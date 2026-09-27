@@ -40,7 +40,10 @@ export interface DocumentOperation {
   historyGroup?: string
   /** Trusted gateway's digest of the original tool call, before planning/rebasing. Never accepted by UI IPC. */
   requestDigest?: string
-  mutation: { type: 'command'; command: DocumentCommand } | { type: 'undo'; expectedTopOperationId?: string } | { type: 'redo' }
+  mutation: { type: 'command'; command: DocumentCommand;
+    /** Strictly amend this history head; stale ownership never creates a new Undo entry. */
+    amendHistory?: { expectedTopOperationId: string }
+  } | { type: 'undo'; expectedTopOperationId?: string } | { type: 'redo' }
 }
 
 export type DocumentOperationResult =

@@ -136,13 +136,24 @@ export class DocumentSession {
     const digest = operationDigest(operation)
     return this.serial(async () => {
       const id = operation.operationId
-      if (operation.documentId !== this.state.documentId) return this.reject(id, 'denied', 'wrong-document', '操作不属于此文档')
+      const amendment = operation.mutation.type === 'command' ? operation.mutation.amendHistory : undefined
+      if (operation.documentId !== this.state.documentId) return this.reject(id, amendment ? 'conflict' : 'denied', 'wrong-document', '操作不属于此文档')
       const replay = this.lookupOperation(id, digest)
       if (replay) return replay
       if (!id) return this.reject(id, 'denied', 'missing-operation-id', '操作缺少编号')
       if (this.closed || operation.epoch !== this.state.epoch) return this.reject(id, 'conflict', 'stale-epoch', '文档会话已改变，请重新读取')
       if (operation.runId && this.state.stoppedRuns.includes(operation.runId)) return this.reject(id, 'cancelled', 'run-stopped', '任务已停止，未写入后续操作')
       if (operation.baseRevision !== this.state.revision) return this.reject(id, 'conflict', 'stale-revision', '文档已改变，未覆盖当前内容')
+      if (amendment) {
+        const head = this.state.past.at(-1)
+        if (!amendment.expectedTopOperationId || !head || head.operationId !== amendment.expectedTopOperationId) {
+          return this.reject(id, 'conflict', 'history-head-changed', '原修改已不在历史顶部，未追加静态结果')
+        }
+        if (head.actor !== operation.actor || head.runId !== operation.runId) {
+          return this.reject(id, 'conflict', 'history-owner-changed', '原修改的作者或任务不匹配，未追加静态结果')
+        }
+        if (this.state.future.length) return this.reject(id, 'conflict', 'history-redo-present', '存在待重做操作，未追加静态结果')
+      }
       const next = structuredClone(this.state)
       let candidate: DocumentModel
       try {
@@ -163,11 +174,12 @@ export class DocumentSession {
           this.driver.validate(candidate)
           if (documentDigest(candidate) !== documentDigest(next.model)) {
             const previous = next.past.at(-1)
-            if (operation.historyGroup && previous?.historyGroup === operation.historyGroup
+            if (amendment || (operation.historyGroup && previous?.historyGroup === operation.historyGroup
               && previous.actor === operation.actor && previous.runId === operation.runId
-              && previous.operationId === next.operations.at(-1)?.operationId) {
-              previous.after = structuredClone(candidate)
-              previous.operationId = id
+              && previous.operationId === next.operations.at(-1)?.operationId)) {
+              // A strict amendment was checked in this serial turn; retain its original before/group.
+              previous!.after = structuredClone(candidate)
+              previous!.operationId = id
             } else next.past.push({ operationId: id, actor: operation.actor,
               ...(operation.runId ? { runId: operation.runId } : {}),
               ...(operation.historyGroup ? { historyGroup: operation.historyGroup } : {}),

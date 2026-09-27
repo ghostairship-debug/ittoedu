@@ -36,7 +36,7 @@ const operation = z.object({
   // Desktop UI cannot impersonate an agent, attach a run, or grant itself permissions.
   actor: z.literal('human'),
   historyGroup: id.optional(),
-  mutation: z.discriminatedUnion('type', [z.object({ type: z.literal('command'), command }).strict(), z.object({ type: z.literal('undo'), expectedTopOperationId: id.optional() }).strict(), z.object({ type: z.literal('redo') }).strict()]),
+  mutation: z.discriminatedUnion('type', [z.object({ type: z.literal('command'), command, amendHistory: z.object({ expectedTopOperationId: id }).strict().optional() }).strict(), z.object({ type: z.literal('undo'), expectedTopOperationId: id.optional() }).strict(), z.object({ type: z.literal('redo') }).strict()]),
 }).strict()
 
 export const saveDirectoryContextSchema = z.object({ workspaceId: z.string().min(1).max(256), directoryEntryId: z.string().min(1).max(256) }).strict()
