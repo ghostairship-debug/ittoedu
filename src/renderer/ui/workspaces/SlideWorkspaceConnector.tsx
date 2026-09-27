@@ -329,6 +329,9 @@ export function SlideWorkspaceConnector({
       captureRuntimeContentTextTarget,
       captureRuntimeAssetReplacementTarget,
       submitDynamicFallbackIntent: (intent) => useEditorStore.getState().submitDynamicFallbackIntent(intent),
+      dynamicFallbackState: (targetDocumentId) => useEditorStore.getState().dynamicFallbackState(targetDocumentId),
+      retryDynamicFallback: (taskId) => useEditorStore.getState().retryDynamicFallback(taskId),
+      discardDynamicFallback: (taskId) => useEditorStore.getState().discardDynamicFallback(taskId),
     },
     authoring: {
       runFieldTextIntent: runSlideFieldTextIntent,

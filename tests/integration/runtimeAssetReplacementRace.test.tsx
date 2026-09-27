@@ -30,14 +30,13 @@ const publishedAuthoringHarness = vi.hoisted(() => ({
   latestRevision: -1,
   onMessage: null as ((message: PlayerAuthoringHostMessage) => void) | null,
 }))
-const fallbackRequests = vi.hoisted(() => [] as Array<{ handle: { documentId: string; sequence: number }; itemId: string; locationId: string; amend: unknown }>)
+const FALLBACK_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4z8AAAAADAAEY3Y2wAAAAAElFTkSuQmCC'
+const fallbackCapture = vi.hoisted(() => ({ capture: vi.fn(async () =>
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVQI12P4z8AAAAADAAEY3Y2wAAAAAElFTkSuQmCC') }))
 
-vi.mock('../../src/renderer/composition/runtime/staticFallbackRecapture', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../src/renderer/composition/runtime/staticFallbackRecapture')>()
-  return { ...actual, scheduleStaticFallbackRecapture: (input: Parameters<typeof actual.scheduleStaticFallbackRecapture>[0]) => {
-    if (typeof input === 'string') throw new Error('legacy fallback request')
-    fallbackRequests.push(input)
-  } }
+vi.mock('../../src/renderer/export/playerCapture', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/renderer/export/playerCapture')>()
+  return { ...actual, capturePublishedCourseV2Stage: fallbackCapture.capture }
 })
 
 vi.mock('../../src/renderer/ui/coursePlayerTryRun', async (importOriginal) => {
@@ -221,6 +220,16 @@ function runtimeBindingAssetId(
   return null
 }
 
+function runtimeFallbackAssetId(project: CourseProjectDocument): string | null {
+  for (const surface of project.surfaces) {
+    if (surface.type !== 'slide') continue
+    const scene = surface.scenes.find(candidate => candidate.id === FIRST_SCENE_ID)
+    const item = scene?.layerItems.find(candidate => candidate.layerItemId === RUNTIME_ITEM_ID)
+    if (item?.kind === 'runtime') return item.runtime.staticFallback?.assetId ?? null
+  }
+  return null
+}
+
 function persistentSnapshot(): PersistentSnapshot {
   const state = useEditorStore.getState()
   if (state.slideBackend?.kind !== 'slide-authoring') {
@@ -247,26 +256,21 @@ function persistentSnapshot(): PersistentSnapshot {
 const originalCapture =
   useEditorStore.getState().captureRuntimeAssetReplacementTarget
 const originalReplace = useEditorStore.getState().replaceRuntimeAssetAtTarget
-const originalCaptureSubmission = useEditorStore.getState().captureCourseSubmission
+const originalSubmit = useEditorStore.getState().submitDynamicFallbackIntent
 const originalImportAsset = useEditorStore.getState().importAsset
 
 function installWriteSpies() {
   const capture = vi.fn(originalCapture)
   const replace = vi.fn(originalReplace)
-  const captureSubmission = vi.fn(originalCaptureSubmission)
+  const submit = vi.fn(originalSubmit)
   const importAsset = vi.fn(originalImportAsset)
   useEditorStore.setState({
     captureRuntimeAssetReplacementTarget: capture,
     replaceRuntimeAssetAtTarget: replace,
-    captureCourseSubmission: captureSubmission,
+    submitDynamicFallbackIntent: submit,
     importAsset,
   })
-  return {
-    capture,
-    replace,
-    captureSubmission,
-    importAsset,
-  }
+  return { capture, replace, submit, importAsset }
 }
 
 let targetMessageRevision = 0
@@ -348,7 +352,8 @@ function expectBypassImportUnused(spies: ReturnType<typeof installWriteSpies>) {
 }
 
 beforeEach(async () => {
-  fallbackRequests.length = 0
+  fallbackCapture.capture.mockReset()
+  fallbackCapture.capture.mockResolvedValue(FALLBACK_PNG)
   targetMessageRevision = 0
   publishedAuthoringHarness.latestRevision = -1
   publishedAuthoringHarness.onMessage = null
@@ -372,7 +377,7 @@ afterEach(() => {
   useEditorStore.setState({
     captureRuntimeAssetReplacementTarget: originalCapture,
     replaceRuntimeAssetAtTarget: originalReplace,
-    captureCourseSubmission: originalCaptureSubmission,
+    submitDynamicFallbackIntent: originalSubmit,
     importAsset: originalImportAsset,
   })
   useEditorStore.getState().clearV9SlideCandidateBackend()
@@ -396,7 +401,8 @@ describe('ARCH-2 Workspace Runtime asset replacement race', () => {
     await waitFor(() => {
       expect(useEditorStore.getState().statusMessage).toMatch(/工程内容已改变|失效|过期/)
     })
-    expect(spies.replace).toHaveBeenCalledOnce()
+    expect(spies.replace).not.toHaveBeenCalled()
+    expect(spies.submit).not.toHaveBeenCalled()
     expect(persistentSnapshot()).toEqual(afterIntervention)
     expect(activeProject().assets).not.toHaveProperty(REPLACEMENT_ASSET_ID)
     expect(selectMediaAssetFiles(useEditorStore.getState()))
@@ -422,6 +428,7 @@ describe('ARCH-2 Workspace Runtime asset replacement race', () => {
       expect(useEditorStore.getState().statusMessage).toMatch(/上下文已切换|目标已失效/)
     })
     expect(spies.replace).not.toHaveBeenCalled()
+    expect(spies.submit).not.toHaveBeenCalled()
     expect(persistentSnapshot()).toEqual(afterIntervention)
     expect(activeProject().assets).not.toHaveProperty(REPLACEMENT_ASSET_ID)
     expect(selectMediaAssetFiles(useEditorStore.getState()))
@@ -444,6 +451,7 @@ describe('ARCH-2 Workspace Runtime asset replacement race', () => {
       expect(useEditorStore.getState().statusMessage).toMatch(/目标已失效|上下文已切换/)
     })
     expect(spies.replace).not.toHaveBeenCalled()
+    expect(spies.submit).not.toHaveBeenCalled()
     expect(persistentSnapshot()).toEqual(afterIntervention)
     expect(activeProject().assets).not.toHaveProperty(REPLACEMENT_ASSET_ID)
     expect(selectMediaAssetFiles(useEditorStore.getState()))
@@ -451,20 +459,46 @@ describe('ARCH-2 Workspace Runtime asset replacement race', () => {
     expectBypassImportUnused(spies)
   })
 
-  it('binds a successful Slide image replacement to its exact frozen submission and location', async () => {
+  it('freezes the exact target before the screenshot and writes nothing before capture settles', async () => {
+    const image = deferred<string>()
+    fallbackCapture.capture.mockImplementationOnce(() => image.promise)
+    const before = persistentSnapshot()
     const { selection, spies } = await renderPendingReplacement()
     await resolveSelection(selection, REPLACEMENT)
-    expect(spies.replace).toHaveBeenCalledOnce()
-    expect(spies.captureSubmission).toHaveBeenCalledOnce()
-    expect(spies.replace.mock.invocationCallOrder[0]).toBeLessThan(spies.captureSubmission.mock.invocationCallOrder[0]!)
-    const handle = spies.captureSubmission.mock.results[0]?.value
-    expect(handle).not.toBeNull()
-    expect(fallbackRequests).toHaveLength(1)
-    expect(fallbackRequests[0]).toMatchObject({ handle, itemId: RUNTIME_ITEM_ID, locationId: FIRST_LOCATION_ID })
-    expect(typeof fallbackRequests[0]?.amend).toBe('function')
+    await waitFor(() => expect(fallbackCapture.capture).toHaveBeenCalledOnce())
+    expect(spies.replace).not.toHaveBeenCalled()
+    expect(spies.submit).toHaveBeenCalledOnce()
+    expect(spies.submit.mock.calls[0]?.[0]).toMatchObject({
+      kind: 'runtime.asset', documentId: useEditorStore.getState().courseDocument.documentId,
+      projectId: before.project.id, locationId: FIRST_LOCATION_ID, itemId: RUNTIME_ITEM_ID,
+      target: spies.capture.mock.results[0]?.value, asset: REPLACEMENT.meta,
+    })
+    const submitted = spies.submit.mock.calls[0]?.[0]
+    expect(submitted?.kind).toBe('runtime.asset')
+    if (submitted?.kind !== 'runtime.asset') throw new Error('missing runtime asset intent')
+    expect(submitted.bytes).toEqual(REPLACEMENT_BYTES)
+    expect(persistentSnapshot()).toEqual(before)
+    expect(useEditorStore.getState().statusMessage).toMatch(/尚未写入/)
+    await act(async () => { image.resolve(FALLBACK_PNG); await image.promise })
+    await waitFor(() => expect(runtimeBindingAssetId(activeProject())).toBe(REPLACEMENT_ASSET_ID))
   })
 
-  it('uses only replaceRuntimeAssetAtTarget once for a normal replacement, creates one history frame, and clears target busy state', async () => {
+  it('keeps screenshot failure out of the project and offers a visible discard path', async () => {
+    fallbackCapture.capture.mockRejectedValueOnce(new Error('截图失败'))
+    const before = persistentSnapshot()
+    const { selection, spies } = await renderPendingReplacement()
+    await resolveSelection(selection, REPLACEMENT)
+    await waitFor(() => expect(useEditorStore.getState().statusMessage).toMatch(/截图失败.*未写入/))
+    expect(spies.submit).toHaveBeenCalledOnce()
+    expect(spies.replace).not.toHaveBeenCalled()
+    expect(persistentSnapshot()).toEqual(before)
+    expect(screen.getByRole('alert', { name: '动态内容待处理修改' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '放弃修改' }))
+    await waitFor(() => expect(screen.queryByRole('alert', { name: '动态内容待处理修改' })).toBeNull())
+    expect(persistentSnapshot()).toEqual(before)
+  })
+
+  it('commits content and fallback in one history frame and clears target busy state', async () => {
     const before = persistentSnapshot()
     const originalAssetId = runtimeBindingAssetId(before.project)
     const { selection, spies } = await renderPendingReplacement()
@@ -475,10 +509,9 @@ describe('ARCH-2 Workspace Runtime asset replacement race', () => {
     })
     await settleCourse()
     const after = persistentSnapshot()
-    expect(spies.replace).toHaveBeenCalledOnce()
-    expect(spies.replace.mock.calls[0]?.[0]).toEqual(
-      spies.capture.mock.results[0]?.value,
-    )
+    expect(spies.replace).not.toHaveBeenCalled()
+    expect(spies.submit).toHaveBeenCalledOnce()
+    expect(fallbackCapture.capture).toHaveBeenCalledOnce()
     expect(after.project.revision).toBe(before.project.revision + 1)
     expect(after.activeHistoryDepth).toBe(before.activeHistoryDepth + 1)
     expect(after.sidecarPastDepth).toBe(before.sidecarPastDepth)
@@ -486,6 +519,11 @@ describe('ARCH-2 Workspace Runtime asset replacement race', () => {
     expect(after.project.assets[REPLACEMENT_ASSET_ID]).toEqual(REPLACEMENT.meta)
     expect(after.assetFiles[REPLACEMENT_ASSET_ID]).toEqual([...REPLACEMENT_BYTES])
     expect(originalAssetId).not.toBe(REPLACEMENT_ASSET_ID)
+    const fallbackId = runtimeFallbackAssetId(after.project)
+    expect(fallbackId).toBeTruthy()
+    expect(fallbackId).not.toBe(runtimeFallbackAssetId(before.project))
+    expect(after.project.assets[fallbackId!]).toMatchObject({ mimeType: 'image/png' })
+    expect(after.assetFiles[fallbackId!]).toBeDefined()
     expectBypassImportUnused(spies)
 
     const liveButton = await publishRuntimeAssetTarget()

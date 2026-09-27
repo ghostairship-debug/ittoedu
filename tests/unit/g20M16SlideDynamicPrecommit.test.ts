@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest'
 import type { DynamicFallbackIntent, DynamicFallbackResult } from '../../src/renderer/composition/runtime/precommitDynamicFallback'
 import { runSlideDynamicFallbackSubmission } from '../../src/renderer/ui/workspaces/SlideLocationWorkspace'
 
+vi.mock('../../src/renderer/phaser/createEditorGame', () => ({ createEditorGame: vi.fn() }))
+
 const intent: DynamicFallbackIntent = {
   kind: 'component.text',
   documentId: 'document-1',
@@ -30,15 +32,20 @@ describe('Slide dynamic fallback submission feedback', () => {
     expect(setStatus.mock.calls.map(([message]) => message)).toEqual([labels.pending, labels.applied])
   })
 
-  it('keeps failed, conflicting and blocked submissions visibly uncommitted', async () => {
-    for (const status of ['failed', 'conflict', 'blocked', 'unknown'] as const) {
+  it('describes each unresolved receipt without claiming an unknown write failed', async () => {
+    for (const [status, expected] of [
+      ['failed', '版本冲突 未写入修改'],
+      ['conflict', '版本冲突 未写入修改'],
+      ['blocked', '版本冲突 当前修改尚未处理，请先处理前序任务'],
+      ['unknown', '版本冲突 提交结果尚未确认，请重试核实'],
+    ] as const) {
       const setStatus = vi.fn()
       const submit = vi.fn(() => ({
         taskId: 'task-2',
         settled: Promise.resolve({ status, reason: '版本冲突', taskId: 'task-2' } as DynamicFallbackResult),
       }))
       await expect(runSlideDynamicFallbackSubmission(intent, submit, setStatus, labels)).resolves.toBeNull()
-      expect(setStatus.mock.calls.map(([message]) => message)).toEqual([labels.pending, '版本冲突 未写入修改'])
+      expect(setStatus.mock.calls.map(([message]) => message)).toEqual([labels.pending, expected])
     }
   })
 
@@ -47,5 +54,24 @@ describe('Slide dynamic fallback submission feedback', () => {
     const submit = vi.fn(() => null)
     await expect(runSlideDynamicFallbackSubmission(intent, submit, setStatus, labels)).resolves.toBeNull()
     expect(setStatus.mock.calls.map(([message]) => message)).toEqual(['当前文档无法提交动态内容，未写入修改'])
+  })
+
+  it('submits a second independent intent while the first still awaits acknowledgement', async () => {
+    let settleFirst!: (result: DynamicFallbackResult) => void
+    const first = new Promise<DynamicFallbackResult>(resolve => { settleFirst = resolve })
+    const second = Promise.resolve({ status: 'unchanged', receipt: null } as DynamicFallbackResult)
+    const submit = vi.fn()
+      .mockReturnValueOnce({ taskId: 'task-a', settled: first })
+      .mockReturnValueOnce({ taskId: 'task-b', settled: second })
+    const setStatus = vi.fn()
+    const pendingFirst = runSlideDynamicFallbackSubmission(intent, submit, setStatus, labels)
+    const nextIntent = { ...intent, itemId: 'component-2' }
+    const pendingSecond = runSlideDynamicFallbackSubmission(nextIntent, submit, setStatus, labels)
+
+    expect(submit.mock.calls.map(([value]) => value.itemId)).toEqual(['component-1', 'component-2'])
+    expect(setStatus.mock.calls.map(([message]) => message)).toEqual([labels.pending, labels.pending])
+    await expect(pendingSecond).resolves.toBe('unchanged')
+    settleFirst({ status: 'applied', receipt: {} } as DynamicFallbackResult)
+    await expect(pendingFirst).resolves.toBe('applied')
   })
 })

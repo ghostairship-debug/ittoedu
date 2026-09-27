@@ -7,7 +7,7 @@ import { useContextMenu, type MenuCommand } from '../../editing/commands/Command
 import { OBJECT_EDIT_EVENT, requestObjectContextMenu } from '../../editing/commands/objectContextMenu'
 import { hiddenObjectCommands, hiddenObjectName } from '../../editing/commands/hiddenObjectCommands'
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
-import type { DynamicFallbackIntent, DynamicFallbackResult } from '../../composition/runtime/precommitDynamicFallback'
+import type { DynamicFallbackIntent, DynamicFallbackResult, DynamicFallbackTaskState } from '../../composition/runtime/precommitDynamicFallback'
 import { canEditLayerInScope } from '../../../shared/teacherControllerRole'
 import { controllerDisplayFrame, useControllerDisplayRevision } from '../../authoring/controllerDisplayBounds'
 import {
@@ -144,28 +144,42 @@ import {
 
 export const SLIDE_SESSIONLESS_ERROR = '没有活动的 Slide 编辑会话，不能从旧工程恢复界面'
 
+export function slideDynamicFallbackFailureMessage(result: DynamicFallbackResult): string | null {
+  if (result.status === 'unknown') return `${result.reason} 提交结果尚未确认，请重试核实`
+  if (result.status === 'blocked') return `${result.reason} 当前修改尚未处理，请先处理前序任务`
+  if (result.status === 'failed' || result.status === 'conflict') return `${result.reason} 未写入修改`
+  return null
+}
+
 export async function runSlideDynamicFallbackSubmission(
   intent: DynamicFallbackIntent,
   submit: (intent: DynamicFallbackIntent) => { taskId: string; settled: Promise<DynamicFallbackResult> } | null,
   setStatus: (message: string) => void,
   labels: { pending: string; applied: string; unchanged: string },
 ): Promise<'applied' | 'unchanged' | null> {
+  let submission: ReturnType<typeof submit>
   try {
-    const submission = submit(intent)
-    if (!submission) {
-      setStatus('当前文档无法提交动态内容，未写入修改')
-      return null
-    }
-    setStatus(labels.pending)
+    submission = submit(intent)
+  } catch (error) {
+    setStatus(`${error instanceof Error ? error.message : String(error)} 未写入修改`)
+    return null
+  }
+  if (!submission) {
+    setStatus('当前文档无法提交动态内容，未写入修改')
+    return null
+  }
+  setStatus(labels.pending)
+  try {
     const result = await submission.settled
-    if (result.status !== 'applied' && result.status !== 'unchanged') {
-      setStatus(`${result.reason} 未写入修改`)
+    const failure = slideDynamicFallbackFailureMessage(result)
+    if (failure || (result.status !== 'applied' && result.status !== 'unchanged')) {
+      setStatus(failure ?? '动态内容提交结果尚未确认，请重试核实')
       return null
     }
     setStatus(result.status === 'applied' ? labels.applied : labels.unchanged)
     return result.status
   } catch (error) {
-    setStatus(`${error instanceof Error ? error.message : String(error)} 未写入修改`)
+    setStatus(`${error instanceof Error ? error.message : String(error)} 提交结果尚未确认，请重试核实`)
     return null
   }
 }
@@ -297,6 +311,9 @@ export interface SlideWorkspaceRuntimePort {
     session: Readonly<RuntimeTargetEditSession>,
   ) => CourseRuntimeAssetReplacementTarget | null
   readonly submitDynamicFallbackIntent: (intent: DynamicFallbackIntent) => { taskId: string; settled: Promise<DynamicFallbackResult> } | null
+  readonly dynamicFallbackState: (documentId: string) => readonly DynamicFallbackTaskState[]
+  readonly retryDynamicFallback: (taskId: string) => Promise<DynamicFallbackResult>
+  readonly discardDynamicFallback: (taskId: string) => void
 }
 
 export interface SlideWorkspaceAuthoringPort extends SlideWorkspaceCommandPort {
@@ -878,6 +895,7 @@ export function SlideLocationWorkspace({
     useState<ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>>([])
   const [componentImageTargets, setComponentImageTargets] = useState<ReadonlyArray<Readonly<ComponentAuthoringImageTarget>>>([])
   const [replacingComponentImageTargetId, setReplacingComponentImageTargetId] = useState<string | null>(null)
+  const replacingComponentImageTargetIdsRef = useRef(new Set<string>())
   /** M15: the draft of text a component renders itself (no prop field draft backs it). */
   const [componentAutoValue, setComponentAutoValue] = useState('')
   const [activeRuntimeTextSession, setActiveRuntimeTextSession] =
@@ -888,7 +906,10 @@ export function SlideLocationWorkspace({
     useState<Readonly<FormulaEditSession> | null>(null)
   const [replacingRuntimeAssetTargetId, setReplacingRuntimeAssetTargetId] =
     useState<string | null>(null)
-  const dynamicSubmissionPendingRef = useRef(false)
+  const replacingRuntimeAssetTargetIdsRef = useRef(new Set<string>())
+  const [dynamicRecoveryView, setDynamicRecoveryView] = useState<{ documentId: string | null; tasks: readonly DynamicFallbackTaskState[] }>({ documentId: null, tasks: [] })
+  const dynamicRecoveryTasks = dynamicRecoveryView.documentId === (documentId ?? null) ? dynamicRecoveryView.tasks : []
+  const [recoveringDynamicTaskId, setRecoveringDynamicTaskId] = useState<string | null>(null)
   const [hoveredAuthoringTargetId, setHoveredAuthoringTargetId] =
     useState<string | null>(null)
   const [stageViewportSize, setStageViewportSize] = useState({
@@ -2200,21 +2221,48 @@ export function SlideLocationWorkspace({
     setActiveComponentTextSession(result.session)
   }, [currentComponentTextEditContext])
 
+  const refreshDynamicRecoveryTasks = useCallback(() => {
+    setDynamicRecoveryView({ documentId: documentId ?? null, tasks: documentId ? ports.runtime.dynamicFallbackState(documentId).filter(task =>
+      task.status === 'failed' || task.status === 'conflict' || task.status === 'blocked' || task.status === 'unknown') : [] })
+  }, [documentId, ports.runtime])
+  useEffect(() => { refreshDynamicRecoveryTasks() }, [refreshDynamicRecoveryTasks])
+
   const submitDynamicFallback = useCallback(async (
     intent: DynamicFallbackIntent,
     labels: { pending: string; applied: string; unchanged: string },
   ): Promise<'applied' | 'unchanged' | null> => {
-    if (dynamicSubmissionPendingRef.current) {
-      ports.canvas.setStatus('上一项动态内容修改仍在处理中，请等待确认')
-      return null
-    }
-    dynamicSubmissionPendingRef.current = true
     try {
       return await runSlideDynamicFallbackSubmission(intent, ports.runtime.submitDynamicFallbackIntent, ports.canvas.setStatus, labels)
     } finally {
-      dynamicSubmissionPendingRef.current = false
+      refreshDynamicRecoveryTasks()
     }
-  }, [ports.canvas, ports.runtime])
+  }, [ports.canvas, ports.runtime, refreshDynamicRecoveryTasks])
+
+  const retryDynamicFallback = useCallback(async (taskId: string) => {
+    setRecoveringDynamicTaskId(taskId)
+    ports.canvas.setStatus('正在重试并核实动态内容提交结果')
+    try {
+      const result = await ports.runtime.retryDynamicFallback(taskId)
+      const failure = slideDynamicFallbackFailureMessage(result)
+      ports.canvas.setStatus(failure ?? (result.status === 'applied' ? '动态内容及静态后备图已确认' : '动态内容没有变化'))
+    } catch (error) {
+      ports.canvas.setStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      refreshDynamicRecoveryTasks()
+      setRecoveringDynamicTaskId(null)
+    }
+  }, [ports.canvas, ports.runtime, refreshDynamicRecoveryTasks])
+
+  const discardDynamicFallback = useCallback((taskId: string) => {
+    try {
+      ports.runtime.discardDynamicFallback(taskId)
+      ports.canvas.setStatus('已放弃未写入的动态内容修改')
+    } catch (error) {
+      ports.canvas.setStatus(error instanceof Error ? error.message : String(error))
+    } finally {
+      refreshDynamicRecoveryTasks()
+    }
+  }, [ports.canvas, ports.runtime, refreshDynamicRecoveryTasks])
 
   const commitComponentText = useCallback(async (
     session: Readonly<ComponentTextEditSession>,
@@ -2338,7 +2386,7 @@ export function SlideLocationWorkspace({
   const replaceRuntimeAsset = useCallback(async (
     target: Readonly<RuntimeAuthoringTarget>,
   ) => {
-    if (target.kind !== 'asset' || replacingRuntimeAssetTargetId) return
+    if (target.kind !== 'asset' || replacingRuntimeAssetTargetIdsRef.current.has(target.targetId)) return
     const started = beginRuntimeTargetEditSession(
       target,
       currentRuntimeTargetEditContext(),
@@ -2357,6 +2405,7 @@ export function SlideLocationWorkspace({
       ports.canvas.setStatus('运行时图片目标没有可提交的 V9 作者地址，请重新选择')
       return
     }
+    replacingRuntimeAssetTargetIdsRef.current.add(session.targetId)
     setReplacingRuntimeAssetTargetId(session.targetId)
     try {
       const imported = await onSelectImageAsset()
@@ -2371,6 +2420,10 @@ export function SlideLocationWorkspace({
             ? '运行时图片编辑上下文已切换，未写入修改'
             : '运行时图片目标已失效，未写入修改',
         )
+        return
+      }
+      if (readSnapshot().projectRevision !== courseTarget.courseTarget.documentRevision) {
+        ports.canvas.setStatus('工程内容已改变，运行时图片目标已过期，未写入修改')
         return
       }
       if (!documentId || !courseLocationId) {
@@ -2388,12 +2441,12 @@ export function SlideLocationWorkspace({
         unchanged: '运行时图片未改变',
       })
     } finally {
-      setReplacingRuntimeAssetTargetId(null)
+      replacingRuntimeAssetTargetIdsRef.current.delete(session.targetId)
+      setReplacingRuntimeAssetTargetId(replacingRuntimeAssetTargetIdsRef.current.values().next().value ?? null)
     }
   }, [
     currentRuntimeTargetEditContext,
     onSelectImageAsset,
-    replacingRuntimeAssetTargetId,
     documentId,
     courseLocationId,
     submitDynamicFallback,
@@ -2401,14 +2454,16 @@ export function SlideLocationWorkspace({
 
   /** M15: replaces a picture a component shows from its package with a managed image; the component is rebuilt with it. */
   const replaceComponentImage = useCallback(async (target: Readonly<ComponentAuthoringImageTarget>) => {
-    if (replacingComponentImageTargetId) return
+    if (replacingComponentImageTargetIdsRef.current.has(target.targetId)) return
+    const sourceRevision = readSnapshot().projectRevision
+    replacingComponentImageTargetIdsRef.current.add(target.targetId)
     setReplacingComponentImageTargetId(target.targetId)
     try {
       const imported = await onSelectImageAsset()
       if (!imported) return
       const current = componentImageTargetsByHostRef.current
       const currentSnapshot = readSnapshot()
-      if (documentIdRef.current !== documentId || currentSnapshot.projectId !== snapshot.projectId || currentSnapshot.locationId !== courseLocationId ||
+      if (documentIdRef.current !== documentId || currentSnapshot.projectId !== snapshot.projectId || currentSnapshot.locationId !== courseLocationId || currentSnapshot.projectRevision !== sourceRevision ||
         ![...current.values()].flat().some(candidate => candidate.targetId === target.targetId)) {
         ports.canvas.setStatus('组件图片目标已失效，未写入修改')
         return
@@ -2422,9 +2477,10 @@ export function SlideLocationWorkspace({
         assetKey: target.assetKey, asset: imported.meta, bytes: imported.bytes,
       }, { pending: '正在生成静态后备图，组件图片尚未写入', applied: '已替换组件图片；组件源码没有改动', unchanged: '组件图片未改变' })
     } finally {
-      setReplacingComponentImageTargetId(null)
+      replacingComponentImageTargetIdsRef.current.delete(target.targetId)
+      setReplacingComponentImageTargetId(replacingComponentImageTargetIdsRef.current.values().next().value ?? null)
     }
-  }, [onSelectImageAsset, replacingComponentImageTargetId, documentId, courseLocationId, snapshot.projectId, submitDynamicFallback])
+  }, [onSelectImageAsset, documentId, courseLocationId, snapshot.projectId, submitDynamicFallback])
 
   const canvasAuthoringHitAtClientPoint = useCallback((
     clientX: number,
@@ -3624,6 +3680,18 @@ export function SlideLocationWorkspace({
             }}
             onRetryPreview={retryRuntimePreview}
           />
+          {dynamicRecoveryTasks.length > 0 && (
+            <div role="alert" aria-label="动态内容待处理修改" style={{ position: 'absolute', right: 16, bottom: 16, zIndex: 30, maxWidth: 340, padding: 12, background: '#fff', color: '#1f2937', border: '1px solid #b45309', borderRadius: 8, boxShadow: '0 4px 16px #0003' }}>
+              <strong>动态内容修改需要处理</strong>
+              {dynamicRecoveryTasks.map((task, index) => (
+                <div key={task.taskId} style={{ marginTop: 8 }}>
+                  <div>第 {index + 1} 项：{task.reason ?? '动态内容修改尚未完成'}{task.status === 'unknown' ? '；提交结果尚未确认' : ''}</div>
+                  <button type="button" disabled={recoveringDynamicTaskId !== null} onClick={() => { void retryDynamicFallback(task.taskId) }}>重试并核实</button>
+                  {task.status !== 'unknown' && <button type="button" disabled={recoveringDynamicTaskId !== null} onClick={() => discardDynamicFallback(task.taskId)}>放弃修改</button>}
+                </div>
+              ))}
+            </div>
+          )}
           {nativeTextEditor.editor}
           {canvasMenu.element}
           {(drawPreview || lineDragGuides) && (
