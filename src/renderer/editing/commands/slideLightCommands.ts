@@ -46,13 +46,18 @@ export function slideLightPageCommands(state: SlideLightPageCommandState): Slide
 export function slideLightObjectCommands(state: SlideLightObjectCommandState): SlideLightCommand[] {
   const locked = state.locked ? '所选元素已锁定' : null
   const click = locked ?? (state.clickBindable ? null : '此元素不支持点击互动')
+  const seen = new Set<string>(), duplicateLabels = new Set<string>()
+  for (const location of state.locations) {
+    if (seen.has(location.label)) duplicateLabels.add(location.label)
+    else seen.add(location.label)
+  }
   return [
     ...LIGHT_SLIDE_OPACITIES.map(value => ({ id: `slide.opacity.${Math.round(value * 100)}`, label: `不透明度：${Math.round(value * 100)}%`, group: 'style' as const, kind: 'opacity' as const, value, disabledReason: locked })),
     ...FONT_FAMILY_OPTIONS.filter(option => fontFamilySource(option.family) === 'bundled').map(option => ({ id: `slide.font.${option.family}`, label: `字体：${option.label}`, group: 'style' as const, kind: 'font' as const, value: option.family, disabledReason: locked ?? (state.isText ? null : '仅文字元素支持字体') })),
     ...LIGHT_SLIDE_LINE_SPACING.map((value, index) => ({ id: `slide.spacing.${value}`, label: `行距：${spacingLabels[index]}（额外 ${value} 像素）`, group: 'style' as const, kind: 'line-spacing' as const, value, disabledReason: locked ?? (state.isText ? null : '仅文字元素支持行距') })),
     ...alignments.map(option => ({ id: `slide.align.${option.id}`, label: option.label, group: 'layout' as const, kind: 'page-align' as const, value: option.id, disabledReason: locked })),
     ...state.sounds.map(sound => ({ id: `slide.audio.${sound.id}`, label: `点击播放：${sound.name}`, group: 'interaction' as const, kind: 'audio-play' as const, value: sound.id, disabledReason: click ?? (state.complexAudioRule ? '已有复杂互动，请在编辑器中设置' : null) })),
-    ...state.locations.map(location => ({ id: `slide.go.${location.id}`, label: `点击跳到：${location.label}`, group: 'interaction' as const, kind: 'location-go' as const, value: location.id, disabledReason: click ?? (state.complexNavigationRule ? '已有复杂互动，请在编辑器中设置' : null) })),
+    ...state.locations.map((location, index) => ({ id: `slide.go.${location.id}`, label: `点击跳到：${location.label}${duplicateLabels.has(location.label) ? `（第${index + 1}页）` : ''}`, group: 'interaction' as const, kind: 'location-go' as const, value: location.id, disabledReason: click ?? (state.complexNavigationRule ? '已有复杂互动，请在编辑器中设置' : null) })),
   ]
 }
 
