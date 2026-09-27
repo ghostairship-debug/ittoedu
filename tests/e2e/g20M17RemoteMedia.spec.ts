@@ -66,6 +66,7 @@ test('M17 remote media: HTTPS image/audio import stays live, saves, reopens, and
   writeFileSync(join(workspace, 'remote-media.html'), `<!doctype html><html><head><meta charset="utf-8"></head><body><h1>Network media</h1><img id="remote-image" alt="Remote lesson image" src="${origin}/image.png"><audio id="remote-audio" controls src="${origin}/tone.wav"></audio></body></html>`)
   const modelServer = await selectionServer()
   let app: ElectronApplication | undefined
+  let importError = ''
   try {
     app = await launchSelectionApp(directory)
     await app.evaluate(({ app: electronApp }, allowedOrigin) => {
@@ -90,7 +91,14 @@ test('M17 remote media: HTTPS image/audio import stays live, saves, reopens, and
     await page.getByRole('button', { name: '导入 HTML 页面', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: '导入 HTML 页面' })
     await dialog.getByRole('button', { name: '导入', exact: true }).click()
-    await expect(dialog).toHaveCount(0, { timeout: 60_000 })
+    await expect.poll(async () => {
+      if (await dialog.count() === 0) return 'closed'
+      const alert = dialog.getByRole('alert')
+      if (await alert.count() === 0 || !(await alert.isVisible())) return 'pending'
+      importError = (await alert.innerText()).trim()
+      return importError ? 'failed' : 'pending'
+    }, { timeout: 65_000 }).not.toBe('pending')
+    if (importError) throw new Error(importError)
     await expect(page.getByText('HTML 页面已导入；在线图片/音视频链接已保留，离线时可能无法使用')).toBeVisible()
     await expect.poll(() => document().then(snapshot => snapshot.model.kind === 'course-v9' ? snapshot.model.project.network?.connectOrigins : undefined)).toContain(origin)
 
@@ -129,6 +137,7 @@ test('M17 remote media: HTTPS image/audio import stays live, saves, reopens, and
     expect(csp).toContain(`img-src data: blob: ${origin}`)
     expect(csp).toContain(`media-src data: blob: ${origin}`)
   } finally {
+    writeFileSync(join(directory, 'evidence.json'), JSON.stringify({ requests, importError }, null, 2))
     if (app) await closeApp(app)
     await modelServer.close()
     await new Promise<void>(resolveClose => remote.close(() => resolveClose()))
