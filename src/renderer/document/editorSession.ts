@@ -4,7 +4,7 @@ import { Decoration, DecorationSet, EditorView } from 'prosemirror-view'
 import { baseKeymap, chainCommands, exitCode, splitBlock } from 'prosemirror-commands'
 import { keymap } from 'prosemirror-keymap'
 import { type MarkdownDocument } from '../../shared/document/markdown'
-import type { DocumentSelection } from '../../shared/document/ports'
+import type { DocumentPoint, DocumentSelection } from '../../shared/document/ports'
 import { toEditorDocument, fromEditorDocument, renewEditorIdentities, editorPositionToPoint } from './documentAdapter'
 import { documentEditorSchema as schema } from './editorSchema'
 import { CellSelection, tableEditing } from 'prosemirror-tables'
@@ -395,6 +395,56 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     }
     if (selection) view.updateState(view.state.apply(view.state.tr.setSelection(selection)))
   }
+  /** A closed top-level replacement is required when a changed node contains a table. */
+  function tableReplacement(before: import('prosemirror-model').Node, after: import('prosemirror-model').Node) {
+    let prefix = 0, suffix = 0, from = 0
+    while (prefix < before.childCount && prefix < after.childCount && before.child(prefix).eq(after.child(prefix))) {
+      from += before.child(prefix).nodeSize; prefix++
+    }
+    while (suffix < before.childCount - prefix && suffix < after.childCount - prefix &&
+      before.child(before.childCount - suffix - 1).eq(after.child(after.childCount - suffix - 1))) suffix++
+    const beforeEnd = before.content.size - Array.from({ length: suffix }, (_, i) => before.child(before.childCount - i - 1).nodeSize).reduce((a, b) => a + b, 0)
+    const afterEnd = after.content.size - Array.from({ length: suffix }, (_, i) => after.child(after.childCount - i - 1).nodeSize).reduce((a, b) => a + b, 0)
+    const hasTable = (node: import('prosemirror-model').Node) => {
+      if (node.type.name === 'table_container') return true
+      let found = false
+      node.descendants(child => { if (child.type.name === 'table_container') { found = true; return false } })
+      return found
+    }
+    const affected = (doc: import('prosemirror-model').Node) =>
+      Array.from({ length: doc.childCount - prefix - suffix }, (_, i) => doc.child(prefix + i)).some(hasTable)
+    return affected(before) || affected(after) ? { from, beforeEnd, afterEnd } : null
+  }
+  /** Resolve a logical document point after a closed replacement, including Unicode and math atoms. */
+  function pointPosition(doc: import('prosemirror-model').Node, point: DocumentPoint): number | null {
+    let blockAt = -1
+    doc.descendants((node, at) => { if (blockAt < 0 && node.attrs.id === point.blockId) blockAt = at; return blockAt < 0 })
+    const block = blockAt < 0 ? null : doc.nodeAt(blockAt)
+    if (!block) return null
+    const key = point.slot.kind === 'field' ? point.slot.field : point.slot.kind === 'item' ? `item:` + point.slot.itemId
+      : point.slot.kind === 'header' ? `column:` + point.slot.columnId : `cell:` + JSON.stringify([point.slot.rowId, point.slot.columnId])
+    let slotAt = blockAt, slot = block
+    if (!(key === 'content' && block.isTextblock)) {
+      slotAt = -1
+      block.descendants((node, at) => { if (slotAt < 0 && node.type.name === 'slot' && node.attrs.key === key) { slotAt = blockAt + 1 + at; slot = node } return slotAt < 0 })
+    }
+    if (slotAt < 0 || !slot.isTextblock) return null
+    let remaining = Math.max(0, point.offset), utf16 = 0
+    slot.forEach(child => {
+      if (remaining <= 0) return
+      const width = child.isText ? Array.from(child.text ?? '').length : 1
+      const count = Math.min(remaining, width)
+      utf16 += child.isText ? Array.from(child.text ?? '').slice(0, count).join('').length : count
+      remaining -= count
+    })
+    return slotAt + 1 + utf16
+  }
+  function restoreTextSelection(kept: DocumentSelection | null | undefined) {
+    if (kept?.kind !== 'text') return
+    const anchor = pointPosition(view.state.doc, kept.anchor), head = pointPosition(view.state.doc, kept.head)
+    if (anchor === null || head === null) return
+    view.updateState(view.state.apply(view.state.tr.setSelection(TextSelection.create(view.state.doc, anchor, head))))
+  }
   function update(next: LayoutEditorOptions) {
     if (composing) { deferred = next; return }
     const changed = JSON.stringify(next.document.content) !== JSON.stringify(options.document.content)
@@ -409,8 +459,13 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       if (from !== null && end) {
         const overlap = from - Math.min(end.a, end.b)
         const to = end.a + Math.max(0, overlap), nextTo = end.b + Math.max(0, overlap)
-        const transaction = view.state.tr.replace(from, to, document.slice(from, nextTo)).setMeta('canonicalUpdate', true)
+        const closed = tableReplacement(view.state.doc, document)
+        const transaction = closed
+          ? view.state.tr.replaceWith(closed.from, closed.beforeEnd, document.content.cut(closed.from, closed.afterEnd))
+          : view.state.tr.replace(from, to, document.slice(from, nextTo))
+        transaction.setMeta('canonicalUpdate', true)
         view.updateState(view.state.apply(transaction))
+        if (closed) restoreTextSelection(kept)
         reselect(kept)
       }
     }
