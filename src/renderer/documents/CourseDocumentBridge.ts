@@ -170,6 +170,9 @@ export class CourseDocumentBridge {
     if (!foreground) return []
     const navigation = this.navigation
     const projections = [...this.projections.values()]
+    // Prepare view drafts only after every semantic candidate has reached a formal ACK.
+    await Promise.all(projections.map(projection => this.dynamicFallback.wait(projection.documentId)))
+    if (navigation !== this.navigation) throw new Error('关闭准备期间已切换文档，请重新执行')
     try {
       for (const projection of projections) {
         this.present(projection)

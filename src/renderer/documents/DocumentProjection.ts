@@ -279,13 +279,14 @@ export class DocumentProjection {
 
   /** Fixed envelope: no normal queue rebase or new operation identity on an unknown ACK retry. */
   async editExact(snapshot: DocumentSnapshot, command: DocumentCommand, operationId: string = crypto.randomUUID()): Promise<DocumentOperationResult> {
-    if (!this.precommitGate || !this.state.connected || this.disposed || this.queue.length || this.worker || this.previewTail)
+    if (!this.precommitGate || this.disposed || this.queue.length || this.worker || this.previewTail)
       throw new Error('精确提交前文档仍有未确认输入')
-    if (snapshot.documentId !== this.documentId || this.state.committed?.epoch !== snapshot.epoch) throw new Error('精确提交文档会话已改变')
+    if (snapshot.documentId !== this.documentId) throw new Error('精确提交目标文档已改变')
     let result: DocumentOperationResult | null
     try { result = await this.api.lookup(this.documentId, operationId) }
     catch (error) { if (this.ownOperations.has(operationId)) throw new DocumentExactAckUnknownError(operationId, error); throw error }
     if (!result) {
+      if (!this.state.connected || this.state.committed?.epoch !== snapshot.epoch) throw new Error('精确提交文档会话已改变')
       if (this.state.committed.revision !== snapshot.revision) throw new Error('精确提交基准已变化')
       const operation: DocumentOperation = { documentId: this.documentId, epoch: snapshot.epoch, operationId,
         baseRevision: snapshot.revision, actor: 'human', mutation: { type: 'command', command: structuredClone(command) } }
@@ -302,9 +303,10 @@ export class DocumentProjection {
       let current: DocumentSnapshot
       try { current = await this.api.read(this.documentId) }
       catch (error) { throw new DocumentExactAckUnknownError(operationId, error) }
-      this.accept(current, current.revision === result.revision ? operationId : undefined)
+      if (current.epoch !== this.state.committed?.epoch) await this.reattach()
+      else this.accept(current, current.revision === result.revision ? operationId : undefined)
       this.expectedRevision = current.revision
-      this.expectedEpoch = snapshot.epoch
+      this.expectedEpoch = current.epoch
     } else {
       try { this.accept(await this.api.read(this.documentId)) } catch { /* The rejection remains authoritative. */ }
     }

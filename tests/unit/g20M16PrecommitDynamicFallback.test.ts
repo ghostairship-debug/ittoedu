@@ -51,7 +51,7 @@ async function host(withB = false, fixtureName = 'surface-runtime') {
     async reconcileFile() { throw new Error('unused') }, subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener) } },
   }
   const projection = await DocumentProjection.attach(api, session.documentId)
-  return { session, projection, api, operations, durable }
+  return { session, projection, api, operations, durable, registry }
 }
 function item(model: Course, id: string) {
   const surface = model.project.surfaces[0]
@@ -191,6 +191,9 @@ describe('M16 precommit dynamic fallback', () => {
     expect(h.operations).toHaveLength(1)
     expect(() => service.discard(handle.taskId)).toThrow('回执未知')
     expect((await service.retry(handle.taskId)).status).toBe('unknown')
+    await h.registry.close(h.session.documentId, { discardDirty: true })
+    const restored = await h.registry.restore(h.durable.get(h.session.documentId)!)
+    expect(restored.read().epoch).not.toBe(h.session.read().epoch)
     expect((await service.retry(handle.taskId)).status).toBe('applied')
     expect(h.operations).toHaveLength(1)
     expect(h.session.read().undoDepth).toBe(1)
@@ -264,8 +267,15 @@ describe('M16 precommit dynamic fallback', () => {
     await bridge.activatePrepared(h.session.documentId, async () => undefined)
     expect(view.flowTextEdit).toEqual(draft)
     expect(() => bridge.readCommitted()).toThrow('动态内容及静态后备图尚未完成')
+    let preparedViews = 0
+    const all = bridge.drainAll(() => { preparedViews++ })
+    await Promise.resolve()
+    expect(preparedViews).toBe(0)
     held.resolve()
     expect((await handle.settled).status).toBe('applied')
+    const snapshots = await all
+    expect(preparedViews).toBe(2)
+    expect(snapshots.find(snapshot => snapshot.documentId === h.session.documentId)?.revision).toBe(h.session.read().revision)
     expect(bridge.readCommitted().documentId).toBe(h.session.documentId)
     h.projection.dispose()
   })
@@ -323,6 +333,26 @@ describe('M16 precommit dynamic fallback', () => {
     await service.wait(h.session.documentId)
     expect(service.state(h.session.documentId)).toEqual([])
     await expect(service.retry(first.taskId)).rejects.toThrow('没有可重试')
+    h.projection.dispose()
+  })
+
+  it('blocks SaveAll preparation for a failed draft until it is explicitly discarded', async () => {
+    const h = await host()
+    const service = new PrecommitDynamicFallback(async () => { throw new Error('screenshot failed') })
+    let view = {} as CourseDocumentView
+    const bridge = new CourseDocumentBridge({ read: () => view, patch: patch => { view = { ...view, ...patch } as CourseDocumentView } }, service)
+    await bridge.connect(h.api)
+    const revision = h.session.read().revision
+    const handle = bridge.submitDynamicFallback(intent(h, 'slide-surface-runtime', 'draft'))
+    expect((await handle.settled).status).toBe('failed')
+    expect(bridge.dynamicFallbackState(h.session.documentId)).toMatchObject([{ taskId: handle.taskId, reason: 'screenshot failed' }])
+    let prepared = 0
+    await expect(bridge.drainAll(() => { prepared++ })).rejects.toThrow('screenshot failed')
+    expect(prepared).toBe(0)
+    expect(h.session.read().revision).toBe(revision)
+    bridge.discardDynamicFallback(handle.taskId)
+    expect(await bridge.drainAll(() => { prepared++ })).toHaveLength(1)
+    expect(prepared).toBe(1)
     h.projection.dispose()
   })
 })
