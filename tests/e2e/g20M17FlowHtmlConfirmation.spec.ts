@@ -56,7 +56,7 @@ function erasingHtml() {
 
 function nonconvergingHtml() {
   const heights = Array.from({ length: 100 }, (_, index) => `main.h${index}{height:${200 + index}px}`).join('')
-  return `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0}${heights}</style></head><body><main class="h0">持续改变高度</main><script>var n=0;function change(){document.querySelector("main").className="h"+(++n%100);requestAnimationFrame(change)}requestAnimationFrame(change)</script></body></html>`
+  return `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0}${heights}</style></head><body><main class="h0">持续改变高度</main><script>var n=0;function change(){document.querySelector("main").className="h"+(++n%100)}setInterval(change,0)</script></body></html>`
 }
 
 async function snapshot(page: Page, id: string) {
