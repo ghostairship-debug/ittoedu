@@ -31,7 +31,11 @@ const runtimeSource = `CoursewareRuntime.define({protocol:'surface-runtime',runt
   button.textContent='运行交互';button.style.cssText='position:absolute;left:210px;top:100px';
   var result=document.createElement('output');result.dataset.m16LightRuntimeResult='true';
   var clickCount=0;button.onclick=function(){result.textContent=++clickCount===1?'交互成功':'再次交互成功'};
-  panel.append(heading,image,button,result);ctx.dom.root.appendChild(panel);
+  var corner=document.createElement('button');corner.type='button';corner.dataset.m16LightRuntimeCorner='true';
+  corner.textContent='右上交互';corner.style.cssText='position:absolute;right:8px;top:8px';
+  var cornerResult=document.createElement('output');cornerResult.dataset.m16LightRuntimeCornerResult='true';
+  corner.onclick=function(){cornerResult.textContent='右上可用'};
+  panel.append(heading,image,button,result,corner,cornerResult);ctx.dom.root.appendChild(panel);
   return {destroy(){panel.remove()}};
 }});`
 
@@ -157,18 +161,21 @@ test('M16 Flow paper Runtime and managed Component light edits commit with fallb
     await expect.poll(() => component.locator('[data-m15-card-picture]').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
 
     await expect(runtime.getByTestId('flow-runtime-light-edit-targets')).toHaveCount(0)
+    await runtime.locator('[data-m16-light-runtime-corner]').click()
+    await expect(runtime.locator('[data-m16-light-runtime-corner-result]')).toHaveText('右上可用')
     await runtime.locator('[data-m16-light-runtime-button]').click()
     await expect(runtime.locator('[data-m16-light-runtime-result]')).toHaveText('交互成功')
     await runtime.getByTestId('flow-runtime-edit-mode-toggle').click()
     await expect(runtime.locator('[data-m16-light-runtime-result]')).toHaveText('交互成功')
-    await expect(runtime.getByTestId('flow-runtime-light-edit-targets').getByRole('button', { name: /编辑文字/ })).toBeVisible()
+    await expect(runtime.getByTestId('flow-runtime-light-edit-targets').getByRole('button', { name: /Flow 页面原文字.*编辑文字/ })).toBeVisible()
+    await expect(runtime.getByTestId('flow-runtime-light-edit-targets').getByRole('button', { name: /运行交互.*编辑文字/ })).toBeVisible()
     await runtime.getByTestId('flow-runtime-edit-mode-toggle').click()
     await expect(runtime.getByTestId('flow-runtime-light-edit-targets')).toHaveCount(0)
     await runtime.locator('[data-m16-light-runtime-button]').click()
     await expect(runtime.locator('[data-m16-light-runtime-result]')).toHaveText('再次交互成功')
     await runtime.getByTestId('flow-runtime-edit-mode-toggle').click()
-    await expect(runtime.getByTestId('flow-runtime-light-edit-targets').getByRole('button', { name: /编辑文字/ })).toBeVisible()
-    await runtime.getByTestId('flow-runtime-light-edit-targets').getByRole('button', { name: /编辑文字/ }).click()
+    await expect(runtime.getByTestId('flow-runtime-light-edit-targets').getByRole('button', { name: /Flow 页面原文字.*编辑文字/ })).toBeVisible()
+    await runtime.getByTestId('flow-runtime-light-edit-targets').getByRole('button', { name: /Flow 页面原文字.*编辑文字/ }).click()
     await expect(textEditor).toHaveValue(oldText)
     await textEditor.fill(newText)
     await textEditor.press('Enter')
