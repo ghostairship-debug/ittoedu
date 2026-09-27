@@ -131,7 +131,26 @@ test('M17-T01/T02/T03: both UI entries import without model calls; benchmark run
     if (!frameBounds) throw new Error('Imported benchmark has no visible frame')
     expect(frameBounds.width / frameBounds.height).toBeGreaterThan(1.7)
     expect(frameBounds.width / frameBounds.height).toBeLessThan(1.85)
+    const benchmarkFrame = page.locator('.published-authoring-host iframe').last()
+    const visualEvidence: Array<{ state: string; ready: string | null; cssViewport: { width: number; height: number }; screenshot: string }> = []
+    async function captureBenchmarkFrame(state: string, filename: string) {
+      const screenshot = join(shots, filename)
+      const cssViewport = await original.locator('html').evaluate(element => ({
+        width: element.ownerDocument.defaultView?.innerWidth ?? 0,
+        height: element.ownerDocument.defaultView?.innerHeight ?? 0,
+      }))
+      const ready = await benchmarkFrame.getAttribute('data-html-document-ready')
+      await benchmarkFrame.screenshot({ path: screenshot })
+      visualEvidence.push({ state, ready, cssViewport, screenshot })
+      writeFileSync(join(directory, 'benchmark-iframe-captures.json'), JSON.stringify({
+        source: benchmark,
+        sourceBytes: bytes.length,
+        sourceSha256: benchmarkSha256,
+        captures: visualEvidence,
+      }, null, 2))
+    }
     await page.screenshot({ path: join(shots, '03-benchmark-initial.png') })
+    await captureBenchmarkFrame('initial', '03-benchmark-initial-iframe.png')
     const progress = original.getByRole('slider', { name: 'Audio progress' })
     const before = Number(await progress.inputValue())
     await original.getByRole('button', { name: 'Play line 1' }).click()
@@ -142,10 +161,12 @@ test('M17-T01/T02/T03: both UI entries import without model calls; benchmark run
     await line.locator('button.text-toggle').last().click()
     await expect(line.locator('.chinese')).toBeVisible()
     await page.screenshot({ path: join(shots, '04-benchmark-line-translation-audio.png') })
+    await captureBenchmarkFrame('line-translation-audio', '04-benchmark-line-translation-audio-iframe.png')
     await original.getByRole('button', { name: 'Conversation 2' }).click()
     await expect(original.getByText('Hello, Peter.')).toBeVisible()
     await expect(original.getByRole('button', { name: 'Play line 5' })).toBeVisible()
     await page.screenshot({ path: join(shots, '05-benchmark-conversation-2.png') })
+    await captureBenchmarkFrame('conversation-2', '05-benchmark-conversation-2-iframe.png')
     expect(server.requests).toHaveLength(0)
 
     // T03: edit the same admitted React benchmark, then force its DOM to redraw and reopen its V9 document.
