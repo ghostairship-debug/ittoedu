@@ -29,7 +29,7 @@ function fixture() {
   writeFileSync(join(workspace, 'flow-a.h5lesson'), makeCourse('m16-menu-a', '插入验收 A', '正文 A：原始段落。'))
   writeFileSync(join(workspace, 'flow-b.h5lesson'), makeCourse('m16-menu-b', '插入验收 B', '正文 B：目标页面。'))
   const imagePath = join(directory, 'pixel.png')
-  writeFileSync(imagePath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p2cAAAAASUVORK5CYII=', 'base64'))
+  writeFileSync(imagePath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAJUlEQVR4nGP8z8Dwn4ECwESJ5lEDIICJgULANGoAw2gYMFAeBgBYbQIe5lO8/AAAAABJRU5ErkJggg==', 'base64'))
   return { directory, workspace, imagePath }
 }
 
@@ -66,6 +66,9 @@ test('M16-T06 Flow light workbench insert menu exposes the 11 document and 4 pap
   try {
     await setupSelectionUI(app, page, server.endpoint, data.workspace)
     const opened = await openFlow(page, data.workspace, 'flow-a.h5lesson')
+    const menuShots = join(data.directory, 'shots')
+    mkdirSync(menuShots)
+    await page.screenshot({ path: join(menuShots, 'flow-insert-menu.png') })
     await app.evaluate(({ dialog }, imagePath) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [imagePath] })
     }, data.imagePath)
@@ -96,8 +99,9 @@ test('M16-T06 Flow light workbench insert menu exposes the 11 document and 4 pap
     await page.getByRole('menuitem', { name: '图片', exact: true }).first().click()
     await expect.poll(async () => {
       const current = await snapshot(page, opened.documentId)
-      return current.model.kind === 'course-v9' ? current.model.project.surfaces.find(item => item.type === 'flow')?.blocks.some(block => block.type === 'media' && block.mediaKind === 'image') : false
-    }).toBe(true)
+      const inserted = current.model.kind === 'course-v9' && current.model.project.surfaces.find(item => item.type === 'flow')?.blocks.some(block => block.type === 'media' && block.mediaKind === 'image')
+      return inserted ? 'inserted' : JSON.stringify({ revision: current.revision, alerts: await page.getByRole('alert').allTextContents(), status: await page.locator('.status-bar').innerText() })
+    }).toBe('inserted')
     await showInsertMenu(page)
     await page.getByRole('menuitem', { name: '图片', exact: true }).last().click()
     await expect.poll(async () => {
@@ -114,6 +118,13 @@ test('M16-T06 Flow light workbench insert menu exposes the 11 document and 4 pap
     expect(surface?.type === 'flow' ? surface.surfaceLayerItems.length : 0).toBeGreaterThanOrEqual(2)
     expect(surface?.type === 'flow' ? surface.surfaceLayerItems.map(entry => entry.item.kind) : []).toContain('native')
     expect(surface?.type === 'flow' ? surface.surfaceLayerItems.some(entry => entry.item.kind === 'native' && entry.item.content.nativeType === 'shape') : false).toBe(true)
+    await page.screenshot({ path: join(menuShots, 'flow-menu.png') })
+    writeFileSync(join(data.directory, 'evidence.json'), JSON.stringify({
+      run: 'flow-menu', documentId: opened.documentId, revision: after.revision,
+      blockTypes: surface?.type === 'flow' ? surface.blocks.map(block => block.type) : [],
+      paperTypes: surface?.type === 'flow' ? surface.surfaceLayerItems.map(entry => entry.item.kind) : [],
+      assets: Object.keys(after.model.project.assets),
+    }, null, 2))
 
     await page.evaluate(async id => { await window.desktopAPI.documents!.save(id) }, opened.documentId)
     await page.evaluate(async id => { await window.desktopAPI.documents!.close(id) }, opened.documentId)
@@ -123,7 +134,7 @@ test('M16-T06 Flow light workbench insert menu exposes the 11 document and 4 pap
     const reopenedFlow = reopened.model.project.surfaces.find(item => item.type === 'flow')
     expect(reopenedFlow?.type === 'flow' ? reopenedFlow.blocks.some(block => block.type === 'heading') : false).toBe(true)
     expect(reopenedFlow?.type === 'flow' ? reopenedFlow.blocks.some(block => block.type === 'table') : false).toBe(true)
-    expect(reopenedFlow?.type === 'flow' ? reopenedFlow.surfaceLayerItems.map(entry => entry.item.kind) : []).toEqual(expect.arrayContaining(['native', 'shape']))
+    expect(reopenedFlow?.type === 'flow' ? reopenedFlow.surfaceLayerItems.some(entry => entry.item.kind === 'native' && entry.item.content.nativeType === 'shape') : false).toBe(true)
     expect(reopenedFlow?.type === 'flow' ? reopenedFlow.blocks.some(block => block.type === 'media' && block.mediaKind === 'image') : false).toBe(true)
     expect(reopenedFlow?.type === 'flow' ? reopenedFlow.surfaceLayerItems.some(entry => entry.item.kind === 'native' && entry.item.content.nativeType === 'image') : false).toBe(true)
     expect(Object.keys(reopened.model.resources.assets).length).toBeGreaterThan(0)
@@ -137,6 +148,13 @@ test('M16-T06 Flow image chooser result is discarded after switching the capture
   try {
     await setupSelectionUI(app, page, server.endpoint, data.workspace)
     const first = await openFlow(page, data.workspace, 'flow-a.h5lesson')
+    await page.keyboard.press('Escape')
+    const second = await openFlow(page, data.workspace, 'flow-b.h5lesson')
+    await page.keyboard.press('Escape')
+    const beforeB = await snapshot(page, second.documentId)
+    await page.locator('.workspace-document-tabs').getByRole('tab', { name: /^flow-a\.h5lesson/ }).click()
+    await expect(page.locator('.workspace-document-tabs').getByRole('tab', { name: /^flow-a\.h5lesson/ })).toHaveAttribute('aria-selected', 'true')
+    await showInsertMenu(page)
     const beforeA = await snapshot(page, first.documentId)
     await app.evaluate(({ dialog }) => {
       dialog.showOpenDialog = async () => await new Promise(resolve => {
@@ -145,10 +163,19 @@ test('M16-T06 Flow image chooser result is discarded after switching the capture
     })
     await page.getByRole('menuitem', { name: '图片', exact: true }).first().click()
     await expect.poll(() => app.evaluate(() => typeof (globalThis as typeof globalThis & { __resolveM16Chooser?: unknown }).__resolveM16Chooser)).toBe('function')
-    const second = await openFlow(page, data.workspace, 'flow-b.h5lesson')
-    const beforeB = await snapshot(page, second.documentId)
+    await page.locator('.workspace-document-tabs').getByRole('tab', { name: /^flow-b\.h5lesson/ }).click()
+    await expect(page.locator('.workspace-document-tabs').getByRole('tab', { name: /^flow-b\.h5lesson/ })).toHaveAttribute('aria-selected', 'true')
     await app.evaluate((_, path) => (globalThis as typeof globalThis & { __resolveM16Chooser: (paths: string[]) => void }).__resolveM16Chooser([path]), data.imagePath)
-    await expect(page.getByRole('alert').filter({ hasText: '文档已切换，请重新插入' })).toBeVisible()
+    await expect(page.locator('.status-bar')).not.toContainText('正在处理')
+    await expect(page.getByRole('alert').filter({ hasText: '文档或选区已变化，请重新插入' })).toBeVisible()
+    const shots = join(data.directory, 'shots')
+    mkdirSync(shots)
+    await page.screenshot({ path: join(shots, 'stale-document.png') })
+    writeFileSync(join(data.directory, 'evidence.json'), JSON.stringify({
+      run: 'stale-document', before: [beforeA.revision, beforeB.revision],
+      after: [(await snapshot(page, first.documentId)).revision, (await snapshot(page, second.documentId)).revision],
+      alerts: await page.getByRole('alert').allTextContents(),
+    }, null, 2))
     expect((await snapshot(page, first.documentId)).revision).toBe(beforeA.revision)
     expect((await snapshot(page, second.documentId)).revision).toBe(beforeB.revision)
     const afterA = await snapshot(page, first.documentId), afterB = await snapshot(page, second.documentId)
@@ -164,4 +191,76 @@ test('M16-T06 Flow image chooser result is discarded after switching the capture
     await closeSelectionApp(app)
     await server.close()
   }
+})
+
+test('M16-T06 Flow image chooser result is discarded after changing selection on the same page', async () => {
+  test.setTimeout(180_000)
+  const data = fixture(), server = await selectionServer(), app = await launchSelectionApp(data.directory)
+  const page = await app.firstWindow()
+  try {
+    await setupSelectionUI(app, page, server.endpoint, data.workspace)
+    const opened = await openFlow(page, data.workspace, 'flow-a.h5lesson')
+    await page.keyboard.press('Escape')
+    await page.getByTestId('flow-paper').locator('[data-flow-block-id="m16-menu-a-heading"]').click()
+    await showInsertMenu(page)
+    const before = await snapshot(page, opened.documentId)
+    await app.evaluate(({ dialog }) => {
+      dialog.showOpenDialog = async () => await new Promise(resolve => {
+        (globalThis as typeof globalThis & { __resolveM16Chooser?: (paths: string[]) => void }).__resolveM16Chooser = paths => resolve({ canceled: false, filePaths: paths })
+      })
+    })
+    await page.getByRole('menuitem', { name: '图片', exact: true }).first().click()
+    await expect.poll(() => app.evaluate(() => typeof (globalThis as typeof globalThis & { __resolveM16Chooser?: unknown }).__resolveM16Chooser)).toBe('function')
+    await page.getByTestId('flow-paper').locator('[data-flow-block-id="m16-menu-a-paragraph"]').click()
+    await app.evaluate((_, path) => (globalThis as typeof globalThis & { __resolveM16Chooser: (paths: string[]) => void }).__resolveM16Chooser([path]), data.imagePath)
+    await expect(page.getByRole('alert').filter({ hasText: '文档或选区已变化，请重新插入' })).toBeVisible()
+    const after = await snapshot(page, opened.documentId)
+    expect(after.revision).toBe(before.revision)
+    expect(after.undoDepth).toBe(before.undoDepth)
+    expect(after.model.kind).toBe('course-v9')
+    if (after.model.kind !== 'course-v9') throw new Error('Expected course document')
+    const flow = after.model.project.surfaces.find(surface => surface.type === 'flow')
+    expect(flow?.type === 'flow' ? flow.blocks.some(block => block.type === 'media' && block.mediaKind === 'image') : false).toBe(false)
+    expect(Object.keys(after.model.resources.assets)).toHaveLength(0)
+    const shots = join(data.directory, 'shots')
+    mkdirSync(shots)
+    await page.screenshot({ path: join(shots, 'stale-selection.png') })
+    writeFileSync(join(data.directory, 'evidence.json'), JSON.stringify({ run: 'stale-selection', before: before.revision, after: after.revision,
+      alerts: await page.getByRole('alert').allTextContents() }, null, 2))
+  } finally {
+    await app.evaluate((_, path) => (globalThis as typeof globalThis & { __resolveM16Chooser?: (paths: string[]) => void }).__resolveM16Chooser?.([path]), data.imagePath).catch(() => {})
+    await closeSelectionApp(app)
+    await server.close()
+  }
+})
+
+test('M16-T06 Flow menu insert commits freshly typed document text before inserting a block', async () => {
+  test.setTimeout(180_000)
+  const data = fixture(), server = await selectionServer(), app = await launchSelectionApp(data.directory)
+  const page = await app.firstWindow()
+  try {
+    await setupSelectionUI(app, page, server.endpoint, data.workspace)
+    const opened = await openFlow(page, data.workspace, 'flow-a.h5lesson')
+    await page.keyboard.press('Escape')
+    await page.getByTestId('flow-paper').locator('[data-flow-block-id="m16-menu-a-paragraph"]').click()
+    await page.keyboard.press('End')
+    await page.keyboard.insertText('补充文字。')
+    await showInsertMenu(page)
+    const before = await snapshot(page, opened.documentId)
+    await page.getByRole('menuitem', { name: '标题', exact: true }).click()
+    await expect.poll(async () => {
+      const current = await snapshot(page, opened.documentId)
+      if (current.model.kind !== 'course-v9') return false
+      const flow = current.model.project.surfaces.find(surface => surface.type === 'flow')
+      return current.revision > before.revision && flow?.type === 'flow'
+        && flow.blocks.filter(block => block.type === 'heading').length >= 2
+        && JSON.stringify(flow.blocks.find(block => block.id === 'm16-menu-a-paragraph')).includes('补充文字。')
+    }).toBe(true)
+    await expect(page.getByRole('alert')).toHaveCount(0)
+    const after = await snapshot(page, opened.documentId)
+    const shots = join(data.directory, 'shots')
+    mkdirSync(shots)
+    await page.screenshot({ path: join(shots, 'typed-then-insert.png') })
+    writeFileSync(join(data.directory, 'evidence.json'), JSON.stringify({ run: 'typed-then-insert', before: before.revision, after: after.revision }, null, 2))
+  } finally { await closeSelectionApp(app); await server.close() }
 })

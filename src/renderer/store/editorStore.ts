@@ -1020,6 +1020,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
     readAuthoringSession: () => get().courseAuthoringSession,
     readAssetSidecar: () => get().courseAssetSidecar,
+    readCanvasMode: () => get().canvasMode,
     patch: (patch) => write(patch),
     persist: persistFlowResult,
     applyBackend: applyFlowBackend,

@@ -15,6 +15,7 @@ import {
 } from '../shared/constants'
 import { toUserMessage, UserFacingError } from '../shared/errors'
 import { formatPageInsets, WINDOW_PAGE_INSETS } from '../shared/pageFrame'
+import { FLOW_COMPONENT_BLOCK_HEIGHT } from '../shared/flowBodyPresentation'
 import {
   collectCourseProjectHealth,
   summarizeCourseProjectHealth,
@@ -23,14 +24,26 @@ import {
   componentPackagesToArchiveFiles,
   componentPackagesFromArchive,
 } from './components/componentPackageStore'
-import { emptyCourseAssetSidecar } from './project/v9AssetAdapter'
+import { dedupeCourseMediaImports, emptyCourseAssetSidecar } from './project/v9AssetAdapter'
 import { useComponentLibrary } from './app/useComponentLibrary'
+import { componentCatalogInstallStatus } from './components/componentCatalogStatus'
+import { selectCurrentCatalogPackages } from './components/componentLibraryModel'
 import { useCourseDelivery } from './app/useCourseDelivery'
 import { courseDeliverySnapshot } from './app/courseDeliverySnapshot'
 import { useCourseProjectLifecycle } from './app/useCourseProjectLifecycle'
 import { useFlowDocumentRecovery } from './app/useFlowDocumentRecovery'
 import { buildFlowEditorView, captureFlowEditorAuthoringTarget } from './course/flowEditorView'
 import { findFlowBlockRecursive, flowSurfaceIn } from '../core/tools/flowDocumentModel'
+import { createExternalComponentNode, createImageNode, createShapeNode, createTextNode } from '../core/tools/nativeNodeFactories'
+import { sceneNodeToCourseLayerItem } from '../shared/courseProjectModel'
+import { resolveComponentPresetProps } from '../shared/componentProps'
+import { componentSupportsScope } from '../shared/componentCapabilities'
+import type { ComponentPackageData } from '../shared/componentTypes'
+import { prepareFlowMenuComponentInsertion } from './course/flowMenuComponentInsertion'
+import type { NativeLayerItem, ComponentLayerItem } from '../shared/courseProjectTypes'
+import type { FlowInsertCommand } from './ui/flow/flowInsertCommands'
+import type { FlowDeepInsertPayload } from './ui/RightSidebar'
+import { flowMenuPaperPlacement } from './ui/flow/flowMenuPaperPlacement'
 import { useEditorKeyboardRouter } from './app/useEditorKeyboardRouter'
 import { useMediaImport } from './app/useMediaImport'
 import type { WorkspaceMediaDropHandler } from './lessonWorkspace/workspaceMediaDrop'
@@ -60,7 +73,7 @@ import { ExportPreflightDialog } from './ui/ExportPreflightDialog'
 import { RightSidebar } from './ui/RightSidebar'
 import { ScenePanel } from './ui/ScenePanel'
 import { CourseBottomNavigation } from './ui/BottomSceneNavigator'
-import { requestFlowBlockFocus, requestFlowBlockSelection } from './ui/FlowWorkspace'
+import { captureFlowMenuPage, requestFlowBlockFocus, requestFlowBlockSelection, type FlowMenuPageCapture } from './ui/FlowWorkspace'
 import { TopToolbar } from './ui/TopToolbar'
 import { Workspace } from './ui/Workspace'
 import { ProjectHealthPanel } from './ui/ProjectHealthPanel'
@@ -459,6 +472,7 @@ export default function App() {
     selectImage: () => desktopApi().selectImage(),
     selectImages: () => desktopApi().selectImages(),
     selectAudios: () => desktopApi().selectAudios(),
+    selectAudio: () => desktopApi().selectAudio(),
     selectVideos: () => desktopApi().selectVideos(),
     selectVideo: () => desktopApi().selectVideo(),
     replaceSelectedVideo: (asset, bytes) => useEditorStore.getState().replaceSelectedVideo(asset, bytes),
@@ -510,6 +524,158 @@ export default function App() {
     commitStatus: setStatus,
     reportError: setError,
   })
+
+  type CapturedFlowMenuPage = Extract<FlowMenuPageCapture, { ok: true }>
+  const [pendingFlowComponent, setPendingFlowComponent] = useState<{ command: FlowInsertCommand; capture: CapturedFlowMenuPage } | null>(null)
+
+  const captureFlowMenuTarget = async (capture?: CapturedFlowMenuPage) => {
+    let page: FlowMenuPageCapture = capture ?? captureFlowMenuPage()
+    if (!page.ok) throw new Error(page.reason)
+    if (!capture) {
+      const before = useEditorStore.getState()
+      const flow = before.flowSession
+      if (before.courseDocument.documentId === page.documentId && flow
+        && flow.history.present.id === page.projectId && flow.selection.surfaceId === page.surfaceId
+        && flow.selection.locationId === page.locationId && flow.history.present.revision !== page.revision) {
+        await before.drainCourseDocument()
+        await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()))
+        const refreshed = captureFlowMenuPage()
+        if (!refreshed.ok || refreshed.documentId !== page.documentId || refreshed.projectId !== page.projectId
+          || refreshed.surfaceId !== page.surfaceId || refreshed.locationId !== page.locationId
+          || refreshed.generation !== page.generation || refreshed.selectedBlockId !== page.selectedBlockId
+          || refreshed.selectionSignature !== page.selectionSignature) {
+          throw new Error('正文或选区已变化，请重新打开插入菜单')
+        }
+        page = refreshed
+      }
+    }
+    const state = useEditorStore.getState()
+    const flow = state.flowSession
+    const token = state.courseAuthoringSession?.token
+    if (state.canvasMode !== 'edit' || !flow || !token || token.surfaceType !== 'flow'
+      || flow.selection.authoringScope !== 'page' || state.courseDocument.documentId !== page.documentId
+      || flow.history.present.id !== page.projectId || flow.history.present.revision !== page.revision
+      || flow.selection.locationId !== page.locationId || flow.selection.surfaceId !== page.surfaceId
+      || JSON.stringify(flow.selection) !== page.selectionSignature
+      || token.generation !== page.generation || token.revision !== page.revision) {
+      throw new Error('文档或编辑位置已变化，请重新打开插入菜单')
+    }
+    const view = buildFlowEditorView({ project: flow.history.present, locationId: page.locationId })
+    const selected = page.selectedBlockId
+    const target = captureFlowEditorAuthoringTarget({ view, sessionToken: token,
+      target: selected ? { kind: 'block', blockId: selected } : { kind: 'surface' } })
+    return { page, target, project: flow.history.present, state }
+  }
+
+  const insertFlowMenu = (command: FlowInsertCommand, payload?: FlowDeepInsertPayload, frozen?: CapturedFlowMenuPage, preparedPackage?: ComponentPackageData) => {
+    void (async () => {
+      try {
+        const { page, target, project, state } = await captureFlowMenuTarget(frozen)
+        const confirmFlowMenuCommit = async (expectedRevision: number) => {
+          const confirmed = await useEditorStore.getState().drainCourseDocument()
+          if (confirmed.documentId !== page.documentId || confirmed.revision < expectedRevision
+            || confirmed.model.kind !== 'course-v9' || confirmed.model.project.id !== page.projectId) {
+            throw new Error('当前文档尚未确认这次插入，请检查后重试')
+          }
+          setStatus('已插入到当前 Flow 页面')
+        }
+        const commit = async (intent: Parameters<typeof state.runFlowAuthoringIntent>[1]) => {
+          const live = useEditorStore.getState()
+          if (live.courseDocument.documentId !== page.documentId || JSON.stringify(live.flowSession?.selection) !== page.selectionSignature) {
+            throw new Error('文档或选区已变化，请重新插入')
+          }
+          const receipt = live.runFlowAuthoringIntent(target, intent)
+          if (!receipt.ok) throw new Error(receipt.reason ?? '插入尚未提交')
+          await confirmFlowMenuCommit(page.revision + 1)
+        }
+        if (command.destination === 'document' && ['heading', 'list', 'table', 'formula', 'divider', 'callout', 'section'].includes(command.kind)) {
+          await commit({ kind: 'menu-insert-document', documentKind: command.kind as 'heading' | 'list' | 'table' | 'formula' | 'divider' | 'callout' | 'section' })
+          return
+        }
+        if (command.kind === 'component') {
+          if (!payload?.packageId) { setPendingFlowComponent({ command, capture: page }); return }
+          const installed = preparedPackage ?? state.componentPackages[payload.packageId]
+          const embedded = project.componentPackages[payload.packageId]
+          if (!installed || installed.manifest.id !== payload.packageId
+            || (embedded && embedded.version !== installed.manifest.version)) throw new Error('组件包或版本已变化')
+          const manifest = installed.manifest
+          if (!componentSupportsScope(manifest, 'scene')) throw new Error('该组件不支持当前文档页')
+          const props = payload.presetId ? resolveComponentPresetProps(manifest, payload.presetId) : structuredClone(manifest.defaultProps)
+          if (command.destination === 'paper') {
+            const placement = flowMenuPaperPlacement(page, manifest.defaultSize)
+            const item = sceneNodeToCourseLayerItem(createExternalComponentNode({
+              name: manifest.name, component: { packageId: manifest.id, version: manifest.version },
+              props, width: placement.frame.width, height: placement.frame.height,
+              x: placement.frame.x, y: placement.frame.y,
+            })) as ComponentLayerItem
+            await commit(embedded
+              ? { kind: 'menu-insert-paper', item, ...placement }
+              : { kind: 'menu-insert-paper-component', item, packageData: installed, ...placement })
+            return
+          }
+          const surface = flowSurfaceIn(project, page.surfaceId)
+          const selected = page.selectedBlockId ? findFlowBlockRecursive(surface.blocks, page.selectedBlockId) : null
+          if (page.selectedBlockId && !selected) throw new Error('正文插入目标已变化')
+          const step = await prepareFlowMenuComponentInsertion({
+            project, resources: { assetFiles: selectMediaAssetFiles(state), componentPackages: state.componentPackages },
+            target: { projectId: page.projectId, documentRevision: page.revision,
+              locationId: page.locationId, surfaceId: page.surfaceId },
+            destination: { parentBlockId: selected?.parentId ?? null, index: selected ? selected.index + 1 : surface.blocks.length },
+            packageId: manifest.id, packageData: installed, presetId: payload.presetId,
+            width: page.bodyWidth, height: FLOW_COMPONENT_BLOCK_HEIGHT,
+          })
+          const live = useEditorStore.getState()
+          if (live.courseDocument.documentId !== page.documentId || JSON.stringify(live.flowSession?.selection) !== page.selectionSignature) {
+            throw new Error('文档或选区已变化，请重新插入')
+          }
+          const result = live.commitFlowMenuComponentAtTarget(target, step)
+          if (!result.ok) throw new Error(result.reason ?? '正文组件未提交')
+          await confirmFlowMenuCommit(page.revision + 1)
+          return
+        }
+        if (command.destination === 'paper' && (command.kind === 'text-box' || command.kind === 'shape')) {
+          const placement = flowMenuPaperPlacement(page, command.kind === 'text-box'
+            ? { width: 280, height: 120 } : { width: 180, height: 120 })
+          const item = sceneNodeToCourseLayerItem(command.kind === 'text-box'
+            ? createTextNode({ text: '请输入文本', x: placement.frame.x, y: placement.frame.y,
+                width: placement.frame.width, height: placement.frame.height })
+            : createShapeNode('rectangle', { x: placement.frame.x, y: placement.frame.y,
+                width: placement.frame.width, height: placement.frame.height })) as NativeLayerItem
+          await commit({ kind: 'menu-insert-paper', item, ...placement })
+          return
+        }
+        if (command.kind === 'image' || command.kind === 'video' || command.kind === 'audio') {
+          if (command.destination === 'paper' && command.kind !== 'image') throw new Error('纸面菜单仅支持图片媒体')
+          const existing = payload?.assetId ? project.assets[payload.assetId] : null
+          if (payload?.assetId && (!existing || existing.kind !== command.kind)) throw new Error('所选媒体素材已变化')
+          const selected = existing ? null : command.kind === 'image' ? await mediaImport.selectImageAsset()
+            : command.kind === 'video' ? await mediaImport.selectVideoAsset() : await mediaImport.selectAudioAsset()
+          if (!existing && !selected) return
+          const deduped = selected ? await dedupeCourseMediaImports(command.kind, project.assets,
+            state.courseAssetSidecar ?? emptyCourseAssetSidecar(), [selected]) : null
+          const prepared = deduped?.placements[0]
+          const asset = existing ?? prepared?.meta
+          if (!asset) throw new Error('所选媒体素材未准备完成')
+          const source = existing || (deduped && deduped.additions.length === 0)
+            ? { kind: 'existing' as const, assetId: asset.id }
+            : { kind: 'new' as const, meta: asset, bytes: prepared!.bytes }
+          if (command.destination === 'paper') {
+            const imageWidth = Math.min(320, Math.max(80, asset.width ?? 320))
+            const imageHeight = Math.max(80, Math.min(240, imageWidth * ((asset.height ?? 180) / (asset.width ?? 320))))
+            const placement = flowMenuPaperPlacement(page, { width: imageWidth, height: imageHeight })
+            const item = sceneNodeToCourseLayerItem(createImageNode({ assetId: asset.id,
+              width: placement.frame.width, height: placement.frame.height,
+              x: placement.frame.x, y: placement.frame.y })) as NativeLayerItem
+            await commit({ kind: 'menu-insert-media', placement: 'paper', mediaKind: 'image', source, item, ...placement })
+          } else {
+            await commit({ kind: 'menu-insert-media', placement: 'document', mediaKind: command.kind, source })
+          }
+          return
+        }
+        throw new Error('当前插入类型不可用')
+      } catch (error) { setError(error instanceof Error ? error.message : 'Flow 插入失败') }
+    })()
+  }
 
   useEditorKeyboardRouter({
     isReadOnly: () => courseDelivery.previewOpen || useEditorStore.getState().canvasMode === 'run',
@@ -639,6 +805,7 @@ export default function App() {
         : mediaImport.selectAndImportAudio()) }}
       onAddShape={shapeType => useEditorStore.getState().addShapeNode(shapeType)}
       onAddFormula={() => useEditorStore.getState().addFormulaNode()}
+      flowInsertMenu={{ onInsert: command => insertFlowMenu(command) }}
       insertSurface={insertSurface} editingScope={editingScope} spatialScope={spatialInsertScope}
       mode={courseCanvasMode}
       busy={busy} hasFlowSurface={hasFlowSurface}
@@ -710,6 +877,7 @@ export default function App() {
           <CourseBottomNavigation documentId={courseConnection.documentId} />
         </div>
         <RightSidebar
+          onFlowInsert={insertFlowMenu}
           onAddImage={(x, y) =>
             void mediaImport.selectAndImportImage('add', { x, y })
           }
@@ -726,6 +894,33 @@ export default function App() {
           onUpdateCatalogComponent={componentLibrary.requestCatalogUpdate}
         />
       </EditorPanelLayout>
+      {pendingFlowComponent && <div className="modal-backdrop" role="presentation" onMouseDown={() => setPendingFlowComponent(null)}>
+        <section className="modal" role="dialog" aria-modal="true" aria-labelledby="flow-component-choice-title" onMouseDown={event => event.stopPropagation()}>
+          <h2 id="flow-component-choice-title">选择要插入的组件</h2>
+          <p>将组件插入{pendingFlowComponent.command.destination === 'document' ? '正文' : '纸面'}。选择已有组件或内置组件。</p>
+          <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+            {Object.values(componentPackages).map(data =>
+              <button key={data.manifest.id} type="button" className="secondary-button" onClick={() => {
+                const pending = pendingFlowComponent
+                setPendingFlowComponent(null)
+                insertFlowMenu(pending.command, { packageId: data.manifest.id }, pending.capture, data)
+              }}>{data.manifest.name}</button>)}
+            {selectCurrentCatalogPackages(componentLibrary.componentCatalog.packages.filter(entry => entry.sourceTrust === 'built-in'))
+              .filter(entry => !componentPackages[entry.packageId]
+                && componentCatalogInstallStatus(entry, componentPackages[entry.packageId]) === 'available')
+              .map(entry => <button key={entry.packageId} type="button" className="secondary-button" onClick={() => {
+                const pending = pendingFlowComponent
+                setPendingFlowComponent(null)
+                void componentLibrary.prepareCatalogPackage(entry).then(data => {
+                  if (data) insertFlowMenu(pending.command, { packageId: data.manifest.id }, pending.capture, data)
+                }).catch(error => setError(error instanceof Error ? error.message : '组件包准备失败'))
+              }}>{entry.name}</button>)}
+          </div>
+          <div className="modal__actions">
+            <button type="button" className="secondary-button" onClick={() => setPendingFlowComponent(null)}>取消</button>
+          </div>
+        </section>
+      </div>}
       <footer className="status-bar" aria-live="polite">
         <span className="status-dot" />
         <span>{courseDelivery.exportProgress === 'cancelling' ? '正在清理已取消的导出…' : busy ? '正在处理…' : (statusMessage ?? '就绪')}</span>

@@ -44,7 +44,7 @@ import { flowMediaDropAfterBlock } from './flow/flowMediaDropPosition'
 import { FlowPaperMedia } from './flow/FlowPaperMedia'
 import { FlowMediaCropEditor } from './flow/FlowMediaCropEditor'
 import type { FlowMediaToolPort } from './flow/flowMediaCommands'
-import { observeFlowParagraphLayout } from './flow/flowParagraphLayout'
+import { measureFlowParagraphLayout, observeFlowParagraphLayout } from './flow/flowParagraphLayout'
 import { flowMediaFloatAnchor } from './flow/flowMediaFloatPlacement'
 
 export interface FlowWorkspaceProps {
@@ -68,6 +68,18 @@ export interface FlowBlockFocusRequest {
   readonly surfaceId: string
   readonly blockId: string
   readonly revision: number
+}
+export type FlowMenuPageCapture =
+  | { readonly ok: false; readonly reason: string }
+  | { readonly ok: true; readonly documentId: string; readonly projectId: string; readonly revision: number;
+      readonly locationId: string; readonly surfaceId: string; readonly generation: number;
+      readonly selectedBlockId: string | null; readonly selectionSignature: string; readonly paperWidth: number; readonly bodyWidth: number;
+      readonly paragraphRects: readonly FlowParagraphBlockRect[] }
+const flowMenuCaptureListeners = new Set<() => FlowMenuPageCapture>()
+/** Flush the visible editor, then capture the page and observed layout before a menu opens a file picker. */
+export function captureFlowMenuPage(): FlowMenuPageCapture {
+  if (flowMenuCaptureListeners.size !== 1) return { ok: false, reason: '当前 Flow 页面尚未就绪' }
+  return [...flowMenuCaptureListeners][0]()
 }
 const flowBlockFocusListeners = new Set<(request: FlowBlockFocusRequest) => boolean>()
 /** A one-shot view focus request; an unmounted or changed document drops it. */
@@ -201,7 +213,29 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
   const [viewport, setViewport] = useState({ width: 1280, height: 720, nativeChrome: { right: 0, bottom: 0 } })
   const assetMimeTypes = useMemo(() => Object.fromEntries(Object.entries(assets).map(([id, asset]) => [id, asset.mimeType])), [assets])
   const assetUrls = useAssetObjectUrls(assetFiles, assetMimeTypes)
-  const current = useRef({ documentId, view, sessionToken, commands }); current.current = { documentId, view, sessionToken, commands }
+  const current = useRef({ documentId, view, sessionToken, commands, readOnly, selection }); current.current = { documentId, view, sessionToken, commands, readOnly, selection }
+  useEffect(() => {
+    const capture = (): FlowMenuPageCapture => {
+      const value = current.current
+      if (!value.documentId || value.readOnly || value.selection?.authoringScope !== 'page') return { ok: false, reason: '请切换到可编辑的 Flow 当前文档页' }
+      const flushed = editorRef.current?.flush()
+      if (!flushed?.ready || flushed.diagnostics.length) return { ok: false, reason: '请先完成当前正文输入' }
+      const paper = paperRef.current
+      const width = paper?.getBoundingClientRect().width ?? 0
+      const padding = paper ? window.getComputedStyle(paper) : null
+      const bodyWidth = Math.max(0, width - (Number.parseFloat(padding?.paddingLeft ?? '0') || 0)
+        - (Number.parseFloat(padding?.paddingRight ?? '0') || 0))
+      const rects = paper ? measureFlowParagraphLayout(paper) : []
+      const selected = value.selection?.selectedBlockId
+      const selectedBlockId = selected && value.view.blocks.some(entry => entry.blockId === selected)
+        ? selected : value.view.blocks.some(entry => entry.blockId === value.view.activeBlockId) ? value.view.activeBlockId : null
+      return { ok: true, documentId: value.documentId, projectId: value.view.projectId, revision: value.view.revision,
+        locationId: value.view.locationId, surfaceId: value.view.surfaceId, generation: value.sessionToken.generation,
+        selectedBlockId, selectionSignature: JSON.stringify(value.selection), paperWidth: width, bodyWidth, paragraphRects: rects }
+    }
+    flowMenuCaptureListeners.add(capture)
+    return () => { flowMenuCaptureListeners.delete(capture) }
+  }, [])
   const bodyWidth = resolveFlowBodyWidth(view.layout, viewport.width - viewport.nativeChrome.right)
   const objectRevision = useMemo(() => ({ assetUrls, componentPackages, bodyWidth }), [assetUrls, componentPackages, bodyWidth])
   const controller = useFlowTextAuthoringController({ view, sessionToken, selection, readOnly, textEdit, workspaceRef, commands })
