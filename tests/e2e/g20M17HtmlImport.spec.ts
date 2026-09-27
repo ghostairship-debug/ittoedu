@@ -102,7 +102,7 @@ async function importedFrame(page: Page, position: 'first' | 'last' = 'first') {
 }
 
 async function saveAndWait(page: Page, name: string) {
-  await page.keyboard.press('Control+S')
+  await page.getByLabel('常用工具').getByRole('button', { name: '保存', exact: true }).click()
   await expect.poll(() => page.evaluate(async filename => {
     const documents = await window.desktopAPI.documents!.list()
     return documents.find(item => item.binding.kind === 'file' && item.binding.path.endsWith(filename))?.dirty
