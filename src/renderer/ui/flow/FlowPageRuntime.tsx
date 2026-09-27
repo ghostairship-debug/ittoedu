@@ -77,6 +77,7 @@ export function FlowPageRuntime({ item, surfaceId, ownerKey = surfaceId, width, 
       height,
       visible: true,
       mode: 'authoring',
+      flowHtmlConfirmationMode: 'runtime',
       session,
       resolveAsset: assetId => {
         const url = callbacks.current.assetUrls[assetId]

@@ -64,6 +64,7 @@ import {
 } from './slide/SlidePublishedAdapter'
 import { SpatialSurfaceHost } from './spatial/SpatialSurfaceHost'
 import { PublishedGlobalCanvasRuntimeOwner } from './runtime/publishedGlobalCanvasRuntimeOwner'
+import type { FlowHtmlConfirmationMode } from './runtime/surfaceRuntimeContentSize'
 import {
   PublishedAuthoringSessionCoordinator,
   type PublishedAuthoringPatchSurface,
@@ -89,6 +90,7 @@ export interface CreatePublishedDynamicHostsOptions {
   viewport?: { width: number; height: number }
   resolveAsset?: (assetId: string) => string | undefined
   playbackPathId?: string | null
+  flowHtmlConfirmationMode?: FlowHtmlConfirmationMode
   /** Internal deterministic export host; keeps authored interactions inert. */
   staticCapture?: boolean
   /** Pure Slide compatibility policy. Mixed/static callers leave this false. */
@@ -229,6 +231,7 @@ function createPublishedSurfaceHostInternal(
     return new FlowPublishedAdapter(payload, surface.id, {
       locationId: startLocationId,
       resolveAsset,
+      flowHtmlConfirmationMode: options.flowHtmlConfirmationMode,
       globalInteractionVisibilityState: options.globalInteractionVisibilityState,
       onInteractionInvalidated: () => options.onInteractionInvalidated?.(surface.id),
       onInteractionReady: () => options.onInteractionReady?.(surface.id),
@@ -1666,6 +1669,7 @@ export function createPublishedCourseSession(
       viewport: options.viewport,
       resolveAsset: options.resolveAsset ?? options.services?.resolveAsset,
       playbackPathId: options.playbackPathId,
+      flowHtmlConfirmationMode: options.flowHtmlConfirmationMode,
       globalInteractionVisibilityState,
       teacherControllerSession,
       navigation: options.staticCapture ? undefined : navigation,
@@ -1827,6 +1831,7 @@ class FlowPublishedAdapter implements SurfaceHost {
     options: {
       locationId: string
       resolveAsset: (assetId: string) => string | undefined
+      flowHtmlConfirmationMode?: FlowHtmlConfirmationMode
       globalInteractionVisibilityState?: PublishedInteractionVisibilityState
       onInteractionInvalidated?: () => void
       onInteractionReady?: () => void
@@ -1855,6 +1860,7 @@ class FlowPublishedAdapter implements SurfaceHost {
       surfaceId,
       locationId: options.locationId,
       resolveAsset: options.resolveAsset,
+      flowHtmlConfirmationMode: options.flowHtmlConfirmationMode,
       globalInteractionVisibilityState: options.globalInteractionVisibilityState,
       onInteractionInvalidated: options.onInteractionInvalidated,
       onInteractionReady: options.onInteractionReady,

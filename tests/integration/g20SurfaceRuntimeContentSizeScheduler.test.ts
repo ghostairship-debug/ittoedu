@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
-import { afterEach, expect, it, vi } from 'vitest'
-import { observeSurfaceRuntimeContentSize } from '../../src/player/surfaces/runtime/surfaceRuntimeContentSize'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { observeSurfaceRuntimeContentSize, type FlowHtmlConfirmationMode } from '../../src/player/surfaces/runtime/surfaceRuntimeContentSize'
 
-const mocks = vi.hoisted(() => ({ measure: vi.fn(), waitResize: vi.fn() }))
+const mocks = vi.hoisted(() => ({ measure: vi.fn(), waitResize: vi.fn(), freeze: vi.fn() }))
 vi.mock('../../src/player/surfaces/runtime/managedHtmlContentMeasurement', () => ({ measureManagedHtmlContent: mocks.measure }))
 vi.mock('../../src/player/surfaces/runtime/managedHtmlFlowAdmissionProfile', () => ({
-  freezeManagedHtmlLayout: () => () => true,
+  freezeManagedHtmlLayout: mocks.freeze,
   managedHtmlStylesheetSignature: () => 'stable',
   waitForManagedHtmlResize: mocks.waitResize,
 }))
@@ -22,26 +22,29 @@ async function until(condition: () => boolean): Promise<void> {
 
 const observers: Array<{ destroy(): void }> = []
 const frames: HTMLIFrameElement[] = []
+beforeEach(() => mocks.freeze.mockImplementation(() => () => true))
 afterEach(() => {
   for (const observer of observers.splice(0)) observer.destroy()
   for (const frame of frames.splice(0)) frame.remove()
   vi.useRealTimers()
   mocks.measure.mockReset()
   mocks.waitResize.mockReset()
+  mocks.freeze.mockReset()
 })
 
-function fixture() {
+function fixture(flowHtmlConfirmationMode?: FlowHtmlConfirmationMode, onHeight?: (height: number, origin: HTMLElement) => void, setupFrame?: (frame: HTMLIFrameElement) => void) {
   const frame = document.createElement('iframe')
   document.body.append(frame)
   frames.push(frame)
+  setupFrame?.(frame)
   const origin = frame.contentDocument!.documentElement
   const source = { kind: 'managed-document' as const, iframe: frame, origin, minimumHeight: 1 }
   let currentSource: typeof source | null = source
   const heights: number[] = []
   const errors: Error[] = []
   const observer = observeSurfaceRuntimeContentSize({
-    root: document.body, source: () => currentSource,
-    onHeightChange: height => heights.push(height), onError: error => errors.push(error),
+    root: document.body, source: () => currentSource, flowHtmlConfirmationMode,
+    onHeightChange: height => { heights.push(height); onHeight?.(height, origin) }, onError: error => errors.push(error),
   })
   observers.push(observer)
   return { frame, origin, source, observer, heights, errors, setSource(next: typeof source | null) { currentSource = next; observer.refresh() } }
@@ -55,6 +58,148 @@ function controlledMeasurements() {
   }))
   return calls
 }
+
+it.each([undefined, 'admission', 'runtime'] as const)('routes the first frozen-layout mismatch in %s mode', async mode => {
+  const calls = controlledMeasurements()
+  mocks.waitResize.mockResolvedValue(undefined)
+  mocks.freeze.mockImplementation(() => () => false)
+  const { observer, heights, errors } = fixture(mode)
+  const ready = observer.waitForReady()
+  const rejection = mode === 'runtime' ? null : expect(ready).rejects.toThrow('删除、移动或改变了正文')
+  await until(() => calls.length === 1)
+  calls[0]!.resolve(900)
+  await until(() => heights.length === 1)
+  if (mode === 'runtime') {
+    await until(() => calls.length === 2)
+    calls[1]!.resolve(900)
+    await ready
+    expect(errors).toEqual([])
+    expect(heights).toEqual([900])
+  } else {
+    await rejection
+    expect(errors).toHaveLength(1)
+    expect(calls).toHaveLength(1)
+  }
+})
+
+it('restarts after the post-measurement frozen-layout mismatch without a mutation notification', async () => {
+  const calls = controlledMeasurements()
+  mocks.waitResize.mockResolvedValue(undefined)
+  let checks = 0
+  mocks.freeze.mockImplementation(() => () => ++checks === 1)
+  const { observer, heights, errors } = fixture('runtime')
+  const ready = observer.waitForReady()
+  await until(() => calls.length === 1)
+  calls[0]!.resolve(900)
+  await until(() => calls.length === 2)
+  calls[1]!.resolve(900)
+  await until(() => calls.length === 3)
+  calls[2]!.resolve(900)
+  await ready
+  expect(checks).toBe(2)
+  expect(heights).toEqual([900])
+  expect(errors).toEqual([])
+})
+
+it('aborts the old confirmation and counts simultaneous mutation and resize only once', async () => {
+  const calls = controlledMeasurements()
+  let waiting: AbortSignal | undefined
+  mocks.waitResize.mockImplementation((_document, signal: AbortSignal) => new Promise<void>((_resolve, reject) => {
+    waiting = signal
+    signal.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), { once: true })
+  }))
+  let resize: ResizeObserverCallback | undefined
+  const { origin, observer, heights, errors } = fixture('runtime', undefined, frame => {
+    class ProbeResizeObserver {
+      constructor(callback: ResizeObserverCallback) { resize = callback }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    Object.defineProperty(frame.contentWindow!, 'ResizeObserver', { configurable: true, value: ProbeResizeObserver })
+  })
+  const emit = (height: number) => resize!([{ target: origin, contentRect: { width: 760, height } } as unknown as ResizeObserverEntry], {} as ResizeObserver)
+  emit(300)
+  const ready = observer.waitForReady()
+  for (let index = 0; index < 11; index++) {
+    await until(() => calls.length === index + 1)
+    origin.ownerDocument.body.dataset.initial = String(index)
+    await until(() => calls[index]!.signal.aborted)
+  }
+  await until(() => calls.length === 12)
+  calls[11]!.resolve(900)
+  await until(() => heights.length === 1 && !!waiting)
+  origin.ownerDocument.body.dataset.tick = 'one'
+  emit(301)
+  await until(() => waiting!.aborted)
+  await until(() => calls.length === 13)
+  calls[12]!.resolve(900)
+  await ready
+  expect(calls[11]!.signal.aborted).toBe(false)
+  expect(calls).toHaveLength(13)
+  expect(errors).toEqual([])
+  expect(heights).toEqual([900])
+})
+
+it('counts a confirmation invalidation after publication when no controller remains', async () => {
+  const calls = controlledMeasurements()
+  mocks.waitResize.mockResolvedValue(undefined)
+  const { origin, observer, heights, errors } = fixture('runtime', (_height, root) => {
+    queueMicrotask(() => { root.ownerDocument.body.dataset.confirmation = 'stale' })
+  })
+  const ready = observer.waitForReady()
+  const rejected = expect(ready).rejects.toThrow('invalidations=13')
+  for (let index = 0; index < 12; index++) {
+    await until(() => calls.length === index + 1)
+    origin.ownerDocument.body.dataset.initial = String(index)
+    await until(() => calls[index]!.signal.aborted)
+  }
+  await until(() => calls.length === 13)
+  calls[12]!.resolve(900)
+  await rejected
+  expect(heights).toEqual([900])
+  expect(errors).toHaveLength(1)
+  expect(calls).toHaveLength(13)
+  expect(mocks.waitResize).not.toHaveBeenCalled()
+})
+
+it('allows twelve invalidations, then resets the budget after stable readiness', async () => {
+  const calls = controlledMeasurements()
+  mocks.waitResize.mockResolvedValue(undefined)
+  const { origin, observer, heights, errors } = fixture('runtime')
+  const ready = observer.waitForReady()
+  for (let index = 0; index < 12; index++) {
+    await until(() => calls.length === index + 1)
+    origin.ownerDocument.body.dataset.initial = String(index)
+    await until(() => calls[index]!.signal.aborted)
+  }
+  await until(() => calls.length === 13)
+  calls[12]!.resolve(900)
+  await until(() => calls.length === 14)
+  calls[13]!.resolve(900)
+  await ready
+  origin.ownerDocument.body.dataset.next = 'interaction'
+  await until(() => calls.length === 15)
+  const nextReady = observer.waitForReady()
+  calls[14]!.resolve(900)
+  await nextReady
+  expect(heights).toEqual([900])
+  expect(errors).toEqual([])
+})
+
+it('keeps profile failures fatal in runtime mode', async () => {
+  const calls = controlledMeasurements()
+  mocks.freeze.mockImplementation(() => { throw new Error('unsupported profile') })
+  const { observer, heights, errors } = fixture('runtime')
+  const ready = observer.waitForReady()
+  const rejected = expect(ready).rejects.toThrow('unsupported profile')
+  await until(() => calls.length === 1)
+  calls[0]!.resolve(900)
+  await rejected
+  expect(calls).toHaveLength(1)
+  expect(heights).toEqual([])
+  expect(errors).toHaveLength(1)
+})
 
 it('joins one initial and one confirmation measurement even when their combined time exceeds three seconds', async () => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })

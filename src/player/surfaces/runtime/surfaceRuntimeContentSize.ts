@@ -1,6 +1,8 @@
 import { measureManagedHtmlContent, type ManagedHtmlMeasurementSource } from './managedHtmlContentMeasurement'
 import { freezeManagedHtmlLayout, managedHtmlStylesheetSignature, waitForManagedHtmlResize } from './managedHtmlFlowAdmissionProfile'
 
+export type FlowHtmlConfirmationMode = 'admission' | 'runtime'
+
 export type SurfaceRuntimeContentSource =
   | { kind: 'intrinsic'; element: HTMLElement }
   | { kind: 'viewport'; origin: HTMLElement; viewportElements: ReadonlySet<HTMLElement> }
@@ -9,6 +11,7 @@ export type SurfaceRuntimeContentSource =
 export interface SurfaceRuntimeContentSizeOptions {
   root: HTMLElement
   source?: () => SurfaceRuntimeContentSource | null
+  flowHtmlConfirmationMode?: FlowHtmlConfirmationMode
   onHeightChange(height: number): void
   onError?(error: Error): void
 }
@@ -68,6 +71,7 @@ function contentHeight(source: Exclude<SurfaceRuntimeContentSource, ManagedHtmlM
 export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentSizeOptions): SurfaceRuntimeContentSizeObserver {
   const view = options.root.ownerDocument.defaultView
   const defaultSource: SurfaceRuntimeContentSource = { kind: 'viewport', origin: options.root, viewportElements: new Set([options.root]) }
+  const runtimeConfirmation = options.flowHtmlConfirmationMode === 'runtime'
   let destroyed = false
   let frame = 0
   let lastHeight: number | null = null
@@ -109,6 +113,24 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
     mutationObserver?.disconnect()
     settle(failure)
     options.onError?.(failure)
+  }
+  const countInvalidation = (): boolean => {
+    if (countedGeneration === generation) return true
+    countedGeneration = generation
+    if (++invalidations <= 12) return true
+    fail(new Error(`Flow HTML 持续失效，无法稳定测量（phase=measurement, invalidations=${invalidations}, lastHeight=${lastHeight ?? 'none'}, reason=${lastInvalidation}）；请使用演示页。`))
+    return false
+  }
+  const restartConfirmation = (reason: string): boolean => {
+    if (!runtimeConfirmation || observedSource?.kind !== 'managed-document' || !verifyPublishedLayout) return false
+    lastInvalidation = reason
+    if (!countInvalidation()) return true
+    verifyPublishedLayout = null
+    expectedRootResizeSize = null
+    dirty = true
+    ready = false
+    controller?.abort()
+    return true
   }
   const sourceSize = (source: SurfaceRuntimeContentSource | null): string | null =>
     source?.kind === 'managed-document' ? `${source.iframe.clientWidth}x${source.iframe.clientHeight}` : null
@@ -188,15 +210,11 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
       lastInvalidation = replaced ? 'source replacement' : resized ? 'viewport resize' : reason
       dirty = true
       ready = false
-      if (controller && !controller.signal.aborted) {
-        if (!replaced && countedGeneration !== generation) {
-          countedGeneration = generation
-          if (++invalidations > 12) {
-            fail(new Error(`Flow HTML 持续失效，无法稳定测量（phase=measurement, invalidations=${invalidations}, lastHeight=${lastHeight ?? 'none'}, reason=${lastInvalidation}）；请使用演示页。`))
-            return
-          }
-        }
-        // During confirmation the frozen live layout must run and reject author resize edits.
+      if (!replaced && restartConfirmation(lastInvalidation)) {
+        if (failure) return
+      } else if (controller && !controller.signal.aborted) {
+        if (!replaced && !countInvalidation()) return
+        // Admission keeps the frozen live layout and rejects author resize edits.
         if (!verifyPublishedLayout || replaced) controller.abort()
       }
     } else if (reason === 'verify' && ready) {
@@ -228,7 +246,10 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
       if (verifyPublishedLayout && source.kind === 'managed-document') await waitForManagedHtmlResize(source.origin.ownerDocument, pending.signal)
       if (pending.signal.aborted) return
       phase = verifyPublishedLayout ? 'confirm-measure' : 'initial-measure'
-      if (verifyPublishedLayout && !verifyPublishedLayout()) throw new Error('Flow HTML 在调整视口后删除、移动或改变了正文；请使用演示页。')
+      if (verifyPublishedLayout && !verifyPublishedLayout()) {
+        if (restartConfirmation('layout confirmation')) return
+        throw new Error('Flow HTML 在调整视口后删除、移动或改变了正文；请使用演示页。')
+      }
       const height = source.kind === 'managed-document'
         ? await measureManagedHtmlContent(source, pending.signal)
         : contentHeight(source)
@@ -255,12 +276,16 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
         observedSize = sourceSize(source)
         if (source.kind === 'managed-document') { dirty = true; return }
       }
-      if (verifyPublishedLayout && !verifyPublishedLayout()) throw new Error('Flow HTML 在调整视口后删除、移动或改变了正文；请使用演示页。')
+      if (verifyPublishedLayout && !verifyPublishedLayout()) {
+        if (restartConfirmation('layout confirmation')) return
+        throw new Error('Flow HTML 在调整视口后删除、移动或改变了正文；请使用演示页。')
+      }
       verifyPublishedLayout = null
       if (dirty) return
       ready = true
       phase = 'ready'
       heightChanges = invalidations = 0
+      countedGeneration = -1
       settle()
     } catch (cause) {
       if (destroyed || pending.signal.aborted || currentGeneration !== generation) return

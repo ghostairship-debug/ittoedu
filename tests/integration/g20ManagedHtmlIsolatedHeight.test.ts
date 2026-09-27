@@ -12,7 +12,7 @@ beforeAll(async () => {
 }, 15000)
 afterAll(async () => { await browser?.close() })
 
-async function pageWith(html: string, network?: { requests: number; image?: Buffer }): Promise<Page> {
+async function pageWith(html: string, network?: { requests: number; image?: Buffer }, mode?: 'admission' | 'runtime'): Promise<Page> {
   const page = await browser.newPage()
   if (network) await page.route('https://measurement.invalid/**', async route => {
     network.requests++
@@ -22,7 +22,7 @@ async function pageWith(html: string, network?: { requests: number; image?: Buff
   })
   await page.setContent('<div id="root"><iframe style="width:640px;height:300px;border:0"></iframe></div>')
   await page.addScriptTag({ content: script })
-  await page.evaluate(async html => {
+  await page.evaluate(async ({ html, mode }) => {
     const frame = document.querySelector('iframe')!
     const ready = new Promise<void>(resolve => frame.onload = () => resolve())
     frame.srcdoc = html
@@ -30,17 +30,74 @@ async function pageWith(html: string, network?: { requests: number; image?: Buff
     const state = { heights: [] as number[], errors: [] as string[], measures: 0, resizes: 0, observer: null as any }
     frame.contentWindow!.addEventListener('resize', () => { state.resizes++; frame.contentDocument!.body.dataset.resizes = String(state.resizes) })
     state.observer = (window as any).HeightReview.observeSurfaceRuntimeContentSize({
-      root: document.getElementById('root'),
+      root: document.getElementById('root'), flowHtmlConfirmationMode: mode,
       source: () => { state.measures++; return { kind: 'managed-document', iframe: frame, origin: frame.contentDocument!.documentElement, minimumHeight: 1 } },
       onHeightChange: (height: number) => { state.heights.push(height); frame.style.height = `${height}px` },
       onError: (error: Error) => state.errors.push(error.message),
     })
     ;(window as any).testHeight = state
-  }, html)
+  }, { html, mode })
   return page
 }
 
 const settled = (page: Page) => page.evaluate(() => (window as any).testHeight.observer.waitForReady())
+
+const raceHtml = '<!doctype html><style>body{margin:0;font:16px sans-serif}article{height:400px}#more{height:300px}</style><article>lesson</article><div id="more" style="display:none">translation</div><p id="clock">0:00</p>'
+
+it.each([false, true])('retains natural Flow interaction across ten height changes with clock=%s', async clock => {
+  const page = await pageWith(raceHtml, undefined, 'runtime')
+  try {
+    await settled(page)
+    expect(await page.evaluate(() => (window as any).testHeight.heights)).toEqual([453])
+    if (clock) await page.evaluate(() => {
+      const doc = document.querySelector('iframe')!.contentDocument!
+      let tick = 0
+      ;(window as any).heightClock = setInterval(() => {
+        doc.getElementById('clock')!.textContent = '0:' + String(++tick).padStart(2, '0')
+      }, 250)
+    })
+    for (let index = 0; index < 10; index++) {
+      await page.evaluate(open => {
+        document.querySelector('iframe')!.contentDocument!.getElementById('more')!.style.display = open ? 'block' : 'none'
+      }, index % 2 === 0)
+      await page.waitForTimeout(400)
+      expect(await page.evaluate(() => (window as any).testHeight.errors)).toEqual([])
+      expect(await page.evaluate(() => (window as any).testHeight.heights.at(-1))).toBe(index % 2 === 0 ? 753 : 453)
+    }
+    const result = await page.evaluate(() => ({
+      heights: (window as any).testHeight.heights,
+      clock: document.querySelector('iframe')!.contentDocument!.getElementById('clock')!.textContent,
+      mirrors: document.querySelectorAll('[data-html-height-measurement]').length,
+    }))
+    expect(result.heights).toEqual([453, 753, 453, 753, 453, 753, 453, 753, 453, 753, 453])
+    if (clock) expect(result.clock).not.toBe('0:00')
+    expect(result.mirrors).toBe(0)
+  } finally { await page.close() }
+})
+
+it('bounds a real continuously changing natural Flow page and clears its mirrors', async () => {
+  const page = await pageWith('<!doctype html><style>body{margin:0}article{height:400px}</style><article>lesson</article>', undefined, 'runtime')
+  try {
+    await settled(page)
+    await page.evaluate(() => {
+      const article = document.querySelector('iframe')!.contentDocument!.querySelector<HTMLElement>('article')!
+      let tick = 0
+      const update = () => {
+        article.style.height = `${400 + (++tick % 2) * 300}px`
+        ;(window as any).heightAnimation = requestAnimationFrame(update)
+      }
+      update()
+    })
+    await page.waitForFunction(() => (window as any).testHeight.errors.length === 1, undefined, { timeout: 10000 })
+    const result = await page.evaluate(() => ({
+      errors: (window as any).testHeight.errors,
+      mirrors: document.querySelectorAll('[data-html-height-measurement]').length,
+    }))
+    expect(result.errors).toHaveLength(1)
+    expect(result.errors[0]).toMatch(/持续失效|持续改变布局/)
+    expect(result.mirrors).toBe(0)
+  } finally { await page.close() }
+})
 
 it('preserves loaded local image dimensions without duplicating author load handlers', async () => {
   const svg = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="600"/>')}`
