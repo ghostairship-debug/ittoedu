@@ -82,6 +82,31 @@ test('parser scripts preserve handler target, property override, and inline scri
   expect(result[4]?.attrs).toEqual(['false:false', 'false:false', 'false:false'])
 })
 
+test('inline handlers resolve element, form, and document names', async ({ page }) => {
+  await page.goto('about:blank')
+  await page.setContent(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-eval' blob:">`)
+  const source = createHtmlDocumentRuntimeSource({
+    html: `<form><input name="answer" value="before"><button id="target" onclick="textContent='clicked'; answer.value='after'; documentElement.setAttribute('data-doc','changed')">Click</button></form>`,
+    resourceKeys: [],
+  })
+  const result = await page.evaluate(async source => {
+    let definition: any
+    new Function('CoursewareRuntime', source)({ define(value: unknown) { definition = value } })
+    const root = document.body.appendChild(document.createElement('div'))
+    let ready!: Promise<unknown>
+    const lifecycle = definition.create({ dom: { root }, assets: {}, capture: { waitUntil(value: Promise<unknown>) { ready = value } } })
+    await ready
+    const frame = root.querySelector('iframe')!
+    const button = frame.contentDocument!.getElementById('target') as HTMLButtonElement
+    button.click()
+    const result = { text: button.textContent, answer: (frame.contentDocument!.querySelector('[name=answer]') as HTMLInputElement).value,
+      documentValue: frame.contentDocument!.documentElement.getAttribute('data-doc') }
+    lifecycle.destroy()
+    return result
+  }, source)
+  expect(result).toEqual({ text: 'clicked', answer: 'after', documentValue: 'changed' })
+})
+
 test('unsupported early event attributes fail and Blob scripts are revoked on destroy', async ({ page }) => {
   await page.goto('about:blank')
   await page.setContent(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-eval' blob:">`)

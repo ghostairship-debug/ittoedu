@@ -49,7 +49,7 @@ CoursewareRuntime.define({
       handlerCode = '(function(){const specs=' + JSON.stringify(eventHandlers) + ';' +
         'for(const element of document.querySelectorAll("[data-cw-inline-handler]")){' +
         'const id=element.getAttribute("data-cw-inline-handler");' +
-        'for(const [key,eventName,body] of specs) if(key===id) element["on"+eventName]=new Function("event",body);' +
+        'for(const [key,eventName,body] of specs) if(key===id) element["on"+eventName]=new Function("event","with(document){with(this.form||{}){with(this){"+body+"}}}");' +
         'element.removeAttribute("data-cw-inline-handler");}})();';
       let flushUrl = null;
       for (const script of Array.from(parsed.querySelectorAll('script'))) {
