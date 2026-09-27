@@ -7,30 +7,34 @@ import type { ComponentLayerItem, RuntimeLayerItem } from '@/shared/courseProjec
 const mocks = vi.hoisted(() => ({
   runtimeProps: null as any,
   componentProps: null as any,
-  captureText: vi.fn(() => ({ kind: 'text', itemId: 'card-1' })),
-  writeText: vi.fn(() => ({ ok: true, status: 'updated' })),
-  captureAsset: vi.fn(() => ({ kind: 'asset', itemId: 'card-1' })),
-  replaceAsset: vi.fn(() => ({ ok: true, status: 'updated' })),
+  captureText: vi.fn(() => ({ kind: 'text', itemId: 'card-1', projectId: 'project-1', revision: 1, generation: 1,
+    original: 'Before', region: 'p' })),
+  captureAsset: vi.fn(() => ({ kind: 'asset', itemId: 'card-1', projectId: 'project-1', revision: 1, generation: 1, key: 'hero' })),
   captureRuntimeText: vi.fn((_session: any) => ({ initialValue: 'Before', courseTarget: { itemId: 'runtime-1' } })),
-  updateRuntimeText: vi.fn(() => ({ ok: true, status: 'updated' })),
   captureRuntimeAsset: vi.fn((_session: any) => ({ courseTarget: { itemId: 'runtime-1' } })),
-  replaceRuntimeAsset: vi.fn(() => ({ ok: true, status: 'replaced' })),
-  captureSubmission: vi.fn(() => ({ documentId: 'document-1', sequence: 1, settled: Promise.resolve(null) })),
-  amendFrozen: vi.fn(),
-  recapture: vi.fn(),
+  submitIntent: vi.fn(() => ({ taskId: 'task-1', settled: Promise.resolve({ status: 'applied', receipt: { status: 'applied' } }) })),
+  dynamicFallbackState: vi.fn(() => []),
+  retryDynamicFallback: vi.fn(async () => ({ status: 'applied', receipt: { status: 'applied' } })),
+  discardDynamicFallback: vi.fn(),
 }))
 vi.mock('@/renderer/ui/flow/FlowPageRuntime', () => ({ FlowPageRuntime: (props: any) => { mocks.runtimeProps = props; return <div data-testid="runtime-mount" /> } }))
 vi.mock('@/renderer/ui/flow/FlowPageComponent', () => ({ FlowPageComponent: (props: any) => { mocks.componentProps = props; return <div data-testid="component-mount" /> } }))
 vi.mock('@/renderer/ui/CanvasPlainTextEditor', () => ({ CanvasPlainTextEditor: (props: any) => <button data-testid="commit-text" onClick={() => props.onCommit('Edited')}>commit</button> }))
 vi.mock('@/renderer/composition/runtime/flowDynamicLightEditCommands', () => ({ flowComponentLightEditCommands: {
-  captureText: mocks.captureText, writeText: mocks.writeText, captureAsset: mocks.captureAsset, replaceAsset: mocks.replaceAsset,
+  captureText: mocks.captureText, captureAsset: mocks.captureAsset,
 } }))
-vi.mock('@/renderer/composition/runtime/staticFallbackRecapture', () => ({ scheduleStaticFallbackRecapture: mocks.recapture }))
-vi.mock('@/renderer/store/editorStore', () => ({ useEditorStore: { getState: () => ({
-  captureRuntimeContentTextTarget: mocks.captureRuntimeText, updateRuntimeContentTextAtTarget: mocks.updateRuntimeText,
-  captureRuntimeAssetReplacementTarget: mocks.captureRuntimeAsset, replaceRuntimeAssetAtTarget: mocks.replaceRuntimeAsset,
-  captureCourseSubmission: mocks.captureSubmission, amendFrozenCourseCommit: mocks.amendFrozen,
-}) } }))
+vi.mock('@/renderer/store/editorStore', () => ({
+  selectActiveCourseProjectDocument: () => ({ id: 'project-1', revision: 1 }),
+  useEditorStore: { getState: () => ({
+    courseAuthoringSession: { token: { generation: 1 } },
+    captureRuntimeContentTextTarget: mocks.captureRuntimeText,
+    captureRuntimeAssetReplacementTarget: mocks.captureRuntimeAsset,
+    submitDynamicFallbackIntent: mocks.submitIntent,
+    dynamicFallbackState: mocks.dynamicFallbackState,
+    retryDynamicFallback: mocks.retryDynamicFallback,
+    discardDynamicFallback: mocks.discardDynamicFallback,
+  }) },
+}))
 
 const entries: Array<{ root: Root; element: HTMLElement }> = []
 afterEach(async () => {
@@ -84,16 +88,17 @@ it('uses card-local Component geometry, clips target bounds, and commits auto te
   await act(async () => textButton.click())
   await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="commit-text"]')!.click())
   expect(mocks.captureText).toHaveBeenCalledWith('card-1', 'Before', 'p')
-  expect(mocks.writeText).toHaveBeenCalledWith(expect.anything(), 'Edited')
-  await act(async () => imageButton.click())
-  expect(mocks.replaceAsset).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ id: 'asset-1' }), expect.any(Uint8Array))
-  expect(mocks.captureSubmission).toHaveBeenCalledTimes(2)
-  expect(mocks.recapture).toHaveBeenCalledTimes(2)
-  expect(mocks.recapture).toHaveBeenLastCalledWith(expect.objectContaining({
-    handle: expect.objectContaining({ documentId: 'document-1', sequence: 1 }), itemId: 'card-1', locationId: 'location-1', amend: expect.any(Function),
+  expect(mocks.submitIntent).toHaveBeenCalledWith(expect.objectContaining({
+    kind: 'component.text', documentId: 'document-1', locationId: 'location-1', itemId: 'card-1',
+    original: 'Before', region: 'p', text: 'Edited', expectedText: 'Before',
   }))
-  // The document bridge reports success only after Main acknowledges the queued edit.
-  expect(onStatus).not.toHaveBeenCalled()
+  await act(async () => imageButton.click())
+  expect(mocks.submitIntent).toHaveBeenCalledTimes(2)
+  expect(mocks.submitIntent).toHaveBeenLastCalledWith(expect.objectContaining({
+    kind: 'component.asset', documentId: 'document-1', locationId: 'location-1', itemId: 'card-1',
+    assetKey: 'hero', asset: expect.objectContaining({ id: 'asset-1' }), bytes: expect.any(Uint8Array),
+  }))
+  expect(onStatus).toHaveBeenCalledWith('修改已确认', 'success')
 })
 
 it('maps Runtime target identity to location, commits text and asset through the Store, and keeps local bounds', async () => {
@@ -108,14 +113,39 @@ it('maps Runtime target identity to location, commits text and asset through the
   await act(async () => textButton.click())
   expect(mocks.captureRuntimeText.mock.calls[0]![0]).toMatchObject({ sceneId: 'location-1', nodeId: 'runtime-1' })
   await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="commit-text"]')!.click())
-  expect(mocks.updateRuntimeText).toHaveBeenCalledWith(expect.anything(), 'Edited')
+  expect(mocks.submitIntent).toHaveBeenCalledWith(expect.objectContaining({
+    kind: 'runtime.text', documentId: 'document-1', locationId: 'location-1', itemId: 'runtime-1',
+    value: 'Edited', target: expect.objectContaining({ courseTarget: { itemId: 'runtime-1' } }),
+  }))
   await act(async () => element.querySelector<HTMLButtonElement>('[aria-label="Picture，替换图片"]')!.click())
   expect(mocks.captureRuntimeAsset.mock.calls[0]![0]).toMatchObject({ sceneId: 'location-1', nodeId: 'runtime-1' })
-  expect(mocks.replaceRuntimeAsset).toHaveBeenCalledTimes(1)
-  expect(mocks.recapture).toHaveBeenCalledTimes(2)
-  expect(mocks.recapture).toHaveBeenLastCalledWith(expect.objectContaining({
-    handle: expect.objectContaining({ documentId: 'document-1', sequence: 1 }), itemId: 'runtime-1', locationId: 'location-1', amend: expect.any(Function),
+  expect(mocks.submitIntent).toHaveBeenCalledTimes(2)
+  expect(mocks.submitIntent).toHaveBeenLastCalledWith(expect.objectContaining({
+    kind: 'runtime.asset', documentId: 'document-1', locationId: 'location-1', itemId: 'runtime-1',
+    target: expect.objectContaining({ courseTarget: { itemId: 'runtime-1' } }), asset: expect.objectContaining({ id: 'asset-1' }),
   }))
+})
+
+it('keeps a failed text draft and offers retry before reporting a confirmed edit', async () => {
+  const { root, element } = mount()
+  const onStatus = vi.fn()
+  let settle!: (result: unknown) => void
+  mocks.submitIntent.mockImplementationOnce(() => ({ taskId: 'task-failed', settled: new Promise(resolve => { settle = resolve }) }) as any)
+  await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} item={runtime} onStatus={onStatus} />))
+  const target = { targetId: 'text-1', scope: 'scene' as const, sceneId: 'surface-1', kind: 'text' as const, key: 'title',
+    label: 'Title', source: 'registered' as const, layer: 'scene' as const, bounds: { x: 10, y: 5, width: 40, height: 20 } }
+  await act(async () => mocks.runtimeProps.onTargetsChanged({ scope: 'scene', sceneId: 'surface-1', revision: 1, targets: [target] }))
+  await act(async () => element.querySelector<HTMLButtonElement>('[aria-label="Title，编辑文字"]')!.click())
+  await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="commit-text"]')!.click())
+  expect(mocks.submitIntent).toHaveBeenCalledTimes(1)
+  expect(onStatus).not.toHaveBeenCalledWith('修改已确认', 'success')
+  await act(async () => settle({ status: 'failed', taskId: 'task-failed', reason: '截图失败' }))
+  expect(element.querySelector('[data-testid="flow-dynamic-edit-recovery"]')?.textContent).toContain('截图失败')
+  expect(element.querySelector('[data-testid="commit-text"]')).not.toBeNull()
+  await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="flow-dynamic-edit-recovery"] button')!.click())
+  expect(mocks.retryDynamicFallback).toHaveBeenCalledWith('task-failed')
+  expect(element.querySelector('[data-testid="flow-dynamic-edit-recovery"]')).toBeNull()
+  expect(onStatus).toHaveBeenCalledWith('修改已确认', 'success')
 })
 
 it('rejects a late picker result after the document owner changes', async () => {
@@ -131,7 +161,7 @@ it('rejects a late picker result after the document owner changes', async () => 
   expect(onSelectImageAsset).toHaveBeenCalledTimes(1)
   await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} documentId="document-2" item={component} onSelectImageAsset={onSelectImageAsset} />))
   await act(async () => finish(await base.onSelectImageAsset()))
-  expect(mocks.replaceAsset).not.toHaveBeenCalled()
+  expect(mocks.submitIntent).not.toHaveBeenCalled()
   expect(mocks.componentProps.ownerKey).toContain('document-2')
 })
 

@@ -8,9 +8,9 @@ import type { StageRect } from '../../authoring/stageViewportTransform'
 import type { DeepReadonly } from '../../course/flowEditorView'
 import { beginRuntimeTargetEditSession, validateRuntimeTargetEditSession, type RuntimeTargetEditSession } from '../../authoring/runtimeTargetEditSession'
 import { flowComponentLightEditCommands, type FlowComponentLightEditTarget } from '../../composition/runtime/flowDynamicLightEditCommands'
-import { scheduleStaticFallbackRecapture } from '../../composition/runtime/staticFallbackRecapture'
+import type { DynamicFallbackIntent } from '../../composition/runtime/precommitDynamicFallback'
 import type { CourseRuntimeContentTextTarget } from '../../runtime/runtimeContentTextAuthoringCommands'
-import { useEditorStore } from '../../store/editorStore'
+import { selectActiveCourseProjectDocument, useEditorStore } from '../../store/editorStore'
 import { CanvasPlainTextEditor } from '../CanvasPlainTextEditor'
 import { FlowDynamicAuthoringOverlay } from './FlowDynamicAuthoringOverlay'
 import { FlowPageComponent } from './FlowPageComponent'
@@ -69,23 +69,67 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
   snapshotRef.current = shown
   const [active, setActive] = useState<LocalTextEdit | null>(null)
   const [busy, setBusy] = useState<{ owner: string; targetId: string } | null>(null)
+  const [failedTask, setFailedTask] = useState<{ owner: string; taskId: string; status: string; reason: string } | null>(null)
   const request = useRef(0)
   const selecting = useRef(false)
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; request.current++ } }, [])
-  useEffect(() => { selecting.current = false; request.current++; setBusy(null) }, [owner])
+  useEffect(() => {
+    selecting.current = false; request.current++; setBusy(null)
+    const failed = useEditorStore.getState().dynamicFallbackState(documentId).find(task =>
+      task.itemId === item.layerItemId && ['failed', 'conflict', 'blocked', 'unknown'].includes(task.status))
+    setFailedTask(failed ? { owner, taskId: failed.taskId, status: failed.status, reason: failed.reason ?? '修改尚未确认' } : null)
+  }, [owner, documentId, item.layerItemId])
   const runtimeTargets = shown.runtime
   const componentTextTargets = shown.componentText
   const componentImageTargets = shown.componentImage
   const liveActive = active?.owner === owner ? active : null
   const liveBusy = busy?.owner === owner ? busy.targetId : null
   const report = (message: string, kind: 'success' | 'error' = 'error') => onStatus?.(message, kind)
-  const scheduleFallback = () => {
-    const state = useEditorStore.getState()
-    const handle = state.captureCourseSubmission()
-    if (!handle || handle.documentId !== documentId) return report('静态后备图未能关联本次修改，请撤销后重试')
-    scheduleStaticFallbackRecapture({ handle, itemId: item.layerItemId, locationId,
-      amend: (commit, command) => useEditorStore.getState().amendFrozenCourseCommit(commit, command) })
+  const commonIntent = { documentId, projectId, locationId, itemId: item.layerItemId }
+  const submitFallback = async (intent: DynamicFallbackIntent): Promise<boolean> => {
+    try {
+      const handle = useEditorStore.getState().submitDynamicFallbackIntent(intent)
+      if (!handle) { report('当前文档已切换，修改未写入'); return false }
+      const result = await handle.settled
+      if (result.status === 'applied' || result.status === 'unchanged') {
+        if (mounted.current && ownerRef.current === owner) {
+          setFailedTask(null)
+          report(result.status === 'unchanged' ? '内容没有变化' : '修改已确认', 'success')
+        }
+        return true
+      }
+      if (mounted.current && ownerRef.current === owner) {
+        setFailedTask({ owner, taskId: result.taskId, status: result.status, reason: result.reason })
+        report(`${result.reason} 修改未确认，草稿已保留`)
+      }
+      return false
+    } catch (error) {
+      if (mounted.current && ownerRef.current === owner) report(error instanceof Error ? error.message : '修改未确认，草稿已保留')
+      return false
+    }
+  }
+  const retryFailed = async (): Promise<void> => {
+    if (!failedTask || failedTask.owner !== owner) return
+    setBusy({ owner, targetId: 'fallback-retry' })
+    try {
+      const result = await useEditorStore.getState().retryDynamicFallback(failedTask.taskId)
+      if (!mounted.current || ownerRef.current !== owner) return
+      if (result.status === 'applied' || result.status === 'unchanged') {
+        setFailedTask(null); setActive(null); report('修改已确认', 'success')
+      } else {
+        setFailedTask({ owner, taskId: result.taskId, status: result.status, reason: result.reason })
+        report(result.reason)
+      }
+    } catch (error) { report(error instanceof Error ? error.message : '重试失败，草稿仍保留') }
+    finally { if (mounted.current && ownerRef.current === owner) setBusy(null) }
+  }
+  const discardFailed = (): void => {
+    if (!failedTask || failedTask.owner !== owner || failedTask.status === 'unknown') return
+    try {
+      useEditorStore.getState().discardDynamicFallback(failedTask.taskId)
+      setFailedTask(null); setActive(null); report('未确认的修改已取消', 'success')
+    } catch (error) { report(error instanceof Error ? error.message : '未能取消修改') }
   }
   const editable = !readOnly && !item.locked
   const editableRef = useRef(editable)
@@ -135,21 +179,29 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
     if (!captured) return report('组件文字目标已失效或已锁定')
     setActive({ owner, target, value: target.lightEdit.text, component: captured })
   }
-  const commitText = (edit: LocalTextEdit, value: string) => {
-    if (!editable || ownerRef.current !== edit.owner) return report('编辑目标已切换，未写入修改')
+  const commitText = async (edit: LocalTextEdit, value: string): Promise<void> => {
+    if (!editable || ownerRef.current !== edit.owner || liveBusy) return report('编辑目标已切换或仍在确认，未写入修改')
+    let intent: DynamicFallbackIntent
     if (edit.runtime) {
       if (!validateRuntimeTargetEditSession(edit.runtime.session, runtimeContext()).ok) return report('运行时文字目标已失效，未写入修改')
-      const result = useEditorStore.getState().updateRuntimeContentTextAtTarget(edit.runtime.course, value)
-      if (!result.ok) report(`${result.reason} 未写入修改`)
-      else if (result.status === 'unchanged') report('运行时文字没有变化', 'success')
-      else scheduleFallback()
+      intent = { ...commonIntent, kind: 'runtime.text', target: edit.runtime.course, value }
     } else if (edit.component && sameTarget(edit.target as ComponentAuthoringTextTarget)) {
-      const result = flowComponentLightEditCommands.writeText(edit.component, value)
-      if (!result.ok) report(`${result.reason} 未写入修改`)
-      else if (result.status === 'unchanged') report('组件文字没有变化', 'success')
-      else scheduleFallback()
-    } else report('组件文字目标已失效，未写入修改')
-    setActive(null)
+      const current = useEditorStore.getState()
+      const project = selectActiveCourseProjectDocument(current)
+      if (project?.id !== edit.component.projectId || project.revision !== edit.component.revision
+        || current.courseAuthoringSession?.token.generation !== edit.component.generation) return report('组件文字目标已失效，未写入修改')
+      const target = edit.target as ComponentAuthoringTextTarget
+      if (!target.lightEdit || edit.component.original === undefined) return report('组件文字目标已失效，未写入修改')
+      intent = { ...commonIntent, kind: 'component.text', original: edit.component.original,
+        ...(edit.component.region ? { region: edit.component.region } : {}), text: value, expectedText: target.lightEdit.text }
+    } else return report('组件文字目标已失效，未写入修改')
+    setActive({ ...edit, value })
+    setBusy({ owner, targetId: edit.target.targetId })
+    try {
+      if (await submitFallback(intent) && mounted.current && ownerRef.current === owner) setActive(null)
+    } finally {
+      if (mounted.current && ownerRef.current === owner) setBusy(null)
+    }
   }
   const replaceRuntime = async (target: Readonly<RuntimeAuthoringTarget>) => {
     const begun = beginRuntimeTargetEditSession(target, runtimeContext())
@@ -158,25 +210,25 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
     if (!course) return report('运行时图片目标已失效或已锁定')
     await selectAndReplace(target.targetId, async asset => {
       if (!validateRuntimeTargetEditSession(begun.session, runtimeContext()).ok) return report('运行时图片目标已失效，未写入修改')
-      const result = useEditorStore.getState().replaceRuntimeAssetAtTarget(course, asset.meta, asset.bytes)
-      if (!result.ok) report(`${result.reason} 未写入修改`)
-      else if (result.status === 'unchanged') report('运行时图片没有变化', 'success')
-      else scheduleFallback()
+      await submitFallback({ ...commonIntent, kind: 'runtime.asset', target: course, asset: asset.meta, bytes: asset.bytes })
     })
   }
   const replaceComponent = async (target: Readonly<ComponentAuthoringImageTarget>) => {
     if (!sameTarget(target)) return report('组件图片目标已失效，请重新选择')
     const captured = flowComponentLightEditCommands.captureAsset(item.layerItemId, target.assetKey)
     if (!captured) return report('组件图片目标已失效或已锁定')
-    await selectAndReplace(target.targetId, asset => {
+    await selectAndReplace(target.targetId, async asset => {
       if (!sameTarget(target)) return report('组件图片目标已失效，未写入修改')
-      const result = flowComponentLightEditCommands.replaceAsset(captured, asset.meta, asset.bytes)
-      if (!result.ok) report(`${result.reason} 未写入修改`)
-      else if (result.status === 'unchanged') report('组件图片没有变化', 'success')
-      else scheduleFallback()
+      const current = useEditorStore.getState()
+      const project = selectActiveCourseProjectDocument(current)
+      if (project?.id !== captured.projectId || project.revision !== captured.revision
+        || current.courseAuthoringSession?.token.generation !== captured.generation) return report('组件图片目标已失效，未写入修改')
+      await submitFallback({ ...commonIntent, kind: 'component.asset', assetKey: captured.key,
+        asset: asset.meta, bytes: asset.bytes,
+        ...(item.kind === 'component' ? { expectedAssetId: item.assetOverrides?.[captured.key]?.assetId } : {}) })
     })
   }
-  const selectAndReplace = async (targetId: string, commit: (asset: { meta: AssetMeta; bytes: Uint8Array }) => void) => {
+  const selectAndReplace = async (targetId: string, commit: (asset: { meta: AssetMeta; bytes: Uint8Array }) => Promise<void>) => {
     if (!editable || selecting.current) return
     selecting.current = true
     const serial = ++request.current
@@ -184,7 +236,7 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
     try {
       const asset = await onSelectImageAsset()
       if (!asset || !mounted.current || request.current !== serial || ownerRef.current !== owner || !editableRef.current) return
-      commit(asset)
+      await commit(asset)
     } catch (error) { report(error instanceof Error ? error.message : '图片选择失败') }
     finally { if (request.current === serial) { selecting.current = false; if (mounted.current) setBusy(null) } }
   }
@@ -200,6 +252,12 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
   const overlayStyle: CSSProperties = { position: 'absolute', inset: 0, pointerEvents: 'none' }
   return <div data-testid="flow-paper-dynamic-light-edit" style={{ position: 'relative', width: '100%', height: '100%' }}>
     {content}
+    {failedTask?.owner === owner && <div data-testid="flow-dynamic-edit-recovery" role="alert"
+      style={{ position: 'absolute', zIndex: 8, left: 8, right: 8, bottom: 8, padding: 8, background: '#fff', color: '#7a2434', pointerEvents: 'auto' }}>
+      <span>{failedTask.reason}</span>
+      <button type="button" disabled={Boolean(liveBusy)} onClick={() => { void retryFailed() }}>重试</button>
+      {failedTask.status !== 'unknown' && <button type="button" disabled={Boolean(liveBusy)} onClick={discardFailed}>取消修改</button>}
+    </div>}
     {editable && item.kind === 'runtime' && (runtimeTargets.length > 0 || activeRuntime) && <div className="canvas-authoring-targets" data-testid="flow-runtime-light-edit-targets"
       style={overlayStyle} onPointerDown={event => event.stopPropagation()}>
       {runtimeTargets.map(target => <button key={target.targetId} type="button"
