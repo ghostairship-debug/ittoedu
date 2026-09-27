@@ -16,7 +16,7 @@ async function fixture(admissionStatus: 'ready' | 'rejected' = 'ready') {
   const source = path.join(root, 'lesson.html')
   await fs.writeFile(source, '<!doctype html><html><body>Lesson</body></html>')
   const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
-  const snapshot = { documentId: 'doc', epoch: 'epoch', revision: 0,
+  let snapshot = { documentId: 'doc', epoch: 'epoch', revision: 0,
     model: { kind: 'course-v9' as const, project, resources: { assets: {}, components: {} } } }
   const session = { read: vi.fn(() => snapshot), drain: vi.fn(async () => snapshot) }
   const receipt = { status: 'applied' as const, documentId: 'doc', operationId: 'commit', beforeRevision: 0, revision: 1, persistence: 'recoverable' as const }
@@ -34,7 +34,7 @@ async function fixture(admissionStatus: 'ready' | 'rejected' = 'ready') {
   const service = new HtmlImportDesktopService({ documents, chooseSource: async () => source })
   const input = { documentId: 'doc', epoch: 'epoch', revision: 0, locationId: project.locations[0]!.id,
     source: { kind: 'file' as const, path: source } }
-  return { service, input, session, gateway, receipt, source }
+  return { service, input, session, gateway, receipt, source, advanceRevision: () => { snapshot = { ...snapshot, revision: 1 } } }
 }
 
 describe('M17 human HTML desktop import', () => {
@@ -55,6 +55,14 @@ describe('M17 human HTML desktop import', () => {
     await expect(f.service.import({ ...f.input, revision: 1 })).rejects.toThrow('目标已改变')
     await expect(f.service.import({ ...f.input, runId: 'renderer-run' })).rejects.toThrow()
     expect(f.gateway.beginRun).not.toHaveBeenCalled()
+  })
+
+  it('rejects a revision change while issuing the frozen handle before creating scratch', async () => {
+    const f = await fixture()
+    f.gateway.issueTarget.mockImplementation(async () => { f.advanceRevision(); return 'new-revision-handle' })
+    await expect(f.service.import(f.input)).rejects.toThrow('签发句柄期间已改变')
+    expect(f.gateway.execute).not.toHaveBeenCalled()
+    expect(f.gateway.stop).toHaveBeenCalledOnce()
   })
 
   it('returns null when the picker is cancelled without opening a run', async () => {

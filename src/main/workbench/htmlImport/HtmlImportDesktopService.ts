@@ -42,6 +42,10 @@ export class HtmlImportDesktopService {
       if (current.epoch !== frozen.epoch || current.revision !== frozen.revision)
         throw new Error('HTML 导入目标已改变；未建立候选')
       const targetHandle = await gateway.issueTarget(runId, input.documentId, { kind: 'document' })
+      // Issuing a handle drains the session; that await can observe a newer revision.
+      const afterHandle = await session.drain()
+      if (afterHandle.epoch !== frozen.epoch || afterHandle.revision !== frozen.revision)
+        throw new Error('HTML 导入目标在签发句柄期间已改变；未建立候选')
       const service = new HtmlImportService({ session, gateway })
       const ticket = await service.prepare({ operationId, runId, targetHandle, sourcePath: source, locationId: input.locationId })
       await service.admit(ticket)
