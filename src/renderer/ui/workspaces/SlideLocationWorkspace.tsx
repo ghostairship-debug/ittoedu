@@ -2351,6 +2351,10 @@ export function SlideLocationWorkspace({
         )
         return
       }
+      if (!courseLocationId || !ports.runtime.scheduleStaticFallbackRecapture) {
+        ports.canvas.setStatus('当前页面无法更新静态后备图，未写入运行时图片')
+        return
+      }
       const committed = ports.runtime.replaceRuntimeAssetAtTarget(
         courseTarget,
         imported.meta,
@@ -2369,6 +2373,8 @@ export function SlideLocationWorkspace({
           ? '已替换全局运行时图片；此素材由整课共享'
           : '已替换运行时图片；此素材由当前场景的所有状态共享',
       )
+      if (!ports.runtime.scheduleStaticFallbackRecapture(courseTarget.courseTarget.itemId, courseLocationId))
+        ports.canvas.setStatus('运行时图片已替换，但静态后备图缺少确认版本或页面；请撤销本次修改后重试')
     } finally {
       setReplacingRuntimeAssetTargetId(null)
     }
@@ -2392,8 +2398,14 @@ export function SlideLocationWorkspace({
         ports.canvas.setStatus('组件图片目标已失效，未写入修改')
         return
       }
+      if (!courseLocationId || !ports.runtime.scheduleStaticFallbackRecapture) {
+        ports.canvas.setStatus('当前页面无法更新静态后备图，未写入组件图片')
+        return
+      }
       const committed = replace(target.nodeId, target.assetKey, imported.meta, imported.bytes)
       ports.canvas.setStatus(!committed.ok ? `${committed.reason} 未写入修改` : committed.status === 'unchanged' ? '组件图片未改变' : '已替换组件图片；组件源码没有改动')
+      if (committed.ok && committed.status === 'updated' && !ports.runtime.scheduleStaticFallbackRecapture(target.nodeId, courseLocationId))
+        ports.canvas.setStatus('组件图片已替换，但静态后备图缺少确认版本或页面；请撤销本次修改后重试')
     } finally {
       setReplacingComponentImageTargetId(null)
     }

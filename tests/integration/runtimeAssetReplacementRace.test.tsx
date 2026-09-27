@@ -30,6 +30,15 @@ const publishedAuthoringHarness = vi.hoisted(() => ({
   latestRevision: -1,
   onMessage: null as ((message: PlayerAuthoringHostMessage) => void) | null,
 }))
+const fallbackRequests = vi.hoisted(() => [] as Array<{ handle: { documentId: string; sequence: number }; itemId: string; locationId: string; amend: unknown }>)
+
+vi.mock('../../src/renderer/composition/runtime/staticFallbackRecapture', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/renderer/composition/runtime/staticFallbackRecapture')>()
+  return { ...actual, scheduleStaticFallbackRecapture: (input: Parameters<typeof actual.scheduleStaticFallbackRecapture>[0]) => {
+    if (typeof input === 'string') throw new Error('legacy fallback request')
+    fallbackRequests.push(input)
+  } }
+})
 
 vi.mock('../../src/renderer/ui/coursePlayerTryRun', async (importOriginal) => {
   const actual = await importOriginal<
@@ -238,20 +247,24 @@ function persistentSnapshot(): PersistentSnapshot {
 const originalCapture =
   useEditorStore.getState().captureRuntimeAssetReplacementTarget
 const originalReplace = useEditorStore.getState().replaceRuntimeAssetAtTarget
+const originalCaptureSubmission = useEditorStore.getState().captureCourseSubmission
 const originalImportAsset = useEditorStore.getState().importAsset
 
 function installWriteSpies() {
   const capture = vi.fn(originalCapture)
   const replace = vi.fn(originalReplace)
+  const captureSubmission = vi.fn(originalCaptureSubmission)
   const importAsset = vi.fn(originalImportAsset)
   useEditorStore.setState({
     captureRuntimeAssetReplacementTarget: capture,
     replaceRuntimeAssetAtTarget: replace,
+    captureCourseSubmission: captureSubmission,
     importAsset,
   })
   return {
     capture,
     replace,
+    captureSubmission,
     importAsset,
   }
 }
@@ -335,6 +348,7 @@ function expectBypassImportUnused(spies: ReturnType<typeof installWriteSpies>) {
 }
 
 beforeEach(async () => {
+  fallbackRequests.length = 0
   targetMessageRevision = 0
   publishedAuthoringHarness.latestRevision = -1
   publishedAuthoringHarness.onMessage = null
@@ -358,6 +372,7 @@ afterEach(() => {
   useEditorStore.setState({
     captureRuntimeAssetReplacementTarget: originalCapture,
     replaceRuntimeAssetAtTarget: originalReplace,
+    captureCourseSubmission: originalCaptureSubmission,
     importAsset: originalImportAsset,
   })
   useEditorStore.getState().clearV9SlideCandidateBackend()
@@ -434,6 +449,19 @@ describe('ARCH-2 Workspace Runtime asset replacement race', () => {
     expect(selectMediaAssetFiles(useEditorStore.getState()))
       .not.toHaveProperty(REPLACEMENT_ASSET_ID)
     expectBypassImportUnused(spies)
+  })
+
+  it('binds a successful Slide image replacement to its exact frozen submission and location', async () => {
+    const { selection, spies } = await renderPendingReplacement()
+    await resolveSelection(selection, REPLACEMENT)
+    expect(spies.replace).toHaveBeenCalledOnce()
+    expect(spies.captureSubmission).toHaveBeenCalledOnce()
+    expect(spies.replace.mock.invocationCallOrder[0]).toBeLessThan(spies.captureSubmission.mock.invocationCallOrder[0]!)
+    const handle = spies.captureSubmission.mock.results[0]?.value
+    expect(handle).not.toBeNull()
+    expect(fallbackRequests).toHaveLength(1)
+    expect(fallbackRequests[0]).toMatchObject({ handle, itemId: RUNTIME_ITEM_ID, locationId: FIRST_LOCATION_ID })
+    expect(typeof fallbackRequests[0]?.amend).toBe('function')
   })
 
   it('uses only replaceRuntimeAssetAtTarget once for a normal replacement, creates one history frame, and clears target busy state', async () => {
