@@ -1,14 +1,12 @@
-import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test'
+import { _electron as electron, expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
-import { flowCourse, openInWorkbench, root as repoRoot, solidPng, type Rect } from './helpers/g20M19Harness'
+import { flowCourse, openInWorkbench, root, solidPng, type Rect } from './helpers/g20M19Harness'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 
-const root = resolve(__dirname, '../..')
 const filename = 'm16-paper-anchor.h5lesson'
 const png = solidPng(96, 64, [27, 125, 110])
-
 type Anchor = { blockId: string; offsetY: number; xRatio: number }
 type Snapshot = { id: string; anchor: Anchor | null; frame: Rect; kind: string; label: string }
 
@@ -24,8 +22,7 @@ function fixture(directory: string) {
     { id: 'm16-anchor-target', type: 'paragraph', content: { inlines: [{ type: 'text', text: '锚点目标段落：对象应随此段落一起移动。' }] } },
     { id: 'm16-anchor-after', type: 'paragraph', content: { inlines: [{ type: 'text', text: '挂靠后段：保留顺序和独立正文语义。' }] } },
   )
-  const bytes = createCourseProjectArchive({ project, assetFiles: opened.assetFiles, componentFiles: opened.componentFiles })
-  writeFileSync(join(workspace, filename), bytes)
+  writeFileSync(join(workspace, filename), createCourseProjectArchive({ project, assetFiles: opened.assetFiles, componentFiles: opened.componentFiles }))
   writeFileSync(join(directory, 'anchor.png'), png)
   return { workspace, imagePath: join(directory, 'anchor.png') }
 }
@@ -70,44 +67,78 @@ async function launch(directory: string, workspace: string): Promise<ElectronApp
   return app
 }
 
-test('M16-T02 Flow paper text and image layers follow their paragraph through edit, save, reopen and Player preview', async () => {
+async function expectPaperMenu(menu: Locator) {
+  await expect(menu).toBeVisible()
+  const documentItems = menu.locator('[data-flow-insert-destination="document"]')
+  const paperItems = menu.locator('[data-flow-insert-destination="paper"]')
+  await expect(documentItems).toHaveCount(11)
+  await expect(paperItems).toHaveCount(4)
+  await expect(menu.locator('section[aria-label="放到纸面上"]').getByRole('menuitem', { name: '文本框', exact: true })).toBeVisible()
+  await expect(menu.locator('section[aria-label="放到纸面上"]').getByRole('menuitem', { name: '图片', exact: true })).toBeVisible()
+  return { documentItems: 11, paperItems: 4, paperLabels: await menu.locator('section[aria-label="放到纸面上"] [role="menuitem"]').allTextContents() }
+}
+
+async function clickParagraphStart(page: Page, paragraph: Locator) {
+  const box = await paragraph.boundingBox()
+  if (!box) throw new Error('Preceding paragraph is not laid out')
+  await paragraph.click({ position: { x: 2, y: Math.min(8, box.height / 2) } })
+  await page.keyboard.press('Home')
+}
+
+test('M16-T02 Flow paper text and image layers follow paragraphs through edit, save, reopen and Player preview', async () => {
   test.skip(process.platform !== 'win32', 'Windows Electron acceptance path.')
   test.setTimeout(300_000)
-  const output = join(repoRoot, 'output/g20/m16/paper-anchor')
+  const output = join(root, 'output/g20/m16/paper-anchor')
   mkdirSync(output, { recursive: true })
   const directory = mkdtempSync(join(output, 'run-'))
+  const shots = join(directory, 'shots')
+  mkdirSync(shots)
   const { workspace, imagePath } = fixture(directory)
-  let app = await launch(directory, workspace)
+  const evidence: Record<string, unknown> = { run: directory, shots, modelCalls: 0, status: 'running', entryPoints: {}, screenshots: [], screenshotsRequireManualReview: true }
   const errors: string[] = []
-  let page = await app.firstWindow()
+  let app: ElectronApplication | undefined = await launch(directory, workspace)
+  let page: Page = await app.firstWindow()
   page.on('pageerror', error => errors.push(error.message))
   try {
     await openInWorkbench(page, filename)
     const flow = page.locator('.flow-workspace').filter({ visible: true }).first()
     const body = flow.getByRole('textbox', { name: '正文编辑', exact: true }).filter({ visible: true }).first()
     await expect(body.locator('[data-flow-block-id="m16-anchor-target"]')).toBeVisible()
-    const existingLayers = await layerSnapshot(page)
-    const existingIds = new Set(existingLayers.map(layer => layer.id))
+    const existingIds = new Set((await layerSnapshot(page)).map(layer => layer.id))
 
-    const insert = page.getByRole('button', { name: '插入', exact: true })
-    await insert.click()
-    const menu = page.getByLabel('插入内容')
-    await menu.getByRole('button', { name: '添加文字', exact: true }).click()
+    // Lightweight editor insertion menu: use the 11+4 Flow contract, not legacy 添加文字/添加图片 actions.
+    await page.getByRole('button', { name: '插入', exact: true }).click()
+    const lightMenu = page.getByRole('menu', { name: 'Flow 插入菜单' })
+    evidence.entryPoints = { light: await expectPaperMenu(lightMenu) }
+    const paper = lightMenu.locator('section[aria-label="放到纸面上"]')
+    await paper.getByRole('menuitem', { name: '文本框', exact: true }).click()
     await expect.poll(async () => (await layerSnapshot(page)).filter(layer => layer.kind === 'text' && !existingIds.has(layer.id)).length).toBe(1)
     const textLayer = (await layerSnapshot(page)).find(layer => layer.kind === 'text' && !existingIds.has(layer.id))!
     expect(textLayer.anchor).toBeTruthy()
-    expect(textLayer.anchor!.blockId).toBeTruthy()
     await expect(flow.locator(`[data-testid="flow-layer-card-${textLayer.id}"]`)).toBeVisible()
+    await flow.locator(`[data-testid="flow-layer-card-${textLayer.id}"]`).click()
+    await expect(flow.locator(`[data-flow-anchor-block-id="${textLayer.anchor!.blockId}"]`)).toBeVisible()
+    await page.screenshot({ path: join(shots, 'authored-anchor-visible.png') })
+    ;(evidence.screenshots as string[]).push('shots/authored-anchor-visible.png')
 
-    await insert.click()
     await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, imagePath)
-    await page.getByLabel('插入内容').getByRole('button', { name: '添加图片', exact: true }).click()
+    await page.getByRole('button', { name: '插入', exact: true }).click()
+    const imageMenu = page.getByRole('menu', { name: 'Flow 插入菜单' }).locator('section[aria-label="放到纸面上"]')
+    await imageMenu.getByRole('menuitem', { name: '图片', exact: true }).click()
     await expect.poll(async () => (await layerSnapshot(page)).filter(layer => layer.kind === 'image' && !existingIds.has(layer.id)).length).toBe(1)
     const imageLayer = (await layerSnapshot(page)).find(layer => layer.kind === 'image' && !existingIds.has(layer.id))!
     expect(imageLayer.anchor).toBeTruthy()
     await expect(flow.locator(`[data-testid="flow-layer-card-${imageLayer.id}"] img`)).toBeVisible()
 
-    // A real paragraph edit above the anchored block must move the projected layer with it.
+    // Also prove that the same 11+4 paper insertion menu is reachable from the full editor's Elements rail.
+    await page.getByRole('button', { name: '在编辑器中打开', exact: true }).click()
+    await page.getByRole('tab', { name: '元素', exact: true }).click()
+    const fullMenu = page.getByTestId('elements-tab').getByRole('menu', { name: 'Flow 插入菜单' })
+    evidence.entryPoints = { ...(evidence.entryPoints as object), full: await expectPaperMenu(fullMenu) }
+    await page.screenshot({ path: join(shots, 'full-editor-paper-menu.png') })
+    ;(evidence.screenshots as string[]).push('shots/full-editor-paper-menu.png')
+    await openInWorkbench(page, filename)
+
     const anchoredId = textLayer.anchor!.blockId
     const beforeTop = await paragraphTop(page, anchoredId)
     const layer = flow.locator(`[data-testid="flow-layer-card-${textLayer.id}"]`)
@@ -115,14 +146,8 @@ test('M16-T02 Flow paper text and image layers follow their paragraph through ed
     const ids = await paragraphIds(page)
     const anchorIndex = ids.indexOf(anchoredId)
     expect(anchorIndex).toBeGreaterThan(0)
-    const precedingId = ids[anchorIndex - 1]!
-    const preceding = body.locator(`[data-flow-block-id="${precedingId}"]`)
-    await preceding.click()
-    await preceding.evaluate(element => {
-      const range = document.createRange(), selection = element.ownerDocument.getSelection()
-      range.selectNodeContents(element); range.collapse(true)
-      selection?.removeAllRanges(); selection?.addRange(range)
-    })
+    const preceding = body.locator(`[data-flow-block-id="${ids[anchorIndex - 1]}"]`)
+    await clickParagraphStart(page, preceding)
     await page.keyboard.insertText('新增导语使锚点段落下移。'.repeat(18))
     await expect.poll(() => paragraphTop(page, anchoredId)).toBeGreaterThan(beforeTop + 20)
     const afterTextParagraphTop = await paragraphTop(page, anchoredId)
@@ -141,8 +166,7 @@ test('M16-T02 Flow paper text and image layers follow their paragraph through ed
     const afterDeleteLayerTop = (await layer.boundingBox())!.y
     expect(afterDeleteParagraphTop).toBeLessThan(afterInsertParagraphTop)
     expect(Math.abs((afterDeleteLayerTop - afterInsertLayerTop) - (afterDeleteParagraphTop - afterInsertParagraphTop))).toBeLessThan(4)
-    const afterEdit = await layerSnapshot(page)
-    expect(afterEdit.find(item => item.id === textLayer.id)?.anchor?.blockId).toBe(anchoredId)
+    expect((await layerSnapshot(page)).find(item => item.id === textLayer.id)?.anchor?.blockId).toBe(anchoredId)
 
     await page.getByRole('button', { name: '保存', exact: true }).first().click()
     await expect.poll(() => {
@@ -154,7 +178,7 @@ test('M16-T02 Flow paper text and image layers follow their paragraph through ed
           && flow.surfaceLayerItems.some(entry => entry.item.layerItemId === imageLayer.id && entry.paragraphAnchor?.blockId === imageLayer.anchor!.blockId)
       } catch { return false }
     }).toBe(true)
-    await app.close()
+    await app.close(); app = undefined
     const saved = openCourseProjectArchive(new Uint8Array(readFileSync(join(workspace, filename))))
     const savedFlow = saved.project.surfaces.find(surface => surface.type === 'flow')
     expect(savedFlow?.type).toBe('flow')
@@ -175,13 +199,24 @@ test('M16-T02 Flow paper text and image layers follow their paragraph through ed
 
     await page.getByRole('button', { name: '整课预览', exact: true }).click()
     await expect(page.locator('.course-preview-host [data-playback-view]')).toBeVisible()
-    const player = page
-    await expect(player.getByText('新增导语使锚点段落下移。', { exact: false })).toBeVisible()
-    await expect(player.locator(`[data-flow-overlay-item="${imageLayer.id}"] img`)).toBeVisible()
+    await expect(page.getByText('新增导语使锚点段落下移。', { exact: false })).toBeVisible()
+    await expect(page.locator(`[data-flow-overlay-item="${imageLayer.id}"] img`)).toBeVisible()
+    await page.screenshot({ path: join(shots, 'player-paper-anchor-visible.png') })
+    ;(evidence.screenshots as string[]).push('shots/player-paper-anchor-visible.png')
     expect(errors).toEqual([])
     await page.getByRole('button', { name: '关闭预览', exact: true }).click()
-    await app.close()
+    evidence.status = 'e2e-assertions-completed-screenshot-review-pending'
+  } catch (error) {
+    evidence.status = 'failed'
+    evidence.failure = error instanceof Error ? error.message : String(error)
+    throw error
   } finally {
-    if (app.process().exitCode === null) await app.close().catch(() => undefined)
+    if (page && !page.isClosed()) {
+      await page.screenshot({ path: join(shots, 'final-state.png') }).catch(() => undefined)
+      ;(evidence.screenshots as string[]).push('shots/final-state.png')
+    }
+    evidence.pageErrors = errors
+    writeFileSync(join(directory, 'evidence.json'), JSON.stringify(evidence, null, 2) + '\n', 'utf8')
+    if (app && app.process().exitCode === null) await app.close().catch(() => undefined)
   }
 })
