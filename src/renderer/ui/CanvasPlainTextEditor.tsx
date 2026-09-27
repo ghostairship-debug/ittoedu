@@ -14,6 +14,7 @@ interface CanvasPlainTextEditorProps {
   value: string
   multiline?: boolean
   maxLength?: number
+  readOnly?: boolean
   rotation?: number
   onDraftChange?(value: string, composing: boolean): void
   onCommit(value: string): void
@@ -32,6 +33,7 @@ export function CanvasPlainTextEditor({
   value,
   multiline = false,
   maxLength,
+  readOnly = false,
   rotation = 0,
   onCommit,
   onAdvance,
@@ -82,6 +84,7 @@ export function CanvasPlainTextEditor({
     'aria-label': label,
     value: draft,
     maxLength,
+    readOnly,
     onChange: (
       event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
     ) => {
