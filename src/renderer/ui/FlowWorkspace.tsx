@@ -11,6 +11,8 @@ import { documentResourceReferences } from '../../shared/document/resources'
 import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, FLOW_COMPONENT_BLOCK_HEIGHT, flowPaperMaxWidth, resolveFlowBodyWidth } from '../../shared/flowBodyPresentation'
 import { measureFlowPaperOrigin } from '../../shared/flowViewportGeometry'
 import type { FlowParagraphBlockRect } from '../../shared/flowParagraphAnchors'
+import { resolveFlowRuntimePaperSlots } from '../../shared/flowRuntimePaperLayout'
+import type { StageRect } from '../authoring/stageViewportTransform'
 import { MIN_NODE_SIZE } from '../../shared/constants'
 import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../document'
 import { createFlowDocumentResourcePort } from '../document/flowDocumentResources'
@@ -207,6 +209,40 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
   const [paperLayout, setPaperLayout] = useState<{ key: string; width: number; rects: readonly FlowParagraphBlockRect[] }>({ key: paperLayoutKey, width: 0, rects: [] })
   const viewKey = `${view.projectId}/${view.surfaceId}`
   const currentPaperLayout = paperLayout.key === paperLayoutKey ? paperLayout : { key: paperLayoutKey, width: 0, rects: [] }
+  const runtimeOwnerKey = `${documentId ?? ''}/${view.projectId}/${view.surfaceId}/${sessionToken.generation}`
+  const [runtimeHeights, setRuntimeHeights] = useState<{ key: string; values: Readonly<Record<string, number>> }>({ key: runtimeOwnerKey, values: {} })
+  const observedRuntimeHeights = runtimeHeights.key === runtimeOwnerKey ? runtimeHeights.values : {}
+  const runtimeLayout = useMemo(() => {
+    const blocks = currentPaperLayout.rects.map(rect => ({ blockId: rect.blockId, top: rect.y, bottom: rect.y + rect.height }))
+    const visible = new Set(blocks.map(block => block.blockId))
+    const entries = view.overlayLayers.flatMap(layer => {
+      if (layer.owner !== 'surface' || layer.item.paperSpace !== 'paper' || !layer.paragraphAnchor || !layer.effectiveVisible
+        || layer.item.kind !== 'runtime' || !layer.item.runtime.enabled || layer.item.runtime.protocol !== 'surface-runtime'
+        || layer.item.runtime.runtimeApiVersion !== 3 || layer.item.runtime.renderMode !== 'dom') return []
+      let block = view.blocks.find(entry => entry.blockId === layer.paragraphAnchor?.blockId)
+      while (block && !visible.has(block.blockId)) block = view.blocks.find(entry => entry.blockId === block?.parentId)
+      if (!block) return []
+      return [{ id: layer.selectionId, blockId: block.blockId, order: layer.stackOrder,
+        observedHeight: observedRuntimeHeights[layer.selectionId] ?? layer.item.frame.height,
+        offsetY: layer.paragraphAnchor.offsetY }]
+    })
+    const slots = resolveFlowRuntimePaperSlots(blocks, entries)
+    const runtimeFrames: Record<string, StageRect> = {}
+    for (const slot of slots.slots) {
+      const layer = view.overlayLayers.find(layer => layer.selectionId === slot.id)
+      if (!layer?.paragraphAnchor) continue
+      runtimeFrames[slot.id] = { ...layer.item.frame, x: layer.paragraphAnchor.xRatio * currentPaperLayout.width,
+        y: slot.top, height: slot.height }
+    }
+    return { runtimeFrames, runtimeSpacers: Object.entries(slots.addedAfterBlock).map(([blockId, height]) => ({ blockId, height })) }
+  }, [currentPaperLayout, view.overlayLayers, view.blocks, observedRuntimeHeights])
+  const onRuntimeHeightChange = (layerItemId: string, height: number) => {
+    if (!Number.isFinite(height) || height < 0) return
+    setRuntimeHeights(previous => {
+      const values = previous.key === runtimeOwnerKey ? previous.values : {}
+      return values[layerItemId] === height ? previous : { key: runtimeOwnerKey, values: { ...values, [layerItemId]: height } }
+    })
+  }
   const [panState, setPanState] = useState({ key: viewKey, x: 0, y: 0 })
   const viewPan = panState.key === viewKey ? panState : { x: 0, y: 0 }
   const setViewPan = (pan: { x: number; y: number }) => setPanState(current => current.key === viewKey && current.x === pan.x && current.y === pan.y ? current : { key: viewKey, ...pan })
@@ -432,6 +468,7 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
     <FlowOverlayAuthoringLayer view={view} sessionToken={sessionToken} selection={selection} locationId={selection?.locationId ?? view.locationId}
       readOnly={readOnly} assetUrls={assetUrls} componentPackages={componentPackages} paperScrollTop={paperScroll.top} paperScrollLeft={paperScroll.left}
       paperOrigin={paperOrigin} paperWidth={currentPaperLayout.width} paragraphRects={currentPaperLayout.rects}
+      runtimeFrames={runtimeLayout.runtimeFrames} onRuntimeHeightChange={onRuntimeHeightChange}
       overlayViewportSize={viewport} viewPan={viewPan} onViewPanChange={setViewPan} onEditFormula={controller.openFormula}
       onBodyPlaneChange={(layerItemId, bodyPlane) => runOverlay(layerItemId, { kind: 'patch-overlay-body-plane', bodyPlane })}
       onBeforeGesture={() => editorRef.current?.flush().ready ?? true} commands={commands}>
@@ -456,6 +493,7 @@ export function FlowWorkspace({ documentId, view, sessionToken, assets, selectio
           <style>{FLOW_BODY_CSS}</style>
           <SharedDocumentEditor key={`${view.projectId}/${view.surfaceId}/${sessionToken.generation}`} ref={editorRef} document={document} revision={String(view.revision)} readOnly={readOnly} target="flow" toolbarHost={toolbarHost}
             editPreview={editPreview}
+            runtimeSpacers={runtimeLayout.runtimeSpacers}
             objectRevision={objectRevision}
             clipboardContext={(resources: DocumentResources) => createDocumentClipboardContext(resources, { assets, assetFiles, componentPackages })}
             clipboardResourcePort={context => {

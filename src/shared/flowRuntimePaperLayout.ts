@@ -26,6 +26,7 @@ export interface FlowRuntimePaperLayout {
   totalAddedHeight: number
 }
 
+/** Blocks are live paper rectangles, already shifted by any existing Runtime spacers. */
 export function resolveFlowRuntimePaperSlots(
   blocks: readonly FlowRuntimePaperBlock[],
   runtimes: readonly FlowRuntimePaperItem[],
@@ -44,13 +45,13 @@ export function resolveFlowRuntimePaperSlots(
     const group = byBlock.get(block.blockId)
     if (!group || !Number.isFinite(block.top) || !Number.isFinite(block.bottom)) continue
     group.sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
-    let tail = Number.NEGATIVE_INFINITY
+    let tail = block.bottom
     for (const runtime of group) {
-      const top = Math.max(block.top + totalAddedHeight + (runtime.offsetY ?? 0), tail)
+      const top = Math.max(block.bottom, block.top + (runtime.offsetY ?? 0), tail)
       slots.push({ id: runtime.id, blockId: block.blockId, top, height: runtime.observedHeight, bottom: top + runtime.observedHeight })
       tail = top + runtime.observedHeight
     }
-    const height = Math.max(0, tail - block.bottom - totalAddedHeight)
+    const height = Math.max(0, tail - block.bottom)
     addedAfterBlock[block.blockId] = height
     totalAddedHeight += height
   }

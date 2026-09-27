@@ -94,21 +94,21 @@ it('reports real Runtime content growth and shrink without remount or duplicate 
   frame.remove()
 })
 
-it('places same-anchor Runtime slots in stable order and shifts later blocks once', () => {
+it('places Runtime slots after live anchor rectangles without double-counting existing spacers', () => {
   const layout = resolveFlowRuntimePaperSlots(
-    [{ blockId: 'a', top: 0, bottom: 100 }, { blockId: 'b', top: 100, bottom: 220 }],
+    [{ blockId: 'a', top: 0, bottom: 100 }, { blockId: 'b', top: 400, bottom: 520 }],
     [{ id: 'z', blockId: 'a', order: 2, observedHeight: 160 }, { id: 'x', blockId: 'a', order: 1, observedHeight: 140 }, { id: 'b-runtime', blockId: 'b', order: 0, observedHeight: 130 }],
   )
   expect(layout.slots).toEqual([
-    { id: 'x', blockId: 'a', top: 0, height: 140, bottom: 140 },
-    { id: 'z', blockId: 'a', top: 140, height: 160, bottom: 300 },
-    { id: 'b-runtime', blockId: 'b', top: 300, height: 130, bottom: 430 },
+    { id: 'x', blockId: 'a', top: 100, height: 140, bottom: 240 },
+    { id: 'z', blockId: 'a', top: 240, height: 160, bottom: 400 },
+    { id: 'b-runtime', blockId: 'b', top: 520, height: 130, bottom: 650 },
   ])
-  expect(layout.addedAfterBlock).toMatchObject({ a: 200, b: 10 })
-  expect(layout.totalAddedHeight).toBe(210)
+  expect(layout.addedAfterBlock).toMatchObject({ a: 300, b: 130 })
+  expect(layout.totalAddedHeight).toBe(430)
   const withinBlock = resolveFlowRuntimePaperSlots([{ blockId: 'a', top: 0, bottom: 100 }], [{ id: 'short', blockId: 'a', order: 0, observedHeight: 40, offsetY: 20 }])
-  expect(withinBlock.slots[0]?.top).toBe(20)
-  expect(withinBlock.addedAfterBlock.a).toBe(0)
+  expect(withinBlock.slots[0]?.top).toBe(100)
+  expect(withinBlock.addedAfterBlock.a).toBe(40)
 })
 
 it('accepts a managed document as the content source and measures its page instead of the fixed host', async () => {

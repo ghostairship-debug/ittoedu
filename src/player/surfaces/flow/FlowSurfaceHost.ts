@@ -10,6 +10,7 @@ import { plainDocumentText, type FlowTextContent } from '../../../shared/documen
 import { buildNativeChartSvg } from '../../../shared/nativeChartSvg'
 import { createFlowViewportGeometry, flowViewportOverlayPoint, measureFlowPaperOrigin } from '../../../shared/flowViewportGeometry'
 import { flowParagraphAnchoredFrame, type FlowParagraphAnchor, type FlowParagraphBlockRect } from '../../../shared/flowParagraphAnchors'
+import { resolveFlowRuntimePaperSlots } from '../../../shared/flowRuntimePaperLayout'
 import { flowMediaCropGeometry } from '../../../shared/flowMediaCrop'
 import { courseSlideCanvas, type SlideCanvasSize } from '../../../shared/slideCanvas'
 import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, FLOW_COMPONENT_BLOCK_HEIGHT, flowPaperMaxWidth, resolveFlowParagraphPresentation } from '../../../shared/flowBodyPresentation'
@@ -212,6 +213,9 @@ export class FlowSurfaceHost {
   #interactionGeneration = 0
   #interactionNodes = new Map<string, PublishedInteractionNodeHandle>()
   #runtimeHandles: FlowRuntimeHandleRecord[] = []
+  #runtimeObservedHeights = new Map<string, number>()
+  #runtimeSpacers = new Map<string, HTMLElement>()
+  #runtimeLayoutFrame = 0
   #deferredCarrierMounts: Array<() => void> = []
   readonly #runtimeSession: PublishedSurfaceRuntimeSession
   readonly #carrierSideEffects: PublishedCarrierSideEffectGate
@@ -515,6 +519,11 @@ export class FlowSurfaceHost {
       this.#interactionPort = null
       this.#interactionNodes.clear()
       this.#destroyRuntimeHandles()
+      this.#runtimeObservedHeights.clear()
+      for (const spacer of this.#runtimeSpacers.values()) spacer.remove()
+      this.#runtimeSpacers.clear()
+      if (this.#runtimeLayoutFrame) this.#root?.ownerDocument.defaultView?.cancelAnimationFrame(this.#runtimeLayoutFrame)
+      this.#runtimeLayoutFrame = 0
       this.#destroyComponentHandles()
       this.#destroyVideoHandles()
       this.#clearOverlayRecords()
@@ -601,6 +610,7 @@ export class FlowSurfaceHost {
   #retireRuntimeHandle(record: FlowRuntimeHandleRecord): boolean {
     if (record.retired) return false
     record.retired = true
+    this.#runtimeObservedHeights.delete(record.item.layerItemId)
     const index = this.#runtimeHandles.indexOf(record)
     if (index >= 0) this.#runtimeHandles.splice(index, 1)
     try {
@@ -641,6 +651,13 @@ export class FlowSurfaceHost {
         : {}),
       fallbackText: firstVisibleRuntimeText(item.runtime.content.values)
         ?? item.runtime.protocol,
+      onContentHeightChange: height => {
+        if (record.retired || !Number.isFinite(height) || height < 0 || this.#runtimeObservedHeights.get(item.layerItemId) === height) return
+        this.#runtimeObservedHeights.set(item.layerItemId, height)
+        const surface = findPublishedFlowSurface(this.#playback, this.#surfaceId)
+        this.#syncPaperOverlayPositions(surface)
+        this.#options.playbackView?.refreshBounds()
+      },
       reportError: (phase, error) => {
         if (phase === 'lifecycle' && this.#retireRuntimeHandle(record)) {
           this.#showRuntimeFallback(record.wrap, record.item)
@@ -829,6 +846,10 @@ export class FlowSurfaceHost {
     this.#interactionNodes.clear()
     this.#clearOverlayRecords()
     this.#destroyRuntimeHandles()
+    this.#runtimeObservedHeights.clear()
+    this.#runtimeSpacers.clear()
+    if (this.#runtimeLayoutFrame) this.#root.ownerDocument.defaultView?.cancelAnimationFrame(this.#runtimeLayoutFrame)
+    this.#runtimeLayoutFrame = 0
     this.#destroyComponentHandles()
     this.#destroyVideoHandles()
     const surface = findPublishedFlowSurface(this.#playback, this.#surfaceId)
@@ -913,6 +934,61 @@ export class FlowSurfaceHost {
     const paper = article.querySelector<HTMLElement>('.flow-runtime-reading')
     const paragraphLayout = paper && entries.some(entry => entry.source === 'surface' && entry.item.paperSpace === 'paper' && entry.paragraphAnchor)
       ? measurePublishedFlowParagraphLayout(paper, this.#options.playbackView?.state.zoom ?? 1) : null
+    const runtimeSlots = new Map<string, { top: number; height: number }>()
+    if (paper && paragraphLayout) {
+      const blockRects = new Map(paragraphLayout.blocks.map(block => [block.blockId, block]))
+      const runtimeItems = entries.flatMap(entry => {
+        if (!isExecutableFlowSurfaceRuntime(entry) || entry.item.paperSpace !== 'paper' || !entry.paragraphAnchor) return []
+        const anchor = [entry.paragraphAnchor.blockId, ...visiblePublishedFlowAncestors(paper, entry.paragraphAnchor.blockId)]
+          .map(id => blockRects.get(id)).find((block): block is FlowParagraphBlockRect => Boolean(block))
+        return anchor ? [{ id: entry.item.layerItemId, blockId: anchor.blockId, order: entry.stackOrder,
+          observedHeight: this.#runtimeObservedHeights.get(entry.item.layerItemId) ?? entry.item.frame.height,
+          offsetY: entry.paragraphAnchor.offsetY }] : []
+      })
+      const layout = resolveFlowRuntimePaperSlots(
+        paragraphLayout.blocks.map(block => ({ blockId: block.blockId, top: block.y, bottom: block.y + block.height })),
+        runtimeItems,
+      )
+      for (const slot of layout.slots) runtimeSlots.set(slot.id, { top: slot.top, height: slot.height })
+      const desired = new Map(Object.entries(layout.addedAfterBlock).filter(([, height]) => height > 0))
+      let spacerChanged = false
+      for (const [blockId, spacer] of this.#runtimeSpacers) {
+        if (desired.has(blockId)) continue
+        spacer.remove()
+        this.#runtimeSpacers.delete(blockId)
+        spacerChanged = true
+      }
+      const nodes = new Map([...paper.querySelectorAll<HTMLElement>('[data-flow-block-id]')]
+        .filter(node => Boolean(node.dataset.flowBlockId)).map(node => [node.dataset.flowBlockId!, node]))
+      for (const [blockId, height] of desired) {
+        const anchor = nodes.get(blockId)
+        if (!anchor) continue
+        let spacer = this.#runtimeSpacers.get(blockId)
+        if (!spacer) {
+          spacer = paper.ownerDocument.createElement('div')
+          spacer.dataset.flowRuntimeSpacer = blockId
+          spacer.setAttribute('aria-hidden', 'true')
+          spacer.style.cssText = 'display:block;pointer-events:none;user-select:none;'
+          this.#runtimeSpacers.set(blockId, spacer)
+          spacerChanged = true
+        }
+        if (spacer.previousElementSibling !== anchor) { anchor.after(spacer); spacerChanged = true }
+        const nextHeight = `${height}px`
+        if (spacer.style.height !== nextHeight) { spacer.style.height = nextHeight; spacerChanged = true }
+      }
+      if (spacerChanged && !this.#runtimeLayoutFrame) {
+        const view = paper.ownerDocument.defaultView
+        this.#runtimeLayoutFrame = view?.requestAnimationFrame(() => {
+          this.#runtimeLayoutFrame = 0
+          if (this.#article === article) this.#syncPaperOverlayPositions(surface)
+        }) ?? 0
+        this.#options.playbackView?.refreshBounds()
+      }
+    } else if (this.#runtimeSpacers.size) {
+      for (const spacer of this.#runtimeSpacers.values()) spacer.remove()
+      this.#runtimeSpacers.clear()
+      this.#options.playbackView?.refreshBounds()
+    }
     for (const entry of entries) {
       if (isControllerItem(entry.item)) continue
       const wrap = this.#layerPlaneForEntry(entry)?.querySelector<HTMLElement>(
@@ -923,11 +999,17 @@ export class FlowSurfaceHost {
         const frame = entry.source === 'surface' && entry.item.paperSpace === 'paper' && entry.paragraphAnchor && paragraphLayout && paper
           ? flowParagraphAnchoredFrame(entry.paragraphAnchor, entry.item.frame, paragraphLayout.width, paragraphLayout.blocks, visiblePublishedFlowAncestors(paper, entry.paragraphAnchor.blockId)) ?? entry.item.frame
           : entry.item.frame
+        const slot = runtimeSlots.get(entry.item.layerItemId)
+        const shownFrame = slot ? { ...frame, y: slot.top, height: slot.height } : frame
         const point = entry.item.paperSpace === 'paper'
-          ? geometry.paperToViewport(frame)
-          : flowViewportOverlayPoint(frame, this.#canvas, geometry.layoutViewportSize)
+          ? geometry.paperToViewport(shownFrame)
+          : flowViewportOverlayPoint(shownFrame, this.#canvas, geometry.layoutViewportSize)
         wrap.style.left = `${point.x}px`
         wrap.style.top = `${point.y}px`
+        if (slot && wrap.style.height !== `${slot.height}px`) {
+          wrap.style.height = `${slot.height}px`
+          this.#runtimeHandles.find(record => record.wrap === wrap)?.handle?.updateSize(shownFrame.width, slot.height)
+        }
       }
     }
   }
