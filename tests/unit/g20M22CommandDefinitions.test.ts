@@ -8,9 +8,20 @@ describe('M22 command definitions', () => {
     const commands = slideLightCommands(state)
     expect(commands.find(command => command.id === 'slide.opacity.25')?.label).toBe('不透明度：25%')
     expect(commands.find(command => command.id === 'slide.spacing.8')?.label).toContain('额外 8 像素')
-    expect(commands.filter(command => command.kind === 'location-go').map(command => command.value)).toEqual(['loc-1', 'loc-2'])
+    expect(commands.filter(command => command.kind === 'location-go').map(command => [command.label, command.value])).toEqual([
+      ['点击跳到：同名（第1页）', 'loc-1'], ['点击跳到：同名（第2页）', 'loc-2'],
+    ])
     expect(new Set(commands.map(command => command.id)).size).toBe(commands.length)
     expect(commands.filter(command => command.kind === 'font').length).toBeGreaterThan(0)
+  })
+
+  it('keeps a unique destination name concise while numbering duplicate names by course order', () => {
+    const commands = slideLightObjectCommands({ ...state, locations: [
+      { id: 'loc-1', label: '同名' }, { id: 'loc-flow', label: 'Flow 目标页' }, { id: 'loc-2', label: '同名' },
+    ] })
+    expect(commands.filter(command => command.kind === 'location-go').map(command => [command.label, command.value])).toEqual([
+      ['点击跳到：同名（第1页）', 'loc-1'], ['点击跳到：Flow 目标页', 'loc-flow'], ['点击跳到：同名（第3页）', 'loc-2'],
+    ])
   })
 
   it('separates page actions from object actions without requiring a selected item', () => {

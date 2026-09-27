@@ -59,11 +59,16 @@ test('M22-T02 workbench audio placement and identity-based jump survive save and
     await expect.poll(async () => firstScene(await read()).layerItems.length).toBe(3)
 
     await selectItem(page, 'm22-target')
-    // Two pages have the same visible name. The product must expose their distinct location identities to users.
+    // Two pages have the same name; their course-order labels must identify the selected destination.
+    const locations = project(await read()).locations
+    const firstIndex = locations.findIndex(location => location.id === fixture.firstLocationId)
+    const secondIndex = locations.findIndex(location => location.id === fixture.secondLocationId)
+    if (firstIndex < 0 || secondIndex < 0 || firstIndex === secondIndex) throw new Error('Distinct destinations missing')
+    const firstLabel = `点击跳到：同名页（第${firstIndex + 1}页）`
+    const secondLabel = `点击跳到：同名页（第${secondIndex + 1}页）`
     await page.locator('[data-selection-quick-bar]').getByRole('button', { name: '更多操作', exact: true }).click()
-    const duplicates = page.getByRole('menuitem', { name: /点击跳到：同名页/ }).filter({ visible: true })
-    await expect(duplicates).toHaveCount(2)
-    await duplicates.nth(1).click()
+    await expect(page.getByRole('menuitem', { name: firstLabel, exact: true }).filter({ visible: true })).toHaveCount(1)
+    await page.getByRole('menuitem', { name: secondLabel, exact: true }).filter({ visible: true }).click()
     await expect.poll(async () => firstScene(await read()).interactions.filter(rule =>
       rule.trigger.type === 'node.click' && rule.trigger.nodeId === 'm22-target').length).toBe(1)
     const nav = firstScene(await read()).interactions.find(rule => rule.trigger.type === 'node.click' && rule.trigger.nodeId === 'm22-target')
@@ -78,7 +83,7 @@ test('M22-T02 workbench audio placement and identity-based jump survive save and
       .toEqual({ type: 'location.go', locationId: fixture.flowLocationId })
     await selectItem(page, 'm22-target')
     await page.locator('[data-selection-quick-bar]').getByRole('button', { name: '更多操作', exact: true }).click()
-    await page.getByRole('menuitem', { name: /点击跳到：同名页/ }).filter({ visible: true }).nth(1).click()
+    await page.getByRole('menuitem', { name: secondLabel, exact: true }).filter({ visible: true }).click()
     await expect.poll(async () => firstScene(await read()).interactions.find(rule =>
       rule.trigger.type === 'node.click' && rule.trigger.nodeId === 'm22-target')?.actions[0]?.action)
       .toEqual({ type: 'location.go', locationId: fixture.secondLocationId })
