@@ -73,6 +73,29 @@ async function chooseHtml(app: ElectronApplication, path: string) {
   await app.evaluate((_electron, filename) => { (globalThis as unknown as { m17ConfirmationFile?: string }).m17ConfirmationFile = filename }, path)
 }
 
+async function buildJobs(app: ElectronApplication, profile: string) {
+  return app.evaluate(async ({ app }, expectedProfile) => {
+    const fs = process.getBuiltinModule('node:fs')!
+    const path = process.getBuiltinModule('node:path')!
+    const v8 = process.getBuiltinModule('node:v8')!
+    if (path.resolve(app.getPath('userData')).toLowerCase() !== path.resolve(expectedProfile).toLowerCase())
+      throw new Error('Build logs are outside this isolated Electron profile')
+    const folder = path.join(expectedProfile, 'workbench-v2', 'builds')
+    let entries: import('node:fs').Dirent[]
+    try { entries = await fs.promises.readdir(folder, { withFileTypes: true }) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error }
+    return Promise.all(entries.filter(entry => entry.isDirectory() && /^[a-f0-9-]{36}$/.test(entry.name)).map(async entry => {
+      const statePath = path.join(folder, entry.name, 'state.bin')
+      const state = v8.deserialize(await fs.promises.readFile(statePath)) as {
+        jobId: string; status: string; logs: { stage: string; level: string; message: string }[]
+      }
+      if (state.jobId !== entry.name || !Array.isArray(state.logs)) throw new Error('Controlled build log is corrupt')
+      return { jobId: state.jobId, statePath, status: state.status,
+        admissionErrors: state.logs.filter(log => log.stage === 'admission' && log.level === 'error').map(log => log.message) }
+    }))
+  }, profile)
+}
+
 async function openImport(page: Page) {
   await page.getByRole('button', { name: '插入', exact: true }).click()
   await page.getByRole('button', { name: '导入 HTML 页面', exact: true }).click()
@@ -179,7 +202,7 @@ test('M17-T05 Flow HTML keeps measuring during use while admission remains stric
   writeFileSync(join(workspace, 'erasing.html'), erasingHtml(), 'utf8')
   writeFileSync(join(workspace, 'nonconverging.html'), nonconvergingHtml(), 'utf8')
   const server = await selectionServer()
-  const errors: string[] = [], expectedRejections: Record<string, string> = {}
+  const errors: string[] = [], expectedRejections: Record<string, { ui: string; admission?: string; jobId?: string }> = {}
   const evidence: Record<string, unknown> = { run: directory, baseline: 'b0bcaa8b', actualCommit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
     pageErrors: errors, expectedRejections, exportPath }
   let app: ElectronApplication | undefined
@@ -283,11 +306,22 @@ test('M17-T05 Flow HTML keeps measuring during use while admission remains stric
 
     const stable = await snapshot(page, reopened.documentId)
     const disk = readFileSync(coursePath)
+    const profile = join(directory, 'profile')
     for (const [name, pattern] of [['erasing.html', /改变了正文/], ['nonconverging.html', /持续失效|持续改变布局/]] as const) {
+      const previousJobs = new Set((await buildJobs(app, profile)).map(job => job.jobId))
       const result = await imported(page, app, workspace, name)
-      expectedRejections[name] = result.reason
-      expect(result.reason, `${name} unexpectedly committed`).toMatch(pattern)
-      if (name === 'nonconverging.html') expect(result.reason).toMatch(/invalidations=13|phase=publish-height/)
+      expectedRejections[name] = { ui: result.reason }
+      expect(result.reason, `${name} unexpectedly committed`).not.toBe('')
+      await expect(result.dialog).toBeVisible()
+      const newJobs = (await buildJobs(app, profile)).filter(job => !previousJobs.has(job.jobId))
+      expect(newJobs, `${name} must have exactly one new controlled build job`).toHaveLength(1)
+      const job = newJobs[0]!
+      expect(job.status).toBe('cancelled')
+      expect(job.admissionErrors).toHaveLength(1)
+      const admissionReason = job.admissionErrors[0]!
+      expectedRejections[name] = { ui: result.reason, admission: admissionReason, jobId: job.jobId }
+      expect(admissionReason).toMatch(pattern)
+      if (name === 'nonconverging.html') expect(admissionReason).toMatch(/invalidations=13/)
       await page.screenshot({ path: join(shots, `${name}-rejected.png`) })
       const after = await snapshot(page, reopened.documentId)
       expect(after.revision).toBe(stable.revision)
@@ -296,7 +330,8 @@ test('M17-T05 Flow HTML keeps measuring during use while admission remains stric
       expect(after.assets).toEqual(stable.assets)
       expect(after.blocks).toEqual(stable.blocks)
       expect(readFileSync(coursePath)).toEqual(disk)
-      evidence[name] = { reason: result.reason, before: { revision: stable.revision, undoDepth: stable.undoDepth },
+      evidence[name] = { uiReason: result.reason, admissionReason, jobId: job.jobId, statePath: job.statePath,
+        before: { revision: stable.revision, undoDepth: stable.undoDepth },
         after: { revision: after.revision, undoDepth: after.undoDepth }, runtimeCount: after.imported.length }
       await result.dialog.getByRole('button', { name: '取消', exact: true }).click()
     }
