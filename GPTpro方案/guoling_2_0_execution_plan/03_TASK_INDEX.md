@@ -1,6 +1,6 @@
 # 问题与任务索引
 
-当前修订 v2.3：36 个 S/M 实施任务属于当前开发；验收按 `required_for` 区分当前开发和后续发行准备，延期用例不进入当前完成门。
+当前修订 v2.4：38 个 S/M 实施任务属于当前开发；验收按 `required_for` 区分当前开发和后续发行准备，延期用例不进入当前完成门。
 
 先读[根目录收敛稿](../../果铃2.0收敛方案.md)。任务依赖/批次以 task_registry.json 为准，验收以 acceptance_cases.json 为准。
 
@@ -44,11 +44,13 @@
 | [M20](mid_term/M20.md) | 文件与会话细节：新建菜单、纯文本文档、另存为与会话所属 | M14 |
 | [M21](mid_term/M21.md) | 轻编辑外壳与第一档：固定顶栏、统一快捷条、右键菜单与常用编辑 | M14 |
 | [M22](mid_term/M22.md) | 轻编辑第二档：常用属性与简单互动 | M21、M16 |
+| [M23](mid_term/M23.md) | 工作台 HTML 预览与轻编辑 | M15、M17、M20、M21 |
+| [M24](mid_term/M24.md) | 内置 AI 通用工具：读 Skill、导入 HTML、看页面与保存导出 | M17、M23 |
 | [M15](mid_term/M15.md) | 统一编辑目标、元素 AI 卡与 Runtime 图文轻编辑 | M21、M19 |
 | [M16](mid_term/M16.md) | Flow 混合画布、自由原生图层与页面 Runtime | M15、M05、M13 |
 | [M17](mid_term/M17.md) | HTML 高保真机械导入与 Runtime 承载 | M15、M16、S13 |
 | [M19](mid_term/M19.md) | 有限画布参数化与三视图统一 | M14 |
-| [M18](mid_term/M18.md) | 理想呈现后置的 Representation Planning 与创作链 | M15、M16、M17、M19、S14 |
+| [M18](mid_term/M18.md) | 框架 HTML 创作链与后置表示规划 | M15、M16、M17、M19、S14、M23、M24 |
 
 ## 长期：2.x–3.0
 
@@ -57,3 +59,4 @@
 - [自有执行器路线｜2.0 基线与后续演进](long_term/L03.md)
 - [全画布实时共创｜过程可见、可干预与协作边界](long_term/L04.md)
 - [长尾能力与平台边界｜布局、性能、连接器和扩展生态](long_term/L05.md)
+- [果铃 Harness 能力补全实施方案](long_term/L06.md)

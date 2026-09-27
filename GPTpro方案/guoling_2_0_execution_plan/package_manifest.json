@@ -7,9 +7,9 @@
     "mid_term": "2.0 required",
     "long_term": "2.x-3.0 synthesis only"
   },
-  "task_count": 36,
-  "product_acceptance_count": 199,
-  "markdown_document_count": 79,
+  "task_count": 38,
+  "product_acceptance_count": 209,
+  "markdown_document_count": 82,
   "product_tests_run": false,
   "files": [
     {
@@ -29,8 +29,8 @@
     },
     {
       "path": "03_TASK_INDEX.md",
-      "bytes": 4640,
-      "sha256": "b7c144a4395475c833b8aa1aa299c87158cdd5d0300f5b4532115b1db6115c20"
+      "bytes": 4905,
+      "sha256": "3b31a1ccb6694cfe8f25a277c657c882f5b4d5b42f75eca0cc8f85b7d19d363f"
     },
     {
       "path": "04_CAPABILITIES.md",
@@ -39,8 +39,8 @@
     },
     {
       "path": "acceptance_cases.json",
-      "bytes": 120030,
-      "sha256": "caa1a60d6214129c702c86a740221b085bf5420b03eb0e4fd50a1170bf2b6bbd"
+      "bytes": 127430,
+      "sha256": "ce9776d3cbdfa3057fedffe12e06a00a4e17fed16eceba36d751f7ea615d9eef"
     },
     {
       "path": "assets/workbench-layout-2026-09-23.png",
@@ -69,8 +69,8 @@
     },
     {
       "path": "delivery/ACCEPTANCE.md",
-      "bytes": 97443,
-      "sha256": "1fe71e38580a98f06588b89a1f992940eba508069dae4eb49efcdaeaf5977233"
+      "bytes": 103983,
+      "sha256": "db86b1747c3d258986bc58abed815c5248d42669e1179b7d75c049a20fbbe648"
     },
     {
       "path": "delivery/AGENT_HANDOFF.md",
@@ -99,8 +99,8 @@
     },
     {
       "path": "delivery/SEQUENCE.md",
-      "bytes": 6721,
-      "sha256": "ef2a8b2a4f8e17fc12de5d94038abde330d3b37428efb3c76c223d89c3df1679"
+      "bytes": 7107,
+      "sha256": "620984e3c1db695cc9cfb46a60c258079ca58d97e832f0a22a884ad6e5be42ef"
     },
     {
       "path": "delivery/TESTING.md",
@@ -109,8 +109,8 @@
     },
     {
       "path": "delivery/TRACEABILITY.md",
-      "bytes": 4614,
-      "sha256": "cca5d53b7bcfe7ba649341ccc161f35ab619b78552175501b58ee3bbf8f6c907"
+      "bytes": 5194,
+      "sha256": "a5fd94083c79119885b795bd2da4943827d52591ba5b0820be5ef58ec7802e71"
     },
     {
       "path": "delivery/UI_HANDOFF_2026_09_23.md",
@@ -189,8 +189,8 @@
     },
     {
       "path": "evidence/B17_2026_09_27_M17.md",
-      "bytes": 7872,
-      "sha256": "a8e224b24390385ce14a6c805a7be3559529c9eea71958cab2611558f1863cb8"
+      "bytes": 11068,
+      "sha256": "6fc78a4683bba3d823789daf1350291712ed02972d500239bd3e2b84805a6f5c"
     },
     {
       "path": "evidence/R20_RETIREMENT.md",
@@ -224,13 +224,13 @@
     },
     {
       "path": "evidence/STATUS.md",
-      "bytes": 3018,
-      "sha256": "289268bbcc03bc6460eb5ea78a560079ed25a0225fb6df15012bced27b669787"
+      "bytes": 3037,
+      "sha256": "359fc188127662bdf5ec51b651019dd96a587df6a186ac0cc7e519a7950d979a"
     },
     {
       "path": "index.html",
-      "bytes": 2254040,
-      "sha256": "eddcb7565fddb9ed57183747cc7c98ab5b09bb48dcdaae0fdf41bd0723c0d5d6"
+      "bytes": 2534127,
+      "sha256": "d1dbc87e1d4317ccaada3c91135d074d67507477c8fbc73e6c103e12cab94f02"
     },
     {
       "path": "long_term/L01.md",
@@ -256,6 +256,11 @@
       "path": "long_term/L05.md",
       "bytes": 2706,
       "sha256": "a974ec1d8f9046fbd23dc04f71a557a0446889dcfe99b7098b6d457c50ea7a40"
+    },
+    {
+      "path": "long_term/L06.md",
+      "bytes": 84529,
+      "sha256": "d86b90a4fe8fccd361e7f6298202bf364dd86034ebcbc94b7d7f80763511535c"
     },
     {
       "path": "mid_term/M01.md",
@@ -339,13 +344,13 @@
     },
     {
       "path": "mid_term/M17.md",
-      "bytes": 5299,
-      "sha256": "7c794f18aac41adcd19695fa44148597f25a2e70ada30ee0ac23976c473f901a"
+      "bytes": 7328,
+      "sha256": "5248afc4a26bf9ca3fd89380f12e3749a747e1017a5f9c73e96a5610db0bfeef"
     },
     {
       "path": "mid_term/M18.md",
-      "bytes": 5077,
-      "sha256": "9af195d341d9800ed36de0c14aaddf76b9fa3917a91350f3f151a1513fcf75e4"
+      "bytes": 8941,
+      "sha256": "12d2502c518e8e8e9d44742bf02b81105d83fd672546b0aea229f8f80a22ee64"
     },
     {
       "path": "mid_term/M19.md",
@@ -368,6 +373,16 @@
       "sha256": "a5ba32b6058180ffd9a32241dc272acccf60b0e8955c8170a8e98ad7a940f378"
     },
     {
+      "path": "mid_term/M23.md",
+      "bytes": 6151,
+      "sha256": "2b3ed7902eeb546f3c4a61618ddf9350a53ba2dfb20e76f1d4a712103ecfc1c6"
+    },
+    {
+      "path": "mid_term/M24.md",
+      "bytes": 5693,
+      "sha256": "1ab9d153ec4e5c9d45d82221d1cda7b39543f11172e45b19d3503f7cfd0bda69"
+    },
+    {
       "path": "mid_term/WORKBENCH_EDITOR_LAYOUT.md",
       "bytes": 17174,
       "sha256": "9e9b496862c3e55011f491937f7a2688484a3324b415c13236ef94d9e605d932"
@@ -379,8 +394,8 @@
     },
     {
       "path": "requirements_traceability.json",
-      "bytes": 18671,
-      "sha256": "d88f38ea4fd4fcbe8cc90af92e9459310464bf0c4091f2971bce036ad564c8e0"
+      "bytes": 19667,
+      "sha256": "08f7d3a074ccc0c3146ba6cfca7ec446cc3665e8c3f84d5ae6560110819da3c3"
     },
     {
       "path": "short_term/S01.md",
@@ -454,8 +469,8 @@
     },
     {
       "path": "task_registry.json",
-      "bytes": 40395,
-      "sha256": "c82bfeadb66fe8fb7dd8e3f05d7230c1ec789d8b51da512c682ada07067f3ab6"
+      "bytes": 42409,
+      "sha256": "11301cc20b937bf30481713be5e9d45e8bc1bb9b71698b84ab549871b70495c2"
     },
     {
       "path": "templates/engine_capabilities.json",
@@ -474,8 +489,8 @@
     },
     {
       "path": "tools/refresh_plan.py",
-      "bytes": 15428,
-      "sha256": "17450717229e92c1f9f76e26afe7cb6cc9dfd171888a55aedc1ba2337305ea23"
+      "bytes": 15499,
+      "sha256": "11a83783ef2a18a2ad07ddd03603b98db81ab08dbbad72ad31b9960832251940"
     },
     {
       "path": "tools/selfcheck_plan.py",
@@ -488,19 +503,19 @@
       "sha256": "9917718d3b9b76d0a293bc8cf09c2cb5b15808fd8c2579d2c1fbc5bcd1d0a17f"
     }
   ],
-  "plan_revision": "2.3",
-  "reader_article_count": 80,
+  "plan_revision": "2.4",
+  "reader_article_count": 83,
   "convergence_document": "../../果铃2.0收敛方案.md",
-  "convergence_sha256": "ff7f463c0c9d1c6c681dfa55db3b9038f3110e68c321409906fc975ece9afda1",
+  "convergence_sha256": "fc8eefd17d16fe01e444df66f12c4517470a0b754cbcf75416506a4cf8a8676a",
   "task_status_counts": {
-    "planned": 1,
+    "planned": 3,
     "in_progress": 0,
-    "implemented": 0,
-    "verified": 35,
+    "implemented": 1,
+    "verified": 34,
     "blocked": 0
   },
   "acceptance_status_counts": {
-    "not_run": 9,
+    "not_run": 19,
     "passed": 190,
     "failed": 0,
     "blocked": 0,

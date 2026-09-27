@@ -2477,6 +2477,17 @@
       ]
     },
     {
+      "id": "M17-T05",
+      "task_id": "M17",
+      "title": "Flow HTML 使用中持续更新时保持可互动",
+      "preconditions": "流式讲义中导入一页符合 Flow 准入的自然排版 HTML，页面含每 250 毫秒更新一次的文字（如音频计时）和一个展开/收起内容的按钮；另备一页随窗口高度删改正文的反例页",
+      "steps": "在编辑态与试运行中各反复展开、收起 10 次；再分别导入反例页与持续改变高度的页面",
+      "expected": "使用中高度随内容正确变化，页面始终可互动，不被替换为静态后备图；导入检查照旧拒绝随窗口删改正文的页面，持续变化的页面仍在有界轮次后明确报错",
+      "test_layer": "electron",
+      "required_for": "2.0",
+      "status": "not_run"
+    },
+    {
       "id": "M19-T01",
       "task_id": "M19",
       "title": "Slide 有限画布不再写死 1280×720",
@@ -2563,10 +2574,10 @@
     {
       "id": "M18-T01",
       "task_id": "M18",
-      "title": "教学设计与理想呈现不读取编辑器能力",
-      "preconditions": "同一教学需求，Skill/工作流可记录加载的上下文",
-      "steps": "在 REL-T11 同一次真实运行中完成教学设计与理想呈现/框架 HTML，再检查这一阶段读取的内容",
-      "expected": "在理想呈现确定前不加载 Native Schema、Runtime 能力白名单或当前编辑器限制；模型先回答怎样教、怎样呈现",
+      "title": "教学策划与框架 HTML 阶段不读取编辑器能力",
+      "preconditions": "同一教学需求与材料；运行事件记录加载的 Skill、参考资料、能力说明与工具族",
+      "steps": "在 REL-T11 同一次真实运行中完成教学策划与框架 HTML，检查框架 HTML 确认前读取的内容",
+      "expected": "框架 HTML 确认前不读取短能力说明、能力卡、Native Schema，也不展开课件编辑工具族；框架 HTML 为整课一个分页文件，只呈现布局与大致功能，图片音视频为写明需求的占位，不生成素材、不引用远程脚本或 CDN",
       "test_layer": "integration",
       "required_for": "2.0",
       "status": "not_run"
@@ -2574,10 +2585,10 @@
     {
       "id": "M18-T02",
       "task_id": "M18",
-      "title": "后置 Representation Planning",
-      "preconditions": "已有理想 HTML/呈现稿与一份短 Capability Profile",
-      "steps": "在 REL-T11 同一次运行中，对页面/区域一次性决定 Surface 与 Native/Asset/Runtime 表示",
-      "expected": "输出可直接执行的薄计划；简单独立且值得频繁手改者可 Native，纯视觉素材为 Asset，复杂联动区域优先 Runtime；不增加评分Agent或多轮架构审查",
+      "title": "后置表示规划",
+      "preconditions": "已确认的框架 HTML 与不超过 1,500 字符的短能力说明",
+      "steps": "在 REL-T11 同一次运行中，逐节决定表面（演示页 / 流式讲义 / 无限画布）与原生 / 素材 / 互动页表示",
+      "expected": "只读一次短能力说明，输出可直接执行的 03-representation-plan.md 薄计划；简单独立且常改者可原生，纯视觉为素材，复杂联动区域优先互动页；用户要求按材料实现时不降级；不增加评分 Agent 或多轮审查",
       "test_layer": "real-engine",
       "required_for": "2.0",
       "status": "not_run"
@@ -2585,11 +2596,33 @@
     {
       "id": "M18-T03",
       "task_id": "M18",
-      "title": "表示计划由机械工具执行而非二次重设计",
-      "preconditions": "M18-T02 计划包含至少 Native、Asset、Runtime 两类以上输出",
-      "steps": "在 REL-T11 同一次运行中，由现有/新增薄工具完成资源准备、Runtime 导入和必要原生对象创建，再保存重开",
-      "expected": "执行阶段不重新让模型照 HTML 重写整件作品；已完整 HTML 默认可整体 Runtime，原生拆分是有收益时的优化而非导入前提",
+      "title": "按页机械组装与视觉精修",
+      "preconditions": "M18-T02 的计划至少包含原生、素材、互动页中的两类",
+      "steps": "在 REL-T11 同一次运行中完成按页导入、按占位生成素材、补必要原生对象，再逐页看画面精修，保存重开",
+      "expected": "一页进一页，不挤在一个场景；执行阶段不让模型照 HTML 重写整件作品；组装后逐页看真实画面完成一轮视觉精修；做不到的要求逐条列出",
       "test_layer": "integration",
+      "required_for": "2.0",
+      "status": "not_run"
+    },
+    {
+      "id": "M18-T04",
+      "task_id": "M18",
+      "title": "假模型走通创作链的两种模式",
+      "preconditions": "本地假模型按 Skill 调用真实工具；一份教学材料",
+      "steps": "默认模式与“根据材料自动创作”模式各跑一遍：读 Skill → 教学策划 → 框架 HTML 预览 → 表示规划 → 按页导入与组装 → 看页面精修 → 保存重开",
+      "expected": "默认模式在教学策划与框架 HTML 后各用弹窗确认一次；自动模式不确认、不提问，中间稿照写并直接得到保存好的成品；两种模式都没有让模型照 HTML 重写整件作品",
+      "test_layer": "electron",
+      "required_for": "2.0",
+      "status": "not_run"
+    },
+    {
+      "id": "M18-T05",
+      "task_id": "M18",
+      "title": "课件方法来源单一且无 AI 登记义务",
+      "preconditions": "改写后的两个课件 Skill、AGENTS.md 与能力清单生成物",
+      "steps": "检查方法来源、短能力说明长度与 Skill 文字",
+      "expected": "1.x 的 8 张课件方法卡及其生成物已删除，课件方法只来自两个 Skill；短能力说明不超过 1,500 字符并有自动检查；Skill 不再要求 AI 公开或登记可编辑文字、图片与编号；AGENTS.md 课件路由与 Skill 行为一致",
+      "test_layer": "unit",
       "required_for": "2.0",
       "status": "not_run"
     },
@@ -2774,7 +2807,84 @@
       "evidence_files": [
         "evidence/B13_2026_09_27_M20.md"
       ]
+    },
+    {
+      "id": "M23-T01",
+      "task_id": "M23",
+      "title": "HTML 预览与编辑器隔离",
+      "preconditions": "工作空间中一份 HTML，含本地图片、内联脚本、一个远程脚本、一张远程图片，并尝试读取所在文件夹以外的文件与编辑器接口",
+      "steps": "在资源管理器双击打开，操作页面交互，关闭标签后再尝试访问",
+      "expected": "在工作台标签内默认显示预览并真实运行；远程脚本不加载，远程图片可显示并提示离线不可用；页面拿不到编辑器接口、读不到所在文件夹以外的文件、不能跳转整个窗口；关闭标签后访问失效；右键仍可用浏览器打开或作为互动页导入",
+      "test_layer": "security",
+      "required_for": "2.0",
+      "status": "not_run"
+    },
+    {
+      "id": "M23-T02",
+      "task_id": "M23",
+      "title": "分页预览三种呈现",
+      "preconditions": "一份整课分页 HTML：body 下多个 section，含固定画布页、流式长页与镜头编排页",
+      "steps": "逐页翻看（按钮与方向键），在预览与源码之间切换",
+      "expected": "固定画布页整页适配，流式长页可滚动，镜头编排页自身动画照常运行；页码正确，切到源码再回预览仍停在原页",
+      "test_layer": "electron",
+      "required_for": "2.0",
+      "status": "not_run"
+    },
+    {
+      "id": "M23-T03",
+      "task_id": "M23",
+      "title": "笔形按钮轻编辑与热更新",
+      "preconditions": "M23-T02 的 HTML，页面内有一个会随操作变化的交互状态；本地假模型",
+      "steps": "点笔形按钮进入轻编辑，双击改一段文字、替换一张图片，用快捷条“AI 修改”改一段文字，撤销一次，保存后关闭重开",
+      "expected": "改动立即在预览中生效且页面状态不丢；改字写回源码对应位置，新图存到 HTML 同目录的素材文件夹并更新引用，其余字节不变；Ctrl+Z 可撤销；AI 修改后预览刷新并停在当前页；脚本生成的文字标为不能直接修改；重开后修改保持",
+      "test_layer": "electron",
+      "required_for": "2.0",
+      "status": "not_run"
+    },
+    {
+      "id": "M24-T01",
+      "task_id": "M24",
+      "title": "按需读取 Skill",
+      "preconditions": "产品随附两个课件 Skill；本地假模型",
+      "steps": "分别发出一个普通改字任务与一个课件创作任务",
+      "expected": "系统提示词不含 Skill 正文，工具说明只列 Skill 名称与一句话用途；普通任务不读取 Skill；创作任务按需读取 SKILL.md 与其直接引用的参考资料，并记入运行事件",
+      "test_layer": "integration",
+      "required_for": "2.0",
+      "status": "not_run"
+    },
+    {
+      "id": "M24-T02",
+      "task_id": "M24",
+      "title": "AI 机械导入 HTML 并按页拆分",
+      "preconditions": "一份整课分页 HTML（多个 section，含重复图片）与一份含远程脚本的 HTML；本地假模型",
+      "steps": "由 AI 调用导入工具，把各节导入指定的演示页或讲义位置，再重复同一调用，然后保存重开",
+      "expected": "每节进入各自页面，不挤在一个场景；公共样式带到各页，同一图片只存一份；导入期间零模型调用，一次可撤销；重复调用不重复导入；远程脚本被拒且零正式写入；外部 MCP 使用同一工具",
+      "test_layer": "integration",
+      "required_for": "2.0",
+      "status": "not_run"
+    },
+    {
+      "id": "M24-T03",
+      "task_id": "M24",
+      "title": "看页面",
+      "preconditions": "多页 H5 演示；本地假模型分别配置为能看图、不能看图但设置了视觉模型、两者都没有",
+      "steps": "AI 请求查看当前页与非当前页的画面",
+      "expected": "能看图时模型请求中确有该页的真实图像；不能看图时由视觉模型分析并标明来源；两者都没有时明确返回缺口；查看不写文档、不改选区、不进撤销，切页或修改后不串读旧画面",
+      "test_layer": "electron",
+      "required_for": "2.0",
+      "status": "not_run"
+    },
+    {
+      "id": "M24-T04",
+      "task_id": "M24",
+      "title": "保存与导出",
+      "preconditions": "AI 修改过的 H5 演示与 Markdown；各权限档",
+      "steps": "AI 调用保存与导出（至少离线 HTML），再尝试不支持的格式与只读档下保存",
+      "expected": "磁盘版本与回执一致，导出文件存在且可打开；不支持的格式返回具体原因；只读档拒绝保存；只要求编辑时不擅自写盘",
+      "test_layer": "integration",
+      "required_for": "2.0",
+      "status": "not_run"
     }
   ],
-  "plan_revision": "2.0"
+  "plan_revision": "2.4"
 }

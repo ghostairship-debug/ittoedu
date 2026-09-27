@@ -161,7 +161,7 @@ S04 做直接工具演示，S05/S06/S07 在真实窗口完成 API 正文流和�
 
 ## G-PRODUCT
 
-M01–M22 当前 2.0 产品任务全部完成；其中 M15–M22 是 2026-09-25/26 追加的轻编辑、三视图统一、文件会话细节与 Runtime/HTML/Flow 创作能力收口。正常、空态、失败、取消、恢复及额度/冲突/外部接手状态齐备。Markdown、纯文本、Flow、Slides、Spatial、Runtime、HTML 导入、附件、图片成果、Explorer、会话及 API 配置均无必须绕开的核心缺口。
+M01–M24 当前 2.0 产品任务全部完成；其中 M15–M24 是 2026-09-25/28 追加的轻编辑、三视图统一、文件会话细节、Runtime/HTML/Flow 创作能力、HTML 预览轻编辑、内置 AI 通用工具与框架 HTML 创作链收口。正常、空态、失败、取消、恢复及额度/冲突/外部接手状态齐备。Markdown、纯文本、Flow、Slides、Spatial、Runtime、HTML 导入、附件、图片成果、Explorer、会话及 API 配置均无必须绕开的核心缺口。
 
 ## G-2.0
 

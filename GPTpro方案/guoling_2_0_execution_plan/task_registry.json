@@ -1140,6 +1140,59 @@
       ]
     },
     {
+      "id": "M23",
+      "title": "工作台 HTML 预览与轻编辑",
+      "phase": "M",
+      "release": "2.0",
+      "required": true,
+      "dependencies": [
+        "M15",
+        "M17",
+        "M20",
+        "M21"
+      ],
+      "document": "mid_term/M23.md",
+      "status": "planned",
+      "existing_code": [
+        "src/main/workbench/DocumentHostService.ts",
+        "src/main/protocols.ts",
+        "src/player/lightEdit/htmlDocumentRoots.ts",
+        "src/renderer/lessonWorkspace/controller/useLessonWorkspaceController.ts"
+      ],
+      "sources": [],
+      "acceptance_ids": [
+        "M23-T01",
+        "M23-T02",
+        "M23-T03"
+      ]
+    },
+    {
+      "id": "M24",
+      "title": "内置 AI 通用工具：读 Skill、导入 HTML、看页面与保存导出",
+      "phase": "M",
+      "release": "2.0",
+      "required": true,
+      "dependencies": [
+        "M17",
+        "M23"
+      ],
+      "document": "mid_term/M24.md",
+      "status": "planned",
+      "existing_code": [
+        "src/main/workbench/execution/ExecutionEngine.ts",
+        "src/core/tools/ToolCatalog.ts",
+        "src/main/workbench/htmlImport/HtmlImportService.ts",
+        "src/player/surfaces/publishedCapture.ts"
+      ],
+      "sources": [],
+      "acceptance_ids": [
+        "M24-T01",
+        "M24-T02",
+        "M24-T03",
+        "M24-T04"
+      ]
+    },
+    {
       "id": "M15",
       "title": "统一编辑目标、元素 AI 卡与 Runtime 图文轻编辑",
       "phase": "M",
@@ -1227,11 +1280,12 @@
         "S13"
       ],
       "document": "mid_term/M17.md",
-      "status": "verified",
+      "status": "implemented",
       "existing_code": [
         "src/player/RuntimeHost.ts",
         "src/player/surfaces/flow/FlowSurfaceHost.ts",
-        "src/renderer/authoring/generation/prepareGenerationCandidate.ts"
+        "src/renderer/authoring/generation/prepareGenerationCandidate.ts",
+        "src/player/surfaces/runtime/surfaceRuntimeContentSize.ts"
       ],
       "sources": [
         "R54",
@@ -1244,7 +1298,8 @@
         "M17-T01",
         "M17-T02",
         "M17-T03",
-        "M17-T04"
+        "M17-T04",
+        "M17-T05"
       ]
     },
     {
@@ -1282,7 +1337,7 @@
     },
     {
       "id": "M18",
-      "title": "理想呈现后置的 Representation Planning 与创作链",
+      "title": "框架 HTML 创作链与后置表示规划",
       "phase": "M",
       "release": "2.0",
       "required": true,
@@ -1291,13 +1346,18 @@
         "M16",
         "M17",
         "M19",
-        "S14"
+        "S14",
+        "M23",
+        "M24"
       ],
       "document": "mid_term/M18.md",
       "status": "planned",
       "existing_code": [
-        "src/shared/courseAgentCapabilities.ts",
-        "src/renderer/authoring/generation/prepareGenerationCandidate.ts"
+        ".agents/skills/orchestrate-courseware/SKILL.md",
+        ".agents/skills/build-courseware-project/SKILL.md",
+        "src/shared/courseAgentSkills.ts",
+        "scripts/generate-ai-capabilities.ts",
+        "AGENTS.md"
       ],
       "sources": [
         "R46",
@@ -1309,7 +1369,9 @@
       "acceptance_ids": [
         "M18-T01",
         "M18-T02",
-        "M18-T03"
+        "M18-T03",
+        "M18-T04",
+        "M18-T05"
       ]
     }
   ],
@@ -1477,14 +1539,16 @@
     },
     {
       "id": "B18",
-      "title": "创作链收口与终局核对",
+      "title": "框架 HTML 创作链、预览轻编辑与终局核对",
       "tasks": [
+        "M23",
+        "M24",
         "M18"
       ],
-      "exit": "教学设计与理想呈现不读取编辑器能力；理想 HTML 后做一次薄 Representation Planning 并机械执行；在同一次 REL-T11 真实端到端运行中核对，最后由 Owner 做 M14-T05。"
+      "exit": "M23 工作台直接预览 .html 并可笔形轻编辑、热更新写回源码；M24 内置 AI 通用工具（按需读 Skill、按页机械导入 HTML、看页面、保存导出）；M18 创作链写入两个课件 Skill：教学策划 → 框架 HTML → 表示规划 → 按页组装 → 视觉精修，默认两次确认、明确要求自动创作时全部跳过、按材料实现时不降级；M18-T01～T03 在同一次 REL-T11 真实运行中核对，最后由 Owner 做 M14-T05。"
     }
   ],
-  "plan_revision": "2.3",
+  "plan_revision": "2.4",
   "removed_acceptance": [
     {
       "id": "S01-T03",
