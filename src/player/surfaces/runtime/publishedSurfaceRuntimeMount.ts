@@ -624,6 +624,11 @@ export function mountPublishedSurfaceRuntime(
       throw new Error('Surface Runtime create() 必须返回含 destroy() 的生命周期对象')
     }
     lifecycle = created
+    if (options.onContentHeightChange) {
+      for (const iframe of root.querySelectorAll<HTMLIFrameElement>('iframe[data-html-document-runtime="true"]')) {
+        iframe.setAttribute('scrolling', 'no')
+      }
+    }
     try { domText?.applyAll() } catch (error) { console.warn(`Surface Runtime“${options.instanceId}”的文字修改暂不可用`, error) }
     lifecycle.setMode?.(surfaceMode)
     lifecycle.resize?.(options.width, options.height)

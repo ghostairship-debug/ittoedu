@@ -20,7 +20,7 @@ let browser: Browser
 let bundle: string
 beforeAll(async () => {
   bundle = (await build({ stdin: { contents: `export {mountPublishedSurfaceRuntime,createPublishedSurfaceRuntimeSession} from './src/player/surfaces/runtime/publishedSurfaceRuntimeMount'`, resolveDir: process.cwd(), loader: 'ts' }, bundle: true, write: false, format: 'iife', globalName: 'HeightAdmission', platform: 'browser', define: { 'process.env.NODE_ENV': '"test"' } })).outputFiles[0]!.text
-  browser = await chromium.launch({ headless: true })
+  browser = await chromium.launch({ headless: true, ignoreDefaultArgs: ['--hide-scrollbars'] })
 }, 15000)
 afterAll(async () => { await browser?.close() })
 
@@ -41,14 +41,15 @@ const flowFixtureHtml = `<!doctype html><html lang="zh-CN"><head><meta charset="
   <button id="advance" type="button">显示结论</button><output id="result">等待操作</output>
   </main><script>document.getElementById('advance').addEventListener('click',function(){document.getElementById('result').textContent='观察后得到结论'})</script></body></html>`
 
-async function observe(source: string) {
+async function observe(source: string, options: { width?: number; autoHeight?: boolean } = {}) {
   const page = await browser.newPage()
+  const width = options.width ?? 640
   try {
-    await page.route('https://height-admission.invalid/**', route => route.fulfill({ contentType: 'text/html', body: '<div id="host" style="width:640px;height:700px"></div>' }))
+    await page.route('https://height-admission.invalid/**', route => route.fulfill({ contentType: 'text/html', body: `<div id="host" style="width:${width}px;height:700px"></div>` }))
     await page.route('https://height-admission.invalid/style.css', route => route.fulfill({ contentType: 'text/css', body: paintCss }))
     await page.goto('https://height-admission.invalid/')
     await page.addScriptTag({ content: bundle })
-    return await page.evaluate(async source => {
+    return await page.evaluate(async ({ source, width, autoHeight }) => {
       const api = (window as any).HeightAdmission
       const bytes = new Uint8Array(source.length * 2)
       for (let i = 0; i < source.length; i++) { bytes[i * 2] = source.charCodeAt(i) & 255; bytes[i * 2 + 1] = source.charCodeAt(i) >>> 8 }
@@ -56,15 +57,26 @@ async function observe(source: string) {
       const session = api.createPublishedSurfaceRuntimeSession()
       const heights: number[] = []
       const beforeResize: string[] = []
+      const beforeWidths: number[] = []
+      const innerFrame = () => document.querySelector<HTMLIFrameElement>('iframe[data-html-document-runtime="true"]')
       let handle: any
-      handle = api.mountPublishedSurfaceRuntime(document.getElementById('host'), { instanceId: 'admission', runtime: { protocol: 'surface-runtime', runtimeApiVersion: 3, enabled: true, renderMode: 'dom', code: { encoding: 'base64-utf16le', data: btoa(binary) }, content: { values: {} }, assets: {} }, width: 640, height: 700, visible: true, session, resolveAsset: () => undefined, onContentHeightChange: (height: number) => { beforeResize.push(document.querySelector('iframe')?.contentDocument?.body.innerHTML ?? 'missing'); heights.push(height); handle.updateSize(640, height) } })
+      handle = api.mountPublishedSurfaceRuntime(document.getElementById('host'), { instanceId: 'admission', runtime: { protocol: 'surface-runtime', runtimeApiVersion: 3, enabled: true, renderMode: 'dom', code: { encoding: 'base64-utf16le', data: btoa(binary) }, content: { values: {} }, assets: {} }, width, height: 700, visible: true, session, resolveAsset: () => undefined,
+        ...(autoHeight ? { onContentHeightChange: (height: number) => {
+          beforeResize.push(document.querySelector('iframe')?.contentDocument?.body.innerHTML ?? 'missing')
+          beforeWidths.push(innerFrame()?.contentDocument?.documentElement.clientWidth ?? -1)
+          heights.push(height)
+          handle.updateSize(width, height)
+        } } : {}) })
       let observationFailure = '', captureFailure = ''
       try { await handle.waitForObservationReady() } catch (error) { observationFailure = String(error) }
       try { await handle.waitForCaptureReady() } catch (error) { captureFailure = String(error) }
-      const result = { beforeResize, heights, ok: handle.ok, observationFailure, captureFailure, mirrors: document.querySelectorAll('[data-html-height-measurement]').length }
+      const live = innerFrame()
+      const result = { beforeResize, beforeWidths, heights, ok: handle.ok, observationFailure, captureFailure,
+        liveWidth: live?.contentDocument?.documentElement.clientWidth, liveHeight: live?.clientHeight,
+        scrolling: live?.getAttribute('scrolling'), mirrors: document.querySelectorAll('[data-html-height-measurement]').length }
       handle.destroy(); session.destroy()
       return result
-    }, source)
+    }, { source, width, autoHeight: options.autoHeight !== false })
   } finally { await page.close() }
 }
 
@@ -78,14 +90,27 @@ it('admits a natural long Flow page with Chromium-expanded font shorthand and me
 })
 
 it('admits the full M17 Flow fixture CSS without clipping its long page', async () => {
-  const result = await observe(createHtmlDocumentRuntimeSource({ html: flowFixtureHtml, resourceKeys: [] }))
+  const result = await observe(createHtmlDocumentRuntimeSource({ html: flowFixtureHtml, resourceKeys: [] }), { width: 760 })
   expect(result.ok).toBe(true)
   expect(result.heights[0]).toBeGreaterThan(1300)
+  expect(result.beforeWidths).toEqual([760])
+  expect(result.liveWidth).toBe(760)
+  expect(result.liveHeight).toBe(result.heights[0])
+  expect(result.scrolling).toBe('no')
   expect(result.beforeResize[0]).toContain('第 18 段')
   expect(result.beforeResize[0]).toContain('id="advance"')
   expect(result.observationFailure).toBe('')
   expect(result.captureFailure).toBe('')
   expect(result.mirrors).toBe(0)
+})
+
+it('keeps fixed-viewport HTML without a height callback on its original scrolling policy', async () => {
+  const result = await observe(createHtmlDocumentRuntimeSource({ html: flowFixtureHtml, resourceKeys: [] }), { width: 760, autoHeight: false })
+  expect(result.ok).toBe(true)
+  expect(result.heights).toEqual([])
+  expect(result.scrolling).toBeNull()
+  expect(result.liveHeight).toBe(700)
+  expect(result.liveWidth).toBeLessThan(760)
 })
 
 it('rejects an explicit nondefault font longhand outside the proven profile', async () => {

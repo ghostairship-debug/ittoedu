@@ -128,6 +128,7 @@ export async function measureManagedHtmlContent(source: ManagedHtmlMeasurementSo
   const parent = source.iframe.ownerDocument
   const frame = parent.createElement('iframe')
   frame.dataset.htmlHeightMeasurement = 'true'
+  if (source.iframe.getAttribute('scrolling') === 'no') frame.setAttribute('scrolling', 'no')
   frame.setAttribute('sandbox', 'allow-same-origin')
   frame.setAttribute('aria-hidden', 'true')
   frame.tabIndex = -1
