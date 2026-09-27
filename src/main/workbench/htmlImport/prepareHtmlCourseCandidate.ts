@@ -46,9 +46,7 @@ export async function prepareHtmlCourseCandidate(input: {
   }
   const closure = await readHtmlClosure({ htmlPath: input.sourcePath, ...(input.rootDir ? { rootDir: input.rootDir } : {}) })
   signal?.throwIfAborted()
-  const errors = [...validateHtmlImport(closure), ...closure.remoteReferences.filter(item => item.context === 'js-string').map(item => ({
-    level: 'error' as const, code: 'remote-resource', message: `未授权远程引用 ${item.url}`, reference: item.url,
-  }))]
+  const errors = validateHtmlImport(closure)
   if (errors.length) throw new Error(errors.map(item => item.message).join('\n'))
   const project = structuredClone(snapshot.model.project)
   const resources = structuredClone(snapshot.model.resources)
