@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { parse } from 'acorn'
+import { analyzeJavaScriptClosure } from './javascriptClosureProof'
 import type {
   ExtractedResource,
   ExtractedResourceOrigin,
@@ -536,6 +537,8 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     if (statement.type === 'ExpressionStatement' && expression?.type === 'CallExpression'
       && (expression.callee as Node).type === 'FunctionExpression' && modulepreloadShapes.has(modulepreloadShape(expression))) inertPolyfills.add(expression)
   }
+  const closureProof = analyzeJavaScriptClosure(root, inertPolyfills)
+  if (closureProof.frameworkError) addDiagnostic(sink, 'error', 'unsupported-framework-resource-input', '无法证明框架入口及资源来源闭合')
   const edits: Array<{ start: number; end: number; value: string }> = []
   const handled = new Set<Node>()
   const jsString = (value: string) => JSON.stringify(value).replace(/</g, '\\u003c')
@@ -623,9 +626,15 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       const result = rewriteSingleUrl(url, 'js-string', baseDir, sink, siblings, false)
       if (result.changed) edits.push({ start: value.start, end: value.end, value: jsString(result.value) })
     }
+    if (node === root) for (const input of closureProof.resourceInputs) {
+      if (input.proof.kind === 'proven-resource') {
+        for (const literal of input.proof.literals) urlSink(literal, input.name)
+      } else addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${input.name} 的资源地址`)
+    }
     if (node.type === 'AssignmentExpression' && node.operator === '=') {
       const name = memberName(node.left as Node)
-      if (name && ['src', 'srcset', 'href', 'poster', 'data', 'action', 'formAction'].includes(name)) urlSink(node.right as Node, name)
+      if (name && ['src', 'srcset', 'href', 'poster', 'data', 'action', 'formAction'].includes(name)
+        && closureProof.internalSink(node).kind === 'unknown') urlSink(node.right as Node, name)
     }
     if (node.type === 'CallExpression' || node.type === 'NewExpression') {
       const callee = node.callee as Node | undefined
