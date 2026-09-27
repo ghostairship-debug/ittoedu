@@ -1500,8 +1500,10 @@ export function createFlowAuthoringSlice(
                   { duration: 0 },
                 )
             const selection = flowOverlaySelection(document, target)
+            const candidate = structuredClone(document)
+            candidate.assets[asset.meta.id] = asset.meta
             return persistIntentResult(patchFlowOverlayProperties(
-              document,
+              candidate,
               selection,
               { assetId: asset.meta.id },
               { expectedRevision: document.revision },

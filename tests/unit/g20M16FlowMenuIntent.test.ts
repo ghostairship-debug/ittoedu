@@ -44,10 +44,12 @@ function harness(prepare?: (project: ReturnType<typeof createBlankFlowCourseProj
     applyBackend: () => undefined,
   }
   const run = createFlowAuthoringSlice({} as EditorStoreKernel, ports).runFlowAuthoringIntent
-  const target = (kind: 'surface' | 'block' = 'surface'): CourseAuthoringTarget => captureFlowEditorAuthoringTarget({
+  const target = (kind: 'surface' | 'block' | 'overlay' = 'surface'): CourseAuthoringTarget => captureFlowEditorAuthoringTarget({
     view: buildFlowEditorView({ project: session.history.present, locationId: session.selection.locationId }),
     sessionToken: owner.token,
-    target: kind === 'surface' ? { kind: 'surface' } : { kind: 'block', blockId: flowSurfaceIn(session.history.present, session.selection.surfaceId).blocks[0]!.id },
+    target: kind === 'surface' ? { kind: 'surface' }
+      : kind === 'block' ? { kind: 'block', blockId: flowSurfaceIn(session.history.present, session.selection.surfaceId).blocks[0]!.id }
+        : { kind: 'overlay', layerItemId: flowSurfaceIn(session.history.present, session.selection.surfaceId).surfaceLayerItems[0]!.item.layerItemId },
   })
   return { run, target, persist, get session() { return session }, get sidecar() { return sidecar }, setMode(value: 'edit' | 'run') { mode = value } }
 }
@@ -145,6 +147,49 @@ describe('Flow menu authoring intent', () => {
     expect(h.sidecar.files[entry.item.content.data.assetId]).toBeDefined()
     expect(h.session.history.past).toHaveLength(1)
     expect(h.persist).toHaveBeenCalledTimes(1)
+  })
+
+  it('replaces a paper image with one asset transaction while preserving placement and crop', () => {
+    const h = harness(project => { project.assets.original = {
+      id: 'original', filename: 'original.png', mimeType: 'image/png', kind: 'image', path: 'assets/original.png',
+      byteLength: bytes.length, width: 64, height: 64,
+    } })
+    const blockId = flowSurfaceIn(h.session.history.present, h.session.selection.surfaceId).blocks[0]!.id
+    const image = sceneNodeToCourseLayerItem(createImageNode({ id: 'paper-image', name: '图片', assetId: 'original',
+      width: 64, height: 64, crop: { left: 0.1, top: 0.2, right: 0.15, bottom: 0.05 }, cropX: 0.6, cropY: 0.4 })) as FlowMenuPaperItem
+    const anchor = { blockId, offsetY: 12, xRatio: 0.35 }
+    expect(h.run(h.target(), { kind: 'menu-insert-paper', item: image, frame, paragraphAnchor: anchor }).ok).toBe(true)
+    const before = h.session.history.present
+    const original = flowSurfaceIn(before, h.session.selection.surfaceId).surfaceLayerItems[0]!
+    const target = h.target('overlay')
+    const newBytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 1])
+    const receipt = h.run(target, { kind: 'import-replacement-media', name: 'replacement.png', mimeType: 'image/png', bytes: newBytes })
+    expect(receipt.ok, receipt.reason).toBe(true)
+    const next = h.session.history.present
+    const replaced = flowSurfaceIn(next, h.session.selection.surfaceId).surfaceLayerItems[0]!
+    expect(replaced.item.kind).toBe('native')
+    if (replaced.item.kind !== 'native' || replaced.item.content.nativeType !== 'image'
+      || original.item.kind !== 'native' || original.item.content.nativeType !== 'image') throw new Error('missing paper image')
+    const assetId = replaced.item.content.data.assetId
+    expect(assetId).not.toBe('original')
+    expect(next.assets[assetId]).toMatchObject({ id: assetId, kind: 'image', filename: 'replacement.png', byteLength: newBytes.length })
+    expect(Array.from(h.sidecar.files[assetId]!)).toEqual(Array.from(newBytes))
+    expect(before.assets[assetId]).toBeUndefined()
+    expect(next.revision).toBe(before.revision + 1)
+    expect(replaced.paragraphAnchor).toEqual(anchor)
+    expect(replaced.item.frame).toEqual(original.item.frame)
+    expect(replaced.item.content.data.crop).toEqual(original.item.content.data.crop)
+    expect(replaced.item.content.data.cropX).toBe(original.item.content.data.cropX)
+    expect(replaced.item.content.data.cropY).toBe(original.item.content.data.cropY)
+    expect(h.session.history.past).toHaveLength(2)
+    expect(h.persist).toHaveBeenCalledTimes(2)
+
+    const sidecar = h.sidecar
+    const stale = h.run(target, { kind: 'import-replacement-media', name: 'stale.png', mimeType: 'image/png', bytes: newBytes })
+    expect(stale.ok).toBe(false)
+    expect(h.session.history.present).toBe(next)
+    expect(h.sidecar).toBe(sidecar)
+    expect(h.persist).toHaveBeenCalledTimes(2)
   })
 
   it.each([
