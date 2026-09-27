@@ -108,7 +108,7 @@ test('M16-T04 Flow 正文、paper Native 与 Runtime 独立修改后保存重开
     const edited = await edit('runtime')
     await expect(page.getByTestId('flow-paper').getByText('Flow 正文已修改', { exact: true })).toBeVisible()
     await expect(page.locator(`[data-layer-item-id="${nativeId}"]`)).toContainText('Native 纸面标注已修改')
-    await expect(page.locator('[data-m16-mixed-runtime="true"]')).toContainText('Runtime 原始内容')
+    await expect(page.locator('[data-m16-mixed-runtime="true"] h2')).toHaveText('Runtime 改后标题')
 
     await page.keyboard.press('Control+z')
     const undone = await page.evaluate(async id => window.desktopAPI!.documents!.read(id), documentId)
