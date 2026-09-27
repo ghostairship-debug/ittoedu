@@ -28,8 +28,8 @@ function interactiveHtml() {
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>
     html,body{margin:0}body{font:20px sans-serif;color:#16324f;background:#eff6ff}
     main{box-sizing:border-box;width:100%;padding:24px}h1{margin:0 0 16px;font-size:30px}
-    button{font:inherit;padding:8px 12px;margin:0 12px 12px 0}#expanded{height:0;overflow:hidden;background:#bfdbfe}
-    #expanded p{margin:16px}#clock,#clicks{display:inline-block;min-width:110px}
+    button{font:20px sans-serif;padding:8px 12px;margin:0 12px 12px 0}#expanded{display:none;box-sizing:border-box;height:300px;padding:16px;background:#bfdbfe}
+    #expanded p{margin:0}#clock,#clicks{display:inline-block;min-width:110px}
   </style></head><body><main id="fixture"><h1>自然排版的互动讲义</h1>
     <p>先预测，再展开观察，最后解释。</p>
     <button id="start" type="button">开始计时</button><output id="clock" data-ticks="0">计时 0</output>
@@ -44,7 +44,7 @@ function interactiveHtml() {
     });
     document.getElementById('toggle').addEventListener('click',function(){
       opened=!opened;clicks++;
-      var expanded=document.getElementById('expanded');expanded.style.height=opened?'300px':'0px';expanded.dataset.open=String(opened);
+      var expanded=document.getElementById('expanded');expanded.style.display=opened?'block':'none';expanded.dataset.open=String(opened);
       var output=document.getElementById('clicks');output.dataset.clicks=String(clicks);output.textContent='操作 '+clicks
     });
   </script></body></html>`
@@ -98,14 +98,19 @@ async function imported(page: Page, app: ElectronApplication, workspace: string,
 }
 
 async function geometry(frame: Locator, content: FrameLocator, host: Locator, tail?: Locator) {
-  const iframeHeight = await frame.evaluate(element => element.getBoundingClientRect().height)
+  const { iframeHeight, iframeScale } = await frame.evaluate(element => {
+    const clientHeight = element.clientHeight
+    if (!clientHeight) throw new Error('Runtime iframe has no client height')
+    const iframeHeight = element.getBoundingClientRect().height
+    return { iframeHeight, iframeScale: iframeHeight / clientHeight }
+  })
   const hostHeight = await host.evaluate(element => element.getBoundingClientRect().height)
   const contentHeight = await content.locator('#fixture').evaluate(element => element.getBoundingClientRect().height)
   const ticks = Number(await content.locator('#clock').getAttribute('data-ticks'))
   const clicks = Number(await content.locator('#clicks').getAttribute('data-clicks'))
   const fallbackCount = await host.locator('[data-runtime-fallback="true"]').count()
   const tailY = tail && await tail.count() ? (await tail.first().boundingBox())?.y ?? null : null
-  return { iframeHeight, hostHeight, contentHeight, ticks, clicks, fallbackCount, tailY }
+  return { iframeHeight, iframeScale, hostHeight, contentHeight, ticks, clicks, fallbackCount, tailY }
 }
 
 async function exercise(page: Page, label: string, frame: Locator, host: Locator, rounds: number, shots: string, evidence: Record<string, unknown>, tail?: Locator) {
@@ -129,10 +134,11 @@ async function exercise(page: Page, label: string, frame: Locator, host: Locator
       await expect(content.locator('#expanded')).toHaveAttribute('data-open', String(open))
       await expect.poll(async () => (await geometry(frame, content, host, tail)).contentHeight - baseline.contentHeight,
         { timeout: 10_000 }).toBe(open ? 300 : 0)
-      await expect.poll(async () => (await geometry(frame, content, host, tail)).iframeHeight - baseline.iframeHeight,
-        { timeout: 10_000 }).toBeGreaterThan(open ? 180 : -25)
-      if (!open) await expect.poll(async () => (await geometry(frame, content, host, tail)).iframeHeight - baseline.iframeHeight,
-        { timeout: 10_000 }).toBeLessThan(25)
+      const tolerance = Math.max(8, 300 * baseline.iframeScale * 0.03)
+      await expect.poll(async () => {
+        const current = await geometry(frame, content, host, tail)
+        return Math.abs(current.iframeHeight - baseline.iframeHeight - (open ? 300 * current.iframeScale : 0))
+      }, { timeout: 10_000 }).toBeLessThanOrEqual(tolerance)
       const current = await geometry(frame, content, host, tail)
       expect(current.clicks).toBe(round * 2 + (open ? 1 : 2))
       expect(current.fallbackCount).toBe(0)
