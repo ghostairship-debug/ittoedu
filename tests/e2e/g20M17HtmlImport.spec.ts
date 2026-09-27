@@ -456,7 +456,7 @@ test('M17-T04: remote image and audio fail before document writes or requests; l
     const runningFrame = page.locator('.course-try-run-host iframe').first().contentFrame()
     await runningFrame.locator('#toggle').click()
     await expect(runningFrame.locator('#result')).toHaveText('Done')
-    await page.keyboard.press('Control+S')
+    await page.getByLabel('常用工具').getByRole('button', { name: '保存', exact: true }).click()
     await expect.poll(async () => (await document()).dirty).toBe(false)
     const persisted = openCourseProjectArchive(new Uint8Array(readFileSync(join(workspace, courseName))))
     const assetBytes = Object.values(persisted.assetFiles).map(bytes => Buffer.from(bytes))
