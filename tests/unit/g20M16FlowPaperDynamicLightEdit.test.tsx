@@ -321,3 +321,23 @@ it('retains an unconfirmed draft visibly when the card becomes read-only', async
   await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!.click())
   expect(mocks.submitIntent).toHaveBeenCalledWith(expect.objectContaining({ kind: 'runtime.text', value: 'A' }))
 })
+
+it('clears IME bookkeeping after read-only composition ends and the draft is canceled', async () => {
+  mocks.realEditor = true
+  const { root, element } = mount()
+  await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} item={runtime} />))
+  const target = { targetId: 'text-1', scope: 'scene' as const, sceneId: 'surface-1', kind: 'text' as const, key: 'title',
+    label: 'Title', source: 'auto' as const, layer: 'scene' as const, bounds: { x: 10, y: 5, width: 40, height: 20 } }
+  await act(async () => mocks.runtimeProps.onTargetsChanged({ scope: 'scene', sceneId: 'surface-1', revision: 1, targets: [target] }))
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!.click())
+  await act(async () => element.querySelector<HTMLButtonElement>('[aria-label="Title，编辑文字"]')!.click())
+  const input = element.querySelector<HTMLInputElement>('.canvas-plain-text-editor__control')!
+  await act(async () => fireEvent.compositionStart(input))
+  await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} item={runtime} readOnly />))
+  expect(input.readOnly).toBe(true)
+  await act(async () => fireEvent.compositionEnd(input))
+  await act(async () => fireEvent.keyDown(input, { key: 'Escape' }))
+  expect(element.querySelector('.canvas-plain-text-editor__control')).toBeNull()
+  await expect(prepareFlowDynamicDrafts('document-1')).resolves.toBeUndefined()
+  expect(mocks.submitIntent).not.toHaveBeenCalled()
+})

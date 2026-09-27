@@ -151,7 +151,7 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
   const runtimeEditing = item.kind === 'runtime' && mode.owner === owner && mode.editing
   const modeChangeRef = useRef(onRuntimeEditModeChange)
   modeChangeRef.current = onRuntimeEditModeChange
-  useEffect(() => () => { modeChangeRef.current?.(item.layerItemId, false) }, [owner, item.layerItemId])
+  useEffect(() => () => { composingRef.current = false; modeChangeRef.current?.(item.layerItemId, false) }, [owner, item.layerItemId])
   const editableRef = useRef(editable)
   editableRef.current = editable
 
@@ -274,10 +274,10 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
   const activeComponent = liveActive?.component && liveActive.target.kind === 'component-text' ? liveActive : null
   const prepareRuntimeDraft = (): Promise<void> => {
     if (runtimePreparation.current?.owner === owner) return runtimePreparation.current.pending
-    if (composingRef.current) return Promise.reject(new Error('输入法组合中，请完成当前文字后再继续'))
     if (busyRef.current || failedRef.current) return Promise.reject(new Error('修改仍在确认或需要恢复，请先处理'))
     const edit = activeRef.current
-    if (!edit?.runtime || edit.owner !== owner) return Promise.resolve()
+    if (!edit?.runtime || edit.owner !== owner) { composingRef.current = false; return Promise.resolve() }
+    if (composingRef.current) return Promise.reject(new Error('输入法组合中，请完成当前文字后再继续'))
     if (edit.value === edit.runtime.course.initialValue) { setActive(null); return Promise.resolve() }
     if (!editable) return Promise.reject(new Error('当前卡片已锁定或只读，文字草稿尚未提交'))
     const control = runtimeEditRoot.current?.querySelector<HTMLInputElement | HTMLTextAreaElement>('.canvas-plain-text-editor__control')
@@ -350,6 +350,7 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
         multiline={activeRuntime.target.multiline} maxLength={activeRuntime.target.maxLength}
         readOnly={Boolean(!editable || liveBusy || failedTask?.owner === owner || runtimePreparation.current?.owner === owner)}
         onDraftChange={(value, composing) => {
+          if (!composing) composingRef.current = false
           if (!editable || runtimePreparation.current?.owner === owner || failedRef.current) return
           composingRef.current = composing
           if (activeRef.current?.owner === owner && activeRef.current.target.targetId === activeRuntime.target.targetId)
@@ -357,7 +358,8 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
           setActive(current => current?.owner === owner && current.target.targetId === activeRuntime.target.targetId
             ? { ...current, value } : current)
         }}
-        onCommit={() => { void prepareRuntimeDraft().catch(error => report(error instanceof Error ? error.message : '修改未确认')) }} onCancel={() => setActive(null)} />}
+        onCommit={() => { void prepareRuntimeDraft().catch(error => report(error instanceof Error ? error.message : '修改未确认')) }}
+        onCancel={() => { composingRef.current = false; activeRef.current = null; setActive(null) }} />}
     </div>}
     {editable && item.kind === 'component' && <div onPointerDown={event => event.stopPropagation()}>
       <FlowDynamicAuthoringOverlay textTargets={componentTextTargets} imageTargets={componentImageTargets}
