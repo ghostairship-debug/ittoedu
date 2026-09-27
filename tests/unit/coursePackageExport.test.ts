@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import type { CourseProjectDocument, RuntimeLayerItem } from '@/shared/courseProjectTypes'
 import { publishedCourseV2Schema } from '@/shared/publishedCourseSchema'
+import { createHtmlDocumentRuntimeSource } from '@/shared/runtime/htmlDocumentSource'
 import {
   addCourseFlowPage,
   addCourseSpatialPage,
@@ -312,6 +313,62 @@ describe('course package export', () => {
     expect(webIndex).toContain(
       "connect-src 'self' https://api.example.com wss://z-realtime.example.com:8443",
     )
+  })
+
+  it('allows declared HTTPS origins for online image and media CSP without changing script or WSS policy', () => {
+    const sources = onlineSources()
+    sources.project.network!.connectOrigins!.push(
+      'https://media-only.example.com:8443',
+      'https://a-media.example.com',
+    )
+    const online = buildPublishedCourseStandaloneHtml(sources, {
+      playerBundle: PLAYER_BUNDLE,
+      singleHtmlMode: 'online-lightweight',
+    })
+    const web = strFromU8(buildPublishedCourseWebPackageFiles(sources, PLAYER_BUNDLE)['index.html']!)
+    for (const html of [online, web]) {
+      expect(html.match(/img-src[^;]*/)?.[0]).toContain('https://media-only.example.com:8443')
+      expect(html.match(/media-src[^;]*/)?.[0]).toContain('https://media-only.example.com:8443')
+      expect(html.match(/img-src[^;]*/)?.[0]).not.toContain('wss://')
+      expect(html.match(/media-src[^;]*/)?.[0]).not.toContain('wss://')
+      expect(html.match(/script-src[^;]*/)?.[0]).not.toContain('https://')
+    }
+    expect(online.match(/img-src[^;]*/)?.[0].match(/https:\/\/a-media\.example\.com/g)).toHaveLength(1)
+    const offline = buildPublishedCourseStandaloneHtml(sources, PLAYER_BUNDLE)
+    expect(offline.match(/img-src[^;]*/)?.[0]).not.toContain('https://')
+    expect(offline.match(/media-src[^;]*/)?.[0]).not.toContain('https://')
+  })
+
+  it('warns for remote media in a managed HTML wrapper only in offline export', () => {
+    const sources = runtimeSources(createHtmlDocumentRuntimeSource({
+      html: `<!doctype html><html><body>
+        <p>展示地址：https://text.example.com/example.mp4</p>
+        <script>const example = 'https://script-text.example.com/example.png';</script>
+        <img src="https://image.example.com/picture" srcset="https://retina.example.com/picture 2x">
+        <video poster="https://poster.example.com/cover"><source src="https://media.example.com/movie" type="video/mp4"></video>
+      </body></html>`,
+      resourceKeys: [],
+    }))
+    sources.project.network = { connectOrigins: [
+      'https://image.example.com', 'https://retina.example.com',
+      'https://poster.example.com', 'https://media.example.com',
+    ] }
+    const resources = { assetFiles: sources.assetFiles, components: sources.components }
+    const offline = collectCoursePackageExportPreflight(
+      sources.project, 'standalone-html', resources, PLAYER_BUNDLE,
+      new Date('2026-08-17T00:00:00.000Z'), { singleHtmlMode: 'offline-portable' },
+    )
+    const warnings = offline.items.filter((item) => item.code === 'offline-managed-html-remote-media')
+    expect(warnings).toHaveLength(4)
+    expect(warnings.every((item) => item.severity === 'warning')).toBe(true)
+    expect(warnings.map((item) => item.message).join(' ')).not.toContain('text.example.com')
+    expect(warnings.map((item) => item.message).join(' ')).not.toContain('script-text.example.com')
+    expect(offline.summary.canExport).toBe(true)
+    expect(collectCoursePackageExportPreflight(
+      sources.project, 'web-package', resources, PLAYER_BUNDLE,
+    ).items.filter((item) => item.code === 'offline-managed-html-remote-media')).toEqual([])
+    expect(buildPublishedCourseStandaloneHtml(sources, PLAYER_BUNDLE))
+      .toContain('media-src data: blob:;')
   })
 
   it('lists only actual online remote dependencies in stable preflight order', () => {

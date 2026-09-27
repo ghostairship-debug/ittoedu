@@ -5,6 +5,7 @@ import type {
   CourseProjectDocument,
 } from '../../../shared/courseProjectTypes'
 import { visitCourseProject } from '../../../shared/contracts/course-project-v9/references'
+import { unpackHtmlDocumentRuntimeSource } from '../../../shared/runtime/htmlDocumentSource'
 import { compareStableStrings } from '../../../shared/stableOrder'
 import {
   collectPublishedCourseAssetIds,
@@ -39,6 +40,7 @@ export interface CoursePackagePreflightItem {
     | 'online-remote-url-invalid'
     | 'online-connect-origin-undeclared'
     | 'online-connect-origin-unresolved'
+    | 'offline-managed-html-remote-media'
   message: string
   path?: ReadonlyArray<string | number>
 }
@@ -218,6 +220,59 @@ function collectPublishedConnectSources(
   ))
 }
 
+function collectOfflineManagedHtmlRemoteMedia(
+  project: CourseProjectDocument,
+): CoursePackagePreflightItem[] {
+  const parsed = courseProjectDocumentSchema.safeParse(project)
+  if (!parsed.success) return []
+  const dependencies = new Map<string, ReadonlyArray<string | number>>()
+  visitCourseProject(parsed.data, {
+    layerItem(item, path) {
+      if (item.kind !== 'runtime' || !item.runtime.enabled) return
+      const managed = unpackHtmlDocumentRuntimeSource(item.runtime.source)
+      if (!managed) return
+      const sourcePath = [...path, 'runtime', 'source']
+      const add = (value: string | undefined) => {
+        const url = value?.trim()
+        if (url && /^(?:https?:\/\/|\/\/)/i.test(url) && !dependencies.has(url)) {
+          dependencies.set(url, sourcePath)
+        }
+      }
+      const addSrcset = (value: string | undefined) => {
+        for (const candidate of value?.split(',') ?? []) {
+          add(candidate.trim().split(/\s+/, 1)[0])
+        }
+      }
+      // Scan only media elements and their URL attributes; visible URL text is not a dependency.
+      // Removing raw-text elements also keeps JS examples from looking like actual media tags.
+      const markup = managed.html
+        .replace(/<!--[\s\S]*?-->/g, '')
+        .replace(/<(script|style|textarea|title)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+      for (const element of markup.matchAll(/<(img|audio|video|source|image)\b((?:[^"'<>]|"[^"]*"|'[^']*')*)>/gi)) {
+        const tag = element[1]!.toLowerCase()
+        const attributes = new Map<string, string>()
+        for (const attribute of element[2]!.matchAll(/([^\s"'=<>/]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>]+))/g)) {
+          attributes.set(attribute[1]!.toLowerCase(), attribute[2] ?? attribute[3] ?? attribute[4] ?? '')
+        }
+        if (tag === 'image') {
+          add(attributes.get('href') ?? attributes.get('xlink:href'))
+          continue
+        }
+        add(attributes.get('src'))
+        if (tag === 'video') add(attributes.get('poster'))
+        if (tag === 'img' || tag === 'source') addSrcset(attributes.get('srcset'))
+      }
+    },
+  })
+  return [...dependencies].sort(([left], [right]) => compareStableStrings(left, right))
+    .map(([url, path]) => ({
+      severity: 'warning',
+      code: 'offline-managed-html-remote-media',
+      message: `离线便携单 HTML 中的 HTML 页面引用远程媒体：${url}；离线时该媒体不可用。`,
+      path,
+    }))
+}
+
 function collectOnlineConnectPreflightItems(
   project: CourseProjectDocument,
   components: CoursePackageExportResources['components'],
@@ -321,6 +376,9 @@ export function collectCoursePackageExportPreflight(
         message: `在线轻量单 HTML 将依赖远程素材：${url}`,
       })
     }
+  }
+  if (delivery === 'standalone-html' && !onlineStandalone) {
+    items.push(...collectOfflineManagedHtmlRemoteMedia(project))
   }
   if (delivery === 'web-package' || onlineStandalone) {
     items.push(...collectOnlineConnectPreflightItems(project, resources.components))

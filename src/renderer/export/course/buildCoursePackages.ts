@@ -202,6 +202,8 @@ function onlineStandaloneCsp(
       .map(exactConnectOrigin)
       .filter((origin): origin is string => origin !== null),
   )
+  const declaredMediaOrigins = [...connectOrigins]
+    .filter((origin) => exactHttpsOrigin(origin) !== null)
 
   for (const [assetId, asset] of Object.entries(payload.assets)) {
     const origin = exactHttpsOrigin(asset.url)
@@ -233,8 +235,14 @@ function onlineStandaloneCsp(
     "default-src 'none'",
     "script-src 'unsafe-inline' 'unsafe-eval' blob:",
     "style-src 'unsafe-inline'",
-    `img-src ${cspSources(['data:', 'blob:'], imageOrigins)}`,
-    `media-src ${cspSources(['data:', 'blob:'], mediaOrigins)}`,
+    `img-src ${cspSources(
+      ['data:', 'blob:', ...[...imageOrigins].sort(compareStableStrings)],
+      new Set(declaredMediaOrigins.filter((origin) => !imageOrigins.has(origin))),
+    )}`,
+    `media-src ${cspSources(
+      ['data:', 'blob:', ...[...mediaOrigins].sort(compareStableStrings)],
+      new Set(declaredMediaOrigins.filter((origin) => !mediaOrigins.has(origin))),
+    )}`,
     `font-src ${cspSources(['data:'], fontOrigins)}`,
     `connect-src ${cspSources(['data:', 'blob:'], connectOrigins)}`,
     'worker-src blob:',
@@ -247,12 +255,16 @@ function packageIndex(
   connectOrigins: readonly string[],
 ): string {
   const connectSource = cspSources(["'self'"], new Set(connectOrigins))
+  const mediaSource = cspSources(
+    ["'self'", 'data:', 'blob:'],
+    new Set(connectOrigins.filter((origin) => exactHttpsOrigin(origin) !== null)),
+  )
   return `<!doctype html>
 <html lang="${escapeHtml(lang)}">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self' data:; connect-src ${connectSource}; worker-src blob:">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src ${mediaSource}; media-src ${mediaSource}; font-src 'self' data:; connect-src ${connectSource}; worker-src blob:">
   <title>${escapeHtml(payload.title)}</title>
   <link rel="stylesheet" href="./player/player.css">
 </head>
