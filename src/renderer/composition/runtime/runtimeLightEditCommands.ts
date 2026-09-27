@@ -41,7 +41,7 @@ export const runtimeLightEditCommands = {
     const state = useEditorStore.getState()
     const document = selectActiveCourseProjectDocument(state)
     const projection = selectEffectiveLayerProjection(state)
-    if (!document || !projection) return { ok: false, reason: '当前没有可编辑的 H5 演示' }
+    if (!document || !projection || !projection.locationId) return { ok: false, reason: '当前没有可编辑的 H5 演示页面' }
     const target = state.captureRuntimeContentTextTarget({
       projectId: document.id,
       scope: selectEditingScope(state),
@@ -55,7 +55,13 @@ export const runtimeLightEditCommands = {
     if (!target) return { ok: false, reason: '这个 Runtime 已锁定或不在当前编辑范围，未写入修改' }
     const committed = state.updateRuntimeContentTextAtTarget(target, text)
     if (!committed.ok) return { ok: false, reason: committed.reason }
-    if (committed.status === 'updated') scheduleStaticFallbackRecapture(itemId)
+    if (committed.status === 'updated') {
+      const handle = useEditorStore.getState().captureCourseSubmission()
+      const locationId = projection.locationId
+      if (!handle || !locationId) return { ok: false, reason: '页面文字已更新，但静态后备图缺少确认版本或页面；请撤销本次修改后重试' }
+      scheduleStaticFallbackRecapture({ handle, itemId, locationId,
+        amend: (commit, command) => useEditorStore.getState().amendFrozenCourseCommit(commit, command) })
+    }
     return { ok: true, changed: committed.status === 'updated' }
   },
 }

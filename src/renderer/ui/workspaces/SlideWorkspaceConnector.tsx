@@ -334,7 +334,14 @@ export function SlideWorkspaceConnector({
       // M15: component light edits commit through the component authoring actions.
       writeComponentTextRule,
       replaceComponentAssetAtKey,
-      scheduleStaticFallbackRecapture,
+      scheduleStaticFallbackRecapture: (itemId, targetLocationId) => {
+        const state = useEditorStore.getState()
+        const handle = state.captureCourseSubmission()
+        if (!handle || !targetLocationId) return false
+        scheduleStaticFallbackRecapture({ handle, itemId, locationId: targetLocationId,
+          amend: (commit, command) => useEditorStore.getState().amendFrozenCourseCommit(commit, command) })
+        return true
+      },
     },
     authoring: {
       runFieldTextIntent: runSlideFieldTextIntent,
