@@ -128,7 +128,7 @@ test('M16-T04 Flow 正文、paper Native 与 Runtime 独立修改后保存重开
     await expect(player.locator('[data-m16-mixed-runtime="true"] h2')).toHaveText('Runtime 改后标题')
     await mode.getByRole('button', { name: '编辑状态', exact: true }).click()
     await page.getByRole('button', { name: '保存', exact: true }).click()
-    expect((await page.evaluate(async id => window.desktopAPI!.documents!.read(id), documentId)).dirty).toBe(false)
+    await expect.poll(async () => (await page.evaluate(async id => window.desktopAPI!.documents!.read(id), documentId)).dirty).toBe(false)
 
     await page.locator('.workspace-document-tabs').getByRole('button', { name: `关闭 ${name}`, exact: true }).click()
     await tree.getByRole('button', { name, exact: true }).dblclick()
