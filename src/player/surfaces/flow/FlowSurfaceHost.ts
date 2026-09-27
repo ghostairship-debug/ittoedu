@@ -306,17 +306,25 @@ export class FlowSurfaceHost {
     if (!wrap || !wrap.isConnected || !root.contains(wrap)) {
       throw new Error(`图层“${itemId}”在当前位置没有可捕获的宿主`)
     }
-    const width = wrap.offsetWidth
-    const height = wrap.offsetHeight
-    if (width <= 0 || height <= 0) throw new Error(`图层“${itemId}”没有可见布局尺寸`)
+    const capturedSize = { width: 0, height: 0 }
+    const width = item.frame.width
+    const height = item.frame.height
     const content = await capturePublishedSurfacePng({
       root: wrap,
       width,
       height,
       layers: [{ element: wrap, x: 0, y: 0, width, height, rotation: 0, opacity: 1 }],
+      resolveGeometryAfterReady: () => {
+        const width = wrap.offsetWidth
+        const height = wrap.offsetHeight
+        if (width <= 0 || height <= 0) throw new Error(`图层“${itemId}”没有可见布局尺寸`)
+        capturedSize.width = width
+        capturedSize.height = height
+        return { width, height, layers: [{ element: wrap, x: 0, y: 0, width, height, rotation: 0, opacity: 1 }] }
+      },
       transparentBackground: true,
     })
-    return { format: 'data-url', content, width, height }
+    return { format: 'data-url', content, ...capturedSize }
   }
 
   readObservationState() {

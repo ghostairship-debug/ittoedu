@@ -928,11 +928,16 @@ export interface PublishedSurfaceCaptureLayer {
 /** Backward-compatible name retained for Slide callers. */
 export type PublishedSlideCaptureLayer = PublishedSurfaceCaptureLayer
 
-export interface CapturePublishedSurfaceOptions {
-  readonly root: HTMLElement
+export interface PublishedSurfaceCaptureGeometry {
   readonly width: number
   readonly height: number
   readonly layers: readonly PublishedSurfaceCaptureLayer[]
+}
+
+export interface CapturePublishedSurfaceOptions extends PublishedSurfaceCaptureGeometry {
+  readonly root: HTMLElement
+  /** Resolve live geometry after dynamic capture resources and fonts are ready. Layer elements must stay the same. */
+  readonly resolveGeometryAfterReady?: () => PublishedSurfaceCaptureGeometry
   /** Item capture stays transparent and omits the authored page background. */
   readonly transparentBackground?: boolean
   readonly timeoutMs?: number
@@ -999,9 +1004,14 @@ export async function capturePublishedSurfacePng(
           'Published 静态捕获等待字体就绪超时',
         )
       }
+      const geometry = options.resolveGeometryAfterReady?.() ?? options
+      if (geometry.layers.length !== options.layers.length
+        || geometry.layers.some((layer, index) => layer.element !== options.layers[index]?.element)) {
+        throw new Error('Published 静态捕获就绪后不能替换图层资源')
+      }
       const canvas = options.root.ownerDocument.createElement('canvas')
-      canvas.width = Math.max(1, Math.round(options.width))
-      canvas.height = Math.max(1, Math.round(options.height))
+      canvas.width = Math.max(1, Math.round(geometry.width))
+      canvas.height = Math.max(1, Math.round(geometry.height))
       const context = canvas.getContext('2d')
       if (!context) throw new Error('无法创建 Published 页面合成画布')
       context.imageSmoothingEnabled = true
@@ -1029,7 +1039,7 @@ export async function capturePublishedSurfacePng(
         })
       }
 
-      for (const layer of options.layers) {
+      for (const layer of geometry.layers) {
         const content = await captureElementContent(
           layer.element,
           layer.width,
