@@ -1125,7 +1125,7 @@
         "M16"
       ],
       "document": "mid_term/M22.md",
-      "status": "planned",
+      "status": "verified",
       "existing_code": [
         "src/renderer/documents/CourseLightToolbar.tsx",
         "src/renderer/workbench/NativeSelectionContext.tsx"
