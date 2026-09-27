@@ -20,6 +20,7 @@ import { decodePublishedCode } from '../../decodePublishedExecutableCode'
 import { validateRuntimeSource } from '../../RuntimeRegistry'
 import { registerPublishedDynamicUpdateProbe } from '../publishedDynamicUpdateProbe'
 import { DomTextOverrides } from '../../lightEdit/domTextOverrides'
+import { managedHtmlDocuments, watchManagedHtmlDocuments } from '../../lightEdit/htmlDocumentRoots'
 import { observeSurfaceRuntimeContentSize, type SurfaceRuntimeContentSizeObserver, type SurfaceRuntimeContentSource } from './surfaceRuntimeContentSize'
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
 import type { RuntimeAuthoringTargetsChangedHandler } from '../../RuntimeAuthoringTargetRegistry'
@@ -647,12 +648,23 @@ export function mountPublishedSurfaceRuntime(
   }
 
   let contentSizeObserver: SurfaceRuntimeContentSizeObserver | null = null
+  let stopWatchingManagedHeight: (() => void) | null = null
   if (options.onContentHeightChange) {
+    const source = options.contentSizeSource ?? (() : SurfaceRuntimeContentSource | null => {
+      const iframe = root.querySelector<HTMLIFrameElement>('iframe[data-html-document-runtime="true"]')
+      if (!iframe) return { kind: 'viewport', origin: root, viewportElements: new Set([root]) }
+      if (iframe.dataset.htmlDocumentReady !== 'true') return null
+      if (iframe.clientWidth <= 0 || iframe.clientHeight <= 0) return null
+      const managed = managedHtmlDocuments(root).find(item => item.iframe === iframe)
+      return managed ? { kind: 'managed-document', iframe, origin: managed.root, minimumHeight: 1 } : null
+    })
     contentSizeObserver = observeSurfaceRuntimeContentSize({
       root,
-      ...(options.contentSizeSource ? { source: options.contentSizeSource } : {}),
+      source,
       onHeightChange: options.onContentHeightChange,
+      onError: error => quarantine(error),
     })
+    if (!options.contentSizeSource) stopWatchingManagedHeight = watchManagedHtmlDocuments(root, () => contentSizeObserver?.refresh())
   }
   let quarantined = false
   let capturePrepared = false
@@ -667,6 +679,7 @@ export function mountPublishedSurfaceRuntime(
     authoringTargets?.destroy()
     domText?.destroy()
     events.dispose()
+    stopWatchingManagedHeight?.()
     contentSizeObserver?.destroy()
     instanceDestroyed = true
     try { lifecycle.destroy() } catch (error) { reportError(options, 'destroy', error) }
@@ -738,6 +751,8 @@ export function mountPublishedSurfaceRuntime(
     async waitForObservationReady() {
       await handle.waitForReady()
       await captureBarrier.waitForReady()
+      await contentSizeObserver?.waitForReady()
+      await handle.waitForReady()
     },
     async waitForCaptureReady() {
       if (captureFailure) throw captureFailure
@@ -748,6 +763,7 @@ export function mountPublishedSurfaceRuntime(
         if (!suspended) lifecycle.suspend?.()
         lifecycle.setMode?.('capture')
         await captureBarrier.waitForReady(() => lifecycle.prepareCapture?.())
+        await contentSizeObserver?.waitForReady()
       } catch (cause) {
         quarantine(cause)
         capturePrepared = false
@@ -762,6 +778,7 @@ export function mountPublishedSurfaceRuntime(
     },
     setVisible(visible: boolean) {
       invoke(() => lifecycle.setVisible?.(visible))
+      contentSizeObserver?.refresh()
     },
     updateSize(width: number, height: number) {
       if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return
@@ -786,6 +803,7 @@ export function mountPublishedSurfaceRuntime(
       if (instanceDestroyed) return
       instanceDestroyed = true
       unregisterCapture()
+      stopWatchingManagedHeight?.()
       contentSizeObserver?.destroy()
       captureBarrier.destroy()
       try {

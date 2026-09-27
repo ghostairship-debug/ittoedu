@@ -1,15 +1,20 @@
+import { measureManagedHtmlContent, type ManagedHtmlMeasurementSource } from './managedHtmlContentMeasurement'
+
 export type SurfaceRuntimeContentSource =
   | { kind: 'intrinsic'; element: HTMLElement }
   | { kind: 'viewport'; origin: HTMLElement; viewportElements: ReadonlySet<HTMLElement> }
+  | ManagedHtmlMeasurementSource
 
 export interface SurfaceRuntimeContentSizeOptions {
   root: HTMLElement
   source?: () => SurfaceRuntimeContentSource | null
   onHeightChange(height: number): void
+  onError?(error: Error): void
 }
 
 export interface SurfaceRuntimeContentSizeObserver {
   refresh(): void
+  waitForReady(): Promise<void>
   destroy(): void
 }
 
@@ -17,6 +22,7 @@ function sameSource(left: SurfaceRuntimeContentSource | null, right: SurfaceRunt
   if (!left || !right) return left === right
   if (left.kind !== right.kind) return false
   if (left.kind === 'intrinsic' && right.kind === 'intrinsic') return left.element === right.element
+  if (left.kind === 'managed-document' && right.kind === 'managed-document') return left.iframe === right.iframe && left.origin === right.origin
   if (left.kind !== 'viewport' || right.kind !== 'viewport' || left.origin !== right.origin) return false
   return left.viewportElements.size === right.viewportElements.size
     && [...left.viewportElements].every(element => right.viewportElements.has(element))
@@ -38,7 +44,7 @@ function directTextBottom(element: HTMLElement, originTop: number, scaleY: numbe
   return bottom
 }
 
-function contentHeight(source: SurfaceRuntimeContentSource): number {
+function contentHeight(source: Exclude<SurfaceRuntimeContentSource, ManagedHtmlMeasurementSource>): number {
   if (source.kind === 'intrinsic') return Math.max(0, source.element.offsetHeight)
   const origin = source.origin
   const originRect = origin.getBoundingClientRect()
@@ -67,6 +73,15 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
   let observedSource: SurfaceRuntimeContentSource | null = null
   let resizeObserver: ResizeObserver | null = null
   let mutationObserver: MutationObserver | null = null
+  let controller: AbortController | null = null
+  let generation = 0
+  let failure: Error | null = null
+  let consecutiveChanges = 0
+  const waiters = new Set<{ resolve(): void; reject(error: Error): void }>()
+  const settle = (error?: Error): void => {
+    for (const waiter of waiters) error ? waiter.reject(error) : waiter.resolve()
+    waiters.clear()
+  }
   const sourceRoot = (source: SurfaceRuntimeContentSource): HTMLElement => source.kind === 'intrinsic' ? source.element : source.origin
   const bindResizeNodes = (): void => {
     resizeObserver?.disconnect()
@@ -76,17 +91,41 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
     for (const child of root.querySelectorAll('*')) resizeObserver.observe(child)
   }
   const schedule = (): void => {
-    if (destroyed || frame || !view) return
-    frame = view.requestAnimationFrame(() => {
+    if (destroyed || failure || !view) return
+    generation += 1
+    controller?.abort()
+    if (frame) return
+    frame = view.requestAnimationFrame(async () => {
       frame = 0
       if (destroyed) return
+      const currentGeneration = generation
       const source = options.source ? options.source() : defaultSource
       if (!sameSource(source, observedSource)) attach(source)
-      if (!source) return
-      const height = contentHeight(source)
-      if (height === lastHeight) return
-      lastHeight = height
-      options.onHeightChange(height)
+      if (!source) { settle(); return }
+      const pending = new AbortController()
+      controller = pending
+      try {
+        const height = source.kind === 'managed-document'
+          ? await measureManagedHtmlContent(source, pending.signal)
+          : contentHeight(source)
+        if (destroyed || pending.signal.aborted || currentGeneration !== generation) return
+        // Navigation can replace the child document without a mutation in the old tree.
+        if (source.kind === 'managed-document' && source.iframe.contentDocument !== source.origin.ownerDocument) { schedule(); return }
+        if (height !== lastHeight) {
+          if (source.kind === 'managed-document' && ++consecutiveChanges > 12) throw new Error('HTML 页面在调整 Flow 高度后持续改变布局，无法稳定显示；请使用演示页。')
+          lastHeight = height
+          options.onHeightChange(height)
+          // The real page may react to its one final resize. Check that result before readiness.
+          if (source.kind === 'managed-document') { schedule(); return }
+        } else consecutiveChanges = 0
+        settle()
+      } catch (cause) {
+        if (destroyed || pending.signal.aborted || currentGeneration !== generation) return
+        if (cause instanceof Error && cause.name === 'AbortError') { schedule(); return }
+        failure = cause instanceof Error ? cause : new Error(String(cause))
+        settle(failure)
+        options.onError?.(failure)
+      }
     })
   }
   const attach = (source: SurfaceRuntimeContentSource | null): void => {
@@ -107,9 +146,18 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
   schedule()
   return {
     refresh: schedule,
+    waitForReady() {
+      if (failure) return Promise.reject(failure)
+      if (destroyed) return Promise.reject(new Error('内容高度观察器已销毁'))
+      const result = new Promise<void>((resolve, reject) => waiters.add({ resolve, reject }))
+      schedule()
+      return result
+    },
     destroy() {
       if (destroyed) return
       destroyed = true
+      controller?.abort()
+      settle(new Error('内容高度观察器已销毁'))
       if (frame && view) view.cancelAnimationFrame(frame)
       resizeObserver?.disconnect()
       mutationObserver?.disconnect()
