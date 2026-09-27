@@ -511,39 +511,53 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
   const selectTargetMedia = useCallback(async <T extends object>(
     input: TargetMediaSelection<T>,
   ): Promise<PreparedTargetMedia | null> => {
+    // Freeze before entering App's action queue, not when the native picker opens.
     const target = input.captureTarget()
-    if (!target) throw new Error('当前没有可用的媒体插入目标。')
-    const frozenTarget = Object.freeze({ ...target }) as Readonly<T>
+    const frozenTarget = target ? Object.freeze({ ...target }) as Readonly<T> : null
     const started = portsRef.current.captureIdentity()
     const context = portsRef.current.readCourseMediaContext?.()
-    if (!started || !context) throw new Error('当前没有可写入的课程媒体资源。')
     const title = '媒体插入已取消'
     const assertCurrent = () => {
+      if (!frozenTarget) throw new Error('当前没有可用的媒体插入目标。')
+      if (!started || !context) throw new Error('当前没有可写入的课程媒体资源。')
       assertFreshIdentity(started, portsRef.current.captureIdentity(), title)
       if (!input.isTargetCurrent(frozenTarget)) {
         throw new UserFacingError(title, '文档或选区已变化，请重新选择媒体。', '请重新选择插入位置后再试。')
       }
     }
-    assertCurrent()
-    const select = input.kind === 'image' ? portsRef.current.selectImage
-      : input.kind === 'video' ? portsRef.current.selectVideo : portsRef.current.selectAudio
-    if (!select) throw new Error('当前界面不支持选择此类媒体。')
-    const file = await select()
-    if (!file) return null
-    assertCurrent()
-    const imported = input.kind === 'image'
-      ? createImageAssetImport(file, { dimensions: await readImageDimensions(file.bytes, file.mimeType) })
-      : createMediaAssetImport(file, input.kind,
-        await readMediaMetadata(file.bytes, file.mimeType, input.kind))
-    assertCurrent()
-    const deduped = await dedupeCourseMediaImports(input.kind, context.assets, context.sidecar, [imported])
-    assertCurrent()
-    const placement = deduped.placements[0]
-    if (!placement) throw new Error('所选媒体素材未准备完成。')
-    const source = deduped.additions.length === 0
-      ? { kind: 'existing' as const, assetId: placement.meta.id }
-      : { kind: 'new' as const, meta: placement.meta, bytes: placement.bytes }
-    return { asset: placement.meta, bytes: placement.bytes, source, assertCurrent }
+    let failure: unknown
+    let failed = false
+    const prepared = await portsRef.current.runBusy(async () => {
+      try {
+        assertCurrent()
+        const select = input.kind === 'image' ? portsRef.current.selectImage
+          : input.kind === 'video' ? portsRef.current.selectVideo : portsRef.current.selectAudio
+        if (!select) throw new Error('当前界面不支持选择此类媒体。')
+        const file = await select()
+        if (!file) return null
+        assertCurrent()
+        const imported = input.kind === 'image'
+          ? createImageAssetImport(file, { dimensions: await readImageDimensions(file.bytes, file.mimeType) })
+          : createMediaAssetImport(file, input.kind,
+            await readMediaMetadata(file.bytes, file.mimeType, input.kind))
+        assertCurrent()
+        const deduped = await dedupeCourseMediaImports(input.kind, context!.assets, context!.sidecar, [imported])
+        assertCurrent()
+        const placement = deduped.placements[0]
+        if (!placement) throw new Error('所选媒体素材未准备完成。')
+        const source = deduped.additions.length === 0
+          ? { kind: 'existing' as const, assetId: placement.meta.id }
+          : { kind: 'new' as const, meta: placement.meta, bytes: placement.bytes }
+        return { asset: placement.meta, bytes: placement.bytes, source, assertCurrent }
+      } catch (error) {
+        // runBusy reports the failure; preserve rejection for Flow/Slide callers.
+        failed = true
+        failure = error
+        throw error
+      }
+    }, '媒体读取失败。请重新选择受支持的文件。')
+    if (failed) throw failure
+    return prepared ?? null
   }, [])
 
   const selectAndImportAudio = useCallback(async () => {

@@ -164,6 +164,28 @@ describe('useMediaImport target media Owner', () => {
     }
   }
 
+  it('freezes the target before the busy queue and reports a stale queued selection', async () => {
+    const harness = createHarness()
+    const select = vi.fn(async () => chosen)
+    harness.ports.selectImage = select
+    const originalRun = harness.ports.runBusy
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => { release = () => resolve() })
+    const busy = vi.fn(async <T,>(operation: () => Promise<T>, fallback: string) => {
+      await gate
+      return originalRun(operation, fallback)
+    })
+    harness.ports.runBusy = busy as MediaImportPorts['runBusy']
+    const { result } = renderHook(() => useMediaImport(harness.ports))
+    const pending = result.current.selectTargetMedia(targetInput(harness))
+    expect(busy).toHaveBeenCalledTimes(1)
+    harness.identity.revision = 2
+    release()
+    await expect(pending).rejects.toThrow('工程已发生变化')
+    expect(select).not.toHaveBeenCalled()
+    expect(errorText(harness.errors[0])).toContain('工程已发生变化')
+  })
+
   it('reuses the existing asset and sidecar bytes for identical content', async () => {
     const harness = createHarness()
     const existing = createImageAssetImport(chosen, { id: 'existing', dimensions: { width: 20, height: 10 } })
