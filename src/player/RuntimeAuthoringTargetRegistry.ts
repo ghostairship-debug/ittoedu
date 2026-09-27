@@ -1,7 +1,7 @@
 import type * as PhaserTypes from 'phaser'
 import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../shared/slideCanvas'
 import { observerFor, type DomTextOverrides } from './lightEdit/domTextOverrides'
-import { managedHtmlDocuments, managedHtmlRect, watchManagedHtmlDocuments } from './lightEdit/htmlDocumentRoots'
+import { managedHtmlDocuments, managedHtmlRect, visibleDomRect, watchManagedHtmlDocuments } from './lightEdit/htmlDocumentRoots'
 import type { PhaserTextOverrides } from './lightEdit/phaserTextOverrides'
 import type {
   EditableTextContent,
@@ -434,9 +434,14 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
         const range = sample.node.ownerDocument.createRange()
         if (typeof range.getBoundingClientRect !== 'function') continue
         range.selectNodeContents(sample.node)
-        const measured = range.getBoundingClientRect()
-        const rect = document ? managedHtmlRect(measured, document) : measured
-        if (!finitePositiveDomRect(rect)) continue
+        const parent = sample.node.parentElement
+        if (!parent) continue
+        const measured = visibleDomRect(range.getBoundingClientRect(), parent)
+        if (!measured) continue
+        const rect = document
+          ? visibleDomRect(managedHtmlRect(measured, document), document.iframe)
+          : measured
+        if (!rect) continue
         targets.push(this.freezeTarget({
           targetId: `auto:${this.domElementId(sample.node)}:text`,
           ...scope,
@@ -455,9 +460,12 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
         if (image.closest('[data-courseware-asset-key]')) continue
         const key = sources.assetKeyForUrl(image.currentSrc || image.src)
         if (!key || !this.knownKey('asset', key)) continue
-        const measured = image.getBoundingClientRect()
-        const rect = imageRoot.document ? managedHtmlRect(measured, imageRoot.document) : measured
-        if (!finitePositiveDomRect(rect)) continue
+        const measured = visibleDomRect(image.getBoundingClientRect(), image)
+        if (!measured) continue
+        const rect = imageRoot.document
+          ? visibleDomRect(managedHtmlRect(measured, imageRoot.document), imageRoot.document.iframe)
+          : measured
+        if (!rect) continue
         targets.push(this.freezeTarget({
           targetId: `auto:${this.domElementId(image)}:asset`,
           ...scope,

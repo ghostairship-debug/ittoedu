@@ -211,3 +211,48 @@ it('suppresses only the click from a consumed pointer sequence', () => {
   expect(clicks).toBe(3)
   stop(); root.remove()
 })
+
+it('publishes only painted image and text bounds after axis-specific clipping', async () => {
+  const root = document.createElement('div')
+  document.body.append(root)
+  root.getBoundingClientRect = () => rect(0, 0, 300, 200)
+  root.innerHTML = '<section><img src="data:image/png;base64,SEVSTw=="></section><aside><h2>译文位置</h2></aside>'
+  const section = root.querySelector('section')!
+  section.style.overflowX = 'hidden'
+  section.getBoundingClientRect = () => rect(20, 20, 100, 100)
+  const image = section.querySelector('img')!
+  image.getBoundingClientRect = () => rect(20, 30, 130, 60)
+  const aside = root.querySelector('aside')!
+  aside.style.overflowY = 'scroll'
+  aside.getBoundingClientRect = () => rect(125, 60, 80, 20)
+  const originalRange = Range.prototype.getBoundingClientRect
+  Object.defineProperty(Range.prototype, 'getBoundingClientRect', {
+    configurable: true, value: () => rect(130, 55, 60, 40),
+  })
+  const dom = new DomTextOverrides([root], [])
+  const updates: RuntimeAuthoringTargetUpdate[] = []
+  const registry = new RuntimeAuthoringTargetRegistry({
+    scope: 'scene', width: 300, height: 200, canvas: { width: 300, height: 200 },
+    content: { values: {} }, assets: { hero: { assetId: 'hero' } },
+    domRoots: { underlay: document.createElement('div'), overlay: root },
+    lightEdit: { dom, assetKeyForUrl: url => url === 'data:image/png;base64,SEVSTw==' ? 'hero' : undefined },
+    onTargetsChanged: update => updates.push(update),
+  })
+  try {
+    await flush()
+    const targets = updates.at(-1)!.targets
+    const asset = targets.find(target => target.kind === 'asset')!
+    const text = targets.find(target => target.kind === 'text' && target.label === '译文位置')!
+    expect(asset.bounds).toEqual({ x: 20, y: 30, width: 100, height: 60 })
+    expect(text.bounds).toEqual({ x: 130, y: 60, width: 60, height: 20 })
+    expect(asset.bounds.x + asset.bounds.width).toBeLessThan(text.bounds.x)
+    image.getBoundingClientRect = () => rect(130, 30, 20, 60)
+    registry.invalidate()
+    await flush()
+    expect(updates.at(-1)!.targets.some(target => target.kind === 'asset')).toBe(false)
+    expect(updates.at(-1)!.targets.some(target => target.kind === 'text')).toBe(true)
+  } finally {
+    registry.destroy(); dom.destroy(); root.remove()
+    Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true, value: originalRange })
+  }
+})

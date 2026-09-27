@@ -18,6 +18,39 @@ export function managedHtmlDocuments(root: ParentNode): ManagedHtmlDocument[] {
   return documents
 }
 
+/** The painted part of a DOM target, before any iframe coordinate mapping. */
+export function visibleDomRect(rect: DOMRect, element: Element): DOMRect | null {
+  const document = element.ownerDocument
+  const view = document.defaultView
+  const viewport = document.documentElement
+  let left = Math.max(rect.left, 0)
+  let top = Math.max(rect.top, 0)
+  let right = Math.min(rect.right, view?.innerWidth || viewport.clientWidth)
+  let bottom = Math.min(rect.bottom, view?.innerHeight || viewport.clientHeight)
+  for (let ancestor: Element | null = element; ancestor; ancestor = ancestor.parentElement) {
+    const style = view?.getComputedStyle(ancestor)
+    if (!style) continue
+    const overflowX = style.overflowX || style.overflow
+    const overflowY = style.overflowY || style.overflow
+    const clipsX = /^(hidden|clip|auto|scroll)$/.test(overflowX)
+    const clipsY = /^(hidden|clip|auto|scroll)$/.test(overflowY)
+    if (!clipsX && !clipsY) continue
+    const bounds = ancestor.getBoundingClientRect()
+    const clipLeft = bounds.left + ancestor.clientLeft
+    const clipTop = bounds.top + ancestor.clientTop
+    if (clipsX) {
+      left = Math.max(left, clipLeft)
+      right = Math.min(right, clipLeft + (ancestor.clientWidth || bounds.width))
+    }
+    if (clipsY) {
+      top = Math.max(top, clipTop)
+      bottom = Math.min(bottom, clipTop + (ancestor.clientHeight || bounds.height))
+    }
+  }
+  if (![left, top, right, bottom].every(Number.isFinite) || right <= left || bottom <= top) return null
+  return new DOMRect(left, top, right - left, bottom - top)
+}
+
 /** A child document's viewport rectangle expressed in the outer document. */
 export function managedHtmlRect(rect: DOMRect, managed: ManagedHtmlDocument): DOMRect {
   const frame = managed.iframe.getBoundingClientRect()
