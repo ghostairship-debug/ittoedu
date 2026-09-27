@@ -4,6 +4,7 @@ import type { BrowserWindow } from 'electron'
 import type { HostToolServices } from '../../core/tools/HostToolServices'
 import { documentHost } from './documentHost'
 import { ControlledBuildService } from './build/ControlledBuildService'
+import { htmlImportNetworkGrants } from './htmlImport/htmlImportNetworkGrants'
 import { createElectronBuildAdmission } from './build/ElectronBuildAdmission'
 import { frozenImageRoles } from './images/frozenImageRoles'
 import { ImageGenerationService } from './images/ImageGenerationService'
@@ -53,7 +54,8 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       stop: id => images.stop(id), readResource: id => images.readResource(id),
       readReadyResourceFromJob: input => images.readReadyResourceFromJob(input) },
     builds: { create: (input, ticket) => builds.create(input, ticket), lookupCreate: (runId, ticket) => builds.lookupCreate(runId, ticket), execute: (runId, call) => builds.execute(runId, call),
-      artifact: (runId, jobId, artifactId) => builds.artifact(runId, jobId, artifactId), cancelRun: runId => builds.cancelRun(runId) },
+      artifact: (runId, jobId, artifactId) => builds.artifact(runId, jobId, artifactId), cancelRun: runId => builds.cancelRun(runId),
+      policy: (runId, documentId) => htmlImportNetworkGrants.policy(runId, documentId, () => host.registry.get(documentId).read()) },
   }
   host.tools.configureHostServices(services)
   imageService = images

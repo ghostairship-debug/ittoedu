@@ -16,6 +16,7 @@ import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { ControlledBuildService } from '../../src/main/workbench/build/ControlledBuildService'
 import { createDocumentJournal } from '../../src/main/workbench/documentJournal'
 import { HtmlImportService } from '../../src/main/workbench/htmlImport/HtmlImportService'
+import { HtmlImportNetworkGrants } from '../../src/main/workbench/htmlImport/htmlImportNetworkGrants'
 import { normalizeDesktopError } from '../../src/main/errors'
 import { unpackHtmlDocumentRuntimeSource } from '../../src/shared/runtime/htmlDocumentSource'
 import type { BuildAdmissionPort } from '../../src/shared/workbench/build'
@@ -65,13 +66,17 @@ async function fixture(admission?: BuildAdmissionPort, existingOrders: readonly 
       frames: [{ phase: 'running', elapsedMs: 0, capturedAt: 0, stateVersion: 0, publicState: {}, width: 1, height: 1,
         dataUrl: `data:image/png;base64,${png.toString('base64')}` }], elapsedMs: 0, semanticVerdict: 'requires-review' })) }))
   const builds = new ControlledBuildService({ directory: path.join(root, 'builds'), admission: admission ?? { run } })
-  const gateway = new DocumentToolGateway(registry, [driver], randomUUID, { services: { builds } })
+  const grants = new HtmlImportNetworkGrants()
+  const hostedBuilds = Object.assign(builds, {
+    policy: (runId: string, documentId: string) => grants.policy(runId, documentId, () => registry.get(documentId).read()),
+  })
+  const gateway = new DocumentToolGateway(registry, [driver], randomUUID, { services: { builds: hostedBuilds } })
   await gateway.beginRun({ runId: 'run', actor: 'human', documents: [{ documentId: session.documentId, writable: [{ kind: 'document' }] }] })
   const targetHandle = await gateway.issueTarget('run', session.documentId, { kind: 'document' })
-  const service = new HtmlImportService({ session, gateway })
+  const service = new HtmlImportService({ session, gateway, networkGrants: grants })
   const request = { operationId: 'html-import-1', runId: 'run', targetHandle, sourcePath, locationId: kind === 'flow'
     ? project.locations.find(item => item.kind === 'flow-block')!.id : project.locations[0]!.id }
-  return { root, sourcePath, project, session, service, request, builds, gateway, run, journal }
+  return { root, sourcePath, project, session, service, request, builds, gateway, run, journal, grants }
 }
 
 describe('M17 S13 HTML import orchestration', () => {
@@ -212,7 +217,7 @@ describe('M17 S13 HTML import orchestration', () => {
     expect(ticket.jobId).toBeTruthy()
     await f.service.cancel(ticket)
     const bad = await fixture()
-    await fs.writeFile(bad.sourcePath, '<img src="https://example.org/a.png">')
+    await fs.writeFile(bad.sourcePath, '<script src="https://example.org/lesson.js"></script>')
     await expect(bad.service.prepare(bad.request)).rejects.toThrow('远程')
     const network = await fixture()
     await fs.writeFile(network.sourcePath, '<script>fetch("https://example.org/a.json")</script>')
@@ -220,7 +225,7 @@ describe('M17 S13 HTML import orchestration', () => {
     expect(network.run).not.toHaveBeenCalled()
   })
 
-  it('projects every rejected remote URL through desktop IPC without writing the document', async () => {
+  it('projects a rejected remote script through desktop IPC without writing the document', async () => {
     const f = await fixture()
     const urls = ['https://example.org/lesson.js', 'https://example.org/photo.png', 'https://example.org/audio.mp3']
     await fs.writeFile(f.sourcePath, `<script src="${urls[0]}"></script><img src="${urls[1]}"><audio src="${urls[2]}"></audio>`)
@@ -232,13 +237,43 @@ describe('M17 S13 HTML import orchestration', () => {
     expect(failure).toBeDefined()
     const shown = normalizeDesktopError(failure, fallback)
     expect(shown.title).toBe('HTML 导入失败')
-    for (const url of urls) expect(shown.message).toContain(url)
-    expect(shown.suggestion).toContain('本地化')
+    expect(shown.message).toContain(urls[0]!)
+    expect(shown.message).not.toContain(urls[1]!)
+    expect(shown.message).not.toContain(urls[2]!)
+    expect(shown.suggestion).toContain('修正')
     expect(shown.message).not.toBe(fallback.message)
     expect(execute).not.toHaveBeenCalled()
     expect(f.session.read().revision).toBe(before.revision)
     expect(f.session.read().undoDepth).toBe(before.undoDepth)
     expect(f.session.read().model).toEqual(before.model)
+  })
+
+  it('imports HTTPS media with an exact origin, a visible notice and one undoable document write', async () => {
+    const f = await fixture()
+    const imageUrl = 'https://cdn.example.org/photo.png'
+    const audioUrl = 'https://cdn.example.org/lesson.mp3'
+    await fs.writeFile(f.sourcePath, `<img src="${imageUrl}"><audio controls src="${audioUrl}"></audio>`)
+    const ticket = await f.service.prepare(f.request)
+    expect(f.service.notices(ticket).join('\n')).toContain('离线时可能无法使用')
+    const scratch = JSON.parse(await fs.readFile(path.join(f.root, 'builds', ticket.jobId, 'files', 'project.json'), 'utf8'))
+    expect(scratch.network.connectOrigins).toEqual(['https://cdn.example.org'])
+    await f.service.admit(ticket)
+    expect((await f.service.commit(ticket)).status).toBe('applied')
+    const committed = f.session.read()
+    if (committed.model.kind !== 'course-v9') throw new Error('wrong model')
+    expect(committed.model.project.network?.connectOrigins).toEqual(['https://cdn.example.org'])
+    const item = committed.model.project.surfaces[0]
+    if (item?.type !== 'slide' || item.scenes[0]?.layerItems[0]?.kind !== 'runtime') throw new Error('wrong imported carrier')
+    const html = unpackHtmlDocumentRuntimeSource(item.scenes[0].layerItems[0].runtime.source)?.html ?? ''
+    expect(html).toContain(imageUrl)
+    expect(html).toContain(audioUrl)
+    expect(committed.undoDepth).toBe(1)
+    expect(f.grants.policy('run', committed.documentId, () => committed)).toBeUndefined()
+    await f.session.execute({ documentId: committed.documentId, epoch: committed.epoch, baseRevision: committed.revision,
+      operationId: 'undo-remote-media', actor: 'human', mutation: { type: 'undo' } })
+    const undone = f.session.read()
+    if (undone.model.kind !== 'course-v9') throw new Error('wrong model')
+    expect(undone.model.project.network?.connectOrigins ?? []).toEqual([])
   })
 
   it('cancels an in-flight S13 check and keeps late results outside the document', async () => {

@@ -11,6 +11,7 @@ import { insertHtmlImportEmptyParagraph, resolveHtmlImportTarget } from './resol
 import { prepareImageResource } from '../admittedImageResource'
 import { readHtmlClosure } from './readHtmlClosure'
 import { validateHtmlImport } from './validateHtmlImport'
+import { collectRemoteMediaOrigins } from './remoteHtmlReferences'
 import type { ExtractedResource, ImportDiagnostic } from './types'
 
 type CourseModel = Extract<DocumentModel, { kind: 'course-v9' }>
@@ -21,6 +22,7 @@ export interface HtmlCourseCandidate {
   model: CourseModel
   instanceId: string
   diagnostics: ImportDiagnostic[]
+  networkOrigins: string[]
 }
 
 function assetKind(resource: ExtractedResource): 'image' | 'audio' | 'video' | 'font' {
@@ -45,9 +47,15 @@ export async function prepareHtmlCourseCandidate(input: {
   const destination = resolveHtmlImportTarget(snapshot.model.project, input.locationId, input.anchorBlockId)
   const closure = await readHtmlClosure({ htmlPath: input.sourcePath, ...(input.rootDir ? { rootDir: input.rootDir } : {}) })
   signal?.throwIfAborted()
-  const errors = validateHtmlImport(closure)
-  if (errors.length) throw new UserFacingError('HTML 导入失败', errors.map(item => item.message).join('\n'), '请移除或本地化列出的资源后重试。')
+  const diagnostics = validateHtmlImport(closure)
+  const errors = diagnostics.filter(item => item.level === 'error')
+  if (errors.length) throw new UserFacingError('HTML 导入失败', errors.map(item => item.message).join('\n'), '请修正列出的不受支持或不安全资源后重试。')
+  const networkOrigins = collectRemoteMediaOrigins(closure)
   const project = structuredClone(snapshot.model.project)
+  if (networkOrigins.length) project.network = {
+    ...project.network,
+    connectOrigins: [...new Set([...(project.network?.connectOrigins ?? []), ...networkOrigins])].sort(),
+  }
   const resources = structuredClone(snapshot.model.resources)
   const assets: Record<string, { assetId: string }> = {}
   for (const resource of closure.resources) {
@@ -98,5 +106,5 @@ export async function prepareHtmlCourseCandidate(input: {
   validateCourseProjectArchiveData({ project: model.project, assetFiles: model.resources.assets, componentFiles: model.resources.components })
   signal?.throwIfAborted()
   return { target: { documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision, projectId: project.id, locationId: destination.locationId, surfaceId: destination.surfaceId, ...(destination.kind === 'flow' ? { anchorBlockId: destination.anchorBlockId } : {}) },
-    sourcePath: input.sourcePath, model, instanceId, diagnostics: closure.diagnostics }
+    sourcePath: input.sourcePath, model, instanceId, diagnostics, networkOrigins }
 }

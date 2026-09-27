@@ -25,7 +25,7 @@ export interface HostToolServices {
     execute(runId: string, call: BuildToolCall): Promise<unknown>
     artifact(runId: string, jobId: string, artifactId: string): Promise<BuildImportArtifact>
     cancelRun(runId: string): Promise<unknown>
-    policy?(runId: string, documentId: string): { allowedOrigins: readonly string[]; budget?: Partial<BuildBudget> } | Promise<{ allowedOrigins: readonly string[]; budget?: Partial<BuildBudget> }>
+    policy?(runId: string, documentId: string): { allowedOrigins: readonly string[]; budget?: Partial<BuildBudget> } | undefined | Promise<{ allowedOrigins: readonly string[]; budget?: Partial<BuildBudget> } | undefined>
   }
 }
 const handle = z.string().min(1).max(512)

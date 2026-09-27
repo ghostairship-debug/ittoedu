@@ -52,6 +52,14 @@ describe('M17 human HTML desktop import', () => {
     expect(f.gateway.stop).toHaveBeenCalledWith(result?.runId)
   })
 
+  it('returns a nonblocking offline notice for a legal HTTPS image', async () => {
+    const f = await fixture()
+    await fs.writeFile(f.source, '<img src="https://cdn.example.org/photo.png">')
+    const result = await f.service.import(f.input)
+    expect(result?.receipt.status).toBe('applied')
+    expect(result?.notices.join('\n')).toContain('离线时可能无法使用')
+  })
+
   it('rejects stale requests and strict-contract extras before starting a run', async () => {
     const f = await fixture()
     await expect(f.service.import({ ...f.input, revision: 1 })).rejects.toThrow('目标已改变')

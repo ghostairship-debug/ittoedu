@@ -428,6 +428,12 @@ export const COURSE_PROJECT_VALIDATION_FINDING_CODE_LEDGER = [
     note: 'V9 Schema enforces layerItemId uniqueness inside each owner list.',
   },
   {
+    code: 'offline-managed-html-remote-media',
+    status: 'active',
+    sections: ['exportPreflight'],
+    note: 'Managed HTML can preserve online media that will be unavailable in offline portable export.',
+  },
+  {
     code: 'online-connect-origin-undeclared',
     status: 'upstream-filtered',
     sections: ['exportPreflight'],

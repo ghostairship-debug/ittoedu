@@ -22,6 +22,7 @@ export interface HtmlImportDesktopResult {
   operationId: string
   runId: string
   receipt: DocumentOperationResult
+  notices: string[]
 }
 export interface HtmlImportDesktopAPI {
   import(input: HtmlImportDesktopRequest): Promise<HtmlImportDesktopResult | null>

@@ -3,6 +3,7 @@ import type { DocumentSession } from '../../../core/documents/DocumentSession'
 import type { ToolGateway, ToolResult } from '../../../shared/workbench/tools'
 import type { DocumentOperationResult } from '../../../shared/workbench/document'
 import { prepareHtmlCourseCandidate, type HtmlCourseCandidate } from './prepareHtmlCourseCandidate'
+import type { HtmlImportNetworkGrants } from './htmlImportNetworkGrants'
 
 export interface HtmlImportRequest {
   operationId: string
@@ -39,7 +40,7 @@ function read(result: ToolResult): Record<string, unknown> {
 export class HtmlImportService {
   private readonly records = new Map<string, ImportRecord>()
   private readonly preparing = new Map<string, { digest: string; promise: Promise<HtmlImportTicket> }>()
-  constructor(private readonly ports: { session: DocumentSession; gateway: BuildGateway }) {}
+  constructor(private readonly ports: { session: DocumentSession; gateway: BuildGateway; networkGrants?: HtmlImportNetworkGrants }) {}
 
   private call(runId: string, callId: string, name: string, input: unknown): Promise<ToolResult> {
     return this.ports.gateway.execute(runId, callId, { name, input })
@@ -66,7 +67,16 @@ export class HtmlImportService {
         locationId: request.locationId, ...(request.anchorBlockId ? { anchorBlockId: request.anchorBlockId } : {}),
         ...(request.rootDir ? { rootDir: request.rootDir } : {}) })
       if (this.ports.session.read().epoch !== baseline.epoch || this.ports.session.read().revision !== baseline.revision) throw new Error('HTML 导入目标已改变；未建立构建任务')
-      const job = read(await this.call(request.runId, `${request.operationId}:create`, 'build.create', { target: request.targetHandle })).job
+      if (candidate.networkOrigins.length && !this.ports.networkGrants) throw new Error('HTML 导入网络授权服务不可用')
+      if (candidate.networkOrigins.length) this.ports.networkGrants!.register(request.runId, {
+        documentId: baseline.documentId, epoch: baseline.epoch, revision: baseline.revision, origins: candidate.networkOrigins,
+      })
+      let job: unknown
+      try {
+        job = read(await this.call(request.runId, `${request.operationId}:create`, 'build.create', { target: request.targetHandle })).job
+      } finally {
+        this.ports.networkGrants?.clear(request.runId)
+      }
       if (typeof job !== 'string') throw new Error('受控构建未返回任务身份')
       const record: ImportRecord = { digest, candidate, runId: request.runId, jobId: job, state: 'prepared' }
       this.records.set(request.operationId, record)
@@ -95,6 +105,10 @@ export class HtmlImportService {
   private ticket(operationId: string, record: ImportRecord): HtmlImportTicket {
     return { operationId, requestDigest: record.digest, runId: record.runId, jobId: record.jobId,
       target: { ...record.candidate.target }, sourcePath: record.candidate.sourcePath, instanceId: record.candidate.instanceId }
+  }
+
+  notices(ticket: HtmlImportTicket): string[] {
+    return this.require(ticket).candidate.diagnostics.filter(item => item.level === 'warning').map(item => item.message)
   }
 
   private require(ticket: HtmlImportTicket): ImportRecord {

@@ -5,6 +5,7 @@ import type { DocumentHostService } from '../DocumentHostService'
 import { htmlImportDesktopRequestSchema } from '../../../shared/workbench/htmlImportDesktop'
 import type { HtmlImportDesktopResult } from '../../../shared/workbench/htmlImportDesktop'
 import { HtmlImportService } from './HtmlImportService'
+import { htmlImportNetworkGrants } from './htmlImportNetworkGrants'
 import { resolveHtmlImportTarget } from './resolveHtmlImportTarget'
 
 /** Main owns the human run and frozen document target; the S13 Gateway remains the only writer. */
@@ -46,12 +47,13 @@ export class HtmlImportDesktopService {
       const afterHandle = await session.drain()
       if (afterHandle.epoch !== frozen.epoch || afterHandle.revision !== frozen.revision)
         throw new Error('HTML 导入目标在签发句柄期间已改变；未建立候选')
-      const service = new HtmlImportService({ session, gateway })
+      const service = new HtmlImportService({ session, gateway, networkGrants: htmlImportNetworkGrants })
       const ticket = await service.prepare({ operationId, runId, targetHandle, sourcePath: source, locationId: input.locationId, anchorBlockId: input.anchorBlockId })
       await service.admit(ticket)
       const receipt = await service.commit(ticket)
-      return { operationId, runId, receipt }
+      return { operationId, runId, receipt, notices: service.notices(ticket) }
     } finally {
+      htmlImportNetworkGrants.clear(runId)
       await gateway.stop(runId)
     }
   }

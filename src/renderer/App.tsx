@@ -420,7 +420,7 @@ export default function App() {
         throw new Error('导入已提交，但当前文档尚未同步；请重新打开页面核对')
       }
       setHtmlImportDialog(null)
-      setStatus('HTML 页面已导入到所选位置')
+      setStatus(result.notices.length ? 'HTML 页面已导入；在线图片/音视频链接已保留，离线时可能无法使用' : 'HTML 页面已导入到所选位置')
     } catch (error) {
       setHtmlImportDialog(current => current?.documentId === dialog.documentId && current.epoch === dialog.epoch
         ? { ...current, busy: false, error: readableError(error, 'HTML 导入失败') } : current)
