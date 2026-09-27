@@ -99,6 +99,7 @@ export type EditorClipboardCommand = 'cut' | 'copy' | 'paste' | 'paste-plain'
 
 export interface DesktopAPI {
   editorClipboard?(command: EditorClipboardCommand): Promise<void>
+  htmlImport?: import('./workbench/htmlImportDesktop').HtmlImportDesktopAPI
   imageResults?: import('./workbench/imageResultsDesktop').ImageResultsDesktopAPI
   attachments?: import('./workbench/attachmentsDesktop').AttachmentsDesktopAPI
   execution?: import('./workbench/executionDesktop').ExecutionDesktopAPI
@@ -176,6 +177,7 @@ export interface DesktopAPI {
 }
 
 export const IPC_CHANNELS = {
+  htmlImport: 'html-import:operate',
   imageResults: 'image-results:operate',
   imageResultsChanged: 'image-results:changed',
   externalMcp: 'external-mcp:operate',

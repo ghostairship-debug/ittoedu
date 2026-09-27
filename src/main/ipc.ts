@@ -1,6 +1,7 @@
 import { saveDocumentWithDialog } from './workbench/documentSaveDialog'
 import { installWorkbenchToolServices, workbenchImageService, workbenchImageSelection } from './workbench/workbenchToolServices'
 import { ImageResultsDesktopService } from './workbench/images/ImageResultsDesktopService'
+import { HtmlImportDesktopService } from './workbench/htmlImport/HtmlImportDesktopService'
 import { closeDocumentWithDialog } from './workbench/documentCloseDialog'
 import { trashWorkspaceWithDialog } from './workbench/workspaceTrashDialog'
 import { workspaceFilesRequestSchema } from '../shared/workbench/workspaceFiles'
@@ -336,6 +337,17 @@ export function registerIpcHandlers(context: IpcContext): void {
     message: '连接配置未能保存，请保留当前设置。', suggestion: '请检查连接配置及系统安全存储。',
   }, async (_event, args) => operateExecutionSettings(requireSingleArgument(args)))
   const documents = documentHost()
+  const htmlImport = new HtmlImportDesktopService({
+    documents,
+    chooseSource: async () => {
+      const result = await dialog.showOpenDialog(requireWindow(context), { properties: ['openFile'], filters: [{ name: 'HTML', extensions: ['html'] }] })
+      return result.canceled ? null : result.filePaths[0] ?? null
+    },
+  })
+  registerSafeHandler(IPC_CHANNELS.htmlImport, context, {
+    code: 'HTML_IMPORT_FAILED', title: 'HTML 导入未完成',
+    message: 'HTML 页面未能导入。', suggestion: '请检查来源文件与当前目标后重试。',
+  }, async (_event, args) => htmlImport.import(requireSingleArgument(args)))
   documents.setEventSink(event => {
     const window = context.getMainWindow()
     if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.documentEvent, event)

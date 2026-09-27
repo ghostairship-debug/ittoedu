@@ -5,6 +5,7 @@ import type { AttachmentReadProgress } from '../shared/workbench/attachmentsDesk
 // Sandboxed preloads cannot require local CommonJS modules at runtime. Keep this
 // whitelist self-contained; the shared declaration remains the source of API types.
 const IPC_CHANNELS = {
+  htmlImport: 'html-import:operate',
   imageResults: 'image-results:operate',
   imageResultsChanged: 'image-results:changed',
   externalMcp: 'external-mcp:operate',
@@ -138,6 +139,7 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 }
 
 const desktopAPI = Object.freeze<DesktopAPI>({
+  htmlImport: { import: input => invoke(IPC_CHANNELS.htmlImport, input) },
   externalMcp: {
     grant: input => invoke(IPC_CHANNELS.externalMcp, { type: 'grant', ...input }),
     list: input => invoke(IPC_CHANNELS.externalMcp, { type: 'list', ...input }),
