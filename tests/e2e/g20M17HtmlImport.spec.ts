@@ -1,4 +1,4 @@
-import { expect, test, type ElectronApplication, type Page } from '@playwright/test'
+import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test'
 import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path'
 import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
-import { selectionServer, launchSelectionApp, setupSelectionUI, openSelectionFile } from './helpers/g20SelectionHarness'
+import { closeSelectionApp, selectionServer, launchSelectionApp, setupSelectionUI, openSelectionFile } from './helpers/g20SelectionHarness'
 import { solidPng } from '../helpers/solidPng'
 
 const root = resolve(__dirname, '../..')
@@ -24,6 +24,23 @@ function fixtureHtml() {
 function makeCourse() {
   const project = createBlankCourseProject({ title: 'M17 导入验收', canvas: { width: 1280, height: 720 }, includeDefaultController: false, controls: 'none' })
   return new CourseV9Driver().serialize({ kind: 'course-v9', project, resources: { assets: {}, components: {} } })
+}
+
+async function closeM17App(app: ElectronApplication) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const result = await Promise.race([
+    closeSelectionApp(app).then(() => 'closed' as const),
+    new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), 8_000) }),
+  ])
+  if (timer) clearTimeout(timer)
+  if (result === 'timeout') { try { app.process()?.kill() } catch { /* preserve the original test failure */ } }
+}
+
+async function centreOf(locator: Locator) {
+  await expect(locator).toBeVisible()
+  const box = await locator.boundingBox()
+  if (!box) throw new Error('No visible edit target bounds')
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 }
 }
 
 async function setFilePicker(app: ElectronApplication, path: string) {
@@ -64,7 +81,7 @@ async function saveAndReopen(page: Page, workspace: string, name: string) {
 
 test('M17-T01/T02/T03: both UI entries import without model calls; benchmark runs; imported text and image survive save/reopen', async () => {
   test.skip(process.platform !== 'win32', 'Windows Electron acceptance path.')
-  test.setTimeout(600_000)
+  test.setTimeout(360_000)
   const bytes = readFileSync(benchmark)
   expect(createHash('sha256').update(bytes).digest('hex')).toBe(benchmarkSha256)
   const base = join(root, 'output/g20/m17/electron-acceptance')
@@ -128,21 +145,21 @@ test('M17-T01/T02/T03: both UI entries import without model calls; benchmark run
     await page.getByRole('button', { name: '插入', exact: true }).click()
     await page.getByRole('button', { name: '导入 HTML 页面', exact: true }).click()
     await importDialog(page, null)
-    const original = await importedFrame(page, 'last')
-    await expect(original.getByText('Choose a line to begin listening.')).toBeVisible()
-    await expect(original.getByText('Ready to listen')).toBeVisible()
-    await expect(original.getByRole('button', { name: 'Play line 1' })).toBeVisible()
-    await expect(original.locator('.audio-player .timecode').last()).toHaveText('1:01')
-    await expect.poll(() => original.locator('.classroom-photo img').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+    let benchmarkContent = await importedFrame(page, 'last')
+    await expect(benchmarkContent.getByText('Choose a line to begin listening.')).toBeVisible()
+    await expect(benchmarkContent.getByText('Ready to listen')).toBeVisible()
+    await expect(benchmarkContent.getByRole('button', { name: 'Play line 1' })).toBeVisible()
+    await expect(benchmarkContent.locator('.audio-player .timecode').last()).toHaveText('1:01')
+    await expect.poll(() => benchmarkContent.locator('.classroom-photo img').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
     const frameBounds = await page.locator('.published-authoring-host iframe').last().boundingBox()
     if (!frameBounds) throw new Error('Imported benchmark has no visible frame')
     expect(frameBounds.width / frameBounds.height).toBeGreaterThan(1.7)
     expect(frameBounds.width / frameBounds.height).toBeLessThan(1.85)
-    const benchmarkFrame = page.locator('.published-authoring-host iframe').last()
+    let benchmarkFrame = page.locator('.published-authoring-host iframe').last()
     const visualEvidence: Array<{ state: string; ready: string | null; cssViewport: { width: number; height: number }; screenshot: string }> = []
     async function captureBenchmarkFrame(state: string, filename: string) {
       const screenshot = join(shots, filename)
-      const cssViewport = await original.locator('html').evaluate(element => ({
+      const cssViewport = await benchmarkContent.locator('html').evaluate(element => ({
         width: element.ownerDocument.defaultView?.innerWidth ?? 0,
         height: element.ownerDocument.defaultView?.innerHeight ?? 0,
       }))
@@ -158,36 +175,50 @@ test('M17-T01/T02/T03: both UI entries import without model calls; benchmark run
     }
     await page.screenshot({ path: join(shots, '03-benchmark-initial.png') })
     await captureBenchmarkFrame('initial', '03-benchmark-initial-iframe.png')
-    const progress = original.getByRole('slider', { name: 'Audio progress' })
+    const modes = page.getByRole('group', { name: '画布模式' })
+    const runMode = modes.getByRole('button', { name: '当前位置试运行', exact: true })
+    const editMode = modes.getByRole('button', { name: '编辑状态', exact: true })
+    const tryRun = page.getByTestId('course-try-run-host')
+    const liveBar = page.getByTestId('live-scene-bar')
+    await runMode.click()
+    await expect(tryRun).toHaveAttribute('data-course-player-ready', 'true', { timeout: 60_000 })
+    benchmarkFrame = page.locator('.course-try-run-host iframe').last()
+    benchmarkContent = benchmarkFrame.contentFrame()
+    await expect(benchmarkContent.getByText('Choose a line to begin listening.')).toBeVisible()
+    const progress = benchmarkContent.getByRole('slider', { name: 'Audio progress' })
     const before = Number(await progress.inputValue())
-    await original.getByRole('button', { name: 'Play line 1' }).click()
-    await expect(original.getByText('Good morning, class.')).toBeVisible()
-    await expect(original.getByText('Ms Gao is speaking')).toBeVisible()
+    await benchmarkContent.getByRole('button', { name: 'Play line 1' }).click()
+    await expect(benchmarkContent.getByText('Good morning, class.')).toBeVisible()
+    await expect(benchmarkContent.getByText('Ms Gao is speaking')).toBeVisible()
     await expect.poll(async () => Number(await progress.inputValue())).toBeGreaterThan(before)
-    const line = original.locator('.dialogue-row.is-active')
+    const line = benchmarkContent.locator('.dialogue-row.is-active')
     await line.locator('button.text-toggle').last().click()
     await expect(line.locator('.chinese')).toBeVisible()
     await page.screenshot({ path: join(shots, '04-benchmark-line-translation-audio.png') })
     await captureBenchmarkFrame('line-translation-audio', '04-benchmark-line-translation-audio-iframe.png')
-    await original.getByRole('button', { name: 'Conversation 2' }).click()
-    await expect(original.getByText('Hello, Peter.')).toBeVisible()
-    await expect(original.getByRole('button', { name: 'Play line 5' })).toBeVisible()
+    await benchmarkContent.getByRole('button', { name: 'Conversation 2' }).click()
+    await expect(benchmarkContent.getByText('Hello, Peter.')).toBeVisible()
+    await expect(benchmarkContent.getByRole('button', { name: 'Play line 5' })).toBeVisible()
     await page.screenshot({ path: join(shots, '05-benchmark-conversation-2.png') })
     await captureBenchmarkFrame('conversation-2', '05-benchmark-conversation-2-iframe.png')
     expect(server.requests).toHaveLength(0)
 
     // T03: edit the same admitted React benchmark, then force its DOM to redraw and reopen its V9 document.
     const editedTranslation = '老师早上好，同学们！'
-    await original.getByRole('button', { name: 'Conversation 1' }).click()
-    await original.getByRole('button', { name: 'Play line 1' }).click()
-    const benchmarkLine = original.locator('.dialogue-row.is-active')
+    await benchmarkContent.getByRole('button', { name: 'Conversation 1' }).click()
+    await benchmarkContent.getByRole('button', { name: 'Play line 1' }).click()
+    const benchmarkLine = benchmarkContent.locator('.dialogue-row.is-active')
     const translation = benchmarkLine.locator('.chinese')
     if (!await translation.isVisible()) await benchmarkLine.locator('button.text-toggle').last().click()
     await expect(translation).toBeVisible()
+    await editMode.click()
+    await expect(liveBar).toBeVisible()
+    await expect(tryRun).toHaveAttribute('inert', '')
     const previousTranslation = (await translation.textContent())?.trim()
     expect(previousTranslation).toBeTruthy()
     expect(previousTranslation).not.toBe(editedTranslation)
-    await translation.dblclick()
+    const translationPoint = await centreOf(translation)
+    await page.mouse.dblclick(translationPoint.x, translationPoint.y)
     const benchmarkEditor = page.getByTestId('canvas-plain-text-editor').locator('input, textarea')
     await expect(benchmarkEditor).toBeVisible()
     await expect(benchmarkEditor).toHaveValue(previousTranslation!)
@@ -195,24 +226,30 @@ test('M17-T01/T02/T03: both UI entries import without model calls; benchmark run
     await benchmarkEditor.press('Enter')
     await expect(translation).toHaveText(editedTranslation)
 
-    const benchmarkImage = original.locator('.classroom-photo img')
+    const benchmarkImage = benchmarkContent.locator('.classroom-photo img')
     const previousBenchmarkImage = await benchmarkImage.getAttribute('src')
     await expect.poll(() => benchmarkImage.evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(1)
     await setFilePicker(app, replacement)
-    await benchmarkImage.dblclick()
+    const benchmarkImagePoint = await centreOf(benchmarkImage)
+    await page.mouse.dblclick(benchmarkImagePoint.x, benchmarkImagePoint.y)
+    await expect(liveBar).toContainText('要重新加载这一页后才会显示这项修改')
+    await liveBar.getByRole('button', { name: '重新加载', exact: true }).click()
+    await expect(liveBar).toContainText('已停在试运行的这一刻', { timeout: 60_000 })
+    await expect(tryRun).toHaveAttribute('data-course-player-ready', 'true', { timeout: 60_000 })
     await expect.poll(() => benchmarkImage.getAttribute('src')).not.toBe(previousBenchmarkImage)
     await expect.poll(() => benchmarkImage.evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1)
+    await liveBar.getByRole('button', { name: '继续运行', exact: true }).click()
     await page.screenshot({ path: join(shots, '05a-benchmark-light-edited.png') })
 
-    await original.getByRole('button', { name: 'Conversation 2' }).click()
-    await expect(original.getByText('Hello, Peter.')).toBeVisible()
-    await original.getByRole('button', { name: 'Conversation 1' }).click()
-    await original.getByRole('button', { name: 'Play line 1' }).click()
-    const redrawnLine = original.locator('.dialogue-row.is-active')
+    await benchmarkContent.getByRole('button', { name: 'Conversation 2' }).click()
+    await expect(benchmarkContent.getByText('Hello, Peter.')).toBeVisible()
+    await benchmarkContent.getByRole('button', { name: 'Conversation 1' }).click()
+    await benchmarkContent.getByRole('button', { name: 'Play line 1' }).click()
+    const redrawnLine = benchmarkContent.locator('.dialogue-row.is-active')
     const redrawnTranslation = redrawnLine.locator('.chinese')
     if (!await redrawnTranslation.isVisible()) await redrawnLine.locator('button.text-toggle').last().click()
     await expect(redrawnTranslation).toHaveText(editedTranslation)
-    await expect.poll(() => original.locator('.classroom-photo img').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1)
+    await expect.poll(() => benchmarkContent.locator('.classroom-photo img').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1)
     await page.screenshot({ path: join(shots, '05b-benchmark-react-redraw.png') })
 
     await saveAndReopen(page, workspace, courseName)
@@ -224,8 +261,11 @@ test('M17-T01/T02/T03: both UI entries import without model calls; benchmark run
     expect(JSON.stringify(benchmarkRuntime.runtime.content.overrides)).toContain(editedTranslation)
     expect(Object.values(savedBenchmark.assetFiles).some(bytes =>
       Buffer.compare(Buffer.from(bytes), Buffer.from(imageTwo, 'base64')) === 0)).toBe(true)
-    const reopenedBenchmark = await importedFrame(page, 'last')
-    await expect.poll(() => reopenedBenchmark.locator('.classroom-photo img').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1)
+    const reopenedAuthoring = await importedFrame(page, 'last')
+    await expect.poll(() => reopenedAuthoring.locator('.classroom-photo img').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBe(1)
+    await runMode.click()
+    await expect(tryRun).toHaveAttribute('data-course-player-ready', 'true', { timeout: 60_000 })
+    const reopenedBenchmark = page.locator('.course-try-run-host iframe').last().contentFrame()
     const reopenedProgress = reopenedBenchmark.getByRole('slider', { name: 'Audio progress' })
     const reopenedBefore = Number(await reopenedProgress.inputValue())
     await reopenedBenchmark.getByRole('button', { name: 'Play line 1' }).click()
@@ -238,6 +278,10 @@ test('M17-T01/T02/T03: both UI entries import without model calls; benchmark run
     await reopenedBenchmark.getByRole('button', { name: 'Conversation 2' }).click()
     await expect(reopenedBenchmark.getByRole('button', { name: 'Play line 5' })).toBeVisible()
     await page.screenshot({ path: join(shots, '05c-benchmark-reopened-interactive.png') })
+    await editMode.click()
+    await expect(liveBar).toBeVisible()
+    await liveBar.getByRole('button', { name: '回到编辑画面', exact: true }).click()
+    await expect(page.locator('.published-authoring-host')).toHaveCount(1)
     expect(server.requests).toHaveLength(0)
 
     // The original static fixture remains a separate light-edit regression.
@@ -245,18 +289,31 @@ test('M17-T01/T02/T03: both UI entries import without model calls; benchmark run
     await tree.getByRole('button', { name: 'right-click.html', exact: true }).click({ button: 'right' })
     await page.getByRole('menuitem', { name: '作为互动页导入', exact: true }).click()
     await importDialog(page, 'right-click.html')
-    const fixture = await importedFrame(page)
+    const fixtureAuthoring = await importedFrame(page)
+    await expect(fixtureAuthoring.locator('#sentence')).toHaveText('Original greeting')
+    await runMode.click()
+    await expect(tryRun).toHaveAttribute('data-course-player-ready', 'true', { timeout: 60_000 })
+    const fixture = page.locator('.course-try-run-host iframe').first().contentFrame()
     await expect(fixture.locator('#sentence')).toHaveText('Original greeting')
-    await fixture.locator('#sentence').dblclick()
+    await editMode.click()
+    await expect(liveBar).toBeVisible()
     const editor = page.getByTestId('canvas-plain-text-editor').locator('input, textarea')
+    const sentencePoint = await centreOf(fixture.locator('#sentence'))
+    await page.mouse.dblclick(sentencePoint.x, sentencePoint.y)
     await expect(editor).toBeVisible()
     await editor.fill('Edited greeting')
     await editor.press('Enter')
     await expect(fixture.locator('#sentence')).toHaveText('Edited greeting')
     await setFilePicker(app, replacement)
     const previousImage = await fixture.locator('#picture').getAttribute('src')
-    await fixture.locator('#picture').dblclick()
+    const fixtureImagePoint = await centreOf(fixture.locator('#picture'))
+    await page.mouse.dblclick(fixtureImagePoint.x, fixtureImagePoint.y)
+    await expect(liveBar).toContainText('要重新加载这一页后才会显示这项修改')
+    await liveBar.getByRole('button', { name: '重新加载', exact: true }).click()
+    await expect(liveBar).toContainText('已停在试运行的这一刻', { timeout: 60_000 })
+    await expect(tryRun).toHaveAttribute('data-course-player-ready', 'true', { timeout: 60_000 })
     await expect.poll(async () => fixture.locator('#picture').getAttribute('src')).not.toBe(previousImage)
+    await liveBar.getByRole('button', { name: '继续运行', exact: true }).click()
     await page.screenshot({ path: join(shots, '06-fixture-light-edited.png') })
     await saveAndReopen(page, workspace, editingCourseName)
     const persisted = openCourseProjectArchive(new Uint8Array(readFileSync(join(workspace, editingCourseName))))
@@ -267,7 +324,8 @@ test('M17-T01/T02/T03: both UI entries import without model calls; benchmark run
     const reopened = await importedFrame(page)
     await expect(reopened.locator('#sentence')).toHaveText('Edited greeting')
     await expect(reopened.locator('#picture')).not.toHaveAttribute('src', previousImage ?? '')
-    await page.getByRole('group', { name: '画布模式' }).getByRole('button', { name: '当前位置试运行', exact: true }).click()
+    await runMode.click()
+    await expect(tryRun).toHaveAttribute('data-course-player-ready', 'true', { timeout: 60_000 })
     const running = page.locator('.course-try-run-host iframe').first().contentFrame()
     await expect(running.locator('#sentence')).toHaveText('Edited greeting')
     await running.locator('#advance').click()
@@ -276,7 +334,7 @@ test('M17-T01/T02/T03: both UI entries import without model calls; benchmark run
     expect(server.requests).toHaveLength(0)
     expect(errors).toEqual([])
   } finally {
-    await app?.close()
+    if (app) await closeM17App(app)
     await server.close()
   }
 })
@@ -347,8 +405,13 @@ test('M17-T04: remote image and audio fail before document writes or requests; l
     await expect(frame.getByRole('img', { name: 'Inline image' })).toBeVisible()
     await expect.poll(() => frame.getByRole('img', { name: 'Local image' }).evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
     await expect.poll(() => frame.getByRole('img', { name: 'Inline image' }).evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
-    await frame.locator('#toggle').click()
-    await expect(frame.locator('#result')).toHaveText('Done')
+    const runMode = page.getByRole('group', { name: '画布模式' }).getByRole('button', { name: '当前位置试运行', exact: true })
+    await runMode.click()
+    const tryRun = page.getByTestId('course-try-run-host')
+    await expect(tryRun).toHaveAttribute('data-course-player-ready', 'true', { timeout: 60_000 })
+    const runningFrame = page.locator('.course-try-run-host iframe').first().contentFrame()
+    await runningFrame.locator('#toggle').click()
+    await expect(runningFrame.locator('#result')).toHaveText('Done')
     await page.keyboard.press('Control+S')
     await expect.poll(async () => (await document()).dirty).toBe(false)
     const persisted = openCourseProjectArchive(new Uint8Array(readFileSync(join(workspace, courseName))))
@@ -367,7 +430,7 @@ test('M17-T04: remote image and audio fail before document writes or requests; l
     expect(modelServer.requests).toEqual([])
     await page.screenshot({ path: join(shots, '02-local-closure-running.png') })
   } finally {
-    await app?.close()
+    if (app) await closeM17App(app)
     await modelServer.close()
     await new Promise<void>(resolve => remote.close(() => resolve()))
   }
