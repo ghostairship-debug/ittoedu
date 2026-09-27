@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { LIGHT_SLIDE_FONTS } from '../../src/core/tools/lightSlideEditing'
 import { canvasReady } from './helpers/g20M21Harness'
-import { CANVAS, closeM22, COURSE, FIRST, firstScene, item, launchM22, menuCommand, project, savedProject, selectItem } from './helpers/g20M22Harness'
+import { CANVAS, closeM22, COURSE, FIRST, firstScene, item, launchM22, menuCommand, project, retainM22Evidence, savedProject, selectItem } from './helpers/g20M22Harness'
 
 // M22-T01 requirement assertions. The command port exists; the current production quick-bar/menu wiring is pending
 // integration by the owner. Keep these UI assertions strict instead of replacing them with direct port calls.
@@ -13,7 +13,7 @@ test('M22-T01 workbench edits opacity, font, two-line spacing, page background a
     const { page, frame, read } = h
     const before = await read()
     expect(project(before).surfaces[0]?.type).toBe('slide')
-    expect(firstScene(before).layerItems).toHaveLength(2)
+    expect(firstScene(before).layerItems).toHaveLength(3)
     await selectItem(page, 'm22-title')
 
     await menuCommand(page, '不透明度：50%')
@@ -27,8 +27,21 @@ test('M22-T01 workbench edits opacity, font, two-line spacing, page background a
     await frame.getByRole('button', { name: '重做', exact: true }).click()
     await expect.poll(async () => item(await read(), 'm22-title').opacity).toBe(0.5)
 
+    await selectItem(page, 'm22-picture')
+    await menuCommand(page, '不透明度：50%')
+    await expect.poll(async () => item(await read(), 'm22-picture').opacity).toBe(0.5)
+    await expect.poll(async () => page.locator('[data-slide-layer-item="m22-picture"]:visible').first()
+      .evaluate(element => Number(getComputedStyle(element).opacity))).toBeCloseTo(0.5)
+    await frame.getByRole('button', { name: '撤销', exact: true }).click()
+    await expect.poll(async () => item(await read(), 'm22-picture').opacity).toBe(1)
+    await frame.getByRole('button', { name: '重做', exact: true }).click()
+    await expect.poll(async () => item(await read(), 'm22-picture').opacity).toBe(0.5)
+
     const font = LIGHT_SLIDE_FONTS[0]
     if (!font) throw new Error('No bundled font')
+    const originalFont = item(await read(), 'm22-title')
+    if (originalFont.kind !== 'native' || originalFont.content.nativeType !== 'text') throw new Error('Expected Native text')
+    const beforeFont = originalFont.content.data.style.fontFamily
     await selectItem(page, 'm22-title')
     await page.locator('[data-selection-quick-bar]').getByRole('button', { name: '字体', exact: true }).click()
     await page.getByRole('menu', { name: '字体' }).getByRole('menuitem', { name: new RegExp(`字体：${font.label}`) }).click()
@@ -36,6 +49,17 @@ test('M22-T01 workbench edits opacity, font, two-line spacing, page background a
       const selected = item(await read(), 'm22-title')
       return selected.kind === 'native' && selected.content.nativeType === 'text' ? selected.content.data.style.fontFamily : null
     }).toBe(font.family)
+    await expect(page.locator('[data-slide-layer-item="m22-title"] [data-text-line]:visible').first()).toHaveCSS('font-family', new RegExp(font.family.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    await frame.getByRole('button', { name: '撤销', exact: true }).click()
+    await expect.poll(async () => { const value = item(await read(), 'm22-title'); return value.kind === 'native' && value.content.nativeType === 'text' ? value.content.data.style.fontFamily : null }).toBe(beforeFont)
+    await frame.getByRole('button', { name: '重做', exact: true }).click()
+    await expect.poll(async () => { const value = item(await read(), 'm22-title'); return value.kind === 'native' && value.content.nativeType === 'text' ? value.content.data.style.fontFamily : null }).toBe(font.family)
+    const originalSpacingItem = item(await read(), 'm22-title')
+    if (originalSpacingItem.kind !== 'native' || originalSpacingItem.content.nativeType !== 'text') throw new Error('Expected Native text')
+    const beforeSpacing = originalSpacingItem.content.data.style.lineSpacing
+    const lines = page.locator('[data-slide-layer-item="m22-title"] [data-text-line]:visible')
+    await expect(lines).toHaveCount(2)
+    const beforeTops = await lines.evaluateAll(elements => elements.map(element => element.getBoundingClientRect().top))
     await selectItem(page, 'm22-title')
     await page.locator('[data-selection-quick-bar]').getByRole('button', { name: '行距', exact: true }).click()
     await page.getByRole('menu', { name: '行距' }).getByRole('menuitem', { name: /行距：宽松（额外 8 像素）/ }).click()
@@ -44,19 +68,60 @@ test('M22-T01 workbench edits opacity, font, two-line spacing, page background a
       return selected.kind === 'native' && selected.content.nativeType === 'text' ? selected.content.data.style.lineSpacing : null
     }).toBe(8)
     // The fixture has two actual text lines: the line boxes must separate more than in the initial rendering.
-    const lines = page.locator('[data-slide-layer-item="m22-title"] [data-text-line]:visible')
-    await expect(lines).toHaveCount(2)
     const tops = await lines.evaluateAll(elements => elements.map(element => element.getBoundingClientRect().top))
-    expect(tops[1]! - tops[0]!).toBeGreaterThan(20)
+    expect(tops[1]! - tops[0]!).toBeGreaterThan(beforeTops[1]! - beforeTops[0]!)
+    await frame.getByRole('button', { name: '撤销', exact: true }).click()
+    await expect.poll(async () => { const value = item(await read(), 'm22-title'); return value.kind === 'native' && value.content.nativeType === 'text' ? value.content.data.style.lineSpacing : null }).toBe(beforeSpacing)
+    await frame.getByRole('button', { name: '重做', exact: true }).click()
+    await expect.poll(async () => { const value = item(await read(), 'm22-title'); return value.kind === 'native' && value.content.nativeType === 'text' ? value.content.data.style.lineSpacing : null }).toBe(8)
 
+    const beforeBackground = firstScene(await read()).backgroundColor
     await selectItem(page, 'm22-title')
     await page.locator('[data-selection-quick-bar]').getByRole('button', { name: '页面背景', exact: true }).click()
     await page.getByRole('menu', { name: '页面背景' }).getByRole('menuitem', { name: /页面背景：#dbeafe/ }).click()
     await expect.poll(async () => firstScene(await read()).backgroundColor).toBe('#dbeafe')
+    await expect.poll(async () => page.locator('.canvas-stage-stack').evaluate(element => {
+      const target = [...element.querySelectorAll('*')].find(node => getComputedStyle(node).backgroundColor === 'rgb(219, 234, 254)')
+      return Boolean(target)
+    })).toBe(true)
+    await frame.getByRole('button', { name: '撤销', exact: true }).click()
+    await expect.poll(async () => firstScene(await read()).backgroundColor).toBe(beforeBackground)
+    await frame.getByRole('button', { name: '重做', exact: true }).click()
+    await expect.poll(async () => firstScene(await read()).backgroundColor).toBe('#dbeafe')
+    const beforeAlignBox = await page.locator('[data-slide-layer-item="m22-title"]:visible').first().boundingBox()
+    if (!beforeAlignBox) throw new Error('No painted text before alignment')
     await selectItem(page, 'm22-title')
     await menuCommand(page, '对齐页面水平居中')
     await expect.poll(async () => item(await read(), 'm22-title').frame.x).toBe((CANVAS.width - FIRST.width) / 2)
+    const afterAlignBox = await page.locator('[data-slide-layer-item="m22-title"]:visible').first().boundingBox()
+    expect(afterAlignBox?.x).toBeGreaterThan(beforeAlignBox.x)
+    await frame.getByRole('button', { name: '撤销', exact: true }).click()
+    await expect.poll(async () => item(await read(), 'm22-title').frame.x).toBe(FIRST.x)
+    await frame.getByRole('button', { name: '重做', exact: true }).click()
+    await expect.poll(async () => item(await read(), 'm22-title').frame.x).toBe((CANVAS.width - FIRST.width) / 2)
     expect(await frame.getAttribute('data-editor-mode')).toBe('light')
+
+    const blankLocation = project(await read()).locations.find(location => location.label === '空白页')
+    if (!blankLocation) throw new Error('No blank Slide location')
+    await frame.getByTestId(`bottom-scene-${blankLocation.id}`).locator('.bottom-scene-card__main').click()
+    await expect(page.locator('[data-slide-layer-item]:visible')).toHaveCount(0)
+    const pageActions = page.getByRole('button', { name: '页面操作', exact: true })
+    await expect(pageActions).toBeVisible()
+    await pageActions.click()
+    await page.getByRole('menuitem', { name: '页面背景：#dcfce7', exact: true }).click()
+    await expect.poll(async () => {
+      const slide = project(await read()).surfaces[0]
+      return slide.type === 'slide' ? slide.scenes[2]?.backgroundColor : null
+    }).toBe('#dcfce7')
+    await frame.getByRole('button', { name: '撤销', exact: true }).click()
+    await expect.poll(async () => { const slide = project(await read()).surfaces[0]; return slide.type === 'slide' ? slide.scenes[2]?.backgroundColor : null }).not.toBe('#dcfce7')
+    await frame.getByRole('button', { name: '重做', exact: true }).click()
+    await expect.poll(async () => { const slide = project(await read()).surfaces[0]; return slide.type === 'slide' ? slide.scenes[2]?.backgroundColor : null }).toBe('#dcfce7')
+    await pageActions.click()
+    await expect(page.getByRole('menuitem', { name: '放置音频', exact: true })).toBeVisible()
+    await page.keyboard.press('Escape')
+    await frame.getByTestId(`bottom-scene-${h.fixture.firstLocationId}`).locator('.bottom-scene-card__main').click()
+    await canvasReady(page)
 
     await frame.getByRole('button', { name: '保存', exact: true }).click()
     await expect.poll(async () => (await read()).dirty).toBe(false)
@@ -71,5 +136,5 @@ test('M22-T01 workbench edits opacity, font, two-line spacing, page background a
     const reopened = await page.evaluate(id => window.desktopAPI!.documents!.read(id), reopenedId)
     expect(project(reopened)).toEqual(project(saved))
     expect(reopened.dirty).toBe(false)
-  } finally { await closeM22(h.app) }
+  } finally { try { await retainM22Evidence(h, 'properties') } finally { await closeM22(h.app) } }
 })

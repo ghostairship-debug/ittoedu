@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { canvasReady } from './helpers/g20M21Harness'
-import { closeM22, COURSE, firstScene, item, launchM22, menuCommand, project, savedProject, selectItem, wave } from './helpers/g20M22Harness'
+import { closeM22, COURSE, firstScene, item, launchM22, menuCommand, project, retainM22Evidence, savedProject, selectItem, wave } from './helpers/g20M22Harness'
 
 async function spyOnRealAudio(page: Page) {
   await page.evaluate(() => {
@@ -13,6 +13,10 @@ async function spyOnRealAudio(page: Page) {
       return old.call(this)
     }
   })
+}
+async function clearPlayedAudio(page: Page) {
+  await page.evaluate(() => { (window as any).__m22Played = [] as HTMLMediaElement[] })
+  expect(await page.evaluate(() => (window as any).__m22Played.length)).toBe(0)
 }
 async function expectAudioPlayed(page: Page) {
   await expect.poll(() => page.evaluate(() => (window as any).__m22Played?.length ?? 0)).toBeGreaterThan(0)
@@ -94,6 +98,7 @@ test('M22-T02 workbench audio placement and identity-based jump survive save and
 
     await spyOnRealAudio(page)
     await page.getByRole('button', { name: '当前位置试运行', exact: true }).click()
+    await clearPlayedAudio(page)
     await clickPlaybackItem(page, '.course-try-run-host', button.layerItemId)
     await expectAudioPlayed(page)
     await clickPlaybackItem(page, '.course-try-run-host', 'm22-target')
@@ -102,6 +107,7 @@ test('M22-T02 workbench audio placement and identity-based jump survive save and
     await frame.getByTestId(`bottom-scene-${fixture.firstLocationId}`).locator('.bottom-scene-card__main').click()
 
     await page.getByRole('button', { name: '整课预览', exact: true }).click()
+    await clearPlayedAudio(page)
     await clickPlaybackItem(page, '.course-preview-host', button.layerItemId)
     await expectAudioPlayed(page)
     await clickPlaybackItem(page, '.course-preview-host', 'm22-target')
@@ -130,9 +136,10 @@ test('M22-T02 workbench audio placement and identity-based jump survive save and
     }, htmlFile)
     const exported = await opened
     await expect(exported.locator('#course-root')).not.toBeEmpty()
+    await clearPlayedAudio(exported)
     await clickPlaybackItem(exported, '#course-root', button.layerItemId)
     await expectAudioPlayed(exported)
     await clickPlaybackItem(exported, '#course-root', 'm22-target')
     await expectNavigated(exported, '#course-root')
-  } finally { await closeM22(h.app) }
+  } finally { try { await retainM22Evidence(h, 'interactions') } finally { await closeM22(h.app) } }
 })
