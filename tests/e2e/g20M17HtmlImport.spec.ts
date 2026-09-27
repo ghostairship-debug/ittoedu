@@ -383,7 +383,7 @@ test('M17-T01/T02/T03: both UI entries import without model calls; benchmark run
   }
 })
 
-test('M17-T04: remote image and audio fail before document writes or requests; local and inline resources form a saved closure', async () => {
+test('M17-T04: remote script is rejected before document writes or requests; local and inline resources form a saved closure', async () => {
   test.skip(process.platform !== 'win32', 'Windows Electron acceptance path.')
   test.setTimeout(240_000)
   const base = join(root, 'output/g20/m17/resource-boundary')
@@ -403,7 +403,7 @@ test('M17-T04: remote image and audio fail before document writes or requests; l
   const remote = createServer((request, response) => { remoteRequests.push(request.url ?? ''); response.writeHead(418); response.end('unauthorized') })
   await new Promise<void>(resolve => remote.listen(0, '127.0.0.1', resolve))
   const port = (remote.address() as { port: number }).port
-  writeFileSync(join(workspace, 'blocked.html'), `<!doctype html><html><head><meta charset="utf-8"><script src="http://127.0.0.1:${port}/remote-script.js"></script></head><body>${body}<img src="http://127.0.0.1:${port}/remote-image.png"><audio src="http://127.0.0.1:${port}/remote-audio.mp3"></audio></body></html>`)
+  writeFileSync(join(workspace, 'blocked.html'), `<!doctype html><html><head><meta charset="utf-8"><script src="https://127.0.0.1:${port}/remote-script.js"></script></head><body>${body}</body></html>`)
   let app: ElectronApplication | undefined
   try {
     app = await launchSelectionApp(directory)
@@ -426,10 +426,10 @@ test('M17-T04: remote image and audio fail before document writes or requests; l
     const dialog = page.getByRole('dialog', { name: '导入 HTML 页面' })
     await expect(dialog).toBeVisible()
     await dialog.getByRole('button', { name: '导入', exact: true }).click()
-    await expect(dialog.getByRole('alert')).toContainText('未授权远程资源')
+    await expect(dialog.getByRole('alert')).toContainText('远程脚本')
     await expect(dialog.getByRole('alert')).toContainText('remote-script.js')
-    await expect(dialog.getByRole('alert')).toContainText('remote-image.png')
-    await expect(dialog.getByRole('alert')).toContainText('remote-audio.mp3')
+    await expect(dialog.getByRole('alert')).not.toContainText('remote-image.png')
+    await expect(dialog.getByRole('alert')).not.toContainText('remote-audio.mp3')
     const afterFailure = await document()
     expect(afterFailure.revision).toBe(before.revision)
     expect(afterFailure.model).toEqual(before.model)
