@@ -20,7 +20,6 @@ import {
   reportTryRunInteractionDiagnostic,
 } from '../coursePlayerTryRun'
 import { sidecarFileIdsFrom } from '../workspaceSlidePreviewRebuild'
-import { scheduleStaticFallbackRecapture } from '../../composition/runtime/staticFallbackRecapture'
 import { captureLiveSceneBaseline, liveSceneChangesSince, liveSceneItemLabel, sceneWithLiveCarriers } from './liveSceneChanges'
 import {
   buildSlidePreviewRebuildKey,
@@ -328,20 +327,8 @@ export function SlideWorkspaceConnector({
     },
     runtime: {
       captureRuntimeContentTextTarget,
-      updateRuntimeContentTextAtTarget,
       captureRuntimeAssetReplacementTarget,
-      replaceRuntimeAssetAtTarget,
-      // M15: component light edits commit through the component authoring actions.
-      writeComponentTextRule,
-      replaceComponentAssetAtKey,
-      scheduleStaticFallbackRecapture: (itemId, targetLocationId) => {
-        const state = useEditorStore.getState()
-        const handle = state.captureCourseSubmission()
-        if (!handle || !targetLocationId) return false
-        scheduleStaticFallbackRecapture({ handle, itemId, locationId: targetLocationId,
-          amend: (commit, command) => useEditorStore.getState().amendFrozenCourseCommit(commit, command) })
-        return true
-      },
+      submitDynamicFallbackIntent: (intent) => useEditorStore.getState().submitDynamicFallbackIntent(intent),
     },
     authoring: {
       runFieldTextIntent: runSlideFieldTextIntent,
@@ -405,9 +392,6 @@ export function SlideWorkspaceConnector({
     commitTextEdit,
     componentPackages,
     drawSlideShapeNode,
-    replaceRuntimeAssetAtTarget,
-    writeComponentTextRule,
-    replaceComponentAssetAtKey,
     locationId,
     project,
     tryRunMountKey,
@@ -421,7 +405,6 @@ export function SlideWorkspaceConnector({
     setStatus,
     updateNode,
     updateNodes,
-    updateRuntimeContentTextAtTarget,
     updateTextEditDraft,
     setSlideTextEditComposing,
   ])

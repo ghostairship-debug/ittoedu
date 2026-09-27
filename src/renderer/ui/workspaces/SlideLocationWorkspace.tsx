@@ -7,6 +7,7 @@ import { useContextMenu, type MenuCommand } from '../../editing/commands/Command
 import { OBJECT_EDIT_EVENT, requestObjectContextMenu } from '../../editing/commands/objectContextMenu'
 import { hiddenObjectCommands, hiddenObjectName } from '../../editing/commands/hiddenObjectCommands'
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
+import type { DynamicFallbackIntent, DynamicFallbackResult } from '../../composition/runtime/precommitDynamicFallback'
 import { canEditLayerInScope } from '../../../shared/teacherControllerRole'
 import { controllerDisplayFrame, useControllerDisplayRevision } from '../../authoring/controllerDisplayBounds'
 import {
@@ -122,7 +123,6 @@ import {
 import type { CourseRuntimeContentTextTarget } from '../../runtime/runtimeContentTextAuthoringCommands'
 import type { CourseRuntimeAssetReplacementTarget } from '../../runtime/courseRuntimeTransactions'
 import type { ImportedImageAsset } from '../../project/assetManager'
-import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import type { FormulaNode, TextNode, TextRun } from '../../../shared/contracts/native-v1'
 import type { NativeLineGeometry } from '../../../shared/contracts/native-v1/types'
 import { resolveNativeLinePoints } from '../../../shared/nativeLineGeometry'
@@ -143,6 +143,32 @@ import {
 } from './SlideDynamicAuthoringOverlay'
 
 export const SLIDE_SESSIONLESS_ERROR = '没有活动的 Slide 编辑会话，不能从旧工程恢复界面'
+
+export async function runSlideDynamicFallbackSubmission(
+  intent: DynamicFallbackIntent,
+  submit: (intent: DynamicFallbackIntent) => { taskId: string; settled: Promise<DynamicFallbackResult> } | null,
+  setStatus: (message: string) => void,
+  labels: { pending: string; applied: string; unchanged: string },
+): Promise<'applied' | 'unchanged' | null> {
+  try {
+    const submission = submit(intent)
+    if (!submission) {
+      setStatus('当前文档无法提交动态内容，未写入修改')
+      return null
+    }
+    setStatus(labels.pending)
+    const result = await submission.settled
+    if (result.status !== 'applied' && result.status !== 'unchanged') {
+      setStatus(`${result.reason} 未写入修改`)
+      return null
+    }
+    setStatus(result.status === 'applied' ? labels.applied : labels.unchanged)
+    return result.status
+  } catch (error) {
+    setStatus(`${error instanceof Error ? error.message : String(error)} 未写入修改`)
+    return null
+  }
+}
 
 type RuntimeOverrideSync = Map<string, { scope: 'scene' | 'global'; nodeId: string; json: string; overrides: readonly LightEditTextOverride[] }>
 
@@ -267,24 +293,10 @@ export interface SlideWorkspaceRuntimePort {
   readonly captureRuntimeContentTextTarget: (
     session: Readonly<RuntimeTargetEditSession>,
   ) => CourseRuntimeContentTextTarget | null
-  readonly updateRuntimeContentTextAtTarget: (
-    target: CourseRuntimeContentTextTarget,
-    value: string,
-  ) => { ok: false; reason: string } | { ok: true; status: 'unchanged' | 'updated' }
   readonly captureRuntimeAssetReplacementTarget: (
     session: Readonly<RuntimeTargetEditSession>,
   ) => CourseRuntimeAssetReplacementTarget | null
-  readonly replaceRuntimeAssetAtTarget: (
-    target: CourseRuntimeAssetReplacementTarget,
-    asset: AssetMeta,
-    bytes: Uint8Array,
-  ) => { ok: false; reason: string } | { ok: true; status: 'unchanged' | 'replaced' }
-  /** M15: a rule for text a component renders itself (back at the original text, the rule goes). */
-  readonly writeComponentTextRule?: (itemId: string, rule: LightEditTextOverride) => { ok: false; reason: string } | { ok: true; status: 'unchanged' | 'updated' }
-  /** M15: a new image instead of one of a component's manifest assets. */
-  readonly replaceComponentAssetAtKey?: (itemId: string, assetKey: string, asset: AssetMeta, bytes: Uint8Array) => { ok: false; reason: string } | { ok: true; status: 'unchanged' | 'updated' }
-  /** M15: capture the item's static fallback again once its text edits settle. */
-  readonly scheduleStaticFallbackRecapture?: (itemId: string, locationId: string | null) => boolean
+  readonly submitDynamicFallbackIntent: (intent: DynamicFallbackIntent) => { taskId: string; settled: Promise<DynamicFallbackResult> } | null
 }
 
 export interface SlideWorkspaceAuthoringPort extends SlideWorkspaceCommandPort {
@@ -784,6 +796,8 @@ export function SlideLocationWorkspace({
   const slideCanvas = useMemo(() => ({ width: slideCanvasWidth, height: slideCanvasHeight }), [slideCanvasWidth, slideCanvasHeight])
   const snapshotRef = useRef(snapshot)
   snapshotRef.current = snapshot
+  const documentIdRef = useRef(documentId)
+  documentIdRef.current = documentId
   const readSnapshot = () => snapshotRef.current
   const canvasMenu = useContextMenu()
   const slideLight = useCourseEditorActions()?.slideLight
@@ -874,6 +888,7 @@ export function SlideLocationWorkspace({
     useState<Readonly<FormulaEditSession> | null>(null)
   const [replacingRuntimeAssetTargetId, setReplacingRuntimeAssetTargetId] =
     useState<string | null>(null)
+  const dynamicSubmissionPendingRef = useRef(false)
   const [hoveredAuthoringTargetId, setHoveredAuthoringTargetId] =
     useState<string | null>(null)
   const [stageViewportSize, setStageViewportSize] = useState({
@@ -2185,7 +2200,23 @@ export function SlideLocationWorkspace({
     setActiveComponentTextSession(result.session)
   }, [currentComponentTextEditContext])
 
-  const commitComponentText = useCallback((
+  const submitDynamicFallback = useCallback(async (
+    intent: DynamicFallbackIntent,
+    labels: { pending: string; applied: string; unchanged: string },
+  ): Promise<'applied' | 'unchanged' | null> => {
+    if (dynamicSubmissionPendingRef.current) {
+      ports.canvas.setStatus('上一项动态内容修改仍在处理中，请等待确认')
+      return null
+    }
+    dynamicSubmissionPendingRef.current = true
+    try {
+      return await runSlideDynamicFallbackSubmission(intent, ports.runtime.submitDynamicFallbackIntent, ports.canvas.setStatus, labels)
+    } finally {
+      dynamicSubmissionPendingRef.current = false
+    }
+  }, [ports.canvas, ports.runtime])
+
+  const commitComponentText = useCallback(async (
     session: Readonly<ComponentTextEditSession>,
     value: string,
   ) => {
@@ -2204,13 +2235,12 @@ export function SlideLocationWorkspace({
       return
     }
     if (session.source === 'auto' && session.lightEdit) {
-      if (!courseLocationId || !ports.runtime.scheduleStaticFallbackRecapture) { ports.canvas.setStatus('当前页面无法更新静态后备图，未写入组件文字'); return }
-      const committed = ports.runtime.writeComponentTextRule?.(session.nodeId, { original: session.lightEdit.original, ...(session.lightEdit.region ? { region: session.lightEdit.region } : {}), text: value })
-      ports.canvas.setStatus(!committed ? '当前版本不能修改组件文字' : !committed.ok ? `${committed.reason} 未写入修改`
-        : committed.status === 'unchanged' ? '组件文字没有变化' : '已更新组件文字；组件源码没有改动')
-      if (committed?.ok && committed.status === 'updated' && !ports.runtime.scheduleStaticFallbackRecapture?.(session.nodeId, courseLocationId))
-        ports.canvas.setStatus('组件文字已更新，但静态后备图缺少确认版本或页面；请撤销本次修改后重试')
-      setActiveComponentTextSession(null)
+      if (!documentId || !courseLocationId) { ports.canvas.setStatus('当前页面无法提交组件文字，未写入修改'); return }
+      const status = await submitDynamicFallback({
+        kind: 'component.text', documentId, projectId: session.projectId, locationId: courseLocationId, itemId: session.nodeId,
+        original: session.lightEdit.original, ...(session.lightEdit.region ? { region: session.lightEdit.region } : {}), text: value, expectedText: session.initialValue,
+      }, { pending: '正在生成静态后备图，组件文字尚未写入', applied: '已更新组件文字；组件源码没有改动', unchanged: '组件文字没有变化' })
+      if (status) setActiveComponentTextSession(current => current === session ? null : current)
       return
     }
     const draft = componentDraftRef.current
@@ -2224,7 +2254,7 @@ export function SlideLocationWorkspace({
         : '已更新当前演示状态中的组件文字',
     )
     setActiveComponentTextSession(null)
-  }, [currentComponentTextEditContext, queueAuthoringNodePatch])
+  }, [currentComponentTextEditContext, documentId, courseLocationId, submitDynamicFallback])
 
   const beginRuntimeTextEdit = useCallback((
     target: Readonly<RuntimeAuthoringTarget>,
@@ -2257,7 +2287,7 @@ export function SlideLocationWorkspace({
     }))
   }, [currentRuntimeTargetEditContext])
 
-  const commitRuntimeText = useCallback((
+  const commitRuntimeText = useCallback(async (
     session: Readonly<SlideRuntimeTextEditSession>,
     value: string,
   ) => {
@@ -2274,30 +2304,22 @@ export function SlideLocationWorkspace({
       setActiveRuntimeTextSession(null)
       return
     }
-    if (session.courseTarget.override && (!courseLocationId || !ports.runtime.scheduleStaticFallbackRecapture)) {
-      ports.canvas.setStatus('当前页面无法更新静态后备图，未写入运行时文字')
+    if (!documentId || !courseLocationId) {
+      ports.canvas.setStatus('当前页面无法提交运行时文字，未写入修改')
       return
     }
-    const committed = ports.runtime.updateRuntimeContentTextAtTarget(
-      session.courseTarget,
-      value,
-    )
-    if (!committed.ok) {
-      ports.canvas.setStatus(`${committed.reason} 未写入修改`)
-    } else if (committed.status === 'unchanged') {
-      ports.canvas.setStatus('运行时文字没有变化')
-    } else if (session.courseTarget.courseTarget.owner === 'global') {
-      ports.canvas.setStatus('已更新全局运行时文字；此内容由整课共享')
-    } else {
-      ports.canvas.setStatus('已更新运行时文字；此内容由当前场景的所有状态共享')
-    }
-    // The static fallback follows text found by the host (M15).
-    if (committed.ok && committed.status === 'updated' && session.courseTarget.override &&
-      !ports.runtime.scheduleStaticFallbackRecapture?.(session.courseTarget.courseTarget.itemId, courseLocationId)) {
-      ports.canvas.setStatus('运行时文字已更新，但静态后备图缺少确认版本或页面；请撤销本次修改后重试')
-    }
+    const status = await submitDynamicFallback({
+      kind: 'runtime.text', documentId, projectId: session.liveSession.projectId, locationId: courseLocationId,
+      itemId: session.courseTarget.courseTarget.itemId, target: session.courseTarget, value,
+    }, {
+      pending: '正在生成静态后备图，运行时文字尚未写入',
+      applied: session.courseTarget.courseTarget.owner === 'global'
+        ? '已更新全局运行时文字；此内容由整课共享'
+        : '已更新运行时文字；此内容由当前场景的所有状态共享',
+      unchanged: '运行时文字没有变化',
+    })
     // Light-edit rules reach the host through the rule sync; only keyed text is patched here.
-    if (committed.ok && committed.status === 'updated' && !session.courseTarget.override) {
+    if (status === 'applied' && !session.courseTarget.override) {
       const target = session.courseTarget.courseTarget
       postAuthoringPatch({
         kind: 'runtime-content',
@@ -2310,8 +2332,8 @@ export function SlideLocationWorkspace({
         value,
       })
     }
-    setActiveRuntimeTextSession(null)
-  }, [currentRuntimeTargetEditContext, postAuthoringPatch])
+    if (status) setActiveRuntimeTextSession(current => current === session ? null : current)
+  }, [currentRuntimeTargetEditContext, documentId, courseLocationId, postAuthoringPatch, submitDynamicFallback])
 
   const replaceRuntimeAsset = useCallback(async (
     target: Readonly<RuntimeAuthoringTarget>,
@@ -2351,30 +2373,20 @@ export function SlideLocationWorkspace({
         )
         return
       }
-      if (!courseLocationId || !ports.runtime.scheduleStaticFallbackRecapture) {
-        ports.canvas.setStatus('当前页面无法更新静态后备图，未写入运行时图片')
+      if (!documentId || !courseLocationId) {
+        ports.canvas.setStatus('当前页面无法提交运行时图片，未写入修改')
         return
       }
-      const committed = ports.runtime.replaceRuntimeAssetAtTarget(
-        courseTarget,
-        imported.meta,
-        imported.bytes,
-      )
-      if (!committed.ok) {
-        ports.canvas.setStatus(`${committed.reason} 未写入修改`)
-        return
-      }
-      if (committed.status === 'unchanged') {
-        ports.canvas.setStatus('运行时图片未改变')
-        return
-      }
-      ports.canvas.setStatus(
-        courseTarget.courseTarget.owner === 'global'
+      await submitDynamicFallback({
+        kind: 'runtime.asset', documentId, projectId: session.projectId, locationId: courseLocationId,
+        itemId: courseTarget.courseTarget.itemId, target: courseTarget, asset: imported.meta, bytes: imported.bytes,
+      }, {
+        pending: '正在生成静态后备图，运行时图片尚未写入',
+        applied: courseTarget.courseTarget.owner === 'global'
           ? '已替换全局运行时图片；此素材由整课共享'
           : '已替换运行时图片；此素材由当前场景的所有状态共享',
-      )
-      if (!ports.runtime.scheduleStaticFallbackRecapture(courseTarget.courseTarget.itemId, courseLocationId))
-        ports.canvas.setStatus('运行时图片已替换，但静态后备图缺少确认版本或页面；请撤销本次修改后重试')
+        unchanged: '运行时图片未改变',
+      })
     } finally {
       setReplacingRuntimeAssetTargetId(null)
     }
@@ -2382,34 +2394,37 @@ export function SlideLocationWorkspace({
     currentRuntimeTargetEditContext,
     onSelectImageAsset,
     replacingRuntimeAssetTargetId,
+    documentId,
+    courseLocationId,
+    submitDynamicFallback,
   ])
 
   /** M15: replaces a picture a component shows from its package with a managed image; the component is rebuilt with it. */
   const replaceComponentImage = useCallback(async (target: Readonly<ComponentAuthoringImageTarget>) => {
     if (replacingComponentImageTargetId) return
-    const replace = ports.runtime.replaceComponentAssetAtKey
-    if (!replace) { ports.canvas.setStatus('当前版本不能替换组件图片'); return }
     setReplacingComponentImageTargetId(target.targetId)
     try {
       const imported = await onSelectImageAsset()
       if (!imported) return
       const current = componentImageTargetsByHostRef.current
-      if (![...current.values()].flat().some(candidate => candidate.targetId === target.targetId)) {
+      const currentSnapshot = readSnapshot()
+      if (documentIdRef.current !== documentId || currentSnapshot.projectId !== snapshot.projectId || currentSnapshot.locationId !== courseLocationId ||
+        ![...current.values()].flat().some(candidate => candidate.targetId === target.targetId)) {
         ports.canvas.setStatus('组件图片目标已失效，未写入修改')
         return
       }
-      if (!courseLocationId || !ports.runtime.scheduleStaticFallbackRecapture) {
-        ports.canvas.setStatus('当前页面无法更新静态后备图，未写入组件图片')
+      if (!documentId || !courseLocationId) {
+        ports.canvas.setStatus('当前页面无法提交组件图片，未写入修改')
         return
       }
-      const committed = replace(target.nodeId, target.assetKey, imported.meta, imported.bytes)
-      ports.canvas.setStatus(!committed.ok ? `${committed.reason} 未写入修改` : committed.status === 'unchanged' ? '组件图片未改变' : '已替换组件图片；组件源码没有改动')
-      if (committed.ok && committed.status === 'updated' && !ports.runtime.scheduleStaticFallbackRecapture(target.nodeId, courseLocationId))
-        ports.canvas.setStatus('组件图片已替换，但静态后备图缺少确认版本或页面；请撤销本次修改后重试')
+      await submitDynamicFallback({
+        kind: 'component.asset', documentId, projectId: snapshot.projectId, locationId: courseLocationId, itemId: target.nodeId,
+        assetKey: target.assetKey, asset: imported.meta, bytes: imported.bytes,
+      }, { pending: '正在生成静态后备图，组件图片尚未写入', applied: '已替换组件图片；组件源码没有改动', unchanged: '组件图片未改变' })
     } finally {
       setReplacingComponentImageTargetId(null)
     }
-  }, [onSelectImageAsset, replacingComponentImageTargetId])
+  }, [onSelectImageAsset, replacingComponentImageTargetId, documentId, courseLocationId, snapshot.projectId, submitDynamicFallback])
 
   const canvasAuthoringHitAtClientPoint = useCallback((
     clientX: number,
