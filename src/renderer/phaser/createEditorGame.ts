@@ -40,6 +40,8 @@ export function createEditorGame(
     scene: [new EditorScene(bridge, stage)],
     input: {
       activePointers: 2,
+      // Authoring pointer capture handles drags; preview overlay events must not reach this scene.
+      windowEvents: false,
     },
     render: {
       antialias: true,
