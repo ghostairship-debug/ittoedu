@@ -5,7 +5,7 @@ import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/
 import { createBlankFlowCourseProject } from '../../src/renderer/project/createFlowCourseProject'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import { unpackHtmlDocumentRuntimeSource } from '../../src/shared/runtime/htmlDocumentSource'
-import { launchSelectionApp, openSelectionFile, selectionServer, setupSelectionUI } from './helpers/g20SelectionHarness'
+import { closeSelectionApp, launchSelectionApp, openSelectionFile, selectionServer, setupSelectionUI } from './helpers/g20SelectionHarness'
 import { root, solidPng } from './helpers/g20M19Harness'
 
 const courseName = 'M17 Flow 长页导入.h5lesson'
@@ -13,6 +13,16 @@ const htmlName = 'flow-long-page.html'
 const anchorId = 'm17-flow-anchor'
 const tailId = 'm17-flow-tail'
 const picture = solidPng(64, 48, [23, 105, 189])
+
+async function closeFlowImportApp(app: ElectronApplication) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const result = await Promise.race([
+    closeSelectionApp(app).then(() => 'closed' as const),
+    new Promise<'timeout'>(resolve => { timer = setTimeout(() => resolve('timeout'), 8_000) }),
+  ])
+  if (timer) clearTimeout(timer)
+  if (result === 'timeout') { try { app.process()?.kill() } catch { /* preserve the original test failure */ } }
+}
 
 function flowCourse() {
   const project = createBlankFlowCourseProject({ includeDefaultController: false, controls: 'none' })
@@ -161,7 +171,7 @@ test('M17 Flow insert menu imports a managed long HTML page that runs after save
     evidence.modelRequests = server.requests.length
     writeFileSync(join(directory, 'evidence.json'), JSON.stringify(evidence, null, 2))
     await info.attach('M17 Flow HTML import evidence', { path: join(directory, 'evidence.json'), contentType: 'application/json' })
-    await app?.close()
+    if (app) await closeFlowImportApp(app)
     await server.close()
   }
 })
