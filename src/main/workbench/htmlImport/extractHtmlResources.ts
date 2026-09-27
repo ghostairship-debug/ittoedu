@@ -499,14 +499,42 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
   return parts.join('')
 }
 
+type JavaScriptNode = { type: string; start: number; end: number; [key: string]: unknown }
+
+function modulepreloadShape(node: JavaScriptNode): string {
+  return JSON.stringify(node, (key, value: unknown) => {
+    if (['start', 'end', 'raw'].includes(key)) return undefined
+    if (value && typeof value === 'object' && (value as JavaScriptNode).type === 'TemplateLiteral') {
+      const template = value as JavaScriptNode
+      if ((template.expressions as JavaScriptNode[]).length === 0) {
+        return { type: 'Literal', value: (template.quasis as Array<{ value: { cooked: string | null } }>)[0].value.cooked }
+      }
+    }
+    return value
+  })
+}
+
+// Only these complete, inert-on-supported-host IIFEs are exempt, never a guard-shaped substring.
+// Keep identifiers and every executable AST field: broader Vite variants need their own evidence.
+const modulepreloadShapes = new Set([
+  '(function(){let e=document.createElement(`link`).relList;if(e&&e.supports&&e.supports(`modulepreload`))return;for(let e of document.querySelectorAll(`link[rel="modulepreload"]`))n(e);new MutationObserver(e=>{for(let t of e)if(t.type===`childList`)for(let e of t.addedNodes)e.tagName===`LINK`&&e.rel===`modulepreload`&&n(e)}).observe(document,{childList:!0,subtree:!0});function t(e){let t={};return e.integrity&&(t.integrity=e.integrity),e.referrerPolicy&&(t.referrerPolicy=e.referrerPolicy),e.crossOrigin===`use-credentials`?t.credentials=`include`:e.crossOrigin===`anonymous`?t.credentials=`omit`:t.credentials=`same-origin`,t}function n(e){if(e.ep)return;e.ep=!0;let n=t(e);fetch(e.href,n)}})();',
+  '(function(){let e=document.createElement(`link`).relList;if(e&&e.supports&&e.supports(`modulepreload`))return;for(let e of document.querySelectorAll(`link[rel="modulepreload"]`))n(e);function n(e){if(e.ep)return;e.ep=!0;let n={credentials:`same-origin`};fetch(e.href,n)}})();',
+].map(code => modulepreloadShape(((parse(code, { ecmaVersion: 'latest' }) as unknown as JavaScriptNode).body as JavaScriptNode[])[0].expression as JavaScriptNode)))
+
 function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>): string {
-  type Node = { type: string; start: number; end: number; [key: string]: unknown }
+  type Node = JavaScriptNode
   let root: Node
   try {
     root = parse(code, { ecmaVersion: 'latest', sourceType, allowHashBang: true }) as unknown as Node
   } catch (error) {
     addDiagnostic(sink, 'error', 'script-parse', `脚本无法解析: ${String(error)}`)
     return code
+  }
+  const inertPolyfills = new Set<Node>()
+  for (const statement of root.body as Node[]) {
+    const expression = statement.expression as Node | undefined
+    if (statement.type === 'ExpressionStatement' && expression?.type === 'CallExpression'
+      && (expression.callee as Node).type === 'FunctionExpression' && modulepreloadShapes.has(modulepreloadShape(expression))) inertPolyfills.add(expression)
   }
   const edits: Array<{ start: number; end: number; value: string }> = []
   const handled = new Set<Node>()
@@ -554,23 +582,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       const callee = node.callee as Node | undefined
       const name = callee?.type === 'Identifier' ? String(callee.name) : callee ? memberName(callee) : null
       if (name && ['fetch', 'importScripts', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'XMLHttpRequest', 'sendBeacon'].includes(name)) {
-        const request = (node.arguments as Node[])[0]
-        const requestOwner = request?.type === 'MemberExpression' ? request.object as Node : null
-        const loader = [...ancestors].reverse().find(ancestor => ['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(ancestor.type))
-        const loaderParam = (loader?.params as Node[] | undefined)?.[0]
-        const modulepreloadPolyfill = name === 'fetch' && requestOwner?.type === 'Identifier' && loaderParam?.type === 'Identifier'
-          && requestOwner.name === loaderParam.name && loader && /\.ep\)\s*return/.test(code.slice(loader.start, loader.end))
-          && ancestors.some(ancestor => {
-            if (!['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'].includes(ancestor.type)) return false
-            const body = code.slice(ancestor.start, ancestor.end)
-            const beforeGuard = body.slice(0, body.search(/if\s*\([^)]*\.supports/))
-            const loaderName = (loader?.id as Node | undefined)?.name
-            if (typeof loaderName !== 'string' || new RegExp('\\b' + loaderName + '\\s*\\(').test(beforeGuard)) return false
-            return /\.relList\b/.test(body)
-              && /\.supports\(\s*['"`]modulepreload['"`]\s*\)/.test(body)
-              && /querySelectorAll\(\s*['"`]link\[rel=/.test(body)
-              && /if\s*\([^)]*\.supports[\s\S]*?\)\s*return/.test(body)
-          }) && request?.type === 'MemberExpression' && memberName(request) === 'href'
+        const modulepreloadPolyfill = name === 'fetch' && ancestors.some(ancestor => inertPolyfills.has(ancestor))
         if (!modulepreloadPolyfill) addDiagnostic(sink, 'error', 'unsupported-network-sink', `导入暂不支持脚本网络/动态加载: ${name}`)
       }
       if (name === 'setAttribute') {

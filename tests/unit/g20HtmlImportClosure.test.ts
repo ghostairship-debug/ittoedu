@@ -89,6 +89,36 @@ describe('HTML import closure', () => {
     expect(validateHtmlImport(extractHtmlResources({ html: `<script>${eager}</script>` })).map(error => error.code)).toContain('unsupported-network-sink')
   })
 
+  it('accepts the original complete Vite fallback and preserves its native-support early return', () => {
+    const vite = '(function(){let e=document.createElement(`link`).relList;if(e&&e.supports&&e.supports(`modulepreload`))return;for(let e of document.querySelectorAll(`link[rel="modulepreload"]`))n(e);new MutationObserver(e=>{for(let t of e)if(t.type===`childList`)for(let e of t.addedNodes)e.tagName===`LINK`&&e.rel===`modulepreload`&&n(e)}).observe(document,{childList:!0,subtree:!0});function t(e){let t={};return e.integrity&&(t.integrity=e.integrity),e.referrerPolicy&&(t.referrerPolicy=e.referrerPolicy),e.crossOrigin===`use-credentials`?t.credentials=`include`:e.crossOrigin===`anonymous`?t.credentials=`omit`:t.credentials=`same-origin`,t}function n(e){if(e.ep)return;e.ep=!0;let n=t(e);fetch(e.href,n)}})();'
+    const result = extractHtmlResources({ html: `<script type="module">${vite}</script>` })
+    expect(validateHtmlImport(result)).toEqual([])
+    const calls: unknown[] = []
+    const document = {
+      createElement: () => ({ relList: { supports: (name: string) => name === 'modulepreload' } }),
+      querySelectorAll: () => { throw new Error('native support must return before querying links') },
+    }
+    new Function('document', 'fetch', 'MutationObserver', vite)(document, (...args: unknown[]) => calls.push(args), class { constructor() { throw new Error('observer must be unreachable') } })
+    expect(calls).toEqual([])
+    const quoted = vite.replaceAll('`', "'").replace('if(e&&', '/* preserved formatting */\nif (e&&')
+    expect(validateHtmlImport(extractHtmlResources({ html: `<script>${quoted}</script>` }))).toEqual([])
+  })
+
+  it.each([
+    ['comment-hidden eager call', (code: string) => code.replace('let e=document', 'n/**/({href:location.href});let e=document')],
+    ['unused nested guard', (code: string) => code.replace('if(e&&e.supports&&e.supports(`modulepreload`))return;', 'function unused(){if(e&&e.supports&&e.supports(`modulepreload`))return;}')],
+    ['inverted guard', (code: string) => code.replace('if(e&&e.supports&&e.supports(`modulepreload`))', 'if(!(e&&e.supports&&e.supports(`modulepreload`)))')],
+    ['extra fetch', (code: string) => code.replace('fetch(e.href,n)', 'fetch(e.href,n);fetch(location.href)')],
+    ['guard alternate branch', (code: string) => code.replace('))return;', ')){}else return;')],
+    ['guard in callback', (code: string) => code.replace('if(e&&e.supports&&e.supports(`modulepreload`))return;', '(()=>{if(e&&e.supports&&e.supports(`modulepreload`))return;})();')],
+    ['injected IIFE argument', (code: string) => code.replace('})();', '})(fetch(location.href));')],
+    ['guard variable reassigned', (code: string) => code.replace('if(e&&', 'e=null;if(e&&')],
+  ])('rejects the Vite lookalike with %s', (_name, mutate) => {
+    const vite = '(function(){let e=document.createElement(`link`).relList;if(e&&e.supports&&e.supports(`modulepreload`))return;for(let e of document.querySelectorAll(`link[rel="modulepreload"]`))n(e);function n(e){if(e.ep)return;e.ep=!0;let n={credentials:`same-origin`};fetch(e.href,n)}})();'
+    const result = extractHtmlResources({ html: `<script>${mutate(vite)}</script>` })
+    expect(validateHtmlImport(result).map(error => error.code)).toContain('unsupported-network-sink')
+  })
+
   it('rejects CSS import modifiers rather than turning them into media queries', () => {
     const files = new Map([['theme.css', new TextEncoder().encode('.title{color:red}')]])
     const media = extractHtmlResources({ html: '<style>@import "theme.css" screen;</style>', siblingFiles: files })
