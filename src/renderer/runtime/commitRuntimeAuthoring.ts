@@ -248,7 +248,7 @@ export function createRuntimeAuthoringActions(ports: RuntimeAuthoringPorts) {
     const document = state.document
     const projection = state.projection
     let authoringSession = state.authoringSession
-    const targetContextId = projection?.surfaceType === 'spatial-2d'
+    const targetContextId = projection?.surfaceType === 'spatial-2d' || projection?.surfaceType === 'flow'
       ? projection.locationId
       : state.activeSceneId
     if (
@@ -265,7 +265,7 @@ export function createRuntimeAuthoringActions(ports: RuntimeAuthoringPorts) {
       return null
     }
 
-    let expectedOwner: 'global' | 'scene'
+    let expectedOwner: 'global' | 'surface' | 'scene'
     const projectedItemId = session.nodeId
     if (!projectedItemId) return null
     if (session.scope === 'global') {
@@ -281,16 +281,14 @@ export function createRuntimeAuthoringActions(ports: RuntimeAuthoringPorts) {
       const surface = document.surfaces.find(
         (candidate) => candidate.id === projection.surfaceId,
       )
-      if (
-        !location
-        || location.kind !== 'slide-scene'
-        || !surface
-        || surface.type !== 'slide'
-        || session.sceneId !== location.sceneId
-      ) {
+      if (!location || !surface || location.surfaceId !== surface.id) return null
+      if (surface.type === 'flow' && location.kind === 'flow-block' && session.sceneId === location.id) {
+        expectedOwner = 'surface'
+      } else if (surface.type === 'slide' && location.kind === 'slide-scene' && session.sceneId === location.sceneId) {
+        expectedOwner = 'scene'
+      } else {
         return null
       }
-      expectedOwner = 'scene'
     }
 
     const row = projection.unifiedRows.find((candidate) => (
@@ -671,7 +669,7 @@ export function createRuntimeAuthoringActions(ports: RuntimeAuthoringPorts) {
     ) {
       return null
     }
-    let expectedOwner: 'global' | 'scene'
+    let expectedOwner: 'global' | 'surface' | 'scene'
     const projectedItemId = session.nodeId
     if (!projectedItemId) return null
     if (session.scope === 'global') {
@@ -684,16 +682,14 @@ export function createRuntimeAuthoringActions(ports: RuntimeAuthoringPorts) {
       const surface = document.surfaces.find(
         (candidate) => candidate.id === projection.surfaceId,
       )
-      if (
-        !location
-        || location.kind !== 'slide-scene'
-        || !surface
-        || surface.type !== 'slide'
-        || session.sceneId !== location.sceneId
-      ) {
+      if (!location || !surface || location.surfaceId !== surface.id) return null
+      if (surface.type === 'flow' && location.kind === 'flow-block' && session.sceneId === location.id) {
+        expectedOwner = 'surface'
+      } else if (surface.type === 'slide' && location.kind === 'slide-scene' && session.sceneId === location.sceneId) {
+        expectedOwner = 'scene'
+      } else {
         return null
       }
-      expectedOwner = 'scene'
     }
     const row = projection.unifiedRows.find((candidate) => (
       candidate.owner === expectedOwner

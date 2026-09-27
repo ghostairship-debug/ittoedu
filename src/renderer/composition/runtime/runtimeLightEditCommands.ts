@@ -45,7 +45,7 @@ export const runtimeLightEditCommands = {
     const target = state.captureRuntimeContentTextTarget({
       projectId: document.id,
       scope: selectEditingScope(state),
-      sceneId: projection.surfaceType === 'spatial-2d' ? projection.locationId : selectActiveSceneId(state),
+      sceneId: projection.surfaceType === 'spatial-2d' || projection.surfaceType === 'flow' ? projection.locationId : selectActiveSceneId(state),
       targetId: `page-text:${itemId}`,
       nodeId: itemId,
       kind: 'text',
