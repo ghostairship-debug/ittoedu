@@ -20,7 +20,19 @@ function requireCurrent(source: ManagedHtmlMeasurementSource, signal: AbortSigna
   if (signal.aborted || !source.iframe.isConnected || source.iframe.contentDocument !== source.origin.ownerDocument) throw abortError()
 }
 
-function resourceAllowed(value: string): boolean { return /^(?:data:|blob:|#|$)/i.test(value) }
+interface MeasuredImageIntrinsicSize { width: number; height: number }
+
+function readLoadedImageSize(image: HTMLImageElement): MeasuredImageIntrinsicSize {
+  const width = image.naturalWidth, height = image.naturalHeight
+  if (!image.complete || !Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    throw unsupported('图片尚未完成加载或没有有效固有尺寸。')
+  }
+  return { width, height }
+}
+
+function createMeasurementImageSource({ width, height }: MeasuredImageIntrinsicSize): string {
+  return `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"/>`)}`
+}
 
 /** Copy CSS through CSSOM: the browser, rather than a rule heuristic, owns the cascade. */
 function copyDocument(source: Document, destination: Document): Array<[Element, Element]> {
@@ -55,17 +67,16 @@ function copyDocument(source: Document, destination: Document): Array<[Element, 
     }
     if (original.localName === 'link') { element.remove(); continue }
     if (original.localName === 'img') {
-      const image = original as HTMLImageElement
-      if (!image.complete || (image.currentSrc && !image.naturalWidth)) throw unsupported('图片尚未完成加载。')
-      const url = image.currentSrc || image.src
-      if (!resourceAllowed(url)) throw unsupported('测量仅支持已本地化的图片资源。')
+      const size = readLoadedImageSize(original as HTMLImageElement)
       element.removeAttribute('srcset')
       element.removeAttribute('sizes')
-      if (url) element.setAttribute('src', url)
+      // Only the inert mirror sees this no-network placeholder; live capture keeps the real image.
+      element.setAttribute('src', createMeasurementImageSource(size))
     }
     if (['audio', 'video', 'source', 'track'].includes(original.localName)) {
       element.removeAttribute('src')
       element.removeAttribute('srcset')
+      if (original.localName === 'source') element.removeAttribute('sizes')
       if (original.localName === 'video') {
         const video = original as HTMLVideoElement
         // The inert poster preserves the loaded video's intrinsic ratio without playback.

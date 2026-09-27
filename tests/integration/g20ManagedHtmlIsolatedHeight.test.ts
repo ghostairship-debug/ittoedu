@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, it } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { resolve } from 'node:path'
+import { solidPng } from '../helpers/solidPng'
 import { chromium, type Browser, type Page } from 'playwright'
 
 let browser: Browser
@@ -11,11 +12,13 @@ beforeAll(async () => {
 }, 15000)
 afterAll(async () => { await browser?.close() })
 
-async function pageWith(html: string, network?: { requests: number }): Promise<Page> {
+async function pageWith(html: string, network?: { requests: number; image?: Buffer }): Promise<Page> {
   const page = await browser.newPage()
   if (network) await page.route('https://measurement.invalid/**', async route => {
     network.requests++
-    await route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>' })
+    await route.fulfill(network.image
+      ? { contentType: 'image/png', body: network.image }
+      : { contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"/>' })
   })
   await page.setContent('<div id="root"><iframe style="width:640px;height:300px;border:0"></iframe></div>')
   await page.addScriptTag({ content: script })
@@ -45,6 +48,32 @@ it('preserves loaded local image dimensions without duplicating author load hand
   try {
     await settled(page)
     expect(await page.evaluate(() => ({ heights: (window as any).testHeight.heights, loads: (window as any).imageLoads }))).toEqual({ heights: [600], loads: 1 })
+  } finally { await page.close() }
+})
+
+it('measures a loaded cross-origin picture without a second request or changing its painted box', async () => {
+  const network = { requests: 0, image: solidPng(400, 180, [23, 105, 189]) }
+  const html = '<!doctype html><style>body{margin:0}picture,img{display:block}img{width:200px;height:180px;object-fit:cover;object-position:25% 50%}article{height:920px}</style><picture><source media="(min-width:1px)" srcset="https://measurement.invalid/selected.png" sizes="200px"><img src="https://measurement.invalid/fallback.png" alt="lesson image"></picture><article>lesson body</article>'
+  const page = await pageWith(html, network)
+  try {
+    await settled(page)
+    expect(await page.evaluate(() => {
+      const live = document.querySelector('iframe')!.contentDocument!.querySelector('img')!
+      const state = (window as any).testHeight
+      return { heights: state.heights, errors: state.errors, complete: live.complete, natural: [live.naturalWidth, live.naturalHeight],
+        currentSrc: live.currentSrc, mirrors: document.querySelectorAll('[data-html-height-measurement]').length }
+    })).toEqual({ heights: [1100], errors: [], complete: true, natural: [400, 180],
+      currentSrc: 'https://measurement.invalid/selected.png', mirrors: 0 })
+    expect(network.requests).toBe(1)
+  } finally { await page.close() }
+})
+
+it('rejects a broken image even when CSS supplies a visible size', async () => {
+  const page = await pageWith('<!doctype html><style>body{margin:0}img{display:block;width:200px;height:180px}</style><img src="data:image/png;base64,broken"><article style="height:920px">lesson body</article>')
+  try {
+    await expect(settled(page)).rejects.toThrow('图片尚未完成加载或没有有效固有尺寸')
+    expect(await page.evaluate(() => (window as any).testHeight.heights)).toEqual([])
+    expect(await page.locator('[data-html-height-measurement]').count()).toBe(0)
   } finally { await page.close() }
 })
 
