@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
-import { SlideLightActions, slideLightMenuItems } from '../../src/renderer/editing/quickbar/SlideLightActions'
-import { slideLightCommands } from '../../src/renderer/editing/commands/slideLightCommands'
+import { SlideLightActions, SlideLightPageActions, slideLightMenuItems } from '../../src/renderer/editing/quickbar/SlideLightActions'
+import { slideLightCommands, slideLightPageCommands } from '../../src/renderer/editing/commands/slideLightCommands'
 import { SelectionQuickBar } from '../../src/renderer/editing/quickbar/SelectionQuickBar'
 
 afterEach(cleanup)
@@ -39,4 +39,32 @@ it('M22 preserves disabled reason and reports command rejection in the quick bar
   fireEvent.click(screen.getByRole('button', { name: '行距' }))
   await act(async () => { fireEvent.click(within(screen.getByRole('menu', { name: '行距' })).getAllByRole('menuitem')[0]) })
   expect(screen.getByRole('alert').textContent).toBe('目标已失效')
+})
+
+it('M22 page entry runs page commands without a selected item and shares disabled reasons', async () => {
+  const list = slideLightPageCommands({ stateBackgroundOverride: true })
+  const onRun = vi.fn(async (_command: typeof list[number]) => {})
+  render(<SlideLightPageActions commands={list} backgroundColor={null} onRun={onRun} />)
+  fireEvent.click(screen.getByRole('button', { name: '页面操作' }))
+  const menu = screen.getByRole('menu', { name: '页面操作' })
+  const background = within(menu).getByRole('menuitem', { name: /#ffffff/ })
+  expect(background.getAttribute('aria-disabled')).toBe('true')
+  expect(background.getAttribute('aria-description')).toContain('独立背景')
+  fireEvent.click(background)
+  expect(onRun).not.toHaveBeenCalled()
+  await act(async () => { fireEvent.click(within(menu).getByRole('menuitem', { name: '放置音频' })) })
+  expect(onRun).toHaveBeenCalledWith(list.find(command => command.kind === 'audio-import'))
+})
+
+it('M22 page entry reports rejection from the captured page action', async () => {
+  const list = slideLightPageCommands({})
+  const onError = vi.fn()
+  const onRun = vi.fn(async () => { throw new Error('页面已切换') })
+  render(<SlideLightPageActions commands={list} backgroundColor="#ffffff" onRun={onRun} onError={onError} />)
+  fireEvent.click(screen.getByRole('button', { name: '页面操作' }))
+  const selected = within(screen.getByRole('menu', { name: '页面操作' })).getByRole('menuitem', { name: /#ffffff/ })
+  expect(selected.textContent).toContain('✓')
+  await act(async () => { fireEvent.click(selected) })
+  expect(screen.getByRole('alert').textContent).toBe('页面已切换')
+  expect(onError).toHaveBeenCalledWith('页面已切换')
 })
