@@ -74,6 +74,7 @@ beforeEach(() => {
   })
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
+    unobserve() {}
     disconnect() {}
   })
 })
@@ -374,7 +375,7 @@ describe('FlowWorkspace edit media', () => {
     await waitFor(() => expect(block.querySelector('img')).toBeTruthy())
     const image = block.querySelector('img')
     expect(image).toBeTruthy()
-    expect(image).toHaveAttribute('data-flow-asset-id', 'asset-image')
+    expect(image?.parentElement).toHaveAttribute('data-flow-asset-id', 'asset-image')
     expect(image).toHaveAttribute('src')
     expect(image?.getAttribute('src')).toMatch(/^blob:flow-image\/png-/)
     expect(image?.getAttribute('alt')).toBe('示意图')
@@ -493,7 +494,7 @@ describe('FlowWorkspace edit media', () => {
     )
     await waitFor(() => expect(screen.getByTestId('flow-block-media-image').querySelector('img')).toBeTruthy())
     const image = screen.getByTestId('flow-block-media-image').querySelector('img')
-    expect(image).toHaveAttribute('data-flow-asset-id', 'asset-image-2')
+    expect(image?.parentElement).toHaveAttribute('data-flow-asset-id', 'asset-image-2')
     expect(image).toHaveAttribute('alt', '新说明')
     expect(image).toHaveAttribute('src')
     expect(image?.getAttribute('src')).toMatch(/^blob:flow-image\/png-/)
