@@ -181,26 +181,28 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
     if (!captured) return report('组件文字目标已失效或已锁定')
     setActive({ owner, target, value: target.lightEdit.text, component: captured })
   }
-  const commitText = async (edit: LocalTextEdit, value: string): Promise<void> => {
-    if (!editable || ownerRef.current !== edit.owner || liveBusy) return report('编辑目标已切换或仍在确认，未写入修改')
+  const commitText = async (edit: LocalTextEdit, value: string): Promise<boolean> => {
+    if (!editable || ownerRef.current !== edit.owner || liveBusy) { report('编辑目标已切换或仍在确认，未写入修改'); return false }
     let intent: DynamicFallbackIntent
     if (edit.runtime) {
-      if (!validateRuntimeTargetEditSession(edit.runtime.session, runtimeContext()).ok) return report('运行时文字目标已失效，未写入修改')
+      if (!validateRuntimeTargetEditSession(edit.runtime.session, runtimeContext()).ok) { report('运行时文字目标已失效，未写入修改'); return false }
       intent = { ...commonIntent, kind: 'runtime.text', target: edit.runtime.course, value }
     } else if (edit.component && sameTarget(edit.target as ComponentAuthoringTextTarget)) {
       const current = useEditorStore.getState()
       const project = selectActiveCourseProjectDocument(current)
       if (project?.id !== edit.component.projectId || project.revision !== edit.component.revision
-        || current.courseAuthoringSession?.token.generation !== edit.component.generation) return report('组件文字目标已失效，未写入修改')
+        || current.courseAuthoringSession?.token.generation !== edit.component.generation) { report('组件文字目标已失效，未写入修改'); return false }
       const target = edit.target as ComponentAuthoringTextTarget
-      if (!target.lightEdit || edit.component.original === undefined) return report('组件文字目标已失效，未写入修改')
+      if (!target.lightEdit || edit.component.original === undefined) { report('组件文字目标已失效，未写入修改'); return false }
       intent = { ...commonIntent, kind: 'component.text', original: edit.component.original,
         ...(edit.component.region ? { region: edit.component.region } : {}), text: value, expectedText: target.lightEdit.text }
-    } else return report('组件文字目标已失效，未写入修改')
+    } else { report('组件文字目标已失效，未写入修改'); return false }
     setActive({ ...edit, value })
     setBusy({ owner, targetId: edit.target.targetId })
     try {
-      if (await submitFallback(intent) && mounted.current && ownerRef.current === owner) setActive(null)
+      const applied = await submitFallback(intent)
+      if (applied && mounted.current && ownerRef.current === owner) setActive(null)
+      return applied && mounted.current && ownerRef.current === owner
     } finally {
       if (mounted.current && ownerRef.current === owner) setBusy(null)
     }
@@ -251,13 +253,23 @@ export function FlowPaperDynamicLightEdit({ documentId, projectId, surfaceId, lo
       componentPackages={componentPackages} assetUrls={assetUrls} onTargetsChanged={acceptComponent} />
   const activeRuntime = liveActive?.runtime && liveActive.target.kind === 'text' ? liveActive : null
   const activeComponent = liveActive?.component && liveActive.target.kind === 'component-text' ? liveActive : null
+  const completeRuntimeEditing = async (): Promise<void> => {
+    if (liveBusy || failedTask?.owner === owner) return
+    if (activeRuntime) {
+      if (activeRuntime.value !== activeRuntime.runtime!.course.initialValue) {
+        if (!await commitText(activeRuntime, activeRuntime.value)) return
+      } else setActive(null)
+    }
+    if (mounted.current && ownerRef.current === owner) setMode({ owner, editing: false })
+  }
   const overlayStyle: CSSProperties = { position: 'absolute', inset: 0, pointerEvents: 'none' }
   return <div data-testid="flow-paper-dynamic-light-edit" style={{ position: 'relative', width: '100%', height: '100%' }}>
     {content}
     {editable && item.kind === 'runtime' && <button type="button" data-testid="flow-runtime-edit-mode-toggle"
-      aria-pressed={runtimeEditing} onPointerDown={event => { if (liveActive) event.preventDefault(); event.stopPropagation() }}
-      onClick={event => { event.stopPropagation(); setMode({ owner, editing: !runtimeEditing }) }}
-      style={{ position: 'absolute', zIndex: 9, top: 8, right: 8, pointerEvents: 'auto' }}>
+      aria-pressed={runtimeEditing} disabled={Boolean(liveBusy)}
+      onPointerDown={event => { if (liveActive) event.preventDefault(); event.stopPropagation() }}
+      onClick={event => { event.stopPropagation(); if (runtimeEditing) void completeRuntimeEditing(); else setMode({ owner, editing: true }) }}
+      style={{ position: 'absolute', zIndex: 9, bottom: '100%', right: 0, marginBottom: 6, pointerEvents: 'auto' }}>
       {runtimeEditing ? '\u5b8c\u6210\u7f16\u8f91\u7ee7\u7eed\u8fd0\u884c' : '\u7f16\u8f91\u56fe\u6587'}
     </button>}
     {failedTask?.owner === owner && (item.kind !== 'runtime' || runtimeEditing) && <div data-testid="flow-dynamic-edit-recovery" role="alert"

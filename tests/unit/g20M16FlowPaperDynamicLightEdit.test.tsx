@@ -184,7 +184,7 @@ it('ignores old Runtime source targets and hides edits when switched to read-onl
   expect(mocks.captureRuntimeText).not.toHaveBeenCalled()
 })
 
-it('runs Runtime by default, preserves an unfinished draft across mode changes, and does not remount the host', async () => {
+it('runs Runtime by default, confirms an active draft before leaving edit mode, and keeps the host mounted', async () => {
   const { root, element } = mount()
   await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} item={runtime} />))
   const host = element.querySelector('[data-testid="runtime-mount"]')!
@@ -193,21 +193,41 @@ it('runs Runtime by default, preserves an unfinished draft across mode changes, 
   await act(async () => mocks.runtimeProps.onTargetsChanged({ scope: 'scene', sceneId: 'surface-1', revision: 1, targets: [target] }))
   const toggle = element.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!
   expect(toggle.textContent).toBe('编辑图文')
+  expect(toggle.style.bottom).toBe('100%')
   expect(toggle.getAttribute('aria-pressed')).toBe('false')
   expect(element.querySelector('[data-testid="flow-runtime-light-edit-targets"]')).toBeNull()
   await act(async () => toggle.click())
   expect(toggle.textContent).toBe('完成编辑继续运行')
-  expect(element.querySelector('[aria-label="Title，编辑文字"]')).not.toBeNull()
   await act(async () => element.querySelector<HTMLButtonElement>('[aria-label="Title，编辑文字"]')!.click())
   await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="draft-text"]')!.click())
-  expect(element.querySelector('[data-testid="draft-text"]')?.textContent).toBe('Unsaved draft')
   await act(async () => toggle.click())
+  expect(mocks.submitIntent).toHaveBeenCalledWith(expect.objectContaining({ kind: 'runtime.text', value: 'Unsaved draft' }))
   expect(element.querySelector('[data-testid="flow-runtime-light-edit-targets"]')).toBeNull()
-  expect(mocks.submitIntent).not.toHaveBeenCalled()
   expect(element.querySelector('[data-testid="runtime-mount"]')).toBe(host)
+})
+
+it('keeps edit mode and the draft visible while confirmation is pending or failed', async () => {
+  const { root, element } = mount()
+  let settle!: (result: unknown) => void
+  mocks.submitIntent.mockImplementationOnce(() => ({ taskId: 'task-failed', settled: new Promise(resolve => { settle = resolve }) }) as any)
+  await act(async () => root.render(<FlowPaperDynamicLightEdit {...base} item={runtime} />))
+  const target = { targetId: 'text-1', scope: 'scene' as const, sceneId: 'surface-1', kind: 'text' as const, key: 'title',
+    label: 'Title', source: 'auto' as const, layer: 'scene' as const, bounds: { x: 10, y: 5, width: 40, height: 20 } }
+  await act(async () => mocks.runtimeProps.onTargetsChanged({ scope: 'scene', sceneId: 'surface-1', revision: 1, targets: [target] }))
+  const toggle = element.querySelector<HTMLButtonElement>('[data-testid="flow-runtime-edit-mode-toggle"]')!
   await act(async () => toggle.click())
+  await act(async () => element.querySelector<HTMLButtonElement>('[aria-label="Title，编辑文字"]')!.click())
+  await act(async () => element.querySelector<HTMLButtonElement>('[data-testid="draft-text"]')!.click())
+  await act(async () => { toggle.click(); await Promise.resolve() })
+  expect(toggle.disabled).toBe(true)
   expect(element.querySelector('[data-testid="draft-text"]')?.textContent).toBe('Unsaved draft')
-  expect(element.querySelector('[data-testid="runtime-mount"]')).toBe(host)
+  await act(async () => settle({ status: 'failed', taskId: 'task-failed', reason: '提交失败' }))
+  expect(toggle.textContent).toBe('完成编辑继续运行')
+  expect(element.querySelector('[data-testid="draft-text"]')?.textContent).toBe('Unsaved draft')
+  expect(element.querySelector('[data-testid="flow-dynamic-edit-recovery"]')).not.toBeNull()
+  await act(async () => toggle.click())
+  expect(mocks.submitIntent).toHaveBeenCalledTimes(1)
+  expect(element.querySelector('[data-testid="flow-runtime-light-edit-targets"]')).not.toBeNull()
 })
 
 it('keeps locked and read-only cards in run mode and resets edit mode for a new owner', async () => {
