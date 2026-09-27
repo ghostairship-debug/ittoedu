@@ -28,7 +28,7 @@ function interactiveHtml() {
   return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>
     html,body{margin:0}body{font:20px sans-serif;color:#16324f;background:#eff6ff}
     main{box-sizing:border-box;width:100%;padding:24px}h1{margin:0 0 16px;font-size:30px}
-    button{font:20px sans-serif;padding:8px 12px;margin:0 12px 12px 0}#expanded{display:none;box-sizing:border-box;height:300px;padding:16px;background:#bfdbfe}
+    button{font:20px sans-serif;padding:8px 12px;margin:0 12px 12px 0}#expanded{display:none;box-sizing:border-box;height:300px;padding:16px;background:#bfdbfe}#expanded.open{display:block}
     #expanded p{margin:0}#clock,#clicks{display:inline-block;min-width:110px}
   </style></head><body><main id="fixture"><h1>自然排版的互动讲义</h1>
     <p>先预测，再展开观察，最后解释。</p>
@@ -44,7 +44,7 @@ function interactiveHtml() {
     });
     document.getElementById('toggle').addEventListener('click',function(){
       opened=!opened;clicks++;
-      var expanded=document.getElementById('expanded');expanded.style.display=opened?'block':'none';expanded.dataset.open=String(opened);
+      var expanded=document.getElementById('expanded');expanded.classList.toggle('open',opened);expanded.dataset.open=String(opened);
       var output=document.getElementById('clicks');output.dataset.clicks=String(clicks);output.textContent='操作 '+clicks
     });
   </script></body></html>`
@@ -55,7 +55,8 @@ function erasingHtml() {
 }
 
 function nonconvergingHtml() {
-  return '<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0}</style></head><body><main style="height:200px">持续改变高度</main><script>var n=0;function change(){document.querySelector("main").style.height=(200+(++n%100))+"px";requestAnimationFrame(change)}requestAnimationFrame(change)</script></body></html>'
+  const heights = Array.from({ length: 100 }, (_, index) => `main.h${index}{height:${200 + index}px}`).join('')
+  return `<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0}${heights}</style></head><body><main class="h0">持续改变高度</main><script>var n=0;function change(){document.querySelector("main").className="h"+(++n%100);requestAnimationFrame(change)}requestAnimationFrame(change)</script></body></html>`
 }
 
 async function snapshot(page: Page, id: string) {
