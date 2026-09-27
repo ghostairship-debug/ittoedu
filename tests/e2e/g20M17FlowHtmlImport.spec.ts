@@ -97,15 +97,15 @@ test('M17 Flow insert menu imports a managed long HTML page that runs after save
     await expect(dialog.getByLabel('导入目标页面').locator('option:checked')).toContainText('流式讲义')
     await dialog.getByLabel('HTML 正文位置').selectOption(anchorId)
     await dialog.getByRole('button', { name: '导入', exact: true }).click()
-    const importOutcome = await Promise.race([
-      expect(dialog).toHaveCount(0, { timeout: 90_000 }).then(() => 'closed' as const),
-      dialog.getByRole('alert').toBeVisible({ timeout: 90_000 }).then(async () => ({
-        error: (await dialog.getByRole('alert').innerText()).trim(),
-      })),
-    ])
-    if (importOutcome !== 'closed') {
-      throw new Error(importOutcome.error || 'HTML import was rejected without a visible error message')
-    }
+    let importError = ''
+    await expect.poll(async () => {
+      if (await dialog.count() === 0) return 'closed'
+      const alert = dialog.getByRole('alert')
+      if (await alert.count() === 0 || !(await alert.isVisible())) return 'pending'
+      importError = (await alert.innerText()).trim()
+      return importError ? { error: importError } : 'pending'
+    }, { timeout: 90_000 }).not.toBe('pending')
+    if (importError) throw new Error(importError)
     await expect(page.getByText('HTML 页面已导入到所选位置')).toBeVisible()
     await expect.poll(async () => (await flowSnapshot(page, opened.documentId)).imported.length).toBe(1)
     const committed = await flowSnapshot(page, opened.documentId)
