@@ -82,15 +82,18 @@ it('joins one initial and one confirmation measurement even when their combined 
   expect(errors).toEqual([])
 })
 
-it('counts actual DOM invalidations by measurement round and rejects persistent churn', async () => {
+it('rejects thirteen in-flight data attribute changes that alter visible paint', async () => {
   const calls = controlledMeasurements()
   mocks.waitResize.mockResolvedValue(undefined)
   const { origin, observer, heights, errors } = fixture()
+  const style = origin.ownerDocument.createElement('style')
+  style.textContent = 'body[data-tick="paint-a"]{color:red}body[data-tick="paint-b"]{color:blue}'
+  origin.ownerDocument.head.append(style)
   const ready = observer.waitForReady()
   const rejected = expect(ready).rejects.toThrow('持续失效')
   for (let index = 0; index < 13; index++) {
     await until(() => calls.length === index + 1)
-    origin.ownerDocument.body.textContent = 'change ' + index
+    origin.ownerDocument.body.dataset.tick = index % 2 === 0 ? 'paint-a' : 'paint-b'
     await until(() => calls[index]!.signal.aborted || errors.length > 0)
   }
   await rejected
