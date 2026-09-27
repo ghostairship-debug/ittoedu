@@ -1,3 +1,5 @@
+import { preservesManagedHtmlVisibility } from './managedHtmlContentVisibility'
+
 /** A measurement document never runs the imported page's code or changes its viewport. */
 export interface ManagedHtmlMeasurementSource {
   kind: 'managed-document'
@@ -150,7 +152,13 @@ export async function measureManagedHtmlContent(source: ManagedHtmlMeasurementSo
       frame.style.height = `${height}px`
       const next = Math.max(Math.ceil(source.minimumHeight), bounds(mirror))
       if (!Number.isFinite(next) || next > 1_000_000) throw unsupported('页面高度超过可测量范围。')
-      if (next <= height) return height
+      if (next <= height) {
+        let visible: boolean
+        try { visible = preservesManagedHtmlVisibility(pairs) }
+        catch { throw unsupported('无法证明调整高度后的内容可见性。') }
+        if (!visible) throw unsupported('调整高度会新增内容裁切或缩小文字、媒体与操作目标。')
+        return height
+      }
       height = next
     }
     throw unsupported('页面高度依赖自身视口，无法在有限布局检查内收敛。')
