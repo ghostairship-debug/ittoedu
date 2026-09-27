@@ -2,7 +2,9 @@ import { _electron as electron, expect, test, type ElectronApplication, type Pag
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
+import { importComponentPackage } from '../../src/core/drivers/codecs/importComponentPackage'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
+import { componentPackagesToArchiveFiles } from '../../src/renderer/components/componentPackageStore'
 import { closeSelectionApp } from './helpers/g20SelectionHarness'
 import { flowCourse, root, solidPng, openInWorkbench } from './helpers/g20M19Harness'
 
@@ -16,6 +18,8 @@ function makeFixture(directory: string) {
   mkdirSync(workspace)
   const opened = openCourseProjectArchive(flowCourse())
   const project = structuredClone(opened.project)
+  const component = importComponentPackage(new Uint8Array(readFileSync(join(root, 'resources/built-in-components/packages/text-container.h5component'))))
+  project.componentPackages[component.manifest.id] = component.metadata
   const flow = project.surfaces.find(surface => surface.type === 'flow')
   if (flow?.type !== 'flow') throw new Error('Flow fixture missing')
   flow.blocks.splice(1, 0,
@@ -24,7 +28,8 @@ function makeFixture(directory: string) {
     { id: ids.after, type: 'paragraph', content: { inlines: [{ type: 'text', text: '后一段。'.repeat(12) }] } },
   )
   const baseline = flow.surfaceLayerItems.map(entry => ({ id: entry.item.layerItemId, anchor: entry.paragraphAnchor, paperSpace: entry.item.paperSpace, frame: structuredClone(entry.item.frame) }))
-  writeFileSync(join(workspace, name), createCourseProjectArchive({ project, assetFiles: opened.assetFiles, componentFiles: opened.componentFiles }))
+  writeFileSync(join(workspace, name), createCourseProjectArchive({ project, assetFiles: opened.assetFiles,
+    componentFiles: { ...opened.componentFiles, ...componentPackagesToArchiveFiles({ [component.manifest.id]: component }) } }))
   writeFileSync(join(directory, 'image.png'), image)
   return { workspace, imagePath: join(directory, 'image.png'), baseline }
 }
@@ -155,13 +160,9 @@ test('M16-T02 drag changes paragraph anchor; delete reanchors with undo/redo; fi
   try {
     let launched = await launch(directory, workspace); app = launched.app; let page = launched.page
     const text = await insertPaper(page, '文本框')
-    const shape = await insertPaper(page, '形状')
-    expect(shape.anchor).not.toBeNull()
-    await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, imagePath)
-    const watermark = await insertPaper(page, '图片')
     const flow = page.locator('.flow-workspace').filter({ visible: true }).first()
     const selection = flow.getByTestId(`flow-layer-selection-${text.id}`)
-    await selection.click()
+    await expect(selection).toBeVisible()
     const target = flow.locator(`[data-flow-block-id="${ids.target}"]`)
     await target.scrollIntoViewIfNeeded()
     const targetBox = await target.boundingBox(), selectedBox = await selection.boundingBox()
@@ -181,7 +182,11 @@ test('M16-T02 drag changes paragraph anchor; delete reanchors with undo/redo; fi
     expect(Math.abs(resized.xRatio - dragged.anchor!.xRatio)).toBeLessThan(0.02)
     expect(Math.abs(resized.offsetY - dragged.anchor!.offsetY)).toBeLessThan(4)
 
-    await flow.getByTestId(`flow-layer-selection-${watermark.id}`).click()
+    const shape = await insertPaper(page, '形状')
+    expect(shape.anchor).not.toBeNull()
+    await app.evaluate(({ dialog }, path) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [path] }) }, imagePath)
+    const watermark = await insertPaper(page, '图片')
+    await expect(flow.getByTestId(`flow-layer-selection-${watermark.id}`)).toBeVisible()
     await flow.getByRole('button', { name: '固定在纸面', exact: true }).click()
     await expect.poll(async () => (await layer(page, watermark.id)).anchor).toBeNull()
     await flow.getByRole('button', { name: '正文下方', exact: true }).click()
