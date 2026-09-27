@@ -74,9 +74,9 @@ describe('HTML import closure', () => {
 
   it('classifies member network calls and element URL assignments as sinks', () => {
     const remote = extractHtmlResources({ html: '<script>window.fetch("https://cdn.example/api"); image.src="https://cdn.example/pic.png";</script>' })
-    expect(validateHtmlImport(remote).map(error => error.code)).toEqual(expect.arrayContaining(['unsupported-network-sink', 'remote-js-resource']))
+    expect(validateHtmlImport(remote).map(error => error.code)).toEqual(expect.arrayContaining(['unsupported-network-sink', 'remote-resource']))
     const padded = extractHtmlResources({ html: '<script>image.src="  https://cdn.example/pic.png";</script>' })
-    expect(validateHtmlImport(padded).map(error => error.code)).toContain('remote-js-resource')
+    expect(validateHtmlImport(padded).map(error => error.code)).toContain('remote-resource')
     const mixedSrcset = extractHtmlResources({ html: `<script>image.srcset="${uri} 1x, https://cdn.example/pic.png 2x";</script>` })
     expect(validateHtmlImport(mixedSrcset).map(error => error.code)).toContain('remote-resource')
     const missing = extractHtmlResources({ html: '<script>image.src="picture.png";</script>' })
@@ -94,11 +94,15 @@ describe('HTML import closure', () => {
     const text = extractHtmlResources({ html: '<script>const ns="http://www.w3.org/2000/svg"; const docs="https://react.dev";</script>' })
     expect(validateHtmlImport(text)).toEqual([])
     const alias = extractHtmlResources({ html: '<script>const u="https://example.org/a.png"; document.createElement("img").src=u;</script>' })
-    expect(validateHtmlImport(alias).map(error => error.code)).toContain('remote-js-resource')
+    expect(validateHtmlImport(alias)).toEqual([expect.objectContaining({ level: 'warning', code: 'remote-media-preserved' })])
     const audio = extractHtmlResources({ html: '<script>new Audio("https://example.org/a.mp3")</script>' })
-    expect(validateHtmlImport(audio).map(error => error.code)).toContain('remote-js-resource')
+    expect(validateHtmlImport(audio)).toEqual([expect.objectContaining({ level: 'warning', code: 'remote-media-preserved' })])
     const audioAlias = extractHtmlResources({ html: '<script>const clip="https://example.org/a.mp3"; new Audio(clip)</script>' })
-    expect(validateHtmlImport(audioAlias).map(error => error.code)).toContain('remote-js-resource')
+    expect(validateHtmlImport(audioAlias)).toEqual([expect.objectContaining({ level: 'warning', code: 'remote-media-preserved' })])
+    const image = extractHtmlResources({ html: '<script>const img = new Image(); img.src="https://example.org/picture"</script>' })
+    expect(validateHtmlImport(image)).toEqual([expect.objectContaining({ level: 'warning', code: 'remote-media-preserved' })])
+    const script = extractHtmlResources({ html: '<script>const script = document.createElement("script"); script.src="https://example.org/code"</script>' })
+    expect(validateHtmlImport(script).map(diagnostic => diagnostic.code)).toContain('remote-script')
   })
 
   it('rejects ambiguous or computed URL sinks instead of treating them as local', () => {
@@ -172,12 +176,12 @@ describe('HTML import closure', () => {
     expect(local.resources[0]?.origins).toHaveLength(2)
     expect(validateHtmlImport(local)).toEqual([])
     const remote = extractHtmlResources({ html: '<style>.x{background:-webkit-image-set("https://cdn.example/a.png" 1x)}</style>' })
-    expect(validateHtmlImport(remote).map(error => error.code)).toContain('remote-resource')
+    expect(validateHtmlImport(remote)).toEqual([expect.objectContaining({ level: 'warning', code: 'remote-media-preserved' })])
     const typed = extractHtmlResources({ html: '<style>.x{background:image-set("picture.png" type("image/png") 1x)}</style>', siblingFiles: new Map([['picture.png', png]]) })
     expect(validateHtmlImport(typed)).toEqual([])
     expect(typed.resources).toHaveLength(1)
     const closingParen = extractHtmlResources({ html: '<style>.x{background:image-set("p).png" 1x,"https://cdn.example/b.png" 2x)}</style>', siblingFiles: new Map([['p).png', png]]) })
-    expect(validateHtmlImport(closingParen).map(error => error.code)).toContain('remote-resource')
+    expect(validateHtmlImport(closingParen).map(error => error.code)).toContain('remote-media-preserved')
   })
 
   it('rejects data URI script sources and handles computed property names precisely', () => {
@@ -193,7 +197,7 @@ describe('HTML import closure', () => {
 
   it('includes modulepreload and SVG image references in closure decisions', () => {
     const remote = extractHtmlResources({ html: '<link rel="modulepreload" href="https://cdn.example/mod.js">' })
-    expect(validateHtmlImport(remote).map(error => error.code)).toEqual(expect.arrayContaining(['unsupported-module-graph', 'remote-resource']))
+    expect(validateHtmlImport(remote).map(error => error.code)).toEqual(expect.arrayContaining(['unsupported-module-graph', 'remote-script']))
     const local = extractHtmlResources({ html: '<svg><image href="picture.png"/><image xlink:href="picture.png"/></svg>', siblingFiles: new Map([['picture.png', png]]) })
     expect(local.resources).toHaveLength(1)
     expect(local.resources[0]?.origins).toHaveLength(2)
@@ -237,6 +241,6 @@ describe('HTML import closure', () => {
     const cycle = extractHtmlResources({ html: '<link rel="stylesheet" href="a.css">', siblingFiles: new Map([['a.css', new TextEncoder().encode('@import "a.css";')]]) })
     expect(validateHtmlImport(cycle).map(error => error.code)).toContain('css-import-cycle')
     const blocked = extractHtmlResources({ html: '<base href="/"><script src="https://cdn.example/a.js"></script><img src="../escape.png"><iframe src="x.html"></iframe>' })
-    expect(validateHtmlImport(blocked).map(error => error.code)).toEqual(expect.arrayContaining(['unsupported-html-capability', 'remote-script', 'missing-relative-resource', 'remote-resource']))
+    expect(validateHtmlImport(blocked).map(error => error.code)).toEqual(expect.arrayContaining(['unsupported-html-capability', 'remote-script', 'missing-relative-resource']))
   })
 })

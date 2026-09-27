@@ -2,6 +2,8 @@
 import { createHash } from 'node:crypto'
 import { describe, expect, it } from 'vitest'
 import { extractHtmlResources } from '../../src/main/workbench/htmlImport/extractHtmlResources'
+import { collectRemoteMediaOrigins } from '../../src/main/workbench/htmlImport/remoteHtmlReferences'
+import { validateHtmlImport } from '../../src/main/workbench/htmlImport/validateHtmlImport'
 
 const png = Uint8Array.of(137, 80, 78, 71, 1, 2, 3, 4)
 const gif = Uint8Array.of(71, 73, 70, 56, 7, 7, 7)
@@ -96,7 +98,7 @@ const ratio = 10 / 2;
     expect(result.html).toContain(`cw-resource:${sha256(gif)} 1x`)
     expect(result.html).toContain(`cw-resource:${sha256(png)} 480w`)
     expect(result.html).toContain('https://cdn.example.com/big.png 800w')
-    expect(result.remoteReferences).toEqual([{ url: 'https://cdn.example.com/big.png', context: 'srcset' }])
+    expect(result.remoteReferences).toEqual([{ url: 'https://cdn.example.com/big.png', context: 'srcset', usage: 'image' }])
     expect(result.resources.find(resource => resource.mediaType === 'image/png')?.origins.map(origin => origin.context).sort()).toEqual(['html-attr', 'srcset'])
   })
 
@@ -155,14 +157,31 @@ const ratio = 10 / 2;
     const html = '<img src="https://cdn.example.com/a.png"><img src="//cdn.example.com/b.png"><script>const ns = "http://www.w3.org/2000/svg";</script>'
     const result = extractHtmlResources({ html })
     expect(result.html).toContain('https://cdn.example.com/a.png')
-    expect(result.html).toContain('//cdn.example.com/b.png')
+    expect(result.html).toContain('https://cdn.example.com/b.png')
     expect(result.html).toContain('http://www.w3.org/2000/svg')
     expect(result.remoteReferences).toEqual([
-      { url: 'https://cdn.example.com/a.png', context: 'html-attr' },
-      { url: '//cdn.example.com/b.png', context: 'html-attr' },
+      { url: 'https://cdn.example.com/a.png', context: 'html-attr', usage: 'image' },
+      { url: 'https://cdn.example.com/b.png', context: 'html-attr', usage: 'image' },
     ])
     expect(result.resources).toEqual([])
     expect(() => new Function(scriptBody(result.html))).not.toThrow()
+  })
+
+  it('preserves HTTPS image, audio and video links with exact media origins while rejecting remote scripts', () => {
+    const result = extractHtmlResources({ html: '<img src="https://cdn.example.test/p?id=1"><audio src="https://cdn.example.test/a"></audio><video src="https://media.example.test/v" poster="https://cdn.example.test/p"></video><script src="https://cdn.example.test/app.js"></script>' })
+    expect(result.html).toContain('https://media.example.test/v')
+    expect(result.remoteReferences.map(reference => reference.usage)).toEqual(['image', 'media', 'media', 'image'])
+    expect(collectRemoteMediaOrigins(result)).toEqual(['https://cdn.example.test', 'https://media.example.test'])
+    const diagnostics = validateHtmlImport(result)
+    expect(diagnostics.filter(diagnostic => diagnostic.level === 'warning')).toHaveLength(4)
+    expect(diagnostics.map(diagnostic => diagnostic.code)).toContain('remote-script')
+  })
+
+  it('distinguishes CSS background media from stylesheet dependencies', () => {
+    const result = extractHtmlResources({ html: '<style>.hero{background:url(https://cdn.example.test/photo)}@import "https://cdn.example.test/theme.css";</style>' })
+    expect(result.remoteReferences.map(reference => reference.usage)).toEqual(['image', 'stylesheet'])
+    expect(collectRemoteMediaOrigins(result)).toEqual(['https://cdn.example.test'])
+    expect(validateHtmlImport(result).map(diagnostic => diagnostic.code)).toEqual(['remote-media-preserved', 'remote-stylesheet'])
   })
 
   it('keeps a percent-encoded SVG data URI and records an info diagnostic', () => {

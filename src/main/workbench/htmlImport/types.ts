@@ -16,6 +16,7 @@ export interface ExtractedResource {
 export interface RemoteReference {
   url: string
   context: 'html-attr' | 'srcset' | 'css-url' | 'js-string' | 'unknown'
+  usage: 'image' | 'media' | 'script' | 'stylesheet' | 'font' | 'unknown'
 }
 
 export interface ImportDiagnostic {

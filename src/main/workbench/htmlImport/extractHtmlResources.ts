@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { parse } from 'acorn'
 import { analyzeJavaScriptClosure, CSS_RESOURCE_PROPERTIES } from './javascriptClosureProof'
+import type { RemoteReference as Remote } from './types'
 import type {
   ExtractedResource,
   ExtractedResourceOrigin,
@@ -13,6 +14,7 @@ import type {
 export type { ExtractedResource, ExtractedResourceOrigin, ExtractHtmlResourcesInput, ExtractHtmlResourcesResult, ImportDiagnostic, RemoteReference }
 
 type Context = ExtractedResourceOrigin['context']
+type Usage = Remote['usage']
 type Sink = {
   resources: Map<string, ExtractedResource>
   remoteReferences: RemoteReference[]
@@ -223,14 +225,18 @@ function rewriteRelative(reference: string, context: Context, baseDir: string, s
   }
 }
 
-function rewriteSingleUrl(rawUrl: string, context: Context, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>, allowWhitespace: boolean): { value: string; changed: boolean } {
+function rewriteSingleUrl(rawUrl: string, context: Context, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>, allowWhitespace: boolean, usage: Usage = 'unknown'): { value: string; changed: boolean } {
   const lead = rawUrl.match(/^[\t\n\f\r ]*/)?.[0] ?? ''
   const trail = rawUrl.match(/[\t\n\f\r ]*$/)?.[0] ?? ''
   const core = rawUrl.slice(lead.length, rawUrl.length - trail.length)
   if (!core || core.startsWith('#')) return { value: rawUrl, changed: false }
-  if (core.startsWith('//')) { sink.remoteReferences.push({ url: core, context }); return { value: rawUrl, changed: false } }
+  if (core.startsWith('//')) {
+    const normalized = `https:${core}`
+    sink.remoteReferences.push({ url: normalized, context, usage })
+    return { value: lead + normalized + trail, changed: true }
+  }
   if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(core)) {
-    if (/^https?:/i.test(core)) { sink.remoteReferences.push({ url: core, context }); return { value: rawUrl, changed: false } }
+    if (/^https?:/i.test(core)) { sink.remoteReferences.push({ url: core, context, usage }); return { value: rawUrl, changed: false } }
     if (/^data:/i.test(core)) {
       const hit = parseDataUri(core, 0, allowWhitespace)
       if (!hit) return { value: rawUrl, changed: false }
@@ -358,7 +364,7 @@ function rewriteEmbedded(text: string, context: Context, baseDir: string, sink: 
     }
     const remote = flags.remote ? readRemote(text, next) : null
     if (remote) {
-      sink.remoteReferences.push({ url: remote.url, context })
+      sink.remoteReferences.push({ url: remote.url, context, usage: context === 'css-url' ? 'image' : 'unknown' })
       i = remote.end
       continue
     }
@@ -403,6 +409,16 @@ function imageSetStringStarts(css: string): Set<number> {
   return starts
 }
 
+function cssUrlUsage(css: string, at: number): Usage {
+  const before = css.slice(0, at)
+  const block = before.lastIndexOf('{')
+  const rule = before.slice(Math.max(0, before.lastIndexOf('}', block) + 1), block).trim()
+  const property = before.slice(Math.max(block + 1, before.lastIndexOf(';') + 1), at).split(':')[0].trim().toLowerCase()
+  if (/@font-face\b/i.test(rule) && property === 'src') return 'font'
+  if (/^(?:background(?:-image)?|border-image(?:-source)?|list-style(?:-image)?|content|cursor|mask-image)$/.test(property)) return 'image'
+  return 'unknown'
+}
+
 function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>): string {
   const lower = folded(css)
   const parts: string[] = []
@@ -437,7 +453,7 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
       if (closed) j++
       const inner = css.slice(next + 1, closed ? j - 1 : j)
       const rewritten = imageSetStrings.has(next)
-        ? rewriteSingleUrl(inner, 'css-url', baseDir, sink, siblings, false).value
+        ? rewriteSingleUrl(inner, 'css-url', baseDir, sink, siblings, false, 'image').value
         : rewriteEmbedded(inner, 'css-url', baseDir, sink, siblings, { url: false, remote: false }, false)
       if (rewritten !== inner) {
         changed = true
@@ -459,7 +475,7 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
       }
       const key = resolveRelative(baseDir, reference)
       const bytes = key ? siblings.get(key) : undefined
-      if (/^https?:|^\/\//i.test(reference)) sink.remoteReferences.push({ url: reference, context: 'css-url' })
+      if (/^https?:|^\/\//i.test(reference)) sink.remoteReferences.push({ url: reference, context: 'css-url', usage: 'stylesheet' })
       else if (!key || !bytes) addDiagnostic(sink, 'error', 'missing-relative-resource', `找不到相对资源 ${clip(reference, 180)}`, key ?? reference)
       else if (sink.cssStack.has(key)) addDiagnostic(sink, 'error', 'css-import-cycle', `CSS @import 循环: ${key}`, reference)
       else {
@@ -476,7 +492,7 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
     if (lower.startsWith('url', next)) {
       const call = readUrlCall(css, next)
       if (!call) { i = next + 3; continue }
-      const inner = rewriteSingleUrl(call.inner, 'css-url', baseDir, sink, siblings, Boolean(call.quote))
+      const inner = rewriteSingleUrl(call.inner, 'css-url', baseDir, sink, siblings, Boolean(call.quote), cssUrlUsage(css, next))
       if (inner.changed) {
         changed = true
         parts.push(css.slice(cursor, next), renderUrl(call.quote, inner.value.trim()))
@@ -597,6 +613,50 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     }
   }
   scanBindings(root)
+  const isDocumentCreateElement = (call: Node): boolean => {
+    if (call.type !== 'CallExpression') return false
+    const callee = call.callee as Node
+    return callee.type === 'MemberExpression' && closureProof.memberName(callee) === 'createElement'
+      && (callee.object as Node).type === 'Identifier' && (callee.object as Node).name === 'document'
+      && !declarations.has('document')
+  }
+  const mediaBindings = new Map<string, Usage>()
+  const collectMediaBindings = (node: Node): void => {
+    if (node.type === 'VariableDeclarator' && (node.id as Node).type === 'Identifier') {
+      const name = String((node.id as Node).name)
+      const init = node.init as Node | undefined
+      const ctor = init?.type === 'NewExpression' ? (init.callee as Node).name : undefined
+      let usage: Usage = ctor === 'Image' && !declarations.has('Image') ? 'image'
+        : ctor === 'Audio' && !declarations.has('Audio') ? 'media' : 'unknown'
+      if (init && isDocumentCreateElement(init)) {
+        const tag = (init.arguments as Node[])[0]
+        const value = tag && staticString(tag)?.toLowerCase()
+        usage = value === 'img' ? 'image' : value === 'audio' || value === 'video' ? 'media' : value === 'script' ? 'script' : 'unknown'
+      }
+      if (usage !== 'unknown' && declarations.get(name) === 1 && !ambiguous.has(name)) mediaBindings.set(name, usage)
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (key === 'parent') continue
+      if (Array.isArray(value)) {
+        for (const child of value) if (child && typeof child === 'object' && typeof child.type === 'string') collectMediaBindings(child as Node)
+      } else if (value && typeof value === 'object' && typeof (value as Node).type === 'string') collectMediaBindings(value as Node)
+    }
+  }
+  collectMediaBindings(root)
+  const targetUsage = (receiver: Node | undefined, name: string): Usage => {
+    if (name !== 'src' && name !== 'srcset') return 'unknown'
+    if (receiver?.type === 'Identifier') {
+      const usage = mediaBindings.get(String(receiver.name)) ?? 'unknown'
+      return name === 'srcset' && usage !== 'image' ? 'unknown' : usage
+    }
+    if (receiver && isDocumentCreateElement(receiver)) {
+      const tag = (receiver.arguments as Node[])[0]
+      const value = tag && staticString(tag)?.toLowerCase()
+      return value === 'img' ? 'image' : name === 'src' && (value === 'audio' || value === 'video') ? 'media'
+        : name === 'src' && value === 'script' ? 'script' : 'unknown'
+    }
+    return 'unknown'
+  }
   for (const name of constants.keys()) if (declarations.get(name) !== 1 || ambiguous.has(name)) constants.delete(name)
   const visit = (node: Node, ancestors: Node[] = []) => {
     if (handled.has(node)) return
@@ -619,23 +679,19 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       const next = kind === 'css' ? rewriteCss(text, baseDir, sink, siblings) : transformHtml(text, sink, siblings, baseDir, true)
       writeString(value, next)
     }
-    const rewriteUrl = (url: string, name: string): string => {
+    const rewriteUrl = (url: string, name: string, usage: Usage): string => {
       if (!url.trim() || url.trim().startsWith('#')) return url
-      if (name === 'srcset') return rewriteSrcset(url, baseDir, sink, siblings)
+      if (name === 'srcset') return rewriteSrcset(url, baseDir, sink, siblings, usage)
       if (/^data:/i.test(url.trim())) return rewriteEmbedded(url, 'js-string', baseDir, sink, siblings, { url: true, remote: true }, false)
-      if (/^https?:|^\/\//i.test(url.trim())) {
-        addDiagnostic(sink, 'error', 'remote-js-resource', `未授权脚本资源 ${clip(url, 180)}`, url)
-        return url
-      }
-      return rewriteSingleUrl(url, 'js-string', baseDir, sink, siblings, false).value
+      return rewriteSingleUrl(url, 'js-string', baseDir, sink, siblings, false, usage).value
     }
-    const urlSink = (value: Node, name: string) => {
+    const urlSink = (value: Node, name: string, usage: Usage = 'unknown') => {
       const url = literalValue(value) ?? (value.type === 'Identifier' ? constants.get(String(value.name)) ?? null : null)
       if (url === null) { addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的资源地址`); return }
-      writeString(value, rewriteUrl(url, name))
+      writeString(value, rewriteUrl(url, name, usage))
     }
     if (node === root) {
-      for (const definition of closureProof.exclusiveDefinitions) urlSink(definition.value, definition.name)
+      for (const definition of closureProof.exclusiveDefinitions) urlSink(definition.value, definition.name, definition.usage)
       for (const definition of closureProof.deadDefinitions) writeString(definition, '')
       type Transform = { path: string[]; before: string; after: string }
       const targets = new Map<Node, { local: Map<Node, string>; transforms: Transform[] }>()
@@ -647,7 +703,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
         if (input.proof.kind !== 'proven-resource') { addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${input.name} 的资源内容`); continue }
         for (const literal of input.proof.literals) {
           const before = literalValue(literal)!
-          const after = input.kind === 'url' ? rewriteUrl(before, input.name)
+          const after = input.kind === 'url' ? rewriteUrl(before, input.name, input.usage)
             : input.kind === 'css' ? rewriteCss(before, baseDir, sink, siblings) : transformHtml(before, sink, siblings, baseDir, true)
           const owned = input.value.start <= literal.start && literal.end <= input.value.end
           if (before === after) continue
@@ -689,7 +745,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
         addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', '无法静态确定计算属性写入是否为资源入口')
       if (name && ['src', 'srcset', 'href', 'poster', 'data', 'action', 'formAction'].includes(name)) {
         if (node.operator !== '=') addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的复合写入`)
-        else urlSink(right, name)
+        else urlSink(right, name, targetUsage(left.object as Node | undefined, name))
       }
       const htmlTarget = !!name && ['innerHTML', 'outerHTML', 'srcdoc'].includes(name)
       const cssTarget = name === 'cssText' || (left.type === 'MemberExpression' && closureProof.styleReceiver(left.object as Node))
@@ -700,7 +756,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     if (node.type === 'AssignmentExpression' && closureProof.auditedNode(node) && node.operator === '=') {
       const name = memberName(node.left as Node)
       if (name && ['src', 'srcset', 'href', 'poster', 'data', 'action', 'formAction'].includes(name)
-        && closureProof.internalSink(node).kind === 'unknown') urlSink(node.right as Node, name)
+        && closureProof.internalSink(node).kind === 'unknown') urlSink(node.right as Node, name, targetUsage((node.left as Node).object as Node | undefined, name))
     }
     if (node.type === 'CallExpression' || node.type === 'NewExpression') {
       const callee = node.callee as Node | undefined
@@ -709,12 +765,12 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
         const modulepreloadPolyfill = name === 'fetch' && ancestors.some(ancestor => inertPolyfills.has(ancestor))
         if (!modulepreloadPolyfill) addDiagnostic(sink, 'error', 'unsupported-network-sink', `导入暂不支持脚本网络/动态加载: ${name}`)
       }
-      if (node.type === 'NewExpression' && name === 'Audio' && (node.arguments as Node[])[0]) urlSink((node.arguments as Node[])[0], 'Audio')
+      if (node.type === 'NewExpression' && name === 'Audio' && (node.arguments as Node[])[0]) urlSink((node.arguments as Node[])[0], 'Audio', declarations.has('Audio') ? 'unknown' : 'media')
       if (name === 'setAttribute') {
         const args = node.arguments as Node[]
         const attribute = args[0] ? literalValue(args[0]) ?? (args[0].type === 'Identifier' ? constants.get(String(args[0].name)) ?? null : null) : null
         if (!attribute && !closureProof.auditedNode(node)) addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', '无法静态确定 setAttribute 的属性')
-        if (attribute && ['src', 'srcset', 'href', 'poster', 'data', 'action', 'formaction'].includes(attribute) && args[1]) urlSink(args[1], attribute)
+        if (attribute && ['src', 'srcset', 'href', 'poster', 'data', 'action', 'formaction'].includes(attribute) && args[1]) urlSink(args[1], attribute, targetUsage(callee?.object as Node | undefined, attribute))
         if (attribute && (attribute === 'style' || CSS_RESOURCE_PROPERTIES.has(attribute)) && args[1]) embeddedSink(args[1], 'css', attribute)
         if (attribute === 'srcdoc' && args[1]) embeddedSink(args[1], 'html', attribute)
       }
@@ -851,17 +907,33 @@ function javascriptKind(typeValue: string | null): 'script' | 'module' | 'other'
   return 'other'
 }
 
-function rewriteAttributes(tag: StartTag, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>, href: boolean) {
+function attributeUsage(tag: StartTag, attribute: string, parent: string | null): Usage {
+  if (attribute === 'poster') return tag.name === 'video' ? 'image' : 'unknown'
+  if (tag.name === 'img' || tag.name === 'image' || tag.name === 'picture') return 'image'
+  if (tag.name === 'audio' || tag.name === 'video') return attribute === 'srcset' ? 'unknown' : 'media'
+  if (tag.name === 'source') return attribute === 'srcset' ? parent === 'picture' ? 'image' : 'unknown'
+    : parent === 'audio' || parent === 'video' ? 'media' : 'unknown'
+  if (tag.name === 'link' && relHas(tag.attrs, 'icon')) return 'image'
+  if (tag.name === 'link' && relHas(tag.attrs, 'stylesheet')) return 'stylesheet'
+  if (tag.name === 'link' && relHas(tag.attrs, 'modulepreload')) return 'script'
+  if (tag.name === 'link' && relHas(tag.attrs, 'preload')) {
+    const as = attributeBy(tag.attrs, 'as')?.rawValue.toLowerCase()
+    return as === 'image' ? 'image' : as === 'audio' || as === 'video' ? 'media' : as === 'font' ? 'font' : as === 'script' ? 'script' : 'unknown'
+  }
+  return 'unknown'
+}
+
+function rewriteAttributes(tag: StartTag, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>, href: boolean, parent: string | null = null) {
   for (const attribute of tag.attrs) {
     if (!attribute.hasValue || attribute.drop) continue
     if (attribute.name === 'src' || attribute.name === 'poster' || (href && attribute.name === 'href')) {
-      const result = rewriteSingleUrl(decodeEntities(attribute.rawValue), 'html-attr', baseDir, sink, siblings, true)
+      const result = rewriteSingleUrl(decodeEntities(attribute.rawValue), 'html-attr', baseDir, sink, siblings, true, attributeUsage(tag, attribute.name, parent))
       if (!result.changed) continue
       attribute.value = result.value.trim()
       attribute.changed = true
     } else if (attribute.name === 'srcset') {
       const decoded = decodeEntities(attribute.rawValue)
-      const next = rewriteSrcset(decoded, baseDir, sink, siblings)
+      const next = rewriteSrcset(decoded, baseDir, sink, siblings, attributeUsage(tag, attribute.name, parent))
       if (next === decoded) continue
       attribute.value = next
       attribute.changed = true
@@ -875,7 +947,7 @@ function rewriteAttributes(tag: StartTag, baseDir: string, sink: Sink, siblings:
   }
 }
 
-function rewriteSrcset(value: string, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>): string {
+function rewriteSrcset(value: string, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>, usage: Usage = 'image'): string {
   const parts: string[] = []
   let cursor = 0
   let i = 0
@@ -887,7 +959,7 @@ function rewriteSrcset(value: string, baseDir: string, sink: Sink, siblings: Map
     const hit = /^data:/i.test(value.slice(i, i + 5)) ? parseDataUri(value, i, false) : null
     let urlEnd = hit ? hit.end : i
     if (!hit) while (urlEnd < value.length && !/[\s,]/.test(value[urlEnd])) urlEnd++
-    const result = rewriteSingleUrl(decodeEntities(value.slice(urlStart, urlEnd)), 'srcset', baseDir, sink, siblings, false)
+    const result = rewriteSingleUrl(decodeEntities(value.slice(urlStart, urlEnd)), 'srcset', baseDir, sink, siblings, false, usage)
     if (result.changed) {
       changed = true
       parts.push(value.slice(cursor, urlStart), result.value.trim())
@@ -908,6 +980,7 @@ function keptStyleAttributes(attrs: ParsedAttr[]): ParsedAttr[] {
 function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Array>, baseDir = '', embedded = false): string {
   const parts: string[] = []
   let i = 0
+  let mediaParent: string | null = null
   while (i < html.length) {
     if (html.startsWith('<!--', i)) {
       const end = html.indexOf('-->', i + 4)
@@ -927,6 +1000,8 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
     if (html.startsWith('</', i)) {
       const end = html.indexOf('>', i)
       const stop = end === -1 ? html.length : end + 1
+      const closing = /^<\/\s*([a-z][\w:-]*)/i.exec(html.slice(i, stop))?.[1]?.toLowerCase()
+      if (closing === mediaParent) mediaParent = null
       parts.push(html.slice(i, stop))
       i = stop
       continue
@@ -941,6 +1016,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
     const tagStart = i
     const tag = parseStartTag(html, i)
     if (!tag) { parts.push(html[i]); i++; continue }
+    if (['picture', 'audio', 'video'].includes(tag.name) && !tag.selfClosing) mediaParent = tag.name
     if (embedded && (tag.name === 'script' || tag.attrs.some(attribute => /^on[a-z]/i.test(attribute.name)))) addDiagnostic(sink, 'error', 'unsupported-html-capability', '动态 HTML 中的脚本和内联事件暂不支持')
     if (['base', 'iframe', 'object', 'embed'].includes(tag.name)) addDiagnostic(sink, 'error', 'unsupported-html-capability', `导入暂不支持 <${tag.name}>`)
     if (tag.name === 'meta' && /refresh/i.test(attributeBy(tag.attrs, 'http-equiv')?.rawValue ?? '')) addDiagnostic(sink, 'error', 'unsupported-html-capability', '导入暂不支持 meta refresh')
@@ -970,7 +1046,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
         const decoded = decodeEntities(href.rawValue).trim()
         const key = resolveRelative(baseDir, decoded)
         const bytes = key ? siblings.get(key) : undefined
-        if (/^https?:/i.test(decoded) || decoded.startsWith('//')) sink.remoteReferences.push({ url: decoded, context: 'html-attr' })
+        if (/^https?:/i.test(decoded) || decoded.startsWith('//')) sink.remoteReferences.push({ url: decoded, context: 'html-attr', usage: 'stylesheet' })
         else if (bytes && key) {
           const css = neutralizeStyleClose(rewriteCss(decodeText(bytes), directoryOf(key), sink, siblings))
           parts.push(rebuildStart({ rawName: 'style', name: 'style', attrs: keptStyleAttributes(tag.attrs), end: 0, selfClosing: false }, false))
@@ -1017,8 +1093,8 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
           addDiagnostic(sink, 'error', 'unsupported-script-source', `脚本文件类型无法内联: ${key}`, decoded)
           src.value = placeholder(addResource(sink, bytes, mediaTypeForPath(key), { kind: 'relative', context: 'html-attr', reference: decoded }))
           src.changed = true
-        } else {
-          const result = rewriteSingleUrl(decoded, 'html-attr', baseDir, sink, siblings, true)
+        } else if (!/^https?:|^\/\//i.test(decoded)) {
+          const result = rewriteSingleUrl(decoded, 'html-attr', baseDir, sink, siblings, true, 'script')
           if (result.changed) { src.value = result.value.trim(); src.changed = true }
         }
       }
@@ -1034,11 +1110,11 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
       i = raw.closeEnd
       continue
     }
-    rewriteAttributes(tag, baseDir, sink, siblings, tag.name === 'image' || tag.name === 'use')
+    rewriteAttributes(tag, baseDir, sink, siblings, tag.name === 'image' || tag.name === 'use', mediaParent)
     if (tag.name === 'image' || tag.name === 'use') {
       const xlink = attributeBy(tag.attrs, 'xlink:href')
       if (xlink?.hasValue) {
-        const result = rewriteSingleUrl(decodeEntities(xlink.rawValue), 'html-attr', baseDir, sink, siblings, false)
+        const result = rewriteSingleUrl(decodeEntities(xlink.rawValue), 'html-attr', baseDir, sink, siblings, false, tag.name === 'image' ? 'image' : 'unknown')
         if (result.changed) { xlink.value = result.value; xlink.changed = true }
       }
     }

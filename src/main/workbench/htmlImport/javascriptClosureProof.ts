@@ -1,5 +1,7 @@
 import { children, propertyName, recognizeReact1927, type JsNode } from './frameworks/react1927'
+import type { RemoteReference } from './types'
 
+type Usage = RemoteReference['usage']
 type Scope = { parent?: Scope; functionScope: boolean; bindings: Map<string, Binding> }
 type Binding = { declaration: JsNode; initial?: JsNode; scope: Scope; duplicate: boolean }
 type Value = { kind: 'string'; node: JsNode } | { kind: 'object'; fields: Map<string, Value> } | { kind: 'union'; values: Value[] } | { kind: 'non-resource' } | { kind: 'unknown' }
@@ -11,8 +13,8 @@ export interface JavaScriptClosureProof {
   memberName(node: JsNode): string | undefined
   capabilityErrors: JsNode[]
   embeddedInputs: Array<{ value: JsNode; path: string[]; name: string; kind: 'css' | 'html'; proof: ClosureProof }>
-  resourceInputs: Array<{ value: JsNode; name: string; proof: ClosureProof }>
-  exclusiveDefinitions: Array<{ value: JsNode; name: string }>
+  resourceInputs: Array<{ value: JsNode; name: string; usage: Usage; proof: ClosureProof }>
+  exclusiveDefinitions: Array<{ value: JsNode; name: string; usage: Usage }>
   deadDefinitions: JsNode[]
   definitionBackedUses: Set<JsNode>
   frameworkError: boolean
@@ -308,7 +310,15 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
       const tag = jsxProp ? (call.arguments as JsNode[])[0] : undefined
       const hostTag = tag?.type === 'Literal' && typeof tag.value === 'string' || tag?.type === 'TemplateLiteral' && (tag.expressions as JsNode[]).length === 0
       if (jsxProp && !hostTag && !libraryBindings.has(bindingOf(tag!)!) && name && (RESOURCE_FIELDS.has(name) || CSS_RESOURCE_PROPERTIES.has(name) || ['style', 'srcDoc', 'dangerouslySetInnerHTML'].includes(name))) frameworkError = true
-      if (jsxProp && name && RESOURCE_FIELDS.has(name)) resourceInputs.push({ value: node.value as JsNode, name: name === 'srcSet' ? 'srcset' : name, proof: resourceProof(evaluate(node.value as JsNode)) })
+      if (jsxProp && name && RESOURCE_FIELDS.has(name)) {
+        const tagName = tag?.type === 'Literal' && typeof tag.value === 'string' ? tag.value.toLowerCase() : ''
+        const usage: Usage = name === 'poster' && tagName === 'video' ? 'image'
+          : ['src', 'srcSet', 'srcset'].includes(name) && tagName === 'img' ? 'image'
+            : name === 'href' && tagName === 'image' ? 'image'
+              : name === 'src' && (tagName === 'audio' || tagName === 'video') ? 'media'
+                : name === 'src' && tagName === 'script' ? 'script' : 'unknown'
+        resourceInputs.push({ value: node.value as JsNode, name: name === 'srcSet' ? 'srcset' : name, usage, proof: resourceProof(evaluate(node.value as JsNode)) })
+      }
       if (jsxProp && name === 'style') styleInputs(node.value as JsNode, evaluate(node.value as JsNode))
       if (jsxProp && name && CSS_RESOURCE_PROPERTIES.has(name)) embeddedInputs.push({ value: node.value as JsNode, path: [], name, kind: 'css', proof: cssProof(evaluate(node.value as JsNode)) })
       if (jsxProp && name === 'srcDoc') embeddedInputs.push({ value: node.value as JsNode, path: [], name, kind: 'html', proof: resourceProof(evaluate(node.value as JsNode)) })
@@ -358,7 +368,7 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     const live = new Set<JsNode>()
     for (const input of uses) if (input.proof.kind === 'proven-resource') {
       definitionBackedUses.add(input.value)
-      for (const literal of input.proof.literals) { live.add(literal); exclusiveDefinitions.push({ value: literal, name: input.name }) }
+      for (const literal of input.proof.literals) { live.add(literal); exclusiveDefinitions.push({ value: literal, name: input.name, usage: input.usage }) }
     }
     for (const literal of ownedLiterals) if (!live.has(literal)) deadDefinitions.push(literal)
   }
