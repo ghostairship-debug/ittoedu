@@ -26,10 +26,14 @@ afterAll(async () => { await browser?.close() })
 
 const centeredPage = '<!doctype html><style>html,body{margin:0;height:100vh;overflow:hidden}body{display:flex;align-items:center;justify-content:center}</style><button>Continue</button>'
 
+const clippedPage = '<!doctype html><style>body{margin:0}main{position:absolute;width:200px;height:200px}@media(max-height:500px){main{clip:rect(0,200px,1px,0)}}</style><main>Continue</main>'
+const backgroundPage = `<html><style>body{margin:0}main{width:200px;height:200px;background-image:url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22200%22%3E%3Crect width=%22200%22 height=%22200%22 fill=%22red%22/%3E%3C/svg%3E");background-repeat:no-repeat}@media(max-height:500px){main{background-position-y:-199px}}</style><main></main></html>`
+
 async function observe(source: string) {
   const page = await browser.newPage()
   try {
-    await page.setContent('<div id="host" style="width:640px;height:700px"></div>')
+    await page.route('https://height-admission.invalid/**', route => route.fulfill({ contentType: 'text/html', body: '<div id="host" style="width:640px;height:700px"></div>' }))
+    await page.goto('https://height-admission.invalid/')
     await page.addScriptTag({ content: bundle })
     return await page.evaluate(async source => {
       const api = (window as any).HeightAdmission
@@ -38,12 +42,13 @@ async function observe(source: string) {
       let binary = ''; for (const byte of bytes) binary += String.fromCharCode(byte)
       const session = api.createPublishedSurfaceRuntimeSession()
       const heights: number[] = []
+      const beforeResize: string[] = []
       let handle: any
-      handle = api.mountPublishedSurfaceRuntime(document.getElementById('host'), { instanceId: 'admission', runtime: { protocol: 'surface-runtime', runtimeApiVersion: 3, enabled: true, renderMode: 'dom', code: { encoding: 'base64-utf16le', data: btoa(binary) }, content: { values: {} }, assets: {} }, width: 640, height: 700, visible: true, session, resolveAsset: () => undefined, onContentHeightChange: (height: number) => { heights.push(height); handle.updateSize(640, height) } })
+      handle = api.mountPublishedSurfaceRuntime(document.getElementById('host'), { instanceId: 'admission', runtime: { protocol: 'surface-runtime', runtimeApiVersion: 3, enabled: true, renderMode: 'dom', code: { encoding: 'base64-utf16le', data: btoa(binary) }, content: { values: {} }, assets: {} }, width: 640, height: 700, visible: true, session, resolveAsset: () => undefined, onContentHeightChange: (height: number) => { beforeResize.push(document.querySelector('iframe')?.contentDocument?.body.innerHTML ?? 'missing'); heights.push(height); handle.updateSize(640, height) } })
       let observationFailure = '', captureFailure = ''
       try { await handle.waitForObservationReady() } catch (error) { observationFailure = String(error) }
       try { await handle.waitForCaptureReady() } catch (error) { captureFailure = String(error) }
-      const result = { heights, ok: handle.ok, observationFailure, captureFailure, mirrors: document.querySelectorAll('[data-html-height-measurement]').length }
+      const result = { beforeResize, heights, ok: handle.ok, observationFailure, captureFailure, mirrors: document.querySelectorAll('[data-html-height-measurement]').length }
       handle.destroy(); session.destroy()
       return result
     }, source)
@@ -52,6 +57,8 @@ async function observe(source: string) {
 
 it.each([
   centeredPage,
+  clippedPage,
+  backgroundPage,
   centeredPage.replace('<button>Continue</button>', 'Continue'),
   centeredPage.replace('body{display:flex;', 'body{font-size:6vh;display:flex;'),
   centeredPage.replace('</style><button>Continue</button>', 'body::before{content:"Continue"}</style>'),
@@ -64,7 +71,7 @@ it.each([
   expect(result.mirrors).toBe(0)
 })
 
-it('propagates the real Chromium rejection through ControlledBuild admission with zero formal writes', async () => {
+it.each([centeredPage, clippedPage, backgroundPage])('propagates the real Chromium rejection through ControlledBuild admission with zero formal writes', async html => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-height-admission-'))
   try {
     const blank = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
@@ -88,7 +95,7 @@ it('propagates the real Chromium rejection through ControlledBuild admission wit
     const targetHandle = await gateway.issueTarget('height', session.documentId, { kind: 'document' })
     const service = new HtmlImportService({ session, gateway })
     const sourcePath = path.join(root, 'viewport.html')
-    await fs.writeFile(sourcePath, centeredPage)
+    await fs.writeFile(sourcePath, html)
     const before = session.read()
     const ticket = await service.prepare({ operationId: 'viewport', runId: 'height', targetHandle, sourcePath, locationId: project.locations.find(location => location.kind === 'flow-block')!.id })
     await expect(service.admit(ticket)).rejects.toThrow('未通过')
@@ -104,3 +111,15 @@ it('propagates the real Chromium rejection through ControlledBuild admission wit
     await fs.rm(root, { recursive: true, force: true })
   }
 }, 20000)
+
+
+it('quarantines author resize handlers that erase content before claiming readiness', async () => {
+  const html = '<!doctype html><style>body{margin:0}main{height:200px}</style><main>Continue</main><script>addEventListener("resize",()=>{if(innerHeight<500)document.querySelector("main").textContent=""})</script>'
+  const result = await observe(createHtmlDocumentRuntimeSource({ html, resourceKeys: [] }))
+  expect(result.heights).toEqual([200])
+  expect(result.beforeResize[0]).toContain('Continue')
+  expect(result.ok).toBe(false)
+  expect(result.observationFailure).toContain('改变了正文')
+  expect(result.captureFailure).toContain('改变了正文')
+  expect(result.mirrors).toBe(0)
+})

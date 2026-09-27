@@ -6,7 +6,7 @@ import { chromium, type Browser, type Page } from 'playwright'
 let browser: Browser
 let script: string
 beforeAll(async () => {
-  script = execFileSync(process.execPath, [resolve(process.cwd(), 'node_modules/esbuild/bin/esbuild'), '--loader=ts', '--bundle', '--format=iife', '--global-name=HeightReview', '--platform=browser', '--define:process.env.NODE_ENV="test"'], { input: `export {observeSurfaceRuntimeContentSize} from './src/player/surfaces/runtime/surfaceRuntimeContentSize'; export {mountPublishedSurfaceRuntime,createPublishedSurfaceRuntimeSession} from './src/player/surfaces/runtime/publishedSurfaceRuntimeMount'; export {createHtmlDocumentRuntimeSource} from './src/shared/runtime/htmlDocumentSource';`, encoding: 'utf8' })
+  script = execFileSync(process.execPath, [resolve(process.cwd(), 'node_modules/esbuild/bin/esbuild'), '--loader=ts', '--bundle', '--format=iife', '--global-name=HeightReview', '--platform=browser', '--define:process.env.NODE_ENV="test"'], { input: `export {managedHtmlStylesheetSignature} from './src/player/surfaces/runtime/managedHtmlFlowAdmissionProfile'; export {observeSurfaceRuntimeContentSize} from './src/player/surfaces/runtime/surfaceRuntimeContentSize'; export {mountPublishedSurfaceRuntime,createPublishedSurfaceRuntimeSession} from './src/player/surfaces/runtime/publishedSurfaceRuntimeMount'; export {createHtmlDocumentRuntimeSource} from './src/shared/runtime/htmlDocumentSource';`, encoding: 'utf8' })
   browser = await chromium.launch({ headless: true })
 }, 15000)
 afterAll(async () => { await browser?.close() })
@@ -97,11 +97,11 @@ it.each([
   } finally { await page.close() }
 })
 
-it('respects the browser cascade for supports, custom properties, calc, layers and fixed minimums', async () => {
+it('refuses variable-driven competing root minimums outside the approved natural-flow profile', async () => {
   const page = await pageWith('<!doctype html><style>body{margin:0}#app{min-height:100vh}@supports(display:block){#app{--fixed:400px;min-height:calc(var(--fixed) + 0px)}}@layer nested{main{height:350px}}</style><div id="app"><main>text</main></div>')
   try {
-    await settled(page)
-    expect(await page.evaluate(() => ({ heights: (window as any).testHeight.heights, actual: document.querySelector('iframe')!.contentDocument!.getElementById('app')!.getBoundingClientRect().height }))).toEqual({ heights: [400], actual: 400 })
+    await expect(settled(page)).rejects.toThrow('--fixed')
+    expect(await page.evaluate(() => ({ heights: (window as any).testHeight.heights, actual: document.querySelector('iframe')!.contentDocument!.getElementById('app')!.getBoundingClientRect().height }))).toEqual({ heights: [], actual: 400 })
   } finally { await page.close() }
 })
 
@@ -130,13 +130,13 @@ it('cancels old document results and destroys pending mirrors without late callb
   } finally { await page.close() }
 })
 
-it('does not rerun the live document script in the sandboxed measurement copy', async () => {
+it('refuses background images before any mirror can rerun code or request another resource', async () => {
   const network = { requests: 0 }
   const page = await pageWith('<!doctype html><style>body{margin:0;background:url(https://measurement.invalid/background.svg)}</style><article style="height:500px">text</article><script>parent.executions=(parent.executions||0)+1</script>', network)
   try {
-    await settled(page)
+    await expect(settled(page)).rejects.toThrow('background-image')
     expect(await page.evaluate(() => (window as any).executions)).toBe(1)
-    expect(await page.evaluate(() => (window as any).testHeight.heights)).toEqual([500])
+    expect(await page.evaluate(() => (window as any).testHeight.heights)).toEqual([])
     expect(network.requests).toBe(1)
   } finally { await page.close() }
 })
@@ -188,5 +188,81 @@ it.each([true, false])('formal managed runtime observation readiness includes is
     else expect(result.failure).toBe('')
     expect(result.errors).toHaveLength(unsupported ? 1 : 0)
     expect(result.mirrors).toBe(0)
+  } finally { await page.close() }
+})
+
+
+it('detects insertRule without a DOM mutation and stops after destroy', async () => {
+  const page = await pageWith('<!doctype html><style>body{margin:0}</style><article style="height:500px"></article>')
+  try {
+    await settled(page)
+    await page.evaluate(() => document.querySelector('iframe')!.contentDocument!.styleSheets[0]!.insertRule('article{color:red}', 0))
+    await page.waitForFunction(() => (window as any).testHeight.errors.length === 1)
+    await expect(settled(page)).rejects.toThrow('动态修改样式表')
+    expect(await page.evaluate(() => (window as any).testHeight.heights)).toEqual([500])
+    await page.evaluate(() => (window as any).testHeight.observer.destroy())
+    await page.waitForTimeout(80)
+    expect(await page.evaluate(() => (window as any).testHeight.errors.length)).toBe(1)
+  } finally { await page.close() }
+})
+
+it('uses one readiness deadline despite perpetual DOM mutations', async () => {
+  const page = await pageWith('<!doctype html><style>body{margin:0}</style><article style="height:500px"></article>')
+  try {
+    await settled(page)
+    await page.evaluate(() => { const doc = document.querySelector('iframe')!.contentDocument!; (window as any).mutationTimer = setInterval(() => { doc.body.dataset.tick = String(performance.now()) }, 1) })
+    const started = Date.now()
+    await expect(settled(page)).rejects.toThrow('持续变化或测量超时')
+    expect(Date.now() - started).toBeLessThan(4500)
+    expect(await page.locator('[data-html-height-measurement]').count()).toBe(0)
+    await page.evaluate(() => clearInterval((window as any).mutationTimer))
+  } finally { await page.close() }
+}, 8000)
+
+it('runs no duplicate author script for a supported natural page', async () => {
+  const page = await pageWith('<!doctype html><style>body{margin:0}</style><article style="height:500px">text</article><script>parent.executions=(parent.executions||0)+1</script>')
+  try {
+    await settled(page)
+    expect(await page.evaluate(() => (window as any).executions)).toBe(1)
+    expect(await page.evaluate(() => (window as any).testHeight.heights)).toEqual([500])
+  } finally { await page.close() }
+})
+
+it('bounds CSSOM polling and records real Chromium 100/500/1000-rule cost', async () => {
+  const page = await browser.newPage()
+  try {
+    await page.addScriptTag({ content: script })
+    const samples = await page.evaluate(() => {
+      const style = document.createElement('style'); document.head.append(style)
+      const signature = (window as any).HeightReview.managedHtmlStylesheetSignature
+      const results: Array<{ rules: number; meanMs: number }> = []
+      for (const count of [100, 500, 1000]) {
+        style.textContent = Array.from({length: count}, (_, i) => `.item${i}{height:20px;color:red}`).join('')
+        signature(document)
+        const start = performance.now()
+        for (let i = 0; i < 100; i++) signature(document)
+        results.push({rules: count, meanMs: (performance.now() - start) / 100})
+      }
+      style.sheet!.insertRule('.extra{color:red}', 0)
+      let refused = false; try { signature(document) } catch { refused = true }
+      return {results, refused}
+    })
+    console.log('CSSOM polling cost', JSON.stringify(samples))
+    expect(samples.refused).toBe(true)
+    expect(samples.results.every(sample => Number.isFinite(sample.meanMs))).toBe(true)
+  } finally { await page.close() }
+})
+
+
+it('retains real author interaction through natural 920 to 200 to 920 growth', async () => {
+  const page = await pageWith('<!doctype html><style>body{margin:0}#app{min-height:100vh}</style><div id="app"><article style="height:920px" onclick="this.style.height=this.style.height===\'920px\'?\'200px\':\'920px\'"></article></div>')
+  try {
+    await settled(page)
+    for (let i = 0; i < 2; i++) {
+      await page.evaluate(() => document.querySelector('iframe')!.contentDocument!.querySelector('article')!.click())
+      await settled(page)
+    }
+    expect(await page.evaluate(() => (window as any).testHeight.heights)).toEqual([920, 200, 920])
+    expect(await page.evaluate(() => (window as any).testHeight.errors)).toEqual([])
   } finally { await page.close() }
 })

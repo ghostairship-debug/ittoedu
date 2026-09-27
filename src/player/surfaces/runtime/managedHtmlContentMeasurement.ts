@@ -1,4 +1,5 @@
 import { preservesManagedHtmlVisibility } from './managedHtmlContentVisibility'
+import { inspectManagedHtmlFlowProfile, managedHtmlStylesheetSignature } from './managedHtmlFlowAdmissionProfile'
 
 /** A measurement document never runs the imported page's code or changes its viewport. */
 export interface ManagedHtmlMeasurementSource {
@@ -9,7 +10,7 @@ export interface ManagedHtmlMeasurementSource {
 }
 
 const FAILURE = '此 HTML 页面无法自动适配 Flow 高度；请使用固定视口的演示页。'
-const MAX_LAYOUT_PASSES = 12
+
 
 function unsupported(reason: string): Error { return new Error(`${FAILURE} ${reason}`) }
 
@@ -112,6 +113,7 @@ function equivalentLayout(pairs: Array<[Element, Element]>, source: Document, mi
 export async function measureManagedHtmlContent(source: ManagedHtmlMeasurementSource, signal: AbortSignal): Promise<number> {
   requireCurrent(source, signal)
   const live = source.origin.ownerDocument
+  const profile = inspectManagedHtmlFlowProfile(live)
   const parent = source.iframe.ownerDocument
   const frame = parent.createElement('iframe')
   frame.dataset.htmlHeightMeasurement = 'true'
@@ -147,21 +149,27 @@ export async function measureManagedHtmlContent(source: ManagedHtmlMeasurementSo
     requireCurrent(source, signal)
     for (const [original, copy] of pairs) { copy.scrollTop = original.scrollTop; copy.scrollLeft = original.scrollLeft }
     if (!equivalentLayout(pairs, live, mirror)) throw unsupported('隔离布局与当前页面不一致。')
-    let height = Math.max(1, Math.ceil(source.minimumHeight))
-    for (let pass = 0; pass < MAX_LAYOUT_PASSES; pass += 1) {
-      frame.style.height = `${height}px`
-      const next = Math.max(Math.ceil(source.minimumHeight), bounds(mirror))
-      if (!Number.isFinite(next) || next > 1_000_000) throw unsupported('页面高度超过可测量范围。')
-      if (next <= height) {
-        let visible: boolean
-        try { visible = preservesManagedHtmlVisibility(pairs) }
-        catch { throw unsupported('无法证明调整高度后的内容可见性。') }
-        if (!visible) throw unsupported('调整高度会新增内容裁切或缩小文字、媒体与操作目标。')
-        return height
-      }
-      height = next
+    for (const [original, copy] of pairs) {
+      if (profile.minimumRoots.has(original)) (copy as HTMLElement).style.setProperty('min-height', '0px', 'important')
     }
-    throw unsupported('页面高度依赖自身视口，无法在有限布局检查内收敛。')
+    frame.style.height = '1px'
+    const height = Math.max(Math.ceil(source.minimumHeight), bounds(mirror))
+    if (!Number.isFinite(height) || height > 1_000_000) throw unsupported('页面高度超过可测量范围。')
+    frame.style.height = `${height}px`
+    if (bounds(mirror) > height || !preservesManagedHtmlVisibility(pairs)) throw unsupported('无法证明调整高度后的内容可见性。')
+    for (const [original, copy] of pairs) {
+      if (!copy.isConnected) continue
+      const a = original.getBoundingClientRect(), b = copy.getBoundingClientRect()
+      const container = profile.transparentRoots.has(original)
+      if (Math.abs(a.x - b.x) > 1 || Math.abs(a.y - b.y) > 1 || Math.abs(a.width - b.width) > 1 || (!container && Math.abs(a.height - b.height) > 1)) throw unsupported('内容几何在调整高度时改变。')
+      const left = live.defaultView!.getComputedStyle(original), right = mirror.defaultView!.getComputedStyle(copy)
+      for (const property of ['color', 'background-color', 'opacity', 'visibility', 'font-size', 'line-height', 'border-top-width', 'border-bottom-width', 'border-left-width', 'border-right-width']) {
+        if (left.getPropertyValue(property) !== right.getPropertyValue(property)) throw unsupported('内容绘制样式在调整高度时改变。')
+      }
+    }
+    requireCurrent(source, signal)
+    if (managedHtmlStylesheetSignature(live) !== profile.stylesheetSignature) throw unsupported('测量期间样式表发生变化。')
+    return height
   } finally {
     if (timeout) clearTimeout(timeout)
     signal.removeEventListener('abort', remove)

@@ -1,4 +1,5 @@
 import { measureManagedHtmlContent, type ManagedHtmlMeasurementSource } from './managedHtmlContentMeasurement'
+import { freezeManagedHtmlLayout, managedHtmlStylesheetSignature, waitForManagedHtmlResize } from './managedHtmlFlowAdmissionProfile'
 
 export type SurfaceRuntimeContentSource =
   | { kind: 'intrinsic'; element: HTMLElement }
@@ -77,10 +78,40 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
   let generation = 0
   let failure: Error | null = null
   let consecutiveChanges = 0
+  let cssFrame = 0
+  let cssSignature: string | null = null
+  let verifyPublishedLayout: (() => boolean) | null = null
+  let deadline: ReturnType<typeof setTimeout> | null = null
   const waiters = new Set<{ resolve(): void; reject(error: Error): void }>()
   const settle = (error?: Error): void => {
+    if (deadline) clearTimeout(deadline)
+    deadline = null
     for (const waiter of waiters) error ? waiter.reject(error) : waiter.resolve()
     waiters.clear()
+  }
+  const fail = (cause: unknown): void => {
+    if (destroyed || failure) return
+    failure = cause instanceof Error ? cause : new Error(String(cause))
+    controller?.abort()
+    if (frame && view) view.cancelAnimationFrame(frame)
+    if (cssFrame && view) view.cancelAnimationFrame(cssFrame)
+    frame = cssFrame = 0
+    resizeObserver?.disconnect()
+    mutationObserver?.disconnect()
+    settle(failure)
+    options.onError?.(failure)
+  }
+  const monitorStyles = (): void => {
+    cssFrame = 0
+    if (destroyed || failure || !view || observedSource?.kind !== 'managed-document') return
+    const source = observedSource
+    if (source.iframe.contentDocument !== source.origin.ownerDocument) { schedule(); return }
+    try {
+      const signature = managedHtmlStylesheetSignature(source.origin.ownerDocument)
+      if (cssSignature !== null && signature !== cssSignature) throw new Error('Flow HTML 不允许动态修改样式表；请使用演示页。')
+      cssSignature = signature
+    } catch (cause) { fail(cause); return }
+    cssFrame = view.requestAnimationFrame(monitorStyles)
   }
   const sourceRoot = (source: SurfaceRuntimeContentSource): HTMLElement => source.kind === 'intrinsic' ? source.element : source.origin
   const bindResizeNodes = (): void => {
@@ -92,6 +123,7 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
   }
   const schedule = (): void => {
     if (destroyed || failure || !view) return
+    if (observedSource?.kind === 'managed-document' && !deadline) deadline = setTimeout(() => fail(new Error('Flow HTML 布局持续变化或测量超时；请使用演示页。')), 3000)
     generation += 1
     controller?.abort()
     if (frame) return
@@ -105,6 +137,8 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
       const pending = new AbortController()
       controller = pending
       try {
+        if (verifyPublishedLayout && source.kind === 'managed-document') await waitForManagedHtmlResize(source.origin.ownerDocument, pending.signal)
+        if (verifyPublishedLayout && !verifyPublishedLayout()) throw new Error('Flow HTML 在调整视口后删除、移动或改变了正文；请使用演示页。')
         const height = source.kind === 'managed-document'
           ? await measureManagedHtmlContent(source, pending.signal)
           : contentHeight(source)
@@ -114,24 +148,32 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
         if (height !== lastHeight) {
           if (source.kind === 'managed-document' && ++consecutiveChanges > 12) throw new Error('HTML 页面在调整 Flow 高度后持续改变布局，无法稳定显示；请使用演示页。')
           lastHeight = height
+          if (source.kind === 'managed-document') verifyPublishedLayout = freezeManagedHtmlLayout(source.origin.ownerDocument)
           options.onHeightChange(height)
           // The real page may react to its one final resize. Check that result before readiness.
           if (source.kind === 'managed-document') { schedule(); return }
         } else consecutiveChanges = 0
+        if (verifyPublishedLayout && !verifyPublishedLayout()) throw new Error('Flow HTML 在调整视口后删除、移动或改变了正文；请使用演示页。')
+        verifyPublishedLayout = null
         settle()
       } catch (cause) {
         if (destroyed || pending.signal.aborted || currentGeneration !== generation) return
         if (cause instanceof Error && cause.name === 'AbortError') { schedule(); return }
-        failure = cause instanceof Error ? cause : new Error(String(cause))
-        settle(failure)
-        options.onError?.(failure)
+        fail(cause)
       }
     })
   }
   const attach = (source: SurfaceRuntimeContentSource | null): void => {
     resizeObserver?.disconnect()
     mutationObserver?.disconnect()
+    if (cssFrame && view) view.cancelAnimationFrame(cssFrame)
+    cssFrame = 0
+    cssSignature = null
+    verifyPublishedLayout = null
     observedSource = source
+    if (deadline) clearTimeout(deadline)
+    deadline = source?.kind === 'managed-document' ? setTimeout(() => fail(new Error('Flow HTML 布局持续变化或测量超时；请使用演示页。')), 3000) : null
+    if (source?.kind === 'managed-document' && view) cssFrame = view.requestAnimationFrame(monitorStyles)
     if (!source) return
     const root = sourceRoot(source)
     const sourceView = root.ownerDocument.defaultView
@@ -159,6 +201,7 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
       controller?.abort()
       settle(new Error('内容高度观察器已销毁'))
       if (frame && view) view.cancelAnimationFrame(frame)
+      if (cssFrame && view) view.cancelAnimationFrame(cssFrame)
       resizeObserver?.disconnect()
       mutationObserver?.disconnect()
     },
