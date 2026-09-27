@@ -163,3 +163,51 @@ it('bridges the full consumed pointer stream and cleans up after up, cancel and 
   expect(innerMoves).toEqual([30, 40])
   root.remove()
 })
+
+it('suppresses only the click from a consumed pointer sequence', () => {
+  const root = document.createElement('div')
+  document.body.append(root)
+  const iframe = document.createElement('iframe')
+  iframe.dataset.htmlDocumentRuntime = 'true'
+  root.append(iframe)
+  const inner = iframe.contentDocument!
+  inner.body.innerHTML = '<button>继续</button>'
+  const button = inner.querySelector('button')!
+  let consume = true
+  let clicks = 0
+  root.addEventListener('pointerdown', event => { if (consume) event.preventDefault() }, true)
+  button.addEventListener('click', () => { clicks += 1 })
+  const pointer = (type: string, id: number) => {
+    const event = new inner.defaultView!.MouseEvent(type, { bubbles: true, cancelable: true })
+    Object.defineProperty(event, 'pointerId', { value: id })
+    return event
+  }
+  const click = (id: number, detail: number) => {
+    const event = new inner.defaultView!.MouseEvent('click', { bubbles: true, cancelable: true, detail })
+    Object.defineProperty(event, 'pointerId', { value: id })
+    return event
+  }
+  const stop = bridgeManagedHtmlEvents(root)
+  button.dispatchEvent(pointer('pointerdown', 1))
+  button.dispatchEvent(pointer('pointerup', 1))
+  const consumedClick = click(1, 1)
+  button.dispatchEvent(consumedClick)
+  expect(consumedClick.defaultPrevented).toBe(true)
+  expect(clicks).toBe(0)
+  button.dispatchEvent(click(-1, 0))
+  expect(clicks).toBe(1)
+  consume = false
+  button.dispatchEvent(pointer('pointerdown', 1))
+  button.dispatchEvent(pointer('pointerup', 1))
+  button.dispatchEvent(click(1, 1))
+  expect(clicks).toBe(2)
+  consume = true
+  button.dispatchEvent(pointer('pointerdown', 1))
+  button.dispatchEvent(pointer('pointerup', 1))
+  consume = false
+  button.dispatchEvent(pointer('pointerdown', 1))
+  button.dispatchEvent(pointer('pointerup', 1))
+  button.dispatchEvent(click(1, 1))
+  expect(clicks).toBe(3)
+  stop(); root.remove()
+})

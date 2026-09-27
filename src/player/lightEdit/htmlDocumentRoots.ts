@@ -77,9 +77,9 @@ export function watchManagedHtmlDocuments(root: HTMLElement, onChange: () => voi
 /** An iframe has a separate event tree; authoring gestures reach the outer surface here. */
 export function bridgeManagedHtmlEvents(root: HTMLElement): () => void {
   type ActivePointer = { clientX: number; clientY: number; pointerType: string; isPrimary: boolean }
-  type Entry = { iframe: HTMLIFrameElement; listener: (event: MouseEvent) => void; active: Map<number, ActivePointer> }
+  type Entry = { iframe: HTMLIFrameElement; listener: (event: MouseEvent) => void; active: Map<number, ActivePointer>; pendingClicks: Set<number> }
   const listeners = new Map<Document, Entry>()
-  const types = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'lostpointercapture', 'dblclick', 'contextmenu'] as const
+  const types = ['pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'lostpointercapture', 'click', 'dblclick', 'contextmenu'] as const
   const view = root.ownerDocument.defaultView
   const pointerEvent = (type: string, pointerId: number, state: ActivePointer): Event | null => {
     if (!view) return null
@@ -92,6 +92,7 @@ export function bridgeManagedHtmlEvents(root: HTMLElement): () => void {
       if (event) root.dispatchEvent(event)
     }
     entry.active.clear()
+    entry.pendingClicks.clear()
   }
   const remove = (document: Document, entry: Entry) => {
     cancelActive(entry)
@@ -103,9 +104,17 @@ export function bridgeManagedHtmlEvents(root: HTMLElement): () => void {
     const active = new Set(current.map(item => item.document))
     for (const [document, entry] of listeners) if (!active.has(document)) remove(document, entry)
     for (const item of current) if (!listeners.has(item.document)) {
-      const entry: Entry = { iframe: item.iframe, active: new Map(), listener: () => undefined }
+      const entry: Entry = { iframe: item.iframe, active: new Map(), pendingClicks: new Set(), listener: () => undefined }
       entry.listener = (event: MouseEvent) => {
         const pointer = event as PointerEvent
+        if (event.type === 'click') {
+          if (event.detail > 0 && entry.pendingClicks.delete(pointer.pointerId)) {
+            event.preventDefault()
+            event.stopImmediatePropagation()
+          }
+          return
+        }
+        if (event.type === 'pointerdown') entry.pendingClicks.delete(pointer.pointerId)
         const isPointer = event.type.startsWith('pointer') || event.type === 'lostpointercapture'
         const wasActive = isPointer && entry.active.has(pointer.pointerId)
         if ((event.type === 'pointermove' || event.type === 'pointercancel' || event.type === 'lostpointercapture') && !wasActive) return
@@ -131,6 +140,8 @@ export function bridgeManagedHtmlEvents(root: HTMLElement): () => void {
           entry.active.set(pointer.pointerId, { clientX: point.left, clientY: point.top, pointerType: pointer.pointerType, isPrimary: pointer.isPrimary })
         } else if (wasActive && (event.type === 'pointerup' || event.type === 'pointercancel' || event.type === 'lostpointercapture')) {
           entry.active.delete(pointer.pointerId)
+          if (event.type === 'pointerup') entry.pendingClicks.add(pointer.pointerId)
+          else entry.pendingClicks.delete(pointer.pointerId)
         } else if (wasActive) {
           entry.active.set(pointer.pointerId, { clientX: point.left, clientY: point.top, pointerType: pointer.pointerType, isPrimary: pointer.isPrimary })
         }
