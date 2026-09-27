@@ -27,6 +27,10 @@ interface PendingOperation {
   reject(error: Error): void
 }
 
+export class DocumentExactAckUnknownError extends Error {
+  constructor(readonly operationId: string, cause: unknown) { super(cause instanceof Error ? cause.message : '精确提交回执未知') }
+}
+
 const successful = (result: DocumentOperationResult): result is Extract<DocumentOperationResult, { revision: number }> =>
   result.status === 'applied' || result.status === 'unchanged'
 
@@ -39,6 +43,8 @@ export class DocumentProjection {
   private stopSubscription?: () => void
   private worker?: Promise<void>
   private previewTail?: Promise<unknown>
+  private precommitRelease?: () => void
+  private precommitGate?: Promise<void>
   private expectedRevision = 0
   private expectedEpoch = ''
   private observedOwnRevision = 0
@@ -126,6 +132,7 @@ export class DocumentProjection {
 
   edit(command: DocumentCommand, options: { historyGroup?: string } = {}): Promise<DocumentOperationResult> {
     if (this.disposed || !this.state.committed) return Promise.reject(new Error('文档视图尚未连接'))
+    if (this.precommitGate) return Promise.reject(new Error('动态内容正在准备静态后备图，输入未提交'))
     if (this.queue.some(entry => entry.mutation.type !== 'command')) return Promise.reject(new Error('请等待撤销或重做完成后继续输入'))
     const frozen = structuredClone(command)
     const historyGroup = options.historyGroup
@@ -258,6 +265,52 @@ export class DocumentProjection {
     this.update()
   }
 
+  precommitExternalChangeCount(): number { return this.externalChanges }
+
+  /** Reserve this projection against ordinary full-document edits while a semantic candidate is prepared. */
+  reservePrecommit(): () => void {
+    if (this.precommitGate) throw new Error('文档已有动态内容准备任务')
+    let release!: () => void
+    const gate = new Promise<void>(done => { release = done })
+    this.precommitGate = gate
+    this.precommitRelease = release
+    return () => { if (this.precommitGate === gate) { this.precommitGate = undefined; this.precommitRelease = undefined; release() } }
+  }
+
+  /** Fixed envelope: no normal queue rebase or new operation identity on an unknown ACK retry. */
+  async editExact(snapshot: DocumentSnapshot, command: DocumentCommand, operationId: string = crypto.randomUUID()): Promise<DocumentOperationResult> {
+    if (!this.precommitGate || !this.state.connected || this.disposed || this.queue.length || this.worker || this.previewTail)
+      throw new Error('精确提交前文档仍有未确认输入')
+    if (snapshot.documentId !== this.documentId || this.state.committed?.epoch !== snapshot.epoch) throw new Error('精确提交文档会话已改变')
+    let result: DocumentOperationResult | null
+    try { result = await this.api.lookup(this.documentId, operationId) }
+    catch (error) { if (this.ownOperations.has(operationId)) throw new DocumentExactAckUnknownError(operationId, error); throw error }
+    if (!result) {
+      if (this.state.committed.revision !== snapshot.revision) throw new Error('精确提交基准已变化')
+      const operation: DocumentOperation = { documentId: this.documentId, epoch: snapshot.epoch, operationId,
+        baseRevision: snapshot.revision, actor: 'human', mutation: { type: 'command', command: structuredClone(command) } }
+      this.ownOperations.add(operationId)
+      try { result = await this.api.dispatch(operation) }
+      catch (error) {
+        try { result = await this.api.lookup(this.documentId, operationId) } catch { /* Preserve original identity for retry. */ }
+        if (!result) throw new DocumentExactAckUnknownError(operationId, error)
+      }
+    }
+    if (result.documentId !== this.documentId || result.operationId !== operationId) throw new Error('精确提交回执身份不匹配')
+    if (successful(result)) {
+      this.ownOperations.add(operationId)
+      let current: DocumentSnapshot
+      try { current = await this.api.read(this.documentId) }
+      catch (error) { throw new DocumentExactAckUnknownError(operationId, error) }
+      this.accept(current, current.revision === result.revision ? operationId : undefined)
+      this.expectedRevision = current.revision
+      this.expectedEpoch = snapshot.epoch
+    } else {
+      try { this.accept(await this.api.read(this.documentId)) } catch { /* The rejection remains authoritative. */ }
+    }
+    return result
+  }
+
   async undo(): Promise<DocumentOperationResult> { await this.drain(); return this.enqueue({ type: 'undo' }) }
   async undoLatestAgent(expectedTopOperationId?: string): Promise<DocumentOperationResult> {
     const snapshot = await this.drain()
@@ -268,6 +321,11 @@ export class DocumentProjection {
   }
   async redo(): Promise<DocumentOperationResult> { await this.drain(); return this.enqueue({ type: 'redo' }) }
   async drain(): Promise<DocumentSnapshot> {
+    while (this.precommitGate) await this.precommitGate
+    return this.drainForPrecommit()
+  }
+  /** The precommit owner reads the same authority while its own gate is held. */
+  async drainForPrecommit(): Promise<DocumentSnapshot> {
     for (;;) {
       if (this.previewTail) await this.previewTail
       while (this.worker) await this.worker
@@ -293,5 +351,8 @@ export class DocumentProjection {
     this.stopSubscription?.()
     this.stopSubscription = undefined
     this.listeners.clear()
+    this.precommitRelease?.()
+    this.precommitGate = undefined
+    this.precommitRelease = undefined
   }
 }

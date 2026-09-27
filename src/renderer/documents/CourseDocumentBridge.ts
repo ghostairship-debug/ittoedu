@@ -4,6 +4,7 @@ import { normalizeWorkspacePath } from '../../shared/workspaceIdentity'
 import { CourseV9Driver } from '../../core/drivers/CourseV9Driver'
 import { bumpCourseAuthoringSessionGeneration } from '../authoring/courseAuthoringSession'
 import { DocumentProjection, type DocumentProjectionState } from './DocumentProjection'
+import { PrecommitDynamicFallback, type DynamicFallbackIntent, type DynamicFallbackResult, type DynamicFallbackTaskHandle, type DynamicFallbackTaskState } from '../composition/runtime/precommitDynamicFallback'
 import { courseViewDocument, courseViewModel, courseViewPatch, projectCourseDocument, type CourseDocumentView } from './CourseDocumentView'
 
 type CourseModel = Extract<DocumentModel, { kind: 'course-v9' }>
@@ -43,12 +44,12 @@ export class CourseDocumentBridge {
   private navigation = 0
   private activation = 0
   private lastSubmission: Promise<boolean> = Promise.resolve(true)
-  constructor(private readonly ports: CourseDocumentBridgePorts) {}
+  constructor(private readonly ports: CourseDocumentBridgePorts, private readonly dynamicFallback = new PrecommitDynamicFallback()) {}
 
   connection(): CourseDocumentConnection {
     const state = this.active?.read()
-    return { activation: this.activation, documents: [...this.visible].flatMap(id => { const state = this.projections.get(id)?.read(), snapshot = state?.committed; return snapshot ? [{ ...snapshot, dirty: snapshot.dirty || Boolean(state.pending.length) }] : [] }), documentId: this.active?.documentId ?? null, snapshot: state?.committed ?? null,
-      pending: state?.pending.length ?? 0, error: state?.error?.message ?? null, connected: state?.connected ?? false }
+    return { activation: this.activation, documents: [...this.visible].flatMap(id => { const state = this.projections.get(id)?.read(), snapshot = state?.committed; return snapshot ? [{ ...snapshot, dirty: snapshot.dirty || Boolean(state.pending.length) || this.dynamicFallback.pendingCount(id) > 0 }] : [] }), documentId: this.active?.documentId ?? null, snapshot: state?.committed ?? null,
+      pending: (state?.pending.length ?? 0) + (this.active ? this.dynamicFallback.pendingCount(this.active.documentId) : 0), error: state?.error?.message ?? this.dynamicFallback.state(this.active?.documentId ?? '').find(task => task.reason)?.reason ?? null, connected: state?.connected ?? false }
   }
   private render = (): void => {
     const state = this.active?.read()
@@ -57,7 +58,7 @@ export class CourseDocumentBridge {
     if (model.kind !== 'course-v9') throw new Error('此视图只能显示课程文档')
     const current = this.ports.read()
     this.ports.patch({ ...projectCourseDocument(model, current), courseDocument: this.connection(),
-      dirty: state.committed.dirty || Boolean(state.pending.length),
+      dirty: state.committed.dirty || Boolean(state.pending.length) || this.dynamicFallback.pendingCount(state.committed.documentId) > 0,
       projectPath: state.committed.binding.kind === 'file' ? normalizeWorkspacePath(state.committed.binding.path) : null,
       ...(state.error ? { errorMessage: state.error.message, statusMessage: null } : {}),
     })
@@ -110,7 +111,14 @@ export class CourseDocumentBridge {
   }
   async activatePrepared(documentId: string, prepare: () => Promise<unknown>): Promise<void> {
     const navigation = ++this.navigation
-    if (this.active) await prepare()
+    if (this.active) {
+      const projection = this.active
+      if (this.dynamicFallback.pendingCount(projection.documentId)) {
+        // A semantic task already owns the frozen candidate. Navigation may leave it running
+        // on this document, but earlier ordinary input must finish first.
+        if (projection.read().pending.length) await projection.drainForPrecommit()
+      } else await prepare()
+    }
     if (navigation !== this.navigation) return
     await this.activate(documentId, navigation)
   }
@@ -148,8 +156,12 @@ export class CourseDocumentBridge {
   async discardRecovery(documentId: string): Promise<void> { await this.host().discardRecovery(documentId) }
   async drain(): Promise<DocumentSnapshot> {
     if (this.connecting) await this.connecting
-    if (!this.active) throw new Error('课程文档服务尚未连接')
-    return this.active.drain()
+    const projection = this.active
+    if (!projection) throw new Error('课程文档服务尚未连接')
+    await this.dynamicFallback.wait(projection.documentId)
+    const snapshot = await projection.drain()
+    if (this.active !== projection) throw new Error('等待课程输入期间已切换文档，请重新执行')
+    return snapshot
   }
   /** Prepare stored view drafts without awaiting while a background document is projected. */
   async drainAll(prepareView: () => void): Promise<DocumentSnapshot[]> {
@@ -171,13 +183,17 @@ export class CourseDocumentBridge {
       return [id, view?.v9ContentEdit, view?.spatialContentEdit, view?.flowTextEdit, view?.flowDocumentDraft]
     }))
     const preparedDrafts = draftState()
-    const snapshots = await Promise.all(projections.map(projection => projection.drain()))
+    const snapshots = await Promise.all(projections.map(async projection => {
+      await this.dynamicFallback.wait(projection.documentId)
+      return projection.drain()
+    }))
     if (navigation !== this.navigation || draftState() !== preparedDrafts) throw new Error('关闭准备期间又有新的输入或文档切换，请确认后再次关闭')
     return snapshots
   }
   readCommitted(): DocumentSnapshot {
     const state = this.active?.read()
     if (!state?.committed || !state.connected || state.error || state.pending.length) throw new Error('课程输入尚未确认，请等待或处理保留的草稿')
+    this.dynamicFallback.assertReady(state.committed.documentId)
     return state.committed
   }
   /** The synchronous result is only a prepared local projection, never a commit receipt. */
@@ -198,6 +214,8 @@ export class CourseDocumentBridge {
       this.lastSubmission = Promise.resolve(true)
       return true
     }
+    try { this.dynamicFallback.assertReady(projection.documentId) }
+    catch (error) { this.lastSubmission = Promise.resolve(false); this.ports.patch({ errorMessage: error instanceof Error ? error.message : '动态编辑尚未完成' }); return false }
     this.visible.add(projection.documentId)
     const submission = ++this.sequence
     const status = patch.statusMessage
@@ -213,10 +231,32 @@ export class CourseDocumentBridge {
       })
     return true
   }
+  submitDynamicFallback(intent: DynamicFallbackIntent): DynamicFallbackTaskHandle {
+    const projection = this.projections.get(intent.documentId)
+    if (!projection) throw new Error('动态编辑目标文档未连接')
+    const handle = this.dynamicFallback.submit(projection, intent)
+    this.visible.add(intent.documentId)
+    this.ports.patch({ courseDocument: this.connection() })
+    void handle.settled.then(() => { this.ports.patch({ courseDocument: this.connection() }); if (this.active === projection) this.render() })
+    return handle
+  }
+  retryDynamicFallback(taskId: string): Promise<DynamicFallbackResult> {
+    const result = this.dynamicFallback.retry(taskId)
+    this.ports.patch({ courseDocument: this.connection() })
+    void result.then(() => { this.ports.patch({ courseDocument: this.connection() }); this.render() })
+    return result
+  }
+  discardDynamicFallback(taskId: string): void {
+    this.dynamicFallback.discard(taskId)
+    this.ports.patch({ courseDocument: this.connection() })
+    this.render()
+  }
+  dynamicFallbackState(documentId: string): readonly DynamicFallbackTaskState[] { return this.dynamicFallback.state(documentId) }
   acknowledgement(): Promise<boolean> { return this.lastSubmission }
   async history(direction: 'undo' | 'redo'): Promise<boolean> {
     const projection = this.active
     if (!projection) return false
+    await this.dynamicFallback.wait(projection.documentId)
     const result = await projection[direction]()
     return this.finishHistory(projection, result, direction)
   }
@@ -234,6 +274,7 @@ export class CourseDocumentBridge {
       || target.projection.read().committed?.epoch !== target.epoch) {
       throw new Error('撤销目标文档已切换或变化，请重新确认最近 AI 修改')
     }
+    await this.dynamicFallback.wait(target.documentId)
     const result = await target.projection.undoLatestAgent(target.expectedTopOperationId)
     const projection = target.projection
     return this.finishHistory(projection, result, 'undo')
@@ -258,6 +299,7 @@ export class CourseDocumentBridge {
   async close(documentId: string): Promise<boolean> {
     const projection = this.projections.get(documentId)
     if (!projection) return true
+    await this.dynamicFallback.wait(documentId)
     await projection.drain()
     if (!await this.host().closeWithDialog(documentId)) return false
     this.visible.delete(documentId); this.views.delete(documentId)
