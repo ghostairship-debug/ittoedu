@@ -30,7 +30,7 @@ const runtimeSource = `CoursewareRuntime.define({protocol:'surface-runtime',runt
   var button=document.createElement('button');button.type='button';button.dataset.m16LightRuntimeButton='true';
   button.textContent='运行交互';button.style.cssText='position:absolute;left:210px;top:100px';
   var result=document.createElement('output');result.dataset.m16LightRuntimeResult='true';
-  button.onclick=function(){result.textContent='交互成功'};
+  var clickCount=0;button.onclick=function(){result.textContent=++clickCount===1?'交互成功':'再次交互成功'};
   panel.append(heading,image,button,result);ctx.dom.root.appendChild(panel);
   return {destroy(){panel.remove()}};
 }});`
@@ -156,6 +156,17 @@ test('M16 Flow paper Runtime and managed Component light edits commit with fallb
     const cardAssetId = afterCardImage.component.assetOverrides.pic!.assetId
     await expect.poll(() => component.locator('[data-m15-card-picture]').evaluate(image => (image as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
 
+    await expect(runtime.getByTestId('flow-runtime-light-edit-targets')).toHaveCount(0)
+    await runtime.locator('[data-m16-light-runtime-button]').click()
+    await expect(runtime.locator('[data-m16-light-runtime-result]')).toHaveText('交互成功')
+    await runtime.getByTestId('flow-runtime-edit-mode-toggle').click()
+    await expect(runtime.locator('[data-m16-light-runtime-result]')).toHaveText('交互成功')
+    await expect(runtime.getByTestId('flow-runtime-light-edit-targets').getByRole('button', { name: /编辑文字/ })).toBeVisible()
+    await runtime.getByTestId('flow-runtime-edit-mode-toggle').click()
+    await expect(runtime.getByTestId('flow-runtime-light-edit-targets')).toHaveCount(0)
+    await runtime.locator('[data-m16-light-runtime-button]').click()
+    await expect(runtime.locator('[data-m16-light-runtime-result]')).toHaveText('再次交互成功')
+    await runtime.getByTestId('flow-runtime-edit-mode-toggle').click()
     await expect(runtime.getByTestId('flow-runtime-light-edit-targets').getByRole('button', { name: /编辑文字/ })).toBeVisible()
     await runtime.getByTestId('flow-runtime-light-edit-targets').getByRole('button', { name: /编辑文字/ }).click()
     await expect(textEditor).toHaveValue(oldText)
@@ -175,6 +186,8 @@ test('M16 Flow paper Runtime and managed Component light edits commit with fallb
     expect(edited.runtime.fallback).toBeTruthy()
     const runtimeAssetId = edited.runtime.assets.hero.assetId
     evidence.edited = edited
+    await runtime.getByTestId('flow-runtime-edit-mode-toggle').click()
+    await expect(runtime.getByTestId('flow-runtime-light-edit-targets')).toHaveCount(0)
     await page.screenshot({ path: join(directory, 'edited.png') })
 
     await page.keyboard.press('Control+Z')
