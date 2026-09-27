@@ -97,7 +97,15 @@ test('M17 Flow insert menu imports a managed long HTML page that runs after save
     await expect(dialog.getByLabel('导入目标页面').locator('option:checked')).toContainText('流式讲义')
     await dialog.getByLabel('HTML 正文位置').selectOption(anchorId)
     await dialog.getByRole('button', { name: '导入', exact: true }).click()
-    await expect(dialog).toHaveCount(0, { timeout: 90_000 })
+    const importOutcome = await Promise.race([
+      expect(dialog).toHaveCount(0, { timeout: 90_000 }).then(() => 'closed' as const),
+      dialog.getByRole('alert').toBeVisible({ timeout: 90_000 }).then(async () => ({
+        error: (await dialog.getByRole('alert').innerText()).trim(),
+      })),
+    ])
+    if (importOutcome !== 'closed') {
+      throw new Error(importOutcome.error || 'HTML import was rejected without a visible error message')
+    }
     await expect(page.getByText('HTML 页面已导入到所选位置')).toBeVisible()
     await expect.poll(async () => (await flowSnapshot(page, opened.documentId)).imported.length).toBe(1)
     const committed = await flowSnapshot(page, opened.documentId)
@@ -133,7 +141,7 @@ test('M17 Flow insert menu imports a managed long HTML page that runs after save
       resourceKey: payload!.resourceKeys[0], assetId: binding!.assetId, cardHeight: height }
     await page.screenshot({ path: join(directory, 'flow-imported.png') })
 
-    await page.keyboard.press('Control+S')
+    await page.getByLabel('常用工具').getByRole('button', { name: '保存', exact: true }).click()
     await expect.poll(async () => (await flowSnapshot(page, opened.documentId)).dirty).toBe(false)
     const saved = openCourseProjectArchive(new Uint8Array(readFileSync(join(workspace, courseName))))
     const savedFlow = saved.project.surfaces.find(surface => surface.type === 'flow')
