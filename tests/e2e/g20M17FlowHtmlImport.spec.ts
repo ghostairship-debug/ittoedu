@@ -124,9 +124,13 @@ test('M17 Flow insert menu imports a managed long HTML page that runs after save
     const binding = entry.item.runtime.assets[payload!.resourceKeys[0]!]
     expect(binding).toBeTruthy()
     expect(committed.assets[binding!.assetId]).toBeTruthy()
-    const runtimeCard = paper.getByTestId(`flow-layer-card-${entry.item.layerItemId}`)
+    const runtimeCard = page.getByTestId(`flow-layer-card-${entry.item.layerItemId}`)
     const importedFrame = runtimeCard.locator('iframe[data-html-document-runtime="true"]')
-    await expect(importedFrame).toHaveAttribute('data-html-document-ready', 'true', { timeout: 60_000 })
+    await expect(importedFrame).toHaveAttribute('data-html-document-ready', 'true', { timeout: 20_000 }).catch(async error => {
+      const fallback = await runtimeCard.locator('[data-runtime-fallback="true"]').count()
+      const alerts = await page.getByRole('alert').allTextContents()
+      throw new Error(`Flow HTML 页面未启动：fallback=${fallback}; alerts=${alerts.join(' | ') || 'none'}; ${String(error)}`)
+    })
     const document = importedFrame.contentFrame()
     await expect(document.locator('#page-heading')).toHaveText('纵向 HTML 讲义')
     await expect(document.locator('.lesson-row')).toHaveCount(18)
