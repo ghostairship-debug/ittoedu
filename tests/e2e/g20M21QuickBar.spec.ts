@@ -322,7 +322,8 @@ test('M21-T01 M21-T02 M21-T03 a steady top bar and canvas, one quick bar everywh
       const imageBox = (await image.boundingBox())!
       const imageMenu = await contextMenuAt(page, centre(imageBox), '对象操作')
       imageMenuItems = await imageMenu.getByRole('menuitem').evaluateAll(items => items.map(item => item.getAttribute('aria-label') ?? ''))
-      expect(imageMenuItems).toEqual(['替换图片…', '裁剪…', '正文宽', '宽幅', '通栏', '左环绕', '右环绕', '说明文字', '改为浮动', '上移', '下移', ...more])
+      expect(imageMenuItems).toEqual(['替换图片…', '裁剪…', '正文宽', '宽幅', '通栏', '左环绕', '右环绕', '说明文字', '改为浮动', '上移', '下移', '删除'])
+      expect(imageMenuItems.filter(item => more.includes(item))).toEqual(more)
       await page.screenshot({ path: join(shots, 't05-flow-image-menu.png') })
       await page.keyboard.press('Escape')
       // Cells of a table selected together get the text tools.
