@@ -125,7 +125,7 @@ it('accepts a managed document as the content source and measures its page inste
   root.style.height = '300px'
   document.body.append(root)
   const heights: number[] = []
-  const observer = observeSurfaceRuntimeContentSize({ root, source: () => page, onHeightChange: height => heights.push(height) })
+  const observer = observeSurfaceRuntimeContentSize({ root, source: () => ({ kind: 'viewport', origin: page.body, viewportElements: new Set([page.body]) }), onHeightChange: height => heights.push(height) })
   await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
   expect(heights).toEqual([920])
   pageHeight = 480
@@ -158,7 +158,7 @@ it.each([0.5, 2])('measures unscaled content at %sx and shrinks after a styleshe
   } })
   Object.defineProperty(content, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 0, bottom: contentHeight * scale, height: contentHeight * scale }) })
   const heights: number[] = []
-  const observer = observeSurfaceRuntimeContentSize({ root, onHeightChange: height => heights.push(height) })
+  const observer = observeSurfaceRuntimeContentSize({ root, source: () => ({ kind: 'viewport', origin: root, viewportElements: new Set([root, wrapper]) }), onHeightChange: height => heights.push(height) })
   await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
   expect(heights).toEqual([1200])
   hostHeight = 1200
@@ -195,5 +195,55 @@ it('measures direct visible text in an otherwise empty Runtime root', async () =
   expect(heights).toEqual([40])
   observer.destroy()
   createRange.mockRestore()
+  root.remove()
+})
+
+it('keeps fixed intrinsic boxes and viewport padding while explicit sources change', async () => {
+  const root = document.createElement('div')
+  document.body.append(root)
+  const first = document.createElement('main')
+  const paragraph = document.createElement('p')
+  first.append(paragraph)
+  const second = document.createElement('main')
+  Object.defineProperty(first, 'offsetHeight', { configurable: true, value: 1200 })
+  Object.defineProperty(second, 'offsetHeight', { configurable: true, value: 500 })
+  let source: { kind: 'intrinsic'; element: HTMLElement } | null = null
+  const heights: number[] = []
+  const observer = observeSurfaceRuntimeContentSize({ root, source: () => source, onHeightChange: height => heights.push(height) })
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  expect(heights).toEqual([])
+  source = { kind: 'intrinsic', element: first }
+  root.append(first)
+  observer.refresh()
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  expect(heights).toEqual([1200])
+  source = { kind: 'intrinsic', element: second }
+  root.replaceChildren(second)
+  observer.refresh()
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  expect(heights).toEqual([1200, 500])
+  observer.destroy()
+  root.remove()
+})
+
+it('includes fixed child boxes and trailing padding inside an explicitly declared viewport', async () => {
+  const root = document.createElement('div')
+  const viewport = document.createElement('div')
+  viewport.style.paddingBottom = '200px'
+  const fixed = document.createElement('main')
+  const paragraph = document.createElement('p')
+  fixed.append(paragraph)
+  viewport.append(fixed)
+  root.append(viewport)
+  document.body.append(root)
+  Object.defineProperty(root, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 0, bottom: 300, height: 300 }) })
+  Object.defineProperty(viewport, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 0, bottom: 300, height: 300 }) })
+  Object.defineProperty(fixed, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 0, bottom: 1200, height: 1200 }) })
+  Object.defineProperty(paragraph, 'getBoundingClientRect', { configurable: true, value: () => ({ top: 0, bottom: 21, height: 21 }) })
+  const heights: number[] = []
+  const observer = observeSurfaceRuntimeContentSize({ root, source: () => ({ kind: 'viewport', origin: root, viewportElements: new Set([root, viewport]) }), onHeightChange: height => heights.push(height) })
+  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  expect(heights).toEqual([1400])
+  observer.destroy()
   root.remove()
 })

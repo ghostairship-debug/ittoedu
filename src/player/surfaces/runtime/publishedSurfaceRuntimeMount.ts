@@ -20,7 +20,7 @@ import { decodePublishedCode } from '../../decodePublishedExecutableCode'
 import { validateRuntimeSource } from '../../RuntimeRegistry'
 import { registerPublishedDynamicUpdateProbe } from '../publishedDynamicUpdateProbe'
 import { DomTextOverrides } from '../../lightEdit/domTextOverrides'
-import { observeSurfaceRuntimeContentSize, type SurfaceRuntimeContentSizeObserver } from './surfaceRuntimeContentSize'
+import { observeSurfaceRuntimeContentSize, type SurfaceRuntimeContentSizeObserver, type SurfaceRuntimeContentSource } from './surfaceRuntimeContentSize'
 import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
 import type { RuntimeAuthoringTargetsChangedHandler } from '../../RuntimeAuthoringTargetRegistry'
 import {
@@ -80,7 +80,7 @@ export interface PublishedSurfaceRuntimeMountOptions {
   courseState?: CourseStateStoreContract
   fallbackText?: string
   onContentHeightChange?(height: number): void
-  contentSizeSource?: () => HTMLElement | Document | null
+  contentSizeSource?: () => SurfaceRuntimeContentSource | null
   actions?: Readonly<RuntimeHostActions>
   presentation?: RuntimePresentationApi
   reportError?(phase: 'register' | 'create' | 'lifecycle' | 'destroy', error: Error): void
