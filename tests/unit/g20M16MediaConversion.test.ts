@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import { floatFlowMediaBlock, embedFlowNativeMedia } from '@/core/tools/flowMediaConversion'
 import { createBlankFlowSurface, flowSurfaceIn } from '@/core/tools/flowDocumentModel'
 import { appendOverlayItem, insertFlowOverlayShape, nativeMediaOverlay } from '@/core/tools/flowNativeInsertion'
+import { patchFlowOverlayPaperSpace } from '@/renderer/course/flowSharedAuthoringAdapters'
+import { selectFlowOverlay } from '@/renderer/course/flowEditorSlice'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { COURSE_PROJECT_SCHEMA_VERSION, type CourseProjectDocument, type RuntimeLayerItem } from '@/shared/courseProjectTypes'
 
@@ -36,6 +38,22 @@ describe('Flow body and paper media conversion', () => {
     expect(result.surfaceLayerItems).toHaveLength(0)
     expect(result.blocks[1]).toMatchObject({ id: 'embedded', assetId: 'photo', crop: { left: 0.1, right: 0.15 }, cropX: 0.4, cropY: 0.6, layout: 'wide', wrap: 'right' })
     expect(result.blocks[2]).toMatchObject({ id: floated.captionBlockId, type: 'paragraph' })
+  })
+
+  it('clears the paragraph anchor in the same transaction when pinning floated media to the viewport', () => {
+    const floated = floatFlowMediaBlock(fixture(), { surfaceId: 'flow', blockId: 'media', layerItemId: 'floating-photo',
+      frame: { mode: 'absolute', x: 40, y: 100, width: 320, height: 180 }, anchor: { blockId: 'h', offsetY: 40, xRatio: 0.05 } })
+    const before = floated.nextDocument
+    const selection = selectFlowOverlay(before, 'h', ['floating-photo'])
+    const result = patchFlowOverlayPaperSpace(before, selection, 'viewport', { expectedRevision: before.revision })
+    expect(result.ok).toBe(true)
+    expect(result.historyEntry).toBe(true)
+    expect(result.nextDocument?.revision).toBe(before.revision + 1)
+    const entry = flowSurfaceIn(result.nextDocument!, 'flow').surfaceLayerItems[0]
+    expect(entry?.item.paperSpace).toBeUndefined()
+    expect(entry?.paragraphAnchor).toBeUndefined()
+    expect(() => courseProjectDocumentSchema.parse(result.nextDocument)).not.toThrow()
+    expect(flowSurfaceIn(before, 'flow').surfaceLayerItems[0]?.paragraphAnchor).toEqual({ blockId: 'h', offsetY: 40, xRatio: 0.05 })
   })
 
   it('uses the original caption position when the media itself was selected as its anchor', () => {

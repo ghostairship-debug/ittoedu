@@ -1273,8 +1273,16 @@ export function patchFlowOverlayPaperSpace(
   const mutated = runOverlayMutation(document, options, (draft) => {
     const next = locateCourseLayer(draft, overlayId)
     if (!next) throw new Error(`找不到浮层：${overlayId}`)
-    if (paperSpace === 'viewport') delete next.item.paperSpace
-    else next.item.paperSpace = 'paper'
+    if (paperSpace === 'viewport') {
+      delete next.item.paperSpace
+      if (next.source === 'surface' && next.surfaceId) {
+        const surface = draft.surfaces.find(candidate => candidate.id === next.surfaceId)
+        if (surface?.type === 'flow') {
+          const entry = surface.surfaceLayerItems.find(candidate => candidate.item.layerItemId === overlayId)
+          if (entry) delete entry.paragraphAnchor
+        }
+      }
+    } else next.item.paperSpace = 'paper'
     return []
   }, paperSpace === 'paper' ? '已改为跟随稿纸滚动' : '已改为钉在视口')
   if (!mutated.ok) return mutated

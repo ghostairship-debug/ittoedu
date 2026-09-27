@@ -35,6 +35,7 @@ import { ScenePanel } from '@/renderer/ui/ScenePanel'
 import { TopToolbar } from '@/renderer/ui/TopToolbar'
 import { FlowWorkspace } from '@/renderer/ui/FlowWorkspace'
 import type { AssetMeta } from '@/shared/contracts/media-v1'
+import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { createBlankFlowCourseProject } from '@/renderer/project/createFlowCourseProject'
 import { createCourseStoreHost } from '../helpers/courseStoreHost'
@@ -952,6 +953,8 @@ describe('Flow product shell wiring', () => {
     expect(overlayId).toBeDefined()
     expect(readFlowSharedOwnership(updatedFlow.history.present, overlayId!)).toBe('viewport-overlay')
     expect(locateCourseLayer(updatedFlow.history.present, overlayId!)?.item.paperSpace).toBe('paper')
+    expect(flowSurfaceIn(updatedFlow.history.present, updatedFlow.selection.surfaceId).surfaceLayerItems.find(entry => entry.item.layerItemId === overlayId)?.paragraphAnchor).toBeDefined()
+    const depthBeforeViewport = undoDepth()
 
     cleanup()
     render(<PropertiesTab onReplaceImage={() => undefined} />)
@@ -959,7 +962,17 @@ describe('Flow product shell wiring', () => {
     if (!paperSpace) throw new Error('expected paperSpace select')
     fireEvent.change(paperSpace, { target: { value: 'viewport' } })
     await drain()
-    expect(locateCourseLayer(useEditorStore.getState().flowSession!.history.present, overlayId!)?.item.paperSpace).toBeUndefined()
+    const viewportFlow = useEditorStore.getState().flowSession!
+    expect(undoDepth()).toBe(depthBeforeViewport + 1)
+    expect(locateCourseLayer(viewportFlow.history.present, overlayId!)?.item.paperSpace).toBeUndefined()
+    expect(flowSurfaceIn(viewportFlow.history.present, viewportFlow.selection.surfaceId).surfaceLayerItems.find(entry => entry.item.layerItemId === overlayId)?.paragraphAnchor).toBeUndefined()
+    expect(() => courseProjectDocumentSchema.parse(viewportFlow.history.present)).not.toThrow()
+
+    await undoAndDrain()
+    const restoredFlow = useEditorStore.getState().flowSession!
+    expect(undoDepth()).toBe(depthBeforeViewport)
+    expect(locateCourseLayer(restoredFlow.history.present, overlayId!)?.item.paperSpace).toBe('paper')
+    expect(flowSurfaceIn(restoredFlow.history.present, restoredFlow.selection.surfaceId).surfaceLayerItems.find(entry => entry.item.layerItemId === overlayId)?.paragraphAnchor).toBeDefined()
   })
 
   it('updates paragraph fontFamily via FontFamilyPicker and fontSize via input', async () => {
