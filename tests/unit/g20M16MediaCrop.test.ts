@@ -23,6 +23,29 @@ it('projects Native source fractions to one crop rectangle and clipped DOM drawi
   expect(image.parentElement?.style.aspectRatio).toBe('600 / 350')
 })
 
+it('keeps uncropped image at its natural size and switches crop projection on and off', () => {
+  const plain: FlowMediaBlock = { id: 'plain', type: 'media', mediaKind: 'image', assetId: 'original', layout: 'wide' }
+  const props = { url: 'asset://original', source: { width: 1, height: 1 } }
+  const view = render(createElement(FlowPaperMedia, { ...props, block: plain }))
+  const image = view.container.querySelector('img')!
+  expect(view.container.firstElementChild).toBe(image)
+  expect(image.getAttribute('data-flow-media-kind')).toBe('image')
+  expect(image.style.maxWidth).toBe('100%')
+  expect(image.style.width).toBe('')
+  expect(image.style.height).toBe('')
+  expect(image.style.position).toBe('')
+
+  view.rerender(createElement(FlowPaperMedia, { ...props, block }))
+  const clipped = view.container.firstElementChild as HTMLElement
+  expect(clipped.tagName).toBe('DIV')
+  expect(clipped.style.aspectRatio).toBe('0.6 / 0.7')
+  expect(clipped.querySelector('img')?.style.position).toBe('absolute')
+
+  view.rerender(createElement(FlowPaperMedia, { ...props, block: plain }))
+  expect(view.container.firstElementChild?.tagName).toBe('IMG')
+  expect((view.container.firstElementChild as HTMLElement).style.width).toBe('')
+})
+
 it('matches Native edge bounds near 98 percent and preserves crop on body to Native round trip', () => {
   const nearEdge = { left: 0.99, top: 1, right: 0.4, bottom: 0.5 }
   const native = clampCrop(nearEdge)
