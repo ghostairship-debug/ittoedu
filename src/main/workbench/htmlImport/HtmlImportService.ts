@@ -10,6 +10,7 @@ export interface HtmlImportRequest {
   targetHandle: string
   sourcePath: string
   locationId: string
+  anchorBlockId?: string
   rootDir?: string
 }
 export interface HtmlImportTicket {
@@ -48,7 +49,7 @@ export class HtmlImportService {
     if (!request.operationId || !request.runId || !request.targetHandle || !request.sourcePath || !request.locationId)
       throw new Error('HTML 导入缺少任务、操作、文档授权、来源或目标')
     const digest = documentDigest({ runId: request.runId, targetHandle: request.targetHandle, sourcePath: request.sourcePath,
-      locationId: request.locationId, rootDir: request.rootDir ?? null })
+      locationId: request.locationId, anchorBlockId: request.anchorBlockId ?? null, rootDir: request.rootDir ?? null })
     const existing = this.records.get(request.operationId)
     if (existing) {
       if (existing.digest !== digest) throw new Error('同一 HTML 导入票据不能改变任务、来源或目标')
@@ -62,8 +63,9 @@ export class HtmlImportService {
     const promise = (async () => {
       const baseline = this.ports.session.read()
       const candidate = await prepareHtmlCourseCandidate({ snapshot: baseline, sourcePath: request.sourcePath,
-        locationId: request.locationId, ...(request.rootDir ? { rootDir: request.rootDir } : {}) })
-      if (this.ports.session.read().revision !== baseline.revision) throw new Error('HTML 导入目标已改变；未建立构建任务')
+        locationId: request.locationId, ...(request.anchorBlockId ? { anchorBlockId: request.anchorBlockId } : {}),
+        ...(request.rootDir ? { rootDir: request.rootDir } : {}) })
+      if (this.ports.session.read().epoch !== baseline.epoch || this.ports.session.read().revision !== baseline.revision) throw new Error('HTML 导入目标已改变；未建立构建任务')
       const job = read(await this.call(request.runId, `${request.operationId}:create`, 'build.create', { target: request.targetHandle })).job
       if (typeof job !== 'string') throw new Error('受控构建未返回任务身份')
       const record: ImportRecord = { digest, candidate, runId: request.runId, jobId: job, state: 'prepared' }

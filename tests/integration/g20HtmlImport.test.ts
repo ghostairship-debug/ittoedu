@@ -6,6 +6,7 @@ import path from 'node:path'
 import sharp from 'sharp'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { addCourseFlowPage } from '../../src/core/tools/courseLocations'
 import { createTextNode } from '../../src/core/tools/nativeNodeFactories'
 import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
 import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
@@ -25,12 +26,14 @@ afterEach(async () => {
   }
 })
 
-async function fixture(admission?: BuildAdmissionPort, existingOrders: readonly number[] = []) {
+async function fixture(admission?: BuildAdmissionPort, existingOrders: readonly number[] = [], kind: 'slide' | 'flow' = 'slide', emptyBody = false) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-html-import-'))
   roots.push(root)
   const sourcePath = path.join(root, 'lesson.html')
   await fs.writeFile(sourcePath, '<!doctype html><button onclick="this.textContent=\'Next\'">Start</button>')
-  const project = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+  const blank = createBlankCourseProject({ includeDefaultController: false, controls: 'none' })
+  const project = kind === 'flow' ? addCourseFlowPage(blank, { expectedRevision: blank.revision }).project : blank
+  if (emptyBody) project.surfaces.filter(surface => surface.type === 'flow').forEach(surface => { surface.blocks = surface.blocks.filter(block => block.type === 'heading') })
   const firstSurface = project.surfaces[0]
   if (firstSurface?.type !== 'slide') throw new Error('fixture requires Slide')
   for (const order of existingOrders) firstSurface.scenes[0]!.layerItems.push(sceneNodeToCourseLayerItem(createTextNode(), order))
@@ -52,7 +55,8 @@ async function fixture(admission?: BuildAdmissionPort, existingOrders: readonly 
   await gateway.beginRun({ runId: 'run', actor: 'human', documents: [{ documentId: session.documentId, writable: [{ kind: 'document' }] }] })
   const targetHandle = await gateway.issueTarget('run', session.documentId, { kind: 'document' })
   const service = new HtmlImportService({ session, gateway })
-  const request = { operationId: 'html-import-1', runId: 'run', targetHandle, sourcePath, locationId: project.locations[0]!.id }
+  const request = { operationId: 'html-import-1', runId: 'run', targetHandle, sourcePath, locationId: kind === 'flow'
+    ? project.locations.find(item => item.kind === 'flow-block')!.id : project.locations[0]!.id }
   return { root, sourcePath, project, session, service, request, builds, gateway, run, journal }
 }
 
@@ -95,6 +99,70 @@ describe('M17 S13 HTML import orchestration', () => {
     const surface = model.project.surfaces[0]
     if (surface?.type !== 'slide') throw new Error('wrong surface')
     expect(surface.scenes[0]!.layerItems.map(item => item.order)).toEqual([0, 5, 6])
+  })
+
+  it('places an admitted Flow Runtime on paper at the selected paragraph and restores it with Redo', async () => {
+    const f = await fixture(undefined, [], 'flow')
+    const gif = Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=', 'base64')
+    await fs.writeFile(f.sourcePath, `<img src="data:image/gif;base64,${gif.toString('base64')}">`)
+    const flowLocation = f.project.locations.find(item => item.kind === 'flow-block')!
+    const ticket = await f.service.prepare({ ...f.request, anchorBlockId: flowLocation.blockId })
+    expect(ticket.target.anchorBlockId).toBe(flowLocation.blockId)
+    expect(ticket.target.surfaceId).toBe(flowLocation.surfaceId)
+    await f.service.admit(ticket)
+    expect((await f.service.commit(ticket)).status).toBe('applied')
+    const committed = f.session.read()
+    if (committed.model.kind !== 'course-v9') throw new Error('wrong model')
+    const flow = committed.model.project.surfaces.find(item => item.type === 'flow')!
+    expect(flow.surfaceLayerItems).toHaveLength(1)
+    const entry = flow.surfaceLayerItems[0]!
+    expect(entry.item).toMatchObject({ kind: 'runtime', paperSpace: 'paper' })
+    expect(entry.paragraphAnchor).toEqual({ blockId: flowLocation.blockId, offsetY: 0, xRatio: 0 })
+    expect(entry.visibility).toEqual({ mode: 'all', locationIds: [] })
+    if (entry.item.kind !== 'runtime') throw new Error('wrong carrier')
+    const assetId = Object.values(entry.item.runtime.assets)[0]!.assetId
+    expect(committed.model.resources.assets[assetId]).toEqual(new Uint8Array(gif))
+    await f.session.execute({ documentId: committed.documentId, epoch: committed.epoch, baseRevision: committed.revision,
+      operationId: 'flow-undo', actor: 'human', mutation: { type: 'undo' } })
+    const undone = f.session.read()
+    if (undone.model.kind !== 'course-v9') throw new Error('wrong model')
+    expect(undone.model.project.surfaces.find(item => item.type === 'flow')!.surfaceLayerItems).toHaveLength(0)
+    expect(undone.model.resources.assets[assetId]).toBeUndefined()
+    await f.session.execute({ documentId: undone.documentId, epoch: undone.epoch, baseRevision: undone.revision,
+      operationId: 'flow-redo', actor: 'human', mutation: { type: 'redo' } })
+    const redone = f.session.read()
+    if (redone.model.kind !== 'course-v9') throw new Error('wrong model')
+    expect(redone.model.project.surfaces.find(item => item.type === 'flow')!.surfaceLayerItems[0]).toEqual(entry)
+    expect(redone.model.resources.assets[assetId]).toEqual(new Uint8Array(gif))
+  })
+
+  it('creates the formal empty Flow paragraph inside the candidate when its body is empty', async () => {
+    const f = await fixture(undefined, [], 'flow', true)
+    const ticket = await f.service.prepare(f.request)
+    expect(f.session.read().revision).toBe(f.project.revision)
+    const before = f.session.read().model
+    if (before.kind !== 'course-v9') throw new Error('wrong model')
+    expect(before.project.surfaces.find(item => item.type === 'flow')!.blocks).toHaveLength(1)
+    await f.service.admit(ticket)
+    expect((await f.service.commit(ticket)).status).toBe('applied')
+    const after = f.session.read().model
+    if (after.kind !== 'course-v9') throw new Error('wrong model')
+    const flow = after.project.surfaces.find(item => item.type === 'flow')!
+    expect(flow.blocks).toHaveLength(2)
+    expect(flow.blocks[1]).toMatchObject({ type: 'paragraph', id: ticket.target.anchorBlockId, content: { inlines: [] } })
+    expect(flow.surfaceLayerItems[0]?.paragraphAnchor?.blockId).toBe(ticket.target.anchorBlockId)
+  })
+
+  it('binds the Flow anchor to the ticket and rejects replacement or unknown paragraphs before scratch', async () => {
+    const f = await fixture(undefined, [], 'flow')
+    const location = f.project.locations.find(item => item.kind === 'flow-block')!
+    const ticket = await f.service.prepare({ ...f.request, anchorBlockId: location.blockId })
+    await expect(f.service.prepare({ ...f.request, anchorBlockId: 'other' })).rejects.toThrow('不能改变')
+    await expect(f.service.admit({ ...ticket, target: { ...ticket.target, anchorBlockId: 'other' } })).rejects.toThrow('票据无效')
+    await f.service.cancel(ticket)
+    const bad = await fixture(undefined, [], 'flow')
+    await expect(bad.service.prepare({ ...bad.request, anchorBlockId: 'missing' })).rejects.toThrow('挂靠段落不存在')
+    expect(bad.run).not.toHaveBeenCalled()
   })
 
   it('freezes runId so stopRun rejects a ready artifact without a formal write', async () => {
