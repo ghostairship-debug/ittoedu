@@ -726,6 +726,13 @@ for (const carrier of ['flow', 'markdown'] as const) {
       await expect.poll(objectFormal).toBe(objectBefore)
       await objectBody.press('Control+Shift+z')
       await expect.poll(objectFormal).toBe(objectPasted)
+      const shots = join(data.directory, 'shots')
+      mkdirSync(shots, { recursive: true })
+      await page.screenshot({ path: join(shots, `${carrier}-clipboard.png`) })
+      writeFileSync(join(data.directory, `${carrier}-clipboard-evidence.json`), JSON.stringify({
+        carrier, plainText: await visibleText(), objectPlainText: (await targetParagraph()).map(item => item.type === 'text' ? item.text : '').join(''),
+        objectContainsMath: (await targetParagraph()).some(item => item.type === 'math'),
+      }, null, 2))
     } finally { try { await restoreClipboard() } finally { await closeSelectionApp(app); await server.close() } }
   })
 }
