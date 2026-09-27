@@ -9,7 +9,7 @@
   },
   "task_count": 36,
   "product_acceptance_count": 199,
-  "markdown_document_count": 78,
+  "markdown_document_count": 79,
   "product_tests_run": false,
   "files": [
     {
@@ -39,8 +39,8 @@
     },
     {
       "path": "acceptance_cases.json",
-      "bytes": 119718,
-      "sha256": "ee399017aa1f77226b884b81627a2aebe268a29d308f021ef215fb03cecf4ceb"
+      "bytes": 120030,
+      "sha256": "caa1a60d6214129c702c86a740221b085bf5420b03eb0e4fd50a1170bf2b6bbd"
     },
     {
       "path": "assets/workbench-layout-2026-09-23.png",
@@ -69,8 +69,8 @@
     },
     {
       "path": "delivery/ACCEPTANCE.md",
-      "bytes": 97247,
-      "sha256": "7dfa0fb4bb94b2be0f4a98dd101801404caf4189f0cf01af40393af951e283d3"
+      "bytes": 97443,
+      "sha256": "1fe71e38580a98f06588b89a1f992940eba508069dae4eb49efcdaeaf5977233"
     },
     {
       "path": "delivery/AGENT_HANDOFF.md",
@@ -188,6 +188,11 @@
       "sha256": "7fc4fc0f942cc0dedb81574c2d878b9834957000d89feb47505f97b72a519bc2"
     },
     {
+      "path": "evidence/B17_2026_09_27_M17.md",
+      "bytes": 7872,
+      "sha256": "a8e224b24390385ce14a6c805a7be3559529c9eea71958cab2611558f1863cb8"
+    },
+    {
       "path": "evidence/R20_RETIREMENT.md",
       "bytes": 3551,
       "sha256": "5cbe8abe5afa9d6eaac62b74724e0757799549aa0795043eeb11a7b22be08e65"
@@ -220,12 +225,12 @@
     {
       "path": "evidence/STATUS.md",
       "bytes": 3018,
-      "sha256": "0aa76d510ca95ddeab293927c6111675a8cd5db54241fedf0c3d94aada92ef35"
+      "sha256": "289268bbcc03bc6460eb5ea78a560079ed25a0225fb6df15012bced27b669787"
     },
     {
       "path": "index.html",
-      "bytes": 2234122,
-      "sha256": "ff9e4edf883a5ff7511e3086395fc7e84284a8a59e18cafec73713afeeae8e8d"
+      "bytes": 2254040,
+      "sha256": "eddcb7565fddb9ed57183747cc7c98ab5b09bb48dcdaae0fdf41bd0723c0d5d6"
     },
     {
       "path": "long_term/L01.md",
@@ -334,8 +339,8 @@
     },
     {
       "path": "mid_term/M17.md",
-      "bytes": 5103,
-      "sha256": "4f8ac9cd53c0f571f6717e9e18e2e2671f7c593273c8fc22bacfa80ed5af201b"
+      "bytes": 5299,
+      "sha256": "7c794f18aac41adcd19695fa44148597f25a2e70ada30ee0ac23976c473f901a"
     },
     {
       "path": "mid_term/M18.md",
@@ -449,8 +454,8 @@
     },
     {
       "path": "task_registry.json",
-      "bytes": 40394,
-      "sha256": "435f1495ee6eb07d4287a57eb0ca1b28fb5eb96a16774e86a1d8bedd912cc8ce"
+      "bytes": 40395,
+      "sha256": "c82bfeadb66fe8fb7dd8e3f05d7230c1ec789d8b51da512c682ada07067f3ab6"
     },
     {
       "path": "templates/engine_capabilities.json",
@@ -484,19 +489,19 @@
     }
   ],
   "plan_revision": "2.3",
-  "reader_article_count": 79,
+  "reader_article_count": 80,
   "convergence_document": "../../果铃2.0收敛方案.md",
-  "convergence_sha256": "2d4cae8e033b5b1f112f577272ab8f5e1f2de4ca16ba5050282ff0fee4a899b4",
+  "convergence_sha256": "ff7f463c0c9d1c6c681dfa55db3b9038f3110e68c321409906fc975ece9afda1",
   "task_status_counts": {
-    "planned": 2,
+    "planned": 1,
     "in_progress": 0,
     "implemented": 0,
-    "verified": 34,
+    "verified": 35,
     "blocked": 0
   },
   "acceptance_status_counts": {
-    "not_run": 13,
-    "passed": 186,
+    "not_run": 9,
+    "passed": 190,
     "failed": 0,
     "blocked": 0,
     "skipped": 0
