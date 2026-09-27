@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type CSSProperties } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { RuntimeLayerItem } from '../../../shared/courseProjectTypes'
 import type { RuntimeAuthoringTargetUpdate } from '../../../shared/runtimeTypes'
 import {
@@ -13,6 +13,8 @@ import { retainAssetObjectUrls } from '../useAssetObjectUrls'
 export interface FlowPageRuntimeProps {
   readonly item: DeepReadonly<RuntimeLayerItem>
   readonly surfaceId: string
+  /** Stable document/session owner identity; changing it retires the previous target publisher. */
+  readonly ownerKey?: string
   readonly width: number
   /** Derived paper-space slot height. It is never persisted or added to History. */
   readonly height: number
@@ -24,19 +26,17 @@ export interface FlowPageRuntimeProps {
 }
 
 /** Runs one Flow paper Runtime in the actual API 3 host while editing. */
-export function FlowPageRuntime({ item, surfaceId, width, height, assetUrls, onHeightChange, onTargetsChanged, onError, style }: FlowPageRuntimeProps) {
+export function FlowPageRuntime({ item, surfaceId, ownerKey = surfaceId, width, height, assetUrls, onHeightChange, onTargetsChanged, onError, style }: FlowPageRuntimeProps) {
   const container = useRef<HTMLDivElement>(null)
   const handle = useRef<PublishedSurfaceRuntimeMountHandle | null>(null)
-  const callbacks = useRef({ onHeightChange, onTargetsChanged, onError, assetUrls })
-  callbacks.current = { onHeightChange, onTargetsChanged, onError, assetUrls }
-  const requestedAssetIds = useRef(new Set<string>())
-  const relevantAssetIds = new Set([
-    ...Object.values(item.runtime.assets).map(binding => binding.assetId),
-    ...requestedAssetIds.current,
-  ])
-  // Managed URLs arrive after the first render and may rotate when project bytes change.
-  // Recreate only hosts whose own asset references changed, including projectUrl() reads.
-  const assetSignature = JSON.stringify([...relevantAssetIds].sort().map(id => [id, assetUrls[id] ?? null]))
+  const callbacks = useRef({ onHeightChange, onError, assetUrls })
+  callbacks.current = { onHeightChange, onError, assetUrls }
+  const targetOwners = useRef(new Map<string, FlowPageRuntimeProps['onTargetsChanged']>())
+  targetOwners.current.set(ownerKey, onTargetsChanged)
+  const currentOwnerKey = useRef(ownerKey)
+  currentOwnerKey.current = ownerKey
+  const assetBaseline = useRef<Map<string, string | null> | null>(null)
+  const [assetEpoch, setAssetEpoch] = useState(0)
 
   // API 3 snapshots content.get/all() at create. Value/key or binding changes require
   // a new host; DOM text override rules can be updated on the existing instance.
@@ -55,6 +55,14 @@ export function FlowPageRuntime({ item, surfaceId, width, height, assetUrls, onH
       || item.runtime.runtimeApiVersion !== 3 || item.runtime.renderMode !== 'dom') return
     const session = createPublishedSurfaceRuntimeSession()
     const releaseUrls = retainAssetObjectUrls(assetUrls)
+    // Route through this mount's owner key. Same-owner callback refreshes are safe,
+    // while a replaced owner still receives its own target cleanup.
+    const targetsOwner = (update: Readonly<RuntimeAuthoringTargetUpdate>) =>
+      targetOwners.current.get(ownerKey)?.(update)
+    const baseline = new Map<string, string | null>(
+      Object.values(item.runtime.assets).map(binding => [binding.assetId, assetUrls[binding.assetId] ?? null]),
+    )
+    assetBaseline.current = baseline
     let active = true
     let targetRevision = 0
     const mounted = mountPublishedSurfaceRuntime(target, {
@@ -66,8 +74,9 @@ export function FlowPageRuntime({ item, surfaceId, width, height, assetUrls, onH
       mode: 'authoring',
       session,
       resolveAsset: assetId => {
-        requestedAssetIds.current.add(assetId)
-        return callbacks.current.assetUrls[assetId]
+        const url = callbacks.current.assetUrls[assetId]
+        baseline.set(assetId, url ?? null)
+        return url
       },
       authoring: {
         scope: 'scene',
@@ -75,7 +84,7 @@ export function FlowPageRuntime({ item, surfaceId, width, height, assetUrls, onH
         onTargetsChanged: update => {
           if (!active) return
           targetRevision = Math.max(targetRevision, update.revision)
-          callbacks.current.onTargetsChanged?.(update)
+          targetsOwner?.(update)
         },
       },
       onContentHeightChange: (measured: number) => {
@@ -92,17 +101,28 @@ export function FlowPageRuntime({ item, surfaceId, width, height, assetUrls, onH
       mounted.destroy()
       session.destroy()
       releaseUrls()
-      callbacks.current.onTargetsChanged?.({ scope: 'scene', sceneId: surfaceId, revision: targetRevision + 1, targets: [] })
+      if (assetBaseline.current === baseline) assetBaseline.current = null
+      targetsOwner({ scope: 'scene', sceneId: surfaceId, revision: targetRevision + 1, targets: [] })
+      if (ownerKey !== currentOwnerKey.current) targetOwners.current.delete(ownerKey)
     }
-  }, [item.layerItemId, item.runtime.enabled, item.runtime.protocol, item.runtime.runtimeApiVersion, item.runtime.renderMode, sourceKey, surfaceId, assetSignature])
+  }, [item.layerItemId, item.runtime.enabled, item.runtime.protocol, item.runtime.runtimeApiVersion, item.runtime.renderMode, sourceKey, surfaceId, ownerKey, assetEpoch])
+
+  // IDs learned from projectUrl() join this mount's baseline when first read. Their
+  // appearance alone cannot remount; only a subsequently changed URL can.
+  useEffect(() => {
+    const baseline = assetBaseline.current
+    if (baseline && [...baseline].some(([id, url]) => url !== (assetUrls[id] ?? null))) {
+      setAssetEpoch(epoch => epoch + 1)
+    }
+  }, [assetUrls])
 
   useEffect(() => {
     handle.current?.applyAuthoringTextOverrides(item.runtime.content.overrides ?? [])
-  }, [overrideKey, sourceKey, assetSignature])
+  }, [overrideKey, sourceKey, ownerKey, assetEpoch])
 
   useEffect(() => {
     handle.current?.updateSize(width, height)
-  }, [width, height, sourceKey, assetSignature])
+  }, [width, height, sourceKey, ownerKey, assetEpoch])
 
   return <div ref={container} data-testid="flow-page-runtime" data-runtime-instance-id={item.layerItemId}
     style={{ width: '100%', height: '100%', minHeight: 0, ...style }} />

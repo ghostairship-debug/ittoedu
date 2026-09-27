@@ -145,3 +145,56 @@ it('remounts when a managed asset URL becomes ready or rotates, without remounti
   expect(container.querySelector('p')).not.toBe(firstParagraph)
   expect(container.querySelector('img')?.getAttribute('src')).toBe(urlB)
 })
+
+it('tracks an unbound projectUrl read without a spurious remount on the next render', async () => {
+  const frame = document.createElement('iframe')
+  document.body.append(frame)
+  const container = frame.contentDocument!.createElement('div')
+  frame.contentDocument!.body.append(container)
+  const root = createRoot(container)
+  mounted.push({ root, frame })
+  const layer = item(`CoursewareRuntime.define({runtimeApiVersion:3,create(ctx){
+    const img=document.createElement('img'); img.src=ctx.assets.projectUrl('unbound-id');
+    ctx.dom.root.appendChild(img); return {destroy(){ctx.dom.root.replaceChildren()}};
+  }})`)
+  layer.runtime.assets = {}
+  const urlA = 'data:image/png;base64,SEVSTw=='
+  const urlB = 'data:image/png;base64,U0VDT05E'
+  const base = { item: layer, surfaceId: 'flow-1', onHeightChange: vi.fn(), width: 640 }
+  await act(async () => root.render(<FlowPageRuntime {...base} height={400} assetUrls={{ 'unbound-id': urlA }} />))
+  const image = container.querySelector('img')
+  expect(image?.getAttribute('src')).toBe(urlA)
+  await act(async () => root.render(<FlowPageRuntime {...base} height={450} assetUrls={{ 'unbound-id': urlA }} />))
+  expect(container.querySelector('img')).toBe(image)
+  await act(async () => root.render(<FlowPageRuntime {...base} height={450} assetUrls={{ 'unbound-id': urlB }} />))
+  expect(container.querySelector('img')).not.toBe(image)
+  expect(container.querySelector('img')?.getAttribute('src')).toBe(urlB)
+})
+
+it('clears targets through the old mount owner when the document owner changes', async () => {
+  const frame = document.createElement('iframe')
+  document.body.append(frame)
+  const container = frame.contentDocument!.createElement('div')
+  frame.contentDocument!.body.append(container)
+  const view = frame.contentWindow as Window & typeof globalThis
+  const rect = (x: number, y: number, width: number, height: number) =>
+    ({ x, y, left: x, top: y, width, height, right: x + width, bottom: y + height, toJSON: () => ({}) }) as DOMRect
+  Object.defineProperty(view.HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: () => rect(0, 0, 640, 400) })
+  Object.defineProperty(view.Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => rect(20, 20, 120, 25) })
+  const root = createRoot(container)
+  mounted.push({ root, frame })
+  const oldUpdates: RuntimeAuthoringTargetUpdate[] = []
+  const newUpdates: RuntimeAuthoringTargetUpdate[] = []
+  const base = { item: item(makeSource('owner')), surfaceId: 'flow-1', width: 640, height: 400,
+    assetUrls: { 'image-1': 'data:image/png;base64,SEVSTw==' }, onHeightChange: vi.fn() }
+  await act(async () => root.render(<FlowPageRuntime {...base} ownerKey="owner-a"
+    onTargetsChanged={update => oldUpdates.push(update)} />))
+  await act(async () => { await Promise.resolve(); await Promise.resolve() })
+  expect(oldUpdates.flatMap(update => update.targets).length).toBeGreaterThan(0)
+  await act(async () => root.render(<FlowPageRuntime {...base} ownerKey="owner-b"
+    onTargetsChanged={update => newUpdates.push(update)} />))
+  await act(async () => { await Promise.resolve(); await Promise.resolve() })
+  expect(oldUpdates.at(-1)?.targets).toEqual([])
+  expect(newUpdates.flatMap(update => update.targets).length).toBeGreaterThan(0)
+  expect(newUpdates.every(update => update.targets.length > 0)).toBe(true)
+})

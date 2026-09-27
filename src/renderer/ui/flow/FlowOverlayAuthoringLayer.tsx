@@ -712,6 +712,7 @@ export function FlowOverlayAuthoringLayer({
           <FlowPageRuntime
             item={layer.item}
             surfaceId={view.surfaceId}
+            ownerKey={`${view.projectId}:${view.surfaceId}:${sessionToken.generation}`}
             width={authoredFrameOf(layer).width}
             height={authoredFrameOf(layer).height}
             assetUrls={assetUrls}
