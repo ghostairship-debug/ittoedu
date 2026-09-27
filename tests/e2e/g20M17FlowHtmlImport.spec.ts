@@ -173,6 +173,18 @@ test('M17 Flow insert menu imports a managed long HTML page that runs after save
     const running = runningFrame.contentFrame()
     await expect(running.locator('#page-heading')).toHaveText('纵向 HTML 讲义')
     await expect(running.locator('#picture')).toHaveJSProperty('naturalWidth', 64)
+    const trialArticle = page.getByTestId('flow-runtime-article')
+    const articleBounds = await trialArticle.boundingBox()
+    if (!articleBounds) throw new Error('Flow 试运行正文不可见')
+    await page.mouse.move(articleBounds.x + articleBounds.width - 20, articleBounds.y + articleBounds.height / 2)
+    await page.mouse.wheel(0, 2_400)
+    await expect.poll(async () => trialArticle.evaluate(element => element.scrollTop), { timeout: 5_000 }).toBeGreaterThan(900)
+    const buttonBounds = await running.locator('#advance').boundingBox()
+    const hostBounds = await page.getByTestId('flow-try-run-host').boundingBox()
+    if (!buttonBounds || !hostBounds || buttonBounds.y + buttonBounds.height / 2 < hostBounds.y
+      || buttonBounds.y + buttonBounds.height / 2 > hostBounds.y + hostBounds.height)
+      throw new Error('Flow 长页滚动后，互动按钮仍未进入试运行视口')
+    evidence.interactionViewport = { scrollTop: await trialArticle.evaluate(element => element.scrollTop), buttonBounds, hostBounds }
     await running.locator('#advance').click()
     await expect(running.locator('#result')).toHaveText('观察后得到结论')
     await page.screenshot({ path: join(directory, 'flow-try-run.png') })
