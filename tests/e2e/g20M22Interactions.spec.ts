@@ -112,9 +112,44 @@ test('M22-T02 workbench audio placement and identity-based jump survive save and
     await frame.getByTestId(`bottom-scene-${fixture.firstLocationId}`).locator('.bottom-scene-card__main').click()
 
     await page.getByRole('button', { name: '整课预览', exact: true }).click()
+    await expect(page.locator('.course-preview-host')).toBeVisible()
+    await expect(page.getByTestId('course-preview-feedback')).toHaveCount(0)
+    const previewAudio = page.locator('.course-preview-host [data-slide-layer-item="' + button.layerItemId + '"]:visible').first()
+    await expect(previewAudio).toHaveAttribute('role', 'button')
     await clearPlayedAudio(page)
-    await clickPlaybackItem(page, '.course-preview-host', button.layerItemId)
-    await expectAudioPlayed(page)
+    await page.evaluate(id => {
+      const host = document.querySelector('.course-preview-host')
+      const wrapper = host?.querySelector('[data-slide-layer-item="' + id + '"]')
+      if (!host || !wrapper) throw new Error('Preview audio wrapper missing')
+      const identity = (node: EventTarget | null) => node instanceof Element
+        ? { tag: node.tagName.toLowerCase(), id: node.id || null, layerItem: node.getAttribute('data-slide-layer-item'), role: node.getAttribute('role'), className: node.getAttribute('class') }
+        : { nodeName: node instanceof Node ? node.nodeName : null }
+      const box = wrapper.getBoundingClientRect()
+      const center = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+      ;(window as any).__m22PreviewAudioClick = {
+        before: { wrapper: identity(wrapper), role: wrapper.getAttribute('role'), tabindex: wrapper.getAttribute('tabindex'),
+          pointerEvents: getComputedStyle(wrapper).pointerEvents, center: identity(center),
+          centerIsWrapper: center === wrapper, centerInsideWrapper: center ? wrapper.contains(center) : false },
+        click: null,
+      }
+      host.addEventListener('click', event => {
+        ;(window as any).__m22PreviewAudioClick.click = {
+          target: identity(event.target), composedPath: event.composedPath().slice(0, 8).map(identity),
+        }
+      }, { capture: true, once: true })
+    }, button.layerItemId)
+    try {
+      await clickPlaybackItem(page, '.course-preview-host', button.layerItemId)
+      await expectAudioPlayed(page)
+    } finally {
+      const diagnostic = await page.evaluate(() => ({
+        ...(window as any).__m22PreviewAudioClick,
+        playCalls: (window as any).__m22Played?.length ?? null,
+      })).catch(error => ({ diagnosticError: String(error) }))
+      await test.info().attach('m22-preview-audio-click.json', {
+        body: Buffer.from(JSON.stringify(diagnostic, null, 2)), contentType: 'application/json',
+      })
+    }
     await clickPlaybackItem(page, '.course-preview-host', 'm22-target')
     await expectNavigated(page, '.course-preview-host')
     await page.getByRole('button', { name: '关闭预览', exact: true }).click()
