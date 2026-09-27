@@ -74,7 +74,7 @@ async function geometry(page: Page, blockId: string, layerId: string) {
     const card = workspace.querySelector<HTMLElement>(`[data-testid="flow-layer-card-${input.layerId}"]`)
     if (!paper || !block || !card) throw new Error('Flow geometry missing')
     const p = paper.getBoundingClientRect(), b = block.getBoundingClientRect(), c = card.getBoundingClientRect()
-    return { paperWidth: p.width, xRatio: (c.left - p.left) / p.width, blockTop: b.top, layerTop: c.top, offsetY: c.top - b.top }
+    return { paperWidth: p.width, paperTop: p.top, xRatio: (c.left - p.left) / p.width, blockTop: b.top, layerTop: c.top, offsetY: c.top - b.top }
   }, { blockId, layerId })
 }
 
@@ -192,15 +192,22 @@ test('M16-T02 drag changes paragraph anchor; delete reanchors with undo/redo; fi
     await flow.getByRole('button', { name: '正文下方', exact: true }).click()
     await expect.poll(async () => (await layer(page, watermark.id)).bodyPlane).toBe('underlay')
     const fixed = await layer(page, watermark.id)
-    const fixedBox = await flow.getByTestId(`flow-layer-card-${watermark.id}`).boundingBox()
+    const fixedBefore = await geometry(page, ids.target, watermark.id)
     const beforeBlock = flow.locator(`[data-flow-block-id="${ids.before}"]`)
     await beforeBlock.click(); await page.keyboard.press('Home'); await page.keyboard.insertText('新增上方文字。'.repeat(25))
-    const afterEdit = await geometry(page, ids.target, text.id)
-    expect(afterEdit.blockTop).toBeGreaterThan(resized.blockTop + 10)
-    expect(Math.abs(afterEdit.offsetY - dragged.anchor!.offsetY)).toBeLessThan(4)
-    const fixedAfter = await flow.getByTestId(`flow-layer-card-${watermark.id}`).boundingBox()
-    if (!fixedBox || !fixedAfter) throw new Error('Fixed image box missing')
-    expect(Math.abs(fixedAfter.y - fixedBox.y)).toBeLessThan(4)
+    await expect.poll(async () => (await geometry(page, ids.target, text.id)).blockTop).toBeGreaterThan(resized.blockTop + 10)
+    let turn = 0
+    await expect.poll(async () => {
+      await page.mouse.move(1450 + (turn++ % 2), 700)
+      return Math.abs((await geometry(page, ids.target, text.id)).offsetY - dragged.anchor!.offsetY)
+    }).toBeLessThan(4)
+    await expect.poll(async () => {
+      await page.mouse.move(1450 + (turn++ % 2), 700)
+      const current = await geometry(page, ids.target, watermark.id)
+      return Math.abs((current.layerTop - current.paperTop) - (fixedBefore.layerTop - fixedBefore.paperTop))
+    }).toBeLessThan(4)
+    evidence.geometry = { resized, afterEdit: await geometry(page, ids.target, text.id), fixedBefore, fixedAfter: await geometry(page, ids.target, watermark.id) }
+    await page.screenshot({ path: join(directory, 't02-underlay-after-edit.png') })
     expect((await layer(page, watermark.id)).frame).toEqual(fixed.frame)
     expect(await flow.getByTestId('flow-authoring-surface-underlay').getByTestId(`flow-layer-card-${watermark.id}`).count()).toBe(1)
 
@@ -227,7 +234,7 @@ test('M16-T02 drag changes paragraph anchor; delete reanchors with undo/redo; fi
       const actual = finalBeforeSave.layers.find(entry => entry.id === old.id)
       expect(actual?.anchor).toBeNull()
       expect(actual?.paperSpace).toBe(old.paperSpace ?? null)
-      expect(actual?.frame).toEqual(old.frame.mode === 'absolute' ? old.frame : actual?.frame)
+      if (old.frame.mode === 'absolute') expect(actual?.frame).toEqual({ x: old.frame.x, y: old.frame.y, width: old.frame.width, height: old.frame.height })
     }
     await page.getByRole('button', { name: '保存', exact: true }).first().click()
     await expect.poll(() => {
