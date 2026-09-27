@@ -332,8 +332,23 @@ test('M21-T01 M21-T02 M21-T03 a steady top bar and canvas, one quick bar everywh
       const from = centre((await cells.nth(0).boundingBox())!), to = centre((await cells.nth(1).boundingBox())!)
       await page.mouse.move(from.x, from.y); await page.mouse.down()
       await page.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2); await page.mouse.move(to.x, to.y); await page.mouse.up()
+      await expect(flow.locator('[data-document-id="flow-table"] td.selectedCell')).toHaveCount(2)
       await expect(documentBar.getByRole('button', { name: '当前选区加粗', exact: true })).toBeVisible()
       const tableBar = await documentBar.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label') ?? ''))
+      const tableBolds = () => page.evaluate(async () => {
+        const found = (await window.desktopAPI.documents!.list()).find(entry => entry.binding.kind === 'file' && entry.binding.path.endsWith('flow.h5lesson'))
+        if (found?.model.kind !== 'course-v9') return null
+        const surface = found.model.project.surfaces.find(entry => entry.type === 'flow')
+        if (surface?.type !== 'flow') return null
+        const table = surface.blocks.find(entry => entry.id === 'flow-table')
+        if (table?.type !== 'table') return null
+        return table.columns.map(column => table.rows[0]?.cells[column.id]?.inlines.some(inline => inline.type === 'text' && inline.style?.bold === true) ?? false)
+      })
+      expect(await tableBolds()).toEqual([false, false, false])
+      await documentBar.getByRole('button', { name: '当前选区加粗', exact: true }).click()
+      await expect.poll(tableBolds).toEqual([true, true, false])
+      await page.keyboard.press('Control+z')
+      await expect.poll(tableBolds).toEqual([false, false, false])
       await page.screenshot({ path: join(shots, 't02-flow-table.png') })
       const paragraph = flow.getByText('春风又绿江南岸', { exact: false }).first()
       await paragraph.scrollIntoViewIfNeeded()

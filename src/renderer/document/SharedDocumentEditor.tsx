@@ -65,7 +65,7 @@ export function readDocumentFormatting(state: EditorState) {
   const samples: TextRunStyle[] = []
   const sample = (marks: typeof state.selection.$from.parent.marks) => samples.push(marks.find(mark => mark.type === documentEditorSchema.marks.style)?.attrs.value ?? {})
   if (state.selection.empty) sample(state.storedMarks ?? state.selection.$from.marks())
-  else state.doc.nodesBetween(state.selection.from, state.selection.to, node => { if (node.isInline && !node.isTextblock) sample(node.marks) })
+  else for (const range of state.selection.ranges) state.doc.nodesBetween(range.$from.pos, range.$to.pos, node => { if (node.isInline && !node.isTextblock) sample(node.marks) })
   const values = <T,>(get: (style: TextRunStyle) => T): T | 'mixed' => {
     const first = get(samples[0] ?? {})
     return samples.some(style => get(style) !== first) ? 'mixed' : first
@@ -585,10 +585,10 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     if (state.selection.empty) {
       const current = (state.storedMarks ?? state.selection.$from.marks()).find(mark => mark.type === type)?.attrs.value ?? {}
       tr.addStoredMark(type.create({ value: merged(current) }))
-    } else state.doc.nodesBetween(state.selection.from, state.selection.to, (node, pos) => {
+    } else for (const range of state.selection.ranges) state.doc.nodesBetween(range.$from.pos, range.$to.pos, (node, pos) => {
       if (!node.isInline) return
       const current = node.marks.find(mark => mark.type === type)?.attrs.value ?? {}
-      tr.addMark(Math.max(state.selection.from, pos), Math.min(state.selection.to, pos + node.nodeSize), type.create({ value: merged(current) }))
+      tr.addMark(Math.max(range.$from.pos, pos), Math.min(range.$to.pos, pos + node.nodeSize), type.create({ value: merged(current) }))
     })
     editor.view.dispatch(tr)
     editor.view.focus()
@@ -607,7 +607,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     const state = editor.view.state, transaction = state.tr
     for (const type of [documentEditorSchema.marks.style, documentEditorSchema.marks.code, documentEditorSchema.marks.link]) {
       if (state.selection.empty) transaction.removeStoredMark(type)
-      else transaction.removeMark(state.selection.from, state.selection.to, type)
+      else for (const range of state.selection.ranges) transaction.removeMark(range.$from.pos, range.$to.pos, type)
     }
     editor.view.dispatch(transaction)
     editor.view.focus()
@@ -716,17 +716,21 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     : { mode: contextualTarget.mode, ranges: contextualTarget.ranges?.map(range => [range.from, range.to]) }) : ''
   const hostAiButton = contextualTarget ? props.renderAiButton?.(contextualTarget, quickBarIssue) : undefined
   const tableTools = contextualTarget && mode === 'layout' ? activeTableMenu() : []
-  const textTools = contextualTarget && mode === 'layout' && contextualTarget.selection?.kind === 'text'
-    && contextualTarget.selection.head.slot.kind !== 'cell' && contextualTarget.selection.head.slot.kind !== 'header'
+  const textSelection = contextualTarget?.selection?.kind === 'text' ? contextualTarget.selection : null
+  const textTools = !!(contextualTarget && mode === 'layout' && textSelection
+    && (textSelection.anchor.blockId !== textSelection.head.blockId || JSON.stringify(textSelection.anchor.slot) !== JSON.stringify(textSelection.head.slot)
+      || textSelection.anchor.offset !== textSelection.head.offset))
+  const cellTextTools = !!(contextualTarget && mode === 'layout' && contextualTarget.selection?.kind === 'cells')
   const quickBar = contextualTarget && !props.readOnly && !props.contextualCardSuppressed && quickBarPlace
     && <SelectionQuickBar anchor={quickBarPlace.anchor} bounds={quickBarPlace.bounds} label="选中内容快捷工具" selectionKey={selectionKey}
       suspended={pointerGesture || dismissedGeneration === targetGeneration}>
-      {textTools && <>
+      {(textTools || cellTextTools) && <>
         <QuickBarButton label="当前选区加粗" icon={<Bold size={14} />} pressed={format.flags.bold === true} onClick={() => toggleStyle('bold')} />
         <QuickBarButton label="当前选区斜体" icon={<Italic size={14} />} pressed={format.flags.italic === true} onClick={() => toggleStyle('italic')} />
         <QuickBarButton label="当前选区下划线" icon={<Underline size={14} />} pressed={format.flags.underline === true} onClick={() => toggleStyle('underline')} />
         <QuickBarColorButton label="当前选区文字颜色" icon={<Baseline size={14} />} onPick={color => { if (color) style({ color }) }} />
         <QuickBarColorButton label="当前选区高亮" icon={<Highlighter size={14} />} variant="highlight" onPick={highlightColor => style({ highlightColor })} />
+        {textTools && <>
         <QuickBarButton label="当前选区链接" icon={<Link2 size={14} />} onClick={() => {
           const state = layout.current?.view.state
           setLinkDraft(state?.selection.$from.marks().find(mark => mark.type === documentEditorSchema.marks.link)?.attrs.href ?? '')
@@ -755,6 +759,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
             <button type="button" role="menuitem" onMouseDown={event => event.preventDefault()} onClick={() => { close(); clearFormatting() }}>清除文字格式</button>
           </div>}
         </QuickBarPopoverButton>
+        </>}
         <QuickBarSeparator />
       </>}
       {tableTools.length > 0 && <QuickBarPopoverButton label="表格操作" text="表格操作" popupRole="menu">
