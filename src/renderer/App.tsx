@@ -25,6 +25,7 @@ import {
   componentPackagesFromArchive,
 } from './components/componentPackageStore'
 import { dedupeCourseMediaImports, emptyCourseAssetSidecar } from './project/v9AssetAdapter'
+import { createSlideLightEditingPort } from './composition/selection/slideLightEditingPort'
 import { useComponentLibrary } from './app/useComponentLibrary'
 import { componentCatalogInstallStatus } from './components/componentCatalogStatus'
 import { selectCurrentCatalogPackages } from './components/componentLibraryModel'
@@ -736,10 +737,68 @@ export default function App() {
     }, '诊断报告导出失败。请换一个可写目录后重试。')
   }, [run])
   const mediaImportRef = useRef(mediaImport); mediaImportRef.current = mediaImport
+  const slideLight = useMemo(() => {
+    const readCurrent = () => {
+      const state = useEditorStore.getState()
+      const connection = state.courseDocument
+      const snapshot = connection.snapshot
+      const backend = selectSlideAuthoringBackend(state)
+      const candidate = state.slideCandidateSnapshot
+      if (!connection.connected || connection.pending || connection.error || !snapshot ||
+        snapshot.model.kind !== 'course-v9' || snapshot.documentId !== connection.documentId ||
+        !backend || !candidate || state.flowSession || state.spatialSession ||
+        state.canvasMode !== 'edit' || selectEditingScope(state) !== 'scene' ||
+        state.v9ContentEdit || state.editingTextNodeId || state.flowDocumentDraft) return null
+      const project = backend.getSession().history.present
+      const token = state.courseAuthoringSession?.token
+      if (snapshot.model.project.id !== project.id || snapshot.model.project.revision !== project.revision ||
+        token?.surfaceType !== 'slide' || token.locationId !== candidate.locationId ||
+        token.revision !== project.revision) return null
+      const selected = candidate.selection.selectionIds
+      const itemId = selected.length === 1 && project.surfaces.some(surface => surface.type === 'slide' &&
+        surface.scenes.some(scene => scene.id === candidate.sceneId &&
+          scene.layerItems.some(item => item.layerItemId === selected[0]))) ? selected[0]! : null
+      return { documentId: snapshot.documentId, epoch: snapshot.epoch, project,
+        locationId: candidate.locationId, stateId: candidate.selection.stateId, itemId, pending: connection.pending }
+    }
+    return createSlideLightEditingPort({
+      readCurrent,
+      async commit(step, target) {
+        const current = readCurrent()
+        if (!current || current.documentId !== target.documentId || current.epoch !== target.epoch ||
+          current.project.id !== target.projectId || current.project.revision !== target.expectedRevision ||
+          current.locationId !== target.locationId || current.stateId !== target.stateId ||
+          (target.kind === 'object' && current.itemId !== target.itemId)) return false
+        const store = useEditorStore.getState()
+        const token = store.courseAuthoringSession?.token
+        if (!token || !store.commitDesignProduction(step, token)) return false
+        const confirmed = await useEditorStore.getState().drainCourseDocument()
+        return confirmed.documentId === target.documentId && confirmed.epoch === target.epoch &&
+          confirmed.model.kind === 'course-v9' && confirmed.model.project.id === target.projectId &&
+          confirmed.model.project.revision === step.nextDocument.revision
+      },
+      async chooseAudio() {
+        const selected = await mediaImportRef.current.selectAudioAsset()
+        if (!selected) return null
+        const current = readCurrent()
+        if (!current) throw new Error('文档已切换，请重新选择音频')
+        const state = useEditorStore.getState()
+        const batch = await dedupeCourseMediaImports('audio', current.project.assets,
+          state.courseAssetSidecar ?? emptyCourseAssetSidecar(), [selected])
+        const placement = batch.placements[0]
+        if (!placement) throw new Error('声音读取失败')
+        return { asset: placement.meta, bytes: placement.bytes }
+      },
+      createId: () => crypto.randomUUID(),
+    })
+  }, [])
+  const slideLightPageTarget = slideLight.capturePage()
+  const slideLightPageView = slideLightPageTarget ? slideLight.viewPage(slideLightPageTarget) : null
   const courseEditorActions = useMemo<CourseEditorActions>(() => ({
     replaceImage: () => { void mediaImportRef.current.selectAndImportImage('replace') },
     replaceVideo: () => { void mediaImportRef.current.replaceSelectedVideo() },
-  }), [])
+    slideLight,
+  }), [slideLight])
 
   return (
     <ProjectColorPaletteContext.Provider value={projectColors}>
@@ -757,6 +816,7 @@ export default function App() {
       onOpenProject={path => courseProjectLifecycle.openRecentProject(path, { origin: 'lesson' })} onNewProject={() => courseProjectLifecycle.newProject({ origin: 'lesson' })} onNewProjectFromPptx={newProjectFromPptx} onDirtyChange={setLessonDirty} onActiveDocumentChange={setActiveWorkspaceDocument}
 >
     <CourseEditorFrame lightTools={<CourseLightToolbar
+      slideLightPage={slideLightPageView ? { view: slideLightPageView, run: command => slideLight.runPage(slideLightPageView.target, command) } : null}
       documentId={courseConnection.documentId}
       isCurrentDocument={id => useEditorStore.getState().courseDocument.documentId === id}
       canUndo={canUndoCourse} canRedo={canRedoCourse}
@@ -800,9 +860,16 @@ export default function App() {
       })() }}
       onAddImage={() => { void mediaImport.selectAndImportImage('add') }}
       onAddVideo={() => { void mediaImport.selectAndImportVideo('add') }}
-      onAddAudio={() => { void (useEditorStore.getState().flowSession
-        ? mediaImport.selectAndInsertFlowAudio()
-        : mediaImport.selectAndImportAudio()) }}
+      onAddAudio={() => {
+        if (useEditorStore.getState().flowSession) { void mediaImport.selectAndInsertFlowAudio(); return }
+        if (insertSurface === 'slide') {
+          const target = slideLight.capturePage()
+          if (!target) { setError('当前演示页尚未就绪，请稍后重试'); return }
+          void slideLight.placeAudio(target).catch(error => setError(error instanceof Error ? error.message : '放置音频失败'))
+          return
+        }
+        void mediaImport.selectAndImportAudio()
+      }}
       onAddShape={shapeType => useEditorStore.getState().addShapeNode(shapeType)}
       onAddFormula={() => useEditorStore.getState().addFormulaNode()}
       flowInsertMenu={{ onInsert: command => insertFlowMenu(command) }}

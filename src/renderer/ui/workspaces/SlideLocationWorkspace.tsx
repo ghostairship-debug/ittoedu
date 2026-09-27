@@ -1,5 +1,7 @@
 import { resolveSlideSelectionLayer } from '../../workbench/SelectionContextController'
 import { NativeSelectionContext } from '../../workbench/NativeSelectionContext'
+import { useCourseEditorActions } from '../../documents/CourseEditorActionsContext'
+import { slideLightMenuItems } from '../../editing/quickbar/SlideLightActions'
 import { QUICK_BAR_SELECTOR } from '../../editing/quickbar/usePointerGesture'
 import { useContextMenu, type MenuCommand } from '../../editing/commands/CommandMenu'
 import { OBJECT_EDIT_EVENT, requestObjectContextMenu } from '../../editing/commands/objectContextMenu'
@@ -784,6 +786,7 @@ export function SlideLocationWorkspace({
   snapshotRef.current = snapshot
   const readSnapshot = () => snapshotRef.current
   const canvasMenu = useContextMenu()
+  const slideLight = useCourseEditorActions()?.slideLight
   // Hidden objects stay findable on the canvas (M21): the label counts them, and a menu shows them again.
   const hiddenLayers = slideEditorView?.layers.filter((layer) => !layer.item.visible && canEditLayerInScope(layer, editingScope)) ?? []
   const hiddenMenu = (): MenuCommand[] => hiddenObjectCommands(
@@ -3302,6 +3305,11 @@ export function SlideLocationWorkspace({
         if (currentSnapshot.selectedNodeIds.length) ports.selection.selectNodes([])
         const world = clientToWorld(createStageViewportTransform(viewport), point)
         const noPort = '当前界面不支持此操作'
+        const pageTarget = slideLight?.capturePage()
+        const pageView = pageTarget ? slideLight?.viewPage(pageTarget) : null
+        const pageItems = pageTarget && pageView ? slideLightMenuItems(pageView.commands, command => {
+          void slideLight!.runPage(pageTarget, command).catch(error => ports.canvas.setStatus(error instanceof Error ? error.message : '页面操作失败'))
+        }) : []
         canvasMenu.open(point, '画布操作', [
           { id: 'canvas.paste', label: '粘贴', shortcut: 'Ctrl+V', group: 'clipboard', run: () => ports.selection.paste?.(), disabledReason: ports.selection.paste ? null : noPort },
           { id: 'canvas.select-all', label: '全选', shortcut: 'Ctrl+A', group: 'clipboard', run: () => ports.selection.selectAll?.(), disabledReason: ports.selection.selectAll ? null : noPort },
@@ -3313,6 +3321,7 @@ export function SlideLocationWorkspace({
           { id: 'canvas.hidden', label: '找回隐藏的对象', group: 'view', run: () => canvasMenu.open(point, '隐藏的对象', hiddenMenu()),
             disabledReason: hiddenLayers.length ? null : '本页没有隐藏的对象' },
           { id: 'canvas.try-run', label: '当前位置试运行', group: 'view', run: () => ports.canvas.setCanvasMode('run') },
+          ...pageItems,
         ])
       }}
       onDoubleClickCapture={(event) => {

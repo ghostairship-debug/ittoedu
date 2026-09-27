@@ -7,6 +7,8 @@ import { useContextMenu, type MenuCommand } from '../editing/commands/CommandMen
 import { IMAGE_FIT_LABEL, multiObjectCommands, singleObjectCommands, type SingleObjectState } from '../editing/commands/objectCommands'
 import { OBJECT_CONTEXT_MENU_EVENT, requestObjectEdit, type ObjectContextMenuRequest } from '../editing/commands/objectContextMenu'
 import { ImageCropOverlay } from '../editing/crop/ImageCropOverlay'
+import { SlideLightActions, slideLightMenuItems } from '../editing/quickbar/SlideLightActions'
+import type { SlideLightCommand } from '../editing/commands/slideLightCommands'
 import { ElementAiButton } from './elementCards/ElementAiCard'
 import { rotatedBoundingBox, unionBoxes, visibleBounds, type QuickBarBounds, type QuickBarRect } from '../editing/quickbar/placeQuickBar'
 import { QuickBarAiButton, QuickBarButton, QuickBarColorButton, QuickBarLabel, QuickBarMenu, QuickBarPopoverButton, QuickBarSeparator, SelectionQuickBar } from '../editing/quickbar/SelectionQuickBar'
@@ -56,7 +58,8 @@ const ALIGN_ICON = { left: <AlignLeft size={14} />, center: <AlignCenter size={1
 const ALIGN_LABEL = { left: '左对齐', center: '居中', right: '右对齐' }
 
 function run(action: () => unknown, onError: (message: string) => void) {
-  try { action() } catch (error) { onError(error instanceof Error ? error.message : String(error)) }
+  try { void Promise.resolve(action()).catch(error => onError(error instanceof Error ? error.message : String(error))) }
+  catch (error) { onError(error instanceof Error ? error.message : String(error)) }
 }
 
 /** What an element's AI card calls it: the start of its text, else its name. */
@@ -228,6 +231,21 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
     const node = single.view, patch = single.patch
     // Cropping and replacing a video are Slide-page tools for now (M21).
     const slidePage = selection?.kind === 'slide-native' && !selection.spatialMode
+    const slideLight = slidePage && !single.disabledReason ? actions?.slideLight : undefined
+    const lightTarget = slideLight?.captureObject()
+    const lightView = lightTarget?.itemId === node.id ? slideLight?.viewObject(lightTarget) : null
+    const pageTarget = lightView ? slideLight?.capturePage() : null
+    const pageView = pageTarget ? slideLight?.viewPage(pageTarget) : null
+    const lightCommands = lightView ? [...lightView.commands, ...(pageView?.commands ?? [])] : []
+    const runLight = (command: SlideLightCommand) => {
+      if (command.kind === 'scene-background' || command.kind === 'audio-import') {
+        if (!pageTarget) throw new Error('页面已切换，请重新选择')
+        return slideLight!.runPage(pageTarget, command)
+      }
+      if (!lightTarget) throw new Error('对象已切换，请重新选择')
+      return slideLight!.runObject(lightTarget, command)
+    }
+    const lightMenu = slideLightMenuItems(lightCommands, runLight)
     const objectState: SingleObjectState = { locked: node.locked, visible: node.visible, disabledReason: single.disabledReason,
       setLocked: (locked: boolean) => patch({ locked }), setVisible: (visible: boolean) => patch({ visible }),
       // The main action matches the quick bar's button for the type: 编辑文字 for text, 编辑公式 for formulas, 替换图片 and
@@ -253,6 +271,7 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
       node.locked ? { id: 'object.unlock', label: '解锁', group: 'state', run: () => patch({ locked: false }), disabledReason: single.disabledReason }
         : { id: 'object.lock', label: '锁定', group: 'state', run: () => patch({ locked: true }), disabledReason: single.disabledReason },
     ] : singleObjectCommands(objectState, ports, { primary: true }))
+    if (lightMenu.length) contextItems = [...contextItems, ...guarded(lightMenu)]
     if (single.disabledReason) content = <><span title={single.disabledReason}><QuickBarLabel>此处不可编辑</QuickBarLabel></span><QuickBarSeparator />{ai}</>
     // A hidden object stays selected until the selection moves on, so it can be shown again in place.
     else if (!node.visible) content = <><QuickBarLabel>已隐藏</QuickBarLabel><QuickBarButton label="显示" text="显示" icon={<Eye size={14} />} onClick={() => patch({ visible: true })} /><QuickBarSeparator />{ai}</>
@@ -271,11 +290,14 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
     else {
       content = <>
         <ObjectActions view={node} patch={patch} replaceImage={single.replaceImage} editText={single.editText} extra={objectState} />
+        {lightView && <SlideLightActions commands={lightCommands} fontFamily={lightView.fontFamily}
+          lineSpacing={lightView.lineSpacing} backgroundColor={pageView?.backgroundColor ?? null}
+          onRun={runLight} onError={report} />}
         {node.type === 'runtime' && <QuickBarPopoverButton label="页面文字" text="页面文字" icon={<Type size={14} />} popoverLabel="页面文字">
           {() => <RuntimePageTextList itemId={node.id} onError={report} />}
         </QuickBarPopoverButton>}
         {node.type !== 'table' && node.type !== 'chart' && node.type !== 'input' && node.type !== 'external-component' && <QuickBarSeparator />}
-        {ai}<QuickBarMenu items={guarded(singleObjectCommands(objectState, ports))} />
+        {ai}<QuickBarMenu items={guarded([...singleObjectCommands(objectState, ports), ...lightMenu])} />
       </>
     }
   } else if (selection?.kind === 'multi-selection') {

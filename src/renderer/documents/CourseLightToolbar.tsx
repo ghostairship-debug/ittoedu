@@ -6,10 +6,14 @@ import type { SingleHtmlExportMode } from '../export/course/coursePackagePreflig
 import { useCourseEditorChrome } from './CourseEditorChromeContext'
 import { ElementCardIndicator, type ElementCardNavigation } from '../workbench/elementCards/ElementCardIndicator'
 import { FlowInsertMenu } from '../ui/flow/FlowInsertMenu'
+import { SlideLightPageActions } from '../editing/quickbar/SlideLightActions'
+import type { SlideLightPageView } from '../composition/selection/slideLightEditingPort'
+import type { SlideLightCommand } from '../editing/commands/slideLightCommands'
 import type { FlowInsertCommand } from '../ui/flow/flowInsertCommands'
 import './courseEditorChrome.css'
 
 export interface CourseLightToolbarProps {
+  slideLightPage?: { readonly view: SlideLightPageView; readonly run: (command: SlideLightCommand) => Promise<void> } | null
   documentId: string | null
   isCurrentDocument(id: string): boolean
   canUndo: boolean
@@ -134,8 +138,8 @@ export function CourseLightToolbar(props: CourseLightToolbarProps) {
           <button type="button" aria-label="添加视频" disabled={Boolean(unavailable || flowMediaUnavailable)} title={unavailable ?? flowMediaUnavailable ?? undefined} onClick={() => insert(props.onAddVideo)}>
             <span>视频</span><small>{props.insertSurface === 'flow' ? '文中视频块' : '当前画布'}</small>
           </button>
-          <button type="button" aria-label={audioToDocument ? '插入音频到正文' : '导入音频到声音库'} disabled={props.insertSurface === null || Boolean(audioToDocument && flowMediaUnavailable)} title={flowMediaUnavailable ?? undefined} onClick={() => insert(props.onAddAudio)}>
-            <span>音频</span><small>{audioToDocument ? '文中音频块' : '加入声音库供互动播放'}</small>
+          <button type="button" aria-label={audioToDocument ? '插入音频到正文' : props.insertSurface === 'slide' ? '放置音频' : '导入音频到声音库'} disabled={props.insertSurface === null || Boolean(audioToDocument && flowMediaUnavailable)} title={flowMediaUnavailable ?? undefined} onClick={() => insert(props.onAddAudio)}>
+            <span>音频</span><small>{audioToDocument ? '文中音频块' : props.insertSurface === 'slide' ? '放置点击播放按钮' : '加入声音库供互动播放'}</small>
           </button>
           {props.onAddFormula && <button type="button" aria-label="插入公式" disabled={Boolean(unavailable || flowMediaUnavailable)} title={unavailable ?? flowMediaUnavailable ?? undefined} onClick={() => { const add = props.onAddFormula; if (add) insert(add) }}>
             <span>公式</span><small>{props.insertSurface === 'flow' ? '文中公式块' : '可编辑的数学公式'}</small>
@@ -152,6 +156,8 @@ export function CourseLightToolbar(props: CourseLightToolbarProps) {
         </div>}
       </div>
       <div className="course-light-tools__document-actions">
+        {editing && props.slideLightPage && <SlideLightPageActions commands={props.slideLightPage.view.commands}
+          backgroundColor={props.slideLightPage.view.backgroundColor} onRun={props.slideLightPage.run} onError={props.reportError} />}
         {props.elementCards && <ElementCardIndicator documentId={props.documentId} navigation={props.elementCards} />}
         {chrome.workbench && <span className="course-light-tools__status">{chrome.workbench.documentStatus}</span>}
         {!compact && props.onPreview && <button type="button" disabled={props.busy} onClick={() => { if (props.onPreview) invoke(props.onPreview) }}>整课预览</button>}
