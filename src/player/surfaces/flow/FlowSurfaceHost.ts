@@ -96,6 +96,7 @@ import {
   type PublishedSurfaceRuntimeSession,
   type PublishedSurfaceRuntimeMountHandle,
 } from '../runtime/publishedSurfaceRuntimeMount'
+import type { FlowHtmlConfirmationMode } from '../runtime/surfaceRuntimeContentSize'
 import {
   isPublishedGlobalCanvasRuntimePointerItem,
   setPublishedGlobalCanvasRuntimeInteractionVisibility,
@@ -136,6 +137,7 @@ export interface FlowCourseProgressSource {
 }
 
 export interface FlowSurfaceHostOptions {
+  flowHtmlConfirmationMode?: FlowHtmlConfirmationMode
   surfaceId?: string
   locationId?: string
   /** Runtime-session only. Default is collapsed (scheme 1). */
@@ -689,6 +691,7 @@ export class FlowSurfaceHost {
         : {}),
       fallbackText: firstVisibleRuntimeText(item.runtime.content.values)
         ?? item.runtime.protocol,
+      flowHtmlConfirmationMode: this.#options.flowHtmlConfirmationMode ?? 'runtime',
       onContentHeightChange: height => {
         if (record.retired || !Number.isFinite(height) || height < 0 || this.#runtimeObservedHeights.get(item.layerItemId) === height) return
         this.#runtimeObservedHeights.set(item.layerItemId, height)
