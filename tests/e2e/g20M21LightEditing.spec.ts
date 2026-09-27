@@ -9,8 +9,17 @@ import { canvasReady, centre, closeMenu, contextMenuAt, FRAMES, lightCourse, men
 
 const COURSE = 'm21.h5lesson'
 const OTHER = 'other.h5lesson'
-const OBJECT_ITEMS = ['复制', '粘贴', '创建副本', '删除', '上移一层', '下移一层', '置于顶层', '置于底层', '锁定', '隐藏']
-const CANVAS_ITEMS = ['粘贴', '全选', '在此插入文字', '在此插入图片…', '在此插入视频…', '在此插入矩形', '在此插入公式', '找回隐藏的对象', '当前位置试运行']
+const LEGACY_OBJECT_ITEMS = ['复制', '粘贴', '创建副本', '删除', '上移一层', '下移一层', '置于顶层', '置于底层', '锁定', '隐藏']
+const M22_PAGE_ITEMS = ['页面背景：#ffffff', '页面背景：#f8fafc', '页面背景：#fef3c7', '页面背景：#dbeafe', '页面背景：#dcfce7', '页面背景：#111827', '放置音频']
+const M22_OBJECT_ITEMS = [
+  '不透明度：100%', '不透明度：75%', '不透明度：50%', '不透明度：25%',
+  '字体：Noto 无衬线中文',
+  '行距：紧凑（额外 0 像素）', '行距：标准（额外 4 像素）', '行距：宽松（额外 8 像素）', '行距：加宽（额外 16 像素）',
+  '对齐页面左侧', '对齐页面水平居中', '对齐页面右侧', '对齐页面顶部', '对齐页面垂直居中', '对齐页面底部',
+  '点击跳到：M21 轻编辑 · 导入', '点击跳到：M21 轻编辑 · 练习', '点击跳到：无标题', '点击跳到：空间 · 全景',
+]
+const OBJECT_ITEMS = [...LEGACY_OBJECT_ITEMS, ...M22_OBJECT_ITEMS, ...M22_PAGE_ITEMS]
+const CANVAS_ITEMS = ['粘贴', '全选', '在此插入文字', '在此插入图片…', '在此插入视频…', '在此插入矩形', '在此插入公式', '找回隐藏的对象', '当前位置试运行', ...M22_PAGE_ITEMS]
 const SCENE_ITEMS = ['新建场景', '创建副本', '重命名', '前移', '后移', '删除场景']
 const STATE_ITEMS = ['新建状态', '创建副本', '重命名', '删除状态']
 const PRIMARY = new Set(['编辑文字', '替换图片…', '编辑此处文字', '替换此处图片…'])
@@ -96,7 +105,7 @@ test('M21-T04 M21-T05 M21-T06 one command set in the workbench and the editor; p
       const runtimeText = { x: RUNTIME_FRAME.x + RUNTIME_TEXT_AT.x + 40, y: RUNTIME_FRAME.y + RUNTIME_TEXT_AT.y + 20 }
       const runtime = await menuItems(await contextMenuAt(page, onStage(box, runtimeText), '对象操作'))
       expect(runtime[0]!.label).toBe('编辑此处文字')
-      expect(runtime.map(item => item.label)).toEqual(expect.arrayContaining(OBJECT_ITEMS))
+      expect(runtime.map(item => item.label)).toEqual(expect.arrayContaining(LEGACY_OBJECT_ITEMS))
       workbenchMenus.runtime = runtime
       await page.screenshot({ path: join(shots, 'workbench-runtime-menu.png') })
       await closeMenu(page)
