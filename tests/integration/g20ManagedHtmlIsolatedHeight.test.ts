@@ -235,19 +235,6 @@ it('detects insertRule without a DOM mutation and stops after destroy', async ()
   } finally { await page.close() }
 })
 
-it('does not mistake metadata updates between valid snapshots for layout churn', async () => {
-  const page = await pageWith('<!doctype html><style>body{margin:0}</style><article style="height:500px"></article>')
-  try {
-    await settled(page)
-    await page.evaluate(() => { const doc = document.querySelector('iframe')!.contentDocument!; (window as any).mutationTimer = setInterval(() => { doc.body.dataset.tick = String(performance.now()) }, 1) })
-    await settled(page)
-    await page.waitForTimeout(80)
-    expect(await page.evaluate(() => ({ heights: (window as any).testHeight.heights, errors: (window as any).testHeight.errors }))).toEqual({ heights: [500], errors: [] })
-    expect(await page.locator('[data-html-height-measurement]').count()).toBe(0)
-    await page.evaluate(() => clearInterval((window as any).mutationTimer))
-  } finally { await page.close() }
-}, 8000)
-
 it('runs no duplicate author script for a supported natural page', async () => {
   const page = await pageWith('<!doctype html><style>body{margin:0}</style><article style="height:500px">text</article><script>parent.executions=(parent.executions||0)+1</script>')
   try {

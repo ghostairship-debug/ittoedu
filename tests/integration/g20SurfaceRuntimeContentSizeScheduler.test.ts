@@ -36,14 +36,15 @@ function fixture() {
   frames.push(frame)
   const origin = frame.contentDocument!.documentElement
   const source = { kind: 'managed-document' as const, iframe: frame, origin, minimumHeight: 1 }
+  let currentSource: typeof source | null = source
   const heights: number[] = []
   const errors: Error[] = []
   const observer = observeSurfaceRuntimeContentSize({
-    root: document.body, source: () => source,
+    root: document.body, source: () => currentSource,
     onHeightChange: height => heights.push(height), onError: error => errors.push(error),
   })
   observers.push(observer)
-  return { frame, origin, source, observer, heights, errors }
+  return { frame, origin, source, observer, heights, errors, setSource(next: typeof source | null) { currentSource = next; observer.refresh() } }
 }
 
 function controlledMeasurements() {
@@ -97,4 +98,103 @@ it('counts actual DOM invalidations by measurement round and rejects persistent 
   expect(errors[0]!.message).toContain('invalidations=13')
   expect(heights).toEqual([])
   expect(calls).toHaveLength(13)
+})
+
+it('settles waiters when the source disappears during an in-flight measurement', async () => {
+  const calls = controlledMeasurements()
+  const { observer, setSource, heights, errors } = fixture()
+  const ready = observer.waitForReady()
+  await until(() => calls.length === 1)
+  setSource(null)
+  await ready
+  await observer.waitForReady()
+  expect(calls[0]!.signal.aborted).toBe(true)
+  expect(heights).toEqual([])
+  expect(errors).toEqual([])
+})
+
+it('starts a fresh invalidation budget when a new document replaces the old one', async () => {
+  const calls = controlledMeasurements()
+  mocks.waitResize.mockResolvedValue(undefined)
+  const { origin, observer, setSource, heights, errors } = fixture()
+  const ready = observer.waitForReady()
+  for (let index = 0; index < 11; index++) {
+    await until(() => calls.length === index + 1)
+    origin.ownerDocument.body.textContent = 'old ' + index
+    await until(() => calls[index]!.signal.aborted)
+  }
+  await until(() => calls.length === 12)
+  const frame = document.createElement('iframe')
+  document.body.append(frame)
+  frames.push(frame)
+  const nextOrigin = frame.contentDocument!.documentElement
+  setSource({ kind: 'managed-document', iframe: frame, origin: nextOrigin, minimumHeight: 1 })
+  await until(() => calls[11]!.signal.aborted)
+  for (let index = 0; index < 2; index++) {
+    await until(() => calls.length === 13 + index)
+    nextOrigin.ownerDocument.body.textContent = 'new ' + index
+    await until(() => calls[12 + index]!.signal.aborted)
+  }
+  await until(() => calls.length === 15)
+  calls[14]!.resolve(900)
+  await until(() => heights.length === 1 && calls.length === 16)
+  calls[15]!.resolve(900)
+  await ready
+  expect(heights).toEqual([900])
+  expect(errors).toEqual([])
+})
+
+it('ignores only the published transparent root size while keeping descendant resize observable', async () => {
+  const calls = controlledMeasurements()
+  mocks.waitResize.mockResolvedValue(undefined)
+  const frame = document.createElement('iframe')
+  document.body.append(frame)
+  frames.push(frame)
+  const origin = frame.contentDocument!.documentElement
+  const child = frame.contentDocument!.createElement('article')
+  frame.contentDocument!.body.append(child)
+  let rootHeight = 300
+  Object.defineProperty(origin, 'clientWidth', { configurable: true, get: () => 760 })
+  Object.defineProperty(origin, 'clientHeight', { configurable: true, get: () => rootHeight })
+  Object.defineProperty(frame, 'clientWidth', { configurable: true, get: () => 760 })
+  Object.defineProperty(frame, 'clientHeight', { configurable: true, get: () => rootHeight })
+  let resize: ResizeObserverCallback | undefined
+  class ProbeResizeObserver {
+    constructor(callback: ResizeObserverCallback) { resize = callback }
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  Object.defineProperty(frame.contentWindow!, 'ResizeObserver', { configurable: true, value: ProbeResizeObserver })
+  const emit = (target: Element, width: number, height: number) => resize!([{ target, contentRect: { width, height } } as ResizeObserverEntry], {} as ResizeObserver)
+  const heights: number[] = []
+  const errors: Error[] = []
+  const observer = observeSurfaceRuntimeContentSize({
+    root: document.body,
+    source: () => ({ kind: 'managed-document', iframe: frame, origin, minimumHeight: 1 }),
+    onHeightChange: height => { heights.push(height); rootHeight = height },
+    onError: error => errors.push(error),
+  })
+  observers.push(observer)
+  const ready = observer.waitForReady()
+  await until(() => calls.length === 1 && !!resize)
+  emit(origin, 760, 300)
+  emit(child, 760, 100)
+  calls[0]!.resolve(900)
+  await until(() => heights.length === 1)
+  emit(origin, 760, 900)
+  await until(() => calls.length === 2)
+  calls[1]!.resolve(900)
+  await ready
+  expect(calls).toHaveLength(2)
+  expect(errors).toEqual([])
+  emit(child, 760, 120)
+  await until(() => calls.length === 3)
+  emit(origin, 760, 850)
+  await until(() => calls[2]!.signal.aborted && calls.length === 4)
+  const nextReady = observer.waitForReady()
+  calls[3]!.resolve(900)
+  await nextReady
+  expect(heights).toEqual([900])
+  expect(errors).toEqual([])
 })

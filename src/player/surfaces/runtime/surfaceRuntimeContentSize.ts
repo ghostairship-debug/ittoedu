@@ -89,7 +89,8 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
   let cssFrame = 0
   let cssSignature: string | null = null
   let verifyPublishedLayout: (() => boolean) | null = null
-  const resizeSizes = new WeakMap<Element, string>()
+  let expectedRootResizeSize: string | null = null
+  let resizeSizes = new WeakMap<Element, string>()
   const waiters = new Set<{ resolve(): void; reject(error: Error): void }>()
   const settle = (error?: Error): void => {
     for (const waiter of waiters) error ? waiter.reject(error) : waiter.resolve()
@@ -138,9 +139,13 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
     cssFrame = 0
     cssSignature = null
     verifyPublishedLayout = null
+    expectedRootResizeSize = null
+    resizeSizes = new WeakMap<Element, string>()
     observedSource = source
     observedSize = sourceSize(source)
     lastHeight = null
+    heightChanges = invalidations = 0
+    countedGeneration = -1
     ready = false
     if (source?.kind === 'managed-document' && view) cssFrame = view.requestAnimationFrame(monitorStyles)
     if (!source) return
@@ -152,7 +157,9 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
       for (const entry of entries) {
         const size = `${entry.contentRect.width}x${entry.contentRect.height}`
         const previous = resizeSizes.get(entry.target)
-        if (previous !== undefined && previous !== size) changed = true
+        const expectedRootResize = entry.target === root && expectedRootResizeSize === size
+        if (expectedRootResize) expectedRootResizeSize = null
+        if (previous !== undefined && previous !== size && !expectedRootResize) changed = true
         resizeSizes.set(entry.target, size)
       }
       if (changed) request('descendant resize')
@@ -160,12 +167,7 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
     const Mutation = sourceView?.MutationObserver
     mutationObserver = Mutation ? new Mutation(records => {
       if (records.some(record => record.type === 'childList')) bindResizeNodes()
-      // data-* is metadata unless a stylesheet selector can use it; paint/size checks still run for such selectors.
-      const selectorsMayUseData = source.kind !== 'managed-document' || cssSignature === null
-        || /\[\s*data-|:has\s*\(/i.test(cssSignature)
-      if (records.some(record => record.type !== 'attributes' || !record.attributeName?.startsWith('data-') || selectorsMayUseData)) {
-        request('DOM mutation')
-      }
+      if (records.length > 0) request('DOM mutation')
     }) : null
     bindResizeNodes()
     mutationObserver?.observe(root, { childList: true, subtree: true, characterData: true, attributes: true })
@@ -187,7 +189,7 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
       dirty = true
       ready = false
       if (controller && !controller.signal.aborted) {
-        if (countedGeneration !== generation) {
+        if (!replaced && countedGeneration !== generation) {
           countedGeneration = generation
           if (++invalidations > 12) {
             fail(new Error(`Flow HTML 持续失效，无法稳定测量（phase=measurement, invalidations=${invalidations}, lastHeight=${lastHeight ?? 'none'}, reason=${lastInvalidation}）；请使用演示页。`))
@@ -201,8 +203,15 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
       dirty = true
       ready = false
     }
+    if (!source) {
+      if (frame) view.cancelAnimationFrame(frame)
+      frame = 0
+      ready = true
+      dirty = false
+      settle()
+      return
+    }
     if (controller || frame) return
-    if (!source) { ready = false; dirty = false; return }
     if (!dirty && ready) { settle(); return }
     frame = view.requestAnimationFrame(run)
   }
@@ -234,9 +243,15 @@ export function observeSurfaceRuntimeContentSize(options: SurfaceRuntimeContentS
         }
         lastHeight = height
         phase = 'publish-height'
+        const priorRootSize = source.kind === 'managed-document'
+          ? `${source.origin.clientWidth}x${source.origin.clientHeight}` : null
         if (source.kind === 'managed-document') verifyPublishedLayout = freezeManagedHtmlLayout(source.origin.ownerDocument)
         publishingHeight = true
         try { options.onHeightChange(height) } finally { publishingHeight = false }
+        if (destroyed || pending.signal.aborted || currentGeneration !== generation || !sameSource(source, observedSource)) return
+        const publishedRootSize = source.kind === 'managed-document'
+          ? `${source.origin.clientWidth}x${source.origin.clientHeight}` : null
+        expectedRootResizeSize = publishedRootSize !== priorRootSize ? publishedRootSize : null
         observedSize = sourceSize(source)
         if (source.kind === 'managed-document') { dirty = true; return }
       }
