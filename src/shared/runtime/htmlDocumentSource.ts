@@ -13,6 +13,7 @@ CoursewareRuntime.define({
   create(context) {
     const iframe = context.dom.root.ownerDocument.createElement('iframe');
     iframe.setAttribute('title', 'HTML 页面');
+    iframe.dataset.htmlDocumentRuntime = 'true';
     iframe.style.cssText = 'display:block;border:0;width:100%;height:100%;';
     const replacements = Object.create(null);
     for (const key of __htmlDocumentPayload.resourceKeys) {
@@ -26,21 +27,48 @@ CoursewareRuntime.define({
       return replacements[key];
     });
     let destroyed = false;
+    let suspended = false;
+    const pausedMedia = new Set();
+    let cancelReady = () => {};
     const ready = new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('HTML 页面加载超时')), 15000);
-      iframe.addEventListener('load', () => { clearTimeout(timeout); resolve(); }, { once: true });
-      iframe.addEventListener('error', () => { clearTimeout(timeout); reject(new Error('HTML 页面加载失败')); }, { once: true });
+      let pending = true;
+      const cleanup = () => { clearTimeout(timeout); iframe.removeEventListener('load', onLoad); iframe.removeEventListener('error', onError); };
+      const finish = (error) => { if (!pending) return; pending = false; cleanup(); error ? reject(error) : resolve(); };
+      const onLoad = () => {
+        // A connected iframe may also emit the initial about:blank load.
+        if (iframe.contentDocument?.URL === 'about:srcdoc' && iframe.contentDocument.readyState === 'complete') finish();
+      };
+      const onError = () => finish(new Error('HTML 页面加载失败'));
+      const timeout = setTimeout(() => finish(new Error('HTML 页面加载超时')), 15000);
+      iframe.addEventListener('load', onLoad);
+      iframe.addEventListener('error', onError);
+      cancelReady = () => finish(new Error('HTML 页面已销毁'));
     });
-    context.dom.root.appendChild(iframe);
     iframe.srcdoc = html;
+    context.dom.root.appendChild(iframe);
     context.capture.waitUntil(ready);
     return {
       resize(width, height) { iframe.style.height = Math.max(1, height) + 'px'; },
       setVisible(visible) { iframe.style.visibility = visible ? 'visible' : 'hidden'; },
-      suspend() { if (iframe.contentDocument) for (const media of iframe.contentDocument.querySelectorAll('audio,video')) media.pause(); },
-      resume() {},
+      suspend() {
+        if (destroyed || suspended) return;
+        suspended = true;
+        if (iframe.contentDocument) for (const media of iframe.contentDocument.querySelectorAll('audio,video')) {
+          if (!media.paused) { pausedMedia.add(media); media.pause(); }
+        }
+      },
+      resume() {
+        if (destroyed || !suspended) return;
+        suspended = false;
+        for (const media of pausedMedia) {
+          if (iframe.contentDocument?.contains(media)) {
+            try { Promise.resolve(media.play()).catch(() => {}); } catch {}
+          }
+        }
+        pausedMedia.clear();
+      },
       prepareCapture() { return ready; },
-      destroy() { if (destroyed) return; destroyed = true; iframe.remove(); iframe.srcdoc = ''; },
+      destroy() { if (destroyed) return; destroyed = true; pausedMedia.clear(); cancelReady(); iframe.remove(); iframe.srcdoc = ''; },
     };
   },
 });`
