@@ -38,13 +38,16 @@ export function FlowPageRuntime({ item, surfaceId, width, height, assetUrls, onH
   // Recreate only hosts whose own asset references changed, including projectUrl() reads.
   const assetSignature = JSON.stringify([...relevantAssetIds].sort().map(id => [id, assetUrls[id] ?? null]))
 
-  // A changed source or binding retires the old host. Geometry changes use updateSize instead.
+  // API 3 snapshots content.get/all() at create. Value/key or binding changes require
+  // a new host; DOM text override rules can be updated on the existing instance.
   const sourceKey = JSON.stringify([
     item.runtime.source, item.runtime.protocol, item.runtime.runtimeApiVersion,
-    item.runtime.enabled, item.runtime.renderMode, item.runtime.content,
+    item.runtime.enabled, item.runtime.renderMode,
+    item.runtime.content.values, item.runtime.content.metadata,
     item.runtime.assets, item.runtime.nodeBindings, item.runtime.staticFallback,
   ])
-  const runtime = useMemo(() => projectFlowRuntimeForAuthoring(item), [sourceKey])
+  const overrideKey = JSON.stringify(item.runtime.content.overrides ?? [])
+  const runtime = useMemo(() => projectFlowRuntimeForAuthoring(item), [sourceKey, overrideKey])
 
   useEffect(() => {
     const target = container.current
@@ -91,11 +94,15 @@ export function FlowPageRuntime({ item, surfaceId, width, height, assetUrls, onH
       releaseUrls()
       callbacks.current.onTargetsChanged?.({ scope: 'scene', sceneId: surfaceId, revision: targetRevision + 1, targets: [] })
     }
-  }, [item.layerItemId, item.runtime.enabled, item.runtime.protocol, item.runtime.runtimeApiVersion, item.runtime.renderMode, runtime, surfaceId, assetSignature])
+  }, [item.layerItemId, item.runtime.enabled, item.runtime.protocol, item.runtime.runtimeApiVersion, item.runtime.renderMode, sourceKey, surfaceId, assetSignature])
+
+  useEffect(() => {
+    handle.current?.applyAuthoringTextOverrides(item.runtime.content.overrides ?? [])
+  }, [overrideKey, sourceKey, assetSignature])
 
   useEffect(() => {
     handle.current?.updateSize(width, height)
-  }, [width, height, runtime])
+  }, [width, height, sourceKey, assetSignature])
 
   return <div ref={container} data-testid="flow-page-runtime" data-runtime-instance-id={item.layerItemId}
     style={{ width: '100%', height: '100%', minHeight: 0, ...style }} />

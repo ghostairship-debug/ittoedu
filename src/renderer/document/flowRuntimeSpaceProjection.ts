@@ -20,10 +20,18 @@ export function projectFlowRuntimeForAuthoring(
     enabled: item.runtime.enabled,
     renderMode: item.runtime.renderMode,
     code: { encoding: 'base64-utf16le', data: bytesToBase64(bytes) },
-    // The authoring mount reads these bindings. They remain the document's single source.
-    content: item.runtime.content as PublishedRuntimeLayerItem['runtime']['content'],
-    assets: item.runtime.assets as PublishedRuntimeLayerItem['runtime']['assets'],
-    ...(item.runtime.nodeBindings ? { nodeBindings: item.runtime.nodeBindings as Record<string, string> } : {}),
-    ...(item.runtime.staticFallback ? { staticFallback: item.runtime.staticFallback } : {}),
+    // This is a disposable execution snapshot. Host light edits must never mutate V9.
+    content: {
+      values: { ...item.runtime.content.values },
+      ...(item.runtime.content.metadata ? { metadata: Object.fromEntries(
+        Object.entries(item.runtime.content.metadata).map(([key, value]) => [key, { ...value }]),
+      ) } : {}),
+      ...(item.runtime.content.overrides ? { overrides: item.runtime.content.overrides.map(rule => ({ ...rule })) } : {}),
+    },
+    assets: Object.fromEntries(
+      Object.entries(item.runtime.assets).map(([key, binding]) => [key, { assetId: binding.assetId }]),
+    ),
+    ...(item.runtime.nodeBindings ? { nodeBindings: { ...item.runtime.nodeBindings } } : {}),
+    ...(item.runtime.staticFallback ? { staticFallback: { ...item.runtime.staticFallback } } : {}),
   }
 }

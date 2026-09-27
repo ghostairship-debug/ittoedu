@@ -3,6 +3,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { FlowPageRuntime } from '@/renderer/ui/flow/FlowPageRuntime'
 import { projectFlowRuntimeForAuthoring } from '@/renderer/document/flowRuntimeSpaceProjection'
+import { createPublishedSurfaceRuntimeSession, mountPublishedSurfaceRuntime } from '@/player/surfaces/runtime/publishedSurfaceRuntimeMount'
 import type { RuntimeLayerItem } from '@/shared/courseProjectTypes'
 import type { RuntimeAuthoringTargetUpdate } from '@/shared/runtimeTypes'
 
@@ -37,8 +38,33 @@ it('projects source for the Published API 3 mount while sharing V9 content and a
   const layer = item(makeSource('one'))
   const projected = projectFlowRuntimeForAuthoring(layer)
   expect(projected.code.encoding).toBe('base64-utf16le')
-  expect(projected.content).toBe(layer.runtime.content)
-  expect(projected.assets).toBe(layer.runtime.assets)
+  expect(projected.content).not.toBe(layer.runtime.content)
+  expect(projected.assets).not.toBe(layer.runtime.assets)
+  projected.content.values.title = 'Runtime-only '
+  projected.assets.hero!.assetId = 'different-image'
+  expect(layer.runtime.content.values.title).toBe('Lesson ')
+  expect(layer.runtime.assets.hero!.assetId).toBe('image-1')
+})
+
+it('keeps the V9 document unchanged when the Runtime host edits its execution snapshot', () => {
+  const frame = document.createElement('iframe')
+  document.body.append(frame)
+  const container = frame.contentDocument!.createElement('div')
+  frame.contentDocument!.body.append(container)
+  const layer = item(makeSource('one'))
+  const projected = projectFlowRuntimeForAuthoring(layer)
+  const session = createPublishedSurfaceRuntimeSession()
+  const handle = mountPublishedSurfaceRuntime(container, {
+    instanceId: layer.layerItemId, runtime: projected, width: 640, height: 400,
+    visible: true, mode: 'authoring', session, resolveAsset: () => 'data:image/png;base64,SEVSTw==',
+  })
+  expect(handle.ok).toBe(true)
+  handle.applyAuthoringContentValue('title', 'Runtime-only ')
+  expect(projected.content.values.title).toBe('Runtime-only ')
+  expect(layer.runtime.content.values.title).toBe('Lesson ')
+  handle.destroy()
+  session.destroy()
+  frame.remove()
 })
 
 it('runs the real authoring Runtime, updates size in place, and retires stale source and targets', async () => {
@@ -70,6 +96,17 @@ it('runs the real authoring Runtime, updates size in place, and retires stale so
   await act(async () => root.render(<FlowPageRuntime {...props} item={first} width={600} height={500} />))
   expect(container.querySelector('p')).toBe(paragraph)
   expect(container.querySelector('[data-surface-runtime-root]')?.getAttribute('data-size')).toBe('600x500')
+  const edited = item(makeSource('one'))
+  edited.runtime.content.overrides = [{ original: 'Lesson one', region: 'p', text: 'Edited lesson' }]
+  await act(async () => root.render(<FlowPageRuntime {...props} item={edited} width={600} height={500} />))
+  expect(container.querySelector('p')).toBe(paragraph)
+  expect(paragraph?.textContent).toBe('Edited lesson')
+  expect(first.runtime.content.overrides).toBeUndefined()
+  const changedValue = item(makeSource('one'))
+  changedValue.runtime.content.values.title = 'New title '
+  await act(async () => root.render(<FlowPageRuntime {...props} item={changedValue} width={600} height={500} />))
+  expect(container.querySelector('p')).not.toBe(paragraph)
+  expect(container.querySelector('p')?.textContent).toBe('New title one')
   const second = item(makeSource('two'))
   await act(async () => root.render(<FlowPageRuntime {...props} item={second} width={600} height={500} />))
   expect(container.querySelector('p')?.textContent).toBe('Lesson two')
