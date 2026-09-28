@@ -1,3 +1,4 @@
+import { parseHtmlStartTag, readHtmlRawText } from '../../../shared/html/htmlSourceScanner'
 import { createHash } from 'node:crypto'
 import { parse } from 'acorn'
 import { analyzeJavaScriptClosure, CSS_RESOURCE_PROPERTIES } from './javascriptClosureProof'
@@ -820,57 +821,30 @@ function decodeText(bytes: Uint8Array): string {
 }
 
 function parseStartTag(html: string, index: number): StartTag | null {
-  if (html[index] !== '<' || html[index + 1] === '/' || html[index + 1] === '!' || html[index + 1] === '?' || !/[A-Za-z]/.test(html[index + 1] ?? '')) return null
-  let j = index + 1
-  const nameStart = j
-  j++
-  while (j < html.length && /[A-Za-z0-9:_-]/.test(html[j])) j++
-  const rawName = html.slice(nameStart, j)
-  const attrs: ParsedAttr[] = []
-  while (j < html.length) {
-    const beforeSpace = j
-    while (j < html.length && /[\t\n\f\r ]/.test(html[j])) j++
-    if (j >= html.length) break
-    if (html[j] === '>') return { rawName, name: rawName.toLowerCase(), attrs, end: j + 1, selfClosing: false }
-    if (html[j] === '/' && html[j + 1] === '>') return { rawName, name: rawName.toLowerCase(), attrs, end: j + 2, selfClosing: true }
-    if (j === beforeSpace) break
-    if (!/[^\s=/>]/.test(html[j] ?? '')) { j++; continue }
-    const rawStart = j
-    while (j < html.length && /[^\s=/>]/.test(html[j])) j++
-    const rawAttr = html.slice(rawStart, j)
-    let hasValue = false
-    let quote: '"' | "'" | '' = ''
-    let rawValue = ''
-    const afterName = j
-    while (j < html.length && /[\t\n\f\r ]/.test(html[j])) j++
-    if (html[j] === '=') {
-      hasValue = true
-      j++
-      while (j < html.length && /[\t\n\f\r ]/.test(html[j])) j++
-      if (html[j] === '"' || html[j] === "'") {
-        quote = html[j] as '"' | "'"
-        j++
-        const valueStart = j
-        while (j < html.length && html[j] !== quote) j++
-        rawValue = html.slice(valueStart, j)
-        if (html[j] === quote) j++
-      } else {
-        const valueStart = j
-        while (j < html.length && !/[\t\n\f\r >]/.test(html[j]) && !(html[j] === '/' && html[j + 1] === '>')) j++
-        rawValue = html.slice(valueStart, j)
-      }
-    } else j = afterName
-    attrs.push({ name: rawAttr.toLowerCase(), rawName: rawAttr, hasValue, quote, rawValue, value: rawValue, changed: false, drop: false })
+  const tag = parseHtmlStartTag(html, index)
+  if (!tag) return null
+  return {
+    rawName: tag.rawName,
+    name: tag.name,
+    attrs: tag.attributes.map(attribute => ({
+      name: attribute.name,
+      rawName: attribute.rawName,
+      hasValue: attribute.valueSpan !== undefined,
+      quote: attribute.quote,
+      rawValue: attribute.valueSpan ? html.slice(attribute.valueSpan.start, attribute.valueSpan.end) : '',
+      value: attribute.decodedValue ?? '',
+      changed: false,
+      drop: false,
+    })),
+    end: tag.end,
+    selfClosing: tag.selfClosing,
   }
-  return { rawName, name: rawName.toLowerCase(), attrs, end: Math.min(j + 1, html.length), selfClosing: false }
 }
 
 function readRaw(html: string, from: number, tag: string): { body: string; closeStart: number; closeEnd: number; closed: boolean } {
-  const match = new RegExp(`</${tag}\\s*>`, 'gi')
-  match.lastIndex = from
-  const found = match.exec(html)
-  if (!found || found.index < from) return { body: html.slice(from), closeStart: html.length, closeEnd: html.length, closed: false }
-  return { body: html.slice(from, found.index), closeStart: found.index, closeEnd: found.index + found[0].length, closed: true }
+  const raw = readHtmlRawText(html, from, tag)
+  if (!raw.close) return { body: html.slice(from), closeStart: html.length, closeEnd: html.length, closed: false }
+  return { body: html.slice(raw.body.start, raw.body.end), closeStart: raw.close.start, closeEnd: raw.close.end, closed: true }
 }
 
 function escapeAttr(value: string, quote: '"' | "'"): string {
