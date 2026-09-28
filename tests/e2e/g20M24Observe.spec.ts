@@ -36,13 +36,13 @@ async function saveScreenshot(page: import('@playwright/test').Page, directory: 
   return path
 }
 
-test('M24-T03 real Electron observations send the correct captured page for supported, fallback and unavailable vision', async ({}, info) => {
+test('M24-T03 real Electron observations send the correct captured page for supported, fallback and unknown-inherited vision', async ({}, info) => {
   test.skip(process.platform !== 'win32', 'M24-T03 requires the Windows Electron host.')
   test.setTimeout(360_000)
   const fixture = createG20M24Fixture()
   const model = await startG20M24ModelServer(fixture.directory)
   const facts: Record<string, unknown> = { case: 'M24-T03', status: 'running', evidenceDirectory: fixture.directory,
-    coveredModes: ['same-conversation-model-vision-supported', 'separate-vision-model-fallback', 'no-vision-role'] }
+    coveredModes: ['same-conversation-model-vision-supported', 'separate-vision-model-fallback', 'same-conversation-model-vision-unknown-inherited'] }
   const rounds: G20M24ObservationRound[] = []
   let app: Awaited<ReturnType<typeof launchG20M24App>>['app'] | undefined
   let page: Awaited<ReturnType<typeof launchG20M24App>>['page'] | undefined
@@ -98,19 +98,30 @@ test('M24-T03 real Electron observations send the correct captured page for supp
     expect(comparableState(afterFallback)).toEqual(comparableState(beforeFallback))
     await info.attach('M24 separate vision actual observation PNG', { path: fallback.visualRequest!.pngPath, contentType: 'image/png' })
 
-    // No visual role must explicitly say vision-unavailable and must not send image bytes.
+    // With no visual role and no capability fact for the chat model, unknown vision
+    // inherits the conversation route and sends that model the actual captured PNG.
     await configureG20M24Roles(page, connectionId, G20_M24_MODELS.chat, null, false)
-    const unavailable = model.arm('vision-unavailable', 'unavailable', G20_M24_PAGES[0].label, G20_M24_MODELS.chat); rounds.push(unavailable)
-    await sendG20M24Task(page, unavailable.id, `观察“${unavailable.targetLabel}”，如未配置视觉请如实说明。`)
-    await waitForRound(page, unavailable)
-    const beforeUnavailable = await captureG20M24EditorState(page, opened.documentId)
-    unavailable.release()
-    await expectFinished(page, unavailable.id)
-    const afterUnavailable = await captureG20M24EditorState(page, opened.documentId)
-    facts.noVisionRole = { before: comparableState(beforeUnavailable), after: comparableState(afterUnavailable), round: unavailable }
-    expect(unavailable.observation).toMatchObject({ source: 'isolated-published', identity: { locationId: G20_M24_PAGES[0].id } })
-    expect(comparableState(afterUnavailable)).toEqual(comparableState(beforeUnavailable))
-    expect(unavailable.completed).toBe(true)
+    const roleSettings = await page.evaluate(() => window.desktopAPI!.executionSettings!.read())
+    expect(roleSettings.profile.roles.vision).toBeNull()
+    expect(roleSettings.capabilityRecords?.find(record => record.connectionId === connectionId
+      && record.model === G20_M24_MODELS.chat)?.facts.vision).toBeUndefined()
+    const inherited = model.arm('vision-unknown-inherited', 'direct', G20_M24_PAGES[0].label, G20_M24_MODELS.chat); rounds.push(inherited)
+    await sendG20M24Task(page, inherited.id, `观察“${inherited.targetLabel}”，识别背景色。`)
+    await waitForRound(page, inherited)
+    const beforeInherited = await captureG20M24EditorState(page, opened.documentId)
+    await saveScreenshot(page, fixture.directory, 'unknown-inherited-held-user-on-blue', info)
+    inherited.release()
+    await expectFinished(page, inherited.id)
+    const afterInherited = await captureG20M24EditorState(page, opened.documentId)
+    facts.unknownVisionInherited = { before: comparableState(beforeInherited), after: comparableState(afterInherited), round: inherited }
+    expect(inherited.imageReceipt?.model).toBe(G20_M24_MODELS.chat)
+    expect(inherited.imageReceipt?.targetLabel).toBe(G20_M24_PAGES[0].label)
+    expect(inherited.observation).toMatchObject({ source: 'isolated-published', identity: { locationId: G20_M24_PAGES[0].id } })
+    expect(inherited.imageReceipt?.pixelCounts[G20_M24_PAGES[0].label]).toBeGreaterThan(20_000)
+    expect(inherited.visualRequest).toBeUndefined()
+    expect(comparableState(afterInherited)).toEqual(comparableState(beforeInherited))
+    expect(inherited.completed).toBe(true)
+    await info.attach('M24 unknown capability inherited conversation PNG', { path: inherited.imageReceipt!.pngPath, contentType: 'image/png' })
 
     // A genuine user text edit after the page handle is issued makes that handle stale.
     // The model gets the rejection and no screenshot from the old revision.

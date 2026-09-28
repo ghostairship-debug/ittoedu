@@ -46,10 +46,13 @@ export const answerForModel = (question: UserQuestionView, answer: UserAnswer) =
 export const sameAnswer = (a: UserAnswer, b: UserAnswer) =>
   JSON.stringify([...a.choices].sort((x, y) => x - y)) === JSON.stringify([...b.choices].sort((x, y) => x - y)) && (a.other ?? '') === (b.other ?? '')
 
+export const USER_QUESTION_USAGE_GUIDANCE = `需要用户在几个明确方案中做决定且无法从用户原话和文档推断，或正在执行的 Skill 明确要求用户审阅并确认当前阶段的新产物时，调用 ${USER_QUESTION_TOOL} 给出选项并等待回答。`
+  + '阶段确认前先提供当前产物供用户审阅；用户已明确选择跳过确认的自动模式或免去该确认时，不再追加确认。每次只问一个问题，不用于寒暄或重复确认已明确的输入要求，不自行增加阶段确认。'
+
 export const userQuestionToolDefinition: ModelToolDefinition = {
   name: USER_QUESTION_TOOL,
   description: '向用户提一个需要其决定的问题，并给出 2–6 个可点选的选项；界面会弹出选项卡，另有“其他”供用户自己填写，选项里不要再写“其他”。'
-    + '只在确实需要用户在几个明确方案中做决定、且无法从用户原话和文档推断时使用；每次只问一个问题，不用于寒暄或确认已经明确的要求。'
+    + USER_QUESTION_USAGE_GUIDANCE
     + '调用后任务会等待用户回答，工具结果只含用户实际的选择（selected）和补充文字（other）；随后按用户的选择继续完成任务。',
   inputSchema: {
     type: 'object', additionalProperties: false, required: ['question', 'options'],

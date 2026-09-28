@@ -95,6 +95,7 @@ def rendered_article(path, source):
         group = 'overview'
     else:
         group = {'short_term':'short','mid_term':'mid','long_term':'long'}.get(path.split('/')[0], path.split('/')[0])
+        if path == 'long_term/L06.md': group = 'mid'
         if '/' not in path: group = 'overview'
         if group not in {'short','mid','long','delivery','evidence','contracts','overview'}: group = 'delivery'
     title = next((line[2:] for line in source.splitlines() if line.startswith('# ')), path)
@@ -114,6 +115,8 @@ def refresh():
         content = read(path)
         content = re.sub(r'^# .*$', f"# {task['id']}｜{task['title']}", content, count=1, flags=re.M)
         content = re.sub(r'^\*\*实施依赖：\*\*.*$', '**实施依赖：** ' + ('、'.join(task['dependencies']) or '无'), content, flags=re.M)
+        if 'completion_dependencies' in task:
+            content = re.sub(r'^\*\*完成依赖：\*\*.*$', '**完成依赖：** ' + ('、'.join(task['completion_dependencies']) or '无'), content, flags=re.M)
         selected = [x for x in cases if x['task_id'] == task['id']]
         section = '## 验收用例\n\n<!-- 由 acceptance_cases.json 生成；修改定义后运行 tools/refresh_plan.py -->\n\n' + render_cases(selected) + '\n'
         pattern = r'## 验收用例\n.*?(?=\n## [^#]|\Z)'
@@ -133,8 +136,9 @@ def refresh():
         index += [f'## {title}', '', '| 编号 | 任务 | 实施依赖 |', '|---|---|---|']
         index += [f"| [{t['id']}]({t['document']}) | {t['title']} | {'、'.join(t['dependencies']) or '无'} |" for t in tasks if t['phase']==phase]
         index += ['']
-    index += ['## 长期：2.x–3.0', '']
+    index += ['## 当前2.0完整收口方案', '', '- [L06 v2.0｜M25–M30完整技术规格与全部核查处置](long_term/L06.md)', '', '开工依赖与完成依赖分别见任务入口和JSON；当前L06不因历史目录名后置。', '', '## 长期：2.x–3.0（不含已前移L06）', '']
     for p in sorted((ROOT/'long_term').glob('*.md')):
+        if p.name == 'L06.md': continue
         index.append(f'- [{read(p).splitlines()[0][2:]}](long_term/{p.name})')
     write(ROOT/'03_TASK_INDEX.md', '\n'.join(index))
 
@@ -161,11 +165,11 @@ S04 做直接工具演示，S05/S06/S07 在真实窗口完成 API 正文流和�
 
 ## G-PRODUCT
 
-M01–M24 当前 2.0 产品任务全部完成；其中 M15–M24 是 2026-09-25/28 追加的轻编辑、三视图统一、文件会话细节、Runtime/HTML/Flow 创作能力、HTML 预览轻编辑、内置 AI 通用工具与框架 HTML 创作链收口。正常、空态、失败、取消、恢复及额度/冲突/外部接手状态齐备。Markdown、纯文本、Flow、Slides、Spatial、Runtime、HTML 导入、附件、图片成果、Explorer、会话及 API 配置均无必须绕开的核心缺口。
+M01–M30当前2.0产品任务全部完成；M25–M30为2026-09-29前移的完整L06和实际故障收口，旧范围通过不替代新增验收；其中 M15–M24 是 2026-09-25/28 追加的轻编辑、三视图统一、文件会话细节、Runtime/HTML/Flow 创作能力、HTML 预览轻编辑、内置 AI 通用工具与框架 HTML 创作链收口。正常、空态、失败、取消、恢复及额度/冲突/外部接手状态齐备。Markdown、纯文本、Flow、Slides、Spatial、Runtime、HTML 导入、附件、图片成果、Explorer、会话及 API 配置均无必须绕开的核心缺口。
 
 ## G-2.0
 
-当前开发完成须同时满足 G-INFRA、G-PRODUCT、B13–B18 新增收口批次及 [发布门](RELEASE.md) 中 `required_for: 2.0` 的核心行为用例，形成工程候选。后续正式发行再验证 `release-preparation` 用例并由 Owner 签收。核心内容能力不因重构退化；每项声明有实际证据，not_run/blocked/skipped 不汇总为 passed。外部 MCP 兜底不代替自建主执行器完成产品任务。
+当前开发完成须同时满足 G-INFRA、G-PRODUCT、B13–B24新增收口批次及 [发布门](RELEASE.md) 中 `required_for: 2.0` 的核心行为用例，并由M30-T08完成扩展范围Owner签收，形成新的工程候选。旧REL/M14-T05原范围接受继续保留，不自动覆盖完整L06。后续正式发行再验证 `release-preparation` 用例并由 Owner 签收。核心内容能力不因重构退化；每项声明有实际证据，not_run/blocked/skipped 不汇总为 passed。外部 MCP 兜底不代替自建主执行器完成产品任务。
 ''')
 
     count_line = status_summary(tasks, cases)

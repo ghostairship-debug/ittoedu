@@ -1,5 +1,6 @@
 import { _electron as electron, chromium, expect, test, type Page } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -9,19 +10,21 @@ import type { ExecutionDocumentReference } from '../../src/shared/workbench/exec
 import type { InputAttachmentReference } from '../../src/shared/workbench/attachments'
 import type { ExecutionPermissionMode } from '../../src/shared/workbench/executionPermission'
 import { disclosedExecutionSettings } from '../../src/shared/workbench/executionDesktop'
+import { modelCapabilityRecord } from '../../src/shared/workbench/modelCapabilities'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { summarizeRelMixedRun } from './helpers/g20RelMixedEvidence'
+import { relM18StageEvidence } from './helpers/g20RelMixedM18Evidence'
 import { relToolDiagnostics } from './helpers/g20RelToolDiagnostics'
 import { relProtocolDiagnostics } from './helpers/g20RelProtocolDiagnostics'
 import { preserveRelFailureEvidence, relTransportDiagnostics } from './helpers/g20RelTransportDiagnostics'
-import { advanceRelResumeManifest, collectRelUsage, createRelRecoveryDirectory, readRelResumeManifest,
+import { advanceRelResumeManifest, collectRelUsage, readRelResumeManifest,
   relResumeRunIds, validateRelRecoveryDirectory, verifyRelResumeLineage, writeRelResumeManifest,
   type RelResumeManifest } from './helpers/g20RelMixedRecovery'
 
 const root = resolve(__dirname, '../..')
 const model = 'deepseek-flash'
-const imageModel = 'gpt-image-2'
-const route = { provider: 'teamorouter', baseURL: 'https://api.teamorouter.com/v1', keyName: 'TEAMOROUTER_API_KEY' } as const
+const imageModel = 'gpt-image-2.5-sunburst'
+const route = { provider: 'teamorouter', baseURL: 'https://api.teamorouter.com/v1' } as const
 const terminal = ['completed', 'partial', 'failed', 'stopped', 'interrupted']
 
 test.use({ trace: 'off' }) // The test passes a runtime API key through page.evaluate.
@@ -31,29 +34,34 @@ test('REL-T11 one actual built-in Engine run covers a complete mixed teacher tas
   test.skip(process.env.G20_REL_REAL_API !== '1', 'Actual provider run is explicitly gated')
   test.setTimeout(0)
   if (process.env.G20_REL_TEXT_ROUTE && process.env.G20_REL_TEXT_ROUTE !== 'teamorouter')
-    throw new Error('REL-T11 now requires the TeamoRouter text and image route')
+    throw new Error('REL-T11 requires the TeamoRouter text route')
+  if (process.env.G20_REL_OWNER_RELEASE !== '1')
+    throw new Error('REL-T11 needs the Owner-approved route, models, image channel and single-run policy')
   const resumePath = process.env.G20_REL_RESUME_MANIFEST
   if (resumePath && process.env.G20_REL_RESUME_PAID !== '1')
     throw new Error('REL continuation requires the explicit G20_REL_RESUME_PAID=1 gate')
   const resumeManifest = resumePath ? readRelResumeManifest(resolve(resumePath)) : null
-  const legacyOAuthResume = resumeManifest?.schemaVersion === 1
-    || resumeManifest?.schemaVersion === 3 && resumeManifest.requestedImageProvider === 'openai'
-  const key = process.env[route.keyName]
-  if (!resumeManifest && !key) throw new Error(`${route.keyName} is absent`)
+  if (resumeManifest && resumeManifest.requestedImageModel !== imageModel)
+    throw new Error('REL continuation image model differs from the current gpt-image-2.5-sunburst route')
+  if (resumeManifest && !(resumeManifest.schemaVersion === 1
+    || resumeManifest.schemaVersion === 3 && resumeManifest.requestedImageProvider === 'openai'))
+    throw new Error('REL-T11 current run never continues a TeamoRouter Images route')
   const output = join(root, 'output/g20/rel-t11')
   mkdirSync(output, { recursive: true })
   const directory = resumeManifest ? dirname(resolve(resumePath!)) : mkdtempSync(join(output, 'real-'))
-  const recoveryDirectory = resumeManifest?.recoveryDirectory ?? createRelRecoveryDirectory()
+  if (!resumeManifest && !process.env.G20_REL_OAUTH_PROFILE_RECOVERY_DIR)
+    throw new Error('Fresh REL-T11 workspace requires a formally logged-in private OAuth profile')
+  const recoveryDirectory = resumeManifest?.recoveryDirectory
+    ?? validateRelRecoveryDirectory(resolve(process.env.G20_REL_OAUTH_PROFILE_RECOVERY_DIR!))
   const profile = join(recoveryDirectory, 'profile')
   const workspace = resumeManifest?.workspacePath ?? join(directory, 'workspace')
   try {
     if (!resumeManifest) mkdirSync(workspace)
   } catch (error) {
-    if (!resumeManifest) rmSync(validateRelRecoveryDirectory(recoveryDirectory), { recursive: true, force: true })
     throw error
   }
   const courseName = '光合作用互动课件.h5lesson'
-  const coursePath = join(workspace, courseName), htmlPath = join(directory, '光合作用互动课件.html')
+  const coursePath = join(workspace, courseName), htmlPath = join(workspace, '光合作用互动课件.html')
   const materialPath = join(workspace, '光合作用材料.md')
   try {
     if (resumeManifest) {
@@ -63,25 +71,23 @@ test('REL-T11 one actual built-in Engine run covers a complete mixed teacher tas
       writeFileSync(materialPath, [
         '# 光合作用课堂材料',
         '现象：绿色叶片在光照下吸收二氧化碳和水，生成有机物并释放氧气。',
-        '教学顺序：第一页引出预测；第二页先观察，再由学生操作揭示解释。',
-        '互动原型有一处故意保留的语法错误，需要先在受控构建区编译观察错误，再修复：',
+        '教学顺序：第一页回顾植物生长条件并提出预测；第二页观察记录、叶片图片与学生操作揭示解释。至少两页，每页可独立导航。',
+        '教学图片：在第二页放一张叶片、阳光与气体交换的简明图，并允许教师日后替换。',
+        '下面是教师提供的互动原型，含有一处语法错误。它只是素材线索，不能原样作为最终成品：',
         "CoursewareRuntime.define({protocol:'surface-runtime',runtimeApiVersion:3,create(ctx){const button=;ctx.dom.root.appendChild(button)}});",
         '修复后的互动应显示“显示答案”按钮，点击后揭示“光合作用把光能转化为化学能”。',
       ].join('\n'))
     }
   } catch (error) {
-    if (!resumeManifest) rmSync(validateRelRecoveryDirectory(recoveryDirectory), { recursive: true, force: true })
     throw error
   }
   let app: Awaited<ReturnType<typeof electron.launch>>
   try {
     app = await electron.launch({ cwd: root,
-      args: [legacyOAuthResume ? join(root, 'tests/e2e/helpers/g20RelMixedRealPreflightBootstrap.cjs') : '.',
-        `--user-data-dir=${profile}`],
+      args: [join(root, 'tests/e2e/helpers/g20RelMixedRealPreflightBootstrap.cjs'), `--user-data-dir=${profile}`],
       env: { ...process.env, TEAMOROUTER_API_KEY: '', DEEPSEEK_API_KEY: '',
         VITE_DEV_SERVER_URL: '', [BACKGROUND_E2E_ENV]: '1' } })
   } catch (error) {
-    if (!resumeManifest) rmSync(validateRelRecoveryDirectory(recoveryDirectory), { recursive: true, force: true })
     throw error
   }
   let browser: Awaited<ReturnType<typeof chromium.launch>> | null = null
@@ -102,102 +108,78 @@ test('REL-T11 one actual built-in Engine run covers a complete mixed teacher tas
   let sentIdentity: { workspaceId: string; conversationId: string; submissionId: string } | null = null
   const manualIntervention: string[] = []
   let evidence: Record<string, unknown> = { caseId: 'REL-T11',
-    route: legacyOAuthResume ? 'TeamoRouter text + frozen GPT OAuth image continuation' : 'TeamoRouter text + OpenAI Images API',
+    route: 'TeamoRouter text + private GPT OAuth image',
     requestedTextModel: model, requestedImageModel: imageModel, textBilling: 'metered-declared',
-    imageBilling: legacyOAuthResume ? 'subscription-declared' : 'metered-declared', actualCharge: 'unknown', sent: false,
+    imageBilling: 'subscription-declared', actualCharge: 'unknown', sent: false,
+    runPolicy: { capabilityProbe: 'one vision check on current conversation model',
+      fullRun: 'one run, no retries; record actual requests, usage and charge when available' },
     firstPass: false, repair: 'not_observed', manualIntervention, exportedHtml: null }
   try {
     const page = await app.firstWindow(); windowPage = page; page.setDefaultTimeout(20_000)
     stage.value = 'settings-preflight'
     const initialSettings = await page.evaluate(() => window.desktopAPI!.executionSettings!.read())
     expect(initialSettings.secureStorageAvailable).toBe(true)
-    if (legacyOAuthResume) {
-      stage.value = 'legacy-oauth-preflight'
-      const oauth = await app.evaluate(async () => (globalThis as any).__G20_REL_REAL_PREFLIGHT__.ready)
-      expect(oauth).toMatchObject({ provider: 'openai', protocol: 'chatgpt-responses',
-        billing: 'subscription', credentialReadable: true, secureStorageAvailable: true, sourceIsIsolated: true })
-      expect(oauth.imageRole.model).toBe(imageModel)
-      expect(oauth.imageRole.parameters ?? {}).toEqual({})
-      expect(oauth.imageEditRole === null || (oauth.imageEditRole.connectionId === oauth.imageRole.connectionId
-        && oauth.imageEditRole.model === imageModel
-        && Object.keys(oauth.imageEditRole.parameters ?? {}).length === 0)).toBe(true)
-      evidence.legacyOAuthAccessTokenExpired = oauth.expired
-    }
-    if (!resumeManifest) expect(initialSettings.connections).toEqual([])
+    stage.value = 'oauth-preflight'
+    const oauth = await app.evaluate(async () => (globalThis as any).__G20_REL_REAL_PREFLIGHT__.ready)
+    expect(oauth).toMatchObject({ provider: 'openai', protocol: 'chatgpt-responses',
+      billing: 'subscription', credentialReadable: true, expired: false,
+      secureStorageAvailable: true, sourceIsIsolated: true })
+    expect(oauth.imageRole).toMatchObject({ model: imageModel })
+    expect(oauth.imageRole?.parameters ?? {}).toEqual({})
+    const oauthConnection = initialSettings.connections.find(item => item.connection.id === oauth.imageRole.connectionId)
+    expect(oauthConnection).toMatchObject({ hasCredential: true, revoked: false, connection: {
+      provider: 'openai', protocol: 'chatgpt-responses', billing: { kind: 'subscription' },
+      auth: { kind: 'oauth' },
+    } })
     if (!resumeManifest) {
-      stage.value = 'teamorouter-connection'
-      const connection = await page.evaluate(async apiKey => window.desktopAPI!.executionSettings!.saveConnection({
-        apiKey: apiKey.key, connection: { provider: apiKey.provider, protocol: 'openai-chat',
-          imageProtocol: 'openai-images', baseURL: apiKey.baseURL, accountId: 'owner-authorized-runtime-key',
-          authKind: 'api-key', billing: { kind: 'metered' } },
-      }), { key: key!, provider: route.provider, baseURL: route.baseURL })
-      stage.value = 'model-catalog'
+      const textConnection = initialSettings.connections.find(item => item.connection.provider === route.provider
+        && item.connection.baseURL === route.baseURL && item.connection.protocol === 'openai-chat'
+        && item.connection.imageProtocol === null && item.hasCredential && !item.revoked)
+      expect(textConnection).toBeTruthy()
       const catalog = await page.evaluate(async selected => window.desktopAPI!.executionSettings!.discoverModels(
-        selected.connection.id, selected.connection.revision), connection)
+        selected.id, selected.revision), { id: textConnection!.connection.id, revision: textConnection!.connection.revision })
+      expect(catalog.source).toBe('live')
       expect(catalog.models.some(entry => entry.id === model)).toBe(true)
-      expect(catalog.models.some(entry => entry.id === imageModel)).toBe(true)
-      evidence.catalog = { textSelectedPresent: true, imageSelectedPresent: true,
-        count: catalog.models.length, capabilitiesVerified: catalog.capabilitiesVerified }
-      stage.value = 'role-binding'
-      await page.evaluate(async ({ connectionId, model, imageModel }) => {
-        const api = window.desktopAPI!.executionSettings!, current = await api.read()
-        return api.saveProfile({ expectedRevision: current.profile.revision, roles: {
-          conversation: { connectionId, model }, vision: null,
-          imageGenerate: { connectionId, model: imageModel, parameters: {} },
-          imageEdit: { connectionId, model: imageModel, parameters: {} },
-        } })
-      }, { connectionId: connection.connection.id, model, imageModel })
+      evidence.catalog = { textSelectedPresent: true, source: catalog.source,
+        checkedAt: catalog.checkedAt, count: catalog.models.length, capabilitiesVerified: catalog.capabilitiesVerified }
     }
     const frozen = await page.evaluate(async () => window.desktopAPI!.executionSettings!.read())
     expect(frozen.profile.roles).toMatchObject({ conversation: { model }, imageGenerate: { model: imageModel } })
-    if (legacyOAuthResume) expect(frozen.profile.roles.imageGenerate?.parameters ?? {}).toEqual({})
-    else {
-      expect(frozen.profile.roles.imageGenerate).toMatchObject({ parameters: {} })
-      expect(frozen.profile.roles.imageEdit).toMatchObject({ model: imageModel, parameters: {} })
-    }
+    expect(frozen.profile.roles.imageGenerate?.parameters ?? {}).toEqual({})
     const textConnection = frozen.connections.find(entry => entry.connection.id === frozen.profile.roles.conversation?.connectionId)
     expect(textConnection).toMatchObject({ hasCredential: true, revoked: false, connection: {
-      provider: route.provider, protocol: 'openai-chat', baseURL: route.baseURL,
+      provider: route.provider, protocol: 'openai-chat', imageProtocol: null, baseURL: route.baseURL,
       billing: { kind: 'metered' }, auth: { kind: 'api-key' },
     } })
     const imageConnection = frozen.connections.find(entry => entry.connection.id === frozen.profile.roles.imageGenerate?.connectionId)
-    if (legacyOAuthResume) {
-      expect(imageConnection).toMatchObject({ hasCredential: true, revoked: false, connection: {
-        provider: 'openai', protocol: 'chatgpt-responses', baseURL: 'https://chatgpt.com/backend-api/codex',
-        billing: { kind: 'subscription' }, auth: { kind: 'oauth' },
-      } })
-      frozenImageConnection = { id: imageConnection!.connection.id, revision: imageConnection!.connection.revision }
-    } else {
-      expect(textConnection?.connection.imageProtocol).toBe('openai-images')
-      expect(imageConnection?.connection.id).toBe(textConnection?.connection.id)
-      expect(frozen.profile.roles.imageEdit?.connectionId).toBe(textConnection?.connection.id)
-      frozenImageConnection = { id: textConnection!.connection.id, revision: textConnection!.connection.revision }
-      if (resumeManifest?.schemaVersion === 2 || resumeManifest?.schemaVersion === 3) {
-        expect(frozenImageConnection).toEqual({ id: resumeManifest.imageConnectionId,
-          revision: resumeManifest.imageConnectionRevision })
-      }
-    }
-    if (legacyOAuthResume && resumeManifest?.schemaVersion === 3)
+    expect(imageConnection).toMatchObject({ hasCredential: true, revoked: false, connection: {
+      provider: 'openai', protocol: 'chatgpt-responses', baseURL: 'https://chatgpt.com/backend-api/codex',
+      billing: { kind: 'subscription' }, auth: { kind: 'oauth' },
+    } })
+    expect(imageConnection?.connection.id).not.toBe(textConnection?.connection.id)
+    frozenImageConnection = { id: imageConnection!.connection.id, revision: imageConnection!.connection.revision }
+    if (resumeManifest?.schemaVersion === 3)
       expect(frozenImageConnection).toEqual({ id: resumeManifest.imageConnectionId,
         revision: resumeManifest.imageConnectionRevision })
+    const conversationRole = frozen.profile.roles.conversation
+    const visionFact = textConnection && conversationRole && modelCapabilityRecord(frozen.capabilityRecords ?? [], {
+      connection: textConnection.connection, model: conversationRole.model, parameters: conversationRole.parameters })?.facts.vision
+    evidence.capabilityPreflight = { vision: { model, route: 'conversation', status: visionFact?.status ?? 'unknown',
+      observedAt: visionFact?.observedAt ?? null, actualModel: visionFact?.actualModel ?? null },
+      image: { model: imageModel, connectionId: imageConnection?.connection.id,
+        credentialReady: imageConnection?.hasCredential === true, generationUnverified: true }, paidRequests: 0 }
     const disclosedSettings = disclosedExecutionSettings(frozen)
     expect(disclosedSettings.roles.conversation).toMatchObject({
       provider: route.provider, model, billingKind: 'metered',
     })
-    expect(disclosedSettings.roles.imageGenerate).toMatchObject(legacyOAuthResume
-      ? { connectionId: imageConnection?.connection.id, provider: 'openai', model: imageModel, billingKind: 'subscription' }
-      : { connectionId: textConnection?.connection.id, provider: route.provider, model: imageModel, billingKind: 'metered' })
-    if (!legacyOAuthResume) expect(disclosedSettings.roles.imageEdit).toEqual(disclosedSettings.roles.imageGenerate)
+    expect(disclosedSettings.roles.imageGenerate).toMatchObject({ connectionId: imageConnection?.connection.id,
+      provider: 'openai', model: imageModel, billingKind: 'subscription' })
     evidence.frozenRoles = { conversation: frozen.profile.roles.conversation,
       imageGenerate: frozen.profile.roles.imageGenerate, imageEdit: frozen.profile.roles.imageEdit }
     evidence.textRoute = { provider: route.provider, baseURL: route.baseURL,
       requestedModel: model, billingKind: 'metered', credentialReady: textConnection?.hasCredential === true }
-    evidence.imageRoute = legacyOAuthResume
-      ? { provider: 'openai', protocol: 'chatgpt-responses', requestedModel: imageModel,
-        billingKind: 'subscription', credentialReady: imageConnection?.hasCredential === true }
-      : { provider: route.provider, protocol: 'openai-images',
-        endpoint: `${route.baseURL}/images/generations`, requestedModel: imageModel,
-        billingKind: 'metered', credentialReady: textConnection?.hasCredential === true }
+    evidence.imageRoute = { provider: 'openai', protocol: 'chatgpt-responses', requestedModel: imageModel,
+      billingKind: 'subscription', credentialReady: imageConnection?.hasCredential === true }
     evidence.disclosedSettings = disclosedSettings
     stage.value = 'workspace'
     await app.evaluate(({ dialog }, selected) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selected] }) }, workspace)
@@ -219,15 +201,13 @@ test('REL-T11 one actual built-in Engine run covers a complete mixed teacher tas
         revision: conversation.revision }
     }, { workspace, conversationId: resumeManifest?.conversationId ?? null })
     const instruction = [
-      '读取工作空间中的《光合作用材料.md》，基于材料创建并保存《光合作用互动课件.h5lesson》V9。',
-      '创建至少两页：第一页提出预测并说明材料中的现象，第二页给观察事实和解释；直接编辑课件文字。',
-      '调用 image.generate 为叶片和阳光生成一张教学插图，并用 media.insert 实际放到第二页。',
-      '第二页加入可重复点击揭示答案的局部 DOM Runtime 互动。材料中原型故意有语法错误：',
-      '先在 build scratch 写入原型并调用 build.compile，读取真实错误日志，再修复源码、重新编译。',
-      'Runtime 按钮默认“显示答案”，点击后显示“光合作用把光能转化为化学能”。',
-      '构建候选的 staticFallback 必须含真实 assetId，coverage 为 surface；按钮要能接收点击。',
-      '调用 build.check 完成真实准入，仅在 ready 后 build.import。普通文字和图片直接提交。',
-      '需要工具时按需用 tools.load 展开工具族；不要使用外部 CLI 或 shell。最后简要报告成功和修复情况。',
+      '根据材料自动创作：读取《光合作用材料.md》，按随产品提供的 orchestrate-courseware 和 build-courseware-project 两个 Skill 完成整课，不中途提问或等待确认。',
+      '先保存 01-teaching-plan.md；再保存整个课程的 02-course-frame.html（body 下每个顶层 section 为一页）和一页讲解操作说明 02-presentation-script.md。框架确认阶段之前不要读取编辑器能力说明或展开课件编辑工具；框架页只写布局、大致功能与无 src 的媒体占位，不生成素材。',
+      '随后只读一次不超过 1500 字符的短能力简介，逐节决定表面及原生、素材、互动表示，保存 03-representation-plan.md。',
+      '按每个 section 机械导入与组装为《光合作用互动课件.h5lesson》V9，一页进一页，不让模型照 HTML 重写整件作品。依据占位生成叶片与阳光插图，实际插入课件。',
+      '材料要求可重复点击揭示解释的局部互动，请实现并在真实离线播放中可用。材料附有一个错误互动原型；遇到真实编译或准入错误时读取诊断、修复后再继续，不把错误原型当最终成品。',
+      '组装后逐页看真实画面并精修排版、字号、对齐、溢出与配色；由你调用 file.save 保存课件和中间稿，并调用 document.export 将离线单 HTML 写成工作空间中的《光合作用互动课件.html》。随后重新打开已保存课件，核对页、图片与互动，报告首次成功、修复、假设和未满足要求。',
+      '只使用果铃内置工具，不调用外部 CLI 或 shell。不能完成的要求逐条如实说明。',
     ].join('\n')
     let sendText = instruction
     let sendDocuments: ExecutionDocumentReference[] = []
@@ -255,7 +235,7 @@ test('REL-T11 one actual built-in Engine run covers a complete mixed teacher tas
       expect(previous?.input.selection.connection).toMatchObject({ provider: route.provider,
         protocol: 'openai-chat', baseURL: route.baseURL,
         billing: { kind: 'metered' } })
-      if (!legacyOAuthResume) expect(previous?.input.selection.connection.imageProtocol).toBe('openai-images')
+      expect(previous?.input.selection.connection.imageProtocol).toBeNull()
       expect(previous?.input.selection.connection.id).toBe(disclosedSettings.roles.conversation?.connectionId)
       expect(previous?.input.selection.connection.revision).toBe(disclosedSettings.roles.conversation?.connectionRevision)
       expect(previous?.input.selection.parameters ?? {}).toEqual(frozen.profile.roles.conversation?.parameters ?? {})
@@ -266,8 +246,12 @@ test('REL-T11 one actual built-in Engine run covers a complete mixed teacher tas
       expect(source?.workspaceId).toBe(resumeManifest.workspaceId)
       expect(source?.conversationId).toBe(resumeManifest.conversationId)
       expect(source?.model).toMatchObject({ provider: route.provider, model, billing: 'metered' })
-      expect(state.submissions.some(item => item.submissionId !== source?.submissionId
-        && ['queued', 'starting', 'accepted'].includes(item.state))).toBe(false)
+      const verifiedRunsBySubmission = new Map(priorRuns.map(run => [run.input.taskId, run.runId]))
+      expect(state.submissions.some(item => {
+        const boundToVerifiedRun = Boolean(item.runId && verifiedRunsBySubmission.get(item.submissionId) === item.runId)
+        return item.state === 'queued' || item.state === 'starting'
+          || (item.state === 'accepted' || Boolean(item.runId)) && !boundToVerifiedRun
+      })).toBe(false)
       expect(state.conversation?.revision).toBe(prepared.revision)
       sendText = source!.text
       sendDocuments = source!.documents
@@ -347,85 +331,98 @@ test('REL-T11 one actual built-in Engine run covers a complete mixed teacher tas
       requestCount: combinedRun.requests.length, toolCount: combinedRun.tools.length,
       runElapsedMs: allRuns.reduce((sum, item) => sum + item.updatedAt - item.createdAt, 0) }
     let receipts = summarizeRelMixedRun(allRuns)
+    const stages = relM18StageEvidence(allRuns)
+    evidence.m18 = stages
     evidence.receipts = receipts
-    evidence.firstPass = priorRuns.length === 0 && receipts.firstPass
-    evidence.repair = receipts.repairedSuccess ? 'verified failed compile, corrected compile, ready check, applied import'
-      : receipts.compile.failed ? 'compile failed; full repair unverified' : 'not_observed'
+    evidence.firstPassCompleted = priorRuns.length === 0 && runStatus === 'completed'
+      && stages.m18T01 && stages.m18T02 && stages.m18T03
+    evidence.firstPass = evidence.firstPassCompleted && stages.indexes.failedBuilds.length === 0
+    evidence.repair = stages.repairObserved ? 'real build error repaired and admitted'
+      : stages.indexes.failedBuilds.length ? 'build error observed; repair unverified' : 'not_observed'
     const usage = await collectRelUsage({ events: (conversationId, after, limit) => page.evaluate(
       args => window.desktopAPI!.execution!.events(args.conversationId, args.after, args.limit),
       { conversationId, after, limit }) }, prepared.conversationId, allRuns.map(item => item.runId))
     evidence.usage = usage.usage
     evidence.usagePagination = { pages: usage.pages, eventCount: usage.eventCount,
       cursor: usage.cursor, complete: usage.complete }
-    stage.value = 'save-reopen'
+    stage.value = 'artifact-review'
     if (existsSync(coursePath)) {
-      const opened = await page.evaluate(async filename => window.desktopAPI!.documents!.open(filename), coursePath)
-      await page.evaluate(async id => { await window.desktopAPI!.documents!.save(id); await window.desktopAPI!.documents!.close(id) }, opened.documentId)
-      const reopened = await page.evaluate(async filename => window.desktopAPI!.documents!.open(filename), coursePath)
       const archive = openCourseProjectArchive(new Uint8Array(readFileSync(coursePath)))
       receipts = summarizeRelMixedRun(allRuns, archive)
       evidence.receipts = receipts
-      evidence.firstPass = priorRuns.length === 0 && receipts.firstPass
-      evidence.repair = receipts.repairedSuccess ? 'verified failed compile, corrected compile, ready check, applied import'
-        : receipts.compile.failed ? 'compile failed; full repair unverified' : 'not_observed'
+      const reopened = await page.evaluate(async filename => window.desktopAPI!.documents!.open(filename), coursePath)
       evidence.reopenedClean = !reopened.dirty
       evidence.locations = archive.project.locations.length
       evidence.runtimeCount = archive.project.surfaces.flatMap(surface => surface.type === 'slide'
         ? surface.scenes.flatMap(scene => scene.layerItems.filter(item => item.kind === 'runtime')) : []).length
       evidence.assetCount = Object.keys(archive.project.assets).length
-      stage.value = 'export'
-      const tree = page.locator('.lesson-directory-tree')
-      await tree.getByRole('button', { name: courseName, exact: true }).dblclick()
-      await page.getByRole('button', { name: '深度编辑', exact: true }).click()
-      await app.evaluate(({ dialog }, filename) => { dialog.showSaveDialog = async () => ({ canceled: false, filePath: filename }) }, htmlPath)
-      await page.getByTestId('export-menu-trigger').click()
-      await page.getByTestId('export-single-html').click()
-      const preflight = page.getByRole('alertdialog', { name: '单 HTML 导出预检' })
-      evidence.exportPreflight = await preflight.textContent()
-      await expect(preflight).toContainText('0 个错误')
-      await preflight.getByRole('button', { name: '继续导出' }).click()
-      const large = page.getByRole('alertdialog', { name: '单 HTML 文件较大' })
-      if (await large.isVisible().catch(() => false)) await large.getByRole('button', { name: '仍导出单 HTML' }).click()
-      await expect.poll(() => existsSync(htmlPath) ? readFileSync(htmlPath).byteLength : 0,
-        { timeout: 120_000 }).toBeGreaterThan(100_000)
-      evidence.exportedHtml = htmlPath
-      manualIntervention.push('UI export after model run')
+    }
+    const planPath = join(workspace, '01-teaching-plan.md')
+    const framePath = join(workspace, '02-course-frame.html')
+    const scriptPath = join(workspace, '02-presentation-script.md')
+    const representationPath = join(workspace, '03-representation-plan.md')
+    if ([planPath, framePath, scriptPath, representationPath].every(existsSync)) {
       browser = await chromium.launch({ headless: true })
+      const context = await browser.newContext({ offline: true })
+      const framePage = await context.newPage()
+      const frameFacts = await framePage.evaluate(html => {
+        const doc = new DOMParser().parseFromString(html, 'text/html')
+        return { sectionCount: doc.querySelectorAll('body > section').length,
+          mediaWithSource: doc.querySelectorAll('img[src],audio[src],video[src],source[src]').length,
+          remoteDependencies: doc.querySelectorAll('script[src],link[href^="http"]').length }
+      }, readFileSync(framePath, 'utf8'))
+      evidence.framework = frameFacts
+      const planText = readFileSync(planPath, 'utf8')
+      const representationText = readFileSync(representationPath, 'utf8')
+      evidence.teachingPlanBytes = Buffer.byteLength(planText)
+      evidence.presentationScriptBytes = readFileSync(scriptPath).byteLength
+      evidence.representationPlanBytes = Buffer.byteLength(representationText)
+      expect(frameFacts.sectionCount).toBeGreaterThanOrEqual(2)
+      expect(frameFacts.mediaWithSource).toBe(0)
+      expect(frameFacts.remoteDependencies).toBe(0)
+      expect(representationText.trim().length).toBeGreaterThan(100)
+      expect(new Set(stages.indexes.observations.map(item => item.locationId).filter(Boolean)).size)
+        .toBeGreaterThanOrEqual(frameFacts.sectionCount)
+      expect(stages.indexes.imported.length).toBeGreaterThanOrEqual(frameFacts.sectionCount)
+      await framePage.close()
+      await context.close()
+    }
+    if (existsSync(htmlPath)) {
+      evidence.exportedHtml = htmlPath
+      if (!browser) browser = await chromium.launch({ headless: true })
       const context = await browser.newContext({ offline: true }), exported = await context.newPage()
       const errors: string[] = []
       exported.on('pageerror', error => errors.push(error.message))
       await exported.goto(pathToFileURL(htmlPath).href)
-      await exported.keyboard.press('PageDown')
-      if (runStatus === 'completed' && receipts.build.importAppliedAfterReady
-        && typeof evidence.runtimeCount === 'number' && evidence.runtimeCount > 0) {
-        const quiz = exported.getByRole('button', { name: '显示答案', exact: true })
-        const quizHandle = await quiz.elementHandle({ timeout: 20_000 })
-        expect(quizHandle).toBeTruthy()
-        await quizHandle!.click({ timeout: 20_000 })
-        await expect(exported.getByText('光合作用把光能转化为化学能')).toBeVisible({ timeout: 20_000 })
-        await quizHandle!.click({ timeout: 20_000 })
-        await expect(exported.getByText('光合作用把光能转化为化学能')).toBeVisible({ timeout: 20_000 })
-        evidence.offlineInteraction = true
-      } else {
-        evidence.offlineInteraction = false
-        evidence.offlineSkippedReason = 'run partial or no admitted Runtime; exported HTML opened without interaction assertion'
-      }
+      await exported.getByRole('button', { name: '展', exact: true }).click()
+      await exported.getByRole('button', { name: '下一步', exact: true }).click()
+      const lesson = exported.frameLocator('iframe')
+      const quiz = lesson.getByRole('button', { name: '显示答案', exact: true })
+      const answer = lesson.getByText('光合作用把光能转化为化学能')
+      await expect(answer).toBeHidden({ timeout: 20_000 })
+      await quiz.click({ timeout: 20_000 })
+      await expect(answer).toBeVisible({ timeout: 20_000 })
+      await quiz.click({ timeout: 20_000 })
+      await expect(answer).toBeHidden({ timeout: 20_000 })
+      await quiz.click({ timeout: 20_000 })
+      await expect(answer).toBeVisible({ timeout: 20_000 })
+      evidence.offlineInteraction = true
       evidence.offlinePageErrors = errors
       expect(errors).toEqual([])
       await context.close()
     }
     expect(runStatus).toBe('completed')
+    expect(stages.indexes.orchestrateSkill).toBeGreaterThanOrEqual(0)
+    expect(stages.indexes.buildSkill).toBeGreaterThanOrEqual(0)
+    expect(stages.m18T01).toBe(true)
+    expect(stages.m18T02).toBe(true)
+    expect(stages.m18T03).toBe(true)
     expect(evidence.reopenedClean).toBe(true)
     expect(evidence.locations).toBeGreaterThanOrEqual(2)
-    expect(evidence.runtimeCount).toBeGreaterThanOrEqual(1)
     expect(evidence.assetCount).toBeGreaterThanOrEqual(1)
     expect(evidence.offlineInteraction).toBe(true)
     expect(receipts.imageReady).toBe(true)
     expect(receipts.mediaLinked).toBe(true)
-    expect(receipts.compile.failed).toBe(true)
-    expect(receipts.compile.fixedAfterFailure).toBe(true)
-    expect(receipts.build.checkReady).toBe(true)
-    expect(receipts.build.importAppliedAfterReady).toBe(true)
   } catch (error) {
     postSendFailure = sent
     throw error
@@ -459,10 +456,12 @@ test('REL-T11 one actual built-in Engine run covers a complete mixed teacher tas
         if (finalRun && !evidence.receipts) {
           const receipts = summarizeRelMixedRun([...priorRuns, finalRun])
           evidence.receipts = receipts
-          evidence.firstPass = priorRuns.length === 0 && receipts.firstPass
-          evidence.repair = receipts.repairedSuccess
-            ? 'verified failed compile, corrected compile, ready check, applied import'
-            : receipts.compile.failed ? 'compile failed; full repair unverified' : 'not_observed'
+          const stages = relM18StageEvidence([...priorRuns, finalRun])
+          evidence.firstPassCompleted = priorRuns.length === 0 && finalRun.status === 'completed'
+            && stages.m18T01 && stages.m18T02 && stages.m18T03
+          evidence.firstPass = evidence.firstPassCompleted && stages.indexes.failedBuilds.length === 0
+          evidence.repair = stages.repairObserved ? 'real build error repaired and admitted'
+            : stages.indexes.failedBuilds.length ? 'build error observed; repair unverified' : 'not_observed'
         }
         if (finalRun) evidence.toolDiagnostics = relToolDiagnostics([...priorRuns, finalRun])
         if (sentIdentity && !evidence.usage) {
@@ -511,8 +510,8 @@ test('REL-T11 one actual built-in Engine run covers a complete mixed teacher tas
         workspaceId: sentIdentity.workspaceId, conversationId: sentIdentity.conversationId,
         runId, submissionId: sentIdentity.submissionId,
         requestedTextModel: model, requestedProvider: 'teamorouter',
-        requestedImageModel: imageModel, requestedImageProvider: legacyOAuthResume ? 'openai' : 'teamorouter',
-        requestedImageProtocol: legacyOAuthResume ? 'chatgpt-responses' : 'openai-images',
+        requestedImageModel: imageModel, requestedImageProvider: 'openai',
+        requestedImageProtocol: 'chatgpt-responses',
         imageConnectionId: frozenImageConnection!.id, imageConnectionRevision: frozenImageConnection!.revision })
       writeRelResumeManifest(join(directory, 'resume.json'), manifest)
       evidence.resume = { available: true, manifest: join(directory, 'resume.json'),
@@ -520,10 +519,11 @@ test('REL-T11 one actual built-in Engine run covers a complete mixed teacher tas
     }
     const existingResumePending = Boolean(resumeManifest && (!sent || !finalObservedRun
       || ['partial', 'failed', 'interrupted'].includes(finalObservedRun.status)))
-    const privateProfilePreserved = preserveFailureEvidence || preserveLiveApp || canResumePaid || existingResumePending
+    const privateProfilePreserved = true // The formally logged-in profile predates this fresh workspace and is never test-owned.
     if (resumeManifest && !canResumePaid) evidence.resume = { available: !sent,
       manifest: resolve(resumePath!), reason: sent ? 'send outcome requires durable reconciliation' : 'continuation was not sent' }
-    evidence.failureEvidence = { privateProfilePreserved, postSendFailure,
+    evidence.failureEvidence = { privateProfilePreserved, postSendFailure, preserveFailureEvidence,
+      existingResumePending,
       ...(privateProfilePreserved ? { recoveryDirectory } : {}),
       paidContinuationAvailable: Boolean(canResumePaid && finalObservedRun && sentIdentity && runId) }
     evidence = { ...evidence, stage: stage.value, sent, runStatus, elapsedMs: Date.now() - startedAt,
@@ -534,14 +534,12 @@ test('REL-T11 one actual built-in Engine run covers a complete mixed teacher tas
     await info.attach('REL-T11 actual route evidence', { path: evidenceFile, contentType: 'application/json' })
     await browser?.close().catch(() => undefined)
     if (!preserveLiveApp) {
-      await app.evaluate(({ app, BrowserWindow }) => {
-        BrowserWindow.getAllWindows().forEach(window => window.destroy()); app.exit(0)
-      }).catch(() => undefined)
-      await app.close().catch(() => undefined)
-      if (!privateProfilePreserved) {
-        rmSync(validateRelRecoveryDirectory(recoveryDirectory), { recursive: true, force: true })
-        if (resumeManifest) rmSync(join(directory, 'resume.json'), { force: true })
+      const child = app.process()
+      if (child.exitCode === null && child.pid) {
+        if (process.platform === 'win32') execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'])
+        else child.kill('SIGKILL')
       }
+      await app.close().catch(() => undefined)
     }
   }
 })

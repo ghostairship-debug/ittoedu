@@ -1,87 +1,64 @@
 {
-  "scope": "方案制品检查；不是果铃产品实现或实测报告",
-  "plan_revision": "2.0",
-  "checked_on": "2026-09-23",
+  "scope": "本轮仅方案定义、登记、派生阅读器和计划维护工具检查；不是产品修复或产品测试报告",
+  "plan_revision": "2.5",
+  "l06_revision": "2.0",
+  "checked_on": "2026-09-29",
   "package_validation": {
     "package_validation": "passed",
-    "tasks": 28,
-    "product_cases": 157,
-    "requirements": 29,
-    "reader_articles": 51,
+    "tasks": 44,
+    "product_cases": 239,
+    "requirements": 47,
+    "reader_articles": 94,
     "product_tests_executed": false,
     "errors": []
   },
   "validator_regression_checks": {
     "status": "passed",
-    "script": "tools/selfcheck_plan.py",
     "command": "python tools/selfcheck_plan.py",
     "exit_code": 0,
-    "output": "PASS: clean copied package\r\nPASS: B01 schedules S04 before S03\r\nPASS: Removed migration case remains active: S01-T03\r\nPASS: Reader content/render drift: short_term/S02.md\r\nselfcheck_plan: passed (3 rejection checks; repository files untouched)",
-    "checks": [
-      "rejects reversed batch dependencies",
-      "rejects restored retired migration case",
-      "rejects stale offline reader"
-    ],
-    "normal_baseline_and_restored_copy": "passed",
-    "writes_repository_files": false
+    "positive_status_checks": 1,
+    "rejection_checks": 9,
+    "repository_files_touched": false,
+    "output": "selfcheck_plan: passed (1 positive status check, 9 rejection checks; repository files untouched)"
   },
-  "typescript_contract_sample": {
-    "status": "passed",
-    "version": "7.0.2",
-    "command": "node node_modules/typescript/bin/tsc --ignoreConfig --strict --noEmit --target ES2022 --module ES2022 GPTpro方案/guoling_2_0_execution_plan/contracts/workbench-contracts.ts",
-    "exit_code": 0,
-    "output": ""
-  },
-  "reader_validation": {
-    "content_and_links": "passed",
-    "javascript_syntax": "passed",
-    "reader_articles": 51,
-    "internal_markdown_links_checked": 69,
-    "root_round_trip": true,
-    "browser_interaction": "not_run",
-    "scope": "Current Markdown render/content and local link existence validated; unchanged reader JavaScript syntax/root round-trip evidence retained from 2026-09-22; no browser, visual or product GUI claim."
-  },
-  "generation": {
-    "idempotence": "passed",
-    "python": "3.13.5",
-    "markdown": "3.8",
-    "evidence_date": "2026-09-22",
-    "reuse_basis": "refresh_plan.py and its dependency versions unchanged; this revision adds a separate selfcheck script, no change to generation rules."
+  "source_preservation": {
+    "product_source_test_script_files_checked": 2085,
+    "changed_files": [],
+    "old_tasks_exactly_preserved": true,
+    "old_cases_exactly_preserved": true,
+    "task_board_unchanged": true
   },
   "product_code_modified": false,
   "product_tests_run": false,
-  "all_product_case_status": "not_run",
-  "screenshots_in_archive": false,
-  "historical_validator_check": {
-    "checked_on": "2026-09-22",
-    "check": "validation result snapshots remain independent",
-    "status": "passed",
-    "scope": "Previous manual evidence retained; not one of the three automated checks run on 2026-09-23."
+  "paid_calls_run": false,
+  "new_tasks": {
+    "planned": 6
   },
-  "repository_entry_checks": {
-    "roadmap": {
-      "command": "npm run check:development-roadmap",
-      "exit_code": 0,
-      "output": "> ittoedu-courseware-editor@1.0.0 check:development-roadmap\n> tsx scripts/check-development-roadmap.ts\n\n开发路线校验通过：176 个节点，22 份规格，归档旧任务映射 98 行；首个并行 frontier：r12-000-native-contract + r12-005-flow-native-authoring-parity。"
-    },
-    "task_board": {
-      "command": "npm run check:task-board",
-      "exit_code": 0,
-      "output": "> ittoedu-courseware-editor@1.0.0 check:task-board\n> tsx scripts/generate-task-board.ts --check\n\n任务板已是最新状态。"
-    }
+  "new_current_cases": {
+    "not_run": 30
   },
-  "key_pattern_check": {
-    "original_pattern": "sk-[A-Za-z0-9]{8,}",
-    "matched_files": 25,
-    "matched_occurrences": 51,
-    "all_matches_inside_task_identifiers": true,
-    "other_matches": 0,
-    "boundary_aware_matches_in_plan_scope": 0,
-    "scope": "Pattern scan only; not a general secret audit; matched credential values were not printed."
+  "preserved_current_cases": {
+    "passed": 205
   },
-  "owner_decisions": {
-    "image_api": "pending; not a B05 prerequisite",
-    "gpt_oauth": "first release; current account via formal login; initial image generation route; capability tests not_run",
-    "r20": "authorized retirement after absorption; card removed and task board regenerated"
-  }
+  "deferred_release_cases": {
+    "not_run": 4
+  },
+  "reader_validation": {
+    "current_content_and_local_links": "passed",
+    "reader_articles": 94,
+    "browser_interaction": "not_run",
+    "note": "同源JSON/Markdown与嵌入阅读内容由方案校验核对，未运行产品GUI或阅读器浏览器交互。"
+  },
+  "typescript_contract_sample": {
+    "status": "not_run",
+    "note": "本次未修改设计样例，不把旧检查冒充本轮执行。"
+  },
+  "plan_tool_changes": [
+    "tools/refresh_plan.py：完成依赖投影、L06当前分类和新完成门",
+    "tools/validate_plan.py：完成依赖图/批次/文档一致性"
+  ],
+  "notes": [
+    "旧REL六段/partial及原范围Owner接受保留；新增签收为M30-T08。",
+    "QA更新后再次刷新manifest并校验；检查通过不代表新产品用例通过。"
+  ]
 }

@@ -1,4 +1,4 @@
 interface:
   display_name: "策划互动课件"
-  short_description: "多轮补全教学信息，逐阶段确认策划与呈现脚本后再构建"
-  default_prompt: "Use $orchestrate-courseware to clarify my teaching intent over multiple turns, confirm the teaching plan, then separately clarify and confirm the presentation script before building."
+  short_description: "教学策划与整课框架 HTML；默认两次确认，明确自动创作时连续推进"
+  default_prompt: "Use $orchestrate-courseware to create a teaching plan and one-section-per-page framework HTML, then hand off to $build-courseware-project. In default mode, ask for confirmation after the plan and after previewing the framework HTML. If I explicitly ask to create automatically from my materials, continue without questions or confirmations."

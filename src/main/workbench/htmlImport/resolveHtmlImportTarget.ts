@@ -78,7 +78,7 @@ export function resolveHtmlImportDestination(
   if (destination.kind === 'slide-new') {
     const surface = project.surfaces.find(item => item.id === destination.surface)
     if (surface?.type === 'spatial-2d') throw new Error('HTML 页面不支持导入到 Spatial 空间表面')
-    if (!surface || surface.type !== 'slide') throw new Error(`找不到用于新建页面的 Slide 表面：${destination.surface}`)
+    if (!surface || surface.type !== 'slide') throw new Error(`找不到用于新建页面的 Slide 表面：${destination.surface}；surface 须填当前工程 project.surfaces[].id，不是 t... 句柄`)
     if (destination.after && !surface.scenes.some(scene => scene.id === destination.after)
       && !project.locations.some(item => item.kind === 'slide-scene' && item.surfaceId === surface.id && item.id === destination.after))
       throw new Error('新页插入位置不属于目标 Slide 表面')
@@ -88,7 +88,7 @@ export function resolveHtmlImportDestination(
   if (destination.kind === 'slide-existing') {
     const location = project.locations.find(item => item.id === destination.location)
     const surface = project.surfaces.find(item => item.id === location?.surfaceId)
-    if (!location || !surface) throw new Error('HTML 导入目标位置不存在')
+    if (!location || !surface) throw new Error(`HTML 导入目标位置不存在：${destination.location}；location 须填当前工程 project.locations[].id，不是 t... 句柄`)
     if (surface.type === 'spatial-2d') throw new Error('HTML 页面不支持导入到 Spatial 空间表面')
     if (location.kind !== 'slide-scene' || surface.type !== 'slide') throw new Error('目标位置不是 Slide 场景')
     return { kind: 'slide', locationId: location.id, surfaceId: surface.id, sceneId: location.sceneId }

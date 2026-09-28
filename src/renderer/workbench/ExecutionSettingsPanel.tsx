@@ -28,6 +28,9 @@ const isApiImageConnection = (entry: ExecutionConnectionView) => supportsOpenAII
 const isImageConnection = (entry: ExecutionConnectionView) => isOAuthImageConnection(entry) || isApiImageConnection(entry)
 const catalogKey = (entry: ExecutionConnectionView) => `${entry.connection.id}:${entry.connection.revision}`
 const imageCatalogModel = (id: string) => /^gpt-image(?:-|$)/i.test(id)
+const oauthImageProjectCandidates = new Set(['gpt-image-2', 'gpt-image-2.5-sunburst', 'gpt-image-2.5-flare'])
+const isOAuthImageProjectCandidate = (entry: ExecutionConnectionView | undefined, model: string) =>
+  Boolean(entry && isOAuthImageConnection(entry) && oauthImageProjectCandidates.has(model))
 const billingLabels: Record<ExecutionConnectionView['connection']['billing']['kind'], string> = {
   metered: '按量付费', 'token-plan': 'Token Plan', subscription: '订阅', prepaid: '预付费', unknown: '未知计费来源',
 }
@@ -290,7 +293,7 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
     .filter((role): role is NonNullable<typeof role> => Boolean(role && role.connectionId === imageConnectionId)).map(role => role.model)
   const imageCatalog = chosenImageConnection && catalogs[catalogKey(chosenImageConnection)]
   const imageChoices = [...new Set([...savedImageModels,
-    ...(chosenImageConnection && isOAuthImageConnection(chosenImageConnection) ? ['gpt-image-2'] : []),
+    ...(chosenImageConnection && isOAuthImageConnection(chosenImageConnection) ? [...oauthImageProjectCandidates] : []),
     ...(imageCatalog?.models.map(model => model.id).filter(model => chosenImageConnection && isApiImageConnection(chosenImageConnection)
       ? true : imageCatalogModel(model)) ?? [])])]
   const imageRolesDiffer = Boolean(settings?.profile.roles.imageGenerate && settings.profile.roles.imageEdit
@@ -377,7 +380,7 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
         </select></label>
         <label style={field}>图片模型<select aria-label="图片模型" value={imageChoices.includes(imageModel) ? imageModel : ''} disabled={!chosenImageConnection?.hasCredential} onChange={event => { setImageModel(event.target.value); setConfirmImageUnification(false) }}>
           <option value="">未选择</option>
-          {imageChoices.map(model => <option key={model} value={model}>{model}{imageCatalog?.models.some(item => item.id === model) ? '（目录列出，图片能力待验证）' : model === 'gpt-image-2' ? '（项目候选，能力待验证）' : '（已存配置，能力待验证）'}</option>)}
+          {imageChoices.map(model => <option key={model} value={model}>{model}{isOAuthImageProjectCandidate(chosenImageConnection, model) ? '（项目候选，能力待验证）' : imageCatalog?.models.some(item => item.id === model) ? '（目录列出，图片能力待验证）' : model === 'gpt-image-2' ? '（项目候选，能力待验证）' : '（已存配置，能力待验证）'}</option>)}
         </select></label>
         {chosenImageConnection && isApiImageConnection(chosenImageConnection) && <label style={field}>自定义图片模型 ID<input aria-label="自定义图片模型 ID" value={imageModel} onChange={event => { setImageModel(event.target.value); setConfirmImageUnification(false) }} placeholder="供应商实际支持的 Images 模型 ID" /></label>}
         {chosenImageConnection && <small>请求路径：{chosenImageConnection.connection.provider} · {chosenImageConnection.connection.accountId} · {billingLabels[chosenImageConnection.connection.billing.kind]}{isApiImageConnection(chosenImageConnection) ? ` · ${openAIImagesEndpoint(chosenImageConnection.connection, 'generate')}` : ''}。模型目录及登录状态不等于图片生成或编辑能力已通过验证。</small>}
@@ -408,7 +411,7 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
              ? true : imageCatalogModel(model.id))) ?? []
            const savedModel = savedSelection?.connectionId === roles[role].connectionId ? savedSelection.model : ''
            const extraModels = [...new Set([savedModel, roles[role].model])]
-             .filter(model => model && !choices.some(item => item.id === model))
+             .filter(model => model && !choices.some(item => item.id === model) && !(imageRole && isOAuthImageProjectCandidate(chosen, model)))
            const catalogError = chosen && catalogErrors[catalogKey(chosen)]
            const noChoices = choices.length === 0
            const modelLabel = imageRole ? `${roleLabels[role]}图片模型` : `${roleLabels[role]}模型`
@@ -424,9 +427,10 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
               <label style={field}>{imageRole ? `${roleLabels[role]}：图片模型` : `${roleLabels[role]}模型`}<select aria-label={modelLabel} value={roles[role].model} disabled={!roles[role].connectionId} onChange={event => patchRole(role, { model: event.target.value })}>
                 <option value="">{!chosen ? '先选择连接' : catalog ? '选择模型' : '正在读取目录或目录不可用'}</option>
                 {extraModels.map(model => <option key={model} value={model}>{model}（已存配置，目录未列出，能力待验证）</option>)}
-                {choices.map(model => <option key={model.id} value={model.id}>{model.displayName && model.displayName !== model.id ? `${model.displayName} · ${model.id}` : model.id}（目录列出，能力待验证）</option>)}
-                {imageRole && chosen && isOAuthImageConnection(chosen)
-                  && !choices.some(model => model.id === 'gpt-image-2') && <option value="gpt-image-2">gpt-image-2（项目候选，能力待验证）</option>}
+                {choices.map(model => <option key={model.id} value={model.id}>{model.displayName && model.displayName !== model.id ? `${model.displayName} · ${model.id}` : model.id}{imageRole && isOAuthImageProjectCandidate(chosen, model.id) ? '（项目候选，能力待验证）' : '（目录列出，能力待验证）'}</option>)}
+                {imageRole && chosen && isOAuthImageConnection(chosen) && [...oauthImageProjectCandidates]
+                  .filter(projectCandidate => !choices.some(model => model.id === projectCandidate))
+                  .map(model => <option key={model} value={model}>{model}（项目候选，能力待验证）</option>)}
               </select></label>
             </div>
             {imageRole && chosen && isApiImageConnection(chosen) && <label style={field}>自定义{modelLabel}<input aria-label={`自定义${modelLabel}`} value={roles[role].model}

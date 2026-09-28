@@ -240,8 +240,17 @@ describe('M24 g20-b18-c2 HTML section import orchestration', () => {
     const before = env.courseSession.read()
     if (before.model.kind !== 'course-v9') throw new Error('wrong model')
     const slide = before.model.project.surfaces.find(item => item.type === 'slide')!
+    const location = before.model.project.locations.find(item => item.surfaceId === slide.id)!
+    const slideHandle = await env.gateway.issueTarget(runId, env.courseSession.documentId,
+      { kind: 'course-surface', surfaceId: slide.id })
+    const locationHandle = await env.gateway.issueTarget(runId, env.courseSession.documentId,
+      { kind: 'course-location', locationId: location.id })
     const call = { name: 'html.import', input: { source, target, mode: 'sections',
-      destinations: [{ kind: 'slide-new', surface: slide.id }] } }
+      destinations: [
+        { kind: 'slide-existing', location: locationHandle },
+        { kind: 'slide-new', surface: slideHandle },
+        { kind: 'slide-new', surface: slideHandle },
+      ] } }
     const first = await env.gateway.execute(runId, 'gateway-html-import-call', call)
     expect(first.kind).toBe('document-operation')
     if (first.kind !== 'document-operation') return

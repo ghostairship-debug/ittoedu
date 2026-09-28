@@ -40,6 +40,7 @@ import { documentTextLength, normalizeDocumentText } from '../../shared/document
 import { flowBlockSchema } from '../../shared/courseProjectSchema'
 import { changeFlowTableStructure } from './flowTableContentOperations'
 import { rotatedRectangleAabb } from '../../shared/geometry'
+import { htmlImportInputSchema } from './HtmlImportTools'
 
 interface Run {
   grant: ToolRunGrant
@@ -644,6 +645,10 @@ export class DocumentToolGateway implements ToolGateway {
     // Durable replay precedes target validation: a successful call has already changed that target.
     const receipt = this.findReceipt(runId, operationId, requestDigest)
     if (receipt) return receipt
+    if (call.name === 'html.import') {
+      const imported = await this.hostTools.lookup(runId, operationId, requestDigest, call.name)
+      if (imported) return imported
+    }
     if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
     const definition = toolCatalog.find(tool => tool.name === call.name)
     if (!definition) throw new ToolError('unsupported-tool', '此工具尚未接入正式 Gateway')
@@ -661,8 +666,34 @@ export class DocumentToolGateway implements ToolGateway {
         if (!locationId || !project.locations.some(location => location.id === locationId)) return null
         return { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, projectId: project.id, locationId }
       } }, call.input)
-    if (call.name === 'html.import') return this.hostTools.importHtml({ runId, operationId, requestDigest,
-      resolveHandle: (handle, access) => this.resolveWholeDocumentHandle(runId, handle, access) }, call.input)
+    if (call.name === 'html.import') {
+      const input = htmlImportInputSchema.parse(call.input)
+      const document = await this.resolveWholeDocumentHandle(runId, input.target, 'write')
+      const destinationId = async (value: string, kinds: ToolTarget['kind'][]): Promise<string> => {
+        if (!this.handles.has(value)) return value
+        const resolved = await this.resolveEditTarget(runId, value)
+        const target = resolved.target
+        if (resolved.documentId !== document.documentId || !kinds.includes(target.kind))
+          throw new ToolError('invalid-target', 'HTML 导入目标句柄不属于当前课件或目标类型不符')
+        if (target.kind === 'course-surface') return target.surfaceId
+        if (target.kind === 'course-location') return target.locationId
+        if (target.kind === 'flow-block') return target.blockId
+        if (target.kind === 'flow-container') return target.parentId ?? target.surfaceId
+        throw new ToolError('invalid-target', 'HTML 导入目标句柄类型不受支持')
+      }
+      const destinations = await Promise.all(input.destinations.map(async destination => {
+        if (destination.kind === 'slide-existing') return { ...destination,
+          location: await destinationId(destination.location, ['course-location']) }
+        if (destination.kind === 'slide-new') return { ...destination,
+          surface: await destinationId(destination.surface, ['course-surface']),
+          ...(destination.after ? { after: await destinationId(destination.after, ['course-location']) } : {}) }
+        return { ...destination, container: await destinationId(destination.container,
+          ['course-surface', 'course-location', 'flow-block', 'flow-container']) }
+      }))
+      return this.hostTools.importHtml({ runId, operationId, requestDigest,
+        resolveHandle: (handle, access) => this.resolveWholeDocumentHandle(runId, handle, access) },
+      { ...input, destinations })
+    }
     if (call.name === 'file.save' || call.name === 'document.export')
       return this.hostTools.deliverDocument({ runId, operationId, requestDigest,
         resolveHandle: handle => this.resolveWholeDocumentHandle(runId, handle, 'write') }, call.name, call.input)

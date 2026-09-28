@@ -1351,7 +1351,7 @@
         "M24"
       ],
       "document": "mid_term/M18.md",
-      "status": "planned",
+      "status": "verified",
       "existing_code": [
         ".agents/skills/orchestrate-courseware/SKILL.md",
         ".agents/skills/build-courseware-project/SKILL.md",
@@ -1372,6 +1372,214 @@
         "M18-T03",
         "M18-T04",
         "M18-T05"
+      ]
+    },
+    {
+      "id": "M25",
+      "title": "基本可用性修复：窗口、会话关闭、HTML预览与受管载体",
+      "phase": "M",
+      "release": "2.0",
+      "required": true,
+      "dependencies": [
+        "M18"
+      ],
+      "document": "mid_term/M25.md",
+      "status": "planned",
+      "existing_code": [
+        "src/main/createWindow.ts",
+        "src/main/workbench/execution/ExecutionDesktopService.ts",
+        "src/main/workbench/documentCloseFlow.ts",
+        "src/renderer/documentFiles/documentFileSession.ts",
+        "src/main/workbench/htmlPreview/htmlPreviewResponse.ts",
+        "src/shared/runtime/htmlDocumentSource.ts"
+      ],
+      "sources": [
+        "R70"
+      ],
+      "acceptance_ids": [
+        "M25-T01",
+        "M25-T02",
+        "M25-T03",
+        "M25-T04"
+      ],
+      "completion_dependencies": [
+        "M18"
+      ]
+    },
+    {
+      "id": "M26",
+      "title": "长任务可靠性：传输重试、观察恢复、真实终态与上下文",
+      "phase": "M",
+      "release": "2.0",
+      "required": true,
+      "dependencies": [
+        "M18"
+      ],
+      "document": "mid_term/M26.md",
+      "status": "planned",
+      "existing_code": [
+        "src/main/workbench/execution/ExecutionEngine.ts",
+        "src/main/workbench/providers/OpenAIChatProvider.ts",
+        "src/main/workbench/providers/ChatGPTResponsesProvider.ts",
+        "src/core/tools/DocumentToolGateway.ts",
+        "src/main/workbench/execution/executionOutcome.ts",
+        "src/main/workbench/execution/ExecutionEventStore.ts"
+      ],
+      "sources": [
+        "R70"
+      ],
+      "acceptance_ids": [
+        "M26-T01",
+        "M26-T02",
+        "M26-T03",
+        "M26-T04"
+      ],
+      "completion_dependencies": [
+        "M25"
+      ]
+    },
+    {
+      "id": "M27",
+      "title": "基础工作闭环：通用文件材料、轻编辑、工作记录与工具连续性",
+      "phase": "M",
+      "release": "2.0",
+      "required": true,
+      "dependencies": [
+        "M18"
+      ],
+      "document": "mid_term/M27.md",
+      "status": "planned",
+      "existing_code": [
+        "src/core/tools/AgentFileTools.ts",
+        "src/main/workbench/execution/AgentFileService.ts",
+        "src/main/workbench/WorkspaceFiles.ts",
+        "src/main/workbench/attachments/AttachmentService.ts",
+        "src/main/workbench/skills/BundledSkillService.ts",
+        "src/core/tools/ToolCatalog.ts"
+      ],
+      "sources": [
+        "R70"
+      ],
+      "acceptance_ids": [
+        "M27-T01",
+        "M27-T02",
+        "M27-T03",
+        "M27-T04",
+        "M27-T05",
+        "M27-T06"
+      ],
+      "completion_dependencies": [
+        "M25",
+        "M26"
+      ]
+    },
+    {
+      "id": "M28",
+      "title": "真实通用执行、异步作业与独立图像HTML观察",
+      "phase": "M",
+      "release": "2.0",
+      "required": true,
+      "dependencies": [
+        "M27"
+      ],
+      "document": "mid_term/M28.md",
+      "status": "planned",
+      "existing_code": [
+        "src/main/workbench/execution/ExecutionEngine.ts",
+        "src/main/workbench/workbenchToolServices.ts",
+        "src/main/workbench/images/ImageGenerationService.ts",
+        "src/main/workbench/observation/ViewObservationService.ts",
+        "src/main/workbench/htmlPreview/HtmlPreviewService.ts"
+      ],
+      "sources": [
+        "R70"
+      ],
+      "acceptance_ids": [
+        "M28-T01",
+        "M28-T02",
+        "M28-T03",
+        "M28-T04"
+      ],
+      "completion_dependencies": [
+        "M25",
+        "M26",
+        "M27"
+      ]
+    },
+    {
+      "id": "M29",
+      "title": "网络研究、外部工具、首个媒体与有限Agent委派",
+      "phase": "M",
+      "release": "2.0",
+      "required": true,
+      "dependencies": [
+        "M27",
+        "M28"
+      ],
+      "document": "mid_term/M29.md",
+      "status": "planned",
+      "existing_code": [
+        "src/main/workbench/external/McpDocumentServer.ts",
+        "src/main/workbench/external/ExternalMcpService.ts",
+        "src/main/workbench/workbenchToolServices.ts"
+      ],
+      "sources": [
+        "R70"
+      ],
+      "acceptance_ids": [
+        "M29-T01",
+        "M29-T02",
+        "M29-T03",
+        "M29-T04"
+      ],
+      "completion_dependencies": [
+        "M25",
+        "M26",
+        "M27",
+        "M28"
+      ]
+    },
+    {
+      "id": "M30",
+      "title": "工作体验整合、综合能力验证与2.0增量终局签收",
+      "phase": "M",
+      "release": "2.0",
+      "required": true,
+      "dependencies": [
+        "M25",
+        "M26",
+        "M27",
+        "M28",
+        "M29"
+      ],
+      "document": "mid_term/M30.md",
+      "status": "planned",
+      "existing_code": [
+        "src/renderer/workbench/ExecutionTimeline.tsx",
+        "src/renderer/workbench/elementCards/elementCardController.ts",
+        "src/shared/workbench/userQuestion.ts",
+        "src/main/workbench/execution/ExecutionDesktopService.ts",
+        "src/renderer/workbench/ExecutionSettingsPanel.tsx"
+      ],
+      "sources": [
+        "R70"
+      ],
+      "acceptance_ids": [
+        "M30-T01",
+        "M30-T02",
+        "M30-T03",
+        "M30-T04",
+        "M30-T05",
+        "M30-T06",
+        "M30-T07",
+        "M30-T08"
+      ],
+      "completion_dependencies": [
+        "M25",
+        "M26",
+        "M27",
+        "M28",
+        "M29"
       ]
     }
   ],
@@ -1545,10 +1753,58 @@
         "M24",
         "M18"
       ],
-      "exit": "M23 工作台直接预览 .html 并可笔形轻编辑、热更新写回源码；M24 内置 AI 通用工具（按需读 Skill、按页机械导入 HTML、看页面、保存导出）；M18 创作链写入两个课件 Skill：教学策划 → 框架 HTML → 表示规划 → 按页组装 → 视觉精修，默认两次确认、明确要求自动创作时全部跳过、按材料实现时不降级；M18-T01～T03 在同一次 REL-T11 真实运行中核对，最后由 Owner 做 M14-T05。"
+      "exit": "M23 工作台直接预览 .html 并可笔形轻编辑、热更新写回源码；M24 内置 AI 通用工具（按需读 Skill、按页机械导入 HTML、看页面、保存导出）；M18 创作链写入两个课件 Skill：教学策划 → 框架 HTML → 表示规划 → 按页组装 → 视觉精修，默认两次确认、明确要求自动创作时全部跳过、按材料实现时不降级；M18-T01～T03 在同一 REL-T11 真实任务及修复续接链中核对，保留首轮与最终 partial 限制；M14-T05 由 Owner 终局核对。"
+    },
+    {
+      "id": "B19",
+      "title": "基本可用性修复：窗口、会话关闭、HTML预览与受管载体",
+      "tasks": [
+        "M25"
+      ],
+      "exit": "R1–R4和M25直接验收完成：窗口/会话/关闭可用，HTML用满余量且Player可运行，课件副本重开可轻改。"
+    },
+    {
+      "id": "B20",
+      "title": "长任务可靠性：传输重试、观察恢复、真实终态与上下文",
+      "tasks": [
+        "M26"
+      ],
+      "exit": "R5–R8完成：两Provider计时及有限重试、相关观察/句柄恢复、真实终态和截图Pruning，正式事实/Stop不退化。"
+    },
+    {
+      "id": "B21",
+      "title": "基础工作闭环：通用文件材料、轻编辑、工作记录与工具连续性",
+      "tasks": [
+        "M27"
+      ],
+      "exit": "原A1–A5及A6完整接通：普通文件读写组织、材料引用、轻改、工作记录、用户Skill、Batch/窄审批。"
+    },
+    {
+      "id": "B22",
+      "title": "真实通用执行、异步作业与独立图像HTML观察",
+      "tasks": [
+        "M28"
+      ],
+      "exit": "原B0–B3完成：真实受限后端、通用脚本和必要进程、等待取消、无V9图片/HTML观察修正，固定helper不能通过。"
+    },
+    {
+      "id": "B23",
+      "title": "网络研究、外部工具、首个媒体与有限Agent委派",
+      "tasks": [
+        "M29"
+      ],
+      "exit": "原C1–C3及首个XM/单runner XD真实接通：研究引用、外部授权读写、浏览器、媒体和薄委派；未授权/未连接保持阻断。"
+    },
+    {
+      "id": "B24",
+      "title": "工作体验整合、综合能力验证与2.0增量终局签收",
+      "tasks": [
+        "M30"
+      ],
+      "exit": "U1–U3、T1–T4及M30-T08 Owner增量签收完成后，扩展2.0才闭合；旧范围接受不自动覆盖。"
     }
   ],
-  "plan_revision": "2.4",
+  "plan_revision": "2.5",
   "removed_acceptance": [
     {
       "id": "S01-T03",

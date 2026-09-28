@@ -21,7 +21,7 @@ export const G20_M24_PAGES = [
   { id: 'm24-page-blue', sceneId: 'm24-scene-blue', label: '蓝色目标页', color: '#1d4ed8', rgb: [29, 78, 216] as const, textId: 'm24-text-blue' },
 ] as const
 
-export type G20M24ObservationMode = 'direct' | 'fallback' | 'unavailable' | 'stale'
+export type G20M24ObservationMode = 'direct' | 'fallback' | 'stale'
 
 export interface G20M24ObservationRound {
   id: string
@@ -203,15 +203,6 @@ export async function startG20M24ModelServer(evidenceDirectory: string) {
             throw new Error('Conversation did not receive the separate vision result and target provenance')
           round.completed = true
           sendText(response, data.model ?? '', `${round.id} 已收到独立视觉分析及${round.targetLabel}来源。`)
-          return
-        }
-        if (round.mode === 'unavailable') {
-          if ((data.messages ?? []).some(message => message.role === 'user' && Array.isArray(message.content)
-            && (message.content as any[]).some(part => part?.type === 'image_url'))) throw new Error('Unconfigured vision unexpectedly received an image')
-          if (!(data.messages ?? []).some(message => typeof message.content === 'string' && message.content.includes('vision-unavailable')))
-            throw new Error('Missing explicit vision-unavailable provenance')
-          round.completed = true
-          sendText(response, data.model ?? '', `${round.id} 已说明未配置视觉，未声称看过画面。`)
           return
         }
       }

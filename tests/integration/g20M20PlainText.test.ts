@@ -11,6 +11,7 @@ import { ExecutionEventStore } from '../../src/main/workbench/execution/Executio
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import { modelToolWireName, OpenAIChatProvider } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
+import type { ModelEvent, ModelProvider, ModelRequest } from '../../src/shared/workbench/modelProvider'
 
 const directories: string[] = [], servers: Server[] = []
 afterEach(async () => {
@@ -92,6 +93,62 @@ it('M20-T02 local HTTP/SSE agent opens, reads, edits and creates formal text doc
   expect(await fs.readFile(created, 'utf8')).toBe('新建纯文本\n')
   expect(requests).toHaveLength(12)
   expect(receipts.filter(receipt => receipt.name === 'text.replace').length).toBe(2)
+})
+
+it('gives direct source write targets when opening .txt and creating .html', async () => {
+  const { directory, host } = await setup()
+  const workspace = path.join(directory, 'workspace')
+  await fs.mkdir(workspace)
+  const original = path.join(workspace, 'existing.txt'), created = path.join(workspace, 'created.html')
+  await fs.writeFile(original, '原稿')
+  const complete = (request: ModelRequest, turn: number, call?: { name: string; input: object }): Extract<ModelEvent, { type: 'response.completed' }> => {
+    const toolCalls = call ? [{ id: `call-${turn}`, name: call.name, argumentsText: JSON.stringify(call.input) }] : []
+    return { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: `response-${turn}`,
+      actualModel: 'fixture-model', nativeResponse: {}, finishReason: call ? 'tool_calls' : 'stop', toolCalls,
+      assistant: { role: 'assistant', content: '', ...(call ? { tool_calls: [{ id: `call-${turn}`, type: 'function' as const,
+        function: { name: call.name, arguments: JSON.stringify(call.input) } }] } : {}) } }
+  }
+  for (const [index, intent] of (['open', 'create'] as const).entries()) {
+    let turn = 0
+    const provider: ModelProvider = { async *stream(request) {
+      turn++
+      if (turn === 1) {
+        yield complete(request, turn, intent === 'open'
+          ? { name: 'file.open', input: { path: 'existing.txt' } }
+          : { name: 'file.create', input: { name: 'created.html', kind: 'html' } })
+        return
+      }
+      if (turn === 2) {
+        const prior = [...request.messages].reverse().find(message => message.role === 'tool')
+        const result = JSON.parse(String(prior?.content)) as { data: { markdown?: unknown; text?: {
+          content: string; truncated: boolean; writableTarget?: string } } }
+        expect(result.data.markdown).toBeUndefined()
+        expect(result.data.text).toMatchObject({ content: intent === 'open' ? '原稿' : '', truncated: false })
+        expect(result.data.text?.writableTarget).toEqual(expect.any(String))
+        yield complete(request, turn, { name: 'text.replace', input: { target: result.data.text!.writableTarget!,
+          content: intent === 'open' ? '已改稿' : '<h1>新页</h1>' } })
+        return
+      }
+      yield complete(request, turn)
+    } }
+    const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider, files: new AgentFileService(host),
+      runs: new ExecutionRunStore(path.join(directory, `direct-runs-${index}`)),
+      events: new ExecutionEventStore({ directory: path.join(directory, `direct-events-${index}`) }) })
+    const started = await engine.start({ conversationId: `direct-${intent}`, taskId: `direct-${intent}`,
+      instruction: '打开或新建文件并写入正文', documents: [], workspaceRoot: workspace, permission: 'workspace',
+      selection: { model: 'fixture-model', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat',
+        baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'fixture' },
+        billing: { kind: 'unknown' }, capabilities: { tools: 'supported', stream: 'supported', vision: 'unsupported', reasoning: 'unknown' } } } })
+    const run = await engine.wait(started.runId)
+    expect(run.status, JSON.stringify(run.tools.map(tool => tool.result))).toBe('completed')
+    expect(run.tools[1]?.result).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+    const documentId = (run.tools[0]!.result as { data: { documentId: string } }).data.documentId
+    expect((await host.internalAPI.read(documentId)).model).toMatchObject({ kind: 'text',
+      source: intent === 'open' ? '已改稿' : '<h1>新页</h1>' })
+    expect(turn).toBe(3)
+  }
+  expect(await fs.readFile(original, 'utf8')).toBe('原稿')
+  expect(await fs.readFile(created, 'utf8')).toBe('')
 })
 async function setup() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-m20-text-'))

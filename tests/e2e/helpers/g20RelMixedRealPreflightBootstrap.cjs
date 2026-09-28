@@ -1,5 +1,4 @@
-// Legacy REL continuation only. Its existing private profile owns a frozen GPT OAuth
-// image role; a new TeamoRouter Images run uses the normal Electron entry instead.
+// REL-T11 reads the private GPT OAuth profile without exposing its credential to renderer.
 const path = require('node:path')
 const fs = require('node:fs')
 const { app } = require('electron')
@@ -19,7 +18,10 @@ globalThis.__G20_REL_REAL_PREFLIGHT__ = {
     const state = await store.read()
     mark('settings-read')
     const imageRole = state.profile.roles.imageGenerate
-    if (!imageRole) throw new Error('Legacy image role is not bound')
+    if (!imageRole) return { imageRole: null, imageEditRole: state.profile.roles.imageEdit,
+      provider: null, protocol: null, billing: null, credentialReadable: false,
+      expired: true, secureStorageAvailable: state.secureStorageAvailable,
+      sourceIsIsolated: app.getPath('userData') !== path.join(process.env.APPDATA || '', 'Guoling-2.0-engineering-oauth') }
     const selected = await store.snapshot('imageGenerate')
     mark('image-role-resolved')
     const record = await store.readOAuthCredential(selected.connection.auth.credentialRef)

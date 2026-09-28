@@ -7,7 +7,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { build } from 'esbuild'
 import { describeAuthoringToolDiscovery } from '../src/renderer/authoring/tools/authoringToolFacade'
 import { describeGenerationSemanticTools, generationProjectDocumentWireInputSchema } from '../src/shared/generationContract'
-import { courseAgentMethodSkills, courseAgentProductSkills, courseAgentSessionSkillMarkdown, courseAgentSkillMarkdown, courseAgentSkillSummary } from '../src/shared/courseAgentSkills'
+import { courseAgentMethodSkills } from '../src/shared/courseAgentSkills'
 import { courseAgentCapabilityDiskIndex, courseAgentCapabilityQueryHelp, type CourseAgentCapabilityData, type CourseAgentCapabilityEntry } from '../src/shared/courseAgentCapabilities'
 import packageJson from '../package.json'
 import { importComponentPackage } from '../src/core/drivers/codecs/importComponentPackage'
@@ -956,12 +956,6 @@ async function addDiscoveryArtifacts(projectRoot: string, files: Map<string, str
         keywords: text.split('\n').filter(line => /^#{1,3} /.test(line)).join(' '),
       })
     }
-  }
-  for (const skill of courseAgentProductSkills) {
-    const location = `skills/${skill.name}/SKILL.md`
-    const text = skill.name === 'courseware-session' ? courseAgentSessionSkillMarkdown() : courseAgentSkillMarkdown(skill)
-    resources.set(location, text)
-    entries.push({ id: `skill:${skill.name}`, kind: 'skill', label: skill.name, path: location, scopes: allScopes, carriers: allCarriers, summary: courseAgentSkillSummary(skill) })
   }
   resources.set('query-core.mjs', stripTypeScriptTypes(await fs.readFile(path.join(projectRoot, 'src/shared/courseAgentCapabilities.ts'), 'utf8')).split('\n').map(line => line.trimEnd()).join('\n'))
   const helper = await build({ entryPoints: [path.join(projectRoot, 'scripts/candidate-helper.ts')], bundle: true, write: false,

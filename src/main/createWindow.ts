@@ -273,8 +273,9 @@ export async function createMainWindow(
     })
   })
 
+  const windowWebContentsId = window.webContents.id
   window.on('closed', () => {
-    clearHtmlPreviewFrameEntries(window.webContents.id)
+    clearHtmlPreviewFrameEntries(windowWebContentsId)
     beginPreviewNetworkDocumentNavigation()
     appState.detachWindow(window)
   })

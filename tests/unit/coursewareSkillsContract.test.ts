@@ -3,8 +3,6 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { GenerationRequest } from '../../src/shared/generationContract'
-import { courseAgentSkills } from '../../src/shared/courseAgentSkills'
 
 const repoRoot = process.cwd()
 async function readRepoFile(relativePath: string): Promise<string> {
@@ -29,7 +27,7 @@ describe('courseware skill contracts', () => {
     ])
     expect(Buffer.byteLength(entry)).toBeLessThanOrEqual(6 * 1024)
     expect(entry).toContain('[build-method.md](references/build-method.md)')
-    expect(entry).toContain('教师看过并明确确认')
+    expect(entry).toContain('分别确认教学策划与框架 HTML')
     expect(entry).toContain('observe()')
     expect(entry).toContain('readReceipts')
     for (const topic of ['载体所有权', '资产与任务图', '先做最高风险纵切', '增量构建与 Worker', '保持可编辑', '验证与交付', '停止条件']) expect(methods).toContain(topic)
@@ -49,6 +47,32 @@ describe('courseware skill contracts', () => {
     expect(orchestrator).toContain('教师控制器只作课堂兜底')
     expect(builder).toContain('[main-progression.md](references/main-progression.md)')
     expect(builder).toContain('先证明控制器隐藏时的正文主路径')
+  })
+
+  it('M18-T05 has one courseware method source and a bounded representation brief', async () => {
+    const [orchestrator, builder, methods, brief, agents, generated, bundled] = await Promise.all([
+      readRepoFile('.agents/skills/orchestrate-courseware/SKILL.md'),
+      readRepoFile('.agents/skills/build-courseware-project/SKILL.md'),
+      readRepoFile('.agents/skills/build-courseware-project/references/build-method.md'),
+      readRepoFile('.agents/skills/build-courseware-project/references/representation-capabilities.md'),
+      readRepoFile('AGENTS.md'),
+      readRepoFile('artifacts/ai-capabilities/discovery-data.json'),
+      readRepoFile('src/shared/generated/bundledSkills.json'),
+    ])
+    expect(brief.length).toBeLessThanOrEqual(1500)
+    expect(orchestrator).toContain('框架 HTML 与讲解说明')
+    expect(orchestrator).toContain('不读取编辑器能力简介')
+    expect(builder).toContain('03-representation-plan.md')
+    expect(builder).toContain('[representation-capabilities.md](references/representation-capabilities.md)')
+    expect(builder).toContain('逐页看真实画面')
+    expect(agents).toContain('根据材料自动创作')
+    expect(`${builder}\n${methods}`).not.toMatch(/文字必须.{0,20}公开稳定作者目标|动态载体公开可编辑内容/)
+    const skills = (JSON.parse(bundled) as { manifest: { skills: Array<{ name: string }> } }).manifest.skills
+    expect(skills.map(skill => skill.name)).toEqual(['orchestrate-courseware', 'build-courseware-project'])
+    const resources = (JSON.parse(generated) as { resourcePaths: string[] }).resourcePaths
+    expect(resources).toContain('skills/build-courseware-project/references/representation-capabilities.md')
+    for (const old of ['courseware-session', 'course-design', 'course-build', 'qa-repair', 'style-remix', 'pro-editing', 'visual-craft', 'interaction-craft'])
+      expect(resources).not.toContain(`skills/${old}/SKILL.md`)
   })
 
   it('requires every nonterminal script position to expose a recoverable body action', async () => {

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "semanticVersion": "acd37d3d2e4e80bda7833ca4bbf086e0ac64c78a78c880bc5c7e584bb50cd4ac",
+  "semanticVersion": "fc136a43c943d441b2f75f17ef5e73c19ec9e2a94b26ff765566e1fc33a96bde",
   "entries": [
     {
       "id": "asset.font.import",
@@ -1021,7 +1021,7 @@
         "runtime"
       ],
       "summary": "构建方法与完整质量标准",
-      "keywords": "# 构建方法与完整质量标准 ## 软件内 Builder V2 适用范围 ## 1. 冷启动 ## 2. 发现能力 ## 3. 载体所有权 ## 4. 资产与任务图（动手前） ## 5. 用产品 API 写工程 ## 6. 先做最高风险纵切 ## 7. 增量构建与 Worker ## 8. 保持可编辑 ## 9. 验证与交付 ## 停止条件 ### 软件内与外部 Builder V2 共用字节编码"
+      "keywords": "# 构建方法与完整质量标准 ## 外部案例 Builder V2 适用范围 ## 1. 外部案例冷启动 ## 2. 外部案例发现能力 ## 3. 载体所有权 ## 4. 资产与任务图（动手前） ## 5. 外部案例用产品 API 写工程 ## 6. 先做最高风险纵切 ## 7. 增量构建与 Worker ## 8. 保持可编辑 ## 9. 验证与交付 ## 停止条件 ### 软件内与外部 Builder V2 共用字节编码"
     },
     {
       "id": "reference:build-courseware-project/current-capabilities",
@@ -1149,6 +1149,31 @@
       "keywords": "# 使用 PPT 原稿与检查导入页面 ## 原稿与导入结果分别核对 ## 检查与修复 ## 收尾 ## 参考来源与适配边界"
     },
     {
+      "id": "reference:build-courseware-project/representation-capabilities",
+      "kind": "reference",
+      "label": "表示选择短能力简介",
+      "path": "skills/build-courseware-project/references/representation-capabilities.md",
+      "scopes": [
+        "slide:scene",
+        "slide:surface",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:surface",
+        "spatial-2d:global"
+      ],
+      "carriers": [
+        "native",
+        "recipe",
+        "existing-component",
+        "generated-component",
+        "runtime"
+      ],
+      "summary": "表示选择短能力简介",
+      "keywords": "# 表示选择短能力简介"
+    },
+    {
       "id": "reference:build-courseware-project/validation-boundaries",
       "kind": "reference",
       "label": "验证边界",
@@ -1217,7 +1242,7 @@
         "runtime"
       ],
       "summary": "让互动产生可观察的学习",
-      "keywords": "# 让互动产生可观察的学习 ## 先确定互动揭示什么 ## 按认知任务选择操作 ## 脚本写到可实施 ## 参考来源与适配边界"
+      "keywords": "# 让互动产生可观察的学习 ## 先确定互动揭示什么 ## 按认知任务选择操作 ## 框架 HTML 写到可实施 ## 参考来源与适配边界"
     },
     {
       "id": "reference:orchestrate-courseware/main-progression",
@@ -1465,104 +1490,8 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "从分别确认的 01-teaching-plan.md 与 02-presentation-script.md，在任意课例目录中构建、增量修复和验证可编辑 Course Project V9。自主定位产品，通过同源能力发现与 Builder V2 正式工具完成课件和离线 HTML。",
-      "keywords": "# 构建互动课件工程 ## 冷启动与能力发现 ## 构建与编辑 ## 必须保留的教学与质量方法"
-    },
-    {
-      "id": "skill:course-build",
-      "kind": "skill",
-      "label": "course-build",
-      "path": "skills/course-build/SKILL.md",
-      "scopes": [
-        "slide:scene",
-        "slide:surface",
-        "slide:global",
-        "flow:surface",
-        "flow:global",
-        "spatial-2d:world",
-        "spatial-2d:surface",
-        "spatial-2d:global"
-      ],
-      "carriers": [
-        "native",
-        "recipe",
-        "existing-component",
-        "generated-component",
-        "runtime"
-      ],
-      "summary": "输入：用户当前任务与已有真实文件"
-    },
-    {
-      "id": "skill:course-design",
-      "kind": "skill",
-      "label": "course-design",
-      "path": "skills/course-design/SKILL.md",
-      "scopes": [
-        "slide:scene",
-        "slide:surface",
-        "slide:global",
-        "flow:surface",
-        "flow:global",
-        "spatial-2d:world",
-        "spatial-2d:surface",
-        "spatial-2d:global"
-      ],
-      "carriers": [
-        "native",
-        "recipe",
-        "existing-component",
-        "generated-component",
-        "runtime"
-      ],
-      "summary": "输入：教学主题和明确引用的材料"
-    },
-    {
-      "id": "skill:courseware-session",
-      "kind": "skill",
-      "label": "courseware-session",
-      "path": "skills/courseware-session/SKILL.md",
-      "scopes": [
-        "slide:scene",
-        "slide:surface",
-        "slide:global",
-        "flow:surface",
-        "flow:global",
-        "spatial-2d:world",
-        "spatial-2d:surface",
-        "spatial-2d:global"
-      ],
-      "carriers": [
-        "native",
-        "recipe",
-        "existing-component",
-        "generated-component",
-        "runtime"
-      ],
-      "summary": "本轮课件会话的可选内置方法入口，按需读取完整方法、质量参考和精确能力卡。"
-    },
-    {
-      "id": "skill:interaction-craft",
-      "kind": "skill",
-      "label": "interaction-craft",
-      "path": "skills/interaction-craft/SKILL.md",
-      "scopes": [
-        "slide:scene",
-        "slide:surface",
-        "slide:global",
-        "flow:surface",
-        "flow:global",
-        "spatial-2d:world",
-        "spatial-2d:surface",
-        "spatial-2d:global"
-      ],
-      "carriers": [
-        "native",
-        "recipe",
-        "existing-component",
-        "generated-component",
-        "runtime"
-      ],
-      "summary": "输入：教学动作与反馈路径"
+      "summary": "从教学策划和整课框架 HTML 做后置表示规划，按页导入组装、视觉精修并交付可编辑 Course Project V9；支持默认两次确认与明确的自动创作模式。",
+      "keywords": "# 构建互动课件工程 ## 1. 后置表示规划 ## 2. 导入与组装 ## 3. 视觉精修与交付"
     },
     {
       "id": "skill:orchestrate-courseware",
@@ -1586,104 +1515,8 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "把教学主题、教材、教案、题目、课程标准或既有课件，经多轮信息补全、教学简报确认、策划确认、呈现简报确认和脚本确认，整理为教师可直接审阅的 01-teaching-plan.md 与 02-presentation-script.md；两份文件明确确认后才交给课件 Builder。不得用它选择技术载体、编写 Project 或实现代码。",
-      "keywords": "# 编排互动课件 ## 不可跨越的阶段门 ## 交互原则 ## 1. 教学信息发现 ## 2. 形成并确认教学策划 ## 3. 呈现信息发现 ## 4. 形成并确认教学呈现脚本 ## 5. 交给干净 Builder"
-    },
-    {
-      "id": "skill:pro-editing",
-      "kind": "skill",
-      "label": "pro-editing",
-      "path": "skills/pro-editing/SKILL.md",
-      "scopes": [
-        "slide:scene",
-        "slide:surface",
-        "slide:global",
-        "flow:surface",
-        "flow:global",
-        "spatial-2d:world",
-        "spatial-2d:surface",
-        "spatial-2d:global"
-      ],
-      "carriers": [
-        "native",
-        "recipe",
-        "existing-component",
-        "generated-component",
-        "runtime"
-      ],
-      "summary": "输入：当前选择、页或整课引用及明确编辑目标"
-    },
-    {
-      "id": "skill:qa-repair",
-      "kind": "skill",
-      "label": "qa-repair",
-      "path": "skills/qa-repair/SKILL.md",
-      "scopes": [
-        "slide:scene",
-        "slide:surface",
-        "slide:global",
-        "flow:surface",
-        "flow:global",
-        "spatial-2d:world",
-        "spatial-2d:surface",
-        "spatial-2d:global"
-      ],
-      "carriers": [
-        "native",
-        "recipe",
-        "existing-component",
-        "generated-component",
-        "runtime"
-      ],
-      "summary": "输入：当前目标、诊断和具体失败证据"
-    },
-    {
-      "id": "skill:style-remix",
-      "kind": "skill",
-      "label": "style-remix",
-      "path": "skills/style-remix/SKILL.md",
-      "scopes": [
-        "slide:scene",
-        "slide:surface",
-        "slide:global",
-        "flow:surface",
-        "flow:global",
-        "spatial-2d:world",
-        "spatial-2d:surface",
-        "spatial-2d:global"
-      ],
-      "carriers": [
-        "native",
-        "recipe",
-        "existing-component",
-        "generated-component",
-        "runtime"
-      ],
-      "summary": "输入：当前焦点和用户的视觉意图"
-    },
-    {
-      "id": "skill:visual-craft",
-      "kind": "skill",
-      "label": "visual-craft",
-      "path": "skills/visual-craft/SKILL.md",
-      "scopes": [
-        "slide:scene",
-        "slide:surface",
-        "slide:global",
-        "flow:surface",
-        "flow:global",
-        "spatial-2d:world",
-        "spatial-2d:surface",
-        "spatial-2d:global"
-      ],
-      "carriers": [
-        "native",
-        "recipe",
-        "existing-component",
-        "generated-component",
-        "runtime"
-      ],
-      "summary": "输入：页面内容、Surface 和视觉要求"
+      "summary": "根据教学材料完成教学策划与整课框架 HTML；默认在策划和框架后各请教师确认一次，明确要求根据材料自动创作时连续推进。表示规划和工程组装交给 build-courseware-project。",
+      "keywords": "# 编排互动课件 ## 模式与确认 ## 1. 教学策划 ## 2. 框架 HTML 与讲解说明 ## 3. 交给 Builder"
     },
     {
       "id": "slide.interaction",
@@ -1914,19 +1747,12 @@
     "skills/build-courseware-project/references/main-progression.md",
     "skills/build-courseware-project/references/page-design.md",
     "skills/build-courseware-project/references/ppt-import-review.md",
+    "skills/build-courseware-project/references/representation-capabilities.md",
     "skills/build-courseware-project/references/validation-boundaries.md",
-    "skills/course-build/SKILL.md",
-    "skills/course-design/SKILL.md",
-    "skills/courseware-session/SKILL.md",
-    "skills/interaction-craft/SKILL.md",
     "skills/orchestrate-courseware/SKILL.md",
     "skills/orchestrate-courseware/references/interaction-design.md",
     "skills/orchestrate-courseware/references/main-progression.md",
     "skills/orchestrate-courseware/references/teaching-design-quality.md",
-    "skills/pro-editing/SKILL.md",
-    "skills/qa-repair/SKILL.md",
-    "skills/style-remix/SKILL.md",
-    "skills/visual-craft/SKILL.md",
     "tools/asset.font.import.json",
     "tools/asset.image.transform.json",
     "tools/asset.media.import.json",

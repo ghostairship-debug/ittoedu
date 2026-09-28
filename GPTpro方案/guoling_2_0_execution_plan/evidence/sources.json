@@ -661,5 +661,12 @@
     "kind": "repository",
     "baseline_commit": "25b12b4b253298f63b642b60e1e80bd0c1f93840",
     "checked_on": "2026-09-25"
+  },
+  "R70": {
+    "title": "L06 v2.0：2.0收口、核查处置与直接执行规格",
+    "url": "../long_term/L06.md",
+    "locator": "2026-09-29 Owner前移决定；§15批次，§20直接规格，§21全部D/G处置；原基线5d331b88加工作树，不代表新产品实现。",
+    "kind": "local-plan",
+    "checked_on": "2026-09-29"
   }
 }

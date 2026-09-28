@@ -25,7 +25,7 @@ export function htmlImportReceiptResult(receipt: HtmlImportReceipt): ToolResult 
 /** Single canonical tool schema projected by both the built-in gateway and external MCP. */
 export const htmlImportTool = {
   name: 'html.import' as const,
-  description: '将已授权 HTML text 文档按页拆分或整份导入到 Course V9 目标文档的 Slide 或 Flow 表面，执行本页内脚本并保留公共样式。通过一次受控准入与一次正式提交完成，支持单次撤销。',
+  description: '将已授权 HTML text 文档按页拆分或整份导入 Course V9，执行页内脚本并保留公共样式。source、target 使用当前任务的 t... 文档句柄；destinations 的位置字段可填同一课件本轮 listChildren 返回的当前 t... 目标句柄，或 read(课件文档句柄) 返回的稳定 id。修改页面后须重新读取目标，旧句柄会失效。一次准入和提交，支持单次撤销。',
   inputSchema: htmlImportInputSchema,
   manual: { label: '导入 HTML 页面', group: 'edit' as const, targetKinds: ['document'] as const },
 }

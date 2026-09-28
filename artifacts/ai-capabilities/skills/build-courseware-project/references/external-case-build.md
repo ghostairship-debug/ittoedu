@@ -4,7 +4,7 @@
 
 ## 两个根目录不得混淆
 
-- **课例交付目录 `case-dir`**：教师的当前目录或明确指定目录。两份 Markdown、原始材料、`implementation/` 和最终交付物都留在这里；它不需要是 Git 仓库。
+- **课例交付目录 `case-dir`**：教师的当前目录或明确指定目录。教学策划、框架 HTML、讲解说明、表示规划、原始材料、`implementation/` 和最终交付物都留在这里；它不需要是 Git 仓库。
 - **编辑器产品根目录 `editor-root`**：只提供 Capability Index、Builder Facade、产品工厂、校验器、Player 与导出器。不要把教学文件或交付物写进这里，也不要要求教师切换当前项目。
 
 ## 自主定位 editor-root
@@ -22,7 +22,7 @@
 
 ## 课例构建模块合同
 
-新课例使用 Builder V2。默认模块为 `<case-dir>/implementation/build.ts`，显式导出 `apiVersion = 2`，并 `default export` 一个函数，或导出 `buildCoursewareCase` 函数。下面只展示调用形态；正文必须换成已确认脚本的内容：
+新课例使用 Builder V2。默认模块为 `<case-dir>/implementation/build.ts`，显式导出 `apiVersion = 2`，并 `default export` 一个函数，或导出 `buildCoursewareCase` 函数。下面只展示调用形态；正文必须换成当前框架 HTML 与讲解说明的内容：
 
 ```ts
 export const apiVersion = 2
@@ -36,7 +36,7 @@ export default async function build({ api }) {
   })
   const receipt = await session.execute('native.content', {
     operation: 'insert',
-    template: { nativeType: 'text', text: '已确认的正文', x: 60, y: 70, width: 1100, height: 130 },
+    template: { nativeType: 'text', text: '当前页面正文', x: 60, y: 70, width: 1100, height: 130 },
   }, { kind: 'create', scope })
   if (receipt.status !== 'committed') throw new Error(JSON.stringify(receipt.diagnostics))
   return await session.finish()
@@ -51,7 +51,7 @@ export default async function build({ api }) {
 - `capabilityDiscovery`：当前精简发现入口，携带 `semanticVersion`；`capabilityIndex` 保留旧 consumer 兼容；
 - `api.discover(query)` / `api.readCapability(id, options)`：与应用同源的只读查询和完整能力卡；
 - `api.componentCatalog()`：本轮受管目录实际可用的包和 sourceId，未知受信来源不能冒充内置；
-- `api.createCourseProject({ surfaceType, title })`：创建产品管理的浏览器构建会话，`surfaceType` 按脚本选 `slide` / `flow` / `spatial-2d`。
+- `api.createCourseProject({ surfaceType, title })`：创建产品管理的浏览器构建会话，`surfaceType` 按表示规划选 `slide` / `flow` / `spatial-2d`。
 
 会话的 `tools` 保留工具名列表；常用 `observe({itemIds?,includeContent?,includeLocations?,offset?,limit?})` 只取当前 scope 和最多 20 个目标（limit 可至 100），返回 total / nextOffset，按需展开具体内容；Runtime 源码不随窄观察返回。 每次返回 surfaceGeometry（Slide canvas / Flow layout / Spatial bounds 与 camera）；includeContent 同时返回 contentMode:"raw" 的 items，以及仅本页当前 owner、同一分页对象的 effectiveLayout 和 componentDefinitions。effectiveLayout 使用当前命名状态后的外框/旋转/透明度/可见性/层序，保留原始 items 供编辑；Flow 正文按语义排版，无虚构固定外框。组件定义只含正式默认/最小尺寸与公开属性描述，不携带包源码或全部资源。其他 owner 的遮挡需切换 owner 分别观察，不能把当前 owner 列表当作整页合成。`activateScope()` 切换位置、owner、状态并返回窄观察；`createScope()` 获取插入地址；`execute()` 返回本次正式 receipt，`readReceipts({after,limit})` 用 cursor 分段取历史。会话的 discover/readCapability 与 api 同源，会话方法及 finish 均须 await。一次成功修改后重新取需要使用的 target/scope，不复用旧 revision；失败先读 diagnostics，不能跳过失败继续组装交付物。
 
@@ -64,7 +64,7 @@ export default async function build({ api }) {
 
 ## 按需发现与复用示例
 
-先理解两份已确认稿的整体教学目标；以下只取当前片段的技术能力。参数名来自实际卡片，不能把示例当作第二份 Schema。
+先理解当前教学策划、框架 HTML 与表示规划的整体目标；以下只取当前页面的技术能力。参数名来自实际卡片，不能把示例当作第二份 Schema。
 
 ```ts
 const found = api.discover({ kind: 'recipe', surface: 'slide', owner: 'scene', limit: 10 })

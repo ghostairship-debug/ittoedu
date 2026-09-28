@@ -16,7 +16,7 @@ interface RelResumeManifestBase {
   originalSubmissionId: string
   requestedTextModel: 'deepseek-flash'
   requestedProvider: 'teamorouter'
-  requestedImageModel: 'gpt-image-2'
+  requestedImageModel: string
   createdAt: string
 }
 
@@ -186,7 +186,8 @@ export function readRelResumeManifest(filename: string): RelResumeManifest {
     || typeof manifest.workspacePath !== 'string' || typeof manifest.workspaceId !== 'string' || typeof manifest.conversationId !== 'string'
     || typeof manifest.runId !== 'string' || typeof manifest.originalSubmissionId !== 'string'
     || manifest.requestedTextModel !== 'deepseek-flash' || manifest.requestedProvider !== 'teamorouter'
-    || manifest.requestedImageModel !== 'gpt-image-2' || typeof manifest.createdAt !== 'string')
+    || typeof manifest.requestedImageModel !== 'string' || !manifest.requestedImageModel
+    || typeof manifest.createdAt !== 'string')
     throw new Error('Invalid REL resume manifest fields')
   if (manifest.schemaVersion !== 3 && (manifest.maxPaidContinuations !== 1 || manifest.usedPaidContinuations !== 0))
     throw new Error('Invalid legacy REL resume manifest fields')
@@ -243,7 +244,7 @@ export async function rebuildRelResumeManifest(input: { filename: string; recove
   const firstSubmission = allSubmissions.find(value => value.submissionId === root.input.taskId)
   const image = root.input.disclosedSettings?.roles.imageGenerate
   const imageProvider = image?.provider === 'openai' ? 'openai' : image?.provider === 'teamorouter' ? 'teamorouter' : null
-  if (!firstSubmission || !image || !imageProvider || image.model !== 'gpt-image-2'
+  if (!firstSubmission || !image || !imageProvider || !image.model
     || root.input.selection.model !== 'deepseek-flash' || root.input.selection.connection.provider !== 'teamorouter'
     || imageProvider === 'teamorouter' && root.input.selection.connection.imageProtocol !== 'openai-images')
     throw new Error('REL root route or submission cannot be verified')
@@ -253,7 +254,7 @@ export async function rebuildRelResumeManifest(input: { filename: string; recove
     originalSubmissionId: root.input.taskId, rootRunId: root.runId, latestRunId: runs.at(-1)!.runId,
     latestSubmissionId: runs.at(-1)!.input.taskId, runIds: runs.map(run => run.runId),
     submissionIds: runs.map(run => run.input.taskId), requestedTextModel: 'deepseek-flash',
-    requestedProvider: 'teamorouter', requestedImageModel: 'gpt-image-2',
+    requestedProvider: 'teamorouter', requestedImageModel: image.model,
     requestedImageProvider: imageProvider,
     requestedImageProtocol: imageProvider === 'openai' ? 'chatgpt-responses' : 'openai-images',
     imageConnectionId: image.connectionId, imageConnectionRevision: image.connectionRevision,

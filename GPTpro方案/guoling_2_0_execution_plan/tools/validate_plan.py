@@ -28,7 +28,7 @@ def validate():
         if id in visited: return
         if id not in by_id: fail('Unknown task: '+id); return
         active.add(id)
-        for dep in by_id[id]['dependencies']: visit(dep)
+        for dep in dict.fromkeys(by_id[id]['dependencies'] + by_id[id].get('completion_dependencies', [])): visit(dep)
         active.remove(id); visited.add(id)
     for t in tasks:
         visit(t['id'])
@@ -43,6 +43,9 @@ def validate():
         if s.splitlines()[0]!=f"# {t['id']}｜{t['title']}":fail('Task title drift: '+t['id'])
         deps='**实施依赖：** '+('、'.join(t['dependencies']) or '无')
         if deps not in s.splitlines():fail('Task dependencies drift: '+t['id'])
+        if 'completion_dependencies' in t:
+            complete='**完成依赖：** '+('、'.join(t['completion_dependencies']) or '无')
+            if complete not in s.splitlines(): fail('Task completion dependencies drift: '+t['id'])
         expected=render_cases([c for c in cases if c['task_id']==t['id']])
         if expected not in s: fail('Task acceptance drift: '+t['id'])
         for ref in t['sources']:
@@ -54,7 +57,7 @@ def validate():
         for id in batch['tasks']:
             if id not in by_id:fail('Unknown batch task: '+id);continue
             if id in covered:fail('Repeated completion ownership: '+id)
-            for dep in by_id[id]['dependencies']:
+            for dep in dict.fromkeys(by_id[id]['dependencies'] + by_id[id].get('completion_dependencies', [])):
                 if dep not in covered:fail(f"{batch['id']} schedules {id} before {dep}")
             covered.add(id)
     if covered!=set(by_id):fail('Batches do not cover all tasks')

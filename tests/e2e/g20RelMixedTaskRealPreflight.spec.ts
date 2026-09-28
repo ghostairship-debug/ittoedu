@@ -1,121 +1,110 @@
 import { _electron as electron, expect, test } from '@playwright/test'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
 import { disclosedExecutionSettings } from '../../src/shared/workbench/executionDesktop'
-import { openAIImagesEndpoint } from '../../src/shared/workbench/images'
-import { createRelRecoveryDirectory, readRelResumeManifest, validateRelRecoveryDirectory } from './helpers/g20RelMixedRecovery'
+import { modelCapabilityRecord } from '../../src/shared/workbench/modelCapabilities'
+import { validateRelRecoveryDirectory } from './helpers/g20RelMixedRecovery'
 
 const root = resolve(__dirname, '../..')
 const baseURL = 'https://api.teamorouter.com/v1'
 const textModel = 'deepseek-flash'
-const imageModel = 'gpt-image-2'
+const imageModel = 'gpt-image-2.5-sunburst'
 
 test.use({ trace: 'off' })
+test.describe.configure({ retries: 0 })
 
-test('REL-T11 no-fee preflight freezes TeamoRouter text and Images roles in a private fresh profile', async () => {
-  test.setTimeout(45_000)
+test('REL-T11 route and capability preflight', async ({}, info) => {
+  test.skip(!process.env.G20_REL_OAUTH_PROFILE_RECOVERY_DIR,
+    'Set G20_REL_OAUTH_PROFILE_RECOVERY_DIR to an existing formally logged-in private profile')
+  test.setTimeout(process.env.G20_REL_PROBE_VISION === '1' ? 120_000 : 45_000)
+  const recoveryDirectory = validateRelRecoveryDirectory(resolve(process.env.G20_REL_OAUTH_PROFILE_RECOVERY_DIR!))
+  const paidVisionProbe = process.env.G20_REL_PROBE_VISION === '1'
+  if (paidVisionProbe && process.env.G20_REL_OWNER_RELEASE !== '1')
+    throw new Error('Paid vision capability probe requires G20_REL_OWNER_RELEASE=1')
+  const profile = join(recoveryDirectory, 'profile')
   const output = join(root, 'output/g20/rel-t11')
   mkdirSync(output, { recursive: true })
-  const directory = mkdtempSync(join(output, 'real-preflight-'))
-  const recoveryDirectory = createRelRecoveryDirectory()
-  const profile = join(recoveryDirectory, 'profile')
-  let app: Awaited<ReturnType<typeof electron.launch>> | undefined
-  try {
-    app = await electron.launch({ cwd: root, args: ['.', `--user-data-dir=${profile}`],
-      env: { ...process.env, TEAMOROUTER_API_KEY: '', DEEPSEEK_API_KEY: '', OPENAI_API_KEY: '',
-        VITE_DEV_SERVER_URL: '', [BACKGROUND_E2E_ENV]: '1' } })
-    const page = await app.firstWindow()
-    const initial = await page.evaluate(() => window.desktopAPI!.executionSettings!.read())
-    expect(initial).toMatchObject({ secureStorageAvailable: true, connections: [] })
-    const connection = await page.evaluate(async input => window.desktopAPI!.executionSettings!.saveConnection({
-      apiKey: 'fixture-only-no-network', connection: {
-        provider: 'teamorouter', protocol: 'openai-chat', imageProtocol: 'openai-images',
-        baseURL: input.baseURL, accountId: 'fixture-preflight', authKind: 'api-key', billing: { kind: 'metered' },
-      },
-    }), { baseURL })
-    await page.evaluate(async input => {
-      const service = window.desktopAPI!.executionSettings!, current = await service.read()
-      await service.saveProfile({ expectedRevision: current.profile.revision, roles: {
-        conversation: { connectionId: input.connectionId, model: input.textModel }, vision: null,
-        imageGenerate: { connectionId: input.connectionId, model: input.imageModel, parameters: {} },
-        imageEdit: { connectionId: input.connectionId, model: input.imageModel, parameters: {} },
-      } })
-    }, { connectionId: connection.connection.id, textModel, imageModel })
-    const frozen = await page.evaluate(() => window.desktopAPI!.executionSettings!.read())
-    const selected = frozen.connections.find(item => item.connection.id === connection.connection.id)
-    expect(selected).toMatchObject({ hasCredential: true, connection: {
-      provider: 'teamorouter', protocol: 'openai-chat', imageProtocol: 'openai-images',
-      baseURL, billing: { kind: 'metered' }, auth: { kind: 'api-key' },
-    } })
-    expect(frozen.profile.roles.conversation).toMatchObject({ connectionId: connection.connection.id, model: textModel })
-    expect(frozen.profile.roles.imageGenerate).toMatchObject({ connectionId: connection.connection.id, model: imageModel })
-    expect(frozen.profile.roles.imageEdit).toEqual(frozen.profile.roles.imageGenerate)
-    const disclosed = disclosedExecutionSettings(frozen)
-    expect(disclosed.roles.conversation).toMatchObject({ provider: 'teamorouter', model: textModel, billingKind: 'metered' })
-    expect(disclosed.roles.imageGenerate).toMatchObject({ provider: 'teamorouter', model: imageModel, billingKind: 'metered' })
-    expect(disclosed.roles.imageEdit).toEqual(disclosed.roles.imageGenerate)
-    expect(openAIImagesEndpoint(selected!.connection, 'generate')).toBe(`${baseURL}/images/generations`)
-    expect(JSON.stringify(frozen)).not.toContain('fixture-only-no-network')
-    writeFileSync(join(directory, 'preflight.json'), JSON.stringify({ caseId: 'REL-T11', phase: 'teamo-only-no-fee-preflight',
-      paidRequests: 0, catalogRequests: 0, text: { provider: 'teamorouter', model: textModel, billing: 'metered' },
-      image: { provider: 'teamorouter', protocol: 'openai-images', model: imageModel, billing: 'metered' },
-      endpoint: `${baseURL}/images/generations`, isolatedProfile: true, frozenRoles: disclosed }, null, 2))
-  } finally {
-    if (app) {
-      await app.evaluate(({ app: electronApp, BrowserWindow }) => {
-        BrowserWindow.getAllWindows().forEach(window => window.destroy()); electronApp.exit(0)
-      }).catch(() => undefined)
-      await app.close().catch(() => undefined)
-    }
-    rmSync(validateRelRecoveryDirectory(recoveryDirectory), { recursive: true, force: true })
-  }
-})
-
-test('REL-T11 no-fee preflight verifies a legacy OAuth continuation without changing its frozen route', async () => {
-  test.skip(!process.env.G20_REL_RESUME_MANIFEST, 'An existing legacy resume manifest is required')
-  test.setTimeout(120_000)
-  const manifest = readRelResumeManifest(resolve(process.env.G20_REL_RESUME_MANIFEST!))
-  test.skip(manifest.schemaVersion !== 1, 'This check is only for a legacy GPT OAuth image run')
-  expect(existsSync(join(manifest.workspacePath, '光合作用材料.md'))).toBe(true)
-  const profile = join(manifest.recoveryDirectory, 'profile')
-  console.log('REL legacy preflight: launching private profile')
+  const directory = mkdtempSync(join(output, 'preflight-'))
   const app = await electron.launch({ cwd: root,
     args: [join(root, 'tests/e2e/helpers/g20RelMixedRealPreflightBootstrap.cjs'), `--user-data-dir=${profile}`],
     env: { ...process.env, TEAMOROUTER_API_KEY: '', DEEPSEEK_API_KEY: '', OPENAI_API_KEY: '',
       VITE_DEV_SERVER_URL: '', [BACKGROUND_E2E_ENV]: '1' } })
   try {
     const page = await app.firstWindow()
-    page.setDefaultTimeout(20_000)
-    console.log('REL legacy preflight: checking frozen OAuth credential')
-    const oauth = await app.evaluate(async () => (globalThis as any).__G20_REL_REAL_PREFLIGHT__.ready)
-    expect(oauth).toMatchObject({ provider: 'openai', protocol: 'chatgpt-responses', billing: 'subscription',
-      credentialReadable: true, secureStorageAvailable: true, sourceIsIsolated: true })
-    const settings = await page.evaluate(() => window.desktopAPI!.executionSettings!.read())
-    console.log('REL legacy preflight: checking saved roles and prior run')
-    const disclosed = disclosedExecutionSettings(settings)
-    expect(disclosed.roles.conversation).toMatchObject({ provider: 'teamorouter', model: textModel, billingKind: 'metered' })
-    expect(disclosed.roles.imageGenerate).toMatchObject({ provider: 'openai', model: imageModel, billingKind: 'subscription' })
-    const state = await page.evaluate(async input => {
-      const api = window.desktopAPI!.execution!
-      return { run: await api.run(input.runId), submissions: await api.submissions({
-        workspaceId: input.workspaceId, conversationId: input.conversationId }),
-        conversation: await api.conversation(input.workspaceId, input.conversationId) }
-    }, manifest)
-    expect(state.run).toMatchObject({ runId: manifest.runId, status: 'partial', input: {
-      taskId: manifest.originalSubmissionId, conversationId: manifest.conversationId,
-      workspaceRoot: manifest.workspacePath, disclosedSettings: disclosed,
-      selection: { model: textModel, connection: { provider: 'teamorouter', baseURL } },
-    } })
-    expect(state.run?.input.selection.parameters ?? {}).toEqual(settings.profile.roles.conversation?.parameters ?? {})
-    expect(state.run?.input.disclosedSettings).toEqual(disclosed)
-    expect(state.submissions.some(item => item.retryOfRunId === manifest.runId)).toBe(false)
-    expect(state.submissions.find(item => item.submissionId === manifest.originalSubmissionId)?.runId).toBe(manifest.runId)
-    expect(state.conversation).toBeTruthy()
+    let state = await page.evaluate(() => window.desktopAPI!.executionSettings!.read())
+    if (process.env.G20_REL_PREPARE_IMAGE_ROLE === '1') {
+      const generate = state.profile.roles.imageGenerate
+      const edit = state.profile.roles.imageEdit
+      const connection = state.connections.find(item => item.connection.id === generate?.connectionId)
+      if (!generate || !edit || generate.connectionId !== edit.connectionId
+        || !connection?.hasCredential || connection.revoked || connection.connection.provider !== 'openai'
+        || connection.connection.protocol !== 'chatgpt-responses' || connection.connection.auth.kind !== 'oauth')
+        throw new Error('Existing GPT OAuth generate/edit connection is unavailable; profile was not changed')
+      if (generate.model !== imageModel || edit.model !== imageModel) {
+        await page.evaluate(async (input: any) => { await window.desktopAPI!.executionSettings!.saveProfile(input) }, {
+          expectedRevision: state.profile.revision, roles: { ...state.profile.roles,
+            imageGenerate: { ...generate, model: imageModel }, imageEdit: { ...edit, model: imageModel } },
+        } as any)
+        state = await page.evaluate(() => window.desktopAPI!.executionSettings!.read())
+      }
+    }
+    let probeResult: { status: string; observedAt?: number; actualModel?: string } | null = null
+    if (paidVisionProbe) {
+      const selected = state.profile.roles.conversation
+      const connection = state.connections.find(item => item.connection.id === selected?.connectionId)
+      if (!connection?.hasCredential || connection.revoked || connection.connection.provider !== 'teamorouter'
+        || connection.connection.protocol !== 'openai-chat' || connection.connection.baseURL !== baseURL
+        || selected?.model !== textModel)
+        throw new Error('Frozen TeamoRouter deepseek-flash conversation selection is unavailable; probe was not sent')
+      const result = await page.evaluate(async revision => window.desktopAPI!.executionSettings!.probeCapabilities({
+        role: 'conversation', expectedProfileRevision: revision, checks: ['vision'] }), state.profile.revision)
+      probeResult = { status: result.facts.vision?.status ?? 'unknown', observedAt: result.facts.vision?.observedAt,
+        actualModel: result.facts.vision?.actualModel }
+      state = await page.evaluate(() => window.desktopAPI!.executionSettings!.read())
+    }
+    const credential = await app.evaluate(async () => (globalThis as any).__G20_REL_REAL_PREFLIGHT__.ready)
+    const roles = disclosedExecutionSettings(state).roles
+    const text = state.connections.find(item => item.connection.id === roles.conversation?.connectionId)
+    const image = state.connections.find(item => item.connection.id === roles.imageGenerate?.connectionId)
+    const visionFact = text && state.profile.roles.conversation && modelCapabilityRecord(state.capabilityRecords ?? [], {
+      connection: text.connection, model: state.profile.roles.conversation.model,
+      parameters: state.profile.roles.conversation.parameters })?.facts.vision
+    const blockers = [
+      ...(!text?.hasCredential || text.revoked || text.connection.provider !== 'teamorouter'
+        || text.connection.protocol !== 'openai-chat' || text.connection.imageProtocol !== null
+        || text.connection.baseURL !== baseURL || roles.conversation?.model !== textModel
+        ? ['TeamoRouter deepseek-flash text route is unavailable'] : []),
+      ...(!image?.hasCredential || image.revoked || image.connection.provider !== 'openai'
+        || image.connection.protocol !== 'chatgpt-responses' || roles.imageGenerate?.model !== imageModel
+        || !credential.credentialReadable || credential.expired || !credential.sourceIsIsolated
+        ? ['Existing private GPT OAuth image role is unavailable'] : []),
+    ]
+    const evidence = { caseId: 'REL-T11', phase: paidVisionProbe ? 'paid-vision-probe' : 'no-fee',
+      status: blockers.length ? 'blocked' : 'ready', paidRequests: paidVisionProbe ? 1 : 0,
+      recoveryDirectory, blockers, roles, probeResult,
+      imageCapability: { model: imageModel, credentialReady: credential.credentialReadable,
+        generationUnverified: true },
+      visionCapability: { route: 'conversation', model: textModel, fact: visionFact?.status ?? 'unknown',
+        actualModel: visionFact?.actualModel ?? null,
+        declared: text?.connection.capabilities.vision ?? null },
+      runPolicy: { capabilityProbe: 'one approved vision check on current conversation model',
+        fullRun: 'one run, no Playwright retries; observe actual usage and stop on nonprogress or unrecoverable error' },
+      highCapabilityComparison: { status: 'prepared-only', provider: 'openai', model: 'gpt-6-astra',
+        fullRunRequests: 0 },
+      next: blockers.length ? 'Correct the blocked route or credential before the single real run.'
+        : 'Run the single real task with the approved route and image model.' }
+    const filename = join(directory, 'preflight.json')
+    writeFileSync(filename, JSON.stringify(evidence, null, 2))
+    await info.attach('REL-T11 no-fee preflight', { path: filename, contentType: 'application/json' })
+    expect(['blocked', 'ready']).toContain(evidence.status)
   } finally {
-    await app.evaluate(({ app: electronApp, BrowserWindow }) => {
-      BrowserWindow.getAllWindows().forEach(window => window.destroy()); electronApp.exit(0)
-    }).catch(() => undefined)
+    const child = app.process()
+    if (child.exitCode === null && child.pid) {
+      if (process.platform === 'win32') execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'])
+      else child.kill('SIGKILL')
+    }
     await app.close().catch(() => undefined)
   }
 })

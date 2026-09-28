@@ -13,7 +13,7 @@ import { AttachmentError, AttachmentService, type AttachmentLiveConversation } f
 import { ExecutionSettingsError, type ExecutionSettingsStore } from '../providers/ExecutionSettingsStore'
 import type { DocumentHostService } from '../DocumentHostService'
 import { ConversationStore } from '../conversations/ConversationStore'
-import { ExecutionEngine } from './ExecutionEngine'
+import { ExecutionEngine, trustedRunDocumentIds } from './ExecutionEngine'
 import { VisualAnalysisService } from './VisualAnalysisService'
 import { ExecutionRunStore } from './ExecutionRunStore'
 import { captureMainTiming, ExecutionEventStore, type ExecutionTimingMark, type ExecutionTimingStage } from './ExecutionEventStore'
@@ -25,6 +25,7 @@ import { DesktopOperationError } from '../../errors'
 import { DEFAULT_PERMISSION_MODE } from '../../../shared/workbench/executionPermission'
 import { executionInputError } from './executionInputErrors'
 import { AgentFileService } from './AgentFileService'
+import { fileCreated } from './executionOutcome'
 import { diagnosticLog } from '../../diagnosticLog'
 import { readTarget } from '../../../core/tools/ToolTargets'
 import { locateCourseLayer } from '../../../core/drivers/course/layerProperties'
@@ -456,7 +457,7 @@ export class ExecutionDesktopService {
     const continuation = previous ? this.continuation(previous) : next.continuation
     await this.startSubmission(next, continuation)
   }
-  private async continuationDocuments(previous: ExecutionRunRecord, documents: ExecutionDocumentReference[]): Promise<ExecutionDocumentReference[]> {
+  private async continuationLineage(previous: ExecutionRunRecord): Promise<ExecutionRunRecord[]> {
     const lineage: ExecutionRunRecord[] = [], seen = new Set<string>()
     let cursor: ExecutionRunRecord | null = previous
     while (cursor) {
@@ -465,6 +466,41 @@ export class ExecutionDesktopService {
       cursor = cursor.continuedFrom ? await this.engine.read(cursor.continuedFrom) : null
       if (lineage[0]!.continuedFrom && !cursor) throw new Error('先前运行记录缺失，不能安全继续')
     }
+    return lineage
+  }
+  /** Restore the same dirty session before preparation or a new file.open can bind its old disk image. */
+  private async restoreContinuationDocuments(lineage: readonly ExecutionRunRecord[]): Promise<void> {
+    const trusted = new Set(lineage.flatMap(trustedRunDocumentIds))
+    const paths = new Map<string, string>()
+    const pathKey = (value: string) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value)
+    const conflict = () => new DesktopOperationError('execution-recovery-binding-conflict', '恢复稿与已打开文件冲突',
+      '上次任务的未保存修改仍在恢复稿中，但同一文件已被另一个文档会话打开。',
+      '请先处理已打开文件和恢复稿，再继续原任务；未保存修改未被覆盖。')
+    for (const run of lineage) for (const tool of run.tools) {
+      if (tool.state !== 'returned' || (tool.call.name !== 'file.open' && !fileCreated(tool.call.name, tool.result))) continue
+      const data = tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
+        ? tool.result.data as { documentId?: unknown; path?: unknown } : null
+      if (typeof data?.documentId !== 'string' || typeof data.path !== 'string' || !trusted.has(data.documentId)) continue
+      const prior = paths.get(data.documentId)
+      if (prior && pathKey(prior) !== pathKey(data.path)) throw conflict()
+      paths.set(data.documentId, data.path)
+    }
+    const recoverable = await this.options.documents.internalAPI.recoverable()
+    for (const recovery of recoverable.filter(snapshot => trusted.has(snapshot.documentId))) {
+      const expectedPath = paths.get(recovery.documentId)
+      if (expectedPath && (recovery.binding.kind !== 'file' || pathKey(recovery.binding.path) !== pathKey(expectedPath))) throw conflict()
+      const live = this.options.documents.registry.list()
+      const recoveryPath = recovery.binding.kind === 'file' ? recovery.binding.path : null
+      if (recoveryPath && live.some(snapshot => snapshot.documentId !== recovery.documentId
+        && snapshot.binding.kind === 'file' && pathKey(snapshot.binding.path) === pathKey(recoveryPath))) throw conflict()
+      if (!live.some(snapshot => snapshot.documentId === recovery.documentId)) {
+        try { await this.options.documents.internalAPI.restore(recovery.documentId) }
+        catch (error) { throw new DesktopOperationError('execution-recovery-failed', '恢复稿无法打开',
+          '上次任务的未保存修改尚未恢复，原任务不能安全继续。', '请先处理文档恢复问题，再继续原任务。', { cause: error }) }
+      }
+    }
+  }
+  private async continuationDocuments(lineage: readonly ExecutionRunRecord[], documents: ExecutionDocumentReference[]): Promise<ExecutionDocumentReference[]> {
     const refreshed: ExecutionDocumentReference[] = []
     for (const reference of documents) {
       let expected = reference.revision
@@ -523,8 +559,10 @@ export class ExecutionDesktopService {
         }
       }
       const snapshot = await this.options.documents.registry.get(reference.documentId).drain()
-      if (snapshot.epoch !== reference.epoch || snapshot.revision !== expected) throw executionInputError('document-range-changed')
-      refreshed.push({ ...reference, revision: expected })
+      const wholeDocument = !reference.selection?.length && reference.writable.every(target => target.kind === 'document')
+      if (snapshot.revision !== expected || snapshot.epoch !== reference.epoch && !(snapshot.recovered && wholeDocument))
+        throw executionInputError('document-range-changed')
+      refreshed.push({ ...reference, epoch: snapshot.epoch, revision: expected })
     }
     return refreshed
   }
@@ -566,7 +604,9 @@ export class ExecutionDesktopService {
     this.timing(input.conversationId, input.submissionId, `${input.submissionId}:prepare:start`, 'submission.prepare.started')
     let record: StoredExecutionSubmission
     try {
-      const preparedInput = previous ? { ...input, documents: await this.continuationDocuments(previous, input.documents) } : input
+      const lineage = previous ? await this.continuationLineage(previous) : null
+      if (lineage) await this.restoreContinuationDocuments(lineage)
+      const preparedInput = lineage ? { ...input, documents: await this.continuationDocuments(lineage, input.documents) } : input
       record = await this.prepareSubmission(preparedInput, current, digest)
       if (previous) {
         // The public submission remains the user's original frozen payload so
