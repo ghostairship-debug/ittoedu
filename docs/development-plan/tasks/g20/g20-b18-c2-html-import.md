@@ -1,0 +1,8 @@
+# g20-b18-c2-html-import 一次事务按页导入 html
+
+- Status / Owner: queued / 主会话激活后指派 6Sol/xhigh
+- Outcome / Evidence: 现有 `HtmlImportService.ts:49-102` 一次只生成一个 Runtime、`:154` 把外层 operationId 直接当 `build.import` callId、`:123-127` 的 cancel 停整个 gateway run。目标：`html.import` 方案 (a) 分页拆分，多页装入同一候选，一次 S13 `build.check` 与一次 `build.import`，幂等回执，单 job 取消。
+- Write scope: `src/core/tools/HtmlImportTools.ts`、`src/main/workbench/htmlImport/splitHtmlSections.ts`、`HtmlImportToolService.ts`、`HtmlImportOperationStore.ts`（均新）；`HtmlImportService.ts`、`prepareHtmlCourseCandidate.ts`、`resolveHtmlImportTarget.ts`、`readHtmlClosure.ts`、`HtmlImportDesktopService.ts`（改，仅适配单 job cancel 与已有整份模式）；`tests/unit/g20HtmlSectionSplit.test.ts`、`tests/integration/g20M24HtmlImport.test.ts`（新）、`tests/integration/g20HtmlImport.test.ts`（加反例，保留原断言）。禁止：共享 scanner、Gateway、HostToolServices、ControlledBuildService、正式 Schema、M23 文件、`extractHtmlResources.ts`。详细边界见 `B18_执行卡.md` §3 C2。
+- Write locks: main-preload
+- Acceptance: 输入 `{source, target, mode?, destinations}`，source 为已授权 HTML text 文档短句柄，从 canonical source 取正文而非陈旧磁盘，资源根由宿主从 binding 冻结；外层 `operationIdentity` 与服务派生的 `html:<outer>:create`、`:asset:<id>`、`:project`、`:check`、`:commit` child callId 严格分开，绝不复用外层 callId；操作记录执行前持久化，丢 ACK 后同 operation 返回既有 receipt 不重做；lookup 先于重新解析句柄与读取当前源文；整批失败零写入、一次 undo 全撤回；远程脚本在创建 scratch 前拒绝；重复 data URI 复用已有 SHA-256 key；Flow 每源页独立段落锚点，Spatial 明确不支持；cancel 只停该 job。
+- Validation: `npm run typecheck`；`npx vitest run --config output/tmp/vitest.fsallow.config.mts tests/unit/g20HtmlSectionSplit.test.ts tests/integration/g20M24HtmlImport.test.ts tests/integration/g20HtmlImport.test.ts`。门槛：B0-a，且 B1 已提供 M23 的 source snapshot 接口。
