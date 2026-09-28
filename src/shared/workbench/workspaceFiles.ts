@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { documentRelativePathSchema } from '../document/resources'
 import { slideCanvasSchema } from '../slideCanvas'
+import { htmlPreviewRequestSchema, type HtmlPreviewRequest, type HtmlPreviewResponse } from './htmlPreview'
 
 export type WorkspaceEntryKind = 'file' | 'directory'
 export type WorkspaceOperationStatus = 'success' | 'cancelled' | 'partial' | 'failed'
@@ -102,12 +103,17 @@ export const workspaceFilesRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('move'), ...mutation, sourceEntryIds: z.array(id).min(1).max(200), targetWorkspaceId: id.optional(), targetDirectoryId: id, resourcePolicy: z.enum(['copy', 'cancel']).optional() }).strict(),
   z.object({ type: z.literal('trash'), ...mutation, entryIds: z.array(id).min(1).max(200) }).strict(),
   z.object({ type: z.literal('reveal'), ...mutation, entryId: id }).strict(),
+  // HTML preview lease/edit family (M23). It carries no workspaceId on purpose: the
+  // open document session already bounds what the preview may read, and the router
+  // recognises this family before the workspace-authorization branch.
+  ...htmlPreviewRequestSchema.options,
 ])
 export type WorkspaceFilesRequest = z.infer<typeof workspaceFilesRequestSchema>
 export type WorkspaceFilesResponse<T extends WorkspaceFilesRequest> = T extends { type: 'root' } ? RegisteredWorkspaceRoot
   : T extends { type: 'watch' } ? { workspaceId: string; watching: boolean }
   : T extends { type: 'list' } ? WorkspaceListPage : T extends { type: 'resolve' } ? ResolvedWorkspaceEntry
-  : T extends { type: 'read-media' } ? WorkspaceMediaFile : T extends { type: 'read-pptx' } ? WorkspacePptxFile : WorkspaceOperationResult
+  : T extends { type: 'read-media' } ? WorkspaceMediaFile : T extends { type: 'read-pptx' } ? WorkspacePptxFile
+  : T extends HtmlPreviewRequest ? HtmlPreviewResponse<T> : WorkspaceOperationResult
 export interface WorkspaceFilesChange { workspaceId: string }
 export interface WorkspaceFilesAPI {
   subscribe?(listener: (event: WorkspaceFilesChange) => void): () => void

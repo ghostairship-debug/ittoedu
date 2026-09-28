@@ -5,6 +5,7 @@ import { WORKSPACE_PPTX_MAX_BYTES, workspaceFilesRequestSchema, type RegisteredW
 import { UserFacingError } from '../../shared/errors'
 import type { WorkspaceFiles } from './WorkspaceFiles'
 import { createBlankCourseProject } from '../../core/course/createCourseProject'
+import { isHtmlPreviewRequest, type HtmlPreviewHost } from '../../shared/workbench/htmlPreview'
 import { createDefaultTeacherControllerPackage } from '../../shared/defaultTeacherControllerComponent'
 import { createCourseProjectArchive, openCourseProjectArchive } from '../../core/drivers/codecs/courseProjectArchive'
 import { readWorkspaceMediaSelection } from '../fileDialogs'
@@ -19,7 +20,10 @@ export class WorkspaceFilesDesktopService {
   private readonly listeners = new Set<(event: WorkspaceFilesChange) => void>()
   private readonly watchers = new Map<string, () => void>()
   private readonly preparedCourses = new Map<string, { input: string; bytes: Uint8Array }>()
+  private previewHost: HtmlPreviewHost | null = null
   constructor(private readonly files: WorkspaceFiles, private readonly relocateConversationHomes?: RelocateConversationHomes) { this.operate.subscribe = this.subscribe }
+  /** Inject the HTML preview service (B2). Until then preview requests fail closed. */
+  attachHtmlPreview(host: HtmlPreviewHost) { this.previewHost = host }
   readonly subscribe = (listener: (event: WorkspaceFilesChange) => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   dispose() { for (const close of this.watchers.values()) close(); this.watchers.clear(); this.listeners.clear() }
   private watch(workspaceId: string) {
@@ -90,6 +94,19 @@ export class WorkspaceFilesDesktopService {
       const root = this.authorized.get(pathKey(input.directory))
       if (!root) throw new Error('请先通过工作空间选择器授权此目录')
       return { ...root }
+    }
+    // Preview requests carry no workspaceId: the open document session bounds what
+    // the preview may read. Route them before the workspace guard, and never let
+    // them reach the file copy/move branches below.
+    if (isHtmlPreviewRequest(input)) {
+      const host = this.previewHost
+      if (!host) throw new UserFacingError('HTML 预览未就绪', '预览服务尚未连接。', '请稍后重试；若持续失败请反馈。')
+      switch (input.type) {
+        case 'html-preview.open': return await host.open(input)
+        case 'html-preview.release': return await host.release(input)
+        case 'html-preview.resolve-target': return await host.resolveTarget(input)
+        case 'html-preview.edit': return await host.edit(input)
+      }
     }
     if (![...this.authorized.values()].some(root => root.workspaceId === input.workspaceId)) throw new Error('工作空间尚未授权')
     if (input.type === 'move' && input.targetWorkspaceId
