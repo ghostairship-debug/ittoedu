@@ -1,5 +1,5 @@
 import { saveDocumentWithDialog } from './workbench/documentSaveDialog'
-import { installWorkbenchToolServices, workbenchImageService, workbenchImageSelection } from './workbench/workbenchToolServices'
+import { acceptWorkbenchExportBuildReply, disposeWorkbenchExportPort, installWorkbenchToolServices, workbenchImageService, workbenchImageSelection } from './workbench/workbenchToolServices'
 import { ImageResultsDesktopService } from './workbench/images/ImageResultsDesktopService'
 import { HtmlImportDesktopService } from './workbench/htmlImport/HtmlImportDesktopService'
 import { closeDocumentWithDialog } from './workbench/documentCloseDialog'
@@ -10,9 +10,12 @@ import { operateExecutionSettings } from './workbench/providers/executionSetting
 import { executionDesktopService } from './workbench/execution/ExecutionDesktopService'
 import { installDocumentSaveEvents } from './workbench/execution/DocumentSaveEvents'
 import { attachmentsDesktopService } from './workbench/attachments/attachmentsDesktopService'
-import { operateWorkspaceFiles, subscribeWorkspaceFilesChanges } from './workbench/workspaceFilesDesktopService'
+import { attachHtmlPreviewHost, operateWorkspaceFiles, subscribeWorkspaceFilesChanges } from './workbench/workspaceFilesDesktopService'
+import { HtmlPreviewService } from './workbench/htmlPreview/HtmlPreviewService'
+import { HtmlSourceEditService } from './workbench/htmlPreview/HtmlSourceEditService'
+import { setHtmlPreviewProtocolHandler } from './protocols'
 import path from 'node:path'
-import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
+import type { BrowserWindow, IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { app, dialog, ipcMain } from 'electron'
 import { documentHost } from './workbench/documentHost'
 import { documentHostRequestSchema } from '../shared/workbench/desktop'
@@ -81,6 +84,15 @@ export interface IpcContext {
   getRendererEntryUrl(): string | null
   appState: AppState
 }
+
+const documentExportBuildReplySchema = z.object({
+  requestId: z.string().uuid(),
+  identity: z.object({ documentId: z.string().min(1), epoch: z.string().min(1), revision: z.number().int().nonnegative(), projectId: z.string().min(1) }).strict(),
+  status: z.enum(['generated', 'failed', 'cancelled']),
+  files: z.array(z.object({ relativePath: z.string(), mimeType: z.string(), bytes: z.instanceof(Uint8Array) }).strict()).max(1).optional(),
+  warnings: z.array(z.string()).max(100),
+  reason: z.string().max(4096).optional(),
+}).strict()
 
 const bytesSchema = z.custom<Uint8Array>(
   (value) => value instanceof Uint8Array,
@@ -266,8 +278,19 @@ let documentSaveEvents: ReturnType<typeof installDocumentSaveEvents> | undefined
 let elementCardCleanup: (() => void) | undefined
 let imageResults: ImageResultsDesktopService | undefined
 let workspaceFileEventGeneration = 0
+let htmlPreview: HtmlPreviewService | undefined
+let htmlPreviewClosedCleanup: (() => void) | undefined
+export function releaseAllHtmlPreviewLeases(): void { htmlPreview?.releaseAll() }
 export function registerIpcHandlers(context: IpcContext): void {
   installWorkbenchToolServices(context)
+  ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildReply)
+  ipcMain.on(IPC_CHANNELS.documentExportBuildReply, (event: IpcMainEvent, raw: unknown) => {
+    try {
+      assertTrustedIpcSender(event, context.getMainWindow(), context.getRendererEntryUrl())
+      const reply = documentExportBuildReplySchema.parse(raw)
+      acceptWorkbenchExportBuildReply(reply, event.sender.id)
+    } catch { /* A foreign, malformed, stale or duplicate export reply cannot write a file. */ }
+  })
   const generation = ++workspaceFileEventGeneration
   const imageResultsReady = executionDesktopService().then(execution => {
     if (generation !== workspaceFileEventGeneration) throw new Error('图片结果服务已关闭')
@@ -337,6 +360,28 @@ export function registerIpcHandlers(context: IpcContext): void {
     message: '连接配置未能保存，请保留当前设置。', suggestion: '请检查连接配置及系统安全存储。',
   }, async (_event, args) => operateExecutionSettings(requireSingleArgument(args)))
   const documents = documentHost()
+  htmlPreviewClosedCleanup?.()
+  htmlPreview?.dispose()
+  const preview = new HtmlPreviewService({
+    readDocument: documentId => documents.registry.get(documentId).drain(),
+    networkOwner: () => mainPreviewNetworkPolicy.currentDocumentOwner(),
+    currentMainFrame: () => {
+      const window = context.getMainWindow()
+      if (!window || window.isDestroyed() || window.webContents.mainFrame.detached) return null
+      const frame = window.webContents.mainFrame
+      return { webContentsId: window.webContents.id, processId: frame.processId, frameToken: frame.frameToken }
+    },
+    agentBundlePath: path.join(app.getAppPath(), 'dist-renderer', 'html-preview-agent.iife.js'),
+  })
+  preview.setEditPort(new HtmlSourceEditService({
+    readDocument: documentId => documents.internalAPI.read(documentId),
+    execute: operation => documents.internalAPI.dispatch(operation),
+    withFileAccess: work => documents.fileCoordinator.withFileAccess(work),
+  }))
+  htmlPreview = preview
+  setHtmlPreviewProtocolHandler(preview.handleProtocolRequest)
+  htmlPreviewClosedCleanup = documents.subscribeClosed(documentId => preview.releaseDocument(documentId))
+  void attachHtmlPreviewHost(preview).catch(error => diagnosticLog.append({ source: 'main', message: 'HTML 预览服务未能启动', details: { reason: error instanceof Error ? error.message : String(error) } }))
   const htmlImport = new HtmlImportDesktopService({
     documents,
     chooseSource: async () => {
@@ -349,6 +394,7 @@ export function registerIpcHandlers(context: IpcContext): void {
     message: 'HTML 页面未能导入。', suggestion: '请检查来源文件与当前目标后重试。',
   }, async (_event, args) => htmlImport.import(requireSingleArgument(args)))
   documents.setEventSink(event => {
+    if (event.type === 'changed') preview.releaseChangedBinding(event.snapshot)
     const window = context.getMainWindow()
     if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.documentEvent, event)
   })
@@ -915,6 +961,11 @@ export function registerIpcHandlers(context: IpcContext): void {
 
 export function unregisterIpcHandlers(): void {
   workspaceFileEventGeneration++
+  ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildReply)
+  disposeWorkbenchExportPort()
+  htmlPreviewClosedCleanup?.(); htmlPreviewClosedCleanup = undefined
+  htmlPreview?.dispose(); htmlPreview = undefined
+  setHtmlPreviewProtocolHandler(null)
   stopWorkspaceFileEvents?.(); stopWorkspaceFileEvents = undefined
   const saves = documentSaveEvents; documentSaveEvents = undefined
   elementCardCleanup?.(); elementCardCleanup = undefined

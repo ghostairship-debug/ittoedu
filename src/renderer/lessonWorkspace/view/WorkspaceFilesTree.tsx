@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type DragEvent } from 'react'
 import { ChevronRight, File, FileText, Folder, FolderOpen, Presentation } from 'lucide-react'
-import type { LessonDirectoryEntry } from '../../../shared/lessonDesktopContract'
+import type { LessonDesktopRequest, LessonDesktopResult, LessonDirectoryEntry } from '../../../shared/lessonDesktopContract'
 import { WORKSPACE_PPTX_MAX_BYTES, type RegisteredWorkspaceRoot, type WorkspaceFilesAPI, type WorkspaceFilesRequest, type WorkspaceListItem, type WorkspaceOperationResult } from '../../../shared/workbench/workspaceFiles'
 import type { SaveDirectoryContext } from '../../../shared/workbench/desktop'
 import './WorkspaceFilesTree.css'
@@ -14,12 +14,12 @@ import { CommandMenuItems, ContextMenu, moveMenuFocus } from '../../editing/comm
 import { explorerContextCommands, explorerNewCommands, type ExplorerCommandPorts } from './explorerCommands'
 
 type Entry = Extract<WorkspaceListItem, { status: 'accessible' }>
-type Dialog = 'create-markdown' | 'create-course' | 'create-text' | 'mkdir' | 'rename' | 'copy' | 'move' | 'trash'
+type Dialog = 'create-markdown' | 'create-course' | 'create-text' | 'create-html' | 'mkdir' | 'rename' | 'copy' | 'move' | 'trash'
 type Row = { entry: Entry; parentId: string }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 function icon(name: string) { return /\.(md|markdown)$/i.test(name) ? <FileText size={15} /> : /\.h5lesson$/i.test(name) ? <Presentation size={15} /> : <File size={15} /> }
-export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFile, onDirectory, onScope, onSaveDirectoryChange, onImportHtml }: {
-  directory: string; files: WorkspaceFilesAPI; refreshVersion?: number
+export function WorkspaceFilesTree({ directory, files, operation, refreshVersion = 0, onFile, onDirectory, onScope, onSaveDirectoryChange, onImportHtml }: {
+  directory: string; files: WorkspaceFilesAPI; operation?(request: LessonDesktopRequest): Promise<LessonDesktopResult>; refreshVersion?: number
   onFile(entry: LessonDirectoryEntry): void; onDirectory(path: string): void
   onScope?(path: string, kind: 'folder' | 'file', workspaceId?: string): void
   onSaveDirectoryChange?(directory: SaveDirectoryContext | null): void
@@ -220,13 +220,13 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
     if (type === 'rename') {
       setName(single?.name ?? '')
       setDialog(type)
-    } else if (type === 'create-markdown' || type === 'create-course' || type === 'create-text' || type === 'mkdir') {
+    } else if (type === 'create-markdown' || type === 'create-course' || type === 'create-text' || type === 'create-html' || type === 'mkdir') {
       const targetDir = targetDirectory
       let entries = targetDir ? pagesRef.current[targetDir] : undefined
       if (!entries && targetDir && root) {
         entries = await load(targetDir, root)
       }
-      setName(computeDefaultName(type, entries))
+      setName(type === 'create-html' ? uniqueFilename('新建 HTML 文档', '.html', entries) : computeDefaultName(type, entries))
       if (type === 'create-course') setCanvasPreset(SLIDE_CANVAS_PRESETS[0]!.id)
       setDialog(type)
     } else {
@@ -303,10 +303,10 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
   const submit = () => {
     if (!root || !dialog) return
     if (dialog === 'mkdir' || dialog.startsWith('create-')) {
-      const filename = normalizeNewFilename(dialog as CreateFileType, name)
+      const filename = dialog === 'create-html' ? (/\.html?$/i.test(name.trim()) ? name.trim() : `${name.trim()}.html`) : normalizeNewFilename(dialog as CreateFileType, name)
       const preset = SLIDE_CANVAS_PRESETS.find(item => item.id === canvasPreset) ?? SLIDE_CANVAS_PRESETS[0]!
       if (dialog === 'create-course') void run({ type: 'create-course', ...common(), targetDirectoryId: targetDirectory!, name: filename, canvas: { width: preset.width, height: preset.height } })
-      else void run({ type: dialog as 'mkdir' | 'create-markdown' | 'create-text', ...common(), targetDirectoryId: targetDirectory!, name: filename })
+      else void run({ type: dialog === 'create-html' ? 'create-text' : dialog as 'mkdir' | 'create-markdown' | 'create-text', ...common(), targetDirectoryId: targetDirectory!, name: filename })
     } else if (dialog === 'rename' && single) void run({ type: 'rename', ...common(), sourceEntryId: single.entryId, name: name.trim() })
     else if (dialog === 'copy' || dialog === 'move') void run({ type: dialog, ...common(), sourceEntryIds: selected.map(row => row.entry.entryId), targetDirectoryId: destination ?? root.rootEntryId })
     else if (dialog === 'trash') void run({ type: 'trash', ...common(), entryIds: selected.map(row => row.entry.entryId) })
@@ -361,6 +361,7 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
   const commandPorts: ExplorerCommandPorts = {
     create: type => action(type), newFromPptx: choosePptx, importPptx: () => { if (pptxRow) importPptx(pptxRow) },
     importHtml: () => { if (root && menu && onImportHtml) { onImportHtml({ workspaceId: root.workspaceId, directoryEntryId: menu.directoryEntryId }, menu.sourceEntryId); setMenu(undefined) } },
+    openHtmlExternal: () => { if (root && menu?.sourceEntryId) { if (!operation) { setError('当前界面不能用浏览器打开文件'); return } void files({ type: 'resolve', workspaceId: root.workspaceId, entryId: menu.sourceEntryId }).then(value => operation({ operation: 'open-external', path: value.resolvedPath })).then(result => { if (result.opened === false) throw new Error(result.openError ?? '没有可用的关联程序') }).catch(reason => setError(message(reason))); setMenu(undefined) } },
     rename: () => action('rename'), copy: () => copy('copy'), cut: () => copy('move'), paste,
     copyTo: () => action('copy'), moveTo: () => action('move'), trash: () => action('trash'),
     copyPath: () => { void copyPath().catch(reason => setError(message(reason))) },
@@ -369,7 +370,7 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
   const renderEntries = (id: string): React.ReactNode => <ul role="group" className="lesson-directory-tree">{(pages[id] ?? []).map(entry => entry.status === 'blocked' ? <li key={`blocked:${entry.name}`}><span>{entry.name}（无法访问）</span></li> : <li role="treeitem" aria-selected={selection.has(entry.entryId)} aria-expanded={entry.kind === 'directory' ? expanded.has(entry.entryId) : undefined} key={entry.entryId} data-kind={entry.kind} data-open={expanded.has(entry.entryId)}>
     <div className="workspace-tree-row" data-drop={dropTarget === entry.entryId} {...(entry.kind === 'directory' ? droppable(entry.entryId) : {})}>
       {entry.kind === 'directory' && <button type="button" className="workspace-tree-toggle" aria-label={`${expanded.has(entry.entryId) ? '折叠' : '展开'} ${entry.name}`} onClick={() => { setExpanded(value => { const next = new Set(value); if (next.has(entry.entryId)) next.delete(entry.entryId); else next.add(entry.entryId); return next }) }}><ChevronRight size={14} /></button>}
-      <button type="button" className="lesson-tree-row" data-entry-id={entry.entryId} aria-pressed={selection.has(entry.entryId)} ref={element => { if (element) buttons.current.set(entry.entryId, element); else buttons.current.delete(entry.entryId) }} draggable={!busy} onDragStart={event => { writeWorkspaceEntryDrag(event.dataTransfer, root!.workspaceId, selection.has(entry.entryId) ? selected.map(row => row.entry) : [entry]) }} onClick={event => choose({ entry, parentId: id }, event)} onDoubleClick={() => { void open(entry).catch(reason => setError(message(reason))) }} onContextMenu={event => { event.preventDefault(); if (!selection.has(entry.entryId)) choose({ entry, parentId: id }); setMenu({ x: event.clientX, y: event.clientY, directoryEntryId: entry.kind === 'directory' ? entry.entryId : id, htmlImport: entry.kind === 'directory' ? 'pick' : /\.html$/i.test(entry.name) ? 'selected' : null, ...(entry.kind === 'file' && /\.html$/i.test(entry.name) ? { sourceEntryId: entry.entryId } : {}) }) }}>
+      <button type="button" className="lesson-tree-row" data-entry-id={entry.entryId} aria-pressed={selection.has(entry.entryId)} ref={element => { if (element) buttons.current.set(entry.entryId, element); else buttons.current.delete(entry.entryId) }} draggable={!busy} onDragStart={event => { writeWorkspaceEntryDrag(event.dataTransfer, root!.workspaceId, selection.has(entry.entryId) ? selected.map(row => row.entry) : [entry]) }} onClick={event => choose({ entry, parentId: id }, event)} onDoubleClick={() => { void open(entry).catch(reason => setError(message(reason))) }} onContextMenu={event => { event.preventDefault(); if (!selection.has(entry.entryId)) choose({ entry, parentId: id }); setMenu({ x: event.clientX, y: event.clientY, directoryEntryId: entry.kind === 'directory' ? entry.entryId : id, htmlImport: entry.kind === 'directory' ? 'pick' : /\.html?$/i.test(entry.name) ? 'selected' : null, ...(entry.kind === 'file' && /\.html?$/i.test(entry.name) ? { sourceEntryId: entry.entryId } : {}) }) }}>
         {entry.kind === 'directory' ? expanded.has(entry.entryId) ? <FolderOpen size={15} /> : <Folder size={15} /> : icon(entry.name)}<span title={entry.name}>{entry.name}</span>
       </button>
     </div>{entry.kind === 'directory' && expanded.has(entry.entryId) && renderEntries(entry.entryId)}
@@ -400,7 +401,7 @@ export function WorkspaceFilesTree({ directory, files, refreshVersion = 0, onFil
       {root && <><button type="button" className="workspace-tree-root" data-drop={dropTarget === root.rootEntryId} {...droppable(root.rootEntryId)} onClick={() => { ++scopeTicket.current; onScope?.(root.resolvedPath, 'folder', root.workspaceId); setSelection(new Set()); setParentId(root.rootEntryId); onSaveDirectoryChange?.({ workspaceId: root.workspaceId, directoryEntryId: root.rootEntryId }); setMenu(undefined) }} onContextMenu={event => { event.preventDefault(); setSelection(new Set()); setParentId(root.rootEntryId); setMenu({ x: event.clientX, y: event.clientY, directoryEntryId: root.rootEntryId, htmlImport: 'pick' }) }}>工作空间根目录</button>{renderEntries(root.rootEntryId)}</>}
     </div>
     {menu && <ContextMenu at={menu} label="文件菜单" onClose={() => setMenu(undefined)}
-      items={explorerContextCommands({ blocked, selected: selected.length, pptx: Boolean(pptxRow), htmlImport: onImportHtml ? menu.htmlImport : null, clipboard: clipboard?.ids.length ?? 0 }, commandPorts)} />}
+      items={explorerContextCommands({ blocked, selected: selected.length, pptx: Boolean(pptxRow), htmlImport: onImportHtml ? menu.htmlImport : null, htmlFile: menu.htmlImport === 'selected', clipboard: clipboard?.ids.length ?? 0 }, commandPorts)} />}
     {dialog && <section ref={dialogRef} className="workspace-file-dialog" role="dialog" aria-modal="true" aria-label="文件操作" onKeyDown={event => { event.stopPropagation(); if (event.key === 'Escape' && !busy) { event.preventDefault(); close() } else if (event.key === 'Tab') { const controls = [...(dialogRef.current?.querySelectorAll<HTMLElement>('input:not(:disabled), select:not(:disabled), button:not(:disabled)') ?? [])]; const first = controls[0], last = controls.at(-1); if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() } } else if (event.key === 'Enter' && event.target instanceof HTMLInputElement && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229 && !busy && !retry && (dialog === 'rename' || dialog === 'mkdir' || dialog.startsWith('create-')) && name.trim()) { event.preventDefault(); submit() } }}>
       {dialog === 'create-course' && <label>画布尺寸<select aria-label="画布尺寸" value={canvasPreset} onChange={event => setCanvasPreset(event.target.value)}>
         {SLIDE_CANVAS_PRESETS.map(preset => <option key={preset.id} value={preset.id}>{preset.label}（{preset.width}×{preset.height}）</option>)}

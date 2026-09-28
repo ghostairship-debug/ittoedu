@@ -17,6 +17,9 @@ export interface ExecutionStart {
   taskId: string
   instruction: string
   selection: ModelSelection
+  /** Optional visual fallback fixed when this task was accepted. */
+  visionSelection?: ModelSelection
+  visionUnavailableReason?: string
   /** User-visible role/connection revisions; host role freezing rejects later changes. */
   disclosedSettings?: DisclosedExecutionSettings
   documents: readonly { documentId: string; writable: readonly ToolTarget[]; selection?: readonly ToolTarget[] }[]
@@ -51,6 +54,8 @@ export interface ExecutionToolRecord {
 }
 export interface ExecutionModelRecord {
   requestId: string
+  /** An independent no-tool vision request is accounted alongside conversation requests. */
+  kind?: 'visual-analysis'
   state: 'sending' | 'completed' | 'failed'
   actualModel?: string
   responseId?: string

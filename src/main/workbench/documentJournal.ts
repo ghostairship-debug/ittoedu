@@ -389,7 +389,7 @@ export function createDocumentJournal(options: { directory: string }): DocumentJ
     try { intent = JSON.parse(bytes) as SaveIntent } catch { throw new Error('保存恢复记录损坏') }
     if (intent.schemaVersion !== 1 || intent.documentId !== documentId || !intent.epoch ||
       !Number.isSafeInteger(intent.revision) || intent.revision < 0 ||
-      !['markdown', 'course-v9'].includes(intent.kind) ||
+      !['markdown', 'text', 'course-v9'].includes(intent.kind) ||
       !intent.sourceBinding || !['file', 'untitled'].includes(intent.sourceBinding.kind) ||
       (intent.sourceBinding.kind === 'file' && (!path.isAbsolute(intent.sourceBinding.path) ||
         !Number.isSafeInteger(intent.sourceBinding.bindingVersion) || intent.sourceBinding.bindingVersion < 1 ||

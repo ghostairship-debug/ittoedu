@@ -132,6 +132,11 @@ export class PreviewNetworkPolicy {
     this.#previewLeases.clear()
   }
 
+  /** Main-owned preview services reuse the active top document lease. */
+  currentDocumentOwner(): PreviewNetworkDocumentOwner | null {
+    return this.#activeDocumentOwner ? { ...this.#activeDocumentOwner } : null
+  }
+
   allowsRequest(value: string): boolean {
     const origin = requestOrigin(value)
     if (origin === null) return false

@@ -13,7 +13,8 @@
  * save/export touch the disk) must still present a document-write or file-write
  * receipt, because Main re-validates authority at the service boundary.
  */
-import type { DocumentSnapshot } from './document'
+import type { DocumentOperationResult, DocumentSnapshot } from './document'
+import type { ModelFailure, ModelUsage } from './modelProvider'
 
 /** Capabilities that may read bundled authoring Skills. */
 export interface SkillServicePort {
@@ -43,10 +44,14 @@ export interface HtmlImportServicePort {
   import(input: {
     runId: string
     operationId: string
+    requestDigest: string
     sourceDocumentId: string
     sourceEpoch: string
     sourceRevision: number
+    sourceBindingVersion: number | null
     targetDocumentId: string
+    targetEpoch: string
+    targetRevision: number
     mode: 'auto' | 'sections' | 'whole'
     destinations: readonly HtmlImportDestination[]
     signal?: AbortSignal
@@ -55,13 +60,13 @@ export interface HtmlImportServicePort {
   cancel(input: { runId: string; operationId: string }): Promise<void>
 }
 
-export type HtmlImportReceipt = {
-  operationId: string
-  status: 'applied' | 'unchanged' | 'rejected' | 'failed'
-  pages: readonly { order: number; location: string; runtimeId: string }[]
-  revision?: number
-  reason?: string
-}
+type HtmlImportPageReceipt = readonly { order: number; location: string; runtimeId: string }[]
+
+export type HtmlImportReceipt =
+  | { operationId: string; status: 'applied' | 'unchanged'; pages: HtmlImportPageReceipt; revision: number;
+      commit: Extract<DocumentOperationResult, { status: 'applied' | 'unchanged' }> }
+  | { operationId: string; status: 'rejected' | 'failed'; pages: HtmlImportPageReceipt; reason: string;
+      revision?: never; commit?: never }
 
 /** Observation image bytes live in the app's run resources, never in V9 assets. */
 export interface ObservationImageResource {
@@ -103,6 +108,13 @@ export type ObservationResult = {
   reason?: string
 }
 
+/** Provider facts from a separate visual request; the Engine journals them with the run. */
+export type VisualAnalysisRequestEvent =
+  | { type: 'sending'; requestId: string }
+  | { type: 'started'; requestId: string; responseId: string; actualModel?: string }
+  | { type: 'completed'; requestId: string; responseId: string; actualModel?: string; usage?: ModelUsage }
+  | { type: 'failed'; requestId: string; failure: ModelFailure }
+
 /** Vision fallback analysis, performed once against the task-frozen selection. */
 export interface VisualAnalysisPort {
   analyze(input: {
@@ -110,9 +122,10 @@ export interface VisualAnalysisPort {
     observation: ObservationResult
     question: string
     signal?: AbortSignal
+    onRequestEvent?(event: VisualAnalysisRequestEvent): Promise<void>
   }): Promise<
     | { status: 'analyzed'; conclusion: string; actualModel?: string; selection: { model: string; connection: string; billing: string } }
-    | { status: 'vision-unavailable'; reason: string }
+    | { status: 'vision-unavailable'; reason: string; outcome?: 'not-sent' | 'rejected' | 'unknown'; code?: string }
   >
 }
 
@@ -121,6 +134,7 @@ export interface DocumentDeliveryServicePort {
   save(input: {
     runId: string
     operationId: string
+    requestDigest: string
     documentId: string
     epoch: string
     baseRevision: number
@@ -129,6 +143,7 @@ export interface DocumentDeliveryServicePort {
   export(input: {
     runId: string
     operationId: string
+    requestDigest: string
     documentId: string
     epoch: string
     revision: number
@@ -157,7 +172,10 @@ export type ExportReceipt = {
   /** `generated` means bytes exist but nothing was written yet. */
   status: 'written' | 'generated' | 'rejected' | 'failed'
   path?: string
+  documentId: string
+  epoch: string
   format: ExportFormat
+  fileVersion?: string | null
   exportedRevision?: number
   currentRevision: number
   warnings: readonly string[]

@@ -1222,6 +1222,7 @@ describe('AI capability manifest generation', () => {
       'schemas/published-course-v2.json',
       'schemas/runtime-api2.json',
       'schemas/runtime-api3.json',
+      'skills/manifest.json',
     ])
     expect(index.artifacts).not.toHaveProperty('index.json')
     expect(index.artifacts).not.toHaveProperty('generation-evidence.json')

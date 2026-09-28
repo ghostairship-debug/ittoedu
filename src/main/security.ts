@@ -76,6 +76,38 @@ export function isAllowedEditorPreviewFrameUrl(
   }
 }
 
+/** Only the currently leased HTML entry may navigate a preview subframe. */
+const htmlPreviewFrameEntries = new Map<string, number>()
+
+function htmlPreviewEntryKey(value: string): string | null {
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'courseware-preview:' || url.hostname !== 'app' || url.search) return null
+    url.hash = ''
+    return url.href
+  } catch {
+    return null
+  }
+}
+
+export function registerHtmlPreviewFrameEntry(entryUrl: string, ownerWebContentsId: number): () => void {
+  const key = htmlPreviewEntryKey(entryUrl)
+  if (!key || !Number.isSafeInteger(ownerWebContentsId)) throw new Error('Invalid HTML preview entry')
+  htmlPreviewFrameEntries.set(key, ownerWebContentsId)
+  return () => { if (htmlPreviewFrameEntries.get(key) === ownerWebContentsId) htmlPreviewFrameEntries.delete(key) }
+}
+
+export function clearHtmlPreviewFrameEntries(ownerWebContentsId: number): void {
+  for (const [key, owner] of htmlPreviewFrameEntries) {
+    if (owner === ownerWebContentsId) htmlPreviewFrameEntries.delete(key)
+  }
+}
+
+export function isAllowedHtmlPreviewFrameUrl(candidate: string, ownerWebContentsId: number): boolean {
+  const key = htmlPreviewEntryKey(candidate)
+  return key !== null && htmlPreviewFrameEntries.get(key) === ownerWebContentsId
+}
+
 export function hardenWebContents(
   contents: WebContents,
   isAllowedNavigation: (url: string) => boolean,

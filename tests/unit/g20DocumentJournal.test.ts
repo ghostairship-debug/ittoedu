@@ -73,6 +73,21 @@ describe('G20 durable document journal', () => {
     expect(await journal.recover('document-b')).toEqual(other)
   })
 
+  it('reconciles an interrupted text Save As from its recorded save intent', async () => {
+    const { root, directory, journal } = await fixture()
+    const documentId = 'text-save-intent'
+    const source = '<!doctype html>\r\n<title>课件</title>\r\n'
+    const draft: DocumentModel = { kind: 'text', source, resources: { assets: {}, components: {} } }
+    await journal.append({ ...state(documentId, 1), model: draft })
+    const filename = path.join(root, 'lesson.html')
+    await journal.save({ documentId, revision: 1, model: draft, bytes: bytes(source),
+      binding: { kind: 'file', path: filename, version: null, bindingVersion: 1 } })
+    expect(await fs.readFile(filename, 'utf8')).toBe(source)
+    const recovered = await createDocumentJournal({ directory }).recover(documentId)
+    expect(recovered).toMatchObject({ savedRevision: 1, binding: { kind: 'file', path: filename, bindingVersion: 1 } })
+    expect(recovered?.binding.kind === 'file' && recovered.binding.version).toBe(await readDocumentFileVersion(filename, 'text'))
+  })
+
   it('saves the captured revision, preserves Save As originals and refuses external file changes', async () => {
     const { root, journal } = await fixture()
     const filename = path.join(root, 'lesson.md')

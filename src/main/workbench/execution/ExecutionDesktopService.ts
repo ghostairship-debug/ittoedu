@@ -6,7 +6,7 @@ import type { ConversationRecord } from '../../../shared/workbench/conversations
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import type { ExecutionEvent, ExecutionEventInput } from '../../../shared/workbench/executionEvents'
 import type { EditEvent } from '../../../shared/workbench/editSession'
-import type { ModelChatMessage, ModelProvider } from '../../../shared/workbench/modelProvider'
+import type { ModelChatMessage, ModelProvider, ModelSelection } from '../../../shared/workbench/modelProvider'
 import { EXECUTION_NO_PROGRESS, MODEL_REQUEST_BUDGET_EXHAUSTED, TOOL_CALL_BUDGET_EXHAUSTED, type ExecutionRunRecord } from '../../../shared/workbench/execution'
 import { PayloadCompiler } from '../../../core/execution/PayloadCompiler'
 import { AttachmentError, AttachmentService, type AttachmentLiveConversation } from '../attachments/AttachmentService'
@@ -14,6 +14,7 @@ import { ExecutionSettingsError, type ExecutionSettingsStore } from '../provider
 import type { DocumentHostService } from '../DocumentHostService'
 import { ConversationStore } from '../conversations/ConversationStore'
 import { ExecutionEngine } from './ExecutionEngine'
+import { VisualAnalysisService } from './VisualAnalysisService'
 import { ExecutionRunStore } from './ExecutionRunStore'
 import { captureMainTiming, ExecutionEventStore, type ExecutionTimingMark, type ExecutionTimingStage } from './ExecutionEventStore'
 import { ExecutionSubmissionStore, type StoredExecutionSubmission } from './ExecutionSubmissionStore'
@@ -130,14 +131,18 @@ export class ExecutionDesktopService {
     const oauth = new ChatGPTResponsesProvider({ credentialResolver: async connection => (await import('../providers/executionSettingsService.js')).resolveOAuthCredential(connection), fetch: options.fetch })
     const provider: ModelProvider = { stream: (request, callOptions) => (request.selection.connection.protocol === 'chatgpt-responses' ? oauth : chat).stream(request, callOptions) }
     const serializePayload: typeof serializeModelRequest = input => input.selection.connection.protocol === 'chatgpt-responses' ? serializeChatGPTResponsesRequest(input) : serializeModelRequest(input)
+    const visualAnalysis = new VisualAnalysisService({
+      frozenSelection: async runId => (await this.runs.read(runId))?.input.visionSelection ?? null,
+      provider, observation: { readResource: input => options.documents.tools.readObservationResource(input.runId, input.resourceId) },
+    })
     this.engine = new ExecutionEngine({ registry: options.documents.registry, gateway: options.documents.tools, runs: this.runs, events: this.events,
       edits: this.edits, provider, serializePayload, initialCompiler: new PayloadCompiler({ attachments: this.attachments, serializePayload }),
-      files: new AgentFileService(options.documents),
+      files: new AgentFileService(options.documents), visualAnalysis,
       readImageTiming: async jobId => (await import('../workbenchToolServices.js')).workbenchImageService().readTiming(jobId),
       observeBodyStreaming: (selection, observation) => options.settings.recordBodyStreaming(selection, observation) })
     this.engine.subscribe(event => {
       this.eventSink?.(event)
-      if (event.type === 'run.end') void this.afterRunEnd(event.runId).catch(() => undefined)
+      if (event.type === 'run.end') { visualAnalysis.clearRun(event.runId); void this.afterRunEnd(event.runId).catch(() => undefined) }
     })
     this.edits.subscribe(event => this.editSink?.(event))
   }
@@ -366,12 +371,20 @@ export class ExecutionDesktopService {
       }
       if (selection.connection.capabilities.vision === 'unsupported') throw executionInputError('vision-unsupported')
     }
+    let visionSelection: ModelSelection | undefined
+    let visionUnavailableReason: string | undefined
+    if (selection.role === 'vision') visionSelection = selection
+    else if ((await this.options.settings.read()).profile.roles.vision) {
+      try { visionSelection = await select('vision') }
+      catch (error) { visionUnavailableReason = error instanceof Error ? error.message : '视觉模型连接不可用' }
+    } else visionUnavailableReason = '任务接受时未配置视觉模型角色'
     const now = Date.now(), attachmentIds = [...new Set(attachments.map(reference => reference.attachmentId))]
     return { schemaVersion: 1, submissionId: input.submissionId, workspaceId: input.workspaceId, conversationId: input.conversationId,
       state: 'queued', mode: input.mode ?? 'queue', text: input.text, documents: structuredClone(input.documents), attachments: structuredClone(attachments), permission,
       model: { provider: selection.connection.provider, model: selection.model, accountId: selection.connection.accountId, billing: selection.connection.billing.kind },
       createdAt: now, updatedAt: now, digest, attachmentIds,
       start: { conversationId: current.conversationId, taskId: input.submissionId, instruction: input.text, selection, documents,
+        ...(visionSelection ? { visionSelection } : {}), ...(visionUnavailableReason ? { visionUnavailableReason } : {}),
         permission, workspaceRoot: space.rootPath,
         ...(current.home ? { conversationHome: structuredClone(current.home), conversationHomeRoot: homeSpace.rootPath } : {}),
         ...(input.disclosedSettings ? { disclosedSettings: input.disclosedSettings } : {}),

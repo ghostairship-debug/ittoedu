@@ -1152,7 +1152,7 @@
         "M21"
       ],
       "document": "mid_term/M23.md",
-      "status": "planned",
+      "status": "verified",
       "existing_code": [
         "src/main/workbench/DocumentHostService.ts",
         "src/main/protocols.ts",
@@ -1177,7 +1177,7 @@
         "M23"
       ],
       "document": "mid_term/M24.md",
-      "status": "planned",
+      "status": "verified",
       "existing_code": [
         "src/main/workbench/execution/ExecutionEngine.ts",
         "src/core/tools/ToolCatalog.ts",

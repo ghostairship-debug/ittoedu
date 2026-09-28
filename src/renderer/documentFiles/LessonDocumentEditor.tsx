@@ -10,6 +10,7 @@ import { parseDocumentMarkdown, type MarkdownDocument } from '../../shared/docum
 import { documentRefLabel, type DocumentFileRef } from '../../shared/document/ports'
 import { DocumentFileSession, type RecoverableDocumentFilePort } from './documentFileSession'
 import { PlainTextDocumentEditor, type PlainTextDocumentEditorHandle } from './PlainTextDocumentEditor'
+import { HtmlDocumentEditor } from './html/HtmlDocumentEditor'
 import { type DocumentConflictHunk } from './documentSourceMerge'
 import './documentFileEditor.css'
 import { fileClipboardResourcePort, readFileClipboardContext, selectedFileClipboardContext, type FileClipboardContext } from './fileDocumentClipboard'
@@ -56,12 +57,14 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   const state = useSyncExternalStore(session.subscribe, session.getSnapshot)
   const editor = useRef<SharedDocumentEditorHandle>(null)
   const textEditor = useRef<PlainTextDocumentEditorHandle>(null)
+  const htmlEditor = useRef<PlainTextDocumentEditorHandle>(null)
+  const htmlTabId = useMemo(() => sessionKey ?? crypto.randomUUID(), [sessionKey])
   const [error, setError] = useState<string | null>(null)
   const pinned = usePinnedSelection(session.documentId)
   useEffect(() => {
     if (!session.documentId) return
     return workbenchSelection.register(session.documentId, async () => {
-      const current = (session.committedDocument?.model.kind === 'text' ? textEditor.current : editor.current)?.flush()
+      const current = activeDraft()
       if (current && !current.ready) throw new Error('请先完成当前输入。')
       if (current) session.edit(current.source, operationGroup.current)
       if (!await session.drain() || !session.committedDocument) throw new Error('正文输入尚未确认。')
@@ -85,6 +88,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   const currentRef = session.ref
   const resolveImage = (href: string) => resolveFileDocumentImage(documentRefLabel(currentRef), href)
   const isText = committed?.model.kind === 'text'
+  const isHtml = isText && /\.html?$/i.test(committed.binding.kind === 'file' ? committed.binding.path : committed.binding.suggestedName)
   const parsedSource = useMemo(() => {
     if (isText) return null
     const parsed = parseDocumentMarkdown(state.source, { createId: () => crypto.randomUUID(), target: 'file', resolveImage, previous: lastProjection.current })
@@ -111,7 +115,12 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     void readFileClipboardContext(document.resources, relativePath => session.readResource(relativePath)).then(context => { if (live) setClipboard(context) }).catch(reason => { if (live) setError((reason as Error).message) })
     return () => { live = false }
   }, [session, resourceKey, state.disk?.version.contentVersion, isText])
-  function activeDraft() { return (session.committedDocument?.model.kind === 'text' ? textEditor.current : editor.current)?.flush() }
+  function activeDraft() {
+    const current = session.committedDocument
+    if (current?.model.kind !== 'text') return editor.current?.flush()
+    const name = current.binding.kind === 'file' ? current.binding.path : current.binding.suggestedName
+    return (/\.html?$/i.test(name) ? htmlEditor.current : textEditor.current)?.flush()
+  }
   async function flush() {
     const current = activeDraft()
     if (current && !current.ready) return false
@@ -160,7 +169,8 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
       {!state.conflictHunks.length && <>{state.conflict !== 'deleted' && <><details><summary>查看磁盘稿</summary><pre>{state.conflict.source}</pre></details><button type="button" onClick={() => { void session.resolveConflict('disk') }}>采用磁盘稿</button></>}
       <button type="button" disabled={state.saving || state.composing || state.conflictHunks.length > 0} onClick={() => { void (state.conflict === 'deleted' ? saveAs() : session.resolveConflict('local')) }}>{state.conflict === 'deleted' ? '另存当前稿' : '保留当前稿并保存'}</button></>}
     </aside>}
-    {committed?.model.kind === 'text' && <div inert={state.conflictHunks.length > 0}><PlainTextDocumentEditor ref={textEditor} source={state.source} revision={committed.revision} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} /></div>}
+    {isHtml && committed && <div inert={state.conflictHunks.length > 0}><HtmlDocumentEditor ref={htmlEditor} tabId={htmlTabId} committed={committed} source={state.source} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} onSave={() => { void flush() }} /></div>}
+    {isText && !isHtml && committed && <div inert={state.conflictHunks.length > 0}><PlainTextDocumentEditor ref={textEditor} source={state.source} revision={committed.revision} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} /></div>}
     {committed && committed.model.kind !== 'text' && parsedSource && <div inert={state.conflictHunks.length > 0}><SharedDocumentEditor ref={editor} document={document} revision={state.source} sourceDraft={state.source} target="file" initialMode={parsedSource.status === 'valid' ? 'layout' : 'source'} resolveImage={resolveImage}
       sourceMap={parsedSource.status === 'valid' ? parsedSource.sourceMap : undefined}
       editPreview={editPreview}

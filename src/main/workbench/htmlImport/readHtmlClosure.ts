@@ -7,6 +7,7 @@ import type { ExtractHtmlResourcesResult } from './types'
 export interface ReadHtmlClosureInput {
   htmlPath: string
   rootDir?: string
+  sourceHtml?: string
 }
 
 export interface ReadHtmlClosureResult extends ExtractHtmlResourcesResult {
@@ -20,11 +21,16 @@ function confined(root: string, target: string): boolean {
 
 /** Reads only references found by the extractor; the caller's selected HTML is the default root. */
 export async function readHtmlClosure(input: ReadHtmlClosureInput): Promise<ReadHtmlClosureResult> {
+  if (!isAbsolute(input.htmlPath)) {
+    if (input.sourceHtml === undefined || input.rootDir) throw new Error('未绑定 HTML 只能从当前正文导入自包含资源')
+    const siblingFiles = new Map<string, Uint8Array>()
+    return { ...extractHtmlResources({ html: input.sourceHtml, siblingFiles }), siblingFiles }
+  }
   const htmlFile = await realpath(input.htmlPath)
   const base = dirname(htmlFile)
   const root = await realpath(input.rootDir ?? dirname(htmlFile))
   if (!confined(root, htmlFile)) throw new Error('HTML 文件不在批准的资源根目录内')
-  const html = (await readFile(htmlFile)).toString('utf8')
+  const html = input.sourceHtml !== undefined ? input.sourceHtml : (await readFile(htmlFile)).toString('utf8')
   const files = new Map<string, Uint8Array>()
   let result = extractHtmlResources({ html, siblingFiles: files })
   for (;;) {

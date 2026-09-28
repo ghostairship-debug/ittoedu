@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>三页互动课例夹具</title>
+  <style>
+    :root {
+      color: #17324d;
+      background: #eef4fa;
+      font-family: "Microsoft YaHei", "Noto Sans SC", sans-serif;
+      font-synthesis: none;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #eef4fa; }
+    main { display: block; }
+    .lesson-page { color: #17324d; background: #fff; }
+    .page-heading { margin: 0 0 20px; color: #1d4ed8; font-size: 38px; }
+    .shared-image {
+      width: 48px;
+      height: 48px;
+      object-fit: contain;
+      image-rendering: pixelated;
+      border: 1px solid #93c5fd;
+      vertical-align: middle;
+    }
+    .counter-widget { display: flex; align-items: center; gap: 12px; margin-top: 20px; }
+    .counter-widget button { padding: 8px 14px; border: 0; border-radius: 6px; background: #1d4ed8; color: #fff; }
+    .counter-widget output { min-width: 90px; font-variant-numeric: tabular-nums; }
+    .fixed-page {
+      position: relative;
+      width: 1280px;
+      height: 720px;
+      margin: 0;
+      padding: 54px 76px;
+      overflow: hidden;
+    }
+    .corner-marker { position: absolute; padding: 4px 8px; border: 1px solid #64748b; background: #f8fafc; }
+    .corner-marker--tl { top: 12px; left: 12px; }
+    .corner-marker--tr { top: 12px; right: 12px; }
+    .corner-marker--bl { bottom: 12px; left: 12px; }
+    .corner-marker--br { right: 12px; bottom: 12px; }
+    .nested-note { margin: 14px 0; padding: 10px 16px; border-left: 4px solid #60a5fa; background: #eff6ff; }
+    .flow-page { max-width: 780px; min-height: 100vh; margin: 0 auto; padding: 36px 40px; line-height: 1.9; }
+    .flow-page p { margin: 14px 0; }
+    .flow-end { margin-top: 44px; padding: 12px; background: #dbeafe; font-weight: 700; }
+    .camera-page { position: relative; width: 1280px; height: 720px; margin: 0; padding: 42px 56px; overflow: hidden; }
+    .camera-track { width: 520px; min-height: 210px; padding: 24px; background: #fef3c7; border: 2px solid #d97706; }
+    .camera-track p { margin: 8px 0; }
+    .camera-caption { margin-top: 24px; }
+  </style>
+</head>
+<body>
+  <main id="m24-course">
+    <section id="fixed-page" class="lesson-page fixed-page" aria-labelledby="fixed-title">
+      <span class="corner-marker corner-marker--tl">左上</span>
+      <span class="corner-marker corner-marker--tr">右上</span>
+      <span class="corner-marker corner-marker--bl">左下</span>
+      <span class="corner-marker corner-marker--br">右下</span>
+      <h1 id="fixed-title" class="page-heading">第一节：固定画布观察</h1>
+      <p>请先看蓝色示意图，再记录观察结果：<img class="shared-image" alt="蓝色示意色块" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNQTX6tmvyaAUIBACWKBc28sHaMAAAAAElFTkSuQmCC"></p>
+      <p>重复文案：先观察，再记录。</p>
+      <p>重复文案：先观察，再记录。</p>
+      <section id="nested-detail" class="nested-note" aria-label="页内说明">
+        <h2>页内说明</h2>
+        <p>这个嵌套 section 属于本页，不是第四页。</p>
+      </section>
+      <div class="counter-widget">
+        <button type="button" data-count="0" onclick="var n = Number(this.dataset.count || 0) + 1; this.dataset.count = String(n); this.parentElement.querySelector('output').textContent = '计数：' + n;">计数 +1</button>
+        <output aria-live="polite">计数：0</output>
+      </div>
+    </section>
+
+    <section id="flow-page" class="lesson-page flow-page" aria-labelledby="flow-title">
+      <h1 id="flow-title" class="page-heading">第二节：流式观察记录</h1>
+      <p>观察灯泡亮度时，先固定电池数量和导线连接，再改变一个条件。一次只调整一个因素，才能判断亮度变化与哪个条件有关。</p>
+      <p>开始记录前，把电路图、观察日期和使用的材料写在一起。遇到看不清的变化时，先重复操作，再比较两次结果，不急着下结论。</p>
+      <ul>
+        <li>检查电池正负极是否连接正确。</li>
+        <li>确认导线接触牢固，灯泡没有松动。</li>
+        <li>每次只改变一个条件，并记下改变前后的现象。</li>
+        <li>把不确定的结果标出来，留待下一次观察。</li>
+      </ul>
+      <p>记录的顺序是：先描述看到的现象，再写操作步骤，最后说明哪些条件保持不变。这样，其他同学也能按相同步骤复查。</p>
+      <p>如果两次结果不同，检查是否同时改变了电池、导线或灯泡。找到唯一变化后，再用新的观察检验自己的解释。</p>
+      <p>这张小图在三页中使用同一份内联图片数据：<img class="shared-image" alt="蓝色示意色块" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNQTX6tmvyaAUIBACWKBc28sHaMAAAAAElFTkSuQmCC"></p>
+      <div class="counter-widget">
+        <button type="button" data-count="0" onclick="var n = Number(this.dataset.count || 0) + 1; this.dataset.count = String(n); this.parentElement.querySelector('output').textContent = '计数：' + n;">计数 +1</button>
+        <output aria-live="polite">计数：0</output>
+      </div>
+      <p class="flow-end" id="flow-end-marker">流式页面末尾：观察记录完成。</p>
+    </section>
+
+    <section id="camera-page" class="lesson-page camera-page" aria-labelledby="camera-title">
+      <h1 id="camera-title" class="page-heading">第三节：持续镜头</h1>
+      <div class="camera-track" data-camera-track data-camera-frame="0">
+        <strong>镜头状态</strong>
+        <p>切到其他页再返回，动画与本页计数都应继续。</p>
+      </div>
+      <p class="camera-caption">镜头每隔一小段时间向右移动，并保留当前帧编号。</p>
+      <p>同一份示意图再次出现：<img class="shared-image" alt="蓝色示意色块" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNQTX6tmvyaAUIBACWKBc28sHaMAAAAAElFTkSuQmCC"></p>
+      <div class="counter-widget">
+        <button type="button" data-count="0" onclick="var n = Number(this.dataset.count || 0) + 1; this.dataset.count = String(n); this.parentElement.querySelector('output').textContent = '计数：' + n;">计数 +1</button>
+        <output aria-live="polite">计数：0</output>
+      </div>
+      <p id="script-generated-copy"></p>
+    </section>
+  </main>
+  <!-- 标签样式的注释不是第四页：<section id="comment-only"></section> -->
+  <script type="application/json" id="section-scan-example">{"example":"<section id=\"string-only\"></section>"}</script>
+  <script>
+    (function () {
+      var track = document.querySelector("[data-camera-track]");
+      var generated = document.getElementById("script-generated-copy");
+      if (generated) generated.textContent = "脚本生成的文字不能直接编辑";
+      if (!track) return;
+      var frame = 0;
+      window.setInterval(function () {
+        frame += 1;
+        track.setAttribute("data-camera-frame", String(frame));
+      }, 80);
+    }());
+  </script>
+</body>
+</html>

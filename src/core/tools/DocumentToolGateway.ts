@@ -319,6 +319,26 @@ export class DocumentToolGateway implements ToolGateway {
     return this.capture(runId, snapshot, target, true)
   }
 
+  /** Main-only task-frozen file scope; absent for external MCP grants. */
+  runFileAccess(runId: string): ToolRunGrant['fileAccess'] {
+    return this.run(runId).grant.fileAccess && structuredClone(this.run(runId).grant.fileAccess)
+  }
+
+  /** Host-only compound-tool check of one frozen document handle. */
+  async resolveWholeDocumentHandle(runId: string, handleId: string, access: 'read' | 'write'): Promise<{
+    documentId: string; epoch: string; revision: number; bindingVersion: number | null
+  }> {
+    const run = this.run(runId)
+    if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
+    const handle = this.handle(runId, handleId)
+    const snapshot = await this.registry.get(handle.documentId).drain()
+    if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
+    const target = this.resolve(handle, snapshot, access === 'write', true)
+    if (target.kind !== 'document') throw new ToolError('invalid-target', '复合工具需要整份文档句柄')
+    return { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
+      bindingVersion: snapshot.binding.kind === 'file' ? snapshot.binding.bindingVersion : null }
+  }
+
   /** Host-only source map for provisional projections; never a model capability or a commit receipt. */
   async resolveEditTarget(runId: string, handleId: string): Promise<{ documentId: string; epoch: string; revision: number; target: ToolTarget; model: DocumentModel }> {
     const run = this.run(runId)
@@ -385,6 +405,12 @@ export class DocumentToolGateway implements ToolGateway {
     return { documentId: snapshot.documentId, revision: snapshot.revision, target }
   }
 
+
+  /** Host-only observation bytes, scoped to the run that captured them. */
+  readObservationResource(runId: string, resourceId: string): Promise<{ mimeType: string; bytes: Uint8Array }> {
+    if (this.run(runId).stopped) throw new ToolError('run-stopped', '任务已停止')
+    return this.hostTools.readObservationResource({ runId, resourceId })
+  }
 
   /** Host-only continuation bridge. Engine proves the source run is an ancestor in the same
    * conversation; Coordinator checks the durable job and issues a fresh current-run handle. */
@@ -542,6 +568,10 @@ export class DocumentToolGateway implements ToolGateway {
       const { digest, key, operationId } = this.identifyCall(runId, callId, input)
       const previousDigest = this.callDigests.get(key)
       if (previousDigest && previousDigest !== digest) throw new ToolError('operation-payload-mismatch', '同一调用编号不能提交不同内容')
+      if (input.name === 'html.import' || input.name === 'file.save' || input.name === 'document.export') {
+        const imported = await this.hostTools.lookup(runId, operationId, digest, input.name)
+        if (imported) return imported
+      }
       return this.findReceipt(runId, operationId, digest) ?? await this.hostTools.lookup(runId, operationId, digest, input.name)
     } catch (error) { return this.error(error) }
   }
@@ -549,17 +579,31 @@ export class DocumentToolGateway implements ToolGateway {
   private findReceipt(runId: string, operationId: string, requestDigest: string): ToolResult | null {
     const run = this.run(runId)
     for (const doc of run.grant.documents) {
-      const result = this.registry.get(doc.documentId).lookupRequest({ documentId: doc.documentId, operationId, actor: run.grant.actor, runId, requestDigest })
+      // Closing another granted document cannot hide this operation's durable receipt.
+      let session: ReturnType<DocumentRegistry['get']>
+      try { session = this.registry.get(doc.documentId) } catch { continue }
+      const result = session.lookupRequest({ documentId: doc.documentId, operationId, actor: run.grant.actor, runId, requestDigest })
       if (result) return { kind: 'document-operation', result, affected: [] }
     }
     return null
   }
 
   execute(runId: string, callId: string, input: ModelToolCall): Promise<ToolResult> {
+    return this.executeCall(runId, callId, input, false)
+  }
+
+  /** Host-only build child call for compound tools; never advertised to the model. */
+  executeInternalBuild(runId: string, callId: string, input: ModelToolCall): Promise<ToolResult> {
+    if (!isHostToolName(input.name) || !input.name.startsWith('build.'))
+      return Promise.resolve({ kind: 'error', code: 'unsupported-tool', message: '内部构建端口只接受受控 build 工具' })
+    return this.executeCall(runId, callId, input, true)
+  }
+
+  private executeCall(runId: string, callId: string, input: ModelToolCall, internalBuild: boolean): Promise<ToolResult> {
     try {
       const advertised = this.run(runId).advertised
-      if (advertised && !advertised.names.has(input.name)) throw new ToolError('tool-not-advertised', '此工具不在本次冻结的可用目录中')
-      if (advertised && input.name === 'batch') advertised.batchSchema!.parse(input.input)
+      if (!internalBuild && advertised && !advertised.names.has(input.name)) throw new ToolError('tool-not-advertised', '此工具不在本次冻结的可用目录中')
+      if (!internalBuild && advertised && input.name === 'batch') advertised.batchSchema!.parse(input.input)
       const { call, digest, key, operationId } = this.identifyCall(runId, callId, input)
       const previousDigest = this.callDigests.get(key)
       if (previousDigest && previousDigest !== digest) return Promise.resolve({ kind: 'error', code: 'operation-payload-mismatch', message: '同一调用编号不能提交不同内容' })
@@ -603,6 +647,25 @@ export class DocumentToolGateway implements ToolGateway {
     if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
     const definition = toolCatalog.find(tool => tool.name === call.name)
     if (!definition) throw new ToolError('unsupported-tool', '此工具尚未接入正式 Gateway')
+    if (call.name === 'skills.read') return this.hostTools.readSkill(call.input)
+    if (call.name === 'view.observe') return this.hostTools.observePage({ runId, operationId,
+      resolveTarget: async handle => {
+        const observed = await this.resolveObservationTarget(runId, handle)
+        const snapshot = await this.registry.get(observed.documentId).drain()
+        if (snapshot.revision !== observed.revision || snapshot.model.kind !== 'course-v9') return null
+        const project = snapshot.model.project, target = observed.target
+        let locationId: string | undefined
+        if (target.kind === 'document') locationId = project.startLocationId
+        else if ('locationId' in target) locationId = target.locationId
+        else if ('surfaceId' in target) locationId = project.locations.find(location => location.surfaceId === target.surfaceId)?.id
+        if (!locationId || !project.locations.some(location => location.id === locationId)) return null
+        return { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, projectId: project.id, locationId }
+      } }, call.input)
+    if (call.name === 'html.import') return this.hostTools.importHtml({ runId, operationId, requestDigest,
+      resolveHandle: (handle, access) => this.resolveWholeDocumentHandle(runId, handle, access) }, call.input)
+    if (call.name === 'file.save' || call.name === 'document.export')
+      return this.hostTools.deliverDocument({ runId, operationId, requestDigest,
+        resolveHandle: handle => this.resolveWholeDocumentHandle(runId, handle, 'write') }, call.name, call.input)
     if (isHostToolName(call.name)) return this.hostTools.invoke(runId, operationId, requestDigest, call.name, call.input)
     const value = definition.inputSchema.parse(call.input)
     if (call.name === 'read' || call.name === 'inspect' || call.name === 'listChildren') return this.read(runId, call.name, value as { target: string; limit?: number; cursor?: string })

@@ -208,6 +208,7 @@ async function service() {
   }))
 }
 export async function authorizeWorkspaceFilesRoot(directory: string) { return (await service()).authorizeRoot(directory) }
+export async function attachHtmlPreviewHost(host: HtmlPreviewHost): Promise<void> { (await service()).attachHtmlPreview(host) }
 export const operateWorkspaceFiles: WorkspaceFilesAPI = async request => (await service()).operate(request)
 
 export async function subscribeWorkspaceFilesChanges(listener: (event: WorkspaceFilesChange) => void) { return (await service()).subscribe(listener) }

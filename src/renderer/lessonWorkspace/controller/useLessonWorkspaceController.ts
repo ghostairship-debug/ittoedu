@@ -154,8 +154,8 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
         }
         return
       }
-      // 工作空间内所有 Markdown 与 UTF-8 纯文本均通过同一正式文档会话打开。
-      if (/\.(?:md|markdown|txt)$/i.test(entry.name)) {
+      // Markdown、纯文本与 HTML 都通过同一正式文档会话打开。
+      if (/\.(?:md|markdown|txt|html?)$/i.test(entry.name)) {
         const lesson = current.current.lesson
         try {
           await props.tabs.openTab({ path: entry.path, name: entry.name, kind: 'document', lesson })

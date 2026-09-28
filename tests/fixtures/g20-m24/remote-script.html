@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>远程脚本拒绝夹具</title>
+  <style>
+    :root { color: #17324d; background: #eef4fa; font-family: "Microsoft YaHei", "Noto Sans SC", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #eef4fa; }
+    main { display: block; }
+    .lesson-page { max-width: 900px; margin: 0 auto; padding: 32px; background: #fff; }
+    .page-heading { color: #1d4ed8; }
+    .shared-image { width: 48px; height: 48px; image-rendering: pixelated; vertical-align: middle; }
+    .counter-widget { display: flex; align-items: center; gap: 12px; margin-top: 16px; }
+    .counter-widget button { padding: 8px 14px; border: 0; border-radius: 6px; background: #1d4ed8; color: #fff; }
+  </style>
+  <script src="https://g20-fixture.invalid/remote-script.js"></script>
+</head>
+<body>
+  <main id="m24-remote-course">
+    <section id="remote-page-one" class="lesson-page">
+      <h1 class="page-heading">远程脚本拒绝：第一节</h1>
+      <p>导入必须在任何正式写入前拒绝这份文档。</p>
+      <p>重复示意图：<img class="shared-image" alt="蓝色示意色块" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNQTX6tmvyaAUIBACWKBc28sHaMAAAAAElFTkSuQmCC"></p>
+      <div class="counter-widget">
+        <button type="button" data-count="0" onclick="var n = Number(this.dataset.count || 0) + 1; this.dataset.count = String(n); this.parentElement.querySelector('output').textContent = '计数：' + n;">计数 +1</button>
+        <output aria-live="polite">计数：0</output>
+      </div>
+    </section>
+    <section id="remote-page-two" class="lesson-page">
+      <h2 class="page-heading">远程脚本拒绝：第二节</h2>
+      <p>第二页用于确认拒绝时不会只导入文档的一部分。</p>
+      <p>重复示意图：<img class="shared-image" alt="蓝色示意色块" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNQTX6tmvyaAUIBACWKBc28sHaMAAAAAElFTkSuQmCC"></p>
+      <div class="counter-widget">
+        <button type="button" data-count="0" onclick="var n = Number(this.dataset.count || 0) + 1; this.dataset.count = String(n); this.parentElement.querySelector('output').textContent = '计数：' + n;">计数 +1</button>
+        <output aria-live="polite">计数：0</output>
+      </div>
+    </section>
+    <section id="remote-page-three" class="lesson-page">
+      <h2 class="page-heading">远程脚本拒绝：第三节</h2>
+      <p>第三页保留相同公共样式与可交互控件。</p>
+      <p>重复示意图：<img class="shared-image" alt="蓝色示意色块" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNQTX6tmvyaAUIBACWKBc28sHaMAAAAAElFTkSuQmCC"></p>
+      <div class="counter-widget">
+        <button type="button" data-count="0" onclick="var n = Number(this.dataset.count || 0) + 1; this.dataset.count = String(n); this.parentElement.querySelector('output').textContent = '计数：' + n;">计数 +1</button>
+        <output aria-live="polite">计数：0</output>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>自然流式课例夹具</title>
+  <style>
+    :root { color: #17324d; background: #f8fafc; font-family: "Microsoft YaHei", "Noto Sans SC", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f8fafc; }
+    .flow-page { max-width: 760px; margin: 0 auto; padding: 28px 36px; border-bottom: 1px solid #cbd5e1; line-height: 1.85; }
+    .flow-page h1 { color: #0f766e; font-size: 30px; }
+    .flow-page h2 { color: #155e75; font-size: 22px; }
+    .flow-page p { margin: 14px 0; }
+    .flow-page li { margin: 8px 0; }
+    .flow-page figure { margin: 18px 0; }
+    .shared-image { width: 40px; height: 40px; image-rendering: pixelated; vertical-align: middle; }
+    .counter-widget { display: flex; align-items: center; gap: 12px; margin: 18px 0; }
+    .counter-widget button { padding: 8px 14px; border: 1px solid #0f766e; border-radius: 6px; background: #ecfeff; color: #134e4a; }
+    .flow-end { padding: 10px 14px; background: #ccfbf1; font-weight: 700; }
+  </style>
+</head>
+<body>
+  <section id="flow-observe" class="flow-page" aria-labelledby="flow-observe-title">
+    <h1 id="flow-observe-title">观察：先记录现象</h1>
+    <p>课堂观察从可见的现象开始。先说明材料和操作，再描述发生了什么；暂时不写原因，避免把猜想和观察混在一起。</p>
+    <h2>记录要点</h2>
+    <ol>
+      <li>写出观察对象和日期。</li>
+      <li>说明操作前保持不变的条件。</li>
+      <li>用具体词语记录变化，而不是只写“变好了”。</li>
+      <li>把还不能确定的地方标出来，之后再验证。</li>
+    </ol>
+    <figure>
+      <img class="shared-image" alt="蓝色示意色块" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNQTX6tmvyaAUIBACWKBc28sHaMAAAAAElFTkSuQmCC">
+      <figcaption>每一页引用同一份小型内联示意图。</figcaption>
+    </figure>
+    <div class="counter-widget">
+      <button type="button" data-count="0" onclick="var n = Number(this.dataset.count || 0) + 1; this.dataset.count = String(n); this.parentElement.querySelector('output').textContent = '本页计数：' + n;">本页计数 +1</button>
+      <output aria-live="polite">本页计数：0</output>
+    </div>
+    <p>第一张流式页面结束。它有自己的来源 ID，后续页面不会覆盖这个锚点。</p>
+  </section>
+
+  <section id="flow-compare" class="flow-page" aria-labelledby="flow-compare-title">
+    <h1 id="flow-compare-title">比较：一次只改变一个条件</h1>
+    <p>比较两次实验时，先列出相同点和不同点。若同时改变多个条件，就无法判断哪一个变化带来了观察结果。</p>
+    <h2>复查顺序</h2>
+    <ul>
+      <li>再次确认材料数量和连接位置。</li>
+      <li>检查记录是否包含操作前后的状态。</li>
+      <li>重复一次操作，留意相同现象是否再次出现。</li>
+      <li>如果结果不一致，回到记录中寻找同时改变的条件。</li>
+      <li>保留原始记录，不用后来的解释覆盖当时的观察。</li>
+    </ul>
+    <p>用自己的话说明比较结果，并指出证据来自哪一条记录。说明证据可以帮助同学复现你的判断。</p>
+    <figure>
+      <img class="shared-image" alt="蓝色示意色块" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNQTX6tmvyaAUIBACWKBc28sHaMAAAAAElFTkSuQmCC">
+      <figcaption>与上一页相同的图像字节应只导入一次。</figcaption>
+    </figure>
+    <div class="counter-widget">
+      <button type="button" data-count="0" onclick="var n = Number(this.dataset.count || 0) + 1; this.dataset.count = String(n); this.parentElement.querySelector('output').textContent = '本页计数：' + n;">本页计数 +1</button>
+      <output aria-live="polite">本页计数：0</output>
+    </div>
+    <p>第二张流式页面结束。独立 ID：flow-compare。</p>
+  </section>
+
+  <section id="flow-explain" class="flow-page" aria-labelledby="flow-explain-title">
+    <h1 id="flow-explain-title">解释：用证据支持结论</h1>
+    <p>完成观察和比较之后，再提出解释。一个清楚的解释会引用具体现象，也会说明哪些条件保持不变。</p>
+    <h2>表达框架</h2>
+    <p>我观察到……；我改变了……，并保持……不变；重复操作后……；因此，我认为……。如果证据不足，就把结论写成待验证的问题。</p>
+    <p>不同小组可能得到不同结果。先核对材料和操作，再讨论差异；不要只凭一次结果断定规律。</p>
+    <p>本页使用相同图片资源：<img class="shared-image" alt="蓝色示意色块" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGNQTX6tmvyaAUIBACWKBc28sHaMAAAAAElFTkSuQmCC"></p>
+    <div class="counter-widget">
+      <button type="button" data-count="0" onclick="var n = Number(this.dataset.count || 0) + 1; this.dataset.count = String(n); this.parentElement.querySelector('output').textContent = '本页计数：' + n;">本页计数 +1</button>
+      <output aria-live="polite">本页计数：0</output>
+    </div>
+    <p class="flow-end" id="flow-conclusion-end">结论页末尾：证据、操作和解释已经对应。</p>
+    <p>第三张流式页面结束。独立 ID：flow-explain。</p>
+  </section>
+</body>
+</html>

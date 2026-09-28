@@ -1,5 +1,7 @@
+import { decodeHTML } from 'entities'
+
 /**
- * Shared, dependency-free HTML source scanner. Single source of truth for the
+ * Shared, DOM-free HTML source scanner. Single source of truth for the
  * importer's tag lexing and for the M23 source locator / M24 section splitter.
  *
  * Offsets are JavaScript source string UTF-16 code-unit offsets in half-open
@@ -59,19 +61,8 @@ const ASCII_LETTER = /[A-Za-z]/
 const NAME_CHAR = /[A-Za-z0-9:_-]/
 const SPACE = /[\t\n\f\r ]/
 const ATTRIBUTE_STOP = /[\s=/>]/
-const ENTITY = /&(#x[0-9a-fA-F]+|#\d+|amp|lt|gt|quot|apos);/g
-
 export function decodeHtmlEntities(value: string): string {
-  if (!value.includes('&')) return value
-  return value.replace(ENTITY, (entity, body: string) => {
-    if (body === 'amp') return '&'
-    if (body === 'lt') return '<'
-    if (body === 'gt') return '>'
-    if (body === 'quot') return '"'
-    if (body === 'apos') return "'"
-    const code = body.startsWith('#x') ? Number.parseInt(body.slice(2), 16) : Number.parseInt(body.slice(1), 10)
-    return Number.isFinite(code) && code >= 0 && code <= 0x10ffff ? String.fromCodePoint(code) : entity
-  })
+  return value.includes('&') ? decodeHTML(value) : value
 }
 
 /**
@@ -118,7 +109,7 @@ export function parseHtmlStartTag(source: string, index: number): HtmlStartTag |
         if (source[j] === quote) j += 1
       } else {
         const valueStart = j
-        while (j < source.length && !SPACE.test(source[j]!) && !(source[j] === '/' && source[j + 1] === '>')) j += 1
+        while (j < source.length && source[j] !== '>' && !SPACE.test(source[j]!) && !(source[j] === '/' && source[j + 1] === '>')) j += 1
         valueSpan = { start: valueStart, end: j }
         decodedValue = decodeHtmlEntities(source.slice(valueStart, j))
       }

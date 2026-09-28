@@ -11,10 +11,13 @@ import {
   hardenWebContents,
   isAllowedDocumentUrl,
   isAllowedEditorPreviewFrameUrl,
+  isAllowedHtmlPreviewFrameUrl,
+  clearHtmlPreviewFrameEntries,
 } from './security'
 import { askMediaCapture } from './mediaCapturePrompt'
 import { editorEntryUrl } from './protocols'
 import { documentHost } from './workbench/documentHost'
+import { releaseAllHtmlPreviewLeases } from './ipc'
 import { saveDocumentWithDialog } from './workbench/documentSaveDialog'
 import { prepareDocumentWindowClose, type DocumentCloseChoice } from './workbench/documentCloseCoordinator'
 import { mainPreviewNetworkPolicy } from './previewNetworkPolicy'
@@ -169,6 +172,7 @@ export async function createMainWindow(
   let previewNetworkDocumentToken: string | null = null
 
   const beginPreviewNetworkDocumentNavigation = (): void => {
+    releaseAllHtmlPreviewLeases()
     previewNetworkDocumentToken = null
     mainPreviewNetworkPolicy.beginDocumentNavigation()
   }
@@ -191,10 +195,27 @@ export async function createMainWindow(
   hardenWebContents(
     window.webContents,
     (url) => isAllowedDocumentUrl(url, rendererEntryUrl),
-    (url) => isAllowedEditorPreviewFrameUrl(url, rendererEntryUrl),
+    (url) => isAllowedEditorPreviewFrameUrl(url, rendererEntryUrl)
+      || isAllowedHtmlPreviewFrameUrl(url, window.webContents.id),
   )
 
   window.webContents.on('before-input-event', (event, input) => {
+    const focusedPreviewUrl = window.webContents.focusedFrame?.url ?? ''
+    const focusedPreview = isAllowedHtmlPreviewFrameUrl(focusedPreviewUrl, window.webContents.id)
+    const historyKey = input.type === 'keyDown' && !input.isAutoRepeat && (input.control || input.meta)
+      && !input.alt && focusedPreview ? input.key.toLocaleLowerCase('en-US') : ''
+    const historyDirection = historyKey === 'z' ? input.shift ? 'redo' : 'undo'
+      : historyKey === 'y' && !input.shift ? 'redo' : null
+    if (historyDirection) {
+      event.preventDefault()
+      // The physical shortcut is observed by Main, not reported by untrusted page JS.
+      if (!window.isDestroyed()) {
+        const detail = JSON.stringify({ url: focusedPreviewUrl, direction: historyDirection })
+        void window.webContents.executeJavaScript(
+          `window.dispatchEvent(new CustomEvent('courseware:html-preview-history', { detail: ${detail} }))`, true).catch(() => undefined)
+      }
+      return
+    }
     const saveShortcut =
       input.type === 'keyDown' &&
       !input.isAutoRepeat &&
@@ -253,16 +274,21 @@ export async function createMainWindow(
   })
 
   window.on('closed', () => {
+    clearHtmlPreviewFrameEntries(window.webContents.id)
     beginPreviewNetworkDocumentNavigation()
     appState.detachWindow(window)
   })
 
   window.webContents.on('render-process-gone', () => {
+    clearHtmlPreviewFrameEntries(window.webContents.id)
     beginPreviewNetworkDocumentNavigation()
   })
 
   window.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
-    if (isMainFrame && !isInPlace) beginPreviewNetworkDocumentNavigation()
+    if (isMainFrame && !isInPlace) {
+      clearHtmlPreviewFrameEntries(window.webContents.id)
+      beginPreviewNetworkDocumentNavigation()
+    }
   })
 
   window.webContents.on('did-frame-navigate', (

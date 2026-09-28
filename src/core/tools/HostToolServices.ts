@@ -6,11 +6,22 @@ import { buildToolCallSchema, type BuildCreateTicket, type BuildCreateLookup, ty
 import type { HostImageInput } from './imageResource'
 import { DocumentRegistry } from '../documents/DocumentRegistry'
 import { documentDigest } from '../documents/documentDigest'
+import type { SkillServicePort } from '../../shared/workbench/toolPorts'
+import { executeSkillRead } from './SkillTools'
+import { executeHtmlImport, htmlImportReceiptResult } from './HtmlImportTools'
+import { documentDeliveryReceiptResult, executeDocumentDeliveryTool } from './DocumentDeliveryTools'
+import { executeViewObserveTool, type ViewObserveToolContext } from './ViewObserveTools'
+import type { DocumentDeliveryServicePort, HtmlImportServicePort, ObservationServicePort } from '../../shared/workbench/toolPorts'
 
 /** Main supplies real services. Neither their implementations nor credentials enter core. */
 export interface HostToolServices {
+  skills?: SkillServicePort
+  htmlImports?: HtmlImportServicePort
+  deliveries?: DocumentDeliveryServicePort
+  observations?: ObservationServicePort
   /** Freeze role/connection selections before the run can issue any service operation. */
   beginRun?(grant: ToolRunGrant): Promise<void>
+  stopRun?(runId: string): Promise<void> | void
   images?: {
     selection(runId: string, documentId: string, operation: 'generate' | 'edit'): ImageModelSelection | Promise<ImageModelSelection>
     run(request: ImageGenerationRequest, options?: { signal?: AbortSignal }): Promise<ImageJobSnapshot>
@@ -81,7 +92,29 @@ export class HostToolCoordinator {
   constructor(private services: HostToolServices, private readonly registry: DocumentRegistry, private readonly authority: HostAuthority) {}
   configure(services: HostToolServices) { this.services = services }
   async beginRun(grant: ToolRunGrant) { await this.services.beginRun?.(structuredClone(grant)) }
-  supports(name: string) { return !isHostToolName(name) || (name.startsWith('image.') ? !!this.services.images : !!this.services.builds) }
+  supports(name: string) { return name === 'skills.read' ? !!this.services.skills : name === 'view.observe' ? !!this.services.observations : name === 'html.import' ? !!this.services.htmlImports
+    : name === 'file.save' || name === 'document.export' ? !!this.services.deliveries
+      : !isHostToolName(name) || (name.startsWith('image.') ? !!this.services.images : !!this.services.builds) }
+  observePage(context: ViewObserveToolContext, input: unknown): Promise<ToolResult> {
+    if (!this.services.observations) return Promise.resolve({ kind: 'error', code: 'service-unavailable', message: '画面观察服务尚未就绪' })
+    return executeViewObserveTool(this.services.observations, context, input)
+  }
+  readObservationResource(input: { runId: string; resourceId: string }): Promise<{ mimeType: string; bytes: Uint8Array }> {
+    if (!this.services.observations) return Promise.reject(new Error('画面观察服务尚未就绪'))
+    return this.services.observations.readResource(input)
+  }
+  deliverDocument(context: { runId: string; operationId: string; requestDigest: string; resolveHandle(handle: string, access: 'write'): Promise<{ documentId: string; epoch: string; revision: number }> }, name: 'file.save' | 'document.export', input: unknown): Promise<ToolResult> {
+    if (!this.services.deliveries) return Promise.resolve({ kind: 'error', code: 'service-unavailable', message: '文档保存与导出服务尚未就绪' })
+    return executeDocumentDeliveryTool(this.services.deliveries, context, name, input)
+  }
+  importHtml(context: { runId: string; operationId: string; requestDigest: string; resolveHandle(handle: string, access: 'read' | 'write'): Promise<{ documentId: string; epoch: string; revision: number; bindingVersion: number | null }> }, input: unknown): Promise<ToolResult> {
+    if (!this.services.htmlImports) return Promise.resolve({ kind: 'error', code: 'service-unavailable', message: 'HTML 导入服务尚未就绪' })
+    return executeHtmlImport(this.services.htmlImports, context, input)
+  }
+  readSkill(input: unknown): Promise<ToolResult> {
+    if (!this.services.skills) return Promise.resolve({ kind: 'error', code: 'service-unavailable', message: '随附 Skill 尚未就绪' })
+    return executeSkillRead(this.services.skills, input)
+  }
   /** The caller proves sourceRunId belongs to its durable continuation lineage. */
   reissueImageForContinuation(currentRunId: string, sourceDocumentId: string, destinationDocumentId: string,
     sourceRunId: string, jobId: string, resourceId: string): Promise<string> {
@@ -102,6 +135,7 @@ export class HostToolCoordinator {
     return work
   }
   async stop(runId: string) {
+    await this.services.stopRun?.(runId)
     for (const job of this.jobs.values()) if (job.runId === runId && job.kind === 'image') job.controller.abort()
     await Promise.allSettled([
       ...[...this.jobs.values()].filter((job): job is ImageJob => job.runId === runId && job.kind === 'image').map(job => this.services.images!.stop(job.jobId)),
@@ -120,6 +154,14 @@ export class HostToolCoordinator {
   }
   /** Recovery queries only; no registration of edit authority or reconstruction of a task. */
   async lookup(runId: string, operationId: string, requestDigest: string, name: string): Promise<ToolResult | null> {
+    if ((name === 'file.save' || name === 'document.export') && this.services.deliveries) {
+      const receipt = await this.services.deliveries.lookup({ runId, operationId, requestDigest })
+      return receipt ? documentDeliveryReceiptResult(receipt) : null
+    }
+    if (name === 'html.import' && this.services.htmlImports) {
+      const receipt = await this.services.htmlImports.lookup({ runId, operationId, requestDigest })
+      return receipt ? htmlImportReceiptResult(receipt) : null
+    }
     if (name !== 'build.create' || !this.services.builds) return null
     const result = await this.services.builds.lookupCreate(runId, { operationId, requestDigest })
     if (!result) return null

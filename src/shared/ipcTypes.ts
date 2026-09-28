@@ -157,6 +157,8 @@ export interface DesktopAPI {
     extension: 'pptx' | 'json' | 'docx'
     bytes: Uint8Array
   }): Promise<{ path: string } | null>
+  onDocumentExportBuildRequest?(handler: (request: import('./workbench/toolPorts').ExportBuildRequest) => void): () => void
+  sendDocumentExportBuildReply?(reply: import('./workbench/toolPorts').ExportBuildReply): void
   exportPdf(input: {
     suggestedName: string
     html: string
@@ -223,6 +225,8 @@ export const IPC_CHANNELS = {
   exportWebPackage: 'export:write-web-package',
   exportBinary: 'export:write-binary',
   exportPdf: 'export:write-pdf',
+  documentExportBuildRequest: 'document-export:build-request',
+  documentExportBuildReply: 'document-export:build-reply',
   previewNetworkDocumentToken: 'preview-network:document-token',
   setPreviewNetworkPolicy: 'preview-network:set',
   releasePreviewNetworkPolicy: 'preview-network:release',

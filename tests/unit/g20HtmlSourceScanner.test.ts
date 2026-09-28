@@ -92,6 +92,13 @@ describe('parseHtmlStartTag attribute spans', () => {
     expect(byName('disabled').valueSpan).toBeUndefined()
   })
 
+  it('stops an unquoted final attribute before the tag close', () => {
+    const source = '<img src=old.png>'
+    const tag = parseHtmlStartTag(source, 0)!
+    expect(slice(source, tag.attributes[0]!.valueSpan!)).toBe('old.png')
+    expect(tag.end).toBe(source.length)
+  })
+
   it('keeps attribute name spans pointing at the raw name only', () => {
     const source = '<div DATA-X="1">'
     const tag = parseHtmlStartTag(source, 0)!
@@ -149,6 +156,7 @@ describe('decodeHtmlEntities', () => {
   it('decodes named, decimal and hex entities', () => {
     expect(decodeHtmlEntities('a&amp;b&lt;c&gt;d&quot;e&apos;f')).toBe('a&b<c>d"e\'f')
     expect(decodeHtmlEntities('&#65;&#x42;')).toBe('AB')
+    expect(decodeHtmlEntities('&nbsp;&mdash;&copy;')).toBe(' —©')
   })
 
   it('leaves unknown entities and bare ampersands untouched', () => {

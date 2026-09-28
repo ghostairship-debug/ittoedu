@@ -116,9 +116,9 @@ export class DocumentHostService {
   private kind(filename: string): DocumentKind {
     const extension = path.extname(filename).toLowerCase()
     if (extension === '.md' || extension === '.markdown') return 'markdown'
-    if (extension === '.txt') return 'text'
+    if (extension === '.txt' || extension === '.html' || extension === '.htm') return 'text'
     if (extension === '.h5lesson') return 'course-v9'
-    throw new Error('当前支持 Markdown、纯文本（.txt）和 V9 h5lesson 文档')
+    throw new Error('当前支持 Markdown、纯文本（.txt）、HTML（.html/.htm）和 V9 h5lesson 文档')
   }
 
   open(filename: string): Promise<DocumentSnapshot> { return this.fileCoordinator.withFileAccess(() => this.openFile(filename)) }
@@ -181,12 +181,22 @@ export class DocumentHostService {
   }
 
   /** overwriteConfirmed is supplied only after the native dialog, never from renderer arguments. */
-  async saveToPath(documentId: string, filename?: string, overwriteConfirmed = false): Promise<DocumentSnapshot> {
+  async saveWithFact(documentId: string, filename?: string): Promise<{ snapshot: DocumentSnapshot; savedRevision: number }> {
+    let savedRevision: number | undefined
+    const snapshot = await this.saveToPath(documentId, filename, false, progress => {
+      if (progress.status === 'saved') savedRevision = progress.savedRevision
+    })
+    if (savedRevision === undefined) throw new Error('保存已完成但缺少保存版本回执')
+    return { snapshot, savedRevision }
+  }
+
+  async saveToPath(documentId: string, filename?: string, overwriteConfirmed = false, onProgress?: DocumentSaveObserver): Promise<DocumentSnapshot> {
     const initial = this.registry.get(documentId).read(), saveId = randomUUID()
     const base = { saveId, documentId, epoch: initial.epoch }
     let observedRevision = initial.revision, terminal = false
     let documentName = initial.binding.kind === 'file' ? path.basename(initial.binding.path) : initial.binding.suggestedName
     const observer: DocumentSaveObserver = progress => {
+      onProgress?.(progress)
       documentName = progress.binding.kind === 'file' ? path.basename(progress.binding.path) : progress.binding.suggestedName
       if (progress.status === 'saving') { observedRevision = progress.revision; this.publishSave({ ...base, documentName, time: Date.now(), status: 'saving', revision: progress.revision }) }
       else if (progress.status === 'saved') { terminal = true; this.publishSave({ ...base, documentName, time: Date.now(), status: 'saved', savedRevision: progress.savedRevision, currentRevision: progress.currentRevision }) }

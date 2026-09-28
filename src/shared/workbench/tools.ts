@@ -1,6 +1,8 @@
 import type { DocumentOperation, DocumentOperationResult } from './document'
 import type { DocumentSlot } from '../document/ports'
 import type { DisclosedExecutionSettings } from './executionDesktop'
+import type { ExecutionPermissionMode } from './executionPermission'
+import type { ConversationHome } from './conversations'
 
 /** Host-only addresses. A model sees opaque handles, never these coordinates. */
 export type ToolTarget =
@@ -26,6 +28,8 @@ export interface ToolRunGrant {
   actor: DocumentOperation['actor']
   documents: readonly { documentId: string; writable: readonly ToolTarget[] }[]
   disclosedSettings?: DisclosedExecutionSettings
+  /** Main-frozen file scope for built-in task delivery tools; external MCP grants use their bound documents. */
+  fileAccess?: { permission: ExecutionPermissionMode; workspaceRoot?: string; conversationHomeRoot?: string; conversationHome?: ConversationHome; boundPaths?: Record<string, string> }
 }
 
 /** Transport assigns callId outside the model arguments. */

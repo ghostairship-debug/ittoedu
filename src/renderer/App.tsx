@@ -84,6 +84,7 @@ import { ProductivityDialog } from './ui/productivity/ProductivityDialog'
 import { MaterialLibraryDialog } from './ui/MaterialLibraryDialog'
 import { EditorPanelLayout } from './ui/EditorPanelLayout'
 import { createMaterialCitationRequest } from './authoring/tools/materialCitationRequest'
+import { buildDocumentExport } from './workbench/delivery/DocumentExportRenderer'
 import type { ProductivityContext } from './authoring/productivity'
 import { resolveCourseProjectDiagnosticTargetRoute } from './diagnostics/projectHealthNavigation'
 import { createCourseFromPptx, pptxCourseStem } from './project/pptxCourseCreation'
@@ -128,6 +129,14 @@ function captureCourseIdentity() {
 }
 
 export default function App() {
+  useEffect(() => {
+    const api = window.desktopAPI
+    if (!api?.onDocumentExportBuildRequest || !api.sendDocumentExportBuildReply) return
+    return api.onDocumentExportBuildRequest(request => {
+      void buildDocumentExport(request).then(reply => api.sendDocumentExportBuildReply?.(reply))
+        .catch(error => console.error('文档导出生成回复失败', error))
+    })
+  }, [])
   const lessonShell = useRef<LessonWorkspaceShellHandle>(null)
   const saveDirectory = useRef<SaveDirectoryContext | null>(null)
   const rawDocuments = window.desktopAPI?.documents

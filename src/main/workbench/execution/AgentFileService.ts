@@ -9,8 +9,8 @@ import { createDefaultTeacherControllerPackage } from '../../../shared/defaultTe
 import { createCourseProjectArchive } from '../../../core/drivers/codecs/courseProjectArchive'
 import { validateWorkspaceEntryName } from '../WorkspaceFiles'
 
-const supported = /\.(?:md|markdown|txt|h5lesson)$/i
-function startDirectory(context: AgentFileContext): { directory: string; fallback: boolean } {
+const supported = /\.(?:md|markdown|txt|html?|h5lesson)$/i
+export function startDirectory(context: Pick<AgentFileContext, 'workspaceRoot' | 'conversationHomeRoot' | 'conversationHome'>): { directory: string; fallback: boolean } {
   const home = context.conversationHome
   if (!home) return { directory: context.workspaceRoot, fallback: false }
   const relative = home.kind === 'file' ? path.dirname(home.path) : home.path
@@ -39,14 +39,14 @@ export class AgentFileService implements AgentFilePort {
     const stat = await fs.lstat(filename)
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('目标不是可访问文件')
     if (context.permission !== 'full' && !isInsideRoot(context.workspaceRoot, filename)) throw new Error('当前权限不允许访问工作空间外文件')
-    if (!supported.test(filename)) throw new Error('当前只支持打开 Markdown、纯文本（.txt）和 H5 演示（.h5lesson）')
+    if (!supported.test(filename)) throw new Error('当前只支持打开 Markdown、纯文本（.txt）、HTML（.html/.htm）和 H5 演示（.h5lesson）')
     return filename
   }
   async preflightCreate(context: AgentFileContext, raw: unknown): Promise<{ directory: string; outside: boolean }> {
     const input = agentFileSchemas['file.create'].parse(raw)
     if (context.permission === 'read-only') throw new Error('只读任务不能创建文件')
     validateWorkspaceEntryName(input.name)
-    const extension = input.kind === 'markdown' ? '.md' : input.kind === 'text' ? '.txt' : '.h5lesson'
+    const extension = input.kind === 'markdown' ? '.md' : input.kind === 'text' ? '.txt' : input.kind === 'html' ? '.html' : '.h5lesson'
     if (path.extname(input.name).toLowerCase() !== extension) throw new Error(`文件名与${input.kind}格式不符`)
     const { directory } = await this.directory(context, input.path, true)
     return { directory, outside: !isInsideRoot(context.workspaceRoot, directory) }
@@ -95,7 +95,7 @@ export class AgentFileService implements AgentFilePort {
       return createCourseProjectArchive({ project, assetFiles: {}, componentFiles: { [`${component.manifest.id}@${component.manifest.version}`]: component.files } })
     })() : Buffer.from('', 'utf8')
     const receipt = await this.host.files.createFile({ operationId, workspaceId: root.workspaceId, targetDirectoryId: root.rootEntryId,
-      name: input.name, format: input.kind === 'text' ? 'file' : input.kind, bytes }).catch(error => { throw new AgentFileOutcomeUnknown(error instanceof Error ? error.message : String(error)) })
+      name: input.name, format: input.kind === 'course-v9' ? 'course-v9' : input.kind === 'markdown' ? 'markdown' : 'file', bytes }).catch(error => { throw new AgentFileOutcomeUnknown(error instanceof Error ? error.message : String(error)) })
     const created = receipt.items.find(item => item.status === 'success' && item.targetPath)
     if (!created?.targetPath) return { data: { operation: receipt, homeMissingFallback: fallback } }
     const snapshot = await this.host.open(created.targetPath).catch(() => null)

@@ -251,6 +251,23 @@ export class McpDocumentServer {
         documentId: result.result.documentId, operationId: result.result.operationId, revision: result.result.revision, status: result.result.status, label: '外部工具修改已应用',
       })
     }
-    return { content: [{ type: 'text', text: JSON.stringify(result) }], structuredContent: { result, ticket, nextTicket: this.ticket(grant) }, isError: !successful(result) }
+    const content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> = [
+      { type: 'text', text: JSON.stringify(result) },
+    ]
+    let observationImageMissing = false
+    if (call.name === 'view.observe' && result.kind === 'read' && result.data && typeof result.data === 'object') {
+      const image = (result.data as { image?: { resourceId?: unknown; mimeType?: unknown } }).image
+      if (typeof image?.resourceId === 'string' && image.mimeType === 'image/png') {
+        try {
+          const resource = await this.options.gateway.readObservationResource(grant.connection.runId, image.resourceId)
+          if (resource.mimeType !== image.mimeType) throw new Error('观察图片格式不一致')
+          content.push({ type: 'image', data: Buffer.from(resource.bytes).toString('base64'), mimeType: resource.mimeType })
+        } catch {
+          observationImageMissing = true
+          content.push({ type: 'text', text: '观察图片资源已过期；本次结果只有身份元数据，不能据此声称已看见画面。' })
+        }
+      }
+    }
+    return { content, structuredContent: { result, ticket, nextTicket: this.ticket(grant) }, isError: !successful(result) || observationImageMissing }
   }
 }

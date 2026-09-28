@@ -51,6 +51,8 @@ const IPC_CHANNELS = {
   exportWebPackage: 'export:write-web-package',
   exportBinary: 'export:write-binary',
   exportPdf: 'export:write-pdf',
+  documentExportBuildRequest: 'document-export:build-request',
+  documentExportBuildReply: 'document-export:build-reply',
   previewNetworkDocumentToken: 'preview-network:document-token',
   setPreviewNetworkPolicy: 'preview-network:set',
   releasePreviewNetworkPolicy: 'preview-network:release',
@@ -312,6 +314,15 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   exportWebPackage: (input) => invoke(IPC_CHANNELS.exportWebPackage, input),
   exportBinary: (input) => invoke(IPC_CHANNELS.exportBinary, input),
   exportPdf: (input) => invoke(IPC_CHANNELS.exportPdf, input),
+  onDocumentExportBuildRequest: handler => {
+    const listener = (_event: Electron.IpcRendererEvent, request: unknown) => {
+      if (request && typeof request === 'object' && 'requestId' in request && typeof request.requestId === 'string')
+        handler(request as import('../shared/workbench/toolPorts').ExportBuildRequest)
+    }
+    ipcRenderer.on(IPC_CHANNELS.documentExportBuildRequest, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.documentExportBuildRequest, listener)
+  },
+  sendDocumentExportBuildReply: reply => ipcRenderer.send(IPC_CHANNELS.documentExportBuildReply, reply),
   setPreviewNetworkPolicy: (input) => invoke(IPC_CHANNELS.setPreviewNetworkPolicy, {
     ...input,
     documentToken: requirePreviewNetworkDocumentToken(),

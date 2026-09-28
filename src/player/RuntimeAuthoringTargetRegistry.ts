@@ -153,6 +153,7 @@ function optionalMaxLength(value: unknown): number | undefined {
 export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
   private readonly registrations = new Map<number, StoredRegistration>()
   private readonly domElementIds = new WeakMap<object, number>()
+  private readonly automaticDomNodes = new Map<number, WeakRef<object>>()
   private readonly mutationObservers: MutationObserver[] = []
   private readonly unwatchHtmlDocuments: Array<() => void> = []
   private readonly resizeObserver: ResizeObserver | null
@@ -542,12 +543,26 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
     return false
   }
 
+  /** Resolve an observed automatic DOM target only while its node is still connected. */
+  resolveAutomaticDomTarget(targetId: string): Text | HTMLImageElement | null {
+    const match = /^auto:(\d+):(text|asset)$/.exec(targetId)
+    if (!match) return null
+    const node = this.automaticDomNodes.get(Number(match[1]))?.deref()
+    if (match[2] === 'text' && node instanceof Text && node.isConnected) return node
+    if (match[2] === 'asset' && node instanceof HTMLImageElement && node.isConnected) return node
+    return null
+  }
+
   private domElementId(element: object): number {
     const existing = this.domElementIds.get(element)
     if (existing !== undefined) return existing
     const id = this.nextDomElementId
     this.nextDomElementId += 1
     this.domElementIds.set(element, id)
+    this.automaticDomNodes.set(id, new WeakRef(element))
+    if (this.automaticDomNodes.size > 1024) {
+      for (const [key, value] of this.automaticDomNodes) if (!value.deref()) this.automaticDomNodes.delete(key)
+    }
     return id
   }
 

@@ -9,7 +9,7 @@ export const fileCreated = (name: string, result?: ToolResult): boolean => name 
   && !!result.data && typeof result.data === 'object'
   && (result.data as { operation?: { status?: unknown } }).operation?.status === 'success'
 
-export interface ServiceToolOutcome { status: 'failed' | 'unknown' | 'stopped'; message: string }
+export interface ServiceToolOutcome { status: 'failed' | 'unknown' | 'stopped' | 'saved' | 'generated' | 'written'; message: string }
 
 /** Only tools whose read receipt is itself a service job use its status for task settlement. */
 export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceToolOutcome | null => {
@@ -20,6 +20,9 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
     if (operation.status === 'failed' || operation.status === 'cancelled' || operation.status === 'partial')
       return { status: 'failed', message: operation.items?.find(item => item.error?.message)?.error?.message ?? '新建文件未完整成功' }
   }
+  if (name === 'file.save' && data.status === 'saved') return { status: 'saved', message: data.dirty === true ? '文件已保存到原版本，期间的新修改仍未保存' : '文件已保存' }
+  if (name === 'document.export' && data.status === 'generated') return { status: 'generated', message: '导出内容已生成，尚未写入文件' }
+  if (name === 'document.export' && data.status === 'written') return { status: 'written', message: '导出文件已写入' }
   if (name === 'build.compile' && data.ok === false) return { status: 'failed', message: typeof data.message === 'string' ? data.message : '构建语法编译未通过' }
   if (name === 'build.check' && (data.status === 'failed' || data.status === 'cancelled' || data.status === 'exhausted')) {
     return { status: 'failed', message: data.status === 'failed' ? '构建检查未通过，请读取构建日志' : data.status === 'cancelled' ? '构建检查已取消' : '构建检查已耗尽预算' }
@@ -39,7 +42,8 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
 }
 
 export const toolFailed = (name: string, result?: ToolResult) => result?.kind === 'error' ||
-  result?.kind === 'document-operation' && !committed(result) || serviceToolOutcome(name, result) !== null
+  result?.kind === 'document-operation' && !committed(result) ||
+  ['failed', 'unknown', 'stopped'].includes(serviceToolOutcome(name, result)?.status ?? '')
 
 function jobOf(tool: ExecutionToolRecord): string | null {
   if (!tool.call.name.startsWith('build.')) return null

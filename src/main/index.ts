@@ -6,6 +6,7 @@ import { registerIpcHandlers, unregisterIpcHandlers } from './ipc'
 import { disposeNativeTextMeasurement } from './workbench/documentHost'
 import {
   installEditorProtocol,
+  installHtmlPreviewProtocol,
   registerPrivilegedSchemes,
 } from './protocols'
 import { diagnosticLog } from './diagnosticLog'
@@ -100,6 +101,7 @@ app
     removeDiagnosticHandlers = diagnosticLog.installProcessHandlers()
 
     installEditorProtocol(session.defaultSession)
+    installHtmlPreviewProtocol(session.defaultSession)
     registerIpcHandlers({
       getMainWindow: () => mainWindow,
       getRendererEntryUrl: () => rendererEntryUrl,

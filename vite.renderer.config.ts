@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vite'
 import { APP_NAME } from './src/shared/constants'
+import { htmlPreviewAgentPlugin } from './scripts/htmlPreviewAgentPlugin'
 import {
   bundledFontFaceSpecifiers,
   resolveBundledFontDescriptors,
@@ -65,14 +66,14 @@ function bundledFontsPlugin(): Plugin {
 
 export default defineConfig({
   base: './',
-  plugins: [productIdentityPlugin(), react(), playerBundlePlugin(), bundledFontsPlugin()],
+  plugins: [productIdentityPlugin(), react(), playerBundlePlugin(), bundledFontsPlugin(), htmlPreviewAgentPlugin()],
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
     },
   },
   build: {
-    rollupOptions: { input: { main: resolve(__dirname, 'index.html'), admission: resolve(__dirname, 'admission.html'), attachmentExtraction: resolve(__dirname, 'attachment-extraction.html'), nativeTextMeasurement: resolve(__dirname, 'native-text-measurement.html') } },
+    rollupOptions: { input: { main: resolve(__dirname, 'index.html'), admission: resolve(__dirname, 'admission.html'), observation: resolve(__dirname, 'observation.html'), attachmentExtraction: resolve(__dirname, 'attachment-extraction.html'), nativeTextMeasurement: resolve(__dirname, 'native-text-measurement.html') } },
     outDir: 'dist-renderer',
     emptyOutDir: true,
     sourcemap: true,

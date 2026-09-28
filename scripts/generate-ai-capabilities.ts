@@ -313,6 +313,7 @@ export interface AiCapabilityGenerationOptions {
 export interface AiCapabilityGenerationResult {
   files: ReadonlyMap<string, string>
   capabilityBundle: string
+  bundledSkillBundle: string
   indexBytes: number
   componentCatalogStatus: ComponentCatalogCapabilitySnapshot['status']
 }
@@ -1513,11 +1514,44 @@ export async function generateAiCapabilityArtifacts(
     canonicalJson(componentCatalogSnapshot),
   )
 
+  // The packaged skills.read catalog exposes only files linked directly from each
+  // SKILL.md. The broader capability discovery may index other references.
+  const bundledSkillFiles = new Map<string, string>()
+  const bundledSkillManifest = { skills: await Promise.all(courseAgentMethodSkills.map(async skill => {
+    const skillRoot = await fs.realpath(path.join(projectRoot, '.agents', 'skills', skill.name))
+    const entryKey = `skills/${skill.name}/SKILL.md`
+    const entryReal = await fs.realpath(path.join(skillRoot, 'SKILL.md'))
+    const entryDifference = path.relative(skillRoot, entryReal)
+    if (!entryDifference || entryDifference === '..' || entryDifference.startsWith(`..${path.sep}`)
+      || path.isAbsolute(entryDifference) || !(await fs.stat(entryReal)).isFile())
+      throw new Error(`Bundled Skill entry escapes root: ${entryKey}`)
+    const entry = await fs.readFile(entryReal, 'utf8')
+    bundledSkillFiles.set(entryKey, entry)
+    const links = [...entry.matchAll(/\]\((references\/[A-Za-z0-9._-]+\.md)(?:#[^)]*)?\)/g)]
+      .map(match => match[1]!)
+    const references = [...new Set(links)].sort().map(relative => `skills/${skill.name}/${relative}`)
+    for (const key of references) {
+      const relative = key.slice(`skills/${skill.name}/`.length)
+      const real = await fs.realpath(path.join(skillRoot, ...relative.split('/')))
+      const difference = path.relative(skillRoot, real)
+      if (!difference || difference === '..' || difference.startsWith(`..${path.sep}`) || path.isAbsolute(difference)
+        || !(await fs.stat(real)).isFile()) throw new Error(`Bundled Skill reference escapes root: ${key}`)
+      bundledSkillFiles.set(key, await fs.readFile(real, 'utf8'))
+    }
+    const description = entry.match(/^description: (.+)$/m)?.[1]?.split('。')[0]?.trim()
+    if (!description) throw new Error(`Bundled Skill missing description: ${entryKey}`)
+    const version = createHash('sha256').update(canonicalJson(Object.fromEntries(
+      [entryKey, ...references].map(key => [key, bundledSkillFiles.get(key)]),
+    ))).digest('hex')
+    return { name: skill.name, description: `${description}。`, path: entryKey, references, version }
+  })) }
+  files.set('skills/manifest.json', canonicalJson(bundledSkillManifest))
+
   const downstreamEvidence = artifactEvidence(files)
   const index = {
     manifestVersion: AI_CAPABILITY_MANIFEST_VERSION,
     editorVersion: APP_VERSION,
-    description: '果铃支持 H5 演示、讲义、无限画布与文档；能力范围见分域协议。',
+    description: '果铃能力索引。',
     protocols: currentProtocols,
     surfaces: {
       types: COURSE_SURFACE_TYPES,
@@ -1724,7 +1758,7 @@ export async function generateAiCapabilityArtifacts(
       component: 'docs/COMPONENT_AUTHORING.md',
     },
     artifacts: downstreamEvidence,
-    hashScope: '索引只记录下级生成物哈希；generation-evidence 另行记录索引哈希，两者均不自哈希。',
+    hashScope: '索引记录下级哈希，证据记录索引；均不自哈希。',
   }
   assertIndexWithinLimit(index)
   files.set('index.json', canonicalJson(index))
@@ -1771,9 +1805,17 @@ export async function generateAiCapabilityArtifacts(
     hashScope: '证据记录 index.json 和全部下级生成物；不记录 generation-evidence.json 自身哈希。',
   }))
 
+  for (const [key, content] of bundledSkillFiles) {
+    if (files.get(key) !== content) throw new Error(`Bundled Skill changed during generation: ${key}`)
+  }
+  const bundledSkillBundle = canonicalJson({
+    manifest: bundledSkillManifest,
+    files: Object.fromEntries([...bundledSkillFiles].sort(([a], [b]) => a.localeCompare(b, 'en'))),
+  })
   return {
     files,
     capabilityBundle,
+    bundledSkillBundle,
     indexBytes: Buffer.byteLength(files.get('index.json')!, 'utf8'),
     componentCatalogStatus: componentCatalogSnapshot.status,
   }
@@ -1908,6 +1950,8 @@ async function main(): Promise<void> {
     if (options.outputRoot === path.join(options.projectRoot, 'artifacts', 'ai-capabilities')) {
       const bundle = await fs.readFile(path.join(options.projectRoot, 'src/shared/generated/courseAgentCapabilities.json'), 'utf8').catch(() => '')
       if (bundle !== generated.capabilityBundle) throw new Error('打包能力资源过期，请运行 generate:ai-capabilities')
+      const skills = await fs.readFile(path.join(options.projectRoot, 'src/shared/generated/bundledSkills.json'), 'utf8').catch(() => '')
+      if (skills !== generated.bundledSkillBundle) throw new Error('打包 Skill 资源过期，请运行 generate:ai-capabilities')
     }
     console.log(
       `AI 能力清单已是最新状态；索引 ${generated.indexBytes} / ${AI_CAPABILITY_INDEX_MAX_BYTES} 字节，组件目录 ${generated.componentCatalogStatus}。`,
@@ -1919,6 +1963,7 @@ async function main(): Promise<void> {
     const target = path.join(options.projectRoot, 'src/shared/generated/courseAgentCapabilities.json')
     await fs.mkdir(path.dirname(target), { recursive: true })
     await fs.writeFile(target, generated.capabilityBundle, 'utf8')
+    await fs.writeFile(path.join(options.projectRoot, 'src/shared/generated/bundledSkills.json'), generated.bundledSkillBundle, 'utf8')
   }
   console.log(
     `已生成 ${generated.files.size} 个 AI 能力文件；索引 ${generated.indexBytes} / ${AI_CAPABILITY_INDEX_MAX_BYTES} 字节，组件目录 ${generated.componentCatalogStatus}。`,

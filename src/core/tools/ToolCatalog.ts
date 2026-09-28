@@ -6,6 +6,11 @@ import { presentationStateNameSchema } from './presentationStateTools'
 import { selectionReplacementSchema } from './selectionReplacement'
 import { layerPositionSchema, layerPlacementSchema, layerAlignModeSchema, layerDistributeAxisSchema } from './layerEditSchema'
 import { hostToolCatalog } from './HostToolServices'
+import { skillReadTool } from './SkillTools'
+import { htmlImportTool } from './HtmlImportTools'
+import { documentDeliveryTools } from './DocumentDeliveryTools'
+import { viewObserveTool } from './ViewObserveTools'
+import bundledSkills from '../../shared/generated/bundledSkills.json'
 import { inputAnswerSchema } from './inputInsertion'
 import { composeInputSchema, updateComposedInteractionSchema } from './interactionCompose'
 import { imageFitSchema } from './imageApplication'
@@ -107,15 +112,16 @@ export interface RunToolScope {
 
 /** Model discovery is a run projection; it never changes the canonical MCP catalog. */
 export function selectRunToolNames(scopes: readonly RunToolScope[]): string[] {
-  if (!scopes.length) return []
+  if (!scopes.length) return ['skills.read']
   if (scopes.some(scope => scope.kind === 'course-v9' && scope.wholeDocumentWritable))
     return toolCatalog.filter(tool => tool.name !== 'document.insert' || scopes.some(scope => scope.canInsertFlow)).map(tool => tool.name)
   const writable = new Set(scopes.flatMap(scope => scope.writableTargetKinds))
   const hasV9Write = scopes.some(scope => scope.kind === 'course-v9' && scope.writableTargetKinds.length > 0)
   const eligible = (name: string) => {
-    if (name === 'read' || name === 'inspect' || name === 'listChildren') return true
+    if (name === 'read' || name === 'inspect' || name === 'listChildren' || name === 'skills.read') return true
+    if (name === 'view.observe') return scopes.some(scope => scope.kind === 'course-v9')
     if (name.startsWith('image.')) return hasV9Write
-    if (name.startsWith('build.')) return false
+    if (name.startsWith('build.') || name === 'html.import' || name === 'document.export') return false
     if (name === 'batch') return false
     if (name === 'document.insert' && !scopes.some(scope => scope.canInsertFlow)) return false
     const tool = toolCatalog.find(candidate => candidate.name === name)
@@ -148,10 +154,10 @@ export function describeToolFamily(family: ToolFamily, allowedNames: readonly st
     return '对象属性（调用 object.update，properties.nativeTextStyle 调文字颜色、字体、样式，properties.frame 调位置）、图层与空间布局'
   return toolFamilyDescriptions[family]
 }
-const baselineTools = new Set(['read', 'inspect', 'listChildren', 'text.replace', 'flow.content'])
+const baselineTools = new Set(['read', 'inspect', 'listChildren', 'skills.read', 'view.observe', 'file.save', 'text.replace', 'flow.content'])
 export function familyOfTool(name: string): ToolFamily | null {
   if (baselineTools.has(name) || name === 'batch') return null
-  if (name.startsWith('build.')) return 'build'
+  if (name.startsWith('build.') || name === 'html.import' || name === 'document.export') return 'build'
   if (name.startsWith('image.') || name.startsWith('media.') || name.startsWith('audio.') || name.startsWith('sound.')) return 'media'
   if (name.startsWith('interaction.') || name.startsWith('input.')) return 'interaction'
   if (name.startsWith('course.') || name.startsWith('slide.') || name.startsWith('surface.') || name.startsWith('state.')) return 'navigation'
@@ -169,6 +175,10 @@ const readableKinds: ToolDefinition['manual']['targetKinds'] = ['course-audio', 
 /** One registry drives input validation, model/MCP JSON schema and manual action metadata. */
 export const toolCatalog = [
   ...hostToolCatalog,
+  skillReadTool(bundledSkills.manifest.skills),
+  htmlImportTool,
+  ...documentDeliveryTools,
+  viewObserveTool,
   { name: 'read', description: '分页读取目标文字或属性；返回 data.target 是当前内容的新短句柄，后续编辑应使用它。nextCursor 续读仍配原调用的 target；外部修改目标时明确冲突。', inputSchema: z.object(page).strict(), manual: { label: '读取', group: 'read', targetKinds: readableKinds } },
   { name: 'inspect', description: '读取目标类型、可用操作及小范围摘要；返回 data.target 是当前内容的新短句柄，后续编辑应使用它；外部修改目标时明确冲突。', inputSchema: z.object({ target }).strict(), manual: { label: '检查目标', group: 'read', targetKinds: readableKinds } },
   { name: 'listChildren', description: '分页列出文档、页面、owner、命名态的背景和内容子项，或 Flow 分节正文，并取得短句柄；写权限仍按冻结目标逐项判定。', inputSchema: z.object(page).strict(), manual: { label: '列出子项', group: 'read', targetKinds: ['course-audio', 'document', 'course-surface', 'course-location', 'course-owner', 'course-state', 'flow-container', 'flow-block'] } },

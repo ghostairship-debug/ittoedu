@@ -4,13 +4,25 @@ import { pathToFileURL } from 'node:url'
 import { app, net, protocol, type Session } from 'electron'
 
 export const EDITOR_SCHEME = 'courseware-editor'
+export const HTML_PREVIEW_SCHEME = 'courseware-preview'
 
 const configuredEditorSessions = new WeakSet<Session>()
+const configuredHtmlPreviewSessions = new WeakSet<Session>()
+let htmlPreviewHandler: ((request: Request) => Promise<Response>) | null = null
 
 export function registerPrivilegedSchemes(): void {
   protocol.registerSchemesAsPrivileged([
     {
       scheme: EDITOR_SCHEME,
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+      },
+    },
+    {
+      scheme: HTML_PREVIEW_SCHEME,
       privileges: {
         standard: true,
         secure: true,
@@ -63,4 +75,17 @@ export function installEditorProtocol(electronSession: Session, resource?: (url:
 
 export function editorEntryUrl(): string {
   return `${EDITOR_SCHEME}://app/index.html`
+}
+
+/** Installed before any preview frame is created; no lease means no response. */
+export function installHtmlPreviewProtocol(electronSession: Session): void {
+  if (configuredHtmlPreviewSessions.has(electronSession)) return
+  configuredHtmlPreviewSessions.add(electronSession)
+  electronSession.protocol.handle(HTML_PREVIEW_SCHEME, request =>
+    htmlPreviewHandler?.(request) ?? Promise.resolve(new Response('Not found', { status: 404 })),
+  )
+}
+
+export function setHtmlPreviewProtocolHandler(handler: ((request: Request) => Promise<Response>) | null): void {
+  htmlPreviewHandler = handler
 }

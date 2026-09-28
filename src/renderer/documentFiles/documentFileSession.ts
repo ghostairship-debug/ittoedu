@@ -212,7 +212,7 @@ export class DocumentFileSession {
   }
   private schedule() {
     clearTimeout(this.timer)
-    if (!this.savingAs && this.committedDocument?.binding.kind === 'file' && this.state.dirty && !this.state.composing && !this.state.conflict && !this.state.recovery) this.timer = setTimeout(() => { void this.flush() }, 800)
+    if (!this.savingAs && this.committedDocument?.binding.kind === 'file' && !/\.html?$/i.test(this.committedDocument.binding.path) && this.state.dirty && !this.state.composing && !this.state.conflict && !this.state.recovery) this.timer = setTimeout(() => { if (this.committedDocument?.binding.kind === 'file' && !/\.html?$/i.test(this.committedDocument.binding.path)) void this.flush() }, 800)
   }
   /** Confirm pending human input without forcing a file save before an AI task. */
   async drain(skipHistoryTask = false): Promise<boolean> {

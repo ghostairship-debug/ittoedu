@@ -15,9 +15,9 @@ afterEach(async () => {
     await fs.rm(root, { recursive: true, force: true })
   }
 })
-async function fixture(source = 'old\n\nnotes') {
+async function fixture(source = 'old\n\nnotes', name = 'notes.md') {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'markdown-main-session-')); roots.push(root)
-  const filename = path.join(root, 'notes.md'); await fs.writeFile(filename, source)
+  const filename = path.join(root, name); await fs.writeFile(filename, source)
   const ref = { kind: 'file' as const, path: filename }
   const journal = path.join(root, 'journal'), metadata = path.join(root, 'metadata')
   const { host, documents } = createMarkdownTestHost(journal)
@@ -102,5 +102,17 @@ describe('Markdown projection on the main document owner', () => {
     await view.resolveConflict('recovery')
     expect(await fs.readFile(f.filename, 'utf8')).toBe('![保留](images/a.png)')
     expect(view.getSnapshot().dirty).toBe(false)
+  })
+
+  it('keeps an HTML text document dirty past the ordinary 800 ms autosave interval until explicit save', async () => {
+    const f = await fixture('<p>before</p>', 'page.html')
+    f.session.edit('<p>after</p>')
+    expect(await f.session.drain()).toBe(true)
+    await new Promise(resolve => setTimeout(resolve, 950))
+    expect(f.session.getSnapshot().dirty).toBe(true)
+    expect(f.session.committedDocument).toMatchObject({ dirty: true, model: { kind: 'text', source: '<p>after</p>' } })
+    expect(await fs.readFile(f.filename, 'utf8')).toBe('<p>before</p>')
+    expect(await f.session.flush()).toBe(true)
+    expect(await fs.readFile(f.filename, 'utf8')).toBe('<p>after</p>')
   })
 })
