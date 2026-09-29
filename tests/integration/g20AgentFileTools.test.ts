@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
@@ -107,6 +107,7 @@ describe('general agent file tools', () => {
     const h = await fixture()
     let dispatches = 0, turn = 0
     const files: AgentFilePort = { preflightCreate: async () => ({ directory: path.join(h.workspace, 'lesson'), outside: false }),
+      preflightMutation: async () => ({ paths: [path.join(h.workspace, 'lesson', 'uncertain.md')], outside: false }),
       execute: async () => { dispatches++; throw new AgentFileOutcomeUnknown('ACK 丢失') } }
     const provider: ModelProvider = { async *stream(request) {
       turn++
@@ -224,4 +225,253 @@ describe('general agent file tools', () => {
     expect((await engine.wait(started.runId)).status).toBe('completed')
     expect(await readFile(path.join(targetDirectory, 'approved.md'), 'utf8')).toBe('')
   })
+})
+
+
+it('M27 generic UTF-8 data/code and extensionless sources share one dirty document and save/reopen exact bytes', async () => {
+  const h = await fixture()
+  for (const name of ['data.json', 'table.csv', 'lesson.py', 'Dockerfile']) {
+    const filename = path.join(h.workspace, 'lesson', name), source = '\ufeff# 原稿\r\n中文,1\r\n'
+    await writeFile(filename, source)
+    const result = await h.files.execute(h.context, 'file.open', { path: filename }, `open-${name}`)
+    expect(result.opened).toMatchObject({ kind: 'text', writable: true })
+    const snapshot = await h.host.internalAPI.read(result.opened!.documentId)
+    const edited = source.replace('原稿', '已修改')
+    expect(await h.host.internalAPI.dispatch({ documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision,
+      operationId: `edit-${name}`, actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: edited } } })).toMatchObject({ status: 'applied' })
+    expect((await h.files.execute(h.context, 'file.open', { path: filename }, `again-${name}`)).opened?.documentId).toBe(snapshot.documentId)
+    expect((await h.host.internalAPI.read(snapshot.documentId))).toMatchObject({ dirty: true, undoDepth: 1, model: { source: edited } })
+    expect(await readFile(filename, 'utf8')).toBe(source)
+    await h.host.saveToPath(snapshot.documentId)
+    await h.host.operate({ type: 'close', documentId: snapshot.documentId })
+    expect((await h.host.open(filename)).model).toMatchObject({ kind: 'text', source: edited })
+    expect(await readFile(filename)).toEqual(Buffer.from(edited, 'utf8'))
+  }
+  const created = await h.files.execute(h.context, 'file.create', { name: 'new-script.py', kind: 'text' }, 'create-code')
+  expect(created.opened).toMatchObject({ kind: 'text' })
+  expect(await readFile(path.join(h.workspace, 'lesson', 'new-script.py'), 'utf8')).toBe('')
+})
+
+
+it('M27 binary and structured files are not misrepresented as editable source', async () => {
+  const h = await fixture()
+  const binary = path.join(h.workspace, 'lesson', 'binary.dat'), document = path.join(h.workspace, 'lesson', 'report.pdf')
+  await writeFile(binary, Buffer.from([65, 0, 66])); await writeFile(document, '%PDF-1.7\n')
+  await expect(h.files.execute(h.context, 'file.open', { path: binary }, 'binary')).rejects.toMatchObject({ code: 'TEXT_ENCODING_UNSUPPORTED' })
+  await expect(h.files.execute(h.context, 'file.open', { path: document }, 'pdf')).rejects.toThrow('相应的文档')
+  expect(await readFile(binary)).toEqual(Buffer.from([65, 0, 66]))
+  await expect(h.files.execute(h.context, 'file.create', { name: 'fake.pdf', kind: 'text' }, 'fake')).rejects.toThrow()
+  await expect(h.files.execute(h.context, 'file.create', { name: 'wrong.md', kind: 'text' }, 'wrong')).rejects.toThrow('格式不符')
+})
+
+it('M27 file listing continues across all pages and rejects a changed-directory or foreign-run cursor', async () => {
+  const h = await fixture(), folder = path.join(h.workspace, 'pages'); await mkdir(folder)
+  for (let i = 0; i < 12; i++) await writeFile(path.join(folder, `file-${String(i).padStart(2, '0')}.txt`), '')
+  const first = (await h.files.execute(h.context, 'file.list', { path: folder, limit: 5 }, 'page-one')).data as any
+  const second = (await h.files.execute(h.context, 'file.list', { path: folder, limit: 5, cursor: first.nextCursor }, 'page-two')).data as any
+  const last = (await h.files.execute(h.context, 'file.list', { path: folder, limit: 5, cursor: second.nextCursor }, 'page-three')).data as any
+  expect([...first.entries, ...second.entries, ...last.entries].map(entry => entry.name))
+    .toEqual(Array.from({ length: 12 }, (_, i) => `file-${String(i).padStart(2, '0')}.txt`))
+  expect([first.truncated, second.truncated, last.truncated]).toEqual([true, true, false])
+  expect([first.unscannedEntries, second.unscannedEntries, last.unscannedEntries]).toEqual([7, 2, 0])
+  await expect(h.files.execute({ ...h.context, runId: 'different' }, 'file.list', { path: folder, cursor: first.nextCursor }, 'foreign')).rejects.toThrow('本次查询')
+  await writeFile(path.join(folder, 'new.txt'), '')
+  await expect(h.files.execute(h.context, 'file.list', { path: folder, cursor: first.nextCursor }, 'stale')).rejects.toThrow('目录内容已改变')
+})
+
+it('M27 filename search makes default exclusions visible and does not claim an unscanned dependency tree', async () => {
+  const h = await fixture(), folder = path.join(h.workspace, 'filename-search')
+  await mkdir(folder); await mkdir(path.join(folder, 'node_modules'))
+  await writeFile(path.join(folder, 'match.txt'), '')
+  await writeFile(path.join(folder, 'node_modules', 'match-inside.txt'), '')
+  const result = (await h.files.execute(h.context, 'file.search', { path: folder, query: 'match' }, 'filename-exclusions')).data as any
+  expect(result.matches).toEqual([path.join(folder, 'match.txt')])
+  expect(result).toMatchObject({ truncated: false, excludedCount: 1, failedCount: 0,
+    excluded: [{ path: path.join(folder, 'node_modules'), reason: '默认排除目录' }] })
+})
+
+
+it('M27 filename search preserves its position inside the last directory rather than losing remaining matches', async () => {
+  const h = await fixture(), folder = path.join(h.workspace, 'search'); await mkdir(folder)
+  for (let i = 0; i < 5; i++) await writeFile(path.join(folder, `hit-${i}.txt`), '')
+  const all: string[] = []; let cursor: string | undefined
+  do {
+    const result = (await h.files.execute(h.context, 'file.search', { path: folder, query: 'hit', limit: 2, ...(cursor ? { cursor } : {}) }, `search-${all.length}`)).data as any
+    all.push(...result.matches); cursor = result.nextCursor
+    expect(result.truncated).toBe(Boolean(cursor))
+  } while (cursor)
+  expect(all).toEqual(Array.from({ length: 5 }, (_, i) => path.join(folder, `hit-${i}.txt`)))
+  const first = (await h.files.execute(h.context, 'file.search', { path: folder, query: 'hit', limit: 2 }, 'again')).data as any
+  await expect(h.files.execute(h.context, 'file.search', { path: folder, query: 'different', cursor: first.nextCursor }, 'wrong-query')).rejects.toThrow('本次查询')
+})
+
+it('M27 file read, versioned replace and unique patch preserve UTF-8 BOM, emoji and CRLF', async () => {
+  const h = await fixture(), filename = path.join(h.workspace, 'lesson', 'source.py')
+  const original = '\ufefflabel = "😀"\r\nvalue = 1\r\n'
+  await writeFile(filename, original)
+  const first = (await h.files.execute(h.context, 'file.read', { path: filename, limit: 11 }, 'read-1')).data as any
+  expect(first).toMatchObject({ path: filename, version: expect.stringMatching(/^sha256:/), dirty: false, truncated: true })
+  const second = (await h.files.execute(h.context, 'file.read', { path: filename, cursor: first.nextCursor, limit: 20 }, 'read-2')).data as any
+  expect(first.text + second.text).toBe(original)
+  const patch = (await h.files.execute(h.context, 'file.patch', { path: filename, expectedVersion: first.version,
+    oldText: 'value = 1', newText: 'value = 2' }, 'patch-1')).data as any
+  expect(patch).toMatchObject({ status: 'written', saved: true, beforeVersion: first.version, afterVersion: expect.stringMatching(/^sha256:/) })
+  expect(await readFile(filename)).toEqual(Buffer.from(original.replace('value = 1', 'value = 2'), 'utf8'))
+  await expect(h.files.execute(h.context, 'file.patch', { path: filename, expectedVersion: first.version,
+    oldText: 'value = 2', newText: 'value = 3' }, 'stale')).rejects.toThrow('版本已改变')
+  await writeFile(filename, 'same\nsame\n')
+  const repeated = (await h.files.execute(h.context, 'file.read', { path: filename }, 'repeat-read')).data as any
+  await expect(h.files.execute(h.context, 'file.patch', { path: filename, expectedVersion: repeated.version,
+    oldText: 'same', newText: 'other' }, 'ambiguous')).rejects.toThrow('匹配多处')
+  const ranged = (await h.files.execute(h.context, 'file.patch', { path: filename, expectedVersion: repeated.version,
+    oldText: 'same', newText: 'other', range: { from: 5, to: 9 } }, 'ranged')).data as any
+  expect(ranged.status).toBe('written')
+  expect(await readFile(filename, 'utf8')).toBe('same\nother\n')
+  const created = (await h.files.execute(h.context, 'file.write', { mode: 'create', path: 'lesson/new.json', content: '{"ok":true}\n' }, 'write-create')).data as any
+  expect(created.operation.status).toBe('success')
+  expect(await readFile(path.join(h.workspace, 'lesson', 'new.json'), 'utf8')).toBe('{"ok":true}\n')
+  await expect(h.files.execute(h.context, 'file.write', { mode: 'create', path: 'lesson/new.json', content: 'overwrite' }, 'duplicate'))
+    .resolves.toMatchObject({ data: { operation: { status: 'failed' } } })
+})
+
+it('M27 an opened dirty file stays under DocumentSession and selected targets do not widen', async () => {
+  const h = await fixture(), filename = path.join(h.workspace, 'lesson', 'existing.md')
+  const snapshot = await h.host.open(filename)
+  await h.host.tools.beginRun({ runId: h.context.runId, actor: 'agent', documents: [{ documentId: snapshot.documentId,
+    writable: [{ kind: 'document' }] }] })
+  expect(await h.host.internalAPI.dispatch({ documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision,
+    operationId: 'human-first', actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: '未保存正文' } } }))
+    .toMatchObject({ status: 'applied' })
+  const read = (await h.files.execute(h.context, 'file.read', { path: filename }, 'dirty-read')).data as any
+  expect(read).toMatchObject({ text: '未保存正文', dirty: true, version: expect.stringMatching(/^document:/) })
+  const patched = (await h.files.execute(h.context, 'file.patch', { path: filename, expectedVersion: read.version,
+    oldText: '正文', newText: '内容' }, 'dirty-patch')).data as any
+  expect(patched).toMatchObject({ status: 'applied', saved: false, dirty: true })
+  expect((await h.host.internalAPI.read(snapshot.documentId))).toMatchObject({ model: { source: '未保存内容' }, dirty: true, undoDepth: 2 })
+  expect(await readFile(filename, 'utf8')).toBe('正文')
+  const next = await h.host.internalAPI.read(snapshot.documentId)
+  expect(await h.host.internalAPI.dispatch({ documentId: snapshot.documentId, epoch: next.epoch, baseRevision: next.revision,
+    operationId: 'undo-patch', actor: 'human', mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
+  expect((await h.host.internalAPI.read(snapshot.documentId)).model).toMatchObject({ source: '未保存正文' })
+  const narrow = await fixture(), narrowPath = path.join(narrow.workspace, 'lesson', 'existing.md')
+  const narrowSnapshot = await narrow.host.open(narrowPath)
+  await narrow.host.tools.beginRun({ runId: narrow.context.runId, actor: 'agent', documents: [{ documentId: narrowSnapshot.documentId,
+    writable: [{ kind: 'markdown-range', from: 0, to: 1 }] }] })
+  const narrowRead = (await narrow.files.execute(narrow.context, 'file.read', { path: narrowPath }, 'narrow-read')).data as any
+  await expect(narrow.files.execute(narrow.context, 'file.write', { mode: 'replace', path: narrowPath,
+    expectedVersion: narrowRead.version, content: '越权整篇' }, 'narrow-write')).rejects.toThrow()
+  expect((await narrow.host.internalAPI.read(narrowSnapshot.documentId)).model).toMatchObject({ source: '正文' })
+})
+
+it('M27 grep resumes inside a file and across folders, with explicit exclusions', async () => {
+  const h = await fixture(), folder = path.join(h.workspace, 'sources')
+  await mkdir(folder); await mkdir(path.join(folder, 'node_modules'))
+  for (let i = 0; i < 12; i++) await writeFile(path.join(folder, `part-${String(i).padStart(2, '0')}.txt`), `中文 needle ${i}\n`)
+  await writeFile(path.join(folder, 'node_modules', 'ignored.txt'), 'needle')
+  const matches: string[] = []; let cursor: string | undefined; let excluded = 0
+  do {
+    const page = (await h.files.execute(h.context, 'file.grep', { path: folder, query: 'needle', limit: 5,
+      ...(cursor ? { cursor } : {}) }, `grep-${matches.length}`)).data as any
+    matches.push(...page.matches.map((match: any) => match.path))
+    excluded = page.excludedCount
+    cursor = page.nextCursor
+  } while (cursor)
+  expect(matches).toHaveLength(12)
+  expect(new Set(matches).size).toBe(12)
+  expect(excluded).toBeGreaterThan(0)
+  const first = (await h.files.execute(h.context, 'file.grep', { path: folder, query: 'needle', limit: 1 }, 'grep-stale-first')).data as any
+  await writeFile(path.join(folder, 'new.txt'), 'needle')
+  await expect(h.files.execute(h.context, 'file.grep', { path: folder, query: 'needle', limit: 1,
+    cursor: first.nextCursor }, 'grep-stale-second')).rejects.toThrow('目录内容已改变')
+})
+
+it('M27 grep cursor keeps exact line positions inside one long file', async () => {
+  const h = await fixture(), filename = path.join(h.workspace, 'lesson', 'many.txt')
+  await writeFile(filename, Array.from({ length: 12 }, (_, i) => `行${i} needle`).join('\r\n'))
+  const hits: Array<{ line: number; column: number }> = []; let cursor: string | undefined
+  do {
+    const page = (await h.files.execute(h.context, 'file.grep', { path: filename, query: 'needle', limit: 5,
+      ...(cursor ? { cursor } : {}) }, `grep-file-${hits.length}`)).data as any
+    hits.push(...page.matches.map(({ line, column }: { line: number; column: number }) => ({ line, column })))
+    cursor = page.nextCursor
+  } while (cursor)
+  expect(hits).toEqual(Array.from({ length: 12 }, (_, i) => ({ line: i + 1, column: i < 10 ? 4 : 5 })))
+})
+
+it('M27 file organization reports per-item partials and external read grants stay read-only', async () => {
+  const h = await fixture(), readGrant = { ...h.context, readOnlyRoots: [h.outside] }
+  expect((await h.files.execute(readGrant, 'file.read', { path: path.join(h.outside, 'external.md') }, 'outside-read')).data)
+    .toMatchObject({ text: '外部' })
+  expect((await h.files.execute(readGrant, 'file.open', { path: path.join(h.outside, 'external.md') }, 'outside-open')).opened)
+    .toMatchObject({ writable: false })
+  const externalVersion = (await h.files.execute(readGrant, 'file.read', { path: path.join(h.outside, 'external.md') }, 'outside-version')).data as any
+  await expect(h.files.execute(readGrant, 'file.write', { mode: 'replace', path: path.join(h.outside, 'external.md'),
+    expectedVersion: externalVersion.version, content: '越权' }, 'outside-write')).rejects.toThrow('明确批准')
+  expect(await readFile(path.join(h.outside, 'external.md'), 'utf8')).toBe('外部')
+  expect((await h.files.execute(h.context, 'file.mkdir', { path: 'lesson', name: 'sub' }, 'mkdir')).data)
+    .toMatchObject({ operation: { status: 'success' } })
+  await writeFile(path.join(h.workspace, 'lesson', 'a.txt'), 'a')
+  await writeFile(path.join(h.workspace, 'lesson', 'b.txt'), 'b')
+  await writeFile(path.join(h.workspace, 'lesson', 'sub', 'b.txt'), 'collision')
+  const copy = (await h.files.execute(h.context, 'file.copy', { sources: ['lesson/a.txt', 'lesson/b.txt'],
+    destination: 'lesson/sub' }, 'copy')).data as any
+  expect(copy.operation).toMatchObject({ status: 'partial', items: [{ status: 'success' }, { status: 'failed' }] })
+  expect(await readFile(path.join(h.workspace, 'lesson', 'sub', 'a.txt'), 'utf8')).toBe('a')
+  expect(await readFile(path.join(h.workspace, 'lesson', 'sub', 'b.txt'), 'utf8')).toBe('collision')
+  expect((await h.files.execute(h.context, 'file.rename', { path: 'lesson/sub/a.txt', name: 'renamed.txt' }, 'rename')).data)
+    .toMatchObject({ operation: { status: 'success' } })
+  expect((await h.files.execute(h.context, 'file.move', { sources: ['lesson/sub/renamed.txt'], destination: 'lesson' }, 'move')).data)
+    .toMatchObject({ operation: { status: 'success' } })
+  expect(await readFile(path.join(h.workspace, 'lesson', 'renamed.txt'), 'utf8')).toBe('a')
+})
+
+it('M27 a continued run uses file.read as the exact source observation before a scoped patch', async () => {
+  const h = await fixture(), filename = path.join(h.workspace, 'lesson', 'existing.md')
+  const snapshot = await h.host.open(filename)
+  await h.host.tools.beginRun({ runId: h.context.runId, actor: 'agent', documents: [{ documentId: snapshot.documentId,
+    writable: [{ kind: 'document' }] }] })
+  h.host.tools.requireReadObservation(h.context.runId)
+  const version = `document:${snapshot.documentId}:${snapshot.epoch}:${snapshot.revision}`
+  await expect(h.files.execute(h.context, 'file.patch', { path: filename, expectedVersion: version,
+    oldText: '正', newText: '新', range: { from: 0, to: 1 } }, 'without-observation')).rejects.toThrow('继续修改前需读取')
+  expect((await h.files.execute(h.context, 'file.read', { path: filename, limit: 1 }, 'observed')).data)
+    .toMatchObject({ text: '正', truncated: true })
+  expect((await h.files.execute(h.context, 'file.patch', { path: filename, expectedVersion: version,
+    oldText: '正', newText: '新', range: { from: 0, to: 1 } }, 'after-observation')).data)
+    .toMatchObject({ status: 'applied', saved: false })
+  expect((await h.host.internalAPI.read(snapshot.documentId)).model).toMatchObject({ source: '新文' })
+})
+
+it('M27 stop before final file replacement leaves original bytes and no temp file', async () => {
+  const h = await fixture(), filename = path.join(h.workspace, 'lesson', 'plain.txt')
+  await writeFile(filename, 'before')
+  const version = ((await h.files.execute(h.context, 'file.read', { path: filename }, 'read')).data as any).version
+  const stopped = { ...h.context, assertActive: () => { throw new Error('任务已停止') } }
+  await expect(h.files.execute(stopped, 'file.write', { mode: 'replace', path: filename,
+    expectedVersion: version, content: 'after' }, 'stopped-write')).rejects.toThrow('任务已停止')
+  expect(await readFile(filename, 'utf8')).toBe('before')
+  expect((await readdir(path.dirname(filename))).some(name => name.endsWith('.tmp'))).toBe(false)
+})
+
+it('M27 rename preserves an opened dirty document binding; trash uses the host recycle callback', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'g20-files-organize-')); cleanup.push(root)
+  const workspace = path.join(root, 'workspace'), trash = path.join(root, 'trash')
+  await mkdir(workspace); await mkdir(trash)
+  const oldPath = path.join(workspace, 'draft.md'), newPath = path.join(workspace, 'renamed.md')
+  await writeFile(oldPath, 'disk')
+  const host = new DocumentHostService(path.join(root, 'journal'), { trashItem: async source => rename(source, path.join(trash, path.basename(source))) })
+  const files = new AgentFileService(host), context: AgentFileContext = { runId: 'organize', workspaceRoot: workspace, permission: 'workspace' }
+  const snapshot = await host.open(oldPath)
+  expect(await host.internalAPI.dispatch({ documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision,
+    operationId: 'edit', actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: 'dirty' } } }))
+    .toMatchObject({ status: 'applied' })
+  expect((await files.execute(context, 'file.rename', { path: oldPath, name: 'renamed.md' }, 'rename-dirty')).data)
+    .toMatchObject({ operation: { status: 'success' } })
+  expect((await host.internalAPI.read(snapshot.documentId))).toMatchObject({ binding: { kind: 'file', path: newPath }, dirty: true, model: { source: 'dirty' } })
+  await host.saveToPath(snapshot.documentId)
+  expect(await readFile(newPath, 'utf8')).toBe('dirty')
+  expect((await files.execute(context, 'file.trash', { paths: [newPath] }, 'trash-dirty')).data)
+    .toMatchObject({ operation: { status: 'success' } })
+  expect(await readFile(path.join(trash, 'renamed.md'), 'utf8')).toBe('dirty')
+  expect((await host.internalAPI.read(snapshot.documentId)).binding).toMatchObject({ kind: 'untitled' })
 })

@@ -55,7 +55,7 @@ export const documentHostRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('observe-file'), documentId: id }).strict(),
   z.object({ type: z.literal('reconcile-file'), documentId: id, epoch: id, baseRevision: z.number().int().nonnegative(), bindingVersion: z.number().int().positive(), version: z.string().nullable(), choice: z.enum(['disk', 'local']), source: z.string().optional() }).strict(),
   z.object({ type: z.literal('close'), documentId: id, discardDirty: z.boolean().optional(), expected: z.object({ epoch: id, revision: z.number().int().nonnegative() }).strict().optional() }).strict(),
-  z.object({ type: z.literal('close-dialog'), documentId: id, suggestedDirectory: saveDirectoryContextSchema.optional() }).strict(),
+  z.object({ type: z.literal('close-dialog'), documentId: id, suggestedDirectory: saveDirectoryContextSchema.optional(), discardOnly: z.boolean().optional() }).strict(),
   z.object({ type: z.literal('recoverable') }).strict(),
   z.object({ type: z.literal('restore'), documentId: id }).strict(),
   z.object({ type: z.literal('discard-recovery'), documentId: id }).strict(),
@@ -75,7 +75,7 @@ export interface DocumentHostAPI {
   observeFile(documentId: string): Promise<DocumentFileObservation>
   reconcileFile(input: ReconcileDocumentFile): Promise<DocumentSnapshot>
   close(documentId: string, discardDirty?: boolean): Promise<void>
-  closeWithDialog(documentId: string, suggestedDirectory?: SaveDirectoryContext): Promise<boolean>
+  closeWithDialog(documentId: string, suggestedDirectory?: SaveDirectoryContext, discardOnly?: boolean): Promise<boolean>
   recoverable(): Promise<DocumentSnapshot[]>
   restore(documentId: string): Promise<DocumentSnapshot>
   discardRecovery(documentId: string): Promise<void>

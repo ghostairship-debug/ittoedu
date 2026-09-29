@@ -88,13 +88,18 @@ test('M23-T01 sandboxed HTML previews cannot reach editor APIs, sibling frames, 
     await page.locator('.workspace-document-tabs').getByRole('tab', { name: /^security-two\.html/ }).click()
     await expect(second).toBeVisible()
     const secondUrl = await second.locator('iframe[title="HTML 预览"]').getAttribute('src')
-    expect(firstUrl).toMatch(/^courseware-preview:\/\/app\//)
-    expect(secondUrl).toMatch(/^courseware-preview:\/\/app\//)
+    expect(firstUrl).toMatch(/^courseware-preview:\/\/[a-f0-9]{32}\.[a-f0-9]{32}\.app\//)
+    expect(secondUrl).toMatch(/^courseware-preview:\/\/[a-f0-9]{32}\.[a-f0-9]{32}\.app\//)
     await page.getByRole('button', { name: '关闭 security-one.html', exact: true }).click()
     await expect(first).toHaveCount(0)
-    const leaseChecks = await secondPreview.locator('body').evaluate(async (_body, urls) => {
+    // Sibling origins are no longer readable. Revoke status is checked in Main, not by granting cross-tab fetch.
+    const siblingFetch = await secondPreview.locator('body').evaluate(async (_body, url) => {
+      try { await fetch(url); return 'unexpectedly-readable' } catch { return 'blocked' }
+    }, firstUrl!)
+    expect(siblingFetch).toBe('blocked')
+    const leaseChecks = await app.evaluate(async ({ net }, urls) => {
       const load = async (url: string) => {
-        const response = await fetch(url)
+        const response = await net.fetch(url)
         return { status: response.status, body: await response.text() }
       }
       return { released: await load(urls.first), remaining: await load(urls.second) }
@@ -149,6 +154,32 @@ test('M23-T02 HTML preview paginates fixed, flow and camera layouts and keeps pl
     }))
     facts.pageShape = pageShape
     expect(pageShape).toMatchObject({ directSections: 3, allSections: 4, fixedWidth: '1280px', fixedHeight: '720px', flowMaxWidth: '780px' })
+    const layoutSizes: Array<Record<string, number>> = []
+    for (const [width, height] of [[1200, 720], [1800, 1100]]) {
+      const actualSize = await app.evaluate(({ BrowserWindow }, size) => {
+        const window = BrowserWindow.getAllWindows()[0]!
+        window.setContentSize(size[0], size[1])
+        return window.getContentSize()
+      }, [width, height])
+      await expect.poll(() => page!.evaluate(() => [innerWidth, innerHeight])).toEqual(actualSize)
+      await expect.poll(async () => preview.locator('body').evaluate(() => innerHeight)).toBeGreaterThan(0)
+      await expect.poll(async () => region.locator('iframe[title="HTML 预览"]').evaluate(frame => {
+        const pane = frame.parentElement!, tools = pane.querySelector('[aria-label="HTML 分页"]')
+        const notice = pane.querySelector('.html-preview-pane__notice')
+        const available = pane.getBoundingClientRect().height - (tools?.getBoundingClientRect().height ?? 0)
+          - (notice?.getBoundingClientRect().height ?? 0)
+        return Math.abs(frame.getBoundingClientRect().height - available)
+      })).toBeLessThan(4)
+      const geometry = await preview.locator('#fixed-page').evaluate(section => {
+        const rect = section.getBoundingClientRect()
+        return { width: innerWidth, height: innerHeight, pageWidth: rect.width, pageHeight: rect.height }
+      })
+      expect(geometry.pageWidth).toBeLessThanOrEqual(geometry.width + 2)
+      expect(geometry.pageHeight).toBeLessThanOrEqual(geometry.height + 2)
+      layoutSizes.push(geometry)
+    }
+    facts.m25ViewportSizes = layoutSizes
+    expect(layoutSizes[1].height - layoutSizes[0].height).toBeGreaterThan(250)
     const renderDiagnostics = await Promise.all([
       region.locator('iframe[title="HTML 预览"]').evaluate(frame => {
         const style = getComputedStyle(frame), rect = frame.getBoundingClientRect()

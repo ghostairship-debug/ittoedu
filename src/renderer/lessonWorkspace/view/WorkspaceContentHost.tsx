@@ -109,7 +109,7 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
         <div
           key={tab.id}
           hidden={tabs.activeTab !== tab.id}
-          className="lesson-file-tab"
+          className={`lesson-file-tab${tab.kind === "document" && /\.html?$/i.test(tab.path || tab.name) ? " lesson-file-tab--html" : ""}`}
         >
           {tab.kind === "document" ? (
             tab.lesson && relativeFile(tab.lesson, tab.path) ? (

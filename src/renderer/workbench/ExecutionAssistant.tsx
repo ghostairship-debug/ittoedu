@@ -17,6 +17,8 @@ import type { ExternalMcpAPI } from '../../shared/workbench/external'
 import { ExecutionSettingsPanel } from './ExecutionSettingsPanel'
 import { ExternalMcpPanel } from './ExternalMcpPanel'
 import { ExecutionTimeline } from './ExecutionTimeline'
+import { ExecutionChangeReview, type ExecutionChangeReviewProps } from './ExecutionChangeReview'
+import type { UserCheckpointIndex } from '../../main/workbench/execution/CheckpointForkService'
 import { ExecutionQuestionCard } from './ExecutionQuestionCard'
 import { ExecutionApprovalCard } from './ExecutionApprovalCard'
 import { pendingApproval, pendingQuestion } from './executionTimelineModel'
@@ -39,6 +41,10 @@ export interface ExecutionAssistantProps {
 }
 
 const billingLabels = { metered: '按量付费', 'token-plan': 'Token Plan', subscription: '订阅', prepaid: '预付费', unknown: '计费未知' }
+const checkpointStatusLabels: Record<ExecutionRunRecord['status'], string> = {
+  queued: '等待中', running: '进行中', stopping: '正在停止', stopped: '已停止', partial: '部分完成',
+  completed: '已完成', failed: '失败', interrupted: '已中断',
+}
 const effortLabels: Record<DiscoveredReasoningEffort, string> = { none: '关闭', minimal: '极低', low: '低', medium: '中', high: '高', xhigh: '极高', max: '最高' }
 // Official model pages document these exact IDs. ChatGPT OAuth account support is
 // separate, so provider directory declarations take priority and this remains labelled unverified.
@@ -149,6 +155,10 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
   const [settingsEntry, setSettingsEntry] = useState<'default' | 'chatgpt-oauth'>('default')
   const [externalOpen, setExternalOpen] = useState(false)
   const [historySearchOpen, setHistorySearchOpen] = useState(false)
+  const [reviewRunId, setReviewRunId] = useState<string | null>(null)
+  const [reviewCheckpoint, setReviewCheckpoint] = useState<UserCheckpointIndex | null>(null)
+  const [checkpointBusy, setCheckpointBusy] = useState(false)
+  const [forkAdvisory, setForkAdvisory] = useState<{ conversationId: string; remaining: string[] } | null>(null)
   const [modelMenuOpen, setModelMenuOpen] = useState(false)
   const [modelQuery, setModelQuery] = useState('')
   const [modelCatalogs, setModelCatalogs] = useState<Record<string, DiscoveredModels>>({})
@@ -183,6 +193,7 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
 
   useEffect(() => { activeRef.current = active }, [active])
   useEffect(() => { runRef.current = run }, [run])
+  useEffect(() => { setReviewRunId(null); setReviewCheckpoint(null) }, [active?.conversationId])
   useEffect(() => { draftRef.current = draft }, [draft])
   useEffect(() => { documentsRef.current = documents; workbenchSelection.setPinned(documents) }, [documents])
   useEffect(() => () => workbenchSelection.setPinned([]), [])
@@ -429,6 +440,39 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
 
   const openQuestion = useMemo(() => pendingQuestion(projection), [projection])
   const openApproval = useMemo(() => pendingApproval(projection), [projection])
+  const reviewAPI = api
+  const reviewLoader = useMemo(() => reviewAPI?.changeReview && active
+    ? (input: Parameters<ExecutionChangeReviewProps['loadPage']>[0]) => reviewAPI.changeReview!({
+      ...input, workspaceId: active.workspaceId, conversationId: active.conversationId }) : undefined,
+  [api, active?.workspaceId, active?.conversationId])
+  const reviewRollback = useMemo(() => reviewAPI?.changeRollback && active
+    ? (input: Parameters<ExecutionChangeReviewProps['rollback']>[0]) => reviewAPI.changeRollback!({
+      ...input, workspaceId: active.workspaceId, conversationId: active.conversationId }) : undefined,
+  [api, active?.workspaceId, active?.conversationId])
+  const readCheckpoint = async () => {
+    if (!reviewAPI?.checkpoint || !active || !reviewRunId || checkpointBusy) return
+    setCheckpointBusy(true); setError('')
+    try {
+      setReviewCheckpoint(await reviewAPI.checkpoint({ workspaceId: active.workspaceId,
+        conversationId: active.conversationId, runId: reviewRunId }))
+    } catch (reason) { setError(reason instanceof Error ? reason.message : '检查点暂不可读取') }
+    finally { setCheckpointBusy(false) }
+  }
+  const forkFromCheckpoint = async () => {
+    if (!reviewAPI?.forkCheckpoint || !active || !reviewRunId || busy || checkpointBusy) return
+    setBusy(true); setError('')
+    try {
+      await persist()
+      const result = await reviewAPI.forkCheckpoint({ workspaceId: active.workspaceId,
+        conversationId: active.conversationId, runId: reviewRunId })
+      setConversations(value => value.some(item => item.conversationId === result.conversation.conversationId)
+        ? updateConversation(value, result.conversation) : [...value, result.conversation])
+      setSessionSearch('')
+      applyConversation(result.conversation)
+      setForkAdvisory({ conversationId: result.conversation.conversationId, remaining: result.fork.advisoryRemaining })
+    } catch (reason) { setError(reason instanceof Error ? reason.message : '无法从检查点新建会话') }
+    finally { setBusy(false) }
+  }
   useEffect(() => { if (workspaceId) setPermissionState(readPermission(workspaceId)) }, [workspaceId])
   // Element AI cards (M15) belong to this space and use the permission level shown here.
   useEffect(() => { elementCards.setWorkspace(workspaceId || null); return () => elementCards.setWorkspace(null) }, [workspaceId])
@@ -953,6 +997,8 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
             <summary aria-label="会话更多操作">更多</summary>
             <div className="execution-assistant__more-menu" aria-label="会话次级操作">
               <button type="button" onClick={() => { moreRef.current!.open = false; setHistorySearchOpen(value => !value) }} disabled={!active || !api}>搜索历史</button>
+              <button type="button" onClick={() => { moreRef.current!.open = false; setReviewRunId(value => value ? null : active?.runIndex.builtinRunIds.at(-1) ?? null) }}
+                disabled={!active?.runIndex.builtinRunIds.length || !reviewLoader || !reviewRollback}>审阅本次变更</button>
               <button type="button" onClick={() => { moreRef.current!.open = false; void openExternal() }} disabled={!active || busy || !externalAPI}>外部客户端</button>
             </div>
           </details>
@@ -971,6 +1017,10 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
           </button>
         </div>
       </header>
+      {forkAdvisory && forkAdvisory.conversationId === active?.conversationId && <section aria-label="新会话继续提示" className="execution-assistant__submission-note">
+        <p>已从检查点创建新会话。先检查并修改下方目标草稿；发送时会重新读取当前文件，原任务操作不会自动重做。</p>
+        {forkAdvisory.remaining.length > 0 && <><strong>原计划提示（请核对）</strong><ul>{forkAdvisory.remaining.map((item, index) => <li key={index}>{item}</li>)}</ul></>}
+      </section>}
       {error && <p className="execution-assistant__error" role="alert">{error}</p>}
       {active?.home?.missing && <p className="execution-assistant__home-notice" role="status">所属文件已删除，本条消息不会自动引用该文件；可重新引用文件。</p>}
       <div className="execution-assistant__history">
@@ -991,6 +1041,21 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
             timedSubmissions.current.delete(taskId)
             void api.timing!({ ...owner, submissionId: taskId, stage: 'renderer.first-visible', stamp, itemId }).catch(() => undefined)
           } : undefined} />
+        {reviewRunId && active?.runIndex.builtinRunIds.includes(reviewRunId) && reviewLoader && reviewRollback && <section aria-label="会话变更审阅">
+          <header><strong>审阅任务变更</strong>
+            <label>任务 <select value={reviewRunId} onChange={event => { setReviewRunId(event.currentTarget.value); setReviewCheckpoint(null) }}>
+              {active.runIndex.builtinRunIds.map((id, index) => <option key={id} value={id}>第 {index + 1} 次任务</option>)}
+            </select></label>
+            {reviewAPI?.checkpoint && <button type="button" disabled={checkpointBusy || busy} onClick={() => void readCheckpoint()}>
+              {checkpointBusy ? '正在读取…' : '查看检查点'}</button>}
+            {reviewAPI?.forkCheckpoint && <button type="button" disabled={checkpointBusy || busy} onClick={() => void forkFromCheckpoint()}>从此新建会话</button>}
+            <button type="button" onClick={() => setReviewRunId(null)}>关闭审阅</button>
+          </header>
+          {reviewCheckpoint?.runId === reviewRunId && <p role="status">当前检查点：任务{checkpointStatusLabels[reviewCheckpoint.runStatus]}，
+            关联内容 {reviewCheckpoint.contentVersions.length} 份。从此继续会创建新会话；文档内容需在变更审阅中另行选择回退。</p>}
+          <ExecutionChangeReview key={`${active.conversationId}:${reviewRunId}`} runId={reviewRunId}
+            loadPage={reviewLoader} rollback={reviewRollback} onLocateDocument={onLocateDocument} />
+        </section>}
         {connectionFailure(run) && <div className="execution-assistant__submission-note" role="alert">
           <p>{connectionFailure(run)}</p>
           <button type="button" disabled={busy || !submissions.some(item => item.runId === run!.runId)} onClick={() => void submit('queue', undefined, run!)}>连接恢复后继续此任务</button>

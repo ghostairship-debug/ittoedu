@@ -11,6 +11,7 @@ export class TextEncodingError extends Error {
 }
 
 function sourceIsValid(source: string): void {
+  if (typeof source === 'string' && source.includes(String.fromCharCode(0))) throw new TextEncodingError('文件含二进制零字节，不能作为 UTF-8 源文编辑')
   if (typeof source !== 'string' || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u.test(source)) throw new TypeError('纯文本必须是有效 Unicode 源文')
 }
 

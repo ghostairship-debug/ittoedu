@@ -59,6 +59,7 @@ export interface ModelFailure {
 }
 export type ModelEvent = { requestId: string; sequence: number } & (
   | { type: 'response.started'; responseId: string; /** Only provider-reported, never inferred from selection. */ actualModel?: string; providerRequestId?: string }
+  | { type: 'usage.reported'; usage: ModelUsage }
   | { type: 'text.delta'; text: string }
   | { type: 'reasoning.delta'; text: string }
   /** Preview only. The target/permission-aware S06 parser, not this adapter, may turn this into draft text. */
@@ -69,6 +70,8 @@ export type ModelEvent = { requestId: string; sequence: number } & (
   | { type: 'response.failed'; failure: ModelFailure }
 )
 export interface ModelProvider {
+  /** Explicit adapter fact: absence does not authorize automatic replay of an unknown provider. */
+  readonly retrySafety?: 'pure-generation' | 'server-side-effects'
   /** Exactly one request, no implicit retry, provider fallback, tool execution or document mutation. */
   stream(request: ModelRequest, options?: { signal?: AbortSignal }): AsyncIterable<ModelEvent>
 }

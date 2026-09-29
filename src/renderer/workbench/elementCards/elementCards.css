@@ -31,5 +31,7 @@
 .element-card-indicator__menu button:hover { background: #f5f3ff; }
 .element-card-indicator__menu small { color: #66758a; }
 
-/* A text card floats under the quick bar that opened it, above the page (M15). */
-.element-text-card { position: fixed; z-index: 60; }
+/* A text card follows its visible selection; its fallback remains reachable when that selection leaves view. */
+.element-text-card { position: fixed; z-index: 60; max-height: calc(100vh - 16px); overflow: auto; }
+.element-text-card__binding { display: grid; gap: 5px; box-sizing: border-box; width: min(320px, 82vw); margin-bottom: 4px; padding: 7px 9px; border: 1px solid #f59e0b; border-radius: 7px; background: #fffbeb; color: #78350f; font-size: 12px; }
+.element-text-card__binding button { justify-self: start; padding: 3px 8px; border: 1px solid #d97706; border-radius: 4px; background: #fff; color: inherit; cursor: pointer; }

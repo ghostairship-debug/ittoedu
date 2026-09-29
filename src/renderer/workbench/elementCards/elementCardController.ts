@@ -18,7 +18,7 @@ import { textTargetContent } from '../../../core/drivers/course/elementFields'
  * unlisted conversation that Main clears when the document closes; requests to one element queue in that
  * conversation, different elements run side by side. A card's AI may change only its element.
  */
-export type ElementCardEntryState = 'sending' | 'queued' | 'running' | 'completed' | 'failed' | 'stopped' | 'cancelled'
+export type ElementCardEntryState = 'sending' | 'queued' | 'running' | 'completed' | 'partial' | 'failed' | 'stopped' | 'cancelled'
 export interface ElementCardEntry {
   submissionId: string
   text: string
@@ -106,11 +106,11 @@ function withReply(entry: ElementCardEntry, projection: ExecutionProjection): El
   const reply = item?.content.map(part => part.kind === 'text' ? part.text : '').join('').trim()
   return reply ? { ...entry, reply } : entry
 }
-const TERMINAL: ReadonlySet<ElementCardEntryState> = new Set(['completed', 'failed', 'stopped'])
+const TERMINAL: ReadonlySet<ElementCardEntryState> = new Set(['completed', 'partial', 'failed', 'stopped'])
 const TEXT_LOST = '这段文字已找不到，请重新选中后再打开 AI 卡。'
 
 const RUN_STATE: Partial<Record<ExecutionRunRecord['status'], ElementCardEntryState>> = {
-  queued: 'running', running: 'running', stopping: 'running', completed: 'completed', partial: 'completed',
+  queued: 'running', running: 'running', stopping: 'running', completed: 'completed', partial: 'partial',
   failed: 'failed', interrupted: 'failed', stopped: 'stopped',
 }
 
@@ -188,6 +188,22 @@ export class ElementCardController {
       target: structuredClone(input.target), workspaceId: null, conversation: null, entries: [], projection: emptyExecutionProjection(''), error: '', catchUp: Promise.resolve() })
     this.notify()
     return key
+  }
+  /** Explicit user re-selection keeps this card's draft and conversation while replacing only its live text target. */
+  rebindText(key: string, input: { documentId: string; target: ExecutionSelectionTarget; label: string;
+    anchor: { left: number; top: number }; content: string | null }): void {
+    const card = this.cards.get(key)
+    if (!card || card.kind !== 'text') throw new Error('原文字卡已关闭，请重新打开。')
+    if (card.documentId !== input.documentId) throw new Error('只能在原文档中重新选择文字。')
+    if (card.entries.some(entry => entry.state === 'sending' || entry.state === 'queued' || entry.state === 'running')
+      || pendingQuestion(card.projection) || pendingApproval(card.projection)) throw new Error('当前请求尚未结束，请稍后重新选择。')
+    if (input.content === null) throw new Error('新选区内容无法确认，请重新选中后再试。')
+    card.target = structuredClone(input.target)
+    card.content = input.content
+    card.label = input.label
+    card.anchor = { ...input.anchor }
+    card.error = ''
+    this.notify()
   }
   /** Closes a text card: its running request stops, its conversation goes; what it changed stays in the document. */
   async closeText(key: string): Promise<void> {

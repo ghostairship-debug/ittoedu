@@ -19,7 +19,8 @@ describe('HTML document API 3 carrier', () => {
     expect(source).toContain('CoursewareRuntime.define(')
     expect(unpackHtmlDocumentRuntimeSource(source)).toEqual({ html, resourceKeys: [] })
     expect(scanRuntimePageText(source).entries.map(entry => entry.text)).toContain('下一句对话')
-    expect(unpackHtmlDocumentRuntimeSource(source + '// tampered')).toBeNull()
+    expect(unpackHtmlDocumentRuntimeSource(source + '// cosmetic comment')).toEqual({ html, resourceKeys: [] })
+    expect(unpackHtmlDocumentRuntimeSource(source + ';globalThis.changed=true')).toBeNull()
     expect(unpackHtmlDocumentRuntimeSource('CoursewareRuntime.define({})')).toBeNull()
   })
 
@@ -100,4 +101,20 @@ describe('HTML document API 3 carrier', () => {
     const definition = execute(createHtmlDocumentRuntimeSource({ html: `cw-resource:${key}`, resourceKeys: [key] }))
     expect(() => definition.create({ dom: { root: document.createElement('div') }, assets: { url: () => 'blob:"</script>' }, capture: { waitUntil() {} } })).toThrow('不能安全嵌入')
   })
+})
+
+
+it('M25 accepts only cosmetic syntax changes and never evaluates a marked but customized carrier', () => {
+  const html = '<h1>格式变化保留轻编辑</h1>'
+  const source = createHtmlDocumentRuntimeSource({ html, resourceKeys: [] })
+  const formatted = ('/* formatting only */\n' + source)
+    .replace("protocol: 'surface-runtime'", 'protocol: "surface-runtime"')
+    .replace('"version":1', 'version : 1')
+    .replace('CoursewareRuntime.define({', 'CoursewareRuntime.define( {\n/* a comment */')
+  expect(unpackHtmlDocumentRuntimeSource(formatted)).toEqual({ html, resourceKeys: [] })
+  expect(scanRuntimePageText(formatted).entries.map(entry => entry.text)).toContain('格式变化保留轻编辑')
+  expect(unpackHtmlDocumentRuntimeSource(source.replace("iframe.dataset.htmlDocumentRuntime = 'true';", ''))).toBeNull()
+  expect(unpackHtmlDocumentRuntimeSource(source.replace('return {\n      resize', 'globalThis.__candidateExecuted = true; return {\n      resize'))).toBeNull()
+  expect(unpackHtmlDocumentRuntimeSource(source.replace('"version":1', '"version":(globalThis.__candidateExecuted = true, 1)'))).toBeNull()
+  expect(Reflect.get(globalThis, '__candidateExecuted')).toBeUndefined()
 })

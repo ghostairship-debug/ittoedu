@@ -12,6 +12,7 @@ import {
   isAllowedDocumentUrl,
   isAllowedEditorPreviewFrameUrl,
   isAllowedHtmlPreviewFrameUrl,
+  isAllowedHtmlPreviewChildFrameUrl,
   clearHtmlPreviewFrameEntries,
 } from './security'
 import { askMediaCapture } from './mediaCapturePrompt'
@@ -167,14 +168,17 @@ export async function createMainWindow(
       backgroundThrottling: showApplicationWindows,
     },
   })
+  const windowWebContentsId = window.webContents.id
   let closeApproved = false
   let closeCheckInFlight = false
   let previewNetworkDocumentToken: string | null = null
 
   const beginPreviewNetworkDocumentNavigation = (): void => {
-    releaseAllHtmlPreviewLeases()
-    previewNetworkDocumentToken = null
-    mainPreviewNetworkPolicy.beginDocumentNavigation()
+    try { releaseAllHtmlPreviewLeases() }
+    finally {
+      previewNetworkDocumentToken = null
+      mainPreviewNetworkPolicy.beginDocumentNavigation()
+    }
   }
   const sendPreviewNetworkDocumentToken = (): void => {
     if (previewNetworkDocumentToken === null || window.isDestroyed()) return
@@ -195,8 +199,9 @@ export async function createMainWindow(
   hardenWebContents(
     window.webContents,
     (url) => isAllowedDocumentUrl(url, rendererEntryUrl),
-    (url) => isAllowedEditorPreviewFrameUrl(url, rendererEntryUrl)
-      || isAllowedHtmlPreviewFrameUrl(url, window.webContents.id),
+    (url, frame) => isAllowedEditorPreviewFrameUrl(url, rendererEntryUrl)
+      || isAllowedHtmlPreviewFrameUrl(url, windowWebContentsId)
+      || isAllowedHtmlPreviewChildFrameUrl(url, windowWebContentsId, frame),
   )
 
   window.webContents.on('before-input-event', (event, input) => {
@@ -273,21 +278,22 @@ export async function createMainWindow(
     })
   })
 
-  const windowWebContentsId = window.webContents.id
   window.on('closed', () => {
-    clearHtmlPreviewFrameEntries(windowWebContentsId)
-    beginPreviewNetworkDocumentNavigation()
-    appState.detachWindow(window)
+    try { clearHtmlPreviewFrameEntries(windowWebContentsId) }
+    catch (error) { console.error('关闭窗口时释放 HTML 预览帧失败', error) }
+    try { beginPreviewNetworkDocumentNavigation() }
+    catch (error) { console.error('关闭窗口时释放预览网络授权失败', error) }
+    finally { appState.detachWindow(window) }
   })
 
   window.webContents.on('render-process-gone', () => {
-    clearHtmlPreviewFrameEntries(window.webContents.id)
+    clearHtmlPreviewFrameEntries(windowWebContentsId)
     beginPreviewNetworkDocumentNavigation()
   })
 
   window.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => {
     if (isMainFrame && !isInPlace) {
-      clearHtmlPreviewFrameEntries(window.webContents.id)
+      clearHtmlPreviewFrameEntries(windowWebContentsId)
       beginPreviewNetworkDocumentNavigation()
     }
   })

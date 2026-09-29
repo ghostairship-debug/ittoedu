@@ -1,6 +1,8 @@
 import type { DocumentSnapshot } from '../../shared/workbench/document'
 
 export interface DocumentClosePorts {
+  /** A failed renderer draft can be discarded explicitly without first committing or saving it. */
+  discardOnly?: boolean
   read(): Promise<DocumentSnapshot>
   hasWritableTasks(): Promise<boolean>
   confirmStop(): Promise<boolean>
@@ -19,10 +21,11 @@ export async function closeDocumentFlow(ports: DocumentClosePorts): Promise<bool
   }
   let snapshot = await ports.read()
   let discard = false
-  if (snapshot.dirty) {
+  if (snapshot.dirty || ports.discardOnly) {
     const decision = await ports.chooseDirty(snapshot)
     if (decision === 'cancel') return false
     if (decision === 'save') {
+      if (ports.discardOnly) return false
       const saved = await ports.save()
       if (!saved || saved.dirty) return false
       snapshot = saved

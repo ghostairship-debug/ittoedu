@@ -73,6 +73,7 @@ it.each([false, true])('reopens a V9 file and applies its prior ready image with
   } }
   const gateway = new DocumentToolGateway(registry, [driver], randomUUID, { services, prepareImage: prepareImageResource })
   const files: AgentFileService = { async preflightCreate() { return { directory: root, outside: false } },
+    async preflightMutation() { return { paths: [filePath], outside: false } },
     async execute(context, name, input) {
       if (name === 'file.create') return { data: { operation: { status: 'success' }, path: filePath, documentId: session.documentId },
         opened: { documentId: session.documentId, kind: 'course-v9', name: filePath, writable: true } }

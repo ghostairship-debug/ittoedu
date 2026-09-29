@@ -52,7 +52,7 @@ describe('M23 preview lease lifecycle', () => {
   it('serves the canonical unsaved source and sibling files with GET/HEAD, then revokes the token', async () => {
     const { service, policy, entries, open } = await fixture()
     const lease = await open('tab-1')
-    expect(lease.url).toMatch(/^courseware-preview:\/\/app\/[a-f0-9]{64}\/file\/lesson\.html$/)
+    expect(lease.url).toMatch(/^courseware-preview:\/\/[a-f0-9]{32}\.[a-f0-9]{32}\.app\/[a-f0-9]{64}\/file\/lesson\.html$/)
     expect(lease.url).not.toContain('g20-preview-life')
     expect(entries.has(lease.url)).toBe(true)
     expect(policy.allowsRequest('https://media.example/a.png')).toBe(true)
@@ -74,6 +74,7 @@ describe('M23 preview lease lifecycle', () => {
     const { service, open } = await fixture()
     const a = await open('tab-a')
     const b = await open('tab-b')
+    expect(new URL(a.url).host).not.toBe(new URL(b.url).host)
     expect((await service.handleProtocolRequest(new Request(a.url))).status).toBe(200)
     expect((await service.handleProtocolRequest(new Request(b.url))).status).toBe(200)
     const replacement = await open('tab-a')

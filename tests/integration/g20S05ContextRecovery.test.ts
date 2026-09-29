@@ -175,7 +175,7 @@ it('accepts a complete read of an inspect-refreshed document root before resumed
   expect((await h.host.internalAPI.read(h.document.documentId)).model).toMatchObject({ source: 'FIRST BBB' })
 })
 
-it('does not let a range read stand in for observing the whole document', async () => {
+it('M26 reading one range never authorizes an unobserved different range', async () => {
   let requests = 0
   const provider: ModelProvider = { async *stream(request) {
     requests += 1
@@ -184,7 +184,7 @@ it('does not let a range read stand in for observing the whole document', async 
       failure: { outcome: 'unknown', kind: 'transport', code: 'network-lost', message: '连接中断' } }
     else if (requests === 2) yield complete(request, [{ id: 'read-range', name: 'read', input: { target: reference.writable[0]!.target } }])
     else if (requests === 3) yield complete(request, [{ id: 'premature-write', name: 'text.replace',
-      input: { target: reference.writable[0]!.target, content: 'FIRST' } }])
+      input: { target: reference.writable[1]!.target, content: 'FIRST' } }])
     else yield complete(request, [], '未修改')
   } }
   const h = await fixture(provider)
@@ -198,7 +198,7 @@ it('does not let a range read stand in for observing the whole document', async 
   expect((await h.host.internalAPI.read(h.document.documentId)).model).toMatchObject({ source: 'AAA BBB' })
 })
 
-it('does not unlock recovery after a truncated document read', async () => {
+it('M26 a truncated document read never covers text beyond its returned interval', async () => {
   let requests = 0
   const provider: ModelProvider = { async *stream(request) {
     requests += 1
@@ -215,7 +215,7 @@ it('does not unlock recovery after a truncated document read', async () => {
   const h = await fixture(provider)
   const source = `AAA ${'B'.repeat(250)}`
   const long = await h.host.internalAPI.create({ kind: 'markdown', source, resources: { assets: {}, components: {} } }, 'long.md')
-  h.input.documents = [{ documentId: long.documentId, writable: [{ kind: 'markdown-range', from: 0, to: 3 }] }]
+  h.input.documents = [{ documentId: long.documentId, writable: [{ kind: 'markdown-range', from: 150, to: 153 }] }]
   const first = await h.engine.start(h.input)
   expect((await h.engine.wait(first.runId)).status).toBe('failed')
   const continued = await h.engine.resume(first.runId, { ...h.input, taskId: 'continued' })

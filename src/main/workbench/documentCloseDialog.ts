@@ -7,12 +7,13 @@ import { executionDesktopService } from './execution/ExecutionDesktopService'
 import { externalMcpService } from './external/externalDesktopService'
 
 const pending = new Map<string, Promise<boolean>>()
-export function closeDocumentWithDialog(window: BrowserWindow, documents: DocumentHostService, documentId: string, suggestedDirectory?: SaveDirectoryContext): Promise<boolean> {
+export function closeDocumentWithDialog(window: BrowserWindow, documents: DocumentHostService, documentId: string, suggestedDirectory?: SaveDirectoryContext, discardOnly = false): Promise<boolean> {
   const existing = pending.get(documentId)
   if (existing) return existing
   const operation = (async () => {
     const execution = await executionDesktopService(), external = await externalMcpService()
     return closeDocumentFlow({
+      discardOnly,
       read: () => documents.registry.get(documentId).drain(),
       hasWritableTasks: async () => {
         const active = await execution.writableTasksForDocument(documentId)
@@ -24,6 +25,12 @@ export function closeDocumentWithDialog(window: BrowserWindow, documents: Docume
       stopWritableTasks: async () => { await execution.stopTasksForDocument(documentId); await external.stopForDocument(documentId) },
       chooseDirty: async snapshot => {
         const name = snapshot.binding.kind === 'file' ? snapshot.binding.path : snapshot.binding.suggestedName
+        if (discardOnly) {
+          const result = await dialog.showMessageBox(window, { type: 'warning', title: '放弃未保存更改',
+            message: `放弃“${name}”的未保存更改并关闭？`, detail: '包括尚未确认的输入；磁盘原文件不会删除，已完成的保存不会回退。',
+            buttons: ['放弃未保存更改并关闭', '取消'], defaultId: 1, cancelId: 1, noLink: true })
+          return result.response === 0 ? 'discard' : 'cancel'
+        }
         const result = await dialog.showMessageBox(window, { type: 'question', title: '保存文档更改', message: `关闭前保存“${name}”的更改？`,
           buttons: ['保存并关闭', '放弃未保存更改', '取消'], defaultId: 0, cancelId: 2, noLink: true })
         return result.response === 0 ? 'save' : result.response === 1 ? 'discard' : 'cancel'

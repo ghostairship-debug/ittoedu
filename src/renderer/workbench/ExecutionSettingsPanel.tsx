@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
-import type { ExecutionConnectionView, ExecutionProfile, ExecutionRole, ExecutionSettingsView } from '../../shared/workbench/executionSettings'
+import type { ExecutionConnectionView, ExecutionProfile, ExecutionRole, ExecutionRoleSelection, ExecutionSettingsView } from '../../shared/workbench/executionSettings'
 import { executionRoles } from '../../shared/workbench/executionSettings'
 import { executionSettingsConnectionSchema, executionSettingsRolesSchema, type DiscoveredModels, type ExecutionSettingsAPI, type SaveExecutionConnectionDesktop } from '../../shared/workbench/executionSettingsDesktop'
 import { modelCapabilityIdentity, modelCapabilityRecord, type ProbedModelCapability } from '../../shared/workbench/modelCapabilities'
@@ -49,6 +49,22 @@ const matchesSavedRole = (draft: RoleDraft, saved: NonNullable<ExecutionProfile[
     return modelCapabilityIdentity({ ...identity, parameters: parameters as NonNullable<typeof saved.parameters> }).parametersKey
       === modelCapabilityIdentity({ ...identity, parameters: saved.parameters }).parametersKey
   } catch { return false }
+}
+type PresetRole = 'conversation' | 'vision'
+const presetCapabilities = { conversation: 'tools', vision: 'vision' } as const
+function verifiedRoleCandidates(settings: ExecutionSettingsView, entry: ExecutionConnectionView, role: PresetRole): ExecutionRoleSelection[] {
+  if (!entry.hasCredential || entry.revoked) return []
+  const candidates: ExecutionRoleSelection[] = []
+  for (const record of settings.capabilityRecords ?? []) {
+    if (record.connectionId !== entry.connection.id || record.connectionRevision !== entry.connection.revision
+      || record.facts[presetCapabilities[role]]?.status !== 'supported') continue
+    try {
+      const parameters: unknown = JSON.parse(record.parametersKey)
+      if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) continue
+      candidates.push({ connectionId: entry.connection.id, model: record.model, parameters: parameters as ExecutionRoleSelection['parameters'] })
+    } catch { /* An invalid record cannot fill a role. */ }
+  }
+  return candidates
 }
 const field: CSSProperties = { display: 'grid', gap: 5, minWidth: 0 }
 const grid: CSSProperties = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(250px,100%),1fr))', gap: 12 }
@@ -299,6 +315,26 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
   const imageRolesDiffer = Boolean(settings?.profile.roles.imageGenerate && settings.profile.roles.imageEdit
     && (settings.profile.roles.imageGenerate.connectionId !== settings.profile.roles.imageEdit.connectionId
       || settings.profile.roles.imageGenerate.model !== settings.profile.roles.imageEdit.model))
+  const preset = selected && settings ? {
+    conversation: verifiedRoleCandidates(settings, selected, 'conversation'),
+    vision: verifiedRoleCandidates(settings, selected, 'vision'),
+  } : null
+  const presetFillable = (['conversation', 'vision'] as const).filter(role => preset?.[role].length === 1
+    && !roles[role].connectionId && !roles[role].model && !settings?.profile.roles[role])
+  const applyVerifiedPreset = () => {
+    if (!preset || !presetFillable.length) return
+    setRoles(current => {
+      const next = { ...current }
+      for (const role of presetFillable) {
+        const selection = preset[role][0]!
+        if (current[role].connectionId || current[role].model) continue
+        next[role] = { connectionId: selection.connectionId, model: selection.model,
+          parameters: JSON.stringify(selection.parameters ?? {}, null, 2) }
+      }
+      return next
+    })
+    setStatus('已将当前连接的已验证能力填入未配置角色的草稿。检查后点击“保存模型角色”；已有角色和高级设置保持原值。')
+  }
   return <div className="modal-backdrop" role="presentation">
     <section ref={dialog} className="modal" role="dialog" aria-modal="true" aria-labelledby="execution-settings-title" onKeyDown={keys}
       style={{ width: 'min(920px, calc(100vw - 32px))', maxHeight: '90vh', overflowY: 'auto', padding: 24, display: 'grid', gap: 18 }}>
@@ -367,6 +403,20 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
         {hasConnectionChanges && <small>先保存当前连接修改，再读取该连接的模型目录。</small>}
         {models.length > 0 && <details open><summary>模型目录（名称不代表能力已验证）</summary><div style={{ maxHeight: 140, overflow: 'auto' }}>{models.map(model => <div key={model}><code>{model}</code></div>)}</div></details>}
       </fieldset>}
+      {entry === 'default' && settings && <section aria-label="已验证角色预设" style={{ display: 'grid', gap: 8, borderTop: '1px solid var(--border-color, #d0d5dd)', paddingTop: 12 }}>
+        <h3 style={{ margin: 0, fontSize: 14 }}>已验证角色预设</h3>
+        <p style={{ margin: 0 }}>先在上方选择已保存且接通的连接。预设只填入空白角色草稿；对话、视觉和图片仍是独立槽位，已保存的高级选择不会被覆盖。</p>
+        {!selected ? <small>尚未选择连接。</small> : !selected.hasCredential || selected.revoked
+          ? <small>此连接尚未接通或已撤销，没有可填入的角色。</small>
+          : (['conversation', 'vision'] as const).map(role => <small key={role}>{roleLabels[role]}：{
+            preset![role].length === 1 ? `${preset![role][0]!.model} 已按当前连接版本、模型和参数验证${role === 'conversation' ? '工具' : '视觉'}能力${settings.profile.roles[role] ? '；已有角色配置保留' : ''}。`
+              : preset![role].length > 1 ? '有多组已验证模型，请在高级设置中明确选择。'
+                : `当前连接暂无已验证可用的${role === 'conversation' ? '工具' : '视觉'}能力；可在高级设置中保存角色并显式验证。`
+          }</small>)}
+        {selected?.hasCredential && !selected.revoked && <small>图片生成与编辑暂无本页可复用的独立能力记录；请在“图片服务”或高级设置中明确选择，保存名称不代表真实生成已通过。</small>}
+        <button type="button" className="secondary-button" disabled={busy || Boolean(loginId) || presetFillable.length === 0}
+          onClick={applyVerifiedPreset} style={{ justifySelf: 'start' }}>填入已验证的空白角色</button>
+      </section>}
       <details>
         <summary>可选：图片服务{imageRolesDiffer ? '（生成与编辑分别配置）' : chosenImageConnection && imageModel ? `（已选 ${chosenImageConnection.connection.accountId} · ${imageModel}）` : ''}</summary>
       <fieldset disabled={busy || !settings || !settings.secureStorageAvailable} style={{ border: 0, padding: 0, margin: 0, display: 'grid', gap: 10 }}>

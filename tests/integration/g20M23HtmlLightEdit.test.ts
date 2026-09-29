@@ -150,7 +150,7 @@ it('restores responsive image attributes on hot undo and only selects in explici
   command({ type: 'html-preview.init', leaseId: 'lease', loadId: 'load' })
   fireEvent.click(image)
   expect(posted.some(value => (value as { event?: string }).event === 'targets')).toBe(false)
-  command({ type: 'html-preview.edit-mode', loadId: 'load', enabled: true })
+  command({ type: 'html-preview.edit-mode', loadId: 'load', requestId: 'test-edit-mode', enabled: true })
   fireEvent.click(image)
   const target = posted.find(value => (value as { event?: string }).event === 'targets') as { targets: Array<{ handle: string }> }
   expect(target?.targets).toHaveLength(1)
@@ -189,7 +189,7 @@ it('reports a nested section under its actual page section after a text double c
   command({ type: 'html-preview.init', leaseId: 'lease', loadId: 'load' })
   fireEvent.doubleClick(document.querySelector('p')!)
   expect(posted.some(value => (value as { event?: string }).event === 'targets')).toBe(false)
-  command({ type: 'html-preview.edit-mode', loadId: 'load', enabled: true })
+  command({ type: 'html-preview.edit-mode', loadId: 'load', requestId: 'test-edit-mode', enabled: true })
   fireEvent.doubleClick(document.querySelector('p')!)
   expect(posted.find(value => (value as { event?: string }).event === 'targets'))
     .toMatchObject({ targets: [{ kind: 'text', sectionOrder: 0, rawText: '内层文字' }] })
@@ -207,7 +207,7 @@ it('marks script replacements as dynamic even when the replacement has identical
   const dispose = mountHtmlPreviewAgent(document)
   const command = (data: object) => window.dispatchEvent(new MessageEvent('message', { source: window.parent, data }))
   command({ type: 'html-preview.init', leaseId: 'lease', loadId: 'load' })
-  command({ type: 'html-preview.edit-mode', loadId: 'load', enabled: true })
+  command({ type: 'html-preview.edit-mode', loadId: 'load', requestId: 'test-edit-mode', enabled: true })
   document.querySelector('p')!.textContent = 'same'
   fireEvent.doubleClick(document.querySelector('p')!)
   expect(posted.find(value => (value as { event?: string }).event === 'targets'))
@@ -256,7 +256,7 @@ it('keeps the same frame and script state when canonical change arrives before t
   const props = { lease, committed: snapshot(1, original), tabId: 'tab', onUndo: vi.fn(), onRedo: vi.fn(), active: true }
   const mounted = render(createElement(HtmlPreviewPane, props))
   const frame = screen.getByTitle('HTML 预览') as HTMLIFrameElement
-  expect(frame.getAttribute('sandbox')).toBe('allow-scripts')
+  expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin')
   const frameWindow = frame.contentWindow!
   Reflect.set(frameWindow, 'testCounter', 7)
   fireEvent.click(screen.getByRole('button', { name: '编辑预览' }))
@@ -300,7 +300,7 @@ it('does not downgrade revision or hot patch after a newer canonical change prec
     bindingVersion: 1, url: 'courseware-preview://app/token/file/lesson.html' }
   const onTarget = vi.fn(), onApplied = vi.fn(), onEditSettled = vi.fn()
   const controller = new HtmlPreviewController(frame, lease, { onTarget, onApplied, onEditSettled, onPatchMismatch: vi.fn(),
-    onEditing: vi.fn(), onPage: vi.fn(), onReady: vi.fn() })
+    onEditing: vi.fn(), onPage: vi.fn(), onReady: vi.fn(), onEditModeReady: vi.fn() })
   const report = { handle: 'target', kind: 'text', domPath: [{ name: 'html', index: 0 }], sectionOrder: null,
     rawText: 'old', attributeName: null, rect: { x: 0, y: 0, width: 10, height: 10 }, scriptCreated: false }
   const send = (seq: number) => window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow,
@@ -319,6 +319,35 @@ it('does not downgrade revision or hot patch after a newer canonical change prec
   expect(posted).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'html-preview.patch' }), '*')
   send(2)
   await waitFor(() => expect(workspaceFiles).toHaveBeenCalledWith(expect.objectContaining({ type: 'html-preview.resolve-target', revision: 3 })))
+  controller.dispose()
+  frame.remove()
+})
+
+it('M30 accepts edit-mode ACK only from the current load and latest command', () => {
+  const frame = document.createElement('iframe')
+  document.body.append(frame)
+  const posted = vi.spyOn(frame.contentWindow!, 'postMessage')
+  const onEditModeReady = vi.fn()
+  const controller = new HtmlPreviewController(frame, { leaseId: 'lease', loadId: 'load', documentId: 'doc',
+    epoch: 'epoch', revision: 0, bindingVersion: 1, url: 'courseware-preview://app/token/file/lesson.html' }, {
+    onTarget: vi.fn(), onReady: vi.fn(), onEditModeReady, onPage: vi.fn(), onEditing: vi.fn(),
+    onApplied: vi.fn(), onEditSettled: vi.fn(), onPatchMismatch: vi.fn(),
+  })
+  controller.setEditMode(true)
+  const first = posted.mock.calls.at(-1)?.[0] as { requestId: string }
+  controller.setEditMode(false)
+  const current = posted.mock.calls.at(-1)?.[0] as { requestId: string }
+  const reply = (loadId: string, seq: number, requestId: string, enabled: boolean) =>
+    window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: {
+      event: 'edit-mode-ready', protocol: 1, leaseId: 'lease', loadId, seq, requestId, enabled,
+    } }))
+  reply('previous-load', 1, current.requestId, false)
+  reply('load', 2, first.requestId, true)
+  expect(onEditModeReady).not.toHaveBeenCalled()
+  reply('load', 3, current.requestId, false)
+  expect(onEditModeReady).toHaveBeenCalledExactlyOnceWith(false)
+  reply('load', 4, current.requestId, false)
+  expect(onEditModeReady).toHaveBeenCalledTimes(1)
   controller.dispose()
   frame.remove()
 })

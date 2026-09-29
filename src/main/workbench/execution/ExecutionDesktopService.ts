@@ -8,6 +8,7 @@ import type { ExecutionEvent, ExecutionEventInput } from '../../../shared/workbe
 import type { EditEvent } from '../../../shared/workbench/editSession'
 import type { ModelChatMessage, ModelProvider, ModelSelection } from '../../../shared/workbench/modelProvider'
 import { EXECUTION_NO_PROGRESS, MODEL_REQUEST_BUDGET_EXHAUSTED, TOOL_CALL_BUDGET_EXHAUSTED, type ExecutionRunRecord } from '../../../shared/workbench/execution'
+import { conversationHistoryIndex } from './ConversationHistoryIndex'
 import { PayloadCompiler } from '../../../core/execution/PayloadCompiler'
 import { AttachmentError, AttachmentService, type AttachmentLiveConversation } from '../attachments/AttachmentService'
 import { ExecutionSettingsError, type ExecutionSettingsStore } from '../providers/ExecutionSettingsStore'
@@ -25,6 +26,10 @@ import { DesktopOperationError } from '../../errors'
 import { DEFAULT_PERMISSION_MODE } from '../../../shared/workbench/executionPermission'
 import { executionInputError } from './executionInputErrors'
 import { AgentFileService } from './AgentFileService'
+import { ExecutionChangeReviewService } from '../review/ExecutionChangeReviewService'
+import { HostArtifactDeliveryService } from './HostArtifactDeliveryService'
+import type { HtmlActionService } from '../observation/HtmlActionService'
+import { forkDraftFromCheckpoint, indexUserCheckpoint } from './CheckpointForkService'
 import { fileCreated } from './executionOutcome'
 import { diagnosticLog } from '../../diagnosticLog'
 import { readTarget } from '../../../core/tools/ToolTargets'
@@ -102,6 +107,8 @@ export class ExecutionDesktopService {
   readonly submissions: ExecutionSubmissionStore
   readonly edits: EditSessionService
   readonly attachments: AttachmentService
+  readonly changeReview: ExecutionChangeReviewService
+  readonly artifacts: HostArtifactDeliveryService
   private readonly queues = new Map<string, Promise<unknown>>()
   private readonly elementChanges = new Map<string, ElementChange>()
   private eventSink?: (event: ExecutionEvent) => void
@@ -119,6 +126,9 @@ export class ExecutionDesktopService {
     this.events = new ExecutionEventStore({ directory: path.join(options.directory, 'events') })
     this.submissions = new ExecutionSubmissionStore(path.join(options.directory, 'submissions'))
     this.edits = new EditSessionService(options.documents.registry, options.documents.tools)
+    this.changeReview = new ExecutionChangeReviewService(options.documents, path.join(options.directory, 'change-review'))
+    this.artifacts = new HostArtifactDeliveryService({ journalDirectory: path.join(options.directory, 'artifact-deliveries'),
+      withFileOperation: work => options.documents.fileCoordinator.withFileOperation(work) })
     this.attachments = options.attachments ?? new AttachmentService({ directory: path.join(options.directory, 'attachments') })
     const chat = new OpenAIChatProvider({ credentialResolver: connection => options.settings.resolveCredential(connection), fetch: options.fetch,
       onTransportDiagnostic: diagnostic => diagnosticLog.append({ source: 'main', message: 'OpenAI Chat transport failure', details: {
@@ -130,7 +140,7 @@ export class ExecutionDesktopService {
       onProtocolShape: shape => diagnosticLog.append({ source: 'main', message: 'OpenAI Chat tool fragment protocol', details: {
         chatToolCode: shape.code, chatToolType: shape.type, chatToolIndex: shape.index, chatToolHasFunction: shape.hasFunction } }) })
     const oauth = new ChatGPTResponsesProvider({ credentialResolver: async connection => (await import('../providers/executionSettingsService.js')).resolveOAuthCredential(connection), fetch: options.fetch })
-    const provider: ModelProvider = { stream: (request, callOptions) => (request.selection.connection.protocol === 'chatgpt-responses' ? oauth : chat).stream(request, callOptions) }
+    const provider: ModelProvider = { retrySafety: 'pure-generation', stream: (request, callOptions) => (request.selection.connection.protocol === 'chatgpt-responses' ? oauth : chat).stream(request, callOptions) }
     const serializePayload: typeof serializeModelRequest = input => input.selection.connection.protocol === 'chatgpt-responses' ? serializeChatGPTResponsesRequest(input) : serializeModelRequest(input)
     const visualAnalysis = new VisualAnalysisService({
       frozenSelection: async runId => (await this.runs.read(runId))?.input.visionSelection ?? null,
@@ -138,8 +148,11 @@ export class ExecutionDesktopService {
     })
     this.engine = new ExecutionEngine({ registry: options.documents.registry, gateway: options.documents.tools, runs: this.runs, events: this.events,
       edits: this.edits, provider, serializePayload, initialCompiler: new PayloadCompiler({ attachments: this.attachments, serializePayload }),
-      files: new AgentFileService(options.documents), visualAnalysis,
+      files: new AgentFileService(options.documents), materials: this.attachments, visualAnalysis, changeReview: this.changeReview,
+      artifacts: this.artifacts,
       readImageTiming: async jobId => (await import('../workbenchToolServices.js')).workbenchImageService().readTiming(jobId),
+      approveBrowserAction: async input => (await import('../workbenchToolServices.js')).approveWorkbenchBrowserAction(input),
+      browserApprovalContext: async runId => (await import('../workbenchToolServices.js')).workbenchBrowserApprovalContext(runId),
       observeBodyStreaming: (selection, observation) => options.settings.recordBodyStreaming(selection, observation) })
     this.engine.subscribe(event => {
       this.eventSink?.(event)
@@ -148,6 +161,7 @@ export class ExecutionDesktopService {
     this.edits.subscribe(event => this.editSink?.(event))
   }
   setSinks(events?: (event: ExecutionEvent) => void, edits?: (event: EditEvent) => void) { this.eventSink = events; this.editSink = edits }
+  setHtmlActions(service: HtmlActionService): void { this.engine.setHtmlActions(service) }
   withConversation<T>(conversationId: string, action: () => Promise<T>): Promise<T> { return this.serial(conversationId, action) }
   private timing(conversationId: string, taskId: string, markId: string, stage: ExecutionTimingStage,
     extra: Pick<ExecutionTimingMark, 'sourceWallTimeMs' | 'detail'> = {},
@@ -179,7 +193,8 @@ export class ExecutionDesktopService {
     return operation
   }
   private ready(): Promise<void> {
-    return this.initialization ??= (async () => {
+    if (this.initialization) return this.initialization
+    const initialization = (async () => {
       let runs = await this.runs.list()
       for (const record of runs.filter(run => ['queued', 'running', 'stopping'].includes(run.status))) {
         for (const reference of record.input.documents) {
@@ -194,8 +209,10 @@ export class ExecutionDesktopService {
       await this.clearElementCards().catch(() => undefined)
       runs = await this.runs.list()
       const submissions = await this.submissions.list()
-      for (let record of submissions.filter(value => value.state === 'starting' || value.state === 'accepted')) {
+      for (const record of submissions.filter(value => ['queued', 'starting', 'accepted'].includes(value.state))) {
         const run = runs.find(value => value.input.taskId === record.submissionId)
+        const conversation = await this.conversations.readConversation(record)
+        if (!conversation) { await this.retireOrphanedSubmission(record, run); continue }
         if (run) await this.bindRun(record, run)
         else if (record.state === 'starting') await this.submissions.update(record.submissionId, { updatedAt: Date.now(),
           failure: { code: 'submission-outcome-unknown', message: '应用中断时启动结果未知；未自动重发，请核对后重试新消息。' } })
@@ -206,6 +223,20 @@ export class ExecutionDesktopService {
       // submission recovery has rebuilt the current conversation references.
       await this.collectAttachmentReleases().catch(() => undefined)
     })()
+    this.initialization = initialization
+    // A real initialization failure is retryable on the next explicit operation, not cached forever.
+    void initialization.catch(() => { if (this.initialization === initialization) this.initialization = undefined })
+    return initialization
+  }
+  private async retireOrphanedSubmission(record: StoredExecutionSubmission, run?: ExecutionRunRecord): Promise<void> {
+    // Deleting a conversation retires its dispatch, not its durable receipts or unknown outcomes.
+    if (run && ['queued', 'running', 'stopping'].includes(run.status)) await this.engine.stop(run.runId)
+    if (record.failure?.code === 'conversation-deleted' && record.state !== 'queued') return
+    await this.submissions.update(record.submissionId, {
+      ...(record.state === 'queued' ? { state: 'cancelled' as const } : {}),
+      ...(run ? { runId: run.runId } : {}), updatedAt: Date.now(),
+      failure: { code: 'conversation-deleted', message: '原会话已删除；此提交仅保留历史和回执，不会恢复会话或重新执行。未确认的请求结果仍为未知。' },
+    })
   }
   private async collectAttachmentReleases(): Promise<void> {
     const live: AttachmentLiveConversation[] = []
@@ -217,8 +248,29 @@ export class ExecutionDesktopService {
   }
   private async required(workspaceId: string, conversationId: string): Promise<ConversationRecord> {
     const record = await this.conversations.readConversation({ workspaceId, conversationId })
-    if (!record) throw new Error('会话已不存在')
+    if (!record) throw new DesktopOperationError('conversation-deleted', '会话已不存在', '原会话已删除或无法找到。', '请选择现有会话或新建会话；文件与已应用的修改没有删除。')
     return record
+  }
+  private async changeReviewSource(input: { workspaceId: string; conversationId: string; runId: string }): Promise<{ run: ExecutionRunRecord; workspaceRoot: string }> {
+    const run = await this.engine.read(input.runId)
+    if (!run) throw new Error('本次运行记录不存在')
+    if (run.input.conversationId !== input.conversationId) throw new Error('运行不属于当前会话')
+    const conversation = await this.required(input.workspaceId, input.conversationId)
+    if (!conversation.runIndex.builtinRunIds.includes(input.runId)) throw new Error('运行不属于当前工作空间会话')
+    const workspace = await this.conversations.readWorkspace(input.workspaceId)
+    if (!workspace) throw new Error('当前工作空间不存在')
+    const root = (await this.options.authorizeWorkspaceRoot(workspace.rootPath)).resolvedPath
+    return { run, workspaceRoot: root }
+  }
+  private async checkpointSource(input: { workspaceId: string; conversationId: string; runId: string }) {
+    const { run } = await this.changeReviewSource(input)
+    const conversation = await this.required(input.workspaceId, input.conversationId)
+    const ids = [...new Set([...run.input.documents.map(document => document.documentId), ...Object.keys(run.documentPaths ?? {})])]
+    const contentVersions = await Promise.all(ids.map(async documentId => {
+      try { return { documentId, revision: (await this.options.documents.registry.get(documentId).drain()).revision } }
+      catch { return { documentId, revision: null } }
+    }))
+    return { run, conversation, checkpoint: indexUserCheckpoint({ run, conversation, contentVersions }) }
   }
   private async workspace(root: string | null) {
     const rootPath = root ? (await this.options.authorizeWorkspaceRoot(root)).resolvedPath : path.join(this.options.directory, 'space')
@@ -308,7 +360,7 @@ export class ExecutionDesktopService {
     }
     if (permission === 'read-only') input = { ...input, documents: input.documents.map(document => ({ ...document, writable: [] })) }
     if (!input.text.trim() && !attachments.length) throw executionInputError('empty-input')
-    let hasImages = false, imageCount = 0, representationBytes = 0
+    let explicitImages = false, imageCount = 0, representationBytes = 0
     this.timing(input.conversationId, input.submissionId, `${input.submissionId}:attachments:start`, 'submission.attachments.started',
       { detail: { attachmentCount: attachments.length } })
     try {
@@ -319,7 +371,7 @@ export class ExecutionDesktopService {
           throw error
         })
         representationBytes += read.bytes.byteLength
-        if (read.representation.kind === 'image') { hasImages = true; imageCount++ }
+        if (read.representation.kind === 'image') { explicitImages = true; imageCount++ }
       }
       this.timing(input.conversationId, input.submissionId, `${input.submissionId}:attachments:end`, 'submission.attachments.finished',
         { detail: { outcome: 'completed', attachmentCount: attachments.length, imageCount, representationBytes } })
@@ -339,18 +391,12 @@ export class ExecutionDesktopService {
         .some(target => !targetStillExists(snapshot, target))) throw executionInputError('document-range-changed')
       documents.push({ documentId: reference.documentId, writable: reference.writable, ...(reference.selection?.length ? { selection: reference.selection } : {}) })
     }
-    const history = current.messages.filter(message => message.role === 'user' || message.role === 'assistant')
-    const context: ModelChatMessage[] = []
-    for (const message of history) {
-      if (message.role === 'user' && message.attachmentIds.length) {
-        const previous = message.runId ? await this.engine.read(message.runId) : null
-        const index = previous?.initialPayload?.explicitAttachments[0]?.messageIndex
-        const payload = previous && index !== undefined ? previous.messages[index] : undefined
-        if (!payload || payload.role !== 'user') throw executionInputError('history-attachment-missing')
-        context.push(structuredClone(payload))
-        if (Array.isArray(payload.content) && payload.content.some(part => part && typeof part === 'object' && !Array.isArray(part) && part.type === 'image_url')) hasImages = true
-      } else context.push({ role: message.role, content: message.text })
-    }
+    const historyIndex = await conversationHistoryIndex(current, runId => this.engine.read(runId))
+    const context = historyIndex.context
+    // History is an index of sources that may be reread later. It contributes no
+    // image bytes to this first request and must not select the vision role for
+    // an otherwise text-only submission. The separately frozen visionSelection
+    // below remains available if a tool explicitly rereads a historical image.
     const select = async (role: 'conversation' | 'vision') => this.options.settings.snapshot(role).catch(error => {
       if (error instanceof ExecutionSettingsError && error.code === 'role-unconfigured') throw executionInputError(role === 'vision' ? 'vision-unconfigured' : 'conversation-unconfigured', error)
       if (error instanceof ExecutionSettingsError && error.code === 'credential-unavailable') throw executionInputError('model-connection-unavailable', error)
@@ -359,16 +405,16 @@ export class ExecutionDesktopService {
     let selection = await select('conversation')
     if (input.disclosedSettings && !matchesDisclosedSelection(input.disclosedSettings, selection)) throw executionInputError('disclosed-settings-changed')
     let selectionReason = '使用接受提交时配置的会话角色'
-    if (hasImages && selection.connection.capabilities.vision !== 'supported') {
+    if (explicitImages && selection.connection.capabilities.vision !== 'supported') {
       // A separately configured vision role remains the explicit override. Without it,
       // an unknown capability stays on the selected conversation model; the provider
       // can then report its real support instead of forcing another role to be set up.
       if ((await this.options.settings.read()).profile.roles.vision) {
         selection = await select('vision')
         if (input.disclosedSettings && !matchesDisclosedSelection(input.disclosedSettings, selection)) throw executionInputError('disclosed-settings-changed')
-        selectionReason = '当前或历史输入含图片，使用接受提交时配置的视觉角色'
+        selectionReason = '当前输入含图片，使用接受提交时配置的视觉角色'
       } else if (selection.connection.capabilities.vision === 'unknown') {
-        selectionReason = '当前或历史输入含图片，未单独配置视觉角色；沿用接受提交时选择的会话模型，其图片能力尚待实际请求确认'
+        selectionReason = '当前输入含图片，未单独配置视觉角色；沿用接受提交时选择的会话模型，其图片能力尚待实际请求确认'
       }
       if (selection.connection.capabilities.vision === 'unsupported') throw executionInputError('vision-unsupported')
     }
@@ -391,7 +437,7 @@ export class ExecutionDesktopService {
         ...(input.disclosedSettings ? { disclosedSettings: input.disclosedSettings } : {}),
         selectionSource: { role: selection.role as 'conversation' | 'vision', reason: selectionReason, profileRevision: selection.profileRevision },
         inputContext: { id: `${input.submissionId}:input`, capturedAt: now, instruction: input.text, attachments,
-          context: context.map((message, index) => ({ message, provenance: { kind: 'history' as const, id: history[index]!.messageId } })) } } }
+          context } } }
   }
   private async acceptSubmission(record: StoredExecutionSubmission, current: ConversationRecord): Promise<StoredExecutionSubmission> {
     const conversation = await this.conversations.updateConversation({ workspaceId: record.workspaceId, conversationId: record.conversationId, expectedRevision: current.revision,
@@ -442,8 +488,12 @@ export class ExecutionDesktopService {
     if (await this.submissions.pausedReason(conversationId)) return
     const records = (await this.submissions.list()).filter(record => record.conversationId === conversationId)
     if (records.some(record => record.state === 'starting')) return
-    const current = records[0] ? await this.required(records[0].workspaceId, conversationId) : null
-    if (!current || await this.activeRun(current)) return
+    const current = records[0] ? await this.conversations.readConversation({ workspaceId: records[0].workspaceId, conversationId }) : null
+    if (!current) {
+      for (const record of records.filter(item => item.state === 'queued')) await this.retireOrphanedSubmission(record)
+      return
+    }
+    if (await this.activeRun(current)) return
     if (!explicit) {
       const latestRunId = current.runIndex.builtinRunIds.at(-1)
       const latest = latestRunId ? await this.engine.read(latestRunId) : null
@@ -677,22 +727,40 @@ export class ExecutionDesktopService {
     await this.collectReply(runId)
     await this.serial(run.input.conversationId, () => this.startNext(run.input.conversationId, run))
   }
+  private runWritesDocument(run: ExecutionRunRecord, documentId: string): boolean {
+    if (run.input.documents.some(document => document.documentId === documentId && document.writable.length > 0)) return true
+    // Only host-returned file receipts count; model parameters never confer write authority.
+    return run.tools.some(tool => {
+      if (tool.state !== 'returned') return false
+      if (tool.result?.kind === 'document-operation') return tool.result.result.documentId === documentId
+      if (tool.call.name !== 'file.open' && !fileCreated(tool.call.name, tool.result)) return false
+      const data = tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
+        ? tool.result.data as { documentId?: unknown; writable?: unknown } : null
+      return data?.documentId === documentId && data.writable === true
+    })
+  }
   async writableTasksForDocument(documentId: string): Promise<{ runIds: string[]; submissionIds: string[] }> {
-    await this.ready()
+    // Closing one document must not initialize/rebind every conversation in the profile.
     const submissions = await this.submissions.list()
-    const submissionIds = submissions.filter(record => record.state === 'queued'
+    const submissionIds = submissions.filter(record => ['queued', 'starting'].includes(record.state)
       && record.documents.some(document => document.documentId === documentId && document.writable.length > 0)).map(record => record.submissionId)
-    const runIds: string[] = []
-    for (const run of await this.runs.list()) if (['queued', 'running', 'stopping'].includes((await this.engine.read(run.runId) ?? run).status)
-      && run.input.documents.some(document => document.documentId === documentId && document.writable.length > 0)) runIds.push(run.runId)
-    return { runIds, submissionIds }
+    const runIds = new Set(this.options.documents.tools.writableRunIdsForDocument(documentId))
+    for (const stored of await this.runs.list()) {
+      const run = await this.engine.read(stored.runId) ?? stored
+      if (['queued', 'running', 'stopping'].includes(run.status) && this.runWritesDocument(run, documentId)) runIds.add(run.runId)
+    }
+    return { runIds: [...runIds], submissionIds }
   }
   async stopTasksForDocument(documentId: string): Promise<{ runIds: string[]; submissionIds: string[] }> {
-    await this.ready()
     const records = await this.submissions.list(), runs = await this.runs.list()
+    const activeIds = this.options.documents.tools.writableRunIdsForDocument(documentId)
+    for (const runId of activeIds) if (!runs.some(run => run.runId === runId)) {
+      const run = await this.engine.read(runId)
+      if (run) runs.push(run)
+    }
     const conversationIds = [...new Set([
       ...records.filter(record => record.documents.some(document => document.documentId === documentId && document.writable.length > 0)).map(record => record.conversationId),
-      ...runs.filter(run => run.input.documents.some(document => document.documentId === documentId && document.writable.length > 0)).map(run => run.input.conversationId),
+      ...runs.filter(run => activeIds.includes(run.runId) || this.runWritesDocument(run, documentId)).map(run => run.input.conversationId),
     ])]
     const cancelled: string[] = [], stopped: string[] = []
     for (const conversationId of conversationIds) await this.serial(conversationId, async () => {
@@ -702,12 +770,13 @@ export class ExecutionDesktopService {
           failure: { code: 'document-close-cancelled', message: '已取消：关联文档正在关闭。' } })
         cancelled.push(record.submissionId)
       }
-      for (const run of await this.runs.list()) {
-        if (run.input.conversationId !== conversationId || !run.input.documents.some(document => document.documentId === documentId && document.writable.length > 0)) continue
-        const live = await this.engine.read(run.runId)
-        if (!live || !['queued', 'running', 'stopping'].includes(live.status)) continue
-        await this.engine.stop(run.runId)
-        stopped.push(run.runId)
+      const granted = new Set(this.options.documents.tools.writableRunIdsForDocument(documentId))
+      for (const stored of await this.runs.list()) {
+        const live = await this.engine.read(stored.runId) ?? stored
+        if (live.input.conversationId !== conversationId || !['queued', 'running', 'stopping'].includes(live.status)) continue
+        if (!granted.has(live.runId) && !this.runWritesDocument(live, documentId)) continue
+        await this.engine.stop(live.runId)
+        stopped.push(live.runId)
       }
     })
     return { runIds: stopped, submissionIds: cancelled }
@@ -944,6 +1013,24 @@ export class ExecutionDesktopService {
           await this.resumeBuiltinQueue(input.conversationId)
         })
         case 'run': return this.engine.read(input.runId)
+        case 'change-review': {
+          const { run } = await this.changeReviewSource(input)
+          return this.changeReview.inspect(run, { offset: input.offset, limit: input.limit })
+        }
+        case 'change-rollback': return this.serial(`change-review:${input.runId}`, async () => {
+          const { run, workspaceRoot } = await this.changeReviewSource(input)
+          if (!['completed', 'partial', 'failed', 'stopped'].includes(run.status))
+            throw new Error('任务仍在运行，请先等待结束或停止后再回退')
+          return this.changeReview.rollback(run, input.entryId, { workspaceRoot, permission: DEFAULT_PERMISSION_MODE })
+        })
+        case 'checkpoint': return (await this.checkpointSource(input)).checkpoint
+        case 'fork-checkpoint': return this.serial(input.conversationId, async () => {
+          const { run, checkpoint } = await this.checkpointSource(input)
+          const fork = forkDraftFromCheckpoint({ source: checkpoint, run, instruction: input.instruction })
+          const conversation = await this.conversations.createConversation({ workspaceId: input.workspaceId,
+            title: fork.title, inputDraft: fork.inputDraft })
+          return { conversation, fork }
+        })
         case 'stop': return this.engine.stop(input.runId)
         case 'approve': try { return await this.engine.decide(input) }
           catch (error) { throw new DesktopOperationError('execution-approval-rejected', '决定没有提交', error instanceof Error ? error.message : '这次修改暂时不能处理。', '修改仍在等待时可以重新选择；任务已停止或结束时，需要重新发送任务。', { cause: error }) }

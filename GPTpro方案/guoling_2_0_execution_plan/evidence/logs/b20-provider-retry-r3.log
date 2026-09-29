@@ -1,0 +1,39 @@
+
+ RUN  v4.1.10 D:/果铃工作台
+
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > blocks a new image request after a saved 429 in the same run while other tools continue
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > uses frozen image role identity to decide whether an edit shares a generate 429 (true)
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > uses frozen image role identity to decide whether an edit shares a generate 429 (false)
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > stops repeated tool rounds with a stable no-progress reason
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > stops an alternating A-B-A-B read loop without a false content change
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > does not treat repeated unchanged edits as progress
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > rejects unsupported streaming tool type custom before any document write
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > rejects unsupported streaming tool type 1 before any document write
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > keeps an unidentifiable 'read' failure partial after a later read and edit
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > keeps an unidentifiable 'read' failure partial after a later read and edit
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > keeps an unidentifiable 'read' failure partial after a later read and edit
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > keeps an unidentifiable 'read' failure partial after a later read and edit
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > keeps an unidentifiable 'inspect' failure partial after a later read and edit
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > reuses the writable document root handle without widening frozen or read-only scopes
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > streams real HTTP arguments into previews, recovers a lost tool ACK and returns native history to the model
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > S06-T06 waits for a late target before preview and commits only the complete matching argument object
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > M15 a run editing a document whose other part another run is previewing commits its own edit without a preview
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > S06-T06 rejects duplicate-key after streamed preview without a document write
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > S06-T06 rejects truncated-escape after streamed preview without a document write
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > sets the stop barrier before a late model completion and never starts another paid request for an unknown response
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > recovers crash-window tool facts and missing commit events read-only, then resumes with fresh handles
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > compresses actual serialized payloads only after all tools return and preserves both document grants and commit facts
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > rejects oversized initial payloads before sending and enforces request and complete tool-round budgets
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > keeps bounded image and build receipts visible after the local request cap without repeating generation
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > never commits a complete tool after identity change even without another preview
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > never commits a complete tool after preview aborted even without another preview
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > does not reopen a completed run when Stop races its final journal flush
+ ↓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > M04 readonly selection handles stay readonly under a whole-document grant and M09 terminal events recover idempotently
+ ✓ tests/integration/g20ExecutionEngine.test.ts > M26 one ordinary generation retry retains unknown usage and fragments but never repeats old tools or joins half-arguments 1434ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > M26 stop during backoff never sends the next request, and long Retry-After becomes an explicit interrupted task 145ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > M26 ordinary transport retry stops after exactly three attempts and records all unknown outcomes 3392ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed | 28 skipped (31)
+   Start at  04:31:08
+   Duration  6.38s (transform 882ms, setup 68ms, import 1.23s, tests 4.97s, environment 0ms)

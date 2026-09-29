@@ -15,12 +15,19 @@ export interface M23RuntimeCapture {
   failedRequests: string[]
   responses: Array<{ url: string; status: number }>
   popups: string[]
+  processLog?: string[]
+  processExit?: { code: number | null; signal: string | null }
 }
 
 export async function launchM23(fixture: M23Fixture) {
   const capture: M23RuntimeCapture = { console: [], pageErrors: [], requests: [], failedRequests: [], responses: [], popups: [] }
   const app = await electron.launch({ cwd: root, args: ['.', `--user-data-dir=${fixture.profile}`],
     env: { ...process.env, VITE_DEV_SERVER_URL: '', [BACKGROUND_E2E_ENV]: '1' } })
+  capture.processLog = []
+  const append = (chunk: Buffer) => { capture.processLog!.push(chunk.toString('utf8').slice(-12_000)); if (capture.processLog!.length > 20) capture.processLog!.shift() }
+  app.process().stderr?.on('data', append)
+  app.process().stdout?.on('data', append)
+  app.process().on('exit', (code, signal) => { capture.processExit = { code, signal } })
   const page = await app.firstWindow()
   page.setDefaultTimeout(15_000)
   page.on('console', message => capture.console.push(`${message.type()}: ${message.text()}`))
@@ -55,7 +62,7 @@ export async function openM23Html(page: Page, name: string) {
   const region = m23Editor(page, name)
   await expect(region).toBeVisible()
   await expect(region.getByRole('toolbar', { name: 'HTML 视图', exact: true })).toBeVisible()
-  await expect(region.getByTitle('HTML 预览')).toHaveAttribute('src', /^courseware-preview:\/\/app\//)
+  await expect(region.getByTitle('HTML 预览')).toHaveAttribute('src', /^courseware-preview:\/\/[a-f0-9]{32}\.[a-f0-9]{32}\.app\//)
   await expect(region.frameLocator('iframe[title="HTML 预览"]').locator('body')).toBeVisible()
   return region
 }
@@ -73,10 +80,14 @@ export async function m23Shot(fixture: M23Fixture, page: Page, info: TestInfo, n
   const shots = join(fixture.directory, 'shots')
   mkdirSync(shots, { recursive: true })
   const path = join(shots, `${name}.png`)
+  if (page.isClosed()) {
+    writeFileSync(join(shots, `${name}-unavailable.json`), JSON.stringify({ status: 'not-captured', reason: 'page-closed' }) + '\n')
+    return path
+  }
   await page.screenshot({ path, fullPage: true }).catch(() => undefined)
   if (existsSync(path)) await info.attach(`M23 ${name}`, { path, contentType: 'image/png' })
   const visibleFrames = page.locator('iframe[title="HTML 预览"]')
-  for (let index = 0; index < await visibleFrames.count(); index += 1) {
+  for (let index = 0; index < await visibleFrames.count().catch(() => 0); index += 1) {
     const iframe = visibleFrames.nth(index)
     if (!(await iframe.isVisible().catch(() => false))) continue
     const framePath = join(shots, `${name}-iframe.png`)
@@ -118,6 +129,10 @@ export async function writeM23Evidence(
   error?: unknown,
 ) {
   if (error) facts.failure = error instanceof Error ? error.stack ?? error.message : String(error)
+  facts.electronProcess = { pid: app.process().pid, exitCode: app.process().exitCode, signalCode: app.process().signalCode }
+  try { facts.mainWindows = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map(window => ({
+    id: window.id, destroyed: window.isDestroyed(), url: window.isDestroyed() ? null : window.webContents.getURL(),
+  }))) } catch (reason) { facts.mainUnavailable = String(reason) }
   let pageState: unknown = null
   let documents: unknown = null
   let windows: unknown = null

@@ -85,9 +85,7 @@ test('S02-T04 renderer rebuild keeps dirty History and an active main task, then
     await tree.getByRole('button', { name: '重建验证.md', exact: true }).dblclick()
     const editor = page.getByRole('region', { name: '教学文档 重建验证.md', exact: true })
     await expect(editor).toBeVisible()
-    const sourceButton = editor.getByRole('button', { name: '源文', exact: true })
-    if (await sourceButton.isVisible()) await sourceButton.click()
-    await expect(editor.getByLabel('正文源文编辑')).toContainText('未保存的主进程正文')
+    await expect(editor.getByRole('textbox', { name: '正文编辑', exact: true })).toContainText('未保存的主进程正文')
 
     releaseResponse()
     await expect.poll(async () => page.evaluate(async runId => (await window.desktopAPI!.execution!.run(runId))?.status, active.runId)).toBe('completed')

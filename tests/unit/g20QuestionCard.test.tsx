@@ -98,6 +98,34 @@ it('answers with free text, supports multiple choice, and keeps the card open wi
   await waitFor(() => expect(answer).toHaveBeenLastCalledWith({ runId: 'run', callId: 'request:0', answer: { choices: [0, 2], other: '每项一句话' } }))
 })
 
+it('M30 takes a real free-text answer without inventing choice options', async () => {
+  const answer = vi.fn<NonNullable<ExecutionDesktopAPI['answer']>>(async () => ({ runId: 'run' }) as Awaited<ReturnType<NonNullable<ExecutionDesktopAPI['answer']>>> )
+  const question: UserQuestionView = { text: '请用一句话说明本课目标。', responseKind: 'free-text', multiple: false, options: [] }
+  mount(api(events(question), answer))
+  const card = await screen.findByRole('region', { name: 'AI 的提问' })
+  expect(within(card).queryByRole('group', { name: '可选答案' })).toBeNull()
+  const submit = within(card).getByRole('button', { name: '提交回答' })
+  expect(submit).toBeDisabled()
+  fireEvent.change(within(card).getByRole('textbox', { name: '你的回答' }), { target: { value: ' 通过观察解释物质与能量变化。  ' } })
+  fireEvent.click(submit)
+  await waitFor(() => expect(answer).toHaveBeenCalledWith({ runId: 'run', callId: 'request:0', answer: { choices: [], other: '通过观察解释物质与能量变化。' } }))
+  expect(within(card).getByRole('textbox', { name: '你的回答' })).toBeDisabled()
+})
+
+it('M30 shows one explicit confirmation action without a fabricated alternative or permission grant', async () => {
+  const answer = vi.fn<NonNullable<ExecutionDesktopAPI['answer']>>(async () => ({ runId: 'run' }) as Awaited<ReturnType<NonNullable<ExecutionDesktopAPI['answer']>>> )
+  const question: UserQuestionView = { text: '已预览教学策划，确认继续到框架吗？', responseKind: 'confirm', multiple: false, options: [{ label: '确认继续' }] }
+  mount(api(events(question), answer))
+  const card = await screen.findByRole('region', { name: 'AI 的提问' })
+  expect(within(card).queryByRole('group', { name: '可选答案' })).toBeNull()
+  expect(card).toHaveTextContent('不会改变当前文件和工具权限')
+  const confirm = within(card).getByRole('button', { name: '确认继续' })
+  expect(within(card).getAllByRole('button')).toEqual([confirm])
+  fireEvent.click(confirm)
+  await waitFor(() => expect(answer).toHaveBeenCalledWith({ runId: 'run', callId: 'request:0', answer: { choices: [0] } }))
+  expect(confirm).toBeDisabled()
+})
+
 it('shows no option card once the run has ended, and the record states the question went unanswered', async () => {
   const ended = events(single, [{ ...base, eventId: 'e3', itemId: 'run', sequence: 3, type: 'run.end', update: 'snapshot', data: { status: 'interrupted', label: '上次运行已中断' } }])
   const projection = foldExecutionEvents(emptyExecutionProjection('c1'), ended)

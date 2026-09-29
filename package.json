@@ -84,6 +84,7 @@
     "@dnd-kit/sortable": "10.0.0",
     "@dnd-kit/utilities": "3.2.2",
     "@noble/hashes": "1.8.0",
+    "@playwright/mcp": "0.0.83",
     "acorn": "8.18.0",
     "cfb": "1.2.2",
     "entities": "8.0.0",
@@ -93,6 +94,7 @@
     "lucide-react": "1.25.0",
     "marked": "17.0.6",
     "nanoid": "6.0.0",
+    "parse5": "8.0.1",
     "pdfjs-dist": "6.3.289",
     "phaser": "4.2.0",
     "pptxgenjs": "4.0.1",
@@ -106,6 +108,7 @@
     "react": "19.2.7",
     "react-dom": "19.2.7",
     "sharp": "0.35.3",
+    "yaml": "2.9.1",
     "zod": "4.4.3",
     "zustand": "5.0.14"
   },

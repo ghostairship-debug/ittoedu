@@ -95,7 +95,7 @@ it('uses one catalog for real HTTP image generation/edit, decoded run-bound reso
   expect(session.read().model.resources).toEqual(baseline.resources)
 })
 
-it('prepares one image for a still-authorized owner after its own Native edit without renewing stale edit authority', async () => {
+it('prepares one image after acknowledged Native inserts while preserving owner authority', async () => {
   const bytes = await sharp({ create: { width: 32, height: 24, channels: 4, background: '#2857aa' } }).png().toBuffer()
   let requests = 0
   const transport = await http((_body, response) => { requests++; complete(response, bytes) })
@@ -115,13 +115,13 @@ it('prepares one image for a still-authorized owner after its own Native edit wi
   const first = await gateway.execute('run', 'native-first', { name: 'native.insert', input: { target: owner,
     template: { nativeType: 'text', text: '先写文字', x: 600, y: 500, width: 250, height: 70 } } })
   expect(first).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
-  expect(await gateway.execute('run', 'native-stale', { name: 'native.insert', input: { target: owner,
-    template: { nativeType: 'text', text: '不能用旧句柄续写' } } })).toMatchObject({ kind: 'error', code: 'target-conflict' })
+  expect(await gateway.execute('run', 'native-second', { name: 'native.insert', input: { target: owner,
+    template: { nativeType: 'text', text: '同一任务继续插入' } } })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
   const generated = data(await gateway.execute('run', 'image-after-text', { name: 'image.generate',
     input: { target: owner, prompt: 'existing owner, fresh image', output: { size: '32x24', format: 'png' } } }))
   expect(generated).toMatchObject({ status: 'ready', resources: [{ width: 32, height: 24 }] })
   expect(requests).toBe(1)
-  expect(session.read().undoDepth).toBe(1)
+  expect(session.read().undoDepth).toBe(2)
   const readonly = await gateway.issueTarget('run', session.documentId, ownerTarget, { readOnly: true })
   expect(await gateway.execute('run', 'image-readonly', { name: 'image.generate',
     input: { target: readonly, prompt: 'must not send' } })).toMatchObject({ kind: 'error', code: 'not-authorized' })
@@ -183,7 +183,9 @@ it('refuses changed build premises and partial grants, cancels prepared work and
   expect(await gateway.execute('partial', 'create', { name: 'build.create', input: { target: partialHandle } })).toMatchObject({ kind: 'error' })
   await gateway.stop('run')
   expect(await gateway.execute('run', 'stopped-import', { name: 'build.import', input: { job: created.job, artifact: checked.artifact } })).toMatchObject({ kind: 'error', code: 'run-stopped' })
-  await expect(service.artifact('run', created.job, checked.artifact)).rejects.toThrow()
+  // Stop revokes future import, while an already admitted artifact remains a
+  // durable, unapplied fact for explicit recovery rather than being discarded.
+  expect((await service.artifact('run', created.job, checked.artifact)).artifactId).toBe(checked.artifact)
   let entered!: () => void, release!: () => void, requests = 0
   const started = new Promise<void>(resolve => { entered = resolve })
   const png = await sharp({ create: { width: 32, height: 24, channels: 4, background: '#ffffff' } }).png().toBuffer()

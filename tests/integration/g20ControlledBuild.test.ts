@@ -8,6 +8,10 @@ import { createBlankCourseProject } from '../../src/core/course/createCourseProj
 import { createDefaultTeacherControllerPackage } from '../../src/shared/defaultTeacherControllerComponent'
 import { documentDigest } from '../../src/core/documents/documentDigest'
 import { componentContentSha256 } from '../../src/shared/componentContentIntegrity'
+import { prepareHtmlCourseCandidate } from '../../src/main/workbench/htmlImport/prepareHtmlCourseCandidate'
+import { createHtmlDocumentRuntimeSource, unpackHtmlDocumentRuntimeSource } from '../../src/shared/runtime/htmlDocumentSource'
+import { visitCourseLayerItems } from '../../src/shared/courseProjectHealth/internal'
+import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 import type { DocumentModel } from '../../src/shared/workbench/document'
 import type { BuildAdmissionPort, BuildBudget, BuildJobSnapshot } from '../../src/shared/workbench/build'
 
@@ -31,6 +35,15 @@ async function fixture(dynamic = false, admission?: BuildAdmissionPort, budget?:
   return { root, service, job, project, baseline, exec, run, files: path.join(root, 'scratch', job.jobId, 'files') }
 }
 describe('controlled scratch builds', () => {
+  it('treats a different button observation as progress on unchanged source', async () => {
+    const f = await fixture(false, undefined, { maxSameSourceChecks: 1 })
+    expect(await f.exec({ type: 'check', buttonCheck: { version: 1, instanceId: 'item', label: '第一个按钮' } }))
+      .toMatchObject({ status: 'failed' })
+    expect(await f.exec({ type: 'check', buttonCheck: { version: 1, instanceId: 'item', label: '第二个按钮' } }))
+      .toMatchObject({ status: 'failed' })
+    const logs = await f.exec({ type: 'logs' }) as { entries: Array<{ message: string }> }
+    expect(logs.entries.at(-1)?.message).toContain('没有受影响动态目标')
+  })
   it('reads and writes real scratch files while rejecting traversal/symlinks and never executing candidate subprocess code', async () => {
     const f = await fixture()
     const sentinel = path.join(f.root, 'sentinel.txt'); await fs.writeFile(sentinel, 'original')
@@ -166,4 +179,87 @@ describe('controlled scratch builds', () => {
     await expect(f.service.artifact('run', f.job.jobId, 'unknown')).rejects.toMatchObject({ code: 'build-cancelled' })
     expect((await f.exec({ type: 'list' }) as { job: BuildJobSnapshot }).job.artifactId).toBeUndefined()
   })
+})
+
+
+it('M25 preserves a software-owned HTML carrier across build formatting, rejects semantic replacement and retains the candidate', async () => {
+  const f = await fixture()
+  const filename = path.join(f.root, 'source.html')
+  await fs.writeFile(filename, '<!doctype html><h1>受管页面</h1>')
+  const snapshot: DocumentSnapshot = { documentId: 'doc', epoch: 'epoch', revision: f.project.revision,
+    binding: { kind: 'file', path: path.join(f.root, 'purpose-created.h5lesson'), version: null, bindingVersion: 1 },
+    model: f.baseline, dirty: false, saving: false, recoverable: false, undoDepth: 0, redoDepth: 0 }
+  const prepared = await prepareHtmlCourseCandidate({ snapshot, sourcePath: filename, locationId: f.project.locations[0]!.id })
+  const baseline = prepared.model, digest = documentDigest(baseline)
+  const job = await f.service.create({ runId: 'run', baseline, allowedOrigins: [],
+    target: { documentId: 'doc', epoch: 'epoch', projectId: baseline.project.id, baseRevision: baseline.project.revision, modelDigest: digest },
+    readSet: [{ documentId: 'doc', epoch: 'epoch', revision: baseline.project.revision, digest }] })
+  const exec = (call: Record<string, unknown>) => f.service.execute('run', { jobId: job.jobId, ...call })
+  const formatted = structuredClone(baseline.project)
+  visitCourseLayerItems(formatted, ({ item }) => { if (item.kind === 'runtime') item.runtime.source = `/* cosmetic */\n${item.runtime.source}` })
+  await exec({ type: 'write', path: 'project.json', content: JSON.stringify(formatted) })
+  const ready = await exec({ type: 'check' }) as BuildJobSnapshot
+  expect(ready.status).toBe('ready')
+  const artifact = await f.service.artifact('run', job.jobId, ready.artifactId!)
+  expect(artifact.command.type).toBe('course.replace')
+  if (artifact.command.type !== 'course.replace') throw new Error('Wrong artifact')
+  expect(artifact.command.project).toEqual(baseline.project)
+  expect(f.run).not.toHaveBeenCalled() // Cosmetic normalization does not fabricate a fresh runtime admission.
+  const customized = structuredClone(baseline.project)
+  visitCourseLayerItems(customized, ({ item }) => {
+    if (item.kind === 'runtime') item.runtime.source = item.runtime.source.replace("iframe.dataset.htmlDocumentRuntime = 'true';", '')
+  })
+  await exec({ type: 'write', path: 'project.json', content: JSON.stringify(customized) })
+  expect(await exec({ type: 'check' })).toMatchObject({ status: 'failed' })
+  expect(await exec({ type: 'logs' })).toMatchObject({ entries: expect.arrayContaining([
+    expect.objectContaining({ message: expect.stringContaining('宿主封装发生语义变化') }),
+  ]) })
+  expect(JSON.parse((await exec({ type: 'read', path: 'project.json' }) as { content: string }).content)).toEqual(customized)
+  expect(f.run).not.toHaveBeenCalled()
+  const contentOnly = structuredClone(baseline.project)
+  visitCourseLayerItems(contentOnly, ({ item }) => {
+    if (item.kind !== 'runtime') return
+    const payload = unpackHtmlDocumentRuntimeSource(item.runtime.source)!
+    item.runtime.source = createHtmlDocumentRuntimeSource({ ...payload, html: payload.html.replace('受管页面', '改过的页面') })
+  })
+  await exec({ type: 'write', path: 'project.json', content: JSON.stringify(contentOnly) })
+  expect(await exec({ type: 'check' })).toMatchObject({ status: 'failed' })
+  expect(f.run).toHaveBeenCalledOnce() // The test port deliberately rejects; no mocked successful admission or publication.
+  const submitted = f.run.mock.calls[0]![0]
+  expect(submitted.project).toEqual(contentOnly)
+  expect((await exec({ type: 'list' }) as { job: BuildJobSnapshot }).job.artifactId).toBeUndefined()
+})
+
+
+it('M28 a background build acknowledges persisted checking and remains cancellable without waiting for its admission provider', async () => {
+  let entered!: () => void, release!: (value: any) => void, calls = 0
+  const reached = new Promise<void>(resolve => { entered = resolve })
+  const f = await fixture(true, { run: async () => { calls++; entered(); return new Promise(resolve => { release = resolve }) } })
+  const changed = structuredClone(f.project); changed.globalLayerItems[0]!.item.opacity = 0.9
+  await f.exec({ type: 'write', path: 'project.json', content: JSON.stringify(changed) })
+  const accepted = await f.service.startCheck('run', { type: 'check', jobId: f.job.jobId })
+  expect(accepted).toMatchObject({ status: 'checking', checks: 1 })
+  expect((await fs.stat(path.join(f.root, 'scratch', f.job.jobId, 'state.bin'))).size).toBeGreaterThan(0)
+  await reached
+  try {
+    expect(await f.service.startCheck('run', { type: 'check', jobId: f.job.jobId })).toEqual(accepted)
+    expect(await f.service.status('run', f.job.jobId)).toMatchObject({ status: 'checking', checks: 1 })
+    expect(await f.service.waitCheck('run', f.job.jobId, 5)).toMatchObject({ status: 'checking', checks: 1 })
+    await expect(f.service.status('other-run', f.job.jobId)).rejects.toMatchObject({ code: 'job-not-authorized' })
+    expect(await f.exec({ type: 'cancel' })).toMatchObject({ status: 'cancelled' })
+    expect(await f.service.waitCheck('run', f.job.jobId, 100)).toMatchObject({ status: 'cancelled' })
+    expect(await f.service.status('run', f.job.jobId)).toMatchObject({ status: 'cancelled' })
+    expect(calls).toBe(1)
+  } finally { release({ ok: true, message: 'Late response must not produce an artifact' }) }
+  expect((await f.service.status('run', f.job.jobId)).artifactId).toBeUndefined()
+  const restored = new ControlledBuildService({ directory: path.join(f.root, 'scratch'), admission: { run: async () => { throw new Error('Must not replay') } } })
+  expect(await restored.status('run', f.job.jobId)).toMatchObject({ status: 'cancelled' })
+})
+
+it('M28 a late cancel preserves a completed build artifact for explicit import', async () => {
+  const f = await fixture()
+  const ready = await f.exec({ type: 'check' }) as BuildJobSnapshot
+  expect(ready.status).toBe('ready')
+  expect(await f.exec({ type: 'cancel' })).toEqual(ready)
+  expect(await f.service.artifact('run', f.job.jobId, ready.artifactId!)).toMatchObject({ artifactId: ready.artifactId })
 })

@@ -5,6 +5,7 @@ import { createPublishedCourseSession } from '../../../player/surfaces/published
 import { waitForPublishedObservationReady } from '../../../player/surfaces/publishedCapture'
 import { installBundledFontFaces } from '../../../shared/fonts/installBundledFontFaces'
 import { ensureBundledFonts } from '../../../shared/fonts/ensureBundledFonts'
+import './dynamicFallbackWorker'
 
 export interface ObservationWorkerInput {
   project: CourseProjectDocument

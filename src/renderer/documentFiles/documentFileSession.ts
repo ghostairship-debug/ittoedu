@@ -156,6 +156,7 @@ export class DocumentFileSession {
     })
   }
   private submitVisible(source: string, historyGroup?: string): void {
+    if (this.disposed) return
     const request = this.submit(source, historyGroup)
     if (this.deferredHistoryInput) {
       const retained = request.then(() => {
@@ -168,7 +169,7 @@ export class DocumentFileSession {
   }
   edit(source: string, historyGroup?: string) {
     if (!this.initialized || this.disposed || this.state.conflictHunks.length || source === this.state.source) return
-    
+
     if (historyGroup) {
       if (this.group?.label !== historyGroup || Date.now() - this.lastEdit > 800) this.group = { label: historyGroup, id: crypto.randomUUID() }
     } else this.group = undefined
@@ -201,6 +202,7 @@ export class DocumentFileSession {
     return { bytes: new Uint8Array(bytes), filename, mime: types[extension] ?? 'application/octet-stream' }
   }
   setComposing(composing: boolean) {
+    if (this.disposed) return
     this.update({ composing })
     if (composing) clearTimeout(this.timer)
     else {
@@ -212,6 +214,7 @@ export class DocumentFileSession {
   }
   private schedule() {
     clearTimeout(this.timer)
+    if (this.disposed) return
     if (!this.savingAs && this.committedDocument?.binding.kind === 'file' && !/\.html?$/i.test(this.committedDocument.binding.path) && this.state.dirty && !this.state.composing && !this.state.conflict && !this.state.recovery) this.timer = setTimeout(() => { if (this.committedDocument?.binding.kind === 'file' && !/\.html?$/i.test(this.committedDocument.binding.path)) void this.flush() }, 800)
   }
   /** Confirm pending human input without forcing a file save before an AI task. */
@@ -346,7 +349,7 @@ export class DocumentFileSession {
     if (observation.version === current.binding.version) { this.observation = observation; return }
     if (this.observation?.version === observation.version && this.state.conflict) return
     this.observation = observation
-    
+
     if (!observation.model) { this.conflictPlan = null; this.update({ conflict: 'deleted', dirty: true, conflictHunks: [] }); return }
     if (!isSourceDocumentModel(observation.model) || observation.model.kind !== current.model.kind) throw new Error('磁盘文件格式已改变')
     await this.projection.drain()
@@ -393,6 +396,16 @@ export class DocumentFileSession {
       const visible = this.projection.read().draft ?? this.projection.read().committed!.model
       if (isSourceDocumentModel(visible) && (visible.source !== this.state.source || (visible.kind === 'markdown' && this.pendingAttachments.size))) await this.submit(this.state.source)
       await this.projection.drain()
+      return true
+    } catch (error) { this.fail(error); return false }
+  }
+  /** Explicit escape from a failed local draft; Main still confirms, stops writers and checks final CAS. */
+  async discardAndClose(): Promise<boolean> {
+    clearTimeout(this.timer)
+    if (!this.projection || this.disposed) return false
+    try {
+      if (!await this.documents.closeWithDialog(this.projection.documentId, undefined, true)) return false
+      this.dispose()
       return true
     } catch (error) { this.fail(error); return false }
   }

@@ -1,12 +1,12 @@
 /** UTF-8 and SSE framing are independent of transport packet boundaries. */
-export async function* serverSentEvents(body: ReadableStream<Uint8Array>, maxBytes: number): AsyncGenerator<string> {
+export async function* serverSentEvents(body: ReadableStream<Uint8Array>, maxBytes: number, onActivity?: () => void): AsyncGenerator<string> {
   const reader = body.getReader()
   const decoder = new TextDecoder('utf-8', { fatal: true })
   let pending = '', data: string[] = [], total = 0, first = true
   const line = (value: string): string | undefined => {
     if (first) { value = value.replace(/^\uFEFF/, ''); first = false }
-    if (value === '') { const result = data.length ? data.join('\n') : undefined; data = []; return result }
-    if (value.startsWith(':')) return
+    if (value === '') { const result = data.length ? data.join('\n') : undefined; data = []; if (result !== undefined) onActivity?.(); return result }
+    if (value.startsWith(':')) { onActivity?.(); return }
     const colon = value.indexOf(':')
     const field = colon < 0 ? value : value.slice(0, colon)
     let text = colon < 0 ? '' : value.slice(colon + 1)

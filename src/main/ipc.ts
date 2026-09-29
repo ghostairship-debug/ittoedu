@@ -13,6 +13,11 @@ import { attachmentsDesktopService } from './workbench/attachments/attachmentsDe
 import { attachHtmlPreviewHost, operateWorkspaceFiles, subscribeWorkspaceFilesChanges } from './workbench/workspaceFilesDesktopService'
 import { HtmlPreviewService } from './workbench/htmlPreview/HtmlPreviewService'
 import { HtmlSourceEditService } from './workbench/htmlPreview/HtmlSourceEditService'
+import { HtmlActionService } from './workbench/observation/HtmlActionService'
+import { HtmlActionDesktopPort } from './workbench/observation/HtmlActionDesktopPort'
+import { ObservationImageStore } from './workbench/observation/ObservationImageStore'
+import { DynamicContentObservationStore, type DynamicContentPublication } from './workbench/observation/DynamicContentObservationStore'
+import { DynamicContentFallbackCaptureService } from './workbench/observation/DynamicContentFallbackCaptureService'
 import { setHtmlPreviewProtocolHandler } from './protocols'
 import path from 'node:path'
 import type { BrowserWindow, IpcMainEvent, IpcMainInvokeEvent } from 'electron'
@@ -280,8 +285,11 @@ let imageResults: ImageResultsDesktopService | undefined
 let workspaceFileEventGeneration = 0
 let htmlPreview: HtmlPreviewService | undefined
 let htmlPreviewClosedCleanup: (() => void) | undefined
+let dynamicContentObservations: DynamicContentObservationStore | undefined
+let dynamicContentChangeCleanup: (() => void) | undefined
 export function releaseAllHtmlPreviewLeases(): void { htmlPreview?.releaseAll() }
 export function registerIpcHandlers(context: IpcContext): void {
+  let htmlActionsReady: Promise<void> | undefined
   installWorkbenchToolServices(context)
   ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildReply)
   ipcMain.on(IPC_CHANNELS.documentExportBuildReply, (event: IpcMainEvent, raw: unknown) => {
@@ -345,6 +353,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   registerSafeHandler(IPC_CHANNELS.execution, context, {
     code: 'EXECUTION_FAILED', title: '会话操作未完成', message: '当前任务没有完成，请查看具体原因。', suggestion: '文档中已应用的修改已保留。',
   }, async (_event, args) => {
+    await htmlActionsReady
     const service = await executionDesktopService()
     const input = requireSingleArgument(args)
     if (input && typeof input === 'object' && (input as { type?: unknown }).type === 'delete-conversation') await imageResultsReady
@@ -360,6 +369,28 @@ export function registerIpcHandlers(context: IpcContext): void {
     message: '连接配置未能保存，请保留当前设置。', suggestion: '请检查连接配置及系统安全存储。',
   }, async (_event, args) => operateExecutionSettings(requireSingleArgument(args)))
   const documents = documentHost()
+  dynamicContentChangeCleanup?.()
+  const contentObservations = new DynamicContentObservationStore(async documentId => {
+    try { return await documents.registry.get(documentId).drain() } catch { return null }
+  })
+  dynamicContentObservations = contentObservations
+  documents.tools.configureDynamicContentServices({ observations: contentObservations,
+    fallback: new DynamicContentFallbackCaptureService({ rendererEntryUrl: context.getRendererEntryUrl }) })
+  dynamicContentChangeCleanup = documents.subscribeEvents(event =>
+    contentObservations.clearDocument(event.type === 'changed' ? event.snapshot.documentId : event.documentId))
+  const mainWindow = context.getMainWindow()
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    const senderId = mainWindow.webContents.id
+    mainWindow.webContents.once('destroyed', () => contentObservations.clearSender(senderId))
+  }
+  registerSafeHandler(IPC_CHANNELS.dynamicContentTargets, context, {
+    code: 'DYNAMIC_CONTENT_TARGETS_FAILED', title: '动态图文目标未能更新',
+    message: '当前画面的图文目标未能确认。', suggestion: '请重新打开当前页面后再试。',
+  }, async (event, args) => {
+    const raw = requireSingleArgument(args)
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false
+    return contentObservations.publish({ ...raw, senderId: event.sender.id } as DynamicContentPublication)
+  })
   htmlPreviewClosedCleanup?.()
   htmlPreview?.dispose()
   const preview = new HtmlPreviewService({
@@ -379,6 +410,12 @@ export function registerIpcHandlers(context: IpcContext): void {
     withFileAccess: work => documents.fileCoordinator.withFileAccess(work),
   }))
   htmlPreview = preview
+  htmlActionsReady = executionDesktopService().then(service => {
+    if (generation !== workspaceFileEventGeneration) return
+    service.setHtmlActions(new HtmlActionService({ preview, frames: new HtmlActionDesktopPort(), images: new ObservationImageStore() }))
+  })
+  void htmlActionsReady.catch(error => diagnosticLog.append({ source: 'main', message: 'HTML 页面操作服务未能启动',
+    details: { reason: error instanceof Error ? error.message : String(error) } }))
   setHtmlPreviewProtocolHandler(preview.handleProtocolRequest)
   htmlPreviewClosedCleanup = documents.subscribeClosed(documentId => preview.releaseDocument(documentId))
   void attachHtmlPreviewHost(preview).catch(error => diagnosticLog.append({ source: 'main', message: 'HTML 预览服务未能启动', details: { reason: error instanceof Error ? error.message : String(error) } }))
@@ -411,7 +448,7 @@ export function registerIpcHandlers(context: IpcContext): void {
   }, async (_event, args) => {
     await saveEventsReady
     const input = documentHostRequestSchema.parse(requireSingleArgument(args))
-    if (input.type === 'close-dialog') return closeDocumentWithDialog(requireWindow(context), documents, input.documentId, input.suggestedDirectory)
+    if (input.type === 'close-dialog') return closeDocumentWithDialog(requireWindow(context), documents, input.documentId, input.suggestedDirectory, input.discardOnly)
     if (input.type !== 'save-dialog') return documents.operate(input)
     return saveDocumentWithDialog(requireWindow(context), documents, input.documentId, input.saveAs, input.suggestedDirectory)
   })
@@ -961,6 +998,9 @@ export function registerIpcHandlers(context: IpcContext): void {
 
 export function unregisterIpcHandlers(): void {
   workspaceFileEventGeneration++
+  dynamicContentChangeCleanup?.(); dynamicContentChangeCleanup = undefined
+  dynamicContentObservations = undefined
+  documentHost().tools.configureDynamicContentServices({})
   ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildReply)
   disposeWorkbenchExportPort()
   htmlPreviewClosedCleanup?.(); htmlPreviewClosedCleanup = undefined

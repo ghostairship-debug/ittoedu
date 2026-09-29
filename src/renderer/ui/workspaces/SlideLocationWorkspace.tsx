@@ -141,6 +141,11 @@ import {
   type SlidePreviewFeedback,
   type SlideRuntimeTextEditSession,
 } from './SlideDynamicAuthoringOverlay'
+import {
+  collectDynamicContentTargets,
+  DynamicContentTargetPublisher,
+  type DynamicContentPublication,
+} from './dynamicContentTargetPublication'
 
 export const SLIDE_SESSIONLESS_ERROR = '没有活动的 Slide 编辑会话，不能从旧工程恢复界面'
 
@@ -944,6 +949,8 @@ export function SlideLocationWorkspace({
   const [liveScene, setLiveScene] = useState<LiveScene | null>(null)
   const liveSceneRef = useRef(liveScene)
   liveSceneRef.current = liveScene
+  const liveAcceptingRef = useRef(false)
+  const liveTargetGenerationRef = useRef<string | null>(null)
   const liveShownRef = useRef<LiveSceneBaseline | null>(null)
   const liveResumeRef = useRef<{ stateId: string | null; courseState: Record<string, unknown> | null } | null>(null)
   // A resumed try-run stays mounted while the document only changed by edits it has taken in place.
@@ -1056,6 +1063,91 @@ export function SlideLocationWorkspace({
     hasPreviewFeedback: previewFeedback !== null,
     generationCurrent: acknowledgedPreviewGeneration === previewGeneration,
   })
+
+  // M15 -> Main: only current, host-observed automatic text/image hits are published.
+  // This is a read-only observation; Main validates document identity and the canonical layer again.
+  const dynamicContentPublisher = useMemo(() => new DynamicContentTargetPublisher(value => {
+    const api = typeof window === 'undefined' ? undefined : (window.desktopAPI as typeof window.desktopAPI & {
+      publishDynamicContentTargets?: (input: DynamicContentPublication) => Promise<boolean>
+    })?.publishDynamicContentTargets
+    return api ? api(value) : Promise.resolve()
+  }), [])
+  const [dynamicDocumentEventVersion, setDynamicDocumentEventVersion] = useState(0)
+  const [dynamicDocumentClosed, setDynamicDocumentClosed] = useState(false)
+  const [verifiedDynamicDocument, setVerifiedDynamicDocument] = useState<{
+    candidateKey: string; epoch: string; revision: number
+  } | null>(null)
+  const dynamicTargetSource: 'authoring' | 'live' | null = liveScene
+    ? liveScene.locationId === courseLocationId && liveEditInteractive && liveAcceptingRef.current
+      && liveTargetGenerationRef.current && canvasMode === 'edit' ? 'live' : null
+    : usePublishedAuthoring && authoringCanvasInteractive && publishedAuthoringInitRef.current?.token
+      ? 'authoring' : null
+  const dynamicViewGeneration = dynamicTargetSource === 'live' ? liveTargetGenerationRef.current
+    : dynamicTargetSource === 'authoring' ? publishedAuthoringInitRef.current?.token : null
+  const observedDynamicTargets = useMemo(() => slideEditorView && courseLocationId
+    && slideEditorView.locationId === courseLocationId && slideEditorView.revision === snapshot.projectRevision
+    ? collectDynamicContentTargets({
+      revision: snapshot.projectRevision, locationId: courseLocationId, sceneId: snapshot.sceneId,
+      layers: slideEditorView.layers, runtime: runtimeTargets, componentText: componentTargets,
+      componentImage: componentImageTargets,
+    }) : [], [slideEditorView, courseLocationId, snapshot.projectRevision, snapshot.sceneId,
+    runtimeTargets, componentTargets, componentImageTargets])
+  const dynamicCandidate = documentId && courseLocationId && dynamicTargetSource && dynamicViewGeneration
+    && observedDynamicTargets.length > 0 && snapshot.projectId && snapshot.sessionGeneration >= 0
+    ? { documentId, projectId: snapshot.projectId, revision: snapshot.projectRevision,
+      locationId: courseLocationId, sessionGeneration: snapshot.sessionGeneration,
+      viewGeneration: dynamicViewGeneration, source: dynamicTargetSource, targets: observedDynamicTargets }
+    : null
+  const dynamicCandidateKey = dynamicCandidate ? JSON.stringify([
+    dynamicCandidate.documentId, dynamicCandidate.projectId, dynamicCandidate.revision,
+    dynamicCandidate.locationId, dynamicCandidate.sessionGeneration, dynamicCandidate.viewGeneration,
+    dynamicCandidate.source,
+  ]) : ''
+  const dynamicCandidateRef = useRef({ candidate: dynamicCandidate, key: dynamicCandidateKey })
+  dynamicCandidateRef.current = { candidate: dynamicCandidate, key: dynamicCandidateKey }
+
+  useEffect(() => {
+    const documents = window.desktopAPI?.documents
+    if (!documentId || !documents) return
+    return documents.subscribe(event => {
+      if (event.type === 'closed' ? event.documentId !== documentId : event.snapshot.documentId !== documentId) return
+      dynamicContentPublisher.clear()
+      setVerifiedDynamicDocument(null)
+      setDynamicDocumentClosed(event.type === 'closed')
+      setDynamicDocumentEventVersion(version => version + 1)
+    })
+  }, [documentId, dynamicContentPublisher])
+  useEffect(() => { setDynamicDocumentClosed(false) }, [documentId])
+
+  useEffect(() => {
+    const captured = dynamicCandidateRef.current
+    const documents = window.desktopAPI?.documents
+    if (!captured.candidate || !captured.key || !documents || dynamicDocumentClosed) return
+    let cancelled = false
+    void documents.read(captured.candidate.documentId).then(document => {
+      const current = dynamicCandidateRef.current
+      if (cancelled || !current.candidate || current.key !== captured.key) return
+      if (document.documentId !== current.candidate.documentId || document.revision !== current.candidate.revision
+        || document.model.kind !== 'course-v9' || document.model.project.id !== current.candidate.projectId
+        || document.model.project.revision !== current.candidate.revision) return
+      setVerifiedDynamicDocument({ candidateKey: captured.key, epoch: document.epoch, revision: document.revision })
+    }).catch(() => undefined)
+    return () => { cancelled = true }
+  }, [dynamicCandidateKey, dynamicDocumentClosed, dynamicDocumentEventVersion])
+
+  useLayoutEffect(() => {
+    if (!dynamicCandidate || !verifiedDynamicDocument || verifiedDynamicDocument.candidateKey !== dynamicCandidateKey
+      || verifiedDynamicDocument.revision !== dynamicCandidate.revision || dynamicDocumentClosed) {
+      dynamicContentPublisher.clear()
+      return
+    }
+    dynamicContentPublisher.replace({ documentId: dynamicCandidate.documentId, epoch: verifiedDynamicDocument.epoch,
+      revision: dynamicCandidate.revision, locationId: dynamicCandidate.locationId,
+      viewGeneration: dynamicCandidate.viewGeneration, source: dynamicCandidate.source,
+      targets: dynamicCandidate.targets })
+  }, [dynamicCandidate, dynamicCandidateKey, verifiedDynamicDocument, dynamicDocumentClosed, dynamicContentPublisher])
+  // React development StrictMode remounts effects without reconstructing memoized refs.
+  useEffect(() => () => dynamicContentPublisher.clear(), [dynamicContentPublisher])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -1746,8 +1838,8 @@ export function SlideLocationWorkspace({
   ])
 
   // M15 运行现场 ------------------------------------------------------------------------------------------------------
-  const liveAcceptingRef = useRef(false)
   const clearLiveTargets = useCallback(() => {
+    liveTargetGenerationRef.current = null
     runtimeTargetsByHostRef.current.clear()
     componentTargetsByHostRef.current.clear()
     componentImageTargetsByHostRef.current.clear()
@@ -1760,7 +1852,7 @@ export function SlideLocationWorkspace({
   }, [])
   /** The paused page's Runtime and component targets take the place of the editor's. */
   const acceptLiveTargets = useCallback((targets: SlideLiveEditTargets) => {
-    if (!liveAcceptingRef.current) return
+    if (!liveAcceptingRef.current || !liveTargetGenerationRef.current) return
     if (targets.kind === 'runtime') {
       const hostKey = `${targets.update.scope}:${targets.update.sceneId ?? ''}`
       runtimeTargetsByHostRef.current.set(hostKey, sanitizeRuntimeAuthoringTargets(targets.update, hostKey, slideCanvas))
@@ -1798,6 +1890,7 @@ export function SlideLocationWorkspace({
       const baseline = ports.liveScene.capture()
       if (position.ready && baseline && ports.liveScene.sceneWithCarriers(position.locationId)) {
         liveAcceptingRef.current = true
+        liveTargetGenerationRef.current = crypto.randomUUID()
         const started = session.beginLiveEdit(acceptLiveTargets)
         if (started) {
           session.playbackView?.reset()
@@ -1810,6 +1903,7 @@ export function SlideLocationWorkspace({
           return
         }
         liveAcceptingRef.current = false
+        liveTargetGenerationRef.current = null
       }
     }
     ports.canvas.setCanvasMode('edit')
@@ -1916,6 +2010,7 @@ export function SlideLocationWorkspace({
         // Loaded again for an edit on the live page: pause it again at once, now showing the edit.
         if (resume && liveSceneRef.current) {
           liveAcceptingRef.current = true
+          liveTargetGenerationRef.current = crypto.randomUUID()
           const started = session.beginLiveEdit(acceptLiveTargetsRef.current)
           const baseline = portsRef.current.liveScene?.capture() ?? null
           if (started && baseline) {

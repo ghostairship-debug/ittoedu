@@ -1,64 +1,37 @@
 {
-  "scope": "本轮仅方案定义、登记、派生阅读器和计划维护工具检查；不是产品修复或产品测试报告",
-  "plan_revision": "2.5",
-  "l06_revision": "2.0",
+  "scope": "M25–M30 实施批次工程候选；按真实交付和回执登记，M30-T08 保留 Owner 签收",
+  "plan_revision": "2.6",
+  "l06_revision": "2.1",
   "checked_on": "2026-09-29",
+  "product_code_modified": true,
+  "product_tests_run": true,
+  "real_model_calls_run": true,
+  "real_model_route": "GPT OAuth ChatGPT Responses / gpt-6-luna / subscription",
   "package_validation": {
-    "package_validation": "passed",
+    "status": "passed",
     "tasks": 44,
-    "product_cases": 239,
+    "product_cases": 240,
     "requirements": 47,
-    "reader_articles": 94,
-    "product_tests_executed": false,
+    "reader_articles": 96,
     "errors": []
   },
-  "validator_regression_checks": {
-    "status": "passed",
-    "command": "python tools/selfcheck_plan.py",
-    "exit_code": 0,
-    "positive_status_checks": 1,
-    "rejection_checks": 9,
-    "repository_files_touched": false,
-    "output": "selfcheck_plan: passed (1 positive status check, 9 rejection checks; repository files untouched)"
+  "current_cases": {
+    "passed": 220,
+    "not_run": 8,
+    "blocked": 6,
+    "failed": 1
   },
-  "source_preservation": {
-    "product_source_test_script_files_checked": 2085,
-    "changed_files": [],
-    "old_tasks_exactly_preserved": true,
-    "old_cases_exactly_preserved": true,
-    "task_board_unchanged": true
+  "media_followup_cases": {
+    "not_run": 1
   },
-  "product_code_modified": false,
-  "product_tests_run": false,
-  "paid_calls_run": false,
-  "new_tasks": {
-    "planned": 6
-  },
-  "new_current_cases": {
-    "not_run": 30
-  },
-  "preserved_current_cases": {
-    "passed": 205
-  },
-  "deferred_release_cases": {
+  "release_preparation_cases": {
     "not_run": 4
   },
-  "reader_validation": {
-    "current_content_and_local_links": "passed",
-    "reader_articles": 94,
-    "browser_interaction": "not_run",
-    "note": "同源JSON/Markdown与嵌入阅读内容由方案校验核对，未运行产品GUI或阅读器浏览器交互。"
-  },
-  "typescript_contract_sample": {
-    "status": "not_run",
-    "note": "本次未修改设计样例，不把旧检查冒充本轮执行。"
-  },
-  "plan_tool_changes": [
-    "tools/refresh_plan.py：完成依赖投影、L06当前分类和新完成门",
-    "tools/validate_plan.py：完成依赖图/批次/文档一致性"
+  "evidence": [
+    "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+    "evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md",
+    "evidence/logs/"
   ],
-  "notes": [
-    "旧REL六段/partial及原范围Owner接受保留；新增签收为M30-T08。",
-    "QA更新后再次刷新manifest并校验；检查通过不代表新产品用例通过。"
-  ]
+  "result": "核心本地文件、受限计算、课件轻改、浏览器读取及关闭恢复已有真实载体证据；唯一真实 Luna T1 运行未交付图表资源，不能登记 M30-T04 通过。搜索连接、真实独立图片与 Codex 写委派仍受外部能力约束。",
+  "owner_signature": "not_signed"
 }

@@ -3,6 +3,7 @@ import type {
   ModelAssistantMessage, ModelConnectionSnapshot, ModelEvent, ModelFailure, ModelJson,
   ModelJsonObject, ModelNativeToolCall, ModelProvider, ModelRequest, ModelUsage,
 } from '../../../shared/workbench/modelProvider'
+import { ModelStreamClock } from './ModelStreamClock'
 import { serverSentEvents } from './serverSentEvents'
 import { httpFailureKind } from './providerHttpFailure'
 
@@ -12,6 +13,7 @@ export interface OpenAIChatProviderOptions {
   fetch?: typeof fetch
   /** Maximum silence while waiting for a valid SSE data event; defaults to 120 seconds. */
   timeoutMs?: number
+  progressTimeoutMs?: number
   /** Absolute request ceiling, including credential resolution and streaming; defaults to 10 minutes. */
   maxDurationMs?: number
   maxResponseBytes?: number
@@ -158,6 +160,7 @@ export function serializeModelRequest(request: ModelRequestPayload): string {
 
 /** A single OpenAI-compatible Chat Completions request. Engine owns continuation and retry policy. */
 export class OpenAIChatProvider implements ModelProvider {
+  readonly retrySafety = 'pure-generation' as const
   constructor(private readonly options: OpenAIChatProviderOptions) {}
 
   async *stream(input: ModelRequest, options: { signal?: AbortSignal } = {}): AsyncGenerator<ModelEvent> {
@@ -170,18 +173,7 @@ export class OpenAIChatProvider implements ModelProvider {
     const abort = () => controller.abort()
     options.signal?.addEventListener('abort', abort, { once: true })
     if (options.signal?.aborted) abort()
-    const expire = () => {
-      if (controller.signal.aborted) return
-      timeout = true
-      controller.abort()
-    }
-    const totalTimer = setTimeout(expire, this.options.maxDurationMs ?? 10 * 60_000)
-    let idleTimer: ReturnType<typeof setTimeout> | undefined
-    const pauseIdle = () => { if (idleTimer) clearTimeout(idleTimer); idleTimer = undefined }
-    const refreshIdle = () => {
-      pauseIdle()
-      idleTimer = setTimeout(expire, this.options.timeoutMs ?? 120_000)
-    }
+    const clock = new ModelStreamClock(this.options, () => { if (!controller.signal.aborted) { timeout = true; controller.abort() } })
     const ensureActive = () => { if (controller.signal.aborted) throw new Error('aborted') }
     let response: Response | undefined
     try {
@@ -206,7 +198,7 @@ export class OpenAIChatProvider implements ModelProvider {
         return
       }
       attempted = true
-      refreshIdle()
+      clock.activity()
       response = await (this.options.fetch ?? fetch)(prepared.endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Authorization: `Bearer ${credential}` },
         body: serializeModelRequest(request), signal: controller.signal, redirect: 'error',
@@ -232,10 +224,10 @@ export class OpenAIChatProvider implements ModelProvider {
       const native: ModelJsonObject = {}, choiceFields: ModelJsonObject = {}
       const chunks: ModelJson[] = []
       let responseId: string | undefined, actualModel: string | undefined, finishReason: string | undefined, done = false, usage: ModelUsage | undefined
-      for await (const data of serverSentEvents(response.body, this.options.maxResponseBytes ?? 16 * 1024 * 1024)) {
+      for await (const data of serverSentEvents(response.body, this.options.maxResponseBytes ?? 16 * 1024 * 1024, () => clock.activity())) {
         // The data event has arrived: downstream checkpointing and UI consumption
         // cannot count as time spent waiting for the next upstream event.
-        pauseIdle()
+        clock.pause()
         ensureActive()
         if (data === '[DONE]') { done = true; break }
         let chunk: ModelJsonObject
@@ -253,6 +245,7 @@ export class OpenAIChatProvider implements ModelProvider {
         if (chunk.usage !== undefined && chunk.usage !== null) {
           if (!object(chunk.usage)) throw new ProtocolError('invalid-usage')
           usage = usageOf(chunk.usage)
+          yield event({ type: 'usage.reported', usage })
         }
         if (chunk.choices.length > 1) throw new ProtocolError('unexpected-multiple-choices')
         for (const choice of chunk.choices) {
@@ -265,6 +258,7 @@ export class OpenAIChatProvider implements ModelProvider {
           const text = appendText(assistant, 'content', delta.content)
           const reasoning = appendText(assistant, 'reasoning_content', delta.reasoning_content)
           appendText(assistant, 'refusal', delta.refusal)
+          if (text || reasoning) clock.progress()
           if (text) { yield event({ type: 'text.delta', text }); ensureActive() }
           if (reasoning) { yield event({ type: 'reasoning.delta', text: reasoning }); ensureActive() }
           if (delta.tool_calls !== undefined && delta.tool_calls !== null) {
@@ -292,6 +286,7 @@ export class OpenAIChatProvider implements ModelProvider {
                 retain(call.function, fn, ['name', 'arguments'])
                 argumentsDelta = appendText(call.function, 'arguments', fn.arguments)
               }
+              if (argumentsDelta) clock.progress()
               yield event({ type: 'tool.delta', index, ...(call.id ? { id: call.id } : {}),
                 ...(call.function.name ? { name: prepared.names.get(call.function.name) ?? call.function.name } : {}), argumentsDelta })
               ensureActive()
@@ -303,9 +298,7 @@ export class OpenAIChatProvider implements ModelProvider {
             finishReason = choice.finish_reason
           }
         }
-        // Only a complete, structurally valid data event starts the next idle wait.
-        // SSE comments and transport bytes without framed data do not extend it.
-        refreshIdle()
+        clock.resume()
       }
       ensureActive()
       if (!done || !responseId || !actualModel || !finishReason) throw new ProtocolError('incomplete-stream')
@@ -338,8 +331,7 @@ export class OpenAIChatProvider implements ModelProvider {
         message: attempted ? '模型请求结果未能完整确认；未自动重试，请保留已收到的片段。' : '模型请求尚未发送。',
         ...(httpStatus !== undefined ? { httpStatus } : {}), ...(providerRequestId ? { providerRequestId } : {}) } })
     } finally {
-      clearTimeout(totalTimer)
-      pauseIdle()
+      clock.dispose()
       options.signal?.removeEventListener('abort', abort)
       controller.abort()
       if (response?.body && !response.body.locked) await response.body.cancel().catch(() => undefined)

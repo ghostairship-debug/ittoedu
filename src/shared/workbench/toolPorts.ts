@@ -19,9 +19,10 @@ import type { ModelFailure, ModelUsage } from './modelProvider'
 /** Capabilities that may read bundled authoring Skills. */
 export interface SkillServicePort {
   /** Read one manifest-registered file of a bundled skill, paged. */
-  read(input: { skill: string; path: string; offset: number; limit: number }): Promise<SkillReadResult>
+  read(input: { skill: string; path: string; offset: number; limit: number; version?: string }, runId?: string): Promise<SkillReadResult>
+  list?(runId: string, refresh?: boolean): Promise<{ entries: readonly { name: string; description: string }[]; warnings: readonly string[]; scripts: string }>
   /** Names and one-line purposes only; never skill body text. */
-  catalog(): Promise<readonly { name: string; description: string }[]>
+  catalog(runId?: string): Promise<readonly { name: string; description: string }[]>
 }
 
 export type SkillReadResult =

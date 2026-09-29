@@ -1,3 +1,23 @@
 .document-conflict-hunk{color-scheme:light;color:#402b0a;margin:12px 0;padding:12px;border:1px solid #dcb77c;border-radius:6px;background:#fffaf0;min-width:0}.document-conflict-hunk legend{font-weight:600}.document-conflict-hunk p{font-size:13px;margin:4px 0 12px}.document-conflict-alternatives{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.document-conflict-alternatives>div{min-width:0}.document-conflict-hunk pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:180px;overflow:auto;margin:8px 0;padding:10px;background:white;border:1px solid #e5dfd3}.document-conflict-hunk mark{background:#ffe2a7;color:#402b0a}.document-conflict-hunk details{margin-top:12px}.document-conflict-hunk textarea{display:block;width:100%;box-sizing:border-box;min-height:70px;margin:8px 0}.document-conflict-hunk button{margin:4px 4px 4px 0}
 @media(max-width:800px){.document-conflict-alternatives{grid-template-columns:1fr}}
-.html-document-editor{display:flex;flex-direction:column;min-height:340px;height:100%}.html-document-editor__toolbar{display:flex;gap:8px;padding:8px 0}.html-document-editor__toolbar button[aria-pressed=true]{font-weight:700}.html-document-editor__preview{flex:1;min-height:300px}.html-document-editor__preview iframe{display:block;width:100%;height:100%;min-height:300px;border:1px solid var(--border,#d9d6ce);background:#fff}.html-document-editor__source{flex:1;min-height:300px}.html-document-editor__source .plain-text-document-editor{height:100%}
+
+
+/* HTML consumes the remaining tab height; other document formats retain natural scrolling. */
+.lesson-file-tab--html { display:flex; flex-direction:column; overflow:hidden; }
+.lesson-file-tab--html[hidden] { display:none; }
+.lesson-document-editor--html,
+.lesson-document-editor__html-body,
+.html-document-editor,
+.html-document-editor__preview,
+.html-document-editor__source { display:flex; flex:1 1 0; flex-direction:column; min-width:0; min-height:0; overflow:hidden; }
+.lesson-document-editor--html > header,
+.lesson-document-editor--html > [role=alert],
+.lesson-document-editor--html > aside,
+.html-document-editor__toolbar { flex:0 0 auto; }
+.lesson-document-editor--html > [role=alert],
+.lesson-document-editor--html > aside { max-height:35%; overflow:auto; }
+.html-document-editor__toolbar { display:flex; gap:8px; padding:8px 0; }
+.html-document-editor__toolbar button[aria-pressed=true] { font-weight:700; }
+.html-document-editor__preview[hidden],
+.html-document-editor__source[hidden] { display:none; }
+.html-document-editor__source .plain-text-document-editor { flex:1; min-height:0; height:100%; }

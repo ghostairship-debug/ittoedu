@@ -320,7 +320,7 @@ it('allows an active SSE stream beyond the idle window while retaining a finite 
   expect(calls).toBe(2)
 })
 
-it('does not let SSE comments extend the idle window, and external stop still aborts an active stream', async () => {
+it('M26 SSE comments extend activity but not the meaningful progress deadline, and external stop still wins', async () => {
   let calls = 0
   const baseURL = await serve(async (req, res) => {
     const body = await bodyOf(req); calls++
@@ -333,7 +333,7 @@ it('does not let SSE comments extend the idle window, and external stop still ab
     }
     if (!res.destroyed) res.end(frame(chunk({ content: '完成' }, 'stop')) + 'data: [DONE]\n\n')
   })
-  const provider = new OpenAIChatProvider({ credentialResolver: async () => 'fixture-key', timeoutMs: 90, maxDurationMs: 500 })
+  const provider = new OpenAIChatProvider({ credentialResolver: async () => 'fixture-key', timeoutMs: 90, progressTimeoutMs: 180, maxDurationMs: 500 })
   const heartbeat = request(baseURL); heartbeat.messages = [{ role: 'user', content: 'heartbeat' }]
   const timedOut = await collect(provider, heartbeat)
   expect(timedOut.some(event => event.type === 'response.completed')).toBe(false)

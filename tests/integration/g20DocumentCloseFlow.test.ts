@@ -55,3 +55,18 @@ it('discard is fenced to the exact revision and preserves edits made while the d
   expect(await closeDocumentFlow(ports)).toBe(true)
   expect((await host.open(filename)).model).toMatchObject({ source: '原稿' })
 })
+
+
+it('M25 discard-only still confirms a clean canonical document and cannot accidentally save a failed local draft', async () => {
+  const { ports, host, opened, filename } = await setup()
+  ports.discardOnly = true
+  ports.chooseDirty = async () => 'cancel'
+  expect(await closeDocumentFlow(ports)).toBe(false)
+  expect((await host.internalAPI.read(opened.documentId)).dirty).toBe(true)
+  ports.chooseDirty = async () => 'save'
+  expect(await closeDocumentFlow(ports)).toBe(false)
+  expect(await fs.readFile(filename, 'utf8')).toBe('原稿')
+  ports.chooseDirty = async () => 'discard'
+  expect(await closeDocumentFlow(ports)).toBe(true)
+  expect((await host.open(filename)).model).toMatchObject({ source: '原稿' })
+})

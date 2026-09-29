@@ -1,3 +1,4 @@
+import { parse } from 'acorn'
 import { MAX_RUNTIME_SOURCE_BYTES } from '../contracts/runtime/schema'
 
 export interface HtmlDocumentPayload { html: string; resourceKeys: string[] }
@@ -157,18 +158,65 @@ export function createHtmlDocumentRuntimeSource(input: { html: string; resourceK
   return source
 }
 
-/** Only the exact structure generated above is unpacked; arbitrary Runtime code is never executed. */
+/** JSON literals only: never execute a candidate Runtime to recover its HTML. */
+function literalValue(node: unknown): unknown {
+  if (!node || typeof node !== 'object') throw new Error('Expected literal')
+  const n = node as Record<string, unknown>
+  if (n.type === 'Literal' && !n.regex && (n.value === null || ['string', 'boolean', 'number'].includes(typeof n.value))) return n.value
+  if (n.type === 'ArrayExpression' && Array.isArray(n.elements)) return n.elements.map(literalValue)
+  if (n.type === 'ObjectExpression' && Array.isArray(n.properties)) {
+    const result: Record<string, unknown> = Object.create(null)
+    for (const raw of n.properties) {
+      const property = raw as Record<string, unknown>, keyNode = property.key as Record<string, unknown> | undefined
+      if (property.type !== 'Property' || property.kind !== 'init' || property.computed || property.method || property.shorthand || !keyNode) throw new Error('Expected JSON property')
+      const key = keyNode.type === 'Identifier' ? keyNode.name : keyNode.type === 'Literal' ? keyNode.value : null
+      if (typeof key !== 'string' || Object.hasOwn(result, key)) throw new Error('Invalid literal property')
+      result[key] = literalValue(property.value)
+    }
+    return result
+  }
+  throw new Error('Executable expression is not a payload')
+}
+
+function payloadValue(value: unknown): HtmlDocumentPayload | null {
+  if (!value || typeof value !== 'object') return null
+  const payload = value as Record<string, unknown>
+  if (Object.keys(payload).length !== 3 || payload.version !== 1 || typeof payload.html !== 'string' || !Array.isArray(payload.resourceKeys)
+    || payload.resourceKeys.some(key => typeof key !== 'string' || !RESOURCE_KEY.test(key))
+    || new Set(payload.resourceKeys).size !== payload.resourceKeys.length) return null
+  return { html: payload.html, resourceKeys: payload.resourceKeys as string[] }
+}
+
+/** Whitespace, comments and literal quoting do not change executable syntax. */
+function syntaxKey(ast: unknown): string {
+  return JSON.stringify(ast, (key, value) => ['start', 'end', 'loc', 'raw'].includes(key) ? undefined
+    : value instanceof RegExp ? { pattern: value.source, flags: value.flags } : value)
+}
+
+/** A software-owned envelope, including provably cosmetic formatting changes, never arbitrary custom code. */
 export function unpackHtmlDocumentRuntimeSource(source: string): HtmlDocumentPayload | null {
-  if (!source.startsWith(PREFIX)) return null
-  const end = source.indexOf(';\n', PREFIX.length)
-  if (end < 0) return null
+  if (new TextEncoder().encode(source).byteLength > MAX_RUNTIME_SOURCE_BYTES) return null
   try {
-    const value: unknown = JSON.parse(source.slice(PREFIX.length, end))
-    if (!value || typeof value !== 'object') return null
-    const payload = value as Record<string, unknown>
-    if (payload.version !== 1 || typeof payload.html !== 'string' || !Array.isArray(payload.resourceKeys)
-      || payload.resourceKeys.some(key => typeof key !== 'string' || !RESOURCE_KEY.test(key))) return null
-    const exact = { html: payload.html, resourceKeys: payload.resourceKeys as string[] }
-    return sourceFor(exact) === source ? exact : null
+    // Keep the common software-produced form cheap; parse syntax only for a reformatted candidate.
+    if (source.startsWith(PREFIX)) {
+      const end = source.indexOf(';\n', PREFIX.length)
+      if (end >= 0) {
+        try {
+          const payload = payloadValue(JSON.parse(source.slice(PREFIX.length, end)))
+          if (payload && createHtmlDocumentRuntimeSource(payload) === source) return payload
+        } catch { /* A valid JavaScript literal may use non-JSON quoting; static parsing below decides. */ }
+      }
+    }
+    const ast = parse(source, { ecmaVersion: 'latest', sourceType: 'script' })
+    const first = ast.body[0]
+    if (first?.type !== 'VariableDeclaration' || first.kind !== 'const' || first.declarations.length !== 1) return null
+    const declaration = first.declarations[0]
+    if (declaration.id.type !== 'Identifier' || declaration.id.name !== '__htmlDocumentPayload') return null
+    const payload = payloadValue(literalValue(declaration.init))
+    if (!payload) return null
+    const owned = parse(createHtmlDocumentRuntimeSource(payload), { ecmaVersion: 'latest', sourceType: 'script' })
+    // The literal payload was already decoded and validated; its property order/quoting is immaterial.
+    ast.body[0] = owned.body[0]
+    return syntaxKey(ast) === syntaxKey(owned) ? payload : null
   } catch { return null }
 }

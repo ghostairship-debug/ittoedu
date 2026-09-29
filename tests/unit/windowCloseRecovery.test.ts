@@ -3,17 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppState } from '../../src/main/appState'
 import { IPC_CHANNELS } from '../../src/shared/ipcTypes'
 
-const controls = vi.hoisted(() => ({ choice: 1, dirty: true, clearRecovery: vi.fn(async () => undefined) }))
+const controls = vi.hoisted(() => ({ choice: 1, dirty: true, clearRecovery: vi.fn(async () => undefined), clearFrames: vi.fn(), releaseLeases: vi.fn() }))
 vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
   const os = await import('node:os')
   class FakeWindow extends EventEmitter {
     destroyed = false
-    webContents = Object.assign(new EventEmitter(), {
+    private contents = Object.assign(new EventEmitter(), {
+      id: 7,
       executeJavaScript: vi.fn(async () => controls.dirty),
       send: vi.fn(),
       mainFrame: { detached: false, send: vi.fn() },
     })
+    get webContents() { if (this.destroyed) throw new Error('Object has been destroyed'); return this.contents }
     loadURL = vi.fn(async () => undefined)
     show = vi.fn()
     isDestroyed() { return this.destroyed }
@@ -26,7 +28,8 @@ vi.mock('electron', async () => {
   return { app: { isPackaged: true, getAppPath: () => process.cwd(), getPath: () => (os.tmpdir()) }, BrowserWindow: FakeWindow,
     dialog: { showMessageBoxSync: vi.fn(() => controls.choice) }, ipcMain: new EventEmitter(), session: { defaultSession: {} } }
 })
-vi.mock('../../src/main/security', () => ({ configureRestrictedSession: vi.fn(), hardenWebContents: vi.fn(), isAllowedDocumentUrl: vi.fn(), isAllowedEditorPreviewFrameUrl: vi.fn() }))
+vi.mock('../../src/main/security', () => ({ configureRestrictedSession: vi.fn(), hardenWebContents: vi.fn(), isAllowedDocumentUrl: vi.fn(), isAllowedEditorPreviewFrameUrl: vi.fn(), isAllowedHtmlPreviewFrameUrl: vi.fn(), isAllowedHtmlPreviewChildFrameUrl: vi.fn(), clearHtmlPreviewFrameEntries: controls.clearFrames }))
+vi.mock('../../src/main/ipc', () => ({ releaseAllHtmlPreviewLeases: controls.releaseLeases }))
 vi.mock('../../src/main/protocols', () => ({ editorEntryUrl: () => 'courseware://editor/index.html' }))
 vi.mock('../../src/main/projectPersistence', () => ({ clearRecoveryProject: controls.clearRecovery }))
 vi.mock('../../src/main/previewNetworkPolicy', () => ({ mainPreviewNetworkPolicy: { replaceBaseOrigins: vi.fn(), beginDocumentNavigation: vi.fn(), allowsRequest: vi.fn(), activateDocument: vi.fn() } }))
@@ -46,7 +49,7 @@ async function openWindow() {
 }
 function requestId(window: { webContents: { send: unknown } }): string { return vi.mocked(window.webContents.send as (...args: unknown[]) => void).mock.calls.at(-1)?.[1] as string }
 async function settle() { await vi.advanceTimersByTimeAsync(0) }
-beforeEach(() => { vi.useFakeTimers(); controls.choice = 1; controls.dirty = true; controls.clearRecovery.mockClear() })
+beforeEach(() => { vi.useFakeTimers(); controls.choice = 1; controls.dirty = true; controls.clearRecovery.mockClear(); controls.clearFrames.mockReset(); controls.releaseLeases.mockReset() })
 afterEach(() => { ipcMain.removeAllListeners(); vi.useRealTimers() })
 
 describe('window close recovery handshake', () => {
@@ -163,4 +166,28 @@ describe('window close recovery handshake', () => {
     await settle()
     expect(window.isDestroyed()).toBe(true)
   })
+})
+
+
+it('M25 releases frames by the captured primitive after webContents is destroyed, including repeated cleanup', async () => {
+  const { window, state } = await openWindow()
+  Reflect.set(window, 'destroyed', true)
+  expect(() => window.webContents).toThrow('Object has been destroyed')
+  expect(() => { window.emit('closed'); window.emit('closed') }).not.toThrow()
+  expect(controls.clearFrames).toHaveBeenNthCalledWith(1, 7)
+  expect(controls.clearFrames).toHaveBeenNthCalledWith(2, 7)
+  expect(controls.releaseLeases).toHaveBeenCalledTimes(2)
+  expect(state.detachWindow).toHaveBeenCalledWith(window)
+})
+
+it('M25 a preview cleanup error does not skip network lease cleanup or AppState detachment', async () => {
+  const { window, state } = await openWindow()
+  const report = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  controls.clearFrames.mockImplementationOnce(() => { throw new Error('frame cleanup failed') })
+  Reflect.set(window, 'destroyed', true)
+  expect(() => window.emit('closed')).not.toThrow()
+  expect(controls.releaseLeases).toHaveBeenCalledTimes(1)
+  expect(state.detachWindow).toHaveBeenCalledWith(window)
+  expect(report).toHaveBeenCalledTimes(1)
+  report.mockRestore()
 })

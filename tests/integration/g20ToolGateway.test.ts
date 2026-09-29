@@ -4,6 +4,7 @@ import { PublishedInteractionController } from '../../src/player/interactions/Pu
 import { sceneNodeToCourseLayerItem } from '../../src/shared/courseProjectModel'
 import { createImageNode, createChartNode, createTableNode } from '../../src/core/tools/nativeNodeFactories'
 import { allocateCourseLayerOrder } from '../../src/core/tools/layerOrder'
+import { planReorderSlideSceneLayers } from '../../src/core/tools/slideLayerState'
 import sharp from 'sharp'
 import { prepareImageResource } from '../../src/main/workbench/admittedImageResource'
 // @vitest-environment node
@@ -88,7 +89,34 @@ describe('G20 real Registry/Driver tool gateway', () => {
     expect(status(await gateway.execute('r', 'replace', replace(handle, 'XYZ')))).toBe('applied')
     await human
     expect(session.read().model).toMatchObject({ source: 'longbcXYZghi' })
-    expect(await gateway.execute('r', 'stale', replace(handle, 'BAD'))).toMatchObject({ kind: 'error', code: 'target-conflict' })
+    expect(status(await gateway.execute('r', 'ack-continued', replace(handle, 'BAD')))).toBe('applied')
+    expect(session.read().model).toMatchObject({ source: 'longbcBADghi' })
+    const overlap = session.read()
+    await session.execute({ documentId: overlap.documentId, epoch: overlap.epoch, operationId: 'human-overlap', actor: 'human',
+      baseRevision: overlap.revision, mutation: { type: 'command', command: { type: 'markdown.splice', from: 6, to: 9, text: 'HUMAN' } } })
+    expect(await gateway.execute('r', 'overlap', replace(handle, 'DENIED'))).toMatchObject({ kind: 'error', code: 'target-conflict' })
+  })
+
+  it('M26 keeps an acknowledged source handle writable but revokes it after Undo and Redo restore identical bytes', async () => {
+    const { registry, gateway } = harness()
+    const session = await registry.create(markdown('abcDEFghi'), 'undo.md')
+    const target: ToolTarget = { kind: 'markdown-range', from: 3, to: 6 }
+    await gateway.beginRun({ runId: 'undo-run', actor: 'agent', documents: [{ documentId: session.documentId, writable: [target] }] })
+    const handle = await gateway.issueTarget('undo-run', session.documentId, target)
+    expect(status(await gateway.execute('undo-run', 'first', replace(handle, 'XYZ')))).toBe('applied')
+    expect(status(await gateway.execute('undo-run', 'second', replace(handle, 'DEF')))).toBe('applied')
+    expect(session.read().model).toMatchObject({ source: 'abcDEFghi' })
+    const beforeUndo = session.read()
+    expect((await session.execute({ documentId: beforeUndo.documentId,
+      epoch: beforeUndo.epoch, operationId: 'human-undo', actor: 'human', baseRevision: beforeUndo.revision,
+      mutation: { type: 'undo' } })).status).toBe('applied')
+    const beforeRedo = session.read()
+    await session.execute({ documentId: beforeRedo.documentId, epoch: beforeRedo.epoch, operationId: 'human-redo',
+      actor: 'human', baseRevision: beforeRedo.revision, mutation: { type: 'redo' } })
+    expect(session.read().model).toMatchObject({ source: 'abcDEFghi' })
+    expect(await gateway.execute('undo-run', 'revoked', replace(handle, 'BAD'))).toMatchObject({ kind: 'error', code: 'target-conflict' })
+    const fresh = await gateway.issueTarget('undo-run', session.documentId, target)
+    expect(await gateway.execute('undo-run', 'fresh-denied', replace(fresh, 'BAD'))).toMatchObject({ kind: 'error', code: 'not-authorized' })
   })
 
   it('uses strict V9 planners for atomic properties/background batches and one undo', async () => {
@@ -308,10 +336,19 @@ describe('G20 real Registry/Driver tool gateway', () => {
     expect(flowSurfaceIn(after.model.project, surface.id).blocks.at(-1)?.id).toBe('human-paragraph')
     expect(after.undoDepth).toBe(2)
     expect(course.load(course.serialize(after.model)).resources).toEqual(model.resources)
-    expect(await gateway.execute('r', 'stale-inspect', { name: 'inspect', input: { target } })).toMatchObject({ code: 'target-conflict' })
+    const continued = await gateway.execute('r', 'continued-inspect', { name: 'inspect', input: { target } })
+    expect(continued).toMatchObject({ kind: 'read', data: { writable: true } })
+    if (continued.kind !== 'read') throw new Error('continued read')
+    const continuedTarget = (continued.data as { target: string }).target
+    expect(status(await gateway.execute('r', 'continued-flow-edit', { name: 'flow.content', input: {
+      target: continuedTarget, content: { inlines: [{ type: 'text', text: '续' }] },
+    } }))).toBe('applied')
     const staleCoordinates = await gateway.issueTarget('r', session.documentId, range)
     expect(await gateway.execute('r', 'stale-grant', { name: 'flow.content', input: { target: staleCoordinates, content: { inlines: [] } } })).toMatchObject({ code: 'not-authorized' })
-    await session.execute({ documentId: after.documentId, epoch: after.epoch, operationId: 'undo-flow', actor: 'human', baseRevision: after.revision, mutation: { type: 'undo' } })
+    const second = session.read()
+    await session.execute({ documentId: second.documentId, epoch: second.epoch, operationId: 'undo-flow-continued', actor: 'human', baseRevision: second.revision, mutation: { type: 'undo' } })
+    const previous = session.read()
+    await session.execute({ documentId: previous.documentId, epoch: previous.epoch, operationId: 'undo-flow', actor: 'human', baseRevision: previous.revision, mutation: { type: 'undo' } })
     const undone = session.read().model
     expect(undone.kind === 'course-v9' && flowSurfaceIn(undone.project, surface.id).blocks).toEqual(flowSurfaceIn(human, surface.id).blocks)
   })
@@ -454,6 +491,40 @@ describe('G20 real Registry/Driver tool gateway', () => {
     expect((session.read().model as typeof model).project.surfaces).toEqual(model.project.surfaces)
   })
 
+  it('M26 inserts after unrelated sibling styling but rejects a changed parent order', async () => {
+    const { registry, gateway } = harness(), model = multiSurfaceModel()
+    const location = model.project.locations.find(value => value.kind === 'slide-scene')!
+    const surface = model.project.surfaces.find(value => value.id === location.surfaceId)!
+    if (surface.type !== 'slide' || location.kind !== 'slide-scene') throw new Error('fixture')
+    const scene = surface.scenes.find(value => value.id === location.sceneId)!
+    if (scene.layerItems.length < 2) throw new Error('fixture needs sibling order')
+    const session = await registry.create(model, 'insert-order.h5lesson')
+    const owner: ToolTarget = { kind: 'course-owner', locationId: location.id, owner: 'scene' }
+    await gateway.beginRun({ runId: 'insert-dependency', actor: 'agent', documents: [{ documentId: session.documentId, writable: [owner] }] })
+    const handle = await gateway.issueTarget('insert-dependency', session.documentId, owner)
+    const beforeStyle = session.read()
+    expect((await session.execute({ documentId: beforeStyle.documentId, epoch: beforeStyle.epoch,
+      operationId: 'human-style', actor: 'human', baseRevision: beforeStyle.revision,
+      mutation: { type: 'command', command: { type: 'course.object.patch', locationId: location.id,
+        itemId: scene.layerItems[0].layerItemId, patch: { locked: !scene.layerItems[0].locked } } } })).status).toBe('applied')
+    expect(status(await gateway.execute('insert-dependency', 'insert-after-style', { name: 'native.insert',
+      input: { target: handle, template: { nativeType: 'text', text: '新注释' } } }))).toBe('applied')
+    const beforeReorder = session.read()
+    if (beforeReorder.model.kind !== 'course-v9') throw new Error('course')
+    const slide = beforeReorder.model.project.surfaces.find(value => value.id === surface.id)
+    if (slide?.type !== 'slide') throw new Error('slide')
+    const ids = slide.scenes.find(value => value.id === scene.id)!.layerItems.map(item => item.layerItemId).reverse()
+    const reordered = planReorderSlideSceneLayers(beforeReorder.model.project, location.id, null, ids)
+    const orderResult = await session.execute({ documentId: beforeReorder.documentId, epoch: beforeReorder.epoch,
+      operationId: 'human-order', actor: 'human', baseRevision: beforeReorder.revision,
+      mutation: { type: 'command', command: { type: 'course.replace', project: {
+        ...reordered, revision: beforeReorder.model.project.revision,
+        updatedAt: beforeReorder.model.project.updatedAt } } } })
+    if (orderResult.status !== 'applied') throw new Error(JSON.stringify(orderResult))
+    expect(await gateway.execute('insert-dependency', 'stale-order', { name: 'native.insert',
+      input: { target: handle, template: { nativeType: 'text', text: '拒绝乱序' } } })).toMatchObject({ kind: 'error', code: 'target-conflict' })
+  })
+
   it('atomically imports admitted image bytes and creates a Native image with durable undo/redo and replay', async () => {
     const { registry, gateway, states } = harness(), model = multiSurfaceModel()
     const location = model.project.locations.find(value => value.kind === 'slide-scene')!
@@ -531,7 +602,8 @@ describe('G20 real Registry/Driver tool gateway', () => {
     expect(await gateway.execute('source', 'text-chunk', replace(target, '正文流'))).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     const changed = resolveFlowBlock((session.read().model as typeof model).project, range).block
     expect(flowTextSlot(changed, range.slot).get().inlines).toEqual([block.content.inlines[0], { type: 'text', text: '正文流' }, block.content.inlines[2]])
-    await expect(gateway.resolveEditTarget('source', target)).rejects.toMatchObject({ code: 'target-conflict' })
+    await expect(gateway.resolveEditTarget('source', target)).resolves.toMatchObject({ revision: session.read().revision,
+      target: { ...range, from: 1, to: 4 } })
     await gateway.stop('source')
     await expect(gateway.resolveEditTarget('source', target)).rejects.toMatchObject({ code: 'run-stopped' })
     expect(session.read().undoDepth).toBe(1)
@@ -992,4 +1064,87 @@ describe('G20 real Registry/Driver tool gateway', () => {
     const parent = await gateway.issueTarget('limited-rule', session.documentId, { kind: 'course-owner', locationId: location.id, owner: 'scene' })
     expect(await gateway.execute('limited-rule', 'still-limited', { name: 'interaction.compose', input: { target: parent, interaction: { trigger: { kind: 'scene-enter' }, effects: [{ kind: 'next-step' }] } } })).toMatchObject({ kind: 'error', code: 'not-authorized' })
   })
+})
+
+
+it.each([9999, 10001])('M26 %i-character source can be read in pages through refreshed handles before a resumed write', async length => {
+  const { registry, gateway } = harness(), source = 'x'.repeat(length)
+  const session = await registry.create(markdown(source), 'paged.md')
+  await gateway.beginRun({ runId: 'pages', actor: 'agent', documents: [{ documentId: session.documentId, writable: [{ kind: 'document' }] }] })
+  gateway.requireReadObservation('pages')
+  let target = await gateway.issueTarget('pages', session.documentId, { kind: 'document' }), cursor: string | undefined
+  let reconstructed = '', pages = 0
+  do {
+    const result = await gateway.execute('pages', `page-${++pages}`, { name: 'read', input: { target, limit: 25, ...(cursor ? { cursor } : {}) } })
+    if (result.kind !== 'read') throw new Error(JSON.stringify(result))
+    const data = result.data as { target: string; text: string; offset: number }
+    expect(data.offset).toBe(reconstructed.length)
+    expect(data.target).not.toBe(target)
+    reconstructed += data.text; target = data.target; cursor = result.nextCursor
+  } while (cursor)
+  expect(reconstructed).toBe(source)
+  expect(pages).toBe(Math.ceil(length / 2500))
+  const body = await gateway.issueTarget('pages', session.documentId, { kind: 'markdown-range', from: 0, to: length })
+  expect(await gateway.execute('pages', 'write-observed', replace(body, '已读后修改'))).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  expect(session.read()).toMatchObject({ undoDepth: 1, model: { source: '已读后修改' } })
+  await gateway.stop('pages')
+})
+
+
+it('M26 partial source observation permits its own range, not an unobserved tail or another document', async () => {
+  const { registry, gateway } = harness()
+  const a = await registry.create(markdown('a'.repeat(250)), 'one.md'), b = await registry.create(markdown('untouched'), 'two.md')
+  await gateway.beginRun({ runId: 'scope', actor: 'agent', documents: [a, b].map(doc => ({ documentId: doc.documentId, writable: [{ kind: 'document' }] })) })
+  gateway.requireReadObservation('scope')
+  const root = await gateway.issueTarget('scope', a.documentId, { kind: 'document' })
+  const covered = await gateway.issueTarget('scope', a.documentId, { kind: 'markdown-range', from: 10, to: 13 })
+  const tail = await gateway.issueTarget('scope', a.documentId, { kind: 'markdown-range', from: 200, to: 203 })
+  const foreign = await gateway.issueTarget('scope', b.documentId, { kind: 'markdown-range', from: 0, to: 3 })
+  expect(await gateway.execute('scope', 'read', { name: 'read', input: { target: root, limit: 1 } })).toMatchObject({ kind: 'read', data: { truncated: true } })
+  expect(await gateway.execute('scope', 'tail', replace(tail, 'BAD'))).toMatchObject({ code: 'resume-observation-required' })
+  expect(await gateway.execute('scope', 'other', replace(foreign, 'BAD'))).toMatchObject({ code: 'resume-observation-required' })
+  expect(await gateway.execute('scope', 'local', replace(covered, 'OK'))).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  expect(b.read()).toMatchObject({ revision: 0, model: { source: 'untouched' } })
+  expect(a.read().undoDepth).toBe(1)
+  await gateway.stop('scope')
+})
+
+it('M26 a cursor cannot splice different revisions even after undo restores the identical bytes', async () => {
+  const { registry, gateway } = harness(), session = await registry.create(markdown('x'.repeat(250)), 'cursor.md')
+  await gateway.beginRun({ runId: 'cursor', actor: 'agent', documents: [{ documentId: session.documentId, writable: [] }] })
+  const target = await gateway.issueTarget('cursor', session.documentId, { kind: 'document' })
+  const page = await gateway.execute('cursor', 'first', { name: 'read', input: { target, limit: 1 } })
+  if (page.kind !== 'read') throw new Error('read failed')
+  const snapshot = session.read(), common = { documentId: session.documentId, epoch: snapshot.epoch, actor: 'human' as const }
+  await session.execute({ ...common, operationId: 'human', baseRevision: 0, mutation: { type: 'command', command: { type: 'markdown.splice', from: 0, to: 1, text: 'y' } } })
+  await session.execute({ ...common, operationId: 'undo', baseRevision: 1, mutation: { type: 'undo' } })
+  expect(session.read().model).toMatchObject({ source: 'x'.repeat(250) })
+  expect(await gateway.execute('cursor', 'stale', { name: 'read', input: { target: (page.data as { target: string }).target, cursor: page.nextCursor } })).toMatchObject({ code: 'stale-cursor' })
+  await gateway.stop('cursor')
+})
+
+
+it('M26 a V9 directory is not an object observation; an externally edited object can be reread without renewing its old write handle', async () => {
+  const { registry, gateway } = harness(), model = multiSurfaceModel(), session = await registry.create(model, 'coverage.h5lesson')
+  await gateway.beginRun({ runId: 'coverage', actor: 'agent', documents: [{ documentId: session.documentId, writable: [{ kind: 'document' }] }] })
+  gateway.requireReadObservation('coverage')
+  const root = await gateway.issueTarget('coverage', session.documentId, { kind: 'document' })
+  const object = await gateway.issueTarget('coverage', session.documentId, { kind: 'course-object', locationId: 'location-spatial', itemId: 'spatial-label' })
+  await gateway.execute('coverage', 'directory', { name: 'read', input: { target: root } })
+  expect(await gateway.execute('coverage', 'unobserved-object', replace(object, 'BAD'))).toMatchObject({ code: 'resume-observation-required' })
+  expect(await gateway.execute('coverage', 'body', { name: 'read', input: { target: object } })).toMatchObject({ kind: 'read', data: { truncated: false } })
+  expect(await gateway.execute('coverage', 'write', replace(object, '已观察对象'))).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  const fresh = await gateway.issueTarget('coverage', session.documentId, { kind: 'course-object', locationId: 'location-spatial', itemId: 'spatial-label' })
+  const before = session.read()
+  await session.execute({ documentId: before.documentId, epoch: before.epoch, baseRevision: before.revision, operationId: 'human-opacity', actor: 'human',
+    mutation: { type: 'command', command: { type: 'course.object.patch', locationId: 'location-spatial', itemId: 'spatial-label', patch: { opacity: 0.5 } } } })
+  const observed = await gateway.execute('coverage', 'observe-human', { name: 'inspect', input: { target: fresh } })
+  expect(observed).toMatchObject({ kind: 'read', data: { writable: false } })
+  if (observed.kind !== 'read') throw new Error('inspect failed')
+  const readOnly = (observed.data as { target: string }).target
+  expect(await gateway.execute('coverage', 'read-human', { name: 'read', input: { target: readOnly } })).toMatchObject({ kind: 'read' })
+  expect(await gateway.execute('coverage', 'no-renewal', replace(readOnly, 'BAD'))).toMatchObject({ code: 'not-authorized' })
+  expect(await gateway.execute('coverage', 'old-handle', replace(fresh, 'BAD'))).toMatchObject({ code: 'target-conflict' })
+  expect(session.read().undoDepth).toBe(2)
+  await gateway.stop('coverage')
 })

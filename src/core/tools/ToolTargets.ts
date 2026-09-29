@@ -168,6 +168,16 @@ export function targetFootprint(model: DocumentModel, target: ToolTarget): strin
   return documentDigest(readTarget(model, target))
 }
 
+/** An insertion depends on the actual parent and sibling order, not sibling text or styling. */
+export function insertionDependencyFootprint(model: DocumentModel, target: ToolTarget): string {
+  if (model.kind !== 'course-v9') throw new Error('插入目标需要 V9 文档')
+  if (target.kind === 'flow-container') return documentDigest(readTarget(model, target))
+  if (target.kind !== 'course-owner') throw new Error('插入目标需要图层 owner 或正文容器')
+  const { location, surface, items } = resolveNativeOwner(model.project, target)
+  return documentDigest({ locationId: location.id, surfaceId: surface.id,
+    owner: target.owner, stateId: target.stateId ?? null, children: items.map(item => item.layerItemId) })
+}
+
 /** Conservative verified mapping for a single disjoint source edit; ambiguous/overlapping edits conflict. */
 export function mapMarkdownRange(before: string, after: string, range: Extract<ToolTarget, { kind: 'markdown-range' }>): typeof range {
   if (before === after) return { ...range }

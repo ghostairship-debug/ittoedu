@@ -1,17 +1,17 @@
-import { HTML_PREVIEW_ORIGIN } from './htmlPreviewProtocol'
-
+// Unprivileged, per-lease origin only. The main editor's CSP is unchanged.
 const BASE_CSP = [
   "default-src 'none'",
-  `script-src ${HTML_PREVIEW_ORIGIN} 'unsafe-inline'`,
-  `style-src ${HTML_PREVIEW_ORIGIN} 'unsafe-inline'`,
-  `font-src ${HTML_PREVIEW_ORIGIN} data:`,
-  `connect-src ${HTML_PREVIEW_ORIGIN}`,
-  "frame-src 'none'",
-  "child-src 'none'",
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:",
+  `style-src 'self' 'unsafe-inline'`,
+  `font-src 'self' data:`,
+  `connect-src 'self'`,
+  "frame-src 'self' blob:",
+  "child-src 'self' blob:",
   "worker-src 'none'",
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
+  "sandbox allow-scripts allow-same-origin",
 ]
 
 export function htmlPreviewContentSecurityPolicy(mediaOrigins: readonly string[]): string {
@@ -21,7 +21,7 @@ export function htmlPreviewContentSecurityPolicy(mediaOrigins: readonly string[]
       return url.protocol === 'https:' && url.origin === value && !url.username && !url.password
     } catch { return false }
   }).sort()
-  const media = `${HTML_PREVIEW_ORIGIN} data: blob:${allowed.length ? ` ${allowed.join(' ')}` : ''}`
+  const media = `'self' data: blob:${allowed.length ? ` ${allowed.join(' ')}` : ''}`
   return [
     ...BASE_CSP.slice(0, 3),
     `img-src ${media}`,
@@ -39,8 +39,7 @@ export function htmlPreviewResponse(
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
     'Cache-Control': 'no-store',
-    'Access-Control-Allow-Origin': '*',
-    'Cross-Origin-Resource-Policy': 'cross-origin',
+    'Cross-Origin-Resource-Policy': 'same-origin',
   })
   if (input.contentType) headers.set('Content-Type', input.contentType)
   if (input.method === 'HEAD') body = null

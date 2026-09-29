@@ -143,7 +143,7 @@ export default function App() {
   const documentsWithSaveDirectory = useMemo<DocumentHostAPI | null>(() => rawDocuments ? {
     ...rawDocuments,
     saveWithDialog: (documentId, saveAs, suggestedDirectory) => rawDocuments.saveWithDialog(documentId, saveAs, suggestedDirectory ?? saveDirectory.current ?? undefined),
-    closeWithDialog: (documentId, suggestedDirectory) => rawDocuments.closeWithDialog(documentId, suggestedDirectory ?? saveDirectory.current ?? undefined),
+    closeWithDialog: (documentId, suggestedDirectory, discardOnly) => rawDocuments.closeWithDialog(documentId, suggestedDirectory ?? saveDirectory.current ?? undefined, discardOnly),
   } : null, [rawDocuments])
   const setSaveDirectory = useCallback((directory: SaveDirectoryContext | null) => { saveDirectory.current = directory }, [])
   const [lessonDirty, setLessonDirty] = useState(false)

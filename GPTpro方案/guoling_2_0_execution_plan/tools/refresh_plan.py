@@ -19,6 +19,7 @@ TASK_STATUSES = ('planned', 'in_progress', 'implemented', 'verified', 'blocked')
 CASE_STATUSES = ('not_run', 'passed', 'failed', 'blocked', 'skipped')
 CURRENT_SCOPE = '2.0'
 DEFERRED_SCOPE = 'release-preparation'
+MEDIA_SCOPE = 'media-followup'
 
 def read(path):
     return path.read_text(encoding='utf-8-sig')
@@ -45,11 +46,13 @@ def status_summary(tasks, cases):
     deferred = [case for case in cases if case['required_for'] == DEFERRED_SCOPE]
     case_counts = status_counts(current, CASE_STATUSES)
     deferred_counts = status_counts(deferred, CASE_STATUSES)
+    media = [case for case in cases if case['required_for'] == MEDIA_SCOPE]
     owner_pending = [case['id'] for case in current if case.get('owner_required') is True and case.get('status') != 'passed']
     owner_summary = ('；Owner 待验收：' + ('、'.join(owner_pending) if owner_pending else '无'))
     return (f'当前开发范围有 **{len(tasks)} 个实施任务、{len(current)} 个验收用例**；'
             f'任务状态：{format_status_counts(task_counts)}；当前验收状态：{format_status_counts(case_counts)}{owner_summary}。'
             f'后续发行准备另有 **{len(deferred)} 个用例**（{format_status_counts(deferred_counts)}），未列入当前开发完成门。'
+            f'媒体后续验收另有 **{len(media)} 个用例**（{format_status_counts(status_counts(media, CASE_STATUSES))}），不进入当前完成门。'
             '统计来自同源 JSON；`verified` / `passed` 是工程状态，不等于 Owner `accepted`，延期用例也不算通过。')
 
 def reader_status_footer(tasks, cases):
@@ -57,7 +60,7 @@ def reader_status_footer(tasks, cases):
     current = [case for case in cases if case['required_for'] == CURRENT_SCOPE]
     deferred = [case for case in cases if case['required_for'] == DEFERRED_SCOPE]
     case_counts = format_status_counts(status_counts(current, CASE_STATUSES)).replace('`', '')
-    return f"{len(tasks)}个2.0实施任务（{task_counts}） · 当前{len(current)}项验收（{case_counts}） · 后续发行{len(deferred)}项"
+    return f"{len(tasks)}个2.0实施任务（{task_counts}） · 当前{len(current)}项验收（{case_counts}） · 后续发行{len(deferred)}项 · 媒体后续{sum(case['required_for'] == MEDIA_SCOPE for case in cases)}项"
 
 def replace_block(text, label, content):
     pattern = rf'<!-- BEGIN GENERATED {label} -->.*?<!-- END GENERATED {label} -->'
@@ -136,7 +139,7 @@ def refresh():
         index += [f'## {title}', '', '| 编号 | 任务 | 实施依赖 |', '|---|---|---|']
         index += [f"| [{t['id']}]({t['document']}) | {t['title']} | {'、'.join(t['dependencies']) or '无'} |" for t in tasks if t['phase']==phase]
         index += ['']
-    index += ['## 当前2.0完整收口方案', '', '- [L06 v2.0｜M25–M30完整技术规格与全部核查处置](long_term/L06.md)', '', '开工依赖与完成依赖分别见任务入口和JSON；当前L06不因历史目录名后置。', '', '## 长期：2.x–3.0（不含已前移L06）', '']
+    index += ['## 当前2.0完整收口方案', '', '- [L06 v2.1｜M25–M30完整技术规格与全部核查处置](long_term/L06.md)', '', '开工依赖与完成依赖分别见任务入口和JSON；当前L06不因历史目录名后置。', '', '## 长期：2.x–3.0（不含已前移L06）', '']
     for p in sorted((ROOT/'long_term').glob('*.md')):
         if p.name == 'L06.md': continue
         index.append(f'- [{read(p).splitlines()[0][2:]}](long_term/{p.name})')
@@ -214,9 +217,10 @@ function show''',reader,flags=re.S)
     manifest=read_json('package_manifest.json')
     task_status_counts = status_counts(tasks, TASK_STATUSES)
     acceptance_status_counts = status_counts(cases, CASE_STATUSES)
+    product_tests_run = read_json('PACKAGE_QA.json').get('product_tests_run') is True
     manifest.update(plan_revision=registry.get('plan_revision', '2.0'),task_count=n,product_acceptance_count=c,
                     markdown_document_count=len(list(ROOT.rglob('*.md'))),reader_article_count=len(articles),
-                    product_tests_run=False,convergence_document=READER_ROOT_PATH,
+                    product_tests_run=product_tests_run,convergence_document=READER_ROOT_PATH,
                     convergence_sha256=hashlib.sha256(CONVERGENCE.read_bytes()).hexdigest(),
                     task_status_counts=task_status_counts,
                     acceptance_status_counts=acceptance_status_counts)
@@ -225,7 +229,7 @@ function show''',reader,flags=re.S)
     dump(ROOT/'package_manifest.json',manifest)
     print(json.dumps(dict(plan_views_refreshed=True,tasks=n,product_cases=c,reader_articles=len(articles),
                           task_status_counts=task_status_counts,acceptance_status_counts=acceptance_status_counts,
-                          product_tests_executed=False),ensure_ascii=False))
+                          product_tests_executed=product_tests_run),ensure_ascii=False))
 
 if __name__ == '__main__':
     refresh()

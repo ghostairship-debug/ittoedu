@@ -12,12 +12,14 @@ import { componentPackageKey } from '../../../core/drivers/codecs/archivePath'
 import { parseComponentPackageFiles, validateComponentRuntimeSource } from '../../../core/drivers/codecs/importComponentPackage'
 import { documentDigest } from '../../../core/documents/documentDigest'
 import { projectDynamicTargets } from '../../../shared/projectDynamicTargets'
+import { createHtmlDocumentRuntimeSource, unpackHtmlDocumentRuntimeSource } from '../../../shared/runtime/htmlDocumentSource'
 import { validateRuntimeSource } from '../../../shared/runtimeSourceValidation'
 import { visitCourseLayerItems } from '../../../shared/courseProjectHealth/internal'
 import { collectCourseProjectInteractionHealth } from '../../../shared/courseProjectHealth/interaction'
 import { resourcePath } from '../documentJournal'
 import { applyDynamicInstanceCaptures, dynamicCaptureRefreshIds } from '../../../core/tools/dynamicCaptureAssets'
 import { prepareImageResource } from '../admittedImageResource'
+import { waitForHostWork } from '../../../shared/workbench/jobWait'
 
 interface CreateReservation { version: 1; runId: string; ticket: BuildCreateTicket; jobId: string; inputDigest: string; target: BuildJobInput['target']; readSet: BuildJobInput['readSet'] }
 
@@ -41,6 +43,7 @@ export class ControlledBuildService {
   private readonly baselines = new Map<string, CourseModel>()
   private readonly tails = new Map<string, Promise<unknown>>()
   private readonly controllers = new Map<string, AbortController>()
+  private readonly pendingChecks = new Map<string, { input: string; started: Promise<BuildJobSnapshot>; result: Promise<unknown> }>()
   constructor(private readonly options: { directory: string; admission: BuildAdmissionPort }) { this.directory = path.resolve(options.directory) }
   private folder(id: string) {
     if (!/^[a-f0-9-]{36}$/.test(id)) throw new ControlledBuildError('invalid-job', '构建任务编号无效')
@@ -238,7 +241,7 @@ export class ControlledBuildService {
     // V8 compiles grammar but never executes the candidate. There is deliberately no runInContext/eval/child process.
     new Script(source, { filename: `build-scratch:${filename}` })
   }
-  private model(files: Record<string, Uint8Array>, job: Job): CourseModel {
+  private model(files: Record<string, Uint8Array>, job: Job, baseline: CourseModel): CourseModel {
     const project = courseProjectDocumentSchema.parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(files['project.json'])))
     if (project.id !== job.target.projectId || project.revision !== job.target.baseRevision) throw new ControlledBuildError('baseline-conflict', '候选必须保持冻结工程 ID 和基线版本')
     for (const origin of project.network?.connectOrigins ?? []) if (!job.allowedOrigins.includes(origin)) throw new ControlledBuildError('origin-not-authorized', `构建未获准连接该精确来源：${origin}`)
@@ -254,13 +257,28 @@ export class ControlledBuildService {
         `组件“${key}”的暂存内容校验值为 ${parsed.contentSha256}；请将 project.json 中该组件的 contentSha256 更新为此值后重新检查`)
       resources.components[componentPackageKey(meta.packageId, meta.version)] = componentFiles
     }
-    visitCourseLayerItems(project, ({ item }) => { if (item.kind === 'runtime') this.syntax(item.runtime.source, 'runtime', item.layerItemId) })
+    const managed = new Set<string>()
+    visitCourseLayerItems(baseline.project, ({ item }) => {
+      if (item.kind === 'runtime' && unpackHtmlDocumentRuntimeSource(item.runtime.source)) managed.add(item.layerItemId)
+    })
+    visitCourseLayerItems(project, ({ item }) => {
+      if (item.kind !== 'runtime') return
+      const payload = unpackHtmlDocumentRuntimeSource(item.runtime.source)
+      if (payload) {
+        // Only payload and cosmetic syntax differ. The factory keeps the supported light-edit lifecycle.
+        item.runtime.source = createHtmlDocumentRuntimeSource(payload)
+      } else if (managed.has(item.layerItemId)) {
+        throw new ControlledBuildError('managed-html-carrier-changed',
+          `受管HTML页面“${item.layerItemId}”的宿主封装发生语义变化，无法保证图文轻编辑。候选源码已保留；请只修改 __htmlDocumentPayload.html / resourceKeys 并保留原宿主，或明确改用独立自定义Runtime，不会静默覆盖自定义逻辑。`)
+      }
+      this.syntax(item.runtime.source, 'runtime', item.layerItemId)
+    })
     validateCourseProjectArchiveData({ project, assetFiles: resources.assets, componentFiles: resources.components })
     const issues = collectCourseProjectInteractionHealth(project, { assetFiles: resources.assets, componentFiles: resources.components }).filter(issue => issue.severity === 'error')
     if (issues.length) throw new ControlledBuildError('interaction-invalid', issues.map(issue => issue.message).join('\n'))
     return { kind: 'course-v9', project, resources }
   }
-  private async check(job: Job, buttonCheck?: Parameters<BuildAdmissionPort['run']>[0]['buttonCheck']) {
+  private async check(job: Job, buttonCheck?: Parameters<BuildAdmissionPort['run']>[0]['buttonCheck'], accepted?: (snapshot: BuildJobSnapshot) => void) {
     this.live(job)
     if (job.checks >= job.budget.maxChecks) { job.status = 'exhausted'; throw new ControlledBuildError('build-budget', '构建检查次数已达上限') }
     // The duration bounds this admission attempt. Model thinking, image generation and user
@@ -271,11 +289,15 @@ export class ControlledBuildService {
     const timer = setTimeout(() => controller.abort(new Error('构建任务达到截止时间')), Math.max(1, job.deadline - Date.now()))
     let abortListener: (() => void) | undefined
     try {
+      await this.save(job)
+      accepted?.(this.view(job))
       const files = await this.files(job), sourceDigest = this.filesDigest(files)
-      job.sameSourceChecks = sourceDigest === job.lastCheckDigest ? job.sameSourceChecks + 1 : 1; job.lastCheckDigest = sourceDigest
+      // A newly requested button is a new observation intent even when source bytes are unchanged.
+      const checkDigest = documentDigest({ sourceDigest, buttonCheck: buttonCheck ?? null })
+      job.sameSourceChecks = checkDigest === job.lastCheckDigest ? job.sameSourceChecks + 1 : 1; job.lastCheckDigest = checkDigest
       if (job.sameSourceChecks > job.budget.maxSameSourceChecks) { job.status = 'exhausted'; throw new ControlledBuildError('build-no-progress', '源码未变化且重复检查无进展；已停止并保留诊断') }
-      let model = this.model(files, job)
       const baseline = await this.baseline(job)
+      let model = this.model(files, job, baseline)
       this.log(job, 'closure', 'info', '普通 JavaScript 语法、正式 Component/Runtime 协议、精确来源和工程资源闭包通过；尚不代表动态准入')
       const targets = projectDynamicTargets(model.project, baseline.project, documentDigest(model.resources) !== documentDigest(baseline.resources))
       let admission: BuildImportArtifact['admission'] = { ok: true, message: '无受影响动态目标；静态资源闭包检查通过' }
@@ -327,9 +349,38 @@ export class ControlledBuildService {
     } finally { clearTimeout(timer); if (abortListener) controller.signal.removeEventListener('abort', abortListener); this.controllers.delete(job.jobId); await this.save(job) }
     return this.view(job)
   }
-  async execute(runId: string, raw: unknown): Promise<unknown> {
+  async status(runId: string, jobId: string): Promise<BuildJobSnapshot> { return this.view(await this.job(runId, jobId)) }
+  /** Waits only for a check this owner already started; an idle scratch job is returned immediately. */
+  async waitCheck(runId: string, jobId: string, milliseconds: number, signal?: AbortSignal): Promise<BuildJobSnapshot> {
+    const current = await this.status(runId, jobId)
+    if (current.status !== 'checking') return current
+    await waitForHostWork(this.pendingChecks.get(jobId)?.result, milliseconds, signal)
+    return this.status(runId, jobId)
+  }
+  startCheck(runId: string, raw: unknown): Promise<BuildJobSnapshot> {
+    const call = buildToolCallSchema.parse(raw)
+    if (call.type !== 'check') return Promise.reject(new ControlledBuildError('invalid-call', '后台构建入口只接受 check'))
+    const input = documentDigest({ runId, call }), existing = this.pendingChecks.get(call.jobId)
+    if (existing) return existing.input === input ? existing.started : Promise.reject(new ControlledBuildError('build-check-running', '同一构建已有不同检查运行，请等待、取消或读取状态'))
+    let accepted!: (snapshot: BuildJobSnapshot) => void, failed!: (error: unknown) => void
+    const started = new Promise<BuildJobSnapshot>((resolve, reject) => { accepted = resolve; failed = reject })
+    const result = this.execute(runId, call, accepted).then(value => { accepted(value as BuildJobSnapshot); return value }, error => { failed(error); throw error })
+      .finally(() => { this.pendingChecks.delete(call.jobId) })
+    this.pendingChecks.set(call.jobId, { input, started, result })
+    void started.catch(() => undefined); void result.catch(() => undefined)
+    return started.then(snapshot => structuredClone(snapshot))
+  }
+  async execute(runId: string, raw: unknown, accepted?: (snapshot: BuildJobSnapshot) => void): Promise<unknown> {
     const call = buildToolCallSchema.parse(raw), job = await this.job(runId, call.jobId)
-    if (call.type === 'cancel') { job.status = 'cancelled'; delete job.artifact; delete job.artifactId; this.controllers.get(job.jobId)?.abort(new Error('构建已取消')); this.log(job, 'cancel', 'info', '已取消；暂存源码保留，正式文档未由构建服务修改'); return this.serial(job.jobId, async () => { await this.save(job); return this.view(job) }) }
+    if (call.type === 'cancel') {
+      // A late cancel cannot erase a completed admission or its still-unapplied
+      // artifact. A caller may query the ready job after the cancellation race.
+      if (job.status !== 'editing' && job.status !== 'checking') return this.view(job)
+      job.status = 'cancelled'; delete job.artifact; delete job.artifactId
+      this.controllers.get(job.jobId)?.abort(new Error('构建已取消'))
+      this.log(job, 'cancel', 'info', '已取消；暂存源码保留，正式文档未由构建服务修改')
+      return this.serial(job.jobId, async () => { await this.save(job); return this.view(job) })
+    }
     if (call.type === 'logs') return { entries: structuredClone(job.logs.slice(call.after, call.after + call.limit)), nextCursor: Math.min(job.logs.length, call.after + call.limit) }
     return this.serial(job.jobId, async () => {
       if (call.type === 'list') return { job: this.view(job), files: Object.entries(await this.files(job)).map(([name, bytes]) => ({ path: name, bytes: bytes.length })) }
@@ -345,7 +396,7 @@ export class ControlledBuildService {
         try { const filename = await resourcePath(await this.scratch(job), call.path, { rejectSymlinks: true }); this.syntax(new TextDecoder('utf-8', { fatal: true }).decode(await fs.readFile(filename)), call.kind, call.path); this.log(job, 'syntax', 'info', `${call.path} 语法编译通过；尚未完成协议/闭包/动态准入`); await this.save(job); return { ok: true, stage: 'syntax-checked' } }
         catch (error) { this.log(job, 'syntax', 'error', error instanceof Error ? error.message : String(error)); await this.save(job); return { ok: false, stage: 'syntax-checked', message: job.logs[job.logs.length - 1].message } }
       }
-      return this.check(job, call.buttonCheck)
+      return this.check(job, call.buttonCheck, accepted)
     })
   }
   async artifact(runId: string, jobId: string, artifactId: string): Promise<BuildImportArtifact> {

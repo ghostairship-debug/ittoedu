@@ -62,6 +62,18 @@ export interface ExecutionModelRecord {
   failure?: ModelFailure
   payload?: { phase: 'initial' | 'dynamic'; digest: string; serializedBytes: number }
 }
+/** Advisory task memory. The frozen input, host receipts and grants remain authoritative. */
+export interface WorkingNote {
+  /** A short host-derived pointer to the user's original instruction, not a replacement for it. */
+  goal: string
+  /** Only host/user code may populate this field; task.note cannot change it. */
+  userConstraints: string[]
+  /** Model working choices. A sourceRef identifies an existing host input or returned tool call, not proof of the claim. */
+  decisions: Array<{ text: string; reason?: string; sourceRefs?: string[] }>
+  remaining: string[]
+  openQuestions: string[]
+  risks: string[]
+}
 export interface ExecutionRunRecord {
   schemaVersion: 1
   runId: string
@@ -81,6 +93,8 @@ export interface ExecutionRunRecord {
   failure?: { code: string; message: string; outcome?: ModelFailure['outcome'] }
   /** Fact summary contains only actual tool returns; it cannot grant permissions. */
   compacted?: { atRequest: number; facts: string }
+  /** Optional additive checkpoint field; older runs remain readable without migration. */
+  workingNote?: WorkingNote
   continuedFrom?: string
   /** Host-verified image resource reissued from an ancestor run under this run's authority. */
   hostContinuationImages?: Array<{ sourceRunId: string; sourceJobId: string; resourceId: string;

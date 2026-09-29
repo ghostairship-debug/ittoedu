@@ -16,15 +16,15 @@ vi.mock('electron', () => ({ app: { getPath: () => '/tmp' }, dialog: { showSaveD
 
 it('starts HTML in an isolated preview and keeps its iframe when switching to source', async () => {
   const workspaceFiles = vi.fn(async (request: { type: string }) => request.type === 'html-preview.open'
-    ? { leaseId: 'lease', documentId: 'doc', epoch: 'epoch', revision: 1, bindingVersion: 1, loadId: 'load', url: 'courseware-preview://app/token/file/page.html' }
+    ? { leaseId: 'lease', documentId: 'doc', epoch: 'epoch', revision: 1, bindingVersion: 1, loadId: 'load', url: `courseware-preview://${'a'.repeat(32)}.${'a'.repeat(32)}.app/${'a'.repeat(64)}/file/page.html` }
     : { released: true })
   Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { workspaceFiles } })
   const committed = { documentId: 'doc', epoch: 'epoch', revision: 1, model: { kind: 'text', source: '<p>hello</p>', resources: { assets: {}, components: {} } },
     binding: { kind: 'file', path: '/lesson/page.html', version: 'v1', bindingVersion: 1 } } as DocumentSnapshot
   const mounted = render(createElement(HtmlDocumentEditor, { tabId: 'tab', committed, source: '<p>hello</p>', onDraft: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn() }))
   const frame = await screen.findByTitle('HTML 预览')
-  expect(frame.getAttribute('sandbox')).toBe('allow-scripts')
-  expect(frame.getAttribute('src')).toBe('courseware-preview://app/token/file/page.html')
+  expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin')
+  expect(frame.getAttribute('src')).toBe(`courseware-preview://${'a'.repeat(32)}.${'a'.repeat(32)}.app/${'a'.repeat(64)}/file/page.html`)
   expect((frame.closest('.html-document-editor__preview') as HTMLElement | null)?.hidden).toBe(false)
   fireEvent.click(screen.getByRole('button', { name: '源码' }))
   expect((frame.closest('.html-document-editor__preview') as HTMLElement | null)?.hidden).toBe(true)

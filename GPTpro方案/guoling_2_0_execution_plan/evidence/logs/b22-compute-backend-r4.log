@@ -1,0 +1,13 @@
+
+ RUN  v4.1.10 D:/果铃工作台
+
+ ✓ tests/integration/g20ComputeBackend.test.ts > runs a fresh Python program with real file, network and child process boundaries 8267ms
+ ✓ tests/integration/g20ComputeBackend.test.ts > stops a spawned descendant before it can produce a late output 8609ms
+ ✓ tests/integration/g20ComputeBackend.test.ts > persists an async compute receipt, waits, reopens verified artifacts and never replays a job id 6787ms
+ ✓ tests/integration/g20ComputeBackend.test.ts > cancels an active compute job without delivering its late declared output 12755ms
+ ✓ tests/integration/g20ComputeBackend.test.ts > retains process exit and logs when a declared output is missing 6213ms
+
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+   Start at  07:53:27
+   Duration  42.91s (transform 49ms, setup 66ms, import 47ms, tests 42.63s, environment 0ms)

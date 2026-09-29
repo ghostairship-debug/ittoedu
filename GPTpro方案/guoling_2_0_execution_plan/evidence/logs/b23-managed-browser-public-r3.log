@@ -1,0 +1,15 @@
+
+ RUN  v4.1.10 D:/果铃工作台
+
+stdout | tests/integration/g20ManagedBrowserPublicSite.test.ts > uses real public redirects, subresources and screenshot through the run proxy
+{"navigation":"returned","pageUrl":"https://www.site-example.com/"}
+
+stdout | tests/integration/g20ManagedBrowserPublicSite.test.ts > uses real public redirects, subresources and screenshot through the run proxy
+{"screenshotBytes":47978,"egress":{"deniedRequests":0,"allowedRequests":14}}
+
+ ✓ tests/integration/g20ManagedBrowserPublicSite.test.ts > uses real public redirects, subresources and screenshot through the run proxy 3597ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  12:42:15
+   Duration  3.97s (transform 71ms, setup 67ms, import 198ms, tests 3.60s, environment 0ms)

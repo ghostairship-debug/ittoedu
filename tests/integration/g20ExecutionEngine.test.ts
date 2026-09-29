@@ -11,6 +11,7 @@ import { MarkdownDriver } from '../../src/core/drivers/MarkdownDriver'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { createDocumentJournal } from '../../src/main/workbench/documentJournal'
 import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEngine'
+import { HostArtifactDeliveryService } from '../../src/main/workbench/execution/HostArtifactDeliveryService'
 import { runEndSummary } from '../../src/main/workbench/execution/executionOutcome'
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
@@ -25,7 +26,7 @@ function deferred() { let resolve!: () => void; const promise = new Promise<void
 const selection: ModelSelection = { model: 'fixture-model', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat',
   baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture-account', auth: { kind: 'api-key', credentialRef: 'fixture-secret-ref' },
   billing: { kind: 'unknown' }, capabilities: { tools: 'supported', stream: 'supported', vision: 'supported', reasoning: 'supported' } } }
-async function fixture(provider: ModelProvider) {
+async function fixture(provider: ModelProvider, withArtifacts = false) {
   const directory = await mkdtemp(path.join(tmpdir(), 'g20-engine-'))
   cleanup.push(() => rm(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 }))
   const driver = new MarkdownDriver(), journal = createDocumentJournal({ directory: path.join(directory, 'documents') })
@@ -33,12 +34,16 @@ async function fixture(provider: ModelProvider) {
   const gateway = new DocumentToolGateway(registry, [driver], randomUUID)
   const edits = new EditSessionService(registry, gateway)
   const runs = new ExecutionRunStore(path.join(directory, 'runs')), events = new ExecutionEventStore({ directory: path.join(directory, 'events') })
-  const engine = new ExecutionEngine({ registry, gateway, edits, runs, events, provider })
+  const workspaceRoot = path.join(directory, 'workspace')
+  if (withArtifacts) await fs.mkdir(path.join(workspaceRoot, 'exports'), { recursive: true })
+  const artifacts = withArtifacts ? new HostArtifactDeliveryService({ journalDirectory: path.join(directory, 'artifact-deliveries'),
+    withFileOperation: work => work() }) : undefined
+  const engine = new ExecutionEngine({ registry, gateway, edits, runs, events, provider, ...(artifacts ? { artifacts } : {}) })
   const session = await registry.create(driver.load(new TextEncoder().encode('前文 OLD 后文')), '未保存.md')
   const other = await registry.create(driver.load(new TextEncoder().encode('另一份文档')), '另一份.md')
   const input: ExecutionStart = { conversationId: 'conversation', taskId: 'task', instruction: '把局部改成新内容', selection,
     documents: [{ documentId: session.documentId, writable: [{ kind: 'markdown-range', from: 3, to: 6 }] }] }
-  return { directory, journal, registry, gateway, edits, runs, events, engine, session, other, input, driver }
+  return { directory, journal, registry, gateway, edits, runs, events, engine, session, other, input, driver, artifacts, workspaceRoot }
 }
 async function serve(handler: RequestListener) {
   const server = createServer(handler)
@@ -59,6 +64,29 @@ const refsOf = (request: ModelRequest) => JSON.parse(String(request.messages[1].
 }[]
 
 describe('G20 canonical model execution loop', () => {
+  it('delivers verified compute bytes through artifact.save in a document-free run', async () => {
+    let turns = 0
+    const bytes = Buffer.from('owner verified result\n')
+    const provider: ModelProvider = { async *stream(request) {
+      if (++turns > 1) { yield complete(request); return }
+      expect(request.tools?.some(tool => tool.name === 'artifact.save')).toBe(true)
+      yield complete(request, [{ id: 'deliver-compute', name: 'artifact.save', argumentsText: JSON.stringify({
+        kind: 'compute', job: 'compute-one', name: 'result.txt', destination: 'exports/result.txt',
+      }) }])
+    } }
+    const h = await fixture(provider, true)
+    h.input.documents = []
+    h.input.workspaceRoot = h.workspaceRoot
+    vi.spyOn(h.gateway, 'readComputeArtifact').mockResolvedValue({ artifact: {
+      name: 'result.txt', digest: 'owner-digest', byteLength: bytes.length, mimeType: 'text/plain',
+    }, bytes })
+    const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+    expect(final.status).toBe('completed')
+    expect(h.gateway.readComputeArtifact).toHaveBeenCalledWith(started.runId, 'compute-one', 'result.txt')
+    expect(final.tools[0]?.result).toMatchObject({ kind: 'read', data: { status: 'written', sourceKind: 'compute',
+      sourceId: 'compute-one@result.txt' } })
+    expect(await fs.readFile(path.join(h.workspaceRoot, 'exports', 'result.txt'))).toEqual(bytes)
+  })
   it('blocks a new image request after a saved 429 in the same run while other tools continue', async () => {
     let turns = 0, imageDispatches = 0
     const provider: ModelProvider = { async *stream(request) {
@@ -176,7 +204,7 @@ describe('G20 canonical model execution loop', () => {
     { failedName: 'read', retry: true, retryOther: false, commit: false },
     { failedName: 'read', retry: true, retryOther: true, commit: true },
     { failedName: 'inspect', retry: true, retryOther: false, commit: true },
-  ] as const)('keeps an unidentifiable $failedName failure partial after a later read and edit', async ({ failedName, retry, retryOther, commit }) => {
+  ] as const)('keeps $failedName diagnostic history while settling from delivery receipts', async ({ failedName, retry, retryOther, commit }) => {
     let turns = 0
     const provider: ModelProvider = { async *stream(request) {
       turns++
@@ -197,7 +225,7 @@ describe('G20 canonical model execution loop', () => {
     h.input.documents = [{ documentId: h.session.documentId, writable: [{ kind: 'markdown-range', from: 3, to: 6 }],
       selection: [{ kind: 'markdown-range', from: 3, to: 6 }] }]
     const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
-    expect(final.status).toBe('partial')
+    expect(final.status).toBe(commit ? 'completed' : 'partial')
     expect(final.tools[1]?.result).toMatchObject({ kind: 'error', code: 'invalid-target' })
     if (retryOther) {
       expect(final.tools[2]?.result?.kind).toBe('read')
@@ -209,12 +237,11 @@ describe('G20 canonical model execution loop', () => {
     const timeline = await h.events.snapshot('conversation')
     expect(timeline.items.filter(item => item.type === 'tool')).toHaveLength(2 + Number(retry) + Number(commit))
     const end = timeline.items.find(item => item.type === 'run.end')
-    expect(end?.data.status).toBe('partial')
+    expect(end?.data.status).toBe(commit ? 'completed' : 'partial')
     const publicEnd = await h.events.findEvent('conversation', `${final.runId}:terminal`)
     if (commit) {
-      expect(runEndSummary(final)).toContain('读取尝试失败，修改已应用；是否遗漏参考内容仍需确认')
-      expect(runEndSummary(final)).not.toContain('剩余工作未完成')
-      expect(publicEnd?.data.text).toContain('读取尝试失败，修改已应用；是否遗漏参考内容仍需确认')
+      expect(runEndSummary(final)).toBeUndefined()
+      expect(publicEnd?.data.status).toBe('completed')
     } else expect(runEndSummary(final)).toContain('剩余工作未完成')
   })
 
@@ -473,7 +500,11 @@ describe('G20 canonical model execution loop', () => {
     expect(final.compacted?.facts).toContain('applied'); expect(final.compacted?.facts).toContain('not-authorized')
     expect(requests[1].messages.slice(0, final.initialMessageCount)).toEqual(requests[0].messages)
     expect(refsOf(requests[1])[1].writable).toEqual([])
-    expect(requests[1].messages.some(message => message.role === 'assistant' || message.role === 'tool')).toBe(false)
+    const nativeRound = requests[1].messages.slice(final.initialMessageCount + 1)
+    expect(nativeRound.map(message => message.role)).toEqual(['assistant', 'tool', 'tool', 'tool'])
+    expect(nativeRound.slice(1).map(message => message.tool_call_id)).toEqual(['read', 'allowed', 'denied'])
+    expect(String(nativeRound[0]!.content)).not.toContain('完整的中间推理与过程。')
+    expect(final.messages.some(message => String(message.content).includes('完整的中间推理与过程。'))).toBe(true)
     expect(Buffer.byteLength(serializeModelRequest(requests[1]))).toBeLessThanOrEqual(budget)
     expect(h.session.read()).toMatchObject({ undoDepth: 1, model: { source: '前文 YES 后文' } })
     expect(h.other.read()).toMatchObject({ undoDepth: 0, model: { source: '另一份文档' } })
@@ -608,4 +639,105 @@ describe('G20 canonical model execution loop', () => {
     expect(page.events.filter(value => value.type === 'document.commit')).toHaveLength(0)
   })
 
+})
+
+
+it('M26 one ordinary generation retry retains unknown usage and fragments but never repeats old tools or joins half-arguments', async () => {
+  let requests = 0
+  const provider: ModelProvider = { retrySafety: 'pure-generation', async *stream(request) {
+    requests++
+    const target = refsOf(request)[0]!.writable[0]!.target
+    if (requests === 1) { yield complete(request, [{ id: 'once-read', name: 'read', argumentsText: JSON.stringify({ target }) }]); return }
+    if (requests === 2) {
+      yield { requestId: request.requestId, sequence: 1, type: 'text.delta', text: '中断片段' }
+      yield { requestId: request.requestId, sequence: 2, type: 'tool.delta', index: 0, id: 'unfinished', name: 'text.replace', argumentsDelta: `{"target":${JSON.stringify(target)},"content":"BROKEN` }
+      yield { requestId: request.requestId, sequence: 3, type: 'usage.reported', usage: { inputTokens: 7, outputTokens: 3, raw: { prompt_tokens: 7, completion_tokens: 3 } } }
+      yield { requestId: request.requestId, sequence: 4, type: 'response.failed', failure: { outcome: 'unknown', kind: 'transport', code: 'socket-lost', message: '已发送但未完整返回' } }
+      return
+    }
+    expect(JSON.stringify(request.messages)).not.toContain('BROKEN')
+    expect(JSON.stringify(request.messages)).not.toContain('中断片段')
+    if (requests === 3) { yield complete(request, [{ id: 'once-write', name: 'text.replace', argumentsText: JSON.stringify({ target, content: 'NEW' }) }]); return }
+    yield complete(request)
+  } }
+  const h = await fixture(provider), abort = vi.spyOn(h.edits, 'abort')
+  const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+  expect(final.status).toBe('completed')
+  expect(final.requests.map(request => request.state)).toEqual(['completed', 'failed', 'completed', 'completed'])
+  expect(final.requests[1]!.failure?.outcome).toBe('unknown')
+  expect(new Set(final.requests.map(request => request.requestId)).size).toBe(4)
+  expect(final.tools.map(tool => tool.call.name)).toEqual(['read', 'text.replace'])
+  expect(h.session.read()).toMatchObject({ revision: 1, undoDepth: 1, model: { source: '前文 NEW 后文' } })
+  expect(abort).toHaveBeenCalled()
+  const events = await h.events.readPage({ conversationId: h.input.conversationId, limit: 1000 })
+  expect(events.events).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'usage', itemId: `${final.requests[1]!.requestId}:usage`, data: expect.objectContaining({ usage: { inputTokens: 7, outputTokens: 3 } }) })]))
+  expect(final.requests[1]!.requestId.split('.attempt-')[0]).toBe(final.requests[2]!.requestId.split('.attempt-')[0])
+  expect(final.requests[2]!.requestId.endsWith('.attempt-2')).toBe(true)
+}, 15_000)
+
+it('M26 stop during backoff never sends the next request, and long Retry-After becomes an explicit interrupted task', async () => {
+  let requests = 0, retryAfterMs = 1000
+  const provider: ModelProvider = { retrySafety: 'pure-generation', async *stream(request) {
+    requests++
+    yield { requestId: request.requestId, sequence: 1, type: 'response.failed', failure: { outcome: 'rejected', kind: 'rate-limit', code: 'http-429', httpStatus: 429, retryAfterMs, message: '速率限制' } }
+  } }
+  const h = await fixture(provider), started = await h.engine.start(h.input)
+  await vi.waitFor(async () => expect((await h.events.readPage({ conversationId: h.input.conversationId, limit: 1000 })).events.some(event => event.data.status === 'retrying')).toBe(true))
+  await h.engine.stop(started.runId)
+  expect((await h.engine.wait(started.runId)).status).toBe('stopped')
+  expect(requests).toBe(1)
+  retryAfterMs = 60_000
+  const next = await h.engine.start({ ...h.input, taskId: 'long-wait' }), waiting = await h.engine.wait(next.runId)
+  expect(waiting.status).toBe('interrupted')
+  expect(waiting.failure?.code).toBe('model-retry-wait')
+  expect(waiting.requests).toHaveLength(1)
+  expect(requests).toBe(2)
+})
+
+it('M26 ordinary transport retry stops after exactly three attempts and records all unknown outcomes', async () => {
+  let count = 0
+  const provider: ModelProvider = { retrySafety: 'pure-generation', async *stream(request) {
+    count++
+    yield { requestId: request.requestId, sequence: 1, type: 'response.failed', failure: { outcome: 'unknown', kind: 'server', httpStatus: 503, code: 'http-503', message: '临时不可用' } }
+  } }
+  const h = await fixture(provider), started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+  expect(count).toBe(3)
+  expect(final.status).toBe('failed')
+  expect(final.requests).toHaveLength(3)
+  expect(final.requests.every(request => request.failure?.outcome === 'unknown')).toBe(true)
+  expect(final.tools).toEqual([])
+  expect(h.session.read().revision).toBe(0)
+}, 15_000)
+
+
+it('M26 context.read uses an actual stored source, rejects another run, and puts selected images after the full native tool round', async () => {
+  let turns = 0, sourceIndex = -1
+  const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a1S8AAAAASUVORK5CYII='
+  const provider: ModelProvider = { async *stream(request) {
+    turns++
+    if (turns === 1) {
+      sourceIndex = request.messages.findIndex(message => Array.isArray(message.content))
+      expect(sourceIndex).toBeGreaterThanOrEqual(0)
+      const current = (await h.runs.list()).find(run => run.status === 'running')!
+      yield complete(request, [
+        { id: 'fetch-history', name: 'context.read', argumentsText: JSON.stringify({ sourceId: `run:${current.runId}:${sourceIndex}`, imageIndexes: [0] }) },
+        { id: 'read-current', name: 'read', argumentsText: JSON.stringify({ target: refsOf(request)[0]!.target }) },
+      ]); return
+    }
+    if (turns === 2) {
+      expect(request.messages.slice(-3).map(message => message.role)).toEqual(['tool', 'tool', 'user'])
+      expect(request.messages.at(-1)?.content).toEqual(expect.arrayContaining([{ type: 'image_url', image_url: { url: image } }]))
+      yield complete(request, [{ id: 'foreign-context', name: 'context.read', argumentsText: JSON.stringify({ sourceId: 'run:unrelated-run:0' }) }]); return
+    }
+    expect(request.messages.at(-1)?.content).toContain('context-read-failed')
+    yield complete(request)
+  } }
+  const h = await fixture(provider)
+  h.input.context = [{ role: 'user', content: [{ type: 'text', text: '存档原图' }, { type: 'image_url', image_url: { url: image } }] }]
+  const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+  expect(final.requests).toHaveLength(3)
+  expect(final.tools[0]?.result).toMatchObject({ kind: 'read', data: { imagesPrepared: 1 } })
+  expect(final.tools[2]?.result).toMatchObject({ kind: 'error', code: 'context-read-failed' })
+  expect(final.messages[sourceIndex]?.content).toEqual(h.input.context[0]!.content)
+  expect(h.session.read().revision).toBe(0)
 })

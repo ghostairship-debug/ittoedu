@@ -1,0 +1,47 @@
+
+ RUN  v4.1.10 D:/果铃工作台
+
+ ✓ tests/unit/g20DisplayEventBuffer.test.ts > M26 display fragments are batched into a real durable log without loss or changes to terminal acknowledgement 29ms
+ ✓ tests/unit/g20DisplayEventBuffer.test.ts > M26 time-bounded display flushing does not admit a commit or a terminal status into the buffer 3ms
+ ✓ tests/unit/g20DisplayEventBuffer.test.ts > M26 slow persistence applies backpressure across queued batches, and flush failure is visible rather than a successful receipt 1ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > blocks a new image request after a saved 429 in the same run while other tools continue 167ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > uses frozen image role identity to decide whether an edit shares a generate 429 (true) 115ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > uses frozen image role identity to decide whether an edit shares a generate 429 (false) 126ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > stops repeated tool rounds with a stable no-progress reason 334ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > stops an alternating A-B-A-B read loop without a false content change 340ms
+ ✓ tests/integration/g20S06StopSnapshotReplay.test.tsx > deduplicates a replayed provider delta, ignores an older snapshot and completes one canonical edit 186ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > does not treat repeated unchanged edits as progress 455ms
+ ✓ tests/integration/g20S06StopSnapshotReplay.test.tsx > uses final complete arguments as an explicit snapshot for middle-gap 105ms
+ ✓ tests/integration/g20S06StopSnapshotReplay.test.tsx > uses final complete arguments as an explicit snapshot for tail-restored 158ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > rejects unsupported streaming tool type custom before any document write 197ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > rejects unsupported streaming tool type 1 before any document write 130ms
+ ✓ tests/integration/g20S06StopSnapshotReplay.test.tsx > uses final complete arguments as an explicit snapshot for conflicting-replay 134ms
+ ✓ tests/integration/g20S06StopSnapshotReplay.test.tsx > stops before late delta and complete, then a reopened timeline cannot revive the draft or run 314ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > keeps an unidentifiable 'read' failure partial after a later read and edit 295ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > keeps an unidentifiable 'read' failure partial after a later read and edit 229ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > keeps an unidentifiable 'read' failure partial after a later read and edit 212ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > keeps an unidentifiable 'read' failure partial after a later read and edit 311ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > keeps an unidentifiable 'inspect' failure partial after a later read and edit 253ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > reuses the writable document root handle without widening frozen or read-only scopes 210ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > streams real HTTP arguments into previews, recovers a lost tool ACK and returns native history to the model 187ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > S06-T06 waits for a late target before preview and commits only the complete matching argument object 154ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > M15 a run editing a document whose other part another run is previewing commits its own edit without a preview 280ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > S06-T06 rejects duplicate-key after streamed preview without a document write 149ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > S06-T06 rejects truncated-escape after streamed preview without a document write 126ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > sets the stop barrier before a late model completion and never starts another paid request for an unknown response 150ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > recovers crash-window tool facts and missing commit events read-only, then resumes with fresh handles 203ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > compresses actual serialized payloads only after all tools return and preserves both document grants and commit facts 973ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > rejects oversized initial payloads before sending and enforces request and complete tool-round budgets 248ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > keeps bounded image and build receipts visible after the local request cap without repeating generation 173ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > never commits a complete tool after identity change even without another preview 122ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > never commits a complete tool after preview aborted even without another preview 116ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > does not reopen a completed run when Stop races its final journal flush 108ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > G20 canonical model execution loop > M04 readonly selection handles stay readonly under a whole-document grant and M09 terminal events recover idempotently 172ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > M26 one ordinary generation retry retains unknown usage and fragments but never repeats old tools or joins half-arguments 1494ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > M26 stop during backoff never sends the next request, and long Retry-After becomes an explicit interrupted task 176ms
+ ✓ tests/integration/g20ExecutionEngine.test.ts > M26 ordinary transport retry stops after exactly three attempts and records all unknown outcomes 3311ms
+
+ Test Files  3 passed (3)
+      Tests  39 passed (39)
+   Start at  05:58:07
+   Duration  12.99s (transform 2.06s, setup 206ms, import 2.92s, tests 12.45s, environment 1.05s)

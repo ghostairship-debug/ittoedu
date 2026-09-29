@@ -1,0 +1,15 @@
+
+ RUN  v4.1.10 D:/果铃工作台
+
+ ✓ tests/unit/g20ConversationHistoryIndex.test.ts > M27 indexes repeated assistant wording by the actual chronological source message 1ms
+ ✓ tests/unit/g20ContextProjection.test.ts > M26 old images leave only the working view while originals, first input and latest two captures remain exact 5ms
+ ✓ tests/unit/g20ContextProjection.test.ts > M26 large calls and replies stay paired after projection and remain losslessly readable from original message indexes 4ms
+ ✓ tests/unit/g20ContextProjection.test.ts > M27 pages archived text without splitting a UTF-16 surrogate pair 1ms
+ ✓ tests/integration/g20MaterialFind.test.ts > M27 searches immutable extracted PDF/DOCX/PPTX text with real source locators and a bound continuation 116ms
+ ✓ tests/integration/g20ScopedSkills.test.ts > M27 discovers only metadata without overriding bundled names and reads root resources through the actual Gateway 34ms
+ ✓ tests/integration/g20ScopedSkills.test.ts > M27 refuses changed Skill pages, revoked roots, binary-as-text and symlink escapes without losing original files 26ms
+
+ Test Files  4 passed (4)
+      Tests  7 passed (7)
+   Start at  07:38:20
+   Duration  1.59s (transform 1.09s, setup 271ms, import 1.67s, tests 189ms, environment 0ms)

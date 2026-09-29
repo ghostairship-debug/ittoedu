@@ -1,0 +1,34 @@
+
+ RUN  v4.1.10 D:/果铃工作台
+
+ ✓ tests/integration/g20AgentFileTools.test.ts > general agent file tools > lists from file home, creates beside it through FileService, and opens formal DocumentSession 36ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > general agent file tools > confines workspace permission, permits outside only at full level, and never writes at read-only 40ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > general agent file tools > keeps list/search inside the workspace except at full level, while read-only can inspect inside 9ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > general agent file tools > falls back to workspace root if home folder was deleted 13ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > general agent file tools > does not widen an existing selection grant when the same file is opened again 16ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > general agent file tools > uses a separate frozen home root and requires a one-call grant for an outside default create 14ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > general agent file tools > settles failed and successful file receipts as side effects, not generic reads 0ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > general agent file tools > never replays an unresolved file create under a second call ID 120ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > general agent file tools > reports partial completion if a committed new file is followed by a model failure 92ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > general agent file tools > opens a file during a document-free run and receives a live Gateway write handle on the next turn 159ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > general agent file tools > discovers course tool families after file.open adds a V9 document to a live run 122ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > general agent file tools > waits for explicit approval before creating a file in ask mode 126ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > general agent file tools > waits for explicit approval before creating a file in workspace mode 187ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > M27 generic UTF-8 data/code and extensionless sources share one dirty document and save/reopen exact bytes 283ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > M27 binary and structured files are not misrepresented as editable source 15ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > M27 file listing continues across all pages and rejects a changed-directory or foreign-run cursor 29ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > M27 filename search makes default exclusions visible and does not claim an unscanned dependency tree 17ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > M27 filename search preserves its position inside the last directory rather than losing remaining matches 26ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > M27 file read, versioned replace and unique patch preserve UTF-8 BOM, emoji and CRLF 77ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > M27 an opened dirty file stays under DocumentSession and selected targets do not widen 69ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > M27 grep resumes inside a file and across folders, with explicit exclusions 93ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > M27 grep cursor keeps exact line positions inside one long file 22ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > M27 file organization reports per-item partials and external read grants stay read-only 141ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > M27 a continued run uses file.read as the exact source observation before a scoped patch 37ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > M27 stop before final file replacement leaves original bytes and no temp file 30ms
+ ✓ tests/integration/g20AgentFileTools.test.ts > M27 rename preserves an opened dirty document binding; trash uses the host recycle callback 127ms
+
+ Test Files  1 passed (1)
+      Tests  26 passed (26)
+   Start at  07:50:04
+   Duration  4.18s (transform 1.61s, setup 79ms, import 2.06s, tests 1.90s, environment 0ms)

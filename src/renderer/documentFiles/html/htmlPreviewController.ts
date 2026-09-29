@@ -11,6 +11,7 @@ export type HtmlSelectedTarget = { report: HtmlTargetReport; resolved: HtmlPrevi
 export interface HtmlPreviewControllerEvents {
   onTarget(target: HtmlSelectedTarget | null, issue?: string): void
   onReady(sectionCount: number, ambiguous: boolean): void
+  onEditModeReady(enabled: boolean): void
   onPage(index: number, scroll: number): void
   onEditing(): void
   onApplied(revision: number, patch: { handle: string; kind: 'text' | 'image'; value: string }, beforeValue: string): void
@@ -27,6 +28,7 @@ export class HtmlPreviewController {
   private reloadFrameLoaded = false
   private selected: HtmlSelectedTarget | null = null
   private requestSerial = 0
+  private modeRequest: { requestId: string; enabled: boolean } | null = null
   constructor(
     private readonly iframe: HTMLIFrameElement,
     readonly lease: HtmlPreviewLease,
@@ -58,6 +60,11 @@ export class HtmlPreviewController {
     if (message.event !== 'ready') this.lastSeq = message.seq
     if (message.event === 'ready') { this.lastSeq = -1; this.reloading = false; this.events.onReady(message.sectionCount, message.sectionsAmbiguous) }
     if (message.event === 'page') this.events.onPage(message.pageIndex, message.perPageScroll)
+    if (message.event === 'edit-mode-ready' && this.modeRequest?.requestId === message.requestId
+      && this.modeRequest.enabled === message.enabled) {
+      this.modeRequest = null
+      this.events.onEditModeReady(message.enabled)
+    }
     if (message.event === 'targets') void this.resolve(message.targets)
   }
 
@@ -70,6 +77,7 @@ export class HtmlPreviewController {
     this.reloadFrameLoaded = false
     this.lastSeq = -1
     this.requestSerial += 1
+    this.modeRequest = null
     this.select(null)
   }
 
@@ -87,7 +95,9 @@ export class HtmlPreviewController {
   }
 
   setEditMode(enabled: boolean): void {
-    this.iframe.contentWindow?.postMessage({ type: 'html-preview.edit-mode', loadId: this.lease.loadId, enabled }, '*')
+    const requestId = crypto.randomUUID()
+    this.modeRequest = { requestId, enabled }
+    this.iframe.contentWindow?.postMessage({ type: 'html-preview.edit-mode', loadId: this.lease.loadId, requestId, enabled }, '*')
   }
 
   patch(patch: { handle: string; kind: 'text' | 'image'; value: string; expected: string }): void {

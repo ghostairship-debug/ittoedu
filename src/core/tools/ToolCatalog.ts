@@ -6,7 +6,8 @@ import { presentationStateNameSchema } from './presentationStateTools'
 import { selectionReplacementSchema } from './selectionReplacement'
 import { layerPositionSchema, layerPlacementSchema, layerAlignModeSchema, layerDistributeAxisSchema } from './layerEditSchema'
 import { hostToolCatalog } from './HostToolServices'
-import { skillReadTool } from './SkillTools'
+import { workbenchServiceToolCatalog } from './WorkbenchServiceTools'
+import { skillReadTool, skillListTool } from './SkillTools'
 import { htmlImportTool } from './HtmlImportTools'
 import { documentDeliveryTools } from './DocumentDeliveryTools'
 import { viewObserveTool } from './ViewObserveTools'
@@ -23,6 +24,11 @@ import { documentTextContentSchema } from '../../shared/document/content'
 import { flowBlockSchema } from '../../shared/courseProjectSchema'
 
 const target = z.string().min(1).max(100)
+export const contentTargetsInputSchema = z.object({ target }).strict()
+export const contentUpdateInputSchema = z.union([
+  z.object({ target, text: z.string() }).strict(),
+  z.object({ target, resource: z.string().min(1).max(100) }).strict(),
+])
 const layerPosition = z.discriminatedUnion('kind', [layerPositionSchema.options[0], layerPositionSchema.options[1], layerPositionSchema.options[2].omit({ siblingId: true }).extend({ sibling: target }), layerPositionSchema.options[3].omit({ siblingId: true }).extend({ sibling: target })])
 const nativeMediaProperties = nativeTemplateSchema.options[3].omit({ nativeType: true, assetId: true, paperSpace: true, placement: true })
 const flowMediaProperties = z.object({ layout: z.enum(['content-width', 'wide', 'full-width']).optional(), altText: z.string().max(4000).optional(), caption: documentTextContentSchema.optional(), wrap: z.enum(['none', 'left', 'right']).optional() }).strict()
@@ -82,9 +88,32 @@ export type MutationCall = z.infer<typeof mutationCallSchema>
 /** Batch references address a previous host-created result, never an internal object ID. */
 const batchCreatedResultSchema = z.object({ $result: z.object({ step: z.number().int().min(0).max(99) }).strict() }).strict()
 const batchResultReferenceMutationSchema = mutationSchemas[20].extend({ input: mutationSchemas[20].shape.input.extend({ replacement: batchCreatedResultSchema }) })
-export const batchMutationCallSchema = z.union([mutationCallSchema, batchResultReferenceMutationSchema])
+const batchNodeReferenceSchema = z.union([target, batchCreatedResultSchema])
+const batchComposeTriggerSchema = z.discriminatedUnion('kind', [
+  composeInputSchema.shape.trigger.options[0].extend({ node: batchNodeReferenceSchema }),
+  composeInputSchema.shape.trigger.options[1].extend({ node: batchNodeReferenceSchema }),
+  composeInputSchema.shape.trigger.options[2],
+  composeInputSchema.shape.trigger.options[3],
+])
+const composeEffects = composeInputSchema.shape.effects.element.options
+const batchComposeEffectSchema = z.discriminatedUnion('kind', [
+  composeEffects[0],
+  composeEffects[1].extend({ nodes: z.array(batchNodeReferenceSchema).min(1).max(32) }),
+  composeEffects[2].extend({ nodes: z.array(batchNodeReferenceSchema).min(1).max(32) }),
+  composeEffects[3], composeEffects[4], composeEffects[5], composeEffects[6],
+  composeEffects[7], composeEffects[8], composeEffects[9],
+])
+const batchObjectUpdateResultSchema = mutationSchemas[1].extend({ input: mutationSchemas[1].shape.input.extend({ target: batchCreatedResultSchema }) })
+const batchInteractionResultSchema = mutationSchemas[12].extend({ input: mutationSchemas[12].shape.input.extend({
+  interaction: composeInputSchema.omit({ operation: true }).extend({
+    trigger: batchComposeTriggerSchema,
+    effects: z.array(batchComposeEffectSchema).min(1).max(32),
+  }),
+}) })
+export const batchMutationCallSchema = z.union([mutationCallSchema, batchResultReferenceMutationSchema,
+  batchObjectUpdateResultSchema, batchInteractionResultSchema])
 export type BatchMutationCall = z.infer<typeof batchMutationCallSchema>
-const batchResultReferenceDescription = 'selection.replace 的 replacement 可为 {$result:{step:0}}，step 从0计数，只能引用此前 native.insert/media.insert/document.insert/layer.duplicate 新建的主对象；不可前向引用或引用修改结果。创建与替换同次提交。'
+const batchResultReferenceDescription = '同批后续步骤可用 {$result:{step:0}} 引用此前新建的主对象：selection.replace.replacement、object.update.target、interaction.compose 的点击/提交节点和显隐节点；step 从 0 计数。不可前向引用或引用修改结果，跨文档拒绝。创建、样式和互动同次提交。'
 const batchDescription = '同文档两项及以上普通编辑可放进 batch，一次校验提交与撤销；单项正文请直接调用 text.replace，才能逐步显示生成内容。'
 const batchEndDescription = '跨文档须分别调用。'
 
@@ -93,9 +122,13 @@ export function batchInputSchemaFor(mutationNames: readonly string[]): z.ZodType
   const selected = mutationSchemas.filter(schema => mutationNames.includes(schema.shape.name.value))
   if (!selected.length) throw new Error('批量工具至少需要一项可用修改')
   const canonical = selected.length === 1 ? selected[0] : z.union(selected as unknown as [z.ZodType, z.ZodType, ...z.ZodType[]])
-  const canReferenceCreated = mutationNames.includes('selection.replace') &&
-    ['native.insert', 'media.insert', 'document.insert', 'layer.duplicate'].some(name => mutationNames.includes(name))
-  const operation = canReferenceCreated ? z.union([canonical, batchResultReferenceMutationSchema]) : canonical
+  const canReferenceCreated = ['native.insert', 'media.insert', 'document.insert', 'layer.duplicate'].some(name => mutationNames.includes(name))
+  const references = canReferenceCreated ? [
+    ...(mutationNames.includes('selection.replace') ? [batchResultReferenceMutationSchema] : []),
+    ...(mutationNames.includes('object.update') ? [batchObjectUpdateResultSchema] : []),
+    ...(mutationNames.includes('interaction.compose') ? [batchInteractionResultSchema] : []),
+  ] : []
+  const operation = references.length ? z.union([canonical, ...references] as unknown as [z.ZodType, z.ZodType, ...z.ZodType[]]) : canonical
   return z.object({ operations: z.array(operation).min(1).max(100) }).strict()
 }
 
@@ -111,16 +144,19 @@ export interface RunToolScope {
 }
 
 /** Model discovery is a run projection; it never changes the canonical MCP catalog. */
-export function selectRunToolNames(scopes: readonly RunToolScope[]): string[] {
-  if (!scopes.length) return ['skills.read']
+export function selectRunToolNames(scopes: readonly RunToolScope[], options: { standaloneImage?: boolean } = {}): string[] {
+  if (!scopes.length) return ['skills.read', 'skills.list', ...workbenchServiceToolCatalog.map(tool => tool.name),
+    ...(options.standaloneImage ? ['image.generate', 'image.edit', 'image.status'] : [])]
   if (scopes.some(scope => scope.kind === 'course-v9' && scope.wholeDocumentWritable))
     return toolCatalog.filter(tool => tool.name !== 'document.insert' || scopes.some(scope => scope.canInsertFlow)).map(tool => tool.name)
   const writable = new Set(scopes.flatMap(scope => scope.writableTargetKinds))
   const hasV9Write = scopes.some(scope => scope.kind === 'course-v9' && scope.writableTargetKinds.length > 0)
   const eligible = (name: string) => {
-    if (name === 'read' || name === 'inspect' || name === 'listChildren' || name === 'skills.read') return true
+    if (workbenchServiceToolCatalog.some(tool => tool.name === name)) return true
+    if (name === 'read' || name === 'inspect' || name === 'listChildren' || name === 'skills.read' || name === 'skills.list') return true
+    if (name === 'content.targets') return scopes.some(scope => scope.kind === 'course-v9')
     if (name === 'view.observe') return scopes.some(scope => scope.kind === 'course-v9')
-    if (name.startsWith('image.')) return hasV9Write
+    if (name.startsWith('image.')) return hasV9Write || !!options.standaloneImage
     if (name.startsWith('build.') || name === 'html.import' || name === 'document.export') return false
     if (name === 'batch') return false
     if (name === 'document.insert' && !scopes.some(scope => scope.canInsertFlow)) return false
@@ -154,7 +190,9 @@ export function describeToolFamily(family: ToolFamily, allowedNames: readonly st
     return '对象属性（调用 object.update，properties.nativeTextStyle 调文字颜色、字体、样式，properties.frame 调位置）、图层与空间布局'
   return toolFamilyDescriptions[family]
 }
-const baselineTools = new Set(['read', 'inspect', 'listChildren', 'skills.read', 'view.observe', 'file.save', 'text.replace', 'flow.content'])
+const baselineTools = new Set(['read', 'inspect', 'listChildren', 'content.targets', 'skills.read', 'skills.list', 'view.observe', 'file.save', 'text.replace', 'flow.content',
+  'image.generate', 'image.edit', 'image.status',
+  ...workbenchServiceToolCatalog.map(tool => tool.name)])
 export function familyOfTool(name: string): ToolFamily | null {
   if (baselineTools.has(name) || name === 'batch') return null
   if (name.startsWith('build.') || name === 'html.import' || name === 'document.export') return 'build'
@@ -175,13 +213,17 @@ const readableKinds: ToolDefinition['manual']['targetKinds'] = ['course-audio', 
 /** One registry drives input validation, model/MCP JSON schema and manual action metadata. */
 export const toolCatalog = [
   ...hostToolCatalog,
+  ...workbenchServiceToolCatalog,
   skillReadTool(bundledSkills.manifest.skills),
+  skillListTool,
   htmlImportTool,
   ...documentDeliveryTools,
   viewObserveTool,
   { name: 'read', description: '分页读取目标文字或属性；返回 data.target 是当前内容的新短句柄，后续编辑应使用它。nextCursor 续读仍配原调用的 target；外部修改目标时明确冲突。', inputSchema: z.object(page).strict(), manual: { label: '读取', group: 'read', targetKinds: readableKinds } },
   { name: 'inspect', description: '读取目标类型、可用操作及小范围摘要；返回 data.target 是当前内容的新短句柄，后续编辑应使用它；外部修改目标时明确冲突。', inputSchema: z.object({ target }).strict(), manual: { label: '检查目标', group: 'read', targetKinds: readableKinds } },
   { name: 'listChildren', description: '分页列出文档、页面、owner、命名态的背景和内容子项，或 Flow 分节正文，并取得短句柄；写权限仍按冻结目标逐项判定。', inputSchema: z.object(page).strict(), manual: { label: '列出子项', group: 'read', targetKinds: ['course-audio', 'document', 'course-surface', 'course-location', 'course-owner', 'course-state', 'flow-container', 'flow-block'] } },
+  { name: 'content.targets', description: '发现当前 Runtime/Component 对象的宿主确认文字与图片轻编辑目标，返回短句柄和当前文字。声明内容从正式课件读取；自动识别内容只来自当前真实宿主观察。不得输入 CSS selector、内部对象编号或猜测未观察到的内容。', inputSchema: contentTargetsInputSchema, manual: { label: '发现动态图文目标', group: 'read', targetKinds: ['course-object'] } },
+  { name: 'content.update', description: '以 content.targets 返回的短句柄修改一个 Runtime/Component 文字或图片目标。文字给 text，图片给本任务已有 image resource；互斥。宿主在正式文档 CAS 下校验来源、位置、锁定和当前值；已有静态后备图必须同步捕获，否则不提交。', inputSchema: contentUpdateInputSchema, manual: { label: '修改动态图文', group: 'edit', targetKinds: ['course-object'] } },
   { name: 'text.replace', description: '只替换已授权 Markdown 范围、纯文本范围、Native 纯文本、Flow 正文或范围的文字内容；不修改对象字体、颜色等样式属性。若本任务授权 Native 对象样式，可用 tools.load 展开 layout，再用 object.update。保留范围外源文、公式、样式和可确定映射的 runs。纯文本文档保持纯文本，不写入 Markdown 语法。', inputSchema: mutationSchemas[0].shape.input, manual: { label: '替换正文', group: 'edit', targetKinds: ['markdown-range', 'course-object', 'flow-block', 'flow-range'] } },
   { name: 'object.update', description: '修改对象公开属性；Native 文字整节点样式使用 nativeTextStyle，正文使用 text.replace。文字框需给字体和四边 padding 留足可读空间，shrink 会缩小字；设背景色时要同时明确 backgroundOpacity，默认 0 为透明。透明文字框在无遮挡的纯色场景中，须让文字颜色与有效 Slide 场景背景形成清晰对比；有背景图片或图层衬底时按实际画面判断。遵守锁定与正式 V9 校验。', inputSchema: mutationSchemas[1].shape.input, manual: { label: '修改属性', group: 'edit', targetKinds: ['course-object'] } },
   { name: 'owner.background', description: '修改课程、Slide/Flow/Spatial Surface、场景或命名态的背景；省略字段保持原值。', inputSchema: mutationSchemas[2].shape.input, manual: { label: '修改背景', group: 'edit', targetKinds: ['course-background'] } },

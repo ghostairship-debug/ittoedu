@@ -1,0 +1,10 @@
+
+Running 2 tests using 1 worker
+
+
+
+(node:23416) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[1/2] tests\e2e\g20M23HtmlPreview.spec.ts:15:5 › M23-T01 sandboxed HTML previews cannot reach editor APIs, sibling frames, outside files or navigation
+[2/2] tests\e2e\g20M23HtmlPreview.spec.ts:128:5 › M23-T02 HTML preview paginates fixed, flow and camera layouts and keeps placeholders and page state
+  2 passed (1.0m)

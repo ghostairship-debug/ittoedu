@@ -157,11 +157,11 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     return session.close()
   }, preserveAndClose: () => session.preserveAndClose() }))
   const status = state.conflict ? '存在文件冲突' : committed ? documentSaveLabel({ ...committed, dirty: state.dirty, saving: state.saving }) : '正在打开'
-  return <section aria-label={`教学文档 ${documentRefLabel(currentRef)}`} onCompositionStartCapture={() => session.setComposing(true)} onCompositionEndCapture={() => { queueMicrotask(() => session.setComposing(false)) }} onKeyDownCapture={event => {
+  return <section className={isHtml ? "lesson-document-editor--html" : undefined} aria-label={`教学文档 ${documentRefLabel(currentRef)}`} onCompositionStartCapture={() => session.setComposing(true)} onCompositionEndCapture={() => { queueMicrotask(() => session.setComposing(false)) }} onKeyDownCapture={event => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); event.stopPropagation(); void (event.shiftKey ? saveAs() : flush()) }
   }}>
      <header><strong>{documentRefLabel(currentRef)}</strong> <span role="status">{status}</span> <button type="button" disabled={state.saving || state.composing || Boolean(state.conflict) || state.recovery} onClick={() => { void flush() }}>保存</button> <button type="button" disabled={state.saving || state.composing || state.conflictHunks.length > 0} onClick={() => { void saveAs() }}>另存为</button>{committed?.undoHead?.actor === 'agent' && !state.recovery && !state.conflict && !editPreview && <button type="button" onClick={() => { void session.undoLatestAgent() }}>撤销最近 AI 修改</button>}</header>
-    {(error || state.error) && <div role="alert">{error ?? state.error}<button type="button" onClick={() => { void flush() }}>重试保存</button>{onClosed && <button type="button" onClick={() => { void session.preserveAndClose().then(closed => { if (closed) onClosed() }) }}>保留恢复稿后关闭</button>}</div>}
+    {(error || state.error) && <div role="alert">{error ?? state.error}<button type="button" onClick={() => { void flush() }}>重试保存</button>{onClosed && <><button type="button" onClick={() => { void session.preserveAndClose().then(closed => { if (closed) onClosed() }) }}>保留恢复稿后关闭</button><button type="button" onClick={() => { void session.discardAndClose().then(closed => { if (closed) onClosed() }) }}>放弃未保存更改并关闭</button></>}</div>}
     {state.recovery && <aside role="alert">已找到未保存恢复稿，请比较后继续。{state.conflictHunks.length ? <span>请逐处处理下方冲突。</span> : <button type="button" onClick={() => { void session.resolveConflict('recovery') }}>保留恢复稿并保存</button>}</aside>}
     {state.conflict && <aside role="alert">
       <p>{state.conflict === 'deleted' ? '磁盘文档已删除，当前稿已保留。' : '磁盘稿与当前稿在同一处有修改，请比较后选择。'}</p>
@@ -169,7 +169,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
       {!state.conflictHunks.length && <>{state.conflict !== 'deleted' && <><details><summary>查看磁盘稿</summary><pre>{state.conflict.source}</pre></details><button type="button" onClick={() => { void session.resolveConflict('disk') }}>采用磁盘稿</button></>}
       <button type="button" disabled={state.saving || state.composing || state.conflictHunks.length > 0} onClick={() => { void (state.conflict === 'deleted' ? saveAs() : session.resolveConflict('local')) }}>{state.conflict === 'deleted' ? '另存当前稿' : '保留当前稿并保存'}</button></>}
     </aside>}
-    {isHtml && committed && <div inert={state.conflictHunks.length > 0}><HtmlDocumentEditor ref={htmlEditor} tabId={htmlTabId} committed={committed} source={state.source} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} onSave={() => { void flush() }} /></div>}
+    {isHtml && committed && <div className="lesson-document-editor__html-body" inert={state.conflictHunks.length > 0}><HtmlDocumentEditor ref={htmlEditor} tabId={htmlTabId} committed={committed} source={state.source} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} onSave={() => { void flush() }} /></div>}
     {isText && !isHtml && committed && <div inert={state.conflictHunks.length > 0}><PlainTextDocumentEditor ref={textEditor} source={state.source} revision={committed.revision} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} /></div>}
     {committed && committed.model.kind !== 'text' && parsedSource && <div inert={state.conflictHunks.length > 0}><SharedDocumentEditor ref={editor} document={document} revision={state.source} sourceDraft={state.source} target="file" initialMode={parsedSource.status === 'valid' ? 'layout' : 'source'} resolveImage={resolveImage}
       sourceMap={parsedSource.status === 'valid' ? parsedSource.sourceMap : undefined}
@@ -191,7 +191,8 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
          const documentId = session.documentId
          if (!documentId || target.selection && target.selection.kind !== 'text' || !target.ranges?.length) return undefined
          const label = textCardLabel(target.ranges.map(range => range.before).join(''))
-         return <TextAiButton documentId={documentId} disabledReason={issue} start={async () => {
+         return <TextAiButton documentId={documentId} selectionIdentity={JSON.stringify(target.ranges.map(range => [range.from, range.to, range.before]))}
+           disabledReason={issue} start={async () => {
            const snapshot = await workbenchSelection.prepare(documentId)
            const capture = captureMarkdownSelection(snapshot, target), range = capture.targets[0]
            if (capture.targets.length !== 1 || range?.kind !== 'markdown-range') throw new Error('请选择连续的一段文字再用 AI 修改。')

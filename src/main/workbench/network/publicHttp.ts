@@ -1,0 +1,161 @@
+import { lookup } from 'node:dns/promises'
+import { request as httpRequest } from 'node:http'
+import { request as httpsRequest } from 'node:https'
+import { isIP } from 'node:net'
+import { resolvePublicDnsOverHttps } from './publicDnsOverHttps'
+
+export class PublicHttpError extends Error {
+  constructor(readonly code: string, message: string) { super(message); this.name = 'PublicHttpError' }
+}
+
+export interface PublicHttpResponse {
+  url: string
+  status: number
+  contentType: string
+  charset?: string
+  bytes: Uint8Array
+}
+
+export interface PublicHttpOptions {
+  signal?: AbortSignal
+  timeoutMs?: number
+  maxBytes?: number
+  maxRedirects?: number
+  resolve?: (hostname: string) => Promise<readonly { address: string; family: 4 | 6 }[]>
+}
+
+function ipv4Number(address: string): number {
+  const parts = address.split('.').map(Number)
+  if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return -1
+  return ((parts[0]! * 2 ** 24) + (parts[1]! << 16) + (parts[2]! << 8) + parts[3]!) >>> 0
+}
+
+const blockedV4: readonly [number, number][] = [
+  [0x00000000, 8], [0x0a000000, 8], [0x64400000, 10], [0x7f000000, 8],
+  [0xa9fe0000, 16], [0xac100000, 12], [0xc0000000, 24], [0xc0000200, 24],
+  [0xc0a80000, 16], [0xc6120000, 15], [0xc6336400, 24], [0xcb007100, 24],
+  [0xe0000000, 4], [0xf0000000, 4],
+]
+
+/** This intentionally rejects special-use and documentation ranges too. */
+export function isPublicAddress(address: string): boolean {
+  const family = isIP(address)
+  if (family === 4) {
+    const value = ipv4Number(address)
+    return value >= 0 && !blockedV4.some(([network, bits]) => {
+      const mask = bits === 0 ? 0 : (0xffffffff << (32 - bits)) >>> 0
+      return ((value & mask) >>> 0) === ((network & mask) >>> 0)
+    })
+  }
+  if (family !== 6) return false
+  // IPv4-mapped IPv6 must be evaluated by its embedded address.
+  const mapped = address.match(/^(?:::ffff:)(\d{1,3}(?:\.\d{1,3}){3})$/i)
+  if (mapped) return isPublicAddress(mapped[1]!)
+  const normalized = address.replace(/^\[|\]$/g, '').toLowerCase()
+  // 6to4/Teredo can tunnel to an otherwise forbidden IPv4 destination.
+  if (normalized.startsWith('2002:') || normalized.startsWith('2001:0:') || normalized.startsWith('2001:db8:')) return false
+  const first = Number.parseInt(normalized.slice(0, 4), 16)
+  return Number.isFinite(first) && first >= 0x2000 && first <= 0x3fff
+}
+
+export function parsePublicUrl(raw: string): URL {
+  let url: URL
+  try { url = new URL(raw) } catch { throw new PublicHttpError('invalid-url', '网页地址无效') }
+  if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password)
+    throw new PublicHttpError('invalid-url', '只可读取无内嵌凭据的 HTTP 或 HTTPS 网页')
+  const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase()
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') || host.endsWith('.internal') || host.endsWith('.test'))
+    throw new PublicHttpError('private-target', '网页地址指向本机或私有网络')
+  if (isIP(host) && !isPublicAddress(host)) throw new PublicHttpError('private-target', '网页地址指向本机或私有网络')
+  url.hash = ''
+  return url
+}
+
+function isSyntheticProxyAddress(address: string): boolean {
+  const value = ipv4Number(address)
+  return value >= 0 && ((value & 0xfffe0000) >>> 0) === 0xc6120000
+}
+
+/** Never fallback for an actual private or mixed DNS answer. */
+export async function resolveWithSyntheticFallback(hostname: string,
+  systemResolve: () => Promise<readonly { address: string; family: 4 | 6 }[]>,
+  publicResolve: () => Promise<readonly { address: string; family: 4 | 6 }[]>): Promise<readonly { address: string; family: 4 | 6 }[]> {
+  const answers = await systemResolve()
+  return answers.length && answers.every(answer => answer.family === 4 && isSyntheticProxyAddress(answer.address))
+    ? publicResolve() : answers
+}
+
+async function publicAddress(url: URL, resolver: NonNullable<PublicHttpOptions['resolve']>): Promise<{ address: string; family: 4 | 6 }> {
+  const hostname = url.hostname.replace(/^\[|\]$/g, '')
+  if (isIP(hostname)) return { address: hostname, family: isIP(hostname) as 4 | 6 }
+  let answers: readonly { address: string; family: 4 | 6 }[]
+  try { answers = await resolver(hostname) } catch { throw new PublicHttpError('dns-failed', '网页域名解析失败') }
+  if (!answers.length || answers.some(answer => !isPublicAddress(answer.address)))
+    throw new PublicHttpError('private-target', '网页域名解析到本机、私有或保留地址')
+  return answers[0]!
+}
+
+function oneRequest(url: URL, address: { address: string; family: 4 | 6 }, signal: AbortSignal, maxBytes: number): Promise<{ status: number; location?: string; contentType: string; charset?: string; bytes: Uint8Array }> {
+  return new Promise((resolve, reject) => {
+    const client = url.protocol === 'https:' ? httpsRequest : httpRequest
+    const req = client(url, { method: 'GET', signal, headers: { Accept: 'text/html, text/plain, application/pdf;q=0.5', 'Accept-Encoding': 'identity',
+      'User-Agent': 'GuolingResearch/2.0' }, lookup: (_host, options, callback) => options.all
+        ? callback(null, [{ address: address.address, family: address.family }])
+        : callback(null, address.address, address.family) }, response => {
+      const status = response.statusCode ?? 0
+      const location = typeof response.headers.location === 'string' ? response.headers.location : undefined
+      const contentTypeHeader = String(response.headers['content-type'] ?? 'application/octet-stream')
+      const contentType = contentTypeHeader.split(';', 1)[0]!.trim().toLowerCase()
+      const charset = contentTypeHeader.match(/(?:^|;)\s*charset\s*=\s*["']?([^;"'\s]+)/i)?.[1]
+      if (status >= 300 && status < 400) { response.resume(); resolve({ status, location, contentType, bytes: new Uint8Array() }); return }
+      const announced = Number(response.headers['content-length'] ?? 0)
+      if (announced > maxBytes) { response.destroy(new PublicHttpError('too-large', '网页正文超过读取上限')); return }
+      let size = 0
+      const chunks: Buffer[] = []
+      response.on('data', (chunk: Buffer) => {
+        size += chunk.byteLength
+        if (size > maxBytes) response.destroy(new PublicHttpError('too-large', '网页正文超过读取上限'))
+        else chunks.push(chunk)
+      })
+      response.on('error', reject)
+      response.on('end', () => resolve({ status, contentType, ...(charset ? { charset } : {}), bytes: Buffer.concat(chunks) }))
+    })
+    req.on('error', reject)
+    req.end()
+  })
+}
+
+/** DNS answers are checked and pinned to the actual socket for every hop. */
+export async function fetchPublicResource(raw: string, options: PublicHttpOptions = {}): Promise<PublicHttpResponse> {
+  const timeoutMs = options.timeoutMs ?? 12_000, maxBytes = options.maxBytes ?? 2 * 1024 * 1024, maxRedirects = options.maxRedirects ?? 5
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000 || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 20 * 1024 * 1024
+    || !Number.isSafeInteger(maxRedirects) || maxRedirects < 0 || maxRedirects > 10) throw new PublicHttpError('invalid-limits', '网页读取限制无效')
+  const controller = new AbortController()
+  const onAbort = () => controller.abort()
+  options.signal?.addEventListener('abort', onAbort, { once: true })
+  if (options.signal?.aborted) controller.abort()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  timer.unref()
+  try {
+    let url = parsePublicUrl(raw)
+    const resolver = options.resolve ?? (async (host: string) => resolveWithSyntheticFallback(host,
+      async () => (await lookup(host, { all: true })).map(({ address, family }) => ({ address, family: family as 4 | 6 })),
+      () => resolvePublicDnsOverHttps(host, controller.signal)))
+    for (let hop = 0; hop <= maxRedirects; hop++) {
+      if (controller.signal.aborted) throw new PublicHttpError('cancelled', '网页读取已取消或超时')
+      const address = await publicAddress(url, resolver)
+      const response = await oneRequest(url, address, controller.signal, maxBytes)
+      if (response.status >= 300 && response.status < 400) {
+        if (!response.location || hop === maxRedirects) throw new PublicHttpError('redirect-limit', '网页跳转无效或超过上限')
+        url = parsePublicUrl(new URL(response.location, url).href)
+        continue
+      }
+      if (response.status < 200 || response.status >= 300) throw new PublicHttpError('http-error', `网页返回 HTTP ${response.status}`)
+      return { url: url.href, status: response.status, contentType: response.contentType, ...(response.charset ? { charset: response.charset } : {}), bytes: response.bytes }
+    }
+    throw new PublicHttpError('redirect-limit', '网页跳转超过上限')
+  } catch (cause) {
+    if (controller.signal.aborted) throw new PublicHttpError('cancelled', '网页读取已取消或超时')
+    throw cause
+  } finally { clearTimeout(timer); options.signal?.removeEventListener('abort', onAbort) }
+}

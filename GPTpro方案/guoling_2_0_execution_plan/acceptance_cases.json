@@ -2939,7 +2939,11 @@
       "expected": "无Object has been destroyed；frame租约和AppState清理，脏稿确认不变",
       "test_layer": "electron",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "passed",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+        "evidence/logs/b19-m25-final-close-e2e-r6.log"
+      ]
     },
     {
       "id": "M25-T02",
@@ -2950,7 +2954,11 @@
       "expected": "不复活已删会话、不重放作用；相关任务安全收拢；关闭不依赖全部历史恢复；原文件保留",
       "test_layer": "integration+electron",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "passed",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+        "evidence/logs/b19-m25-final-close-e2e-r6.log"
+      ]
     },
     {
       "id": "M25-T03",
@@ -2961,7 +2969,10 @@
       "expected": "预览占满剩余空间，滚动正确；正文/控制器/脚本真实执行，无Node/凭据/越权文件，不静态冒充",
       "test_layer": "electron",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "not_run",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md"
+      ]
     },
     {
       "id": "M25-T04",
@@ -2972,7 +2983,11 @@
       "expected": "工厂封装/ready/资源/生命周期一致，实际可轻编辑；原内容插图布局保留，不要求AI登记",
       "test_layer": "integration+electron",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "passed",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+        "evidence/logs/b19-historical-carrier-e2e-r5.log"
+      ]
     },
     {
       "id": "M26-T01",
@@ -2983,7 +2998,12 @@
       "expected": "不被120s总限误杀；预算内重试真实计次，半流不拼，工具零重复；业务unknown不重放",
       "test_layer": "integration",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "passed",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+        "evidence/B20_M26_T01_provider-retry-r2.log",
+        "evidence/B20_M26_T01_provider-retry-r3.log"
+      ]
     },
     {
       "id": "M26-T02",
@@ -2994,7 +3014,12 @@
       "expected": "长文有恢复路径，不读尽无关资料；同版续读跨版拒拼；CAS/权限/停止保持",
       "test_layer": "integration",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "passed",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+        "evidence/logs/b20-r6-read-r2.log",
+        "evidence/logs/b20-gateway-service-integration-r2.log"
+      ]
     },
     {
       "id": "M26-T03",
@@ -3005,7 +3030,12 @@
       "expected": "探索不永久partial，无关saved不清必要缺口；partial不映射完成；原记录不改",
       "test_layer": "integration",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "passed",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+        "evidence/logs/b20-r7-rel-replay-r1.log",
+        "evidence/logs/b20-r7-substance-r1.log"
+      ]
     },
     {
       "id": "M26-T04",
@@ -3016,7 +3046,12 @@
       "expected": "旧图大参数引用可重读，要求/配对/回执不丢；显示不逐片等fsync，正式事实可靠，不伪报提速",
       "test_layer": "integration",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "passed",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+        "evidence/logs/b20-display-buffer-r1.log",
+        "evidence/logs/b21-material-history-skill-m27-r1.log"
+      ]
     },
     {
       "id": "M27-T01",
@@ -3027,7 +3062,11 @@
       "expected": "覆盖/排除/截断真实，未保存稿唯一writer，旧版本拒写，编码换行保留，多文件部分失败清晰",
       "test_layer": "integration",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "passed",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+        "evidence/logs/b21-files-m27-integration-r5.log"
+      ]
     },
     {
       "id": "M27-T02",
@@ -3038,7 +3077,11 @@
       "expected": "位置/版本/来源真实，DOCX不造页码；提取复用，失败截断可见，相关页图进视觉",
       "test_layer": "integration",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "passed",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+        "evidence/logs/b21-material-history-skill-m27-r1.log"
+      ]
     },
     {
       "id": "M27-T03",
@@ -3049,7 +3092,10 @@
       "expected": "一次正式事务可撤销保存重开；图文保态，脚本明确重跑；第二路提示且不误拒提交",
       "test_layer": "integration+electron",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "not_run",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md"
+      ]
     },
     {
       "id": "M27-T04",
@@ -3060,7 +3106,10 @@
       "expected": "有效用户限制/来源/决策/剩余保留；新run真实授权，无重复操作，初始输入也可瘦身",
       "test_layer": "integration",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "not_run",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md"
+      ]
     },
     {
       "id": "M27-T05",
@@ -3071,7 +3120,11 @@
       "expected": "版本来源可查、禁用生效；无隐式执行/网络/凭据权，不建第二目录接口",
       "test_layer": "integration",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "passed",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+        "evidence/logs/b21-material-history-skill-m27-r1.log"
+      ]
     },
     {
       "id": "M27-T06",
@@ -3082,7 +3135,12 @@
       "expected": "一次提交撤销，非法零写，类型/scope准确；早期课件不披露能力；新观察意图不误熔断",
       "test_layer": "integration",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "passed",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+        "evidence/logs/b21-m27-light-batch-a3-r10.log",
+        "evidence/logs/b21-m27-button-check-r1.log"
+      ]
     },
     {
       "id": "M28-T01",
@@ -3093,7 +3151,11 @@
       "expected": "产品可取得，工作空间/只读限制真实；cwd/JobObjects不作沙箱证明，不满足保持阻断",
       "test_layer": "integration",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "passed",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+        "evidence/logs/b22-compute-backend-r4.log"
+      ]
     },
     {
       "id": "M28-T02",
@@ -3104,7 +3166,12 @@
       "expected": "计算进程/日志/成果真实，无模型空轮询，迟到不写、不重复作用；T1/T4共用",
       "test_layer": "integration",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "passed",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+        "evidence/logs/b22-compute-backend-r4.log",
+        "evidence/logs/b24-m30-real-compute-r5.log"
+      ]
     },
     {
       "id": "M28-T03",
@@ -3115,7 +3182,10 @@
       "expected": "资源身份/账源真实，不造空V9，unknown不重购；真实生成编辑复用T3",
       "test_layer": "integration+real-model",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "blocked",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md"
+      ]
     },
     {
       "id": "M28-T04",
@@ -3126,7 +3196,10 @@
       "expected": "live/isolated来源真实，前台不串目标，图像进模型，旧柄有重读路径；T3共用",
       "test_layer": "electron+real-model",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "not_run",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md"
+      ]
     },
     {
       "id": "M29-T01",
@@ -3137,7 +3210,10 @@
       "expected": "来源支持内容，不把摘要/错误页当全文；范围费用真实，无连接不通过；T2共用",
       "test_layer": "real-service",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "blocked",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md"
+      ]
     },
     {
       "id": "M29-T02",
@@ -3148,7 +3224,12 @@
       "expected": "真实协议浏览器往返，scope/文件根准确，无凭据泄露/停止后写；T4共用",
       "test_layer": "real-service+browser",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "passed",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+        "evidence/logs/b23-m29-owned-final-r1.log",
+        "evidence/logs/b23-managed-browser-public-r3.log"
+      ]
     },
     {
       "id": "M29-T03",
@@ -3158,8 +3239,9 @@
       "steps": "一次生成→保全→插入或保存→重开播放",
       "expected": "真实媒体/TTL处理；供应商未定保持阻断，等待反例复用B1，不承诺全媒体平台",
       "test_layer": "real-service",
-      "required_for": "2.0",
-      "status": "not_run"
+      "required_for": "media-followup",
+      "status": "not_run",
+      "deferred_reason": "2026-09-29 Owner最新范围：语音/视频/音乐真实生成与端到端闭环移出当前2.0完成门；保留原用例与not_run事实。已有授权通道确实可用时可验证，不为此采购或阻塞其他工作。当前框架另由M29-T05验收。"
     },
     {
       "id": "M29-T04",
@@ -3170,7 +3252,25 @@
       "expected": "不外包兜底原生基础，权限/退出/外部修改真实；不三CLI重建，不以exit0作成功",
       "test_layer": "real-service",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "blocked",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md"
+      ]
+    },
+    {
+      "id": "M29-T05",
+      "task_id": "M29",
+      "title": "语音视频音乐最小扩展框架",
+      "preconditions": "XM；复用现有Connection、作业、资源及工具；已核实既有GPT OAuth/TeamoRouter能力",
+      "steps": "核对实际可用能力；本地验证发现/参数/路由/权限/停止/未配置边界，确认失败不影响其他工具；存在已有授权可用通道时接通并必要实测",
+      "expected": "不预建多供应商平台；无通道明确未配置且不发生成请求；真实生成/端到端未验证保持未验证，不以fixture或mock标接通；图片和通用作业不缩减",
+      "test_layer": "integration",
+      "required_for": "2.0",
+      "status": "passed",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+        "evidence/logs/b23-m29-owned-final-r1.log"
+      ]
     },
     {
       "id": "M30-T01",
@@ -3181,7 +3281,10 @@
       "expected": "只有真实变化，冲突不覆盖；逐项部分回退，不全局伪原子",
       "test_layer": "integration+electron",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "not_run",
+      "evidence_files": [
+        "evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md"
+      ]
     },
     {
       "id": "M30-T02",
@@ -3192,7 +3295,10 @@
       "expected": "写依赖审批不并行猜测；fork重新授权不重放任务；聊天/内容恢复分离",
       "test_layer": "integration+electron",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "not_run",
+      "evidence_files": [
+        "evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md"
+      ]
     },
     {
       "id": "M30-T03",
@@ -3203,7 +3309,10 @@
       "expected": "目标不误绑、生命周期不暗改；无逐字暗号/扩权；预设不假共享额度或能力",
       "test_layer": "electron",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "not_run",
+      "evidence_files": [
+        "evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md"
+      ]
     },
     {
       "id": "M30-T04",
@@ -3214,7 +3323,11 @@
       "expected": "数据/脚本/图表/报告多文件真实交付，无V9/外部Agent必需，证据共用不重复付费",
       "test_layer": "real-model",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "failed",
+      "evidence_files": [
+        "evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md",
+        "evidence/logs/b24-m30-real-model-r2-send.log"
+      ]
     },
     {
       "id": "M30-T05",
@@ -3225,7 +3338,11 @@
       "expected": "资料引用真实，目标约束保留，终态正确，无重复写入",
       "test_layer": "real-model",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "blocked",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+        "evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md"
+      ]
     },
     {
       "id": "M30-T06",
@@ -3236,7 +3353,11 @@
       "expected": "无V9独立链完整，真实脚本图片可用，初始图不冒充动作后状态",
       "test_layer": "real-model",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "blocked",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+        "evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md"
+      ]
     },
     {
       "id": "M30-T07",
@@ -3247,14 +3368,18 @@
       "expected": "实际协议/浏览器/成果成立，撤权晚到不写，不操作真实联系人或业务资源",
       "test_layer": "real-model+real-service",
       "required_for": "2.0",
-      "status": "not_run"
+      "status": "blocked",
+      "evidence_files": [
+        "evidence/B19_B24_IMPLEMENTATION_2026_09_29.md",
+        "evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md"
+      ]
     },
     {
       "id": "M30-T08",
       "task_id": "M30",
       "title": "扩展2.0范围Owner终局签收",
       "preconditions": "M25–M29及M30工程用例通过，旧证据保留",
-      "steps": "Owner日常界面打开材料成果、预览轻改、保存重开、放弃关闭；核对L06全范围/未运行发行项",
+      "steps": "Owner日常界面打开材料成果、预览轻改、保存重开、放弃关闭；核对L06最新范围、媒体框架/真实生成延期及未运行发行项",
       "expected": "新增范围真实可用，旧205通过不替代本次接受；无未说明核心阻断，候选身份/签收人有据",
       "test_layer": "manual",
       "required_for": "2.0",
@@ -3262,5 +3387,5 @@
       "owner_required": true
     }
   ],
-  "plan_revision": "2.5"
+  "plan_revision": "2.6"
 }

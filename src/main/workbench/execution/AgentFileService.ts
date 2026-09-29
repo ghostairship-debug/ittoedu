@@ -1,6 +1,10 @@
+import { FileBrowsePages } from './FileBrowsePages'
+import { FileGrepPages } from './FileGrepPages'
+import { AgentFileText } from './AgentFileText'
+import { sourceFileKind } from '../../../shared/workbench/sourceFileKind'
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
-import type { AgentFileContext, AgentFileOutcome, AgentFileService as AgentFilePort, AgentFileToolName } from '../../../core/tools/AgentFileTools'
+import type { AgentFileContext, AgentFileMutationName, AgentFileOutcome, AgentFileService as AgentFilePort, AgentFileToolName } from '../../../core/tools/AgentFileTools'
 import { AgentFileOutcomeUnknown, agentFileSchemas } from '../../../core/tools/AgentFileTools'
 import { isInsideRoot } from '../../../shared/workbench/executionPermission'
 import type { DocumentHostService } from '../DocumentHostService'
@@ -9,7 +13,6 @@ import { createDefaultTeacherControllerPackage } from '../../../shared/defaultTe
 import { createCourseProjectArchive } from '../../../core/drivers/codecs/courseProjectArchive'
 import { validateWorkspaceEntryName } from '../WorkspaceFiles'
 
-const supported = /\.(?:md|markdown|txt|html?|h5lesson)$/i
 export function startDirectory(context: Pick<AgentFileContext, 'workspaceRoot' | 'conversationHomeRoot' | 'conversationHome'>): { directory: string; fallback: boolean } {
   const home = context.conversationHome
   if (!home) return { directory: context.workspaceRoot, fallback: false }
@@ -19,7 +22,22 @@ export function startDirectory(context: Pick<AgentFileContext, 'workspaceRoot' |
 
 /** Main-only file tools. Paths are rechecked at use time, including symlink resolution. */
 export class AgentFileService implements AgentFilePort {
-  constructor(private readonly host: DocumentHostService) {}
+  private readonly pages = new FileBrowsePages()
+  private readonly grepPages = new FileGrepPages()
+  private readonly text: AgentFileText
+  constructor(private readonly host: DocumentHostService) { this.text = new AgentFileText(host) }
+  private async mayRead(context: AgentFileContext, resolved: string): Promise<boolean> {
+    if (context.permission === 'full' || isInsideRoot(context.workspaceRoot, resolved)) return true
+    for (const candidate of context.readOnlyRoots ?? []) {
+      const root = await fs.realpath(candidate).catch(() => null)
+      if (root && isInsideRoot(root, resolved)) return true
+    }
+    return false
+  }
+  private mayWrite(context: AgentFileContext, resolved: string): boolean {
+    return context.permission !== 'read-only' && (context.permission === 'full' || isInsideRoot(context.workspaceRoot, resolved)
+      || (context.approvedOutsidePaths ?? []).some(approved => isInsideRoot(approved, resolved)))
+  }
   private async directory(context: AgentFileContext, raw?: string, allowOutside = false): Promise<{ directory: string; fallback: boolean }> {
     const preferred = startDirectory(context)
     const wanted = raw ? path.resolve(context.workspaceRoot, raw) : preferred.directory
@@ -31,15 +49,16 @@ export class AgentFileService implements AgentFilePort {
     }
     const stat = await fs.lstat(directory)
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('目标不是可访问文件夹')
-    if (!allowOutside && context.permission !== 'full' && !isInsideRoot(context.workspaceRoot, directory)) throw new Error('当前权限不允许访问工作空间外文件夹')
+    if (!allowOutside && !await this.mayRead(context, directory)) throw new Error('当前权限不允许访问工作空间外文件夹')
     return { directory, fallback }
   }
-  private async filename(context: AgentFileContext, raw: string): Promise<string> {
+  private async filename(context: AgentFileContext, raw: string, access: 'read' | 'write' = 'read', preflight = false): Promise<string> {
     const filename = await fs.realpath(path.resolve(context.workspaceRoot, raw))
     const stat = await fs.lstat(filename)
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('目标不是可访问文件')
-    if (context.permission !== 'full' && !isInsideRoot(context.workspaceRoot, filename)) throw new Error('当前权限不允许访问工作空间外文件')
-    if (!supported.test(filename)) throw new Error('当前只支持打开 Markdown、纯文本（.txt）、HTML（.html/.htm）和 H5 演示（.h5lesson）')
+    if (access === 'read' ? !await this.mayRead(context, filename) : !preflight && !this.mayWrite(context, filename))
+      throw new Error('当前权限不允许访问工作空间外文件')
+    sourceFileKind(filename) // Binary and structured formats use their actual importers.
     return filename
   }
   async preflightCreate(context: AgentFileContext, raw: unknown): Promise<{ directory: string; outside: boolean }> {
@@ -47,53 +66,134 @@ export class AgentFileService implements AgentFilePort {
     if (context.permission === 'read-only') throw new Error('只读任务不能创建文件')
     validateWorkspaceEntryName(input.name)
     const extension = input.kind === 'markdown' ? '.md' : input.kind === 'text' ? '.txt' : input.kind === 'html' ? '.html' : '.h5lesson'
-    if (path.extname(input.name).toLowerCase() !== extension) throw new Error(`文件名与${input.kind}格式不符`)
+    if (input.kind === 'text' ? sourceFileKind(input.name) !== 'text' : path.extname(input.name).toLowerCase() !== extension) throw new Error(`文件名与${input.kind}格式不符`)
     const { directory } = await this.directory(context, input.path, true)
     return { directory, outside: !isInsideRoot(context.workspaceRoot, directory) }
+  }
+  async preflightMutation(context: AgentFileContext, name: AgentFileMutationName, raw: unknown): Promise<{ paths: string[]; outside: boolean }> {
+    if (context.permission === 'read-only') throw new Error('只读任务不能修改文件')
+    let paths: string[]
+    if (name === 'file.create') {
+      const input = agentFileSchemas[name].parse(raw), preflight = await this.preflightCreate(context, input)
+      paths = [path.join(preflight.directory, input.name)]
+    } else if (name === 'file.write') {
+      const input = agentFileSchemas[name].parse(raw)
+      if (input.mode === 'create') {
+        validateWorkspaceEntryName(path.basename(input.path))
+        paths = [path.join((await this.directory(context, path.dirname(path.resolve(context.workspaceRoot, input.path)), true)).directory, path.basename(input.path))]
+      } else paths = [await this.filename(context, input.path, 'write', true)]
+    } else if (name === 'file.patch') {
+      const input = agentFileSchemas[name].parse(raw)
+      paths = [await this.filename(context, input.path, 'write', true)]
+    } else if (name === 'file.mkdir') {
+      const input = agentFileSchemas[name].parse(raw)
+      validateWorkspaceEntryName(input.name)
+      paths = [path.join((await this.directory(context, input.path, true)).directory, input.name)]
+    } else if (name === 'file.rename' || name === 'file.trash') {
+      const inputs = name === 'file.rename' ? [agentFileSchemas[name].parse(raw).path] : agentFileSchemas[name].parse(raw).paths
+      paths = await Promise.all(inputs.map(value => this.filenameOrDirectory(context, value, true)))
+      if (name === 'file.rename') {
+        const input = agentFileSchemas[name].parse(raw)
+        validateWorkspaceEntryName(input.name)
+        paths.push(path.join(path.dirname(paths[0]!), input.name))
+      }
+    } else {
+      const input = agentFileSchemas[name].parse(raw)
+      const sources = await Promise.all(input.sources.map(value => this.filenameOrDirectory(context, value, name === 'file.move')))
+      const destination = (await this.directory(context, input.destination, true)).directory
+      paths = [...sources, ...sources.map(source => path.join(destination, path.basename(source)))]
+    }
+    return { paths, outside: paths.some(value => !isInsideRoot(context.workspaceRoot, value)) }
+  }
+  private async filenameOrDirectory(context: AgentFileContext, raw: string, forWrite: boolean): Promise<string> {
+    const value = await fs.realpath(path.resolve(context.workspaceRoot, raw))
+    const stat = await fs.lstat(value)
+    if (stat.isSymbolicLink() || !stat.isFile() && !stat.isDirectory()) throw new Error('目标不是可访问文件或文件夹')
+    if (forWrite ? !this.mayWrite(context, value) && !(context.permission !== 'read-only' && !isInsideRoot(context.workspaceRoot, value))
+      : !await this.mayRead(context, value)) throw new Error('当前权限不允许访问工作空间外文件')
+    return value
+  }
+  private async requireMutationScope(context: AgentFileContext, paths: string[], copySources = 0): Promise<void> {
+    if (context.permission === 'read-only') throw new Error('只读任务不能修改文件')
+    for (let i = 0; i < paths.length; i++) {
+      if (i < copySources && await this.mayRead(context, paths[i]!)) continue
+      if (!this.mayWrite(context, paths[i]!)) throw new Error('工作空间外修改需要当前操作的明确批准')
+    }
   }
   async execute(context: AgentFileContext, name: AgentFileToolName, raw: unknown, operationId: string): Promise<AgentFileOutcome> {
     if (!context.workspaceRoot || !path.isAbsolute(context.workspaceRoot)) throw new Error('任务缺少已冻结的工作空间位置')
     if (name === 'file.list') {
       const input = agentFileSchemas[name].parse(raw), { directory, fallback } = await this.directory(context, input.path)
-      const entries = (await fs.readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
-      const limit = input.limit ?? 50
-      return { data: { path: directory, entries: entries.slice(0, limit).map(entry => ({ name: entry.name, kind: entry.isDirectory() ? 'folder' : entry.isFile() ? 'file' : 'unsupported' })), truncated: entries.length > limit, homeMissingFallback: fallback } }
+      return { data: { path: directory, ...await this.pages.list(context.runId, directory, input.limit ?? 50, input.cursor), homeMissingFallback: fallback } }
     }
     if (name === 'file.search') {
       const input = agentFileSchemas[name].parse(raw), { directory, fallback } = await this.directory(context, input.path)
-      const found: string[] = [], pending = [directory], limit = input.limit ?? 50
-      let visited = 0
-      while (pending.length && found.length < limit && visited < 2000) {
-        const current = pending.shift()!
-        for (const entry of await fs.readdir(current, { withFileTypes: true })) {
-          if (++visited > 2000) break
-          const candidate = path.join(current, entry.name)
-          if (entry.name.toLocaleLowerCase().includes(input.query.toLocaleLowerCase())) found.push(candidate)
-          if (entry.isDirectory() && !entry.isSymbolicLink()) pending.push(candidate)
-          if (found.length >= limit) break
-        }
-      }
-      return { data: { path: directory, matches: found, truncated: pending.length > 0 || visited >= 2000, homeMissingFallback: fallback } }
+      return { data: { path: directory, ...await this.pages.search(context.runId, directory, input.query, input.limit ?? 50,
+        async wanted => (await this.directory(context, wanted)).directory, input.cursor), homeMissingFallback: fallback } }
     }
     if (name === 'file.open') {
       const input = agentFileSchemas[name].parse(raw), filename = await this.filename(context, input.path)
       const snapshot = await this.host.open(filename)
       return { data: { path: filename, documentId: snapshot.documentId, kind: snapshot.model.kind }, opened: {
-        documentId: snapshot.documentId, kind: snapshot.model.kind, name: filename, writable: context.permission !== 'read-only',
+        documentId: snapshot.documentId, kind: snapshot.model.kind, name: filename,
+        writable: context.permission !== 'read-only' && (context.permission === 'full' || isInsideRoot(context.workspaceRoot, filename)),
       } }
+    }
+    if (name === 'file.read') {
+      const input = agentFileSchemas[name].parse(raw), filename = await this.filename(context, input.path)
+      return this.text.read(context, filename, input.limit, input.cursor, operationId)
+    }
+    if (name === 'file.grep') {
+      const input = agentFileSchemas[name].parse(raw)
+      const wanted = input.path ? path.resolve(context.workspaceRoot, input.path) : startDirectory(context).directory
+      const resolved = await fs.realpath(wanted), stat = await fs.lstat(resolved)
+      if (stat.isSymbolicLink()) throw new Error('搜索目标不能是符号链接')
+      if (stat.isFile()) await this.filename(context, resolved)
+      else if (stat.isDirectory()) await this.directory(context, resolved)
+      else throw new Error('搜索目标不是文件或目录')
+      return { data: { path: resolved, query: input.query, ...await this.grepPages.search({ runId: context.runId, root: resolved,
+        kind: stat.isFile() ? 'file' : 'directory', query: input.query, limit: input.limit ?? 50, cursor: input.cursor,
+        verifyDirectory: async directory => (await this.directory(context, directory)).directory,
+        readFile: async filename => {
+          const permitted = await this.filename(context, filename)
+          const file = await this.text.searchable(permitted)
+          return { source: file.source, version: file.version }
+        } }) } }
+    }
+    if (name === 'file.write') {
+      const input = agentFileSchemas[name].parse(raw)
+      const scope = await this.preflightMutation(context, name, input)
+      await this.requireMutationScope(context, scope.paths)
+      return this.text.write(context, scope.paths[0]!, input.content, input.mode,
+        input.mode === 'replace' ? input.expectedVersion : undefined, operationId)
+    }
+    if (name === 'file.patch') {
+      const input = agentFileSchemas[name].parse(raw)
+      const scope = await this.preflightMutation(context, name, input)
+      await this.requireMutationScope(context, scope.paths)
+      return this.text.patch(context, scope.paths[0]!, input.expectedVersion, input.oldText, input.newText, input.range, operationId)
+    }
+    if (name === 'file.mkdir' || name === 'file.copy' || name === 'file.move' || name === 'file.rename' || name === 'file.trash') {
+      const scope = await this.preflightMutation(context, name, raw)
+      const sourceCount = name === 'file.copy' ? agentFileSchemas[name].parse(raw).sources.length : 0
+      await this.requireMutationScope(context, scope.paths, sourceCount)
+      return this.organize(context, name, raw, operationId, scope.paths)
     }
     const input = agentFileSchemas['file.create'].parse(raw)
     if (context.permission === 'read-only') throw new Error('只读任务不能创建文件')
     const preflight = await this.preflightCreate(context, input)
     const { directory, fallback } = await this.directory(context, input.path, true)
     if (directory !== preflight.directory) throw new Error('目标文件夹已改变，请重新确认')
-    if (preflight.outside && context.permission !== 'full' && context.approvedOutsideDirectory !== directory) throw new Error('工作空间外新建文件需要明确批准')
+    if (preflight.outside && context.permission !== 'full' && context.approvedOutsideDirectory !== directory
+      && !(context.approvedOutsidePaths ?? []).some(approved => isInsideRoot(approved, path.join(directory, input.name))))
+      throw new Error('工作空间外新建文件需要明确批准')
     const root = await this.host.files.registerRoot(directory)
     const bytes = input.kind === 'course-v9' ? (() => {
       const project = createBlankCourseProject({ title: input.name.replace(/\.h5lesson$/i, '') })
       const component = createDefaultTeacherControllerPackage()
       return createCourseProjectArchive({ project, assetFiles: {}, componentFiles: { [`${component.manifest.id}@${component.manifest.version}`]: component.files } })
     })() : Buffer.from('', 'utf8')
+    context.assertActive?.()
     const receipt = await this.host.files.createFile({ operationId, workspaceId: root.workspaceId, targetDirectoryId: root.rootEntryId,
       name: input.name, format: input.kind === 'course-v9' ? 'course-v9' : input.kind === 'markdown' ? 'markdown' : 'file', bytes }).catch(error => { throw new AgentFileOutcomeUnknown(error instanceof Error ? error.message : String(error)) })
     const created = receipt.items.find(item => item.status === 'success' && item.targetPath)
@@ -102,7 +202,78 @@ export class AgentFileService implements AgentFilePort {
     if (!snapshot) return { data: { operation: receipt, path: created.targetPath, homeMissingFallback: fallback,
       openError: '文件已创建，但暂时无法打开；请检查目录后用 file.open 重试' } }
     return { data: { operation: receipt, path: created.targetPath, homeMissingFallback: fallback, documentId: snapshot.documentId }, opened: {
-      documentId: snapshot.documentId, kind: snapshot.model.kind, name: created.targetPath, writable: true,
+      documentId: snapshot.documentId, kind: snapshot.model.kind, name: created.targetPath,
+      writable: context.permission === 'full' || isInsideRoot(context.workspaceRoot, created.targetPath),
     } }
+  }
+  private async rootFor(context: AgentFileContext, paths: string[]) {
+    const workspace = await fs.realpath(context.workspaceRoot)
+    if (paths.every(value => isInsideRoot(workspace, value))) return this.host.files.registerRoot(workspace)
+    const drive = path.parse(paths[0]!).root
+    if (!paths.every(value => path.parse(value).root.toLowerCase() === drive.toLowerCase()))
+      throw new Error('当前文件整理不支持跨磁盘复制或移动；请分别选择同一磁盘的目标')
+    return this.host.files.registerRoot(drive)
+  }
+  private async entryId(root: { workspaceId: string; rootEntryId: string; resolvedPath: string }, target: string): Promise<string> {
+    const relative = path.relative(root.resolvedPath, target)
+    if (relative === '') return root.rootEntryId
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('文件项不属于当前授权根')
+    let current = root.rootEntryId
+    for (const segment of relative.split(path.sep)) {
+      let cursor: string | undefined, found: string | undefined
+      do {
+        const page = await this.host.files.listChildren({ workspaceId: root.workspaceId, directoryEntryId: current, cursor, limit: 200 })
+        const matching = page.entries.find(item => item.status === 'accessible' && (process.platform === 'win32'
+          ? item.name.toLowerCase() === segment.toLowerCase() : item.name === segment))
+        found = matching?.status === 'accessible' ? matching.entryId : undefined
+        cursor = page.nextCursor
+      } while (!found && cursor)
+      if (!found) throw new Error(`文件项已改变或不可访问：${target}`)
+      current = found
+    }
+    return current
+  }
+  private async organize(context: AgentFileContext, name: 'file.mkdir' | 'file.copy' | 'file.move' | 'file.rename' | 'file.trash',
+    raw: unknown, operationId: string, scoped: string[]): Promise<AgentFileOutcome> {
+    const root = await this.rootFor(context, scoped)
+    if (name === 'file.mkdir') {
+      const input = agentFileSchemas[name].parse(raw), target = scoped[0]!
+      const parent = await this.entryId(root, path.dirname(target))
+      context.assertActive?.()
+      return { data: { operation: await this.host.files.mkdir({ operationId, workspaceId: root.workspaceId,
+        targetDirectoryId: parent, name: input.name }) } }
+    }
+    if (name === 'file.rename') {
+      const input = agentFileSchemas[name].parse(raw), source = await this.entryId(root, scoped[0]!)
+      context.assertActive?.()
+      return { data: { operation: await this.host.files.rename({ operationId, workspaceId: root.workspaceId,
+        sourceEntryId: source, name: input.name }) } }
+    }
+    const sources = name === 'file.trash' ? scoped : scoped.slice(0, agentFileSchemas[name].parse(raw).sources.length)
+    const destination = name === 'file.trash' ? undefined : await this.entryId(root, path.dirname(scoped[sources.length]!))
+    const items: Array<{ status: 'success' | 'partial' | 'failed' | 'cancelled'; sourcePath?: string; targetPath?: string;
+      affectedPaths: string[]; error?: { code: string; message: string } }> = []
+    for (const [index, source] of sources.entries()) {
+      try {
+        if (name === 'file.copy' && this.host.registry.list().some(snapshot => snapshot.binding.kind === 'file'
+          && snapshot.binding.path.toLowerCase() === source.toLowerCase() && snapshot.dirty))
+          throw new Error('源文件有未保存修改；请先保存或明确复制磁盘版本')
+        const entry = await this.entryId(root, source)
+        const id = `${operationId}:${index}`
+        context.assertActive?.()
+        const receipt = name === 'file.trash'
+          ? await this.host.files.trash({ operationId: id, workspaceId: root.workspaceId, entryIds: [entry] })
+          : name === 'file.copy'
+            ? await this.host.files.copy({ operationId: id, workspaceId: root.workspaceId, sourceEntryIds: [entry], targetDirectoryId: destination! })
+            : await this.host.files.move({ operationId: id, workspaceId: root.workspaceId, sourceEntryIds: [entry], targetDirectoryId: destination! })
+        items.push(...receipt.items.map(item => ({ ...item, sourcePath: item.sourcePath ?? source })))
+      } catch (error) {
+        items.push({ status: 'failed', sourcePath: source, affectedPaths: [source],
+          error: { code: 'file-operation-failed', message: error instanceof Error ? error.message : String(error) } })
+      }
+    }
+    const status = items.every(item => item.status === 'success') ? 'success'
+      : items.some(item => item.status === 'success' || item.status === 'partial') ? 'partial' : 'failed'
+    return { data: { operation: { operationId, status, items, affectedPaths: [...new Set(items.flatMap(item => item.affectedPaths))] } } }
   }
 }

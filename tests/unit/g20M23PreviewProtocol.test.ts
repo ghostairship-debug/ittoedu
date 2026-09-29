@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { htmlPreviewFileUrl, parseHtmlPreviewProtocolUrl } from '../../src/main/workbench/htmlPreview/htmlPreviewProtocol'
+import { htmlPreviewFileUrl, htmlPreviewOrigin, parseHtmlPreviewProtocolUrl } from '../../src/main/workbench/htmlPreview/htmlPreviewProtocol'
 import { htmlPreviewContentSecurityPolicy, htmlPreviewResponse } from '../../src/main/workbench/htmlPreview/htmlPreviewResponse'
 import {
   collectHtmlPreviewMediaUrls, normalizeCssPreviewMediaReferences,
@@ -19,16 +19,16 @@ describe('M23 preview protocol', () => {
     expect(parseHtmlPreviewProtocolUrl(url)).toEqual({ kind: 'file', token, relativePath: '子目录/我的图.png', hasQuery: false })
     expect(parseHtmlPreviewProtocolUrl(`${url}?v=1`)).toEqual({ kind: 'file', token, relativePath: '子目录/我的图.png', hasQuery: true })
     expect(parseHtmlPreviewProtocolUrl(htmlPreviewFileUrl(token, '完成率%.html'))).toEqual({ kind: 'file', token, relativePath: '完成率%.html', hasQuery: false })
-    expect(parseHtmlPreviewProtocolUrl(`courseware-preview://app/${token}/_agent/html-preview-agent.iife.js`)).toEqual({ kind: 'agent', token })
+    expect(parseHtmlPreviewProtocolUrl(`${htmlPreviewOrigin(token)}/${token}/_agent/html-preview-agent.iife.js`)).toEqual({ kind: 'agent', token })
     for (const candidate of [
-      `courseware-preview://app/${token}/file/../secret.txt`,
-      `courseware-preview://app/${token}/file/%2e%2e/secret.txt`,
-      `courseware-preview://app/${token}/file/%252e%252e/secret.txt`,
-      `courseware-preview://app/${token}/file/a%2fb.txt`,
-      `courseware-preview://app/${token}/file/a%5cb.txt`,
-      `courseware-preview://app/${token}/file/C%3a/secret.txt`,
-      `courseware-preview://app/${token}/file/%00secret.txt`,
-      `courseware-preview://app/${token}/file/ok.txt?path=secret/../outside`,
+      `${htmlPreviewOrigin(token)}/${token}/file/../secret.txt`,
+      `${htmlPreviewOrigin(token)}/${token}/file/%2e%2e/secret.txt`,
+      `${htmlPreviewOrigin(token)}/${token}/file/%252e%252e/secret.txt`,
+      `${htmlPreviewOrigin(token)}/${token}/file/a%2fb.txt`,
+      `${htmlPreviewOrigin(token)}/${token}/file/a%5cb.txt`,
+      `${htmlPreviewOrigin(token)}/${token}/file/C%3a/secret.txt`,
+      `${htmlPreviewOrigin(token)}/${token}/file/%00secret.txt`,
+      `${htmlPreviewOrigin(token)}/${token}/file/ok.txt?path=secret/../outside`,
       `courseware-preview://evil/${token}/file/ok.txt`,
     ]) {
       if (candidate.includes('ok.txt?')) expect(parseHtmlPreviewProtocolUrl(candidate)).toMatchObject({ relativePath: 'ok.txt', hasQuery: true })
@@ -38,15 +38,21 @@ describe('M23 preview protocol', () => {
 
   it('returns an independent restrictive CSP and no reusable cache', async () => {
     const csp = htmlPreviewContentSecurityPolicy(['https://media.example', 'https://media.example', 'https://bad.example/path'])
-    expect(csp).toContain('img-src courseware-preview://app data: blob: https://media.example')
+    expect(csp).toContain("img-src 'self' data: blob: https://media.example")
     expect(csp).not.toContain('https://bad.example')
-    expect(csp).toContain("connect-src courseware-preview://app")
-    expect(csp).toContain("frame-src 'none'")
+    expect(csp).toContain("connect-src 'self'")
+    expect(csp).toContain("frame-src 'self' blob:")
+    expect(csp).toContain("script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:")
+    expect(csp).toContain("sandbox allow-scripts allow-same-origin")
+    expect(csp).toContain("worker-src 'none'")
+    expect(csp).toContain("form-action 'none'")
     const response = htmlPreviewResponse('<h1>draft</h1>', { method: 'HEAD', contentType: 'text/html; charset=utf-8' })
     expect(response.headers.get('Content-Security-Policy')).toContain("default-src 'none'")
     expect(response.headers.get('X-Content-Type-Options')).toBe('nosniff')
     expect(response.headers.get('Referrer-Policy')).toBe('no-referrer')
     expect(response.headers.get('Cache-Control')).toBe('no-store')
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull()
+    expect(response.headers.get('Cross-Origin-Resource-Policy')).toBe('same-origin')
     expect(await response.text()).toBe('')
   })
 
@@ -87,4 +93,14 @@ describe('M23 preview protocol', () => {
     expect(source).toContain('src="//images.example/a.png"')
     expect(normalizeCssPreviewMediaReferences('div{background:url(//images.example/a.png)}', media)).toContain('url(https://images.example/a.png)')
   })
+})
+
+
+it('M25 binds a transient origin to its lease token and refuses sibling-token substitution', () => {
+  const other = 'b'.repeat(64)
+  const a = htmlPreviewFileUrl(token, 'one.html'), b = htmlPreviewFileUrl(other, 'two.html')
+  expect(new URL(a).host).not.toBe(new URL(b).host)
+  expect(parseHtmlPreviewProtocolUrl(a.replace(`/${token}/`, `/${other}/`))).toBeNull()
+  expect(parseHtmlPreviewProtocolUrl(`courseware-preview://app/${token}/file/one.html`)).toBeNull()
+  expect(parseHtmlPreviewProtocolUrl(a.replace('.app/', '.app.evil/'))).toBeNull()
 })

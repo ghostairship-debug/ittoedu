@@ -86,12 +86,12 @@ function executionFixture() {
     for (const listener of listeners) listener(timeline.at(-1)!)
   }
   /** The run of a request ends; Main has recorded what it changed on the object. */
-  const finish = (conversationId: string, runId: string, change: Omit<ElementChangeView, 'submissionId'>) => {
+  const finish = (conversationId: string, runId: string, change: Omit<ElementChangeView, 'submissionId'>, status: 'completed' | 'partial' = 'completed') => {
     const submission = submissions.find(value => value.runId === runId)!
-    runs.set(runId, { ...runs.get(runId)!, status: 'completed' })
+    runs.set(runId, { ...runs.get(runId)!, status, ...(status === 'partial' ? { failure: { code: 'test-required-output-missing', message: '文字已修改，所需图片未生成。' } } : {}) })
     changes.set(submission.submissionId, { submissionId: submission.submissionId, ...change })
     const base = { conversationId, taskId: 'task', runId, time: 1, source: 'builtin' as const }
-    timeline.push({ ...base, eventId: `end-${runId}`, itemId: 'run-end', sequence: timeline.length + 1, type: 'run.end', update: 'snapshot', data: { status: 'completed' } })
+    timeline.push({ ...base, eventId: `end-${runId}`, itemId: 'run-end', sequence: timeline.length + 1, type: 'run.end', update: 'snapshot', data: { status } })
     for (const listener of listeners) listener(timeline.at(-1)!)
     return submission.submissionId
   }
@@ -326,4 +326,31 @@ it('M15 a card shows a request\'s reply as its run showed it, before the convers
   await cards.send(key, '看看', capture('a'))
   f.say('c1', 'run-1', '看过了：是红色。')
   await waitFor(() => expect(cards.view(key)!.entries[0]!.reply).toBe('看过了：是红色。'))
+})
+
+
+it('M26 partial remains visible and terminal while an applied change stays undoable', async () => {
+  const f = executionFixture(), d = documentsFixture()
+  window.desktopAPI = { execution: f.execution, executionSettings: settings(), documents: d.documents } as unknown as typeof window.desktopAPI
+  elementCards.setWorkspace('partial-workspace')
+  try {
+    render(<SelectionQuickBar label="选中对象快捷工具" anchor={{ left: 100, top: 200, width: 120, height: 40 }} bounds={{ left: 0, top: 0, right: 1000, bottom: 800 }} selectionKey="doc:partial">
+      <ElementAiButton documentId="doc" target={target('partial')} label="部分交付" capture={async () => capture('partial')} />
+    </SelectionQuickBar>)
+    fireEvent.click(screen.getByRole('button', { name: 'AI 修改' }))
+    const card = screen.getByRole('dialog', { name: 'AI 修改：部分交付' })
+    fireEvent.change(within(card).getByRole('textbox', { name: 'AI 修改要求' }), { target: { value: '改字并补图' } })
+    fireEvent.click(within(card).getByRole('button', { name: '发送' }))
+    await waitFor(() => expect(f.api.send).toHaveBeenCalledOnce())
+    act(() => { f.finish('c1', 'run-1', { state: 'applied', fields: ['文字'] }, 'partial') })
+    await within(card).findByText('部分完成', { exact: true })
+    expect(within(card).queryByText('已完成', { exact: true })).toBeNull()
+    expect(within(card).getByRole('alert')).toHaveTextContent('文字已修改，所需图片未生成。')
+    await waitFor(() => expect(within(card).getByRole('button', { name: '撤销这张卡的 AI 修改' })).toBeEnabled())
+    expect(elementCards.view(elementCardKey('doc', target('partial')))).toMatchObject({ busy: false, entries: [{ state: 'partial' }] })
+    expect(f.api.elementChange).toHaveBeenCalled()
+  } finally {
+    act(() => d.close('doc'))
+    window.desktopAPI = undefined as unknown as typeof window.desktopAPI
+  }
 })

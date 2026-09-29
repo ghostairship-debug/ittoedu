@@ -7,6 +7,7 @@ import { prepareImageResource } from '../admittedImageResource'
 import { captureMainTiming } from '../execution/ExecutionEventStore'
 import type { ImageProviderPort, ImageProviderReference } from './ImageProviderPort'
 import { imageProvenance } from './imageRoute'
+import { waitForHostWork } from '../../../shared/workbench/jobWait'
 
 export interface ImageGenerationServiceOptions {
   directory: string
@@ -22,7 +23,7 @@ const hash = (data: string | Uint8Array) => createHash('sha256').update(data).di
 type StoredImageJob = ImageJobSnapshot & { request: ImageGenerationRequest }
 const expose = ({ request: _request, ...job }: StoredImageJob): ImageJobSnapshot => structuredClone(job)
 const queues = new Map<string, Promise<unknown>>()
-const active = new Map<string, { controller: AbortController; promise: Promise<ImageJobSnapshot>; requestDigest: string; sequence: number }>()
+const active = new Map<string, { controller: AbortController; promise: Promise<ImageJobSnapshot>; started: Promise<ImageJobSnapshot>; requestDigest: string; sequence: number }>()
 function serial<T>(key: string, operation: () => Promise<T>): Promise<T> {
   const result = (queues.get(key) ?? Promise.resolve()).catch(() => undefined).then(operation), tail = result.catch(() => undefined)
   queues.set(key, tail); void tail.finally(() => { if (queues.get(key) === tail) queues.delete(key) }); return result
@@ -103,22 +104,35 @@ export class ImageGenerationService {
     })
   }
   run(input: ImageGenerationRequest, options: { signal?: AbortSignal } = {}): Promise<ImageJobSnapshot> {
+    try { return this.launch(input, options).promise.then(value => structuredClone(value)) } catch (error) { return Promise.reject(error) }
+  }
+  /** Returns only after the existing job owner durably creates or recovers its receipt. */
+  start(input: ImageGenerationRequest, options: { signal?: AbortSignal } = {}): Promise<ImageJobSnapshot> {
+    try { return this.launch(input, options).started.then(value => structuredClone(value)) } catch (error) { return Promise.reject(error) }
+  }
+  private launch(input: ImageGenerationRequest, options: { signal?: AbortSignal }) {
     const request = structuredClone(input), key = this.key(request.jobId), requestDigest = hash(JSON.stringify(request)), existing = active.get(key)
     if (existing) {
-      if (existing.requestDigest !== requestDigest) return Promise.reject(new ImageGenerationError('image-job-conflict', '此图片任务身份已绑定其他请求。'))
-      return existing.promise.then(value => structuredClone(value))
+      if (existing.requestDigest !== requestDigest) throw new ImageGenerationError('image-job-conflict', '此图片任务身份已绑定其他请求。')
+      return existing
     }
     const controller = new AbortController(), abort = () => { controller.abort(); void this.stop(request.jobId).catch(() => undefined) }
     options.signal?.addEventListener('abort', abort, { once: true }); if (options.signal?.aborted) controller.abort()
     const sequence = ++this.runSequence
-    const promise = this.maintenance.then(() => this.execute(request, key, requestDigest, controller)).finally(() => {
+    let accepted!: (value: ImageJobSnapshot) => void, rejectStart!: (error: unknown) => void
+    const started = new Promise<ImageJobSnapshot>((resolve, reject) => { accepted = resolve; rejectStart = reject })
+    const promise = this.maintenance.then(() => this.execute(request, key, requestDigest, controller, accepted))
+      .catch(error => { rejectStart(error); throw error }).finally(() => {
       options.signal?.removeEventListener('abort', abort); active.delete(key)
       for (const listener of this.settledListeners) { try { listener() } catch { /* Cleanup observers cannot change a model result. */ } }
     })
-    active.set(key, { controller, promise, requestDigest, sequence })
-    return promise.then(value => structuredClone(value))
+    // Both waiting and background callers see their own rejection; an unused branch is not unhandled.
+    void started.catch(() => undefined); void promise.catch(() => undefined)
+    const entry = { controller, promise, started, requestDigest, sequence }
+    active.set(key, entry)
+    return entry
   }
-  private async execute(request: ImageGenerationRequest, filename: string, requestDigest: string, controller: AbortController): Promise<ImageJobSnapshot> {
+  private async execute(request: ImageGenerationRequest, filename: string, requestDigest: string, controller: AbortController, accepted: (job: ImageJobSnapshot) => void): Promise<ImageJobSnapshot> {
     const initial = await serial(filename, async () => {
       try {
         const retired = JSON.parse(await fs.readFile(this.retiredKey(request.jobId), 'utf8')) as { jobId?: unknown; requestDigest?: unknown }
@@ -140,14 +154,23 @@ export class ImageGenerationService {
         createdAt: now, updatedAt: now, provenance: imageProvenance(request), resources: [] }
       await this.atomic(filename, job); this.publish(job); return { job, existing: false }
     })
+    accepted(expose(initial.job))
     if (initial.existing || initial.job.stopped) return expose(initial.job)
     const references: ImageProviderReference[] = []
     let providerInvoked = false, providerFinished = false, referencesFinished = false, resourcesStarted = false, resourcesFinished = false
     this.timing(filename, 'image.references.started', { referenceCount: (request.referenceIds ?? []).length })
     try {
       for (const referenceId of request.referenceIds ?? []) {
-        if (!this.options.resolveReference) throw new ImageGenerationError('reference-unavailable', '未配置已授权的参考图读取入口。')
-        const source = await this.options.resolveReference(request.runId, request.documentId, referenceId)
+        let source: HostImageInput
+        if (request.documentId.startsWith('workspace:')) {
+          const match = /^(image-tool:[a-f0-9]{64})@(image_[a-f0-9]{64})$/.exec(referenceId)
+          if (!match || match[1] === request.jobId) throw new ImageGenerationError('reference-unavailable', '独立参考图须来自本任务已完成的另一图片作业。')
+          source = await this.readReadyResourceFromJob({ jobId: match[1]!, sourceRunId: request.runId,
+            sourceDocumentId: request.documentId, resourceId: match[2]! })
+        } else {
+          if (!this.options.resolveReference) throw new ImageGenerationError('reference-unavailable', '未配置已授权的参考图读取入口。')
+          source = await this.options.resolveReference(request.runId, request.documentId, referenceId)
+        }
         references.push({ ...source, bytes: Uint8Array.from(source.bytes), referenceId })
       }
       referencesFinished = true
@@ -192,6 +215,19 @@ export class ImageGenerationService {
       }
       return expose(job)
     })
+  }
+  /** Bounded wait for this owner's already-started request; never starts or resends it. */
+  async wait(runId: string, jobId: string, milliseconds: number, signal?: AbortSignal): Promise<ImageJobSnapshot> {
+    const current = await this.read(jobId)
+    if (current.runId !== runId) throw new ImageGenerationError('image-job-not-authorized', '图片任务不属于当前运行。')
+    const work = active.get(this.key(jobId))?.promise
+    // An in-flight provider may still return a known, unapplied image after a
+    // stopped-after-send unknown receipt. Waiting never resends that request.
+    if (!work || !['preparing', 'running', 'unknown'].includes(current.status)) return current
+    await waitForHostWork(work, milliseconds, signal)
+    const result = await this.read(jobId)
+    if (result.runId !== runId) throw new ImageGenerationError('image-job-not-authorized', '图片任务不属于当前运行。')
+    return result
   }
   async stop(jobId: string): Promise<ImageJobSnapshot> {
     const filename = this.key(jobId); active.get(filename)?.controller.abort()

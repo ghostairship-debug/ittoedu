@@ -1,0 +1,1 @@
+{"mode":"send","phase":"result-collected","submitted":true,"accepted":{"state":"accepted","runId":"1e98058f-23b4-40a6-af33-3b9ce0c7eacd"},"runStatus":"stopped","requestCount":12,"fileNames":["chart.py","report.css","report.html","sales.csv","summary.json"],"appClosed":true,"scratchRemoved":true,"error":null}

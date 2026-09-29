@@ -61,6 +61,8 @@ export function HtmlPreviewPane({ lease, committed, onUndo, onRedo, onSave, acti
   const [pageCount, setPageCount] = useState(0)
   const [ambiguous, setAmbiguous] = useState(false)
   const [stale, setStale] = useState(false)
+  const [frameReady, setFrameReady] = useState(false)
+  const [modePending, setModePending] = useState(false)
   const [editMode, setEditMode] = useState(false)
   useEffect(() => {
     if (!active) return
@@ -76,6 +78,9 @@ export function HtmlPreviewPane({ lease, committed, onUndo, onRedo, onSave, acti
   }, [active, lease.url, onUndo, onRedo])
   const refreshPreservingView = () => {
     if (!frame.current) return
+    setFrameReady(false)
+    setModePending(editModeRef.current)
+    setEditMode(false)
     restoreAfterLoad.current = { ...view.current }
     history.current = []
     pendingEdit.current = null
@@ -88,6 +93,9 @@ export function HtmlPreviewPane({ lease, committed, onUndo, onRedo, onSave, acti
   useEffect(() => {
     const iframe = frame.current
     if (!iframe) return
+    setFrameReady(false)
+    setModePending(editModeRef.current)
+    setEditMode(false)
     latestSource.current = source
     history.current = []
     pendingEdit.current = null
@@ -105,9 +113,16 @@ export function HtmlPreviewPane({ lease, committed, onUndo, onRedo, onSave, acti
       },
       onReady(count, isAmbiguous) {
         setPageCount(count); setAmbiguous(isAmbiguous); setStale(false)
+        setFrameReady(true)
+        setModePending(editModeRef.current)
         instance.setEditMode(editModeRef.current)
         const restore = restoreAfterLoad.current
         if (restore) { restoreAfterLoad.current = null; instance.restore(restore.index, restore.scroll) }
+      },
+      onEditModeReady(enabled) {
+        if (enabled !== editModeRef.current) return
+        setEditMode(enabled)
+        setModePending(false)
       },
       onPage(index, scroll) { view.current = { index, scroll }; setPage(index) },
       onEditing() { pendingEdit.current = { beforeSource: latestSource.current } },
@@ -166,13 +181,13 @@ export function HtmlPreviewPane({ lease, committed, onUndo, onRedo, onSave, acti
 
   return <div ref={container} className="html-preview-pane">
     <div className="html-preview-pane__toolbar" role="toolbar" aria-label="HTML 分页">
-      <button type="button" aria-pressed={editMode} onClick={() => {
+      <button type="button" aria-pressed={editMode} disabled={!frameReady || modePending} onClick={() => {
         const next = !editModeRef.current
         editModeRef.current = next
-        setEditMode(next)
+        setModePending(true)
         setSelected(null)
         controller.current?.setEditMode(next)
-      }}>{editMode ? '完成编辑' : '编辑预览'}</button>
+      }}>{modePending ? '正在切换编辑模式…' : editMode ? '完成编辑' : '编辑预览'}</button>
       <button type="button" disabled={pageCount < 2 || page === 0} onClick={() => controller.current?.navigate(page - 1)}>上一页</button>
       <span>{pageCount ? `${page + 1} / ${pageCount}` : '连续页面'}</span>
       <button type="button" disabled={pageCount < 2 || page >= pageCount - 1} onClick={() => controller.current?.navigate(page + 1)}>下一页</button>
@@ -181,7 +196,8 @@ export function HtmlPreviewPane({ lease, committed, onUndo, onRedo, onSave, acti
     {stale && <div role="status" className="html-preview-pane__notice">
       源码已从其他编辑入口变化。<button type="button" onClick={refreshPreservingView}>刷新预览</button>
     </div>}
-    <iframe ref={frame} title="HTML 预览" src={lease.url} sandbox="allow-scripts" referrerPolicy="no-referrer"
+    <iframe ref={frame} title="HTML 预览" src={lease.url} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer"
+      style={{ pointerEvents: modePending ? 'none' : undefined }}
       onLoad={() => controller.current?.frameLoaded()} />
     {selected && <HtmlLightEditOverlay target={selected} committed={committed} position={position}
       onText={value => controller.current!.editText(value)} onImage={image => controller.current!.editImage(image)}

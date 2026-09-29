@@ -1,0 +1,8 @@
+
+Running 1 test using 1 worker
+
+(node:16248) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 1 tests\e2e\g20M30ZeroDocumentWorkspace.spec.ts:12:5 › M30 T1 fixture: zero-document delivery, HTML editing, review and fork in Electron (50.7s)
+
+  1 passed (51.3s)

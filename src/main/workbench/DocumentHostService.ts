@@ -1,3 +1,4 @@
+import { sourceFileKind } from '../../shared/workbench/sourceFileKind'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -46,6 +47,7 @@ export class DocumentHostService {
   private readonly drivers
   private readonly subscribed = new Set<string>()
   private eventSink?: (event: DocumentEvent) => void
+  private readonly eventListeners = new Set<(event: DocumentEvent) => void>()
   private readonly saveListeners = new Set<(fact: DocumentSaveFact) => void>()
   private readonly closeListeners = new Set<(documentId: string) => void>()
   private bootstrapping?: Promise<DocumentSnapshot>
@@ -61,6 +63,12 @@ export class DocumentHostService {
   }
 
   setEventSink(sink?: (event: DocumentEvent) => void): void { this.eventSink = sink }
+
+  /** Main consumers can observe every formal session change without replacing the renderer event sink. */
+  subscribeEvents(listener: (event: DocumentEvent) => void): () => void {
+    this.eventListeners.add(listener)
+    return () => this.eventListeners.delete(listener)
+  }
 
   subscribeSaves(listener: (fact: DocumentSaveFact) => void): () => void { this.saveListeners.add(listener); return () => this.saveListeners.delete(listener) }
   /** A document session closed (its tab or window); what belonged to it can be cleared (M15 element AI cards). */
@@ -107,19 +115,14 @@ export class DocumentHostService {
           this.subscribed.delete(event.documentId)
           for (const listener of this.closeListeners) { try { listener(event.documentId) } catch { /* Closing never waits for its listeners. */ } }
         }
+        for (const listener of this.eventListeners) { try { listener(event) } catch { /* Observation cannot veto a formal edit. */ } }
         this.eventSink?.(event)
       })
     }
     return session.read()
   }
 
-  private kind(filename: string): DocumentKind {
-    const extension = path.extname(filename).toLowerCase()
-    if (extension === '.md' || extension === '.markdown') return 'markdown'
-    if (extension === '.txt' || extension === '.html' || extension === '.htm') return 'text'
-    if (extension === '.h5lesson') return 'course-v9'
-    throw new Error('当前支持 Markdown、纯文本（.txt）、HTML（.html/.htm）和 V9 h5lesson 文档')
-  }
+  private kind(filename: string): DocumentKind { return sourceFileKind(filename) }
 
   open(filename: string): Promise<DocumentSnapshot> { return this.fileCoordinator.withFileAccess(() => this.openFile(filename)) }
   private async openFile(filename: string): Promise<DocumentSnapshot> {

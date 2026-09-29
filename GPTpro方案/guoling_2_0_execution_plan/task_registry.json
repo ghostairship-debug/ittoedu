@@ -1384,7 +1384,7 @@
         "M18"
       ],
       "document": "mid_term/M25.md",
-      "status": "planned",
+      "status": "implemented",
       "existing_code": [
         "src/main/createWindow.ts",
         "src/main/workbench/execution/ExecutionDesktopService.ts",
@@ -1416,7 +1416,7 @@
         "M18"
       ],
       "document": "mid_term/M26.md",
-      "status": "planned",
+      "status": "verified",
       "existing_code": [
         "src/main/workbench/execution/ExecutionEngine.ts",
         "src/main/workbench/providers/OpenAIChatProvider.ts",
@@ -1448,7 +1448,7 @@
         "M18"
       ],
       "document": "mid_term/M27.md",
-      "status": "planned",
+      "status": "implemented",
       "existing_code": [
         "src/core/tools/AgentFileTools.ts",
         "src/main/workbench/execution/AgentFileService.ts",
@@ -1483,7 +1483,7 @@
         "M27"
       ],
       "document": "mid_term/M28.md",
-      "status": "planned",
+      "status": "implemented",
       "existing_code": [
         "src/main/workbench/execution/ExecutionEngine.ts",
         "src/main/workbench/workbenchToolServices.ts",
@@ -1508,7 +1508,7 @@
     },
     {
       "id": "M29",
-      "title": "网络研究、外部工具、首个媒体与有限Agent委派",
+      "title": "网络研究、外部工具、媒体最小框架与有限Agent委派",
       "phase": "M",
       "release": "2.0",
       "required": true,
@@ -1517,7 +1517,7 @@
         "M28"
       ],
       "document": "mid_term/M29.md",
-      "status": "planned",
+      "status": "implemented",
       "existing_code": [
         "src/main/workbench/external/McpDocumentServer.ts",
         "src/main/workbench/external/ExternalMcpService.ts",
@@ -1530,7 +1530,8 @@
         "M29-T01",
         "M29-T02",
         "M29-T03",
-        "M29-T04"
+        "M29-T04",
+        "M29-T05"
       ],
       "completion_dependencies": [
         "M25",
@@ -1553,7 +1554,7 @@
         "M29"
       ],
       "document": "mid_term/M30.md",
-      "status": "planned",
+      "status": "implemented",
       "existing_code": [
         "src/renderer/workbench/ExecutionTimeline.tsx",
         "src/renderer/workbench/elementCards/elementCardController.ts",
@@ -1789,11 +1790,11 @@
     },
     {
       "id": "B23",
-      "title": "网络研究、外部工具、首个媒体与有限Agent委派",
+      "title": "网络研究、外部工具、媒体最小框架与有限Agent委派",
       "tasks": [
         "M29"
       ],
-      "exit": "原C1–C3及首个XM/单runner XD真实接通：研究引用、外部授权读写、浏览器、媒体和薄委派；未授权/未连接保持阻断。"
+      "exit": "C1–C3及单runner XD真实接通；语音/视频/音乐最小扩展框架与未配置边界本地验证。真实媒体生成闭环按Owner最新范围独立延期，不冒充通过。"
     },
     {
       "id": "B24",
@@ -1804,7 +1805,7 @@
       "exit": "U1–U3、T1–T4及M30-T08 Owner增量签收完成后，扩展2.0才闭合；旧范围接受不自动覆盖。"
     }
   ],
-  "plan_revision": "2.5",
+  "plan_revision": "2.6",
   "removed_acceptance": [
     {
       "id": "S01-T03",

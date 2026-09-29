@@ -179,6 +179,9 @@
 .execution-question__other { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 6px; }
 .execution-question__other label { flex: 1 1 200px; min-width: 0; display: grid; gap: 3px; font-size: 11px; color: var(--muted-text, #607069); }
 .execution-question__other input { min-width: 0; box-sizing: border-box; padding: 5px 7px; border: 1px solid var(--border-color, #cbd3cf); border-radius: 7px; }
+.execution-question__other textarea { min-width: 0; width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--border-color, #cbd3cf); border-radius: 7px; font: inherit; font-size: 13px; resize: vertical; }
+.execution-question__confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.execution-question__confirm small { color: var(--muted-text, #607069); font-size: 11px; }
 .execution-question__error { margin: 0; color: #9b3b27; font-size: 12px; }
 
 /* General-agent composer (Owner 2026-09-24): chips above, "+" left of the input, permission bottom-left, model and send bottom-right. */

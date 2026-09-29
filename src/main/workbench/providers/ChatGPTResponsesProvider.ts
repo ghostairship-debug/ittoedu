@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util'
 import type { ModelAssistantMessage, ModelConnectionSnapshot, ModelEvent, ModelFailure, ModelJsonObject, ModelProvider, ModelRequest, ModelUsage } from '../../../shared/workbench/modelProvider'
 import { modelToolWireName } from './OpenAIChatProvider'
+import { ModelStreamClock, waitForModelOperation } from './ModelStreamClock'
 import { serverSentEvents } from './serverSentEvents'
 import { httpFailureKind } from './providerHttpFailure'
 
@@ -10,6 +11,8 @@ export interface ChatGPTResponsesProviderOptions {
   credentialResolver(connection: Readonly<ModelConnectionSnapshot>): Promise<{ accessToken: string; accountId: string }>
   fetch?: typeof fetch
   timeoutMs?: number
+  progressTimeoutMs?: number
+  maxDurationMs?: number
   maxResponseBytes?: number
   now?: () => number
   /** Local, privacy-filtered diagnostics only. Never receives response bytes or credentials. */
@@ -114,6 +117,7 @@ function retryAfter(value: string | null, now: number): number | undefined {
 
 /** Direct ChatGPT Responses transport. No Codex process, login, retry or alternate billing route. */
 export class ChatGPTResponsesProvider implements ModelProvider {
+  readonly retrySafety = 'pure-generation' as const
   constructor(private readonly options: ChatGPTResponsesProviderOptions) {}
   async *stream(input: ModelRequest, options: { signal?: AbortSignal } = {}): AsyncGenerator<ModelEvent> {
     let sequence = 0, attempted = false, timedOut = false
@@ -122,7 +126,7 @@ export class ChatGPTResponsesProvider implements ModelProvider {
     const abort = () => controller.abort()
     options.signal?.addEventListener('abort', abort, { once: true })
     if (options.signal?.aborted) abort()
-    const timer = setTimeout(() => { timedOut = true; abort() }, this.options.timeoutMs ?? 120_000)
+    const clock = new ModelStreamClock(this.options, () => { if (!controller.signal.aborted) { timedOut = true; abort() } })
     let response: Response | undefined
     try {
       const request = structuredClone(input)
@@ -130,8 +134,8 @@ export class ChatGPTResponsesProvider implements ModelProvider {
       try { if (!request.requestId) throw new Error(); prepared = prepare(request) }
       catch { yield event({ type: 'response.failed', failure: { outcome: 'not-sent', kind: 'configuration', code: 'invalid-model-request', message: 'ChatGPT 连接或请求配置无效；请求未发送。' } }); return }
       let credential: { accessToken: string; accountId: string }
-      try { credential = await this.options.credentialResolver(request.selection.connection) }
-      catch { yield event({ type: 'response.failed', failure: { outcome: 'not-sent', kind: 'auth', code: 'credential-unavailable', message: 'ChatGPT 登录凭据不可用；请求未发送。' } }); return }
+      try { credential = await waitForModelOperation(() => this.options.credentialResolver(request.selection.connection), controller.signal) }
+      catch { controller.signal.throwIfAborted(); yield event({ type: 'response.failed', failure: { outcome: 'not-sent', kind: 'auth', code: 'credential-unavailable', message: 'ChatGPT 登录凭据不可用；请求未发送。' } }); return }
       if (credential.accountId !== request.selection.connection.accountId || !text(credential.accessToken) || /[\r\n]/.test(credential.accessToken)) {
         yield event({ type: 'response.failed', failure: { outcome: 'not-sent', kind: 'auth', code: 'credential-account-mismatch', message: 'ChatGPT 登录与所选账号不匹配；请求未发送。' } }); return
       }
@@ -165,12 +169,14 @@ export class ChatGPTResponsesProvider implements ModelProvider {
       const doneItems = new Map<number, ModelJsonObject>()
       const doneItemIds = new Set<string>()
       let nextDoneIndex = 0
-      for await (const data of serverSentEvents(response.body, this.options.maxResponseBytes ?? 32 * 1024 * 1024)) {
+      for await (const data of serverSentEvents(response.body, this.options.maxResponseBytes ?? 32 * 1024 * 1024, () => clock.activity())) {
+        clock.pause()
         controller.signal.throwIfAborted()
         if (data === '[DONE]') break
         sawFramedEvent = true
         const chunk: unknown = JSON.parse(data)
         if (!object(chunk) || !text(chunk.type)) throw new ProtocolError()
+        if (object(chunk.response) && object(chunk.response.usage)) yield event({ type: 'usage.reported', usage: usageOf(chunk.response.usage) })
         // These are explicit provider terminal events. Never forward their untrusted error text or payload.
         if (chunk.type === 'error') throw new ProviderResponseError('chatgpt-provider-sse-error')
         if (chunk.type === 'response.failed') throw new ProviderResponseError('chatgpt-provider-response-failed')
@@ -189,6 +195,7 @@ export class ChatGPTResponsesProvider implements ModelProvider {
         }
         if (chunk.type === 'response.output_text.delta' || chunk.type === 'response.reasoning_summary_text.delta') {
           if (!responseId || typeof chunk.delta !== 'string') throw new ProtocolError()
+          if (chunk.delta) clock.progress()
           if (chunk.type === 'response.output_text.delta') previewText += chunk.delta
           yield event({ type: chunk.type === 'response.output_text.delta' ? 'text.delta' : 'reasoning.delta', text: chunk.delta })
         }
@@ -204,6 +211,7 @@ export class ChatGPTResponsesProvider implements ModelProvider {
           const index = Number(chunk.output_index), call = toolPreviews.get(index)
           if (!call || argumentDones.has(index) || typeof chunk.delta !== 'string') throw new ProtocolError()
           call.arguments += chunk.delta
+          if (chunk.delta) clock.progress()
           yield event({ type: 'tool.delta', index, id: call.id, name: prepared.names.get(call.name), argumentsDelta: chunk.delta })
         }
         if (chunk.type === 'response.function_call_arguments.done') {
@@ -213,6 +221,7 @@ export class ChatGPTResponsesProvider implements ModelProvider {
           argumentDones.set(index, chunk.arguments)
           if (call && !call.arguments && chunk.arguments) {
             call.arguments = chunk.arguments
+            clock.progress()
             yield event({ type: 'tool.delta', index, id: call.id, name: prepared.names.get(call.name), argumentsDelta: chunk.arguments })
           }
         }
@@ -279,6 +288,7 @@ export class ChatGPTResponsesProvider implements ModelProvider {
             nativeResponse: structuredClone({ ...native, output }) })
           completed = true; break
         }
+        clock.resume()
       }
       if (!completed) {
         if (!sawFramedEvent && mediaType !== 'text/event-stream') throw new ProtocolError(unexpectedMediaCode)
@@ -304,7 +314,7 @@ export class ChatGPTResponsesProvider implements ModelProvider {
       yield event({ type: 'response.failed', failure: { outcome: providerFailure && providerFailure.code !== 'chatgpt-provider-response-incomplete'
         ? 'rejected' : attempted ? 'unknown' : 'not-sent', kind, code, message } })
     } finally {
-      clearTimeout(timer); options.signal?.removeEventListener('abort', abort); controller.abort()
+      clock.dispose(); options.signal?.removeEventListener('abort', abort); controller.abort()
       if (response?.body && !response.body.locked) await response.body.cancel().catch(() => undefined)
     }
   }

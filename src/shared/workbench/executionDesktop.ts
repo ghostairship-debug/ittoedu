@@ -80,6 +80,10 @@ export const executionDesktopRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('pause-queue'), ...identity }).strict(),
   z.object({ type: z.literal('resume-queue'), ...identity }).strict(),
   z.object({ type: z.literal('run'), runId: id }).strict(),
+  z.object({ type: z.literal('change-review'), ...identity, runId: id, offset: index.optional(), limit: z.number().int().min(1).max(100).optional() }).strict(),
+  z.object({ type: z.literal('change-rollback'), ...identity, runId: id, entryId: id }).strict(),
+  z.object({ type: z.literal('checkpoint'), ...identity, runId: id }).strict(),
+  z.object({ type: z.literal('fork-checkpoint'), ...identity, runId: id, instruction: z.string().max(8000).optional() }).strict(),
   z.object({ type: z.literal('stop'), runId: id }).strict(),
   z.object({ type: z.literal('answer'), runId: id, callId: id, answer: userAnswerSchema }).strict(),
   z.object({ type: z.literal('approve'), runId: id, callId: id, decision: approvalDecisionSchema }).strict(),
@@ -172,6 +176,11 @@ export interface ExecutionDesktopAPI {
   pauseQueue(input: { workspaceId: string; conversationId: string }): Promise<void>
   resumeQueue(input: { workspaceId: string; conversationId: string }): Promise<void>
   run(runId: string): Promise<ExecutionRunRecord | null>
+  changeReview?(input: { workspaceId: string; conversationId: string; runId: string; offset?: number; limit?: number }): Promise<import('../../main/workbench/review/ExecutionChangeReviewService').ChangeReviewPage>
+  changeRollback?(input: { workspaceId: string; conversationId: string; runId: string; entryId: string }): Promise<import('../../main/workbench/review/ExecutionChangeReviewService').ChangeRollbackResult>
+  checkpoint?(input: { workspaceId: string; conversationId: string; runId: string }): Promise<import('../../main/workbench/execution/CheckpointForkService').UserCheckpointIndex>
+  forkCheckpoint?(input: { workspaceId: string; conversationId: string; runId: string; instruction?: string }): Promise<{
+    conversation: ConversationRecord; fork: import('../../main/workbench/execution/CheckpointForkService').ForkDraft }>
   stop(runId: string): Promise<ExecutionRunRecord | null>
   /** Answers the open ask_user question of a live built-in run with the user's own choice. */
   answer?(input: { runId: string; callId: string; answer: UserAnswer }): Promise<ExecutionRunRecord>

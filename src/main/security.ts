@@ -1,9 +1,11 @@
 import path from 'node:path'
+import { parseHtmlPreviewProtocolUrl } from './workbench/htmlPreview/htmlPreviewProtocol'
 import { fileURLToPath } from 'node:url'
 import type {
   IpcMainInvokeEvent,
   Session,
   WebContents,
+  WebFrameMain,
 } from 'electron'
 import type { BrowserWindow } from 'electron'
 import { DesktopOperationError } from './errors'
@@ -82,7 +84,7 @@ const htmlPreviewFrameEntries = new Map<string, number>()
 function htmlPreviewEntryKey(value: string): string | null {
   try {
     const url = new URL(value)
-    if (url.protocol !== 'courseware-preview:' || url.hostname !== 'app' || url.search) return null
+    if (!parseHtmlPreviewProtocolUrl(value) || url.search) return null
     url.hash = ''
     return url.href
   } catch {
@@ -108,10 +110,27 @@ export function isAllowedHtmlPreviewFrameUrl(candidate: string, ownerWebContents
   return key !== null && htmlPreviewFrameEntries.get(key) === ownerWebContentsId
 }
 
+/** Descendants may load only local srcdoc/Blob documents owned by an active preview origin. */
+export function isAllowedHtmlPreviewChildFrameUrl(candidate: string, ownerWebContentsId: number, frame?: WebFrameMain | null): boolean {
+  const local = candidate === 'about:srcdoc' || candidate === 'about:blank'
+  let blob: URL | null = null
+  if (!local) {
+    try { const url = new URL(candidate); if (url.protocol !== 'blob:') return false; blob = new URL(url.pathname) }
+    catch { return false }
+  }
+  for (let parent = frame?.parent; parent; parent = parent.parent) {
+    if (!isAllowedHtmlPreviewFrameUrl(parent.url, ownerWebContentsId)) continue
+    if (local) return true
+    const owner = new URL(parent.url)
+    return blob?.protocol === owner.protocol && blob.host === owner.host
+  }
+  return false
+}
+
 export function hardenWebContents(
   contents: WebContents,
   isAllowedNavigation: (url: string) => boolean,
-  isAllowedSubframeNavigation: (url: string) => boolean = () => false,
+  isAllowedSubframeNavigation: (url: string, frame?: WebFrameMain | null) => boolean = () => false,
 ): void {
   contents.setWindowOpenHandler(() => ({ action: 'deny' }))
 
@@ -122,7 +141,7 @@ export function hardenWebContents(
   contents.on('will-frame-navigate', (event) => {
     const allowed = event.isMainFrame
       ? isAllowedNavigation(event.url)
-      : isAllowedSubframeNavigation(event.url)
+      : isAllowedSubframeNavigation(event.url, event.frame)
     if (!allowed) {
       event.preventDefault()
     }

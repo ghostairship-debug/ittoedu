@@ -551,7 +551,9 @@ export function FlowWorkspace({ documentId, toolbarContainer, view, sessionToken
               // Selected text opens a text card (M15); it stays until closed and follows its text through follow-ups.
               if (target.selection?.kind === 'text' && target.mode === 'layout' && documentId && !readOnly) {
                 const surfaceId = view.surfaceId, label = textCardLabel(target.ranges?.map(range => range.before).join('') || '所选文字')
-                return <TextAiButton documentId={documentId} disabledReason={issue ?? contextualCommandIssue(target)} start={async () => {
+                return <TextAiButton documentId={documentId}
+                  selectionIdentity={JSON.stringify({ surfaceId, selection: target.selection, ranges: target.ranges?.map(range => [range.from, range.to, range.before]) })}
+                  disabledReason={issue ?? contextualCommandIssue(target)} start={async () => {
                   const snapshot = await workbenchSelection.prepare(documentId)
                   const capture = captureFlowSelection(snapshot, surfaceId, target), range = capture.targets[0]
                   if (capture.targets.length !== 1 || range?.kind !== 'flow-range') throw new Error('请在一段文字内选择要修改的内容。')

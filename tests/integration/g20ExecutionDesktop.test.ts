@@ -286,5 +286,75 @@ describe('G20 execution desktop integration', () => {
     expect(await service.operate({ type: 'conversation', workspaceId: opened.workspace.workspaceId, conversationId: conversation.conversationId })).toBeNull()
     expect(await documents.internalAPI.read(document.documentId)).toMatchObject({ model: { source: 'after provider\n' } })
     expect(await fs.readFile(filename, 'utf8')).toBe('before provider\n')
+    const afterDelete = new ExecutionDesktopService({ directory: path.join(root, 'desktop'), documents, settings,
+      authorizeWorkspaceRoot: async input => ({ resolvedPath: await fs.realpath(input) }), fetch: forbiddenFetch })
+    expect(await afterDelete.operate({ type: 'conversation', workspaceId: opened.workspace.workspaceId, conversationId: conversation.conversationId })).toBeNull()
+    expect(await afterDelete.submissions.read(sent.run.input.taskId)).toMatchObject({ state: 'accepted', runId: sent.run.runId, failure: { code: 'conversation-deleted' } })
+    expect((await afterDelete.engine.read(sent.run.runId))?.status).toBe('completed')
+    expect(await afterDelete.writableTasksForDocument(document.documentId)).toEqual({ runIds: [], submissionIds: [] })
+    expect(forbiddenFetch).not.toHaveBeenCalled()
+    expect(await documents.internalAPI.read(document.documentId)).toMatchObject({ dirty: true, model: { source: 'after provider\n' } })
   })
+})
+
+
+it('M25 retries a failed initialization on the next explicit operation; document close queries never initialize history', async () => {
+  const { service, workspace, document } = await fixture()
+  const recover = vi.spyOn(service.engine, 'recover')
+  expect(await service.writableTasksForDocument(document.documentId)).toEqual({ runIds: [], submissionIds: [] })
+  expect(recover).not.toHaveBeenCalled()
+  vi.spyOn(service.runs, 'list').mockRejectedValueOnce(new Error('temporary read failure'))
+  await expect(service.operate({ type: 'workspace', root: workspace })).rejects.toThrow()
+  const result = await service.operate({ type: 'workspace', root: workspace }) as { workspace: { rootPath: string } }
+  expect(result.workspace.rootPath).toBe(await fs.realpath(workspace))
+  expect(recover).toHaveBeenCalledTimes(1)
+})
+
+it('M25 retires an orphan active submission without resurrecting its conversation or replaying its unknown request', async () => {
+  const forbiddenFetch = vi.fn(async () => { throw new Error('No model call during recovery') })
+  const { root, workspace, filename, documents, document, settings, service } = await fixture(forbiddenFetch)
+  await configureConversation(settings, 'http://127.0.0.1:1/v1')
+  const space = await service.operate({ type: 'workspace', root: workspace }) as { workspace: { workspaceId: string } }
+  const now = Date.now(), taskId = 'orphan-active-submission', runId = 'orphan-active-run', conversationId = 'deleted-conversation'
+  const input = { conversationId, taskId, instruction: '保留未知请求', selection: await settings.snapshot('conversation'),
+    documents: [{ documentId: document.documentId, writable: [{ kind: 'document' as const }] }] }
+  await service.runs.save({ schemaVersion: 1, runId, version: 1, input, budget: { maxRequests: 5, maxToolCalls: 5, maxContextBytes: 1000000 },
+    status: 'running', createdAt: now, updatedAt: now, messages: [], initialMessageCount: 0,
+    requests: [{ requestId: 'dispatched-before-interruption', state: 'sending' }], tools: [] })
+  await service.submissions.create({ schemaVersion: 1, submissionId: taskId, workspaceId: space.workspace.workspaceId, conversationId,
+    state: 'accepted', mode: 'queue', text: input.instruction, documents: [reference(document)], attachments: [], attachmentIds: [],
+    model: { provider: 'fixture', model: 'fixture-model', accountId: 'fixture-account', billing: 'unknown' },
+    createdAt: now, updatedAt: now, digest: 'fixture-orphan-active', start: input, runId })
+  const afterCrash = new ExecutionDesktopService({ directory: path.join(root, 'desktop'), documents: new DocumentHostService(path.join(root, 'journals')),
+    settings, authorizeWorkspaceRoot: async selected => ({ resolvedPath: selected }), fetch: forbiddenFetch })
+  await afterCrash.operate({ type: 'workspace', root: workspace })
+  expect(await afterCrash.operate({ type: 'conversation', workspaceId: space.workspace.workspaceId, conversationId })).toBeNull()
+  expect(await afterCrash.engine.read(runId)).toMatchObject({ status: 'interrupted',
+    requests: [{ state: 'failed', failure: { outcome: 'unknown', code: 'interrupted-request' } }] })
+  expect(await afterCrash.submissions.read(taskId)).toMatchObject({ state: 'accepted', runId, failure: { code: 'conversation-deleted' } })
+  expect(await afterCrash.writableTasksForDocument(document.documentId)).toEqual({ runIds: [], submissionIds: [] })
+  expect(forbiddenFetch).not.toHaveBeenCalled()
+  expect(await fs.readFile(filename, 'utf8')).toBe('before provider\n')
+  expect((await documents.internalAPI.read(document.documentId)).dirty).toBe(false)
+})
+
+it('M25 stops the live writer of a dynamically attached document and blocks attachment across its closing barrier', async () => {
+  const pendingFetch = vi.fn((_request: unknown, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+    init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+  }))
+  const { service, workspace, documents, document, settings } = await fixture(pendingFetch)
+  await configureConversation(settings, 'http://127.0.0.1:1/v1')
+  const space = await service.operate({ type: 'workspace', root: workspace }) as { workspace: { workspaceId: string } }
+  const conversation = await service.operate({ type: 'create-conversation', workspaceId: space.workspace.workspaceId }) as { conversationId: string; revision: number }
+  const sent = await service.operate({ type: 'send', workspaceId: space.workspace.workspaceId, conversationId: conversation.conversationId,
+    submissionId: '43333333-3333-4333-8333-666666666666', expectedRevision: conversation.revision, text: '等待测试', documents: [] }) as { run: ExecutionRunRecord }
+  await vi.waitFor(() => expect(pendingFetch).toHaveBeenCalledTimes(1))
+  await documents.tools.withWriteTaskBarrier([document.documentId], async () => {
+    await expect(documents.tools.attachRunDocument(sent.run.runId, document.documentId, true)).rejects.toThrow('正在关闭')
+  })
+  await documents.tools.attachRunDocument(sent.run.runId, document.documentId, true)
+  expect(await service.writableTasksForDocument(document.documentId)).toEqual({ runIds: [sent.run.runId], submissionIds: [] })
+  expect(await service.stopTasksForDocument(document.documentId)).toEqual({ runIds: [sent.run.runId], submissionIds: [] })
+  expect(await service.engine.read(sent.run.runId)).toMatchObject({ status: 'stopped' })
+  await expect(documents.tools.issueTarget(sent.run.runId, document.documentId, { kind: 'document' })).rejects.toThrow('已停止')
 })

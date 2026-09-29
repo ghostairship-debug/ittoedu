@@ -1,0 +1,11 @@
+
+Running 3 tests using 1 worker
+
+
+
+(node:26164) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[1/3] tests\e2e\g20M25CloseRecovery.spec.ts:47:5 › M25-T01 destroyed main window releases its preview and reopens safely
+[2/3] tests\e2e\g20M25CloseRecovery.spec.ts:93:5 › M25-T02 failed HTML draft can cancel then confirm discard without overwriting the disk
+[3/3] tests\e2e\g20M25CloseRecovery.spec.ts:157:5 › M25-T02 terminal orphan in an isolated profile keeps its receipt and does not restore a deleted conversation
+  3 passed (27.8s)

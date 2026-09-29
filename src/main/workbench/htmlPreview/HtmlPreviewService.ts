@@ -37,6 +37,14 @@ export interface HtmlPreviewEditContext {
   snapshot: DocumentSnapshot
 }
 
+/** Main-only identity for a live HTML action session. It never grants document writes. */
+export interface HtmlPreviewAutomationContext {
+  lease: HtmlPreviewLease
+  tabId: string
+  webContentsId: number
+  bindingPath: string
+}
+
 /** B4 supplies the canonical locator/transaction implementation at composition time. */
 export interface HtmlPreviewEditPort {
   resolveTarget(request: ResolveRequest, context: HtmlPreviewEditContext): Promise<{ revision: number; targets: HtmlPreviewResolvedTarget[] }>
@@ -144,8 +152,10 @@ export class HtmlPreviewService implements HtmlPreviewHost {
     for (const [operationId, receipt] of this.editReceipts) {
       if (receipt.leaseId === lease.public.leaseId) this.editReceipts.delete(operationId)
     }
-    lease.unregisterFrame()
-    try { this.policy.releasePreviewLease(lease.public.leaseId, lease.owner) } catch { /* A new top document already cleared its leases. */ }
+    try { lease.unregisterFrame() }
+    finally {
+      try { this.policy.releasePreviewLease(lease.public.leaseId, lease.owner) } catch { /* A new top document already cleared its leases. */ }
+    }
   }
 
   async open(request: OpenRequest): Promise<HtmlPreviewLease> {
@@ -235,6 +245,31 @@ export class HtmlPreviewService implements HtmlPreviewHost {
     if (!snapshot) { this.removeLease(lease); return null }
     return { lease: lease.public, tabId: lease.tabId, rootRealPath: lease.rootRealPath,
       entryRealPath: lease.entryRealPath, bindingPath: lease.bindingPath, snapshot }
+  }
+
+  /** An action session must start from the exact source revision that created its frame.
+   * A later source edit requires a fresh preview lease, even if the renderer kept a
+   * patched frame mounted. This avoids claiming that arbitrary JS state survived. */
+  async automationContext(leaseId: string, loadId: string, revision: number): Promise<HtmlPreviewAutomationContext> {
+    const lease = this.leases.get(leaseId)
+    if (!lease || lease.public.loadId !== loadId) throw new Error('HTML 预览会话已失效，请重新打开预览')
+    const snapshot = await this.snapshotFor(lease)
+    if (!snapshot) { this.removeLease(lease); throw new Error('HTML 预览来源已失效，请重新打开预览') }
+    if (lease.public.revision !== revision || snapshot.revision !== revision)
+      throw new Error('HTML 源码版本已变化，请重新打开预览并观察')
+    return { lease: lease.public, tabId: lease.tabId, webContentsId: lease.webContentsId,
+      bindingPath: lease.bindingPath }
+  }
+
+  /** Select only an unambiguous, already mounted preview for a frozen document. */
+  async automationContextForDocument(input: { documentId: string; epoch: string; revision: number;
+    tabId?: string }): Promise<HtmlPreviewAutomationContext> {
+    const matches = [...this.leases.values()].filter(lease => lease.public.documentId === input.documentId
+      && lease.public.epoch === input.epoch && lease.public.revision === input.revision
+      && (input.tabId === undefined || lease.tabId === input.tabId))
+    if (matches.length !== 1) throw new Error(matches.length
+      ? '同一 HTML 文档有多个预览，请指定当前标签页' : '没有当前版本的 HTML 预览，请打开并观察该文档')
+    return this.automationContext(matches[0]!.public.leaseId, matches[0]!.public.loadId, input.revision)
   }
 
   async resolveTarget(request: ResolveRequest): Promise<{ revision: number; targets: HtmlPreviewResolvedTarget[] }> {

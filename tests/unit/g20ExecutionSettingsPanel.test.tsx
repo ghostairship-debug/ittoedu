@@ -2,9 +2,23 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, expect, it, vi } from 'vitest'
 import { ExecutionSettingsPanel } from '../../src/renderer/workbench/ExecutionSettingsPanel'
 import type { ExecutionSettingsAPI } from '../../src/shared/workbench/executionSettingsDesktop'
-import type { ExecutionSettingsView } from '../../src/shared/workbench/executionSettings'
+import type { ExecutionConnectionView, ExecutionSettingsView } from '../../src/shared/workbench/executionSettings'
+import type { ModelCapabilityRecord, ProbedModelCapability } from '../../src/shared/workbench/modelCapabilities'
 
 afterEach(cleanup)
+const connected = (id: string, revision = 1): ExecutionConnectionView => ({
+  connection: { id, revision, provider: id, protocol: 'openai-chat', baseURL: `https://${id}.invalid/v1`, accountId: `${id}-account`,
+    auth: { kind: 'api-key', credentialRef: 'private-reference' }, billing: { kind: 'token-plan' },
+    capabilities: { tools: 'unknown', vision: 'unknown', stream: 'unknown', reasoning: 'unknown' } },
+  hasCredential: true, revoked: false,
+})
+const recorded = (connectionId: string, connectionRevision: number, model: string, capability: ProbedModelCapability,
+  status: 'supported' | 'unknown', parametersKey = '{}'): ModelCapabilityRecord => ({
+  connectionId, connectionRevision, model, parametersKey,
+  facts: status === 'supported' ? { [capability]: { status, observedAt: 1, source: 'probe' } } : {},
+  lastProbe: { observedAt: 1, checks: [capability], requestCount: 1,
+    outcomes: [{ capability, status, code: status, message: status === 'supported' ? '已观察' : '暂未证实' }] },
+})
 function setup() {
   let state: ExecutionSettingsView = { connections: [], secureStorageAvailable: true,
     profile: { revision: 0, updatedAt: '2026-09-23T00:00:00.000Z', roles: { conversation: null, vision: null, imageGenerate: null, imageEdit: null } } }
@@ -365,7 +379,7 @@ it('point-selects catalog models per role and clears the model when the billing 
   expect(within(screen.getByLabelText('视觉理解模型')).queryByRole('option', { name: /alpha/ })).toBeNull()
   fireEvent.change(screen.getByLabelText('视觉理解模型'), { target: { value: 'beta' } })
   fireEvent.change(screen.getByLabelText('图片生成连接'), { target: { value: 'oauth' } })
-  expect(within(screen.getByLabelText('图片生成图片模型')).getByRole('option', { name: /gpt-image-2.*项目候选/ })).toBeInTheDocument()
+  expect(within(screen.getByLabelText('图片生成图片模型')).getByRole('option', { name: /^gpt-image-2（项目候选/ })).toBeInTheDocument()
   fireEvent.change(screen.getByLabelText('图片生成图片模型'), { target: { value: 'gpt-image-2' } })
   fireEvent.click(screen.getByRole('button', { name: '保存模型角色' }))
   await waitFor(() => expect(api.saveProfile).toHaveBeenCalledWith({ expectedRevision: 0, roles: {
@@ -393,4 +407,55 @@ it('shows a manual model ID only as an explicit fallback when the chosen directo
     conversation: { connectionId: 'custom', model: 'vendor-model-id', parameters: {} },
     vision: null, imageGenerate: null, imageEdit: null,
   } }))
+})
+
+it('M30 fills only empty roles with uniquely verified models while preserving advanced choices', async () => {
+  const { api, state } = setup()
+  state.connections = [connected('preset', 2), connected('manual')]
+  state.connections[1]!.connection.imageProtocol = 'openai-images'
+  state.profile.roles.vision = { connectionId: 'manual', model: 'manual-vision', parameters: { detail: 'high' } }
+  state.profile.roles.imageGenerate = { connectionId: 'manual', model: 'image-model', parameters: {} }
+  state.capabilityRecords = [
+    recorded('preset', 2, 'tool-model', 'tools', 'supported', '{"reasoning_effort":"low"}'),
+    recorded('preset', 2, 'vision-model', 'vision', 'supported'),
+    recorded('preset', 1, 'stale-tool', 'tools', 'supported'),
+  ]
+  render(<ExecutionSettingsPanel open api={api} onClose={vi.fn()} />)
+  await screen.findByLabelText('选择连接')
+  fireEvent.change(screen.getByLabelText('选择连接'), { target: { value: 'preset' } })
+  const preset = within(screen.getByRole('region', { name: '已验证角色预设' }))
+  expect(preset.getByText(/tool-model 已按当前连接版本/)).toBeInTheDocument()
+  expect(preset.getByText(/vision-model 已按当前连接版本/)).toHaveTextContent('已有角色配置保留')
+  expect(preset.queryByText(/stale-tool/)).toBeNull()
+  fireEvent.click(preset.getByRole('button', { name: '填入已验证的空白角色' }))
+  expect(api.saveProfile).not.toHaveBeenCalled()
+  expect(screen.getByLabelText('对话与规划连接')).toHaveValue('preset')
+  expect(screen.getByLabelText('对话与规划模型')).toHaveValue('tool-model')
+  expect(screen.getByLabelText('对话与规划参数')).toHaveValue('{\n  "reasoning_effort": "low"\n}')
+  expect(screen.getByLabelText('视觉理解连接')).toHaveValue('manual')
+  expect(screen.getByLabelText('图片生成图片模型')).toHaveValue('image-model')
+  await waitFor(() => expect(within(screen.getByLabelText('对话与规划模型')).getByRole('option', { name: /available-model/ })).toBeInTheDocument())
+  fireEvent.change(screen.getByLabelText('对话与规划模型'), { target: { value: 'available-model' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存模型角色' }))
+  await waitFor(() => expect(api.saveProfile).toHaveBeenCalledWith({ expectedRevision: 0, roles: {
+    conversation: { connectionId: 'preset', model: 'available-model', parameters: { reasoning_effort: 'low' } },
+    vision: { connectionId: 'manual', model: 'manual-vision', parameters: { detail: 'high' } },
+    imageGenerate: { connectionId: 'manual', model: 'image-model', parameters: {} }, imageEdit: null,
+  } }))
+})
+
+it('M30 leaves unknown and ambiguous abilities out of a connection preset', async () => {
+  const { api, state } = setup()
+  state.connections = [connected('preset', 2)]
+  state.capabilityRecords = [recorded('preset', 2, 'text-unknown', 'tools', 'unknown'),
+    recorded('preset', 1, 'old-vision', 'vision', 'supported')]
+  render(<ExecutionSettingsPanel open api={api} onClose={vi.fn()} />)
+  await screen.findByLabelText('选择连接')
+  fireEvent.change(screen.getByLabelText('选择连接'), { target: { value: 'preset' } })
+  const preset = within(screen.getByRole('region', { name: '已验证角色预设' }))
+  expect(preset.getByText(/暂无已验证可用的工具能力/)).toBeInTheDocument()
+  expect(preset.getByText(/暂无已验证可用的视觉能力/)).toBeInTheDocument()
+  expect(preset.getByText(/图片生成与编辑暂无本页可复用的独立能力记录/)).toBeInTheDocument()
+  expect(preset.getByRole('button', { name: '填入已验证的空白角色' })).toBeDisabled()
+  expect(api.saveProfile).not.toHaveBeenCalled()
 })

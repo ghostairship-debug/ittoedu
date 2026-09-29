@@ -23,19 +23,30 @@ afterEach(async () => {
   for (const server of servers.splice(0)) await new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) })
   for (const root of roots.splice(0)) {
     if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unsafe fixture root')
-    await fs.rm(root, { recursive: true, force: true })
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 50 })
   }
 })
 const digest = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex')
 
 it('S08-T02 sends two distinct image cards as decoded image bytes while read status stays unknown', async () => {
   const requests: { path: string; raw: string }[] = [], errors: string[] = []
+  let materialRound = 0
   const server = createServer((request, response) => { void (async () => {
     if (request.url === '/v1/models') { response.setHeader('Content-Type', 'application/json'); response.end(JSON.stringify({ data: [{ id: 'fixture-vision' }] })); return }
     if (request.method !== 'POST' || request.url !== '/v1/chat/completions') throw new Error(`Unexpected local route ${request.method} ${request.url}`)
     const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(Buffer.from(chunk))
     requests.push({ path: request.url, raw: Buffer.concat(chunks).toString() })
     response.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    if (materialRound === 1 || materialRound === 2) {
+      const body = JSON.parse(requests.at(-1)!.raw)
+      const prefix = materialRound === 1 ? '列出当前显式材料' : '按 material.list'
+      const tool = body.tools.find((tool: any) => tool.function.description.startsWith(prefix))
+      if (!tool) throw new Error('Material tool missing from actual request')
+      const args = materialRound === 1 ? {} : { attachmentId: first.id, representationId: 'original-image' }
+      materialRound++
+      response.end(`data: ${JSON.stringify({ id: `material-round-${materialRound}`, model: 'fixture-vision', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: `material-${materialRound}`, type: 'function', function: { name: tool.function.name, arguments: JSON.stringify(args) } }] }, finish_reason: 'tool_calls' }] })}\n\ndata: [DONE]\n\n`)
+      return
+    }
     response.end(`data: ${JSON.stringify({ id: 'two-image-fixture', model: 'fixture-vision', choices: [{ index: 0, delta: { role: 'assistant', content: '两张图像已收到' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`)
   })().catch(error => { errors.push(String(error)); response.destroy() }) })
   servers.push(server)
@@ -113,4 +124,48 @@ it('S08-T02 sends two distinct image cards as decoded image bytes while read sta
   cards.rerender(createElement(AttachmentComposer, { api: attachmentAPI, value: [], onChange: () => undefined }))
   await waitFor(() => expect(screen.queryByText(/尚未发送/)).toBeNull())
   expect(screen.queryByText(/已读取/)).toBeNull()
+  // A4: subsequent messages use immutable history references, not recursive image payload copies.
+  let previousRunId = run.runId
+  for (let round = 0; round < 2; round++) {
+    await waitFor(async () => {
+      const settled = await service.operate({ type: 'conversation', ...identity }) as ConversationRecord
+      expect(settled.messages.some(message => message.role === 'assistant' && message.runId === previousRunId)).toBe(true)
+    })
+    const current = await service.operate({ type: 'conversation', ...identity }) as ConversationRecord
+    const next = await service.operate({ type: 'send', ...identity, submissionId: randomUUID(), expectedRevision: current.revision,
+      text: `继续讨论第${round + 1}轮`, documents: [], attachments: [] }) as { run: ExecutionRunRecord }
+    const completed = await service.engine.wait(next.run.runId)
+    expect(completed.status).toBe('completed')
+    previousRunId = completed.runId
+    const nextBody = JSON.parse(requests.at(-1)!.raw)
+    expect(JSON.stringify(nextBody.messages)).not.toContain('data:image/')
+    expect(JSON.stringify(nextBody.messages)).toContain(`run:${run.runId}:${run.initialPayload!.explicitAttachments[0]!.messageIndex}`)
+    expect(completed.initialPayload?.totals.imageBytes).toBe(0)
+    expect(completed.initialPayload?.automaticContext.some(entry => entry.provenance.kind === 'history'
+      && entry.provenance.id.startsWith(`run:${run.runId}:`))).toBe(true)
+    expect(completed.initialPayload?.explicitAttachments).toEqual([])
+    expect(completed.initialPayload?.readStatus).toBe('unknown')
+  }
+  expect((await service.runs.read(run.runId))?.messages).toEqual(run.messages)
+  expect(requests).toHaveLength(3)
+  await waitFor(async () => {
+    const current = await service.operate({ type: 'conversation', ...identity }) as ConversationRecord
+    expect(current.messages.some(message => message.role === 'assistant' && message.runId === previousRunId)).toBe(true)
+  })
+  materialRound = 1
+  const current = await service.operate({ type: 'conversation', ...identity }) as ConversationRecord
+  const reread = await service.operate({ type: 'send', ...identity, submissionId: randomUUID(), expectedRevision: current.revision,
+    text: '按需再看原来的第一张图片', documents: [], attachments: [] }) as { run: ExecutionRunRecord }
+  const rereadRun = await service.engine.wait(reread.run.runId)
+  expect(rereadRun.status, JSON.stringify({ failure: rereadRun.failure, requests: rereadRun.requests, tools: rereadRun.tools, errors })).toBe('completed')
+  expect(rereadRun.tools.map(tool => tool.call.name)).toEqual(['material.list', 'material.read'])
+  expect(rereadRun.tools[0]!.result).toMatchObject({ kind: 'read', data: { sources: expect.arrayContaining([
+    expect.objectContaining({ attachmentId: first.id, originalDigest: digest(firstBytes) }),
+  ]), observation: 'index-only' } })
+  expect(rereadRun.tools[1]!.result).toMatchObject({ kind: 'read', data: { attachmentId: first.id, representationDigest: digest(firstBytes), observation: 'image-prepared-for-next-request' } })
+  const finalBody = JSON.parse(requests.at(-1)!.raw)
+  expect(finalBody.messages.at(-1).content[1].image_url.url).toBe(`data:image/png;base64,${firstBytes.toString('base64')}`)
+  expect(rereadRun.initialPayload?.totals.imageBytes).toBe(0)
+  expect(rereadRun.initialPayload?.readStatus).toBe('unknown')
+  expect(requests).toHaveLength(6)
 })

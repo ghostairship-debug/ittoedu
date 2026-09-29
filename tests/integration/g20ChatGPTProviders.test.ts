@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http'
+import { setTimeout as delay } from 'node:timers/promises'
 import { createHash } from 'node:crypto'
 import { afterEach, expect, it } from 'vitest'
 import { ChatGPTResponsesProvider, CHATGPT_RESPONSES_BASE_URL, serializeChatGPTResponsesRequest } from '../../src/main/workbench/providers/ChatGPTResponsesProvider'
@@ -368,4 +369,28 @@ it('device OAuth polls only on interval; cancelled in-flight login cannot save l
   cancelled = true; const second = await client.beginDeviceAuthorization(target); now += 1000
   let error: unknown; try { await client.pollDeviceAuthorization(second.loginId) } catch (caught) { error = caught }
   expect(error).toMatchObject({ code: 'http-400' }); expect(String(error)).not.toContain('secret-own-refresh')
+})
+
+
+it('M26 OAuth streams use activity/progress/total clocks rather than the old fixed idle-duration cutoff', async () => {
+  let requests = 0
+  const transport = await serve(async (req, res) => {
+    await body(req); requests++
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    res.write(frame({ type: 'response.created', response: { id: 'live-turn' } }))
+    for (let i = 0; i < 7 && !res.destroyed; i++) {
+      await delay(25)
+      res.write(frame({ type: 'response.reasoning_summary_text.delta', delta: `推理${i}` }))
+    }
+    if (!res.destroyed) res.end(frame({ type: 'response.completed', response: { id: 'live-turn', status: 'completed',
+      output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '完成' }] }] } }))
+  })
+  const credentialResolver = async () => ({ accessToken: 'purpose-token', accountId: 'account' })
+  const completed = await collect(new ChatGPTResponsesProvider({ fetch: transport, credentialResolver, timeoutMs: 100, progressTimeoutMs: 150, maxDurationMs: 600 }), request())
+  expect(completed.at(-1)?.type).toBe('response.completed')
+  expect(completed.filter(event => event.type === 'reasoning.delta')).toHaveLength(7)
+  const bounded = await collect(new ChatGPTResponsesProvider({ fetch: transport, credentialResolver, timeoutMs: 100, progressTimeoutMs: 150, maxDurationMs: 120 }), request())
+  expect(bounded.at(-1)).toMatchObject({ type: 'response.failed', failure: { kind: 'timeout', outcome: 'unknown' } })
+  expect(bounded.some(event => event.type === 'response.completed')).toBe(false)
+  expect(requests).toBe(2) // One transport attempt each; the provider itself never retries.
 })

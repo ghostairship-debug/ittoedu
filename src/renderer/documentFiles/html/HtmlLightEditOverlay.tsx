@@ -46,7 +46,8 @@ export function HtmlLightEditOverlay({ target, committed, position, onText, onIm
       {target.resolved.status === 'editable' && <button type="button" disabled={busy || (target.report.kind === 'text' && value === target.report.rawText)} onClick={() => void submit()}>
         {target.report.kind === 'text' ? '应用' : '选择图片'}
       </button>}
-      {aiAvailable && <TextAiButton documentId={committed.documentId} start={async () => {
+      {aiAvailable && <TextAiButton documentId={committed.documentId}
+        selectionIdentity={`${target.report.kind}:${target.report.handle}:${committed.revision}`} start={async () => {
         if (committed.model.kind !== 'text' || (locator && committed.revision !== locator.revision)) throw new Error('源码已变化，请重新选择。')
         const range = { kind: 'markdown-range' as const,
           from: target.report.kind === 'text' ? locator?.valueSpan?.start ?? 0 : 0,

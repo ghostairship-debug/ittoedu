@@ -10,7 +10,7 @@ type Init = { type: 'html-preview.init'; leaseId: string; loadId: string }
 type Patch = { type: 'html-preview.patch'; loadId: string; handle: string; kind: 'text' | 'image'; value: string; expected: string }
 type Navigate = { type: 'html-preview.navigate'; loadId: string; index: number }
 type Restore = { type: 'html-preview.restore'; loadId: string; index: number; scroll: number }
-type EditMode = { type: 'html-preview.edit-mode'; loadId: string; enabled: boolean }
+type EditMode = { type: 'html-preview.edit-mode'; loadId: string; requestId: string; enabled: boolean }
 type Command = Init | Patch | Navigate | Restore | EditMode
 
 interface RuntimeNodeTracking {
@@ -212,7 +212,11 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
       return
     }
     if (!loadId || message.loadId !== loadId) return
-    if (message.type === 'html-preview.edit-mode' && typeof message.enabled === 'boolean') editMode = message.enabled
+    if (message.type === 'html-preview.edit-mode' && typeof message.enabled === 'boolean'
+      && typeof message.requestId === 'string' && message.requestId.length > 0 && message.requestId.length <= 256) {
+      editMode = message.enabled
+      send({ event: 'edit-mode-ready', requestId: message.requestId, enabled: editMode })
+    }
     if (message.type === 'html-preview.navigate' && Number.isSafeInteger(message.index)) pagination.navigate(message.index)
     if (message.type === 'html-preview.restore' && Number.isSafeInteger(message.index) && Number.isFinite(message.scroll)) {
       pagination.restore({ pageIndex: message.index, perPageScroll: Math.max(0, message.scroll) })

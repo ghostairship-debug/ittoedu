@@ -4,7 +4,7 @@ from pathlib import PurePosixPath
 import hashlib, json, re, sys
 from urllib.parse import urlsplit, unquote
 from refresh_plan import (ROOT, CONVERGENCE, READER_ROOT_PATH, TASK_STATUSES, CASE_STATUSES,
-                          CURRENT_SCOPE, DEFERRED_SCOPE, rendered_article, render_cases, batch_table, status_counts,
+                          CURRENT_SCOPE, DEFERRED_SCOPE, MEDIA_SCOPE, rendered_article, render_cases, batch_table, status_counts,
                           status_summary, reader_status_footer)
 
 errors=[]
@@ -64,8 +64,8 @@ def validate():
     for c in cases:
         if c['task_id'] not in by_id and c['task_id']!='RELEASE':fail('Unknown case owner: '+c['id'])
         if c.get('status') not in CASE_STATUSES:fail('Invalid case status: '+c['id'])
-        if c.get('required_for') not in (CURRENT_SCOPE, DEFERRED_SCOPE):fail('Invalid case scope: '+c['id'])
-        if c.get('required_for')==DEFERRED_SCOPE and (c.get('status')!='not_run' or not c.get('deferred_reason')):
+        if c.get('required_for') not in (CURRENT_SCOPE, DEFERRED_SCOPE, MEDIA_SCOPE):fail('Invalid case scope: '+c['id'])
+        if c.get('required_for') in (DEFERRED_SCOPE, MEDIA_SCOPE) and (c.get('status')!='not_run' or not c.get('deferred_reason')):
             fail('Deferred case must remain not_run with reason: '+c['id'])
         if 'owner_required' in c and not isinstance(c['owner_required'],bool):fail('owner_required must be boolean: '+c['id'])
         for key in ['title','preconditions','steps','expected','test_layer']:
@@ -148,8 +148,11 @@ def validate():
     actual={p.relative_to(ROOT).as_posix() for p in ROOT.rglob('*') if p.is_file() and p.name!='package_manifest.json' and '__pycache__' not in p.parts and p.suffix not in {'.pyc','.pyo'}}
     if listed!=actual:fail('Manifest inventory drift')
     qa=get('PACKAGE_QA.json')
-    if qa.get('product_code_modified') or qa.get('product_tests_run'):fail('QA claims product work')
-    return dict(package_validation='failed' if errors else 'passed',tasks=len(tasks),product_cases=len(cases),requirements=len(trace),reader_articles=len(articles),product_tests_executed=False,errors=list(errors))
+    if not isinstance(qa.get('product_code_modified'), bool) or not isinstance(qa.get('product_tests_run'), bool):
+        fail('QA product work flags must be boolean')
+    if manifest.get('product_tests_run') != qa.get('product_tests_run'):
+        fail('Manifest product test flag drift')
+    return dict(package_validation='failed' if errors else 'passed',tasks=len(tasks),product_cases=len(cases),requirements=len(trace),reader_articles=len(articles),product_tests_executed=qa.get('product_tests_run', False),errors=list(errors))
 
 if __name__=='__main__':
     try: result=validate()

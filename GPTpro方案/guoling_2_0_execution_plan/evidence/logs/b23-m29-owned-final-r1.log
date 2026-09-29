@@ -1,0 +1,25 @@
+
+ RUN  v4.1.10 D:/果铃工作台
+
+ ✓ tests/integration/g20CodexDelegationRunner.test.ts > returns a verified result only after a real artifact readback and caller verification 84ms
+ ✓ tests/integration/g20CodexDelegationRunner.test.ts > does not launch without a verified boundary and still revokes a pre-created MCP grant 5ms
+ ✓ tests/integration/g20DelegationJobService.test.ts > persists a receipt before dispatch, seals a checked artifact, and never replays the same job 51ms
+ ✓ tests/integration/g20DelegationJobService.test.ts > rejects unapproved copy roots and preserves unknown effects after cancellation 40ms
+ ✓ tests/integration/g20CodexDelegationRunner.test.ts > treats stop as unknown until the process tree is independently confirmed, and never verifies a late artifact 68ms
+ ✓ tests/integration/g20CodexDelegationRunner.test.ts > keeps failed CLI output and out-of-root artifacts from becoming successful delegation 66ms
+ ✓ tests/integration/g20WindowsCodexSandboxBoundary.test.ts > probes both real Windows profiles and rejects an unsafe CLI launch 457ms
+ ✓ tests/integration/g20MediaCapabilityService.test.ts > M29 media capability boundary > reports all three kinds unconfigured without a verified connection and never creates work 2ms
+ ✓ tests/integration/g20MediaCapabilityService.test.ts > M29 media capability boundary > rejects invalid parameters and read-only or stopped tasks before provider submission 0ms
+ ✓ tests/integration/g20MediaCapabilityService.test.ts > M29 media capability boundary > does not expose a late provider receipt as an actionable resource after Stop 1ms
+ ✓ tests/integration/g20BrowserActionApprovals.test.ts > one-use managed browser action approvals > binds the exact run, operation, action, parameters and observed page 2ms
+ ✓ tests/integration/g20BrowserActionApprovals.test.ts > one-use managed browser action approvals > consumes only once and removes the grant on stop 1ms
+ ✓ tests/integration/g20BrowserActionApprovals.test.ts > one-use managed browser action approvals > rejects changed parameters and mismatched snapshot identities 0ms
+ ✓ tests/integration/g20WebResearchService.test.ts > M29 public research boundary > blocks literal, resolved, and special-use private targets before a socket is opened 6ms
+ ✓ tests/integration/g20WebResearchService.test.ts > M29 public research boundary > keeps search snippets separate from the opened source body and supports versioned paging 3ms
+ ✓ tests/integration/g20WebResearchService.test.ts > M29 public research boundary > reports missing search connection, login pages, and binary files without false full-text results 1ms
+ ✓ tests/integration/g20ManagedBrowserMcpService.test.ts > manages a real Edge MCP browser with per-action approval, scoped transfer and stop cleanup 5203ms
+
+ Test Files  7 passed (7)
+      Tests  17 passed (17)
+   Start at  12:22:10
+   Duration  6.13s (transform 300ms, setup 449ms, import 531ms, tests 6.00s, environment 2.35s)

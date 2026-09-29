@@ -1,0 +1,52 @@
+
+ RUN  v4.1.10 D:/果铃工作台
+
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > S04-T03 edits the frozen Markdown document, isolates grants and rejects forged targets 11ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > maps a disjoint human edit, detects overlapping edits, and observes queued input 1ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > uses strict V9 planners for atomic properties/background batches and one undo 120ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > makes valid Markdown batches one history entry and cross-document batches zero writes 2ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > S04-T04 rolls back all three same-document steps when the second is invalid 2ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > waits for durable ACK, returns a lost receipt idempotently and stops later calls 3ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > returns explicit read pagination, bounded child handles and stale-cursor errors 1ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > S04-T05 directly commits Native text, style, position and backgrounds in one resource-preserving history entry 105ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > limits Flow rich replacement to the authorized logical range and preserves other blocks, math, styles and resources 70ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > rejects invalid/legacy Flow content and missing-resource insertions without partially applying a batch 29ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > deletes Flow navigation with its references, preserves unrelated content and resources, and refuses the last heading 74ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > requires destination authorization for Flow moves, preserves stable identity, and rejects section cycles atomically 62ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > applies strict Flow table merge/row insertion in one history entry and rolls back an invalid merged-column move 64ms
+ ✓ tests/integration/g20S05ContextRecovery.test.ts > compacts a large completed turn while retaining canonical commit facts and enough room to finish the goal 247ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > creates Native objects with host identities on an explicit unmounted owner and preserves state/History/resources 75ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > atomically imports admitted image bytes and creates a Native image with durable undo/redo and replay 105ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > refuses invalid image bytes, cross-document resources and stopped runs; failed media batch writes neither metadata nor bytes 62ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > resolves host-only Flow source maps and applies common text chunks through the strict range planner 20ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > applies one admitted image across Slide/Spatial Native images, Flow media and three backgrounds in one undo 92ms
+ ✓ tests/integration/g20S05ContextRecovery.test.ts > records an unknown model outcome without retrying it and requires fresh observation before resumed writes 310ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > rejects unsupported media targets and Native fit on Flow/background without partial resource writes 33ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > creates Flow surface/global Native overlays without replacing document flow and keeps paper-space semantics through save and undo 76ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > creates Spatial world and Slide scene/surface structured Native content with frozen origins and fresh child identities 107ms
+ ✓ tests/integration/g20S05ContextRecovery.test.ts > allows read-only file listing during recovery observation but still requires the frozen document read before writing 236ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > refuses cross-Surface owners and unsupported Native carrier combinations without a partial batch 36ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > creates managed inputs atomically and preserves feedback through answer edits, archive and real Published submission 219ms
+ ✓ tests/integration/g20S05ContextRecovery.test.ts > accepts a complete read of an inspect-refreshed document root before resumed writing 234ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > composes click rules from frozen handles with one History and executes Published motion then cross-Surface navigation 132ms
+ ✓ tests/integration/g20S05ContextRecovery.test.ts > M26 reading one range never authorizes an unobserved different range 185ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > rejects unsupported input owners, invalid answers, hand-edited families and nonterminal navigation with zero partial commits 76ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > completes rule CRUD through discovered handles while preserving omitted fields, archive, no-op History and Published navigation 249ms
+ ✓ tests/integration/g20S05ContextRecovery.test.ts > M26 a truncated document read never covers text beyond its returned interval 217ms
+ ✓ tests/integration/g20S05ContextRecovery.test.ts > rejects a prior-revision root handle as a current recovery observation 30ms
+ ✓ tests/integration/g20S05ContextRecovery.test.ts > queries a terminal run lost tool receipt on recovery without replaying the old operation 188ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > deletes an input family member through the same planner with atomic release, failed-batch rollback and one undo 278ms
+ ✓ tests/integration/g20S05ContextRecovery.test.ts > blocks a fresh same-name side effect when the previous tool has no recoverable receipt 285ms
+ ✓ tests/integration/g20ToolGateway.test.ts > G20 real Registry/Driver tool gateway > refuses stale or locked rule edits, cross-document references and delete-receipt privilege expansion 293ms
+ ✓ tests/integration/g20S05ContextRecovery.test.ts > rebuilds queued continuation facts from the run journal instead of trusting a stale queued summary 148ms
+ ✓ tests/integration/g20S05ContextRecovery.test.ts > rejects oversized frozen history as initial input without treating an old assistant message as compressible work 68ms
+ ✓ tests/integration/g20ToolGateway.test.ts > M26 9999-character source can be read in pages through refreshed handles before a resumed write 7ms
+ ✓ tests/integration/g20ToolGateway.test.ts > M26 10001-character source can be read in pages through refreshed handles before a resumed write 6ms
+ ✓ tests/integration/g20ToolGateway.test.ts > M26 partial source observation permits its own range, not an unobserved tail or another document 3ms
+ ✓ tests/integration/g20ToolGateway.test.ts > M26 a cursor cannot splice different revisions even after undo restores the identical bytes 2ms
+ ✓ tests/integration/g20ToolGateway.test.ts > M26 a V9 directory is not an object observation; an externally edited object can be reread without renewing its old write handle 71ms
+
+ Test Files  2 passed (2)
+      Tests  44 passed (44)
+   Start at  05:31:33
+   Duration  3.85s (transform 1.88s, setup 138ms, import 2.68s, tests 4.64s, environment 0ms)

@@ -9,11 +9,11 @@ import { elementCardKey, elementCards, useElementCard, type ElementCardEntryStat
 import './elementCards.css'
 
 const STATE_LABEL: Record<ElementCardEntryState, string> = {
-  sending: '发送中…', queued: '排队中', running: '进行中…', completed: '已完成', failed: '未完成', stopped: '已停止', cancelled: '已取消',
+  sending: '发送中…', queued: '排队中', running: '进行中…', completed: '已完成', partial: '部分完成', failed: '未完成', stopped: '已停止', cancelled: '已取消',
 }
 
 /** The element's own AI card (M15): its requests and replies, questions and approvals, and an input for the next one. */
-export function ElementAiCard({ cardKey, capture, onClose }: { cardKey: string; capture?(): Promise<SelectionCapture>; onClose(): void }) {
+export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey: string; capture?(): Promise<SelectionCapture>; onClose(): void; onRebind?(): void }) {
   const card = useElementCard(cardKey)
   const [draft, setDraft] = useState(''), [sending, setSending] = useState(false), [error, setError] = useState('')
   const [conflict, setConflict] = useState<{ direction: 'undo' | 'redo'; submissionId: string; fields: readonly string[] } | null>(null)
@@ -49,6 +49,7 @@ export function ElementAiCard({ cardKey, capture, onClose }: { cardKey: string; 
         onClick={() => { if (card.undo) void revert('undo', card.undo.submissionId) }}><Undo2 size={13} aria-hidden="true" /></button>
       <button type="button" aria-label="重做这张卡的 AI 修改" title={redoTitle} disabled={!card.redo}
         onClick={() => { if (card.redo) void revert('redo', card.redo.submissionId) }}><Redo2 size={13} aria-hidden="true" /></button>
+      {text && onRebind && <button type="button" aria-label="重新选择文字并保留输入" title="重新选择文字并保留输入" onClick={onRebind}>重选</button>}
       <button type="button" className="element-ai-card__close" aria-label={text ? '关闭 AI 卡' : '收起 AI 卡'}
         title={text ? '关闭（这张卡随之结束，修改保留）' : '收起（记录保留到文件关闭）'} onClick={onClose}>×</button>
     </header>

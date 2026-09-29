@@ -153,8 +153,11 @@ it('stop after send remains unknown and a known late image is retained unapplied
     const result = await provider.generate(req, refs, opts); resultReady()
     await new Promise<void>(resolve => { releaseResult = resolve }); return result
   } } })
-  const lateRun = late.run(request('late')); await ready; await late.stop('late'); releaseResult()
+  const lateRun = late.run(request('late')); await ready; await late.stop('late')
+  const lateWait = late.wait('run', 'late', 1000)
+  releaseResult()
   const retained = await lateRun
+  expect(await lateWait).toEqual(retained)
   expect(retained).toMatchObject({ status: 'unapplied', stopped: true, resources: [{ width: 32, height: 24 }] })
   expect(Buffer.from((await late.readResource(retained.resources[0]!.resourceId)).bytes)).toEqual(image)
   expect(calls).toBe(2)
@@ -199,4 +202,34 @@ it('defers image cache collection during an active provider request and leaves a
   await expect(service.readResource(completed.resources[0]!.resourceId)).rejects.toThrow()
   await expect(service.run(request('active'))).rejects.toThrow('不能再次发送')
   expect(calls).toBe(1)
+})
+
+
+it('M28 asynchronous image acceptance is a durable pending receipt, not a generated image or a second request', async () => {
+  const root = await directory(), bytes = await fixture(); let received!: () => void, release!: () => void, count = 0
+  const reached = new Promise<void>(resolve => { received = resolve })
+  const transport = await server(async (_body, responseStream) => {
+    count++; received(); await new Promise<void>(resolve => { release = resolve })
+    responseStream.writeHead(200, { 'Content-Type': 'application/json' }); responseStream.end(response(bytes))
+  })
+  const service = new ImageGenerationService({ directory: root, provider: new ChatGPTImageProvider({ credentialResolver: resolver, fetch: transport }) })
+  const accepted = await service.start(request('async-receipt'))
+  expect(accepted).toMatchObject({ jobId: 'async-receipt', status: 'preparing', resources: [] })
+  expect((await fs.readdir(path.join(root, 'jobs'))).filter(name => name.endsWith('.json'))).toHaveLength(1)
+  await reached
+  const completion = service.run(request('async-receipt'))
+  try {
+    expect(await service.start(request('async-receipt'))).toEqual(accepted)
+    expect(await service.read('async-receipt')).toMatchObject({ status: 'running', resources: [] })
+    expect(await service.wait('run', 'async-receipt', 5)).toMatchObject({ status: 'running', resources: [] })
+    await expect(service.wait('other-run', 'async-receipt', 0)).rejects.toMatchObject({ code: 'image-job-not-authorized' })
+    await expect(service.start({ ...request('async-receipt'), prompt: 'a different request' })).rejects.toMatchObject({ code: 'image-job-conflict' })
+    expect(count).toBe(1)
+  } finally { release() }
+  const ready = await completion
+  expect(await service.wait('run', 'async-receipt', 1000)).toEqual(ready)
+  expect(ready).toMatchObject({ status: 'ready', resources: [{ width: 32, height: 24 }] })
+  expect(Buffer.from((await service.readResource(ready.resources[0]!.resourceId)).bytes)).toEqual(bytes)
+  expect(await new ImageGenerationService({ directory: root, provider: { generate: async () => { throw new Error('Never replay') } } }).start(request('async-receipt'))).toEqual(ready)
+  expect(count).toBe(1)
 })

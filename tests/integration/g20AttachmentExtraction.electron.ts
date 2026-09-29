@@ -6,6 +6,7 @@ import os from 'node:os'
 import assert from 'node:assert/strict'
 import sharp from 'sharp'
 import { createSandboxedAttachmentExtractor, type SandboxedAttachmentExtractionOptions } from '../../src/main/workbench/attachments/SandboxedAttachmentExtraction'
+import { listMaterials, readMaterial } from '../../src/main/workbench/execution/MaterialReadTools'
 import { AttachmentService } from '../../src/main/workbench/attachments/AttachmentService'
 import { MATERIAL_TEXT, diagramPng, r19LessonMaterials } from '../fixtures/r19LessonMaterials'
 
@@ -21,6 +22,7 @@ function twoPagePdf() {
   return Buffer.from(source)
 }
 
+if (process.env.G20_MATERIAL_TEST_PROFILE) app.setPath('userData', path.resolve(process.env.G20_MATERIAL_TEST_PROFILE))
 app.disableHardwareAcceleration()
 app.on('window-all-closed', () => { /* Each isolated job is expected to close its only window. */ })
 void app.whenReady().then(async () => {
@@ -47,6 +49,20 @@ void app.whenReady().then(async () => {
     assert.match(Buffer.from((await service.readRepresentation(full.id, text.id)).bytes).toString(), /Readable first page/)
     assert.equal((await service.readSnapshot(original.id)).representations[0].kind, 'file')
     console.log('PASS 1: real PDF.js worker, selected scanned page pixels, full-page text, immutable source')
+    const pageRead = await readMaterial(service, new Set([second.id]), { attachmentId: second.id, representationId: image.id })
+    assert.deepEqual(pageRead.data.source.locator, image.provenance.locator)
+    assert.equal(pageRead.data.source.locator?.page, 2)
+    assert.deepEqual(pageRead.modelMessage?.content, [{ type: 'text', text: (pageRead.modelMessage!.content as any[])[0].text },
+      { type: 'image_url', image_url: { url: `data:image/png;base64,${Buffer.from(pixels).toString('base64')}` } }])
+    const partial = await readMaterial(service, new Set([full.id]), { attachmentId: full.id, representationId: text.id, maxChars: 5 })
+    assert.ok('text' in partial.data); assert.equal(partial.data.text, 'Reada'); assert.equal(partial.data.truncated, true)
+    assert.equal(partial.data.source.locator?.page, 1); assert.equal(partial.data.wholeSourceRead, false)
+    const index = await listMaterials(service, new Set([second.id]), { attachmentId: second.id })
+    assert.equal(index.observation, 'index-only')
+    if (!('coverage' in index)) throw new Error('Expected one material representation index')
+    assert.deepEqual(index.coverage, second.coverage)
+    await assert.rejects(readMaterial(service, new Set([second.id]), { attachmentId: full.id, representationId: text.id }), /当前显式输入/)
+    console.log('PASS 4: material tools preserve actual PDF page/text/image fingerprints and reject another snapshot without authority')
     for (const fixture of r19LessonMaterials().filter(item => item.format !== 'pdf')) {
       const source = await service.receiveBytes({ name: fixture.name, bytes: fixture.bytes, source: { kind: 'drop' } })
       const derived = await service.extract(source.id)
@@ -59,12 +75,12 @@ void app.whenReady().then(async () => {
     const controller = new AbortController()
     const cancelled = extractor.extract({ bytes: twoPagePdf(), filename: 'cancel.pdf' }, { signal: controller.signal })
     controller.abort(new Error('explicit cancellation'))
-    await assert.rejects(cancelled, /explicit cancellation/)
+    await assert.rejects(cancelled, (error: any) => error.code === 'operation-cancelled' && error.cause?.message === 'explicit cancellation')
     assert.equal(BrowserWindow.getAllWindows().length, 0)
     await assert.rejects(createSandboxedAttachmentExtractor({ ...options, timeoutMs: 1 }).extract({ bytes: twoPagePdf(), filename: 'timeout.pdf' }), /超时/)
     assert.equal(BrowserWindow.getAllWindows().length, 0)
     console.log('PASS 3: cancellation and timeout destroy real sandbox windows')
-    await fs.writeFile(path.join(carrier, rendererURL ? 'dev-result.json' : 'build-result.json'), JSON.stringify({ passed: 3, failed: 0, entry: rendererURL ?? options.rendererFile, at: new Date().toISOString() }, null, 2))
+    await fs.writeFile(path.join(carrier, rendererURL ? 'dev-result.json' : 'build-result.json'), JSON.stringify({ passed: 4, failed: 0, entry: rendererURL ?? options.rendererFile, at: new Date().toISOString() }, null, 2))
   } finally {
     if (!path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Invalid temporary root')
     await fs.rm(directory, { recursive: true, force: true })

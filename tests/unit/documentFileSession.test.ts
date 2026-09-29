@@ -116,3 +116,22 @@ describe('Markdown projection on the main document owner', () => {
     expect(await fs.readFile(f.filename, 'utf8')).toBe('<p>after</p>')
   })
 })
+
+
+it('M25 a failed local draft has a confirmed discard path without retrying drain or save; cancel retains the draft', async () => {
+  const f = await fixture('original', 'failed.html')
+  f.session.setComposing(true)
+  f.session.edit('uncommitted input')
+  const drain = vi.spyOn(f.session, 'drain').mockResolvedValue(false)
+  const close = vi.spyOn(f.documents, 'closeWithDialog').mockResolvedValueOnce(false).mockImplementationOnce(async id => {
+    await f.documents.close(id, true); return true
+  })
+  expect(await f.session.discardAndClose()).toBe(false)
+  expect(f.session.getSnapshot().source).toBe('uncommitted input')
+  expect(await f.session.discardAndClose()).toBe(true)
+  expect(close).toHaveBeenCalledWith(f.session.documentId, undefined, true)
+  expect(drain).not.toHaveBeenCalled()
+  f.session.setComposing(false) // A late IME completion cannot recreate the disposed writer.
+  expect(await f.documents.list()).toEqual([])
+  expect(await fs.readFile(f.filename, 'utf8')).toBe('original')
+})
