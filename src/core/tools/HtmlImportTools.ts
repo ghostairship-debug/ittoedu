@@ -19,7 +19,8 @@ export type HtmlImportInput = z.infer<typeof htmlImportInputSchema>
 
 export function htmlImportReceiptResult(receipt: HtmlImportReceipt): ToolResult {
   if (receipt.commit) return { kind: 'document-operation', result: receipt.commit, affected: receipt.pages.map(page => page.runtimeId) }
-  return { kind: 'error', code: 'html-import-failed', message: receipt.reason ?? 'HTML 导入未完成' }
+  if (receipt.status === 'cancelled') return { kind: 'error', code: 'html-import-cancelled', message: 'HTML 导入已取消；本次没有新的课件提交，先前已应用的修改保留。' }
+  return { kind: 'error', code: 'html-import-failed', message: (receipt.reason ?? 'HTML 导入未完成') + '；请保留交互脚本与已确认内容，修复具体诊断后重试。applied 仅表示已提交，交付仍需 file.save。' }
 }
 
 /** Single canonical tool schema projected by both the built-in gateway and external MCP. */

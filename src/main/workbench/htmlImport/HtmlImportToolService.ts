@@ -50,7 +50,8 @@ export class HtmlImportToolService implements HtmlImportServicePort {
     const record = await this.options.operationStore.lookup(input.runId, input.operationId)
     if (!record) return null
     if (record.requestDigest !== input.requestDigest) throw new Error('同一 HTML 导入操作编号不能改变请求参数')
-    if (record.receipt) return record.receipt
+    if (record.receipt) return record.status === 'cancelled' && !record.receipt.commit
+      ? { ...record.receipt, status: 'cancelled' } : record.receipt
     try {
       const recovered = await this.recoverCommit(record)
       if (recovered) return recovered
@@ -154,9 +155,12 @@ export class HtmlImportToolService implements HtmlImportServicePort {
         }
         if (record.children.some(item => item.name === 'build.import')) throw new HtmlImportOutcomeUnknownError(error)
         const reason = error instanceof Error ? error.message : String(error)
-        const receipt: HtmlImportReceipt = { operationId: input.operationId, status: record.status === 'cancelled' ? 'rejected' : 'failed',
+        // A signal can stop preparation before cancel() records its state.
+        // Committed or ambiguous child writes have already been reconciled above.
+        const status = record.status === 'cancelled' || input.signal?.aborted ? 'cancelled' : 'failed'
+        const receipt: HtmlImportReceipt = { operationId: input.operationId, status,
           pages: record.pages ?? [], reason }
-        await this.options.operationStore.patch(input.runId, input.operationId, { status: record.status === 'cancelled' ? 'cancelled' : 'failed', receipt, reason })
+        await this.options.operationStore.patch(input.runId, input.operationId, { status, receipt, reason })
         return receipt
       }
       throw error

@@ -591,6 +591,40 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     })
     if (valid) { dataBindings.add(stateBinding); for (const parameter of updaterParams) dataBindings.add(parameter) }
   }
+  // A DOM collection is not plain JSON, but reading one of its elements is not a URL capability.
+  // Permit only element use through known DOM members; calls/aliases/computed sinks stay audited below.
+  const domMembers = new Set(['classList', 'textContent', 'innerText', 'style', 'querySelector', 'querySelectorAll',
+    'focus', 'blur', 'scrollIntoView', 'getAttribute', 'setAttribute', 'addEventListener', 'removeEventListener',
+    'src', 'href', 'poster', 'srcset', 'value', 'checked', 'disabled', 'hidden'])
+  const indexedDomUse = (node: JsNode): boolean => {
+    const use = parents.get(node)
+    return use?.type === 'MemberExpression' && use.object === node && domMembers.has(memberName(use) ?? '')
+  }
+  const domCollection = (node: JsNode, seen = new Set<Binding>()): boolean => {
+    if (node.type === 'Identifier') {
+      const binding = bindingOf(node)
+      if (!binding?.initial || binding.duplicate || seen.has(binding) || assignments.has(binding) || objectAssigns.has(binding)) return false
+      // Do not infer collection provenance after replacement, mutation or escape to an unknown function.
+      const stable = allNodes.filter(ref => isReference(ref) && bindingOf(ref) === binding).every(ref => {
+        const use = parents.get(ref)
+        if (use?.type !== 'MemberExpression' || use.object !== ref) return false
+        if (memberName(use) === 'length') return parents.get(use)?.type !== 'AssignmentExpression'
+        return use.computed === true && indexedDomUse(use)
+      })
+      return stable && domCollection(binding.initial, new Set(seen).add(binding))
+    }
+    if (node.type === 'ArrayExpression') {
+      const items = node.elements as JsNode[]
+      return items.length === 1 && items[0]?.type === 'SpreadElement' && domCollection(items[0].argument as JsNode, seen)
+    }
+    if (node.type !== 'CallExpression') return false
+    const callee = node.callee as JsNode, args = node.arguments as JsNode[]
+    if (callee.type !== 'MemberExpression') return false
+    const receiver = callee.object as JsNode
+    if (receiver.type !== 'Identifier' || bindingOf(receiver)) return false
+    if (receiver.name === 'Array' && memberName(callee) === 'from') return args.length === 1 && domCollection(args[0], seen)
+    return receiver.name === 'document' && memberName(callee) === 'querySelectorAll' && args.length === 1
+  }
   const inInert = (node: JsNode): boolean => { let current: JsNode | undefined = node; while (current) { if (inertCalls.has(current)) return true; current = parents.get(current) } return false }
   for (const node of allNodes) {
     if (inLibrary(node) || inInert(node)) continue
@@ -599,6 +633,7 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     const name = node.type === 'MemberExpression' ? memberName(node) : node.type === 'Identifier' && isReference(node) && !bindingOf(node) ? String(node.name) : undefined
     if (node.type === 'MemberExpression' && node.computed && name === undefined
       && ((parent.type === 'CallExpression' && parent.callee === node) || !dataValue(node.object as JsNode))
+      && !(indexedDomUse(node) && domCollection(node.object as JsNode))
       && !resourceInputs.some(input => input.value === node && input.proof.kind === 'proven-resource')
       && !((node.property as JsNode).type === 'Literal' && typeof (node.property as JsNode).value === 'number')) capabilityErrors.push(node)
     if (name && (networks.has(name) || ['eval', 'Function', 'Reflect', 'constructor', 'getOwnPropertyDescriptor', 'getOwnPropertyDescriptors', '__lookupGetter__', '__lookupSetter__'].includes(name))) capabilityErrors.push(node)

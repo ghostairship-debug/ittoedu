@@ -43,6 +43,13 @@ export interface HtmlPreviewAutomationContext {
   tabId: string
   webContentsId: number
   bindingPath: string
+  source?: 'isolated'
+}
+
+export class HtmlPreviewUnavailableError extends Error {
+  constructor(readonly reason: 'missing' | 'ambiguous') {
+    super(reason === 'ambiguous' ? '同一 HTML 文档有多个预览，请指定当前标签页' : '没有当前版本的 HTML 预览，请打开并观察该文档')
+  }
 }
 
 /** B4 supplies the canonical locator/transaction implementation at composition time. */
@@ -267,8 +274,7 @@ export class HtmlPreviewService implements HtmlPreviewHost {
     const matches = [...this.leases.values()].filter(lease => lease.public.documentId === input.documentId
       && lease.public.epoch === input.epoch && lease.public.revision === input.revision
       && (input.tabId === undefined || lease.tabId === input.tabId))
-    if (matches.length !== 1) throw new Error(matches.length
-      ? '同一 HTML 文档有多个预览，请指定当前标签页' : '没有当前版本的 HTML 预览，请打开并观察该文档')
+    if (matches.length !== 1) throw new HtmlPreviewUnavailableError(matches.length ? 'ambiguous' : 'missing')
     return this.automationContext(matches[0]!.public.leaseId, matches[0]!.public.loadId, input.revision)
   }
 

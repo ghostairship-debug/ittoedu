@@ -1330,7 +1330,7 @@ export class ExecutionEngine {
     const imageReady = (tool.call.name === 'image.generate' || tool.call.name === 'image.edit')
       && tool.result?.kind === 'read' && (tool.result.data as { status?: unknown } | null)?.status === 'ready'
     this.timing(record, `${record.runId}:${tool.callId}:end`, 'tool.finished', { requestId: tool.requestId,
-      toolCallId: tool.callId, detail: { outcome: tool.result?.kind === 'error' ? 'failed' : serviceOutcome?.status
+      toolCallId: tool.callId, detail: { outcome: serviceOutcome?.status === 'stopped' ? 'stopped' : tool.result?.kind === 'error' ? 'failed' : serviceOutcome?.status
         ?? (committed(tool.result) ? tool.result.result.status : imageReady ? 'ready' : 'returned') } })
     // Preserve the host receipt boundary before projecting earlier producer-side image marks.
     await this.projectImageTiming(record, tool)

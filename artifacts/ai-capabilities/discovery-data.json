@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "semanticVersion": "fc136a43c943d441b2f75f17ef5e73c19ec9e2a94b26ff765566e1fc33a96bde",
+  "semanticVersion": "c9b14a65b99f389ff6100ba151ece584668cbb33ccf5a9607b44c11e60fd8d89",
   "entries": [
     {
       "id": "asset.font.import",
@@ -1491,7 +1491,7 @@
         "runtime"
       ],
       "summary": "从教学策划和整课框架 HTML 做后置表示规划，按页导入组装、视觉精修并交付可编辑 Course Project V9；支持默认两次确认与明确的自动创作模式。",
-      "keywords": "# 构建互动课件工程 ## 1. 后置表示规划 ## 2. 导入与组装 ## 3. 视觉精修与交付"
+      "keywords": "# 构建互动课件工程 ## 1. 后置表示规划 ## 2. 导入与组装 ## 3. 视觉精修与交付 ## 导入故障与交付收口"
     },
     {
       "id": "skill:orchestrate-courseware",

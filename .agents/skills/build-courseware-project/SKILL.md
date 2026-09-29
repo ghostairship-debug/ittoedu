@@ -24,3 +24,10 @@ description: 从教学策划和整课框架 HTML 做后置表示规划，按页�
 按需阅读 [build-method.md](references/build-method.md) 的载体所有权、资产与任务图、最高风险纵切、增量构建、可编辑性与验证方法；推进遵守 [main-progression.md](references/main-progression.md)，先证明控制器隐藏时的正文主路径，再查控制器兜底；布局看 [page-design.md](references/page-design.md)，PPT 来源看 [ppt-import-review.md](references/ppt-import-review.md)，最终检查看 [validation-boundaries.md](references/validation-boundaries.md)。稳定图文与简单点击走 Native；局部复杂互动先匹配或新建 Component；整页连续机制才用 Runtime。Flow 保留语义正文，Spatial 保留世界和镜头。Runtime/Component 中的普通图文由宿主自动发现，AI 不登记文案表、图片编号或编辑目标。
 
 缺关键教学内容或必须改变已确认体验时，默认模式返回 `$orchestrate-courseware`；自动模式保留可完成部分并在交付时列出精确缺口。技术参数不让教师猜。工具回执、保存重开和真实画面分别核对，不能把候选成功当作完整教师验收。
+
+## 导入故障与交付收口
+
+- 导入器报错时保留已确认框架，按具体诊断修复。不得以删除整段互动脚本、隐藏问题页或把互动改成静态按钮换取准入通过；未解决时保留可恢复成果并说明缺口。
+- 拆页后每一页必须独立可见、可运行。依赖整份 `pages` 集合的共享脚本不能直接复制到每个独立页面；分页导航与页内互动分别处理，逐页核对目标按钮的真实效果。确实不可机械拆分时保留原文并说明，不擅自改成整课单页。
+- 第一次成功导入后立即保存目标 `.h5lesson`，再做下一轮精修；后续改动再保存。`file.save` 的 `target` 使用 `file.create/open` 返回的顶层整文档 `target`，不传路径、documentId 或 `text.writableTarget`。保存的是课件，而非只有来源 HTML。
+- 交付前核对目标课件 `file.save` 回执的 `savedRevision/currentRevision` 与 `dirty:false`，再通过正式文件读取/重开核实场景与资源及代表互动。已有打开标签的 `file.open` 可能只复用内存，不能单独证明磁盘内容；`recoverable` 只说明可恢复，不是已写入目标文件。

@@ -15,6 +15,8 @@ const fileMutations = new Set<string>(agentFileMutationNames)
 
 /** Only tools whose read receipt is itself a service job use its status for task settlement. */
 export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceToolOutcome | null => {
+  if (name === 'html.import' && result?.kind === 'error' && result.code === 'html-import-cancelled')
+    return { status: 'stopped', message: result.message }
   if (result?.kind !== 'read' || !result.data || typeof result.data !== 'object') return null
   const data = result.data as Record<string, unknown>
   if (fileMutations.has(name) && data.operation && typeof data.operation === 'object') {
@@ -163,8 +165,43 @@ function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord
   })
 }
 
+interface NewFileDeliveryFact { documentId: string; label: string; revision: number | null; savedRevision: number | null }
+
+/** Only this run's receipts count: a created path is not evidence that subsequent edits reached that file. */
+export function newFileDeliveryFacts(record: ExecutionRunRecord): NewFileDeliveryFact[] {
+  const facts = new Map<string, NewFileDeliveryFact>()
+  for (const tool of record.tools) {
+    const data = tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
+      ? tool.result.data as Record<string, unknown> : null
+    if (fileCreated(tool.call.name, tool.result) && typeof data?.documentId === 'string') {
+      const label = typeof data.path === 'string' ? data.path.split(/[\\/]/).at(-1)! : data.documentId
+      if (!facts.has(data.documentId)) facts.set(data.documentId, { documentId: data.documentId,
+        label: label.slice(0, 160), revision: null, savedRevision: null })
+    }
+    const mutation = tool.result?.kind === 'document-operation' ? tool.result.result
+      : tool.call.name === 'file.patch' && data?.documentResult && typeof data.documentResult === 'object'
+        ? data.documentResult as Record<string, unknown> : null
+    if (mutation?.status === 'applied' && typeof mutation.documentId === 'string'
+      && typeof mutation.revision === 'number' && Number.isSafeInteger(mutation.revision)) {
+      const fact = facts.get(mutation.documentId)
+      if (fact) fact.revision = mutation.revision
+    }
+    if (tool.call.name === 'file.save' && data?.status === 'saved' && typeof data.documentId === 'string'
+      && typeof data.savedRevision === 'number' && Number.isSafeInteger(data.savedRevision)) {
+      const fact = facts.get(data.documentId)
+      if (fact) {
+        fact.savedRevision = data.savedRevision
+        if (data.dirty === true && typeof data.currentRevision === 'number') fact.revision = data.currentRevision
+      }
+    }
+  }
+  return [...facts.values()]
+}
+const unconfirmedSave = (fact: NewFileDeliveryFact) => fact.revision !== null
+  && (fact.savedRevision === null || fact.savedRevision < fact.revision)
+
 export function hasUnresolvedToolFailure(record: ExecutionRunRecord): boolean {
-  return unresolvedToolFailures(record).length > 0
+  return unresolvedToolFailures(record).length > 0 || newFileDeliveryFacts(record).some(unconfirmedSave)
 }
 
 /** Only receipt-backed facts are summarized; scratch cleanup is not a new task failure. */
@@ -187,6 +224,11 @@ export function runEndSummary(record: ExecutionRunRecord): string | undefined {
   if (importApplied) parts.push(`已正式导入 ${importApplied} 项构建成果`)
   const createdFiles = record.tools.filter(tool => fileCreated(tool.call.name, tool.result)).length
   if (createdFiles) parts.push(`已创建 ${createdFiles} 个文件`)
+  const fileFacts = newFileDeliveryFacts(record)
+  const unsaved = fileFacts.filter(unconfirmedSave)
+  if (unsaved.length) parts.push(`新文件的修改尚未确认保存：${unsaved.map(fact => `${fact.label}（文档版本 ${fact.revision}）`).join('、')}；可恢复状态不等于目标文件已写盘`)
+  const scaffolds = fileFacts.filter(fact => fact.revision === null && /\.h5lesson$/i.test(fact.label))
+  if (scaffolds.length) parts.push(`仅有创建回执、未见课件内容提交：${scaffolds.map(fact => fact.label).join('、')}`)
   const savedArtifacts = record.tools.filter(tool => tool.call.name === 'artifact.save'
     && serviceToolOutcome(tool.call.name, tool.result)?.status === 'written').length
   if (savedArtifacts) parts.push(`已保存 ${savedArtifacts} 项作业成果`)

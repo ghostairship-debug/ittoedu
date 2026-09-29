@@ -20,7 +20,7 @@ export const isHtmlActionTool = (name: string): name is HtmlActionToolName =>
   Object.hasOwn(htmlActionToolSchemas, name)
 
 const descriptions: Record<HtmlActionToolName, string> = {
-  'html.observe': '观察本任务冻结的当前 HTML 文档在受管预览中的真实状态和截图；返回本次观察的短元素句柄。需要打开当前版本预览；未观察到真实画面时明确失败。',
+  'html.observe': '观察本任务冻结的当前 HTML 文档在受管预览中的真实状态和截图；返回本次观察的短元素句柄。优先复用当前版本预览；没有可用预览时由宿主准备任务独立预览，不切换用户标签。源码修改后重新观察；未观察到真实画面时明确失败。',
   'html.navigate': '将当前 HTML 预览翻到指定页码（从 0 开始），随后返回该页真实状态和截图；只在本任务绑定的页面内操作。',
   'html.click': '点击最近一次 HTML 观察返回的元素句柄，随后重新读取真实状态和截图。旧句柄或页面变化会冲突；不得重复猜测同一点击是否发生。',
   'html.input': '向最近一次 HTML 观察返回的可编辑元素句柄输入 value，并触发页面输入事件，随后重新读取真实状态和截图。不可输入密码或文件控件。',

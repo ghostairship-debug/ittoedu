@@ -1,13 +1,14 @@
 /* M15 element AI card: a white panel under the quick bar, like the AI form it replaces. */
-.element-ai-card { display: grid; gap: 8px; box-sizing: border-box; width: min(320px, 82vw); padding: 10px; border: 1px solid #c4b5fd; border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgb(0 0 0 / 18%); color: #17211d; font-size: 12px; white-space: normal; }
+.element-ai-card { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; max-height: var(--element-ai-card-max-height, calc(100dvh - 16px)); min-height: 0; gap: 8px; box-sizing: border-box; width: min(320px, 82vw); padding: 10px; border: 1px solid #c4b5fd; border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgb(0 0 0 / 18%); color: #17211d; font-size: 12px; white-space: normal; }
 .element-ai-card p { margin: 0; }
+.element-ai-card__body { display: grid; align-content: start; gap: 8px; min-height: 0; overflow-y: auto; overflow-wrap: anywhere; overscroll-behavior: contain; }
 .element-ai-card__header { display: flex; align-items: center; gap: 6px; color: #5b21b6; }
 .element-ai-card__header strong { overflow: hidden; flex: 1; min-width: 0; color: #17211d; text-overflow: ellipsis; white-space: nowrap; }
 .element-ai-card__header button { min-width: 24px; height: 22px; padding: 0 6px; border: 1px solid #d8dee6; border-radius: 4px; background: #fff; color: #334155; font: inherit; cursor: pointer; }
 .element-ai-card__header button:disabled { opacity: .5; cursor: not-allowed; }
 .element-ai-card__close { border-color: transparent !important; font-size: 15px !important; line-height: 1; }
 .element-ai-card__hint { color: #66758a; }
-.element-ai-card__log { display: grid; gap: 8px; max-height: 220px; margin: 0; padding: 0; overflow-y: auto; list-style: none; }
+.element-ai-card__log { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .element-ai-card__entry { display: grid; gap: 2px; padding: 6px 8px; border-radius: 6px; background: #f6f4ff; }
 .element-ai-card__request { font-weight: 600; }
 .element-ai-card__state { color: #66758a; }
@@ -17,7 +18,7 @@
 .element-ai-card__failure { color: #b42318; }
 .element-ai-card__notice { color: #92400e; }
 .element-ai-card__form { display: grid; gap: 6px; }
-.element-ai-card__form textarea { box-sizing: border-box; width: 100%; min-height: 48px; resize: vertical; font: inherit; }
+.element-ai-card__form textarea { box-sizing: border-box; width: 100%; min-height: 48px; max-height: min(160px, 18dvh); resize: vertical; font: inherit; }
 .element-ai-card__actions { display: flex; justify-content: flex-end; gap: 6px; }
 .element-ai-card__actions button { padding: 4px 12px; }
 .element-ai-card__confirm { display: grid; gap: 6px; padding: 8px; border: 1px solid #f59e0b; border-radius: 6px; background: #fffbeb; color: #78350f; }
@@ -32,6 +33,8 @@
 .element-card-indicator__menu small { color: #66758a; }
 
 /* A text card follows its visible selection; its fallback remains reachable when that selection leaves view. */
-.element-text-card { position: fixed; z-index: 60; max-height: calc(100vh - 16px); overflow: auto; }
+.element-text-card { position: fixed; z-index: 60; display: flex; flex-direction: column; max-height: calc(100dvh - 16px); }
+.element-text-card > .element-ai-card { flex: 1 1 auto; }
+.element-text-card__binding { flex: none; }
 .element-text-card__binding { display: grid; gap: 5px; box-sizing: border-box; width: min(320px, 82vw); margin-bottom: 4px; padding: 7px 9px; border: 1px solid #f59e0b; border-radius: 7px; background: #fffbeb; color: #78350f; font-size: 12px; }
 .element-text-card__binding button { justify-self: start; padding: 3px 8px; border: 1px solid #d97706; border-radius: 4px; background: #fff; color: inherit; cursor: pointer; }

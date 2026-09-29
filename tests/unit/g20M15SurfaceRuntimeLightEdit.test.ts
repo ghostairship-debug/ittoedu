@@ -71,3 +71,30 @@ it('M15 a Surface Runtime shows its text rules in playback and publishes its own
   session.destroy()
   playback.frame.remove(); authoring.frame.remove()
 })
+
+
+it.each(['authoring', 'live'] as const)('maps non-default API3 canvas text and image targets without drift in %s mode', async mode => {
+  const f = realm(), session = createPublishedSurfaceRuntimeSession()
+  const updates: RuntimeAuthoringTargetUpdate[] = []
+  const publish = (update: RuntimeAuthoringTargetUpdate) => updates.push(update)
+  const handle = mountPublishedSurfaceRuntime(f.container, {
+    instanceId: 'non-default', runtime: runtime(), width: 640, height: 360,
+    canvas: { width: 1024, height: 768 }, visible: true, session,
+    resolveAsset: id => id === 'asset-hero' ? HERO : undefined,
+    ...(mode === 'authoring' ? { mode: 'authoring' as const,
+      authoring: { scope: 'scene' as const, sceneId: 'scene', onTargetsChanged: publish } } : {}),
+  })
+  try {
+    await handle.waitForReady()
+    const stop = mode === 'live' ? handle.startLiveEdit?.({ sceneId: 'scene', onTargetsChanged: publish }) : undefined
+    for (let i = 0; i < 8; i++) await Promise.resolve()
+    const text = updates.at(-1)!.targets.find(target => target.kind === 'text')!
+    expect(text.bounds.x).toBeCloseTo(20 / 640 * 1024)
+    expect(text.bounds.y).toBeCloseTo(10 / 360 * 768)
+    expect(text.bounds.width).toBeCloseTo(80 / 640 * 1024)
+    expect(text.bounds.height).toBeCloseTo(24 / 360 * 768)
+    expect(updates.at(-1)!.targets.find(target => target.kind === 'asset')!.bounds)
+      .toEqual({ x: 0, y: 0, width: 1024, height: 768 })
+    stop?.()
+  } finally { handle.destroy(); session.destroy(); f.frame.remove() }
+})

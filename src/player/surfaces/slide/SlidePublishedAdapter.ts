@@ -2435,6 +2435,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
                 runtime: nextItem.runtime,
                 width: nextItem.frame.width,
                 height: nextItem.frame.height,
+                canvas: slideCanvas,
                 visible: this.#active || this.#authoring !== null,
                 resolveAsset: this.#resolveAsset,
                 session: this.#runtimeSession,

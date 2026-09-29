@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { hasUnresolvedToolFailure, runEndSummary } from '../../src/main/workbench/execution/executionOutcome'
+import { htmlImportReceiptResult } from '../../src/core/tools/HtmlImportTools'
+import { hasUnresolvedToolFailure, runEndSummary, serviceToolOutcome } from '../../src/main/workbench/execution/executionOutcome'
 import type { ExecutionRunRecord, ExecutionToolRecord } from '../../src/shared/workbench/execution'
 
 const tool = (name: string, input: unknown, result: ExecutionToolRecord['result'], index: number): ExecutionToolRecord => ({
@@ -102,4 +103,51 @@ describe('M26 R7 receipt-based settlement', () => {
     } }, 3)
     expect(hasUnresolvedToolFailure(run(delegated, ready, other, verified))).toBe(false)
   })
+})
+
+
+const createdLesson = () => tool('file.create', { name: 'lesson.h5lesson' }, { kind: 'read', data: {
+  documentId: 'lesson', path: 'C:/fixture/lesson.h5lesson', operation: { status: 'success' },
+} }, 0)
+const appliedLesson = (revision = 1) => tool('html.import', {}, { kind: 'document-operation', affected: [], result: {
+  status: 'applied', documentId: 'lesson', operationId: `import-${revision}`, beforeRevision: revision - 1,
+  revision, persistence: 'recoverable',
+} }, revision)
+const savedLesson = (documentId: string, savedRevision: number, currentRevision = savedRevision) => tool('file.save', {},
+  { kind: 'read', data: { status: 'saved', documentId, savedRevision, currentRevision, dirty: savedRevision !== currentRevision } }, 10)
+
+it('does not settle a new course from recoverable edits or from saving the source HTML', () => {
+  const record = run(createdLesson(), appliedLesson(), savedLesson('source-html', 16))
+  expect(hasUnresolvedToolFailure(record)).toBe(true)
+  record.status = 'stopped'
+  expect(runEndSummary(record)).toContain('lesson.h5lesson（文档版本 1）')
+  expect(runEndSummary(record)).toContain('可恢复状态不等于目标文件已写盘')
+  expect(hasUnresolvedToolFailure(run(...record.tools, savedLesson('lesson', 1)))).toBe(false)
+})
+
+it('keeps a save raced by a new revision pending, including path-based file.patch receipts', () => {
+  const patch = tool('file.patch', {}, { kind: 'read', data: { documentResult: {
+    status: 'applied', documentId: 'lesson', revision: 2,
+  } } }, 11)
+  expect(hasUnresolvedToolFailure(run(createdLesson(), appliedLesson(), savedLesson('lesson', 1), patch))).toBe(true)
+  expect(hasUnresolvedToolFailure(run(createdLesson(), appliedLesson(), savedLesson('lesson', 1, 2)))).toBe(true)
+  expect(hasUnresolvedToolFailure(run(createdLesson(), appliedLesson(), savedLesson('lesson', 1), patch, savedLesson('lesson', 2)))).toBe(false)
+})
+
+it('preserves ordinary unsaved editing and an intentionally empty new file without inventing a failure', () => {
+  expect(hasUnresolvedToolFailure(run(appliedLesson()))).toBe(false)
+  expect(hasUnresolvedToolFailure(run(createdLesson()))).toBe(false)
+  const stopped = run(createdLesson()); stopped.status = 'stopped'
+  expect(runEndSummary(stopped)).toContain('仅有创建回执、未见课件内容提交：lesson.h5lesson')
+})
+
+it('distinguishes a cancelled import from failure and still reports a committed operation first', () => {
+  expect(htmlImportReceiptResult({ operationId: 'cancel', status: 'cancelled', reason: 'stopped', pages: [] }))
+    .toMatchObject({ kind: 'error', code: 'html-import-cancelled' })
+  expect(serviceToolOutcome('html.import', htmlImportReceiptResult({ operationId: 'cancel', status: 'cancelled', reason: 'stopped', pages: [] })))
+    .toMatchObject({ status: 'stopped' })
+  const applied = appliedLesson().result!
+  if (applied.kind !== 'document-operation' || applied.result.status !== 'applied') throw new Error('fixture')
+  expect(htmlImportReceiptResult({ operationId: 'done', status: 'applied', revision: 1, pages: [], commit: applied.result }))
+    .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
 })

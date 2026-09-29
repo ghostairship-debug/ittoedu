@@ -954,3 +954,59 @@ describe('M24 g20-b18-c2 HTML section import orchestration', () => {
     expect(sectionTitles).toEqual(['第一节：固定画布观察', '第二节：流式观察记录', '第三节：持续镜头'])
   })
 })
+
+
+it('persists an imported course to the actual h5lesson bytes and reopens it without a recovery journal', async () => {
+  // Admission is the fixture above; this test verifies the real writer/archive round trip, not art quality.
+  const env = await setupTestEnvironment(), runId = 'disk-roundtrip'
+  await env.gateway.beginRun({ runId, actor: 'human', documents: [
+    { documentId: env.courseSession.documentId, writable: [{ kind: 'document' }] },
+    { documentId: env.htmlSession.documentId, writable: [] },
+  ] })
+  await env.gateway.loadToolFamilies(runId, ['build'])
+  const target = await env.gateway.issueTarget(runId, env.courseSession.documentId, { kind: 'document' })
+  const source = await env.gateway.issueTarget(runId, env.htmlSession.documentId, { kind: 'document' }, { readOnly: true })
+  const before = env.courseSession.read()
+  if (before.model.kind !== 'course-v9') throw new Error('fixture model')
+  const slide = before.model.project.surfaces.find(surface => surface.type === 'slide')!
+  const result = await env.gateway.execute(runId, 'import', { name: 'html.import', input: {
+    source, target, mode: 'sections', destinations: [{ kind: 'slide-new', surface: slide.id }],
+  } })
+  expect(result).toMatchObject({ kind: 'document-operation', result: { status: 'applied', persistence: 'recoverable' } })
+  const file = path.join(env.root, 'delivered.h5lesson')
+  await expect(fs.stat(file)).rejects.toMatchObject({ code: 'ENOENT' })
+  const saved = await env.courseSession.save({ kind: 'file', path: file, version: null, bindingVersion: 1 })
+  expect(saved.dirty).toBe(false)
+  await env.registry.close(env.courseSession.documentId)
+  // A fresh driver reads only the archive, never the old session or journal.
+  const reopened = new CourseV9Driver().load(new Uint8Array(await fs.readFile(file)))
+  expect(reopened.kind).toBe('course-v9')
+  if (reopened.kind !== 'course-v9' || saved.model.kind !== 'course-v9') throw new Error('fixture model')
+  expect(reopened.project).toEqual(saved.model.project)
+  expect(Object.keys(reopened.resources.assets)).toEqual(Object.keys(saved.model.resources.assets))
+  const imported = reopened.project.surfaces.flatMap(surface => surface.type === 'slide'
+    ? surface.scenes.flatMap(scene => scene.layerItems.filter(item => item.kind === 'runtime')) : [])
+  expect(imported).toHaveLength(3)
+  for (const item of imported) {
+    if (item.kind !== 'runtime') throw new Error('fixture runtime')
+    expect(unpackHtmlDocumentRuntimeSource(item.runtime.source)?.html).toContain('<section')
+  }
+})
+
+it('records a signal-only cancellation before preparation without misreporting an import failure', async () => {
+  const env = await setupTestEnvironment(), controller = new AbortController()
+  const source = env.htmlSession.read(), target = env.courseSession.read()
+  controller.abort(new Error('user stopped'))
+  const input = { runId: 'signal-only', operationId: 'cancelled-before-prepare', requestDigest: 'signal-digest',
+    sourceDocumentId: source.documentId, sourceEpoch: source.epoch, sourceRevision: source.revision,
+    sourceBindingVersion: source.binding.kind === 'file' ? source.binding.bindingVersion : null,
+    targetDocumentId: target.documentId, targetEpoch: target.epoch, targetRevision: target.revision,
+    mode: 'whole' as const, destinations: [{ kind: 'slide-new' as const, surface: 'unused' }], signal: controller.signal }
+  const result = await env.toolService.import(input)
+  expect(result).toMatchObject({ status: 'cancelled' })
+  expect(await env.toolService.lookup(input)).toEqual(result)
+  expect(await env.operationStore.lookup(input.runId, input.operationId)).toMatchObject({ status: 'cancelled', children: [] })
+  expect(env.courseSession.read().revision).toBe(target.revision)
+  expect(env.courseSession.read().undoDepth).toBe(target.undoDepth)
+  expect(env.run).not.toHaveBeenCalled()
+})

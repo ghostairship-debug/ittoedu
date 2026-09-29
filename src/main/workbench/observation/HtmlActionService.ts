@@ -1,9 +1,15 @@
 import { randomUUID } from 'node:crypto'
 import type { ObservationImageResource } from '../../../shared/workbench/toolPorts'
-import type { HtmlPreviewAutomationContext, HtmlPreviewService } from '../htmlPreview/HtmlPreviewService'
+import type { HtmlPreviewAutomationContext } from '../htmlPreview/HtmlPreviewService'
 import { ObservationImageStore } from './ObservationImageStore'
 import type { HtmlActionCapture, HtmlActionDiagnostic, HtmlActionFramePort } from './HtmlActionDesktopPort'
 import { sameHtmlPreviewDocumentUrl, type HtmlPageElement, type HtmlPageState } from './HtmlActionPageScript'
+
+export interface HtmlActionPreviewPort {
+  automationContext(leaseId: string, loadId: string, revision: number): Promise<HtmlPreviewAutomationContext>
+  automationContextForDocument(input: { documentId: string; epoch: string; revision: number; tabId?: string; runId?: string }): Promise<HtmlPreviewAutomationContext>
+  releaseRun?(runId: string): void
+}
 
 export interface HtmlActionIdentity {
   runId: string
@@ -18,7 +24,7 @@ export interface HtmlActionIdentity {
 
 export interface HtmlActionObservation {
   identity: HtmlActionIdentity
-  source: 'live-html-preview'
+  source: 'live-html-preview' | 'isolated-html-preview'
   generation: number
   currentUrl: string
   title: string
@@ -53,7 +59,7 @@ export class HtmlActionService {
   /** A host call ID remains spent across a source-revision restart, including unknown outcomes. */
   private readonly usedActionIds = new Map<string, Set<string>>()
 
-  constructor(private readonly options: { preview: HtmlPreviewService; frames: HtmlActionFramePort;
+  constructor(private readonly options: { preview: HtmlActionPreviewPort; frames: HtmlActionFramePort;
     images: ObservationImageStore }) {}
 
   async beginRun(runId: string, input: { leaseId: string; loadId: string; revision: number }): Promise<HtmlActionIdentity> {
@@ -66,7 +72,7 @@ export class HtmlActionService {
     tabId?: string }): Promise<HtmlActionIdentity> {
     if (!runId || !input.documentId || !input.epoch || !Number.isSafeInteger(input.revision) || input.revision < 0)
       throw new Error('HTML 文档观察身份无效')
-    return this.beginFromContext(runId, () => this.options.preview.automationContextForDocument(input))
+    return this.beginFromContext(runId, () => this.options.preview.automationContextForDocument({ ...input, runId }))
   }
 
   /** Explicitly replace the observation epoch after a canonical source revision.
@@ -80,7 +86,7 @@ export class HtmlActionService {
       || input.revision === old.identity.revision) throw new Error('HTML 重开必须使用同一文档的新正式版本')
     this.opening.add(runId)
     try {
-      const context = await this.options.preview.automationContextForDocument(input)
+      const context = await this.options.preview.automationContextForDocument({ ...input, runId })
       const frameToken = await this.options.frames.frameToken(context)
       if (this.stoppedRuns.has(runId) || this.cancelledOpening.has(runId)
         || this.runs.get(runId) !== old || old.stopped) throw new Error('HTML 观察已停止')
@@ -161,7 +167,7 @@ export class HtmlActionService {
       const { path: _path, fingerprint: _fingerprint, ...report } = element
       return { ...report, handle }
     })
-    return { identity: session.identity, source: 'live-html-preview', generation: session.generation,
+    return { identity: session.identity, source: session.context.source === 'isolated' ? 'isolated-html-preview' : 'live-html-preview', generation: session.generation,
       currentUrl: state.url,
       title: state.title, readyState: state.readyState, pageIndex: state.pageIndex, pageCount: state.pageCount,
       structure: state.structure.slice(0, 32), diagnostics: state.diagnostics.slice(0, 32),
@@ -247,7 +253,7 @@ export class HtmlActionService {
     this.stoppedRuns.add(runId)
     if (this.opening.has(runId)) this.cancelledOpening.add(runId)
     const session = this.runs.get(runId)
-    if (!session) return
-    this.retire(session)
+    if (session) this.retire(session)
+    this.options.preview.releaseRun?.(runId)
   }
 }

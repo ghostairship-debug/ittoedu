@@ -164,7 +164,7 @@ export class ChatGPTResponsesProvider implements ModelProvider {
       const headerModel = response.headers.get('openai-model')
       if (headerModel !== null && !text(headerModel)) throw new ProtocolError()
       let responseId = '', streamModel: string | undefined, previewText = '', completed = false, sawFramedEvent = false
-      const toolPreviews = new Map<number, { id: string; name: string; arguments: string }>()
+      const toolPreviews = new Map<number, { id: string; name: string; arguments: string; toolIndex: number }>()
       const argumentDones = new Map<number, string>()
       const doneItems = new Map<number, ModelJsonObject>()
       const doneItemIds = new Set<string>()
@@ -204,15 +204,17 @@ export class ChatGPTResponsesProvider implements ModelProvider {
           if (!Number.isSafeInteger(chunk.output_index) || Number(chunk.output_index) < 0 || !text(item.call_id) || !text(item.name) || !prepared.names.has(item.name)) throw new ProtocolError()
           const index = Number(chunk.output_index)
           if (toolPreviews.has(index)) throw new ProtocolError()
-          toolPreviews.set(index, { id: item.call_id, name: item.name, arguments: '' })
-          yield event({ type: 'tool.delta', index, id: item.call_id, name: prepared.names.get(item.name), argumentsDelta: '' })
+          // output_index includes reasoning/messages; the engine indexes only function calls.
+          const toolIndex = toolPreviews.size
+          toolPreviews.set(index, { id: item.call_id, name: item.name, arguments: '', toolIndex })
+          yield event({ type: 'tool.delta', index: toolIndex, id: item.call_id, name: prepared.names.get(item.name), argumentsDelta: '' })
         }
         if (chunk.type === 'response.function_call_arguments.delta') {
           const index = Number(chunk.output_index), call = toolPreviews.get(index)
           if (!call || argumentDones.has(index) || typeof chunk.delta !== 'string') throw new ProtocolError()
           call.arguments += chunk.delta
           if (chunk.delta) clock.progress()
-          yield event({ type: 'tool.delta', index, id: call.id, name: prepared.names.get(call.name), argumentsDelta: chunk.delta })
+          yield event({ type: 'tool.delta', index: call.toolIndex, id: call.id, name: prepared.names.get(call.name), argumentsDelta: chunk.delta })
         }
         if (chunk.type === 'response.function_call_arguments.done') {
           const index = Number(chunk.output_index), call = toolPreviews.get(index)
@@ -222,7 +224,7 @@ export class ChatGPTResponsesProvider implements ModelProvider {
           if (call && !call.arguments && chunk.arguments) {
             call.arguments = chunk.arguments
             clock.progress()
-            yield event({ type: 'tool.delta', index, id: call.id, name: prepared.names.get(call.name), argumentsDelta: chunk.arguments })
+            yield event({ type: 'tool.delta', index: call.toolIndex, id: call.id, name: prepared.names.get(call.name), argumentsDelta: chunk.arguments })
           }
         }
         if (chunk.type === 'response.output_item.done') {
@@ -271,7 +273,7 @@ export class ChatGPTResponsesProvider implements ModelProvider {
               if (!text(item.call_id) || !text(item.name) || !prepared.names.has(item.name) || typeof item.arguments !== 'string' || seen.has(item.call_id)) throw new ProtocolError()
               seen.add(item.call_id)
               const preview = toolPreviews.get(index)
-              if (preview && (preview.id !== item.call_id || preview.name !== item.name || preview.arguments && preview.arguments !== item.arguments)
+              if (preview && (preview.toolIndex !== calls.length || preview.id !== item.call_id || preview.name !== item.name || preview.arguments && preview.arguments !== item.arguments)
                 || argumentDones.has(index) && argumentDones.get(index) !== item.arguments) throw new ProtocolError()
               calls.push({ id: item.call_id, name: prepared.names.get(item.name)!, argumentsText: item.arguments })
             }

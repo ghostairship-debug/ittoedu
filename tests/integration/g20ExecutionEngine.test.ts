@@ -16,6 +16,8 @@ import { runEndSummary } from '../../src/main/workbench/execution/executionOutco
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
 import { EditSessionService } from '../../src/main/workbench/execution/EditSessionService'
+import { ChatGPTResponsesProvider, CHATGPT_RESPONSES_BASE_URL, serializeChatGPTResponsesRequest } from '../../src/main/workbench/providers/ChatGPTResponsesProvider'
+import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import { OpenAIChatProvider, serializeModelRequest } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import type { ExecutionStart } from '../../src/shared/workbench/execution'
 import type { ModelEvent, ModelJsonObject, ModelProvider, ModelRequest, ModelSelection } from '../../src/shared/workbench/modelProvider'
@@ -740,4 +742,55 @@ it('M26 context.read uses an actual stored source, rejects another run, and puts
   expect(final.tools[2]?.result).toMatchObject({ kind: 'error', code: 'context-read-failed' })
   expect(final.messages[sourceIndex]?.content).toEqual(h.input.context[0]!.content)
   expect(h.session.read().revision).toBe(0)
+})
+
+
+it('aligns OAuth streamed edits and multiple tools after reasoning and message items with their final calls', async () => {
+  let turns = 0
+  const transport: typeof fetch = async (_url, init) => {
+    const wire = JSON.parse(String(init?.body))
+    const responseId = `oauth-${++turns}`
+    if (turns > 1) {
+      const outputs = wire.input.filter((item: { type: string }) => item.type === 'function_call_output')
+      expect(outputs).toHaveLength(3)
+      expect(outputs.map((item: { call_id: string }) => item.call_id)).toEqual(['edit', 'inspect', 'read'])
+      expect(outputs.every((item: { output: string }) => JSON.parse(item.output).kind !== 'error')).toBe(true)
+      return new Response(chunk({ type: 'response.completed', response: { id: responseId, status: 'completed', output: [
+        { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Done' }] },
+      ] } }), { headers: { 'content-type': 'text/event-stream' } })
+    }
+    const refs = JSON.parse(wire.instructions.split('本次固定文档与权限（切换界面不改变它们）：')[1].split('\n')[0])
+    const calls = [
+      { id: 'edit', name: 'text.replace', args: { target: refs[0].writable[0].target, content: 'NEW' } },
+      { id: 'inspect', name: 'inspect', args: { target: refs[0].target } },
+      { id: 'read', name: 'read', args: { target: refs[0].target } },
+    ]
+    const output: ModelJsonObject[] = [{ type: 'reasoning', id: 'reason', encrypted_content: 'opaque' }]
+    let packets = chunk({ type: 'response.created', response: { id: responseId } })
+    for (const [ordinal, call] of calls.entries()) {
+      if (ordinal === 1) output.push({ type: 'message', role: 'assistant', content: [] })
+      const index = output.length, args = JSON.stringify(call.args), name = modelToolWireName(call.name)
+      packets += chunk({ type: 'response.output_item.added', output_index: index,
+        item: { type: 'function_call', id: `item-${call.id}`, call_id: call.id, name } })
+      if (ordinal !== 1) packets += chunk({ type: 'response.function_call_arguments.delta', output_index: index, delta: args })
+      packets += chunk({ type: 'response.function_call_arguments.done', output_index: index, arguments: args })
+      output.push({ type: 'function_call', id: `item-${call.id}`, call_id: call.id, name, arguments: args, status: 'completed' })
+    }
+    packets += chunk({ type: 'response.completed', response: { id: responseId, status: 'completed', output } })
+    return new Response(packets, { headers: { 'content-type': 'text/event-stream' } })
+  }
+  const provider = new ChatGPTResponsesProvider({ fetch: transport,
+    credentialResolver: async () => ({ accessToken: 'fixture-only', accountId: 'fixture-account' }) })
+  const h = await fixture(provider)
+  const oauth = { ...selection, connection: { ...selection.connection, provider: 'openai',
+    protocol: 'chatgpt-responses' as const, baseURL: CHATGPT_RESPONSES_BASE_URL,
+    auth: { kind: 'oauth' as const, credentialRef: 'fixture-only' } } }
+  const engine = new ExecutionEngine({ registry: h.registry, gateway: h.gateway, edits: h.edits,
+    runs: h.runs, events: h.events, provider, serializePayload: serializeChatGPTResponsesRequest })
+  const started = await engine.start({ ...h.input, selection: oauth }), final = await engine.wait(started.runId)
+  expect(final.status, JSON.stringify({ failure: final.failure, tools: final.tools, requests: final.requests })).toBe('completed')
+  expect(final.tools).toHaveLength(3)
+  expect(final.tools.every(tool => tool.result?.kind !== 'error')).toBe(true)
+  expect((await h.session.drain()).model).toMatchObject({ source: '前文 NEW 后文' })
+  expect(turns).toBe(2)
 })

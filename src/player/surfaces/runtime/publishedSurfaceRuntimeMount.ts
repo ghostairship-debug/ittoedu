@@ -73,6 +73,8 @@ export interface PublishedSurfaceRuntimeMountOptions {
   runtime: PublishedSurfaceRuntime
   width: number
   height: number
+  /** Coordinate space consumed by the Slide authoring mapper (not the Runtime frame). */
+  canvas?: import('../../../shared/slideCanvas').SlideCanvasSize
   visible: boolean
   mode?: 'playback' | 'authoring' | 'capture'
   resolveAsset(assetId: string): string | undefined
@@ -554,6 +556,7 @@ export function mountPublishedSurfaceRuntime(
         root,
         width: options.width,
         height: options.height,
+        ...(options.canvas ? { canvas: options.canvas } : {}),
         content: options.runtime.content,
         assets: options.runtime.assets,
         authoring: options.authoring,
@@ -733,6 +736,7 @@ export function mountPublishedSurfaceRuntime(
         root,
         width: options.width,
         height: options.height,
+        ...(options.canvas ? { canvas: options.canvas } : {}),
         content: options.runtime.content,
         assets: options.runtime.assets,
         authoring: { scope: 'scene', ...(input.sceneId ? { sceneId: input.sceneId } : {}), onTargetsChanged: input.onTargetsChanged },

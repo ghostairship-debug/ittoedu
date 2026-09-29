@@ -246,3 +246,37 @@ describe('HTML import closure', () => {
     expect(validateHtmlImport(blocked).map(error => error.code)).toEqual(expect.arrayContaining(['unsupported-html-capability', 'remote-script', 'missing-relative-resource']))
   })
 })
+
+
+it.each([
+  "[...document.querySelectorAll('section')]",
+  "Array.from(document.querySelectorAll('section'))",
+  "document.querySelectorAll('section')",
+])('preserves ordinary DOM page indexing from %s without removing interactions', source => {
+  const code = `const pages=${source};let active=0;function go(n){
+    if(n<0||n>=pages.length)return;
+    pages[active].classList.remove('active');active=n;pages[active].classList.add('active');
+    pages[active].querySelector('h2')?.focus?.();
+  } document.querySelector('button').addEventListener('click',()=>go(1));`
+  const html = `<section class="active"><h2>One</h2></section><section><h2>Two</h2></section><button>Next</button><script>${code}</script>`
+  const result = extractHtmlResources({ html })
+  expect(validateHtmlImport(result)).toEqual([])
+  expect(result.html).toContain(code)
+  const doc = new DOMParser().parseFromString(result.html, 'text/html')
+  new Function('document', code)(doc)
+  doc.querySelector('button')!.click()
+  expect(doc.querySelectorAll('section')[0]!.classList.contains('active')).toBe(false)
+  expect(doc.querySelectorAll('section')[1]!.classList.contains('active')).toBe(true)
+})
+
+it.each([
+  "const pages=[...document.querySelectorAll('section')];let i=0;pages[i].src=chooseUrl()",
+  "const pages=[...document.querySelectorAll('section')];let i=0;pages[i][method]()",
+  "const pages=[...document.querySelectorAll('section')];let i=0;pages.push(window);pages[i].classList.add('x')",
+  "let pages=[...document.querySelectorAll('section')];let i=0;pages=unknown();pages[i].classList.add('x')",
+  "const pages=[...document.querySelectorAll('section')];let i=0;unknown(pages);pages[i].classList.add('x')",
+  "function f(document){const pages=[...document.querySelectorAll('section')];let i=0;pages[i].classList.add('x')}",
+])('does not exempt unknown resources or escaped collection capabilities: %s', code => {
+  const result = extractHtmlResources({ html: `<script>${code}</script>` })
+  expect(validateHtmlImport(result).some(issue => issue.level === 'error')).toBe(true)
+})

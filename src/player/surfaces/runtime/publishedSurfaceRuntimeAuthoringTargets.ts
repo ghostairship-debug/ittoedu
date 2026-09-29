@@ -25,6 +25,7 @@ export interface PublishedSurfaceRuntimeAuthoringTargetsOptions {
   root: HTMLElement
   width: number
   height: number
+  canvas?: import('../../../shared/slideCanvas').SlideCanvasSize
   content: EditableTextContent
   assets: Readonly<Record<string, RuntimeAssetBinding>>
   authoring: PublishedRuntimeAuthoringMountOptions
@@ -157,6 +158,7 @@ export class PublishedSurfaceRuntimeAuthoringTargets implements SurfaceRuntimeAu
       ...(options.authoring.sceneId ? { sceneId: options.authoring.sceneId } : {}),
       width: options.width,
       height: options.height,
+      ...(options.canvas ? { canvas: options.canvas } : {}),
       ...(options.authoring.targetOutputSpace ? { targetOutputSpace: options.authoring.targetOutputSpace } : {}),
       content: options.content,
       assets: options.assets,

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type ReactNode, type SyntheticEvent } from 'react'
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type SyntheticEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { MoreHorizontal, Sparkles } from 'lucide-react'
 import { ColorSwatchPanel, type ColorSwatchVariant } from '../color/ColorSwatchPanel'
@@ -81,8 +81,8 @@ export function SelectionQuickBar({ anchor, bounds, label, suspended = false, se
   const position = placeQuickBar(anchor, bounds, measured, 8, aboveOffset)
   // Popovers may leave the selection's editor; only the window limits them.
   const spaceAbove = position.top - 8, spaceBelow = window.innerHeight - position.top - measured.height - 8
-  const direction = position.placement === 'above' && spaceAbove >= 200 ? 'up' : spaceBelow >= spaceAbove ? 'down' : 'up'
-  const maxHeight = Math.max(160, (direction === 'up' ? spaceAbove : spaceBelow) - 8)
+  const direction = spaceBelow >= spaceAbove ? 'down' : 'up'
+  const maxHeight = Math.max(0, (direction === 'up' ? spaceAbove : spaceBelow) - 8)
   const hidden = suspended || !size
   return createPortal(<QuickBarContext.Provider value={{ open, setOpen, direction, maxHeight }}>
     <div ref={container} className="selection-quick-bar" data-selection-quick-bar="true" data-placement={position.placement}
@@ -136,7 +136,7 @@ export function QuickBarPopoverButton({ children, popoverLabel, popupRole = 'dia
       onMouseDown={keepSelection} onClick={() => setOpen(expanded ? null : id)}>
       {button.icon}{button.text && <span>{button.text}</span>}
     </button>
-    {expanded && <div className={`selection-quick-bar__popover selection-quick-bar__popover--${direction}`} role={popupRole === 'menu' ? undefined : 'dialog'} aria-label={popupRole === 'menu' ? undefined : popoverLabel ?? button.label} style={{ maxHeight }}>
+    {expanded && <div className={`selection-quick-bar__popover selection-quick-bar__popover--${direction}`} role={popupRole === 'menu' ? undefined : 'dialog'} aria-label={popupRole === 'menu' ? undefined : popoverLabel ?? button.label} style={{ maxHeight, '--element-ai-card-max-height': `${maxHeight}px` } as CSSProperties}>
       {children(close)}
     </div>}
   </span>

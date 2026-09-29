@@ -13,6 +13,7 @@ import { attachmentsDesktopService } from './workbench/attachments/attachmentsDe
 import { attachHtmlPreviewHost, operateWorkspaceFiles, subscribeWorkspaceFilesChanges } from './workbench/workspaceFilesDesktopService'
 import { HtmlPreviewService } from './workbench/htmlPreview/HtmlPreviewService'
 import { HtmlSourceEditService } from './workbench/htmlPreview/HtmlSourceEditService'
+import { TaskHtmlPreview } from './workbench/observation/TaskHtmlPreview'
 import { HtmlActionService } from './workbench/observation/HtmlActionService'
 import { HtmlActionDesktopPort } from './workbench/observation/HtmlActionDesktopPort'
 import { ObservationImageStore } from './workbench/observation/ObservationImageStore'
@@ -410,14 +411,19 @@ export function registerIpcHandlers(context: IpcContext): void {
     withFileAccess: work => documents.fileCoordinator.withFileAccess(work),
   }))
   htmlPreview = preview
+  const taskPreview = new TaskHtmlPreview({ live: preview,
+    readDocument: documentId => documents.registry.get(documentId).drain(),
+    agentBundlePath: path.join(app.getAppPath(), 'dist-renderer', 'html-preview-agent.iife.js') })
+  mainWindow?.webContents.once('destroyed', () => taskPreview.dispose())
   htmlActionsReady = executionDesktopService().then(service => {
     if (generation !== workspaceFileEventGeneration) return
-    service.setHtmlActions(new HtmlActionService({ preview, frames: new HtmlActionDesktopPort(), images: new ObservationImageStore() }))
+    service.setHtmlActions(new HtmlActionService({ preview: taskPreview, frames: new HtmlActionDesktopPort(), images: new ObservationImageStore() }))
   })
   void htmlActionsReady.catch(error => diagnosticLog.append({ source: 'main', message: 'HTML 页面操作服务未能启动',
     details: { reason: error instanceof Error ? error.message : String(error) } }))
   setHtmlPreviewProtocolHandler(preview.handleProtocolRequest)
-  htmlPreviewClosedCleanup = documents.subscribeClosed(documentId => preview.releaseDocument(documentId))
+  const stopPreviewClosed = documents.subscribeClosed(documentId => { preview.releaseDocument(documentId); taskPreview.releaseDocument(documentId) })
+  htmlPreviewClosedCleanup = () => { stopPreviewClosed(); taskPreview.dispose() }
   void attachHtmlPreviewHost(preview).catch(error => diagnosticLog.append({ source: 'main', message: 'HTML 预览服务未能启动', details: { reason: error instanceof Error ? error.message : String(error) } }))
   const htmlImport = new HtmlImportDesktopService({
     documents,

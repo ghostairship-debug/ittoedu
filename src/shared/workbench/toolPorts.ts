@@ -66,7 +66,7 @@ type HtmlImportPageReceipt = readonly { order: number; location: string; runtime
 export type HtmlImportReceipt =
   | { operationId: string; status: 'applied' | 'unchanged'; pages: HtmlImportPageReceipt; revision: number;
       commit: Extract<DocumentOperationResult, { status: 'applied' | 'unchanged' }> }
-  | { operationId: string; status: 'rejected' | 'failed'; pages: HtmlImportPageReceipt; reason: string;
+  | { operationId: string; status: 'rejected' | 'failed' | 'cancelled'; pages: HtmlImportPageReceipt; reason: string;
       revision?: never; commit?: never }
 
 /** Observation image bytes live in the app's run resources, never in V9 assets. */
