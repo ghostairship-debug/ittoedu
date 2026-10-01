@@ -1,5 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import path from 'node:path'
+import { cpus, freemem, totalmem } from 'node:os'
 
 /** Linux amd64 Python 3.12.14 slim, pinned to the platform manifest and local
  * image identity observed on 2026-09-29. A tag is never an execution identity.
@@ -124,18 +125,20 @@ export class PodmanComputeBackend {
   }
   async start(request: ComputeBackendRequest): Promise<ComputeProcess> {
     if (!safeArg(request.program) || !request.program || request.argv.length > 128 || request.argv.some(arg => !safeArg(arg))
-      || !Number.isSafeInteger(request.timeoutMs) || request.timeoutMs < 1000 || request.timeoutMs > 10 * 60_000
+      || !Number.isSafeInteger(request.timeoutMs) || request.timeoutMs < 1000 || request.timeoutMs > 60 * 60_000
       || !validContainerName(request.containerName))
       throw new Error('受限执行参数无效')
     const available = await this.availability()
     if (!available.available) throw new Error(available.reason ?? '受限执行后端不可用')
     const root = await this.linuxPath(request.directory)
     const name = request.containerName
+    const memoryMiB = Math.max(512, Math.min(4096, Math.floor(Math.min(totalmem() / 4, freemem() / 2) / 1024 / 1024)))
+    const cpuCount = Math.max(1, Math.min(4, cpus().length - 1))
     const args = ['podman', 'run', '--rm', '--pull=never', '--name', name,
-      '--network', 'none', '--read-only', '--pids-limit', '64', '--memory', '512m', '--cpus', '1',
+      '--network', 'none', '--read-only', '--pids-limit', '256', '--memory', `${memoryMiB}m`, '--cpus', String(cpuCount),
       '--timeout', String(Math.ceil(request.timeoutMs / 1000)), '--stop-timeout', '1',
       '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '65534:65534',
-      '--tmpfs', '/tmp:rw,nosuid,nodev,size=64m',
+      '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m',
       '--volume', `${root}/input:/job/input:ro`, '--volume', `${root}/work:/job/work:rw`, '--volume', `${root}/output:/job/output:rw`,
       '--workdir', '/job/work', '--entrypoint', request.program, this.options.image, ...request.argv]
     const child = this.command(args)

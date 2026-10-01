@@ -85,3 +85,16 @@ it('queries a lost ACK by host ticket, rejects altered/revoked identities and gi
   expect((await caller.request('tools/call', { name: 'text.replace', arguments: { ticket: caller.context.operationTickets[1], arguments: args } })).response.status).toBe(401)
   expect((await host.internalAPI.read(a.documentId)).undoDepth).toBe(1)
 })
+
+it('delivers an authorized UTF-8 edit above the old 4 MiB HTTP limit without a second writer', async () => {
+  const { host, server, a } = await fixture()
+  const grant = await server.grant({ workspaceId: 'space', conversationId: 'conversation', taskId: 'large-inline', instruction: 'replace source',
+    documents: [{ documentId: a.documentId, writable: [{ kind: 'markdown-range', from: 0, to: 7 }] }] })
+  const caller = await client(grant), content = '中文'.repeat(800_000)
+  expect(Buffer.byteLength(content)).toBeGreaterThan(4 * 1024 * 1024)
+  const reply = await caller.request('tools/call', { name: 'text.replace', arguments: { ticket: caller.context.operationTickets[0],
+    arguments: { target: caller.context.documents[0].writable[0].target, content } } })
+  expect(reply.response.status).toBe(200)
+  expect(reply.data.result.structuredContent.result, JSON.stringify(reply.data.result.structuredContent.result)).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  expect((await host.internalAPI.read(a.documentId)).model).toMatchObject({ source: content })
+})

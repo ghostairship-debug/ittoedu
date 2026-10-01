@@ -24,6 +24,7 @@ export class HtmlPreviewController {
   private revision: number
   private lastSeq = -1
   private active = true
+  private visible = true
   private reloading = false
   private reloadFrameLoaded = false
   private selected: HtmlSelectedTarget | null = null
@@ -65,7 +66,7 @@ export class HtmlPreviewController {
       this.modeRequest = null
       this.events.onEditModeReady(message.enabled)
     }
-    if (message.event === 'targets') void this.resolve(message.targets)
+    if (this.visible && message.event === 'targets') void this.resolve(message.targets)
   }
 
   init(): void {
@@ -84,6 +85,12 @@ export class HtmlPreviewController {
   frameLoaded(): void {
     this.reloadFrameLoaded = true
     this.init()
+  }
+
+  setVisibility(visible: boolean): void {
+    this.visible = visible
+    if (!visible) this.requestSerial++
+    this.iframe.contentWindow?.postMessage({ type: 'html-preview.visibility', loadId: this.lease.loadId, active: visible }, '*')
   }
 
   navigate(index: number): void {

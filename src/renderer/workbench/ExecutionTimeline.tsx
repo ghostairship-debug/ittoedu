@@ -6,15 +6,19 @@ import type { ImageResultsDesktopAPI } from '../../shared/workbench/imageResults
 import { ImageResultCard } from './ImageResultCard'
 import type { ConversationMessage } from '../../shared/workbench/conversations'
 import { captureRendererTiming, type RendererTimingStamp } from '../../shared/workbench/executionDesktop'
+import { ExecutionReplyContent } from './ExecutionReplyContent'
 
 export interface ExecutionTimelineProps {
   projection: ExecutionProjection
   readBlob?(ref: ExecutionBlobRef): Promise<string>
   onLocateDocument?(documentId: string): void
+  onOpenSavedFile?(runId: string, itemId: string): void
   imageResults?: ImageResultsDesktopAPI
   searchEvents?(input: { query: string; after?: number; limit?: number }): Promise<ExecutionEventSearchPage>
   workspaceId?: string
   userMessages?: readonly ConversationMessage[]
+  /** A fresh object requests the newest position after an explicit, confirmed submission. */
+  latestRequest?: { conversationId: string; submissionId: string }
   /** The assistant opens search from its conversation menu; standalone timelines own a local affordance. */
   historySearchOpen?: boolean
   onHistorySearchClose?(): void
@@ -31,15 +35,31 @@ const statusLabel = (status?: string) => ({
   failed: '失败', interrupted: '已中断', pending: '等待中', executing: '执行中', returned: '已返回', committed: '已提交', rejected: '已拒绝',
   preparing: '准备中', ready: '已生成', unapplied: '未应用', unknown: '结果未知',
   waiting: '等待你选择', answered: '已回答', cancelled: '未回答', approval: '等待你批准', approved: '已允许', denied: '已拒绝',
+  saved: '已保存', written: '已写入', generated: '已生成',
 }[status ?? ''] ?? status ?? '')
 
-function TextContent({ text }: { text: string }) {
+function ReplyCopyAction({ text }: { text: string }) {
+  const [result, setResult] = useState<'idle' | 'copied' | 'failed'>('idle')
+  useEffect(() => { setResult('idle') }, [text])
+  const copy = async () => {
+    setResult('idle')
+    try { await navigator.clipboard.writeText(text); setResult('copied') }
+    catch { setResult('failed') }
+  }
+  return <div className="execution-reply__actions">
+    <button type="button" title="复制这段已收到的完整内容" onClick={() => void copy()}>复制内容</button>
+    {result === 'copied' && <small role="status">已复制</small>}
+    {result === 'failed' && <small role="alert">复制失败，请重试。</small>}
+  </div>
+}
+function TextContent({ text, reply = false }: { text: string; reply?: boolean }) {
   const [limit, setLimit] = useState(TEXT_PAGE)
   const safe = useMemo(() => readableExecutionData(text), [text])
-  return <><pre className="execution-timeline__content">{safe.slice(0, limit)}</pre>
+  return <>{reply && safe.length > 0 && <ReplyCopyAction text={safe} />}
+    {reply ? <ExecutionReplyContent text={safe.slice(0, limit)} /> : <pre className="execution-timeline__content">{safe.slice(0, limit)}</pre>}
     {safe.length > limit && <button type="button" onClick={() => setLimit(value => value + TEXT_PAGE)}>继续读取内容（剩余 {safe.length - limit} 字符）</button>}</>
 }
-function BlobContent({ content, readBlob }: { content: Extract<ExecutionContent, { kind: 'blob' }>; readBlob?: (ref: ExecutionBlobRef) => Promise<string> }) {
+function BlobContent({ content, readBlob, reply = false }: { content: Extract<ExecutionContent, { kind: 'blob' }>; readBlob?: (ref: ExecutionBlobRef) => Promise<string>; reply?: boolean }) {
   const [text, setText] = useState<string | null>(null), [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const generation = useRef(0)
   useEffect(() => { ++generation.current; setText(null); setError(''); setBusy(false); return () => { ++generation.current } }, [content.ref.id])
@@ -51,7 +71,7 @@ function BlobContent({ content, readBlob }: { content: Extract<ExecutionContent,
     catch { if (ticket === generation.current) setError('完整内容暂不可读取，可以重试。') }
     finally { if (ticket === generation.current) setBusy(false) }
   }
-  if (text !== null) return <TextContent text={text} />
+  if (text !== null) return <TextContent text={text} reply={reply} />
   return <div className="execution-timeline__blob">
     <button type="button" onClick={() => void load()} disabled={!readBlob || busy}>{busy ? '读取中…' : `读取完整内容（${content.ref.bytes} 字节）`}</button>
     {error && <span role="alert">{error}</span>}
@@ -71,8 +91,8 @@ const ItemContent = memo(function ItemContent({ item, readBlob }: Pick<Execution
     if (previous?.kind === 'text' && content.kind === 'text') previous.text += content.text
     else combined.push({ ...content })
   }
-  return <>{combined.map((content, index) => content.kind === 'text' ? <TextContent text={content.text} key={index} />
-    : <BlobContent key={content.ref.id} content={content} readBlob={readBlob} />)}</>
+  return <>{combined.map((content, index) => content.kind === 'text' ? <TextContent text={content.text} reply={item.type === 'text'} key={index} />
+    : <BlobContent key={content.ref.id} content={content} readBlob={readBlob} reply={item.type === 'text'} />)}</>
 })
 const detailLabels = { input: '参数', output: '工具输出', diff: '实际差异', error: '错误详情' } as const
 /** Read-only record of an ask_user question. The live option card above the composer is the only place to answer. */
@@ -94,7 +114,7 @@ function QuestionRecord({ item, ended }: { item: ExecutionItem; ended: boolean }
     {item.data.error && item.data.status !== 'answered' && <p>{readableExecutionData(item.data.error)}</p>}
   </article>
 }
-function TimelineItem({ item, projection, readBlob, onLocateDocument, imageResults, workspaceId, expanded, onExpanded }: ExecutionTimelineProps & {
+function TimelineItem({ item, projection, readBlob, onLocateDocument, onOpenSavedFile, imageResults, workspaceId, expanded, onExpanded }: ExecutionTimelineProps & {
   item: ExecutionItem; expanded: boolean; onExpanded(open: boolean): void;
 }) {
   const source = item.source === 'external-mcp' ? '外部 MCP · 仅显示实际工具事实' : ''
@@ -107,14 +127,16 @@ function TimelineItem({ item, projection, readBlob, onLocateDocument, imageResul
   const application = ({ applied: '已应用', unchanged: '内容未变化', conflict: '应用冲突', denied: '未获应用授权', cancelled: '未应用（已取消）', failed: '应用失败' } as Record<string, string>)[facts.application ?? ''] ?? '未确认应用'
   const saving = ({ saved: '已保存', saving: '保存中', failed: '保存失败' } as Record<string, string>)[facts.save ?? ''] ?? '保存未确认'
   const heading = readableExecutionData((item.type === 'run.state' ? titles[item.type] : item.data.label) || (item.type === 'tool' ? item.data.toolName : undefined) || titles[item.type])
+  const savedFile = item.type === 'tool' && item.source === 'builtin' && item.data.saveStatus === 'saved'
+    && (item.data.toolName === 'file.write' || item.data.toolName === 'file.save')
   const body = <>
     {item.type === 'image' && item.data.jobId && imageResults && workspaceId && projection.conversationId
       ? <ImageResultCard api={imageResults} owner={{ workspaceId, conversationId: projection.conversationId, runId: item.runId, jobId: item.data.jobId }} />
       : <ItemContent item={item} readBlob={readBlob} />}
     {operationItem && <dl className="execution-timeline__facts">
       {item.type === 'tool' && <><dt>工具执行</dt><dd>{['completed', 'returned'].includes(item.data.status ?? '') ? '已运行' : item.data.status === 'failed' ? '执行失败' : incompleteAfterEnd ? '结果未确认（任务已结束）' : statusLabel(item.data.status) || '状态未确认'}</dd></>}
-      {item.type !== 'document.save' && <><dt>文档应用</dt><dd>{application}</dd></>}
-      <dt>文件保存</dt><dd>{saving}</dd>
+      {(facts.application !== undefined || item.type === 'document.commit') && <><dt>文档应用</dt><dd>{application}</dd></>}
+      {(facts.save !== undefined || item.type === 'document.save') && <><dt>文件保存</dt><dd>{saving}</dd></>}
     </dl>}
     {facts.documentId && <p><button type="button" disabled={!onLocateDocument} onClick={() => onLocateDocument?.(facts.documentId!)}>
       定位文档{item.data.documentName ? `：${readableExecutionData(item.data.documentName)}` : ''}</button>{!onLocateDocument && <small> 当前视图未连接文档定位</small>}</p>}
@@ -135,9 +157,11 @@ function TimelineItem({ item, projection, readBlob, onLocateDocument, imageResul
   const isCollapsible = !['text', 'run.end', 'run.state'].includes(item.type)
   return <article data-execution-item={`${item.runId}:${item.itemId}`} className={`execution-timeline__card execution-timeline__card--${item.type.replace('.', '-')}`} aria-label={titles[item.type]}>
     {isCollapsible ? <details open={expanded} onToggle={event => { if (event.currentTarget.open !== expanded) onExpanded(event.currentTarget.open) }}>
-      <summary><strong>{heading}</strong>{displayedStatus && <span> · {displayedStatus}</span>}</summary>
+      <summary><strong>{heading}</strong>{displayedStatus && <span> · {savedFile ? '已保存' : displayedStatus}</span>}</summary>
       {source && <small>{source}</small>}{item.data.toolName && <small>工具：{item.data.toolName}</small>}{expanded && body}
     </details> : <><header><strong>{heading}</strong>{displayedStatus && <span> · {displayedStatus}</span>}</header>{source && <small>{source}</small>}{body}</>}
+    {savedFile && onOpenSavedFile && <button type="button" className="execution-timeline__file-result" title={item.data.documentName}
+      onClick={() => onOpenSavedFile(item.runId, item.itemId)}><span>{item.data.documentName ? `打开文件：${readableExecutionData(item.data.documentName)}` : '打开文件'}</span></button>}
   </article>
 }
 
@@ -160,13 +184,13 @@ function HistorySearch({ searchEvents, readBlob, onClose }: Pick<ExecutionTimeli
     {error && <p role="alert">{error}</p>}
     {page && <><p role="status">本页找到 {page.hits.length} 条历史事件{page.hasMore ? '，后面仍有记录可搜索' : '，已搜索到末尾'}。历史快照可能已被后续更新替换。</p>
       {page.hits.map(({ event, excerpt }) => <details key={event.eventId}><summary>{titles[event.type]} · 历史事件 {event.sequence} · {readableExecutionData(excerpt)}</summary>
-        {(['text', ...executionDetailKeys] as const).map(field => { const ref = event.data[`${field}Ref`], text = event.data[field]; return ref ? <BlobContent key={field} content={{ kind: 'blob', ref }} readBlob={readBlob} /> : text !== undefined ? <TextContent key={field} text={text} /> : null })}
+        {(['text', ...executionDetailKeys] as const).map(field => { const ref = event.data[`${field}Ref`], text = event.data[field], reply = field === 'text' && event.type === 'text'; return ref ? <BlobContent key={field} content={{ kind: 'blob', ref }} readBlob={readBlob} reply={reply} /> : text !== undefined ? <TextContent key={field} text={text} reply={reply} /> : null })}
       </details>)}
       {page.hasMore && <button type="button" disabled={busy} onClick={() => void search(page.cursor)}>继续搜索更后记录</button>}
     </>}
   </section>
 }
-function TimelineBody({ projection, readBlob, onLocateDocument, imageResults, workspaceId, userMessages = [], searchEvents, historySearchOpen, onHistorySearchClose, onFirstVisible, readings }: ExecutionTimelineProps & { readings: Map<string, ReadingState> }) {
+function TimelineBody({ projection, readBlob, onLocateDocument, onOpenSavedFile, imageResults, workspaceId, userMessages = [], latestRequest, searchEvents, historySearchOpen, onHistorySearchClose, onFirstVisible, readings }: ExecutionTimelineProps & { readings: Map<string, ReadingState> }) {
   const region = useRef<HTMLElement>(null), scroller = useRef<HTMLElement | null>(null)
   const observedTasks = useRef(new Set<string>())
   const visibilityFrames = useRef<{ first: number; second?: number } | null>(null)
@@ -176,6 +200,7 @@ function TimelineBody({ projection, readBlob, onLocateDocument, imageResults, wo
   const saved = readings.get(projection.conversationId)
   const follow = useRef(saved?.following ?? true), prepend = useRef<{ height: number; top: number } | null>(null)
   const anchor = useRef<{ key: string; offset: number } | null>(null)
+  const seenLatestRequest = useRef<ExecutionTimelineProps['latestRequest']>(undefined)
   const [following, setFollowing] = useState(saved?.following ?? true)
   const [windowRange, setWindowRange] = useState(() => saved?.range ?? ({ start: Math.max(0, projection.items.length - PAGE_SIZE), end: projection.items.length }))
   const [expanded, setExpanded] = useState<Set<string>>(() => saved?.expanded ?? new Set())
@@ -268,6 +293,11 @@ function TimelineBody({ projection, readBlob, onLocateDocument, imageResults, wo
     follow.current = true; setFollowing(true); anchor.current = null
     setWindowRange({ start: Math.max(0, projection.items.length - PAGE_SIZE), end: projection.items.length })
   }
+  useLayoutEffect(() => {
+    if (!latestRequest || latestRequest.conversationId !== projection.conversationId || seenLatestRequest.current === latestRequest) return
+    seenLatestRequest.current = latestRequest
+    latest()
+  }, [latestRequest, projection.conversationId])
   const earlier = () => {
     const host = scroller.current
     if (host) prepend.current = { height: host.scrollHeight, top: host.scrollTop }
@@ -289,7 +319,7 @@ function TimelineBody({ projection, readBlob, onLocateDocument, imageResults, wo
       </article>
       const item = entry.item
       const key = `${item.runId}:${item.itemId}`
-      return <TimelineItem key={key} item={item} projection={projection} readBlob={readBlob} onLocateDocument={onLocateDocument} imageResults={imageResults} workspaceId={workspaceId} expanded={expanded.has(key)}
+      return <TimelineItem key={key} item={item} projection={projection} readBlob={readBlob} onLocateDocument={onLocateDocument} onOpenSavedFile={onOpenSavedFile} imageResults={imageResults} workspaceId={workspaceId} expanded={expanded.has(key)}
         onExpanded={open => setExpanded(value => { const next = new Set(value); if (open) next.add(key); else next.delete(key); return next })} />
     })}
     {windowRange.end < projection.items.length && <button type="button" onClick={() => { follow.current = false; setFollowing(false); setWindowRange(value => ({ start: value.end, end: Math.min(projection.items.length, value.end + PAGE_SIZE) })) }}>读取更后记录</button>}

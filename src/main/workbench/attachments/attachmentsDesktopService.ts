@@ -90,7 +90,8 @@ export class AttachmentsDesktopService {
         else this.cancelled.set(key, Date.now() + 60_000)
         return
       }
-      case 'extract': return this.controlled(input.requestId, window, signal => this.attachments.extract(input.attachmentId, { pages: input.pages, signal }))
+      case 'extract': return this.controlled(input.requestId, window, signal => this.attachments.extract(input.attachmentId, { pages: input.pages, images: input.images ?? 'auto', signal,
+        onProgress: (loaded, total) => onProgress?.({ requestId: input.requestId, loaded, total, unit: 'pages' }) }))
 
     }
   }

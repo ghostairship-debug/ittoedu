@@ -37,6 +37,28 @@ test('real-usage repairs: non-default Runtime hits, reachable card composer, ind
       await page.screenshot({ path: path.join(directory, `runtime-${input.live ? 'live' : 'authoring'}.png`) })
     }
     evidence.runtime = runtimeEvidence
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1200, 850))
+    const drafts: string[] = await app.evaluate(() => Reflect.get(globalThis, 'repairDraftPages')())
+    expect(drafts).toHaveLength(6)
+    const persisted = await app.evaluate(() => Reflect.get(globalThis, 'repairDraftPersistence'))
+    expect(persisted).toMatchObject({ dirty: false, revision: 1, locations: 6, runtimePages: 6, readFromArchive: true })
+    expect(persisted.fileBytes).toBeGreaterThan(0) // Content and interactions, not ZIP size, establish a complete fixture.
+    evidence.draftPersistence = persisted
+    const draftEvidence = []
+    for (const [index, html] of drafts.entries()) {
+      const geometry = await page.evaluate(html => Reflect.get(window, 'repairFixture').draftPage(html), html)
+      expect(geometry.sections).toBe(1); expect(geometry.diagrams).toBe(1)
+      expect(geometry.height).toBeLessThanOrEqual(geometry.viewport)
+      const frame = page.frameLocator('iframe')
+      await expect(frame.locator('[data-result]')).toHaveText(`Ready ${index + 1}`)
+      await frame.getByRole('textbox', { name: 'Answer', exact: true }).fill(`answer ${index + 1}`)
+      await frame.getByRole('button', { name: 'Show result' }).click()
+      await expect(frame.locator('[data-result] strong')).toHaveText(`Verified ${index + 1}: answer ${index + 1}`)
+      await page.screenshot({ path: path.join(directory, `draft-${index + 1}.png`) })
+      draftEvidence.push({ page: index + 1, ...geometry, actualClick: true })
+    }
+    evidence.draft = draftEvidence
+
     await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(600, 440))
     for (const kind of ['element', 'text'] as const) {
       await page.evaluate(kind => Reflect.get(window, 'repairFixture').card(kind), kind)
@@ -46,12 +68,13 @@ test('real-usage repairs: non-default Runtime hits, reachable card composer, ind
       await card.getByRole('textbox', { name: 'AI 修改要求' }).fill('Draft stays reachable')
       const measure = () => send.evaluate(button => {
         const rect = button.getBoundingClientRect(), body = document.querySelector('.element-ai-card__body')!
-        return { top: rect.top, bottom: rect.bottom, viewport: innerHeight, scrolls: body.scrollHeight > body.clientHeight,
+        return { left: rect.left, right: rect.right, viewportWidth: innerWidth, top: rect.top, bottom: rect.bottom, viewport: innerHeight, scrolls: body.scrollHeight > body.clientHeight,
           hit: document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2) === button }
       })
       const before = await measure()
       expect(before.top).toBeGreaterThanOrEqual(0); expect(before.bottom).toBeLessThanOrEqual(before.viewport)
       expect(before.hit).toBe(true); expect(before.scrolls).toBe(true)
+      expect(before.left).toBeGreaterThanOrEqual(0); expect(before.right).toBeLessThanOrEqual(before.viewportWidth)
       await card.locator('.element-ai-card__body').evaluate(body => { body.scrollTop = body.scrollHeight })
       const after = await measure(); expect(after.top).toBeCloseTo(before.top, 1); expect(after.hit).toBe(true)
       await page.screenshot({ path: path.join(directory, `card-${kind}.png`) })
@@ -63,7 +86,7 @@ test('real-usage repairs: non-default Runtime hits, reachable card composer, ind
     expect(preview.revised.join(' ')).toContain('Revised source')
     expect(preview.pixelsChanged).toBe(true); expect(preview.bytes).toBeGreaterThan(1000)
     expect(preview.width).toBeGreaterThanOrEqual(1200); expect(preview.height).toBeGreaterThanOrEqual(700)
-    for (const key of ['repeatGeneration', 'staleRejected', 'cancelled', 'diskUnchanged', 'windowsRestored']) expect(preview[key], key).toBe(true)
+    for (const key of ['repeatGeneration', 'staleRejected', 'cancelled', 'diskUnchanged', 'windowsRestored', 'earlierImageRetained']) expect(preview[key], key).toBe(true)
     expect(preview.deniedRequests).toBe(0)
     evidence.preview = preview
   } finally { await writeFile(path.join(directory, 'evidence.json'), JSON.stringify(evidence, null, 2)); await app.close() }

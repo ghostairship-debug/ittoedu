@@ -31,15 +31,13 @@ import { HostArtifactDeliveryService } from './HostArtifactDeliveryService'
 import type { HtmlActionService } from '../observation/HtmlActionService'
 import { forkDraftFromCheckpoint, indexUserCheckpoint } from './CheckpointForkService'
 import { fileCreated } from './executionOutcome'
+import { sourceFileKind } from '../../../shared/workbench/sourceFileKind'
+import { continueDocumentTargets } from './continuationTargets'
+import { ElementChangeTracker } from './ElementChangeTracker'
 import { diagnosticLog } from '../../diagnosticLog'
 import { readTarget } from '../../../core/tools/ToolTargets'
-import { locateCourseLayer } from '../../../core/drivers/course/layerProperties'
-import { elementChangeUnits, elementUnitLabel, flowSlotContent, lostRuntimeTextEdits, readElementFields, readFlowBlockFields, runtimeSourceOf, sameFieldValue, traceFlowRange, traceSourceRange, writeElementFields, writeFlowBlockFields, type ElementFields } from '../../../core/drivers/course/elementFields'
-import { sliceFlowRichText } from '../../../core/tools/flowDocumentModel'
-import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
-import type { FlowTextContent } from '../../../shared/document/content'
 import { isSourceDocumentModel } from '../../../shared/workbench/document'
-import type { ElementChangeView, ElementRevertResult, ExecutionSelectionTarget } from '../../../shared/workbench/executionDesktop'
+import type { ElementChangeView, ElementRevertResult } from '../../../shared/workbench/executionDesktop'
 
 export interface ExecutionDesktopServiceOptions {
   directory: string
@@ -61,43 +59,6 @@ function targetStillExists(snapshot: DocumentSnapshot, target: ExecutionDocument
   if (target.kind !== 'course-object' && target.kind !== 'flow-block') return false
   try { readTarget(snapshot.model, target); return true } catch { return false }
 }
-/** M15: an element card request's object, block or text when it started and when it ended, for the card's own undo and redo. */
-interface ElementFieldChange {
-  kind: 'fields'
-  conversationId: string
-  documentId: string
-  /** The card's object or document block in a version of the course, and writing fields back into one. */
-  read(project: CourseProjectDocument): ElementFields | null
-  write(project: CourseProjectDocument, fields: Readonly<Record<string, unknown>>): CourseProjectDocument
-  before: ElementFields | null
-  /** Undefined until the request ends; null when the object was gone by then. */
-  after?: ElementFields | null
-  undone: boolean
-  /** A text card in a Flow document: its range and the slot's text before the request, and after it (null when untraceable). */
-  range?: { target: Extract<ExecutionSelectionTarget, { kind: 'flow-range' }>; content: FlowTextContent; after?: { target: Extract<ExecutionSelectionTarget, { kind: 'flow-range' }>; content: FlowTextContent } | null }
-  /** A Runtime's source before the request, and its text edits that lost their original text by it. */
-  runtime?: { itemId: string; source: string; lostTexts?: string[] }
-}
-/** A text card in a Markdown document: the text of its range before and after the request, and where that text is now. */
-interface ElementSourceChange {
-  kind: 'source'
-  conversationId: string
-  documentId: string
-  before: { from: number; to: number; text: string; source: string }
-  after?: { text: string; prefix: string; suffix: string } | null
-  /** Where the request's text (or, undone, the original text) starts now. */
-  position: number
-  undone: boolean
-}
-type ElementChange = ElementFieldChange | ElementSourceChange
-const ELEMENT_UNSUPPORTED = '组件和页面 Runtime 的修改请用编辑器的撤销（Ctrl+Z）。'
-const SOURCE_UNTRACEABLE = '这段文字在 AI 修改后又改过，卡片不能撤销；请用编辑器的撤销。'
-const unitLabels = (units: readonly string[][]) => [...new Set(units.map(elementUnitLabel))]
-/** The one place a non-empty text occurs, or -1. */
-function uniqueIndex(source: string, text: string): number {
-  const first = text ? source.indexOf(text) : -1
-  return first >= 0 && source.indexOf(text, first + 1) < 0 ? first : -1
-}
 /** Main owns spaces, task freezes and runs. Mounting a view only reads/subscribes. */
 export class ExecutionDesktopService {
   readonly conversations: ConversationStore
@@ -110,7 +71,7 @@ export class ExecutionDesktopService {
   readonly changeReview: ExecutionChangeReviewService
   readonly artifacts: HostArtifactDeliveryService
   private readonly queues = new Map<string, Promise<unknown>>()
-  private readonly elementChanges = new Map<string, ElementChange>()
+  private readonly elementChanges = new Map<string, ElementChangeTracker>()
   private eventSink?: (event: ExecutionEvent) => void
   private editSink?: (event: EditEvent) => void
   private externalRevoker?: (input: { workspaceId: string; conversationId: string; portIds: string[] }) => Promise<void>
@@ -120,6 +81,7 @@ export class ExecutionDesktopService {
     collect(): void
   }
   private initialization?: Promise<void>
+  private readonly recoveryIssues = new Map<string, string>()
   constructor(private readonly options: ExecutionDesktopServiceOptions) {
     this.conversations = new ConversationStore({ directory: path.join(options.directory, 'conversations') })
     this.runs = new ExecutionRunStore(path.join(options.directory, 'runs'))
@@ -128,7 +90,8 @@ export class ExecutionDesktopService {
     this.edits = new EditSessionService(options.documents.registry, options.documents.tools)
     this.changeReview = new ExecutionChangeReviewService(options.documents, path.join(options.directory, 'change-review'))
     this.artifacts = new HostArtifactDeliveryService({ journalDirectory: path.join(options.directory, 'artifact-deliveries'),
-      withFileOperation: work => options.documents.fileCoordinator.withFileOperation(work) })
+      withFileOperation: work => options.documents.fileCoordinator.withFileOperation(work),
+      assertTarget: filename => options.documents.assertFileAvailable(filename) })
     this.attachments = options.attachments ?? new AttachmentService({ directory: path.join(options.directory, 'attachments') })
     const chat = new OpenAIChatProvider({ credentialResolver: connection => options.settings.resolveCredential(connection), fetch: options.fetch,
       onTransportDiagnostic: diagnostic => diagnosticLog.append({ source: 'main', message: 'OpenAI Chat transport failure', details: {
@@ -205,20 +168,23 @@ export class ExecutionDesktopService {
         }
       }
       await this.engine.recover()
-      // M15: element AI cards live only while their document is open; none survives a restart.
+      // Cards are transient; unsubmitted input survives as an ordinary recoverable conversation draft.
       await this.clearElementCards().catch(() => undefined)
       runs = await this.runs.list()
       const submissions = await this.submissions.list()
       for (const record of submissions.filter(value => ['queued', 'starting', 'accepted'].includes(value.state))) {
+        try {
         const run = runs.find(value => value.input.taskId === record.submissionId)
         const conversation = await this.conversations.readConversation(record)
         if (!conversation) { await this.retireOrphanedSubmission(record, run); continue }
         if (run) await this.bindRun(record, run)
         else if (record.state === 'starting') await this.submissions.update(record.submissionId, { updatedAt: Date.now(),
           failure: { code: 'submission-outcome-unknown', message: '应用中断时启动结果未知；未自动重发，请核对后重试新消息。' } })
+        } catch { this.recoveryIssues.set(record.submissionId, '一项旧提交无法恢复，已保留；其他会话仍可使用。') }
       }
       const queuedConversations = [...new Set(submissions.filter(value => value.state === 'queued').map(value => value.conversationId))]
       for (const conversationId of queuedConversations) await this.serial(conversationId, () => this.startNext(conversationId))
+        .catch(() => { this.recoveryIssues.set(conversationId, '一项旧会话队列未恢复，已保留且未重新发出。') })
       // A release intent written before a prior crash is reconciled only after run and
       // submission recovery has rebuilt the current conversation references.
       await this.collectAttachmentReleases().catch(() => undefined)
@@ -278,7 +244,8 @@ export class ExecutionDesktopService {
     const canonical = await fs.realpath(rootPath), key = (value: string) => process.platform === 'win32' ? value.toLowerCase() : value
     const existing = (await this.conversations.listWorkspaces()).find(space => key(space.rootPath) === key(canonical))
     const workspace = existing ?? await this.conversations.registerWorkspace({ workspaceId: randomUUID(), rootPath: canonical, managed: root === null, authorization: root === null ? 'managed' : 'user-selected' })
-    return { workspace, conversations: listed(await this.conversations.listConversations(workspace.workspaceId)) }
+    return { workspace, conversations: listed(await this.conversations.listConversations(workspace.workspaceId)),
+      recoveryIssues: [...this.runs.recoveryIssues, ...this.submissions.recoveryIssues, ...this.engine.recoveryIssues.values(), ...this.recoveryIssues.values(), ...this.options.documents.recoveryIssues] }
   }
   private async validateHome(workspaceId: string, home: ConversationHomeInput): Promise<ConversationHomeInput> {
     const space = await this.conversations.readWorkspace(workspaceId)
@@ -328,8 +295,31 @@ export class ExecutionDesktopService {
       pending: run.tools.filter(tool => tool.state !== 'returned').map(tool => ({ name: tool.call.name, state: tool.state })),
       previousFailure: run.failure ?? null }) }
   }
+  private async resolveHomeFile(root: string, home: NonNullable<ConversationRecord['home']>): Promise<string | null> {
+    if (home.kind !== 'file' || home.missing) return null
+    const base = await fs.realpath(root)
+    let filename: string
+    try { filename = await fs.realpath(path.join(base, ...home.path.split('/'))) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw executionInputError('home-file-missing', error); throw error }
+    const relative = path.relative(base, filename)
+    if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('会话所属文件已移出获准的工作空间')
+    return filename
+  }
+  private async prepareDocuments(input: Pick<ExecutionSendInput, 'workspaceId' | 'conversationId' | 'documents' | 'permission'>) {
+    const current = await this.required(input.workspaceId, input.conversationId)
+    if (input.documents.length || !current.home) return structuredClone(input.documents)
+    const space = await this.conversations.readWorkspace(current.home.workspaceId ?? current.workspaceId)
+    if (!space) throw new Error('会话所属位置的工作空间不存在')
+    const filename = await this.resolveHomeFile(space.rootPath, current.home)
+    if (!filename) return []
+    try { sourceFileKind(filename) } catch { return [] }
+    const snapshot = await this.options.documents.internalAPI.open(filename)
+    return [{ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
+      writable: input.permission === 'read-only' ? [] : [{ kind: 'document' as const }] }]
+  }
+
   private async prepareSubmission(input: ExecutionSendInput, current: ConversationRecord, digest: string): Promise<StoredExecutionSubmission> {
-    const attachments = input.attachments ?? []
+    const attachments = [...input.attachments ?? []]
     // Main owns the permission level: read-only tasks receive no writable scope whatever the renderer sent.
     const permission = input.permission ?? DEFAULT_PERMISSION_MODE
     const space = await this.conversations.readWorkspace(current.workspaceId)
@@ -340,22 +330,20 @@ export class ExecutionDesktopService {
     // A file home is the default document context only when the teacher did not pin another reference.
     // The binding is resolved by Main through the formal DocumentHost; home metadata itself grants no write.
     if (!input.documents.length && current.home?.kind === 'file' && !current.home.missing) {
-      const candidate = path.join(homeSpace.rootPath, ...current.home.path.split('/'))
-      let resolved: string | undefined
-      try { resolved = await fs.realpath(candidate) }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-        // A move may be between its disk mutation and home-index update. Do not
-        // mark the old path missing here: that would race the successful rebase.
-        throw executionInputError('home-file-missing', error)
-      }
+      const resolved = await this.resolveHomeFile(homeSpace.rootPath, current.home)
       if (resolved) {
-        const relative = path.relative(homeSpace.rootPath, resolved)
-        if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative))
-          throw new Error('会话所属文件已移出获准的工作空间')
-        const snapshot = await this.options.documents.internalAPI.open(resolved)
-        input = { ...input, documents: [{ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
-          writable: permission === 'read-only' ? [] : [{ kind: 'document' }] }] }
+        let editable = true
+        try { sourceFileKind(resolved) } catch { editable = false }
+        if (editable) {
+          const snapshot = await this.options.documents.internalAPI.open(resolved)
+          input = { ...input, documents: [{ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
+            writable: permission === 'read-only' ? [] : [{ kind: 'document' }] }] }
+        } else {
+          const material = await this.attachments.receiveAuthorizedFile({ path: resolved, kind: 'workspace', authorizationId: `home:${input.submissionId}` })
+          const first = material.representations[0]
+          if (!first) throw executionInputError('attachment-unavailable')
+          attachments.push({ attachmentId: material.id, representationId: first.id, role: 'reference', delivery: 'source' })
+        }
       }
     }
     if (permission === 'read-only') input = { ...input, documents: input.documents.map(document => ({ ...document, writable: [] })) }
@@ -365,6 +353,11 @@ export class ExecutionDesktopService {
       { detail: { attachmentCount: attachments.length } })
     try {
       for (const reference of attachments) {
+        if (reference.delivery === 'source') {
+          const source = await this.attachments.readSnapshot(reference.attachmentId)
+          if (!source.representations.some(rep => rep.id === reference.representationId)) throw executionInputError('attachment-unavailable')
+          continue
+        }
         const read = await this.attachments.readRepresentation(reference.attachmentId, reference.representationId).catch(error => {
           if (error instanceof AttachmentError && ['representation-unavailable', 'corrupt-snapshot', 'corrupt-blob'].includes(error.code)
             || (error as NodeJS.ErrnoException)?.code === 'ENOENT') throw executionInputError('attachment-unavailable', error)
@@ -446,6 +439,7 @@ export class ExecutionDesktopService {
     return this.submissions.update(record.submissionId, { conversationRevision: conversation.revision, updatedAt: Date.now() })
   }
   private async bindRun(record: StoredExecutionSubmission, run: ExecutionRunRecord): Promise<ConversationRecord> {
+    this.elementChanges.get(record.submissionId)?.bindRun(run.runId)
     let current = await this.required(record.workspaceId, record.conversationId)
     const prior = current.messages.find(message => message.messageId === record.submissionId)
     if (prior && prior.runId !== run.runId) throw new Error('执行提交已绑定到不同运行')
@@ -521,24 +515,12 @@ export class ExecutionDesktopService {
   /** Restore the same dirty session before preparation or a new file.open can bind its old disk image. */
   private async restoreContinuationDocuments(lineage: readonly ExecutionRunRecord[]): Promise<void> {
     const trusted = new Set(lineage.flatMap(trustedRunDocumentIds))
-    const paths = new Map<string, string>()
     const pathKey = (value: string) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value)
     const conflict = () => new DesktopOperationError('execution-recovery-binding-conflict', '恢复稿与已打开文件冲突',
       '上次任务的未保存修改仍在恢复稿中，但同一文件已被另一个文档会话打开。',
       '请先处理已打开文件和恢复稿，再继续原任务；未保存修改未被覆盖。')
-    for (const run of lineage) for (const tool of run.tools) {
-      if (tool.state !== 'returned' || (tool.call.name !== 'file.open' && !fileCreated(tool.call.name, tool.result))) continue
-      const data = tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
-        ? tool.result.data as { documentId?: unknown; path?: unknown } : null
-      if (typeof data?.documentId !== 'string' || typeof data.path !== 'string' || !trusted.has(data.documentId)) continue
-      const prior = paths.get(data.documentId)
-      if (prior && pathKey(prior) !== pathKey(data.path)) throw conflict()
-      paths.set(data.documentId, data.path)
-    }
     const recoverable = await this.options.documents.internalAPI.recoverable()
     for (const recovery of recoverable.filter(snapshot => trusted.has(snapshot.documentId))) {
-      const expectedPath = paths.get(recovery.documentId)
-      if (expectedPath && (recovery.binding.kind !== 'file' || pathKey(recovery.binding.path) !== pathKey(expectedPath))) throw conflict()
       const live = this.options.documents.registry.list()
       const recoveryPath = recovery.binding.kind === 'file' ? recovery.binding.path : null
       if (recoveryPath && live.some(snapshot => snapshot.documentId !== recovery.documentId
@@ -551,74 +533,26 @@ export class ExecutionDesktopService {
     }
   }
   private async continuationDocuments(lineage: readonly ExecutionRunRecord[], documents: ExecutionDocumentReference[]): Promise<ExecutionDocumentReference[]> {
-    const refreshed: ExecutionDocumentReference[] = []
-    for (const reference of documents) {
-      let expected = reference.revision
-      const scopedTargets = [...reference.writable, ...(reference.selection ?? [])]
-      const localRanges = scopedTargets.filter(target => target.kind === 'markdown-range')
-        .filter((target, index, ranges) => ranges.findIndex(other => other.from === target.from && other.to === target.to) === index)
-      const flowRanges = scopedTargets.some(target => target.kind === 'flow-range')
-      for (const run of lineage) {
-        // The frozen system message records the exact Gateway handles issued for
-        // writable targets. A separately issued child handle has no proven extent.
-        const knownRanges = new Map<string, { from: number; to: number }>()
-        if (localRanges.length) {
-          const prefix = '本次固定文档与权限（切换界面不改变它们）：'
-          const message = run.messages.slice(0, run.initialMessageCount).find(value => value.role === 'system'
-            && typeof value.content === 'string' && value.content.startsWith(prefix))
-          const frozenDocument = run.input.documents.find(value => value.documentId === reference.documentId)
-          if (!message || typeof message.content !== 'string' || !frozenDocument) throw executionInputError('document-range-changed')
-          let issued: unknown
-          try { issued = JSON.parse(message.content.slice(prefix.length)) }
-          catch { throw executionInputError('document-range-changed') }
-          const frozenIndex = run.input.documents.indexOf(frozenDocument)
-          const issuedDocument = Array.isArray(issued) ? issued[frozenIndex] as { documentId?: unknown;
-            writable?: Array<{ kind?: unknown; target?: unknown }> } | undefined : undefined
-          if (issuedDocument?.documentId !== reference.documentId || !Array.isArray(issuedDocument.writable)
-            || issuedDocument.writable.length !== frozenDocument.writable.length) throw executionInputError('document-range-changed')
-          for (const [index, target] of frozenDocument.writable.entries()) {
-            const handle = issuedDocument.writable[index]
-            if (handle?.kind !== target.kind || typeof handle.target !== 'string') throw executionInputError('document-range-changed')
-            if (target.kind === 'markdown-range') knownRanges.set(handle.target, target)
-          }
-        }
-        for (const tool of run.tools) {
-          const callInput = tool.call.input && typeof tool.call.input === 'object' && !Array.isArray(tool.call.input)
-            ? tool.call.input as { target?: unknown; content?: unknown } : null
-          if (localRanges.length && (tool.call.name === 'read' || tool.call.name === 'inspect')
-            && typeof callInput?.target === 'string' && knownRanges.has(callInput.target)
-            && tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object' && !Array.isArray(tool.result.data)) {
-            const refreshedHandle = (tool.result.data as { target?: unknown }).target
-            if (typeof refreshedHandle === 'string') knownRanges.set(refreshedHandle, knownRanges.get(callInput.target)!)
-          }
-          const result = tool.result?.kind === 'document-operation' ? tool.result.result : null
-          if (!result || result.documentId !== reference.documentId
-            || result.status !== 'applied' && result.status !== 'unchanged') continue
-          if (result.beforeRevision !== expected) throw executionInputError('document-range-changed')
-          if (result.status === 'applied' && flowRanges) throw executionInputError('document-range-changed')
-          if (result.status === 'applied' && localRanges.length) {
-            const actual = typeof callInput?.target === 'string' ? knownRanges.get(callInput.target) : undefined
-            // Equal width on the parent grant cannot prove equal width on a child.
-            if (tool.call.name !== 'text.replace' || typeof callInput?.content !== 'string' || localRanges.length !== 1
-              || !actual || actual.from !== localRanges[0]!.from || actual.to !== localRanges[0]!.to
-              || callInput.content.length !== actual.to - actual.from) throw executionInputError('document-range-changed')
-            if (tool.result?.kind === 'document-operation' && typeof tool.result.affected[0] === 'string')
-              knownRanges.set(tool.result.affected[0], actual)
-          }
-          expected = result.revision
-        }
-      }
-      const snapshot = await this.options.documents.registry.get(reference.documentId).drain()
-      const wholeDocument = !reference.selection?.length && reference.writable.every(target => target.kind === 'document')
-      if (snapshot.revision !== expected || snapshot.epoch !== reference.epoch && !(snapshot.recovered && wholeDocument))
-        throw executionInputError('document-range-changed')
-      refreshed.push({ ...reference, epoch: snapshot.epoch, revision: expected })
-    }
-    return refreshed
+    const byId = new Map(lineage.map(run => [run.runId, run]))
+    const ownRuns = new Set<string>()
+    let source = lineage.at(-1)
+    while (source && !ownRuns.has(source.runId)) { ownRuns.add(source.runId); source = source.taskContinuedFrom ? byId.get(source.taskContinuedFrom) : undefined }
+    try {
+      return await Promise.all(documents.map(reference => continueDocumentTargets(this.options.documents.registry.get(reference.documentId), reference, ownRuns)))
+    } catch (error) { throw executionInputError('document-range-changed', error) }
   }
+
   /** Caller holds the conversation serial barrier during external grant/handoff. */
   pauseQueueForExternal(conversationId: string): Promise<void> { return this.submissions.pause(conversationId) }
-  /** Explicit only. The caller revokes active external grants before entering the conversation barrier. */
+  private async reclaimExternalQueue(current: ConversationRecord): Promise<boolean> {
+    if (await this.submissions.pausedReason(current.conversationId) !== 'external-handoff') return false
+    const portIds = current.runIndex.externalPortIds
+    // The external service installs this callback before it can grant access. Before that (including a
+    // fresh process), persisted connection ids are history and do not represent a live external writer.
+    if (portIds.length) await this.externalRevoker?.({ workspaceId: current.workspaceId, conversationId: current.conversationId, portIds: [...portIds] })
+    return true
+  }
+  /** Explicit only, after the caller has settled the external writer. */
   async resumeBuiltinQueue(conversationId: string): Promise<void> {
     await this.submissions.resume(conversationId)
     await this.startNext(conversationId, undefined, true)
@@ -663,7 +597,7 @@ export class ExecutionDesktopService {
         // lost ACK confirmation computes the same digest with the same ID.
         record.documents = structuredClone(input.documents)
         record.retryOfRunId = previous.runId
-        record.continuation = this.continuation(previous)
+        record.continuation = { ...this.continuation(previous), sameTask: true }
         if (previous.input.inputContext && record.start.inputContext)
           record.start.inputContext.context = structuredClone(previous.input.inputContext.context)
         record.start.workspaceRoot = previous.input.workspaceRoot
@@ -799,7 +733,7 @@ export class ExecutionDesktopService {
         },
       } })
       this.imageRetention?.collect()
-      for (const [submissionId, change] of this.elementChanges) if (change.conversationId === input.conversationId) this.elementChanges.delete(submissionId)
+      for (const [submissionId, change] of this.elementChanges) if (change.conversationId === input.conversationId) { change.dispose(); this.elementChanges.delete(submissionId) }
       // Deletion is already durable. A failed sweep keeps its intent for startup retry.
       await this.collectAttachmentReleases().catch(() => undefined)
     } catch (error) {
@@ -825,131 +759,34 @@ export class ExecutionDesktopService {
               await this.submissions.update(submission.submissionId, { state: 'cancelled', updatedAt: Date.now(),
                 failure: { code: 'element-card-closed', message: '已取消：元素 AI 卡已随文件关闭。' } })
           const current = await this.conversations.readConversation({ workspaceId: record.workspaceId, conversationId: record.conversationId })
-          if (current) await this.removeConversation({ workspaceId: current.workspaceId, conversationId: current.conversationId, expectedRevision: current.revision })
+          if (current?.inputDraft.trim() || current?.inputAttachments.length) {
+            for (const runId of current.runIndex.builtinRunIds) await this.engine.stop(runId)
+            const latest = await this.conversations.readConversation(current)
+            if (latest) await this.conversations.recoverElementDraft({ workspaceId: latest.workspaceId,
+              conversationId: latest.conversationId, expectedRevision: latest.revision })
+          } else if (current) await this.removeConversation({ workspaceId: current.workspaceId, conversationId: current.conversationId, expectedRevision: current.revision })
         }))
       }
   }
-  /** An element card request edits one object, block or text: it is read as the request starts, before the model can change it. */
+  /** Subscribe before the run starts; only durable commits with that run identity count. */
   private async recordElementBaseline(record: StoredExecutionSubmission): Promise<void> {
+    this.elementChanges.get(record.submissionId)?.dispose()
     try {
       const conversation = await this.conversations.readConversation({ workspaceId: record.workspaceId, conversationId: record.conversationId })
-      const element = conversation?.element
-      const reference = element && record.documents.find(value => value.documentId === element.documentId)
+      const reference = conversation?.element && record.documents.find(value => value.documentId === conversation.element!.documentId)
       const target = reference?.writable.length === 1 ? reference.writable[0] : undefined
       if (!reference || !target || target.kind === 'document') return
-      const snapshot = await this.options.documents.registry.get(reference.documentId).drain()
-      const base = { conversationId: record.conversationId, documentId: reference.documentId, undone: false }
-      if (target.kind === 'markdown-range') {
-        if (!isSourceDocumentModel(snapshot.model) || target.to > snapshot.model.source.length) return
-        const source = snapshot.model.source
-        this.elementChanges.set(record.submissionId, { kind: 'source', ...base, position: target.from,
-          before: { from: target.from, to: target.to, text: source.slice(target.from, target.to), source } })
-        return
-      }
-      if (snapshot.model.kind !== 'course-v9') return
-      const project = snapshot.model.project
-      if (target.kind === 'course-object') {
-        if (!locateCourseLayer(project, target.itemId)) return
-        const source = runtimeSourceOf(project, target.itemId)
-        this.elementChanges.set(record.submissionId, { kind: 'fields', ...base, before: readElementFields(project, target.itemId),
-          read: value => readElementFields(value, target.itemId), write: (value, fields) => writeElementFields(value, target.itemId, fields),
-          ...(source !== null ? { runtime: { itemId: target.itemId, source } } : {}) })
-        return
-      }
-      const read = (value: CourseProjectDocument) => readFlowBlockFields(value, target.surfaceId, target.blockId)
-      const before = read(project), content = target.kind === 'flow-range' ? flowSlotContent(project, target) : null
-      if (!before || target.kind === 'flow-range' && !content) return
-      this.elementChanges.set(record.submissionId, { kind: 'fields', ...base, before, read,
-        write: (value, fields) => writeFlowBlockFields(value, target.surfaceId, target.blockId, fields),
-        ...(target.kind === 'flow-range' && content ? { range: { target, content } } : {}) })
-    } catch { /* The card's undo is a convenience; the request runs regardless. */ }
+      const session = this.options.documents.registry.get(reference.documentId), snapshot = await session.drain()
+      this.elementChanges.set(record.submissionId, new ElementChangeTracker(record.conversationId, reference.documentId, target, session, snapshot))
+    } catch { /* A card's optional inverse never blocks the actual task. */ }
   }
-  private async recordElementResult(submissionId: string): Promise<void> {
-    const change = this.elementChanges.get(submissionId)
-    if (!change || change.after !== undefined) return
-    try {
-      const model = (await this.options.documents.registry.get(change.documentId).drain()).model
-      if (change.kind === 'source') {
-        const { from, to, source } = change.before
-        const text = isSourceDocumentModel(model) ? model.source : null
-        const traced = text === null ? null : traceSourceRange(source, text, from, to)
-        change.after = traced && text !== null ? { text: text.slice(traced.from, traced.to), prefix: text.slice(Math.max(0, traced.from - 24), traced.from),
-          suffix: text.slice(traced.to, traced.to + 24) } : null
-        return
-      }
-      change.after = model.kind === 'course-v9' ? change.read(model.project) : null
-      if (change.runtime && model.kind === 'course-v9') change.runtime.lostTexts = lostRuntimeTextEdits(model.project, change.runtime.itemId, change.runtime.source)
-      if (change.range && model.kind === 'course-v9') {
-        const { target, content } = change.range, next = flowSlotContent(model.project, target)
-        const traced = next && traceFlowRange(content, next, target.from, target.to)
-        change.range.after = traced && next ? { target: { ...target, ...traced }, content: next } : null
-      }
-    } catch { change.after = null }
-  }
+  private async recordElementResult(submissionId: string): Promise<void> { this.elementChanges.get(submissionId)?.finish() }
   private elementChangeView(submissionId: string): ElementChangeView {
-    const change = this.elementChanges.get(submissionId)
-    if (!change) return { submissionId, state: 'none', fields: [] }
-    if (change.after === undefined) return { submissionId, state: 'pending', fields: [] }
-    if (change.kind === 'source') {
-      if (!change.after) return { submissionId, state: 'none', fields: [], unavailable: SOURCE_UNTRACEABLE }
-      const text = change.undone ? change.before.text : change.after.text
-      const place = text ? { target: { kind: 'markdown-range' as const, from: change.position, to: change.position + text.length }, content: text } : {}
-      return change.before.text === change.after.text ? { submissionId, state: 'none', fields: [], ...place }
-        : { submissionId, state: change.undone ? 'undone' : 'applied', fields: ['文字'], ...place }
-    }
-    const range = change.range, current = range && (change.undone ? range : range.after)
-    const place = current && current.target.to > current.target.from
-      ? { target: current.target, content: JSON.stringify(sliceFlowRichText(current.content, current.target.from, current.target.to)) } : {}
-    const lost = change.runtime?.lostTexts?.length ? { lostTexts: [...change.runtime.lostTexts] } : {}
-    if (!change.before) return { submissionId, state: 'none', fields: [], unavailable: ELEMENT_UNSUPPORTED, ...lost }
-    if (!change.after) return { submissionId, state: 'none', fields: [], unavailable: '这个对象已不存在。' }
-    const units = elementChangeUnits(change.before, change.after)
-    return units.length ? { submissionId, state: change.undone ? 'undone' : 'applied', fields: unitLabels(units), ...place } : { submissionId, state: 'none', fields: [], ...place }
+    return this.elementChanges.get(submissionId)?.view(submissionId) ?? { submissionId, state: 'none', fields: [] }
   }
-  /**
-   * Undoes (or redoes) one element card request as one ordinary edit in the document's history. Only what the
-   * request changed is written; fields changed again since are reported first and written only when `force`
-   * confirms it. A Markdown text card restores its text where it is found, or says it cannot.
-   */
   private async revertElement(input: { submissionId: string; direction: 'undo' | 'redo'; force?: boolean }): Promise<ElementRevertResult> {
-    const change = this.elementChanges.get(input.submissionId), view = this.elementChangeView(input.submissionId)
-    if (!change?.after || view.state === 'pending' || view.state === 'none')
-      return { status: 'unavailable', message: view.unavailable ?? (view.state === 'pending' ? '这次修改还没有结束。' : '这次请求没有改动这个对象。') }
-    if ((input.direction === 'undo') === change.undone)
-      return { status: 'unavailable', message: input.direction === 'undo' ? '这次修改已经撤销。' : '这次修改没有撤销，不需要重做。' }
-    const session = this.options.documents.registry.get(change.documentId)
-    for (let attempt = 0; attempt < 3; attempt++) {
-      const snapshot = await session.drain()
-      let command: Extract<Parameters<typeof session.execute>[0]['mutation'], { type: 'command' }>['command'], position = 0
-      if (change.kind === 'source') {
-        if (!isSourceDocumentModel(snapshot.model)) return { status: 'unavailable', message: '这个文档已不可编辑。' }
-        const source = snapshot.model.source, after = change.after
-        const [from, to] = input.direction === 'undo' ? [after.text, change.before.text] : [change.before.text, after.text]
-        const inPlace = source.slice(change.position, change.position + from.length) === from
-          && (from || source.slice(Math.max(0, change.position - after.prefix.length), change.position) === after.prefix && source.slice(change.position, change.position + after.suffix.length) === after.suffix)
-        position = inPlace ? change.position : uniqueIndex(source, from)
-        if (position < 0) return { status: 'unavailable', message: SOURCE_UNTRACEABLE }
-        command = { type: 'markdown.splice', from: position, to: position + from.length, text: to }
-      } else {
-        if (!change.before || !change.after) return { status: 'unavailable', message: view.unavailable ?? '这次请求没有改动这个对象。' }
-        const [from, to] = input.direction === 'undo' ? [change.after, change.before] : [change.before, change.after]
-        const units = elementChangeUnits(change.before, change.after)
-        const current = snapshot.model.kind === 'course-v9' ? change.read(snapshot.model.project) : null
-        if (!current || snapshot.model.kind !== 'course-v9') return { status: 'unavailable', message: '这个对象已不存在。' }
-        const conflicts = units.filter(unit => unit.some(key => !sameFieldValue(current[key], from[key])))
-        if (conflicts.length && !input.force) return { status: 'conflict', fields: unitLabels(conflicts) }
-        command = { type: 'course.replace', project: change.write(snapshot.model.project, Object.fromEntries(units.flat().map(key => [key, to[key]]))) }
-      }
-      const result = await session.execute({ documentId: change.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision, operationId: randomUUID(),
-        actor: 'human', mutation: { type: 'command', command } })
-      if (result.status === 'applied' || result.status === 'unchanged') {
-        change.undone = input.direction === 'undo'
-        if (change.kind === 'source') change.position = position
-        return { status: 'applied', change: this.elementChangeView(input.submissionId) }
-      }
-      if (result.status !== 'conflict') return { status: 'unavailable', message: 'message' in result ? result.message : '撤销没有完成。' }
-    }
-    return { status: 'unavailable', message: '文档正在被修改，请稍后再试。' }
+    return this.elementChanges.get(input.submissionId)?.revert(input.submissionId, input.direction, input.force)
+      ?? { status: 'unavailable', message: '没有可定位的卡片修改，请查看文档历史。' }
   }
   async operate(raw: unknown): Promise<unknown> {
     const received = captureMainTiming()
@@ -965,8 +802,14 @@ export class ExecutionDesktopService {
         case 'set-conversation-home': return this.serial(input.conversationId, async () => this.conversations.setConversationHome({ ...input,
           home: input.home ? await this.validateHome(input.workspaceId, input.home) : null }))
         case 'conversation': return this.conversations.readConversation(input)
+        case 'prepare-documents': return this.serial(input.conversationId, () => this.prepareDocuments(input))
         case 'draft': return this.serial('attachment-lifecycle', () => this.serial(input.conversationId, async () => {
-          for (const ref of input.attachments) await this.attachments.readRepresentation(ref.attachmentId, ref.representationId)
+          for (const ref of input.attachments) {
+            if (ref.delivery === 'source') {
+              const snapshot = await this.attachments.readSnapshot(ref.attachmentId)
+              if (!snapshot.representations.some(rep => rep.id === ref.representationId)) throw executionInputError('attachment-unavailable')
+            } else await this.attachments.readRepresentation(ref.attachmentId, ref.representationId)
+          }
           return this.conversations.updateConversation({ ...input, patch: { inputDraft: input.text, inputAttachments: input.attachments, frozenContextRefs: this.refs(input.documents) } })
         }))
         case 'rename-conversation': return this.serial(input.conversationId, () => this.conversations.updateConversation({ ...input, patch: { title: input.title } }))
@@ -997,6 +840,20 @@ export class ExecutionDesktopService {
           return record && record.workspaceId === input.workspaceId && record.conversationId === input.conversationId ? this.publicSubmission(record) : null
         }
         case 'submissions': return Promise.all((await this.submissions.list()).filter(record => record.workspaceId === input.workspaceId && record.conversationId === input.conversationId).map(record => this.publicSubmission(record)))
+        case 'run-queued': return this.serial(input.conversationId, async () => {
+          let record = await this.submissions.read(input.submissionId)
+          if (!record || record.workspaceId !== input.workspaceId || record.conversationId !== input.conversationId) throw new Error('排队消息不属于当前会话')
+          if (record.state !== 'queued') return this.submissionResult(record)
+          const current = await this.required(input.workspaceId, input.conversationId), active = await this.activeRun(current)
+          if (await this.reclaimExternalQueue(current)) await this.submissions.resume(input.conversationId)
+          if (active) {
+            const stopped = await this.engine.stop(active.runId)
+            if (!stopped || ['queued', 'running', 'stopping'].includes(stopped.status)) throw new Error('当前任务尚未停止，排队消息仍保留')
+            record = await this.submissions.update(record.submissionId, { continuation: this.continuation(stopped), updatedAt: Date.now() })
+          }
+          // The accepted payload and identity are reused. The user's newer composer draft is not touched.
+          return this.submissionResult(await this.startSubmission(record, record.continuation))
+        })
         case 'delete-submission': return this.serial(input.conversationId, async () => {
           const record = await this.submissions.read(input.submissionId)
           if (!record || record.workspaceId !== input.workspaceId || record.conversationId !== input.conversationId) throw new Error('排队消息不存在')
@@ -1006,12 +863,32 @@ export class ExecutionDesktopService {
         })
         case 'pause-queue': return this.serial(input.conversationId, async () => {
           await this.required(input.workspaceId, input.conversationId)
-          await this.pauseQueueForExternal(input.conversationId)
+          await this.submissions.pause(input.conversationId, input.reason ?? 'external-handoff')
         })
         case 'resume-queue': return this.serial(input.conversationId, async () => {
-          await this.required(input.workspaceId, input.conversationId)
+          const current = await this.required(input.workspaceId, input.conversationId)
+          await this.reclaimExternalQueue(current)
           await this.resumeBuiltinQueue(input.conversationId)
         })
+        case 'browser-control': {
+          const owner = await this.required(input.workspaceId, input.conversationId)
+          const record = await this.engine.read(input.runId)
+          if (!owner.runIndex.builtinRunIds.includes(input.runId) || record?.input.conversationId !== owner.conversationId)
+            throw new Error('浏览器不属于当前会话')
+          const { controlWorkbenchBrowser } = await import('../workbenchToolServices.js')
+          try {
+            if (input.action === 'status') return await controlWorkbenchBrowser(input.runId, 'status')
+            await controlWorkbenchBrowser(input.runId, 'status')
+            await this.engine.pauseForBrowser(input.runId, true)
+            const result = await controlWorkbenchBrowser(input.runId, input.action)
+            if (input.action === 'resume') await this.engine.pauseForBrowser(input.runId, false)
+            return result
+          } catch (cause) {
+            throw new DesktopOperationError('browser-control-failed', '浏览器控制未完成',
+              input.action === 'resume' ? '浏览器暂未返回助手控制。' : '受管浏览器暂时无法接管或读取。',
+              '任务和输入已保留，可重试接管或继续任务，也可停止任务。', { cause })
+          }
+        }
         case 'run': return this.engine.read(input.runId)
         case 'change-review': {
           const { run } = await this.changeReviewSource(input)

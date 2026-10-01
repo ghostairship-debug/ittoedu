@@ -4,6 +4,8 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, expect, it } from 'vitest'
+import { ChatGPTOAuthClient } from '../../src/main/workbench/providers/ChatGPTOAuthClient'
+import { createOAuthSecurePersistence } from '../../src/main/workbench/providers/OAuthSecurePersistence'
 import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
 import type { CredentialEncryptionPort } from '../../src/main/workbench/providers/providerCredentials'
 import type { ExecutionConnectionConfiguration, ExecutionProfile } from '../../src/shared/workbench/executionSettings'
@@ -190,4 +192,68 @@ it('preserves prior settings when secure storage/encryption/disk writes fail, wh
   expect((await new ExecutionSettingsStore(options).read()).connections[0]).toMatchObject({ revoked: true, hasCredential: false })
   expect(await fs.readdir(directory)).toEqual(expect.arrayContaining(['execution-settings-v1.json', 'blocked-parent']))
   expect((await fs.readdir(directory)).some(name => name.endsWith('.tmp'))).toBe(false)
+})
+
+
+async function loggedInFixture() {
+  const f = await setup()
+  const configuration: ExecutionConnectionConfiguration = { ...config('test-account'), provider: 'openai', protocol: 'chatgpt-responses',
+    baseURL: 'https://chatgpt.com/backend-api/codex', authKind: 'oauth', billing: { kind: 'subscription' } }
+  const saved = await f.store.saveConnection({ connection: configuration })
+  const target = await f.store.reserveOAuthLogin(saved.connection.id, saved.connection.revision)
+  await f.store.compareAndSetOAuthCredential(target.credentialRef, 0, { connectionId: target.connectionId, revision: target.revision,
+    accountId: 'test-account', accessToken: 'test-access', refreshToken: 'test-refresh', expiresAt: Date.now() + 3_600_000 })
+  await f.store.saveProfile({ roles: roles(saved.connection.id) })
+  return { ...f, configuration, target, connection: (await f.store.snapshot('conversation')).connection }
+}
+
+it('keeps an unchanged OAuth connection and metadata revision usable through the actual credential resolver', async () => {
+  const f = await loggedInFixture()
+  const noop = await f.store.saveConnection({ id: f.connection.id, expectedRevision: f.connection.revision, connection: f.configuration })
+  expect(noop).toMatchObject({ hasCredential: true, connection: { revision: f.connection.revision, auth: f.connection.auth } })
+  const changed = await f.store.saveConnection({ id: f.connection.id, expectedRevision: noop.connection.revision,
+    connection: { ...f.configuration, billing: { kind: 'prepaid' } } })
+  expect(changed.hasCredential).toBe(true)
+  expect(changed.connection.revision).toBe(f.connection.revision + 1)
+  const store = new ExecutionSettingsStore(f.options)
+  const client = new ChatGPTOAuthClient({ clientId: 'test-client', originator: 'test-fixture', redirectURI: 'http://localhost:1455/auth/callback',
+    persistence: createOAuthSecurePersistence(store), fetch: async () => { throw new Error('unexpected network') } })
+  await expect(client.resolveCredential(changed.connection)).resolves.toEqual({ accessToken: 'test-access', accountId: 'test-account' })
+  await expect(client.resolveCredential(f.connection)).resolves.toEqual({ accessToken: 'test-access', accountId: 'test-account' })
+  expect((await store.snapshot('conversation')).connection.revision).toBe(changed.connection.revision)
+})
+
+it('serializes refresh across old and metadata-only OAuth versions and does not resurrect a revoked login', async () => {
+  const f = await loggedInFixture()
+  const changed = await f.store.saveConnection({ id: f.connection.id, expectedRevision: f.connection.revision,
+    connection: { ...f.configuration, billing: { kind: 'prepaid' } } })
+  const oldRef = f.connection.auth.credentialRef, newRef = changed.connection.auth.credentialRef
+  const active: string[] = [], order: string[] = []
+  const refresh = (ref: string) => f.store.withOAuthLease(ref, async () => {
+    active.push(ref); expect(active).toHaveLength(1)
+    const entry = await f.store.readOAuthCredential(ref)
+    order.push(entry.credential!.accessToken)
+    if (entry.credential!.accessToken === 'test-access') {
+      await new Promise(resolve => setTimeout(resolve, 5))
+      expect(await f.store.compareAndSetOAuthCredential(ref, entry.version, { ...entry.credential!, accessToken: 'fresh', refreshToken: 'rotated' })).toBe(true)
+    }
+    active.pop()
+  })
+  await Promise.all([refresh(oldRef), refresh(newRef)])
+  expect(order).toEqual(['test-access', 'fresh'])
+  const pending = await f.store.readOAuthCredential(newRef)
+  await f.store.revokeConnection(f.connection.id)
+  expect(await f.store.compareAndSetOAuthCredential(newRef, pending.version, pending.credential)).toBe(false)
+  expect((await f.store.readOAuthCredential(oldRef)).credential).toBeNull()
+  expect((await f.store.readOAuthCredential(newRef)).credential).toBeNull()
+  expect((await f.store.read()).connections[0]).toMatchObject({ hasCredential: false, revoked: true })
+})
+
+it('does not carry an OAuth login to a different account or endpoint', async () => {
+  const f = await loggedInFixture()
+  const changed = await f.store.saveConnection({ id: f.connection.id, expectedRevision: f.connection.revision,
+    connection: { ...f.configuration, accountId: 'different-account' } })
+  expect(changed.hasCredential).toBe(false)
+  expect((await f.store.readOAuthCredential(changed.connection.auth.credentialRef)).credential).toBeNull()
+  await expect(f.store.snapshot('conversation')).rejects.toMatchObject({ code: 'credential-unavailable' })
 })

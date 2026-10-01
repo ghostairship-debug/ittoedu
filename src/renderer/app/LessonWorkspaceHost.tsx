@@ -6,7 +6,7 @@ import { LessonWorkspaceShell, type LessonWorkspaceShellHandle } from '../lesson
 import { LessonMaterialBrowser } from '../lessonMaterials/LessonMaterialBrowser'
 import type { LessonAuthoringMaterialSelection } from '../../shared/lessonAuthoring'
 import { createDesktopDocumentPort } from './lessonDocumentPort'
-import { ExecutionAssistant } from '../workbench/ExecutionAssistant'
+import { ExecutionAssistant, type ExecutionAssistantHandle } from '../workbench/ExecutionAssistant'
 import { WorkspaceRecoveryPanel } from '../workbench/WorkspaceRecoveryPanel'
 import type { ExecutionDocumentReference } from '../../shared/workbench/executionDesktop'
 import type { DocumentHostAPI, SaveDirectoryContext } from '../../shared/workbench/desktop'
@@ -15,7 +15,7 @@ export interface LessonWorkspaceHostProps {
   courseDocuments?: CourseDocumentsPort
   projectPath: string | null
   captureCourseDocument?(writable: boolean): Promise<ExecutionDocumentReference[]>
-  prepareCourseDocuments?(): Promise<void>
+  prepareCourseDocuments?(documentIds?: readonly string[]): Promise<void>
   onOpenProject(path: string): Promise<boolean>
   onNewProject(): Promise<boolean>
   onNewProjectFromPptx?(file: { name: string; bytes: Uint8Array }): Promise<boolean>
@@ -28,13 +28,14 @@ export interface LessonWorkspaceHostProps {
 }
 export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, LessonWorkspaceHostProps>(function LessonWorkspaceHost(props, ref) {
   const shell = useRef<LessonWorkspaceShellHandle>(null)
+  const assistant = useRef<ExecutionAssistantHandle>(null)
   useImperativeHandle(ref, () => ({
     showProject: () => shell.current?.showProject(),
     detachLesson: () => shell.current?.detachLesson(),
     flushAll: () => shell.current?.flushAll() ?? Promise.resolve(true),
     saveActiveDocument: () => shell.current?.saveActiveDocument() ?? Promise.resolve('none'),
     closeAll: () => shell.current?.closeAll() ?? Promise.resolve(true),
-    preserveAll: () => shell.current?.preserveAll() ?? Promise.resolve(true),
+    preserveAll: async () => { await assistant.current?.preserveDraft(); return shell.current?.preserveAll() ?? true },
     openFile: path => shell.current?.openFile(path) ?? Promise.resolve(),
     focusDocument: id => shell.current?.focusDocument(id) ?? Promise.resolve(),
   }), [])
@@ -46,7 +47,7 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
   const documents = props.documents ?? api?.documents
   const port = useMemo(() => api?.lessonFiles && documents ? createDesktopDocumentPort(api.lessonFiles, documents) : null, [api?.lessonFiles, documents])
   useEffect(() => workbenchSelection.setFallback(async id => {
-    await props.prepareCourseDocuments?.()
+    await props.prepareCourseDocuments?.([id])
     if (!api?.documents) throw new Error('文档服务尚未就绪')
     return api.documents.read(id)
   }), [api?.documents, props.prepareCourseDocuments])
@@ -62,9 +63,9 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
       list={() => service.list(target)} importMaterial={input => service.importMaterial(target, input)} read={input => service.read(target, input)} />
   }
   return <><LessonWorkspaceShell ref={shell} {...props} lessonOperation={api.lesson} workspaceFiles={api.workspaceFiles} documentPort={port}
-    renderAssistant={(root, documentTarget, isCourse, drainDocuments) => api.execution ? <ExecutionAssistant root={root}
+    renderAssistant={(root, documentTarget, isCourse, drainDocuments) => api.execution ? <ExecutionAssistant ref={assistant} root={root}
       onLocateDocument={id => shell.current?.focusDocument(id) ?? Promise.resolve()}
-      prepareSend={async () => { if (!await drainDocuments()) return false; await props.prepareCourseDocuments?.(); return true }}
+      prepareSend={async (ids = []) => { if (!await drainDocuments(ids)) return false; await props.prepareCourseDocuments?.(ids); return true }}
       captureDocuments={async writable => {
         const editor = documentTarget?.getEditor()
         if (editor) {

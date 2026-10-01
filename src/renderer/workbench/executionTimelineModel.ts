@@ -86,7 +86,7 @@ function redactString(value: string): string {
     .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, 'Bearer [已隐藏]')
     .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, '[凭据已隐藏]')
     .replace(/((?:api[-_]?key|access[-_]?token|refresh[-_]?token|password|secret)\s*[:=]\s*)[^\s,;]+/gi, '$1[已隐藏]')
-    .replace(/[A-Za-z]:[\\/](?:[^\s"<>|]+[\\/])*([^\\/\s"<>|]+)/g, '[本地路径]/$1')
+    .replace(/\b[A-Za-z]:[\\/](?:[^\s"<>|]+[\\/])*([^\\/\s"<>|]+)/g, '[本地路径]/$1')
     .replace(/\/(?:Users|home)\/[^\s"<>]+/g, '[本地路径]')
 }
 /** Presentation only: never interprets HTML, opens links, or replays tool arguments. */

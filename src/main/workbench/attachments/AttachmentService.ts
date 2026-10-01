@@ -42,7 +42,7 @@ export class AttachmentService implements AttachmentReader {
   constructor(private readonly options: AttachmentServiceOptions) {
     this.directory = path.resolve(options.directory)
     this.queueKey = process.platform === 'win32' ? this.directory.toLowerCase() : this.directory
-    this.limit = options.maxSourceBytes ?? 32 * 1024 * 1024
+    this.limit = options.maxSourceBytes ?? MATERIAL_EXTRACTION_LIMITS.sourceBytes
     if (!Number.isSafeInteger(this.limit) || this.limit < 1) throw new Error('Invalid attachment byte limit')
   }
 
@@ -108,6 +108,9 @@ export class AttachmentService implements AttachmentReader {
       const snapshots = [] as Awaited<ReturnType<AttachmentService['readSnapshot']>>[]
       for (const name of (await fs.readdir(snapshotsDirectory)).filter(value => /^[a-f0-9-]{36}\.json$/.test(value)))
         snapshots.push(await this.readSnapshot(name.slice(0, -5)))
+      // A surviving derived snapshot still needs its immutable original for later page extraction.
+      for (const snapshot of snapshots) if (snapshot.derivedFrom && (!candidates.has(snapshot.id) || retainedIds.has(snapshot.id)))
+        retainedIds.add(snapshot.derivedFrom)
       const retainedDigests = new Set<string>()
       for (const snapshot of snapshots) {
         if (candidates.has(snapshot.id) && !retainedIds.has(snapshot.id)) {
@@ -129,6 +132,12 @@ export class AttachmentService implements AttachmentReader {
     abort(options.signal)
     if (!this.options.resolveAuthorizedPath) throw new AttachmentError('path-not-authorized', '没有已授权的文件读取入口')
     const authorized = await this.options.resolveAuthorizedPath(input.authorizationId)
+    return this.receiveAuthorizedFile({ ...authorized, authorizationId: input.authorizationId, name: input.name }, options)
+  }
+
+  /** Main-only entry; the caller already resolved the user's file/home grant. Not exposed to renderer paths. */
+  async receiveAuthorizedFile(authorized: { path: string; kind?: 'file' | 'workspace'; authorizationId: string; name?: string },
+    options: { signal?: AbortSignal; onProgress?: (loaded: number, total: number) => void } = {}): Promise<AttachmentSnapshot> {
     abort(options.signal)
     const handle = await fs.open(authorized.path, 'r')
     let bytes: Buffer
@@ -154,7 +163,7 @@ export class AttachmentService implements AttachmentReader {
       if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw new AttachmentError('source-changed', '附件在读取期间已改变，请重新添加')
       bytes = Buffer.concat(chunks)
     } finally { await handle.close() }
-    return this.receiveBytes({ name: input.name ?? path.basename(authorized.path), bytes, source: { kind: authorized.kind ?? 'file', authorizationId: input.authorizationId, pathHint: authorized.path } }, options)
+    return this.receiveBytes({ name: authorized.name ?? path.basename(authorized.path), bytes, source: { kind: authorized.kind ?? 'file', authorizationId: authorized.authorizationId, pathHint: authorized.path } }, options)
   }
 
   async receiveBytes(input: ReceiveAttachmentBytes, options: { signal?: AbortSignal } = {}): Promise<AttachmentSnapshot> {
@@ -207,22 +216,89 @@ export class AttachmentService implements AttachmentReader {
   }
 
   /** Derivation creates a new immutable record; callers explicitly replace their draft reference. */
-  async extract(attachmentId: string, options: { pages?: AttachmentPageRange; signal?: AbortSignal } = {}): Promise<AttachmentSnapshot> {
+  /** Process bounded batches but keep the immutable source and completed batches for resume. */
+  async extract(attachmentId: string, options: { pages?: AttachmentPageRange; images?: 'auto' | 'all'; signal?: AbortSignal; onProgress?(loaded: number, total: number): void } = {}): Promise<AttachmentSnapshot> {
+    abort(options.signal)
+    const original = await this.readSnapshot(attachmentId)
+    const format = original.name.split('.').pop()?.toLowerCase()
+    if (format === 'docx') return this.extractBatch(attachmentId, options)
+    if (format !== 'pdf' && format !== 'pptx') return this.extractBatch(attachmentId, options)
+    const requested = options.pages && structuredClone(options.pages)
+    if (requested && (!Number.isSafeInteger(requested.from) || !Number.isSafeInteger(requested.to)
+      || requested.from < 1 || requested.to < requested.from)) throw new AttachmentError('invalid-extraction', '页范围无效')
+    const key = hash(Buffer.from(JSON.stringify(['batches-v1', original.id, original.digest, requested ?? null, options.images ?? 'all'])))
+    const filename = path.join(this.directory, 'extraction-progress', `${key}.json`)
+    type Progress = { source: string; digest: string; batches: string[]; result?: string }
+    let progress: Progress = { source: original.id, digest: original.digest, batches: [] }
+    try { progress = JSON.parse(await fs.readFile(filename, 'utf8')) }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+    if (progress.source !== original.id || progress.digest !== original.digest || !Array.isArray(progress.batches))
+      throw new AttachmentError('invalid-extraction', '提取进度与原件版本不一致')
+    if (progress.result) {
+      const completed = await this.readSnapshot(progress.result)
+      if (completed.derivedFrom !== original.id || completed.digest !== original.digest) throw new AttachmentError('invalid-extraction', '提取进度来源损坏')
+      options.onProgress?.(completed.coverage?.selectedPages ? completed.coverage.selectedPages.to - completed.coverage.selectedPages.from + 1 : completed.coverage?.totalPages ?? 0, completed.coverage?.totalPages ?? 0)
+      return completed
+    }
+    const persist = async () => this.serialStorage(async () => {
+      await fs.mkdir(path.dirname(filename), { recursive: true })
+      await this.atomic(filename, Buffer.from(JSON.stringify(progress)))
+    })
+    const batches: AttachmentSnapshot[] = []
+    let next = requested?.from ?? 1, total: number | undefined
+    for (const id of progress.batches) {
+      const batch = await this.readSnapshot(id), coverage = batch.coverage
+      if (batch.derivedFrom !== original.id || batch.digest !== original.digest || !coverage?.selectedPages
+        || coverage.selectedPages.from !== next || total !== undefined && coverage.totalPages !== total)
+        throw new AttachmentError('invalid-extraction', '已保存提取批次不连续或来源改变')
+      total = coverage.totalPages; next = coverage.selectedPages.to + 1; batches.push(batch)
+    }
+    const report = () => options.onProgress?.(next - (requested?.from ?? 1), (requested?.to ?? total ?? 0) - (requested?.from ?? 1) + 1)
+    if (batches.length) report()
+    while (total === undefined || next <= (requested?.to ?? total)) {
+      abort(options.signal)
+      const batch = await this.extractBatch(attachmentId, { ...options,
+        ...(requested ? { pages: { from: next, to: requested.to } } : { pages: undefined }),
+        fromPage: next, maxPages: MATERIAL_EXTRACTION_LIMITS.pages })
+      const coverage = batch.coverage!
+      if (!coverage.selectedPages || coverage.selectedPages.from !== next || !coverage.totalPages
+        || total !== undefined && total !== coverage.totalPages) throw new AttachmentError('invalid-extraction', '提取批次页码不连续')
+      total = coverage.totalPages; next = coverage.selectedPages.to + 1
+      batches.push(batch); progress.batches.push(batch.id); await persist(); report()
+    }
+    abort(options.signal)
+    if (batches.length === 1) { progress.result = batches[0]!.id; await persist(); return batches[0]! }
+    const representations: AttachmentRepresentation[] = [], gaps: AttachmentSnapshot['gaps'] = []
+    for (const [index, batch] of batches.entries()) {
+      const id = (value: string) => `batch-${index + 1}-${value}`
+      representations.push(...batch.representations.map(item => ({ ...item, id: id(item.id) })))
+      gaps.push(...batch.gaps.map(gap => ({ ...gap, ...(gap.resolutionRepresentationId ? { resolutionRepresentationId: id(gap.resolutionRepresentationId) } : {}) })))
+    }
+    const selectedPages = { from: requested?.from ?? 1, to: next - 1 }
+    const combined = attachmentSnapshotSchema.parse({ ...original, id: randomUUID(), derivedFrom: original.id,
+      capturedAt: Date.now(), representations, gaps,
+      coverage: { format, ...(options.images === 'auto' ? { imageMode: 'auto' as const } : {}), totalPages: total, selectedPages, complete: !gaps.length && selectedPages.from === 1 && selectedPages.to === total } })
+    await this.serialStorage(async () => { await this.ensureDirectories(); await this.install(path.join(this.directory, 'snapshots', `${combined.id}.json`), Buffer.from(JSON.stringify(combined))) })
+    progress.result = combined.id; await persist()
+    return structuredClone(combined)
+  }
+
+  private async extractBatch(attachmentId: string, options: { pages?: AttachmentPageRange; images?: 'auto' | 'all'; maxPages?: number; fromPage?: number; signal?: AbortSignal } = {}): Promise<AttachmentSnapshot> {
     const pages = options.pages && structuredClone(options.pages)
     abort(options.signal)
     if (!this.options.extractor) throw new AttachmentError('extraction-unavailable', '附件提取工作进程尚未配置')
     const original = await this.readSnapshot(attachmentId)
     const bytes = await this.readFile(path.join(this.directory, 'blobs', original.digest))
     if (bytes.length !== original.byteLength || hash(bytes) !== original.digest) throw new AttachmentError('corrupt-blob', '附件原件快照已损坏')
-    const extracted = await this.options.extractor.extract({ bytes: Uint8Array.from(bytes), filename: original.name, ...(pages ? { pages } : {}) }, { signal: options.signal })
+    const extracted = await this.options.extractor.extract({ bytes: Uint8Array.from(bytes), filename: original.name, images: options.images, maxPages: options.maxPages, fromPage: options.fromPage, ...(pages ? { pages } : {}) }, { signal: options.signal })
     abort(options.signal)
     const { material, totalPages, selectedPages } = extracted
     if (!['pdf', 'docx', 'pptx'].includes(material.format) || material.format !== original.name.split('.').pop()?.toLowerCase() ||
         material.version !== 1 || !Array.isArray(material.fragments) || !Array.isArray(material.assets) || !Array.isArray(material.gaps) ||
         material.fragments.length > 100_000 || material.assets.length > 4096 || material.gaps.length > 100_000) throw new AttachmentError('invalid-extraction', '附件提取返回结构无效')
-    if (material.format !== 'docx' && (!Number.isSafeInteger(totalPages) || totalPages! < 1 || totalPages! > MATERIAL_EXTRACTION_LIMITS.pages || !selectedPages ||
+    if (material.format !== 'docx' && (!Number.isSafeInteger(totalPages) || totalPages! < 1 || !selectedPages ||
         !Number.isSafeInteger(selectedPages.from) || !Number.isSafeInteger(selectedPages.to) || selectedPages.from < 1 || selectedPages.to < selectedPages.from || selectedPages.to > totalPages! ||
-        selectedPages.from !== (pages?.from ?? 1) || selectedPages.to !== (pages?.to ?? totalPages))) throw new AttachmentError('invalid-extraction', '附件提取页范围不一致')
+        selectedPages.from !== (pages?.from ?? options.fromPage ?? 1) || selectedPages.to !== Math.min(pages?.to ?? totalPages!, (pages?.from ?? options.fromPage ?? 1) + (options.maxPages ?? totalPages!) - 1))) throw new AttachmentError('invalid-extraction', '附件提取页范围不一致')
     if (material.format === 'docx' && (pages || totalPages !== undefined || selectedPages)) throw new AttachmentError('invalid-extraction', 'Word XML 不提供可靠页范围')
     const representations: AttachmentRepresentation[] = [], gaps: AttachmentSnapshot['gaps'] = []
     const assets = new Map(material.assets.map(asset => [asset.id, asset]))
@@ -272,7 +348,7 @@ export class AttachmentService implements AttachmentReader {
       gaps.push({ code: gap.resolution?.kind === 'read-page-image' ? 'scanned-page' : 'extraction-gap', message: gap.reason, locator: gap.locator, ...(resolutionRepresentationId ? { resolutionRepresentationId } : {}) })
     }
     const snapshot = attachmentSnapshotSchema.parse({ ...original, id: randomUUID(), derivedFrom: original.id, capturedAt: Date.now(), representations, gaps,
-      coverage: { format: material.format, complete: !gaps.length && (!selectedPages || selectedPages.from === 1 && selectedPages.to === totalPages), ...(totalPages ? { totalPages, selectedPages } : {}) },
+      coverage: { format: material.format, ...(options.images === 'auto' ? { imageMode: 'auto' as const } : {}), complete: !gaps.length && (!selectedPages || selectedPages.from === 1 && selectedPages.to === totalPages), ...(totalPages ? { totalPages, selectedPages } : {}) },
     })
     await this.serialStorage(async () => {
       await this.ensureDirectories()

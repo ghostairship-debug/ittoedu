@@ -31,6 +31,14 @@ export async function operateLessonDesktop(window: BrowserWindow, request: unkno
   workspaces ??= new LessonWorkspaceService(app.getPath('userData'))
   projects ??= new LessonProjectRegistry(app.getPath('userData'))
   switch (input.operation) {
+    case 'open-link': {
+      let url: URL
+      try { url = new URL(input.url) }
+      catch { return { opened: false, openError: '链接地址不完整，请复制链接后检查。' } }
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') return { opened: false, openError: '仅支持打开网页链接。' }
+      try { await shell.openExternal(url.href); return { opened: true } }
+      catch { return { opened: false, openError: '浏览器未能打开该链接，请复制链接后重试。' } }
+    }
     case 'open-external': {
       // F06：经系统关联宿主打开真实文件；无关联程序或失败时回执明确，不抛错中断流程。
       const filename = await fs.realpath(input.path)

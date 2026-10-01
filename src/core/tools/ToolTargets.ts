@@ -180,9 +180,16 @@ export function insertionDependencyFootprint(model: DocumentModel, target: ToolT
 
 /** Conservative verified mapping for a single disjoint source edit; ambiguous/overlapping edits conflict. */
 export function mapMarkdownRange(before: string, after: string, range: Extract<ToolTarget, { kind: 'markdown-range' }>): typeof range {
+  return mapSequenceRange(before, after, range)
+}
+/** The same verified mapping for source code units or rich-text code-point/atom tokens. */
+export function mapSequenceRange<T, R extends { from: number; to: number }>(
+  before: { readonly length: number; readonly [index: number]: T },
+  after: { readonly length: number; readonly [index: number]: T }, range: R): R {
   if (before === after) return { ...range }
   let from = 0
   while (from < before.length && from < after.length && before[from] === after[from]) from += 1
+  if (from === before.length && from === after.length) return { ...range }
   let oldTo = before.length, newTo = after.length
   while (oldTo > from && newTo > from && before[oldTo - 1] === after[newTo - 1]) { oldTo -= 1; newTo -= 1 }
   if (oldTo === from) {

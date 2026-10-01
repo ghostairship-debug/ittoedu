@@ -61,7 +61,7 @@ export async function openM23Html(page: Page, name: string) {
   await expect(page.locator('.workspace-document-tabs').getByRole('tab', { name: new RegExp(`^${escaped}`) })).toHaveAttribute('aria-selected', 'true')
   const region = m23Editor(page, name)
   await expect(region).toBeVisible()
-  await expect(region.getByRole('toolbar', { name: 'HTML 视图', exact: true })).toBeVisible()
+  await expect(region.getByRole('group', { name: 'HTML 视图', exact: true })).toBeVisible()
   await expect(region.getByTitle('HTML 预览')).toHaveAttribute('src', /^courseware-preview:\/\/[a-f0-9]{32}\.[a-f0-9]{32}\.app\//)
   await expect(region.frameLocator('iframe[title="HTML 预览"]').locator('body')).toBeVisible()
   return region

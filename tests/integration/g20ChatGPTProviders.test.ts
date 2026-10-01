@@ -78,7 +78,7 @@ it('direct Responses HTTP preserves every native continuation item, wire tools, 
     res.writeHead(200, { 'Content-Type': 'text/event-stream' })
     if (bodies.length === 1) {
       const name = wire.tools[0].name
-      expect(name).toMatch(/^tool_/); expect(wire.tools[0].parameters).toEqual(request().tools![0]!.inputSchema)
+      expect(name).toBe('text_replace'); expect(wire.tools[0].parameters).toEqual(request().tools![0]!.inputSchema)
       expect(wire.tools[0].strict).toBe(false); expect(wire.instructions).toBe('保留系统指令😀')
       nativeOutput.push({ id: 'reason', type: 'reasoning', encrypted_content: 'opaque-ciphertext', signature: { opaque: '签名' }, summary: [{ type: 'summary_text', text: '思考摘要' }] },
         { id: 'call-item', type: 'function_call', call_id: 'native-call', name, arguments: '{"text":"你好😀"}', status: 'completed', opaque_extension: { keep: true } },

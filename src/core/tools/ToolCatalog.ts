@@ -174,7 +174,7 @@ export function selectRunToolNames(scopes: readonly RunToolScope[], options: { s
   return toolCatalog.filter(tool => direct.includes(tool) || tool.name === 'batch' && hasMutation).map(tool => tool.name)
 }
 
-export const toolFamilies = ['content', 'layout', 'navigation', 'interaction', 'media', 'build'] as const
+export const toolFamilies = ['content', 'layout', 'navigation', 'interaction', 'media', 'build', 'jobs'] as const
 export type ToolFamily = typeof toolFamilies[number]
 export const toolFamilyDescriptions: Record<ToolFamily, string> = {
   content: 'Flow 讲义块、原生内容与正文结构',
@@ -183,6 +183,7 @@ export const toolFamilyDescriptions: Record<ToolFamily, string> = {
   interaction: '交互规则、输入题和答案',
   media: '图片、视频、声音与图像生成',
   build: '受控构建、检查与导入',
+  jobs: '受限计算、有限委派与作业状态、等待、日志和取消',
 }
 /** Describe only capabilities actually allowed by this run's frozen grant. */
 export function describeToolFamily(family: ToolFamily, allowedNames: readonly string[]): string {
@@ -190,12 +191,13 @@ export function describeToolFamily(family: ToolFamily, allowedNames: readonly st
     return '对象属性（调用 object.update，properties.nativeTextStyle 调文字颜色、字体、样式，properties.frame 调位置）、图层与空间布局'
   return toolFamilyDescriptions[family]
 }
-const baselineTools = new Set(['read', 'inspect', 'listChildren', 'content.targets', 'skills.read', 'skills.list', 'view.observe', 'file.save', 'text.replace', 'flow.content',
+const baselineTools = new Set(['read', 'inspect', 'listChildren', 'content.targets', 'skills.read', 'skills.list', 'view.observe', 'file.save', 'html.import', 'text.replace', 'flow.content',
   'image.generate', 'image.edit', 'image.status',
-  ...workbenchServiceToolCatalog.map(tool => tool.name)])
+  'web.search', 'web.open', 'mcp.discover', 'mcp.invoke', 'mcp.resource', 'media.discover'])
 export function familyOfTool(name: string): ToolFamily | null {
   if (baselineTools.has(name) || name === 'batch') return null
-  if (name.startsWith('build.') || name === 'html.import' || name === 'document.export') return 'build'
+  if (name.startsWith('job.') || name.startsWith('compute.') || name.startsWith('delegate.')) return 'jobs'
+  if (name.startsWith('build.') || name === 'document.export') return 'build'
   if (name.startsWith('image.') || name.startsWith('media.') || name.startsWith('audio.') || name.startsWith('sound.')) return 'media'
   if (name.startsWith('interaction.') || name.startsWith('input.')) return 'interaction'
   if (name.startsWith('course.') || name.startsWith('slide.') || name.startsWith('surface.') || name.startsWith('state.')) return 'navigation'
@@ -207,7 +209,7 @@ export function visibleRunToolNames(allowed: readonly string[], loadedFamilies: 
   const canBatch = allowed.includes('batch') && mutationNamesIn(direct).length > 0
   return allowed.filter(name => direct.includes(name) || name === 'batch' && canBatch)
 }
-const page = { target, cursor: z.string().min(1).optional(), limit: z.number().int().min(1).max(100).optional() }
+const page = { target, cursor: z.string().min(1).optional(), limit: z.number().int().min(1).max(10_000).optional() }
 const readableKinds: ToolDefinition['manual']['targetKinds'] = ['course-audio', 'course-sound', 'course-asset', 'spatial-graph', 'document', 'markdown-range', 'course-owner', 'course-state', 'course-surface', 'course-location', 'course-interaction', 'course-object', 'course-background', 'flow-container', 'flow-block', 'flow-range']
 
 /** One registry drives input validation, model/MCP JSON schema and manual action metadata. */

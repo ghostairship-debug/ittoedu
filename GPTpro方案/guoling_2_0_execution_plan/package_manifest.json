@@ -8,8 +8,8 @@
     "long_term": "2.x-3.0 synthesis only"
   },
   "task_count": 44,
-  "product_acceptance_count": 240,
-  "markdown_document_count": 95,
+  "product_acceptance_count": 241,
+  "markdown_document_count": 96,
   "product_tests_run": true,
   "files": [
     {
@@ -30,7 +30,7 @@
     {
       "path": "03_TASK_INDEX.md",
       "bytes": 5759,
-      "sha256": "a3c849259501591cdd490df915f88e13336266b38614a46662ece6880f32c7c1"
+      "sha256": "b2878bb50df546c325896de93cb5c75cc6743d440e5dabe7ebd53093ac00e756"
     },
     {
       "path": "04_CAPABILITIES.md",
@@ -39,8 +39,8 @@
     },
     {
       "path": "acceptance_cases.json",
-      "bytes": 148948,
-      "sha256": "cdbb71ef0ff157eeba90697825ea371480f356cc79c570979acb3bd3b1928d1b"
+      "bytes": 146404,
+      "sha256": "bee2a79f45fc8948908863971ef2967f0a63c247d2dda2d66ffda20a6e7b6ad3"
     },
     {
       "path": "assets/workbench-layout-2026-09-23.png",
@@ -69,8 +69,8 @@
     },
     {
       "path": "delivery/ACCEPTANCE.md",
-      "bytes": 121395,
-      "sha256": "f0096787f2e69e1c64c56a2302a41e07f23dccc6e718ed0e2759e17fc5021f11"
+      "bytes": 122139,
+      "sha256": "a4dbdc358f6dea29d5b9ce7d8a1e576e48d5bd389a9fcc7b73a9e6e5d44040ea"
     },
     {
       "path": "delivery/AGENT_HANDOFF.md",
@@ -109,8 +109,8 @@
     },
     {
       "path": "delivery/TRACEABILITY.md",
-      "bytes": 6168,
-      "sha256": "5442bdb20b9d74dff26c5570787a6090df83f9b61d05aa1f17106bf844d34d51"
+      "bytes": 6484,
+      "sha256": "fabd04d12154b297d4da58c1af175015a06e28daaf39019cd91e6e38c967c3ef"
     },
     {
       "path": "delivery/UI_HANDOFF_2026_09_23.md",
@@ -385,12 +385,17 @@
     {
       "path": "evidence/STATUS.md",
       "bytes": 3270,
-      "sha256": "575ba23176ee2d29dfc494367542a8884dce3742fdea24fc9b1d1520f46c89b5"
+      "sha256": "37c9dc2d32a52cd17f4e08e611c3c0db3d8ba66ebf4235beff75795607654571"
+    },
+    {
+      "path": "evidence/USABILITY_REPAIRS_2026_09_29.md",
+      "bytes": 10607,
+      "sha256": "c957e7dab3b15a9e3ba49fdd5e1e3217090c5fe05f18b9cfa431e33077359d30"
     },
     {
       "path": "index.html",
-      "bytes": 2910099,
-      "sha256": "4727aeeb9481025eb1a2e0c7f1ce182e2d9e74093676ea3bdf44fecfae3e2c48"
+      "bytes": 2938764,
+      "sha256": "d5b397a9b167916b9a719faf88e09e325f72ed02f3ac81ff265da7ab7127d306"
     },
     {
       "path": "long_term/L01.md",
@@ -509,8 +514,8 @@
     },
     {
       "path": "mid_term/M18.md",
-      "bytes": 9324,
-      "sha256": "333e269be6d79d3e8df957987e7140f0baa7c9a4f965fce19b5d6c90be49fb32"
+      "bytes": 8681,
+      "sha256": "764248d57c224102528a186aeaae6d49a2529827787f1494aa5f5f4f510de2de"
     },
     {
       "path": "mid_term/M19.md",
@@ -584,8 +589,8 @@
     },
     {
       "path": "requirements_traceability.json",
-      "bytes": 20907,
-      "sha256": "87493ba02a2a34303d6d58b115a0da40be5fb9cc2677c29e53e41d3cafd384b2"
+      "bytes": 21341,
+      "sha256": "1d5443f182cfa7648cda1a3876d05ac5b5753dddb48e98210090d88fe16bd44a"
     },
     {
       "path": "short_term/S01.md",
@@ -659,8 +664,8 @@
     },
     {
       "path": "task_registry.json",
-      "bytes": 50058,
-      "sha256": "89f5db7b0df251c9c4a6880f88bf5ed0fd42b5d6842137101065f5577a475a9c"
+      "bytes": 48221,
+      "sha256": "8753acbbd5130e6c62866dc5c2d122a2968b950b2a0d4f03105eb83dd0467dcf"
     },
     {
       "path": "templates/engine_capabilities.json",
@@ -694,19 +699,19 @@
     }
   ],
   "plan_revision": "2.6",
-  "reader_article_count": 96,
+  "reader_article_count": 97,
   "convergence_document": "../../果铃2.0收敛方案.md",
-  "convergence_sha256": "c7268538ea81f09a8e3ea53d064ae0c082ef1c933f91b3897125ddb93d88409a",
+  "convergence_sha256": "6316d453710f2d674844b7088ba2224f4d2a42b883ad69f572a0623ef73622c5",
   "task_status_counts": {
     "planned": 0,
     "in_progress": 0,
-    "implemented": 5,
-    "verified": 39,
+    "implemented": 6,
+    "verified": 38,
     "blocked": 0
   },
   "acceptance_status_counts": {
     "not_run": 13,
-    "passed": 220,
+    "passed": 221,
     "failed": 1,
     "blocked": 6,
     "skipped": 0

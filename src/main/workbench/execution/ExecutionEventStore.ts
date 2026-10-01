@@ -1,3 +1,4 @@
+import { TimingTrace } from './TimingTrace'
 import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -76,6 +77,7 @@ export interface ExecutionEventStoreOptions { directory: string; segmentBytes?: 
 
 /** A durable fact log, not a Run/Conversation owner. It has no execution callbacks or recovery replay hooks. */
 export class ExecutionEventStore {
+  private readonly timingTrace = new TimingTrace()
   private readonly directory: string
   private readonly segmentBytes: number
   private readonly inlineBytes: number
@@ -104,15 +106,9 @@ export class ExecutionEventStore {
     return serial(process.platform === 'win32' ? filename.toLowerCase() : filename, action)
   }
   private async readTimingUnlocked(conversationId: string, taskId: string): Promise<ExecutionTimingMark[]> {
-    let raw: string
-    try { raw = await fs.readFile(this.timingFile(conversationId, taskId), 'utf8') }
-    catch (error) { if (missing(error)) return []; throw error }
-    const stored: unknown = JSON.parse(raw)
-    if (!stored || typeof stored !== 'object' || (stored as { version?: unknown }).version !== 1
-      || (stored as { conversationId?: unknown }).conversationId !== conversationId
-      || (stored as { taskId?: unknown }).taskId !== taskId || !Array.isArray((stored as { marks?: unknown }).marks)) throw new Error('计时记录无效')
-    return (stored as { marks: ExecutionTimingMark[] }).marks
+    return this.timingTrace.read(this.timingFile(conversationId, taskId), conversationId, taskId)
   }
+
   /** Append-idempotent diagnostic trace. Main persists renderer facts with their distinct clock identity. */
   recordTiming(mark: ExecutionTimingMark): Promise<void> {
     return this.timingLock(mark.conversationId, mark.taskId, async () => {
@@ -120,23 +116,7 @@ export class ExecutionEventStore {
         || !mark.clockInstanceId || !Number.isFinite(mark.monotonicMs) || mark.monotonicMs < 0
         || !Number.isFinite(mark.wallTimeMs) || mark.wallTimeMs < 0
         || mark.process === 'renderer' && (!Number.isFinite(mark.timeOriginMs) || mark.timeOriginMs! < 0)) throw new Error('计时标记无效')
-      const marks = await this.readTimingUnlocked(mark.conversationId, mark.taskId)
-      const existing = marks.find(value => value.markId === mark.markId)
-      if (existing) {
-        if (stable(existing) !== stable(mark)) throw new Error('计时标记身份冲突')
-        return
-      }
-      if (marks.length >= 2048) throw new Error('计时标记数量超限')
-      const filename = this.timingFile(mark.conversationId, mark.taskId), directory = path.dirname(filename)
-      await fs.mkdir(directory, { recursive: true })
-      const temporary = `${filename}.${randomUUID()}.tmp`
-      try {
-        const handle = await fs.open(temporary, 'wx')
-        try { await handle.writeFile(JSON.stringify({ version: 1, conversationId: mark.conversationId, taskId: mark.taskId,
-          marks: [...marks, structuredClone(mark)] })); await handle.sync() } finally { await handle.close() }
-        await fs.rename(temporary, filename)
-        await syncDirectory(directory)
-      } finally { await fs.rm(temporary, { force: true }).catch(() => undefined) }
+      await this.timingTrace.append(this.timingFile(mark.conversationId, mark.taskId), structuredClone(mark))
     })
   }
   readTiming(conversationId: string, taskId: string): Promise<ExecutionTimingMark[]> {

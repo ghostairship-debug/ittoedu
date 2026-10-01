@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type SyntheticEvent } from 'react'
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useId, useRef, useState, type CSSProperties, type ReactNode, type SyntheticEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { MoreHorizontal, Sparkles } from 'lucide-react'
 import { ColorSwatchPanel, type ColorSwatchVariant } from '../color/ColorSwatchPanel'
@@ -129,6 +129,23 @@ export function QuickBarPopoverButton({ children, popoverLabel, popupRole = 'dia
   const { open, setOpen, direction, maxHeight } = useContext(QuickBarContext)
   const expanded = open === id
   const close = () => setOpen(null)
+  const popup = useRef<HTMLDivElement>(null)
+  const [horizontal, setHorizontal] = useState(0)
+  const measurePopover = useCallback(() => {
+    const node = popup.current, toolbar = node?.closest<HTMLElement>('[data-selection-quick-bar]')
+    if (!node || !toolbar) return
+    const left = toolbar.getBoundingClientRect().left, width = node.getBoundingClientRect().width
+    const next = Math.max(8, Math.min(left, window.innerWidth - width - 8)) - left
+    setHorizontal(previous => previous === next ? previous : next)
+  }, [])
+  useLayoutEffect(measurePopover)
+  useEffect(() => {
+    if (!expanded) return
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measurePopover)
+    if (popup.current) observer?.observe(popup.current)
+    window.addEventListener('resize', measurePopover); document.addEventListener('scroll', measurePopover, true)
+    return () => { observer?.disconnect(); window.removeEventListener('resize', measurePopover); document.removeEventListener('scroll', measurePopover, true) }
+  }, [expanded, measurePopover])
   useEffect(() => { if (openToken) setOpen(id) }, [openToken])
   return <span className="selection-quick-bar__anchor">
     <button type="button" className={`selection-quick-bar__button${button.text ? ' selection-quick-bar__button--text' : ''}`}
@@ -136,7 +153,7 @@ export function QuickBarPopoverButton({ children, popoverLabel, popupRole = 'dia
       onMouseDown={keepSelection} onClick={() => setOpen(expanded ? null : id)}>
       {button.icon}{button.text && <span>{button.text}</span>}
     </button>
-    {expanded && <div className={`selection-quick-bar__popover selection-quick-bar__popover--${direction}`} role={popupRole === 'menu' ? undefined : 'dialog'} aria-label={popupRole === 'menu' ? undefined : popoverLabel ?? button.label} style={{ maxHeight, '--element-ai-card-max-height': `${maxHeight}px` } as CSSProperties}>
+    {expanded && <div ref={popup} className={`selection-quick-bar__popover selection-quick-bar__popover--${direction}`} role={popupRole === 'menu' ? undefined : 'dialog'} aria-label={popupRole === 'menu' ? undefined : popoverLabel ?? button.label} style={{ maxHeight, left: horizontal, maxWidth: 'calc(100vw - 16px)', '--element-ai-card-max-height': `${maxHeight}px` } as CSSProperties}>
       {children(close)}
     </div>}
   </span>

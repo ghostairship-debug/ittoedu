@@ -29,14 +29,15 @@ export const attachmentSnapshotSchema = z.object({
   derivedFrom: z.uuid().optional(),
   state: z.literal('added'), source: attachmentSourceSchema, mediaType: z.string().min(1).max(100), byteLength: nonnegative,
   digest, blobRef: attachmentBlobRefSchema, representations: z.array(attachmentRepresentationSchema),
-  coverage: z.object({ format: z.enum(['pdf', 'docx', 'pptx']), complete: z.boolean(), totalPages: z.number().int().positive().optional(), selectedPages: z.object({ from: z.number().int().positive(), to: z.number().int().positive() }).strict().optional() }).strict().optional(),
+  coverage: z.object({ format: z.enum(['pdf', 'docx', 'pptx']), imageMode: z.enum(['auto', 'all']).optional(), complete: z.boolean(), totalPages: z.number().int().positive().optional(), selectedPages: z.object({ from: z.number().int().positive(), to: z.number().int().positive() }).strict().optional() }).strict().optional(),
   gaps: z.array(z.object({ code: z.enum(['extraction-unavailable', 'extraction-gap', 'scanned-page', 'unsupported-image']), message: z.string().min(1), locator: z.object({ part: z.string(), page: z.number().int().positive().optional(), paragraph: z.number().int().positive().optional() }).strict().optional(), resolutionRepresentationId: z.string().optional() }).strict()),
 }).strict()
 export type AttachmentSnapshot = z.infer<typeof attachmentSnapshotSchema>
 export type AttachmentRepresentation = z.infer<typeof attachmentRepresentationSchema>
-export const inputAttachmentReferenceSchema = z.object({ attachmentId: z.uuid(), representationId: z.string().min(1).max(512), role: z.enum(['reference', 'target']).optional() }).strict()
+export const inputAttachmentReferenceSchema = z.object({ attachmentId: z.uuid(), representationId: z.string().min(1).max(512), role: z.enum(['reference', 'target']).optional(), delivery: z.enum(['source', 'inline']).optional() }).strict()
 export type InputAttachmentReference = z.infer<typeof inputAttachmentReferenceSchema>
 export interface AttachmentReader {
+  readSnapshot?(attachmentId: string): Promise<AttachmentSnapshot>
   readRepresentation(attachmentId: string, representationId: string): Promise<{ snapshot: AttachmentSnapshot; representation: AttachmentRepresentation; bytes: Uint8Array }>
 }
 export interface InputContextProvenance {
@@ -73,7 +74,7 @@ export interface PayloadManifest {
   totals: { serializedBytes: number; originalBytes: number; representationBytes: number; imageBytes: number; textCharacters: number; base64Characters: number }
   userText: { messageIndex: number; characters: number; digest: string } | null
   automaticContext: { messageIndex: number; provenance: InputContextProvenance; digest: string; serializedBytes: number }[]
-  explicitAttachments: { messageIndex: number; contentIndex: number; attachmentId: string; representationId: string; name: string; role?: 'reference' | 'target'; originalDigest: string; representationDigest: string; mediaType: string; provenance: AttachmentProvenance }[]
+  explicitAttachments: { messageIndex: number; contentIndex: number; attachmentId: string; representationId: string; name: string; role?: 'reference' | 'target'; delivery?: 'source' | 'inline'; originalDigest: string; representationDigest: string; mediaType: string; provenance: AttachmentProvenance }[]
   tools: { name: string; digest: string }[]
   delivery: { status: 'prepared' } | { status: 'sent'; requestId: string; acceptedAt: number }
   readStatus: 'unknown'
@@ -82,7 +83,7 @@ export interface CompiledPayload { messages: ModelChatMessage[]; tools: ModelToo
 export interface PayloadSerializerInput { selection: ModelSelection; messages: readonly ModelChatMessage[]; tools: readonly ModelToolDefinition[] }
 
 export interface AttachmentPageRange { from: number; to: number }
-export interface AttachmentExtractionInput { bytes: Uint8Array; filename: string; pages?: AttachmentPageRange }
+export interface AttachmentExtractionInput { bytes: Uint8Array; filename: string; pages?: AttachmentPageRange; maxPages?: number; fromPage?: number; images?: 'auto' | 'all' }
 export interface AttachmentExtractionResult {
   material: MaterialExtraction
   totalPages?: number

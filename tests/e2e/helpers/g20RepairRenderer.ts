@@ -84,9 +84,24 @@ function card(kind: 'element' | 'text') {
   record.error = 'A diagnostic that must not move the composer. '.repeat(6)
   const mount = document.createElement('div'); document.body.append(mount); react = createRoot(mount)
   flushSync(() => react!.render(kind === 'text' ? h(ElementTextCardLayer) : h(SelectionQuickBar, {
-    anchor: { left: 40, top: window.innerHeight * .55, width: 100, height: 20 },
+    anchor: { left: window.innerWidth - 70, top: window.innerHeight * .55, width: 60, height: 20 },
     bounds: { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }, label: 'Fixture',
     children: h(ElementAiButton, { documentId: 'fixture', target, label: 'Card fixture', capture: async () => { throw new Error('Layout fixture never sends') } }),
   })))
 }
-Reflect.set(window, 'repairFixture', { runtime, card })
+
+async function draftPage(html: string) {
+  clear()
+  const host = document.createElement('div'); host.style.cssText = 'width:1024px;height:768px;background:white'; document.body.append(host)
+  const session = createPublishedSurfaceRuntimeSession()
+  const runtime = { protocol: 'surface-runtime' as const, runtimeApiVersion: 3 as const, enabled: true, renderMode: 'dom' as const,
+    code: encode(createHtmlDocumentRuntimeSource({ html, resourceKeys: [] })), content: { values: {} }, assets: {} }
+  const handle = mountPublishedSurfaceRuntime(host, { instanceId: 'draft', runtime, width: 1024, height: 768,
+    canvas: { width: 1024, height: 768 }, visible: true, session, resolveAsset: () => undefined, mode: 'playback' })
+  dispose = () => { handle.destroy(); session.destroy() }
+  await handle.waitForObservationReady?.()
+  const inner = host.querySelector('iframe')!.contentDocument!
+  return { sections: inner.querySelectorAll('section').length, diagrams: inner.querySelectorAll('svg').length,
+    height: inner.documentElement.scrollHeight, viewport: inner.defaultView!.innerHeight }
+}
+Reflect.set(window, 'repairFixture', { runtime, card, draftPage })

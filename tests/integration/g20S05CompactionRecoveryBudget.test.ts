@@ -131,7 +131,7 @@ it('keeps committed and unresolved facts through compaction, lost tool ACK, netw
   expect(partial.status).toBe('partial')
   expect(partial.compacted?.atRequest).toBe(1)
   expect(partial.compacted?.facts).toContain('"status":"applied"')
-  expect(partial.tools.map(tool => tool.result?.kind)).toEqual(['document-operation', 'error'])
+  expect(partial.tools.map(tool => tool.result?.kind), JSON.stringify({ failure: partial.failure, requests: partial.requests, toolStates: partial.tools.map(t => [t.call.name, t.state]) })).toEqual(['document-operation', 'error'])
   expect(partial.tools[1]?.result).toMatchObject({ kind: 'error', code: 'tool-outcome-unknown' })
   expect(requests).toHaveLength(2)
   expect((await host.internalAPI.read(document.documentId))).toMatchObject({ revision: 1, undoDepth: 1, model: { source: 'FIRST BBB' } })
@@ -252,7 +252,7 @@ it('does not release an unresolved side effect after a no-op continuation and an
   await runs.save(crashed)
   const execute = vi.spyOn(host.tools, 'execute')
   const second = await engine.resume(first.runId, { ...input, taskId: 'no-op-continuation' })
-  expect((await engine.wait(second.runId)).status).toBe('completed')
+  expect((await engine.wait(second.runId)).status).toBe('partial')
   const third = await engine.resume(second.runId, { ...input, taskId: 'second-continuation' })
   const final = await engine.wait(third.runId)
   expect(final.status).toBe('partial')
@@ -302,7 +302,7 @@ it('lets a pending, never-invoked write proceed after the earlier read ACK was l
   const first = await h.engine.start(h.input)
   const failed = await h.engine.wait(first.runId)
   expect(failed.status).toBe('failed')
-  expect(failed.tools.map(tool => [tool.call.name, tool.state])).toEqual([['read', 'returned'], ['text.replace', 'pending']])
+  expect(failed.tools.map(tool => [tool.call.name, tool.state]), JSON.stringify({ failure: failed.failure, requests: failed.requests })).toEqual([['read', 'returned'], ['text.replace', 'pending']])
   expect(calls.map(call => call.name)).toEqual(['read'])
   const second = await h.engine.resume(first.runId, { ...h.input, taskId: 'resume' })
   const final = await h.engine.wait(second.runId)
@@ -400,3 +400,24 @@ it.each([['text.replace', 'batch'], ['batch', 'text.replace']] as const)(
     await h.events.readTiming(h.input.conversationId, 'resume')
   },
 )
+
+
+it('does not inherit unresolved delivery merely because a new independent run shares conversation memory', async () => {
+  const provider: ModelProvider = { async *stream(request) { yield complete(request, [], '独立回答') } }
+  const f = await markdownFixture('independent-completion', provider)
+  const first = await f.engine.start(f.input)
+  await f.engine.wait(first.runId)
+  const old = (await f.runs.read(first.runId))!
+  old.status = 'partial'
+  old.tools.push({ callId: 'uncertain', providerCallId: 'uncertain', requestId: old.requests[0]!.requestId,
+    call: { name: 'file.save', input: { target: 'old-handle' } }, state: 'executing' })
+  await f.runs.save(old)
+  const independent = await f.engine.start({ ...f.input, taskId: 'new-question', instruction: '一个独立问题', documents: [] },
+    { runId: first.runId, facts: 'Only conversation context' })
+  const ended = await f.engine.wait(independent.runId)
+  expect(ended.status).toBe('completed')
+  expect(ended.taskContinuedFrom).toBeUndefined()
+  expect(ended.tools).toHaveLength(0)
+  const resumed = await f.engine.resume(first.runId, { ...f.input, taskId: 'resume-original' })
+  expect((await f.engine.wait(resumed.runId)).status).toBe('partial')
+})

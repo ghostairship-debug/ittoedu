@@ -11,14 +11,20 @@ async function currentSource(page: import('@playwright/test').Page, documentId: 
 }
 
 async function nativeHistory(app: import('@playwright/test').ElectronApplication, direction: 'undo' | 'redo') {
-  await app.evaluate(({ BrowserWindow }, keyCode) => {
+  await app.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows()[0]!
-    // Background E2E windows are off-screen and transparent. Electron needs a focused
-    // BrowserWindow for sendInputEvent to reach before-input-event.
     if (!window.isVisible()) window.show()
     window.focus()
-    window.webContents.sendInputEvent({ type: 'keyDown', keyCode, modifiers: ['control'] })
-    window.webContents.sendInputEvent({ type: 'keyUp', keyCode, modifiers: ['control'] })
+  })
+  // Showing a background Electron window and sending a shortcut in the same
+  // main-process turn can precede its focused-frame update. Wait for the real
+  // preview focus, without retrying Ctrl+Z or bypassing the native input route.
+  await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.focusedFrame?.url ?? ''))
+    .toMatch(/^courseware-preview:/)
+  await app.evaluate(({ BrowserWindow }, keyCode) => {
+    const contents = BrowserWindow.getAllWindows()[0]!.webContents
+    contents.sendInputEvent({ type: 'keyDown', keyCode, modifiers: ['control'] })
+    contents.sendInputEvent({ type: 'keyUp', keyCode, modifiers: ['control'] })
   }, direction === 'undo' ? 'Z' : 'Y')
 }
 

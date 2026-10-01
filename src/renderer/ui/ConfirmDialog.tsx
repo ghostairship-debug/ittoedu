@@ -1,10 +1,11 @@
 import { AlertTriangle } from 'lucide-react'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 
 interface ConfirmDialogProps {
   open: boolean
   title: string
   message: string
+  details?: ReactNode
   confirmLabel?: string
   cancelLabel?: string
   danger?: boolean
@@ -16,6 +17,7 @@ export function ConfirmDialog({
   open,
   title,
   message,
+  details,
   confirmLabel = '确认',
   cancelLabel = '取消',
   danger = false,
@@ -59,6 +61,7 @@ export function ConfirmDialog({
             </p>
           </div>
         </div>
+        {details}
         <div className="modal__actions">
           <button
             ref={cancelRef}

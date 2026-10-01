@@ -475,3 +475,17 @@ it('M27 rename preserves an opened dirty document binding; trash uses the host r
   expect(await readFile(path.join(trash, 'renamed.md'), 'utf8')).toBe('dirty')
   expect((await host.internalAPI.read(snapshot.documentId)).binding).toMatchObject({ kind: 'untitled' })
 })
+
+it('accepts a large read-page request without invalid-arguments failure and preserves a real continuation cursor', async () => {
+  const h = await fixture(), filename = path.join(h.workspace, 'lesson', 'large.md')
+  await writeFile(filename, 'x'.repeat(70_000))
+  const snapshot = await h.host.open(filename)
+  await h.host.tools.beginRun({ runId: 'paged', actor: 'agent', documents: [{ documentId: snapshot.documentId, writable: [] }] })
+  const target = await h.host.tools.issueTarget('paged', snapshot.documentId, { kind: 'document' }, { readOnly: true })
+  const first = await h.host.tools.execute('paged', 'large-read', { name: 'read', input: { target, limit: 5000 } })
+  expect(first).toMatchObject({ kind: 'read', data: { text: 'x'.repeat(64_000), truncated: true } })
+  if (first.kind !== 'read') throw new Error('read failed')
+  expect(await h.host.tools.execute('paged', 'next', { name: 'read', input: { target, cursor: first.nextCursor, limit: 5000 } }))
+    .toMatchObject({ kind: 'read', data: { text: 'x'.repeat(6000), truncated: false } })
+  await h.host.tools.stop('paged')
+})

@@ -3385,6 +3385,20 @@
       "required_for": "2.0",
       "status": "not_run",
       "owner_required": true
+    },
+    {
+      "id": "M18-T06",
+      "task_id": "M18",
+      "title": "可靠初稿默认流程与人主导局部精修",
+      "preconditions": "当前两个 Skill、短 HTML 合同、正式 HTML Runtime、保存与回读入口；隔离 profile 和临时文件",
+      "steps": "验证默认流程取消全课审美精修与固定确认；六页独立脚本在真实 Runtime 中点击生效，自动映射导入后保存并从文件字节重开；保留用户指定完整检查能力",
+      "expected": "核心图示与展示存在、页独立可见、无重叠 Native 替代；默认初稿可保存与重开，机械测试不冒充模型质量或 Owner accepted",
+      "test_layer": "integration",
+      "required_for": "2.0",
+      "status": "passed",
+      "evidence_files": [
+        "evidence/USABILITY_REPAIRS_2026_09_29.md"
+      ]
     }
   ],
   "plan_revision": "2.6"

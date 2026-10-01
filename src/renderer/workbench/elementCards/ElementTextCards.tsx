@@ -16,7 +16,7 @@ export function textCardLabel(text: string): string {
   return flat.length > 16 ? `“${flat.slice(0, 16)}…”` : `“${flat}”`
 }
 
-const textAnchors = new Map<string, { node: HTMLElement; target: string; selectionIdentity: string }>()
+const textAnchors = new Map<string, { node: HTMLElement; target: string; selectionIdentity: string; stable?: boolean }>()
 const anchorChanged = 'guoling:text-card-anchor-changed'
 let rebindKey: string | null = null
 const rebindListeners = new Set<() => void>()
@@ -27,8 +27,8 @@ function setRebind(key: string | null) {
   rebindKey = key
   for (const listener of rebindListeners) listener()
 }
-function attachAnchor(key: string, node: HTMLElement | null, target?: ExecutionSelectionTarget, selectionIdentity?: string) {
-  if (node && target && selectionIdentity) textAnchors.set(key, { node, target: JSON.stringify(target), selectionIdentity })
+function attachAnchor(key: string, node: HTMLElement | null, target?: ExecutionSelectionTarget, selectionIdentity?: string, stable = false) {
+  if (node && target && selectionIdentity) textAnchors.set(key, { node, target: JSON.stringify(target), selectionIdentity, stable })
   else textAnchors.delete(key)
   window.dispatchEvent(new Event(anchorChanged))
 }
@@ -78,13 +78,18 @@ export function TextAiButton({ documentId, selectionIdentity, start, disabledRea
     const node = anchor.current
     return () => {
       if (!node) return
-      for (const [key, linked] of textAnchors) if (linked.node === node) attachAnchor(key, null)
+      for (const [key, linked] of textAnchors) if (linked.node === node && !linked.stable) attachAnchor(key, null)
     }
   }, [])
   return <span ref={anchor} className="selection-quick-bar__anchor">
     <QuickBarButton label="AI 修改" text="AI 修改" icon={<Sparkles size={14} />} disabled={Boolean(disabledReason)} onClick={() => {
       setError('')
       const openingIdentity = selectionIdentity
+      const requestedKey = rebindKey
+      const selection = window.getSelection()
+      const selectedNode = selection?.rangeCount ? selection.getRangeAt(0).commonAncestorContainer : null
+      const selectedElement = selectedNode instanceof HTMLElement ? selectedNode : selectedNode?.parentElement
+      const textAnchor = selectedElement?.closest<HTMLElement>('.ProseMirror p,.ProseMirror h1,.ProseMirror h2,[data-block-id],.cm-line') ?? selectedElement
       const rect = anchor.current?.getBoundingClientRect()
       void start().then(value => {
         if (latestIdentity.current !== openingIdentity) throw new Error('选区已变化，请重新选中文字再试。')
@@ -101,8 +106,9 @@ export function TextAiButton({ documentId, selectionIdentity, start, disabledRea
             && JSON.stringify(card.target) === JSON.stringify(value.target))
           key = same?.key ?? elementCards.openText({ documentId, ...value, anchor: position })
         }
-        attachAnchor(key, anchor.current, value.target, openingIdentity)
+        attachAnchor(key, textAnchor ?? anchor.current, value.target, openingIdentity, Boolean(textAnchor))
       }).catch(reason => setError(reason instanceof Error ? reason.message : String(reason)))
+        .finally(() => { if (requestedKey && rebindKey === requestedKey) setRebind(null) })
     }} />
     {error && <span role="alert" className="selection-quick-bar__notice" title={error}>{error}</span>}
   </span>
@@ -118,7 +124,7 @@ function TextCardPanel({ card }: { card: ElementCardView }) {
     function update() {
       const linked = textAnchors.get(card.key)
       // A stale quick bar cannot stand in for text that the host has moved. The user can explicitly reselect it.
-      const anchor = linked?.target === JSON.stringify(card.target) ? linked.node : null
+      const anchor = linked && (linked.stable || linked.target === JSON.stringify(card.target)) ? linked.node : null
       if (anchor !== observed) {
         if (observed) resize?.unobserve(observed)
         observed = anchor

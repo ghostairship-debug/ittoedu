@@ -1,3 +1,4 @@
+import { ensureBundledFonts } from '../../shared/fonts/ensureBundledFonts'
 import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../../shared/slideCanvas'
 import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
 import type { LayerItem } from '../../shared/courseProjectTypes'
@@ -42,6 +43,7 @@ function lineStyle(line: Element | undefined, onSimplified?: () => void): ShapeN
 
 /** Stage editable content and report each omitted object or effect before any project write. */
 export async function parsePptxImport(bytes: Uint8Array, canvas: SlideCanvasSize = DEFAULT_SLIDE_CANVAS): Promise<PptxImportDraft> {
+  await ensureBundledFonts()
   const pkg = openPptxPackage(bytes)
   const main = pkg.xml('ppt/presentation.xml')
   const size = xmlFirst(main, 'sldSz')
@@ -50,7 +52,7 @@ export async function parsePptxImport(bytes: Uint8Array, canvas: SlideCanvasSize
   const scale = Math.min(canvas.width / width, canvas.height / height)
   const origin = { x: (canvas.width - width * scale) / 2, y: (canvas.height - height * scale) / 2 }
   const slideRefs = xmlAll(main, 'sldId')
-  if (!slideRefs.length || slideRefs.length > PPTX_IMPORT_LIMITS.slides) pptxReject('页数', '仅支持 1–100 页')
+  if (!slideRefs.length) pptxReject('页数', '文稿没有可导入页')
   const mainRels = pkg.relationships('ppt/presentation.xml')
   const issues: PptxImportIssue[] = []
   const slides: PptxSlideDraft[] = [], assets: CourseImportedAsset[] = []
@@ -107,7 +109,7 @@ export async function parsePptxImport(bytes: Uint8Array, canvas: SlideCanvasSize
         const sharedKey = source.sharedKey && `${source.sharedKey}:${JSON.stringify(theme)}`
         if (sharedKey && shared.has(sharedKey)) { sharedKeys.push(sharedKey); continue }
         if (['nvGrpSpPr', 'grpSpPr', 'extLst'].includes(object.localName)) continue
-        if (++objectCount > PPTX_IMPORT_LIMITS.objects) pptxReject('对象数量', '最多导入 2000 个对象')
+        if (++objectCount > PPTX_IMPORT_LIMITS.objects) pptxReject('对象数量', '当前单次原生导入最多 20000 个对象；原材料保留，可按页范围提取')
         const itemStart = items.length
         const objectName = xmlFirst(object, 'cNvPr')?.getAttribute('name') || `对象 ${objectCount}`
         const reportStrokeSimplification = () => issues.push({ page, type: '边框样式', message: `“${objectName}”保留线宽及实线/虚线/点线类型；转角与虚线节奏按编辑器样式呈现` })

@@ -21,7 +21,15 @@ import { MODULE_SOURCE } from '../../src/main/workbench/htmlImport/frameworks/re
 const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='
 const sound = 'data:audio/mpeg;base64,SUQzAwAAAAAA'
 const vendor = MODULE_SOURCE.map(([, source]) => `var ${source};`).join('\n')
-const errors = (script: string) => validateHtmlImport(extractHtmlResources({ html: `<script type="module">${script}</script>` })).map(item => item.code)
+const diagnostics = (script: string) => validateHtmlImport(extractHtmlResources({ html: `<script type="module">${script}</script>` }))
+const errors = (script: string) => diagnostics(script).filter(item => item.level === 'error').map(item => item.code)
+const preservedMedia = (script: string, url: string) => {
+  const result = extractHtmlResources({ html: `<script type="module">${script}</script>` })
+  expect(validateHtmlImport(result).filter(item => item.level === 'error')).toEqual([])
+  expect(result.remoteReferences.some(reference => reference.url === url && ['image', 'media'].includes(reference.usage))).toBe(true)
+  expect(validateHtmlImport(result)).toContainEqual(expect.objectContaining({ level: 'warning', code: 'remote-media-preserved', reference: url }))
+  expect(result.html).toContain(url)
+}
 const app = (src = 'D[key]', extra = '', props = `{src:${src},alt:"lesson"}`) => `
 var D={a:${JSON.stringify(image)}}, k=${JSON.stringify(sound)};
 ${extra}
@@ -46,8 +54,8 @@ describe('audited framework resource closure', () => {
     expect(errors(vendor + app('D[key]', `Object.assign(D,{a:${JSON.stringify(image)}});k=${JSON.stringify(sound)};`))).toEqual([])
     const replaced = app('D[key]', `Object.assign(D,{a:${JSON.stringify(image)}});`).replace(`a:${JSON.stringify(image)}`, 'a:".data:image/png;base64,YWJj"')
     expect(errors(vendor + replaced)).toEqual([])
-    expect(errors(vendor + app('D[key]', 'Object.assign(D,{a:"https://example.invalid/image.png"});'))).toContain('remote-js-resource')
-    expect(errors(vendor + app('D[key]', 'k="https://example.invalid/sound.mp3";'))).toContain('remote-js-resource')
+    preservedMedia(vendor + app('D[key]', 'Object.assign(D,{a:"https://example.invalid/image.png"});'), 'https://example.invalid/image.png')
+    preservedMedia(vendor + app('D[key]', 'k="https://example.invalid/sound.mp3";'), 'https://example.invalid/sound.mp3')
     expect(errors(vendor + app() + 'k="https://example.invalid/late.mp3";')).toContain('unsupported-dynamic-url-sink')
   })
 
@@ -100,16 +108,25 @@ describe('audited framework resource closure', () => {
     '{src:D.a,style:{backgroundImage:"url("+chooseUrl()+")"}}',
     '{src:D.a,style:chooseStyle()}',
     '{src:D.a,style:{"--picture":chooseUrl()}}',
-    '{src:D.a,dangerouslySetInnerHTML:{__html:chooseHtml()}}',
-    '{src:D.a,dangerouslySetInnerHTML:chooseMarkup()}',
   ])('rejects unproven recursive React resource input: %s', props => {
     expect(errors(vendor + app('D.a', '', props))).toContain('unsupported-dynamic-url-sink')
   })
 
-  it('rejects static remote resources nested in CSS and HTML', () => {
-    expect(errors(vendor + app('D.a', '', '{src:D.a,style:{backgroundImage:"url(https://example.invalid/x.png)"}}'))).toContain('remote-resource')
+  it.each([
+    '{src:D.a,dangerouslySetInnerHTML:{__html:chooseHtml()}}',
+    '{src:D.a,dangerouslySetInnerHTML:chooseMarkup()}',
+  ])('preserves dynamic React markup with a nonblocking diagnostic: %s', props => {
+    const script = vendor + app('D.a', '', props)
+    const result = extractHtmlResources({ html: `<script type="module">${script}</script>` })
+    expect(validateHtmlImport(result).filter(issue => issue.level === 'error')).toEqual([])
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({ level: 'warning', code: 'dynamic-html-preserved' }))
+    expect(result.html).toContain(props.includes('chooseHtml') ? 'chooseHtml()' : 'chooseMarkup()')
+  })
+
+  it('preserves authorized passive media but rejects unknown remote resource uses', () => {
+    preservedMedia(vendor + app('D.a', '', '{src:D.a,style:{backgroundImage:"url(https://example.invalid/x.png)"}}'), 'https://example.invalid/x.png')
     expect(errors(vendor + app('D.a', '', '{src:D.a,fill:"url(https://example.invalid/paint.svg)"}'))).toContain('remote-resource')
-    expect(errors(vendor + app('D.a', '', `{src:D.a,dangerouslySetInnerHTML:{__html:${JSON.stringify('<img src="https://example.invalid/x.png">')}}}`))).toContain('remote-resource')
+    preservedMedia(vendor + app('D.a', '', `{src:D.a,dangerouslySetInnerHTML:{__html:${JSON.stringify('<img src="https://example.invalid/x.png">')}}}`), 'https://example.invalid/x.png')
   })
 
   it('preserves legal static CSS and HTML while localizing nested relative resources', () => {
@@ -135,14 +152,22 @@ describe('audited framework resource closure', () => {
     'const p="src";img[p]=chooseUrl()',
     'img.src+=chooseUrl()',
     'img.setAttribute(p,chooseUrl())',
-    'element.innerHTML=chooseHtml()',
     'element.style.backgroundImage=chooseStyle()',
     'element.style.setProperty("background-image",chooseStyle())',
-    'element.insertAdjacentHTML("beforeend",chooseHtml())',
-    'element.innerHTML+=chooseHtml()',
     'element.style.cssText+=chooseStyle()',
   ])('rejects unknown dynamic DOM sinks: %s', code => {
     expect(errors(code)).toContain('unsupported-dynamic-url-sink')
+  })
+
+  it.each([
+    'element.innerHTML=chooseHtml()',
+    'element.insertAdjacentHTML("beforeend",chooseHtml())',
+    'element.innerHTML+=chooseHtml()',
+  ])('preserves dynamic DOM markup with a nonblocking diagnostic: %s', code => {
+    const result = extractHtmlResources({ html: `<script>${code}</script>` })
+    expect(validateHtmlImport(result).filter(issue => issue.level === 'error')).toEqual([])
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({ level: 'warning', code: 'dynamic-html-preserved' }))
+    expect(result.html).toContain(code)
   })
 
   it.each([
@@ -154,10 +179,10 @@ describe('audited framework resource closure', () => {
     'function apply(el,key){return el[key]}const st=apply(document.body,"style");st.backgroundImage=location.hash',
     'const apply=(el,key)=>{const st=el[key];st.backgroundImage=location.hash};apply(document.body,"style")',
     'function apply({el},key){const st=el[key];st.backgroundImage=location.hash}apply({el:document.body},"style")',
-    'const obj={};const alias=obj;alias.x=document.body;const st=obj[location.hash];st.backgroundImage=location.hash',
-    'const obj={};function change(arg){arg.x=document.body}change(obj);const st=obj[location.hash];st.backgroundImage=location.hash',
-    'const obj={};Object.defineProperty(obj,"x",{value:document.body});const st=obj[location.hash];st.backgroundImage=location.hash',
-    'const obj={};function change(arg){arg.x=document.body}const update=change.bind(null,obj);update();const st=obj[location.hash];st.backgroundImage=location.hash',
+    'const obj={};const alias=obj;alias.x=document.body.style;const st=obj[location.hash];st.backgroundImage=location.hash',
+    'const obj={};function change(arg){arg.x=document.body.style}change(obj);const st=obj[location.hash];st.backgroundImage=location.hash',
+    'const obj={};Object.defineProperty(obj,"x",{value:document.body.style});const st=obj[location.hash];st.backgroundImage=location.hash',
+    'const obj={};function change(arg){arg.x=document.body.style}const update=change.bind(null,obj);update();const st=obj[location.hash];st.backgroundImage=location.hash',
     'const obj={};const key=location.hash;const first=obj[key];const second=first[key];second("fetch(location.hash)")',
     'const first={}.toString;const second=first[location.hash];second("fetch(location.hash)")',
     'const name="style";const st=el[name];st.backgroundImage="url("+location.hash+")"',

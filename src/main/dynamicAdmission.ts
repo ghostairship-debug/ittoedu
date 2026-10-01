@@ -1,3 +1,4 @@
+import { FairWorkQueue } from './workbench/FairWorkQueue'
 import { randomUUID } from 'node:crypto'
 import { BrowserWindow, session, type WebContents } from 'electron'
 import { dynamicAdmissionRequestSchema, dynamicAdmissionResultSchema, type DynamicAdmissionResult } from '../shared/dynamicAdmissionContract'
@@ -6,6 +7,7 @@ import { configureRestrictedSession } from './security'
 import { PreviewNetworkPolicy } from './previewNetworkPolicy'
 
 const runs = new Map<string, { owner: WebContents; cancel(): void }>()
+const admissionQueue = new FairWorkQueue(2)
 
 /** The deadline and termination live in Main, outside the candidate's JavaScript process. */
 export async function operateDynamicAdmission(raw: unknown, owner: WebContents, rendererEntryUrl: string): Promise<DynamicAdmissionResult> {
@@ -15,7 +17,21 @@ export async function operateDynamicAdmission(raw: unknown, owner: WebContents, 
     if (run?.owner === owner) run.cancel()
     return { ok: false, message: '准入已取消' }
   }
-  if (runs.has(request.id) || runs.size >= 2) throw new Error('动态准入正在运行，请稍后重试')
+  if (runs.has(request.id)) throw new Error('动态准入身份已存在')
+  const waiting = new AbortController()
+  const ownerClosed = () => waiting.abort(new Error('编辑器已关闭，排队准入取消'))
+  owner.once('destroyed', ownerClosed)
+  runs.set(request.id, { owner, cancel: () => waiting.abort(new Error('排队准入已取消')) })
+  let release: (() => void) | undefined
+  try {
+    release = await admissionQueue.acquire(waiting.signal)
+    if (owner.isDestroyed() || waiting.signal.aborted) throw new Error('动态准入已取消')
+    return await runAdmittedCandidate(request, owner, rendererEntryUrl, waiting.signal)
+  } catch (error) { return { ok: false, message: error instanceof Error ? error.message : String(error) } }
+  finally { runs.delete(request.id); owner.removeListener('destroyed', ownerClosed); release?.() }
+}
+
+async function runAdmittedCandidate(request: Extract<ReturnType<typeof dynamicAdmissionRequestSchema.parse>, { operation: 'run' }>, owner: WebContents, rendererEntryUrl: string, signal: AbortSignal): Promise<DynamicAdmissionResult> {
   const assets = new Map<string, { bytes: Uint8Array; mimeType: string }>()
   const assetResources: Record<string, { url: string; byteLength: number }> = {}
   const resourcePrefix = `/admission-assets/${request.id}/`
@@ -65,6 +81,8 @@ export async function operateDynamicAdmission(raw: unknown, owner: WebContents, 
   const workerGone = () => rejectStop(new Error('动态准入进程异常退出'))
   runs.set(request.id, { owner, cancel: () => stop('动态准入已取消') })
   owner.once('destroyed', ownerGone)
+  const aborted = () => stop('动态准入已取消')
+  signal.addEventListener('abort', aborted, { once: true })
   worker.webContents.once('render-process-gone', workerGone)
   let timer = setTimeout(() => stop('动态候选启动或单目标准入超时'), 20_000)
   const absoluteTimer = setTimeout(() => stop('动态准入超过绝对任务上限'), 20 * 60_000)
@@ -77,7 +95,7 @@ export async function operateDynamicAdmission(raw: unknown, owner: WebContents, 
       let completed = false
       const execute = worker.webContents.executeJavaScript(`window.__COURSEWARE_ADMISSION_RUN__(${encoded})`).finally(() => { completed = true })
       const captureFrames = async () => {
-        let capturedBytes = 0
+        // Frames are consumed one at a time; released frames do not count against later pages.
         let clicked = false
         let progress = 0
         while (!completed && !worker.isDestroyed()) {
@@ -104,8 +122,7 @@ export async function operateDynamicAdmission(raw: unknown, owner: WebContents, 
           if (!frame) { await new Promise(resolve => setTimeout(resolve, 16)); continue }
           if (!Number.isSafeInteger(frame.id) || frame.id < 1) throw new Error('动态观察帧身份无效')
           const bitmap = await worker.webContents.capturePage(), dataUrl = bitmap.toDataURL()
-          capturedBytes += dataUrl.length
-          if (capturedBytes > 48_000_000) throw new Error('动态观察图像超过本轮资源上限')
+          if (dataUrl.length > 48_000_000) throw new Error('单帧动态观察图像超过资源上限')
           const size = bitmap.getSize(), payload = { dataUrl, capturedAt: Date.now(), width: size.width, height: size.height }
           await worker.webContents.executeJavaScript(`window.__COURSEWARE_ADMISSION_ACCEPT_FRAME__(${frame.id},${JSON.stringify(payload)})`)
         }
@@ -121,6 +138,7 @@ export async function operateDynamicAdmission(raw: unknown, owner: WebContents, 
     clearTimeout(absoluteTimer)
     runs.delete(request.id)
     owner.removeListener('destroyed', ownerGone)
+    signal.removeEventListener('abort', aborted)
     if (!worker.isDestroyed()) worker.destroy()
     await isolatedSession.clearStorageData()
     assets.clear()

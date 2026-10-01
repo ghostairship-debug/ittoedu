@@ -80,6 +80,26 @@ async function fixture(admission?: BuildAdmissionPort, existingOrders: readonly 
 }
 
 describe('M17 S13 HTML import orchestration', () => {
+  it('imports runtime answers from real inputs without imposing a static data format', async () => {
+    const f = await fixture()
+    const html = `<input name="q1"><output></output><script>
+      const state={};const input=document.querySelector('input');
+      function answer(questionId,value){state[questionId]=value;document.querySelector('output').innerHTML='<strong>'+state[questionId]+'</strong>';}
+      input.addEventListener('input',()=>{state[input.name]=input.value;answer(input.name,state[input.name]);});
+    </script>`
+    await fs.writeFile(f.sourcePath, html)
+    const ticket = await f.service.prepare(f.request)
+    await f.service.admit(ticket)
+    expect((await f.service.commit(ticket)).status).toBe('applied')
+    const model = f.session.read().model
+    if (model.kind !== 'course-v9') throw new Error('wrong model')
+    const surface = model.project.surfaces[0]
+    if (surface?.type !== 'slide') throw new Error('wrong surface')
+    const item = surface.scenes[0]!.layerItems[0]
+    if (item?.kind !== 'runtime') throw new Error('wrong carrier')
+    expect(unpackHtmlDocumentRuntimeSource(item.runtime.source)?.html).toBe(html)
+    expect(f.session.read().undoDepth).toBe(1)
+  })
   it('writes a real S13 scratch, checks an artifact and imports one canonical History entry', async () => {
     const f = await fixture()
     const gif = Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=', 'base64')

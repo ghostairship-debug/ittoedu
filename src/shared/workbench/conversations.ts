@@ -63,7 +63,7 @@ export interface ConversationHome {
 
 /**
  * M15: the conversation behind one element's AI card. It is not listed with the space's sessions and is cleared
- * when its document closes or the application starts; nothing of it is offered for recovery.
+ * when its document closes or the application starts. Unsubmitted input is retained as an ordinary conversation draft.
  */
 export interface ConversationElementScope {
   kind: 'element'

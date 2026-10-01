@@ -57,7 +57,7 @@ export class BundledSkillService implements SkillServicePort {
     if (!validRelativePath(input.path) || !entry.readable.has(input.path))
       return { status: 'unknown-path', skill: input.skill, path: input.path }
     if (!Number.isSafeInteger(input.offset) || input.offset < 0 || !Number.isSafeInteger(input.limit)
-      || input.limit < 1 || input.limit > 8000) throw new RangeError('Invalid Skill page range')
+      || input.limit < 1 || input.limit > 64_000) throw new RangeError('Invalid Skill page range')
     const source = entry.readable.get(input.path)!
     const characters = Array.from(new Intl.Segmenter('und', { granularity: 'grapheme' }).segment(source), item => item.segment)
     const end = Math.min(characters.length, input.offset + input.limit)

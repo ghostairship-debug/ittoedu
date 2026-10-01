@@ -129,7 +129,7 @@ export class WorkspaceFilesDesktopService {
         const resolved = await this.files.resolveEntry(input.workspaceId, input.entryId)
         if (resolved.kind !== 'file' || !/\.pptx$/i.test(resolved.resolvedPath)) throw new Error('只能把 .pptx 文件导入为 H5 演示')
         const stat = await fs.stat(resolved.resolvedPath)
-        if (stat.size > WORKSPACE_PPTX_MAX_BYTES) throw new UserFacingError('PPT 导入失败', 'PPTX 不能超过 32 MiB。', '请压缩图片或拆分演示文稿后再导入。')
+        if (stat.size > WORKSPACE_PPTX_MAX_BYTES) throw new UserFacingError('PPT 导入失败', 'PPTX 不能超过 256 MiB。', '请压缩图片或拆分演示文稿后再导入。')
         const bytes = new Uint8Array(await fs.readFile(resolved.resolvedPath))
         const current = await this.files.resolveEntry(input.workspaceId, input.entryId)
         if (current.kind !== 'file' || pathKey(current.resolvedPath) !== pathKey(resolved.resolvedPath)) throw new Error('PPT 文件已变化，请重新选择')

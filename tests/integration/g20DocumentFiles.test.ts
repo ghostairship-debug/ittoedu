@@ -221,3 +221,29 @@ it('a first save requested during directory movement cannot bind a file at a pat
   expect(await host.internalAPI.read(draft.documentId)).toMatchObject({ dirty: true, binding: { kind: 'untitled' }, model: { source: 'unsaved' } })
   await expect(fs.stat(path.join(target, 'new.md'))).rejects.toMatchObject({ code: 'ENOENT' })
 })
+
+it('renames and trashes one file without reopening an unrelated indexed document journal', async () => {
+  const { workspace, recovery } = await fixture()
+  const otherPath = path.join(workspace, 'large.md'), targetPath = path.join(workspace, 'result.md')
+  await fs.writeFile(otherPath, 'other document '.repeat(100000)); await fs.writeFile(targetPath, 'result')
+  const host = new DocumentHostService(recovery, { async trashItem(filename) { await fs.rename(filename, path.join(workspace, 'trashed-result.md')) } })
+  const other = await host.open(otherPath), target = await host.open(targetPath)
+  await host.saveToPath(other.documentId)
+  const registered = await host.files.registerRoot(workspace)
+  const rows = (await host.files.listChildren({ workspaceId: registered.workspaceId, directoryEntryId: registered.rootEntryId })).entries
+  const entry = rows.find(row => row.name === 'result.md')!
+  if (entry.status !== 'accessible') throw new Error('fixture')
+  const { createHash } = await import('node:crypto')
+  const unrelated = path.join(recovery, createHash('sha256').update(other.documentId).digest('hex') + '.journal')
+  const originalOpen = fs.open.bind(fs)
+  const open = vi.spyOn(fs, 'open').mockImplementation(async (...args) => {
+    if (String(args[0]) === unrelated) throw new Error('unrelated journal payload must not participate')
+    return originalOpen(...args)
+  })
+  expect(await host.files.rename({ operationId: 'rename-result', workspaceId: registered.workspaceId, sourceEntryId: entry.entryId, name: 'renamed.md' })).toMatchObject({ status: 'success' })
+  expect(await host.internalAPI.read(target.documentId)).toMatchObject({ binding: { path: path.join(workspace, 'renamed.md') } })
+  expect(await host.files.trash({ operationId: 'trash-result', workspaceId: registered.workspaceId, entryIds: [entry.entryId] })).toMatchObject({ status: 'success' })
+  expect(await host.internalAPI.read(target.documentId)).toMatchObject({ binding: { kind: 'untitled' } })
+  expect(open.mock.calls.some(call => String(call[0]) === unrelated)).toBe(false)
+  expect(await fs.readFile(otherPath, 'utf8')).toBe('other document '.repeat(100000))
+})

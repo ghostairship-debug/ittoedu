@@ -58,8 +58,8 @@ function parseDevelopmentServerUrl(): URL | null {
   return url
 }
 
-function confirmClose(window: BrowserWindow): DocumentCloseChoice {
-  const choice = dialog.showMessageBoxSync(window, {
+async function confirmClose(window: BrowserWindow): Promise<DocumentCloseChoice> {
+  const { response: choice } = await dialog.showMessageBox(window, {
     type: 'warning',
     title: '保存未完成的修改？',
     message: '工作台中有尚未保存的文档修改。',
@@ -74,16 +74,19 @@ function confirmClose(window: BrowserWindow): DocumentCloseChoice {
   return 'cancel'
 }
 
-function requestRendererBeforeClose(window: BrowserWindow, mode: 'save' | 'preserve'): Promise<{ ready: boolean; suggestedDirectory?: SaveDirectoryContext }> {
+function requestRendererBeforeClose(window: BrowserWindow, mode: 'save' | 'preserve', signal: AbortSignal, onWaiting?: () => void): Promise<{ ready: boolean; suggestedDirectory?: SaveDirectoryContext }> {
   const requestId = randomUUID()
   const resultChannel = mode === 'save' ? IPC_CHANNELS.saveAndCloseResult : IPC_CHANNELS.preserveAndCloseResult
   const requestChannel = mode === 'save' ? IPC_CHANNELS.requestSaveAndClose : IPC_CHANNELS.requestPreserveAndClose
   return new Promise((resolve) => {
     let settled = false
+    // This is an offered recovery choice, not a timeout or automatic discard.
+    const waiting = setTimeout(() => { if (!settled) onWaiting?.() }, 3_000)
     const finish = (ready: boolean, suggestedDirectory?: SaveDirectoryContext) => {
       if (settled) return
       settled = true
-      clearTimeout(timeout)
+      clearTimeout(waiting)
+      signal.removeEventListener('abort', onClosed)
       ipcMain.removeListener(resultChannel, onResult)
       window.removeListener('closed', onClosed)
       resolve({ ready, ...(suggestedDirectory ? { suggestedDirectory } : {}) })
@@ -101,7 +104,8 @@ function requestRendererBeforeClose(window: BrowserWindow, mode: 'save' | 'prese
       finish(saved === true, parsed.data)
     }
     const onClosed = () => finish(false)
-    const timeout = setTimeout(() => finish(false), 5 * 60_000)
+    signal.addEventListener('abort', onClosed, { once: true })
+    if (signal.aborted) { finish(false); return }
     ipcMain.on(resultChannel, onResult)
     window.once('closed', onClosed)
     try {
@@ -146,8 +150,8 @@ export async function createMainWindow(
       : {}),
     width: 1440,
     height: 900,
-    minWidth: 1200,
-    minHeight: 720,
+    minWidth: 640,
+    minHeight: 480,
     title: APP_NAME,
     backgroundColor: '#0b1020',
     icon: getIconPath(),
@@ -171,6 +175,25 @@ export async function createMainWindow(
   const windowWebContentsId = window.webContents.id
   let closeApproved = false
   let closeCheckInFlight = false
+  let closeController: AbortController | undefined
+  let closeRecoveryPrompt = false
+  const offerCloseRecovery = async (reason?: string) => {
+    const attempt = closeController
+    if (closeRecoveryPrompt || closeApproved || !attempt || attempt.signal.aborted || window.isDestroyed()) return
+    closeRecoveryPrompt = true
+    try {
+      const { response } = await dialog.showMessageBox(window, {
+        type: 'warning', title: '关闭前保全尚未完成',
+        message: '可以返回处理当前输入，继续等待，或只保留已确认的恢复稿后关闭。',
+        detail: (reason ? `未完成原因：${reason}\n\n` : '') + '“只保留已确认的恢复稿”不会删除课件、聊天或 Main 已持久化的修改；但仍在输入框、尚未提交成功的文字、图片和其他视图草稿可能丢失。正常退出请先返回检查。',
+        buttons: ['返回继续编辑', '继续等待', '只保留已确认恢复稿并关闭'], defaultId: 0, cancelId: 0, noLink: true,
+      })
+      if (response === 1 || closeController !== attempt || attempt.signal.aborted || closeApproved || window.isDestroyed()) return
+      attempt.abort()
+      if (response === 2 && !window.isDestroyed()) { closeApproved = true; window.close() }
+    } catch (error) { console.error('关闭选项未能显示，窗口与恢复稿保持原状', error) }
+    finally { closeRecoveryPrompt = false }
+  }
   let previewNetworkDocumentToken: string | null = null
 
   const beginPreviewNetworkDocumentNavigation = (): void => {
@@ -239,8 +262,10 @@ export async function createMainWindow(
   window.on('close', (event) => {
     if (closeApproved) return
     event.preventDefault()
-    if (closeCheckInFlight) return
+    if (closeCheckInFlight) { void offerCloseRecovery(); return }
     closeCheckInFlight = true
+    const closing = new AbortController(); closeController = closing
+    window.setProgressBar(2, { mode: 'indeterminate' })
     let closeSaveDirectory: SaveDirectoryContext | undefined
     void prepareDocumentWindowClose({
       list: () => documentHost().registry.list(),
@@ -253,32 +278,38 @@ export async function createMainWindow(
         new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 1_500)),
       ]).then(rendererDirty => rendererDirty || appState.isDirty()),
       confirm: () => confirmClose(window),
+      cancelled: () => closing.signal.aborted,
       prepareRenderer: async mode => {
-        const prepared = await requestRendererBeforeClose(window, mode)
+        const prepared = await requestRendererBeforeClose(window, mode, closing.signal, () => {
+          if (closeController === closing && !closing.signal.aborted) void offerCloseRecovery()
+        })
         if (mode === 'preserve') closeSaveDirectory = prepared.suggestedDirectory
-        return prepared.ready
+        if (!prepared.ready && !closing.signal.aborted) await offerCloseRecovery()
+        return prepared.ready && !closing.signal.aborted
       },
       save: documentId => saveDocumentWithDialog(window, documentHost(), documentId, false, closeSaveDirectory),
       onBlocked: documentId => {
         if (!window.isDestroyed()) { window.webContents.send(IPC_CHANNELS.requestFocusDocument, documentId); window.focus() }
       },
     }).then(approved => {
-      if (!approved) return
+      if (!approved || closing.signal.aborted) return
       appState.setDirty(false)
       closeApproved = true
       if (!window.isDestroyed()) window.close()
     }).catch((error) => {
       console.error('关闭前保存或保全失败', error)
-      if (!window.isDestroyed()) void dialog.showMessageBox(window, {
-        type: 'error', title: '文档尚未保存，窗口保持打开',
-        message: error instanceof Error ? error.message : '无法保存全部文档，请检查当前稿后重试。',
-      })
+      if (!window.isDestroyed() && !closing.signal.aborted) return offerCloseRecovery(error instanceof Error ? error.message : '无法保存全部文档')
     }).finally(() => {
-      closeCheckInFlight = false
+      if (closeController === closing) {
+        closeCheckInFlight = false; closeController = undefined
+        if (!window.isDestroyed()) window.setProgressBar(-1)
+      }
     })
   })
 
+  window.on('unresponsive', () => { if (closeCheckInFlight) void offerCloseRecovery() })
   window.on('closed', () => {
+    closeController?.abort()
     try { clearHtmlPreviewFrameEntries(windowWebContentsId) }
     catch (error) { console.error('关闭窗口时释放 HTML 预览帧失败', error) }
     try { beginPreviewNetworkDocumentNavigation() }

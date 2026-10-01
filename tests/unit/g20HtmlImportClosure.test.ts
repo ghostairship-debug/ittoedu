@@ -13,17 +13,17 @@ const uri = `data:image/png;base64,${Buffer.from(png).toString('base64')}`
 describe('HTML import closure', () => {
   it('decodes JavaScript literals and safely re-encodes their runtime values', () => {
     const escaped = uri.replace('data:', '\\x64ata:')
-    const result = extractHtmlResources({ html: `<script>const x = ''; const image = {}; image.src = '${escaped}'; image.poster = \`${uri}\`; const c = \`prefix\${x}${uri}\`;</script>` })
+    const result = extractHtmlResources({ html: `<script>const x = ''; image.src = '${escaped}'; image.poster = \`${uri}\`; const c = \`prefix\${x}${uri}\`;</script>` })
     expect(result.resources).toHaveLength(1)
     expect(result.resources[0]?.origins).toHaveLength(2)
     const code = result.html.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? ''
-    expect(new Function(`${code}; return [image.src, image.poster];`)()).toEqual([`cw-resource:${result.resources[0]?.key}`, `cw-resource:${result.resources[0]?.key}`])
+    expect(new Function('image', `${code}; return [image.src, image.poster];`)({})).toEqual([`cw-resource:${result.resources[0]?.key}`, `cw-resource:${result.resources[0]?.key}`])
     expect(code).toContain(`prefix\${x}${uri}`)
     expect(validateHtmlImport(result)).toEqual([])
   })
 
   it('keeps rewritten inline JavaScript intact in a real HTML parser', () => {
-    const html = `<script>const image = {}; image.src = '${uri} \\x3c/script><p id="injected">'; const x = image.src; window.finished = true;</script>`
+    const html = `<script>image.src = '${uri} \\x3c/script><p id="injected">'; const x = image.src; window.finished = true;</script>`
     const result = extractHtmlResources({ html })
     expect(validateHtmlImport(result)).toEqual([])
     const document = new DOMParser().parseFromString(result.html, 'text/html')
@@ -31,18 +31,18 @@ describe('HTML import closure', () => {
     expect(document.querySelectorAll('script')).toHaveLength(1)
     const source = document.querySelector('script')?.textContent ?? ''
     const state: Record<string, unknown> = {}
-    expect(new Function('window', `${source}; return [x, window.finished];`)(state)).toEqual([`cw-resource:${result.resources[0]?.key} </script><p id="injected">`, true])
+    expect(new Function('window', 'image', `${source}; return [x, window.finished];`)(state, {})).toEqual([`cw-resource:${result.resources[0]?.key} </script><p id="injected">`, true])
   })
 
   it('keeps the HTML parser out of script escaped-comment mode after rewriting', () => {
-    const html = `<script>const image = {}; image.src = '${uri} \\x3c!-- \\x3cscript>'; const x = image.src; window.finished = true;</script><p id="after">after</p>`
+    const html = `<script>image.src = '${uri} \\x3c!-- \\x3cscript>'; const x = image.src; window.finished = true;</script><p id="after">after</p>`
     const result = extractHtmlResources({ html })
     expect(validateHtmlImport(result)).toEqual([])
     const document = new DOMParser().parseFromString(result.html, 'text/html')
     expect(document.querySelector('#after')?.textContent).toBe('after')
     const source = document.querySelector('script')?.textContent ?? ''
     const state: Record<string, unknown> = {}
-    expect(new Function('window', `${source}; return [x, window.finished];`)(state)).toEqual([`cw-resource:${result.resources[0]?.key} <!-- <script>`, true])
+    expect(new Function('window', 'image', `${source}; return [x, window.finished];`)(state, {})).toEqual([`cw-resource:${result.resources[0]?.key} <!-- <script>`, true])
     expect(source).toContain('\\u003c!-- \\u003cscript>')
   })
 
@@ -272,11 +272,78 @@ it.each([
 it.each([
   "const pages=[...document.querySelectorAll('section')];let i=0;pages[i].src=chooseUrl()",
   "const pages=[...document.querySelectorAll('section')];let i=0;pages[i][method]()",
-  "const pages=[...document.querySelectorAll('section')];let i=0;pages.push(window);pages[i].classList.add('x')",
+  "const pages=[...document.querySelectorAll('section')];let i=0;pages.push(window);pages[i].src=chooseUrl()",
   "let pages=[...document.querySelectorAll('section')];let i=0;pages=unknown();pages[i].classList.add('x')",
-  "const pages=[...document.querySelectorAll('section')];let i=0;unknown(pages);pages[i].classList.add('x')",
-  "function f(document){const pages=[...document.querySelectorAll('section')];let i=0;pages[i].classList.add('x')}",
+  "const pages=[...document.querySelectorAll('section')];let i=0;unknown(pages);pages[i].src=chooseUrl()",
+  "function f(document){const pages=[...document.querySelectorAll('section')];let i=0;pages[i].style.backgroundImage=chooseUrl()}",
 ])('does not exempt unknown resources or escaped collection capabilities: %s', code => {
   const result = extractHtmlResources({ html: `<script>${code}</script>` })
   expect(validateHtmlImport(result).some(issue => issue.level === 'error')).toBe(true)
+})
+
+
+describe('ordinary mutable data and non-resource styles', () => {
+  it('runs dynamic local callback dispatch and HTML input feedback while collecting static resources', () => {
+    const code = `const input=document.querySelector('input');const output=document.querySelector('output');
+      const actions={answer:()=>{output.innerHTML='<strong>'+input.value+'</strong>';}};
+      document.querySelector('button').addEventListener('click',event=>actions[event.currentTarget.name]());`
+    const result = extractHtmlResources({ html: `<img src="${uri}"><input><button name="answer">Answer</button><output></output><script>${code}</script>` })
+    expect(validateHtmlImport(result).filter(issue => issue.level === 'error')).toEqual([])
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 'dynamic-html-preserved', level: 'warning' }))
+    expect(result.resources).toHaveLength(1)
+    expect(result.html).toContain(code)
+    const doc = new DOMParser().parseFromString(result.html, 'text/html')
+    new Function('document', code)(doc)
+    for (const value of ['First', 'Revised']) {
+      doc.querySelector('input')!.value = value
+      doc.querySelector('button')!.click()
+      expect(doc.querySelector('output > strong')!.textContent).toBe(value)
+    }
+  })
+  it('preserves repeated input-driven answers through function parameters and data aliases', () => {
+    const code = `const state={};const history=[];const alias=state;
+      const input=document.querySelector('input');const output=document.querySelector('output');
+      function answer(questionId,value){alias[questionId]=value;history.push(value);output.textContent=state[questionId];}
+      input.addEventListener('input',()=>{state[input.name]=input.value;answer(input.name,state[input.name]);});`
+    const result = extractHtmlResources({ html: `<input name="q1"><output></output><script>${code}</script>` })
+    expect(validateHtmlImport(result)).toEqual([])
+    expect(result.html).toContain(code)
+    const doc = new DOMParser().parseFromString(result.html, 'text/html')
+    const state = new Function('document', `${code};return {state,history};`)(doc)
+    const input = doc.querySelector('input')!
+    for (const value of ['预测答案', '观察后修订']) {
+      input.value = value
+      input.dispatchEvent(new Event('input'))
+      expect(doc.querySelector('output')!.textContent).toBe(value)
+      expect(state.state.q1).toBe(value)
+    }
+    expect(state.history).toEqual(['预测答案', '观察后修订'])
+  })
+  it.each([
+    'const answers=[]; for(let i=0;i<3;i++) answers[i]=false;',
+    'const state={}; const questionId="q"; const value=true; state[questionId]=value;',
+    'const state={};function answer(questionId,value){state[questionId]=value;}',
+    'const state={};const input=document.querySelector("input");state.data=input.value;state.src=input.value;state.innerHTML=input.value;',
+    'const state={};function read(value){return value;}state[read("answer")]=read("hello");read(state);',
+    'const answers=[]; const alias=answers; for(let i=0;i<3;i++) alias[i]=false;',
+    'const e=document.querySelector("p"); e.style.opacity=String(Math.random());',
+    'const e=document.querySelector("p"); e.style.transform=`translateX(${Math.random()*10}px)`;',
+    'const e=document.querySelector("p"); e.style.setProperty("opacity",String(Math.random()));',
+  ])('does not mistake ordinary logic for a resource: %s', code => {
+    const result = extractHtmlResources({ html: `<p>题目</p><script>${code}</script>` })
+    expect(validateHtmlImport(result).filter(issue => issue.level === 'error')).toEqual([])
+    expect(result.resources).toEqual([])
+    expect(result.html).toContain(code)
+  })
+  it.each([
+    'let x={};x=document.querySelector("img");const key=location.hash.slice(1);x[key]=location.hash;',
+    'const answers=[fetch];const k=location.hash.slice(1);answers[k]();',
+    'const e=document.querySelector("p");e.style.backgroundImage=location.hash;',
+    'const e=document.querySelector("p");const s=e.style;s.setProperty("background-image",location.hash);',
+    'const e=document.querySelector("img");const key=location.hash.slice(1);e[key]=location.hash;',
+    'const state={};state.image=document.querySelector("img");function answer(key,value){state[key].src=value;}',
+    'const state={};state.style=document.body.style;const key=location.hash;state[key].backgroundImage=location.hash;',
+  ])('keeps actual dynamic capability and resource failures visible: %s', code => {
+    expect(validateHtmlImport(extractHtmlResources({ html: `<script>${code}</script>` })).some(issue => issue.level === 'error')).toBe(true)
+  })
 })

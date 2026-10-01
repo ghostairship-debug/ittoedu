@@ -7,13 +7,6 @@ set "ELECTRON_RUN_AS_NODE="
 
 if not exist "package.json" goto invalid_root
 
-echo [ittoedu Courseware Editor] Syncing courseware Skills for the current user...
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%CD%\scripts\install-courseware-skills.ps1"
-if errorlevel 1 (
-  echo [ittoedu Courseware Editor] WARNING: Skill installation failed; editor startup will continue.
-  echo Run "npm run install:courseware-skills" after resolving the message above.
-)
-
 where npm.cmd >nul 2>nul
 if errorlevel 1 goto missing_node
 
@@ -23,11 +16,11 @@ if not exist "node_modules\electron\dist\electron.exe" (
   if errorlevel 1 goto failed
 )
 
-echo [ittoedu Courseware Editor] Building and launching...
-call npm.cmd run build:desktop
+echo [Guoling] Checking current source and build...
+node scripts\prepare-source-launch.mjs
 if errorlevel 1 goto failed
 
-start "" /D "%CD%" "%CD%\node_modules\electron\dist\electron.exe" "%CD%"
+start "" /D "%CD%" "%CD%\node_modules\electron\dist\electron.exe" "%CD%" %*
 exit /b 0
 
 :missing_node

@@ -2,7 +2,7 @@ import { useSyncExternalStore } from 'react'
 import type { ConversationRecord } from '../../../shared/workbench/conversations'
 import type { DocumentHostAPI } from '../../../shared/workbench/desktop'
 import type { ExecutionRunRecord } from '../../../shared/workbench/execution'
-import { disclosedExecutionSettings, type ElementChangeView, type ElementRevertResult, type ExecutionDesktopAPI, type ExecutionSelectionTarget, type ExecutionSendResult, type ExecutionSubmissionRecord } from '../../../shared/workbench/executionDesktop'
+import { disclosedExecutionSettings, type ElementChangeView, type ElementRevertResult, type ExecutionDesktopAPI, type ExecutionSelectionTarget, type ExecutionSendInput, type ExecutionSendResult, type ExecutionSubmissionRecord } from '../../../shared/workbench/executionDesktop'
 import { emptyExecutionProjection, foldExecutionEvents, type ExecutionEvent, type ExecutionProjection } from '../../../shared/workbench/executionEvents'
 import { DEFAULT_PERMISSION_MODE, type ApprovalDecision, type ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
 import type { ExecutionSettingsAPI } from '../../../shared/workbench/executionSettingsDesktop'
@@ -28,6 +28,7 @@ export interface ElementCardEntry {
   failure?: string
   /** What the request changed on the object, once it ended (M15). */
   change?: ElementChangeView
+  queuePausedReason?: ExecutionSubmissionRecord['queuePausedReason']
 }
 /** The request the card's undo (or redo) would take back (or repeat), and what it changed. */
 export interface ElementCardStep { submissionId: string; fields: readonly string[] }
@@ -48,6 +49,9 @@ export interface ElementCardView {
   question: PendingQuestion | null
   approval: PendingApproval | null
   error: string
+  draft: string
+  closing: boolean
+  unconfirmed: boolean
   undo: ElementCardStep | null
   redo: ElementCardStep | null
   /** Why the latest request cannot be undone in the card (components and Runtime); the editor's undo still can. */
@@ -61,6 +65,7 @@ export interface ElementCardPorts {
   snapshot?(documentId: string): Promise<DocumentSnapshot>
 }
 
+interface PendingSend { cancelled: boolean; invoked: boolean; request?: ExecutionSendInput; done: Promise<void>; settle(): void }
 interface CardRecord {
   key: string
   kind: 'element' | 'text'
@@ -73,8 +78,15 @@ interface CardRecord {
   workspaceId: string | null
   conversation: ConversationRecord | null
   entries: ElementCardEntry[]
+  /** Requests before an explicit re-selection must never restore that older selection. */
+  textStart: number
   projection: ExecutionProjection
   error: string
+  draft: string
+  closing: boolean
+  unconfirmed?: ExecutionSendInput
+  sends: Map<string, PendingSend>
+  sending: Promise<void>
   catchUp: Promise<void>
 }
 
@@ -124,6 +136,7 @@ export class ElementCardController {
   private documents: { api: Pick<DocumentHostAPI, 'subscribe'>; stop(): void } | null = null
   private views = new Map<string, ElementCardView>()
   private readonly openRequests = new Set<string>()
+  private preserving?: Promise<void>
 
   constructor(private readonly ports: ElementCardPorts) {}
 
@@ -144,7 +157,7 @@ export class ElementCardController {
       key, kind: card.kind, anchor: card.anchor, textLost: card.kind === 'text' && card.content === null ? TEXT_LOST : null, documentId: card.documentId, label: card.label, target: card.target,
       entries: card.entries.map(entry => withReply(entry, card.projection)),
       busy: card.entries.some(entry => entry.state === 'sending' || entry.state === 'queued' || entry.state === 'running'),
-      question: pendingQuestion(card.projection), approval: pendingApproval(card.projection), error: card.error, ...steps(card.entries),
+      question: pendingQuestion(card.projection), approval: pendingApproval(card.projection), error: card.error, draft: card.draft, closing: card.closing, unconfirmed: Boolean(card.unconfirmed), ...steps(card.entries),
     }
     this.views.set(key, view)
     return view
@@ -166,7 +179,7 @@ export class ElementCardController {
       return key
     }
     this.cards.set(key, { key, kind: 'element', anchor: null, documentId: input.documentId, label: input.label, target: structuredClone(input.target), workspaceId: null,
-      conversation: null, entries: [], projection: emptyExecutionProjection(''), error: '', catchUp: Promise.resolve() })
+      conversation: null, entries: [], textStart: 0, projection: emptyExecutionProjection(''), error: '', draft: '', closing: false, sends: new Map(), sending: Promise.resolve(), catchUp: Promise.resolve() })
     // A card ends with its document (Main deletes its conversation at the same time).
     const documents = this.ports.documents?.()
     if (documents && this.documents?.api !== documents) {
@@ -185,7 +198,7 @@ export class ElementCardController {
     for (const card of [...this.cards.values()]) if (card.kind === 'text') void this.closeText(card.key).catch(() => undefined)
     const key = `${input.documentId}:text:${crypto.randomUUID()}`
     this.cards.set(key, { key, kind: 'text', anchor: input.anchor, content: input.content ?? undefined, documentId: input.documentId, label: input.label,
-      target: structuredClone(input.target), workspaceId: null, conversation: null, entries: [], projection: emptyExecutionProjection(''), error: '', catchUp: Promise.resolve() })
+      target: structuredClone(input.target), workspaceId: null, conversation: null, entries: [], textStart: 0, projection: emptyExecutionProjection(''), error: '', draft: '', closing: false, sends: new Map(), sending: Promise.resolve(), catchUp: Promise.resolve() })
     this.notify()
     return key
   }
@@ -202,75 +215,200 @@ export class ElementCardController {
     card.content = input.content
     card.label = input.label
     card.anchor = { ...input.anchor }
+    card.textStart = card.entries.length
     card.error = ''
     this.notify()
   }
-  /** Closes a text card: its running request stops, its conversation goes; what it changed stays in the document. */
+  setDraft(key: string, draft: string): void {
+    const card = this.cards.get(key)
+    if (card) { card.draft = draft; this.notify() }
+  }
+  /** Window exit preserves unsent input in the existing conversation store, without sending or clearing it. */
+  flushDrafts(): Promise<void> {
+    if (this.preserving) return this.preserving
+    const work = Promise.allSettled([...this.cards.values()].map(async card => {
+      await card.sending
+      if (this.cards.get(card.key) !== card || card.closing || !card.draft && !card.conversation?.inputDraft) return
+      const api = this.ports.execution(), workspaceId = card.workspaceId ?? this.workspace?.workspaceId
+      if (!api || !workspaceId) throw new Error('AI 卡草稿尚未保存：执行服务或工作空间尚未就绪。')
+      if (!card.conversation) {
+        card.conversation = await api.createConversation(workspaceId, card.label, undefined,
+          { kind: 'element', documentId: card.documentId, label: card.label })
+        card.workspaceId = workspaceId
+        card.projection = emptyExecutionProjection(card.conversation.conversationId); this.listen(api)
+      }
+      const snapshot = card.draft ? await this.ports.snapshot?.(card.documentId) : undefined
+      const documents = snapshot ? [selectionReference({ documentId: card.documentId, epoch: snapshot.epoch,
+        revision: snapshot.revision, targets: [structuredClone(card.target)], label: card.label }, this.permission !== 'read-only')] : []
+      for (let attempt = 0; ; attempt++) {
+        const current = await api.conversation(workspaceId, card.conversation.conversationId) ?? card.conversation
+        const sameContext = current.frozenContextRefs.length === documents.length && current.frozenContextRefs.every((ref, index) => {
+          const document = documents[index]!
+          return ref.documentId === document.documentId && ref.epoch === document.epoch && ref.revision === document.revision
+            && JSON.stringify(ref.selection) === JSON.stringify(document.selection) && JSON.stringify(ref.writeScope) === JSON.stringify(document.writable)
+        })
+        if (current.inputDraft === card.draft && sameContext) {
+          card.conversation = current; return
+        }
+        try {
+          card.conversation = await api.draft({ workspaceId, conversationId: current.conversationId,
+            expectedRevision: current.revision, text: card.draft, documents, attachments: [] })
+          if (card.conversation.inputDraft === card.draft) return
+        } catch (error) {
+          if (!isExecutionInputError(error, 'conversation-draft-changed') || attempt >= 3) throw error
+        }
+      }
+    })).then(results => { for (const result of results) if (result.status === 'rejected') throw result.reason })
+    this.preserving = work.finally(() => { this.preserving = undefined })
+    return this.preserving
+  }
+  private cancelPreparing(card: CardRecord): void {
+    for (const [id, pending] of card.sends) {
+      pending.cancelled = true
+      if (!pending.invoked) this.patchEntry(card, id, { state: 'cancelled' }, false)
+    }
+    this.notify()
+  }
+  private async deleteCardConversation(card: CardRecord): Promise<void> {
+    const api = this.ports.execution(), conversation = card.conversation
+    if (!api || !conversation) return
+    const latest = await api.conversation(conversation.workspaceId, conversation.conversationId)
+    if (latest) await api.deleteConversation({ workspaceId: latest.workspaceId, conversationId: latest.conversationId, expectedRevision: latest.revision })
+  }
+  /** Preparation can be cancelled immediately; an invoked request keeps its control until settled. */
   async closeText(key: string): Promise<void> {
     const card = this.cards.get(key)
     if (card?.kind !== 'text') return
-    this.cards.delete(key)
-    this.notify()
-    const api = this.ports.execution(), conversation = card.conversation
-    const latest = api && conversation ? await api.conversation(conversation.workspaceId, conversation.conversationId) : null
-    if (api && latest) await api.deleteConversation({ workspaceId: latest.workspaceId, conversationId: latest.conversationId, expectedRevision: latest.revision })
+    card.closing = true; this.cancelPreparing(card)
+    const invoked = [...card.sends.values()].some(value => value.invoked)
+    if (!invoked && !card.conversation && !this.preserving) { this.cards.delete(key); this.notify(); return }
+    try {
+      await this.preserving
+      await Promise.all([...card.sends.values()].map(value => value.done))
+      if (card.unconfirmed) throw new Error('发送结果尚未确认，请先核对原提交再关闭。')
+      await this.deleteCardConversation(card)
+      if (this.cards.get(key) === card) this.cards.delete(key)
+      this.notify()
+    } catch (error) {
+      card.closing = false
+      card.error = error instanceof Error ? error.message : '关闭尚未完成，请重试；任务入口保留。'
+      this.notify(); throw error
+    }
   }
 
-  /**
-   * Sends one request about the card's element. Requests to a busy element wait in its queue. `capture` is the
-   * element as selected now; only it is writable. A text card sends to where its text is now and waits for the
-   * previous request to end.
-   */
-  async send(key: string, instruction: string, selected?: SelectionCapture): Promise<void> {
-    const card = this.cards.get(key)
-    const text = instruction.trim()
+  /** All asynchronous preparation stays inside the card's cancellation lifetime. */
+  async send(key: string, instruction: string, selected?: SelectionCapture | (() => Promise<SelectionCapture>)): Promise<void> {
+    const card = this.cards.get(key), text = instruction.trim(), api = this.ports.execution(), workspace = this.workspace
     if (!card || !text) return
-    const api = this.ports.execution()
-    if (!api) throw new Error('AI 执行服务尚未就绪。')
-    const workspace = this.workspace
-    if (!workspace) throw new Error('工作空间尚未就绪，请稍后再发送。')
-    const capture = card.kind === 'text' ? await this.textCapture(card) : selected
-    if (!capture || capture.documentId !== card.documentId || capture.targets.length !== 1
-      || card.kind === 'element' && elementCardKey(capture.documentId, capture.targets[0]!) !== key)
-      throw new Error('选中的对象已改变，请重新选择后发送。')
-    const settings = await this.ports.settings()?.read()
-    const conversation = settings?.profile.roles.conversation
-    const connection = settings?.connections.find(value => value.connection.id === conversation?.connectionId)
-    if (!settings || !conversation || !connection?.hasCredential || connection.revoked) throw new Error('尚未配置可用的对话模型。请先在模型设置中选择连接、模型和账号。')
-    const submissionId = crypto.randomUUID()
-    const entry: ElementCardEntry = { submissionId, text, state: 'sending' }
-    card.entries = [...card.entries, entry]; card.error = ''; card.target = structuredClone(capture.targets[0]!)
-    this.notify()
+    if (card.closing) throw new Error('这张卡正在关闭。')
+    if (card.unconfirmed) throw new Error('请先核对上次发送结果；原请求和输入仍保留。')
+    if (!api || !workspace) throw new Error('AI 执行服务或工作空间尚未就绪。')
+    if (card.kind === 'text' && this.view(key)?.busy) throw new Error('请等 AI 改完这一次再继续追问。')
+    const submissionId = crypto.randomUUID(), previous = card.sending, permission = this.permission
+    let settle!: () => void
+    const done = new Promise<void>(resolve => { settle = resolve })
+    const pending: PendingSend = { cancelled: false, invoked: false, done, settle }
+    card.sends.set(submissionId, pending); card.sending = done
+    card.entries = [...card.entries, { submissionId, text, state: 'sending' }]; card.error = ''; this.notify()
+    const alive = () => {
+      if (this.cards.get(key) !== card || card.closing || pending.cancelled) throw new Error('发送已取消；未发送的输入保留。')
+    }
     try {
+      await previous; alive()
+      const capture = card.kind === 'text' ? await this.textCapture(card) : typeof selected === 'function' ? await selected() : selected
+      alive()
+      if (!capture || capture.documentId !== card.documentId || capture.targets.length !== 1
+        || card.kind === 'element' && elementCardKey(capture.documentId, capture.targets[0]!) !== key)
+        throw new Error('选中的对象已改变，请重新选择后发送。')
+      const settings = await this.ports.settings()?.read(); alive()
+      const role = settings?.profile.roles.conversation
+      const connection = settings?.connections.find(value => value.connection.id === role?.connectionId)
+      if (!settings || !role || !connection?.hasCredential || connection.revoked) throw new Error('尚未配置可用的对话模型。请先在模型设置中选择连接、模型和账号。')
+      card.target = structuredClone(capture.targets[0]!)
       let current = card.conversation
       if (!current || card.workspaceId !== workspace.workspaceId) {
         current = await api.createConversation(workspace.workspaceId, card.label, undefined, { kind: 'element', documentId: card.documentId, label: card.label })
-        card.workspaceId = workspace.workspaceId; card.conversation = current; card.projection = emptyExecutionProjection(current.conversationId)
-        this.listen(api)
+        card.workspaceId = workspace.workspaceId; card.conversation = current
+        card.projection = emptyExecutionProjection(current.conversationId); this.listen(api); alive()
       }
-      const writable = this.permission !== 'read-only'
       const request = { workspaceId: workspace.workspaceId, conversationId: current.conversationId, submissionId, text,
-        documents: [selectionReference(capture, writable)], attachments: [], mode: 'queue' as const,
-        permission: this.permission, disclosedSettings: disclosedExecutionSettings(settings) }
-      // The conversation moves on while the element's requests run, so each send goes against its latest revision. A
-      // card keeps no draft there: a newer revision is only its own requests' progress, and sending again is safe.
+        documents: [selectionReference(capture, permission !== 'read-only')], attachments: [], mode: 'queue' as const,
+        permission, disclosedSettings: disclosedExecutionSettings(settings) }
       let result: ExecutionSendResult
-      for (let attempt = 0; ; attempt += 1) {
-        current = await api.conversation(current.workspaceId, current.conversationId) ?? current
-        try { result = await api.send({ ...request, expectedRevision: current.revision }); break }
-        catch (error) { if (attempt >= 3 || !isExecutionInputError(error, 'conversation-draft-changed')) throw error }
+      for (let attempt = 0; ; attempt++) {
+        current = await api.conversation(current.workspaceId, current.conversationId) ?? current; alive()
+        try { pending.request = { ...request, expectedRevision: current.revision }; pending.invoked = true; result = await api.send(pending.request); break }
+        catch (error) {
+          // Known draft-CAS rejection happened before a task was accepted.
+          if (!isExecutionInputError(error, 'conversation-draft-changed') || attempt >= 3) throw error
+          pending.invoked = false; alive()
+        }
       }
       card.conversation = result.conversation
       this.applySubmission(card, result.submission, result.run)
+      if (pending.cancelled && !card.closing) {
+        if (result.submission.runId) await api.stop(result.submission.runId)
+        else if (result.submission.state === 'queued') this.applySubmission(card, await api.deleteSubmission(request))
+      }
+      if (card.draft.trim() === text && result.submission.state !== 'failed') card.draft = ''
+      this.notify()
     } catch (error) {
-      this.patchEntry(card, submissionId, { state: 'failed', failure: error instanceof Error ? error.message : '请求没有发送。' })
+      // A lost send ACK is queried with the original submission identity, never resent with a new one.
+      const current = card.conversation
+      const known = pending.invoked && current && api.submission
+        ? await api.submission({ workspaceId: current.workspaceId, conversationId: current.conversationId, submissionId }).catch(() => null) : null
+      if (known) {
+        this.applySubmission(card, known, known.runId ? await api.run(known.runId).catch(() => null) : undefined)
+        if (pending.cancelled && !card.closing) {
+          if (known.runId) await api.stop(known.runId)
+          else if (known.state === 'queued') this.applySubmission(card, await api.deleteSubmission({ workspaceId: known.workspaceId, conversationId: known.conversationId, submissionId }))
+        }
+        if (known.state !== 'failed' && card.draft.trim() === text) card.draft = ''
+        this.notify(); return
+      }
+      if (pending.invoked && pending.request) card.unconfirmed = pending.request
+      this.patchEntry(card, submissionId, { state: pending.cancelled && !pending.invoked ? 'cancelled' : 'failed',
+        failure: pending.invoked ? '发送结果尚未确认；请核对原提交，勿重复发送。' : error instanceof Error ? error.message : '请求没有发送。' })
       throw error
+    } finally {
+      card.sends.delete(submissionId); settle()
+      // The document/card can close during createConversation. It may leave an empty conversation, never an orphan run.
+      if (this.cards.get(key) !== card && card.conversation) void this.deleteCardConversation(card).catch(() => undefined)
+    }
+  }
+
+  /** User-requested confirmation reuses the original idempotent submission, including a lost ACK. */
+  async confirmSend(key: string): Promise<void> {
+    const card = this.cards.get(key), api = this.ports.execution(), request = card?.unconfirmed
+    if (!card || !api || !request) return
+    if (card.closing) throw new Error('卡片正在关闭，请等待。')
+    card.error = ''; this.notify()
+    try {
+      const known = await api.submission(request)
+      if (known) this.applySubmission(card, known, known.runId ? await api.run(known.runId) : undefined)
+      else {
+        // Main either finds the existing acceptance or accepts the original payload once.
+        const result = await api.send(request)
+        card.conversation = result.conversation; this.applySubmission(card, result.submission, result.run)
+      }
+      if (card.unconfirmed === request) card.unconfirmed = undefined
+      if (card.draft.trim() === request.text) card.draft = ''
+      this.notify()
+    } catch (error) {
+      if (isExecutionInputError(error, 'conversation-draft-changed')) card.unconfirmed = undefined
+      card.error = error instanceof Error ? error.message : '原发送仍未确认，请稍后核对。'; this.notify(); throw error
     }
   }
 
   /** A text card's range as it is now; refused while a request runs or when the text is no longer where the card left it. */
   private async textCapture(card: CardRecord): Promise<SelectionCapture> {
-    if (this.view(card.key)?.busy) throw new Error('请等 AI 改完这一次再继续追问。')
+    const latest = this.latestTextEntry(card), api = this.ports.execution()
+    if (latest && api?.elementChange) {
+      const start = card.textStart, change = await api.elementChange(latest.submissionId)
+      if (start === card.textStart && this.latestTextEntry(card)?.submissionId === latest.submissionId) {
+        this.followText(card, change); this.patchEntry(card, latest.submissionId, { change })
+      }
+    }
     if (card.content === null) throw new Error(TEXT_LOST)
     const snapshot = await this.ports.snapshot?.(card.documentId)
     if (!snapshot) throw new Error('文档尚未就绪，请稍后再发送。')
@@ -282,6 +420,9 @@ export class ElementCardController {
     if (card.kind !== 'text' || change.state === 'pending') return
     if (change.target && change.content !== undefined) { card.target = structuredClone(change.target); card.content = change.content }
     else card.content = null
+  }
+  private latestTextEntry(card: CardRecord): ElementCardEntry | undefined {
+    return [...card.entries.slice(card.textStart)].reverse().find(entry => entry.runId && TERMINAL.has(entry.state))
   }
 
   async answer(key: string, runId: string, callId: string, answer: UserAnswer): Promise<void> {
@@ -304,14 +445,34 @@ export class ElementCardController {
     const api = this.ports.execution(), card = this.cards.get(key)
     if (!api?.revertElement || !card) throw new Error('当前版本不能在卡片中撤销。')
     const result = await api.revertElement({ submissionId, direction, ...(force ? { force } : {}) })
-    if (result.status === 'applied') { this.followText(card, result.change); this.patchEntry(card, submissionId, { change: result.change }) }
+    if (result.status === 'applied') {
+      if (card.entries.findIndex(entry => entry.submissionId === submissionId) >= card.textStart) this.followText(card, result.change)
+      this.patchEntry(card, submissionId, { change: result.change })
+    }
     return result
   }
   /** Stops the element's running request; queued ones stay. */
-  async stop(key: string): Promise<void> {
+  async stop(key: string, pauseFollowing = false): Promise<void> {
     const api = this.ports.execution(), card = this.cards.get(key)
-    const running = card?.entries.find(entry => entry.state === 'running' && entry.runId)
-    if (api && running?.runId) await api.stop(running.runId)
+    if (!api || !card) return
+    if (pauseFollowing && card.conversation) {
+      await api.pauseQueue({ workspaceId: card.conversation.workspaceId, conversationId: card.conversation.conversationId, reason: 'user' })
+      this.cancelPreparing(card)
+    }
+    const running = card.entries.find(entry => entry.state === 'running' && entry.runId)
+    if (running?.runId) { await api.stop(running.runId); this.refresh(key); return }
+    if (pauseFollowing) { this.refresh(key); return }
+    if (card.sends.size) { this.cancelPreparing(card); return }
+    const queued = card.entries.find(entry => entry.state === 'queued')
+    if (queued && card.conversation) this.applySubmission(card, await api.deleteSubmission({ workspaceId: card.conversation.workspaceId,
+      conversationId: card.conversation.conversationId, submissionId: queued.submissionId }))
+  }
+
+  async resumeQueue(key: string): Promise<void> {
+    const api = this.ports.execution(), card = this.cards.get(key)
+    if (!api || !card?.conversation) return
+    await api.resumeQueue({ workspaceId: card.conversation.workspaceId, conversationId: card.conversation.conversationId })
+    this.refresh(key)
   }
 
   /** The top bar asks for a card to be shown when its element's quick bar appears (a jump to it). */
@@ -322,7 +483,7 @@ export class ElementCardController {
   /** The document closed: Main clears its cards' conversations; nothing of them stays here either. */
   forgetDocument(documentId: string) {
     let changed = false
-    for (const [key, card] of this.cards) if (card.documentId === documentId) { this.cards.delete(key); changed = true }
+    for (const [key, card] of this.cards) if (card.documentId === documentId) { this.cancelPreparing(card); this.cards.delete(key); changed = true }
     if (changed) this.notify()
   }
 
@@ -382,7 +543,7 @@ export class ElementCardController {
       if (!TERMINAL.has(entry.state) || entry.change && entry.change.state !== 'pending') continue
       const change = await api.elementChange(entry.submissionId)
       pending ||= change.state === 'pending'
-      this.followText(card, change)
+      if (this.latestTextEntry(card)?.submissionId === entry.submissionId) this.followText(card, change)
       this.patchEntry(card, entry.submissionId, { change }, false)
     }
     this.notify()
@@ -394,7 +555,7 @@ export class ElementCardController {
         : run ? RUN_STATE[run.status] ?? 'running' : 'running'
     const reply = run && card.conversation?.messages.find(message => message.role === 'assistant' && message.runId === run.runId)?.text
     this.patchEntry(card, submission.submissionId, {
-      state, ...(submission.runId ? { runId: submission.runId } : {}), ...(reply ? { reply } : {}),
+      state, queuePausedReason: submission.queuePausedReason, ...(submission.runId ? { runId: submission.runId } : {}), ...(reply ? { reply } : {}),
       ...(submission.failure ? { failure: submission.failure.message } : run?.failure ? { failure: run.failure.message } : {}),
     }, notify)
   }

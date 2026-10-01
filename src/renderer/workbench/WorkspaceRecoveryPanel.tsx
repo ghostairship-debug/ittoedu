@@ -70,12 +70,13 @@ export function WorkspaceRecoveryPanel({ api, onRestored }: WorkspaceRecoveryPan
     }
   }
 
-  const restore = async (documentId: string, alreadyRestored: boolean) => {
+  const restore = async (documentId: string, alreadyRestored: boolean, mode?: 'unbound') => {
     if (inFlight.current) return
     inFlight.current = documentId; operationGeneration.current++; setBusy(documentId); setConfirming(null)
     try {
       if (!alreadyRestored) {
-        await api.restore(documentId)
+        if (mode) await api.restore(documentId, mode)
+        else await api.restore(documentId)
         operationGeneration.current++
         setItems(current => current.map(item => item.snapshot.documentId === documentId ? { ...item, restored: true, error: null } : item))
       }
@@ -128,6 +129,8 @@ export function WorkspaceRecoveryPanel({ api, onRestored }: WorkspaceRecoveryPan
           <button type="button" disabled={busy !== null} onClick={() => void discard(id)}>确认丢弃恢复稿</button>
         </div> : <div className="workspace-recovery-panel__actions">
           <button type="button" disabled={busy !== null} onClick={() => void restore(id, item.restored)}>{item.restored ? '打开已恢复稿' : '恢复并打开'}</button>
+          {!item.restored && item.snapshot.binding.kind === 'file' && <button type="button" disabled={busy !== null}
+            title="保留内容与撤销历史，重新选择保存位置；不改动原文件" onClick={() => void restore(id, false, 'unbound')}>恢复为未命名稿</button>}
           {!item.restored && <button type="button" disabled={busy !== null} onClick={() => setConfirming(id)}>丢弃恢复稿</button>}
         </div>}
       </li>

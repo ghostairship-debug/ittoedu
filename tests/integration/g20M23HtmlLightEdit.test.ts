@@ -5,7 +5,7 @@ import { vi } from 'vitest'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, expect, it } from 'vitest'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { HtmlSourceEditService } from '../../src/main/workbench/htmlPreview/HtmlSourceEditService'
 import type { HtmlPreviewEditContext } from '../../src/main/workbench/htmlPreview/HtmlPreviewService'
@@ -15,9 +15,11 @@ import { HtmlPreviewPane } from '../../src/renderer/documentFiles/html/HtmlPrevi
 import { mountHtmlPreviewAgent } from '../../src/player/htmlPreview/htmlPreviewAgent'
 import { HtmlPreviewController } from '../../src/renderer/documentFiles/html/htmlPreviewController'
 import { HtmlLightEditOverlay } from '../../src/renderer/documentFiles/html/HtmlLightEditOverlay'
+import { HtmlTextDrafts } from '../../src/renderer/documentFiles/html/htmlTextDrafts'
 
 const roots: string[] = []
-afterEach(async () => { cleanup(); vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }) })
+beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }) })
+afterEach(async () => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }) })
 
 async function setup(source: string, entryName = 'lesson.html') {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-m23-html-edit-')); roots.push(root)
@@ -224,7 +226,7 @@ it('offers the existing source AI card for a no-src image placeholder and a dyna
   resolved: { handle: 'image', status: 'editable' as const, locator: { documentId: 'doc', epoch: 'epoch', revision: 1,
     bindingVersion: 1, targetKind: 'image' as const, elementSpan: { start: 12, end: 25 }, valueSpan: null,
     attributeName: 'src', expectedRaw: '' } } }
-  const props = { committed, position: { left: 4, top: 4 }, onText: vi.fn(), onImage: vi.fn(), onClose: vi.fn() }
+  const props = { committed, position: { left: 4, top: 4 }, value: '', onValue: vi.fn(), onText: vi.fn(), onImage: vi.fn(), onClose: vi.fn() }
   const mounted = render(createElement(HtmlLightEditOverlay, { ...props, target: image }))
   expect(screen.getByRole('button', { name: '选择图片' })).toBeTruthy()
   expect(screen.getByRole('button', { name: 'AI 修改' })).toBeTruthy()
@@ -253,7 +255,7 @@ it('keeps the same frame and script state when canonical change arrives before t
       attributeName: null, expectedRaw: 'old' } }] }
     : request.type === 'html-preview.edit' ? pending : { released: true })
   Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { workspaceFiles } })
-  const props = { lease, committed: snapshot(1, original), tabId: 'tab', onUndo: vi.fn(), onRedo: vi.fn(), active: true }
+  const props = { lease, committed: snapshot(1, original), tabId: 'tab', textDrafts: new HtmlTextDrafts(), onUndo: vi.fn(), onRedo: vi.fn(), active: true }
   const mounted = render(createElement(HtmlPreviewPane, props))
   const frame = screen.getByTitle('HTML 预览') as HTMLIFrameElement
   expect(frame.getAttribute('sandbox')).toBe('allow-scripts allow-same-origin')
@@ -279,6 +281,7 @@ it('keeps the same frame and script state when canonical change arrives before t
   settle({ status: 'applied', revision: 2, savedRevision: null, dirty: true,
     patch: { handle: 'text', kind: 'text', value: 'new' } })
   await waitFor(() => expect(screen.queryByRole('dialog', { name: '编辑 HTML 文字' })).toBeNull())
+  expect(props.textDrafts.read()).toEqual([])
   expect(screen.getByTitle('HTML 预览')).toBe(frame)
   expect(Reflect.get(frameWindow, 'testCounter')).toBe(7)
   mounted.unmount()

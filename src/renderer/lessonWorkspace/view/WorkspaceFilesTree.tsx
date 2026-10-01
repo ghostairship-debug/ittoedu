@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type DragEvent } from 'react'
-import { ChevronRight, File, FileText, Folder, FolderOpen, Presentation } from 'lucide-react'
+import { ChevronDown, ChevronRight, File, FileCode2, FileText, Folder, FolderOpen, Plus, Presentation, RotateCw } from 'lucide-react'
 import type { LessonDesktopRequest, LessonDesktopResult, LessonDirectoryEntry } from '../../../shared/lessonDesktopContract'
 import { WORKSPACE_PPTX_MAX_BYTES, type RegisteredWorkspaceRoot, type WorkspaceFilesAPI, type WorkspaceFilesRequest, type WorkspaceListItem, type WorkspaceOperationResult } from '../../../shared/workbench/workspaceFiles'
 import type { SaveDirectoryContext } from '../../../shared/workbench/desktop'
@@ -9,6 +9,7 @@ import { REVEAL_IN_EXPLORER_EVENT, takePendingReveal, type RevealInExplorerDetai
 import { SLIDE_CANVAS_PRESETS } from '../../../shared/slideCanvas'
 import { snapshotWorkspaceDrop } from './workspaceDropFiles'
 import { parseWorkspaceEntryDrag, WORKSPACE_ENTRIES_DRAG_TYPE, writeWorkspaceEntryDrag } from '../workspaceMediaDrag'
+import { confirmPptxLosses } from '../../project/confirmPptxLosses'
 import { createCourseFromPptx, pptxCourseArchive, pptxCourseStem } from '../../project/pptxCourseCreation'
 import { CommandMenuItems, ContextMenu, moveMenuFocus } from '../../editing/commands/CommandMenu'
 import { explorerContextCommands, explorerNewCommands, type ExplorerCommandPorts } from './explorerCommands'
@@ -17,7 +18,7 @@ type Entry = Extract<WorkspaceListItem, { status: 'accessible' }>
 type Dialog = 'create-markdown' | 'create-course' | 'create-text' | 'create-html' | 'mkdir' | 'rename' | 'copy' | 'move' | 'trash'
 type Row = { entry: Entry; parentId: string }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
-function icon(name: string) { return /\.(md|markdown)$/i.test(name) ? <FileText size={15} /> : /\.h5lesson$/i.test(name) ? <Presentation size={15} /> : <File size={15} /> }
+function icon(name: string) { return /\.(md|markdown)$/i.test(name) ? <FileText size={16} /> : /\.h5lesson$/i.test(name) ? <Presentation size={16} /> : /\.html?$/i.test(name) ? <FileCode2 size={16} /> : <File size={16} /> }
 export function WorkspaceFilesTree({ directory, files, operation, refreshVersion = 0, onFile, onDirectory, onScope, onSaveDirectoryChange, onImportHtml }: {
   directory: string; files: WorkspaceFilesAPI; operation?(request: LessonDesktopRequest): Promise<LessonDesktopResult>; refreshVersion?: number
   onFile(entry: LessonDirectoryEntry): void; onDirectory(path: string): void
@@ -141,12 +142,25 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
     setDestinations(value => [...value, ...page.filter(entry => !value.some(item => item.id === entry.entryId)).map(entry => ({ id: entry.entryId, name: entry.name }))])
   }
   const revealItem = useCallback(async (detail: RevealInExplorerDetail) => {
+    const ticket = ++scopeTicket.current
     const currentRoot = active.current
     if (!currentRoot) { setNotice('工作空间未就绪'); return }
     if (detail.workspaceId && detail.workspaceId !== currentRoot.workspaceId) { setNotice('目标文件位于其他工作空间'); return }
-    const cleanPath = (detail.path ?? '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').trim()
+    let requestedPath = (detail.path ?? '').replace(/\\/g, '/').trim()
+    if (/^(?:[A-Za-z]:\/|\/)/.test(requestedPath)) {
+      const rootPath = currentRoot.resolvedPath.replace(/\\/g, '/').replace(/\/+$/, '')
+      const compare = (value: string) => /^[A-Za-z]:\//.test(rootPath) || rootPath.startsWith('//') ? value.toLowerCase() : value
+      if (compare(requestedPath.replace(/\/+$/, '')) === compare(rootPath)) requestedPath = ''
+      else if (compare(requestedPath).startsWith(`${compare(rootPath)}/`)) requestedPath = requestedPath.slice(rootPath.length + 1)
+      else {
+        if (detail.open && detail.kind === 'file') {
+          onFile({ name: requestedPath.split('/').pop() ?? requestedPath, kind: 'file', path: detail.path ?? requestedPath })
+        } else setNotice('目标文件位于当前工作空间之外')
+        return
+      }
+    }
+    const cleanPath = requestedPath.replace(/^\/+|\/+$/g, '')
     if (!cleanPath) {
-      ++scopeTicket.current
       onScope?.(currentRoot.resolvedPath, 'folder', currentRoot.workspaceId)
       setSelection(new Set()); setParentId(currentRoot.rootEntryId)
       onSaveDirectoryChange?.({ workspaceId: currentRoot.workspaceId, directoryEntryId: currentRoot.rootEntryId })
@@ -165,7 +179,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
       if (!entries || !entries.some(e => e.status === 'accessible' && e.name === segment)) {
         entries = await load(currentDirId, currentRoot, generation)
       }
-      if (generation !== epoch.current) return
+      if (generation !== epoch.current || ticket !== scopeTicket.current) return
       const found = entries?.find((e): e is Entry => e.status === 'accessible' && e.name === segment)
       if (!found) { setNotice(`未在资源管理器中找到：${cleanPath}`); return }
       if (isLast) { targetEntry = found }
@@ -174,7 +188,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
         ancestorIds.push(found.entryId); currentDirId = found.entryId
       }
     }
-    if (!targetEntry || generation !== epoch.current) return
+    if (!targetEntry || generation !== epoch.current || ticket !== scopeTicket.current) return
     if (ancestorIds.length > 0) setExpanded(prev => new Set([...prev, ...ancestorIds]))
     const directoryEntryId = targetEntry.kind === 'directory' ? targetEntry.entryId : currentDirId
     setParentId(directoryEntryId)
@@ -182,22 +196,23 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
     setSelection(new Set([targetEntry.entryId]))
     setAnchor(targetEntry.entryId)
     setMenu(undefined)
-    const ticket = ++scopeTicket.current
     try {
       const resolved = await files({ type: 'resolve', workspaceId: currentRoot.workspaceId, entryId: targetEntry.entryId })
       if (ticket === scopeTicket.current && generation === epoch.current) {
         onScope?.(resolved.resolvedPath, targetEntry.kind === 'file' ? 'file' : 'folder', currentRoot.workspaceId)
+        if (detail.open && targetEntry.kind === 'file') onFile({ name: targetEntry.name, kind: 'file', path: resolved.resolvedPath })
       }
     } catch (reason) {
       if (ticket === scopeTicket.current && generation === epoch.current) setError(message(reason))
     }
+    if (ticket !== scopeTicket.current || generation !== epoch.current) return
     const scrollTarget = () => {
       const element = buttons.current.get(targetEntry!.entryId) ?? document.querySelector<HTMLElement>(`[data-entry-id="${targetEntry!.entryId}"]`)
       element?.scrollIntoView?.({ block: 'nearest' })
     }
     scrollTarget()
-    requestAnimationFrame(scrollTarget)
-  }, [files, load, onScope, onSaveDirectoryChange])
+    requestAnimationFrame(() => { if (ticket === scopeTicket.current && generation === epoch.current) scrollTarget() })
+  }, [files, load, onScope, onSaveDirectoryChange, onFile])
   useEffect(() => {
     const handler = (event: Event) => {
       const custom = event as CustomEvent<RevealInExplorerDetail>
@@ -288,6 +303,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
       const file = await source()
       const stem = pptxCourseStem(file.name)
       const course = await createCourseFromPptx(file.bytes, stem)
+      if (!await confirmPptxLosses(file.name, course.issues) || generation !== epoch.current) return
       const entries = pagesRef.current[directoryId] ?? await load(directoryId, current)
       made = { name: uniqueFilename(stem, '.h5lesson', entries), archive: pptxCourseArchive(course), issues: course.issues.length }
     } catch (reason) { if (generation === epoch.current) setError(message(reason)) }
@@ -367,27 +383,27 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
     copyPath: () => { void copyPath().catch(reason => setError(message(reason))) },
     reveal: () => { if (single && root) void run({ type: 'reveal', ...common(), entryId: single.entryId }) },
   }
-  const renderEntries = (id: string): React.ReactNode => <ul role="group" className="lesson-directory-tree">{(pages[id] ?? []).map(entry => entry.status === 'blocked' ? <li key={`blocked:${entry.name}`}><span>{entry.name}（无法访问）</span></li> : <li role="treeitem" aria-selected={selection.has(entry.entryId)} aria-expanded={entry.kind === 'directory' ? expanded.has(entry.entryId) : undefined} key={entry.entryId} data-kind={entry.kind} data-open={expanded.has(entry.entryId)}>
+  const renderEntries = (id: string): React.ReactNode => <ul role="group" className="lesson-directory-tree">{(pages[id] ?? []).map(entry => entry.status === 'blocked' ? <li className="workspace-tree-blocked" key={`blocked:${entry.name}`}><File size={16} aria-hidden="true" /><span title={`${entry.name}（无法访问）`}>{entry.name}（无法访问）</span></li> : <li role="treeitem" aria-selected={selection.has(entry.entryId)} aria-expanded={entry.kind === 'directory' ? expanded.has(entry.entryId) : undefined} key={entry.entryId} data-kind={entry.kind} data-open={expanded.has(entry.entryId)}>
     <div className="workspace-tree-row" data-drop={dropTarget === entry.entryId} {...(entry.kind === 'directory' ? droppable(entry.entryId) : {})}>
       {entry.kind === 'directory' && <button type="button" className="workspace-tree-toggle" aria-label={`${expanded.has(entry.entryId) ? '折叠' : '展开'} ${entry.name}`} onClick={() => { setExpanded(value => { const next = new Set(value); if (next.has(entry.entryId)) next.delete(entry.entryId); else next.add(entry.entryId); return next }) }}><ChevronRight size={14} /></button>}
       <button type="button" className="lesson-tree-row" data-entry-id={entry.entryId} aria-pressed={selection.has(entry.entryId)} ref={element => { if (element) buttons.current.set(entry.entryId, element); else buttons.current.delete(entry.entryId) }} draggable={!busy} onDragStart={event => { writeWorkspaceEntryDrag(event.dataTransfer, root!.workspaceId, selection.has(entry.entryId) ? selected.map(row => row.entry) : [entry]) }} onClick={event => choose({ entry, parentId: id }, event)} onDoubleClick={() => { void open(entry).catch(reason => setError(message(reason))) }} onContextMenu={event => { event.preventDefault(); if (!selection.has(entry.entryId)) choose({ entry, parentId: id }); setMenu({ x: event.clientX, y: event.clientY, directoryEntryId: entry.kind === 'directory' ? entry.entryId : id, htmlImport: entry.kind === 'directory' ? 'pick' : /\.html?$/i.test(entry.name) ? 'selected' : null, ...(entry.kind === 'file' && /\.html?$/i.test(entry.name) ? { sourceEntryId: entry.entryId } : {}) }) }}>
-        {entry.kind === 'directory' ? expanded.has(entry.entryId) ? <FolderOpen size={15} /> : <Folder size={15} /> : icon(entry.name)}<span title={entry.name}>{entry.name}</span>
+        {entry.kind === 'directory' ? expanded.has(entry.entryId) ? <FolderOpen size={16} /> : <Folder size={16} /> : icon(entry.name)}<span title={entry.name}>{entry.name}</span>
       </button>
     </div>{entry.kind === 'directory' && expanded.has(entry.entryId) && renderEntries(entry.entryId)}
   </li>)}</ul>
   return <div className="workspace-files-tree" aria-busy={busy}>
     <div role="toolbar" aria-label="文件管理" className="workspace-files-primary-actions">
       <details ref={createMenu} className="workspace-files-create-menu">
-        <summary aria-label="新建文件或文件夹" onClick={event => {
+        <summary aria-label="新建文件或文件夹" title="新建文件或文件夹" onClick={event => {
           if (createMenu.current?.open) { setCreateAt(undefined); return }
           const rect = event.currentTarget.getBoundingClientRect()
           setCreateAt({ left: Math.max(0, Math.min(rect.left, window.innerWidth - 200)), top: rect.bottom + 4 })
-        }}>新建</summary>
+        }}><Plus size={15} aria-hidden="true" /><span>新建</span><ChevronDown size={12} aria-hidden="true" /></summary>
         <div className="workspace-files-create-options command-menu" role="menu" aria-label="新建" style={createAt} onKeyDown={moveMenuFocus}>
           <CommandMenuItems items={explorerNewCommands(blocked, commandPorts)} onRun={item => item.run()} />
         </div>
       </details>
-      <button type="button" disabled={busy || !root} onClick={() => { void refresh().catch(reason => setError(message(reason))) }}>刷新</button>
+      <button type="button" title="刷新文件列表" disabled={busy || !root} onClick={() => { void refresh().catch(reason => setError(message(reason))) }}><RotateCw size={14} aria-hidden="true" /><span>刷新</span></button>
     </div>
     <input ref={pptxInput} type="file" accept=".pptx" hidden aria-label="选择要在此文件夹新建为 H5 演示的 PPT" onChange={event => {
       const file = event.target.files?.[0], target = pptxTarget.current
@@ -398,7 +414,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
     {error && <p role="alert">{error}</p>}
     {results && results.status !== 'success' && <ul className="workspace-file-results" aria-label="文件操作结果">{results.items.map((item, index) => <li key={index} data-status={item.status}>{item.sourcePath?.split(/[\\/]/).pop() ?? item.targetPath?.split(/[\\/]/).pop() ?? '文件'}：{item.status === 'success' ? '已完成' : item.error?.message ?? (item.status === 'cancelled' ? '已取消' : '未完成')}</li>)}</ul>}
     <div role="tree" aria-label="工作空间文件" aria-multiselectable="true" onKeyDown={keyboard} onContextMenu={event => { if (!root || (event.target instanceof Element && event.target.closest('.lesson-tree-row, .workspace-tree-root'))) return; event.preventDefault(); setSelection(new Set()); setParentId(root.rootEntryId); setMenu({ x: event.clientX, y: event.clientY, directoryEntryId: root.rootEntryId, htmlImport: 'pick' }) }}>
-      {root && <><button type="button" className="workspace-tree-root" data-drop={dropTarget === root.rootEntryId} {...droppable(root.rootEntryId)} onClick={() => { ++scopeTicket.current; onScope?.(root.resolvedPath, 'folder', root.workspaceId); setSelection(new Set()); setParentId(root.rootEntryId); onSaveDirectoryChange?.({ workspaceId: root.workspaceId, directoryEntryId: root.rootEntryId }); setMenu(undefined) }} onContextMenu={event => { event.preventDefault(); setSelection(new Set()); setParentId(root.rootEntryId); setMenu({ x: event.clientX, y: event.clientY, directoryEntryId: root.rootEntryId, htmlImport: 'pick' }) }}>工作空间根目录</button>{renderEntries(root.rootEntryId)}</>}
+      {root && <><button type="button" className="workspace-tree-root" aria-label="工作空间根目录" aria-pressed={selection.size === 0 && targetDirectory === root.rootEntryId} title={root.resolvedPath} data-drop={dropTarget === root.rootEntryId} {...droppable(root.rootEntryId)} onClick={() => { ++scopeTicket.current; onScope?.(root.resolvedPath, 'folder', root.workspaceId); setSelection(new Set()); setParentId(root.rootEntryId); onSaveDirectoryChange?.({ workspaceId: root.workspaceId, directoryEntryId: root.rootEntryId }); setMenu(undefined) }} onContextMenu={event => { event.preventDefault(); setSelection(new Set()); setParentId(root.rootEntryId); setMenu({ x: event.clientX, y: event.clientY, directoryEntryId: root.rootEntryId, htmlImport: 'pick' }) }}><Folder size={16} aria-hidden="true" /><span>{root.resolvedPath.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) || root.resolvedPath}</span></button>{renderEntries(root.rootEntryId)}</>}
     </div>
     {menu && <ContextMenu at={menu} label="文件菜单" onClose={() => setMenu(undefined)}
       items={explorerContextCommands({ blocked, selected: selected.length, pptx: Boolean(pptxRow), htmlImport: onImportHtml ? menu.htmlImport : null, htmlFile: menu.htmlImport === 'selected', clipboard: clipboard?.ids.length ?? 0 }, commandPorts)} />}

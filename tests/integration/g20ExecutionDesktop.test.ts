@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { ExecutionDesktopService } from '../../src/main/workbench/execution/ExecutionDesktopService'
 import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
+import { ExternalMcpService } from '../../src/main/workbench/external/ExternalMcpService'
 import type { CredentialEncryptionPort } from '../../src/main/workbench/providers/providerCredentials'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 import type { ExecutionRunRecord } from '../../src/shared/workbench/execution'
@@ -250,7 +251,7 @@ describe('G20 execution desktop integration', () => {
       submissionId: '42222222-2222-4222-8222-222222222222', expectedRevision: input.revision, text: '请替换全文', documents: [reference(document, [{ kind: 'markdown-range', from: 0, to: 'before provider\n'.length }])] }) as { run: ExecutionRunRecord; conversation: { revision: number; inputDraft: string; runIndex: { builtinRunIds: string[] } } }
     expect(sent.conversation).toMatchObject({ inputDraft: '', runIndex: { builtinRunIds: [sent.run.runId] } })
     const run = await waitForRun(service, sent.run.runId)
-    expect(run.status).toBe('completed'); expect(requests).toBe(2); expect(firstTarget).toMatch(/^t/); expect(firstToolWireName).toMatch(/^tool_/)
+    expect(run.status).toBe('completed'); expect(requests).toBe(2); expect(firstTarget).toMatch(/^t/); expect(firstToolWireName).toBe('text_replace')
     expect(firstToolReceipt).toMatchObject({ kind: 'document-operation', result: { status: 'applied', revision: 1 } })
     expect((await fs.readdir(root, { recursive: true })).filter(entry => path.basename(entry) === 'candidate.json')).toEqual([])
     expect(await documents.internalAPI.read(document.documentId)).toMatchObject({ dirty: true, revision: 1, model: { source: 'after provider\n' } })
@@ -357,4 +358,154 @@ it('M25 stops the live writer of a dynamically attached document and blocks atta
   expect(await service.stopTasksForDocument(document.documentId)).toEqual({ runIds: [sent.run.runId], submissionIds: [] })
   expect(await service.engine.read(sent.run.runId)).toMatchObject({ status: 'stopped' })
   await expect(documents.tools.issueTarget(sent.run.runId, document.documentId, { kind: 'document' })).rejects.toThrow('已停止')
+})
+
+
+it.each(['pdf', 'pptx', 'png'])('starts a material-home conversation without opening %s as editable text', async extension => {
+  const requests: unknown[] = []
+  const fetcher: typeof fetch = async (_url, init) => {
+    requests.push(JSON.parse(String(init?.body)))
+    return new Response(`data: ${JSON.stringify({ id: 'material-home', model: 'fixture-model', choices: [{ index: 0, delta: { role: 'assistant', content: '材料目录可用' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+  }
+  const f = await fixture(fetcher)
+  await configureConversation(f.settings, 'http://127.0.0.1:1/v1')
+  const bytes = extension === 'png' ? await sharp({ create: { width: 2, height: 2, channels: 4, background: '#168844' } }).png().toBuffer()
+    : extension === 'pdf' ? Buffer.from('%PDF-1.7 source registration fixture, not a parsing test')
+      : Buffer.from([80, 75, 3, 4, 1, 2, 3, 4])
+  const file = path.join(f.workspace, `source.${extension}`)
+  await fs.writeFile(file, bytes)
+  const space = await f.service.operate({ type: 'workspace', root: f.workspace }) as { workspace: { workspaceId: string } }
+  const current = await f.service.operate({ type: 'create-conversation', workspaceId: space.workspace.workspaceId,
+    home: { kind: 'file', path: path.basename(file) } }) as { conversationId: string; revision: number }
+  const identity = { workspaceId: space.workspace.workspaceId, conversationId: current.conversationId }
+  expect(await f.service.operate({ type: 'prepare-documents', ...identity, documents: [] })).toEqual([])
+  const sent = await f.service.operate({ type: 'send', ...identity, submissionId: crypto.randomUUID(), expectedRevision: current.revision,
+    text: '先列出材料目录', documents: [], permission: 'read-only' }) as { run: ExecutionRunRecord }
+  const run = await f.service.engine.wait(sent.run.runId)
+  expect(run.status).toBe('completed')
+  expect(run.input.documents).toEqual([])
+  expect(run.initialPayload?.explicitAttachments).toHaveLength(1)
+  expect(run.initialPayload?.explicitAttachments[0]?.delivery).toBe('source')
+  expect(run.initialPayload?.totals.imageBytes).toBe(0)
+  expect(JSON.stringify(requests)).toContain('index-only')
+  expect(JSON.stringify(requests)).not.toContain(bytes.toString('base64'))
+  const ref = run.initialPayload!.explicitAttachments[0]!
+  const read = await f.service.attachments.readRepresentation(ref.attachmentId, ref.representationId)
+  expect(Buffer.from(read.bytes)).toEqual(bytes)
+  expect(f.documents.registry.list()).toHaveLength(1) // Only the existing draft.md session.
+  await waitForCompletedConversation(f.service, identity.workspaceId, identity.conversationId, run.runId)
+})
+
+
+it.each(['resume-queue', 'run-queued', 'restart-resume'] as const)('reclaims an external handoff with %s through the existing stop barrier and queued identity', async action => {
+  const model = vi.fn(async () => new Response(`data: ${JSON.stringify({ id: 'reclaim', model: 'fixture-model', choices: [{ index: 0, delta: { role: 'assistant', content: '已继续任务' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } }))
+  const f = await fixture(model)
+  await configureConversation(f.settings, 'http://127.0.0.1:1/v1')
+  const space = await f.service.operate({ type: 'workspace', root: f.workspace }) as { workspace: { workspaceId: string } }
+  const conversation = await f.service.operate({ type: 'create-conversation', workspaceId: space.workspace.workspaceId }) as { conversationId: string; revision: number }
+  const identity = { workspaceId: space.workspace.workspaceId, conversationId: conversation.conversationId }
+  const external = new ExternalMcpService({ conversations: f.service.conversations, engine: f.service.engine,
+    registry: f.documents.registry, gateway: f.documents.tools, attachments: f.service.attachments,
+    appendEvent: input => f.service.appendExternalEvent(input) })
+  f.service.setExternalRevoker(input => external.revokeConversation(input))
+  try {
+    await f.service.pauseQueueForExternal(identity.conversationId)
+    const grant = await external.grant({ ...identity, expectedRevision: conversation.revision, instruction: '外部任务', documents: [reference(f.document)], lifetimeMs: 60_000 })
+    const submissionId = crypto.randomUUID()
+    const queued = await f.service.operate({ type: 'send', ...identity, submissionId, expectedRevision: grant.conversation.revision,
+      text: '需要接回的原要求', documents: [] }) as { submission: { state: string }; conversation: { revision: number } }
+    expect(queued.submission.state).toBe('queued')
+    expect(model).not.toHaveBeenCalled()
+    let service = f.service
+    let release!: () => void
+    let reached!: () => void
+    const barrierReached = new Promise<void>(resolve => { reached = resolve })
+    if (action === 'restart-resume') {
+      await external.close()
+      service = new ExecutionDesktopService({ directory: path.join(f.root, 'desktop'), documents: f.documents, settings: f.settings,
+        authorizeWorkspaceRoot: f.authorizeWorkspaceRoot, fetch: model })
+    } else {
+      const stop = f.documents.tools.stop.bind(f.documents.tools)
+      vi.spyOn(f.documents.tools, 'stop').mockImplementationOnce(async runId => {
+        reached()
+        await new Promise<void>(resolve => { release = resolve })
+        return stop(runId)
+      })
+    }
+    const reclaim = service.operate({ type: action === 'run-queued' ? 'run-queued' : 'resume-queue', ...identity,
+      ...(action === 'run-queued' ? { submissionId } : {}) })
+    if (action !== 'restart-resume') {
+      await barrierReached
+      expect(model).not.toHaveBeenCalled()
+      release()
+    }
+    await reclaim
+    const stored = await service.submissions.read(submissionId)
+    expect(stored?.state).toBe('accepted')
+    expect((await service.engine.wait(stored!.runId!)).status).toBe('completed')
+    expect(model).toHaveBeenCalledTimes(1)
+    expect(await service.submissions.pausedReason(identity.conversationId)).toBeUndefined()
+    expect((await external.list(identity))[0]?.status).not.toBe('active')
+    const retained = await service.conversations.readConversation(identity)
+    expect(retained?.messages.find(message => message.role === 'user')?.text).toBe('需要接回的原要求')
+  } finally { await external.close() }
+})
+
+it('runs an accepted queued item with the original identity without replacing a newer composer draft', async () => {
+  const f = await fixture(async () => new Response(`data: ${JSON.stringify({ id: 'queued', model: 'fixture-model', choices: [{ index: 0, delta: { role: 'assistant', content: '队列完成' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } }))
+  await configureConversation(f.settings, 'http://127.0.0.1:1/v1')
+  const space = await f.service.operate({ type: 'workspace', root: f.workspace }) as { workspace: { workspaceId: string } }
+  const conversation = await f.service.operate({ type: 'create-conversation', workspaceId: space.workspace.workspaceId }) as { conversationId: string; revision: number }
+  const identity = { workspaceId: space.workspace.workspaceId, conversationId: conversation.conversationId }
+  await f.service.operate({ type: 'pause-queue', ...identity })
+  const id = crypto.randomUUID()
+  const accepted = await f.service.operate({ type: 'send', ...identity, submissionId: id, expectedRevision: conversation.revision,
+    text: '排队的要求', documents: [] }) as { conversation: { revision: number }; submission: { state: string } }
+  expect(accepted.submission.state).toBe('queued')
+  const draft = await f.service.operate({ type: 'draft', ...identity, expectedRevision: accepted.conversation.revision,
+    text: '下一条未发送的人工要求', documents: [], attachments: [] }) as { revision: number }
+  expect(draft.revision).toBeGreaterThan(accepted.conversation.revision)
+  const started = await f.service.operate({ type: 'run-queued', ...identity, submissionId: id }) as { run: ExecutionRunRecord; submission: { submissionId: string } }
+  expect(started.submission.submissionId).toBe(id)
+  await f.service.engine.wait(started.run.runId)
+  const repeated = await f.service.operate({ type: 'run-queued', ...identity, submissionId: id }) as { run: ExecutionRunRecord }
+  expect(repeated.run.runId).toBe(started.run.runId)
+  expect(await f.service.operate({ type: 'conversation', ...identity })).toMatchObject({ inputDraft: '下一条未发送的人工要求' })
+  expect((await f.service.runs.list()).filter(run => run.input.taskId === id)).toHaveLength(1)
+  await waitForCompletedConversation(f.service, identity.workspaceId, identity.conversationId, started.run.runId)
+})
+
+
+it('stops current work after durably pausing its queue, and starts nothing until explicit resume', async () => {
+  let requests = 0, entered!: () => void
+  const started = new Promise<void>(resolve => { entered = resolve })
+  const f = await fixture(async (_url, options) => {
+    requests++
+    if (requests === 1) { entered(); await new Promise<never>((_resolve, reject) => {
+      const cancel = () => reject(options?.signal?.reason ?? new Error('stopped'))
+      options?.signal?.addEventListener('abort', cancel, { once: true }); if (options?.signal?.aborted) cancel()
+    }) }
+    return new Response(`data: ${JSON.stringify({ id: 'after-pause', model: 'fixture-model', choices: [{ index: 0, delta: { role: 'assistant', content: 'finished after user resume' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } })
+  })
+  await configureConversation(f.settings, 'http://127.0.0.1:1/v1')
+  const space = await f.service.operate({ type: 'workspace', root: f.workspace }) as { workspace: { workspaceId: string } }
+  const conversation = await f.service.operate({ type: 'create-conversation', workspaceId: space.workspace.workspaceId }) as { conversationId: string; revision: number }
+  const identity = { workspaceId: space.workspace.workspaceId, conversationId: conversation.conversationId }
+  const first = await f.service.operate({ type: 'send', ...identity, submissionId: crypto.randomUUID(), expectedRevision: conversation.revision,
+    text: 'hold current', documents: [] }) as { run: ExecutionRunRecord; conversation: { revision: number } }
+  await started
+  const second = await f.service.operate({ type: 'send', ...identity, submissionId: crypto.randomUUID(), expectedRevision: first.conversation.revision,
+    text: 'queued next', documents: [] }) as { submission: { submissionId: string; state: string } }
+  expect(second.submission.state).toBe('queued')
+  await f.service.operate({ type: 'pause-queue', ...identity, reason: 'user' })
+  await f.service.operate({ type: 'stop', runId: first.run.runId })
+  await new Promise(resolve => setTimeout(resolve, 80))
+  expect(requests).toBe(1)
+  expect(await f.service.operate({ type: 'submission', ...identity, submissionId: second.submission.submissionId }))
+    .toMatchObject({ state: 'queued', queuePausedReason: 'user' })
+  await f.service.operate({ type: 'resume-queue', ...identity })
+  await expect.poll(() => requests).toBe(2)
+  const after = await f.service.operate({ type: 'submission', ...identity, submissionId: second.submission.submissionId }) as { runId: string }
+  await f.service.engine.wait(after.runId)
+  await waitForCompletedConversation(f.service, identity.workspaceId, identity.conversationId, after.runId)
 })

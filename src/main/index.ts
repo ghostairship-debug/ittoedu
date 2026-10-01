@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, session } from 'electron'
 import { configureApplicationStorage } from './applicationIdentity'
+import { launchFileArguments } from './launchFileArguments'
 import { AppState } from './appState'
 import { createMainWindow } from './createWindow'
 import { registerIpcHandlers, unregisterIpcHandlers } from './ipc'
@@ -80,8 +81,8 @@ async function openMainWindow(): Promise<void> {
   })
 }
 
-app.on('second-instance', () => {
-  void openMainWindow().catch((error) => {
+app.on('second-instance', (_event, argv, workingDirectory) => {
+  void (async () => { appState.enqueueOpenFiles(await launchFileArguments(argv, workingDirectory, app.isPackaged)); await app.whenReady(); await openMainWindow() })().catch((error) => {
     console.error('恢复主窗口失败', error)
   })
 })
@@ -107,6 +108,7 @@ app
       getRendererEntryUrl: () => rendererEntryUrl,
       appState,
     })
+    appState.enqueueOpenFiles(await launchFileArguments(process.argv, process.cwd(), app.isPackaged))
     await openMainWindow()
 
     app.on('activate', () => {

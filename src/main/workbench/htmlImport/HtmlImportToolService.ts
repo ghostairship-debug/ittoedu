@@ -91,6 +91,18 @@ export class HtmlImportToolService implements HtmlImportServicePort {
       if (target.model.kind !== 'course-v9' || target.epoch !== input.targetEpoch || target.revision !== input.targetRevision)
         throw new Error('目标 Course V9 文档已改变；未建立导入候选')
       const split = splitHtmlSections(sourceHtml, input.mode)
+      let destinations = input.destinations
+      if (!destinations.length) {
+        const slides = target.model.project.surfaces.filter(surface => surface.type === 'slide')
+        if (slides.length !== 1) throw new Error('自动导入需要唯一演示页表面；请为本次导入明确 destinations，不需遍历全部对象')
+        const slide = slides[0]!
+        const first = slide.scenes.length === 1 && !slide.scenes[0]!.layerItems.length ? slide.scenes[0] : undefined
+        const initial = first && target.model.project.locations.find(location => location.kind === 'slide-scene' && location.sceneId === first.id && location.surfaceId === slide.id)
+        destinations = split.sections.map((_page, index) => index === 0 && initial
+          ? { kind: 'slide-existing' as const, location: initial.id }
+          : { kind: 'slide-new' as const, surface: slide.id })
+      }
+
       await this.options.operationStore.patch(input.runId, input.operationId, { status: 'preparing', targetDocumentId: target.documentId })
       const targetHandle = await this.options.gateway.issueTarget(input.runId, input.targetDocumentId, { kind: 'document' })
       const targetAfterHandle = await this.options.documents.read(input.targetDocumentId)
@@ -109,7 +121,7 @@ export class HtmlImportToolService implements HtmlImportServicePort {
           await this.options.operationStore.child(runId, input.operationId, { callId, name, input: childInput })
         } })
       const ticket = await service.prepare({ operationId: input.operationId, runId: input.runId, targetHandle,
-        sourcePath, rootDir, sourceHtml, sections: split.sections, destinations: input.destinations,
+        sourcePath, rootDir, sourceHtml, sections: split.sections, destinations,
         mode: split.mode, commitCallId: `html:${input.operationId}:commit` })
       const during = await this.options.operationStore.lookup(input.runId, input.operationId)
       if (during?.status === 'cancelled') { await this.options.cancelJob(input.runId, ticket.jobId); throw new Error('HTML 导入已取消') }
@@ -122,7 +134,7 @@ export class HtmlImportToolService implements HtmlImportServicePort {
         const currentSource = lease.read()
         if (currentSource.epoch !== source.epoch || currentSource.revision !== source.revision
           || documentDigest(currentSource.binding) !== sourceBinding || currentSource.model.kind !== 'text'
-          || documentDigest(currentSource.model.source) !== documentDigest(sourceHtml))
+          || currentSource.model.source !== sourceHtml)
           throw new Error('来源 HTML 在导入期间改变；未写入正式文档')
         const targetNow = await this.options.documents.read(input.targetDocumentId)
         if (targetNow.epoch !== target.epoch || targetNow.revision !== target.revision)

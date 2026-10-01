@@ -30,7 +30,7 @@ it.skipIf(process.env.GUOLING_REAL_BROWSER_WEB !== '1')('uses real public redire
     const image = screenshot.content.find(item => item.type === 'binary' && item.mimeType === 'image/png')
     expect(image).toBeTruthy()
     if (!image || image.type !== 'binary') throw new Error('真实截图未生成图片资源')
-    const bytes = service.readResource('public-site', image.resourceId).bytes
+    const bytes = (await service.readResource('public-site', image.resourceId)).bytes
     expect(Buffer.from(bytes).subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a')
     const egress = service.egressStats('public-site')
     console.log(JSON.stringify({ screenshotBytes: bytes.byteLength, egress }))

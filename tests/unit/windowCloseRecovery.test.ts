@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppState } from '../../src/main/appState'
 import { IPC_CHANNELS } from '../../src/shared/ipcTypes'
 
-const controls = vi.hoisted(() => ({ choice: 1, dirty: true, clearRecovery: vi.fn(async () => undefined), clearFrames: vi.fn(), releaseLeases: vi.fn() }))
+const controls = vi.hoisted(() => ({ choice: 1, recoveryChoice: 0, dirty: true, clearRecovery: vi.fn(async () => undefined), clearFrames: vi.fn(), releaseLeases: vi.fn() }))
 vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
   const os = await import('node:os')
@@ -18,6 +18,8 @@ vi.mock('electron', async () => {
     get webContents() { if (this.destroyed) throw new Error('Object has been destroyed'); return this.contents }
     loadURL = vi.fn(async () => undefined)
     show = vi.fn()
+    setProgressBar = vi.fn()
+    focus = vi.fn()
     isDestroyed() { return this.destroyed }
     close = vi.fn(() => {
       let prevented = false
@@ -26,7 +28,7 @@ vi.mock('electron', async () => {
     })
   }
   return { app: { isPackaged: true, getAppPath: () => process.cwd(), getPath: () => (os.tmpdir()) }, BrowserWindow: FakeWindow,
-    dialog: { showMessageBoxSync: vi.fn(() => controls.choice) }, ipcMain: new EventEmitter(), session: { defaultSession: {} } }
+    dialog: { showMessageBox: vi.fn(async (_window, options) => ({ response: options.title === '保存未完成的修改？' ? controls.choice : controls.recoveryChoice, checkboxChecked: false })) }, ipcMain: new EventEmitter(), session: { defaultSession: {} } }
 })
 vi.mock('../../src/main/security', () => ({ configureRestrictedSession: vi.fn(), hardenWebContents: vi.fn(), isAllowedDocumentUrl: vi.fn(), isAllowedEditorPreviewFrameUrl: vi.fn(), isAllowedHtmlPreviewFrameUrl: vi.fn(), isAllowedHtmlPreviewChildFrameUrl: vi.fn(), clearHtmlPreviewFrameEntries: controls.clearFrames }))
 vi.mock('../../src/main/ipc', () => ({ releaseAllHtmlPreviewLeases: controls.releaseLeases }))
@@ -35,7 +37,7 @@ vi.mock('../../src/main/projectPersistence', () => ({ clearRecoveryProject: cont
 vi.mock('../../src/main/previewNetworkPolicy', () => ({ mainPreviewNetworkPolicy: { replaceBaseOrigins: vi.fn(), beginDocumentNavigation: vi.fn(), allowsRequest: vi.fn(), activateDocument: vi.fn() } }))
 vi.mock('../../src/main/windowVisibility', () => ({ BACKGROUND_E2E_WINDOW_ORIGIN: -10000, shouldShowApplicationWindows: () => false }))
 
-import { ipcMain } from 'electron'
+import { ipcMain, dialog } from 'electron'
 vi.mock('../../src/main/workbench/documentHost', () => ({
   documentHost: () => ({ registry: { list: () => [], get: () => ({ drain: async () => undefined }) } }),
 }))
@@ -49,7 +51,7 @@ async function openWindow() {
 }
 function requestId(window: { webContents: { send: unknown } }): string { return vi.mocked(window.webContents.send as (...args: unknown[]) => void).mock.calls.at(-1)?.[1] as string }
 async function settle() { await vi.advanceTimersByTimeAsync(0) }
-beforeEach(() => { vi.useFakeTimers(); controls.choice = 1; controls.dirty = true; controls.clearRecovery.mockClear(); controls.clearFrames.mockReset(); controls.releaseLeases.mockReset() })
+beforeEach(() => { vi.useFakeTimers(); controls.choice = 1; controls.recoveryChoice = 0; controls.dirty = true; vi.mocked(dialog.showMessageBox).mockClear(); controls.clearRecovery.mockClear(); controls.clearFrames.mockReset(); controls.releaseLeases.mockReset() })
 afterEach(() => { ipcMain.removeAllListeners(); vi.useRealTimers() })
 
 describe('window close recovery handshake', () => {
@@ -85,50 +87,50 @@ describe('window close recovery handshake', () => {
     expect(state.setDirty).not.toHaveBeenCalled()
     expect(ipcMain.listenerCount(IPC_CHANNELS.preserveAndCloseResult)).toBe(0)
   })
-  it('times out without closing and ignores a late result until a fresh request', async () => {
+  it('offers recovery while waiting; choosing to wait does not expire the original request', async () => {
+    controls.recoveryChoice = 1
     const { window } = await openWindow()
     window.close(); await settle()
+    const original = requestId(window)
+    await vi.advanceTimersByTimeAsync(3_000)
+    expect(dialog.showMessageBox).toHaveBeenCalledWith(window, expect.objectContaining({ title: '关闭前保全尚未完成' }))
     await vi.advanceTimersByTimeAsync(5 * 60_000)
     expect(window.isDestroyed()).toBe(false)
-    expect(controls.clearRecovery).not.toHaveBeenCalled()
-    expect(ipcMain.listenerCount(IPC_CHANNELS.preserveAndCloseResult)).toBe(0)
-    ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, requestId(window), true)
+    expect(ipcMain.listenerCount(IPC_CHANNELS.preserveAndCloseResult)).toBe(1)
+    ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, original, true)
     await settle()
-    expect(window.isDestroyed()).toBe(false)
-    window.close(); await settle()
-    expect(window.webContents.send).toHaveBeenCalledTimes(2)
-    ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, requestId(window), true)
-    await settle()
-    expect(window.isDestroyed()).toBe(false)
     ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, requestId(window), true)
     await settle()
     expect(window.isDestroyed()).toBe(true)
+    expect(controls.clearRecovery).not.toHaveBeenCalled()
   })
-  it.each(['preserve', 'save'] as const)('rejects a timed-out %s success after a newer close has started', async mode => {
+  it.each(['preserve', 'save'] as const)('ignores a cancelled %s handshake when a newer close is in progress', async mode => {
     controls.choice = mode === 'save' ? 0 : 1
-    const resultChannel = mode === 'save' ? IPC_CHANNELS.saveAndCloseResult : IPC_CHANNELS.preserveAndCloseResult
+    const channel = mode === 'save' ? IPC_CHANNELS.saveAndCloseResult : IPC_CHANNELS.preserveAndCloseResult
     const { window } = await openWindow()
     window.close(); await settle()
-    const oldFlushId = requestId(window)
-    await vi.advanceTimersByTimeAsync(5 * 60_000)
+    const old = requestId(window)
+    window.close(); await settle() // Explicit return to editing cancels the waiting attempt.
+    expect(ipcMain.listenerCount(IPC_CHANNELS.preserveAndCloseResult)).toBe(0)
     window.close(); await settle()
-    const flushId = requestId(window)
-    expect(flushId).not.toBe(oldFlushId)
-    ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, oldFlushId, true)
+    const fresh = requestId(window)
+    expect(fresh).not.toBe(old)
+    ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, old, true)
+    await settle(); expect(window.isDestroyed()).toBe(false)
+    ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, fresh, true)
     await settle()
-    expect(window.isDestroyed()).toBe(false)
-    ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, flushId, true)
-    await settle()
-    expect(window.isDestroyed()).toBe(false)
-    const decisionId = requestId(window)
-    expect(decisionId).not.toBe(flushId)
-    ipcMain.emit(resultChannel, { sender: window.webContents }, oldFlushId, true)
-    await settle()
-    expect(window.isDestroyed()).toBe(false)
-    expect(controls.clearRecovery).not.toHaveBeenCalled()
-    ipcMain.emit(resultChannel, { sender: window.webContents }, decisionId, true)
+    ipcMain.emit(channel, { sender: window.webContents }, requestId(window), true)
+    await settle(); expect(window.isDestroyed()).toBe(true)
+  })
+  it('allows only an explicit confirmed-recovery close when renderer preparation fails', async () => {
+    controls.recoveryChoice = 2
+    const { window } = await openWindow()
+    window.close(); await settle()
+    ipcMain.emit(IPC_CHANNELS.preserveAndCloseResult, { sender: window.webContents }, requestId(window), false)
     await settle()
     expect(window.isDestroyed()).toBe(true)
+    expect(dialog.showMessageBox).toHaveBeenCalledWith(window, expect.objectContaining({ detail: expect.stringContaining('可能丢失') }))
+    expect(controls.clearRecovery).not.toHaveBeenCalled()
   })
   it('also preserves drafts on an apparently clean close', async () => {
     controls.dirty = false

@@ -60,7 +60,7 @@ export const runtimeLightEditCommands = {
     if (!submission) return { ok: false, reason: '页面文字暂时无法提交，草稿已保留' }
     try {
       const result = await submission.settled
-      if (result.status === 'failed' || result.status === 'conflict') return { ok: false, reason: result.reason }
+      if (result.status !== 'applied' && result.status !== 'unchanged') return { ok: false, reason: result.reason }
       return { ok: true, changed: result.status === 'applied' }
     } catch (error) {
       return { ok: false, reason: error instanceof Error ? error.message : '页面文字提交失败，草稿已保留' }

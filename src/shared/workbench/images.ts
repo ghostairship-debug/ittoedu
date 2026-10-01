@@ -94,6 +94,8 @@ export interface ImageJobSnapshot {
   provenance: ImageRequestProvenance
   resources: ImageResourceReference[]
   failure?: ModelFailure
+  retryAt?: string
+  attempts?: Array<{ at: string; failure?: ModelFailure; provenance: ImageRequestProvenance }>
   /** Optional for jobs persisted before timing was introduced. Never contains prompts, tokens, or raw responses. */
   timing?: ImageJobTimingMark[]
 }

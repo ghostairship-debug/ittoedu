@@ -16,18 +16,18 @@ const samePath = (a: string, b: string) => process.platform === 'win32' ? a.toLo
 /** Bounded literal text search with source versions and a position inside the current file. */
 export class FileGrepPages {
   private readonly cursors = new Map<string, Cursor>()
+  releaseRun(runId: string): void { for (const [id, value] of this.cursors) if (value.runId === runId) this.cursors.delete(id) }
   private begin(runId: string, root: string, query: string, kind: 'file' | 'directory', cursor?: string): Cursor {
     if (!cursor) return { runId, root, query, queue: kind === 'directory' ? [{ directory: root, offset: 0 }] : [],
       ...(kind === 'file' ? { file: { filename: root, offset: 0, line: 1, lineStart: 0 } } : {}), observed: {}, scannedFiles: 0,
       excludedCount: 0, failedCount: 0, createdAt: Date.now() }
     const saved = this.cursors.get(cursor)
-    if (!saved || saved.runId !== runId || !samePath(saved.root, root) || saved.query !== query || Date.now() - saved.createdAt > 900_000)
+    if (!saved || saved.runId !== runId || !samePath(saved.root, root) || saved.query !== query)
       throw new Error('正文搜索游标已失效或不属于本次查询，请重新搜索')
     return structuredClone(saved)
   }
   private remember(state: Cursor): string {
     const id = randomUUID()
-    while (this.cursors.size >= 128) this.cursors.delete(this.cursors.keys().next().value!)
     this.cursors.set(id, structuredClone(state))
     return id
   }

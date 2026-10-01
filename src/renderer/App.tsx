@@ -87,6 +87,8 @@ import { createMaterialCitationRequest } from './authoring/tools/materialCitatio
 import { buildDocumentExport } from './workbench/delivery/DocumentExportRenderer'
 import type { ProductivityContext } from './authoring/productivity'
 import { resolveCourseProjectDiagnosticTargetRoute } from './diagnostics/projectHealthNavigation'
+import { BundledFontBoundary } from './app/BundledFontBoundary'
+import { confirmPptxLosses } from './project/confirmPptxLosses'
 import { createCourseFromPptx, pptxCourseStem } from './project/pptxCourseCreation'
 
 function desktopApi() {
@@ -138,6 +140,29 @@ export default function App() {
     })
   }, [])
   const lessonShell = useRef<LessonWorkspaceShellHandle>(null)
+  const openingLaunchFiles = useRef(false)
+  useEffect(() => {
+    const api = window.desktopAPI
+    if (!api?.launchFiles) return
+    const open = async () => {
+      if (openingLaunchFiles.current) return
+      openingLaunchFiles.current = true
+      try {
+        for (;;) {
+          const requests = await api.launchFiles!({ type: 'list' })
+          if (!requests.length || !lessonShell.current) break
+          for (const request of requests) {
+            try { await lessonShell.current.openFile(request.path) }
+            catch (error) { setError(`无法打开 ${request.path}：${error instanceof Error ? error.message : String(error)}`) }
+            await api.launchFiles!({ type: 'ack', id: request.id })
+          }
+        }
+      } finally { openingLaunchFiles.current = false }
+    }
+    const start = () => { void open().catch(error => setError(error instanceof Error ? error.message : '启动文件暂时无法打开')) }
+    const stop = api.onLaunchFilesChanged?.(start)
+    start(); return () => stop?.()
+  }, [])
   const saveDirectory = useRef<SaveDirectoryContext | null>(null)
   const rawDocuments = window.desktopAPI?.documents
   const documentsWithSaveDirectory = useMemo<DocumentHostAPI | null>(() => rawDocuments ? {
@@ -312,6 +337,7 @@ export default function App() {
     beforeReplace: async () => await flowRecovery.flush(),
     onProjectReplaced: () => lessonShell.current?.detachLesson(),
     preserveBeforeClose: async () => {
+      await elementCards.flushDrafts()
       if (!(await flowRecovery.flush()) || !(await lessonShell.current?.preserveAll() ?? true)) return false
       await useEditorStore.getState().drainAllCourseDocuments()
       return true
@@ -348,12 +374,10 @@ export default function App() {
   // The work area's "从 PPT 新建 H5 演示": a new untitled H5 presentation holding the PPT's pages (M21).
   const newProjectFromPptx = async ({ name, bytes }: { name: string; bytes: Uint8Array }) => {
     const title = pptxCourseStem(name)
-    let issues = 0
-    const created = await courseProjectLifecycle.newProjectFrom(async () => {
-      const course = await createCourseFromPptx(bytes, title)
-      issues = course.issues.length
-      return course
-    }, { origin: 'lesson' })
+    const course = await createCourseFromPptx(bytes, title)
+    if (!await confirmPptxLosses(name, course.issues)) return false
+    const issues = course.issues.length
+    const created = await courseProjectLifecycle.newProjectFrom(async () => course, { origin: 'lesson' })
     if (created) setStatus(issues ? `已从 PPT 新建 H5 演示「${title}」；${issues} 项内容未保留或已简化` : `已从 PPT 新建 H5 演示「${title}」`)
     return created
   }
@@ -919,7 +943,7 @@ export default function App() {
         activeDocumentId: courseConnection.documentId,
         activate: id => useEditorStore.getState().activateCourseDocument(id),
         close: id => useEditorStore.getState().closeCourseDocument(id) }}
-      prepareCourseDocuments={async () => { await useEditorStore.getState().drainAllCourseDocuments() }}
+      prepareCourseDocuments={async ids => { await useEditorStore.getState().drainAllCourseDocuments(ids) }}
       captureCourseDocument={async writable => {
         const snapshot = await useEditorStore.getState().drainCourseDocument()
         return [captureDocumentReference(snapshot, writable)]
@@ -927,7 +951,7 @@ export default function App() {
       onOpenProject={path => courseProjectLifecycle.openRecentProject(path, { origin: 'lesson' })} onNewProject={() => courseProjectLifecycle.newProject({ origin: 'lesson' })} onNewProjectFromPptx={newProjectFromPptx} onDirtyChange={setLessonDirty} onActiveDocumentChange={setActiveWorkspaceDocument}
       onImportHtml={(directory, sourceEntryId) => { void openHtmlImport(directory, sourceEntryId) }}
 >
-    <CourseEditorFrame lightTools={<CourseLightToolbar
+    <BundledFontBoundary><CourseEditorFrame lightTools={<CourseLightToolbar
       slideLightPage={slideLightPageView ? { view: slideLightPageView, run: command => slideLight.runPage(slideLightPageView.target, command) } : null}
       documentId={courseConnection.documentId}
       isCurrentDocument={id => useEditorStore.getState().courseDocument.documentId === id}
@@ -1309,7 +1333,7 @@ export default function App() {
           </section>
         </div>
       ) : null}
-    </CourseEditorFrame>
+    </CourseEditorFrame></BundledFontBoundary>
     {htmlImportDialog && <HtmlImportDialog
       sourceName={htmlImportDialog.sourcePath?.split(/[\\/]/).pop() ?? null}
       destinations={htmlImportDialog.destinations}

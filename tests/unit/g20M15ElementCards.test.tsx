@@ -48,6 +48,14 @@ function executionFixture() {
       return structuredClone(created)
     }),
     conversation: vi.fn(async (_workspaceId: string, id: string) => structuredClone(conversations.get(id) ?? null)),
+    draft: vi.fn(async (input: Omit<ExecutionSendInput, 'submissionId' | 'mode'>) => {
+      const current = conversations.get(input.conversationId)!
+      const saved = { ...current, revision: current.revision + 1, inputDraft: input.text,
+        frozenContextRefs: input.documents.map(ref => ({ contextRefId: ref.documentId, documentId: ref.documentId,
+          epoch: ref.epoch, revision: ref.revision, selection: ref.selection, writeScope: ref.writable })) }
+      conversations.set(saved.conversationId, saved)
+      return structuredClone(saved)
+    }),
     send: vi.fn(async (input: ExecutionSendInput) => {
       const current = conversations.get(input.conversationId)!
       // As Main: a send names the revision it saw; across contextBridge only the fixed message arrives.
@@ -65,6 +73,8 @@ function executionFixture() {
     submissions: vi.fn(async () => structuredClone(submissions)),
     run: vi.fn(async (runId: string) => structuredClone(runs.get(runId) ?? null)),
     stop: vi.fn(async () => null),
+    pauseQueue: vi.fn(async () => { submissions.forEach(item => { if (item.state === 'queued') item.queuePausedReason = 'user' }) }),
+    resumeQueue: vi.fn(async () => { submissions.forEach(item => { delete item.queuePausedReason }) }),
     events: vi.fn(async (_conversationId: string, after = 0) => {
       const events = timeline.filter(event => event.sequence > after)
       return { events, cursor: events.at(-1)?.sequence ?? after, hasMore: false }
@@ -106,7 +116,7 @@ function executionFixture() {
     timeline.push({ ...base, eventId: `text-${runId}`, itemId: 'text', sequence: timeline.length + 1, type: 'text', update: 'snapshot', data: { text } })
     for (const listener of listeners) listener(timeline.at(-1)!)
   }
-  return { api, control, ask, finish, progress, say, reverts, submissions, execution: api as unknown as ExecutionDesktopAPI }
+  return { api, control, ask, finish, progress, say, reverts, submissions, changes, execution: api as unknown as ExecutionDesktopAPI }
 }
 
 const settings = (): ExecutionSettingsAPI => ({
@@ -298,6 +308,60 @@ it('M15 a text card sends to where its text is now, waits for the previous reque
   expect(f.api.deleteConversation).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'workspace', conversationId: 'c1' }))
 })
 
+it('refreshes a completed text target before follow-up and keeps a later explicit re-selection', async () => {
+  const f = executionFixture()
+  let source = 'P AAA ZZ', revision = 1
+  const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings(),
+    snapshot: async () => ({ documentId: 'doc', epoch: 'epoch', revision, model: { kind: 'markdown', source } }) as DocumentSnapshot })
+  cards.setWorkspace('workspace')
+  const key = cards.openText({ documentId: 'doc', target: { kind: 'markdown-range', from: 2, to: 5 },
+    content: 'AAA', label: '文字', anchor: { left: 0, top: 0 } })
+  await cards.send(key, '改写')
+  source = 'P BBBB ZZ'; revision++
+  const submissionId = f.finish('c1', 'run-1', { state: 'applied', fields: ['文字'],
+    target: { kind: 'markdown-range', from: 2, to: 6 }, content: 'BBBB' })
+  await waitFor(() => expect(cards.view(key)!.busy).toBe(false))
+  source = 'XP BBBB ZZ'; revision++
+  f.changes.set(submissionId, { submissionId, state: 'applied', fields: ['文字'],
+    target: { kind: 'markdown-range', from: 3, to: 7 }, content: 'BBBB' })
+  await cards.send(key, '继续改')
+  expect(f.api.send.mock.calls[1]![0].documents[0]!.selection).toEqual([{ kind: 'markdown-range', from: 3, to: 7 }])
+  f.finish('c1', 'run-2', { state: 'applied', fields: ['文字'], target: { kind: 'markdown-range', from: 3, to: 7 }, content: 'BBBB' })
+  await waitFor(() => expect(cards.view(key)!.busy).toBe(false))
+  cards.rebindText(key, { documentId: 'doc', target: { kind: 'markdown-range', from: 8, to: 10 }, content: 'ZZ', label: '新文字', anchor: { left: 0, top: 0 } })
+  await cards.send(key, '改新选区')
+  expect(f.api.send.mock.calls[2]![0].documents[0]!.selection).toEqual([{ kind: 'markdown-range', from: 8, to: 10 }])
+})
+
+it('preserves unsent card input once through conversation drafts, surfaces failures, and still ends on explicit close', async () => {
+  const f = executionFixture(), selected = { kind: 'markdown-range' as const, from: 0, to: 4 }
+  const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings(),
+    snapshot: async () => ({ documentId: 'doc', epoch: 'epoch', revision: 3, model: { kind: 'markdown', source: 'text' } }) as DocumentSnapshot })
+  cards.setWorkspace('workspace')
+  const key = cards.openText({ documentId: 'doc', target: selected, content: 'text', label: '文字', anchor: { left: 0, top: 0 } })
+  cards.setDraft(key, '  尚未发送的修改要求  ')
+  const first = cards.flushDrafts()
+  expect(cards.flushDrafts()).toBe(first)
+  await first; await cards.flushDrafts()
+  expect(f.api.createConversation).toHaveBeenCalledTimes(1)
+  expect(f.api.draft).toHaveBeenCalledTimes(1)
+  expect(f.api.draft.mock.calls[0]![0]).toMatchObject({ text: '  尚未发送的修改要求  ',
+    documents: [{ documentId: 'doc', epoch: 'epoch', revision: 3, selection: [selected], writable: [selected] }] })
+  expect(f.api.send).not.toHaveBeenCalled()
+  expect(cards.view(key)!.draft).toBe('  尚未发送的修改要求  ')
+  cards.setDraft(key, '继续输入')
+  f.api.draft.mockRejectedValueOnce(new Error('无法保存草稿'))
+  await expect(cards.flushDrafts()).rejects.toThrow('无法保存草稿')
+  expect(cards.view(key)!.draft).toBe('继续输入')
+  const persist = f.api.draft.getMockImplementation()!
+  f.api.draft.mockImplementationOnce(async input => { cards.setDraft(key, '保存期间的最新输入'); return persist(input) })
+  await cards.flushDrafts()
+  expect((await f.api.conversation('workspace', 'c1'))!.inputDraft).toBe('保存期间的最新输入')
+  await cards.closeText(key)
+  expect(f.api.deleteConversation).toHaveBeenCalledTimes(1)
+  expect(await f.api.conversation('workspace', 'c1')).toBeNull()
+})
+
 it('M15 a card sends against its conversation as it is now, while its earlier requests move it on', async () => {
   const f = executionFixture()
   const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings() })
@@ -353,4 +417,107 @@ it('M26 partial remains visible and terminal while an applied change stays undoa
     act(() => d.close('doc'))
     window.desktopAPI = undefined as unknown as typeof window.desktopAPI
   }
+})
+
+
+it.each(['capture', 'settings', 'conversation'] as const)('does not send an invisible task when a text card closes during %s', async stage => {
+  const f = executionFixture(), d = documentsFixture(), conf = settings()
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  if (stage === 'settings') { const read = conf.read; conf.read = async () => { await gate; return read() } }
+  if (stage === 'conversation') { const create = f.api.createConversation.getMockImplementation()!; f.api.createConversation.mockImplementation(async (...args) => { await gate; return create(...args) }) }
+  const snapshot = { documentId: 'doc', epoch: 'epoch', revision: 3, model: { kind: 'markdown', source: 'text' } } as DocumentSnapshot
+  const cards = new ElementCardController({ execution: () => f.execution, settings: () => conf, documents: () => d.documents,
+    snapshot: async () => { if (stage === 'capture') await gate; return snapshot } })
+  cards.setWorkspace('workspace')
+  const key = cards.openText({ documentId: 'doc', target: { kind: 'markdown-range', from: 0, to: 4 }, label: '文字', content: 'text', anchor: { left: 20, top: 20 } })
+  const sent = cards.send(key, '改写').catch(error => error)
+  await waitFor(() => expect(cards.view(key)?.busy).toBe(true))
+  if (stage === 'conversation') await waitFor(() => expect(f.api.createConversation).toHaveBeenCalledTimes(1))
+  const closed = cards.closeText(key); release()
+  await Promise.all([sent, closed])
+  expect(f.api.send).not.toHaveBeenCalled()
+  expect(cards.view(key)).toBeNull()
+  if (stage === 'conversation') await waitFor(() => expect(f.api.deleteConversation).toHaveBeenCalledTimes(1))
+})
+
+it('keeps the next draft while a previous request completes, and cancels pending preparation', async () => {
+  const f = executionFixture(), d = documentsFixture(), cards = new ElementCardController({ execution: () => f.execution, settings: () => settings(), documents: () => d.documents })
+  cards.setWorkspace('workspace')
+  const key = cards.ensure({ documentId: 'doc', target: target('a'), label: '标题' })
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  cards.setDraft(key, '第一次修改')
+  const sent = cards.send(key, '第一次修改', async () => { await gate; return capture('a') }).catch(error => error)
+  await waitFor(() => expect(cards.view(key)?.busy).toBe(true))
+  cards.setDraft(key, '下一次人工要求')
+  await cards.stop(key); release(); await sent
+  expect(f.api.send).not.toHaveBeenCalled()
+  expect(cards.view(key)).toMatchObject({ draft: '下一次人工要求', busy: false })
+  cards.forgetDocument('doc')
+})
+
+
+it('keeps a lost send ACK attached to its original submission until explicitly confirmed', async () => {
+  const f = executionFixture(), d = documentsFixture()
+  const api = f.execution
+  api.submission = vi.fn(async input => f.submissions.find(value => value.submissionId === input.submissionId) ?? null)
+  const actual = f.api.send.getMockImplementation()!
+  let lose = true
+  f.api.send.mockImplementation(async input => {
+    if (lose) { lose = false; throw new Error('transport lost before acknowledgement') }
+    return actual(input)
+  })
+  const cards = new ElementCardController({ execution: () => api, settings: () => settings(), documents: () => d.documents })
+  cards.setWorkspace('workspace')
+  const key = cards.ensure({ documentId: 'doc', target: target('a'), label: '标题' })
+  cards.setDraft(key, '原发送')
+  await expect(cards.send(key, '原发送', capture('a'))).rejects.toThrow()
+  expect(cards.view(key)).toMatchObject({ unconfirmed: true, draft: '原发送' })
+  const originalId = f.api.send.mock.calls[0]![0].submissionId
+  await expect(cards.send(key, '原发送', capture('a'))).rejects.toThrow('核对')
+  expect(f.api.send).toHaveBeenCalledTimes(1)
+  await cards.confirmSend(key)
+  expect(f.api.send.mock.calls[1]![0].submissionId).toBe(originalId)
+  expect(f.submissions).toHaveLength(1)
+  expect(cards.view(key)).toMatchObject({ unconfirmed: false, draft: '' })
+  cards.forgetDocument('doc')
+})
+
+it('retains control while a submitted text-card request awaits ACK and closes it afterwards', async () => {
+  const f = executionFixture(), d = documentsFixture()
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const original = f.api.send.getMockImplementation()!
+  f.api.send.mockImplementation(async input => { const accepted = await original(input); await gate; return accepted })
+  const cards = new ElementCardController({ execution: () => f.execution, settings: () => settings(), documents: () => d.documents,
+    snapshot: async () => ({ documentId: 'doc', epoch: 'epoch', revision: 3, model: { kind: 'markdown', source: 'text' } }) as DocumentSnapshot })
+  cards.setWorkspace('workspace')
+  const key = cards.openText({ documentId: 'doc', target: { kind: 'markdown-range', from: 0, to: 4 }, label: '文字', content: 'text', anchor: { left: 20, top: 20 } })
+  const sent = cards.send(key, '改写')
+  await waitFor(() => expect(f.api.send).toHaveBeenCalledTimes(1))
+  const closed = cards.closeText(key)
+  expect(cards.view(key)).toMatchObject({ closing: true })
+  release(); await Promise.all([sent, closed])
+  expect(cards.view(key)).toBeNull()
+  expect(f.api.deleteConversation).toHaveBeenCalledTimes(1)
+  expect(f.api.send).toHaveBeenCalledTimes(1)
+})
+
+
+it('pauses the accepted queue before stopping the card run and preserves a newer draft', async () => {
+  const f = executionFixture(), cards = new ElementCardController({ execution: () => f.execution, settings: () => settings() })
+  cards.setWorkspace('workspace')
+  const key = cards.ensure({ documentId: 'doc', target: target('a'), label: '标题' })
+  await cards.send(key, 'first', capture('a'))
+  f.control.next = 'queued'; await cards.send(key, 'second', capture('a'))
+  cards.setDraft(key, 'new teacher draft')
+  await cards.stop(key, true)
+  await waitFor(() => expect(cards.view(key)!.entries[1]!.queuePausedReason).toBe('user'))
+  expect(f.api.pauseQueue.mock.invocationCallOrder[0]).toBeLessThan(f.api.stop.mock.invocationCallOrder[0]!)
+  expect(cards.view(key)!.draft).toBe('new teacher draft')
+  expect(f.submissions[1]!.state).toBe('queued')
+  await cards.resumeQueue(key)
+  await waitFor(() => expect(cards.view(key)!.entries[1]!.queuePausedReason).toBeUndefined())
+  cards.forgetDocument('doc')
 })

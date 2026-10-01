@@ -14,8 +14,8 @@ export interface OpenAIChatProviderOptions {
   /** Maximum silence while waiting for a valid SSE data event; defaults to 120 seconds. */
   timeoutMs?: number
   progressTimeoutMs?: number
-  /** Absolute request ceiling, including credential resolution and streaming; defaults to 10 minutes. */
-  maxDurationMs?: number
+  /** Optional explicit request deadline. Absent/null relies on activity and progress clocks. */
+  maxDurationMs?: number | null
   maxResponseBytes?: number
   now?: () => number
   /** Receives only fixed-category protocol shape metadata, never response bytes. */
@@ -120,7 +120,9 @@ async function untilAbort<T>(work: () => Promise<T>, signal: AbortSignal): Promi
   } finally { signal.removeEventListener('abort', onAbort) }
 }
 export function modelToolWireName(name: string): string {
-  if (/^[A-Za-z0-9_-]{1,64}$/.test(name)) return name
+  // Provider-only spelling: the catalog and returned calls keep their original names.
+  const alias = name.replace(/[^A-Za-z0-9_-]/g, '_')
+  if (/^[A-Za-z0-9_-]{1,64}$/.test(alias)) return alias
   return `tool_${createHash('sha256').update(name).digest('hex').slice(0, 48)}`
 }
 export type ModelRequestPayload = Pick<ModelRequest, 'selection' | 'messages' | 'tools'>
@@ -213,7 +215,7 @@ export class OpenAIChatProvider implements ModelProvider {
         const kind = await httpFailureKind(response)
         const retryAfterMs = retryAfter(response.headers.get('retry-after'), (this.options.now ?? Date.now)())
         yield event({ type: 'response.failed', failure: { outcome: rejected ? 'rejected' : 'unknown', kind,
-          code: `http-${response.status}`, message: `模型服务返回 HTTP ${response.status}；未自动重试。`, httpStatus,
+          code: `http-${response.status}`, message: `模型服务返回 HTTP ${response.status}；是否重试由执行器依据错误类型决定。`, httpStatus,
           ...(providerRequestId ? { providerRequestId } : {}),
           ...(retryAfterMs !== undefined ? { retryAfterMs } : {}) } })
         return
@@ -321,14 +323,16 @@ export class OpenAIChatProvider implements ModelProvider {
     } catch (error) {
       const kind: ModelFailure['kind'] = controller.signal.aborted ? timeout ? 'timeout' : 'aborted' : error instanceof ProtocolError ? 'protocol' : 'transport'
       if (kind === 'transport' && this.options.onTransportDiagnostic) {
-        try { await this.options.onTransportDiagnostic(transportDiagnostic(error, response, httpStatus)) } catch { /* diagnostics cannot alter provider outcome */ }
+        const report = this.options.onTransportDiagnostic, detail = transportDiagnostic(error, response, httpStatus)
+        void Promise.resolve().then(() => report(detail)).catch(() => undefined)
       }
       if (kind === 'protocol' && error instanceof ProtocolError && failureShape && this.options.onProtocolShape) {
-        try { await this.options.onProtocolShape({ code: error.message, ...failureShape }) } catch { /* diagnostics cannot alter provider outcome */ }
+        const report = this.options.onProtocolShape, detail = { code: error.message, ...failureShape }
+        void Promise.resolve().then(() => report(detail)).catch(() => undefined)
       }
       yield event({ type: 'response.failed', failure: { outcome: attempted ? 'unknown' : 'not-sent', kind,
         code: error instanceof ProtocolError ? error.message : kind,
-        message: attempted ? '模型请求结果未能完整确认；未自动重试，请保留已收到的片段。' : '模型请求尚未发送。',
+        message: attempted ? '模型请求结果未能完整确认；片段与已提交工具保留，是否重试由执行器决定。' : '模型请求尚未发送。',
         ...(httpStatus !== undefined ? { httpStatus } : {}), ...(providerRequestId ? { providerRequestId } : {}) } })
     } finally {
       clock.dispose()

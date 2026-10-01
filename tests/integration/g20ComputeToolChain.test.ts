@@ -30,7 +30,7 @@ it.skipIf(!image)('routes a real isolated compute job through coordinator, job w
   const registry = new DocumentRegistry({ drivers: [], createId: () => 'unexpected-document', bindingKey: binding => binding.path,
     persistence: { async append() { throw new Error('No document transaction expected') }, async save() { throw new Error('No document save expected') } } })
   const never = async (): Promise<never> => { throw new Error('Compute must not touch document authority') }
-  const host = new HostToolCoordinator({ compute, jobs }, registry, { resolve: never, resolveImage: never, active: never,
+  const host = new HostToolCoordinator({ compute, jobs }, registry, { resolve: never, resolveImage: never, active: never, applied: never,
     actor: () => 'agent', ownsDocument: () => false, provideImage: never, readImage: never })
   await host.beginRun({ runId: 'compute-run', actor: 'agent', documents: [], fileAccess: { permission: 'workspace', workspaceRoot: root } })
   const submitted = data(await host.runCompute('compute-run', 'tool:compute-chain', { language: 'python',

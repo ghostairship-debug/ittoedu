@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { readUtf8File } from '../readUtf8File'
 import type { ExecutionRunRecord, ExecutionToolRecord } from '../../../shared/workbench/execution'
 import type { ToolResult } from '../../../shared/workbench/tools'
 import type { ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
@@ -9,7 +10,6 @@ import type { DocumentHostService } from '../DocumentHostService'
 import { createTextDriver } from '../../../core/drivers/TextDriver'
 import { ChangeReviewStore, type ChangeReviewCapture } from './ChangeReviewStore'
 
-const MAX_FILE_BYTES = 16 * 1024 * 1024
 const FILE_MUTATIONS = new Set(['file.create', 'file.write', 'file.patch', 'file.mkdir', 'file.copy', 'file.move', 'file.rename', 'file.trash'])
 const OUTSIDE_EFFECTS = new Set(['mcp.invoke', 'compute.run', 'job.cancel', 'job.start', 'media.start',
   'agent.delegate', 'image.generate', 'image.edit', 'build.import'])
@@ -61,16 +61,7 @@ export class ExecutionChangeReviewService {
   }
 
   private async ordinaryFile(filename: string): Promise<{ version: string; text: string; mode: number; identity?: string }> {
-    const [actual, stat, bytes] = await Promise.all([fs.realpath(filename), fs.lstat(filename), fs.readFile(filename)])
-    if (!samePath(actual, filename) || !stat.isFile() || stat.isSymbolicLink()) throw new Error('文件位置或类型已改变')
-    if (bytes.byteLength > MAX_FILE_BYTES) throw new Error('文件超过可保全的 16 MiB 上限')
-    const model = await textDriver.load(bytes)
-    if (model.kind !== 'text') throw new Error('文件不是普通 UTF-8 源文')
-    const version = hash(bytes)
-    const after = await fs.lstat(filename)
-    if (hash(await fs.readFile(filename)) !== version || after.ino !== stat.ino || after.dev !== stat.dev || after.mode !== stat.mode)
-      throw new Error('读取期间文件已改变')
-    return { version, text: model.source, mode: stat.mode, ...(stat.ino ? { identity: `${stat.dev}:${stat.ino}` } : {}) }
+    return readUtf8File(filename, { limit: 4000 })
   }
 
   /** Call after file preflight and before the side effect. Missing/oversize before content is recorded as unavailable. */
@@ -87,11 +78,10 @@ export class ExecutionChangeReviewService {
     if (live) before = { kind: 'document', documentId: live.documentId, epoch: live.epoch, revision: live.revision }
     else {
       try {
-        const current = await this.ordinaryFile(filename)
-        before = { kind: 'file', ...current }
+        before = await this.store.captureFile(filename)
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') before = { kind: 'missing' }
-        else before = { kind: 'unavailable', reason: error instanceof Error ? error.message : String(error) }
+        else throw new Error('无法保全修改前正文，未开始覆盖；请检查源文件和快照目录', { cause: error })
       }
     }
     const kind = input.toolInput && typeof input.toolInput === 'object' ? (input.toolInput as { kind?: unknown }).kind : undefined
@@ -177,7 +167,7 @@ export class ExecutionChangeReviewService {
       const before = capture.before.text
       let after = ''
       try { const current = await this.ordinaryFile(capture.path); if (current.version === capture.after.version) after = current.text } catch { /* preview is optional */ }
-      entry.preview = { before: before.slice(0, 4000), after: after.slice(0, 4000), truncated: before.length > 4000 || after.length > 4000 }
+      entry.preview = { before: before.slice(0, 4000), after: after.slice(0, 4000), truncated: (capture.before.blob?.characters ?? before.length) > 4000 || after.length >= 4000 }
     }
     if (entry.availability === 'ready' && capture?.after && source === 'host-file') {
       try {
@@ -233,6 +223,7 @@ export class ExecutionChangeReviewService {
     this.assertAuthority(filename, authority)
     if (!capture.after) return { entryId, status: 'unavailable', message: '缺少提交后版本证据' }
     return this.host.fileCoordinator.withFileOperation(async () => {
+      await this.host.assertFileAvailable(filename)
       if (this.live(filename)) return { entryId, status: 'conflict', message: '文件已在编辑器中打开，请使用文档历史回退' }
       let current: Awaited<ReturnType<typeof this.ordinaryFile>>
       try { current = await this.ordinaryFile(filename) }
@@ -258,12 +249,9 @@ export class ExecutionChangeReviewService {
         }
       }
       if (capture.before.kind !== 'file') return { entryId, status: 'unavailable', message: '没有可恢复的修改前正文' }
-      const bytes = Buffer.from(capture.before.text, 'utf8')
-      if (hash(bytes) !== capture.before.version) return { entryId, status: 'unavailable', message: '修改前快照校验失败' }
       const temporary = path.join(path.dirname(filename), `.${path.basename(filename)}.${randomUUID()}.tmp`)
       try {
-        const handle = await fs.open(temporary, 'wx')
-        try { await handle.writeFile(bytes); await handle.sync() } finally { await handle.close() }
+        await this.store.writeBefore(capture.before, temporary)
         await fs.chmod(temporary, capture.before.mode)
         if (!this.matchesAfter(await this.ordinaryFile(filename), capture.after!) || this.live(filename))
           return { entryId, status: 'conflict', message: '提交前文件再次改变，未覆盖' }

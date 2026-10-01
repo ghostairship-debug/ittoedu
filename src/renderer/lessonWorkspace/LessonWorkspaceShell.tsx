@@ -20,7 +20,7 @@ export interface LessonWorkspaceShellProps {
   onNewProject(): Promise<boolean>
   /** A new H5 presentation made from a PPT (M21). */
   onNewProjectFromPptx?(file: { name: string; bytes: Uint8Array }): Promise<boolean>
-  renderAssistant?(root: string | null, documentTarget: ActiveDocumentTarget | undefined, isCourse: boolean, drainDocuments: () => Promise<boolean>): ReactNode
+  renderAssistant?(root: string | null, documentTarget: ActiveDocumentTarget | undefined, isCourse: boolean, drainDocuments: (documentIds?: readonly string[]) => Promise<boolean>): ReactNode
   renderMaterial?(path: string, lesson: LessonWorkspace | null): ReactNode
   renderMaterials?(lesson: LessonWorkspace): ReactNode
   onDirtyChange?(dirty: boolean): void

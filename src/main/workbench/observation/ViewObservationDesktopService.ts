@@ -24,24 +24,34 @@ export class ViewObservationDesktopService {
     signal?: AbortSignal }): Promise<ViewObservationCapture> => {
     if (input.signal?.aborted) throw new Error('观察已取消')
     const { project, resources } = input.snapshot.model
-    const assets: Record<string, string> = {}
-    for (const [id, content] of Object.entries(resources.assets)) assets[id] = bytes(content)
-    const components: Record<string, Record<string, string>> = {}
-    for (const [key, files] of Object.entries(resources.components)) components[key] = Object.fromEntries(
-      Object.entries(files).map(([name, content]) => [name, bytes(content)]))
+    const token = randomUUID()
+    const binarySources = new Map<string, { bytes: Uint8Array; mime: string }>()
+    const resource = (content: Uint8Array, mime: string) => {
+      const pathname = `/_observation/${token}/${binarySources.size}`
+      binarySources.set(pathname, { bytes: content, mime })
+      return { url: `courseware-editor://app${pathname}`, byteLength: content.byteLength }
+    }
     const assetResources: Record<string, { url: string; byteLength: number }> = {}
-    for (const [id, asset] of Object.entries(project.assets)) if (!resources.assets[id] && asset.remote)
-      assetResources[id] = { url: asset.remote.url, byteLength: asset.byteLength }
-    const payload = { project, locationId: input.identity.locationId, assets, assetResources, components }
+    for (const [id, asset] of Object.entries(project.assets)) {
+      const content = resources.assets[id] ?? resources.assets[asset.id]
+      if (content) assetResources[id] = resource(content, asset.mimeType)
+      else if (asset.remote) assetResources[id] = { url: asset.remote.url, byteLength: asset.byteLength }
+    }
+    const componentResources = Object.fromEntries(Object.entries(resources.components).map(([key, files]) => [key,
+      Object.fromEntries(Object.entries(files).map(([name, content]) => [name, resource(content, 'application/octet-stream')]))]))
+    const payload = { project, locationId: input.identity.locationId, assets: {}, assetResources, components: {}, componentResources }
     const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64')
-    if (Buffer.byteLength(encoded) > 64 * 1024 * 1024) throw new Error('观察快照超过 64 MiB 上限')
+    if (Buffer.byteLength(encoded) > 64 * 1024 * 1024) throw new Error('观察结构快照超过 64 MiB 上限；资源字节不计入结构载荷')
 
     const isolatedSession = session.fromPartition(`observation-${randomUUID()}`)
-    installEditorProtocol(isolatedSession)
+    installEditorProtocol(isolatedSession, url => {
+      const entry = url.hostname === 'app' ? binarySources.get(url.pathname) : undefined
+      return entry ? new Response(Uint8Array.from(entry.bytes), { headers: { 'Content-Type': entry.mime, 'Cache-Control': 'no-store' } }) : undefined
+    })
     const network = new PreviewNetworkPolicy()
     const base = new URL(this.options.rendererEntryUrl)
     network.replaceBaseOrigins(['http:', 'https:'].includes(base.protocol) ? [base.origin] : [])
-    const token = randomUUID(), owner = { processId: 0, frameToken: token, documentToken: token }
+    const owner = { processId: 0, frameToken: token, documentToken: token }
     network.activateDocument(owner)
     network.replacePreviewLease({ leaseId: token, connectOrigins: project.network?.connectOrigins ?? [],
       remoteAssetUrls: Object.values(project.assets).flatMap(asset => asset.remote ? [asset.remote.url] : []) }, owner)
@@ -81,6 +91,8 @@ export class ViewObservationDesktopService {
       clearTimeout(timeout)
       input.signal?.removeEventListener('abort', onAbort)
       if (!worker.isDestroyed()) worker.destroy()
+      binarySources.clear()
+      isolatedSession.protocol.unhandle('courseware-editor')
       await isolatedSession.clearStorageData()
     }
   }

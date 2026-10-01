@@ -67,7 +67,7 @@ it('serializes the exact final HTTP body for budgets including native tools, par
     thinking: { type: 'enabled' }, reasoning_effort: 'high', max_tokens: 512, metadata: { title: '中文😀' } })
   expect(wire).not.toHaveProperty('n')
   expect(wire.tools[0]).toMatchObject({ type: 'function', function: { description: input.tools![0]!.description, parameters: input.tools![0]!.inputSchema } })
-  expect(wire.tools[0].function.name).toMatch(/^tool_[a-f0-9]+$/)
+  expect(wire.tools[0].function.name).toBe('text_replace')
   expect(wire.messages).toEqual(input.messages)
   expect(serialized).not.toContain('credential-one')
   expect(serialized).not.toContain('request-one')

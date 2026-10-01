@@ -78,8 +78,8 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
       <WorkspaceDocumentTabs props={props} layout={layout} hidden={editorFocus} onNewFromPptx={pptx.pick} />
       {pptx.element}
       {tabs.tabs.length === 0 && <section className="lesson-workbench-empty" aria-label="没有打开的文件">
-        <h2>从一份文档开始</h2>
-        <p>新建文档或打开文件夹；会话可以独立继续。</p>
+        <h2>在这里完成你的作品</h2>
+        <p>打开文件开始编辑，或在 AI 助手中描述目标，边创作边完善。</p>
         <div className="lesson-chat-empty-actions">
           <button type="button" onClick={() => void actions.run(() => tabs.createMarkdown())}>新建 Markdown</button>
           <button type="button" onClick={() => void actions.run(actions.newCourse)}>新建 H5 演示</button>
@@ -116,6 +116,7 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
               <LessonDocumentEditor
                 ref={tabs.editorRef(tab.id)}
                 sessionKey={tab.id}
+                active={tabs.activeTab === tab.id}
                 documentId={tab.documentId}
                 documentRef={{
                   kind: "lesson",
@@ -133,6 +134,7 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
               <LessonDocumentEditor
                 ref={tabs.editorRef(tab.id)}
                 sessionKey={tab.id}
+                active={tabs.activeTab === tab.id}
                 documentId={tab.documentId}
                 documentRef={{ kind: "file", path: tab.path || tab.name }}
                 port={props.documentPort}

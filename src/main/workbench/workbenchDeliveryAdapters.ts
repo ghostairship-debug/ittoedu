@@ -1,3 +1,5 @@
+import { publishNewFile, publicationIdentity } from './publishNewFile'
+import { DocumentSaveFailure } from '../../shared/workbench/documentSave'
 import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -86,27 +88,73 @@ export async function resolveExportDestination(
 
 function sha256(bytes: Uint8Array): string { return createHash('sha256').update(bytes).digest('hex') }
 
+const exportWrites = new Map<string, Promise<unknown>>()
+function serializeExport<T>(filename: string, work: () => Promise<T>): Promise<T> {
+  const key = process.platform === 'win32' ? path.resolve(filename).toLowerCase() : path.resolve(filename)
+  const next = (exportWrites.get(key) ?? Promise.resolve()).catch(() => undefined).then(work)
+  exportWrites.set(key, next)
+  void next.finally(() => { if (exportWrites.get(key) === next) exportWrites.delete(key) }).catch(() => undefined)
+  return next
+}
+
+/** The byte writer alone knows whether the publication syscall was entered. */
+async function publishExport(filename: string, bytes: Uint8Array, expectedVersion: string | undefined,
+  signal?: AbortSignal, prepared?: (identity: string | null) => Promise<void>): Promise<{ fileVersion: string }> {
+  const temporary = path.join(path.dirname(filename), `.${path.basename(filename)}.${randomUUID()}.tmp`)
+  let enteringPublication = false, published = false, retain = false
+  const check = async () => {
+    if (expectedVersion !== undefined && (await workbenchExportWriter.inspect(filename))?.fileVersion !== expectedVersion)
+      throw Object.assign(new Error('导出目标已改变；原文件保留，请重新核对'), { code: 'export-version-conflict' })
+  }
+  try {
+    if (!bytes.byteLength || bytes.byteLength > EXPORT_MAX_BYTES) throw new Error('导出字节大小无效')
+    signal?.throwIfAborted(); await check()
+    const handle = await fs.open(temporary, 'wx')
+    try { await handle.writeFile(bytes); await handle.sync() } finally { await handle.close() }
+    await prepared?.(await publicationIdentity(temporary))
+    await check(); signal?.throwIfAborted()
+    enteringPublication = true
+    if (expectedVersion === undefined) await publishNewFile(temporary, filename)
+    else await fs.rename(temporary, filename)
+    published = true
+    return { fileVersion: sha256(bytes) }
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    const knownRejection = ['EEXIST', 'EACCES', 'EPERM', 'EROFS', 'ENOSPC', 'EXDEV', 'ENOENT', 'EBUSY', 'ENOTSUP', 'export-version-conflict'].includes(code ?? '')
+    const phase = error instanceof DocumentSaveFailure ? error.publication
+      : published || enteringPublication && !knownRejection ? 'unknown' : 'not-published'
+    retain = phase === 'unknown'
+    throw error instanceof DocumentSaveFailure ? error : new DocumentSaveFailure(phase, error)
+  } finally {
+    if (!retain) await fs.rm(temporary, { force: true }).catch(() => undefined)
+  }
+}
+
 export const workbenchExportWriter = {
-  async inspect(filename: string): Promise<{ fileVersion: string; sha256: string } | null> {
+  async replaceExisting(filename: string, bytes: Uint8Array, expectedVersion: string, signal?: AbortSignal,
+    prepared?: (identity: string | null) => Promise<void>): Promise<{ fileVersion: string }> {
+    return serializeExport(filename, () => publishExport(filename, bytes, expectedVersion, signal, prepared))
+  },
+  async inspect(filename: string): Promise<{ fileVersion: string; sha256: string; publicationIdentity: string | null } | null> {
     let stat
-    try { stat = await fs.lstat(filename) }
+    try { stat = await fs.lstat(filename, { bigint: true }) }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error }
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('导出目标不是普通文件')
-    if (stat.size > EXPORT_MAX_BYTES) return { fileVersion: 'oversize', sha256: 'oversize' }
-    const digest = sha256(await fs.readFile(filename))
-    return { fileVersion: digest, sha256: digest }
-  },
-  async writeNew(filename: string, bytes: Uint8Array, signal?: AbortSignal): Promise<{ fileVersion: string }> {
-    if (bytes.byteLength === 0 || bytes.byteLength > EXPORT_MAX_BYTES) throw new Error('导出字节大小无效')
-    signal?.throwIfAborted()
-    const temporary = path.join(path.dirname(filename), `.${path.basename(filename)}.${randomUUID()}.tmp`)
+    const identity = stat.ino !== 0n ? `${stat.dev}:${stat.ino}` : null
+    if (stat.size > BigInt(EXPORT_MAX_BYTES)) return { fileVersion: 'oversize', sha256: 'oversize', publicationIdentity: identity }
+    const handle = await fs.open(filename, 'r')
     try {
-      const handle = await fs.open(temporary, 'wx')
-      try { await handle.writeFile(bytes); await handle.sync() } finally { await handle.close() }
-      // Hard-link publication is atomic and fails if the target already exists.
-      signal?.throwIfAborted()
-      await fs.link(temporary, filename)
-      return { fileVersion: sha256(bytes) }
-    } finally { await fs.rm(temporary, { force: true }).catch(() => undefined) }
+      const before = await handle.stat({ bigint: true })
+      if (before.dev !== stat.dev || before.ino !== stat.ino || before.size !== stat.size || before.mtimeNs !== stat.mtimeNs)
+        throw new Error('导出目标在查证期间改变，请重新查询原操作')
+      const digest = sha256(await handle.readFile()), after = await handle.stat({ bigint: true })
+      if (after.size !== before.size || after.mtimeNs !== before.mtimeNs || after.ctimeNs !== before.ctimeNs
+        || await publicationIdentity(filename) !== identity) throw new Error('导出目标在查证期间改变，请重新查询原操作')
+      return { fileVersion: digest, sha256: digest, publicationIdentity: identity }
+    } finally { await handle.close() }
+  },
+  async writeNew(filename: string, bytes: Uint8Array, signal?: AbortSignal,
+    prepared?: (identity: string | null) => Promise<void>): Promise<{ fileVersion: string }> {
+    return serializeExport(filename, () => publishExport(filename, bytes, undefined, signal, prepared))
   },
 }

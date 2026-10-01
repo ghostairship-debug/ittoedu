@@ -5,6 +5,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AttachmentService } from '../../src/main/workbench/attachments/AttachmentService'
 import { extractAttachmentMaterial } from '../../src/renderer/workbench/attachments/materialExtractionWorker'
+import { extractMaterial, listMaterials, readMaterial } from '../../src/main/workbench/execution/MaterialReadTools'
 import { MATERIAL_TEXT, diagramPng, r19LessonMaterials } from '../fixtures/r19LessonMaterials'
 import type { AttachmentExtractor } from '../../src/shared/workbench/attachments'
 
@@ -57,6 +58,28 @@ describe('actual Office extraction into immutable attachment representations', (
     await expect(extractAttachmentMaterial({ bytes: word.bytes, filename: word.name, pages: { from: 1, to: 1 } })).rejects.toThrow('没有可靠页边界')
   })
 
+  it('continues from an authorized derived source after its original conversation is deleted', async () => {
+    const service = await fixture()
+    const original = await service.receiveBytes({ name: 'two.pptx', bytes: twoSlides(), source: { kind: 'paste' } })
+    const first = await extractMaterial(service, new Set([original.id]), { attachmentId: original.id, pages: { from: 1, to: 1 } })
+    const authorized = new Set([first.derivedId])
+    expect(await listMaterials(service, authorized, {})).toMatchObject({ sources: [{ attachmentId: first.derivedId, derivedFrom: original.id }] })
+    await service.prepareConversationRelease({ version: 1, workspaceId: 'fixture-workspace', conversationId: 'original-owner', attachmentIds: [original.id] })
+    await service.collectConversationReleases([{ workspaceId: 'fixture-workspace', conversationId: 'derived-owner', attachmentIds: [first.derivedId] }])
+    expect((await service.readSnapshot(original.id)).id).toBe(original.id)
+    const second = await extractMaterial(service, authorized, { attachmentId: first.derivedId, pages: { from: 2, to: 2 } })
+    authorized.add(second.derivedId)
+    expect(second.data).toMatchObject({ derivedFrom: original.id, coverage: { selectedPages: { from: 2, to: 2 } } })
+    const text = (await service.readSnapshot(second.derivedId)).representations.find(item => item.kind === 'text')!
+    expect((await readMaterial(service, authorized, { attachmentId: second.derivedId, representationId: text.id })).data).toMatchObject({ text: 'Explicit second slide' })
+    expect((await extractMaterial(service, authorized, { attachmentId: original.id, pages: { from: 2, to: 2 } })).data.reused).toBe(true)
+    const unrelated = await service.receiveBytes({ name: original.name, bytes: twoSlides(), source: { kind: 'paste' } })
+    await expect(extractMaterial(service, authorized, { attachmentId: unrelated.id, pages: { from: 2, to: 2 } })).rejects.toThrow('当前显式输入')
+    await service.prepareConversationRelease({ version: 1, workspaceId: 'fixture-workspace', conversationId: 'derived-owner', attachmentIds: [...authorized] })
+    await service.collectConversationReleases([])
+    await expect(service.readSnapshot(original.id)).rejects.toThrow()
+  })
+
   it('retains unresolved Office content as gaps and rejects cancellation or inconsistent worker ranges without modifying the source snapshot', async () => {
     const word = r19LessonMaterials().find(item => item.format === 'docx')!, files = unzipSync(word.bytes)
     delete files['word/media/diagram.png']
@@ -71,4 +94,42 @@ describe('actual Office extraction into immutable attachment representations', (
     const slides = await inconsistent.receiveBytes({ name: 'slides.pptx', bytes: twoSlides(), source: { kind: 'drop' } })
     await expect(inconsistent.extract(slides.id, { pages: { from: 2, to: 2 } })).rejects.toMatchObject({ code: 'invalid-extraction' })
   })
+})
+
+it('extracts more than one hundred slides in bounded resumable batches without changing source identity', async () => {
+  const files = unzipSync(r19LessonMaterials().find(item => item.format === 'pptx')!.bytes)
+  const template = files['ppt/slides/slide1.xml'], relationships = files['ppt/slides/_rels/slide1.xml.rels']
+  files['ppt/presentation.xml'] = strToU8(`<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:sldIdLst>${Array.from({ length: 120 }, (_, i) => `<p:sldId id="${256+i}" r:id="slide${i+1}"/>`).join('')}</p:sldIdLst></p:presentation>`)
+  files['ppt/_rels/presentation.xml.rels'] = strToU8(`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${Array.from({ length: 120 }, (_, i) => `<Relationship Id="slide${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${i+1}.xml"/>`).join('')}</Relationships>`)
+  for (let i = 1; i <= 120; i++) {
+    files[`ppt/slides/slide${i}.xml`] = strToU8(strFromU8(template).replace(MATERIAL_TEXT, `Content page ${i}`))
+    files[`ppt/slides/_rels/slide${i}.xml.rels`] = relationships
+  }
+  const controller = new AbortController(), seen: number[] = []
+  let interrupt = true
+  const service = await fixture({ extract: async (input, options) => {
+    seen.push(input.fromPage ?? 1)
+    if (interrupt && input.fromPage === 33) { interrupt = false; controller.abort(new Error('fixture cancellation')); throw controller.signal.reason }
+    return extractAttachmentMaterial(input, options)
+  } })
+  const source = await service.receiveBytes({ name: 'large.pptx', bytes: zipSync(files), source: { kind: 'drop' } })
+  await expect(service.extract(source.id, { signal: controller.signal })).rejects.toThrow('fixture cancellation')
+  const all = await service.extract(source.id)
+  expect(seen).toEqual([1, 33, 33, 65, 97])
+  expect(all.coverage).toMatchObject({ totalPages: 120, complete: true, selectedPages: { from: 1, to: 120 } })
+  expect(new Set(all.representations.map(part => part.provenance.locator?.page)).size).toBe(120)
+  const tail = await service.extract(source.id, { pages: { from: 118, to: 120 } })
+  expect(tail.coverage).toMatchObject({ totalPages: 120, complete: false, selectedPages: { from: 118, to: 120 } })
+  expect(await service.readSnapshot(source.id)).toEqual(source)
+  expect((await service.extract(source.id)).id).toBe(all.id)
+})
+
+it('accepts a real Office package above the former 32 MiB entry limit', async () => {
+  const files = unzipSync(r19LessonMaterials().find(item => item.format === 'pptx')!.bytes)
+  files['unused-padding.bin'] = new Uint8Array(33 * 1024 * 1024)
+  const bytes = zipSync(files, { level: 0 }), service = await fixture()
+  expect(bytes.byteLength).toBeGreaterThan(32 * 1024 * 1024)
+  const source = await service.receiveBytes({ name: 'above32.pptx', bytes, source: { kind: 'drop' } })
+  expect((await service.extract(source.id)).coverage).toMatchObject({ format: 'pptx', complete: true })
+  expect((await service.readSnapshot(source.id)).byteLength).toBe(bytes.byteLength)
 })

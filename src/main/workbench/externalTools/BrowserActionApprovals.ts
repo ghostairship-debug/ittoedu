@@ -60,5 +60,7 @@ export class BrowserActionApprovals {
     catch { return false }
   }
 
+  invalidate(runId: string): void { this.runs.get(runId)?.pending.clear() }
+
   revokeRun(runId: string): void { this.runs.delete(runId) }
 }

@@ -12,7 +12,7 @@ export const htmlImportInputSchema = z.object({
   source: z.string().min(1).max(200),
   target: z.string().min(1).max(200),
   mode: z.enum(['auto', 'sections', 'whole']).default('auto'),
-  destinations: z.array(htmlImportDestinationSchema).min(1),
+  destinations: z.array(htmlImportDestinationSchema).default([]),
 }).strict()
 
 export type HtmlImportInput = z.infer<typeof htmlImportInputSchema>
@@ -26,7 +26,7 @@ export function htmlImportReceiptResult(receipt: HtmlImportReceipt): ToolResult 
 /** Single canonical tool schema projected by both the built-in gateway and external MCP. */
 export const htmlImportTool = {
   name: 'html.import' as const,
-  description: '将已授权 HTML text 文档按页拆分或整份导入 Course V9，执行页内脚本并保留公共样式。source、target 使用当前任务的 t... 文档句柄；destinations 的位置字段可填同一课件本轮 listChildren 返回的当前 t... 目标句柄，或 read(课件文档句柄) 返回的稳定 id。修改页面后须重新读取目标，旧句柄会失效。一次准入和提交，支持单次撤销。',
+  description: '将已授权 HTML text 文档按页拆分或整份导入 Course V9，执行页内脚本并保留公共样式。source、target 使用当前任务的 t... 文档句柄；destinations 的位置字段可填同一课件本轮 listChildren 返回的当前 t... 目标句柄，或 read(课件文档句柄) 返回的稳定 id。省略 destinations 时，宿主在唯一 Slide 表面按页顺序导入，复用空白初始页且不覆盖已有内容；有多个 Slide 表面时需明确目标。一次准入和提交，支持单次撤销。',
   inputSchema: htmlImportInputSchema,
   manual: { label: '导入 HTML 页面', group: 'edit' as const, targetKinds: ['document'] as const },
 }

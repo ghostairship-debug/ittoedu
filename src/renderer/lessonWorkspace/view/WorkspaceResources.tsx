@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { Folder } from 'lucide-react'
 import type { LessonWorkspaceViewProps } from './lessonWorkspaceViewTypes'
 import type { WorkbenchLayoutController } from './useWorkbenchLayoutPrefs'
 import { LessonDirectoryTree } from './LessonDirectoryTree'
@@ -24,9 +25,9 @@ export function WorkspaceResources({ props, layout, editorFocus = false, proPane
  const conversationsOpen = editorFocus ? proPanel === 'conversations' : layout.prefs.conversationsOpen
  return <nav ref={navigation} className="lesson-workspace-navigation" aria-label="工作空间导航" data-explorer-open={explorerOpen} data-conversations-open={conversationsOpen}>
    <section className="lesson-workspace-pane lesson-workspace-files" hidden={!explorerOpen} aria-label="资源管理器">
-     <header><strong>资源管理器</strong></header>
+     <header><strong>项目文件</strong></header>
      {state.workspace ? <div className="lesson-pane-body">
-       <button type="button" className="lesson-workspace-root" title="显示全部会话" style={{ border: 0, padding: 0, background: 'transparent', cursor: 'pointer', width: '100%' }} onClick={() => sessionDock.setScope?.(null)}>{state.workspace}</button>
+       {!props.workspaceFiles && <button type="button" className="workspace-tree-root" aria-label="工作空间根目录" title={`${state.workspace} · 显示全部会话`} onClick={() => sessionDock.setScope?.(null)}><Folder size={16} aria-hidden="true" /><span>{state.workspace.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) || state.workspace}</span></button>}
        <LessonDirectoryTree refreshVersion={state.treeVersion} files={props.workspaceFiles} directory={state.workspace} operation={props.operation}
          onFile={entry => { layout.setContentClosed(false); actions.setMobilePane('workbench'); void actions.run(() => actions.openFile(entry)) }}
          onDirectory={actions.setSelectedDirectory} onScope={setConversationScope} onSaveDirectoryChange={props.onSaveDirectoryChange} onImportHtml={props.onImportHtml} />

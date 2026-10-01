@@ -98,7 +98,8 @@ export function ImageResultCard({ api, owner, documents = window.desktopAPI?.doc
     <small>请求图片模型：{provenance.requestedImageModel}；执行路径：ChatGPT OAuth 图片{view.job.operation === 'edit' ? '编辑' : '生成'}接口；账号：{provenance.accountId}。</small>
     <small>配置计费来源：{billingLabels[provenance.billing.kind]}；单次实际费用未知，以账号账单为准。</small>
     {provenance.outputWarnings?.length ? <p role="status">实际图片的尺寸或格式与请求不同，请预览确认后再应用。</p> : null}
-    {view.job.failure && <p role="alert">{view.job.failure.message}</p>}
+    {view.job.retryAt && <p role="status">当前图片作业等待限流冷却，预计 {new Date(view.job.retryAt).toLocaleTimeString()} 后继续；可停止，不会更换模型或账号。</p>}
+    {view.job.failure && !view.job.retryAt && <p role="alert">{view.job.failure.message}</p>}
     {['preparing', 'running'].includes(view.job.status) && <button type="button" disabled={busy} onClick={() => void act(async () => setView(await api.stop(owner)))}>停止图片请求</button>}
     {applied.length > 0 && <p>已应用 {applied.length} 次；文件保存状态请查看文档头部。撤销后当前内容以文档为准。</p>}
     {view.job.resources.length > 0 && <>

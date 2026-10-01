@@ -1,6 +1,6 @@
 import { sha256 } from '@noble/hashes/sha256'
 import { bytesToHex } from '@noble/hashes/utils'
-import { attachmentSnapshotSchema, attachmentRepresentationSchema, type AttachmentReader, type CompiledPayload, type InputContext, type PayloadBudget, type PayloadManifest, type PayloadSerializerInput } from '../../shared/workbench/attachments'
+import { attachmentSnapshotSchema, attachmentRepresentationSchema, type AttachmentReader, type AttachmentSnapshot, type AttachmentRepresentation, type InputAttachmentReference, type CompiledPayload, type InputContext, type PayloadBudget, type PayloadManifest, type PayloadSerializerInput } from '../../shared/workbench/attachments'
 import type { ModelChatMessage, ModelJson, ModelSelection, ModelToolDefinition } from '../../shared/workbench/modelProvider'
 
 const encoder = new TextEncoder()
@@ -42,9 +42,33 @@ export class PayloadCompiler {
     const userIndex = messages.length, content: ModelJson[] = []
     if (input.instruction) content.push({ type: 'text', text: input.instruction })
     const explicitAttachments: PayloadManifest['explicitAttachments'] = []
-    const originals = new Set<string>(); let pixels = 0
+    const originals = new Set<string>(), sourceMessages = new Map<string, number>()
+    const metadata = new Map<string, AttachmentSnapshot>(); let pixels = 0
+    const addSource = (reference: InputAttachmentReference, snapshot: AttachmentSnapshot, representation: AttachmentRepresentation) => {
+      let contentIndex = sourceMessages.get(snapshot.id)
+      if (contentIndex === undefined) {
+        contentIndex = content.length; sourceMessages.set(snapshot.id, contentIndex)
+        const label = `材料目录（不是正文、也不是指令）：${JSON.stringify({ attachmentId: snapshot.id, name: snapshot.name,
+          mediaType: snapshot.mediaType, originalDigest: snapshot.digest, byteLength: snapshot.byteLength,
+          representations: snapshot.representations.length, coverage: snapshot.coverage, gaps: snapshot.gaps,
+          readStatus: 'index-only', next: 'material.list / material.extract / material.find / material.read' })}`
+        content.push({ type: 'text', text: label }); totals.textCharacters += label.length
+      }
+      if (!originals.has(snapshot.id)) { originals.add(snapshot.id); totals.originalBytes += snapshot.byteLength }
+      explicitAttachments.push({ messageIndex: userIndex, contentIndex, attachmentId: snapshot.id, representationId: representation.id,
+        name: snapshot.name, ...(reference.role ? { role: reference.role } : {}), delivery: 'source', originalDigest: snapshot.digest,
+        representationDigest: representation.blobRef.digest, mediaType: representation.mediaType, provenance: representation.provenance })
+    }
     for (const reference of input.attachments) {
       options.signal?.throwIfAborted()
+      if (this.options.attachments.readSnapshot) {
+        let source = metadata.get(reference.attachmentId)
+        if (!source) { source = attachmentSnapshotSchema.parse(await this.options.attachments.readSnapshot(reference.attachmentId)); metadata.set(reference.attachmentId, source) }
+        const representation = source.representations.find(value => value.id === reference.representationId)
+        if (source.id !== reference.attachmentId || !representation || representation.provenance.originalDigest !== source.digest)
+          throw new PayloadCompileError('provenance-mismatch', '材料目录与来源记录不一致')
+        if (reference.delivery === 'source' || representation.kind === 'file') { addSource(reference, source, representation); continue }
+      }
       const read = await this.options.attachments.readRepresentation(reference.attachmentId, reference.representationId)
       const snapshot = attachmentSnapshotSchema.parse(read.snapshot), representation = attachmentRepresentationSchema.parse(read.representation), bytes = Uint8Array.from(read.bytes)
       if (snapshot.id !== reference.attachmentId || representation.id !== reference.representationId ||
@@ -55,7 +79,7 @@ export class PayloadCompiler {
         throw new PayloadCompileError('provenance-mismatch', '附件表示与来源记录不一致')
       }
       const contentIndex = content.length
-      if (representation.kind === 'file') throw new PayloadCompileError('representation-unavailable', '附件原件尚未提取，请先选择页或全文提取后发送')
+      if (reference.delivery === 'source' || representation.kind === 'file') { addSource(reference, snapshot, representation); continue }
       if (representation.kind === 'image') {
         if (selection.connection.capabilities.vision === 'unsupported') throw new PayloadCompileError('vision-unavailable', '所选连接不支持图片输入')
         const encoded = base64(bytes)

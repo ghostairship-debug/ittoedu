@@ -1,10 +1,12 @@
+import { publishNewFile } from '../publishNewFile'
+import { DocumentSaveFailure } from '../../../shared/workbench/documentSave'
 import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
 import { validateWorkspaceEntryName } from '../WorkspaceFiles'
 
-const MAX_ARTIFACT_BYTES = 64 * 1024 * 1024
+const MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const missing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === 'ENOENT'
 const code = (error: unknown) => (error as NodeJS.ErrnoException)?.code
@@ -43,7 +45,7 @@ export interface ArtifactDeliveryPreflight {
 }
 export interface ArtifactDeliveryResult {
   operationId: string
-  status: 'written' | 'conflict' | 'stopped' | 'unknown'
+  status: 'written' | 'rejected' | 'conflict' | 'stopped' | 'unknown'
   path: string
   sourceKind: ArtifactSourceKind
   sourceId: string
@@ -73,6 +75,7 @@ export interface HostArtifactDeliveryOptions {
   journalDirectory: string
   /** Use DocumentHostService.fileCoordinator.withFileOperation. */
   withFileOperation<T>(work: () => Promise<T>): Promise<T>
+  assertTarget?(filename: string): void | Promise<void>
 }
 
 async function verifyNoSymlinkDirectory(directory: string): Promise<string> {
@@ -123,7 +126,7 @@ export class HostArtifactDeliveryService {
     catch (error) { if (missing(error)) return null; throw error }
     const record = JSON.parse(bytes) as DeliveryRecord
     if (record.schemaVersion !== 1 || record.operationId !== operationId || !record.requestDigest
-      || !['prepared', 'written', 'conflict', 'stopped', 'unknown'].includes(record.status))
+      || !['prepared', 'written', 'rejected', 'conflict', 'stopped', 'unknown'].includes(record.status))
       throw new Error('成果回执记录无效；结果未知，不能自动重试')
     return record
   }
@@ -158,6 +161,8 @@ export class HostArtifactDeliveryService {
     } catch (error) { return missing(error) ? 'missing' : 'different' }
   }
   private async resultFromRecord(record: DeliveryRecord): Promise<ArtifactDeliveryResult> {
+    if (record.status === 'rejected' || record.status === 'conflict' || record.status === 'stopped')
+      return publicReceipt(record, record.status)
     const observed = await this.observed(record)
     if (record.status === 'prepared') return { ...publicReceipt(record, 'unknown', observed),
       message: '交付在最终回执前中断；即使目标字节相同，也不能证明来源，本次不会自动重放' }
@@ -186,7 +191,7 @@ export class HostArtifactDeliveryService {
     if (this.stoppedRuns.has(input.runId)) throw new DeliveryStopped()
     if (!input.runId || input.runId.length > 512 || !input.sourceId || input.sourceId.length > 512
       || !['image', 'compute'].includes(input.sourceKind)) throw new Error('成果来源身份无效')
-    if (!(input.bytes instanceof Uint8Array) || input.bytes.byteLength > MAX_ARTIFACT_BYTES) throw new Error('成果字节无效或超过 64 MiB')
+    if (!(input.bytes instanceof Uint8Array) || input.bytes.byteLength > MAX_ARTIFACT_BYTES) throw new Error('成果字节无效或超过 256 MiB')
     const bytes = Uint8Array.from(input.bytes), digest = hash(bytes)
     const scope = await this.preflight(input)
     if (scope.approvalRequired && !input.approvedTargetPath) throw new Error('成果写入需要本次目标的明确批准')
@@ -209,24 +214,32 @@ export class HostArtifactDeliveryService {
     const existing = await this.createRecord(prepared)
     if (existing.requestDigest !== prepared.requestDigest) throw new Error('同一成果操作编号不能用于不同目标或字节')
     if (existing !== prepared) return this.resultFromRecord(existing)
-    let linked = false
+    let publication: 'not-published' | 'unknown' | 'published' = 'not-published'
     try {
       await this.options.withFileOperation(async () => {
         const scope = await this.preflight(input)
+        await this.options.assertTarget?.(scope.path)
         if (!samePath(scope.path, prepared.path)) throw new Error('成果目标在提交前改变')
         this.assertLive(input)
         const temporary = path.join(scope.parent, `.${path.basename(scope.path)}.${randomUUID()}.tmp`)
-        const handle = await fs.open(temporary, 'wx')
-        try { await handle.writeFile(bytes); await handle.sync() }
-        finally { await handle.close() }
+        let owned = false
         try {
-          // The hard link publishes fully staged bytes atomically and fails if
-          // another writer created the target. Rename would overwrite on some hosts.
+          const handle = await fs.open(temporary, 'wx')
+          owned = true
+          try { await handle.writeFile(bytes); await handle.sync() }
+          finally { await handle.close() }
           await verifyNoSymlinkDirectory(scope.parent)
           this.assertLive(input)
-          await fs.link(temporary, scope.path)
-          linked = true
-        } finally { await fs.rm(temporary, { force: true }).catch(() => undefined) }
+          publication = 'unknown'
+          try { await publishNewFile(temporary, scope.path) }
+          catch (error) {
+            if (error instanceof DocumentSaveFailure) publication = error.publication
+            throw error
+          }
+          publication = 'published'
+        } finally {
+          if (owned && publication !== 'unknown') await fs.rm(temporary, { force: true }).catch(() => undefined)
+        }
       })
       await verifyNoSymlinkDirectory(path.dirname(prepared.path))
       const observed = await this.observed(prepared)
@@ -235,11 +248,12 @@ export class HostArtifactDeliveryService {
       await this.updateRecord(written)
       return publicReceipt(written, 'written')
     } catch (error) {
-      const status: ArtifactDeliveryResult['status'] = linked ? 'unknown' : code(error) === 'EEXIST' ? 'conflict'
-        : error instanceof DeliveryStopped ? 'stopped' : 'unknown'
+      const status: ArtifactDeliveryResult['status'] = publication !== 'not-published' ? 'unknown'
+        : code(error) === 'EEXIST' ? 'conflict' : error instanceof DeliveryStopped ? 'stopped' : 'rejected'
       const record: DeliveryRecord = { ...prepared, status,
         message: status === 'conflict' ? '目标文件已存在，未覆盖' : status === 'stopped' ? '运行停止，成果未交付'
-          : error instanceof Error ? error.message : '交付结果未知' }
+          : status === 'rejected' ? `成果尚未发布，可处理原因后再次保存：${error instanceof Error ? error.message : String(error)}`
+            : error instanceof Error ? error.message : '交付结果未知' }
       await this.updateRecord(record).catch(() => undefined)
       return publicReceipt(record, status, status === 'unknown' ? await this.observed(record) : undefined)
     }

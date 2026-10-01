@@ -146,7 +146,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments }: {
   async function preserveAll() {
     // 同 flushAll：preserveDraft 期间的重渲染会删/增注册表键，必须按 await 前的快照遍历。
     for (const [filename, editor] of [...documents.current]) {
-      if (!(await editor.session.preserveDraft())) { setActiveTab(tabsRef.current.find(tab => tab.id === filename)?.id ?? filename); return false }
+      if (!(await editor.preserveDraft())) { setActiveTab(tabsRef.current.find(tab => tab.id === filename)?.id ?? filename); return false }
     }
     return true
   }
@@ -266,8 +266,11 @@ export function useDocumentTabsController({ documentPort, courseDocuments }: {
     window.addEventListener('keydown', keydown, true)
     return () => window.removeEventListener('keydown', keydown, true)
   }, [activeTab, courseDocuments])
-  const drainAll = async () => {
-    for (const editor of [...documents.current.values()]) if (!await editor.session.drain()) return false
+  const drainAll = async (documentIds?: readonly string[]) => {
+    for (const editor of [...documents.current.values()]) {
+      if (documentIds && !documentIds.includes(editor.session.documentId ?? '')) continue
+      if (!await editor.session.drain()) return false
+    }
     return true
   }
   return { tabs, activeTab, isCourseActive: tabs.some(tab => tab.id === activeTab && tab.kind === 'course'), createMarkdown, setActiveTab, focusDocument, openTab, closeTab, removeTab, registerEditor, editorRef, updateDirty, flushAll, saveActiveDocument, drainAll, preserveAll, closeAll, disposeDocuments, activeDocumentTarget, selectionChanged, sendContextualCommand }

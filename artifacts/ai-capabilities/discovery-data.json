@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "semanticVersion": "c9b14a65b99f389ff6100ba151ece584668cbb33ccf5a9607b44c11e60fd8d89",
+  "semanticVersion": "c63c42d375affe484533f97169027639b29ab24708aa82637560a1eb9c7687c6",
   "entries": [
     {
       "id": "asset.font.import",
@@ -1001,7 +1001,7 @@
     {
       "id": "reference:build-courseware-project/build-method",
       "kind": "reference",
-      "label": "构建方法与完整质量标准",
+      "label": "外部 Builder 与完整工程任务参考",
       "path": "skills/build-courseware-project/references/build-method.md",
       "scopes": [
         "slide:scene",
@@ -1020,8 +1020,8 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "构建方法与完整质量标准",
-      "keywords": "# 构建方法与完整质量标准 ## 外部案例 Builder V2 适用范围 ## 1. 外部案例冷启动 ## 2. 外部案例发现能力 ## 3. 载体所有权 ## 4. 资产与任务图（动手前） ## 5. 外部案例用产品 API 写工程 ## 6. 先做最高风险纵切 ## 7. 增量构建与 Worker ## 8. 保持可编辑 ## 9. 验证与交付 ## 停止条件 ### 软件内与外部 Builder V2 共用字节编码"
+      "summary": "外部 Builder 与完整工程任务参考",
+      "keywords": "# 外部 Builder 与完整工程任务参考 ## 外部案例 Builder V2 适用范围 ## 1. 外部案例冷启动 ## 2. 外部案例发现能力 ## 3. 载体所有权 ## 4. 资产与任务图（动手前） ## 5. 外部案例用产品 API 写工程 ## 6. 先做最高风险纵切 ## 7. 增量构建与 Worker ## 8. 保持可编辑 ## 9. 验证与交付 ## 停止条件 ### 软件内与外部 Builder V2 共用字节编码"
     },
     {
       "id": "reference:build-courseware-project/current-capabilities",
@@ -1074,9 +1074,34 @@
       "keywords": "# 任意课例目录构建 ## 两个根目录不得混淆 ## 自主定位 editor-root ## 课例构建模块合同 ## 按需发现与复用示例 ## 调用与失败边界"
     },
     {
+      "id": "reference:build-courseware-project/html-draft-contract",
+      "kind": "reference",
+      "label": "HTML 初稿的最小承载合同",
+      "path": "skills/build-courseware-project/references/html-draft-contract.md",
+      "scopes": [
+        "slide:scene",
+        "slide:surface",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:surface",
+        "spatial-2d:global"
+      ],
+      "carriers": [
+        "native",
+        "recipe",
+        "existing-component",
+        "generated-component",
+        "runtime"
+      ],
+      "summary": "HTML 初稿的最小承载合同",
+      "keywords": "# HTML 初稿的最小承载合同"
+    },
+    {
       "id": "reference:build-courseware-project/main-progression",
       "kind": "reference",
-      "label": "正文主推进构建与 QA 合同",
+      "label": "教学推进与操作边界",
       "path": "skills/build-courseware-project/references/main-progression.md",
       "scopes": [
         "slide:scene",
@@ -1095,8 +1120,8 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "正文主推进构建与 QA 合同",
-      "keywords": "# 正文主推进构建与 QA 合同 ## 构建前路径检查 ## 实现边界 ## 真实 Player 与 HTML 验证顺序"
+      "summary": "教学推进与操作边界",
+      "keywords": "# 教学推进与操作边界"
     },
     {
       "id": "reference:build-courseware-project/page-design",
@@ -1176,7 +1201,7 @@
     {
       "id": "reference:build-courseware-project/validation-boundaries",
       "kind": "reference",
-      "label": "验证边界",
+      "label": "初稿、局部精修与完整验收",
       "path": "skills/build-courseware-project/references/validation-boundaries.md",
       "scopes": [
         "slide:scene",
@@ -1195,8 +1220,8 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "验证边界",
-      "keywords": "# 验证边界 ## 每个实现单元 ## 整课 ## 按实际使用的能力补充 ## 结论用语"
+      "summary": "初稿、局部精修与完整验收",
+      "keywords": "# 初稿、局部精修与完整验收 ## 默认初稿 ## 人主导局部精修 ## 用户要求的完整检查"
     },
     {
       "id": "reference:component-api4/authoring",
@@ -1247,7 +1272,7 @@
     {
       "id": "reference:orchestrate-courseware/main-progression",
       "kind": "reference",
-      "label": "正文主推进设计合同",
+      "label": "教学推进与操作边界",
       "path": "skills/orchestrate-courseware/references/main-progression.md",
       "scopes": [
         "slide:scene",
@@ -1266,8 +1291,8 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "正文主推进设计合同",
-      "keywords": "# 正文主推进设计合同 ## 主路径与终点 ## 控制器边界 ## 提交确认前复核"
+      "summary": "教学推进与操作边界",
+      "keywords": "# 教学推进与操作边界"
     },
     {
       "id": "reference:orchestrate-courseware/teaching-design-quality",
@@ -1471,7 +1496,7 @@
     {
       "id": "skill:build-courseware-project",
       "kind": "skill",
-      "label": "构建互动课件工程",
+      "label": "导入并交付初稿",
       "path": "skills/build-courseware-project/SKILL.md",
       "scopes": [
         "slide:scene",
@@ -1490,13 +1515,13 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "从教学策划和整课框架 HTML 做后置表示规划，按页导入组装、视觉精修并交付可编辑 Course Project V9；支持默认两次确认与明确的自动创作模式。",
-      "keywords": "# 构建互动课件工程 ## 1. 后置表示规划 ## 2. 导入与组装 ## 3. 视觉精修与交付 ## 导入故障与交付收口"
+      "summary": "将已有教学 HTML 机械导入为可编辑课件并真实保存；默认交付初稿，选页精修由用户发起。",
+      "keywords": "# 导入并交付初稿"
     },
     {
       "id": "skill:orchestrate-courseware",
       "kind": "skill",
-      "label": "编排互动课件",
+      "label": "生成教学初稿",
       "path": "skills/orchestrate-courseware/SKILL.md",
       "scopes": [
         "slide:scene",
@@ -1515,8 +1540,8 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "根据教学材料完成教学策划与整课框架 HTML；默认在策划和框架后各请教师确认一次，明确要求根据材料自动创作时连续推进。表示规划和工程组装交给 build-courseware-project。",
-      "keywords": "# 编排互动课件 ## 模式与确认 ## 1. 教学策划 ## 2. 框架 HTML 与讲解说明 ## 3. 交给 Builder"
+      "summary": "按教学材料生成内容完整的课件初稿；默认简短策划、整课 HTML，再交给 Builder 机械导入保存。支持指定阶段审阅与局部修订。",
+      "keywords": "# 生成教学初稿"
     },
     {
       "id": "slide.interaction",
@@ -1744,6 +1769,7 @@
     "skills/build-courseware-project/references/build-method.md",
     "skills/build-courseware-project/references/current-capabilities.md",
     "skills/build-courseware-project/references/external-case-build.md",
+    "skills/build-courseware-project/references/html-draft-contract.md",
     "skills/build-courseware-project/references/main-progression.md",
     "skills/build-courseware-project/references/page-design.md",
     "skills/build-courseware-project/references/ppt-import-review.md",

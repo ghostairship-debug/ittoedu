@@ -63,3 +63,21 @@ describe('M29 outgoing MCP authorization', () => {
       .toMatchObject({ status: 'rejected' })
   })
 })
+
+it('discovers an authorized tool on page 25 and rejects real cursor loops', async () => {
+  let calls = 0, loop = false
+  const client = { listTools: vi.fn(async () => {
+    calls++
+    return calls === 25 && !loop ? { tools: [{ name: 'page_read', inputSchema: { type: 'object', properties: {} } }] }
+      : { tools: [], nextCursor: loop ? 'same-cursor' : `p-${calls}` }
+  }), callTool: vi.fn(), close: vi.fn(async () => undefined) }
+  const service = new McpClientService({ connection, connect: async () => client })
+  service.beginRun('long-discovery', { allowedTools: ['page_read'], writeAllowed: false })
+  expect(await service.discover('long-discovery')).toMatchObject({ status: 'available', tools: [{ remoteName: 'page_read' }] })
+  expect(calls).toBe(25)
+  loop = true
+  service.beginRun('loop', { allowedTools: ['page_read'], writeAllowed: false })
+  expect(await service.discover('loop')).toMatchObject({ status: 'failed', reason: '外部工具分页游标重复' })
+  expect(calls).toBe(27)
+  await service.endRun('long-discovery'); await service.endRun('loop')
+})

@@ -10,6 +10,7 @@ export interface JavaScriptClosureProof {
   internalSink(node: JsNode): ClosureProof
   auditedNode(node: JsNode): boolean
   styleReceiver(node: JsNode): boolean
+  dataReceiver(node: JsNode): boolean
   memberName(node: JsNode): string | undefined
   capabilityErrors: JsNode[]
   embeddedInputs: Array<{ value: JsNode; path: string[]; name: string; kind: 'css' | 'html'; proof: ClosureProof }>
@@ -23,6 +24,9 @@ const UNKNOWN: Value = { kind: 'unknown' }
 const UNKNOWN_PROOF: ClosureProof = { kind: 'unknown' }
 const RESOURCE_FIELDS = new Set(['src', 'srcSet', 'srcset', 'href', 'xlinkHref', 'poster', 'data', 'action', 'formAction'])
 export const CSS_RESOURCE_PROPERTIES = new Set(['fill', 'stroke', 'filter', 'clipPath', 'clip-path', 'mask', 'cursor', 'markerStart', 'marker-start', 'markerMid', 'marker-mid', 'markerEnd', 'marker-end'])
+/** These declarations cannot load a URL, even when their value is computed. */
+const NON_RESOURCE_STYLES = new Set(('opacity transform transformOrigin translate rotate scale display visibility position top right bottom left inset width height minWidth minHeight maxWidth maxHeight margin marginTop marginRight marginBottom marginLeft padding paddingTop paddingRight paddingBottom paddingLeft gap rowGap columnGap zIndex color backgroundColor fontSize fontFamily fontWeight fontStyle lineHeight letterSpacing wordSpacing textAlign whiteSpace overflow overflowX overflowY borderWidth borderStyle borderColor borderRadius flex flexGrow flexShrink flexBasis flexDirection flexWrap alignItems alignSelf justifyContent gridTemplateColumns gridTemplateRows order pointerEvents transition transitionProperty transitionDuration transitionDelay animation animationName animationDuration animationDelay').split(' '))
+export const nonResourceStyle = (name: string | null | undefined): boolean => !!name && NON_RESOURCE_STYLES.has(name.replace(/-([a-z])/g, (_, char: string) => char.toUpperCase()))
 const FUNCTIONS = new Set(['FunctionDeclaration', 'FunctionExpression', 'ArrowFunctionExpression'])
 const keyOf = (node: JsNode): string | undefined => node.type === 'Identifier' ? String(node.name)
   : node.type === 'Literal' && (typeof node.value === 'string' || typeof node.value === 'number') ? String(node.value) : undefined
@@ -625,6 +629,18 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     if (receiver.name === 'Array' && memberName(callee) === 'from') return args.length === 1 && domCollection(args[0], seen)
     return receiver.name === 'document' && memberName(callee) === 'querySelectorAll' && args.length === 1
   }
+  // A local container remains a data receiver when it stores a runtime answer.
+  // Its contents need not be statically known: assigning input.value or a function
+  // parameter does not turn the container itself into a DOM/style resource sink.
+  // This fact does not propagate through indexed reads to the stored value.
+  const localContainer = (node: JsNode, seen = new Set<Binding>()): Binding | undefined => {
+    if (node.type !== 'Identifier') return undefined
+    const binding = bindingOf(node)
+    if (!binding?.initial || binding.duplicate || seen.has(binding) || assignments.has(binding)) return undefined
+    if (['ArrayExpression', 'ObjectExpression'].includes(binding.initial.type)) return binding
+    return localContainer(binding.initial, new Set(seen).add(binding))
+  }
+  const dataReceiver = (node: JsNode): boolean => !!localContainer(node)
   const inInert = (node: JsNode): boolean => { let current: JsNode | undefined = node; while (current) { if (inertCalls.has(current)) return true; current = parents.get(current) } return false }
   for (const node of allNodes) {
     if (inLibrary(node) || inInert(node)) continue
@@ -632,6 +648,7 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     if (!parent) continue
     const name = node.type === 'MemberExpression' ? memberName(node) : node.type === 'Identifier' && isReference(node) && !bindingOf(node) ? String(node.name) : undefined
     if (node.type === 'MemberExpression' && node.computed && name === undefined
+      && !dataReceiver(node.object as JsNode)
       && ((parent.type === 'CallExpression' && parent.callee === node) || !dataValue(node.object as JsNode))
       && !(indexedDomUse(node) && domCollection(node.object as JsNode))
       && !resourceInputs.some(input => input.value === node && input.proof.kind === 'proven-resource')
@@ -654,6 +671,7 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     embeddedInputs,
     capabilityErrors,
     styleReceiver,
+    dataReceiver,
     memberName,
     auditedNode: node => !!audited && !frameworkError && inLibrary(node),
     internalSink(node) {

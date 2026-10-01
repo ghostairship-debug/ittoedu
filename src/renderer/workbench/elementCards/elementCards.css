@@ -19,7 +19,7 @@
 .element-ai-card__notice { color: #92400e; }
 .element-ai-card__form { display: grid; gap: 6px; }
 .element-ai-card__form textarea { box-sizing: border-box; width: 100%; min-height: 48px; max-height: min(160px, 18dvh); resize: vertical; font: inherit; }
-.element-ai-card__actions { display: flex; justify-content: flex-end; gap: 6px; }
+.element-ai-card__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .element-ai-card__actions button { padding: 4px 12px; }
 .element-ai-card__confirm { display: grid; gap: 6px; padding: 8px; border: 1px solid #f59e0b; border-radius: 6px; background: #fffbeb; color: #78350f; }
 

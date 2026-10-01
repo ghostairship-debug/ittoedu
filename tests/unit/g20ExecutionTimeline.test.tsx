@@ -81,7 +81,7 @@ it('keeps actual tool arguments, output, differences and errors safe while disti
   const card = screen.getByRole('article', { name: '工具执行' }); expand(card)
   expect(within(card).getByText('已运行')).toBeInTheDocument()
   expect(within(card).getByText('应用失败')).toBeInTheDocument()
-  expect(within(card).getByText('保存未确认')).toBeInTheDocument()
+  expect(within(card).queryByText('保存未确认')).not.toBeInTheDocument()
   expect(within(card).getByRole('region', { name: '参数' })).toHaveTextContent('[已隐藏]')
   expect(within(card).getByRole('region', { name: '参数' })).not.toHaveTextContent('private-key')
   expect(within(card).getByRole('region', { name: '参数' })).not.toHaveTextContent('C:/Users/person')

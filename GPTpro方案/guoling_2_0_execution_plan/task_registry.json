@@ -1337,7 +1337,7 @@
     },
     {
       "id": "M18",
-      "title": "框架 HTML 创作链与后置表示规划",
+      "title": "可靠课件初稿与人主导局部精修",
       "phase": "M",
       "release": "2.0",
       "required": true,
@@ -1351,7 +1351,7 @@
         "M24"
       ],
       "document": "mid_term/M18.md",
-      "status": "verified",
+      "status": "implemented",
       "existing_code": [
         ".agents/skills/orchestrate-courseware/SKILL.md",
         ".agents/skills/build-courseware-project/SKILL.md",
@@ -1371,7 +1371,8 @@
         "M18-T02",
         "M18-T03",
         "M18-T04",
-        "M18-T05"
+        "M18-T05",
+        "M18-T06"
       ]
     },
     {

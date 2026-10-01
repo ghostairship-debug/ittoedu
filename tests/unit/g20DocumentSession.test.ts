@@ -286,3 +286,28 @@ describe('G20 S02/S03 authoritative document session', () => {
     expect(loads).toBe(0); expect(registry.list()).toHaveLength(1)
   })
 })
+
+
+it('publishes attribution only after a durable changed commit, once, and isolates observers from formal content', async () => {
+  const { session, persistence } = await newMarkdown()
+  const commits: Array<{ id: string; before: string; after: string; run?: string }> = []
+  session.subscribeCommits(event => {
+    expect(persistence.states.at(-1)?.revision).toBe(event.result.revision)
+    commits.push({ id: event.operation.operationId, before: event.before.kind === 'markdown' ? event.before.source : '',
+      after: event.after.kind === 'markdown' ? event.after.source : '', run: event.operation.runId })
+    if (event.after.kind === 'markdown') event.after.source = 'observer-only mutation'
+    throw new Error('observer failure')
+  })
+  const change = operation(session, 'owned', 'AI result', 'run-one')
+  const result = await session.execute(change)
+  expect(result.status).toBe('applied')
+  expect(await session.execute(change)).toEqual(result)
+  expect(await session.execute({ ...operation(session, 'stale', 'wrong'), baseRevision: 0 })).toMatchObject({ status: 'conflict' })
+  expect(await session.execute(operation(session, 'same', 'AI result'))).toMatchObject({ status: 'unchanged' })
+  expect(commits).toEqual([{ id: 'owned', before: '', after: 'AI result', run: 'run-one' }])
+  expect(session.read().model).toMatchObject({ source: 'AI result' })
+  expect(persistence.states.at(-1)?.model).toMatchObject({ source: 'AI result' })
+  persistence.failNext(true)
+  await expect(session.execute(operation(session, 'not-durable', 'rejected'))).resolves.toMatchObject({ status: 'failed', applied: false, code: 'recovery-write-failed' })
+  expect(commits).toHaveLength(1)
+})

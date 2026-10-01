@@ -3,7 +3,7 @@ import type { ObservationServicePort } from '../../shared/workbench/toolPorts'
 import type { ToolResult } from '../../shared/workbench/tools'
 
 export const viewObserveTool = { name: 'view.observe' as const,
-  description: '观察已授权 H5 演示指定页面的真实画面。可观察非当前页；不更改文档、选区或当前播放状态。',
+  description: '观察已授权 H5 演示指定页面的真实画面。可观察非当前页；不更改文档、选区或当前播放状态。purpose 默认 required；用户明确要求的检查必须保持 required，仅你自行添加的可选诊断可用 diagnostic。诊断不可用会保留未验证说明，不表示检查通过，也不改变任何权限。',
   inputSchema: viewObserveInputSchema,
   manual: { label: '查看页面', group: 'read' as const, targetKinds: ['course-location', 'course-owner', 'course-state', 'course-object', 'document'] as const },
 }

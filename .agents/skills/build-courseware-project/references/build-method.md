@@ -1,4 +1,6 @@
-# 构建方法与完整质量标准
+# 外部 Builder 与完整工程任务参考
+
+本文件只在确需外部 Builder V2 或用户明确要求完整工程验收时展开。内置可靠初稿遵循主 Skill，不将这里的 Worker、表示规划、完整 QA 和导出清理要求反向施加给默认初稿。
 
 映射载体、构建和体验 QA 时必须遵守 [main-progression.md](main-progression.md)：先证明控制器隐藏时的正文主路径，再验证控制器兜底。
 
@@ -6,7 +8,7 @@
 
 仓库里**没有** `agent-kit/` CLI。不要运行 `courseware-agent-kit.mjs`，也不要虚构 `scaffold` / `graph` / `assemble` / `rig` / `validate --workspace`。
 
-下文的产品仓库定位、`implementation/build.ts` 和 Builder V2 `context` 只适用于实际提供该入口的外部案例构建。内置 Agent 按主 Skill 使用当前正式工具：先完成后置表示规划，再以 `html.import` 按页组装、观察、保存和导出；不为使用本参考而转走外部案例入口。载体选择与验证原则两种执行环境共用。
+下文的产品仓库定位、`implementation/build.ts` 和 Builder V2 `context` 只适用于实际提供该入口的外部案例构建。内置 Agent 按主 Skill 使用当前正式工具，以 `html.import` 保真导入并保存；表示规划、观察和导出按实际需求展开，不为使用本参考而转走外部案例入口。载体选择与验证原则两种执行环境共用。
 
 ## 外部案例 Builder V2 适用范围
 
@@ -14,11 +16,11 @@
 
 ## 1. 外部案例冷启动
 
-1. 直接读取 `01-teaching-plan.md`、`02-course-frame.html`、`02-presentation-script.md` 和其中引用的材料；先形成 `03-representation-plan.md`，再进入技术查询与组装。
+1. 复用当前已有策划、框架 HTML 和实际需要的材料；讲解说明与独立表示规划仅在任务需要时形成，不因采用外部 Builder 固定增加文件。
 2. 读取用户本轮约束；不继承被否决的设计和无关聊天摘要。
 3. 把教师当前目录或明确指定目录作为**课例交付目录**；它可以是任意普通目录，不需要是 Git 仓库，也不得被切换成编辑器仓库。
 4. 先运行 `node <skill目录>/scripts/resolve-editor-root.mjs`（确定性脚本，约 0.1 秒）获得 `editorRoot` 与 `capabilityIndex`；脚本失败时再按 [external-case-build.md](external-case-build.md) 的四级阶梯手工解析，并可用环境变量 `COURSEWARE_EDITOR_ROOT` 显式指定。然后读取返回的 `capabilityDiscovery`，按需查询完整能力；`index.json` 保留兼容读取。不要把定位产品依赖转嫁给教师。
-5. 若教学策划、框架 HTML 或讲解说明缺失关键教学内容或逐步操作，或实现必须改变教师可感知体验，默认模式返回 `$orchestrate-courseware`；自动模式按已声明的合理假设推进并在交付时列出。默认模式的两次确认不能省略。
+5. 若材料缺失会影响核心内容或实现必须改变教师可感知体验，按用户已经明确的约束修订；只有无法合理判断时补问。用户要求阶段审阅时等待相应确认，不固定插入两次确认。
 
 实现页面布局或修复视觉问题时读取 [page-design.md](page-design.md)；使用 PPT 原稿或检查已导入页面时读取 [ppt-import-review.md](ppt-import-review.md)。只读与本次任务有关的参考。
 
@@ -121,13 +123,13 @@ Coordinator 是唯一能写权威 Project 和共享接口的人。小型强耦�
 
 ## 9. 验证与交付
 
-运行 `validate:course-project`，并按 [validation-boundaries.md](validation-boundaries.md) 检查本课实际使用的行为、真实编辑保存重开、CoursePlayer、默认离线 HTML 和要求交付的其它格式。增量修改复用未受影响的证据；只补受影响的行为与必要回归，不因使用 Skill 默认跑全仓测试或所有导出格式。
+运行 `validate:course-project`，并按 [validation-boundaries.md](validation-boundaries.md) 检查本课实际使用的行为、真实编辑保存重开、CoursePlayer、用户要求交付的离线 HTML 或其它格式。增量修改复用未受影响的证据；只补受影响的行为与必要回归，不因使用 Skill 默认跑全仓测试或所有导出格式。
 
 <!-- lesson-authoring-shared:experience:start -->
 工程检查通过后，逐项回看前述页面映射，确认每个已约定动作、反馈和恢复在产物中都有对应实现；不能以工具回执全部成功代替框架 HTML 与讲解说明的内容完整。再对受影响页面做只读体验 QA。自动化最多 `engineering candidate`；具体课例未经真实视觉/互动复核不得称 `art candidate`；`accepted` 必须来自教师明确验收。不得宣称 Editor 1.0 已发布。
 <!-- lesson-authoring-shared:experience:end -->
 
-保留教学策划、框架 HTML、讲解说明、表示规划、真实 Project、默认导出 HTML 及用户要求的交付物。成功后清理 Worker 任务、临时副本、截图和中间报告。
+保留用户要求的策划、框架、真实工程和交付物。详细讲稿、表示规划、离线导出均按实际任务需要；不删除用户中间稿或把旧文件清理当作交付前置。
 
 ## 停止条件
 

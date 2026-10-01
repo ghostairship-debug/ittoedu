@@ -1,6 +1,7 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
-import { ExecutionAssistant } from '../../src/renderer/workbench/ExecutionAssistant'
+import { ExecutionAssistant, type ExecutionAssistantHandle } from '../../src/renderer/workbench/ExecutionAssistant'
+import { createRef } from 'react'
 import { WorkbenchSessionDock, WorkbenchSessionPortalProvider, useWorkbenchSessionDock } from '../../src/renderer/workbench/WorkbenchSessionPortal'
 import { ExecutionTimeline } from '../../src/renderer/workbench/ExecutionTimeline'
 import type { ConversationRecord, WorkspaceRecord } from '../../src/shared/workbench/conversations'
@@ -11,7 +12,7 @@ import { emptyExecutionProjection, foldExecutionEvents, type ExecutionEvent } fr
 import type { ExecutionSettingsView } from '../../src/shared/workbench/executionSettings'
 import type { ExecutionSettingsAPI } from '../../src/shared/workbench/executionSettingsDesktop'
 
-afterEach(() => { cleanup(); localStorage.clear() })
+afterEach(() => { cleanup(); localStorage.clear(); vi.unstubAllGlobals() })
 
 const workspace: WorkspaceRecord = { workspaceId: 'workspace', rootPath: 'C:/workspace', managed: false, authorization: 'user-selected', revision: 1, createdAt: 1, updatedAt: 1 }
 const conversation = (id: string, title: string, inputDraft = ''): ConversationRecord => ({
@@ -74,8 +75,19 @@ function executionFixture(initial: ConversationRecord[]) {
     timeline: vi.fn(async id => emptyExecutionProjection(id)), blob: vi.fn(async () => 'blob'), edits: vi.fn(async () => []),
     subscribe: vi.fn(listener => { listeners.add(listener); return () => listeners.delete(listener) }), subscribeEdits: vi.fn(() => () => {}),
   }
-  return { api, state }
+  return { api, state, emit: (event: ExecutionEvent) => listeners.forEach(listener => listener(event)) }
 }
+
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(done => { resolve = done })
+  return { promise, resolve }
+}
+const streamEvent = (sequence: number, text: string, endedRun?: string): ExecutionEvent => ({
+  conversationId: 'a', taskId: endedRun ?? 'task', runId: endedRun ?? 'run', time: sequence, source: 'builtin',
+  eventId: `event-${sequence}`, sequence, itemId: endedRun ? 'end' : 'answer', type: endedRun ? 'run.end' : 'text',
+  update: endedRun ? 'snapshot' : 'append', data: endedRun ? { status: 'failed' } : { text },
+})
 
 const settingsView = (configured: boolean): ExecutionSettingsView => ({
   secureStorageAvailable: true,
@@ -101,6 +113,159 @@ function ScopeControls() {
   </>
 }
 
+it('keeps middle and tail text flowing through notification bursts while an old failed run refreshes only once', async () => {
+  const initial = conversation('a', '有失败历史的会话')
+  const { api, emit } = executionFixture([initial])
+  const historicalEnd = streamEvent(1, '', 'old-failure')
+  const historicalRead = deferred<ConversationRecord | null>()
+  const firstPage = deferred<Awaited<ReturnType<ExecutionDesktopAPI['events']>>>()
+  const middlePage = deferred<Awaited<ReturnType<ExecutionDesktopAPI['events']>>>()
+  vi.mocked(api.timeline).mockResolvedValue(foldExecutionEvents(emptyExecutionProjection('a'), [historicalEnd]))
+  vi.mocked(api.conversation).mockImplementationOnce(() => historicalRead.promise)
+  vi.mocked(api.events)
+    .mockResolvedValueOnce({ events: [], cursor: 1, hasMore: false })
+    .mockImplementationOnce(() => firstPage.promise)
+    .mockImplementationOnce(() => middlePage.promise)
+    .mockResolvedValueOnce({ events: [streamEvent(4, '尾段')], cursor: 4, hasMore: false })
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(true)}
+    captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  await waitFor(() => expect(api.conversation).toHaveBeenCalledTimes(1))
+
+  act(() => { for (let index = 0; index < 20; index += 1) emit(streamEvent(2, '首段')) })
+  await waitFor(() => expect(api.events).toHaveBeenCalledTimes(2))
+  await act(async () => firstPage.resolve({ events: [streamEvent(2, '首段')], cursor: 2, hasMore: false }))
+  expect(screen.getByRole('article', { name: '回复' })).toHaveTextContent('首段')
+  expect(api.events).toHaveBeenCalledTimes(3)
+  act(() => { for (let index = 0; index < 20; index += 1) emit(streamEvent(4, '尾段')) })
+  await act(async () => middlePage.resolve({ events: [streamEvent(3, '中段')], cursor: 3, hasMore: false }))
+  expect(screen.getByRole('article', { name: '回复' })).toHaveTextContent('首段中段尾段')
+  expect(vi.mocked(api.events).mock.calls.map(call => call[1])).toEqual([1, 1, 2, 3])
+  expect(api.conversation).toHaveBeenCalledTimes(1) // The held terminal read did not block either text page.
+
+  await act(async () => historicalRead.resolve(initial))
+  await waitFor(() => expect(api.conversation).toHaveBeenCalledTimes(5)) // One bounded hydration retry.
+  vi.mocked(api.events).mockResolvedValueOnce({ events: [streamEvent(5, '继续')], cursor: 5, hasMore: false })
+  await act(async () => emit(streamEvent(5, '继续')))
+  expect(screen.getByRole('article', { name: '回复' })).toHaveTextContent('首段中段尾段继续')
+  expect(api.conversation).toHaveBeenCalledTimes(5)
+
+  vi.mocked(api.events)
+    .mockResolvedValueOnce({ events: [streamEvent(6, '补齐')], cursor: 6, hasMore: true })
+    .mockRejectedValueOnce(new Error('A later page is temporarily unavailable'))
+    .mockResolvedValueOnce({ events: [], cursor: 6, hasMore: false })
+  await act(async () => emit(streamEvent(6, '补齐')))
+  await act(async () => emit(streamEvent(6, '补齐')))
+  expect(screen.getByRole('article', { name: '回复' })).toHaveTextContent('首段中段尾段继续补齐')
+  expect(api.conversation).toHaveBeenCalledTimes(5)
+})
+
+it('refreshes new terminal messages without replacing local draft attachments, newer revisions, or another conversation', async () => {
+  const initial = { ...conversation('a', '会话 A', '原草稿'), inputAttachments: [
+    { attachmentId: '11111111-1111-4111-8111-111111111111', representationId: 'source' },
+  ] }
+  const { api, state, emit } = executionFixture([initial, conversation('b', '会话 B', '乙会话草稿')])
+  const terminalReads = [deferred<ConversationRecord | null>(), deferred<ConversationRecord | null>(), deferred<ConversationRecord | null>()]
+  let readIndex = 0
+  vi.mocked(api.conversation).mockImplementation(async (_workspaceId, id) => id === 'a'
+    ? terminalReads[readIndex++]!.promise : structuredClone(state.get(id) ?? null))
+  const events: ExecutionEvent[] = []
+  vi.mocked(api.events).mockImplementation(async (id, after = 0) => ({ events: events.filter(event => event.conversationId === id && event.sequence > after), cursor: id === 'a' ? events.length : 0, hasMore: false }))
+  const ref = createRef<ExecutionAssistantHandle>()
+  render(<ExecutionAssistant ref={ref} root="C:/workspace" api={api} settingsAPI={settingsFixture(true)}
+    captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  await waitFor(() => expect(api.events).toHaveBeenCalledTimes(1))
+  const composer = screen.getByRole('textbox', { name: '给创作助手发消息' })
+  const end = (sequence: number) => { const event = streamEvent(sequence, '', `ended-${sequence}`); events.push(event); emit(event) }
+  await act(async () => end(1))
+  fireEvent.change(composer, { target: { value: '正在编辑的新草稿' } })
+  const replied: ConversationRecord = { ...initial, revision: 2, inputDraft: '', inputAttachments: [], messages: [
+    { messageId: 'reply', role: 'assistant', text: '任务回复', runId: 'ended-1', createdAt: 2, attachmentIds: [] },
+  ] }
+  state.set('a', replied)
+  await act(async () => terminalReads[0]!.resolve(replied))
+  expect(composer).toHaveValue('正在编辑的新草稿')
+  await act(async () => ref.current!.preserveDraft())
+  expect(api.draft).toHaveBeenLastCalledWith(expect.objectContaining({ expectedRevision: 2,
+    text: '正在编辑的新草稿', attachments: initial.inputAttachments }))
+
+  await act(async () => end(2))
+  fireEvent.change(composer, { target: { value: '第四版草稿' } })
+  await act(async () => ref.current!.preserveDraft())
+  const stale = structuredClone(state.get('a')!)
+  fireEvent.change(composer, { target: { value: '第五版草稿' } })
+  await act(async () => ref.current!.preserveDraft())
+  await act(async () => terminalReads[1]!.resolve(stale))
+  await act(async () => ref.current!.preserveDraft())
+  expect(api.draft).toHaveBeenCalledTimes(3) // A late revision 4 must not replace already saved revision 5.
+  expect(composer).toHaveValue('第五版草稿')
+
+  await act(async () => end(3))
+  fireEvent.click(screen.getByRole('button', { name: '会话 B' }))
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toHaveValue('乙会话草稿'))
+  await act(async () => terminalReads[2]!.resolve({ ...replied, revision: 6 }))
+  expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toHaveValue('乙会话草稿')
+  expect(screen.getByRole('button', { name: '会话 B' })).toHaveAttribute('aria-current', 'page')
+})
+
+it('preserves a focused unsent composer through the existing close handle and waits for its write', async () => {
+  const { api, state } = executionFixture([conversation('a', '未发送要求')])
+  const ref = createRef<ExecutionAssistantHandle>()
+  render(<ExecutionAssistant ref={ref} root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).not.toBeDisabled())
+  const input = screen.getByRole('textbox', { name: '给创作助手发消息' })
+  input.focus()
+  fireEvent.change(input, { target: { value: '保持焦点，关闭后还要继续写。' } })
+  expect(input).toHaveFocus()
+  await ref.current!.preserveDraft()
+  expect(state.get('a')?.inputDraft).toBe('保持焦点，关闭后还要继续写。')
+})
+
+it('restoring an old failed message keeps a different new draft until an explicit replacement choice', async () => {
+  const { api } = executionFixture([conversation('a', '失败消息')])
+  vi.mocked(api.submissions).mockResolvedValue([{ submissionId: '11111111-1111-4111-8111-111111111111', workspaceId: 'workspace', conversationId: 'a',
+    state: 'failed', mode: 'queue', text: '旧要求', documents: [], attachments: [], createdAt: 1, updatedAt: 1,
+    failure: { code: 'model-not-configured', message: '未连接' }, model: { provider: 'fixture', model: 'fixture', accountId: 'fixture', billing: 'unknown' } }])
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  const restore = await screen.findByRole('button', { name: '恢复到输入框' })
+  const input = screen.getByRole('textbox', { name: '给创作助手发消息' })
+  fireEvent.change(input, { target: { value: '新要求要保留' } })
+  fireEvent.click(restore)
+  const conflict = await screen.findByRole('alertdialog', { name: '输入框已有另一份草稿' })
+  expect(input).toHaveValue('新要求要保留')
+  fireEvent.click(within(conflict).getByRole('button', { name: '保留当前输入' }))
+  expect(input).toHaveValue('新要求要保留')
+  fireEvent.click(restore)
+  fireEvent.click(await screen.findByRole('button', { name: '替换为这条消息' }))
+  expect(input).toHaveValue('旧要求')
+  expect(input).toHaveFocus()
+})
+
+it('labels a recovered stale document reference and only refreshes it after explicit reselection', async () => {
+  const recovered: ConversationRecord = { ...conversation('a', '恢复的草稿', '继续改这段文字'), frozenContextRefs: [{ contextRefId: 'old', documentId: 'doc', epoch: 'old-epoch', revision: 1, writeScope: [{ kind: 'document' }] }] }
+  const { api } = executionFixture([recovered])
+  vi.stubGlobal('desktopAPI', { documents: { read: vi.fn(async () => ({ epoch: 'new-epoch', binding: { kind: 'file', path: 'C:/workspace/reopened.html' } })) } })
+  const captureDocuments = vi.fn(async () => [{ documentId: 'doc', epoch: 'new-epoch', revision: 2, writable: [{ kind: 'document' as const }] }])
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={captureDocuments} prepareSend={vi.fn(async () => true)} />)
+  await screen.findByText(/原引用需要重新选择/)
+  expect(captureDocuments).not.toHaveBeenCalled()
+  expect(api.draft).not.toHaveBeenCalled()
+  expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toHaveValue('继续改这段文字')
+  fireEvent.click(screen.getByRole('button', { name: '重新引用当前文档' }))
+  await waitFor(() => expect(api.draft).toHaveBeenCalledWith(expect.objectContaining({ text: '继续改这段文字', documents: [expect.objectContaining({ epoch: 'new-epoch' })] })))
+  await waitFor(() => expect(screen.queryByText(/原引用需要重新选择/)).toBeNull())
+})
+
+it('offers explicit reclaim for an externally paused queue through the existing resume operation', async () => {
+  const { api } = executionFixture([conversation('a', '外部任务会话')])
+  vi.mocked(api.submissions).mockResolvedValue([{ submissionId: '11111111-1111-4111-8111-111111111111', workspaceId: 'workspace', conversationId: 'a',
+    state: 'queued', mode: 'queue', text: '已接收的要求', documents: [], attachments: [], createdAt: 1, updatedAt: 1,
+    queuePausedReason: 'external-handoff', model: { provider: 'fixture', model: 'fixture', accountId: 'fixture', billing: 'unknown' } }])
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  fireEvent.click(await screen.findByRole('button', { name: '接回并继续排队任务' }))
+  await waitFor(() => expect(api.resumeQueue).toHaveBeenCalledWith({ workspaceId: 'workspace', conversationId: 'a' }))
+  expect(screen.getByRole('button', { name: '接回并立即执行' })).toBeVisible()
+})
+
 it('keeps the active conversation and draft while explorer selection filters homes and new sessions inherit the scope', async () => {
   const a = { ...conversation('a', '甲', '继续写'), home: { kind: 'file' as const, path: 'Unit/a.md', workspaceId: 'workspace' } }
   const b = { ...conversation('b', '乙'), home: { kind: 'folder' as const, path: 'Unit/Sub', workspaceId: 'workspace' } }
@@ -125,7 +290,7 @@ it('keeps the active conversation and draft while explorer selection filters hom
   fireEvent.change(screen.getByRole('textbox', { name: '给创作助手发消息' }), { target: { value: '关于这个文件' } })
   expect(screen.getByLabelText('本条消息的引用')).toHaveTextContent('默认引用 Unit/a.md')
   expect(captureDocuments).not.toHaveBeenCalled()
-  fireEvent.click(screen.getByRole('button', { name: '全部会话' }))
+  fireEvent.click(screen.getByRole('button', { name: '显示全部会话' }))
   expect(screen.getByRole('button', { name: '根会话' })).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '丙' }))
   await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('所属文件已删除，本条消息不会自动引用该文件'))

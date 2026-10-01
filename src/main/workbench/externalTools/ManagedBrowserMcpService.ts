@@ -1,3 +1,4 @@
+import { managedBrowserWindowCode, type ManagedBrowserControlState } from './managedBrowserControlCode'
 import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } from 'node:path'
@@ -17,7 +18,7 @@ const browserTools = [
 ] as const
 export type ManagedBrowserTool = typeof browserTools[number]['name']
 export const managedBrowserWriteTools = ['browser_click', 'browser_type', 'browser_file_upload'] as const
-export type ManagedBrowserResult = McpCallResult & { snapshotId?: string; downloads?: readonly BrowserDownload[] }
+export type ManagedBrowserResult = McpCallResult & { snapshotId?: string; downloads?: readonly BrowserDownload[]; downloadIssues?: readonly { name: string; reason: string }[] }
 export interface BrowserDownload { resourceId: string; name: string; mimeType: string; byteLength: number }
 
 export interface ManagedBrowserGrant {
@@ -45,13 +46,19 @@ interface BrowserRun {
   client: McpClientService
   proxy: PublicBrowserProxy
   stopped: boolean
+  used?: boolean
+  control: ManagedBrowserControlState['state']
+  controlGeneration: number
+  controls?: Promise<ManagedBrowserControlState>
+  controlWaiters: Set<() => void>
   pageUrl?: string
   snapshotId?: string
   fileChooserSnapshotId?: string
   tail: Promise<unknown>
   results: Map<string, { digest: string; result: Promise<ManagedBrowserResult> }>
-  resources: Map<string, { mimeType: string; bytes: Uint8Array }>
+  resources: Map<string, { mimeType: string; filename: string; byteLength: number }>
   downloads: Set<string>
+  preserveScratch?: boolean
   pendingApproval?: { tool: string; digest: string }
 }
 
@@ -95,14 +102,18 @@ export class ManagedBrowserMcpService {
     try { proxyUrl = await proxy.start() }
     catch (error) { await fs.rm(scratch, { recursive: true, force: true }); throw error }
     const packageRoot = dirname(require.resolve('@playwright/mcp/package.json'))
+    const configFile = join(scratch, 'host-browser-config.json')
+    await fs.writeFile(configFile, JSON.stringify({ browser: { isolated: true, launchOptions: { headless: false,
+      args: ['--window-position=-32000,-32000'] } } }), { flag: 'wx' })
+    const privateTools = [{ name: 'browser_run_code_unsafe', effect: 'write' as const }, { name: 'browser_close', effect: 'read' as const }]
     const client = new McpClientService({ connection: { namespace: 'browser',
       transport: { kind: 'stdio', command: this.options.nodeExecutable ?? process.execPath,
-        args: [join(packageRoot, 'cli.js'), '--browser=msedge', '--headless', '--isolated', '--no-webmcp', '--block-service-workers',
+        args: [join(packageRoot, 'cli.js'), '--browser=msedge', `--config=${configFile}`, '--isolated', '--no-webmcp', '--block-service-workers',
           '--timeout-navigation=15000', '--timeout-action=5000', `--output-dir=${scratch}`, `--proxy-server=${proxyUrl}`,
           '--proxy-bypass=<-loopback>',
           ...(allowedOrigins.length ? [`--allowed-origins=${allowedOrigins.join(';')}`] : [])],
         cwd: scratch, env: { ELECTRON_RUN_AS_NODE: '1' } },
-      tools: browserTools },
+      tools: [...browserTools, ...privateTools] },
       // Navigation is independently checked below. This guard prevents accidental direct invocation bypass.
       authorizeCall: async ({ tool, arguments: args }) => tool !== 'browser_navigate' || this.allowedUrl(grant, args.url, allowedOrigins),
       authorizeWrite: async ({ runId: currentRunId, tool, arguments: args }) => {
@@ -112,9 +123,9 @@ export class ManagedBrowserMcpService {
     })
     const visible = browserTools.filter(tool => tool.effect === 'read'
       || grant.permission !== 'read-only' && !!this.options.approveExternalAction)
-    try { client.beginRun(runId, { allowedTools: visible.map(tool => tool.name), writeAllowed: true }) }
+    try { client.beginRun(runId, { allowedTools: [...visible, ...privateTools].map(tool => tool.name), writeAllowed: true }) }
     catch (error) { await proxy.stop(); await fs.rm(scratch, { recursive: true, force: true }); throw error }
-    this.runs.set(runId, { grant: { ...grant, allowedOrigins }, scratch, client, proxy, stopped: false,
+    this.runs.set(runId, { grant: { ...grant, allowedOrigins }, scratch, client, proxy, stopped: false, control: 'agent', controlGeneration: 0, controlWaiters: new Set(),
       tail: Promise.resolve(), results: new Map(), resources: new Map(), downloads: new Set() })
   }
 
@@ -142,6 +153,48 @@ export class ManagedBrowserMcpService {
       ...((run.snapshotId ?? run.fileChooserSnapshotId) ? { snapshotId: run.snapshotId ?? run.fileChooserSnapshotId } : {}) }
   }
 
+  controlState(runId: string): ManagedBrowserControlState {
+    const run = this.run(runId)
+    return { state: run.stopped ? 'stopped' : run.control, ...(run.pageUrl ? { pageUrl: run.pageUrl } : {}),
+      ...(run.snapshotId ? { snapshotId: run.snapshotId } : {}) }
+  }
+
+  /** No arbitrary code or credential export: this entry only shows/hides the existing task browser. */
+  async control(runId: string, action: 'takeover' | 'resume'): Promise<ManagedBrowserControlState> {
+    const run = this.run(runId)
+    if (run.stopped) throw new Error('浏览器任务已停止')
+    if (run.controls) throw new Error('浏览器接管正在切换，请等待当前操作结束')
+    if (run.control === (action === 'takeover' ? 'human' : 'agent')) return this.controlState(runId)
+    run.control = 'transition'; run.controlGeneration++
+    run.snapshotId = undefined; run.fileChooserSnapshotId = undefined; run.pendingApproval = undefined
+    const control = (async () => {
+      await run.tail.catch(() => undefined)
+      if (run.stopped) throw new Error('任务已停止')
+      run.snapshotId = undefined; run.fileChooserSnapshotId = undefined; run.pendingApproval = undefined
+      run.used = true
+      const code = managedBrowserWindowCode[action === 'takeover' ? 'show' : 'hide']
+      const args = { code }
+      run.pendingApproval = { tool: 'browser_run_code_unsafe', digest: createHash('sha256').update(JSON.stringify(args)).digest('hex') }
+      try {
+        const reply = await run.client.invoke({ runId, operationId: `host-window-${randomUUID()}`, name: 'mcp.browser.browser_run_code_unsafe', arguments: args })
+        if (reply.status !== 'returned') throw new Error('未能切换原受管浏览器窗口；任务保持暂停，可再次尝试或停止')
+      } finally { run.pendingApproval = undefined }
+      if (run.stopped) throw new Error('任务已停止')
+      if (action === 'resume') {
+        const result = await this.perform(run, { runId, operationId: `host-return-observe-${randomUUID()}`,
+          name: 'mcp.browser.browser_snapshot', arguments: {} })
+        if (result.status !== 'returned' || !result.snapshotId) throw new Error('返回后的页面尚未重新观察，任务仍暂停')
+      }
+      run.control = action === 'takeover' ? 'human' : 'agent'
+      for (const notify of [...run.controlWaiters]) notify()
+      return this.controlState(runId)
+    })()
+    run.controls = control
+    try { return await control }
+    catch (error) { if (!run.stopped) run.control = 'human'; throw error }
+    finally { if (run.controls === control) run.controls = undefined }
+  }
+
   /** Local diagnostic only: verifies that denied requests reached the per-run egress guard. */
   egressStats(runId: string): { deniedRequests: number; allowedRequests: number } { return this.run(runId).proxy.stats() }
 
@@ -151,7 +204,7 @@ export class ManagedBrowserMcpService {
     const found = await run.client.discover(runId, signal)
     if (found.status !== 'available') return found
     // Expose only the curated contract. Browser MCP may offer more tools, including process-level unsafe code.
-    return { status: 'available', tools: found.tools.map(tool => {
+    return { status: 'available', tools: found.tools.filter(tool => remoteName(tool.remoteName)).map(tool => {
       if (tool.effect !== 'write') return tool
       const source = tool.inputSchema
       const properties = source.properties && typeof source.properties === 'object' ? source.properties as Record<string, unknown> : {}
@@ -178,8 +231,27 @@ export class ManagedBrowserMcpService {
     const digest = createHash('sha256').update(JSON.stringify([input.name, args, snapshotId])).digest('hex')
     const prior = run.results.get(input.operationId)
     if (prior) return prior.digest === digest ? prior.result : Promise.resolve(reject('同一操作身份不能改变参数'))
-    const work = run.tail.then(() => this.perform(run, normalized), () => this.perform(run, normalized))
-    run.tail = work.catch(() => undefined)
+    const tool = remoteName(input.name)
+    if (!tool || !this.validateArgs(tool, args)) return Promise.resolve(reject('浏览器工具或参数超出受管白名单'))
+    const generation = run.controlGeneration
+    const work = (async () => {
+      // Wait outside the operation tail: resume itself must be able to acquire that
+      // tail, show the existing session, and refresh observations without deadlock.
+      while (!run.stopped && !input.signal?.aborted && run.control !== 'agent') {
+        await new Promise<void>(resolve => {
+          const finish = () => { run.controlWaiters.delete(check); input.signal?.removeEventListener('abort', finish); resolve() }
+          const check = () => { if (run.stopped || input.signal?.aborted || run.control === 'agent') finish() }
+          run.controlWaiters.add(check); input.signal?.addEventListener('abort', finish, { once: true }); check()
+        })
+      }
+      if (run.stopped || input.signal?.aborted) return reject('浏览器任务已停止；等待中的动作未执行')
+      const perform = () => run.control !== 'agent'
+        || generation !== run.controlGeneration && (tool === 'browser_navigate' || browserTools.find(item => item.name === tool)!.effect === 'write')
+        ? Promise.resolve(reject('用户接管后页面已改变，请使用返回后的新观察；原动作未执行')) : this.perform(run, normalized)
+      const operation = run.tail.then(perform, perform)
+      run.tail = operation.catch(() => undefined)
+      return operation
+    })()
     run.results.set(input.operationId, { digest, result: work })
     return work
   }
@@ -195,7 +267,7 @@ export class ManagedBrowserMcpService {
     if (tool === 'browser_navigate') return typeof args.url === 'string'
     if (tool === 'browser_click') return typeof args.target === 'string' && args.target.length > 0 && args.target.length < 1000
     if (tool === 'browser_type') return typeof args.target === 'string' && typeof args.text === 'string' && args.text.length <= 20_000
-    if (tool === 'browser_file_upload') return Array.isArray(args.paths) && args.paths.length > 0 && args.paths.length <= 4
+    if (tool === 'browser_file_upload') return Array.isArray(args.paths) && args.paths.length > 0 && args.paths.length <= 256
       && args.paths.every(path => typeof path === 'string' && path.length > 0 && path.length < 1000)
     if (tool === 'browser_wait_for') return args.time === undefined || typeof args.time === 'number' && args.time >= 0 && args.time <= 30
     return true
@@ -212,18 +284,18 @@ export class ManagedBrowserMcpService {
       const source = await fs.realpath(resolve(root, entry))
       if (!within(root, source)) throw new Error('上传来源超出授权根')
       const stat = await fs.stat(source)
-      if (!stat.isFile() || stat.size > 20 * 1024 * 1024) throw new Error('上传来源不是受支持的普通文件')
-      const bytes = await fs.readFile(source)
-      if (bytes.byteLength !== stat.size) throw new Error('上传来源在读取期间改变')
+      if (!stat.isFile() || stat.size > 256 * 1024 * 1024) throw new Error('上传来源不是受支持的普通文件')
       const dest = join(staged, `${randomUUID()}-${basename(source)}`)
-      await fs.writeFile(dest, bytes, { flag: 'wx' })
+      await fs.copyFile(source, dest)
+      const after = await fs.stat(source)
+      if (after.size !== stat.size || after.mtimeMs !== stat.mtimeMs || (await fs.stat(dest)).size !== stat.size) { await fs.rm(dest, { force: true }); throw new Error('上传来源在复制期间改变') }
       paths.push(dest)
     }
     return { paths }
   }
 
-  private async collectDownloads(run: BrowserRun, before: ReadonlySet<string>, result: McpCallResult): Promise<BrowserDownload[]> {
-    const out: BrowserDownload[] = []
+  private async collectDownloads(run: BrowserRun, before: ReadonlySet<string>, result: McpCallResult): Promise<{ downloads: BrowserDownload[]; issues: { name: string; reason: string }[] }> {
+    const out: BrowserDownload[] = [], issues: { name: string; reason: string }[] = []
     const announced = new Set<string>()
     if (result.status === 'returned') for (const item of result.content) if (item.type === 'text') {
       for (const match of item.text.matchAll(/(?:^|\n)- Downloaded file [^\n]*? to "(?:\.\/)?([^"\\/]+)"/g)) announced.add(match[1]!)
@@ -232,17 +304,21 @@ export class ManagedBrowserMcpService {
       if (name === 'uploads' || before.has(name) || run.downloads.has(name)) continue
       const path = join(run.scratch, name)
       const stat = await fs.lstat(path)
-      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 20 * 1024 * 1024) continue
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 256 * 1024 * 1024) {
+        run.preserveScratch = true
+        issues.push({ name, reason: `下载保留于 ${run.scratch}；不是普通文件或超过当前单次 256 MiB 字节读取范围，未静默登记为完整成果` }); continue
+      }
       const actual = await fs.realpath(path)
       if (!within(run.scratch, actual)) continue
-      const bytes = await fs.readFile(actual)
-      if (bytes.length !== stat.size) continue
-      const resourceId = randomUUID()
-      run.resources.set(resourceId, { mimeType: mime(name), bytes })
+      const resourceId = randomUUID(), sealed = join(run.scratch, `.resource-${resourceId}`)
+      await fs.copyFile(actual, sealed)
+      const after = await fs.stat(actual)
+      if (after.size !== stat.size || after.mtimeMs !== stat.mtimeMs || (await fs.stat(sealed)).size !== stat.size) { await fs.rm(sealed, { force: true }); throw new Error('下载文件在封存期间改变，未登记错误成果') }
+      run.resources.set(resourceId, { mimeType: mime(name), filename: sealed, byteLength: stat.size })
       run.downloads.add(name)
-      out.push({ resourceId, name, mimeType: mime(name), byteLength: bytes.length })
+      out.push({ resourceId, name, mimeType: mime(name), byteLength: stat.size })
     }
-    return out
+    return { downloads: out, issues }
   }
 
   private observedUrl(result: McpCallResult): string | undefined {
@@ -283,6 +359,9 @@ export class ManagedBrowserMcpService {
     }
     // The generic MCP write gate only opens for the exact, already approved operation.
     const before = effect === 'write' ? new Set(await fs.readdir(run.scratch)) : new Set<string>()
+    if (run.stopped || (effect === 'write' || tool === 'browser_navigate') && run.control !== 'agent') return reject('用户正在接管；本次动作未执行')
+    if (effect === 'write' && input.snapshotId !== run.snapshotId && input.snapshotId !== run.fileChooserSnapshotId) return reject('页面已由用户接管或重新观察，请重新发起动作')
+    run.used = true
     if (effect === 'write') run.pendingApproval = { tool, digest: createHash('sha256').update(JSON.stringify(remoteArgs)).digest('hex') }
     let result: McpCallResult
     try {
@@ -292,30 +371,32 @@ export class ManagedBrowserMcpService {
     if (run.stopped) return { status: 'unknown', service: 'browser', tool: input.name,
       operationId: input.operationId, reason: '浏览器停止后结果待核对' }
     const observed = this.observedUrl(result)
-    if (observed && !this.allowedUrl(run.grant, observed)) {
+    if (observed && !(observed === 'about:blank' && !run.pageUrl) && !this.allowedUrl(run.grant, observed)) {
       await this.stopRun(input.runId)
       return { status: 'failed', service: 'browser', tool: input.name, operationId: input.operationId,
         reason: '浏览器转到了任务未授权的来源，已停止会话' }
     }
-    if (observed) run.pageUrl = observed
+    if (observed && observed !== 'about:blank') run.pageUrl = observed
     if (result.status === 'returned') {
       if (tool === 'browser_click') run.fileChooserSnapshotId = input.snapshotId
       else if (effect === 'write' || tool === 'browser_navigate') run.fileChooserSnapshotId = undefined
       if (effect === 'write' || tool === 'browser_navigate') run.snapshotId = undefined
       if (tool === 'browser_snapshot') run.snapshotId = randomUUID()
-      const downloads = effect === 'write' ? await this.collectDownloads(run, before, result) : []
+      const { downloads, issues } = effect === 'write' ? await this.collectDownloads(run, before, result) : { downloads: [], issues: [] }
       return { ...result, ...(run.snapshotId && tool === 'browser_snapshot' ? { snapshotId: run.snapshotId } : {}),
-        ...(downloads.length ? { downloads } : {}) }
+        ...(downloads.length ? { downloads } : {}), ...(issues.length ? { downloadIssues: issues } : {}) }
     }
     return result
   }
 
-  readResource(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array } {
+  async readResource(runId: string, resourceId: string): Promise<{ mimeType: string; bytes: Uint8Array }> {
     const run = this.run(runId)
     if (run.stopped) throw new Error('任务已停止')
     const download = run.resources.get(resourceId)
-    return download ? { mimeType: download.mimeType, bytes: new Uint8Array(download.bytes) }
-      : run.client.readResource(runId, resourceId)
+    if (!download) return run.client.readResource(runId, resourceId)
+    const bytes = await fs.readFile(download.filename)
+    if (run.stopped || bytes.length !== download.byteLength) throw new Error('下载成果已停止或发生变化')
+    return { mimeType: download.mimeType, bytes }
   }
 
   lookup(runId: string, operationId: string): Promise<ManagedBrowserResult | null> {
@@ -325,13 +406,16 @@ export class ManagedBrowserMcpService {
   async stopRun(runId: string): Promise<void> {
     const run = this.runs.get(runId)
     if (!run || run.stopped) return
-    run.stopped = true
+    run.stopped = true; run.control = 'stopped'; run.controlGeneration++
+    for (const notify of [...run.controlWaiters]) notify()
     run.resources.clear()
     await run.proxy.stop()
+    // Ask the exact task browser to exit before stopping its transport, so its Edge children release their profile.
+    if (run.used) await run.client.invoke({ runId, operationId: `host-close-${randomUUID()}`, name: 'mcp.browser.browser_close', arguments: {} }).catch(() => undefined)
     await run.client.stopRun(runId)
     const root = await fs.realpath(this.options.scratchRoot)
     const target = await fs.realpath(run.scratch).catch(() => undefined)
-    if (target && within(root, target) && target !== root) await fs.rm(target, { recursive: true, force: true })
+    if (target && within(root, target) && target !== root && !run.preserveScratch) await fs.rm(target, { recursive: true, force: true, maxRetries: 8, retryDelay: 100 })
   }
 
   async endRun(runId: string): Promise<void> {

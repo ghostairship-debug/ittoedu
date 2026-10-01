@@ -1,4 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { promises as fs } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { extractHtml } from './extractHtml'
 import { fetchPublicResource, parsePublicUrl, PublicHttpError, type PublicHttpResponse } from './publicHttp'
 
@@ -45,14 +48,15 @@ export type WebOpenResult =
   | { status: 'opened'; source: WebSource; text: string; offset: number; nextOffset?: number; truncated: boolean }
   | { status: 'access-required' | 'needs-material-reader' | 'failed' | 'rejected'; reason: string; url?: string }
 
-interface StoredSource { source: WebSource; body: string }
-interface RunState { stopped: boolean; controllers: Set<AbortController>; sources: Map<string, StoredSource> }
+interface StoredSource { source: WebSource; filename: string }
+interface RunState { stopped: boolean; controllers: Set<AbortController>; sources: Map<string, StoredSource>; directory?: Promise<string> }
 
 export interface WebResearchOptions {
   searchProvider?: SearchProviderPort
   /** Test seam; the production default always uses pinned-DNS public HTTP. */
   fetch?: typeof fetchPublicResource
   now?: () => Date
+  temporaryRoot?: string
 }
 
 export class WebResearchService {
@@ -74,9 +78,12 @@ export class WebResearchService {
     if (!run || run.stopped) return
     run.stopped = true
     for (const controller of run.controllers) controller.abort()
+    run.sources.clear()
+    const directory = await run.directory?.catch(() => null)
+    if (directory) await fs.rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 })
   }
 
-  endRun(runId: string): void { this.runs.delete(runId) }
+  endRun(runId: string): void { void this.stopRun(runId).catch(() => undefined); this.runs.delete(runId) }
 
   private requireRun(runId: string): RunState {
     const run = this.runs.get(runId)
@@ -102,7 +109,7 @@ export class WebResearchService {
     if (!input.query?.trim() || input.query.length > 2000 || input.cursor && input.cursor.length > 2048)
       return { status: 'rejected', reason: '检索词或分页游标无效' }
     const limit = input.limit ?? 5
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10) return { status: 'rejected', reason: '单页结果数量须为 1–10' }
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) return { status: 'rejected', reason: '单页结果数量须为 1–20' }
     if (run.stopped) return { status: 'rejected', reason: '任务已停止' }
     const provider = this.options.searchProvider
     if (!provider) return { status: 'not-configured', reason: '未配置已授权且可用的联网搜索连接' }
@@ -127,7 +134,7 @@ export class WebResearchService {
     signal?: AbortSignal }): Promise<WebOpenResult> {
     const run = this.requireRun(input.runId)
     const offset = input.offset ?? 0, limit = input.limit ?? 7000
-    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 200 || limit > 12_000)
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 20_000)
       return { status: 'rejected', reason: '正文读取范围无效' }
     if (run.stopped) return { status: 'rejected', reason: '任务已停止' }
     let stored = input.sourceId ? run.sources.get(input.sourceId) : undefined
@@ -135,9 +142,8 @@ export class WebResearchService {
     if (stored && input.version && stored.source.version !== input.version) return { status: 'rejected', reason: '正文来源版本已改变' }
     if (!stored) {
       if (!input.url) return { status: 'rejected', reason: '需要网页 URL 或本任务来源句柄' }
-      if (run.sources.size >= 40) return { status: 'rejected', reason: '本任务网页来源已达到上限' }
       try {
-        const response: PublicHttpResponse = await this.call(run, input.signal, signal => this.fetch(input.url!, { signal }))
+        const response: PublicHttpResponse = await this.call(run, input.signal, signal => this.fetch(input.url!, { signal, maxBytes: 16 * 1024 * 1024, timeoutMs: 30_000 }))
         const url = response.url
         if (response.contentType === 'application/pdf' || response.contentType === 'application/octet-stream')
           return { status: 'needs-material-reader', reason: '此 URL 返回文件；需受控下载后交材料读取服务', url }
@@ -156,12 +162,27 @@ export class WebResearchService {
         const source: WebSource = { sourceId: randomUUID(), url, title: extracted.title || new URL(url).hostname,
           fetchedAt: this.now().toISOString(), contentType: response.contentType, version, bodyComplete: true,
           ...('publishedAt' in extracted && extracted.publishedAt ? { publishedAt: extracted.publishedAt } : {}) }
-        stored = { source, body: extracted.text }
+        // Immutable text is task-backed on disk; opening source 41 is not a quota event.
+        if (run.stopped || input.signal?.aborted) return { status: 'rejected', reason: '任务已停止' }
+        run.directory ??= fs.mkdtemp(path.join(this.options.temporaryRoot ?? os.tmpdir(), 'guoling-web-sources-'))
+        const directory = await run.directory
+        if (run.stopped || input.signal?.aborted) return { status: 'rejected', reason: '任务已停止' }
+        const filename = path.join(directory, source.sourceId)
+        await fs.writeFile(filename, extracted.text, { encoding: 'utf8', flag: 'wx' })
+        if (run.stopped || input.signal?.aborted) {
+          await fs.rm(filename, { force: true })
+          return { status: 'rejected', reason: '任务已停止' }
+        }
+        stored = { source, filename }
         run.sources.set(source.sourceId, stored)
       } catch (cause) { return { status: 'failed', reason: cause instanceof Error ? cause.message : '网页读取未完成' } }
     }
-    const text = stored.body.slice(offset, offset + limit), nextOffset = offset + text.length
-    return { status: 'opened', source: stored.source, text, offset, truncated: nextOffset < stored.body.length,
-      ...(nextOffset < stored.body.length ? { nextOffset } : {}) }
+    let body: string
+    try { body = await fs.readFile(stored.filename, 'utf8') }
+    catch { return { status: 'failed', reason: '网页来源缓存无法读取，请使用原 URL 与版本重新读取' } }
+    if (run.stopped || input.signal?.aborted) return { status: 'rejected', reason: '任务已停止' }
+    const text = body.slice(offset, offset + limit), nextOffset = offset + text.length
+    return { status: 'opened', source: stored.source, text, offset, truncated: nextOffset < body.length,
+      ...(nextOffset < body.length ? { nextOffset } : {}) }
   }
 }

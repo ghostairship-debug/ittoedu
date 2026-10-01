@@ -1,18 +1,21 @@
 // @vitest-environment jsdom
-import { createElement } from 'react'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { expect, it, vi } from 'vitest'
+import { createElement, createRef } from 'react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { BrowserWindow } from 'electron'
 import type { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 import { saveDocumentWithDialog } from '../../src/main/workbench/documentSaveDialog'
 import { explorerContextCommands, explorerNewCommands, type ExplorerCommandPorts } from '../../src/renderer/lessonWorkspace/view/explorerCommands'
 import { HtmlDocumentEditor } from '../../src/renderer/documentFiles/html/HtmlDocumentEditor'
+import type { PlainTextDocumentEditorHandle } from '../../src/renderer/documentFiles/PlainTextDocumentEditor'
 import { WorkspaceFilesTree } from '../../src/renderer/lessonWorkspace/view/WorkspaceFilesTree'
 import type { WorkspaceFilesAPI, WorkspaceFilesRequest } from '../../src/shared/workbench/workspaceFiles'
 
 const native = vi.hoisted(() => ({ showSaveDialog: vi.fn() }))
 vi.mock('electron', () => ({ app: { getPath: () => '/tmp' }, dialog: { showSaveDialog: native.showSaveDialog } }))
+beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }) })
+afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 it('starts HTML in an isolated preview and keeps its iframe when switching to source', async () => {
   const workspaceFiles = vi.fn(async (request: { type: string }) => request.type === 'html-preview.open'
@@ -31,6 +34,104 @@ it('starts HTML in an isolated preview and keeps its iframe when switching to so
   expect(screen.getByRole('textbox', { name: '纯文本编辑' })).toBeTruthy()
   fireEvent.click(screen.getByRole('button', { name: '预览' }))
   expect(screen.getByTitle('HTML 预览')).toBe(frame)
+  mounted.unmount(); cleanup()
+})
+
+it('retains light-edit input through hiding, source view and reload, including typing between optimistic save and ACK', async () => {
+  const original = '<p>old</p>'
+  const snapshot = (source: string, revision = 1) => ({ documentId: 'doc', epoch: 'epoch', revision,
+    model: { kind: 'text', source, resources: { assets: {}, components: {} } },
+    binding: { kind: 'file', path: '/lesson/page.html', version: 'v1', bindingVersion: 1 } }) as DocumentSnapshot
+  const lease = { leaseId: 'lease', documentId: 'doc', epoch: 'epoch', revision: 1, bindingVersion: 1,
+    loadId: 'load', url: `courseware-preview://${'a'.repeat(32)}.${'a'.repeat(32)}.app/${'a'.repeat(64)}/file/page.html` }
+  const workspaceFiles = vi.fn(async (request: { type: string; revision?: number; targets?: Array<{ handle: string }> }) => {
+    if (request.type === 'html-preview.open') return lease
+    if (request.type === 'html-preview.resolve-target') return { revision: request.revision, targets: [{
+      handle: request.targets![0].handle, status: 'editable', locator: { documentId: 'doc', epoch: 'epoch',
+        revision: request.revision, bindingVersion: 1, targetKind: 'text', elementSpan: { start: 0, end: 10 },
+        valueSpan: { start: 3, end: 6 }, expectedRaw: 'old', attributeName: null } }] }
+    return { released: true }
+  })
+  Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { workspaceFiles } })
+  const ref = createRef<PlainTextDocumentEditorHandle>()
+  const props = { ref, active: true, tabId: 'tab', committed: snapshot(original), source: original,
+    onDraft: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn(), onPendingDraftChange: vi.fn() }
+  const mounted = render(createElement(HtmlDocumentEditor, props))
+  const frame = await screen.findByTitle('HTML 预览') as HTMLIFrameElement
+  let seq = 0
+  const send = (message: { event: string; [key: string]: unknown }) => act(() => {
+    window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow,
+      data: { protocol: 1, leaseId: 'lease', loadId: 'load', ...(message.event === 'ready' ? {} : { seq: ++seq }), ...message } }))
+  })
+  const select = (handle: string) => send({ event: 'targets', targets: [{ handle, kind: 'text',
+    domPath: [{ name: 'html', index: 0 }, { name: 'body', index: 1 }, { name: 'p', index: 0 }],
+    sectionOrder: null, rawText: 'old', attributeName: null, rect: { x: 0, y: 0, width: 40, height: 20 }, scriptCreated: false }] })
+  select('first-frame')
+  let input = await screen.findByRole('textbox', { name: 'HTML 文字' }) as HTMLTextAreaElement
+  fireEvent.change(input, { target: { value: 'new < & >' } })
+  await waitFor(() => expect(props.onPendingDraftChange).toHaveBeenLastCalledWith(true))
+  mounted.rerender(createElement(HtmlDocumentEditor, { ...props, active: false }))
+  mounted.rerender(createElement(HtmlDocumentEditor, props))
+  expect((screen.getByRole('textbox', { name: 'HTML 文字' }) as HTMLTextAreaElement).value).toBe('new < & >')
+  fireEvent.click(screen.getByRole('button', { name: '源码' }))
+  fireEvent.click(screen.getByRole('button', { name: '预览' }))
+  expect((screen.getByRole('textbox', { name: 'HTML 文字' }) as HTMLTextAreaElement).value).toBe('new < & >')
+  fireEvent.click(screen.getByRole('button', { name: '重新加载预览' }))
+  expect(screen.queryByRole('textbox', { name: 'HTML 文字' })).toBeNull()
+  fireEvent.load(frame)
+  send({ event: 'ready', sectionCount: 0, sectionsAmbiguous: false })
+  select('replacement-frame')
+  input = await screen.findByRole('textbox', { name: 'HTML 文字' }) as HTMLTextAreaElement
+  expect(input.value).toBe('new < & >')
+  expect(props.onDraft).not.toHaveBeenCalled()
+  expect(workspaceFiles.mock.calls.some(([request]) => request.type === 'html-preview.edit')).toBe(false)
+  fireEvent.compositionStart(input)
+  expect(ref.current!.flush().ready).toBe(false)
+  fireEvent.compositionEnd(input)
+  let flushed!: ReturnType<PlainTextDocumentEditorHandle['flush']>
+  act(() => { flushed = ref.current!.flush() })
+  expect(flushed).toEqual({ ready: true, source: '<p>new &lt; &amp; &gt;</p>' })
+  expect(props.onPendingDraftChange).toHaveBeenLastCalledWith(true)
+  // session.edit publishes source before the canonical snapshot/ACK has changed.
+  mounted.rerender(createElement(HtmlDocumentEditor, { ...props, source: flushed.source }))
+  expect(props.onPendingDraftChange).toHaveBeenLastCalledWith(true)
+  fireEvent.change(screen.getByRole('textbox', { name: 'HTML 文字' }), { target: { value: 'typed after save' } })
+  let newer!: ReturnType<PlainTextDocumentEditorHandle['flush']>
+  act(() => { newer = ref.current!.flush() })
+  expect(newer).toEqual({ ready: true, source: '<p>typed after save</p>' })
+  mounted.rerender(createElement(HtmlDocumentEditor, { ...props, source: newer.source, committed: snapshot(flushed.source, 2) }))
+  expect(screen.queryByText(/原文字已变化，草稿仍保留/)).toBeNull()
+  expect(props.onPendingDraftChange).toHaveBeenLastCalledWith(true)
+  act(() => { expect(ref.current!.flush()).toEqual(newer) })
+  mounted.rerender(createElement(HtmlDocumentEditor, { ...props, source: newer.source, committed: snapshot(newer.source, 3) }))
+  await waitFor(() => expect(props.onPendingDraftChange).toHaveBeenLastCalledWith(false))
+  mounted.unmount(); cleanup()
+})
+
+it('keeps a conflicting draft accessible when its source text changes and blocks flush until it is handled', async () => {
+  const workspaceFiles = vi.fn(async (request: { type: string }) => request.type === 'html-preview.open'
+    ? { leaseId: 'lease', documentId: 'doc', epoch: 'epoch', revision: 1, bindingVersion: 1, loadId: 'load', url: 'courseware-preview://app/file/page.html' }
+    : { revision: 1, targets: [{ handle: 'text', status: 'editable', locator: { documentId: 'doc', epoch: 'epoch', revision: 1,
+      bindingVersion: 1, targetKind: 'text', elementSpan: { start: 0, end: 10 }, valueSpan: { start: 3, end: 6 }, expectedRaw: 'old', attributeName: null } }] })
+  Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { workspaceFiles } })
+  const committed = { documentId: 'doc', epoch: 'epoch', revision: 1, model: { kind: 'text', source: '<p>old</p>', resources: { assets: {}, components: {} } },
+    binding: { kind: 'file', path: '/lesson/page.html', version: 'v1', bindingVersion: 1 } } as DocumentSnapshot
+  const ref = createRef<PlainTextDocumentEditorHandle>()
+  const props = { ref, tabId: 'tab', committed, source: '<p>old</p>', onDraft: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn() }
+  const mounted = render(createElement(HtmlDocumentEditor, props))
+  const frame = await screen.findByTitle('HTML 预览') as HTMLIFrameElement
+  act(() => { window.dispatchEvent(new MessageEvent('message', { source: frame.contentWindow, data: { protocol: 1, leaseId: 'lease', loadId: 'load', seq: 1,
+    event: 'targets', targets: [{ handle: 'text', kind: 'text', domPath: [{ name: 'p', index: 0 }], sectionOrder: null, rawText: 'old',
+      attributeName: null, rect: { x: 0, y: 0, width: 40, height: 20 }, scriptCreated: false }] } })) })
+  fireEvent.change(await screen.findByRole('textbox', { name: 'HTML 文字' }), { target: { value: 'my draft' } })
+  const changed = '<p>external</p>'
+  mounted.rerender(createElement(HtmlDocumentEditor, { ...props, source: changed,
+    committed: { ...committed, revision: 2, model: { ...committed.model, source: changed } } as DocumentSnapshot }))
+  expect(await screen.findByText(/原文字已变化，草稿仍保留/)).toBeTruthy()
+  expect((screen.getByRole('textbox', { name: '保留的 HTML 文字草稿：old' }) as HTMLTextAreaElement).value).toBe('my draft')
+  expect(ref.current!.flush()).toEqual({ ready: false, source: changed })
+  fireEvent.click(screen.getByRole('button', { name: '放弃这份草稿' }))
+  expect(ref.current!.flush()).toEqual({ ready: true, source: changed })
   mounted.unmount(); cleanup()
 })
 

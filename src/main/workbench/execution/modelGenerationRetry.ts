@@ -16,11 +16,15 @@ export function modelGenerationRetry(provider: Pick<ModelProvider, 'retrySafety'
   return { kind: delayMs > MAX_AUTOMATIC_MODEL_WAIT_MS ? 'wait' : 'retry', delayMs }
 }
 export async function waitForGenerationRetry(delayMs: number, signal: AbortSignal): Promise<void> {
-  if (signal.aborted) return
-  await new Promise<void>(resolve => {
-    const finish = () => { clearTimeout(timer); signal.removeEventListener('abort', finish); resolve() }
-    const timer = setTimeout(finish, delayMs)
-    signal.addEventListener('abort', finish, { once: true })
-    if (signal.aborted) finish()
-  })
+  let remaining = Math.max(0, delayMs)
+  while (remaining > 0 && !signal.aborted) {
+    const chunk = Math.min(remaining, 2_147_483_647)
+    await new Promise<void>(resolve => {
+      const finish = () => { clearTimeout(timer); signal.removeEventListener('abort', finish); resolve() }
+      const timer = setTimeout(finish, chunk)
+      signal.addEventListener('abort', finish, { once: true })
+      if (signal.aborted) finish()
+    })
+    remaining -= chunk
+  }
 }

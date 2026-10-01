@@ -56,7 +56,7 @@ const stateSchema = z.object({ schemaVersion: z.literal(1), profile: profileSche
   bodyStreamingObservations: z.array(bodyStreamingSchema).default([]),
   capabilityRecords: z.array(capabilityRecordSchema).default([]),
   modelCatalogs: z.array(modelCatalogSchema).max(8).default([]),
-  revisions: z.array(z.object({ connection: connectionSchema, encrypted: z.string().min(1).optional(), revoked: z.boolean(), credentialVersion: z.number().int().nonnegative().default(0) }).strict()),
+  revisions: z.array(z.object({ connection: connectionSchema, encrypted: z.string().min(1).optional(), oauthSourceRef: identity.optional(), revoked: z.boolean(), credentialVersion: z.number().int().nonnegative().default(0) }).strict()),
 }).strict()
 type StoredState = z.infer<typeof stateSchema>
 type StoredRevision = StoredState['revisions'][number]
@@ -83,8 +83,23 @@ function freeze<T>(value: T): T {
   }
   return value
 }
-function expose(entry: StoredRevision): ExecutionConnectionView {
-  return { connection: structuredClone(entry.connection), hasCredential: !entry.revoked && Boolean(entry.encrypted), revoked: entry.revoked }
+/** Configuration revisions can share one OAuth login/refresh owner, never duplicate a rotating token. */
+function credentialOwner(revisions: readonly StoredRevision[], entry: StoredRevision): StoredRevision {
+  if (!entry.oauthSourceRef) return entry
+  const owner = revisions.find(value => value.connection.auth.credentialRef === entry.oauthSourceRef)
+  const a = owner?.connection, b = entry.connection
+  if (!owner || owner.oauthSourceRef || entry.encrypted || !a || a.auth.kind !== 'oauth' || b.auth.kind !== 'oauth'
+    || a.id !== b.id || a.provider !== b.provider || a.protocol !== b.protocol || a.baseURL !== b.baseURL || a.accountId !== b.accountId
+    || a.revision >= b.revision) throw new Error('OAuth 登录来源与配置身份不一致')
+  return owner
+}
+function hasCredential(state: StoredState, entry: StoredRevision): boolean {
+  const owner = credentialOwner(state.revisions, entry)
+  return !entry.revoked && !owner.revoked && Boolean(owner.encrypted)
+}
+function expose(entry: StoredRevision, state: StoredState): ExecutionConnectionView {
+  const owner = credentialOwner(state.revisions, entry)
+  return { connection: structuredClone(entry.connection), hasCredential: hasCredential(state, entry), revoked: entry.revoked || owner.revoked }
 }
 function sameConnectionIdentity(stored: ModelConnectionSnapshot, supplied: Readonly<ModelConnectionSnapshot>): boolean {
   const { capabilities: _storedCapabilities, ...storedIdentity } = stored
@@ -151,6 +166,7 @@ export class ExecutionSettingsStore {
       for (const entry of state.revisions) {
         if (refs.has(entry.connection.auth.credentialRef) || entry.connection.revision !== (revisions.get(entry.connection.id) ?? 0) + 1
           || entry.revoked && entry.encrypted || entry.encrypted && !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(entry.encrypted)) throw new Error()
+        credentialOwner(state.revisions, entry)
         refs.add(entry.connection.auth.credentialRef); revisions.set(entry.connection.id, entry.connection.revision)
       }
       for (const selected of Object.values(state.profile.roles)) if (selected && !revisions.has(selected.connectionId)) throw new Error()
@@ -184,14 +200,14 @@ export class ExecutionSettingsStore {
     return this.serial(async () => {
       const state = await this.load(), latest = new Map<string, StoredRevision>()
       for (const entry of state.revisions) latest.set(entry.connection.id, entry)
-      return { connections: [...latest.values()].map(expose), profile: structuredClone(state.profile), bodyStreamingObservations: structuredClone(state.bodyStreamingObservations),
+      return { connections: [...latest.values()].map(entry => expose(entry, state)), profile: structuredClone(state.profile), bodyStreamingObservations: structuredClone(state.bodyStreamingObservations),
         capabilityRecords: structuredClone(state.capabilityRecords), secureStorageAvailable: await this.available() }
     })
   }
   cachedModelCatalog(id: string, revision: number): Promise<DiscoveredModels | undefined> {
     return this.serial(async () => {
       const state = await this.load(), entry = this.current(state, id)
-      if (!entry || entry.connection.revision !== revision || entry.revoked || !entry.encrypted) return undefined
+      if (!entry || entry.connection.revision !== revision || !hasCredential(state, entry)) return undefined
       const catalog = state.modelCatalogs.find(value => value.connectionId === id && value.connectionRevision === revision)
       return catalog ? { ...structuredClone(catalog), source: 'cache', capabilitiesVerified: false } : undefined
     })
@@ -201,7 +217,7 @@ export class ExecutionSettingsStore {
       checkedAt: catalog.checkedAt, models: catalog.models.slice(0, 1024) })
     return this.serial(async () => {
       const state = await this.load(), entry = this.current(state, parsed.connectionId)
-      if (!entry || entry.connection.revision !== parsed.connectionRevision || entry.revoked || !entry.encrypted)
+      if (!entry || entry.connection.revision !== parsed.connectionRevision || !hasCredential(state, entry))
         throw new ExecutionSettingsError('stale-discovery', '读取期间连接已改变或撤销，请重新读取。')
       state.modelCatalogs = [...state.modelCatalogs.filter(value => value.connectionId !== parsed.connectionId
         || value.connectionRevision !== parsed.connectionRevision), parsed].slice(-8)
@@ -266,6 +282,10 @@ export class ExecutionSettingsStore {
         await this.requireEncryption()
         if (parsed.connection.authKind === 'oauth' && parsed.apiKey !== undefined) throw new ExecutionSettingsError('oauth-not-connected', 'OAuth 需要正式登录，不能用 API Key 代替。')
         const { authKind, ...configuration } = parsed.connection
+        if (prior && parsed.apiKey === undefined) {
+          const { id: _id, revision: _revision, auth, ...oldConfiguration } = prior.connection
+          if (auth.kind === authKind && isDeepStrictEqual(oldConfiguration, { ...configuration, imageProtocol: configuration.imageProtocol ?? null })) return expose(prior, state)
+        }
         const id = prior?.connection.id ?? this.createId()
         if (!prior && state.revisions.some(entry => entry.connection.id === id)) throw new ExecutionSettingsError('duplicate-identity', '连接身份冲突，未保存。')
         const credentialRef = this.createId()
@@ -283,10 +303,14 @@ export class ExecutionSettingsStore {
         } else if (authKind === 'api-key' && prior && !prior.revoked && prior.connection.accountId === connection.accountId
           && prior.connection.provider === connection.provider && prior.connection.baseURL === connection.baseURL
           && prior.connection.protocol === connection.protocol && prior.connection.auth.kind === authKind) encrypted = prior.encrypted
-        const entry: StoredRevision = { connection, ...(encrypted ? { encrypted } : {}), revoked: false, credentialVersion: 0 }
+        const sameLogin = authKind === 'oauth' && prior && prior.connection.auth.kind === 'oauth' && hasCredential(state, prior)
+          && prior.connection.id === connection.id && prior.connection.accountId === connection.accountId
+          && prior.connection.provider === connection.provider && prior.connection.baseURL === connection.baseURL && prior.connection.protocol === connection.protocol
+        const entry: StoredRevision = { connection, ...(encrypted ? { encrypted } : {}), revoked: false, credentialVersion: 0,
+          ...(sameLogin ? { oauthSourceRef: credentialOwner(state.revisions, prior).connection.auth.credentialRef } : {}) }
         state.revisions.push(entry)
         await this.persist(state)
-        return expose(entry)
+        return expose(entry, state)
       } finally { delete supplied.apiKey; delete parsed.apiKey }
     })
   }
@@ -328,7 +352,7 @@ export class ExecutionSettingsStore {
       const state = await this.load(), selected = state.profile.roles[role]
       if (!selected) throw new ExecutionSettingsError('role-unconfigured', '请先配置此角色的模型连接。')
       const entry = this.current(state, selected.connectionId)
-      if (!entry || entry.revoked || !entry.encrypted) throw new ExecutionSettingsError('credential-unavailable', '此角色的连接尚未接通或已撤销。')
+      if (!entry || !hasCredential(state, entry)) throw new ExecutionSettingsError('credential-unavailable', '此角色的连接尚未接通或已撤销。')
       await this.requireEncryption()
       const selection: ModelSelection = { connection: structuredClone(entry.connection), model: selected.model, ...(selected.parameters ? { parameters: selected.parameters } : {}) }
       const verified = modelCapabilityRecord(state.capabilityRecords, selection)
@@ -376,12 +400,13 @@ export class ExecutionSettingsStore {
       if (oauthReservations.has(`${this.queueKey}\u0000${credentialRef}`)) return { version: 0, credential: null }
       const state = await this.load(), entry = state.revisions.find(value => value.connection.auth.credentialRef === credentialRef)
       if (!entry) return { version: 1, credential: null }
-      if (entry.connection.auth.kind !== 'oauth' || entry.revoked || !entry.encrypted) return { version: entry.credentialVersion, credential: null }
+      const owner = credentialOwner(state.revisions, entry)
+      if (entry.connection.auth.kind !== 'oauth' || !hasCredential(state, entry)) return { version: owner.credentialVersion, credential: null }
       await this.requireEncryption()
       try {
-        const credential = oauthCredentialSchema.parse(JSON.parse(await this.options.encryption.decryptString(Buffer.from(entry.encrypted, 'base64'))))
-        if (credential.connectionId !== entry.connection.id || credential.revision !== entry.connection.revision || credential.accountId !== entry.connection.accountId) throw new Error()
-        return { version: entry.credentialVersion, credential }
+        const credential = oauthCredentialSchema.parse(JSON.parse(await this.options.encryption.decryptString(Buffer.from(owner.encrypted!, 'base64'))))
+        if (credential.connectionId !== owner.connection.id || credential.revision !== owner.connection.revision || credential.accountId !== owner.connection.accountId) throw new Error()
+        return { version: owner.credentialVersion, credential: { ...credential, revision: entry.connection.revision } }
       } catch { throw new ExecutionSettingsError('credential-decryption-failed', '此账号的安全登录凭据不可读取，请重新登录。') }
     })
   }
@@ -391,7 +416,7 @@ export class ExecutionSettingsStore {
       const key = `${this.queueKey}\u0000${credentialRef}`
       if (oauthReservations.has(key)) { oauthReservations.delete(key); return }
       const state = await this.load(), entry = state.revisions.find(value => value.connection.auth.credentialRef === credentialRef)
-      if (entry && !entry.revoked && entry.encrypted) return expose(entry)
+      if (entry && !entry.revoked && entry.encrypted) return expose(entry, state)
     })
   }
   compareAndSetOAuthCredential(credentialRef: string, expectedVersion: number, value: ChatGPTOAuthCredential | null): Promise<boolean> {
@@ -399,13 +424,14 @@ export class ExecutionSettingsStore {
     return this.serial(async () => {
       const key = `${this.queueKey}\u0000${credentialRef}`, pending = oauthReservations.get(key)
       const state = await this.load(), existing = state.revisions.find(entry => entry.connection.auth.credentialRef === credentialRef)
+      const owner = existing ? credentialOwner(state.revisions, existing) : undefined
       if (pending) {
         if (expectedVersion !== 0) return false
         if (!supplied) { oauthReservations.delete(key); return true }
         if (this.current(state, pending.connection.id)?.connection.revision !== pending.expectedRevision) { oauthReservations.delete(key); return false }
-      } else if (!existing || existing.connection.auth.kind !== 'oauth' || existing.credentialVersion !== expectedVersion || supplied && existing.revoked) return false
+      } else if (!existing || existing.connection.auth.kind !== 'oauth' || owner!.credentialVersion !== expectedVersion || supplied && (existing.revoked || owner!.revoked)) return false
       if (!supplied) {
-        existing!.revoked = true; delete existing!.encrypted; existing!.credentialVersion++
+        existing!.revoked = true; owner!.revoked = true; delete owner!.encrypted; owner!.credentialVersion++
         await this.persist(state); return true
       }
       const parsed = oauthCredentialSchema.safeParse(supplied), connection = pending?.connection ?? existing!.connection
@@ -414,20 +440,24 @@ export class ExecutionSettingsStore {
       await this.requireEncryption()
       let encrypted: string
       try {
-        const bytes = await this.options.encryption.encryptString(JSON.stringify(parsed.data))
+        const bytes = await this.options.encryption.encryptString(JSON.stringify(owner ? { ...parsed.data, revision: owner.connection.revision } : parsed.data))
         if (!bytes.byteLength) throw new Error()
         encrypted = Buffer.from(bytes).toString('base64')
       } catch { throw new ExecutionSettingsError('credential-encryption-failed', '登录凭据无法安全保存，原配置已保留。') }
       if (pending) state.revisions.push({ connection: { ...connection, imageProtocol: connection.imageProtocol ?? null,
         accountId: supplied.accountId }, encrypted, revoked: false, credentialVersion: 1 })
-      else { existing!.encrypted = encrypted; existing!.credentialVersion++ }
+      else { owner!.encrypted = encrypted; owner!.credentialVersion++ }
       await this.persist(state)
       if (pending) oauthReservations.delete(key)
       return true
     })
   }
-  withOAuthLease<T>(credentialRef: string, operation: () => Promise<T>): Promise<T> {
-    const key = `${this.queueKey}\u0000${credentialRef}`
+  async withOAuthLease<T>(credentialRef: string, operation: () => Promise<T>): Promise<T> {
+    const ownerRef = await this.serial(async () => {
+      const state = await this.load(), entry = state.revisions.find(value => value.connection.auth.credentialRef === credentialRef)
+      return entry ? credentialOwner(state.revisions, entry).connection.auth.credentialRef : credentialRef
+    })
+    const key = `${this.queueKey}\u0000${ownerRef}`
     const result = (oauthLeases.get(key) ?? Promise.resolve()).catch(() => undefined).then(operation), tail = result.catch(() => undefined)
     oauthLeases.set(key, tail); void tail.finally(() => { if (oauthLeases.get(key) === tail) oauthLeases.delete(key) })
     return result
@@ -435,8 +465,8 @@ export class ExecutionSettingsStore {
   assertOAuthConnection(connection: Readonly<ModelConnectionSnapshot>): Promise<void> {
     const supplied = structuredClone(connection)
     return this.serial(async () => {
-      const entry = (await this.load()).revisions.find(item => item.connection.auth.credentialRef === supplied.auth.credentialRef)
-      if (!entry || entry.revoked || !entry.encrypted || supplied.auth.kind !== 'oauth' || !sameConnectionIdentity(entry.connection, supplied)) throw new ExecutionSettingsError('credential-revoked', '此请求的登录凭据已撤销或身份不匹配。')
+      const state = await this.load(), entry = state.revisions.find(item => item.connection.auth.credentialRef === supplied.auth.credentialRef)
+      if (!entry || !hasCredential(state, entry) || supplied.auth.kind !== 'oauth' || !sameConnectionIdentity(entry.connection, supplied)) throw new ExecutionSettingsError('credential-revoked', '此请求的登录凭据已撤销或身份不匹配。')
       await this.requireEncryption()
     })
   }

@@ -12,7 +12,7 @@ export interface ChatGPTResponsesProviderOptions {
   fetch?: typeof fetch
   timeoutMs?: number
   progressTimeoutMs?: number
-  maxDurationMs?: number
+  maxDurationMs?: number | null
   maxResponseBytes?: number
   now?: () => number
   /** Local, privacy-filtered diagnostics only. Never receives response bytes or credentials. */
@@ -151,7 +151,7 @@ export class ChatGPTResponsesProvider implements ModelProvider {
         const status = response.status
         const kind = await httpFailureKind(response)
         yield event({ type: 'response.failed', failure: { outcome: status >= 400 && status < 500 && status !== 408 ? 'rejected' : 'unknown', kind,
-          code: `http-${status}`, message: `ChatGPT 返回 HTTP ${status}；未自动重试或切换连接。`, httpStatus: status,
+          code: `http-${status}`, message: `ChatGPT 返回 HTTP ${status}；本次调用结束；重试由执行器按实际策略处理，不切换连接。`, httpStatus: status,
           ...(retryAfter(response.headers.get('retry-after'), (this.options.now ?? Date.now)()) !== undefined
             ? { retryAfterMs: retryAfter(response.headers.get('retry-after'), (this.options.now ?? Date.now)()) } : {}) } }); return
       }
@@ -302,17 +302,18 @@ export class ChatGPTResponsesProvider implements ModelProvider {
       const kind: ModelFailure['kind'] = aborted ? timedOut ? 'timeout' : 'aborted' : providerFailure ? 'server'
         : error instanceof ProtocolError || error instanceof SyntaxError || error instanceof TruncatedStreamError ? 'protocol' : 'transport'
       if (kind === 'protocol' && error instanceof Error && this.options.onProtocolError) {
-        try { await this.options.onProtocolError(error) } catch { /* diagnostics cannot alter provider outcome */ }
+        const report = this.options.onProtocolError
+        void Promise.resolve().then(() => report(error)).catch(() => undefined)
       }
       const code = aborted ? `chatgpt-${kind}` : providerFailure?.code
         ?? (error instanceof ProtocolError ? error.code : error instanceof TruncatedStreamError ? 'chatgpt-stream-truncated'
           : kind === 'protocol' ? 'chatgpt-protocol-mismatch' : `chatgpt-${kind}`)
       const message = providerFailure ? providerFailure.code === 'chatgpt-provider-response-incomplete'
-        ? 'ChatGPT 明确报告响应未完成；结果未知，未自动重试。'
-        : 'ChatGPT 明确报告响应失败；未自动重试。'
-        : error instanceof TruncatedStreamError && !aborted ? 'ChatGPT 响应流在完成前结束；结果未知，未自动重试。'
-          : kind === 'protocol' ? 'ChatGPT 响应格式无法解析；结果未知，未自动重试。'
-            : attempted ? 'ChatGPT 请求未取得完整结果，执行状态未知；未自动重试。' : 'ChatGPT 请求未发送。'
+        ? 'ChatGPT 明确报告响应未完成；结果未知，是否重试由执行器决定，已提交工具不会重放。'
+        : 'ChatGPT 明确报告响应失败；是否重试由执行器决定，已提交工具不会重放。'
+        : error instanceof TruncatedStreamError && !aborted ? 'ChatGPT 响应流在完成前结束；结果未知，是否重试由执行器决定，已提交工具不会重放。'
+          : kind === 'protocol' ? 'ChatGPT 响应格式无法解析；结果未知，是否重试由执行器决定，已提交工具不会重放。'
+            : attempted ? 'ChatGPT 请求未取得完整结果，执行状态未知；是否重试由执行器决定，已提交工具不会重放。' : 'ChatGPT 请求未发送。'
       yield event({ type: 'response.failed', failure: { outcome: providerFailure && providerFailure.code !== 'chatgpt-provider-response-incomplete'
         ? 'rejected' : attempted ? 'unknown' : 'not-sent', kind, code, message } })
     } finally {

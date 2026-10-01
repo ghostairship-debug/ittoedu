@@ -67,6 +67,7 @@ export function useEditorKeyboardRouter(ports: EditorKeyboardActionPorts): void 
         event.preventDefault()
         current.selectAll()
       } else if ((event.ctrlKey || event.metaKey) && key === 'c') {
+        if (window.getSelection()?.toString()) return
         event.preventDefault()
         current.copySelection()
       } else if ((event.ctrlKey || event.metaKey) && key === 'v') {

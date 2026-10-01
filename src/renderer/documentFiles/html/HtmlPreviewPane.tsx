@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { decodeHtmlEntities, scanHtmlSource } from '../../../shared/html/htmlSourceScanner'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import type { HtmlPreviewLease } from '../../../shared/workbench/htmlPreview'
 import { HtmlLightEditOverlay } from './HtmlLightEditOverlay'
 import { HtmlPreviewController, type HtmlSelectedTarget } from './htmlPreviewController'
+import type { HtmlTextDrafts } from './htmlTextDrafts'
 import './htmlPreview.css'
 
 type Patch = { handle: string; kind: 'text' | 'image'; value: string }
@@ -33,19 +34,23 @@ export interface HtmlPreviewPaneProps {
   lease: HtmlPreviewLease
   committed: DocumentSnapshot
   tabId: string
+  textDrafts: HtmlTextDrafts
   onUndo(): void
   onRedo(): void
   onSave?(): void
   /** True while the preview tab is shown; stale source refreshes on activation. */
   active?: boolean
+  toolbarLeading?: ReactNode
 }
 
 /** Keeps one sandbox frame mounted across canonical text revisions. */
-export function HtmlPreviewPane({ lease, committed, onUndo, onRedo, onSave, active = true }: HtmlPreviewPaneProps) {
+export function HtmlPreviewPane({ lease, committed, textDrafts, onUndo, onRedo, onSave, active = true, toolbarLeading }: HtmlPreviewPaneProps) {
+  useSyncExternalStore(textDrafts.subscribe, textDrafts.read)
   const frame = useRef<HTMLIFrameElement>(null)
   const container = useRef<HTMLDivElement>(null)
   const controller = useRef<HtmlPreviewController | null>(null)
   const selectedTarget = useRef<HtmlSelectedTarget | null>(null)
+  const activeRef = useRef(active); activeRef.current = active
   void onSave
   const source = committed.model.kind === 'text' ? committed.model.source : ''
   const latestSource = useRef(source)
@@ -112,6 +117,7 @@ export function HtmlPreviewPane({ lease, committed, onUndo, onRedo, onSave, acti
         }
       },
       onReady(count, isAmbiguous) {
+        instance.setVisibility(activeRef.current)
         setPageCount(count); setAmbiguous(isAmbiguous); setStale(false)
         setFrameReady(true)
         setModePending(editModeRef.current)
@@ -147,6 +153,7 @@ export function HtmlPreviewPane({ lease, committed, onUndo, onRedo, onSave, acti
 
   useEffect(() => {
     const instance = controller.current
+    if (!active) { instance?.updateCommitted(committed); if (source !== latestSource.current) setStale(true); return }
     if (!instance || source === latestSource.current) { instance?.updateCommitted(committed); return }
     const previous = latestSource.current
     if (pendingEdit.current) {
@@ -175,22 +182,30 @@ export function HtmlPreviewPane({ lease, committed, onUndo, onRedo, onSave, acti
     }
     latestSource.current = source
     instance.updateCommitted(committed)
-  }, [committed, source])
+  }, [committed, source, active])
 
+  useEffect(() => { controller.current?.setVisibility(active) }, [active, lease.leaseId, lease.loadId])
   useEffect(() => { if (active && stale) refreshPreservingView() }, [active, stale, lease.url])
 
   return <div ref={container} className="html-preview-pane">
     <div className="html-preview-pane__toolbar" role="toolbar" aria-label="HTML 分页">
-      <button type="button" aria-pressed={editMode} disabled={!frameReady || modePending} onClick={() => {
+      {toolbarLeading}
+      <button type="button" className="html-preview-pane__edit" title="编辑模式中双击文字或单击图片，Esc 关闭编辑框" aria-pressed={editMode} disabled={!frameReady || modePending} onClick={() => {
         const next = !editModeRef.current
         editModeRef.current = next
         setModePending(true)
         setSelected(null)
         controller.current?.setEditMode(next)
       }}>{modePending ? '正在切换编辑模式…' : editMode ? '完成编辑' : '编辑预览'}</button>
-      <button type="button" disabled={pageCount < 2 || page === 0} onClick={() => controller.current?.navigate(page - 1)}>上一页</button>
-      <span>{pageCount ? `${page + 1} / ${pageCount}` : '连续页面'}</span>
-      <button type="button" disabled={pageCount < 2 || page >= pageCount - 1} onClick={() => controller.current?.navigate(page + 1)}>下一页</button>
+      {pageCount > 1 && <div className="html-preview-pane__pages" role="group" aria-label="页面导航">
+        <button type="button" disabled={page === 0} onClick={() => controller.current?.navigate(page - 1)}>上一页</button>
+        <span>{page + 1} / {pageCount}</span>
+        <button type="button" disabled={page >= pageCount - 1} onClick={() => controller.current?.navigate(page + 1)}>下一页</button>
+      </div>}
+      {editMode && <span className="html-preview-pane__edit-hint">双击文字 · 单击图片</span>}
+      <details className="html-preview-pane__more"><summary aria-label="预览更多操作">更多</summary>
+        <button type="button" title="重新加载当前源码；页面内运行状态将重置，文档和未发送输入保持不变" onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); refreshPreservingView() }}>重新加载预览</button>
+      </details>
       {ambiguous && <span role="status">分页结构不明确，按连续页面预览。</span>}
     </div>
     {stale && <div role="status" className="html-preview-pane__notice">
@@ -198,9 +213,15 @@ export function HtmlPreviewPane({ lease, committed, onUndo, onRedo, onSave, acti
     </div>}
     <iframe ref={frame} title="HTML 预览" src={lease.url} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer"
       style={{ pointerEvents: modePending ? 'none' : undefined }}
-      onLoad={() => controller.current?.frameLoaded()} />
+      onLoad={() => controller.current?.frameLoaded()} onError={() => { setModePending(false); setIssue('预览未能加载。可重新加载预览或切换源码；文档和输入均保留。') }} />
     {selected && <HtmlLightEditOverlay target={selected} committed={committed} position={position}
-      onText={value => controller.current!.editText(value)} onImage={image => controller.current!.editImage(image)}
+      value={textDrafts.find(selected, source)?.value ?? selected.report.rawText}
+      onValue={value => textDrafts.change(selected, source, value)}
+      onText={async value => {
+        const result = await controller.current!.editText(value)
+        if (result.status === 'applied' || result.status === 'unchanged') textDrafts.applied(selected, source, value)
+        return result
+      }} onImage={image => controller.current!.editImage(image)}
       onClose={() => setSelected(null)} />}
     {issue && <p role="alert" className="html-preview-pane__notice">{issue}</p>}
   </div>

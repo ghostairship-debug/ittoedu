@@ -11,6 +11,7 @@ export const lessonDesktopRequestSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('list-directory'), directory }).strict(),
   z.object({ operation: z.literal('open-project'), path: directory }).strict(),
   z.object({ operation: z.literal('open-external'), path: directory }).strict(),
+  z.object({ operation: z.literal('open-link'), url: z.string().min(1) }).strict(),
   z.object({ operation: z.literal('create-lesson'), directory, name: z.string().min(1).max(200) }).strict(),
   z.object({ operation: z.literal('open-lesson'), directory: directory.optional(), asCopy: z.boolean().optional() }).strict(),
   z.object({ operation: z.literal('list-lessons'), directory }).strict(),

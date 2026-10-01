@@ -294,6 +294,9 @@
   .lesson-workspace-pane-switcher button{flex:1;padding:5px;border-color:rgba(244,241,234,.28);background:transparent;color:#f4f1ea}
   .lesson-workspace-pane-switcher button[aria-selected=true]{background:rgba(244,241,234,.16)}
   .workspace-grid>.workspace-region{grid-row:2;grid-column:1;display:none}
+  .workspace-grid[data-editor-focus=false]{grid-template-rows:minmax(0,1fr)}
+  .workspace-grid[data-editor-focus=false]>.lesson-workspace-pane-switcher{display:none}
+  .workspace-grid[data-editor-focus=false]>.workspace-region{grid-row:1}
   .workspace-grid[data-active-pane=navigation]>.workspace-region--resources,
   .workspace-grid[data-active-pane=workbench]>.workspace-region--content,
   .workspace-grid[data-active-pane=chat]>.workspace-region--assistant{display:flex}

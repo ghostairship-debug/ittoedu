@@ -6,8 +6,9 @@ import { createServer, type Server } from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import sharp from 'sharp'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { BrowserWindow } from 'electron'
+import { readMaterial } from '../../src/main/workbench/execution/MaterialReadTools'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { ExecutionDesktopService } from '../../src/main/workbench/execution/ExecutionDesktopService'
 import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
@@ -75,15 +76,15 @@ describe('attachment draft to canonical execution payload', () => {
     }
     const followup = await service.operate({ type: 'send', ...identity, submissionId: randomUUID(), expectedRevision: completed.revision, text: '继续说明图中颜色', documents: [], attachments: [] }) as { run: ExecutionRunRecord }
     const followed = await service.engine.wait(followup.run.runId), nextBody = JSON.parse(wire.bodies[1])
-    expect(nextBody.model).toBe('configured-vision')
-    expect(nextBody.messages.some((message: { content: unknown }) => JSON.stringify(message.content).includes(bytes.toString('base64')))).toBe(true)
+    expect(nextBody.model).toBe('conversation')
+    expect(nextBody.messages.some((message: { content: unknown }) => JSON.stringify(message.content).includes(bytes.toString('base64')))).toBe(false)
     expect(followed.initialPayload!.explicitAttachments).toEqual([])
-    expect(followed.initialPayload!.automaticContext.some(item => item.provenance.kind === 'history' && item.provenance.id === sent.conversation.messages[0].messageId)).toBe(true)
+    expect(followed.initialPayload!.automaticContext.some(item => item.provenance.kind === 'history' && item.provenance.id.includes(sent.run.runId))).toBe(true)
   })
 
-  it('retains exact draft references on final payload overflow and on unextracted-file rejection without any request', async () => {
+  it('preserves an actual oversized inline payload and accepts an unextracted original as a source index', async () => {
     const wire = await backend(), { service, conversation, identity } = await fixture(wire.baseURL)
-    const snapshot = await service.attachments.receiveBytes({ name: 'long.txt', bytes: Buffer.from('文'.repeat(360_000)), source: { kind: 'drop' } })
+    const snapshot = await service.attachments.receiveBytes({ name: 'long.txt', bytes: Buffer.from('文'.repeat(3_000_000)), source: { kind: 'drop' } })
     const attachments = [{ attachmentId: snapshot.id, representationId: 'original-text' }]
     const draft = await service.operate({ type: 'draft', ...identity, expectedRevision: conversation.revision, text: '不要丢弃', documents: [], attachments }) as ConversationRecord
     const overflow = await service.operate({ type: 'send', ...identity, submissionId: randomUUID(), expectedRevision: draft.revision, text: draft.inputDraft, documents: [], attachments }) as { submission: { state: string; failure?: { message: string } } }
@@ -94,11 +95,14 @@ describe('attachment draft to canonical execution payload', () => {
     const file = await service.attachments.receiveBytes({ name: 'original.pdf', bytes: Buffer.from('%PDF-1.7'), source: { kind: 'file' } })
     const pending = [{ attachmentId: file.id, representationId: 'original-file' }]
     const revised = await service.operate({ type: 'draft', ...identity, expectedRevision: retained.revision, text: '', documents: [], attachments: pending }) as ConversationRecord
-    const unextracted = await service.operate({ type: 'send', ...identity, submissionId: randomUUID(), expectedRevision: revised.revision, text: '', documents: [], attachments: pending }) as { submission: { state: string; failure?: { message: string } } }
-    expect(unextracted.submission.state).toBe('failed')
-    expect(unextracted.submission.failure?.message).toContain('尚未提取')
-    expect(await service.operate({ type: 'conversation', ...identity })).toMatchObject({ inputDraft: revised.inputDraft, inputAttachments: revised.inputAttachments })
     expect(wire.bodies).toEqual([])
+    const unextracted = await service.operate({ type: 'send', ...identity, submissionId: randomUUID(), expectedRevision: revised.revision, text: '', documents: [], attachments: pending }) as { run: ExecutionRunRecord; submission: { state: string } }
+    expect(unextracted.submission.state).toBe('accepted')
+    const completed = await service.engine.wait(unextracted.run.runId)
+    expect(completed.initialPayload?.explicitAttachments[0]).toMatchObject({ attachmentId: file.id, delivery: 'source' })
+    expect(wire.bodies).toHaveLength(1)
+    expect(wire.bodies[0]).toContain('index-only')
+    expect(wire.bodies[0]).not.toContain('%PDF-1.7')
   })
 
   it('unifies paste/drop byte intake and preview, rejects raw path authority and removes only draft references', async () => {
@@ -117,4 +121,24 @@ describe('attachment draft to canonical execution payload', () => {
     expect(await service.attachments.readSnapshot(pasted.id)).toEqual(pasted)
     await expect(service.operate({ type: 'draft', ...identity, expectedRevision: drafted.revision, text: '', documents: [], attachments: [] })).rejects.toThrow('较新的草稿')
   })
+})
+
+
+it('sends a large material as an index without fetching the blob, then reads the requested range with provenance', async () => {
+  const wire = await backend(), f = await fixture(wire.baseURL)
+  const text = '大材料正文\n'.repeat(500_000) + '末尾结论'
+  const snapshot = await f.service.attachments.receiveBytes({ name: 'large-source.txt', bytes: Buffer.from(text), source: { kind: 'file' } })
+  const readSpy = vi.spyOn(f.service.attachments, 'readRepresentation')
+  const attachments = [{ attachmentId: snapshot.id, representationId: snapshot.representations[0]!.id, delivery: 'source' as const }]
+  const sent = await f.service.operate({ type: 'send', ...f.identity, submissionId: randomUUID(), expectedRevision: f.conversation.revision,
+    text: '请按需读取末尾结论', documents: [], attachments }) as { run: ExecutionRunRecord }
+  const run = await f.service.engine.wait(sent.run.runId)
+  expect(run.status).toBe('completed')
+  expect(readSpy).not.toHaveBeenCalled()
+  expect(Buffer.byteLength(wire.bodies[0]!)).toBeLessThan(128 * 1024)
+  expect(run.initialPayload?.totals).toMatchObject({ originalBytes: Buffer.byteLength(text), representationBytes: 0, imageBytes: 0 })
+  const result = await readMaterial(f.service.attachments, new Set([snapshot.id]), { attachmentId: snapshot.id,
+    representationId: snapshot.representations[0]!.id, offset: text.length - 4, maxChars: 100 })
+  expect(result.data).toMatchObject({ text: '末尾结论', originalDigest: snapshot.digest, wholeSourceRead: false })
+  readSpy.mockRestore()
 })

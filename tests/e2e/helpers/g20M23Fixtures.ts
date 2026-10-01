@@ -74,6 +74,7 @@ export function m23Fixture(spec: string): M23Fixture {
 <head><meta charset="utf-8"><title>M23 轻编辑夹具</title>
 <style>body{font:22px sans-serif;margin:32px;color:#17324d}main{max-width:900px;padding:24px;background:#f8fafc}p{padding:8px}.counter{margin-top:24px;padding:12px;background:#dbeafe}img{width:96px;height:96px;object-fit:contain}</style></head>
 <body><main id="lesson">
+<svg width="40" height="20"><path d="M0 10L40 10" stroke="black"/></svg><template><p>保留模板</p></template><select aria-label="fixture choice"><option>默认</option></select><math><mi>x</mi></math>
 <h1 id="lesson-title">可编辑 HTML 课例</h1>
 <p id="duplicate-a">同一文案。</p>
 <p id="duplicate-b">同一文案。</p>

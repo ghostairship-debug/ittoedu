@@ -63,6 +63,6 @@ describe('BundledSkillService', () => {
     expect(() => new BundledSkillService(crossing)).toThrow('Bundled Skill key crosses its root')
     const service = new BundledSkillService(bundle)
     await expect(service.read({ skill: 'orchestrate-courseware', path: 'SKILL.md', offset: -1, limit: 1 })).rejects.toThrow(RangeError)
-    await expect(service.read({ skill: 'orchestrate-courseware', path: 'SKILL.md', offset: 0, limit: 8001 })).rejects.toThrow(RangeError)
+    await expect(service.read({ skill: 'orchestrate-courseware', path: 'SKILL.md', offset: 0, limit: 64_001 })).rejects.toThrow(RangeError)
   })
 })

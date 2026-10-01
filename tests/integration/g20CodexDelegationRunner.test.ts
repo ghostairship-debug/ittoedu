@@ -108,3 +108,20 @@ it('keeps failed CLI output and out-of-root artifacts from becoming successful d
   expect(escaped.reason).toContain('超出')
   expect(verify).not.toHaveBeenCalled()
 })
+
+it('keeps useful work alive after more than 32 MiB of legitimate stdout and stderr', async () => {
+  const { root, fixture } = await copyWith(`
+    const fs=require('node:fs'),{once}=require('node:events');
+    process.stdin.resume();process.stdin.on('end',async()=>{
+      const line=JSON.stringify({type:'diagnostic',text:'x'.repeat(1024*1024)})+String.fromCharCode(10);
+      for(let i=0;i<36;i++){if(!process.stdout.write(line))await once(process.stdout,'drain');if(!process.stderr.write('y'.repeat(1024*1024)))await once(process.stderr,'drain');}
+      fs.writeFileSync('answer.txt','preserved');console.log(JSON.stringify({type:'turn.completed'}));
+    });
+  `)
+  const runner = new CodexDelegationRunner({ boundary: fixtureBoundary(root, fixture), inspectCli: ready })
+  const result = await runner.run(request(root), { verify: async input => ({ accepted: (await readFile(input.artifacts[0].path, 'utf8')) === 'preserved', detail: 'large output retained' }) })
+  if (result.diagnosticFile) cleanups.push(() => rm(path.dirname(result.diagnosticFile!), { recursive: true, force: true }))
+  expect(result.status).toBe('verified')
+  expect(result.diagnosticFile).toBeTruthy()
+  await expect((await import('node:fs/promises')).stat(result.diagnosticFile!).then(stat => stat.size)).resolves.toBeGreaterThan(32 * 1024 * 1024)
+})

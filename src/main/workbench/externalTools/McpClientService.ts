@@ -156,22 +156,22 @@ export class McpClientService {
       const tools = new Map<string, McpDiscoveredTool>()
       let cursor: string | undefined
       const seen = new Set<string>()
-      for (let page = 0; page < 20; page++) {
+      for (;;) {
         const result = await client.listTools(cursor ? { cursor } : undefined, { signal: controller.signal, timeout: 12_000 })
         if (run.stopped || controller.signal.aborted) return { status: 'stopped', reason: '任务已停止' }
         for (const tool of result.tools) {
           const effect = configured.get(tool.name)
           if (!effect || !visible.has(tool.name)) continue
-          if (!nameRule.test(tool.name) || tools.has(tool.name) || JSON.stringify(tool.inputSchema).length > 64_000) continue
+          if (!nameRule.test(tool.name) || tools.has(tool.name)) continue
+          if (Buffer.byteLength(JSON.stringify(tool.inputSchema), 'utf8') > 4 * 1024 * 1024) return { status: 'failed', reason: `工具 ${tool.name} 的单份 Schema 超过 4 MiB，未静默忽略该能力` }
           tools.set(tool.name, { name: `mcp.${this.connection.namespace}.${tool.name}`, remoteName: tool.name,
             description: tool.description?.slice(0, 2000) ?? '', inputSchema: structuredClone(tool.inputSchema), effect })
         }
         cursor = result.nextCursor
-        if (!cursor) break
+        if (!cursor || [...visible].filter(name => configured.has(name)).every(name => tools.has(name))) { cursor = undefined; break }
         if (seen.has(cursor)) return { status: 'failed', reason: '外部工具分页游标重复' }
         seen.add(cursor)
       }
-      if (cursor) return { status: 'failed', reason: '外部工具列表超出分页上限' }
       run.tools = tools
       return { status: 'available', tools: [...tools.values()] }
     } catch (cause) { return { status: 'failed', reason: summarizeError(cause) } }

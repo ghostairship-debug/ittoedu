@@ -581,7 +581,7 @@ export type EditorState =
       createCourseDocumentFrom(project: CourseProjectDocument, assetFiles: Record<string, Uint8Array>, componentPackages: Record<string, ComponentPackageData>): Promise<void>
       openCourseDocument(path: string): Promise<void>
       drainCourseDocument(): Promise<DocumentSnapshot>
-      drainAllCourseDocuments(): Promise<DocumentSnapshot[]>
+      drainAllCourseDocuments(documentIds?: readonly string[]): Promise<DocumentSnapshot[]>
       undoLatestAgentCourseDocument(): Promise<boolean>
       saveCourseDocument(saveAs?: boolean): Promise<DocumentSnapshot | null>
       restoreCourseDocument(documentId: string): Promise<void>
@@ -1352,12 +1352,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
       if (!prepared.ok) throw new Error(prepared.reason)
       return documents.drain()
     },
-    async drainAllCourseDocuments() {
-      await prepareCurrentFlowDynamicDrafts()
+    async drainAllCourseDocuments(documentIds) {
+      if (documentIds && !documentIds.length) return []
+      if (!documentIds || documentIds.includes(get().courseDocument.documentId ?? '')) await prepareCurrentFlowDynamicDrafts()
       return documents.drainAll(() => {
         const prepared = courseLifecycleSlice.prepareCourseProjectPersistence()
         if (!prepared.ok) throw new Error(prepared.reason)
-      })
+      }, documentIds)
     },
     async undoLatestAgentCourseDocument() {
       const target = documents.captureLatestAgentUndoTarget()

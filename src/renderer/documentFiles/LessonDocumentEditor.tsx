@@ -26,12 +26,14 @@ export interface LessonDocumentEditorHandle {
   flush(): Promise<boolean>
   saveAs(): Promise<boolean>
   close(): Promise<boolean>
+  preserveDraft(): Promise<boolean>
   preserveAndClose(): Promise<boolean>
 }
 export interface LessonDocumentEditorProps {
   documentRef: DocumentFileRef
   documentId?: string
   sessionKey?: string
+  active?: boolean
   port: RecoverableDocumentFilePort
   onDirtyChange?(dirty: boolean): void
   onClosed?(): void
@@ -50,7 +52,7 @@ function ConflictHunk({ hunk, index, session }: { hunk: DocumentConflictHunk; in
   </fieldset>
 }
 
-export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, LessonDocumentEditorProps>(function LessonDocumentEditor({ documentRef, documentId, sessionKey, port, onDirtyChange, onClosed, onSelectionChange, onContextualCommand, onContextualDismiss }, ref) {
+export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, LessonDocumentEditorProps>(function LessonDocumentEditor({ documentRef, documentId, sessionKey, active = true, port, onDirtyChange, onClosed, onSelectionChange, onContextualCommand, onContextualDismiss }, ref) {
   const identity = sessionKey ?? JSON.stringify(documentRef)
   const session = useMemo(() => new DocumentFileSession(documentRef, port, documentId), [identity, port])
   const lifetime = useMemo(() => ({ leases: 0, opened: false }), [session])
@@ -60,6 +62,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   const htmlEditor = useRef<PlainTextDocumentEditorHandle>(null)
   const htmlTabId = useMemo(() => sessionKey ?? crypto.randomUUID(), [sessionKey])
   const [error, setError] = useState<string | null>(null)
+  const [htmlPendingDraft, setHtmlPendingDraft] = useState(false)
   const pinned = usePinnedSelection(session.documentId)
   useEffect(() => {
     if (!session.documentId) return
@@ -106,7 +109,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     // a real unmount or identity change releases this specific session permanently.
     return () => { lifetime.leases--; queueMicrotask(() => { if (!lifetime.leases) session.dispose() }) }
   }, [session, lifetime])
-  useEffect(() => { onDirtyChange?.(state.dirty) }, [state.dirty, onDirtyChange])
+  useEffect(() => { onDirtyChange?.(state.dirty || htmlPendingDraft) }, [state.dirty, htmlPendingDraft, onDirtyChange])
 
   const resourceKey = JSON.stringify(document.resources)
   useEffect(() => {
@@ -133,6 +136,18 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     if (current) session.edit(current.source, operationGroup.current)
     return session.saveAs()
   }
+  async function preserveDraft() {
+    const current = activeDraft()
+    if (current && !current.ready) return false
+    if (current) session.edit(current.source, operationGroup.current)
+    return session.preserveDraft()
+  }
+  async function preserveAndClose() {
+    const current = activeDraft()
+    if (current && !current.ready) return false
+    if (current) session.edit(current.source, operationGroup.current)
+    return session.preserveAndClose()
+  }
   function bindTarget(selection: DocumentContextSelection | null): ContextualEditTarget | null {
     const snapshot = session.getSnapshot()
     if (!selection || !snapshot.disk || snapshot.source !== selection.source) return null
@@ -150,18 +165,28 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     container.append(element)
     return () => URL.revokeObjectURL(url)
   }
-  useImperativeHandle(ref, () => ({ session, getContextualEditTarget: () => isText ? null : bindTarget(editor.current?.getContextualEditTarget() ?? null), flush, saveAs, close: async () => {
+  useImperativeHandle(ref, () => ({ session, getContextualEditTarget: () => isText ? null : bindTarget(editor.current?.getContextualEditTarget() ?? null), flush, saveAs, preserveDraft, close: async () => {
     const current = activeDraft()
     if (current && !current.ready) return false
     if (current) session.edit(current.source, operationGroup.current)
     return session.close()
-  }, preserveAndClose: () => session.preserveAndClose() }))
-  const status = state.conflict ? '存在文件冲突' : committed ? documentSaveLabel({ ...committed, dirty: state.dirty, saving: state.saving }) : '正在打开'
+  }, preserveAndClose }))
+  const status = state.conflict ? '存在文件冲突' : committed ? documentSaveLabel({ ...committed, dirty: state.dirty || htmlPendingDraft, saving: state.saving }) : '正在打开'
+  const documentActions = <>
+    <span role="status" className="lesson-document-status">{status}</span>
+    <button type="button" disabled={state.saving || state.composing || Boolean(state.conflict) || state.recovery} onClick={() => { void flush() }}>保存</button>
+    <details className="lesson-document-more"><summary aria-label="文档更多操作">文件</summary>
+      <div className="lesson-document-more__menu">
+      <button type="button" disabled={state.saving || state.composing || state.conflictHunks.length > 0} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void saveAs() }}>另存为</button>
+      {committed?.undoHead?.actor === 'agent' && !state.recovery && !state.conflict && !editPreview && <button type="button" onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void session.undoLatestAgent() }}>撤销最近 AI 修改</button>}
+      </div>
+    </details>
+  </>
   return <section className={isHtml ? "lesson-document-editor--html" : undefined} aria-label={`教学文档 ${documentRefLabel(currentRef)}`} onCompositionStartCapture={() => session.setComposing(true)} onCompositionEndCapture={() => { queueMicrotask(() => session.setComposing(false)) }} onKeyDownCapture={event => {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); event.stopPropagation(); void (event.shiftKey ? saveAs() : flush()) }
   }}>
-     <header><strong>{documentRefLabel(currentRef)}</strong> <span role="status">{status}</span> <button type="button" disabled={state.saving || state.composing || Boolean(state.conflict) || state.recovery} onClick={() => { void flush() }}>保存</button> <button type="button" disabled={state.saving || state.composing || state.conflictHunks.length > 0} onClick={() => { void saveAs() }}>另存为</button>{committed?.undoHead?.actor === 'agent' && !state.recovery && !state.conflict && !editPreview && <button type="button" onClick={() => { void session.undoLatestAgent() }}>撤销最近 AI 修改</button>}</header>
-    {(error || state.error) && <div role="alert">{error ?? state.error}<button type="button" onClick={() => { void flush() }}>重试保存</button>{onClosed && <><button type="button" onClick={() => { void session.preserveAndClose().then(closed => { if (closed) onClosed() }) }}>保留恢复稿后关闭</button><button type="button" onClick={() => { void session.discardAndClose().then(closed => { if (closed) onClosed() }) }}>放弃未保存更改并关闭</button></>}</div>}
+    {!isHtml && <header><strong>{documentRefLabel(currentRef)}</strong>{documentActions}</header>}
+    {(error || state.error) && <div role="alert">{error ?? state.error}<button type="button" onClick={() => { void flush() }}>重试保存</button>{onClosed && <><button type="button" onClick={() => { void preserveAndClose().then(closed => { if (closed) onClosed() }) }}>保留恢复稿后关闭</button><button type="button" onClick={() => { void session.discardAndClose().then(closed => { if (closed) onClosed() }) }}>放弃未保存更改并关闭</button></>}</div>}
     {state.recovery && <aside role="alert">已找到未保存恢复稿，请比较后继续。{state.conflictHunks.length ? <span>请逐处处理下方冲突。</span> : <button type="button" onClick={() => { void session.resolveConflict('recovery') }}>保留恢复稿并保存</button>}</aside>}
     {state.conflict && <aside role="alert">
       <p>{state.conflict === 'deleted' ? '磁盘文档已删除，当前稿已保留。' : '磁盘稿与当前稿在同一处有修改，请比较后选择。'}</p>
@@ -169,7 +194,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
       {!state.conflictHunks.length && <>{state.conflict !== 'deleted' && <><details><summary>查看磁盘稿</summary><pre>{state.conflict.source}</pre></details><button type="button" onClick={() => { void session.resolveConflict('disk') }}>采用磁盘稿</button></>}
       <button type="button" disabled={state.saving || state.composing || state.conflictHunks.length > 0} onClick={() => { void (state.conflict === 'deleted' ? saveAs() : session.resolveConflict('local')) }}>{state.conflict === 'deleted' ? '另存当前稿' : '保留当前稿并保存'}</button></>}
     </aside>}
-    {isHtml && committed && <div className="lesson-document-editor__html-body" inert={state.conflictHunks.length > 0}><HtmlDocumentEditor ref={htmlEditor} tabId={htmlTabId} committed={committed} source={state.source} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} onSave={() => { void flush() }} /></div>}
+    {isHtml && committed && <div className="lesson-document-editor__html-body" inert={state.conflictHunks.length > 0}><HtmlDocumentEditor ref={htmlEditor} active={active} tabId={htmlTabId} committed={committed} source={state.source} documentActions={documentActions} onPendingDraftChange={setHtmlPendingDraft} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} onSave={() => { void flush() }} /></div>}
     {isText && !isHtml && committed && <div inert={state.conflictHunks.length > 0}><PlainTextDocumentEditor ref={textEditor} source={state.source} revision={committed.revision} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} /></div>}
     {committed && committed.model.kind !== 'text' && parsedSource && <div inert={state.conflictHunks.length > 0}><SharedDocumentEditor ref={editor} document={document} revision={state.source} sourceDraft={state.source} target="file" initialMode={parsedSource.status === 'valid' ? 'layout' : 'source'} resolveImage={resolveImage}
       sourceMap={parsedSource.status === 'valid' ? parsedSource.sourceMap : undefined}

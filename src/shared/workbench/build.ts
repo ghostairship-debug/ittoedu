@@ -14,7 +14,7 @@ export type BuildCreateTicket = z.infer<typeof buildCreateTicketSchema>
 export type BuildCreateLookup = { status: 'created'; job: BuildJobSnapshot }
   | { status: 'unknown'; jobId: string; runId: string; target: BuildTarget }
 /** maxDurationMs limits one build.check admission; idle model and image time is excluded. */
-export interface BuildBudget { maxBytes: number; maxFiles: number; maxWrites: number; maxChecks: number; maxSameSourceChecks: number; maxDurationMs: number }
+export interface BuildBudget { maxBytes: number; maxFiles: number; maxWrites: number | null; maxChecks: number | null; maxSameSourceChecks: number | null; maxDurationMs: number }
 export interface BuildJobInput {
   runId: string
   target: BuildTarget

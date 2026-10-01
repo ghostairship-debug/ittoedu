@@ -1,6 +1,6 @@
 # 验收总表
 
-由 acceptance_cases.json 生成：44 个实施任务，240 个产品场景。下列状态与证据引用来自同源 JSON；工程 `passed` 不等于 Owner `accepted`。修改定义后同步生成，不手改此表。
+由 acceptance_cases.json 生成：44 个实施任务，241 个产品场景。下列状态与证据引用来自同源 JSON；工程 `passed` 不等于 Owner `accepted`。修改定义后同步生成，不手改此表。
 
 ## S01
 
@@ -2527,6 +2527,18 @@
 **验证层：** unit；范围：`2.0`；当前状态：`passed`。
 
 **证据：** `evidence/B18_2026_09_28_M18.md`
+
+### M18-T06｜可靠初稿默认流程与人主导局部精修
+
+**环境／前置：** 当前两个 Skill、短 HTML 合同、正式 HTML Runtime、保存与回读入口；隔离 profile 和临时文件
+
+**操作：** 验证默认流程取消全课审美精修与固定确认；六页独立脚本在真实 Runtime 中点击生效，自动映射导入后保存并从文件字节重开；保留用户指定完整检查能力
+
+**验收：** 核心图示与展示存在、页独立可见、无重叠 Native 替代；默认初稿可保存与重开，机械测试不冒充模型质量或 Owner accepted
+
+**验证层：** integration；范围：`2.0`；当前状态：`passed`。
+
+**证据：** `evidence/USABILITY_REPAIRS_2026_09_29.md`
 
 ## M25
 

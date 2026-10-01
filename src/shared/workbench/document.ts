@@ -1,3 +1,5 @@
+import type { DocumentSlot } from '../document/ports'
+import type { DocumentSaveIdentity } from './documentSave'
 import type { CourseProjectDocument } from '../courseProjectTypes'
 
 /** Document identity is independent of the file's project ID and its path. */
@@ -29,6 +31,11 @@ export type DocumentCommand =
   | { type: 'course.replace'; project: CourseProjectDocument; resources?: DocumentResources }
   | { type: 'course.object.patch'; locationId: string; itemId: string; patch: Record<string, unknown> }
 
+export interface DocumentTextChanges {
+  source: Array<{ from: number; to: number; inserted: number }>
+  flow: Array<{ surfaceId: string; parentId: string | null; blockId: string; slot: DocumentSlot; from: number; to: number; inserted: number }>
+}
+
 /** Host-owned envelope. Providers receive domain arguments, never this authority. */
 export interface DocumentOperation {
   documentId: DocumentId
@@ -40,6 +47,8 @@ export interface DocumentOperation {
   historyGroup?: string
   /** Trusted gateway's digest of the original tool call, before planning/rebasing. Never accepted by UI IPC. */
   requestDigest?: string
+  /** Exact splices computed by the host planner; excluded from UI and model input schemas. */
+  textChanges?: DocumentTextChanges
   mutation: { type: 'command'; command: DocumentCommand;
     /** Strictly amend this history head; stale ownership never creates a new Undo entry. */
     amendHistory?: { expectedTopOperationId: string }
@@ -73,6 +82,8 @@ export interface DocumentHistoryEntry {
   actor?: DocumentOperation['actor']
   runId?: string
   historyGroup?: string
+  beforeRevision?: number
+  revision?: number
   before: DocumentModel
   after: DocumentModel
 }
@@ -89,7 +100,7 @@ export interface DurableDocumentState {
   model: DocumentModel
   past: DocumentHistoryEntry[]
   future: DocumentHistoryEntry[]
-  operations: { operationId: string; digest: string; result: DocumentOperationResult }[]
+  operations: { operationId: string; digest: string; result: DocumentOperationResult; actor?: DocumentOperation['actor']; runId?: string; textChanges?: DocumentTextChanges }[]
   stoppedRuns: string[]
 }
 
@@ -109,5 +120,5 @@ export interface DocumentDriver {
 /** No filesystem, Electron, DOM or renderer dependency is permitted in the core. */
 export interface DocumentPersistence {
   append(state: DurableDocumentState): Promise<void>
-  save(input: { documentId: DocumentId; revision: number; model: DocumentModel; binding: DocumentBinding; bytes: Uint8Array }): Promise<Extract<DocumentBinding, { kind: 'file' }>>
+  save(input: { documentId: DocumentId; revision: number; model: DocumentModel; binding: DocumentBinding; bytes: Uint8Array; saveIdentity?: DocumentSaveIdentity }): Promise<Extract<DocumentBinding, { kind: 'file' }>>
 }

@@ -152,7 +152,8 @@ async function partialDocumentFixture(options: { source?: string; replacement?: 
   const failed = await service.engine.wait(first.run!.runId)
   expect(failed.status).toBe('partial')
   expect(failed.tools[0].result).toMatchObject({ kind: 'document-operation', result: { status: 'applied', beforeRevision: 0, revision: 1 } })
-  expect((await documents.internalAPI.read(document.documentId)).model).toMatchObject({ source: options.derivedTarget ? 'XYZBC tail' : '已修改 后文' })
+  const original = options.source ?? '原正文 后文', edited = options.derivedTarget ?? { from: 0, to: 3 }
+  expect((await documents.internalAPI.read(document.documentId)).model).toMatchObject({ source: original.slice(0, edited.from) + (options.replacement ?? '已修改') + original.slice(edited.to) })
   const restored = await waitForDraft(service, identity, draft.inputDraft)
   return { service, documents, document, identity, send, failed, restored, get requests() { return requests } }
 }
@@ -166,9 +167,10 @@ it.each([
   const sent = await f.service.operate(f.send) as ExecutionSendResult
   const failed = await f.service.engine.wait(sent.run!.runId)
   expect(failed.status).toBe('failed')
-  expect(failed.requests).toHaveLength(1)
+  const attempts = fault === 'disconnect' ? 3 : 1
+  expect(failed.requests).toHaveLength(attempts)
   expect(failed.requests[0].failure).toMatchObject({ kind, code, outcome })
-  expect(f.requests).toBe(1)
+  expect(f.requests).toBe(attempts)
 
   const persisted = await f.service.operate({ type: 'run', runId: failed.runId }) as ExecutionRunRecord
   expect(persisted.requests[0].failure).toMatchObject({ kind, code })
@@ -181,7 +183,7 @@ it.each([
   const receipt = await f.service.operate(f.send) as ExecutionSendResult
   expect(receipt.run?.runId).toBe(failed.runId)
   expect(receipt.submission.state).toBe('accepted')
-  expect(f.requests).toBe(1)
+  expect(f.requests).toBe(attempts)
   expect((await f.service.runs.list()).filter(run => run.input.taskId === f.send.submissionId)).toHaveLength(1)
 
   const continuation = { ...f.send, submissionId: randomUUID(), expectedRevision: current.revision, retryOfRunId: failed.runId }
@@ -189,7 +191,7 @@ it.each([
   const second = await f.service.engine.wait(resumed.run!.runId)
   expect(second.status).toBe('completed')
   expect(second.continuedFrom).toBe(failed.runId)
-  expect(f.requests).toBe(2)
+  expect(f.requests).toBe(attempts + 1)
   const after = await f.service.operate({ type: 'conversation', ...f.identity }) as ConversationRecord
   expect(after.runIndex.builtinRunIds).toEqual([failed.runId, second.runId])
   expect(after.messages.filter(message => message.role === 'user')).toHaveLength(1)
@@ -198,10 +200,10 @@ it.each([
   const recoveredAck = await f.service.operate(continuation) as ExecutionSendResult
   expect(recoveredAck.run!.runId).toBe(second.runId)
   expect(recoveredAck.submission.retryOfRunId).toBe(failed.runId)
-  expect(f.requests).toBe(2)
+  expect(f.requests).toBe(attempts + 1)
   const duplicateClick = await f.service.operate({ ...continuation, submissionId: randomUUID() }) as ExecutionSendResult
   expect(duplicateClick.run!.runId).toBe(second.runId)
-  expect(f.requests).toBe(2)
+  expect(f.requests).toBe(attempts + 1)
 })
 
 it('holds queued work at the local request cap and creates only one explicit continuation', async () => {
@@ -282,13 +284,15 @@ it('M12-T02 continues a real selectionReference whose selection and writable con
   expect(f.requests).toBe(3)
 })
 
-it('M12-T02 rejects a derived child range whose growth shifts the frozen parent coordinates', async () => {
+it('continues a derived child expansion by its canonical splice without widening to the document', async () => {
   const f = await partialDocumentFixture({ source: 'ABC tail', replacement: 'XYZ', derivedTarget: { from: 0, to: 1 } })
-  await expect(f.service.operate({ ...f.send, submissionId: randomUUID(), expectedRevision: f.restored.revision,
-    retryOfRunId: f.failed.runId })).rejects.toThrow()
+  const resumed = await f.service.operate({ ...f.send, submissionId: randomUUID(), expectedRevision: f.restored.revision,
+    retryOfRunId: f.failed.runId }) as ExecutionSendResult
+  expect((await f.service.engine.wait(resumed.run!.runId)).status).toBe('completed')
+  expect(resumed.run!.input.documents[0]!.writable).toEqual([{ kind: 'markdown-range', from: 0, to: 5 }])
   expect((await f.documents.internalAPI.read(f.document.documentId))).toMatchObject({ revision: 1,
     model: { source: 'XYZBC tail' } })
-  expect(f.requests).toBe(2)
+  expect(f.requests).toBe(3)
 })
 
 it('M12-T02 rejects partial continuation after a later human edit instead of rebasing its old local range', async () => {
@@ -302,4 +306,22 @@ it('M12-T02 rejects partial continuation after a later human edit instead of reb
   expect((await f.documents.internalAPI.read(f.document.documentId))).toMatchObject({ revision: 2,
     model: { source: '教师后改 后文' } })
   expect(f.requests).toBe(2)
+})
+
+
+it('continues expanded text after a disjoint human prefix and a canonical Save As', async () => {
+  const f = await partialDocumentFixture({ replacement: '扩写后的正文', selection: true })
+  const session = f.documents.registry.get(f.document.documentId), before = await session.drain()
+  await session.execute({ documentId: before.documentId, epoch: before.epoch, baseRevision: before.revision, operationId: 'prefix', actor: 'human',
+    mutation: { type: 'command', command: { type: 'markdown.splice', from: 0, to: 0, text: '人工前缀 ' } } })
+  if (f.document.binding.kind !== 'file') throw new Error('fixture file')
+  const destination = path.join(path.dirname(f.document.binding.path), 'renamed.md')
+  await f.documents.saveToPath(f.document.documentId, destination)
+  const resumed = await f.service.operate({ ...f.send, submissionId: randomUUID(), expectedRevision: f.restored.revision,
+    retryOfRunId: f.failed.runId }) as ExecutionSendResult
+  expect((await f.service.engine.wait(resumed.run!.runId)).status).toBe('completed')
+  expect(resumed.run!.input.documents[0]!.writable).toContainEqual({ kind: 'markdown-range', from: 5, to: 11 })
+  expect(resumed.run!.input.documents[0]!.selection).toEqual([{ kind: 'markdown-range', from: 5, to: 11 }])
+  expect(await fs.readFile(destination, 'utf8')).toBe('人工前缀 扩写后的正文 后文')
+  expect(await fs.readFile(f.document.binding.path, 'utf8')).toBe('原正文 后文')
 })

@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { afterEach, expect, it, vi } from 'vitest'
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { createCourseProjectArchive, type CourseProjectArchiveData } from '../../src/core/drivers/codecs/courseProjectArchive'
@@ -20,6 +21,8 @@ import { isExecutionInputError } from '../../src/shared/workbench/executionInput
 import type { ConversationRecord } from '../../src/shared/workbench/conversations'
 import type { ElementChangeView, ElementRevertResult, ExecutionDocumentReference, ExecutionSendResult } from '../../src/shared/workbench/executionDesktop'
 
+const modelOperation = new AsyncLocalStorage<string>()
+const operationActor = () => modelOperation.getStore() ? { actor: 'agent' as const, runId: modelOperation.getStore()! } : { actor: 'human' as const }
 const roots: string[] = []
 afterEach(async () => {
   vi.restoreAllMocks()
@@ -53,7 +56,10 @@ async function fixture(model: (request: { instruction: string }) => Promise<void
   const respond = async (_url: unknown, init?: { body?: unknown }) => {
     const body = JSON.parse(String(init?.body ?? '{}')) as { messages?: Array<{ role: string; content: unknown }> }
     const last = body.messages?.filter(message => message.role === 'user').at(-1)?.content
-    await model({ instruction: typeof last === 'string' ? last : JSON.stringify(last ?? '') })
+    const instruction = typeof last === 'string' ? last : JSON.stringify(last ?? '')
+    const active = (await service.runs.list()).find(run => instruction.includes(run.input.instruction) && !['completed', 'failed', 'partial', 'stopped'].includes(run.status))
+    if (!active) throw new Error('fixture lost its actual run identity')
+    await modelOperation.run(active.runId, () => model({ instruction }))
     return reply()
   }
   const options = { directory: path.join(root, 'execution'), documents, settings, fetch: vi.fn(respond) as unknown as typeof fetch,
@@ -79,7 +85,7 @@ async function edit(documents: DocumentHostService, documentId: string, change: 
   const session = documents.registry.get(documentId), snapshot = await session.drain()
   if (snapshot.model.kind !== 'course-v9') throw new Error('course')
   const project = structuredClone(snapshot.model.project); change(project)
-  const result = await session.execute({ documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision, operationId: randomUUID(), actor: 'human',
+  const result = await session.execute({ documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision, operationId: randomUUID(), ...operationActor(),
     mutation: { type: 'command', command: { type: 'course.replace', project } } })
   expect(result.status).toBe('applied')
 }
@@ -88,6 +94,26 @@ const sceneItems = (project: CourseProjectDocument) => {
   if (surface?.type !== 'slide') throw new Error('slide surface')
   return surface.scenes[0]!.layerItems
 }
+
+it('R11 unsubmitted card input survives restart as a visible draft without sending or losing frozen references', async () => {
+  const f = await fixture()
+  const card = await f.service.operate({ type: 'create-conversation', workspaceId: f.workspaceId,
+    element: { kind: 'element', documentId: f.opened.documentId, label: '标题' } }) as ConversationRecord
+  const refs = [objectReference(f.opened, 'a')]
+  const saved = await f.service.operate({ type: 'draft', workspaceId: f.workspaceId, conversationId: card.conversationId,
+    expectedRevision: card.revision, text: '保留这个尚未发送的问题', documents: refs, attachments: [] }) as ConversationRecord
+  const restarted = new ExecutionDesktopService(f.options)
+  const visible = await restarted.operate({ type: 'conversations', workspaceId: f.workspaceId }) as ConversationRecord[]
+  const recovered = visible.find(value => value.conversationId === card.conversationId)
+  expect(recovered?.inputDraft).toBe(saved.inputDraft)
+  expect(recovered?.element).toBeUndefined()
+  expect(recovered?.title).toBe('未发送的 AI 卡草稿 · 标题')
+  expect(recovered?.frozenContextRefs).toEqual(saved.frozenContextRefs)
+  expect(await restarted.runs.list()).toHaveLength(0)
+  const restartedAgain = new ExecutionDesktopService(f.options)
+  expect((await restartedAgain.operate({ type: 'conversations', workspaceId: f.workspaceId }) as ConversationRecord[])
+    .find(value => value.conversationId === card.conversationId)?.revision).toBe(recovered?.revision)
+})
 
 it('M15 an element card conversation is not listed with the sessions and ends with its document and with the app', async () => {
   const f = await fixture()
@@ -203,6 +229,7 @@ it('M15 a card undoes only what its request changed, asks before overwriting lat
   const change = (result: ExecutionSendResult) => f.service.operate({ type: 'element-change', submissionId: result.submission.submissionId }) as Promise<ElementChangeView>
   const settle = async (result: ExecutionSendResult) => {
     if (result.run) await f.service.engine.wait(result.run.runId)
+    if (result.run) await vi.waitFor(async () => expect((await f.service.conversations.readConversation({ workspaceId: f.workspaceId, conversationId: result.submission.conversationId }))!.messages.some(message => message.role === 'assistant' && message.runId === result.run!.runId)).toBe(true))
     await vi.waitFor(async () => expect((await change(result)).state).not.toBe('pending'))
     return change(result)
   }
@@ -228,7 +255,7 @@ it('M15 a card undoes only what its request changed, asks before overwriting lat
   const session = f.documents.registry.get(f.opened.documentId)
   const history = async (type: 'undo' | 'redo') => {
     const snapshot = await session.drain()
-    return session.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision, operationId: randomUUID(), actor: 'human', mutation: { type } })
+    return session.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision, operationId: randomUUID(), ...operationActor(), mutation: { type } })
   }
   expect((await history('undo')).status).toBe('applied')
   expect(await current('b')).toEqual({ text: '要点（AI）', color: '#dc2626', x: 300 })
@@ -278,6 +305,7 @@ it('M15 a document block card undoes only the fields its request changed and ask
   const sent = await f.service.operate({ type: 'send', workspaceId: f.workspaceId, conversationId: card.conversationId, submissionId: randomUUID(), expectedRevision: card.revision,
     text: '图片-改', documents: [{ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, writable: [target], selection: [target] }], attachments: [] }) as ExecutionSendResult
   if (sent.run) await f.service.engine.wait(sent.run.runId)
+    if (sent.run) await vi.waitFor(async () => expect((await f.service.conversations.readConversation({ workspaceId: f.workspaceId, conversationId: sent.submission.conversationId }))!.messages.some(message => message.role === 'assistant' && message.runId === sent.run!.runId)).toBe(true))
   const read = () => f.service.operate({ type: 'element-change', submissionId: sent.submission.submissionId }) as Promise<ElementChangeView>
   await vi.waitFor(async () => expect((await read()).state).not.toBe('pending'))
   expect(await read()).toMatchObject({ state: 'applied', fields: ['替代文字', '排版'] })
@@ -303,7 +331,7 @@ it('M15 a Markdown text card follows its text through follow-ups and undoes and 
     const session = f.documents.registry.get(documentId), snapshot = await session.drain()
     if (snapshot.model.kind !== 'markdown') throw new Error('markdown')
     const from = snapshot.model.source.indexOf(find)
-    const result = await session.execute({ documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision, operationId: randomUUID(), actor: 'human',
+    const result = await session.execute({ documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision, operationId: randomUUID(), ...operationActor(),
       mutation: { type: 'command', command: { type: 'markdown.splice', from, to: from + find.length, text } } })
     expect(result.status).toBe('applied')
   }
@@ -322,6 +350,7 @@ it('M15 a Markdown text card follows its text through follow-ups and undoes and 
     const sent = await f.service.operate({ type: 'send', workspaceId: f.workspaceId, conversationId: card.conversationId, submissionId: randomUUID(), expectedRevision: latest!.revision,
       text, documents: [{ documentId, epoch: snapshot.epoch, revision: snapshot.revision, writable: [target], selection: [target] }], attachments: [] }) as ExecutionSendResult
     if (sent.run) await f.service.engine.wait(sent.run.runId)
+    if (sent.run) await vi.waitFor(async () => expect((await f.service.conversations.readConversation({ workspaceId: f.workspaceId, conversationId: sent.submission.conversationId }))!.messages.some(message => message.role === 'assistant' && message.runId === sent.run!.runId)).toBe(true))
     const read = () => f.service.operate({ type: 'element-change', submissionId: sent.submission.submissionId }) as Promise<ElementChangeView>
     await vi.waitFor(async () => expect((await read()).state).not.toBe('pending'))
     return { submissionId: sent.submission.submissionId, change: await read() }
@@ -366,6 +395,7 @@ it('M15 a Flow text card traces its range in the paragraph and undoes the paragr
   const sent = await f.service.operate({ type: 'send', workspaceId: f.workspaceId, conversationId: card.conversationId, submissionId: randomUUID(), expectedRevision: card.revision,
     text: '一段-改', documents: [{ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, writable: [target], selection: [target] }], attachments: [] }) as ExecutionSendResult
   if (sent.run) await f.service.engine.wait(sent.run.runId)
+    if (sent.run) await vi.waitFor(async () => expect((await f.service.conversations.readConversation({ workspaceId: f.workspaceId, conversationId: sent.submission.conversationId }))!.messages.some(message => message.role === 'assistant' && message.runId === sent.run!.runId)).toBe(true))
   const read = () => f.service.operate({ type: 'element-change', submissionId: sent.submission.submissionId }) as Promise<ElementChangeView>
   await vi.waitFor(async () => expect((await read()).state).not.toBe('pending'))
   const changed = await read()
@@ -411,6 +441,7 @@ it('M15 a Runtime card names the earlier text edits whose original text its requ
     const result = await f.service.operate({ type: 'send', workspaceId: f.workspaceId, conversationId: card.conversationId, submissionId: randomUUID(),
       expectedRevision: latest!.revision, text, documents: [objectReference(snapshot, 'quiz')], attachments: [] }) as ExecutionSendResult
     if (result.run) await f.service.engine.wait(result.run.runId)
+    if (result.run) await vi.waitFor(async () => expect((await f.service.conversations.readConversation({ workspaceId: f.workspaceId, conversationId: result.submission.conversationId }))!.messages.some(message => message.role === 'assistant' && message.runId === result.run!.runId)).toBe(true))
     const view = () => f.service.operate({ type: 'element-change', submissionId: result.submission.submissionId }) as Promise<ElementChangeView>
     await vi.waitFor(async () => expect((await view()).state).not.toBe('pending'))
     return view()
@@ -419,4 +450,27 @@ it('M15 a Runtime card names the earlier text edits whose original text its requ
   expect(await send('换题目')).toMatchObject({ state: 'none', lostTexts: ['听录音，选图片'] })
   // A request that keeps the text reports nothing.
   expect((await send('只改样式')).lostTexts).toBeUndefined()
+})
+
+
+it('does not attribute human edits made during an AI request to that request', async () => {
+  let f!: Awaited<ReturnType<typeof fixture>>
+  f = await fixture(async () => {
+    await modelOperation.run('', () => edit(f.documents, f.opened.documentId, project => {
+      const item = sceneItems(project).find(i => i.layerItemId === 'a')!
+      if (item.kind === 'native' && item.content.nativeType === 'text') item.content.data.text = '人工重要修改'
+    }))
+  })
+  const card = await f.service.operate({ type: 'create-conversation', workspaceId: f.workspaceId,
+    element: { kind: 'element', documentId: f.opened.documentId, label: '标题' } }) as ConversationRecord
+  const sent = await f.service.operate({ type: 'send', workspaceId: f.workspaceId, conversationId: card.conversationId,
+    submissionId: randomUUID(), expectedRevision: card.revision, text: '只提供建议', documents: [objectReference(f.opened, 'a')], attachments: [] }) as ExecutionSendResult
+  if (sent.run) await f.service.engine.wait(sent.run.runId)
+    if (sent.run) await vi.waitFor(async () => expect((await f.service.conversations.readConversation({ workspaceId: f.workspaceId, conversationId: sent.submission.conversationId }))!.messages.some(message => message.role === 'assistant' && message.runId === sent.run!.runId)).toBe(true))
+  const change = () => f.service.operate({ type: 'element-change', submissionId: sent.submission.submissionId }) as Promise<ElementChangeView>
+  await vi.waitFor(async () => expect((await change()).state).not.toBe('pending'))
+  expect(await change()).toMatchObject({ state: 'none', fields: [] })
+  expect(await f.service.operate({ type: 'element-revert', submissionId: sent.submission.submissionId, direction: 'undo' })).toMatchObject({ status: 'unavailable' })
+  const model = (await f.documents.registry.get(f.opened.documentId).drain()).model
+  expect(model.kind === 'course-v9' && textOf(model.project, 'a').text).toBe('人工重要修改')
 })

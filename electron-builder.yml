@@ -19,6 +19,8 @@ files:
   - resources/built-in-components/components/**/thumbnail.svg
   - package.json
 extraResources:
+  - from: resources/file-publish/file-publish.exe
+    to: file-publish/file-publish.exe
   - from: resources/clipboard-file-list/clipboard-file-list.exe
     to: clipboard-file-list/clipboard-file-list.exe
 win:

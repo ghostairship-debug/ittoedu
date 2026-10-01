@@ -131,7 +131,7 @@ export class HtmlActionService {
     session.stopped = true
     session.handles.clear()
     session.unsubscribeErrors()
-    this.options.images.clearRun(session.identity.runId)
+    void this.options.images.clearRun(session.identity.runId).catch(() => undefined)
     if (this.runs.get(session.identity.runId) === session) this.runs.delete(session.identity.runId)
   }
 
@@ -158,7 +158,8 @@ export class HtmlActionService {
     await this.assertCurrent(session)
     if (!sameHtmlPreviewDocumentUrl(state.url, session.identity.url))
       throw new Error('HTML 页面来源已变化，请重新打开预览')
-    const image = this.options.images.put(session.identity.runId, capture.png, capture.width, capture.height)
+    const image = await this.options.images.put(session.identity.runId, capture.png, capture.width, capture.height)
+    await this.assertCurrent(session)
     session.generation += 1
     session.handles.clear()
     const elements = state.elements.slice(0, 120).map(element => {
@@ -244,7 +245,7 @@ export class HtmlActionService {
     return { identity: session.identity, errors: [...session.errors] }
   }
 
-  readResource(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array } {
+  async readResource(runId: string, resourceId: string): Promise<{ mimeType: string; bytes: Uint8Array }> {
     this.require(runId)
     return this.options.images.read(runId, resourceId)
   }

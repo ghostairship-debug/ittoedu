@@ -11,7 +11,7 @@ export interface StoredExecutionSubmission extends ExecutionSubmissionRecord {
   start: ExecutionStart
   attachmentIds: string[]
   conversationRevision?: number
-  continuation?: { runId: string; facts: string }
+  continuation?: { runId: string; facts: string; sameTask?: boolean }
 }
 
 const clone = <T>(value: T): T => structuredClone(value)
@@ -19,6 +19,8 @@ const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'E
 
 /** Durable acceptance owner. A starting record without a matching run checkpoint is never replayed. */
 export class ExecutionSubmissionStore {
+  private readonly unavailable = new Map<string, string>()
+  get recoveryIssues(): string[] { return [...this.unavailable.values()] }
   private tail: Promise<unknown> = Promise.resolve()
   constructor(private readonly directory: string) {}
   private file(submissionId: string): string {
@@ -91,23 +93,25 @@ export class ExecutionSubmissionStore {
       catch (error) { if (missing(error)) return []; throw error }
       const records: StoredExecutionSubmission[] = []
       for (const name of names.filter(value => /^[a-f0-9]{64}\.json$/.test(value))) {
-        const record = this.validate(JSON.parse(await fs.readFile(path.join(this.directory, name), 'utf8')))
-        if (path.basename(this.file(record.submissionId)) !== name) throw new Error('执行提交恢复记录身份不匹配')
-        records.push(record)
+        try {
+          const record = this.validate(JSON.parse(await fs.readFile(path.join(this.directory, name), 'utf8')))
+          if (path.basename(this.file(record.submissionId)) !== name) throw new Error('执行提交恢复记录身份不匹配')
+          records.push(record); this.unavailable.delete(name)
+        } catch { this.unavailable.set(name, `一份历史提交记录无法读取，原文件保留：${name}`) }
       }
       return records.sort((a, b) => a.createdAt - b.createdAt || a.submissionId.localeCompare(b.submissionId)).map(clone)
     })
   }
-  private async readPauses(): Promise<Record<string, 'external-handoff'>> {
+  private async readPauses(): Promise<Record<string, 'external-handoff' | 'user'>> {
     let bytes: string
     try { bytes = await fs.readFile(this.pausesFile(), 'utf8') }
     catch (error) { if (missing(error)) return {}; throw error }
     const value = JSON.parse(bytes) as Record<string, unknown>
     if (!value || typeof value !== 'object' || Array.isArray(value)
-      || Object.values(value).some(reason => reason !== 'external-handoff')) throw new Error('执行队列暂停记录无效')
-    return value as Record<string, 'external-handoff'>
+      || Object.values(value).some(reason => reason !== 'external-handoff' && reason !== 'user')) throw new Error('执行队列暂停记录无效')
+    return value as Record<string, 'external-handoff' | 'user'>
   }
-  private async writePauses(pauses: Record<string, 'external-handoff'>): Promise<void> {
+  private async writePauses(pauses: Record<string, 'external-handoff' | 'user'>): Promise<void> {
     await fs.mkdir(this.directory, { recursive: true })
     const filename = this.pausesFile(), temporary = `${filename}.${randomUUID()}.tmp`
     try {
@@ -116,13 +120,13 @@ export class ExecutionSubmissionStore {
       await fs.rename(temporary, filename)
     } finally { await fs.rm(temporary, { force: true }).catch(() => undefined) }
   }
-  pause(conversationId: string): Promise<void> {
-    return this.serial(async () => { const pauses = await this.readPauses(); pauses[conversationId] = 'external-handoff'; await this.writePauses(pauses) })
+  pause(conversationId: string, reason: 'external-handoff' | 'user' = 'external-handoff'): Promise<void> {
+    return this.serial(async () => { const pauses = await this.readPauses(); if (pauses[conversationId] !== 'external-handoff') pauses[conversationId] = reason; await this.writePauses(pauses) })
   }
   resume(conversationId: string): Promise<void> {
     return this.serial(async () => { const pauses = await this.readPauses(); if (!(conversationId in pauses)) return; delete pauses[conversationId]; await this.writePauses(pauses) })
   }
-  pausedReason(conversationId: string): Promise<'external-handoff' | undefined> {
+  pausedReason(conversationId: string): Promise<'external-handoff' | 'user' | undefined> {
     return this.serial(async () => (await this.readPauses())[conversationId])
   }
 }

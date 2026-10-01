@@ -67,6 +67,7 @@ export const executionDesktopRequestSchema = z.discriminatedUnion('type', [
     element: z.object({ kind: z.literal('element'), documentId: id, label: z.string().min(1).max(200) }).strict().optional() }).strict(),
   z.object({ type: z.literal('set-conversation-home'), ...identity, home: conversationHomeSchema.nullable() }).strict(),
   z.object({ type: z.literal('conversation'), ...identity }).strict(),
+  z.object({ type: z.literal('prepare-documents'), ...identity, documents: z.array(executionDocumentReferenceSchema).max(100), permission: executionPermissionModeSchema.optional() }).strict(),
   z.object({ type: z.literal('draft'), ...identity, expectedRevision: index, text: z.string().max(1024 * 1024), documents: z.array(executionDocumentReferenceSchema).max(100), attachments: z.array(inputAttachmentReferenceSchema).max(1000).default([]) }).strict(),
   z.object({ type: z.literal('rename-conversation'), ...identity, expectedRevision: index, title: z.string().min(1).max(1024) }).strict(),
   z.object({ type: z.literal('delete-conversation'), ...identity, expectedRevision: index }).strict(),
@@ -76,10 +77,12 @@ export const executionDesktopRequestSchema = z.discriminatedUnion('type', [
     stamp: rendererTimingStampSchema, itemId: id }).strict(),
   z.object({ type: z.literal('submission'), ...identity, submissionId: z.uuid() }).strict(),
   z.object({ type: z.literal('submissions'), ...identity }).strict(),
+  z.object({ type: z.literal('run-queued'), ...identity, submissionId: z.uuid() }).strict(),
   z.object({ type: z.literal('delete-submission'), ...identity, submissionId: z.uuid() }).strict(),
-  z.object({ type: z.literal('pause-queue'), ...identity }).strict(),
+  z.object({ type: z.literal('pause-queue'), ...identity, reason: z.literal('user').optional() }).strict(),
   z.object({ type: z.literal('resume-queue'), ...identity }).strict(),
   z.object({ type: z.literal('run'), runId: id }).strict(),
+  z.object({ type: z.literal('browser-control'), ...identity, runId: id, action: z.enum(['status', 'takeover', 'resume']) }).strict(),
   z.object({ type: z.literal('change-review'), ...identity, runId: id, offset: index.optional(), limit: z.number().int().min(1).max(100).optional() }).strict(),
   z.object({ type: z.literal('change-rollback'), ...identity, runId: id, entryId: id }).strict(),
   z.object({ type: z.literal('checkpoint'), ...identity, runId: id }).strict(),
@@ -95,7 +98,7 @@ export const executionDesktopRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('element-change'), submissionId: id }).strict(),
   z.object({ type: z.literal('element-revert'), submissionId: id, direction: z.enum(['undo', 'redo']), force: z.boolean().optional() }).strict(),
 ])
-export interface ExecutionWorkspace { workspace: WorkspaceRecord; conversations: ConversationRecord[] }
+export interface ExecutionWorkspace { workspace: WorkspaceRecord; conversations: ConversationRecord[]; recoveryIssues?: string[] }
 export interface ExecutionSendInput {
   workspaceId: string
   conversationId: string
@@ -130,7 +133,7 @@ export interface ExecutionSubmissionRecord {
   runId?: string
   retryOfRunId?: string
   failure?: { code: string; message: string }
-  queuePausedReason?: 'external-handoff'
+  queuePausedReason?: 'external-handoff' | 'user'
   permission?: ExecutionPermissionMode
 }
 export interface ExecutionSendResult { submission: ExecutionSubmissionRecord; conversation: ConversationRecord; run?: ExecutionRunRecord }
@@ -167,15 +170,18 @@ export interface ExecutionDesktopAPI {
   draft(input: Omit<ExecutionSendInput, 'submissionId' | 'mode'>): Promise<ConversationRecord>
   renameConversation(input: { workspaceId: string; conversationId: string; expectedRevision: number; title: string }): Promise<ConversationRecord>
   deleteConversation(input: { workspaceId: string; conversationId: string; expectedRevision: number }): Promise<void>
+  prepareDocuments?(input: Pick<ExecutionSendInput, 'workspaceId' | 'conversationId' | 'documents' | 'permission'>): Promise<ExecutionDocumentReference[]>
   send(input: ExecutionSendInput): Promise<ExecutionSendResult>
   timing?(input: { workspaceId: string; conversationId: string; submissionId: string; stage: 'renderer.first-visible';
     stamp: RendererTimingStamp; itemId: string }): Promise<void>
   submission(input: { workspaceId: string; conversationId: string; submissionId: string }): Promise<ExecutionSubmissionRecord | null>
   submissions(input: { workspaceId: string; conversationId: string }): Promise<ExecutionSubmissionRecord[]>
+  runQueued?(input: { workspaceId: string; conversationId: string; submissionId: string }): Promise<ExecutionSendResult>
   deleteSubmission(input: { workspaceId: string; conversationId: string; submissionId: string }): Promise<ExecutionSubmissionRecord>
-  pauseQueue(input: { workspaceId: string; conversationId: string }): Promise<void>
+  pauseQueue(input: { workspaceId: string; conversationId: string; reason?: 'user' }): Promise<void>
   resumeQueue(input: { workspaceId: string; conversationId: string }): Promise<void>
   run(runId: string): Promise<ExecutionRunRecord | null>
+  browserControl?(input: { workspaceId: string; conversationId: string; runId: string; action: 'status' | 'takeover' | 'resume' }): Promise<{ state: 'agent' | 'human' | 'transition' | 'stopped'; pageUrl?: string; snapshotId?: string }>
   changeReview?(input: { workspaceId: string; conversationId: string; runId: string; offset?: number; limit?: number }): Promise<import('../../main/workbench/review/ExecutionChangeReviewService').ChangeReviewPage>
   changeRollback?(input: { workspaceId: string; conversationId: string; runId: string; entryId: string }): Promise<import('../../main/workbench/review/ExecutionChangeReviewService').ChangeRollbackResult>
   checkpoint?(input: { workspaceId: string; conversationId: string; runId: string }): Promise<import('../../main/workbench/execution/CheckpointForkService').UserCheckpointIndex>

@@ -11,7 +11,7 @@ export async function conversationHistoryIndex(conversation: ConversationRecord,
   const cache = new Map<string, ExecutionRunRecord | null>(), entries: InputContext['context'][number][] = []
   const lastAssistantIndex = new Map<string, number>()
   for (const [position, message] of history.entries()) {
-    if (message.runId && !cache.has(message.runId)) cache.set(message.runId, await readRun(message.runId))
+    if (message.runId && !cache.has(message.runId)) cache.set(message.runId, await readRun(message.runId).catch(() => null))
     const run = message.runId ? cache.get(message.runId) : null
     let index = -1
     if (run?.input.conversationId === conversation.conversationId) {

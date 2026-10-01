@@ -4,13 +4,14 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import sharp from 'sharp'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { ChatGPTImageProvider, imageProvenance, serializeChatGPTImageRequest, type ImageProviderReference } from '../../src/main/workbench/images/ChatGPTImageProvider'
 import { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
 import type { ImageGenerationRequest } from '../../src/shared/workbench/images'
 
 const servers: Server[] = [], directories: string[] = []
 afterEach(async () => {
+  vi.useRealTimers(); vi.restoreAllMocks()
   await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) })))
   await Promise.all(directories.splice(0).map(directory => fs.rm(directory, { recursive: true, force: true })))
 })
@@ -232,4 +233,39 @@ it('M28 asynchronous image acceptance is a durable pending receipt, not a genera
   expect(Buffer.from((await service.readResource(ready.resources[0]!.resourceId)).bytes)).toEqual(bytes)
   expect(await new ImageGenerationService({ directory: root, provider: { generate: async () => { throw new Error('Never replay') } } }).start(request('async-receipt'))).toEqual(ready)
   expect(count).toBe(1)
+})
+
+
+it('keeps rejected rate-limit retries in one durable image job and resumes after the actual cooling time', async () => {
+  const root = await directory(), bytes = await fixture()
+  let count = 0
+  const inputs: ImageGenerationRequest[] = []
+  const service = new ImageGenerationService({ directory: root, provider: { generate: async input => {
+    inputs.push(structuredClone(input)); count++
+    if (count === 1) return { status: 'failed', failure: { outcome: 'rejected', kind: 'rate-limit', code: 'image-http-429', message: '稍后再试', retryAfterMs: 60_000 }, provenance: imageProvenance(input) }
+    return { status: 'completed', images: [{ bytes, mimeType: 'image/png', filename: 'test.png' }], provenance: imageProvenance(input) }
+  } } })
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  const waiting = service.run(request('cooldown'))
+  for (let i = 0; i < 2000 && !(await service.read('cooldown').catch(() => null))?.retryAt; i++) await new Promise<void>(resolve => setImmediate(resolve))
+  expect((await service.read('cooldown')).retryAt).toBeTruthy(); expect(count).toBe(1)
+  await vi.advanceTimersByTimeAsync(59_999); expect(count).toBe(1)
+  await vi.advanceTimersByTimeAsync(1)
+  const done = await waiting
+  expect(done).toMatchObject({ status: 'ready', attempts: [{ failure: { outcome: 'rejected' } }, {}] })
+  expect(done.retryAt).toBeUndefined(); expect(count).toBe(2)
+  expect(inputs[0]).toEqual(inputs[1]); expect(await service.run(request('cooldown'))).toEqual(done); expect(count).toBe(2)
+})
+
+it('stops a cooling image job before another provider attempt, while an unknown attempt is never retried', async () => {
+  const root = await directory(), abort = new AbortController()
+  let calls = 0
+  const service = new ImageGenerationService({ directory: root, provider: { generate: async input => {
+    calls++
+    return { status: 'failed', failure: { outcome: input.jobId === 'unknown-once' ? 'unknown' : 'rejected', kind: 'rate-limit', code: 'image-http-429', message: 'rate limited', retryAfterMs: 60_000 }, provenance: imageProvenance(input) }
+  } } })
+  const stopped = service.run(request('stop-cooling'), { signal: abort.signal })
+  await vi.waitFor(async () => expect((await service.read('stop-cooling').catch(() => null))?.retryAt).toBeTruthy())
+  abort.abort(); expect((await stopped).status).toBe('stopped'); expect(calls).toBe(1)
+  expect((await service.run(request('unknown-once'))).status).toBe('unknown'); expect(calls).toBe(2)
 })

@@ -1,6 +1,7 @@
 import { execFile, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from 'node:child_process'
-import { promises as fs } from 'node:fs'
-import { homedir } from 'node:os'
+import { promises as fs, createWriteStream } from 'node:fs'
+import { StringDecoder } from 'node:string_decoder'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { isInsideRoot, type ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
@@ -51,6 +52,7 @@ export interface CodexDelegationResult {
   reason: string
   /** Bounded local diagnostic only; never part of an agent prompt or success claim. */
   diagnostic?: string
+  diagnosticFile?: string
   /** External disk effects need FileService review; no document transaction is performed here. */
   externalChangesPossible: boolean
 }
@@ -86,8 +88,7 @@ export interface CodexCliInspection {
   account?: 'ChatGPT'
 }
 
-const MAX_EVENT_BYTES = 512 * 1024
-const MAX_OUTPUT_BYTES = 32 * 1024 * 1024
+const MAX_EVENT_BYTES = 64 * 1024 * 1024
 const STOP_WAIT_MS = 5000
 const REVOKE_WAIT_MS = 5000
 const MODEL = 'gpt-6-luna' as const
@@ -273,6 +274,10 @@ export class CodexDelegationRunner {
       ...(request.expectedArtifacts.length ? ['', 'Expected artifacts:', ...request.expectedArtifacts.map(item => `- ${item}`)] : []),
     ].join('\n')
 
+    let logDirectory: string
+    try { logDirectory = await fs.mkdtemp(path.join(tmpdir(), 'guoling-delegation-log-')) }
+    catch (cause) { result.reason = `无法准备执行日志目录：${cause instanceof Error ? cause.message : String(cause)}`; return result }
+    const logPath = path.join(logDirectory, 'events.jsonl')
     let child: ChildProcessWithoutNullStreams
     try {
       child = this.options.boundary!.launchRestricted({ copyRoot: root, permission: scope, executable,
@@ -280,7 +285,12 @@ export class CodexDelegationRunner {
     } catch (cause) { result.reason = `执行器启动失败：${cause instanceof Error ? cause.message : String(cause)}`; return result }
     result.externalChangesPossible = true
     let terminal: 'success' | 'failed' | undefined, summary = '', threadId: string | undefined
-    let outputBytes = 0, protocolError = false, buffer = '', diagnostic = ''
+    let protocolError = false, buffer = '', diagnostic = ''
+    const decoder = new StringDecoder('utf8')
+    const log = createWriteStream(logPath, { flags: 'wx', mode: 0o600 })
+    let logError: Error | undefined
+    log.on('error', error => { logError = error; child.stdout.resume() })
+    log.on('drain', () => child.stdout.resume())
     const redact = (value: string) => request.mcp?.bearer ? value.replaceAll(request.mcp.bearer, '[redacted]') : value
     const notify = (event: DelegationEvent) => { try { options.onEvent?.({ ...event, detail: redact(event.detail) }) } catch { /* UI failure cannot alter the process result. */ } }
     let stopping = false, stopBarrier: Promise<void> | undefined, stopConfirmed = false
@@ -294,15 +304,14 @@ export class CodexDelegationRunner {
         this.options.boundary!.stopRestricted(child).then(confirmed => { stopConfirmed = confirmed })]).then(() => undefined)
     }
     const receive = (chunk: Buffer) => {
-      outputBytes += chunk.byteLength
-      if (outputBytes > MAX_OUTPUT_BYTES) { protocolError = true; stop(); return }
-      buffer += chunk.toString('utf8')
+      buffer += decoder.write(chunk)
       for (;;) {
         const index = buffer.indexOf('\n')
         if (index < 0) break
         const line = buffer.slice(0, index).trim(); buffer = buffer.slice(index + 1)
         if (!line) continue
         if (Buffer.byteLength(line) > MAX_EVENT_BYTES) { protocolError = true; stop(); return }
+        if (!logError && !log.write(redact(line) + '\n')) child.stdout.pause()
         try {
           const parsed = eventFromJson(JSON.parse(line))
           if (parsed.terminal) terminal = parsed.terminal
@@ -315,20 +324,30 @@ export class CodexDelegationRunner {
     }
     child.stdout.on('data', receive)
     child.stderr.on('data', (chunk: Buffer) => {
-      outputBytes += chunk.byteLength
+      // stderr is a diagnostic tail, not a reason to cancel useful work.
       diagnostic = (diagnostic + chunk.toString('utf8')).slice(-4000)
-      if (outputBytes > MAX_OUTPUT_BYTES) { protocolError = true; stop() }
     })
     const exit = new Promise<{ code: number | null; signal: NodeJS.Signals | null; error?: Error }>(resolve => {
       child.once('error', error => resolve({ code: null, signal: null, error }))
       child.once('close', (code, signal) => resolve({ code, signal }))
     })
     options.signal?.addEventListener('abort', stop, { once: true })
-    const timeout = setTimeout(stop, request.timeoutMs ?? 15 * 60_000)
+    let timeout = setTimeout(stop, request.timeoutMs ?? 15 * 60_000)
     timeout.unref()
+    const progress = () => { if (request.timeoutMs === undefined && !stopping) { clearTimeout(timeout); timeout = setTimeout(stop, 15 * 60_000); timeout.unref() } }
+    child.stdout.on('data', progress)
     try { child.stdin.end(prompt) } catch { stop() }
     const exited = await Promise.race([exit, stopWait])
     clearTimeout(timeout)
+    child.stdout.removeListener('data', progress)
+    buffer += decoder.end()
+    if (buffer.trim()) {
+      try { const parsed = eventFromJson(JSON.parse(buffer)); if (parsed.terminal) terminal = parsed.terminal; if (parsed.summary) summary = redact(parsed.summary) }
+      catch { protocolError = true }
+    }
+    await new Promise<void>(resolve => { if (logError) resolve(); else { log.once('error', () => resolve()); log.end(resolve) } })
+    result.diagnosticFile = logError ? undefined : logPath
+    if (logError) diagnostic += `\n事件日志落盘失败：${logError.message}`
     options.signal?.removeEventListener('abort', stop)
     if (stopBarrier) await bounded(stopBarrier, REVOKE_WAIT_MS)
     result.threadId = threadId

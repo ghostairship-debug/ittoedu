@@ -5,7 +5,8 @@ export interface DocumentClosePorts {
   list(): readonly DocumentSnapshot[]
   drain(): Promise<void>
   rendererDirty(): Promise<boolean>
-  confirm(): DocumentCloseChoice
+  confirm(): DocumentCloseChoice | Promise<DocumentCloseChoice>
+  cancelled?(): boolean
   /** Flushes unfinished input to canonical recovery; it must not dispose views or save files. */
   prepareRenderer(mode: 'save' | 'preserve'): Promise<boolean>
   save(documentId: string): Promise<DocumentSnapshot | null>
@@ -22,16 +23,17 @@ export async function prepareDocumentWindowClose(ports: DocumentClosePorts): Pro
   // A background view may still hold input that has not reached its main session.
   if (!(await ports.prepareRenderer('preserve'))) return false
   await ports.drain()
-  const decision = hasDraft || ports.list().some(snapshot => snapshot.dirty) ? ports.confirm() : 'preserve'
-  if (decision === 'cancel') return false
+  const decision = hasDraft || ports.list().some(snapshot => snapshot.dirty) ? await ports.confirm() : 'preserve'
+  if (decision === 'cancel' || ports.cancelled?.()) return false
   if (decision === 'preserve') {
     if (!(await ports.prepareRenderer('preserve'))) return false
     await ports.drain()
-    return true
+    return !ports.cancelled?.()
   }
 
   // One save attempt per document. Later input remains dirty instead of being silently resaved.
   for (const snapshot of ports.list()) {
+    if (ports.cancelled?.()) return false
     if (!snapshot.dirty) continue
     try {
       const saved = await ports.save(snapshot.documentId)
@@ -47,5 +49,5 @@ export async function prepareDocumentWindowClose(ports: DocumentClosePorts): Pro
   await ports.drain()
   const remaining = ports.list().find(snapshot => snapshot.dirty || snapshot.saving)
   if (remaining) { await blocked(remaining.documentId, 'changed'); return false }
-  return true
+  return !ports.cancelled?.()
 }

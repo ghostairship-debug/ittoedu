@@ -84,4 +84,19 @@ describe('splitHtmlSections', () => {
     expect(result.sections).toHaveLength(1)
     expect(result.sections[0]!.html).toBe(source)
   })
+
+  it.each([
+    '<body><section>Intro</section><main><section>Exercise</section></main></body>',
+    '<body><main><section>One</section></main><main><section>Two</section></main></body>',
+    '<body><section>Optional body end tag</section>',
+    '<body><main><section>Missing main end tag</section></body>',
+    '<body><section>Browser-recovered section</body>',
+    '<body><section title="unfinished',
+  ])('preserves the whole source when automatic splitting cannot determine page boundaries: %s', source => {
+    const result = splitHtmlSections(source, 'auto')
+    expect(result.mode).toBe('whole')
+    expect(result.sections).toEqual([{ order: 0, id: null, html: source }])
+    expect(result.warnings).toHaveLength(1)
+    expect(() => splitHtmlSections(source, 'sections')).toThrow()
+  })
 })

@@ -78,3 +78,19 @@ it('M27 invalidates an active Skill when only the body bytes change at the same 
   await expect(h.service.read({ skill: 'workspace/prepare-table', path: 'SKILL.md', offset: 0, limit: 100 }, 'skills-run'))
     .rejects.toMatchObject({ code: 'skill-changed' })
 })
+
+it('discovers all enabled Skill metadata beyond one hundred and reads a long reference in one bounded page', async () => {
+  const h = await fixture()
+  for (let i = 0; i < 101; i++) {
+    const folder = path.join(h.skills, `skill-${i}`)
+    await fs.mkdir(folder)
+    await fs.writeFile(path.join(folder, 'SKILL.md'), `---\nname: skill-${i}\ndescription: fixture\n---\nnot preloaded\n`)
+  }
+  const listed = await h.service.list('skills-run', true)
+  expect(listed.entries.filter(entry => entry.name.startsWith('workspace/'))).toHaveLength(102)
+  expect(listed.warnings).toEqual([])
+  const content = 'a'.repeat(9000)
+  await fs.writeFile(path.join(h.directory, 'references/long.md'), content)
+  expect(await h.service.read({ skill: 'workspace/prepare-table', path: 'references/long.md', offset: 0, limit: 16_000 }, 'skills-run'))
+    .toMatchObject({ status: 'read', content, truncated: false })
+})

@@ -7,6 +7,7 @@ import { prepareImageResource } from '../admittedImageResource'
 import { captureMainTiming } from '../execution/ExecutionEventStore'
 import type { ImageProviderPort, ImageProviderReference } from './ImageProviderPort'
 import { imageProvenance } from './imageRoute'
+import { waitForGenerationRetry } from '../execution/modelGenerationRetry'
 import { waitForHostWork } from '../../../shared/workbench/jobWait'
 
 export interface ImageGenerationServiceOptions {
@@ -179,8 +180,26 @@ export class ImageGenerationService {
       await this.update(filename, job => { if (!job.stopped) job.status = 'running' })
       providerInvoked = true
       this.timing(filename, 'image.provider.started', { referenceCount: references.length })
-      const result = await this.options.provider.generate(request, references, { signal: controller.signal,
-        onTiming: (stage, detail) => this.timing(filename, stage, detail) })
+      let result: Awaited<ReturnType<ImageProviderPort['generate']>>
+      for (let attempt = 1; ; attempt++) {
+        const at = this.now().toISOString()
+        result = await this.options.provider.generate(request, references, { signal: controller.signal,
+          onTiming: (stage, detail) => this.timing(filename, stage, detail) })
+        await this.update(filename, job => { (job.attempts ??= []).push({ at, provenance: result.provenance,
+          ...(result.status === 'failed' ? { failure: result.failure } : {}) }) })
+        // Only a provider's definite rejection can be tried again, inside this
+        // same job and frozen route. Unknown, quota and auth outcomes never do.
+        if (result.status !== 'failed' || result.failure.outcome !== 'rejected'
+          || result.failure.kind !== 'rate-limit' || attempt >= 3 || controller.signal.aborted) break
+        const delay = Math.max(1000, result.failure.retryAfterMs ?? 1000 * attempt)
+        const failure = result.failure
+        providerFinished = true
+        await this.update(filename, job => { job.retryAt = new Date(this.now().getTime() + delay).toISOString(); job.failure = failure })
+        await waitForGenerationRetry(delay, controller.signal)
+        if (controller.signal.aborted) break
+        await this.update(filename, job => { delete job.retryAt; delete job.failure })
+        providerFinished = false
+      }
       providerFinished = true
       this.timing(filename, 'image.provider.finished', { outcome: result.status === 'completed' ? 'completed' : result.failure.outcome,
         ...(result.status === 'completed' ? { imageCount: result.images.length } : {}) })
@@ -193,6 +212,7 @@ export class ImageGenerationService {
         this.timing(filename, 'image.resources.finished', { outcome: 'completed', imageCount: resources.length })
       }
       return await this.update(filename, job => {
+        delete job.retryAt
         job.provenance = structuredClone(result.provenance)
         if (result.status === 'completed') { job.resources = resources; job.status = job.stopped || controller.signal.aborted ? 'unapplied' : 'ready'; job.stopped ||= controller.signal.aborted; delete job.failure }
         else { job.failure = result.failure; job.status = result.failure.outcome === 'unknown' ? 'unknown' : job.stopped || controller.signal.aborted ? 'stopped' : 'failed'; job.stopped ||= controller.signal.aborted }

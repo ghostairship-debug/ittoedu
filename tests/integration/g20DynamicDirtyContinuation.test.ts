@@ -37,7 +37,7 @@ it('restores a dirty dynamically opened document before continuing after a proce
   let requests = 0
   const localFetch: typeof fetch = async (_url, init) => {
     requests++
-    if (requests === 3) return new Response('', { status: 504 })
+    if (requests === 3) return new Response('', { status: 401 }) // Definite failure ends this task; ordinary 504 now retries pure generation.
     const body = JSON.parse(String(init?.body)) as { messages: Array<{ role: string; content: string }> }
     const prior = [...body.messages].reverse().find(message => message.role === 'tool')
     const target = requests === 2 ? (JSON.parse(String(prior?.content)) as { data: { markdown: { writableTarget: string } } }).data.markdown.writableTarget : undefined

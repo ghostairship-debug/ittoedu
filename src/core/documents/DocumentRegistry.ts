@@ -1,4 +1,5 @@
 import type { DocumentBinding, DocumentDriver, DocumentModel, DocumentPersistence, DurableDocumentState } from '../../shared/workbench/document'
+import type { DocumentSaveIdentity } from '../../shared/workbench/documentSave'
 import { DocumentSession, type DocumentFileLease, type DocumentSaveObserver } from './DocumentSession'
 
 export interface DocumentRegistryOptions {
@@ -92,16 +93,16 @@ export class DocumentRegistry {
     return operation
   }
 
-  save(documentId: string, binding?: Extract<DocumentBinding, { kind: 'file' }>, observer?: DocumentSaveObserver): Promise<ReturnType<DocumentSession['read']>> {
+  save(documentId: string, binding?: Extract<DocumentBinding, { kind: 'file' }>, observer?: DocumentSaveObserver, saveIdentity?: DocumentSaveIdentity): Promise<ReturnType<DocumentSession['read']>> {
     const target = binding ? structuredClone(binding) : undefined
     const previous = this.documentSaves.get(documentId) ?? Promise.resolve()
-    const operation = previous.catch(() => undefined).then(() => this.saveCurrent(documentId, target, observer))
+    const operation = previous.catch(() => undefined).then(() => this.saveCurrent(documentId, target, observer, saveIdentity))
     this.documentSaves.set(documentId, operation)
     void operation.finally(() => { if (this.documentSaves.get(documentId) === operation) this.documentSaves.delete(documentId) }).catch(() => undefined)
     return operation
   }
 
-  private async saveCurrent(documentId: string, binding?: Extract<DocumentBinding, { kind: 'file' }>, observer?: DocumentSaveObserver): Promise<ReturnType<DocumentSession['read']>> {
+  private async saveCurrent(documentId: string, binding?: Extract<DocumentBinding, { kind: 'file' }>, observer?: DocumentSaveObserver, saveIdentity?: DocumentSaveIdentity): Promise<ReturnType<DocumentSession['read']>> {
     const session = this.get(documentId)
     const currentBinding = session.read().binding
     const sameBinding = binding && currentBinding.kind === 'file' && this.options.bindingKey(binding) === this.options.bindingKey(currentBinding)
@@ -110,11 +111,11 @@ export class DocumentRegistry {
     if (target.kind !== 'file') throw new Error('未保存文档需要选择保存路径')
     const key = this.options.bindingKey(target)
     const moving = this.fileBarriers.get(key)
-    if (moving) { await moving; return this.saveCurrent(documentId, binding, observer) }
+    if (moving) { await moving; return this.saveCurrent(documentId, binding, observer, saveIdentity) }
     const owner = this.bindings.get(key) ?? this.savingBindings.get(key)
     if ((owner && owner !== documentId) || this.opening.has(key)) throw new Error('目标文件已被其他文档占用')
     this.savingBindings.set(key, documentId)
-    const saved = session.save(actualBinding, observer)
+    const saved = session.save(actualBinding, observer, saveIdentity)
     this.saving.set(key, saved)
     try {
       const snapshot = await saved

@@ -3,6 +3,7 @@ import type {
   DocumentOperationResult, DocumentPersistence, DocumentSnapshot, DurableDocumentState,
 } from '../../shared/workbench/document'
 import { documentDigest } from './documentDigest'
+import { DocumentSaveFailure, type DocumentSaveIdentity, type DocumentSaveProof } from '../../shared/workbench/documentSave'
 
 export interface CreateDocumentSession {
   documentId: string
@@ -22,6 +23,7 @@ export type DocumentSaveObserver = (progress: DocumentSaveProgress) => void
 export interface DocumentFileLease {
   read(): DocumentSnapshot
   rebind(binding: DocumentBinding): Promise<DocumentSnapshot>
+  acknowledgeSave(proof: DocumentSaveProof): Promise<DocumentSnapshot>
 }
 
 function operationDigest(operation: DocumentOperation): string {
@@ -30,11 +32,21 @@ function operationDigest(operation: DocumentOperation): string {
     actor: operation.actor, runId: operation.runId, requestDigest: operation.requestDigest })
 }
 
+
+/** Host-only notification of one durable operation. Never exposed as an IPC write capability. */
+export interface CommittedDocumentOperation {
+  operation: DocumentOperation
+  result: Extract<DocumentOperationResult, { revision: number }>
+  before: DocumentModel
+  after: DocumentModel
+}
+
 /** The only formal content/history writer for one document. No view state lives here. */
 export class DocumentSession {
   private tail: Promise<unknown> = Promise.resolve()
   private saveTail: Promise<unknown> = Promise.resolve()
   private listeners = new Set<(event: DocumentEvent) => void>()
+  private readonly commitListeners = new Set<(commit: CommittedDocumentOperation) => void>()
   private saving = false
   private saveError: string | null = null
   private recovered = false
@@ -90,6 +102,12 @@ export class DocumentSession {
     if (this.closed) throw new Error('文档已关闭')
     this.listeners.add(listener)
     return () => { this.listeners.delete(listener) }
+  }
+
+  subscribeCommits(listener: (commit: CommittedDocumentOperation) => void): () => void {
+    if (this.closed) throw new Error('文档已关闭')
+    this.commitListeners.add(listener)
+    return () => { this.commitListeners.delete(listener) }
   }
 
   private notify(operationId?: string): void {
@@ -180,7 +198,8 @@ export class DocumentSession {
               // A strict amendment was checked in this serial turn; retain its original before/group.
               previous!.after = structuredClone(candidate)
               previous!.operationId = id
-            } else next.past.push({ operationId: id, actor: operation.actor,
+              previous!.revision = this.state.revision + 1
+            } else next.past.push({ operationId: id, actor: operation.actor, beforeRevision: this.state.revision, revision: this.state.revision + 1,
               ...(operation.runId ? { runId: operation.runId } : {}),
               ...(operation.historyGroup ? { historyGroup: operation.historyGroup } : {}),
               before: next.model, after: structuredClone(candidate) })
@@ -202,13 +221,44 @@ export class DocumentSession {
         operationId: id, beforeRevision: this.state.revision, revision: next.revision, persistence: 'recoverable',
       }
       next.sequence += 1
-      next.operations.push({ operationId: id, digest, result })
+      const sourceCommand = operation.mutation.type === 'command' && operation.mutation.command.type === 'markdown.splice'
+        ? operation.mutation.command : null
+      const textChanges = operation.textChanges ?? (sourceCommand ? { source: [{ from: sourceCommand.from, to: sourceCommand.to, inserted: sourceCommand.text.length }], flow: [] } : undefined)
+      next.operations.push({ operationId: id, digest, result, actor: operation.actor, ...(operation.runId ? { runId: operation.runId } : {}),
+        ...(textChanges ? { textChanges: structuredClone(textChanges) } : {}) })
       try { await this.persistence.append(structuredClone(next)) }
       catch (error) { return this.reject(id, 'failed', 'recovery-write-failed', error instanceof Error ? error.message : '恢复稿写入失败，修改未提交') }
+      const before = this.state.model
       this.state = next
+      if (changed && this.commitListeners.size) {
+        // One detached, read-only host event, not a full clone per open card.
+        const commit = structuredClone({ operation, result, before, after: next.model })
+        for (const listener of this.commitListeners) {
+          try { listener(commit) } catch { /* Observer failures never turn a durable success into a replay. */ }
+        }
+      }
       this.notify(id)
       return structuredClone(result)
     })
+  }
+
+  /** Read the existing canonical receipt/history chain; no second undo log or model-derived identity. */
+  committedChangesSince(revision: number) {
+    if (!Number.isSafeInteger(revision) || revision < 0 || revision > this.state.revision) throw new Error('原文档版本不可定位')
+    const entries = new Map([...this.state.past, ...this.state.future].map(entry => [entry.operationId, entry]))
+    let next = revision
+    const changes = this.state.operations.flatMap(receipt => {
+      const result = receipt.result
+      if (result.status !== 'applied' || result.revision <= revision) return []
+      if (result.beforeRevision !== next) throw new Error('原修改到当前版本之间存在无法定位的历史，请重新选择')
+      next = result.revision
+      const entry = entries.get(receipt.operationId)
+      const pair = entry && (entry.beforeRevision === result.beforeRevision || entry.beforeRevision === undefined && !entry.historyGroup)
+        ? { before: entry.before, after: entry.after } : {}
+      return [{ ...receipt, ...pair, result }]
+    })
+    if (next !== this.state.revision) throw new Error('原修改的历史已改变，请重新选择')
+    return structuredClone(changes)
   }
 
   stopRun(runId: string): Promise<DocumentSnapshot> {
@@ -262,6 +312,21 @@ export class DocumentSession {
       try {
         return await work({
           read: () => { assertActive(); return this.read() },
+          acknowledgeSave: async proof => {
+            assertActive()
+            if (proof.documentId !== this.state.documentId || proof.savedRevision > this.state.revision)
+              throw new Error('保存查证对应的版本不属于当前文档')
+            if (this.state.savedRevision !== null && this.state.savedRevision > proof.savedRevision) return this.read()
+            const binding = this.state.binding
+            if (documentDigest(binding) !== documentDigest(proof.sourceBinding)
+              && documentDigest(binding) !== documentDigest(proof.binding)) throw new Error('保存后文件绑定已改变，未回退当前绑定')
+            const next = structuredClone(this.state)
+            next.binding = structuredClone(proof.binding); next.savedRevision = proof.savedRevision; next.sequence++
+            await this.persistence.append(structuredClone(next))
+            this.state = next; this.saveError = null
+            if (next.savedRevision === next.revision) this.recovered = false
+            this.notify(); return this.read()
+          },
           rebind: async binding => {
             assertActive()
             const next = structuredClone(this.state)
@@ -281,7 +346,7 @@ export class DocumentSession {
   }
 
   /** Captures r in the queue; disk I/O does not block edits of r+1. */
-  save(binding?: DocumentBinding, observer?: DocumentSaveObserver): Promise<DocumentSnapshot> {
+  save(binding?: DocumentBinding, observer?: DocumentSaveObserver, saveIdentity?: DocumentSaveIdentity): Promise<DocumentSnapshot> {
     const observe = (progress: DocumentSaveProgress) => { try { observer?.(progress) } catch { /* Observation cannot change document persistence. */ } }
     const target = binding ? structuredClone(binding) : undefined
     const save = this.saveTail.then(async () => {
@@ -296,9 +361,11 @@ export class DocumentSession {
         observe({ status: 'saving', revision: snapshot.revision, binding: structuredClone(snapshot.binding) })
         return snapshot
       })
+      let persistenceCalled = false
       try {
         const bytes = await this.driver.serialize(captured.model)
-        const savedBinding = await this.persistence.save({ documentId: captured.documentId, revision: captured.revision, model: captured.model, binding: captured.binding, bytes })
+        persistenceCalled = true
+        const savedBinding = await this.persistence.save({ documentId: captured.documentId, revision: captured.revision, model: captured.model, binding: captured.binding, bytes, ...(saveIdentity ? { saveIdentity } : {}) })
         return await this.serial(async () => {
           const next = structuredClone(this.state)
           next.binding = savedBinding
@@ -314,6 +381,7 @@ export class DocumentSession {
           return this.read()
         })
       } catch (error) {
+        error = error instanceof DocumentSaveFailure ? error : new DocumentSaveFailure(persistenceCalled ? 'unknown' : 'not-published', error)
         this.reportSaveFailure(error)
         observe({ status: 'failed', revision: captured.revision, binding: structuredClone(captured.binding), error })
         throw error
@@ -335,6 +403,7 @@ export class DocumentSession {
         try { listener({ type: 'closed', documentId: this.state.documentId, epoch: this.state.epoch }) } catch { /* detached view */ }
       }
       this.listeners.clear()
+      this.commitListeners.clear()
     })
   }
 }

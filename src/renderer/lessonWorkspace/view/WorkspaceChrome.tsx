@@ -14,6 +14,13 @@ export function WorkspaceChrome({ props, layout, editorFocus = false, proPanel =
  const { state, actions } = props;
  const [switcherMenuOpen, setSwitcherMenuOpen] = useState(false);
  const [layoutMenuOpen, setLayoutMenuOpen] = useState(false);
+ const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 860px)').matches);
+ useEffect(() => {
+  const query = window.matchMedia('(max-width: 860px)');
+  const update = () => setNarrow(query.matches);
+  query.addEventListener('change', update); update();
+  return () => query.removeEventListener('change', update);
+ }, []);
  const switcherMenu = useRef<HTMLDetailsElement>(null), layoutMenu = useRef<HTMLDetailsElement>(null);
  useDismissableDetails(switcherMenu); useDismissableDetails(layoutMenu);
  const workspaceName = state.workspace ? basename(state.workspace) : '';
@@ -24,6 +31,20 @@ export function WorkspaceChrome({ props, layout, editorFocus = false, proPanel =
  const toggleExplorer = () => editorFocus ? proEditorRailController.toggle('resources') : layout.setExplorerOpen(!explorerVisible);
  const toggleConversations = () => editorFocus ? proEditorRailController.toggle('conversations') : layout.setConversationsOpen(!conversationsVisible);
  const toggleAssistant = () => editorFocus ? proEditorRailController.toggle('ai') : layout.toggleChatClosed();
+ const selectRegion = (region: 'resources' | 'conversations' | 'workbench' | 'chat') => {
+  if (narrow && !editorFocus) {
+   if (region === 'resources') layout.setExplorerOpen(true);
+   if (region === 'conversations') layout.setConversationsOpen(true);
+   if (region === 'workbench') layout.setContentClosed(false);
+   if (region === 'chat') layout.setChatClosed(false);
+  } else {
+   if (region === 'resources') toggleExplorer();
+   if (region === 'conversations') toggleConversations();
+   if (region === 'workbench') layout.toggleContentClosed();
+   if (region === 'chat') toggleAssistant();
+  }
+  actions.setMobilePane(region === 'resources' || region === 'conversations' ? 'navigation' : region);
+ };
  const { setExplorerOpen } = layout;
  useEffect(() => {
   // Locating a file shows the explorer first; the explorer reveals the file once it is mounted.
@@ -126,10 +147,10 @@ export function WorkspaceChrome({ props, layout, editorFocus = false, proPanel =
           </div>
         </details>
         <div className="lesson-workspace-toolbar-actions">
-          <button type="button" aria-pressed={explorerVisible} onClick={() => { toggleExplorer(); actions.setMobilePane('navigation'); }}>资源管理器</button>
-          <button type="button" aria-pressed={conversationsVisible} onClick={() => { toggleConversations(); actions.setMobilePane('navigation'); }}>会话列表</button>
-          {!editorFocus && <button type="button" aria-pressed={contentOpen} onClick={() => { layout.toggleContentClosed(); actions.setMobilePane('workbench'); }}>内容</button>}
-          <button type="button" aria-pressed={assistantVisible} onClick={() => { toggleAssistant(); actions.setMobilePane('chat'); }}>AI 助手</button>
+          {(narrow || editorFocus) && <button type="button" aria-pressed={explorerVisible && (!narrow || editorFocus || state.mobilePane === 'navigation')} onClick={() => selectRegion('resources')}>资源管理器</button>}
+          {(narrow || editorFocus) && <button type="button" aria-pressed={conversationsVisible && (!narrow || editorFocus || state.mobilePane === 'navigation')} onClick={() => selectRegion('conversations')}>会话列表</button>}
+          {!editorFocus && narrow && <button type="button" aria-pressed={contentOpen && state.mobilePane === 'workbench'} onClick={() => selectRegion('workbench')}>内容</button>}
+          <button type="button" aria-pressed={assistantVisible && (!narrow || editorFocus || state.mobilePane === 'chat')} onClick={() => selectRegion('chat')}>AI 助手</button>
           <details
             ref={layoutMenu}
             className="lesson-workspace-more lesson-layout-menu"

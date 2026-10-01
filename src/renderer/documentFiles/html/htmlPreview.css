@@ -13,14 +13,21 @@
   flex-wrap: wrap;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 12px;
+  justify-content: flex-start;
+  gap: 8px;
   min-height: 36px;
-  padding: 4px 12px;
+  padding: 6px 10px;
   border-bottom: 1px solid #dce1e7;
   background: #fff;
   font-size: 12px;
 }
+.html-preview-pane__pages { display:flex; align-items:center; gap:6px; }
+.html-preview-pane__toolbar .html-preview-pane__edit { transition:none; }
+.html-preview-pane__edit[aria-pressed=true] { background:#245b46!important; color:white!important; border-color:#245b46!important; }
+.html-preview-pane__edit-hint { font-size:11px; color:#68756f; }
+.html-preview-pane__more { position:relative; margin-left:auto; }
+.html-preview-pane__more>summary { cursor:pointer; padding:5px 8px; list-style:none; }
+.html-preview-pane__more[open]>button { position:absolute; right:0; top:100%; z-index:15; white-space:nowrap; box-shadow:0 6px 18px #173e311c; }
 
 .html-preview-pane__toolbar button,
 .html-preview-pane__notice button,

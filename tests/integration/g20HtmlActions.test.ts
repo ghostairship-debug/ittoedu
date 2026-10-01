@@ -110,9 +110,9 @@ describe('M28 HTML action sessions', () => {
     const first = await f.service.observe('run')
     expect(first.source).toBe('live-html-preview')
     expect(first.errors[0]?.message).toBe('page warning')
-    expect(f.service.readResource('run', first.image.resourceId).bytes).toEqual(PNG)
+    expect((await f.service.readResource('run', first.image.resourceId)).bytes).toEqual(PNG)
     const message = htmlActionModelMessage({ toolCallId: 'call-1', target: '当前 HTML', observation: first,
-      bytes: f.service.readResource('run', first.image.resourceId).bytes })
+      bytes: (await f.service.readResource('run', first.image.resourceId)).bytes })
     expect(message.role).toBe('user')
     const parts = message.content
     expect(Array.isArray(parts) && parts[1] !== null && typeof parts[1] === 'object'
@@ -120,7 +120,7 @@ describe('M28 HTML action sessions', () => {
     const clicked = await f.service.click('run', { operationId: 'op-1', handle: first.elements[0]!.handle })
     expect(clicked.structure[0]).toContain('clicked 1')
     const afterClick = htmlActionModelMessage({ toolCallId: 'call-2', target: '当前 HTML', toolName: 'html.click',
-      observation: clicked, bytes: f.service.readResource('run', clicked.image.resourceId).bytes })
+      observation: clicked, bytes: (await f.service.readResource('run', clicked.image.resourceId)).bytes })
     expect(JSON.stringify(afterClick.content)).toContain('工具 html.click 后的真实画面')
     expect(f.clicks()).toBe(1)
     expect(await f.service.click('run', { operationId: 'op-1', handle: first.elements[0]!.handle })).toBe(clicked)
@@ -131,7 +131,7 @@ describe('M28 HTML action sessions', () => {
     expect(typed.structure[0]).toContain('新的回答')
     f.service.stopRun('run')
     expect(f.stopped()).toBe(1)
-    expect(() => f.service.readResource('run', typed.image.resourceId)).toThrow('已停止')
+    await expect(f.service.readResource('run', typed.image.resourceId)).rejects.toThrow('已停止')
     await expect(f.service.observe('run')).rejects.toThrow('已停止')
   })
 
@@ -171,7 +171,7 @@ describe('M28 HTML action sessions', () => {
     await expect(f.service.observe('run')).rejects.toThrow('源码版本已变化')
     const freshIdentity = await f.service.restartDocumentRun('run', { documentId: 'doc', epoch: 'epoch', revision: 3 })
     expect(freshIdentity.revision).toBe(3)
-    expect(() => f.service.readResource('run', old.image.resourceId)).toThrow('不存在')
+    await expect(f.service.readResource('run', old.image.resourceId)).rejects.toThrow('不存在')
     const fresh = await f.service.observe('run')
     expect(fresh.identity.revision).toBe(3)
     expect(fresh.elements[0]!.handle).not.toBe(old.elements[0]!.handle)

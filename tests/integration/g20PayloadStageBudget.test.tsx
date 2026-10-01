@@ -112,9 +112,9 @@ it('budgets the actual initial HTTP body with runtime context and PNG base64, th
     message.role === 'tool' && JSON.parse(message.content).kind === 'document-operation')).toBe(true)
   expect((await documents.internalAPI.read(document.documentId)).model).toMatchObject({ source: repaired })
 
-  const largePixels = randomBytes(600 * 600 * 3)
-  const large = await sharp(largePixels, { raw: { width: 600, height: 600, channels: 3 } }).png().toBuffer()
-  expect(large.toString('base64').length).toBeGreaterThan(1024 * 1024)
+  const largePixels = randomBytes(1600 * 1600 * 3)
+  const large = await sharp(largePixels, { raw: { width: 1600, height: 1600, channels: 3 } }).png().toBuffer()
+  expect(large.toString('base64').length).toBeGreaterThan(8 * 1024 * 1024)
   const largeSnapshot = await service.attachments.receiveBytes({ name: 'large.png', bytes: large, source: { kind: 'paste' } })
   const largeRef = [{ attachmentId: largeSnapshot.id, representationId: 'original-image', role: 'reference' as const }]
   const overflowConversation = await createConversation()

@@ -164,12 +164,13 @@ export class CourseDocumentBridge {
     return snapshot
   }
   /** Prepare stored view drafts without awaiting while a background document is projected. */
-  async drainAll(prepareView: () => void): Promise<DocumentSnapshot[]> {
+  async drainAll(prepareView: () => void, documentIds?: readonly string[]): Promise<DocumentSnapshot[]> {
+    if (documentIds && !documentIds.length) return []
     if (this.connecting) await this.connecting
     const foreground = this.active
     if (!foreground) return []
     const navigation = this.navigation
-    const projections = [...this.projections.values()]
+    const projections = [...this.projections.values()].filter(projection => !documentIds || documentIds.includes(projection.documentId))
     // Prepare view drafts only after every semantic candidate has reached a formal ACK.
     await Promise.all(projections.map(projection => this.dynamicFallback.wait(projection.documentId)))
     if (navigation !== this.navigation) throw new Error('关闭准备期间已切换文档，请重新执行')
@@ -181,7 +182,7 @@ export class CourseDocumentBridge {
     } finally {
       this.present(foreground)
     }
-    const draftState = () => JSON.stringify([...this.projections.keys()].map(id => {
+    const draftState = () => JSON.stringify(projections.map(projection => projection.documentId).map(id => {
       const view = this.active?.documentId === id ? this.ports.read() : this.views.get(id)
       return [id, view?.v9ContentEdit, view?.spatialContentEdit, view?.flowTextEdit, view?.flowDocumentDraft]
     }))

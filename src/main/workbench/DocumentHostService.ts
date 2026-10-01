@@ -1,3 +1,6 @@
+import { DocumentSaveFailure, type DocumentSaveIdentity } from '../../shared/workbench/documentSave'
+import type { SaveReceipt } from '../../shared/workbench/toolPorts'
+import { documentDigest } from '../../core/documents/documentDigest'
 import { sourceFileKind } from '../../shared/workbench/sourceFileKind'
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
@@ -122,12 +125,18 @@ export class DocumentHostService {
     return session.read()
   }
 
+  get recoveryIssues(): readonly string[] { return [...this.fileCoordinator.recoveryIssues, ...this.journal.recoveryIssues] }
+  async assertFileAvailable(filename: string): Promise<void> { this.fileCoordinator.assertResolved([filename]); await this.journal.assertAvailable([filename]) }
+
   private kind(filename: string): DocumentKind { return sourceFileKind(filename) }
 
   open(filename: string): Promise<DocumentSnapshot> { return this.fileCoordinator.withFileAccess(() => this.openFile(filename)) }
   private async openFile(filename: string): Promise<DocumentSnapshot> {
     if (!path.isAbsolute(filename)) throw new Error('文档路径必须是绝对路径')
     const canonical = await fs.realpath(filename)
+    // Opening healthy existing bytes does not authorize disk mutations through an unknown old binding.
+    this.fileCoordinator.assertResolved([canonical], [], true)
+    await this.journal.assertAvailable([canonical], [], true)
     const kind = this.kind(canonical)
     const version = await readDocumentFileVersion(canonical, kind)
     if (version === null) throw new Error('文档已不存在')
@@ -183,33 +192,53 @@ export class DocumentHostService {
     }))
   }
 
+  /** Query a correlated persisted intent and its actual file identity; never perform a second save. */
+  async lookupSave(documentId: string, identity: DocumentSaveIdentity): Promise<SaveReceipt | null> {
+    const proof = await this.journal.lookupSave(documentId, identity)
+    if (!proof) return null
+    let current = this.registry.list().find(value => value.documentId === documentId)
+    if (current && (documentDigest(current.binding) === documentDigest(proof.sourceBinding)
+      || documentDigest(current.binding) === documentDigest(proof.binding))) {
+      await this.registry.withFileBindings([documentId], [proof.binding], async leases => {
+        const lease = leases.get(documentId)!
+        current = await lease.acknowledgeSave(proof)
+      })
+    }
+    const revision = current?.revision ?? (await this.journal.inspect(documentId))?.revision
+    if (revision === undefined) return null
+    return { status: 'saved', documentId, epoch: proof.epoch, path: proof.binding.path,
+      savedRevision: proof.savedRevision, currentRevision: revision, fileVersion: proof.binding.version,
+      dirty: revision !== proof.savedRevision, warnings: revision === proof.savedRevision ? [] : ['原操作已保存；之后的修改未由该操作保存'] }
+  }
+
   /** overwriteConfirmed is supplied only after the native dialog, never from renderer arguments. */
-  async saveWithFact(documentId: string, filename?: string): Promise<{ snapshot: DocumentSnapshot; savedRevision: number }> {
+  async saveWithFact(documentId: string, filename?: string, saveIdentity?: DocumentSaveIdentity): Promise<{ snapshot: DocumentSnapshot; savedRevision: number }> {
     let savedRevision: number | undefined
     const snapshot = await this.saveToPath(documentId, filename, false, progress => {
       if (progress.status === 'saved') savedRevision = progress.savedRevision
-    })
+    }, saveIdentity)
     if (savedRevision === undefined) throw new Error('保存已完成但缺少保存版本回执')
     return { snapshot, savedRevision }
   }
 
-  async saveToPath(documentId: string, filename?: string, overwriteConfirmed = false, onProgress?: DocumentSaveObserver): Promise<DocumentSnapshot> {
+  async saveToPath(documentId: string, filename?: string, overwriteConfirmed = false, onProgress?: DocumentSaveObserver, saveIdentity?: DocumentSaveIdentity): Promise<DocumentSnapshot> {
     const initial = this.registry.get(documentId).read(), saveId = randomUUID()
     const base = { saveId, documentId, epoch: initial.epoch }
-    let observedRevision = initial.revision, terminal = false
+    let observedRevision = initial.revision, terminal = false, enteredSession = false
     let documentName = initial.binding.kind === 'file' ? path.basename(initial.binding.path) : initial.binding.suggestedName
     const observer: DocumentSaveObserver = progress => {
       onProgress?.(progress)
       documentName = progress.binding.kind === 'file' ? path.basename(progress.binding.path) : progress.binding.suggestedName
-      if (progress.status === 'saving') { observedRevision = progress.revision; this.publishSave({ ...base, documentName, time: Date.now(), status: 'saving', revision: progress.revision }) }
+      if (progress.status === 'saving') { enteredSession = true; observedRevision = progress.revision; this.publishSave({ ...base, documentName, time: Date.now(), status: 'saving', revision: progress.revision }) }
       else if (progress.status === 'saved') { terminal = true; this.publishSave({ ...base, documentName, time: Date.now(), status: 'saved', savedRevision: progress.savedRevision, currentRevision: progress.currentRevision }) }
       else { terminal = true; this.publishSave({ ...base, documentName, time: Date.now(), status: 'failed', revision: progress.revision, error: progress.error instanceof Error ? progress.error.message : String(progress.error) }) }
     }
     return this.fileCoordinator.withFileAccess(async () => {
-      const saved = await this.saveFile(documentId, filename, overwriteConfirmed, observer)
+      const saved = await this.saveFile(documentId, filename, overwriteConfirmed, observer, saveIdentity)
       if (saved.binding.kind === 'file') await this.files.acknowledgeDocumentSave(saved.binding.path, saved.model.kind, saved.binding.version)
       return saved
     }).catch(error => {
+      error = error instanceof DocumentSaveFailure ? error : new DocumentSaveFailure(enteredSession ? 'unknown' : 'not-published', error)
       // Path/ownership preflight may fail before a session captures a save revision.
       if (!terminal) {
         this.registry.get(documentId).reportSaveFailure(error)
@@ -218,16 +247,19 @@ export class DocumentHostService {
       throw error
     })
   }
-  private async saveFile(documentId: string, filename?: string, overwriteConfirmed = false, observer?: DocumentSaveObserver): Promise<DocumentSnapshot> {
+  private async saveFile(documentId: string, filename?: string, overwriteConfirmed = false, observer?: DocumentSaveObserver, saveIdentity?: DocumentSaveIdentity): Promise<DocumentSnapshot> {
     const current = this.registry.get(documentId).read()
-    if (!filename) return this.registry.save(documentId, undefined, observer)
+    const paths = [...(filename ? [filename] : []), ...(current.binding.kind === 'file' ? [current.binding.path] : [])]
+    this.fileCoordinator.assertResolved(paths, [documentId])
+    await this.journal.assertAvailable(paths, [documentId])
+    if (!filename) return this.registry.save(documentId, undefined, observer, saveIdentity)
     if (!path.isAbsolute(filename)) throw new Error('保存路径必须是绝对路径')
     const canonical = path.join(await fs.realpath(path.dirname(filename)), path.basename(filename))
     if (this.kind(canonical) !== current.model.kind) throw new Error('另存格式与文档不一致')
-    if (current.binding.kind === 'file' && canonicalKey(canonical) === canonicalKey(current.binding.path)) return this.registry.save(documentId, undefined, observer)
+    if (current.binding.kind === 'file' && canonicalKey(canonical) === canonicalKey(current.binding.path)) return this.registry.save(documentId, undefined, observer, saveIdentity)
     const version = await readDocumentFileVersion(canonical, current.model.kind)
     if (version !== null && !overwriteConfirmed) throw new Error('另存目标已存在，请选择新文件名')
-    return this.registry.save(documentId, { kind: 'file', path: canonical, version, bindingVersion: current.binding.kind === 'file' ? current.binding.bindingVersion + 1 : 1 }, observer)
+    return this.registry.save(documentId, { kind: 'file', path: canonical, version, bindingVersion: current.binding.kind === 'file' ? current.binding.bindingVersion + 1 : 1 }, observer, saveIdentity)
   }
 
   async operate(raw: unknown): Promise<unknown> {
@@ -246,6 +278,7 @@ export class DocumentHostService {
       case 'observe-file': return this.observeFile(input.documentId)
       case 'reconcile-file': return this.reconcileFile(input)
       case 'close': return this.fileCoordinator.withFileAccess(async () => {
+        this.fileCoordinator.assertResolved([], [input.documentId])
         await this.registry.close(input.documentId, { discardDirty: input.discardDirty, expected: input.expected })
         await this.journal.discard(input.documentId)
         return
@@ -257,16 +290,29 @@ export class DocumentHostService {
           // crash recovery races a view attachment and falsely blocks editing.
           if (this.registry.list().some(snapshot => snapshot.documentId === documentId)) continue
           const state = await this.journal.recover(documentId)
-          if (state && state.savedRevision !== state.revision) snapshots.push({ documentId, epoch: state.epoch, revision: state.revision, model: state.model, binding: state.binding, dirty: true, saving: false, recoverable: true, undoDepth: state.past.length, redoDepth: state.future.length })
+          let bindingUnresolved = false
+          try { this.fileCoordinator.assertResolved([], [documentId]) } catch { bindingUnresolved = true }
+          if (state && (state.savedRevision !== state.revision || bindingUnresolved)) snapshots.push({ documentId, epoch: state.epoch, revision: state.revision, model: state.model, binding: state.binding, dirty: true, saving: false, recoverable: true, undoDepth: state.past.length, redoDepth: state.future.length })
         }
         return snapshots
       })
       case 'restore': return this.fileCoordinator.withFileAccess(async () => {
+        if (input.mode !== 'unbound') this.fileCoordinator.assertResolved([], [input.documentId])
         const state = await this.journal.recover(input.documentId)
         if (!state) throw new Error('恢复稿不存在')
+        if (input.mode === 'unbound') {
+          if (this.registry.list().some(snapshot => snapshot.documentId === input.documentId))
+            throw new Error('该恢复稿已经打开，请从文档另存为；未改变当前绑定')
+          // This explicit recovery choice changes only the binding. Content, undo/redo,
+          // operation receipts and stop barriers remain owned by the same document.
+          state.binding = { kind: 'untitled', suggestedName: state.binding.kind === 'file'
+            ? path.basename(state.binding.path) : state.binding.suggestedName }
+          state.savedRevision = null
+        }
         return this.attach(await this.registry.restore(state))
       })
       case 'discard-recovery': return this.fileCoordinator.withFileAccess(async () => {
+        this.fileCoordinator.assertResolved([], [input.documentId])
         if (this.registry.list().some(snapshot => snapshot.documentId === input.documentId)) throw new Error('文档已打开，请从文档关闭入口处理未保存更改')
         await this.journal.discard(input.documentId)
         return

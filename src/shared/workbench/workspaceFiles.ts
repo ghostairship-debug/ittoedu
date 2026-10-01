@@ -38,7 +38,7 @@ export interface WorkspacePptxFile {
 }
 
 /** Largest PPTX read for an import; the importer itself accepts the same size. */
-export const WORKSPACE_PPTX_MAX_BYTES = 32 * 1024 * 1024
+export const WORKSPACE_PPTX_MAX_BYTES = 256 * 1024 * 1024
 /** Largest ready-made H5 presentation a create-course request may carry. */
 export const WORKSPACE_COURSE_ARCHIVE_MAX_BYTES = 256 * 1024 * 1024
 

@@ -177,6 +177,31 @@ async function setupTestEnvironment(admission?: BuildAdmissionPort, cancelJobSpy
 }
 
 describe('M24 g20-b18-c2 HTML section import orchestration', () => {
+  it('automatically imports ambiguous sections as one faithful page and preserves them after saving', async () => {
+    const env = await setupTestEnvironment(), runId = 'auto-whole-fallback'
+    const html = '<body><section>Intro</section><main><section>Exercise</section><button onclick="this.textContent=\'Done\'">Start</button></main></body>'
+    const sourceSession = await env.registry.create({ kind: 'text', source: html, resources: { assets: {}, components: {} } }, 'flexible.html')
+    await env.gateway.beginRun({ runId, actor: 'human', documents: [
+      { documentId: env.courseSession.documentId, writable: [{ kind: 'document' }] },
+      { documentId: sourceSession.documentId, writable: [] },
+    ] })
+    await env.gateway.loadToolFamilies(runId, ['build'])
+    const target = await env.gateway.issueTarget(runId, env.courseSession.documentId, { kind: 'document' })
+    const source = await env.gateway.issueTarget(runId, sourceSession.documentId, { kind: 'document' }, { readOnly: true })
+    const result = await env.gateway.execute(runId, 'auto-import', { name: 'html.import', input: { source, target, mode: 'auto' } })
+    expect(result).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+    expect(env.courseSession.read().undoDepth).toBe(1)
+    const file = path.join(env.root, 'auto-import.h5lesson')
+    await env.courseSession.save({ kind: 'file', path: file, version: null, bindingVersion: 1 })
+    const reopened = new CourseV9Driver().load(new Uint8Array(await fs.readFile(file)))
+    if (reopened.kind !== 'course-v9') throw new Error('wrong model')
+    const imports = reopened.project.surfaces.flatMap(surface => surface.type === 'slide'
+      ? surface.scenes.flatMap(scene => scene.layerItems.filter(item => item.kind === 'runtime')) : [])
+    expect(imports).toHaveLength(1)
+    const item = imports[0]!
+    if (item.kind !== 'runtime') throw new Error('wrong carrier')
+    expect(unpackHtmlDocumentRuntimeSource(item.runtime.source)?.html).toBe(html)
+  })
   it('executes html.import through the external MCP HTTP bridge with the same canonical receipt', async () => {
     const env = await setupTestEnvironment()
     const server = new McpDocumentServer({ gateway: env.gateway, registry: env.registry,
@@ -970,9 +995,11 @@ it('persists an imported course to the actual h5lesson bytes and reopens it with
   if (before.model.kind !== 'course-v9') throw new Error('fixture model')
   const slide = before.model.project.surfaces.find(surface => surface.type === 'slide')!
   const result = await env.gateway.execute(runId, 'import', { name: 'html.import', input: {
-    source, target, mode: 'sections', destinations: [{ kind: 'slide-new', surface: slide.id }],
+    source, target, mode: 'sections',
   } })
   expect(result).toMatchObject({ kind: 'document-operation', result: { status: 'applied', persistence: 'recoverable' } })
+  // Compound import advances this run's own document reference; no reopen/read-tree ceremony.
+  await expect(env.gateway.resolveWholeDocumentHandle(runId, target, 'write')).resolves.toMatchObject({ revision: before.revision + 1 })
   const file = path.join(env.root, 'delivered.h5lesson')
   await expect(fs.stat(file)).rejects.toMatchObject({ code: 'ENOENT' })
   const saved = await env.courseSession.save({ kind: 'file', path: file, version: null, bindingVersion: 1 })

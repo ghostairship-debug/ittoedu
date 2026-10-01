@@ -3,7 +3,7 @@ import type { AttachmentExtractionInput, AttachmentExtractionResult } from '../.
 
 declare global {
   interface Window {
-    attachmentExtraction: { run(extract: (input: AttachmentExtractionInput) => Promise<AttachmentExtractionResult>): void }
+    attachmentExtraction: { run(extract: (input: AttachmentExtractionInput, options?: { onProgress?: (page: number, total: number) => void }) => Promise<AttachmentExtractionResult>): void }
   }
 }
 window.attachmentExtraction.run(extractAttachmentMaterial)

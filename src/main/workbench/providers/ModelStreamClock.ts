@@ -1,14 +1,14 @@
 export interface ModelStreamClockOptions {
   timeoutMs?: number
   progressTimeoutMs?: number
-  maxDurationMs?: number
+  maxDurationMs?: number | null
   now?: () => number
 }
 /** One attempt, three clocks. Local consumption pauses waiting clocks, never the total deadline. */
 export class ModelStreamClock {
   private idle?: ReturnType<typeof setTimeout>
   private progressTimer?: ReturnType<typeof setTimeout>
-  private total: ReturnType<typeof setTimeout>
+  private total?: ReturnType<typeof setTimeout>
   private paused = false
   private disposed = false
   private remaining: number
@@ -20,8 +20,10 @@ export class ModelStreamClock {
     const duration = (value: number | undefined, fallback: number) => value !== undefined && Number.isFinite(value) && value > 0 ? value : fallback
     this.now = options.now ?? Date.now
     this.idleMs = duration(options.timeoutMs, 120_000)
-    this.remaining = this.progressMs = duration(options.progressTimeoutMs, 300_000)
-    this.total = setTimeout(() => this.timeout('total'), duration(options.maxDurationMs, 600_000))
+    this.remaining = this.progressMs = duration(options.progressTimeoutMs, 10 * 60_000)
+    // Progress/idle clocks protect the default path; only an explicit deadline caps total work.
+    if (typeof options.maxDurationMs === 'number' && Number.isFinite(options.maxDurationMs) && options.maxDurationMs > 0)
+      this.total = setTimeout(() => this.timeout('total'), options.maxDurationMs)
     this.arm()
   }
   private timeout(phase: 'idle' | 'progress' | 'total') { if (!this.disposed) { this.dispose(); this.expire(phase) } }

@@ -3,7 +3,7 @@ import type { DocumentDeliveryServicePort, ExportReceipt, SaveReceipt } from '..
 import type { ToolResult } from '../../shared/workbench/tools'
 
 export const fileSaveInputSchema = z.object({
-  target: z.string().min(1).max(200),
+  target: z.string().min(1).max(200).describe('file.open/create 返回的 data.target 文档短句柄；不是文件路径、documentId 或正文 writableTarget。'),
   destination: z.string().min(1).max(1024).optional(),
 }).strict()
 
@@ -14,9 +14,9 @@ export const documentExportInputSchema = z.object({
 }).strict()
 
 export const documentDeliveryTools = [
-  { name: 'file.save' as const, description: '将已授权文档的当前正式内容保存到原位置或已授权的新位置，返回确切保存版本与脏状态。', inputSchema: fileSaveInputSchema,
+  { name: 'file.save' as const, description: '保存已打开文档的当前正式内容。target 使用宿主返回的文档短句柄，destination 仅用于另存为。返回确切保存版本与脏状态。', inputSchema: fileSaveInputSchema,
     manual: { label: '保存文件', group: 'edit' as const, targetKinds: ['document'] as const } },
-  { name: 'document.export' as const, description: '将已授权的 Course V9 文档导出为离线单 HTML、在线单 HTML 或网页包，返回生成与写盘的真实状态。', inputSchema: documentExportInputSchema,
+  { name: 'document.export' as const, description: '将已授权的 Course V9 文档导出为离线单 HTML、在线单 HTML 或网页包，返回生成与写盘的真实状态。同任务同文档的既有导出未被修改时可原位更新；其他同名文件不覆盖，不需先删除旧文件。', inputSchema: documentExportInputSchema,
     manual: { label: '导出文档', group: 'edit' as const, targetKinds: ['document'] as const } },
 ]
 

@@ -629,7 +629,7 @@ async function verifyDocumentationContract(): Promise<void> {
   )
   assert(
     /call npm\.cmd ci/i.test(launcher) &&
-      /call npm\.cmd run build:desktop/i.test(launcher) &&
+      /node scripts[\\/]prepare-source-launch\.mjs/i.test(launcher) &&
       /node_modules\\electron\\dist\\electron\.exe/i.test(launcher),
     '双击入口未按文档执行锁定依赖、生产构建和 Electron 启动',
   )

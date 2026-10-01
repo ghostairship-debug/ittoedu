@@ -50,7 +50,7 @@ export interface HostToolServices {
   mcp?: {
     discover(runId: string, signal?: AbortSignal): Promise<unknown>
     invoke(input: { runId: string; operationId: string; name: string; arguments: Record<string, unknown>; snapshotId?: string; signal?: AbortSignal }): Promise<unknown>
-    readResource(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array }
+    readResource(runId: string, resourceId: string): Promise<{ mimeType: string; bytes: Uint8Array }> | { mimeType: string; bytes: Uint8Array }
     lookup(runId: string, operationId: string): Promise<unknown | null>
   }
   media?: {
@@ -124,6 +124,7 @@ interface HostAuthority {
   resolveImage(runId: string, target: string): Promise<{ snapshot: DocumentSnapshot; target: ToolTarget }>
   active(runId: string, documentId: string, epoch: string): void
   actor(runId: string): DocumentOperation['actor']
+  applied(runId: string, before: DocumentSnapshot, after: DocumentSnapshot): void
   ownsDocument(runId: string, documentId: string): boolean
   provideImage(runId: string, documentId: string, source: HostImageInput): Promise<string>
   readImage(runId: string, documentId: string, resource: string): Promise<HostImageInput>
@@ -320,7 +321,7 @@ export class HostToolCoordinator {
     return this.services.mcp ? { kind: 'read', data: await this.services.mcp.invoke({ runId, operationId, name, arguments: args, ...(snapshotId ? { snapshotId } : {}), signal }) }
       : this.serviceUnavailable('外部 MCP 服务尚未配置')
   }
-  readMcpResource(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array } {
+  async readMcpResource(runId: string, resourceId: string): Promise<{ mimeType: string; bytes: Uint8Array }> {
     this.builtInRun(runId)
     if (!this.services.mcp) throw new Error('外部 MCP 服务尚未配置')
     return this.services.mcp.readResource(runId, resourceId)
@@ -364,6 +365,7 @@ export class HostToolCoordinator {
     for (const job of this.jobs.values()) if (job.runId === runId && job.kind === 'image') job.controller.abort()
     await Promise.allSettled([
       ...(this.services.stopRun ? [this.services.stopRun(runId)] : []),
+      ...(this.services.observations?.stopRun ? [this.services.observations.stopRun(runId)] : []),
       ...[...this.jobs.values()].filter((job): job is ImageJob => job.runId === runId && job.kind === 'image').map(job => this.services.images!.stop(job.jobId)),
       ...(this.services.builds ? [this.services.builds.cancelRun(runId)] : []),
       ...(this.services.compute ? [this.services.compute.cancelRun(runId)] : []),
@@ -501,6 +503,10 @@ export class HostToolCoordinator {
       if (current.epoch !== artifact.target.epoch || current.revision !== artifact.target.baseRevision || current.model.kind !== 'course-v9' || current.model.project.id !== artifact.target.projectId || documentDigest(current.model) !== artifact.target.modelDigest) return { kind: 'error', code: 'build-target-conflict', message: '构建前提已改变，制品未导入；不会替换为最新版本绕过冲突' }
       if (artifact.command.project.id !== artifact.target.projectId || artifact.command.project.revision !== artifact.target.baseRevision || !artifact.command.resources) throw new Error('构建制品的工程身份、基线或资源闭包无效')
       const result = await session.execute({ documentId: job.documentId, epoch: artifact.target.epoch, baseRevision: artifact.target.baseRevision, operationId, requestDigest, runId, actor: this.authority.actor(runId), mutation: { type: 'command', command: artifact.command } })
+      if (result.status === 'applied') {
+        const after = await session.drain()
+        if (after.revision === result.revision && after.epoch === current.epoch) this.authority.applied(runId, current, after)
+      }
       return { kind: 'document-operation', result, affected: [] }
     }
     const { job: _job, ...parameters } = input as Record<string, unknown>

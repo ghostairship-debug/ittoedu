@@ -58,7 +58,6 @@ export class ScopedSkillService implements SkillServicePort {
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') warnings.push(`${root.source}: 根目录未能读取或不在授权内`); continue }
       for (const folder of folders.sort((a, b) => a.name.localeCompare(b.name))) {
         if (!folder.isDirectory() || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$/.test(folder.name)) continue
-        if (entries.length >= 100) { warnings.push('Skill 元数据目录已截断到 100 项，请缩小根目录'); break }
         try { entries.push(await this.metadata(root, folder.name)) }
         catch (error) { warnings.push(`${root.source}/${folder.name}: ${(error as { code?: string }).code ?? 'metadata-unavailable'}`) }
       }
@@ -85,7 +84,7 @@ export class ScopedSkillService implements SkillServicePort {
     const entry = (await this.index(runId)).entries.find(skill => skill.name === input.skill)
     if (!entry) return { status: 'unknown-skill', skill: input.skill }
     if (!relativeFile(input.path)) return { status: 'unknown-path', skill: input.skill, path: input.path }
-    if (!Number.isSafeInteger(input.offset) || input.offset < 0 || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 8000)
+    if (!Number.isSafeInteger(input.offset) || input.offset < 0 || !Number.isSafeInteger(input.limit) || input.limit < 1 || input.limit > 64_000)
       throw failure('invalid-input', 'Skill 分页范围无效')
     const roots = await this.rootsFor(runId)
     if (!roots.some(root => root.source === entry.root.source && root.directory === entry.root.directory && root.authorizedRoot === entry.root.authorizedRoot))

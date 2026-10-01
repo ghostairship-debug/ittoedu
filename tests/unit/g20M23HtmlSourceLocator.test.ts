@@ -123,3 +123,13 @@ it('rejects parser-repaired nesting and duplicate image attributes instead of ch
   expect(locateHtmlSourceTarget(duplicate, image, identity))
     .toMatchObject({ status: 'not-editable', reason: 'not-unique' })
 })
+
+
+it.each(['<svg><path d="M0 0L1 1"/></svg>', '<template><p>模板</p></template>', '<select><option>选项</option></select>', '<math><mi>x</mi></math>'])(
+  'keeps exact ordinary text editable beside %s without losing child indices', sibling => {
+    const source = `<html><body>${sibling}<h1>标题</h1><h1>标题</h1></body></html>`
+    const path = [{ name: 'html', index: 0 }, { name: 'body', index: 1 }, { name: 'h1', index: 2 }]
+    const located = locateHtmlSourceTarget(source, textReport(path, '标题'), identity)
+    expect(located.status).toBe('editable')
+    if (located.status === 'editable') expect(located.locator.valueSpan!.start).toBe(source.lastIndexOf('标题'))
+  })

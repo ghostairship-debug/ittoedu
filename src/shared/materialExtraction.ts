@@ -14,7 +14,7 @@ export interface MaterialExtraction {
   assets: { id: string; mime: string; bytes: Uint8Array }[]
   gaps: { locator: MaterialFragment['locator']; reason: string; resolution?: { kind: 'read-page-image'; assetId: string } }[]
 }
-export const MATERIAL_EXTRACTION_LIMITS = { sourceBytes: 32 * 1024 * 1024, outputBytes: 128 * 1024 * 1024, pages: 100, textCharacters: 2 * 1024 * 1024 } as const
+export const MATERIAL_EXTRACTION_LIMITS = { sourceBytes: 256 * 1024 * 1024, outputBytes: 256 * 1024 * 1024, pages: 32, textCharacters: 16 * 1024 * 1024 } as const
 
 export interface LessonMaterialTarget { lessonId: string; rootPath: string }
 export interface LessonMaterialRecord {

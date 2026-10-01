@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import { mkdtemp } from 'node:fs/promises'
@@ -8,7 +8,7 @@ import path from 'node:path'
 import { HostArtifactDeliveryService, type ArtifactDeliveryInput } from '../../src/main/workbench/execution/HostArtifactDeliveryService'
 
 const cleanup: string[] = []
-afterEach(async () => { for (const root of cleanup.splice(0)) await fs.rm(root, { recursive: true, force: true }) })
+afterEach(async () => { vi.restoreAllMocks(); for (const root of cleanup.splice(0)) await fs.rm(root, { recursive: true, force: true }) })
 async function fixture(withFileOperation?: <T>(work: () => Promise<T>) => Promise<T>) {
   const base = await mkdtemp(path.join(tmpdir(), 'g20-artifact-'))
   cleanup.push(base)
@@ -98,4 +98,81 @@ describe('M28 host artifact delivery', () => {
     expect(await service.lookup(input.operationId)).toMatchObject({ status: 'unknown', observed: 'matching' })
     expect(await service.deliver(input)).toMatchObject({ status: 'unknown' })
   })
+
+  it.each(['ENOSPC', 'EACCES'])('records a pre-publication %s rejection and can save the same artifact after correction', async failureCode => {
+    const { service, input, journalDirectory } = await fixture()
+    const open = fs.open.bind(fs), outputDirectory = path.join(input.workspaceRoot, 'exports')
+    const failedOpen = vi.spyOn(fs, 'open').mockImplementation(async (filename, flags, mode) => {
+      if (path.dirname(String(filename)) === outputDirectory)
+        throw Object.assign(new Error(`fixture ${failureCode}`), { code: failureCode })
+      return open(filename, flags, mode)
+    })
+    const publish = vi.spyOn(fs, 'link')
+    const rejected = await service.deliver(input)
+    expect(rejected).toMatchObject({ status: 'rejected' })
+    expect(rejected.message).toContain(failureCode)
+    expect(publish).not.toHaveBeenCalled()
+    expect(await fs.readdir(outputDirectory)).toEqual([])
+    failedOpen.mockRestore()
+    const reopened = new HostArtifactDeliveryService({ journalDirectory, withFileOperation: work => work() })
+    expect(await reopened.lookup(input.operationId)).toMatchObject(rejected)
+    expect(await reopened.deliver(input)).toMatchObject(rejected)
+    const corrected = await reopened.deliver({ ...input, operationId: 'corrected-delivery' })
+    expect(corrected.status).toBe('written')
+    expect(await fs.readFile(corrected.path)).toEqual(Buffer.from(input.bytes))
+  })
+
+  it('cleans its incomplete temporary file when staging bytes fails before publication', async () => {
+    const { service, input } = await fixture()
+    const open = fs.open.bind(fs), outputDirectory = path.join(input.workspaceRoot, 'exports')
+    vi.spyOn(fs, 'open').mockImplementation(async (filename, flags, mode) => {
+      const handle = await open(filename, flags, mode)
+      if (path.dirname(String(filename)) === outputDirectory) vi.spyOn(handle, 'writeFile').mockRejectedValue(
+        Object.assign(new Error('fixture disk full during staging'), { code: 'ENOSPC' }))
+      return handle
+    })
+    expect(await service.deliver(input)).toMatchObject({ status: 'rejected' })
+    expect(await fs.readdir(outputDirectory)).toEqual([])
+  })
+
+  it('uses a definite publication rejection to allow a corrected new delivery', async () => {
+    const { service, input } = await fixture()
+    const publish = vi.spyOn(fs, 'link').mockRejectedValueOnce(
+      Object.assign(new Error('fixture denied publication'), { code: 'EACCES' }))
+    expect(await service.deliver(input)).toMatchObject({ status: 'rejected' })
+    expect(publish).toHaveBeenCalledOnce()
+    expect(await fs.readdir(path.join(input.workspaceRoot, 'exports'))).toEqual([])
+    const corrected = await service.deliver({ ...input, operationId: 'corrected-publication' })
+    expect(corrected.status).toBe('written')
+    expect(await fs.readFile(corrected.path)).toEqual(Buffer.from(input.bytes))
+  })
+})
+
+it('seals and delivers an 80 MiB compute artifact through the real services without the former 64 MiB cutoff', async () => {
+  const { ComputeJobService } = await import('../../src/main/workbench/compute/ComputeJobService')
+  const { base, service, input } = await fixture()
+  const bytes = Buffer.alloc(80 * 1024 * 1024, 37); bytes.write('actual-large-source', 0)
+  // Only the container runner is replaced: actual inputs, transformation, sealing, delivery and reread use disk.
+  const backend = { availability: async () => ({ available: true }), start: async (request: { directory: string }) => {
+    const done = (async () => {
+      await fs.copyFile(path.join(request.directory, 'input', 'source.bin'), path.join(request.directory, 'output', 'result.bin'))
+      const file = await fs.open(path.join(request.directory, 'output', 'result.bin'), 'r+')
+      try { await file.write(Buffer.from('transformed'), 0, 11, 0) } finally { await file.close() }
+      return { exitCode: 0, stdout: 'transformed', stderr: '', timedOut: false, cancelled: false, truncated: false }
+    })()
+    return { done, cancel: async () => true }
+  } }
+  const compute = new ComputeJobService({ directory: path.join(base, 'compute'), backend: backend as never })
+  const started = await compute.start({ runId: input.runId, jobId: 'large', language: 'python',
+    code: 'fixture backend copies and transforms the declared input', inputs: [{ name: 'source.bin', bytes }], outputNames: ['result.bin'] })
+  const ready = await compute.wait(input.runId, started.jobId, 10_000)
+  expect(ready.status).toBe('ready')
+  const artifact = await compute.readArtifact(input.runId, started.jobId, 'result.bin')
+  const delivered = await service.deliver({ ...input, bytes: artifact.bytes, sourceId: `${started.jobId}@${artifact.artifact.name}` })
+  expect(delivered.status).toBe('written')
+  const saved = await fs.readFile(path.join(input.workspaceRoot, 'exports/result.bin'))
+  expect(saved.byteLength).toBe(bytes.byteLength)
+  expect(saved.subarray(0, 11).toString()).toBe('transformed')
+  expect(createHash('sha256').update(saved).digest('hex')).toBe(artifact.artifact.digest)
+  expect((await service.lookup(input.operationId))?.status).toBe('written')
 })

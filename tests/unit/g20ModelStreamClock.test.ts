@@ -65,3 +65,34 @@ it('M26 stop clears backoff and aborts a stuck local credential wait without cla
   expect(waited).toHaveBeenCalledOnce()
   expect(vi.getTimerCount()).toBe(0)
 })
+
+it('allows a live reasoning stream beyond five minutes but retains a finite no-progress deadline', async () => {
+  vi.useFakeTimers()
+  const expired = vi.fn(), clock = new ModelStreamClock({}, expired)
+  try {
+    for (let i = 0; i < 6; i++) { await vi.advanceTimersByTimeAsync(60_000); clock.activity() }
+    expect(expired).not.toHaveBeenCalled()
+    for (let i = 0; i < 3; i++) { await vi.advanceTimersByTimeAsync(60_000); clock.activity() }
+    await vi.advanceTimersByTimeAsync(60_000)
+    expect(expired).toHaveBeenCalledWith('progress')
+  } finally { clock.dispose(); vi.useRealTimers() }
+})
+
+it.each([undefined, null])('lets continuing generation pass the old twenty-minute total (%s)', async maxDurationMs => {
+  vi.useFakeTimers()
+  const expired = vi.fn(), clock = new ModelStreamClock({ maxDurationMs }, expired)
+  try {
+    for (let i = 0; i < 40; i++) { await vi.advanceTimersByTimeAsync(60_000); clock.activity(); clock.progress() }
+    expect(expired).not.toHaveBeenCalled()
+  } finally { clock.dispose() }
+})
+it('consumes streams larger than the old accumulated quota while bounding one unfinished event', async () => {
+  const event = new TextEncoder().encode(`data: ${'x'.repeat(1024 * 1024)}\n\n`)
+  let remaining = 40
+  const stream = new ReadableStream<Uint8Array>({ pull(controller) { if (remaining--) controller.enqueue(event); else controller.close() } })
+  let count = 0
+  for await (const value of serverSentEvents(stream, 2 * 1024 * 1024)) { expect(value.length).toBe(1024 * 1024); count++ }
+  expect(count).toBe(40)
+  const malformed = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode('data: ' + 'x'.repeat(500))); controller.close() } })
+  await expect((async () => { for await (const _ of serverSentEvents(malformed, 100)) {} })()).rejects.toThrow('response-too-large')
+})

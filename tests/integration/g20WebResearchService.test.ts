@@ -60,3 +60,22 @@ describe('M29 public research boundary', () => {
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 })
+
+it('opens more than forty sources and accepts the page limits advertised by the tools', async () => {
+  const body = 'a'.repeat(19_000)
+  const fetch = vi.fn(async (url: string) => ({ url, status: 200, contentType: 'text/plain', bytes: html(body) }))
+  const search = vi.fn().mockResolvedValue({ provider: 'fixture', results: [] })
+  const service = new WebResearchService({ fetch, searchProvider: { search } })
+  service.beginRun('many')
+  try {
+    expect(await service.search({ runId: 'many', query: 'test', limit: 20 })).toMatchObject({ status: 'results' })
+    const first = await service.open({ runId: 'many', url: 'https://example.com/0', limit: 20_000 })
+    expect(first).toMatchObject({ status: 'opened', text: body, truncated: false })
+    if (first.status !== 'opened') throw new Error('first source unavailable')
+    for (let i = 1; i <= 45; i++) expect(await service.open({ runId: 'many', url: `https://example.com/${i}`, limit: 1 }))
+      .toMatchObject({ status: 'opened', text: 'a', truncated: true, nextOffset: 1 })
+    expect(await service.open({ runId: 'many', sourceId: first.source.sourceId, version: first.source.version, offset: 1, limit: 20_000 }))
+      .toMatchObject({ status: 'opened', text: body.slice(1) })
+    expect(fetch).toHaveBeenCalledTimes(46)
+  } finally { await service.stopRun('many'); service.endRun('many') }
+})

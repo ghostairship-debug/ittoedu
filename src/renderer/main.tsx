@@ -22,10 +22,10 @@ if (!root) throw new Error('应用根节点不存在')
 
 // Slide text is measured synchronously into canvases the moment a surface
 // mounts, and the Player freezes that measurement into a texture. Register and
-// load the bundled faces before the first render so nothing is ever laid out
-// against fallback metrics. `ensureBundledFonts()` never rejects.
+// start loading the bundled faces now. BundledFontBoundary holds metric-sensitive
+// surfaces until ready without delaying the workspace shell. `ensureBundledFonts()` never rejects.
 installBundledFontFaces()
-await ensureBundledFonts()
+void ensureBundledFonts()
 
 // Teach the export path where the editor's font bytes are. This is a
 // registration, not a read: nothing is fetched until an export asks for it, so

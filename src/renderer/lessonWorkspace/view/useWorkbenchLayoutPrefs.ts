@@ -12,7 +12,7 @@ export interface WorkbenchLayoutPrefs {
 }
 export const STORAGE_KEY = 'guoling-workbench-layout-v2'
 export const DEFAULT_PREFS: WorkbenchLayoutPrefs = {
-  navWidth: 240, chatWidth: 360, navCollapsed: false, contentClosed: false,
+  navWidth: 216, chatWidth: 350, navCollapsed: false, contentClosed: false,
   chatClosed: false, explorerOpen: true, conversationsOpen: true, sessionsHeight: 260,
 }
 export const LAYOUT_LIMITS = { nav: { min: 180, max: 440 }, chat: { min: 280, max: 640 }, sessions: { min: 160, max: 500 }, content: 320 } as const

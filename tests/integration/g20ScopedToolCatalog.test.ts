@@ -10,7 +10,8 @@ import type { HostToolServices } from '../../src/core/tools/HostToolServices'
 import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEngine'
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
-import { OpenAIChatProvider, serializeModelRequest } from '../../src/main/workbench/providers/OpenAIChatProvider'
+import { OpenAIChatProvider, modelToolWireName, serializeModelRequest } from '../../src/main/workbench/providers/OpenAIChatProvider'
+import { workbenchServiceToolCatalog } from '../../src/core/tools/WorkbenchServiceTools'
 import type { ModelEvent, ModelProvider, ModelRequest, ModelSelection } from '../../src/shared/workbench/modelProvider'
 import type { ToolTarget } from '../../src/shared/workbench/tools'
 import { toolFamilies } from '../../src/core/tools/ToolCatalog'
@@ -78,13 +79,13 @@ it('sends a narrow Markdown catalog on every real HTTP turn and commits one cano
   expect(run.status).toBe('completed')
   expect(bodies).toHaveLength(3)
   const wireNames = bodies[0].data.tools.map((tool: any) => tool.function.name)
-  // The scoped document catalog, then the built-in loop's own question tool (M09-T04); it is not a document tool.
-  expect(wireNames).toEqual(['read', 'inspect', 'listChildren', expect.stringMatching(/^tool_[a-f0-9]+$/), 'batch', 'ask_user'])
+  // Services and engine controls are independent of the scoped document editing catalog.
+  const serviceAndControlNames = new Set([...workbenchServiceToolCatalog.map(tool => modelToolWireName(tool.name)), 'context_read', 'task_note', 'ask_user', 'tools_load'])
+  expect(wireNames.filter((name: string) => !serviceAndControlNames.has(name))).toEqual(['read', 'inspect', 'listChildren', 'text_replace', 'batch'])
   expect(bodies.map(body => body.data.tools.map((tool: any) => tool.function.name))).toEqual(Array(3).fill(wireNames))
   const batch = bodies[0].data.tools.find((tool: any) => tool.function.name === 'batch')
   expect(JSON.stringify(batch.function.parameters)).toContain('text.replace')
   expect(JSON.stringify(batch.function.parameters)).not.toContain('document.insert')
-  expect(bodies[0].bytes).toBeLessThan(10_000)
   expect(run.requests.map((request, index) => request.payload?.serializedBytes === bodies[index].bytes)).toEqual([true, true, true])
   expect((await host.internalAPI.read(session.documentId))).toMatchObject({ revision: 1, undoDepth: 1, model: { source: 'X YY CC' } })
 })

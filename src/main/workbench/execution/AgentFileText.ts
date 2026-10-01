@@ -1,6 +1,8 @@
+import { matchTextPatch } from './textPatchMatch'
 import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { readUtf8File } from '../readUtf8File'
 import type { DocumentHostService } from '../DocumentHostService'
 import type { AgentFileContext, AgentFileOutcome } from '../../../core/tools/AgentFileTools'
 import { TextDriver } from '../../../core/drivers/TextDriver'
@@ -13,11 +15,12 @@ type Source = { source: string; version: string; dirty: boolean; snapshot?: Docu
 const hash = (bytes: Uint8Array) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`
 const samePath = (a: string, b: string) => process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
 const textDriver = new TextDriver()
-const MAX_TEXT_BYTES = 16 * 1024 * 1024
+const MAX_TEXT_BYTES = 256 * 1024 * 1024
 
 /** Ordinary UTF-8 source operations. Open documents always go through their existing session and Gateway. */
 export class AgentFileText {
   private readonly pages = new Map<string, Page>()
+  releaseRun(runId: string): void { for (const [id, value] of this.pages) if (value.runId === runId) this.pages.delete(id) }
   constructor(private readonly host: DocumentHostService) {}
 
   private live(filename: string): DocumentSnapshot | undefined {
@@ -32,24 +35,33 @@ export class AgentFileText {
       return { source: snapshot.model.source, version: `document:${snapshot.documentId}:${snapshot.epoch}:${snapshot.revision}`,
         dirty: snapshot.dirty, snapshot }
     }
-    const [actual, stat] = await Promise.all([fs.realpath(filename), fs.lstat(filename)])
-    if (!samePath(actual, filename) || !stat.isFile() || stat.isSymbolicLink())
-      throw new Error('文件位置或类型已改变，请重新定位并读取')
-    const bytes = await fs.readFile(filename)
-    if (bytes.byteLength > MAX_TEXT_BYTES) throw new Error('普通源文件超过 16 MiB；请按范围使用材料或受控计算工具')
-    const model = textDriver.load(bytes)
-    if (model.kind !== 'text') throw new Error('文件不是普通文本')
-    const version = hash(bytes)
-    if (hash(await fs.readFile(filename)) !== version) throw new Error('读取期间文件已改变，请重新读取')
-    return { source: model.source, version, dirty: false }
+    const current = await readUtf8File(filename, { maxCollectedBytes: MAX_TEXT_BYTES })
+    return { source: current.text, version: current.version, dirty: false }
   }
 
   async read(context: AgentFileContext, filename: string, limit = 8_000, cursor?: string, operationId: string = randomUUID()): Promise<AgentFileOutcome> {
+    if (sourceFileKind(filename) === 'course-v9') throw new Error('H5 演示须通过正式文档工具读取')
+    if (!this.live(filename)) {
+      const position = cursor ? this.pages.get(cursor) : undefined
+      if (cursor && (!position || position.runId !== context.runId || !samePath(position.filename, filename))) throw new Error('文件分页不属于本次读取')
+      const offset = position?.offset ?? 0
+      const current = await readUtf8File(filename, { from: offset, limit: limit + 1 })
+      if (position && position.version !== current.version) throw new Error('文件版本已改变，请从当前版本重新读取')
+      if (this.live(filename)) throw new Error('文件已在工作台打开，请重新读取当前文档')
+      let length = Math.min(limit, current.text.length)
+      if (/[\uD800-\uDBFF]/u.test(current.text[length - 1] ?? '') && /[\uDC00-\uDFFF]/u.test(current.text[length] ?? '')) length--
+      if (!length && current.text.length) length = Math.min(2, current.text.length)
+      const end = offset + length, truncated = end < current.total
+      const nextCursor = truncated ? randomUUID() : undefined
+      if (nextCursor) this.pages.set(nextCursor, { runId: context.runId, filename, version: current.version, offset: end, time: Date.now() })
+      return { data: { path: filename, text: current.text.slice(0, length), offset, total: current.total,
+        version: current.version, dirty: false, truncated, ...(nextCursor ? { nextCursor } : {}) } }
+    }
     const current = await this.source(filename)
     let offset = 0
     if (cursor) {
       const page = this.pages.get(cursor)
-      if (!page || page.runId !== context.runId || !samePath(page.filename, filename) || page.version !== current.version || Date.now() - page.time > 900_000)
+      if (!page || page.runId !== context.runId || !samePath(page.filename, filename) || page.version !== current.version)
         throw new Error('文件分页已失效或版本已改变，请从首页重新读取')
       offset = page.offset
     }
@@ -77,7 +89,6 @@ export class AgentFileText {
       version: current.version, dirty: current.dirty, truncated } as Record<string, unknown>
     if (truncated) {
       const nextCursor = randomUUID()
-      while (this.pages.size >= 128) this.pages.delete(this.pages.keys().next().value!)
       this.pages.set(nextCursor, { runId: context.runId, filename, version: current.version, offset: end, time: Date.now() })
       data.nextCursor = nextCursor
     }
@@ -107,27 +118,21 @@ export class AgentFileText {
     range: { from: number; to: number } | undefined, operationId: string): Promise<AgentFileOutcome> {
     if (context.permission === 'read-only') throw new Error('只读任务不能修改文件')
     return this.host.fileCoordinator.withFileOperation(async () => {
+      await this.host.assertFileAvailable(filename)
       const current = await this.source(filename)
       if (current.version !== expectedVersion) throw new Error('文件版本已改变，请重新读取后修改')
-      let from: number, to: number
-      if (range) {
-        ({ from, to } = range)
-        if (to < from || current.source.slice(from, to) !== oldText) throw new Error('补丁范围或原文已改变，请重新读取')
-      } else {
-        from = current.source.indexOf(oldText)
-        if (from < 0) throw new Error('补丁原文不存在，请重新读取')
-        if (current.source.indexOf(oldText, from + 1) >= 0) throw new Error('补丁原文匹配多处，请提供精确 range')
-        to = from + oldText.length
-      }
-      const next = current.source.slice(0, from) + newText + current.source.slice(to)
+      const match = matchTextPatch(current.source, oldText, newText, range)
+      const { from, to, text } = match
+      const next = current.source.slice(0, from) + text + current.source.slice(to)
       this.assertText(filename, next)
-      return this.commit(context, filename, current, next, operationId, { from, to, newText })
+      return this.commit(context, filename, current, next, operationId, { from, to, newText: text })
     })
   }
 
   private async replaceExisting(context: AgentFileContext, filename: string, content: string, expectedVersion: string,
     operationId: string): Promise<AgentFileOutcome> {
     return this.host.fileCoordinator.withFileOperation(async () => {
+      await this.host.assertFileAvailable(filename)
       const current = await this.source(filename)
       if (current.version !== expectedVersion) throw new Error('文件版本已改变，请重新读取后覆盖')
       return this.commit(context, filename, current, content, operationId)
@@ -181,6 +186,7 @@ export class AgentFileText {
 
   private assertText(filename: string, content: string): void {
     if (sourceFileKind(filename) === 'course-v9') throw new Error('不能把普通源文写入 H5 演示归档')
+    if (Buffer.byteLength(content) > MAX_TEXT_BYTES) throw new Error('完整源文编辑超过 256 MiB；原件保留，可按范围读取或使用受控计算处理')
     textDriver.validate({ kind: 'text', source: content, resources: { assets: {}, components: {} } })
   }
 }

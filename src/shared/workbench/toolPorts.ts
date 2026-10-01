@@ -95,6 +95,7 @@ export interface ObservationServicePort {
     viewGeneration?: string
     signal?: AbortSignal
   }): Promise<ObservationResult>
+  stopRun?(runId: string): Promise<void> | void
   /** Load real bytes for a previously captured observation resource. */
   readResource(input: { runId: string; resourceId: string }): Promise<{ mimeType: string; bytes: Uint8Array }>
 }

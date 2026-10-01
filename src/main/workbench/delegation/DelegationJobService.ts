@@ -153,7 +153,7 @@ export class DelegationJobService {
   /** Creates an isolated, bounded copy without letting the model choose a host write root. */
   async startManaged(input: ManagedDelegationInput): Promise<DelegationJobSnapshot> {
     const materials = (input.materials ?? []).map(artifactName)
-    if (materials.length > 32 || new Set(materials).size !== materials.length)
+    if (new Set(materials).size !== materials.length)
       throw new DelegationJobError('invalid-materials', '委派资料过多或重名')
     if (!path.isAbsolute(input.workspaceRoot)) throw new DelegationJobError('workspace-root', '委派工作空间根无效')
     const workspaceRoot = await fs.realpath(input.workspaceRoot)
@@ -173,7 +173,7 @@ export class DelegationJobService {
           const source = await fs.realpath(path.join(workspaceRoot, ...name.split('/')))
           if (!inside(workspaceRoot, source)) throw new DelegationJobError('material-outside', '委派资料超出冻结工作空间')
           const before = await fs.stat(source)
-          if (!before.isFile() || before.size > 20 * 1024 * 1024 || total + before.size > 64 * 1024 * 1024)
+          if (!before.isFile() || before.size > 256 * 1024 * 1024 || total + before.size > 256 * 1024 * 1024)
             throw new DelegationJobError('material-invalid', '委派资料类型或总量超出范围')
           const bytes = await fs.readFile(source)
           const after = await fs.stat(source)
@@ -200,7 +200,7 @@ export class DelegationJobService {
   private async startOwned(input: DelegationJobInput): Promise<DelegationJobSnapshot> {
     if (!input.runId || !input.taskId?.trim() || !input.goal?.trim() || input.goal.length > 100_000
       || !['workspace', 'full', 'read-only'].includes(input.permission) || !Array.isArray(input.expectedArtifacts)
-      || input.expectedArtifacts.length < 1 || input.expectedArtifacts.length > 16)
+      || input.expectedArtifacts.length < 1)
       throw new DelegationJobError('invalid-input', '委派目标、权限或声明成果无效')
     const expectedArtifacts = input.expectedArtifacts.map(artifactName)
     if (new Set(expectedArtifacts).size !== expectedArtifacts.length) throw new DelegationJobError('invalid-input', '委派声明成果重名')
@@ -244,7 +244,7 @@ export class DelegationJobService {
     const source = await fs.realpath(path.join(copyRoot, ...name.split('/')))
     if (!inside(copyRoot, source)) throw new DelegationJobError('artifact-outside', '委派成果离开批准副本')
     const stat = await fs.stat(source)
-    if (!stat.isFile() || !stat.size || stat.size > 20 * 1024 * 1024) throw new DelegationJobError('artifact-invalid', '委派成果为空、类型无效或过大')
+    if (!stat.isFile() || !stat.size || stat.size > 256 * 1024 * 1024) throw new DelegationJobError('artifact-invalid', '委派成果为空、类型无效或过大')
     const bytes = await fs.readFile(source)
     if (bytes.byteLength !== stat.size) throw new DelegationJobError('artifact-changed', '委派成果读取期间发生变化')
     const output = path.join(this.folder(jobId), 'artifacts', digest(name))
@@ -266,15 +266,15 @@ export class DelegationJobService {
             message: event.detail.slice(0, 1000) }].slice(-200)
         }).catch(() => undefined) },
         verify: async ({ artifacts }) => ({ accepted: artifacts.length === input.expectedArtifacts.length
-          && artifacts.every(artifact => artifact.bytes > 0 && artifact.bytes <= 20 * 1024 * 1024),
+          && artifacts.every(artifact => artifact.bytes > 0 && artifact.bytes <= 256 * 1024 * 1024),
         detail: '声明成果已在批准副本内回读；等待父任务审阅和正式交付。' }),
       })
       const artifacts: DelegationJobArtifact[] = []
       if (result.status === 'verified' && !active.controller.signal.aborted) {
         for (const name of input.expectedArtifacts) {
           artifacts.push(await this.snapshotArtifact(jobId, copyRoot, name))
-          if (artifacts.reduce((total, artifact) => total + artifact.byteLength, 0) > 64 * 1024 * 1024)
-            throw new DelegationJobError('artifact-limit', '委派成果总量超过 64 MiB')
+          if (artifacts.reduce((total, artifact) => total + artifact.byteLength, 0) > 256 * 1024 * 1024)
+            throw new DelegationJobError('artifact-limit', '委派成果总量超过 256 MiB')
         }
       }
       await this.update(jobId, job => {

@@ -7,10 +7,11 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { DocumentDeliveryService } from '../../src/main/workbench/delivery/DocumentDeliveryService'
 import { DocumentDeliveryOperationStore } from '../../src/main/workbench/delivery/DocumentDeliveryOperationStore'
+import type { DocumentSaveIdentity } from '../../src/shared/workbench/documentSave'
 import type { DocumentDeliveryServiceOptions } from '../../src/main/workbench/delivery/DocumentDeliveryService'
 
 const roots: string[] = []
-afterEach(async () => { for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }) })
+afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true }) })
 
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-delivery-')); roots.push(root)
@@ -18,7 +19,7 @@ async function fixture() {
   const document = await host.internalAPI.create({ kind: 'markdown', source: '# original\n', resources: { assets: {}, components: {} } }, 'note.md')
   const target = path.join(root, 'note.md')
   const authorize = vi.fn(async () => undefined)
-  const saveWithFact = vi.fn((documentId: string, filename?: string) => host.saveWithFact(documentId, filename))
+  const saveWithFact = vi.fn((documentId: string, filename?: string, identity?: DocumentSaveIdentity) => host.saveWithFact(documentId, filename, identity))
   const writer: DocumentDeliveryServiceOptions['writer'] = {
     writeNew: async (filename, bytes) => {
       await fs.writeFile(filename, bytes, { flag: 'wx' })
@@ -30,7 +31,7 @@ async function fixture() {
     },
   }
   const service = new DocumentDeliveryService({
-    documents: { read: host.internalAPI.read, saveWithFact,
+    documents: { read: host.internalAPI.read, saveWithFact, lookupSave: (id, identity) => host.lookupSave(id, identity),
       withFileLease: (id, work) => host.registry.get(id).withFileLease(lease => work(() => lease.read())) },
     operations: new DocumentDeliveryOperationStore(path.join(root, 'operations')),
     authorize, resolveSaveDestination: async () => target, resolveExportDestination: async () => null,
@@ -76,4 +77,64 @@ it('keeps savedRevision separate from a later currentRevision and leaves dirty t
   expect(result).toMatchObject({ status: 'saved', savedRevision: document.revision,
     currentRevision: document.revision + 1, dirty: true })
   expect(await fs.readFile(target, 'utf8')).toBe('# original\n')
+})
+
+
+const saveInput = (f: Awaited<ReturnType<typeof fixture>>, operationId: string) => ({ runId: 'save-test', operationId,
+  requestDigest: operationId, documentId: f.document.documentId, epoch: f.document.epoch, baseRevision: f.document.revision })
+
+it('reports a definite pre-publication disk conflict as rejected, not an unknown save', async () => {
+  const f = await fixture()
+  await f.host.saveWithFact(f.document.documentId, f.target)
+  await fs.writeFile(f.target, '# external edit\n')
+  const input = saveInput(f, 'conflict')
+  expect(await f.service.save(input)).toMatchObject({ status: 'rejected', reason: expect.stringContaining('磁盘文件') })
+  expect(await f.service.lookup(input)).toMatchObject({ status: 'rejected' })
+  expect(await fs.readFile(f.target, 'utf8')).toBe('# external edit\n')
+})
+
+it('recovers an actual save whose outer acknowledgement was lost without writing again', async () => {
+  const f = await fixture(), input = saveInput(f, 'lost-ack')
+  f.saveWithFact.mockImplementationOnce(async (id, filename, identity) => {
+    await f.host.saveWithFact(id, filename, identity)
+    throw new Error('lost outer acknowledgement')
+  })
+  await expect(f.service.save(input)).rejects.toMatchObject({ code: 'tool-outcome-unknown' })
+  const result = await f.service.lookup(input)
+  expect(result).toMatchObject({ status: 'saved', path: f.target, savedRevision: 0, dirty: false })
+  expect(await f.service.save(input)).toEqual(result)
+  expect(f.saveWithFact).toHaveBeenCalledTimes(1)
+  expect(await fs.readFile(f.target, 'utf8')).toBe('# original\n')
+})
+
+it('does not treat an unrelated equal-byte replacement as the original publication', async () => {
+  const f = await fixture(), input = saveInput(f, 'equal-other')
+  f.saveWithFact.mockImplementationOnce(async (id, filename, identity) => {
+    await f.host.saveWithFact(id, filename, identity)
+    await fs.rename(f.target, f.target + '.original')
+    await fs.writeFile(f.target, '# original\n', { flag: 'wx' })
+    throw new Error('lost acknowledgement, then another file appeared')
+  })
+  await expect(f.service.save(input)).rejects.toMatchObject({ code: 'tool-outcome-unknown' })
+  await expect(f.service.lookup(input)).rejects.toMatchObject({ code: 'tool-outcome-unknown' })
+  expect(f.saveWithFact).toHaveBeenCalledTimes(1)
+})
+
+it('reconciles a published file after its canonical save acknowledgement failed, preserving newer input', async () => {
+  const f = await fixture(), input = saveInput(f, 'journal-ack')
+  const journal = (f.host as unknown as { journal: { append(state: import('../../src/shared/workbench/document').DurableDocumentState): Promise<void> } }).journal
+  const append = journal.append.bind(journal)
+  let fail = true
+  vi.spyOn(journal, 'append').mockImplementation(async state => {
+    if (fail && state.savedRevision === 0) { fail = false; throw new Error('save acknowledgement disk failure') }
+    return append(state)
+  })
+  await expect(f.service.save(input)).rejects.toMatchObject({ code: 'tool-outcome-unknown' })
+  const current = await f.host.internalAPI.read(f.document.documentId)
+  await f.host.internalAPI.dispatch({ documentId: current.documentId, epoch: current.epoch, operationId: 'later-input',
+    baseRevision: current.revision, actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: '# later input\n' } } })
+  expect(await f.service.lookup(input)).toMatchObject({ status: 'saved', savedRevision: 0, currentRevision: 1, dirty: true })
+  expect(await f.host.internalAPI.read(f.document.documentId)).toMatchObject({ dirty: true, model: { source: '# later input\n' }, binding: { path: f.target } })
+  expect(await fs.readFile(f.target, 'utf8')).toBe('# original\n')
+  expect(f.saveWithFact).toHaveBeenCalledTimes(1)
 })

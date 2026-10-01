@@ -39,7 +39,7 @@ describe('M28/M29 shared service catalog and gateway', () => {
       .toMatchObject({ kind: 'read', data: { status: 'returned' } })
     expect(await gateway.execute('agent-run', 'resource', { name: 'mcp.resource', input: { resourceId } }))
       .toMatchObject({ kind: 'read', data: { resourceId, mimeType: 'image/png', byteLength: bytes.length } })
-    expect(gateway.readMcpResource('agent-run', resourceId).bytes).toEqual(bytes)
+    expect((await gateway.readMcpResource('agent-run', resourceId)).bytes).toEqual(bytes)
     expect(await gateway.execute('agent-run', 'media', { name: 'media.start', input: { kind: 'speech', prompt: '读出这段文字' } }))
       .toMatchObject({ kind: 'read', data: { status: 'not-configured' } })
     await gateway.stop('agent-run')

@@ -66,6 +66,27 @@ const refsOf = (request: ModelRequest) => JSON.parse(String(request.messages[1].
 }[]
 
 describe('G20 canonical model execution loop', () => {
+  it('publishes the first display fragment after durable acknowledgement without waiting for the batching interval', async () => {
+    const visible: string[] = []
+    const provider: ModelProvider = { async *stream(request) {
+      yield { requestId: request.requestId, sequence: 1, type: 'text.delta', text: '首片' }
+      expect(visible).toContain('首片')
+      yield { requestId: request.requestId, sequence: 2, type: 'text.delta', text: '尾片' }
+      yield complete(request, [], '首片尾片')
+    } }
+    const h = await fixture(provider)
+    const published: number[] = []
+    const unsubscribe = h.engine.subscribe(event => {
+      published.push(event.sequence)
+      if (event.type === 'text' && event.data.status === 'running') visible.push(event.data.text ?? '')
+    })
+    const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
+    unsubscribe()
+    expect(final.status).toBe('completed')
+    expect(visible.join('')).toBe('首片尾片')
+    const persisted = await h.events.readPage({ conversationId: h.input.conversationId })
+    expect(persisted.events.map(event => event.sequence)).toEqual(published)
+  })
   it('delivers verified compute bytes through artifact.save in a document-free run', async () => {
     let turns = 0
     const bytes = Buffer.from('owner verified result\n')
@@ -114,8 +135,8 @@ describe('G20 canonical model execution loop', () => {
     expect(final.tools[1]!.result).toMatchObject({ kind: 'error', code: 'image-rate-limited-for-run' })
     expect(final.tools[2]!.result).toMatchObject({ kind: 'read' })
     expect(final.status).toBe('partial')
-    expect(final.failure?.code).toBe('image-rate-limited-for-run')
-    expect(turns).toBe(2)
+    expect(final.failure?.code).toBeUndefined()
+    expect(turns).toBe(3)
   })
   it.each([true, false])('uses frozen image role identity to decide whether an edit shares a generate 429 (%s)', async sameRole => {
     let turns = 0, dispatches = 0
@@ -140,7 +161,7 @@ describe('G20 canonical model execution loop', () => {
     expect(dispatches).toBe(sameRole ? 1 : 2)
     expect(final.tools[1]!.result).toMatchObject(sameRole
       ? { kind: 'error', code: 'image-rate-limited-for-run' } : { kind: 'read', data: { status: 'ready' } })
-    expect(turns).toBe(sameRole ? 2 : 3)
+    expect(turns).toBe(3)
   })
   it('stops repeated tool rounds with a stable no-progress reason', async () => {
     let requests = 0
@@ -227,7 +248,7 @@ describe('G20 canonical model execution loop', () => {
     h.input.documents = [{ documentId: h.session.documentId, writable: [{ kind: 'markdown-range', from: 3, to: 6 }],
       selection: [{ kind: 'markdown-range', from: 3, to: 6 }] }]
     const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
-    expect(final.status).toBe(commit ? 'completed' : 'partial')
+    expect(final.status).toBe('completed')
     expect(final.tools[1]?.result).toMatchObject({ kind: 'error', code: 'invalid-target' })
     if (retryOther) {
       expect(final.tools[2]?.result?.kind).toBe('read')
@@ -239,12 +260,12 @@ describe('G20 canonical model execution loop', () => {
     const timeline = await h.events.snapshot('conversation')
     expect(timeline.items.filter(item => item.type === 'tool')).toHaveLength(2 + Number(retry) + Number(commit))
     const end = timeline.items.find(item => item.type === 'run.end')
-    expect(end?.data.status).toBe(commit ? 'completed' : 'partial')
+    expect(end?.data.status).toBe('completed')
     const publicEnd = await h.events.findEvent('conversation', `${final.runId}:terminal`)
     if (commit) {
       expect(runEndSummary(final)).toBeUndefined()
       expect(publicEnd?.data.status).toBe('completed')
-    } else expect(runEndSummary(final)).toContain('剩余工作未完成')
+    } else expect(runEndSummary(final)).toBeUndefined() // Corrected read-only exploration is not a missing requested write.
   })
 
   it('reuses the writable document root handle without widening frozen or read-only scopes', async () => {
@@ -677,7 +698,7 @@ it('M26 one ordinary generation retry retains unknown usage and fragments but ne
   expect(final.requests[2]!.requestId.endsWith('.attempt-2')).toBe(true)
 }, 15_000)
 
-it('M26 stop during backoff never sends the next request, and long Retry-After becomes an explicit interrupted task', async () => {
+it('stops both short and long same-task cooldowns without sending a replacement request', async () => {
   let requests = 0, retryAfterMs = 1000
   const provider: ModelProvider = { retrySafety: 'pure-generation', async *stream(request) {
     requests++
@@ -689,9 +710,12 @@ it('M26 stop during backoff never sends the next request, and long Retry-After b
   expect((await h.engine.wait(started.runId)).status).toBe('stopped')
   expect(requests).toBe(1)
   retryAfterMs = 60_000
-  const next = await h.engine.start({ ...h.input, taskId: 'long-wait' }), waiting = await h.engine.wait(next.runId)
-  expect(waiting.status).toBe('interrupted')
-  expect(waiting.failure?.code).toBe('model-retry-wait')
+  const next = await h.engine.start({ ...h.input, taskId: 'long-wait' })
+  await vi.waitFor(async () => expect((await h.events.readPage({ conversationId: h.input.conversationId, limit: 1000 })).events.some(event => event.runId === next.runId && event.data.label === '等待服务冷却')).toBe(true))
+  expect((await h.engine.read(next.runId))?.status).toBe('running')
+  await h.engine.stop(next.runId)
+  const waiting = await h.engine.wait(next.runId)
+  expect(waiting.status).toBe('stopped')
   expect(waiting.requests).toHaveLength(1)
   expect(requests).toBe(2)
 })
@@ -793,4 +817,39 @@ it('aligns OAuth streamed edits and multiple tools after reasoning and message i
   expect(final.tools.every(tool => tool.result?.kind !== 'error')).toBe(true)
   expect((await h.session.drain()).model).toMatchObject({ source: '前文 NEW 后文' })
   expect(turns).toBe(2)
+})
+
+it('archives whole OAuth rounds on actual wire and never resurrects old native payloads in later turns', async () => {
+  const wires: string[] = []; let turns = 0
+  const provider: ModelProvider = { async *stream(request) {
+    wires.push(serializeChatGPTResponsesRequest(request)); turns++
+    if (turns > 4) { yield complete(request); return }
+    const call = { id: `call-${turns}`, name: turns % 2 ? 'read' : 'inspect', argumentsText: JSON.stringify({ target: refsOf(request)[0].target }) }
+    const event = complete(request, [call], `turn-${turns}`)
+    event.assistant.nativeResponses = { protocol: 'chatgpt-responses', responseId: `r-${turns}`, output: [
+      { type: 'reasoning', id: `opaque-${turns}`, encrypted_content: `MARKER-${turns}-` + 'x'.repeat(550_000) },
+      { type: 'function_call', id: `i-${turns}`, call_id: call.id, name: modelToolWireName(call.name), arguments: call.argumentsText },
+    ] }
+    event.usage = { inputTokens: 90_000, outputTokens: 10, raw: {} }
+    yield event
+  } }
+  const h = await fixture(provider)
+  const oauth = { ...selection, connection: { ...selection.connection, provider: 'openai', protocol: 'chatgpt-responses' as const,
+    baseURL: CHATGPT_RESPONSES_BASE_URL, auth: { kind: 'oauth' as const, credentialRef: 'fixture-only' } } }
+  const engine = new ExecutionEngine({ registry: h.registry, gateway: h.gateway, edits: h.edits, runs: h.runs,
+    events: h.events, provider, serializePayload: serializeChatGPTResponsesRequest })
+  const started = await engine.start({ ...h.input, selection: oauth }), final = await engine.wait(started.runId)
+  expect(final.status).toBe('completed')
+  expect(wires).toHaveLength(5)
+  expect(wires[3]).not.toContain('MARKER-1-')
+  expect(wires[4]).not.toContain('MARKER-1-')
+  expect(wires[3]).toContain('MARKER-2-' + 'x'.repeat(550_000))
+  expect(JSON.stringify(final.messages)).toContain('MARKER-1-')
+  expect(final.compacted?.fromMessage).toBeGreaterThan(final.initialMessageCount)
+  expect(final.requests[0].inputTokens).toBe(90_000)
+  for (const wire of wires) {
+    const input = JSON.parse(wire).input
+    const calls = new Set(input.filter((item: { type: string }) => item.type === 'function_call').map((item: { call_id: string }) => item.call_id))
+    for (const result of input.filter((item: { type: string }) => item.type === 'function_call_output')) expect(calls.has(result.call_id)).toBe(true)
+  }
 })

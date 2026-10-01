@@ -1,6 +1,6 @@
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import { parseComponentPackageFiles } from '../../../core/drivers/codecs/importComponentPackage'
-import { buildPublishedCourseV2Payload } from '../../export/course/buildPublishedCourse'
+import { buildPublishedCourseV2Payload, collectPublishedCourseComponentKeys } from '../../export/course/buildPublishedCourse'
 import { createPublishedCourseSession } from '../../../player/surfaces/publishedDynamicHosts'
 import { waitForPublishedObservationReady } from '../../../player/surfaces/publishedCapture'
 import { installBundledFontFaces } from '../../../shared/fonts/installBundledFontFaces'
@@ -13,6 +13,7 @@ export interface ObservationWorkerInput {
   assets: Record<string, string>
   assetResources: Record<string, { url: string; byteLength: number }>
   components: Record<string, Record<string, string>>
+  componentResources?: Record<string, Record<string, { url: string; byteLength: number }>>
 }
 export interface ObservationWorkerResult { locationId: string; structure: string[]; diagnostics: string[] }
 
@@ -24,8 +25,17 @@ export async function renderObservationSnapshot(input: ObservationWorkerInput): 
   installBundledFontFaces()
   await ensureBundledFonts()
   const assetFiles = Object.fromEntries(Object.entries(input.assets).map(([key, bytes]) => [key, decode(bytes)]))
-  const components = Object.fromEntries(Object.entries(input.components).map(([key, files]) =>
-    [key, parseComponentPackageFiles(Object.fromEntries(Object.entries(files).map(([name, bytes]) => [name, decode(bytes)])))]))
+  const components = Object.fromEntries(await Promise.all([...collectPublishedCourseComponentKeys(input.project)].map(async key => {
+    const source = input.componentResources?.[key]
+    const files = source ? Object.fromEntries(await Promise.all(Object.entries(source).map(async ([name, resource]) => {
+      const response = await fetch(resource.url)
+      if (!response.ok) throw new Error(`组件文件不可读取：${name}`)
+      const bytes = new Uint8Array(await response.arrayBuffer())
+      if (bytes.byteLength !== resource.byteLength) throw new Error(`组件文件长度已改变：${name}`)
+      return [name, bytes] as const
+    }))) : Object.fromEntries(Object.entries(input.components[key] ?? {}).map(([name, bytes]) => [name, decode(bytes)]))
+    return [key, parseComponentPackageFiles(files)] as const
+  })))
   const payload = buildPublishedCourseV2Payload({ project: input.project, assetFiles, assetResources: input.assetResources, components })
   const root = document.createElement('div')
   root.id = 'observation-root'

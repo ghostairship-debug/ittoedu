@@ -343,6 +343,13 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (window && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.workspaceFilesChanged, event)
   }).then(stop => { if (generation !== workspaceFileEventGeneration) stop(); else stopWorkspaceFileEvents = stop })
     .catch(error => diagnosticLog.append({ source: 'main', message: '文件变更订阅未能启动', details: { reason: error instanceof Error ? error.message : String(error) } }))
+  registerSafeHandler(IPC_CHANNELS.launchFiles, context, {
+    code: 'LAUNCH_FILE_FAILED', title: '打开文件未完成', message: '启动文件尚未打开。', suggestion: '当前文件和恢复稿保留。',
+  }, async (_event, args) => {
+    const input = z.discriminatedUnion('type', [z.object({ type: z.literal('list') }).strict(), z.object({ type: z.literal('ack'), id: z.uuid() }).strict()]).parse(requireSingleArgument(args))
+    if (input.type === 'ack') context.appState.acknowledgeOpenFile(input.id)
+    return context.appState.pendingOpenFiles()
+  })
   registerSafeHandler(IPC_CHANNELS.externalMcp, context, {
     code: 'EXTERNAL_MCP_FAILED', title: '外部连接操作未完成', message: '外部连接未完成，请查看具体原因。', suggestion: '文档和已应用的修改已保留。',
   }, async (_event, args) => operateExternalMcp(requireSingleArgument(args)))

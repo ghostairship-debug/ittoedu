@@ -3,7 +3,8 @@ import type { DocumentModel, DocumentSnapshot } from './document'
 import type { ObservationResult } from './toolPorts'
 
 const identity = z.string().trim().min(1).max(200)
-export const viewObserveInputSchema = z.object({ target: identity, detail: z.enum(['auto', 'low', 'high']).optional() }).strict()
+export const viewObserveInputSchema = z.object({ target: identity, detail: z.enum(['auto', 'low', 'high']).optional(),
+  purpose: z.enum(['required', 'diagnostic']).optional() }).strict()
 export type ViewObserveInput = z.infer<typeof viewObserveInputSchema>
 
 export type ViewObservationIdentity = ObservationResult['identity']

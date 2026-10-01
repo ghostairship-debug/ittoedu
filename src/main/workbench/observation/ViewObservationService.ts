@@ -19,13 +19,15 @@ function assertFresh(snapshot: DocumentSnapshot, identity: ViewObservationIdenti
 
 /** Validates both sides of capture, so a late frame cannot be assigned to a new revision. */
 export class ViewObservationService implements ObservationServicePort {
+  private readonly stopped = new Set<string>()
   constructor(private readonly options: ViewObservationServiceOptions) {}
+  async stopRun(runId: string): Promise<void> { this.stopped.add(runId); await this.options.images.clearRun(runId) }
 
   async observe(input: Parameters<ObservationServicePort['observe']>[0]): Promise<ObservationResult> {
     const identity: ViewObservationIdentity = { documentId: input.documentId, epoch: input.epoch,
       revision: input.revision, locationId: input.locationId,
       ...(input.viewGeneration === undefined ? {} : { viewGeneration: input.viewGeneration }) }
-    if (input.signal?.aborted) throw new Error('观察已取消')
+    if (input.signal?.aborted || this.stopped.has(input.runId)) throw new Error('观察已取消')
     const snapshot = await this.options.snapshot(input.documentId)
     assertFresh(snapshot, identity, input.projectId)
     const frozen = structuredClone(snapshot)
@@ -36,12 +38,14 @@ export class ViewObservationService implements ObservationServicePort {
       const candidate = await this.options.captureLive({ identity, signal: input.signal })
       if (candidate && sameObservationIdentity(candidate.identity, identity)) { capture = candidate; source = 'live' }
     }
-    if (!capture) capture = await this.options.captureIsolated({ identity, snapshot: frozen, signal: input.signal })
-    if (input.signal?.aborted) throw new Error('观察已取消')
+    if (!capture) capture = await this.options.captureIsolated({ identity, snapshot: structuredClone(snapshot), signal: input.signal })
+    if (input.signal?.aborted || this.stopped.has(input.runId)) throw new Error('观察已取消')
     if (!sameObservationIdentity(capture.identity, identity)) throw new Error('捕获画面的宿主身份与请求目标不符')
     assertFresh(await this.options.snapshot(input.documentId), identity, input.projectId)
-    if (input.signal?.aborted) throw new Error('观察已取消')
-    const image = this.options.images.put(input.runId, capture.png, capture.width, capture.height)
+    if (input.signal?.aborted || this.stopped.has(input.runId)) throw new Error('观察已取消')
+    const image = await this.options.images.put(input.runId, capture.png, capture.width, capture.height)
+    if (input.signal?.aborted || this.stopped.has(input.runId)) throw new Error('观察已取消')
+    assertFresh(await this.options.snapshot(input.documentId), identity, input.projectId)
     return { source, identity, coverage: { width: capture.width, height: capture.height },
       structure: capture.structure, diagnostics: capture.diagnostics, image }
   }

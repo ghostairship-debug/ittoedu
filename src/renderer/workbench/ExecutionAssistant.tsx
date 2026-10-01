@@ -1,7 +1,7 @@
 import { selectionReference, workbenchSelection, type ContextualEditRequest } from './SelectionContextController'
 import { elementCards } from './elementCards/elementCardController'
 import './selectionContext.css'
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
+import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { File, Folder } from 'lucide-react'
 import { dispatchRevealInExplorer } from './revealInExplorer'
@@ -16,7 +16,7 @@ import type { DiscoveredModel, DiscoveredModels, DiscoveredReasoningEffort, Exec
 import type { ExternalMcpAPI } from '../../shared/workbench/external'
 import { ExecutionSettingsPanel } from './ExecutionSettingsPanel'
 import { ExternalMcpPanel } from './ExternalMcpPanel'
-import { ExecutionTimeline } from './ExecutionTimeline'
+import { ExecutionTimeline, type ExecutionTimelineProps } from './ExecutionTimeline'
 import { ExecutionChangeReview, type ExecutionChangeReviewProps } from './ExecutionChangeReview'
 import type { UserCheckpointIndex } from '../../main/workbench/execution/CheckpointForkService'
 import { ExecutionQuestionCard } from './ExecutionQuestionCard'
@@ -29,11 +29,14 @@ import { isExecutionInputError } from '../../shared/workbench/executionInputMess
 import './executionAssistant.css'
 import { bodyStreamingLabel, bodyStreamingRecord, configuredBodyStreamingAlternatives } from '../../shared/workbench/bodyStreaming'
 import { useWorkbenchSessionDock } from './WorkbenchSessionPortal'
+import { ConfirmDialog } from '../ui/ConfirmDialog'
+
+export interface ExecutionAssistantHandle { preserveDraft(): Promise<void> }
 
 export interface ExecutionAssistantProps {
   root: string | null
   captureDocuments(writable: boolean): Promise<ExecutionDocumentReference[]>
-  prepareSend(): Promise<boolean>
+  prepareSend(documentIds?: readonly string[]): Promise<boolean>
   api?: ExecutionDesktopAPI
   settingsAPI?: ExecutionSettingsAPI
   externalAPI?: ExternalMcpAPI
@@ -126,7 +129,7 @@ function defaultExecutionAPI(): ExecutionDesktopAPI | undefined {
   return (window.desktopAPI as typeof window.desktopAPI & { execution?: ExecutionDesktopAPI }).execution
 }
 
-export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: suppliedAPI, settingsAPI: suppliedSettingsAPI, externalAPI: suppliedExternalAPI, onLocateDocument }: ExecutionAssistantProps) {
+export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, ExecutionAssistantProps>(function ExecutionAssistant({ root, captureDocuments, prepareSend, api: suppliedAPI, settingsAPI: suppliedSettingsAPI, externalAPI: suppliedExternalAPI, onLocateDocument }, ref) {
   const sessionDock = useWorkbenchSessionDock()
   const sessionScope = sessionDock.scope
   useSyncExternalStore(workbenchSelection.subscribe, workbenchSelection.readVersion)
@@ -173,13 +176,20 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
   const modelMenuRef = useRef<HTMLDivElement>(null)
   const [submissions, setSubmissions] = useState<ExecutionSubmissionRecord[]>([])
   const [userHistoryOffsets, setUserHistoryOffsets] = useState<Record<string, number>>({})
+  const [latestRequest, setLatestRequest] = useState<ExecutionTimelineProps['latestRequest']>()
   const [sessionSearch, setSessionSearch] = useState('')
   const [sessionMenuId, setSessionMenuId] = useState<string | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [documentNames, setDocumentNames] = useState<Record<string, string>>({})
+  const [documentReferenceIssues, setDocumentReferenceIssues] = useState<Record<string, string>>({})
+  const [pendingRestore, setPendingRestore] = useState<ExecutionSubmissionRecord | null>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  const [recoveryIssues, setRecoveryIssues] = useState<string[]>([])
+  const [browserHuman, setBrowserHuman] = useState<string | null>(null)
   const [busy, setBusy] = useState(false), [attachmentBusy, setAttachmentBusy] = useState(false), [error, setError] = useState('')
   const generation = useRef(0), capturePromise = useRef<Promise<ExecutionDocumentReference[]> | null>(null)
+  const fileOpenTicket = useRef(0)
   const documentsByConversation = useRef(new Map<string, ExecutionDocumentReference[]>())
   const frozenByConversation = useRef(new Map<string, boolean>())
   const activeRef = useRef<ConversationRecord | null>(null), draftRef = useRef('')
@@ -255,13 +265,15 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
   }
 
   const applyConversation = (conversation: ConversationRecord) => {
+    setLatestRequest(undefined)
     setHistorySearchOpen(false)
+    setPendingRestore(null)
     setModelMenuOpen(false)
     if (moreRef.current) moreRef.current.open = false
     setActive(conversation); activeRef.current = conversation
     setDraft(conversation.inputDraft); draftRef.current = conversation.inputDraft
     setAttachments(conversation.inputAttachments); attachmentsRef.current = conversation.inputAttachments
-    setRun(null); setError('')
+    setRun(null); setSubmissions([]); setProjection(emptyExecutionProjection(conversation.conversationId)); setError('')
     const remembered = documentsByConversation.current.get(conversation.conversationId)
     const restored = remembered ?? restoredDocuments(conversation)
     documentsByConversation.current.set(conversation.conversationId, restored)
@@ -276,12 +288,13 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
     documentsByConversation.current.clear(); frozenByConversation.current.clear()
     activeRef.current = null; draftRef.current = ''; documentsRef.current = []; attachmentsRef.current = []; contextFrozenRef.current = false
     setWorkspaceId(''); setConversations([]); setActive(null); setDraft(''); setDocuments([]); setAttachments([]); setSubmissions([]); setUserHistoryOffsets({})
+    setLatestRequest(undefined)
     setContextFrozen(false); setRun(null); setError('')
     if (!api) { setError('当前环境没有统一执行服务。'); return }
     setBusy(true)
     void api.workspace(root).then(async value => {
       if (ticket !== generation.current) return
-      setWorkspaceId(value.workspace.workspaceId); setConversations(value.conversations)
+      setWorkspaceId(value.workspace.workspaceId); setConversations(value.conversations); setRecoveryIssues(value.recoveryIssues ?? [])
       let selected = value.conversations[0]
       if (!selected) selected = await api.createConversation(value.workspace.workspaceId, undefined,
         sessionScope ? { kind: sessionScope.kind, path: sessionScope.path } : undefined)
@@ -363,14 +376,17 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
   useEffect(() => {
     const documentsAPI = window.desktopAPI?.documents
     let disposed = false
-    if (!documentsAPI || documents.length === 0) { setDocumentNames({}); return }
+    if (!documentsAPI || documents.length === 0) { setDocumentNames({}); setDocumentReferenceIssues({}); return }
     void Promise.all(documents.map(async reference => {
       try {
         const snapshot = await documentsAPI.read(reference.documentId)
         const name = snapshot.binding.kind === 'file' ? snapshot.binding.path.split(/[\\/]/).at(-1) || '已绑定文档' : snapshot.binding.suggestedName
-        return [reference.documentId, name] as const
-      } catch { return [reference.documentId, '已绑定文档'] as const }
-    })).then(entries => { if (!disposed) setDocumentNames(Object.fromEntries(entries)) })
+        return { id: reference.documentId, name, issue: snapshot.epoch !== reference.epoch ? '原引用需要重新选择' : '' }
+      } catch { return { id: reference.documentId, name: '原文档', issue: '原文档尚未打开' } }
+    })).then(entries => { if (!disposed) {
+      setDocumentNames(Object.fromEntries(entries.map(value => [value.id, value.name])))
+      setDocumentReferenceIssues(Object.fromEntries(entries.filter(value => value.issue).map(value => [value.id, value.issue])))
+    } })
     return () => { disposed = true }
   }, [documents])
 
@@ -379,33 +395,34 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
     if (!api || !conversationId) { setProjection(emptyExecutionProjection(conversationId ?? '')); return }
     let disposed = false
     let current = emptyExecutionProjection(conversationId)
-    let chain = Promise.resolve()
-    const catchUp = (initial: boolean) => {
-      chain = chain.then(async () => {
-        if (disposed) return
-        if (initial) current = await api.timeline(conversationId)
-        const endedRuns = new Set(current.items.filter(item => item.type === 'run.end').map(item => item.runId))
-        while (!disposed) {
-          const page = await api.events(conversationId, current.cursor, 5000)
-          page.events.filter(event => event.type === 'run.end').forEach(event => endedRuns.add(event.runId))
-          current = foldExecutionEvents(current, page.events)
-          if (!page.hasMore) break
-        }
-        if (!disposed) setProjection(current)
-        if (endedRuns.size > 0 && !disposed) {
+    let published = current
+    let initial = true, catchingUp = false, catchUpPending = false, refreshingConversation = false
+    const observedEndedRuns = new Set<string>(), pendingEndedRuns = new Set<string>()
+    // Terminal messages may be persisted just after run.end. Their bounded retry must
+    // never hold up the event cursor or repeat for old failures on every text update.
+    const refreshConversation = () => {
+      if (refreshingConversation || disposed || pendingEndedRuns.size === 0) return
+      refreshingConversation = true
+      void (async () => {
+        while (!disposed && pendingEndedRuns.size > 0) {
+          const endedRuns = [...pendingEndedRuns]
+          pendingEndedRuns.clear()
           const selected = activeRef.current
           if (selected?.conversationId === conversationId) {
-            const needsReply = [...endedRuns].some(runId => !selected.messages.some(message => message.role === 'assistant' && message.runId === runId))
+            const needsReply = endedRuns.some(runId => !selected.messages.some(message => message.role === 'assistant' && message.runId === runId))
+            if (!needsReply) continue
             let latest: ConversationRecord | null = selected
-            for (let attempt = 0; needsReply && attempt < 5 && !disposed; attempt += 1) {
+            for (let attempt = 0; attempt < 5 && !disposed; attempt += 1) {
               if (attempt > 0) await new Promise(resolve => setTimeout(resolve, attempt * 25))
+              if (disposed) return
               const value = await api.conversation(selected.workspaceId, conversationId)
               if (!value) { latest = null; break }
               latest = value
               if (value.revision > selected.revision) break
             }
-            if (latest && !disposed) {
-              const hasLocalDraft = draftRef.current !== selected.inputDraft || !sameAttachments(attachmentsRef.current, selected.inputAttachments)
+            const activeNow = activeRef.current
+            if (latest && !disposed && activeNow?.conversationId === conversationId && latest.revision > activeNow.revision) {
+              const hasLocalDraft = draftRef.current !== activeNow.inputDraft || !sameAttachments(attachmentsRef.current, activeNow.inputAttachments)
               setActive(latest); activeRef.current = latest
               setConversations(value => updateConversation(value, latest))
               if (!hasLocalDraft) {
@@ -420,11 +437,46 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
             }
           }
         }
-      }).catch(() => { if (!disposed) setError('任务过程暂不可读取，已保留会话内容。') })
+      })().catch(() => { if (!disposed) setError('任务过程暂不可读取，已保留会话内容。') })
+        .finally(() => { refreshingConversation = false; refreshConversation() })
+    }
+    const observeEndedRun = (runId: string) => {
+      if (observedEndedRuns.has(runId)) return
+      observedEndedRuns.add(runId); pendingEndedRuns.add(runId)
+    }
+    const catchUp = () => {
+      catchUpPending = true
+      if (catchingUp || disposed) return
+      catchingUp = true
+      void (async () => {
+        while (!disposed && catchUpPending) {
+          catchUpPending = false
+          if (initial) {
+            current = await api.timeline(conversationId)
+            initial = false
+            current.items.filter(item => item.type === 'run.end').forEach(item => observeEndedRun(item.runId))
+          }
+          while (!disposed) {
+            const page = await api.events(conversationId, current.cursor, 5000)
+            if (page.events.length > 0) {
+              const cursor = current.cursor
+              const next = foldExecutionEvents(current, page.events)
+              if (next.cursor !== cursor) current = next
+              page.events.filter(event => event.sequence > cursor && event.type === 'run.end').forEach(event => observeEndedRun(event.runId))
+            }
+            if (!page.hasMore) break
+          }
+          if (!disposed) {
+            if (current !== published) { setProjection(current); published = current }
+            refreshConversation()
+          }
+        }
+      })().catch(() => { if (!disposed) setError('任务过程暂不可读取，已保留会话内容。') })
+        .finally(() => { catchingUp = false; if (catchUpPending && !disposed) catchUp() })
     }
     const unsubscribe = api.subscribe(event => {
       if (event.conversationId !== conversationId) return
-      catchUp(false)
+      catchUp()
       if (event.type === 'run.end' || runRef.current?.runId !== event.runId) {
         if (event.type === 'run.end') void settingsAPI?.read().then(setSettings).catch(() => undefined)
         void api.run(event.runId).then(value => { if (!disposed) { setRun(value); runRef.current = value } })
@@ -432,7 +484,7 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
         if (selected) void api.submissions({ workspaceId: selected.workspaceId, conversationId }).then(value => { if (!disposed) setSubmissions(value) })
       }
     })
-    catchUp(true)
+    catchUp()
     const latestRunId = active.runIndex.builtinRunIds.at(-1)
     if (latestRunId) void api.run(latestRunId).then(value => { if (!disposed) { setRun(value); runRef.current = value } })
     return () => { disposed = true; unsubscribe() }
@@ -651,6 +703,8 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
     return task
   }
 
+  useImperativeHandle(ref, () => ({ preserveDraft: async () => { await persist() } }))
+
   const select = async (conversation: ConversationRecord) => {
     if (!active || conversation.conversationId === active.conversationId || busy) return
     setBusy(true); setError('')
@@ -716,6 +770,11 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
     const index = value.findIndex(item => item.submissionId === next.submissionId)
     return index < 0 ? [...value, next] : value.map(item => item.submissionId === next.submissionId ? next : item)
   })
+  const revealSubmission = (submission: ExecutionSubmissionRecord) => {
+    if (submission.state !== 'queued' && submission.state !== 'accepted') return
+    setUserHistoryOffsets(value => ({ ...value, [submission.conversationId]: 0 }))
+    setLatestRequest({ conversationId: submission.conversationId, submissionId: submission.submissionId })
+  }
   const applySendResult = (result: Awaited<ReturnType<ExecutionDesktopAPI['send']>>) => {
     replaceSubmission(result.submission)
     setConversations(value => updateConversation(value, result.conversation)); setActive(result.conversation); activeRef.current = result.conversation
@@ -726,6 +785,7 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
       setDocuments([]); documentsRef.current = []; setContextFrozen(false); contextFrozenRef.current = false
     }
     if (result.run) setRun(result.run)
+    revealSubmission(result.submission)
   }
   const submit = async (mode: ExecutionSubmissionMode = 'queue', retry?: ExecutionSubmissionRecord, continueRun?: ExecutionRunRecord, permissionOverride?: ExecutionPermissionMode) => {
     const clicked = !retry ? captureRendererTiming() : undefined
@@ -759,13 +819,16 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
           ...(source.permission ? { permission: source.permission } : {}) }
       }
       else {
-        const ready = await prepareSend()
-        if (!ready) { setError('当前文档输入尚未同步，消息没有发送。'); return }
+        const pinned = await (capturePromise.current ?? Promise.resolve(documentsRef.current))
+        const preparedDocuments = api.prepareDocuments ? await api.prepareDocuments({ workspaceId: selected.workspaceId,
+          conversationId: selected.conversationId, documents: pinned, permission: permissionOverride ?? permission }) : pinned
+        const ready = await prepareSend(preparedDocuments.map(document => document.documentId))
+        if (!ready) { setError('引用文档的输入尚未同步；请处理对应文档后重试。'); return }
         // A click blurs the textarea first. Wait for that CAS, then freeze one exact payload.
         await persist()
         const current = activeRef.current
         if (!current || current.conversationId !== selected.conversationId) throw new Error('会话已切换，消息没有发送。')
-        const captured = await (capturePromise.current ?? Promise.resolve(documentsRef.current))
+        const captured = preparedDocuments
         const level = permissionOverride ?? permission
         request = { workspaceId: current.workspaceId, conversationId: current.conversationId, submissionId: crypto.randomUUID(),
           expectedRevision: current.revision, text: draftRef.current, documents: documentsForPermission(captured, level), attachments: structuredClone(attachmentsRef.current), mode, permission: level }
@@ -802,6 +865,7 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
         if (latest) { setConversations(value => updateConversation(value, latest)); setActive(latest); activeRef.current = latest }
         if (known.state === 'accepted' || known.state === 'queued') {
           setDraft(''); draftRef.current = ''; setAttachments([]); attachmentsRef.current = []
+          revealSubmission(known)
         }
         setError(known.state === 'starting' ? '提交状态尚在确认中；再次确认会复用同一提交，不会创建第二次运行。' : known.failure?.message ?? '')
       } else if (request) {
@@ -876,27 +940,48 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
     catch (failure) { setError(failure instanceof Error ? failure.message : '排队消息未删除。') }
     finally { setBusy(false) }
   }
-  const restoreSubmission = (submission: ExecutionSubmissionRecord) => {
+  const applyRestoredSubmission = (submission: ExecutionSubmissionRecord) => {
     setDraft(submission.text); draftRef.current = submission.text
     setAttachments(submission.attachments); attachmentsRef.current = submission.attachments
     setDocuments(submission.documents); documentsRef.current = submission.documents
     setContextFrozen(true); contextFrozenRef.current = true
+    if (activeRef.current) {
+      documentsByConversation.current.set(activeRef.current.conversationId, submission.documents)
+      frozenByConversation.current.set(activeRef.current.conversationId, true)
+    }
+    setPendingRestore(null)
+    composerRef.current?.focus()
+  }
+  const restoreSubmission = async (submission: ExecutionSubmissionRecord) => {
+    await capturePromise.current
+    if (activeRef.current?.conversationId !== submission.conversationId) return
+    const hasInput = draftRef.current.length > 0 || attachmentsRef.current.length > 0
+    if (hasInput && (draftRef.current !== submission.text || !sameAttachments(attachmentsRef.current, submission.attachments)
+      || !sameDocuments(documentsRef.current, submission.documents))) { setPendingRestore(submission); return }
+    applyRestoredSubmission(submission)
   }
   /** A queued message runs now: stop the current task and continue with it ("立即执行"). */
   const runQueuedNow = async (submission: ExecutionSubmissionRecord) => {
     if (!api || busy) return
     setBusy(true); setError('')
-    try { replaceSubmission(await api.deleteSubmission({ workspaceId: submission.workspaceId, conversationId: submission.conversationId, submissionId: submission.submissionId })) }
-    catch (failure) { setError(failure instanceof Error ? failure.message : '排队消息已开始，未能立即执行。'); setBusy(false); return }
-    setBusy(false)
-    restoreSubmission(submission)
-    await submit('adjust', undefined, undefined, submission.permission)
+    try {
+      if (!api.runQueued) throw new Error('当前执行服务需要更新，排队消息和输入均保留。')
+      const result = await api.runQueued({ workspaceId: submission.workspaceId, conversationId: submission.conversationId, submissionId: submission.submissionId })
+      replaceSubmission(result.submission)
+      if (activeRef.current?.conversationId === submission.conversationId) {
+        setActive(result.conversation); activeRef.current = result.conversation
+        if (result.run) setRun(result.run)
+        revealSubmission(result.submission)
+      }
+    } catch (failure) { setError(failure instanceof Error ? failure.message : '排队消息未能立即执行，原输入仍保留。') }
+    finally { setBusy(false) }
   }
   const openExternal = async () => {
     if (!api || !externalAPI || !active || busy) return
     setBusy(true); setError('')
     try {
-      if (!await prepareSend()) throw new Error('当前文档输入尚未同步，未打开外部交接。')
+      const refs = await (capturePromise.current ?? Promise.resolve(documentsRef.current))
+      if (!await prepareSend(refs.map(document => document.documentId))) throw new Error('引用文档的输入尚未同步，未打开外部交接。')
       if (!contextFrozenRef.current) freezeDocuments(draftRef.current || '外部交接')
       await persist()
       await (capturePromise.current ?? Promise.resolve(documentsRef.current))
@@ -914,15 +999,51 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
     void submit('queue')
   }
 
-  const stop = async () => {
+  const controlBrowser = async (action: 'takeover' | 'resume') => {
+    if (!api?.browserControl || !active || !run || busy) return
+    setBusy(true); setError('')
+    try {
+      const state = await api.browserControl({ workspaceId, conversationId: active.conversationId, runId: run.runId, action })
+      setBrowserHuman(state.state === 'agent' ? null : run.runId)
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '浏览器接管未完成')
+      const state = await api.browserControl({ workspaceId, conversationId: active.conversationId, runId: run.runId, action: 'status' }).catch(() => null)
+      if (state?.state === 'human' || state?.state === 'transition') setBrowserHuman(run.runId)
+    } finally { setBusy(false) }
+  }
+
+  const stop = async (pauseFollowing = false) => {
     if (!api || !run || !['queued', 'running', 'stopping'].includes(run.status)) return
     setBusy(true); setError('')
-    try { setRun(await api.stop(run.runId)) }
+    try {
+      if (pauseFollowing && active) await api.pauseQueue({ workspaceId, conversationId: active.conversationId, reason: 'user' })
+      setRun(await api.stop(run.runId))
+    }
     catch { setError('停止请求没有到达执行器，请重试。') }
     finally { setBusy(false) }
   }
 
-  const userHistory = userMessageWindow(active?.messages ?? [], active ? userHistoryOffsets[active.conversationId] ?? 0 : 0)
+  const userHistoryOffset = active ? userHistoryOffsets[active.conversationId] ?? 0 : 0
+  const userHistory = useMemo(() => userMessageWindow(active?.messages ?? [], userHistoryOffset), [active?.messages, userHistoryOffset])
+  const readTimelineBlob = useMemo<ExecutionTimelineProps['readBlob']>(() => api && active
+    ? ref => api.blob(active.conversationId, ref) : undefined, [api, active?.conversationId])
+  const searchTimelineEvents = useMemo<ExecutionTimelineProps['searchEvents']>(() => api && active
+    ? input => api.searchEvents({ conversationId: active.conversationId, ...input }) : undefined, [api, active?.conversationId])
+  const openSavedFile = useMemo<ExecutionTimelineProps['onOpenSavedFile']>(() => api && active ? (runId, itemId) => {
+    const conversationId = active.conversationId, ticket = generation.current, openTicket = ++fileOpenTicket.current
+    void api.run(runId).then(record => {
+      if (ticket !== generation.current || openTicket !== fileOpenTicket.current || activeRef.current?.conversationId !== conversationId) return
+      const tool = record?.input.conversationId === conversationId ? record.tools.find(value => value.callId === itemId) : undefined
+      const receipt = tool?.state === 'returned' && tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
+        ? tool.result.data as { path?: unknown; saved?: unknown; status?: unknown; dirty?: unknown } : null
+      const saved = tool?.call.name === 'file.write' && receipt?.saved === true
+        || tool?.call.name === 'file.save' && receipt?.status === 'saved' && receipt.dirty === false
+      if (!saved || typeof receipt?.path !== 'string') throw new Error('这份文件的保存位置暂不可读取。')
+      dispatchRevealInExplorer({ path: receipt.path, kind: 'file', open: true })
+    }).catch(() => {
+      if (ticket === generation.current && openTicket === fileOpenTicket.current && activeRef.current?.conversationId === conversationId) setError('保存结果暂不可打开，请在项目文件中查找。')
+    })
+  } : undefined, [api, active?.conversationId])
   const moveUserHistory = (offsetFromLatest: number) => {
     if (!active) return
     setUserHistoryOffsets(value => ({ ...value, [active.conversationId]: offsetFromLatest }))
@@ -932,9 +1053,18 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
     (!conversationScope || homeInScope(conversationScope, conversation.home))
     && `${conversation.title || '新会话'} ${conversation.home?.path ?? ''}`.toLocaleLowerCase().includes(sessionSearch.trim().toLocaleLowerCase()))
   const sessionList = <aside className="execution-assistant__sessions" aria-label="会话列表">
-    <header><strong title={sessionScope ? `会话列表 · ${sessionScope.path}` : undefined}>会话列表{sessionScope ? ` · ${sessionScope.path}` : ''}</strong><button type="button" onClick={() => void create()} disabled={busy || !workspaceId}>新建会话</button></header>
+    <header><strong>会话列表</strong><button type="button" onClick={() => void create()} disabled={busy || !workspaceId}>新建会话</button></header>
+    {sessionScope && <div className="execution-assistant__session-filter" aria-label="会话筛选">
+      <span title={sessionScope.path}>{sessionScope.kind === 'file' ? '文件' : '文件夹'} · {sessionScope.path}</span>
+      <button type="button" onClick={() => sessionDock.setScope?.(null)}>显示全部会话</button>
+    </div>}
     <input aria-label="搜索会话" value={sessionSearch} onChange={event => { setSessionSearch(event.target.value); setSessionMenuId(null) }} placeholder="搜索会话" />
-    <nav aria-label="工作空间会话">{filteredConversations.map(conversation => <div className="execution-assistant__session-row" key={conversation.conversationId}>
+    <nav aria-label="工作空间会话">
+      {filteredConversations.length === 0 && <div className="execution-assistant__session-empty">
+        <p>{sessionSearch.trim() ? '没有匹配的会话。' : sessionScope ? '这个位置还没有会话，可以新建或查看全部。' : '还没有会话，点击“新建会话”开始。'}</p>
+        {sessionSearch.trim() && <button type="button" onClick={() => setSessionSearch('')}>清除搜索</button>}
+      </div>}
+      {filteredConversations.map(conversation => <div className="execution-assistant__session-row" key={conversation.conversationId}>
       {renamingId === conversation.conversationId ? <form onSubmit={event => { event.preventDefault(); void renameConversationItem(conversation, renameDraft) }}
         onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); setRenamingId(null) } }}>
         <input aria-label={`重命名 ${conversation.title || '新会话'}`} autoFocus value={renameDraft} onChange={event => setRenameDraft(event.target.value)} />
@@ -952,7 +1082,6 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
         </div>}
       </div>
     </div>)}</nav>
-    {filteredConversations.length === 0 && <p className="execution-assistant__session-empty">没有匹配的会话。</p>}
   </aside>
 
   const isEmptySession = Boolean(
@@ -988,6 +1117,7 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
   }
 
   return <section className={`execution-assistant${sessionDock.inWorkspace ? ' execution-assistant--docked' : ''}`} aria-label="创作助手">
+    {recoveryIssues.length > 0 && <details className="execution-assistant__notice"><summary>{recoveryIssues.length} 项历史恢复需处理；其他会话可继续使用</summary>{recoveryIssues.map((message, index) => <p key={index}>{message}</p>)}</details>}
     {sessionDock.inWorkspace ? sessionDock.target && createPortal(sessionList, sessionDock.target) : sessionList}
     <div className="execution-assistant__main">
       <header className="execution-assistant__header">
@@ -1024,6 +1154,17 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
       {error && <p className="execution-assistant__error" role="alert">{error}</p>}
       {active?.home?.missing && <p className="execution-assistant__home-notice" role="status">所属文件已删除，本条消息不会自动引用该文件；可重新引用文件。</p>}
       <div className="execution-assistant__history">
+        {isEmptySession && projection.items.length === 0 && submissions.length === 0 && !historySearchOpen ? <section className="execution-assistant__welcome" aria-label="开始创作">
+          <span className="execution-assistant__welcome-mark" aria-hidden="true">✦</span>
+          <h2>告诉我想做什么</h2>
+          <p>描述目标，或拖入材料，我们一起完善内容。</p>
+          {!configured && <div className="execution-assistant__welcome-connect"><p>连接模型后即可开始对话。</p>
+            <button type="button" className="primary-button" onClick={() => { setSettingsEntry('default'); setSettingsOpen(true) }}>连接模型</button></div>}
+          <div className="execution-assistant__welcome-examples" aria-label="试试这些任务">
+            {['帮我整理材料，提炼重点并给出清晰的结构。', '帮我制作一份演示，先和我确认主题与内容。'].map((text, index) => <button type="button" key={text} disabled={!active || busy}
+              onClick={() => { setDraft(text); draftRef.current = text; freezeDocuments(text); composerRef.current?.focus() }}>{index === 0 ? '整理材料' : '制作演示'}<span aria-hidden="true">↗</span></button>)}
+          </div>
+        </section> : <>
         {userHistory.windowCount > 1 && <section aria-label="用户消息历史">
           <header>
             <span aria-live="polite">第 {userHistory.windowNumber} / {userHistory.windowCount} 组 · 共 {userHistory.total} 条</span>
@@ -1034,13 +1175,14 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
             </nav>
           </header>
         </section>}
-        <ExecutionTimeline projection={projection} userMessages={userHistory.messages} imageResults={active?.conversationId === projection.conversationId ? window.desktopAPI?.imageResults : undefined} workspaceId={active?.workspaceId} onLocateDocument={onLocateDocument} readBlob={api && active ? ref => api.blob(active.conversationId, ref) : undefined} searchEvents={api && active ? input => api.searchEvents({ conversationId: active.conversationId, ...input }) : undefined} historySearchOpen={historySearchOpen} onHistorySearchClose={() => setHistorySearchOpen(false)}
+        <ExecutionTimeline projection={projection} userMessages={userHistory.messages} latestRequest={latestRequest} imageResults={active?.conversationId === projection.conversationId ? window.desktopAPI?.imageResults : undefined} workspaceId={active?.workspaceId} onLocateDocument={onLocateDocument} onOpenSavedFile={openSavedFile} readBlob={readTimelineBlob} searchEvents={searchTimelineEvents} historySearchOpen={historySearchOpen} onHistorySearchClose={() => setHistorySearchOpen(false)}
           onFirstVisible={api?.timing ? (taskId, itemId, stamp) => {
             const owner = timedSubmissions.current.get(taskId)
             if (!owner) return
             timedSubmissions.current.delete(taskId)
             void api.timing!({ ...owner, submissionId: taskId, stage: 'renderer.first-visible', stamp, itemId }).catch(() => undefined)
           } : undefined} />
+        </>}
         {reviewRunId && active?.runIndex.builtinRunIds.includes(reviewRunId) && reviewLoader && reviewRollback && <section aria-label="会话变更审阅">
           <header><strong>审阅任务变更</strong>
             <label>任务 <select value={reviewRunId} onChange={event => { setReviewRunId(event.currentTarget.value); setReviewCheckpoint(null) }}>
@@ -1068,10 +1210,13 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
           <header><strong>{item.state === 'queued' ? `排队中${item.position ? ` · 第 ${item.position} 条` : ''}` : item.state === 'starting' ? '正在确认' : '未发送'}</strong>
             <small>{item.model.provider} · {item.model.model}</small></header>
           <p>{item.text || `附件 ${item.attachments.length} 个`}</p>
-          {item.queuePausedReason === 'external-handoff' && <p className="execution-assistant__submission-note">外部客户端已接手，内置队列保持暂停；撤销外部授权后可显式恢复。</p>}
+          {item.queuePausedReason === 'external-handoff' && <p className="execution-assistant__submission-note">外部交接后内置队列保持暂停；接回任务会先结束外部授权。
+            <button type="button" disabled={busy} onClick={() => { void api?.resumeQueue({ workspaceId: item.workspaceId, conversationId: item.conversationId }).catch(cause => setError(String(cause))) }}>接回并继续排队任务</button></p>}
+          {item.queuePausedReason === 'user' && <p className="execution-assistant__submission-note">后续任务已暂停，消息和草稿仍保留。
+            <button type="button" disabled={busy} onClick={() => { void api?.resumeQueue({ workspaceId: item.workspaceId, conversationId: item.conversationId }).catch(cause => setError(String(cause))) }}>继续排队任务</button></p>}
           {item.failure && <p className="execution-assistant__submission-note">{item.failure.message}</p>}
           <div className="execution-assistant__submission-actions">
-            {item.state === 'queued' && <button type="button" onClick={() => void runQueuedNow(item)} disabled={busy}>立即执行（先停止当前任务）</button>}
+            {item.state === 'queued' && <button type="button" onClick={() => void runQueuedNow(item)} disabled={busy}>{item.queuePausedReason === 'external-handoff' ? '接回并立即执行' : '立即执行（先停止当前任务）'}</button>}
             {item.state === 'queued' && <button type="button" onClick={() => void removeQueued(item)} disabled={busy}>删除排队消息</button>}
             {(item.state === 'starting' || item.failure?.code === 'ack-unconfirmed') && <button type="button" onClick={() => void submit(item.mode, item)} disabled={busy}>用同一提交确认</button>}
             {(item.state === 'failed' || item.state === 'starting' && item.failure) && <button type="button" onClick={() => restoreSubmission(item)} disabled={busy}>恢复到输入框</button>}
@@ -1089,6 +1234,11 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
           if (runRef.current?.runId === record.runId) { setRun(record); runRef.current = record }
         } : undefined} />}
       <footer className="execution-assistant__composer">
+        {Object.keys(documentReferenceIssues).length > 0 && <div className="execution-assistant__reference-notice" role="status">
+          <p>{Object.entries(documentReferenceIssues).map(([id, issue]) => `${documentNames[id] ?? '原文档'}：${issue}`).join('；')}。文字和附件仍保留。</p>
+          <div><button type="button" disabled={busy} onClick={() => void changeSelection(false)}>重新引用当前文档</button>
+            <button type="button" disabled={busy} onClick={() => void changeSelection(true)}>重新引用当前选区</button></div>
+        </div>}
         {(documents.length > 0 || contextFrozen) && <div className="execution-assistant__references" aria-label="本条消息的引用">
           {documents.map(value => {
             const name = documentNames[value.documentId] ?? '已绑定文档'
@@ -1121,7 +1271,7 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
                 <p>也可以直接粘贴或拖入图片、文档。</p>
               </div>}
             </div>
-            <textarea aria-label="给创作助手发消息" data-attachment-paste-target value={draft} disabled={!active || busy} placeholder="描述你要讨论或完成的内容"
+            <textarea ref={composerRef} aria-label="给创作助手发消息" aria-describedby="assistant-composer-hint" data-attachment-paste-target value={draft} disabled={!active} readOnly={busy} placeholder="描述你要讨论或完成的内容"
               onFocus={() => { setPlusOpen(false); setPermissionOpen(false) }}
               onCompositionStart={() => { composingRef.current = true }} onCompositionEnd={() => { composingRef.current = false }} onKeyDown={onComposerKeyDown}
               onChange={event => { setDraft(event.target.value); draftRef.current = event.target.value; freezeDocuments(event.target.value) }} onBlur={() => { void persist().catch(() => setError('草稿未保存，请重试。')) }} />
@@ -1146,7 +1296,7 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
               <span id={modelSummaryId}>{modelSummary}{connection ? ` · ${billingLabels[connection.connection.billing.kind]}` : ''}{!configured && conversationSelection ? ' · 不可用' : ''}</span>
               <span aria-hidden="true">▾</span>
             </button>
-            {modelMenuOpen && createPortal(<div ref={modelMenuRef} id="assistant-model-choices" className="execution-assistant__model-menu" role="group" aria-label="对话模型选择"
+            {modelMenuOpen && createPortal(<div ref={modelMenuRef} id="assistant-model-choices" className={`execution-assistant__model-menu${modelOptions.length === 0 ? ' execution-assistant__model-menu--empty' : ''}`} role="group" aria-label="对话模型选择"
               style={{ left: modelMenuPosition.left, bottom: modelMenuPosition.bottom, width: modelMenuPosition.width }}>
               <strong>下次任务使用</strong>
               {conversationSelection && <div className="execution-assistant__model-effort" role="group" aria-label="推理强度">
@@ -1174,7 +1324,10 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
                   setModelCatalogErrors(current => { const next = { ...current }; delete next[key]; return next })
                   setModelCatalogs(current => ({ ...current }))
                 }}>重试目录</button></div>)}
-              {modelOptions.filter(value => value.connection.hasCredential && !value.connection.revoked).length === 0 && <p>连接模型目录读取中。请先接入 API 或登录 ChatGPT。</p>}
+              {modelOptions.filter(value => value.connection.hasCredential && !value.connection.revoked).length === 0 && <p>{!settings?.connections.some(value => value.hasCredential && !value.revoked)
+                ? '还没有可用连接。可以接入 API 或登录 ChatGPT。'
+                : settings.connections.some(value => value.hasCredential && !value.revoked && !modelCatalogs[`${value.connection.id}:${value.connection.revision}`] && !modelCatalogErrors[`${value.connection.id}:${value.connection.revision}`])
+                  ? '正在读取连接的模型目录…' : '暂无可选的对话模型。可在模型设置中检查连接和模型名称。'}</p>}
               </div>
               <p>{bodyStreamingLabel(bodyStreaming)}</p>
               <button type="button" className="execution-assistant__manage-models" onClick={() => { setModelMenuOpen(false); setSettingsEntry('chatgpt-oauth'); setSettingsOpen(true) }}>登录 ChatGPT（OAuth）…</button>
@@ -1182,18 +1335,28 @@ export function ExecutionAssistant({ root, captureDocuments, prepareSend, api: s
             </div>, document.body)}
           </div>
           <div className="execution-assistant__actions">
-            {run && ['queued', 'running', 'stopping'].includes(run.status) && <button type="button" onClick={() => void stop()} disabled={busy || run.status === 'stopping'}>{run.status === 'stopping' ? '正在停止…' : '停止'}</button>}
-            <button type="button" className="primary-button" onClick={() => void submit('queue')} disabled={!active || busy || attachmentBusy || (!draft.trim() && attachments.length === 0)}>{run && ['queued', 'running', 'stopping'].includes(run.status) ? '加入队列' : '发送'}</button>
+            {run && run.status === 'running' && api?.browserControl && <button type="button" disabled={busy}
+              onClick={() => void controlBrowser(browserHuman === run.runId ? 'resume' : 'takeover')}>
+              {browserHuman === run.runId ? '登录完成，继续任务' : '接管浏览器登录'}</button>}
+            {run && ['queued', 'running', 'stopping'].includes(run.status) && <button type="button" onClick={() => void stop()} disabled={busy || run.status === 'stopping'}>{run.status === 'stopping' ? '正在停止…' : '停止当前'}</button>}
+            {run?.status === 'running' && submissions.some(item => item.state === 'queued') && <button type="button" disabled={busy} onClick={() => void stop(true)}>停止并暂停后续</button>}
+            <button type="button" className="primary-button" onClick={() => { composerRef.current?.focus(); void submit('queue') }} disabled={!active || busy || attachmentBusy || (!draft.trim() && attachments.length === 0)}>{run && ['queued', 'running', 'stopping'].includes(run.status) ? '加入队列' : '发送'}</button>
           </div>
         </div>
+        <small id="assistant-composer-hint" className="execution-assistant__composer-hint">Enter 发送 · Shift + Enter 换行</small>
       </footer>
     </div>
     <ExecutionSettingsPanel open={settingsOpen} entry={settingsEntry} onClose={() => setSettingsOpen(false)} api={settingsAPI}
       onSaved={value => setSettings(value)} />
+    <ConfirmDialog open={pendingRestore !== null} title="输入框已有另一份草稿" message="恢复这条消息会替换当前文字、附件和引用。可以先保留当前输入，原消息仍在历史中。"
+      confirmLabel="替换为这条消息" cancelLabel="保留当前输入"
+      details={pendingRestore && <pre className="execution-assistant__restore-preview">{pendingRestore.text || `附件 ${pendingRestore.attachments.length} 个`}</pre>}
+      onCancel={() => { setPendingRestore(null); composerRef.current?.focus() }}
+      onConfirm={() => { if (pendingRestore) applyRestoredSubmission(pendingRestore) }} />
     {externalAPI && active && <ExternalMcpPanel open={externalOpen} onClose={() => setExternalOpen(false)} api={externalAPI}
       workspaceId={workspaceId} conversation={active} documents={documents} instruction={draft} documentNames={documentNames}
       onConversationChange={conversation => {
         setConversations(value => updateConversation(value, conversation)); setActive(conversation); activeRef.current = conversation
       }} />}
   </section>
-}
+})

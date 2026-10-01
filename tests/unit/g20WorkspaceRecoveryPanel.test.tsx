@@ -33,7 +33,7 @@ async function fixture() {
 function panelApi(host: DocumentHostService) {
   return {
     recoverable: vi.fn(() => host.internalAPI.recoverable()),
-    restore: vi.fn((documentId: string) => host.internalAPI.restore(documentId)),
+    restore: vi.fn((documentId: string, mode?: 'original' | 'unbound') => host.operate({ type: 'restore', documentId, ...(mode ? { mode } : {}) }) as Promise<DocumentSnapshot>),
     discardRecovery: vi.fn(async (documentId: string) => { await host.operate({ type: 'discard-recovery', documentId }) }),
     subscribe: vi.fn(() => () => undefined),
   } satisfies Pick<DocumentHostAPI, 'recoverable' | 'restore' | 'discardRecovery' | 'subscribe'>
@@ -127,4 +127,21 @@ it('defers recovery without changing drafts and reopens the list from its compac
   fireEvent.click(reopen)
   expect(await screen.findByText('稍后恢复.md')).toBeTruthy()
   expect(screen.getByRole('button', { name: '恢复并打开' })).toBeTruthy()
+})
+
+
+it('offers an untitled recovery without modifying the original file or losing history', async () => {
+  const { root, original, restart } = await fixture(), filename = path.join(root, '恢复来源.md')
+  await fs.writeFile(filename, 'disk original')
+  const source = await original.open(filename)
+  await editMarkdown(original, source, 'unsaved important draft')
+  const host = restart(), api = panelApi(host), navigate = vi.fn(async () => undefined)
+  render(<WorkspaceRecoveryPanel api={api} onRestored={navigate} />)
+  await screen.findByText('恢复来源.md')
+  fireEvent.click(screen.getByRole('button', { name: '恢复为未命名稿' }))
+  await waitFor(() => expect(navigate).toHaveBeenCalledWith(source.documentId))
+  expect(api.restore).toHaveBeenCalledWith(source.documentId, 'unbound')
+  expect(await host.internalAPI.read(source.documentId)).toMatchObject({ dirty: true, undoDepth: 1,
+    binding: { kind: 'untitled' }, model: { source: 'unsaved important draft' } })
+  expect(await fs.readFile(filename, 'utf8')).toBe('disk original')
 })

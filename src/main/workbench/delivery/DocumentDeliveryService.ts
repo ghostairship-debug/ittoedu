@@ -1,3 +1,4 @@
+import { DocumentSaveFailure, type DocumentSaveIdentity } from '../../../shared/workbench/documentSave'
 import { createHash, randomUUID } from 'node:crypto'
 import { documentDigest } from '../../../core/documents/documentDigest'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
@@ -8,7 +9,8 @@ import { DocumentDeliveryOperationStore, type DeliveryOperationRecord } from './
 export interface DocumentDeliveryServiceOptions {
   documents: {
     read(documentId: string): Promise<DocumentSnapshot>
-    saveWithFact(documentId: string, filename?: string): Promise<{ snapshot: DocumentSnapshot; savedRevision: number }>
+    saveWithFact(documentId: string, filename?: string, identity?: DocumentSaveIdentity): Promise<{ snapshot: DocumentSnapshot; savedRevision: number }>
+    lookupSave?(documentId: string, identity: DocumentSaveIdentity): Promise<SaveReceipt | null>
     withFileLease<T>(documentId: string, work: (read: () => DocumentSnapshot) => Promise<T>): Promise<T>
   }
   operations: DocumentDeliveryOperationStore
@@ -21,10 +23,14 @@ export interface DocumentDeliveryServiceOptions {
   build: { build(request: ExportBuildRequest, signal?: AbortSignal): Promise<ExportBuildReply> }
   writer: {
     /** Must reject an existing destination and atomically publish complete bytes. */
-    writeNew(filename: string, bytes: Uint8Array, signal?: AbortSignal): Promise<{ fileVersion: string }>
-    inspect(filename: string): Promise<{ fileVersion: string; sha256: string } | null>
+    writeNew(filename: string, bytes: Uint8Array, signal?: AbortSignal, prepared?: (identity: string | null) => Promise<void>): Promise<{ fileVersion: string }>
+    inspect(filename: string): Promise<{ fileVersion: string; sha256: string; publicationIdentity?: string | null } | null>
+    replaceExisting?(filename: string, bytes: Uint8Array, expectedVersion: string, signal?: AbortSignal, prepared?: (identity: string | null) => Promise<void>): Promise<{ fileVersion: string }>
   }
+  withFileOperation?<T>(work: () => Promise<T>): Promise<T>
+  assertExportTarget?(filename: string): Promise<void>
   signalForRun?(runId: string): AbortSignal | undefined
+  taskRunIds?(runId: string): Promise<readonly string[]>
 }
 
 export class DocumentDeliveryOutcomeUnknown extends Error {
@@ -52,9 +58,18 @@ export class DocumentDeliveryService implements DocumentDeliveryServicePort {
     const record = await this.options.operations.lookup(input.runId, input.operationId)
     if (!record) return null
     if (record.requestDigest !== input.requestDigest) throw new Error('同一保存/导出操作编号不能改变请求')
-    if (record.status === 'writing' && record.path && record.contentSha256 && record.receipt) {
+    if (record.kind === 'save' && record.status !== 'completed' && record.status !== 'failed'
+      && record.documentId && this.options.documents.lookupSave) {
+      const receipt = await this.options.documents.lookupSave(record.documentId, { runId: input.runId, operationId: input.operationId, requestDigest: input.requestDigest })
+      if (receipt) {
+        await this.options.operations.patch(input.runId, input.operationId, { status: 'completed', receipt, path: receipt.path, fileVersion: receipt.fileVersion })
+        return receipt
+      }
+    }
+    if (record.kind === 'export' && record.status === 'writing' && record.path && record.contentSha256 && record.receipt) {
       const observed = await this.options.writer.inspect(record.path)
-      if (!observed || observed.sha256 !== record.contentSha256) throw new DocumentDeliveryOutcomeUnknown()
+      if (!observed || !record.publicationIdentity || observed.publicationIdentity !== record.publicationIdentity
+        || observed.sha256 !== record.contentSha256) throw new DocumentDeliveryOutcomeUnknown()
       const receipt: ExportReceipt = { ...(record.receipt as ExportReceipt), status: 'written', path: record.path, fileVersion: observed.fileVersion }
       await this.options.operations.patch(input.runId, input.operationId, { status: 'completed', receipt, fileVersion: observed.fileVersion })
       return receipt
@@ -67,7 +82,7 @@ export class DocumentDeliveryService implements DocumentDeliveryServicePort {
     const known = await this.options.operations.lookup(input.runId, input.operationId)
     if (known) return (await this.lookup(input)) as SaveReceipt
     await this.started({ runId: input.runId, operationId: input.operationId, requestDigest: input.requestDigest, kind: 'save', status: 'started' })
-    let calledSave = false
+    await this.options.operations.patch(input.runId, input.operationId, { documentId: input.documentId })
     let before: DocumentSnapshot | undefined
     try {
       before = await this.options.documents.read(input.documentId)
@@ -81,8 +96,10 @@ export class DocumentDeliveryService implements DocumentDeliveryServicePort {
       const justBefore = await this.options.documents.read(input.documentId)
       if (justBefore.epoch !== before.epoch || justBefore.revision !== before.revision
         || documentDigest(justBefore.binding) !== documentDigest(before.binding)) throw new Error('保存准备期间文档或文件绑定已变化')
-      calledSave = true
-      const { snapshot, savedRevision } = await this.options.documents.saveWithFact(input.documentId, filename)
+      const { snapshot, savedRevision } = await this.options.documents.saveWithFact(input.documentId, filename,
+        { runId: input.runId, operationId: input.operationId, requestDigest: input.requestDigest }).catch(error => {
+          throw error instanceof DocumentSaveFailure ? error : new DocumentDeliveryOutcomeUnknown(error)
+        })
       if (snapshot.binding.kind !== 'file') throw new DocumentDeliveryOutcomeUnknown()
       const receipt: SaveReceipt = { status: 'saved', path: snapshot.binding.path, documentId: snapshot.documentId, epoch: snapshot.epoch,
         savedRevision, currentRevision: snapshot.revision, fileVersion: snapshot.binding.version, dirty: snapshot.dirty,
@@ -91,7 +108,7 @@ export class DocumentDeliveryService implements DocumentDeliveryServicePort {
       catch (error) { throw new DocumentDeliveryOutcomeUnknown(error) }
       return receipt
     } catch (error) {
-      if (calledSave && !(/另存目标已存在|另存格式与文档不一致|保存路径必须是绝对路径/.test(error instanceof Error ? error.message : '')))
+      if (error instanceof DocumentDeliveryOutcomeUnknown || error instanceof DocumentSaveFailure && error.publication === 'unknown')
         throw error instanceof DocumentDeliveryOutcomeUnknown ? error : new DocumentDeliveryOutcomeUnknown(error)
       const receipt = failedSave({ documentId: input.documentId, epoch: input.epoch, revision: input.baseRevision },
         error instanceof Error ? error.message : String(error), before?.dirty ?? true)
@@ -129,24 +146,38 @@ export class DocumentDeliveryService implements DocumentDeliveryServicePort {
       if (!filename) return generated
       validateExportDestination(filename, input.format)
       signal?.throwIfAborted()
-      const receipt = await this.options.documents.withFileLease(input.documentId, async read => {
+      const write = () => this.options.documents.withFileLease(input.documentId, async read => {
         const final = read()
         if (final.epoch !== snapshot.epoch || documentDigest(final.binding) !== documentDigest(snapshot.binding))
           throw new Error('导出写盘前文档身份或文件绑定已变化')
         signal?.throwIfAborted()
-        if (await this.options.writer.inspect(filename)) throw new Error('导出目标已存在，请选择新文件名')
+        await this.options.assertExportTarget?.(filename)
+        const existing = await this.options.writer.inspect(filename)
+        if (existing && (!this.options.writer.replaceExisting || !await this.options.operations.ownsExportVersion({
+          runId: input.runId, documentId: input.documentId, epoch: input.epoch, path: filename, format: input.format, fileVersion: existing.fileVersion,
+          taskRunIds: await this.options.taskRunIds?.(input.runId),
+        }))) throw new Error('导出目标已有其他内容或已被修改，请选择新文件名；原文件未变更')
         const sha256 = createHash('sha256').update(bytes).digest('hex')
-        await this.options.operations.patch(input.runId, input.operationId, { status: 'writing', path: filename, contentSha256: sha256, receipt: generated })
-        writing = true
+        const prepared = async (publicationIdentity: string | null) => {
+          await this.options.operations.patch(input.runId, input.operationId,
+            { status: 'writing', path: filename, contentSha256: sha256, publicationIdentity, receipt: generated })
+        }
         signal?.throwIfAborted()
-        const result = await this.options.writer.writeNew(filename, bytes, signal)
+        await prepared(null) // Older/custom writers without a candidate proof must remain queryable as unknown.
+        // Only the byte writer can report a definite pre-publication rejection.
+        writing = true
+        const result = existing
+          ? await this.options.writer.replaceExisting!(filename, bytes, existing.fileVersion, signal, prepared)
+          : await this.options.writer.writeNew(filename, bytes, signal, prepared)
         return { ...generated, status: 'written' as const, path: filename, fileVersion: result.fileVersion, currentRevision: read().revision }
       })
+      const receipt = this.options.withFileOperation ? await this.options.withFileOperation(write) : await write()
       try { await this.options.operations.patch(input.runId, input.operationId, { status: 'completed', receipt, fileVersion: receipt.fileVersion }) }
       catch (error) { throw new DocumentDeliveryOutcomeUnknown(error) }
       return receipt
     } catch (error) {
-      if (writing) throw error instanceof DocumentDeliveryOutcomeUnknown ? error : new DocumentDeliveryOutcomeUnknown(error)
+      if (error instanceof DocumentDeliveryOutcomeUnknown || writing && !(error instanceof DocumentSaveFailure && error.publication === 'not-published'))
+        throw error instanceof DocumentDeliveryOutcomeUnknown ? error : new DocumentDeliveryOutcomeUnknown(error)
       const receipt = failedExport(input, error instanceof Error ? error.message : String(error))
       await this.options.operations.patch(input.runId, input.operationId, { status: 'failed', receipt })
       return receipt

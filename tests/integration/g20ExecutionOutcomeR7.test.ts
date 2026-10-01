@@ -57,6 +57,26 @@ describe('M26 R7 receipt-based settlement', () => {
       tool('file.write', input, written('required.md'), 1))
     expect(hasUnresolvedToolFailure(record)).toBe(true)
   })
+  it('treats a definite artifact publication rejection as failed until the same delivery succeeds', () => {
+    const input = { kind: 'compute', job: 'job-one', name: 'result.txt', destination: 'result.txt' }
+    const rejected = tool('artifact.save', input, { kind: 'read', data: { status: 'rejected', message: '目标目录不可写' } }, 0)
+    expect(serviceToolOutcome(rejected.call.name, rejected.result)).toEqual({ status: 'failed', message: '目标目录不可写' })
+    expect(hasUnresolvedToolFailure(run(rejected))).toBe(true)
+    expect(hasUnresolvedToolFailure(run(rejected, tool('artifact.save', input, written('result.txt'), 1)))).toBe(false)
+  })
+  it('limits diagnostic settlement to definite read-only observation failures', () => {
+    const optional = tool('view.observe', { target: 'page', purpose: 'diagnostic' }, error('service-unavailable'), 0)
+    expect(hasUnresolvedToolFailure(run(optional))).toBe(false)
+    expect(hasUnresolvedToolFailure(run({ ...optional, result: error('tool-outcome-unknown') }))).toBe(true)
+    expect(hasUnresolvedToolFailure(run({ ...optional, call: { name: 'html.click', input: { purpose: 'diagnostic' } } }))).toBe(true)
+    expect(hasUnresolvedToolFailure(run({ ...optional, call: { name: 'file.write', input: { purpose: 'diagnostic' } } }))).toBe(true)
+  })
+  it('settles a missing required visual check only after a successful observation of the same host page', () => {
+    const observation = (locationId: string) => ({ kind: 'read' as const, data: { identity: { documentId: 'course', locationId }, image: { resourceId: 'pixels' } } })
+    const failed = { ...tool('view.observe', { target: 'old-handle' }, observation('one'), 0), observationFailure: { message: '视觉不可用' } }
+    expect(hasUnresolvedToolFailure(run(failed, tool('view.observe', { target: 'new-handle' }, observation('two'), 1)))).toBe(true)
+    expect(hasUnresolvedToolFailure(run(failed, tool('view.observe', { target: 'new-handle' }, observation('one'), 1)))).toBe(false)
+  })
   it('keeps a durable running image job pending until the matching owner reports ready', () => {
     const pending = tool('image.generate', { prompt: '图一' }, { kind: 'read', data: { job: 'image-one', status: 'running' } }, 0)
     const unrelated = tool('job.wait', { kind: 'image', job: 'image-other' }, { kind: 'read', data: {
@@ -150,4 +170,24 @@ it('distinguishes a cancelled import from failure and still reports a committed 
   if (applied.kind !== 'document-operation' || applied.result.status !== 'applied') throw new Error('fixture')
   expect(htmlImportReceiptResult({ operationId: 'done', status: 'applied', revision: 1, pages: [], commit: applied.result }))
     .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+})
+
+it('settles a renewed save reference for the same document, not a different successful save', () => {
+  const opened = tool('file.open', {}, { kind: 'read', data: { documentId: 'lesson', target: 'old-target' } }, 0)
+  const failed = tool('file.save', { target: 'old-target' }, error('target-conflict'), 1)
+  const renewed = tool('file.open', {}, { kind: 'read', data: { documentId: 'lesson', target: 'new-target' } }, 2)
+  expect(hasUnresolvedToolFailure(run(opened, failed, renewed, savedLesson('other', 3)))).toBe(true)
+  expect(hasUnresolvedToolFailure(run(opened, failed, renewed, savedLesson('lesson', 3)))).toBe(false)
+  expect(hasUnresolvedToolFailure(run(opened, failed, renewed, savedLesson('lesson', 2, 3)))).toBe(true)
+  expect(hasUnresolvedToolFailure(run(opened, { ...failed, result: error('tool-outcome-unknown') }, savedLesson('lesson', 3)))).toBe(true)
+})
+
+
+it.each(['file.write', 'file.patch'])('tracks unsaved new-document revisions from %s', name => {
+  const mutation = tool(name, {}, { kind: 'read', data: { saved: false, dirty: true, documentResult: {
+    status: 'applied', documentId: 'lesson', revision: 2,
+  } } }, 11)
+  expect(hasUnresolvedToolFailure(run(createdLesson(), mutation))).toBe(true)
+  expect(hasUnresolvedToolFailure(run(createdLesson(), mutation, savedLesson('other', 2)))).toBe(true)
+  expect(hasUnresolvedToolFailure(run(createdLesson(), mutation, savedLesson('lesson', 2)))).toBe(false)
 })

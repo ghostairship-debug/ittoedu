@@ -98,6 +98,8 @@ export interface PreviewNetworkPolicyInput {
 export type EditorClipboardCommand = 'cut' | 'copy' | 'paste' | 'paste-plain'
 
 export interface DesktopAPI {
+  launchFiles?(input: { type: 'list' } | { type: 'ack'; id: string }): Promise<Array<{ id: string; path: string }>>
+  onLaunchFilesChanged?(handler: () => void): () => void
   editorClipboard?(command: EditorClipboardCommand): Promise<void>
   htmlImport?: import('./workbench/htmlImportDesktop').HtmlImportDesktopAPI
   imageResults?: import('./workbench/imageResultsDesktop').ImageResultsDesktopAPI
@@ -236,6 +238,8 @@ export const IPC_CHANNELS = {
   dirtyState: 'app:dirty-state',
   editorClipboard: 'editor:clipboard',
   requestSave: 'app:request-save',
+  launchFiles: 'app:launch-files',
+  launchFilesChanged: 'app:launch-files-changed',
   requestFocusDocument: 'app:request-focus-document',
   requestSaveAndClose: 'app:request-save-and-close',
   requestPreserveAndClose: 'app:request-preserve-and-close',

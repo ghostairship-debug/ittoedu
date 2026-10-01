@@ -35,6 +35,7 @@ export class ComputeJobError extends Error {
 export class ComputeJobService {
   private readonly directory: string
   private readonly active = new Map<string, Active>()
+  private capacity: Promise<void> = Promise.resolve()
   private readonly cancellations = new Map<string, Promise<ComputeJobSnapshot>>()
   private readonly tails = new Map<string, Promise<unknown>>()
   constructor(options: { directory: string; backend: PodmanComputeBackend; now?: () => Date }) {
@@ -104,12 +105,12 @@ export class ComputeJobService {
     if (input.code && input.code.length > 1024 * 1024) throw new ComputeJobError('input-limit', '计算源码超过上限')
     const inputs = (input.inputs ?? []).map(file => ({ name: safeName(file.name), bytes: Uint8Array.from(file.bytes) }))
     const outputNames = (input.outputNames ?? []).map(safeName)
-    if (inputs.length > 256 || outputNames.length > 64 || new Set(inputs.map(file => file.name)).size !== inputs.length
+    if (new Set(inputs.map(file => file.name)).size !== inputs.length
       || new Set(outputNames).size !== outputNames.length || inputs.some(file => file.name === '__main__.py')
-      || inputs.reduce((total, file) => total + file.bytes.byteLength, 0) > 64 * 1024 * 1024)
+      || inputs.reduce((total, file) => total + file.bytes.byteLength, 0) > 256 * 1024 * 1024)
       throw new ComputeJobError('input-limit', '计算输入或输出声明超过上限或重名')
-    const timeoutMs = input.timeoutMs ?? 60_000
-    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 10 * 60_000) throw new ComputeJobError('invalid-timeout', '计算时限无效')
+    const timeoutMs = input.timeoutMs ?? 5 * 60_000
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 60 * 60_000) throw new ComputeJobError('invalid-timeout', '计算时限无效')
     const program = input.program ?? 'python3', argv = input.argv ?? (input.code !== undefined ? ['/job/input/__main__.py'] : [])
     const requestDigest = digest(JSON.stringify({ runId: input.runId, language: input.language, code: input.code,
       program, argv, inputs: inputs.map(file => ({ name: file.name, digest: digest(file.bytes) })), outputNames, timeoutMs }))
@@ -161,7 +162,7 @@ export class ComputeJobService {
       if (stat.isSymbolicLink()) throw new ComputeJobError('output-symlink', '计算输出包含链接，未登记为成果')
     }
     const stat = await fs.stat(current)
-    if (!stat.isFile() || stat.size <= 0 || stat.size > 64 * 1024 * 1024) throw new ComputeJobError('output-invalid', '计算输出缺失、为空或超过上限')
+    if (!stat.isFile() || stat.size <= 0 || stat.size > 256 * 1024 * 1024) throw new ComputeJobError('output-invalid', '计算输出缺失、为空或超过上限')
     const bytes = await fs.readFile(current)
     if (name.endsWith('.json')) { try { JSON.parse(bytes.toString('utf8')) } catch { throw new ComputeJobError('output-invalid', 'JSON 计算结果无法解析') } }
     if (name.endsWith('.png') && !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new ComputeJobError('output-invalid', 'PNG 计算结果签名无效')
@@ -170,6 +171,10 @@ export class ComputeJobService {
   private async execute(jobId: string, root: string, frozen: ReturnType<ComputeJobService['request']>, containerName: string, active: Active): Promise<void> {
     let processStarted = false, processFinished = false
     let artifacts: ComputeArtifact[] = []
+    let release!: () => void
+    const previous = this.capacity
+    this.capacity = new Promise<void>(resolve => { release = resolve })
+    await previous.catch(() => undefined)
     try {
       if (active.cancelled) return
       active.starting = true
@@ -188,8 +193,8 @@ export class ComputeJobService {
       })
       if (outcome.exitCode === 0) for (const name of frozen.outputNames) {
         artifacts.push(await this.artifact(root, name))
-        if (artifacts.reduce((total, entry) => total + entry.byteLength, 0) > 64 * 1024 * 1024)
-          throw new ComputeJobError('output-limit', '计算成果总量超过 64 MiB，未登记为可交付成果')
+        if (artifacts.reduce((total, entry) => total + entry.byteLength, 0) > 256 * 1024 * 1024)
+          throw new ComputeJobError('output-limit', '计算成果总量超过 256 MiB，未登记为可交付成果')
       }
       await this.update(jobId, job => {
         job.artifacts = artifacts
@@ -206,7 +211,7 @@ export class ComputeJobService {
         job.artifacts = artifacts
         job.logs = [...job.logs, ...this.logLines('system', job.reason)].slice(-200)
       }).catch(() => undefined)
-    }
+    } finally { release() }
   }
   private logLines(stream: 'stdout' | 'stderr' | 'system', source: string): ComputeJobLogs['entries'] {
     const now = Date.now()

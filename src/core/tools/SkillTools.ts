@@ -7,7 +7,7 @@ export const skillReadInputSchema = z.object({
   version: z.string().min(1).max(150).optional(),
   path: z.string().min(1).max(512).default('SKILL.md'),
   offset: z.number().int().min(0).default(0),
-  limit: z.number().int().min(1).max(8000).default(4000),
+  limit: z.number().int().min(1).max(64_000).default(12_000),
 }).strict()
 
 /** One schema is projected by both the built-in gateway and MCP. */

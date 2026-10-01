@@ -1,8 +1,11 @@
+import { publishNewFile, publicationIdentity } from './publishNewFile'
 import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { deserialize, serialize } from 'node:v8'
 import { isDeepStrictEqual } from 'node:util'
+import { DocumentSaveFailure, type DocumentSaveIdentity, type DocumentSaveProof } from '../../shared/workbench/documentSave'
+import { JournalBindingIndex, journalIdentity, type JournalBindingMetadata } from './JournalBindingIndex'
 import { documentRelativePathSchema } from '../../shared/document/resources'
 import type { DocumentBinding, DocumentKind, DocumentModel, DocumentPersistence, DocumentResources, DurableDocumentState } from '../../shared/workbench/document'
 
@@ -22,6 +25,8 @@ interface SaveIntent {
   sourceBinding: DocumentBinding
   targetBinding: FileBinding
   expectedVersion: string
+  saveIdentity?: DocumentSaveIdentity
+  fileIdentity?: string
 }
 
 export class DocumentJournalError extends Error {
@@ -42,6 +47,20 @@ function serial<T>(key: string, action: () => Promise<T>): Promise<T> {
 function fileKey(filename: string): string {
   const absolute = path.resolve(filename)
   return process.platform === 'win32' ? absolute.toLowerCase() : absolute
+}
+
+
+/** A retained intent is not necessarily pending: clean saves may keep the same binding. */
+function pendingSave(state: Pick<DurableDocumentState, 'epoch' | 'revision' | 'savedRevision' | 'binding'>,
+  kind: DocumentKind, intent: SaveIntent | null): intent is SaveIntent {
+  if (!intent || intent.epoch !== state.epoch || intent.kind !== kind || state.revision < intent.revision
+    || state.savedRevision !== null && state.savedRevision > intent.revision
+    || !isDeepStrictEqual(state.binding, intent.sourceBinding)) return false
+  const newBinding = state.binding.kind === 'untitled'
+    ? intent.targetBinding.bindingVersion === 1
+    : intent.targetBinding.bindingVersion === state.binding.bindingVersion + 1
+      && fileKey(intent.targetBinding.path) !== fileKey(state.binding.path)
+  return state.savedRevision !== intent.revision || newBinding
 }
 
 async function syncDirectory(directory: string): Promise<void> {
@@ -81,35 +100,55 @@ function record(state: DurableDocumentState): Buffer {
   return Buffer.concat([header, payload, COMMIT])
 }
 
-/** Only an incomplete final record is discarded. A complete damaged record fails loudly. */
-async function scan(filename: string, documentId?: string): Promise<DurableDocumentState | null> {
-  let bytes: Buffer
-  try { bytes = await fs.readFile(filename) } catch (error) { if (missing(error)) return null; throw error }
-  let offset = 0
+/** Read one complete record at a time, so a long journal does not need a >2 GiB readFile buffer.
+ * Only an incomplete final record is discarded; committed corruption still fails explicitly. */
+async function scan(filename: string, documentId?: string, options: { offset?: number; repairTail?: boolean; onRecord?(offset: number): void } = {}): Promise<DurableDocumentState | null> {
+  let file: Awaited<ReturnType<typeof fs.open>>
+  try { file = await fs.open(filename, 'r') } catch (error) { if (missing(error)) return null; throw error }
+  let offset = options.offset ?? 0, fileSize = 0
+  const initialIdentity = await journalIdentity(filename)
   let latest: DurableDocumentState | null = null
-  while (offset < bytes.length) {
-    if (bytes.length - offset < HEADER_SIZE) break
-    const header = bytes.subarray(offset, offset + HEADER_SIZE)
-    const size = header.readUInt32BE(8)
-    if (!header.subarray(0, 8).equals(MAGIC) || header.readUInt32BE(12) !== ((~size) >>> 0)) throw new DocumentJournalError('journal-corrupt', '恢复日志记录头损坏')
-    const end = offset + HEADER_SIZE + size + COMMIT.length
-    if (end > bytes.length) break
-    const payload = bytes.subarray(offset + HEADER_SIZE, end - COMMIT.length)
-    if (!bytes.subarray(end - COMMIT.length, end).equals(COMMIT) ||
-        !createHash('sha256').update(payload).digest().equals(header.subarray(16))) throw new DocumentJournalError('journal-corrupt', '恢复日志完整记录校验失败')
-    let state: DurableDocumentState
-    try {
-      state = deserialize(payload) as DurableDocumentState
-      checkState(state, documentId ?? state.documentId)
-    } catch { throw new DocumentJournalError('journal-corrupt', '恢复日志完整记录无法解码或状态无效') }
-    if (path.basename(filename) !== `${digest(Buffer.from(state.documentId))}.journal` ||
-        (latest && (state.documentId !== latest.documentId || state.sequence <= latest.sequence))) throw new DocumentJournalError('journal-corrupt', '恢复日志身份或顺序损坏')
-    latest = state
-    offset = end
+  const read = async (position: number, size: number): Promise<Buffer> => {
+    const bytes = Buffer.allocUnsafe(size)
+    let received = 0
+    while (received < size) {
+      const next = await file.read(bytes, received, Math.min(size - received, 1024 * 1024), position + received)
+      if (!next.bytesRead) throw new DocumentJournalError('journal-corrupt', '恢复日志在读取期间改变或记录不完整')
+      received += next.bytesRead
+    }
+    return bytes
   }
-  if (offset !== bytes.length) {
+  try {
+    fileSize = (await file.stat()).size
+    while (offset < fileSize) {
+      if (fileSize - offset < HEADER_SIZE) break
+      const header = await read(offset, HEADER_SIZE), size = header.readUInt32BE(8)
+      if (!header.subarray(0, 8).equals(MAGIC) || header.readUInt32BE(12) !== ((~size) >>> 0))
+        throw new DocumentJournalError('journal-corrupt', '恢复日志记录头损坏')
+      const end = offset + HEADER_SIZE + size + COMMIT.length
+      if (end > fileSize) break
+      const payload = await read(offset + HEADER_SIZE, size)
+      if (!(await read(end - COMMIT.length, COMMIT.length)).equals(COMMIT)
+        || !createHash('sha256').update(payload).digest().equals(header.subarray(16)))
+        throw new DocumentJournalError('journal-corrupt', '恢复日志完整记录校验失败')
+      let state: DurableDocumentState
+      try {
+        state = deserialize(payload) as DurableDocumentState
+        checkState(state, documentId ?? state.documentId)
+      } catch { throw new DocumentJournalError('journal-corrupt', '恢复日志完整记录无法解码或状态无效') }
+      if (path.basename(filename) !== `${digest(Buffer.from(state.documentId))}.journal`
+        || latest && (state.documentId !== latest.documentId || state.sequence <= latest.sequence))
+        throw new DocumentJournalError('journal-corrupt', '恢复日志身份或顺序损坏')
+      latest = state; options.onRecord?.(offset); offset = end
+    }
+    if (await journalIdentity(filename) !== initialIdentity) throw new DocumentJournalError('journal-sequence-conflict', '恢复日志在读取期间改变，未修复或提交')
+  } finally { await file.close() }
+  if (offset !== fileSize && options.repairTail !== false) {
     const handle = await fs.open(filename, 'r+')
-    try { await handle.truncate(offset); await handle.sync() } finally { await handle.close() }
+    try {
+      if ((await handle.stat()).size !== fileSize) throw new DocumentJournalError('journal-sequence-conflict', '恢复日志在尾部修复前改变，未截断')
+      await handle.truncate(offset); await handle.sync()
+    } finally { await handle.close() }
   }
   return latest
 }
@@ -254,7 +293,7 @@ async function writeFlushed(filename: string, bytes: Uint8Array): Promise<void> 
 }
 
 async function saveFile(input: Parameters<DocumentPersistence['save']>[0],
-  recordIntent: (target: FileBinding, expectedVersion: string) => Promise<void>): ReturnType<DocumentPersistence['save']> {
+  recordIntent: (target: FileBinding, expectedVersion: string, fileIdentity: string | null) => Promise<void>): ReturnType<DocumentPersistence['save']> {
   if (input.binding.kind !== 'file') throw new Error('保存需要已选择的文件路径')
   const binding = input.binding
   const root = await fs.realpath(path.dirname(path.resolve(binding.path)))
@@ -268,6 +307,7 @@ async function saveFile(input: Parameters<DocumentPersistence['save']>[0],
   const staged: { temporary: string; target: string }[] = []
   const packages: { relative: string; temporary: string; target: string }[] = []
   const temporary = path.join(root, `.${path.basename(filename)}.${randomUUID()}.tmp`)
+  let publishing = false, published = false, retainCandidate = false
   try {
     if (input.model.kind === 'markdown') {
       if (!Buffer.from(input.bytes).equals(Buffer.from(input.model.source, 'utf8'))) throw new Error('保存正文与固定文档版本不一致')
@@ -318,11 +358,11 @@ async function saveFile(input: Parameters<DocumentPersistence['save']>[0],
       // Publish complete immutable sidecars without overwrite. A crash can leave only unused
       // complete files; the old document remains intact until the final atomic replacement.
       for (const item of staged) {
-        try { await fs.link(item.temporary, item.target) }
+        try { await publishNewFile(item.temporary, item.target) }
         catch (error) {
           if ((error as NodeJS.ErrnoException).code !== 'EEXIST' || digest(await fs.readFile(item.target)) !== digest(await fs.readFile(item.temporary))) throw error
         }
-        await fs.unlink(item.temporary)
+        await fs.rm(item.temporary, { force: true })
         await syncDirectory(path.dirname(item.target))
       }
       for (const bundle of packages) {
@@ -351,17 +391,26 @@ async function saveFile(input: Parameters<DocumentPersistence['save']>[0],
     // completed replacement from a prepared temporary file or an external edit.
     const expectedVersion = await readDocumentFileVersion(temporary, input.model.kind)
     if (!expectedVersion) throw new Error('保存候选文件不可读取')
-    await recordIntent({ kind: 'file', path: filename, version: binding.version, bindingVersion: binding.bindingVersion }, expectedVersion)
+    await recordIntent({ kind: 'file', path: filename, version: binding.version, bindingVersion: binding.bindingVersion }, expectedVersion, await publicationIdentity(temporary))
     await assertCurrent()
+    publishing = true
     if (binding.version === null) {
       // New/Save As targets use exclusive creation, closing the check-then-create race.
-      await fs.link(temporary, filename)
+      await publishNewFile(temporary, filename)
     } else await fs.rename(temporary, filename)
+    published = true
     await syncDirectory(root)
     const version = await readDocumentFileVersion(filename, input.model.kind)
     return { kind: 'file', path: filename, version, bindingVersion: binding.bindingVersion }
+  } catch (error) {
+    // Definite syscall rejection leaves the destination untouched; an interrupted
+    // publication or failed acknowledgement is investigated with its retained intent.
+    const code = (error as NodeJS.ErrnoException).code
+    const knownRejection = ['EEXIST', 'EACCES', 'EPERM', 'ENOSPC', 'EROFS', 'EXDEV', 'ENOTSUP', 'ENOENT', 'EBUSY'].includes(code ?? '')
+    retainCandidate = published || publishing && !knownRejection
+    throw new DocumentSaveFailure(retainCandidate ? 'unknown' : 'not-published', error)
   } finally {
-    await Promise.all([temporary, ...staged.map(item => item.temporary)].map(filename => fs.rm(filename, { force: true }).catch(() => {})))
+    await Promise.all([...(retainCandidate ? [] : [temporary]), ...staged.map(item => item.temporary)].map(filename => fs.rm(filename, { force: true }).catch(() => {})))
     // These are exact, generated temporary directories beneath the verified document root.
     for (const bundle of packages) {
       const local = path.relative(root, path.resolve(bundle.temporary))
@@ -373,12 +422,27 @@ async function saveFile(input: Parameters<DocumentPersistence['save']>[0],
 export interface DocumentJournal extends DocumentPersistence {
   recover(documentId: string): Promise<DurableDocumentState | null>
   list(): Promise<string[]>
+  listBindings(): Promise<readonly JournalBindingMetadata[]>
+  readonly recoveryIssues: readonly string[]
+  assertAvailable(paths?: readonly string[], documentIds?: readonly string[], readOnly?: boolean): Promise<void>
+  /** Diagnostic read: never truncates a torn tail or updates a save binding. */
+  inspect(documentId: string): Promise<DurableDocumentState | null>
   discard(documentId: string): Promise<void>
+  lookupSave(documentId: string, identity: DocumentSaveIdentity): Promise<DocumentSaveProof | null>
 }
 
 /** Main-process persistence only. The DocumentSession remains the sole content/history writer. */
 export function createDocumentJournal(options: { directory: string }): DocumentJournal {
   const directory = path.resolve(options.directory)
+  const bindings = new JournalBindingIndex()
+  const unavailable = new Map<string, { documentId?: string; path?: string; message: string }>()
+  const load = async (target: string, documentId?: string): Promise<DurableDocumentState | null> => {
+    const known = await bindings.read(target)
+    let offset = known?.offset ?? 0
+    const state = await scan(target, documentId, { offset, onRecord: value => { offset = value } })
+    if (state && !known) await bindings.update(target, state, offset)
+    return state
+  }
   const filename = (documentId: string) => path.join(directory, `${digest(Buffer.from(documentId))}.journal`)
   const intentFilename = (documentId: string) => path.join(directory, `${digest(Buffer.from(documentId))}.save-intent.json`)
   const readIntent = async (documentId: string): Promise<SaveIntent | null> => {
@@ -405,7 +469,8 @@ export function createDocumentJournal(options: { directory: string }): DocumentJ
     checkState(state, state.documentId)
     const encoded = record(state)
     await fs.mkdir(directory, { recursive: true })
-    const previous = await scan(target, state.documentId)
+    const known = await bindings.read(target)
+    const previous = !known || state.sequence <= known.sequence ? await load(target, state.documentId) : null
     if (previous && state.sequence <= previous.sequence) {
       if (state.sequence === previous.sequence && isDeepStrictEqual(previous, state)) {
         const handle = await fs.open(target, 'r+')
@@ -417,25 +482,29 @@ export function createDocumentJournal(options: { directory: string }): DocumentJ
     }
     const handle = await fs.open(target, 'a+')
     const before = (await handle.stat()).size
+    let recordOffset = before
     try { await handle.writeFile(encoded); await handle.sync() }
     catch (error) { await handle.truncate(before); await handle.sync(); throw error }
     finally { await handle.close() }
     await syncDirectory(directory)
+    // Every record already contains the complete current undo/redo history, receipts
+    // and resources. Compact duplicate historical snapshots, never the history within it.
+    // The append is durable first; a failed maintenance replacement cannot undo its ACK.
+    if (before + encoded.length > Math.max(16 * 1024 * 1024, encoded.length * 3)) {
+      const temporary = `${target}.checkpoint-${randomUUID()}.tmp`
+      try {
+        await writeFlushed(temporary, encoded)
+        await fs.rename(temporary, target)
+        recordOffset = 0
+        await syncDirectory(directory)
+      } catch { /* Keep the already durable append if optional compaction is unavailable. */ }
+      finally { await fs.rm(temporary, { force: true }).catch(() => undefined) }
+    }
+    await bindings.update(target, state, recordOffset).catch(() => undefined)
   }
   const reconcileSave = async (target: string, state: DurableDocumentState): Promise<DurableDocumentState> => {
     const intent = await readIntent(state.documentId)
-    if (!intent || intent.epoch !== state.epoch || intent.kind !== state.model.kind ||
-      state.revision < intent.revision || state.savedRevision !== null && state.savedRevision > intent.revision ||
-      !isDeepStrictEqual(state.binding, intent.sourceBinding)) return state
-
-    // A clean Save As can publish a new file at revision r while the journal already
-    // says savedRevision=r. Only its still-unacknowledged binding transition needs
-    // repair; an ordinary clean save at the same path needs no new journal record.
-    const newBinding = state.binding.kind === 'untitled'
-      ? intent.targetBinding.bindingVersion === 1
-      : intent.targetBinding.bindingVersion === state.binding.bindingVersion + 1
-        && fileKey(intent.targetBinding.path) !== fileKey(state.binding.path)
-    if (state.savedRevision === intent.revision && !newBinding) return state
+    if (!pendingSave(state, state.model.kind, intent)) return state
     const targetPath = intent.targetBinding.path
     try {
       if ((await fs.lstat(targetPath)).isSymbolicLink()) return state
@@ -449,14 +518,14 @@ export function createDocumentJournal(options: { directory: string }): DocumentJ
     await appendWithinQueue(target, repaired)
     return repaired
   }
-  const recordSaveIntent = (input: Parameters<DocumentPersistence['save']>[0], targetBinding: FileBinding, expectedVersion: string): Promise<void> => {
+  const recordSaveIntent = (input: Parameters<DocumentPersistence['save']>[0], targetBinding: FileBinding, expectedVersion: string, fileIdentity: string | null): Promise<void> => {
     const target = filename(input.documentId)
     return serial(fileKey(target), async () => {
-      const state = await scan(target, input.documentId)
+      const state = await load(target, input.documentId)
       if (!state || state.revision < input.revision || state.model.kind !== input.model.kind) throw new Error('保存版本不属于当前文档恢复日志')
       const intent: SaveIntent = { schemaVersion: 1, documentId: input.documentId, epoch: state.epoch,
         revision: input.revision, kind: input.model.kind, sourceBinding: state.binding,
-        targetBinding, expectedVersion }
+        targetBinding, expectedVersion, ...(input.saveIdentity ? { saveIdentity: input.saveIdentity } : {}), ...(fileIdentity ? { fileIdentity } : {}) }
       const destination = intentFilename(input.documentId), temporary = `${destination}.${randomUUID()}.tmp`
       await fs.mkdir(directory, { recursive: true })
       try {
@@ -465,6 +534,39 @@ export function createDocumentJournal(options: { directory: string }): DocumentJ
         await syncDirectory(directory)
       } finally { await fs.rm(temporary, { force: true }).catch(() => {}) }
     })
+  }
+  const listBindings = async (): Promise<readonly JournalBindingMetadata[]> => {
+    let names: string[]
+    try { names = await fs.readdir(directory) } catch (error) { if (missing(error)) return []; throw error }
+    const found: JournalBindingMetadata[] = []
+    for (const name of names.filter(value => /^[a-f0-9]{64}\.journal$/.test(value)).sort()) {
+      const target = path.join(directory, name)
+      try {
+      const entry = await serial(fileKey(target), async () => {
+        let metadata = await bindings.read(target)
+        if (!metadata) { await load(target); metadata = await bindings.read(target) }
+        if (!metadata) return null
+        const intent = await readIntent(metadata.documentId)
+        // A published Save As may not yet have acknowledged its new binding.
+        if (pendingSave(metadata, metadata.kind, intent)) {
+          const state = await load(target, metadata.documentId)
+          if (state) await reconcileSave(target, state)
+          metadata = await bindings.read(target)
+        }
+        return metadata
+      })
+      if (entry) found.push(entry)
+      unavailable.delete(target)
+      } catch {
+        const prior = await bindings.read(target, true)
+        const message = `一份文档恢复记录无法读取，原文件保留：${prior?.binding.kind === 'file' ? prior.binding.path : name}`
+        unavailable.set(target, { ...(prior ? { documentId: prior.documentId } : {}),
+          ...(prior?.binding.kind === 'file' ? { path: prior.binding.path } : {}), message })
+        if (prior) found.push({ ...prior, unavailable: true })
+      }
+    }
+    for (const filename of unavailable.keys()) if (!names.includes(path.basename(filename))) unavailable.delete(filename)
+    return found
   }
   return {
     append(state) {
@@ -476,7 +578,7 @@ export function createDocumentJournal(options: { directory: string }): DocumentJ
     recover(documentId) {
       const target = filename(documentId)
       return serial(fileKey(target), async () => {
-        const state = await scan(target, documentId)
+        const state = await load(target, documentId)
         return state ? reconcileSave(target, state) : null
       })
     },
@@ -484,26 +586,45 @@ export function createDocumentJournal(options: { directory: string }): DocumentJ
       const target = filename(documentId)
       return serial(fileKey(target), async () => {
         await Promise.all([target, intentFilename(documentId)].map(name => fs.rm(name, { force: true })))
+        await bindings.discard(target)
         await syncDirectory(directory)
       })
     },
-    async list() {
-      let names: string[]
-      try { names = await fs.readdir(directory) } catch (error) { if (missing(error)) return []; throw error }
-      const ids: string[] = []
-      for (const name of names.filter(name => /^[a-f0-9]{64}\.journal$/.test(name)).sort()) {
-        const target = path.join(directory, name)
-        const state = await serial(fileKey(target), () => scan(target))
-        if (state) ids.push(state.documentId)
-      }
-      return ids
+    async lookupSave(documentId, identity) {
+      return serial(fileKey(filename(documentId)), async () => {
+        const intent = await readIntent(documentId)
+        if (!intent?.saveIdentity || !isDeepStrictEqual(intent.saveIdentity, identity) || !intent.fileIdentity) return null
+        try {
+          if (fileKey(await fs.realpath(path.dirname(intent.targetBinding.path))) !== fileKey(path.dirname(intent.targetBinding.path))) return null
+          if (await publicationIdentity(intent.targetBinding.path) !== intent.fileIdentity) return null
+          const version = await readDocumentFileVersion(intent.targetBinding.path, intent.kind)
+          if (version !== intent.expectedVersion) return null
+          return { identity, documentId, epoch: intent.epoch, savedRevision: intent.revision,
+            sourceBinding: intent.sourceBinding, binding: { ...intent.targetBinding, version } }
+        } catch (error) { if (missing(error)) return null; throw error }
+      })
+    },
+    listBindings,
+    get recoveryIssues() { return [...unavailable.values()].map(issue => issue.message) },
+    async assertAvailable(paths = [], documentIds = [], readOnly = false) {
+      await listBindings()
+      const contains = (parent: string, child: string) => { const rel = path.relative(fileKey(parent), fileKey(child)); return !rel || rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel) }
+      for (const issue of unavailable.values()) if (!readOnly && !issue.documentId && !issue.path
+        || issue.documentId && documentIds.includes(issue.documentId)
+        || issue.path && paths.some(filename => contains(issue.path!, filename) || contains(filename, issue.path!))) throw new Error(issue.message)
+    },
+    async list() { return (await listBindings()).filter(entry => !entry.unavailable).map(entry => entry.documentId) },
+    inspect(documentId) {
+      const target = filename(documentId)
+      return serial(fileKey(target), () => scan(target, documentId, { repairTail: false }))
     },
     save(input) {
       // The caller may commit r+1 while saving r. Capture everything synchronously.
       const frozen = deserialize(serialize(input)) as typeof input
       if (frozen.binding.kind !== 'file') return Promise.reject(new Error('保存需要已选择的文件路径'))
       return serial(fileKey(frozen.binding.path), () => saveFile(frozen,
-        (target, expectedVersion) => recordSaveIntent(frozen, target, expectedVersion)))
+        (target, expectedVersion, fileIdentity) => recordSaveIntent(frozen, target, expectedVersion, fileIdentity))
+        .catch(error => { throw error instanceof DocumentSaveFailure ? error : new DocumentSaveFailure('not-published', error) }))
     },
   }
 }

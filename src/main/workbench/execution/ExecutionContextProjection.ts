@@ -10,21 +10,41 @@ export function contextSourceIndex(sourceId: string): { runId: string; index: nu
 
 /** A disposable model working view. Original messages and native tool pairing remain owned by RunStore. */
 export function projectExecutionContext(runId: string, messages: readonly ModelChatMessage[], initialCount: number, retainToolTurns = 2) {
-  const imageMessages = messages.flatMap((message, index) => index >= initialCount && Array.isArray(message.content)
-    && message.content.some(imagePart) ? [index] : [])
-  const retained = new Set(imageMessages.slice(-2))
+  // A newly requested observation batch must reach the next model turn intact.
+  // Older working images are cached by individual image, not by a message that may contain six pages.
+  const lastAssistant = messages.map(message => message.role).lastIndexOf('assistant')
+  const retained = new Set<string>(), seenImages = new Set<string>()
+  let retainedBytes = 0, retainedCount = 0
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const parts = messages[index]!.content
+    if (!Array.isArray(parts)) continue
+    for (let partIndex = parts.length - 1; partIndex >= 0; partIndex--) {
+      const part = parts[partIndex]
+      if (!imagePart(part)) continue
+      const bytes = Buffer.byteLength(part.image_url.url, 'utf8')
+      const fresh = index < initialCount && lastAssistant < initialCount || lastAssistant >= initialCount && index > lastAssistant
+      if (fresh || !seenImages.has(part.image_url.url) && retainedCount < 2
+        && (retainedCount === 0 || retainedBytes + bytes <= 4 * 1024 * 1024)) {
+        retained.add(`${index}:${partIndex}`)
+        retainedCount++; retainedBytes += bytes; seenImages.add(part.image_url.url)
+      }
+    }
+  }
   const assistantTurns = messages.flatMap((message, index) => index >= initialCount && message.role === 'assistant'
     && Array.isArray(message.tool_calls) && message.tool_calls.length ? [index] : [])
   const recentStart = retainToolTurns > 0 ? assistantTurns.at(-retainToolTurns) ?? initialCount : messages.length
   let imagesArchived = 0, encodedImageBytesRemoved = 0, toolBytesRemoved = 0
   const projected = messages.map((message, index): ModelChatMessage => {
-    if (index < initialCount) return message
+    if (index < initialCount && !(Array.isArray(message.content) && message.content.some(imagePart))) return message
     const sourceId = contextMessageId(runId, index)
-    if (Array.isArray(message.content) && !retained.has(index) && message.content.some(imagePart)) {
-      const content = message.content.map(part => {
+    if (Array.isArray(message.content) && message.content.some(imagePart)) {
+      let imageIndex = -1
+      const content = message.content.map((part, partIndex) => {
         if (!imagePart(part)) return part
+        imageIndex++
+        if (retained.has(`${index}:${partIndex}`)) return part
         imagesArchived++; encodedImageBytesRemoved += Buffer.byteLength(part.image_url.url, 'utf8')
-        return { type: 'text', text: `画面已存档（不是当前画面）；完整内容仍在原运行。用 context.read 的 sourceId=${sourceId} 列出并按图片索引重读。` }
+        return { type: 'text', text: `旧画面已存档；需要比较时用 context.read 的 sourceId=${sourceId}, imageIndexes=[${imageIndex}] 取回。无需为完成流程重复读取旧图；当前页面请重新观察。` }
       })
       return { ...message, content }
     }

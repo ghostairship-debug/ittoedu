@@ -2,6 +2,8 @@ export interface RevealInExplorerDetail {
   workspaceId?: string
   path: string
   kind: 'folder' | 'file'
+  /** A saved-result action opens the located file; ordinary reveals only select it. */
+  open?: boolean
 }
 
 export const REVEAL_IN_EXPLORER_EVENT = 'guoling:reveal-in-explorer'

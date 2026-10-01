@@ -15,7 +15,9 @@ const STATE_LABEL: Record<ElementCardEntryState, string> = {
 /** The element's own AI card (M15): its requests and replies, questions and approvals, and an input for the next one. */
 export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey: string; capture?(): Promise<SelectionCapture>; onClose(): void; onRebind?(): void }) {
   const card = useElementCard(cardKey)
-  const [draft, setDraft] = useState(''), [sending, setSending] = useState(false), [error, setError] = useState('')
+  const [sending, setSending] = useState(false), [error, setError] = useState('')
+  const draft = card?.draft ?? ''
+  const setDraft = (value: string) => elementCards.setDraft(cardKey, value)
   const [conflict, setConflict] = useState<{ direction: 'undo' | 'redo'; submissionId: string; fields: readonly string[] } | null>(null)
   const input = useRef<HTMLTextAreaElement>(null), body = useRef<HTMLDivElement>(null)
   useEffect(() => { input.current?.focus({ preventScroll: true }) }, [])
@@ -26,7 +28,7 @@ export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey
     const text = draft.trim()
     if (!text || sending) return
     setSending(true); setError('')
-    try { await elementCards.send(cardKey, text, capture ? await capture() : undefined); setDraft('') }
+    try { await elementCards.send(cardKey, text, capture) }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)) }
     finally { setSending(false) }
   }
@@ -67,7 +69,7 @@ export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey
       : <ol className="element-ai-card__log" aria-label="修改记录">
         {card.entries.map(entry => <li key={entry.submissionId} className="element-ai-card__entry" data-state={entry.state}>
           <p className="element-ai-card__request">{entry.text}</p>
-          <p className="element-ai-card__state">{STATE_LABEL[entry.state]}</p>
+          <p className="element-ai-card__state">{entry.queuePausedReason === 'user' ? '排队已暂停' : STATE_LABEL[entry.state]}</p>
           {entry.reply && <p className="element-ai-card__reply">{entry.reply}</p>}
           {entry.change?.lostTexts?.length ? <p className="element-ai-card__notice" role="status">
             之前改过的文字“{entry.change.lostTexts.join('”“')}”在新页面里找不到原文，这些文字修改不再生效。</p> : null}
@@ -87,8 +89,15 @@ export function ElementAiCard({ cardKey, capture, onClose, onRebind }: { cardKey
           event.preventDefault(); void send()
         }} />
       <div className="element-ai-card__actions">
-        {card.busy && <button type="button" onClick={() => { void elementCards.stop(cardKey).catch(reason => setError(reason instanceof Error ? reason.message : String(reason))) }}>停止</button>}
-        <button type="submit" disabled={!draft.trim() || sending || text && (card.busy || Boolean(card.textLost))}>{sending ? '发送中…' : '发送'}</button>
+        {card.unconfirmed && <button type="button" disabled={sending} onClick={() => {
+          setSending(true); setError(''); void elementCards.confirmSend(cardKey).catch(reason => setError(reason instanceof Error ? reason.message : String(reason))).finally(() => setSending(false))
+        }}>核对并继续原发送</button>}
+        {card.busy && <button type="button" onClick={() => { void elementCards.stop(cardKey).catch(reason => setError(reason instanceof Error ? reason.message : String(reason))) }}>{card.entries.some(entry => entry.state === 'running') ? '停止当前' : card.entries.some(entry => entry.state === 'sending') ? '取消发送' : '取消排队'}</button>}
+        {card.entries.some(entry => entry.state === 'running') && card.entries.some(entry => entry.state === 'queued') && <button type="button"
+          onClick={() => { void elementCards.stop(cardKey, true).catch(reason => setError(String(reason))) }}>停止并暂停后续</button>}
+        {card.entries.some(entry => entry.queuePausedReason === 'user') && <button type="button"
+          onClick={() => { void elementCards.resumeQueue(cardKey).catch(reason => setError(String(reason))) }}>继续排队任务</button>}
+        <button type="submit" disabled={!draft.trim() || sending || card.closing || card.unconfirmed || text && (card.busy || Boolean(card.textLost))}>{sending ? '发送中…' : '发送'}</button>
       </div>
     </form>
   </section>

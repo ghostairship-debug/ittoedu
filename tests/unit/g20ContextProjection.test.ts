@@ -55,3 +55,35 @@ it('M27 pages archived text without splitting a UTF-16 surrogate pair', () => {
   const third = readContextMessage(message, contextReadSchema.parse({ sourceId: 'run:r:1', offset: second.data.nextOffset }))
   expect(first.data.text + second.data.text + third.data.text).toBe('A😀B')
 })
+
+it('sends a newly requested six-image batch once, then retains individual recent pictures rather than two whole batches', () => {
+  const first: ModelChatMessage = { role: 'system', content: 'scope' }
+  const batch: ModelChatMessage = { role: 'user', content: Array.from({ length: 6 }, (_, i) => ({ type: 'image_url', image_url: { url: pixels(i) } })) }
+  const request: ModelChatMessage = { role: 'assistant', content: null, tool_calls: [{ id: 'observe', type: 'function', function: { name: 'view.observe', arguments: '{}' } }] }
+  const result: ModelChatMessage = { role: 'tool', tool_call_id: 'observe', content: '{}' }
+  const pending = [first, request, result, batch], original = hash(pending)
+  expect(projectExecutionContext('r', pending, 1).messages.at(-1)).toEqual(batch)
+  const later = [...pending, { role: 'assistant', content: 'observed' } as ModelChatMessage]
+  const projected = projectExecutionContext('r', later, 1)
+  const parts = projected.messages[3]!.content as { type: string }[]
+  expect(parts.filter(part => part.type === 'image_url')).toHaveLength(2)
+  expect(projected.imagesArchived).toBe(4)
+  expect(JSON.stringify(parts[0])).toContain('imageIndexes=[0]')
+  expect(hash(pending)).toBe(original)
+  const reread = readContextMessage(batch, contextReadSchema.parse({ sourceId: 'run:r:3', imageIndexes: [0, 1, 2, 3, 4, 5] }))
+  expect(reread.data.imagesPrepared).toBe(6)
+})
+
+
+it('sends every explicit initial image on the first model turn and archives older initial pixels only after acknowledgement', () => {
+  const initial: ModelChatMessage[] = [{ role: 'system', content: 'fixed scope' }, { role: 'user', content:
+    Array.from({ length: 6 }, (_, i) => ({ type: 'image_url', image_url: { url: pixels(i) } })) }]
+  expect(projectExecutionContext('initial', initial, 2).messages).toEqual(initial)
+  const messages = [...initial, { role: 'assistant', content: '已观察六张图' } as ModelChatMessage]
+  const before = hash(messages), next = projectExecutionContext('initial', messages, 2)
+  expect(next.imagesArchived).toBe(4)
+  expect(JSON.stringify(next.messages)).not.toContain(pixels(0))
+  expect(hash(messages)).toBe(before)
+  const reread = readContextMessage(initial[1]!, contextReadSchema.parse({ sourceId: 'run:initial:1', imageIndexes: [0, 1] }))
+  expect(reread.data.imagesPrepared).toBe(2)
+})

@@ -60,6 +60,8 @@ const IPC_CHANNELS = {
   dirtyState: 'app:dirty-state',
   editorClipboard: 'editor:clipboard',
   requestSave: 'app:request-save',
+  launchFiles: 'app:launch-files',
+  launchFilesChanged: 'app:launch-files-changed',
   requestFocusDocument: 'app:request-focus-document',
   requestSaveAndClose: 'app:request-save-and-close',
   requestPreserveAndClose: 'app:request-preserve-and-close',
@@ -188,14 +190,17 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     draft: input => invoke(IPC_CHANNELS.execution, { type: 'draft', ...input }),
     renameConversation: input => invoke(IPC_CHANNELS.execution, { type: 'rename-conversation', ...input }),
     deleteConversation: input => invoke(IPC_CHANNELS.execution, { type: 'delete-conversation', ...input }),
+    prepareDocuments: input => invoke(IPC_CHANNELS.execution, { type: 'prepare-documents', ...input }),
     send: input => invoke(IPC_CHANNELS.execution, { type: 'send', ...input }),
     timing: input => invoke(IPC_CHANNELS.execution, { type: 'timing', ...input }),
     submission: input => invoke(IPC_CHANNELS.execution, { type: 'submission', ...input }),
     submissions: input => invoke(IPC_CHANNELS.execution, { type: 'submissions', ...input }),
+    runQueued: input => invoke(IPC_CHANNELS.execution, { type: 'run-queued', ...input }),
     deleteSubmission: input => invoke(IPC_CHANNELS.execution, { type: 'delete-submission', ...input }),
     pauseQueue: input => invoke(IPC_CHANNELS.execution, { type: 'pause-queue', ...input }),
     resumeQueue: input => invoke(IPC_CHANNELS.execution, { type: 'resume-queue', ...input }),
     run: runId => invoke(IPC_CHANNELS.execution, { type: 'run', runId }),
+    browserControl: input => invoke(IPC_CHANNELS.execution, { type: 'browser-control', ...input }),
     changeReview: input => invoke(IPC_CHANNELS.execution, { type: 'change-review', ...input }),
     changeRollback: input => invoke(IPC_CHANNELS.execution, { type: 'change-rollback', ...input }),
     checkpoint: input => invoke(IPC_CHANNELS.execution, { type: 'checkpoint', ...input }),
@@ -250,7 +255,7 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     closeWithDialog: (documentId, suggestedDirectory, discardOnly) => invoke(IPC_CHANNELS.documents, { type: 'close-dialog', documentId, ...(discardOnly === undefined ? {} : { discardOnly }),
       ...(suggestedDirectory ? { suggestedDirectory } : {}) }),
     recoverable: () => invoke(IPC_CHANNELS.documents, { type: 'recoverable' }),
-    restore: documentId => invoke(IPC_CHANNELS.documents, { type: 'restore', documentId }),
+    restore: (documentId, mode) => invoke(IPC_CHANNELS.documents, { type: 'restore', documentId, ...(mode ? { mode } : {}) }),
     discardRecovery: documentId => invoke(IPC_CHANNELS.documents, { type: 'discard-recovery', documentId }),
     subscribe: listener => {
       const receive = (_event: Electron.IpcRendererEvent, event: import('../shared/workbench/document').DocumentEvent) => listener(event)
@@ -342,6 +347,12 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   ),
   setDirtyState: (dirty) => invoke(IPC_CHANNELS.dirtyState, dirty),
   editorClipboard: command => invoke(IPC_CHANNELS.editorClipboard, command),
+  launchFiles: input => invoke(IPC_CHANNELS.launchFiles, input),
+  onLaunchFilesChanged: handler => {
+    const listener = () => handler()
+    ipcRenderer.on(IPC_CHANNELS.launchFilesChanged, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.launchFilesChanged, listener)
+  },
   onRequestFocusDocument: handler => {
     const listener = (_event: Electron.IpcRendererEvent, id: unknown) => { if (typeof id === 'string' && id.length > 0 && id.length <= 512) handler(id) }
     ipcRenderer.on(IPC_CHANNELS.requestFocusDocument, listener)

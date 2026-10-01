@@ -6,14 +6,21 @@ import { inspectImageTransformSource } from './imageTransform'
 
 export interface MaterialExtractionOptions {
   pages?: { from: number; to: number }
+  maxPages?: number
+  fromPage?: number
+  images?: 'auto' | 'all'
+  onProgress?: (page: number, total: number) => void
+  onSelectedPages?: (range: { from: number; to: number }) => void
   onPageCount?: (total: number) => void
   onPageImage?: (image: { assetId: string; width: number; height: number; downsampled: boolean }) => void
 }
 function pageRange(total: number, options: MaterialExtractionOptions) {
   options.onPageCount?.(total)
-  const range = options.pages ?? { from: 1, to: total }
+  const range = options.pages ?? { from: options.fromPage ?? 1, to: total }
   if (!Number.isSafeInteger(range.from) || !Number.isSafeInteger(range.to) || range.from < 1 || range.to < range.from || range.to > total) throw new Error(`页范围必须在 1–${total} 内`)
-  return range
+  const selected = { from: range.from, to: options.maxPages ? Math.min(range.to, range.from + options.maxPages - 1) : range.to }
+  options.onSelectedPages?.(selected)
+  return selected
 }
 
 function result(format: MaterialExtraction['format']): MaterialExtraction {
@@ -95,11 +102,12 @@ export function extractOfficeMaterial(bytes: Uint8Array, format: 'docx' | 'pptx'
     }
   } else {
     const slides = xmlAll(pkg.xml(part), 'sldId')
-    if (!slides.length || slides.length > limits.pages) throw new Error('材料幻灯片数量须为 1–100')
+    if (!slides.length) throw new Error('材料没有幻灯片')
     const range = pageRange(slides.length, options)
     const relationships = pkg.relationships(part)
     slides.forEach((slide, index) => {
       if (index + 1 < range.from || index + 1 > range.to) return
+      options.onProgress?.(index + 1, slides.length)
       const rel = relationships.find(item => item.id === pptxRelationshipId(slide) && item.type.endsWith('/slide'))
       if (!rel || rel.external || !pkg.files[rel.target]) throw new Error(`第 ${index + 1} 页内容缺失`)
       content(pkg, pkg.xml(rel.target).documentElement, rel.target, out, index + 1)
@@ -131,14 +139,19 @@ export async function extractPdfMaterial(bytes: Uint8Array, options: MaterialExt
   const out = result('pdf')
   try {
     const pdf = await loading.promise
-    if (pdf.numPages > limits.pages) throw new Error('PDF 材料不能超过 100 页')
     const range = pageRange(pdf.numPages, options)
     let totalBytes = 0
     for (let page = range.from; page <= range.to; page++) {
+      options.onProgress?.(page, pdf.numPages)
       const source = await pdf.getPage(page)
       const locator = { part: 'document.pdf', page }
       const text = (await source.getTextContent()).items.map(item => 'str' in item ? item.str + (item.hasEOL ? '\n' : ' ') : '').join('').trim()
       if (text) add(out, { kind: 'text', locator, text })
+      if (options.images === 'auto' && text) {
+        const ops = (await source.getOperatorList()).fnArray
+        const visual = new Set([pdfjs.OPS.paintImageXObject, pdfjs.OPS.paintInlineImageXObject, pdfjs.OPS.paintImageMaskXObject, pdfjs.OPS.constructPath, pdfjs.OPS.shadingFill])
+        if (!ops.some(op => visual.has(op))) { source.cleanup(); continue }
+      }
       const initial = source.getViewport({ scale: 1 })
       const viewport = source.getViewport({ scale: Math.min(2, 1600 / Math.max(initial.width, initial.height)) })
       const canvas = document.createElement('canvas')
@@ -160,7 +173,7 @@ export async function extractPdfMaterial(bytes: Uint8Array, options: MaterialExt
   } finally { await loading.destroy() }
 }
 export async function extractMaterial(bytes: Uint8Array, filename: string): Promise<MaterialExtraction> {
-  if (!bytes.length || bytes.length > limits.sourceBytes) throw new Error('材料须为非空且不超过 32 MiB 的文件')
+  if (!bytes.length || bytes.length > limits.sourceBytes) throw new Error('材料须为非空且不超过 256 MiB 的文件')
   const extension = filename.split('.').pop()?.toLowerCase()
   if (extension === 'docx' || extension === 'pptx') return extractOfficeMaterial(bytes, extension)
   if (extension === 'pdf') return extractPdfMaterial(bytes)

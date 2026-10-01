@@ -26,10 +26,10 @@ interface CreateReservation { version: 1; runId: string; ticket: BuildCreateTick
 
 type CourseModel = Extract<DocumentModel, { kind: 'course-v9' }>
 interface Job extends BuildJobSnapshot {
-  budget: BuildBudget; allowedOrigins: string[]; logs: BuildLogEntry[]; sourceDigest?: string
-  lastCheckDigest?: string; sameSourceChecks: number; artifact?: BuildImportArtifact; artifactDigest?: string
+  budget: BuildBudget; budgetSources?: Partial<Record<keyof BuildBudget, 'host-default' | 'explicit'>>; allowedOrigins: string[]; logs: BuildLogEntry[]; sourceDigest?: string
+  lastCheckDigest?: string; lastCheckOwner?: string; sameSourceChecks: number; artifact?: BuildImportArtifact; artifactDigest?: string
 }
-const DEFAULT_BUDGET: BuildBudget = { maxBytes: 64 * 1024 * 1024, maxFiles: 4096, maxWrites: 256, maxChecks: 12, maxSameSourceChecks: 2, maxDurationMs: 10 * 60_000 }
+const DEFAULT_BUDGET: BuildBudget = { maxBytes: 256 * 1024 * 1024, maxFiles: 16384, maxWrites: null, maxChecks: null, maxSameSourceChecks: null, maxDurationMs: 10 * 60_000 }
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT'
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 export class ControlledBuildError extends Error {
@@ -39,6 +39,7 @@ export class ControlledBuildError extends Error {
 /** Source is data here. No candidate scripts, configs, plugins, shell commands or install hooks run in Main. */
 export class ControlledBuildService {
   private readonly directory: string
+  private readonly checkOwner = randomUUID()
   private readonly jobs = new Map<string, Job>()
   private readonly baselines = new Map<string, CourseModel>()
   private readonly tails = new Map<string, Promise<unknown>>()
@@ -95,7 +96,7 @@ export class ControlledBuildService {
   private checkingLive(job: Job) {
     this.live(job)
     // A synchronous closure or digest may cross the deadline before its timer callback can run.
-    if (Date.now() >= job.deadline) { job.status = 'exhausted'; throw new ControlledBuildError('build-budget', '本次构建检查超时，已保留暂存源码和错误') }
+    if (Date.now() >= job.deadline) { job.status = 'failed'; throw new ControlledBuildError('build-timeout', '本次检查超时；候选和已完成修改保留，可以继续检查或修正') }
   }
   private log(job: Job, stage: BuildLogEntry['stage'], level: BuildLogEntry['level'], message: string) {
     job.logs.push({ cursor: job.logs.length + 1, time: Date.now(), stage, level, message: message.slice(0, 8000), ...(message.length > 8000 ? { truncated: true } : {}) })
@@ -200,9 +201,14 @@ export class ControlledBuildService {
     if (!input.runId || input.baseline.kind !== 'course-v9' || input.baseline.project.id !== target.projectId || input.baseline.project.revision !== target.baseRevision || documentDigest(input.baseline) !== target.modelDigest ||
         !readSet.some(entry => entry.documentId === target.documentId && entry.epoch === target.epoch && entry.revision === target.baseRevision && entry.digest === target.modelDigest)) throw new ControlledBuildError('invalid-baseline', '构建冻结目标与读集合不一致')
     const budget = { ...DEFAULT_BUDGET, ...input.budget }
-    for (const [key, value] of Object.entries(budget)) if (!Number.isSafeInteger(value) || value < 1 || value > DEFAULT_BUDGET[key as keyof BuildBudget]) throw new ControlledBuildError('invalid-budget', '构建预算必须在宿主上限内')
+    for (const [key, value] of Object.entries(budget)) {
+      const maximum = DEFAULT_BUDGET[key as keyof BuildBudget]
+      if (maximum === null && value === null) continue
+      if (maximum === undefined || !Number.isSafeInteger(value) || value === null || value < 1
+        || maximum !== null && value > maximum) throw new ControlledBuildError('invalid-budget', '构建预算必须在宿主资源范围内；调用次数默认不设限')
+    }
     const allowedOrigins = input.allowedOrigins.map(origin => courseConnectOriginSchema.parse(origin))
-    const now = Date.now(), job: Job = { jobId: reservedJobId ?? randomUUID(), runId: input.runId, target, readSet, sourceRevision: 0, status: 'editing', createdAt: now, deadline: now + budget.maxDurationMs, writes: 0, checks: 0, budget, allowedOrigins, logs: [], sameSourceChecks: 0 }
+    const now = Date.now(), job: Job = { jobId: reservedJobId ?? randomUUID(), runId: input.runId, target, readSet, sourceRevision: 0, status: 'editing', createdAt: now, deadline: now + budget.maxDurationMs, writes: 0, checks: 0, budget, budgetSources: Object.fromEntries(Object.keys(budget).map(key => [key, Object.hasOwn(input.budget ?? {}, key) ? 'explicit' : 'host-default'])), allowedOrigins, logs: [], sameSourceChecks: 0 }
     await fs.mkdir(this.directory, { recursive: true }); await this.safeRoot(this.directory)
     await fs.mkdir(this.folder(job.jobId)); await fs.mkdir(path.join(this.folder(job.jobId), 'files'))
     const baselineFile = await fs.open(path.join(this.folder(job.jobId), 'baseline.bin'), 'wx')
@@ -223,7 +229,7 @@ export class ControlledBuildService {
   }
   private async writeFile(job: Job, relative: string, bytes: Uint8Array, count = true) {
     this.live(job)
-    if (count && job.writes >= job.budget.maxWrites) { job.status = 'exhausted'; throw new ControlledBuildError('build-budget', '构建写入次数已达上限') }
+    if (count && job.budget.maxWrites !== null && job.writes >= job.budget.maxWrites) { job.status = 'exhausted'; throw new ControlledBuildError('build-budget', '构建写入次数已达上限') }
     const root = await this.scratch(job), filename = await resourcePath(root, relative, { rejectSymlinks: true })
     const existing = await this.files(job)
     const total = Object.values(existing).reduce((sum, value) => sum + value.length, 0) - (existing[relative]?.length ?? 0) + bytes.length
@@ -236,7 +242,7 @@ export class ControlledBuildService {
     if (count) { job.writes++; job.sourceRevision++; job.status = 'editing'; delete job.artifact; delete job.artifactId }
   }
   private syntax(source: string, kind: 'component' | 'runtime', filename: string) {
-    if (Buffer.byteLength(source) > 2 * 1024 * 1024) throw new Error('动态源码超过 2 MiB 上限')
+    if (Buffer.byteLength(source) > 16 * 1024 * 1024) throw new Error('动态源码超过 16 MiB，请拆分模块或移出内嵌素材')
     if (kind === 'component') validateComponentRuntimeSource(source); else validateRuntimeSource(source)
     // V8 compiles grammar but never executes the candidate. There is deliberately no runInContext/eval/child process.
     new Script(source, { filename: `build-scratch:${filename}` })
@@ -280,7 +286,13 @@ export class ControlledBuildService {
   }
   private async check(job: Job, buttonCheck?: Parameters<BuildAdmissionPort['run']>[0]['buttonCheck'], accepted?: (snapshot: BuildJobSnapshot) => void) {
     this.live(job)
-    if (job.checks >= job.budget.maxChecks) { job.status = 'exhausted'; throw new ControlledBuildError('build-budget', '构建检查次数已达上限') }
+    if (job.status === 'ready' && job.artifact && job.artifactId && job.lastCheckOwner === this.checkOwner) {
+      const sourceDigest = this.filesDigest(await this.files(job))
+      if (sourceDigest === job.sourceDigest
+        && job.lastCheckDigest === documentDigest({ sourceDigest, buttonCheck: buttonCheck ?? null })
+        && documentDigest(job.artifact.command) === job.artifactDigest) return this.view(job)
+    }
+    if (job.budget.maxChecks !== null && job.checks >= job.budget.maxChecks) { job.status = 'exhausted'; throw new ControlledBuildError('build-budget', '构建检查次数已达上限') }
     // The duration bounds this admission attempt. Model thinking, image generation and user
     // waiting between scratch operations do not spend the build execution budget.
     job.deadline = Date.now() + job.budget.maxDurationMs
@@ -295,7 +307,8 @@ export class ControlledBuildService {
       // A newly requested button is a new observation intent even when source bytes are unchanged.
       const checkDigest = documentDigest({ sourceDigest, buttonCheck: buttonCheck ?? null })
       job.sameSourceChecks = checkDigest === job.lastCheckDigest ? job.sameSourceChecks + 1 : 1; job.lastCheckDigest = checkDigest
-      if (job.sameSourceChecks > job.budget.maxSameSourceChecks) { job.status = 'exhausted'; throw new ControlledBuildError('build-no-progress', '源码未变化且重复检查无进展；已停止并保留诊断') }
+      job.lastCheckOwner = this.checkOwner
+      if (job.budget.maxSameSourceChecks !== null && job.sameSourceChecks > job.budget.maxSameSourceChecks) { job.status = 'exhausted'; throw new ControlledBuildError('build-no-progress', '源码未变化且重复检查无进展；已停止并保留诊断') }
       const baseline = await this.baseline(job)
       let model = this.model(files, job, baseline)
       this.log(job, 'closure', 'info', '普通 JavaScript 语法、正式 Component/Runtime 协议、精确来源和工程资源闭包通过；尚不代表动态准入')
@@ -344,7 +357,7 @@ export class ControlledBuildService {
       job.sourceDigest = sourceDigest; job.artifactId = artifactId; job.status = 'ready'
       this.log(job, 'admission', 'info', targets.length ? '真实宿主准入完成；制品可交正式 Gateway 按冻结前提导入，尚未修改文档，语义结果待复核' : '静态制品已准备；尚未修改文档')
     } catch (error) {
-      if ((job.status as BuildJobSnapshot['status']) !== 'cancelled' && job.status !== 'exhausted') job.status = Date.now() >= job.deadline ? 'exhausted' : 'failed'
+      if ((job.status as BuildJobSnapshot['status']) !== 'cancelled' && job.status !== 'exhausted') job.status = 'failed'
       this.log(job, 'admission', 'error', error instanceof Error ? error.message : String(error))
     } finally { clearTimeout(timer); if (abortListener) controller.signal.removeEventListener('abort', abortListener); this.controllers.delete(job.jobId); await this.save(job) }
     return this.view(job)
@@ -391,7 +404,7 @@ export class ControlledBuildService {
       }
       if (call.type === 'syntax') {
         this.live(job)
-        if (job.checks >= job.budget.maxChecks) { job.status = 'exhausted'; await this.save(job); throw new ControlledBuildError('build-budget', '构建检查次数已达上限') }
+        if (job.budget.maxChecks !== null && job.checks >= job.budget.maxChecks) { job.status = 'exhausted'; await this.save(job); throw new ControlledBuildError('build-budget', '构建检查次数已达上限') }
         job.checks++
         try { const filename = await resourcePath(await this.scratch(job), call.path, { rejectSymlinks: true }); this.syntax(new TextDecoder('utf-8', { fatal: true }).decode(await fs.readFile(filename)), call.kind, call.path); this.log(job, 'syntax', 'info', `${call.path} 语法编译通过；尚未完成协议/闭包/动态准入`); await this.save(job); return { ok: true, stage: 'syntax-checked' } }
         catch (error) { this.log(job, 'syntax', 'error', error instanceof Error ? error.message : String(error)); await this.save(job); return { ok: false, stage: 'syntax-checked', message: job.logs[job.logs.length - 1].message } }

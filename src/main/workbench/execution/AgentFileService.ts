@@ -26,6 +26,7 @@ export class AgentFileService implements AgentFilePort {
   private readonly grepPages = new FileGrepPages()
   private readonly text: AgentFileText
   constructor(private readonly host: DocumentHostService) { this.text = new AgentFileText(host) }
+  releaseRun(runId: string): void { this.pages.releaseRun(runId); this.grepPages.releaseRun(runId); this.text.releaseRun(runId) }
   private async mayRead(context: AgentFileContext, resolved: string): Promise<boolean> {
     if (context.permission === 'full' || isInsideRoot(context.workspaceRoot, resolved)) return true
     for (const candidate of context.readOnlyRoots ?? []) {

@@ -205,6 +205,7 @@ export class DocumentToolGateway implements ToolGateway {
       },
       active: (runId, documentId, epoch) => { const run = this.run(runId); if (run.stopped) throw new ToolError('run-stopped', '任务已停止'); const current = this.registry.get(documentId).read(); this.authorizeDocument(run, current); if (current.epoch !== epoch) throw new ToolError('stale-epoch', '文档会话已改变') },
       actor: runId => this.run(runId).grant.actor,
+      applied: (runId, before, after) => this.recordAppliedFootprints(runId, before, after.model, after.revision, [], []),
       ownsDocument: (runId, documentId) => this.run(runId).grant.documents.some(document => document.documentId === documentId),
       provideImage: (runId, documentId, source) => this.provideImage(runId, documentId, source),
       readImage: (runId, documentId, resource) => this.readImageResource(runId, documentId, resource),
@@ -450,6 +451,22 @@ export class DocumentToolGateway implements ToolGateway {
     const nextCursor = `c${this.createId()}`
     this.cursors.set(nextCursor, { ...this.readIdentity(runId, snapshot, target), method: 'read', digest: documentDigest(content), offset: maxChars })
     return { kind: target.kind, text: content.slice(0, maxChars), total: content.length, truncated: true, nextCursor }
+  }
+
+  /** Diagnostic/settlement identity only. Does not validate or widen the writable grant. */
+  effectTargets(runId: string, call: ModelToolCall): Array<{ documentId: string; target: ToolTarget }> | undefined {
+    const input = call.input && typeof call.input === 'object' ? call.input as { target?: unknown; operations?: unknown } : null
+    const supported = ['text.replace', 'native.modify', 'object.update', 'document.text', 'file.save', 'document.export', 'view.observe']
+    const calls = call.name === 'batch' && Array.isArray(input?.operations) ? input.operations as ModelToolCall[] : [call]
+    if (!calls.length || calls.some(item => !item || !supported.includes(item.name))) return undefined
+    const targets: Array<{ documentId: string; target: ToolTarget }> = []
+    for (const item of calls) {
+      const target = item.input && typeof item.input === 'object' && 'target' in item.input ? item.input.target : undefined
+      if (typeof target !== 'string') return undefined
+      try { const handle = this.handle(runId, target); targets.push({ documentId: handle.documentId, target: structuredClone(handle.target) }) }
+      catch { return undefined }
+    }
+    return targets
   }
 
   /** Host-only: documents named by any of these strings when they are handles issued to this run. */
@@ -797,7 +814,7 @@ export class DocumentToolGateway implements ToolGateway {
   }
 
   /** Host-owned bytes stay out of tool receipts; the Engine may send verified images on the next model round. */
-  readMcpResource(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array } {
+  readMcpResource(runId: string, resourceId: string): Promise<{ mimeType: string; bytes: Uint8Array }> {
     return this.hostTools.readMcpResource(runId, resourceId)
   }
 
@@ -967,7 +984,7 @@ export class DocumentToolGateway implements ToolGateway {
       if (call.name === 'mcp.invoke') return this.hostTools.mcpInvoke(runId, operationId, value.name as string,
         value.arguments as Record<string, unknown>, value.snapshotId as string | undefined)
       if (call.name === 'mcp.resource') {
-        const resource = this.hostTools.readMcpResource(runId, value.resourceId as string)
+        const resource = await this.hostTools.readMcpResource(runId, value.resourceId as string)
         return { kind: 'read', data: { resourceId: value.resourceId, mimeType: resource.mimeType,
           byteLength: resource.bytes.byteLength, observation: 'host-resource-available-for-next-request' } }
       }
@@ -1471,7 +1488,9 @@ export class DocumentToolGateway implements ToolGateway {
     const command = isSourceDocumentModel(model) ? { type: 'markdown.replace' as const, source: model.source, resources: model.resources }
       : { type: 'course.replace' as const, project: model.project, resources: model.resources }
     const result = await session.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch, operationId, baseRevision: snapshot.revision,
-      actor: run.grant.actor, runId, requestDigest, mutation: { type: 'command', command } })
+      actor: run.grant.actor, runId, requestDigest,
+      ...((sourceSplices.length || flowSplices.length) ? { textChanges: { source: sourceSplices, flow: flowSplices } } : {}),
+      mutation: { type: 'command', command } })
     if (result.status === 'applied') this.recordAppliedFootprints(runId, snapshot, model, result.revision, sourceSplices, flowSplices)
     const affected: string[] = []
     const advisories: ToolAdvisory[] = []
@@ -1578,7 +1597,8 @@ export class DocumentToolGateway implements ToolGateway {
     }
     const refreshed = this.refreshReadHandle(handle, snapshot, target)
     const refreshedHandle = this.handle(runId, refreshed)
-    const limit = method === 'listChildren' ? input.limit ?? 25 : (input.limit ?? 25) * 100
+    // Large page requests are served in chunks, not rejected after a paid model round.
+    const limit = method === 'listChildren' ? Math.min(input.limit ?? 100, 1000) : Math.min((input.limit ?? 120) * 100, 64_000)
     const end = Math.min(offset + limit, content.length)
     if (method === 'read' && typeof content === 'string') this.readCoverage.record(runId, snapshot, target, content.length, offset, end)
     let data: unknown

@@ -1,7 +1,7 @@
 import { parseHtmlStartTag, readHtmlRawText } from '../../../shared/html/htmlSourceScanner'
 import { createHash } from 'node:crypto'
 import { parse } from 'acorn'
-import { analyzeJavaScriptClosure, CSS_RESOURCE_PROPERTIES } from './javascriptClosureProof'
+import { analyzeJavaScriptClosure, CSS_RESOURCE_PROPERTIES, nonResourceStyle } from './javascriptClosureProof'
 import type { RemoteReference as Remote } from './types'
 import type {
   ExtractedResource,
@@ -676,9 +676,15 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       handled.add(value)
       addEdit({ start: value.start, end: value.end, value: jsString(next) })
     }
+    const preserveDynamicHtml = (name: string) => addDiagnostic(sink, 'warning', 'dynamic-html-preserved',
+      `${name} 的动态内容保留原代码执行；运行时生成的资源未作静态收集`)
     const embeddedSink = (value: Node, kind: 'css' | 'html', name: string) => {
       const text = literalValue(value) ?? (value.type === 'Identifier' ? constants.get(String(value.name)) ?? null : null)
-      if (text === null) { addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的资源内容`); return }
+      if (text === null) {
+        if (kind === 'html') preserveDynamicHtml(name)
+        else addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的资源内容`)
+        return
+      }
       const next = kind === 'css' ? rewriteCss(text, baseDir, sink, siblings, name) : transformHtml(text, sink, siblings, baseDir, true)
       writeString(value, next)
     }
@@ -703,7 +709,11 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
         ...closureProof.embeddedInputs,
       ]
       for (const input of inputs) {
-        if (input.proof.kind !== 'proven-resource') { addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${input.name} 的资源内容`); continue }
+        if (input.proof.kind !== 'proven-resource') {
+          if (input.kind === 'html') preserveDynamicHtml(input.name)
+          else addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${input.name} 的资源内容`)
+          continue
+        }
         for (const literal of input.proof.literals) {
           const before = literalValue(literal)!
           const after = input.kind === 'url' ? rewriteUrl(before, input.name, input.usage)
@@ -744,16 +754,17 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       const left = node.left as Node, right = node.right as Node
       const property = left.property as Node | undefined
       const name = memberName(left) ?? (left.computed && property?.type === 'Identifier' ? constants.get(String(property.name)) ?? null : null)
-      if (left.type === 'MemberExpression' && left.computed && name === null && !(property?.type === 'Literal' && typeof property.value === 'number'))
+      const dataTarget = left.type === 'MemberExpression' && closureProof.dataReceiver(left.object as Node)
+      if (left.type === 'MemberExpression' && left.computed && name === null && !dataTarget && !(property?.type === 'Literal' && typeof property.value === 'number'))
         addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', '无法静态确定计算属性写入是否为资源入口')
-      if (name && ['src', 'srcset', 'href', 'poster', 'data', 'action', 'formAction'].includes(name)) {
+      if (!dataTarget && name && ['src', 'srcset', 'href', 'poster', 'data', 'action', 'formAction'].includes(name)) {
         if (node.operator !== '=') addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的复合写入`)
         else urlSink(right, name, targetUsage(left.object as Node | undefined, name))
       }
-      const htmlTarget = !!name && ['innerHTML', 'outerHTML', 'srcdoc'].includes(name)
-      const cssTarget = name === 'cssText' || (left.type === 'MemberExpression' && closureProof.styleReceiver(left.object as Node))
-      if ((htmlTarget || cssTarget) && node.operator !== '=') addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', '资源内容的复合写入无法静态解析')
-      else if (htmlTarget) embeddedSink(right, 'html', name!)
+      const htmlTarget = !dataTarget && !!name && ['innerHTML', 'outerHTML', 'srcdoc'].includes(name)
+      const cssTarget = !dataTarget && (name === 'cssText' || (left.type === 'MemberExpression' && closureProof.styleReceiver(left.object as Node) && !nonResourceStyle(name)))
+      if (htmlTarget) embeddedSink(right, 'html', name!)
+      else if (cssTarget && node.operator !== '=') addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', '资源内容的复合写入无法静态解析')
       else if (cssTarget) embeddedSink(right, 'css', name ?? 'style')
     }
     if (node.type === 'AssignmentExpression' && closureProof.auditedNode(node) && node.operator === '=') {
@@ -779,7 +790,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       }
       if (!closureProof.auditedNode(node)) {
         const args = node.arguments as Node[]
-        if (name === 'setProperty' && args[1]) embeddedSink(args[1], 'css', 'style.setProperty')
+        if (name === 'setProperty' && args[1] && !nonResourceStyle(args[0] ? literalValue(args[0]) : null)) embeddedSink(args[1], 'css', 'style.setProperty')
         if (name === 'insertRule' && args[0]) embeddedSink(args[0], 'css', 'stylesheet.insertRule')
         if (name === 'insertAdjacentHTML' && args[1]) embeddedSink(args[1], 'html', name)
       }

@@ -12,17 +12,17 @@ const ignoredDirectories = new Set(['.git', 'node_modules', 'dist', 'output', '.
 /** A cursor is an observation position, never file authority. Every directory is revalidated by the caller. */
 export class FileBrowsePages {
   private readonly cursors = new Map<string, Cursor>()
+  releaseRun(runId: string): void { for (const [id, value] of this.cursors) if (value.runId === runId) this.cursors.delete(id) }
   private start(runId: string, root: string, query: string | undefined, cursor?: string): Cursor {
     if (!cursor) return { runId, root, query, queue: [{ directory: root, offset: 0 }], createdAt: Date.now(),
       excludedCount: 0, failedCount: 0, scannedEntries: 0 }
     const saved = this.cursors.get(cursor)
-    if (!saved || saved.runId !== runId || saved.root !== root || saved.query !== query || Date.now() - saved.createdAt > 900_000)
+    if (!saved || saved.runId !== runId || saved.root !== root || saved.query !== query)
       throw new Error('目录分页已失效或不属于本次查询，请从首页重新读取')
     return structuredClone(saved)
   }
   private remember(value: Cursor): string {
     const id = randomUUID()
-    while (this.cursors.size >= 128) this.cursors.delete(this.cursors.keys().next().value!)
     this.cursors.set(id, structuredClone(value))
     return id
   }
@@ -74,7 +74,6 @@ export class FileBrowsePages {
       }
       if (position.offset === entries.length) state.queue.shift()
     }
-    if (state.queue.length > 10_000) throw new Error('搜索待查目录过多，请指定更小的目录；没有返回完整搜索的结论')
     const truncated = state.queue.length > 0
     return { matches, scanned, scannedEntries: state.scannedEntries, excludedCount: state.excludedCount,
       failedCount: state.failedCount, excluded, failed, truncated,

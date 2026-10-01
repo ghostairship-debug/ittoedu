@@ -17,6 +17,7 @@ import { ViewObservationService } from './observation/ViewObservationService'
 import { ViewObservationDesktopService } from './observation/ViewObservationDesktopService'
 import { ObservationImageStore } from './observation/ObservationImageStore'
 import { DocumentDeliveryService } from './delivery/DocumentDeliveryService'
+import { ExecutionRunStore } from './execution/ExecutionRunStore'
 import { DocumentDeliveryOperationStore } from './delivery/DocumentDeliveryOperationStore'
 import { DocumentExportPort } from './delivery/DocumentExportPort'
 import { resolveExportDestination, resolveSaveDestination, workbenchExportWriter } from './workbenchDeliveryAdapters'
@@ -80,6 +81,13 @@ export function approveWorkbenchBrowserAction(input: BrowserActionApproval): voi
     throw new Error('外部页面已变化，请重新观察后批准具体操作')
   browserActionApprovals.grant(input)
 }
+export async function controlWorkbenchBrowser(runId: string, action: 'status' | 'takeover' | 'resume') {
+  if (!browserService) throw new Error('本任务尚未启动受管浏览器')
+  if (action === 'status') return browserService.controlState(runId)
+  browserActionApprovals?.invalidate(runId)
+  return browserService.control(runId, action)
+}
+
 export function workbenchBrowserApprovalContext(runId: string): { pageUrl?: string; snapshotId?: string } {
   if (!browserService) throw new Error('受管浏览器尚未安装')
   return browserService.approvalContext(runId)
@@ -172,9 +180,11 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   }
   const deliveries = new DocumentDeliveryService({
     documents: { read: documentId => host.registry.get(documentId).drain(),
-      saveWithFact: (documentId, filename) => host.saveWithFact(documentId, filename),
+      saveWithFact: (documentId, filename, identity) => host.saveWithFact(documentId, filename, identity),
+      lookupSave: (documentId, identity) => host.lookupSave(documentId, identity),
       withFileLease: (documentId, work) => host.registry.get(documentId).withFileLease(lease => work(() => lease.read())) },
     operations: new DocumentDeliveryOperationStore(path.join(directory, 'document-delivery-operations')),
+    taskRunIds: runId => new ExecutionRunStore(path.join(directory, 'runs')).taskLineage(runId),
     authorize: async ({ runId }) => {
       if (host.tools.runFileAccess(runId)?.permission === 'read-only') throw new Error('只读任务不能保存或导出文件')
     },
@@ -183,12 +193,20 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       resolveExportDestination(runId, snapshot, requested, suggestedName, format, id => host.tools.runFileAccess(id)),
     build: { build: (request, signal) => currentExportPort().build(request, signal) },
     writer: workbenchExportWriter,
+    withFileOperation: work => host.fileCoordinator.withFileOperation(work),
+    assertExportTarget: async filename => {
+      await host.assertFileAvailable(filename)
+      const key = (value: string) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value)
+      for (const snapshot of host.registry.list()) if (snapshot.binding.kind === 'file' && key(snapshot.binding.path) === key(filename)
+        && (await host.registry.get(snapshot.documentId).drain()).dirty) throw new Error('导出目标存在尚未保存的修改；请选择新文件名')
+    },
     signalForRun: runId => deliverySignals.get(runId)?.signal,
   })
   const services: HostToolServices = {
     htmlImports,
     deliveries,
     observations: {
+      stopRun: runId => observations.stopRun(runId),
       observe: input => {
         const signal = deliverySignals.get(input.runId)?.signal
         if (!signal || signal.aborted) throw new Error('观察任务已停止')

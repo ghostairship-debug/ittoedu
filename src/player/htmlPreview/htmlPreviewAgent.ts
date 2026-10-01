@@ -11,7 +11,8 @@ type Patch = { type: 'html-preview.patch'; loadId: string; handle: string; kind:
 type Navigate = { type: 'html-preview.navigate'; loadId: string; index: number }
 type Restore = { type: 'html-preview.restore'; loadId: string; index: number; scroll: number }
 type EditMode = { type: 'html-preview.edit-mode'; loadId: string; requestId: string; enabled: boolean }
-type Command = Init | Patch | Navigate | Restore | EditMode
+type Visibility = { type: 'html-preview.visibility'; loadId: string; active: boolean }
+type Command = Init | Patch | Navigate | Restore | EditMode | Visibility
 
 interface RuntimeNodeTracking {
   isRuntimeNode(node: Node): boolean
@@ -187,19 +188,45 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
       attributeName: node instanceof HTMLImageElement ? 'src' : null,
       rect, scriptCreated: tracking.isRuntimeNode(node) }
   }
+  let visible = true
+  const pausedMedia = new Set<HTMLMediaElement>(), pausedAnimations = new Set<Animation>()
+  const pauseControlledActivity = () => {
+    for (const media of doc.querySelectorAll<HTMLMediaElement>('video,audio')) if (!media.paused) { pausedMedia.add(media); media.pause() }
+    for (const animation of doc.getAnimations?.() ?? []) if (animation.playState === 'running') { pausedAnimations.add(animation); animation.pause() }
+  }
+  const setVisible = (value: boolean) => {
+    if (visible === value) return
+    visible = value
+    if (!visible) pauseControlledActivity()
+    else {
+      for (const media of pausedMedia) if (media.isConnected) void media.play().catch(() => undefined)
+      for (const animation of pausedAnimations) if (animation.playState === 'paused') animation.play()
+      pausedMedia.clear(); pausedAnimations.clear()
+    }
+  }
+  const onActivity = () => { if (!visible) pauseControlledActivity() }
+  doc.addEventListener('play', onActivity, true)
+  doc.addEventListener('animationstart', onActivity, true)
+  doc.addEventListener('transitionrun', onActivity, true)
+  const textReportAt = (event: MouseEvent) => {
+    const text = textAtPoint(doc, event.clientX, event.clientY)
+    return text && editableText(text) && event.target instanceof Node && event.target.contains(text) ? report(text) : null
+  }
   const onClick = (event: MouseEvent) => {
-    if (!loadId || !editMode || event.button !== 0) return
+    if (!visible || !loadId || !editMode || event.button !== 0) return
     const target = event.target
     const image = target instanceof HTMLImageElement ? target : null
     const targetReport = image && report(image)
     if (targetReport) send({ event: 'targets', targets: [targetReport] })
-    if (targetReport) { event.preventDefault(); event.stopPropagation() }
+    // A double click starts with two clicks. Keep author buttons/links from
+    // activating before the text selection can open its editing controls.
+    const textReport = image ? null : textReportAt(event)
+    if (targetReport || textReport) { event.preventDefault(); event.stopImmediatePropagation() }
   }
   const onDoubleClick = (event: MouseEvent) => {
-    if (!loadId || !editMode || event.button !== 0 || event.target instanceof HTMLImageElement) return
-    const text = textAtPoint(doc, event.clientX, event.clientY)
-    const targetReport = text && editableText(text) ? report(text) : null
-    if (targetReport) { send({ event: 'targets', targets: [targetReport] }); event.preventDefault(); event.stopPropagation() }
+    if (!visible || !loadId || !editMode || event.button !== 0 || event.target instanceof HTMLImageElement) return
+    const targetReport = textReportAt(event)
+    if (targetReport) { send({ event: 'targets', targets: [targetReport] }); event.preventDefault(); event.stopImmediatePropagation() }
   }
   const onMessage = (event: MessageEvent<Command>) => {
     if (event.source !== win.parent || !event.data || typeof event.data !== 'object') return
@@ -212,6 +239,7 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
       return
     }
     if (!loadId || message.loadId !== loadId) return
+    if (message.type === 'html-preview.visibility' && typeof message.active === 'boolean') { setVisible(message.active); return }
     if (message.type === 'html-preview.edit-mode' && typeof message.enabled === 'boolean'
       && typeof message.requestId === 'string' && message.requestId.length > 0 && message.requestId.length <= 256) {
       editMode = message.enabled
@@ -280,14 +308,18 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
       placeholders.refresh()
     }
   }
-  doc.addEventListener('click', onClick, true)
-  doc.addEventListener('dblclick', onDoubleClick, true)
+  win.addEventListener('click', onClick, true)
+  win.addEventListener('dblclick', onDoubleClick, true)
   win.addEventListener('message', onMessage)
   win.parent.postMessage({ event: 'html-preview.hello', protocol: 1 }, '*')
   return () => {
     disposed = true
-    doc.removeEventListener('click', onClick, true)
-    doc.removeEventListener('dblclick', onDoubleClick, true)
+    doc.removeEventListener('play', onActivity, true)
+    doc.removeEventListener('animationstart', onActivity, true)
+    doc.removeEventListener('transitionrun', onActivity, true)
+    pausedMedia.clear(); pausedAnimations.clear()
+    win.removeEventListener('click', onClick, true)
+    win.removeEventListener('dblclick', onDoubleClick, true)
     win.removeEventListener('message', onMessage)
     pagination.destroy()
     placeholders.destroy()

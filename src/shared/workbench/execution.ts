@@ -51,6 +51,12 @@ export interface ExecutionToolRecord {
   result?: ToolResult
   /** Durable timestamp makes a reconstructed commit event identical after a crash. */
   receiptTime?: number
+  /** Derived from host-issued handles before dispatch; never supplied in model arguments. */
+  effectTargets?: Array<{ documentId: string; target: ToolTarget }>
+  /** Canonical file paths returned by the host's mutation preflight before dispatch. */
+  effectPaths?: string[]
+  /** Host capture/vision delivery failure after an observation receipt was returned. */
+  observationFailure?: { message: string; outcome?: ModelFailure['outcome'] }
 }
 export interface ExecutionModelRecord {
   requestId: string
@@ -61,6 +67,9 @@ export interface ExecutionModelRecord {
   responseId?: string
   failure?: ModelFailure
   payload?: { phase: 'initial' | 'dynamic'; digest: string; serializedBytes: number }
+  /** Provider-reported counters, not balances; used to size the working context. */
+  inputTokens?: number
+  outputTokens?: number
 }
 /** Advisory task memory. The frozen input, host receipts and grants remain authoritative. */
 export interface WorkingNote {
@@ -92,10 +101,12 @@ export interface ExecutionRunRecord {
   tools: ExecutionToolRecord[]
   failure?: { code: string; message: string; outcome?: ModelFailure['outcome'] }
   /** Fact summary contains only actual tool returns; it cannot grant permissions. */
-  compacted?: { atRequest: number; facts: string }
+  compacted?: { atRequest: number; facts: string; fromMessage?: number }
   /** Optional additive checkpoint field; older runs remain readable without migration. */
   workingNote?: WorkingNote
   continuedFrom?: string
+  /** Explicit user continuation only. Conversation memory/queued messages do not inherit delivery obligations. */
+  taskContinuedFrom?: string
   /** Host-verified image resource reissued from an ancestor run under this run's authority. */
   hostContinuationImages?: Array<{ sourceRunId: string; sourceJobId: string; resourceId: string;
     sourceDocumentId: string; destinationDocumentId: string; documentId: string; resource: string }>

@@ -32,9 +32,12 @@ function parseDiscoveredModel(value: unknown, isOAuth: boolean, secret: string):
   const displayName = catalogText(item.display_name ?? item.displayName ?? item.name, 128, secret)
   const description = catalogText(item.description, 256, secret)
   const model: DiscoveredModel = { id, ...(displayName ? { displayName } : {}), ...(description ? { description } : {}) }
-  if (isOAuth && Array.isArray(item.supported_reasoning_efforts)) {
+  const apiEffort = record(item.effort)
+  const supportedEfforts = isOAuth ? item.supported_reasoning_efforts : apiEffort?.supported_levels
+  const declaredDefault = isOAuth ? item.default_reasoning_effort : apiEffort?.default_level
+  if (Array.isArray(supportedEfforts)) {
     const choices = new Map<DiscoveredReasoningEffort, { effort: DiscoveredReasoningEffort; description?: string }>()
-    for (const raw of item.supported_reasoning_efforts.slice(0, 16)) {
+    for (const raw of supportedEfforts.slice(0, 16)) {
       const option = record(raw)
       const effort = catalogEffort(option?.reasoning_effort ?? raw)
       if (!effort || choices.has(effort)) continue
@@ -44,7 +47,7 @@ function parseDiscoveredModel(value: unknown, isOAuth: boolean, secret: string):
     // An explicit empty list is meaningful: it overrides documented defaults.
     model.reasoningEfforts = [...choices.values()]
     if (choices.size) {
-      const defaultEffort = catalogEffort(item.default_reasoning_effort)
+      const defaultEffort = catalogEffort(declaredDefault)
       if (defaultEffort && choices.has(defaultEffort)) model.defaultReasoningEffort = defaultEffort
     }
   }

@@ -136,16 +136,20 @@ describe('controlled scratch builds', () => {
       const check = f.exec({ type: 'check' })
       await started
       await vi.advanceTimersByTimeAsync(101)
-      expect(await check).toMatchObject({ status: 'exhausted' })
+      expect(await check).toMatchObject({ status: 'failed' })
       expect(signal?.aborted).toBe(true)
       release({ ok: true, message: 'late success must not publish' })
-      await expect(f.service.artifact('run', f.job.jobId, 'late')).rejects.toMatchObject({ code: 'build-budget' })
+      await expect(f.service.artifact('run', f.job.jobId, 'late')).rejects.toMatchObject({ code: 'artifact-not-ready' })
       expect((await f.exec({ type: 'list' }) as { job: BuildJobSnapshot }).job.artifactId).toBeUndefined()
+      // A failed attempt preserves the same candidate; no new job or source copy is required.
+      await f.exec({ type: 'write', path: 'project.json', content: JSON.stringify(f.project) })
+      expect(await f.exec({ type: 'check' })).toMatchObject({ status: 'ready', jobId: f.job.jobId })
     } finally { vi.useRealTimers() }
   })
   it('rejects an admission that crosses its deadline before the timer callback runs', async () => {
     let now = Date.now()
     const clock = vi.spyOn(Date, 'now').mockImplementation(() => now)
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
       const f = await fixture(true, { async run() {
         now += 101
@@ -153,11 +157,14 @@ describe('controlled scratch builds', () => {
       } }, { maxDurationMs: 100 })
       const changed = structuredClone(f.project); changed.globalLayerItems[0].item.opacity = 0.9
       await f.exec({ type: 'write', path: 'project.json', content: JSON.stringify(changed) })
-      expect(await f.exec({ type: 'check' })).toMatchObject({ status: 'exhausted' })
+      expect(await f.exec({ type: 'check' })).toMatchObject({ status: 'failed' })
       const logs = await f.exec({ type: 'logs' }) as { entries: Array<{ message: string }> }
-      expect(logs.entries.at(-1)?.message).toContain('本次构建检查超时')
+      expect(logs.entries.at(-1)?.message).toContain('检查超时')
       expect((await f.exec({ type: 'list' }) as { job: BuildJobSnapshot }).job.artifactId).toBeUndefined()
-    } finally { clock.mockRestore() }
+      // A failed attempt preserves the same candidate; no new job or source copy is required.
+      await f.exec({ type: 'write', path: 'project.json', content: JSON.stringify(f.project) })
+      expect(await f.exec({ type: 'check' })).toMatchObject({ status: 'ready', jobId: f.job.jobId })
+    } finally { vi.useRealTimers(); clock.mockRestore() }
   })
   it('cancels an in-flight admission, ignores its late response, and never exposes an import artifact', async () => {
     let release!: (value: any) => void, entered!: () => void
@@ -262,4 +269,36 @@ it('M28 a late cancel preserves a completed build artifact for explicit import',
   expect(ready.status).toBe('ready')
   expect(await f.exec({ type: 'cancel' })).toEqual(ready)
   expect(await f.service.artifact('run', f.job.jobId, ready.artifactId!)).toMatchObject({ artifactId: ready.artifactId })
+})
+
+it('keeps new work available after more than the old write/check counts and reuses an unchanged successful check', async () => {
+  const f = await fixture()
+  for (let i = 0; i < 260; i++) await f.exec({ type: 'write', path: 'notes.txt', content: String(i) })
+  for (let i = 0; i < 15; i++) {
+    await f.exec({ type: 'write', path: 'notes.txt', content: `check-${i}` })
+    expect(await f.exec({ type: 'check' })).toMatchObject({ status: 'ready' })
+  }
+  const ready = await f.service.status('run', f.job.jobId)
+  expect(ready.writes).toBe(275); expect(ready.checks).toBe(15)
+  for (let i = 0; i < 4; i++) expect(await f.exec({ type: 'check' })).toEqual(ready)
+  expect(await f.service.artifact('run', f.job.jobId, ready.artifactId!)).toMatchObject({ artifactId: ready.artifactId })
+  expect(f.run).not.toHaveBeenCalled()
+}, 20_000)
+
+it('still honors an explicitly supplied caller write budget', async () => {
+  const f = await fixture(false, undefined, { maxWrites: 1 })
+  await f.exec({ type: 'write', path: 'notes.txt', content: 'one' })
+  await expect(f.exec({ type: 'write', path: 'notes.txt', content: 'two' })).rejects.toMatchObject({ code: 'build-budget' })
+  expect(await fs.readFile(path.join(f.files, 'notes.txt'), 'utf8')).toBe('one')
+})
+
+it('rechecks a persisted candidate after the admission host is recreated instead of reusing stale host evidence', async () => {
+  const f = await fixture()
+  const first = await f.exec({ type: 'check' }) as BuildJobSnapshot
+  expect(first.status).toBe('ready')
+  const recreated = new ControlledBuildService({ directory: path.join(f.root, 'scratch'), admission: { run: f.run } })
+  const next = await recreated.execute('run', { type: 'check', jobId: f.job.jobId }) as BuildJobSnapshot
+  expect(next.status).toBe('ready')
+  expect(next.checks).toBe(first.checks + 1)
+  expect(f.run).not.toHaveBeenCalled() // Static verification is real, but it needs no dynamic admission.
 })

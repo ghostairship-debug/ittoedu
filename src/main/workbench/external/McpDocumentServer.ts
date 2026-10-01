@@ -154,7 +154,7 @@ export class McpDocumentServer {
     const chunks: Buffer[] = []; let length = 0
     for await (const bytes of request) {
       length += bytes.length
-      if (length > 4 * 1024 * 1024) return this.respond(response, 413)
+      if (length > 64 * 1024 * 1024) return this.respond(response, 413, error(null, -32602, '单次 JSON 请求超过 64 MiB；请按工具支持的分块或资源引用传递，已完成的任务未取消'))
       chunks.push(Buffer.from(bytes))
     }
     let message: Record<string, unknown>

@@ -12,7 +12,9 @@ export interface DeliveryOperationRecord {
   receipt?: SaveReceipt | ExportReceipt
   path?: string
   contentSha256?: string
+  publicationIdentity?: string | null
   fileVersion?: string | null
+  documentId?: string
 }
 
 /** Durable outer-operation ticket. An interrupted disk write is queried, never replayed. */
@@ -66,6 +68,24 @@ export class DocumentDeliveryOperationStore {
       await this.write(key, record)
       return { record, created: true }
     })
+  }
+  async ownsExportVersion(input: { runId: string; documentId: string; epoch: string; path: string; format: string; fileVersion: string; taskRunIds?: readonly string[] }): Promise<boolean> {
+    await Promise.all([...this.tails.values()].map(tail => tail.catch(() => undefined)))
+    let names: string[]
+    try { names = await fs.readdir(this.directory) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error }
+    const key = (value: string) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value)
+    let owned = false
+    for (const name of names.filter(value => /^[a-f0-9]{64}\.json$/.test(value))) {
+      const record = JSON.parse(await fs.readFile(path.join(this.directory, name), 'utf8')) as DeliveryOperationRecord
+      if (record.kind !== 'export' || !record.path || key(record.path) !== key(input.path)) continue
+      if (record.status === 'writing') return false // An unresolved write is never replaced by a new attempt.
+      const receipt = record.receipt as ExportReceipt | undefined
+      if ((record.runId === input.runId || input.taskRunIds?.includes(record.runId)) && record.status === 'completed' && receipt?.status === 'written'
+        && receipt.documentId === input.documentId && (receipt.epoch === input.epoch
+          || record.runId !== input.runId && input.taskRunIds?.includes(record.runId))
+        && receipt.format === input.format && receipt.fileVersion === input.fileVersion) owned = true
+    }
+    return owned
   }
   async patch(runId: string, operationId: string, change: Partial<DeliveryOperationRecord>): Promise<DeliveryOperationRecord> {
     const key = this.key(runId, operationId)

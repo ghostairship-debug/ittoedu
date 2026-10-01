@@ -259,6 +259,20 @@ export class ConversationStore {
       return clone(next)
     })
   }
+  /** Keep an unsubmitted card draft discoverable after its transient editor has closed. */
+  recoverElementDraft(input: { workspaceId: string; conversationId: string; expectedRevision: number }): Promise<ConversationRecord> {
+    return this.serial(async () => {
+      const state = await this.readState(), previous = this.conversation(state, input.workspaceId, input.conversationId)
+      this.assertExpected(previous.revision, input.expectedRevision)
+      if (!previous.element || !previous.inputDraft.trim() && !previous.inputAttachments.length) return clone(previous)
+      const { element, ...retained } = previous
+      const next: ConversationRecord = { ...retained, title: `未发送的 AI 卡草稿 · ${element.label}`,
+        revision: previous.revision + 1, updatedAt: this.now() }
+      state.conversations[next.conversationId] = next
+      await this.writeState(state)
+      return clone(next)
+    })
+  }
   /** Assign a newly empty conversation once. The serialized check prevents a late explorer click from moving an active task. */
   setConversationHome(input: { workspaceId: string; conversationId: string; home: ConversationHome | null }): Promise<ConversationRecord> {
     return this.serial(async () => {

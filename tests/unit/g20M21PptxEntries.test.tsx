@@ -137,3 +137,27 @@ it('M21 work area: the empty page and the tab bar 新建 menu both make a new H5
   expect(onNewProjectFromPptx).toHaveBeenCalledTimes(2)
   expect(onNewProject).not.toHaveBeenCalled()
 })
+
+
+it('lists the actual source-page losses before creation and cancel makes no course file', async () => {
+  const { directory, service } = await workspace(), bytes = pptxImportFixture({ unsupported: true })
+  const original = path.join(directory, '带损失.pptx'); await fs.writeFile(original, bytes)
+  const onFile = renderTree(directory, service)
+  const begin = async () => {
+    fireEvent.contextMenu(await screen.findByRole('button', { name: '带损失.pptx' }))
+    fireEvent.click(within(screen.getByRole('menu', { name: '文件菜单' })).getByRole('menuitem', { name: '导入为 H5 演示' }))
+    return screen.findByRole('alertdialog', { name: '确认 PPT 转换结果' })
+  }
+  const dialog = await begin()
+  const details = within(dialog).getByLabelText('完整 PPT 转换损失详情') as HTMLTextAreaElement
+  expect(details.value).toContain('第 1 页'); expect(details.value.length).toBeGreaterThan(10)
+  fireEvent.click(within(dialog).getByRole('button', { name: '取消' }))
+  await waitFor(() => expect(screen.queryByRole('alertdialog', { name: '确认 PPT 转换结果' })).toBeNull())
+  expect(onFile).not.toHaveBeenCalled()
+  expect((await fs.readdir(directory)).filter(file => file.endsWith('.h5lesson'))).toEqual([])
+  expect(await fs.readFile(original)).toEqual(Buffer.from(bytes))
+  const accepted = await begin()
+  fireEvent.click(within(accepted).getByRole('button', { name: '确认并新建' }))
+  await waitFor(() => expect(onFile).toHaveBeenCalled())
+  expect(await fs.readFile(original)).toEqual(Buffer.from(bytes))
+})

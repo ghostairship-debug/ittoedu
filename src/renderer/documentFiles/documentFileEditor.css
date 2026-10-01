@@ -16,7 +16,15 @@
 .html-document-editor__toolbar { flex:0 0 auto; }
 .lesson-document-editor--html > [role=alert],
 .lesson-document-editor--html > aside { max-height:35%; overflow:auto; }
-.html-document-editor__toolbar { display:flex; gap:8px; padding:8px 0; }
+.html-document-editor__toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:6px 10px; border-bottom:1px solid var(--border,#d9d6ce); }
+.html-document-editor__views { display:flex; gap:2px; padding:2px; border-radius:8px; background:var(--canvas,#f4f1ea); }
+.html-document-editor__views button { border:0!important; padding:5px 9px!important; background:transparent!important; }
+.html-document-editor__views button[aria-pressed=true] { background:var(--surface,#fffefa)!important; color:var(--green,#245b46); }
+.lesson-document-status { font-size:12px; color:var(--ink-muted,#66706a); }
+.lesson-document-more { position:relative; flex:none; }
+.lesson-document-more>summary { cursor:pointer; padding:5px 8px; font-size:12px; list-style:none; }
+.lesson-document-more__menu { position:absolute; top:100%; left:0; z-index:15; min-width:170px; display:grid; gap:3px; padding:5px; border:1px solid var(--border,#d9d6ce); border-radius:8px; background:var(--surface,#fffefa); box-shadow:0 6px 18px #173e311c; }
+.lesson-document-more__menu>button { text-align:left; white-space:nowrap; }
 .html-document-editor__toolbar button[aria-pressed=true] { font-weight:700; }
 .html-document-editor__preview[hidden],
 .html-document-editor__source[hidden] { display:none; }

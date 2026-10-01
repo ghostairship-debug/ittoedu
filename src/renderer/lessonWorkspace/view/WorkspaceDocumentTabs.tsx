@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import type { LessonWorkspaceViewProps } from './lessonWorkspaceViewTypes'
 import type { WorkbenchLayoutController } from './useWorkbenchLayoutPrefs'
 import type { LessonFileTab } from '../controller/useDocumentTabsController'
@@ -7,6 +7,15 @@ import { dispatchRevealInExplorer } from '../../workbench/revealInExplorer'
 import { documentTabCommands } from './documentTabCommands'
 export function WorkspaceDocumentTabs({ props, layout, hidden = false, onNewFromPptx }: { props: LessonWorkspaceViewProps; layout: WorkbenchLayoutController; hidden?: boolean; onNewFromPptx?(): void }) {
  const { state, actions, tabs } = props;
+ const tabList = useRef<HTMLDivElement>(null);
+ useLayoutEffect(() => {
+  const list = tabList.current, active = list?.querySelector<HTMLElement>('[aria-selected="true"]');
+  if (!list || !active || hidden) return;
+  const item = active.closest('.lesson-workbench-tab') ?? active;
+  const bounds = item.getBoundingClientRect(), viewport = list.getBoundingClientRect();
+  if (bounds.left < viewport.left) list.scrollLeft += bounds.left - viewport.left;
+  else if (bounds.right > viewport.right) list.scrollLeft += bounds.right - viewport.right;
+ }, [tabs.activeTab, tabs.tabs, hidden]);
  const [newTabMenuOpen, setNewTabMenuOpen] = useState(false);
  const [newDocName, setNewDocName] = useState('');
  const tabLabels = distinguishTabNames(tabs.tabs);
@@ -40,7 +49,7 @@ export function WorkspaceDocumentTabs({ props, layout, hidden = false, onNewFrom
 
  return (
       <div className="workspace-document-tabs" hidden={hidden}>
-      <div role="tablist" aria-label="打开的文件">
+      <div ref={tabList} role="tablist" aria-label="打开的文件">
         {state.lesson && (
           <button
             type="button"

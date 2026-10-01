@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { createHash } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -189,3 +190,114 @@ describe('G20 durable document journal', () => {
     await expect(fs.access(path.join(destination, 'missing.txt'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
 })
+
+it('reads recovery records without loading the whole journal and preserves history, receipts and stopped runs', async () => {
+  const { directory, journal } = await fixture()
+  const original = state('streamed')
+  original.model.resources.assets['blob'] = new Uint8Array([1, 2, 3])
+  original.past.push({ operationId: 'history', before: model('before'), after: original.model })
+  original.future.push({ operationId: 'redo', before: original.model, after: model('after') })
+  original.stoppedRuns.push('stopped')
+  await journal.append(original)
+  const filename = journalFile(directory, original.documentId)
+  const beforeBytes = await fs.readFile(filename)
+  const readFile = fs.readFile.bind(fs)
+  vi.spyOn(fs, 'readFile').mockImplementation(((input: Parameters<typeof fs.readFile>[0], ...rest: unknown[]) => {
+    if (String(input).endsWith('.journal')) throw new Error('whole-journal read forbidden')
+    return (readFile as (...args: unknown[]) => Promise<unknown>)(input, ...rest)
+  }) as typeof fs.readFile)
+  expect(await createDocumentJournal({ directory }).recover('streamed')).toEqual(original)
+  expect(await journal.list()).toEqual(['streamed'])
+  expect(await readFile(filename)).toEqual(beforeBytes)
+  await journal.append({ ...original, sequence: 1, revision: 1 })
+  expect(await journal.recover('streamed')).toEqual({ ...original, sequence: 1, revision: 1 })
+})
+
+it('compacts repeated full snapshots without dropping undo/redo, receipts, resources or stop barriers', async () => {
+  const { directory, journal } = await fixture()
+  const current = state('checkpoint')
+  current.model.resources.assets['large'] = new Uint8Array(2 * 1024 * 1024).fill(7)
+  current.past.push({ operationId: 'old', before: model('before'), after: current.model })
+  current.future.push({ operationId: 'redo', before: current.model, after: model('after') })
+  current.operations.push({ operationId: 'old', digest: 'proof', result: { status: 'applied', documentId: current.documentId,
+    operationId: 'old', beforeRevision: 0, revision: 1, persistence: 'recoverable' } })
+  current.stoppedRuns.push('never-replay')
+  await journal.append(current)
+  const filename = journalFile(directory, current.documentId), oneRecord = (await fs.stat(filename)).size
+  for (let sequence = 1; sequence < 12; sequence++) await journal.append({ ...current, sequence, revision: sequence })
+  expect((await fs.stat(filename)).size).toBeLessThan(oneRecord * 8)
+  const latest = { ...current, sequence: 11, revision: 11 }
+  // Native typed-array comparison avoids enumerating millions of bytes in the test reporter.
+  expect(isDeepStrictEqual(await createDocumentJournal({ directory }).recover(current.documentId), latest)).toBe(true)
+  const compactSize = (await fs.stat(filename)).size
+  await journal.append(latest)
+  expect((await fs.stat(filename)).size).toBe(compactSize)
+  expect((await fs.readdir(directory)).filter(name => name.endsWith('.tmp'))).toEqual([])
+}, 20_000)
+
+it('indexes bindings without reopening unrelated journal payloads and invalidates external changes', async () => {
+  const { root, directory, journal } = await fixture()
+  const a = { ...state('large-a'), binding: { kind: 'file' as const, path: path.join(root, 'a.md'), version: null, bindingVersion: 1 } }
+  a.model = model('A'.repeat(1024 * 1024))
+  await journal.append(a)
+  const b = { ...state('b'), binding: { kind: 'file' as const, path: path.join(root, 'b.md'), version: null, bindingVersion: 1 } }
+  await journal.append(b)
+  const open = vi.spyOn(fs, 'open')
+  const restarted = createDocumentJournal({ directory })
+  expect((await restarted.listBindings()).map(entry => entry.documentId).sort()).toEqual(['b', 'large-a'])
+  expect(open.mock.calls.some(call => String(call[0]).endsWith('.journal'))).toBe(false)
+  await restarted.recover('b')
+  expect(open.mock.calls.some(call => String(call[0]) === journalFile(directory, 'large-a'))).toBe(false)
+  const filename = journalFile(directory, 'large-a'), original = await fs.readFile(filename)
+  const corrupt = Buffer.from(original); corrupt[55] ^= 1
+  await fs.writeFile(filename, corrupt)
+  expect(await restarted.listBindings()).toEqual(expect.arrayContaining([expect.objectContaining({ documentId: 'large-a', unavailable: true }), expect.objectContaining({ documentId: 'b' })]))
+  await expect(restarted.assertAvailable([a.binding.path])).rejects.toThrow('无法读取')
+  await expect(restarted.assertAvailable([b.binding.path])).resolves.toBeUndefined()
+  await expect(restarted.recover('large-a')).rejects.toMatchObject({ code: 'journal-corrupt' })
+  expect(await fs.readFile(filename)).toEqual(corrupt)
+})
+
+it('keeps diagnostic inspection read-only and does not rescan history on a verified append', async () => {
+  const { directory, journal } = await fixture(), first = state('indexed')
+  await journal.append(first)
+  const open = vi.spyOn(fs, 'open')
+  await journal.append({ ...first, sequence: 1, revision: 1 })
+  expect(open.mock.calls.filter(call => String(call[0]).endsWith('.journal') && call[1] === 'r')).toHaveLength(0)
+  const filename = journalFile(directory, first.documentId)
+  await fs.appendFile(filename, 'torn')
+  const size = (await fs.stat(filename)).size
+  expect(await journal.inspect(first.documentId)).toMatchObject({ sequence: 1 })
+  expect((await fs.stat(filename)).size).toBe(size)
+  expect(await journal.recover(first.documentId)).toMatchObject({ sequence: 1 })
+  expect((await fs.stat(filename)).size).toBe(size - 4)
+})
+
+it('does not reload an unrelated clean journal merely because an acknowledged save intent remains', async () => {
+  const { root, directory, journal } = await fixture(), filename = path.join(root, 'clean.md')
+  await fs.writeFile(filename, 'clean')
+  const binding = { kind: 'file' as const, path: filename, version: await readDocumentFileVersion(filename, 'markdown'), bindingVersion: 1 }
+  const current = { ...state('clean', 1), model: model('clean'), binding, savedRevision: 1 }
+  await journal.append(current)
+  await journal.save({ documentId: current.documentId, revision: 1, model: current.model, binding, bytes: bytes('clean') })
+  const open = vi.spyOn(fs, 'open')
+  expect((await createDocumentJournal({ directory }).listBindings())[0]).toMatchObject({ documentId: 'clean', savedRevision: 1, binding })
+  expect(open.mock.calls.some(call => String(call[0]).endsWith('.journal'))).toBe(false)
+})
+
+it('keeps the durable append and complete history when checkpoint replacement fails', async () => {
+  const { directory, journal } = await fixture(), current = state('failed-checkpoint')
+  current.model.resources.assets['large'] = new Uint8Array(2 * 1024 * 1024).fill(9)
+  current.past.push({ operationId: 'history', before: model('old'), after: current.model })
+  current.stoppedRuns.push('stopped-run')
+  const rename = fs.rename.bind(fs)
+  let failedCheckpoints = 0
+  vi.spyOn(fs, 'rename').mockImplementation(async (source, target) => {
+    if (String(source).includes('.checkpoint-')) { failedCheckpoints++; throw new Error('fixture replacement interrupted') }
+    return rename(source, target)
+  })
+  for (let sequence = 0; sequence < 10; sequence++) await journal.append({ ...current, sequence, revision: sequence })
+  expect(failedCheckpoints).toBeGreaterThan(0)
+  expect(isDeepStrictEqual(await createDocumentJournal({ directory }).recover(current.documentId), { ...current, sequence: 9, revision: 9 })).toBe(true)
+  expect((await fs.readdir(directory)).filter(name => name.endsWith('.tmp'))).toEqual([])
+}, 20_000)

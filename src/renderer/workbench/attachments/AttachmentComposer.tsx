@@ -15,7 +15,7 @@ export interface AttachmentComposerProps {
   children?: ReactNode | ((actions: AttachmentActions) => ReactNode)
 }
 export interface AttachmentActions { addFiles(): void; referenceWorkspace(): void; canAdd: boolean; canReference: boolean }
-const references = (snapshot: AttachmentSnapshot): InputAttachmentReference[] => snapshot.representations.map(representation => ({ attachmentId: snapshot.id, representationId: representation.id, role: 'reference' }))
+const references = (snapshot: AttachmentSnapshot): InputAttachmentReference[] => snapshot.representations.map(representation => ({ attachmentId: snapshot.id, representationId: representation.id, role: 'reference', delivery: !snapshot.derivedFrom && representation.kind === 'image' ? 'inline' : 'source' }))
 const htmlImage = /<img\b[^>]*\bsrc\s*=\s*(["'])(data:image\/(png|jpeg|webp|gif);base64,([^"']+))\1/gi
 
 function embeddedClipboardImages(html: string): File[] {
@@ -47,6 +47,8 @@ export function AttachmentComposer({ api = window.desktopAPI?.attachments, value
   const [referencing, setReferencing] = useState(false), [workspaceEntries, setWorkspaceEntries] = useState<{ id: string; name: string; kind: 'file' | 'directory' }[]>([]), [workspace, setWorkspace] = useState<{ workspaceId: string; directoryId: string; rootId: string }>()
   const [error, setError] = useState(''), [busy, setBusy] = useState(false)
   const [ranges, setRanges] = useState<Record<string, string>>({})
+  const [imageModes, setImageModes] = useState<Record<string, 'auto' | 'all'>>({})
+  const [extracting, setExtracting] = useState<{ name: string; loaded: number; total: number } | null>(null)
   const [previewSelection, setPreviewSelection] = useState<Record<string, string>>({})
   const [preview, setPreview] = useState<{ name: string; text?: string; url?: string } | null>(null)
   const current = useRef(value), change = useRef(onChange), live = useRef(true), request = useRef<string | null>(null), previewURL = useRef<string | null>(null), composing = useRef(false)
@@ -72,10 +74,11 @@ export function AttachmentComposer({ api = window.desktopAPI?.attachments, value
     if (!api || disabled || busy) return
     setBusy(true); setError('')
     try { await action() } catch (failure) { if (live.current) setError(failure instanceof Error ? failure.message : '附件操作未完成') }
-    finally { request.current = null; if (live.current) setBusy(false) }
+    finally { request.current = null; if (live.current) { setBusy(false); setExtracting(null) } }
   }
   const updateJobs = (update: (jobs: IntakeJob[]) => IntakeJob[]) => { jobsRef.current = update(jobsRef.current); if (live.current) setJobs([...jobsRef.current]) }
-  useEffect(() => api?.subscribeProgress?.(({ requestId, loaded, total }) => {
+  useEffect(() => api?.subscribeProgress?.(({ requestId, loaded, total, unit }) => {
+    if (unit === 'pages' && request.current === requestId) { setExtracting(value => value ? { ...value, loaded, total } : value); return }
     const active = [...pending.current.entries()].find(([, operation]) => operation.requestId === requestId)
     if (!active || active[1].controller.signal.aborted) return
     updateJobs(jobs => jobs.map(job => job.id === active[0] && (job.state === 'reading' || job.state === 'preparing')
@@ -133,15 +136,26 @@ export function AttachmentComposer({ api = window.desktopAPI?.attachments, value
     const root = await window.desktopAPI.workspaceFiles({ type: 'root', directory: workspaceDirectory }); await listWorkspace(root.workspaceId, root.rootEntryId, root.rootEntryId)
   })
   const extract = (snapshot: AttachmentSnapshot) => work(async () => {
-    const rawRange = ranges[snapshot.id]?.trim(), match = rawRange?.match(/^(\d+)\s*[-–]\s*(\d+)$/)
+    const sourceId = snapshot.derivedFrom ?? snapshot.id
+    const selectedPages = snapshot.coverage?.selectedPages
+    const rawRange = (ranges[sourceId] ?? (selectedPages ? `${selectedPages.from}-${selectedPages.to}` : '')).trim(), match = rawRange.match(/^(\d+)\s*[-–]\s*(\d+)$/)
     if (rawRange && !match) throw new Error('页范围请填写“1-3”，留空提取全文')
     const requestId = crypto.randomUUID(); request.current = requestId
-    const derived = await api!.extract({ attachmentId: snapshot.id, requestId, ...(match ? { pages: { from: Number(match[1]), to: Number(match[2]) } } : {}) })
-    if (!live.current) return
+    setExtracting({ name: snapshot.name, loaded: 0, total: 0 })
+    const derived = await api!.extract({ attachmentId: sourceId, requestId, images: imageModes[sourceId] ?? snapshot.coverage?.imageMode ?? (snapshot.coverage ? 'all' : 'auto'), ...(match ? { pages: { from: Number(match[1]), to: Number(match[2]) } } : {}) })
+    if (!live.current || request.current !== requestId || !current.current.some(ref => ref.attachmentId === snapshot.id)) return
     setSnapshots(previous => ({ ...previous, [derived.id]: derived }))
-    const role = current.current.find(ref => ref.attachmentId === snapshot.id)?.role
-    apply([...current.current.filter(ref => ref.attachmentId !== snapshot.id), ...references(derived).map(ref => ({ ...ref, ...(role ? { role } : {}) }))])
+    if (!derived.representations.length) { setError('所选页面没有可提取的文字或图片；原有材料仍保留，可调整页范围。'); return }
+    const selected = current.current.filter(ref => ref.attachmentId === snapshot.id), role = selected[0]?.role
+    const delivery: 'source' | 'inline' = selected.every(ref => ref.delivery === 'source') ? 'source' : 'inline'
+    apply([...current.current.filter(ref => ref.attachmentId !== snapshot.id), ...references(derived).map(ref => ({ ...ref, delivery, ...(role ? { role } : {}) }))])
   })
+  const cancelExtraction = () => {
+    const requestId = request.current
+    request.current = null
+    setExtracting(null)
+    if (requestId) void api?.cancel(requestId).catch(() => undefined)
+  }
   const showPreview = (snapshot: AttachmentSnapshot) => work(async () => {
     const selected = current.current.filter(ref => ref.attachmentId === snapshot.id)
     const image = snapshot.representations.find(rep => rep.kind === 'image' && selected.some(ref => ref.representationId === rep.id))
@@ -190,12 +204,12 @@ export function AttachmentComposer({ api = window.desktopAPI?.attachments, value
       if (event.dataTransfer.files.length) { event.preventDefault(); event.stopPropagation(); receive([...event.dataTransfer.files], 'drop') }
     }}>
     {typeof children === 'function' ? null : children}
-    {typeof children === 'function' ? busy && <div className="attachment-composer__status"><span role="status">正在处理附件… {request.current && <button type="button" onClick={() => void api?.cancel(request.current!)}>取消</button>}</span></div>
+    {typeof children === 'function' ? busy && <div className="attachment-composer__status"><span role="status">正在处理附件… {request.current && <button type="button" onClick={cancelExtraction}>取消</button>}</span></div>
       : <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
       <button type="button" disabled={!api || disabled || busy} onClick={() => void work(async () => { granted(await api!.select()) })}>添加附件</button>
       <button type="button" disabled={!api || disabled || busy || !workspaceDirectory} onClick={startReference}>@ 引用空间文件</button>
       <span style={{ fontSize: 12, color: '#64748b' }}>可粘贴或拖入图片、文档；原件只读保存</span>
-      {busy && <span role="status">正在处理附件… {request.current && <button type="button" onClick={() => void api?.cancel(request.current!)}>取消</button>}</span>}
+      {busy && <span role="status">正在处理附件… {request.current && <button type="button" onClick={cancelExtraction}>取消</button>}</span>}
     </div>}
     {preparing && <p role="status">附件正在准备，完成前不能发送；可以取消单项处理。</p>}
     {jobs.map(job => <div key={job.id} aria-label={`附件准备：${job.name}`} style={{ border: '1px solid #cbd5e1', padding: 8, marginTop: 6 }}>
@@ -212,20 +226,28 @@ export function AttachmentComposer({ api = window.desktopAPI?.attachments, value
       const snapshot = snapshots[id]
       if (!snapshot) return <div key={id}>正在读取附件快照…</div>
       const pending = snapshot.representations.some(rep => rep.kind === 'file')
+      const extractable = pending || Boolean(snapshot.derivedFrom && snapshot.coverage)
+      const sourceId = snapshot.derivedFrom ?? id
       const selected = value.filter(ref => ref.attachmentId === id)
+      const sourceOnly = selected.every(ref => ref.delivery === 'source')
       return <div key={id} style={{ border: '1px solid #cbd5e1', borderRadius: 6, marginTop: 8, padding: 8 }}>
-        <AttachmentThumbnail api={api} snapshot={snapshot} /><strong>{snapshot.name}</strong> <span style={{ fontSize: 12 }}>{Math.ceil(snapshot.byteLength / 1024)} KB · {pending ? '已添加，待提取' : `已添加 · ${selected.length} 个表示`} · 尚未发送</span>
+        <AttachmentThumbnail api={api} snapshot={snapshot} /><strong>{snapshot.name}</strong> <span style={{ fontSize: 12 }}>{Math.ceil(snapshot.byteLength / 1024)} KB · {sourceOnly ? '供助手按需读取' : pending ? '原件目录' : `本轮直接发送 · ${selected.length} 个表示`} · 尚未发送</span>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
           {!pending && selected.length > 1 && <select aria-label={`${snapshot.name}预览表示`} value={previewSelection[id] ?? snapshot.representations.find(rep => rep.kind === 'image')?.id ?? selected[0].representationId} onChange={event => setPreviewSelection(previous => ({ ...previous, [id]: event.target.value }))}>
             {selected.map(ref => { const rep = snapshot.representations.find(item => item.id === ref.representationId)!; return <option key={ref.representationId} value={ref.representationId}>{rep.provenance.locator?.page ? `第 ${rep.provenance.locator.page} 页 · ` : ''}{rep.kind === 'image' ? '图片' : '文本'} · {rep.provenance.locator?.paragraph ?? ref.representationId}</option> })}
           </select>}
-          <button type="button" disabled={busy || disabled} onClick={() => void showPreview(snapshot)}>预览发送内容</button>
+          <button type="button" disabled={busy || disabled} onClick={() => void showPreview(snapshot)}>预览材料内容</button>
+          {!pending && <label><input type="checkbox" checked={!sourceOnly} disabled={busy || disabled}
+            onChange={event => apply(current.current.map(ref => ref.attachmentId === id ? { ...ref, delivery: event.target.checked ? 'inline' : 'source' } : ref))} />直接发送所选表示到本轮</label>}
           <select aria-label={`${snapshot.name}用途`} disabled={busy || disabled} value={selected[0]?.role ?? 'reference'} onChange={event => apply(current.current.map(ref => ref.attachmentId === id ? { ...ref, role: event.target.value as 'reference' | 'target' } : ref))}>
             <option value="reference">参考资料</option><option value="target">待处理附件</option>
           </select>
           <button type="button" disabled={busy || disabled} onClick={() => apply(current.current.filter(ref => ref.attachmentId !== id))}>移除</button>
-          {pending && <><input aria-label={`${snapshot.name}页范围`} placeholder={/\.docx$/i.test(snapshot.name) ? 'Word 仅支持全文' : '页范围，如 1-3；留空为全部'} disabled={busy || disabled || /\.docx$/i.test(snapshot.name)} value={ranges[id] ?? ''} onChange={event => setRanges(previous => ({ ...previous, [id]: event.target.value }))} />
-            <button type="button" disabled={busy || disabled} onClick={() => void extract(snapshot)}>提取内容</button></>}
+          {extractable && <><input aria-label={`${snapshot.name}页范围`} placeholder={/\.docx$/i.test(snapshot.name) ? 'Word 仅支持全文' : '页范围，如 1-3；留空为全部'} disabled={busy || disabled || /\.docx$/i.test(snapshot.name)} value={ranges[sourceId] ?? (snapshot.coverage?.selectedPages ? `${snapshot.coverage.selectedPages.from}-${snapshot.coverage.selectedPages.to}` : '')} onChange={event => setRanges(previous => ({ ...previous, [sourceId]: event.target.value }))} />
+            {/\.pdf$/i.test(snapshot.name) && <select aria-label={`${snapshot.name}图片提取方式`} disabled={busy || disabled} value={imageModes[sourceId] ?? snapshot.coverage?.imageMode ?? (snapshot.coverage ? 'all' : 'auto')} onChange={event => setImageModes(previous => ({ ...previous, [sourceId]: event.target.value as 'auto' | 'all' }))}>
+              <option value="auto">优先文本，必要时保留页图</option><option value="all">保留全部所选页图</option>
+            </select>}
+            <button type="button" disabled={busy || disabled} onClick={() => void extract(snapshot)}>{pending ? '提取内容' : '重新提取'}</button></>}
         </div>
         {snapshot.coverage?.selectedPages && <div style={{ fontSize: 12 }}>已选第 {snapshot.coverage.selectedPages.from}–{snapshot.coverage.selectedPages.to} 页，共 {snapshot.coverage.totalPages} 页</div>}
         {snapshot.gaps.map((gap, index) => <div key={index} style={{ fontSize: 12, color: '#92400e' }}>{gap.message}</div>)}
@@ -233,6 +255,8 @@ export function AttachmentComposer({ api = window.desktopAPI?.attachments, value
     })}
     {typeof children === 'function' && children({ addFiles: () => void work(async () => { granted(await api!.select()) }), referenceWorkspace: () => void startReference(),
       canAdd: Boolean(api) && !disabled && !busy, canReference: Boolean(api) && !disabled && !busy && Boolean(workspaceDirectory) })}
+    {extracting && <div role="status">正在提取 {extracting.name}：{extracting.total ? `${extracting.loaded}/${extracting.total} 页已保留` : '读取首批页码…'}
+      <button type="button" onClick={cancelExtraction}>取消后续提取</button></div>}
     {error && <div role="alert">{error}</div>}
     {preview && <div role="dialog" aria-label={`附件预览：${preview.name}`} style={{ border: '1px solid #94a3b8', padding: 10, marginTop: 8 }}>
       <strong>{preview.name}</strong><button type="button" onClick={() => { if (previewURL.current) URL.revokeObjectURL(previewURL.current); previewURL.current = null; setPreview(null) }}>关闭预览</button>

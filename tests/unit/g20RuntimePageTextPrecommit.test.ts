@@ -43,3 +43,9 @@ it('reports capture failure without a legacy content commit', async () => {
   await expect(runtimeLightEditCommands.setPageText('runtime-1', '原文', '新文')).resolves.toEqual({ ok: false, reason: '后备图捕获失败' })
   expect(updateLegacy).not.toHaveBeenCalled()
 })
+
+
+it.each(['blocked', 'unknown', 'failed', 'conflict'] as const)('retains page text for %s instead of acknowledging it', async status => {
+  submit.mockReturnValue({ taskId: 'pending', settled: Promise.resolve({ status, reason: '原操作仍待处理' }) })
+  await expect(runtimeLightEditCommands.setPageText('runtime-1', '原文', '人工新稿')).resolves.toEqual({ ok: false, reason: '原操作仍待处理' })
+})
