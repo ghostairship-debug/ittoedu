@@ -23,6 +23,16 @@ const sound = 'data:audio/mpeg;base64,SUQzAwAAAAAA'
 const vendor = MODULE_SOURCE.map(([, source]) => `var ${source};`).join('\n')
 const diagnostics = (script: string) => validateHtmlImport(extractHtmlResources({ html: `<script type="module">${script}</script>` }))
 const errors = (script: string) => diagnostics(script).filter(item => item.level === 'error').map(item => item.code)
+const warnings = (script: string) => {
+  const result = extractHtmlResources({ html: `<script type="module">${script}</script>` })
+  const issues = validateHtmlImport(result)
+  expect(issues.filter(item => item.level === 'error')).toEqual([])
+  if (issues.some(item => item.message.includes('该脚本的资源引用闭合'))) {
+    expect(result.html).toBe(`<script type="module">${script}</script>`)
+    expect(result.resources).toEqual([])
+  }
+  return issues.filter(item => item.level === 'warning').map(item => item.code)
+}
 const preservedMedia = (script: string, url: string) => {
   const result = extractHtmlResources({ html: `<script type="module">${script}</script>` })
   expect(validateHtmlImport(result).filter(item => item.level === 'error')).toEqual([])
@@ -56,7 +66,7 @@ describe('audited framework resource closure', () => {
     expect(errors(vendor + replaced)).toEqual([])
     preservedMedia(vendor + app('D[key]', 'Object.assign(D,{a:"https://example.invalid/image.png"});'), 'https://example.invalid/image.png')
     preservedMedia(vendor + app('D[key]', 'k="https://example.invalid/sound.mp3";'), 'https://example.invalid/sound.mp3')
-    expect(errors(vendor + app() + 'k="https://example.invalid/late.mp3";')).toContain('unsupported-dynamic-url-sink')
+    expect(warnings(vendor + app() + 'k="https://example.invalid/late.mp3";')).toContain('unsupported-dynamic-url-sink')
   })
 
   it.each([
@@ -69,17 +79,17 @@ describe('audited framework resource closure', () => {
     ['implicit arrow escape', 'D[key]', 'const get=()=>D;mutate(get());'],
     ['sequence escape', 'D[key]', 'const get=()=>(0,D);mutate(get());'],
     ['unknown table method', 'D[key]', 'D.__defineGetter__("a",chooseImage);'],
-  ])('rejects %s', (_name, src, extra) => {
-    expect(errors(vendor + app(src, extra))).toContain('unsupported-dynamic-url-sink')
+  ])('warns and preserves %s', (_name, src, extra) => {
+    expect(warnings(vendor + app(src, extra))).toContain('unsupported-dynamic-url-sink')
   })
 
-  it('rejects props spreads and escaped framework entry functions', () => {
-    expect(errors(vendor + app('D[key]', '', '{...incoming}'))).toContain('unsupported-framework-resource-input')
-    expect(errors(vendor + app('D[key]', 'const make=T.jsx;'))).toContain('unsupported-framework-resource-input')
-    expect(errors(vendor + app('D[key]', 'T.jsx=otherFactory;'))).toContain('unsupported-framework-resource-input')
-    expect(errors(vendor + app('D[key]', 's=otherModule;'))).toContain('unsupported-framework-resource-input')
-    expect(errors(vendor + app('D[key]', 'const document=otherDocument;'))).toContain('unsupported-framework-resource-input')
-    expect(errors(vendor + app('D[key]', 'Object.prototype.remote="https://example.invalid/image";'))).toContain('unsupported-framework-resource-input')
+  it('warns and preserves props spreads and escaped framework entry functions', () => {
+    expect(warnings(vendor + app('D[key]', '', '{...incoming}'))).toContain('unsupported-framework-resource-input')
+    expect(warnings(vendor + app('D[key]', 'const make=T.jsx;'))).toContain('unsupported-framework-resource-input')
+    expect(warnings(vendor + app('D[key]', 'T.jsx=otherFactory;'))).toContain('unsupported-framework-resource-input')
+    expect(warnings(vendor + app('D[key]', 's=otherModule;'))).toContain('unsupported-framework-resource-input')
+    expect(warnings(vendor + app('D[key]', 'const document=otherDocument;'))).toContain('unsupported-framework-resource-input')
+    expect(warnings(vendor + app('D[key]', 'Object.prototype.remote="https://example.invalid/image";'))).toContain('unsupported-framework-resource-input')
   })
 
   it('rewrites a shared relative literal once and leaves parseable JavaScript', () => {
@@ -108,8 +118,8 @@ describe('audited framework resource closure', () => {
     '{src:D.a,style:{backgroundImage:"url("+chooseUrl()+")"}}',
     '{src:D.a,style:chooseStyle()}',
     '{src:D.a,style:{"--picture":chooseUrl()}}',
-  ])('rejects unproven recursive React resource input: %s', props => {
-    expect(errors(vendor + app('D.a', '', props))).toContain('unsupported-dynamic-url-sink')
+  ])('warns and preserves unproven recursive React resource input: %s', props => {
+    expect(warnings(vendor + app('D.a', '', props))).toContain('unsupported-dynamic-url-sink')
   })
 
   it.each([
@@ -123,9 +133,10 @@ describe('audited framework resource closure', () => {
     expect(result.html).toContain(props.includes('chooseHtml') ? 'chooseHtml()' : 'chooseMarkup()')
   })
 
-  it('preserves authorized passive media but rejects unknown remote resource uses', () => {
+  it('preserves authorized passive media while flagging unknown remote resource uses as nonblocking warnings', () => {
     preservedMedia(vendor + app('D.a', '', '{src:D.a,style:{backgroundImage:"url(https://example.invalid/x.png)"}}'), 'https://example.invalid/x.png')
-    expect(errors(vendor + app('D.a', '', '{src:D.a,fill:"url(https://example.invalid/paint.svg)"}'))).toContain('remote-resource')
+    expect(diagnostics(vendor + app('D.a', '', '{src:D.a,fill:"url(https://example.invalid/paint.svg)"}')).map(item => item.code)).toContain('remote-resource')
+    expect(errors(vendor + app('D.a', '', '{src:D.a,fill:"url(https://example.invalid/paint.svg)"}'))).toEqual([])
     preservedMedia(vendor + app('D.a', '', `{src:D.a,dangerouslySetInnerHTML:{__html:${JSON.stringify('<img src="https://example.invalid/x.png">')}}}`), 'https://example.invalid/x.png')
   })
 
@@ -147,16 +158,29 @@ describe('audited framework resource closure', () => {
   })
 
   it.each([
-    'img[p]=chooseUrl()',
-    'img[p]="https://example.invalid/x.png"',
-    'const p="src";img[p]=chooseUrl()',
-    'img.src+=chooseUrl()',
-    'img.setAttribute(p,chooseUrl())',
-    'element.style.backgroundImage=chooseStyle()',
-    'element.style.setProperty("background-image",chooseStyle())',
-    'element.style.cssText+=chooseStyle()',
-  ])('rejects unknown dynamic DOM sinks: %s', code => {
-    expect(errors(code)).toContain('unsupported-dynamic-url-sink')
+    ['img[p]=chooseUrl()', 'warning'],
+    ['img[p]="https://example.invalid/x.png"', 'warning'],
+    ['const p="src";img[p]=chooseUrl()', 'warning'],
+    ['img.src+=chooseUrl()', 'warning'],
+    ['img.setAttribute(p,chooseUrl())', 'warning'],
+    ['element.style.backgroundImage=chooseStyle()', 'warning'],
+    ['element.style.setProperty("background-image",chooseStyle())', 'warning'],
+    ['element.style.cssText+=chooseStyle()', 'warning'],
+  ])('flags unknown dynamic DOM sinks at the right level: %s', (code, expectedLevel) => {
+    const issues = diagnostics(code)
+    const matched = issues.filter(item => item.code === 'unsupported-dynamic-url-sink')
+    expect(matched.length).toBeGreaterThan(0)
+    expect(matched.every(item => item.level === expectedLevel)).toBe(true)
+  })
+
+  it.each([
+    'fetch("/api/data.json")',
+    'const load=fetch;load(location.hash)',
+    'const name="fetch";globalThis[name](location.hash)',
+  ])('flags network-capability aliases as nonblocking warnings rather than rejects: %s', code => {
+    const issues = diagnostics(code)
+    expect(issues.filter(item => item.level === 'error')).toEqual([])
+    expect(issues.some(item => item.level === 'warning' && item.code === 'unsupported-network-sink')).toBe(true)
   })
 
   it.each([
@@ -174,7 +198,6 @@ describe('audited framework resource closure', () => {
     'const st=el.style;st.backgroundImage="url("+location.hash+")"',
     'let st;st=el.style;const next=st;next.backgroundImage=chooseUrl()',
     'const {style:st}=el;st.backgroundImage="url("+location.hash+")"',
-    'const load=fetch;load(location.hash)',
     'function apply(el,key){const st=el[key];st.backgroundImage="url("+location.hash+")"}apply(document.body,"style")',
     'function apply(el,key){return el[key]}const st=apply(document.body,"style");st.backgroundImage=location.hash',
     'const apply=(el,key)=>{const st=el[key];st.backgroundImage=location.hash};apply(document.body,"style")',
@@ -186,7 +209,6 @@ describe('audited framework resource closure', () => {
     'const obj={};const key=location.hash;const first=obj[key];const second=first[key];second("fetch(location.hash)")',
     'const first={}.toString;const second=first[location.hash];second("fetch(location.hash)")',
     'const name="style";const st=el[name];st.backgroundImage="url("+location.hash+")"',
-    'const name="fetch";globalThis[name](location.hash)',
     'const st=Reflect.get(el,"style");st.backgroundImage=location.hash',
     'eval("fetch(location.hash)")',
     'const key="st"+"yle";const st=el[key];st.backgroundImage=location.hash',
@@ -200,9 +222,9 @@ describe('audited framework resource closure', () => {
     'function style(){return el.style}style().backgroundImage=location.hash',
     'function set(st){st.backgroundImage=location.hash}set(el.style)',
     'const put=el.insertAdjacentHTML;put("beforeend",location.hash)',
-  ])('rejects unproven capability aliases and escapes: %s', code => {
-    expect(errors(code)).toContain('unsupported-dynamic-url-sink')
-    expect(errors(vendor + app('D.a', `function unsafe(){${code}}`))).toContain('unsupported-dynamic-url-sink')
+  ])('warns and preserves unproven capability aliases and escapes: %s', code => {
+    expect(warnings(code)).toContain('unsupported-dynamic-url-sink')
+    expect(warnings(vendor + app('D.a', `function unsafe(){${code}}`))).toContain('unsupported-dynamic-url-sink')
   })
 
   it('preserves shared image captions and ordinary CSS-looking text', () => {
@@ -219,15 +241,15 @@ describe('audited framework resource closure', () => {
   })
 
   it('does not treat arbitrary component props as proven host resource consumers', () => {
-    expect(errors(vendor + app('D.a', 'function Caption(props){return (0,T.jsx)("span",{children:props.src})}').replace('(0,T.jsx)("img",', '(0,T.jsx)(Caption,'))).toContain('unsupported-framework-resource-input')
+    expect(warnings(vendor + app('D.a', 'function Caption(props){return (0,T.jsx)("span",{children:props.src})}').replace('(0,T.jsx)("img",', '(0,T.jsx)(Caption,'))).toContain('unsupported-framework-resource-input')
   })
 
   it('proves literal containers and audited state updates before allowing unknown indices', () => {
     expect(errors('const rows=[{label:"one"},{label:"two"}];const row=rows[location.hash]')).toEqual([])
     const safe = 'function state(){const [value,setValue]=(0,h.useState)({});const toggle=(key,field)=>setValue(previous=>({...previous,[key]:{...previous[key],[field]:!previous[key]?.[field]}}));return !!value[location.hash]}'
     expect(errors(vendor + app('D.a', safe))).toEqual([])
-    expect(errors(vendor + app('D.a', safe.replace('setValue(previous=>', 'setValue(document.body);setValue(previous=>')))).toContain('unsupported-dynamic-url-sink')
-    expect(errors(vendor + app('D.a', 'function bad(){const [value,setValue]=(0,h.useState)({});const escape=setValue;return value[location.hash]}'))).toContain('unsupported-dynamic-url-sink')
+    expect(warnings(vendor + app('D.a', safe.replace('setValue(previous=>', 'setValue(document.body);setValue(previous=>')))).toContain('unsupported-dynamic-url-sink')
+    expect(warnings(vendor + app('D.a', 'function bad(){const [value,setValue]=(0,h.useState)({});const escape=setValue;return value[location.hash]}'))).toContain('unsupported-dynamic-url-sink')
   })
 
   it('does not acquire ownership through a shared producer alias', () => {
@@ -300,8 +322,8 @@ describe('audited framework resource closure', () => {
   })
 
   it('does not grant summaries to changed library code or lookalike fragments', () => {
-    expect(errors(vendor.replace('e.action=t', 'e.action=chooseAction()') + app())).toContain('unsupported-dynamic-url-sink')
-    expect(errors('function update(e){var n=e.memoizedProps,r=e.stateNode;switch(e.type){case"img":r.src=n.src}}')).toContain('unsupported-dynamic-url-sink')
+    expect(warnings(vendor.replace('e.action=t', 'e.action=chooseAction()') + app())).toContain('unsupported-dynamic-url-sink')
+    expect(warnings('function update(e){var n=e.memoizedProps,r=e.stateNode;switch(e.type){case"img":r.src=n.src}}')).toContain('unsupported-dynamic-url-sink')
     expect(validateHtmlImport(extractHtmlResources({ html: `<script>${vendor + app()}</script>` })).map(item => item.code)).toContain('unsupported-dynamic-url-sink')
   })
 
@@ -322,7 +344,7 @@ describe('audited framework resource closure', () => {
     'function update(e){var n=e.memoizedProps,r=e.stateNode;switch(e.type){case "img":r.src=n.src}}const props={type:"img",memoizedProps:{src:"https://example.invalid/a.png"},stateNode:document.createElement("img")};const alias=props;update(alias)',
     'function update(e){var n=e.memoizedProps,r=e.stateNode;switch(e.type){case "img":r.src=n.src}}update(source())',
     'function update(e){var n=e.memoizedProps,r=e.stateNode;switch(e.type){case "img":r.src=n.src}}function apply(x){update(x)}apply({type:"img",memoizedProps:{src:"https://example.invalid/a.png"},stateNode:document.createElement("img")})',
-  ])('rejects the previously misclassified DOM sink: %s', code => {
-    expect(errors(code)).toContain('unsupported-dynamic-url-sink')
+  ])('warns and preserves the previously misclassified DOM sink: %s', code => {
+    expect(warnings(code)).toContain('unsupported-dynamic-url-sink')
   })
 })

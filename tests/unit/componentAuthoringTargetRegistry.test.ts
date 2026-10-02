@@ -4,6 +4,7 @@ import {
   type ComponentHostNode,
 } from '@/player/ComponentAuthoringTargetRegistry'
 import { componentManifestSchema } from '@/shared/componentSchema'
+import { DomTextOverrides } from '@/player/lightEdit/domTextOverrides'
 import type {
   ComponentEditorHost,
   ComponentEditableTextBounds,
@@ -396,5 +397,74 @@ describe('ComponentAuthoringTargetRegistry', () => {
     })
 
     registry.destroy()
+  })
+
+  it.each(['文字', '图片'])('仅第 401 个合格自动%s触发截断，400 项不变时仍发布提示增减', async (kind) => {
+    const root = document.createElement('div')
+    vi.spyOn(root, 'getBoundingClientRect').mockReturnValue(rect(0, 0, 400, 200))
+    const addText = (text: string, width = 20) => {
+      const element = document.createElement('p')
+      element.textContent = text
+      Object.defineProperties(element, {
+        offsetWidth: { value: width }, offsetHeight: { value: 20 },
+        offsetLeft: { value: 10 }, offsetTop: { value: 10 },
+        offsetParent: { value: root },
+      })
+      root.append(element)
+      return element
+    }
+    const addImage = (src: string) => {
+      const image = document.createElement('img')
+      image.src = src
+      vi.spyOn(image, 'getBoundingClientRect').mockReturnValue(rect(10, 10, 20, 20))
+      root.append(image)
+      return image
+    }
+    for (let index = 0; index < 400; index += 1) addText(`文字 ${index}`)
+    const dom = new DomTextOverrides([root], [])
+    const onTargetsChanged = vi.fn()
+    const registry = new ComponentAuthoringTargetRegistry({
+      manifest,
+      node: node({ x: 0, y: 0, rotation: 0 }),
+      scope: 'scene',
+      sceneId: 'scene-one',
+      domRoot: root,
+      lightEdit: {
+        dom,
+        assetKeyForUrl: (url) => url === 'https://assets.example/hero.png' ? 'hero' : null,
+      },
+      onTargetsChanged,
+    })
+    registry.registerTextRegion({
+      key: 'content.title',
+      getBounds: () => ({ x: 0, y: 0, width: 20, height: 20 }),
+    })
+    await flushTargets()
+    const first = onTargetsChanged.mock.calls.at(-1)![0]
+    expect(first.truncated).toBeUndefined()
+    expect(first.targets.filter((target: { source: string }) => target.source === 'auto')).toHaveLength(400)
+    expect(first.targets).toHaveLength(401)
+
+    addText('123')
+    addText('无法测量', 0)
+    addImage('https://assets.example/unknown.png')
+    await flushTargets()
+    expect(onTargetsChanged).toHaveBeenCalledOnce()
+
+    const extra = kind === '文字' ? addText('新增文字') : addImage('https://assets.example/hero.png')
+    await flushTargets()
+    expect(onTargetsChanged).toHaveBeenCalledTimes(2)
+    expect(onTargetsChanged.mock.calls.at(-1)![0]).toMatchObject({ revision: 2, truncated: true })
+    expect(onTargetsChanged.mock.calls.at(-1)![0].targets).toEqual(first.targets)
+
+    extra.remove()
+    await flushTargets()
+    expect(onTargetsChanged).toHaveBeenCalledTimes(3)
+    expect(onTargetsChanged.mock.calls.at(-1)![0].truncated).toBeUndefined()
+    expect(onTargetsChanged.mock.calls.at(-1)![0].targets).toEqual(first.targets)
+    registry.destroy()
+    dom.destroy()
+    expect(onTargetsChanged.mock.calls.at(-1)![0].targets).toEqual([])
+    expect(onTargetsChanged.mock.calls.at(-1)![0].truncated).toBeUndefined()
   })
 })

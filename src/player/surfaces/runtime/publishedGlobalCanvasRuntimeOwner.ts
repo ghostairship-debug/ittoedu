@@ -447,7 +447,7 @@ export class PublishedGlobalCanvasRuntimeOwner {
     const sink = this.#authoring
     if (!sink || this.#destroyed) return
     const mapped = mapGlobalRuntimeTargetsToLayer(update, item, courseSlideCanvas(this.#payload))
-    if (mapped.targets.length === 0) {
+    if (mapped.targets.length === 0 && !mapped.truncated) {
       this.#authoringTargetsByItemId.delete(item.layerItemId)
     } else {
       this.#authoringTargetsByItemId.set(item.layerItemId, mapped)
@@ -458,19 +458,20 @@ export class PublishedGlobalCanvasRuntimeOwner {
   #emitAuthoringTargets(): void {
     const sink = this.#authoring
     if (!sink) return
+    const entries = [...this.#authoringTargetsByItemId.entries()]
+      .sort(([leftId], [rightId]) => {
+        const left = this.#records.get(leftId)?.item
+        const right = this.#records.get(rightId)?.item
+        return (left?.order ?? 0) - (right?.order ?? 0)
+          || leftId.localeCompare(rightId, 'en')
+      })
     sink.onTargetsChanged(Object.freeze({
       revision: ++this.#authoringRevision,
       scope: 'global',
-      targets: Object.freeze(
-        [...this.#authoringTargetsByItemId.entries()]
-          .sort(([leftId], [rightId]) => {
-            const left = this.#records.get(leftId)?.item
-            const right = this.#records.get(rightId)?.item
-            return (left?.order ?? 0) - (right?.order ?? 0)
-              || leftId.localeCompare(rightId, 'en')
-          })
-          .flatMap(([, entry]) => entry.targets),
-      ),
+      targets: Object.freeze(entries.flatMap(([, entry]) => entry.targets)),
+      truncatedItemIds: Object.freeze(entries
+        .filter(([, entry]) => entry.truncated)
+        .map(([itemId]) => itemId)),
     }))
   }
 
@@ -486,6 +487,7 @@ export class PublishedGlobalCanvasRuntimeOwner {
       revision: ++this.#authoringRevision,
       scope: 'global',
       targets: Object.freeze([]),
+      truncatedItemIds: Object.freeze([]),
     }))
   }
 

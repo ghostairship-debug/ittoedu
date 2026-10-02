@@ -17,7 +17,7 @@ const samePath = (a: string, b: string) => process.platform === 'win32' ? a.toLo
 const textDriver = new TextDriver()
 const MAX_TEXT_BYTES = 256 * 1024 * 1024
 
-/** Ordinary UTF-8 source operations. Open documents always go through their existing session and Gateway. */
+/** Ordinary UTF-8 source operations. Open document writes use their existing canonical session. */
 export class AgentFileText {
   private readonly pages = new Map<string, Page>()
   releaseRun(runId: string): void { for (const [id, value] of this.pages) if (value.runId === runId) this.pages.delete(id) }
@@ -39,9 +39,10 @@ export class AgentFileText {
     return { source: current.text, version: current.version, dirty: false }
   }
 
-  async read(context: AgentFileContext, filename: string, limit = 8_000, cursor?: string, operationId: string = randomUUID()): Promise<AgentFileOutcome> {
+  async read(context: AgentFileContext, filename: string, limit = 8_000, cursor?: string, _operationId: string = randomUUID()): Promise<AgentFileOutcome> {
     if (sourceFileKind(filename) === 'course-v9') throw new Error('H5 演示须通过正式文档工具读取')
-    if (!this.live(filename)) {
+    const opened = this.live(filename)
+    if (!opened) {
       const position = cursor ? this.pages.get(cursor) : undefined
       if (cursor && (!position || position.runId !== context.runId || !samePath(position.filename, filename))) throw new Error('文件分页不属于本次读取')
       const offset = position?.offset ?? 0
@@ -57,7 +58,9 @@ export class AgentFileText {
       return { data: { path: filename, text: current.text.slice(0, length), offset, total: current.total,
         version: current.version, dirty: false, truncated, ...(nextCursor ? { nextCursor } : {}) } }
     }
-    const current = await this.source(filename)
+    const snapshot = await this.host.registry.get(opened.documentId).drain()
+    if (!isSourceDocumentModel(snapshot.model)) throw new Error('当前文档不是普通源文件')
+    const current = { source: snapshot.model.source, version: `document:${snapshot.documentId}:${snapshot.epoch}:${snapshot.revision}`, dirty: snapshot.dirty }
     let offset = 0
     if (cursor) {
       const page = this.pages.get(cursor)
@@ -68,22 +71,6 @@ export class AgentFileText {
     let end = Math.min(offset + limit, current.source.length)
     if (end < current.source.length && /[\uD800-\uDBFF]/u.test(current.source[end - 1] ?? '') && /[\uDC00-\uDFFF]/u.test(current.source[end] ?? '')) end--
     if (end === offset && offset < current.source.length) end = Math.min(offset + 2, current.source.length)
-    if (current.snapshot) {
-      try {
-        await this.host.tools.attachRunDocument(context.runId, current.snapshot.documentId,
-          context.permission !== 'read-only' && (context.permission === 'full' || isInsideRoot(context.workspaceRoot, filename)))
-        const target = await this.host.tools.issueTarget(context.runId, current.snapshot.documentId,
-          { kind: 'markdown-range', from: offset, to: end }, { readOnly: true })
-        const receipt = await this.host.tools.execute(context.runId, `${operationId}:source-observation:${randomUUID()}`,
-          { name: 'read', input: { target, limit: Math.max(1, Math.ceil((end - offset) / 100)) } })
-        if (receipt.kind !== 'read' || (receipt.data as { text?: unknown }).text !== current.source.slice(offset, end))
-          throw new Error('正式文档观察与文件读取不一致，请重新读取')
-        if ((await this.source(filename)).version !== current.version) throw new Error('读取期间文档已改变，请重新读取')
-      } catch (error) {
-        // Direct service fixtures can read without an Engine run. A stopped or stale real run is never ignored.
-        if (!(error instanceof Error && 'code' in error && error.code === 'unknown-run')) throw error
-      }
-    }
     const truncated = end < current.source.length
     const data = { path: filename, text: current.source.slice(offset, end), offset, total: current.source.length,
       version: current.version, dirty: current.dirty, truncated } as Record<string, unknown>
@@ -92,6 +79,7 @@ export class AgentFileText {
       this.pages.set(nextCursor, { runId: context.runId, filename, version: current.version, offset: end, time: Date.now() })
       data.nextCursor = nextCursor
     }
+    context.assertActive?.()
     return { data }
   }
 
@@ -110,17 +98,21 @@ export class AgentFileText {
       return { data: { path: filename, operation: receipt, saved: !!created,
         ...(created ? { afterVersion: hash(Buffer.from(content, 'utf8')) } : {}) } }
     }
-    if (!expectedVersion) throw new Error('覆盖文件必须提供读取时取得的版本')
-    return this.replaceExisting(context, filename, content, expectedVersion, operationId)
+    if (expectedVersion) return this.replaceExisting(context, filename, content, expectedVersion, operationId)
+    return this.host.fileCoordinator.withFileOperation(async () => {
+      await this.host.assertFileAvailable(filename)
+      const current = await this.source(filename)
+      return this.commit(context, filename, current, content, operationId)
+    })
   }
 
-  async patch(context: AgentFileContext, filename: string, expectedVersion: string, oldText: string, newText: string,
+  async patch(context: AgentFileContext, filename: string, expectedVersion: string | undefined, oldText: string, newText: string,
     range: { from: number; to: number } | undefined, operationId: string): Promise<AgentFileOutcome> {
     if (context.permission === 'read-only') throw new Error('只读任务不能修改文件')
     return this.host.fileCoordinator.withFileOperation(async () => {
       await this.host.assertFileAvailable(filename)
       const current = await this.source(filename)
-      if (current.version !== expectedVersion) throw new Error('文件版本已改变，请重新读取后修改')
+      if (expectedVersion !== undefined && current.version !== expectedVersion) throw new Error('文件版本已改变，请重新读取后修改')
       const match = matchTextPatch(current.source, oldText, newText, range)
       const { from, to, text } = match
       const next = current.source.slice(0, from) + text + current.source.slice(to)
@@ -143,8 +135,18 @@ export class AgentFileText {
     edit?: { from: number; to: number; newText: string }): Promise<AgentFileOutcome> {
     if (current.snapshot) {
       const snapshot = current.snapshot
-      if (context.permission !== 'full' && !isInsideRoot(context.workspaceRoot, filename))
-        throw new Error('已打开的工作空间外文档需取得正式文档写授权，单次文件批准不会扩大后续文档权限')
+      if (context.permission !== 'full' && !isInsideRoot(context.workspaceRoot, filename)) {
+        if (!(context.approvedOutsidePaths ?? []).some(approved => samePath(approved, filename))) throw new Error('工作空间外文档的本次修改需要明确批准')
+        context.assertActive?.()
+        const result = await this.host.registry.get(snapshot.documentId).execute({ documentId: snapshot.documentId, epoch: snapshot.epoch,
+          operationId, baseRevision: snapshot.revision, actor: 'agent', runId: context.runId,
+          mutation: { type: 'command', command: { type: 'markdown.replace', source: next } },
+          ...(edit ? { textChanges: { source: [{ from: edit.from, to: edit.to, inserted: edit.newText.length }], flow: [] } } : {}) })
+        if (result.status !== 'applied' && result.status !== 'unchanged') throw new Error(result.status === 'conflict'
+          ? '文档在批准后又被修改，请重新读取' : 'message' in result ? result.message : '正式文档修改未完成')
+        return { data: { path: filename, operationId, status: result.status, documentResult: result,
+          beforeVersion: current.version, afterVersion: `document:${snapshot.documentId}:${snapshot.epoch}:${result.revision}`, saved: false, dirty: true } }
+      }
       await this.host.tools.attachRunDocument(context.runId, snapshot.documentId, true)
       const target = await this.host.tools.issueTarget(context.runId, snapshot.documentId,
         { kind: 'markdown-range', from: edit?.from ?? 0, to: edit?.to ?? current.source.length })

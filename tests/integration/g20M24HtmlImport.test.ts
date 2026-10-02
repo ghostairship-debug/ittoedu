@@ -20,6 +20,10 @@ import { HtmlImportNetworkGrants } from '../../src/main/workbench/htmlImport/htm
 import { HtmlImportOperationStore } from '../../src/main/workbench/htmlImport/HtmlImportOperationStore'
 import { HtmlImportToolService } from '../../src/main/workbench/htmlImport/HtmlImportToolService'
 import { executeHtmlImport, htmlImportInputSchema } from '../../src/core/tools/HtmlImportTools'
+import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEngine'
+import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
+import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
+import type { ModelProvider, ModelSelection } from '../../src/shared/workbench/modelProvider'
 import { unpackHtmlDocumentRuntimeSource } from '../../src/shared/runtime/htmlDocumentSource'
 import type { BuildAdmissionPort } from '../../src/shared/workbench/build'
 import type { SpatialSurfaceDocument } from '../../src/shared/courseProjectTypes'
@@ -177,6 +181,36 @@ async function setupTestEnvironment(admission?: BuildAdmissionPort, cancelJobSpy
 }
 
 describe('M24 g20-b18-c2 HTML section import orchestration', () => {
+  it('delivers HTML import advisories in the next actual engine provider request', async () => {
+    const env = await setupTestEnvironment()
+    const selection: ModelSelection = { model: 'fixture', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat',
+      baseURL: 'https://fixture.invalid/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'fixture' }, billing: { kind: 'unknown' },
+      capabilities: { tools: 'supported', stream: 'supported', vision: 'unsupported', reasoning: 'unknown' } } }
+    let turns = 0
+    const provider: ModelProvider = { async *stream(request) {
+      const calls: { id: string; name: string; argumentsText: string }[] = []
+      if (++turns === 1) {
+        const refs = JSON.parse(String(request.messages[1].content).split('：')[1]) as { target: string }[]
+        calls.push({ id: 'import', name: 'html.import', argumentsText: JSON.stringify({ target: refs[0].target, source: refs[1].target, mode: 'whole' }) })
+      } else {
+        const message = request.messages.find(item => item.role === 'tool')!
+        expect(JSON.parse(String(message.content))).toMatchObject({ kind: 'document-operation', advisories: [
+          { step: 0, code: 'html-import-warning', message: expect.stringMatching(/CSP.*阻止/) },
+        ] })
+      }
+      yield { type: 'response.completed', requestId: request.requestId, sequence: 1, responseId: 'fixture', actualModel: 'fixture',
+        finishReason: calls.length ? 'tool_calls' : 'stop', nativeResponse: {}, toolCalls: calls, assistant: { role: 'assistant', content: calls.length ? null : '完成',
+          ...(calls.length ? { tool_calls: calls.map(call => ({ id: call.id, type: 'function' as const, function: { name: call.name, arguments: call.argumentsText } })) } : {}) } }
+    } }
+    const engine = new ExecutionEngine({ registry: env.registry, gateway: env.gateway, provider,
+      runs: new ExecutionRunStore(path.join(env.root, 'runs')), events: new ExecutionEventStore({ directory: path.join(env.root, 'events') }) })
+    const started = await engine.start({ conversationId: 'html-advisories', taskId: 'html-advisories', instruction: '导入页面', selection,
+      documents: [{ documentId: env.courseSession.documentId, writable: [{ kind: 'document' }] }, { documentId: env.remoteHtmlSession.documentId, writable: [] }] })
+    expect(await engine.wait(started.runId)).toMatchObject({ status: 'completed' })
+    expect(turns).toBe(2)
+    expect(env.courseSession.read()).toMatchObject({ undoDepth: 1 })
+  })
+
   it('automatically imports ambiguous sections as one faithful page and preserves them after saving', async () => {
     const env = await setupTestEnvironment(), runId = 'auto-whole-fallback'
     const html = '<body><section>Intro</section><main><section>Exercise</section><button onclick="this.textContent=\'Done\'">Start</button></main></body>'
@@ -549,7 +583,7 @@ describe('M24 g20-b18-c2 HTML section import orchestration', () => {
     ).rejects.toThrow('同一 HTML 导入操作编号不能改变请求参数')
   })
 
-  it('rejects remote scripts before creating scratch and touches neither disk nor document', async () => {
+  it('preserves remote scripts and records a warning diagnostic without blocking import', async () => {
     const env = await setupTestEnvironment()
     const runId = 'test-run-remote-script'
 
@@ -583,18 +617,23 @@ describe('M24 g20-b18-c2 HTML section import orchestration', () => {
       destinations: [{ kind: 'slide-new', surface: slideSurface.id }],
     })
 
-    expect(result.kind).toBe('error')
-    if (result.kind === 'error') {
-      expect(result.message).toContain('远程')
+    // 导入应成功；Remote script 只是 warning（AGENTS.md 2026-09-30"导入优先"）
+    expect(result.kind).toBe('document-operation')
+    if (result.kind === 'document-operation') {
+      expect(result.result.status).toBe('applied')
+      expect(result.advisories).toContainEqual(expect.objectContaining({ step: 0, code: 'html-import-warning', message: expect.stringMatching(/CSP.*阻止/) }))
     }
 
-    // Admission was never called
-    expect(env.run).not.toHaveBeenCalled()
+    // A new service reads the durable outer receipt without repeating admission.
+    const restored = new HtmlImportToolService({ documents: { read: id => env.registry.get(id).drain(), get: id => env.registry.get(id) },
+      gateway: env.gateway, cancelJob: async (run, jobId) => { await env.builds.execute(run, { type: 'cancel', jobId }) },
+      operationStore: new HtmlImportOperationStore(path.join(env.root, 'operations')) })
+    expect(await executeHtmlImport(restored, context, { source: sourceHandle, target: targetHandle, mode: 'sections',
+      destinations: [{ kind: 'slide-new', surface: slideSurface.id }] })).toEqual(result)
+    expect(env.run).toHaveBeenCalledOnce()
 
-    // Target document was untouched
     const snapshotAfter = await env.courseSession.drain()
-    expect(snapshotAfter.revision).toBe(snapshotBefore.revision)
-    expect(snapshotAfter.undoDepth).toBe(snapshotBefore.undoDepth)
+    expect(snapshotAfter.undoDepth).toBe(snapshotBefore.undoDepth + 1)
   })
 
   it('cancels before a build job exists without dispatching any child call', async () => {
@@ -998,8 +1037,10 @@ it('persists an imported course to the actual h5lesson bytes and reopens it with
     source, target, mode: 'sections',
   } })
   expect(result).toMatchObject({ kind: 'document-operation', result: { status: 'applied', persistence: 'recoverable' } })
-  // Compound import advances this run's own document reference; no reopen/read-tree ceremony.
-  await expect(env.gateway.resolveWholeDocumentHandle(runId, target, 'write')).resolves.toMatchObject({ revision: before.revision + 1 })
+  // Compound import advances the document revision; the previous document handle is now
+  // conflicted for further writes (resolve() would report 本任务已修改), so verify through
+  // the canonical session instead of a stale handle.
+  expect(env.courseSession.read().revision).toBe(before.revision + 1)
   const file = path.join(env.root, 'delivered.h5lesson')
   await expect(fs.stat(file)).rejects.toMatchObject({ code: 'ENOENT' })
   const saved = await env.courseSession.save({ kind: 'file', path: file, version: null, bindingVersion: 1 })

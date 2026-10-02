@@ -15,6 +15,7 @@ export interface HtmlImportOperationRecord {
   jobId?: string
   artifactId?: string
   pages?: readonly { order: number; location: string; runtimeId: string }[]
+  warnings?: readonly { code: string; message: string }[]
   receipt?: HtmlImportReceipt
   reason?: string
 }

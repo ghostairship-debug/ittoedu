@@ -14,7 +14,7 @@ export interface HtmlPreviewControllerEvents {
   onEditModeReady(enabled: boolean): void
   onPage(index: number, scroll: number): void
   onEditing(): void
-  onApplied(revision: number, patch: { handle: string; kind: 'text' | 'image'; value: string }, beforeValue: string): void
+  onApplied(revision: number, patch: Extract<HtmlPreviewEditOutcome, { status: 'applied' }>['patch'], beforeValue: string): void
   onEditSettled(): void
   onPatchMismatch(): void
 }

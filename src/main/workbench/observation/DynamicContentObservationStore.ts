@@ -13,6 +13,7 @@ export interface DynamicContentPublication {
   readonly publicationSeq: number
   readonly source: 'authoring' | 'live'
   readonly targets: readonly DynamicContentObservedTarget[]
+  readonly truncatedItemIds?: readonly string[]
 }
 
 export interface DynamicContentReadIdentity {
@@ -26,6 +27,7 @@ interface ActivePublication extends DynamicContentReadIdentity {
   readonly viewGeneration: string
   readonly source: DynamicContentPublication['source']
   readonly targets: readonly DynamicContentObservedTarget[]
+  readonly truncatedItemIds?: readonly string[]
 }
 
 interface SenderDocumentState {
@@ -113,25 +115,32 @@ export class DynamicContentObservationStore {
       documentId: publication.documentId, epoch: publication.epoch, revision: publication.revision,
       locationId: publication.locationId, viewGeneration: publication.viewGeneration,
       source: publication.source, targets: targets as DynamicContentObservedTarget[],
+      ...(Array.isArray(publication.truncatedItemIds) ? {
+        truncatedItemIds: publication.truncatedItemIds.filter(value => shortString(value)),
+      } : {}),
     }
     return true
   }
 
   /** Rechecks the canonical snapshot; callers still pass each hit through the core target planner. */
-  async read(identity: DynamicContentReadIdentity): Promise<DynamicContentObservedTarget[]> {
+  async read(identity: DynamicContentReadIdentity): Promise<{
+    targets: DynamicContentObservedTarget[]; truncatedItemIds?: readonly string[]
+  }> {
     let snapshot: DocumentSnapshot | null
-    try { snapshot = await this.snapshot(identity.documentId) } catch { return [] }
+    try { snapshot = await this.snapshot(identity.documentId) } catch { return { targets: [] } }
     if (!snapshot || snapshot.documentId !== identity.documentId || snapshot.epoch !== identity.epoch
       || snapshot.revision !== identity.revision || snapshot.model.kind !== 'course-v9'
       || snapshot.model.project.revision !== snapshot.revision
-      || !snapshot.model.project.locations.some(location => location.id === identity.locationId)) return []
+      || !snapshot.model.project.locations.some(location => location.id === identity.locationId)) return { targets: [] }
     const result: DynamicContentObservedTarget[] = []
+    const truncatedItemIds = new Set<string>()
     for (const documents of this.senders.values()) {
       const state = documents.get(identity.documentId)
       if (!state?.active || !sameIdentity(state.active, identity)) continue
       result.push(...state.active.targets.map(hit => ({ ...hit })))
+      for (const itemId of state.active.truncatedItemIds ?? []) truncatedItemIds.add(itemId)
     }
-    return result
+    return { targets: result, ...(truncatedItemIds.size ? { truncatedItemIds: [...truncatedItemIds] } : {}) }
   }
 
   private retire(state: SenderDocumentState): void {

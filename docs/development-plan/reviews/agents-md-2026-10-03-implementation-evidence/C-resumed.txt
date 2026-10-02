@@ -1,0 +1,16 @@
+onclick       可挂载
+onkeydown     可挂载
+ondrop        可挂载
+ondragover    可挂载
+ondragstart   可挂载
+ontouchstart  可挂载
+onwheel       可挂载
+onmouseenter  可挂载
+onmouseleave  可挂载
+oncontextmenu 可挂载
+onscroll      可挂载
+onpointermove 可挂载
+onended       可挂载
+onplay        可挂载
+onerror       可挂载
+onload        可挂载

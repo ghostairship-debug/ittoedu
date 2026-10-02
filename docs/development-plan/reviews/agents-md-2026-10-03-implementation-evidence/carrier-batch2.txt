@@ -1,0 +1,12 @@
+已清除环境变量 ELECTRON_RUN_AS_NODE：它会让 electron.exe 退化成普通 Node，主进程读取 app 对象时崩溃，Playwright 只会报 “Process failed to launch!”。本进程后续启动的 Electron 不再继承该变量。
+
+Running 4 tests using 1 worker
+
+(node:4664) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ok 1 tests\e2e\g20HtmlCspCarrier.spec.ts:4:5 › HTML carrier executes ordered scripts and handlers under inherited CSP (455ms)
+  ok 2 tests\e2e\g20HtmlCspCarrier.spec.ts:47:5 › parser scripts preserve handler target, property override, and inline script order (151ms)
+  ok 3 tests\e2e\g20HtmlCspCarrier.spec.ts:85:5 › inline handlers resolve element, form, and document names (123ms)
+  ok 4 tests\e2e\g20HtmlCspCarrier.spec.ts:110:5 › early event attributes mount and fire, and Blob scripts are revoked on destroy (261ms)
+
+  4 passed (2.1s)

@@ -1,0 +1,2 @@
+先 file.read=false  attach(true) 返回=true  text.replace -> document-operation applied
+先 file.read=true  attach(true) 返回=false  text.replace -> error not-authorized: 目标不在本次任务的可写范围

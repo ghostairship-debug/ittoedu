@@ -33,7 +33,6 @@ CoursewareRuntime.define({
     const scriptUrls = [];
     const eventHandlers = [];
     let handlerCode = '';
-    const supportedEvents = new Set(['click', 'dblclick', 'change', 'input', 'submit', 'keydown', 'keyup', 'keypress', 'pointerdown', 'pointerup', 'mousedown', 'mouseup', 'mousemove', 'mouseover', 'mouseout', 'focus', 'blur']);
     try {
       for (const element of parsed.querySelectorAll('*')) {
         if (element.hasAttribute('data-cw-inline-handler')) throw new Error('HTML 页面事件标记冲突');
@@ -41,7 +40,6 @@ CoursewareRuntime.define({
         for (const attribute of Array.from(element.attributes)) {
           if (!/^on[a-z]+$/i.test(attribute.name)) continue;
           const eventName = attribute.name.slice(2).toLowerCase();
-          if (!supportedEvents.has(eventName)) throw new Error('HTML 页面不支持内联事件：' + attribute.name);
           if (id === null) { id = String(eventHandlers.length); element.setAttribute('data-cw-inline-handler', id); }
           eventHandlers.push([id, eventName, attribute.value]);
           element.removeAttribute(attribute.name);
@@ -61,7 +59,8 @@ CoursewareRuntime.define({
           scriptUrls.push(url);
           script.textContent = '';
           script.setAttribute('src', url);
-          if (type !== 'module') { script.removeAttribute('defer'); script.removeAttribute('async'); }
+          if (type !== 'module') { if (!script.hasAttribute('data-cw-defer')) script.removeAttribute('defer'); script.removeAttribute('async'); }
+          script.removeAttribute('data-cw-defer');
         }
         if (eventHandlers.length) {
           if (!flushUrl) {

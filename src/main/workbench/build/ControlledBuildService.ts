@@ -9,7 +9,7 @@ import { courseConnectOriginSchema, courseProjectDocumentSchema } from '../../..
 import type { DocumentModel } from '../../../shared/workbench/document'
 import { validateCourseProjectArchiveData } from '../../../core/drivers/codecs/courseProjectArchive'
 import { componentPackageKey } from '../../../core/drivers/codecs/archivePath'
-import { parseComponentPackageFiles, validateComponentRuntimeSource } from '../../../core/drivers/codecs/importComponentPackage'
+import { parseComponentPackageFiles } from '../../../core/drivers/codecs/importComponentPackage'
 import { documentDigest } from '../../../core/documents/documentDigest'
 import { projectDynamicTargets } from '../../../shared/projectDynamicTargets'
 import { createHtmlDocumentRuntimeSource, unpackHtmlDocumentRuntimeSource } from '../../../shared/runtime/htmlDocumentSource'
@@ -243,7 +243,7 @@ export class ControlledBuildService {
   }
   private syntax(source: string, kind: 'component' | 'runtime', filename: string) {
     if (Buffer.byteLength(source) > 16 * 1024 * 1024) throw new Error('动态源码超过 16 MiB，请拆分模块或移出内嵌素材')
-    if (kind === 'component') validateComponentRuntimeSource(source); else validateRuntimeSource(source)
+    if (kind === 'runtime') validateRuntimeSource(source)
     // V8 compiles grammar but never executes the candidate. There is deliberately no runInContext/eval/child process.
     new Script(source, { filename: `build-scratch:${filename}` })
   }

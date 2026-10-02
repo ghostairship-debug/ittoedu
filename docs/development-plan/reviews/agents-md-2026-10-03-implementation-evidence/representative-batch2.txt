@@ -1,0 +1,30 @@
+{
+  "commit": "applied",
+  "saveClean": true,
+  "reopened": true,
+  "scriptPreserved": true,
+  "managedImage": 1,
+  "warnings": [
+    {
+      "code": "resource-hint-omitted",
+      "message": "[resource-hint-omitted] 已移除非受管素材的加载提示 hint.js；不影响页面正文，脚本或样式请内联（共 1 处）"
+    },
+    {
+      "code": "early-event-handler",
+      "message": "[early-event-handler] onload/onerror 等加载期事件尽力绑定，个别时序可能漏触发；关键初始化请改用脚本内 addEventListener 或立即执行（共 2 处）"
+    },
+    {
+      "code": "unmanaged-relative-resource",
+      "message": "[unmanaged-relative-resource] 本地资源 a.vtt 的类型暂不能作为受管素材，已保留原引用；课件中无法解析该引用，请内联内容或改用受支持媒体（共 1 处）"
+    },
+    {
+      "code": "unsupported-network-sink",
+      "message": "[unsupported-network-sink] 脚本网络调用已保留；fetch/EventSource/WebSocket 仅可连接工程声明的精确 HTTPS/WSS 源，本地相对数据不会打包，远程脚本/模块/Worker 被 CSP 阻止；请内联本地数据或使用已声明的连接源（共 1 处）"
+    },
+    {
+      "code": "unsupported-dynamic-url-sink",
+      "message": "[unsupported-dynamic-url-sink] 无法静态证明该脚本的资源引用闭合，已原样保留；脚本里的本地文件引用不会被打包，请内联资源或改为可解析的静态媒体引用（共 1 处）"
+    }
+  ],
+  "admission": "fixture; Electron admission not tested"
+}

@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { extractHtmlResources } from '../../src/main/workbench/htmlImport/extractHtmlResources'
 import { readHtmlClosure } from '../../src/main/workbench/htmlImport/readHtmlClosure'
 import { validateHtmlImport } from '../../src/main/workbench/htmlImport/validateHtmlImport'
+import { createHtmlDocumentRuntimeSource } from '../../src/shared/runtime/htmlDocumentSource'
 
 const png = Uint8Array.of(137, 80, 78, 71, 1, 2, 3, 4)
 const uri = `data:image/png;base64,${Buffer.from(png).toString('base64')}`
@@ -46,12 +47,44 @@ describe('HTML import closure', () => {
     expect(source).toContain('\\u003c!-- \\u003cscript>')
   })
 
-  it('fails on invalid scripts and external module graphs without scanning as success', () => {
+  it('rejects invalid scripts and preserves existing module dependencies with an actionable warning', () => {
     const invalid = extractHtmlResources({ html: `<script>const = '${uri}'</script>` })
     expect(invalid.resources).toEqual([])
     expect(validateHtmlImport(invalid).map(error => error.code)).toContain('script-parse')
-    const module = extractHtmlResources({ html: '<script type="module">import "./dependency.js"</script>' })
+    const module = extractHtmlResources({ html: '<script type="module">import "./dependency.js"</script>', siblingFiles: new Map([['dependency.js', new TextEncoder().encode('export default 1')]]) })
     expect(validateHtmlImport(module).map(error => error.code)).toContain('unsupported-module-graph')
+    expect(validateHtmlImport(module).some(error => error.level === 'error')).toBe(false)
+    expect(module.resources).toEqual([])
+    expect(module.html).toContain('import "./dependency.js"')
+  })
+
+  it.each(['./missing.js', 'http://example.test/mod.js', 'file:///C:/mod.js', 'blob:https://example.test/mod'])('diagnoses an explicitly bad module reference %s', reference => {
+    const result = extractHtmlResources({ html: `<script type="module">import ${JSON.stringify(reference)}</script>` })
+    expect(validateHtmlImport(result).some(error => error.level === 'error')).toBe(true)
+    expect(result.html).toContain(JSON.stringify(reference))
+  })
+
+  it('does not treat a bare package name as a missing local file', () => {
+    const result = extractHtmlResources({ html: '<script type="module">import "react"</script>' })
+    expect(validateHtmlImport(result).filter(error => error.level === 'error')).toEqual([])
+    expect(result.diagnostics.find(error => error.code === 'unsupported-module-graph')?.message).toContain('合并为单文件')
+  })
+
+  it.each(['click', 'keydown', 'drop', 'dragover', 'dragstart', 'touchstart', 'wheel', 'mouseenter', 'mouseleave',
+    'contextmenu', 'scroll', 'pointermove', 'ended', 'play', 'pause', 'timeupdate', 'error', 'load'])('mounts inline on%s handlers', name => {
+    const source = createHtmlDocumentRuntimeSource({ html: `<body><div on${name}="window.called=true">text</div></body>`, resourceKeys: [] })
+    let definition: any
+    new Function('CoursewareRuntime', source)({ define(value: any) { definition = value } })
+    const root = document.createElement('div')
+    const lifecycle = definition.create({ dom: { root }, assets: {}, capture: { waitUntil(promise: Promise<unknown>) { promise.catch(() => {}) } } })
+    expect(root.querySelector('iframe')).not.toBeNull()
+    lifecycle.destroy()
+  })
+
+  it('warns for load timing without warning for drag interaction', () => {
+    const result = extractHtmlResources({ html: '<body onload="ready()"><img onerror="fallback()"><div ondrop="drop(event)"></div></body>' })
+    expect(result.diagnostics.filter(item => item.code === 'early-event-handler')).toHaveLength(2)
+    expect(validateHtmlImport(result).filter(item => item.level === 'error')).toEqual([])
   })
 
   it('preserves unused resource-looking strings and visible text', () => {
@@ -160,16 +193,37 @@ describe('HTML import closure', () => {
     expect(validateHtmlImport(result).map(error => error.code)).toContain('unsupported-network-sink')
   })
 
-  it('rejects CSS import modifiers rather than turning them into media queries', () => {
+  it('inlines CSS import modifiers as layers and supports conditions', () => {
     const files = new Map([['theme.css', new TextEncoder().encode('.title{color:red}')]])
     const media = extractHtmlResources({ html: '<style>@import "theme.css" screen;</style>', siblingFiles: files })
     expect(validateHtmlImport(media)).toEqual([])
     expect(media.html).toContain('@media screen{.title{color:red}}')
     for (const modifier of ['layer(theme)', 'supports(display: grid)', 'layer(theme) supports(display: grid)', '/*comment*/ layer(theme)']) {
       const result = extractHtmlResources({ html: `<style>@import "theme.css" ${modifier};</style>`, siblingFiles: files })
-      expect(validateHtmlImport(result).map(error => error.code)).toContain('unsupported-css-import')
+      expect(validateHtmlImport(result)).toEqual([])
+      expect(result.html).not.toContain('@import')
       expect(result.html).not.toContain('@media')
     }
+  })
+
+  it('nests layer, supports and media around recursive CSS imports and rewrites their resources', () => {
+    const files = new Map([['css/theme.css', new TextEncoder().encode('@import "nested.css"; .title{background:url(../picture.png)}')],
+      ['css/nested.css', new TextEncoder().encode('.nested{color:red}')], ['picture.png', png]])
+    const result = extractHtmlResources({ html: '<style>@import "css/theme.css" layer(theme) supports(display: grid) screen and (min-width: 1px);</style>', siblingFiles: files })
+    expect(validateHtmlImport(result)).toEqual([])
+    expect(result.html).toContain('@layer theme{@supports (display: grid){@media screen and (min-width: 1px){.nested{color:red}')
+    expect(result.html).not.toContain('@import')
+    expect(result.resources).toHaveLength(1)
+    expect(result.html).toContain('cw-resource:')
+    const anonymous = extractHtmlResources({ html: '<style>@import "css/nested.css" layer supports((display: grid) and (color: red));</style>', siblingFiles: files })
+    expect(anonymous.html).toContain('@layer{@supports (display: grid) and (color: red){.nested{color:red}}}')
+  })
+
+  it('marks only originally external classic defer scripts for carrier scheduling', () => {
+    const result = extractHtmlResources({ html: '<script defer src="a.js"></script><script defer>window.inline=true</script><script async defer src="a.js"></script>',
+      siblingFiles: new Map([['a.js', new TextEncoder().encode('window.external=true')]]) })
+    expect(result.html.match(/data-cw-defer/g)).toHaveLength(1)
+    expect(result.html).toContain('<script defer>window.inline=true</script>')
   })
 
   it('localizes image-set string resources and rejects remote strings', () => {
@@ -199,7 +253,7 @@ describe('HTML import closure', () => {
 
   it('includes modulepreload and SVG image references in closure decisions', () => {
     const remote = extractHtmlResources({ html: '<link rel="modulepreload" href="https://cdn.example/mod.js">' })
-    expect(validateHtmlImport(remote).map(error => error.code)).toEqual(expect.arrayContaining(['unsupported-module-graph', 'remote-script']))
+    expect(validateHtmlImport(remote).map(error => error.code)).toEqual(expect.arrayContaining(['resource-hint-omitted', 'remote-script']))
     const local = extractHtmlResources({ html: '<svg><image href="picture.png"/><image xlink:href="picture.png"/></svg>', siblingFiles: new Map([['picture.png', png]]) })
     expect(local.resources).toHaveLength(1)
     expect(local.resources[0]?.origins).toHaveLength(2)
@@ -278,7 +332,8 @@ it.each([
   "function f(document){const pages=[...document.querySelectorAll('section')];let i=0;pages[i].style.backgroundImage=chooseUrl()}",
 ])('does not exempt unknown resources or escaped collection capabilities: %s', code => {
   const result = extractHtmlResources({ html: `<script>${code}</script>` })
-  expect(validateHtmlImport(result).some(issue => issue.level === 'error')).toBe(true)
+  expect(validateHtmlImport(result).some(issue => issue.level === 'error')).toBe(false)
+  expect(validateHtmlImport(result)).toContainEqual(expect.objectContaining({ level: 'warning', code: 'unsupported-dynamic-url-sink' }))
 })
 
 
@@ -337,13 +392,19 @@ describe('ordinary mutable data and non-resource styles', () => {
   })
   it.each([
     'let x={};x=document.querySelector("img");const key=location.hash.slice(1);x[key]=location.hash;',
-    'const answers=[fetch];const k=location.hash.slice(1);answers[k]();',
     'const e=document.querySelector("p");e.style.backgroundImage=location.hash;',
     'const e=document.querySelector("p");const s=e.style;s.setProperty("background-image",location.hash);',
     'const e=document.querySelector("img");const key=location.hash.slice(1);e[key]=location.hash;',
     'const state={};state.image=document.querySelector("img");function answer(key,value){state[key].src=value;}',
     'const state={};state.style=document.body.style;const key=location.hash;state[key].backgroundImage=location.hash;',
   ])('keeps actual dynamic capability and resource failures visible: %s', code => {
-    expect(validateHtmlImport(extractHtmlResources({ html: `<script>${code}</script>` })).some(issue => issue.level === 'error')).toBe(true)
+    const issues = validateHtmlImport(extractHtmlResources({ html: `<script>${code}</script>` }))
+    expect(issues.some(issue => issue.level === 'error')).toBe(false)
+    expect(issues).toContainEqual(expect.objectContaining({ level: 'warning', code: 'unsupported-dynamic-url-sink' }))
+  })
+  it('flags indirect fetch aliases through containers as warning, not error', () => {
+    const result = validateHtmlImport(extractHtmlResources({ html: `<script>const answers=[fetch];const k=location.hash.slice(1);answers[k]();</script>` }))
+    expect(result.some(issue => issue.level === 'error')).toBe(false)
+    expect(result.some(issue => issue.level === 'warning' && issue.code === 'unsupported-network-sink')).toBe(true)
   })
 })

@@ -41,7 +41,7 @@ export class HtmlImportToolService implements HtmlImportServicePort {
     }
     if (result?.status !== 'applied' && result?.status !== 'unchanged') return null
     const receipt: HtmlImportReceipt = { operationId: record.operationId, status: result.status,
-      pages: record.pages ?? [], revision: result.revision, commit: result }
+      pages: record.pages ?? [], revision: result.revision, commit: result, warnings: record.warnings }
     await this.options.operationStore.patch(record.runId, record.operationId, { status: 'committed', receipt })
     return receipt
   }
@@ -125,7 +125,8 @@ export class HtmlImportToolService implements HtmlImportServicePort {
         mode: split.mode, commitCallId: `html:${input.operationId}:commit` })
       const during = await this.options.operationStore.lookup(input.runId, input.operationId)
       if (during?.status === 'cancelled') { await this.options.cancelJob(input.runId, ticket.jobId); throw new Error('HTML 导入已取消') }
-      await this.options.operationStore.patch(input.runId, input.operationId, { status: 'checking', jobId: ticket.jobId, pages: ticket.pages })
+      const warnings = service.warnings(ticket)
+      await this.options.operationStore.patch(input.runId, input.operationId, { status: 'checking', jobId: ticket.jobId, pages: ticket.pages, warnings })
       input.signal?.throwIfAborted()
       await service.admit(ticket)
       await this.options.operationStore.patch(input.runId, input.operationId, { status: 'ready' })
@@ -146,7 +147,7 @@ export class HtmlImportToolService implements HtmlImportServicePort {
       if (result.status !== 'applied' && result.status !== 'unchanged')
         throw new Error('message' in result ? result.message : 'HTML 导入未提交')
       const receipt: HtmlImportReceipt = { operationId: input.operationId, status: result.status,
-        pages: ticket.pages ?? [], revision: result.revision,
+        pages: ticket.pages ?? [], revision: result.revision, warnings,
         commit: result as Extract<DocumentOperationResult, { status: 'applied' | 'unchanged' }> }
       await this.options.operationStore.patch(input.runId, input.operationId, { status: 'committed', receipt })
       return receipt

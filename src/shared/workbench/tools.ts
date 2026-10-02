@@ -41,7 +41,7 @@ export interface ToolDefinition {
   manual: { label: string; group: 'read' | 'edit'; targetKinds: readonly ToolTarget['kind'][] }
 }
 /** Non-blocking feedback about the committed result; it never changes the receipt status. */
-export interface ToolAdvisory { step: number; code: 'native-text-shrink' | 'native-text-transparent-background' | 'native-text-low-contrast'; message: string }
+export interface ToolAdvisory { step: number; code: 'native-text-shrink' | 'native-text-transparent-background' | 'native-text-low-contrast' | 'html-import-warning'; message: string }
 export type ToolResult =
   | { kind: 'document-operation'; result: DocumentOperationResult; affected: readonly string[]; advisories?: readonly ToolAdvisory[] }
   | { kind: 'read'; data: unknown; nextCursor?: string }

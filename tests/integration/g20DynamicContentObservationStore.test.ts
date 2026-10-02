@@ -29,16 +29,34 @@ const identity = (doc: DocumentSnapshot) => ({ documentId: doc.documentId, epoch
   revision: doc.revision, locationId: 'location-scene-1' })
 
 describe('M27-T03 Main M15 target observation cache', () => {
+  it('retains metadata-only truncation for its document and removes it on clear or a newer publication', async () => {
+    const runtime = snapshot('surface-runtime'), component = snapshot('component')
+    const docs = new Map([[runtime.documentId, runtime], [component.documentId, component]])
+    const store = new DynamicContentObservationStore(async id => docs.get(id) ?? null)
+    const truncated = { ...publication(runtime, 1, 'view-a', []), truncatedItemIds: ['slide-surface-runtime'] }
+    expect(await store.publish(truncated)).toBe(true)
+    expect(await store.read(identity(runtime))).toEqual({ targets: [], truncatedItemIds: ['slide-surface-runtime'] })
+    expect(await store.read(identity(component))).toEqual({ targets: [] })
+    expect(await store.publish({ ...truncated, publicationSeq: 2, truncatedItemIds: [] })).toBe(true)
+    expect(await store.read(identity(runtime))).toEqual({ targets: [] })
+    expect(await store.publish({ ...truncated, publicationSeq: 3 })).toBe(true)
+    store.clearDocument(runtime.documentId)
+    expect(await store.read(identity(runtime))).toEqual({ targets: [] })
+    expect(await store.publish({ ...truncated, publicationSeq: 4 })).toBe(true)
+    store.clearSender(17)
+    expect(await store.read(identity(runtime))).toEqual({ targets: [] })
+  })
+
   it('takes globally increasing publications, retires old generations, and treats empty hits as revocation', async () => {
     const doc = snapshot('surface-runtime')
     const store = new DynamicContentObservationStore(async () => doc)
     expect(await store.publish(publication(doc, 1, 'view-a'))).toBe(true)
-    expect(await store.read(identity(doc))).toHaveLength(1)
+    expect((await store.read(identity(doc))).targets).toHaveLength(1)
     expect(await store.publish(publication(doc, 1, 'view-a', []))).toBe(false)
     expect(await store.publish(publication(doc, 2, 'view-b'))).toBe(true)
     expect(await store.publish(publication(doc, 3, 'view-a'))).toBe(false)
     expect(await store.publish(publication(doc, 4, 'view-b', []))).toBe(true)
-    expect(await store.read(identity(doc))).toEqual([])
+    expect((await store.read(identity(doc))).targets).toEqual([])
     expect(await store.publish(publication(doc, 3, 'view-b'))).toBe(false)
   })
 
@@ -51,16 +69,16 @@ describe('M27-T03 Main M15 target observation cache', () => {
     doc.revision += 1
     if (doc.model.kind !== 'course-v9') throw new Error('course')
     doc.model.project.revision += 1
-    expect(await store.read(identity(initial))).toEqual([])
+    expect((await store.read(identity(initial))).targets).toEqual([])
     expect(await store.publish(publication(initial, 2, 'view-a'))).toBe(false)
     store.clearDocument(doc.documentId)
     // In-place Runtime updates keep the mounted view generation while formal revision advances.
     expect(await store.publish(publication(doc, 3, 'view-a'))).toBe(true)
     expect(await store.publish(publication(doc, 4, 'view-b'))).toBe(true)
     expect(await store.publish(publication(doc, 5, 'view-a'))).toBe(false)
-    expect(await store.read(identity(doc))).toHaveLength(1)
+    expect((await store.read(identity(doc))).targets).toHaveLength(1)
     store.clearSender(17)
-    expect(await store.read(identity(doc))).toEqual([])
+    expect((await store.read(identity(doc))).targets).toEqual([])
     expect(await store.publish(publication(doc, 5, 'view-b'))).toBe(false)
   })
 
@@ -72,14 +90,14 @@ describe('M27-T03 Main M15 target observation cache', () => {
     const componentHit: DynamicContentPublication['targets'] = [{ kind: 'component.text', source: 'auto',
       revision: component.revision, locationId: 'location-scene-1', itemId: 'slide-quiz', original: '请选择答案', text: '请选择答案' }]
     expect(await store.publish({ ...publication(component, 1, 'component-page', componentHit), senderId: 18 })).toBe(true)
-    expect(await store.read(identity(runtime))).toMatchObject([{ kind: 'runtime.text' }])
-    expect(await store.read(identity(component))).toMatchObject([{ kind: 'component.text' }])
+    expect((await store.read(identity(runtime))).targets).toMatchObject([{ kind: 'runtime.text' }])
+    expect((await store.read(identity(component))).targets).toMatchObject([{ kind: 'component.text' }])
     expect(await store.publish({ ...publication(runtime, 2, 'wrong-page'), locationId: 'missing-location' })).toBe(false)
     expect(await store.publish({ ...publication(runtime, 2, 'bad-hit'), targets: [{ ...componentHit[0]!, locationId: 'other-page' }] })).toBe(false)
     expect(await store.publish(publication(runtime, 2, 'next-page', []))).toBe(true)
     expect(await store.publish(publication(runtime, 3, 'runtime-page'))).toBe(false)
-    expect(await store.read(identity(runtime))).toEqual([])
-    expect(await store.read(identity(component))).toHaveLength(1)
+    expect((await store.read(identity(runtime))).targets).toEqual([])
+    expect((await store.read(identity(component))).targets).toHaveLength(1)
   })
 
   it('does not resurrect an in-flight publication after a document clear barrier', async () => {
@@ -93,6 +111,6 @@ describe('M27-T03 Main M15 target observation cache', () => {
     hold = false
     finish(doc)
     expect(await pending).toBe(false)
-    expect(await store.read(identity(doc))).toEqual([])
+    expect((await store.read(identity(doc))).targets).toEqual([])
   })
 })

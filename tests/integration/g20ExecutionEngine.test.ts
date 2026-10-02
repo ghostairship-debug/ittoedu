@@ -376,6 +376,50 @@ describe('G20 canonical model execution loop', () => {
     expect((await h.events.snapshot('conversation')).items.filter(item => item.type === 'document.commit')).toHaveLength(1)
   })
 
+  it.each(['invalid-target', 'not-authorized', 'preview-failed'])('C2 submits complete streamed text after %s preview failure and undoes once', async code => {
+    let turns = 0
+    const provider: ModelProvider = { async *stream(request) {
+      if (++turns > 1) { yield complete(request, [], '完成'); return }
+      const target = refsOf(request)[0]!.writable[0]!.target
+      const raw = JSON.stringify({ target, content: 'NEW' })
+      yield { type: 'tool.delta', requestId: request.requestId, sequence: 1, index: 0, id: 'no-preview', name: 'text.replace', argumentsDelta: raw.slice(0, -3) }
+      yield { type: 'tool.delta', requestId: request.requestId, sequence: 2, index: 0, id: 'no-preview', argumentsDelta: raw.slice(-3) }
+      yield complete(request, [{ id: 'no-preview', name: 'text.replace', argumentsText: raw }], '')
+    } }
+    const h = await fixture(provider)
+    const begin = vi.spyOn(h.edits, 'begin').mockRejectedValue(Object.assign(new Error('preview unavailable'), { code }))
+    const execute = vi.spyOn(h.gateway, 'execute')
+    const started = await h.engine.start(h.input), run = await h.engine.wait(started.runId)
+    expect(begin).toHaveBeenCalledTimes(1)
+    expect(execute).toHaveBeenCalledWith(started.runId, run.tools[0]!.callId, expect.objectContaining({ name: 'text.replace' }))
+    expect(run).toMatchObject({ status: 'completed', tools: [{ result: { kind: 'document-operation', result: { status: 'applied' } } }] })
+    const changed = h.session.read()
+    expect(changed).toMatchObject({ revision: 1, undoDepth: 1, model: { source: '前文 NEW 后文' } })
+    expect(await h.session.execute({ documentId: changed.documentId, epoch: changed.epoch, operationId: 'undo-no-preview',
+      baseRevision: changed.revision, actor: 'human', mutation: { type: 'undo', expectedTopOperationId: changed.undoHead!.operationId } })).toMatchObject({ status: 'applied' })
+    expect(h.session.read()).toMatchObject({ undoDepth: 0, model: { source: '前文 OLD 后文' } })
+  })
+
+  it('C2 stops after skipped preview without submitting late complete text', async () => {
+    const entered = deferred(), release = deferred()
+    const provider: ModelProvider = { async *stream(request) {
+      const target = refsOf(request)[0]!.writable[0]!.target, raw = JSON.stringify({ target, content: 'LATE' })
+      yield { type: 'tool.delta', requestId: request.requestId, sequence: 1, index: 0, id: 'stopped-preview', name: 'text.replace', argumentsDelta: raw.slice(0, -3) }
+      entered.resolve(); await release.promise
+      yield { type: 'tool.delta', requestId: request.requestId, sequence: 2, index: 0, id: 'stopped-preview', argumentsDelta: raw.slice(-3) }
+      yield complete(request, [{ id: 'stopped-preview', name: 'text.replace', argumentsText: raw }], '')
+    } }
+    const h = await fixture(provider)
+    const begin = vi.spyOn(h.edits, 'begin').mockRejectedValue(Object.assign(new Error('preview unavailable'), { code: 'invalid-target' }))
+    const execute = vi.spyOn(h.gateway, 'execute')
+    const started = await h.engine.start(h.input); await entered.promise
+    const stopped = h.engine.stop(started.runId); release.resolve(); await stopped
+    expect(begin).toHaveBeenCalledTimes(1)
+    expect(execute).not.toHaveBeenCalled()
+    expect(await h.engine.wait(started.runId)).toMatchObject({ status: 'stopped' })
+    expect(h.session.read()).toMatchObject({ revision: 0, undoDepth: 0, model: { source: '前文 OLD 后文' } })
+  })
+
   it('M15 a run editing a document whose other part another run is previewing commits its own edit without a preview', async () => {
     const aStreaming = deferred(), releaseA = deferred(), turns = new Map<string, number>()
     const provider: ModelProvider = { async *stream(request) {

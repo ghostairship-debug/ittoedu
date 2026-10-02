@@ -600,6 +600,16 @@ interface LiveScene {
 let liveReloadSequence = 0
 
 
+interface AuthoringTargetSnapshot<T> {
+  targets: ReadonlyArray<Readonly<T>>
+  truncatedItemIds: readonly string[]
+}
+
+function combineAuthoringTargets<T>(snapshots: Iterable<AuthoringTargetSnapshot<T>>): AuthoringTargetSnapshot<T> {
+  const values = [...snapshots]
+  return { targets: values.flatMap(value => value.targets), truncatedItemIds: values.flatMap(value => value.truncatedItemIds) }
+}
+
 function sanitizeRuntimeAuthoringTargets(
   update: PlayerRuntimeAuthoringTargetsMessage['update'],
   hostKey: string,
@@ -877,11 +887,11 @@ export function SlideLocationWorkspace({
   const authoringObservationReady = useMemo(() => new SlideAuthoringObservationReady(), [])
   const runtimeTargetsByHostRef = useRef(new Map<
     string,
-    ReadonlyArray<Readonly<RuntimeAuthoringTarget>>
+    AuthoringTargetSnapshot<RuntimeAuthoringTarget>
   >())
   const componentTargetsByHostRef = useRef(new Map<
     string,
-    ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>
+    AuthoringTargetSnapshot<ComponentAuthoringTextTarget>
   >())
   const componentImageTargetsByHostRef = useRef(new Map<string, ReadonlyArray<Readonly<ComponentAuthoringImageTarget>>>())
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null)
@@ -895,10 +905,12 @@ export function SlideLocationWorkspace({
     editPreview.sequence >= 0 && editPreview.target.kind === 'course-object' &&
     editPreview.target.locationId === courseLocationId && resolveSlideSelectionLayer(slideEditorView, editPreview.target) ? editPreview : null
   const previewPaintedRef = useRef<{ locationId: string; itemId: string; stateId?: string } | null>(null)
-  const [runtimeTargets, setRuntimeTargets] =
-    useState<ReadonlyArray<Readonly<RuntimeAuthoringTarget>>>([])
-  const [componentTargets, setComponentTargets] =
-    useState<ReadonlyArray<Readonly<ComponentAuthoringTextTarget>>>([])
+  const [runtimeTargetSnapshot, setRuntimeTargetSnapshot] =
+    useState<AuthoringTargetSnapshot<RuntimeAuthoringTarget>>({ targets: [], truncatedItemIds: [] })
+  const [componentTargetSnapshot, setComponentTargetSnapshot] =
+    useState<AuthoringTargetSnapshot<ComponentAuthoringTextTarget>>({ targets: [], truncatedItemIds: [] })
+  const runtimeTargets = runtimeTargetSnapshot.targets
+  const componentTargets = componentTargetSnapshot.targets
   const [componentImageTargets, setComponentImageTargets] = useState<ReadonlyArray<Readonly<ComponentAuthoringImageTarget>>>([])
   const [replacingComponentImageTargetId, setReplacingComponentImageTargetId] = useState<string | null>(null)
   const replacingComponentImageTargetIdsRef = useRef(new Set<string>())
@@ -1090,13 +1102,15 @@ export function SlideLocationWorkspace({
       revision: snapshot.projectRevision, locationId: courseLocationId, sceneId: snapshot.sceneId,
       layers: slideEditorView.layers, runtime: runtimeTargets, componentText: componentTargets,
       componentImage: componentImageTargets,
-    }) : [], [slideEditorView, courseLocationId, snapshot.projectRevision, snapshot.sceneId,
-    runtimeTargets, componentTargets, componentImageTargets])
+      truncatedItemIds: [...runtimeTargetSnapshot.truncatedItemIds, ...componentTargetSnapshot.truncatedItemIds],
+    }) : { targets: [], truncatedItemIds: [] }, [slideEditorView, courseLocationId, snapshot.projectRevision, snapshot.sceneId,
+    runtimeTargetSnapshot, componentTargetSnapshot, componentImageTargets])
   const dynamicCandidate = documentId && courseLocationId && dynamicTargetSource && dynamicViewGeneration
-    && observedDynamicTargets.length > 0 && snapshot.projectId && snapshot.sessionGeneration >= 0
+    && (observedDynamicTargets.targets.length > 0 || (observedDynamicTargets.truncatedItemIds?.length ?? 0) > 0)
+    && snapshot.projectId && snapshot.sessionGeneration >= 0
     ? { documentId, projectId: snapshot.projectId, revision: snapshot.projectRevision,
       locationId: courseLocationId, sessionGeneration: snapshot.sessionGeneration,
-      viewGeneration: dynamicViewGeneration, source: dynamicTargetSource, targets: observedDynamicTargets }
+      viewGeneration: dynamicViewGeneration, source: dynamicTargetSource, ...observedDynamicTargets }
     : null
   const dynamicCandidateKey = dynamicCandidate ? JSON.stringify([
     dynamicCandidate.documentId, dynamicCandidate.projectId, dynamicCandidate.revision,
@@ -1144,7 +1158,7 @@ export function SlideLocationWorkspace({
     dynamicContentPublisher.replace({ documentId: dynamicCandidate.documentId, epoch: verifiedDynamicDocument.epoch,
       revision: dynamicCandidate.revision, locationId: dynamicCandidate.locationId,
       viewGeneration: dynamicCandidate.viewGeneration, source: dynamicCandidate.source,
-      targets: dynamicCandidate.targets })
+      targets: dynamicCandidate.targets, truncatedItemIds: dynamicCandidate.truncatedItemIds })
   }, [dynamicCandidate, dynamicCandidateKey, verifiedDynamicDocument, dynamicDocumentClosed, dynamicContentPublisher])
   // React development StrictMode remounts effects without reconstructing memoized refs.
   useEffect(() => () => dynamicContentPublisher.clear(), [dynamicContentPublisher])
@@ -1243,8 +1257,8 @@ export function SlideLocationWorkspace({
     runtimeTargetsByHostRef.current.clear()
     componentTargetsByHostRef.current.clear()
     lastAuthoringTargetsRevisionRef.current = -1
-    setRuntimeTargets([])
-    setComponentTargets([])
+    setRuntimeTargetSnapshot({ targets: [], truncatedItemIds: [] })
+    setComponentTargetSnapshot({ targets: [], truncatedItemIds: [] })
     setComponentImageTargets([]); componentImageTargetsByHostRef.current.clear()
     setActiveRuntimeTextSession(null)
     setActiveComponentTextSession(null)
@@ -1698,9 +1712,10 @@ export function SlideLocationWorkspace({
       const hostKey = `${message.update.scope}:${message.update.sceneId ?? ''}`
       runtimeTargetsByHostRef.current.set(
         hostKey,
-        sanitizeRuntimeAuthoringTargets(message.update, hostKey, slideCanvas),
+        { targets: sanitizeRuntimeAuthoringTargets(message.update, hostKey, slideCanvas),
+          truncatedItemIds: message.update.truncatedItemIds ?? [] },
       )
-      setRuntimeTargets([...runtimeTargetsByHostRef.current.values()].flat())
+      setRuntimeTargetSnapshot(combineAuthoringTargets(runtimeTargetsByHostRef.current.values()))
       return
     }
     if (message.type === PLAYER_AUTHORING_MESSAGE_TYPES.componentTargets) {
@@ -1713,10 +1728,11 @@ export function SlideLocationWorkspace({
       ].join(':')
       componentTargetsByHostRef.current.set(
         hostKey,
-        sanitizeComponentAuthoringTargets(message.update, hostKey, slideCanvas),
+        { targets: sanitizeComponentAuthoringTargets(message.update, hostKey, slideCanvas),
+          truncatedItemIds: message.update.truncated ? [message.update.nodeId] : [] },
       )
       componentImageTargetsByHostRef.current.set(hostKey, sanitizeComponentImageTargets(message.update, hostKey, slideCanvas))
-      setComponentTargets([...componentTargetsByHostRef.current.values()].flat())
+      setComponentTargetSnapshot(combineAuthoringTargets(componentTargetsByHostRef.current.values()))
       setComponentImageTargets([...componentImageTargetsByHostRef.current.values()].flat())
       return
     }
@@ -1766,8 +1782,8 @@ export function SlideLocationWorkspace({
     lastAuthoringTargetsRevisionRef.current = -1
     runtimeTargetsByHostRef.current.clear()
     componentTargetsByHostRef.current.clear()
-    setRuntimeTargets([])
-    setComponentTargets([])
+    setRuntimeTargetSnapshot({ targets: [], truncatedItemIds: [] })
+    setComponentTargetSnapshot({ targets: [], truncatedItemIds: [] })
     setComponentImageTargets([]); componentImageTargetsByHostRef.current.clear()
     setAcknowledgedPreviewGeneration(null)
     setPreviewFeedback({
@@ -1821,8 +1837,8 @@ export function SlideLocationWorkspace({
           authoringSnapshotBarrierRef.current = null
           runtimeTargetsByHostRef.current.clear()
           componentTargetsByHostRef.current.clear()
-          setRuntimeTargets([])
-          setComponentTargets([])
+          setRuntimeTargetSnapshot({ targets: [], truncatedItemIds: [] })
+          setComponentTargetSnapshot({ targets: [], truncatedItemIds: [] })
           setComponentImageTargets([]); componentImageTargetsByHostRef.current.clear()
           setAcknowledgedPreviewGeneration(null)
         },
@@ -1843,8 +1859,8 @@ export function SlideLocationWorkspace({
     runtimeTargetsByHostRef.current.clear()
     componentTargetsByHostRef.current.clear()
     componentImageTargetsByHostRef.current.clear()
-    setRuntimeTargets([])
-    setComponentTargets([])
+    setRuntimeTargetSnapshot({ targets: [], truncatedItemIds: [] })
+    setComponentTargetSnapshot({ targets: [], truncatedItemIds: [] })
     setComponentImageTargets([])
     setActiveRuntimeTextSession(null)
     setActiveComponentTextSession(null)
@@ -1855,15 +1871,21 @@ export function SlideLocationWorkspace({
     if (!liveAcceptingRef.current || !liveTargetGenerationRef.current) return
     if (targets.kind === 'runtime') {
       const hostKey = `${targets.update.scope}:${targets.update.sceneId ?? ''}`
-      runtimeTargetsByHostRef.current.set(hostKey, sanitizeRuntimeAuthoringTargets(targets.update, hostKey, slideCanvas))
-      setRuntimeTargets([...runtimeTargetsByHostRef.current.values()].flat())
+      runtimeTargetsByHostRef.current.set(hostKey, {
+        targets: sanitizeRuntimeAuthoringTargets(targets.update, hostKey, slideCanvas),
+        truncatedItemIds: targets.update.truncatedItemIds ?? [],
+      })
+      setRuntimeTargetSnapshot(combineAuthoringTargets(runtimeTargetsByHostRef.current.values()))
       return
     }
     const update = targets.update
     const hostKey = [update.scope, update.sceneId ?? '', update.nodeId].join(':')
-    componentTargetsByHostRef.current.set(hostKey, sanitizeComponentAuthoringTargets(update, hostKey, slideCanvas))
+    componentTargetsByHostRef.current.set(hostKey, {
+      targets: sanitizeComponentAuthoringTargets(update, hostKey, slideCanvas),
+      truncatedItemIds: update.truncated ? [update.nodeId] : [],
+    })
     componentImageTargetsByHostRef.current.set(hostKey, sanitizeComponentImageTargets(update, hostKey, slideCanvas))
-    setComponentTargets([...componentTargetsByHostRef.current.values()].flat())
+    setComponentTargetSnapshot(combineAuthoringTargets(componentTargetsByHostRef.current.values()))
     setComponentImageTargets([...componentImageTargetsByHostRef.current.values()].flat())
   }, [slideCanvas])
   const acceptLiveTargetsRef = useRef(acceptLiveTargets)
@@ -2241,7 +2263,7 @@ export function SlideLocationWorkspace({
         // Read the synchronous host registry rather than React render state so
         // a blur racing with target cleanup can never commit a retired target.
         targets: [...componentTargetsByHostRef.current.values()]
-          .flat()
+          .flatMap(value => value.targets)
           .filter((target) => (
             target.scope === currentSnapshot.editingScope &&
             (target.scope === 'global' ||
@@ -2265,7 +2287,7 @@ export function SlideLocationWorkspace({
         // cleanup cannot write into a replacement Runtime that happens to use
         // the same content or asset key.
         targets: [...runtimeTargetsByHostRef.current.values()]
-          .flat()
+          .flatMap(value => value.targets)
           .filter((target) => (
             (target.kind === 'text' || target.kind === 'asset') &&
             runtimeTargetMatchesEditingContext(

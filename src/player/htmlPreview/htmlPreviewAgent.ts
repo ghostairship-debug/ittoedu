@@ -149,7 +149,7 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
   const nodes = new Map<string, Node>()
   const imageOriginals = new WeakMap<HTMLImageElement, {
     src: string | null; srcset: string | null; sizes: string | null;
-    sources: Array<{ node: Element; srcset: string | null; sizes: string | null }>
+    sources: Array<{ node: Element; srcset: string | null; sizes: string | null; type: string | null }>
   }>()
   const imageObservations = new WeakMap<HTMLImageElement, NonNullable<ReturnType<typeof imageOriginals.get>>>()
   let nextHandle = 0
@@ -180,7 +180,7 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
     if (node instanceof HTMLImageElement) imageObservations.set(node, {
       src: node.getAttribute('src'), srcset: node.getAttribute('srcset'), sizes: node.getAttribute('sizes'),
       sources: Array.from(node.parentElement?.localName === 'picture' ? node.parentElement.querySelectorAll('source') : [])
-        .map(source => ({ node: source, srcset: source.getAttribute('srcset'), sizes: source.getAttribute('sizes') })),
+        .map(source => ({ node: source, srcset: source.getAttribute('srcset'), sizes: source.getAttribute('sizes'), type: source.getAttribute('type') })),
     })
     return { handle: handleOf(node), kind: node instanceof HTMLImageElement ? 'image' : 'text',
       domPath: pathFor(element), sectionOrder: sectionOrder(element),
@@ -263,18 +263,19 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
         const observed = imageObservations.get(node)
         if (!original && (!observed || node.getAttribute('srcset') !== observed.srcset || node.getAttribute('sizes') !== observed.sizes
           || observed.sources.some(source => !source.node.isConnected
-            || source.node.getAttribute('srcset') !== source.srcset || source.node.getAttribute('sizes') !== source.sizes))) {
+            || source.node.getAttribute('srcset') !== source.srcset || source.node.getAttribute('sizes') !== source.sizes || source.node.getAttribute('type') !== source.type))) {
           win.parent.postMessage({ event: 'html-preview.patch-result', protocol: 1, leaseId, loadId,
             handle: message.handle, ok: false }, '*')
           return
         }
         if (original) {
           const expectOriginal = message.expected === (original.src ?? '')
-          const matches = (actual: string | null, baseline: string | null) => actual === (expectOriginal ? baseline : null)
-          if (!matches(node.getAttribute('srcset'), original.srcset) || !matches(node.getAttribute('sizes'), original.sizes)
+          const expectedSrcset = (baseline: string | null) => baseline === null || expectOriginal ? baseline : replaceSrcsetUrls(baseline, message.expected)
+          const expectedType = (baseline: string | null) => expectOriginal || baseline?.toLowerCase() === imageMimeFromUrl(message.expected) ? baseline : null
+          if (node.getAttribute('srcset') !== expectedSrcset(original.srcset) || node.getAttribute('sizes') !== original.sizes
             || original.sources.some(source => !source.node.isConnected
-              || !matches(source.node.getAttribute('srcset'), source.srcset)
-              || !matches(source.node.getAttribute('sizes'), source.sizes))) {
+              || source.node.getAttribute('srcset') !== expectedSrcset(source.srcset)
+              || source.node.getAttribute('sizes') !== source.sizes || source.node.getAttribute('type') !== expectedType(source.type))) {
             win.parent.postMessage({ event: 'html-preview.patch-result', protocol: 1, leaseId, loadId,
               handle: message.handle, ok: false }, '*')
             return
@@ -294,12 +295,15 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
           if (value === null) target.removeAttribute(name)
           else target.setAttribute(name, value)
         }
-        setAttribute(node, 'srcset', restore ? original.srcset : null)
-        setAttribute(node, 'sizes', restore ? original.sizes : null)
-        for (const source of original.sources) {
-          if (!source.node.isConnected) continue
-          setAttribute(source.node, 'srcset', restore ? source.srcset : null)
-          setAttribute(source.node, 'sizes', restore ? source.sizes : null)
+        {
+          setAttribute(node, 'srcset', original.srcset === null || restore ? original.srcset : replaceSrcsetUrls(original.srcset, message.value))
+          setAttribute(node, 'sizes', original.sizes)
+          for (const source of original.sources) {
+            if (!source.node.isConnected) continue
+            setAttribute(source.node, 'srcset', source.srcset === null || restore ? source.srcset : replaceSrcsetUrls(source.srcset, message.value))
+            setAttribute(source.node, 'sizes', source.sizes)
+            setAttribute(source.node, 'type', restore || source.type?.toLowerCase() === imageMimeFromUrl(message.value) ? source.type : null)
+          }
         }
         if (restore && original.src === null) node.removeAttribute('src')
         else node.setAttribute('src', message.value)
@@ -334,3 +338,4 @@ if (typeof document !== 'undefined' && document.currentScript) {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true })
   else mount()
 }
+import { replaceSrcsetUrls, imageMimeFromUrl } from '../../shared/html/responsiveImage'

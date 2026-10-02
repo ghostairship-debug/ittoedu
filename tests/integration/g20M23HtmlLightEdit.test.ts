@@ -61,7 +61,7 @@ it('commits only the located text in one human History entry and supports undo',
   expect((await f.host.internalAPI.read(after.documentId)).model).toMatchObject({ source: (f.snapshot.model as { source: string }).source })
 })
 
-it('prepares selected bytes, rejects symlink assets, and removes responsive srcset in one source commit', async () => {
+it('prepares selected bytes, rejects symlink assets, and replaces responsive candidates in one source commit', async () => {
   const f = await setup('<html><body><picture><source srcset="old.webp"><img src="old.png" srcset="other.png" alt="图"></picture></body></html>')
   const report = { handle: 'image', kind: 'image' as const, domPath: [{ name: 'html', index: 0 },
     { name: 'body', index: 1 }, { name: 'picture', index: 0 }, { name: 'img', index: 1 }], sectionOrder: null,
@@ -74,9 +74,9 @@ it('prepares selected bytes, rejects symlink assets, and removes responsive srcs
     baseRevision: f.snapshot.revision, bindingVersion: f.lease.bindingVersion, leaseId: 'lease', loadId: 'load',
     target: 'image', change: { kind: 'image', name: 'selected.png', mimeType: 'image/png', bytes },
   }
-  expect(await f.service.edit(request, f.context)).toMatchObject({ status: 'applied', patch: { value: 'lesson.assets/image-op-image.png' } })
+  expect(await f.service.edit(request, f.context)).toMatchObject({ status: 'applied', patch: { value: 'lesson.assets/image-op-image.png', rewroteResponsive: true } })
   const after = await f.host.internalAPI.read(f.snapshot.documentId)
-  expect(after.model).toMatchObject({ source: '<html><body><picture><source><img src="lesson.assets/image-op-image.png" alt="图"></picture></body></html>' })
+  expect(after.model).toMatchObject({ source: '<html><body><picture><source srcset="lesson.assets/image-op-image.png"><img src="lesson.assets/image-op-image.png" srcset="lesson.assets/image-op-image.png" alt="图"></picture></body></html>' })
   expect(await fs.readFile(path.join(f.root, 'lesson.assets', 'image-op-image.png'))).toEqual(Buffer.from(bytes))
 
   const other = await setup('<html><body><img src="old.png"></body></html>')
@@ -141,8 +141,8 @@ it('replaces an img with no src by inserting one attribute and can undo to the o
   expect(await fs.readFile(path.join(f.root, 'lesson.assets', 'image-no-src-image.svg'))).toBeTruthy()
 })
 
-it('restores responsive image attributes on hot undo and only selects in explicit edit mode', () => {
-  document.body.innerHTML = '<picture><source srcset="hero.webp" sizes="90vw"><img src="old.png" srcset="old2.png" sizes="80vw"></picture>'
+it('rewrites responsive candidates on hot patch, restores them on undo, and rejects script changes', () => {
+  document.body.innerHTML = '<picture><source srcset="hero.webp 400w, hero2.webp 800w" sizes="90vw" type="image/webp"><source srcset="hero.png 1x" type="IMAGE/PNG"><img src="old.png" srcset="old2.png 1x, old3.png 2x" sizes="80vw"></picture>'
   const image = document.querySelector('img')!
   image.getBoundingClientRect = () => ({ x: 5, y: 5, left: 5, top: 5, width: 100, height: 80, right: 105, bottom: 85, toJSON: () => ({}) })
   const posted: unknown[] = []
@@ -157,18 +157,32 @@ it('restores responsive image attributes on hot undo and only selects in explici
   const target = posted.find(value => (value as { event?: string }).event === 'targets') as { targets: Array<{ handle: string }> }
   expect(target?.targets).toHaveLength(1)
   command({ type: 'html-preview.patch', loadId: 'load', handle: target.targets[0]!.handle, kind: 'image', value: 'new.png', expected: 'old.png' })
-  expect(image.getAttribute('srcset')).toBeNull()
-  expect(document.querySelector('source')?.getAttribute('srcset')).toBeNull()
-  command({ type: 'html-preview.patch', loadId: 'load', handle: target.targets[0]!.handle, kind: 'image', value: 'old.png', expected: 'new.png' })
-  expect(image.getAttribute('srcset')).toBe('old2.png')
+  expect(image.getAttribute('src')).toBe('new.png')
+  expect(image.getAttribute('srcset')).toBe('new.png 1x, new.png 2x')
   expect(image.getAttribute('sizes')).toBe('80vw')
-  expect(document.querySelector('source')?.getAttribute('srcset')).toBe('hero.webp')
+  expect(document.querySelector('source')?.getAttribute('srcset')).toBe('new.png 400w, new.png 800w')
   expect(document.querySelector('source')?.getAttribute('sizes')).toBe('90vw')
+  expect(document.querySelector('source')?.getAttribute('type')).toBeNull()
+  expect(document.querySelectorAll('source')[1]?.getAttribute('srcset')).toBe('new.png 1x')
+  expect(document.querySelectorAll('source')[1]?.getAttribute('type')).toBe('IMAGE/PNG')
+  command({ type: 'html-preview.patch', loadId: 'load', handle: target.targets[0]!.handle, kind: 'image', value: 'old.png', expected: 'new.png' })
+  expect(image.getAttribute('srcset')).toBe('old2.png 1x, old3.png 2x')
+  expect(image.getAttribute('sizes')).toBe('80vw')
+  expect(document.querySelector('source')?.getAttribute('srcset')).toBe('hero.webp 400w, hero2.webp 800w')
+  expect(document.querySelector('source')?.getAttribute('sizes')).toBe('90vw')
+  expect(document.querySelector('source')?.getAttribute('type')).toBe('image/webp')
+  expect(document.querySelectorAll('source')[1]?.getAttribute('srcset')).toBe('hero.png 1x')
+  expect(document.querySelectorAll('source')[1]?.getAttribute('type')).toBe('IMAGE/PNG')
+  document.querySelector('source')!.setAttribute('type', 'image/avif')
+  command({ type: 'html-preview.patch', loadId: 'load', handle: target.targets[0]!.handle, kind: 'image', value: 'new.png', expected: 'old.png' })
+  expect(image.getAttribute('src')).toBe('old.png')
+  expect(document.querySelector('source')?.getAttribute('type')).toBe('image/avif')
+  document.querySelector('source')!.setAttribute('type', 'image/webp')
   image.setAttribute('srcset', 'script-other.png')
   command({ type: 'html-preview.patch', loadId: 'load', handle: target.targets[0]!.handle, kind: 'image', value: 'new.png', expected: 'old.png' })
   expect(image.getAttribute('src')).toBe('old.png')
   expect(image.getAttribute('srcset')).toBe('script-other.png')
-  image.setAttribute('srcset', 'old2.png')
+  image.setAttribute('srcset', 'old2.png 1x, old3.png 2x')
   image.setAttribute('src', 'script.png')
   command({ type: 'html-preview.patch', loadId: 'load', handle: target.targets[0]!.handle, kind: 'image', value: 'new.png', expected: 'old.png' })
   expect(image.getAttribute('src')).toBe('script.png')
@@ -353,4 +367,41 @@ it('M30 accepts edit-mode ACK only from the current load and latest command', ()
   expect(onEditModeReady).toHaveBeenCalledTimes(1)
   controller.dispose()
   frame.remove()
+})
+
+it.each([
+  ['density', '<img src="old.png" srcset="hero.webp 1x, fallback.png 2x" sizes="80vw">',
+    '<img src="$new" srcset="$new 1x, $new 2x" sizes="80vw">', true],
+  ['width', '<img src="old.png" srcset="hero.webp 400w, fallback.png 800w" sizes="(max-width: 600px) 100vw, 80vw">',
+    '<img src="$new" srcset="$new 400w, $new 800w" sizes="(max-width: 600px) 100vw, 80vw">', true],
+  ['src only', '<img src="old.png">', '<img src="$new">', false],
+  ['picture', '<picture><source srcset="hero.webp 1x, fallback.webp 2x" sizes="90vw" type="image/webp"><source srcset="matching.png" type="IMAGE/PNG"><img src="old.png" srcset="alt.png" sizes="80vw"></picture>',
+    '<picture><source srcset="$new 1x, $new 2x" sizes="90vw"><source srcset="$new" type="IMAGE/PNG"><img src="$new" srcset="$new" sizes="80vw"></picture>', true],
+  ['density without 1x', '<img src="old.png" srcset="fallback.png 2x">', '<img src="$new" srcset="$new 2x">', true],
+] as const)('replaces every candidate in %s markup and restores the source on undo', async (name, markup, expectedMarkup, responsive) => {
+  const source = `<html><body>${markup}</body></html>`
+  const f = await setup(source)
+  const picture = name === 'picture'
+  const report = { handle: 'img', kind: 'image' as const,
+    domPath: [{ name: 'html', index: 0 }, { name: 'body', index: 1 },
+      ...(picture ? [{ name: 'picture', index: 0 }] : []), { name: 'img', index: picture ? 2 : 0 }],
+    sectionOrder: null, rawText: 'old.png', attributeName: 'src', rect: { x: 0, y: 0, width: 40, height: 20 }, scriptCreated: false }
+  await f.service.resolveTarget({ type: 'html-preview.resolve-target', leaseId: 'lease', loadId: 'load',
+    revision: f.snapshot.revision, targets: [report] }, f.context)
+  const bytes = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 0])
+  const result = await f.service.edit({ type: 'html-preview.edit', operationId: 'op-responsive', documentId: f.snapshot.documentId,
+    epoch: f.snapshot.epoch, baseRevision: f.snapshot.revision, bindingVersion: f.lease.bindingVersion,
+    leaseId: 'lease', loadId: 'load', target: 'img',
+    change: { kind: 'image', name: 'picked.png', mimeType: 'image/png', bytes } }, f.context)
+  const url = 'lesson.assets/image-op-responsive.png'
+  expect(result).toMatchObject({ status: 'applied', patch: { value: url } })
+  if (result.status !== 'applied') throw new Error('image replacement did not commit')
+  expect(result.patch.rewroteResponsive).toBe(responsive ? true : undefined)
+  const after = await f.host.internalAPI.read(f.snapshot.documentId)
+  expect(after.model).toMatchObject({ source: `<html><body>${expectedMarkup.replaceAll('$new', url)}</body></html>` })
+  expect(after.undoDepth).toBe(f.snapshot.undoDepth + 1)
+  expect((await f.host.internalAPI.dispatch({ documentId: after.documentId, epoch: after.epoch,
+    baseRevision: after.revision, operationId: 'responsive-undo', actor: 'human',
+    mutation: { type: 'undo' } })).status).toBe('applied')
+  expect((await f.host.internalAPI.read(after.documentId)).model).toMatchObject({ source })
 })

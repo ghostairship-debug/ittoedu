@@ -1,0 +1,50 @@
+OK   extract=ok  prepare=PASS  | module + 本地 import（仅警告，运行时无法解析）
+OK   extract=ok  prepare=PASS  | <script type=module src=本地>
+OK   extract=ok  prepare=PASS  | defer 本地外部脚本（语义见 4.3(h)）
+       运行时 HTML → <script defer>window.__a=1;</script>
+OK   extract=ok  prepare=PASS  | async 本地外部脚本
+OK   extract=ok  prepare=PASS  | fetch 相对 json
+OK   extract=ok  prepare=PASS  | new Worker
+OK   extract=ok  prepare=PASS  | XMLHttpRequest
+OK   extract=ok  prepare=PASS  | iframe https
+OK   extract=ok  prepare=PASS  | 静态 onClick 属性
+OK   extract=ok  prepare=PASS  | setAttribute 动态属性名
+OK   extract=ok  prepare=PASS  | Google Fonts link
+OK   extract=ok  prepare=PASS  | Tailwind CDN script
+OK   extract=ok  prepare=PASS  | data: 脚本
+OK   extract=ok  prepare=PASS  | img avif
+OK   extract=ok  prepare=PASS  | 拖拽等内联事件属性（导入过；挂载失败见脚本 C）
+OK   extract=ok  prepare=PASS  | @import 普通（对照：已内联）
+       运行时 HTML → <style>body{color:red} p{color:blue}</style>
+OK   extract=ok  prepare=PASS  | link stylesheet 本地（对照：已内联）
+       运行时 HTML → <style>body{color:red}</style>
+FIX  extract=ok  prepare=PASS  | modulepreload 本地 js（prepare 层整份失败）
+FIX  extract=ok  prepare=PASS  | preload as=script 本地 js（prepare 层整份失败）
+FIX  extract=ok  prepare=PASS  | @import layer() 本地 css（导入过但 css 没打包）
+       运行时 HTML → <style>@import url("a.css") layer(base); p{color:blue}</style>
+FIX  extract=ok  prepare=PASS  | track 本地 vtt（非受管素材）
+FIX  extract=ok  prepare=PASS  | class + constructor
+FIX  extract=ok  prepare=PASS  | class extends + super
+FIX  extract=ok  prepare=PASS  | x.constructor
+FIX  extract=ok  prepare=PASS  | el.style[prop]=v
+FIX  extract=ok  prepare=PASS  | opts[i].onclick=（quiz 常见）
+FIX  extract=ok  prepare=PASS  | el.dataset[k]
+FIX  extract=ok  prepare=PASS  | obj[key]（参数）
+FIX  extract=ok  prepare=PASS  | eval
+FIX  extract=ok  prepare=PASS  | new Function
+FIX  extract=ok  prepare=PASS  | Object.getOwnPropertyDescriptor
+FIX  extract=ok  prepare=PASS  | Reflect.ownKeys
+FIX  extract=ok  prepare=PASS  | 解构 style
+FIX  extract=ok  prepare=PASS  | 动态 URL：img.src = 变量
+FIX  extract=ok  prepare=PASS  | 动态 URL：audio.src = 数组项
+FIX  extract=ok  prepare=PASS  | 动态 URL：style.backgroundImage = url(+变量)
+FIX  extract=ok  prepare=PASS  | 本地内联 d3
+FIX  extract=ok  prepare=PASS  | 本地内联 lodash
+KEEP extract=REJECT[script-parse]  prepare=FAIL: 脚本无法解析: SyntaxError: Unexpected token (1:9)  | 脚本语法错误
+KEEP extract=REJECT[missing-relative-resource]  prepare=FAIL: 找不到相对资源 missing.png  | 缺失的本地图片
+KEEP extract=REJECT[missing-relative-resource]  prepare=FAIL: 找不到相对资源 nope.js  | 缺失的本地脚本
+KEEP extract=REJECT[remote-https-required]  prepare=FAIL: 远程资源需要 HTTPS: http://example.com/a.png  | http:// 图片
+KEEP extract=REJECT[remote-https-required]  prepare=FAIL: 远程资源需要 HTTPS: http://example.com/embed  | http:// iframe
+KEEP extract=REJECT[remote-https-required]  prepare=FAIL: 远程资源需要 HTTPS: http://example.com/a.png  | CSS background http://
+KEEP extract=REJECT[unsupported-url-scheme]  prepare=FAIL: 不支持资源协议 file:///C:/a.png  | file:/// 图片
+KEEP extract=REJECT[unsupported-url-scheme]  prepare=FAIL: 不支持资源协议 blob:https://example.com/abc  | blob: 图片

@@ -20,6 +20,13 @@ export function startDirectory(context: Pick<AgentFileContext, 'workspaceRoot' |
   return { directory: path.resolve(context.conversationHomeRoot ?? context.workspaceRoot, relative), fallback: !!home.missing }
 }
 
+function createKind(name: string, requested?: 'markdown' | 'text' | 'html' | 'course-v9'): 'markdown' | 'text' | 'html' | 'course-v9' {
+  const detected = /\.html$/i.test(name) ? 'html' : sourceFileKind(name)
+  const kind = requested ?? detected
+  if (kind !== detected && !(kind === 'text' && sourceFileKind(name) === 'text')) throw new Error(`文件名与${kind}格式不符`)
+  return kind
+}
+
 /** Main-only file tools. Paths are rechecked at use time, including symlink resolution. */
 export class AgentFileService implements AgentFilePort {
   private readonly pages = new FileBrowsePages()
@@ -66,8 +73,7 @@ export class AgentFileService implements AgentFilePort {
     const input = agentFileSchemas['file.create'].parse(raw)
     if (context.permission === 'read-only') throw new Error('只读任务不能创建文件')
     validateWorkspaceEntryName(input.name)
-    const extension = input.kind === 'markdown' ? '.md' : input.kind === 'text' ? '.txt' : input.kind === 'html' ? '.html' : '.h5lesson'
-    if (input.kind === 'text' ? sourceFileKind(input.name) !== 'text' : path.extname(input.name).toLowerCase() !== extension) throw new Error(`文件名与${input.kind}格式不符`)
+    createKind(input.name, input.kind)
     const { directory } = await this.directory(context, input.path, true)
     return { directory, outside: !isInsideRoot(context.workspaceRoot, directory) }
   }
@@ -181,6 +187,7 @@ export class AgentFileService implements AgentFilePort {
       return this.organize(context, name, raw, operationId, scope.paths)
     }
     const input = agentFileSchemas['file.create'].parse(raw)
+    const kind = createKind(input.name, input.kind)
     if (context.permission === 'read-only') throw new Error('只读任务不能创建文件')
     const preflight = await this.preflightCreate(context, input)
     const { directory, fallback } = await this.directory(context, input.path, true)
@@ -189,14 +196,14 @@ export class AgentFileService implements AgentFilePort {
       && !(context.approvedOutsidePaths ?? []).some(approved => isInsideRoot(approved, path.join(directory, input.name))))
       throw new Error('工作空间外新建文件需要明确批准')
     const root = await this.host.files.registerRoot(directory)
-    const bytes = input.kind === 'course-v9' ? (() => {
+    const bytes = kind === 'course-v9' ? (() => {
       const project = createBlankCourseProject({ title: input.name.replace(/\.h5lesson$/i, '') })
       const component = createDefaultTeacherControllerPackage()
       return createCourseProjectArchive({ project, assetFiles: {}, componentFiles: { [`${component.manifest.id}@${component.manifest.version}`]: component.files } })
     })() : Buffer.from('', 'utf8')
     context.assertActive?.()
     const receipt = await this.host.files.createFile({ operationId, workspaceId: root.workspaceId, targetDirectoryId: root.rootEntryId,
-      name: input.name, format: input.kind === 'course-v9' ? 'course-v9' : input.kind === 'markdown' ? 'markdown' : 'file', bytes }).catch(error => { throw new AgentFileOutcomeUnknown(error instanceof Error ? error.message : String(error)) })
+      name: input.name, format: kind === 'course-v9' ? 'course-v9' : kind === 'markdown' && /\.md$/i.test(input.name) ? 'markdown' : 'file', bytes }).catch(error => { throw new AgentFileOutcomeUnknown(error instanceof Error ? error.message : String(error)) })
     const created = receipt.items.find(item => item.status === 'success' && item.targetPath)
     if (!created?.targetPath) return { data: { operation: receipt, homeMissingFallback: fallback } }
     const snapshot = await this.host.open(created.targetPath).catch(() => null)
@@ -252,13 +259,14 @@ export class AgentFileService implements AgentFilePort {
     }
     const sources = name === 'file.trash' ? scoped : scoped.slice(0, agentFileSchemas[name].parse(raw).sources.length)
     const destination = name === 'file.trash' ? undefined : await this.entryId(root, path.dirname(scoped[sources.length]!))
+    const flushFirst = name === 'file.copy' && (raw as { flushFirst?: unknown }).flushFirst === true
     const items: Array<{ status: 'success' | 'partial' | 'failed' | 'cancelled'; sourcePath?: string; targetPath?: string;
-      affectedPaths: string[]; error?: { code: string; message: string } }> = []
+      affectedPaths: string[]; copied?: 'disk-version'; error?: { code: string; message: string } }> = []
     for (const [index, source] of sources.entries()) {
       try {
-        if (name === 'file.copy' && this.host.registry.list().some(snapshot => snapshot.binding.kind === 'file'
-          && snapshot.binding.path.toLowerCase() === source.toLowerCase() && snapshot.dirty))
-          throw new Error('源文件有未保存修改；请先保存或明确复制磁盘版本')
+        const dirty = name === 'file.copy' && this.host.registry.list().some(snapshot => snapshot.binding.kind === 'file'
+          && snapshot.binding.path.toLowerCase() === source.toLowerCase() && snapshot.dirty)
+        if (dirty && flushFirst) throw new Error('源文件有未保存修改；请先保存或省略 flushFirst 复制磁盘版本')
         const entry = await this.entryId(root, source)
         const id = `${operationId}:${index}`
         context.assertActive?.()
@@ -267,7 +275,8 @@ export class AgentFileService implements AgentFilePort {
           : name === 'file.copy'
             ? await this.host.files.copy({ operationId: id, workspaceId: root.workspaceId, sourceEntryIds: [entry], targetDirectoryId: destination! })
             : await this.host.files.move({ operationId: id, workspaceId: root.workspaceId, sourceEntryIds: [entry], targetDirectoryId: destination! })
-        items.push(...receipt.items.map(item => ({ ...item, sourcePath: item.sourcePath ?? source })))
+        items.push(...receipt.items.map(item => ({ ...item, sourcePath: item.sourcePath ?? source,
+          ...(dirty && item.status === 'success' ? { copied: 'disk-version' as const } : {}) })))
       } catch (error) {
         items.push({ status: 'failed', sourcePath: source, affectedPaths: [source],
           error: { code: 'file-operation-failed', message: error instanceof Error ? error.message : String(error) } })
@@ -275,6 +284,8 @@ export class AgentFileService implements AgentFilePort {
     }
     const status = items.every(item => item.status === 'success') ? 'success'
       : items.some(item => item.status === 'success' || item.status === 'partial') ? 'partial' : 'failed'
-    return { data: { operation: { operationId, status, items, affectedPaths: [...new Set(items.flatMap(item => item.affectedPaths))] } } }
+    const anyDiskVersion = items.some(item => item.copied === 'disk-version')
+    return { data: { operation: { operationId, status, items, affectedPaths: [...new Set(items.flatMap(item => item.affectedPaths))] },
+      ...(name === 'file.copy' && anyDiskVersion ? { copied: 'disk-version' as const } : {}) } }
   }
 }

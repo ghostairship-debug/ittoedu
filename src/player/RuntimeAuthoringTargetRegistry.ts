@@ -157,7 +157,10 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
   private readonly mutationObservers: MutationObserver[] = []
   private readonly unwatchHtmlDocuments: Array<() => void> = []
   private readonly resizeObserver: ResizeObserver | null
-  private previousTargets: ReadonlyArray<Readonly<RuntimeAuthoringTarget>> | null = null
+  private previousTargets: {
+    targets: ReadonlyArray<Readonly<RuntimeAuthoringTarget>>
+    truncated: boolean
+  } | null = null
   private nextRegistrationId = 1
   private nextDomElementId = 1
   private width: number
@@ -252,28 +255,39 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
     this.mutationObservers.forEach((observer) => observer.disconnect())
     this.mutationObservers.length = 0
     this.resizeObserver?.disconnect()
-    if ((this.previousTargets?.length ?? 0) > 0) {
+    if ((this.previousTargets?.targets.length ?? 0) > 0) {
       this.publish(Object.freeze([]))
     }
-    this.previousTargets = Object.freeze([])
+    this.previousTargets = Object.freeze({ targets: Object.freeze([]), truncated: false })
   }
 
   private publishChangedTargets(): void {
-    const targets = Object.freeze([
+    const underlayTargets = [
       ...this.collectDomTargets('underlay'),
       ...this.collectRegisteredTargets('underlay'),
-      ...this.collectAutoTargets('underlay'),
+    ]
+    const underlayAuto = this.collectAutoTargets('underlay')
+    const overlayTargets = [
       ...this.collectDomTargets('overlay'),
       ...this.collectRegisteredTargets('overlay'),
-      ...this.collectAutoTargets('overlay'),
+    ]
+    const overlayAuto = this.collectAutoTargets('overlay')
+    const targets = Object.freeze([
+      ...underlayTargets,
+      ...underlayAuto.targets,
+      ...overlayTargets,
+      ...overlayAuto.targets,
     ])
-    if (sameTargets(this.previousTargets, targets)) return
-    this.publish(targets)
-    this.previousTargets = targets
+    const truncated = underlayAuto.truncated || overlayAuto.truncated
+    if (this.previousTargets?.truncated === truncated &&
+      sameTargets(this.previousTargets.targets, targets)) return
+    this.publish(targets, truncated)
+    this.previousTargets = Object.freeze({ targets, truncated })
   }
 
   private publish(
     targets: ReadonlyArray<Readonly<RuntimeAuthoringTarget>>,
+    truncated = false,
   ): void {
     this.revision += 1
     try {
@@ -282,6 +296,7 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
         scope: this.options.scope,
         ...(this.options.sceneId ? { sceneId: this.options.sceneId } : {}),
         targets,
+        ...(truncated ? { truncated: true } : {}),
       }))
     } catch (error) {
       console.error('运行时画布编辑目标回调失败', error)
@@ -410,9 +425,12 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
   }
 
   /** Text and images the Runtime renders without registering them (M15). */
-  private collectAutoTargets(layer: RuntimeLayer): RuntimeAuthoringTarget[] {
+  private collectAutoTargets(layer: RuntimeLayer): {
+    targets: RuntimeAuthoringTarget[]
+    truncated: boolean
+  } {
     const sources = this.options.lightEdit
-    if (!sources) return []
+    if (!sources) return { targets: [], truncated: false }
     const targets: RuntimeAuthoringTarget[] = []
     const scope = { scope: this.options.scope, ...(this.options.sceneId ? { sceneId: this.options.sceneId } : {}) }
     const root = this.options.domRoots?.[layer]
@@ -426,7 +444,6 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
       })
       const managed = managedHtmlDocuments(root)
       for (const sample of sources.dom?.samples() ?? []) {
-        if (targets.length >= MAX_AUTO_TARGETS) break
         const document = managed.find(item => item.root === sample.root)
         if ((sample.root !== root && !document) || sample.live) continue
         // Registered keys keep their own editing path.
@@ -443,6 +460,7 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
           ? visibleDomRect(managedHtmlRect(measured, document), document.iframe)
           : measured
         if (!rect) continue
+        if (targets.length >= MAX_AUTO_TARGETS) return { targets, truncated: true }
         targets.push(this.freezeTarget({
           targetId: `auto:${this.domElementId(sample.node)}:text`,
           ...scope,
@@ -457,7 +475,6 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
         }))
       }
       for (const imageRoot of [{ root, document: undefined }, ...managed.map(item => ({ root: item.root, document: item }))]) for (const image of imageRoot.root.querySelectorAll('img')) {
-        if (targets.length >= MAX_AUTO_TARGETS) break
         if (image.closest('[data-courseware-asset-key]')) continue
         const key = sources.assetKeyForUrl(image.currentSrc || image.src)
         if (!key || !this.knownKey('asset', key)) continue
@@ -467,6 +484,7 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
           ? visibleDomRect(managedHtmlRect(measured, imageRoot.document), imageRoot.document.iframe)
           : measured
         if (!rect) continue
+        if (targets.length >= MAX_AUTO_TARGETS) return { targets, truncated: true }
         targets.push(this.freezeTarget({
           targetId: `auto:${this.domElementId(image)}:asset`,
           ...scope,
@@ -491,10 +509,10 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
     }
     const layerOf = sources.phaserLayerOf ?? (() => 'overlay' as const)
     for (const sample of sources.phaser?.samples() ?? []) {
-      if (targets.length >= MAX_AUTO_TARGETS) break
       if (sample.live || layerOf(sample.text) !== layer) continue
       const bounds = phaserBounds(sample.text)
       if (!bounds) continue
+      if (targets.length >= MAX_AUTO_TARGETS) return { targets, truncated: true }
       targets.push(this.freezeTarget({
         targetId: `auto:${this.domElementId(sample.text)}:text`,
         ...scope,
@@ -509,13 +527,13 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
       }))
     }
     for (const image of sources.phaserImages?.() ?? []) {
-      if (targets.length >= MAX_AUTO_TARGETS) break
       if (!image.active || !image.visible || layerOf(image) !== layer) continue
       const source = image.texture?.source?.[0]?.image as { src?: unknown } | undefined
       const key = typeof source?.src === 'string' ? sources.assetKeyForUrl(source.src) : undefined
       if (!key || !this.knownKey('asset', key)) continue
       const bounds = phaserBounds(image)
       if (!bounds) continue
+      if (targets.length >= MAX_AUTO_TARGETS) return { targets, truncated: true }
       targets.push(this.freezeTarget({
         targetId: `auto:${this.domElementId(image)}:asset`,
         ...scope,
@@ -527,7 +545,7 @@ export class RuntimeAuthoringTargetRegistry implements RuntimeAuthoringApi {
         bounds,
       }))
     }
-    return targets
+    return { targets, truncated: false }
   }
 
   private knownKey(kind: unknown, key: unknown): key is string {

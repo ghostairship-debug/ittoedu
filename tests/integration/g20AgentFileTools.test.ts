@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
@@ -184,7 +184,10 @@ describe('general agent file tools', () => {
     const provider: ModelProvider = { async *stream(request) {
       turn++
       if (turn === 1) {
-        expect(request.tools?.map(tool => tool.name)).not.toContain('tools.load')
+        // Before any course document is attached, V9-only tool families
+        // are not yet advertised, even though general file/work tools are.
+        expect(request.tools?.map(tool => tool.name)).toEqual(expect.arrayContaining(['file.open', 'file.list']))
+        expect(request.tools?.some(tool => tool.name === 'slide.duplicate' || tool.name === 'course.history' || tool.name === 'layer.duplicate')).toBe(false)
         const call = { id: 'open-course', type: 'function' as const, function: { name: 'file.open', arguments: JSON.stringify({ path: 'lesson/course.h5lesson' }) } }
         yield { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: 'r1', actualModel: 'fixture', nativeResponse: {}, finishReason: 'tool_calls',
           toolCalls: [{ id: call.id, name: call.function.name, argumentsText: call.function.arguments }], assistant: { role: 'assistant', content: '', tool_calls: [call] } } as Extract<ModelEvent, { type: 'response.completed' }>
@@ -250,6 +253,32 @@ it('M27 generic UTF-8 data/code and extensionless sources share one dirty docume
   const created = await h.files.execute(h.context, 'file.create', { name: 'new-script.py', kind: 'text' }, 'create-code')
   expect(created.opened).toMatchObject({ kind: 'text' })
   expect(await readFile(path.join(h.workspace, 'lesson', 'new-script.py'), 'utf8')).toBe('')
+})
+
+it('infers file.create kind from the extension and rejects utf-8 or incompatible formats', async () => {
+  const h = await fixture()
+  for (const name of ['data.json', 'results.csv', 'icon.svg', 'manifest.xml', 'no-extension']) {
+    const created = await h.files.execute(h.context, 'file.create', { name }, `create-${name}`)
+    expect(created.opened, name).toMatchObject({ writable: true, kind: 'text' })
+    expect(await readFile(path.join(h.workspace, 'lesson', name), 'utf8')).toBe('')
+    // Clean the open session so other creates can re-use the binding without conflict.
+    await h.host.operate({ type: 'close', documentId: created.opened!.documentId })
+  }
+  // Strict kinds still enforce extension consistency.
+  await expect(h.files.execute(h.context, 'file.create', { name: 'wrong.json', kind: 'markdown' }, 'wrong-md')).rejects.toThrow('格式不符')
+  await expect(h.files.execute(h.context, 'file.create', { name: 'css.css', kind: 'html' }, 'wrong-html')).rejects.toThrow('格式不符')
+  await expect(h.files.execute(h.context, 'file.create', { name: 'lesson.md', kind: 'course-v9' }, 'wrong-course')).rejects.toThrow('格式不符')
+  for (const name of ['lesson.md', 'lesson.markdown', 'page.html', 'lesson.h5lesson']) {
+    const created = await h.files.execute(h.context, 'file.create', { name }, `create-${name}`)
+    const kind = name.endsWith('.h5lesson') ? 'course-v9' : name.endsWith('.html') ? 'text' : 'markdown'
+    expect(created.data).toMatchObject({ operation: { status: 'success' } })
+    expect(created.opened).toMatchObject({ kind, writable: true })
+    expect(h.host.registry.get(created.opened!.documentId).read().model.kind).toBe(kind)
+  }
+  for (const input of [{ name: 'picture.png' }, { name: 'broken.h5lesson', kind: 'text' }, { name: 'raw.json', kind: 'utf-8' }]) {
+    await expect(h.files.execute(h.context, 'file.create', input, `reject-${input.name}`)).rejects.toThrow()
+    await expect(stat(path.join(h.workspace, 'lesson', input.name))).rejects.toMatchObject({ code: 'ENOENT' })
+  }
 })
 
 
@@ -363,6 +392,56 @@ it('M27 an opened dirty file stays under DocumentSession and selected targets do
   expect((await narrow.host.internalAPI.read(narrowSnapshot.documentId)).model).toMatchObject({ source: '正文' })
 })
 
+it('reads one drained snapshot after queued commits with matching paged text and version without Gateway observation', async () => {
+  const h = await fixture(), filename = path.join(h.workspace, 'lesson', 'existing.md')
+  const snapshot = await h.host.open(filename), session = h.host.registry.get(snapshot.documentId)
+  let entered!: () => void, release!: () => void, beganRead!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const acquired = new Promise<void>(resolve => { entered = resolve })
+  const reading = new Promise<void>(resolve => { beganRead = resolve })
+  const lease = session.withFileLease(async () => { entered(); await held })
+  await acquired
+  const committed = session.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision,
+    operationId: 'queued-source-edit', actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: '当前😀正文' } } })
+  const drain = session.drain.bind(session)
+  const draining = vi.spyOn(session, 'drain').mockImplementation(() => { beganRead(); return drain() })
+  const gateway = vi.spyOn(h.host.tools, 'execute').mockImplementation(async () => { throw new Error('file.read must not execute Gateway observation') })
+  const attach = vi.spyOn(h.host.tools, 'attachRunDocument').mockImplementation(async () => { throw new Error('file.read must not attach a run document') })
+  try {
+    const pending = h.files.execute(h.context, 'file.read', { path: filename, limit: 3 }, 'queued-file-read')
+    expect(await Promise.race([reading.then(() => 'draining'), pending.then(() => 'returned')])).toBe('draining')
+    expect(session.read().model).toMatchObject({ source: '正文' })
+    release()
+    expect(await committed).toMatchObject({ status: 'applied' })
+    const first = (await pending).data as any
+    const second = (await h.files.execute(h.context, 'file.read', { path: filename, limit: 20, cursor: first.nextCursor }, 'queued-file-next')).data as any
+    const version = `document:${snapshot.documentId}:${snapshot.epoch}:${snapshot.revision + 1}`
+    expect(first).toMatchObject({ text: '当前', offset: 0, total: '当前😀正文'.length, version, dirty: true, truncated: true })
+    expect(second).toMatchObject({ text: '😀正文', offset: 2, version, dirty: true, truncated: false })
+    expect(first.text + second.text).toBe('当前😀正文')
+    expect(gateway).not.toHaveBeenCalled()
+    expect(attach).not.toHaveBeenCalled()
+    expect(await readFile(filename, 'utf8')).toBe('正文')
+  } finally {
+    release(); await lease; await committed
+    draining.mockRestore(); gateway.mockRestore(); attach.mockRestore()
+  }
+})
+
+it('rejects an opened file.read stopped after draining and before returning the snapshot', async () => {
+  const h = await fixture(), filename = path.join(h.workspace, 'lesson', 'existing.md')
+  const snapshot = await h.host.open(filename), session = h.host.registry.get(snapshot.documentId)
+  const drain = session.drain.bind(session)
+  let stopped = false
+  const draining = vi.spyOn(session, 'drain').mockImplementationOnce(async () => { const current = await drain(); stopped = true; return current })
+  const assertActive = vi.fn(() => { if (stopped) throw new Error('任务已停止') })
+  try {
+    await expect(h.files.execute({ ...h.context, assertActive }, 'file.read', { path: filename }, 'stopped-file-read')).rejects.toThrow('任务已停止')
+    expect(assertActive).toHaveBeenCalledOnce()
+    expect(session.read()).toMatchObject({ model: { source: '正文' }, revision: snapshot.revision, undoDepth: 0 })
+  } finally { draining.mockRestore() }
+})
+
 it('M27 grep resumes inside a file and across folders, with explicit exclusions', async () => {
   const h = await fixture(), folder = path.join(h.workspace, 'sources')
   await mkdir(folder); await mkdir(path.join(folder, 'node_modules'))
@@ -425,21 +504,33 @@ it('M27 file organization reports per-item partials and external read grants sta
   expect(await readFile(path.join(h.workspace, 'lesson', 'renamed.txt'), 'utf8')).toBe('a')
 })
 
-it('M27 a continued run uses file.read as the exact source observation before a scoped patch', async () => {
+it('M27 a continued run can patch a scoped file directly without a pre-read gate', async () => {
   const h = await fixture(), filename = path.join(h.workspace, 'lesson', 'existing.md')
   const snapshot = await h.host.open(filename)
   await h.host.tools.beginRun({ runId: h.context.runId, actor: 'agent', documents: [{ documentId: snapshot.documentId,
     writable: [{ kind: 'document' }] }] })
-  h.host.tools.requireReadObservation(h.context.runId)
   const version = `document:${snapshot.documentId}:${snapshot.epoch}:${snapshot.revision}`
-  await expect(h.files.execute(h.context, 'file.patch', { path: filename, expectedVersion: version,
-    oldText: '正', newText: '新', range: { from: 0, to: 1 } }, 'without-observation')).rejects.toThrow('继续修改前需读取')
-  expect((await h.files.execute(h.context, 'file.read', { path: filename, limit: 1 }, 'observed')).data)
-    .toMatchObject({ text: '正', truncated: true })
   expect((await h.files.execute(h.context, 'file.patch', { path: filename, expectedVersion: version,
-    oldText: '正', newText: '新', range: { from: 0, to: 1 } }, 'after-observation')).data)
+    oldText: '正', newText: '新', range: { from: 0, to: 1 } }, 'direct-patch')).data)
     .toMatchObject({ status: 'applied', saved: false })
   expect((await h.host.internalAPI.read(snapshot.documentId)).model).toMatchObject({ source: '新文' })
+})
+
+it('M27 file.write mode=replace without expectedVersion auto-reads current version and commits, while false expectedVersion is rejected by CAS', async () => {
+  const h = await fixture(), filename = path.join(h.workspace, 'lesson', 'target.md')
+  await writeFile(filename, '原始内容')
+  const replaced = (await h.files.execute(h.context, 'file.write', { mode: 'replace', path: filename,
+    content: '模型直接覆盖' }, 'replace-without-version')).data as any
+  expect(replaced).toMatchObject({ status: 'written', saved: true, beforeVersion: expect.stringMatching(/^sha256:/), afterVersion: expect.stringMatching(/^sha256:/) })
+  expect(await readFile(filename, 'utf8')).toBe('模型直接覆盖')
+  const second = (await h.files.execute(h.context, 'file.write', { mode: 'replace', path: filename,
+    content: '再次直接覆盖' }, 'replace-again')).data as any
+  expect(second.afterVersion).not.toBe(replaced.afterVersion)
+  expect(await readFile(filename, 'utf8')).toBe('再次直接覆盖')
+  const fakeVersion = 'sha256:0000000000000000000000000000000000000000000000000000000000000000'
+  await expect(h.files.execute(h.context, 'file.write', { mode: 'replace', path: filename,
+    expectedVersion: fakeVersion, content: '不应写入' }, 'fake-version')).rejects.toThrow('版本已改变')
+  expect(await readFile(filename, 'utf8')).toBe('再次直接覆盖')
 })
 
 it('M27 stop before final file replacement leaves original bytes and no temp file', async () => {
@@ -451,6 +542,131 @@ it('M27 stop before final file replacement leaves original bytes and no temp fil
     expectedVersion: version, content: 'after' }, 'stopped-write')).rejects.toThrow('任务已停止')
   expect(await readFile(filename, 'utf8')).toBe('before')
   expect((await readdir(path.dirname(filename))).some(name => name.endsWith('.tmp'))).toBe(false)
+})
+
+it.each([
+  { permission: 'workspace', readFirst: false }, { permission: 'workspace', readFirst: true },
+  { permission: 'ask', readFirst: false }, { permission: 'ask', readFirst: true },
+] as const)('commits one approved opened outside file in $permission mode (readFirst=$readFirst) without widening authority', async ({ permission, readFirst }) => {
+  const h = await fixture(), filename = path.join(h.outside, 'external.md')
+  const snapshot = await h.host.open(filename), session = h.host.registry.get(snapshot.documentId)
+  const context = { ...h.context, permission, readOnlyRoots: [h.outside] }
+  await h.host.tools.beginRun({ runId: context.runId, actor: 'agent', documents: [] })
+  if (readFirst) {
+    expect((await h.files.execute(context, 'file.read', { path: filename }, 'outside-read')).data).toMatchObject({ text: '外部' })
+    expect(await h.host.tools.attachRunDocument(context.runId, snapshot.documentId, false)).toBe(false)
+  }
+  await expect(h.files.execute(context, 'file.write', { mode: 'replace', path: filename, content: '未批准' }, 'outside-unapproved'))
+    .rejects.toThrow('明确批准')
+  const operationId = h.host.tools.operationIdentity(context.runId, 'approved-outside')
+  const approved = { ...context, approvedOutsidePaths: [filename] }
+  const outcome = (await h.files.execute(approved, readFirst ? 'file.patch' : 'file.write', readFirst
+    ? { path: filename, oldText: '外部', newText: '已批准外部' }
+    : { mode: 'replace', path: filename, content: '已批准外部' }, operationId)).data as any
+  expect(outcome).toMatchObject({ path: filename, operationId, status: 'applied', saved: false, dirty: true,
+    beforeVersion: `document:${snapshot.documentId}:${snapshot.epoch}:${snapshot.revision}`,
+    afterVersion: `document:${snapshot.documentId}:${snapshot.epoch}:${snapshot.revision + 1}`,
+    documentResult: { operationId, status: 'applied' } })
+  expect(session.read()).toMatchObject({ model: { source: '已批准外部' }, undoDepth: 1, undoHead: { operationId, actor: 'agent' } })
+  expect(await readFile(filename, 'utf8')).toBe('外部')
+  await expect(h.files.execute(context, 'file.write', { mode: 'replace', path: filename, content: '后续未批准' }, 'outside-later'))
+    .rejects.toThrow('明确批准')
+  await expect(h.files.execute({ ...approved, permission: 'read-only' }, 'file.patch', { path: filename, oldText: '已批准', newText: '越权' }, 'outside-readonly'))
+    .rejects.toThrow('只读')
+  expect(await h.host.tools.attachRunDocument(context.runId, snapshot.documentId, false)).toBe(false)
+  const target = await h.host.tools.issueTarget(context.runId, snapshot.documentId, { kind: 'markdown-range', from: 0, to: '已批准外部'.length })
+  expect(await h.host.tools.execute(context.runId, 'outside-document-write', { name: 'text.replace', input: { target, content: '文档越权' } }))
+    .toMatchObject({ kind: 'error', code: 'not-authorized' })
+  const after = session.read()
+  expect(await session.execute({ documentId: after.documentId, epoch: after.epoch, baseRevision: after.revision,
+    operationId: 'outside-undo', actor: 'human', mutation: { type: 'undo', expectedTopOperationId: operationId } }))
+    .toMatchObject({ status: 'applied' })
+  expect(session.read().model).toMatchObject({ source: '外部' })
+})
+
+it('rejects an approved outside document commit if a user edits after its snapshot was captured', async () => {
+  const h = await fixture(), filename = path.join(h.outside, 'external.md')
+  const snapshot = await h.host.open(filename), session = h.host.registry.get(snapshot.documentId)
+  const execute = session.execute.bind(session)
+  const intercepted = vi.spyOn(session, 'execute').mockImplementationOnce(async operation => {
+    const current = session.read()
+    expect(await execute({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision,
+      operationId: 'outside-human-race', actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: '人工新稿' } } }))
+      .toMatchObject({ status: 'applied' })
+    return execute(operation)
+  })
+  try {
+    await expect(h.files.execute({ ...h.context, approvedOutsidePaths: [filename] }, 'file.write',
+      { mode: 'replace', path: filename, content: '不能覆盖人工新稿' }, 'outside-stale')).rejects.toThrow('文档在批准后又被修改')
+    expect(session.read()).toMatchObject({ model: { source: '人工新稿' }, undoDepth: 1, undoHead: { operationId: 'outside-human-race', actor: 'human' } })
+    expect(await readFile(filename, 'utf8')).toBe('外部')
+  } finally { intercepted.mockRestore() }
+})
+
+it('stops an approved outside document mutation before the canonical commit', async () => {
+  const h = await fixture(), filename = path.join(h.outside, 'external.md')
+  const snapshot = await h.host.open(filename), session = h.host.registry.get(snapshot.documentId)
+  const stopped = { ...h.context, approvedOutsidePaths: [filename], assertActive: () => { throw new Error('任务已停止') } }
+  await expect(h.files.execute(stopped, 'file.patch', { path: filename, oldText: '外部', newText: '停止后修改' }, 'outside-stopped'))
+    .rejects.toThrow('任务已停止')
+  expect(session.read()).toMatchObject({ model: { source: '外部' }, revision: snapshot.revision, undoDepth: 0 })
+  expect(session.lookupOperation('outside-stopped')).toBeNull()
+  expect(await readFile(filename, 'utf8')).toBe('外部')
+})
+
+it('patches without expectedVersion using current unique content or range while an explicit stale version is rejected', async () => {
+  const h = await fixture(), filename = path.join(h.workspace, 'lesson', 'patch.txt')
+  await writeFile(filename, 'same\nsame\n')
+  await expect(h.files.execute(h.context, 'file.patch', { path: filename, oldText: 'same', newText: 'other' }, 'ambiguous-without-version'))
+    .rejects.toThrow('匹配多处')
+  expect((await h.files.execute(h.context, 'file.patch', { path: filename, oldText: 'same', newText: 'other', range: { from: 5, to: 9 } }, 'range-without-version')).data)
+    .toMatchObject({ status: 'written', saved: true })
+  expect(await readFile(filename, 'utf8')).toBe('same\nother\n')
+  const snapshot = await h.host.open(filename), session = h.host.registry.get(snapshot.documentId)
+  await h.host.tools.beginRun({ runId: h.context.runId, actor: 'agent', documents: [{ documentId: snapshot.documentId, writable: [{ kind: 'document' }] }] })
+  expect(await session.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision,
+    operationId: 'unrelated-human-change', actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: '标题\nsame\nother\n' } } }))
+    .toMatchObject({ status: 'applied' })
+  await expect(h.files.execute(h.context, 'file.patch', { path: filename,
+    expectedVersion: `document:${snapshot.documentId}:${snapshot.epoch}:${snapshot.revision}`, oldText: 'other', newText: 'new' }, 'explicit-stale'))
+    .rejects.toThrow('版本已改变')
+  expect((await h.files.execute(h.context, 'file.patch', { path: filename, oldText: 'other', newText: 'new' }, 'unique-without-version')).data)
+    .toMatchObject({ status: 'applied', saved: false, dirty: true })
+  expect(session.read().model).toMatchObject({ source: '标题\nsame\nnew\n' })
+  expect(await readFile(filename, 'utf8')).toBe('same\nother\n')
+})
+
+it('file.copy defaults to copying the disk version of a dirty draft and marks copied=disk-version', async () => {
+  const h = await fixture()
+  const filename = path.join(h.workspace, 'lesson', 'existing.md')
+  const snapshot = await h.host.open(filename)
+  await h.host.tools.beginRun({ runId: h.context.runId, actor: 'agent', documents: [{ documentId: snapshot.documentId,
+    writable: [{ kind: 'document' }] }] })
+  expect(await h.host.internalAPI.dispatch({ documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision,
+    operationId: 'draft-edit', actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: '未保存草稿' } } }))
+    .toMatchObject({ status: 'applied' })
+  await h.files.execute(h.context, 'file.mkdir', { path: 'lesson', name: 'copies' }, 'mkdir-copies')
+  const copied = (await h.files.execute(h.context, 'file.copy', { sources: ['lesson/existing.md'],
+    destination: 'lesson/copies' }, 'copy-dirty')).data as any
+  expect(copied.operation.status).toBe('success')
+  expect(copied.copied).toBe('disk-version')
+  expect(copied.operation.items[0]?.copied).toBe('disk-version')
+  // The copy carries the on-disk body, not the GUI draft.
+  expect(await readFile(path.join(h.workspace, 'lesson', 'copies', 'existing.md'), 'utf8')).toBe('正文')
+  expect(await readFile(filename, 'utf8')).toBe('正文')
+  // flushFirst still refuses when the model asked for the GUI draft but did not save.
+  await h.files.execute(h.context, 'file.mkdir', { path: 'lesson', name: 'flush' }, 'mkdir-flush')
+  const flushed = (await h.files.execute(h.context, 'file.copy', { sources: ['lesson/existing.md'],
+    destination: 'lesson/flush', flushFirst: true }, 'copy-dirty-flush')).data as any
+  expect(flushed.operation.status).toBe('failed')
+  expect(flushed.operation.items[0]?.error?.message).toContain('未保存')
+  // After saving, flushFirst succeeds and the GUI body reaches the copy.
+  await h.host.saveToPath(snapshot.documentId)
+  const afterSave = (await h.files.execute(h.context, 'file.copy', { sources: ['lesson/existing.md'],
+    destination: 'lesson/flush', flushFirst: true }, 'copy-saved')).data as any
+  expect(afterSave.operation.status).toBe('success')
+  expect(afterSave.copied).toBeUndefined()
+  expect(await readFile(path.join(h.workspace, 'lesson', 'flush', 'existing.md'), 'utf8')).toBe('未保存草稿')
 })
 
 it('M27 rename preserves an opened dirty document binding; trash uses the host recycle callback', async () => {

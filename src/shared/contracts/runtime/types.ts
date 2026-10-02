@@ -308,6 +308,10 @@ export interface RuntimeAuthoringTargetUpdate {
   scope: RuntimeScope
   sceneId?: string
   targets: ReadonlyArray<Readonly<RuntimeAuthoringTarget>>
+  /** Some automatic targets were omitted by the per-layer discovery limit. */
+  truncated?: boolean
+  /** Published adapters identify which Runtime instances were truncated. */
+  truncatedItemIds?: readonly string[]
 }
 
 export interface RuntimeCreateContextBase {

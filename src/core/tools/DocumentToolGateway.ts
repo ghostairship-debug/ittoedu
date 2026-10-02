@@ -1,4 +1,4 @@
-import { ToolReadCoverage, mapAcknowledgedFlowRange, mapAcknowledgedRange, type FlowSplice, type SourceSplice } from './ToolReadCoverage'
+import { mapAcknowledgedFlowRange, mapAcknowledgedRange, type FlowSplice, type SourceSplice } from './ToolReadCoverage'
 import { planCreateCourseSound, planUpdateCourseSound, planDeleteCourseSound, planUpdateCourseAudioSettings } from './courseAudio'
 import { planSpatialStructure, spatialReferenceHandles } from './spatialStructure'
 import { renameCourseSurface, moveCourseSlideScene, addCourseSlidePage, addCourseFlowPage, addCourseSpatialPage, renameCourseLocation, deleteCourseLocation, deleteCourseSurface, duplicateCourseLocation, reorderCourseSurfaces } from './courseLocations'
@@ -55,7 +55,6 @@ interface Run {
   sources: Map<string, string>
   rangeFootprints: Map<string, string>
   stopped: boolean
-  invalidatedDocuments: Set<string>
   history: Map<string, { undoDepth: number; redoDepth: number }>
   watches: (() => void)[]
 }
@@ -154,7 +153,9 @@ function writableKinds(model: DocumentModel, writable: readonly ToolTarget[]): T
 }
 
 export interface DynamicContentObservationPort {
-  read(input: { documentId: string; epoch: string; revision: number; locationId: string }): Promise<readonly DynamicContentObservedTarget[]>
+  read(input: { documentId: string; epoch: string; revision: number; locationId: string }): Promise<{
+    targets: readonly DynamicContentObservedTarget[]; truncatedItemIds?: readonly string[]
+  }>
 }
 export interface DynamicContentFallbackPort {
   capture(input: { runId: string; documentId: string; target: DynamicContentHostTarget;
@@ -175,8 +176,6 @@ export class DocumentToolGateway implements ToolGateway {
   private readonly handles = new Map<string, Handle>()
   private readonly contentTargets = new Map<string, { runId: string; source: string; writable: boolean; target: DynamicContentHostTarget }>()
   private readonly cursors = new Map<string, Cursor>()
-  private readonly readCoverage = new ToolReadCoverage()
-  private readonly observationRuns = new Set<string>()
   private readonly pending = new Map<string, { digest: string; result: Promise<ToolResult> }>()
   private readonly callDigests = new Map<string, string>()
 
@@ -330,20 +329,10 @@ export class DocumentToolGateway implements ToolGateway {
       await this.hostTools.beginRun(grant)
       this.assertWriteTasksAllowed(grant, generations)
       const run: Run = { grant, toolScopes, loadedFamilies: new Set(), epochs, sources, rangeFootprints,
-        stopped: false, invalidatedDocuments: new Set(), history: new Map(), watches: [] }
+        stopped: false, history: new Map(), watches: [] }
       this.runs.set(grant.runId, run)
       for (const doc of grant.documents) this.watchDocument(grant.runId, doc.documentId)
     } finally { this.startingRuns.delete(input.runId) }
-  }
-
-  /** An explicit continuation observes only the content it is about to change. Not a new permission. */
-  requireReadObservation(runId: string): void {
-    if (this.run(runId).stopped) throw new ToolError('run-stopped', '任务已停止')
-    this.observationRuns.add(runId)
-  }
-  private assertObserved(runId: string, snapshot: DocumentSnapshot, targets: readonly ToolTarget[]): void {
-    if (this.observationRuns.has(runId) && targets.some(target => !this.readCoverage.has(runId, snapshot, target)))
-      throw new ToolError('resume-observation-required', '继续修改前需读取该目标的当前内容；可以分段或分页读取，无需读完无关文档。')
   }
 
   /** Main-only: a file tool has opened a supported document during this live run. */
@@ -375,7 +364,7 @@ export class DocumentToolGateway implements ToolGateway {
     if (new Set(ids).size !== ids.length || ids.some(id => !id)) throw new Error('恢复文档身份重复或无效')
     const grant: ToolRunGrant = { runId: input.runId, actor: input.actor, documents: ids.map(documentId => ({ documentId, writable: [] })) }
     this.runs.set(input.runId, { grant, toolScopes: [], loadedFamilies: new Set(), epochs: new Map(), sources: new Map(),
-      rangeFootprints: new Map(), stopped: true, invalidatedDocuments: new Set(), history: new Map(), watches: [] })
+      rangeFootprints: new Map(), stopped: true, history: new Map(), watches: [] })
   }
 
   /** Host-only: never expose arbitrary addresses as model tool input. */
@@ -446,7 +435,6 @@ export class DocumentToolGateway implements ToolGateway {
     const target = this.resolve(handle, snapshot, false)
     const current = readTarget(snapshot.model, target)
     const content = typeof current === 'string' ? current : JSON.stringify(current)
-    this.readCoverage.record(runId, snapshot, target, content.length, 0, Math.min(maxChars, content.length))
     if (content.length <= maxChars) return { kind: target.kind, text: content, total: content.length, truncated: false }
     const nextCursor = `c${this.createId()}`
     this.cursors.set(nextCursor, { ...this.readIdentity(runId, snapshot, target), method: 'read', digest: documentDigest(content), offset: maxChars })
@@ -473,7 +461,8 @@ export class DocumentToolGateway implements ToolGateway {
   documentsOfHandles(runId: string, values: readonly string[]): string[] {
     const found = new Set<string>()
     for (const value of values) {
-      try { found.add(this.handle(runId, value).documentId) } catch { /* Not a handle of this run. */ }
+      const content = this.contentTargets.get(value)
+      try { found.add(this.handle(runId, content?.runId === runId ? content.source : value).documentId) } catch { /* Not a handle of this run. */ }
     }
     return [...found]
   }
@@ -504,7 +493,7 @@ export class DocumentToolGateway implements ToolGateway {
     const handle = this.handle(runId, handleId)
     const snapshot = await this.registry.get(handle.documentId).drain()
     if (handle.revision !== snapshot.revision) throw new ToolError('target-conflict', '读取句柄不是当前文档版本')
-    const target = this.resolve(handle, snapshot, false, true)
+    const target = this.resolve(handle, snapshot, false, false)
     return { documentId: snapshot.documentId, revision: snapshot.revision, target }
   }
 
@@ -543,8 +532,6 @@ export class DocumentToolGateway implements ToolGateway {
     run.stopped = true
     this.contentFallback?.stopRun?.(runId)
     for (const unwatch of run.watches.splice(0)) unwatch()
-    this.readCoverage.clear(runId)
-    this.observationRuns.delete(runId)
     for (const [id, resource] of this.images) if (resource.runId === runId) this.images.delete(id)
     for (const [id, target] of this.contentTargets) if (target.runId === runId) this.contentTargets.delete(id)
     for (const [id, cursor] of this.cursors) if (cursor.runId === runId) this.cursors.delete(id)
@@ -559,17 +546,15 @@ export class DocumentToolGateway implements ToolGateway {
     return run
   }
   private watchDocument(runId: string, documentId: string): void {
+    // Tracks changing undo/redo depth only for run summary; no invalidation.
+    // Per AGENTS.md, undo must not revoke this task's write permission (CAS/revision
+    // and handle footprints already protect against cross-task overwrites).
     const run = this.run(runId), session = this.registry.get(documentId), current = session.read()
     run.history.set(documentId, { undoDepth: current.undoDepth, redoDepth: current.redoDepth })
     run.watches.push(session.subscribe(event => {
       if (event.type !== 'changed') return
-      const previous = run.history.get(documentId), next = event.snapshot
+      const next = event.snapshot
       run.history.set(documentId, { undoDepth: next.undoDepth, redoDepth: next.redoDepth })
-      if (previous && next.undoDepth < previous.undoDepth && next.redoDepth > previous.redoDepth) {
-        // An Undo can restore identical bytes. Its history transition still revokes this run's write lineage.
-        run.invalidatedDocuments.add(documentId)
-        for (const handle of this.handles.values()) if (handle.runId === runId && handle.documentId === documentId) handle.conflicted = true
-      }
     }))
   }
   private authorizeDocument(run: Run, snapshot: DocumentSnapshot): void {
@@ -577,7 +562,6 @@ export class DocumentToolGateway implements ToolGateway {
     if (run.epochs.get(snapshot.documentId) !== snapshot.epoch) throw new ToolError('stale-epoch', '文档会话已改变，请重新冻结任务')
   }
   private canWrite(run: Run, snapshot: DocumentSnapshot, target: ToolTarget): boolean {
-    if (run.invalidatedDocuments.has(snapshot.documentId)) return false
     return run.grant.documents.find(doc => doc.documentId === snapshot.documentId)!.writable.some(allowed => {
       try {
         const frozen = run.rangeFootprints.get(documentDigest({ documentId: snapshot.documentId, target: allowed }))
@@ -666,8 +650,11 @@ export class DocumentToolGateway implements ToolGateway {
         }
         handle.target = nextTarget
         if (nextTarget.kind === 'markdown-range' && isSourceDocumentModel(model)) handle.source = model.source
-        handle.footprint = targetFootprint(model, nextTarget)
-        handle.expectedFootprint = handle.footprint
+        // handle.footprint stays the pre-apply snapshot so a second write on the same
+        // short handle is reported as "本任务已修改目标内容" (target-conflict), not a
+        // silent re-apply over the task's own prior commit. expectedFootprint tracks
+        // this task's last acknowledged commit for the "本任务 / 外部" message pick.
+        handle.expectedFootprint = targetFootprint(model, nextTarget)
         handle.revision = revision
       } catch { handle.conflicted = true }
     }
@@ -710,12 +697,10 @@ export class DocumentToolGateway implements ToolGateway {
         doc.writable = nextWritable
       }
     }
-    this.readCoverage.advance(runId, snapshot, committed, edits, flowEdits)
   }
   private refreshReadHandle(handle: Handle, snapshot: DocumentSnapshot, target: ToolTarget): string {
     const run = this.run(handle.runId)
-    const unchanged = !handle.conflicted && !run.invalidatedDocuments.has(snapshot.documentId)
-      && targetFootprint(snapshot.model, target) === handle.expectedFootprint
+    const unchanged = !handle.conflicted && targetFootprint(snapshot.model, target) === handle.expectedFootprint
     // A stable object can be inspected after an external edit; the new read does not renew write authority.
     return this.capture(handle.runId, snapshot, target,
       unchanged && handle.writable && this.canWrite(run, snapshot, target), handle.readOnly || !unchanged)
@@ -725,7 +710,6 @@ export class DocumentToolGateway implements ToolGateway {
     this.authorizeDocument(run, snapshot)
     if (handle.epoch !== snapshot.epoch) throw new ToolError('stale-epoch', '目标会话已失效')
     if (write && !handle.writable) throw new ToolError('not-authorized', '目标不在本次任务的可写范围')
-    if (write && run.invalidatedDocuments.has(snapshot.documentId)) throw new ToolError('target-conflict', '文档已撤销，旧任务写权限失效；请重新发起任务。')
     if (!insertion && handle.conflicted && (write || verifyFootprint)) throw new ToolError('target-conflict', '目标内容已由其他操作改变；旧句柄不可续写，请核对新内容后重新发起任务。')
     let target = handle.target
     try {
@@ -863,9 +847,11 @@ export class DocumentToolGateway implements ToolGateway {
     if (object.kind !== 'course-object') throw new ToolError('invalid-target', '动态图文发现需要 Runtime 或 Component 对象句柄')
     const observed = await this.contentObservations?.read({ documentId: snapshot.documentId, epoch: snapshot.epoch,
       revision: snapshot.revision, locationId: object.locationId })
-    const targets = discoverDynamicContentTargets(snapshot, { target: object, ...(observed ? { observed } : {}) })
+    const targets = discoverDynamicContentTargets(snapshot, { target: object, ...(observed ? { observed: observed.targets } : {}) })
     const writable = handle.writable && this.canWrite(run, snapshot, object)
-    return { kind: 'read', data: { targets: targets.map(found => {
+    return { kind: 'read', data: { ...(observed?.truncatedItemIds?.includes(object.itemId) ? {
+      truncated: true, notice: '自动识别目标仅列出前 400 项（Runtime 按层计）；其余未列出，已声明目标仍正常返回。',
+    } : {}), targets: targets.map(found => {
       const id = `c${this.createId()}`
       if (this.contentTargets.has(id) || this.handles.has(id)) throw new Error('动态图文句柄编号重复')
       this.contentTargets.set(id, { runId, source, writable, target: found })
@@ -951,6 +937,18 @@ export class DocumentToolGateway implements ToolGateway {
     if (!definition) throw new ToolError('unsupported-tool', '此工具尚未接入正式 Gateway')
     if (call.name === 'content.targets') return this.discoverContent(runId, call.input)
     if (call.name === 'content.update') return this.updateContent(runId, operationId, requestDigest, call.input)
+    // text.replace over a discovered Runtime/Component short handle dispatches into the same
+    // admission + CAS + undo pipeline as content.update; no additional target kinds are created.
+    if (call.name === 'text.replace' && call.input && typeof call.input === 'object') {
+      const input = call.input as { target?: unknown; content?: unknown }
+      if (typeof input.target === 'string' && this.contentTargets.has(input.target)) {
+        if (typeof input.content !== 'string') throw new ToolError('invalid-input', '文字替换需要字符串内容')
+        const mapped = this.contentTargets.get(input.target)!
+        if (!mapped.target.field.kind.endsWith('text') && mapped.target.field.kind !== 'runtime.value')
+          throw new ToolError('invalid-input', '文字替换需要 Runtime/Component 文本字段；图片目标请用 content.update')
+        return this.updateContent(runId, operationId, requestDigest, { target: input.target, text: input.content })
+      }
+    }
     if (call.name === 'skills.read') return this.hostTools.readSkill(runId, call.input)
     if (call.name === 'skills.list') return this.hostTools.listSkills(runId, call.input)
     if (isWorkbenchServiceTool(call.name)) {
@@ -1078,7 +1076,6 @@ export class DocumentToolGateway implements ToolGateway {
     const destinations = destinationHandles.map(handle => handle ? this.resolve(handle, snapshot, true, false, true) : null)
     const layerTargets = layerHandles.map(group => group.map(handle => this.resolve(handle, snapshot, true)))
     const referenceTargets = referenceHandles.map(group => group.map(handle => this.resolve(handle, snapshot, false, true)))
-    this.assertObserved(runId, snapshot, [...targets, ...destinations.filter((target): target is ToolTarget => target !== null), ...layerTargets.flat()])
     const driver = this.drivers.find(value => value.kind === snapshot.model.kind)
     if (!driver) throw new Error('文档 Driver 未注册')
     let model = snapshot.model
@@ -1600,7 +1597,6 @@ export class DocumentToolGateway implements ToolGateway {
     // Large page requests are served in chunks, not rejected after a paid model round.
     const limit = method === 'listChildren' ? Math.min(input.limit ?? 100, 1000) : Math.min((input.limit ?? 120) * 100, 64_000)
     const end = Math.min(offset + limit, content.length)
-    if (method === 'read' && typeof content === 'string') this.readCoverage.record(runId, snapshot, target, content.length, offset, end)
     let data: unknown
     if (typeof content === 'string') data = { target: refreshed, text: content.slice(offset, end), offset, total: content.length, truncated: end < content.length }
     else data = content.slice(offset, end).map(child => {

@@ -532,7 +532,6 @@ export class ExecutionEngine {
           ...(frozen.conversationHome ? { conversationHome: frozen.conversationHome } : {}) },
         ...(frozen.disclosedSettings ? { disclosedSettings: frozen.disclosedSettings } : {}) })
       runBegun = true
-      if (continuation) this.options.gateway.requireReadObservation(runId)
       // DocumentSession.drain above includes unsaved human edits. No disk snapshot or active-tab lookup is used.
       const references = [], permission = frozen.permission ?? DEFAULT_PERMISSION_MODE
       const outsideDocuments = new Set<string>(), documentNames = new Map<string, string>()
@@ -1138,10 +1137,9 @@ export class ExecutionEngine {
         try {
           await this.options.edits.begin({ editId: stream.callId, toolCallId: stream.callId, runId: active.record.runId, targetHandle: decoded.target })
           stream.editing = true
-        } catch (error) {
-          // One preview per document: while another run's edit of it is previewed (another object's card, M15), this
-          // call is not refused; it shows no preview and the gateway commits it once it is complete.
-          if ((error as { code?: unknown } | null)?.code !== 'document-busy') throw error
+        } catch {
+          // Preview is optional. The completed call still goes through the gateway's
+          // authority, target and conflict checks, including targets without a projection.
           stream.previewSkipped = true
         }
       }

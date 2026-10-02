@@ -37,8 +37,10 @@ describe('M15 host target publication', () => {
         { ...runtime('runtime-a'), source: 'registered' }],
       componentText: [componentText('component-a'), componentText('missing')],
       componentImage: [image('component-a'), image('missing')],
+      truncatedItemIds: ['runtime-a', 'component-a', 'hidden', 'missing', 'runtime-a'],
     })
-    expect(hits).toEqual([
+    expect(hits.truncatedItemIds).toEqual(['runtime-a', 'component-a'])
+    expect(hits.targets).toEqual([
       { kind: 'runtime.text', source: 'auto', revision: 7, locationId: 'location-a',
         itemId: 'runtime-a', original: '原文', region: 'region-a', text: '现文' },
       { kind: 'component.text', source: 'auto', revision: 7, locationId: 'location-a',
@@ -46,6 +48,40 @@ describe('M15 host target publication', () => {
       { kind: 'component.image', source: 'auto', revision: 7, locationId: 'location-a',
         itemId: 'component-a', assetKey: 'picture' },
     ])
+  })
+
+  it('publishes truncation changes even when the retained targets stay the same', async () => {
+    const sent: DynamicContentPublication[] = []
+    const publisher = new DynamicContentTargetPublisher(async value => { sent.push(value) })
+    const value = { documentId: 'document-a', epoch: 'epoch-a', revision: 7, locationId: 'location-a',
+      viewGeneration: 'host-a', source: 'authoring' as const,
+      targets: [{ kind: 'runtime.text' as const, source: 'auto' as const, revision: 7,
+        locationId: 'location-a', itemId: 'runtime-a', original: '原文', text: '现文' }] }
+    publisher.replace(value)
+    publisher.replace({ ...value, truncatedItemIds: ['runtime-a'] })
+    publisher.replace({ ...value, truncatedItemIds: [] })
+    await publisher.settled()
+    expect(sent.map(item => item.truncatedItemIds ?? [])).toEqual([[], ['runtime-a'], []])
+    expect(sent.every(item => item.targets.length === 1)).toBe(true)
+    publisher.dispose()
+    await publisher.settled()
+  })
+
+  it('publishes metadata-only discoveries and clears their truncation notice', async () => {
+    const sent: DynamicContentPublication[] = []
+    const publisher = new DynamicContentTargetPublisher(async value => { sent.push(value) })
+    const value = { documentId: 'document-a', epoch: 'epoch-a', revision: 7, locationId: 'location-a',
+      viewGeneration: 'host-a', source: 'live' as const, targets: [], truncatedItemIds: ['runtime-a'] }
+    publisher.replace(value)
+    publisher.replace(value)
+    publisher.replace({ ...value, truncatedItemIds: [] })
+    await publisher.settled()
+    expect(sent.map(item => ({ targets: item.targets, truncatedItemIds: item.truncatedItemIds }))).toEqual([
+      { targets: [], truncatedItemIds: ['runtime-a'] },
+      { targets: [], truncatedItemIds: [] },
+    ])
+    publisher.dispose()
+    await publisher.settled()
   })
 
   it('sends clear without waiting for a stuck old publish, with monotonic sequence for Main', async () => {

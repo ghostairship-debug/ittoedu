@@ -1,0 +1,22 @@
+{
+  "bodyLoad": true,
+  "constructor": true,
+  "defer": "ok",
+  "deferOrder": [
+    "first",
+    "second"
+  ],
+  "drag": true,
+  "drop": true,
+  "dynamicImage": 1,
+  "first": "answer 1",
+  "imageLoad": true,
+  "initial": "answer",
+  "layerColor": "rgb(17, 34, 51)",
+  "localFetchUnpacked": true,
+  "ready": true,
+  "remoteLibraryLoaded": false,
+  "second": "answer 2",
+  "staticImage": 1,
+  "violations": []
+}

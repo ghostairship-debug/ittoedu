@@ -67,7 +67,13 @@ export async function prepareHtmlCourseCandidate(input: {
   signal?.throwIfAborted()
   const diagnostics = validateHtmlImport(closure)
   const errors = diagnostics.filter(item => item.level === 'error')
-  if (errors.length) throw new UserFacingError('HTML 导入失败', errors.map(item => item.message).join('\n'), '请修正列出的不受支持或不安全资源后重试。')
+  if (errors.length) {
+    const grouped = new Map<string, string[]>()
+    for (const error of errors) grouped.set(error.code, [...(grouped.get(error.code) ?? []), error.message])
+    const messages = [...grouped].slice(0, 10).map(([code, entries]) =>
+      `[${code}] ${[...new Set(entries)].slice(0, 10).join('；')}（共 ${entries.length} 处）`)
+    throw new UserFacingError('HTML 导入失败', messages.join('\n'), '请修正列出的脚本语法或资源地址后重试。')
+  }
   const networkOrigins = collectRemoteMediaOrigins(closure)
   const project = structuredClone(snapshot.model.project)
   if (networkOrigins.length) project.network = {

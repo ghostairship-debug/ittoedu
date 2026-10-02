@@ -1,0 +1,50 @@
+
+ RUN  v4.1.10 D:/果铃工作台
+
+ ❯ tests/integration/g20BodyStreamingCapability.test.ts (3 tests | 1 failed) 689ms
+   × persists exact revision/model/parameters evidence and offers only configured observed alternatives 40ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/g20BodyStreamingCapability.test.ts > persists exact revision/model/parameters evidence and offers only configured observed alternatives
+AssertionError: expected { …(6) } to be undefined
+
+- Expected:
+undefined
+
++ Received:
+{
+  "connectionId": "11b2ebbb-dc01-4578-9679-f7070d1dac37",
+  "connectionRevision": 1,
+  "latest": {
+    "observedAt": 2,
+    "operationId": "op2",
+    "requestId": "request2",
+    "result": "operation-only",
+  },
+  "model": "configured",
+  "parametersKey": "{\"a\":1,\"b\":2}",
+  "progressive": {
+    "observedAt": 1,
+    "operationId": "op",
+    "requestId": "request",
+    "result": "progressive",
+  },
+}
+
+ ❯ tests/integration/g20BodyStreamingCapability.test.ts:79:85
+     77|   const newer = await store.saveConnection({ id: saved.connection.id, …
+     78|   records = (await store.read()).bodyStreamingObservations!
+     79|   expect(bodyStreamingRecord(records, { ...frozen, connection: newer.c…
+       |                                                                                     ^
+     80|   expect(configuredBodyStreamingAlternatives(await store.read())).toEq…
+     81| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  1 failed | 54 passed (55)
+   Start at  00:37:56
+   Duration  19.16s (transform 3.65s, setup 257ms, import 5.37s, tests 18.39s, environment 550ms)
+

@@ -61,6 +61,7 @@ export function HtmlPreviewPane({ lease, committed, textDrafts, onUndo, onRedo, 
   const editModeRef = useRef(false)
   const [selected, setSelected] = useState<HtmlSelectedTarget | null>(null)
   const [issue, setIssue] = useState<string | null>(null)
+  const [responsiveNotice, setResponsiveNotice] = useState<string | null>(null)
   const [position, setPosition] = useState({ left: 8, top: 8 })
   const [page, setPage] = useState(0)
   const [pageCount, setPageCount] = useState(0)
@@ -133,6 +134,7 @@ export function HtmlPreviewPane({ lease, committed, textDrafts, onUndo, onRedo, 
       onPage(index, scroll) { view.current = { index, scroll }; setPage(index) },
       onEditing() { pendingEdit.current = { beforeSource: latestSource.current } },
       onApplied(revision, patch, beforeValue) {
+        if (patch.rewroteResponsive) setResponsiveNotice('已把旧备用图指向新图（可撤销）')
         history.current.push({ revision, patch, beforeValue,
           beforeSource: pendingEdit.current?.beforeSource ?? latestSource.current,
           ...(pendingEdit.current?.observedRevision === revision && pendingEdit.current.observedSource
@@ -168,7 +170,7 @@ export function HtmlPreviewPane({ lease, committed, textDrafts, onUndo, onRedo, 
     else {
       const reverse = [...history.current].reverse().find(item => item.afterSource === previous && item.beforeSource === source)
       const forward = [...history.current].reverse().find(item => item.beforeSource === previous && item.afterSource === source)
-      if (reverse) instance.patch({ ...reverse.patch, value: reverse.beforeValue, expected: reverse.patch.value })
+      if (reverse) { instance.patch({ ...reverse.patch, value: reverse.beforeValue, expected: reverse.patch.value }); setResponsiveNotice(null) }
       else if (forward) instance.patch({ ...forward.patch, expected: forward.beforeValue })
       else {
         const exact = selectedTextChange(previous, source, selectedTarget.current, committed.revision)
@@ -208,6 +210,7 @@ export function HtmlPreviewPane({ lease, committed, textDrafts, onUndo, onRedo, 
       </details>
       {ambiguous && <span role="status">分页结构不明确，按连续页面预览。</span>}
     </div>
+    {responsiveNotice && <p role="status" className="html-preview-pane__notice">{responsiveNotice}</p>}
     {stale && <div role="status" className="html-preview-pane__notice">
       源码已从其他编辑入口变化。<button type="button" onClick={refreshPreservingView}>刷新预览</button>
     </div>}

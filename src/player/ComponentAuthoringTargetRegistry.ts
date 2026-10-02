@@ -182,8 +182,10 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
   private readonly resizeObservedElements = new Set<Element>()
   private node: ComponentHostNode
   private domRoot: HTMLElement | undefined
-  private previousTargets:
-    ReadonlyArray<Readonly<ComponentAuthoringTarget>> | null = null
+  private previousTargets: {
+    targets: ReadonlyArray<Readonly<ComponentAuthoringTarget>>
+    truncated: boolean
+  } | null = null
   private nextTextRegionId = 1
   private nextDomElementId = 1
   private revision = 0
@@ -250,28 +252,31 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
     this.invalidationQueued = false
     this.textRegions.clear()
     this.detachDomObservers()
-    if ((this.previousTargets?.length ?? 0) > 0) {
+    if ((this.previousTargets?.targets.length ?? 0) > 0) {
       this.publish(Object.freeze([]))
     }
-    this.previousTargets = Object.freeze([])
+    this.previousTargets = Object.freeze({ targets: Object.freeze([]), truncated: false })
   }
 
   private publishChangedTargets(): void {
     const fields = this.resolveTextFields()
-    const targets = Object.freeze(this.node.visible
-      ? [
-          ...this.collectDomTargets(fields),
-          ...this.collectRegisteredTargets(fields),
-          ...this.collectAutoTargets(),
-        ]
-      : [])
-    if (sameTargets(this.previousTargets, targets)) return
-    this.publish(targets)
-    this.previousTargets = targets
+    const declaredTargets = this.node.visible
+      ? [...this.collectDomTargets(fields), ...this.collectRegisteredTargets(fields)]
+      : []
+    const automatic = this.node.visible
+      ? this.collectAutoTargets()
+      : { targets: [], truncated: false }
+    const targets = Object.freeze([...declaredTargets, ...automatic.targets])
+    const truncated = automatic.truncated
+    if (this.previousTargets?.truncated === truncated &&
+      sameTargets(this.previousTargets.targets, targets)) return
+    this.publish(targets, truncated)
+    this.previousTargets = Object.freeze({ targets, truncated })
   }
 
   private publish(
     targets: ReadonlyArray<Readonly<ComponentAuthoringTarget>>,
+    truncated = false,
   ): void {
     this.revision += 1
     try {
@@ -281,6 +286,7 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
         ...(this.options.sceneId ? { sceneId: this.options.sceneId } : {}),
         nodeId: this.node.id,
         targets,
+        ...(truncated ? { truncated: true } : {}),
       }))
     } catch (error) {
       console.error('组件画布文字目标回调失败', error)
@@ -384,9 +390,12 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
    * Text and pictures the component renders itself (M15): every visible text that is not program-computed and not
    * already declared, and every picture showing one of the component's manifest assets.
    */
-  private collectAutoTargets(): ComponentAuthoringTarget[] {
+  private collectAutoTargets(): {
+    targets: ComponentAuthoringTarget[]
+    truncated: boolean
+  } {
     const root = this.domRoot, sources = this.options.lightEdit
-    if (!root || !sources) return []
+    if (!root || !sources) return { targets: [], truncated: false }
     const rootRect = root.getBoundingClientRect()
     const toLocal = (rect: DOMRect): ComponentEditableTextBounds | null => isFinitePositiveRect(rootRect) && isFinitePositiveRect(rect) ? {
       x: ((rect.left - rootRect.left) / rootRect.width) * this.node.width,
@@ -397,7 +406,6 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
     const targets: ComponentAuthoringTarget[] = []
     const range = root.ownerDocument.createRange()
     for (const sample of sources.dom?.samples() ?? []) {
-      if (targets.length >= MAX_AUTO_TARGETS) break
       if (sample.root !== root || sample.live) continue
       // Declared text keeps its own editing path.
       if (sample.node.parentElement?.closest('[data-courseware-edit-key]')) continue
@@ -406,16 +414,17 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
       // A text that cannot be measured is skipped, never the whole list.
       if (!local && typeof range.getBoundingClientRect === 'function') { range.selectNodeContents(sample.node); local = toLocal(range.getBoundingClientRect()) }
       if (!local || !isFinitePositiveBounds(local)) continue
+      if (targets.length >= MAX_AUTO_TARGETS) return { targets, truncated: true }
       targets.push(this.createTarget(`auto:${this.domElementId(sample.node)}:text`, '', autoLabel(sample.rule?.text || sample.original),
         sample.original.length > 30, undefined, 'auto', local,
         { original: sample.original, region: sample.region, text: sample.rule?.text ?? sample.original }))
     }
     for (const image of root.querySelectorAll('img')) {
-      if (targets.length >= MAX_AUTO_TARGETS) break
       const assetKey = sources.assetKeyForUrl(image.getAttribute('src') ?? '') ?? sources.assetKeyForUrl(image.currentSrc || image.src)
       if (!assetKey) continue
       const local = offsetBoundsInsideRoot(image, root) ?? toLocal(image.getBoundingClientRect())
       if (!local || !isFinitePositiveBounds(local)) continue
+      if (targets.length >= MAX_AUTO_TARGETS) return { targets, truncated: true }
       targets.push(Object.freeze({
         kind: 'component-image' as const,
         targetId: `auto:${this.domElementId(image)}:image`,
@@ -430,7 +439,7 @@ export class ComponentAuthoringTargetRegistry implements ComponentEditorHost {
         rotation: this.node.rotation,
       }))
     }
-    return targets
+    return { targets, truncated: false }
   }
 
   private createTarget(

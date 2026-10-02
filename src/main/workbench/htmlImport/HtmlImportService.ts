@@ -149,6 +149,20 @@ export class HtmlImportService {
     return this.require(ticket).candidate.diagnostics.filter(item => item.level === 'warning').map(item => item.message)
   }
 
+  warnings(ticket: HtmlImportTicket): { code: string; message: string }[] {
+    const grouped = new Map<string, { message: string; count: number }>()
+    for (const item of this.require(ticket).candidate.diagnostics) {
+      if (item.level !== 'warning') continue
+      const previous = grouped.get(item.code)
+      if (previous) previous.count++
+      else grouped.set(item.code, { message: item.message, count: 1 })
+    }
+    return [...grouped].slice(0, 5).map(([code, item]) => {
+      const prefix = `[${code}] `, suffix = `（共 ${item.count} 处）`
+      return { code, message: prefix + item.message.slice(0, 200 - prefix.length - suffix.length) + suffix }
+    })
+  }
+
   private require(ticket: HtmlImportTicket): ImportRecord {
     const record = this.records.get(ticket.operationId)
     if (!record || record.digest !== ticket.requestDigest || record.runId !== ticket.runId || record.jobId !== ticket.jobId
@@ -177,7 +191,12 @@ export class HtmlImportService {
     try {
       const checked = read(await this.call(record.runId, `html:${ticket.operationId}:check`, 'build.check', { job: record.jobId }))
       if (record.state !== 'checking') throw new Error('HTML 导入已取消')
-      if (checked.status !== 'ready' || typeof checked.artifact !== 'string') throw new Error(`HTML 候选未通过受控构建：${String(checked.status)}`)
+      if (checked.status !== 'ready' || typeof checked.artifact !== 'string') {
+        const logs = read(await this.call(record.runId, `html:${ticket.operationId}:logs`, 'build.logs', { job: record.jobId, after: 0, limit: 5000 }))
+        const entries = logs.entries as { level: string; message: string }[]
+        const reasons = entries.filter(entry => entry.level === 'error').slice(-3).map(entry => entry.message.slice(0, 200))
+        throw new Error(`HTML 候选未通过受控构建：${String(checked.status)}${reasons.length ? '\n' + reasons.join('\n') : ''}`)
+      }
       record.artifactId = checked.artifact
       record.state = 'ready'
     } catch (error) { if (this.records.get(ticket.operationId)?.state !== 'cancelled') record.state = 'failed'; throw error }

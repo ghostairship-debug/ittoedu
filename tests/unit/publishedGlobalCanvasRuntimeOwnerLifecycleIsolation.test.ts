@@ -173,6 +173,7 @@ describe('Published global canvas Runtime owner lifecycle isolation', () => {
     firstHealthyMount.authoring?.onTargetsChanged({
       revision: 41,
       scope: 'global',
+      truncated: true,
       targets: [{
         targetId: 'global-title',
         scope: 'global',
@@ -186,6 +187,7 @@ describe('Published global canvas Runtime owner lifecycle isolation', () => {
     expect(targetUpdates.at(-1)).toMatchObject({
       revision: 1,
       scope: 'global',
+      truncatedItemIds: ['owner-lifecycle-healthy'],
       targets: [expect.objectContaining({
         targetId: 'global-title',
         nodeId: 'owner-lifecycle-healthy',
@@ -220,6 +222,7 @@ describe('Published global canvas Runtime owner lifecycle isolation', () => {
       revision: 2,
       scope: 'global',
       targets: [],
+      truncatedItemIds: [],
     })
     const updateCountAfterReplacement = targetUpdates.length
     firstHealthyMount.authoring?.onTargetsChanged({
@@ -244,6 +247,7 @@ describe('Published global canvas Runtime owner lifecycle isolation', () => {
     expect(targetUpdates.at(-1)).toMatchObject({
       revision: 3,
       scope: 'global',
+      truncatedItemIds: [],
       targets: [expect.objectContaining({
         targetId: 'replacement-title',
         nodeId: 'owner-lifecycle-healthy',
@@ -253,6 +257,7 @@ describe('Published global canvas Runtime owner lifecycle isolation', () => {
     mountedOptions.get('owner-lifecycle-failure')!.authoring?.onTargetsChanged({
       revision: 99,
       scope: 'global',
+      truncated: true,
       targets: [{
         targetId: 'stale-failed-title',
         scope: 'global',
@@ -265,6 +270,7 @@ describe('Published global canvas Runtime owner lifecycle isolation', () => {
     })
     expect(targetUpdates).toHaveLength(updatesAfterFailure)
     owner.destroy()
+    expect(targetUpdates.at(-1)).toMatchObject({ targets: [], truncatedItemIds: [] })
   })
 
   it('keeps the active generation inert when activation synchronously prepares restart', () => {

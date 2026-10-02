@@ -387,8 +387,8 @@ it('M27-T03 consumes a fresh host observed Component image and commits picture, 
       observations++
       expect(input).toMatchObject({ documentId: session.documentId, epoch: session.read().epoch,
         revision: session.read().revision, locationId: location.id })
-      return [{ kind: 'component.image', source: 'auto', revision: input.revision,
-        locationId: input.locationId, itemId: component.layerItemId, assetKey: 'hero' }]
+      return { targets: [{ kind: 'component.image', source: 'auto', revision: input.revision,
+        locationId: input.locationId, itemId: component.layerItemId, assetKey: 'hero' }] }
     } },
     dynamicContentFallback: { async capture(input) {
       captures++

@@ -80,6 +80,20 @@ async function fixture(admission?: BuildAdmissionPort, existingOrders: readonly 
 }
 
 describe('M17 S13 HTML import orchestration', () => {
+  it('returns bounded warnings grouped by code and exposes concrete admission errors without committing', async () => {
+    const f = await fixture({ run: async () => ({ ok: false, processId: 1, message: 'lesson.html: runtime mount failed: missing answer()' }) })
+    await fs.writeFile(f.sourcePath, '<script src="https://cdn.example/a.js"></script>'.repeat(12) +
+      '<iframe src="https://example.com/lesson"></iframe><script>class Lesson{constructor(){}}</script>')
+    const ticket = await f.service.prepare(f.request)
+    const warnings = f.service.warnings(ticket)
+    expect(warnings.length).toBeLessThanOrEqual(5)
+    expect(new Set(warnings.map(item => item.code)).size).toBe(warnings.length)
+    expect(warnings.every(item => item.message.length <= 200)).toBe(true)
+    expect(warnings.find(item => item.code === 'remote-script')?.message).toMatch(/CSP.*阻止.*共 \d+ 处/)
+    await expect(f.service.admit(ticket)).rejects.toThrow('lesson.html: runtime mount failed: missing answer()')
+    expect(f.session.read()).toMatchObject({ revision: 0, undoDepth: 0 })
+  })
+
   it('imports runtime answers from real inputs without imposing a static data format', async () => {
     const f = await fixture()
     const html = `<input name="q1"><output></output><script>
@@ -230,42 +244,48 @@ describe('M17 S13 HTML import orchestration', () => {
     expect(f.session.read().undoDepth).toBe(0)
   })
 
-  it('lets lexical namespace strings pass, but rejects real remote sinks before build.create', async () => {
+  it('lets lexical namespace strings and remote sinks pass as preserved code with warning diagnostics', async () => {
     const f = await fixture()
     await fs.writeFile(f.sourcePath, '<script>const xmlns="http://www.w3.org/2000/svg"; const docs="https://react.dev";</script>')
     const ticket = await f.service.prepare(f.request)
     expect(ticket.jobId).toBeTruthy()
     await f.service.cancel(ticket)
+    // 远程脚本与 fetch 按 AGENTS.md 2026-09-30 导入优先原则只算 warning,不再否决整份导入
     const bad = await fixture()
     await fs.writeFile(bad.sourcePath, '<script src="https://example.org/lesson.js"></script>')
-    await expect(bad.service.prepare(bad.request)).rejects.toThrow('远程')
+    const badTicket = await bad.service.prepare(bad.request)
+    expect(badTicket.jobId).toBeTruthy()
+    await bad.service.cancel(badTicket)
     const network = await fixture()
     await fs.writeFile(network.sourcePath, '<script>fetch("https://example.org/a.json")</script>')
-    await expect(network.service.prepare(network.request)).rejects.toThrow('网络')
-    expect(network.run).not.toHaveBeenCalled()
+    const networkTicket = await network.service.prepare(network.request)
+    expect(networkTicket.jobId).toBeTruthy()
+    await network.service.cancel(networkTicket)
   })
 
-  it('projects a rejected remote script through desktop IPC without writing the document', async () => {
+  it('projects a preserved remote script into the candidate without throwing, and writes the document after admission', async () => {
     const f = await fixture()
     const urls = ['https://example.org/lesson.js', 'https://example.org/photo.png', 'https://example.org/audio.mp3']
     await fs.writeFile(f.sourcePath, `<script src="${urls[0]}"></script><img src="${urls[1]}"><audio src="${urls[2]}"></audio>`)
     const before = f.session.read()
-    const execute = vi.spyOn(f.gateway, 'execute')
-    const fallback = { code: 'HTML_IMPORT_FAILED', title: 'HTML 导入失败', message: '导入未完成。', suggestion: '请重试。' }
-    let failure: unknown
-    try { await f.service.prepare(f.request) } catch (error) { failure = error }
-    expect(failure).toBeDefined()
-    const shown = normalizeDesktopError(failure, fallback)
-    expect(shown.title).toBe('HTML 导入失败')
-    expect(shown.message).toContain(urls[0]!)
-    expect(shown.message).not.toContain(urls[1]!)
-    expect(shown.message).not.toContain(urls[2]!)
-    expect(shown.suggestion).toContain('修正')
-    expect(shown.message).not.toBe(fallback.message)
-    expect(execute).not.toHaveBeenCalled()
-    expect(f.session.read().revision).toBe(before.revision)
-    expect(f.session.read().undoDepth).toBe(before.undoDepth)
-    expect(f.session.read().model).toEqual(before.model)
+    // remote/script/fetch 现在是 warning,prepare 不再抛
+    const ticket = await f.service.prepare(f.request)
+    const notices = f.service.notices(ticket).join('\n')
+    expect(notices).toContain(urls[0]!)
+    await f.service.admit(ticket)
+    const committed = await f.service.commit(ticket)
+    expect(committed.status).toBe('applied')
+    const after = f.session.read()
+    expect(after.undoDepth).toBe(before.undoDepth + 1)
+    if (after.model.kind !== 'course-v9') throw new Error('wrong model')
+    const slide = after.model.project.surfaces[0]
+    if (slide?.type !== 'slide') throw new Error('wrong surface')
+    const item = slide.scenes[0]!.layerItems[0]
+    if (item?.kind !== 'runtime') throw new Error('wrong carrier')
+    const html = unpackHtmlDocumentRuntimeSource(item.runtime.source)?.html ?? ''
+    expect(html).toContain(urls[0]!)
+    expect(html).toContain(urls[1]!)
+    expect(html).toContain(urls[2]!)
   })
 
   it('imports HTTPS media with an exact origin, a visible notice and one undoable document write', async () => {
@@ -307,5 +327,66 @@ describe('M17 S13 HTML import orchestration', () => {
     release!()
     await rejected
     expect(f.session.read().revision).toBe(0)
+  })
+
+  it('imports modern ESM with fetch() instead of statically rejecting the whole document', async () => {
+    const f = await fixture()
+    const html = `<section><h1 id="t">模块课</h1><p id="data">loading…</p></section>
+<script type="module">
+  fetch('/api/data.json')
+  const title = document.getElementById('t')
+  if (title) title.textContent = 'ESM 已执行'
+</script>`
+    await fs.writeFile(f.sourcePath, html)
+    const ticket = await f.service.prepare(f.request)
+    await f.service.admit(ticket)
+    expect((await f.service.commit(ticket)).status).toBe('applied')
+    const model = f.session.read().model
+    if (model.kind !== 'course-v9') throw new Error('wrong model')
+    const slide = model.project.surfaces[0]
+    if (slide?.type !== 'slide') throw new Error('wrong surface')
+    const item = slide.scenes[0]!.layerItems[0]
+    if (item?.kind !== 'runtime') throw new Error('wrong carrier')
+    expect(unpackHtmlDocumentRuntimeSource(item.runtime.source)?.html).toContain(`type="module"`)
+  })
+
+  it('imports iframes and Google Fonts link as preserved warnings, not as a whole-document error', async () => {
+    const f = await fixture()
+    const html = `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400">
+<section><h1>嵌入演示</h1><iframe src="https://player.example.com/embed/abc" width="560" height="315"></iframe></section>`
+    await fs.writeFile(f.sourcePath, html)
+    const ticket = await f.service.prepare(f.request)
+    await f.service.admit(ticket)
+    expect((await f.service.commit(ticket)).status).toBe('applied')
+    const model = f.session.read().model
+    if (model.kind !== 'course-v9') throw new Error('wrong model')
+    const slide = model.project.surfaces[0]
+    if (slide?.type !== 'slide') throw new Error('wrong surface')
+    const item = slide.scenes[0]!.layerItems[0]
+    if (item?.kind !== 'runtime') throw new Error('wrong carrier')
+    const committedHtml = unpackHtmlDocumentRuntimeSource(item.runtime.source)?.html ?? ''
+    expect(committedHtml).toContain('<iframe')
+    expect(committedHtml).toContain('fonts.googleapis.com')
+  })
+
+  it('imports AVIF <img> without rejecting on format', async () => {
+    const f = await fixture()
+    // 1x1 AVIF (transparent). 由 avif 规范示例最小合法字节派生。
+    const avif = Buffer.from('AAAAIGZ0eXBhdmlmAAAAAGF2aWZtaWYxbWlhZgAAACBtZXRhAAAAAAAAAAdoZGxyAAAAAAAAAABwaWN0AAAAAAAAAAAAAAAAbG9jYQAAAAABAAEAAAAAAQABAAAAAAFpZW5jAAAAAAAAAAAAAANgAQAA', 'base64')
+    await fs.writeFile(f.sourcePath, `<section><h1>AVIF 图</h1><img src="data:image/avif;base64,${avif.toString('base64')}"></section>`)
+    const ticket = await f.service.prepare(f.request)
+    await f.service.admit(ticket)
+    expect((await f.service.commit(ticket)).status).toBe('applied')
+    const model = f.session.read().model
+    if (model.kind !== 'course-v9') throw new Error('wrong model')
+    const slide = model.project.surfaces[0]
+    if (slide?.type !== 'slide') throw new Error('wrong surface')
+    const item = slide.scenes[0]!.layerItems[0]
+    if (item?.kind !== 'runtime') throw new Error('wrong carrier')
+    const key = Object.keys(item.runtime.assets)[0]
+    expect(key).toBeTruthy()
+    const assetId = item.runtime.assets[key!]!.assetId
+    expect(model.project.assets[assetId]?.mimeType).toBe('image/avif')
+    expect(model.resources.assets[assetId]).toEqual(new Uint8Array(avif))
   })
 })

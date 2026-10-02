@@ -196,6 +196,10 @@ function mediaTypeForPath(key: string): string {
   return MEDIA_TYPES[extensionOf(key)] ?? 'application/octet-stream'
 }
 
+function managedMediaType(type: string): boolean {
+  return /^(image|audio|video|font)\//.test(type) || type.includes('font') || type.includes('woff')
+}
+
 function resolveRelative(baseDir: string, reference: string): string | null {
   let raw = reference.trim()
   if (!raw || raw.startsWith('#') || raw.startsWith('//') || /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw)) return null
@@ -220,8 +224,13 @@ function rewriteRelative(reference: string, context: Context, baseDir: string, s
     addDiagnostic(sink, 'error', 'missing-relative-resource', `找不到相对资源 ${clip(reference, 180)}`, key ?? reference)
     return { value: reference, changed: false }
   }
+  const mediaType = mediaTypeForPath(key)
+  if (!managedMediaType(mediaType)) {
+    addDiagnostic(sink, 'warning', 'unmanaged-relative-resource', `本地资源 ${clip(reference, 120)} 的类型暂不能作为受管素材，已保留原引用；课件中无法解析该引用，请内联内容或改用受支持媒体`, reference)
+    return { value: reference, changed: false }
+  }
   return {
-    value: placeholder(addResource(sink, bytes, mediaTypeForPath(key), { kind: 'relative', context, reference })) + (reference.match(/#[^?]*/)?.[0] ?? ''),
+    value: placeholder(addResource(sink, bytes, mediaType, { kind: 'relative', context, reference })) + (reference.match(/#[^?]*/)?.[0] ?? ''),
     changed: true,
   }
 }
@@ -422,6 +431,32 @@ function cssUrlUsage(css: string, at: number, propertyHint?: string): Usage {
   return 'unknown'
 }
 
+function importConditions(value: string): { layer?: string; supports?: string; media: string } | null {
+  let rest = value.replace(/\/\*[\s\S]*?\*\//g, '').trim()
+  const take = (name: string): string | null => {
+    const match = new RegExp(`^${name}\\s*\\(`, 'i').exec(rest)
+    if (!match) return null
+    let depth = 1, i = match[0].length
+    const start = i
+    for (; i < rest.length; i++) {
+      if (rest[i] === '"' || rest[i] === "'") {
+        const quote = rest[i++]
+        while (i < rest.length && rest[i] !== quote) i += rest[i] === '\\' ? 2 : 1
+      } else if (rest[i] === '(') depth++
+      else if (rest[i] === ')' && --depth === 0) break
+    }
+    if (depth !== 0) return null
+    const content = rest.slice(start, i).trim()
+    rest = rest.slice(i + 1).trim()
+    return content
+  }
+  let layer: string | undefined, supports: string | undefined
+  if (/^layer\s*\(/i.test(rest)) { const name = take('layer'); if (name === null) return null; layer = name }
+  else if (/^layer\b/i.test(rest)) { layer = ''; rest = rest.slice(5).trim() }
+  if (/^supports\s*\(/i.test(rest)) { const condition = take('supports'); if (condition === null) return null; supports = condition }
+  return { layer, supports, media: rest }
+}
+
 function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>, propertyHint?: string): string {
   const lower = folded(css)
   const parts: string[] = []
@@ -468,25 +503,27 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
     }
     if (lower.startsWith('@import', next)) {
       const match = /^@import\s+(?:url\(\s*(['"]?)([^)'"\s]+)\1\s*\)|(['"])([^'"]+)\3)\s*([^;]*);/i.exec(css.slice(next))
-      if (!match) { addDiagnostic(sink, 'error', 'unsupported-css-import', '无法解析 CSS @import'); i = next + 7; continue }
+      if (!match) { addDiagnostic(sink, 'warning', 'unsupported-css-import', '无法解析 CSS @import'); i = next + 7; continue }
       const reference = match[2] ?? match[4]
-      const media = match[5]?.trim() ?? ''
-      if (/^(?:layer(?:\s*\(|\b)|supports\s*\()/i.test(media.replace(/\/\*[\s\S]*?\*\//g, '').trim())) {
-        addDiagnostic(sink, 'error', 'unsupported-css-import', 'CSS @import 的 layer()/supports() 条件暂不支持', reference)
-        i = next + match[0].length
-        continue
-      }
+      const conditions = importConditions(match[5] ?? '')
       const key = resolveRelative(baseDir, reference)
       const bytes = key ? siblings.get(key) : undefined
       if (/^https?:|^\/\//i.test(reference)) sink.remoteReferences.push({ url: reference, context: 'css-url', usage: 'stylesheet' })
       else if (!key || !bytes) addDiagnostic(sink, 'error', 'missing-relative-resource', `找不到相对资源 ${clip(reference, 180)}`, key ?? reference)
-      else if (sink.cssStack.has(key)) addDiagnostic(sink, 'error', 'css-import-cycle', `CSS @import 循环: ${key}`, reference)
+      else if (sink.cssStack.has(key)) addDiagnostic(sink, 'warning', 'css-import-cycle', `CSS @import 循环: ${key}`, reference)
+      else if (!conditions) addDiagnostic(sink, 'warning', 'unsupported-css-import', 'CSS @import 条件无法解析，已保留原文；本地样式不能加载，请内联对应样式', reference)
       else {
         sink.cssStack.add(key)
-        const imported = rewriteCss(decodeText(bytes), directoryOf(key), sink, siblings)
+        let imported = rewriteCss(decodeText(bytes), directoryOf(key), sink, siblings)
         sink.cssStack.delete(key)
         changed = true
-        parts.push(css.slice(cursor, next), media ? `@media ${media}{${imported}}` : imported)
+        if (conditions.media) imported = `@media ${conditions.media}{${imported}}`
+        if (conditions.supports !== undefined) {
+          const condition = /^[\w-]+\s*:/.test(conditions.supports) ? `(${conditions.supports})` : conditions.supports
+          imported = `@supports ${condition}{${imported}}`
+        }
+        if (conditions.layer !== undefined) imported = `@layer${conditions.layer ? ' ' + conditions.layer : ''}{${imported}}`
+        parts.push(css.slice(cursor, next), imported)
         cursor = next + match[0].length
       }
       i = next + match[0].length
@@ -541,13 +578,13 @@ const modulepreloadShapes = new Set([
   '(function(){let e=document.createElement(`link`).relList;if(e&&e.supports&&e.supports(`modulepreload`))return;for(let e of document.querySelectorAll(`link[rel="modulepreload"]`))n(e);function n(e){if(e.ep)return;e.ep=!0;let n={credentials:`same-origin`};fetch(e.href,n)}})();',
 ].map(code => modulepreloadShape(((parse(code, { ecmaVersion: 'latest' }) as unknown as JavaScriptNode).body as JavaScriptNode[])[0].expression as JavaScriptNode)))
 
-function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>): string {
+function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>, scriptLabel = '脚本'): string {
   type Node = JavaScriptNode
   let root: Node
   try {
     root = parse(code, { ecmaVersion: 'latest', sourceType, allowHashBang: true }) as unknown as Node
   } catch (error) {
-    addDiagnostic(sink, 'error', 'script-parse', `脚本无法解析: ${String(error)}`)
+    addDiagnostic(sink, 'error', 'script-parse', `${scriptLabel} 无法解析: ${String(error)}；请修正该脚本的语法后重试`)
     return code
   }
   const inertPolyfills = new Set<Node>()
@@ -557,20 +594,28 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       && (expression.callee as Node).type === 'FunctionExpression' && modulepreloadShapes.has(modulepreloadShape(expression))) inertPolyfills.add(expression)
   }
   const closureProof = analyzeJavaScriptClosure(root, inertPolyfills)
-  if (closureProof.frameworkError) addDiagnostic(sink, 'error', 'unsupported-framework-resource-input', '无法证明框架入口及资源来源闭合')
+  if (closureProof.networkCalls.length) addDiagnostic(sink, 'warning', 'unsupported-network-sink', '脚本网络调用已保留；fetch/EventSource/WebSocket 仅可连接工程声明的精确 HTTPS/WSS 源，本地相对数据不会打包，远程脚本/模块/Worker 被 CSP 阻止；请内联本地数据或使用已声明的连接源')
+  const preserveScript = closureProof.frameworkError || closureProof.capabilityErrors.length > 0
+  const outputSink = sink
+  if (preserveScript) {
+    addDiagnostic(sink, 'warning', closureProof.frameworkError ? 'unsupported-framework-resource-input' : 'unsupported-dynamic-url-sink',
+      '无法静态证明该脚本的资源引用闭合，已原样保留；脚本里的本地文件引用不会被打包，请内联资源或改为可解析的静态媒体引用')
+    // Still diagnose explicit bad inputs using the existing traversal, but do not
+    // publish any resources or partial rewrites from an unproven script.
+    sink = createSink()
+  }
   const edits = new Map<string, { start: number; end: number; value: string }>()
   let conflictingEdits = false
   const addEdit = (edit: { start: number; end: number; value: string }) => {
     const key = `${edit.start}:${edit.end}`, previous = edits.get(key)
     if (previous && previous.value !== edit.value) {
       conflictingEdits = true
-      addDiagnostic(sink, 'error', 'conflicting-js-rewrite', '同一脚本值在不同资源上下文中需要不同改写')
+      addDiagnostic(sink, 'warning', 'conflicting-js-rewrite', '同一脚本值在不同资源上下文中需要不同改写')
       return
     }
     edits.set(key, edit)
   }
   const handled = new Set<Node>()
-  if (closureProof.capabilityErrors.length) addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', '资源能力存在无法证明闭合的引用或逃逸')
   const jsString = (value: string) => JSON.stringify(value).replace(/</g, '\\u003c')
   const staticString = (value: Node): string | null => {
     if (value.type === 'Literal' && typeof value.value === 'string') return value.value
@@ -664,7 +709,16 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
   const visit = (node: Node, ancestors: Node[] = []) => {
     if (handled.has(node)) return
     if (['ImportDeclaration', 'ExportAllDeclaration', 'ImportExpression'].includes(node.type) || (node.type === 'ExportNamedDeclaration' && node.source)) {
-      addDiagnostic(sink, 'error', 'unsupported-module-graph', '导入暂不支持模块依赖图')
+      const source = node.source as Node | undefined
+      const reference = source && staticString(source)
+      addDiagnostic(outputSink, 'warning', 'unsupported-module-graph', `模块依赖 ${reference ? clip(reference, 100) : '（动态引用）'} 已保留，但本地 import 引用在课件中无法解析，该页脚本不会运行；请把脚本合并为单文件。远程模块被 CSP 阻止，请内联模块`)
+      if (reference && /^(?:\.{1,2}\/|\/|[a-zA-Z][a-zA-Z0-9+.-]*:)/.test(reference)) {
+        // Reuse URL diagnostics without registering or rewriting module dependencies.
+        const diagnosticSink = createSink()
+        rewriteSingleUrl(reference, 'js-string', baseDir, diagnosticSink, siblings, false, 'script')
+        sink.diagnostics.push(...diagnosticSink.diagnostics.filter(item => item.level === 'error'))
+        sink.remoteReferences.push(...diagnosticSink.remoteReferences)
+      }
     }
     const memberName = (member: Node): string | null => closureProof.memberName(member) ?? null
     const literalValue = (value: Node): string | null => {
@@ -682,7 +736,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       const text = literalValue(value) ?? (value.type === 'Identifier' ? constants.get(String(value.name)) ?? null : null)
       if (text === null) {
         if (kind === 'html') preserveDynamicHtml(name)
-        else addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的资源内容`)
+        else addDiagnostic(sink, 'warning', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的资源内容`)
         return
       }
       const next = kind === 'css' ? rewriteCss(text, baseDir, sink, siblings, name) : transformHtml(text, sink, siblings, baseDir, true)
@@ -696,7 +750,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     }
     const urlSink = (value: Node, name: string, usage: Usage = 'unknown') => {
       const url = literalValue(value) ?? (value.type === 'Identifier' ? constants.get(String(value.name)) ?? null : null)
-      if (url === null) { addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的资源地址`); return }
+      if (url === null) { addDiagnostic(sink, 'warning', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的资源地址`); return }
       writeString(value, rewriteUrl(url, name, usage))
     }
     if (node === root) {
@@ -711,7 +765,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       for (const input of inputs) {
         if (input.proof.kind !== 'proven-resource') {
           if (input.kind === 'html') preserveDynamicHtml(input.name)
-          else addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${input.name} 的资源内容`)
+          else addDiagnostic(sink, 'warning', 'unsupported-dynamic-url-sink', `无法静态解析 ${input.name} 的资源内容`)
           continue
         }
         for (const literal of input.proof.literals) {
@@ -723,7 +777,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
           const target = targets.get(input.value) ?? { local: new Map<Node, string>(), transforms: [] }
           if (owned) {
             const previous = target.local.get(literal)
-            if (previous !== undefined && previous !== after) { conflictingEdits = true; addDiagnostic(sink, 'error', 'conflicting-js-rewrite', '同一资源使用位置需要不同改写') }
+            if (previous !== undefined && previous !== after) { conflictingEdits = true; addDiagnostic(sink, 'warning', 'conflicting-js-rewrite', '同一资源使用位置需要不同改写') }
             target.local.set(literal, after)
           } else target.transforms.push({ path: input.path, before, after })
           targets.set(input.value, target)
@@ -733,7 +787,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
         const values = new Map<string, string>()
         for (const item of transforms) {
           const previous = values.get(item.before)
-          if (previous !== undefined && previous !== item.after) { conflictingEdits = true; addDiagnostic(sink, 'error', 'conflicting-js-rewrite', '同一资源使用位置需要不同改写') }
+          if (previous !== undefined && previous !== item.after) { conflictingEdits = true; addDiagnostic(sink, 'warning', 'conflicting-js-rewrite', '同一资源使用位置需要不同改写') }
           values.set(item.before, item.after)
         }
         const branches = [...values].map(([before, after]) => `__cwField===${jsString(before)}?${jsString(after)}:`).join('')
@@ -756,15 +810,15 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       const name = memberName(left) ?? (left.computed && property?.type === 'Identifier' ? constants.get(String(property.name)) ?? null : null)
       const dataTarget = left.type === 'MemberExpression' && closureProof.dataReceiver(left.object as Node)
       if (left.type === 'MemberExpression' && left.computed && name === null && !dataTarget && !(property?.type === 'Literal' && typeof property.value === 'number'))
-        addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', '无法静态确定计算属性写入是否为资源入口')
+        addDiagnostic(sink, 'warning', 'unsupported-dynamic-url-sink', '无法静态确定计算属性写入是否为资源入口')
       if (!dataTarget && name && ['src', 'srcset', 'href', 'poster', 'data', 'action', 'formAction'].includes(name)) {
-        if (node.operator !== '=') addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的复合写入`)
+        if (node.operator !== '=') addDiagnostic(sink, 'warning', 'unsupported-dynamic-url-sink', `无法静态解析 ${name} 的复合写入`)
         else urlSink(right, name, targetUsage(left.object as Node | undefined, name))
       }
       const htmlTarget = !dataTarget && !!name && ['innerHTML', 'outerHTML', 'srcdoc'].includes(name)
       const cssTarget = !dataTarget && (name === 'cssText' || (left.type === 'MemberExpression' && closureProof.styleReceiver(left.object as Node) && !nonResourceStyle(name)))
       if (htmlTarget) embeddedSink(right, 'html', name!)
-      else if (cssTarget && node.operator !== '=') addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', '资源内容的复合写入无法静态解析')
+      else if (cssTarget && node.operator !== '=') addDiagnostic(sink, 'warning', 'unsupported-dynamic-url-sink', '资源内容的复合写入无法静态解析')
       else if (cssTarget) embeddedSink(right, 'css', name ?? 'style')
     }
     if (node.type === 'AssignmentExpression' && closureProof.auditedNode(node) && node.operator === '=') {
@@ -777,13 +831,13 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
       const name = callee?.type === 'Identifier' ? String(callee.name) : callee ? memberName(callee) : null
       if (name && ['fetch', 'importScripts', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'XMLHttpRequest', 'sendBeacon'].includes(name)) {
         const modulepreloadPolyfill = name === 'fetch' && ancestors.some(ancestor => inertPolyfills.has(ancestor))
-        if (!modulepreloadPolyfill) addDiagnostic(sink, 'error', 'unsupported-network-sink', `导入暂不支持脚本网络/动态加载: ${name}`)
+        if (!modulepreloadPolyfill) addDiagnostic(sink, 'warning', 'unsupported-network-sink', `脚本网络/动态调用保留原样执行: ${name}；本地相对数据不会打包，fetch/EventSource/WebSocket 仅允许工程声明的精确 HTTPS/WSS 源，远程脚本/模块/Worker 被 CSP 阻止；请内联数据或使用已声明源`)
       }
       if (node.type === 'NewExpression' && name === 'Audio' && (node.arguments as Node[])[0]) urlSink((node.arguments as Node[])[0], 'Audio', declarations.has('Audio') ? 'unknown' : 'media')
       if (name === 'setAttribute') {
         const args = node.arguments as Node[]
         const attribute = args[0] ? literalValue(args[0]) ?? (args[0].type === 'Identifier' ? constants.get(String(args[0].name)) ?? null : null) : null
-        if (!attribute && !closureProof.auditedNode(node)) addDiagnostic(sink, 'error', 'unsupported-dynamic-url-sink', '无法静态确定 setAttribute 的属性')
+        if (!attribute && !closureProof.auditedNode(node)) addDiagnostic(sink, 'warning', 'unsupported-dynamic-url-sink', '无法静态确定 setAttribute 的属性；保留原代码执行，运行时资源未静态收集')
         if (attribute && ['src', 'srcset', 'href', 'poster', 'data', 'action', 'formaction'].includes(attribute) && args[1]) urlSink(args[1], attribute, targetUsage(callee?.object as Node | undefined, attribute))
         if (attribute && (attribute === 'style' || CSS_RESOURCE_PROPERTIES.has(attribute)) && args[1]) embeddedSink(args[1], 'css', attribute)
         if (attribute === 'srcdoc' && args[1]) embeddedSink(args[1], 'html', attribute)
@@ -804,16 +858,21 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     }
   }
   visit(root)
+  if (preserveScript) {
+    outputSink.diagnostics.push(...sink.diagnostics.filter(item => item.level === 'error'))
+    outputSink.remoteReferences.push(...sink.remoteReferences)
+    return code
+  }
   if (edits.size === 0 || conflictingEdits) return code
   const ordered = [...edits.values()].sort((a, b) => b.start - a.start)
   if (ordered.some((edit, index) => index > 0 && edit.end > ordered[index - 1].start)) {
-    addDiagnostic(sink, 'error', 'conflicting-js-rewrite', '脚本资源改写区间重叠')
+    addDiagnostic(sink, 'warning', 'conflicting-js-rewrite', '脚本资源改写区间重叠')
     return code
   }
   let result = code
   for (const edit of ordered) result = result.slice(0, edit.start) + edit.value + result.slice(edit.end)
   try { parse(result, { ecmaVersion: 'latest', sourceType, allowHashBang: true }) } catch (error) {
-    addDiagnostic(sink, 'error', 'script-rewrite', `资源改写后脚本无法解析: ${String(error)}`)
+    addDiagnostic(sink, 'warning', 'script-rewrite', `资源改写后脚本无法解析: ${String(error)}`)
     return code
   }
   return result
@@ -968,6 +1027,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
   const parts: string[] = []
   let i = 0
   let mediaParent: string | null = null
+  let scriptNumber = 0
   while (i < html.length) {
     if (html.startsWith('<!--', i)) {
       const end = html.indexOf('-->', i + 4)
@@ -1003,10 +1063,12 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
     const tagStart = i
     const tag = parseStartTag(html, i)
     if (!tag) { parts.push(html[i]); i++; continue }
+    if (tag.attrs.some(attribute => /^(onload|onerror)$/i.test(attribute.name))) addDiagnostic(sink, 'warning', 'early-event-handler',
+      'onload/onerror 等加载期事件尽力绑定，个别时序可能漏触发；关键初始化请改用脚本内 addEventListener 或立即执行')
     if (['picture', 'audio', 'video'].includes(tag.name) && !tag.selfClosing) mediaParent = tag.name
-    if (embedded && (tag.name === 'script' || tag.attrs.some(attribute => /^on[a-z]/i.test(attribute.name)))) addDiagnostic(sink, 'error', 'unsupported-html-capability', '动态 HTML 中的脚本和内联事件暂不支持')
-    if (['base', 'iframe', 'object', 'embed'].includes(tag.name)) addDiagnostic(sink, 'error', 'unsupported-html-capability', `导入暂不支持 <${tag.name}>`)
-    if (tag.name === 'meta' && /refresh/i.test(attributeBy(tag.attrs, 'http-equiv')?.rawValue ?? '')) addDiagnostic(sink, 'error', 'unsupported-html-capability', '导入暂不支持 meta refresh')
+    if (embedded && (tag.name === 'script' || tag.attrs.some(attribute => /^on[a-z]/i.test(attribute.name)))) addDiagnostic(sink, 'warning', 'unsupported-html-capability', '动态 HTML 中的脚本和内联事件按原样保留，由宿主预览/Player 决定是否可执行')
+    if (['base', 'iframe', 'object', 'embed'].includes(tag.name)) addDiagnostic(sink, 'warning', 'unsupported-html-capability', `<${tag.name}> 已保留；预览与发布播放器的 CSP 阻止外部嵌入页面，请改为普通链接或内联内容`)
+    if (tag.name === 'meta' && /refresh/i.test(attributeBy(tag.attrs, 'http-equiv')?.rawValue ?? '')) addDiagnostic(sink, 'warning', 'unsupported-html-capability', 'meta refresh 已保留；宿主预览/Player 可能忽略自动跳转')
     if (RAW_TEXT.has(tag.name)) {
       const raw = readRaw(html, tag.end, tag.name)
       if (!raw.closed) addDiagnostic(sink, 'warning', 'unclosed-element', `未闭合的 <${tag.name}>`)
@@ -1028,7 +1090,24 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
       const stylesheet = relHas(tag.attrs, 'stylesheet')
       const modulepreload = relHas(tag.attrs, 'modulepreload')
       const managed = stylesheet || relHas(tag.attrs, 'icon') || relHas(tag.attrs, 'preload') || modulepreload
-      if (modulepreload) addDiagnostic(sink, 'error', 'unsupported-module-graph', '导入暂不支持 modulepreload 依赖图')
+      if (href?.hasValue && (modulepreload || relHas(tag.attrs, 'preload'))) {
+        const decoded = decodeEntities(href.rawValue).trim()
+        const data = /^data:/i.test(decoded) ? parseDataUri(decoded, 0, true) : null
+        const remoteMedia = /^https:|^\/\//i.test(decoded) && ['image', 'audio', 'video', 'font'].includes(attributeBy(tag.attrs, 'as')?.rawValue.toLowerCase() ?? '')
+        if (!managedMediaType(mediaTypeForPath(decoded)) && data?.kind !== 'media' && !remoteMedia) {
+          const key = resolveRelative(baseDir, decoded)
+          // Keep the existing bad-input diagnostics even when the performance hint is omitted.
+          if (!key || !siblings.has(key)) rewriteSingleUrl(decoded, 'html-attr', baseDir, sink, siblings, true, attributeUsage(tag, 'href', mediaParent))
+          addDiagnostic(sink, 'warning', 'resource-hint-omitted', `已移除非受管素材的加载提示 ${clip(decoded, 120)}；不影响页面正文，脚本或样式请内联`, decoded)
+          i = tag.end
+          continue
+        }
+        const result = rewriteSingleUrl(decoded, 'html-attr', baseDir, sink, siblings, true, attributeUsage(tag, 'href', mediaParent))
+        if (result.changed) { href.value = result.value; href.changed = true }
+        parts.push(tag.attrs.some(attribute => attribute.changed) ? rebuildStart(tag, tag.selfClosing) : html.slice(tagStart, tag.end))
+        i = tag.end
+        continue
+      }
       if (href?.hasValue && stylesheet && extensionOf(decodeEntities(href.rawValue)) === 'css') {
         const decoded = decodeEntities(href.rawValue).trim()
         const key = resolveRelative(baseDir, decoded)
@@ -1054,16 +1133,16 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
       continue
     }
     if (tag.name === 'script' && !tag.selfClosing) {
+      scriptNumber++
       const src = attributeBy(tag.attrs, 'src')
       const raw = readRaw(html, tag.end, 'script')
       if (!raw.closed) addDiagnostic(sink, 'warning', 'unclosed-element', '未闭合的 <script>')
       let body = raw.body
       let inlined = false
       if (src?.hasValue) {
-        if (attributeBy(tag.attrs, 'defer') || attributeBy(tag.attrs, 'async')) addDiagnostic(sink, 'error', 'script-order', '外部脚本 defer/async 顺序无法保持')
         const decoded = decodeEntities(src.rawValue).trim()
-        if (/^https?:|^\/\//i.test(decoded)) addDiagnostic(sink, 'error', 'remote-script', `远程脚本不可导入: ${clip(decoded, 180)}`, decoded)
-        if (/^data:/i.test(decoded)) addDiagnostic(sink, 'error', 'unsupported-script-source', 'data URI 脚本源暂不支持安全内联', clip(decoded))
+        if (/^https?:|^\/\//i.test(decoded)) addDiagnostic(sink, 'warning', 'remote-script', `远程脚本已保留: ${clip(decoded, 180)}；预览与发布播放器的 CSP 阻止远程脚本加载，请内联该库或改用本地脚本文件`, decoded)
+        if (/^data:/i.test(decoded)) addDiagnostic(sink, 'warning', 'unsupported-script-source', 'data URI 脚本源保留原文；不对其重写资源闭包', clip(decoded))
         const key = resolveRelative(baseDir, decoded)
         const bytes = key ? siblings.get(key) : undefined
         if (bytes && key && ['js', 'mjs'].includes(extensionOf(decoded))) {
@@ -1073,13 +1152,14 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
           const source = decodeText(bytes)
           body = neutralizeScriptClose(scriptKind === 'other'
             ? source
-            : rewriteJavaScript(source, scriptKind === 'module' ? 'module' : 'script', base, sink, siblings))
+            : rewriteJavaScript(source, scriptKind === 'module' ? 'module' : 'script', base, sink, siblings, `第 ${scriptNumber} 个 <script>（${key}）`))
           src.drop = true
+          if (scriptKind !== 'module' && attributeBy(tag.attrs, 'defer') && !attributeBy(tag.attrs, 'async')) tag.attrs.push({
+            name: 'data-cw-defer', rawName: 'data-cw-defer', hasValue: false, quote: '', rawValue: '', value: '', changed: true, drop: false,
+          })
           inlined = true
         } else if (bytes && key) {
-          addDiagnostic(sink, 'error', 'unsupported-script-source', `脚本文件类型无法内联: ${key}`, decoded)
-          src.value = placeholder(addResource(sink, bytes, mediaTypeForPath(key), { kind: 'relative', context: 'html-attr', reference: decoded }))
-          src.changed = true
+          addDiagnostic(sink, 'warning', 'unsupported-script-source', `脚本文件类型未内联: ${key}；保留外部引用`, decoded)
         } else if (!/^https?:|^\/\//i.test(decoded)) {
           const result = rewriteSingleUrl(decoded, 'html-attr', baseDir, sink, siblings, true, 'script')
           if (result.changed) { src.value = result.value.trim(); src.changed = true }
@@ -1089,7 +1169,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
         const baseKind = javascriptKind(attributeBy(tag.attrs, 'type')?.hasValue ? attributeBy(tag.attrs, 'type')!.rawValue : null)
         body = neutralizeScriptClose(baseKind === 'other'
           ? body
-          : rewriteJavaScript(body, baseKind === 'module' ? 'module' : 'script', baseDir, sink, siblings))
+          : rewriteJavaScript(body, baseKind === 'module' ? 'module' : 'script', baseDir, sink, siblings, `第 ${scriptNumber} 个 <script>`))
       }
       const start = tag.attrs.some(attribute => attribute.changed || attribute.drop) ? rebuildStart(tag, false) : html.slice(tagStart, tag.end)
       parts.push(start, body)

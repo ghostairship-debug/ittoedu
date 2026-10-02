@@ -21,6 +21,55 @@ const scriptBody = (html: string) => {
 }
 
 describe('extractHtmlResources', () => {
+  it.each([
+    'class Lesson{constructor(){this.x=1}}',
+    'const opts=document.querySelectorAll("button");for(let i=0;i<opts.length;i++){opts[i].onclick=()=>{opts[i].textContent="answered"}}',
+  ])('preserves the whole unproven script while still importing independent HTML media: %s', body => {
+    const code = `${body};document.querySelector('img').src=${JSON.stringify(dataUri(png, 'image/png'))};`
+    const result = extractHtmlResources({ html: `<img src="pic.png"><script>${code}</script>`, siblingFiles: files([['pic.png', png]]) })
+    expect(validateHtmlImport(result).filter(item => item.level === 'error')).toEqual([])
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({ level: 'warning', code: 'unsupported-dynamic-url-sink' }))
+    expect(scriptBody(result.html)).toBe(code)
+    expect(scriptBody(result.html)).not.toContain('cw-resource:')
+    expect(result.resources).toHaveLength(1)
+    expect(result.html).toContain('<img src="cw-resource:')
+  })
+
+  it('leaves a dynamic URL sink unchanged while localizing a proven static sink', () => {
+    const code = 'const img=document.querySelector("img");img.src="pic.png";function set(audio,u){audio.src=u}'
+    const result = extractHtmlResources({ html: `<script>${code}</script>`, siblingFiles: files([['pic.png', png]]) })
+    expect(validateHtmlImport(result).filter(item => item.level === 'error')).toEqual([])
+    expect(result.html).toContain('cw-resource:')
+    expect(result.html).toContain('audio.src=u')
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({ level: 'warning', code: 'unsupported-dynamic-url-sink' }))
+  })
+
+  it.each([
+    ['missing.png', 'missing-relative-resource'],
+    ['http://example.com/a.png', 'remote-https-required'],
+    ['file:///C:/a.png', 'unsupported-url-scheme'],
+    ['blob:https://example.com/a', 'unsupported-url-scheme'],
+  ])('keeps the explicit bad resource %s rejected inside an otherwise unproven script', (url, code) => {
+    const source = `class Lesson{constructor(){}};document.querySelector('img').src=${JSON.stringify(url)};`
+    const result = extractHtmlResources({ html: `<script>${source}</script>` })
+    expect(scriptBody(result.html)).toBe(source)
+    expect(result.resources).toEqual([])
+    expect(validateHtmlImport(result)).toContainEqual(expect.objectContaining({ level: 'error', code }))
+  })
+
+  it('drops script/style loading hints and keeps non-media references without creating unusable placeholders', () => {
+    const result = extractHtmlResources({ html: '<link rel="modulepreload" href="a.js"><link rel="preload" as="style" href="a.css"><link rel="preload" as="image" href="pic.png"><video><track src="a.vtt"></video>',
+      siblingFiles: files([['a.js', text('window.ready=true')], ['a.css', text('body{color:red}')], ['pic.png', png], ['a.vtt', text('WEBVTT')]]) })
+    expect(validateHtmlImport(result).filter(item => item.level === 'error')).toEqual([])
+    expect(result.html).not.toContain('modulepreload')
+    expect(result.html).not.toContain('as="style"')
+    expect(result.html).toContain('as="image" href="cw-resource:')
+    expect(result.html).toContain('<track src="a.vtt">')
+    expect(result.resources).toHaveLength(1)
+    expect(result.resources[0].mediaType).toBe('image/png')
+    expect(validateHtmlImport(extractHtmlResources({ html: '<link rel="preload" as="script" href="missing.js">' }))).toContainEqual(expect.objectContaining({ level: 'error', code: 'missing-relative-resource' }))
+  })
+
   it('extracts an image data URI from img and replaces it with a content hash', () => {
     const uri = dataUri(png, 'image/png')
     const result = extractHtmlResources({ html: `<img src="${uri}" alt="cat">` })
@@ -167,13 +216,14 @@ const ratio = 10 / 2;
     expect(() => new Function(scriptBody(result.html))).not.toThrow()
   })
 
-  it('preserves HTTPS image, audio and video links with exact media origins while rejecting remote scripts', () => {
+  it('preserves HTTPS image, audio and video links with exact media origins while preserving remote scripts as nonblocking warnings', () => {
     const result = extractHtmlResources({ html: '<img src="https://cdn.example.test/p?id=1"><audio src="https://cdn.example.test/a"></audio><video src="https://media.example.test/v" poster="https://cdn.example.test/p"></video><script src="https://cdn.example.test/app.js"></script>' })
     expect(result.html).toContain('https://media.example.test/v')
     expect(result.remoteReferences.map(reference => reference.usage)).toEqual(['image', 'media', 'media', 'image'])
     expect(collectRemoteMediaOrigins(result)).toEqual(['https://cdn.example.test', 'https://media.example.test'])
     const diagnostics = validateHtmlImport(result)
-    expect(diagnostics.filter(diagnostic => diagnostic.level === 'warning')).toHaveLength(4)
+    expect(diagnostics.filter(diagnostic => diagnostic.level === 'warning')).toHaveLength(5)
+    expect(diagnostics.filter(diagnostic => diagnostic.level === 'error')).toEqual([])
     expect(diagnostics.map(diagnostic => diagnostic.code)).toContain('remote-script')
   })
 

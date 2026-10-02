@@ -237,6 +237,8 @@ export interface ComponentAuthoringTargetUpdate {
   sceneId?: string
   nodeId: string
   targets: ReadonlyArray<Readonly<ComponentAuthoringTarget>>
+  /** Some automatic targets were omitted by the discovery limit. */
+  truncated?: boolean
 }
 
 export interface ComponentEditorHost {

@@ -13,6 +13,8 @@ export interface JavaScriptClosureProof {
   dataReceiver(node: JsNode): boolean
   memberName(node: JsNode): string | undefined
   capabilityErrors: JsNode[]
+  /** fetch/Worker/... 等"做网络副作用而不是闭包破坏"的调用点;以 warning 报告而非否决导入。 */
+  networkCalls: JsNode[]
   embeddedInputs: Array<{ value: JsNode; path: string[]; name: string; kind: 'css' | 'html'; proof: ClosureProof }>
   resourceInputs: Array<{ value: JsNode; name: string; usage: Usage; proof: ClosureProof }>
   exclusiveDefinitions: Array<{ value: JsNode; name: string; usage: Usage }>
@@ -410,6 +412,8 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
   // Capability references are allowed only at an analyzed operation or tracked alias.
   // Unknown calls, returns, containers, destructuring and bound methods fail closed.
   const capabilityErrors: JsNode[] = []
+  const networkCalls: JsNode[] = []
+  /** fetch 等网络调用以 warning 形式由 extractHtmlResources 报告,不再纳入"资源闭合"责任。 */
   const networks = new Set(['fetch', 'importScripts', 'WebSocket', 'EventSource', 'Worker', 'SharedWorker', 'XMLHttpRequest', 'sendBeacon'])
   const setters = new Set(['setAttribute', 'setProperty', 'insertRule', 'insertAdjacentHTML'])
   // Unknown bindings (especially parameters) are not local data. The finite
@@ -653,7 +657,8 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
       && !(indexedDomUse(node) && domCollection(node.object as JsNode))
       && !resourceInputs.some(input => input.value === node && input.proof.kind === 'proven-resource')
       && !((node.property as JsNode).type === 'Literal' && typeof (node.property as JsNode).value === 'number')) capabilityErrors.push(node)
-    if (name && (networks.has(name) || ['eval', 'Function', 'Reflect', 'constructor', 'getOwnPropertyDescriptor', 'getOwnPropertyDescriptors', '__lookupGetter__', '__lookupSetter__'].includes(name))) capabilityErrors.push(node)
+    if (name && networks.has(name)) networkCalls.push(node)
+    else if (name && ['eval', 'Function', 'Reflect', 'constructor', 'getOwnPropertyDescriptor', 'getOwnPropertyDescriptors', '__lookupGetter__', '__lookupSetter__'].includes(name)) capabilityErrors.push(node)
     if (node.type === 'MemberExpression' && setters.has(name ?? '') && !(parent.type === 'CallExpression' && parent.callee === node)) capabilityErrors.push(node)
     if (node.type === 'ObjectPattern' && (node.properties as JsNode[]).some(prop => prop.type === 'Property' && (prop.computed || keyOf(prop.key as JsNode) === 'style' || setters.has(keyOf(prop.key as JsNode) ?? '') || networks.has(keyOf(prop.key as JsNode) ?? '')))) capabilityErrors.push(node)
     if (!styleReceiver(node) || (node.type === 'Identifier' && !isReference(node))) continue
@@ -670,6 +675,7 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     definitionBackedUses,
     embeddedInputs,
     capabilityErrors,
+    networkCalls,
     styleReceiver,
     dataReceiver,
     memberName,

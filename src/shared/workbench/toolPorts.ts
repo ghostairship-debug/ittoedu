@@ -65,7 +65,7 @@ type HtmlImportPageReceipt = readonly { order: number; location: string; runtime
 
 export type HtmlImportReceipt =
   | { operationId: string; status: 'applied' | 'unchanged'; pages: HtmlImportPageReceipt; revision: number;
-      commit: Extract<DocumentOperationResult, { status: 'applied' | 'unchanged' }> }
+      commit: Extract<DocumentOperationResult, { status: 'applied' | 'unchanged' }>; warnings?: readonly { code: string; message: string }[] }
   | { operationId: string; status: 'rejected' | 'failed' | 'cancelled'; pages: HtmlImportPageReceipt; reason: string;
       revision?: never; commit?: never }
 

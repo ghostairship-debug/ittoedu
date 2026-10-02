@@ -9,6 +9,7 @@ type HtmlPreviewTargetReport = z.infer<typeof htmlPreviewTargetReportSchema>
 import type { HtmlPreviewEditContext, HtmlPreviewEditPort } from './HtmlPreviewService'
 import { escapeHtmlAttribute, escapeHtmlText, locateHtmlSourceTarget } from './htmlSourceLocator'
 import { prepareHtmlImage } from './htmlImagePreparation'
+import { replaceSrcsetUrls } from '../../../shared/html/responsiveImage'
 
 type ResolveRequest = Extract<HtmlPreviewRequest, { type: 'html-preview.resolve-target' }>
 type EditRequest = Extract<HtmlPreviewRequest, { type: 'html-preview.edit' }>
@@ -39,7 +40,7 @@ function attributeRemoval(source: string, tokenStart: number, tokenEnd: number, 
   return { from, to, text: '' }
 }
 
-function imageResponsiveRemovals(source: string, elementStart: number): Splice[] | null {
+function imageResponsiveEdits(source: string, elementStart: number, url: string, mimeType: string): Splice[] | null {
   const scan = scanHtmlSource(source)
   const index = indexHtmlElements(source, scan.tokens)
   const elementAt = index.elements.findIndex(element => element.startTag.start === elementStart)
@@ -53,11 +54,15 @@ function imageResponsiveRemovals(source: string, elementStart: number): Splice[]
     const token = scan.tokens.find(candidate => candidate.kind === 'start-tag' && candidate.span.start === node.startTag.start)
     if (!token) return null
     for (const attribute of token.attributes ?? []) {
-      if (attribute.name !== 'srcset' && attribute.name !== 'sizes') continue
+      if (node.name === 'source' && attribute.name === 'type' && attribute.decodedValue?.toLowerCase() !== mimeType.toLowerCase()) {
+        const removal = attributeRemoval(source, token.span.start, token.span.end, attribute.span.start, attribute.valueSpan?.end ?? attribute.span.end)
+        if (removal) edits.push(removal)
+        continue
+      }
+      if (attribute.name !== 'srcset') continue
       if (!attribute.valueSpan) return null
-      const removal = attributeRemoval(source, token.span.start, token.span.end, attribute.span.start, attribute.valueSpan.end)
-      if (!removal) return null
-      edits.push(removal)
+      edits.push({ from: attribute.valueSpan.start, to: attribute.valueSpan.end,
+        text: escapeHtmlAttribute(replaceSrcsetUrls(attribute.decodedValue ?? '', url), attribute.quote) })
     }
   }
   return edits
@@ -146,9 +151,9 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
           await removeUnreferencedPreparedImage(); return { status: 'rejected', reason: 'source-changed' }
         }
         replacement = escapeHtmlAttribute(patchValue, attribute?.quote ?? '"')
-        const removals = imageResponsiveRemovals(source, locator.elementSpan.start)
-        if (!removals) { await removeUnreferencedPreparedImage(); return { status: 'rejected', reason: 'not-editable' } }
-        edits = removals
+        const responsive = imageResponsiveEdits(source, locator.elementSpan.start, patchValue, request.change.mimeType)
+        if (!responsive) { await removeUnreferencedPreparedImage(); return { status: 'rejected', reason: 'not-editable' } }
+        edits = responsive
       }
       if (locator.valueSpan) edits.push({ from: locator.valueSpan.start, to: locator.valueSpan.end, text: replacement })
       else if (request.change.kind === 'image') {
@@ -173,7 +178,8 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
           : { status: 'rejected', reason: 'conflict' }
       }
       return { status: 'applied', revision: result.revision, savedRevision: null,
-        dirty: true, patch: { handle: request.target, kind: request.change.kind, value: patchValue } }
+        dirty: true, patch: { handle: request.target, kind: request.change.kind, value: patchValue,
+          ...(request.change.kind === 'image' && edits.length > 1 ? { rewroteResponsive: true } : {}) } }
     })
   }
 }

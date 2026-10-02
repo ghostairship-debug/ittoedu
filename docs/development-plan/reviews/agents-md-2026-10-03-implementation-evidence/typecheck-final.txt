@@ -1,0 +1,4 @@
+
+> ittoedu-courseware-editor@1.0.0 typecheck
+> tsc --noEmit && tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.e2e.json --noEmit
+

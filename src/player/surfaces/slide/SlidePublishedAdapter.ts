@@ -1268,17 +1268,22 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     this.#liveEdit = live
     this.#pausePublishedVideos()
     this.#carrierSideEffects.suspend()
-    const publishRuntimeTargets = (): void => publish({
-      kind: 'runtime',
-      update: Object.freeze({
-        revision: ++live.revision,
-        scope: 'scene' as const,
-        sceneId: scene.id,
-        targets: Object.freeze([...live.runtimeTargets.entries()]
-          .sort(([leftId, left], [rightId, right]) => left.order - right.order || leftId.localeCompare(rightId, 'en'))
-          .flatMap(([, entry]) => entry.update.targets)),
-      }),
-    })
+    const publishRuntimeTargets = (): void => {
+      const entries = [...live.runtimeTargets.entries()]
+        .sort(([leftId, left], [rightId, right]) => left.order - right.order || leftId.localeCompare(rightId, 'en'))
+      publish({
+        kind: 'runtime',
+        update: Object.freeze({
+          revision: ++live.revision,
+          scope: 'scene' as const,
+          sceneId: scene.id,
+          targets: Object.freeze(entries.flatMap(([, entry]) => entry.update.targets)),
+          truncatedItemIds: Object.freeze(entries
+            .filter(([, entry]) => entry.update.truncated)
+            .map(([itemId]) => itemId)),
+        }),
+      })
+    }
     for (const record of this.#renderedLayers.values()) {
       if (record.source !== 'scene' || !record.applicable || !record.item.visible) continue
       const itemId = record.item.layerItemId
@@ -1292,7 +1297,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
           onTargetsChanged: (update) => {
             if (this.#liveEdit !== live) return
             const mapped = mapRuntimeAuthoringTargetsToLayer(update, record.item, surface.canvas)
-            if (mapped.targets.length > 0) live.runtimeTargets.set(itemId, { order: record.item.order, update: mapped })
+            if (mapped.targets.length > 0 || mapped.truncated) live.runtimeTargets.set(itemId, { order: record.item.order, update: mapped })
             else live.runtimeTargets.delete(itemId)
             publishRuntimeTargets()
           },
@@ -1864,17 +1869,18 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   #publishAuthoringRuntimeTargets(sceneId: string): void {
     const publish = this.#authoring?.onRuntimeTargetsChanged
     if (!publish) return
+    const entries = [...this.#authoringRuntimeTargets.entries()]
+      .sort(([leftId, left], [rightId, right]) => (
+        left.order - right.order || leftId.localeCompare(rightId, 'en')
+      ))
     publish(Object.freeze({
       revision: ++this.#authoringRuntimeRevision,
       scope: 'scene' as const,
       sceneId,
-      targets: Object.freeze(
-        [...this.#authoringRuntimeTargets.entries()]
-          .sort(([leftId, left], [rightId, right]) => (
-            left.order - right.order || leftId.localeCompare(rightId, 'en')
-          ))
-          .flatMap(([, entry]) => entry.update.targets),
-      ),
+      targets: Object.freeze(entries.flatMap(([, entry]) => entry.update.targets)),
+      truncatedItemIds: Object.freeze(entries
+        .filter(([, entry]) => entry.update.truncated)
+        .map(([itemId]) => itemId)),
     }))
   }
 
@@ -2463,7 +2469,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
                         ) => {
                           if (!isCurrentMount()) return
                           const mapped = mapRuntimeAuthoringTargetsToLayer(update, nextItem, findSlideSurface(this.#payload, this.id).canvas)
-                          if (mapped.targets.length > 0) {
+                          if (mapped.targets.length > 0 || mapped.truncated) {
                             this.#authoringRuntimeTargets.set(nextItem.layerItemId, {
                               order: nextItem.order,
                               update: mapped,

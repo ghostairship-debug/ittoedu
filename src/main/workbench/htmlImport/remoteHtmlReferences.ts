@@ -22,10 +22,10 @@ export function remoteReferenceDiagnostic(reference: RemoteReference): ImportDia
     return { level: 'warning', code: 'remote-media-preserved',
       message: `已保留网络媒体 ${reference.url}；离线时可能无法使用`, reference: reference.url }
   }
-  return { level: 'error', code: reference.usage === 'script' ? 'remote-script'
+  return { level: 'warning', code: reference.usage === 'script' ? 'remote-script'
     : reference.usage === 'stylesheet' ? 'remote-stylesheet'
       : reference.usage === 'font' ? 'remote-font' : 'remote-resource',
-  message: `导入暂不支持远程${reference.usage === 'stylesheet' ? '样式' : reference.usage === 'font' ? '字体' : reference.usage === 'script' ? '脚本' : '资源加载方式'}: ${reference.url}`,
+  message: `远程${reference.usage === 'stylesheet' ? '样式表' : reference.usage === 'font' ? '字体' : reference.usage === 'script' ? '脚本' : '资源'}已保留: ${reference.url}；预览与发布播放器的 CSP 阻止加载，请内联该库/样式、改用本地字体文件或普通链接`,
   reference: reference.url }
 }
 

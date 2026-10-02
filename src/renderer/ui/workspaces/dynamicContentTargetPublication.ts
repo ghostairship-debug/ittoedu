@@ -11,6 +11,7 @@ export interface DynamicContentPublication {
   publicationSeq: number
   source: 'authoring' | 'live'
   targets: DynamicContentObservedTarget[]
+  truncatedItemIds?: readonly string[]
 }
 
 interface LayerFact {
@@ -28,7 +29,8 @@ export function collectDynamicContentTargets(input: {
   runtime: readonly Readonly<RuntimeAuthoringTarget>[]
   componentText: readonly Readonly<ComponentAuthoringTextTarget>[]
   componentImage: readonly Readonly<ComponentAuthoringImageTarget>[]
-}): DynamicContentObservedTarget[] {
+  truncatedItemIds?: readonly string[]
+}): { targets: DynamicContentObservedTarget[]; truncatedItemIds?: readonly string[] } {
   const layers = new Map(input.layers.filter(layer => layer.effectiveVisible)
     .map(layer => [layer.item.layerItemId, layer] as const))
   const belongs = (kind: 'runtime' | 'component', nodeId: string | undefined, scope: string, sceneId: string | undefined) => {
@@ -62,7 +64,11 @@ export function collectDynamicContentTargets(input: {
     add({ kind: 'component.image', source: 'auto', revision: input.revision, locationId: input.locationId,
       itemId: target.nodeId, assetKey: target.assetKey })
   }
-  return [...results.values()]
+  const truncatedItemIds = [...new Set(input.truncatedItemIds ?? [])].filter(itemId => {
+    const layer = layers.get(itemId)
+    return layer?.item.kind === 'runtime' || layer?.item.kind === 'component'
+  })
+  return { targets: [...results.values()], ...(truncatedItemIds.length ? { truncatedItemIds } : {}) }
 }
 
 type PublicationBody = Omit<DynamicContentPublication, 'publicationSeq'>
@@ -92,9 +98,9 @@ export class DynamicContentTargetPublisher {
 
   replace(value: PublicationBody): void {
     if (this.disposed) return
-    if (value.targets.length === 0) { this.clear(); return }
+    if (value.targets.length === 0 && !value.truncatedItemIds?.length) { this.clear(); return }
     const key = identityOf(value)
-    const signature = JSON.stringify(value.targets)
+    const signature = JSON.stringify([value.targets, value.truncatedItemIds ?? []])
     if (this.active && identityOf(this.active) !== key) this.clear()
     if (this.active && this.signature === signature) return
     this.active = value
@@ -107,7 +113,7 @@ export class DynamicContentTargetPublisher {
     const previous = this.active
     this.active = null
     this.signature = ''
-    this.enqueue({ ...previous, targets: [] })
+    this.enqueue({ ...previous, targets: [], truncatedItemIds: [] })
   }
 
   dispose(): void { this.clear(); this.disposed = true }

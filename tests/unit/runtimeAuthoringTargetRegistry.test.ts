@@ -210,4 +210,66 @@ describe('RuntimeAuthoringTargetRegistry', () => {
     await flushTargets()
     expect(onTargetsChanged).toHaveBeenCalledTimes(callsBeforeDestroy + 1)
   })
+
+  it('每层只在第 401 个合格自动目标出现时提示截断，目标不变也发布提示增减', async () => {
+    const underlay = document.createElement('div')
+    const overlay = document.createElement('div')
+    for (const root of [underlay, overlay]) {
+      vi.spyOn(root, 'getBoundingClientRect').mockReturnValue(rect(0, 0, 640, 360))
+    }
+    const addImage = (root: HTMLElement, src = 'https://assets.example/hero.png', width = 20) => {
+      const image = document.createElement('img')
+      image.src = src
+      vi.spyOn(image, 'getBoundingClientRect').mockReturnValue(rect(10, 10, width, 20))
+      root.append(image)
+      return image
+    }
+    for (const root of [underlay, overlay]) {
+      for (let index = 0; index < 400; index += 1) addImage(root)
+    }
+    const onTargetsChanged = vi.fn()
+    const registry = new RuntimeAuthoringTargetRegistry({
+      scope: 'scene',
+      sceneId: 'scene-one',
+      width: 640,
+      height: 360,
+      content: { values: { title: '声明文字' } },
+      assets: { hero: { assetId: 'asset-hero' } },
+      domRoots: { underlay, overlay },
+      lightEdit: {
+        assetKeyForUrl: (url) => url === 'https://assets.example/hero.png' ? 'hero' : undefined,
+      },
+      onTargetsChanged,
+    })
+    registry.register({
+      kind: 'text', key: 'title', layer: 'overlay',
+      getBounds: () => ({ x: 0, y: 0, width: 20, height: 20 }),
+    })
+    await flushTargets()
+    const first = onTargetsChanged.mock.calls.at(-1)![0]
+    expect(first.truncated).toBeUndefined()
+    expect(first.targets.filter((target: { source: string; layer: string }) => target.source === 'auto' && target.layer === 'underlay')).toHaveLength(400)
+    expect(first.targets.filter((target: { source: string; layer: string }) => target.source === 'auto' && target.layer === 'overlay')).toHaveLength(400)
+    expect(first.targets).toHaveLength(801)
+
+    addImage(overlay, 'https://assets.example/unknown.png')
+    addImage(overlay, undefined, 0)
+    await flushTargets()
+    expect(onTargetsChanged).toHaveBeenCalledOnce()
+
+    const extra = addImage(overlay)
+    await flushTargets()
+    expect(onTargetsChanged).toHaveBeenCalledTimes(2)
+    expect(onTargetsChanged.mock.calls.at(-1)![0]).toMatchObject({ revision: 2, truncated: true })
+    expect(onTargetsChanged.mock.calls.at(-1)![0].targets).toEqual(first.targets)
+
+    extra.remove()
+    await flushTargets()
+    expect(onTargetsChanged).toHaveBeenCalledTimes(3)
+    expect(onTargetsChanged.mock.calls.at(-1)![0].truncated).toBeUndefined()
+    expect(onTargetsChanged.mock.calls.at(-1)![0].targets).toEqual(first.targets)
+    registry.destroy()
+    expect(onTargetsChanged.mock.calls.at(-1)![0].targets).toEqual([])
+    expect(onTargetsChanged.mock.calls.at(-1)![0].truncated).toBeUndefined()
+  })
 })
