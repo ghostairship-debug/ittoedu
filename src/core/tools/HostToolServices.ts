@@ -4,7 +4,7 @@ import type { ToolDefinition, ToolResult, ToolTarget, ToolRunGrant } from '../..
 import type { ImageGenerationRequest, ImageJobSnapshot, ImageModelSelection } from '../../shared/workbench/images'
 import { buildToolCallSchema, type BuildCreateTicket, type BuildCreateLookup, type BuildImportArtifact, type BuildJobInput, type BuildJobSnapshot, type BuildToolCall } from '../../shared/workbench/build'
 import type { HostImageInput } from './imageResource'
-import type { AssetSourceRecord } from '../../shared/workbench/assetSources'
+import type { AssetSource } from '../../shared/contracts/media-v1'
 import type { ComputeArtifact, ComputeJobInput, ComputeJobSnapshot } from '../../shared/workbench/compute'
 import { DocumentRegistry } from '../documents/DocumentRegistry'
 import { documentDigest } from '../documents/documentDigest'
@@ -64,7 +64,7 @@ export interface HostToolServices {
     preview(input: { runId: string; images: readonly string[]; signal?: AbortSignal }): Promise<unknown>
     readPreview(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array }
     fetch(input: { runId: string; image: string; signal?: AbortSignal }): Promise<
-      | { status: 'ready'; file: HostImageInput; width: number; height: number; source: AssetSourceRecord }
+      | { status: 'ready'; file: HostImageInput; width: number; height: number; source: AssetSource }
       | { status: 'failed' | 'rejected'; reason: string }>
   }
   /** The existing component library, read-only. */

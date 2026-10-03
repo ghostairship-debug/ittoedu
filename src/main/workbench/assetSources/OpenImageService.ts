@@ -1,5 +1,5 @@
 import sharp from 'sharp'
-import type { AssetSourceRecord } from '../../../shared/workbench/assetSources'
+import type { AssetSource } from '../../../shared/contracts/media-v1'
 import type { HostImageInput } from '../../../core/tools/imageResource'
 import { type AssetHttpPort, type ImageSearchInput, type ImageSearchPage, type OpenImageCandidate, type OpenLibrary } from './assetSourceTypes'
 import { openLibrarySource } from './licensePolicy'
@@ -37,7 +37,7 @@ export type OpenImagePreviewResult =
   | { status: 'prepared'; previews: readonly OpenImagePreview[]; failures?: readonly { image: string; reason: string }[] }
   | { status: 'failed' | 'rejected'; reason: string; failures?: readonly { image: string; reason: string }[] }
 export type OpenImageFetchResult =
-  | { status: 'ready'; file: HostImageInput; width: number; height: number; source: AssetSourceRecord }
+  | { status: 'ready'; file: HostImageInput; width: number; height: number; source: AssetSource }
   | { status: 'failed' | 'rejected'; reason: string }
 
 type SearchLibrary = (http: AssetHttpPort, input: ImageSearchInput) => Promise<ImageSearchPage>
@@ -58,9 +58,7 @@ const reasonOf = (cause: unknown, fallback: string) => cause instanceof Error &&
 
 /** 下载内容统一核对与缩放：JPEG/PNG/WebP 且不超宽的原样保留，其余转为 PNG（有透明）或 JPEG。 */
 export async function normalizeImage(bytes: Uint8Array, maxWidth: number): Promise<{ bytes: Uint8Array; mimeType: string; width: number; height: number }> {
-  let metadata: sharp.Metadata
-  try { metadata = await sharp(bytes, { failOn: 'error' }).metadata() }
-  catch { throw new Error('下载内容不是可识别的图片') }
+  const metadata = await sharp(bytes, { failOn: 'error' }).metadata().catch(() => { throw new Error('下载内容不是可识别的图片') })
   const { format, width, height } = metadata
   if (!format || !width || !height) throw new Error('下载内容不是可识别的图片')
   if ((format === 'jpeg' || format === 'png' || format === 'webp') && width <= maxWidth && (metadata.pages ?? 1) === 1)

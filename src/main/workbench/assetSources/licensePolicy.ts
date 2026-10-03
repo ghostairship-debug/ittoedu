@@ -1,4 +1,4 @@
-import type { AssetSourceRecord } from '../../../shared/workbench/assetSources'
+import type { AssetSource } from '../../../shared/contracts/media-v1'
 
 /** 默认只采用 CC0、公有领域和 CC BY；CC BY-SA 须教师同意；NC、ND 与授权不明一律排除。 */
 export type OpenLicenseCode = 'cc0' | 'pd' | 'by' | 'by-sa'
@@ -88,7 +88,7 @@ export function attributionText(work: OpenLibraryWork): string {
 }
 
 /** 随图片保存的来源记录；CC0 与公有领域无需署名，不生成 attribution。 */
-export function openLibrarySource(work: OpenLibraryWork): AssetSourceRecord {
+export function openLibrarySource(work: OpenLibraryWork): AssetSource {
   return {
     kind: 'open-library',
     ...(work.title ? { title: work.title } : {}),
@@ -123,11 +123,11 @@ export function htmlText(value: unknown, max: number): string | undefined {
   return cleanText(text, max)
 }
 
-/** 只接受 http(s) 地址；协议相对地址补成 https。 */
+/** 只接受不含凭据的 http(s) 地址；协议相对地址补成 https。 */
 export function httpUrl(value: unknown): string | undefined {
   if (typeof value !== 'string' || !value.trim()) return undefined
   try {
     const url = new URL(value.startsWith('//') ? `https:${value}` : value)
-    return url.protocol === 'https:' || url.protocol === 'http:' ? url.href : undefined
+    return (url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password ? url.href : undefined
   } catch { return undefined }
 }

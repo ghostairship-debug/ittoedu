@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { AssetHttpError, type AssetHttpPort } from '../../src/main/workbench/assetSources/assetSourceTypes'
 import { commonsLicense, htmlText, openLibrarySource, openverseLicense } from '../../src/main/workbench/assetSources/licensePolicy'
 import { searchOpenverse } from '../../src/main/workbench/assetSources/openverse'
+import { assetSourceSchema } from '../../src/shared/contracts/media-v1'
 import { commonsRendition, searchCommons } from '../../src/main/workbench/assetSources/wikimediaCommons'
 
 const unused = async (): Promise<never> => { throw new Error('unexpected download') }
@@ -58,6 +59,10 @@ describe('license policy and attribution', () => {
     const source = openLibrarySource({ title: 'Winter solstice', sourceName: 'Flickr', pageUrl: 'https://www.flickr.com/photos/1/2', license: cc0 })
     expect(source).toEqual({ kind: 'open-library', title: 'Winter solstice', url: 'https://www.flickr.com/photos/1/2',
       license: { id: 'CC0 1.0', url: 'https://creativecommons.org/publicdomain/zero/1.0/' } })
+    // Both records are valid formal CourseAssetMeta.source values.
+    expect(assetSourceSchema.parse(source)).toEqual(source)
+    const byRecord = openLibrarySource({ title: 'T', author: 'A', sourceName: 'Flickr', pageUrl: 'https://www.flickr.com/photos/1/2', license: by })
+    expect(assetSourceSchema.parse(byRecord)).toEqual(byRecord)
     expect(htmlText('<a href="//commons.wikimedia.org/wiki/User:A" title="x">Hawes&amp;thoughts</a>‮<script>alert(1)</script>', 80)).toBe('Hawes&thoughts')
   })
 })
