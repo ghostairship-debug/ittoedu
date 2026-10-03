@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto'
 import sharp from 'sharp'
-import { UserFacingError } from '../../../shared/errors'
 import type { DocumentModel, DocumentSnapshot } from '../../../shared/workbench/document'
 import { courseProjectDocumentSchema } from '../../../shared/courseProjectSchema'
 import { createHtmlDocumentRuntimeSource } from '../../../shared/runtime/htmlDocumentSource'
@@ -21,6 +20,10 @@ import type { LayerItem } from '../../../shared/courseProjectTypes'
 import { walkComposition } from '../../../shared/composition/content'
 import type { CourseRuntimeDefinition } from '../../../shared/courseProjectTypes'
 import { effectiveSceneCanvas } from '../../../shared/slideCanvas'
+import type { CourseComponentDefinition } from '../../../shared/courseProjectTypes'
+import { courseComponentNameIssue } from '../../../shared/composition/projectReferences'
+import { findCourseComponentName, uniqueCourseComponentName } from '../../../core/course/courseComponents'
+import { normalizeCourseProjectInPlace } from '../../../core/course/normalizeCourseProject'
 
 type CourseModel = Extract<DocumentModel, { kind: 'course-v9' }>
 export interface HtmlImportTarget { documentId: string; epoch: string; baseRevision: number; projectId: string; locationId: string; surfaceId: string; anchorBlockId?: string }
@@ -71,15 +74,9 @@ export async function prepareHtmlCourseCandidate(input: {
     ...(input.sourceHtml !== undefined ? { sourceHtml: input.sourceHtml } : {}),
   })
   signal?.throwIfAborted()
-  const diagnostics = validateHtmlImport(closure)
-  const errors = diagnostics.filter(item => item.level === 'error')
-  if (errors.length) {
-    const grouped = new Map<string, string[]>()
-    for (const error of errors) grouped.set(error.code, [...(grouped.get(error.code) ?? []), error.message])
-    const messages = [...grouped].slice(0, 10).map(([code, entries]) =>
-      `[${code}] ${[...new Set(entries)].slice(0, 10).join('；')}（共 ${entries.length} 处）`)
-    throw new UserFacingError('HTML 导入失败', messages.join('\n'), '请修正列出的脚本语法或资源地址后重试。')
-  }
+  // Usable content enters the course: unresolved references stay as placeholders and
+  // script or address problems are reported, never a reason to refuse the whole page.
+  const diagnostics = validateHtmlImport(closure).map(item => item.level === 'error' ? { ...item, level: 'warning' as const } : item)
   const networkOrigins = collectRemoteMediaOrigins(closure)
   const project = structuredClone(snapshot.model.project)
   if (networkOrigins.length) project.network = {
@@ -99,6 +96,37 @@ export async function prepareHtmlCourseCandidate(input: {
     assets[resource.key] = { assetId: id }
   }
 
+  let fallbackBytes: Buffer | undefined
+  const prepareFallback = async (runtime: CourseRuntimeDefinition, identity: string, coverage: 'scene' | 'surface') => {
+    const fallbackId = `runtime-capture-${identity.replace(/[^A-Za-z0-9_-]/g, '-')}`
+    fallbackBytes ??= await sharp({ create: { width: 1, height: 1, channels: 4, background: '#ffffff' } }).png().toBuffer()
+    const fallback = await prepareImageResource({ bytes: fallbackBytes, mimeType: 'image/png', filename: `${fallbackId}.png` }, () => fallbackId)
+    project.assets[fallbackId] = { ...fallback.meta, id: fallbackId, path: `assets/${fallbackId}.png` }
+    resources.assets[fallbackId] = fallback.bytes
+    runtime.staticFallback = { assetId: fallbackId, coverage }
+  }
+  /** An independent iframe document becomes a named component; an identical one is reused. */
+  const embedComponent = (runtime: CourseRuntimeDefinition, hint: string): string => {
+    const definition: CourseComponentDefinition = { protocol: runtime.protocol, runtimeApiVersion: runtime.runtimeApiVersion, enabled: runtime.enabled,
+      renderMode: runtime.renderMode, source: runtime.source, content: { values: {} }, assets: runtime.assets }
+    const same = Object.entries(project.components ?? {}).find(([, value]) => JSON.stringify(value) === JSON.stringify(definition))
+    if (same) return same[0]
+    const name = findCourseComponentName(project, hint) === undefined && !courseComponentNameIssue(hint) ? hint : uniqueCourseComponentName(project, hint)
+    ;(project.components ??= {})[name] = definition
+    return name
+  }
+  const imported: LayerItem[] = []
+  /** Components and asset slots of the imported pages resolve like any later change; copies get a capture placeholder. */
+  const finishImportedItems = async () => {
+    normalizeCourseProjectInPlace(project)
+    for (const item of imported) {
+      if (item.kind !== 'composition') continue
+      const nested: { id: string; runtime: CourseRuntimeDefinition }[] = []
+      walkComposition(item.content.root, node => { if (node.kind === 'runtime' && !node.runtime.staticFallback) nested.push(node) })
+      for (const node of nested) await prepareFallback(node.runtime, node.id, 'surface')
+    }
+  }
+
   /** Both import routes use the same carrier choice; ordinary DOM needs no Runtime capture. */
   const prepareCarrier = async (page: {
     html: string; label: string; identitySeed: string; frame: LayerItem['frame']; layerItems: readonly LayerItem[]
@@ -112,7 +140,7 @@ export async function prepareHtmlCourseCandidate(input: {
       return { protocol: 'surface-runtime', runtimeApiVersion: 3, enabled: true, renderMode: 'dom',
         source, content: { values: {} }, assets: Object.fromEntries(keys.map(key => [key, assets[key]!])) }
     }
-    const parsed = parseWebComposition({ html: page.html, assets: bindings, createEmbeddedRuntime: runtimeForHtml })
+    const parsed = parseWebComposition({ html: page.html, assets: bindings, embedComponent: (html, hint) => embedComponent(runtimeForHtml(html), hint) })
     diagnostics.push(...parsed.diagnostics)
     const programRuntime = parsed.kind === 'program' ? runtimeForHtml(parsed.html) : undefined
     const instanceId = `html_${createHash('sha256').update(`${page.identitySeed}:${programRuntime?.source ?? page.html}`).digest('hex').slice(0, 24)}`
@@ -123,20 +151,10 @@ export async function prepareHtmlCourseCandidate(input: {
       visible: true, locked: false, rotation: 0, opacity: 1,
       hitPolicy: 'auto' as const, playbackInitialVisibility: 'inherit' as const,
     }
-    let fallbackBytes: Buffer | undefined
-    const prepareFallback = async (runtime: CourseRuntimeDefinition, identity: string, coverage: 'scene' | 'surface') => {
-      const fallbackId = `runtime-capture-${identity}`
-      fallbackBytes ??= await sharp({ create: { width: 1, height: 1, channels: 4, background: '#ffffff' } }).png().toBuffer()
-      const fallback = await prepareImageResource({ bytes: fallbackBytes, mimeType: 'image/png', filename: `${fallbackId}.png` }, () => fallbackId)
-      project.assets[fallbackId] = { ...fallback.meta, id: fallbackId, path: `assets/${fallbackId}.png` }
-      resources.assets[fallbackId] = fallback.bytes
-      runtime.staticFallback = { assetId: fallbackId, coverage }
-    }
     if (parsed.kind === 'composition') {
-      const nested: { id: string; runtime: CourseRuntimeDefinition }[] = []
-      walkComposition(parsed.composition.root, node => { if (node.kind === 'runtime') nested.push(node) })
-      for (const node of nested) await prepareFallback(node.runtime, node.id, 'surface')
-      return { ...base, kind: 'composition', content: parsed.composition }
+      const item: LayerItem = { ...base, kind: 'composition', content: parsed.composition }
+      imported.push(item)
+      return item
     }
     await prepareFallback(programRuntime!, instanceId, 'scene')
     return { ...base, kind: 'runtime', runtime: programRuntime! }
@@ -233,6 +251,7 @@ export async function prepareHtmlCourseCandidate(input: {
       pages.push({ order: i, location: targetLocationId, runtimeId: item.layerItemId })
     }
 
+    await finishImportedItems()
     const model: CourseModel = { kind: 'course-v9', project: courseProjectDocumentSchema.parse(project), resources }
     validateCourseProjectArchiveData({ project: model.project, assetFiles: model.resources.assets, componentFiles: model.resources.components })
     signal?.throwIfAborted()
@@ -276,6 +295,7 @@ export async function prepareHtmlCourseCandidate(input: {
     targetSurface.surfaceLayerItems.push({ item: { ...item, paperSpace: 'paper' }, visibility: { mode: 'all', locationIds: [] },
       bodyPlane: 'overlay', paragraphAnchor: { blockId: destination.anchorBlockId, offsetY: 0, xRatio: 0 } })
   }
+  await finishImportedItems()
   const model: CourseModel = { kind: 'course-v9', project: courseProjectDocumentSchema.parse(project), resources }
   validateCourseProjectArchiveData({ project: model.project, assetFiles: model.resources.assets, componentFiles: model.resources.components })
   signal?.throwIfAborted()

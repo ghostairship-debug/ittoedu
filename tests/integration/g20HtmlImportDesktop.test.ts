@@ -28,6 +28,7 @@ async function fixture(admissionStatus: 'ready' | 'rejected' = 'ready', kind: 's
       if (call.name === 'build.create') return { kind: 'read', data: { job: 'job' } }
       if (call.name === 'build.write') return { kind: 'read', data: {} }
       if (call.name === 'build.check') return { kind: 'read', data: { status: admissionStatus, artifact: 'artifact' } }
+      if (call.name === 'build.logs') return { kind: 'read', data: { entries: [{ level: 'error', message: '准入宿主拒绝' }] } }
       if (call.name === 'build.import') return { kind: 'document-operation', result: receipt }
       throw new Error(`Unexpected tool: ${call.name}`)
     }),
@@ -48,7 +49,8 @@ describe('M17 human HTML desktop import', () => {
     expect(f.gateway.beginRun).toHaveBeenCalledWith({ runId: result?.runId, actor: 'human',
       documents: [{ documentId: 'doc', writable: [{ kind: 'document' }] }] })
     expect(f.gateway.issueTarget).toHaveBeenCalledWith(result?.runId, 'doc', { kind: 'document' })
-    expect(f.gateway.execute.mock.calls.map(call => call[2].name)).toEqual(['build.create', 'build.write', 'build.write', 'build.check', 'build.import'])
+    // A page without scripts is editable content: only the project is written, no capture placeholder.
+    expect(f.gateway.execute.mock.calls.map(call => call[2].name)).toEqual(['build.create', 'build.write', 'build.check', 'build.import'])
     expect(f.gateway.stop).toHaveBeenCalledWith(result?.runId)
   })
 
@@ -105,12 +107,12 @@ describe('M17 human HTML desktop import', () => {
     const location = flow.input.locationId
     const result = await flow.service.import({ ...flow.input, anchorBlockId: location })
     expect(result?.receipt.status).toBe('applied')
-    expect(flow.gateway.execute.mock.calls.map(call => call[2].name)).toEqual(['build.create', 'build.write', 'build.write', 'build.check', 'build.import'])
+    expect(flow.gateway.execute.mock.calls.map(call => call[2].name)).toEqual(['build.create', 'build.write', 'build.check', 'build.import'])
   })
 
   it('stops the human run after an S13 admission failure without importing', async () => {
     const f = await fixture('rejected')
-    await expect(f.service.import(f.input)).rejects.toThrow('未通过受控构建')
+    await expect(f.service.import(f.input)).rejects.toThrow(/未通过受控构建[\s\S]*准入宿主拒绝/)
     expect(f.gateway.execute.mock.calls.some(call => call[2].name === 'build.import')).toBe(false)
     expect(f.gateway.stop).toHaveBeenCalledOnce()
   })

@@ -3,6 +3,7 @@ import { publishedCourseV2Schema } from '../shared/publishedCourseSchema'
 import type { PublishedCourseV2Payload } from '../shared/publishedCourseTypes'
 import { attachPublishedCoursePresenter, type PublishedCoursePresenter } from './publishedCoursePresenter'
 import { assertParsedPublishedCourseV2 } from './surfaces/CoursePlayer'
+import { mountPublishedCredits } from './surfaces/publishedCredits'
 import {
   createPublishedCourseSession,
   type PublishedCourseSession,
@@ -128,6 +129,9 @@ async function mountPublishedCourseEntry(
     return
   }
   activePresenter = attachPublishedCoursePresenter(root, session, payload)
+  const disposeCredits = mountPublishedCredits(root, payload.credits)
+  const destroy = session.destroy.bind(session)
+  session.destroy = () => { disposeCredits(); return destroy() }
 }
 
 function abandonActiveEntry(): void {

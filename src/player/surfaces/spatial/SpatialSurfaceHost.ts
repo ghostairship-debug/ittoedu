@@ -91,6 +91,8 @@ import {
 } from '../publishedCapture'
 import type { SurfaceCapture, SurfaceCaptureRequest } from '../SurfaceHost'
 import { mountWebComposition, type WebCompositionMountHandle } from '../../composition/mountWebComposition'
+import { applyThemeVariables } from '../../composition/compositionHostDocument'
+import { courseThemeStyleText, courseThemeVariables } from '../../../shared/contracts/design-v1/theme'
 import { createPublishedSurfaceRuntimeSession } from '../runtime/publishedSurfaceRuntimeMount'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
@@ -739,6 +741,7 @@ export class SpatialSurfaceHost {
     root.dataset.worldBoundsMode = this.#session.input.surface.world.bounds.mode
     root.tabIndex = 0
     root.hidden = !this.#active
+    if (this.#session.input.courseTheme) applyThemeVariables(root, courseThemeVariables(this.#session.input.courseTheme.designTokens))
     root.setAttribute('role', 'region')
     root.setAttribute('aria-label', `${this.#session.input.surface.title} 空间探索`)
     const effectiveBg = resolveEffectiveBackground({
@@ -1486,11 +1489,13 @@ export class SpatialSurfaceHost {
       if (viewport) wrapper.dataset.playbackBounds = 'true'
       Object.assign(wrapper.style, { position: 'absolute', boxSizing: 'border-box', overflow: 'hidden', transformOrigin: 'center center' })
       const mount = () => {
+        const courseTheme = this.#session.input.courseTheme
         const handle = mountWebComposition(wrapper, {
           instanceId: item.layerItemId,
           content: item.content,
           width: item.frame.width,
           height: item.frame.height,
+          ...(courseTheme ? { theme: courseThemeStyleText(courseTheme, this.#resolveAsset) } : {}),
           mode: this.#options.staticCapture ? 'capture' : 'playback',
           visible: this.#active || this.#options.staticCapture === true,
           resolveAsset: this.#resolveAsset,

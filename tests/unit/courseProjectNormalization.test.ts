@@ -119,7 +119,7 @@ describe('Course project normalization', () => {
     expect(restoredCopy.runtime.content.overrides).toEqual([{ original: 'A', region: 'r', text: 'B' }])
 
     project = normalizeCourseProject(renameCourseComponent(project, '公转模拟', '地球公转'))
-    expect(frame(project).iframe.attributes.src).toBe(`../components/${encodeURI('地球公转')}.html`)
+    expect(frame(project).iframe.attributes.src).toBe('../components/地球公转.html')
     expect(Object.keys(project.components!)).toEqual(['地球公转'])
     expect(frame(project).iframe.children).toHaveLength(1)
 
@@ -205,6 +205,50 @@ describe('Course project normalization', () => {
     delete undefinedComponent.components
     ;(frame(undefinedComponent).iframe.children[0] as Extract<Node, { kind: 'runtime' }>).runtime.source = 'x'
     expect(() => driver.apply(model, { type: 'course.replace', project: undefinedComponent })).toThrow(/没有定义/)
+  })
+
+  it('takes the definition of a component that a pasted page brings into a course without it', () => {
+    const driver = new CourseV9Driver()
+    const project = normalizeCourseProject(createBlankCourseProject({ id: 'c4', now: '2026-10-04T00:00:00.000Z', includeDefaultController: false, controls: 'none' }))
+    const model = { kind: 'course-v9' as const, project: courseProjectDocumentSchema.parse(project), resources: { assets: {}, components: {} } }
+    const pasted = structuredClone(model.project)
+    const item = { ...page(), order: 5 }
+    const visit = (node: Node): void => {
+      if (node.kind === 'element' && node.id === 'frame') node.children = [{ id: 'copy', kind: 'runtime', runtime: { ...definition(), content: { values: {} } } }]
+      if (node.kind === 'element') node.children.forEach(visit)
+    }
+    visit(item.content.root)
+    ;(pasted.surfaces[0] as SlideSurfaceDocument).scenes[0]!.layerItems.push(item)
+    const next = driver.apply(model, { type: 'course.replace', project: pasted }) as typeof model
+    expect(next.project.components).toEqual({ 公转模拟: definition() })
+  })
+
+  it('gives a pasted component a free name when the course has a different one of that name', () => {
+    const driver = new CourseV9Driver()
+    let project = normalizeCourseProject(createBlankCourseProject({ id: 'c5', now: '2026-10-04T00:00:00.000Z', includeDefaultController: false, controls: 'none' }))
+    ;(project.surfaces[0] as SlideSurfaceDocument).scenes[0]!.layerItems.push({ ...page(), order: 5 })
+    project = normalizeCourseProject(setCourseComponent(project, '公转模拟', definition()))
+    const model = { kind: 'course-v9' as const, project: courseProjectDocumentSchema.parse(project), resources: { assets: {}, components: {} } }
+    const pasted = structuredClone(model.project)
+    const other = definition('CoursewareRuntime.define({ create() { return { destroy() {} } } }) // other course')
+    const third = definition('CoursewareRuntime.define({ create() { return { destroy() {} } } }) // third course')
+    const paste = (layerItemId: string, order: number, value: CourseComponentDefinition) => {
+      const item = { ...page(), layerItemId, order }
+      const visit = (node: Node): void => {
+        if (node.kind === 'element' && node.id === 'frame') node.children = [{ id: 'copy', kind: 'runtime', runtime: { ...value } }]
+        if (node.kind === 'element') node.children.forEach(visit)
+      }
+      visit(item.content.root)
+      ;(pasted.surfaces[0] as SlideSurfaceDocument).scenes[0]!.layerItems.push(item)
+    }
+    paste('pasted-a', 6, other)
+    paste('pasted-b', 7, other)
+    paste('pasted-c', 8, third)
+    const next = driver.apply(model, { type: 'course.replace', project: pasted }) as typeof model
+    expect(next.project.components).toEqual({ 公转模拟: definition(), '公转模拟 2': other, '公转模拟 3': third })
+    const sources = scene(next.project).layerItems.map(item => JSON.stringify(item).match(/components\/([^"]+)\.html/)?.[1])
+    expect(sources).toEqual(['公转模拟', '公转模拟 2', '公转模拟 2', '公转模拟 3'])
+    expect(JSON.stringify(scene(next.project).layerItems[0])).toContain(definition().source)
   })
 
   it('normalizes every committed change through the driver', () => {

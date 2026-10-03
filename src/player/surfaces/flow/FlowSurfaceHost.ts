@@ -107,6 +107,8 @@ import {
 } from '../publishedCourseState'
 import { capturePublishedSurfacePng } from '../publishedCapture'
 import { mountWebComposition, type WebCompositionMountHandle } from '../../composition/mountWebComposition'
+import { applyThemeVariables } from '../../composition/compositionHostDocument'
+import { courseThemeStyleText, courseThemeVariables } from '../../../shared/contracts/design-v1/theme'
 
 type FlowRuntimeFailurePhase = 'register' | 'create' | 'lifecycle' | 'destroy'
 
@@ -388,6 +390,7 @@ export class FlowSurfaceHost {
       root.style.minHeight = '0'
       root.style.overflow = 'hidden'
       root.style.setProperty('--flow-toc-inset', '0px')
+      if (this.#playback.designTokens) applyThemeVariables(root, courseThemeVariables(this.#playback.designTokens))
       root.hidden = !this.#active
 
       const globalUnderlay = createFlowRuntimePlane(dom, 'global-underlay', 0)
@@ -1174,6 +1177,8 @@ export class FlowSurfaceHost {
             content: item.content,
             width: item.frame.width,
             height: item.frame.height,
+            ...(this.#playback.designTokens ? { theme: courseThemeStyleText({ designTokens: this.#playback.designTokens, theme: this.#playback.theme },
+              assetId => resolvePlaybackAssetUrl(this.#playback, assetId, this.#options.resolveAsset)) } : {}),
             mode: 'playback',
             visible: this.#active,
             resolveAsset: assetId => resolvePlaybackAssetUrl(this.#playback, assetId, this.#options.resolveAsset),

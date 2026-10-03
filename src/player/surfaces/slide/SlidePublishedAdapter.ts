@@ -1,6 +1,9 @@
 import type { TeacherControllerAction } from '../../../shared/teacherControllerConfig'
 import { effectiveSceneCanvas, mapSlideFrame, sameSlideCanvas, sharedSlideFrameMapping, unmapSlideFrame } from '../../../shared/slideCanvas'
 import { mountWebComposition, type WebCompositionMountHandle, type CompositionBounds } from '../../composition/mountWebComposition'
+import { applyThemeVariables } from '../../composition/compositionHostDocument'
+import { courseThemeStyleText, courseThemeVariables } from '../../../shared/contracts/design-v1/theme'
+import { compositionStateNodeAttributes, withCompositionNodeAttributes } from '../../../shared/composition/stateNodes'
 import type { PlaybackNavigationViewPort } from '../../navigation/coursePlaybackSequence'
 import { TeacherControllerComponentHost } from '../../teacherControllerComponentHost'
 import { controllerHostInput, isControllerItem, type PublishedTeacherControllerItem } from '../../teacherControllerComponentGeometry'
@@ -200,17 +203,30 @@ function resolveSlideLocation(
   throw new Error(`找不到 Slide 位置：${locationId}`)
 }
 
-/** Exact-state Published adapter; initial-state selection remains in navigation. */
+/** Exact-state Published adapter; initial-state selection remains in navigation.
+ * Composition items carry the node states of the selected state (in-page steps, explicit node states). */
 export function composePublishedSlideLocation(input: {
   readonly payload: PublishedCourseV2Payload
   readonly locationId: string
   readonly stateId: string | null
 }): CourseLayerComposition<PublishedLayerItem> {
-  return composePublishedCourseLocation({
+  const composition = composePublishedCourseLocation({
     course: input.payload,
     locationId: input.locationId,
     stateId: input.stateId,
   })
+  const surface = input.payload.surfaces.find(candidate => candidate.id === composition.surfaceId)
+  const scene = surface?.type === 'slide' ? surface.scenes.find(candidate => candidate.id === composition.sceneId) : undefined
+  if (!scene) return composition
+  const state = input.stateId === null ? undefined : scene.presentation?.states.find(candidate => candidate.id === input.stateId)
+  const attributes = compositionStateNodeAttributes(scene, state)
+  if (!attributes.size) return composition
+  return {
+    ...composition,
+    entries: composition.entries.map(entry => entry.source === 'scene' && entry.item.kind === 'composition' && attributes.has(entry.item.layerItemId)
+      ? { ...entry, item: { ...entry.item, content: withCompositionNodeAttributes(entry.item.content, attributes.get(entry.item.layerItemId)) } }
+      : entry),
+  }
 }
 
 export type PublishedSlideLayerSource = 'scene' | 'surface' | 'global'
@@ -778,6 +794,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     string,
     Readonly<{ order: number; update: RuntimeAuthoringTargetUpdate }>
   >()
+  #themeStyle: string | undefined
 
   constructor(
     payload: PublishedCourseV2Payload,
@@ -1280,6 +1297,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     root.dataset.canvasHeight = String(canvas.height)
     root.style.overflow = 'hidden'
     root.style.transformOrigin = '0 0'
+    applyThemeVariables(root, courseThemeVariables(this.#payload.designTokens))
     if (this.#authoring || this.#staticCapture) {
       root.inert = true
       root.style.pointerEvents = 'none'
@@ -1615,10 +1633,45 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     }
     this.#invalidateInteractions()
     this.#interactionPort?.resetLocalVisibility()
+    // Replaying the same state renders it again; only a change of state can update in place.
+    const inPlace = locationId === this.#locationId && presentationStateId !== this.#presentationStateId
+      && this.#applyStateInPlace(location.id, presentationStateId)
     this.#locationId = locationId
     this.#presentationStateId = presentationStateId
-    this.#render()
+    if (!inPlace) this.#render()
     this.#restoreInteractionsIfActive()
+  }
+
+  /**
+   * A state change that only changes node states of compositions (in-page steps,
+   * shown answers) updates the mounted documents, so revealed nodes fade in and
+   * running components keep their state. Anything else renders the page again.
+   */
+  #applyStateInPlace(locationId: string, stateId: string | undefined): boolean {
+    if (this.#authoring || !this.#root) return false
+    const current = composePublishedSlideLocation({ payload: this.#payload, locationId, stateId: this.#presentationStateId ?? null })
+    const next = composePublishedSlideLocation({ payload: this.#payload, locationId, stateId: stateId ?? null })
+    if (JSON.stringify(current.background) !== JSON.stringify(next.background) || current.entries.length !== next.entries.length) return false
+    const updates: Array<{ record: SlideRenderedLayerRecord; item: PublishedCompositionLayerItem }> = []
+    for (const [index, entry] of next.entries.entries()) {
+      const before = current.entries[index]!
+      if (before.item.layerItemId !== entry.item.layerItemId || before.source !== entry.source || before.mounted !== entry.mounted
+        || before.applicable !== entry.applicable || before.stackOrder !== entry.stackOrder) return false
+      if (JSON.stringify(before.item) === JSON.stringify(entry.item)) continue
+      const record = this.#renderedLayers.get(renderedLayerKey(entry.source as SlideRenderedLayerSource, entry.item.layerItemId))
+      if (entry.item.kind !== 'composition' || before.item.kind !== 'composition' || !record?.compositionHandle
+        || JSON.stringify({ ...before.item, content: null }) !== JSON.stringify({ ...entry.item, content: null })) return false
+      updates.push({ record, item: entry.item })
+    }
+    for (const { record, item } of updates) {
+      record.item = item
+      void record.compositionHandle!.update(item.content).catch(error => this.#services?.reportDiagnostic?.({
+        surfaceId: this.id, phase: 'mount', severity: 'error', message: error instanceof Error ? error.message : String(error), cause: error,
+      }))
+    }
+    if (stateId) this.#root.dataset.presentationStateId = stateId
+    else delete this.#root.dataset.presentationStateId
+    return true
   }
 
   async destroy(): Promise<void> {
@@ -2476,6 +2529,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
           mountComposition: (compositionWrap, item) => {
             const handle = mountWebComposition(compositionWrap, {
               instanceId: item.layerItemId, content: item.content, width: item.frame.width, height: item.frame.height,
+              theme: this.#themeStyle ??= courseThemeStyleText(this.#payload, this.#resolveAsset),
               mode: this.#authoring ? 'authoring' : this.#staticCapture ? 'capture' : 'playback',
               visible: this.#active || this.#authoring !== null || this.#staticCapture,
               resolveAsset: this.#resolveAsset, session: this.#runtimeSession, sceneId: scene.id,

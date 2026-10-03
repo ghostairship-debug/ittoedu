@@ -12,6 +12,8 @@ import type {
   PublishedFlowSurface,
 } from '../../../shared/publishedCourseTypes'
 import { serializeFormulaAst } from '../../../shared/formulaLinear'
+import type { PublishedCourseCredit } from '../../../shared/publishedCourseTypes'
+import { courseCreditLine } from './courseCredits'
 import { flowRichTextSegments } from '../../../player/surfaces/flow/flowModel'
 import {
   buildFlowPrintPlan,
@@ -41,6 +43,15 @@ export interface FlowDocxOptions extends BuildFlowPrintPlanOptions, BuildFlowDoc
   resolveAsset?: (assetId: string) => FlowDocxAsset | undefined
   author?: string
   createdAt?: Date
+  /** Attributed assets: a closing "素材来源" section. Course payloads supply their own. */
+  credits?: readonly PublishedCourseCredit[]
+}
+
+/** Attribution travels with the document as its closing section. */
+function creditsSection(credits: readonly PublishedCourseCredit[] | undefined): string {
+  if (!credits?.length) return ''
+  return paragraph('素材来源', { style: 'Heading2', keepNext: true })
+    + credits.map((credit, index) => paragraph(`${index + 1}. ${courseCreditLine(credit)}`)).join('')
 }
 
 export interface FlowDocxBlockReportItem {
@@ -691,7 +702,7 @@ export function buildFlowDocxFromPlan(
     context.warnings.push(detail)
     context.report.push({ disposition: 'omitted', detail })
   }
-  const body = plan.nodes.map((node) => renderPrintNode(node, context)).join('')
+  const body = plan.nodes.map((node) => renderPrintNode(node, context)).join('') + creditsSection(options.credits)
   const page = pageSizeTwips(plan.pageSize)
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><w:body>${body}<w:sectPr><w:pgSz w:w="${page.width}" w:h="${page.height}"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`
   const createdAt = isoDate(options.createdAt ?? new Date('1980-01-01T00:00:00.000Z'))
@@ -849,7 +860,7 @@ export function buildFlowDocxFromProjection(
   const bgHex = projection.backgroundColor ? wordColor(projection.backgroundColor) : null
   const bgXml = bgHex && bgHex !== 'FFFFFF' ? `<w:background w:color="${bgHex}"/>` : ''
 
-  const body = bodyParts.join('')
+  const body = bodyParts.join('') + creditsSection(options.credits)
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">${bgXml}<w:body>${body}<w:sectPr>${headerRefXml}${footerRefXml}<w:pgSz w:w="${page.width}" w:h="${page.height}"/><w:pgMar w:top="${projection.pageBox.marginTwips}" w:right="${projection.pageBox.marginTwips}" w:bottom="${projection.pageBox.marginTwips}" w:left="${projection.pageBox.marginTwips}" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`
 
   const createdAt = isoDate(options.createdAt ?? new Date('1980-01-01T00:00:00.000Z'))
@@ -960,7 +971,7 @@ export function buildFlowDocx(
     const targetSurfaceId = targetSurfaceIdOrOptions
     const opts = options ?? {}
     const projection = buildFlowDocxProjection(payload, targetSurfaceId, opts)
-    return buildFlowDocxFromProjection(projection, opts)
+    return buildFlowDocxFromProjection(projection, { ...opts, credits: opts.credits ?? payload.credits })
   }
 
   const surface = payloadOrSurface as PublishedFlowSurface
