@@ -12,7 +12,7 @@ import { mountPublishedComponent, type PublishedComponentMountHandle, type Publi
 import { paintCompositionDocument, type CompositionDocumentComponent } from './documentContent'
 import type { PublishedInputDescriptor } from '../interactions/PublishedInteractionSurfacePort'
 import { bindPublishedNativeInputSubmit } from './nativeInput'
-import { componentReferenceName, assetReferencePath, resolveCssAssetReferences } from '../../shared/composition/projectReferences'
+import { componentReferenceName, projectReferencePath, resolveCssAssetReferences } from '../../shared/composition/projectReferences'
 import {
   compositionHostStyleText,
   HOST_NODE_ATTRIBUTE,
@@ -146,18 +146,19 @@ export function mountWebComposition(parent: HTMLElement, options: WebComposition
   /** Attributes as rendered: bound asset slots resolved; unfilled images and component frames show placeholders. */
   const renderedAttributes = (content: Extract<ContentNode, { kind: 'element' }>, embedded: boolean): Record<string, string> => {
     const tag = content.tagName.toLowerCase()
-    const component = tag === 'iframe' && content.attributes.src !== undefined ? componentReferenceName(content.attributes.src) : null
+    const src = content.attributes.src
+    // A project file is never fetched by URL: a component is mounted under the frame, otherwise a placeholder shows.
+    const projectFrame = tag === 'iframe' && src !== undefined && projectReferencePath(src) !== null
     const result: Record<string, string> = {}
     for (const [key, value] of Object.entries(content.attributes)) {
-      if (component && key.toLowerCase() === 'src') continue
+      if (projectFrame && key.toLowerCase() === 'src') continue
       result[key] = resolveCompositionAttribute(key, resolveUrl(value), current.assets, options.resolveAsset)
     }
-    if (component && !embedded) {
-      result.srcdoc = placeholderDocument('待填组件', content.attributes.title || component)
+    if (projectFrame && !embedded) {
+      result.srcdoc = placeholderDocument('待填组件', content.attributes.title || componentReferenceName(src!) || src!)
       result[PENDING_ATTRIBUTE] = 'component'
     }
-    const src = content.attributes.src
-    if (tag === 'img' && src !== undefined && assetReferencePath(src) && result.src === src) {
+    if (tag === 'img' && src !== undefined && projectReferencePath(src) && result.src === src) {
       result.src = pendingImageUrl(content.attributes.alt)
       result[PENDING_ATTRIBUTE] = 'asset'
       if (content.attributes.alt && result.title === undefined) result.title = content.attributes.alt

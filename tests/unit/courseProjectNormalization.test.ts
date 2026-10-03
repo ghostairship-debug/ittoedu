@@ -119,7 +119,7 @@ describe('Course project normalization', () => {
     expect(restoredCopy.runtime.content.overrides).toEqual([{ original: 'A', region: 'r', text: 'B' }])
 
     project = normalizeCourseProject(renameCourseComponent(project, '公转模拟', '地球公转'))
-    expect(frame(project).iframe.attributes.src).toBe(`../components/${encodeURI('地球公转')}.html`)
+    expect(frame(project).iframe.attributes.src).toBe('../components/地球公转.html')
     expect(Object.keys(project.components!)).toEqual(['地球公转'])
     expect(frame(project).iframe.children).toHaveLength(1)
 

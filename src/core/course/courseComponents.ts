@@ -110,7 +110,7 @@ export function renameCourseComponent(project: CourseProjectDocument, from: stri
     const path = end < 0 ? src : src.slice(0, end)
     const slash = path.lastIndexOf('/')
     const extension = /\.html?$/i.exec(path)?.[0] ?? '.html'
-    node.attributes.src = `${path.slice(0, slash + 1)}${encodeURI(to)}${extension}${end < 0 ? '' : src.slice(end)}`
+    node.attributes.src = `${path.slice(0, slash + 1)}${to}${extension}${end < 0 ? '' : src.slice(end)}`
   })
   return next
 }

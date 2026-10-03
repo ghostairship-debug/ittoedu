@@ -76,8 +76,9 @@ it('creates nested Runtime from ordinary local iframe HTML, admits it, edits sta
       if (node.kind === 'element' && node.tagName === 'main') mainId = node.id
       if (node.kind === 'element' && node.tagName === 'iframe') {
         iframeId = node.id
-        expect(node.attributes).toMatchObject({ id: 'experiment', title: '独立实验' })
-        expect(node.attributes.src ?? node.attributes.srcdoc).toBeUndefined()
+        // The independent document became the named component `experiment`; the frame refers to it.
+        expect(node.attributes).toMatchObject({ id: 'experiment', title: '独立实验', src: '../components/experiment.html' })
+        expect(node.attributes.srcdoc).toBeUndefined()
         expect(node.children).toHaveLength(1)
       }
       if (node.kind === 'runtime') {
@@ -223,14 +224,14 @@ it('keeps a shared shell program whole and runs its inlined srcdoc child without
 
 it('uses an ordinary srcdoc boundary but preserves explicit parent access and sandbox semantics through the whole carrier', () => {
   let created = 0
-  const createEmbeddedRuntime = (html: string) => { created++; return { html } }
+  const createEmbeddedRuntime = () => { created++; return '实验' }
   const independent = '<iframe srcdoc="&lt;button onclick=&quot;this.textContent=\'观察\'&quot;&gt;揭示&lt;/button&gt;" title="实验"></iframe>'
-  expect(parseWebComposition({ html: independent, createEmbeddedRuntime }).kind).toBe('composition')
+  expect(parseWebComposition({ html: independent, embedComponent: createEmbeddedRuntime }).kind).toBe('composition')
   expect(created).toBe(1)
   const localNames = '<iframe srcdoc="&lt;script&gt;const top=4;function label(parent){return parent+top}window.result=label(2);&lt;/script&gt;"></iframe>'
-  expect(parseWebComposition({ html: localNames, createEmbeddedRuntime }).kind).toBe('composition')
+  expect(parseWebComposition({ html: localNames, embedComponent: createEmbeddedRuntime }).kind).toBe('composition')
   const dependent = '<iframe srcdoc="&lt;button onclick=&quot;this.textContent=parent.document.title&quot;&gt;揭示&lt;/button&gt;"></iframe>'
-  expect(parseWebComposition({ html: dependent, createEmbeddedRuntime }).kind).toBe('program')
-  expect(parseWebComposition({ html: independent.replace('<iframe ', '<iframe sandbox '), createEmbeddedRuntime }).kind).toBe('program')
+  expect(parseWebComposition({ html: dependent, embedComponent: createEmbeddedRuntime }).kind).toBe('program')
+  expect(parseWebComposition({ html: independent.replace('<iframe ', '<iframe sandbox '), embedComponent: createEmbeddedRuntime }).kind).toBe('program')
   expect(created).toBe(2)
 })

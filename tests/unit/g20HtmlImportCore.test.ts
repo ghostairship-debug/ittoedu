@@ -54,7 +54,8 @@ describe('extractHtmlResources', () => {
     const result = extractHtmlResources({ html: `<script>${source}</script>` })
     expect(scriptBody(result.html)).toBe(source)
     expect(result.resources).toEqual([])
-    expect(validateHtmlImport(result)).toContainEqual(expect.objectContaining({ level: 'error', code }))
+    // A missing local file stays as a placeholder reference; addresses that can never load stay errors of the source.
+    expect(validateHtmlImport(result)).toContainEqual(expect.objectContaining({ level: code === 'missing-relative-resource' ? 'warning' : 'error', code }))
   })
 
   it('drops script/style loading hints and keeps non-media references without creating unusable placeholders', () => {
@@ -67,7 +68,7 @@ describe('extractHtmlResources', () => {
     expect(result.html).toContain('<track src="a.vtt">')
     expect(result.resources).toHaveLength(1)
     expect(result.resources[0].mediaType).toBe('image/png')
-    expect(validateHtmlImport(extractHtmlResources({ html: '<link rel="preload" as="script" href="missing.js">' }))).toContainEqual(expect.objectContaining({ level: 'error', code: 'missing-relative-resource' }))
+    expect(validateHtmlImport(extractHtmlResources({ html: '<link rel="preload" as="script" href="missing.js">' }))).toContainEqual(expect.objectContaining({ level: 'warning', code: 'missing-relative-resource' }))
   })
 
   it('extracts an image data URI from img and replaces it with a content hash', () => {
@@ -163,7 +164,7 @@ const ratio = 10 / 2;
     expect(result.html).toContain(`poster="cw-resource:${sha256(png)}"`)
     expect(result.html).toContain('src="missing.png"')
     expect(result.html).toContain('href="page.html"')
-    expect(result.diagnostics).toEqual([expect.objectContaining({ level: 'error', code: 'missing-relative-resource', reference: 'missing.png' })])
+    expect(result.diagnostics).toEqual([expect.objectContaining({ level: 'warning', code: 'missing-relative-resource', reference: 'missing.png' })])
   })
 
   it('inlines sibling js and css and resolves nested urls from each file', () => {
