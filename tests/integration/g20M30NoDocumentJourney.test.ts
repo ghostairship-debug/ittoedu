@@ -107,7 +107,7 @@ it('M30 T1 fixture: a no-document product run reads data, delivers four real fil
         kind: string; data: { text: string; version: string }
       }
       expect(htmlRead).toMatchObject({ kind: 'read', data: { text: originalHtml } })
-      sse(response, 't1-patch-html', { tool_calls: [call(0, 't1-patch-html', wire('用 file.read 回执的 version', '按 file.read 的版本'), {
+      sse(response, 't1-patch-html', { tool_calls: [call(0, 't1-patch-html', wire('按唯一 oldText'), {
         path: 'report.html', expectedVersion: htmlRead.data.version,
         oldText: '<h1>销售报告</h1>', newText: '<h1>两个月销售报告</h1>',
       })] }, 'tool_calls')
