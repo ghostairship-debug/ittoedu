@@ -1078,6 +1078,7 @@ export class DocumentToolGateway implements ToolGateway {
       if (call.name === 'image.search') return this.hostTools.imageSearch(runId, value as { query: string; limit?: number; page?: number; allowShareAlike?: boolean })
       if (call.name === 'image.preview') return this.hostTools.imagePreview(runId, value as { images: string[] })
       if (call.name === 'image.fetch') return this.hostTools.imageFetch(runId, value as { image: string; target: string })
+      if (call.name === 'asset.search') return this.hostTools.assetSearch(runId, value as { query: string; limit?: number })
     }
     if (call.name === 'view.observe') return this.hostTools.observePage({ runId, operationId,
       resolveTarget: async handle => {

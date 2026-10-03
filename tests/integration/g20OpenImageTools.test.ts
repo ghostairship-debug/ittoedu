@@ -30,7 +30,8 @@ async function harness() {
   const gateway = new DocumentToolGateway(registry, [driver], () => `${++id}`, { prepareImage: prepareImageResource, services: {
     beginRun: async grant => openImages.beginRun(grant.runId), stopRun: runId => openImages.stopRun(runId),
     openImages: { search: input => openImages.search(input), preview: input => openImages.preview(input),
-      readPreview: (runId, resourceId) => openImages.readPreview(runId, resourceId), fetch: input => openImages.fetch(input) } } })
+      readPreview: (runId, resourceId) => openImages.readPreview(runId, resourceId), fetch: input => openImages.fetch(input) },
+    assetLibrary: { search: async input => ({ status: 'results', query: input.query, candidates: [], libraryComponents: 4 }) } } })
   const baseline = fixture(), session = await registry.create(baseline, 'open-images.h5lesson')
   const begin = async (runId: string, permission: 'workspace' | 'read-only') => {
     await gateway.beginRun({ runId, actor: 'agent', documents: [{ documentId: session.documentId, writable: permission === 'read-only' ? [] : [{ kind: 'document' }] }],
@@ -71,6 +72,8 @@ it('keeps candidates per run and refuses downloads in a read-only run', async ()
   const h = await harness()
   const target = await h.begin('reader', 'read-only')
   expect(data(await h.gateway.execute('reader', 'search', { name: 'image.search', input: { query: 'maple' } }))).toMatchObject({ status: 'results' })
+  expect(data(await h.gateway.execute('reader', 'assets', { name: 'asset.search', input: { query: '公转' } })))
+    .toEqual({ status: 'results', query: '公转', candidates: [], libraryComponents: 4 })
   expect(await h.gateway.execute('reader', 'fetch', { name: 'image.fetch', input: { image: 'img1', target } }))
     .toMatchObject({ kind: 'error', message: expect.stringContaining('只读') })
   const writer = await h.begin('writer', 'workspace')

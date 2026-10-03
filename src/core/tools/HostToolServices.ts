@@ -67,6 +67,8 @@ export interface HostToolServices {
       | { status: 'ready'; file: HostImageInput; width: number; height: number; source: AssetSourceRecord }
       | { status: 'failed' | 'rejected'; reason: string }>
   }
+  /** The existing component library, read-only. */
+  assetLibrary?: { search(input: { runId: string; query: string; limit?: number }): Promise<unknown> }
   /** Freeze role/connection selections before the run can issue any service operation. */
   beginRun?(grant: ToolRunGrant): Promise<void>
   stopRun?(runId: string): Promise<void> | void
@@ -375,6 +377,11 @@ export class HostToolCoordinator {
     const resource = await this.authority.provideImage(runId, snapshot.documentId, fetched.file)
     return { kind: 'read', data: { status: 'ready', resource, mimeType: fetched.file.mimeType, width: fetched.width, height: fetched.height,
       byteLength: fetched.file.bytes.byteLength, source: fetched.source } }
+  }
+  async assetSearch(runId: string, input: { query: string; limit?: number }): Promise<ToolResult> {
+    this.builtInRun(runId)
+    return this.services.assetLibrary ? { kind: 'read', data: await this.services.assetLibrary.search({ runId, ...input }) }
+      : this.serviceUnavailable('资产库检索服务尚未配置')
   }
   /** The caller proves sourceRunId belongs to its durable continuation lineage. */
   reissueImageForContinuation(currentRunId: string, sourceDocumentId: string, destinationDocumentId: string,

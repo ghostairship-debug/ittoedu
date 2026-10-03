@@ -198,7 +198,7 @@ const baselineTools = new Set(['read', 'inspect', 'listChildren', 'content.targe
   'course.createFromHtml',
   'image.generate', 'image.edit', 'image.status',
   'web.search', 'web.open', 'mcp.discover', 'mcp.invoke', 'mcp.resource', 'media.discover',
-  'image.search', 'image.preview', 'image.fetch'])
+  'image.search', 'image.preview', 'image.fetch', 'asset.search'])
 export function familyOfTool(name: string): ToolFamily | null {
   if (baselineTools.has(name) || name === 'batch') return null
   if (name.startsWith('job.') || name.startsWith('compute.') || name.startsWith('delegate.')) return 'jobs'
