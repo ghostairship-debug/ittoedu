@@ -98,7 +98,9 @@ it('S05-T02 reuses one product connection selection for three turns and switches
   expect(runs.map(run => run.input.selectionSource?.profileRevision)).toEqual([1, 1, 1])
   expect(received).toEqual(Array(3).fill(null).map(() => ({ path: '/primary/v1/chat/completions', authorization: 'Bearer fixture-key-A', model: 'fixture-model' })))
 
-  const retained = await settings.saveConnection({ id: first.connection.id, expectedRevision: 1, connection: config })
+  // An unchanged save keeps revision 1; a changed setting on the same account and address is a new revision with the same credential.
+  expect((await settings.saveConnection({ id: first.connection.id, expectedRevision: 1, connection: config })).connection.revision).toBe(1)
+  const retained = await settings.saveConnection({ id: first.connection.id, expectedRevision: 1, connection: { ...config, billing: { kind: 'token-plan' } } })
   expect(retained.hasCredential).toBe(true)
   const retainedRun = await sendTurn('同账户同地址更新配置后继续使用')
   expect(retainedRun.input.selection.connection).toMatchObject({ id: first.connection.id, revision: 2,
