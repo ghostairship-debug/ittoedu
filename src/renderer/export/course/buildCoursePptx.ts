@@ -1,4 +1,5 @@
 import { APP_COMPANY, APP_NAME } from '../../../shared/constants'
+import { courseCreditLine } from './courseCredits'
 import { omitTeacherControllerFromStaticExport } from '../../../shared/teacherControllerRole'
 import { applyPptxShapeExtensions, type PptxShapeExtensions } from '../pptxShapeGeometry'
 import type PptxGenJS from 'pptxgenjs'
@@ -966,6 +967,16 @@ export async function buildCoursePptx(
       message: '未能生成任何 PPTX 页面。',
     })
     return { bytes: new Uint8Array(), slideCount: 0, pages, warnings, report }
+  }
+
+  // Attribution travels with the file: a closing "素材来源" slide.
+  if (published.credits?.length) {
+    const credits = pptx.addSlide()
+    const width = outputCanvas.width / 96 - 1
+    credits.addText('素材来源', { x: 0.5, y: 0.3, w: width, h: 0.6, fontSize: 24, bold: true, fontFace: 'Microsoft YaHei' })
+    credits.addText(published.credits.map(credit => ({ text: courseCreditLine(credit), options: { bullet: true, breakLine: true } })),
+      { x: 0.5, y: 1.0, w: width, h: outputCanvas.height / 96 - 1.4, fontSize: 12, valign: 'top', fontFace: 'Microsoft YaHei' })
+    slideCount += 1
   }
 
   const output = await pptx.write({ outputType: 'arraybuffer', compression: true })
