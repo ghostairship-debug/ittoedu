@@ -2022,7 +2022,8 @@ export class ExecutionEngine {
           else if (event.type === 'response.failed') {
             finishRequest(requestId, event.failure.outcome)
             request.state = 'failed'
-            request.failure = active.stopped
+            // A local adapter failure that sent nothing stays not-sent even after stop.
+            request.failure = active.stopped && event.failure.outcome !== 'not-sent'
               ? { outcome: 'unknown', kind: 'aborted', code: 'stopped-in-flight', message: '已停止等待模型；上游请求结果未知，未自动重发' }
               : event.failure
             await this.checkpoint(record); break
