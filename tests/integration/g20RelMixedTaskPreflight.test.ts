@@ -36,7 +36,10 @@ it('REL-T11 zero-cost preflight creates a V9 file from a document-free run and e
     const tools = request.tools?.map(tool => tool.name) ?? []
     if (turn === 1) {
       expect(tools).toContain('file.create')
-      expect(tools).not.toContain('tools.load')
+      // Before a document exists only the workspace office family can be loaded; course families come with the file.
+      const load = request.tools?.find(tool => tool.name === 'tools.load')
+      expect(load?.description).toContain('office')
+      expect(load?.description).not.toContain('navigation')
       yield complete(request, turn, 'file.create', { name: path.basename(filePath), kind: 'course-v9' }); return
     }
     const latest = [...request.messages].reverse().find(message => message.role === 'tool')

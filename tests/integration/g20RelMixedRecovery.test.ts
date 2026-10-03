@@ -129,7 +129,7 @@ describe('REL-T11 recovery evidence', () => {
         const run = { schemaVersion: 1, runId, version: 1, status: index === 2 ? 'failed' : 'partial',
           ...(index ? { continuedFrom: `run-${index - 1}` } : {}), createdAt: 1000 + index, updatedAt: 2000 + index,
           input: { taskId: submissionId, conversationId: 'conversation', workspaceRoot: workspacePath,
-            instruction: 'same task', selection: { model: 'deepseek-flash', connection: { id: 'text', revision: 1,
+            instruction: 'same task', documents: [], selection: { model: 'deepseek-flash', connection: { id: 'text', revision: 1,
             provider: 'teamorouter', imageProtocol: 'openai-images' }, parameters: {} }, disclosedSettings },
           messages: [], initialMessageCount: 0, requests: [], tools: [] }
         const submission = { schemaVersion: 1, submissionId, workspaceId: 'space', conversationId: 'conversation',

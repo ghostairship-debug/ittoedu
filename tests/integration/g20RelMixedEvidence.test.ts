@@ -39,13 +39,13 @@ describe('REL-T11 mixed-task receipt correlation', () => {
       { name: 'media.insert', input: { target: 'scene-owner', resource: 'generated-handle', properties: {} } },
     ] }, undefined, { status: 'applied', documentId: 'document-a', revision: 2 })
     const archive = { project: { assets: { picture: { id: 'picture', kind: 'image', mimeType: 'image/png',
-      byteLength: bytes.length } }, surfaces: [{ type: 'slide', scenes: [{ layerItems: [
+      byteLength: bytes.length } }, surfaces: [{ type: 'slide', surfaceLayerItems: [], scenes: [{ layerItems: [
       { kind: 'native', content: { nativeType: 'image', data: { assetId: 'picture' } } },
     ] }] }] }, assetFiles: { picture: bytes } } as unknown as Parameters<typeof summarizeRelMixedRun>[1]
     const run = { status: 'completed', tools: [generated, batch] }
     expect(summarizeRelMixedRun(run, archive)).toMatchObject({ mediaLinked: true,
       mediaReceipt: { via: 'same-run-batch', resource: 'generated-handle', revision: 2 },
-      projectMedia: [{ assetId: 'picture', resourceId, surfaceIndex: 0, sceneIndex: 0, itemIndex: 0 }] })
+      projectMedia: [{ assetId: 'picture', resourceId, surfaceIndex: 0 }] })
     const altered = { ...archive!, assetFiles: { picture: new Uint8Array([...bytes, 4]) } }
     expect(summarizeRelMixedRun(run, altered).mediaLinked).toBe(false)
     const unrelated = { ...archive!, project: { ...archive!.project, assets: { ...archive!.project.assets,
@@ -117,7 +117,7 @@ describe('REL-T11 mixed-task receipt correlation', () => {
     const childWithResource = child([{ ...signed, resourceId }])
     const archive = { project: { assets: { picture: { id: 'picture', kind: 'image',
       mimeType: 'image/png', byteLength: bytes.length } },
-    surfaces: [{ type: 'slide', scenes: [{ layerItems: [{ kind: 'native',
+    surfaces: [{ type: 'slide', surfaceLayerItems: [], scenes: [{ layerItems: [{ kind: 'native',
       content: { nativeType: 'image', data: { assetId: 'picture' } } }] }] }] },
     assetFiles: { picture: bytes } } as unknown as Parameters<typeof summarizeRelMixedRun>[1]
     expect(summarizeRelMixedRun([parentWithResource, childWithResource], archive)).toMatchObject({
