@@ -139,7 +139,7 @@ export interface ExecutionSubmissionRecord {
   runId?: string
   retryOfRunId?: string
   failure?: { code: string; message: string }
-  queuePausedReason?: 'external-handoff' | 'user'
+  queuePausedReason?: 'user'
   permission?: ExecutionPermissionMode
 }
 export interface ExecutionSendResult { submission: ExecutionSubmissionRecord; conversation: ConversationRecord; run?: ExecutionRunRecord }

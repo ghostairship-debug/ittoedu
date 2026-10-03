@@ -159,7 +159,6 @@ export class ExecutionDesktopService {
   }
   setSinks(events?: (event: ExecutionEvent) => void, edits?: (event: EditEvent) => void) { this.eventSink = events; this.editSink = edits }
   setHtmlActions(service: HtmlActionService): void { this.engine.setHtmlActions(service) }
-  withConversation<T>(conversationId: string, action: () => Promise<T>): Promise<T> { return this.serial(conversationId, action) }
   private timing(conversationId: string, taskId: string, markId: string, stage: ExecutionTimingStage,
     extra: Pick<ExecutionTimingMark, 'sourceWallTimeMs' | 'detail'> = {},
     stamp = captureMainTiming()): void {
@@ -598,18 +597,8 @@ export class ExecutionDesktopService {
     } catch (error) { throw executionInputError('document-range-changed', error) }
   }
 
-  /** Caller holds the conversation serial barrier during external grant/handoff. */
-  pauseQueueForExternal(conversationId: string): Promise<void> { return this.submissions.pause(conversationId) }
-  private async reclaimExternalQueue(current: ConversationRecord): Promise<boolean> {
-    if (await this.submissions.pausedReason(current.conversationId) !== 'external-handoff') return false
-    const portIds = current.runIndex.externalPortIds
-    // The external service installs this callback before it can grant access. Before that (including a
-    // fresh process), persisted connection ids are history and do not represent a live external writer.
-    if (portIds.length) await this.externalRevoker?.({ workspaceId: current.workspaceId, conversationId: current.conversationId, portIds: [...portIds] })
-    return true
-  }
-  /** Explicit only, after the caller has settled the external writer. */
-  async resumeBuiltinQueue(conversationId: string): Promise<void> {
+  /** Explicit resume of a user-paused queue; runs inside the conversation's serial barrier. */
+  private async resumeBuiltinQueue(conversationId: string): Promise<void> {
     await this.awaitRecoveryAndRebind()
     await this.submissions.resume(conversationId)
     await this.startNext(conversationId, undefined, true)
@@ -790,9 +779,9 @@ export class ExecutionDesktopService {
       const record = await this.required(input.workspaceId, input.conversationId)
       await this.conversations.deleteConversation({ ...input, ports: {
         stopBuiltinRuns: async ({ runIds }) => { await Promise.all(runIds.map(runId => this.engine.stop(runId))) },
+        // Resident external sessions only log into the conversation; without the service there is nothing live to release.
         revokeExternalPorts: async ({ workspaceId, conversationId, portIds }) => {
-          if (portIds.length && !this.externalRevoker) throw refused('外部授权尚未撤销，会话已保留')
-          if (portIds.length) await this.externalRevoker!({ workspaceId, conversationId, portIds: [...portIds] })
+          if (portIds.length) await this.externalRevoker?.({ workspaceId, conversationId, portIds: [...portIds] })
         },
         prepareResourceRelease: async owner => {
           await this.imageRetention?.prepare(owner); prepared = !!this.imageRetention
@@ -922,7 +911,6 @@ export class ExecutionDesktopService {
           if (!record || record.workspaceId !== input.workspaceId || record.conversationId !== input.conversationId) throw refused('排队消息不属于当前会话')
           if (record.state !== 'queued') return this.submissionResult(record)
           const current = await this.required(input.workspaceId, input.conversationId), active = await this.activeRun(current)
-          if (await this.reclaimExternalQueue(current)) await this.submissions.resume(input.conversationId)
           if (active) {
             const stopped = await this.engine.stop(active.runId)
             if (!stopped || ['queued', 'running', 'stopping'].includes(stopped.status)) throw refused('当前任务尚未停止，排队消息仍保留')
@@ -940,11 +928,10 @@ export class ExecutionDesktopService {
         })
         case 'pause-queue': return await this.serial(input.conversationId, async () => {
           await this.required(input.workspaceId, input.conversationId)
-          await this.submissions.pause(input.conversationId, input.reason ?? 'external-handoff')
+          await this.submissions.pause(input.conversationId)
         })
         case 'resume-queue': return await this.serial(input.conversationId, async () => {
-          const current = await this.required(input.workspaceId, input.conversationId)
-          await this.reclaimExternalQueue(current)
+          await this.required(input.workspaceId, input.conversationId)
           await this.resumeBuiltinQueue(input.conversationId)
         })
         case 'browser-viewport': {
