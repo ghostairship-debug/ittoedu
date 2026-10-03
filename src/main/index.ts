@@ -6,6 +6,8 @@ import { createMainWindow } from './createWindow'
 import { registerIpcHandlers, unregisterIpcHandlers } from './ipc'
 import { disposeNativeTextMeasurement } from './workbench/documentHost'
 import { startExternalMcpService } from './workbench/external/externalDesktopService'
+import { installWindowLifecycle } from './windowLifecycleDesktop'
+import type { WindowLifecycle } from './windowLifecycle'
 import {
   installEditorProtocol,
   installHtmlPreviewProtocol,
@@ -32,6 +34,7 @@ const appState = new AppState()
 let mainWindow: BrowserWindow | null = null
 let rendererEntryUrl: string | null = null
 let removeDiagnosticHandlers: (() => void) | null = null
+let lifecycle: WindowLifecycle | null = null
 
 app.on('render-process-gone', (_event, contents, details) => {
   void diagnosticLog.append({
@@ -67,6 +70,8 @@ if (!singleInstanceLock) {
 async function openMainWindow(): Promise<void> {
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore()
+    // A window hidden in the tray comes back when the app is launched again.
+    mainWindow.show()
     mainWindow.focus()
     return
   }
@@ -74,6 +79,8 @@ async function openMainWindow(): Promise<void> {
   await createMainWindow(appState, (result) => {
     mainWindow = result.window
     rendererEntryUrl = result.rendererEntryUrl
+    // Logging off or shutting down Windows quits; it is never turned into a hide.
+    result.window.on('session-end', () => lifecycle?.requestQuit())
     result.window.once('closed', () => {
       mainWindow = null
       rendererEntryUrl = null
@@ -101,6 +108,7 @@ app
     }
 
     removeDiagnosticHandlers = diagnosticLog.installProcessHandlers()
+    lifecycle = installWindowLifecycle(() => mainWindow)
 
     installEditorProtocol(session.defaultSession)
     installHtmlPreviewProtocol(session.defaultSession)
@@ -135,6 +143,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', () => {
+  lifecycle?.dispose()
   removeDiagnosticHandlers?.()
   removeDiagnosticHandlers = null
   unregisterIpcHandlers()
