@@ -1,4 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { courseThemeStyleText } from '../../shared/contracts/design-v1/theme'
+import { selectActiveCourseProjectDocument, useEditorStore } from '../store/editorStore'
 import type { PublishedCompositionLayerItem } from '../../shared/publishedCourseTypes'
 import { mountWebComposition, type CompositionBounds, type WebCompositionMountHandle } from '../../player/composition/mountWebComposition'
 import type { PublishedComponentPackageSource } from '../../player/surfaces/publishedComponentMount'
@@ -52,6 +54,11 @@ export function WebCompositionAuthoringContent(props: WebCompositionAuthoringCon
   const [canResize, setCanResize] = useState(false)
   const [pixelOverride, setPixelOverride] = useState(false)
   const gesture = useRef<{ content: typeof props.content; cancel(): void } | null>(null)
+  // The editing view shows the course theme as playback does; a theme change mounts the content again.
+  const designTokens = useEditorStore(state => selectActiveCourseProjectDocument(state)?.designTokens)
+  const courseTheme = useEditorStore(state => selectActiveCourseProjectDocument(state)?.theme)
+  const theme = useMemo(() => designTokens ? courseThemeStyleText({ designTokens, theme: courseTheme }, id => current.current.assetUrls[id]) : undefined,
+    [designTokens, courseTheme])
 
   const startDrag = (event: PointerEvent, nodeId: string, resize: boolean, inside: boolean) => {
     const input = current.current, handle = mountRef.current
@@ -156,6 +163,7 @@ export function WebCompositionAuthoringContent(props: WebCompositionAuthoringCon
       projectId: input.projectId,
       components: input.components,
       mode: 'authoring',
+      ...(theme ? { theme } : {}),
       session,
       resolveAsset: id => current.current.assetUrls[id],
       onSelection: selection => current.current.onSelection?.(selection),
@@ -172,7 +180,7 @@ export function WebCompositionAuthoringContent(props: WebCompositionAuthoringCon
       handle.destroy()
       session.destroy()
     }
-  }, [props.layerItemId, props.sessionKey, props.existingHandle])
+  }, [props.layerItemId, props.sessionKey, props.existingHandle, theme])
 
   useLayoutEffect(() => { if (!props.existingHandle) mountRef.current?.resize(props.width, props.height) }, [props.width, props.height, props.existingHandle])
   useEffect(() => {
