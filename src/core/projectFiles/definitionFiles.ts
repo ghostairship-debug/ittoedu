@@ -2,8 +2,10 @@ import { courseComponentNameIssue, courseComponentNameKey } from '../../shared/c
 import type { CourseComponentDefinition, CourseProjectDocument } from '../../shared/courseProjectTypes'
 import type { DocumentResources } from '../../shared/workbench/document'
 import { deleteCourseComponent, findCourseComponentName, renameCourseComponent, setCourseComponent } from '../course/courseComponents'
+import { componentPackageKey } from '../drivers/codecs/archivePath'
+import { parseComponentPackageFiles } from '../drivers/codecs/importComponentPackage'
 import { parseProgramHtml } from './pageHtml'
-import { componentFile } from './projectFileView'
+import { componentFile, controllerSource } from './projectFileView'
 import { ProjectFileError, type PlannedChange } from './slidePages'
 
 const COMPONENT_PATH = /^components\/([^/]+)\.html$/
@@ -54,4 +56,22 @@ export function planComponentDelete(project: CourseProjectDocument, resources: D
   const source = componentFile(project, path)
   if (!source) throw new ProjectFileError('not-found', `没有这个组件：${path}`)
   return { project: deleteCourseComponent(project, source.name), resources, identity: `component:${courseComponentNameKey(source.name)}`, diagnostics: [] }
+}
+
+/**
+ * `controller/教师控制台.js` is the entry source of the course's embedded controller package. A revision keeps
+ * the package identity and version (as the editor's source revision does) and always goes through admission.
+ */
+export function planControllerWrite(project: CourseProjectDocument, resources: DocumentResources, source: string): PlannedChange {
+  const current = controllerSource(project, resources)
+  if (!current) throw new ProjectFileError('not-found', '本课件没有教师控制台；需要时先在编辑器中添加')
+  const key = componentPackageKey(current.packageId, current.version)
+  const files = { ...resources.components[key]!, [current.entry]: new TextEncoder().encode(source) }
+  let contentSha256: string
+  try { contentSha256 = parseComponentPackageFiles(files, { expectedId: current.packageId, expectedVersion: current.version }).contentSha256! }
+  catch (error) { throw new ProjectFileError('invalid-component', `教师控制台源码无效：${error instanceof Error ? error.message : String(error)}`) }
+  const next = structuredClone(project)
+  next.componentPackages[current.packageId] = { ...next.componentPackages[current.packageId]!, contentSha256 }
+  return { project: next, resources: { ...resources, components: { ...resources.components, [key]: files } }, identity: 'controller', diagnostics: [],
+    admission: source !== current.source }
 }

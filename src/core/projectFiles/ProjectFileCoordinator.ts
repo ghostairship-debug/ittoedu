@@ -7,7 +7,7 @@ import { normalizeCourseProject } from '../course/normalizeCourseProject'
 import type { ImageAssetResource } from '../tools/imageAssetMetadata'
 import type { HostImageInput } from '../tools/imageResource'
 import { assetPathIssue, assetPathType, planAssetDelete, planAssetMove, planAssetWrite } from './assetFiles'
-import { componentPathName, planComponentDelete, planComponentMove, planComponentWrite, planThemeWrite } from './definitionFiles'
+import { componentPathName, planComponentDelete, planComponentMove, planComponentWrite, planControllerWrite, planThemeWrite } from './definitionFiles'
 import type { PageParsePort } from './pageHtml'
 import { programsChanged, withProgramFallbacks } from './programs'
 import { assetFiles, CONTROLLER_FILE, listProjectFiles, projectFileIdentity, projectFileVersion, readProjectFile, slidePageFiles, THEME_FILE, type ProjectFileRead } from './projectFileView'
@@ -85,6 +85,7 @@ export class ProjectFileCoordinator {
       return this.planAsset(snapshot, path, { bytes: new TextEncoder().encode(content), mimeType: 'image/svg+xml', filename: path.split('/').at(-1)! }, { kind: 'model-svg' })
     }
     if (path === THEME_FILE) return planThemeWrite(project, resources, content)
+    if (path === CONTROLLER_FILE) return planControllerWrite(project, resources, content)
     if (componentPathName(path) !== undefined) return planComponentWrite(project, resources, path, content)
     if (isPage(project, path)) {
       const parse = this.host.parsePage()

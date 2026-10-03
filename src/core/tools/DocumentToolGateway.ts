@@ -1084,6 +1084,15 @@ export class DocumentToolGateway implements ToolGateway {
       const written = await step('build.write', { job, path: meta.path, encoding: 'base64', content: base64(bytes) }, `asset:${assetId}`)
       if (written.kind !== 'read') return { result: written }
     }
+    for (const meta of Object.values(model.project.componentPackages)) {
+      const key = `${meta.packageId}@${meta.version}`, files = model.resources.components[key] ?? {}, old = snapshot.model.resources.components[key] ?? {}
+      const base = meta.manifestPath.slice(0, meta.manifestPath.lastIndexOf('/') + 1)
+      for (const [name, bytes] of Object.entries(files)) {
+        if (old[name] && documentDigest(old[name]) === documentDigest(bytes)) continue
+        const component = await step('build.write', { job, path: `${base}${name}`, encoding: 'base64', content: base64(bytes) }, `component:${key}/${name}`)
+        if (component.kind !== 'read') return { result: component }
+      }
+    }
     const written = await step('build.write', { job, path: 'project.json', content: JSON.stringify(model.project) }, 'project')
     if (written.kind !== 'read') return { result: written }
     const checked = await step('build.check', { job })

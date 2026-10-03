@@ -5,6 +5,7 @@ import path from 'node:path'
 import sharp from 'sharp'
 import { afterEach, describe, expect, it } from 'vitest'
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { createDefaultTeacherControllerPackage } from '../../src/shared/defaultTeacherControllerComponent'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
@@ -270,5 +271,24 @@ describe('project files through the tool gateway', () => {
     applied(await f.call('a5', 'project.write', { path: 'assets/照片.png', from: generated }))
     expect(Object.values(f.project().assets).find(value => value.path === 'assets/照片.png')).toMatchObject({ source: { kind: 'image-model' } })
     expect(await f.files()).not.toEqual(expect.arrayContaining([expect.objectContaining({ type: '待填素材' })]))
+  })
+
+  it('revises the teacher controller source through admission and keeps its package identity', async () => {
+    const pass = await passingAdmission()
+    const pkg = createDefaultTeacherControllerPackage()
+    const model: CourseModel = { kind: 'course-v9', project: createBlankCourseProject(),
+      resources: { assets: {}, components: { [`${pkg.manifest.id}@${pkg.manifest.version}`]: pkg.files } } }
+    const f = await harness({ models: [model], admission: pass.admission })
+    expect(await f.files()).toEqual(expect.arrayContaining([{ path: 'controller/教师控制台.js', type: '教师控制台' }]))
+    expect(await f.call('w0', 'project.write', { path: 'controller/教师控制台.js', content: 'x' })).toMatchObject({ kind: 'error', code: 'read-required' })
+    const source = data<{ content: string }>(await f.call('r1', 'project.read', { path: 'controller/教师控制台.js' })).content
+    expect(source).toBe(pkg.runtimeSource)
+    const before = f.project().componentPackages[pkg.manifest.id]!
+    applied(await f.call('w1', 'project.write', { path: 'controller/教师控制台.js', content: `${source}\n// 课程定制\n` }))
+    expect(pass.count()).toBe(1)
+    const after = f.project().componentPackages[pkg.manifest.id]!
+    expect(after).toMatchObject({ packageId: before.packageId, version: before.version })
+    expect(after.contentSha256).not.toBe(before.contentSha256)
+    expect(data<{ content: string }>(await f.call('r2', 'project.read', { path: 'controller/教师控制台.js' })).content).toContain('// 课程定制')
   })
 })
