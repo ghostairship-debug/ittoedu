@@ -926,17 +926,19 @@ describe('M24 g20-b18-c2 HTML section import orchestration', () => {
     if (imported.kind !== 'course-v9') throw new Error('wrong model')
     const slideAfter = imported.project.surfaces.find(item => item.id === slide.id)
     if (slideAfter?.type !== 'slide') throw new Error('wrong surface')
-    const runtime = slideAfter.scenes.at(-1)?.layerItems.find(item => item.kind === 'runtime')
-    expect(runtime?.kind).toBe('runtime')
-    if (runtime?.kind !== 'runtime') throw new Error('wrong runtime')
-    expect(unpackHtmlDocumentRuntimeSource(runtime.runtime.source)?.html).toContain('UNSAVED CANONICAL')
-    expect(unpackHtmlDocumentRuntimeSource(runtime.runtime.source)?.html).not.toContain('第一节：固定画布观察')
+    // A section without scripts imports as editable content.
+    const page = slideAfter.scenes.at(-1)?.layerItems.find(item => item.kind === 'composition')
+    if (page?.kind !== 'composition') throw new Error('wrong carrier')
+    expect(JSON.stringify(page.content.root)).toContain('UNSAVED CANONICAL')
+    expect(JSON.stringify(page.content.root)).not.toContain('第一节：固定画布观察')
+    const revision = env.courseSession.read().revision
     const edited = env.htmlSession.read()
     await env.htmlSession.execute({ documentId: edited.documentId, epoch: edited.epoch, baseRevision: edited.revision,
       operationId: 'edit-source-again', actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace', source: '<html><body>Changed</body></html>' } } })
     const repeat = await executeHtmlImport(env.toolService, { ...context, resolveHandle: async () => { throw new Error('stale handle was resolved') } }, payload)
     expect(repeat).toEqual(first)
-    expect(env.run).toHaveBeenCalledOnce()
+    expect(env.courseSession.read().revision).toBe(revision)
+    expect(env.run).not.toHaveBeenCalled()
   })
 
   it('recovers a committed child after its outer ACK is lost without a second import', async () => {

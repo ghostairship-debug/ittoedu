@@ -122,7 +122,8 @@ describe('M17 S13 HTML import orchestration', () => {
     expect(f.session.read().revision).toBe(0)
     expect(await fs.readFile(path.join(f.root, 'builds', ticket.jobId, 'files', 'project.json'), 'utf8')).toContain(ticket.instanceId)
     await f.service.admit(ticket)
-    expect(f.run).toHaveBeenCalledOnce()
+    // A page without scripts is editable content; it has no dynamic carrier for the admission host to run.
+    expect(f.run).not.toHaveBeenCalled()
     expect(f.session.read().undoDepth).toBe(0)
     const receipt = await f.service.commit(ticket)
     expect(receipt.status).toBe('applied')
@@ -132,14 +133,14 @@ describe('M17 S13 HTML import orchestration', () => {
     const slide = model.project.surfaces[0]
     if (slide?.type !== 'slide') throw new Error('wrong surface')
     const item = slide.scenes[0]!.layerItems[0]
-    if (item?.kind !== 'runtime') throw new Error('wrong carrier')
-    const key = Object.keys(item.runtime.assets)[0]!
-    expect(unpackHtmlDocumentRuntimeSource(item.runtime.source)?.html).toContain(`cw-resource:${key}`)
-    expect(model.resources.assets[item.runtime.assets[key]!.assetId]).toEqual(new Uint8Array(gif))
+    if (item?.kind !== 'composition') throw new Error('wrong carrier')
+    const key = Object.keys(item.content.assets)[0]!
+    expect(JSON.stringify(item.content.root)).toContain(`cw-resource:${key}`)
+    expect(model.resources.assets[item.content.assets[key]!.assetId]).toEqual(new Uint8Array(gif))
     expect(f.session.read().undoDepth).toBe(1)
     const now = f.session.read()
     await f.session.execute({ documentId: now.documentId, epoch: now.epoch, baseRevision: now.revision, operationId: 'undo', actor: 'human', mutation: { type: 'undo' } })
-    expect(f.session.read().model.resources.assets[item.runtime.assets[key]!.assetId]).toBeUndefined()
+    expect(f.session.read().model.resources.assets[item.content.assets[key]!.assetId]).toBeUndefined()
   })
 
   it('allocates above sparse scene orders without colliding with an existing layer', async () => {
@@ -154,7 +155,7 @@ describe('M17 S13 HTML import orchestration', () => {
     expect(surface.scenes[0]!.layerItems.map(item => item.order)).toEqual([0, 5, 6])
   })
 
-  it('places an admitted Flow Runtime on paper at the selected paragraph and restores it with Redo', async () => {
+  it('places an imported page on Flow paper at the selected paragraph and restores it with Redo', async () => {
     const f = await fixture(undefined, [], 'flow')
     const gif = Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=', 'base64')
     await fs.writeFile(f.sourcePath, `<img src="data:image/gif;base64,${gif.toString('base64')}">`)
@@ -169,11 +170,11 @@ describe('M17 S13 HTML import orchestration', () => {
     const flow = committed.model.project.surfaces.find(item => item.type === 'flow')!
     expect(flow.surfaceLayerItems).toHaveLength(1)
     const entry = flow.surfaceLayerItems[0]!
-    expect(entry.item).toMatchObject({ kind: 'runtime', paperSpace: 'paper' })
+    expect(entry.item).toMatchObject({ kind: 'composition', paperSpace: 'paper' })
     expect(entry.paragraphAnchor).toEqual({ blockId: flowLocation.blockId, offsetY: 0, xRatio: 0 })
     expect(entry.visibility).toEqual({ mode: 'all', locationIds: [] })
-    if (entry.item.kind !== 'runtime') throw new Error('wrong carrier')
-    const assetId = Object.values(entry.item.runtime.assets)[0]!.assetId
+    if (entry.item.kind !== 'composition') throw new Error('wrong carrier')
+    const assetId = Object.values(entry.item.content.assets)[0]!.assetId
     expect(committed.model.resources.assets[assetId]).toEqual(new Uint8Array(gif))
     await f.session.execute({ documentId: committed.documentId, epoch: committed.epoch, baseRevision: committed.revision,
       operationId: 'flow-undo', actor: 'human', mutation: { type: 'undo' } })
@@ -303,10 +304,11 @@ describe('M17 S13 HTML import orchestration', () => {
     if (committed.model.kind !== 'course-v9') throw new Error('wrong model')
     expect(committed.model.project.network?.connectOrigins).toEqual(['https://cdn.example.org'])
     const item = committed.model.project.surfaces[0]
-    if (item?.type !== 'slide' || item.scenes[0]?.layerItems[0]?.kind !== 'runtime') throw new Error('wrong imported carrier')
-    const html = unpackHtmlDocumentRuntimeSource(item.scenes[0].layerItems[0].runtime.source)?.html ?? ''
-    expect(html).toContain(imageUrl)
-    expect(html).toContain(audioUrl)
+    const imported = item?.type === 'slide' ? item.scenes[0]?.layerItems[0] : undefined
+    if (imported?.kind !== 'composition') throw new Error('wrong imported carrier')
+    const content = JSON.stringify(imported.content.root)
+    expect(content).toContain(imageUrl)
+    expect(content).toContain(audioUrl)
     expect(committed.undoDepth).toBe(1)
     expect(f.grants.policy('run', committed.documentId, () => committed)).toBeUndefined()
     await f.session.execute({ documentId: committed.documentId, epoch: committed.epoch, baseRevision: committed.revision,
@@ -363,10 +365,11 @@ describe('M17 S13 HTML import orchestration', () => {
     const slide = model.project.surfaces[0]
     if (slide?.type !== 'slide') throw new Error('wrong surface')
     const item = slide.scenes[0]!.layerItems[0]
-    if (item?.kind !== 'runtime') throw new Error('wrong carrier')
-    const committedHtml = unpackHtmlDocumentRuntimeSource(item.runtime.source)?.html ?? ''
-    expect(committedHtml).toContain('<iframe')
-    expect(committedHtml).toContain('fonts.googleapis.com')
+    if (item?.kind !== 'composition') throw new Error('wrong carrier')
+    const content = JSON.stringify(item.content.root)
+    expect(content).toContain('"tagName":"iframe"')
+    expect(content).toContain('https://player.example.com/embed/abc')
+    expect(content).toContain('fonts.googleapis.com')
   })
 
   it('imports AVIF <img> without rejecting on format', async () => {
@@ -382,10 +385,10 @@ describe('M17 S13 HTML import orchestration', () => {
     const slide = model.project.surfaces[0]
     if (slide?.type !== 'slide') throw new Error('wrong surface')
     const item = slide.scenes[0]!.layerItems[0]
-    if (item?.kind !== 'runtime') throw new Error('wrong carrier')
-    const key = Object.keys(item.runtime.assets)[0]
+    if (item?.kind !== 'composition') throw new Error('wrong carrier')
+    const key = Object.keys(item.content.assets)[0]
     expect(key).toBeTruthy()
-    const assetId = item.runtime.assets[key!]!.assetId
+    const assetId = item.content.assets[key!]!.assetId
     expect(model.project.assets[assetId]?.mimeType).toBe('image/avif')
     expect(model.resources.assets[assetId]).toEqual(new Uint8Array(avif))
   })
