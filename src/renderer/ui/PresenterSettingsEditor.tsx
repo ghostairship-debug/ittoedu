@@ -179,7 +179,7 @@ export function PresenterSettingsEditor({
         PageDown 前进到下一步，PageUp 返回上一步；跨过场景首尾时进入相邻场景。选择“只触发作者规则”后，仅执行配置的规则，不自动推进。
       </p>
       <p className="property-hint">
-        键盘（开启“键盘左右键翻页”时）：←/→ 上一步/下一步，Shift+←/→ 上一场景/下一场景，Home/End 第一页/最后一页。
+        键盘（开启“键盘翻页”时）：←/→ 上一步/下一步，Shift+←/→ 上一场景/下一场景，Home/End 第一页/最后一页。
       </p>
       <button
         type="button"
@@ -207,7 +207,7 @@ export function PresenterSettingsEditor({
             <>
               {keyboardAction ? (
                 <p className="property-hint">
-                  键盘已内建“{keyboardAction}”，开启“键盘左右键翻页”即可使用；只有要触发作者规则时才需保存。
+                  键盘已内建“{keyboardAction}”，开启“键盘翻页”即可使用；只有要触发作者规则时才需保存。
                 </p>
               ) : null}
               <div className="property-inline-actions">

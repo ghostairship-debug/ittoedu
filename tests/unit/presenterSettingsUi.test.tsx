@@ -133,6 +133,7 @@ describe('presenter settings editor', () => {
 
   it('describes the course keyboard keys and names one when it is tested', () => {
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
+    expect(screen.getByLabelText('键盘翻页')).toBeChecked()
     expect(screen.getByText(/Shift\+←\/→ 上一场景\/下一场景，Home\/End 第一页\/最后一页/)).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '测试或添加翻页笔按键' }))
