@@ -140,6 +140,13 @@ describe('project files through the tool gateway', () => {
     const fresh = data<{ content: string }>(await f.call('r2', 'project.read', { path: 'slides/01-导入.html' })).content
     applied(await f.call('w3', 'project.write', { path: 'slides/01-导入.html', content: fresh.replace('为什么会有四季？', '四季从何而来？') }))
     applied(await f.call('w4', 'project.write', { path: 'slides/01-导入.html', content: fresh }))
+    // Dragging and resizing the page body in the editor is a layer change the page file never overwrites.
+    const moved = f.session.read()
+    await f.session.execute({ documentId: moved.documentId, epoch: moved.epoch, operationId: 'human-frame', actor: 'human', baseRevision: moved.revision,
+      mutation: { type: 'command', command: { type: 'course.object.patch', locationId: f.project().locations[0]!.id, itemId: layer.layerItemId,
+        patch: { frame: { x: 40, y: 30, width: 900, height: 500 } } } } })
+    applied(await f.call('e3', 'project.edit', { path: 'slides/01-导入.html', edits: [{ old: '为什么会有四季？', new: '四季的成因是什么？' }] }))
+    expect(pageLayer(f.project()).frame).toEqual({ mode: 'absolute', x: 40, y: 30, width: 900, height: 500 })
   })
 
   it('renames, reorders and deletes pages with the formal location rules', async () => {
