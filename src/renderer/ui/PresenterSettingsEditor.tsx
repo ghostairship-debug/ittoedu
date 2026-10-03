@@ -65,6 +65,20 @@ function standardPresenterCommand(binding: DetectedKey): PresenterCommand | null
   return null
 }
 
+/** The course keyboard keys every player, preview and try-run answers while keyboard navigation is on. */
+function builtInKeyboardAction(binding: DetectedKey): string | null {
+  if (binding.altKey || binding.ctrlKey || binding.metaKey) return null
+  if (binding.key === 'ArrowRight' || binding.key === 'ArrowLeft') {
+    const next = binding.key === 'ArrowRight'
+    if (binding.shiftKey) return next ? '下一场景' : '上一场景'
+    return next ? '下一步' : '上一步'
+  }
+  if (binding.shiftKey) return null
+  if (binding.key === 'Home') return '第一页'
+  if (binding.key === 'End') return '最后一页'
+  return null
+}
+
 export function PresenterSettingsEditor({
   value,
   onChange,
@@ -129,6 +143,7 @@ export function PresenterSettingsEditor({
   }
 
   const standardCommand = detected ? standardPresenterCommand(detected) : null
+  const keyboardAction = detected ? builtInKeyboardAction(detected) : null
 
   return (
     <div className="presenter-settings" data-testid="presenter-settings">
@@ -163,6 +178,9 @@ export function PresenterSettingsEditor({
       <p className="property-hint">
         PageDown 前进到下一步，PageUp 返回上一步；跨过场景首尾时进入相邻场景。选择“只触发作者规则”后，仅执行配置的规则，不自动推进。
       </p>
+      <p className="property-hint">
+        键盘（开启“键盘左右键翻页”时）：←/→ 上一步/下一步，Shift+←/→ 上一场景/下一场景，Home/End 第一页/最后一页。
+      </p>
       <button
         type="button"
         className="secondary-button"
@@ -186,28 +204,35 @@ export function PresenterSettingsEditor({
               已识别为内建“{commandLabel(standardCommand)}”键，无需额外保存。
             </p>
           ) : (
-            <div className="property-inline-actions">
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={detected.repeat || (
-                  !existingDetectedBinding && value.additionalBindings.length >= 32
-                )}
-                onClick={() => saveDetected('next')}
-              >
-                保存为前进键
-              </button>
-              <button
-                type="button"
-                className="secondary-button"
-                disabled={detected.repeat || (
-                  !existingDetectedBinding && value.additionalBindings.length >= 32
-                )}
-                onClick={() => saveDetected('previous')}
-              >
-                保存为后退键
-              </button>
-            </div>
+            <>
+              {keyboardAction ? (
+                <p className="property-hint">
+                  键盘已内建“{keyboardAction}”，开启“键盘左右键翻页”即可使用；只有要触发作者规则时才需保存。
+                </p>
+              ) : null}
+              <div className="property-inline-actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={detected.repeat || (
+                    !existingDetectedBinding && value.additionalBindings.length >= 32
+                  )}
+                  onClick={() => saveDetected('next')}
+                >
+                  保存为前进键
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  disabled={detected.repeat || (
+                    !existingDetectedBinding && value.additionalBindings.length >= 32
+                  )}
+                  onClick={() => saveDetected('previous')}
+                >
+                  保存为后退键
+                </button>
+              </div>
+            </>
           )}
           {detected.key === 'F5' ? (
             <p className="property-hint">F5 可能被浏览器用于刷新，不建议作为演示绑定。</p>
