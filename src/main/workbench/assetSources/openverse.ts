@@ -34,8 +34,9 @@ function candidate(raw: unknown, input: ImageSearchInput): OpenImageCandidate | 
   const license = openverseLicense(raw.license, raw.license_version, raw.license_url, input)
   const width = positiveInteger(raw.width), height = positiveInteger(raw.height)
   if (!id || !fileUrl || !license || (width !== undefined && width < MIN_IMAGE_WIDTH)) return null
-  const author = cleanText(raw.creator, 120), previewUrl = httpUrl(raw.thumbnail)
-  const commonsTitle = commonsTitleFromFileUrl(fileUrl)
+  const author = cleanText(raw.creator, 120), commonsTitle = commonsTitleFromFileUrl(fileUrl)
+  // Openverse 代理 Commons 文件的缩略图会失败（HTTP 424），这类文件改向 Commons 取预览。
+  const previewUrl = commonsTitle ? undefined : httpUrl(raw.thumbnail)
   const tags = Array.isArray(raw.tags) ? raw.tags.flatMap(tag => isRecord(tag) ? cleanText(tag.name, 40) ?? [] : []).slice(0, 10) : []
   return { library: 'openverse', providerId: id, title: cleanText(raw.title, 200) ?? '未命名图片',
     ...(author ? { author } : {}), license, sourceName: openverseSourceName(raw.source ?? raw.provider),

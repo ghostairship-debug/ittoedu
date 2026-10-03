@@ -138,5 +138,7 @@ describe('open image service', () => {
     expect(await normalizeImage(await raster(800, 600, 'gif'), 1600)).toMatchObject({ mimeType: 'image/png', width: 800 })
     expect(await normalizeImage(await raster(2000, 1000, 'jpeg'), 1600)).toMatchObject({ mimeType: 'image/jpeg', width: 1600, height: 800 })
     expect(await normalizeImage(await raster(3200, 1600, 'png', true), 1600)).toMatchObject({ mimeType: 'image/png', width: 1600, height: 800 })
+    // Line art rendered as PNG stays lossless when shrunk.
+    expect(await normalizeImage(await raster(1920, 1728, 'png'), 1600)).toMatchObject({ mimeType: 'image/png', width: 1600, height: 1440 })
   })
 })

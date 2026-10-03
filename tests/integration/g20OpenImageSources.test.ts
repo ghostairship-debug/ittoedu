@@ -84,9 +84,11 @@ describe('Openverse search', () => {
     expect(page).toMatchObject({ library: 'openverse', excluded: 0, hasMore: true })
     expect(page.candidates[0]).toMatchObject({ library: 'openverse', providerId: 'd61764db-e30e-497c-acd0-40e2c4f202f7', title: 'AxialTiltObliquity',
       author: 'Dna-webmaster', sourceName: 'Wikimedia Commons', license: { id: 'CC BY 3.0' }, width: 760, height: 590,
-      pageUrl: 'https://commons.wikimedia.org/w/index.php?curid=3262268', commonsTitle: 'File:AxialTiltObliquity.png',
+      pageUrl: 'https://commons.wikimedia.org/w/index.php?curid=3262268', commonsTitle: 'File:AxialTiltObliquity.png' })
+    // Openverse's thumbnail proxy fails for Commons files (HTTP 424 in a real probe); previews come from Commons instead.
+    expect(page.candidates[0]).not.toHaveProperty('previewUrl')
+    expect(page.candidates[1]).toMatchObject({ sourceName: 'Flickr', license: { id: 'CC0 1.0', attributionRequired: false }, description: '标签：solstice、dusk',
       previewUrl: 'https://api.openverse.org/v1/images/d61764db-e30e-497c-acd0-40e2c4f202f7/thumb/' })
-    expect(page.candidates[1]).toMatchObject({ sourceName: 'Flickr', license: { id: 'CC0 1.0', attributionRequired: false }, description: '标签：solstice、dusk' })
     expect(page.candidates[1]).not.toHaveProperty('commonsTitle')
 
     await searchOpenverse(port, { query: 'x', limit: 3, page: 2, allowShareAlike: true })

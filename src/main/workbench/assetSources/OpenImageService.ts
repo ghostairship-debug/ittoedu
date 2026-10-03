@@ -11,7 +11,8 @@ export const FETCH_WIDTH = 1600
 const PREVIEW_SIZE = 480
 const DOWNLOAD_MAX_BYTES = 100 * 1024 * 1024
 const PREVIEW_MAX_BYTES = 20 * 1024 * 1024
-const IMAGE_ACCEPT = 'image/png, image/jpeg, image/webp, image/gif, image/*;q=0.8'
+// Openverse 的缩略图接口只认含 */* 的 Accept（image/* 返回 406）。
+const IMAGE_ACCEPT = 'image/*,*/*;q=0.8'
 const libraryNames: Record<OpenLibrary, string> = { openverse: 'Openverse', 'wikimedia-commons': 'Wikimedia Commons' }
 
 /** 给模型看的候选；image 是本任务内的短句柄。 */
@@ -56,7 +57,7 @@ export interface OpenImageServiceOptions {
 
 const reasonOf = (cause: unknown, fallback: string) => cause instanceof Error && cause.message ? cause.message : fallback
 
-/** 下载内容统一核对与缩放：JPEG/PNG/WebP 且不超宽的原样保留，其余转为 PNG（有透明）或 JPEG。 */
+/** 下载内容统一核对与缩放：JPEG/PNG/WebP 且不超宽的原样保留；其余线稿、透明图转为 PNG，照片转为 JPEG。 */
 export async function normalizeImage(bytes: Uint8Array, maxWidth: number): Promise<{ bytes: Uint8Array; mimeType: string; width: number; height: number }> {
   const metadata = await sharp(bytes, { failOn: 'error' }).metadata().catch(() => { throw new Error('下载内容不是可识别的图片') })
   const { format, width, height } = metadata
@@ -64,8 +65,9 @@ export async function normalizeImage(bytes: Uint8Array, maxWidth: number): Promi
   if ((format === 'jpeg' || format === 'png' || format === 'webp') && width <= maxWidth && (metadata.pages ?? 1) === 1)
     return { bytes, mimeType: `image/${format}`, width, height }
   const resized = sharp(bytes, { failOn: 'error' }).rotate().resize({ width: maxWidth, withoutEnlargement: true })
-  const { data, info } = await (metadata.hasAlpha ? resized.png() : resized.jpeg({ quality: 85 })).toBuffer({ resolveWithObject: true })
-  return { bytes: new Uint8Array(data), mimeType: metadata.hasAlpha ? 'image/png' : 'image/jpeg', width: info.width, height: info.height }
+  const lossless = metadata.hasAlpha || format === 'png' || format === 'gif' || format === 'svg'
+  const { data, info } = await (lossless ? resized.png() : resized.jpeg({ quality: 85 })).toBuffer({ resolveWithObject: true })
+  return { bytes: new Uint8Array(data), mimeType: lossless ? 'image/png' : 'image/jpeg', width: info.width, height: info.height }
 }
 
 function filenameFor(title: string, mimeType: string): string {
