@@ -48,7 +48,8 @@ it('stops a download over the byte limit, by declared length or while reading', 
   const declared = respond(200, 'image/jpeg', [Buffer.alloc(10)], 5_000_000)
   await expect(fetchPublicResource('https://example.com/large.jpg', { resolve, maxBytes: 1_000_000 }))
     .rejects.toMatchObject({ code: 'too-large' })
-  expect(declared).toHaveLength(1)
+  // Destroyed without an error argument: an 'error' event could crash Main before any listener exists.
+  expect(declared).toEqual([undefined])
   const streamed = respond(200, 'image/jpeg', [Buffer.alloc(600_000), Buffer.alloc(600_000), Buffer.alloc(600_000)])
   await expect(fetchPublicResource('https://example.com/streamed.jpg', { resolve, maxBytes: 1_000_000 }))
     .rejects.toMatchObject({ code: 'too-large', message: expect.stringContaining('上限') })

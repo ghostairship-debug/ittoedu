@@ -135,7 +135,8 @@ function oneRequest(url: URL, address: { address: string; family: 4 | 6 }, signa
       const tooLarge = () => {
         const error = new PublicHttpError('too-large', `网络资源超过 ${Math.max(1, Math.round((maxBytes ?? 0) / 1024 / 1024))} MB 上限，已停止下载`)
         reject(error)
-        response.destroy(error)
+        // Without an argument destroy emits no 'error' event, which may have no listener yet.
+        response.destroy()
       }
       if (maxBytes !== undefined && Number(response.headers['content-length']) > maxBytes) { tooLarge(); return }
       const chunks: Buffer[] = []
