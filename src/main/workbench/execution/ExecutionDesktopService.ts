@@ -204,6 +204,8 @@ export class ExecutionDesktopService {
           }
         }
       }
+      // Reading the submissions records unreadable files, so the first workspace read reports them with the runs.
+      await this.submissions.list().catch(() => undefined)
       // Cards are transient; unsubmitted input survives as an ordinary recoverable conversation draft. This
       // changes which conversations exist, so the fast conversation list must already see it.
       await this.clearElementCards().catch(() => undefined)
