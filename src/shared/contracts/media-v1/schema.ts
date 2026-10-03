@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import type { AssetMeta, ProjectMediaSettings } from './types'
+import { ASSET_SOURCE_KINDS, type AssetMeta, type AssetSource, type ProjectMediaSettings } from './types'
 
 const finiteNumber = z.number().finite()
 const unitInterval = finiteNumber.min(0).max(1)
@@ -69,8 +69,30 @@ const courseProjectAssetRemoteDeliveryUrlSchema = z.string().trim().min(1).max(2
   'Remote asset delivery URL must be an https URL without credentials',
 )
 
+const assetSourceUrlSchema = z.string().trim().min(1).max(2_000).refine((value) => {
+  try {
+    const url = new URL(value)
+    return (url.protocol === 'https:' || url.protocol === 'http:') && url.username === '' && url.password === ''
+  } catch {
+    return false
+  }
+}, 'Asset source URL must be an http(s) URL without credentials')
+
+export const assetSourceSchema: z.ZodType<AssetSource> = z.object({
+  kind: z.enum(ASSET_SOURCE_KINDS),
+  title: z.string().trim().min(1).max(500).optional(),
+  url: assetSourceUrlSchema.optional(),
+  author: z.string().trim().min(1).max(500).optional(),
+  license: z.object({
+    id: z.string().trim().min(1).max(100),
+    url: assetSourceUrlSchema.optional(),
+  }).strict().optional(),
+  attribution: z.string().trim().min(1).max(2_000).optional(),
+}).strict()
+
 type CourseProjectAssetMeta = AssetMeta & {
   remote?: { url: string }
+  source?: AssetSource
 }
 
 /** Exact Course Project V9 asset metadata profile. */
@@ -87,6 +109,7 @@ export const courseProjectAssetMetaSchema: z.ZodType<CourseProjectAssetMeta> = z
   remote: z.object({
     url: courseProjectAssetRemoteDeliveryUrlSchema,
   }).strict().optional(),
+  source: assetSourceSchema.optional(),
 }).strict()
 
 const courseProjectAudioChannelVolumesSchema = z.object({
