@@ -845,7 +845,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     if (!api || !selected || submittingRef.current || attachmentBusy || !retry && !continueRun && !draftRef.current.trim() && attachmentsRef.current.length === 0) return
     if (!configured) { setError('尚未配置可用的对话模型。请先在模型设置中选择连接、模型和账号。'); return }
     submittingRef.current = true; setBusy(true); setError('')
-    let request: ExecutionSendInput | undefined
+    let request: ExecutionSendInput | undefined, sendInvoked = false
     try {
       if (retry) request = { workspaceId: retry.workspaceId, conversationId: retry.conversationId, submissionId: retry.submissionId,
         expectedRevision: selected.revision, text: retry.text, documents: structuredClone(retry.documents), attachments: structuredClone(retry.attachments),
@@ -907,6 +907,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         timedSubmissions.current.set(request.submissionId, { workspaceId: request.workspaceId, conversationId: request.conversationId })
       }
       const sent = request
+      sendInvoked = true
       const result = await api.send(sent).catch(async failure => {
         // Refused before acceptance: Main wrote this conversation after this view last read it (a reply, the next queued run).
         // The same payload is sent once more on that revision only when the stored draft is exactly this payload; any other
@@ -924,8 +925,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       applySendResult(result)
       if (result.submission.state === 'failed') setError(result.submission.failure?.message ?? '消息未启动，输入和附件已恢复。')
     } catch (failure) {
-      let known: ExecutionSubmissionRecord | null = null
-      if (request) try { known = await api.submission({ workspaceId: request.workspaceId, conversationId: request.conversationId, submissionId: request.submissionId }) } catch { /* keep the exact local pending card */ }
+      let known: ExecutionSubmissionRecord | null = null, lookedUp = false
+      if (request) try { known = await api.submission({ workspaceId: request.workspaceId, conversationId: request.conversationId, submissionId: request.submissionId }); lookedUp = true } catch { /* keep the exact local pending card */ }
       if (known) {
         replaceSubmission(known)
         const latest = await api.conversation(known.workspaceId, known.conversationId).catch(() => null)
@@ -937,6 +938,9 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         setError(known.state === 'starting' ? '提交状态尚在确认中；再次确认会复用同一提交，不会创建第二次运行。' : known.failure?.message ?? '')
       } else if (request) {
         const closedDocument = isExecutionInputError(failure, 'document-session-changed')
+        // Main records a submission before anything runs: holding no record after the send settled, it refused this one
+        // and nothing ran. Only a send whose record cannot be read leaves the outcome unknown.
+        const reason = failure instanceof Error ? failure.message : '消息没有发送。'
         replaceSubmission({ submissionId: request.submissionId, workspaceId: request.workspaceId, conversationId: request.conversationId,
           state: 'failed', mode: request.mode ?? 'queue', text: request.text, documents: request.documents, attachments: request.attachments ?? [],
           ...(request.contentOutput ? { contentOutput: request.contentOutput } : {}),
@@ -944,6 +948,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
           model: { provider: connection?.connection.provider ?? '当前连接', model: conversationSelection?.model ?? '当前模型', accountId: connection?.connection.accountId ?? '', billing: connection?.connection.billing.kind ?? 'unknown' },
           createdAt: Date.now(), updatedAt: Date.now(), failure: closedDocument
             ? { code: 'document-session-changed', message: '目标文档已关闭或重新打开；本次未发送。可移除文档引用，核对草稿后重新发送。' }
+            : !sendInvoked ? { code: 'not-sent', message: `未发送：${reason}` }
+            : lookedUp ? { code: 'not-accepted', message: `已拒绝，未执行：${reason}` }
             : { code: 'ack-unconfirmed', message: '未确认执行器是否收到；输入和附件仍保留，可用同一提交再次确认。' } })
         setError(failure instanceof Error ? failure.message : '消息状态未确认；输入和附件仍保留。')
       } else setError(failure instanceof Error ? failure.message : '消息尚未发送；草稿已保留。')
