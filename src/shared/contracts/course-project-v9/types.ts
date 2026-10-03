@@ -19,8 +19,8 @@ import {
   NativeTextContent,
   NativeVideoContent,
 } from '../native-v1/types'
-import type { ProjectDesignTokens } from '../design-v1/types'
-import type { AssetMeta, ProjectMediaSettings } from '../media-v1/types'
+import type { CourseTheme, ProjectDesignTokens } from '../design-v1/types'
+import type { AssetMeta, AssetSource, ProjectMediaSettings } from '../media-v1/types'
 import type { ProjectPlaybackSettings } from '../playback-v1/types'
 import type { EmbeddedComponentPackageMeta } from '../component-v4/types'
 import type { RuntimeRenderMode } from '../runtime/types'
@@ -144,6 +144,8 @@ export interface CourseAssetRemoteDelivery {
  */
 export interface CourseAssetMeta extends AssetMeta {
   remote?: CourseAssetRemoteDelivery
+  /** Provenance and credit text; see `AssetSource`. */
+  source?: AssetSource
 }
 
 /**
@@ -174,6 +176,26 @@ export interface CourseRuntimeDefinition {
     assetId: string
     coverage: 'surface' | 'scene'
   }
+  /** Saved but not admitted (requires `enabled: false`); hosts show the reason instead of running it. */
+  draft?: { reason: string }
+}
+
+/**
+ * A named course component (`components/<name>.html`): the definition fields of
+ * a Runtime. `CourseProjectDocument.components` is their only owner. A page uses
+ * one through `<iframe src="../components/<name>.html">`; the Runtime node under
+ * that iframe is a software-derived copy that also carries the page instance's
+ * own `staticFallback`, `nodeBindings` and `content.overrides`.
+ */
+export interface CourseComponentDefinition {
+  protocol: CourseRuntimeDefinition['protocol']
+  runtimeApiVersion: CourseRuntimeDefinition['runtimeApiVersion']
+  enabled: boolean
+  renderMode: RuntimeRenderMode
+  source: string
+  content: Omit<CourseRuntimeContent, 'overrides'>
+  assets: Record<string, { assetId: string }>
+  draft?: { reason: string }
 }
 
 export interface RuntimeLayerItem extends LayerItemBase {
@@ -217,6 +239,11 @@ export interface GlobalLayerEntry extends ScopedLayerItem {
   plane?: GlobalLayerPlane
 }
 
+/** State of one node inside a composition item, keyed by its composition node id. */
+export interface CompositionNodeOverride {
+  visible?: boolean
+}
+
 export interface LayerItemOverride {
   label?: string
   frame?: Partial<LayerFrame>
@@ -229,6 +256,8 @@ export interface LayerItemOverride {
   playbackInitialVisibility?: 'inherit' | 'hidden'
   nativeData?: Record<string, unknown>
   componentProps?: Record<string, unknown>
+  /** Composition items only: node id -> node state in this presentation state. */
+  compositionNodes?: Record<string, CompositionNodeOverride>
 }
 
 export interface SlidePresentationState {
@@ -239,6 +268,13 @@ export interface SlidePresentationState {
   backgroundAssetId?: string | null
   layerItemOverrides: Record<string, LayerItemOverride>
   layerItemOrder?: string[]
+  /**
+   * Present on states generated from the page's in-page steps (`class="fragment"`
+   * elements, in document order): playback shows the first `fragmentStep` of them.
+   * The initial state carries 0; software maintains these states and keeps the
+   * others as authored.
+   */
+  fragmentStep?: number
 }
 
 export interface SlidePresentation {
@@ -485,6 +521,10 @@ export interface CourseProjectDocument {
   /** Course-level network declaration; absent means no remote access is declared. */
   network?: CourseNetworkDeclaration
   designTokens: ProjectDesignTokens
+  /** Course-wide style sheet injected with the design-token variables into every rendered Web document. */
+  theme?: CourseTheme
+  /** Named components (`components/<name>.html`), the only owner of their definitions. */
+  components?: Record<string, CourseComponentDefinition>
   media: ProjectMediaSettings
   playback: ProjectPlaybackSettings
   courseState: CourseStateDeclaration[]
