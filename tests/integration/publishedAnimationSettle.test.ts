@@ -63,3 +63,46 @@ it('observation waits for finite page, shadow and frame animations, never for en
     await browser.close()
   }
 }, 30_000)
+
+it('static capture paints finite animations at their end without waiting, and leaves endless ones running', async () => {
+  const bundle = (await build({
+    stdin: { contents: `export {capturePublishedSurfacePng} from './src/player/surfaces/publishedCapture';`, resolveDir: process.cwd(), loader: 'ts' },
+    bundle: true, write: false, platform: 'browser', format: 'iife', globalName: 'StaticCapture',
+  })).outputFiles[0]!.text
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const page = await browser.newPage({ viewport: { width: 400, height: 300 } })
+    await page.setContent(`<style>
+      @keyframes enter { from { opacity: 0 } to { opacity: 1 } }
+      @keyframes spin { to { transform: rotate(360deg) } }
+      #box { position: absolute; left: 0; top: 0; width: 100px; height: 100px; background: rgb(255, 0, 0); animation: enter 4s both }
+      #spin { position: absolute; left: 120px; top: 0; width: 20px; height: 20px; background: rgb(0, 0, 255); animation: spin 1s linear infinite }
+    </style><div id="root" style="position: relative; width: 200px; height: 100px; background: #fff"><div id="box"></div><div id="spin"></div></div>`)
+    await page.addScriptTag({ content: bundle })
+    const result = await page.evaluate(async () => {
+      const api = (window as unknown as { StaticCapture: { capturePublishedSurfacePng(options: unknown): Promise<string> } }).StaticCapture
+      const root = document.getElementById('root')!, box = document.getElementById('box')!, spin = document.getElementById('spin')!
+      const started = performance.now()
+      const dataUrl = await api.capturePublishedSurfacePng({ root, width: 200, height: 100,
+        layers: [{ element: box, x: 0, y: 0, width: 100, height: 100, rotation: 0, opacity: 1 }] })
+      const elapsed = performance.now() - started
+      const image = new Image()
+      image.src = dataUrl
+      await image.decode()
+      const canvas = document.createElement('canvas')
+      canvas.width = 200
+      canvas.height = 100
+      const context = canvas.getContext('2d')!
+      context.drawImage(image, 0, 0)
+      return { pixel: [...context.getImageData(50, 50, 1, 1).data], elapsed,
+        box: box.getAnimations()[0]?.playState, spin: spin.getAnimations()[0]?.playState }
+    })
+    // The four-second fade-in is painted at its end: red, not the white page behind it.
+    expect(result.pixel[0]).toBeGreaterThan(225)
+    expect(result.pixel[1]).toBeLessThan(30)
+    expect(result).toMatchObject({ box: 'finished', spin: 'running' })
+    expect(result.elapsed).toBeLessThan(2_000)
+  } finally {
+    await browser.close()
+  }
+}, 30_000)

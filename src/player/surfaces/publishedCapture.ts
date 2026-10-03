@@ -258,6 +258,19 @@ export async function waitForPublishedAnimationsSettled(
   }
 }
 
+/**
+ * A static capture shows the page as it settles without waiting: running finite CSS animations, transitions and
+ * Web Animations below the roots (shadow trees and same-origin frames included) jump to their end. Endless ones stay.
+ */
+function finishPublishedAnimations(roots: readonly Element[]): void {
+  const animations = new Set<Animation>()
+  for (const root of roots) for (const animation of runningAnimationsBelow(root)) animations.add(animation)
+  for (const animation of animations) {
+    if (animationRemainingMs(animation) === null) continue
+    try { animation.finish() } catch { /* An animation that cannot finish keeps its current frame. */ }
+  }
+}
+
 class PublishedCanvasSnapshots {
   readonly #snapshots = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>()
 
@@ -1077,6 +1090,7 @@ export async function capturePublishedSurfacePng(
           'Published 静态捕获等待字体就绪已取消',
         )
       }
+      finishPublishedAnimations([options.root, ...options.layers.map((layer) => layer.element)])
       const geometry = options.resolveGeometryAfterReady?.() ?? options
       if (geometry.layers.length !== options.layers.length
         || geometry.layers.some((layer, index) => layer.element !== options.layers[index]?.element)) {
