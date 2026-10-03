@@ -146,13 +146,17 @@ export function adjacentPlaybackTarget(
   return level === 'step' && direction === 'previous' ? scene.steps.at(-1)! : scene.steps[0]!
 }
 
-/** The first step of the course's first or last scene; null when playback already stands there. */
+/**
+ * Home: the first step of the first scene, unless playback already stands there.
+ * End: the first step of the last scene, unless playback is already anywhere in it (End never goes back).
+ */
 export function edgePlaybackTarget(
   scenes: readonly CoursePlaybackScene[],
   progress: PlaybackNavigationProgress | null,
   edge: PlaybackEdge,
 ): CoursePlaybackStep | null {
   if (!progress) return null
-  const step = (edge === 'first' ? scenes[0] : scenes.at(-1))?.steps[0]
+  if (edge === 'last') return progress.sceneIndex === scenes.length - 1 ? null : scenes.at(-1)?.steps[0] ?? null
+  const step = scenes[0]?.steps[0]
   return step && step.id !== progress.stepId ? step : null
 }

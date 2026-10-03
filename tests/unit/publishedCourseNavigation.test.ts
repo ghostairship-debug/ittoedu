@@ -246,6 +246,11 @@ describe('published course Mixed navigation', () => {
     expect(edgePlaybackTarget(scenes, progress, 'first')?.locationId).toBe(payload.locations[0]!.id)
     expect(edgePlaybackTarget(scenes, progress, 'last')?.locationId).toBe('flow-return')
     expect(edgePlaybackTarget(scenes, playbackNavigationProgress(scenes, 'flow-return'), 'last')).toBeNull()
+    // End never goes back: anywhere in the last scene it stays; elsewhere it lands on that scene's first step.
+    const ending = buildCoursePlaybackSequence({ ...payload, locations: payload.locations.slice(0, 6) })
+    expect(edgePlaybackTarget(ending, playbackNavigationProgress(ending, 'camera-b'), 'last')).toBeNull()
+    expect(edgePlaybackTarget(ending, playbackNavigationProgress(ending, 'flow-b'), 'last')?.locationId).toBe('camera-a')
+    expect(edgePlaybackTarget(ending, playbackNavigationProgress(ending, 'camera-b'), 'first')?.locationId).toBe(payload.locations[0]!.id)
     expect(playbackNavigationProgress(scenes, 'camera-b')).toMatchObject({ stepIndex: 1 })
   })
 

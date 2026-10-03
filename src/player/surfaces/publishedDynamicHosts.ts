@@ -586,7 +586,7 @@ export class PublishedCourseSession {
     return true
   }
 
-  /** Home/End: the first step of the course's first or last scene, under the same guards as a step. */
+  /** Home/End: the first step of the first or last scene (End never goes back), under the same guards as a step. */
   requestPlaybackEdge(edge: PlaybackEdge): boolean {
     const target = edgePlaybackTarget(this.#playbackScenes, this.getPlaybackProgress(), edge)
     if (!this.canAcceptPlaybackNavigation() || !target || !this.acceptsPlaybackTarget(target)) return false
