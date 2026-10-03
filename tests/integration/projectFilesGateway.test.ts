@@ -243,7 +243,7 @@ describe('project files through the tool gateway', () => {
     applied(await f.call('e1', 'project.edit', { path: 'slides/02-观察.html', edits: [{ old: 'title="再看一次"', new: 'title="再观察一次"' }] }))
     expect(pass.count()).toBe(1)
     applied(await f.call('m1', 'project.move', { from: 'components/公转模拟.html', to: 'components/地球公转.html' }))
-    expect(data<{ content: string }>(await f.call('r2', 'project.read', { path: 'slides/01-导入.html' })).content).toContain('src="../components/%E5%9C%B0%E7%90%83%E5%85%AC%E8%BD%AC.html"')
+    expect(data<{ content: string }>(await f.call('r2', 'project.read', { path: 'slides/01-导入.html' })).content).toContain('src="../components/地球公转.html"')
 
     const refused = await harness({ admission: { async run() { return { ok: false, message: '组件脚本抛出错误' } } } as unknown as BuildAdmissionPort })
     applied(await refused.call('w1', 'project.write', { path: 'slides/01-导入.html', content: '<iframe src="../components/坏组件.html" title="坏"></iframe>' }))
