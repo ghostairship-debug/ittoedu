@@ -9,6 +9,7 @@ import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import type { HostToolServices } from '../../src/core/tools/HostToolServices'
+import { prepareImageResource } from '../../src/main/workbench/admittedImageResource'
 import { ControlledBuildService } from '../../src/main/workbench/build/ControlledBuildService'
 import { parseWebComposition } from '../../src/main/workbench/htmlImport/parseWebComposition'
 import { findCompositionNode, walkComposition } from '../../src/shared/composition/content'
@@ -37,18 +38,19 @@ function data<T = Record<string, unknown>>(result: ToolResult): T {
   return result.data as T
 }
 
-async function harness(options: { models?: CourseModel[]; writable?: ToolTarget[]; admission?: BuildAdmissionPort } = {}) {
+async function harness(options: { models?: CourseModel[]; writable?: ToolTarget[]; admission?: BuildAdmissionPort
+  readFile?: NonNullable<HostToolServices['projectFiles']>['readFile'] } = {}) {
   let id = 0
   const registry = new DocumentRegistry({ drivers: [driver], createId: () => `doc-${++id}`, bindingKey: binding => binding.path,
     persistence: { async append() {}, async save() { throw new Error('unused') } } })
   const models = options.models ?? [blank()]
   const sessions = await Promise.all(models.map((model, index) => registry.create(model, index ? `第${index + 1}课.h5lesson` : '四季.h5lesson')))
-  const services: HostToolServices = { projectFiles: { parsePage: parseWebComposition } }
+  const services: HostToolServices = { projectFiles: { parsePage: parseWebComposition, ...(options.readFile ? { readFile: options.readFile } : {}) } }
   if (options.admission) {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'project-files-build-')); roots.push(root)
     services.builds = new ControlledBuildService({ directory: path.join(root, 'scratch'), admission: options.admission })
   }
-  const gateway = new DocumentToolGateway(registry, [driver], () => String(++id), { services })
+  const gateway = new DocumentToolGateway(registry, [driver], () => String(++id), { services, prepareImage: prepareImageResource })
   await gateway.beginRun({ runId: 'r', actor: 'agent', documents: sessions.map(session => ({ documentId: session.documentId, writable: options.writable ?? [{ kind: 'document' }] })) })
   const session = sessions[0]!
   return { gateway, session, sessions,
@@ -236,5 +238,37 @@ describe('project files through the tool gateway', () => {
     expect(draft.advisories?.[0]?.message).toContain('已保存为草稿')
     expect(refused.project().components?.['坏组件']).toMatchObject({ enabled: false, draft: { reason: expect.stringContaining('未通过准入') } })
     expect((await refused.files()).find(file => file.path === 'components/坏组件.html')).toMatchObject({ type: '组件草稿' })
+  })
+
+  it('writes, edits, copies, renames and deletes image assets; pages follow a rename', async () => {
+    const png = await sharp({ create: { width: 3, height: 2, channels: 4, background: '#ff0000' } }).png().toBuffer()
+    const f = await harness({ readFile: async ({ path: file }) => {
+      if (file !== '材料/照片.png') throw new Error('没有这个文件')
+      return { bytes: new Uint8Array(png), mimeType: 'image/png', filename: '照片.png' }
+    } })
+    applied(await f.call('w1', 'project.write', { path: 'slides/01-导入.html',
+      content: '<img src="../assets/地轴.svg" alt="地轴倾斜"><div style="background: url(../assets/照片.png)">照片</div>' }))
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="#2563eb"/></svg>'
+    expect(applied(await f.call('a1', 'project.write', { path: 'assets/地轴.svg', content: svg })).affected).toEqual(['assets/地轴.svg'])
+    const meta = Object.values(f.project().assets).find(value => value.path === 'assets/地轴.svg')!
+    expect(meta).toMatchObject({ mimeType: 'image/svg+xml', width: 40, height: 20, filename: '地轴.svg', source: { kind: 'model-svg' } })
+    const layer = pageLayer(f.project())
+    expect(layer.kind === 'composition' && layer.content.assets['assets/地轴.svg']).toEqual({ assetId: meta.id })
+    expect(data(await f.call('r1', 'project.read', { path: 'assets/地轴.svg' }))).toMatchObject({ path: 'assets/地轴.svg', content: svg, mediaType: 'image/svg+xml', width: 40 })
+    applied(await f.call('e1', 'project.edit', { path: 'assets/地轴.svg', edits: [{ old: '#2563eb', new: '#dc2626' }] }))
+    const model = f.session.read().model as CourseModel
+    expect(new TextDecoder().decode(model.resources.assets[meta.id])).toContain('#dc2626')
+    applied(await f.call('a2', 'project.write', { path: 'assets/照片.png', from: '材料/照片.png' }))
+    expect(Object.values(f.project().assets).find(value => value.path === 'assets/照片.png')).toMatchObject({ width: 3, height: 2, source: { kind: 'user-material' } })
+    expect(await f.call('a3', 'project.write', { path: 'assets/照片2.jpg', from: '材料/照片.png' })).toMatchObject({ kind: 'error', code: 'type-mismatch' })
+    expect(await f.call('a4', 'project.write', { path: 'assets/照片3.png', content: 'not an image' })).toMatchObject({ kind: 'error', code: 'binary-file' })
+    applied(await f.call('m1', 'project.move', { from: 'assets/地轴.svg', to: 'assets/地轴倾斜.svg' }))
+    expect(data<{ content: string }>(await f.call('r2', 'project.read', { path: 'slides/01-导入.html' })).content).toContain('src="../assets/地轴倾斜.svg"')
+    applied(await f.call('d1', 'project.delete', { path: 'assets/照片.png' }))
+    expect(await f.files()).toEqual(expect.arrayContaining([{ path: 'assets/照片.png', type: '待填素材', note: '引用：slides/01-导入.html' }]))
+    const generated = await f.gateway.provideImage('r', f.session.documentId, { bytes: new Uint8Array(png), mimeType: 'image/png', filename: 'gen.png' })
+    applied(await f.call('a5', 'project.write', { path: 'assets/照片.png', from: generated }))
+    expect(Object.values(f.project().assets).find(value => value.path === 'assets/照片.png')).toMatchObject({ source: { kind: 'image-model' } })
+    expect(await f.files()).not.toEqual(expect.arrayContaining([expect.objectContaining({ type: '待填素材' })]))
   })
 })

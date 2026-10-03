@@ -21,8 +21,11 @@ export interface HostToolServices {
   htmlImports?: HtmlImportServicePort
   deliveries?: DocumentDeliveryServicePort
   observations?: ObservationServicePort
-  /** Project files: the existing HTML importer parser reads pages back. */
-  projectFiles?: { parsePage: PageParsePort }
+  /** Project files: the existing HTML importer parser reads pages back; workspace files are read under the task's file access. */
+  projectFiles?: {
+    parsePage: PageParsePort
+    readFile?(input: { runId: string; path: string; fileAccess: ToolRunGrant['fileAccess'] }): Promise<HostImageInput>
+  }
   /** Thin routes to the existing durable owners; this is not a second job store. */
   jobs?: {
     status(ref: HostJobRef): Promise<HostJobView>

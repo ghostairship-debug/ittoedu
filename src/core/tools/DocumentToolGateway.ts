@@ -24,6 +24,7 @@ import { slideSceneContext } from './slideInsertion'
 import { nativeMediaReplacementData, replaceFlowMedia, assertImagePlacementFit } from './imageApplication'
 import { planNativeInsertion } from './nativeInsertion'
 import type { HostImageInput, PrepareImageResourcePort } from './imageResource'
+import type { AssetSource } from '../../shared/contracts/media-v1/types'
 import type { ImageAssetResource } from './imageAssetMetadata'
 import { z } from 'zod'
 import { isSourceDocumentModel, type DocumentDriver, type DocumentSnapshot, type DocumentModel } from '../../shared/workbench/document'
@@ -224,6 +225,11 @@ export class DocumentToolGateway implements ToolGateway {
       commit: (runId, operationId, requestDigest, snapshot, model) => this.commitProjectFiles(runId, operationId, requestDigest, snapshot, model),
       admit: (runId, operationId, requestDigest, snapshot, model) => this.admitProjectFiles(runId, operationId, requestDigest, snapshot, model),
       parsePage: () => this.hostTools.projectFileServices()?.parsePage,
+      prepareImage: input => {
+        if (!this.options.prepareImage) throw new ToolError('unsupported-resource-preparation', '当前宿主未配置图片解码能力')
+        return this.options.prepareImage(input, this.createId)
+      },
+      readSource: (runId, from) => this.projectFileSource(runId, from),
       createId: () => this.createId(),
     })
   }
@@ -1026,6 +1032,23 @@ export class DocumentToolGateway implements ToolGateway {
     this.authorizeDocument(run, snapshot)
     if (access === 'write' && !this.canWrite(run, snapshot, { kind: 'document' })) throw new ToolError('not-authorized', '本次任务没有整份课件的写权限')
     return snapshot
+  }
+
+  /** Image bytes for assets/: this task's image result, a standalone image job result, or a workspace file. */
+  private async projectFileSource(runId: string, from: string): Promise<HostImageInput & { source: AssetSource }> {
+    const run = this.run(runId)
+    const image = this.images.get(from)
+    if (image) {
+      if (image.runId !== runId) throw new ToolError('invalid-resource', '图片资源不属于本任务')
+      return { bytes: Uint8Array.from(image.asset.bytes), mimeType: image.asset.meta.mimeType, filename: image.asset.meta.filename, source: { kind: 'image-model' } }
+    }
+    const standalone = /^(image-tool:[a-f0-9]{64})@(image_[a-f0-9]{64})$/.exec(from)
+    if (standalone) return { ...await this.hostTools.readStandaloneImage(runId, standalone[1]!, standalone[2]!), source: { kind: 'image-model' } }
+    const readFile = this.hostTools.projectFileServices()?.readFile
+    if (!readFile) throw new ToolError('service-unavailable', '读取工作区文件的服务尚未就绪')
+    const file = await readFile({ runId, path: from, fileAccess: run.grant.fileAccess })
+    if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
+    return { ...file, source: { kind: 'user-material', title: file.filename } }
   }
 
   /** Ordinary page edits: one canonical command through the Session, which owns CAS and history. */
