@@ -5,7 +5,7 @@ import { isIP } from 'node:net'
 import { resolvePublicDnsOverHttps } from './publicDnsOverHttps'
 
 export class PublicHttpError extends Error {
-  constructor(readonly code: string, message: string) { super(message); this.name = 'PublicHttpError' }
+  constructor(readonly code: string, message: string, readonly status?: number) { super(message); this.name = 'PublicHttpError' }
 }
 
 export interface PublicHttpResponse {
@@ -19,6 +19,22 @@ export interface PublicHttpResponse {
 export interface PublicHttpOptions {
   signal?: AbortSignal
   resolve?: (hostname: string) => Promise<readonly { address: string; family: 4 | 6 }[]>
+  /** 只可覆盖这三项，其余请求头固定不变。 */
+  headers?: { Accept?: string; 'User-Agent'?: string; 'Accept-Language'?: string }
+  /** 响应正文超过此字节数时中止读取。 */
+  maxBytes?: number
+}
+
+type RequestSettings = { headers: Record<string, string>; maxBytes?: number }
+
+function requestSettings(options: PublicHttpOptions): RequestSettings {
+  const headers: Record<string, string> = { Accept: 'text/html, text/plain, application/pdf;q=0.5', 'Accept-Encoding': 'identity',
+    'User-Agent': 'GuolingResearch/2.0' }
+  for (const name of ['Accept', 'User-Agent', 'Accept-Language'] as const) {
+    const value = options.headers?.[name]
+    if (typeof value === 'string' && value.trim() && !/[\r\n]/.test(value)) headers[name] = value
+  }
+  return { headers, ...(options.maxBytes !== undefined ? { maxBytes: options.maxBytes } : {}) }
 }
 
 function ipv4Number(address: string): number {
@@ -102,11 +118,10 @@ async function publicAddress(url: URL, resolver: NonNullable<PublicHttpOptions['
   return answers[0]!
 }
 
-function oneRequest(url: URL, address: { address: string; family: 4 | 6 }, signal: AbortSignal, activity: () => void): Promise<{ status: number; location?: string; contentType: string; charset?: string; bytes: Uint8Array }> {
+function oneRequest(url: URL, address: { address: string; family: 4 | 6 }, signal: AbortSignal, activity: () => void, settings: RequestSettings): Promise<{ status: number; location?: string; contentType: string; charset?: string; bytes: Uint8Array }> {
   return new Promise((resolve, reject) => {
     const client = url.protocol === 'https:' ? httpsRequest : httpRequest
-    const req = client(url, { method: 'GET', signal, headers: { Accept: 'text/html, text/plain, application/pdf;q=0.5', 'Accept-Encoding': 'identity',
-      'User-Agent': 'GuolingResearch/2.0' }, lookup: (_host, options, callback) => options.all
+    const req = client(url, { method: 'GET', signal, headers: settings.headers, lookup: (_host, options, callback) => options.all
         ? callback(null, [{ address: address.address, family: address.family }])
         : callback(null, address.address, address.family) }, response => {
       activity()
@@ -116,9 +131,19 @@ function oneRequest(url: URL, address: { address: string; family: 4 | 6 }, signa
       const contentType = contentTypeHeader.split(';', 1)[0]!.trim().toLowerCase()
       const charset = contentTypeHeader.match(/(?:^|;)\s*charset\s*=\s*["']?([^;"'\s]+)/i)?.[1]
       if (status >= 300 && status < 400) { response.resume(); resolve({ status, location, contentType, bytes: new Uint8Array() }); return }
+      const maxBytes = settings.maxBytes
+      const tooLarge = () => {
+        const error = new PublicHttpError('too-large', `网络资源超过 ${Math.max(1, Math.round((maxBytes ?? 0) / 1024 / 1024))} MB 上限，已停止下载`)
+        reject(error)
+        response.destroy(error)
+      }
+      if (maxBytes !== undefined && Number(response.headers['content-length']) > maxBytes) { tooLarge(); return }
       const chunks: Buffer[] = []
+      let received = 0
       response.on('data', (chunk: Buffer) => {
         activity()
+        received += chunk.length
+        if (maxBytes !== undefined && received > maxBytes) { tooLarge(); return }
         chunks.push(chunk)
       })
       response.on('error', reject)
@@ -149,19 +174,20 @@ export async function fetchPublicResource(raw: string, options: PublicHttpOption
       async () => (await lookup(host, { all: true })).map(({ address, family }) => ({ address, family: family as 4 | 6 })),
       () => resolvePublicDnsOverHttps(host, controller.signal)))
     const visited = new Set<string>()
+    const settings = requestSettings(options)
     for (;;) {
       if (controller.signal.aborted) throw new PublicHttpError('cancelled', '网页读取已取消')
       if (visited.has(url.href)) throw new PublicHttpError('redirect-loop', '网页出现重复跳转循环')
       visited.add(url.href)
       const address = await publicAddress(url, resolver, controller.signal)
       activity()
-      const response = await oneRequest(url, address, controller.signal, activity)
+      const response = await oneRequest(url, address, controller.signal, activity, settings)
       if (response.status >= 300 && response.status < 400) {
         if (!response.location) throw new PublicHttpError('invalid-redirect', '网页跳转缺少目标地址')
         url = parsePublicUrl(new URL(response.location, url).href)
         continue
       }
-      if (response.status < 200 || response.status >= 300) throw new PublicHttpError('http-error', `网页返回 HTTP ${response.status}`)
+      if (response.status < 200 || response.status >= 300) throw new PublicHttpError('http-error', `网页返回 HTTP ${response.status}`, response.status)
       return { url: url.href, status: response.status, contentType: response.contentType, ...(response.charset ? { charset: response.charset } : {}), bytes: response.bytes }
     }
   } catch (cause) {
