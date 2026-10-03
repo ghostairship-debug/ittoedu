@@ -69,7 +69,7 @@ it('explains a stale local selection while retaining committed edits, and never 
   const secret = 'private-token C:\\private\\provider.json stack-secret'
   vi.spyOn(f.service.attachments, 'readRepresentation').mockRejectedValueOnce(new Error(secret))
   const unknown = await rejection(f.service.operate({ ...f.send, submissionId: randomUUID() }))
-  expect(normalizeDesktopError(unknown, fallback)).toEqual(fallback)
+  expect(normalizeDesktopError(unknown, fallback)).toMatchObject({ code: 'execution-operation-failed', message: '会话服务暂时无法完成操作。' })
   expect(JSON.stringify(normalizeDesktopError(unknown, fallback))).not.toContain(secret)
   expect(diagnostic).toHaveBeenCalled(); await f.assertPreserved()
 })
@@ -79,7 +79,19 @@ it('refuses a composer draft saved on an older conversation revision with the sp
   vi.spyOn(diagnosticLog, 'append').mockResolvedValue(undefined)
   const error = await rejection(f.service.operate({ type: 'draft', workspaceId: f.draft.workspaceId, conversationId: f.draft.conversationId,
     expectedRevision: f.draft.revision - 1, text: '旧视图里的新草稿', documents: [], attachments: [] }))
-  expect(normalizeDesktopError(error, fallback)).toMatchObject({ code: 'execution-conversation-draft-changed', message: expect.stringContaining('草稿已在另一处更新') })
+  expect(normalizeDesktopError(error, fallback)).toMatchObject({ code: 'execution-conversation-draft-changed', title: '草稿未保存', message: expect.stringContaining('草稿已在另一处更新') })
+  await f.assertPreserved()
+})
+
+it('gives every operation failure settled inside a conversation queue its specific reason instead of the generic IPC fallback', async () => {
+  const f = await fixture()
+  vi.spyOn(diagnosticLog, 'append').mockResolvedValue(undefined)
+  const identity = { workspaceId: f.draft.workspaceId, conversationId: f.draft.conversationId }
+  const rename = await rejection(f.service.operate({ type: 'rename-conversation', ...identity, expectedRevision: f.draft.revision - 1, title: '新名称' }))
+  expect(normalizeDesktopError(rename, fallback)).toMatchObject({ code: 'execution-store-revision-conflict', title: '会话名称未保存',
+    message: expect.stringContaining('会话刚被另一项操作更新'), suggestion: expect.stringContaining('再操作一次') })
+  const queued = await rejection(f.service.operate({ type: 'delete-submission', ...identity, submissionId: randomUUID() }))
+  expect(normalizeDesktopError(queued, fallback)).toMatchObject({ code: 'execution-operation-refused', message: '排队消息不存在' })
   await f.assertPreserved()
 })
 

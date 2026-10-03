@@ -360,7 +360,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (!event.sender.isDestroyed()) event.sender.send(`${IPC_CHANNELS.attachments}:progress`, progress)
   }))
   registerSafeHandler(IPC_CHANNELS.execution, context, {
-    code: 'EXECUTION_FAILED', title: '会话操作未完成', message: '当前任务没有完成，请查看具体原因。', suggestion: '文档中已应用的修改已保留。',
+    // The service maps its own failures to specific reasons; this is left for a service that could not be reached.
+    code: 'EXECUTION_FAILED', title: '会话操作未完成', message: '会话服务暂时不可用。', suggestion: '请重试；若仍失败，请重新启动编辑器。当前输入和已应用的修改已保留。',
   }, async (_event, args) => {
     await htmlActionsReady
     const service = await executionDesktopService()
