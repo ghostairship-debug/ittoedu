@@ -1,0 +1,33 @@
+import { z } from 'zod'
+
+/** Optional: the course file name or path (or a document handle); omit when the task has one course. */
+const project = z.string().min(1).max(1000).optional()
+const path = z.string().min(1).max(500)
+
+export const projectFileToolSchemas = {
+  'project.list': z.object({ project }).strict(),
+  'project.read': z.object({ project, path, offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(200_000).optional() }).strict(),
+  'project.write': z.object({ project, path, content: z.string().max(4_000_000) }).strict(),
+  'project.edit': z.object({ project, path, edits: z.array(z.object({ old: z.string().min(1), new: z.string() }).strict()).min(1).max(50) }).strict(),
+  'project.move': z.object({ project, from: path, to: path }).strict(),
+  'project.delete': z.object({ project, path }).strict(),
+} as const
+export type ProjectFileToolName = keyof typeof projectFileToolSchemas
+export const isProjectFileToolName = (name: string): name is ProjectFileToolName => Object.hasOwn(projectFileToolSchemas, name)
+
+const descriptions: Record<ProjectFileToolName, string> = {
+  'project.list': '列出课件工程的文件：slides/<序号>-<名称>.html 演示页（可编辑页或整页程序）、assets/ 素材、页面引用但尚未提供的待填素材和待写组件、controller/教师控制台.js。不需要句柄或编号。',
+  'project.read': '读取工程内一个文件的当前内容（已含人工修改）。页面是普通 HTML，素材用 ../assets/<名称> 相对引用；SVG 素材返回文本，其他素材返回类型与尺寸。很长的文件用 offset/limit 续读。',
+  'project.write': '整份写入一个工程文件：写已有文件前须先读取，读取后若被人改过会失败并提示重读；写新路径即新建（slides/03-名称.html 插入为第 3 页）。页面写普通 HTML/CSS/SVG，不写翻页、键盘和缩放；含脚本的页面按整页程序经准入后提交。素材可写 SVG 文本。软件对齐对象身份并作为一次可撤销修改提交。',
+  'project.edit': '局部替换工程文件中的原文：每处 old 必须在当前文件中唯一出现，否则失败，请重新读取后给出更长的原文。多处替换按顺序一次提交、一次撤销。',
+  'project.move': '改名或移动工程文件：页面可改名或改序号调整顺序（只在同一演示表面内），软件维护导航与引用。',
+  'project.delete': '删除工程文件：删除页面即删除该场景，按现有规则清理导航与引用；至少保留一页。',
+}
+
+/** Single catalog source for the built-in Agent and external MCP. */
+export const projectFileTools = (Object.keys(projectFileToolSchemas) as ProjectFileToolName[]).map(name => ({
+  name, description: descriptions[name], inputSchema: projectFileToolSchemas[name],
+  manual: { label: { 'project.list': '列出工程文件', 'project.read': '读取工程文件', 'project.write': '写入工程文件', 'project.edit': '局部修改工程文件',
+    'project.move': '移动工程文件', 'project.delete': '删除工程文件' }[name],
+    group: (name === 'project.list' || name === 'project.read' ? 'read' : 'edit') as 'read' | 'edit', targetKinds: ['document'] as ['document'] },
+}))
