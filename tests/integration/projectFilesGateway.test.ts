@@ -54,7 +54,8 @@ async function harness(options: { models?: CourseModel[]; writable?: ToolTarget[
   return { gateway, session, sessions,
     call: (callId: string, name: string, input: unknown) => gateway.execute('r', callId, { name, input }),
     project: () => (session.read().model as CourseModel).project,
-    files: async () => data<{ files: { path: string; type: string; note?: string }[] }>(await gateway.execute('r', `list-${++id}`, { name: 'project.list', input: {} })).files }
+    files: async () => data<{ files: { path: string; type: string; note?: string }[] }>(await gateway.execute('r', `list-${++id}`, { name: 'project.list', input: {} })).files,
+    pages: async () => data<{ files: { path: string; type: string; note?: string }[] }>(await gateway.execute('r', `list-${++id}`, { name: 'project.list', input: {} })).files.filter(file => file.path.startsWith('slides/')) }
 }
 
 function pageLayer(model: CourseModel['project'], index = 0) {
@@ -65,16 +66,34 @@ function pageLayer(model: CourseModel['project'], index = 0) {
 
 const PAGE = '<!doctype html><html><head><style>h1 { color: #1d4ed8 }</style></head><body><h1 class="fragment">四季的成因</h1><p>导入</p><p>导入</p></body></html>'
 
+/** An injected port verifies the lifecycle, not real-host rendering (as in the controlled build tests). */
+async function passingAdmission() {
+  const png = await sharp({ create: { width: 20, height: 20, channels: 4, background: '#3388aa' } }).png().toBuffer()
+  const dataUrl = `data:image/png;base64,${png.toString('base64')}`
+  let admitted = 0
+  const admission: BuildAdmissionPort = { async run(payload) {
+    admitted++
+    return { ok: true, processId: 7, message: 'injected admission port',
+      captures: payload.targets.flatMap(target => target.instanceIds.map(instanceId => ({ instanceId, locationId: target.locationId, width: 20, height: 20, dataUrl })))
+        .filter((capture, index, values) => values.findIndex(value => value.instanceId === capture.instanceId) === index),
+      behaviorEvidence: payload.targets.map(target => ({ version: 1, status: 'observed', mode: 'full-admission', projectId: payload.project.id,
+        documentRevision: payload.project.revision, locationId: target.locationId, stateId: target.stateId ?? null, instanceIds: target.instanceIds,
+        sourceIdentities: {}, actions: [], elapsedMs: 5, semanticVerdict: 'requires-review',
+        frames: [{ phase: 'running', elapsedMs: 0, capturedAt: 1, stateVersion: 0, publicState: {}, width: 20, height: 20, dataUrl }] })) }
+  } }
+  return { admission, count: () => admitted }
+}
+
 describe('project files through the tool gateway', () => {
   it('lists, creates, orders and reads slide pages as plain HTML, each write being one undoable change', async () => {
     const f = await harness()
-    expect(await f.files()).toEqual([{ path: 'slides/01-场景 1.html', type: '空白页' }])
+    expect(await f.pages()).toEqual([{ path: 'slides/01-场景 1.html', type: '空白页' }])
     const first = applied(await f.call('w1', 'project.write', { path: 'slides/01-导入.html', content: PAGE }))
     expect(first.affected).toEqual(['slides/01-导入.html'])
-    expect(await f.files()).toEqual([{ path: 'slides/01-导入.html', type: '可编辑页' }])
+    expect(await f.pages()).toEqual([{ path: 'slides/01-导入.html', type: '可编辑页' }])
     applied(await f.call('w2', 'project.write', { path: 'slides/02-观察.html', content: '<h1>观察</h1>' }))
     applied(await f.call('w3', 'project.write', { path: 'slides/02-讨论.html', content: '<h1>讨论</h1>' }))
-    expect((await f.files()).map(file => file.path)).toEqual(['slides/01-导入.html', 'slides/02-讨论.html', 'slides/03-观察.html'])
+    expect((await f.pages()).map(file => file.path)).toEqual(['slides/01-导入.html', 'slides/02-讨论.html', 'slides/03-观察.html'])
     expect(f.session.read().undoDepth).toBe(3)
     const read = data<{ content: string; type: string }>(await f.call('r1', 'project.read', { path: 'slides/01-导入.html' }))
     expect(read.type).toBe('可编辑页')
@@ -121,7 +140,7 @@ describe('project files through the tool gateway', () => {
       applied(await f.call(`w${index}`, 'project.write', { path: `slides/0${index + 1}-${name}.html`, content: `<h1>${name}</h1>` }))
     applied(await f.call('m1', 'project.move', { from: 'slides/03-结论.html', to: 'slides/01-结论.html' }))
     applied(await f.call('m2', 'project.move', { from: 'slides/02-导入.html', to: 'slides/02-引入.html' }))
-    expect((await f.files()).map(file => file.path)).toEqual(['slides/01-结论.html', 'slides/02-引入.html', 'slides/03-观察.html'])
+    expect((await f.pages()).map(file => file.path)).toEqual(['slides/01-结论.html', 'slides/02-引入.html', 'slides/03-观察.html'])
     expect(f.project().locations.map(location => location.label)).toEqual(expect.arrayContaining([expect.stringContaining('引入')]))
     applied(await f.call('d1', 'project.delete', { path: 'slides/03-观察.html' }))
     applied(await f.call('d2', 'project.delete', { path: 'slides/02-引入.html' }))
@@ -136,36 +155,24 @@ describe('project files through the tool gateway', () => {
     expect(pageLayer((two.sessions[1]!.read().model as CourseModel).project).kind).toBe('composition')
     expect(pageLayer(two.project(), 0)).toBeUndefined()
     const readOnly = await harness({ writable: [] })
-    expect(data<{ files: unknown[] }>(await readOnly.call('l2', 'project.list', {})).files).toHaveLength(1)
+    expect(await readOnly.pages()).toHaveLength(1)
     expect(await readOnly.call('w2', 'project.write', { path: 'slides/01-甲.html', content: '<p>甲</p>' })).toMatchObject({ kind: 'error', code: 'not-authorized' })
   })
 
   it('admits a scripted page through the existing staging build before its single commit', async () => {
-    const png = await sharp({ create: { width: 20, height: 20, channels: 4, background: '#3388aa' } }).png().toBuffer()
-    const dataUrl = `data:image/png;base64,${png.toString('base64')}`
-    let admitted = 0
-    const admission: BuildAdmissionPort = { async run(payload) {
-      admitted++
-      return { ok: true, processId: 7, message: 'injected admission port',
-        captures: payload.targets.flatMap(target => target.instanceIds.map(instanceId => ({ instanceId, locationId: target.locationId, width: 20, height: 20, dataUrl })))
-          .filter((capture, index, values) => values.findIndex(value => value.instanceId === capture.instanceId) === index),
-        behaviorEvidence: payload.targets.map(target => ({ version: 1, status: 'observed', mode: 'full-admission', projectId: payload.project.id,
-          documentRevision: payload.project.revision, locationId: target.locationId, stateId: target.stateId ?? null, instanceIds: target.instanceIds,
-          sourceIdentities: {}, actions: [], elapsedMs: 5, semanticVerdict: 'requires-review',
-          frames: [{ phase: 'running', elapsedMs: 0, capturedAt: 1, stateVersion: 0, publicState: {}, width: 20, height: 20, dataUrl }] })) }
-    } }
+    const { admission, count } = await passingAdmission()
     const f = await harness({ admission })
     const program = '<!doctype html><html><body><button>开始</button><script>document.querySelector("button").textContent = "运行中"</script></body></html>'
     applied(await f.call('p1', 'project.write', { path: 'slides/01-实验.html', content: program }))
-    expect(admitted).toBe(1)
+    expect(count()).toBe(1)
     const layer = pageLayer(f.project())
     expect(layer).toMatchObject({ kind: 'runtime', runtime: { protocol: 'surface-runtime', staticFallback: { coverage: 'scene' } } })
     expect(f.session.read().undoDepth).toBe(1)
-    expect(await f.files()).toEqual([{ path: 'slides/01-实验.html', type: '整页程序' }])
+    expect(await f.pages()).toEqual([{ path: 'slides/01-实验.html', type: '整页程序' }])
     expect(data<{ content: string }>(await f.call('r1', 'project.read', { path: 'slides/01-实验.html' })).content).toBe(program)
     // Unchanged program text needs no second admission.
     expect(await f.call('p2', 'project.write', { path: 'slides/01-实验.html', content: program })).toMatchObject({ kind: 'document-operation', result: { status: 'unchanged' } })
-    expect(admitted).toBe(1)
+    expect(count()).toBe(1)
   })
 
   it('reports a failed admission without committing anything', async () => {
@@ -174,5 +181,60 @@ describe('project files through the tool gateway', () => {
     expect(await f.call('p1', 'project.write', { path: 'slides/01-实验.html', content: '<script>throw new Error("x")</script>' }))
       .toMatchObject({ kind: 'error', code: 'admission-failed' })
     expect(f.session.read().revision).toBe(before)
+  })
+
+  it('writes the course theme and lists pending assets and components a page refers to', async () => {
+    const f = await harness()
+    expect((await f.files())[0]).toEqual({ path: 'theme.css', type: '主题', note: '尚未写入' })
+    applied(await f.call('t1', 'project.write', { path: 'theme.css', content: 'h1 { color: var(--color-accent); background: url(../assets/纸纹.png) }' }))
+    expect(f.project().theme?.css).toContain('var(--color-accent)')
+    applied(await f.call('w1', 'project.write', { path: 'slides/01-导入.html',
+      content: '<h1>四季</h1><img src="../assets/地轴倾斜.svg" alt="地轴倾斜示意"><iframe src="../components/公转模拟.html" title="公转模拟"></iframe>' }))
+    const files = await f.files()
+    expect(files).toEqual(expect.arrayContaining([
+      { path: 'assets/纸纹.png', type: '待填素材', note: '引用：theme.css' },
+      { path: 'assets/地轴倾斜.svg', type: '待填素材', note: '说明：地轴倾斜示意；引用：slides/01-导入.html' },
+      { path: 'components/公转模拟.html', type: '待写组件', note: '说明：公转模拟；引用：slides/01-导入.html' },
+    ]))
+    // The run wrote the theme itself, so it may overwrite it; another run would have to read it first.
+    applied(await f.call('t2', 'project.write', { path: 'theme.css', content: 'h1 { color: red }' }))
+    await f.gateway.beginRun({ runId: 'r2', actor: 'agent', documents: [{ documentId: f.session.documentId, writable: [{ kind: 'document' }] }] })
+    expect(await f.gateway.execute('r2', 't3', { name: 'project.write', input: { path: 'theme.css', content: 'h1 { color: blue }' } })).toMatchObject({ kind: 'error', code: 'read-required' })
+    applied(await f.call('d1', 'project.delete', { path: 'theme.css' }))
+    expect(f.project().theme).toBeUndefined()
+  })
+
+  it('writes a named component once; every page copy follows after admission, and a refused one is kept as a draft', async () => {
+    const pass = await passingAdmission()
+    const f = await harness({ admission: pass.admission })
+    applied(await f.call('w1', 'project.write', { path: 'slides/01-导入.html', content: '<h1>四季</h1><iframe src="../components/公转模拟.html" title="公转模拟"></iframe>' }))
+    applied(await f.call('w2', 'project.write', { path: 'slides/02-观察.html', content: '<iframe src="../components/公转模拟.html" title="再看一次"></iframe>' }))
+    expect(pass.count()).toBe(0)
+    const component = '<!doctype html><html><body><canvas></canvas><script>document.title = "公转"</script></body></html>'
+    const written = applied(await f.call('c1', 'project.write', { path: 'components/公转模拟.html', content: component }))
+    expect(written.affected).toEqual(['components/公转模拟.html'])
+    expect(pass.count()).toBe(1)
+    expect(f.project().components?.['公转模拟']).toMatchObject({ enabled: true, protocol: 'surface-runtime' })
+    const copies: unknown[] = []
+    for (const index of [0, 1]) {
+      const layer = pageLayer(f.project(), index)
+      if (layer.kind !== 'composition') throw new Error('composition')
+      walkComposition(layer.content.root, node => { if (node.kind === 'runtime') copies.push(node.runtime) })
+    }
+    expect(copies).toHaveLength(2)
+    expect(copies.every(copy => (copy as { staticFallback?: unknown }).staticFallback)).toBe(true)
+    expect(data<{ content: string; type: string }>(await f.call('r1', 'project.read', { path: 'components/公转模拟.html' }))).toMatchObject({ content: component, type: '组件' })
+    // Editing a page that uses the component keeps its copy and needs no new admission.
+    applied(await f.call('e1', 'project.edit', { path: 'slides/02-观察.html', edits: [{ old: 'title="再看一次"', new: 'title="再观察一次"' }] }))
+    expect(pass.count()).toBe(1)
+    applied(await f.call('m1', 'project.move', { from: 'components/公转模拟.html', to: 'components/地球公转.html' }))
+    expect(data<{ content: string }>(await f.call('r2', 'project.read', { path: 'slides/01-导入.html' })).content).toContain('src="../components/%E5%9C%B0%E7%90%83%E5%85%AC%E8%BD%AC.html"')
+
+    const refused = await harness({ admission: { async run() { return { ok: false, message: '组件脚本抛出错误' } } } as unknown as BuildAdmissionPort })
+    applied(await refused.call('w1', 'project.write', { path: 'slides/01-导入.html', content: '<iframe src="../components/坏组件.html" title="坏"></iframe>' }))
+    const draft = applied(await refused.call('c1', 'project.write', { path: 'components/坏组件.html', content: '<script>throw new Error("x")</script>' }))
+    expect(draft.advisories?.[0]?.message).toContain('已保存为草稿')
+    expect(refused.project().components?.['坏组件']).toMatchObject({ enabled: false, draft: { reason: expect.stringContaining('未通过准入') } })
+    expect((await refused.files()).find(file => file.path === 'components/坏组件.html')).toMatchObject({ type: '组件草稿' })
   })
 })

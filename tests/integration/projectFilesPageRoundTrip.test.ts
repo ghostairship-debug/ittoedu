@@ -6,6 +6,7 @@ import sharp from 'sharp'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { documentDigest } from '../../src/core/documents/documentDigest'
+import { normalizeCourseProject } from '../../src/core/course/normalizeCourseProject'
 import { parsePageHtml, serializePageHtml, type PageComposition, type PageNode } from '../../src/core/projectFiles/pageHtml'
 import { applyCompositionContentEdit, type CompositionContentEdit } from '../../src/core/tools/compositionContent'
 import { parseWebComposition } from '../../src/main/workbench/htmlImport/parseWebComposition'
@@ -131,7 +132,6 @@ describe('slide page file round trip', () => {
 
     const parsed = parse(html, page)
     if (parsed.kind !== 'composition') throw new Error('page should stay editable')
-    expect(parsed.changedRuntimes).toBe(0)
     expect(parsed.content).toEqual(page)
     expect(documentDigest(parsed.content)).toBe(documentDigest(page))
     // Its embedded program keeps the admitted definition, including the static fallback.
@@ -157,16 +157,25 @@ describe('slide page file round trip', () => {
     expect(parsed.content.assets).toEqual(page.assets)
   })
 
-  it('binds a newly referenced existing asset by its file path and keeps unknown paths as written', () => {
+  it('keeps new references as written; normalization binds a slot that names an existing asset', () => {
     const name = Object.values(project.assets).find(meta => meta.id === photoAssetId)!.path
     const html = serializePageHtml(page, project.assets).replace('<p>原生交互</p>', `<p>原生交互</p><img src="../${name}" alt="新图"><img src="../assets/待画.svg" alt="待填素材">`)
     const parsed = parse(html, page)
     if (parsed.kind !== 'composition') throw new Error('page should stay editable')
     const images = nodes(parsed.content).filter((node): node is Extract<PageNode, { kind: 'element' }> => node.kind === 'element' && node.tagName === 'img')
     const added = images.find(node => node.attributes.alt === '新图')!
-    const reference = /^cw-resource:([a-zA-Z0-9_.-]+)$/.exec(added.attributes.src!)?.[1]
-    expect(reference && parsed.content.assets[reference]).toEqual({ assetId: photoAssetId })
+    expect(added.attributes.src).toBe(`../${name}`)
     expect(images.find(node => node.attributes.alt === '待填素材')!.attributes.src).toBe('../assets/待画.svg')
+    const slide = project.surfaces.find(surface => surface.type === 'slide')!
+    if (slide.type !== 'slide') throw new Error('slide')
+    const withPage = structuredClone(project)
+    const item = (withPage.surfaces.find(surface => surface.id === slide.id) as typeof slide).scenes[0]!.layerItems[0]!
+    if (item.kind !== 'composition') throw new Error('composition')
+    item.content = parsed.content
+    const bound = normalizeCourseProject(withPage)
+    const boundItem = (bound.surfaces.find(surface => surface.id === slide.id) as typeof slide).scenes[0]!.layerItems[0]!
+    expect(boundItem.kind === 'composition' && boundItem.content.assets[name]).toEqual({ assetId: photoAssetId })
+    expect(boundItem.kind === 'composition' && boundItem.content.assets['assets/待画.svg']).toBeUndefined()
   })
 
   it('treats a scripted page as a whole-page program whose document keeps relative asset references for the reader', () => {

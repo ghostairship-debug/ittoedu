@@ -1,17 +1,19 @@
-import type { CourseProjectDocument, CourseRuntimeDefinition, LayerItem, SlideSurfaceDocument } from '../../shared/courseProjectTypes'
+import type { CourseProjectDocument, LayerItem, SlideSurfaceDocument } from '../../shared/courseProjectTypes'
 import type { DocumentResources } from '../../shared/workbench/document'
 import { effectiveSceneCanvas } from '../../shared/slideCanvas'
 import { addCourseSlidePage, deleteCourseLocation, renameCourseLocation } from '../tools/courseLocations'
 import { allocateCourseLayerOrder } from '../tools/layerOrder'
 import { mutateAddSlideScene, mutateReorderSlideScenes } from '../tools/slideStructure'
-import { parsePageHtml, type PageComposition, type PageDiagnostic, type PageNode, type PageParsePort } from './pageHtml'
+import { parsePageHtml, type PageDiagnostic, type PageParsePort } from './pageHtml'
 import { slideFolder, slidePageFiles, type SlidePageFile } from './projectFileView'
 
 export interface PlannedChange {
   project: CourseProjectDocument
   resources: DocumentResources
-  /** A new or changed program must pass the existing staging admission before it is committed. */
-  admission: boolean
+  /** Always admit (changed component package code); new or changed programs are detected after normalization. */
+  admission?: boolean
+  /** The same change saved disabled with the reason, when admission refuses it (components). */
+  draft?: (reason: string) => PlannedChange
   /** Identity of the written file after the change (`page:<sceneId>`). */
   identity: string
   diagnostics: readonly PageDiagnostic[]
@@ -21,9 +23,6 @@ export class ProjectFileError extends Error {
 }
 
 const PAGE_PATH = /^(slides(?:-(\d+))?)\/(?:(\d{1,4})-)?(.+)\.html$/
-// A valid 1×1 PNG; admission replaces it with the real capture, as the HTML importer does.
-const PLACEHOLDER_PNG = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII='), char => char.charCodeAt(0))
-
 export function parsePagePath(path: string): { surfaceIndex: number; number?: number; name: string } | undefined {
   const match = PAGE_PATH.exec(path)
   if (!match) return undefined
@@ -34,20 +33,6 @@ export function parsePagePath(path: string): { surfaceIndex: number; number?: nu
 
 function slideSurfaces(project: CourseProjectDocument): SlideSurfaceDocument[] {
   return project.surfaces.filter((surface): surface is SlideSurfaceDocument => surface.type === 'slide')
-}
-
-/** Programs need a declared fallback before admission captures the real one. */
-function withPlaceholderFallbacks(project: CourseProjectDocument, resources: DocumentResources, runtimes: readonly { id: string; runtime: CourseRuntimeDefinition; coverage: 'scene' | 'surface' }[]): DocumentResources {
-  let next = resources
-  for (const { id, runtime, coverage } of runtimes) {
-    if (runtime.staticFallback) continue
-    const assetId = `runtime-capture-${id}`
-    project.assets[assetId] = { id: assetId, filename: `${assetId}.png`, mimeType: 'image/png', kind: 'image', path: `assets/${assetId}.png`,
-      byteLength: PLACEHOLDER_PNG.byteLength, width: 1, height: 1 }
-    next = { ...next, assets: { ...next.assets, [assetId]: Uint8Array.from(PLACEHOLDER_PNG) } }
-    runtime.staticFallback = { assetId, coverage }
-  }
-  return next
 }
 
 /** Locate or create the scene a page path names. A lone blank first page is reused, as HTML import does. */
@@ -115,26 +100,11 @@ export function planPageWrite(input: {
     visible: true, locked: false, rotation: 0, opacity: 1, hitPolicy: 'auto' as const, playbackInitialVisibility: 'inherit' as const,
   }
   if (base?.locked) throw new ProjectFileError('locked', '页面主体已锁定，解锁后再写入')
-  let item: LayerItem, admission: boolean, resources = input.resources
-  if (parsed.kind === 'composition') {
-    const embedded: { id: string; runtime: CourseRuntimeDefinition; coverage: 'surface' }[] = []
-    const visit = (node: PageNode) => {
-      if (node.kind === 'runtime') embedded.push({ id: node.id, runtime: node.runtime, coverage: 'surface' })
-      if (node.kind === 'element') node.children.forEach(visit)
-    }
-    visit(parsed.content.root)
-    resources = withPlaceholderFallbacks(project, resources, embedded)
-    item = { ...layerBase, kind: 'composition', content: parsed.content as PageComposition }
-    admission = parsed.changedRuntimes > 0
-  } else {
-    const runtime = structuredClone(parsed.runtime)
-    resources = withPlaceholderFallbacks(project, resources, [{ id: layerBase.layerItemId, runtime, coverage: 'scene' }])
-    item = { ...layerBase, kind: 'runtime', runtime }
-    admission = parsed.changed
-  }
+  const item: LayerItem = parsed.kind === 'composition' ? { ...layerBase, kind: 'composition', content: parsed.content }
+    : { ...layerBase, kind: 'runtime', runtime: structuredClone(parsed.runtime) }
   if (carrierIndex >= 0) scene.layerItems[carrierIndex] = item
   else scene.layerItems.push(item)
-  return { project, resources, admission, identity: `page:${page.sceneId}`, diagnostics: parsed.diagnostics }
+  return { project, resources: input.resources, identity: `page:${page.sceneId}`, diagnostics: parsed.diagnostics }
 }
 
 /** Rename a page, or move it to another number within its surface; locations and navigation follow the formal rules. */
@@ -155,7 +125,7 @@ export function planPageMove(project: CourseProjectDocument, resources: Document
     scenes.splice(Math.min(Math.max(target.number - 1, 0), scenes.length), 0, page.sceneId)
     next = mutateReorderSlideScenes(next, page.surfaceId, scenes)
   }
-  return { project: next, resources, admission: false, identity: `page:${page.sceneId}`, diagnostics: [] }
+  return { project: next, resources, identity: `page:${page.sceneId}`, diagnostics: [] }
 }
 
 /** Deleting a page deletes its scene with the existing location rules (navigation and print references follow). */
@@ -164,5 +134,5 @@ export function planPageDelete(project: CourseProjectDocument, resources: Docume
   if (!page) throw new ProjectFileError('not-found', `没有这个页面：${path}`)
   const deleted = deleteCourseLocation(project, page.locationId)
   if (!deleted.ok) throw new ProjectFileError('delete-refused', deleted.reason)
-  return { project: deleted.project, resources, admission: false, identity: `page:${page.sceneId}`, diagnostics: [] }
+  return { project: deleted.project, resources, identity: `page:${page.sceneId}`, diagnostics: [] }
 }

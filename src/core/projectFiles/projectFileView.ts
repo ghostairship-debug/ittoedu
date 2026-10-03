@@ -1,12 +1,16 @@
-import type { CompositionLayerItem, CourseProjectDocument, LayerItem, RuntimeLayerItem, SlideSceneDocument } from '../../shared/courseProjectTypes'
+import type { CompositionLayerItem, CourseComponentDefinition, CourseProjectDocument, LayerItem, RuntimeLayerItem, SlideSceneDocument } from '../../shared/courseProjectTypes'
+import { assetReferencePath, componentReferenceName, courseComponentNameKey, cssUrlReferences } from '../../shared/composition/projectReferences'
 import type { DocumentResources } from '../../shared/workbench/document'
 import { unpackHtmlDocumentRuntimeSource } from '../../shared/runtime/htmlDocumentSource'
 import { documentDigest } from '../documents/documentDigest'
-import { assetFilePath, componentReferenceName, serializePageHtml, type PageNode } from './pageHtml'
+import { findCourseComponentName } from '../course/courseComponents'
+import { assetFilePath, programHtml, serializePageHtml, type PageNode } from './pageHtml'
 
+export const THEME_FILE = 'theme.css'
 export const CONTROLLER_FILE = 'controller/教师控制台.js'
 const PAGE_TYPE = { composition: '可编辑页', program: '整页程序', blank: '空白页' } as const
 const NATIVE_KIND: Record<string, string> = { text: '文字', formula: '公式', image: '图片', video: '视频', shape: '形状', table: '表格', chart: '图表', input: '输入框' }
+const URL_ATTRIBUTES = new Set(['src', 'href', 'poster', 'xlink:href', 'data'])
 
 export type PageCarrier =
   | { kind: 'composition'; item: CompositionLayerItem }
@@ -106,34 +110,41 @@ export function assetFiles(project: CourseProjectDocument) {
   return Object.values(project.assets).filter(meta => !hidden.has(meta.id)).map(meta => ({ path: assetFilePath(meta), meta }))
 }
 
-const RELATIVE_ASSET = /(?:^|[\s"'(,=])(?:\.{1,2}\/)*assets\/([^\s"'(),?#<>]+)/g
-
-/** References a page makes to files that do not exist yet: `../assets/x.svg` and `../components/x.html`. */
+/** Asset slots a page or the theme refers to without a bound asset, and component names without a definition. */
 function pendingReferences(pages: readonly SlidePageFile[], project: CourseProjectDocument) {
-  const assets = new Set(assetFiles(project).map(file => file.path))
   const pending = new Map<string, { type: '待填素材' | '待写组件'; description?: string; usedBy: Set<string> }>()
-  const add = (path: string, type: '待填素材' | '待写组件', page: string, description?: string) => {
+  const add = (path: string, type: '待填素材' | '待写组件', usedBy: string, description?: string) => {
     const entry = pending.get(path) ?? { type, usedBy: new Set<string>() }
-    entry.usedBy.add(page)
+    entry.usedBy.add(usedBy)
     if (!entry.description && description) entry.description = description
     pending.set(path, entry)
   }
+  const slot = (value: string, bound: Readonly<Record<string, unknown>>, usedBy: string, description?: string) => {
+    const path = assetReferencePath(value)
+    if (path && !bound[path]) add(path, '待填素材', usedBy, description)
+  }
   for (const page of pages) {
     if (page.carrier?.kind !== 'composition') continue
+    const bound = page.carrier.item.content.assets
     const visit = (node: PageNode) => {
       if (node.kind !== 'element') return
       const description = node.attributes.alt || node.attributes.title || node.attributes['aria-label']
-      const component = node.tagName === 'iframe' ? componentReferenceName(node.attributes.src) : undefined
-      if (component !== undefined && !node.children.some(child => child.kind === 'runtime')) add(`components/${component}.html`, '待写组件', page.path, description)
-      for (const value of Object.values(node.attributes)) for (const match of value.matchAll(RELATIVE_ASSET)) {
-        let name = match[1]!
-        try { name = decodeURI(name) } catch { /* Keep the written form. */ }
-        if (!assets.has(`assets/${name}`)) add(`assets/${name}`, '待填素材', page.path, description)
+      for (const [name, value] of Object.entries(node.attributes)) {
+        const key = name.toLowerCase()
+        if (URL_ATTRIBUTES.has(key)) slot(value, bound, page.path, description)
+        else if (key === 'srcset') value.split(',').forEach(part => slot(part.trim().split(/\s+/)[0] ?? '', bound, page.path, description))
+        else if (key === 'style') cssUrlReferences(value).forEach(reference => slot(reference.reference, bound, page.path))
       }
+      if (node.tagName.toLowerCase() === 'style') node.children.forEach(child => {
+        if (child.kind === 'text') cssUrlReferences(child.text).forEach(reference => slot(reference.reference, bound, page.path))
+      })
+      const component = node.tagName.toLowerCase() === 'iframe' && node.attributes.src !== undefined ? componentReferenceName(node.attributes.src) : null
+      if (component !== null && findCourseComponentName(project, component) === undefined) add(`components/${component}.html`, '待写组件', page.path, description)
       node.children.forEach(visit)
     }
     visit(page.carrier.item.content.root)
   }
+  if (project.theme) cssUrlReferences(project.theme.css).forEach(reference => slot(reference.reference, project.theme!.assets ?? {}, THEME_FILE))
   return pending
 }
 
@@ -154,6 +165,18 @@ export function controllerSource(project: CourseProjectDocument, resources: Docu
   return bytes && entry ? { source: new TextDecoder().decode(bytes), packageId: meta.packageId, version: meta.version, entry } : undefined
 }
 
+/** `components/<name>.html` for a stored definition, matched as file names are (ignoring case). */
+export function componentFile(project: CourseProjectDocument, path: string): { name: string; definition: CourseComponentDefinition } | undefined {
+  const match = /^components\/([^/]+)\.html$/.exec(path)
+  const name = match ? findCourseComponentName(project, match[1]!) : undefined
+  return name === undefined ? undefined : { name, definition: project.components![name]! }
+}
+
+/** The text a model reads for a component: its page document, or the source of a custom program. */
+export function componentText(definition: CourseComponentDefinition, project: CourseProjectDocument): string {
+  return programHtml({ ...definition, content: { ...definition.content } }, project.assets) ?? definition.source
+}
+
 function objectSummary(scene: SlideSceneDocument, carrier: PageCarrier | undefined): string[] {
   return [...scene.layerItems].sort((a, b) => a.order - b.order).filter(item => item !== carrier?.item).map(item => {
     const kind = item.kind === 'native' ? NATIVE_KIND[item.content.nativeType] ?? '对象' : item.kind === 'component' ? '组件'
@@ -164,35 +187,55 @@ function objectSummary(scene: SlideSceneDocument, carrier: PageCarrier | undefin
 
 export function listProjectFiles(project: CourseProjectDocument, resources: DocumentResources): ProjectFileEntry[] {
   const pages = slidePageFiles(project)
-  const files: ProjectFileEntry[] = pages.map(page => {
+  const files: ProjectFileEntry[] = [{ path: THEME_FILE, type: '主题', ...(project.theme?.css.trim() ? {} : { note: '尚未写入' }) }]
+  for (const page of pages) {
     const objects = objectSummary(page.scene, page.carrier)
-    return { path: page.path, type: PAGE_TYPE[page.carrier?.kind ?? 'blank'], ...(objects.length ? { note: `另有独立对象：${objects.join('、')}` } : {}) }
-  })
+    files.push({ path: page.path, type: PAGE_TYPE[page.carrier?.kind ?? 'blank'], ...(objects.length ? { note: `另有独立对象：${objects.join('、')}` } : {}) })
+  }
+  for (const [name, definition] of Object.entries(project.components ?? {})) {
+    const key = courseComponentNameKey(name)
+    const usedBy = pages.filter(page => {
+      let found = false
+      const visit = (node: PageNode) => {
+        if (found || node.kind !== 'element') return
+        const reference = node.tagName.toLowerCase() === 'iframe' && node.attributes.src !== undefined ? componentReferenceName(node.attributes.src) : null
+        found = reference !== null && courseComponentNameKey(reference) === key
+        node.children.forEach(visit)
+      }
+      if (page.carrier?.kind === 'composition') visit(page.carrier.item.content.root)
+      return found
+    }).map(page => page.path)
+    files.push({ path: `components/${name}.html`, type: definition.draft ? '组件草稿' : '组件',
+      note: [definition.draft && `未通过准入：${definition.draft.reason}`, usedBy.length ? `引用页：${usedBy.join('、')}` : '尚无页面引用'].filter(Boolean).join('；') })
+  }
   for (const { path, meta } of assetFiles(project)) files.push({ path, type: '素材',
-    note: [meta.mimeType, meta.width && meta.height ? `${meta.width}×${meta.height}` : ''].filter(Boolean).join('，') })
+    note: [meta.mimeType, meta.width && meta.height ? `${meta.width}×${meta.height}` : '', meta.source ? `来源：${meta.source.kind}` : ''].filter(Boolean).join('，') })
   for (const [path, entry] of pendingReferences(pages, project)) files.push({ path, type: entry.type,
-    note: [entry.description && `说明：${entry.description}`, `引用页：${[...entry.usedBy].join('、')}`].filter(Boolean).join('；') })
+    note: [entry.description && `说明：${entry.description}`, `引用：${[...entry.usedBy].join('、')}`].filter(Boolean).join('；') })
   if (controllerSource(project, resources)) files.push({ path: CONTROLLER_FILE, type: '教师控制台' })
   return files
 }
 
 export type ProjectFileRead =
   | { kind: 'page'; path: string; type: string; content: string; objects: string[]; page: SlidePageFile }
+  | { kind: 'theme'; path: string; content: string }
+  | { kind: 'component'; path: string; name: string; content: string; draft?: string }
   | { kind: 'asset'; path: string; mediaType: string; byteLength: number; width?: number; height?: number; content?: string; assetId: string }
   | { kind: 'controller'; path: string; content: string }
 
 /** Current content of one project file, including unsaved human edits held by the session. */
 export function readProjectFile(project: CourseProjectDocument, resources: DocumentResources, path: string): ProjectFileRead | undefined {
+  if (path === THEME_FILE) return { kind: 'theme', path, content: project.theme?.css ?? '' }
   const page = slidePageFiles(project).find(value => value.path === path)
   if (page) {
     const carrier = page.carrier
     const content = carrier?.kind === 'composition' ? serializePageHtml(carrier.item.content, project.assets)
-      : carrier?.kind === 'program' ? carrier.html.replace(/cw-resource:([a-zA-Z0-9_.-]+)/g, (reference, key: string) => {
-        const meta = project.assets[carrier.item.runtime.assets[key]?.assetId ?? '']
-        return meta ? `../${assetFilePath(meta)}` : reference
-      }) : ''
-    return { kind: 'page', path, type: PAGE_TYPE[page.carrier?.kind ?? 'blank'], content, objects: objectSummary(page.scene, page.carrier), page }
+      : carrier?.kind === 'program' ? programHtml(carrier.item.runtime, project.assets) ?? '' : ''
+    return { kind: 'page', path, type: PAGE_TYPE[carrier?.kind ?? 'blank'], content, objects: objectSummary(page.scene, carrier), page }
   }
+  const component = componentFile(project, path)
+  if (component) return { kind: 'component', path: `components/${component.name}.html`, name: component.name,
+    content: componentText(component.definition, project), ...(component.definition.draft ? { draft: component.definition.draft.reason } : {}) }
   const asset = assetFiles(project).find(value => value.path === path)
   if (asset) {
     const bytes = resources.assets[asset.meta.id]
@@ -215,5 +258,6 @@ export function projectFileVersion(file: ProjectFileRead, resources: DocumentRes
 
 /** The stable object a file path currently addresses; survives renames and reordering. */
 export function projectFileIdentity(file: ProjectFileRead): string {
-  return file.kind === 'page' ? `page:${file.page.sceneId}` : file.kind === 'asset' ? `asset:${file.assetId}` : 'controller'
+  return file.kind === 'page' ? `page:${file.page.sceneId}` : file.kind === 'asset' ? `asset:${file.assetId}`
+    : file.kind === 'component' ? `component:${courseComponentNameKey(file.name)}` : file.kind
 }

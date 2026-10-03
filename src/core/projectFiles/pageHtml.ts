@@ -1,5 +1,6 @@
 import { nanoid } from 'nanoid'
 import type { CompositionNode, WebComposition } from '../../shared/composition/content'
+import { componentReferenceName, courseComponentNameKey } from '../../shared/composition/projectReferences'
 import type { CourseAssetMeta, CourseRuntimeDefinition } from '../../shared/courseProjectTypes'
 import { createHtmlDocumentRuntimeSource, unpackHtmlDocumentRuntimeSource } from '../../shared/runtime/htmlDocumentSource'
 import { validateRuntimeSource } from '../../shared/runtimeSourceValidation'
@@ -33,7 +34,6 @@ const LEADING_NEWLINE_ELEMENTS = new Set(['pre', 'textarea', 'listing'])
 const LEAF_WRAPPERS = new Set(['guoling-native', 'guoling-chart', 'guoling-document'])
 const PLACEHOLDER = /cw-resource:([a-zA-Z0-9_.-]+)/g
 const HEX_KEY = /^[a-f0-9]{64}$/
-const COMPONENT_REFERENCE = /^(?:\.{1,2}\/)*components\/([^/?#]+)\.html$/
 
 const isHtml = (node: ElementNode) => (node.namespace ?? HTML_NAMESPACE) === HTML_NAMESPACE
 const isStyle = (node: ElementNode | undefined) => !!node && isHtml(node) && node.tagName === 'style'
@@ -44,15 +44,8 @@ const scriptJson = (value: unknown) => JSON.stringify(value, null, 2).replace(/<
 
 /** The project file path of a managed asset (`assets/<name>`). */
 export function assetFilePath(meta: Pick<CourseAssetMeta, 'path' | 'filename'>): string {
-  const path = meta.path.replace(/^\.?\//, '')
+  const path = meta.path.replace(/\\/g, '/').replace(/^\.?\//, '')
   return path.startsWith('assets/') ? path : `assets/${meta.filename}`
-}
-
-/** Component name of an `<iframe src="../components/<name>.html">` reference. */
-export function componentReferenceName(src: string | undefined): string | undefined {
-  const match = src === undefined ? null : COMPONENT_REFERENCE.exec(src.trim())
-  if (!match) return undefined
-  try { return decodeURIComponent(match[1]!) } catch { return match[1]! }
 }
 
 function embeddedRuntime(node: ElementNode): CourseRuntimeDefinition | undefined {
@@ -60,10 +53,12 @@ function embeddedRuntime(node: ElementNode): CourseRuntimeDefinition | undefined
   return isHtml(node) && node.tagName === 'iframe' && child?.kind === 'runtime' ? child.runtime : undefined
 }
 
+const componentName = (node: ElementNode) => node.attributes.src === undefined ? null : componentReferenceName(node.attributes.src)
+
 /** A runtime shown as `srcdoc`; component references and other programs stay opaque in the page. */
 function srcdocOf(node: ElementNode): string | undefined {
   const runtime = embeddedRuntime(node)
-  if (!runtime || componentReferenceName(node.attributes.src) !== undefined) return undefined
+  if (!runtime || componentName(node) !== null) return undefined
   return unpackHtmlDocumentRuntimeSource(runtime.source)?.html
 }
 
@@ -99,8 +94,8 @@ function leafPayload(wrapper: string, node: LeafNode): unknown {
   return node.content
 }
 
-/** Placeholder form -> the relative paths a model reads; keys never leave the software. */
-function pathMapper(assets: Assets, bindings: Readonly<Bindings>) {
+/** Imported content keeps software placeholders; the model reads them as relative paths. */
+export function pathMapper(assets: Assets, bindings: Readonly<Bindings>) {
   return (text: string) => text.replace(PLACEHOLDER, (reference, key: string) => {
     const meta = Object.hasOwn(bindings, key) ? assets[bindings[key]!.assetId] : undefined
     return meta ? `../${assetFilePath(meta)}` : reference
@@ -158,8 +153,11 @@ export function serializePageHtml(content: PageComposition, assets: Assets): str
   return doctype + pageRenderer(assets, content.assets).render(content.root)
 }
 
-/** Relative asset paths in a model's text -> software placeholders. Only known assets are bound. */
-function placeholderMapper(assets: Assets, knownKeys: ReadonlyMap<string, readonly string[]>) {
+/**
+ * Relative asset paths inside a software-wrapped HTML program -> its resource placeholders.
+ * Page and theme references are not rewritten: normalization binds those slots by path.
+ */
+export function programPlaceholders(assets: Assets, knownKeys: ReadonlyMap<string, readonly string[]> = new Map()) {
   const byName = new Map<string, string>()
   for (const meta of Object.values(assets)) {
     const name = assetFilePath(meta).slice('assets/'.length)
@@ -169,10 +167,10 @@ function placeholderMapper(assets: Assets, knownKeys: ReadonlyMap<string, readon
   }
   const names = [...byName.keys()].sort((a, b) => b.length - a.length).map(name => name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
   const pattern = names.length ? new RegExp(`(?<=^|[\\s"'(,=;])(?:\\.{1,2}\\/)*assets\\/(${names.join('|')})(?=$|[\\s"'),;?#&])`, 'g') : null
-  /** One stable key per asset: the key the content already used, else a digest the html runtime also accepts. */
-  const keyOf = (assetId: string, hexOnly: boolean) => knownKeys.get(assetId)?.find(key => !hexOnly || HEX_KEY.test(key)) ?? documentDigest(assetId)
-  return (text: string, bindings: Bindings, hexOnly = false): string => pattern ? text.replace(pattern, (_reference, name: string) => {
-    const assetId = byName.get(name)!, key = keyOf(assetId, hexOnly)
+  /** One stable key per asset: the key the program already used, else a digest the wrapper accepts. */
+  const keyOf = (assetId: string) => knownKeys.get(assetId)?.find(key => HEX_KEY.test(key)) ?? documentDigest(assetId)
+  return (text: string, bindings: Bindings): string => pattern ? text.replace(pattern, (_reference, name: string) => {
+    const assetId = byName.get(name)!, key = keyOf(assetId)
     bindings[key] = { assetId }
     return `cw-resource:${key}`
   }) : text
@@ -185,6 +183,22 @@ export function htmlDocumentRuntime(html: string, bindings: Readonly<Bindings>):
   validateRuntimeSource(source)
   return { protocol: 'surface-runtime', runtimeApiVersion: 3, enabled: true, renderMode: 'dom', source,
     content: { values: {} }, assets: Object.fromEntries(resourceKeys.map(key => [key, { assetId: bindings[key]!.assetId }])) }
+}
+
+/** The document a model reads for a software-wrapped program, with relative asset paths. */
+export function programHtml(runtime: CourseRuntimeDefinition, assets: Assets): string | undefined {
+  const payload = unpackHtmlDocumentRuntimeSource(runtime.source)
+  return payload ? pathMapper(assets, runtime.assets)(payload.html) : undefined
+}
+
+/** Program text written by a model -> a wrapped program; an unchanged text keeps the existing definition. */
+export function parseProgramHtml<T extends CourseRuntimeDefinition | Omit<CourseRuntimeDefinition, 'staticFallback' | 'nodeBindings'>>(
+  html: string, assets: Assets, previous?: T): T | CourseRuntimeDefinition {
+  if (previous && programHtml(previous as CourseRuntimeDefinition, assets) === html) return previous
+  const knownKeys = new Map<string, string[]>()
+  for (const [key, { assetId }] of Object.entries(previous?.assets ?? {})) knownKeys.set(assetId, [...knownKeys.get(assetId) ?? [], key])
+  const own: Bindings = {}
+  return htmlDocumentRuntime(programPlaceholders(assets, knownKeys)(html, own), own)
 }
 
 /** Index pairs of a longest common subsequence; common ends are taken first so local edits stay cheap. */
@@ -219,13 +233,14 @@ const shapeOf = (node: PageNode) => node.kind === 'element' ? `element:${node.na
   : node.kind === 'native' ? `native:${node.content.nativeType}` : node.kind
 
 export type ParsedPage =
-  | { kind: 'composition'; content: PageComposition; changedRuntimes: number; diagnostics: readonly PageDiagnostic[] }
-  | { kind: 'program'; runtime: CourseRuntimeDefinition; changed: boolean; diagnostics: readonly PageDiagnostic[] }
+  | { kind: 'composition'; content: PageComposition; diagnostics: readonly PageDiagnostic[] }
+  | { kind: 'program'; runtime: CourseRuntimeDefinition; diagnostics: readonly PageDiagnostic[] }
 
 /**
  * Model HTML -> formal page content aligned with what the page held before. Every unchanged subtree is the
- * previous subtree itself (identities, resource keys, admitted programs with their static fallback); a changed
- * node keeps the identity of the node it replaces in place; only new nodes get new identities.
+ * previous subtree itself (identities, resource keys, programs with their static fallback); a changed node
+ * keeps the identity of the node it replaces in place; only new nodes get new identities. New references
+ * stay as written; normalization binds asset slots and component copies by name.
  */
 export function parsePageHtml(html: string, options: {
   parse: PageParsePort
@@ -239,47 +254,34 @@ export function parsePageHtml(html: string, options: {
   const know = (bindings: Readonly<Bindings>) => {
     for (const [key, { assetId }] of Object.entries(bindings)) knownKeys.set(assetId, [...knownKeys.get(assetId) ?? [], key])
   }
-  const previousRuntimes = new Set<CourseRuntimeDefinition>()
   if (previous) {
     know(previous.assets)
-    const visit = (node: PageNode) => {
-      if (node.kind === 'runtime') { know(node.runtime.assets); previousRuntimes.add(node.runtime) }
-      if (node.kind === 'element') node.children.forEach(visit)
-    }
+    const visit = (node: PageNode) => { if (node.kind === 'runtime') know(node.runtime.assets); if (node.kind === 'element') node.children.forEach(visit) }
     visit(previous.root)
   }
-  if (previousProgram) know(previousProgram.assets)
-  const toPlaceholders = placeholderMapper(assets, knownKeys)
+  const toPlaceholders = programPlaceholders(assets, knownKeys)
   const parsed = options.parse({ html, createEmbeddedRuntime: srcdoc => {
     const own: Bindings = {}
-    return htmlDocumentRuntime(toPlaceholders(srcdoc, own, true), own)
+    return htmlDocumentRuntime(toPlaceholders(srcdoc, own), own)
   } })
+  if (parsed.kind === 'program')
+    return { kind: 'program', runtime: parseProgramHtml(parsed.html, assets, previousProgram), diagnostics: parsed.diagnostics }
 
-  if (parsed.kind === 'program') {
-    const prior = previousProgram && unpackHtmlDocumentRuntimeSource(previousProgram.source)
-    if (prior && pathMapper(assets, previousProgram!.assets)(prior.html) === parsed.html)
-      return { kind: 'program', runtime: previousProgram!, changed: false, diagnostics: parsed.diagnostics }
-    const own: Bindings = {}
-    return { kind: 'program', runtime: htmlDocumentRuntime(toPlaceholders(parsed.html, own, true), own), changed: true, diagnostics: parsed.diagnostics }
-  }
-
-  const bindings: Bindings = { ...previous?.assets }
   const next = pageRenderer(assets, {}), before = pageRenderer(assets, previous?.assets ?? {})
-  /** New content: placeholders for known assets in attributes and style text; parser identities kept. */
-  const fresh = (node: PageNode, parent?: ElementNode): PageNode => {
-    if (node.kind === 'text') return isStyle(parent) ? { ...node, text: toPlaceholders(node.text, bindings) } : node
-    if (node.kind !== 'element') return node
-    return { ...node, attributes: Object.fromEntries(Object.entries(node.attributes).map(([name, value]) => [name, toPlaceholders(value, bindings)])),
-      children: node.children.map(child => fresh(child, node)) }
-  }
-  const adopt = (node: PageNode, prior: PageNode, parent?: ElementNode): PageNode => {
-    if (node.kind !== 'element' || prior.kind !== 'element') return { ...fresh(node, parent), id: prior.id }
+  const adopt = (node: PageNode, prior: PageNode): PageNode => {
+    if (node.kind !== 'element' || prior.kind !== 'element') return { ...node, id: prior.id }
     // An unchanged attribute keeps its exact stored value, including which resource key it used.
     const attributes = Object.fromEntries(Object.entries(node.attributes).map(([name, value]) => {
       const old = prior.attributes[name]
-      return [name, old !== undefined && before.toPaths(old) === value ? old : toPlaceholders(value, bindings)]
+      return [name, old !== undefined && before.toPaths(old) === value ? old : value]
     }))
-    return { ...node, id: prior.id, attributes, children: align(node, prior) }
+    let children = align(node, prior)
+    // A component copy or a program the page cannot show keeps its instance (fallback, bindings) while its name is unchanged.
+    if (!children.length && embeddedRuntime(prior) && srcdocOf(prior) === undefined && isHtml(node) && node.tagName === 'iframe') {
+      const name = componentName(node), priorName = componentName(prior)
+      if (name === null ? priorName === null : priorName !== null && courseComponentNameKey(name) === courseComponentNameKey(priorName)) children = prior.children
+    }
+    return { ...node, id: prior.id, attributes, children }
   }
   const align = (node: ElementNode, prior: ElementNode): PageNode[] => {
     const pairs = commonPairs(node.children.map(child => next.signature(child, node)), prior.children.map(child => before.signature(child, prior)))
@@ -292,26 +294,22 @@ export function parsePageHtml(html: string, options: {
       for (let i = fromI + 1; i < toI; i++) {
         const child = node.children[i]!
         const match = open.findIndex(candidate => shapeOf(candidate) === shapeOf(child))
-        result[i] = match >= 0 ? adopt(child, open.splice(match, 1)[0]!, node) : fresh(child, node)
+        result[i] = match >= 0 ? adopt(child, open.splice(match, 1)[0]!) : child
       }
     }
     return result
   }
-  const aligned = previous && shapeOf(previous.root) === shapeOf(parsed.composition.root)
-    ? adopt(parsed.composition.root, previous.root) : fresh(parsed.composition.root)
-  let changedRuntimes = 0
+  const aligned = previous && shapeOf(previous.root) === shapeOf(parsed.composition.root) ? adopt(parsed.composition.root, previous.root) : parsed.composition.root
   const ids = new Set<string>()
-  const finish = (node: PageNode): PageNode => {
-    if (node.kind === 'runtime' && !previousRuntimes.has(node.runtime)) changedRuntimes++
+  const unique = (node: PageNode): PageNode => {
     // Parser identities never collide with kept ones; stay unique regardless.
-    const unique = ids.has(node.id) ? { ...node, id: `web_${nanoid()}` } : node
-    ids.add(unique.id)
-    return unique.kind === 'element' ? { ...unique, children: unique.children.map(finish) } : unique
+    const value = ids.has(node.id) ? { ...node, id: `web_${nanoid()}` } : node
+    ids.add(value.id)
+    return value.kind === 'element' ? { ...value, children: value.children.map(unique) } : value
   }
-  const root = finish(aligned)
   const doctypeName = (value: string) => value.replace(/^<!doctype/i, '').replace(/>$/, '').trim().toLowerCase()
   const doctype = parsed.composition.doctype !== undefined && previous?.doctype !== undefined
     && doctypeName(parsed.composition.doctype) === doctypeName(previous.doctype) ? previous.doctype : parsed.composition.doctype
-  return { kind: 'composition', content: { ...(doctype !== undefined ? { doctype } : {}), root, assets: bindings },
-    changedRuntimes, diagnostics: parsed.diagnostics }
+  return { kind: 'composition', content: { ...(doctype !== undefined ? { doctype } : {}), root: unique(aligned), assets: { ...previous?.assets } },
+    diagnostics: parsed.diagnostics }
 }
