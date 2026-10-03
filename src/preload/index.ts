@@ -48,6 +48,7 @@ const IPC_CHANNELS = {
   selectComponentCatalogSource: 'component-catalog:select-source',
   setComponentCatalogSourceTrust: 'component-catalog:set-source-trust',
   readComponentCatalogPackage: 'component-catalog:read-package',
+  deleteComponentCatalogHtmlComponent: 'component-catalog:delete-html-component',
   peekProjectArchive: 'project:peek-archive',
   exportHtml: 'export:write-html',
   exportWebPackage: 'export:write-web-package',
@@ -324,6 +325,10 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   ),
   readComponentCatalogPackage: (input) => invoke(
     IPC_CHANNELS.readComponentCatalogPackage,
+    input,
+  ),
+  deleteComponentCatalogHtmlComponent: (input) => invoke(
+    IPC_CHANNELS.deleteComponentCatalogHtmlComponent,
     input,
   ),
   exportHtml: (input) => invoke(IPC_CHANNELS.exportHtml, input),

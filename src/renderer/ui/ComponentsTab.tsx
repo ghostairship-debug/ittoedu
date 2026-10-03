@@ -17,6 +17,7 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import type {
   AvailableComponentCatalogPackage,
+  AvailableHtmlComponent,
   ComponentCatalogSnapshot,
 } from '../../shared/componentCatalog'
 import { componentSupportsScope } from '../../shared/componentCapabilities'
@@ -32,7 +33,9 @@ import { selectFlowEditorBlock } from '../course/flowEditorSlice'
 import {
   collectComponentLibrarySubjects,
   filterComponentLibraryPackages,
+  filterHtmlComponents,
   selectCurrentCatalogPackages,
+  selectCurrentHtmlComponents,
 } from '../components/componentLibraryModel'
 import { CompositionFragmentActions } from '../components/compositionFragments/CompositionFragmentActions'
 import { CompositionFragmentPreview } from '../components/compositionFragments/CompositionFragmentPreview'
@@ -231,6 +234,66 @@ function ComponentDetailsDialog({ data, entry, usage, onClose }: ComponentDetail
   )
 }
 
+/** HTML components saved from courses; AI reuses them by name, the panel only lists and deletes them. */
+function HtmlComponentLibrarySection({ entries, onRefresh }: { entries: AvailableHtmlComponent[]; onRefresh?(): void }) {
+  const [confirming, setConfirming] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const remove = async (entry: AvailableHtmlComponent) => {
+    setDeleting(true)
+    setError(null)
+    try {
+      if (!window.desktopAPI) throw new Error('当前页面未运行在桌面环境中，不能删除资产库条目。')
+      await window.desktopAPI.deleteComponentCatalogHtmlComponent({ sourceId: entry.sourceId, entry: entry.entry })
+      setConfirming(null)
+      onRefresh?.()
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'HTML 组件删除失败。')
+    } finally {
+      setDeleting(false)
+    }
+  }
+  return (
+    <section className="component-library__html-components" aria-label="HTML 组件">
+      <div className="component-library__results-heading">
+        <div><strong>HTML 组件</strong><span>{entries.length} 个结果</span></div>
+      </div>
+      <p className="component-library__html-note">从课件存入资产库的组件，AI 可按名称检索并放进页面；这里可以查看和删除“我的资产库”中的条目。</p>
+      {error && <div className="component-library__issues" role="alert"><ShieldAlert size={16} /><span>{error}</span></div>}
+      <div className="component-library__grid">
+        {entries.map((entry) => {
+          const key = `${entry.sourceId}:${entry.entry}`
+          return (
+            <article key={key} className="component-library-card" data-testid={`html-component-${entry.packageId}`}>
+              <div className="component-library-card__copy">
+                <div className="component-library-card__title">
+                  <strong>{entry.name}</strong>
+                  <span className="component-quality">HTML 组件</span>
+                </div>
+                {entry.description && <p>{entry.description}</p>}
+                <div className="component-library-card__metadata">
+                  <span>v{entry.version}</span>
+                  <span>{entry.sourceLabel}</span>
+                  {entry.sourceCourse && <span>来自 {entry.sourceCourse}</span>}
+                  {entry.savedAt && <span>{new Date(entry.savedAt).toLocaleDateString('zh-CN')}</span>}
+                </div>
+              </div>
+              {entry.removable && (
+                <div className="component-library-card__actions">
+                  <button type="button" className="secondary-button" disabled={deleting}
+                    onClick={() => confirming === key ? void remove(entry) : setConfirming(key)}>
+                    <Trash2 size={13} />{confirming === key ? '确认删除' : '删除'}
+                  </button>
+                </div>
+              )}
+            </article>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 interface ComponentLibraryDialogProps {
   catalog: ComponentCatalogSnapshot
   components: Record<string, ComponentPackageData>
@@ -276,6 +339,8 @@ export function ComponentLibraryDialog({
     .filter((entry) => ['available', 'embedded'].includes(componentCatalogInstallStatus(entry, components[entry.packageId])))
     .map((entry) => entry.packageId)
   const selectedEntries = entries.filter((entry) => selectedIds.has(entry.packageId))
+  const htmlComponents = useMemo(() => selectCurrentHtmlComponents(catalog.htmlComponents ?? []), [catalog.htmlComponents])
+  const visibleHtmlComponents = useMemo(() => filterHtmlComponents(htmlComponents, query), [htmlComponents, query])
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -434,6 +499,9 @@ export function ComponentLibraryDialog({
                 )
               })}
             </div>
+          )}
+          {visibleHtmlComponents.length > 0 && (
+            <HtmlComponentLibrarySection entries={visibleHtmlComponents} onRefresh={onRefresh} />
           )}
         </main>
       </div>

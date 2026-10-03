@@ -148,6 +148,11 @@ export interface DesktopAPI {
     packageId: string
     version: string
   }): Promise<ComponentCatalogPackageFile>
+  /** Deletes one HTML component of the managed library (“我的资产库”). */
+  deleteComponentCatalogHtmlComponent(input: {
+    sourceId: string
+    entry: string
+  }): Promise<ComponentCatalogSnapshot>
   exportHtml(input: {
     suggestedName: string
     html: string
@@ -227,6 +232,7 @@ export const IPC_CHANNELS = {
   selectComponentCatalogSource: 'component-catalog:select-source',
   setComponentCatalogSourceTrust: 'component-catalog:set-source-trust',
   readComponentCatalogPackage: 'component-catalog:read-package',
+  deleteComponentCatalogHtmlComponent: 'component-catalog:delete-html-component',
   peekProjectArchive: 'project:peek-archive',
   exportHtml: 'export:write-html',
   exportWebPackage: 'export:write-web-package',
