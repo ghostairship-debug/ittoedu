@@ -22,7 +22,7 @@
 
 ```text
 schemaVersion, id, revision, title, createdAt, updatedAt,
-assets, componentPackages, network?, designTokens, media, playback,
+assets, componentPackages, network?, designTokens, theme?, components?, media, playback,
 courseState, navigationGuards, locations, startLocationId,
 globalLayerItems, globalInteractions, surfaces, mixedPrintPlan?
 ```
@@ -36,6 +36,8 @@ globalLayerItems, globalInteractions, surfaces, mixedPrintPlan?
 - `componentPackages`：内嵌组件包元数据映射字典（`key === packageId`）。
 - `network`（可选）：课程级网络声明（`CourseNetworkDeclaration`），见第 7 节。
 - `designTokens`：工程级设计 Token（字体 `fonts`、颜色 `colors`）。
+- `theme`（可选）：课程主题样式，见第 8 节。
+- `components`（可选）：按名称登记的课程组件，见第 8 节。
 - `media`：工程级音频与媒体配置。
 - `playback`：全局播放器与演讲者模式配置。
 - `courseState`：全局声明式状态定义列表。
@@ -152,3 +154,30 @@ export type LayerItem = NativeLayerItem | ComponentLayerItem | RuntimeLayerItem
 - `network.connectOrigins?: string[]` 声明 Runtime/Component 代码允许连接的精确 origin（远程媒体、HTTP API、WebSocket、未来 AI API）。
 - 每个 origin 必须是规范化的精确 `https:`/`wss:` origin：字符串等于其 URL `origin`（小写 scheme/host、不写默认端口），拒绝 wildcard、userinfo、path/query/fragment 与其他 scheme；列表内不得重复。
 - 预览、发布与导出宿主从工程声明派生允许的 origin，未声明访问一律拒绝；远程脚本暂不开放。本节只定义网络声明，不定义或禁止桌面、本地、父页面等宿主专属能力；运行时放行与 CSP 派生由后续任务实现。
+
+---
+
+## 8. 课程主题、组件、节点状态与素材来源（2026-10-04 创作流程重构）
+
+本节字段与 Published V2 同批切换（V9 原地修改，不建 V10）；各对象保持 `.strict()`。软件维护的派生事实由 `normalizeCourseProject`（`src/core/course/normalizeCourseProject.ts`）在每次提交与导入候选时重算，不要求作者登记。
+
+### 8.1 课程主题（`theme`）
+- `theme?: { css: string; assets?: Record<string, { assetId: string }> }`：整课共享的样式（`theme.css`）。宿主把由 `designTokens` 派生的变量（`--font-<id>`、`--color-<id>`）与主题 CSS 放进 `@layer guoling-theme`，注入所有渲染的 Web 文档（组合内容及其中的 HTML 文档组件）；页面自身样式总是优先。
+- `theme.assets` 由软件维护：CSS 中 `url(../assets/x.png)` 的槽位绑定到存在的素材。
+- 教师控制台未设置颜色时取 `--color-background` / `--color-text` / `--color-accent`。
+
+### 8.2 课程组件（`components`）
+- `components?: Record<名称, CourseComponentDefinition>` 是组件定义的唯一所有者，名称即 `components/<名称>.html` 的主干：1–80 字符，不含 `\ / : * ? " < > | # %` 与控制字符，首尾不是空格或点，忽略大小写唯一。
+- 定义字段为 Runtime 的 `protocol`、`runtimeApiVersion`、`enabled`、`renderMode`、`source`、`content{values,metadata?}`、`assets` 与可选 `draft{reason}`（草稿必须 `enabled:false`，宿主显示原因占位）。
+- 页面以 `<iframe src="../components/<名称>.html" title="说明">` 引用；iframe 下的 Runtime 节点是软件从定义单向派生的副本，只保留实例字段 `staticFallback`、`nodeBindings`、`content.overrides`。提交中对副本定义字段的修改由驱动按字段写回定义；同一组件被改成不同内容或引用不存在的定义时拒绝。名称不存在时不生成副本，宿主显示待填占位。
+
+### 8.3 节点状态与页内步骤
+- `LayerItemOverride.compositionNodes?: Record<节点 id, { visible?: boolean }>`：任何呈现状态都可控制组合内部节点显隐（只用于 composition 图层，节点须存在）。
+- `SlidePresentationState.fragmentStep?: number` 标记来自页内步骤的状态：场景组合中 `class="fragment"` 的元素按图层存储顺序与文档顺序编号；初始状态为 0，生成状态 `fragment_step_<k>` 显示前 k 个，并复制初始状态的覆盖字段；没有该字段的状态是作者状态，保持原样并显示全部步骤。显式节点状态优先于步骤。播放时节点淡入，静态捕获显示全部步骤，编辑视图显示全部内容。
+
+### 8.4 待填素材
+- 组合中 `<img src="../assets/x.svg" alt="说明">` 原样保存；`assets/x.svg` 槽位绑定 `path === 'assets/x.svg'` 的素材（否则绑定唯一 `filename` 相同的素材），写在 `composition.assets['assets/x.svg']`。未绑定的项目内相对引用显示占位（`alt` / `title` 为说明）。
+
+### 8.5 素材来源（`CourseAssetMeta.source`）
+- `source?: { kind: 'user-material' | 'model-svg' | 'open-library' | 'image-model' | 'asset-library'; title?; url?; author?; license?: { id; url? }; attribution? }`。
+- 发布时有 `attribution` 的已发布素材进入 Published V2 `credits`；播放器角落显示"来源"入口，PDF/PPTX 末尾附"素材来源"页。

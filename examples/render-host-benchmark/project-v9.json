@@ -35,7 +35,7 @@
       "manifestPath": "components/com.ittoedu.teacher-controller@1.0.0/manifest.json",
       "runtimePath": "components/com.ittoedu.teacher-controller@1.0.0/runtime.js",
       "thumbnailPath": "components/com.ittoedu.teacher-controller@1.0.0/thumbnail.svg",
-      "contentSha256": "021aebcb5afad79ddda6833a49375117462f689534537bfe8fab492c9b5b0631",
+      "contentSha256": "853e14585be4461424b4d2ec32f163992f3d6a7a1fb2434c67540a90bacaf688",
       "editableCopy": true
     },
     "com.example.render-host-editable-table": {
@@ -257,10 +257,7 @@
             }
           ],
           "style": {
-            "backgroundColor": "#172033",
             "backgroundOpacity": 0.94,
-            "accentColor": "#e7b85c",
-            "textColor": "#f8fafc",
             "cornerRadius": 16
           },
           "includeInStaticExports": false
