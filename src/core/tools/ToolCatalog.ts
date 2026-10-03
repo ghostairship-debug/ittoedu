@@ -9,6 +9,7 @@ import { hostToolCatalog } from './HostToolServices'
 import { workbenchServiceToolCatalog } from './WorkbenchServiceTools'
 import { skillReadTool, skillListTool } from './SkillTools'
 import { htmlImportTool, createCourseFromHtmlTool } from './HtmlImportTools'
+import { projectFileTools } from './ProjectFileTools'
 import { documentDeliveryTools } from './DocumentDeliveryTools'
 import { viewObserveTool } from './ViewObserveTools'
 import bundledSkills from '../../shared/generated/bundledSkills.json'
@@ -225,6 +226,7 @@ export const toolCatalog = [
   skillListTool,
   htmlImportTool,
   createCourseFromHtmlTool,
+  ...projectFileTools,
   ...documentDeliveryTools,
   viewObserveTool,
   { name: 'read', description: '分页读取目标文字或属性；返回 data.target 是当前内容的新短句柄，后续编辑应使用它。nextCursor 续读仍配原调用的 target；外部修改目标时明确冲突。', inputSchema: z.object(page).strict(), manual: { label: '读取', group: 'read', targetKinds: readableKinds } },
