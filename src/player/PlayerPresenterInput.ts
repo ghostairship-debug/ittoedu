@@ -204,14 +204,14 @@ export class PlayerPresenterInput {
     this.now = options.now ?? (() => performance.now())
     this.dedupeMs = Math.max(0, options.dedupeMs ?? DEFAULT_DEDUPE_MS)
     view.addEventListener('keydown', this.handleKeyDown)
-    view.addEventListener('blur', this.handleBlur)
+    this.watchFocus(view)
   }
 
   destroy(): void {
     if (this.destroyed) return
     this.destroyed = true
     this.window.removeEventListener('keydown', this.handleKeyDown)
-    this.window.removeEventListener('blur', this.handleBlur)
+    this.unwatchFocus(this.window)
     for (const frame of this.frames.splice(0)) frame.dispose()
   }
 
@@ -300,29 +300,39 @@ export class PlayerPresenterInput {
     }
   }
 
-  // Focus moving into a frame blurs the window that held it; the frame is then bridged.
-  private readonly handleBlur = (event: Event): void => {
-    const view = (event.currentTarget ?? this.window) as Window
-    view.setTimeout(() => {
+  // Focus moving into a frame blurs the window that held it: the stage window, or a
+  // bridged frame when focus goes on to another frame. Once focus has settled, every
+  // frame on the focused chain inside the stage is bridged.
+  private watchFocus(view: Window): void {
+    view.addEventListener('blur', this.handleFocusMove)
+  }
+
+  private unwatchFocus(view: Window): void {
+    view.removeEventListener('blur', this.handleFocusMove)
+  }
+
+  private readonly handleFocusMove = (): void => {
+    this.window.setTimeout(() => {
       if (this.destroyed) return
-      let document: Document
-      try { document = view.document } catch { return }
-      const frame = focusedFrame(document)
-      if (!frame || (view === this.window && !composedContains(this.root, frame))) return
-      this.bridge(frame)
+      let document: Document | null = this.window.document
+      for (let frame = focusedFrame(document); frame; frame = document ? focusedFrame(document) : null) {
+        if (document === this.window.document && !composedContains(this.root, frame)) return
+        document = this.bridge(frame)
+      }
     }, 0)
   }
 
-  private bridge(frame: HTMLIFrameElement): void {
+  /** Hears keys inside one same-origin frame of the stage; returns its document, or null for a cross-origin frame. */
+  private bridge(frame: HTMLIFrameElement): Document | null {
     const view = frame.contentWindow
     let document: Document
     try {
-      if (!view) return
+      if (!view) return null
       document = view.document
     } catch {
-      return // A cross-origin frame keeps its keys.
+      return null // A cross-origin frame keeps its keys.
     }
-    if (this.frames.some(entry => entry.frame === frame && entry.window === view && entry.document === document)) return
+    if (this.frames.some(entry => entry.frame === frame && entry.window === view && entry.document === document)) return document
     // Frames of earlier scenes, and documents a frame has since replaced, are let go.
     this.frames = this.frames.filter((entry) => {
       const current = entry.frame.isConnected && entry.frame.contentWindow === entry.window && entry.frame.contentDocument === entry.document
@@ -337,7 +347,7 @@ export class PlayerPresenterInput {
       view.addEventListener('keydown', handleFrameKey)
     }
     view.addEventListener('keydown', queue, true)
-    view.addEventListener('blur', this.handleBlur)
+    this.watchFocus(view)
     this.frames.push({
       frame,
       window: view,
@@ -345,8 +355,9 @@ export class PlayerPresenterInput {
       dispose: () => {
         view.removeEventListener('keydown', queue, true)
         view.removeEventListener('keydown', handleFrameKey)
-        view.removeEventListener('blur', this.handleBlur)
+        this.unwatchFocus(view)
       },
     })
+    return document
   }
 }
