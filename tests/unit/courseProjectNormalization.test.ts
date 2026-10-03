@@ -157,6 +157,56 @@ describe('Course project normalization', () => {
     expect(unbound.theme!.assets).toBeUndefined()
   })
 
+  it('keeps a source edit made on a page copy and a text edit of one instance across commit, save and reopen', () => {
+    const driver = new CourseV9Driver()
+    let project = normalizeCourseProject(createBlankCourseProject({ id: 'c2', now: '2026-10-04T00:00:00.000Z', includeDefaultController: false, controls: 'none' }))
+    const second = { ...page(), layerItemId: 'page2', order: 6 }
+    ;(project.surfaces[0] as SlideSurfaceDocument).scenes[0]!.layerItems.push({ ...page(), order: 5 }, second)
+    project = normalizeCourseProject(setCourseComponent(project, '公转模拟', definition()))
+    let model = { kind: 'course-v9' as const, project: courseProjectDocumentSchema.parse(project), resources: { assets: {}, components: {} } }
+
+    // Runtime source editor / build artifact: the copy's source changes, the component follows.
+    const edited = structuredClone(model.project)
+    const copy = frame(edited).iframe.children[0] as Extract<Node, { kind: 'runtime' }>
+    copy.runtime.source = definition('CoursewareRuntime.define({ create() { return { destroy() {} } } }) // v2').source
+    model = driver.apply(model, { type: 'course.replace', project: edited }) as typeof model
+    expect(model.project.components!['公转模拟']!.source).toContain('// v2')
+    const copies = scene(model.project).layerItems.map(item => JSON.stringify(item)).filter(value => value.includes('// v2'))
+    expect(copies).toHaveLength(2)
+
+    // A text light edit of one instance stays on that instance.
+    const lightEdited = structuredClone(model.project)
+    ;(frame(lightEdited).iframe.children[0] as Extract<Node, { kind: 'runtime' }>).runtime.content.overrides = [{ original: '春分', region: 'r1', text: '秋分' }]
+    model = driver.apply(model, { type: 'course.replace', project: lightEdited }) as typeof model
+    const reopened = driver.load(driver.serialize(model)) as typeof model
+    const reopenedCopy = frame(reopened.project).iframe.children[0] as Extract<Node, { kind: 'runtime' }>
+    expect(reopenedCopy.runtime.content.overrides).toEqual([{ original: '春分', region: 'r1', text: '秋分' }])
+    expect(reopenedCopy.runtime.source).toContain('// v2')
+    expect(reopened.project.components!['公转模拟']!.content).toEqual({ values: {} })
+  })
+
+  it('rejects page copy edits that cannot map to one component definition', () => {
+    const driver = new CourseV9Driver()
+    let project = normalizeCourseProject(createBlankCourseProject({ id: 'c3', now: '2026-10-04T00:00:00.000Z', includeDefaultController: false, controls: 'none' }))
+    ;(project.surfaces[0] as SlideSurfaceDocument).scenes[0]!.layerItems.push({ ...page(), order: 5 }, { ...page(), layerItemId: 'page2', order: 6 })
+    project = normalizeCourseProject(setCourseComponent(project, '公转模拟', definition()))
+    const model = { kind: 'course-v9' as const, project: courseProjectDocumentSchema.parse(project), resources: { assets: {}, components: {} } }
+    const conflicting = structuredClone(model.project)
+    const items = scene(conflicting).layerItems.filter(item => item.kind === 'composition') as CompositionLayerItem[]
+    items.forEach((item, index) => {
+      const visit = (node: Node): void => {
+        if (node.kind === 'runtime') node.runtime.source = `CoursewareRuntime.define({}) // ${index}`
+        if (node.kind === 'element') node.children.forEach(visit)
+      }
+      visit(item.content.root)
+    })
+    expect(() => driver.apply(model, { type: 'course.replace', project: conflicting })).toThrow(/不同内容/)
+    const undefinedComponent = structuredClone(model.project)
+    delete undefinedComponent.components
+    ;(frame(undefinedComponent).iframe.children[0] as Extract<Node, { kind: 'runtime' }>).runtime.source = 'x'
+    expect(() => driver.apply(model, { type: 'course.replace', project: undefinedComponent })).toThrow(/没有定义/)
+  })
+
   it('normalizes every committed change through the driver', () => {
     const driver = new CourseV9Driver()
     const base = normalizeCourseProject(createBlankCourseProject({ id: 'c1', now: '2026-10-04T00:00:00.000Z', includeDefaultController: false, controls: 'none' }))

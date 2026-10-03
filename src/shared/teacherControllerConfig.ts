@@ -28,11 +28,12 @@ export interface TeacherControllerConfig {
   collapsible: boolean
   defaultCollapsed: boolean
   buttons: TeacherControllerButton[]
+  /** Colours left unset follow the course theme (`--color-background`, `--color-text`, `--color-accent`). */
   style: {
-    backgroundColor: string
+    backgroundColor?: string
     backgroundOpacity: number
-    accentColor: string
-    textColor: string
+    accentColor?: string
+    textColor?: string
     cornerRadius: number
   }
   includeInStaticExports: boolean
@@ -49,10 +50,14 @@ export function defaultTeacherControllerConfig(): TeacherControllerConfig {
       ['restart', '重新开始', 'course.restart'], ['audio', '声音', 'audio.toggle-mute'],
       ['fullscreen', '全屏', 'player.fullscreen.toggle'],
     ].map(([id, label, type]) => ({ id: id!, label: label!, visible: id !== 'restart', action: { type } as TeacherControllerAction })),
-    style: { backgroundColor: '#172033', backgroundOpacity: .94, accentColor: '#e7b85c', textColor: '#f8fafc', cornerRadius: 16 },
+    style: { backgroundOpacity: .94, cornerRadius: 16 },
     includeInStaticExports: false,
   }
 }
+
+const STYLE_KEYS = [
+  ['backgroundColor', 'string'], ['backgroundOpacity', 'number'], ['accentColor', 'string'], ['textColor', 'string'], ['cornerRadius', 'number'],
+] as const satisfies ReadonlyArray<readonly [keyof TeacherControllerConfig['style'], 'string' | 'number']>
 
 /** Host reads only valid presentation hints; custom component props remain unrestricted. */
 export function readTeacherControllerConfig(props: Record<string, unknown>): TeacherControllerConfig {
@@ -64,9 +69,9 @@ export function readTeacherControllerConfig(props: Record<string, unknown>): Tea
   const style = props.style
   if (style && typeof style === 'object') {
     result.style = { ...defaults.style }
-    for (const key of Object.keys(defaults.style) as (keyof TeacherControllerConfig['style'])[]) {
+    for (const [key, type] of STYLE_KEYS) {
       const value = Reflect.get(style, key)
-      if (typeof value === typeof defaults.style[key] && (typeof value !== 'number' || Number.isFinite(value))) Object.assign(result.style, { [key]: value })
+      if (typeof value === type && (typeof value !== 'number' || Number.isFinite(value))) Object.assign(result.style, { [key]: value })
     }
   }
   if (Array.isArray(props.buttons)) result.buttons = props.buttons.filter((button): button is TeacherControllerButton =>

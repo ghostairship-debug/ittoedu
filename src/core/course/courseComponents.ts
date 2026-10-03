@@ -124,3 +124,62 @@ export function deleteCourseComponent(project: CourseProjectDocument, name: stri
   if (!Object.keys(next.components!).length) delete next.components
   return next
 }
+
+const DEFINITION_FIELDS = ['protocol', 'runtimeApiVersion', 'enabled', 'renderMode', 'source', 'assets', 'draft', 'content'] as const
+type DefinitionField = typeof DEFINITION_FIELDS[number]
+
+function definitionValue(runtime: CourseRuntimeDefinition | CourseComponentDefinition, field: DefinitionField): unknown {
+  if (field !== 'content') return runtime[field]
+  return { values: runtime.content.values, ...(runtime.content.metadata ? { metadata: runtime.content.metadata } : {}) }
+}
+
+const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
+
+function componentCopies(project: CourseProjectDocument): Map<string, { name: string; runtime: CourseRuntimeDefinition }> {
+  const copies = new Map<string, { name: string; runtime: CourseRuntimeDefinition }>()
+  visitIframes(project, (layerItemId, node, name) => {
+    const child = node.children.length === 1 ? node.children[0]! : undefined
+    if (child?.kind === 'runtime') copies.set(JSON.stringify([layerItemId, node.id]), { name, runtime: child.runtime })
+  })
+  return copies
+}
+
+/**
+ * A commit that changed definition fields of a page copy (a generic edit, the
+ * Runtime source editor, an imported build artifact) changes the component
+ * itself: exactly the changed fields are written to `project.components`, which
+ * then rewrites every copy. Conflicting edits of one component are rejected.
+ * Mutates `next`; `previous` is the committed state the change was made from.
+ */
+export function applyComponentCopyEdits(previous: CourseProjectDocument, next: CourseProjectDocument): void {
+  const before = componentCopies(previous)
+  const written = new Map<string, unknown>()
+  for (const [key, copy] of componentCopies(next)) {
+    const stored = findCourseComponentName(next, copy.name)
+    const prior = before.get(key)
+    const comparable = prior && courseComponentNameKey(prior.name) === courseComponentNameKey(copy.name)
+    if (stored === undefined) {
+      if (!comparable || !same(prior.runtime, copy.runtime)) {
+        throw new TypeError(`组件“${copy.name}”没有定义：页面中的组件内容由软件按 components/${copy.name}.html 维护，请先写入组件定义`)
+      }
+      continue
+    }
+    if (!comparable) continue
+    const definition = next.components![stored]!
+    const original = findCourseComponentName(previous, stored)
+    const originalDefinition = original === undefined ? undefined : previous.components![original]
+    for (const field of DEFINITION_FIELDS) {
+      const value = definitionValue(copy.runtime, field)
+      if (same(definitionValue(prior.runtime, field), value)) continue
+      const id = JSON.stringify([courseComponentNameKey(stored), field])
+      if (written.has(id) && !same(written.get(id), value)) throw new TypeError(`组件“${stored}”的多个页面副本被改成了不同内容，未提交修改`)
+      if (originalDefinition && !same(definitionValue(originalDefinition, field), definitionValue(definition, field)) && !same(definitionValue(definition, field), value)) {
+        throw new TypeError(`组件“${stored}”的定义与页面副本同时被修改且内容不同，未提交修改`)
+      }
+      written.set(id, value)
+      if (field === 'content') definition.content = structuredClone(value) as CourseComponentDefinition['content']
+      else if (value === undefined) delete definition[field]
+      else Object.assign(definition, { [field]: structuredClone(value) })
+    }
+  }
+}

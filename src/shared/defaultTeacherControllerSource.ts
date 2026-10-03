@@ -43,7 +43,8 @@ window.CoursewareComponent.define({
       const collapsed=!!state.collapsed; if(collapsed)open=null;
       root.style.width=collapsed?'52px':'100%';root.style.height=collapsed?'52px':'100%';
       panel.className='controller'+(collapsed?' collapsed':'')+(p.compact?' compact':'');
-      const ink=style.textColor||'#f3eee0',paper=style.backgroundColor||'#252c3d',accent=style.accentColor||'#d9bf73';
+      const themed=(name,fallback)=>((doc.defaultView&&doc.defaultView.getComputedStyle(root).getPropertyValue(name))||'').trim()||fallback;
+      const ink=style.textColor||themed('--color-text','#f3eee0'),paper=style.backgroundColor||themed('--color-background','#252c3d'),accent=style.accentColor||themed('--color-accent','#d9bf73');
       panel.style.setProperty('--ink',ink);panel.style.setProperty('--paper-solid',paper);panel.style.setProperty('--accent',accent);panel.style.setProperty('--accent-ink',/^#[0-9a-f]{6}$/i.test(accent)&&((parseInt(accent.slice(1,3),16)*299+parseInt(accent.slice(3,5),16)*587+parseInt(accent.slice(5,7),16)*114)/1000)<145?'#fff':'#172033');
       panel.style.setProperty('--paper','color-mix(in srgb,'+paper+' '+Math.round((style.backgroundOpacity??1)*100)+'%,transparent)');panel.style.setProperty('--radius',Math.max(0,style.cornerRadius??16)+'px');
       panel.style.backgroundImage=p.backgroundAssetId?'url("'+ctx.projectAssetUrl(p.backgroundAssetId)+'")':'none';panel.style.backgroundSize='cover';
