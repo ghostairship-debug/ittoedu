@@ -785,13 +785,13 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     try {
       if (activeRef.current?.conversationId === conversation.conversationId) await persist()
       const latest = await api.conversation(conversation.workspaceId, conversation.conversationId)
-      if (!latest) throw new Error('Conversation no longer exists')
+      if (!latest) throw new Error('会话名称未保存：会话已不存在。')
       const saved = await api.renameConversation({ workspaceId: latest.workspaceId, conversationId: latest.conversationId,
         expectedRevision: latest.revision, title: title.trim() })
       setConversations(value => updateConversation(value, saved))
       if (activeRef.current?.conversationId === saved.conversationId) { setActive(saved); activeRef.current = saved }
       setRenamingId(null); setSessionMenuId(null)
-    } catch { setError('会话名称未保存，请重试。') }
+    } catch (failure) { setError(failure instanceof Error ? failure.message : '会话名称未保存，请重试。') }
     finally { setBusy(false) }
   }
 
@@ -1366,7 +1366,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
             <textarea ref={composerRef} aria-label="给创作助手发消息" aria-describedby="assistant-composer-hint" data-attachment-paste-target value={draft} disabled={!active} readOnly={busy} placeholder="描述你要讨论或完成的内容"
               onFocus={() => { setPlusOpen(false); setPermissionOpen(false) }}
               onCompositionStart={() => { composingRef.current = true }} onCompositionEnd={() => { composingRef.current = false }} onKeyDown={onComposerKeyDown}
-              onChange={event => { setDraft(event.target.value); draftRef.current = event.target.value; freezeDocuments(event.target.value) }} onBlur={() => { void persist().catch(() => setError('草稿未保存，请重试。')) }} />
+              onChange={event => { setDraft(event.target.value); draftRef.current = event.target.value; freezeDocuments(event.target.value) }} onBlur={() => { void persist().catch(failure => setError(failure instanceof Error ? failure.message : '草稿未保存，请重试。')) }} />
           </div>}
         </AttachmentComposer>
         <div className="execution-assistant__toolbar">

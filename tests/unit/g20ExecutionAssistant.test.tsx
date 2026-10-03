@@ -278,6 +278,26 @@ it('labels a send Main refused before acceptance as not executed and keeps "unco
   expect(within(unknown).getByRole('button', { name: '用同一提交确认' })).toBeInTheDocument()
 })
 
+it('shows the specific reason Main gives when a blurred draft or a session rename is not saved', async () => {
+  const { api } = executionFixture([conversation('a', '会话 A')])
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toBeEnabled())
+  const draftRefusal = `草稿未保存：${executionInputMessages['attachment-unavailable'][0]}\n${executionInputMessages['attachment-unavailable'][1]}`
+  vi.mocked(api.draft).mockRejectedValueOnce(new Error(draftRefusal))
+  fireEvent.change(screen.getByRole('textbox', { name: '给创作助手发消息' }), { target: { value: '要保留的草稿' } })
+  fireEvent.blur(screen.getByRole('textbox', { name: '给创作助手发消息' }))
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(executionInputMessages['attachment-unavailable'][0]))
+  expect(screen.getByRole('alert')).toHaveTextContent('草稿未保存')
+  expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toHaveValue('要保留的草稿')
+  vi.mocked(api.renameConversation).mockRejectedValueOnce(new Error('会话名称未保存：会话刚被另一项操作更新（例如任务结束时写入的回复），这次操作没有生效。\n请再操作一次，会按最新记录处理。'))
+  fireEvent.click(screen.getByRole('button', { name: '管理会话 会话 A' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }))
+  fireEvent.change(screen.getByRole('textbox', { name: '重命名 会话 A' }), { target: { value: '新名称' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存' }))
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('会话刚被另一项操作更新'))
+  expect(screen.getByRole('alert')).not.toHaveTextContent('请重试。')
+})
+
 it('restoring an old failed message keeps a different new draft until an explicit replacement choice', async () => {
   const { api } = executionFixture([conversation('a', '失败消息')])
   vi.mocked(api.submissions).mockResolvedValue([{ submissionId: '11111111-1111-4111-8111-111111111111', workspaceId: 'workspace', conversationId: 'a',
