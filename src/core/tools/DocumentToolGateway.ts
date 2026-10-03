@@ -24,6 +24,7 @@ import { slideSceneContext } from './slideInsertion'
 import { nativeMediaReplacementData, replaceFlowMedia, assertImagePlacementFit } from './imageApplication'
 import { planNativeInsertion } from './nativeInsertion'
 import type { HostImageInput, PrepareImageResourcePort } from './imageResource'
+import type { AssetSource } from '../../shared/contracts/media-v1/types'
 import type { ImageAssetResource } from './imageAssetMetadata'
 import { z } from 'zod'
 import { isSourceDocumentModel, type DocumentDriver, type DocumentSnapshot, type DocumentModel } from '../../shared/workbench/document'
@@ -45,6 +46,8 @@ import { flowBlockSchema } from '../../shared/courseProjectSchema'
 import { changeFlowTableStructure } from './flowTableContentOperations'
 import { rotatedRectangleAabb } from '../../shared/geometry'
 import { htmlImportInputSchema } from './HtmlImportTools'
+import { isProjectFileToolName } from './ProjectFileTools'
+import { ProjectFileCoordinator, type CourseModel, type CourseSnapshot, type ProjectFileCommit } from '../projectFiles/ProjectFileCoordinator'
 
 interface Run {
   grant: ToolRunGrant
@@ -187,6 +190,7 @@ export class DocumentToolGateway implements ToolGateway {
   private readonly callDigests = new Map<string, string>()
 
   private readonly hostTools: HostToolCoordinator
+  private readonly projectFiles: ProjectFileCoordinator
   private contentObservations?: DynamicContentObservationPort
   private contentFallback?: DynamicContentFallbackPort
 
@@ -215,6 +219,18 @@ export class DocumentToolGateway implements ToolGateway {
       ownsDocument: (runId, documentId) => this.run(runId).grant.documents.some(document => document.documentId === documentId),
       provideImage: (runId, documentId, source) => this.provideImage(runId, documentId, source),
       readImage: (runId, documentId, resource) => this.readImageResource(runId, documentId, resource),
+    })
+    this.projectFiles = new ProjectFileCoordinator({
+      document: (runId, selector, access) => this.projectDocument(runId, selector, access),
+      commit: (runId, operationId, requestDigest, snapshot, model) => this.commitProjectFiles(runId, operationId, requestDigest, snapshot, model),
+      admit: (runId, operationId, requestDigest, snapshot, model) => this.admitProjectFiles(runId, operationId, requestDigest, snapshot, model),
+      parsePage: () => this.hostTools.projectFileServices()?.parsePage,
+      prepareImage: input => {
+        if (!this.options.prepareImage) throw new ToolError('unsupported-resource-preparation', '当前宿主未配置图片解码能力')
+        return this.options.prepareImage(input, this.createId)
+      },
+      readSource: (runId, from) => this.projectFileSource(runId, from),
+      createId: () => this.createId(),
     })
   }
 
@@ -551,6 +567,7 @@ export class DocumentToolGateway implements ToolGateway {
     for (const [id, target] of this.contentTargets) if (target.runId === runId) this.contentTargets.delete(id)
     for (const [id, target] of this.compositionTargets) if (target.runId === runId) this.compositionTargets.delete(id)
     for (const [id, cursor] of this.cursors) if (cursor.runId === runId) this.cursors.delete(id)
+    this.projectFiles.stopRun(runId)
     // Already queued canonical commits finish; later requests cannot cross the barrier.
     const liveIds = new Set(this.registry.list().map(document => document.documentId))
     await Promise.all([this.hostTools.stop(runId), ...run.grant.documents.filter(doc => liveIds.has(doc.documentId)).map(doc => this.registry.get(doc.documentId).stopRun(runId))])
@@ -991,6 +1008,116 @@ export class DocumentToolGateway implements ToolGateway {
     return asset
   }
 
+  /** Project files name a course by file name, path or handle; writes need the whole-document grant. */
+  private async projectDocument(runId: string, selector: string | undefined, access: 'read' | 'write'): Promise<CourseSnapshot> {
+    const run = this.run(runId)
+    if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
+    const courses: CourseSnapshot[] = []
+    for (const doc of run.grant.documents) {
+      let snapshot: DocumentSnapshot
+      try { snapshot = await this.registry.get(doc.documentId).drain() } catch { continue }
+      if (snapshot.model.kind === 'course-v9') courses.push(snapshot as CourseSnapshot)
+    }
+    const normalize = (value: string) => value.replace(/\\/g, '/').toLowerCase()
+    const wanted = selector === undefined ? undefined : normalize(selector)
+    let found = wanted === undefined ? courses : this.handles.has(selector!)
+      ? courses.filter(snapshot => snapshot.documentId === this.handle(runId, selector!).documentId)
+      : courses.filter(snapshot => {
+        const path = normalize(snapshot.binding.kind === 'file' ? snapshot.binding.path : snapshot.binding.suggestedName), base = path.split('/').at(-1)!
+        return path === wanted || path.endsWith(`/${wanted}`) || base === wanted || base.replace(/\.h5lesson$/, '') === wanted
+      })
+    // A course named by path that this task has not opened yet is opened through the document host.
+    const openProject = this.hostTools.projectFileServices()?.openProject
+    if (!found.length && selector !== undefined && /\.h5lesson$/i.test(selector) && openProject) {
+      const opened = await openProject({ runId, path: selector, fileAccess: run.grant.fileAccess })
+      await this.attachRunDocument(runId, opened.documentId, opened.writable)
+      const snapshot = await this.registry.get(opened.documentId).drain()
+      if (snapshot.model.kind === 'course-v9') found = [snapshot as CourseSnapshot]
+    }
+    if (found.length !== 1) throw new ToolError(found.length ? 'project-ambiguous' : 'project-not-found',
+      found.length ? '本任务有多个课件，请用 project 指明课件文件名' : '本任务没有可用的课件工程')
+    const snapshot = found[0]!
+    this.authorizeDocument(run, snapshot)
+    if (access === 'write' && !this.canWrite(run, snapshot, { kind: 'document' })) throw new ToolError('not-authorized', '本次任务没有整份课件的写权限')
+    return snapshot
+  }
+
+  /** Image bytes for assets/: this task's image result, a standalone image job result, or a workspace file. */
+  private async projectFileSource(runId: string, from: string): Promise<HostImageInput & { source: AssetSource }> {
+    const run = this.run(runId)
+    const image = this.images.get(from)
+    if (image) {
+      if (image.runId !== runId) throw new ToolError('invalid-resource', '图片资源不属于本任务')
+      return { bytes: Uint8Array.from(image.asset.bytes), mimeType: image.asset.meta.mimeType, filename: image.asset.meta.filename, source: { kind: 'image-model' } }
+    }
+    const standalone = /^(image-tool:[a-f0-9]{64})@(image_[a-f0-9]{64})$/.exec(from)
+    if (standalone) return { ...await this.hostTools.readStandaloneImage(runId, standalone[1]!, standalone[2]!), source: { kind: 'image-model' } }
+    const readFile = this.hostTools.projectFileServices()?.readFile
+    if (!readFile) throw new ToolError('service-unavailable', '读取工作区文件的服务尚未就绪')
+    const file = await readFile({ runId, path: from, fileAccess: run.grant.fileAccess })
+    if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
+    return { ...file, source: { kind: 'user-material', title: file.filename } }
+  }
+
+  /** Ordinary page edits: one canonical command through the Session, which owns CAS and history. */
+  private async commitProjectFiles(runId: string, operationId: string, requestDigest: string, snapshot: CourseSnapshot, model: CourseModel): Promise<ProjectFileCommit> {
+    const run = this.run(runId)
+    const driver = this.drivers.find(value => value.kind === 'course-v9')
+    if (!driver) throw new Error('文档 Driver 未注册')
+    const command = { type: 'course.replace' as const, project: model.project, resources: model.resources }
+    const next = await driver.apply(snapshot.model, command) as CourseModel
+    if (run.stopped) throw new ToolError('run-stopped', '任务已停止，修改未提交')
+    const result = await this.registry.get(snapshot.documentId).execute({ documentId: snapshot.documentId, epoch: snapshot.epoch, operationId,
+      baseRevision: snapshot.revision, actor: run.grant.actor, runId, requestDigest, mutation: { type: 'command', command } })
+    if (result.status === 'applied') this.recordAppliedFootprints(runId, snapshot, next, result.revision, [], [])
+    return { result: { kind: 'document-operation', result, affected: [] }, model: next }
+  }
+
+  /** New or changed programs take the existing staging admission; only its artifact import commits. */
+  private async admitProjectFiles(runId: string, operationId: string, requestDigest: string, snapshot: CourseSnapshot, model: CourseModel): Promise<ProjectFileCommit> {
+    void requestDigest
+    const step = (name: string, input: unknown, suffix = name) => this.executeCall(runId, `${operationId}:${suffix}`, { name, input }, true)
+    const data = (result: Extract<ToolResult, { kind: 'read' }>) => (result.data && typeof result.data === 'object' ? result.data : {}) as Record<string, unknown>
+    const base64 = (bytes: Uint8Array) => {
+      let binary = ''
+      for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))
+      return btoa(binary)
+    }
+    const created = await step('build.create', { target: this.capture(runId, snapshot, { kind: 'document' }, true) })
+    if (created.kind !== 'read') return { result: created }
+    const job = data(created).job
+    for (const [assetId, meta] of Object.entries(model.project.assets)) {
+      const bytes = model.resources.assets[assetId], old = snapshot.model.resources.assets[assetId]
+      if (!bytes || old && documentDigest(old) === documentDigest(bytes)) continue
+      const written = await step('build.write', { job, path: meta.path, encoding: 'base64', content: base64(bytes) }, `asset:${assetId}`)
+      if (written.kind !== 'read') return { result: written }
+    }
+    for (const meta of Object.values(model.project.componentPackages)) {
+      const key = `${meta.packageId}@${meta.version}`, files = model.resources.components[key] ?? {}, old = snapshot.model.resources.components[key] ?? {}
+      const base = meta.manifestPath.slice(0, meta.manifestPath.lastIndexOf('/') + 1)
+      for (const [name, bytes] of Object.entries(files)) {
+        if (old[name] && documentDigest(old[name]) === documentDigest(bytes)) continue
+        const component = await step('build.write', { job, path: `${base}${name}`, encoding: 'base64', content: base64(bytes) }, `component:${key}/${name}`)
+        if (component.kind !== 'read') return { result: component }
+      }
+    }
+    const written = await step('build.write', { job, path: 'project.json', content: JSON.stringify(model.project) }, 'project')
+    if (written.kind !== 'read') return { result: written }
+    const checked = await step('build.check', { job })
+    if (checked.kind !== 'read') return { result: checked }
+    const { status, artifact } = data(checked)
+    if (status !== 'ready' || typeof artifact !== 'string') {
+      const logs = await step('build.logs', { job, after: 0, limit: 5000 })
+      const entries = logs.kind === 'read' ? (data(logs).entries as { level: string; message: string }[] | undefined) ?? [] : []
+      const reasons = entries.filter(entry => entry.level === 'error').slice(-5).map(entry => entry.message.slice(0, 300))
+      return { result: { kind: 'error', code: 'admission-failed', message: `程序未通过准入，未提交：${reasons.join('；') || String(status)}` } }
+    }
+    const imported = await step('build.import', { job, artifact })
+    if (imported.kind !== 'document-operation' || imported.result.status !== 'applied') return { result: imported }
+    const after = await this.registry.get(snapshot.documentId).drain()
+    return { result: imported, ...(after.revision === imported.result.revision && after.model.kind === 'course-v9' ? { model: after.model } : {}) }
+  }
+
   private async invoke(runId: string, operationId: string, requestDigest: string, call: ModelToolCall): Promise<ToolResult> {
     const run = this.run(runId)
     // Durable replay precedes target validation: a successful call has already changed that target.
@@ -1003,6 +1130,10 @@ export class DocumentToolGateway implements ToolGateway {
     if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
     const definition = toolCatalog.find(tool => tool.name === call.name)
     if (!definition) throw new ToolError('unsupported-tool', '此工具尚未接入正式 Gateway')
+    if (isProjectFileToolName(call.name)) {
+      if (!this.hostTools.supports(call.name)) throw new ToolError('service-unavailable', '工程文件服务尚未就绪')
+      return this.projectFiles.execute(runId, operationId, requestDigest, call.name, call.input)
+    }
     if (call.name === 'content.targets') return this.discoverContent(runId, call.input)
     if (call.name === 'content.update') return this.updateContent(runId, operationId, requestDigest, call.input)
     // text.replace over a discovered content short handle dispatches into the same

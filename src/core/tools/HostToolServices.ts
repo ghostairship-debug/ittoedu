@@ -13,6 +13,7 @@ import { executeHtmlImport, htmlImportReceiptResult } from './HtmlImportTools'
 import { documentDeliveryReceiptResult, executeDocumentDeliveryTool } from './DocumentDeliveryTools'
 import { executeViewObserveTool, type ViewObserveToolContext } from './ViewObserveTools'
 import type { DocumentDeliveryServicePort, HtmlImportServicePort, ObservationServicePort } from '../../shared/workbench/toolPorts'
+import type { PageParsePort } from '../projectFiles/pageHtml'
 
 /** Main supplies real services. Neither their implementations nor credentials enter core. */
 export interface HostToolServices {
@@ -20,6 +21,13 @@ export interface HostToolServices {
   htmlImports?: HtmlImportServicePort
   deliveries?: DocumentDeliveryServicePort
   observations?: ObservationServicePort
+  /** Project files: the existing HTML importer parser reads pages back; workspace files are read under the task's file access. */
+  projectFiles?: {
+    parsePage: PageParsePort
+    readFile?(input: { runId: string; path: string; fileAccess: ToolRunGrant['fileAccess'] }): Promise<HostImageInput>
+    /** Open a course named by path through the document host, within the task's file access. */
+    openProject?(input: { runId: string; path: string; fileAccess: ToolRunGrant['fileAccess'] }): Promise<{ documentId: string; writable: boolean }>
+  }
   /** Thin routes to the existing durable owners; this is not a second job store. */
   jobs?: {
     status(ref: HostJobRef): Promise<HostJobView>
@@ -176,7 +184,8 @@ export class HostToolCoordinator {
     if (!match) throw new Error('独立参考图句柄无效；请使用本任务已完成图片的 resource 字段')
     return { jobId: match[1]!, resourceId: match[2]! }
   }
-  supports(name: string) { return name === 'course.createFromHtml' ? false : name === 'skills.read' || name === 'skills.list' ? !!this.services.skills : name === 'view.observe' ? !!this.services.observations : name === 'html.import' ? !!this.services.htmlImports
+  projectFileServices() { return this.services.projectFiles }
+  supports(name: string) { return name.startsWith('project.') ? !!this.services.projectFiles : name === 'course.createFromHtml' ? false : name === 'skills.read' || name === 'skills.list' ? !!this.services.skills : name === 'view.observe' ? !!this.services.observations : name === 'html.import' ? !!this.services.htmlImports
     : name === 'file.save' || name === 'document.export' ? !!this.services.deliveries
       : !isHostToolName(name) || (name.startsWith('image.') ? !!this.services.images : !!this.services.builds) }
   observePage(context: ViewObserveToolContext, input: unknown): Promise<ToolResult> {
