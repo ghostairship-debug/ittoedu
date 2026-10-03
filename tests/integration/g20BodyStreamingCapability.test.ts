@@ -74,7 +74,10 @@ it('persists exact revision/model/parameters evidence and offers only configured
   expect(bodyStreamingRecord(records, { ...frozen, parameters: { a: 2, b: 2 } })).toBeUndefined()
   await store.saveProfile({ roles: { conversation: { connectionId: saved.connection.id, model: 'other' }, vision: { connectionId: saved.connection.id, model: frozen.model, parameters: frozen.parameters }, imageEdit: null, imageGenerate: null } })
   expect(configuredBodyStreamingAlternatives(await store.read(), { ...frozen, model: 'other' })).toHaveLength(1)
-  const newer = await store.saveConnection({ id: saved.connection.id, expectedRevision: 1, connection: { ...config, authKind: 'api-key' } })
+  // An unchanged save keeps the revision; a rotated key is a newer revision without the old evidence.
+  expect((await store.saveConnection({ id: saved.connection.id, expectedRevision: 1, connection: { ...config, authKind: 'api-key' } })).connection.revision).toBe(1)
+  const newer = await store.saveConnection({ id: saved.connection.id, expectedRevision: 1, connection: { ...config, authKind: 'api-key' }, apiKey: 'rotated' })
+  expect(newer.connection.revision).toBe(2)
   records = (await store.read()).bodyStreamingObservations!
   expect(bodyStreamingRecord(records, { ...frozen, connection: newer.connection })).toBeUndefined()
   expect(configuredBodyStreamingAlternatives(await store.read())).toEqual([])

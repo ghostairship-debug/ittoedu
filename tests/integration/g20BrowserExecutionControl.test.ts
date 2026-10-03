@@ -122,7 +122,8 @@ it('pauses the real execution through Desktop browser takeover and continues the
   carrier.control.mockImplementation(async (_runId: string, action: string) => {
     if (action === 'takeover') state = 'human'
     if (action === 'resume') state = 'agent'
-    return { state, snapshotId: state === 'agent' ? 'fresh-observation' : undefined }
+    // Takeover needs a page the task has opened.
+    return { state, pageUrl: 'https://login.example.test/', snapshotId: state === 'agent' ? 'fresh-observation' : undefined }
   })
   const f = await fixture()
   expect(await f.control('takeover')).toMatchObject({ state: 'human' })
@@ -142,7 +143,7 @@ it('recovers the paused execution when a failed browser takeover leaves human co
       state = 'human'; throw new Error('未能切换原受管浏览器窗口；任务保持暂停，可再次尝试或停止')
     }
     if (action === 'resume') state = 'agent'
-    return { state, snapshotId: state === 'agent' ? 'fresh-observation' : undefined }
+    return { state, pageUrl: 'https://login.example.test/', snapshotId: state === 'agent' ? 'fresh-observation' : undefined }
   })
   const f = await fixture()
   await expect(f.control('takeover')).rejects.toThrow('受管浏览器暂时无法接管或读取')
@@ -159,5 +160,6 @@ it('does not pause the real execution when browser status rejects before takeove
   expect(f.events.some(event => event.type === 'run.state' && event.data.status === 'waiting')).toBe(false)
   f.releaseFirstResponse.resolve()
   await f.assertCompleted()
-  expect(carrier.control).toHaveBeenCalledTimes(1)
+  // The failed takeover re-reads status to decide whether to unpause; takeover itself is never attempted.
+  expect(carrier.control.mock.calls.map(call => call[1])).toEqual(['status', 'status'])
 })
