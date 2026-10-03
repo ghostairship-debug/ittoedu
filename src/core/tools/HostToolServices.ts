@@ -25,6 +25,8 @@ export interface HostToolServices {
   projectFiles?: {
     parsePage: PageParsePort
     readFile?(input: { runId: string; path: string; fileAccess: ToolRunGrant['fileAccess'] }): Promise<HostImageInput>
+    /** Open a course named by path through the document host, within the task's file access. */
+    openProject?(input: { runId: string; path: string; fileAccess: ToolRunGrant['fileAccess'] }): Promise<{ documentId: string; writable: boolean }>
   }
   /** Thin routes to the existing durable owners; this is not a second job store. */
   jobs?: {

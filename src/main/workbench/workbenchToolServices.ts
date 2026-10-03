@@ -13,6 +13,7 @@ import { ControlledBuildService } from './build/ControlledBuildService'
 import { htmlImportNetworkGrants } from './htmlImport/htmlImportNetworkGrants'
 import { HtmlImportToolService } from './htmlImport/HtmlImportToolService'
 import { HtmlImportOperationStore } from './htmlImport/HtmlImportOperationStore'
+import { createProjectFileServices } from './projectFiles/projectFileServices'
 import { ViewObservationService } from './observation/ViewObservationService'
 import { ViewObservationDesktopService } from './observation/ViewObservationDesktopService'
 import { ObservationImageStore } from './observation/ObservationImageStore'
@@ -210,6 +211,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   })
   const services: HostToolServices = {
     htmlImports,
+    projectFiles: createProjectFileServices(host),
     deliveries,
     observations: {
       stopRun: runId => observations.stopRun(runId),

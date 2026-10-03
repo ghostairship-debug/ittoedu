@@ -1020,12 +1020,20 @@ export class DocumentToolGateway implements ToolGateway {
     }
     const normalize = (value: string) => value.replace(/\\/g, '/').toLowerCase()
     const wanted = selector === undefined ? undefined : normalize(selector)
-    const found = wanted === undefined ? courses : this.handles.has(selector!)
+    let found = wanted === undefined ? courses : this.handles.has(selector!)
       ? courses.filter(snapshot => snapshot.documentId === this.handle(runId, selector!).documentId)
       : courses.filter(snapshot => {
         const path = normalize(snapshot.binding.kind === 'file' ? snapshot.binding.path : snapshot.binding.suggestedName), base = path.split('/').at(-1)!
         return path === wanted || path.endsWith(`/${wanted}`) || base === wanted || base.replace(/\.h5lesson$/, '') === wanted
       })
+    // A course named by path that this task has not opened yet is opened through the document host.
+    const openProject = this.hostTools.projectFileServices()?.openProject
+    if (!found.length && selector !== undefined && /\.h5lesson$/i.test(selector) && openProject) {
+      const opened = await openProject({ runId, path: selector, fileAccess: run.grant.fileAccess })
+      await this.attachRunDocument(runId, opened.documentId, opened.writable)
+      const snapshot = await this.registry.get(opened.documentId).drain()
+      if (snapshot.model.kind === 'course-v9') found = [snapshot as CourseSnapshot]
+    }
     if (found.length !== 1) throw new ToolError(found.length ? 'project-ambiguous' : 'project-not-found',
       found.length ? '本任务有多个课件，请用 project 指明课件文件名' : '本任务没有可用的课件工程')
     const snapshot = found[0]!

@@ -40,13 +40,18 @@ function data<T = Record<string, unknown>>(result: ToolResult): T {
 }
 
 async function harness(options: { models?: CourseModel[]; writable?: ToolTarget[]; admission?: BuildAdmissionPort
-  readFile?: NonNullable<HostToolServices['projectFiles']>['readFile'] } = {}) {
+  readFile?: NonNullable<HostToolServices['projectFiles']>['readFile']; unopened?: { model: CourseModel; writable: boolean } } = {}) {
   let id = 0
   const registry = new DocumentRegistry({ drivers: [driver], createId: () => `doc-${++id}`, bindingKey: binding => binding.path,
     persistence: { async append() {}, async save() { throw new Error('unused') } } })
   const models = options.models ?? [blank()]
   const sessions = await Promise.all(models.map((model, index) => registry.create(model, index ? `第${index + 1}课.h5lesson` : '四季.h5lesson')))
-  const services: HostToolServices = { projectFiles: { parsePage: parseWebComposition, ...(options.readFile ? { readFile: options.readFile } : {}) } }
+  const unopened = options.unopened && await registry.create(options.unopened.model, '新课.h5lesson')
+  const services: HostToolServices = { projectFiles: { parsePage: parseWebComposition, ...(options.readFile ? { readFile: options.readFile } : {}),
+    ...(unopened ? { openProject: async ({ path: requested }) => {
+      if (requested !== '课程/新课.h5lesson') throw new Error('没有这个课件')
+      return { documentId: unopened.documentId, writable: options.unopened!.writable }
+    } } : {}) } }
   if (options.admission) {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'project-files-build-')); roots.push(root)
     services.builds = new ControlledBuildService({ directory: path.join(root, 'scratch'), admission: options.admission })
@@ -54,7 +59,7 @@ async function harness(options: { models?: CourseModel[]; writable?: ToolTarget[
   const gateway = new DocumentToolGateway(registry, [driver], () => String(++id), { services, prepareImage: prepareImageResource })
   await gateway.beginRun({ runId: 'r', actor: 'agent', documents: sessions.map(session => ({ documentId: session.documentId, writable: options.writable ?? [{ kind: 'document' }] })) })
   const session = sessions[0]!
-  return { gateway, session, sessions,
+  return { gateway, session, sessions, unopened,
     call: (callId: string, name: string, input: unknown) => gateway.execute('r', callId, { name, input }),
     project: () => (session.read().model as CourseModel).project,
     files: async () => data<{ files: { path: string; type: string; note?: string }[] }>(await gateway.execute('r', `list-${++id}`, { name: 'project.list', input: {} })).files,
@@ -290,5 +295,17 @@ describe('project files through the tool gateway', () => {
     expect(after).toMatchObject({ packageId: before.packageId, version: before.version })
     expect(after.contentSha256).not.toBe(before.contentSha256)
     expect(data<{ content: string }>(await f.call('r2', 'project.read', { path: 'controller/教师控制台.js' })).content).toContain('// 课程定制')
+  })
+
+  it('opens a course named by path through the host port and keeps its writability', async () => {
+    const f = await harness({ unopened: { model: blank(), writable: true } })
+    applied(await f.call('w1', 'project.write', { project: '课程/新课.h5lesson', path: 'slides/01-甲.html', content: '<p>甲</p>' }))
+    expect(pageLayer((f.unopened!.read().model as CourseModel).project).kind).toBe('composition')
+    // Once attached, the course is found by its short name too.
+    expect(data<{ files: unknown[] }>(await f.call('l1', 'project.list', { project: '新课' })).files.length).toBeGreaterThan(0)
+    const readOnly = await harness({ unopened: { model: blank(), writable: false } })
+    expect(await readOnly.call('w2', 'project.write', { project: '课程/新课.h5lesson', path: 'slides/01-甲.html', content: '<p>甲</p>' }))
+      .toMatchObject({ kind: 'error', code: 'not-authorized' })
+    expect(await readOnly.call('w3', 'project.list', { project: '课程/别的.h5lesson' })).toMatchObject({ kind: 'error', message: '没有这个课件' })
   })
 })
