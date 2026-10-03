@@ -21,6 +21,7 @@ import { FLOW_WORKSPACE_HEADER_HEIGHT } from '../FlowBlockContextToolbar'
 import type { FlowCurrentSessionCommandPort } from '../flow/useFlowTextAuthoringController'
 import type { WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
 import type { ImportedImageAsset } from '../../project/assetManager'
+import type { FlowWorkspaceProps } from '../FlowWorkspace'
 
 export type FlowCanvasMode = 'edit' | 'run'
 export type FlowEditingScope = 'scene' | 'global'
@@ -29,6 +30,11 @@ export interface FlowTryRunSession {
 }
 
 export interface FlowLocationWorkspaceProps {
+  readonly publishCompositionContent?: FlowWorkspaceProps['publishCompositionContent']
+  readonly onEditComposition?: FlowWorkspaceProps['onEditComposition']
+  readonly onCompositionEdit?: FlowWorkspaceProps['onCompositionEdit']
+  readonly onCompositionSelection?: FlowWorkspaceProps['onCompositionSelection']
+  readonly selectedCompositionNode?: FlowWorkspaceProps['selectedCompositionNode']
   readonly documentId?: string | null
   readonly view: FlowEditorView
   readonly sessionToken: CourseAuthoringSessionToken
@@ -68,6 +74,11 @@ export function FlowLocationWorkspace({
   onDropWorkspaceMedia,
   onSelectImageAsset,
   onStatus,
+  publishCompositionContent,
+  onEditComposition,
+  onCompositionEdit,
+  onCompositionSelection,
+  selectedCompositionNode,
 }: FlowLocationWorkspaceProps) {
   const [toolbarContainer, setToolbarContainer] = useState<HTMLDivElement | null>(null)
   const tryRunRef = useRef<HTMLDivElement>(null)
@@ -151,6 +162,11 @@ export function FlowLocationWorkspace({
             onDropWorkspaceMedia={onDropWorkspaceMedia}
             onSelectImageAsset={onSelectImageAsset}
             onStatus={onStatus}
+            publishCompositionContent={publishCompositionContent}
+            onEditComposition={onEditComposition}
+            onCompositionEdit={canvasMode === 'edit' ? onCompositionEdit : undefined}
+            onCompositionSelection={canvasMode === 'edit' ? onCompositionSelection : undefined}
+            selectedCompositionNode={canvasMode === 'edit' ? selectedCompositionNode : null}
           />
         ) : null}
         <div

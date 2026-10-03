@@ -20,6 +20,7 @@ interface ComponentManifestBase {
   name: string
   version: string
   description?: string
+  /** Package payload: JavaScript for executable components, JSON for structure fragments. */
   entry: string
   thumbnail?: string
   defaultSize: { width: number; height: number }
@@ -117,7 +118,7 @@ export interface ComponentPreset {
   previewPageId?: string
 }
 
-export interface ComponentManifestV4 extends ComponentManifestBase {
+interface ComponentManifestV4Common extends ComponentManifestBase {
   schemaVersion: 4
   runtimeApiVersion: 4
   /** V4 components explicitly declare both their mount scopes and render surface. */
@@ -127,6 +128,18 @@ export interface ComponentManifestV4 extends ComponentManifestBase {
   variants?: ComponentVariant[]
   presets?: ComponentPreset[]
 }
+
+/** Executable packages enter the existing Component API 4 runtime. */
+export interface ComponentExecutableManifestV4 extends ComponentManifestV4Common {
+  content?: never
+}
+
+/** The entry is a JSON structure package, materialised as editable composition instances. */
+export interface ComponentCompositionManifestV4 extends ComponentManifestV4Common {
+  content: { kind: 'composition' }
+}
+
+export type ComponentManifestV4 = ComponentExecutableManifestV4 | ComponentCompositionManifestV4
 
 /** Current production component contract. */
 export type ConfigurableComponentManifest = ComponentManifestV4
@@ -362,6 +375,7 @@ export interface EmbeddedComponentPackageMeta {
 
 export interface ComponentPackageData {
   manifest: ComponentManifest
+  /** Decoded executable source. Composition packages have no Runtime source and store an empty projection. */
   runtimeSource: string
   files: Record<string, Uint8Array>
   /** Recomputed by package parsing; raw test/build sources may omit the cache. */

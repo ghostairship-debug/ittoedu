@@ -1,4 +1,6 @@
 import type { TeacherControllerAction } from '../teacherControllerConfig'
+import { visitCompositionReferences } from '../composition/references'
+import { visitProjectDynamicInstances } from '../composition/dynamic'
 import { readTeacherControllerConfig } from '../teacherControllerConfig'
 import {
   getComponentPropValue,
@@ -190,6 +192,12 @@ function addLayerAssetChecks(
     })
     return true
   }
+  if (item.kind === 'composition') {
+    visitCompositionReferences(item.content, reference => {
+      if (reference.kind === 'asset') addAssetCheck(project, drafts, referenced, reference.id, undefined, '组合内容素材', { ...common, path: [...path, 'content', ...reference.path] }, false)
+    })
+    return false
+  }
   Object.entries(item.runtime.assets).forEach(([key, binding]) => addAssetCheck(
     project,
     drafts,
@@ -339,6 +347,10 @@ function ruleAppliesInState(
 }
 
 function hasExecutableRuntimeAssetConsumer(project: CourseProjectDocument): boolean {
+  const enabledRuntimeLayers = new Set<string>()
+  visitProjectDynamicInstances(project, (entry) => {
+    if (entry.kind === 'runtime' && entry.runtime.enabled && entry.layerItemId) enabledRuntimeLayers.add(entry.layerItemId)
+  })
   for (const location of project.locations) {
     const surface = project.surfaces.find((candidate) => candidate.id === location.surfaceId)
     if (!surface) continue
@@ -356,7 +368,7 @@ function hasExecutableRuntimeAssetConsumer(project: CourseProjectDocument): bool
         stateId,
       })
       if (composition.entries.some(({ item, mounted }) => (
-        mounted && item.kind === 'runtime' && item.runtime.enabled
+        mounted && enabledRuntimeLayers.has(item.layerItemId)
       ))) return true
     }
   }

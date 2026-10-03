@@ -31,6 +31,8 @@ function setup() {
       state = { ...state, connections: [entry] }; return entry
     }),
     saveProfile: vi.fn(async input => { state.profile = { ...state.profile, revision: state.profile.revision + 1, roles: input.roles }; return structuredClone(state.profile) }),
+    setModelFavorite: vi.fn(async () => []),
+    knownModels: vi.fn(async () => []),
     revokeConnection: vi.fn(async () => { state.connections[0]!.hasCredential = false; state.connections[0]!.revoked = true }),
     discoverModels: vi.fn(async () => ({ connectionId: 'connection', connectionRevision: 1, models: [{ id: 'available-model' }], capabilitiesVerified: false as const, source: 'live' as const, checkedAt: '2026-09-25T00:00:00.000Z' })),
     probeCapabilities: vi.fn(async (input: Parameters<ExecutionSettingsAPI['probeCapabilities']>[0]) => {
@@ -458,4 +460,29 @@ it('M30 leaves unknown and ambiguous abilities out of a connection preset', asyn
   expect(preset.getByText(/图片生成与编辑暂无本页可复用的独立能力记录/)).toBeInTheDocument()
   expect(preset.getByRole('button', { name: '填入已验证的空白角色' })).toBeDisabled()
   expect(api.saveProfile).not.toHaveBeenCalled()
+})
+
+
+it('saves a capability reference and native effort without JSON while preserving the actual model and other roles', async () => {
+  const { api, state } = setup()
+  const route = connected('router')
+  route.connection.baseURL = 'https://api.teamorouter.com/v1'
+  route.connection.billing.kind = 'metered'
+  state.connections = [route]
+  const vision = { connectionId: 'router', model: 'vision-original', parameters: { detail: 'high' } }
+  state.profile.roles = { conversation: { connectionId: 'router', model: 'private-alias', capabilityModel: 'anthropic/claude-haiku-4-5', parameters: { temperature: 0.4, thinking: { type: 'enabled', budget_tokens: 12000 } } }, vision, imageGenerate: null, imageEdit: null }
+  vi.mocked(api.knownModels).mockResolvedValue([{ id: 'claude-haiku-4-5', provider: 'anthropic', reasoning: { kind: 'budget' } },
+    { id: 'claude-opus-4-6', provider: 'anthropic', reasoning: { kind: 'effort', efforts: ['low', 'high', 'max'] } }])
+  render(<ExecutionSettingsPanel open api={api} onClose={vi.fn()} />)
+  await screen.findByLabelText('对话与规划参考型号')
+  await waitFor(() => expect(screen.getByLabelText('思考 token 数')).toHaveValue(12000))
+  fireEvent.change(screen.getByLabelText('对话与规划参考型号'), { target: { value: 'anthropic/claude-opus-4-6' } })
+  const controls = screen.getByRole('group', { name: '对话与规划思考设置' })
+  fireEvent.click(within(controls).getByRole('button', { name: '高' }))
+  fireEvent.click(screen.getByRole('button', { name: '保存模型角色' }))
+  await waitFor(() => expect(api.saveProfile).toHaveBeenCalledWith({ expectedRevision: 0, roles: {
+    conversation: { connectionId: 'router', model: 'private-alias', capabilityModel: 'anthropic/claude-opus-4-6', parameters: { temperature: 0.4, thinking: { type: 'adaptive' }, output_config: { effort: 'high' } } },
+    vision, imageGenerate: null, imageEdit: null,
+  } }))
+  expect(api.probeCapabilities).not.toHaveBeenCalled()
 })

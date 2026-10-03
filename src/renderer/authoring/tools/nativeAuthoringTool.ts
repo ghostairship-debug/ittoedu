@@ -32,7 +32,7 @@ const textReplacement = z.object({
   contextAfter: z.string().optional(),
 }).strict()
 const legacyEditInputSchema = z.object({ operation: z.literal('edit'), text: z.string().optional(),
-  replacements: z.array(textReplacement).min(1).max(100).optional(),
+  replacements: z.array(textReplacement).min(1).optional(),
   image: imageEdit.optional(), formula: formulaEdit.optional(), textStyle: textStyleEdit.optional(),
   properties: layerItemPropertiesInputSchema.optional() }).strict()
   .refine(value => value.text !== undefined || value.replacements !== undefined || value.textStyle !== undefined || value.properties !== undefined || value.image !== undefined || value.formula !== undefined, '窄编辑至少提供文字、公式、图片或属性')
@@ -42,7 +42,7 @@ const legacyEditInputSchema = z.object({ operation: z.literal('edit'), text: z.s
 export const nativeContentEditSchemas = {
   shape: z.object({ operation: z.literal('edit-shape'), shapeStyle: shapeStyle.optional(), properties: layerItemPropertiesInputSchema.optional() }).strict()
     .refine(value => Object.keys(value.shapeStyle ?? {}).length > 0 || Object.keys(value.properties ?? {}).length > 0, '图形窄编辑至少提供一个样式或属性字段'),
-  text: z.object({ operation: z.literal('edit-text'), text: z.string().optional(), replacements: z.array(textReplacement).min(1).max(100).optional(), textStyle: textStyleEdit.optional(), properties: layerItemPropertiesInputSchema.optional() }).strict()
+  text: z.object({ operation: z.literal('edit-text'), text: z.string().optional(), replacements: z.array(textReplacement).min(1).optional(), textStyle: textStyleEdit.optional(), properties: layerItemPropertiesInputSchema.optional() }).strict()
     .refine(value => value.text !== undefined || value.replacements !== undefined || value.textStyle !== undefined || value.properties !== undefined, '文字窄编辑至少提供文字、样式或属性')
     .refine(value => value.text === undefined || value.replacements === undefined, 'text 与 replacements 不能同时提供'),
   image: z.object({ operation: z.literal('edit-image'), image: imageEdit, properties: layerItemPropertiesInputSchema.optional() }).strict(),

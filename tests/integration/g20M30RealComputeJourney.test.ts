@@ -110,7 +110,7 @@ it('M30 T1 runs the exact delivered Python source in real isolated compute and s
       for (const id of ['t1-python', 't1-json', 't1-html', 't1-css'])
         expect(toolReceipt(receipts, id)).toMatchObject({ kind: 'read', data: { saved: true } })
       sse(response, 't1-compute', { tool_calls: [call(0, 't1-compute', wire('在已配置的受限 Python 后端'),
-        { code: source, outputNames: ['computed.json', 'chart.svg'], timeoutMs: 20_000 })] }, 'tool_calls')
+        { code: source, outputNames: ['computed.json', 'chart.svg'] })] }, 'tool_calls')
     } else if (requestCount === 4) {
       const compute = toolReceipt(receipts, 't1-compute')
       expect(compute).toMatchObject({ kind: 'read', data: { job: expect.stringMatching(/^compute-/) } })

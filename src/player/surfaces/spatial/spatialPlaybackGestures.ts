@@ -6,7 +6,7 @@ import {
 
 export const SPATIAL_GESTURE_OWNER_ATTR = 'data-spatial-gesture-owner'
 
-export type SpatialGestureOwner = 'runtime' | 'component' | 'media' | 'controller'
+export type SpatialGestureOwner = 'runtime' | 'component' | 'composition' | 'media' | 'controller'
 
 const PAN_THRESHOLD_PX = 4
 const ZOOM_IN = 1.08

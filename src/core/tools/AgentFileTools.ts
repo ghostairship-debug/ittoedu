@@ -3,28 +3,29 @@ import type { ConversationHome } from '../../shared/workbench/conversations'
 import type { ExecutionPermissionMode } from '../../shared/workbench/executionPermission'
 import type { DocumentKind } from '../../shared/workbench/document'
 import type { ModelJsonObject } from '../../shared/workbench/modelProvider'
+import type { OfficeContentToolName } from './OfficeContentTools'
 
 const path = z.string().min(1).max(32767)
-const version = z.string().min(1).max(256)
-const content = z.string().max(4_000_000)
-const paths = z.array(path).min(1).max(100)
+const version = z.string().min(1)
+const content = z.string()
+const paths = z.array(path).min(1)
 export const agentFileSchemas = {
   'file.list': z.object({ path: path.optional(), cursor: z.string().uuid().optional(), limit: z.number().int().min(1).max(100).optional() }).strict(),
-  'file.search': z.object({ path: path.optional(), cursor: z.string().uuid().optional(), query: z.string().min(1).max(200), limit: z.number().int().min(1).max(100).optional() }).strict(),
+  'file.search': z.object({ path: path.optional(), cursor: z.string().uuid().optional(), query: z.string().min(1), limit: z.number().int().min(1).max(100).optional() }).strict(),
   'file.open': z.object({ path }).strict(),
-  'file.create': z.object({ path: path.optional(), name: z.string().min(1).max(200), kind: z.enum(['markdown', 'text', 'html', 'course-v9']).optional() }).strict(),
-  'file.read': z.object({ path, cursor: z.string().min(1).max(128).optional(), limit: z.number().int().min(1).max(64_000).optional() }).strict(),
-  'file.grep': z.object({ path: path.optional(), query: z.string().min(1).max(500), cursor: z.string().uuid().optional(), limit: z.number().int().min(1).max(100).optional() }).strict(),
+  'file.create': z.object({ path: path.optional(), name: z.string().min(1), kind: z.enum(['markdown', 'text', 'html', 'course-v9']).optional() }).strict(),
+  'file.read': z.object({ path, cursor: z.string().min(1).optional(), limit: z.number().int().min(1).optional() }).strict(),
+  'file.grep': z.object({ path: path.optional(), query: z.string().min(1), cursor: z.string().uuid().optional(), limit: z.number().int().min(1).max(100).optional() }).strict(),
   'file.write': z.discriminatedUnion('mode', [
     z.object({ mode: z.literal('create'), path, content }).strict(),
     z.object({ mode: z.literal('replace'), path, content, expectedVersion: version.optional() }).strict(),
   ]),
-  'file.patch': z.object({ path, expectedVersion: version.optional(), oldText: z.string().min(1).max(200_000), newText: content,
+  'file.patch': z.object({ path, expectedVersion: version.optional(), oldText: z.string().min(1), newText: content,
     range: z.object({ from: z.number().int().min(0), to: z.number().int().min(0) }).strict().optional() }).strict(),
-  'file.mkdir': z.object({ path: path.optional(), name: z.string().min(1).max(200) }).strict(),
+  'file.mkdir': z.object({ path: path.optional(), name: z.string().min(1) }).strict(),
   'file.copy': z.object({ sources: paths, destination: path, flushFirst: z.boolean().optional() }).strict(),
   'file.move': z.object({ sources: paths, destination: path }).strict(),
-  'file.rename': z.object({ path, name: z.string().min(1).max(200) }).strict(),
+  'file.rename': z.object({ path, name: z.string().min(1) }).strict(),
   'file.trash': z.object({ paths }).strict(),
 } as const
 export type AgentFileToolName = keyof typeof agentFileSchemas
@@ -75,5 +76,7 @@ export interface AgentFileService {
   preflightCreate(context: AgentFileContext, input: unknown): Promise<{ directory: string; outside: boolean }>
   preflightMutation(context: AgentFileContext, name: AgentFileMutationName, input: unknown): Promise<{ paths: string[]; outside: boolean }>
   execute(context: AgentFileContext, name: AgentFileToolName, input: unknown, operationId: string): Promise<AgentFileOutcome>
+  preflightOffice?(context: AgentFileContext, name: OfficeContentToolName, input: unknown): Promise<{ paths: string[]; outside: boolean }>
+  executeOffice?(context: AgentFileContext, name: OfficeContentToolName, input: unknown, operationId: string): Promise<AgentFileOutcome>
 }
 export class AgentFileOutcomeUnknown extends Error {}

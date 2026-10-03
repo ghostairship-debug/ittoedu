@@ -7,8 +7,8 @@ import { unzipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
 import {
   AI_CAPABILITY_DISCOVERY_MAX_BYTES,
-  AI_CAPABILITY_INDEX_MAX_BYTES,
-  assertIndexWithinLimit,
+  AI_CAPABILITY_INDEX_RECOMMENDED_BYTES,
+  indexSizeWarning,
   canonicalJsonByteLength,
   checkAiCapabilityArtifacts,
   COURSE_NATIVE_TYPES,
@@ -225,7 +225,6 @@ describe('AI capability manifest generation', () => {
         }
       }
     }>(first.files, 'index.json')
-    expect(first.indexBytes).toBeLessThanOrEqual(AI_CAPABILITY_INDEX_MAX_BYTES)
     expect(first.indexBytes).toBe(canonicalJsonByteLength(index))
     expect(index.nodes.map((entry) => entry.type)).toEqual([
       ...COURSE_NATIVE_TYPES,
@@ -1423,9 +1422,10 @@ describe('AI capability manifest generation', () => {
     }
   }, 30_000)
 
-  it('rejects an oversized canonical index fixture', () => {
-    expect(() => assertIndexWithinLimit({
-      oversized: 'x'.repeat(AI_CAPABILITY_INDEX_MAX_BYTES),
-    })).toThrow(/16384/)
+  it('reports a size diagnostic without rejecting an oversized canonical index fixture', () => {
+    expect(indexSizeWarning({
+      oversized: 'x'.repeat(AI_CAPABILITY_INDEX_RECOMMENDED_BYTES),
+    })).toMatch(/16384.*正常生成/)
+    expect(indexSizeWarning({ small: true })).toBeUndefined()
   })
 })

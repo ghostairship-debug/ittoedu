@@ -75,8 +75,8 @@ export function validConversationElement(value: unknown): value is ConversationE
   if (!value || typeof value !== 'object') return false
   const item = value as Record<string, unknown>
   return Object.keys(item).every(key => key === 'kind' || key === 'documentId' || key === 'label')
-    && item.kind === 'element' && typeof item.documentId === 'string' && item.documentId.length > 0 && item.documentId.length <= 512
-    && typeof item.label === 'string' && item.label.length > 0 && item.label.length <= 200
+    && item.kind === 'element' && typeof item.documentId === 'string' && item.documentId.length > 0
+    && typeof item.label === 'string' && item.label.length > 0
 }
 
 export interface ConversationRecord {
@@ -97,7 +97,7 @@ export interface ConversationRecord {
   updatedAt: number
 }
 
-const HOME_PATH_LIMIT = 1024
+const HOME_PATH_LIMIT = 32767
 /** A safe workspace-relative home path: no root, drive, backslash, empty, `.` or `..` segment. */
 export function validHomePath(path: unknown): path is string {
   return typeof path === 'string' && path.length > 0 && path.length <= HOME_PATH_LIMIT && !path.includes('\\') && !path.startsWith('/')
@@ -108,7 +108,7 @@ export function validConversationHome(home: unknown): home is ConversationHome {
   const value = home as Record<string, unknown>
   return Object.keys(value).every(key => key === 'kind' || key === 'path' || key === 'workspaceId' || key === 'missing')
     && (value.kind === 'folder' || value.kind === 'file') && validHomePath(value.path)
-    && (value.workspaceId === undefined || typeof value.workspaceId === 'string' && value.workspaceId.length > 0 && value.workspaceId.length <= 256)
+    && (value.workspaceId === undefined || typeof value.workspaceId === 'string' && value.workspaceId.length > 0)
     && (value.missing === undefined || value.missing === true)
 }
 /** Whether a conversation's home lies in this explorer scope: a folder includes everything below it; a file only itself. */

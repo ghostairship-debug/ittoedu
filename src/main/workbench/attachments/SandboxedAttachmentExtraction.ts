@@ -10,7 +10,6 @@ export interface SandboxedAttachmentExtractionOptions {
   /** Development: exact local Vite extraction entry. Production: rendererFile. */
   rendererURL?: string
   rendererFile?: string
-  timeoutMs?: number
 }
 
 export function createSandboxedAttachmentExtractor(options: SandboxedAttachmentExtractionOptions): AttachmentExtractor {
@@ -18,8 +17,6 @@ export function createSandboxedAttachmentExtractor(options: SandboxedAttachmentE
   const entry = new URL(options.rendererURL ?? pathToFileURL(path.resolve(options.rendererFile!)).href)
   if (entry.pathname.split('/').pop() !== 'attachment-extraction.html' || entry.search || entry.hash) throw new Error('Invalid extraction entry')
   if (options.rendererURL && (entry.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(entry.hostname))) throw new Error('Development extraction entry must be loopback HTTP')
-  const timeoutMs = options.timeoutMs ?? 180_000
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1) throw new Error('Invalid extraction timeout')
   return { async extract(input: AttachmentExtractionInput, callOptions = {}): Promise<AttachmentExtractionResult> {
     const frozen = structuredClone(input)
     const cancelled = () => callOptions.signal?.reason instanceof AttachmentError && callOptions.signal.reason.code === 'operation-cancelled'
@@ -52,23 +49,15 @@ export function createSandboxedAttachmentExtractor(options: SandboxedAttachmentE
     window.webContents.on('will-navigate', event => event.preventDefault())
     window.webContents.on('will-frame-navigate', event => event.preventDefault())
     return new Promise((resolve, reject) => {
-      let settled = false, sent = false, lastPage = 0
+      let settled = false, sent = false
       const finish = (error?: Error, result?: AttachmentExtractionResult) => {
         if (settled) return
-        settled = true; clearTimeout(timer); callOptions.signal?.removeEventListener('abort', onAbort)
+        settled = true; callOptions.signal?.removeEventListener('abort', onAbort)
         if (!window.isDestroyed()) window.destroy()
         isolatedSession.webRequest.onBeforeRequest(null)
         if (error) reject(error); else resolve(result!)
       }
       const onAbort = () => finish(cancelled())
-      const timeout = () => finish(new AttachmentError('extraction-timeout', '本批提取长时间无进展；已完成批次保留，再次提取可继续'))
-      let timer = setTimeout(timeout, timeoutMs)
-      window.webContents.ipc.on('attachment-extraction:progress', (event, progress: { page?: number; total?: number }) => {
-        if (event.senderFrame !== window.webContents.mainFrame || !sent || settled
-          || !Number.isSafeInteger(progress?.page) || !Number.isSafeInteger(progress?.total)
-          || progress.page! <= lastPage || progress.page! > progress.total!) return
-        lastPage = progress.page!; clearTimeout(timer); timer = setTimeout(timeout, timeoutMs)
-      })
       callOptions.signal?.addEventListener('abort', onAbort, { once: true })
       window.on('closed', () => finish(new AttachmentError('extraction-exited', '附件提取工作窗口已关闭')))
       window.webContents.on('render-process-gone', () => finish(new AttachmentError('extraction-exited', '附件提取进程已退出')))

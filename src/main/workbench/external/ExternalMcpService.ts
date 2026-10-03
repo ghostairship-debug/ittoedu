@@ -132,9 +132,9 @@ export class ExternalMcpService implements ExternalMcpAPI {
     if (this.closed) throw new Error('外部连接服务已关闭')
     const connection = await this.server.grant({ workspaceId: input.workspaceId, conversationId: input.conversationId,
       taskId: randomUUID(), instruction: input.instruction, documents: input.documents, expectedDocuments: input.documents,
-      lifetimeMs: input.lifetimeMs, handoff }, resources)
+      handoff }, resources)
     this.grants.set(connection.connectionId, { workspaceId: input.workspaceId, conversationId: input.conversationId,
-      connectionId: connection.connectionId, runId: connection.runId, expiresAt: connection.expiresAt,
+      connectionId: connection.connectionId, runId: connection.runId,
       status: 'active', documents: structuredClone(input.documents) })
     try {
       if (this.closed) throw new Error('外部连接服务已关闭')

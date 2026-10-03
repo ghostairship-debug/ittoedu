@@ -17,6 +17,7 @@ import type {
   SlideSurfaceDocument,
 } from '../../shared/courseProjectTypes'
 import { compareStableStrings } from '../../shared/stableOrder'
+import { effectiveSceneCanvas, mapSlideFrame, sharedSlideFrameMapping } from '../../shared/slideCanvas'
 import {
   analyzeTextNodeLayout,
   textNodeHasEmphasis,
@@ -184,10 +185,12 @@ function collectNodeItems(input: {
   canvas: { width: number; height: number }
   target: SlideVisualPreflightTarget
   node: VisualInspectNode
+  layoutNode?: VisualInspectNode
   context: SlideVisualStateContext
   add: AddItem
 }): void {
   const { canvas, target, node, context, add } = input
+  const layoutNode = input.layoutNode ?? node
   if (!node.visible) return
   const label = nodeLocationLabel(context, node)
   const bounds = rotatedRectangleAabb(node)
@@ -203,7 +206,7 @@ function collectNodeItems(input: {
   )
   if (outside) {
     add({
-      severity: 'error',
+      severity: 'warning',
       code: 'node-fully-outside-canvas',
       message: `${label}完全位于 ${canvas.width}×${canvas.height} 画布之外。`,
       sceneId: context.sceneId,
@@ -239,7 +242,7 @@ function collectNodeItems(input: {
       })
     }
     try {
-      const layout = analyzeFormulaNodeLayout(node)
+      const layout = analyzeFormulaNodeLayout(layoutNode.type === 'formula' ? layoutNode : node)
       if (layout.overflowsWidth || layout.overflowsHeight) {
         const estimated = layout.measurementMode === 'deterministic-fallback'
         add({
@@ -357,7 +360,7 @@ function collectNodeItems(input: {
   }
 
   try {
-    const layout = analyzeTextNodeLayout(node)
+    const layout = analyzeTextNodeLayout(layoutNode.type === 'text' ? layoutNode : node)
     const clipsText = node.style.overflow === 'fixed' &&
       (layout.overflowsWidth || layout.overflowsHeight)
     const shrinkHitFloor = node.style.overflow === 'shrink' &&
@@ -539,11 +542,23 @@ function slideLocation(project: CourseProjectDocument, locationId: string): {
   return { surface, scene }
 }
 
-function mountedNodes(composition: CourseLayerComposition<LayerItem>): VisualInspectNode[] {
+function mountedNodes(
+  composition: CourseLayerComposition<LayerItem>,
+  surface: SlideSurfaceDocument,
+  scene: SlideSurfaceDocument['scenes'][number],
+): Array<{ node: VisualInspectNode; layoutNode: VisualInspectNode }> {
+  const mapping = sharedSlideFrameMapping(surface.canvas, effectiveSceneCanvas(surface, scene))
   return composition.entries.flatMap((entry) => {
     if (!entry.mounted) return []
-    const node = layerItemToVisualNode(entry.item)
-    return node ? [node] : []
+    const shared = entry.source === 'global' || entry.source === 'surface'
+    const controller = entry.item.kind === 'component' && entry.item.role === 'teacher-controller'
+    const item = shared && !controller
+      ? { ...entry.item, frame: mapSlideFrame(entry.item.frame, mapping) }
+      : entry.item
+    const node = layerItemToVisualNode(item)
+    // Shared layers scale their whole rendered content; inspect authored text layout before that scale.
+    const layoutNode = shared && !controller ? layerItemToVisualNode(entry.item) : node
+    return node && layoutNode ? [{ node, layoutNode }] : []
   })
 }
 
@@ -557,6 +572,7 @@ export function collectCourseSlideLocationVisualPreflightItems(input: {
   target: SlideVisualPreflightTarget
 }): SlideVisualPreflightItem[] {
   const { surface, scene } = slideLocation(input.project, input.locationId)
+  const canvas = effectiveSceneCanvas(surface, scene)
   const { items, add } = itemCollector(input.target)
   const states: Array<{ id: string | null; name: string }> = [
     { id: null, name: '母版画面' },
@@ -575,7 +591,8 @@ export function collectCourseSlideLocationVisualPreflightItems(input: {
     if (!composition.background) {
       throw new Error(`Slide composition ${input.locationId} has no background`)
     }
-    const nodes = mountedNodes(composition)
+    const visualEntries = mountedNodes(composition, surface, scene)
+    const nodes = visualEntries.map(entry => entry.node)
     const context: SlideVisualStateContext = {
       sceneId: scene.id,
       sceneName: scene.name,
@@ -583,10 +600,11 @@ export function collectCourseSlideLocationVisualPreflightItems(input: {
       stateName: state.name,
       backgroundColor: composition.background.color,
     }
-    nodes.forEach((node) => collectNodeItems({
-      canvas: surface.canvas,
+    visualEntries.forEach(({ node, layoutNode }) => collectNodeItems({
+      canvas,
       target: input.target,
       node,
+      layoutNode,
       context,
       add,
     }))
@@ -603,7 +621,7 @@ export function collectCourseSlideLocationVisualPreflightItems(input: {
         stateId: state.id,
         stateName: state.name,
         nodes,
-        canvas: surface.canvas,
+        canvas,
       }), add)
     }
   }

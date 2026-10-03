@@ -1,13 +1,11 @@
-import { MAX_SCENE_NODES } from '../../shared/constants'
 import { chartNativeContentObjectSchema, tableNativeContentObjectSchema } from '../../shared/contracts/native-v1'
 import type { NativeChartCategory, NativeChartSeries, NativeChartContent, NativeTableColumn, NativeTableRow, NativeTableStyle } from '../../shared/contracts/native-v1/types'
 import type { TableMergeRegion } from '../../shared/tableMerge'
 import type { CourseProjectDocument, LayerItem, SlideSurfaceDocument } from '../../shared/courseProjectTypes'
 import { createChartNode, createChartLayerItem, createTableNode, createTableLayerItem, type ChartFactoryNode } from './nativeNodeFactories'
-import { appendSceneLayer, slideSceneContext, offsetDefaultSlideInsertion, SlideCommandError, type SlideInsertionOwner } from './slideInsertion'
+import { appendSceneLayer, slideSceneContext, slideInsertionCanvas, offsetDefaultSlideInsertion, SlideCommandError, type SlideInsertionOwner } from './slideInsertion'
 import { allocateCourseLayerOrder } from './layerOrder'
 import { commitCourseProjectMutation } from './courseProjectMutation'
-import { courseSlideCanvas } from '../../shared/slideCanvas'
 export interface AddSlideChartLayerInput {
   readonly id?: string
   readonly x?: number
@@ -49,9 +47,6 @@ export function appendSlideSurfaceLayer(
   surface: SlideSurfaceDocument,
   item: LayerItem,
 ): void {
-  if (surface.surfaceLayerItems.length >= MAX_SCENE_NODES) {
-    throw new Error(`已达到 ${MAX_SCENE_NODES} 个节点上限`)
-  }
   if (surface.surfaceLayerItems.some((entry) => entry.item.layerItemId === item.layerItemId)) {
     throw new Error(`图层 ID 已存在：${item.layerItemId}`)
   }
@@ -86,7 +81,7 @@ export function planSlideChartInsertion(document: CourseProjectDocument, owner: 
       categories: input.categories,
       series: input.series,
       style: input.style,
-      canvas: courseSlideCanvas(document),
+      canvas: slideInsertionCanvas(document, owner),
     })
 
     // Validate against strict chart schema
@@ -137,7 +132,7 @@ export function planSlideTableInsertion(document: CourseProjectDocument, owner: 
       headerRowCount: input.headerRowCount,
       merges: input.merges,
       style: input.style,
-      canvas: courseSlideCanvas(document),
+      canvas: slideInsertionCanvas(document, owner),
     })
 
     // Validate against strict table schema

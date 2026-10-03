@@ -76,7 +76,7 @@ import {
 } from '../../authoring/v9SlideContentEdit'
 import type { InteractionAuthoringTarget } from '../../interactions/interactionAuthoringCommands'
 import { selectActiveCourseProjectDocument, useEditorStore } from '../../store/editorStore'
-import { courseSlideCanvas } from '../../../shared/slideCanvas'
+import { courseSlideCanvas, effectiveSceneCanvas } from '../../../shared/slideCanvas'
 import type { InteractionEditorProps } from '../../ui/InteractionEditor'
 import type { PropertiesContext } from '../../ui/properties/PropertiesContext'
 import {
@@ -340,6 +340,7 @@ export function usePropertiesAuthoringBinding({
   const updatePresentationState = useEditorStore((state) => state.updatePresentationState)
   const updateCourseBackground = useEditorStore((state) => state.updateCourseBackground)
   const resizeSlideCanvas = useEditorStore((state) => state.resizeSlideCanvas)
+  const resizeSlideSceneCanvas = useEditorStore((state) => state.resizeSlideSceneCanvas)
   const setPreviewBackgroundColor = useEditorStore((state) => state.setPreviewBackgroundColor)
   const updatePlayback = useEditorStore((state) => state.updatePlayback)
   const updateDesignTokens = useEditorStore((state) => state.updateDesignTokens)
@@ -1435,6 +1436,7 @@ export function usePropertiesAuthoringBinding({
             effective: sceneEffective,
             interactionCount: scene.interactions.length,
             stateName: activeState?.name ?? null,
+            ...(surfaceDoc ? { canvas: { effective: effectiveSceneCanvas(surfaceDoc, scene), inherited: !scene.canvas } } : {}),
           }
         : null,
       state: activeState && stateEffective
@@ -1450,6 +1452,9 @@ export function usePropertiesAuthoringBinding({
       commands: {
         updateName: (name) => {
           if (sceneId && requireLiveOwner()) updateScene(sceneId, { name })
+        },
+        resizeCanvas: (canvas) => {
+          if (surfaceId && sceneId && requireLiveOwner()) resizeSlideSceneCanvas(surfaceId, sceneId, canvas)
         },
         updateSlideSurfaceBackground: (patch) => {
           previewBackground(null, 'slide-surface')

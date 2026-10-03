@@ -5,9 +5,6 @@ import {
   courseStateScalarSchema,
 } from '../course-state/schema'
 import {
-  MAX_INTERACTION_ACTIONS,
-  MAX_INTERACTION_CONDITIONS,
-  MAX_SCENE_INTERACTIONS,
   isTerminalNavigationAction,
   type InteractionRule,
 } from './types'
@@ -87,7 +84,7 @@ export const interactionTriggerSchema = z.discriminatedUnion('type', [
 
 const presentationInConditionSchema = z.object({
   type: z.literal('presentation.in'),
-  stateIds: z.array(stableIdSchema).min(1).max(256),
+  stateIds: z.array(stableIdSchema).min(1),
 }).strict().superRefine((condition, context) => {
   if (new Set(condition.stateIds).size !== condition.stateIds.length) {
     context.addIssue({
@@ -100,7 +97,7 @@ const presentationInConditionSchema = z.object({
 
 const sceneInConditionSchema = z.object({
   type: z.literal('scene.in'),
-  sceneIds: z.array(stableIdSchema).min(1).max(1_000),
+  sceneIds: z.array(stableIdSchema).min(1),
 }).strict().superRefine((condition, context) => {
   if (new Set(condition.sceneIds).size !== condition.sceneIds.length) {
     context.addIssue({
@@ -271,11 +268,8 @@ const interactionRuleContentObject = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   enabled: z.boolean(),
   trigger: interactionTriggerSchema,
-  conditions: z.array(interactionConditionSchema)
-    .max(MAX_INTERACTION_CONDITIONS),
-  actions: z.array(interactionActionStepSchema)
-    .min(1)
-    .max(MAX_INTERACTION_ACTIONS),
+  conditions: z.array(interactionConditionSchema),
+  actions: z.array(interactionActionStepSchema).min(1),
 }).strict()
 
 function refineInteractionRule(rule: Omit<InteractionRule, 'id'>, context: z.RefinementCtx) {
@@ -345,7 +339,6 @@ function addScopeUniquenessIssues(
 }
 
 export const sceneInteractionsSchema = z.array(interactionRuleSchema)
-  .max(MAX_SCENE_INTERACTIONS)
   .superRefine(addScopeUniquenessIssues)
 
 export function parseSceneInteractions(value: unknown): InteractionRule[] {

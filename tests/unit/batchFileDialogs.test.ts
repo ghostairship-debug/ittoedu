@@ -13,7 +13,6 @@ vi.mock('electron', () => ({
 }))
 
 import {
-  batchCapacityIssue,
   selectAudioFiles,
   selectComponentFiles,
   selectImageFiles,
@@ -73,12 +72,13 @@ describe('batch file dialogs', () => {
     await expect(selectImageFiles(windowStub)).resolves.toBeNull()
   })
 
-  it('rejects a single oversized file without aborting the batch contract', async () => {
+  it('accepts a valid selected image without a fixed file-size quota', async () => {
     const oversizedPath = path.join(temporaryDirectory, 'oversized.png')
     await fs.writeFile(oversizedPath, Uint8Array.from([
       0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
     ]))
-    await fs.truncate(oversizedPath, 100 * 1024 * 1024 + 1)
+    const stats = await fs.stat(oversizedPath)
+    vi.spyOn(fs, 'stat').mockResolvedValue(Object.assign(stats, { size: 100 * 1024 * 1024 + 1 }))
     electron.showOpenDialog.mockResolvedValue({
       canceled: false,
       filePaths: [oversizedPath],
@@ -88,20 +88,21 @@ describe('batch file dialogs', () => {
 
     expect(result).toMatchObject({
       selectedCount: 1,
-      acceptedByteLength: 0,
-      accepted: [],
-      rejected: [{ name: 'oversized.png', code: 'FILE_TOO_LARGE' }],
+      acceptedByteLength: 8,
+      accepted: [{ name: 'oversized.png', mimeType: 'image/png' }],
+      rejected: [],
     })
   })
 
-  it('enforces the total-byte and file-count boundaries deterministically', () => {
-    const mebibyte = 1024 * 1024
-    expect(batchCapacityIssue(2, 200 * mebibyte, 56 * mebibyte, 256 * mebibyte))
-      .toBeNull()
-    expect(batchCapacityIssue(2, 200 * mebibyte, 56 * mebibyte + 1, 256 * mebibyte))
-      .toBe('BATCH_TOTAL_SIZE_LIMIT')
-    expect(batchCapacityIssue(100, 0, 1, 256 * mebibyte))
-      .toBe('BATCH_FILE_COUNT_LIMIT')
+  it('imports all selected files beyond the former batch-count quota', async () => {
+    const files = Array.from({ length: 125 }, (_, index) => path.join(temporaryDirectory, `image-${index}.png`))
+    const image = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    await Promise.all(files.map(filename => fs.writeFile(filename, image)))
+    electron.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: files })
+    const result = await selectImageFiles(windowStub)
+    expect(result?.accepted).toHaveLength(125)
+    expect(result?.rejected).toEqual([])
+    expect(result?.acceptedByteLength).toBe(125 * image.byteLength)
   })
 
   it('validates every component ZIP independently', async () => {

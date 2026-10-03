@@ -920,7 +920,6 @@
         "items": {
           "$ref": "#/$defs/__schema56"
         },
-        "maxItems": 100,
         "minItems": 1,
         "type": "array"
       },
@@ -1094,7 +1093,6 @@
         "items": {
           "$ref": "#/$defs/__schema56"
         },
-        "maxItems": 100,
         "minItems": 1,
         "type": "array"
       },

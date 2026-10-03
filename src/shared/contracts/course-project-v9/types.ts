@@ -25,13 +25,14 @@ import type { ProjectPlaybackSettings } from '../playback-v1/types'
 import type { EmbeddedComponentPackageMeta } from '../component-v4/types'
 import type { RuntimeRenderMode } from '../runtime/types'
 import type { LightEditTextOverride } from '../runtime/lightEdit'
+import type { WebComposition } from '../../composition/content'
 
 export const COURSE_PROJECT_SCHEMA_VERSION = 9 as const
 
 export const COURSE_SURFACE_TYPES = ['slide', 'flow', 'spatial-2d'] as const
 export type CourseSurfaceType = typeof COURSE_SURFACE_TYPES[number]
 
-export const LAYER_ITEM_KINDS = ['native', 'component', 'runtime'] as const
+export const LAYER_ITEM_KINDS = ['native', 'component', 'runtime', 'composition'] as const
 export type LayerItemKind = typeof LAYER_ITEM_KINDS[number]
 
 export const GLOBAL_LAYER_PLANES = ['underlay', 'overlay'] as const
@@ -180,7 +181,12 @@ export interface RuntimeLayerItem extends LayerItemBase {
   runtime: CourseRuntimeDefinition
 }
 
-export type LayerItem = NativeLayerItem | ComponentLayerItem | RuntimeLayerItem
+export interface CompositionLayerItem extends LayerItemBase {
+  kind: 'composition'
+  content: WebComposition<CourseRuntimeDefinition>
+}
+
+export type LayerItem = NativeLayerItem | ComponentLayerItem | RuntimeLayerItem | CompositionLayerItem
 
 export interface LocationVisibility {
   mode: 'all' | 'include' | 'exclude'
@@ -244,6 +250,8 @@ export interface SlidePresentation {
 export interface SlideSceneDocument {
   id: string
   name: string
+  /** Omitted scenes inherit the course default; this is the only authored per-page override. */
+  canvas?: SlideCanvasSize
   /** Missing mode defaults to `'own'`; `backgroundColor` stays required either way. */
   backgroundMode?: BackgroundMode
   backgroundColor: string
@@ -266,7 +274,7 @@ export interface SlideSurfaceDocument extends SurfaceBase {
   backgroundMode?: BackgroundMode
   backgroundColor?: string
   backgroundAssetId?: string | null
-  /** One size for every Slide surface in the course; 1280×720 is the legacy default. */
+  /** Course default and reference size for shared layers; scenes may override it. */
   canvas: SlideCanvasSize
   scenes: SlideSceneDocument[]
 }

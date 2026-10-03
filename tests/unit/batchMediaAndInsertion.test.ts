@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import type { AssetMeta } from '@/shared/contracts/media-v1'
-import { MAX_SCENE_NODES } from '@/shared/constants'
 import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import {
   createImageNode,
@@ -262,10 +261,10 @@ function firstSlideScene(project: CourseProjectDocument) {
   return surface.scenes[0]
 }
 
-  it('falls back to the library instead of reporting false placement near the node limit', async () => {
+  it('places beyond the former node limit as one transaction and one undo', async () => {
     const project = createBlankCourseProject()
     const scene = firstSlideScene(project)
-    scene.layerItems = Array.from({ length: MAX_SCENE_NODES - 1 }, (_, index) => (
+    scene.layerItems = Array.from({ length: 999 }, (_, index) => (
       sceneNodeToCourseLayerItem(createTextNode(), index + 1)
     ))
     const connected = await openCourseOnHost(project)
@@ -291,25 +290,25 @@ function firstSlideScene(project: CourseProjectDocument) {
       importIntoLibrary: (additions) => store.importAssets(additions),
     })
 
-    // The capacity feedback is raised synchronously; the asynchronous library
-    // commit confirmation clears it again, so read it before draining.
-    const state = useEditorStore.getState()
-    expect(state.errorMessage).toContain(`${MAX_SCENE_NODES} 个节点上限`)
-    expect(result).toMatchObject({
-      destination: 'library',
-      completedCount: 2,
-      placedNodeIds: [],
-      libraryFallback: 'scene-capacity',
-    })
-    expect(selectActiveScene(state).nodes).toHaveLength(MAX_SCENE_NODES - 1)
-    expect(state.activeTab).toBe('elements')
+    expect(result).toMatchObject({ destination: 'canvas', completedCount: 2 })
+    expect(result.placedNodeIds).toHaveLength(2)
+    expect(result).not.toHaveProperty('libraryFallback')
     await settleCourse()
 
-    expect(Object.keys(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets)).toEqual([
+    const state = useEditorStore.getState()
+    expect(state.errorMessage).toBeNull()
+    expect(selectActiveScene(state).nodes).toHaveLength(1_001)
+    expect(state.activeTab).toBe('elements')
+    expect(Object.keys(selectActiveCourseProjectDocument(state)!.assets)).toEqual([
       'asset_capacity_a',
       'asset_capacity_b',
     ])
     expect(formalCourse(host, documentId).undoDepth).toBe(1)
+
+    await undoSettled(host, documentId)
+    expect(selectActiveScene(useEditorStore.getState()).nodes).toHaveLength(999)
+    expect(selectActiveCourseProjectDocument(useEditorStore.getState())!.assets).toEqual({})
+    expect(selectMediaAssetFiles(useEditorStore.getState())).toEqual({})
   })
 
   it('lays mixed aspect ratios deterministically without overlap', () => {

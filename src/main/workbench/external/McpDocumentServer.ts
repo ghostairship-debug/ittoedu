@@ -10,7 +10,7 @@ export type { ExternalConnection } from '../../../shared/workbench/external'
 
 interface ServerGrantInput {
   workspaceId: string; conversationId: string; taskId: string
-  instruction: string; documents: ToolRunGrant['documents']; lifetimeMs?: number
+  instruction: string; documents: ToolRunGrant['documents']
   handoff?: ExternalHandoff
   expectedDocuments?: readonly { documentId: string; epoch: string; revision: number }[]
 }
@@ -25,7 +25,6 @@ interface Grant {
   status: ExternalGrantView['status']; barrier?: Promise<void>
   sessions: Map<string, { version: string; initialized: boolean }>; tickets: Set<string>; context: unknown
   resources: ExternalResource[]
-  expiration?: ReturnType<typeof setTimeout>
 }
 export interface McpDocumentServerOptions {
   gateway: DocumentToolGateway
@@ -67,8 +66,6 @@ export class McpDocumentServer {
   }
   async grant(input: ServerGrantInput, resources: ExternalResource[] = []): Promise<ExternalConnection> {
     if (!input.workspaceId || !input.conversationId || !input.taskId) throw new Error('外部连接缺少空间和任务身份')
-    const lifetime = input.lifetimeMs ?? 30 * 60_000
-    if (!Number.isSafeInteger(lifetime) || lifetime < 1000 || lifetime > 8 * 60 * 60_000) throw new Error('外部授权有效期无效')
     const endpoint = await this.listen(), runId = randomUUID()
     const frozen = structuredClone(input)
     await this.options.gateway.beginRun({ runId, actor: 'external', documents: frozen.documents })
@@ -86,29 +83,25 @@ export class McpDocumentServer {
         const current = this.options.registry.get(expected.documentId).read()
         if (current.epoch !== expected.epoch || current.revision !== expected.revision) throw new Error('授权期间目标已改变，请重新选择')
       }
-      const connection: ExternalConnection = { connectionId: randomUUID(), runId, endpoint, bearer: randomBytes(32).toString('base64url'), expiresAt: this.now() + lifetime }
+      const connection: ExternalConnection = { connectionId: randomUUID(), runId, endpoint, bearer: randomBytes(32).toString('base64url') }
       const grant: Grant = { connection, input: frozen, revoked: false, status: 'active', sessions: new Map(), tickets: new Set(), resources: structuredClone(resources),
         context: { instruction: frozen.instruction, documents, handoff: frozen.handoff,
           attachments: resources.map(({ content: _, ...description }) => description),
           visibility: '果铃只记录收到的工具调用；外部聊天、模型用量和任务是否结束未知。', authority: '授权目标固定；请先读取当前文档。外部磁盘写入不属于宿主提交。', ticketRule: TICKET_RULE } }
       this.grants.set(connection.connectionId, grant)
-      grant.expiration = setTimeout(() => { void this.revoke(connection.connectionId, 'expired').catch(() => undefined) }, lifetime)
-      grant.expiration.unref()
       return { ...connection }
     } catch (cause) { await this.options.gateway.stop(runId); throw cause }
   }
   status(connectionId: string): ExternalGrantView['status'] {
     const grant = this.grants.get(connectionId)
     if (!grant) return 'closed'
-    if (!grant.revoked && grant.connection.expiresAt <= this.now()) void this.revoke(connectionId, 'expired').catch(() => undefined)
     return grant.status
   }
-  async revoke(connectionId: string, status: 'revoked' | 'expired' | 'closed' = 'revoked'): Promise<void> {
+  async revoke(connectionId: string, status: 'revoked' | 'closed' = 'revoked'): Promise<void> {
     const grant = this.grants.get(connectionId)
     if (!grant) return
     if (grant.revoked) return grant.barrier
     grant.revoked = true; grant.status = status; grant.sessions.clear()
-    clearTimeout(grant.expiration)
     grant.barrier = this.options.gateway.stop(grant.connection.runId)
     await grant.barrier
   }
@@ -127,7 +120,6 @@ export class McpDocumentServer {
     return [...this.grants.values()].find(grant => this.status(grant.connection.connectionId) === 'active' && safeEqual(token, grant.connection.bearer))
   }
   private ticket(grant: Grant): string {
-    if (grant.tickets.size >= 4096) throw new Error('本次连接操作票据已达上限，请重新授权')
     const ticket = randomUUID(); grant.tickets.add(ticket); return ticket
   }
   private async emit(grant: Grant, callId: string, type: ExecutionEventInput['type'], data: ExecutionEventInput['data'], update: ExecutionEventInput['update'] = 'snapshot') {
@@ -151,10 +143,8 @@ export class McpDocumentServer {
     if (!request.headers['content-type']?.startsWith('application/json')) return this.respond(response, 415)
     const accept = request.headers.accept ?? ''
     if (!accept.includes('application/json') || !accept.includes('text/event-stream')) return this.respond(response, 406)
-    const chunks: Buffer[] = []; let length = 0
+    const chunks: Buffer[] = []
     for await (const bytes of request) {
-      length += bytes.length
-      if (length > 64 * 1024 * 1024) return this.respond(response, 413, error(null, -32602, '单次 JSON 请求超过 64 MiB；请按工具支持的分块或资源引用传递，已完成的任务未取消'))
       chunks.push(Buffer.from(bytes))
     }
     let message: Record<string, unknown>
@@ -189,7 +179,7 @@ export class McpDocumentServer {
     } catch (cause) { this.respond(response, 200, error(id, -32602, cause instanceof Error ? cause.message : '工具请求未完成')) }
   }
   private async dispatch(grant: Grant, method: string, raw: unknown): Promise<unknown> {
-    if (grant.revoked || grant.connection.expiresAt <= this.now()) throw new Error('外部授权已失效')
+    if (grant.revoked) throw new Error('外部授权已撤销')
     if (method === 'ping') return {}
     const params = record(raw) ? raw : {}
     if (method === 'resources/list') return { resources: [{ uri: 'guoling://task/context', name: '本次任务与授权目标', mimeType: 'application/json' }, ...grant.resources.map(({ uri, name, mimeType }) => ({ uri, name, mimeType }))] }
@@ -227,7 +217,7 @@ export class McpDocumentServer {
     if (!lookup) await this.emit(grant, ticket, 'tool', { toolName: call.name, label: definition.manual.label, status: 'running', text: '已收到外部工具请求。' }, 'append')
     let result: ToolResult
     try {
-      if (grant.revoked || grant.connection.expiresAt <= this.now()) throw new Error('外部授权已失效')
+      if (grant.revoked) throw new Error('外部授权已撤销')
       const known = await this.options.gateway.lookup(grant.connection.runId, ticket, call)
       if (!lookup) await this.emit(grant, ticket, 'tool', { status: 'running', text: known ? '已找到同一票据的正式回执。' : '已核对同一票据，未发现既有回执。' }, 'append')
       if (known) result = known

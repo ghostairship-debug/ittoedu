@@ -9,6 +9,13 @@ export interface ExecutionRoleSelection {
   connectionId: string
   model: string
   parameters?: ModelJsonObject
+  /** Reference model used to describe an unfamiliar alias; the actual request keeps model. */
+  capabilityModel?: string
+}
+/** A favorite names the actual route as well as the model; it never changes the selected role. */
+export interface ExecutionModelFavorite {
+  connectionId: string
+  model: string
 }
 export interface ExecutionProfile {
   revision: number
@@ -31,6 +38,7 @@ export interface ExecutionConnectionView {
   revoked: boolean
 }
 export interface ExecutionSettingsView {
+  modelFavorites?: ExecutionModelFavorite[]
   bodyStreamingObservations?: BodyStreamingRecord[]
   capabilityRecords?: ModelCapabilityRecord[]
   connections: ExecutionConnectionView[]

@@ -2,19 +2,19 @@ import { z } from 'zod'
 import { userAnswerSchema, userQuestionViewSchema } from './userQuestion'
 import { approvalDecisionSchema, approvalViewSchema } from './executionPermission'
 
-const id = z.string().min(1).max(512)
+const id = z.string().min(1)
 const count = z.number().int().nonnegative()
 export const executionBlobRefSchema = z.object({ id: z.string().regex(/^[a-f0-9]{64}$/), bytes: count, mime: z.literal('text/plain;charset=utf-8') }).strict()
 export type ExecutionBlobRef = z.infer<typeof executionBlobRefSchema>
 export const executionDetailKeys = ['input', 'output', 'diff', 'error'] as const
 const eventData = {
-  text: z.string().optional(), status: z.string().min(1).max(128).optional(), label: z.string().max(2048).optional(),
+  text: z.string().optional(), status: z.string().min(1).optional(), label: z.string().optional(),
   input: z.string().optional(), output: z.string().optional(), diff: z.string().optional(), error: z.string().optional(),
-  documentName: z.string().max(2048).optional(), targetLabel: z.string().max(2048).optional(),
+  documentName: z.string().optional(), targetLabel: z.string().optional(),
   applicationStatus: z.enum(['applied', 'unchanged', 'conflict', 'denied', 'cancelled', 'failed']).optional(),
   saveStatus: z.enum(['saving', 'saved', 'failed']).optional(),
   toolName: id.optional(), operationId: id.optional(), documentId: id.optional(), revision: count.optional(),
-  jobId: id.optional(), resourceIds: z.array(id).max(1000).optional(),
+  jobId: id.optional(), resourceIds: z.array(id).optional(),
   // Built-in ask_user only: the question the option card shows, then what the user actually answered.
   question: userQuestionViewSchema.optional(), answer: userAnswerSchema.optional(),
   // A modification waiting for the user's approval, then the user's actual decision.

@@ -20,7 +20,7 @@ export const flowAuthoringToolInputSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('replace'), block: flowBlockSchema }).strict(),
   z.object({ operation: z.literal('edit'), content: documentTextContentSchema.optional(), textRange: flowContextTextRangeSchema.optional(),
     image: flowImageReplacementInputSchema.optional(),
-    formula: z.object({ latex: z.string().min(1).max(16384).superRefine((latex, ctx) => { try { parseDocumentMath(latex) } catch (error) { ctx.addIssue({ code: 'custom', message: error instanceof Error ? error.message : '公式无效' }) } }), accessibleText: z.string().trim().min(1).max(4_000) }).strict().optional(),
+    formula: z.object({ latex: z.string().min(1).superRefine((latex, ctx) => { try { parseDocumentMath(latex) } catch (error) { ctx.addIssue({ code: 'custom', message: error instanceof Error ? error.message : '公式无效' }) } }), accessibleText: z.string().trim().min(1) }).strict().optional(),
     textStyle: nativeContentInputSchemaByType.text.shape.runs.element.shape.style.optional(),
     textAlign: z.enum(['left', 'center', 'right']).optional(), lineSpacing: z.number().finite().min(0).max(200).optional() }).strict()
     .refine(value => Object.keys(value).some(key => key !== 'operation' && key !== 'textRange'), '正文窄编辑至少提供一个字段'),

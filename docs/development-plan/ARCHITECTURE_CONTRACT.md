@@ -1,7 +1,11 @@
 # 架构合同：什么不能坏
 
-> **2026-09-22 方案取代声明：** 当前目标以[果铃 2.0 收敛方案](../../果铃2.0收敛方案.md)及其执行包为准。本合同中禁止自建循环/MCP、单一活动编辑器、旧会话归属和候选必经条款不再约束 2.0；相关目标以新架构为准。未涉及的格式、Surface、播放器、资源与导出不变量继续适用，当前源码是否完成另以实测判定。 本轮只修订方案，尚未开始新产品实现。
+> **2026-09-22 方案取代声明：** 当前目标以[已归档的果铃 2.0 收敛方案](../archive/2026-09-convergence/果铃2.0收敛方案.md)及其执行包为准。本合同中禁止自建循环/MCP、单一活动编辑器、旧会话归属和候选必经条款不再约束 2.0；相关目标以新架构为准。未涉及的格式、Surface、播放器、资源与导出不变量继续适用，当前源码是否完成另以实测判定。 本轮只修订方案，尚未开始新产品实现。
 > 本文是“必须守住的现状能力 + 已裁决但尚待修复的目标不变量”的唯一落点。只有改动命中相关架构边界时才补读对应条目，不要求普通任务通读全文。目标态条目会明确标出当前缺口，不能伪称已经满足。协议细节以 `src/shared/contracts/**`、Zod Schema 与源码为准；本文与源码冲突时修正本文。
+
+> **2026-10-03 统一内容重构增量：** Owner 已授权按[实施方案](unified-content-architecture/REFACTOR_PLAN.md)执行。本文 §1.2 是本轮已实现的正式内容、尺寸与软件职责边界，取代相关旧软冻结和提案阶段限制；实际检查与未完成范围见[实施记录](unified-content-architecture/EXECUTION_LOG.md)。旧 2.0 已签收事实不代表本轮已验收。
+
+> **2026-10-03 时限与额度裁决：** Owner 要求取消非必要时限、限额和预算，同时明确保留长时间无响应时的故障检测。MCP 授权持续到主动撤销或应用关闭；运行、构建、委派和计算不因软件累计时间、调用次数、写入次数、文件数量或人为内容体积预算停止。供应商真实窗口、协议与令牌有效期、必要无响应检测、主动取消/撤权、唯一 writer、最终 CAS、授权根、资源引用/格式校验及未知副作用查证继续有效。此裁决覆盖旧条目中与之冲突的绝对任务预算、数量/体积门及授权时限表述，不改变正式权限或可执行扩展的宿主能力。实现边界与证据见[清理实施记录](reviews/2026-10-03-remove-artificial-limits-implementation.md)。
 
 > **2026-09-29目标补充：** 完整L06 v2.0前移至当前2.0收口，最新排期见根方案§7E和L06§15/§20；以下是不变量增量，尚未实现。正式HTML封装由软件工厂维护，build不静默丢失已有轻编辑能力；日常关闭/恢复不依赖全部会话历史健康。普通模型生成有限重试不改变已提交业务回执，媒体/外部未知作用仍查询；目标终态与历史探索诊断分开。独立计算/外部工具使用真实权限边界，不继承Runtime的宿主权限，文档唯一writer、最终CAS、停止、来源和资源保护继续保留。
 
@@ -9,6 +13,7 @@
 
 - Course Project V9 是唯一受支持的作者工程格式；不导入 V8 `.h5lesson`；不借重构创建 V10。
 - V9 已有字段、判别器和语义软冻结；additive 可选字段必须独立合同提交并保持 `.strict()`。Table、Chart 与 Slide Native input 是 Owner 明确批准的三个新 strict discriminator 窄例外，不构成任意联合类型扩展授权。
+- 2026-10-03 Owner 授权的 `composition`、Slide `scene.canvas` 和结构化 Component 内容是本轮新增 strict 合同例外；与 V9、Published V2、编辑、保存及真实 Player consumer 同批实现，详见 §1.2，不因此升级 V10 或 Published V3。
 - **1.9 Flow/共用文档特定例外（2026-09-15 Owner 决定，统一模型已切换并通过工程验证；1.9 完整交付见[主方案第 8 节与 V09/V14](R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md#8-完成-19-的收口)）：**Owner 明确本次不保留兼容边界。按[统一正文合同](R19_SHARED_DOCUMENT_CONTENT_CONTRACT.md)直接以inlines/LaTeX替换Flow目标域，覆盖标题/段落/列表/表格/说明/章节及代码/链接表达；V9/Published严格定义、工厂与直接consumer在同一可运行批次切换，不保留旧正文/旧AST/旧工程读取转换。新课例/会话/材料记录不迁移旧格式。本例外优先于本次目标域的旧软冻结/兼容表述，不扩为删除其他Surface实际能力或创建V10。分项证据与历史缺口见[共用编辑方案](R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md#4-剩余范围与滚动批次)，4.4 是 2026-09-16 历史记录，不再派四稿代表链。
 - Published Course V2、Runtime API 2 / Surface Runtime API 3、Component API 4、Interaction Protocol V1 的版本边界保留。Table、Chart 与 Slide Native input 使用 Published V2 对等 strict 分支并与匹配 Player 成对交付，不为此升级 Published V3。
 - Owner 2026-09-07批准导航分层并授权实施后，085独立窄合同增加TeacherControllerAction/InteractionAction的`step.next`与`step.previous`两个strict无参分支，V9/Published共用；不增加文档字段或第二顺序，不扩Native节点discriminator。旧动作继续可读，新动作在旧reader明确失败；scene.next/previous按已批准场景层级纠正，精确location/deep link/index接口不重解释。Runtime/Component仅additive可选步进方法，旧宿主feature-detect；实施与兼容反例见085合同。
@@ -19,6 +24,21 @@
 ### 1.1 内部生产信任模型
 
 本产品运行于受控团队和受信代码环境。工程内 Runtime/Component、课件模块和批准后的自动生成代码视为可信生产扩展；网络声明、iframe、staging 和自动准入主要服务交付一致性、生命周期、资源闭包、诊断与错误隔离，不用于推导外部恶意插件模型。没有 Owner 新决定时，不新增多租户、公开插件市场、零信任审批或逐能力人工授权平台。长期 Provider Secret、原始 Electron Main、任意 OS 命令、远程脚本和未经合同批准的新宿主 API 仍不属于可信扩展授权。
+
+### 1.2 统一内容、布局与应用（2026-10-03）
+
+- **正式组合内容**：V9/Published V2 的 `composition` 图层以递归 `WebComposition` 表达 element、text、comment、既有 document、既有 Native 和 Runtime 叶子。专业内容仍使用原有合同；不复制一份专业数据或持久 DOM。普通 HTML/CSS/SVG 由软件建立身份及资源映射，不要求作者预先添加私有标记。当前普通含脚本 HTML 仍可整体由 Runtime 保真承载，不宣称自动将任意程序拆成结构化局部节点。
+- **布局只有一个来源**：Web 元素的 attributes/CSS 声明持有其布局值，实际 iframe 的浏览器计算负责重排及媒体查询。测量框、选中框和命中几何是派生结果，不保存为第二份作者坐标。组合外框及既有自由 Native frame 保持各自作者含义；文档内容的专业排版继续归 Document owner。人工与 AI 内容/样式修改最终经同一 `DocumentSession` 的 `composition.edit`，共享 CAS、权限、停止和历史。
+- **编辑入口与目标**：主画布直接选择和手改组合内部元素，深入编辑弹窗复用同一命令及历史。元素 AI 使用软件捕获的内部选区，不能将整图层授权代替所选内容；模型使用宿主返回的内容短句柄，不填写内部编号。固定演示页的普通自由手改可直接写 px；原有比例按声明换算，仅当前受影响的复杂表达需要明确覆盖选择，不对普通拖拽新增确认。
+- **组合原生输入**：沿用原生输入的值、提交、判题、反馈与重置合同。Slide scene 的 `input.submit` 可引用软件生成的组合图层/内部输入路径；global、Flow、Spatial 与其他节点动作不因此扩大支持范围。临时输入值不回写正式工程，普通重排和尺寸变化不重置值；已配置规则随 V9/Published 保存。
+- **持续实例与表面**：Slide、Flow 和 Spatial 消费同一组合内容；保留翻页、阅读流和相机各自语义。内容、样式和外框增量更新不因宿主尺寸变化主动重建未改变的 Runtime 实例。捕获不移出再插回存活 iframe；不承诺任意程序源码替换后保留运行状态。嵌套 Runtime/文档 Component 的目标发现、编译、准入与后备写回使用同一正式叶子 visitor；静态 Web 不增加动态准入门。
+- **页面规格**：Slide surface.canvas 是共享层的参考尺寸，scene.canvas 可覆盖当前页尺寸；`effectiveSceneCanvas` 是消费有效规格的入口。共享自由层通过同一 contain 映射及逆映射在当前页显示/编辑，仍只有一份正式对象；教师控制器保留其独立 dock/session 偏移。作品 viewport、应用可用区域和观察缩放分开，不以打开侧栏修改作品规格。
+- **结构化资产**：Component API4 manifest 可声明 `content:{kind:'composition'}`，以真实包 entry JSON 保存组合定义；实例化由软件分配身份、复用素材和依赖。使用已有组件库、资源与事务，不新建平行资产库。可执行包不接受该分支字段；结构化包不按 JavaScript 源码编译，发布收集实际实例依赖。
+- **第三方源码与导出**：普通 HTML 文件以源文本为唯一正式内容，临时 parse5 源位置不持久化为第二模型；可定位的结构、内联/共享 CSS 和 JSON 数据修改写回源文，未知程序/外部 CSS 保留源码入口。PPTX 使用首场景固定页面规格并 contain，其余页面明确适配；PDF 可保留不同页规格。Web 在 PDF/Office 中明确为实际 Player 图面，Flow 长图按格式分段，不冒称可编辑语义分页；可专业映射的正文仍保有编辑性。
+- **模型与软件应用**：明确绑定的正文生成直接接收模型内容，由软件提交；开放通用任务保留正常 Agent 工具循环。`course.createFromHtml` 在没有课件目标时也可由软件创建、导入和保存；已应用但未保存只恢复保存，不重新导入。方法通过 Skill 按需加载，实际机械重复逻辑交给已有软件用例或随 Skill 提供的有用途脚本，不要求模型填写工程登记及版本。
+- **工作台文件与网页**：任务网页的人机交接使用同一受管 WebContents，不继承编辑器 preload；隐藏视图不等于结束会话。图片/PDF/Office 原格式字节由既有 File owner 和协调器保存，不能为二进制文件伪造 Text DocumentSession。Office 模型只提供语义内容，软件维护 OOXML、资源及版本；公式不支持时保留原式并报告真实计算范围。物理写入后的 ACK/回读失败属于已知可能发生副作用的 unknown，不自动重放。
+
+以上说明实现边界，不代替艺术接受或任意 HTML/Office 兼容承诺；专门限制和真实证据记录在本轮实施记录中。
 
 ## 2. Must Preserve / Must Achieve（25 组）
 
@@ -70,7 +90,7 @@
 
 ### 工具与治理
 
-22. contracts 和 ai-capabilities 的生成/check 保留；`.agents/skills` 两个课件工作流入口保留。
+22. contracts 和 ai-capabilities 的同源生成保留；`.agents/skills` 的课件创作、构建导入、局部编辑与 Office 方法按任务加载，实际名单由 `courseAgentMethodSkills` 同源打包。生成后不立即重复同义 check。
 23. read-model boundary 与 forbidden-token 棘轮保留并只允许收紧。
 24. 自动化最多证明 engineering candidate；未经明确教师验收不得宣称 accepted/发布。
 25. 用户未提交修改不得被自动回退或覆盖。

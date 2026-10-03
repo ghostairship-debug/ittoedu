@@ -5,7 +5,8 @@ import { textTargetContent } from '../../core/drivers/course/elementFields'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { AssetMeta } from '../../shared/contracts/media-v1'
-import type { FlowBlock, FlowMediaBlock } from '../../shared/courseProjectTypes'
+import type { CompositionLayerItem, FlowBlock, FlowMediaBlock } from '../../shared/courseProjectTypes'
+import type { PublishedCompositionLayerItem } from '../../shared/publishedCourseTypes'
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import { documentResourceReferences } from '../../shared/document/resources'
 import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, FLOW_COMPONENT_BLOCK_HEIGHT, flowPaperMaxWidth, resolveFlowBodyWidth } from '../../shared/flowBodyPresentation'
@@ -49,8 +50,15 @@ import { FlowMediaCropEditor } from './flow/FlowMediaCropEditor'
 import type { FlowMediaToolPort } from './flow/flowMediaCommands'
 import { measureFlowParagraphLayout, observeFlowParagraphLayout } from './flow/flowParagraphLayout'
 import { flowMediaFloatAnchor } from './flow/flowMediaFloatPlacement'
+import type { CompositionContentEdit } from '../../shared/composition/edit'
+import type { CompositionAuthoringSelection } from '../composition/WebCompositionAuthoringContent'
 
 export interface FlowWorkspaceProps {
+  readonly publishCompositionContent?: (item: CompositionLayerItem) => PublishedCompositionLayerItem['content']
+  readonly onEditComposition?: (layerItemId: string) => void
+  readonly onCompositionEdit?: (layerItemId: string, edit: CompositionContentEdit) => Promise<void>
+  readonly onCompositionSelection?: (selection: CompositionAuthoringSelection) => void
+  readonly selectedCompositionNode?: CompositionAuthoringSelection | null
   readonly documentId?: string | null
   readonly toolbarContainer?: HTMLElement | null
   readonly view: FlowEditorView
@@ -103,7 +111,7 @@ export function requestFlowBlockSelection(request: { documentId: string; surface
 }
 const EMPTY_ASSET_FILES: Record<string, Uint8Array> = {}
 const EMPTY_COMPONENT_PACKAGES: Record<string, ComponentPackageData> = {}
-export function FlowWorkspace({ documentId, toolbarContainer, view, sessionToken, assets, selection, textEdit, documentDraft, commands, readOnly = false, assetFiles = EMPTY_ASSET_FILES, componentPackages = EMPTY_COMPONENT_PACKAGES, onDropWorkspaceMedia, onSelectImageAsset, onStatus }: FlowWorkspaceProps) {
+export function FlowWorkspace({ documentId, toolbarContainer, view, sessionToken, assets, selection, textEdit, documentDraft, commands, readOnly = false, assetFiles = EMPTY_ASSET_FILES, componentPackages = EMPTY_COMPONENT_PACKAGES, onDropWorkspaceMedia, onSelectImageAsset, onStatus, publishCompositionContent, onEditComposition, onCompositionEdit, onCompositionSelection, selectedCompositionNode }: FlowWorkspaceProps) {
   assertActiveFlowEditorView(view)
   const mediaSource = useWorkspaceMediaSource()
   const mediaSourceRef = useRef(mediaSource)
@@ -470,8 +478,12 @@ export function FlowWorkspace({ documentId, toolbarContainer, view, sessionToken
       backgroundImage: view.backgroundAssetId && assetUrls[view.backgroundAssetId] ? `url(${JSON.stringify(assetUrls[view.backgroundAssetId])})` : undefined, backgroundSize: 'cover', backgroundPosition: 'center' }}>
     <div ref={setToolbarHost} className="flow-document-format-host" />
     <NativeSelectionContext documentId={documentId} revision={view.revision} locationId={selection?.locationId ?? view.locationId} itemIds={selection?.selectedOverlayIds ?? []}
-      enabled={!readOnly} ownsDocumentSelection={false} textEditing={Boolean(textEdit)} />
+      enabled={!readOnly && !selectedCompositionNode} ownsDocumentSelection={false} textEditing={Boolean(textEdit)} />
     <FlowOverlayAuthoringLayer view={view} sessionToken={sessionToken} selection={selection} locationId={selection?.locationId ?? view.locationId}
+      publishCompositionContent={publishCompositionContent} onEditComposition={readOnly ? undefined : onEditComposition}
+      onCompositionEdit={readOnly ? undefined : onCompositionEdit}
+      onCompositionSelection={readOnly ? undefined : onCompositionSelection}
+      selectedCompositionNode={readOnly ? null : selectedCompositionNode}
       documentId={documentId} onSelectImageAsset={onSelectImageAsset}
       runtimeEditToolbarContainer={toolbarContainer} activeRuntimeEditItemId={activeRuntimeEditItemId}
       onRuntimeEditModeChange={(itemId, editing) => setEditingRuntime(current => editing
@@ -541,7 +553,7 @@ export function FlowWorkspace({ documentId, toolbarContainer, view, sessionToken
               if (issue) throw new Error(issue)
               if (!documentId) throw new Error('文档尚未就绪。')
               const snapshot = await workbenchSelection.prepare(documentId)
-              await workbenchSelection.request(captureFlowSelection(snapshot, current.current.view.surfaceId, target), instruction)
+              await workbenchSelection.request(captureFlowSelection(snapshot, current.current.view.surfaceId, target), instruction, true)
             }}
             renderQuickBarActions={target => {
               const block = quickBarBlock(target)

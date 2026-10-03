@@ -124,7 +124,7 @@ function facts(entries: readonly CourseLayerCompositionEntry<AnyItem>[]) {
       ? entry.item.content
       : entry.item.kind === 'component'
         ? entry.item.props
-        : entry.item.runtime.content,
+        : entry.item.kind === 'runtime' ? entry.item.runtime.content : entry.item.content,
   }))
 }
 

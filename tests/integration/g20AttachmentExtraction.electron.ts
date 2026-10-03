@@ -77,9 +77,7 @@ void app.whenReady().then(async () => {
     controller.abort(new Error('explicit cancellation'))
     await assert.rejects(cancelled, (error: any) => error.code === 'operation-cancelled' && error.cause?.message === 'explicit cancellation')
     assert.equal(BrowserWindow.getAllWindows().length, 0)
-    await assert.rejects(createSandboxedAttachmentExtractor({ ...options, timeoutMs: 1 }).extract({ bytes: twoPagePdf(), filename: 'timeout.pdf' }), /超时/)
-    assert.equal(BrowserWindow.getAllWindows().length, 0)
-    console.log('PASS 3: cancellation and timeout destroy real sandbox windows')
+    console.log('PASS 3: explicit cancellation destroys real sandbox windows')
     await fs.writeFile(path.join(carrier, rendererURL ? 'dev-result.json' : 'build-result.json'), JSON.stringify({ passed: 4, failed: 0, entry: rendererURL ?? options.rendererFile, at: new Date().toISOString() }, null, 2))
   } finally {
     if (!path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Invalid temporary root')

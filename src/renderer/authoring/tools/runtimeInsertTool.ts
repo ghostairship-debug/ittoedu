@@ -18,8 +18,8 @@ export const runtimeInsertTool: AuthoringToolDefinition<z.infer<typeof schema>> 
     if (!resources) throw new Error('动态工具缺少当前工程资源')
     if (destination.kind !== 'create' || destination.scope.parent.kind !== 'owner' || destination.scope.insertion.kind !== 'append') throw new Error('Runtime 插入需要 owner 追加 scope')
     if (surface.type === 'spatial-2d') throw new Error('Spatial world Runtime 尚无正式动态播放宿主；请使用已支持的 Component')
-    if (!value.runtime.enabled || value.runtime.source.length > 2_000_000 || !value.runtime.staticFallback
-      || document.assets[value.runtime.staticFallback.assetId]?.kind !== 'image') throw new Error('Runtime 候选必须启用、满足源码上限并声明工程后备图片')
+    if (!value.runtime.enabled || !value.runtime.staticFallback
+      || document.assets[value.runtime.staticFallback.assetId]?.kind !== 'image') throw new Error('Runtime 候选必须启用并声明工程后备图片')
     let nextDocument = document
     let itemIds: readonly string[] = []
     if (surface.type === 'slide') {

@@ -1,4 +1,4 @@
 interface:
-  display_name: "构建互动课件工程"
-  short_description: "在任意课例目录调用编辑器产品入口，构建并验证可编辑互动课件"
-  default_prompt: "Use $build-courseware-project after the teaching plan and framework HTML to write a short representation plan, import each HTML section as a page, assemble materials, visually refine each page, and save a reopenable Course Project V9 in my case directory."
+  display_name: "HTML 导入课件"
+  short_description: "保留已有 HTML 的内容、布局与互动，由软件建立可编辑课件并保存"
+  default_prompt: "Use $build-courseware-project to create and save an editable course from my HTML while preserving its design and interactions."

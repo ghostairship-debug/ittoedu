@@ -2,7 +2,6 @@ import { controllerMetadata } from '../fixtures/teacherController'
 import { createControllerFixture } from '../fixtures/teacherController'
 import { isAuthoringHistoryTransactionFrame } from '../../src/renderer/authoring/resourceAwareAuthoringHistory'
 import { describe, expect, it } from 'vitest'
-import { MAX_SCENE_NODES } from '@/shared/constants'
 import { courseProjectDocumentSchema } from '@/shared/courseProjectSchema'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import {
@@ -487,7 +486,7 @@ describe('V9 Slide scene actions', () => {
       .toEqual(['slide-title', 'slide-locked'])
   })
 
-  it('keeps global clipboard failures atomic and refuses stale, foreign, controller, and capacity writes', () => {
+  it('keeps global clipboard failures atomic and permits paste beyond the former count limit', () => {
     const project = v9SlideFixture()
     project.globalLayerItems.push({
       item: runtimeBoundTo('global-runtime', 60, 'global-banner'),
@@ -576,7 +575,7 @@ describe('V9 Slide scene actions', () => {
     expect(controllerPaste.nextSession?.history.present).toBe(controllerSession.history.present)
 
     const capacityProject = v9SlideFixture()
-    capacityProject.globalLayerItems = Array.from({ length: MAX_SCENE_NODES }, (_, index) => ({
+    capacityProject.globalLayerItems = Array.from({ length: 1_000 }, (_, index) => ({
       item: nativeText(`global-${index}`, 100 + index, `全局 ${index}`),
       visibility: { mode: 'all' as const, locationIds: [] },
       plane: 'overlay' as const,
@@ -590,12 +589,12 @@ describe('V9 Slide scene actions', () => {
     )
     const capacityClipboard = copySlideGlobalClipboard(capacitySession, ['global-0'])
     const capacityPaste = pasteSlideGlobalLayers(capacitySession, capacityClipboard)
-    expect(capacityPaste).toMatchObject({
-      ok: false,
-      reason: expect.stringMatching(/上限/),
-      historyEntry: false,
-    })
-    expect(capacityPaste.nextSession?.history.present).toBe(capacitySession.history.present)
+    expect(capacityPaste).toMatchObject({ ok: true, historyEntry: true })
+    const expandedSession = requireSession(capacityPaste)
+    expect(expandedSession.history.present.globalLayerItems).toHaveLength(1_001)
+    expect(capacitySession.history.present.globalLayerItems).toHaveLength(1_000)
+    expect(expandedSession.selection.selectionIds).toHaveLength(1)
+    expect(expandedSession.selection.selectionIds).not.toContain('global-0')
   })
 
   it('ignores Delete while text, formula or contenteditable is focused', () => {

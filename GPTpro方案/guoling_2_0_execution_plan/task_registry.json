@@ -1351,7 +1351,7 @@
         "M24"
       ],
       "document": "mid_term/M18.md",
-      "status": "implemented",
+      "status": "verified",
       "existing_code": [
         ".agents/skills/orchestrate-courseware/SKILL.md",
         ".agents/skills/build-courseware-project/SKILL.md",
@@ -1385,7 +1385,7 @@
         "M18"
       ],
       "document": "mid_term/M25.md",
-      "status": "implemented",
+      "status": "verified",
       "existing_code": [
         "src/main/createWindow.ts",
         "src/main/workbench/execution/ExecutionDesktopService.ts",
@@ -1449,7 +1449,7 @@
         "M18"
       ],
       "document": "mid_term/M27.md",
-      "status": "implemented",
+      "status": "verified",
       "existing_code": [
         "src/core/tools/AgentFileTools.ts",
         "src/main/workbench/execution/AgentFileService.ts",
@@ -1484,7 +1484,7 @@
         "M27"
       ],
       "document": "mid_term/M28.md",
-      "status": "implemented",
+      "status": "verified",
       "existing_code": [
         "src/main/workbench/execution/ExecutionEngine.ts",
         "src/main/workbench/workbenchToolServices.ts",
@@ -1518,7 +1518,7 @@
         "M28"
       ],
       "document": "mid_term/M29.md",
-      "status": "implemented",
+      "status": "verified",
       "existing_code": [
         "src/main/workbench/external/McpDocumentServer.ts",
         "src/main/workbench/external/ExternalMcpService.ts",
@@ -1555,7 +1555,7 @@
         "M29"
       ],
       "document": "mid_term/M30.md",
-      "status": "implemented",
+      "status": "verified",
       "existing_code": [
         "src/renderer/workbench/ExecutionTimeline.tsx",
         "src/renderer/workbench/elementCards/elementCardController.ts",

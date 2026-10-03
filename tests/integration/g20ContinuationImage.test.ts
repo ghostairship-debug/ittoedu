@@ -91,6 +91,11 @@ it.each([false, true])('reopens a V9 file and applies its prior ready image with
     } }
   let turns = 0, providerError = '', resumedRunId = ''
   const provider: ModelProvider = { async *stream(request) {
+    if (turns === (frozenInitially ? 2 : 3) && !resumedRunId) {
+      yield { requestId: request.requestId, sequence: 1, type: 'response.failed', failure: {
+        outcome: 'unknown', kind: 'transport', code: 'connection-lost', message: '连接中断' } }
+      return
+    }
     turns++
     if (turns === 1 && !frozenInitially) { yield done(request, [{ name: 'file.create', input: { name: 'lesson.h5lesson', kind: 'course-v9' } }]); return }
     if (turns === (frozenInitially ? 1 : 2)) {
@@ -135,16 +140,16 @@ it.each([false, true])('reopens a V9 file and applies its prior ready image with
     capabilities: { tools: 'supported', stream: 'supported', vision: 'unknown', reasoning: 'unknown' } } }
   const input: ExecutionStart = { conversationId: 'same-conversation', taskId: 'image-task', instruction: '创建课件并生成插图',
     selection, documents: frozenInitially ? [{ documentId: session.documentId, writable: [{ kind: 'document' }] }] : [],
-    workspaceRoot: root, permission: 'workspace', budget: { maxRequests: frozenInitially ? 2 : 3 } }
+    workspaceRoot: root, permission: 'workspace' }
   const first = await engine.start(input), exhausted = await engine.wait(first.runId)
   expect(exhausted.status).toBe(frozenInitially ? 'failed' : 'partial')
-  expect(exhausted.failure?.code).toBe('model-request-budget-exhausted')
+  expect(exhausted.failure?.code).toBe('connection-lost')
   expect(exhausted.tools.map(tool => tool.call.name)).toEqual(frozenInitially
     ? ['tools.load', 'image.generate'] : ['file.create', 'tools.load', 'image.generate'])
   expect(exhausted.tools.find(tool => tool.call.name === 'image.generate')?.result).toMatchObject({ kind: 'read' })
   oldResource = (exhausted.tools.find(tool => tool.call.name === 'image.generate')!.result as any).data.resources[0].resource
   await registry.close(session.documentId)
-  const resumed = await engine.start({ ...input, documents: [], budget: { maxRequests: 4 } }, { runId: exhausted.runId, facts: '' },
+  const resumed = await engine.start({ ...input, documents: [] }, { runId: exhausted.runId, facts: '' },
     async prepared => { resumedRunId = prepared.runId })
   const final = await engine.wait(resumed.runId)
   if (final.status !== 'completed') throw new Error(JSON.stringify({ providerError, failure: final.failure, tools: final.tools.map(tool => ({ name: tool.call.name, result: tool.result })) }))

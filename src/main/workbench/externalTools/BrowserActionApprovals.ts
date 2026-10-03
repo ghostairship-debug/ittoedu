@@ -10,7 +10,7 @@ export interface BrowserActionApproval {
 }
 
 interface RunApprovals {
-  pending: Map<string, { approval: BrowserActionApproval; expiresAt: number }>
+  pending: Map<string, BrowserActionApproval>
   consumed: Set<string>
 }
 
@@ -35,18 +35,17 @@ export class BrowserActionApprovals {
     const run = this.runs.get(input.runId)
     if (!run) throw new Error('浏览器任务未运行，无法登记外部写入批准')
     if (!['browser_click', 'browser_type', 'browser_file_upload'].includes(input.tool)
-      || !input.operationId || input.operationId.length > 512 || !input.snapshotId || input.snapshotId.length > 512
+      || !input.operationId || !input.snapshotId
       || !input.arguments || typeof input.arguments !== 'object' || Array.isArray(input.arguments))
       throw new Error('浏览器批准必须绑定具体写入、操作身份和页面观察')
     if (run.consumed.has(input.operationId)) throw new Error('浏览器操作批准已经使用')
     const approval = normalized(input)
     const prior = run.pending.get(input.operationId)
     if (prior) {
-      if (!isDeepStrictEqual(prior.approval, approval)) throw new Error('同一浏览器操作不能更换已批准参数')
+      if (!isDeepStrictEqual(prior, approval)) throw new Error('同一浏览器操作不能更换已批准参数')
       return
     }
-    if (run.pending.size >= 100) throw new Error('本任务待执行的浏览器批准过多')
-    run.pending.set(input.operationId, { approval, expiresAt: Date.now() + 2 * 60_000 })
+    run.pending.set(input.operationId, approval)
   }
 
   consume(input: BrowserActionApproval): boolean {
@@ -56,7 +55,7 @@ export class BrowserActionApprovals {
     if (!entry) return false
     run.pending.delete(input.operationId)
     run.consumed.add(input.operationId)
-    try { return entry.expiresAt >= Date.now() && isDeepStrictEqual(entry.approval, normalized(input)) }
+    try { return isDeepStrictEqual(entry, normalized(input)) }
     catch { return false }
   }
 

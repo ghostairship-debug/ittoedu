@@ -7,6 +7,7 @@ import type { LessonWorkspace } from '../../../shared/lessonWorkspace'
 import { WorkspaceDocumentTabs } from './WorkspaceDocumentTabs'
 import { WorkspaceDocumentStatus } from './WorkspaceDocumentStatus'
 import { LessonDocumentEditor } from '../../documentFiles/LessonDocumentEditor'
+import { MediaFileEditor } from '../../documentFiles/media/MediaFileEditor'
 import { usePptxPicker } from './usePptxPicker'
 function relativeFile(lesson: LessonWorkspace, filename: string) {
   const root = lesson.identity.normalizedDirectory.replace(/[\\/]$/, "");
@@ -24,7 +25,7 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
   const activeFileTab =
     tabs.tabs.find((tab) => tab.id === tabs.activeTab) ?? null;
   const chrome = useContentEditorMode(activeFileTab?.documentId ?? null, editorFocus, enterEditor, exitEditor);
-  const showDocumentHeader = activeFileTab?.kind === 'material' && !editorFocus;
+  const showDocumentHeader = (activeFileTab?.kind === 'material' || activeFileTab?.kind === 'media') && !editorFocus;
   const pptx = usePptxPicker(file => {
     void actions.run(async () => { await actions.newCourseFromPptx(file); layout.setContentClosed(false); actions.setMobilePane('workbench') });
   });
@@ -144,6 +145,18 @@ export function WorkspaceContentHost({ props, layout, editorFocus, enterEditor, 
                 onContextualCommand={(instruction, target) => tabs.sendContextualCommand(tab.id, instruction, target)}
               />
             )
+          ) : tab.kind === 'media' && tab.mediaSnapshot ? (
+            <MediaFileEditor
+              ref={tabs.mediaEditorRef(tab.id)}
+              snapshot={tab.mediaSnapshot}
+              port={{
+                preview: (binding, operations) => tabs.mediaFiles({ type: 'media-file.preview', binding, operations: [...operations] }),
+                save: (binding, operations) => tabs.mediaFiles({ type: 'media-file.save', binding, operations: [...operations] }),
+                reload: binding => tabs.mediaFiles({ type: 'media-file.reload', binding }),
+              }}
+              onSaved={snapshot => tabs.updateMediaSnapshot(tab.id, snapshot)}
+              onDirtyChange={dirty => tabs.updateDirty(tab.id, dirty)}
+            />
           ) : (
             (props.renderMaterial?.(tab.path, tab.lesson) ?? (
               <p>此文件的预览暂不可用：{tab.path}</p>

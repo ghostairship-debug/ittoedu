@@ -1,0 +1,13 @@
+
+ RUN  v4.1.10 D:/果铃工作台
+
+stdout | tests/integration/g20R3LiveNativeJourney.test.ts > delivers a real-model compute report and a sourced research report through the native services
+{"evidence":"D:\\果铃工作台\\output\\g20\\r3\\native-live-368e0d01-041e-43ee-914e-11bf2a9866ca","label":"preserved-research-explicit-continuation","status":"completed","requests":8,"tools":["file.list","file.search","file.read","file.read","file.list"],"reportPreserved":true,"inputPreserved":true}
+
+·
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  00:26:24
+   Duration  38.85s (transform 1.36s, setup 65ms, import 1.90s, tests 36.78s, environment 0ms)
+

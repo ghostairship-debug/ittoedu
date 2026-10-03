@@ -18,9 +18,9 @@ afterEach(async () => {
   for (const server of servers.splice(0)) await new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) })
   for (const root of roots.splice(0)) {
     if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unexpected fixture root')
-    await fs.rm(root, { recursive: true, force: true })
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 50 })
   }
-})
+}, 30_000)
 
 function encryption(): CredentialEncryptionPort {
   const key = randomBytes(32)
@@ -77,9 +77,9 @@ it('M30 T1 fixture: a no-document product run reads data, delivers four real fil
     const receipts = payload.messages.filter(message => message.role === 'tool' && message.tool_call_id && message.content)
       .map(message => ({ tool_call_id: message.tool_call_id!, content: message.content! }))
     serviceReceipts.push(receipts)
-    const wire = (prefix: string) => {
-      const match = payload.tools.find(tool => tool.function.description.startsWith(prefix))
-      if (!match) throw new Error(`Model did not receive ${prefix}`)
+    const wire = (...prefixes: string[]) => {
+      const match = payload.tools.find(tool => prefixes.some(prefix => tool.function.description.startsWith(prefix)))
+      if (!match) throw new Error(`Model did not receive any of: ${prefixes.join(' | ')}`)
       return match.function.name
     }
     const call = (index: number, id: string, name: string, input: unknown) => ({ index, id, type: 'function',
@@ -90,7 +90,7 @@ it('M30 T1 fixture: a no-document product run reads data, delivers four real fil
     } else if (requestCount === 2) {
       expect(JSON.parse(receipts.find(item => item.tool_call_id === 't1-read-input')!.content))
         .toMatchObject({ kind: 'read', data: { text: 'month,amount\nJan,20\nFeb,22\n', truncated: false } })
-      const write = wire('新建或完整替换普通 UTF-8 文件')
+      const write = wire('直接写入完整普通 UTF-8 内容', '新建或完整替换普通 UTF-8 文件')
       sse(response, 't1-write-files', { tool_calls: [
         call(0, 't1-write-python', write, { mode: 'create', path: 'chart.py', content: source }),
         call(1, 't1-write-json', write, { mode: 'create', path: 'summary.json', content: '{"total":42,"count":2}\n' }),
@@ -107,7 +107,7 @@ it('M30 T1 fixture: a no-document product run reads data, delivers four real fil
         kind: string; data: { text: string; version: string }
       }
       expect(htmlRead).toMatchObject({ kind: 'read', data: { text: originalHtml } })
-      sse(response, 't1-patch-html', { tool_calls: [call(0, 't1-patch-html', wire('按 file.read 的版本'), {
+      sse(response, 't1-patch-html', { tool_calls: [call(0, 't1-patch-html', wire('用 file.read 回执的 version', '按 file.read 的版本'), {
         path: 'report.html', expectedVersion: htmlRead.data.version,
         oldText: '<h1>销售报告</h1>', newText: '<h1>两个月销售报告</h1>',
       })] }, 'tool_calls')

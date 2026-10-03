@@ -42,8 +42,8 @@ Path('/job/output/summary.json').write_text(json.dumps(result))
 print('completed')
 `)
   expect(await backend().availability()).toEqual({ available: true })
-  const process = await backend().start({ directory: root, program: 'python3', argv: ['/job/input/program.py'], timeoutMs: 10_000, containerName: containerName() })
-  expect(await process.done).toMatchObject({ exitCode: 0, cancelled: false, timedOut: false, stdout: expect.stringContaining('completed') })
+  const process = await backend().start({ directory: root, program: 'python3', argv: ['/job/input/program.py'], containerName: containerName() })
+  expect(await process.done).toMatchObject({ exitCode: 0, cancelled: false, stdout: expect.stringContaining('completed') })
   expect(JSON.parse(await fs.readFile(path.join(root, 'output', 'summary.json'), 'utf8')))
     .toEqual({ sum: 42, child: '42', input_writable: false, outside_visible: false, network_open: false })
   expect(await fs.readFile(path.join(root, 'input', 'grades.csv'), 'utf8')).toBe('score\n20\n22\n')
@@ -59,7 +59,7 @@ subprocess.Popen(['python3', '-c', "import time; from pathlib import Path; time.
 Path('/job/output/started.txt').write_text('yes')
 time.sleep(30)
 `)
-  const process = await backend().start({ directory: root, program: 'python3', argv: ['/job/input/program.py'], timeoutMs: 15_000, containerName: containerName() })
+  const process = await backend().start({ directory: root, program: 'python3', argv: ['/job/input/program.py'], containerName: containerName() })
   let reached = false
   for (let n = 0; n < 100; n++) {
     try { await fs.access(path.join(root, 'output', 'started.txt')); reached = true; break } catch { await new Promise(resolve => setTimeout(resolve, 50)) }
@@ -77,7 +77,7 @@ it.skipIf(!image)('persists an async compute receipt, waits, reopens verified ar
   const service = new ComputeJobService({ directory, backend: backend() })
   const input = { runId: 'run', jobId: 'calculation-1', language: 'python' as const,
     code: "from pathlib import Path; Path('/job/output/summary.json').write_text('{\"total\":42}')",
-    outputNames: ['summary.json'], timeoutMs: 10_000 }
+    outputNames: ['summary.json'] }
   const accepted = await service.start(input)
   expect(accepted).toMatchObject({ status: 'preparing', artifacts: [] })
   const folders = await fs.readdir(directory)
@@ -99,7 +99,7 @@ it.skipIf(!image)('cancels an active compute job without delivering its late dec
   const service = new ComputeJobService({ directory, backend: backend() })
   const input = { runId: 'run', jobId: 'calculation-stop', language: 'python' as const,
     code: "from pathlib import Path; import time; Path('/job/output/started.txt').write_text('yes'); time.sleep(5); Path('/job/output/late.json').write_text('{\"bad\":true}')",
-    outputNames: ['late.json'], timeoutMs: 15_000 }
+    outputNames: ['late.json'] }
   expect(await service.start(input)).toMatchObject({ status: 'preparing' })
   const folder = path.join(directory, (await fs.readdir(directory))[0]!)
   let reached = false
@@ -118,7 +118,7 @@ it.skipIf(!image)('retains process exit and logs when a declared output is missi
   const root = await job()
   const service = new ComputeJobService({ directory: path.join(root, 'jobs'), backend: backend() })
   const input = { runId: 'run', jobId: 'missing-output', language: 'python' as const,
-    code: "print('calculated 42 but failed to write summary')", outputNames: ['summary.json'], timeoutMs: 10_000 }
+    code: "print('calculated 42 but failed to write summary')", outputNames: ['summary.json'] }
   await service.start(input)
   expect(await service.wait('run', input.jobId, 30_000)).toMatchObject({ status: 'failed', exitCode: 0, artifacts: [] })
   expect(await service.logs('run', input.jobId)).toMatchObject({ entries: expect.arrayContaining([

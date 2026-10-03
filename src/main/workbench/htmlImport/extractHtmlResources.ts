@@ -21,6 +21,7 @@ type Sink = {
   remoteReferences: RemoteReference[]
   diagnostics: ImportDiagnostic[]
   cssStack: Set<string>
+  htmlStack: Set<string>
 }
 type Flags = { url: boolean; remote: boolean }
 type DataHit = {
@@ -56,7 +57,7 @@ const RAW_TEXT = new Set(['title', 'textarea', 'noscript'])
 const clip = (value: string, max = 64) => value.length <= max ? value : value.slice(0, max)
 const copyBytes = (bytes: Uint8Array) => new Uint8Array(bytes)
 const placeholder = (key: string) => `cw-resource:${key}`
-const createSink = (): Sink => ({ resources: new Map(), remoteReferences: [], diagnostics: [], cssStack: new Set() })
+const createSink = (): Sink => ({ resources: new Map(), remoteReferences: [], diagnostics: [], cssStack: new Set(), htmlStack: new Set() })
 
 function addDiagnostic(sink: Sink, level: ImportDiagnostic['level'], code: string, message: string, reference?: string) {
   sink.diagnostics.push(reference === undefined ? { level, code, message } : { level, code, message, reference })
@@ -1067,7 +1068,34 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
       'onload/onerror 等加载期事件尽力绑定，个别时序可能漏触发；关键初始化请改用脚本内 addEventListener 或立即执行')
     if (['picture', 'audio', 'video'].includes(tag.name) && !tag.selfClosing) mediaParent = tag.name
     if (embedded && (tag.name === 'script' || tag.attrs.some(attribute => /^on[a-z]/i.test(attribute.name)))) addDiagnostic(sink, 'warning', 'unsupported-html-capability', '动态 HTML 中的脚本和内联事件按原样保留，由宿主预览/Player 决定是否可执行')
-    if (['base', 'iframe', 'object', 'embed'].includes(tag.name)) addDiagnostic(sink, 'warning', 'unsupported-html-capability', `<${tag.name}> 已保留；预览与发布播放器的 CSP 阻止外部嵌入页面，请改为普通链接或内联内容`)
+    if (tag.name === 'iframe') {
+      const src = attributeBy(tag.attrs, 'src')
+      const srcdoc = attributeBy(tag.attrs, 'srcdoc')
+      if (srcdoc) {
+        srcdoc.value = transformHtml(decodeEntities(srcdoc.rawValue), sink, siblings, baseDir)
+        srcdoc.hasValue = true
+        srcdoc.changed = true
+        if (src) src.drop = true
+      } else if (src?.hasValue && ['html', 'htm'].includes(extensionOf(decodeEntities(src.rawValue)))) {
+        const reference = decodeEntities(src.rawValue).trim()
+        const key = resolveRelative(baseDir, reference)
+        const bytes = key ? siblings.get(key) : undefined
+        if (bytes && key) {
+          if (sink.htmlStack.has(key)) addDiagnostic(sink, 'error', 'recursive-html-document', `嵌入 HTML 循环引用，无法建立离线文档：${key}`, reference)
+          else {
+            sink.htmlStack.add(key)
+            const content = transformHtml(decodeText(bytes), sink, siblings, directoryOf(key))
+            sink.htmlStack.delete(key)
+            src.drop = true
+            tag.attrs.push({ name: 'srcdoc', rawName: 'srcdoc', hasValue: true, quote: '"', rawValue: '', value: content, changed: true, drop: false })
+          }
+        } else if (key) addDiagnostic(sink, 'error', 'missing-relative-resource', `找不到嵌入 HTML ${clip(reference, 180)}`, key)
+      }
+      // Independent local documents become ordinary srcdoc before carrier selection.
+      // Remote and unsupported embeddings retain their existing diagnostic and source.
+      if (!tag.attrs.some(attribute => attribute.name === 'srcdoc' && attribute.hasValue)) addDiagnostic(sink, 'warning', 'unsupported-html-capability', '<iframe> 已保留；预览与发布播放器的 CSP 阻止外部嵌入页面，请改为普通链接或本地 HTML 文档')
+    }
+    if (['base', 'object', 'embed'].includes(tag.name)) addDiagnostic(sink, 'warning', 'unsupported-html-capability', `<${tag.name}> 已保留；预览与发布播放器的 CSP 阻止外部嵌入页面，请改为普通链接或内联内容`)
     if (tag.name === 'meta' && /refresh/i.test(attributeBy(tag.attrs, 'http-equiv')?.rawValue ?? '')) addDiagnostic(sink, 'warning', 'unsupported-html-capability', 'meta refresh 已保留；宿主预览/Player 可能忽略自动跳转')
     if (RAW_TEXT.has(tag.name)) {
       const raw = readRaw(html, tag.end, tag.name)

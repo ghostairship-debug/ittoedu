@@ -3,10 +3,10 @@ import { courseProjectDocumentSchema } from './courseProjectSchema'
 import { authoringToolReceiptV1Schema } from './authoringToolContract'
 import { dynamicBehaviorEvidenceSchema, dynamicButtonCheckSchema } from './dynamicBehaviorObservation'
 
-const encodedFiles = z.record(z.string().min(1).max(500), z.string().max(24_000_000).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/))
+const encodedFiles = z.record(z.string().min(1), z.string().regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/))
 export const dynamicAdmissionPayloadSchema = z.object({
   project: courseProjectDocumentSchema,
-  assetFiles: z.record(z.string().min(1).max(500), z.union([encodedFiles.valueType, z.instanceof(Uint8Array)])),
+  assetFiles: z.record(z.string().min(1), z.union([encodedFiles.valueType, z.instanceof(Uint8Array)])),
   /** Main-owned read-only resources, scoped to one isolated admission session. */
   assetResources: z.record(z.string(), z.object({ url: z.string().min(1), byteLength: z.number().int().nonnegative() }).strict()).optional(),
   componentFiles: z.record(z.string().min(1), encodedFiles),
@@ -14,7 +14,7 @@ export const dynamicAdmissionPayloadSchema = z.object({
   verificationMode: z.enum(['full-admission', 'public-props']).optional(),
   observeBehavior: z.boolean().optional(),
   buttonCheck: dynamicButtonCheckSchema.optional(),
-  targets: z.array(z.object({ locationId: z.string().min(1), stateId: z.string().nullable().optional(), instanceIds: z.array(z.string().min(1)).min(1).max(1000) }).strict()).min(1).max(1000),
+  targets: z.array(z.object({ locationId: z.string().min(1), stateId: z.string().nullable().optional(), instanceIds: z.array(z.string().min(1)).min(1) }).strict()).min(1),
 }).strict().superRefine((payload, context) => {
   if (payload.buttonCheck && (!payload.observeBehavior || payload.verificationMode === 'public-props'
     || payload.targets.filter(target => target.instanceIds.includes(payload.buttonCheck!.instanceId)).length !== 1)) {
@@ -30,8 +30,8 @@ export type DynamicAdmissionRequest = z.infer<typeof dynamicAdmissionRequestSche
 export const dynamicInstanceCaptureSchema = z.object({
   instanceId: z.string().min(1), locationId: z.string().min(1),
   width: z.number().int().positive().max(4096), height: z.number().int().positive().max(4096),
-  dataUrl: z.string().max(24_000_000).regex(/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/),
+  dataUrl: z.string().regex(/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/),
 }).strict()
 export type DynamicInstanceCapture = z.infer<typeof dynamicInstanceCaptureSchema>
-export const dynamicAdmissionResultSchema = z.object({ ok: z.boolean(), message: z.string().max(4000), processId: z.number().int().nonnegative().optional(), diagnostics: authoringToolReceiptV1Schema.shape.diagnostics.optional(), captures: z.array(dynamicInstanceCaptureSchema).max(1000).optional(), behaviorEvidence: dynamicBehaviorEvidenceSchema.optional() }).strict()
+export const dynamicAdmissionResultSchema = z.object({ ok: z.boolean(), message: z.string(), processId: z.number().int().nonnegative().optional(), diagnostics: authoringToolReceiptV1Schema.shape.diagnostics.optional(), captures: z.array(dynamicInstanceCaptureSchema).optional(), behaviorEvidence: dynamicBehaviorEvidenceSchema.optional() }).strict()
 export type DynamicAdmissionResult = z.infer<typeof dynamicAdmissionResultSchema>

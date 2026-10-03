@@ -6,22 +6,24 @@ import type { ConversationRecord } from '../../../shared/workbench/conversations
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import type { ExecutionEvent, ExecutionEventInput } from '../../../shared/workbench/executionEvents'
 import type { EditEvent } from '../../../shared/workbench/editSession'
-import type { ModelChatMessage, ModelProvider, ModelSelection } from '../../../shared/workbench/modelProvider'
-import { EXECUTION_NO_PROGRESS, MODEL_REQUEST_BUDGET_EXHAUSTED, TOOL_CALL_BUDGET_EXHAUSTED, type ExecutionRunRecord } from '../../../shared/workbench/execution'
+import type { ModelChatMessage, ModelSelection } from '../../../shared/workbench/modelProvider'
+import { type ExecutionRunRecord } from '../../../shared/workbench/execution'
 import { conversationHistoryIndex } from './ConversationHistoryIndex'
 import { PayloadCompiler } from '../../../core/execution/PayloadCompiler'
 import { AttachmentError, AttachmentService, type AttachmentLiveConversation } from '../attachments/AttachmentService'
 import { ExecutionSettingsError, type ExecutionSettingsStore } from '../providers/ExecutionSettingsStore'
 import type { DocumentHostService } from '../DocumentHostService'
-import { ConversationStore } from '../conversations/ConversationStore'
+import { ConversationStore, ConversationStoreError } from '../conversations/ConversationStore'
 import { ExecutionEngine, trustedRunDocumentIds } from './ExecutionEngine'
 import { VisualAnalysisService } from './VisualAnalysisService'
 import { ExecutionRunStore } from './ExecutionRunStore'
 import { captureMainTiming, ExecutionEventStore, type ExecutionTimingMark, type ExecutionTimingStage } from './ExecutionEventStore'
 import { ExecutionSubmissionStore, type StoredExecutionSubmission } from './ExecutionSubmissionStore'
 import { EditSessionService } from './EditSessionService'
-import { OpenAIChatProvider, serializeModelRequest } from '../providers/OpenAIChatProvider'
-import { ChatGPTResponsesProvider, serializeChatGPTResponsesRequest } from '../providers/ChatGPTResponsesProvider'
+import { OpenAIChatProvider } from '../providers/OpenAIChatProvider'
+import { ChatGPTResponsesProvider, OpenAIResponsesProvider } from '../providers/ChatGPTResponsesProvider'
+import { AnthropicMessagesProvider } from '../providers/AnthropicMessagesProvider'
+import { routeModelProviders, serializeModelPayload } from '../providers/ModelProviderRouter'
 import { DesktopOperationError } from '../../errors'
 import { DEFAULT_PERMISSION_MODE } from '../../../shared/workbench/executionPermission'
 import { executionInputError } from './executionInputErrors'
@@ -81,6 +83,7 @@ export class ExecutionDesktopService {
     collect(): void
   }
   private initialization?: Promise<void>
+  private recoveryAndRebindPromise?: Promise<void>
   private readonly recoveryIssues = new Map<string, string>()
   constructor(private readonly options: ExecutionDesktopServiceOptions) {
     this.conversations = new ConversationStore({ directory: path.join(options.directory, 'conversations') })
@@ -103,8 +106,10 @@ export class ExecutionDesktopService {
       onProtocolShape: shape => diagnosticLog.append({ source: 'main', message: 'OpenAI Chat tool fragment protocol', details: {
         chatToolCode: shape.code, chatToolType: shape.type, chatToolIndex: shape.index, chatToolHasFunction: shape.hasFunction } }) })
     const oauth = new ChatGPTResponsesProvider({ credentialResolver: async connection => (await import('../providers/executionSettingsService.js')).resolveOAuthCredential(connection), fetch: options.fetch })
-    const provider: ModelProvider = { retrySafety: 'pure-generation', stream: (request, callOptions) => (request.selection.connection.protocol === 'chatgpt-responses' ? oauth : chat).stream(request, callOptions) }
-    const serializePayload: typeof serializeModelRequest = input => input.selection.connection.protocol === 'chatgpt-responses' ? serializeChatGPTResponsesRequest(input) : serializeModelRequest(input)
+    const responses = new OpenAIResponsesProvider({ credentialResolver: connection => options.settings.resolveCredential(connection), fetch: options.fetch })
+    const anthropic = new AnthropicMessagesProvider({ credentialResolver: connection => options.settings.resolveCredential(connection), fetch: options.fetch })
+    const provider = routeModelProviders({ 'openai-chat': chat, 'chatgpt-responses': oauth, 'openai-responses': responses, 'anthropic-messages': anthropic })
+    const serializePayload = serializeModelPayload
     const visualAnalysis = new VisualAnalysisService({
       frozenSelection: async runId => (await this.runs.read(runId))?.input.visionSelection ?? null,
       provider, observation: { readResource: input => options.documents.tools.readObservationResource(input.runId, input.resourceId) },
@@ -158,7 +163,10 @@ export class ExecutionDesktopService {
   private ready(): Promise<void> {
     if (this.initialization) return this.initialization
     const initialization = (async () => {
-      let runs = await this.runs.list()
+      // Fast segment: restore the durable identity any operation may reference by id.
+      // The slow segment below (engine.recover + submission rebind + queue drain) must not block the UI or
+      // a first create-conversation; it is still awaited by every submit path through recoveryAndRebindPromise.
+      const runs = await this.runs.list()
       for (const record of runs.filter(run => ['queued', 'running', 'stopping'].includes(run.status))) {
         for (const reference of record.input.documents) {
           if (!this.options.documents.registry.list().some(document => document.documentId === reference.documentId)) {
@@ -167,32 +175,42 @@ export class ExecutionDesktopService {
           }
         }
       }
-      await this.engine.recover()
-      // Cards are transient; unsubmitted input survives as an ordinary recoverable conversation draft.
-      await this.clearElementCards().catch(() => undefined)
-      runs = await this.runs.list()
-      const submissions = await this.submissions.list()
-      for (const record of submissions.filter(value => ['queued', 'starting', 'accepted'].includes(value.state))) {
-        try {
-        const run = runs.find(value => value.input.taskId === record.submissionId)
-        const conversation = await this.conversations.readConversation(record)
-        if (!conversation) { await this.retireOrphanedSubmission(record, run); continue }
-        if (run) await this.bindRun(record, run)
-        else if (record.state === 'starting') await this.submissions.update(record.submissionId, { updatedAt: Date.now(),
-          failure: { code: 'submission-outcome-unknown', message: '应用中断时启动结果未知；未自动重发，请核对后重试新消息。' } })
-        } catch { this.recoveryIssues.set(record.submissionId, '一项旧提交无法恢复，已保留；其他会话仍可使用。') }
-      }
-      const queuedConversations = [...new Set(submissions.filter(value => value.state === 'queued').map(value => value.conversationId))]
-      for (const conversationId of queuedConversations) await this.serial(conversationId, () => this.startNext(conversationId))
-        .catch(() => { this.recoveryIssues.set(conversationId, '一项旧会话队列未恢复，已保留且未重新发出。') })
-      // A release intent written before a prior crash is reconciled only after run and
-      // submission recovery has rebuilt the current conversation references.
-      await this.collectAttachmentReleases().catch(() => undefined)
+      // Slow segment: engine.recover walks every run and can take hundreds of ms per run with large checkpoints.
+      const recoveryAndRebind = (async () => {
+        await this.engine.recover()
+        // Cards are transient; unsubmitted input survives as an ordinary recoverable conversation draft.
+        await this.clearElementCards().catch(() => undefined)
+        const refreshed = await this.runs.list()
+        const submissions = await this.submissions.list()
+        for (const record of submissions.filter(value => ['queued', 'starting', 'accepted'].includes(value.state))) {
+          try {
+          const run = refreshed.find(value => value.input.taskId === record.submissionId)
+          const conversation = await this.conversations.readConversation(record)
+          if (!conversation) { await this.retireOrphanedSubmission(record, run); continue }
+          if (run) await this.bindRun(record, run)
+          else if (record.state === 'starting') await this.submissions.update(record.submissionId, { updatedAt: Date.now(),
+            failure: { code: 'submission-outcome-unknown', message: '应用中断时启动结果未知；未自动重发，请核对后重试新消息。' } })
+          } catch { this.recoveryIssues.set(record.submissionId, '一项旧提交无法恢复，已保留；其他会话仍可使用。') }
+        }
+        const queuedConversations = [...new Set(submissions.filter(value => value.state === 'queued').map(value => value.conversationId))]
+        for (const conversationId of queuedConversations) await this.serial(conversationId, () => this.startNext(conversationId))
+          .catch(() => { this.recoveryIssues.set(conversationId, '一项旧会话队列未恢复，已保留且未重新发出。') })
+        // A release intent written before a prior crash is reconciled only after run and
+        // submission recovery has rebuilt the current conversation references.
+        await this.collectAttachmentReleases().catch(() => undefined)
+      })()
+      this.recoveryAndRebindPromise = recoveryAndRebind
+      // A recovery failure poisons nothing: submit paths surface it, and it never blocks ready() again.
+      void recoveryAndRebind.catch(() => undefined)
     })()
     this.initialization = initialization
     // A real initialization failure is retryable on the next explicit operation, not cached forever.
     void initialization.catch(() => { if (this.initialization === initialization) this.initialization = undefined })
     return initialization
+  }
+  /** Submit paths and any code that touches an active run must wait for background recovery to finish. */
+  private async awaitRecoveryAndRebind(): Promise<void> {
+    await (this.recoveryAndRebindPromise ?? Promise.resolve())
   }
   private async retireOrphanedSubmission(record: StoredExecutionSubmission, run?: ExecutionRunRecord): Promise<void> {
     // Deleting a conversation retires its dispatch, not its durable receipts or unknown outcomes.
@@ -264,7 +282,8 @@ export class ExecutionDesktopService {
   private digest(input: ExecutionSendInput): string {
     return createHash('sha256').update(JSON.stringify({ workspaceId: input.workspaceId, conversationId: input.conversationId,
       text: input.text, documents: input.documents, attachments: input.attachments ?? [], mode: input.mode ?? 'queue',
-      retryOfRunId: input.retryOfRunId ?? null, permission: input.permission ?? DEFAULT_PERMISSION_MODE })).digest('hex')
+      retryOfRunId: input.retryOfRunId ?? null, permission: input.permission ?? DEFAULT_PERMISSION_MODE,
+      ...(input.contentOutput ? { contentOutput: input.contentOutput } : {}) })).digest('hex')
   }
   private async publicSubmission(record: StoredExecutionSubmission): Promise<ExecutionSubmissionRecord> {
     const { schemaVersion: _schemaVersion, digest: _digest, start: _start, attachmentIds: _attachmentIds,
@@ -384,6 +403,13 @@ export class ExecutionDesktopService {
         .some(target => !targetStillExists(snapshot, target))) throw executionInputError('document-range-changed')
       documents.push({ documentId: reference.documentId, writable: reference.writable, ...(reference.selection?.length ? { selection: reference.selection } : {}) })
     }
+    if (input.contentOutput) {
+      const output = input.contentOutput
+      if (permission === 'read-only') throw new Error('只读任务不能应用正文改写，请切换到可修改模式。')
+      if (!documents.some(document => document.documentId === output.documentId
+        && document.selection?.some(target => JSON.stringify(target) === JSON.stringify(output.target))))
+        throw new Error('正文改写目标与本次固定选区不一致，请重新选择。')
+    }
     const historyIndex = await conversationHistoryIndex(current, runId => this.engine.read(runId))
     const context = historyIndex.context
     // History is an index of sources that may be reread later. It contributes no
@@ -421,9 +447,11 @@ export class ExecutionDesktopService {
     const now = Date.now(), attachmentIds = [...new Set(attachments.map(reference => reference.attachmentId))]
     return { schemaVersion: 1, submissionId: input.submissionId, workspaceId: input.workspaceId, conversationId: input.conversationId,
       state: 'queued', mode: input.mode ?? 'queue', text: input.text, documents: structuredClone(input.documents), attachments: structuredClone(attachments), permission,
+      ...(input.contentOutput ? { contentOutput: structuredClone(input.contentOutput) } : {}),
       model: { provider: selection.connection.provider, model: selection.model, accountId: selection.connection.accountId, billing: selection.connection.billing.kind },
       createdAt: now, updatedAt: now, digest, attachmentIds,
       start: { conversationId: current.conversationId, taskId: input.submissionId, instruction: input.text, selection, documents,
+        ...(input.contentOutput ? { contentOutput: structuredClone(input.contentOutput) } : {}),
         ...(visionSelection ? { visionSelection } : {}), ...(visionUnavailableReason ? { visionUnavailableReason } : {}),
         permission, workspaceRoot: space.rootPath,
         ...(current.home ? { conversationHome: structuredClone(current.home), conversationHomeRoot: homeSpace.rootPath } : {}),
@@ -493,8 +521,7 @@ export class ExecutionDesktopService {
       const latest = latestRunId ? await this.engine.read(latestRunId) : null
       const kind = latest?.requests.at(-1)?.failure?.kind
       if (latest && ['failed', 'partial', 'interrupted'].includes(latest.status)
-        && ([MODEL_REQUEST_BUDGET_EXHAUSTED, TOOL_CALL_BUDGET_EXHAUSTED, EXECUTION_NO_PROGRESS].includes(latest.failure?.code ?? '')
-          || kind && ['auth', 'quota', 'rate-limit', 'transport', 'timeout'].includes(kind))) return
+        && kind && ['auth', 'quota', 'rate-limit', 'transport', 'timeout'].includes(kind)) return
     }
     const next = records.find(record => record.state === 'queued')
     if (!next) return
@@ -554,10 +581,13 @@ export class ExecutionDesktopService {
   }
   /** Explicit only, after the caller has settled the external writer. */
   async resumeBuiltinQueue(conversationId: string): Promise<void> {
+    await this.awaitRecoveryAndRebind()
     await this.submissions.resume(conversationId)
     await this.startNext(conversationId, undefined, true)
   }
   private async send(input: ExecutionSendInput): Promise<ExecutionSendResult> {
+    // Submit paths consult durable run state and the engine; they must see the recovery of any prior run.
+    await this.awaitRecoveryAndRebind()
     const digest = this.digest(input), existing = await this.submissions.read(input.submissionId)
     if (existing) {
       if (existing.digest !== digest || existing.workspaceId !== input.workspaceId || existing.conversationId !== input.conversationId) throw executionInputError('submission-conflict')
@@ -571,6 +601,7 @@ export class ExecutionDesktopService {
         || source.conversationId !== input.conversationId || !['failed', 'partial', 'interrupted'].includes(previous.status))
         throw new Error('原任务尚不可继续，请先核对运行状态')
       if (input.text !== source.text || JSON.stringify(input.documents) !== JSON.stringify(source.documents)
+        || JSON.stringify(input.contentOutput ?? null) !== JSON.stringify(source.contentOutput ?? null)
         || JSON.stringify(input.attachments ?? []) !== JSON.stringify(source.attachments)
         || (input.permission ?? DEFAULT_PERMISSION_MODE) !== (source.permission ?? DEFAULT_PERMISSION_MODE))
         throw new Error('继续运行必须使用原任务冻结的文字、目标和附件')
@@ -591,11 +622,20 @@ export class ExecutionDesktopService {
       const lineage = previous ? await this.continuationLineage(previous) : null
       if (lineage) await this.restoreContinuationDocuments(lineage)
       const preparedInput = lineage ? { ...input, documents: await this.continuationDocuments(lineage, input.documents) } : input
+      if (lineage && input.contentOutput) {
+        const output = input.contentOutput
+        const original = input.documents.find(document => document.documentId === output.documentId)
+        const index = original?.selection?.findIndex(target => JSON.stringify(target) === JSON.stringify(output.target)) ?? -1
+        const target = preparedInput.documents.find(document => document.documentId === output.documentId)?.selection?.[index]
+        if (!target) throw new Error('原正文改写范围无法继续，请重新选择。')
+        preparedInput.contentOutput = { ...output, target: structuredClone(target) }
+      }
       record = await this.prepareSubmission(preparedInput, current, digest)
       if (previous) {
         // The public submission remains the user's original frozen payload so
         // lost ACK confirmation computes the same digest with the same ID.
         record.documents = structuredClone(input.documents)
+        if (input.contentOutput) record.contentOutput = structuredClone(input.contentOutput)
         record.retryOfRunId = previous.runId
         record.continuation = { ...this.continuation(previous), sameTask: true }
         if (previous.input.inputContext && record.start.inputContext)
@@ -675,6 +715,7 @@ export class ExecutionDesktopService {
   }
   async writableTasksForDocument(documentId: string): Promise<{ runIds: string[]; submissionIds: string[] }> {
     // Closing one document must not initialize/rebind every conversation in the profile.
+    await this.awaitRecoveryAndRebind()
     const submissions = await this.submissions.list()
     const submissionIds = submissions.filter(record => ['queued', 'starting'].includes(record.state)
       && record.documents.some(document => document.documentId === documentId && document.writable.length > 0)).map(record => record.submissionId)
@@ -686,6 +727,7 @@ export class ExecutionDesktopService {
     return { runIds: [...runIds], submissionIds }
   }
   async stopTasksForDocument(documentId: string): Promise<{ runIds: string[]; submissionIds: string[] }> {
+    await this.awaitRecoveryAndRebind()
     const records = await this.submissions.list(), runs = await this.runs.list()
     const activeIds = this.options.documents.tools.writableRunIdsForDocument(documentId)
     for (const runId of activeIds) if (!runs.some(run => run.runId === runId)) {
@@ -747,6 +789,7 @@ export class ExecutionDesktopService {
    */
   async clearElementConversations(documentId?: string): Promise<void> {
     await this.ready()
+    await this.awaitRecoveryAndRebind()
     await this.clearElementCards(documentId)
   }
   private async clearElementCards(documentId?: string): Promise<void> {
@@ -793,6 +836,10 @@ export class ExecutionDesktopService {
     try {
       await this.ready()
       const input = executionDesktopRequestSchema.parse(raw)
+      // Cold-start ready may return while background recovery is still walking the run history. The fast
+      // bootstrap cases below do not consult recovered state and may proceed; every other operation awaits
+      // recovery so it observes the same durable truth as before the async split.
+      if (!['workspace', 'conversations', 'create-conversation'].includes(input.type)) await this.awaitRecoveryAndRebind()
       switch (input.type) {
         case 'workspace': return this.serial('workspace', () => this.workspace(input.root))
         case 'conversations': return listed(await this.conversations.listConversations(input.workspaceId))
@@ -810,7 +857,9 @@ export class ExecutionDesktopService {
               if (!snapshot.representations.some(rep => rep.id === ref.representationId)) throw executionInputError('attachment-unavailable')
             } else await this.attachments.readRepresentation(ref.attachmentId, ref.representationId)
           }
+          // An older revision is the same refusal as at send time; its fixed reason lets the composer re-read and save again.
           return this.conversations.updateConversation({ ...input, patch: { inputDraft: input.text, inputAttachments: input.attachments, frozenContextRefs: this.refs(input.documents) } })
+            .catch(error => { throw error instanceof ConversationStoreError && error.code === 'revision-conflict' ? executionInputError('conversation-draft-changed', error) : error })
         }))
         case 'rename-conversation': return this.serial(input.conversationId, () => this.conversations.updateConversation({ ...input, patch: { title: input.title } }))
         case 'delete-conversation': return this.serial('attachment-lifecycle', () => this.serial(input.conversationId, () => this.removeConversation(input)))
@@ -841,6 +890,7 @@ export class ExecutionDesktopService {
         }
         case 'submissions': return Promise.all((await this.submissions.list()).filter(record => record.workspaceId === input.workspaceId && record.conversationId === input.conversationId).map(record => this.publicSubmission(record)))
         case 'run-queued': return this.serial(input.conversationId, async () => {
+          await this.awaitRecoveryAndRebind()
           let record = await this.submissions.read(input.submissionId)
           if (!record || record.workspaceId !== input.workspaceId || record.conversationId !== input.conversationId) throw new Error('排队消息不属于当前会话')
           if (record.state !== 'queued') return this.submissionResult(record)
@@ -870,6 +920,14 @@ export class ExecutionDesktopService {
           await this.reclaimExternalQueue(current)
           await this.resumeBuiltinQueue(input.conversationId)
         })
+        case 'browser-viewport': {
+          const owner = await this.required(input.workspaceId, input.conversationId)
+          const record = await this.engine.read(input.runId)
+          if (!owner.runIndex.builtinRunIds.includes(input.runId) || record?.input.conversationId !== owner.conversationId)
+            throw new Error('浏览器不属于当前会话')
+          const { viewportWorkbenchBrowser } = await import('../workbenchToolServices.js')
+          return viewportWorkbenchBrowser(input.runId, { visible: input.visible, ...(input.bounds ? { bounds: input.bounds } : {}) })
+        }
         case 'browser-control': {
           const owner = await this.required(input.workspaceId, input.conversationId)
           const record = await this.engine.read(input.runId)
@@ -878,12 +936,18 @@ export class ExecutionDesktopService {
           const { controlWorkbenchBrowser } = await import('../workbenchToolServices.js')
           try {
             if (input.action === 'status') return await controlWorkbenchBrowser(input.runId, 'status')
-            await controlWorkbenchBrowser(input.runId, 'status')
+            const state = await controlWorkbenchBrowser(input.runId, 'status')
+            if (input.action === 'takeover' && state.state === 'agent' && !state.pageUrl)
+              throw new Error('本任务尚未打开可接管的网页。')
             await this.engine.pauseForBrowser(input.runId, true)
             const result = await controlWorkbenchBrowser(input.runId, input.action)
             if (input.action === 'resume') await this.engine.pauseForBrowser(input.runId, false)
             return result
           } catch (cause) {
+            if (input.action === 'takeover') {
+              const state = await controlWorkbenchBrowser(input.runId, 'status').catch(() => null)
+              if (state?.state === 'agent') await this.engine.pauseForBrowser(input.runId, false)
+            }
             throw new DesktopOperationError('browser-control-failed', '浏览器控制未完成',
               input.action === 'resume' ? '浏览器暂未返回助手控制。' : '受管浏览器暂时无法接管或读取。',
               '任务和输入已保留，可重试接管或继续任务，也可停止任务。', { cause })
@@ -908,7 +972,7 @@ export class ExecutionDesktopService {
             title: fork.title, inputDraft: fork.inputDraft })
           return { conversation, fork }
         })
-        case 'stop': return this.engine.stop(input.runId)
+        case 'stop': await this.awaitRecoveryAndRebind(); return this.engine.stop(input.runId)
         case 'approve': try { return await this.engine.decide(input) }
           catch (error) { throw new DesktopOperationError('execution-approval-rejected', '决定没有提交', error instanceof Error ? error.message : '这次修改暂时不能处理。', '修改仍在等待时可以重新选择；任务已停止或结束时，需要重新发送任务。', { cause: error }) }
         case 'answer': try { return await this.engine.answer(input) }

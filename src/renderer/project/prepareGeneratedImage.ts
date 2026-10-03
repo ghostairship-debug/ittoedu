@@ -50,7 +50,7 @@ export function createGeneratedImagePreparer(codec: GeneratedImageCodec = browse
     let result = entries.get(key)
     if (!result) {
       result = (async () => {
-        if (!input.bytes.length || input.bytes.length > 64 * 1024 * 1024) throw new Error('图片为空或超过 64 MiB')
+        if (!input.bytes.length) throw new Error('图片为空')
         const format = generatedImageFormat(input.bytes)
         if (format.mimeType !== input.mimeType) throw new Error('图片声明格式与真实字节不一致')
         if (![input.display.width, input.display.height].every(value => Number.isFinite(value) && value > 0)) throw new Error('图片显示区域尺寸无效')

@@ -29,6 +29,9 @@ describe('M28/M29 shared service catalog and gateway', () => {
     })
     await gateway.beginRun({ runId: 'agent-run', actor: 'agent', documents: [],
       fileAccess: { permission: 'workspace', workspaceRoot: 'D:/fixture' } })
+    // The initial baseline catalog is lean: web.open/mcp/web.search/media.discover are
+    // visible immediately; job/compute/media mutations require explicit family loading.
+    await gateway.loadToolFamilies('agent-run', ['jobs', 'media'])
     const names = (await gateway.describeRun('agent-run')).map(tool => tool.name)
     expect(names).toEqual(expect.arrayContaining(['web.open', 'mcp.discover', 'mcp.invoke', 'mcp.resource', 'media.start', 'job.status', 'compute.run']))
     expect(await gateway.execute('agent-run', 'open', { name: 'web.open', input: { url: 'https://example.com/' } }))

@@ -3,7 +3,8 @@ import type { DynamicFallbackIntent } from '../composition/runtime/precommitDyna
 import { prepareFlowDynamicDrafts } from '../composition/runtime/flowDynamicDraftPreparation'
 import { createCoursePlannerBackend, courseViewModel, courseViewPatch } from '../documents/CourseDocumentView'
 import type { DocumentHostAPI } from '../../shared/workbench/desktop'
-import type { DocumentSnapshot } from '../../shared/workbench/document'
+import type { DocumentSnapshot, DocumentOperationResult } from '../../shared/workbench/document'
+import type { CompositionContentEdit } from '../../shared/composition/edit'
 import { commitResourceAwareAuthoringHistory, type ResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { create } from 'zustand'
 import { persistCrossSurfaceToolTransaction } from '../composition/courseToolTransaction'
@@ -28,9 +29,6 @@ import { UserFacingError } from '../../shared/errors'
 import { componentContentSha256 } from '../../shared/componentContentIntegrity'
 import { rotatedRectangleAabb } from '../../shared/geometry'
 import {
-  MAX_PROJECT_SCENES,
-  MAX_SCENE_NODES,
-  MAX_SCENE_PRESENTATION_STATES,
   MIN_NODE_SIZE,
   MIN_VISIBLE_NODE_EDGE,
 } from '../../shared/constants'
@@ -80,7 +78,6 @@ import {
   createSlideAuthoringSlice,
   persistSlideCandidateResult,
   persistSlideLayerCommand,
-  persistSlideMediaResult,
   slidePersistSnapshotFrom,
 } from './slices/slideAuthoringSlice'
 import {
@@ -569,6 +566,7 @@ export type EditorState =
   & ReturnType<typeof createAuthoringToolActions>
   & {
       connectCourseDocuments(api: DocumentHostAPI): Promise<void>
+      submitCompositionEdit(layerItemId: string, edit: CompositionContentEdit): Promise<DocumentOperationResult>
       /** One dynamic light edit is captured and committed with its fallback in the same Main operation. */
       submitDynamicFallbackIntent(intent: DynamicFallbackIntent): ReturnType<CourseDocumentBridge['submitDynamicFallback']> | null
       retryDynamicFallback(taskId: string): ReturnType<CourseDocumentBridge['retryDynamicFallback']>
@@ -807,7 +805,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     persistCandidateResult: (result, extra) => {
       persistCandidateResult(result, extra)
     },
-    persistMedia: (result) => slideAuthoringSlice.persistMediaResult(result, get().errorMessage),
+    persistMedia: (result) => slideAuthoringSlice.persistMediaResult(result),
     persistSpatial: (result, extra) => {
       persistSpatialResult(result, extra)
     },
@@ -1304,6 +1302,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     ...authoringToolActions,
     courseDocument: documents.connection(),
     connectCourseDocuments: api => documents.connect(api),
+    submitCompositionEdit: (layerItemId, edit) => documents.submitCompositionEdit(layerItemId, edit),
     submitDynamicFallbackIntent: intent => documents.connection().documentId === intent.documentId ? documents.submitDynamicFallback(intent) : null,
     retryDynamicFallback: taskId => documents.retryDynamicFallback(taskId),
     discardDynamicFallback: taskId => documents.discardDynamicFallback(taskId),

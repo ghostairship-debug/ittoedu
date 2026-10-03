@@ -10,18 +10,14 @@
   "conditions": [
     {
       "destination": "create",
-      "message": "组件插入使用 create；Flow 正文必须提供当前工程或前序导入的真实图片 staticFallbackAssetId。",
+      "message": "组件插入使用 create；程序组件进入 Flow 正文须有真实后备图片。结构资产物化为可编辑纸面组合。",
       "parents": [
         "owner",
         "flow-body"
-      ],
-      "requiredForParent": {
-        "field": "staticFallbackAssetId",
-        "parent": "flow-body"
-      }
+      ]
     }
   ],
-  "description": "插入已有、目录或候选组件。目标使用 create；父级条件按目标计算：只有 Flow 正文 parent:flow-body 必须提供当前工程或前序导入的真实图片 staticFallbackAssetId，Slide、Flow 浮层和 Spatial world 不受该 Flow-only 条件约束。Spatial world 可使用 operation:candidate 提交 Component API 4 文件候选；candidate 输入仍须满足本卡完整 Schema。优先复用已有组件包与可用后备素材，正文组件自然占位并随内容宽度排版。",
+  "description": "插入已有、目录或候选组件。结构资产由软件组装为可编辑组合，Flow 中放到纸面并可随选中段落移动；无需后备截图。程序组件使用原 Component API 4，只有进入 Flow 正文 parent:flow-body 才必须提供真实图片 staticFallbackAssetId，Slide、Flow 浮层和 Spatial world 不受该条件约束。优先复用已有组件包与素材。",
   "examples": [
     {
       "bindings": "Spatial world 目标使用 create parent:owner；files 来自当前候选 Component API 4 包，staticFallbackAssetId 若由 candidate 输入 Schema 要求则按当前资源绑定。Flow-only 的 parent:flow-body 后备条件不适用于 Spatial world。",
@@ -113,8 +109,6 @@
             "additionalProperties": {
               "anyOf": [
                 {
-                  "maxLength": 24000000,
-                  "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
                   "type": "string"
                 },
                 {
@@ -125,7 +119,6 @@
                       "type": "string"
                     },
                     "text": {
-                      "maxLength": 18000000,
                       "type": "string"
                     }
                   },

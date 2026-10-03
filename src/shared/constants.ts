@@ -7,7 +7,7 @@ export const APP_USER_DATA_DIRECTORY_NAME = APP_EXECUTABLE_NAME
 export const APP_PREVIEW_TEMP_DIRECTORY_NAME = `${APP_EXECUTABLE_NAME}-preview`
 export const APP_PDF_TEMP_FILE_PREFIX = 'ittoedu-courseware-pdf-'
 export const APP_E2E_TEMP_DIRECTORY_NAME = `${APP_EXECUTABLE_NAME}-e2e`
-export const APP_VERSION = '1.0.0'
+export const APP_VERSION = '0.0.1'
 /**
  * Legacy 1280×720 project default. Not the current Slide canvas — read
  * `surface.canvas` or `courseSlideCanvas`. Flow overlay placement and the
@@ -22,14 +22,8 @@ export const COMPONENT_RUNTIME_API_VERSION = 4 as const
 export const MAX_HISTORY_STEPS = 50
 /** Product guidance only; projects remain valid beyond this point. */
 export const RECOMMENDED_PROJECT_SCENES = 200
-/** Defensive corruption/abuse guard, not a normal course-authoring limit. */
-export const MAX_PROJECT_SCENES = 1000
 /** Product guidance only; component-heavy scenes usually stay well below this. */
 export const RECOMMENDED_SCENE_NODES = 250
-/** Defensive corruption/abuse guard, not a normal scene-authoring limit. */
-export const MAX_SCENE_NODES = 1000
-/** Defensive guard for authored presentation states inside one scene. */
-export const MAX_SCENE_PRESENTATION_STATES = 100
 export const MIN_NODE_SIZE = 16
 export const MIN_VISIBLE_NODE_EDGE = 20
 export const SUPPORTED_IMAGE_MIME_TYPES = [

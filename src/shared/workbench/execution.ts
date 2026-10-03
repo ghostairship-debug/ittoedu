@@ -4,13 +4,15 @@ import type { InputContext, PayloadManifest } from './attachments'
 import type { DisclosedExecutionSettings } from './executionDesktop'
 import type { ExecutionPermissionMode } from './executionPermission'
 import type { ConversationHome } from './conversations'
+import type { EditTarget } from './editSession'
 
-export interface ExecutionBudget {
-  /** Null means no cumulative cap for this run. */
-  maxRequests: number | null
-  maxToolCalls: number | null
-  maxContextBytes: number
+/** Explicit host-bound authoring output. This is task metadata, never model-authored tool arguments. */
+export interface ExecutionContentOutput {
+  kind: 'replace-text'
+  documentId: string
+  target: EditTarget
 }
+
 /** Main freezes this from the user's action; model output never supplies authority. */
 export interface ExecutionStart {
   conversationId: string
@@ -23,11 +25,11 @@ export interface ExecutionStart {
   /** User-visible role/connection revisions; host role freezing rejects later changes. */
   disclosedSettings?: DisclosedExecutionSettings
   documents: readonly { documentId: string; writable: readonly ToolTarget[]; selection?: readonly ToolTarget[] }[]
+  contentOutput?: ExecutionContentOutput
   /** Compiled, frozen attachment/context messages. No path implies a new grant. */
   context?: readonly ModelChatMessage[]
   inputContext?: InputContext
   selectionSource?: PayloadManifest['selectionSource']
-  budget?: Partial<ExecutionBudget>
   /** Frozen with the task. Absent means the default workspace level. */
   permission?: ExecutionPermissionMode
   /** Canonical root of this space, including an app-managed space. */
@@ -37,12 +39,10 @@ export interface ExecutionStart {
   /** Canonical root containing conversationHome, which may differ after an in-app cross-space move. */
   conversationHomeRoot?: string
 }
-/** A local per-run cap. Never infer this from a provider or transport error message. */
-export const MODEL_REQUEST_BUDGET_EXHAUSTED = 'model-request-budget-exhausted'
-export const TOOL_CALL_BUDGET_EXHAUSTED = 'tool-call-budget-exhausted'
-export const EXECUTION_NO_PROGRESS = 'execution-no-progress'
 export type ExecutionStatus = 'queued' | 'running' | 'stopping' | 'stopped' | 'partial' | 'completed' | 'failed' | 'interrupted'
 export interface ExecutionToolRecord {
+  /** Host applications share canonical receipts without inventing provider tool calls. */
+  origin?: 'host'
   callId: string
   providerCallId: string
   requestId: string
@@ -60,8 +60,8 @@ export interface ExecutionToolRecord {
 }
 export interface ExecutionModelRecord {
   requestId: string
-  /** An independent no-tool vision request is accounted alongside conversation requests. */
-  kind?: 'visual-analysis'
+  /** An independent no-tool vision or context-note request is accounted alongside conversation requests. */
+  kind?: 'visual-analysis' | 'context-summary'
   state: 'sending' | 'completed' | 'failed'
   actualModel?: string
   responseId?: string
@@ -88,7 +88,6 @@ export interface ExecutionRunRecord {
   runId: string
   version: number
   input: ExecutionStart
-  budget: ExecutionBudget
   status: ExecutionStatus
   createdAt: number
   updatedAt: number
@@ -101,7 +100,13 @@ export interface ExecutionRunRecord {
   tools: ExecutionToolRecord[]
   failure?: { code: string; message: string; outcome?: ModelFailure['outcome'] }
   /** Fact summary contains only actual tool returns; it cannot grant permissions. */
-  compacted?: { atRequest: number; facts: string; fromMessage?: number }
+  compacted?: { atRequest: number; facts: string; fromMessage?: number
+    /** Model-authored note merged from the archived excerpt; advisory, never a new grant. */
+    summary?: string
+    /** Messages before this index were re-projected with bounded text excerpts. */
+    boundedThroughMessage?: number
+    /** The per-message text threshold used for that bounded projection. */
+    boundedTextLimit?: number }
   /** Optional additive checkpoint field; older runs remain readable without migration. */
   workingNote?: WorkingNote
   continuedFrom?: string

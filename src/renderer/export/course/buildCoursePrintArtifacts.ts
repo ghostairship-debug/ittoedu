@@ -1,6 +1,9 @@
 import { buildFlowDocxWithCharts } from './flowChartImages'
+import { appendFlowCompositionPictureNodes, captureFlowCompositionPictures, type FlowCompositionPictures } from './flowCompositionPictures'
+import { resolveFlowDocxPageBox } from './flowDocxProjection'
 import type { MixedPrintEntry } from '../../../shared/courseProjectTypes'
 import { composePublishedCourseLocation } from '../../../shared/courseLayerComposition'
+import { effectiveSceneCanvas, mapSlideFrame, sharedSlideFrameMapping, type SharedSlideFrameMapping } from '../../../shared/slideCanvas'
 import type {
   PublishedCourseSurface,
   PublishedCourseV2Payload,
@@ -263,6 +266,9 @@ export interface PublishedSlideStaticComposition {
   locationId: string
   state?: PublishedSlidePresentationState
   items: PublishedLayerItem[]
+  /** Derived export geometry; the authored item remains unchanged. */
+  authoredItems: ReadonlyMap<string, PublishedLayerItem>
+  frameMappings: ReadonlyMap<string, SharedSlideFrameMapping>
 }
 
 /** Shared static composition for a Published Slide page. */
@@ -289,18 +295,26 @@ export function composePublishedSlideStaticPage(
     locationId,
     stateId,
   })
-  const items = composition.entries
+  const entries = composition.entries
     .filter((entry) => (
       entry.applicable
       && entry.mounted
       && (options.includeGlobalLayerItems || entry.source !== 'global')
       && !shouldOmitPublishedItemFromStaticExport(entry.item)
     ))
-    .map((entry) => entry.item)
+  const frameMappings = new Map(entries.map(entry => [entry.item.layerItemId,
+    entry.source === 'scene' ? { scale: 1, offsetX: 0, offsetY: 0 } : sharedSlideFrameMapping(surface.canvas, effectiveSceneCanvas(surface, scene)),
+  ]))
+  const items = entries.map((entry) => entry.source === 'scene' ? entry.item : {
+      ...entry.item,
+      frame: mapSlideFrame(entry.item.frame, sharedSlideFrameMapping(surface.canvas, effectiveSceneCanvas(surface, scene))),
+    })
   return {
     locationId,
     ...(state ? { state } : {}),
     items,
+    authoredItems: new Map(entries.map(entry => [entry.item.layerItemId, entry.item])),
+    frameMappings,
   }
 }
 
@@ -332,13 +346,16 @@ function resolveMixedPrintPageLayout(
   const pageSize = published.mixedPrintPlan?.pageSize ?? 'A4'
   const configuredOrientation = published.mixedPrintPlan?.orientation ?? 'auto'
   const hasNativeVisualPage = pages.some((page) => page.kind !== 'flow-document')
-  const nativeSize = pages.some((page) => page.kind === 'slide-scene')
-    ? { widthPixels: 1280, heightPixels: 720 }
+  const firstSlidePage = pages.find(page => page.kind === 'slide-scene')
+  const firstSlide = firstSlidePage ? published.surfaces.find(surface => surface.id === firstSlidePage.surfaceId && surface.type === 'slide') : undefined
+  const slideCanvas = firstSlide?.type === 'slide' ? effectiveSceneCanvas(firstSlide, firstSlide.scenes.find(scene => scene.id === firstSlidePage?.sceneId)) : undefined
+  const nativeSize = slideCanvas
+    ? { widthPixels: slideCanvas.width, heightPixels: slideCanvas.height }
     : pages.some((page) => page.kind === 'spatial-frame')
       ? { widthPixels: SPATIAL_EXPORT_VIEWPORT.width, heightPixels: SPATIAL_EXPORT_VIEWPORT.height }
       : { widthPixels: 210 / 25.4 * 96, heightPixels: 297 / 25.4 * 96 }
   const orientation = configuredOrientation === 'auto'
-    ? hasNativeVisualPage ? 'landscape' : 'portrait'
+    ? hasNativeVisualPage && nativeSize.widthPixels >= nativeSize.heightPixels ? 'landscape' : 'portrait'
     : configuredOrientation
   const inches = (pixels: number) => `${Number((pixels / 96).toFixed(6))}in`
   const portrait = pageSize === 'surface-native'
@@ -377,8 +394,11 @@ function buildMixedPrintDocumentHtml(
   published: PublishedCourseV2Payload,
   pages: readonly CourseExportPage[],
   visualCaptures: ReadonlyMap<string, CapturedVisualPage>,
+  flowPictures: ReadonlyMap<string, readonly FlowCompositionPictures[]> = new Map(),
 ): string {
   const sections: string[] = []
+  const nativeSlidePages = isPureSlidePublishedCourse(published) && (!published.mixedPrintPlan || published.mixedPrintPlan.pageSize === 'surface-native')
+  const pageRules: string[] = []
   for (const page of pages) {
     const surface = surfaceById(published, page.surfaceId)
     if (!surface) continue
@@ -387,7 +407,10 @@ function buildMixedPrintDocumentHtml(
       if (!scene) continue
       const captured = visualCaptures.get(page.id)
       if (!captured) continue
-      sections.push(`<section class="page course-visual-print-page course-slide-print-page" data-page-id="${escapeHtml(page.id)}" data-scene-id="${escapeHtml(scene.id)}" data-published-v2-capture="true"><div class="course-visual-print-canvas course-slide-print-canvas" data-capture-width="${captured.width}" data-capture-height="${captured.height}"><img class="course-visual-print-capture course-slide-print-capture" src="${escapeHtml(captured.dataUrl)}" alt="${escapeHtml(scene.name)}"/></div></section>`)
+      const pageName = `course_scene_${sections.length}`
+      const width = `${captured.width / 96}in`, height = `${captured.height / 96}in`
+      if (nativeSlidePages) pageRules.push(`@page ${pageName}{size:${width} ${height};margin:0}`)
+      sections.push(`<section class="page course-visual-print-page course-slide-print-page"${nativeSlidePages ? ` style="page:${pageName};width:${width};height:${height};min-height:${height}"` : ''} data-page-id="${escapeHtml(page.id)}" data-scene-id="${escapeHtml(scene.id)}" data-published-v2-capture="true"><div class="course-visual-print-canvas course-slide-print-canvas" data-capture-width="${captured.width}" data-capture-height="${captured.height}"><img class="course-visual-print-capture course-slide-print-capture" src="${escapeHtml(captured.dataUrl)}" alt="${escapeHtml(scene.name)}"/></div></section>`)
       continue
     }
     if (page.kind === 'spatial-frame' && surface.type === 'spatial-2d') {
@@ -405,13 +428,16 @@ function buildMixedPrintDocumentHtml(
             ? 'portrait'
             : undefined,
       })
-      sections.push(`<section class="page flow-print-document" style="background:${escapeHtml(plan.backgroundColor)}" data-page-id="${escapeHtml(page.id)}" data-flow-print-surface="${escapeHtml(plan.surfaceId)}" data-flow-floating-layers="omitted" data-flow-omitted-floating-layer-count="${plan.omittedFloatingLayerCount}">${renderFlowPrintBodyHtml(plan, {
-        resolveAssetUrl: (assetId) => published.assets[assetId]?.url,
+      const groups = (flowPictures.get(surface.id) ?? []).filter(group => group.scope === 'surface')
+      const urls = new Map(groups.flatMap(group => group.pictures.map(picture => [picture.assetId, picture.dataUrl] as const)))
+      const nodes = appendFlowCompositionPictureNodes(plan.nodes, groups)
+      sections.push(`<section class="page flow-print-document" style="background:${escapeHtml(plan.backgroundColor)}" data-page-id="${escapeHtml(page.id)}" data-flow-print-surface="${escapeHtml(plan.surfaceId)}" data-flow-floating-layers="${groups.length ? 'composition-pictures' : 'omitted'}" data-flow-composition-count="${groups.length}" data-flow-omitted-floating-layer-count="${Math.max(0, plan.omittedFloatingLayerCount - groups.length)}">${renderFlowPrintBodyHtml({ ...plan, nodes }, {
+        resolveAssetUrl: (assetId) => urls.get(assetId) ?? published.assets[assetId]?.url,
       })}</section>`)
     }
   }
   const layout = resolveMixedPrintPageLayout(published, pages)
-  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/><title>${escapeHtml(published.title)}</title><style>@page{size:${layout.pageRule};margin:0}*{box-sizing:border-box}html,body{margin:0;background:#fff;font-family:"Microsoft YaHei","PingFang SC",sans-serif}.page{width:${layout.width};min-height:${layout.height};break-after:page;page-break-after:always}.page:last-child{break-after:auto;page-break-after:auto}.course-visual-print-page{position:relative;height:${layout.height};overflow:hidden;display:flex;align-items:center;justify-content:center;background:#fff}.course-visual-print-canvas{width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden}.course-visual-print-capture{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}.flow-print-document{padding:12mm 15mm;overflow-wrap:anywhere;-webkit-print-color-adjust:exact;print-color-adjust:exact}.flow-print-document table{max-width:100%;border-collapse:collapse}.flow-print-document pre{white-space:pre-wrap}.flow-print-image{display:block;max-width:100%;height:auto;object-fit:contain}</style></head><body>${sections.join('')}</body></html>`
+  return `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"/><title>${escapeHtml(published.title)}</title><style>@page{size:${layout.pageRule};margin:0}${pageRules.join('')}*{box-sizing:border-box}html,body{margin:0;background:#fff;font-family:"Microsoft YaHei","PingFang SC",sans-serif}.page{width:${layout.width};min-height:${layout.height};break-after:page;page-break-after:always}.page:last-child{break-after:auto;page-break-after:auto}.course-visual-print-page{position:relative;height:${layout.height};overflow:hidden;display:flex;align-items:center;justify-content:center;background:#fff}.course-visual-print-canvas{width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden}.course-visual-print-capture{display:block;max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}.flow-print-document{padding:12mm 15mm;overflow-wrap:anywhere;-webkit-print-color-adjust:exact;print-color-adjust:exact}.flow-print-document table{max-width:100%;border-collapse:collapse}.flow-print-document pre{white-space:pre-wrap}.flow-print-document figure[data-flow-print="image"]{break-inside:avoid;margin:0 0 8px}.flow-print-image{display:block;max-width:100%;height:auto;object-fit:contain}</style></head><body>${sections.join('')}</body></html>`
 }
 
 export function auditCourseExportFonts(
@@ -536,7 +562,7 @@ export function collectPublishedPdfProducerNotices(
   if (published.globalLayerItems.length > 0 && !pureSlide) {
     add({
       severity: 'info',
-      message: '全局图层与教师控制器默认不写入 PDF/DOCX 文件。',
+      message: '全局图层与教师控制器默认不写入 PDF 文件。',
       path: ['globalLayerItems'],
     })
   }
@@ -560,7 +586,8 @@ export function collectPublishedPdfProducerNotices(
     }
     if (page.kind === 'flow-document' && surface.type === 'flow') {
       const plan = buildFlowPrintPlan(surface, flowPrintPlanOptions(published))
-      const omitted = flowPrintOmittedOverlayMessage(plan)
+      const compositionCount = surface.surfaceLayerItems.filter(entry => entry.item.kind === 'composition').length
+      const omitted = flowPrintOmittedOverlayMessage({ ...plan, omittedFloatingLayerCount: Math.max(0, plan.omittedFloatingLayerCount - compositionCount) })
       if (omitted) {
         add({
           severity: 'info',
@@ -569,6 +596,9 @@ export function collectPublishedPdfProducerNotices(
           path: ['surfaces', surfaceIndex, 'surfaceLayerItems'],
         })
       }
+      if (compositionCount) add({ severity: 'info', pageId: page.id,
+        path: ['surfaces', surfaceIndex, 'surfaceLayerItems'],
+        message: `Flow 表面“${surface.title}”的 Web 组合使用实际播放器图面，长区域分段保持可读尺寸；PDF 不保留该区域 CSS 编辑与互动。` })
       for (const node of plan.nodes) {
         if (node.type === 'component') {
           add({
@@ -610,6 +640,10 @@ export function collectPublishedPdfProducerNotices(
         const item = entry.item
         if (shouldOmitPublishedItemFromStaticExport(item)) continue
         const path = spatialPublishedItemPath(published, surface, entry.source, item.layerItemId)
+        if (item.kind === 'composition') {
+          add({ severity: 'info', message: `Web 组合“${item.layerItemId}”将在 PDF 中使用同规格播放器图面。`, pageId: page.id, layerItemId: item.layerItemId, ...(path ? { path } : {}) })
+          continue
+        }
         if (item.kind === 'component' || item.kind === 'runtime') {
           const kindLabel = item.kind === 'component' ? '组件' : '运行时'
           const fallbackId = publishedDynamicFallbackAssetId(item)
@@ -697,6 +731,19 @@ export async function buildCoursePrintArtifacts(
     })
 
     const slidePages = pages.filter((page) => page.kind === 'slide-scene')
+    const flowPictures = new Map<string, readonly FlowCompositionPictures[]>()
+    for (const page of pages.filter(page => page.kind === 'flow-document')) {
+      const surface = surfaceById(published, page.surfaceId)
+      if (surface?.type !== 'flow') continue
+      const plan = buildFlowPrintPlan(surface, flowPrintPlanOptions(published))
+      const pictures = await captureFlowCompositionPictures(published, surface, resolveFlowDocxPageBox(plan.pageSize, plan.orientation), (layerItemId, cause) => {
+        const message = `Web 组合“${layerItemId}”实际图面导出失败：${cause instanceof Error ? cause.message : String(cause)}；其他正文继续导出。`
+        pushReport(report, { severity: 'warning', message, pageId: page.id, layerItemId })
+      })
+      flowPictures.set(surface.id, pictures)
+      for (const picture of pictures) if (picture.pictures.length) pushReport(report, { severity: 'info', pageId: page.id, layerItemId: picture.layerItemId,
+        message: `Web 组合“${picture.layerItemId}”按实际图面导出为 ${picture.pictures.length} 段图片，保持可读尺寸；PDF/DOCX 不保留该区域 CSS 编辑与互动，普通正文仍保留文档语义。` })
+    }
     const visualPages = pages.filter((page) => (
       page.kind === 'slide-scene' || page.kind === 'spatial-frame'
     ))
@@ -724,6 +771,7 @@ export async function buildCoursePrintArtifacts(
         const scene = surface.scenes.find((candidate) => candidate.id === page.sceneId)
         if (!scene) continue
         if (!page.locationId) continue
+        const canvas = effectiveSceneCanvas(surface, scene)
         try {
           const rawCapture = options.captureSlideScene
             ? await options.captureSlideScene({
@@ -737,10 +785,10 @@ export async function buildCoursePrintArtifacts(
             : await printCapture?.capturePage({
                 locationId: page.locationId,
                 surfaceId: surface.id,
-                width: 1280,
-                height: 720,
+                width: canvas.width,
+                height: canvas.height,
               })
-          const captured = normalizeCapturedVisualPage(rawCapture, { width: 1280, height: 720 })
+          const captured = normalizeCapturedVisualPage(rawCapture, canvas)
           if (captured) {
             visualCaptures.set(page.id, captured)
             for (const warning of captured.warnings) {
@@ -807,7 +855,7 @@ export async function buildCoursePrintArtifacts(
     const visualCoverageComplete = visualPages.every((page) => visualCaptures.has(page.id))
     const hasProducerError = report.some((item) => item.severity === 'error')
     if (visualCoverageComplete && !hasProducerError) {
-      const mixedHtml = buildMixedPrintDocumentHtml(published, pages, visualCaptures)
+      const mixedHtml = buildMixedPrintDocumentHtml(published, pages, visualCaptures, flowPictures)
       const mixedBytes = new TextEncoder().encode(mixedHtml)
       auditExportSize(mixedBytes, '混合打印 HTML', report)
       files.push({
@@ -816,7 +864,10 @@ export async function buildCoursePrintArtifacts(
         bytes: mixedBytes,
         kind: 'flow-print-html',
       })
-      const pdfHtml = pureSlide
+      const pdfHtml = pureSlide && (!published.mixedPrintPlan || published.mixedPrintPlan.pageSize === 'surface-native') && slidePages.every(page => {
+        const capture = visualCaptures.get(page.id)!
+        return capture.width === 1280 && capture.height === 720
+      })
         ? buildPdfPrintHtml(
             published.title,
             slidePages.map((page) => {
@@ -852,8 +903,11 @@ export async function buildCoursePrintArtifacts(
         })
         continue
       }
+      const pictures = flowPictures.get(surface.id) ?? []
+      const pictureAssets = new Map(pictures.flatMap(group => group.pictures.map(picture => [picture.assetId, { bytes: picture.bytes, mimeType: 'image/png' }] as const)))
       const docx = await buildFlowDocxWithCharts(published, surface.id, {
-        resolveAsset: resolveAssetBytes,
+        resolveAsset: id => pictureAssets.get(id) ?? resolveAssetBytes?.(id),
+        compositionPictures: new Map(pictures.map(group => [group.layerItemId, group])),
         pageSize: plan.pageSize,
         orientation: plan.orientation,
       })

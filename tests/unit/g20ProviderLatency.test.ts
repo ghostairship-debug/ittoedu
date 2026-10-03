@@ -73,9 +73,9 @@ function fragmented(parts: Uint8Array[]) {
     if (index < parts.length) controller.enqueue(parts[index++]); else controller.close()
   } })
 }
-async function readFrames(parts: Uint8Array[], maxBytes = 1024) {
+async function readFrames(parts: Uint8Array[]) {
   const values: string[] = [], stream = fragmented(parts)
-  for await (const value of serverSentEvents(stream, maxBytes)) values.push(value)
+  for await (const value of serverSentEvents(stream)) values.push(value)
   expect(stream.locked).toBe(false)
   return values
 }
@@ -89,17 +89,16 @@ it('preserves SSE UTF-8, BOM, split CRLF, bare CR and incomplete EOF framing acr
   expect(await readFrames([Buffer.from('data: final\r'), Buffer.from('\r')])).toEqual(['final'])
 })
 
-it('retains fragmented SSE byte limits, rejects invalid UTF-8 and releases a cancelled reader', async () => {
-  await expect(readFrames([Buffer.from('data: 123456789012\ndata: 123456789012\n\n')], 20)).rejects.toThrow('response-too-large')
-  await expect(readFrames([Buffer.from('data: '), Buffer.from('x'.repeat(20))], 20)).rejects.toThrow('response-too-large')
+it('preserves fragmented SSE content, rejects invalid UTF-8 and releases a cancelled reader', async () => {
+  expect(await readFrames([Buffer.from('data: 123456789012\ndata: 123456789012\n\n')])).toEqual(['123456789012\n123456789012'])
+  expect(await readFrames([Buffer.from('data: '), Buffer.from('x'.repeat(20))])).toEqual([])
   await expect(readFrames([Uint8Array.of(0xc3)])).rejects.toThrow()
-  // A trailing CR remains part of the unfinished-buffer bound until its next byte/EOF.
-  await expect(readFrames([Buffer.from('data: é\r'), Buffer.from('\n\n')], 8)).rejects.toThrow('response-too-large')
-  expect(await readFrames([Buffer.from('data: é\r\n\n')], 8)).toEqual(['é'])
+  expect(await readFrames([Buffer.from('data: é\r'), Buffer.from('\n\n')])).toEqual(['é'])
+  expect(await readFrames([Buffer.from('data: é\r\n\n')])).toEqual(['é'])
   const cancel = vi.fn(), stream = new ReadableStream<Uint8Array>({
     start(controller) { controller.enqueue(Buffer.from('data: first\n\n')) }, cancel,
   })
-  const iterator = serverSentEvents(stream, 1024)
+  const iterator = serverSentEvents(stream)
   expect(await iterator.next()).toMatchObject({ value: 'first', done: false })
   await iterator.return(undefined)
   expect(cancel).toHaveBeenCalledOnce()

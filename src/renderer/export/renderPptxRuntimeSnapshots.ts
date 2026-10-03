@@ -18,7 +18,7 @@ import { isolatePublishedDynamicItemPayload } from './renderPptxComponentSnapsho
 
 export { PUBLISHED_COURSE_V2_SEAM_LEGACY_ERROR }
 
-type PublishedRuntimeItem = Extract<PublishedLayerItem, { kind: 'runtime' }>
+type PublishedRuntimeItem = Extract<PublishedLayerItem, { kind: 'runtime' | 'composition' }>
 
 interface RuntimeSnapshotEntry {
   surface: PublishedSlideSurface
@@ -84,7 +84,7 @@ function listPublishedRuntimeEntries(
       { includeGlobalLayerItems, locationId: page.locationId },
     )
     for (const item of composition.items) {
-      if (item.kind !== 'runtime' || !item.visible) continue
+      if ((item.kind !== 'runtime' && item.kind !== 'composition') || !item.visible) continue
       const global = isGlobalLayerItem(published, item.layerItemId)
       const snapshotKey = pptxRuntimeSnapshotKey(scene.id, item.layerItemId, global)
       if (seen.has(snapshotKey)) continue

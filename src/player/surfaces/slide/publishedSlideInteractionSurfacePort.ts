@@ -16,6 +16,14 @@ import type {
 import type {
   PublishedNativeVideoHandle,
 } from '../publishedNativeVideoMount'
+import { bindPublishedNativeInputSubmit } from '../../composition/nativeInput'
+
+interface PublishedSlideInputOptions {
+  capture?: boolean
+  root?: HTMLElement
+  describeInput?(nodeId: string): PublishedInputDescriptor | null
+  bindInputSubmit?(nodeId: string, listener: (rawValue: string) => void): (() => void) | null
+}
 
 function videoListenerKey(nodeId: string, kind: PublishedVideoEventKind): string {
   return `${nodeId}::${kind}`
@@ -34,13 +42,13 @@ export class PublishedSlideInteractionSurfacePort implements PublishedInteractio
   readonly #dom: PublishedDomInteractionSurfacePort
   readonly #videos: ReadonlyMap<string, PublishedNativeVideoHandle>
   readonly #capture: boolean
-  readonly #inputOptions: { root?: HTMLElement; describeInput?: (nodeId: string) => PublishedInputDescriptor | null }
+  readonly #inputOptions: PublishedSlideInputOptions
   readonly #videoListeners = new Map<string, Set<(seconds?: number) => void>>()
 
   constructor(
     dom: PublishedDomInteractionSurfacePort,
     videos: ReadonlyMap<string, PublishedNativeVideoHandle>,
-    options: { capture?: boolean; root?: HTMLElement; describeInput?: (nodeId: string) => PublishedInputDescriptor | null } = {},
+    options: PublishedSlideInputOptions = {},
   ) {
     this.#dom = dom
     this.#videos = videos
@@ -76,49 +84,11 @@ export class PublishedSlideInteractionSurfacePort implements PublishedInteractio
     nodeId: string,
     listener: (rawValue: string) => void,
   ): (() => void) | null {
+    if (!this.describeInput(nodeId)) return null
+    const nested = this.#inputOptions.bindInputSubmit?.(nodeId, raw => { if (this.describeInput(nodeId)) listener(raw) })
+    if (nested) return nested
     const root = this.#inputOptions.root
-    if (!root || !this.describeInput(nodeId)) return null
-    const composing = new WeakSet<Element>()
-    const resolve = (event: Event): HTMLInputElement | null => {
-      const target = event.target as HTMLElement | null
-      const input = target?.tagName === 'INPUT' ? target as HTMLInputElement
-        : target?.closest('form')?.querySelector<HTMLInputElement>('input[data-input-node-id]')
-      return input?.dataset.inputNodeId === nodeId && root.contains(input) ? input : null
-    }
-    const start = (event: Event) => { const input = resolve(event); if (input) composing.add(input) }
-    const end = (event: Event) => { const input = resolve(event); if (input) composing.delete(input) }
-    const key = (event: KeyboardEvent) => {
-      const input = resolve(event)
-      if (!input) return
-      event.stopPropagation()
-      if (event.key === 'Enter' && (event.isComposing || composing.has(input) || event.keyCode === 229)) event.preventDefault()
-      if (event.key === 'Escape' && !event.isComposing) { event.preventDefault(); input.value = input.defaultValue }
-    }
-    const pointer = (event: Event) => { if (resolve(event)) event.stopPropagation() }
-    const submit = (event: Event) => {
-      const input = resolve(event)
-      if (!input) return
-      event.preventDefault()
-      event.stopPropagation()
-      if (!this.describeInput(nodeId) || composing.has(input)) return
-      const raw = input.value
-      input.defaultValue = raw
-      listener(raw)
-    }
-    root.addEventListener('compositionstart', start)
-    root.addEventListener('compositionend', end)
-    root.addEventListener('keydown', key)
-    root.addEventListener('pointerdown', pointer)
-    root.addEventListener('click', pointer)
-    root.addEventListener('submit', submit)
-    return () => {
-      root.removeEventListener('compositionstart', start)
-      root.removeEventListener('compositionend', end)
-      root.removeEventListener('keydown', key)
-      root.removeEventListener('pointerdown', pointer)
-      root.removeEventListener('click', pointer)
-      root.removeEventListener('submit', submit)
-    }
+    return root ? bindPublishedNativeInputSubmit(root, nodeId, () => !!this.describeInput(nodeId), listener) : null
   }
 
   cancelActiveMotions(): void {

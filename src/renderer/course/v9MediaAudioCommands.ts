@@ -2,7 +2,6 @@ import { createCourseSoundDefinition, planUpdateCourseSound, planDeleteCourseSou
 export type { CourseAudioSettingsPatch } from '../../core/tools/courseAudio'
 import { commitResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { nanoid } from 'nanoid'
-import { MAX_SCENE_NODES } from '../../shared/constants'
 import { courseSlideCanvas, type SlideCanvasSize } from '../../shared/slideCanvas'
 import { defaultSlideMediaSize } from '../../core/tools/slideInsertion'
 import { mergeCourseNativeData } from '../../shared/courseProjectSchema'
@@ -350,9 +349,6 @@ function appendSceneLayer(
   item: LayerItem,
   stateId: string | null,
 ): void {
-  if (scene.layerItems.length >= MAX_SCENE_NODES) {
-    throw new Error(`已达到 ${MAX_SCENE_NODES} 个节点上限`)
-  }
   if (scene.layerItems.some((candidate) => candidate.layerItemId === item.layerItemId)) {
     throw new Error(`图层 ID 已存在：${item.layerItemId}`)
   }
@@ -809,9 +805,6 @@ function placeMediaItems(
     const existingCount = global
       ? draft.globalLayerItems.length
       : slideSceneContext(draft, media.session).scene.layerItems.length
-    if (!global && existingCount + items.length > MAX_SCENE_NODES) {
-      throw new Error(`已达到 ${MAX_SCENE_NODES} 个节点上限`)
-    }
     const single = items.length === 1
     const nodes = items.map((item, index) => {
       const explicit = single && (x !== undefined || y !== undefined)
@@ -903,18 +896,6 @@ export function importAndPlaceCourseMedia(
         destination: 'library',
         placedLayerItemIds: [],
         ...(plan.overflowToLibrary ? { libraryFallback: 'batch-size' as const } : {}),
-      }
-    }
-    if (media.session.scope !== 'global') {
-      const { scene } = slideSceneContext(media.session.history.present, media.session)
-      if (scene.layerItems.length + input.items.length > MAX_SCENE_NODES) {
-        const imported = importCourseMediaAssets(media, input.items, options)
-        return {
-          ...imported,
-          destination: 'library',
-          placedLayerItemIds: [],
-          libraryFallback: 'scene-capacity',
-        }
       }
     }
     return placeMediaItems(

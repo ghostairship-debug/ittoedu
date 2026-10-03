@@ -110,6 +110,7 @@ export interface DesktopAPI {
   externalMcp?: import('./workbench/external').ExternalMcpAPI
   executionSettings?: import('./workbench/executionSettingsDesktop').ExecutionSettingsAPI
   workspaceFiles?: import('./workbench/workspaceFiles').WorkspaceFilesAPI
+  mediaFiles?(input: import('./workbench/mediaFiles').MediaFilesRequest): Promise<import('./workbench/mediaFiles').MediaFileSnapshot>
   onWorkspaceFilesChanged?(listener: (event: import('./workbench/workspaceFiles').WorkspaceFilesChange) => void): () => void
   documents?: import('./workbench/desktop').DocumentHostAPI
   flowDocumentRecovery?: import('./flowDocumentRecovery').FlowDocumentRecoveryAPI
@@ -158,7 +159,7 @@ export interface DesktopAPI {
   peekProjectArchive(input: { path: string }): Promise<OpenBinaryFileResult | null>
   exportBinary(input: {
     suggestedName: string
-    extension: 'pptx' | 'json' | 'docx'
+    extension: 'pptx' | 'json' | 'docx' | 'h5component'
     bytes: Uint8Array
   }): Promise<{ path: string } | null>
   onDocumentExportBuildRequest?(handler: (request: import('./workbench/toolPorts').ExportBuildRequest) => void): () => void
@@ -194,6 +195,7 @@ export const IPC_CHANNELS = {
   executionEdit: 'execution:edit',
   executionSettings: 'execution-settings:operate',
   workspaceFiles: 'workspace-files:operate',
+  mediaFiles: 'media-files:operate',
   workspaceFilesChanged: 'workspace-files:changed',
   documents: 'documents:operate',
   documentEvent: 'documents:event',

@@ -1,5 +1,3 @@
-const DEFAULT_CAPTURE_TIMEOUT_MS = 10_000
-
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = ''
   const chunkSize = 0x8000
@@ -120,12 +118,23 @@ export function registerPublishedCaptureResource(
   }
 }
 
+function isTag<K extends keyof HTMLElementTagNameMap>(node: Node, tag: K): node is HTMLElementTagNameMap[K] {
+  return node.nodeType === 1 && (node as Element).localName === tag
+}
+
+function isElement(node: Node): node is Element { return node.nodeType === 1 }
+function isSvg(node: Node): node is SVGSVGElement { return node.nodeType === 1 && (node as Element).localName === 'svg' }
+
 function visitComposedElements(root: Element, visit: (element: Element) => void): void {
   visit(root)
+  if (isTag(root, 'iframe')) {
+    const document = root.contentDocument
+    if (document?.documentElement) visitComposedElements(document.documentElement, visit)
+  }
   if (root.shadowRoot) {
     for (const child of root.shadowRoot.children) visitComposedElements(child, visit)
   }
-  if (root instanceof HTMLSlotElement) {
+  if (isTag(root, 'slot')) {
     const assigned = root.assignedElements({ flatten: true })
     const children = assigned.length > 0 ? assigned : [...root.children]
     for (const assigned of children) {
@@ -152,31 +161,34 @@ function resourcesBelow(roots: readonly Element[]): PublishedCaptureResourceEntr
 }
 
 /** Waits only for real resource readiness; never invokes final-frame preparation. */
-export async function waitForPublishedObservationReady(root: HTMLElement, timeoutMs = DEFAULT_CAPTURE_TIMEOUT_MS): Promise<void> {
-  const deadline = new PublishedCaptureDeadline(timeoutMs)
-  const active = (element: Element) => {
-    for (let current: Element | null = element; current; current = current.parentElement) {
-      const style = computedStyle(current)
-      if ((current as HTMLElement).hidden || style.display === 'none' || style.visibility === 'hidden') return false
-      if (current === root) break
+export async function waitForPublishedObservationReady(root: HTMLElement, signal?: AbortSignal): Promise<void> {
+  const lifecycle = new PublishedCaptureLifecycle(signal)
+  try {
+    lifecycle.assertAvailable()
+    const active = (element: Element) => {
+      for (let current: Element | null = element; current; current = current.parentElement) {
+        const style = computedStyle(current)
+        if ((current as HTMLElement).hidden || style.display === 'none' || style.visibility === 'hidden') return false
+        if (current === root) break
+      }
+      return true
     }
-    return true
-  }
-  for (const { owner, resource } of resourcesBelow([root])) {
-    if (!active(owner)) continue
-    const ready = resource.waitForObservationReady ?? resource.waitForReady
-    if (!ready) throw new Error('当前动态资源尚未提供实时观察就绪接口')
-    await deadline.waitFor(ready.call(resource), '等待当前运行内容就绪超时')
-  }
-  if (root.ownerDocument.fonts?.ready) await deadline.waitFor(root.ownerDocument.fonts.ready, '等待当前画布字体就绪超时')
-  const images: HTMLImageElement[] = []
-  visitComposedElements(root, element => {
-    if (element instanceof HTMLImageElement && active(element) && (element.currentSrc || element.src)) images.push(element)
-  })
-  for (const image of images) {
-    if (!image.complete || image.naturalWidth === 0) await deadline.waitFor(image.decode(), '等待当前画布原图就绪超时')
-    if (image.naturalWidth === 0) throw new Error('当前画布图像未成功加载')
-  }
+    for (const { owner, resource } of resourcesBelow([root])) {
+      if (!active(owner)) continue
+      const ready = resource.waitForObservationReady ?? resource.waitForReady
+      if (!ready) throw new Error('当前动态资源尚未提供实时观察就绪接口')
+      await lifecycle.waitFor(ready.call(resource), '等待当前运行内容就绪已取消')
+    }
+    if (root.ownerDocument.fonts?.ready) await lifecycle.waitFor(root.ownerDocument.fonts.ready, '等待当前画布字体就绪已取消')
+    const images: HTMLImageElement[] = []
+    visitComposedElements(root, element => {
+      if (isTag(element, 'img') && active(element) && (element.currentSrc || element.src)) images.push(element)
+    })
+    for (const image of images) {
+      if (!image.complete || image.naturalWidth === 0) await lifecycle.waitFor(image.decode(), '等待当前画布原图就绪已取消')
+      if (image.naturalWidth === 0) throw new Error('当前画布图像未成功加载')
+    }
+  } finally { lifecycle.dispose() }
 }
 
 class PublishedCanvasSnapshots {
@@ -184,7 +196,7 @@ class PublishedCanvasSnapshots {
 
   capture(owner: Element): void {
     visitComposedElements(owner, (element) => {
-      if (!(element instanceof HTMLCanvasElement)) return
+      if (!isTag(element, 'canvas')) return
       if (element.width <= 0 || element.height <= 0) return
       const copy = element.ownerDocument.createElement('canvas')
       copy.width = element.width
@@ -207,89 +219,66 @@ class PublishedCanvasSnapshots {
   }
 }
 
-function captureClockMs(): number {
-  return typeof performance === 'undefined' ? Date.now() : performance.now()
-}
+/** Capture has no whole-task deadline; each pending resource stage has its own fault wait. */
+class PublishedCaptureLifecycle {
+  readonly #controller = new AbortController()
+  readonly #onAbort: () => void
 
-/**
- * One monotonic deadline owns the complete capture. Every asynchronous stage
- * receives only the remaining budget, and image fetches share one abort signal.
- */
-class PublishedCaptureDeadline {
-  readonly #expiresAt: number
-  readonly #abortController = new AbortController()
-
-  constructor(timeoutMs: number) {
-    this.#expiresAt = captureClockMs() + Math.max(0, timeoutMs)
+  constructor(private readonly upstream?: AbortSignal) {
+    this.#onAbort = () => this.#controller.abort(upstream?.reason)
+    if (upstream?.aborted) this.#onAbort()
+    else upstream?.addEventListener('abort', this.#onAbort, { once: true })
   }
 
-  get signal(): AbortSignal {
-    return this.#abortController.signal
+  get signal(): AbortSignal { return this.#controller.signal }
+  get cancelled(): boolean { return this.upstream?.aborted ?? false }
+  dispose(): void { this.upstream?.removeEventListener('abort', this.#onAbort) }
+
+  assertAvailable(): void {
+    if (this.signal.aborted) throw this.#abortError()
   }
 
-  assertAvailable(message: string): void {
-    if (!this.signal.aborted && this.#remainingMs() > 0) return
-    const error = new Error(message)
-    this.#expire(error)
-    throw error
-  }
-
-  waitFor<T>(
-    promise: PromiseLike<T>,
-    message: string,
-    onDeadline?: () => void,
-  ): Promise<T> {
+  waitFor<T>(promise: PromiseLike<T>, message: string, onAbort?: () => void): Promise<T> {
     const pending = Promise.resolve(promise)
-    const remainingMs = this.#remainingMs()
-    if (this.signal.aborted || remainingMs <= 0) {
-      onDeadline?.()
-      const error = new Error(message)
-      this.#expire(error)
+    if (this.signal.aborted) {
+      onAbort?.()
       void pending.catch(() => undefined)
-      return Promise.reject(error)
+      return Promise.reject(this.#abortError(message))
     }
-
     return new Promise<T>((resolve, reject) => {
       let settled = false
       const finish = (complete: () => void) => {
         if (settled) return
         settled = true
-        window.clearTimeout(timeout)
+        window.clearTimeout(timer)
         this.signal.removeEventListener('abort', handleAbort)
         complete()
       }
-      const timeoutError = () => new Error(message)
       const handleAbort = () => {
         if (settled) return
-        onDeadline?.()
-        finish(() => reject(timeoutError()))
+        onAbort?.()
+        finish(() => reject(this.#abortError(message)))
       }
-      const timeout = window.setTimeout(() => {
-        const error = timeoutError()
-        this.#expire(error)
-        handleAbort()
-      }, remainingMs)
-
+      const timer = window.setTimeout(() => {
+        this.#controller.abort(new Error(message.replace(/已取消$/, '无响应')))
+      }, 30_000)
       this.signal.addEventListener('abort', handleAbort, { once: true })
+      if (this.signal.aborted) handleAbort()
       pending.then(
-        (value) => finish(() => resolve(value)),
+        value => finish(() => resolve(value)),
         (cause: unknown) => finish(() => reject(cause)),
       )
     })
   }
 
-  #remainingMs(): number {
-    return Math.max(0, this.#expiresAt - captureClockMs())
-  }
-
-  #expire(error: Error): void {
-    if (!this.signal.aborted) this.#abortController.abort(error)
+  #abortError(message = 'Published 静态捕获已取消'): Error {
+    return this.signal.reason instanceof Error ? this.signal.reason : new Error(message)
   }
 }
 
 async function prepareResources(
   roots: readonly Element[],
-  deadline: PublishedCaptureDeadline,
+  lifecycle: PublishedCaptureLifecycle,
 ): Promise<{
   entries: PublishedCaptureResourceEntry[]
   canvasSnapshots: PublishedCanvasSnapshots
@@ -302,12 +291,14 @@ async function prepareResources(
     // prepareCapture() when preserveDrawingBuffer is false.
     for (const entry of entries) {
       try {
-        await deadline.waitFor(
+        await lifecycle.waitFor(
           entry.resource.waitForCaptureReady(),
-          'Published 静态捕获等待动态内容就绪超时',
+          'Published 静态捕获等待动态内容就绪已取消',
         )
       } catch (cause) {
-        try { entry.resource.failCapture?.(captureError(cause)) } catch { /* Preserve the capture failure. */ }
+        if (!lifecycle.cancelled) {
+          try { entry.resource.failCapture?.(captureError(cause)) } catch { /* Preserve the resource failure. */ }
+        }
         throw cause
       }
       canvasSnapshots.capture(entry.owner)
@@ -341,7 +332,7 @@ interface DomPaintContext {
   readonly origin: { left: number; top: number }
   readonly imageCache: Map<string, Promise<HTMLImageElement>>
   readonly canvasSnapshots: PublishedCanvasSnapshots
-  readonly deadline: PublishedCaptureDeadline
+  readonly lifecycle: PublishedCaptureLifecycle
 }
 
 function localRect(rect: DOMRect, origin: DomPaintContext['origin']): CaptureRect {
@@ -509,21 +500,21 @@ function linearGradient(
 
 async function embeddableImageSource(
   source: string,
-  deadline: PublishedCaptureDeadline,
+  lifecycle: PublishedCaptureLifecycle,
 ): Promise<string> {
   if (source.startsWith('data:') || source.startsWith('blob:')) return source
-  const response = await deadline.waitFor(
-    fetch(source, { signal: deadline.signal }),
-    'Published 静态捕获等待图片素材读取超时',
+  const response = await lifecycle.waitFor(
+    fetch(source, { signal: lifecycle.signal }),
+    'Published 静态捕获等待图片素材读取已取消',
   )
   if (!response.ok) throw new Error(`Published 捕获素材读取失败（${response.status}）`)
-  const blob = await deadline.waitFor(
+  const blob = await lifecycle.waitFor(
     response.blob(),
-    'Published 静态捕获等待图片素材响应超时',
+    'Published 静态捕获等待图片素材响应已取消',
   )
-  const bytes = new Uint8Array(await deadline.waitFor(
+  const bytes = new Uint8Array(await lifecycle.waitFor(
     blob.arrayBuffer(),
-    'Published 静态捕获等待图片素材读取超时',
+    'Published 静态捕获等待图片素材读取已取消',
   ))
   return `data:${blob.type || 'application/octet-stream'};base64,${bytesToBase64(bytes)}`
 }
@@ -531,7 +522,7 @@ async function embeddableImageSource(
 async function decodeImage(
   image: HTMLImageElement,
   source: string,
-  deadline: PublishedCaptureDeadline,
+  lifecycle: PublishedCaptureLifecycle,
 ): Promise<void> {
   let settled = false
   const cleanup = () => {
@@ -565,9 +556,9 @@ async function decodeImage(
       reject(cause)
     }
   })
-  await deadline.waitFor(
+  await lifecycle.waitFor(
     decoding,
-    'Published 静态捕获等待图片解码超时',
+    'Published 静态捕获等待图片解码已取消',
     abandon,
   )
 }
@@ -576,9 +567,9 @@ function loadImage(source: string, paint: DomPaintContext): Promise<HTMLImageEle
   const cached = paint.imageCache.get(source)
   if (cached) return cached
   const loading = (async () => {
-    const embedded = await embeddableImageSource(source, paint.deadline)
+    const embedded = await embeddableImageSource(source, paint.lifecycle)
     const image = new Image()
-    await decodeImage(image, embedded, paint.deadline)
+    await decodeImage(image, embedded, paint.lifecycle)
     return image
   })()
   paint.imageCache.set(source, loading)
@@ -742,7 +733,7 @@ function paintControlValue(
   opacity: number,
   paint: DomPaintContext,
 ): void {
-  const value = element instanceof HTMLSelectElement
+  const value = isTag(element, 'select')
     ? element.selectedOptions[0]?.textContent ?? ''
     : element.value
   if (!value) return
@@ -772,24 +763,39 @@ async function paintReplacedElement(
   let image: CanvasImageSource | null = null
   let width = 0
   let height = 0
-  if (element instanceof HTMLImageElement) {
+  if (isTag(element, 'iframe')) {
+    const document = element.contentDocument
+    if (!document?.documentElement) throw new Error('无法捕获不可访问的嵌入文档')
+    if (document.fonts?.ready) await paint.lifecycle.waitFor(document.fonts.ready, '等待嵌入文档字体就绪已取消')
+    const scaleX = rect.width / Math.max(1, element.offsetWidth)
+    const scaleY = rect.height / Math.max(1, element.offsetHeight)
+    paint.context.save()
+    try {
+      paint.context.translate(rect.left + element.clientLeft * scaleX, rect.top + element.clientTop * scaleY)
+      paint.context.scale(scaleX, scaleY)
+      paint.context.beginPath(); paint.context.rect(0, 0, element.clientWidth, element.clientHeight); paint.context.clip()
+      await paintNode(document.documentElement, opacity, { ...paint, origin: { left: 0, top: 0 } })
+    } finally { paint.context.restore() }
+    return true
+  }
+  if (isTag(element, 'img')) {
     const loaded = await loadImage(element.currentSrc || element.src, paint)
     image = loaded
     width = loaded.naturalWidth || loaded.width
     height = loaded.naturalHeight || loaded.height
-  } else if (element instanceof HTMLCanvasElement) {
+  } else if (isTag(element, 'canvas')) {
     const frozen = paint.canvasSnapshots.get(element) ?? element
     image = frozen
     width = frozen.width
     height = frozen.height
-  } else if (element instanceof HTMLVideoElement) {
+  } else if (isTag(element, 'video')) {
     if (element.readyState < 2 || element.videoWidth <= 0 || element.videoHeight <= 0) {
       return false
     }
     image = element
     width = element.videoWidth
     height = element.videoHeight
-  } else if (element instanceof SVGSVGElement) {
+  } else if (isSvg(element)) {
     const clone = element.cloneNode(true) as SVGSVGElement
     clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
     const source = `data:image/svg+xml;base64,${bytesToBase64(
@@ -816,12 +822,12 @@ async function paintNode(
   inheritedOpacity: number,
   paint: DomPaintContext,
 ): Promise<void> {
-  if (node instanceof Text) {
-    paintText(node, inheritedOpacity, paint)
+  if (node.nodeType === 3) {
+    paintText(node as Text, inheritedOpacity, paint)
     return
   }
-  if (!(node instanceof Element)) return
-  if (node instanceof HTMLStyleElement || node instanceof HTMLScriptElement) return
+  if (!isElement(node)) return
+  if (isTag(node, 'style') || isTag(node, 'script')) return
   const style = computedStyle(node)
   if (
     style.display === 'none'
@@ -836,9 +842,9 @@ async function paintNode(
     await paintElementBox(style, rect, opacity, paint)
     if (await paintReplacedElement(node, style, rect, opacity, paint)) return
     if (
-      node instanceof HTMLInputElement
-      || node instanceof HTMLTextAreaElement
-      || node instanceof HTMLSelectElement
+      isTag(node, 'input')
+      || isTag(node, 'textarea')
+      || isTag(node, 'select')
     ) {
       paintControlValue(node, style, rect, opacity, paint)
       return
@@ -856,7 +862,7 @@ async function paintNode(
     paint.context.clip()
   }
   try {
-    if (node instanceof HTMLSlotElement) {
+    if (isTag(node, 'slot')) {
       const assigned = node.assignedNodes({ flatten: true })
       const children = assigned.length > 0 ? assigned : [...node.childNodes]
       for (const child of children) await paintNode(child, opacity, paint)
@@ -874,7 +880,7 @@ async function captureElementContent(
   width: number,
   height: number,
   canvasSnapshots: PublishedCanvasSnapshots,
-  deadline: PublishedCaptureDeadline,
+  lifecycle: PublishedCaptureLifecycle,
 ): Promise<HTMLCanvasElement> {
   const canvas = element.ownerDocument.createElement('canvas')
   canvas.width = Math.max(1, Math.round(width))
@@ -904,7 +910,7 @@ async function captureElementContent(
       origin: { left: rect.left, top: rect.top },
       imageCache: new Map(),
       canvasSnapshots,
-      deadline,
+      lifecycle,
     })
     context.restore()
   } finally {
@@ -940,7 +946,7 @@ export interface CapturePublishedSurfaceOptions extends PublishedSurfaceCaptureG
   readonly resolveGeometryAfterReady?: () => PublishedSurfaceCaptureGeometry
   /** Item capture stays transparent and omits the authored page background. */
   readonly transparentBackground?: boolean
-  readonly timeoutMs?: number
+  readonly signal?: AbortSignal
 }
 
 /** Backward-compatible name retained for Slide callers. */
@@ -988,20 +994,20 @@ function exposeCaptureRootForLayout(root: HTMLElement): () => void {
 export async function capturePublishedSurfacePng(
   options: CapturePublishedSurfaceOptions,
 ): Promise<string> {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_CAPTURE_TIMEOUT_MS
-  const deadline = new PublishedCaptureDeadline(timeoutMs)
+  const lifecycle = new PublishedCaptureLifecycle(options.signal)
+  lifecycle.assertAvailable()
   const restoreCaptureRoot = exposeCaptureRootForLayout(options.root)
   try {
     const prepared = await prepareResources(
       options.layers.map((layer) => layer.element),
-      deadline,
+      lifecycle,
     )
     try {
       const fontsReady = options.root.ownerDocument.fonts?.ready
       if (fontsReady) {
-        await deadline.waitFor(
+        await lifecycle.waitFor(
           Promise.resolve(fontsReady).then(() => undefined),
-          'Published 静态捕获等待字体就绪超时',
+          'Published 静态捕获等待字体就绪已取消',
         )
       }
       const geometry = options.resolveGeometryAfterReady?.() ?? options
@@ -1035,7 +1041,7 @@ export async function capturePublishedSurfacePng(
           origin: { left: 0, top: 0 },
           imageCache: new Map(),
           canvasSnapshots: prepared.canvasSnapshots,
-          deadline,
+          lifecycle,
         })
       }
 
@@ -1045,7 +1051,7 @@ export async function capturePublishedSurfacePng(
           layer.width,
           layer.height,
           prepared.canvasSnapshots,
-          deadline,
+          lifecycle,
         )
         context.save()
         context.globalAlpha = Math.max(0, Math.min(1, layer.opacity))
@@ -1060,7 +1066,7 @@ export async function capturePublishedSurfacePng(
         )
         context.restore()
       }
-      deadline.assertAvailable('Published 静态捕获超过统一截止时间')
+      lifecycle.assertAvailable()
       try {
         return canvas.toDataURL('image/png')
       } catch (cause) {
@@ -1078,6 +1084,7 @@ export async function capturePublishedSurfacePng(
       }
     }
   } finally {
+    lifecycle.dispose()
     restoreCaptureRoot()
   }
 }

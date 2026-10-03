@@ -1,5 +1,6 @@
 # 场景与全局自由运行时开发指南（API 2/3 Published 纵切）
 
+> 最新事实源 ARCHITECTURE_CONTRACT §Runtime/Component。
 > **当前工程格式是 Course Project V9。** 本文只描述当前 V9 可用边界；类型与协议真值以 `src/shared/runtimeTypes.ts`、`runtimeSchema.ts` 和源码为准。
 
 果铃是通用内容工作台，支持 H5 演示、讲义、无限画布与文档等创作；本文描述其中 Runtime 的实际协议与支持范围，教育内容只是应用场景之一。Runtime 的可执行载体以本文列明的 Published 支持范围为准，不表示可直接嵌入所有文档格式。

@@ -131,7 +131,7 @@ it('G20 plain text opens, saves exact UTF-8 bytes, and refuses a non-UTF-8 file'
   expect(await fs.readFile(bad)).toEqual(bytes)
   const other = path.join(directory, 'notes.doc')
   await fs.writeFile(other, 'x')
-  await expect(host.open(other)).rejects.toThrow('当前支持 Markdown、纯文本（.txt）和 V9 h5lesson 文档')
+  await expect(host.open(other)).rejects.toThrow('该格式需要相应的文档、素材或二进制入口，不能按 UTF-8 源文编辑')
 })
 
 it('G20 overwrite permission is only supplied by the trusted native dialog path', async () => {

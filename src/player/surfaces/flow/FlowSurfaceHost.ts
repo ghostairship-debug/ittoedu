@@ -106,6 +106,7 @@ import {
   type PublishedCarrierSideEffects,
 } from '../publishedCourseState'
 import { capturePublishedSurfacePng } from '../publishedCapture'
+import { mountWebComposition, type WebCompositionMountHandle } from '../../composition/mountWebComposition'
 
 type FlowRuntimeFailurePhase = 'register' | 'create' | 'lifecycle' | 'destroy'
 
@@ -128,6 +129,7 @@ interface PublishedFlowOverlayEntry {
 interface FlowOverlayRecord {
   wrap: HTMLElement
   effects: PublishedCarrierSideEffects
+  composition?: WebCompositionMountHandle
 }
 
 export interface FlowCourseProgressSource {
@@ -301,7 +303,7 @@ export class FlowSurfaceHost {
     if (matches.length === 0) throw new Error(`当前 Published 位置中不存在图层“${itemId}”`)
     if (matches.length > 1) throw new Error(`当前 Published 位置中图层 ID“${itemId}”不唯一`)
     const item = matches[0]!.item
-    if (!item.visible || (item.kind !== 'component' && item.kind !== 'runtime')) {
+    if (!item.visible || (item.kind !== 'component' && item.kind !== 'runtime' && item.kind !== 'composition')) {
       throw new Error(`图层“${itemId}”在当前位置不可用于动态内容静态捕获`)
     }
     const wrap = this.#overlayRecords.get(itemId)?.wrap
@@ -461,6 +463,7 @@ export class FlowSurfaceHost {
       }
     }
     if (this.#pendingRuntimeActivation !== null) return
+    this.#resumeCompositions()
     this.#syncTeacherControllerSession()
     this.#restoreInteractionsIfActive()
   }
@@ -481,6 +484,10 @@ export class FlowSurfaceHost {
     for (const handle of this.#componentHandles) {
       handle.setVisible(false)
       handle.suspend()
+    }
+    for (const record of this.#overlayRecords.values()) {
+      record.composition?.setVisible(false)
+      record.composition?.suspend()
     }
     if (this.#root) this.#root.hidden = true
   }
@@ -617,12 +624,23 @@ export class FlowSurfaceHost {
   }
 
   #clearOverlayRecords(): void {
-    for (const record of this.#overlayRecords.values()) record.effects.retire()
+    for (const record of this.#overlayRecords.values()) {
+      record.effects.retire()
+      record.composition?.destroy()
+    }
     this.#overlayRecords.clear()
+  }
+
+  #resumeCompositions(): void {
+    for (const record of this.#overlayRecords.values()) {
+      record.composition?.setVisible(true)
+      record.composition?.resume()
+    }
   }
 
   #removeOverlayRecord(id: string, record: FlowOverlayRecord): void {
     record.effects.retire()
+    record.composition?.destroy()
     for (const runtime of [...this.#runtimeHandles]) {
       if (runtime.wrap === record.wrap) this.#retireRuntimeHandle(runtime)
     }
@@ -771,6 +789,7 @@ export class FlowSurfaceHost {
           handle.resume()
         }
       }
+      this.#resumeCompositions()
       this.#syncTeacherControllerSession()
       this.#restoreInteractionsIfActive()
       return
@@ -794,6 +813,7 @@ export class FlowSurfaceHost {
         }
       }
       if (this.#active) this.#mountDeferredCarriers()
+      if (this.#active && pendingActivation !== null) this.#resumeCompositions()
       this.#interactionPort?.refreshNodes(this.#interactionNodes.values(), ++this.#interactionGeneration)
       this.#syncTeacherControllerSession()
     } else this.#render()
@@ -979,7 +999,7 @@ export class FlowSurfaceHost {
     if (paper && paragraphLayout) {
       const blockRects = new Map(paragraphLayout.blocks.map(block => [block.blockId, block]))
       const runtimeItems = entries.flatMap(entry => {
-        if (!isExecutableFlowSurfaceRuntime(entry) || entry.item.paperSpace !== 'paper' || !entry.paragraphAnchor) return []
+        if ((!isExecutableFlowSurfaceRuntime(entry) && entry.item.kind !== 'composition') || entry.item.paperSpace !== 'paper' || !entry.paragraphAnchor) return []
         const anchor = [entry.paragraphAnchor.blockId, ...visiblePublishedFlowAncestors(paper, entry.paragraphAnchor.blockId)]
           .map(id => blockRects.get(id)).find((block): block is FlowParagraphBlockRect => Boolean(block))
         return anchor ? [{ id: entry.item.layerItemId, blockId: anchor.blockId, order: entry.stackOrder,
@@ -1051,6 +1071,7 @@ export class FlowSurfaceHost {
           wrap.style.height = `${slot.height}px`
           this.#runtimeHandles.find(record => record.wrap === wrap)?.handle?.updateSize(shownFrame.width, slot.height)
         }
+        this.#overlayRecords.get(entry.item.layerItemId)?.composition?.resize(shownFrame.width, shownFrame.height)
       }
     }
   }
@@ -1142,8 +1163,32 @@ export class FlowSurfaceHost {
         },
       )
       targetPlane.appendChild(wrap)
-      this.#overlayRecords.set(entry.item.layerItemId, { wrap, effects })
-      if (isExecutableFlowSurfaceRuntime(entry)) {
+      const overlayRecord: FlowOverlayRecord = { wrap, effects }
+      this.#overlayRecords.set(entry.item.layerItemId, overlayRecord)
+      if (entry.item.kind === 'composition') {
+        const item = entry.item
+        const mount = () => {
+          if (this.#overlayRecords.get(item.layerItemId) !== overlayRecord) return
+          overlayRecord.composition = mountWebComposition(wrap, {
+            instanceId: item.layerItemId,
+            content: item.content,
+            width: item.frame.width,
+            height: item.frame.height,
+            mode: 'playback',
+            visible: this.#active,
+            resolveAsset: assetId => resolvePlaybackAssetUrl(this.#playback, assetId, this.#options.resolveAsset),
+            session: this.#runtimeSession,
+            courseState: effects.courseState,
+            actions: effects.runtimeActions,
+            projectId: this.#playback.courseId,
+            components: this.#components,
+            componentActions: effects.componentActions,
+            reportError: error => this.#options.reportRuntimeError?.(item.layerItemId, 'lifecycle', error),
+          })
+        }
+        if (this.#active) mount()
+        else this.#deferredCarrierMounts.push(mount)
+      } else if (isExecutableFlowSurfaceRuntime(entry)) {
         wrap.dataset.flowRuntimeKind = entry.item.runtime.protocol
         wrap.style.pointerEvents = entry.item.hitPolicy === 'auto' ? 'auto' : 'none'
         if (this.#active) this.#mountRuntime(wrap, entry.item, effects)
@@ -1498,6 +1543,7 @@ function publishedInteractionOwnership(
 ): PublishedInteractionNodeOwnership {
   if (item.kind === 'component') return 'component'
   if (item.kind === 'runtime') return 'runtime'
+  if (item.kind === 'composition') return 'composition'
   if (item.content.nativeType === 'video') return 'media'
   
   return 'native'
@@ -1575,17 +1621,19 @@ function renderStaticOverlayItem(
   wrap.style.opacity = String(entry.item.opacity)
   // Paper annotations belong to document scrolling, not observation pan bounds.
   if (entry.item.paperSpace !== 'paper') wrap.dataset.playbackBounds = 'true'
-  if (entry.item.kind === 'runtime' || entry.item.kind === 'component') wrap.dataset.layerKind = entry.item.kind
+  if (entry.item.kind !== 'native') wrap.dataset.layerKind = entry.item.kind
   wrap.style.transform = entry.item.rotation === 0 ? '' : `rotate(${entry.item.rotation}deg)`
   wrap.style.transformOrigin = 'center center'
   wrap.inert = entry.item.hitPolicy !== 'auto'
   const intrinsicallyInteractive = (
     entry.item.kind === 'native' && entry.item.content.nativeType === 'video'
-  ) || entry.item.kind === 'component'
+  ) || entry.item.kind === 'component' || entry.item.kind === 'composition'
   wrap.style.pointerEvents = intrinsicallyInteractive && entry.item.hitPolicy === 'auto'
     ? 'auto'
     : 'none'
   wrap.style.zIndex = String(entry.stackOrder)
+  // The owner mounts the shared composition after this positioned wrapper is attached.
+  if (entry.item.kind === 'composition') return wrap
   if (entry.item.kind === 'native') {
     const input = nativeRenderInputFromPublishedItem(entry.item)
     paintPublishedNativeRenderInput(wrap, input, { resolveAsset })

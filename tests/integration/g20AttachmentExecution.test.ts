@@ -119,7 +119,7 @@ describe('attachment draft to canonical execution payload', () => {
     const removed = await service.operate({ type: 'draft', ...identity, expectedRevision: drafted.revision, text: '', documents: [], attachments: [] }) as ConversationRecord
     expect(removed.inputAttachments).toEqual([])
     expect(await service.attachments.readSnapshot(pasted.id)).toEqual(pasted)
-    await expect(service.operate({ type: 'draft', ...identity, expectedRevision: drafted.revision, text: '', documents: [], attachments: [] })).rejects.toThrow('较新的草稿')
+    await expect(service.operate({ type: 'draft', ...identity, expectedRevision: drafted.revision, text: '', documents: [], attachments: [] })).rejects.toThrow('本条消息的草稿已在另一处更新')
   })
 })
 

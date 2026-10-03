@@ -1,5 +1,5 @@
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
-import { analyzeCourseAssetReferences } from '../../../shared/contracts/course-project-v9/assetReferences'
+import { visitProjectDynamicInstances } from '../../../shared/composition/dynamic'
 import type { HistoryResourceState } from '../../store/courseResourceState'
 import { readImageDimensions } from '../../project/assetManager'
 import { AuthoringToolFailure } from './executeAuthoringTool'
@@ -9,11 +9,13 @@ import { AuthoringToolFailure } from './executeAuthoringTool'
 export async function validateDynamicCandidateFallbackAssets(project: CourseProjectDocument,
   resources: HistoryResourceState, instanceIds: readonly string[], assetResources?: Readonly<Record<string, { url: string; byteLength: number }>>): Promise<void> {
   const targets = new Set(instanceIds)
-  const references = analyzeCourseAssetReferences(project, { componentPackages: resources.componentPackages }).graph
-  for (const [assetId, uses] of references) {
-    const fallback = uses.find(reference => (reference.kind === 'runtime-fallback' || reference.kind === 'component-fallback')
-      && targets.has(reference.layerItemId ?? reference.blockId ?? ''))
-    if (!fallback) continue
+  const fallbacks: { assetId: string; path: Array<string | number> }[] = []
+  visitProjectDynamicInstances(project, entry => {
+    if (!targets.has(entry.instanceId)) return
+    const assetId = entry.kind === 'runtime' ? entry.runtime.staticFallback?.assetId : entry.componentItem.staticFallbackAssetId
+    if (assetId) fallbacks.push({ assetId, path: [...entry.path, ...(entry.kind === 'runtime' ? ['staticFallback', 'assetId'] : ['staticFallbackAssetId'])] })
+  })
+  for (const { assetId, path } of fallbacks) {
     const entry = Object.entries(project.assets).find(([key, meta]) => key === assetId || meta.id === assetId)
     try {
       if (!entry || entry[1].kind !== 'image') throw new Error('后备素材不是工程图片')
@@ -30,7 +32,7 @@ export async function validateDynamicCandidateFallbackAssets(project: CourseProj
     } catch (error) {
       throw new AuthoringToolFailure([{ code: 'dynamic-fallback-image-invalid',
         message: `后备图片“${assetId}”不能完整解码：${error instanceof Error ? error.message : String(error)}`,
-        path: fallback.path.map(String) }])
+        path: path.map(String) }])
     }
   }
 }

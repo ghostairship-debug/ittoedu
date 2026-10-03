@@ -74,7 +74,7 @@ function completedCandidate(snapshot: DocumentSnapshot, intent: DynamicFallbackI
   if (image) {
     if (Object.hasOwn(model.project.assets, image.meta.id) || Object.hasOwn(model.resources.assets, image.meta.id)) throw new Error('静态图片编号冲突')
     const located = locateCourseLayer(model.project, intent.itemId)
-    if (!located || located.item.kind === 'native') throw new Error('截图目标已不存在')
+    if (!located || (located.item.kind !== 'runtime' && located.item.kind !== 'component')) throw new Error('程序截图目标已不存在')
     if (located.item.kind === 'runtime') {
       if (!located.item.runtime.staticFallback) throw new Error('Runtime 后备图已改变')
       located.item.runtime.staticFallback.assetId = image.meta.id

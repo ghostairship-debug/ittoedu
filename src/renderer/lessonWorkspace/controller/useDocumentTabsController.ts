@@ -5,13 +5,16 @@ import type { ContextualEditTarget } from '../../../shared/document/ports'
 import type { LessonDocumentEditorHandle } from '../../documentFiles/LessonDocumentEditor'
 import type { RecoverableDocumentFilePort } from '../../documentFiles/documentFileSession'
 import type { LessonWorkspace } from '../../../shared/lessonWorkspace'
+import type { MediaFileEditorHandle } from '../../documentFiles/media/MediaFileEditor'
+import type { MediaFileSnapshot, MediaFilesRequest } from '../../../shared/workbench/mediaFiles'
 
 export type LessonFileTab = {
   id: string
   documentId?: string
   path: string
   name: string
-  kind: 'document' | 'material' | 'course'
+  kind: 'document' | 'material' | 'course' | 'media'
+  mediaSnapshot?: MediaFileSnapshot
   dirty: boolean
   lesson: LessonWorkspace | null
 }
@@ -40,6 +43,9 @@ export interface DocumentTabsController {
   removeTab(path: string): void
   registerEditor(path: string, editor: LessonDocumentEditorHandle | null): void
   editorRef(path: string): (editor: LessonDocumentEditorHandle | null) => void
+  mediaEditorRef(id: string): (editor: MediaFileEditorHandle | null) => void
+  mediaFiles(request: MediaFilesRequest): Promise<MediaFileSnapshot>
+  updateMediaSnapshot(id: string, snapshot: MediaFileSnapshot): void
   updateDirty(path: string, dirty: boolean): void
   flushAll(): Promise<boolean>
   saveActiveDocument(): Promise<'course' | 'document' | 'none'>
@@ -53,9 +59,10 @@ export interface DocumentTabsController {
 }
 
 /** Owns only transient document-tab state and document-session lifecycles. */
-export function useDocumentTabsController({ documentPort, courseDocuments }: {
+export function useDocumentTabsController({ documentPort, courseDocuments, mediaFiles }: {
   courseDocuments?: CourseDocumentsPort
   documentPort: RecoverableDocumentFilePort
+  mediaFiles?(request: MediaFilesRequest): Promise<MediaFileSnapshot>
 }): DocumentTabsController {
   const [tabs, setTabs] = useState<LessonFileTab[]>([])
   const [activeTab, setActive] = useState('')
@@ -99,6 +106,14 @@ export function useDocumentTabsController({ documentPort, courseDocuments }: {
   const subscriptions = useRef(new Map<string, () => void>())
   const documents = useRef(new Map<string, LessonDocumentEditorHandle>())
   const editorRefs = useRef(new Map<string, (editor: LessonDocumentEditorHandle | null) => void>())
+  const mediaEditors = useRef(new Map<string, MediaFileEditorHandle>())
+  const mediaEditorRefs = useRef(new Map<string, (editor: MediaFileEditorHandle | null) => void>())
+  const mediaFilesRef = useRef(mediaFiles); mediaFilesRef.current = mediaFiles
+  const requestMediaFiles = async (request: MediaFilesRequest) => {
+    const api = mediaFilesRef.current ?? window.desktopAPI?.mediaFiles
+    if (!api) throw new Error('图片和 PDF 文件服务尚未连接')
+    return api(request)
+  }
   const [, updateSelection] = useState(0)
   function selectionChanged(path: string) { if (path === activeTab) updateSelection(value => value + 1) }
   async function sendContextualCommand(path: string, instruction: string, target: ContextualEditTarget) {
@@ -106,7 +121,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments }: {
     const documentId = editor?.session.documentId
     if (!documentId) throw new Error('当前文档尚未就绪')
     const snapshot = await workbenchSelection.prepare(documentId)
-    await workbenchSelection.request(captureMarkdownSelection(snapshot, target), instruction)
+    await workbenchSelection.request(captureMarkdownSelection(snapshot, target), instruction, true)
   }
 
   async function flushAll() {
@@ -114,9 +129,12 @@ export function useDocumentTabsController({ documentPort, courseDocuments }: {
     for (const [filename, editor] of [...documents.current]) {
       if (!(await editor.flush())) { setActiveTab(tabsRef.current.find(tab => tab.id === filename)?.id ?? filename); return false }
     }
+    for (const [id, editor] of [...mediaEditors.current]) {
+      if (!await editor.flush()) { setActiveTab(id); return false }
+    }
     // 标签仍标记未保存、注册表里却没有活编辑器时 flush 无从执行：必须按未保存拒绝切换，
     // 否则该标签会被静默移除、当前稿丢失（V02 冲突用例 :62 的红点即此分支缺失）。
-    const unregistered = tabs.find(tab => tab.kind === 'document' && tab.dirty && !documents.current.has(tab.id))
+    const unregistered = tabsRef.current.find(tab => tab.dirty && (tab.kind === 'document' && !documents.current.has(tab.id) || tab.kind === 'media' && !mediaEditors.current.has(tab.id)))
     if (unregistered) { setActiveTab(unregistered.id); return false }
     return true
   }
@@ -125,6 +143,12 @@ export function useDocumentTabsController({ documentPort, courseDocuments }: {
     if (!tab) return 'none'
     if (tab.kind === 'course') return 'course'
     if (tab.kind === 'material') return 'none'
+    if (tab.kind === 'media') {
+      const editor = mediaEditors.current.get(tab.id)
+      if (!editor) throw new Error('当前文件尚未就绪，请稍后重试保存')
+      await editor.flush()
+      return 'document'
+    }
     const editor = documents.current.get(tab.id)
     if (!editor) throw new Error('当前文档尚未就绪，请稍后重试保存')
     await editor.flush()
@@ -133,6 +157,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments }: {
   async function disposeDocuments() {
     for (const editor of documents.current.values()) editor.session.dispose()
     documents.current.clear()
+    mediaEditors.current.clear()
     for (const stop of subscriptions.current.values()) stop()
     subscriptions.current.clear()
     setTabs([])
@@ -148,6 +173,11 @@ export function useDocumentTabsController({ documentPort, courseDocuments }: {
     for (const [filename, editor] of [...documents.current]) {
       if (!(await editor.preserveDraft())) { setActiveTab(tabsRef.current.find(tab => tab.id === filename)?.id ?? filename); return false }
     }
+    for (const [id, editor] of [...mediaEditors.current]) {
+      if (!await editor.preserveDraft()) { setActiveTab(id); return false }
+    }
+    const unregistered = tabsRef.current.find(tab => tab.kind === 'media' && tab.dirty && !mediaEditors.current.has(tab.id))
+    if (unregistered) { setActiveTab(unregistered.id); return false }
     return true
   }
   async function openTab(tab: Omit<LessonFileTab, 'dirty' | 'id' | 'documentId'>) {
@@ -155,9 +185,10 @@ export function useDocumentTabsController({ documentPort, courseDocuments }: {
     const existing = tabsRef.current.find(item => tab.path && normalized(item.path) === normalized(tab.path))
     if (existing) { setActiveTab(existing.id); return }
     const snapshot = tab.kind === 'document' ? await documentPort.documents?.open(tab.path) : undefined
+    const mediaSnapshot = tab.kind === 'media' ? await requestMediaFiles({ type: 'media-file.open-path', path: tab.path }) : undefined
     if (tab.kind === 'document' && !snapshot) throw new Error('文档服务尚未连接')
-    const id = snapshot?.documentId ?? crypto.randomUUID()
-    setTabs(current => current.some(item => item.id === id) ? current : [...current, { ...tab, id, documentId: snapshot?.documentId, dirty: snapshot?.dirty ?? false }])
+    const id = snapshot?.documentId ?? (mediaSnapshot ? `media:${normalized(mediaSnapshot.binding.path)}` : crypto.randomUUID())
+    setTabs(current => current.some(item => item.id === id) ? current : [...current, { ...tab, path: mediaSnapshot?.binding.path ?? tab.path, id, documentId: snapshot?.documentId, mediaSnapshot, dirty: snapshot?.dirty ?? false }])
     if (ticket === navigation.current) setActive(id)
   }
   async function createMarkdown(name = '未命名文档') {
@@ -191,6 +222,10 @@ export function useDocumentTabsController({ documentPort, courseDocuments }: {
   async function closeTab(tab: LessonFileTab) {
     if (tab.kind === 'course') {
       if (!courseRef.current || !await courseRef.current.close(tab.id)) return false
+    } else if (tab.kind === 'media') {
+      const editor = mediaEditors.current.get(tab.id)
+      if (!editor && tab.dirty) return false
+      if (editor && !await editor.close()) { setActiveTab(tab.id); return false }
     } else {
       const editor = documents.current.get(tab.id)
       if (!editor && tab.kind === 'document') return false
@@ -200,6 +235,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments }: {
     return true
   }
   function removeTab(id: string) {
+    mediaEditors.current.delete(id)
     documents.current.delete(id); subscriptions.current.get(id)?.(); subscriptions.current.delete(id)
     const remaining = tabsRef.current.filter(item => item.id !== id)
     setTabs(remaining)
@@ -237,6 +273,17 @@ export function useDocumentTabsController({ documentPort, courseDocuments }: {
     }
     return callback
   }
+  function mediaEditorRef(id: string) {
+    let callback = mediaEditorRefs.current.get(id)
+    if (!callback) {
+      callback = editor => { if (editor) mediaEditors.current.set(id, editor); else mediaEditors.current.delete(id) }
+      mediaEditorRefs.current.set(id, callback)
+    }
+    return callback
+  }
+  function updateMediaSnapshot(id: string, snapshot: MediaFileSnapshot) {
+    setTabs(current => current.map(tab => tab.id === id ? { ...tab, mediaSnapshot: snapshot, path: snapshot.binding.path, name: snapshot.binding.path.split(/[\\/]/).pop() ?? tab.name, dirty: false } : tab))
+  }
   function updateDirty(path: string, dirty: boolean) {
     setTabs(current => current.some(tab => tab.id === path && tab.dirty !== dirty)
       ? current.map(tab => tab.id === path ? { ...tab, dirty } : tab) : current)
@@ -261,6 +308,9 @@ export function useDocumentTabsController({ documentPort, courseDocuments }: {
         event.stopPropagation()
         const editor = documents.current.get(tab.id)
         if (editor) void (event.shiftKey ? editor.saveAs() : editor.flush())
+      } else if (key === 's' && tab.kind === 'media') {
+        event.preventDefault(); event.stopPropagation()
+        void mediaEditors.current.get(tab.id)?.flush()
       }
     }
     window.addEventListener('keydown', keydown, true)
@@ -271,9 +321,12 @@ export function useDocumentTabsController({ documentPort, courseDocuments }: {
       if (documentIds && !documentIds.includes(editor.session.documentId ?? '')) continue
       if (!await editor.session.drain()) return false
     }
+    if (!documentIds) for (const [id, editor] of [...mediaEditors.current]) {
+      if (!await editor.drain()) { setActiveTab(id); return false }
+    }
     return true
   }
-  return { tabs, activeTab, isCourseActive: tabs.some(tab => tab.id === activeTab && tab.kind === 'course'), createMarkdown, setActiveTab, focusDocument, openTab, closeTab, removeTab, registerEditor, editorRef, updateDirty, flushAll, saveActiveDocument, drainAll, preserveAll, closeAll, disposeDocuments, activeDocumentTarget, selectionChanged, sendContextualCommand }
+  return { tabs, activeTab, isCourseActive: tabs.some(tab => tab.id === activeTab && tab.kind === 'course'), createMarkdown, setActiveTab, focusDocument, openTab, closeTab, removeTab, registerEditor, editorRef, mediaEditorRef, mediaFiles: requestMediaFiles, updateMediaSnapshot, updateDirty, flushAll, saveActiveDocument, drainAll, preserveAll, closeAll, disposeDocuments, activeDocumentTarget, selectionChanged, sendContextualCommand }
 }
 
 function normalized(value: string) { return value.replace(/\\/g, '/').toLowerCase() }

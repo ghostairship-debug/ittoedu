@@ -195,9 +195,7 @@ export function buildSlideAuthoringSnapshot(
 }
 
 function slideLayerCarrier(item: LayerItem): AuthoringCarrier {
-  if (item.kind === 'runtime') return 'runtime'
-  if (item.kind === 'component') return 'component'
-  return 'native'
+  return item.kind
 }
 
 function defaultSlideAuthoringField(item: LayerItem): string {

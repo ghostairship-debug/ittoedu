@@ -90,6 +90,8 @@ import {
   type PublishedSurfaceCaptureLayer,
 } from '../publishedCapture'
 import type { SurfaceCapture, SurfaceCaptureRequest } from '../SurfaceHost'
+import { mountWebComposition, type WebCompositionMountHandle } from '../../composition/mountWebComposition'
+import { createPublishedSurfaceRuntimeSession } from '../runtime/publishedSurfaceRuntimeMount'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 const DEFAULT_PATH_COLOR = '#64748b'
@@ -158,6 +160,7 @@ interface SpatialHostRecord {
   wrapper: HTMLElement | SVGGElement
   controllerDom: TeacherControllerComponentHost | null
   componentHandle: PublishedComponentMountHandle | null
+  compositionHandle: WebCompositionMountHandle | null
   componentEffects: PublishedCarrierSideEffects | null
   deferredComponentMount: (() => void) | null
 }
@@ -204,7 +207,7 @@ function layerCenter(item: PublishedLayerItem): { x: number; y: number } {
 
 function createWorldItem(
   dom: Document,
-  item: PublishedLayerItem,
+  item: Exclude<PublishedLayerItem, { kind: 'composition' }>,
   resolveAsset: (assetId: string) => string | undefined,
   options?: {
     projectId?: string
@@ -413,7 +416,7 @@ function paintSpatialStaticDynamicFallback(
 
 function createWorldStaticHtmlItem(
   dom: Document,
-  item: PublishedLayerItem,
+  item: Exclude<PublishedLayerItem, { kind: 'composition' }>,
   resolveAsset: (assetId: string) => string | undefined,
 ): HTMLElement {
   const wrapper = dom.createElement('div')
@@ -452,6 +455,7 @@ function publishedInteractionOwnership(
 ): PublishedInteractionNodeOwnership {
   if (item.kind === 'component') return 'component'
   if (item.kind === 'runtime') return 'runtime'
+  if (item.kind === 'composition') return 'composition'
   if (item.content.nativeType === 'video') return 'media'
   
   return 'native'
@@ -473,7 +477,7 @@ function spatialGestureOwner(item: PublishedLayerItem): SpatialGestureOwner | nu
 
 function createViewportHud(
   dom: Document,
-  item: PublishedLayerItem,
+  item: Exclude<PublishedLayerItem, { kind: 'composition' }>,
   options?: {
     projectId?: string
     components?: Record<string, PublishedComponentPackageSource>
@@ -590,6 +594,7 @@ export class SpatialSurfaceHost {
   #interactionNodes = new Map<string, PublishedInteractionNodeHandle>()
   #active = false
   readonly #carrierSideEffects: PublishedCarrierSideEffectGate
+  readonly #compositionSession = createPublishedSurfaceRuntimeSession()
   #preparedRuntimeActivation: { locationId: string; forced: boolean } | null = null
   #pendingRuntimeActivation: { locationId: string; forced: boolean } | null = null
 
@@ -641,7 +646,7 @@ export class SpatialSurfaceHost {
     this.#globalInteractionVisibilityState = options.globalInteractionVisibilityState
       ?? new PublishedInteractionVisibilityState()
     this.#carrierSideEffects = new PublishedCarrierSideEffectGate({
-      courseState: options.courseState,
+      courseState: options.courseState ?? this.#compositionSession.courseState,
       runtimeActions: options.runtimeActions,
       componentActions: options.componentActions,
     })
@@ -898,6 +903,8 @@ export class SpatialSurfaceHost {
     for (const record of this.#records.values()) {
       record.componentHandle?.setVisible(false)
       record.componentHandle?.suspend()
+      record.compositionHandle?.setVisible(false)
+      record.compositionHandle?.suspend()
     }
     if (this.#root) this.#root.hidden = true
   }
@@ -925,8 +932,10 @@ export class SpatialSurfaceHost {
       record.componentEffects?.retire()
       record.controllerDom?.destroy()
       record.componentHandle?.destroy()
+      record.compositionHandle?.destroy()
     }
     this.#records.clear()
+    this.#compositionSession.destroy()
     this.#root?.remove()
     this.#root = null
     this.#svg = null
@@ -1056,8 +1065,6 @@ export class SpatialSurfaceHost {
     staging.appendChild(decorations)
     const restoreRecords: Array<{
       wrapper: HTMLElement
-      parent: Node
-      nextSibling: ChildNode | null
       style: string
     }> = []
     const layers: PublishedSurfaceCaptureLayer[] = [{
@@ -1085,11 +1092,10 @@ export class SpatialSurfaceHost {
         if (!parent) throw new Error(`Spatial 静态捕获图层“${record.entry.item.layerItemId}”未挂载`)
         restoreRecords.push({
           wrapper,
-          parent,
-          nextSibling: wrapper.nextSibling,
           style: wrapper.getAttribute('style') ?? '',
         })
-        staging.appendChild(wrapper)
+        // Reparenting an iframe destroys its browsing context. Capture each live
+        // wrapper in place; the painter normalizes its measured ancestor scale.
         const { item, coordinateSpace } = record.entry
         Object.assign(wrapper.style, {
           position: 'absolute',
@@ -1129,7 +1135,6 @@ export class SpatialSurfaceHost {
     } finally {
       for (const record of restoreRecords.reverse()) {
         record.wrapper.setAttribute('style', record.style)
-        record.parent.insertBefore(record.wrapper, record.nextSibling)
       }
       staging.remove()
       if (resized) {
@@ -1158,6 +1163,8 @@ export class SpatialSurfaceHost {
       if (mount) mount()
       record.componentHandle?.setVisible(true)
       record.componentHandle?.resume()
+      record.compositionHandle?.setVisible(true)
+      record.compositionHandle?.resume()
     }
   }
 
@@ -1182,6 +1189,7 @@ export class SpatialSurfaceHost {
       record.componentEffects?.retire()
       record.controllerDom?.destroy()
       record.componentHandle?.destroy()
+      record.compositionHandle?.destroy()
       record.wrapper.remove()
     }
     this.#records.clear()
@@ -1289,6 +1297,7 @@ export class SpatialSurfaceHost {
       record.componentEffects?.retire()
       record.controllerDom?.destroy()
       record.componentHandle?.destroy()
+      record.compositionHandle?.destroy()
       record.wrapper.remove()
       this.#records.delete(id)
     }
@@ -1428,8 +1437,9 @@ export class SpatialSurfaceHost {
     const viewport = isSpatialViewportPlaybackItem(entry.source, entry.item)
     let record: SpatialHostRecord | null = null
     let componentHandle: PublishedComponentMountHandle | null = null
+    let compositionHandle: WebCompositionMountHandle | null = null
     let deferredComponentMount: (() => void) | null = null
-    const componentEffects = entry.item.kind === 'component'
+    const componentEffects = entry.item.kind === 'component' || entry.item.kind === 'composition'
       ? this.#carrierSideEffects.createScope(() => (
           record === null
           || this.#records.get(entry.item.layerItemId) === record
@@ -1439,7 +1449,7 @@ export class SpatialSurfaceHost {
       if (record) record.componentHandle = handle
       else componentHandle = handle
     }
-    const deferComponent = !this.#active && componentEffects
+    const deferComponent = !this.#active && !this.#options.staticCapture && componentEffects
       ? (mount: () => void) => {
           const deferred = () => {
             if (componentEffects.active()) mount()
@@ -1457,10 +1467,46 @@ export class SpatialSurfaceHost {
         wrapper,
         controllerDom,
         componentHandle,
+        compositionHandle,
         componentEffects,
         deferredComponentMount,
       }
       return record
+    }
+    if (entry.item.kind === 'composition') {
+      const item = entry.item
+      // Both coordinate spaces retain their existing host placement and camera transform.
+      const wrapper = dom.createElement('div')
+      wrapper.className = viewport ? 'spatial-viewport-item' : 'spatial-world-html-item'
+      wrapper.dataset.spatialLayerRecord = 'true'
+      wrapper.dataset.layerItemId = item.layerItemId
+      wrapper.dataset.layerKind = 'composition'
+      wrapper.dataset.layerSource = entry.source
+      wrapper.dataset.coordinateSpace = viewport ? 'viewport' : 'world'
+      if (viewport) wrapper.dataset.playbackBounds = 'true'
+      Object.assign(wrapper.style, { position: 'absolute', boxSizing: 'border-box', overflow: 'hidden', transformOrigin: 'center center' })
+      const mount = () => {
+        const handle = mountWebComposition(wrapper, {
+          instanceId: item.layerItemId,
+          content: item.content,
+          width: item.frame.width,
+          height: item.frame.height,
+          mode: this.#options.staticCapture ? 'capture' : 'playback',
+          visible: this.#active || this.#options.staticCapture === true,
+          resolveAsset: this.#resolveAsset,
+          session: this.#compositionSession,
+          courseState: componentEffects?.courseState,
+          actions: componentEffects?.runtimeActions,
+          projectId: this.#options.projectId,
+          components: this.#components,
+          componentActions: componentEffects?.componentActions,
+        })
+        if (record) record.compositionHandle = handle
+        else compositionHandle = handle
+      }
+      if (deferComponent) deferComponent(mount)
+      else mount()
+      return finish(wrapper, null)
     }
     if (viewport) {
       const wrapper = dom.createElement('div')
@@ -1589,6 +1635,7 @@ export class SpatialSurfaceHost {
     html.style.top = `${item.frame.y + offset.dy}px`
     html.style.width = `${item.frame.width}px`
     html.style.height = `${item.frame.height}px`
+    record.compositionHandle?.resize(item.frame.width, item.frame.height)
     html.style.opacity = String(item.opacity)
     html.style.transform = item.rotation === 0 ? '' : `rotate(${item.rotation}deg)`
     html.style.zIndex = String(record.entry.stackOrder)

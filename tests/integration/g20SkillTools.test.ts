@@ -17,6 +17,7 @@ import { OpenAIChatProvider } from '../../src/main/workbench/providers/OpenAICha
 import { McpDocumentServer, type ExternalConnection } from '../../src/main/workbench/external/McpDocumentServer'
 import type { ExecutionStart } from '../../src/shared/workbench/execution'
 import type { ModelSelection } from '../../src/shared/workbench/modelProvider'
+import { courseAgentMethodSkills } from '../../src/shared/courseAgentSkills'
 
 const cleanups: (() => Promise<unknown>)[] = []
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
@@ -127,7 +128,7 @@ describe('M24-T01 bundled Skill through real execution and MCP', () => {
       expect(tool.function.description).not.toContain(files[reference])
       expect(tool.function.parameters).toEqual(z.toJSONSchema(skillReadInputSchema))
     }
-    expect(bundledSkills.manifest.skills).toHaveLength(2)
+    expect(bundledSkills.manifest.skills).toHaveLength(courseAgentMethodSkills.length)
     for (const entry of bundledSkills.manifest.skills)
       expect(model.requests[0].tools.find((item: any) => item.function.parameters.properties.skill).function.description)
         .toContain(`${entry.name}：${entry.description}`)

@@ -1,8 +1,8 @@
 import { z } from 'zod'
 import type { ModelChatMessage, ModelToolDefinition } from '../../../shared/workbench/modelProvider'
 
-export const contextReadSchema = z.object({ sourceId: z.string().min(1).max(512), offset: z.number().int().nonnegative().default(0),
-  maxChars: z.number().int().min(1).max(64_000).default(12_000), imageIndexes: z.array(z.number().int().nonnegative()).optional() }).strict()
+export const contextReadSchema = z.object({ sourceId: z.string().min(1), offset: z.number().int().nonnegative().default(0),
+  maxChars: z.number().int().min(1).default(12_000), imageIndexes: z.array(z.number().int().nonnegative()).optional() }).strict()
 export const contextReadTool: ModelToolDefinition = { name: 'context.read',
   description: '按 sourceId 重读宿主提供的运行上下文存档。文本支持 offset/maxChars；先列出图片索引，再显式选 imageIndexes 将原图送入本轮模型。存档不是当前文档，也不恢复旧工具或写权限。',
   inputSchema: z.toJSONSchema(contextReadSchema) as ModelToolDefinition['inputSchema'] }

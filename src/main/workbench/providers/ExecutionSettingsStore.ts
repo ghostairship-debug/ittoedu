@@ -8,32 +8,35 @@ import { bodyStreamingIdentity, bodyStreamingRecord, type BodyStreamingObservati
 import { modelCapabilityIdentity, modelCapabilityRecord, probedModelCapabilities,
   type ModelCapabilityProbeResult, type ModelCapabilityRecord } from '../../../shared/workbench/modelCapabilities'
 import {
-  executionRoles, type ExecutionConnectionView, type ExecutionProfile, type ExecutionRole,
+  executionRoles, type ExecutionConnectionView, type ExecutionModelFavorite, type ExecutionProfile, type ExecutionRole,
   type ExecutionSelectionSnapshot, type ExecutionSettingsView, type SaveExecutionConnection, type SaveExecutionProfile,
 } from '../../../shared/workbench/executionSettings'
 import type { CredentialEncryptionPort } from './providerCredentials'
 import type { ChatGPTOAuthCredential, OAuthCredentialTarget, OAuthSecureEntry } from './ChatGPTOAuthClient'
 import type { DiscoveredModels } from '../../../shared/workbench/executionSettingsDesktop'
 import { supportsChatGPTOAuthImages, supportsOpenAIImages } from '../../../shared/workbench/images'
+import { modelKnowledgeEntrySchema } from '../../../shared/workbench/modelKnowledge'
+import { resolveModelProtocol } from '../../../shared/workbench/modelRouting'
+import { ModelKnowledgeService } from './ModelKnowledgeService'
 
-const identity = z.string().trim().min(1).max(512)
+const identity = z.string().trim().min(1)
 const capability = z.enum(['supported', 'unsupported', 'unknown'])
 const json: z.ZodType<ModelJson> = z.lazy(() => z.union([z.null(), z.boolean(), z.number().finite(), z.string(), z.array(json), z.record(z.string(), json)]))
 const parameters = z.record(z.string(), json)
-const configSchema = z.object({ provider: identity, protocol: z.enum(['openai-chat', 'chatgpt-responses']), baseURL: z.string().url(), accountId: identity,
+const configSchema = z.object({ provider: identity, protocol: z.enum(['openai-chat', 'openai-responses', 'anthropic-messages', 'chatgpt-responses']), baseURL: z.string().url(), accountId: identity,
   imageProtocol: z.enum(['openai-images']).nullable().default(null),
   authKind: z.enum(['api-key', 'oauth']), billing: z.object({ kind: z.enum(['metered', 'token-plan', 'subscription', 'prepaid', 'unknown']) }).strict(),
   capabilities: z.object({ tools: capability, vision: capability, stream: capability, reasoning: capability }).strict(),
 }).strict()
 const connectionSchema = configSchema.omit({ authKind: true }).extend({ id: identity, revision: z.number().int().positive(),
   auth: z.object({ kind: z.enum(['api-key', 'oauth']), credentialRef: identity }).strict() }).strict()
-const selectionSchema = z.object({ connectionId: identity, model: identity, parameters: parameters.optional() }).strict()
+const selectionSchema = z.object({ connectionId: identity, model: identity, parameters: parameters.optional(), capabilityModel: identity.optional() }).strict()
 const rolesSchema = z.object({ conversation: selectionSchema.nullable(), vision: selectionSchema.nullable(),
   imageGenerate: selectionSchema.nullable(), imageEdit: selectionSchema.nullable() }).strict()
 const profileSchema = z.object({ revision: z.number().int().nonnegative(), updatedAt: z.string().datetime(), roles: rolesSchema }).strict()
 const observationSchema = z.object({ requestId: identity, operationId: identity, observedAt: z.number().finite().nonnegative(), result: z.enum(['progressive', 'operation-only']) }).strict()
 const bodyStreamingSchema = z.object({ connectionId: identity, connectionRevision: z.number().int().positive(), model: identity,
-  parametersKey: z.string().max(65536), latest: observationSchema, progressive: observationSchema.optional() }).strict()
+  parametersKey: z.string(), latest: observationSchema, progressive: observationSchema.optional() }).strict()
 const capabilityFactSchema = z.object({ status: z.enum(['supported', 'unsupported']), observedAt: z.number().finite().nonnegative(),
   source: z.enum(['probe', 'request']), actualModel: identity.optional() }).strict()
 const capabilityFactsSchema = z.object({ tools: capabilityFactSchema.optional(), vision: capabilityFactSchema.optional(),
@@ -44,18 +47,21 @@ const capabilityProbeSchema = z.object({ observedAt: z.number().finite().nonnega
   .refine(value => new Set(value).size === value.length), requestCount: z.number().int().positive().max(probedModelCapabilities.length),
   outcomes: z.array(probeOutcomeSchema).min(1).max(probedModelCapabilities.length), facts: capabilityFactsSchema }).strict()
 const capabilityRecordSchema = z.object({ connectionId: identity, connectionRevision: z.number().int().positive(), model: identity,
-  parametersKey: z.string().max(65536), facts: capabilityFactsSchema, lastProbe: capabilityProbeSchema.omit({ facts: true }) }).strict()
+  parametersKey: z.string(), facts: capabilityFactsSchema, lastProbe: capabilityProbeSchema.omit({ facts: true }) }).strict()
 const reasoningEffortSchema = z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
-const discoveredModelSchema = z.object({ id: identity, displayName: z.string().min(1).max(128).optional(),
-  description: z.string().min(1).max(256).optional(), reasoningEfforts: z.array(z.object({ effort: reasoningEffortSchema,
-    description: z.string().min(1).max(128).optional() }).strict()).max(reasoningEffortSchema.options.length).optional(),
-  defaultReasoningEffort: reasoningEffortSchema.optional() }).strict()
+const discoveredModelSchema = z.object({ id: identity, displayName: z.string().min(1).optional(),
+  description: z.string().min(1).optional(), reasoningEfforts: z.array(z.object({ effort: reasoningEffortSchema,
+    description: z.string().min(1).optional() }).strict()).max(reasoningEffortSchema.options.length).optional(),
+  defaultReasoningEffort: reasoningEffortSchema.optional(), metadata: modelKnowledgeEntrySchema.optional(),
+  metadataSource: z.enum(['directory', 'models.dev', 'documented']).optional() }).strict()
 const modelCatalogSchema = z.object({ connectionId: identity, connectionRevision: z.number().int().positive(),
-  checkedAt: z.string().datetime(), models: z.array(discoveredModelSchema).max(1024) }).strict()
+  checkedAt: z.string().datetime(), models: z.array(discoveredModelSchema) }).strict()
+const modelFavoriteSchema = z.object({ connectionId: identity, model: identity }).strict()
 const stateSchema = z.object({ schemaVersion: z.literal(1), profile: profileSchema,
+  modelFavorites: z.array(modelFavoriteSchema).default([]),
   bodyStreamingObservations: z.array(bodyStreamingSchema).default([]),
   capabilityRecords: z.array(capabilityRecordSchema).default([]),
-  modelCatalogs: z.array(modelCatalogSchema).max(8).default([]),
+  modelCatalogs: z.array(modelCatalogSchema).default([]),
   revisions: z.array(z.object({ connection: connectionSchema, encrypted: z.string().min(1).optional(), oauthSourceRef: identity.optional(), revoked: z.boolean(), credentialVersion: z.number().int().nonnegative().default(0) }).strict()),
 }).strict()
 type StoredState = z.infer<typeof stateSchema>
@@ -75,6 +81,7 @@ export interface ExecutionSettingsStoreOptions {
   encryption: CredentialEncryptionPort
   createId?: () => string
   now?: () => Date
+  modelKnowledge?: Pick<ModelKnowledgeService, 'knownModels' | 'enrich' | 'find'>
 }
 function freeze<T>(value: T): T {
   if (value && typeof value === 'object' && !Object.isFrozen(value)) {
@@ -110,11 +117,13 @@ function sameConnectionIdentity(stored: ModelConnectionSnapshot, supplied: Reado
 
 /** One durable settings owner. Connection history permits exact, frozen request credential resolution. */
 export class ExecutionSettingsStore {
+  readonly modelKnowledge: Pick<ModelKnowledgeService, 'knownModels' | 'enrich' | 'find'>
   private readonly filename: string
   private readonly queueKey: string
   private readonly createId: () => string
   private readonly now: () => Date
   constructor(private readonly options: ExecutionSettingsStoreOptions) {
+    this.modelKnowledge = options.modelKnowledge ?? new ModelKnowledgeService({ directory: path.join(options.directory, 'model-knowledge') })
     this.filename = path.join(path.resolve(options.directory), 'execution-settings-v1.json')
     this.queueKey = process.platform === 'win32' ? this.filename.toLowerCase() : this.filename
     this.createId = options.createId ?? randomUUID
@@ -138,7 +147,7 @@ export class ExecutionSettingsStore {
     try { bytes = await fs.readFile(this.filename, 'utf8') }
     catch (error) {
       if (!isMissing(error)) throw new ExecutionSettingsError('settings-read-failed', '连接配置无法读取，未创建替代配置。')
-      return { schemaVersion: 1, revisions: [], bodyStreamingObservations: [], capabilityRecords: [], modelCatalogs: [], profile: { revision: 0, updatedAt: new Date(0).toISOString(),
+      return { schemaVersion: 1, revisions: [], modelFavorites: [], bodyStreamingObservations: [], capabilityRecords: [], modelCatalogs: [], profile: { revision: 0, updatedAt: new Date(0).toISOString(),
         roles: { conversation: null, vision: null, imageGenerate: null, imageEdit: null } } }
     }
     try {
@@ -201,7 +210,19 @@ export class ExecutionSettingsStore {
       const state = await this.load(), latest = new Map<string, StoredRevision>()
       for (const entry of state.revisions) latest.set(entry.connection.id, entry)
       return { connections: [...latest.values()].map(entry => expose(entry, state)), profile: structuredClone(state.profile), bodyStreamingObservations: structuredClone(state.bodyStreamingObservations),
-        capabilityRecords: structuredClone(state.capabilityRecords), secureStorageAvailable: await this.available() }
+        capabilityRecords: structuredClone(state.capabilityRecords), modelFavorites: structuredClone(state.modelFavorites), secureStorageAvailable: await this.available() }
+    })
+  }
+  setModelFavorite(input: ExecutionModelFavorite & { favorite: boolean }): Promise<ExecutionModelFavorite[]> {
+    const supplied = structuredClone(input)
+    return this.serial(async () => {
+      const { connectionId, model, favorite } = modelFavoriteSchema.extend({ favorite: z.boolean() }).parse(supplied)
+      const state = await this.load()
+      const found = state.modelFavorites.some(value => value.connectionId === connectionId && value.model === model)
+      if (favorite && !found) state.modelFavorites.push({ connectionId, model })
+      else if (!favorite && found) state.modelFavorites = state.modelFavorites.filter(value => value.connectionId !== connectionId || value.model !== model)
+      if (favorite !== found) await this.persist(state)
+      return structuredClone(state.modelFavorites)
     })
   }
   cachedModelCatalog(id: string, revision: number): Promise<DiscoveredModels | undefined> {
@@ -214,13 +235,13 @@ export class ExecutionSettingsStore {
   }
   recordModelCatalog(catalog: DiscoveredModels): Promise<void> {
     const parsed = modelCatalogSchema.parse({ connectionId: catalog.connectionId, connectionRevision: catalog.connectionRevision,
-      checkedAt: catalog.checkedAt, models: catalog.models.slice(0, 1024) })
+      checkedAt: catalog.checkedAt, models: catalog.models })
     return this.serial(async () => {
       const state = await this.load(), entry = this.current(state, parsed.connectionId)
       if (!entry || entry.connection.revision !== parsed.connectionRevision || !hasCredential(state, entry))
         throw new ExecutionSettingsError('stale-discovery', '读取期间连接已改变或撤销，请重新读取。')
       state.modelCatalogs = [...state.modelCatalogs.filter(value => value.connectionId !== parsed.connectionId
-        || value.connectionRevision !== parsed.connectionRevision), parsed].slice(-8)
+        || value.connectionRevision !== parsed.connectionRevision), parsed]
       await this.persist(state)
     })
   }
@@ -238,7 +259,7 @@ export class ExecutionSettingsStore {
       }
       const next = bodyStreamingSchema.parse({ ...bodyStreamingIdentity(frozen), latest: previous && previous.latest.observedAt > evidence.observedAt ? previous.latest : evidence,
         ...(evidence.result === 'progressive' ? { progressive: evidence } : previous?.progressive ? { progressive: previous.progressive } : {}) })
-      state.bodyStreamingObservations = [...state.bodyStreamingObservations.filter(value => value !== previous), next].slice(-1000)
+      state.bodyStreamingObservations = [...state.bodyStreamingObservations.filter(value => value !== previous), next]
       await this.persist(state)
     })
   }
@@ -254,7 +275,7 @@ export class ExecutionSettingsStore {
       const previous = modelCapabilityRecord(state.capabilityRecords, frozen)
       const record = capabilityRecordSchema.parse({ ...modelCapabilityIdentity(frozen), facts: { ...previous?.facts, ...evidence.facts },
         lastProbe: { observedAt: evidence.observedAt, checks: evidence.checks, requestCount: evidence.requestCount, outcomes: evidence.outcomes } })
-      state.capabilityRecords = [...state.capabilityRecords.filter(value => value !== previous), record].slice(-1000)
+      state.capabilityRecords = [...state.capabilityRecords.filter(value => value !== previous), record]
       await this.persist(state)
       return structuredClone(record)
     })
@@ -354,7 +375,16 @@ export class ExecutionSettingsStore {
       const entry = this.current(state, selected.connectionId)
       if (!entry || !hasCredential(state, entry)) throw new ExecutionSettingsError('credential-unavailable', '此角色的连接尚未接通或已撤销。')
       await this.requireEncryption()
-      const selection: ModelSelection = { connection: structuredClone(entry.connection), model: selected.model, ...(selected.parameters ? { parameters: selected.parameters } : {}) }
+      const catalogModel = state.modelCatalogs.find(catalog => catalog.connectionId === entry.connection.id
+        && catalog.connectionRevision === entry.connection.revision)?.models.find(model => model.id === selected.model)
+      const metadata = selected.capabilityModel ? await this.modelKnowledge.find(entry.connection, selected.capabilityModel, true)
+        : (await this.modelKnowledge.enrich(entry.connection, [catalogModel ?? { id: selected.model }]))[0]?.metadata
+      const selection: ModelSelection = { connection: structuredClone(entry.connection), model: selected.model,
+        apiProtocol: resolveModelProtocol(entry.connection, metadata?.id ?? selected.capabilityModel ?? selected.model),
+        ...(selected.capabilityModel ? { capabilityModel: selected.capabilityModel } : {}),
+        ...(metadata?.contextWindow ? { contextWindow: metadata.contextWindow } : {}),
+        ...(metadata?.outputLimit ? { outputLimit: metadata.outputLimit } : {}),
+        ...(selected.parameters ? { parameters: selected.parameters } : {}) }
       const verified = modelCapabilityRecord(state.capabilityRecords, selection)
       for (const [name, fact] of Object.entries(verified?.facts ?? {})) selection.connection.capabilities[name as keyof ModelConnectionSnapshot['capabilities']] = fact.status
       return freeze(structuredClone({ role, profileRevision: state.profile.revision, profileUpdatedAt: state.profile.updatedAt, ...selection }))

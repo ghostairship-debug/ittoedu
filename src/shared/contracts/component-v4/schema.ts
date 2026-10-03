@@ -310,14 +310,22 @@ function validateRecursiveContentManifest(
   })
 }
 
-export const componentManifestV4Schema = configurableManifestSchema.extend({
+const componentManifestV4BaseSchema = configurableManifestSchema.extend({
   schemaVersion: z.literal(4),
   runtimeApiVersion: z.literal(4),
   supportedScopes: supportedScopesSchema,
   renderMode: z.enum(COMPONENT_RENDER_MODES),
-}).superRefine((manifest, context) => {
+})
+
+export const componentManifestV4Schema = z.union([
+  componentManifestV4BaseSchema.extend({ content: z.never().optional() }),
+  componentManifestV4BaseSchema.extend({ content: z.object({ kind: z.literal('composition') }).strict() }),
+]).superRefine((manifest, context) => {
   validateConfigurableManifest(manifest, context)
   validateRecursiveContentManifest(manifest, context)
+  if (manifest.content?.kind === 'composition' && !manifest.entry.toLowerCase().endsWith('.json')) {
+    context.addIssue({ code: 'custom', path: ['entry'], message: '结构片段入口必须指向 JSON 内容文件' })
+  }
 })
 
 export const componentManifestSchema = componentManifestV4Schema

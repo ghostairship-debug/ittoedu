@@ -20,16 +20,18 @@ export interface SearchProviderPage {
   providerRequestId?: string
   /** Provider-reported charge only; absent remains unknown. */
   charge?: { amount: number; currency: string }
+  /** Provider execution view: which authorized connection/model actually ran, with provider-reported usage. */
+  execution?: { connectionId: string; model: string; billingKind?: string; inputTokens?: number; outputTokens?: number }
 }
 
 /** Credentials and billing live in the existing Connection owner, not tool output. */
 export interface SearchProviderPort {
-  search(input: { query: string; limit: number; cursor?: string; signal: AbortSignal }): Promise<SearchProviderPage>
+  search(input: { runId?: string; query: string; limit: number; cursor?: string; signal: AbortSignal }): Promise<SearchProviderPage>
 }
 
 export type WebSearchResult =
   | { status: 'results'; query: string; searchedAt: string; provider: string; results: readonly WebSearchHit[]; nextCursor?: string;
-      providerRequestId?: string; charge?: SearchProviderPage['charge'] }
+      providerRequestId?: string; charge?: SearchProviderPage['charge']; execution?: SearchProviderPage['execution'] }
   | { status: 'not-configured' | 'rejected' | 'failed'; reason: string }
 
 export interface WebSource {
@@ -106,35 +108,42 @@ export class WebResearchService {
 
   async search(input: { runId: string; query: string; limit?: number; cursor?: string; signal?: AbortSignal }): Promise<WebSearchResult> {
     const run = this.requireRun(input.runId)
-    if (!input.query?.trim() || input.query.length > 2000 || input.cursor && input.cursor.length > 2048)
+    if (!input.query?.trim())
       return { status: 'rejected', reason: '检索词或分页游标无效' }
     const limit = input.limit ?? 5
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) return { status: 'rejected', reason: '单页结果数量须为 1–20' }
+    if (!Number.isSafeInteger(limit) || limit < 1) return { status: 'rejected', reason: '单页结果数量须为正整数' }
     if (run.stopped) return { status: 'rejected', reason: '任务已停止' }
     const provider = this.options.searchProvider
     if (!provider) return { status: 'not-configured', reason: '未配置已授权且可用的联网搜索连接' }
     try {
-      const page = await this.call(run, input.signal, signal => provider.search({ query: input.query.trim(), limit,
+      const page = await this.call(run, input.signal, signal => provider.search({ runId: input.runId, query: input.query.trim(), limit,
         ...(input.cursor ? { cursor: input.cursor } : {}), signal }))
       const results = page.results.slice(0, limit).flatMap(result => {
         try {
           const url = parsePublicUrl(result.url).href
-          if (!result.title?.trim() || !result.snippet || result.snippet.length > 20_000) return []
-          return [{ title: result.title, url, snippet: result.snippet,
+          if (!result.title?.trim()) return []
+          const snippet = result.snippet ?? ''
+          return [{ title: result.title, url, snippet,
             ...(result.publishedAt && !Number.isNaN(Date.parse(result.publishedAt)) ? { publishedAt: result.publishedAt } : {}) }]
         } catch { return [] }
       })
       return { status: 'results', query: input.query.trim(), searchedAt: this.now().toISOString(), provider: page.provider,
         results, ...(page.nextCursor ? { nextCursor: page.nextCursor } : {}),
-        ...(page.providerRequestId ? { providerRequestId: page.providerRequestId } : {}), ...(page.charge ? { charge: page.charge } : {}) }
-    } catch (cause) { return { status: 'failed', reason: cause instanceof Error ? cause.message : '联网搜索未完成；不会自动重发' } }
+        ...(page.providerRequestId ? { providerRequestId: page.providerRequestId } : {}),
+        ...(page.execution ? { execution: page.execution } : {}),
+        ...(page.charge ? { charge: page.charge } : {}) }
+    } catch (cause) {
+      const known = cause instanceof Error && 'status' in cause ? (cause as { status?: string }).status : undefined
+      const status: 'not-configured' | 'rejected' | 'failed' = known === 'not-configured' || known === 'rejected' ? known : 'failed'
+      return { status, reason: cause instanceof Error ? cause.message : '联网搜索未完成；不会自动重发' }
+    }
   }
 
   async open(input: { runId: string; url?: string; sourceId?: string; version?: string; offset?: number; limit?: number;
     signal?: AbortSignal }): Promise<WebOpenResult> {
     const run = this.requireRun(input.runId)
     const offset = input.offset ?? 0, limit = input.limit ?? 7000
-    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 20_000)
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1)
       return { status: 'rejected', reason: '正文读取范围无效' }
     if (run.stopped) return { status: 'rejected', reason: '任务已停止' }
     let stored = input.sourceId ? run.sources.get(input.sourceId) : undefined
@@ -143,7 +152,7 @@ export class WebResearchService {
     if (!stored) {
       if (!input.url) return { status: 'rejected', reason: '需要网页 URL 或本任务来源句柄' }
       try {
-        const response: PublicHttpResponse = await this.call(run, input.signal, signal => this.fetch(input.url!, { signal, maxBytes: 16 * 1024 * 1024, timeoutMs: 30_000 }))
+        const response: PublicHttpResponse = await this.call(run, input.signal, signal => this.fetch(input.url!, { signal }))
         const url = response.url
         if (response.contentType === 'application/pdf' || response.contentType === 'application/octet-stream')
           return { status: 'needs-material-reader', reason: '此 URL 返回文件；需受控下载后交材料读取服务', url }

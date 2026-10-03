@@ -1,6 +1,6 @@
 import { sha256 } from '@noble/hashes/sha256'
 import { bytesToHex } from '@noble/hashes/utils'
-import { attachmentSnapshotSchema, attachmentRepresentationSchema, type AttachmentReader, type AttachmentSnapshot, type AttachmentRepresentation, type InputAttachmentReference, type CompiledPayload, type InputContext, type PayloadBudget, type PayloadManifest, type PayloadSerializerInput } from '../../shared/workbench/attachments'
+import { attachmentSnapshotSchema, attachmentRepresentationSchema, type AttachmentReader, type AttachmentSnapshot, type AttachmentRepresentation, type InputAttachmentReference, type CompiledPayload, type InputContext, type PayloadManifest, type PayloadSerializerInput } from '../../shared/workbench/attachments'
 import type { ModelChatMessage, ModelJson, ModelSelection, ModelToolDefinition } from '../../shared/workbench/modelProvider'
 
 const encoder = new TextEncoder()
@@ -14,12 +14,6 @@ function base64(bytes: Uint8Array): string {
   for (let offset = 0; offset < bytes.length; offset += 32768) text += String.fromCharCode(...bytes.subarray(offset, offset + 32768))
   return btoa(text)
 }
-function limit(actual: number, maximum: number | undefined, label: string) {
-  if (maximum === undefined) return
-  if (!Number.isSafeInteger(maximum) || maximum < 0) throw new PayloadCompileError('invalid-budget', `${label}预算无效`)
-  if (actual > maximum) throw new PayloadCompileError('payload-too-large', `${label}超过发送预算（${actual} > ${maximum}），请减少附件或上下文`)
-}
-
 /** Builds one frozen initial payload; later tool reads are separate facts, never predicted here. */
 export class PayloadCompiler {
   constructor(private readonly options: {
@@ -28,10 +22,11 @@ export class PayloadCompiler {
     serializePayload: (input: PayloadSerializerInput) => string
   }) {}
 
-  async compile(request: { input: InputContext; selection: ModelSelection; tools: readonly ModelToolDefinition[]; budget: PayloadBudget }, options: { signal?: AbortSignal } = {}): Promise<CompiledPayload> {
-    const { input, selection, tools, budget } = structuredClone(request)
+  async compile(request: { input: InputContext; selection: ModelSelection; tools: readonly ModelToolDefinition[];
+    /** How dynamic images reach a text-only conversation model: inline base64 or host-held source reference. */
+    imageDelivery?: 'inline' | 'source' }, options: { signal?: AbortSignal } = {}): Promise<CompiledPayload> {
+    const { input, selection, tools } = structuredClone(request)
     options.signal?.throwIfAborted()
-    if (!Number.isSafeInteger(budget.maxSerializedBytes) || budget.maxSerializedBytes < 0) throw new PayloadCompileError('invalid-budget', '最终请求字节预算无效')
     if (!input.instruction && !input.attachments.length) throw new PayloadCompileError('empty-input', '请输入指令或添加附件')
     const messages: ModelChatMessage[] = input.context.map(item => item.message)
     const totals: PayloadManifest['totals'] = { serializedBytes: 0, originalBytes: 0, representationBytes: 0, imageBytes: 0, textCharacters: input.instruction.length, base64Characters: 0 }
@@ -43,7 +38,7 @@ export class PayloadCompiler {
     if (input.instruction) content.push({ type: 'text', text: input.instruction })
     const explicitAttachments: PayloadManifest['explicitAttachments'] = []
     const originals = new Set<string>(), sourceMessages = new Map<string, number>()
-    const metadata = new Map<string, AttachmentSnapshot>(); let pixels = 0
+    const metadata = new Map<string, AttachmentSnapshot>()
     const addSource = (reference: InputAttachmentReference, snapshot: AttachmentSnapshot, representation: AttachmentRepresentation) => {
       let contentIndex = sourceMessages.get(snapshot.id)
       if (contentIndex === undefined) {
@@ -65,7 +60,8 @@ export class PayloadCompiler {
         let source = metadata.get(reference.attachmentId)
         if (!source) { source = attachmentSnapshotSchema.parse(await this.options.attachments.readSnapshot(reference.attachmentId)); metadata.set(reference.attachmentId, source) }
         const representation = source.representations.find(value => value.id === reference.representationId)
-        if (source.id !== reference.attachmentId || !representation || representation.provenance.originalDigest !== source.digest)
+        if (!representation) throw new PayloadCompileError('representation-unavailable', '附件表示不存在，请选择可用的原件或提取表示')
+        if (source.id !== reference.attachmentId || representation.provenance.originalDigest !== source.digest)
           throw new PayloadCompileError('provenance-mismatch', '材料目录与来源记录不一致')
         if (reference.delivery === 'source' || representation.kind === 'file') { addSource(reference, source, representation); continue }
       }
@@ -85,7 +81,6 @@ export class PayloadCompiler {
         const encoded = base64(bytes)
         content.push({ type: 'image_url', image_url: { url: `data:${representation.mediaType};base64,${encoded}` } })
         totals.imageBytes += bytes.length; totals.base64Characters += encoded.length
-        pixels += representation.width * representation.height
       } else {
         const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
         if (text.length !== representation.characters) throw new PayloadCompileError('provenance-mismatch', '附件文本长度与来源记录不一致')
@@ -105,11 +100,6 @@ export class PayloadCompiler {
     // The provider owns wire tool aliases, native parameters, model and stream fields.
     const serialized = this.options.serializePayload({ selection, messages, tools })
     totals.serializedBytes = size(serialized)
-    limit(totals.serializedBytes, budget.maxSerializedBytes, '最终请求字节')
-    limit(totals.originalBytes, budget.maxOriginalBytes, '原件字节')
-    limit(totals.representationBytes, budget.maxRepresentationBytes, '附件表示字节')
-    limit(pixels, budget.maxImagePixels, '图片像素')
-    limit(totals.textCharacters, budget.maxTextCharacters, '输入文本字符')
     const connection = selection.connection
     return { messages, tools: [...tools], serialized, manifest: {
       schemaVersion: 1, inputContextId: input.id, scope: 'initial-payload', laterDynamicReads: 'separately-recorded',

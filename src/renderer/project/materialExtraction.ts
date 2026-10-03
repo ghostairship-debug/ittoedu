@@ -1,5 +1,4 @@
 import type { MaterialExtraction, MaterialFragment } from '../../shared/materialExtraction'
-import { MATERIAL_EXTRACTION_LIMITS as limits } from '../../shared/materialExtraction'
 import { openPptxPackage, pptxRelationshipId, xmlAll, xmlChildren, xmlFirst, type PptxPackage } from './pptxPackage'
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import { inspectImageTransformSource } from './imageTransform'
@@ -30,7 +29,6 @@ function add(out: MaterialExtraction, fragment: Omit<MaterialFragment, 'id'>) {
   out.fragments.push({ id: `fragment-${out.fragments.length + 1}`, ...fragment })
 }
 function verify(out: MaterialExtraction): MaterialExtraction {
-  if (out.fragments.reduce((sum, item) => sum + (item.text?.length ?? 0), 0) > limits.textCharacters || out.assets.reduce((sum, item) => sum + item.bytes.length, 0) > limits.outputBytes) throw new Error('材料提取结果超过容量上限')
   if (!out.fragments.length) throw new Error('材料没有可读取内容')
   return out
 }
@@ -140,7 +138,6 @@ export async function extractPdfMaterial(bytes: Uint8Array, options: MaterialExt
   try {
     const pdf = await loading.promise
     const range = pageRange(pdf.numPages, options)
-    let totalBytes = 0
     for (let page = range.from; page <= range.to; page++) {
       options.onProgress?.(page, pdf.numPages)
       const source = await pdf.getPage(page)
@@ -160,8 +157,6 @@ export async function extractPdfMaterial(bytes: Uint8Array, options: MaterialExt
         await source.render({ canvas, viewport }).promise
         const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob(value => value ? resolve(value) : reject(new Error('PDF 页面图像编码失败')), 'image/png'))
         const imageBytes = new Uint8Array(await blob.arrayBuffer())
-        totalBytes += imageBytes.length
-        if (totalBytes > limits.outputBytes) throw new Error('PDF 页面图像超过容量上限')
         const id = `page-${page}.png`
         options.onPageImage?.({ assetId: id, width: canvas.width, height: canvas.height, downsampled: viewport.scale < 1 })
         out.assets.push({ id, mime: 'image/png', bytes: imageBytes })
@@ -173,7 +168,7 @@ export async function extractPdfMaterial(bytes: Uint8Array, options: MaterialExt
   } finally { await loading.destroy() }
 }
 export async function extractMaterial(bytes: Uint8Array, filename: string): Promise<MaterialExtraction> {
-  if (!bytes.length || bytes.length > limits.sourceBytes) throw new Error('材料须为非空且不超过 256 MiB 的文件')
+  if (!bytes.length) throw new Error('材料须为非空文件')
   const extension = filename.split('.').pop()?.toLowerCase()
   if (extension === 'docx' || extension === 'pptx') return extractOfficeMaterial(bytes, extension)
   if (extension === 'pdf') return extractPdfMaterial(bytes)

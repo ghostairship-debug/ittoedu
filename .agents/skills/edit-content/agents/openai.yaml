@@ -1,0 +1,4 @@
+interface:
+  display_name: "局部内容编辑"
+  short_description: "在现有作品上修订文字、数据与布局，保留其他内容和人工设计"
+  default_prompt: "Use $edit-content to apply the requested local changes to my existing work while preserving its other content and design."

@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs'
 
 /** A stable UTF-8 range read and streaming digest. Whole-file memory is optional. */
 export async function readUtf8File(filename: string, options: {
-  from?: number; limit?: number; onChunk?: (bytes: Uint8Array) => Promise<void>; maxCollectedBytes?: number
+  from?: number; limit?: number; onChunk?: (bytes: Uint8Array) => Promise<void>
 } = {}) {
   const [actual, entry] = await Promise.all([fs.realpath(filename), fs.lstat(filename)])
   const same = process.platform === 'win32' ? actual.toLowerCase() === filename.toLowerCase() : actual === filename
@@ -12,16 +12,13 @@ export async function readUtf8File(filename: string, options: {
   if (!Number.isSafeInteger(from) || from < 0 || !(limit >= 0)) throw new Error('文本范围无效')
   const file = await fs.open(filename, 'r')
   const hash = createHash('sha256'), decoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true })
-  let total = 0, byteLength = 0, collectedBytes = 0
+  let total = 0, byteLength = 0
   const parts: string[] = []
   const accept = (text: string) => {
     if (text.includes('\0')) throw new Error('文件含二进制零字节，不是可编辑的 UTF-8 源文')
     const start = Math.max(0, from - total), end = Math.min(text.length, from + limit - total)
     if (end > start) {
       const part = text.slice(start, end)
-      collectedBytes += Buffer.byteLength(part)
-      if (options.maxCollectedBytes !== undefined && collectedBytes > options.maxCollectedBytes)
-        throw new Error('当前完整源文编辑超过可驻留范围；原件保留，可按范围读取或使用受控计算处理')
       parts.push(part)
     }
     total += text.length

@@ -18,6 +18,14 @@ function event(eventId: string, data: ExecutionEventInput['data'] = {}): Executi
 }
 
 describe('segmented execution facts and read-only projection', () => {
+  it('saves and reopens all resource references and long labels beyond former metadata caps', async () => {
+    const { directory, store } = await fixture()
+    const data = { resourceIds: Array.from({ length: 1001 }, (_, index) => `resource-${index}`), label: 'label'.repeat(501) }
+    await store.append(event('resources', data))
+    const reopened = new ExecutionEventStore({ directory })
+    expect((await reopened.snapshot('conversation')).items[0]!.data).toMatchObject(data)
+    await expect(reopened.append(event('resources', { ...data, label: 'changed' }))).rejects.toMatchObject({ code: 'event-id-conflict' })
+  })
   it('retains three identical-status increments for both sources, replaces final item snapshots and never mixes reasoning or invents usage', async () => {
     const { store } = await fixture()
     for (const source of ['builtin', 'external-mcp'] as const) {

@@ -5,6 +5,8 @@ import { HtmlImportDesktopService } from './workbench/htmlImport/HtmlImportDeskt
 import { closeDocumentWithDialog } from './workbench/documentCloseDialog'
 import { trashWorkspaceWithDialog } from './workbench/workspaceTrashDialog'
 import { workspaceFilesRequestSchema } from '../shared/workbench/workspaceFiles'
+import { mediaFilesRequestSchema } from '../shared/workbench/mediaFiles'
+import { operateMediaFiles } from './workbench/mediaFilesDesktopService'
 import { operateExternalMcp, closeExternalMcpService } from './workbench/external/externalDesktopService'
 import { operateExecutionSettings } from './workbench/providers/executionSettingsService'
 import { executionDesktopService } from './workbench/execution/ExecutionDesktopService'
@@ -54,7 +56,6 @@ import { exportPdfFromHtml } from './pdfExport'
 import {
   clearRecoveryProject,
   listRecentProjects,
-  MAX_RECOVERY_PROJECT_BYTES,
   readRecoveryProject,
   writeRecoveryProject,
 } from './projectPersistence'
@@ -96,8 +97,8 @@ const documentExportBuildReplySchema = z.object({
   identity: z.object({ documentId: z.string().min(1), epoch: z.string().min(1), revision: z.number().int().nonnegative(), projectId: z.string().min(1) }).strict(),
   status: z.enum(['generated', 'failed', 'cancelled']),
   files: z.array(z.object({ relativePath: z.string(), mimeType: z.string(), bytes: z.instanceof(Uint8Array) }).strict()).max(1).optional(),
-  warnings: z.array(z.string()).max(100),
-  reason: z.string().max(4096).optional(),
+  warnings: z.array(z.string()),
+  reason: z.string().optional(),
 }).strict()
 
 const bytesSchema = z.custom<Uint8Array>(
@@ -138,11 +139,11 @@ const confirmProjectOpenSchema = z
 
 const recoveryProjectSchema = z
   .object({
-    projectName: z.string().trim().min(1).max(160),
+    projectName: z.string().trim().min(1),
     projectPath: projectPathSchema.optional(),
     bytes: bytesSchema.refine(
       (bytes) =>
-        bytes.byteLength > 0 && bytes.byteLength <= MAX_RECOVERY_PROJECT_BYTES,
+        bytes.byteLength > 0,
       '恢复工程包大小无效',
     ),
   })
@@ -151,31 +152,31 @@ const recoveryProjectSchema = z
 const htmlSchema = z
   .object({
     suggestedName: z.string().trim().min(1).max(160),
-    html: z.string().min(1).max(256 * 1024 * 1024),
+    html: z.string().min(1),
   })
   .strict()
 
 const binaryExportSchema = z.object({
   suggestedName: z.string().trim().min(1).max(160),
-  extension: z.enum(['pptx', 'json', 'docx']),
-  bytes: bytesSchema.refine((bytes) => bytes.byteLength <= 512 * 1024 * 1024, '导出文件过大'),
+  extension: z.enum(['pptx', 'json', 'docx', 'h5component']),
+  bytes: bytesSchema,
 }).strict()
 
 const webPackageSchema = z
   .object({
     suggestedName: z.string().trim().min(1).max(160),
     bytes: bytesSchema.refine(
-      (bytes) => bytes.byteLength > 0 && bytes.byteLength <= 512 * 1024 * 1024,
+      (bytes) => bytes.byteLength > 0,
       '网页包大小无效',
     ),
   })
   .strict()
 
-const previewNetworkLeaseIdSchema = z.string().min(1).max(160).regex(/^[A-Za-z0-9._:-]+$/)
+const previewNetworkLeaseIdSchema = z.string().min(1).regex(/^[A-Za-z0-9._:-]+$/)
 const previewNetworkPolicySchema = z.object({
   leaseId: previewNetworkLeaseIdSchema,
-  connectOrigins: z.array(z.string().min(1).max(300)).max(1_000),
-  remoteAssetUrls: z.array(z.string().min(1).max(2_000)).max(10_000),
+  connectOrigins: z.array(z.string().min(1)),
+  remoteAssetUrls: z.array(z.string().min(1)),
   documentToken: z.string().uuid(),
 }).strict()
 const previewNetworkReleaseSchema = z.object({
@@ -465,6 +466,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (input.type !== 'save-dialog') return documents.operate(input)
     return saveDocumentWithDialog(requireWindow(context), documents, input.documentId, input.saveAs, input.suggestedDirectory)
   })
+  registerSafeHandler(IPC_CHANNELS.mediaFiles, context, {
+    code: 'MEDIA_FILE_OPERATION_FAILED', title: '媒体文件操作未完成',
+    message: '当前修改已保留。', suggestion: '请查看具体原因后重试。',
+  }, async (_event, args) => operateMediaFiles(mediaFilesRequestSchema.parse(requireSingleArgument(args))))
   registerSafeHandler(IPC_CHANNELS.flowDocumentRecovery, context, {
     code: 'FLOW_DOCUMENT_RECOVERY_FAILED', title: '正文恢复稿未保存',
     message: '无法保存或读取 Flow 源文恢复稿。', suggestion: '请保留编辑窗口，检查磁盘后重试。',

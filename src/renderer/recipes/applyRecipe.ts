@@ -33,8 +33,6 @@ export function planRecipe(project: CourseProjectDocument, input: RecipeInput, o
       slots[field.key] = value.trim()
     }
     if (!slots.title) throw new Error('请填写标题。')
-    if (slots.title.length > 54) throw new CapacityError('switch-layout', '标题过长，建议换用概念讲解版式或缩短标题。')
-    if (Object.values(slots).some(value => value.length > 1200)) throw new CapacityError('use-flow', '内容较长，建议切换为流式讲义。')
     const accent = input.accentTokenId
       ? project.designTokens.colors.find(token => token.id === input.accentTokenId)?.color
       : project.designTokens.colors.find(token => token.id === 'accent')?.color ?? '#2563eb'

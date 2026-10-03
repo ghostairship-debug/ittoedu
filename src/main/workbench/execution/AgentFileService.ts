@@ -6,6 +6,10 @@ import path from 'node:path'
 import { promises as fs } from 'node:fs'
 import type { AgentFileContext, AgentFileMutationName, AgentFileOutcome, AgentFileService as AgentFilePort, AgentFileToolName } from '../../../core/tools/AgentFileTools'
 import { AgentFileOutcomeUnknown, agentFileSchemas } from '../../../core/tools/AgentFileTools'
+import { officeContentSchemas, type OfficeContentToolName } from '../../../core/tools/OfficeContentTools'
+import type { FileArtifactBinding } from '../../../shared/workbench/mediaFiles'
+import type { OfficeFormat } from '../../../shared/workbench/officeFiles'
+import type { OfficeFileService } from '../office/OfficeFileService'
 import { isInsideRoot } from '../../../shared/workbench/executionPermission'
 import type { DocumentHostService } from '../DocumentHostService'
 import { createBlankCourseProject } from '../../../core/course/createCourseProject'
@@ -26,14 +30,28 @@ function createKind(name: string, requested?: 'markdown' | 'text' | 'html' | 'co
   if (kind !== detected && !(kind === 'text' && sourceFileKind(name) === 'text')) throw new Error(`文件名与${kind}格式不符`)
   return kind
 }
+function officeFormat(filename: string): OfficeFormat {
+  const format = path.extname(filename).slice(1).toLowerCase()
+  if (format !== 'docx' && format !== 'xlsx' && format !== 'pptx') throw new Error('Office 内容操作只支持 .docx、.xlsx 和 .pptx 原格式文件')
+  return format
+}
 
 /** Main-only file tools. Paths are rechecked at use time, including symlink resolution. */
 export class AgentFileService implements AgentFilePort {
   private readonly pages = new FileBrowsePages()
   private readonly grepPages = new FileGrepPages()
   private readonly text: AgentFileText
+  private office?: Promise<OfficeFileService>
+  private readonly officeBindings = new Map<string, Map<string, FileArtifactBinding>>()
   constructor(private readonly host: DocumentHostService) { this.text = new AgentFileText(host) }
-  releaseRun(runId: string): void { this.pages.releaseRun(runId); this.grepPages.releaseRun(runId); this.text.releaseRun(runId) }
+  releaseRun(runId: string): void { this.pages.releaseRun(runId); this.grepPages.releaseRun(runId); this.text.releaseRun(runId); this.officeBindings.delete(runId) }
+  private officeService(): Promise<OfficeFileService> { return this.office ??= import('../office/OfficeFileService.js').then(module => new module.OfficeFileService(this.host)) }
+  private officeKey(filename: string): string { return process.platform === 'win32' ? filename.toLowerCase() : filename }
+  private rememberOfficeBinding(runId: string, binding: FileArtifactBinding): void {
+    let bindings = this.officeBindings.get(runId)
+    if (!bindings) { bindings = new Map(); this.officeBindings.set(runId, bindings) }
+    bindings.set(this.officeKey(binding.path), binding)
+  }
   private async mayRead(context: AgentFileContext, resolved: string): Promise<boolean> {
     if (context.permission === 'full' || isInsideRoot(context.workspaceRoot, resolved)) return true
     for (const candidate of context.readOnlyRoots ?? []) {
@@ -60,13 +78,14 @@ export class AgentFileService implements AgentFilePort {
     if (!allowOutside && !await this.mayRead(context, directory)) throw new Error('当前权限不允许访问工作空间外文件夹')
     return { directory, fallback }
   }
-  private async filename(context: AgentFileContext, raw: string, access: 'read' | 'write' = 'read', preflight = false): Promise<string> {
+  private async filename(context: AgentFileContext, raw: string, access: 'read' | 'write' = 'read', preflight = false, officeBinary = false): Promise<string> {
     const filename = await fs.realpath(path.resolve(context.workspaceRoot, raw))
     const stat = await fs.lstat(filename)
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('目标不是可访问文件')
     if (access === 'read' ? !await this.mayRead(context, filename) : !preflight && !this.mayWrite(context, filename))
       throw new Error('当前权限不允许访问工作空间外文件')
-    sourceFileKind(filename) // Binary and structured formats use their actual importers.
+    if (officeBinary) officeFormat(filename)
+    else sourceFileKind(filename) // Binary and structured formats use their actual importers.
     return filename
   }
   async preflightCreate(context: AgentFileContext, raw: unknown): Promise<{ directory: string; outside: boolean }> {
@@ -126,6 +145,51 @@ export class AgentFileService implements AgentFilePort {
       if (i < copySources && await this.mayRead(context, paths[i]!)) continue
       if (!this.mayWrite(context, paths[i]!)) throw new Error('工作空间外修改需要当前操作的明确批准')
     }
+  }
+  async preflightOffice(context: AgentFileContext, name: OfficeContentToolName, raw: unknown): Promise<{ paths: string[]; outside: boolean }> {
+    if (name !== 'office.inspect' && context.permission === 'read-only') throw new Error('只读任务不能修改 Office 文件')
+    let filename: string
+    if (name === 'office.create') {
+      const input = officeContentSchemas[name].parse(raw)
+      validateWorkspaceEntryName(input.name)
+      if (officeFormat(input.name) !== input.content.format) throw new Error('Office 文件名与内容格式不符')
+      filename = path.join((await this.directory(context, input.path, true)).directory, input.name)
+    } else {
+      const input = officeContentSchemas[name].parse(raw)
+      filename = await this.filename(context, input.path, name === 'office.inspect' ? 'read' : 'write', name !== 'office.inspect', true)
+      if (name === 'office.edit' && officeFormat(filename) !== officeContentSchemas['office.edit'].parse(raw).content.format) throw new Error('Office 文件原格式与修改内容不符')
+    }
+    return { paths: [filename], outside: !isInsideRoot(context.workspaceRoot, filename) }
+  }
+  async executeOffice(context: AgentFileContext, name: OfficeContentToolName, raw: unknown, operationId: string): Promise<AgentFileOutcome> {
+    if (!context.workspaceRoot || !path.isAbsolute(context.workspaceRoot)) throw new Error('任务缺少已冻结的工作空间位置')
+    context.assertActive?.()
+    const scope = await this.preflightOffice(context, name, raw)
+    const service = await this.officeService()
+    if (name === 'office.inspect') {
+      const filename = scope.paths[0]!, binding = await this.host.artifacts.bind(filename)
+      const inspected = await service.inspect(binding, officeFormat(filename), { assertActive: context.assertActive })
+      this.rememberOfficeBinding(context.runId, binding)
+      return { data: { path: filename, ...inspected, writable: this.mayWrite(context, filename) } }
+    }
+    await this.requireMutationScope(context, scope.paths)
+    if (name === 'office.create') {
+      const input = officeContentSchemas[name].parse(raw), directory = path.dirname(scope.paths[0]!)
+      const root = await this.host.files.registerRoot(directory)
+      const saved = await service.create({ operationId, workspaceId: root.workspaceId, targetDirectoryId: root.rootEntryId, name: input.name },
+        { ...input.content, operation: 'create' }, { assertActive: context.assertActive })
+      this.rememberOfficeBinding(context.runId, saved.binding)
+      return { data: { ...saved, path: saved.binding.path, saved: true } }
+    }
+    const input = officeContentSchemas[name].parse(raw), filename = scope.paths[0]!
+    const observed = this.officeBindings.get(context.runId)?.get(this.officeKey(filename))
+    if (!input.expectedVersion && !observed) throw new Error('请先使用 office.inspect 读取当前 Office 内容和可编辑位置，再执行局部修改')
+    const binding = input.expectedVersion ? await this.host.artifacts.bind(filename) : observed!
+    const saved = await service.edit(binding, { ...input.content, operation: 'edit' }, {
+      assertActive: context.assertActive, expectedVersion: input.expectedVersion,
+    })
+    this.rememberOfficeBinding(context.runId, saved.binding)
+    return { data: { ...saved, path: saved.binding.path, saved: true } }
   }
   async execute(context: AgentFileContext, name: AgentFileToolName, raw: unknown, operationId: string): Promise<AgentFileOutcome> {
     if (!context.workspaceRoot || !path.isAbsolute(context.workspaceRoot)) throw new Error('任务缺少已冻结的工作空间位置')
@@ -203,7 +267,7 @@ export class AgentFileService implements AgentFilePort {
     })() : Buffer.from('', 'utf8')
     context.assertActive?.()
     const receipt = await this.host.files.createFile({ operationId, workspaceId: root.workspaceId, targetDirectoryId: root.rootEntryId,
-      name: input.name, format: kind === 'course-v9' ? 'course-v9' : kind === 'markdown' && /\.md$/i.test(input.name) ? 'markdown' : 'file', bytes }).catch(error => { throw new AgentFileOutcomeUnknown(error instanceof Error ? error.message : String(error)) })
+      name: input.name, format: kind === 'course-v9' ? 'course-v9' : kind === 'markdown' && /\.md$/i.test(input.name) ? 'markdown' : 'file', bytes }, context.assertActive).catch(error => { throw new AgentFileOutcomeUnknown(error instanceof Error ? error.message : String(error)) })
     const created = receipt.items.find(item => item.status === 'success' && item.targetPath)
     if (!created?.targetPath) return { data: { operation: receipt, homeMissingFallback: fallback } }
     const snapshot = await this.host.open(created.targetPath).catch(() => null)

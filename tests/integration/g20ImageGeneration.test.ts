@@ -164,26 +164,44 @@ it('stop after send remains unknown and a known late image is retained unapplied
   expect(calls).toBe(2)
 })
 
-it('times out an unanswered Images request as unknown and never resends the same paid job', async () => {
-  const root = await directory(); let calls = 0
-  const hangingFetch: typeof fetch = async (_url, init) => {
-    calls++
-    await new Promise<never>((_resolve, reject) => {
-      const signal = init?.signal
-      if (!signal || typeof signal === 'string') throw new Error('missing abort signal')
-      signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+it('keeps an injected Images generation transport cancellable beyond the former short total deadline', async () => {
+  const image = await fixture()
+  vi.useFakeTimers()
+  let calls = 0, entered!: () => void, finish!: (value: Response) => void
+  const reached = new Promise<void>(resolve => { entered = resolve })
+  const transport: typeof fetch = async (_url, init) => {
+    calls++; entered()
+    return new Promise<Response>((resolve, reject) => {
+      finish = resolve
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
     })
-    throw new Error('unreachable')
   }
-  const provider = new ChatGPTImageProvider({ credentialResolver: resolver, fetch: hangingFetch, timeoutMs: 25 })
-  const service = new ImageGenerationService({ directory: root, provider })
-  const first = await service.run(request('timeout'))
-  expect(first).toMatchObject({ status: 'unknown', resources: [], stopped: false,
-    failure: { outcome: 'unknown', kind: 'timeout', code: 'image-timeout' },
-    provenance: { charge: 'unknown', querySupport: 'unavailable' } })
+  const provider = new ChatGPTImageProvider({ credentialResolver: resolver, fetch: transport })
+  const controller = new AbortController(), pending = provider.generate(request('long-generation'), [], { signal: controller.signal })
+  await reached
+  await vi.advanceTimersByTimeAsync(12 * 60_000)
+  expect(controller.signal.aborted).toBe(false)
   expect(calls).toBe(1)
-  expect(await new ImageGenerationService({ directory: root, provider }).run(request('timeout'))).toEqual(first)
-  expect(calls).toBe(1)
+  finish(new Response(response(image)))
+  expect(await pending).toMatchObject({ status: 'completed', images: [{ mimeType: 'image/png' }] })
+  const stopReached = new Promise<void>(resolve => { entered = resolve })
+  const stopped = new AbortController(), cancelled = provider.generate(request('cancelled'), [], { signal: stopped.signal })
+  await stopReached
+  stopped.abort()
+  expect(await cancelled).toMatchObject({ status: 'failed', failure: { kind: 'aborted', outcome: 'unknown' } })
+  expect(calls).toBe(2)
+})
+
+it('accepts long prompts, more than five references and all returned images without a local content quota', async () => {
+  const image = await fixture(), refs = Array.from({ length: 6 }, (_, index) => ({ referenceId: `reference-${index}`,
+    bytes: image, mimeType: 'image/png', filename: 'reference.png' } as ImageProviderReference))
+  const input = { ...request('many-images'), operation: 'edit' as const, prompt: '内容'.repeat(110_000), referenceIds: refs.map(ref => ref.referenceId) }
+  const wire = JSON.parse(serializeChatGPTImageRequest(input, refs))
+  expect(wire.prompt).toBe(input.prompt)
+  expect(wire.images).toHaveLength(6)
+  const provider = new ChatGPTImageProvider({ credentialResolver: resolver, fetch: async () => new Response(JSON.stringify({
+    created: 1, data: Array.from({ length: 5 }, () => ({ b64_json: image.toString('base64') })) })) })
+  expect(await provider.generate(input, refs)).toMatchObject({ status: 'completed', images: Array.from({ length: 5 }, () => ({ mimeType: 'image/png' })) })
 })
 
 it('defers image cache collection during an active provider request and leaves a no-resend tombstone', async () => {
@@ -268,4 +286,18 @@ it('stops a cooling image job before another provider attempt, while an unknown 
   await vi.waitFor(async () => expect((await service.read('stop-cooling').catch(() => null))?.retryAt).toBeTruthy())
   abort.abort(); expect((await stopped).status).toBe('stopped'); expect(calls).toBe(1)
   expect((await service.run(request('unknown-once'))).status).toBe('unknown'); expect(calls).toBe(2)
+})
+
+
+it('stops a stalled Images credential resolver without a late paid request', async () => {
+  let release!: (credential: { accessToken: string; accountId: string }) => void
+  const credential = new Promise<{ accessToken: string; accountId: string }>(resolve => { release = resolve })
+  const transport = vi.fn<typeof fetch>(), controller = new AbortController()
+  const provider = new ChatGPTImageProvider({ credentialResolver: async () => credential, fetch: transport })
+  const running = provider.generate(request('credential-stop'), [], { signal: controller.signal })
+  await Promise.resolve()
+  controller.abort()
+  expect(await running).toMatchObject({ status: 'failed', failure: { outcome: 'not-sent', kind: 'aborted' } })
+  release(await resolver()); await Promise.resolve()
+  expect(transport).not.toHaveBeenCalled()
 })

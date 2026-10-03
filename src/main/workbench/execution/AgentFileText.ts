@@ -15,7 +15,6 @@ type Source = { source: string; version: string; dirty: boolean; snapshot?: Docu
 const hash = (bytes: Uint8Array) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`
 const samePath = (a: string, b: string) => process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b
 const textDriver = new TextDriver()
-const MAX_TEXT_BYTES = 256 * 1024 * 1024
 
 /** Ordinary UTF-8 source operations. Open document writes use their existing canonical session. */
 export class AgentFileText {
@@ -35,7 +34,7 @@ export class AgentFileText {
       return { source: snapshot.model.source, version: `document:${snapshot.documentId}:${snapshot.epoch}:${snapshot.revision}`,
         dirty: snapshot.dirty, snapshot }
     }
-    const current = await readUtf8File(filename, { maxCollectedBytes: MAX_TEXT_BYTES })
+    const current = await readUtf8File(filename)
     return { source: current.text, version: current.version, dirty: false }
   }
 
@@ -188,7 +187,6 @@ export class AgentFileText {
 
   private assertText(filename: string, content: string): void {
     if (sourceFileKind(filename) === 'course-v9') throw new Error('不能把普通源文写入 H5 演示归档')
-    if (Buffer.byteLength(content) > MAX_TEXT_BYTES) throw new Error('完整源文编辑超过 256 MiB；原件保留，可按范围读取或使用受控计算处理')
     textDriver.validate({ kind: 'text', source: content, resources: { assets: {}, components: {} } })
   }
 }

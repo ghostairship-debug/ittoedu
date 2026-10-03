@@ -37,8 +37,6 @@ export interface DynamicContentFallbackCaptureOptions {
   signalForRun?(runId: string): AbortSignal | undefined
 }
 
-const MAX_TRANSPORT_BYTES = 64 * 1024 * 1024
-const CAPTURE_TIMEOUT_MS = 20_000
 const toBase64 = (bytes: Uint8Array): string => Buffer.from(bytes).toString('base64')
 
 /** Validate the exact candidate location and layer before starting any renderer. */
@@ -86,7 +84,6 @@ export class DynamicContentFallbackCaptureService implements DynamicContentFallb
     const rendererEntryUrl = this.options.rendererEntryUrl()
     if (!rendererEntryUrl) throw new Error('当前没有可用的候选图层截图入口')
     const encoded = Buffer.from(JSON.stringify(request), 'utf8').toString('base64')
-    if (Buffer.byteLength(encoded) > MAX_TRANSPORT_BYTES) throw new Error('候选图层快照超过 64 MiB 上限')
 
     const isolatedSession = session.fromPartition(`dynamic-fallback-${randomUUID()}`)
     installEditorProtocol(isolatedSession)
@@ -118,9 +115,12 @@ export class DynamicContentFallbackCaptureService implements DynamicContentFallb
     }
     const onAbort = () => stop('动态图文截图已取消')
     const onGone = () => rejectStop(new Error('候选图层截图宿主异常退出'))
+    const onClosed = () => rejectStop(new Error('候选图层截图宿主已关闭'))
     signal?.addEventListener('abort', onAbort, { once: true })
     worker.webContents.once('render-process-gone', onGone)
-    const timeout = setTimeout(() => stop('候选图层截图超过 20 秒'), CAPTURE_TIMEOUT_MS)
+    worker.once('closed', onClosed)
+    if (upstream?.aborted) controller.abort()
+    const faultWait = setTimeout(() => stop('候选图层截图宿主无响应'), 20_000)
     try {
       const result = await Promise.race([stopped, (async () => {
         await worker.loadURL(entry)
@@ -130,10 +130,9 @@ export class DynamicContentFallbackCaptureService implements DynamicContentFallb
         if (output.projectId !== request.projectId || output.revision !== request.revision
           || output.locationId !== request.locationId || output.surfaceId !== request.surfaceId
           || output.itemId !== request.itemId) throw new Error('候选图层截图返回了其他目标')
-        if (typeof output.dataUrl !== 'string' || !output.dataUrl.startsWith('data:image/png;base64,')
-          || output.dataUrl.length > MAX_TRANSPORT_BYTES * 2) throw new Error('候选图层没有返回有效 PNG')
+        if (typeof output.dataUrl !== 'string' || !output.dataUrl.startsWith('data:image/png;base64,')) throw new Error('候选图层没有返回有效 PNG')
         const bytes = Uint8Array.from(Buffer.from(output.dataUrl.slice('data:image/png;base64,'.length), 'base64'))
-        const decoder = sharp(bytes, { failOn: 'warning', limitInputPixels: 40_000_000 })
+        const decoder = sharp(bytes, { failOn: 'warning', limitInputPixels: false })
         const metadata = await decoder.metadata()
         if (metadata.format !== 'png' || !metadata.width || !metadata.height) throw new Error('候选图层 PNG 无效')
         await decoder.raw().toBuffer()
@@ -144,9 +143,11 @@ export class DynamicContentFallbackCaptureService implements DynamicContentFallb
       })()])
       return result
     } finally {
-      clearTimeout(timeout)
+      clearTimeout(faultWait)
       signal?.removeEventListener('abort', onAbort)
       upstream?.removeEventListener('abort', onUpstreamAbort)
+      worker.removeListener('closed', onClosed)
+      worker.webContents.removeListener('render-process-gone', onGone)
       active.delete(controller)
       if (!active.size) this.active.delete(input.runId)
       if (!worker.isDestroyed()) worker.destroy()

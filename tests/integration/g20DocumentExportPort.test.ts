@@ -162,7 +162,7 @@ it('updates a verified task ancestor export across restart epochs but refuses co
   const document = snapshot(), filename = path.join(root, 'lesson.html')
   const runs = new ExecutionRunStore(path.join(root, 'runs'))
   const run = (runId: string, taskContinuedFrom?: string) => ({ schemaVersion: 1, runId, version: 1, status: 'completed', createdAt: 1, updatedAt: 1,
-    input: { conversationId: 'conversation', taskId: runId, instruction: 'test', selection: {} as never, documents: [] }, budget: { maxRequests: null, maxToolCalls: null, maxContextBytes: 10000 }, initialMessageCount: 0, messages: [], tools: [], requests: [], ...(taskContinuedFrom ? { taskContinuedFrom } : {}) }) as import('../../src/shared/workbench/execution').ExecutionRunRecord
+    input: { conversationId: 'conversation', taskId: runId, instruction: 'test', selection: {} as never, documents: [] }, initialMessageCount: 0, messages: [], tools: [], requests: [], ...(taskContinuedFrom ? { taskContinuedFrom } : {}) }) as import('../../src/shared/workbench/execution').ExecutionRunRecord
   await runs.save(run('parent')); await runs.save(run('child', 'parent')); await runs.save({ ...run('other'), continuedFrom: 'parent' })
   let source = 'first'
   const service = new DocumentDeliveryService({ documents: { read: async () => document, saveWithFact: async () => { throw new Error('unused') },

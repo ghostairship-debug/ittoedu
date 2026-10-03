@@ -8,18 +8,20 @@ import { OAuthDesktopService } from './OAuthDesktopService'
 import type { ModelConnectionSnapshot } from '../../../shared/workbench/modelProvider'
 import type { ModelProvider } from '../../../shared/workbench/modelProvider'
 import { OpenAIChatProvider } from './OpenAIChatProvider'
-import { ChatGPTResponsesProvider, CHATGPT_RESPONSES_BASE_URL } from './ChatGPTResponsesProvider'
+import { ChatGPTResponsesProvider, OpenAIResponsesProvider, CHATGPT_RESPONSES_BASE_URL } from './ChatGPTResponsesProvider'
+import { AnthropicMessagesProvider } from './AnthropicMessagesProvider'
+import { routeModelProviders } from './ModelProviderRouter'
 import { ModelCapabilityProbe } from './ModelCapabilityProbe'
 import { diagnosticLog } from '../../diagnosticLog'
 
-const actualModelId = /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,127}$/
+const actualModelId = /^[A-Za-z0-9][A-Za-z0-9._:/+-]*$/
 const reasoningEfforts = new Set<DiscoveredReasoningEffort>(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'])
 const record = (value: unknown): Record<string, unknown> | undefined => value !== null && typeof value === 'object' && !Array.isArray(value)
   ? value as Record<string, unknown> : undefined
-function catalogText(value: unknown, limit: number, secret: string): string | undefined {
+function catalogText(value: unknown, secret: string): string | undefined {
   if (typeof value !== 'string') return undefined
   const text = value.trim()
-  return text && text.length <= limit && !/[\x00-\x1f\x7f]/.test(text) && !text.includes(secret) ? text : undefined
+  return text && !/[\x00-\x1f\x7f]/.test(text) && !text.includes(secret) ? text : undefined
 }
 function catalogEffort(value: unknown): DiscoveredReasoningEffort | undefined {
   return typeof value === 'string' && reasoningEfforts.has(value as DiscoveredReasoningEffort) ? value as DiscoveredReasoningEffort : undefined
@@ -27,21 +29,21 @@ function catalogEffort(value: unknown): DiscoveredReasoningEffort | undefined {
 function parseDiscoveredModel(value: unknown, isOAuth: boolean, secret: string): DiscoveredModel | undefined {
   const item = record(value)
   if (!item) return undefined
-  const id = catalogText(isOAuth ? item.slug : item.id, 512, secret)
+  const id = catalogText(isOAuth ? item.slug : item.id, secret)
   if (!id) return undefined
-  const displayName = catalogText(item.display_name ?? item.displayName ?? item.name, 128, secret)
-  const description = catalogText(item.description, 256, secret)
+  const displayName = catalogText(item.display_name ?? item.displayName ?? item.name, secret)
+  const description = catalogText(item.description, secret)
   const model: DiscoveredModel = { id, ...(displayName ? { displayName } : {}), ...(description ? { description } : {}) }
   const apiEffort = record(item.effort)
-  const supportedEfforts = isOAuth ? item.supported_reasoning_efforts : apiEffort?.supported_levels
-  const declaredDefault = isOAuth ? item.default_reasoning_effort : apiEffort?.default_level
+  const supportedEfforts = item.supported_reasoning_efforts ?? apiEffort?.supported_levels
+  const declaredDefault = item.default_reasoning_effort ?? apiEffort?.default_level
   if (Array.isArray(supportedEfforts)) {
     const choices = new Map<DiscoveredReasoningEffort, { effort: DiscoveredReasoningEffort; description?: string }>()
-    for (const raw of supportedEfforts.slice(0, 16)) {
+    for (const raw of supportedEfforts) {
       const option = record(raw)
       const effort = catalogEffort(option?.reasoning_effort ?? raw)
       if (!effort || choices.has(effort)) continue
-      const note = catalogText(option?.description, 128, secret)
+      const note = catalogText(option?.description, secret)
       choices.set(effort, { effort, ...(note ? { description: note } : {}) })
     }
     // An explicit empty list is meaningful: it overrides documented defaults.
@@ -74,8 +76,10 @@ export class ExecutionSettingsDesktopService {
         case 'save-connection': return await this.store.saveConnection({ ...input.input, connection: { ...input.input.connection,
           capabilities: { tools: 'unknown', vision: 'unknown', stream: 'unknown', reasoning: 'unknown' } } })
         case 'save-profile': return await this.store.saveProfile(input.input)
+        case 'set-model-favorite': return await this.store.setModelFavorite(input.input)
         case 'revoke-connection': return this.oauth ? await this.oauth.revokeConnection(input.id) : await this.store.revokeConnection(input.id)
         case 'discover-models': return await this.discoverModels(input.id, input.revision)
+        case 'known-models': return await this.store.modelKnowledge.knownModels()
         case 'probe-capabilities': return await this.probeCapabilities(input)
         case 'oauth-login-start': return await this.requireOAuth().start(input.id, input.revision)
         case 'oauth-login-status': return this.requireOAuth().status(input.loginId)
@@ -111,7 +115,12 @@ export class ExecutionSettingsDesktopService {
       return credential
     }, fetch: this.transport,
       onProtocolError: error => diagnosticLog.append({ source: 'main', message: 'ChatGPT 协议解析失败', stack: error.stack }) })
-    return { stream: (request, options) => (request.selection.connection.protocol === 'chatgpt-responses' ? oauth : chat).stream(request, options) }
+    const apiCredential = async (connection: Readonly<ModelConnectionSnapshot>) => {
+      const secret = await this.store.resolveCredential(connection); onCredential?.(secret); return secret
+    }
+    return routeModelProviders({ 'openai-chat': chat, 'chatgpt-responses': oauth,
+      'openai-responses': new OpenAIResponsesProvider({ credentialResolver: apiCredential, fetch: this.transport }),
+      'anthropic-messages': new AnthropicMessagesProvider({ credentialResolver: apiCredential, fetch: this.transport }) })
   }
   private async probeCapabilities(input: Extract<ReturnType<typeof executionSettingsRequestSchema.parse>, { type: 'probe-capabilities' }>) {
     const selection = await this.store.snapshot(input.role)
@@ -155,24 +164,30 @@ export class ExecutionSettingsDesktopService {
     const credential = isOAuth ? await this.requireOAuth().resolveCredential(current.connection) : await this.store.resolveCredential(current.connection)
     const secret = typeof credential === 'string' ? credential : credential.accessToken
     const accountId = typeof credential === 'string' ? undefined : credential.accountId
-    const endpoint = `${current.connection.baseURL.replace(/\/+$/, '')}/models${isOAuth ? `?client_version=${encodeURIComponent(this.clientVersion)}` : ''}`
-    const abort = new AbortController(), timer = setTimeout(() => abort.abort(), 15_000)
+    const nativeAnthropic = current.connection.protocol === 'anthropic-messages'
+    const base = current.connection.baseURL.replace(/\/+$/, '')
+    const root = nativeAnthropic && !/\/v1$/.test(base) ? `${base}/v1` : base
+    const endpoint = `${root}/models${isOAuth ? `?client_version=${encodeURIComponent(this.clientVersion)}` : ''}`
+    const abort = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const activity = () => { clearTimeout(timer); timer = setTimeout(() => abort.abort(), 15_000) }
+    activity()
     let response: Response | undefined
     try {
       response = await this.transport(endpoint, {
-        headers: { Authorization: `Bearer ${secret}`, Accept: 'application/json', ...(accountId ? { 'chatgpt-account-id': accountId } : {}) },
+        headers: { ...(nativeAnthropic ? { 'x-api-key': secret, 'anthropic-version': '2023-06-01' }
+          : { Authorization: `Bearer ${secret}` }), Accept: 'application/json', ...(accountId ? { 'chatgpt-account-id': accountId } : {}) },
         signal: abort.signal, redirect: 'error',
       })
+      activity()
       if (!response.ok) throw new ExecutionSettingsError('model-discovery-http', `模型目录请求返回 HTTP ${response.status}；未切换连接。`)
       if (!response.body) throw new ExecutionSettingsError('model-discovery-invalid', '模型服务没有返回可读取的目录。')
       const reader = response.body.getReader(), chunks: Uint8Array[] = []
-      let size = 0
       try {
         for (;;) {
           const chunk = await reader.read()
           if (chunk.done) break
-          size += chunk.value.byteLength
-          if (size > 1024 * 1024) throw new ExecutionSettingsError('model-discovery-limit', '模型目录超过读取上限。')
+          if (chunk.value.byteLength) activity()
           chunks.push(chunk.value)
         }
       } finally { await reader.cancel().catch(() => undefined); reader.releaseLock() }
@@ -180,7 +195,7 @@ export class ExecutionSettingsDesktopService {
       try {
         const payload = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { data?: unknown; models?: unknown }
         const entries = isOAuth ? payload.models : payload.data
-        if (!Array.isArray(entries) || entries.length > 4096) throw new Error()
+        if (!Array.isArray(entries)) throw new Error()
         const found = new Map<string, DiscoveredModel>()
         for (const item of entries) {
           const model = parseDiscoveredModel(item, isOAuth, secret)
@@ -194,11 +209,11 @@ export class ExecutionSettingsDesktopService {
       const result: DiscoveredModels = { connectionId: id, connectionRevision: revision, models,
         capabilitiesVerified: false, source: 'live', checkedAt: new Date().toISOString() }
       await this.store.recordModelCatalog(result)
-      return result
+      return { ...result, models: await this.store.modelKnowledge.enrich(current.connection, models) }
     } catch (error) {
       if (!(error instanceof ExecutionSettingsError) || error.code === 'model-discovery-http' && response && (response.status === 429 || response.status >= 500)) {
         const cached = await this.store.cachedModelCatalog(id, revision)
-        if (cached) return cached
+        if (cached) return { ...cached, models: await this.store.modelKnowledge.enrich(current.connection, cached.models) }
       }
       if (error instanceof ExecutionSettingsError) throw error
       throw new ExecutionSettingsError('model-discovery-failed', '模型目录暂不可读取；未切换连接或发起生成。')

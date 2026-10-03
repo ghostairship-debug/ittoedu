@@ -16,8 +16,7 @@ const roots: string[] = []
 afterEach(async () => { vi.restoreAllMocks(); for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 30 }) })
 async function directory() { const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-repair-safety-')); roots.push(root); return root }
 const record = (runId: string, continuedFrom?: string): ExecutionRunRecord => ({ schemaVersion: 1, runId, version: 1,
-  status: 'completed', createdAt: 1, updatedAt: 1, input: { conversationId: 'same-conversation', taskId: runId, instruction: 'test', selection: {} as never, documents: [] },
-  budget: { maxRequests: null, maxToolCalls: null, maxContextBytes: 10000 }, messages: [], requests: [], tools: [], initialMessageCount: 0,
+  status: 'completed', createdAt: 1, updatedAt: 1, input: { conversationId: 'same-conversation', taskId: runId, instruction: 'test', selection: {} as never, documents: [] }, messages: [], requests: [], tools: [], initialMessageCount: 0,
   ...(continuedFrom ? { taskContinuedFrom: continuedFrom } : {}) })
 
 it('isolates one corrupt run and one corrupt submission while a new independent conversation remains usable', async () => {

@@ -14,10 +14,7 @@ import type {
   LayerItem,
   SlideSceneDocument,
 } from '@/shared/courseProjectTypes'
-import {
-  MAX_SCENE_INTERACTIONS,
-  type InteractionRule,
-} from '@/shared/interactionTypes'
+import type { InteractionRule } from '@/shared/interactionTypes'
 import { describe, expect, it } from 'vitest'
 import { listCourseProjectV9Fixtures } from '../fixtures/course-project-v9/sources'
 
@@ -800,18 +797,21 @@ describe('interaction authoring transaction plans', () => {
     })).toMatchObject({ ok: false, code: 'locked-layer' })
   })
 
-  it('enforces the scope limit and template/rule schemas before producing a plan', () => {
-    const limited = mixedProject()
-    slideScene(limited).interactions = Array.from(
-      { length: MAX_SCENE_INTERACTIONS },
+  it('allows more than the former scope limit while preserving template and rule validation', () => {
+    const large = mixedProject()
+    slideScene(large).interactions = Array.from(
+      { length: 1_000 },
       (_, index) => revealRule(`rule-${index}`, `action-${index}`),
     )
-    expect(planApplyInteractionTemplate({
-      project: limited,
-      target: localTarget(limited),
+    const expanded = planApplyInteractionTemplate({
+      project: large,
+      target: localTarget(large),
       template: template(),
       now: NOW,
-    })).toMatchObject({ ok: false, code: 'interaction-limit' })
+    })
+    expect(expanded).toMatchObject({ ok: true, status: 'planned' })
+    if (!expanded.ok || expanded.status !== 'planned') throw new Error('expected expanded interaction plan')
+    expect(slideScene(expanded.plan.nextDocument).interactions).toHaveLength(1_001)
 
     const project = mixedProject()
     expect(planApplyInteractionTemplate({

@@ -1,11 +1,17 @@
 import { parse } from 'acorn'
-import { MAX_RUNTIME_SOURCE_BYTES } from '../contracts/runtime/schema'
+import { componentRuntimeSourceIdentity } from '../componentRegistryIdentity'
 
 export interface HtmlDocumentPayload { html: string; resourceKeys: string[] }
 
 const PREFIX = 'const __htmlDocumentPayload = '
 const RESOURCE_KEY = /^[a-f0-9]{64}$/
 const PLACEHOLDER = /cw-resource:([a-f0-9]{64})/g
+// Exact software wrappers already emitted by this workspace, including the former load timer.
+// Recognize their executable identities without retaining another writer/factory or changing sources.
+const EXISTING_WRAPPER_IDENTITIES = new Set([
+  '80aace7988c0595a2369b92cfea3e3ea7720194e50dd9f23f93a6b00f6f7c2e3',
+  'd3782279874f93ae61b19e223336d96b299182603ac82d8832f387d05f6f30b5',
+])
 
 function sourceFor(payload: HtmlDocumentPayload): string {
   return `${PREFIX}${JSON.stringify({ version: 1, ...payload })};
@@ -29,11 +35,10 @@ CoursewareRuntime.define({
     });
     // srcdoc inherits the host CSP. Parser inserted inline scripts cannot run there,
     // while same-origin Blob scripts are permitted by the host and export policies.
-    const parsed = new DOMParser().parseFromString(html, 'text/html');
     const scriptUrls = [];
-    const eventHandlers = [];
-    let handlerCode = '';
-    try {
+    function executableDocument(source) {
+      const parsed = new DOMParser().parseFromString(source, 'text/html');
+      const eventHandlers = [];
       for (const element of parsed.querySelectorAll('*')) {
         if (element.hasAttribute('data-cw-inline-handler')) throw new Error('HTML 页面事件标记冲突');
         let id = null;
@@ -45,7 +50,7 @@ CoursewareRuntime.define({
           element.removeAttribute(attribute.name);
         }
       }
-      handlerCode = '(function(){const specs=' + JSON.stringify(eventHandlers) + ';' +
+      const handlerCode = '(function(){const specs=' + JSON.stringify(eventHandlers) + ';' +
         'for(const element of document.querySelectorAll("[data-cw-inline-handler]")){' +
         'const id=element.getAttribute("data-cw-inline-handler");' +
         'for(const [key,eventName,body] of specs) if(key===id) element["on"+eventName]=new Function("event","with(document){with(this.form||{}){with(this){"+body+"}}}");' +
@@ -81,35 +86,42 @@ CoursewareRuntime.define({
         tail.setAttribute('src', flushUrl);
         parsed.body.appendChild(tail);
       }
+      for (const child of parsed.querySelectorAll('iframe[srcdoc]')) {
+        child.setAttribute('srcdoc', executableDocument(child.getAttribute('srcdoc') || '').html);
+      }
+      const doctype = source.match(/^\\s*<!doctype[^>]*>/i)?.[0] || '';
+      return { html: doctype + parsed.documentElement.outerHTML, handlerCode: eventHandlers.length ? handlerCode : '' };
+    }
+    let executable;
+    try {
+      executable = executableDocument(html);
     } catch (error) {
       for (const url of scriptUrls) URL.revokeObjectURL(url);
       throw error;
     }
-    const doctype = html.match(/^\\s*<!doctype[^>]*>/i)?.[0] || '';
-    const executableHtml = doctype + parsed.documentElement.outerHTML;
+    const executableHtml = executable.html;
     let destroyed = false;
     let suspended = false;
     const pausedMedia = new Set();
     let cancelReady = () => {};
     const ready = new Promise((resolve, reject) => {
       let pending = true;
-      const cleanup = () => { clearTimeout(timeout); iframe.removeEventListener('load', onLoad); iframe.removeEventListener('error', onError); };
+      const cleanup = () => { iframe.removeEventListener('load', onLoad); iframe.removeEventListener('error', onError); };
       const finish = (error) => { if (!pending) return; pending = false; cleanup(); if (error) delete iframe.dataset.htmlDocumentReady; error ? reject(error) : resolve(); };
       const onLoad = () => {
         // A connected iframe may also emit the initial about:blank load.
         if (iframe.contentDocument?.URL !== 'about:srcdoc' || iframe.contentDocument.readyState !== 'complete') return;
         try {
-          if (eventHandlers.length) {
+          if (executable.handlerCode) {
             const ChildFunction = iframe.contentWindow?.Function;
             if (!ChildFunction) throw new Error('HTML 页面事件执行环境不可用');
-            new ChildFunction(handlerCode)();
+            new ChildFunction(executable.handlerCode)();
           }
           iframe.dataset.htmlDocumentReady = 'true';
           finish();
         } catch (error) { finish(error); }
       };
       const onError = () => finish(new Error('HTML 页面加载失败'));
-      const timeout = setTimeout(() => finish(new Error('HTML 页面加载超时')), 15000);
       iframe.addEventListener('load', onLoad);
       iframe.addEventListener('error', onError);
       cancelReady = () => finish(new Error('HTML 页面已销毁'));
@@ -153,7 +165,6 @@ export function createHtmlDocumentRuntimeSource(input: { html: string; resourceK
     if (!known.has(match[1]!)) throw new Error(`HTML 页面素材绑定缺失：${match[1]}`)
   }
   const source = sourceFor({ html: input.html, resourceKeys })
-  if (new TextEncoder().encode(source).byteLength > MAX_RUNTIME_SOURCE_BYTES) throw new Error('HTML 页面包装后超过 Runtime 2 MiB 上限')
   return source
 }
 
@@ -194,7 +205,6 @@ function syntaxKey(ast: unknown): string {
 
 /** A software-owned envelope, including provably cosmetic formatting changes, never arbitrary custom code. */
 export function unpackHtmlDocumentRuntimeSource(source: string): HtmlDocumentPayload | null {
-  if (new TextEncoder().encode(source).byteLength > MAX_RUNTIME_SOURCE_BYTES) return null
   try {
     // Keep the common software-produced form cheap; parse syntax only for a reformatted candidate.
     if (source.startsWith(PREFIX)) {
@@ -213,6 +223,7 @@ export function unpackHtmlDocumentRuntimeSource(source: string): HtmlDocumentPay
     if (declaration.id.type !== 'Identifier' || declaration.id.name !== '__htmlDocumentPayload') return null
     const payload = payloadValue(literalValue(declaration.init))
     if (!payload) return null
+    if (EXISTING_WRAPPER_IDENTITIES.has(componentRuntimeSourceIdentity(syntaxKey(ast.body.slice(1))))) return payload
     const owned = parse(createHtmlDocumentRuntimeSource(payload), { ecmaVersion: 'latest', sourceType: 'script' })
     // The literal payload was already decoded and validated; its property order/quoting is immaterial.
     ast.body[0] = owned.body[0]

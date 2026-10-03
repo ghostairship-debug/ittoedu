@@ -1,12 +1,13 @@
 // @vitest-environment node
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http'
 import { setImmediate as nextTurn, setTimeout as delay } from 'node:timers/promises'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { OpenAIChatProvider, serializeModelRequest, type ChatTransportDiagnostic } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import type { ModelEvent, ModelJsonObject, ModelRequest } from '../../src/shared/workbench/modelProvider'
 
 const servers: Server[] = []
 afterEach(async () => {
+  vi.useRealTimers()
   await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => {
     server.closeAllConnections(); server.close(() => resolve())
   })))
@@ -278,26 +279,25 @@ it('does not complete/retry broken, truncated, cancelled or malformed streams af
     if (mode === 'missing-done') { res.end(frame(chunk({}, 'stop'))); return }
     if (mode === 'bad-json') { res.end('data: {oops}\n\n'); return }
     if (mode === 'changed-id') { res.end(frame({ ...chunk({ content: 'wrong' }), id: 'different' }) + 'data: [DONE]\n\n'); return }
-    // Abort/timeout cases keep the real socket open until the client cancels it.
+    // The abort case keeps the real socket open until the client cancels it.
   })
   const provider = new OpenAIChatProvider({ credentialResolver: async () => 'fixture-key' })
-  for (const mode of ['socket', 'truncated', 'missing-done', 'bad-json', 'changed-id', 'abort', 'timeout']) {
+  for (const mode of ['socket', 'truncated', 'missing-done', 'bad-json', 'changed-id', 'abort']) {
     const input = request(baseURL); input.messages = [{ role: 'user', content: mode }]
     const controller = new AbortController(), events: ModelEvent[] = []
-    const selected = mode === 'timeout' ? new OpenAIChatProvider({ credentialResolver: async () => 'fixture-key', timeoutMs: 250 }) : provider
-    for await (const event of selected.stream(input, { signal: controller.signal })) {
+    for await (const event of provider.stream(input, { signal: controller.signal })) {
       events.push(event)
       if (mode === 'abort' && event.type === 'text.delta') controller.abort()
     }
     expect(events.some(event => event.type === 'text.delta')).toBe(true)
     expect(events.some(event => event.type === 'response.completed')).toBe(false)
     expect(events.at(-1)).toMatchObject({ type: 'response.failed', failure: { outcome: 'unknown',
-      kind: mode === 'abort' ? 'aborted' : mode === 'timeout' ? 'timeout' : mode === 'socket' ? 'transport' : 'protocol' } })
+      kind: mode === 'abort' ? 'aborted' : mode === 'socket' ? 'transport' : 'protocol' } })
   }
-  expect(calls).toBe(7)
+  expect(calls).toBe(6)
 })
 
-it('allows an active SSE stream beyond the idle window while retaining a finite total deadline', async () => {
+it('allows an active SSE stream without a task deadline', async () => {
   let calls = 0
   const baseURL = await serve(async (req, res) => {
     await bodyOf(req); calls++
@@ -308,19 +308,14 @@ it('allows an active SSE stream beyond the idle window while retaining a finite 
     }
     res.end(frame(chunk({ content: '完成' }, 'stop')) + 'data: [DONE]\n\n')
   })
-  const provider = new OpenAIChatProvider({ credentialResolver: async () => 'fixture-key', timeoutMs: 100, maxDurationMs: 500 })
+  const provider = new OpenAIChatProvider({ credentialResolver: async () => 'fixture-key' })
   const events = await collect(provider, request(baseURL))
   expect(events.filter(event => event.type === 'reasoning.delta')).toHaveLength(7)
   expect(events.at(-1)).toMatchObject({ type: 'response.completed', finishReason: 'stop' })
-  const bounded = new OpenAIChatProvider({ credentialResolver: async () => 'fixture-key', timeoutMs: 100, maxDurationMs: 120 })
-  const exceeded = await collect(bounded, request(baseURL))
-  expect(exceeded.some(event => event.type === 'reasoning.delta')).toBe(true)
-  expect(exceeded.some(event => event.type === 'response.completed')).toBe(false)
-  expect(exceeded.at(-1)).toMatchObject({ type: 'response.failed', failure: { kind: 'timeout', outcome: 'unknown' } })
-  expect(calls).toBe(2)
+  expect(calls).toBe(1)
 })
 
-it('M26 SSE comments extend activity but not the meaningful progress deadline, and external stop still wins', async () => {
+it('SSE comments keep hidden reasoning alive and external stop still wins', async () => {
   let calls = 0
   const baseURL = await serve(async (req, res) => {
     const body = await bodyOf(req); calls++
@@ -333,11 +328,10 @@ it('M26 SSE comments extend activity but not the meaningful progress deadline, a
     }
     if (!res.destroyed) res.end(frame(chunk({ content: '完成' }, 'stop')) + 'data: [DONE]\n\n')
   })
-  const provider = new OpenAIChatProvider({ credentialResolver: async () => 'fixture-key', timeoutMs: 90, progressTimeoutMs: 180, maxDurationMs: 500 })
+  const provider = new OpenAIChatProvider({ credentialResolver: async () => 'fixture-key' })
   const heartbeat = request(baseURL); heartbeat.messages = [{ role: 'user', content: 'heartbeat' }]
-  const timedOut = await collect(provider, heartbeat)
-  expect(timedOut.some(event => event.type === 'response.completed')).toBe(false)
-  expect(timedOut.at(-1)).toMatchObject({ type: 'response.failed', failure: { kind: 'timeout', outcome: 'unknown' } })
+  const completed = await collect(provider, heartbeat)
+  expect(completed.at(-1)).toMatchObject({ type: 'response.completed' })
   const active = request(baseURL); active.messages = [{ role: 'user', content: 'active' }]
   const controller = new AbortController(), stopped: ModelEvent[] = []
   for await (const event of provider.stream(active, { signal: controller.signal })) {
@@ -349,14 +343,14 @@ it('M26 SSE comments extend activity but not the meaningful progress deadline, a
   expect(calls).toBe(2)
 })
 
-it('does not count downstream event consumption as upstream SSE silence', async () => {
+it('allows slow downstream event consumption', async () => {
   const baseURL = await serve(async (req, res) => {
     await bodyOf(req)
     await delay(100)
     res.writeHead(200, { 'Content-Type': 'text/event-stream' })
     res.end(frame(chunk({ content: '慢消费仍完成' }, 'stop')) + 'data: [DONE]\n\n')
   })
-  const provider = new OpenAIChatProvider({ credentialResolver: async () => 'fixture-key', timeoutMs: 180, maxDurationMs: 500 })
+  const provider = new OpenAIChatProvider({ credentialResolver: async () => 'fixture-key' })
   const events: ModelEvent[] = []
   for await (const event of provider.stream(request(baseURL))) {
     events.push(event)
@@ -365,29 +359,28 @@ it('does not count downstream event consumption as upstream SSE silence', async 
   expect(events.map(event => event.type)).toEqual(['response.started', 'text.delta', 'response.completed'])
 })
 
-it('does not emit a later delta after the total deadline expires during downstream consumption', async () => {
+it('allows downstream event consumption beyond the former total deadline', async () => {
   const baseURL = await serve(async (req, res) => {
     await bodyOf(req)
     res.writeHead(200, { 'Content-Type': 'text/event-stream' })
     res.end(frame(chunk({ content: '不可晚到' }, 'stop')) + 'data: [DONE]\n\n')
   })
-  const provider = new OpenAIChatProvider({ credentialResolver: async () => 'fixture-key', timeoutMs: 400, maxDurationMs: 200 })
+  const provider = new OpenAIChatProvider({ credentialResolver: async () => 'fixture-key' })
   const events: ModelEvent[] = []
   for await (const event of provider.stream(request(baseURL))) {
     events.push(event)
     if (event.type === 'response.started') await delay(250)
   }
-  expect(events.map(event => event.type)).toEqual(['response.started', 'response.failed'])
-  expect(events.at(-1)).toMatchObject({ failure: { outcome: 'unknown', kind: 'timeout' } })
+  expect(events.map(event => event.type)).toEqual(['response.started', 'text.delta', 'response.completed'])
 })
 
-it('preserves external stop when the total deadline fires before downstream consumption resumes', async () => {
+it('preserves external stop during downstream consumption', async () => {
   const baseURL = await serve(async (req, res) => {
     await bodyOf(req)
     res.writeHead(200, { 'Content-Type': 'text/event-stream' })
     res.write(frame(chunk({ content: '不可晚到' }, 'stop')) + 'data: [DONE]\n\n')
   })
-  const provider = new OpenAIChatProvider({ credentialResolver: async () => 'fixture-key', timeoutMs: 500, maxDurationMs: 100 })
+  const provider = new OpenAIChatProvider({ credentialResolver: async () => 'fixture-key' })
   const controller = new AbortController()
   const stream = provider.stream(request(baseURL), { signal: controller.signal })
   const started = await stream.next()
@@ -400,23 +393,14 @@ it('preserves external stop when the total deadline fires before downstream cons
   expect((await stream.next()).done).toBe(true)
 })
 
-it('settles credential resolution on the total deadline or external stop without sending a late request', async () => {
-  let fetches = 0
-  const fetchStub: typeof fetch = async () => { fetches++; throw new Error('late-fetch') }
-  for (const mode of ['deadline', 'stop'] as const) {
-    let release: ((value: string) => void) | undefined
-    const resolver = new Promise<string>(resolve => { release = resolve })
-    const provider = new OpenAIChatProvider({ credentialResolver: async () => resolver, fetch: fetchStub,
-      timeoutMs: 50, maxDurationMs: 80 })
-    const controller = new AbortController()
-    const pending = collect(provider, request('http://127.0.0.1:1/v1'), controller.signal)
-    if (mode === 'stop') setTimeout(() => controller.abort(), 25)
-    let events: ModelEvent[] | null
-    try { events = await Promise.race([pending, delay(220).then(() => null)]) }
-    finally { release?.('late-credential'); await pending }
-    expect(events).not.toBeNull()
-    expect(events?.at(-1)).toMatchObject({ type: 'response.failed', failure: {
-      outcome: 'not-sent', kind: mode === 'stop' ? 'aborted' : 'timeout' } })
-    expect(fetches).toBe(0)
-  }
+it('stops a stalled credential wait without sending a late request', async () => {
+  const transport = vi.fn<typeof fetch>(), controller = new AbortController()
+  let release!: (credential: string) => void
+  const credential = new Promise<string>(resolve => { release = resolve })
+  const provider = new OpenAIChatProvider({ credentialResolver: async () => credential, fetch: transport })
+  const pending = collect(provider, request('https://fixture.invalid/v1'), controller.signal)
+  await Promise.resolve(); controller.abort()
+  expect((await pending).at(-1)).toMatchObject({ type: 'response.failed', failure: { outcome: 'not-sent', kind: 'aborted' } })
+  release('late-credential'); await Promise.resolve()
+  expect(transport).not.toHaveBeenCalled()
 })

@@ -45,9 +45,6 @@ import {
   COMPONENT_RUNTIME_API_VERSION,
   COMPONENT_SCHEMA_VERSION,
   MAX_HISTORY_STEPS,
-  MAX_PROJECT_SCENES,
-  MAX_SCENE_NODES,
-  MAX_SCENE_PRESENTATION_STATES,
   MIN_NODE_SIZE,
   MIN_VISIBLE_NODE_EDGE,
   RECOMMENDED_PROJECT_SCENES,
@@ -67,9 +64,6 @@ import {
   INTERACTION_ACTION_TYPES,
   INTERACTION_CONDITION_TYPES,
   INTERACTION_TRIGGER_TYPES,
-  MAX_INTERACTION_ACTIONS,
-  MAX_INTERACTION_CONDITIONS,
-  MAX_SCENE_INTERACTIONS,
 } from '../src/shared/interactionTypes'
 import {
   PUBLISHED_INTERACTION_PLAYBACK_SUPPORT,
@@ -81,10 +75,6 @@ import {
   type SurfaceRuntimeInstanceLifecycle,
 } from '../src/shared/surfaceRuntimeTypes'
 import {
-  MAX_RUNTIME_ASSET_BINDINGS,
-  MAX_RUNTIME_CONTENT_ENTRIES,
-  MAX_RUNTIME_NODE_BINDINGS,
-  MAX_RUNTIME_SOURCE_BYTES,
   runtimeDocumentSchema,
 } from '../src/shared/runtimeSchema'
 import type {
@@ -105,11 +95,10 @@ import {
   HOST_EVIDENCE_SCHEMA_VERSION,
 } from '../src/player/HostEvidenceRecorder'
 import {
-  SINGLE_HTML_HARD_LIMIT_BYTES,
   SINGLE_HTML_WARNING_BYTES,
 } from '../src/renderer/export/exportSize'
 
-export const AI_CAPABILITY_INDEX_MAX_BYTES = 16_384
+export const AI_CAPABILITY_INDEX_RECOMMENDED_BYTES = 16_384
 export const AI_CAPABILITY_DISCOVERY_MAX_BYTES = 8_192
 export const AI_CAPABILITY_MANIFEST_VERSION = 1 as const
 export const INTERACTION_PROTOCOL_VERSION = 1 as const
@@ -343,13 +332,12 @@ function readableResourceJson(value: unknown): string {
   return `${JSON.stringify(normalizeJson(value), null, 2)}\n`
 }
 
-export function assertIndexWithinLimit(index: unknown): void {
+export function indexSizeWarning(index: unknown): string | undefined {
   const byteLength = canonicalJsonByteLength(index)
-  if (byteLength > AI_CAPABILITY_INDEX_MAX_BYTES) {
-    throw new Error(
-      `AI 能力索引规范化后为 ${byteLength} 字节，超过 ${AI_CAPABILITY_INDEX_MAX_BYTES} 字节上限。`,
-    )
+  if (byteLength > AI_CAPABILITY_INDEX_RECOMMENDED_BYTES) {
+    return `AI 能力索引规范化后为 ${byteLength} 字节，超过建议 ${AI_CAPABILITY_INDEX_RECOMMENDED_BYTES} 字节；完整能力仍正常生成，按需读取。`
   }
+  return undefined
 }
 
 function sha256(value: string | Uint8Array): string {
@@ -365,10 +353,26 @@ function schemaLiteral(
   property: string,
 ): unknown {
   const properties = schema.properties
-  if (typeof properties !== 'object' || properties === null) return undefined
-  const propertySchema = (properties as Record<string, unknown>)[property]
-  if (typeof propertySchema !== 'object' || propertySchema === null) return undefined
-  return (propertySchema as Record<string, unknown>).const
+  if (typeof properties === 'object' && properties !== null) {
+    const propertySchema = (properties as Record<string, unknown>)[property]
+    if (typeof propertySchema === 'object' && propertySchema !== null &&
+      Object.hasOwn(propertySchema, 'const')) {
+      return (propertySchema as Record<string, unknown>).const
+    }
+  }
+  for (const composition of ['anyOf', 'oneOf'] as const) {
+    const branches = schema[composition]
+    if (!Array.isArray(branches) || branches.length === 0) continue
+    const literals = branches.map((branch) =>
+      typeof branch === 'object' && branch !== null
+        ? schemaLiteral(branch as Record<string, unknown>, property)
+        : undefined,
+    )
+    if (literals[0] !== undefined && literals.every((literal) => literal === literals[0])) {
+      return literals[0]
+    }
+  }
+  return undefined
 }
 
 function collectDiscriminatorValues(
@@ -850,6 +854,34 @@ async function directFileEvidence(
   })))
 }
 
+/** Package the maintained method entry and its optional support files; model reads remain task scoped. */
+async function methodSkillResourceFiles(projectRoot: string, skillName: string): Promise<Map<string, string>> {
+  const skillRoot = await fs.realpath(path.join(projectRoot, '.agents', 'skills', skillName))
+  const resources = new Map<string, string>()
+  const read = async (relative: string) => {
+    const filename = await fs.realpath(path.join(skillRoot, ...relative.split('/')))
+    const difference = path.relative(skillRoot, filename)
+    if (!difference || difference === '..' || difference.startsWith(`..${path.sep}`) || path.isAbsolute(difference)
+      || !(await fs.stat(filename)).isFile()) throw new Error(`Bundled Skill file escapes root: ${skillName}/${relative}`)
+    resources.set(relative, await fs.readFile(filename, 'utf8'))
+  }
+  const walk = async (relative: string): Promise<void> => {
+    const entries = await fs.readdir(path.join(skillRoot, ...relative.split('/')), { withFileTypes: true }).catch(error => {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+      throw error
+    })
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name, 'en'))) {
+      const child = `${relative}/${entry.name}`
+      if (entry.isDirectory()) await walk(child)
+      else if (/\.(?:md|mjs|py|ps1)$/.test(entry.name)) await read(child)
+    }
+  }
+  await read('SKILL.md')
+  await walk('references')
+  await walk('scripts')
+  return resources
+}
+
 async function addDiscoveryArtifacts(projectRoot: string, files: Map<string, string>, catalog: ComponentCatalogCapabilitySnapshot) {
   const entries: CourseAgentCapabilityEntry[] = []
   const resources = new Map<string, string>()
@@ -943,14 +975,11 @@ async function addDiscoveryArtifacts(projectRoot: string, files: Map<string, str
       carriers: protocol.carriers, summary: '正式协议同源的完整Markdown指南，保留自然换行供原生Read按需读取。' })
   }
   for (const { name: skillName } of courseAgentMethodSkills) {
-    const sourceRoot = path.join(projectRoot, '.agents', 'skills', skillName)
-    const sourcePaths = ['SKILL.md', ...(await fs.readdir(path.join(sourceRoot, 'references'))).filter(name => name.endsWith('.md')).map(name => `references/${name}`)]
-    for (const sourcePath of sourcePaths) {
-      const text = await fs.readFile(path.join(sourceRoot, sourcePath), 'utf8')
+    for (const [sourcePath, text] of await methodSkillResourceFiles(projectRoot, skillName)) {
       const location = `skills/${skillName}/${sourcePath}`
       resources.set(location, text)
       const label = text.match(/^# (.+)$/m)?.[1] ?? sourcePath
-      entries.push({ id: sourcePath === 'SKILL.md' ? `skill:${skillName}` : `reference:${skillName}/${path.posix.basename(sourcePath, '.md')}`,
+      entries.push({ id: sourcePath === 'SKILL.md' ? `skill:${skillName}` : `reference:${skillName}/${sourcePath.startsWith('scripts/') ? 'script-' : ''}${path.posix.basename(sourcePath, path.posix.extname(sourcePath))}`,
         kind: sourcePath === 'SKILL.md' ? 'skill' : 'reference', label, path: location, scopes: allScopes, carriers: allCarriers,
         summary: sourcePath === 'SKILL.md' ? text.match(/^description: (.+)$/m)?.[1]?.slice(0, 300) ?? label : label,
         keywords: text.split('\n').filter(line => /^#{1,3} /.test(line)).join(' '),
@@ -1474,27 +1503,15 @@ export async function generateAiCapabilityArtifacts(
     guidance: {
       recommendedProjectScenes: RECOMMENDED_PROJECT_SCENES,
       recommendedSceneNodes: RECOMMENDED_SCENE_NODES,
+      aiCapabilityIndexRecommendedBytes: AI_CAPABILITY_INDEX_RECOMMENDED_BYTES,
     },
     defensive: {
-      maxProjectScenes: MAX_PROJECT_SCENES,
-      maxSceneNodes: MAX_SCENE_NODES,
-      maxGlobalLayerItems: MAX_SCENE_NODES,
-      maxScenePresentationStates: MAX_SCENE_PRESENTATION_STATES,
-      maxSceneInteractions: MAX_SCENE_INTERACTIONS,
-      maxInteractionConditions: MAX_INTERACTION_CONDITIONS,
-      maxInteractionActions: MAX_INTERACTION_ACTIONS,
-      maxRuntimeSourceBytes: MAX_RUNTIME_SOURCE_BYTES,
-      maxRuntimeContentEntries: MAX_RUNTIME_CONTENT_ENTRIES,
-      maxRuntimeAssetBindings: MAX_RUNTIME_ASSET_BINDINGS,
-      maxRuntimeNodeBindings: MAX_RUNTIME_NODE_BINDINGS,
       maxHistorySteps: MAX_HISTORY_STEPS,
       minNodeSize: MIN_NODE_SIZE,
       minVisibleNodeEdge: MIN_VISIBLE_NODE_EDGE,
       singleHtmlWarningBytes: SINGLE_HTML_WARNING_BYTES,
-      singleHtmlHardLimitBytes: SINGLE_HTML_HARD_LIMIT_BYTES,
-      aiCapabilityIndexMaxBytes: AI_CAPABILITY_INDEX_MAX_BYTES,
     },
-    note: '推荐值用于可维护性；防御上限用于损坏与滥用保护，不是日常创作目标。',
+    note: '推荐值仅为创作建议；其余字段描述编辑器历史容量、尺寸语义与体积提示，不构成 AI 任务的总时限或累计预算。',
     sourceOfTruth: [
       'src/shared/constants.ts',
       'src/shared/courseProjectTypes.ts',
@@ -1508,30 +1525,15 @@ export async function generateAiCapabilityArtifacts(
     canonicalJson(componentCatalogSnapshot),
   )
 
-  // The packaged skills.read catalog exposes only files linked directly from each
-  // SKILL.md. The broader capability discovery may index other references.
+  // The packaged and on-disk catalogs expose the same method support files.
+  // Availability in the bundle does not preload their contents into a model request.
   const bundledSkillFiles = new Map<string, string>()
   const bundledSkillManifest = { skills: await Promise.all(courseAgentMethodSkills.map(async skill => {
-    const skillRoot = await fs.realpath(path.join(projectRoot, '.agents', 'skills', skill.name))
+    const resources = await methodSkillResourceFiles(projectRoot, skill.name)
     const entryKey = `skills/${skill.name}/SKILL.md`
-    const entryReal = await fs.realpath(path.join(skillRoot, 'SKILL.md'))
-    const entryDifference = path.relative(skillRoot, entryReal)
-    if (!entryDifference || entryDifference === '..' || entryDifference.startsWith(`..${path.sep}`)
-      || path.isAbsolute(entryDifference) || !(await fs.stat(entryReal)).isFile())
-      throw new Error(`Bundled Skill entry escapes root: ${entryKey}`)
-    const entry = await fs.readFile(entryReal, 'utf8')
-    bundledSkillFiles.set(entryKey, entry)
-    const links = [...entry.matchAll(/\]\((references\/[A-Za-z0-9._-]+\.md)(?:#[^)]*)?\)/g)]
-      .map(match => match[1]!)
-    const references = [...new Set(links)].sort().map(relative => `skills/${skill.name}/${relative}`)
-    for (const key of references) {
-      const relative = key.slice(`skills/${skill.name}/`.length)
-      const real = await fs.realpath(path.join(skillRoot, ...relative.split('/')))
-      const difference = path.relative(skillRoot, real)
-      if (!difference || difference === '..' || difference.startsWith(`..${path.sep}`) || path.isAbsolute(difference)
-        || !(await fs.stat(real)).isFile()) throw new Error(`Bundled Skill reference escapes root: ${key}`)
-      bundledSkillFiles.set(key, await fs.readFile(real, 'utf8'))
-    }
+    const entry = resources.get('SKILL.md')!
+    const references = [...resources.keys()].filter(relative => relative !== 'SKILL.md').sort().map(relative => `skills/${skill.name}/${relative}`)
+    for (const [relative, content] of resources) bundledSkillFiles.set(`skills/${skill.name}/${relative}`, content)
     const description = entry.match(/^description: (.+)$/m)?.[1]?.split('。')[0]?.trim()
     if (!description) throw new Error(`Bundled Skill missing description: ${entryKey}`)
     const version = createHash('sha256').update(canonicalJson(Object.fromEntries(
@@ -1754,7 +1756,8 @@ export async function generateAiCapabilityArtifacts(
     artifacts: downstreamEvidence,
     hashScope: '索引记录下级哈希，证据记录索引；均不自哈希。',
   }
-  assertIndexWithinLimit(index)
+  const sizeWarning = indexSizeWarning(index)
+  if (sizeWarning) console.warn(sizeWarning)
   files.set('index.json', canonicalJson(index))
   const capabilityBundle = await addDiscoveryArtifacts(projectRoot, files, componentCatalogSnapshot)
 
@@ -1948,7 +1951,7 @@ async function main(): Promise<void> {
       if (skills !== generated.bundledSkillBundle) throw new Error('打包 Skill 资源过期，请运行 generate:ai-capabilities')
     }
     console.log(
-      `AI 能力清单已是最新状态；索引 ${generated.indexBytes} / ${AI_CAPABILITY_INDEX_MAX_BYTES} 字节，组件目录 ${generated.componentCatalogStatus}。`,
+      `AI 能力清单已是最新状态；索引 ${generated.indexBytes} 字节（建议 ${AI_CAPABILITY_INDEX_RECOMMENDED_BYTES} 字节），组件目录 ${generated.componentCatalogStatus}。`,
     )
     return
   }
@@ -1960,7 +1963,7 @@ async function main(): Promise<void> {
     await fs.writeFile(path.join(options.projectRoot, 'src/shared/generated/bundledSkills.json'), generated.bundledSkillBundle, 'utf8')
   }
   console.log(
-    `已生成 ${generated.files.size} 个 AI 能力文件；索引 ${generated.indexBytes} / ${AI_CAPABILITY_INDEX_MAX_BYTES} 字节，组件目录 ${generated.componentCatalogStatus}。`,
+    `已生成 ${generated.files.size} 个 AI 能力文件；索引 ${generated.indexBytes} 字节（建议 ${AI_CAPABILITY_INDEX_RECOMMENDED_BYTES} 字节），组件目录 ${generated.componentCatalogStatus}。`,
   )
 }
 

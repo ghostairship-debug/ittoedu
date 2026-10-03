@@ -1,5 +1,4 @@
 export const SINGLE_HTML_WARNING_BYTES = 50 * 1024 * 1024
-export const SINGLE_HTML_HARD_LIMIT_BYTES = 256 * 1024 * 1024
 
 /** Computes UTF-8 size without allocating another full copy of a large HTML. */
 export function utf8ByteLength(value: string): number {
@@ -24,4 +23,3 @@ export function utf8ByteLength(value: string): number {
   }
   return bytes
 }
-

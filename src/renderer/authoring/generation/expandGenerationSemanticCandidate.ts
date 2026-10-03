@@ -9,6 +9,7 @@ import { captureSelectionReplacementScopes } from '../tools/semanticReplacementT
 import { prepareGeneratedImage } from '../../project/prepareGeneratedImage'
 import { generatedImageFormat } from '../../../shared/generatedImageFormat'
 import { resolveBackgroundTarget } from '../tools/backgroundTool'
+import { effectiveSceneCanvas } from '../../../shared/slideCanvas'
 
 type Step = GenerationCandidate['steps'][number]
 function sameDestination(left: AuthoringToolDestinationV1, right: AuthoringToolDestinationV1) {
@@ -41,7 +42,7 @@ export async function expandGenerationSemanticCandidate(candidate: GenerationCan
       const destination = step.destination
       if (!request.destinations.some(allowed => sameDestination(allowed, destination))) throw new Error('图片目标不在本次请求范围内')
       const input = generationMediaApplyInputSchema.parse(step.input)
-      const { target, surface } = resolveAuthoringToolScope(document, destination)
+      const { target, surface, location } = resolveAuthoringToolScope(document, destination)
       const imageAfter = request.selectionActions?.find(action => action.operation === 'insert-image-after' && sameDestination(action.destination, destination))
       const anchor = imageAfter && imageAfter.operation === 'insert-image-after' && destination.kind === 'create' && destination.scope.parent.kind === 'owner'
         ? projectEffectiveLayers({ project: document, locationId: target.locationId, stateId: target.stateId, owner: target.owner }).unifiedRows.find(row => row.id === imageAfter.target.itemId)?.item : null
@@ -92,7 +93,10 @@ export async function expandGenerationSemanticCandidate(candidate: GenerationCan
         else {
           const width = anchor?.frame.width, y = anchor ? anchor.frame.y + anchor.frame.height + 24 : undefined
           const height = width && imageDimensions ? width * imageDimensions.height / imageDimensions.width : undefined
-          const remaining = surface.type === 'slide' && y !== undefined ? surface.canvas.height - y : undefined
+          // Scene objects use the current page; shared objects retain their reference frame.
+          const scene = surface.type === 'slide' && target.owner === 'scene' && location.kind === 'slide-scene'
+            ? surface.scenes.find(scene => scene.id === location.sceneId) : undefined
+          const remaining = surface.type === 'slide' && y !== undefined ? effectiveSceneCanvas(surface, scene).height - y : undefined
           if (remaining !== undefined && remaining < 24) throw new Error('选中说明下方没有足够插图空间；请先调整页面布局或明确改用当前页范围')
           const placement = anchor && width && height ? { x: anchor.frame.x, y, width, height: remaining === undefined ? height : Math.min(height, remaining) } : {}
           push(step.id, 'native.content', destination, { operation: 'insert', template: { nativeType: 'image', assetId, fit: input.fit ?? 'contain', ...placement } })

@@ -1,8 +1,8 @@
 import type { CourseProjectDocument } from '../courseProjectTypes'
+import { visitProjectDynamicInstances } from '../composition/dynamic'
 import {
   courseProjectLayerItemIds,
   finalizeCourseProjectHealthFindings,
-  visitCourseLayerItems,
 } from './internal'
 import type {
   CourseProjectHealthArchiveFiles,
@@ -19,16 +19,16 @@ export function collectCourseProjectRuntimeHealth(
   // universe. Published Course V2 preserves the reference but does not define a
   // narrower owner-visibility contract, so only genuinely absent IDs are errors.
   const availableIds = courseProjectLayerItemIds(project)
-  visitCourseLayerItems(project, (visit) => {
-    if (visit.item.kind !== 'runtime') return
-    const { runtime } = visit.item
+  visitProjectDynamicInstances(project, (visit) => {
+    if (visit.kind !== 'runtime') return
+    const { runtime } = visit
     if (runtime.enabled && !runtime.staticFallback) {
       drafts.push({
         severity: 'warning',
         code: 'runtime-static-fallback-missing',
         message: '已启用的运行时没有 staticFallback，静态导出、缩略图或运行时失败时可能无可用画面。',
-        path: [...visit.path, 'runtime', 'staticFallback'],
-        layerItemId: visit.item.layerItemId,
+        path: [...visit.path, 'staticFallback'],
+        layerItemId: visit.layerItemId,
         ...('surfaceId' in visit.owner ? { surfaceId: visit.owner.surfaceId } : {}),
       })
     }
@@ -38,8 +38,8 @@ export function collectCourseProjectRuntimeHealth(
         severity: 'error',
         code: 'runtime-node-reference-missing',
         message: `运行时节点绑定“${bindingKey}”引用了工程中不存在的图层“${layerItemId}”。`,
-        path: [...visit.path, 'runtime', 'nodeBindings', bindingKey],
-        layerItemId: visit.item.layerItemId,
+        path: [...visit.path, 'nodeBindings', bindingKey],
+        layerItemId: visit.layerItemId,
         ...('surfaceId' in visit.owner ? { surfaceId: visit.owner.surfaceId } : {}),
       })
     })

@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
-import { WORKSPACE_PPTX_MAX_BYTES, workspaceFilesRequestSchema, type RegisteredWorkspaceRoot, type WorkspaceFilesAPI, type WorkspaceFilesChange, type WorkspaceItemResult, type WorkspaceOperationResult } from '../../shared/workbench/workspaceFiles'
+import { workspaceFilesRequestSchema, type RegisteredWorkspaceRoot, type WorkspaceFilesAPI, type WorkspaceFilesChange, type WorkspaceItemResult, type WorkspaceOperationResult } from '../../shared/workbench/workspaceFiles'
 import { UserFacingError } from '../../shared/errors'
 import type { WorkspaceFiles } from './WorkspaceFiles'
 import { createBlankCourseProject } from '../../core/course/createCourseProject'
@@ -24,6 +24,11 @@ export class WorkspaceFilesDesktopService {
   constructor(private readonly files: WorkspaceFiles, private readonly relocateConversationHomes?: RelocateConversationHomes) { this.operate.subscribe = this.subscribe }
   /** Inject the HTML preview service (B2). Until then preview requests fail closed. */
   attachHtmlPreview(host: HtmlPreviewHost) { this.previewHost = host }
+  async assertAuthorizedPath(filename: string): Promise<string> {
+    const resolved = await fs.realpath(filename)
+    if (![...this.authorized.values()].some(root => { const relative = path.relative(root.resolvedPath, resolved); return relative === '' || !relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative) })) throw new Error('文件不在已授权的工作空间中')
+    return resolved
+  }
   readonly subscribe = (listener: (event: WorkspaceFilesChange) => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
   dispose() { for (const close of this.watchers.values()) close(); this.watchers.clear(); this.listeners.clear() }
   private watch(workspaceId: string) {
@@ -106,6 +111,7 @@ export class WorkspaceFilesDesktopService {
         case 'html-preview.release': return await host.release(input)
         case 'html-preview.resolve-target': return await host.resolveTarget(input)
         case 'html-preview.edit': return await host.edit(input)
+        case 'html-preview.edit-source': return await host.editSource(input)
       }
     }
     if (![...this.authorized.values()].some(root => root.workspaceId === input.workspaceId)) throw new Error('工作空间尚未授权')
@@ -128,8 +134,6 @@ export class WorkspaceFilesDesktopService {
       case 'read-pptx': {
         const resolved = await this.files.resolveEntry(input.workspaceId, input.entryId)
         if (resolved.kind !== 'file' || !/\.pptx$/i.test(resolved.resolvedPath)) throw new Error('只能把 .pptx 文件导入为 H5 演示')
-        const stat = await fs.stat(resolved.resolvedPath)
-        if (stat.size > WORKSPACE_PPTX_MAX_BYTES) throw new UserFacingError('PPT 导入失败', 'PPTX 不能超过 256 MiB。', '请压缩图片或拆分演示文稿后再导入。')
         const bytes = new Uint8Array(await fs.readFile(resolved.resolvedPath))
         const current = await this.files.resolveEntry(input.workspaceId, input.entryId)
         if (current.kind !== 'file' || pathKey(current.resolvedPath) !== pathKey(resolved.resolvedPath)) throw new Error('PPT 文件已变化，请重新选择')
@@ -208,6 +212,7 @@ async function service() {
   }))
 }
 export async function authorizeWorkspaceFilesRoot(directory: string) { return (await service()).authorizeRoot(directory) }
+export async function assertAuthorizedWorkspacePath(filename: string) { return (await service()).assertAuthorizedPath(filename) }
 export async function attachHtmlPreviewHost(host: HtmlPreviewHost): Promise<void> { (await service()).attachHtmlPreview(host) }
 export const operateWorkspaceFiles: WorkspaceFilesAPI = async request => (await service()).operate(request)
 

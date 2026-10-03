@@ -20,13 +20,11 @@ import {
   validConversationHome,
 } from '../../../shared/workbench/conversations'
 
-const MAX_ID = 256
-const MAX_TEXT = 1024 * 1024
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT'
 
 function clone<T>(value: T): T { return structuredClone(value) }
-function validId(value: unknown): value is string { return typeof value === 'string' && value.length > 0 && value.length <= MAX_ID }
-function validText(value: unknown, maximum = MAX_TEXT): value is string { return typeof value === 'string' && value.length <= maximum }
+function validId(value: unknown): value is string { return typeof value === 'string' && value.length > 0 }
+function validText(value: unknown): value is string { return typeof value === 'string' }
 function validRootPath(value: unknown): value is string { return typeof value === 'string' && value.length > 0 && value.length <= 32767 }
 function validTime(value: unknown): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 }
 function validRevision(value: unknown): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 }
@@ -60,11 +58,11 @@ function validWorkspace(value: unknown, workspaceId: string): value is Workspace
 function validConversation(value: unknown, conversationId: string): value is ConversationRecord {
   if (!value || typeof value !== 'object') return false
   const item = value as ConversationRecord
-  return item.conversationId === conversationId && validId(item.conversationId) && validId(item.workspaceId) && validText(item.title, 1024)
+  return item.conversationId === conversationId && validId(item.conversationId) && validId(item.workspaceId) && validText(item.title)
     && Array.isArray(item.messages) && item.messages.every(validMessage) && new Set(item.messages.map(message => message.messageId)).size === item.messages.length
     && Array.isArray(item.attachmentIds) && uniqueIds(item.attachmentIds) && validRunIndex(item.runIndex)
     && validText(item.inputDraft) && Array.isArray(item.frozenContextRefs) && item.frozenContextRefs.every(validContextRef)
-    && Array.isArray(item.inputAttachments) && item.inputAttachments.length <= 1000 && item.inputAttachments.every(ref => inputAttachmentReferenceSchema.safeParse(ref).success)
+    && Array.isArray(item.inputAttachments) && item.inputAttachments.every(ref => inputAttachmentReferenceSchema.safeParse(ref).success)
     && new Set(item.inputAttachments.map(ref => `${ref.attachmentId}:${ref.representationId}`)).size === item.inputAttachments.length
     && new Set(item.frozenContextRefs.map(reference => reference.contextRefId)).size === item.frozenContextRefs.length
     && (item.home === undefined || validConversationHome(item.home))
@@ -207,7 +205,7 @@ export class ConversationStore {
       if (!validId(conversationId)) throw new TypeError('会话身份无效')
       if (state.conversations[conversationId]) throw new ConversationStoreError('identity-conflict', '会话身份已存在')
       const title = input.title ?? '', inputDraft = input.inputDraft ?? ''
-      if (!validText(title, 1024) || !validText(inputDraft)) throw new TypeError('会话标题或草稿无效')
+      if (!validText(title) || !validText(inputDraft)) throw new TypeError('会话标题或草稿无效')
       if (input.home !== undefined && (!validConversationHome(input.home) || input.home.missing)) throw new TypeError('会话所属位置无效')
       if (input.element !== undefined && !validConversationElement(input.element)) throw new TypeError('元素会话范围无效')
       const time = this.now(), record: ConversationRecord = {

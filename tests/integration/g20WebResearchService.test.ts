@@ -79,3 +79,19 @@ it('opens more than forty sources and accepts the page limits advertised by the 
     expect(fetch).toHaveBeenCalledTimes(46)
   } finally { await service.stopRun('many'); service.endRun('many') }
 })
+
+it('uses cancellable downloads without task deadlines and accepts explicit larger source pages', async () => {
+  const body = 'source '.repeat(8000)
+  const fetch = vi.fn(async (url: string, _options?: { signal?: AbortSignal }) => ({ url, status: 200, contentType: 'text/plain', bytes: html(body) }))
+  const search = vi.fn().mockResolvedValue({ provider: 'fixture', results: [{ title: 'Source', url: 'https://example.com', snippet: body }] })
+  const service = new WebResearchService({ fetch, searchProvider: { search } })
+  service.beginRun('large-page')
+  try {
+    expect(await service.search({ runId: 'large-page', query: 'q'.repeat(3000), cursor: 'c'.repeat(3000), limit: 30 }))
+      .toMatchObject({ status: 'results', results: [{ snippet: body }] })
+    expect(await service.open({ runId: 'large-page', url: 'https://example.com', limit: body.length }))
+      .toMatchObject({ status: 'opened', text: body.trim(), truncated: false })
+    const options = fetch.mock.calls[0]?.[1]
+    expect(options).toEqual({ signal: expect.any(AbortSignal) })
+  } finally { await service.stopRun('large-page'); service.endRun('large-page') }
+})

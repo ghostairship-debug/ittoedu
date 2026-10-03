@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import type { ExecutionConnectionView, ExecutionProfile, ExecutionRole, ExecutionRoleSelection, ExecutionSettingsView } from '../../shared/workbench/executionSettings'
 import { executionRoles } from '../../shared/workbench/executionSettings'
-import { executionSettingsConnectionSchema, executionSettingsRolesSchema, type DiscoveredModels, type ExecutionSettingsAPI, type SaveExecutionConnectionDesktop } from '../../shared/workbench/executionSettingsDesktop'
+import { executionSettingsConnectionSchema, executionSettingsRolesSchema, type DiscoveredModels, type DiscoveredReasoningEffort, type ExecutionSettingsAPI, type SaveExecutionConnectionDesktop } from '../../shared/workbench/executionSettingsDesktop'
+import { findModelKnowledgeReference, type ModelKnowledgeEntry } from '../../shared/workbench/modelKnowledge'
+import type { ModelJsonObject } from '../../shared/workbench/modelProvider'
+import { readModelReasoningEffort, resolveModelReasoning, withModelReasoning, withoutManagedModelReasoning, type ResolvedModelReasoning } from '../../shared/workbench/modelReasoning'
+import { ModelThinkingBudgetControl } from './ModelThinkingBudgetControl'
+import { ModelReferencePicker } from './ModelReferencePicker'
 import { modelCapabilityIdentity, modelCapabilityRecord, type ProbedModelCapability } from '../../shared/workbench/modelCapabilities'
 import { openAIImagesEndpoint, supportsChatGPTOAuthImages, supportsOpenAIImages } from '../../shared/workbench/images'
 
@@ -13,7 +18,9 @@ export interface ExecutionSettingsPanelProps {
   onSaved?(settings: ExecutionSettingsView): void
 }
 type ConnectionDraft = SaveExecutionConnectionDesktop['connection']
-type RoleDraft = { connectionId: string; model: string; parameters: string }
+type RoleDraft = { connectionId: string; model: string; parameters: string; capabilityModel: string }
+const knowledgeKey = (entry: ModelKnowledgeEntry) => entry.provider ? `${entry.provider}/${entry.id}` : entry.id
+const effortLabels: Record<DiscoveredReasoningEffort, string> = { none: '关闭', minimal: '极低', low: '低', medium: '中', high: '高', xhigh: '极高', max: '最高' }
 const blankConnection = (): ConnectionDraft => ({ provider: '', protocol: 'openai-chat', imageProtocol: null, baseURL: '', accountId: '', authKind: 'api-key', billing: { kind: 'unknown' } })
 const oauthConnection = (): ConnectionDraft => ({ provider: 'openai', protocol: 'chatgpt-responses', imageProtocol: null, baseURL: 'https://chatgpt.com/backend-api/codex', accountId: 'pending-login', authKind: 'oauth', billing: { kind: 'subscription' } })
 const connectionPresets: { label: string; connection: ConnectionDraft }[] = [
@@ -38,10 +45,10 @@ const roleDrafts = (profile?: ExecutionProfile): Record<ExecutionRole, RoleDraft
   const selection = profile?.roles[role]
   const parameters = { ...selection?.parameters }
   return [role, { connectionId: selection?.connectionId ?? '', model: selection?.model ?? '',
-    parameters: JSON.stringify(parameters, null, 2) }]
+    parameters: JSON.stringify(parameters, null, 2), capabilityModel: selection?.capabilityModel ?? '' }]
 })) as Record<ExecutionRole, RoleDraft>
 const matchesSavedRole = (draft: RoleDraft, saved: NonNullable<ExecutionProfile['roles'][ExecutionRole]>, connection: ExecutionConnectionView): boolean => {
-  if (draft.connectionId !== saved.connectionId || draft.model !== saved.model) return false
+  if (draft.connectionId !== saved.connectionId || draft.model !== saved.model || draft.capabilityModel !== (saved.capabilityModel ?? '')) return false
   try {
     const parameters: unknown = JSON.parse(draft.parameters)
     if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) return false
@@ -83,6 +90,8 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
   const [models, setModels] = useState<string[]>([])
   const [catalogs, setCatalogs] = useState<Record<string, DiscoveredModels>>({})
   const [catalogErrors, setCatalogErrors] = useState<Record<string, string>>({})
+  const [modelKnowledge, setModelKnowledge] = useState<ModelKnowledgeEntry[]>([])
+  const [knowledgeError, setKnowledgeError] = useState('')
   const catalogRequested = useRef(new Set<string>())
   const [imageConnectionId, setImageConnectionId] = useState('')
   const [imageModel, setImageModel] = useState('')
@@ -109,6 +118,10 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
     dialog.current?.querySelector<HTMLButtonElement>('button')?.focus()
     setSettings(null); setSelectedId(''); setConnection(entry === 'chatgpt-oauth' ? oauthConnection() : blankConnection()); setRoles(roleDrafts())
     if (!api) { setError('当前环境没有模型连接设置服务。'); return }
+    setKnowledgeError('')
+    void api.knownModels().then(entries => {
+      if (generation.current === ticket) setModelKnowledge([...new Map(entries.map(entry => [knowledgeKey(entry), entry])).values()])
+    }).catch(() => { if (generation.current === ticket) setKnowledgeError('型号资料暂不可读取；已存参考型号仍保留。') })
     setBusy(true)
     void api.read().then(value => {
       if (generation.current !== ticket) return
@@ -215,7 +228,8 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
         if (!draft.model.trim()) throw new Error(`${roleLabels[role]}需要选择图片模型。`)
         if (Object.keys(parameters).length) throw new Error(`${roleLabels[role]}当前不支持角色级模型参数；请清空为 {} 后保存。图片输出参数由每次图片请求单独指定，不会静默忽略。`)
       }
-      return [role, { connectionId: draft.connectionId, model: draft.model, parameters }]
+      return [role, { connectionId: draft.connectionId, model: draft.model, parameters,
+        ...(draft.capabilityModel ? { capabilityModel: draft.capabilityModel } : {}) }]
     }))
     let parsed: ReturnType<typeof executionSettingsRolesSchema.parse>
     try { parsed = executionSettingsRolesSchema.parse(selections) }
@@ -298,9 +312,25 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
     catch { setError('取消登录尚未完成，请重试。') }
   }
   const patchRole = (role: ExecutionRole, patch: Partial<RoleDraft>) => setRoles(value => ({ ...value, [role]: { ...value[role], ...patch } }))
+  const chooseRoleEffort = (role: ExecutionRole, effort: DiscoveredReasoningEffort | undefined, resolved: ResolvedModelReasoning) => {
+    try {
+      const current: unknown = JSON.parse(roles[role].parameters)
+      if (!current || typeof current !== 'object' || Array.isArray(current)) throw new Error()
+      patchRole(role, { parameters: JSON.stringify(withModelReasoning(current as ModelJsonObject, effort, resolved), null, 2) })
+      setError('')
+    } catch { setError('当前高级参数不是有效 JSON 对象；原参数保留，修正后可设置思考。') }
+  }
+  const chooseRoleReference = (role: ExecutionRole, capabilityModel: string) => {
+    try {
+      const current: unknown = JSON.parse(roles[role].parameters)
+      if (!current || typeof current !== 'object' || Array.isArray(current)) throw new Error()
+      patchRole(role, { capabilityModel, parameters: JSON.stringify(withoutManagedModelReasoning(current as ModelJsonObject), null, 2) })
+    } catch { patchRole(role, { capabilityModel }) }
+  }
   const chooseRoleConnection = (role: ExecutionRole, connectionId: string) => {
     setRoles(value => ({ ...value, [role]: { ...value[role], connectionId,
-      model: value[role].connectionId === connectionId ? value[role].model : '' } }))
+      model: value[role].connectionId === connectionId ? value[role].model : '',
+      capabilityModel: value[role].connectionId === connectionId ? value[role].capabilityModel : '' } }))
   }
   const imageConnections = settings?.connections.filter(item => isImageConnection(item) && !item.revoked) ?? []
   const oauthImageConnections = imageConnections.filter(isOAuthImageConnection)
@@ -329,7 +359,7 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
         const selection = preset[role][0]!
         if (current[role].connectionId || current[role].model) continue
         next[role] = { connectionId: selection.connectionId, model: selection.model,
-          parameters: JSON.stringify(selection.parameters ?? {}, null, 2) }
+          parameters: JSON.stringify(selection.parameters ?? {}, null, 2), capabilityModel: selection.capabilityModel ?? '' }
       }
       return next
     })
@@ -371,7 +401,13 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
           <label style={field}>供应商标识<input aria-label="供应商标识" value={connection.provider} readOnly={connection.authKind === 'oauth'} onChange={event => setConnection(value => ({ ...value, provider: event.target.value }))} placeholder="供应商名称" /></label>
           <label style={field}>账号标识<input aria-label="账号标识" value={connection.accountId === 'pending-login' ? '登录后自动识别' : connection.accountId} readOnly={connection.authKind === 'oauth'} onChange={event => setConnection(value => ({ ...value, accountId: event.target.value }))} placeholder="便于区分账号的名称" /></label>
           <label style={field}>API 地址<input aria-label="API 地址" type="url" value={connection.baseURL} readOnly={connection.authKind === 'oauth'} onChange={event => setConnection(value => ({ ...value, baseURL: event.target.value }))} placeholder="https://供应商地址/v1" /></label>
-          <label style={field}>协议<input aria-label="协议" value={connection.protocol === 'chatgpt-responses' ? 'ChatGPT Responses' : 'OpenAI 兼容 Chat Completions'} readOnly /></label>
+          <label style={field}>协议{connection.authKind === 'oauth'
+            ? <input aria-label="协议" value="ChatGPT Responses" readOnly />
+            : <select aria-label="协议" value={connection.protocol} onChange={event => setConnection(value => ({ ...value, protocol: event.target.value as ConnectionDraft['protocol'] }))}>
+              <option value="openai-chat">OpenAI Chat Completions</option>
+              <option value="openai-responses">OpenAI Responses</option>
+              <option value="anthropic-messages">Anthropic Messages</option>
+            </select>}</label>
           <label style={field}>认证方式<select aria-label="认证方式" value={connection.authKind} onChange={event => { setApiKey(''); const oauth = event.target.value === 'oauth'; setConnection(value => oauth
             ? oauthConnection()
             : { ...value, protocol: 'openai-chat', imageProtocol: null, baseURL: '', accountId: '', authKind: 'api-key', billing: { kind: 'unknown' } }) }}>
@@ -474,7 +510,7 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
                 {unsupported && <option value={roles[role].connectionId} disabled>{chosen ? `${chosen.connection.provider} · ${chosen.connection.accountId}` : roles[role].connectionId}（当前图片路径不支持）</option>}
                 {available.map(entry => <option key={entry.connection.id} value={entry.connection.id}>{entry.connection.provider} · {entry.connection.accountId} · {billingLabels[entry.connection.billing.kind]}{entry.revoked ? '（已撤销）' : !entry.hasCredential ? isOAuthImageConnection(entry) ? '（未登录）' : '（未接通）' : ''}</option>)}
               </select></label>
-              <label style={field}>{imageRole ? `${roleLabels[role]}：图片模型` : `${roleLabels[role]}模型`}<select aria-label={modelLabel} value={roles[role].model} disabled={!roles[role].connectionId} onChange={event => patchRole(role, { model: event.target.value })}>
+              <label style={field}>{imageRole ? `${roleLabels[role]}：图片模型` : `${roleLabels[role]}模型`}<select aria-label={modelLabel} value={roles[role].model} disabled={!roles[role].connectionId} onChange={event => patchRole(role, { model: event.target.value, capabilityModel: '' })}>
                 <option value="">{!chosen ? '先选择连接' : catalog ? '选择模型' : '正在读取目录或目录不可用'}</option>
                 {extraModels.map(model => <option key={model} value={model}>{model}（已存配置，目录未列出，能力待验证）</option>)}
                 {choices.map(model => <option key={model.id} value={model.id}>{model.displayName && model.displayName !== model.id ? `${model.displayName} · ${model.id}` : model.id}{imageRole && isOAuthImageProjectCandidate(chosen, model.id) ? '（项目候选，能力待验证）' : '（目录列出，能力待验证）'}</option>)}
@@ -487,9 +523,37 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
               onChange={event => patchRole(role, { model: event.target.value })} placeholder="供应商实际支持的 Images 模型 ID" /></label>}
             {chosen && <small>{chosen.connection.provider} · {chosen.connection.accountId} · {billingLabels[chosen.connection.billing.kind]}。{catalog ? `目录列出 ${catalog.models.length} 个名称；不代表${roleLabels[role]}能力已验证。` : catalogError ?? (chosen.hasCredential && !chosen.revoked ? '正在读取该连接的模型目录。' : '连接凭据不可用，无法读取目录。')}</small>}
             {roles[role].connectionId && !imageRole && (catalogError || catalog && noChoices || !chosen?.hasCredential) && <details><summary>目录不可用或无候选时手动指定模型 ID</summary>
-              <label style={field}>自定义{modelLabel}<input aria-label={`自定义${modelLabel}`} value={roles[role].model} onChange={event => patchRole(role, { model: event.target.value })} placeholder="请核对供应商提供的准确 ID" /></label>
+              <label style={field}>自定义{modelLabel}<input aria-label={`自定义${modelLabel}`} value={roles[role].model} onChange={event => patchRole(role, { model: event.target.value, capabilityModel: '' })} placeholder="请核对供应商提供的准确 ID" /></label>
               <small>仅用于目录无法列出该模型的连接；名称和能力均未验证，请核对当前连接的计费来源。</small>
             </details>}
+            {chosen && !imageRole && roles[role].model && (() => {
+              const reference = findModelKnowledgeReference(modelKnowledge, roles[role].capabilityModel)
+              const actual = catalog?.models.find(model => model.id === roles[role].model) ?? { id: roles[role].model }
+              const resolved = resolveModelReasoning(chosen.connection, { ...actual, ...(reference ? { metadata: reference } : {}) })
+              let parameters: ModelJsonObject | undefined
+              try { const parsed: unknown = JSON.parse(roles[role].parameters); if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) parameters = parsed as ModelJsonObject } catch { /* Keep advanced text until explicitly saved. */ }
+              const effort = readModelReasoningEffort(parameters, resolved)
+              return <div role="group" aria-label={`${roleLabels[role]}思考设置`} style={{ display: 'grid', gap: 8, marginTop: 8 }}>
+                {resolved.kind === 'fixed' ? <small>该模型固定启用思考，没有可调档位。</small>
+                  : resolved.format === 'anthropic-budget' ? <ModelThinkingBudgetControl
+                    key={`${roles[role].model}:${roles[role].capabilityModel}`} parameters={parameters ?? {}} resolved={resolved} disabled={busy || !parameters}
+                    onChange={next => patchRole(role, { parameters: JSON.stringify(next, null, 2) })} />
+                  : resolved.kind === 'budget' ? <small>该型号使用数值控制思考；当前连接的参数格式尚未识别。</small>
+                  : resolved.choices.length > 0 ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    <span>{resolved.kind === 'toggle' ? '思考模式' : '推理强度'}</span>
+                    <button type="button" aria-pressed={effort === undefined} onClick={() => chooseRoleEffort(role, undefined, resolved)}>默认</button>
+                    {resolved.choices.map(choice => <button type="button" key={choice.effort} aria-pressed={effort === choice.effort}
+                      onClick={() => chooseRoleEffort(role, choice.effort, resolved)}>{choice.label ?? effortLabels[choice.effort]}</button>)}
+                  </div> : <small>尚未识别可调思考。若这是供应商别名，可选择对应参考型号。</small>}
+                <details open={resolved.source === 'unknown' || Boolean(roles[role].capabilityModel)}><summary>参考型号</summary>
+                  <ModelReferencePicker models={modelKnowledge} label={`${roleLabels[role]}参考型号`}
+                    value={reference ? knowledgeKey(reference) : roles[role].capabilityModel} disabled={busy}
+                    onChange={key => chooseRoleReference(role, key)} />
+                  <small>只用于识别能力；仍向当前连接请求 {roles[role].model}。实际支持以接入服务为准。</small>
+                  {knowledgeError && <small>{knowledgeError}</small>}
+                </details>
+              </div>
+            })()}
             {imageRole && <p style={{ margin: '8px 0 0', fontSize: 13 }}>
               {unsupported ? '已保存的连接没有启用受支持的图片协议；请明确配置 Images API 或选择 ChatGPT OAuth。' : !chosen ? '尚未配置图片连接。请先启用 Images API 并接通 API Key，或登录 ChatGPT。' : chosen.revoked ? '此连接已撤销，需要重新接通。' : !chosen.hasCredential ? '此连接尚未接通凭据。' : '此连接已接通凭据。'}
               {' '}此设置页没有{roleLabels[role]}能力的独立验证记录；保存模型名称不代表该模型可用。请求会使用所选连接和模型，不会自动切换图片连接。

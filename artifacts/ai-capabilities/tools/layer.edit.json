@@ -265,7 +265,6 @@
             "items": {
               "$ref": "#/$defs/__schema0"
             },
-            "maxItems": 200,
             "minItems": 2,
             "type": "array"
           }
@@ -295,7 +294,6 @@
             "items": {
               "$ref": "#/$defs/__schema0"
             },
-            "maxItems": 200,
             "minItems": 3,
             "type": "array"
           }

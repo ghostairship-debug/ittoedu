@@ -2,6 +2,7 @@ import { constrainControllerDisplayFrame, controllerDisplayFrame, useControllerD
 import {
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -16,7 +17,10 @@ import { flowParagraphAnchorAt, flowParagraphAnchoredFrame, type FlowParagraphBl
 import { DEFAULT_SLIDE_CANVAS } from '../../../shared/slideCanvas'
 import { playbackControllerInsets, type PlaybackChromeInsets } from '../../../shared/playbackViewGeometry'
 import { rotatedWorldRectAxisBounds } from '../../authoring/stageViewportTransform'
-import type { LayerItem } from '../../../shared/courseProjectTypes'
+import type { CompositionLayerItem, LayerItem } from '../../../shared/courseProjectTypes'
+import type { PublishedCompositionLayerItem } from '../../../shared/publishedCourseTypes'
+import { WebCompositionAuthoringContent, type CompositionAuthoringSelection } from '../../composition/WebCompositionAuthoringContent'
+import type { CompositionContentEdit } from '../../../shared/composition/edit'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { RuntimeAuthoringTargetUpdate } from '../../../shared/runtimeTypes'
 import type { ImportedImageAsset } from '../../project/assetManager'
@@ -361,6 +365,11 @@ export interface FlowOverlayAuthoringLayerProps {
   readonly onViewPanChange?: (pan: FlowPoint) => void
   readonly children: ReactNode
   readonly onEditFormula?: (layerItemId: string) => void
+  readonly onEditComposition?: (layerItemId: string) => void
+  readonly onCompositionEdit?: (layerItemId: string, edit: CompositionContentEdit) => Promise<void>
+  readonly onCompositionSelection?: (selection: CompositionAuthoringSelection) => void
+  readonly selectedCompositionNode?: CompositionAuthoringSelection | null
+  readonly publishCompositionContent?: (item: CompositionLayerItem) => PublishedCompositionLayerItem['content']
   readonly onBeforeGesture?: () => boolean
   readonly commands: FlowCurrentSessionCommandPort
 }
@@ -394,11 +403,36 @@ export function FlowOverlayAuthoringLayer({
   children,
   onBeforeGesture,
   onEditFormula,
+  onEditComposition,
+  onCompositionEdit,
+  onCompositionSelection,
+  selectedCompositionNode,
+  publishCompositionContent,
   commands,
 }: FlowOverlayAuthoringLayerProps) {
   const overlayRef = useRef<HTMLDivElement>(null)
   const overlayGestureRef = useRef<FlowOverlayGesture | null>(null)
   const [overlayPreview, setOverlayPreview] = useState<{ id: string; frame: StageRect } | null>(null)
+  const [compositionSelection, setCompositionSelection] = useState<{ layerItemId: string; nodeId: string } | null>(null)
+  const [compositionPending, setCompositionPending] = useState(false)
+  const activeCompositionNode = selectedCompositionNode === undefined ? compositionSelection : selectedCompositionNode
+  const compositionSubmitting = useRef(false)
+  const compositionContents = useMemo(() => {
+    const content = new Map<string, PublishedCompositionLayerItem['content']>()
+    if (publishCompositionContent) {
+      for (const layer of view.overlayLayers) {
+        if (layer.item.kind === 'composition') content.set(layer.selectionId, publishCompositionContent(layer.item as CompositionLayerItem))
+      }
+    }
+    return content
+  }, [view.overlayLayers, publishCompositionContent])
+  const submitComposition = async (layerItemId: string, edit: CompositionContentEdit) => {
+    if (!onCompositionEdit) throw new Error('当前组合内容不可编辑')
+    if (compositionSubmitting.current) throw new Error('上一处修改正在保存，请稍后再操作。')
+    compositionSubmitting.current = true; setCompositionPending(true)
+    try { await onCompositionEdit(layerItemId, edit) }
+    finally { compositionSubmitting.current = false; setCompositionPending(false) }
+  }
 
   const geometry = createFlowViewportGeometry({
     viewportClientRect: { x: 0, y: 0, ...overlayViewportSize },
@@ -658,6 +692,8 @@ export function FlowOverlayAuthoringLayer({
     const underlayVisual = layer.owner === 'global' && layer.globalPlane === 'underlay'
     const passThroughVisual = layer.item.hitPolicy === 'pass-through'
     const inertVisual = underlayVisual || passThroughVisual
+    const compositionEditable = selected && layer.item.kind === 'composition' && Boolean(onCompositionEdit)
+      && !readOnly && !layer.locked && !inertVisual
     const pageRuntime = isFlowPageRuntimeLayer(layer)
     const paperComponent = layer.owner === 'surface' && layer.item.paperSpace === 'paper'
       && layer.item.kind === 'component' && layer.effectiveVisible
@@ -697,14 +733,16 @@ export function FlowOverlayAuthoringLayer({
           ),
           opacity: layer.item.opacity,
           ...(controller ? (() => { const base = overlayFrameOf(layer), visible = controllerDisplayFrame(layer.item as LayerItem, base); return { clipPath: `inset(${visible.y-base.y}px ${base.width-(visible.x-base.x)-visible.width}px ${base.height-(visible.y-base.y)-visible.height}px ${visible.x-base.x}px)` } })() : {}),
-          pointerEvents: dynamicPaper && !inertVisual ? 'auto' : interactive ? 'auto' : 'none',
+          pointerEvents: compositionEditable || dynamicPaper && !inertVisual ? 'auto' : interactive ? 'auto' : 'none',
         }}
         onPointerDown={interactive ? event => beginOverlayGesture(event, layer)
           : dynamicEdgeActive
             ? event => { if ((event.target as HTMLElement).closest('[data-runtime-drag-edge]')) beginOverlayGesture(event, layer) }
             : undefined}
         onContextMenu={(interactive || (dynamicPaper && !readOnly && !inertVisual)) ? event => openOverlayMenu(event, layer) : undefined}
-        onDoubleClick={!readOnly && layer.item.kind === 'native' && layer.item.content.nativeType === 'formula' ? event => { event.stopPropagation(); onEditFormula?.(layer.selectionId) } : undefined}
+        onDoubleClick={!readOnly && !layer.locked && layer.item.kind === 'composition'
+          ? event => { event.stopPropagation(); onEditComposition?.(layer.selectionId) }
+          : !readOnly && layer.item.kind === 'native' && layer.item.content.nativeType === 'formula' ? event => { event.stopPropagation(); onEditFormula?.(layer.selectionId) } : undefined}
         onPointerMove={readOnly ? undefined : moveOverlayGesture}
         onPointerUp={readOnly ? undefined : endOverlayGesture}
         onPointerCancel={readOnly ? undefined : cancelOverlayGesture}
@@ -727,7 +765,18 @@ export function FlowOverlayAuthoringLayer({
             scenes={overlayScenes}
             currentSceneId={locationId}
           />
-        ) : dynamicPaper ? (
+        ) : layer.item.kind === 'composition' ? (publishCompositionContent ? <WebCompositionAuthoringContent
+          layerItemId={layer.selectionId}
+          content={compositionContents.get(layer.selectionId)!}
+          width={(preview ?? authoredFrameOf(layer)).width} height={(preview ?? authoredFrameOf(layer)).height}
+          interactive={compositionEditable}
+          selectedNodeId={compositionEditable && activeCompositionNode?.layerItemId === layer.selectionId ? activeCompositionNode.nodeId : null}
+          onSelection={compositionEditable ? selected => { setCompositionSelection({ layerItemId: selected.layerItemId, nodeId: selected.nodeId }); onCompositionSelection?.(selected) } : undefined}
+          onEdit={compositionEditable ? edit => submitComposition(layer.selectionId, edit) : undefined}
+          editingDisabled={compositionPending}
+          sessionKey={`${documentId ?? view.projectId}:${view.surfaceId}`}
+          projectId={view.projectId} components={componentPackages} assetUrls={assetUrls}
+        /> : <div role="alert">组合内容暂未连接预览</div>) : dynamicPaper ? (
           <FlowPaperDynamicLightEdit
             documentId={documentId ?? ''}
             projectId={view.projectId}
@@ -765,6 +814,7 @@ export function FlowOverlayAuthoringLayer({
     const pageRuntime = isFlowPageRuntimeLayer(layer)
     const dynamicPaper = pageRuntime || (layer.owner === 'surface' && layer.item.paperSpace === 'paper'
       && layer.item.kind === 'component' && layer.effectiveVisible)
+    const compositionEditable = editable && layer.item.kind === 'composition' && Boolean(onCompositionEdit)
     return (
       <div
         key={layer.selectionId}
@@ -787,14 +837,16 @@ export function FlowOverlayAuthoringLayer({
             true,
             canvas,
           ),
-          pointerEvents: readOnly || dynamicPaper ? 'none' : 'auto',
+          pointerEvents: readOnly || dynamicPaper || compositionEditable ? 'none' : 'auto',
           background: 'transparent',
         }}
         onPointerDown={readOnly ? undefined : dynamicPaper
           ? event => { if ((event.target as HTMLElement).closest('[data-runtime-drag-edge], [data-handle]')) beginOverlayGesture(event, layer) }
           : event => beginOverlayGesture(event, layer)}
         onContextMenu={readOnly ? undefined : (event) => openOverlayMenu(event, layer)}
-        onDoubleClick={!readOnly && layer.item.kind === 'native' && layer.item.content.nativeType === 'formula' ? event => { event.stopPropagation(); onEditFormula?.(layer.selectionId) } : undefined}
+        onDoubleClick={!readOnly && !layer.locked && layer.item.kind === 'composition'
+          ? event => { event.stopPropagation(); onEditComposition?.(layer.selectionId) }
+          : !readOnly && layer.item.kind === 'native' && layer.item.content.nativeType === 'formula' ? event => { event.stopPropagation(); onEditFormula?.(layer.selectionId) } : undefined}
         onPointerMove={readOnly ? undefined : moveOverlayGesture}
         onPointerUp={readOnly ? undefined : endOverlayGesture}
         onPointerCancel={readOnly ? undefined : cancelOverlayGesture}

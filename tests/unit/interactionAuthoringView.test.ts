@@ -90,7 +90,7 @@ describe('interaction authoring typed views', () => {
       surfaceId: 'surface-slide',
       sceneId: 'scene-1',
       activeStateId: 'state-a',
-      ruleCapacity: { used: 1, limit: 1_000 },
+      ruleCapacity: { used: 1 },
     })
     if (view.availability !== 'available') throw new Error('expected available view')
     expect(view.nodes).toEqual([
@@ -239,7 +239,7 @@ describe('interaction authoring typed views', () => {
       activeSurfaceType: 'flow',
       activeSlideSceneId: null,
       activeStateId: null,
-      ruleCapacity: { used: 1, limit: 1_000 },
+      ruleCapacity: { used: 1 },
     })
     expect(fromSpatial.activeSurfaceType).toBe('spatial-2d')
     expect(fromSpatial.activeSlideSceneId).toBeNull()

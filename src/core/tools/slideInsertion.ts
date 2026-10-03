@@ -1,5 +1,4 @@
 import { nanoid } from 'nanoid'
-import { MAX_SCENE_NODES } from '../../shared/constants'
 import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
 import type { CourseProjectDocument, LayerItem, SlideSceneDocument, SlideSurfaceDocument } from '../../shared/courseProjectTypes'
 import { nativeLineGeometrySchema, type ShapeType } from '../../shared/contracts/native-v1'
@@ -7,7 +6,7 @@ import type { NativeLineGeometry } from '../../shared/contracts/native-v1/types'
 import { createTextNode, createFormulaNode, createShapeNode, createImageNode, createVideoNode } from './nativeNodeFactories'
 import { allocateCourseLayerOrder, sortScopedLayerList } from './layerOrder'
 import { commitCourseProjectMutation } from './courseProjectMutation'
-import { courseSlideCanvas } from '../../shared/slideCanvas'
+import { courseSlideCanvas, effectiveSceneCanvas } from '../../shared/slideCanvas'
 export interface SlideInsertionOwner { scope: string; selection: { locationId: string; stateId: string | null } }
 function stableId(prefix: string, preferred?: string): string { return preferred ?? `${prefix}-${nanoid(10)}` }
 export class SlideCommandError extends Error {
@@ -113,6 +112,13 @@ export function slideSceneContext(
   return { location, surface, scene }
 }
 
+/** Native insertion into a scene uses its page size; shared owners keep their reference size. */
+export function slideInsertionCanvas(project: CourseProjectDocument, owner: SlideInsertionOwner) {
+  if (owner.scope !== 'scene') return courseSlideCanvas(project)
+  const { surface, scene } = slideSceneContext(project, owner)
+  return effectiveSceneCanvas(surface, scene)
+}
+
 export function requireSceneScope(session: SlideInsertionOwner): void {
   if (session.scope !== 'scene') {
     throw new SlideCommandError('wrong-owner', '请先切换到场景层')
@@ -170,9 +176,6 @@ export function appendSceneLayer(
   item: LayerItem,
   stateId: string | null,
 ): void {
-  if (scene.layerItems.length >= MAX_SCENE_NODES) {
-    throw new Error(`已达到 ${MAX_SCENE_NODES} 个节点上限`)
-  }
   if (scene.layerItems.some((candidate) => candidate.layerItemId === item.layerItemId)) {
     throw new Error(`图层 ID 已存在：${item.layerItemId}`)
   }
@@ -247,7 +250,7 @@ export function planSlideTextInsertion(document: CourseProjectDocument, owner: S
         text: input.text ?? '双击编辑文字',
         x: input.x,
         y: input.y,
-        canvas: courseSlideCanvas(document),
+        canvas: slideInsertionCanvas(document, owner),
       }),
       existingCount,
       input.x !== undefined || input.y !== undefined,
@@ -268,7 +271,7 @@ export function planSlideFormulaInsertion(document: CourseProjectDocument, owner
         name: input.label ?? '公式',
         x: input.x,
         y: input.y,
-        canvas: courseSlideCanvas(document),
+        canvas: slideInsertionCanvas(document, owner),
       }),
       existingCount,
       input.x !== undefined || input.y !== undefined,
@@ -303,7 +306,7 @@ export function planSlideShapeInsertion(document: CourseProjectDocument, owner: 
           x: input.frame?.x ?? input.x,
           y: input.frame?.y ?? input.y,
           ...(input.frame ? { width: input.frame.width, height: input.frame.height } : {}),
-          canvas: courseSlideCanvas(document),
+          canvas: slideInsertionCanvas(document, owner),
         })
         if (lineGeometry) created.lineGeometry = structuredClone(lineGeometry)
         return created
@@ -350,7 +353,7 @@ export function planSlideImageInsertion(document: CourseProjectDocument, owner: 
         height: input.height ?? sized.height,
         x: input.x,
         y: input.y,
-        canvas: courseSlideCanvas(document),
+        canvas: slideInsertionCanvas(document, owner),
       }),
       existingCount,
       input.x !== undefined || input.y !== undefined,
@@ -377,7 +380,7 @@ export function planSlideVideoInsertion(document: CourseProjectDocument, owner: 
         height: input.height ?? sized.height,
         x: input.x,
         y: input.y,
-        canvas: courseSlideCanvas(document),
+        canvas: slideInsertionCanvas(document, owner),
       }),
       existingCount,
       input.x !== undefined || input.y !== undefined,

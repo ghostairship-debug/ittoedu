@@ -7,7 +7,6 @@ export interface IntakeJob {
 }
 /** FileReader keeps memory screenshots path-free and provides real byte progress/cancellation. */
 export function readAttachmentFile(file: File, signal: AbortSignal, progress: (loaded: number, total: number) => void): Promise<Uint8Array> {
-  if (file.size > 32 * 1024 * 1024) return Promise.reject(new Error(`${file.name} 超过 32 MiB 接收上限`))
   signal.throwIfAborted()
   return new Promise((resolve, reject) => {
     const reader = new FileReader(), cancel = () => reader.abort()

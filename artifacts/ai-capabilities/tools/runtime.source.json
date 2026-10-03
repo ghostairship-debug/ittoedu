@@ -17,14 +17,12 @@
         "additionalProperties": false,
         "properties": {
           "expectLocationId": {
-            "maxLength": 200,
             "minLength": 1,
             "type": "string"
           },
           "expectStateId": {
             "anyOf": [
               {
-                "maxLength": 200,
                 "minLength": 1,
                 "type": "string"
               },
@@ -34,7 +32,6 @@
             ]
           },
           "label": {
-            "maxLength": 200,
             "minLength": 1,
             "type": "string"
           },
@@ -50,7 +47,6 @@
         "type": "object"
       },
       "source": {
-        "maxLength": 2000000,
         "minLength": 1,
         "type": "string"
       },

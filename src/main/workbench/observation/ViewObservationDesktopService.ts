@@ -41,7 +41,6 @@ export class ViewObservationDesktopService {
       Object.fromEntries(Object.entries(files).map(([name, content]) => [name, resource(content, 'application/octet-stream')]))]))
     const payload = { project, locationId: input.identity.locationId, assets: {}, assetResources, components: {}, componentResources }
     const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64')
-    if (Buffer.byteLength(encoded) > 64 * 1024 * 1024) throw new Error('观察结构快照超过 64 MiB 上限；资源字节不计入结构载荷')
 
     const isolatedSession = session.fromPartition(`observation-${randomUUID()}`)
     installEditorProtocol(isolatedSession, url => {
@@ -70,9 +69,12 @@ export class ViewObservationDesktopService {
     }
     const onAbort = () => stop('观察已取消')
     const onGone = () => rejectStop(new Error('观察宿主异常退出'))
+    const onClosed = () => rejectStop(new Error('观察宿主已关闭'))
     input.signal?.addEventListener('abort', onAbort, { once: true })
     worker.webContents.once('render-process-gone', onGone)
-    const timeout = setTimeout(() => stop('观察宿主准备或截图超时'), 20_000)
+    worker.once('closed', onClosed)
+    if (input.signal?.aborted) onAbort()
+    const faultWait = setTimeout(() => stop('观察宿主准备或截图无响应'), 20_000)
     try {
       const result = await Promise.race([stopped, (async () => {
         await worker.loadURL(entry)
@@ -88,8 +90,10 @@ export class ViewObservationDesktopService {
       })()])
       return result
     } finally {
-      clearTimeout(timeout)
+      clearTimeout(faultWait)
       input.signal?.removeEventListener('abort', onAbort)
+      worker.removeListener('closed', onClosed)
+      worker.webContents.removeListener('render-process-gone', onGone)
       if (!worker.isDestroyed()) worker.destroy()
       binarySources.clear()
       isolatedSession.protocol.unhandle('courseware-editor')

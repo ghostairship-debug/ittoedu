@@ -60,15 +60,15 @@ describe('attachment failure recovery', () => {
     expect(Buffer.from((await service.readRepresentation(good.id, 'original-image')).bytes)).toEqual(goodBytes)
   })
 
-  it('retries the same immutable snapshot and request after cancellation or timeout without broadening exact file grants', async () => {
+  it('retries the same immutable snapshot and request after cancellation or extraction failure without broadening exact file grants', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     const { root, directory } = await fixture()
     const desktop = new AttachmentsDesktopService(directory)
     const owner = windowFor(11), other = windowFor(12), authorizationId = randomUUID(), requestId = randomUUID()
     const source = path.join(root, 'source.pdf')
     await fs.writeFile(source, '%PDF-1.7\nfixture')
-    const grants = (desktop as unknown as { grants: Map<string, { path: string; kind: 'file'; owner: number; expires: number }> }).grants
-    grants.set(authorizationId, { path: source, kind: 'file', owner: 11, expires: Date.now() + 60_000 })
+    const grants = (desktop as unknown as { grants: Map<string, { path: string; kind: 'file'; owner: number }> }).grants
+    grants.set(authorizationId, { path: source, kind: 'file', owner: 11 })
     const original = await desktop.operate({ type: 'receive-granted', authorizationId, requestId: randomUUID() }, owner) as Awaited<ReturnType<AttachmentService['readSnapshot']>>
     expect(original.source.authorizationId).toBe(authorizationId)
     await expect(desktop.operate({ type: 'receive-granted', authorizationId, requestId: randomUUID() }, other)).rejects.toMatchObject({ code: 'attachment-path-not-authorized' })
@@ -82,7 +82,7 @@ describe('attachment failure recovery', () => {
         started()
         return new Promise((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(options.signal?.reason), { once: true }))
       }
-      if (attempts === 2) throw new AttachmentError('extraction-timeout', 'fixture timeout')
+      if (attempts === 2) throw new AttachmentError('extraction-failed', 'fixture failed')
       return { material: { version: 1, extractorVersion: 'fixture', format: 'pdf', fragments: [{ id: 'page-1', kind: 'text', locator: { part: 'page:1', page: 1 }, text: 'recovered text' }], assets: [], gaps: [] }, totalPages: 1, selectedPages: { from: 1, to: 1 }, pageImages: [] }
     } }
     ;(desktop.attachments as unknown as { options: AttachmentServiceOptions }).options.extractor = extractor
@@ -92,7 +92,7 @@ describe('attachment failure recovery', () => {
     await desktop.operate({ type: 'cancel', requestId }, owner)
     await expect(cancelled).rejects.toMatchObject({ code: 'attachment-operation-cancelled' })
     expect(await desktop.attachments.readSnapshot(original.id)).toEqual(original)
-    await expect(desktop.operate(extract, owner)).rejects.toMatchObject({ code: 'attachment-extraction-timeout' })
+    await expect(desktop.operate(extract, owner)).rejects.toMatchObject({ code: 'attachment-extraction-failed' })
     expect(await desktop.attachments.readSnapshot(original.id)).toEqual(original)
     const derived = await desktop.operate(extract, owner) as Awaited<ReturnType<AttachmentService['readSnapshot']>>
     expect(derived).toMatchObject({ derivedFrom: original.id, digest: original.digest })

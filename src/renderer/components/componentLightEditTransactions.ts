@@ -64,7 +64,7 @@ export function planStaticFallbackRefresh(input: {
   now: string
 }): ComponentLightEditPlanResult {
   const located = locateCourseLayer(input.project, input.itemId)
-  if (!located || located.item.kind === 'native') return { ok: false, reason: '这个对象已不存在。' }
+  if (!located || (located.item.kind !== 'runtime' && located.item.kind !== 'component')) return { ok: false, reason: '这个对象没有程序后备图。' }
   if (located.item.locked) return { ok: false, reason: '对象已锁定。' }
   const hasFallback = located.item.kind === 'runtime' ? Boolean(located.item.runtime.staticFallback) : Boolean(located.item.staticFallbackAssetId)
   if (!hasFallback) return { ok: true, status: 'no-op' }

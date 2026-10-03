@@ -1,6 +1,6 @@
 # AGENTS.md 独立审查 v2：实施与实际证据（2026-10-03）
 
-已依审查 §2 完成三批实现，A2/B2 由同一主执行者统一集成。本文是工程修复结果，不代表真实 Electron 整链验收或 Owner 接受。按 Owner 后续指令提交本批修复及直接依赖；未运行付费/真实模型调用。工作树原有的其它修改未回退。
+已依审查 §2 完成三批实现，A2/B2 由同一主执行者统一集成。本文是工程修复结果；本轮补充了代表导入页、M17-T04 与 D3 的真实 Electron 宿主证据，但仍不代表 Owner 接受。按 Owner 后续指令提交本批修复及直接依赖；未运行付费/真实模型调用。工作树原有的其它修改未回退。
 
 提交范围：包括原审计中本批直接依赖的 Runtime 文字替换、read-observation 删除、默认磁盘复制等改动；执行器的上下文预算、视觉路由、恢复/进展及 Gateway 缓存等其它工作树改动未纳入。本文既有检查来自当时工作树；为验证拆分后的提交组合，另对临时提交快照检查类型和 C2/导入警告/D3 模型回执链，结果见 [scoped-commit-checks.txt](agents-md-2026-10-03-implementation-evidence/scoped-commit-checks.txt)。
 
@@ -12,7 +12,7 @@
 2. 未修：layer/supports、defer、全部事件、模块警告与文件/换图事项留到 Batch 2。C2 回归中已有的 BodyStreamingCapability 失败未修：测试对无改动配置保存假设 revision 增加，但 ExecutionSettingsStore 的 no-op 保存返回原 revision；该例不运行 Engine，相关设置源码未改。
 3. 保持边界：预览失败只跳过展示；参数完整性、Gateway 授权、CAS、停止及冲突处理不变。整脚本静态证明失败仍复用既有遍历诊断明确坏输入，不发布资源或半改写。四类坏输入继续拒绝，失败零提交；远程脚本限制和 CSP 不变。
 4. 直接验证：选定 C2 引擎/Runtime 用例 6 passed，未选的 38 skipped 不算通过；包含 preview begin 三类异常、正式提交/一次 undo、停止后迟到调用和 c 句柄 run 归属。HTML 正向 React bundle、整脚本保留、动态点保留、坏引用拒绝、日志与回执重放通过。下一轮 Engine 请求实测包含 html-import-warning。代表 HTML 用真实 HtmlImportService/Gateway/DocumentSession 提交、保存、文件回读；真实 Chromium 从回读后的 Runtime source 执行构造函数、连续答题和静态/动态图。
-5. 缺证据：代表页的 build admission 为 fixture；未在真实 Electron 宿主验证。没有性能测量。四文件 C2 全回归是 54 passed / 1 failed，不能称全绿。
+5. 缺证据：初始检查中的代表页 build admission 使用 fixture；续验的正式 UI 导入已通过 ControlledBuildService 与 Electron 独立宿主准入，fixture 仅为历史证据。没有性能测量。四文件 C2 全回归是 54 passed / 1 failed，不能称全绿。
 6. 与审查不同：§3.4 的 c 句柄归属问题确实复现并修；Gateway 的 readCoverage 实际有四处调用而非三处（Batch 3 删除）。本轮相关文件起始为 LF，不是文档描述的 CRLF，保持起始行尾。
 
 完整 C2 回归命令及关键输出：
@@ -31,7 +31,7 @@ Tests       1 failed | 54 passed (55)
 2. 未修：本地 ES 模块图按 Owner 决定不打包；相对 JSON/VTT 等不作为受管素材，已保留引用并诊断后果。远程依赖仍不能加载。不是把这些依赖记成运行成功。
 3. 保持边界：四类明确坏输入继续拒绝，包括静态脚本中的明确坏资源/模块引用。脚本语法错误带 script 序号，拒绝按 code 合并、最多列 10 组；warnings 按 code 合并、最多 5 条、每条最多 200 字。CSP/远程脚本/模块/Worker 不开放；权限、单 writer、CAS、停止、授权根、staging 和失败零提交不变。A5 只批准这一次，不升级 file.open 或已挂载只读句柄。
 4. 直接验证：5 个 HTML 文件 225 passed，证明资源内联、脚本/模块诊断、准入原因、回执重放与模型可见警告。文件工具 Batch 2 的 37 passed 证明 workspace/ask、先读/不先读、已批准外部写入/一次 undo、后续未批准拒绝、授权不升级、并发 CAS 和停止；Batch 3 相关读取改变后的最终 39 passed 继续覆盖这些属性。A4 完整文件当时 17 passed，包含五种形态、正式与热撤销、type 大小写和脚本冲突。真实 Main 输出在 Chromium 中五种 currentSrc 均选新图。4 个 Chromium carrier e2e 通过，含 body onload 触发及 destroy revoke Blob。代表页正式提交→保存→回读后真实 Chromium 的 head defer、两脚本顺序、layer/supports 样式、drag/drop、body/image load、构造函数、连续答题及图片显示均正常。
-5. 缺证据：未在真实 Electron 宿主验证整份导入准入。tests/e2e/g20M17HtmlImport.spec.ts 的远程脚本断言已改为成功导入、CSP 继续阻止请求，但此 Electron 用例未运行。无性能结论。代表页 localFetchUnpacked=true 证明相对 JSON 未打包；remoteLibraryLoaded=false 仅是该页库未加载的事实，不用它单独证明 CSP 阻断原因。
+5. 缺证据：正式 UI 导入的真实准入、保存、重开和必要互动已补验，详情见下方续验。相对 JSON/VTT、本地 ES 模块图不打包，远程库仍受 CSP 限制，不把它们记成相关依赖运行成功。旧 M17-T04 的 remoteRequests=[] 不能单独证明 CSP 原因；本轮增加实际 violation 断言。没有性能测量或新付费模型结果。
 6. 与审查不同：实际行尾为 LF。A4 首次探针错误地要求宽度描述符图片的 naturalWidth 等于文件像素宽度；浏览器会按候选密度修正 intrinsic width。探针已改为图像解码成功和 currentSrc 选中新图，不改产品来满足错误断言。匹配的 IMAGE/PNG type 保留，不匹配的 image/webp 删除。
 
 命令及关键原始输出：
@@ -62,7 +62,7 @@ Playwright 前后 docs 状态一致，未覆盖跟踪的证据图片。B3 新增
 2. 未修：C1 默认复制磁盘版并返回 disk-version 已正确，保持；可选 flushFirst 清理未实施。D2 没有真实不可接受耗时样本，不实施可选裁剪。B1/C4/C5/D4/D5 按裁决不动。
 3. 保持边界：C3 上游路径权限、分页游标、停止和未打开文件最终磁盘 CAS 保留；正式写入仍是 canonical transaction。D3 Runtime 每层 400、Component 每实例 400；声明目标不受此限。metadata 加在已有记录上，没有新缓存、Map 状态、配置或 gate。D1 其它协议检查入口保留。未改 AGENTS.md、Skill 或 CSP。
 4. 直接验证：C3 用真实正式队列阻塞/排队修改证明 drain 等待，然后分页的文字与版本来自同一新快照；Gateway read/attach spy 未调用，停止前返回拒绝，最终文件工具 39 passed，C1 磁盘复制也在其中。两个 registry 10 passed 证明 400→401→400 与无效候选不误报。publication/Main 9 passed 证明 metadata-only、targets 不变时诊断仍发布、文档隔离及 clear 消失。上游 3 个选定用例证明 authoring/live/global itemId 聚合与清除；未选 restart 不计通过。实际 Store→Gateway→Engine→下一 provider 请求证明其它对象不误提示、当前对象提示送达、清除后消失，声明目标继续返回；连同既有动态编辑与范围续接，3 文件 14 passed。D1 单个指定 Component 用例通过，源码编辑后的摘要冲突可诊断、修正后继续准入，syntax 仍可编译。locator 12 passed；直接源码探针 title/textarea 返回 unsupported-target。最终三个 tsconfig 类型检查通过。
-5. 缺证据：没有真实 Electron 的 D3 界面验收或性能测量；不声称读取/构建提速。没有完成全仓库测试矩阵，也不把未选用例算通过。
+5. 缺证据：D3 的 Runtime 与 Component 真实 Electron 宿主接线已补齐；模型收到和清除提示由既有及本轮聚焦 Engine provider 用例证明。没有性能测量，不声称读取/构建提速。没有完成全仓库测试矩阵，也不把未选用例算通过。
 6. 与审查不同：readCoverage 是四处调用；B3 新接受测试实际在 integration/g20M23HtmlLightEdit.test.ts，不在审查所写 unit 文件，已撤回正确位置的测试。D3 Runtime 限制按层计算，不能写成对象总共只返回 400 项；Main read 返回同一快照的 {targets,truncatedItemIds?}，避免另建缓存或第二次核查。
 
 命令及关键输出：
@@ -97,6 +97,62 @@ Tests       12 passed (12)
 npm run typecheck
 退出码 0
 ```
+
+**本轮真实 Electron 宿主补验（2026-10-03）**
+
+以下是上一轮命令与结果记录，摘要文件不是完整 Playwright stdout。续验的完整输出、准入和回执 JSON 见下一段；当前源码对应的必要制品按变化准备，Electron 串行运行。
+
+```text
+node node_modules/@playwright/test/cli.js test tests/e2e/g20AuditV2RepresentativeElectron.spec.ts --output output/g20/audit-v2/representative-electron/playwright-run-20261003c
+Raw result: 1 passed (55.4s)
+
+node node_modules/@playwright/test/cli.js test tests/e2e/g20M17HtmlImport.spec.ts -g 'M17-T04' --output output/g20/m17/resource-boundary/playwright-run-20261003
+Raw result: 1 passed (1.1m)
+
+node node_modules/@playwright/test/cli.js test tests/e2e/g20AuditV2D3Electron.spec.ts --output output/g20/audit-v2/d3-electron/playwright-run-20261003e
+Raw result: 1 passed (11.6s)
+```
+
+上一轮代表页证明正式 UI 导入、运行和部分重开行为，且采集实际 CDN `securitypolicyviolation`。源码核对表明此入口已经过 HtmlImportDesktopService → HtmlImportService.admit → Gateway build.check → ControlledBuildService → ElectronBuildAdmission；harness 没有替换 admission。此前写成“ControlledBuild 仍为 fixture”不符合实际，现已更正。原代表页只做 `fetch()`，不能由它宣称 JSON 数据可用或不可用；续验改为实际解析 JSON，补齐重开的样式、动态图、加载和拖拽断言。旧 M17-T04 的零请求仍仅是事实，不单独证明 CSP。
+
+D3 Runtime 的上一轮真实宿主回执为 [run-68Niw6/evidence.json](../../../output/g20/audit-v2/d3-electron/run-68Niw6/evidence.json)：初始当前对象为 1 个声明图片加 400 个自动文字（总数 401），其它对象为 1 个声明图片加 1 个文字（总数 2）；触发第 401 个自动目标后目标仍返回 401 项并产生截断提示，删除后提示清除，其他对象未误报。这份 Runtime 证据不替代 Component 每实例证据，后者见续验。探针控件的事件在真实 renderer 中派发，不据此宣称物理鼠标操作可达性通过。
+
+**本轮续验收口：按审查 §9 六项回报**
+
+1. 已消除：代表页正式导入 → 真实准入 → 受管资源 → 运行互动 → 保存 → 真正关闭/离线重开全部通过；补采的持久构建回执为 `status=ready`、`ok=true`、`processId=31556`、`ownerProcessId=16304`、一项目标真实行为证据，消息为“独立进程中的真实宿主准入通过”。重开后实际验证 head defer 顺序、连续答题、静态/动态图、layer/supports 样式、body/image load、拖拽。相对 JSON 返回 `Not found`，实际解析产生 `SyntaxError`，没有误记为依赖运行成功。M17-T04 已补采 enforce 模式的实际 CSP violation。D3 Runtime 与 Component 宿主 metadata-only 发布、送达当前对象、清除和其它对象隔离均通过；Component 真实验证复现了提示只有“Runtime 按层计”的本批缺陷，唯一新增产品修复是在现有 Gateway 提示中同时说明“Runtime 按层计，Component 按实例计”。
+2. 未修及原因：本地 ES 模块图、相对 JSON/VTT 不打包，远程脚本/模块/Worker 不开放，继续按 Owner 裁决提供诊断。C1 可选 flushFirst 清理和 D2 可选性能裁剪没有新依据，未实施。既有 BodyStreamingCapability 的 no-op revision 失败不在本批，仍保留，不能宣称整仓全绿。Component 声明 props 经作者 overlay 编辑，`content.targets` 当前只发布其自动命中；未扩成新的 Component props Gateway 能力。
+3. 保持边界及依据：上限仍是 Runtime 每层 400、Component 每实例 400，声明目标不占自动额度。只有正式 DocumentSession writer、最终 CAS、停止屏障、授权根、staging realpath 闭合和失败零提交继续有效。未改 AGENTS.md、Skills、CSP、Schema 或授权；没有新缓存、配置、平台、宿主接口或付费模型调用。
+4. 命令、关键原始输出与证明属性：仅准备变化涉及的 Electron 制品一次；renderer/player 未改，复用已有制品。三条 Playwright 命令只选择下述四个相关命名用例，全部实际运行，零匹配与未选用例不算通过。
+
+```text
+node node_modules/@playwright/test/cli.js test tests/e2e/g20AuditV2RepresentativeElectron.spec.ts --output output/g20/audit-v2/representative-electron/playwright-closeout-final
+1 passed (1.2m)
+
+node node_modules/@playwright/test/cli.js test tests/e2e/g20AuditV2D3Electron.spec.ts tests/e2e/g20AuditV2D3ComponentElectron.spec.ts --output output/g20/audit-v2/d3-host-closeout
+2 passed (22.3s)
+
+node node_modules/@playwright/test/cli.js test tests/e2e/g20M17HtmlImport.spec.ts -g M17-T04 --output output/g20/audit-v2/m17-host-closeout
+1 passed (59.4s)
+
+node node_modules/vitest/vitest.mjs run tests/integration/g20M27RuntimeTextReplace.test.ts -t "delivers the current object truncation notice"
+Test Files  1 passed (1)
+Tests       1 passed | 2 skipped (3)
+
+npm run build:electron
+退出码 0
+
+npm run typecheck
+退出码 0（renderer、electron、e2e 三个 tsconfig）
+```
+
+完整 stdout：[代表页](../../../output/g20/audit-v2/representative-electron/playwright-closeout-final-command-output.txt)、[Runtime/Component](../../../output/g20/audit-v2/d3-host-closeout-command-output.txt)、[M17-T04](../../../output/g20/audit-v2/m17-host-closeout-command-output.txt)、[模型回执](../../../output/g20/audit-v2/d3-electron/notice-provider-closeout-command-output.txt)、[Electron 构建](../../../output/g20/audit-v2/d3-electron/build-electron-closeout-command-output.txt)、[类型检查](../../../output/g20/audit-v2/final-typecheck-command-output.txt)。
+
+真实结果：[代表页准入/重开](../../../output/g20/audit-v2/representative-electron/run-lSGYWy/evidence.json)、[M17 enforce CSP](../../../output/g20/m17/resource-boundary/run-04Q7FJ/csp-evidence.json)、[Runtime](../../../output/g20/audit-v2/d3-electron/run-4mgJa3/evidence.json)、[Component](../../../output/g20/audit-v2/d3-component-electron/run-PUlgED/evidence.json)。Runtime 初始/超限/清除总目标均为 401（另有一个声明图片）；Component 同包两个实例分别返回 400/1 个自动目标，当前实例 DOM 400 → 401 → 400，目标内容始终不变而提示产生/清除，其它实例不误报，两个声明 overlay 保留，当前声明文字能进入正式编辑器后取消，文档 revision 始终为 0。新增/删除及声明编辑探针在真实 renderer 派发事件，不把它作为物理点击可达性证据。HTML 警告到下一模型请求的原 Engine 证据因相关实现未变继续复用；本轮 D3 聚焦 Engine 用例证明更新后的提示产生、送达和消失。
+
+按 [agent-browser Skill](/C:/Users/74755/.agents/skills/agent-browser/SKILL.md) 的独立 Electron/CDP 方式复用现有 harness，本轮只读连接代表页所属端口 52641，留下[实际宿主快照](../../../output/g20/audit-v2/representative-electron/run-lSGYWy/agent-browser-snapshot.txt)；测试只关闭自己的 Electron 实例，之后关闭该命名浏览器连接。仅 Electron runner 串行，两个新派只读/独立写域子任务均已完成。
+
+5. 缺失的运行/性能证据：本交接指定的三项宿主补验已完成；没有性能测量，不声称提速；没有新增付费模型或完整 E2E 矩阵，也不需要用它们代替已成立的软件属性证据。当前仍是 engineering candidate，Owner 接受状态不由自动化推定；本轮没有提交、push 或发布。
+6. 与审查/前轮报告不一致的实际事实：正式 UI 入口已经走真实 ControlledBuild 准入，原“仍为 fixture”结论已纠正；旧 `fetch()` 成功不能证明 JSON 数据加载，现改为实际解析并捕获 `Not found`；原 D3 Runtime 总数 400 的断言漏算声明图片，正确总数是 401；Component 计数按实例，原统一提示遗漏这点已修正。诊断脚本一度误读 builds/requests、声明按钮物理点击被 canvas 拦截，以及合并正则命令零匹配均未计通过；更正后的实际命名用例输出如上，不修改产品来满足错误探针。
 
 **逐项状态**
 

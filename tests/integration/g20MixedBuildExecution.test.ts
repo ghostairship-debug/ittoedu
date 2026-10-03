@@ -15,7 +15,6 @@ import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEng
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import type { ExecutionRunRecord, ExecutionStart } from '../../src/shared/workbench/execution'
-import { MODEL_REQUEST_BUDGET_EXHAUSTED } from '../../src/shared/workbench/execution'
 import type { ModelEvent, ModelProvider, ModelRequest, ModelSelection } from '../../src/shared/workbench/modelProvider'
 import type { ToolResult } from '../../src/shared/workbench/tools'
 
@@ -131,20 +130,21 @@ it('keeps committed text and History when build checking is stopped, and rejects
   expect(f.text.read().model).toMatchObject({ source: '旧正文' })
 })
 
-it('reports model request budget exhaustion with retained text and no build import', async () => {
+it('reports a connection failure with retained text and no build import', async () => {
   let turn = 0
   const provider: ModelProvider = { async *stream(request) {
+    if (turn === 2) { yield { type: 'response.failed', requestId: request.requestId, sequence: 1, failure: { outcome: 'unknown', kind: 'transport', code: 'connection-lost', message: '连接中断' } }; return }
     yield complete(request, turn++ === 0 ? firstRound(request) : createBuild(request))
   } }
   const f = await fixture(provider)
-  const started = await f.engine.start({ ...f.input, budget: { maxRequests: 2 } })
+  const started = await f.engine.start({ ...f.input, })
   await f.engine.wait(started.runId)
   const { stored, end } = await durableEnd(f, started.runId)
   expect(stored.status).toBe('partial')
-  expect(stored.failure?.code).toBe(MODEL_REQUEST_BUDGET_EXHAUSTED)
-  expect(stored.failure?.message).toContain('2 次模型请求上限')
+  expect(stored.failure?.code).toBe('connection-lost')
+  expect(stored.failure?.message).toContain('连接中断')
   expect(end.data.text).toContain('已保留 1 项正式文档修改')
-  expect(end.data.text).toContain('构建尚未正式导入')
+  expect(end.data.text).toContain('暂存构建未导入')
   expect(end.data.text).toContain('剩余工作未完成')
   expect(f.text.read()).toMatchObject({ model: { source: '新正文' }, undoDepth: 1 })
   expect(f.courseSession.read()).toMatchObject({ revision: 0, undoDepth: 0 })
@@ -153,10 +153,11 @@ it('reports model request budget exhaustion with retained text and no build impo
     .toMatchObject({ kind: 'error', code: 'run-stopped' })
 })
 
-it('continues an exhausted mixed task after reading current documents without repeating committed text or build import', async () => {
-  let turn = 0
+it('continues a disconnected mixed task after reading current documents without repeating committed text or build import', async () => {
+  let turn = 0, disconnected = false
   const secondRunTools: string[] = []
   const provider: ModelProvider = { async *stream(request) {
+    if (turn === 5 && !disconnected) { disconnected = true; yield { type: 'response.failed', requestId: request.requestId, sequence: 1, failure: { outcome: 'unknown', kind: 'transport', code: 'connection-lost', message: '连接中断' } }; return }
     const step = turn++
     if (step === 0) { yield complete(request, firstRound(request)); return }
     if (step === 1) { yield complete(request, createBuild(request)); return }
@@ -172,12 +173,12 @@ it('continues an exhausted mixed task after reading current documents without re
   } }
   const f = await fixture(provider)
   const changedProject = structuredClone(f.project); changedProject.title = '已导入构建'
-  const started = await f.engine.start({ ...f.input, budget: { maxRequests: 5 } })
+  const started = await f.engine.start({ ...f.input, })
   const exhausted = await f.engine.wait(started.runId)
-  expect(exhausted).toMatchObject({ status: 'partial', failure: { code: MODEL_REQUEST_BUDGET_EXHAUSTED } })
+  expect(exhausted).toMatchObject({ status: 'partial', failure: { code: 'connection-lost' } })
   expect(f.text.read()).toMatchObject({ model: { source: '新正文' }, undoDepth: 1 })
   expect(f.courseSession.read()).toMatchObject({ model: { project: { title: '已导入构建' } }, undoDepth: 1 })
-  const continued = await f.engine.resume(started.runId, { ...f.input, taskId: randomUUID(), budget: { maxRequests: 2 } })
+  const continued = await f.engine.resume(started.runId, { ...f.input, taskId: randomUUID() })
   const completed = await f.engine.wait(continued.runId)
   expect(completed).toMatchObject({ status: 'completed', continuedFrom: started.runId })
   expect(completed.requests).toHaveLength(2)
@@ -255,7 +256,7 @@ it('lets the next model request repair a failed compile after the old 24-request
   await f.engine.wait(started.runId)
   const { stored } = await durableEnd(f, started.runId)
   const job = createdJob(stored)
-  expect(stored.budget.maxRequests).toBeNull()
+  expect(stored).not.toHaveProperty('budget')
   expect(stored.status).toBe('completed')
   expect(stored.requests).toHaveLength(28)
   expect(stored.failure).toBeUndefined()

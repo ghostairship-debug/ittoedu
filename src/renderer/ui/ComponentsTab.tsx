@@ -2,6 +2,7 @@ import {
   Box,
   Check,
   ChevronLeft,
+  Download,
   Info,
   Library,
   LocateFixed,
@@ -33,6 +34,9 @@ import {
   filterComponentLibraryPackages,
   selectCurrentCatalogPackages,
 } from '../components/componentLibraryModel'
+import { CompositionFragmentActions } from '../components/compositionFragments/CompositionFragmentActions'
+import { CompositionFragmentPreview } from '../components/compositionFragments/CompositionFragmentPreview'
+import { exportCompositionFragmentPackage } from '../components/compositionFragments/compositionFragmentPackage'
 import {
   selectActiveCourseProjectDocument,
   selectEditingScope,
@@ -217,6 +221,7 @@ function ComponentDetailsDialog({ data, entry, usage, onClose }: ComponentDetail
             </div>
           )}
         </dl>
+        {data?.manifest.content?.kind === 'composition' && <CompositionFragmentPreview data={data} />}
         {entry?.description && <p className="component-details-dialog__description">{entry.description}</p>}
         <div className="modal__actions">
           <button type="button" className="primary-button" onClick={onClose}>完成</button>
@@ -551,6 +556,7 @@ export function ComponentsTab({
       <div className="section-heading section-heading--spaced">
         <span>工程组件</span><span>{packages.length}</span>
       </div>
+      <CompositionFragmentActions />
       <label className="component-project-search">
         <Search size={15} aria-hidden="true" />
         <input
@@ -570,6 +576,7 @@ export function ComponentsTab({
       ) : (
         <div className="project-component-list">
           {visiblePackages.map((data) => {
+            const structure = data.manifest.content?.kind === 'composition'
             const packageId = data.manifest.id
             const usage = project
               ? collectCourseComponentPackageUsage(project, packageId)
@@ -582,7 +589,7 @@ export function ComponentsTab({
             const scopeSupported = isSpatial
               ? spatialScope === 'world' && manifestScopeSupported
               : manifestScopeSupported
-            const draggable = isSpatial || flowInsertPort ? false : scopeSupported
+            const draggable = structure || isSpatial || flowInsertPort ? false : scopeSupported
             const insertionDisabledReason = spatialScope === 'surface'
               ? '表面共享层暂不支持插入组件；请切换到无限画布世界层。'
               : spatialScope === 'global'
@@ -612,17 +619,17 @@ export function ComponentsTab({
                     onDragStart={draggable
                       ? (event) => setComponentDragData(event, packageId, data.manifest.name)
                       : undefined}
-                    onClick={scopeSupported ? () => flowInsertPort ? insertFlowComponent('document', packageId) : addExternalComponentNode(packageId) : undefined}
+                    onClick={scopeSupported ? () => flowInsertPort && !structure ? insertFlowComponent('document', packageId) : addExternalComponentNode(packageId) : undefined}
                   >
                     <span className="component-thumb"><ComponentThumbnail data={data} /></span>
                     <span>
                       <span className="component-name">{data.manifest.name}</span>
                       <span className="component-version">v{data.manifest.version} · {data.provenance?.sourceLabel ?? '工程组件'}</span>
-                      <span className="component-version">场景 {usage.sceneInstanceCount} · 全局 {usage.globalInstanceCount}{canUpdate ? ' · 有更新' : ''}</span>
+                      <span className="component-version">{structure ? '结构资产 · 插入后独立编辑' : `场景 ${usage.sceneInstanceCount} · 全局 ${usage.globalInstanceCount}`}{canUpdate ? ' · 有更新' : ''}</span>
                     </span>
                     <Box size={15} />
                   </button>
-                  {flowInsertPort && <button type="button" disabled={!scopeSupported} aria-label={`将${data.manifest.name}放到纸面上`}
+                  {flowInsertPort && !structure && <button type="button" disabled={!scopeSupported} aria-label={`将${data.manifest.name}放到纸面上`}
                     onClick={() => insertFlowComponent('paper', packageId)}>放到纸面上</button>}
                   <details className="project-component-menu">
                     <summary aria-label={`管理${data.manifest.name}`} title="组件管理"><MoreVertical size={17} /></summary>
@@ -631,6 +638,17 @@ export function ComponentsTab({
                         closeContainingMenu(event.currentTarget)
                         setDetailsPackageId(packageId)
                       }}><Info size={14} />查看详情</button>
+                      {structure && <button type="button" role="menuitem" onClick={event => {
+                        closeContainingMenu(event.currentTarget)
+                        void (async () => {
+                          try {
+                            const desktop = window.desktopAPI
+                            if (!desktop) throw new Error('请在桌面软件中导出结构资产。')
+                            const result = await desktop.exportBinary({ suggestedName: `${data.manifest.name}.h5component`, extension: 'h5component', bytes: exportCompositionFragmentPackage(data) })
+                            if (result) useEditorStore.getState().setStatus(`结构资产已导出：${result.path}`)
+                          } catch (error) { useEditorStore.getState().setError(error instanceof Error ? error.message : '结构资产导出失败。') }
+                        })()
+                      }}><Download size={14} />导出结构资产</button>}
                       <button type="button" role="menuitem" disabled={!canUpdate || !onUpdateCatalogComponent} onClick={(event) => {
                         closeContainingMenu(event.currentTarget)
                         if (catalogEntry) onUpdateCatalogComponent?.(catalogEntry)

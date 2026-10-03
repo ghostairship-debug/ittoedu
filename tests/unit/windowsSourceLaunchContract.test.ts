@@ -1,10 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { windowsSourceLaunchContractIssues } from '../../scripts/windowsSourceLaunchContract'
 import { assertLegacyPpt, resaveLegacyPpt } from '../../src/main/pptResave'
 import { promises as fs } from 'node:fs'
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
+import { zipSync } from 'fflate'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -20,7 +23,7 @@ describe('legacy PPT conversion failure isolation', () => {
   it('rejects renamed ZIP files before launching PowerPoint', () => {
     expect(() => assertLegacyPpt(new Uint8Array([0x50, 0x4b]))).toThrow('不是旧版二进制 PPT')
   })
-  it('cancels or times out only the conversion worker and cleans its copied input', async () => {
+  it('cancels only the conversion worker on explicit abort and cleans its copied input', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'ppt-resave-test-'))
     const source = path.join(directory, 'original.ppt'), temporary = path.join(directory, 'temporary')
     const bytes = Buffer.alloc(512); Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]).copy(bytes)
@@ -30,8 +33,6 @@ describe('legacy PPT conversion failure isolation', () => {
       return spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] })
     }
     try {
-      await expect(resaveLegacyPpt(source, temporary, { timeoutMs: 30, run: runner })).rejects.toThrow('超时')
-      expect(await fs.readdir(temporary)).toEqual([])
       const controller = new AbortController()
       const pending = resaveLegacyPpt(source, temporary, { signal: controller.signal, run: (...args) => {
         const child = runner(args[0], args[1]); setTimeout(() => controller.abort(), 30); return child
@@ -40,6 +41,41 @@ describe('legacy PPT conversion failure isolation', () => {
       expect(await fs.readFile(source)).toEqual(bytes)
       expect(await fs.readdir(temporary)).toEqual([])
     } finally { await fs.rm(directory, { recursive: true, force: true }) }
+  })
+  it('accepts input and output beyond 32 MiB and lets a healthy worker complete after the former 90-second deadline', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'ppt-resave-late-'))
+    const source = path.join(directory, 'original.ppt'), temporary = path.join(directory, 'temporary')
+    const bytes = Buffer.alloc(32 * 1024 * 1024 + 1)
+    Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]).copy(bytes)
+    await fs.writeFile(source, bytes)
+    const converted = zipSync({ 'payload.bin': bytes }, { level: 0 })
+    let started!: () => void, output = '', input = ''
+    const entered = new Promise<void>(resolve => { started = resolve })
+    const worker = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), kill: vi.fn(() => true) })
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    let settled = false
+    const pending = resaveLegacyPpt(source, temporary, { run: (_script, copiedInput, target) => {
+      input = copiedInput; output = target; started(); return worker as unknown as ChildProcessWithoutNullStreams
+    } })
+    void pending.then(() => { settled = true }, () => { settled = true })
+    try {
+      await entered
+      expect(input).not.toBe(source)
+      expect((await fs.stat(input)).size).toBe(bytes.length)
+      await vi.advanceTimersByTimeAsync(90_001)
+      expect(worker.kill).not.toHaveBeenCalled()
+      expect(settled).toBe(false)
+      await fs.writeFile(output, converted)
+      worker.stdout.emit('data', Buffer.from('PPT_RESAVE_OK'))
+      worker.emit('close', 0)
+      expect(Buffer.from(await pending).equals(Buffer.from(converted))).toBe(true)
+      expect((await fs.readFile(source)).equals(bytes)).toBe(true)
+      expect(await fs.readdir(temporary)).toEqual([])
+    } finally {
+      if (!settled) { worker.emit('close', 1); await pending.catch(() => undefined) }
+      vi.useRealTimers()
+      await fs.rm(directory, { recursive: true, force: true })
+    }
   })
 })
 

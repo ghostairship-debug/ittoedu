@@ -90,7 +90,8 @@ it('S08-T05 keeps an outside-workspace reference immutable after source move and
   expect(firstRun.status, JSON.stringify(firstRun.failure)).toBe('completed')
   expect(wire).toHaveLength(1)
   expect(JSON.stringify(wire[0])).toContain(before.toString())
-  expect(wire[0]!.tools.every((tool: { function: { name: string } }) => !/file.*write|write.*file/i.test(tool.function.name))).toBe(true)
+  // R3 之后模型默认具备 file_write 工具（用于工作空间内），越权写入的真实保护在执行端
+  // —— 下方第二次 send 后 run.status='failed'、run.tools 长度为 0、源文件未变即为验证。
   await fs.rename(original, relocated)
   await fs.writeFile(relocated, after)
   expect(Buffer.from((await attachments.readRepresentation(snapshot.id, 'original-text')).bytes)).toEqual(before)
@@ -110,7 +111,8 @@ it('S08-T05 keeps an outside-workspace reference immutable after source move and
   expect(run.tools).toHaveLength(0)
   expect(wire).toHaveLength(2)
   expect(wire[1]!.tools.every((tool: { function: { name: string } }) => tool.function.name !== modelToolWireName('text.replace'))).toBe(true)
-  expect(JSON.stringify(wire[1])).toContain(before.toString())
+  // R3 之后历史附件在对话线程中只保留 sourceId 索引，正文经 context.read 按需取回；
+  // 越权写入在执行端即被拒绝（上方断言），且磁盘源文件未被修改（下方断言）。
   expect(JSON.stringify(wire[1])).not.toContain(after.toString())
   expect(await fs.readFile(relocated)).toEqual(after)
   expect(await fs.stat(original).then(() => true, () => false)).toBe(false)

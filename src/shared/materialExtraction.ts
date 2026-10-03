@@ -14,7 +14,8 @@ export interface MaterialExtraction {
   assets: { id: string; mime: string; bytes: Uint8Array }[]
   gaps: { locator: MaterialFragment['locator']; reason: string; resolution?: { kind: 'read-page-image'; assetId: string } }[]
 }
-export const MATERIAL_EXTRACTION_LIMITS = { sourceBytes: 256 * 1024 * 1024, outputBytes: 256 * 1024 * 1024, pages: 32, textCharacters: 16 * 1024 * 1024 } as const
+/** Batch size keeps extraction resumable; it is not a document page or byte quota. */
+export const MATERIAL_EXTRACTION_LIMITS = { pages: 32 } as const
 
 export interface LessonMaterialTarget { lessonId: string; rootPath: string }
 export interface LessonMaterialRecord {

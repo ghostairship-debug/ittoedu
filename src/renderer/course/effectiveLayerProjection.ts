@@ -164,8 +164,10 @@ export type EffectiveLayerContentSummary =
   | { readonly kind: 'native'; readonly nativeType: NativeLayerItem['content']['nativeType'] }
   | { readonly kind: 'component'; readonly packageId: string; readonly version: string }
   | { readonly kind: 'runtime'; readonly protocol: string; readonly enabled: boolean }
+  | { readonly kind: 'composition' }
 
 export function layerContentSummary(item: LayerItem): EffectiveLayerContentSummary {
+  if (item.kind === 'composition') return { kind: 'composition' }
   if (item.kind === 'native') {
     return { kind: 'native', nativeType: item.content.nativeType }
   }

@@ -16,6 +16,7 @@ const IPC_CHANNELS = {
   executionEdit: 'execution:edit',
   executionSettings: 'execution-settings:operate',
   workspaceFiles: 'workspace-files:operate',
+  mediaFiles: 'media-files:operate',
   workspaceFilesChanged: 'workspace-files:changed',
   documents: 'documents:operate',
   documentEvent: 'documents:event',
@@ -201,6 +202,7 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     resumeQueue: input => invoke(IPC_CHANNELS.execution, { type: 'resume-queue', ...input }),
     run: runId => invoke(IPC_CHANNELS.execution, { type: 'run', runId }),
     browserControl: input => invoke(IPC_CHANNELS.execution, { type: 'browser-control', ...input }),
+    browserViewport: input => invoke(IPC_CHANNELS.execution, { type: 'browser-viewport', ...input }),
     changeReview: input => invoke(IPC_CHANNELS.execution, { type: 'change-review', ...input }),
     changeRollback: input => invoke(IPC_CHANNELS.execution, { type: 'change-rollback', ...input }),
     checkpoint: input => invoke(IPC_CHANNELS.execution, { type: 'checkpoint', ...input }),
@@ -234,8 +236,10 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     read: () => invoke(IPC_CHANNELS.executionSettings, { type: 'read' }),
     saveConnection: input => invoke(IPC_CHANNELS.executionSettings, { type: 'save-connection', input }),
     saveProfile: input => invoke(IPC_CHANNELS.executionSettings, { type: 'save-profile', input }),
+    setModelFavorite: input => invoke(IPC_CHANNELS.executionSettings, { type: 'set-model-favorite', input }),
     revokeConnection: id => invoke(IPC_CHANNELS.executionSettings, { type: 'revoke-connection', id }),
     discoverModels: (id, revision) => invoke(IPC_CHANNELS.executionSettings, { type: 'discover-models', id, revision }),
+    knownModels: () => invoke(IPC_CHANNELS.executionSettings, { type: 'known-models' }),
     probeCapabilities: input => invoke(IPC_CHANNELS.executionSettings, { type: 'probe-capabilities', ...input }),
   },
   documents: {
@@ -282,6 +286,7 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     preserveDraft: (ref, source, expectedVersion, attachments) => invoke(IPC_CHANNELS.lessonDocument, { operation: 'preserve', ref, source, expectedVersion, attachments }),
   },
   workspaceFiles: input => invoke(IPC_CHANNELS.workspaceFiles, input),
+  mediaFiles: input => invoke(IPC_CHANNELS.mediaFiles, input),
   onWorkspaceFilesChanged: listener => {
     const receive = (_event: Electron.IpcRendererEvent, event: import('../shared/workbench/workspaceFiles').WorkspaceFilesChange) => listener(event)
     ipcRenderer.on(IPC_CHANNELS.workspaceFilesChanged, receive)

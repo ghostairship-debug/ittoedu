@@ -12,7 +12,6 @@ const run = (...tools: ExecutionToolRecord[]): ExecutionRunRecord => ({
   schemaVersion: 1, runId: 'offline-replay', version: 1, status: 'running', createdAt: 1, updatedAt: 1,
   input: { conversationId: 'conversation', taskId: 'task', instruction: '完成指定成果',
     selection: {} as ExecutionRunRecord['input']['selection'], documents: [] },
-  budget: { maxRequests: null, maxToolCalls: null, maxContextBytes: 10_000 },
   messages: [], initialMessageCount: 0, requests: [], tools,
 })
 const error = (code: string): ExecutionToolRecord['result'] => ({ kind: 'error', code, message: code })

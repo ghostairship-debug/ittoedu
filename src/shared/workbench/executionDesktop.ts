@@ -1,7 +1,7 @@
 import { documentSlotSchema } from '../document/selectionSchema'
 import { z } from 'zod'
 import { validHomePath, type ConversationElementScope, type ConversationRecord, type WorkspaceRecord } from './conversations'
-import type { ExecutionRunRecord } from './execution'
+import type { ExecutionContentOutput, ExecutionRunRecord } from './execution'
 import type { ExecutionEventSearchInput, ExecutionEventSearchPage, ExecutionBlobRef, ExecutionEvent, ExecutionEventPage, ExecutionProjection } from './executionEvents'
 import type { EditEvent, EditSessionSnapshot } from './editSession'
 import { inputAttachmentReferenceSchema, type InputAttachmentReference } from './attachments'
@@ -9,16 +9,18 @@ import { executionRoles, type ExecutionRole, type ExecutionSelectionSnapshot, ty
 import { userAnswerSchema, type UserAnswer } from './userQuestion'
 import { approvalDecisionSchema, executionPermissionModeSchema, type ApprovalDecision, type ExecutionPermissionMode } from './executionPermission'
 
-const id = z.string().min(1).max(512), index = z.number().int().nonnegative()
+const id = z.string().min(1), index = z.number().int().nonnegative()
 export const executionSelectionTargetSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('markdown-range'), from: index, to: index }).strict().refine(value => value.to > value.from),
-  z.object({ kind: z.literal('course-object'), locationId: id, itemId: id, stateId: id.optional() }).strict(),
+  z.object({ kind: z.literal('course-object'), locationId: id, itemId: id, stateId: id.optional(), compositionNodeId: id.optional() }).strict(),
   z.object({ kind: z.literal('flow-block'), surfaceId: id, blockId: id, parentId: id.nullable() }).strict(),
   z.object({ kind: z.literal('flow-range'), surfaceId: id, blockId: id, parentId: id.nullable(), slot: documentSlotSchema, from: index, to: index }).strict().refine(value => value.to > value.from),
 ])
 export type ExecutionSelectionTarget = z.infer<typeof executionSelectionTargetSchema>
+export const executionContentOutputSchema = z.object({ kind: z.literal('replace-text'), documentId: id,
+  target: executionSelectionTargetSchema }).strict()
 const scope = z.union([z.object({ kind: z.literal('document') }).strict(), executionSelectionTargetSchema])
-export const executionDocumentReferenceSchema = z.object({ documentId: id, epoch: id, revision: index, writable: z.array(scope).max(100), selection: z.array(executionSelectionTargetSchema).min(1).max(100).optional() }).strict()
+export const executionDocumentReferenceSchema = z.object({ documentId: id, epoch: id, revision: index, writable: z.array(scope), selection: z.array(executionSelectionTargetSchema).min(1).optional() }).strict()
 export type ExecutionDocumentReference = z.infer<typeof executionDocumentReferenceSchema>
 const disclosedRoleSchema = z.object({ connectionId: id, connectionRevision: index, provider: id, model: id,
   billingKind: z.enum(['metered', 'token-plan', 'subscription', 'prepaid', 'unknown']) }).strict()
@@ -63,15 +65,16 @@ export function captureRendererTiming(): RendererTimingStamp {
 export const executionDesktopRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('workspace'), root: z.string().min(1).max(32767).nullable() }).strict(),
   z.object({ type: z.literal('conversations'), workspaceId: id }).strict(),
-  z.object({ type: z.literal('create-conversation'), workspaceId: id, title: z.string().max(1024).optional(), home: conversationHomeSchema.optional(),
-    element: z.object({ kind: z.literal('element'), documentId: id, label: z.string().min(1).max(200) }).strict().optional() }).strict(),
+  z.object({ type: z.literal('create-conversation'), workspaceId: id, title: z.string().optional(), home: conversationHomeSchema.optional(),
+    element: z.object({ kind: z.literal('element'), documentId: id, label: z.string().min(1) }).strict().optional() }).strict(),
   z.object({ type: z.literal('set-conversation-home'), ...identity, home: conversationHomeSchema.nullable() }).strict(),
   z.object({ type: z.literal('conversation'), ...identity }).strict(),
-  z.object({ type: z.literal('prepare-documents'), ...identity, documents: z.array(executionDocumentReferenceSchema).max(100), permission: executionPermissionModeSchema.optional() }).strict(),
-  z.object({ type: z.literal('draft'), ...identity, expectedRevision: index, text: z.string().max(1024 * 1024), documents: z.array(executionDocumentReferenceSchema).max(100), attachments: z.array(inputAttachmentReferenceSchema).max(1000).default([]) }).strict(),
-  z.object({ type: z.literal('rename-conversation'), ...identity, expectedRevision: index, title: z.string().min(1).max(1024) }).strict(),
+  z.object({ type: z.literal('prepare-documents'), ...identity, documents: z.array(executionDocumentReferenceSchema), permission: executionPermissionModeSchema.optional() }).strict(),
+  z.object({ type: z.literal('draft'), ...identity, expectedRevision: index, text: z.string(), documents: z.array(executionDocumentReferenceSchema), attachments: z.array(inputAttachmentReferenceSchema).default([]) }).strict(),
+  z.object({ type: z.literal('rename-conversation'), ...identity, expectedRevision: index, title: z.string().min(1) }).strict(),
   z.object({ type: z.literal('delete-conversation'), ...identity, expectedRevision: index }).strict(),
-  z.object({ type: z.literal('send'), ...identity, submissionId: z.uuid(), expectedRevision: index, text: z.string().max(1024 * 1024), documents: z.array(executionDocumentReferenceSchema).max(100), attachments: z.array(inputAttachmentReferenceSchema).max(1000).default([]), mode: executionSubmissionModeSchema.default('queue'), retryOfRunId: id.optional(), disclosedSettings: disclosedSettingsSchema.optional(), permission: executionPermissionModeSchema.optional(),
+  z.object({ type: z.literal('send'), ...identity, submissionId: z.uuid(), expectedRevision: index, text: z.string(), documents: z.array(executionDocumentReferenceSchema), attachments: z.array(inputAttachmentReferenceSchema).default([]), mode: executionSubmissionModeSchema.default('queue'), retryOfRunId: id.optional(), disclosedSettings: disclosedSettingsSchema.optional(), permission: executionPermissionModeSchema.optional(),
+    contentOutput: executionContentOutputSchema.optional(),
     clientTiming: z.object({ click: rendererTimingStampSchema, invoke: rendererTimingStampSchema }).strict().optional() }).strict(),
   z.object({ type: z.literal('timing'), ...identity, submissionId: z.uuid(), stage: z.literal('renderer.first-visible'),
     stamp: rendererTimingStampSchema, itemId: id }).strict(),
@@ -83,15 +86,16 @@ export const executionDesktopRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('resume-queue'), ...identity }).strict(),
   z.object({ type: z.literal('run'), runId: id }).strict(),
   z.object({ type: z.literal('browser-control'), ...identity, runId: id, action: z.enum(['status', 'takeover', 'resume']) }).strict(),
+  z.object({ type: z.literal('browser-viewport'), ...identity, runId: id, visible: z.boolean(), bounds: z.object({ x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive() }).strict().optional() }).strict(),
   z.object({ type: z.literal('change-review'), ...identity, runId: id, offset: index.optional(), limit: z.number().int().min(1).max(100).optional() }).strict(),
   z.object({ type: z.literal('change-rollback'), ...identity, runId: id, entryId: id }).strict(),
   z.object({ type: z.literal('checkpoint'), ...identity, runId: id }).strict(),
-  z.object({ type: z.literal('fork-checkpoint'), ...identity, runId: id, instruction: z.string().max(8000).optional() }).strict(),
+  z.object({ type: z.literal('fork-checkpoint'), ...identity, runId: id, instruction: z.string().optional() }).strict(),
   z.object({ type: z.literal('stop'), runId: id }).strict(),
   z.object({ type: z.literal('answer'), runId: id, callId: id, answer: userAnswerSchema }).strict(),
   z.object({ type: z.literal('approve'), runId: id, callId: id, decision: approvalDecisionSchema }).strict(),
   z.object({ type: z.literal('events'), conversationId: id, after: index.optional(), limit: z.number().int().min(1).max(5000).optional() }).strict(),
-  z.object({ type: z.literal('search-events'), conversationId: id, query: z.string().trim().min(1).max(500), after: index.optional(), limit: z.number().int().min(1).max(100).optional() }).strict(),
+  z.object({ type: z.literal('search-events'), conversationId: id, query: z.string().trim().min(1), after: index.optional(), limit: z.number().int().min(1).max(100).optional() }).strict(),
   z.object({ type: z.literal('timeline'), conversationId: id }).strict(),
   z.object({ type: z.literal('blob'), conversationId: id, ref: z.object({ id: z.string().regex(/^[a-f0-9]{64}$/), bytes: index, mime: z.literal('text/plain;charset=utf-8') }).strict() }).strict(),
   z.object({ type: z.literal('edits'), documentId: id }).strict(),
@@ -107,6 +111,7 @@ export interface ExecutionSendInput {
   expectedRevision: number
   text: string
   documents: ExecutionDocumentReference[]
+  contentOutput?: ExecutionContentOutput
   attachments?: InputAttachmentReference[]
   mode?: ExecutionSubmissionMode
   /** Explicit continuation of a terminal run. Repeated requests for that run reuse its child submission. */
@@ -124,6 +129,7 @@ export interface ExecutionSubmissionRecord {
   mode: ExecutionSubmissionMode
   text: string
   documents: ExecutionDocumentReference[]
+  contentOutput?: ExecutionContentOutput
   attachments: InputAttachmentReference[]
   /** Frozen when main accepts the submission. Later settings changes affect only later submissions. */
   model: { provider: string; model: string; accountId: string; billing: string }
@@ -182,6 +188,7 @@ export interface ExecutionDesktopAPI {
   resumeQueue(input: { workspaceId: string; conversationId: string }): Promise<void>
   run(runId: string): Promise<ExecutionRunRecord | null>
   browserControl?(input: { workspaceId: string; conversationId: string; runId: string; action: 'status' | 'takeover' | 'resume' }): Promise<{ state: 'agent' | 'human' | 'transition' | 'stopped'; pageUrl?: string; snapshotId?: string }>
+  browserViewport?(input: import('./embeddedBrowser').EmbeddedBrowserViewportRequest): Promise<import('./embeddedBrowser').EmbeddedBrowserViewportState>
   changeReview?(input: { workspaceId: string; conversationId: string; runId: string; offset?: number; limit?: number }): Promise<import('../../main/workbench/review/ExecutionChangeReviewService').ChangeReviewPage>
   changeRollback?(input: { workspaceId: string; conversationId: string; runId: string; entryId: string }): Promise<import('../../main/workbench/review/ExecutionChangeReviewService').ChangeRollbackResult>
   checkpoint?(input: { workspaceId: string; conversationId: string; runId: string }): Promise<import('../../main/workbench/execution/CheckpointForkService').UserCheckpointIndex>

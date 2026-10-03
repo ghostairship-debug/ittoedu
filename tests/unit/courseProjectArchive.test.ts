@@ -8,7 +8,7 @@ import { pptxImportFixture, pptxInheritanceFixture, pptxCommonMappingFixture, pp
 import { parsePptxImport } from '@/renderer/project/pptxImport'
 import { planPptxImportTransaction } from '@/renderer/project/pptxImportTransaction'
 import { buildCoursePptx } from '@/renderer/export/course/buildCoursePptx'
-import { openPptxPackage, PPTX_IMPORT_LIMITS } from '@/renderer/project/pptxPackage'
+import { openPptxPackage } from '@/renderer/project/pptxPackage'
 import { applyEditorTransactionStep } from '@/renderer/authoring/editorTransaction'
 import * as assetManager from '@/renderer/project/assetManager'
 import { parseComponentPackageFiles } from '../../src/core/drivers/codecs/importComponentPackage'
@@ -273,9 +273,11 @@ describe('S2 restricted PPTX import atomic archive transaction', () => {
       }
     } finally { decoder.mockRestore() }
   })
-  it('rejects unreadable archives and resource excess but reports unsupported objects alongside retained content', async () => {
-    expect(() => openPptxPackage(new Uint8Array(PPTX_IMPORT_LIMITS.fileBytes + 1))).toThrow('文件大小')
-    expect(() => openPptxPackage(zipSync({ 'bomb.xml': new Uint8Array(2_000_000) }))).toThrow('解压比')
+  it('rejects unreadable archives but retains highly compressed content and reports unsupported objects', async () => {
+    expect(() => openPptxPackage(new Uint8Array(1))).toThrow('压缩包损坏')
+    const compressed = unzipSync(pptxImportFixture())
+    compressed['ppt/unused.xml'] = new Uint8Array(2_000_000)
+    expect(openPptxPackage(zipSync(compressed)).files['ppt/unused.xml']).toHaveLength(2_000_000)
     await expect(parsePptxImport(pptxImportFixture({ brokenRelationship: true }))).rejects.toThrow('第 1 页：损坏关系')
     const partial = await parsePptxImport(pptxImportFixture({ unsupported: true }))
     expect(partial.slides[0]!.items).toHaveLength(2)

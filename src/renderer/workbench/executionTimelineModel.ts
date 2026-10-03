@@ -80,6 +80,62 @@ export function executionDocumentFacts(item: ExecutionItem, projection: Executio
   return { documentId, application, save: item.data.saveStatus ?? save }
 }
 
+const attemptPattern = /^(.+)\.attempt-(\d+):(text|reasoning)\.delta$/
+/**
+ * Presentation-only fold: retry attempts of one logical round leave one
+ * interrupted text card plus one interrupted reasoning card per attempt.
+ * Keep the final attempt's pair (whatever its status) and replace the earlier
+ * interrupted pairs with a single synthesized run.state summary card. Items
+ * without the attempt shape pass through untouched; rounds never merge.
+ */
+export function collapseInterruptedAttempts(items: readonly ExecutionItem[]): ExecutionItem[] {
+  const groups = new Map<string, { index: number; attempt: number; stream: 'text' | 'reasoning' }[]>()
+  items.forEach((item, index) => {
+    const match = attemptPattern.exec(item.itemId)
+    if (!match) return
+    const key = match[1]!, entry = { index, attempt: Number(match[2]), stream: match[3] as 'text' | 'reasoning' }
+    const group = groups.get(key)
+    if (group) group.push(entry); else groups.set(key, [entry])
+  })
+  const removed = new Set<number>(), summaries: { index: number; item: ExecutionItem }[] = []
+  for (const [round, group] of groups) {
+    const attempts = new Map<number, { index: number; stream: 'text' | 'reasoning' }[]>()
+    for (const entry of group) {
+      const bucket = attempts.get(entry.attempt)
+      if (bucket) bucket.push(entry); else attempts.set(entry.attempt, [entry])
+    }
+    const finalAttempt = Math.max(...attempts.keys())
+    const collapsed: { index: number; attempt: number }[] = []
+    for (const [attempt, entries] of attempts) {
+      if (attempt === finalAttempt) continue
+      if (entries.every(entry => items[entry.index]!.data.status === 'interrupted')) {
+        for (const entry of entries) collapsed.push({ index: entry.index, attempt })
+      }
+    }
+    if (!collapsed.length) continue
+    collapsed.sort((left, right) => left.index - right.index)
+    const first = items[collapsed[0]!.index]!
+    const retries = new Set(collapsed.map(entry => entry.attempt)).size
+    for (const entry of collapsed) removed.add(entry.index)
+    summaries.push({
+      index: collapsed[0]!.index,
+      item: {
+        taskId: first.taskId, runId: first.runId, itemId: `${round}:retry-summary`,
+        source: first.source, type: 'run.state', time: first.time, sequence: first.sequence,
+        data: { status: 'interrupted', label: `自动重发 ${retries} 次` }, content: [],
+      },
+    })
+  }
+  if (!summaries.length) return items as ExecutionItem[]
+  const byIndex = new Map(summaries.map(summary => [summary.index, summary.item]))
+  const result: ExecutionItem[] = []
+  items.forEach((item, index) => {
+    if (removed.has(index)) { const summary = byIndex.get(index); if (summary) result.push(summary); return }
+    result.push(item)
+  })
+  return result
+}
+
 const sensitiveKey = /^(?:api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|authorization|credential(?:ref)?)$/i
 function redactString(value: string): string {
   return value
@@ -89,8 +145,12 @@ function redactString(value: string): string {
     .replace(/\b[A-Za-z]:[\\/](?:[^\s"<>|]+[\\/])*([^\\/\s"<>|]+)/g, '[本地路径]/$1')
     .replace(/\/(?:Users|home)\/[^\s"<>]+/g, '[本地路径]')
 }
-/** Presentation only: never interprets HTML, opens links, or replays tool arguments. */
-export function readableExecutionData(value: string): string {
+// By-content memo for redaction. Streaming replays the same strings every
+// turn, so without a cache each render runs 5 regex passes over every visible
+// label/text/detail. Bounded LRU: refresh on hit, drop the oldest entry when full.
+const READABLE_CACHE_LIMIT = 2000
+const readableCache = new Map<string, string>()
+function computeReadable(value: string): string {
   const redact = (input: unknown): unknown => {
     if (typeof input === 'string') return redactString(input)
     if (Array.isArray(input)) return input.map(redact)
@@ -99,4 +159,20 @@ export function readableExecutionData(value: string): string {
   }
   try { return JSON.stringify(redact(JSON.parse(value)), null, 2) }
   catch { return redactString(value) }
+}
+/** Presentation only: never interprets HTML, opens links, or replays tool arguments. */
+export function readableExecutionData(value: string): string {
+  const hit = readableCache.get(value)
+  if (hit !== undefined) {
+    readableCache.delete(value)
+    readableCache.set(value, hit)
+    return hit
+  }
+  const result = computeReadable(value)
+  if (readableCache.size >= READABLE_CACHE_LIMIT) {
+    const oldest = readableCache.keys().next().value
+    if (oldest !== undefined) readableCache.delete(oldest)
+  }
+  readableCache.set(value, result)
+  return result
 }

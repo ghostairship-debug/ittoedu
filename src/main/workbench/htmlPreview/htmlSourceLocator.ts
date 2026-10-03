@@ -119,7 +119,7 @@ export function locateHtmlSourceTarget(
     }
     attributeName = 'src'
   } else {
-    if (report.attributeName !== null || ['script', 'style', 'textarea', 'title', 'noscript'].includes(element.name)) {
+    if (report.attributeName !== null || ['script', 'style', 'title', 'textarea', 'noscript'].includes(element.name)) {
       return rejection(report.handle, 'unsupported-target')
     }
     const children = index.elements.filter(candidate => candidate.parent === selected)

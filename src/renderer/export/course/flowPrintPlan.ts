@@ -59,6 +59,10 @@ export type FlowPrintNode =
       assetId: string
       fallbackLabel: string
       altText?: string
+      /** Derived static projection only; not part of the authored Flow block. */
+      width?: number
+      height?: number
+      pageBreakBefore?: boolean
       caption?: FlowTextContent
       crop?: FlowImageCrop['crop']
       cropX?: number
@@ -415,7 +419,7 @@ function printNodeToHtml(
           const { dom } = flowMediaCropGeometry(source, node)
           image = `<div class="flow-print-image-crop" style="width:100%;max-width:100%;aspect-ratio:${dom.wrapperAspectRatio};overflow:hidden;position:relative"><img class="flow-print-image" src="${escapeHtml(assetUrl)}" alt="${escapeHtml(alt)}" style="position:absolute;display:block;max-width:none;width:${dom.imageWidth};height:${dom.imageHeight};left:${dom.imageLeft};top:${dom.imageTop}"/></div>`
         }
-        return `<figure data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="image">${image}${
+        return `<figure data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="image"${node.pageBreakBefore ? ' style="break-before:page;page-break-before:always;break-inside:avoid"' : ''}>${image}${
           node.caption ? `<figcaption>${richTextToHtml(node.caption)}</figcaption>` : ''
         }</figure>`
       }

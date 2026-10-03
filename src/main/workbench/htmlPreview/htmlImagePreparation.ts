@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import { HTML_PREVIEW_IMAGE_MAX_BYTES } from '../../../shared/workbench/htmlPreview'
 import { isContainedPath } from './htmlPreviewProtocol'
 
 export interface PreparedHtmlImage { filename: string; relativeUrl: string; created: boolean }
@@ -15,7 +14,7 @@ function actualExtension(bytes: Uint8Array, mimeType: string): '.png' | '.jpg' |
   if (mimeType === 'image/svg+xml') {
     try {
       const source = new TextDecoder('utf-8', { fatal: true }).decode(bytes).replace(/^\uFEFF/, '')
-      if (/<svg(?:\s|>)/i.test(source.slice(0, 64 * 1024))) return '.svg'
+      if (/<svg(?:\s|>)/i.test(source)) return '.svg'
     } catch { /* Invalid UTF-8 is not a valid selected SVG. */ }
   }
   return null
@@ -33,12 +32,12 @@ export async function prepareHtmlImage(input: {
   bytes: Uint8Array
 }): Promise<PreparedHtmlImage> {
   const { bytes, rootRealPath, entryRealPath } = input
-  if (!bytes.length || bytes.length > HTML_PREVIEW_IMAGE_MAX_BYTES) throw new Error('图片大小不受支持')
+  if (!bytes.length) throw new Error('图片不能为空')
   const extension = actualExtension(bytes, input.mimeType.toLowerCase())
   if (!extension || mimeForExtension[extension] !== input.mimeType.toLowerCase()) throw new Error('图片格式与实际字节不符')
   if (!isContainedPath(rootRealPath, entryRealPath) || await fs.realpath(entryRealPath) !== entryRealPath) throw new Error('HTML 文件路径已变化')
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,255}$/.test(input.operationId) || input.operationId.includes('..')) throw new Error('操作标识无效')
-  if (!input.name || input.name.length > 200) throw new Error('图片名称无效')
+  if (!input.name) throw new Error('图片名称无效')
   const folder = path.join(path.dirname(entryRealPath), `${path.parse(entryRealPath).name}.assets`)
   if (!isContainedPath(rootRealPath, folder)) throw new Error('图片目录越界')
   try {

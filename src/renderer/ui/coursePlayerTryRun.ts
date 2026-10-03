@@ -11,6 +11,7 @@ import {
 import { buildPublishedCourseV2Payload } from '../export/course/buildPublishedCourse'
 import type { PublishedCourseV2Payload } from '../../shared/publishedCourseTypes'
 import type { PlayerAuthoringHostMessage } from '../../shared/playerAuthoringProtocol'
+import type { WebCompositionMountHandle, WebCompositionMountOptions } from '../../player/composition/mountWebComposition'
 import type { SurfaceDiagnostic } from '../../player/surfaces/SurfaceHost'
 import type { PublishedInteractionDiagnostic } from '../../player/interactions/PublishedInteractionSurfacePort'
 import {
@@ -99,6 +100,8 @@ export interface PublishedCourseMountInput {
     scope: 'scene' | 'surface' | 'global'
     stateId: string | null
     onMessage?: (message: PlayerAuthoringHostMessage) => void
+    onCompositionSelection?: WebCompositionMountOptions['onSelection']
+    onCompositionMount?: (layerItemId: string, handle: WebCompositionMountHandle | null) => void
   }
   onSessionCreated?: (session: PublishedCourseSession) => void
   /**
@@ -248,6 +251,8 @@ export function mountPublishedCourseAuthoring(
     scope: 'scene' | 'surface' | 'global'
     stateId: string | null
     onMessage?: (message: PlayerAuthoringHostMessage) => void
+    onCompositionSelection?: WebCompositionMountOptions['onSelection']
+    onCompositionMount?: (layerItemId: string, handle: WebCompositionMountHandle | null) => void
   },
 ): Promise<PublishedCourseSession> {
   const {
@@ -255,6 +260,8 @@ export function mountPublishedCourseAuthoring(
     scope,
     stateId,
     onMessage,
+    onCompositionSelection,
+    onCompositionMount,
     ...mountInput
   } = input
   return mountPublishedCourseTryRun({
@@ -264,6 +271,8 @@ export function mountPublishedCourseAuthoring(
       scope,
       stateId,
       ...(onMessage ? { onMessage } : {}),
+      ...(onCompositionSelection ? { onCompositionSelection } : {}),
+      ...(onCompositionMount ? { onCompositionMount } : {}),
     },
   })
 }

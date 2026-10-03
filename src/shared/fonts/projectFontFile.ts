@@ -1,8 +1,6 @@
-export const MAX_PROJECT_FONT_BYTES = 32 * 1024 * 1024
-
 /** Inspect the actual container, never infer font kind from a media extension. */
 export function inspectProjectFont(bytes: Uint8Array): { mimeType: string; extension: string } {
-  if (bytes.byteLength < 12 || bytes.byteLength > MAX_PROJECT_FONT_BYTES) throw new Error('字体文件应为 12 字节至 32 MB')
+  if (bytes.byteLength < 12) throw new Error('字体文件头不完整')
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const signature = view.getUint32(0)
   if (signature === 0x774f4632 || signature === 0x774f4646) {

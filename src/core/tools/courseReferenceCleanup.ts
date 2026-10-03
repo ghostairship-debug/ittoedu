@@ -10,6 +10,7 @@ import type {
   SlideSceneDocument,
 } from '../../shared/courseProjectTypes'
 import type { InteractionRule } from '../../shared/interactionTypes'
+import { visitProjectDynamicInstances } from '../../shared/composition/dynamic'
 
 
 export interface RemovedCourseReferences {
@@ -275,14 +276,14 @@ function removeLayerItemReferences(
     })
   })
 
-  visitAllLayerItems(project, (item) => {
-    if (item.kind !== 'runtime' || !item.runtime.nodeBindings) return
-    const bindings = item.runtime.nodeBindings
+  visitProjectDynamicInstances(project, (entry) => {
+    if (entry.kind !== 'runtime' || !entry.runtime.nodeBindings) return
+    const bindings = entry.runtime.nodeBindings
     Object.entries(bindings).forEach(([binding, targetId]) => {
       if (removedLayerItemIds.has(targetId)) delete bindings[binding]
     })
     if (Object.keys(bindings).length === 0) {
-      delete item.runtime.nodeBindings
+      delete entry.runtime.nodeBindings
     }
   })
 

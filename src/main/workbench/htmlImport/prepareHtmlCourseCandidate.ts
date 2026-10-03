@@ -16,6 +16,11 @@ import { collectRemoteMediaOrigins } from './remoteHtmlReferences'
 import type { ExtractedResource, ImportDiagnostic } from './types'
 import type { HtmlImportDestination } from '../../../shared/workbench/toolPorts'
 import { splitHtmlSections, type HtmlSectionPage } from './splitHtmlSections'
+import { parseWebComposition } from './parseWebComposition'
+import type { LayerItem } from '../../../shared/courseProjectTypes'
+import { walkComposition } from '../../../shared/composition/content'
+import type { CourseRuntimeDefinition } from '../../../shared/courseProjectTypes'
+import { effectiveSceneCanvas } from '../../../shared/slideCanvas'
 
 type CourseModel = Extract<DocumentModel, { kind: 'course-v9' }>
 export interface HtmlImportTarget { documentId: string; epoch: string; baseRevision: number; projectId: string; locationId: string; surfaceId: string; anchorBlockId?: string }
@@ -26,6 +31,7 @@ export interface HtmlCourseCandidate {
   instanceId: string
   diagnostics: ImportDiagnostic[]
   networkOrigins: string[]
+  /** runtimeId is the existing receipt field; it identifies the imported layer, including compositions. */
   pages?: readonly { order: number; location: string; runtimeId: string }[]
 }
 
@@ -93,6 +99,49 @@ export async function prepareHtmlCourseCandidate(input: {
     assets[resource.key] = { assetId: id }
   }
 
+  /** Both import routes use the same carrier choice; ordinary DOM needs no Runtime capture. */
+  const prepareCarrier = async (page: {
+    html: string; label: string; identitySeed: string; frame: LayerItem['frame']; layerItems: readonly LayerItem[]
+  }): Promise<LayerItem> => {
+    const resourceKeys = closure.resources.map(resource => resource.key).filter(key => page.html.includes(`cw-resource:${key}`))
+    const bindings = Object.fromEntries(resourceKeys.map(key => [key, assets[key]!]))
+    const runtimeForHtml = (html: string): CourseRuntimeDefinition => {
+      const keys = resourceKeys.filter(key => html.includes(`cw-resource:${key}`))
+      const source = createHtmlDocumentRuntimeSource({ html, resourceKeys: keys })
+      validateRuntimeSource(source)
+      return { protocol: 'surface-runtime', runtimeApiVersion: 3, enabled: true, renderMode: 'dom',
+        source, content: { values: {} }, assets: Object.fromEntries(keys.map(key => [key, assets[key]!])) }
+    }
+    const parsed = parseWebComposition({ html: page.html, assets: bindings, createEmbeddedRuntime: runtimeForHtml })
+    diagnostics.push(...parsed.diagnostics)
+    const programRuntime = parsed.kind === 'program' ? runtimeForHtml(parsed.html) : undefined
+    const instanceId = `html_${createHash('sha256').update(`${page.identitySeed}:${programRuntime?.source ?? page.html}`).digest('hex').slice(0, 24)}`
+    if (page.layerItems.some(item => item.layerItemId === instanceId)) throw new Error('HTML 页面已在目标位置中，不能重复追加')
+    const base = {
+      layerItemId: instanceId, label: page.label, frame: page.frame,
+      order: allocateCourseLayerOrder(project, Math.max(0, ...page.layerItems.map(value => value.order + 1))),
+      visible: true, locked: false, rotation: 0, opacity: 1,
+      hitPolicy: 'auto' as const, playbackInitialVisibility: 'inherit' as const,
+    }
+    let fallbackBytes: Buffer | undefined
+    const prepareFallback = async (runtime: CourseRuntimeDefinition, identity: string, coverage: 'scene' | 'surface') => {
+      const fallbackId = `runtime-capture-${identity}`
+      fallbackBytes ??= await sharp({ create: { width: 1, height: 1, channels: 4, background: '#ffffff' } }).png().toBuffer()
+      const fallback = await prepareImageResource({ bytes: fallbackBytes, mimeType: 'image/png', filename: `${fallbackId}.png` }, () => fallbackId)
+      project.assets[fallbackId] = { ...fallback.meta, id: fallbackId, path: `assets/${fallbackId}.png` }
+      resources.assets[fallbackId] = fallback.bytes
+      runtime.staticFallback = { assetId: fallbackId, coverage }
+    }
+    if (parsed.kind === 'composition') {
+      const nested: { id: string; runtime: CourseRuntimeDefinition }[] = []
+      walkComposition(parsed.composition.root, node => { if (node.kind === 'runtime') nested.push(node) })
+      for (const node of nested) await prepareFallback(node.runtime, node.id, 'surface')
+      return { ...base, kind: 'composition', content: parsed.composition }
+    }
+    await prepareFallback(programRuntime!, instanceId, 'scene')
+    return { ...base, kind: 'runtime', runtime: programRuntime! }
+  }
+
   // Multi-page mode
   if (input.sections && input.destinations) {
     const { destinations } = input
@@ -158,33 +207,17 @@ export async function prepareHtmlCourseCandidate(input: {
       }
 
       const targetSurface = project.surfaces.find(s => s.id === targetSurfaceId)!
+      const targetScene = targetSurface.type === 'slide' ? targetSurface.scenes.find(scene => scene.id === targetSceneId) : undefined
       const layerItems = targetSurface.type === 'slide'
-        ? targetSurface.scenes.find(s => s.id === targetSceneId)?.layerItems
+        ? targetScene?.layerItems
         : targetSurface.surfaceLayerItems.map(entry => entry.item)
       if (!layerItems) throw new Error('HTML 导入目标场景已不存在')
 
-      const resourceKeys = closure.resources.map(item => item.key).filter(key => section.html.includes('cw-resource:' + key))
-      const source = createHtmlDocumentRuntimeSource({ html: section.html, resourceKeys })
-      validateRuntimeSource(source)
-
-      const instanceId = `html_${createHash('sha256').update(`${snapshot.documentId}:${targetLocationId}:${i}:${input.sourcePath}:${source}`).digest('hex').slice(0, 24)}`
-      const fallbackId = `runtime-capture-${instanceId}`
-      const fallbackBytes = await sharp({ create: { width: 1, height: 1, channels: 4, background: '#ffffff' } }).png().toBuffer()
-      const fallback = await prepareImageResource({ bytes: fallbackBytes, mimeType: 'image/png', filename: `${fallbackId}.png` }, () => fallbackId)
-      project.assets[fallbackId] = { ...fallback.meta, id: fallbackId, path: `assets/${fallbackId}.png` }
-      resources.assets[fallbackId] = fallback.bytes
-
       const frame = targetSurface.type === 'slide'
-        ? { mode: 'absolute' as const, x: 0, y: 0, width: targetSurface.canvas.width, height: targetSurface.canvas.height }
+        ? { mode: 'absolute' as const, x: 0, y: 0, ...effectiveSceneCanvas(targetSurface, targetScene) }
         : { mode: 'absolute' as const, x: 0, y: 0, width: 760, height: 480 }
-
-      const item = {
-        layerItemId: instanceId, label: section.title ?? 'HTML 页面', kind: 'runtime' as const, frame,
-        order: allocateCourseLayerOrder(project, Math.max(0, ...layerItems.map(value => value.order + 1))),
-        visible: true, locked: false, rotation: 0, opacity: 1, hitPolicy: 'auto' as const, playbackInitialVisibility: 'inherit' as const,
-        runtime: { protocol: 'surface-runtime' as const, runtimeApiVersion: 3 as const, enabled: true, renderMode: 'dom' as const,
-          source, content: { values: {} }, assets: Object.fromEntries(resourceKeys.map(key => [key, assets[key]!])), staticFallback: { assetId: fallbackId, coverage: 'scene' as const } },
-      }
+      const item = await prepareCarrier({ html: section.html, label: section.title ?? 'HTML 页面', frame, layerItems,
+        identitySeed: `${snapshot.documentId}:${targetLocationId}:${i}:${input.sourcePath}` })
 
       if (targetSurface.type === 'slide') {
         targetSurface.scenes.find(s => s.id === targetSceneId)!.layerItems.push(item)
@@ -197,7 +230,7 @@ export async function prepareHtmlCourseCandidate(input: {
         })
       }
 
-      pages.push({ order: i, location: targetLocationId, runtimeId: instanceId })
+      pages.push({ order: i, location: targetLocationId, runtimeId: item.layerItemId })
     }
 
     const model: CourseModel = { kind: 'course-v9', project: courseProjectDocumentSchema.parse(project), resources }
@@ -224,31 +257,18 @@ export async function prepareHtmlCourseCandidate(input: {
   // Single-target mode (legacy)
   if (!input.locationId) throw new Error('HTML 导入缺少目标位置')
   const destination = resolveHtmlImportTarget(project, input.locationId, input.anchorBlockId)
-  const source = createHtmlDocumentRuntimeSource({ html: closure.html, resourceKeys: closure.resources.map(item => item.key) })
-  validateRuntimeSource(source)
-  const instanceId = `html_${createHash('sha256').update(`${snapshot.documentId}:${input.locationId}:${destination.kind === 'flow' ? destination.anchorBlockId : 'slide'}:${input.sourcePath}:${source}`).digest('hex').slice(0, 24)}`
-  const fallbackId = `runtime-capture-${instanceId}`
-  const fallbackBytes = await sharp({ create: { width: 1, height: 1, channels: 4, background: '#ffffff' } }).png().toBuffer()
-  const fallback = await prepareImageResource({ bytes: fallbackBytes, mimeType: 'image/png', filename: `${fallbackId}.png` }, () => fallbackId)
-  project.assets[fallbackId] = { ...fallback.meta, id: fallbackId, path: `assets/${fallbackId}.png` }
-  resources.assets[fallbackId] = fallback.bytes
   const targetSurface = project.surfaces.find(item => item.id === destination.surfaceId)
   if (!targetSurface || targetSurface.type !== destination.kind) throw new Error('HTML 导入目标 Surface 已不存在')
   const layerItems = destination.kind === 'slide'
     ? targetSurface.type === 'slide' ? targetSurface.scenes.find(item => item.id === destination.sceneId)?.layerItems : undefined
     : targetSurface.type === 'flow' ? targetSurface.surfaceLayerItems.map(entry => entry.item) : undefined
   if (!layerItems) throw new Error('HTML 导入目标场景已不存在')
-  if (layerItems.some(item => item.layerItemId === instanceId)) throw new Error('HTML 页面已在目标位置中，不能重复追加')
   const frame = destination.kind === 'slide' && targetSurface.type === 'slide'
-    ? { mode: 'absolute' as const, x: 0, y: 0, width: targetSurface.canvas.width, height: targetSurface.canvas.height }
+    ? { mode: 'absolute' as const, x: 0, y: 0, ...effectiveSceneCanvas(targetSurface, targetSurface.scenes.find(scene => scene.id === destination.sceneId)) }
     : { mode: 'absolute' as const, x: 0, y: 0, width: 760, height: 480 }
-  const item = {
-    layerItemId: instanceId, label: 'HTML 页面', kind: 'runtime' as const, frame,
-    order: allocateCourseLayerOrder(project, Math.max(0, ...layerItems.map(value => value.order + 1))),
-    visible: true, locked: false, rotation: 0, opacity: 1, hitPolicy: 'auto' as const, playbackInitialVisibility: 'inherit' as const,
-    runtime: { protocol: 'surface-runtime' as const, runtimeApiVersion: 3 as const, enabled: true, renderMode: 'dom' as const,
-      source, content: { values: {} }, assets, staticFallback: { assetId: fallbackId, coverage: 'scene' as const } },
-  }
+  const item = await prepareCarrier({ html: closure.html, label: 'HTML 页面', frame, layerItems,
+    identitySeed: `${snapshot.documentId}:${input.locationId}:${destination.kind === 'flow' ? destination.anchorBlockId : 'slide'}:${input.sourcePath}` })
+  const instanceId = item.layerItemId
   if (destination.kind === 'slide' && targetSurface.type === 'slide') {
     targetSurface.scenes.find(scene => scene.id === destination.sceneId)!.layerItems.push(item)
   } else if (destination.kind === 'flow' && targetSurface.type === 'flow') {

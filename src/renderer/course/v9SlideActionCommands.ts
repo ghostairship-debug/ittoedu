@@ -1,6 +1,5 @@
 import { planReorderSlideSceneLayers, planDuplicateSlideSceneLayers } from '../../core/tools/slideLayerState'
 import { type ResourceAwareAuthoringHistory, type AuthoringHistoryResourceTransition } from '../authoring/resourceAwareAuthoringHistory'
-import { MAX_SCENE_NODES } from '../../shared/constants'
 import { pruneUnusedInputState } from '../../core/tools/inputAuthoringState'
 import type { InteractionRule } from '../../shared/interactionTypes'
 import type {

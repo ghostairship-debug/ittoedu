@@ -10,9 +10,12 @@ import type { HtmlPreviewEditContext, HtmlPreviewEditPort } from './HtmlPreviewS
 import { escapeHtmlAttribute, escapeHtmlText, locateHtmlSourceTarget } from './htmlSourceLocator'
 import { prepareHtmlImage } from './htmlImagePreparation'
 import { replaceSrcsetUrls } from '../../../shared/html/responsiveImage'
+import type { HtmlSourceEditOutcome } from '../../../shared/html/sourceEditCommands'
+import { applyHtmlSourceEdit } from './htmlSourceEdits'
 
 type ResolveRequest = Extract<HtmlPreviewRequest, { type: 'html-preview.resolve-target' }>
 type EditRequest = Extract<HtmlPreviewRequest, { type: 'html-preview.edit' }>
+type SourceEditRequest = Extract<HtmlPreviewRequest, { type: 'html-preview.edit-source' }>
 type EditRecord = { revision: number; report: HtmlPreviewTargetReport; resolved: HtmlPreviewResolvedTarget }
 type Splice = { from: number; to: number; text: string }
 
@@ -24,7 +27,9 @@ export interface HtmlSourceEditDependencies {
 
 function recordKey(leaseId: string, loadId: string, handle: string): string { return `${leaseId}\0${loadId}\0${handle}` }
 
-function matchingSnapshot(snapshot: DocumentSnapshot, request: EditRequest, context: HtmlPreviewEditContext): boolean {
+function matchingSnapshot(snapshot: DocumentSnapshot,
+  request: Pick<EditRequest, 'documentId' | 'epoch' | 'baseRevision' | 'bindingVersion'>,
+  context: HtmlPreviewEditContext): boolean {
   return snapshot.documentId === request.documentId && snapshot.epoch === request.epoch
     && snapshot.revision === request.baseRevision && snapshot.binding.kind === 'file'
     && snapshot.binding.bindingVersion === request.bindingVersion && snapshot.binding.path === context.bindingPath
@@ -83,6 +88,24 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
   private readonly records = new Map<string, EditRecord>()
   constructor(private readonly dependencies: HtmlSourceEditDependencies) {}
 
+  /** Source remains the only formal HTML state; visual controls produce an ordinary canonical text transaction. */
+  async editSource(request: SourceEditRequest, context: HtmlPreviewEditContext): Promise<HtmlSourceEditOutcome> {
+    return this.dependencies.withFileAccess(async () => {
+      const snapshot = await this.dependencies.readDocument(request.documentId)
+      if (!matchingSnapshot(snapshot, request, context)) return { status: 'rejected', reason: 'stale-revision' }
+      if (snapshot.model.kind !== 'text') return { status: 'rejected', reason: 'not-editable' }
+      const edit = applyHtmlSourceEdit(snapshot.model.source, request.command)
+      if (!edit.ok) return { status: 'rejected', reason: edit.reason, message: edit.message }
+      if (!edit.changed) return { status: 'unchanged', revision: snapshot.revision }
+      const result = await this.dependencies.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch,
+        operationId: request.operationId, baseRevision: snapshot.revision, actor: 'human',
+        mutation: { type: 'command', command: { type: 'markdown.replace', source: edit.source } } })
+      if (result.status === 'unchanged') return { status: 'unchanged', revision: result.revision }
+      if (result.status !== 'applied') return { status: 'rejected', reason: 'conflict' }
+      return { status: 'applied', revision: result.revision, savedRevision: null, dirty: true, reload: true }
+    })
+  }
+
   async resolveTarget(request: ResolveRequest, context: HtmlPreviewEditContext): Promise<{ revision: number; targets: HtmlPreviewResolvedTarget[] }> {
     const model = context.snapshot.model
     if (model.kind !== 'text') throw new Error('HTML 文档已变化')
@@ -93,7 +116,6 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
       this.records.set(recordKey(request.leaseId, request.loadId, report.handle), { revision: request.revision, report, resolved })
       return resolved
     })
-    if (this.records.size > 4096) this.records.clear()
     return { revision: context.snapshot.revision, targets }
   }
 

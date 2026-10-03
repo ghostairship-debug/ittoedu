@@ -6,6 +6,7 @@ import { cloneDocumentResources } from './resources'
 import { locateCourseLayer, normalizeEffectiveLayerPropertyPatch, writeBasePropertyPatch, type NativeTextFramePort } from './course/layerProperties'
 import { nativeLayerTextAutoSizeFrame, prepareNativeLayerTextMeasurement } from '../tools/nativeTextLayout'
 import { prepareNativeTextFrame, type AsyncNativeTextMeasurePort } from '../tools/prepareNativeTextFrame'
+import { applyCompositionContentEdit } from '../tools/compositionContent'
 
 function course(model: DocumentModel): asserts model is Extract<DocumentModel, { kind: 'course-v9' }> {
   if (model.kind !== 'course-v9') throw new TypeError('Course V9 Driver 不接受其他文档格式')
@@ -33,6 +34,14 @@ export class CourseV9Driver implements DocumentDriver {
       if (command.project.revision !== model.project.revision) throw new TypeError('替换文档的基准版本已失效')
       project = structuredClone(command.project)
       resources = command.resources ?? model.resources
+    } else if (command.type === 'composition.edit') {
+      project = structuredClone(model.project)
+      const item = locateCourseLayer(project, command.layerItemId)?.item
+      if (!item || item.kind !== 'composition') throw new TypeError('组合内容已不存在')
+      if (item.locked) throw new TypeError('组合内容已锁定')
+      const result = applyCompositionContentEdit(item.content, command.edit)
+      if (!result.ok) throw new TypeError(result.diagnostic.message)
+      item.content = result.content
     } else if (command.type === 'course.object.patch') {
       project = structuredClone(model.project)
       const location = project.locations.find(value => value.id === command.locationId)

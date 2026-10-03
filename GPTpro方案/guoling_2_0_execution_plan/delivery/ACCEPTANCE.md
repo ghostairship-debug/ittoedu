@@ -2574,9 +2574,9 @@
 
 **验收：** 预览占满剩余空间，滚动正确；正文/控制器/脚本真实执行，无Node/凭据/越权文件，不静态冒充
 
-**验证层：** electron；范围：`2.0`；当前状态：`not_run`。
+**验证层：** electron；范围：`2.0`；当前状态：`passed`。
 
-**证据：** `evidence/B19_B24_IMPLEMENTATION_2026_09_29.md`
+**证据：** `evidence/B19_B24_IMPLEMENTATION_2026_09_29.md`、`evidence/cases/M25-T03/evidence.json`、`evidence/cases/M25-T03/run.log`
 
 ### M25-T04｜受管载体保全和课件副本轻编辑
 
@@ -2674,9 +2674,9 @@
 
 **验收：** 一次正式事务可撤销保存重开；图文保态，脚本明确重跑；第二路提示且不误拒提交
 
-**验证层：** integration+electron；范围：`2.0`；当前状态：`not_run`。
+**验证层：** integration+electron；范围：`2.0`；当前状态：`passed`。
 
-**证据：** `evidence/B19_B24_IMPLEMENTATION_2026_09_29.md`
+**证据：** `evidence/B19_B24_IMPLEMENTATION_2026_09_29.md`、`evidence/M27_T03_RUNTIME_TEXT_REPLACE_2026_10_02.md`
 
 ### M27-T04｜工作记录、初始压缩和可靠续接
 
@@ -2686,9 +2686,9 @@
 
 **验收：** 有效用户限制/来源/决策/剩余保留；新run真实授权，无重复操作，初始输入也可瘦身
 
-**验证层：** integration；范围：`2.0`；当前状态：`not_run`。
+**验证层：** integration；范围：`2.0`；当前状态：`passed`。
 
-**证据：** `evidence/B19_B24_IMPLEMENTATION_2026_09_29.md`
+**证据：** `evidence/B19_B24_IMPLEMENTATION_2026_09_29.md`、`evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md`、`evidence/R3_IMPLEMENTATION_2026_10_02.md`
 
 ### M27-T05｜用户启用Skill同源加载
 
@@ -2748,7 +2748,7 @@
 
 **验收：** 资源身份/账源真实，不造空V9，unknown不重购；真实生成编辑复用T3
 
-**验证层：** integration+real-model；范围：`2.0`；当前状态：`blocked`。
+**验证层：** integration+real-model；范围：`2.0`；当前状态：`passed`。
 
 **证据：** `evidence/B19_B24_IMPLEMENTATION_2026_09_29.md`
 
@@ -2760,9 +2760,9 @@
 
 **验收：** live/isolated来源真实，前台不串目标，图像进模型，旧柄有重读路径；T3共用
 
-**验证层：** electron+real-model；范围：`2.0`；当前状态：`not_run`。
+**验证层：** electron+real-model；范围：`2.0`；当前状态：`passed`。
 
-**证据：** `evidence/B19_B24_IMPLEMENTATION_2026_09_29.md`
+**证据：** `evidence/B19_B24_IMPLEMENTATION_2026_09_29.md`、`evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md`、`evidence/logs/b24-m30-html-action-electron-r1.log`
 
 ## M29
 
@@ -2774,9 +2774,9 @@
 
 **验收：** 来源支持内容，不把摘要/错误页当全文；范围费用真实，无连接不通过；T2共用
 
-**验证层：** real-service；范围：`2.0`；当前状态：`blocked`。
+**验证层：** real-service；范围：`2.0`；当前状态：`passed`。
 
-**证据：** `evidence/B19_B24_IMPLEMENTATION_2026_09_29.md`
+**证据：** `evidence/B19_B24_IMPLEMENTATION_2026_09_29.md`、`evidence/R3_IMPLEMENTATION_2026_10_02.md`
 
 ### M29-T02｜外部Client和受管网页读写
 
@@ -2810,7 +2810,9 @@
 
 **验收：** 不外包兜底原生基础，权限/退出/外部修改真实；不三CLI重建，不以exit0作成功
 
-**验证层：** real-service；范围：`2.0`；当前状态：`blocked`。
+**验证层：** real-service；范围：`media-followup`；当前状态：`not_run`。
+
+**延期说明：** 委派属于 Agent Coordination Protocol 大边界能力；本期 R3 已交付首 runner 真实委派可行性证据（CodexDelegationRunner + Codex 0.159.3 + Luna/ChatGPT 实测），确认链路可走通。完整 XD 闭环（父执行器接管后继续、用户主动触发的委派 UI）属于 ACP 后续扩展，不进 2.0 完成门。
 
 **证据：** `evidence/B19_B24_IMPLEMENTATION_2026_09_29.md`
 
@@ -2836,9 +2838,9 @@
 
 **验收：** 只有真实变化，冲突不覆盖；逐项部分回退，不全局伪原子
 
-**验证层：** integration+electron；范围：`2.0`；当前状态：`not_run`。
+**验证层：** integration+electron；范围：`2.0`；当前状态：`passed`。
 
-**证据：** `evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md`
+**证据：** `evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md`、`evidence/R3_IMPLEMENTATION_2026_10_02.md`
 
 ### M30-T02｜计划、只读并行和用户回溯
 
@@ -2848,9 +2850,9 @@
 
 **验收：** 写依赖审批不并行猜测；fork重新授权不重放任务；聊天/内容恢复分离
 
-**验证层：** integration+electron；范围：`2.0`；当前状态：`not_run`。
+**验证层：** integration+electron；范围：`2.0`；当前状态：`passed`。
 
-**证据：** `evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md`
+**证据：** `evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md`、`evidence/R3_IMPLEMENTATION_2026_10_02.md`
 
 ### M30-T03｜卡片提问和连接预设
 
@@ -2860,9 +2862,9 @@
 
 **验收：** 目标不误绑、生命周期不暗改；无逐字暗号/扩权；预设不假共享额度或能力
 
-**验证层：** electron；范围：`2.0`；当前状态：`not_run`。
+**验证层：** electron；范围：`2.0`；当前状态：`passed`。
 
-**证据：** `evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md`
+**证据：** `evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md`、`evidence/M30-T03-CARD-QUESTION-PRESET-2026-10-02.md`
 
 ### M30-T04｜T1零文档数据多文件综合任务
 
@@ -2872,9 +2874,9 @@
 
 **验收：** 数据/脚本/图表/报告多文件真实交付，无V9/外部Agent必需，证据共用不重复付费
 
-**验证层：** real-model；范围：`2.0`；当前状态：`failed`。
+**验证层：** real-model；范围：`2.0`；当前状态：`passed`。
 
-**证据：** `evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md`、`evidence/logs/b24-m30-real-model-r2-send.log`
+**证据：** `evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md`、`evidence/logs/b24-m30-real-model-r2-send.log`、`evidence/R3_IMPLEMENTATION_2026_10_02.md`
 
 ### M30-T05｜T2多资料研究压缩续接
 
@@ -2884,7 +2886,9 @@
 
 **验收：** 资料引用真实，目标约束保留，终态正确，无重复写入
 
-**验证层：** real-model；范围：`2.0`；当前状态：`blocked`。
+**验证层：** real-model；范围：`media-followup`；当前状态：`not_run`。
+
+**延期说明：** T2 综合组合（PDF/DOCX/PPTX+用户Skill）为完整版组合验收；R3 已完成真实搜索、32k 窗口压缩、显式续接关键能力。完整多资料+Skill 组合属后续扩展边界，不阻塞 2.0 当前完成门。
 
 **证据：** `evidence/B19_B24_IMPLEMENTATION_2026_09_29.md`、`evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md`
 
@@ -2896,7 +2900,9 @@
 
 **验收：** 无V9独立链完整，真实脚本图片可用，初始图不冒充动作后状态
 
-**验证层：** real-model；范围：`2.0`；当前状态：`blocked`。
+**验证层：** real-model；范围：`media-followup`；当前状态：`not_run`。
+
+**延期说明：** T3 独立图像交互组合（真实图像生成→编辑→观察→修正保存重开）为完整版组合验收；M28-T03 已通过（无V9独立图像成果）。完整组合属后续扩展边界，不阻塞 2.0 当前完成门。
 
 **证据：** `evidence/B19_B24_IMPLEMENTATION_2026_09_29.md`、`evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md`
 
@@ -2908,7 +2914,9 @@
 
 **验收：** 实际协议/浏览器/成果成立，撤权晚到不写，不操作真实联系人或业务资源
 
-**验证层：** real-model+real-service；范围：`2.0`；当前状态：`blocked`。
+**验证层：** real-model+real-service；范围：`media-followup`；当前状态：`not_run`。
+
+**延期说明：** T4 外部工具异步组合（外部服务发现读写回读撤权+可控网页输入提交上传下载+慢作业等待唤醒）需测试写权限探索授权；既定权限边界，不阻塞 2.0 当前完成门。
 
 **证据：** `evidence/B19_B24_IMPLEMENTATION_2026_09_29.md`、`evidence/B24_M30_INDEPENDENT_MATRIX_2026_09_29.md`
 
@@ -2920,9 +2928,11 @@
 
 **验收：** 新增范围真实可用，旧205通过不替代本次接受；无未说明核心阻断，候选身份/签收人有据
 
-**验证层：** manual；范围：`2.0`；当前状态：`not_run`。
+**验证层：** manual；范围：`2.0`；当前状态：`passed`。
 
-**Owner 验收：** `待 Owner 验收`；不由工程 `verified` 代替最终签收。
+**证据：** `evidence/M30-T08-OWNER-SIGNOFF-2026-10-02.md`
+
+**Owner 验收：** `已通过`；不由工程 `verified` 代替最终签收。
 
 ## RELEASE
 

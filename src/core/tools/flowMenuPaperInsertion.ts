@@ -1,4 +1,3 @@
-import { MAX_SCENE_NODES } from '../../shared/constants'
 import type { ComponentLayerItem, CourseProjectDocument, LayerFrame, NativeLayerItem } from '../../shared/courseProjectTypes'
 import { flowParagraphAnchorSchema, layerFrameSchema, layerItemSchema } from '../../shared/courseProjectSchema'
 import { appendOverlayItem } from './flowNativeInsertion'
@@ -50,7 +49,6 @@ export function appendFlowMenuPaperItem(draft: CourseProjectDocument, input: Flo
       || (candidate.type === 'slide' && candidate.scenes.some(scene => scene.layerItems.some(layer => layer.layerItemId === item.layerItemId)))
       || (candidate.type === 'spatial-2d' && candidate.world.layerItems.some(layer => layer.layerItemId === item.layerItemId)))
   if (duplicate) throw new Error(`图层 ID 已存在：${item.layerItemId}`)
-  if (surface.surfaceLayerItems.length >= MAX_SCENE_NODES) throw new Error(`已达到 ${MAX_SCENE_NODES} 个节点上限`)
   if ('kind' in requested) surface.blocks.push({ id: blockId, type: 'paragraph', content: { inlines: [] } })
   appendOverlayItem(draft, { source: 'surface', surfaceId: input.surfaceId }, item)
   const entry = surface.surfaceLayerItems.find(candidate => candidate.item.layerItemId === item.layerItemId)!

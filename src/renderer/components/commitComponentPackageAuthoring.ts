@@ -28,6 +28,8 @@ import { componentPackageMeta } from '../../shared/componentPackageMeta'
 import { planComponentAssetReplacement, planComponentTextRule, planStaticFallbackRefresh, type ComponentLightEditPlanResult } from './componentLightEditTransactions'
 import type { LightEditTextOverride } from '../../shared/contracts/runtime/lightEdit'
 import { emptyCourseAssetSidecar } from '../project/v9AssetAdapter'
+import { createCompositionFragmentPackage } from './compositionFragments/compositionFragmentPackage'
+import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
 
 /** The result of a component light edit (M15): written, nothing to change, or refused with the reason. */
 export type ComponentLightEditCommitResult = { ok: true; status: 'updated' | 'unchanged' } | { ok: false; reason: string }
@@ -186,6 +188,34 @@ export { editableComponentPackageId } from './editableComponentPackage'
 
 export function createComponentAuthoringActions(ports: ComponentAuthoringPorts) {
   return {
+    extractCompositionFragment(itemId: string, name: string): string | null {
+      const state = ports.read()
+      const document = state.document
+      if (!document) return null
+      try {
+        const data = createCompositionFragmentPackage({ project: document, layerItemId: itemId, name,
+          assetFiles: state.sidecar?.files ?? {}, componentPackages: state.componentPackages })
+        const next = structuredClone(document)
+        next.componentPackages[data.manifest.id] = componentPackageMeta(data)
+        next.revision++; next.updatedAt = new Date().toISOString()
+        const step = createEditorTransactionStep(document, { projectId: document.id, baseRevision: document.revision,
+          nextDocument: courseProjectDocumentSchema.parse(next), resourceChanges: { componentPackageChanges: [{ packageId: data.manifest.id, after: data }] } })
+        if (!step || !ports.persistTransaction(step, `已将“${name.trim()}”提取到工程组件库`)) throw new Error('当前没有可用的作者会话。')
+        ports.setActiveTab('components'); ports.setFeedback({ errorMessage: null })
+        return data.manifest.id
+      } catch (error) {
+        ports.setFeedback({ errorMessage: error instanceof Error ? error.message : '结构资产提取失败。', statusMessage: null })
+        return null
+      }
+    },
+    insertCompositionFragment(packageId: string): boolean {
+      const data = ports.read().componentPackages[packageId]
+      const target = captureComponentInsertionTarget(ports)
+      if (!target || data?.manifest.content?.kind !== 'composition') return false
+      const result = insertComponentPackagesAtTarget(ports, target, [data])
+      ports.setFeedback({ errorMessage: result.ok ? null : result.reason, statusMessage: result.ok ? undefined : null })
+      return result.ok
+    },
     /** M15: sets the rule for one occurrence of a component's own text; back at the original text it is removed. */
     writeComponentTextRule: (itemId: string, rule: LightEditTextOverride): ComponentLightEditCommitResult => commitComponentLightEdit(ports,
       project => planComponentTextRule({ project, itemId, rule, now: new Date().toISOString() }), '已更新组件文字'),
@@ -415,6 +445,13 @@ export function createComponentAuthoringActions(ports: ComponentAuthoringPorts) 
       const state = ports.read()
       const data = state.componentPackages[packageId]
       if (!data) return
+      if (data.manifest.content?.kind === 'composition') {
+        const target = captureComponentInsertionTarget(ports)
+        if (!target) return
+        const result = insertComponentPackagesAtTarget(ports, target, [data])
+        if (!result.ok) ports.setFeedback({ errorMessage: result.reason, statusMessage: null })
+        return
+      }
       const extras = {
         statusMessage: `已添加“${data.manifest.name}”`,
       }

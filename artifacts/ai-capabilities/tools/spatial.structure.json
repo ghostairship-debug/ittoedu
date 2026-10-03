@@ -102,7 +102,6 @@
         "items": {
           "$ref": "#/$defs/__schema5"
         },
-        "maxItems": 20000,
         "minItems": 1,
         "type": "array"
       },

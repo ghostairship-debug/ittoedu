@@ -2,7 +2,7 @@ import { canEditLayerInScope } from '../../shared/teacherControllerRole'
 import { constrainControllerDisplayFrame, controllerAuthoringArea, controllerDisplayFrame, shownControllerFrame } from '../authoring/controllerDisplayBounds'
 import type { LayerItem } from '../../shared/courseProjectTypes'
 import { MIN_NODE_SIZE } from '../../shared/constants'
-import { courseSlideCanvas } from '../../shared/slideCanvas'
+import { sharedSlideFrameMapping } from '../../shared/slideCanvas'
 import type { NativeLineGeometry } from '../../shared/contracts/native-v1/types'
 import {
   collectLineSnapAxes,
@@ -161,6 +161,15 @@ function pointerToWorld(
   return clientToWorld(viewportTransform(options), { x: pointer.x, y: pointer.y })
 }
 
+function workspaceSlideCanvas(backend: SlideAuthoringBackend) {
+  const session = backend.getSession()
+  return buildSlideEditorView({
+    project: session.history.present,
+    locationId: session.selection.locationId,
+    stateId: session.selection.stateId,
+  }).canvas
+}
+
 function layerTargets(backend: SlideAuthoringBackend): V9SlideHitTarget[] {
   const session = backend.getSession()
   const view = buildSlideEditorView({
@@ -170,12 +179,16 @@ function layerTargets(backend: SlideAuthoringBackend): V9SlideHitTarget[] {
   })
   return view.layers.flatMap((layer) => {
     if (!canEditLayerInScope(layer, session.scope)) return []
-    return [adaptV9SlideLayerItemHit(
+    const target = adaptV9SlideLayerItemHit(
       layer.item as LayerItem,
       layer.effectiveVisible,
       session.scope,
-      courseSlideCanvas(session.history.present),
-    )]
+      view.canvas,
+    )
+    if (target.lineStroke && layer.source !== 'scene') {
+      return [{ ...target, lineStroke: { ...target.lineStroke, borderWidth: target.lineStroke.borderWidth * sharedSlideFrameMapping(view.referenceCanvas, view.canvas).scale } }]
+    }
+    return [target]
   })
 }
 
@@ -193,7 +206,8 @@ function nativeFrames(backend: SlideAuthoringBackend): Map<string, SlideEditorNo
     if (
       layer.item.kind !== 'native' &&
       layer.item.kind !== 'component' &&
-      layer.item.kind !== 'runtime'
+      layer.item.kind !== 'runtime' &&
+      layer.item.kind !== 'composition'
     ) continue
     frames.set(layer.selectionId, {
       nodeId: layer.selectionId,
@@ -241,7 +255,7 @@ function overlayForSelection(
     const previewNode = previewById.get(id)
     if (previewNode) {
       const item = session.history.present.globalLayerItems.find(entry => entry.item.layerItemId === id)?.item
-      return [{ ...(item ? controllerDisplayFrame(item, previewNode, courseSlideCanvas(session.history.present)) : previewNode), rotation: previewNode.rotation }]
+      return [{ ...(item ? controllerDisplayFrame(item, previewNode, workspaceSlideCanvas(backend)) : previewNode), rotation: previewNode.rotation }]
     }
     const hit = hits.get(id)
     if (!hit) return []
@@ -285,7 +299,7 @@ function previewMove(
     const next = { ...node, x: node.x + dx, y: node.y + dy }
     const item = globals.find(entry => entry.item.layerItemId === node.nodeId)?.item
     // A dragged controller is written where it is shown: on the visible part of the page (M19).
-    return item ? constrainControllerDisplayFrame(item, next, controllerAuthoringArea(item, courseSlideCanvas(backend.getSession().history.present))) : next
+    return item ? constrainControllerDisplayFrame(item, next, controllerAuthoringArea(item, workspaceSlideCanvas(backend))) : next
   })
 }
 
@@ -526,7 +540,7 @@ export function createSlideWorkspaceAuthoringController(
     const scale = viewportTransform(options).scale
     const snap = snapLinePoint(
       world,
-      collectLineSnapAxes(layerTargets(backend), active.nodeId, courseSlideCanvas(backend.getSession().history.present)),
+      collectLineSnapAxes(layerTargets(backend), active.nodeId, workspaceSlideCanvas(backend)),
       scale,
       pointer.altKey === true,
     )
@@ -667,7 +681,7 @@ export function createSlideWorkspaceAuthoringController(
           // An off-page controller is moved from the page edge where it is shown, not from where it is stored.
           nodes: nextWritable.map(node => {
             const item = present.globalLayerItems.find(entry => entry.item.layerItemId === node.nodeId)?.item
-            return item ? shownControllerFrame(item, node, courseSlideCanvas(present)) : node
+            return item ? shownControllerFrame(item, node, workspaceSlideCanvas(live)) : node
           }),
         }
         preview = gesture.nodes.map((node) => ({ ...node }))

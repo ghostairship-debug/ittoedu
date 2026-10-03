@@ -186,8 +186,7 @@ it('keeps initial images archived on the actual compaction wire while the comple
       '旧过程文字'.repeat(150_000))
   } }
   const f = await fixture(provider)
-  const started = await f.engine.start({ ...f.input, context: [{ role: 'user', content: initialImages.map(url => ({ type: 'image_url', image_url: { url } })) }],
-    budget: { maxContextBytes: 600_000 } }), final = await f.engine.wait(started.runId)
+  const started = await f.engine.start({ ...f.input, context: [{ role: 'user', content: initialImages.map(url => ({ type: 'image_url', image_url: { url } })) }] }), final = await f.engine.wait(started.runId)
   expect(final.status, JSON.stringify(final.failure)).toBe('completed')
   expect(final.compacted).toBeDefined()
   expect(wires).toHaveLength(5)

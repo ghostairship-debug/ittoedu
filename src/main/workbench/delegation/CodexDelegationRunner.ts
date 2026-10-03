@@ -16,9 +16,8 @@ export interface CodexDelegationRequest {
   /** Relative paths inside copyRoot. These are read back, not automatically committed. */
   materials?: readonly string[]
   expectedArtifacts: readonly string[]
-  /** A short-lived grant from ExternalMcpService; never placed on the command line or in a result. */
+  /** A task-scoped grant from ExternalMcpService; never placed on the command line or in a result. */
   mcp?: { endpoint: string; bearer: string; revoke(): Promise<void> }
-  timeoutMs?: number
 }
 
 export interface DelegationArtifact {
@@ -88,7 +87,6 @@ export interface CodexCliInspection {
   account?: 'ChatGPT'
 }
 
-const MAX_EVENT_BYTES = 64 * 1024 * 1024
 const STOP_WAIT_MS = 5000
 const REVOKE_WAIT_MS = 5000
 const MODEL = 'gpt-6-luna' as const
@@ -138,7 +136,7 @@ export async function discoverNativeCodexExecutable(): Promise<string | null> {
 /** No model call: inspect CLI options, existing login and the local model capability catalog. */
 export async function inspectCodexCli(executable: string): Promise<CodexCliInspection> {
   try {
-    const command = (args: string[]) => execFileAsync(executable, args, { env: childEnvironment(), windowsHide: true, timeout: 5000, maxBuffer: 64 * 1024 })
+    const command = (args: string[]) => execFileAsync(executable, args, { env: childEnvironment(), windowsHide: true, timeout: 5000, maxBuffer: Infinity })
     const versionOutput = await command(['--version'])
     const version = (versionOutput.stdout || versionOutput.stderr).trim()
     const helpOutput = await command(['exec', '--help'])
@@ -179,12 +177,12 @@ function eventFromJson(value: unknown): { event?: DelegationEvent; terminal?: 's
   return {}
 }
 
-async function bounded<T>(promise: Promise<T>, waitMs: number, signal?: AbortSignal): Promise<
+async function observe<T>(promise: Promise<T>, signal?: AbortSignal, waitMs?: number): Promise<
   { kind: 'returned'; value: T } | { kind: 'failed'; error: unknown } | { kind: 'expired' } | { kind: 'stopped' }> {
   if (signal?.aborted) return { kind: 'stopped' }
   let timer: ReturnType<typeof setTimeout> | undefined, onAbort: (() => void) | undefined
   const expiry = new Promise<{ kind: 'expired' }>(resolve => {
-    timer = setTimeout(() => resolve({ kind: 'expired' }), waitMs); timer.unref()
+    if (waitMs !== undefined) { timer = setTimeout(() => resolve({ kind: 'expired' }), waitMs); timer.unref() }
   })
   const stop = new Promise<{ kind: 'stopped' }>(resolve => {
     if (signal) { onAbort = () => resolve({ kind: 'stopped' }); signal.addEventListener('abort', onAbort, { once: true }) }
@@ -209,7 +207,7 @@ export class CodexDelegationRunner {
         reason: `委派状态无法确定：${cause instanceof Error ? cause.message : String(cause)}` }
     }
     if (scoped.mcp) {
-      const revoked = await bounded(scoped.mcp.revoke(), REVOKE_WAIT_MS)
+      const revoked = await observe(scoped.mcp.revoke(), undefined, REVOKE_WAIT_MS)
       if (revoked.kind !== 'returned') {
         result.status = 'unknown'
         result.reason = '委派文档授权未能确认撤销；请先核实外部写入状态'
@@ -220,7 +218,7 @@ export class CodexDelegationRunner {
 
   private async execute(request: CodexDelegationRequest, options: CodexDelegationRunOptions): Promise<CodexDelegationResult> {
     const result = base(request.taskId)
-    if (!request.taskId.trim() || !request.goal.trim() || request.goal.length > 100_000) {
+    if (!request.taskId.trim() || !request.goal.trim()) {
       result.reason = '委派目标或任务身份无效'; return result
     }
     if (request.permission === 'ask') { result.reason = '修改前询问权限尚无外部执行器确认通道'; return result }
@@ -228,10 +226,6 @@ export class CodexDelegationRunner {
       result.reason = '委派权限无效'; return result
     }
     if (options.signal?.aborted) { result.status = 'cancelled'; result.reason = '委派在启动前已停止'; return result }
-    if (!Number.isSafeInteger(request.timeoutMs ?? 15 * 60_000) || (request.timeoutMs ?? 15 * 60_000) < 1000
-      || (request.timeoutMs ?? 15 * 60_000) > 2 * 60 * 60_000) {
-      result.reason = '委派时限无效'; return result
-    }
     let root: string, executable: string, materials: string[]
     try {
       const binary = request.executablePath ?? await discoverNativeCodexExecutable()
@@ -310,7 +304,6 @@ export class CodexDelegationRunner {
         if (index < 0) break
         const line = buffer.slice(0, index).trim(); buffer = buffer.slice(index + 1)
         if (!line) continue
-        if (Buffer.byteLength(line) > MAX_EVENT_BYTES) { protocolError = true; stop(); return }
         if (!logError && !log.write(redact(line) + '\n')) child.stdout.pause()
         try {
           const parsed = eventFromJson(JSON.parse(line))
@@ -320,7 +313,6 @@ export class CodexDelegationRunner {
           if (parsed.event) notify(parsed.event)
         } catch { protocolError = true; stop(); return }
       }
-      if (Buffer.byteLength(buffer) > MAX_EVENT_BYTES) { protocolError = true; stop() }
     }
     child.stdout.on('data', receive)
     child.stderr.on('data', (chunk: Buffer) => {
@@ -332,14 +324,8 @@ export class CodexDelegationRunner {
       child.once('close', (code, signal) => resolve({ code, signal }))
     })
     options.signal?.addEventListener('abort', stop, { once: true })
-    let timeout = setTimeout(stop, request.timeoutMs ?? 15 * 60_000)
-    timeout.unref()
-    const progress = () => { if (request.timeoutMs === undefined && !stopping) { clearTimeout(timeout); timeout = setTimeout(stop, 15 * 60_000); timeout.unref() } }
-    child.stdout.on('data', progress)
     try { child.stdin.end(prompt) } catch { stop() }
     const exited = await Promise.race([exit, stopWait])
-    clearTimeout(timeout)
-    child.stdout.removeListener('data', progress)
     buffer += decoder.end()
     if (buffer.trim()) {
       try { const parsed = eventFromJson(JSON.parse(buffer)); if (parsed.terminal) terminal = parsed.terminal; if (parsed.summary) summary = redact(parsed.summary) }
@@ -349,7 +335,7 @@ export class CodexDelegationRunner {
     result.diagnosticFile = logError ? undefined : logPath
     if (logError) diagnostic += `\n事件日志落盘失败：${logError.message}`
     options.signal?.removeEventListener('abort', stop)
-    if (stopBarrier) await bounded(stopBarrier, REVOKE_WAIT_MS)
+    if (stopBarrier) await observe(stopBarrier, undefined, REVOKE_WAIT_MS)
     result.threadId = threadId
     result.exitCode = exited?.code
     result.summary = summary || undefined
@@ -361,7 +347,7 @@ export class CodexDelegationRunner {
       return result
     }
     if (request.mcp) {
-      const revoked = await bounded(request.mcp.revoke(), REVOKE_WAIT_MS)
+      const revoked = await observe(request.mcp.revoke(), undefined, REVOKE_WAIT_MS)
       if (revoked.kind !== 'returned') {
         result.status = 'unknown'; result.reason = '外部执行器已退出，但文档写入授权未能确认撤销'; return result
       }
@@ -373,16 +359,16 @@ export class CodexDelegationRunner {
         : terminal === 'failed' ? '外部执行器报告失败' : exited.code !== 0 ? `执行器退出码 ${exited.code}` : '执行器缺少成功终态事件'
       return result
     }
-    const checked = await bounded((async () => {
+    const checked = await observe((async () => {
       const artifacts = await Promise.all(request.expectedArtifacts.map(async name => {
         const actual = await readableInside(root, name)
         return { path: actual, bytes: (await fs.stat(actual)).size }
       }))
       const verification = await options.verify({ copyRoot: root, artifacts, summary })
       return { artifacts, verification }
-    })(), request.timeoutMs ?? 15 * 60_000, options.signal)
+    })(), options.signal)
     if (options.signal?.aborted || checked.kind === 'stopped' || checked.kind === 'expired') {
-      result.status = 'unknown'; result.reason = '成果核验未在任务期限内完成，未自动接受迟到结果'
+      result.status = 'unknown'; result.reason = '成果核验期间任务已停止，未自动接受迟到结果'
     } else if (checked.kind === 'failed') {
       result.status = 'failed'
       result.reason = `成果回读或核验失败：${checked.error instanceof Error ? checked.error.message : String(checked.error)}`

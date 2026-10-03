@@ -8,7 +8,7 @@ import { layerPositionSchema, layerPlacementSchema, layerAlignModeSchema, layerD
 import { hostToolCatalog } from './HostToolServices'
 import { workbenchServiceToolCatalog } from './WorkbenchServiceTools'
 import { skillReadTool, skillListTool } from './SkillTools'
-import { htmlImportTool } from './HtmlImportTools'
+import { htmlImportTool, createCourseFromHtmlTool } from './HtmlImportTools'
 import { documentDeliveryTools } from './DocumentDeliveryTools'
 import { viewObserveTool } from './ViewObserveTools'
 import bundledSkills from '../../shared/generated/bundledSkills.json'
@@ -28,6 +28,7 @@ export const contentTargetsInputSchema = z.object({ target }).strict()
 export const contentUpdateInputSchema = z.union([
   z.object({ target, text: z.string() }).strict(),
   z.object({ target, resource: z.string().min(1).max(100) }).strict(),
+  z.object({ target, style: z.record(z.string(), z.string().nullable()) }).strict(),
 ])
 const layerPosition = z.discriminatedUnion('kind', [layerPositionSchema.options[0], layerPositionSchema.options[1], layerPositionSchema.options[2].omit({ siblingId: true }).extend({ sibling: target }), layerPositionSchema.options[3].omit({ siblingId: true }).extend({ sibling: target })])
 const nativeMediaProperties = nativeTemplateSchema.options[3].omit({ nativeType: true, assetId: true, paperSpace: true, placement: true })
@@ -145,7 +146,7 @@ export interface RunToolScope {
 
 /** Model discovery is a run projection; it never changes the canonical MCP catalog. */
 export function selectRunToolNames(scopes: readonly RunToolScope[], options: { standaloneImage?: boolean } = {}): string[] {
-  if (!scopes.length) return ['skills.read', 'skills.list', ...workbenchServiceToolCatalog.map(tool => tool.name),
+  if (!scopes.length) return ['skills.read', 'skills.list', 'course.createFromHtml', ...workbenchServiceToolCatalog.map(tool => tool.name),
     ...(options.standaloneImage ? ['image.generate', 'image.edit', 'image.status'] : [])]
   if (scopes.some(scope => scope.kind === 'course-v9' && scope.wholeDocumentWritable))
     return toolCatalog.filter(tool => tool.name !== 'document.insert' || scopes.some(scope => scope.canInsertFlow)).map(tool => tool.name)
@@ -153,6 +154,7 @@ export function selectRunToolNames(scopes: readonly RunToolScope[], options: { s
   const hasV9Write = scopes.some(scope => scope.kind === 'course-v9' && scope.writableTargetKinds.length > 0)
   const eligible = (name: string) => {
     if (workbenchServiceToolCatalog.some(tool => tool.name === name)) return true
+    if (name === 'course.createFromHtml') return true
     if (name === 'read' || name === 'inspect' || name === 'listChildren' || name === 'skills.read' || name === 'skills.list') return true
     if (name === 'content.targets') return scopes.some(scope => scope.kind === 'course-v9')
     if (name === 'view.observe') return scopes.some(scope => scope.kind === 'course-v9')
@@ -174,7 +176,7 @@ export function selectRunToolNames(scopes: readonly RunToolScope[], options: { s
   return toolCatalog.filter(tool => direct.includes(tool) || tool.name === 'batch' && hasMutation).map(tool => tool.name)
 }
 
-export const toolFamilies = ['content', 'layout', 'navigation', 'interaction', 'media', 'build', 'jobs'] as const
+export const toolFamilies = ['content', 'layout', 'navigation', 'interaction', 'media', 'build', 'jobs', 'office'] as const
 export type ToolFamily = typeof toolFamilies[number]
 export const toolFamilyDescriptions: Record<ToolFamily, string> = {
   content: 'Flow 讲义块、原生内容与正文结构',
@@ -184,6 +186,7 @@ export const toolFamilyDescriptions: Record<ToolFamily, string> = {
   media: '图片、视频、声音与图像生成',
   build: '受控构建、检查与导入',
   jobs: '受限计算、有限委派与作业状态、等待、日志和取消',
+  office: 'Word、Excel、PowerPoint 原格式内容创建、读取和局部编辑；软件组装与保存',
 }
 /** Describe only capabilities actually allowed by this run's frozen grant. */
 export function describeToolFamily(family: ToolFamily, allowedNames: readonly string[]): string {
@@ -192,6 +195,7 @@ export function describeToolFamily(family: ToolFamily, allowedNames: readonly st
   return toolFamilyDescriptions[family]
 }
 const baselineTools = new Set(['read', 'inspect', 'listChildren', 'content.targets', 'skills.read', 'skills.list', 'view.observe', 'file.save', 'html.import', 'text.replace', 'flow.content',
+  'course.createFromHtml',
   'image.generate', 'image.edit', 'image.status',
   'web.search', 'web.open', 'mcp.discover', 'mcp.invoke', 'mcp.resource', 'media.discover'])
 export function familyOfTool(name: string): ToolFamily | null {
@@ -219,14 +223,15 @@ export const toolCatalog = [
   skillReadTool(bundledSkills.manifest.skills),
   skillListTool,
   htmlImportTool,
+  createCourseFromHtmlTool,
   ...documentDeliveryTools,
   viewObserveTool,
   { name: 'read', description: '分页读取目标文字或属性；返回 data.target 是当前内容的新短句柄，后续编辑应使用它。nextCursor 续读仍配原调用的 target；外部修改目标时明确冲突。', inputSchema: z.object(page).strict(), manual: { label: '读取', group: 'read', targetKinds: readableKinds } },
   { name: 'inspect', description: '读取目标类型、可用操作及小范围摘要；返回 data.target 是当前内容的新短句柄，后续编辑应使用它；外部修改目标时明确冲突。', inputSchema: z.object({ target }).strict(), manual: { label: '检查目标', group: 'read', targetKinds: readableKinds } },
   { name: 'listChildren', description: '分页列出文档、页面、owner、命名态的背景和内容子项，或 Flow 分节正文，并取得短句柄；写权限仍按冻结目标逐项判定。', inputSchema: z.object(page).strict(), manual: { label: '列出子项', group: 'read', targetKinds: ['course-audio', 'document', 'course-surface', 'course-location', 'course-owner', 'course-state', 'flow-container', 'flow-block'] } },
-  { name: 'content.targets', description: '发现当前 Runtime/Component 对象的宿主确认文字与图片轻编辑目标，返回短句柄和当前文字。声明内容从正式课件读取；自动识别内容只来自当前真实宿主观察。不得输入 CSS selector、内部对象编号或猜测未观察到的内容。', inputSchema: contentTargetsInputSchema, manual: { label: '发现动态图文目标', group: 'read', targetKinds: ['course-object'] } },
-  { name: 'content.update', description: '以 content.targets 返回的短句柄修改一个 Runtime/Component 文字或图片目标。文字给 text，图片给本任务已有 image resource；互斥。宿主在正式文档 CAS 下校验来源、位置、锁定和当前值；已有静态后备图必须同步捕获，否则不提交。', inputSchema: contentUpdateInputSchema, manual: { label: '修改动态图文', group: 'edit', targetKinds: ['course-object'] } },
-  { name: 'text.replace', description: '只替换已授权 Markdown 范围、纯文本范围、Native 纯文本、Flow 正文或范围的文字内容；不修改对象字体、颜色等样式属性。若本任务授权 Native 对象样式，可用 tools.load 展开 layout，再用 object.update。保留范围外源文、公式、样式和可确定映射的 runs。纯文本文档保持纯文本，不写入 Markdown 语法。', inputSchema: mutationSchemas[0].shape.input, manual: { label: '替换正文', group: 'edit', targetKinds: ['markdown-range', 'course-object', 'flow-block', 'flow-range'] } },
+  { name: 'content.targets', description: '发现当前对象可编辑的正文、样式或图片，返回短句柄、当前内容和对象说明。组合内容从正式结构读取文字、元素样式与已绑定图片；Runtime/Component 自动识别内容来自真实宿主观察。直接使用返回的句柄，无需提供内部节点编号或 CSS selector。', inputSchema: contentTargetsInputSchema, manual: { label: '发现内容目标', group: 'read', targetKinds: ['course-object'] } },
+  { name: 'content.update', description: '用 content.targets 返回的短句柄修改一个内容字段：正文给 text，元素内联样式给 style（CSS 属性到值，null 删除该声明），图片给本任务已有 image resource；三者互斥。软件保留其余正文、样式与布局，并检查当前版本和锁定。Runtime/Component 已有静态后备图时同步更新。', inputSchema: contentUpdateInputSchema, manual: { label: '修改内容', group: 'edit', targetKinds: ['course-object'] } },
+  { name: 'text.replace', description: '只替换已授权 Markdown 范围、纯文本范围、Native 纯文本、Flow 正文或范围的文字内容；也接受 content.targets 发现的正文短句柄。不修改对象字体、颜色等样式属性。若本任务授权 Native 对象样式，可用 tools.load 展开 layout，再用 object.update。保留范围外源文、公式、样式和可确定映射的 runs。纯文本文档保持纯文本，不写入 Markdown 语法。', inputSchema: mutationSchemas[0].shape.input, manual: { label: '替换正文', group: 'edit', targetKinds: ['markdown-range', 'course-object', 'flow-block', 'flow-range'] } },
   { name: 'object.update', description: '修改对象公开属性；Native 文字整节点样式使用 nativeTextStyle，正文使用 text.replace。文字框需给字体和四边 padding 留足可读空间，shrink 会缩小字；设背景色时要同时明确 backgroundOpacity，默认 0 为透明。透明文字框在无遮挡的纯色场景中，须让文字颜色与有效 Slide 场景背景形成清晰对比；有背景图片或图层衬底时按实际画面判断。遵守锁定与正式 V9 校验。', inputSchema: mutationSchemas[1].shape.input, manual: { label: '修改属性', group: 'edit', targetKinds: ['course-object'] } },
   { name: 'owner.background', description: '修改课程、Slide/Flow/Spatial Surface、场景或命名态的背景；省略字段保持原值。', inputSchema: mutationSchemas[2].shape.input, manual: { label: '修改背景', group: 'edit', targetKinds: ['course-background'] } },
   { name: 'flow.content', description: '替换 Flow 正文块内容或已冻结的精确正文范围，支持富文本与公式，范围之外的内容、样式、引用与身份保留。', inputSchema: mutationSchemas[3].shape.input, manual: { label: '修改讲义正文', group: 'edit', targetKinds: ['flow-block', 'flow-range'] } },

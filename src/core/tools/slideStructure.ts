@@ -1,6 +1,7 @@
 import { remapDuplicatedInputState } from './inputAuthoringState'
 import { rebuildTableItemIds } from './nativeNodeFactories'
 import { rebuildChartItemIds } from './chartIdentity'
+import { rewriteLayerInternalReferences } from './slideClipboard'
 import { presentationStateNameSchema } from './presentationStateTools'
 import { nanoid } from 'nanoid'
 import type { TeacherControllerButton } from '../../shared/teacherControllerConfig'
@@ -259,6 +260,7 @@ function duplicateSlideSceneDocument(
   scene.name = name
   scene.layerItems.forEach((item) => {
     item.layerItemId = layerIdMap.get(item.layerItemId)!
+    if (item.kind === 'composition') rewriteLayerInternalReferences(item, layerIdMap)
     if (item.kind === 'native' && item.content.nativeType === 'table') item.content.data = rebuildTableItemIds(item.content.data)
     if (item.kind === 'native' && item.content.nativeType === 'chart') item.content.data = rebuildChartItemIds(item.content.data)
     remapDuplicatedInputState(draft, item, stateKeys, ruleIds)

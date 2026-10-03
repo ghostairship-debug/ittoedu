@@ -27,8 +27,7 @@ const conversation: ConversationRecord = {
 const savedRun = (runId: string, callId: string, path: string): ExecutionRunRecord => ({
   schemaVersion: 1, runId, version: 1, input: { conversationId: conversation.conversationId, taskId: 'task', instruction: '保存文件',
     selection: { connection: { id: 'connection', revision: 1, provider: 'fixture', protocol: 'openai-chat', baseURL: 'https://fixture.invalid/v1', accountId: 'account',
-      auth: { kind: 'api-key', credentialRef: 'fixture' }, billing: { kind: 'token-plan' }, capabilities: { tools: 'unknown', vision: 'unknown', stream: 'unknown', reasoning: 'unknown' } }, model: 'fixture-model' }, documents: [] },
-  budget: { maxRequests: 1, maxToolCalls: 1, maxContextBytes: 100 }, status: 'completed', createdAt: 1, updatedAt: 1,
+      auth: { kind: 'api-key', credentialRef: 'fixture' }, billing: { kind: 'token-plan' }, capabilities: { tools: 'unknown', vision: 'unknown', stream: 'unknown', reasoning: 'unknown' } }, model: 'fixture-model' }, documents: [] }, status: 'completed', createdAt: 1, updatedAt: 1,
   messages: [], initialMessageCount: 0, requests: [], tools: [{ callId, providerCallId: callId, requestId: 'request',
     call: { name: 'file.write', input: {} }, state: 'returned', result: { kind: 'read', data: { saved: true, path } } }],
 })

@@ -358,9 +358,7 @@ export async function buildCoursewareCase(
         api: host.api,
         async readAsset(relativePath) {
           const filename = await resolveCasePath(caseRoot, relativePath, '素材文件', { exists: true })
-          if ((await stat(filename)).size > 32 * 1024 * 1024) throw new Error('素材文件超过 32 MiB 上限')
           const bytes = await readFile(filename)
-          if (bytes.byteLength > 32 * 1024 * 1024) throw new Error('素材文件超过 32 MiB 上限')
           return new Uint8Array(bytes)
         },
       })))

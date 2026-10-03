@@ -31,7 +31,6 @@ const relations = new Set('=<>≤≥≠≈∝∈∉→←↔,:;')
 
 class Parser {
   private i = 0
-  private depth = 0
   private environment = false
   constructor(private source: string) {}
   private fail(message: string): never { throw new DocumentMathError(message, this.i) }
@@ -46,7 +45,6 @@ class Parser {
     return match[0]
   }
   parse(): MathNode {
-    if (this.source.length > 16384) this.fail('公式超过 16384 个字符')
     this.skip()
     if (!this.source.slice(this.i)) this.fail('请输入公式')
     const result = this.sequence(() => false)
@@ -96,12 +94,9 @@ class Parser {
     }
   }
   private atom(): MathNode {
-    if (++this.depth > 48) this.fail('公式嵌套超过 48 层')
-    try {
       const base = this.base()
       const scripts = this.scripts()
       return scripts.sub || scripts.sup ? { type: 'scripts', base, ...scripts } : base
-    } finally { this.depth-- }
   }
   private base(): MathNode {
     this.skip()

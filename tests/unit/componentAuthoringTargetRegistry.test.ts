@@ -399,7 +399,7 @@ describe('ComponentAuthoringTargetRegistry', () => {
     registry.destroy()
   })
 
-  it.each(['文字', '图片'])('仅第 401 个合格自动%s触发截断，400 项不变时仍发布提示增减', async (kind) => {
+  it.each(['文字', '图片'])('第 401 个合格自动%s仍发布可编辑目标，不可测和未绑定内容继续跳过', async (kind) => {
     const root = document.createElement('div')
     vi.spyOn(root, 'getBoundingClientRect').mockReturnValue(rect(0, 0, 400, 200))
     const addText = (text: string, width = 20) => {
@@ -454,12 +454,26 @@ describe('ComponentAuthoringTargetRegistry', () => {
     const extra = kind === '文字' ? addText('新增文字') : addImage('https://assets.example/hero.png')
     await flushTargets()
     expect(onTargetsChanged).toHaveBeenCalledTimes(2)
-    expect(onTargetsChanged.mock.calls.at(-1)![0]).toMatchObject({ revision: 2, truncated: true })
-    expect(onTargetsChanged.mock.calls.at(-1)![0].targets).toEqual(first.targets)
+    const expanded = onTargetsChanged.mock.calls.at(-1)![0]
+    expect(expanded.revision).toBe(2)
+    expect(expanded.truncated).toBeUndefined()
+    expect(expanded.targets.filter((target: { source: string }) => target.source === 'auto')).toHaveLength(401)
+    expect(expanded.targets).toHaveLength(402)
+    const extraTarget = expanded.targets.at(-1)!
+    if (kind === '文字') {
+      expect(extraTarget).toMatchObject({ source: 'auto', kind: 'component-text', lightEdit: { original: '新增文字' } })
+      dom.setRules([{ original: extraTarget.lightEdit.original, region: extraTarget.lightEdit.region, text: '第 401 个目标已修改' }])
+      await flushTargets()
+      expect(extra.textContent).toBe('第 401 个目标已修改')
+      expect(onTargetsChanged.mock.calls.at(-1)![0].targets.at(-1)).toMatchObject({ lightEdit: { text: '第 401 个目标已修改' } })
+    } else {
+      expect(extraTarget).toMatchObject({ source: 'auto', kind: 'component-image', assetKey: 'hero', bounds: { x: 10, y: 10, width: 20, height: 20 } })
+    }
 
+    const callsBeforeRemove = onTargetsChanged.mock.calls.length
     extra.remove()
     await flushTargets()
-    expect(onTargetsChanged).toHaveBeenCalledTimes(3)
+    expect(onTargetsChanged).toHaveBeenCalledTimes(callsBeforeRemove + 1)
     expect(onTargetsChanged.mock.calls.at(-1)![0].truncated).toBeUndefined()
     expect(onTargetsChanged.mock.calls.at(-1)![0].targets).toEqual(first.targets)
     registry.destroy()

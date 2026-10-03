@@ -8,7 +8,7 @@ import {
   type ExecutionEventSearchInput, type ExecutionEventSearchPage, type ExecutionBlobRef, type ExecutionEvent, type ExecutionEventInput, type ExecutionEventPage, type ExecutionProjection,
 } from '../../../shared/workbench/executionEvents'
 
-const MAGIC = Buffer.from('G20EVT01'), COMMIT = Buffer.from('G20ECMIT'), HEADER = 48, MAX_RECORD = 64 * 1024 * 1024
+const MAGIC = Buffer.from('G20EVT01'), COMMIT = Buffer.from('G20ECMIT'), HEADER = 48
 const digest = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex')
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT'
 const queues = new Map<string, Promise<unknown>>()
@@ -109,18 +109,73 @@ export class ExecutionEventStore {
     return this.timingTrace.read(this.timingFile(conversationId, taskId), conversationId, taskId)
   }
 
-  /** Append-idempotent diagnostic trace. Main persists renderer facts with their distinct clock identity. */
+  /**
+   * Append-idempotent diagnostic trace. Main persists renderer facts with their distinct clock identity.
+   * Marks are buffered per file in memory and flushed with a single open + writeFile + handle.sync when
+   * the buffer reaches TIMING_BATCH_MARKS, when the run terminates (`run.ended`/`save.finished`), or on
+   * read; an awaited recordTiming resolves only after its mark is durable. The diagnostic file is
+   * crash-atomic only at flush boundaries — pending marks may be lost on process kill; durability of the
+   * event log itself is unchanged.
+   */
+  private readonly timingPending = new Map<string, { marks: ExecutionTimingMark[]; waiters: { resolve: () => void; reject: (error: unknown) => void }[]; scheduled: boolean }>()
   recordTiming(mark: ExecutionTimingMark): Promise<void> {
-    return this.timingLock(mark.conversationId, mark.taskId, async () => {
-      if (!mark.markId || !mark.taskId || !['main', 'renderer'].includes(mark.process) || mark.clock !== 'performance.now'
-        || !mark.clockInstanceId || !Number.isFinite(mark.monotonicMs) || mark.monotonicMs < 0
-        || !Number.isFinite(mark.wallTimeMs) || mark.wallTimeMs < 0
-        || mark.process === 'renderer' && (!Number.isFinite(mark.timeOriginMs) || mark.timeOriginMs! < 0)) throw new Error('计时标记无效')
-      await this.timingTrace.append(this.timingFile(mark.conversationId, mark.taskId), structuredClone(mark))
+    if (!mark.markId || !mark.taskId || !['main', 'renderer'].includes(mark.process) || mark.clock !== 'performance.now'
+      || !mark.clockInstanceId || !Number.isFinite(mark.monotonicMs) || mark.monotonicMs < 0
+      || !Number.isFinite(mark.wallTimeMs) || mark.wallTimeMs < 0
+      || mark.process === 'renderer' && (!Number.isFinite(mark.timeOriginMs) || mark.timeOriginMs! < 0)) return Promise.reject(new Error('计时标记无效'))
+    const filename = this.timingFile(mark.conversationId, mark.taskId)
+    const key = process.platform === 'win32' ? filename.toLowerCase() : filename
+    let bucket = this.timingPending.get(key)
+    if (!bucket) { bucket = { marks: [], waiters: [], scheduled: false }; this.timingPending.set(key, bucket) }
+    bucket.marks.push(structuredClone(mark))
+    return new Promise<void>((resolve, reject) => {
+      bucket!.waiters.push({ resolve, reject })
+      const hot = bucket!.marks.length >= 32 || mark.stage === 'run.ended'
+      if (hot || !bucket!.scheduled) {
+        bucket!.scheduled = true
+        // setImmediate coalesces same-tick recorders into one flush; `hot` skips nothing — every mark still durable.
+        setImmediate(() => { void this.flushTiming(mark.conversationId, mark.taskId) })
+      }
+    })
+  }
+  /** Drains buffered marks for this file with one fsync; resolves all waiters enqueued since the bucket opened. */
+  private flushTiming(conversationId: string, taskId: string): Promise<void> {
+    return this.timingLock(conversationId, taskId, async () => {
+      const filename = this.timingFile(conversationId, taskId)
+      const key = process.platform === 'win32' ? filename.toLowerCase() : filename
+      const bucket = this.timingPending.get(key)
+      if (!bucket || !bucket.marks.length) { if (bucket) bucket.scheduled = false; return }
+      const drains = bucket.marks.splice(0, bucket.marks.length), waiters = bucket.waiters.splice(0, bucket.waiters.length)
+      bucket.scheduled = bucket.marks.length > 0
+      try {
+        await this.timingTrace.appendBatch(filename, drains)
+        for (const waiter of waiters) waiter.resolve()
+      } catch (error) {
+        for (const waiter of waiters) waiter.reject(error)
+        throw error
+      } finally {
+        if (bucket.marks.length && !bucket.scheduled) {
+          bucket.scheduled = true
+          setImmediate(() => { void this.flushTiming(conversationId, taskId) })
+        }
+      }
     })
   }
   readTiming(conversationId: string, taskId: string): Promise<ExecutionTimingMark[]> {
-    return this.timingLock(conversationId, taskId, () => this.readTimingUnlocked(conversationId, taskId).then(marks => structuredClone(marks)))
+    return this.timingLock(conversationId, taskId, async () => {
+      const filename = this.timingFile(conversationId, taskId)
+      const key = process.platform === 'win32' ? filename.toLowerCase() : filename
+      const bucket = this.timingPending.get(key)
+      if (bucket?.marks.length) {
+        const drains = bucket.marks.splice(0, bucket.marks.length), waiters = bucket.waiters.splice(0, bucket.waiters.length)
+        bucket.scheduled = false
+        try {
+          await this.timingTrace.appendBatch(filename, drains)
+          for (const waiter of waiters) waiter.resolve()
+        } catch (error) { for (const waiter of waiters) waiter.reject(error); throw error }
+      }
+      return structuredClone(await this.readTimingUnlocked(conversationId, taskId))
+    })
   }
   private lock<T>(conversationId: string, action: () => Promise<T>) {
     const filename = this.folder(conversationId)
@@ -141,7 +196,7 @@ export class ExecutionEventStore {
     while (offset < bytes.length) {
       if (bytes.length - offset < HEADER) break
       const header = bytes.subarray(offset, offset + HEADER), length = header.readUInt32BE(8)
-      if (!header.subarray(0, 8).equals(MAGIC) || length > MAX_RECORD || header.readUInt32BE(12) !== ((~length) >>> 0)) throw new ExecutionEventStoreError('event-corrupt', '事件记录头损坏')
+      if (!header.subarray(0, 8).equals(MAGIC) || header.readUInt32BE(12) !== ((~length) >>> 0)) throw new ExecutionEventStoreError('event-corrupt', '事件记录头损坏')
       const end = offset + HEADER + length + COMMIT.length
       if (end > bytes.length) break
       const payload = bytes.subarray(offset + HEADER, end - COMMIT.length)
@@ -237,7 +292,8 @@ export class ExecutionEventStore {
       try { projection = foldExecutionEvents(state.projection, pending.map(record => record.event)) }
       catch (error) { throw new ExecutionEventStoreError('event-item-conflict', (error as Error).message) }
       const payload = Buffer.from(JSON.stringify(pending), 'utf8')
-      if (payload.length > MAX_RECORD) throw new RangeError('事件批次超过支持大小')
+      // The existing record format encodes its byte length as an unsigned 32-bit integer.
+      if (payload.length > 0xffff_ffff) throw new RangeError('事件记录无法用当前 32 位长度字段编码')
       const header = Buffer.alloc(HEADER); MAGIC.copy(header); header.writeUInt32BE(payload.length, 8); header.writeUInt32BE((~payload.length) >>> 0, 12); createHash('sha256').update(payload).digest().copy(header, 16)
       const encoded = Buffer.concat([header, payload, COMMIT])
       await fs.mkdir(this.folder(conversationId), { recursive: true })

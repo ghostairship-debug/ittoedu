@@ -33,8 +33,6 @@
         "additionalProperties": {
           "anyOf": [
             {
-              "maxLength": 24000000,
-              "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$",
               "type": "string"
             },
             {
@@ -45,7 +43,6 @@
                   "type": "string"
                 },
                 "text": {
-                  "maxLength": 18000000,
                   "type": "string"
                 }
               },
@@ -89,15 +86,11 @@
       },
       "__schema6": {
         "items": {
-          "$ref": "#/$defs/__schema7"
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
         },
-        "maxItems": 512,
         "type": "array"
-      },
-      "__schema7": {
-        "maxLength": 500,
-        "minLength": 1,
-        "type": "string"
       }
     },
     "$schema": "https://json-schema.org/draft/2020-12/schema",

@@ -2,12 +2,14 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, expect, it, vi } from 'vitest'
 import { ExecutionAssistant } from '../../src/renderer/workbench/ExecutionAssistant'
 import { ExecutionTimeline } from '../../src/renderer/workbench/ExecutionTimeline'
+import { ExecutionQuestionCard } from '../../src/renderer/workbench/ExecutionQuestionCard'
 import { executionActivity, pendingQuestion } from '../../src/renderer/workbench/executionTimelineModel'
 import type { ConversationRecord, WorkspaceRecord } from '../../src/shared/workbench/conversations'
 import type { ExecutionDesktopAPI } from '../../src/shared/workbench/executionDesktop'
 import { emptyExecutionProjection, foldExecutionEvents, type ExecutionEvent } from '../../src/shared/workbench/executionEvents'
 import type { ExecutionSettingsAPI } from '../../src/shared/workbench/executionSettingsDesktop'
-import { USER_QUESTION_TOOL, type UserQuestionView } from '../../src/shared/workbench/userQuestion'
+import { answerProblem, USER_QUESTION_TOOL, userAnswerSchema, userQuestionInputSchema, userQuestionView, userQuestionViewSchema,
+  type UserQuestionView } from '../../src/shared/workbench/userQuestion'
 
 // M09-T04: the AI's question pops up as an option card; one click answers it.
 afterEach(() => { cleanup(); localStorage.clear() })
@@ -26,8 +28,10 @@ function events(question: UserQuestionView, extra: ExecutionEvent[] = []): Execu
 const settingsAPI = (): ExecutionSettingsAPI => ({
   read: vi.fn(async () => ({ secureStorageAvailable: true, connections: [], profile: { revision: 1, updatedAt: '2026-09-24T00:00:00.000Z',
     roles: { conversation: null, vision: null, imageGenerate: null, imageEdit: null } } })),
+  knownModels: vi.fn(async () => []),
   probeCapabilities: vi.fn(async () => { throw new Error('unused') }), saveConnection: vi.fn(async () => { throw new Error('unused') }),
   saveProfile: vi.fn(async () => { throw new Error('unused') }), revokeConnection: vi.fn(async () => {}),
+  setModelFavorite: vi.fn(async () => []),
   discoverModels: vi.fn(async () => ({ connectionId: 'c', connectionRevision: 1, models: [], capabilitiesVerified: false as const, source: 'live' as const, checkedAt: '2026-09-25T00:00:00.000Z' })),
   startOAuthLogin: vi.fn(async () => ({ loginId: 'l', status: 'pending' as const })), oauthLoginStatus: vi.fn(async () => ({ loginId: 'l', status: 'pending' as const })),
   cancelOAuthLogin: vi.fn(async () => {}),
@@ -155,4 +159,32 @@ it('never turns an external MCP event into a question card or an answerable reco
   render(<ExecutionTimeline projection={projection} />)
   expect(screen.queryByRole('article', { name: 'AI 提问' })).toBeNull()
   expect(screen.getByRole('article', { name: '工具执行' })).toHaveTextContent('外部 MCP · 仅显示实际工具事实')
+})
+
+it('accepts complete long questions, more than six actual choices, and long answers without imposing input maxima', async () => {
+  const input = userQuestionInputSchema.parse({ question: '任务说明。'.repeat(150), multiple: true,
+    options: Array.from({ length: 8 }, (_, index) => ({ label: `方案 ${index} ${'完整名称'.repeat(25)}`, description: '完整说明。'.repeat(80) })) })
+  const question = userQuestionViewSchema.parse(userQuestionView(input)), other = '实际详细回答。'.repeat(350)
+  const answer = userAnswerSchema.parse({ choices: question.options.map((_, index) => index), other })
+  expect(answerProblem(question, answer)).toBeNull()
+  expect(answerProblem(question, { choices: [8] })).toBe('所选项不属于这个问题')
+  expect(userQuestionInputSchema.safeParse({ question: '真实问题', options: [{ label: '重复' }, { label: '重复' }] }).success).toBe(false)
+  const onAnswer = vi.fn(async () => {})
+  render(<ExecutionQuestionCard pending={{ runId: 'run', callId: 'call', question }} onAnswer={onAnswer} />)
+  const options = within(screen.getByRole('group', { name: '可选答案' })).getAllByRole('button')
+  expect(options).toHaveLength(8)
+  options.forEach(button => fireEvent.click(button))
+  const field = screen.getByRole('textbox', { name: '其他（自己填写）' })
+  expect(field).not.toHaveAttribute('maxlength')
+  fireEvent.change(field, { target: { value: other } })
+  fireEvent.click(screen.getByRole('button', { name: '提交选择' }))
+  await waitFor(() => expect(onAnswer).toHaveBeenCalledWith(answer))
+  cleanup()
+  const free = userQuestionView(userQuestionInputSchema.parse({ question: input.question, options: [], responseKind: 'free-text' }))
+  render(<ExecutionQuestionCard pending={{ runId: 'run', callId: 'free', question: free }} onAnswer={onAnswer} />)
+  const freeField = screen.getByRole('textbox', { name: '你的回答' })
+  expect(freeField).not.toHaveAttribute('maxlength')
+  fireEvent.change(freeField, { target: { value: other } })
+  fireEvent.click(screen.getByRole('button', { name: '提交回答' }))
+  await waitFor(() => expect(onAnswer).toHaveBeenLastCalledWith({ choices: [], other }))
 })

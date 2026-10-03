@@ -6,7 +6,6 @@ import {
   courseStateScalarSchema,
 } from '../../shared/contracts/course-state/schema'
 import {
-  MAX_INTERACTION_ACTIONS,
   type InteractionActionPayload,
   type InteractionActionStep,
   type InteractionCondition,
@@ -56,8 +55,8 @@ const motionFields = {
 
 const composeEffectSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('set-state'), state: reference }).strict(),
-  z.object({ kind: z.literal('show'), nodes: z.array(reference).min(1).max(32), ...motionFields }).strict(),
-  z.object({ kind: z.literal('hide'), nodes: z.array(reference).min(1).max(32), ...motionFields }).strict(),
+  z.object({ kind: z.literal('show'), nodes: z.array(reference).min(1), ...motionFields }).strict(),
+  z.object({ kind: z.literal('hide'), nodes: z.array(reference).min(1), ...motionFields }).strict(),
   z.object({ kind: z.literal('next-step') }).strict(),
   z.object({ kind: z.literal('previous-step') }).strict(),
   z.object({ kind: z.literal('next-scene') }).strict(),
@@ -73,7 +72,7 @@ export const composeInputSchema = z.object({
   enabled: z.boolean().optional(),
   trigger: composeTriggerSchema,
   when: composeConditionSchema.optional(),
-  effects: z.array(composeEffectSchema).min(1).max(MAX_INTERACTION_ACTIONS),
+  effects: z.array(composeEffectSchema).min(1),
 }).strict()
 
 export const slideInteractionToolInputSchema = z.discriminatedUnion('operation', [

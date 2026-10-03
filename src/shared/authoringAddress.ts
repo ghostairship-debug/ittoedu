@@ -1,6 +1,6 @@
 export const AUTHORING_ADDRESS_PROTOCOL_VERSION = 1 as const
 
-export type AuthoringCarrier = 'native' | 'runtime' | 'component'
+export type AuthoringCarrier = 'native' | 'runtime' | 'component' | 'composition'
 
 export interface AuthoringAddressParts {
   projectId: string

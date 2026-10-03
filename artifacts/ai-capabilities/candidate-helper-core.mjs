@@ -14610,20 +14610,20 @@ var dynamicBehaviorFrameSchema = external_exports.object({
   publicState: external_exports.record(external_exports.string(), external_exports.json()),
   width: external_exports.number().int().positive().max(4096),
   height: external_exports.number().int().positive().max(4096),
-  dataUrl: external_exports.string().max(24e6).regex(/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/)
+  dataUrl: external_exports.string().regex(/^data:image\/png;base64,[A-Za-z0-9+/]+=*$/)
 }).strict();
 var dynamicButtonCheckSchema = external_exports.object({
   version: external_exports.literal(1),
-  instanceId: external_exports.string().trim().min(1).max(200),
-  label: external_exports.string().trim().min(1).max(200),
+  instanceId: external_exports.string().trim().min(1),
+  label: external_exports.string().trim().min(1),
   /** Optional destination expectations checked against the real session after the click. */
-  expectLocationId: external_exports.string().trim().min(1).max(200).optional(),
-  expectStateId: external_exports.string().trim().min(1).max(200).nullable().optional()
+  expectLocationId: external_exports.string().trim().min(1).optional(),
+  expectStateId: external_exports.string().trim().min(1).nullable().optional()
 }).strict();
 var dynamicButtonObservationSchema = external_exports.object({
   version: external_exports.literal(1),
   instanceId: external_exports.string().min(1),
-  label: external_exports.string().min(1).max(200),
+  label: external_exports.string().min(1),
   input: external_exports.literal("electron-mouse"),
   x: external_exports.number().finite().nonnegative(),
   y: external_exports.number().finite().nonnegative(),
@@ -14633,10 +14633,10 @@ var dynamicButtonObservationSchema = external_exports.object({
   clickedAt: external_exports.number().int().nonnegative(),
   observedAt: external_exports.number().int().nonnegative(),
   destination: external_exports.object({
-    expectedLocationId: external_exports.string().min(1).max(200).optional(),
-    expectedStateId: external_exports.string().min(1).max(200).nullable().optional(),
-    actualLocationId: external_exports.string().min(1).max(500),
-    actualStateId: external_exports.string().min(1).max(500).nullable(),
+    expectedLocationId: external_exports.string().min(1).optional(),
+    expectedStateId: external_exports.string().min(1).nullable().optional(),
+    actualLocationId: external_exports.string().min(1),
+    actualStateId: external_exports.string().min(1).nullable(),
     matched: external_exports.boolean()
   }).strict().optional(),
   functionalResult: external_exports.literal("requires-review")
@@ -14649,7 +14649,7 @@ var dynamicBehaviorObservationSchema = external_exports.object({
   documentRevision: external_exports.number().int().nonnegative(),
   locationId: external_exports.string().min(1),
   stateId: external_exports.string().nullable(),
-  instanceIds: external_exports.array(external_exports.string().min(1)).min(1).max(1e3),
+  instanceIds: external_exports.array(external_exports.string().min(1)).min(1),
   sourceIdentities: external_exports.record(external_exports.string(), external_exports.string().min(1)),
   actions: external_exports.array(external_exports.enum(["update-inputs", "resize-and-restore", "suspend", "resume", "click-button"])).max(5),
   frames: external_exports.array(dynamicBehaviorFrameSchema).min(1).max(8),
@@ -14657,9 +14657,7 @@ var dynamicBehaviorObservationSchema = external_exports.object({
   buttonClick: dynamicButtonObservationSchema.optional(),
   semanticVerdict: external_exports.literal("requires-review")
 }).strict();
-var dynamicBehaviorEvidenceSchema = external_exports.array(dynamicBehaviorObservationSchema).max(1e3).superRefine((values, context) => {
-  if (values.reduce((sum, item) => sum + item.frames.reduce((frameSum, frame) => frameSum + frame.dataUrl.length, 0), 0) > 48e6) context.addIssue({ code: "custom", message: "\u672C\u8F6E\u52A8\u6001\u89C2\u5BDF\u56FE\u50CF\u8D85\u8FC7\u8D44\u6E90\u4E0A\u9650" });
-});
+var dynamicBehaviorEvidenceSchema = external_exports.array(dynamicBehaviorObservationSchema);
 var DYNAMIC_BEHAVIOR_SAMPLING = Object.freeze({ runningAtMs: [0, 250, 750], pausedForMs: 250, resumedForMs: 250, buttonObserveForMs: 500, sampleCount: 6, actionCount: 4 });
 
 // src/shared/authoringToolContract.ts
@@ -14889,7 +14887,7 @@ var courseProjectAssetRemoteDeliveryUrlSchema = external_exports.string().trim()
 );
 var courseProjectAssetMetaSchema = external_exports.object({
   id: courseProjectStableIdSchema,
-  filename: external_exports.string().trim().min(1).max(500),
+  filename: external_exports.string().trim().min(1),
   mimeType: external_exports.string().trim().min(1).max(200),
   kind: external_exports.enum(["image", "audio", "video", "font"]),
   path: courseProjectPortablePathSchema,
@@ -15590,14 +15588,21 @@ function validateRecursiveContentManifest(manifest, context) {
     }
   });
 }
-var componentManifestV4Schema = configurableManifestSchema.extend({
+var componentManifestV4BaseSchema = configurableManifestSchema.extend({
   schemaVersion: external_exports.literal(4),
   runtimeApiVersion: external_exports.literal(4),
   supportedScopes: supportedScopesSchema,
   renderMode: external_exports.enum(COMPONENT_RENDER_MODES)
-}).superRefine((manifest, context) => {
+});
+var componentManifestV4Schema = external_exports.union([
+  componentManifestV4BaseSchema.extend({ content: external_exports.never().optional() }),
+  componentManifestV4BaseSchema.extend({ content: external_exports.object({ kind: external_exports.literal("composition") }).strict() })
+]).superRefine((manifest, context) => {
   validateConfigurableManifest(manifest, context);
   validateRecursiveContentManifest(manifest, context);
+  if (manifest.content?.kind === "composition" && !manifest.entry.toLowerCase().endsWith(".json")) {
+    context.addIssue({ code: "custom", path: ["entry"], message: "\u7ED3\u6784\u7247\u6BB5\u5165\u53E3\u5FC5\u987B\u6307\u5411 JSON \u5185\u5BB9\u6587\u4EF6" });
+  }
 });
 var componentManifestSchema = componentManifestV4Schema;
 var embeddedComponentPackageMetaSchema = external_exports.object({

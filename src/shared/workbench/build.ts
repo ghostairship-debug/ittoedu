@@ -13,22 +13,18 @@ export const buildCreateTicketSchema = z.object({ operationId: id, requestDigest
 export type BuildCreateTicket = z.infer<typeof buildCreateTicketSchema>
 export type BuildCreateLookup = { status: 'created'; job: BuildJobSnapshot }
   | { status: 'unknown'; jobId: string; runId: string; target: BuildTarget }
-/** maxDurationMs limits one build.check admission; idle model and image time is excluded. */
-export interface BuildBudget { maxBytes: number; maxFiles: number; maxWrites: number | null; maxChecks: number | null; maxSameSourceChecks: number | null; maxDurationMs: number }
 export interface BuildJobInput {
   runId: string
   target: BuildTarget
   readSet: readonly BuildReadSetEntry[]
   baseline: Extract<DocumentModel, { kind: 'course-v9' }>
   allowedOrigins: readonly string[]
-  budget?: Partial<BuildBudget>
 }
 export interface BuildLogEntry { cursor: number; time: number; stage: 'scratch' | 'syntax' | 'closure' | 'admission' | 'cancel'; level: 'info' | 'error'; message: string; truncated?: boolean }
 export interface BuildJobSnapshot {
   jobId: string; runId: string; target: BuildTarget; readSet: readonly BuildReadSetEntry[]
-  sourceRevision: number; status: 'editing' | 'checking' | 'ready' | 'failed' | 'cancelled' | 'exhausted'
-  /** Current or most recent check deadline; it is not the scratch job's expiry. */
-  createdAt: number; deadline: number; writes: number; checks: number; artifactId?: string
+  sourceRevision: number; status: 'editing' | 'checking' | 'ready' | 'failed' | 'cancelled'
+  createdAt: number; writes: number; checks: number; artifactId?: string
 }
 /** Main-only resource closure; handing this out is not a document commit. */
 export interface BuildImportArtifact {
@@ -42,7 +38,7 @@ export interface BuildAdmissionPort { run(payload: DynamicAdmissionPayload, sign
 export const buildToolCallSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('list'), jobId: z.uuid() }).strict(),
   z.object({ type: z.literal('read'), jobId: z.uuid(), path: z.string().min(1).max(1024), offset: integer.default(0), limit: z.number().int().min(1).max(65536).default(16384), encoding: z.enum(['utf8', 'base64']).default('utf8') }).strict(),
-  z.object({ type: z.literal('write'), jobId: z.uuid(), path: z.string().min(1).max(1024), content: z.string().max(24 * 1024 * 1024), encoding: z.enum(['utf8', 'base64']).default('utf8') }).strict(),
+  z.object({ type: z.literal('write'), jobId: z.uuid(), path: z.string().min(1).max(1024), content: z.string(), encoding: z.enum(['utf8', 'base64']).default('utf8') }).strict(),
   z.object({ type: z.literal('syntax'), jobId: z.uuid(), path: z.string().min(1).max(1024), kind: z.enum(['component', 'runtime']) }).strict(),
   z.object({ type: z.literal('check'), jobId: z.uuid(), buttonCheck: dynamicButtonCheckSchema.optional() }).strict(),
   z.object({ type: z.literal('logs'), jobId: z.uuid(), after: integer.default(0), limit: z.number().int().min(1).max(5000).default(100) }).strict(),

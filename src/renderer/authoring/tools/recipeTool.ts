@@ -5,7 +5,7 @@ import { resolveAuthoringToolScope } from './authoringToolScope'
 import { slideStructureAddress } from './slideStructureTool'
 import type { AuthoringToolDefinition } from './executeAuthoringTool'
 
-const schema = z.object({ recipeId: z.enum(RECIPE_CATALOG.map(entry => entry.id)), slots: z.record(z.string(), z.string().max(1200)), accentTokenId: z.string().min(1).optional() }).strict()
+const schema = z.object({ recipeId: z.enum(RECIPE_CATALOG.map(entry => entry.id)), slots: z.record(z.string(), z.string()), accentTokenId: z.string().min(1).optional() }).strict()
 export const recipeTool: AuthoringToolDefinition<z.infer<typeof schema>> = {
   name: 'recipe.apply', inputSchema: schema,
   description: '仅 Slide：scene owner + create parent:course-locations，insertion={kind:after,siblingId:当前locationId}。slots 只能用 对应 Recipe 能力卡中的 fields.key（从 capabilities/discovery.json 或 query.mjs 按 recipeId 读取）。配方会新建一页，返回位置可用 created-scope。',

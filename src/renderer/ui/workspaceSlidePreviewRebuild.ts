@@ -208,6 +208,9 @@ function candidateLocalStructure(
     kind: entry.item.kind,
     visibility: entry.visibility ?? null,
   }
+  // Authoring patches the canonical composition tree in place. Playback still
+  // rebuilds from its changed source so a resumed preview cannot show old HTML.
+  if (entry.item.kind === 'composition') return authoring ? common : { ...common, item: entry.item }
   if (entry.item.kind !== 'runtime') return common
   return {
     ...common,

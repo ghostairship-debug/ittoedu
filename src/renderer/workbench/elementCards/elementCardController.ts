@@ -92,7 +92,7 @@ interface CardRecord {
 
 /** One card per element: an object, or a document block, of one document. */
 export function elementCardKey(documentId: string, target: ExecutionSelectionTarget): string {
-  if (target.kind === 'course-object') return `${documentId}:object:${target.itemId}`
+  if (target.kind === 'course-object') return `${documentId}:object:${target.itemId}${target.compositionNodeId ? `:composition:${target.compositionNodeId}` : ''}`
   if (target.kind === 'flow-block') return `${documentId}:block:${target.surfaceId}:${target.blockId}`
   throw new Error('元素 AI 卡只针对对象或文档块。')
 }

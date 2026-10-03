@@ -1,4 +1,4 @@
 interface:
-  display_name: "策划互动课件"
-  short_description: "教学策划与整课框架 HTML；默认两次确认，明确自动创作时连续推进"
-  default_prompt: "Use $orchestrate-courseware to create a teaching plan and one-section-per-page framework HTML, then hand off to $build-courseware-project. In default mode, ask for confirmation after the plan and after previewing the framework HTML. If I explicitly ask to create automatically from my materials, continue without questions or confirmations."
+  display_name: "创作互动课件"
+  short_description: "专注教学内容、视觉布局和互动，用熟悉的 HTML 与 CSS 创作完整作品"
+  default_prompt: "Use $orchestrate-courseware to create a complete, visually clear interactive course from my materials and deliver an editable saved project."

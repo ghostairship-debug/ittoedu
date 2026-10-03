@@ -111,7 +111,7 @@ export function v9CourseLocations(
 
 function nativeTypeOf(item: LayerItem): string {
   if (item.kind === 'component') return 'external-component'
-  if (item.kind === 'runtime') return 'runtime'
+  if (item.kind !== 'native') return item.kind
   return item.content.nativeType
 }
 

@@ -1,5 +1,7 @@
 # PublishedLesson V1 发布格式
 
+> 当前发布合同是 Published Course V2；V1 是早期单-HTML 历史格式。
+
 PublishedLesson V1 是单 HTML 与网页包共用的单向 Player 输入。它由 Course Project V9（经 Published Course V2 producer）在导出边界编译产生，不是工程文件，也不是 `.h5lesson` 的另一种保存形式。作者工程从 V8 切到 V9 不自动升级本发布格式版本。
 
 ## 目标与边界

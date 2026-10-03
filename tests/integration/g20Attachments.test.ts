@@ -55,7 +55,7 @@ describe('managed attachment snapshots and actual provider payload', () => {
     const snapshot = await service.receiveBytes({ name: '图片.png', bytes, source: { kind: 'drop' } })
     const context = { ...input(), attachments: [{ attachmentId: snapshot.id, representationId: 'original-image', role: 'reference' as const }] }
     const compiler = new PayloadCompiler({ attachments: service, serializePayload: serializeModelRequest })
-    const compiled = await compiler.compile({ input: context, selection, tools: [], budget: { maxSerializedBytes: 100_000 } })
+    const compiled = await compiler.compile({ input: context, selection, tools: [] })
     const body = JSON.parse(compiled.serialized)
     expect(body.messages).toEqual([{ role: 'user', content: [{ type: 'image_url', image_url: { url: `data:image/png;base64,${bytes.toString('base64')}` } }] }])
     expect(compiled.serialized).toBe(serializeModelRequest({ selection, messages: compiled.messages, tools: compiled.tools }))
@@ -66,14 +66,14 @@ describe('managed attachment snapshots and actual provider payload', () => {
     expect(sent.delivery.status).toBe('sent'); expect(sent.readStatus).toBe('unknown'); expect(compiled.manifest.delivery.status).toBe('prepared')
     expect(() => markPayloadSent(compiled.manifest, { kind: 'backend-accepted', requestId: 'request', payloadDigest: 'different', acceptedAt: 123 })).toThrow()
     const unknownVision = await compiler.compile({ input: context, selection: { ...selection, connection: { ...selection.connection,
-      capabilities: { ...selection.connection.capabilities, vision: 'unknown' } } }, tools: [], budget: { maxSerializedBytes: 100_000 } })
+      capabilities: { ...selection.connection.capabilities, vision: 'unknown' } } }, tools: [] })
     expect(unknownVision.serialized).toContain(`data:image/png;base64,${bytes.toString('base64')}`)
     await expect(compiler.compile({ input: context, selection: { ...selection, connection: { ...selection.connection,
-      capabilities: { ...selection.connection.capabilities, vision: 'unsupported' } } }, tools: [], budget: { maxSerializedBytes: 100_000 } }))
+      capabilities: { ...selection.connection.capabilities, vision: 'unsupported' } } }, tools: [] }))
       .rejects.toMatchObject({ code: 'vision-unavailable' })
   })
 
-  it('budgets the complete actual wire body with tools and automatic context; refuses missing extraction and corrupt provenance', async () => {
+  it('measures the complete actual wire body with tools and automatic context; refuses missing extraction and corrupt provenance', async () => {
     const { service } = await fixture(), bytes = Buffer.from('# 源文\r\n完整🙂')
     const snapshot = await service.receiveBytes({ name: 'notes.md', bytes, source: { kind: 'workspace', authorizationId: 'workspace-read' } })
     const context: InputContext = { ...input(), instruction: '保留原文', context: [
@@ -82,15 +82,13 @@ describe('managed attachment snapshots and actual provider payload', () => {
     ], attachments: [{ attachmentId: snapshot.id, representationId: 'original-text' }] }
     const tools: ModelToolDefinition[] = [{ name: 'document.read', description: '正式工具'.repeat(60), inputSchema: { type: 'object', properties: { documentId: { type: 'string' } } } }]
     const compiler = new PayloadCompiler({ attachments: service, serializePayload: serializeModelRequest })
-    const request = { input: context, selection, tools, budget: { maxSerializedBytes: 100_000 } }
+    const request = { input: context, selection, tools }
     const compiled = await compiler.compile(request), actual = Buffer.byteLength(compiled.serialized)
     expect(compiled.manifest.totals.serializedBytes).toBe(actual)
     expect(actual).toBeGreaterThan(Buffer.byteLength(JSON.stringify(compiled.messages)))
     expect(JSON.parse(compiled.serialized).messages[2].content[1].text).toBe(`附件名称："notes.md"\n附件正文开始\n${bytes.toString('utf8')}\n附件正文结束`)
     expect(compiled.manifest.automaticContext[1]).toMatchObject({ messageIndex: 1, provenance: context.context[1].provenance })
     expect(compiled.manifest.explicitAttachments[0].provenance.range).toEqual({ unit: 'characters', from: 0, to: bytes.toString('utf8').length, total: bytes.toString('utf8').length })
-    await expect(compiler.compile({ ...request, budget: { maxSerializedBytes: actual - 1 } })).rejects.toMatchObject({ code: 'payload-too-large' })
-    await expect(compiler.compile({ ...request, budget: { maxSerializedBytes: actual } })).resolves.toMatchObject({ serialized: compiled.serialized })
     const corrupt = new PayloadCompiler({ serializePayload: serializeModelRequest, attachments: { readRepresentation: async (id, rep) => ({ ...await service.readRepresentation(id, rep), bytes: Buffer.from('changed') }) } })
     await expect(corrupt.compile(request)).rejects.toMatchObject({ code: 'provenance-mismatch' })
     for (const [name, content] of [['source.pdf', '%PDF-1.7'], ['source.docx', 'PK\u0003\u0004']] as const) {
@@ -98,11 +96,16 @@ describe('managed attachment snapshots and actual provider payload', () => {
       expect(unavailable.representations).toEqual([expect.objectContaining({ id: 'original-file', kind: 'file' })]); expect(unavailable.gaps[0].code).toBe('extraction-unavailable')
       await expect(compiler.compile({ ...request, input: { ...input(), attachments: [{ attachmentId: unavailable.id, representationId: 'guessed-text' }] } })).rejects.toMatchObject({ code: 'representation-unavailable' })
     }
-    const limited = new AttachmentService({ directory: path.join(roots[roots.length - 1], 'limited'), maxSourceBytes: 1 })
-    await expect(limited.receiveBytes({ name: 'notes.md', bytes, source: { kind: 'paste' } })).rejects.toMatchObject({ code: 'source-too-large' })
   })
 
-  it('labels immutable text material in both provider wire formats and budgets the complete wrapper', async () => {
+  it('compiles usable input above the former 8 MiB payload ceiling without a host byte budget', async () => {
+    const compiler = new PayloadCompiler({ attachments: { readRepresentation: async () => { throw new Error('No attachments expected') } }, serializePayload: serializeModelRequest })
+    const compiled = await compiler.compile({ input: { ...input(), instruction: 'x'.repeat(8 * 1024 * 1024 + 1) }, selection, tools: [] })
+    expect(compiled.manifest.totals.serializedBytes).toBeGreaterThan(8 * 1024 * 1024)
+    expect(compiled.messages[0]?.content).toEqual([{ type: 'text', text: 'x'.repeat(8 * 1024 * 1024 + 1) }])
+  })
+
+  it('labels immutable text material in both provider wire formats and measures the complete wrapper', async () => {
     const { service } = await fixture()
     const name = '参考"材料\n.md', source = '观察之后再解释，解释时在蓝卡记录证据。'
     const bytes = Buffer.from(source, 'utf8')
@@ -119,7 +122,7 @@ describe('managed attachment snapshots and actual provider payload', () => {
       [selection, serializeModelRequest], [oauthSelection, serializeChatGPTResponsesRequest],
     ] as const) {
       const compiler = new PayloadCompiler({ attachments: service, serializePayload: serialize })
-      const request = { input: inputContext, selection: selected, tools: [], budget: { maxSerializedBytes: 100_000 } }
+      const request = { input: inputContext, selection: selected, tools: [] }
       const compiled = await compiler.compile(request)
       const body = JSON.parse(compiled.serialized)
       const user = selected.connection.protocol === 'chatgpt-responses' ? body.input[0] : body.messages[0]
@@ -133,11 +136,6 @@ describe('managed attachment snapshots and actual provider payload', () => {
       expect(compiled.manifest.totals.serializedBytes).toBe(Buffer.byteLength(compiled.serialized))
       expect(compiled.manifest.payloadDigest).toBe(createHash('sha256').update(compiled.serialized).digest('hex'))
       expect(compiled.serialized).toBe(serialize({ selection: selected, messages: compiled.messages, tools: compiled.tools }))
-      await expect(compiler.compile({ ...request, budget: { maxSerializedBytes: compiled.manifest.totals.serializedBytes - 1 } }))
-        .rejects.toMatchObject({ code: 'payload-too-large' })
-      await expect(compiler.compile({ ...request, budget: { maxSerializedBytes: 100_000,
-        maxTextCharacters: inputContext.instruction.length + source.length } }))
-        .rejects.toMatchObject({ code: 'payload-too-large' })
     }
   })
 })

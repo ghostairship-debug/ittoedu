@@ -1,6 +1,5 @@
 import { strFromU8, unzipSync } from 'fflate'
 
-export const PPTX_IMPORT_LIMITS = { fileBytes: 256 * 1024 * 1024, expandedBytes: 512 * 1024 * 1024, entryBytes: 256 * 1024 * 1024, entries: 65536, ratio: 1000, objects: 20000 } as const
 export interface PptxImportIssue { page?: number; type: string; message: string }
 export class PptxImportError extends Error {
   constructor(readonly issues: PptxImportIssue[]) { super(issues.map(i => `${i.page ? `第 ${i.page} 页：` : ''}${i.type} — ${i.message}`).join('\n')) }
@@ -29,10 +28,8 @@ function resolvePart(source: string, target: string): string {
   return parts.join('/')
 }
 
-/** Stage only: validate every ZIP entry before allocating its expanded bytes. */
+/** Stage only: validate ZIP paths and duplicate entries before parsing Office XML. */
 export function openPptxPackage(bytes: Uint8Array, mainPart = 'ppt/presentation.xml'): PptxPackage {
-  if (bytes.length > PPTX_IMPORT_LIMITS.fileBytes) pptxReject('文件大小', 'PPTX 不能超过 256 MiB')
-  let total = 0
   const names = new Set<string>()
   let files: Record<string, Uint8Array>
   try {
@@ -40,9 +37,6 @@ export function openPptxPackage(bytes: Uint8Array, mainPart = 'ppt/presentation.
       if (entry.name.startsWith('/') || /[\\\u0000]/.test(entry.name) || entry.name.split('/').some(p => p === '..' || p === '.')) pptxReject('ZIP 结构', `非法路径 ${entry.name}`)
       if (names.has(entry.name)) pptxReject('ZIP 结构', `重复路径 ${entry.name}`)
       names.add(entry.name)
-      total += entry.originalSize
-      if (names.size > PPTX_IMPORT_LIMITS.entries || total > PPTX_IMPORT_LIMITS.expandedBytes || entry.originalSize > PPTX_IMPORT_LIMITS.entryBytes) pptxReject('解压大小', '文件数或解压大小超过导入上限')
-      if (entry.originalSize > Math.max(1, entry.size) * PPTX_IMPORT_LIMITS.ratio) pptxReject('解压比', `${entry.name} 超过 1000 倍`)
       return !entry.name.endsWith('/')
     } })
   } catch (error) { if (error instanceof PptxImportError) throw error; return pptxReject('ZIP 结构', 'PPTX 压缩包损坏') }

@@ -1,6 +1,7 @@
 import type { LayerItem } from '../../shared/courseProjectTypes'
 import { rebuildTableItemIds } from './nativeNodeFactories'
 import { rebuildChartItemIds } from './chartIdentity'
+import { rewriteLayerInternalReferences } from './slideClipboard'
 
 export function cloneDuplicatedLayerItem(item: LayerItem, nextId: string): LayerItem {
   const duplicate = structuredClone(item)
@@ -9,6 +10,7 @@ export function cloneDuplicatedLayerItem(item: LayerItem, nextId: string): Layer
   duplicate.frame.x += 20
   duplicate.frame.y += 20
   duplicate.locked = false
+  if (duplicate.kind === 'composition') rewriteLayerInternalReferences(duplicate, new Map([[item.layerItemId, nextId]]))
   if (duplicate.kind === 'native') {
     if (duplicate.content.nativeType === 'table') {
       duplicate.content.data = rebuildTableItemIds(duplicate.content.data)

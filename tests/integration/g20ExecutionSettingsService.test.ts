@@ -8,6 +8,7 @@ import { afterEach, expect, it } from 'vitest'
 import { ExecutionSettingsDesktopService } from '../../src/main/workbench/providers/executionSettingsService'
 import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
 import type { ExecutionConnectionView, ExecutionSettingsView } from '../../src/shared/workbench/executionSettings'
+import type { DiscoveredModels } from '../../src/shared/workbench/executionSettingsDesktop'
 
 const directories: string[] = [], servers: Server[] = []
 afterEach(async () => {
@@ -18,7 +19,7 @@ afterEach(async () => {
     await fs.rm(directory, { recursive: true, force: true })
   }
 })
-async function setup() {
+async function setup(modelKnowledge?: ConstructorParameters<typeof ExecutionSettingsStore>[0]['modelKnowledge']) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-settings-service-')); directories.push(directory)
   const key = randomBytes(32)
   const encryption = {
@@ -28,10 +29,10 @@ async function setup() {
     decryptString(value: Uint8Array) { const data = Buffer.from(value), cipher = createDecipheriv('aes-256-gcm', key, data.subarray(0, 12))
       cipher.setAuthTag(data.subarray(12, 28)); return Buffer.concat([cipher.update(data.subarray(28)), cipher.final()]).toString('utf8') },
   }
-  const store = new ExecutionSettingsStore({ directory, encryption })
+  const store = new ExecutionSettingsStore({ directory, encryption, ...(modelKnowledge ? { modelKnowledge } : {}) })
   return { directory, encryption, store, service: new ExecutionSettingsDesktopService(store) }
 }
-const configuration = (baseURL: string) => ({ provider: 'fixture', protocol: 'openai-chat', baseURL, accountId: 'test-account', authKind: 'api-key', billing: { kind: 'unknown' } })
+const configuration = (baseURL: string) => ({ provider: 'fixture', protocol: 'openai-chat', baseURL, accountId: 'test-account', authKind: 'api-key', billing: { kind: 'unknown' } } as const)
 
 it('admits only strict settings operations, exposes no credential read and never accepts a UI capability success claim', async () => {
   const { service } = await setup()
@@ -77,7 +78,7 @@ it('reads models only on explicit action with current stored credentials, retain
   expect(requests).toBe(2); expect(generationRequests).toBe(0)
 })
 
-it('persists bounded model labels for the same connection revision and selects cached directory only on transport failure', async () => {
+it('persists model labels for the same connection revision and selects cached directory only on transport failure', async () => {
   const { directory, encryption, service } = await setup()
   let requests = 0, offline = false
   const server = createServer((req, res) => {
@@ -95,7 +96,7 @@ it('persists bounded model labels for the same connection revision and selects c
     apiKey: 'fixture-private-key' } }) as ExecutionConnectionView
   const live = await service.operate({ type: 'discover-models', id: saved.connection.id, revision: 1 })
   expect(live).toMatchObject({ source: 'live', models: [{ id: 'fixture-model', displayName: '好用的模型', description: '对话与规划' }] })
-  expect((live as { models: { reasoningEfforts?: unknown }[] }).models[0]!.reasoningEfforts).toBeUndefined()
+  expect((live as { models: { reasoningEfforts?: unknown }[] }).models[0]!.reasoningEfforts).toEqual([{ effort: 'high' }])
   const bytes = await fs.readFile(path.join(directory, 'execution-settings-v1.json'), 'utf8')
   expect(bytes).toContain('fixture-model'); expect(bytes).not.toContain('fixture-private-key')
   offline = true
@@ -165,4 +166,19 @@ it('keeps echoed credentials and customer text out of probe results, settings re
     expect(output).not.toContain(customerText)
   }
   expect(JSON.stringify(publicView)).toContain('fixture-actual-model-v2')
+})
+
+
+it('reads the actual model directory above the old byte and entry quotas', async () => {
+  const { store, directory, encryption } = await setup({ knownModels: async () => [], find: async () => undefined, enrich: async (_connection, models) => models })
+  const saved = await store.saveConnection({ connection: { ...configuration('https://fixture.invalid/v1'), capabilities: { tools: 'unknown', vision: 'unknown', stream: 'unknown', reasoning: 'unknown' } }, apiKey: 'fixture-private-key' })
+  const entries = Array.from({ length: 5000 }, (_, index) => ({ id: `catalog-model-${index}`, name: '目录名称'.repeat(60) }))
+  const payload = JSON.stringify({ data: entries })
+  expect(Buffer.byteLength(payload)).toBeGreaterThan(1024 * 1024)
+  const service = new ExecutionSettingsDesktopService(store, async () => new Response(payload))
+  const result = await service.operate({ type: 'discover-models', id: saved.connection.id, revision: saved.connection.revision }) as DiscoveredModels
+  expect(result.models).toHaveLength(5000)
+  expect(result.models.some(model => model.id === 'catalog-model-4999')).toBe(true)
+  const cached = await new ExecutionSettingsStore({ directory, encryption }).cachedModelCatalog(saved.connection.id, saved.connection.revision)
+  expect(cached?.models).toHaveLength(5000)
 })

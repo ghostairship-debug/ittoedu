@@ -77,7 +77,7 @@ export interface SpatialPropertiesReadModel {
   readonly showCameraFrames: boolean
 }
 
-export interface PropertiesSceneReadModel extends Pick<SlideSceneDocument, 'backgroundMode'> {
+export interface PropertiesSceneReadModel extends Pick<SlideSceneDocument, 'backgroundMode' | 'canvas'> {
   readonly id: string
   readonly name: string
   readonly backgroundColor: string
@@ -88,6 +88,7 @@ export interface PropertiesSceneReadModel extends Pick<SlideSceneDocument, 'back
 
 export interface PropertiesSlideSurfaceReadModel extends SlideSurfaceBackgroundFields {
   readonly id: string
+  readonly canvas: SlideSurfaceDocument['canvas']
 }
 
 export interface PropertiesOwnerReadModel {
@@ -398,6 +399,7 @@ export function selectPropertiesAuthoringReadModel(state: EditorState): Properti
       ? {
           id: scene.id,
           name: scene.name,
+          canvas: scene.canvas,
           backgroundMode: scene.backgroundMode,
           backgroundColor: scene.backgroundColor,
           backgroundAssetId: scene.backgroundAssetId,
@@ -408,6 +410,7 @@ export function selectPropertiesAuthoringReadModel(state: EditorState): Properti
     slideSurface: slideSurfaceDoc
       ? {
           id: slideSurfaceDoc.id,
+          canvas: slideSurfaceDoc.canvas,
           backgroundMode: slideSurfaceDoc.backgroundMode,
           backgroundColor: slideSurfaceDoc.backgroundColor,
           backgroundAssetId: slideSurfaceDoc.backgroundAssetId,

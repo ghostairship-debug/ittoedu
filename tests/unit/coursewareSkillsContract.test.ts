@@ -3,6 +3,8 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { courseAgentMethodSkills } from '@/shared/courseAgentSkills'
+import { BundledSkillService } from '@/main/workbench/skills/BundledSkillService'
 const repoRoot = process.cwd()
 const read = (name: string) => readFile(path.join(repoRoot, name), 'utf8')
 
@@ -14,17 +16,20 @@ describe('courseware skill contracts: reliable draft and user-led refinement', (
     catch (error) { failure = error as { stdout?: string } }
     expect(JSON.parse(failure?.stdout ?? '{}')).toMatchObject({ ok: false, error: 'explicit_editor_root_invalid' })
   })
-  it('keeps short default entries while preserving opt-in external engineering methods', async () => {
+  it('keeps the default task entry short and makes opt-in engineering references readable from the installed bundle', async () => {
     const entry = await read('.agents/skills/build-courseware-project/SKILL.md')
     const method = await read('.agents/skills/build-courseware-project/references/build-method.md')
     expect(Buffer.byteLength(entry)).toBeLessThanOrEqual(6 * 1024)
     expect(entry).toContain('[build-method.md](references/build-method.md)')
-    expect(entry).toContain('默认不展开逐页 AI 视觉精修')
-    expect(entry).toContain('只有外部 Builder 或用户要求完整工程')
-    expect(entry).toContain('file.create → html.import → file.save')
-    for (const topic of ['载体所有权', '资产与任务图', '先做最高风险纵切', '增量构建与 Worker', '保持可编辑', '验证与交付', '停止条件']) expect(method).toContain(topic)
-    expect(method).toContain('分类与排序必须分开选载体')
+    expect(entry).toContain('course.createFromHtml')
+    expect(entry).not.toContain('file.create → html.import → file.save')
     expect(method).toContain('外部 Builder V2')
+    const bundle = JSON.parse(await read('src/shared/generated/bundledSkills.json'))
+    const service = new BundledSkillService(bundle)
+    for (const reference of ['references/build-method.md', 'references/external-case-build.md', 'references/page-design.md']) {
+      const result = await service.read({ skill: 'build-courseware-project', path: reference, offset: 0, limit: 64_000 })
+      expect(result).toMatchObject({ status: 'read', content: await read(`.agents/skills/build-courseware-project/${reference}`), truncated: false })
+    }
   })
   it('keeps real teaching content and separates teacher navigation from self-study gates', async () => {
     const orchestrator = await read('.agents/skills/orchestrate-courseware/SKILL.md')
@@ -37,17 +42,24 @@ describe('courseware skill contracts: reliable draft and user-led refinement', (
     expect(contract).toContain('用户明确要求自主学习')
     expect(builder).toContain('核心教学呈现必须存在')
     expect(builder).toContain('不删除互动逻辑')
-    expect(builder).toContain('文件字节回读')
   })
   it('keeps one bundled method source, includes the short HTML contract and matches editable skill files', async () => {
     const brief = await read('.agents/skills/build-courseware-project/references/representation-capabilities.md')
     const bundled = JSON.parse(await read('src/shared/generated/bundledSkills.json'))
     const resources = JSON.parse(await read('artifacts/ai-capabilities/discovery-data.json')).resourcePaths as string[]
     expect(brief.length).toBeLessThanOrEqual(1500)
-    expect(bundled.manifest.skills.map((skill: { name: string }) => skill.name)).toEqual(['orchestrate-courseware', 'build-courseware-project'])
+    expect(bundled.manifest.skills.map((skill: { name: string }) => skill.name)).toEqual(courseAgentMethodSkills.map(skill => skill.name))
+    expect(bundled.manifest.skills.map((skill: { name: string }) => skill.name)).toContain('edit-content')
     expect(resources).toContain('skills/build-courseware-project/references/html-draft-contract.md')
-    for (const name of ['orchestrate-courseware', 'build-courseware-project'])
+    for (const { name } of courseAgentMethodSkills)
       expect(await read(`artifacts/ai-capabilities/skills/${name}/SKILL.md`)).toBe(await read(`.agents/skills/${name}/SKILL.md`))
+    const assemblyPath = 'skills/orchestrate-courseware/scripts/assemble-html.mjs'
+    expect(resources).toContain(assemblyPath)
+    const service = new BundledSkillService(bundled)
+    expect(await service.read({ skill: 'orchestrate-courseware', path: 'scripts/assemble-html.mjs', offset: 0, limit: 64_000 }))
+      .toMatchObject({ status: 'read', content: await read('.agents/skills/orchestrate-courseware/scripts/assemble-html.mjs'), truncated: false })
+    expect(await service.read({ skill: 'office-content', path: 'SKILL.md', offset: 0, limit: 64_000 }))
+      .toMatchObject({ status: 'read', content: await read('.agents/skills/office-content/SKILL.md'), truncated: false })
     for (const old of ['courseware-session', 'course-design', 'course-build', 'qa-repair', 'style-remix', 'pro-editing', 'visual-craft', 'interaction-craft']) expect(resources).not.toContain(`skills/${old}/SKILL.md`)
   })
   it('retains the real declarative state constraints without forcing them onto every draft page', async () => {

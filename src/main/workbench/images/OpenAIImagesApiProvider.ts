@@ -4,15 +4,15 @@ import type { ImageGenerationRequest, ImageJobTimingMark } from '../../../shared
 import type { ModelConnectionSnapshot, ModelFailure, ModelJsonObject } from '../../../shared/workbench/modelProvider'
 import { prepareImageResource } from '../admittedImageResource'
 import { httpFailureKind } from '../providers/providerHttpFailure'
-import { decodeImageBase64, readBoundedImageJson } from './imageResponse'
+import { waitForModelOperation } from '../providers/OpenAIChatProvider'
+import { IMAGE_RESPONSE_IDLE_TIMEOUT_MS, modelFetch, responseIdleTimeoutCode } from '../providers/modelFetch'
+import { decodeImageBase64, readImageJson } from './imageResponse'
 import type { ImageProviderPort, ImageProviderReference, ImageProviderResult, ImageProviderRunOptions } from './ImageProviderPort'
 import { imageProvenance, imageRoute } from './imageRoute'
 
 export interface OpenAIImagesApiProviderOptions {
   credentialResolver(connection: Readonly<ModelConnectionSnapshot>): Promise<string>
   fetch?: typeof fetch
-  timeoutMs?: number
-  maxResponseBytes?: number
   now?: () => number
 }
 const digest = (value: Uint8Array | string) => createHash('sha256').update(value).digest('hex')
@@ -26,18 +26,18 @@ export class OpenAIImagesApiProvider implements ImageProviderPort {
     const provenance = imageProvenance(request, references), controller = new AbortController(), abort = () => controller.abort()
     const timing = (stage: Extract<ImageJobTimingMark['stage'], 'image.provider.prepared' | 'image.fetch.invoked' | 'image.response.headers'>,
       detail?: ImageJobTimingMark['detail']) => { try { options.onTiming?.(stage, detail) } catch { /* Diagnostics cannot change the request. */ } }
-    let attempted = false, timedOut = false, phase: ModelFailure['kind'] = 'configuration', response: Response | undefined
+    let attempted = false, phase: ModelFailure['kind'] = 'configuration', response: Response | undefined
     options.signal?.addEventListener('abort', abort, { once: true }); if (options.signal?.aborted) abort()
-    const timer = setTimeout(() => { timedOut = true; abort() }, this.options.timeoutMs ?? 300_000)
     try {
       const { connection, imageModel } = request.selection, output = request.output ?? {}
       if (imageRoute(request) !== 'openai-images-api' || !nonempty(imageModel)
         || !nonempty(connection.id) || !nonempty(connection.auth.credentialRef) || !Number.isSafeInteger(connection.revision)
-        || connection.revision < 1 || !nonempty(request.prompt) || request.prompt.length > 200_000) throw new Error('invalid-image-request')
-      if (request.operation === 'edit' ? references.length !== 1 : references.length !== 0) throw new Error('unsupported-image-reference-count')
+        || connection.revision < 1 || !nonempty(request.prompt)) throw new Error('invalid-image-request')
+      if (request.operation === 'edit' ? references.length < 1 : references.length !== 0) throw new Error('unsupported-image-reference-count')
       if ((request.referenceIds ?? []).length !== references.length
         || references.some((ref, index) => ref.referenceId !== request.referenceIds?.[index])) throw new Error('reference-identity-mismatch')
       if (request.selection.capabilities?.[request.operation] === 'unsupported') throw new Error(`unsupported-image-${request.operation}`)
+      if (references.length > 1 && request.selection.capabilities?.multipleReferences === 'unsupported') throw new Error('unsupported-image-multiple-references')
       if (output.background === 'transparent' && request.selection.capabilities?.transparent === 'unsupported') throw new Error('unsupported-image-transparent')
       if (output.size && output.size !== 'auto' && !/^\d{2,5}x\d{2,5}$/.test(output.size)) throw new Error('invalid-image-size')
       if (Object.keys(output).some(key => !['size', 'quality', 'format', 'background'].includes(key))
@@ -52,9 +52,9 @@ export class OpenAIImagesApiProvider implements ImageProviderPort {
         ...(output.background ? { background: output.background } : {}), ...(output.format ? { output_format: output.format } : {}) }
       let body: Buffer, contentType: string
       if (request.operation === 'edit') {
-        const form = new FormData(), ref = references[0]!
+        const form = new FormData()
         for (const [key, value] of Object.entries(fields)) form.append(key, value)
-        form.append('image', new Blob([Buffer.from(ref.bytes)], { type: ref.mimeType }), ref.filename || 'reference.png')
+        for (const ref of references) form.append('image', new Blob([Buffer.from(ref.bytes)], { type: ref.mimeType }), ref.filename || 'reference.png')
         // Serialize once. A second FormData encoding would choose a new boundary,
         // so its bytes would no longer match the persisted request digest.
         const encoded = new Request(provenance.endpoint, { method: 'POST', body: form })
@@ -66,14 +66,13 @@ export class OpenAIImagesApiProvider implements ImageProviderPort {
         contentType = 'application/json'
       }
       provenance.requestBytes = body.byteLength; provenance.requestDigest = digest(body)
-      if (provenance.requestBytes > 96 * 1024 * 1024) throw new Error('image-request-too-large')
       timing('image.provider.prepared', { referenceCount: references.length, requestBytes: provenance.requestBytes })
       phase = 'auth'
-      const credential = await this.options.credentialResolver(connection)
+      const credential = await waitForModelOperation(() => this.options.credentialResolver(connection), controller.signal)
       if (!credential || /[\r\n]/.test(credential)) throw new Error('invalid-image-credential')
       controller.signal.throwIfAborted(); phase = 'transport'; attempted = true
       timing('image.fetch.invoked', { requestBytes: provenance.requestBytes })
-      response = await (this.options.fetch ?? fetch)(provenance.endpoint, { method: 'POST', redirect: 'error', signal: controller.signal,
+      response = await modelFetch(this.options.fetch, IMAGE_RESPONSE_IDLE_TIMEOUT_MS)(provenance.endpoint, { method: 'POST', redirect: 'error', signal: controller.signal,
         headers: { Authorization: `Bearer ${credential}`, Accept: 'application/json', 'Content-Type': contentType }, body: Uint8Array.from(body) })
       timing('image.response.headers', { httpStatus: response.status })
       const providerRequestId = response.headers.get('x-request-id')
@@ -86,9 +85,9 @@ export class OpenAIImagesApiProvider implements ImageProviderPort {
           ...(retryMs !== undefined && Number.isFinite(retryMs) ? { retryAfterMs: Math.max(0, Math.ceil(retryMs)) } : {}) } }
       }
       phase = 'protocol'
-      const payload = await readBoundedImageJson(response, this.options.maxResponseBytes ?? 96 * 1024 * 1024)
+      const payload = await readImageJson(response)
       const safeLabel = (value: unknown): string => {
-        if (!nonempty(value) || value.length > 512 || /[\u0000-\u001f\u007f]/.test(value) || value.includes(credential)) throw new Error('invalid-image-provenance')
+        if (!nonempty(value) || /[\u0000-\u001f\u007f]/.test(value) || value.includes(credential)) throw new Error('invalid-image-provenance')
         return value
       }
       if (payload.id != null) provenance.providerResponseId = safeLabel(payload.id)
@@ -119,13 +118,15 @@ export class OpenAIImagesApiProvider implements ImageProviderPort {
       if (warnings.size) provenance.outputWarnings = [...warnings]
       return { status: 'completed', images, provenance }
     } catch (error) {
-      const kind = controller.signal.aborted ? timedOut ? 'timeout' : 'aborted' : phase
+      const idleCode = controller.signal.aborted ? undefined : responseIdleTimeoutCode(error)
+      const kind = controller.signal.aborted ? 'aborted' : idleCode ? 'timeout' : phase
       const code = !attempted && phase === 'configuration' && error instanceof Error && /^[a-z-]+$/.test(error.message) ? error.message : undefined
       return { status: 'failed', provenance, failure: { outcome: attempted ? 'unknown' : 'not-sent', kind,
-        code: code ? `image-${code}` : `image-${kind}`,
-        message: attempted ? '图片请求未取得可用的完整结果，状态未知；未自动重试。' : '图片请求未发送，请检查所选连接、参数与参考图。' } }
+        code: idleCode ? `image-${idleCode}` : code ? `image-${code}` : `image-${kind}`,
+        message: idleCode ? '图片接口长时间未返回网络数据，连接已结束，结果状态未知；未自动重试。'
+          : attempted ? '图片请求未取得可用的完整结果，状态未知；未自动重试。' : '图片请求未发送，请检查所选连接、参数与参考图。' } }
     } finally {
-      clearTimeout(timer); options.signal?.removeEventListener('abort', abort); controller.abort()
+      options.signal?.removeEventListener('abort', abort); controller.abort()
       if (response?.body && !response.body.locked) await response.body.cancel().catch(() => undefined)
     }
   }

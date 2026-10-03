@@ -23,7 +23,6 @@ import {
   type ExportPreflightTarget,
 } from '../export/exportPreflight'
 import {
-  SINGLE_HTML_HARD_LIMIT_BYTES,
   SINGLE_HTML_WARNING_BYTES,
   utf8ByteLength,
 } from '../export/exportSize'
@@ -95,7 +94,6 @@ export interface CourseDeliveryApi {
   readonly previewFeedback: CourseDeliveryPreviewFeedback | null
   readonly exportPreflightReport: CourseProjectExportPreflightReportV1 | null
   readonly largeHtmlByteLength: number | null
-  readonly singleHtmlHardLimitBytes: number
   bindPreviewHost(host: HTMLDivElement | null): void
   previousPreview(): void
   nextPreview(): void
@@ -656,7 +654,6 @@ export function useCourseDelivery(
     previewFeedback,
     exportPreflightReport,
     largeHtmlByteLength,
-    singleHtmlHardLimitBytes: SINGLE_HTML_HARD_LIMIT_BYTES,
     bindPreviewHost: setPreviewHost,
     previousPreview,
     nextPreview,

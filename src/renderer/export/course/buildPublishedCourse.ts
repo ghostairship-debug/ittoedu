@@ -1,4 +1,5 @@
 import { analyzeCourseAssetReferences } from '../../../shared/contracts/course-project-v9/assetReferences'
+import { walkComposition } from '../../../shared/composition/content'
 import type { ZodError, ZodIssue } from 'zod'
 import { componentRenderMode } from '../../../shared/componentCapabilities'
 import { componentContentSha256 } from '../../../shared/componentContentIntegrity'
@@ -234,6 +235,12 @@ function collectComponentReferences(project: CourseProjectDocument): ComponentRe
   for (const item of allLayerItems(project)) {
     if (item.kind === 'component') {
       result.push({ ...item.component, props: item.props })
+    } else if (item.kind === 'composition') {
+      walkComposition(item.content.root, node => {
+        if (node.kind === 'document') visitFlowBlocks(node.content.blocks, block => {
+          if (block.type === 'component') result.push({ ...block.component, props: block.props })
+        })
+      })
     }
   }
   for (const surface of project.surfaces) {
@@ -577,14 +584,31 @@ function publishRuntime(item: RuntimeLayerItem): PublishedRuntimeLayerItem {
   }
 }
 
-function publishLayerItem(
+export function publishLayerItem(
   sources: CoursePublishSources,
   item: LayerItem,
 ): PublishedLayerItem {
   if (item.kind === 'runtime') return publishRuntime(item)
   if (item.kind === 'component') return publishComponentProps(sources, item)
+  if (item.kind === 'composition') {
+    const { label: _label, locked: _locked, content, ...base } = item
+    return { ...base, content: publishWebComposition(sources, content) }
+  }
   const { label: _label, locked: _locked, ...published } = item
   return cloneJson(published)
+}
+
+export function publishWebComposition(sources: CoursePublishSources, content: import('../../../shared/courseProjectTypes').CompositionLayerItem['content']): import('../../../shared/publishedCourseTypes').PublishedCompositionLayerItem['content'] {
+    const publishNode = (node: import('../../../shared/composition/content').CompositionNode<import('../../../shared/courseProjectTypes').CourseRuntimeDefinition>): import('../../../shared/composition/content').CompositionNode<PublishedRuntimeLayerItem['runtime']> => {
+      if (node.kind === 'element') return { ...cloneJson(node), children: node.children.map(publishNode) }
+      if (node.kind === 'runtime') {
+        const { source, ...data } = node.runtime
+        return { ...node, runtime: { ...cloneJson(data), code: encodePublishedCode(source) } }
+      }
+      if (node.kind === 'document') return { ...node, content: { ...cloneJson(node.content), blocks: publishFlowBlocks(sources, node.content.blocks) } }
+      return cloneJson(node)
+    }
+    return { ...cloneJson(content), root: publishNode(content.root) }
 }
 
 function publishScoped(
@@ -666,6 +690,7 @@ function publishSurface(
       scenes: surface.scenes.map((scene) => ({
         id: scene.id,
         name: scene.name,
+        ...(scene.canvas ? { canvas: cloneJson(scene.canvas) } : {}),
         ...(scene.backgroundMode !== undefined ? { backgroundMode: scene.backgroundMode } : {}),
         backgroundColor: scene.backgroundColor,
         ...(scene.backgroundAssetId !== undefined

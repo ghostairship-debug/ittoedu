@@ -529,9 +529,7 @@ export function spatialNativeLayerItem(
 }
 
 function spatialLayerCarrier(item: DeepReadonly<LayerItem> | LayerItem): AuthoringCarrier {
-  if (item.kind === 'runtime') return 'runtime'
-  if (item.kind === 'component') return 'component'
-  return 'native'
+  return item.kind
 }
 
 function defaultSpatialAuthoringField(item: DeepReadonly<LayerItem> | LayerItem): string {

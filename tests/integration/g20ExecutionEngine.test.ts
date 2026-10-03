@@ -10,6 +10,7 @@ import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { MarkdownDriver } from '../../src/core/drivers/MarkdownDriver'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { createDocumentJournal } from '../../src/main/workbench/documentJournal'
+import { estimateSerializedTokens, modelContextBudget } from '../../src/core/execution/modelContextBudget'
 import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEngine'
 import { HostArtifactDeliveryService } from '../../src/main/workbench/execution/HostArtifactDeliveryService'
 import { runEndSummary } from '../../src/main/workbench/execution/executionOutcome'
@@ -163,43 +164,46 @@ describe('G20 canonical model execution loop', () => {
       ? { kind: 'error', code: 'image-rate-limited-for-run' } : { kind: 'read', data: { status: 'ready' } })
     expect(turns).toBe(3)
   })
-  it('stops repeated tool rounds with a stable no-progress reason', async () => {
+  it('keeps repeated tool rounds running until the model completes', async () => {
     let requests = 0
     const provider: ModelProvider = { async *stream(request) {
       requests++
+      if (requests > 10) { yield complete(request); return }
       yield complete(request, [{ id: `read-${requests}`, name: 'read', argumentsText: JSON.stringify({ target: refsOf(request)[0]!.target }) }])
     } }
     const h = await fixture(provider)
     const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
-    expect(final.status).toBe('failed')
-    expect(final.failure?.code).toBe('execution-no-progress')
-    expect(final.requests).toHaveLength(8)
-    expect(final.tools).toHaveLength(8)
-    expect(requests).toBe(8)
+    expect(final.status).toBe('completed')
+    expect(final.status).toBe('completed'); expect(final.failure).toBeUndefined()
+    expect(final.requests).toHaveLength(11)
+    expect(final.tools).toHaveLength(10)
+    expect(requests).toBe(11)
   })
-  it('stops an alternating A-B-A-B read loop without a false content change', async () => {
+  it('allows repeated alternating observations until the model completes', async () => {
     let requests = 0
     const provider: ModelProvider = { async *stream(request) {
+      if (requests >= 10) { requests++; yield complete(request); return }
       const target = refsOf(request)[requests++ % 2]!.target
       yield complete(request, [{ id: `read-${requests}`, name: 'read', argumentsText: JSON.stringify({ target }) }])
     } }
     const h = await fixture(provider)
     h.input.documents = [h.input.documents[0]!, { documentId: h.other.documentId, writable: [] }]
     const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
-    expect(final.failure?.code).toBe('execution-no-progress')
-    expect(final.requests).toHaveLength(8)
+    expect(final.status).toBe('completed'); expect(final.failure).toBeUndefined()
+    expect(final.requests).toHaveLength(11)
   })
-  it('does not treat repeated unchanged edits as progress', async () => {
+  it('allows repeated unchanged edits without a task quota or false content change', async () => {
     let requests = 0
     const provider: ModelProvider = { async *stream(request) {
       requests++
+      if (requests > 10) { yield complete(request); return }
       yield complete(request, [{ id: `unchanged-${requests}`, name: 'text.replace',
         argumentsText: JSON.stringify({ target: refsOf(request)[0]!.writable[0]!.target, content: 'OLD' }) }])
     } }
     const h = await fixture(provider)
     const started = await h.engine.start(h.input), final = await h.engine.wait(started.runId)
-    expect(final.failure?.code).toBe('execution-no-progress')
-    expect(final.requests).toHaveLength(8)
+    expect(final.status).toBe('completed'); expect(final.failure).toBeUndefined()
+    expect(final.requests).toHaveLength(11)
     expect(h.session.read()).toMatchObject({ revision: 0, undoDepth: 0 })
   })
   it.each(['custom', 1])('rejects unsupported streaming tool type %s before any document write', async type => {
@@ -498,6 +502,43 @@ describe('G20 canonical model execution loop', () => {
     expect(await resumedEngine.recover()).toEqual([]); expect(requests).toBe(2)
   })
 
+  it('marks a late provider response.failed after stop as stopped-in-flight regardless of the upstream code', async () => {
+    const entered = deferred(), release = deferred()
+    const provider: ModelProvider = { async *stream(request) {
+      entered.resolve(); await release.promise
+      yield { requestId: request.requestId, sequence: 1, type: 'response.failed',
+        failure: { outcome: 'unknown', kind: 'transport', code: 'chatgpt-transport', message: '网络返回失败' } }
+    } }
+    const h = await fixture(provider), started = await h.engine.start(h.input); await entered.promise
+    const stopping = h.engine.stop(started.runId); release.resolve(); await stopping
+    const record = (await h.engine.read(started.runId))!
+    expect(record.status).toBe('stopped')
+    expect(record.requests[0].failure).toMatchObject({ outcome: 'unknown', kind: 'aborted', code: 'stopped-in-flight' })
+    expect(record.requests[0].failure?.message).toBe('已停止等待模型；上游请求结果未知，未自动重发')
+  })
+
+  it('uses 回复未完成 (not 普通生成) in the retrying label and text', async () => {
+    let attempts = 0
+    const provider: ModelProvider = { retrySafety: 'pure-generation', async *stream(request) {
+      attempts++
+      if (attempts < 2) yield { requestId: request.requestId, sequence: 1, type: 'response.failed',
+        failure: { outcome: 'unknown', kind: 'transport', code: 'chatgpt-transport', message: '网络中断' } }
+      else yield { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: 'done', actualModel: 'fixture',
+        finishReason: 'stop', nativeResponse: {}, assistant: { role: 'assistant', content: '完成' }, toolCalls: [] }
+    } }
+    const h = await fixture(provider), started = await h.engine.start(h.input)
+    await h.engine.wait(started.runId)
+    const page = await h.events.readPage({ conversationId: 'conversation' })
+    const retrying = page.events.find(value => value.type === 'run.state'
+      && (value.data as { status?: string }).status === 'retrying')
+    expect(retrying).toBeDefined()
+    const data = retrying?.data as { label?: string; text?: string }
+    const label = String(data?.label ?? ''), text = String(data?.text ?? '')
+    expect(label + text).not.toContain('普通')
+    expect(text).toContain('回复未完成')
+    expect(text).toContain('第2次尝试')
+  })
+
   it('recovers crash-window tool facts and missing commit events read-only, then resumes with fresh handles', async () => {
     let requests = 0
     const provider: ModelProvider = { async *stream(request) { requests++; yield { requestId: request.requestId, sequence: 1, type: 'response.completed', responseId: 'done', actualModel: 'fixture', finishReason: 'stop', nativeResponse: {}, assistant: { role: 'assistant', content: '已完成剩余检查' }, toolCalls: [] } } }
@@ -540,7 +581,7 @@ describe('G20 canonical model execution loop', () => {
 
   it('compresses actual serialized payloads only after all tools return and preserves both document grants and commit facts', async () => {
     const requests: ModelRequest[] = []
-    let budget = 0
+    let largeTurnRepetitions = 0
     const provider: ModelProvider = { async *stream(request) {
       requests.push(structuredClone(request))
       if (requests.length === 1) {
@@ -549,13 +590,13 @@ describe('G20 canonical model execution loop', () => {
           { id: 'read', name: 'read', argumentsText: JSON.stringify({ target: refs[0].target }) },
           { id: 'allowed', name: 'text.replace', argumentsText: JSON.stringify({ target: refs[0].writable[0].target, content: 'YES' }) },
           { id: 'denied', name: 'text.replace', argumentsText: JSON.stringify({ target: refs[1].target, content: 'NO' }) },
-        ], '完整的中间推理与过程。'.repeat(budget))
+        ], '完整的中间推理与过程。'.repeat(largeTurnRepetitions))
       } else yield complete(request)
     } }
     const h = await fixture(provider)
     const tools = (await h.gateway.describe()).map(tool => ({ name: tool.name, description: tool.description, inputSchema: tool.schema as ModelJsonObject }))
-    budget = Buffer.byteLength(serializeModelRequest({ selection, tools, messages: [{ role: 'user', content: 'x' }] })) + 10000
-    h.input.budget = { maxContextBytes: budget }
+    largeTurnRepetitions = Buffer.byteLength(serializeModelRequest({ selection, tools, messages: [{ role: 'user', content: 'x' }] })) + 10000
+    h.input.selection = { ...selection, contextWindow: 50_000 }
     h.input.documents = [...h.input.documents, { documentId: h.other.documentId, writable: [] }]
     const run = await h.engine.start(h.input), final = await h.engine.wait(run.runId)
     expect(final.status).toBe('partial'); expect(requests).toHaveLength(2)
@@ -572,15 +613,16 @@ describe('G20 canonical model execution loop', () => {
     expect(nativeRound.slice(1).map(message => message.tool_call_id)).toEqual(['read', 'allowed', 'denied'])
     expect(String(nativeRound[0]!.content)).not.toContain('完整的中间推理与过程。')
     expect(final.messages.some(message => String(message.content).includes('完整的中间推理与过程。'))).toBe(true)
-    expect(Buffer.byteLength(serializeModelRequest(requests[1]))).toBeLessThanOrEqual(budget)
+    expect(estimateSerializedTokens(serializeModelRequest(requests[1]))).toBeLessThanOrEqual(modelContextBudget(h.input.selection).inputTokens)
     expect(h.session.read()).toMatchObject({ undoDepth: 1, model: { source: '前文 YES 后文' } })
     expect(h.other.read()).toMatchObject({ undoDepth: 0, model: { source: '另一份文档' } })
   })
 
-  it('rejects oversized initial payloads before sending and enforces request and complete tool-round budgets', async () => {
+  it('sends large initial input for an unknown model window and runs complete tool rounds without quotas', async () => {
     let requests = 0
     const provider: ModelProvider = { async *stream(request) {
       requests++
+      if (requests > 1) { yield complete(request); return }
       const target = refsOf(request)[0].writable[0].target
       yield complete(request, [
         { id: 'one', name: 'text.replace', argumentsText: JSON.stringify({ target, content: 'YES' }) },
@@ -588,33 +630,30 @@ describe('G20 canonical model execution loop', () => {
       ])
     } }
     const h = await fixture(provider)
-    const oversized = await h.engine.start({ ...h.input, budget: { maxContextBytes: 1 } })
-    expect(await h.engine.wait(oversized.runId)).toMatchObject({ status: 'failed', requests: [] })
-    expect(requests).toBe(0)
-    const toolLimited = await h.engine.start({ ...h.input, budget: { maxToolCalls: 1 } })
-    expect(await h.engine.wait(toolLimited.runId)).toMatchObject({ status: 'failed', tools: [], failure: { code: 'tool-call-budget-exhausted' } })
-    expect(h.session.read().undoDepth).toBe(0); expect(requests).toBe(1)
-    const requestLimited = await h.engine.start({ ...h.input, budget: { maxRequests: 1 } })
-    const final = await h.engine.wait(requestLimited.runId)
-    expect(final.status).toBe('partial'); expect(final.requests).toHaveLength(1); expect(requests).toBe(2)
+    const started = await h.engine.start({ ...h.input, instruction: '任务内容。'.repeat(60000) })
+    const final = await h.engine.wait(started.runId)
+    expect(final.status).toBe('completed'); expect(final.requests).toHaveLength(2)
+    expect(final.tools).toHaveLength(2); expect(final.tools.every(tool => tool.state === 'returned')).toBe(true)
+    expect(final.compacted).toBeUndefined()
+    expect(final).not.toHaveProperty('budget')
     expect(h.session.read()).toMatchObject({ undoDepth: 1, model: { source: '前文 YES 后文' } })
-    expect(final.tools.every(tool => tool.state === 'returned')).toBe(true)
   })
 
-  it('keeps bounded image and build receipts visible after the local request cap without repeating generation', async () => {
+  it('keeps bounded image and build receipts visible after a connection failure without repeating generation', async () => {
     let requests = 0, continuedFacts = ''
     const provider: ModelProvider = { async *stream(request) {
       requests++
       if (requests === 1) {
         yield complete(request, [{ id: 'initial-read', name: 'read', argumentsText: JSON.stringify({ target: refsOf(request)[0]!.target }) }]); return
       }
+      if (requests === 2) { yield { type: 'response.failed', requestId: request.requestId, sequence: 1, failure: { outcome: 'unknown', kind: 'transport', code: 'connection-lost', message: '连接中断' } }; return }
       continuedFacts = request.messages.filter(message => message.role === 'system').map(message => String(message.content)).join('\n')
       yield complete(request, [], '已看到既有图片和构建错误，不重新生成图片')
     } }
     const h = await fixture(provider)
-    const started = await h.engine.start({ ...h.input, budget: { maxRequests: 1 } })
+    const started = await h.engine.start({ ...h.input, })
     const exhausted = await h.engine.wait(started.runId)
-    expect(exhausted.failure?.code).toBe('model-request-budget-exhausted')
+    expect(exhausted.failure?.code).toBe('connection-lost')
     const old = (await h.runs.read(started.runId))!
     const call = (name: string, input: Record<string, unknown>, data: unknown, index: number) => ({
       callId: `service-${index}`, providerCallId: `provider-${index}`, requestId: old.requests[0]!.requestId,
@@ -634,10 +673,10 @@ describe('G20 canonical model execution loop', () => {
         byteLength: 2048, nextOffset: null }, 6),
     )
     old.version++; await h.runs.save(old)
-    const resumed = await h.engine.start({ ...h.input, budget: { maxRequests: 1 } }, { runId: exhausted.runId, facts: 'stale caller summary' })
+    const resumed = await h.engine.start({ ...h.input, }, { runId: exhausted.runId, facts: 'stale caller summary' })
     const final = await h.engine.wait(resumed.runId)
     expect(final.status).toBe('completed')
-    expect(requests).toBe(2)
+    expect(requests).toBe(3)
     expect(continuedFacts).toContain('image-existing')
     expect(continuedFacts).toContain('image_' + 'a'.repeat(64))
     expect(continuedFacts).toContain('build-existing')
@@ -878,7 +917,7 @@ it('archives whole OAuth rounds on actual wire and never resurrects old native p
     yield event
   } }
   const h = await fixture(provider)
-  const oauth = { ...selection, connection: { ...selection.connection, provider: 'openai', protocol: 'chatgpt-responses' as const,
+  const oauth = { ...selection, contextWindow: 4_000_000, connection: { ...selection.connection, provider: 'openai', protocol: 'chatgpt-responses' as const,
     baseURL: CHATGPT_RESPONSES_BASE_URL, auth: { kind: 'oauth' as const, credentialRef: 'fixture-only' } } }
   const engine = new ExecutionEngine({ registry: h.registry, gateway: h.gateway, edits: h.edits, runs: h.runs,
     events: h.events, provider, serializePayload: serializeChatGPTResponsesRequest })

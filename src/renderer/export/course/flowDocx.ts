@@ -456,6 +456,10 @@ function renderAnchoredItem(item: FlowDocxProjectedItem, context: BuildContext):
       const graphic = pictureGraphicXml(item, imagePart, drawingId)
       return anchorXml(drawingId, item, graphic)
     }
+    const message = `浮层“${item.layerItemId}”的图片素材 ${item.assetId} 无法嵌入 DOCX，已保留可见占位。`
+    context.warnings.push(message)
+    const report = context.layerReport.find(entry => entry.layerItemId === item.layerItemId && entry.scope === item.scope)
+    if (report) { report.disposition = 'placeholder'; report.reasonCode = 'image-asset-missing'; report.message = message }
   }
 
   if (item.carrierKind === 'formula') {
@@ -555,7 +559,12 @@ function renderPrintNode(
             disposition: 'preserved',
             detail: 'Embedded OOXML image relationship',
           })
-          return `${leadingContent ? `<w:p>${leadingContent}</w:p>` : ''}${inlineImageDrawing(node.fallbackLabel, image, context.nextDrawingId++, node.crop ? croppedImageAspect(asset.bytes, asset.mimeType, node) : 16 / 9, Infinity, node)}${
+          const dimensions = flowImageDimensions(asset.bytes, asset.mimeType)
+          const aspect = node.crop ? croppedImageAspect(asset.bytes, asset.mimeType, node)
+            : node.width && node.height ? node.width / node.height
+              : dimensions ? dimensions.width / dimensions.height : 16 / 9
+          const pageBreak = node.pageBreakBefore ? '<w:p><w:r><w:br w:type="page"/></w:r></w:p>' : ''
+          return `${pageBreak}${leadingContent ? `<w:p>${leadingContent}</w:p>` : ''}${inlineImageDrawing(node.fallbackLabel, image, context.nextDrawingId++, aspect, node.height ? context.chartMaxHeight : Infinity, node)}${
             node.caption ? paragraph(node.caption, { style: 'Caption' }) : ''
           }`
         }

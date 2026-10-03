@@ -150,6 +150,8 @@ export interface PublishedCourseSessionOptions extends CreatePublishedDynamicHos
     stateId: string | null
     /** Transient full manifests used only by the same-document authoring host. */
     componentPackages?: Readonly<Record<string, ComponentPackageData>>
+    onCompositionSelection?: SlidePublishedAuthoringOptions['onCompositionSelection']
+    onCompositionMount?: SlidePublishedAuthoringOptions['onCompositionMount']
     onMessage?: (message: PlayerAuthoringHostMessage) => void
   }
 }
@@ -1514,6 +1516,8 @@ function createPublishedAuthoringCourseSession(
       courseState: frozenCourseState,
       onRuntimeTargetsChanged: (update) => coordinator?.publishRuntimeTargets(update),
       onComponentTargetsChanged: (update) => coordinator?.publishComponentTargets(update),
+      ...(options.authoring.onCompositionSelection ? { onCompositionSelection: options.authoring.onCompositionSelection } : {}),
+      ...(options.authoring.onCompositionMount ? { onCompositionMount: options.authoring.onCompositionMount } : {}),
     },
   }) as SlidePublishedAdapter
   const player = new CoursePlayer([host], {

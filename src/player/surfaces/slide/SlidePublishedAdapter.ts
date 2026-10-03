@@ -1,4 +1,6 @@
 import type { TeacherControllerAction } from '../../../shared/teacherControllerConfig'
+import { effectiveSceneCanvas, mapSlideFrame, sameSlideCanvas, sharedSlideFrameMapping, unmapSlideFrame } from '../../../shared/slideCanvas'
+import { mountWebComposition, type WebCompositionMountHandle, type CompositionBounds } from '../../composition/mountWebComposition'
 import type { PlaybackNavigationViewPort } from '../../navigation/coursePlaybackSequence'
 import { TeacherControllerComponentHost } from '../../teacherControllerComponentHost'
 import { controllerHostInput, isControllerItem, type PublishedTeacherControllerItem } from '../../teacherControllerComponentGeometry'
@@ -13,7 +15,7 @@ import type {
 } from '../../../shared/courseProjectTypes'
 import {
   isNativeRenderInput,
-  
+  type NativeInputContent,
 } from '../../../shared/contracts/native-v1/types'
 import type {
   PlayerAuthoringContext,
@@ -34,6 +36,7 @@ import type {
 } from '../../../shared/runtimeTypes'
 import type {
   PublishedComponentLayerItem,
+  PublishedCompositionLayerItem,
   PublishedCourseV2Payload,
   PublishedLayerItem,
   PublishedNativeLayerItem,
@@ -131,6 +134,8 @@ import {
 } from '../publishedCourseState'
 
 export interface SlidePublishedAuthoringOptions {
+  readonly onCompositionSelection?: (selection: { layerItemId: string; nodeId: string; bounds: CompositionBounds }) => void
+  readonly onCompositionMount?: (layerItemId: string, handle: WebCompositionMountHandle | null) => void
   readonly stateId: string | null
   /** Surface-scoped items keep the V8-compatible local `scene` wire scope. */
   readonly scope: 'scene' | 'surface' | 'global'
@@ -242,10 +247,16 @@ export interface PublishedSlideRuntimeMountDescriptor {
   readonly item: PublishedRuntimeLayerItem
 }
 
+export interface PublishedSlideCompositionMountDescriptor extends Omit<PublishedSlideRuntimeMountDescriptor, 'kind' | 'item'> {
+  readonly kind: 'composition'
+  readonly item: PublishedCompositionLayerItem
+}
+
 export type PublishedSlidePaintLayer =
   | PublishedSlideNativeRenderLayer
   | PublishedSlideComponentMountDescriptor
   | PublishedSlideRuntimeMountDescriptor
+  | PublishedSlideCompositionMountDescriptor
 
 export interface PublishedSlideRenderPlan {
   readonly locationId: string
@@ -300,6 +311,7 @@ export function publishedSlideRenderPlanFromComposition(
           hostNode: publishedComponentAuthoringNode(entry.item),
         }
       }
+      if (entry.item.kind === 'composition') return { ...base, kind: 'composition', item: entry.item }
       return {
         ...base,
         kind: 'runtime',
@@ -409,7 +421,7 @@ function publishedInteractionOwnership(
   item: PublishedLayerItem,
 ): PublishedInteractionNodeOwnership {
   if (item.kind === 'component') return 'component'
-  if (item.kind === 'runtime') return 'runtime'
+  if (item.kind === 'runtime' || item.kind === 'composition') return 'runtime'
   if (item.content.nativeType === 'video') return 'media'
   
   return 'native'
@@ -453,6 +465,7 @@ function appendLayerNode(
       item: Extract<PublishedLayerItem, { kind: 'component' }>,
     ) => void
     mountRuntime?: (wrap: HTMLElement, item: PublishedRuntimeLayerItem) => void
+    mountComposition?: (wrap: HTMLElement, item: PublishedCompositionLayerItem) => void
     renderInput?: PublishedNativeRenderInput
   },
 ): HTMLElement | null {
@@ -476,6 +489,7 @@ function appendLayerNode(
     ? 'none'
     : isPublishedInteractiveLayer(item)
     || item.kind === 'component'
+    || item.kind === 'composition'
     || (
       source === 'scene'
       && item.hitPolicy !== 'pass-through'
@@ -592,6 +606,10 @@ function appendLayerNode(
       if (options?.deferComponentMount) options.deferComponentMount(() => mountInstance())
       else mountInstance()
     }
+  } else if (item.kind === 'composition') {
+    wrap.dataset.layerKind = 'composition'
+    if (options?.authoring) wrap.style.pointerEvents = 'auto'
+    options?.mountComposition?.(wrap, item)
   } else if (item.kind === 'runtime') {
     wrap.dataset.slideRuntimeKind = item.runtime.protocol
     if (!item.runtime.enabled) {
@@ -678,6 +696,7 @@ interface SlideRenderedLayerRecord {
   readonly wrap: HTMLElement
   componentHandle?: PublishedComponentMountHandle
   runtimeHandle?: PublishedSurfaceRuntimeMountHandle | PublishedCanvasRuntimeMountHandle
+  compositionHandle?: WebCompositionMountHandle
   remountComponent?: (
     item: Extract<PublishedLayerItem, { kind: 'component' }>,
   ) => Promise<void>
@@ -727,6 +746,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   #services: SurfacePlayerServices | null = null
   #controllers: (TeacherControllerComponentHost)[] = []
   #componentHandles: PublishedComponentMountHandle[] = []
+  #compositionHandles: WebCompositionMountHandle[] = []
   #phaserComponentHandles: PublishedComponentMountHandle[] = []
   #deferredCarrierMounts: Array<() => void> = []
   #runtimeHandles: Array<
@@ -908,11 +928,77 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       return { ok: true, target: patch.target }
     }
 
+    if (patch.kind === 'scene-canvas') {
+      const surface = findSlideSurface(this.#payload, this.id)
+      const scene = sceneOf(surface, resolveSlideLocation(this.#payload, this.id, this.#locationId))
+      if (sameSlideCanvas(effectiveSceneCanvas(surface, scene), patch.canvas)
+        && (!patch.referenceCanvas || sameSlideCanvas(surface.canvas, patch.referenceCanvas))) {
+        return { ok: true, target: patch.target }
+      }
+      scene.canvas = { ...patch.canvas }
+      if (patch.referenceCanvas) {
+        for (const candidate of this.#payload.surfaces) {
+          if (candidate.type === 'slide') candidate.canvas = { ...patch.referenceCanvas }
+        }
+      }
+      const root = this.#root
+      if (!root) return this.#authoringFailure('not-ready', '当前 Slide 画布尚未挂载')
+      root.style.width = `${patch.canvas.width}px`
+      root.style.height = `${patch.canvas.height}px`
+      root.dataset.canvasWidth = String(patch.canvas.width)
+      root.dataset.canvasHeight = String(patch.canvas.height)
+      for (const record of this.#renderedLayers.values()) {
+        if (!isControllerItem(record.item)) this.#applyRecordFrame(record)
+      }
+      this.#remountAuthoringControllers()
+      this.#refreshInteractionNodesFromRecords()
+      this.#playbackView?.resize()
+      return { ok: true, target: patch.target }
+    }
+
+    if (patch.kind === 'composition-frame') {
+      const record = this.#authoringRecord(patch.target.scope, patch.target.nodeId)
+      const captured = this.#captureAuthoringIdentity(patch.target, commandIdentity, patch.target.nodeId)
+      const identity = this.#validateCapturedAuthoringRecord(captured, record)
+      if (!identity.ok) return identity
+      if (!record || record.item.kind !== 'composition' || !record.compositionHandle) {
+        return this.#authoringFailure('target-not-found', '组合布局目标不存在')
+      }
+      const previous = record.item
+      const authoredFrame = record.source === 'scene' ? patch.frame : unmapSlideFrame(patch.frame, this.#sharedFrameMapping())
+      record.item = {
+        ...previous, frame: { ...previous.frame, ...authoredFrame },
+        rotation: patch.rotation, opacity: patch.opacity, visible: patch.visible,
+      }
+      this.#cancelAuthoringMotion(patch.target.nodeId)
+      this.#applyRecordFrame(record)
+      if (previous.frame.width !== authoredFrame.width || previous.frame.height !== authoredFrame.height) {
+        record.compositionHandle.resize(authoredFrame.width, authoredFrame.height)
+      }
+      if (previous.visible !== patch.visible) record.compositionHandle.setVisible(patch.visible)
+      await record.compositionHandle.waitForReady()
+      const current = this.#validateCapturedAuthoringRecord(captured, record)
+      if (!current.ok) return current
+      this.#refreshInteractionNodesFromRecords()
+      return { ok: true, target: patch.target }
+    }
+
+    if (patch.kind === 'composition-content') {
+      const record = this.#authoringRecord(patch.target.scope, patch.target.nodeId)
+      const captured = this.#captureAuthoringIdentity(patch.target, commandIdentity, patch.target.nodeId)
+      const identity = this.#validateCapturedAuthoringRecord(captured, record)
+      if (!identity.ok) return identity
+      if (!record || record.item.kind !== 'composition') return this.#authoringFailure('target-not-found', '组合内容目标不存在')
+      const result = await this.#updateAuthoringRecord(record, { ...record.item, content: structuredClone(patch.content) }, captured)
+      if (!result.ok) return result
+      return this.#validateCapturedAuthoringRecord(captured, record)
+    }
+
     if (patch.kind === 'scene-order') {
       const records = [...this.#renderedLayers.values()]
         .filter((record) => (
           record.source === this.#localAuthoringSource()
-          && (record.item.kind === 'native' || record.item.kind === 'component')
+          && (record.item.kind === 'native' || record.item.kind === 'component' || record.item.kind === 'composition')
         ))
         .sort((left, right) => left.item.order - right.item.order)
       const expectedIds = records.map((record) => record.item.layerItemId)
@@ -1063,13 +1149,15 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       return { ok: true, target: patch.target }
     }
 
-    const frame = publishedSlideAuthoringFrameOf(patch.node)
-    if (!frame) {
+    const displayedFrame = publishedSlideAuthoringFrameOf(patch.node)
+    if (!displayedFrame) {
       return this.#authoringFailure(
         'target-mismatch',
         'Published Slide 画面命令只接受 Native render input 或组件 mount descriptor。',
       )
     }
+    const frame = this.#authoringOwner(patch.target.scope) === 'scene'
+      ? displayedFrame : unmapSlideFrame(displayedFrame, this.#sharedFrameMapping())
     if (patch.target.nodeId !== frame.id) {
       return this.#authoringFailure('target-mismatch', '编辑目标 ID 与完整节点 ID 不一致。')
     }
@@ -1117,6 +1205,14 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
 
   getPublishedInteractionSurfacePort(): PublishedInteractionSurfacePort | null {
     return this.#slideInteractionPort
+  }
+
+  #describeNativeInput(input: Pick<NativeInputContent, 'answerType' | 'stateKey' | 'validityKey'>) {
+    const value = this.#payload.courseState.find(declaration => declaration.key === input.stateKey)
+    const validity = this.#payload.courseState.find(declaration => declaration.key === input.validityKey)
+    if (!value || value.valueType !== (input.answerType === 'text' ? 'string' : 'number') || validity?.valueType !== 'boolean') return null
+    return { answerType: input.answerType, stateKey: input.stateKey, validityKey: input.validityKey,
+      defaultValue: value.defaultValue as string | number }
   }
 
   getPublishedGlobalRuntimeMountTarget(itemId: string): HTMLElement | null {
@@ -1176,7 +1272,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     const root = context.container.ownerDocument.createElement('section')
     root.className = 'slide-published-adapter'
     root.dataset.surfaceId = this.id
-    const canvas = findSlideSurface(this.#payload, this.id).canvas
+    const canvas = this.#effectiveCanvas()
     root.style.position = 'absolute'
     root.style.width = `${canvas.width}px`
     root.style.height = `${canvas.height}px`
@@ -1203,13 +1299,19 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
         describeInput: nodeId => {
           const entry = this.getPublishedSlideRenderPlan().layers.find(layer =>
             layer.source === 'scene' && layer.kind === 'native' && layer.renderInput.id === nodeId)
-          if (!entry || entry.kind !== 'native' || entry.renderInput.type !== 'input') return null
-          const input = entry.renderInput
-          const value = this.#payload.courseState.find(declaration => declaration.key === input.stateKey)
-          const validity = this.#payload.courseState.find(declaration => declaration.key === input.validityKey)
-          if (!value || value.valueType !== (input.answerType === 'text' ? 'string' : 'number') || validity?.valueType !== 'boolean') return null
-          return { answerType: input.answerType, stateKey: input.stateKey, validityKey: input.validityKey,
-            defaultValue: value.defaultValue as string | number }
+          if (entry?.kind === 'native' && entry.renderInput.type === 'input') return this.#describeNativeInput(entry.renderInput)
+          for (const handle of this.#compositionHandles) {
+            const descriptor = handle.describeInput(nodeId)
+            if (descriptor) return descriptor
+          }
+          return null
+        },
+        bindInputSubmit: (nodeId, listener) => {
+          for (const handle of this.#compositionHandles) {
+            const dispose = handle.bindInputSubmit(nodeId, listener)
+            if (dispose) return dispose
+          }
+          return null
         },
       },
     )
@@ -1233,7 +1335,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
         this.#pendingRuntimeActivation = preparedActivation
       } else {
         this.#mountDeferredCarriers()
-        for (const handle of this.#runtimeHandles) {
+        for (const handle of [...this.#runtimeHandles, ...this.#compositionHandles]) {
           handle.setVisible(true)
           handle.resume()
         }
@@ -1296,7 +1398,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
           sceneId: scene.id,
           onTargetsChanged: (update) => {
             if (this.#liveEdit !== live) return
-            const mapped = mapRuntimeAuthoringTargetsToLayer(update, record.item, surface.canvas)
+            const mapped = mapRuntimeAuthoringTargetsToLayer(update, record.item, effectiveSceneCanvas(surface, scene))
             if (mapped.targets.length > 0 || mapped.truncated) live.runtimeTargets.set(itemId, { order: record.item.order, update: mapped })
             else live.runtimeTargets.delete(itemId)
             publishRuntimeTargets()
@@ -1381,7 +1483,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     this.#preparedRuntimeActivation = null
     this.#pendingRuntimeActivation = null
     this.#completedActiveResetLocationId = null
-    for (const handle of this.#runtimeHandles) {
+    for (const handle of [...this.#runtimeHandles, ...this.#compositionHandles]) {
       handle.setVisible(false)
       handle.suspend()
     }
@@ -1451,14 +1553,14 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     const itemCapture = request.layerItemId !== undefined
     const layers: PublishedSlideCaptureLayer[] = ordered.map((record) => ({
       element: record.wrap,
-      x: itemCapture ? 0 : record.item.frame.x,
-      y: itemCapture ? 0 : record.item.frame.y,
-      width: record.item.frame.width,
-      height: record.item.frame.height,
+      x: itemCapture ? 0 : this.#displayFrame(record).x,
+      y: itemCapture ? 0 : this.#displayFrame(record).y,
+      width: itemCapture ? record.item.frame.width : this.#displayFrame(record).width,
+      height: itemCapture ? record.item.frame.height : this.#displayFrame(record).height,
       rotation: itemCapture ? 0 : record.item.rotation,
       opacity: itemCapture ? 1 : record.item.opacity,
     }))
-    const canvas = findSlideSurface(this.#payload, this.id).canvas
+    const canvas = this.#effectiveCanvas()
     const width = itemCapture ? ordered[0]!.item.frame.width : canvas.width
     const height = itemCapture ? ordered[0]!.item.frame.height : canvas.height
     const content = await capturePublishedSlidePng({
@@ -1499,7 +1601,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       if (this.#deferredCarrierMounts.length > 0) {
         this.#mountDeferredCarriers()
       } else {
-        for (const handle of this.#runtimeHandles) {
+        for (const handle of [...this.#runtimeHandles, ...this.#compositionHandles]) {
           handle.setVisible(true)
           handle.resume()
         }
@@ -1654,18 +1756,41 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
 
   #applyRecordFrame(record: SlideRenderedLayerRecord): void {
     const { item, wrap } = record
-    wrap.style.left = `${item.frame.x}px`
-    wrap.style.top = `${item.frame.y}px`
+    const frame = this.#displayFrame(record)
+    const scale = record.source === 'scene' ? 1 : this.#sharedFrameMapping().scale
+    // Scale the whole shared item so Native fonts, strokes and Web/program
+    // viewports retain their one authored reference size.
+    wrap.style.left = `${frame.x + (scale - 1) * item.frame.width / 2}px`
+    wrap.style.top = `${frame.y + (scale - 1) * item.frame.height / 2}px`
     wrap.style.width = `${item.frame.width}px`
     wrap.style.height = `${item.frame.height}px`
     wrap.style.opacity = String(item.opacity)
-    wrap.style.transform = `rotate(${item.rotation}deg)`
+    wrap.style.transformOrigin = 'center center'
+    wrap.style.transform = this.#recordTransform(item, record.source)
     wrap.style.zIndex = String(record.stackOrder)
     const visible = this.#isRenderedLayerVisible(record)
     wrap.style.visibility = visible ? 'visible' : 'hidden'
-    wrap.style.pointerEvents = this.#authoring ? 'none' : wrap.style.pointerEvents
+    wrap.style.pointerEvents = this.#authoring ? item.kind === 'composition' ? 'auto' : 'none' : wrap.style.pointerEvents
     if (visible) wrap.removeAttribute('aria-hidden')
     else wrap.setAttribute('aria-hidden', 'true')
+  }
+
+  #effectiveCanvas() {
+    const surface = findSlideSurface(this.#payload, this.id)
+    return effectiveSceneCanvas(surface, sceneOf(surface, resolveSlideLocation(this.#payload, this.id, this.#locationId)))
+  }
+
+  #sharedFrameMapping() {
+    return sharedSlideFrameMapping(findSlideSurface(this.#payload, this.id).canvas, this.#effectiveCanvas())
+  }
+
+  #displayFrame(record: Pick<SlideRenderedLayerRecord, 'item' | 'source'>) {
+    return record.source === 'scene' ? record.item.frame : mapSlideFrame(record.item.frame, this.#sharedFrameMapping())
+  }
+
+  #recordTransform(item: PublishedLayerItem, source: PublishedInteractionNodeSource) {
+    const scale = source === 'scene' ? 1 : this.#sharedFrameMapping().scale
+    return `rotate(${item.rotation}deg)${scale === 1 ? '' : ` scale(${scale})`}`
   }
 
   #isRenderedLayerVisible(record: SlideRenderedLayerRecord): boolean {
@@ -1730,6 +1855,12 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       if (!current.ok) return current
       record.item = item
       this.#applyRecordFrame(record)
+    } else if (item.kind === 'composition') {
+      if (!record.compositionHandle) throw new Error(`组合内容“${item.layerItemId}”没有已挂载实例`)
+      record.item = item
+      this.#applyRecordFrame(record)
+      record.compositionHandle.resize(item.frame.width, item.frame.height)
+      await record.compositionHandle.update(item.content)
     } else if (item.kind === 'native') {
       record.item = item
       this.#applyRecordFrame(record)
@@ -1885,7 +2016,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   }
 
   #destroyRuntimes(): void {
-    for (const handle of this.#runtimeHandles) {
+    for (const handle of [...this.#runtimeHandles, ...this.#compositionHandles]) {
       try {
         handle.destroy()
       } catch (error) {
@@ -1893,6 +2024,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       }
     }
     this.#runtimeHandles = []
+    this.#compositionHandles = []
   }
 
   #destroyControllers(): void {
@@ -1994,12 +2126,12 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       node,
       container: wrap,
       footprintElement: wrap,
-      canvas: findSlideSurface(this.#payload, this.id).canvas,
-      getRenderedStageBounds: () => stageBoundsFromElement(root, findSlideSurface(this.#payload, this.id).canvas),
+      canvas: this.#effectiveCanvas(),
+      getRenderedStageBounds: () => stageBoundsFromElement(root, this.#effectiveCanvas()),
       // The same rule in the editor and in playback: kept on the visible part of the page, at its edge when outside.
       ...(this.#authoring
-        ? { authoringPage: findSlideSurface(this.#payload, this.id).canvas, getConstraintRect: () => visiblePageRect(root, findSlideSurface(this.#payload, this.id).canvas) }
-        : { getConstraintRect: () => visiblePageRect(root, findSlideSurface(this.#payload, this.id).canvas, this.#playbackView?.chrome.insets) }),
+        ? { authoringPage: this.#effectiveCanvas(), getConstraintRect: () => visiblePageRect(root, this.#effectiveCanvas()) }
+        : { getConstraintRect: () => visiblePageRect(root, this.#effectiveCanvas(), this.#playbackView?.chrome.insets) }),
       scenes: this.#payload.locations.map((location) => ({
         id: location.id,
         name: location.label,
@@ -2176,7 +2308,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       },
       authoredMotionStyle: () => ({
         opacity: String(item.opacity),
-        transform: `rotate(${item.rotation}deg)`,
+        transform: this.#recordTransform(item, source),
       }),
     }
     this.#interactionNodes.set(item.layerItemId, handle)
@@ -2204,6 +2336,11 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     const surface = findSlideSurface(this.#payload, this.id)
     const location = resolveSlideLocation(this.#payload, this.id, this.#locationId)
     const scene = sceneOf(surface, location)
+    const canvas = effectiveSceneCanvas(surface, scene)
+    root.style.width = `${canvas.width}px`
+    root.style.height = `${canvas.height}px`
+    root.dataset.canvasWidth = String(canvas.width)
+    root.dataset.canvasHeight = String(canvas.height)
     const composition = composePublishedSlideLocation({
       payload: this.#payload,
       locationId: location.id,
@@ -2250,7 +2387,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       const source = entry.source
       const authoringSnapshotNode = this.#authoring !== null
         && (source === this.#localAuthoringSource() || source === 'global')
-        && (entry.item.kind === 'native' || entry.item.kind === 'component')
+        && (entry.item.kind === 'native' || entry.item.kind === 'component' || entry.item.kind === 'composition')
       const localCarrierAuthoring = this.#authoring !== null
         && source === this.#localAuthoringSource()
       const authoringRuntime = this.#authoring !== null
@@ -2277,6 +2414,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
         : { ...entry.item, visible: effectivelyVisible }
       let record: SlideRenderedLayerRecord | null = null
       let mountedComponentHandle: PublishedComponentMountHandle | undefined
+      let mountedCompositionHandle: WebCompositionMountHandle | undefined
       let mountedRuntimeHandle:
         | PublishedSurfaceRuntimeMountHandle
         | PublishedCanvasRuntimeMountHandle
@@ -2335,6 +2473,34 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
             : {}),
           ...(entry.kind === 'native' ? { renderInput: entry.renderInput } : {}),
           mountComponent: (handle) => rememberComponentHandle(handle),
+          mountComposition: (compositionWrap, item) => {
+            const handle = mountWebComposition(compositionWrap, {
+              instanceId: item.layerItemId, content: item.content, width: item.frame.width, height: item.frame.height,
+              mode: this.#authoring ? 'authoring' : this.#staticCapture ? 'capture' : 'playback',
+              visible: this.#active || this.#authoring !== null || this.#staticCapture,
+              resolveAsset: this.#resolveAsset, session: this.#runtimeSession, sceneId: scene.id,
+              courseState: this.#authoring?.courseState ?? carrierEffects.courseState,
+              projectId: this.#payload.courseId, components: this.#authoring?.componentPackages ?? this.#payload.components,
+              componentActions: !this.#authoring && !this.#staticCapture ? carrierEffects.componentActions : undefined,
+              actions: !this.#authoring && !this.#staticCapture ? carrierEffects.runtimeActions : undefined,
+              presentation: !this.#authoring && !this.#staticCapture ? this.#publishedPresentationApi(scene, carrierEffects.runtimeActions) : undefined,
+              onSelection: this.#authoring?.onCompositionSelection,
+              describeInput: source === 'scene' ? (_nodeId, input) => this.#describeNativeInput(input) : undefined,
+              reportError: error => this.#services?.reportDiagnostic?.({ surfaceId: this.id, phase: 'mount', severity: 'error', message: error.message, cause: error }),
+            })
+            mountedCompositionHandle = handle
+            this.#compositionHandles.push(handle)
+            if (this.#authoring?.onCompositionMount) {
+              const publish = this.#authoring.onCompositionMount, destroy = handle.destroy.bind(handle)
+              let ended = false
+              handle.destroy = () => {
+                if (ended) return
+                ended = true
+                try { publish(item.layerItemId, null) } finally { destroy() }
+              }
+              publish(item.layerItemId, handle)
+            }
+          },
           registerComponentRemount: (mount) => {
             registeredComponentMount = mount
           },
@@ -2435,7 +2601,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
                 runtimeWrap.dataset.slideRuntimeState = 'fallback'
                 runtimeWrap.style.pointerEvents = 'none'
               }
-              const slideCanvas = findSlideSurface(this.#payload, this.id).canvas
+              const slideCanvas = source === 'scene' ? effectiveSceneCanvas(surface, scene) : surface.canvas
               const mountOptions = {
                 instanceId: nextItem.layerItemId,
                 runtime: nextItem.runtime,
@@ -2468,7 +2634,8 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
                           update: Readonly<RuntimeAuthoringTargetUpdate>,
                         ) => {
                           if (!isCurrentMount()) return
-                          const mapped = mapRuntimeAuthoringTargetsToLayer(update, nextItem, findSlideSurface(this.#payload, this.id).canvas)
+                          const displayItem = source === 'scene' ? nextItem : { ...nextItem, frame: mapSlideFrame(nextItem.frame, this.#sharedFrameMapping()) }
+                          const mapped = mapRuntimeAuthoringTargetsToLayer(update, displayItem, slideCanvas)
                           if (mapped.targets.length > 0 || mapped.truncated) {
                             this.#authoringRuntimeTargets.set(nextItem.layerItemId, {
                               order: nextItem.order,
@@ -2567,9 +2734,11 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
         wrap,
         ...(mountedComponentHandle ? { componentHandle: mountedComponentHandle } : {}),
         ...(mountedRuntimeHandle ? { runtimeHandle: mountedRuntimeHandle } : {}),
+        ...(mountedCompositionHandle ? { compositionHandle: mountedCompositionHandle } : {}),
         ...(remountComponent ? { remountComponent } : {}),
         ...(remountRuntime ? { remountRuntime } : {}),
       }
+      if (!isControllerItem(record.item)) this.#applyRecordFrame(record)
       this.#renderedLayers.set(renderedLayerKey(source, entry.item.layerItemId), record)
       if (entry.kind === 'native' && entry.renderInput.type === 'video') {
         this.#mountPublishedVideoHandle(wrap, entry.item.layerItemId, entry.renderInput)

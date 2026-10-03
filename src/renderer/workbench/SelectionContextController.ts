@@ -7,6 +7,9 @@ import type { ExecutionDocumentReference, ExecutionSelectionTarget } from '../..
 import { readTarget } from '../../core/tools/ToolTargets'
 import { findFlowBlockRecursive } from '../../core/tools/flowDocumentModel'
 import { resolveFlowContextSelection } from '../../core/tools/flowTextSlot'
+import type { ExecutionContentOutput } from '../../shared/workbench/execution'
+import { isRichTextFlowBlock } from '../../core/tools/flowDocumentModel'
+import type { FlowTextContent } from '../../shared/document/content'
 
 export interface SelectionCapture {
   documentId: string
@@ -17,7 +20,7 @@ export interface SelectionCapture {
   /** Only used to map a live Markdown highlight; never a writer or an authorization. */
   source?: string
 }
-export interface ContextualEditRequest { selection: SelectionCapture; instruction: string }
+export interface ContextualEditRequest { selection: SelectionCapture; instruction: string; contentOutput?: ExecutionContentOutput }
 export function captureSelection(snapshot: DocumentSnapshot, targets: readonly ExecutionSelectionTarget[], label: string, source?: string): SelectionCapture {
   if (!targets.length) throw new Error('没有选中内容，请先选择明确的修改范围。')
   for (const target of targets) {
@@ -35,6 +38,14 @@ export function captureCourseObjectSelection(snapshot: DocumentSnapshot, locatio
     if (!owner) throw new Error('所选对象已不存在。')
     return { kind: 'course-object', locationId, itemId, ...(owner.source === 'scene' && stateId ? { stateId } : {}) }
   }), `所选 ${itemIds.length} 个对象${stateId ? '（当前命名态）' : ''}`)
+}
+/** Composition addresses belong to the software; an element card freezes only the selected subtree. */
+export function captureCompositionSelection(snapshot: DocumentSnapshot, locationId: string, itemId: string, nodeId: string,
+  stateId?: string | null, label = '所选内容'): SelectionCapture {
+  const object = captureCourseObjectSelection(snapshot, locationId, [itemId], stateId)
+  const target = object.targets[0]
+  if (target?.kind !== 'course-object') throw new Error('所选组合内容已不存在。')
+  return captureSelection(snapshot, [{ ...target, compositionNodeId: nodeId }], label)
 }
 export function matchesCourseObjectState(target: Extract<ExecutionSelectionTarget, { kind: 'course-object' }>, locationId: string | null | undefined, stateId: string | null | undefined, sceneOwned: boolean): boolean {
   return target.locationId === locationId && target.stateId === (sceneOwned ? stateId ?? undefined : undefined)
@@ -87,17 +98,19 @@ export class SelectionContextController {
   getManual(id: string) { return this.manual.get(id) ?? null }
   getPinned(id: string) { return this.pinned.get(id) ?? null }
   setManual(id: string, value: SelectionCapture | null) {
+    // Explicit user/card navigation takes precedence over a read of an earlier canvas selection.
+    this.tickets.set(id, (this.tickets.get(id) ?? 0) + 1)
     if (JSON.stringify(this.manual.get(id) ?? null) === JSON.stringify(value)) return
     if (value) this.manual.set(id, structuredClone(value)); else this.manual.delete(id)
     this.notify()
   }
-  async observe(id: string, revision: number, make: (snapshot: DocumentSnapshot) => SelectionCapture | null) {
+  async observe(id: string, revision: number, make: (snapshot: DocumentSnapshot) => SelectionCapture | null, active = () => true) {
     const ticket = (this.tickets.get(id) ?? 0) + 1; this.tickets.set(id, ticket)
     try {
       const snapshot = await this.readDocument(id)
-      if (this.tickets.get(id) !== ticket) return
+      if (this.tickets.get(id) !== ticket || !active()) return
       this.setManual(id, snapshot.revision === revision ? make(snapshot) : null)
-    } catch { if (this.tickets.get(id) === ticket) this.setManual(id, null) }
+    } catch { if (this.tickets.get(id) === ticket && active()) this.setManual(id, null) }
   }
   register(id: string, prepare: () => Promise<DocumentSnapshot>) { this.preparers.set(id, prepare); return () => { if (this.preparers.get(id) === prepare) this.preparers.delete(id) } }
   setFallback(prepare: (id: string) => Promise<DocumentSnapshot>) { this.fallback = prepare; return () => { if (this.fallback === prepare) this.fallback = undefined } }
@@ -113,13 +126,28 @@ export class SelectionContextController {
     this.pinned = next; this.notify()
   }
   onRequest(handler: (request: ContextualEditRequest) => void) { this.requestHandler = handler; return () => { if (this.requestHandler === handler) this.requestHandler = undefined } }
-  async request(selection: SelectionCapture, instruction: string) {
+  async request(selection: SelectionCapture, instruction: string, contentOnly = false) {
     if (!instruction.trim() || !selection.targets.length) throw new Error('请选择内容并输入修改要求。')
     const snapshot = await this.prepare(selection.documentId)
     if (snapshot.epoch !== selection.epoch || snapshot.revision !== selection.revision) throw new Error('选中的内容已改变，请重新选择后发送。')
     captureSelection(snapshot, selection.targets, selection.label)
     if (!this.requestHandler) throw new Error('统一创作助手尚未就绪。')
-    this.requestHandler({ selection: structuredClone(selection), instruction })
+    let contentOutput: ExecutionContentOutput | undefined
+    const target = selection.targets.length === 1 ? selection.targets[0] : undefined
+    if (contentOnly && target) {
+      const current = readTarget(snapshot.model, target) as { item?: { kind?: string; locked?: boolean; content?: { nativeType?: string } } }
+      const block = snapshot.model.kind === 'course-v9' && target.kind === 'flow-block'
+        ? snapshot.model.project.surfaces.find(surface => surface.id === target.surfaceId && surface.type === 'flow') : undefined
+      const flow = block?.type === 'flow' ? findFlowBlockRecursive(block.blocks, target.kind === 'flow-block' ? target.blockId : '')?.block : undefined
+      const flowContent = target.kind === 'flow-range' ? (current as { content?: FlowTextContent }).content
+        : flow && isRichTextFlowBlock(flow) ? flow.content : flow?.type === 'callout' ? flow.body : undefined
+      const plainFlow = !flowContent?.inlines.some(inline => inline.type === 'math')
+      if (target.kind === 'markdown-range' || target.kind === 'flow-range' && plainFlow
+        || target.kind === 'course-object' && current.item?.kind === 'native' && current.item.content?.nativeType === 'text' && !current.item.locked
+        || flow && plainFlow && (isRichTextFlowBlock(flow) || flow.type === 'callout' || flow.type === 'code'))
+        contentOutput = { kind: 'replace-text', documentId: selection.documentId, target: structuredClone(target) }
+    }
+    this.requestHandler({ selection: structuredClone(selection), instruction, ...(contentOutput ? { contentOutput } : {}) })
   }
 }
 export const workbenchSelection = new SelectionContextController()

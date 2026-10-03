@@ -15,23 +15,18 @@
  *    and its real commit action.
  */
 import { z } from 'zod'
+import { htmlSourceEditCommandSchema, type HtmlSourceEditOutcome } from '../html/sourceEditCommands'
 
-const id = z.string().min(1).max(256)
+const id = z.string().min(1)
 const revision = z.number().int().nonnegative()
 const bindingVersion = z.number().int().positive()
-/** Coordinates and viewport sizes are bounded so a hostile page cannot force
- * unbounded layout work or absurd highlights in the editor DOM. */
-const coordinate = z.number().finite().min(-1_000_000).max(1_000_000)
-const extent = z.number().finite().min(0).max(1_000_000)
+const coordinate = z.number().finite()
+const extent = z.number().finite().nonnegative()
 
-/** Bounded text carried by a target report or an edit. */
-export const HTML_PREVIEW_TEXT_MAX_CODE_UNITS = 64 * 1024
 /** Bounded number of targets one page report may carry. */
 export const HTML_PREVIEW_TARGET_MAX = 64
-/** Bounded image bytes accepted from the existing file picker. */
-export const HTML_PREVIEW_IMAGE_MAX_BYTES = 32 * 1024 * 1024
 
-const text = z.string().max(HTML_PREVIEW_TEXT_MAX_CODE_UNITS)
+const text = z.string()
 
 export const htmlPreviewTargetKindSchema = z.enum(['text', 'image'])
 
@@ -54,17 +49,18 @@ export const htmlPreviewTargetReportSchema = z.object({
   handle: targetHandle,
   kind: htmlPreviewTargetKindSchema,
   /** Source context the page observed, used to disambiguate identical text. */
-  domPath: z.array(z.object({ name: z.string().max(64), index: z.number().int().nonnegative() }).strict()).max(256),
+  domPath: z.array(z.object({ name: z.string(), index: z.number().int().nonnegative() }).strict()),
   sectionOrder: z.number().int().nonnegative().nullable(),
   /** Raw (entity-encoded) source text or attribute value the page displayed. */
   rawText: text,
-  attributeName: z.string().max(64).nullable(),
+  attributeName: z.string().nullable(),
   rect,
   /** True when the page created this node at runtime rather than parsing it. */
   scriptCreated: z.boolean(),
 }).strict()
 
 export const htmlPreviewRequestSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('html-preview.edit-source'), operationId: id, documentId: id, epoch: id, baseRevision: revision, bindingVersion, leaseId: id, loadId: id, command: htmlSourceEditCommandSchema }).strict(),
   /** Open a preview lease for an already-open HTML document in a given tab. */
   z.object({
     type: z.literal('html-preview.open'),
@@ -101,10 +97,10 @@ export const htmlPreviewRequestSchema = z.discriminatedUnion('type', [
       z.object({ kind: z.literal('text'), value: text }).strict(),
       z.object({
         kind: z.literal('image'),
-        name: z.string().min(1).max(200),
-        mimeType: z.string().min(1).max(128),
+        name: z.string().min(1),
+        mimeType: z.string().min(1),
         bytes: z.instanceof(Uint8Array)
-          .refine(bytes => bytes.byteLength > 0 && bytes.byteLength <= HTML_PREVIEW_IMAGE_MAX_BYTES, '图片字节超出允许范围'),
+          .refine(bytes => bytes.byteLength > 0, '图片字节不能为空'),
       }).strict(),
     ]),
   }).strict(),
@@ -148,6 +144,7 @@ export type HtmlPreviewResponse<T extends HtmlPreviewRequest> =
   T extends { type: 'html-preview.open' } ? HtmlPreviewLease
   : T extends { type: 'html-preview.release' } ? { released: boolean }
   : T extends { type: 'html-preview.resolve-target' } ? { revision: number; targets: HtmlPreviewResolvedTarget[] }
+  : T extends { type: 'html-preview.edit-source' } ? HtmlSourceEditOutcome
   : HtmlPreviewEditOutcome
 
 /**
@@ -160,7 +157,7 @@ export const htmlPreviewPageMessageSchema = z.discriminatedUnion('event', [
     protocol: z.literal(1),
     leaseId: id,
     loadId: id,
-    sectionCount: z.number().int().min(0).max(4096),
+    sectionCount: z.number().int().min(0),
     sectionsAmbiguous: z.boolean(),
   }).strict(),
   z.object({
@@ -239,6 +236,7 @@ export interface HtmlPreviewHost {
   release(request: HtmlPreviewReleaseRequest): Promise<{ released: boolean }>
   resolveTarget(request: HtmlPreviewResolveRequest): Promise<{ revision: number; targets: HtmlPreviewResolvedTarget[] }>
   edit(request: HtmlPreviewEditRequest): Promise<HtmlPreviewEditOutcome>
+  editSource(request: Extract<HtmlPreviewRequest, { type: 'html-preview.edit-source' }>): Promise<HtmlSourceEditOutcome>
 }
 
 /**

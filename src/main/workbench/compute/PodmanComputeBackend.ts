@@ -1,6 +1,5 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import path from 'node:path'
-import { cpus, freemem, totalmem } from 'node:os'
 
 /** Linux amd64 Python 3.12.14 slim, pinned to the platform manifest and local
  * image identity observed on 2026-09-29. A tag is never an execution identity.
@@ -14,7 +13,6 @@ export interface ComputeProcessResult {
   stderr: string
   truncated: boolean
   cancelled: boolean
-  timedOut: boolean
 }
 export interface ComputeProcess {
   done: Promise<ComputeProcessResult>
@@ -25,19 +23,18 @@ export interface ComputeBackendRequest {
   directory: string
   program: string
   argv: readonly string[]
-  timeoutMs: number
   /** Persisted by the owner before Podman may create this container. */
   containerName: string
 }
 
 const MAX_LOG_BYTES = 64 * 1024
-const safeArg = (value: string) => typeof value === 'string' && value.length <= 16_384 && !value.includes('\0')
+const safeArg = (value: string) => typeof value === 'string' && !value.includes('\0')
 const validContainerName = (name: string) => /^guoling-compute-[a-f0-9]{32}$/.test(name)
 
-function bounded(child: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<{ code: number | null; stdout: string; stderr: string; truncated: boolean }> {
+function observeProcess(child: ChildProcessWithoutNullStreams, timeoutMs?: number): Promise<{ code: number | null; stdout: string; stderr: string; truncated: boolean }> {
   return new Promise((resolve, reject) => {
     let stdout = '', stderr = '', truncated = false, finished = false
-    const timer = setTimeout(() => { child.kill(); finish(new Error('受限执行后端命令超时')) }, timeoutMs)
+    const timer = timeoutMs === undefined ? undefined : setTimeout(() => { child.kill(); finish(new Error('执行后端控制命令超时')) }, timeoutMs)
     const append = (current: string, chunk: Buffer): string => {
       const remaining = MAX_LOG_BYTES - Buffer.byteLength(current)
       if (remaining <= 0) { truncated = true; return current }
@@ -50,7 +47,7 @@ function bounded(child: ChildProcessWithoutNullStreams, timeoutMs: number): Prom
     child.once('close', code => finish(undefined, code))
     function finish(error?: Error, code: number | null = null) {
       if (finished) return
-      finished = true; clearTimeout(timer)
+      finished = true; if (timer) clearTimeout(timer)
       if (error) reject(error)
       else resolve({ code, stdout, stderr, truncated })
     }
@@ -72,7 +69,7 @@ export class PodmanComputeBackend {
     return spawn(this.options.wslExecutable ?? 'wsl.exe', ['-d', this.options.distro, '--exec', ...args], { windowsHide: true, stdio: 'pipe' })
   }
   private async short(args: readonly string[], timeoutMs = 10_000) {
-    return bounded(this.command(args), timeoutMs)
+    return observeProcess(this.command(args), timeoutMs)
   }
   async availability(): Promise<{ available: boolean; reason?: string }> {
     try {
@@ -93,7 +90,7 @@ export class PodmanComputeBackend {
     const existing = await this.availability()
     if (existing.available) return existing
     try {
-      const pulled = await this.short(['podman', 'pull', '--quiet', PINNED_PYTHON_IMAGE_SOURCE], 180_000)
+      const pulled = await observeProcess(this.command(['podman', 'pull', '--quiet', PINNED_PYTHON_IMAGE_SOURCE]))
       if (pulled.code !== 0) return { available: false, reason: `固定 Python 镜像获取失败：${pulled.stderr.slice(0, 300)}` }
       const inspected = await this.short(['podman', 'image', 'inspect', PINNED_PYTHON_IMAGE_SOURCE, '--format', '{{.Id}}'])
       if (inspected.code !== 0 || inspected.stdout.trim() !== PINNED_PYTHON_IMAGE_ID)
@@ -124,35 +121,30 @@ export class PodmanComputeBackend {
     catch { return false }
   }
   async start(request: ComputeBackendRequest): Promise<ComputeProcess> {
-    if (!safeArg(request.program) || !request.program || request.argv.length > 128 || request.argv.some(arg => !safeArg(arg))
-      || !Number.isSafeInteger(request.timeoutMs) || request.timeoutMs < 1000 || request.timeoutMs > 60 * 60_000
+    if (!safeArg(request.program) || !request.program || request.argv.some(arg => !safeArg(arg))
       || !validContainerName(request.containerName))
       throw new Error('受限执行参数无效')
     const available = await this.availability()
     if (!available.available) throw new Error(available.reason ?? '受限执行后端不可用')
     const root = await this.linuxPath(request.directory)
     const name = request.containerName
-    const memoryMiB = Math.max(512, Math.min(4096, Math.floor(Math.min(totalmem() / 4, freemem() / 2) / 1024 / 1024)))
-    const cpuCount = Math.max(1, Math.min(4, cpus().length - 1))
     const args = ['podman', 'run', '--rm', '--pull=never', '--name', name,
-      '--network', 'none', '--read-only', '--pids-limit', '256', '--memory', `${memoryMiB}m`, '--cpus', String(cpuCount),
-      '--timeout', String(Math.ceil(request.timeoutMs / 1000)), '--stop-timeout', '1',
+      '--network', 'none', '--read-only', '--pids-limit', '-1', '--stop-timeout', '1',
       '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '65534:65534',
-      '--tmpfs', '/tmp:rw,nosuid,nodev,size=256m',
+      '--tmpfs', '/tmp:rw,nosuid,nodev',
       '--volume', `${root}/input:/job/input:ro`, '--volume', `${root}/work:/job/work:rw`, '--volume', `${root}/output:/job/output:rw`,
       '--workdir', '/job/work', '--entrypoint', request.program, this.options.image, ...request.argv]
     const child = this.command(args)
-    let cancelled = false, timedOut = false, finished = false
+    let cancelled = false, finished = false
     const stop = async () => {
       if (finished) return true
       return (await this.stopContainer(name)) || finished
     }
-    // Podman's own --timeout is the descendant-process backstop. The host timer
-    // provides a faster receipt; killing only wsl.exe would orphan a container.
-    const timer = setTimeout(() => { timedOut = true; void stop() }, request.timeoutMs)
-    const done = bounded(child, request.timeoutMs + 20_000).then(result => { finished = true; return {
-      exitCode: result.code, stdout: result.stdout, stderr: result.stderr, truncated: result.truncated, cancelled, timedOut,
-    } }, async error => { await stop(); finished = true; throw error }).finally(() => clearTimeout(timer))
+    // Work remains active until it exits or its owner explicitly cancels it.
+    // Cancellation stops the container tree, rather than only its WSL wrapper.
+    const done = observeProcess(child).then(result => { finished = true; return {
+      exitCode: result.code, stdout: result.stdout, stderr: result.stderr, truncated: result.truncated, cancelled,
+    } }, async error => { await stop(); finished = true; throw error })
     return { done, cancel: async () => { const confirmed = await stop(); cancelled ||= confirmed; return confirmed } }
   }
 }

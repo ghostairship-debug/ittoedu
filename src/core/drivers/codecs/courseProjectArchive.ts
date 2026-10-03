@@ -12,9 +12,6 @@ import {
 } from './archivePath'
 
 const PROJECT_DOCUMENT_PATH = 'project.json'
-const MAX_COURSE_PROJECT_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
-const MAX_COURSE_PROJECT_ENTRIES = 100_000
-const MAX_ARCHIVE_PATH_LENGTH = 1_024
 
 export interface CourseProjectArchiveData {
   project: CourseProjectDocument
@@ -250,10 +247,6 @@ function assertPortablePath(path: string, context: string, opening: boolean): vo
     if (opening) throw openError(`${context}的存储路径不安全。`, error)
     throw saveError(`${context}的存储路径不安全。`, error)
   }
-  if (path.length > MAX_ARCHIVE_PATH_LENGTH) {
-    const message = `${context}的存储路径过长。`
-    throw opening ? openError(message) : saveError(message)
-  }
 }
 
 function validateAssetPath(path: string, opening: boolean): void {
@@ -385,9 +378,6 @@ function createCourseProjectArchiveFiles(
       throw saveError(`存在未登记的组件文件“${suppliedKey}”。`)
     }
   }
-  if (Object.keys(files).length > MAX_COURSE_PROJECT_ENTRIES) {
-    throw saveError(`课程工程包超过 ${MAX_COURSE_PROJECT_ENTRIES} 个文件的安全限制。`)
-  }
   return files
 }
 
@@ -449,18 +439,9 @@ function parseCourseProjectArchiveFiles(
 }
 
 function archiveFilter(): { filter(file: { name: string; originalSize: number }): boolean } {
-  let totalBytes = 0
-  let entries = 0
   return {
     filter(file) {
       assertSafeArchivePath(file.name, 'project', { allowDirectory: true })
-      if (file.name.length > MAX_ARCHIVE_PATH_LENGTH) throw openError('工程包包含过长的文件路径。')
-      entries += 1
-      if (entries > MAX_COURSE_PROJECT_ENTRIES) throw openError('工程包文件数超过安全限制。')
-      totalBytes += file.originalSize
-      if (totalBytes > MAX_COURSE_PROJECT_UNCOMPRESSED_BYTES) {
-        throw openError('工程解压后超过 512MB 安全限制。')
-      }
       return !isArchiveDirectory(file.name)
     },
   }

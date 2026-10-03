@@ -13,8 +13,9 @@ import markdown
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parents[1]
-CONVERGENCE = REPO / '果铃2.0收敛方案.md'
-READER_ROOT_PATH = '../../果铃2.0收敛方案.md'
+CONVERGENCE = REPO / 'docs' / 'archive' / '2026-09-convergence' / '果铃2.0收敛方案.md'
+ROADMAP = REPO / 'docs' / 'ROADMAP.md'
+READER_ROOT_PATH = '../../docs/archive/2026-09-convergence/果铃2.0收敛方案.md'
 TASK_STATUSES = ('planned', 'in_progress', 'implemented', 'verified', 'blocked')
 CASE_STATUSES = ('not_run', 'passed', 'failed', 'blocked', 'skipped')
 CURRENT_SCOPE = '2.0'
@@ -134,7 +135,7 @@ def refresh():
 
     index = ['# 问题与任务索引', '',
              f'当前修订 v{revision}：{n} 个 S/M 实施任务属于当前开发；验收按 `required_for` 区分当前开发和后续发行准备，延期用例不进入当前完成门。', '',
-             '先读[根目录收敛稿](../../果铃2.0收敛方案.md)。任务依赖/批次以 task_registry.json 为准，验收以 acceptance_cases.json 为准。', '']
+             '先读[归档的根目录收敛稿](../../docs/archive/2026-09-convergence/果铃2.0收敛方案.md)。任务依赖/批次以 task_registry.json 为准，验收以 acceptance_cases.json 为准。', '']
     for phase,title in [('S','短期：基础设施'),('M','中期：完整产品体验')]:
         index += [f'## {title}', '', '| 编号 | 任务 | 实施依赖 |', '|---|---|---|']
         index += [f"| [{t['id']}]({t['document']}) | {t['title']} | {'、'.join(t['dependencies']) or '无'} |" for t in tasks if t['phase']==phase]
@@ -181,6 +182,11 @@ M01–M30当前2.0产品任务全部完成；M25–M30为2026-09-29前移的完�
     write(CONVERGENCE, convergence)
     status = replace_block(read(ROOT/'evidence/STATUS.md'), 'STATUS', count_line)
     write(ROOT/'evidence/STATUS.md', status)
+    roadmap_block = ('权威登记（由 `GPTpro方案/guoling_2_0_execution_plan/tools/refresh_plan.py` 从同源 JSON 派生；请勿手改本段）。\n\n'
+                     + count_line +
+                     '\n\n权威状态详情：[GPTpro方案/guoling_2_0_execution_plan/evidence/STATUS.md](../GPTpro方案/guoling_2_0_execution_plan/evidence/STATUS.md)。')
+    roadmap = replace_block(read(ROADMAP), 'ROADMAP_STATUS', roadmap_block)
+    write(ROADMAP, roadmap)
 
     all_cases = [f'# 验收总表\n\n由 acceptance_cases.json 生成：{n} 个实施任务，{c} 个产品场景。'
                  '下列状态与证据引用来自同源 JSON；工程 `passed` 不等于 Owner `accepted`。修改定义后同步生成，不手改此表。']

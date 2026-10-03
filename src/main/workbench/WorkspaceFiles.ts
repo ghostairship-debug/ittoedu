@@ -220,7 +220,7 @@ export class WorkspaceFiles {
   }
 
   createFile(input: { operationId: string; workspaceId: string; targetDirectoryId: string; name: string;
-    format: 'markdown' | 'course-v9' | 'file'; bytes: Uint8Array; overwrite?: boolean }): Promise<WorkspaceOperationResult> {
+    format: 'markdown' | 'course-v9' | 'file'; bytes: Uint8Array; overwrite?: boolean }, beforeCommit?: () => void): Promise<WorkspaceOperationResult> {
     const bytes = Uint8Array.from(input.bytes)
     const digest = stableDigest({ ...input, bytes: createHash('sha256').update(bytes).digest('hex') })
     return this.runOnce(input.operationId, digest, async () => {
@@ -233,7 +233,7 @@ export class WorkspaceFiles {
         await this.requireAvailableTarget(target.resolvedPath, !!input.overwrite)
         const temporary = this.temporarySibling(target.resolvedPath, input.operationId)
         await fs.writeFile(temporary, bytes, { flag: 'wx' })
-        try { await this.renamePath(temporary, target.resolvedPath) }
+        try { beforeCommit?.(); await this.renamePath(temporary, target.resolvedPath) }
         catch (error) { await fs.rm(temporary, { force: true }).catch(() => {}); throw error }
         const entry = await this.provisionalEntry(input.workspaceId, target.resolvedPath, 'file')
         return {

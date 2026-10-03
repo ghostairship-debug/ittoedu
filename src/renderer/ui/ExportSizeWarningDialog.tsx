@@ -4,7 +4,6 @@ import { useEffect, useRef } from 'react'
 interface ExportSizeWarningDialogProps {
   open: boolean
   byteLength: number
-  hardLimitBytes: number
   onCancel(): void
   onExportWebPackage(): void
   onContinueSingleHtml(): void
@@ -18,13 +17,11 @@ function formatFileSize(bytes: number): string {
 export function ExportSizeWarningDialog({
   open,
   byteLength,
-  hardLimitBytes,
   onCancel,
   onExportWebPackage,
   onContinueSingleHtml,
 }: ExportSizeWarningDialogProps) {
   const recommendedRef = useRef<HTMLButtonElement>(null)
-  const exceedsHardLimit = byteLength > hardLimitBytes
 
   useEffect(() => {
     if (!open) return
@@ -57,9 +54,7 @@ export function ExportSizeWarningDialog({
               单 HTML 文件较大
             </h2>
             <p className="modal__message" id="export-size-warning-message">
-              {exceedsHardLimit
-                ? `预计文件大小为 ${formatFileSize(byteLength)}，已经超过单 HTML 的 ${formatFileSize(hardLimitBytes)} 保存上限。请改用网页包。`
-                : `预计文件大小为 ${formatFileSize(byteLength)}。大型单 HTML 打开时需要一次性解码全部内容，可能启动缓慢或占用较多内存；建议改用网页包。`}
+              {`预计文件大小为 ${formatFileSize(byteLength)}。大型单 HTML 打开时需要一次性解码全部内容，可能启动缓慢或占用较多内存；建议改用网页包。`}
             </p>
           </div>
         </div>
@@ -67,16 +62,14 @@ export function ExportSizeWarningDialog({
           <button type="button" className="secondary-button" onClick={onCancel}>
             取消
           </button>
-          {!exceedsHardLimit && (
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={onContinueSingleHtml}
-            >
-              <FileDown size={14} />
-              仍导出单 HTML
-            </button>
-          )}
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={onContinueSingleHtml}
+          >
+            <FileDown size={14} />
+            仍导出单 HTML
+          </button>
           <button
             ref={recommendedRef}
             type="button"
@@ -91,4 +84,3 @@ export function ExportSizeWarningDialog({
     </div>
   )
 }
-

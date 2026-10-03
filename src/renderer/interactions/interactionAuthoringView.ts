@@ -1,4 +1,4 @@
-import { MAX_SCENE_INTERACTIONS, type InteractionRule } from '@/shared/interactionTypes'
+import type { InteractionRule } from '@/shared/interactionTypes'
 import {
   buildSlideEditorView,
   type DeepReadonly,
@@ -43,7 +43,6 @@ export interface InteractionAuthoringSoundOption {
 
 export interface InteractionAuthoringRuleCapacity {
   readonly used: number
-  readonly limit: typeof MAX_SCENE_INTERACTIONS
 }
 
 interface InteractionAuthoringViewShared {
@@ -181,7 +180,7 @@ function sharedView(project: CourseProjectDocument): InteractionAuthoringViewSha
 }
 
 function capacity(rules: readonly InteractionRule[]): InteractionAuthoringRuleCapacity {
-  return Object.freeze({ used: rules.length, limit: MAX_SCENE_INTERACTIONS })
+  return Object.freeze({ used: rules.length })
 }
 
 function slideSceneAtLocation(

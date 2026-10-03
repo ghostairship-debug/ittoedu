@@ -4,7 +4,6 @@ import type { LessonDesktopRequest, LessonDesktopResult, LessonDirectoryEntry } 
 import { normalizeWorkspacePath, sameWorkspacePath } from '../../../shared/workspaceIdentity'
 import { lessonProjectPath } from '../lessonConversationSelection'
 import type { DocumentTabsController } from './useDocumentTabsController'
-import { WORKSPACE_PPTX_MAX_BYTES } from '../../../shared/workbench/workspaceFiles'
 
 export interface LessonWorkspaceControllerProps {
   lessonOperation(request: LessonDesktopRequest): Promise<LessonDesktopResult>
@@ -168,6 +167,11 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
         setMobilePane('workbench')
         return
       }
+      if (/\.(?:pdf|png|jpe?g|webp|avif|gif|svg)$/i.test(entry.name)) {
+        await props.tabs.openTab({ path: entry.path, name: entry.name, kind: 'media', lesson: current.current.lesson })
+        setMobilePane('workbench')
+        return
+      }
       // 其余文件用系统默认应用打开；失败给出明确回执。
       const result = await props.lessonOperation({ operation: 'open-external', path: entry.path })
       if (result.opened === false) throw new Error(`无法用系统应用打开 ${entry.name}：${result.openError ?? '没有可用的关联程序'}`)
@@ -179,7 +183,6 @@ export function useLessonWorkspaceController(props: LessonWorkspaceControllerPro
   }
   async function newCourseFromPptx(file: File) {
     if (!props.onNewProjectFromPptx) throw new Error('当前界面不能从 PPT 新建 H5 演示')
-    if (file.size > WORKSPACE_PPTX_MAX_BYTES) throw new Error('PPTX 不能超过 32 MiB')
     const bytes = new Uint8Array(await file.arrayBuffer())
     await stopAndFlush()
     if (await props.onNewProjectFromPptx({ name: file.name, bytes })) { detachLesson() }

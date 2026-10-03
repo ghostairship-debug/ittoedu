@@ -18,7 +18,7 @@ const schema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('revise'), baseVersion: z.string().min(1), baseContentIdentity: z.string().regex(/^[a-f0-9]{64}$/), files: dynamicPackageFilesSchema }).strict(),
   z.object({ operation: z.literal('patch'), mode: z.enum(['shared', 'instance']), basePackageId: z.string().min(1),
     baseVersion: z.string().min(1), baseContentIdentity: z.string().regex(/^[a-f0-9]{64}$/),
-    changedFiles: dynamicPackageFilesSchema, deleteFiles: z.array(z.string().min(1).max(500)).max(512) }).strict()
+    changedFiles: dynamicPackageFilesSchema, deleteFiles: z.array(z.string().min(1).max(500)) }).strict()
     .refine(value => Object.keys(value.changedFiles).length > 0 || value.deleteFiles.length > 0, '源码增量至少改变或删除一个文件'),
 ])
 export const componentPackageAddress = (projectId: string, packageId: string) => makeAuthoringAddress({ projectId, scope: 'global', carrier: 'component', layerItemId: packageId, field: 'componentPackages' })

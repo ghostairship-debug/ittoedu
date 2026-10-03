@@ -23,8 +23,7 @@ function run(root: string, tools: ExecutionToolRecord[], documentPaths?: Record<
       protocol: 'openai-chat', baseURL: 'https://test.invalid', accountId: 'test',
       auth: { kind: 'api-key', credentialRef: 'test' }, billing: { kind: 'unknown' },
       capabilities: { tools: 'supported', vision: 'unknown', stream: 'supported', reasoning: 'unknown' } },
-      model: 'test' }, documents: [], workspaceRoot: root },
-    budget: { maxRequests: 1, maxToolCalls: 10, maxContextBytes: 2000 }, status: 'completed', createdAt: 1,
+      model: 'test' }, documents: [], workspaceRoot: root }, status: 'completed', createdAt: 1,
     updatedAt: 2, messages: [], initialMessageCount: 0, requests: [], tools,
     ...(documentPaths ? { documentPaths } : {}) } as ExecutionRunRecord
 }

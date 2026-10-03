@@ -12,7 +12,6 @@ import { ExecutionSettingsStore } from '../../src/main/workbench/providers/Execu
 import { modelToolWireName } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import type { ConversationRecord } from '../../src/shared/workbench/conversations'
 import type { ExecutionRunRecord } from '../../src/shared/workbench/execution'
-import { MODEL_REQUEST_BUDGET_EXHAUSTED } from '../../src/shared/workbench/execution'
 import type { ExecutionSendResult } from '../../src/shared/workbench/executionDesktop'
 import { selectionReference } from '../../src/renderer/workbench/SelectionContextController'
 
@@ -27,7 +26,7 @@ afterEach(async () => {
   }
 })
 
-type Fault = 'auth' | 'quota' | 'disconnect' | 'budget'
+type Fault = 'auth' | 'quota' | 'disconnect' | 'after-tool-auth'
 async function waitForDraft(service: ExecutionDesktopService, identity: { workspaceId: string; conversationId: string }, text: string) {
   for (let attempt = 0; attempt < 100; attempt++) {
     const current = await service.operate({ type: 'conversation', ...identity }) as ConversationRecord
@@ -46,17 +45,17 @@ async function fixture(fault: Fault, holdFirstFailure = false) {
     requests++
     if (broken && requests === 1 && holdFirstFailure) await failureGate
     if (broken && fault === 'disconnect') { response.destroy(); return }
-    if (broken && fault === 'budget') {
+    if (broken && fault === 'after-tool-auth' && requests === 1) {
       const payload = JSON.parse(Buffer.concat(chunks).toString()) as { tools?: Array<{ function: { name: string; description: string } }> }
       const listed = payload.tools?.find(tool => tool.function.name === modelToolWireName('file.list'))
       if (!listed) throw new Error('Fixture file.list unavailable')
       response.writeHead(200, { 'Content-Type': 'text/event-stream' })
-      response.end(`data: ${JSON.stringify({ id: `budget-${requests}`, model: 'fixture-model', choices: [{ index: 0,
+      response.end(`data: ${JSON.stringify({ id: `tool-round-${requests}`, model: 'fixture-model', choices: [{ index: 0,
         delta: { role: 'assistant', tool_calls: [{ index: 0, id: `load-${requests}`, type: 'function',
           function: { name: modelToolWireName('file.list'), arguments: '{}' } }] }, finish_reason: 'tool_calls' }] })}\n\ndata: [DONE]\n\n`)
       return
     }
-    if (broken) { response.writeHead(fault === 'auth' ? 401 : 402); response.end(); return }
+    if (broken) { response.writeHead(fault === 'auth' || fault === 'after-tool-auth' ? 401 : 402); response.end(); return }
     response.writeHead(200, { 'Content-Type': 'text/event-stream' })
     response.end(`data: ${JSON.stringify({ id: 'recovered-response', model: 'fixture-model', choices: [{ index: 0,
       delta: { role: 'assistant', content: '连接已恢复' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`)
@@ -206,11 +205,8 @@ it.each([
   expect(f.requests).toBe(attempts + 1)
 })
 
-it('holds queued work at the local request cap and creates only one explicit continuation', async () => {
-  const f = await fixture('budget', true)
-  const start = f.service.engine.start.bind(f.service.engine)
-  vi.spyOn(f.service.engine, 'start').mockImplementation((input, continuation, onPrepared) =>
-    start({ ...input, budget: { maxRequests: 2 } }, continuation, onPrepared))
+it('holds queued work after a tool round and authentication failure and creates only one explicit continuation', async () => {
+  const f = await fixture('after-tool-auth', true)
   const first = await f.service.operate(f.send) as ExecutionSendResult
   for (let attempt = 0; f.requests === 0 && attempt < 100; attempt++) await new Promise(resolve => setTimeout(resolve, 10))
   expect(f.requests).toBe(1)
@@ -219,7 +215,7 @@ it('holds queued work at the local request cap and creates only one explicit con
   expect(queued.submission.state).toBe('queued')
   f.releaseFailure()
   const exhausted = await f.service.engine.wait(first.run!.runId)
-  expect(exhausted).toMatchObject({ status: 'failed', failure: { code: MODEL_REQUEST_BUDGET_EXHAUSTED } })
+  expect(exhausted).toMatchObject({ status: 'failed', failure: { code: 'http-401' } })
   expect(exhausted.requests).toHaveLength(2)
   const restored = await waitForDraft(f.service, f.identity, f.text)
   expect(f.requests).toBe(2)

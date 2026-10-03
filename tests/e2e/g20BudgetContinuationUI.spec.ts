@@ -56,7 +56,7 @@ test('default execution passes 24 requests and 120 tools in the Electron assista
     expect(records.runs.map(run => run?.status)).toEqual(['completed'])
     expect(records.runs[0]?.requests).toHaveLength(26)
     expect(records.runs[0]?.tools).toHaveLength(125)
-    expect(records.runs[0]?.budget).toMatchObject({ maxRequests: null, maxToolCalls: null })
+    expect(records.runs[0]).not.toHaveProperty('budget')
     expect(errors).toEqual([])
     const evidence = join(fixture.directory, 'budget-continuation-ui-evidence.json')
     writeFileSync(evidence, JSON.stringify({ requests: requests.length, tools: records.runs[0]?.tools.length,

@@ -2,7 +2,7 @@ import { app, dialog, type BrowserWindow } from 'electron'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
-import { MATERIAL_EXTRACTION_LIMITS, type MaterialExtraction } from '../shared/materialExtraction'
+import { type MaterialExtraction } from '../shared/materialExtraction'
 import { LessonMaterials } from './lessonMaterials'
 import { LessonWorkspaceService } from './lessonWorkspace'
 import { createWorkspaceIdentity } from './workspaceIdentity'
@@ -11,7 +11,7 @@ const requestSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('select'), path: z.string().min(1).max(32767).optional() }).strict(),
   z.object({ operation: z.literal('list'), target }).strict(),
   z.object({ operation: z.literal('import'), target, input: z.object({ title: z.string().min(1).max(300), original: z.instanceof(Uint8Array), extraction: z.custom<MaterialExtraction>() }).strict() }).strict(),
-  z.object({ operation: z.literal('read'), target, input: z.object({ id: z.uuid(), extractionVersion: z.string().min(1), fragmentIds: z.array(z.string().min(1)).min(1).max(100000) }).strict() }).strict(),
+  z.object({ operation: z.literal('read'), target, input: z.object({ id: z.uuid(), extractionVersion: z.string().min(1), fragmentIds: z.array(z.string().min(1)).min(1) }).strict() }).strict(),
 ])
 let materials: LessonMaterials | undefined
 export async function operateLessonMaterial(window: BrowserWindow, request: unknown) {
@@ -36,9 +36,8 @@ export async function operateLessonMaterial(window: BrowserWindow, request: unkn
           const file = await fs.open(filename, 'r')
           try {
             const stat = await file.stat()
-            if (!stat.isFile() || stat.size > MATERIAL_EXTRACTION_LIMITS.sourceBytes) throw new Error('材料文件不能超过 32 MiB')
+            if (!stat.isFile()) throw new Error('材料必须是普通文件')
             const bytes = await file.readFile()
-            if (bytes.length > MATERIAL_EXTRACTION_LIMITS.sourceBytes) throw new Error('材料文件在读取时超过容量上限')
             sources.push({ title, bytes })
           } finally { await file.close() }
         } catch (error) { failures.push({ title, message: error instanceof Error ? error.message : String(error) }) }

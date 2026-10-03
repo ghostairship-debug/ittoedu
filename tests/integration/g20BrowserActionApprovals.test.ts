@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { BrowserActionApprovals } from '../../src/main/workbench/externalTools/BrowserActionApprovals'
 
 describe('one-use managed browser action approvals', () => {
@@ -34,5 +34,20 @@ describe('one-use managed browser action approvals', () => {
       .toThrow('不能更换')
     expect(() => approvals.grant({ ...approved, snapshotId: 'snapshot-2' }))
       .toThrow('观察身份')
+  })
+
+  it('retains approvals during long tasks without identity or pending-count quotas', () => {
+    const approvals = new BrowserActionApprovals()
+    approvals.beginRun('run')
+    const longIdentity = 'identity-'.repeat(100)
+    const longApproval = { ...approved, operationId: longIdentity, snapshotId: longIdentity,
+      arguments: { target: '#title', text: 'lesson' } }
+    approvals.grant(longApproval)
+    for (let i = 0; i < 125; i++) approvals.grant({ ...approved, operationId: `pending-${i}` })
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 24 * 60 * 60_000)
+    try { expect(approvals.consume(longApproval)).toBe(true) } finally { now.mockRestore() }
+    expect(approvals.consume({ ...approved, operationId: 'pending-124' })).toBe(true)
+    approvals.invalidate('run')
+    expect(approvals.consume({ ...approved, operationId: 'pending-1' })).toBe(false)
   })
 })

@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { bootCourseStore, courseStoreHost, formalHistory, formalReceipt, redoCourse, settleCourse, undoCourse } from '../helpers/triage-t1-editorDocument'
 import type { ComponentPackageData } from '@/shared/componentTypes'
 import { componentContentSha256 } from '@/shared/componentContentIntegrity'
-import { MAX_PROJECT_SCENES, MAX_SCENE_NODES } from '@/shared/constants'
 import type { AssetMeta } from '@/shared/contracts/media-v1'
 import { sceneNodeToCourseLayerItem } from '@/shared/courseProjectModel'
 import { selectEffectiveSlideSceneNodes } from '../helpers/selectEffectiveSlideSceneNodes'
@@ -995,7 +994,7 @@ describe('Spatial canonical clipboard commands', () => {
     expect(afterDangling.errorMessage).toMatch(/资源|引用/)
   })
 
-  it('rejects an owner at capacity without changing document, history, or selection', async () => {
+  it('duplicates a spatial item beyond the former owner limit and undoes it once', async () => {
     await useEditorStore.getState().createCourseDocument('spatial')
     useEditorStore.getState().addTextNode()
     const initial = useEditorStore.getState().spatialSession!
@@ -1012,7 +1011,7 @@ describe('Spatial canonical clipboard commands', () => {
       ...surface.world.layerItems.map((item) => item.order),
     ]
     let order = Math.max(...allOrders) + 1
-    while (surface.world.layerItems.length < MAX_SCENE_NODES) {
+    while (surface.world.layerItems.length < 1_000) {
       const item = structuredClone(source)
       item.layerItemId = `capacity-spatial-${surface.world.layerItems.length}`
       item.label = `容量 ${surface.world.layerItems.length}`
@@ -1024,11 +1023,25 @@ describe('Spatial canonical clipboard commands', () => {
     useEditorStore.getState().selectNode(source.layerItemId)
     await settleCourse()
     const before = useEditorStore.getState()
-    const beforeState = captureWriteState()
+    const depthBefore = formalReceipt().undoDepth
     before.duplicateSelectedNodes()
+    await settleCourse()
     const after = useEditorStore.getState()
-    expectNoWriteSince(beforeState)
-    expect(after.errorMessage).toMatch(/上限/)
+    const nextSurface = after.spatialSession!.history.present.surfaces.find(
+      (candidate) => candidate.id === initial.selection.surfaceId,
+    )
+    if (!nextSurface || nextSurface.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+    expect(nextSurface.world.layerItems).toHaveLength(1_001)
+    expect(after.errorMessage).toBeNull()
+    expect(formalReceipt().undoDepth).toBe(depthBefore + 1)
+    expect(after.spatialSession!.selection.selectionIds).toHaveLength(1)
+    expect(after.spatialSession!.selection.selectionIds).not.toContain(source.layerItemId)
+    await undoCourse()
+    const restored = useEditorStore.getState().spatialSession!.history.present.surfaces.find(
+      (candidate) => candidate.id === initial.selection.surfaceId,
+    )
+    if (!restored || restored.type !== 'spatial-2d') throw new Error('expected Spatial surface')
+    expect(restored.world.layerItems).toHaveLength(1_000)
   })
 })
 
@@ -1133,7 +1146,7 @@ describe('scene operations', () => {
     expect(activeHistory().past).toHaveLength(historyLength)
   })
 
-  it('keeps a high defensive scene limit without the former 30-scene product cap', async () => {
+  it('adds a scene beyond the former defensive scene limit', async () => {
     const store = useEditorStore.getState()
     const document = structuredClone(selectSlideAuthoringDocument(useEditorStore.getState())!)
     const surface = document.surfaces.find((item) => item.type === 'slide')
@@ -1142,7 +1155,7 @@ describe('scene operations', () => {
     const templateLocation = document.locations.find((location) => (
       location.kind === 'slide-scene' && location.sceneId === template.id
     ))
-    surface.scenes = Array.from({ length: MAX_PROJECT_SCENES }, (_, index) => ({
+    surface.scenes = Array.from({ length: 1_000 }, (_, index) => ({
       ...structuredClone(template),
       id: index === 0 ? template.id : `scene_pad_${index}`,
       name: `场景 ${index + 1}`,
@@ -1160,9 +1173,11 @@ describe('scene operations', () => {
     await courseStoreHost().open(document)
     store.addScene()
 
+    await settleCourse()
     const state = useEditorStore.getState()
-    expect(selectSlideSceneList(state)).toHaveLength(MAX_PROJECT_SCENES)
-    expect(state.errorMessage).toContain(`${MAX_PROJECT_SCENES} 个场景上限`)
+    expect(selectSlideSceneList(state)).toHaveLength(1_001)
+    expect(state.errorMessage).toBeNull()
+    expect(formalReceipt().undoDepth).toBe(1)
   })
 
   it('duplicates a scene with independent scene and node identities', async () => {
@@ -1440,7 +1455,7 @@ describe('node operations', () => {
     })
   })
 
-  it('keeps a high defensive node limit without the former 100-node product cap', async () => {
+  it('adds a node beyond the former defensive node limit', async () => {
     const store = useEditorStore.getState()
     const document = structuredClone(selectSlideAuthoringDocument(useEditorStore.getState())!)
     const surface = document.surfaces.find((item) => item.type === 'slide')
@@ -1451,14 +1466,16 @@ describe('node operations', () => {
       ...surface.surfaceLayerItems.map((entry) => entry.item.order),
     ]
     const startOrder = Math.max(-1, ...occupiedOrders) + 1
-    scene.layerItems = Array.from({ length: MAX_SCENE_NODES }, (_, index) => (
+    scene.layerItems = Array.from({ length: 1_000 }, (_, index) => (
       sceneNodeToCourseLayerItem(createTextNode(), startOrder + index)
     ))
     await courseStoreHost().open(document)
     store.addRectangleNode()
 
-    expect(activeScene().nodes).toHaveLength(MAX_SCENE_NODES)
-    expect(useEditorStore.getState().errorMessage).toContain(`${MAX_SCENE_NODES} 个节点上限`)
+    await settleCourse()
+    expect(activeScene().nodes).toHaveLength(1_001)
+    expect(useEditorStore.getState().errorMessage).toBeNull()
+    expect(formalReceipt().undoDepth).toBe(1)
   })
 
   it('deletes a selected node and undo restores it', async () => {

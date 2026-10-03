@@ -29,6 +29,8 @@ export interface PublishedCanvasRuntimeMountHandle {
   applyAuthoringContentValue(key: string, value: string): boolean
   /** M15: replace the Runtime's light-edit rules without recreating it. */
   applyAuthoringTextOverrides(overrides: readonly LightEditTextOverride[]): boolean
+  /** Resize the current viewport without replacing its Runtime or Phaser scene. */
+  updateSize(width: number, height: number): void
   /**
    * M15 运行现场: publish the text and pictures the host finds in this playback Runtime while its page is paused for
    * editing; its Phaser scene stops updating but keeps drawing. Returns the stop function, or null when it cannot.
@@ -178,6 +180,7 @@ function failedHandle(
     element,
     applyAuthoringContentValue: () => false,
     applyAuthoringTextOverrides: () => false,
+    updateSize() {},
     waitForReady: () => Promise.reject(failure),
     waitForCaptureReady: () => Promise.reject(failure),
     restoreAfterCapture() {},
@@ -247,8 +250,9 @@ function createDomOnlyEnvironment(
  */
 export function mountPublishedCanvasRuntime(
   container: HTMLElement,
-  options: PublishedCanvasRuntimeMountOptions,
+  inputOptions: PublishedCanvasRuntimeMountOptions,
 ): PublishedCanvasRuntimeMountHandle {
+  const options = { ...inputOptions }
   const targetWindow = container.ownerDocument.defaultView
   if (!targetWindow) {
     const error = reportError(options, 'register', new Error('Canvas Runtime 挂载文档没有可执行 Window'))
@@ -539,6 +543,18 @@ export function mountPublishedCanvasRuntime(
     },
     get element() {
       return fallback ?? host
+    },
+    updateSize(width, height) {
+      if (destroyed || quarantined) return
+      const nextWidth = Math.max(1, width), nextHeight = Math.max(1, height)
+      if (options.width === nextWidth && options.height === nextHeight) return
+      options.width = nextWidth; options.height = nextHeight
+      if (options.canvas) options.canvas = { width: nextWidth, height: nextHeight }
+      try {
+        game?.scale.resize(Math.ceil(nextWidth), Math.ceil(nextHeight))
+        runtimeHost?.resize(nextWidth, nextHeight)
+        checkLifecycleFailure()
+      } catch (cause) { quarantine('lifecycle', cause) }
     },
     applyAuthoringContentValue(key: string, value: string) {
       if (

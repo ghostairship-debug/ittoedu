@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { createHtmlDocumentRuntimeSource, unpackHtmlDocumentRuntimeSource } from '../../src/shared/runtime/htmlDocumentSource'
 import { scanRuntimePageText } from '../../src/shared/runtimeText/scanPageText'
 
@@ -95,11 +96,34 @@ describe('HTML document API 3 carrier', () => {
     lifecycle.destroy()
   })
 
-  it('rejects missing bindings, unsafe runtime URLs and oversized UTF-8 source', () => {
+  it('rejects missing bindings and unsafe runtime URLs', () => {
     expect(() => createHtmlDocumentRuntimeSource({ html: `cw-resource:${key}`, resourceKeys: [] })).toThrow('绑定缺失')
-    expect(() => createHtmlDocumentRuntimeSource({ html: 'a'.repeat(2 * 1024 * 1024), resourceKeys: [] })).toThrow('2 MiB')
     const definition = execute(createHtmlDocumentRuntimeSource({ html: `cw-resource:${key}`, resourceKeys: [key] }))
     expect(() => definition.create({ dom: { root: document.createElement('div') }, assets: { url: () => 'blob:"</script>' }, capture: { waitUntil() {} } })).toThrow('不能安全嵌入')
+  })
+
+  it('keeps large documents readable and lets a delayed iframe load after the former deadline', async () => {
+    const html = `<h1>大页面</h1><!--${'x'.repeat(2 * 1024 * 1024)}-->`
+    const source = createHtmlDocumentRuntimeSource({ html, resourceKeys: [] })
+    expect(unpackHtmlDocumentRuntimeSource(source)).toEqual({ html, resourceKeys: [] })
+    vi.useFakeTimers()
+    const root = document.createElement('div')
+    let lifecycle: ReturnType<ReturnType<typeof execute>['create']> | undefined
+    try {
+      const waitUntil = vi.fn()
+      lifecycle = execute(createHtmlDocumentRuntimeSource({ html: '<h1>延后加载</h1>', resourceKeys: [] }))
+        .create({ dom: { root }, assets: { url() { throw new Error('unexpected') } }, capture: { waitUntil } })
+      const ready = waitUntil.mock.calls[0]?.[0] as Promise<void>
+      let settled = 'pending'
+      void ready.then(() => { settled = 'ready' }, () => { settled = 'failed' })
+      await vi.advanceTimersByTimeAsync(16_000)
+      expect(settled).toBe('pending')
+      const iframe = root.querySelector('iframe')!
+      Object.defineProperty(iframe, 'contentDocument', { configurable: true, value: { URL: 'about:srcdoc', readyState: 'complete' } })
+      iframe.dispatchEvent(new Event('load'))
+      await ready
+      expect(settled).toBe('ready')
+    } finally { lifecycle?.destroy(); root.remove(); vi.useRealTimers() }
   })
 })
 
@@ -117,4 +141,30 @@ it('M25 accepts only cosmetic syntax changes and never evaluates a marked but cu
   expect(unpackHtmlDocumentRuntimeSource(source.replace('return {\n      resize', 'globalThis.__candidateExecuted = true; return {\n      resize'))).toBeNull()
   expect(unpackHtmlDocumentRuntimeSource(source.replace('"version":1', '"version":(globalThis.__candidateExecuted = true, 1)'))).toBeNull()
   expect(Reflect.get(globalThis, '__candidateExecuted')).toBeUndefined()
+})
+
+it('reads the existing software wrapper without rewriting it and refuses additional executable behavior', () => {
+  // Frozen software-produced source from the current workspace baseline, rather than a second factory.
+  const source = readFileSync('tests/fixtures/runtime/html-document-existing-v1.txt', 'utf8')
+  const payload = { html: '<h1>既有工程仍可编辑</h1>', resourceKeys: [] }
+  expect(unpackHtmlDocumentRuntimeSource(source)).toEqual(payload)
+  expect(unpackHtmlDocumentRuntimeSource(`/* cosmetic formatting */\n${source}\n`)).toEqual(payload)
+  expect(scanRuntimePageText(source).entries.map(entry => entry.text)).toContain('既有工程仍可编辑')
+  expect(unpackHtmlDocumentRuntimeSource(`${source};globalThis.__existingCarrierExecuted=true`)).toBeNull()
+  expect(unpackHtmlDocumentRuntimeSource(source.replace('return {\n      resize', 'globalThis.__existingCarrierExecuted=true;return {\n      resize'))).toBeNull()
+  expect(unpackHtmlDocumentRuntimeSource(source.replace('"version":1', '"version":(globalThis.__existingCarrierExecuted=true,1)'))).toBeNull()
+  expect(Reflect.get(globalThis, '__existingCarrierExecuted')).toBeUndefined()
+})
+
+it('reads a real wrapper emitted before removing the load deadline without reviving a second factory', () => {
+  const source = readFileSync('tests/fixtures/runtime/html-document-before-limit-removal.txt', 'utf8')
+  const payload = { html: '<h1>取消额度前的受管页面</h1>', resourceKeys: [] }
+  expect(unpackHtmlDocumentRuntimeSource(source)).toEqual(payload)
+  expect(unpackHtmlDocumentRuntimeSource(`/* formatting */\n${source}`)).toEqual(payload)
+  expect(scanRuntimePageText(source).entries.map(entry => entry.text)).toContain('取消额度前的受管页面')
+  expect(unpackHtmlDocumentRuntimeSource(`${source};globalThis.__deadlineCarrierExecuted=true`)).toBeNull()
+  const current = createHtmlDocumentRuntimeSource(payload)
+  expect(current).not.toContain('HTML 页面加载超时')
+  expect(current).not.toContain('15000')
+  expect(Reflect.get(globalThis, '__deadlineCarrierExecuted')).toBeUndefined()
 })

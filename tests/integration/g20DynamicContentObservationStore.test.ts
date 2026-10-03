@@ -29,6 +29,15 @@ const identity = (doc: DocumentSnapshot) => ({ documentId: doc.documentId, epoch
   revision: doc.revision, locationId: 'location-scene-1' })
 
 describe('M27-T03 Main M15 target observation cache', () => {
+  it('keeps an entire valid publication beyond the former 2000-target limit', async () => {
+    const doc = snapshot('surface-runtime'), store = new DynamicContentObservationStore(async () => doc)
+    const targets = Array.from({ length: 2001 }, (_, index) => ({ ...publication(doc, 1, 'view-a').targets[0],
+      original: `正文 ${index}`, text: `正文 ${index}` }))
+    expect(await store.publish(publication(doc, 1, 'view-a', targets))).toBe(true)
+    expect((await store.read(identity(doc))).targets).toHaveLength(2001)
+    store.clearDocument(doc.documentId)
+    expect((await store.read(identity(doc))).targets).toEqual([])
+  })
   it('retains metadata-only truncation for its document and removes it on clear or a newer publication', async () => {
     const runtime = snapshot('surface-runtime'), component = snapshot('component')
     const docs = new Map([[runtime.documentId, runtime], [component.documentId, component]])

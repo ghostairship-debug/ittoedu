@@ -16,8 +16,7 @@ function run(): ExecutionRunRecord {
       selection: { model: 'fixture', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat',
         baseURL: 'https://fixture.invalid', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'fixture' },
         billing: { kind: 'unknown' }, capabilities: { tools: 'supported', vision: 'unsupported', stream: 'supported', reasoning: 'unknown' } } },
-      documents: [], workspaceRoot: 'D:/workspace', permission: 'workspace' },
-    budget: { maxRequests: null, maxToolCalls: null, maxContextBytes: 1024 }, messages: [], initialMessageCount: 0,
+      documents: [], workspaceRoot: 'D:/workspace', permission: 'workspace' }, messages: [], initialMessageCount: 0,
     requests: [], tools: [{ callId: 'read-1', providerCallId: 'provider-1', requestId: 'request-1',
       call: { name: 'material.read', input: { attachmentId: 'source-1' } }, state: 'returned', result: { kind: 'read', data: { text: '已读取' } } }],
   }

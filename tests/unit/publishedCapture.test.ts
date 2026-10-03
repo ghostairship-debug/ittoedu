@@ -5,7 +5,8 @@ import {
   waitForPublishedObservationReady,
 } from '../../src/player/surfaces/publishedCapture'
 
-it('waits for the current live resources without preparing, suspending or rendering a static final frame', async () => {
+it('waits for healthy live resources beyond the former ten-second total cutoff without preparing a static final frame', async () => {
+  vi.useFakeTimers()
   const root = document.createElement('div')
   document.body.append(root)
   const waitForCaptureReady = vi.fn(async () => undefined)
@@ -17,7 +18,7 @@ it('waits for the current live resources without preparing, suspending or render
   try {
     let completed = false
     const capture = waitForPublishedObservationReady(root).then(() => { completed = true })
-    await Promise.resolve()
+    await vi.advanceTimersByTimeAsync(20_000)
     expect(completed).toBe(false)
     release(); await capture
     expect(waitForObservationReady).toHaveBeenCalledTimes(1)
@@ -169,7 +170,52 @@ afterEach(() => {
 })
 
 describe('Published Slide static capture', () => {
-  it('shares one absolute deadline across sequential capture resources and restores the root', async () => {
+  it('uses a fresh fault wait for each sequential resource instead of a whole-capture deadline', async () => {
+    vi.useFakeTimers()
+    installCanvasHarness()
+    const root = document.createElement('section')
+    document.body.append(root)
+    setRect(root, 200, 100)
+    const first = createLayer(root), second = createLayer(root)
+    const fail = vi.fn(), restore = vi.fn()
+    const unregister = [first, second].map(({ layer }) => registerPublishedCaptureResource(layer, {
+      waitForCaptureReady: () => new Promise<void>(resolve => window.setTimeout(resolve, 20_000)),
+      failCapture: fail, restoreAfterCapture: restore,
+    }))
+    try {
+      const work = capturePublishedSlidePng({ root, width: 200, height: 100,
+        layers: [first, second].map(({ layer }, index) => ({ element: layer, x: index * 100, y: 0,
+          width: 100, height: 100, rotation: 0, opacity: 1 })) })
+      await vi.advanceTimersByTimeAsync(40_000)
+      expect(await work).toMatch(/^data:image\/png;base64,/)
+      expect(fail).not.toHaveBeenCalled()
+      expect(restore).toHaveBeenCalledTimes(2)
+    } finally { unregister.forEach(remove => remove()) }
+  })
+
+  it('reports a genuinely unresponsive readiness stage and restores its resource', async () => {
+    vi.useFakeTimers()
+    installCanvasHarness()
+    const root = document.createElement('section')
+    document.body.append(root)
+    setRect(root)
+    const { layer } = createLayer(root), fail = vi.fn(), restore = vi.fn()
+    const unregister = registerPublishedCaptureResource(layer, {
+      waitForCaptureReady: () => new Promise<void>(() => undefined), failCapture: fail, restoreAfterCapture: restore,
+    })
+    try {
+      const work = capturePublishedSlidePng({ root, width: 100, height: 100,
+        layers: [{ element: layer, x: 0, y: 0, width: 100, height: 100, rotation: 0, opacity: 1 }] })
+      const rejected = expect(work).rejects.toThrow('等待动态内容就绪无响应')
+      await vi.advanceTimersByTimeAsync(30_000)
+      await rejected
+      expect(fail).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('无响应') }))
+      expect(restore).toHaveBeenCalledOnce()
+    } finally { unregister() }
+  })
+
+  it('keeps sequential capture resources active until explicit Abort and restores the root without poisoning resources', async () => {
+    const controller = new AbortController()
     vi.useFakeTimers()
     installCanvasHarness()
     const root = document.createElement('section')
@@ -225,7 +271,7 @@ describe('Published Slide static capture', () => {
             opacity: 1,
           },
         ],
-        timeoutMs: 50,
+        signal: controller.signal,
       })
       const outcome = capture.then(
         () => null,
@@ -234,16 +280,16 @@ describe('Published Slide static capture', () => {
 
       await vi.advanceTimersByTimeAsync(30)
       expect(secondStarted).toBe(true)
-      await vi.advanceTimersByTimeAsync(19)
+      await vi.advanceTimersByTimeAsync(20_000)
       expect(firstRestored).not.toHaveBeenCalled()
       expect(secondRestored).not.toHaveBeenCalled()
-      await vi.advanceTimersByTimeAsync(1)
-      expect(await outcome).toMatchObject({ message: expect.stringContaining('等待动态内容就绪超时') })
+      controller.abort(new Error('用户取消捕获'))
+      expect(await outcome).toMatchObject({ message: '用户取消捕获' })
 
       expect(firstRestored).toHaveBeenCalledTimes(1)
       expect(secondRestored).toHaveBeenCalledTimes(1)
       expect(firstFailed).not.toHaveBeenCalled()
-      expect(secondFailed).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('超时') }))
+      expect(secondFailed).not.toHaveBeenCalled()
       expect(root.hidden).toBe(true)
       expect(root.style.left).toBe('7px')
     } finally {
@@ -252,7 +298,8 @@ describe('Published Slide static capture', () => {
     }
   })
 
-  it('aborts a pending remote image fetch at the capture deadline and restores resources', async () => {
+  it('fails an unresponsive remote image fetch and restores resources', async () => {
+    const controller = new AbortController()
     vi.useFakeTimers()
     installCanvasHarness()
     const root = document.createElement('section')
@@ -287,13 +334,13 @@ describe('Published Slide static capture', () => {
           rotation: 0,
           opacity: 1,
         }],
-        timeoutMs: 40,
+        signal: controller.signal,
       })
-      const rejection = expect(capture).rejects.toThrow('等待图片素材读取超时')
+      const rejection = expect(capture).rejects.toThrow('等待图片素材读取无响应')
       await vi.advanceTimersByTimeAsync(0)
       expect(fetchSignal?.aborted).toBe(false)
 
-      await vi.advanceTimersByTimeAsync(40)
+      await vi.advanceTimersByTimeAsync(30_000)
       await rejection
 
       expect(fetchSignal?.aborted).toBe(true)
@@ -304,7 +351,8 @@ describe('Published Slide static capture', () => {
     }
   })
 
-  it('cleans pending image decode handlers and the temporary source at the deadline', async () => {
+  it('cleans pending image decode handlers and the temporary source on explicit Abort', async () => {
+    const controller = new AbortController()
     vi.useFakeTimers()
     installCanvasHarness()
     const root = document.createElement('section')
@@ -343,14 +391,16 @@ describe('Published Slide static capture', () => {
         rotation: 0,
         opacity: 1,
       }],
-      timeoutMs: 25,
+      signal: controller.signal,
     })
-    const rejection = expect(capture).rejects.toThrow('等待图片解码超时')
+    const rejection = expect(capture).rejects.toThrow('用户取消捕获')
     await vi.advanceTimersByTimeAsync(0)
     expect(created).toHaveLength(1)
     expect(created[0]?.src).toBe('data:image/png;base64,AA==')
 
-    await vi.advanceTimersByTimeAsync(25)
+    await vi.advanceTimersByTimeAsync(20_000)
+    expect(created[0]?.src).toBe('data:image/png;base64,AA==')
+    controller.abort(new Error('用户取消捕获'))
     await rejection
 
     expect(created[0]?.onload).toBeNull()
@@ -359,7 +409,8 @@ describe('Published Slide static capture', () => {
     expect(created[0]?.src).toBe('')
   })
 
-  it('keeps successful data, blob, and remote images within the shared deadline', async () => {
+  it('captures successful data, blob, and remote images without a deadline', async () => {
+    const controller = new AbortController()
     installCanvasHarness()
     const root = document.createElement('section')
     document.body.appendChild(root)
@@ -412,6 +463,7 @@ describe('Published Slide static capture', () => {
     }))
 
     const result = await capturePublishedSlidePng({
+      signal: controller.signal,
       root,
       width: 100,
       height: 100,
@@ -424,7 +476,6 @@ describe('Published Slide static capture', () => {
         rotation: 0,
         opacity: 1,
       }],
-      timeoutMs: 1_000,
     })
 
     expect(result).toMatch(/^data:image\/png;base64,/)

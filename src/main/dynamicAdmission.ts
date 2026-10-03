@@ -9,7 +9,7 @@ import { PreviewNetworkPolicy } from './previewNetworkPolicy'
 const runs = new Map<string, { owner: WebContents; cancel(): void }>()
 const admissionQueue = new FairWorkQueue(2)
 
-/** The deadline and termination live in Main, outside the candidate's JavaScript process. */
+/** Cancellation and process lifecycle remain owned by Main, outside candidate JavaScript. */
 export async function operateDynamicAdmission(raw: unknown, owner: WebContents, rendererEntryUrl: string): Promise<DynamicAdmissionResult> {
   const request = dynamicAdmissionRequestSchema.parse(raw)
   if (request.operation === 'cancel') {
@@ -46,7 +46,6 @@ async function runAdmittedCandidate(request: Extract<ReturnType<typeof dynamicAd
   // Bytes travel via structured clone, never JSON/base64, and are served lazily
   // by this run's isolated session. Callers cannot supply their own URL claims.
   const encoded = JSON.stringify({ ...request.payload, assetFiles: {}, assetResources })
-  if (Buffer.byteLength(encoded) > 64 * 1024 * 1024) throw new Error('动态候选准入载荷超过 64 MiB')
   const isolatedSession = session.fromPartition(`admission-${randomUUID()}`)
   installEditorProtocol(isolatedSession, url => {
     if (!url.pathname.startsWith('/admission-assets/')) return undefined
@@ -79,16 +78,23 @@ async function runAdmittedCandidate(request: Extract<ReturnType<typeof dynamicAd
   }
   const ownerGone = () => stop('编辑器已关闭，准入取消')
   const workerGone = () => rejectStop(new Error('动态准入进程异常退出'))
+  // Detect an unresponsive host or a stalled target; completing work refreshes
+  // this watchdog, so it never limits the total number of pages or task duration.
+  let idleTimer: ReturnType<typeof setTimeout> | undefined
+  const activity = () => {
+    clearTimeout(idleTimer)
+    idleTimer = setTimeout(() => stop('动态准入宿主长时间未完成当前操作，请检查候选代码或重试'), 60_000)
+  }
   runs.set(request.id, { owner, cancel: () => stop('动态准入已取消') })
   owner.once('destroyed', ownerGone)
   const aborted = () => stop('动态准入已取消')
   signal.addEventListener('abort', aborted, { once: true })
   worker.webContents.once('render-process-gone', workerGone)
-  let timer = setTimeout(() => stop('动态候选启动或单目标准入超时'), 20_000)
-  const absoluteTimer = setTimeout(() => stop('动态准入超过绝对任务上限'), 20 * 60_000)
+  activity()
   try {
     const result = await Promise.race([stopped, (async () => {
       await worker.loadURL(entry)
+      activity()
       const processId = worker.webContents.getOSProcessId()
       if (!processId || processId === owner.getOSProcessId()) throw new Error('候选准入未获得独立执行进程')
       // This fixed entrypoint is shipped by the product. No candidate-supplied completion callback or preload API exists.
@@ -97,15 +103,11 @@ async function runAdmittedCandidate(request: Extract<ReturnType<typeof dynamicAd
       const captureFrames = async () => {
         // Frames are consumed one at a time; released frames do not count against later pages.
         let clicked = false
-        let progress = 0
+        let completedTargets = 0
         while (!completed && !worker.isDestroyed()) {
           const pending = await worker.webContents.executeJavaScript('({frame:window.__COURSEWARE_ADMISSION_PENDING_FRAME__?.()??null,button:window.__COURSEWARE_ADMISSION_PENDING_BUTTON__?.()??null,progress:window.__COURSEWARE_ADMISSION_PROGRESS__?.()??0})') as { frame: { id: number } | null; button: { id: number; x: number; y: number } | null; progress: number }
-          if (Number.isInteger(pending.progress) && pending.progress > progress && pending.progress <= request.payload.targets.length) {
-            progress = pending.progress
-            clearTimeout(timer)
-            timer = setTimeout(() => stop('动态候选单目标准入超时'), 20_000)
-          }
           if (completed || worker.isDestroyed()) break
+          if (pending.progress > completedTargets) { completedTargets = pending.progress; activity() }
           if (pending.button) {
             const { id, x, y } = pending.button, [width, height] = worker.getContentSize()
             if (!request.payload.buttonCheck || clicked || !Number.isSafeInteger(id) || id < 1
@@ -116,15 +118,16 @@ async function runAdmittedCandidate(request: Extract<ReturnType<typeof dynamicAd
             worker.webContents.sendInputEvent({ type: 'mouseDown', ...point, button: 'left', clickCount: 1 })
             worker.webContents.sendInputEvent({ type: 'mouseUp', ...point, button: 'left', clickCount: 1 })
             await worker.webContents.executeJavaScript(`window.__COURSEWARE_ADMISSION_ACCEPT_BUTTON__(${id})`)
+            activity()
             continue
           }
           const frame = pending.frame
           if (!frame) { await new Promise(resolve => setTimeout(resolve, 16)); continue }
           if (!Number.isSafeInteger(frame.id) || frame.id < 1) throw new Error('动态观察帧身份无效')
           const bitmap = await worker.webContents.capturePage(), dataUrl = bitmap.toDataURL()
-          if (dataUrl.length > 48_000_000) throw new Error('单帧动态观察图像超过资源上限')
           const size = bitmap.getSize(), payload = { dataUrl, capturedAt: Date.now(), width: size.width, height: size.height }
           await worker.webContents.executeJavaScript(`window.__COURSEWARE_ADMISSION_ACCEPT_FRAME__(${frame.id},${JSON.stringify(payload)})`)
+          activity()
         }
       }
       const [outcome] = await Promise.all([execute, captureFrames()])
@@ -134,8 +137,7 @@ async function runAdmittedCandidate(request: Extract<ReturnType<typeof dynamicAd
   } catch (error) {
     return { ok: false, message: (error instanceof Error ? error.message : String(error)).slice(0, 4000) }
   } finally {
-    clearTimeout(timer)
-    clearTimeout(absoluteTimer)
+    clearTimeout(idleTimer)
     runs.delete(request.id)
     owner.removeListener('destroyed', ownerGone)
     signal.removeEventListener('abort', aborted)

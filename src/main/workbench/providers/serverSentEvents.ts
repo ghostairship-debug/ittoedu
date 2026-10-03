@@ -1,30 +1,27 @@
-/** Bound a single frame and unfinished buffer, never cumulative consumed stream bytes. */
-export async function* serverSentEvents(body: ReadableStream<Uint8Array>, maxBytes: number, onActivity?: () => void): AsyncGenerator<string> {
+/** Decode SSE framing without imposing a content or generation quota. */
+export async function* serverSentEvents(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
   const reader = body.getReader()
   const decoder = new TextDecoder('utf-8', { fatal: true })
-  let pending: string[] = [], pendingBytes = 0, pendingCR = false
-  let data: string[] = [], eventBytes = 0, first = true
+  let pending: string[] = [], pendingCR = false
+  let data: string[] = [], first = true
   const line = (value: string): string | undefined => {
     if (first) { value = value.replace(/^\uFEFF/, ''); first = false }
-    if (value === '') { const result = data.length ? data.join('\n') : undefined; data = []; eventBytes = 0; if (result !== undefined) onActivity?.(); return result }
-    if (Buffer.byteLength(value, 'utf8') > maxBytes) throw new Error('response-too-large')
-    if (value.startsWith(':')) { onActivity?.(); return }
+    if (value === '') { const result = data.length ? data.join('\n') : undefined; data = []; return result }
+    if (value.startsWith(':')) return
     const colon = value.indexOf(':')
     const field = colon < 0 ? value : value.slice(0, colon)
     let text = colon < 0 ? '' : value.slice(colon + 1)
     if (text.startsWith(' ')) text = text.slice(1)
     if (field === 'data') {
-      eventBytes += Buffer.byteLength(text, 'utf8') + (data.length ? 1 : 0)
-      if (eventBytes > maxBytes) throw new Error('response-too-large')
       data.push(text)
     }
   }
   const append = (value: string) => {
-    if (value) { pending.push(value); pendingBytes += Buffer.byteLength(value, 'utf8') }
+    if (value) pending.push(value)
   }
   const finishLine = () => {
     const value = pending.join('')
-    pending = []; pendingBytes = 0
+    pending = []
     return line(value)
   }
   try {
@@ -53,7 +50,6 @@ export async function* serverSentEvents(body: ReadableStream<Uint8Array>, maxByt
         if (event !== undefined) yield event
       }
       append(text.slice(start))
-      if (pendingBytes + (pendingCR ? 1 : 0) + eventBytes > maxBytes) throw new Error('response-too-large')
     }
     // EOF does not dispatch an unterminated event. Provider requires a framed [DONE].
     if (pendingCR) {

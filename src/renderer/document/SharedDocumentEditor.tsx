@@ -570,7 +570,15 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       }
       focusAfterSwitch.current = true; setMode('source')
     }
-    else if (!sourceComposing.current && diagnostics.length === 0) { restoreSourceSelection.current = true; sourceSelection.current = source.current ? { anchor: source.current.state.selection.main.anchor, head: source.current.state.selection.main.head } : sourceSelection.current; focusAfterSwitch.current = true; setMode('layout') }
+    else if (!sourceComposing.current) {
+      // When blocked by diagnostics, still offer feedback so the button never feels dead.
+      if (diagnostics.length) {
+        setCommandError(`源文中有 ${diagnostics.length} 处问题（第 ${diagnostics[0].line} 行起），先修正或丢弃待修草稿再切回正文。`)
+        return
+      }
+      setCommandError('')
+      restoreSourceSelection.current = true; sourceSelection.current = source.current ? { anchor: source.current.state.selection.main.anchor, head: source.current.state.selection.main.head } : sourceSelection.current; focusAfterSwitch.current = true; setMode('layout')
+    }
   }
   function style(patch: TextRunStyle) {
     const editor = layout.current
@@ -674,6 +682,9 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const toolbar = <div ref={toolbarRef} tabIndex={-1} className="shared-document-toolbar" onPointerDownCapture={() => layout.current?.syncDomTextSelection()} role="toolbar" aria-label="正文工具">
       <details className="shared-document-more"><summary onMouseDown={event => event.preventDefault()} aria-label="更多正文操作">⋯</summary>
         <button type="button" onMouseDown={event => event.preventDefault()} onClick={switchMode}>{mode === 'layout' ? '源文' : '正文'}</button>
+        {mode === 'source' && diagnostics.length > 0 && commandError
+          ? <div role="alert" className="shared-document-more__mode-notice">{commandError}</div>
+          : null}
       </details>
       <button type="button" onClick={() => props.editPreview ? props.editPreview.cancel() : props.onUndo()}>撤销</button><button type="button" onClick={props.onRedo}>重做</button>
       {mode === 'layout' && <>
@@ -823,6 +834,9 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   }} onCompositionStartCapture={() => props.onCompositionChange?.(true, draft.current)} onCompositionEndCapture={() => queueMicrotask(() => props.onCompositionChange?.(false, draft.current))}>
      {!props.readOnly && (props.toolbarHost ? createPortal(<><details className="flow-document-more"><summary onMouseDown={event => event.preventDefault()} aria-label="更多正文操作">⋯</summary>
        <button type="button" onMouseDown={event => event.preventDefault()} onClick={switchMode}>{mode === 'layout' ? '源文' : '正文'}</button>
+       {mode === 'source' && diagnostics.length > 0 && commandError
+         ? <div role="alert" className="shared-document-more__mode-notice">{commandError}</div>
+         : null}
        <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => props.editPreview ? props.editPreview.cancel() : props.onUndo()}>撤销</button>
        <button type="button" onMouseDown={event => event.preventDefault()} onClick={props.onRedo}>重做</button>
      </details>{editorForms}</>, props.toolbarHost) : <>{toolbar}{editorForms}</>)}

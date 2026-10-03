@@ -51,6 +51,7 @@ export function propertiesViewFromLayerItem(item: LayerItem): PropertiesItemView
     }
   }
   if (item.kind === 'runtime') return { ...base, type: 'runtime' }
+  if (item.kind === 'composition') return { ...base, type: 'composition' }
   return {
     ...base,
     type: item.content.nativeType,

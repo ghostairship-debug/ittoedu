@@ -125,7 +125,6 @@ export class HtmlImportService {
           const old = baseline.model.kind === 'course-v9' ? baseline.model.resources.assets[assetId] : undefined
           if (!bytes || old && documentDigest(old) === documentDigest(bytes)) continue
           const content = Buffer.from(bytes).toString('base64')
-          if (content.length > 24 * 1024 * 1024) throw new Error(`HTML 素材 ${meta.filename} 超过受控写入单文件上限`)
           read(await this.call(request.runId, `html:${request.operationId}:asset:${assetId}`, 'build.write',
             { job, path: meta.path, encoding: 'base64', content }))
         }

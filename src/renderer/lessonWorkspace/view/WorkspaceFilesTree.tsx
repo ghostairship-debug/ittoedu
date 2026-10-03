@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type DragEvent } from 'react'
 import { ChevronDown, ChevronRight, File, FileCode2, FileText, Folder, FolderOpen, Plus, Presentation, RotateCw } from 'lucide-react'
 import type { LessonDesktopRequest, LessonDesktopResult, LessonDirectoryEntry } from '../../../shared/lessonDesktopContract'
-import { WORKSPACE_PPTX_MAX_BYTES, type RegisteredWorkspaceRoot, type WorkspaceFilesAPI, type WorkspaceFilesRequest, type WorkspaceListItem, type WorkspaceOperationResult } from '../../../shared/workbench/workspaceFiles'
+import { type RegisteredWorkspaceRoot, type WorkspaceFilesAPI, type WorkspaceFilesRequest, type WorkspaceListItem, type WorkspaceOperationResult } from '../../../shared/workbench/workspaceFiles'
 import type { SaveDirectoryContext } from '../../../shared/workbench/desktop'
 import './WorkspaceFilesTree.css'
 import { computeDefaultName, normalizeNewFilename, getStemSelectionRange, uniqueFilename, type CreateFileType } from '../workspaceFilesNaming'
@@ -313,7 +313,6 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
     if (result?.status === 'success' && made.issues) setNotice(`已从 PPT 新建 H5 演示；${made.issues} 项内容未保留或已简化`)
   }
   const readChosenPptx = (file: File) => async () => {
-    if (file.size > WORKSPACE_PPTX_MAX_BYTES) throw new Error('PPTX 不能超过 32 MiB')
     return { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) }
   }
   const submit = () => {

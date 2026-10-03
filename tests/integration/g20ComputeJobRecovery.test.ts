@@ -24,7 +24,7 @@ it('keeps an unconfirmed stop unknown, then records a known late result as unapp
   expect(await service.start(request)).toMatchObject({ status: 'preparing' })
   await started
   expect(await service.cancel('run', request.jobId)).toMatchObject({ status: 'unknown', stopped: true })
-  finish({ exitCode: 0, stdout: 'late\n', stderr: '', truncated: false, cancelled: false, timedOut: false })
+  finish({ exitCode: 0, stdout: 'late\n', stderr: '', truncated: false, cancelled: false })
   let final = await service.status('run', request.jobId)
   for (let n = 0; n < 50 && final.status === 'unknown'; n++) { await new Promise(resolve => setTimeout(resolve, 10)); final = await service.status('run', request.jobId) }
   expect(final.status).toBe('unapplied')

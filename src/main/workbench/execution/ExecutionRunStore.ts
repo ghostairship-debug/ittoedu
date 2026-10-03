@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs'
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { ExecutionRunRecord } from '../../../shared/workbench/execution'
+import { executionContentOutputSchema } from '../../../shared/workbench/executionDesktop'
 
 const writes = new Map<string, Promise<unknown>>()
 const fileKey = (value: string) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value)
@@ -21,6 +22,7 @@ export class ExecutionRunStore {
       || !value.input || typeof value.input.conversationId !== 'string' || !Array.isArray(value.input.documents)
       || !Array.isArray(value.messages) || !Array.isArray(value.tools) || !Array.isArray(value.requests)
       || path.basename(this.file(value.runId)) !== path.basename(filename)) throw new Error('运行恢复记录无效')
+    if (value.input.contentOutput) executionContentOutputSchema.parse(value.input.contentOutput)
     return value
   }
   save(record: ExecutionRunRecord): Promise<void> {

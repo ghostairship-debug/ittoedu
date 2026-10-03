@@ -15,7 +15,7 @@ import {
   type HistoryResourceChanges,
 } from '../store/courseResourceState'
 import { commitCourseProjectMutation as commitSlideProjectMutation } from '../../core/tools/courseProjectMutation'
-import { buildSlideEditorView, type SlideEditorLayerScope } from '../../core/tools/slideLayerView'
+import { buildSlideEditorView, slideEditorFrameToSource, type SlideEditorLayerScope } from '../../core/tools/slideLayerView'
 
 export { commitSlideProjectMutation }
 
@@ -208,7 +208,7 @@ function deleteEmptyLayerOverride(
 }
 
 function isSceneFrameTransformableKind(kind: LayerItem['kind']): boolean {
-  return kind === 'native' || kind === 'component' || kind === 'runtime'
+  return kind === 'native' || kind === 'component' || kind === 'runtime' || kind === 'composition'
 }
 
 /**
@@ -268,7 +268,7 @@ export function transformSelectedSlideNativeLayers(
       layer.item.frame.width !== transform.width ||
       layer.item.frame.height !== transform.height ||
       layer.item.rotation !== transform.rotation
-    return { transform, changed, source: layer.source }
+    return { transform: slideEditorFrameToSource(view, layer.source, transform), changed, source: layer.source }
   })
   if (!plans.some((plan) => plan.changed)) return history
 
@@ -299,6 +299,20 @@ export function transformSelectedSlideNativeLayers(
     if (!surface || surface.type !== 'slide') {
       throw new SlideCommandError('invalid-target', '当前幻灯片已失效')
     }
+    const surfacePlans = plans.filter(plan => plan.source === 'surface')
+    if (surfacePlans.length > 0) {
+      const surfaceById = new Map(surface.surfaceLayerItems.map(entry => [entry.item.layerItemId, entry.item]))
+      for (const { transform, changed } of surfacePlans) {
+        if (!changed) continue
+        const item = surfaceById.get(transform.nodeId)
+        if (!item || !isSceneFrameTransformableKind(item.kind)) throw new SlideCommandError('invalid-selection', '所选元素已失效，请重新选择')
+        item.frame.x = transform.x
+        item.frame.y = transform.y
+        item.frame.width = transform.width
+        item.frame.height = transform.height
+        item.rotation = transform.rotation
+      }
+    }
     const scene = surface.scenes.find((candidate) => candidate.id === location.sceneId)
     if (!scene) throw new SlideCommandError('invalid-target', '当前幻灯片已失效')
     const baseById = new Map(scene.layerItems.map((item) => [item.layerItemId, item]))
@@ -309,7 +323,7 @@ export function transformSelectedSlideNativeLayers(
       throw new SlideCommandError('invalid-target', '当前状态已失效')
     }
 
-    for (const { transform, changed } of plans.filter(plan => plan.source !== 'global')) {
+    for (const { transform, changed } of plans.filter(plan => plan.source === 'scene')) {
       if (!changed) continue
       const base = baseById.get(transform.nodeId)
       if (!base || !isSceneFrameTransformableKind(base.kind)) {

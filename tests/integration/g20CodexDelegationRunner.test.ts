@@ -19,7 +19,7 @@ async function copyWith(script: string) {
 
 const request = (root: string): CodexDelegationRequest => ({
   taskId: 'parent-child-1', goal: 'Create a checked test artifact', copyRoot: root, executablePath: process.execPath,
-  permission: 'workspace', expectedArtifacts: ['answer.txt'], timeoutMs: 10_000,
+  permission: 'workspace', expectedArtifacts: ['answer.txt'],
 })
 const ready = async () => ({ ready: true, reason: 'fixture', version: 'codex-cli fixture', account: 'ChatGPT' as const })
 

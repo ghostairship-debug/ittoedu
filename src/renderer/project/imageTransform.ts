@@ -31,7 +31,7 @@ async function decodeOriginal(bytes: Uint8Array, mimeType: string): Promise<Deco
 async function readImageTransformSource(bytes: Uint8Array, mimeType: string, signal?: AbortSignal): Promise<DecodedImage> {
   abort(signal)
   try {
-    if (!bytes.length || bytes.length > 64 * 1024 * 1024) throw new Error('原图为空或超过 64 MiB')
+    if (!bytes.length) throw new Error('原图为空')
     const source = await decodeOriginal(bytes, mimeType)
     abort(signal)
     return source

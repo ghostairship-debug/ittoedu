@@ -335,7 +335,7 @@ describe('Published authoring complete snapshot from V9', () => {
       })
       expect(view.sceneId).toBe(location.sceneId)
       for (const layer of view.layers) {
-        if (layer.item.kind === 'runtime') continue
+        if (layer.item.kind !== 'native' && layer.item.kind !== 'component') continue
         const node = layer.item.kind === 'native'
           ? nativeRenderInputFromV9Item(layer.item as NativeLayerItem)
           : {

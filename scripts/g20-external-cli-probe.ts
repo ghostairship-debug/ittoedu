@@ -149,7 +149,7 @@ try {
     const marker = client === 'codex' ? 'CODEX_SLOT' : 'OPENCODE_SLOT', from = source.indexOf(marker)
     const granted = await service.grant({ ...owner, expectedRevision: conversation.revision,
       instruction: `只把 ${marker} 改成 ${client.toUpperCase()}_LUNA_OK，保留其余全部内容。`,
-      documents: [{ documentId: document.documentId, epoch: document.epoch, revision: document.revision, writable: [{ kind: 'markdown-range', from, to: from + marker.length }] }], lifetimeMs: 15 * 60_000 })
+      documents: [{ documentId: document.documentId, epoch: document.epoch, revision: document.revision, writable: [{ kind: 'markdown-range', from, to: from + marker.length }] }] })
     conversation = granted.conversation; grants.set(client, granted); redactions.add(granted.connection.bearer)
   }
   for (const client of clients) {

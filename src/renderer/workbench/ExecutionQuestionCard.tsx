@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { answerProblem, USER_QUESTION_LIMITS, type UserAnswer } from '../../shared/workbench/userQuestion'
+import { answerProblem, type UserAnswer } from '../../shared/workbench/userQuestion'
 import { readableExecutionData, type PendingQuestion } from './executionTimelineModel'
 
 export interface ExecutionQuestionCardProps {
@@ -47,13 +47,13 @@ export function ExecutionQuestionCard({ pending, onAnswer }: ExecutionQuestionCa
       </button>)}
     </div>
     <form className="execution-question__other" onSubmit={event => { event.preventDefault(); void send(withNote(question.multiple ? chosen : [])) }}>
-      <label>其他（自己填写）<input value={other} maxLength={USER_QUESTION_LIMITS.other} disabled={locked}
+      <label>其他（自己填写）<input value={other} disabled={locked}
         onChange={event => setOther(event.target.value)} placeholder={question.multiple ? '可选：补充说明' : '不选以上选项时，在这里写你的回答'} /></label>
       <button type="submit" disabled={locked || (question.multiple ? chosen.length === 0 && !note : !note)}>
         {question.multiple ? '提交选择' : '用这段文字回答'}</button>
     </form></>}
     {kind === 'free-text' && <form className="execution-question__other" onSubmit={event => { event.preventDefault(); void send(withNote([])) }}>
-      <label>你的回答<textarea value={other} maxLength={USER_QUESTION_LIMITS.other} disabled={locked} rows={4}
+      <label>你的回答<textarea value={other} disabled={locked} rows={4}
         onChange={event => setOther(event.target.value)} placeholder="写下需要 AI 继续使用的回答" /></label>
       <button type="submit" disabled={locked || !note}>提交回答</button>
     </form>}

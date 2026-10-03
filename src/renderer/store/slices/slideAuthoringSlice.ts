@@ -38,7 +38,6 @@ import {
   markV9SlideContentComposing,
   updateV9SlideContentTextDraft,
 } from '../../authoring/v9SlideContentEdit'
-import { MAX_SCENE_NODES } from '../../../shared/constants'
 import {
   findGlobalTeacherController,
   locateCourseLayer,
@@ -328,7 +327,7 @@ export function createSlideAuthoringSlice(
   selectNode(nodeId: string | null, additive?: boolean): void
   ensureTeacherController(): void
   persistLayerCommand(result: LayerCommandResult, extra?: SlidePersistExtra): SlideCommandResult
-  persistMediaResult(result: CourseMediaCommandResult, currentErrorMessage?: string | null): CourseMediaCommandResult
+  persistMediaResult(result: CourseMediaCommandResult): CourseMediaCommandResult
   persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
   persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
 } & ReturnType<typeof createSlideOwnedCommands> {
@@ -869,8 +868,8 @@ export function createSlideAuthoringSlice(
     persistLayerCommand(result: LayerCommandResult, extra: SlidePersistExtra = {}): SlideCommandResult {
       return persistSlideLayerCommand(slide, result, extra)
     },
-    persistMediaResult(result: CourseMediaCommandResult, currentErrorMessage?: string | null): CourseMediaCommandResult {
-      return persistSlideMediaResult(kernel, slide, result, currentErrorMessage ?? null)
+    persistMediaResult(result: CourseMediaCommandResult): CourseMediaCommandResult {
+      return persistSlideMediaResult(slide, result)
     },
     persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean {
       return persistSlideTransaction(kernel, slide, step, statusMessage)
@@ -899,14 +898,9 @@ export function persistSlideLayerCommand(
 }
 
 export function persistSlideMediaResult(
-  kernel: EditorStoreKernel,
   slide: SlideAuthoringPorts,
   result: CourseMediaCommandResult,
-  currentErrorMessage: string | null,
 ): CourseMediaCommandResult {
-  const capacityError =
-    `当前场景已达到或将超过 ${MAX_SCENE_NODES} 个节点上限。请删除不需要的节点，或新建场景后继续。`
-  const keepCapacityError = currentErrorMessage === capacityError
   slide.persist({
     ok: result.ok,
     reason: result.reason,
@@ -917,9 +911,6 @@ export function persistSlideMediaResult(
     sidecar: result.sidecar,
     statusMessage: result.ok ? result.reason ?? null : undefined,
   })
-  if (result.ok && (result.libraryFallback === 'scene-capacity' || keepCapacityError)) {
-    kernel.setFeedback({ errorMessage: capacityError })
-  }
   return result
 }
 

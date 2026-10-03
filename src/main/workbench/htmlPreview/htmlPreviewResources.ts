@@ -82,17 +82,15 @@ export async function resolveHtmlPreviewResource(rootRealPath: string, relativeP
 export async function collectHtmlPreviewMediaUrls(source: string, rootRealPath: string): Promise<string[]> {
   const files = new Map<string, Uint8Array>()
   let result = extractHtmlResources({ html: source, siblingFiles: files })
-  for (let pass = 0; pass < 8; pass++) {
+  for (;;) {
     let added = false
     for (const diagnostic of result.diagnostics) {
       if (diagnostic.code !== 'missing-relative-resource' || !diagnostic.reference || !/\.css$/i.test(diagnostic.reference)) continue
       const key = diagnostic.reference
-      if (files.has(key) || files.size >= 32) continue
+      if (files.has(key)) continue
       const target = await resolveHtmlPreviewResource(rootRealPath, key)
       if (!target) continue
       try {
-        const stat = await fs.stat(target)
-        if (stat.size > 1024 * 1024) continue
         files.set(key, new Uint8Array(await fs.readFile(target)))
         added = true
       } catch { /* A disappearing stylesheet cannot grant network access. */ }

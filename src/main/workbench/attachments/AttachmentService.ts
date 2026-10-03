@@ -10,7 +10,6 @@ export class AttachmentError extends Error {
 }
 export interface AttachmentServiceOptions {
   directory: string
-  maxSourceBytes?: number
   extractor?: AttachmentExtractor
   /** Resolves an already granted read capability; the service never grants a path. */
   resolveAuthorizedPath?: (authorizationId: string) => Promise<{ path: string; kind?: 'file' | 'workspace' }>
@@ -38,12 +37,9 @@ function imageType(bytes: Buffer): string | undefined {
 export class AttachmentService implements AttachmentReader {
   private readonly directory: string
   private readonly queueKey: string
-  private readonly limit: number
   constructor(private readonly options: AttachmentServiceOptions) {
     this.directory = path.resolve(options.directory)
     this.queueKey = process.platform === 'win32' ? this.directory.toLowerCase() : this.directory
-    this.limit = options.maxSourceBytes ?? MATERIAL_EXTRACTION_LIMITS.sourceBytes
-    if (!Number.isSafeInteger(this.limit) || this.limit < 1) throw new Error('Invalid attachment byte limit')
   }
 
   private serialStorage<T>(work: () => Promise<T>): Promise<T> {
@@ -144,17 +140,15 @@ export class AttachmentService implements AttachmentReader {
     try {
       const before = await handle.stat()
       if (!before.isFile()) throw new AttachmentError('not-a-file', '附件必须是普通文件')
-      if (before.size > this.limit) throw new AttachmentError('source-too-large', '附件原件超过接收大小限制')
       abort(options.signal)
       options.onProgress?.(0, before.size)
       const chunks: Buffer[] = []; let total = 0
       while (true) {
         abort(options.signal)
-        const chunk = Buffer.alloc(Math.min(65536, this.limit + 1 - total))
+        const chunk = Buffer.alloc(65536)
         const { bytesRead } = await handle.read(chunk)
         if (!bytesRead) break
         total += bytesRead
-        if (total > this.limit) throw new AttachmentError('source-too-large', '附件原件超过接收大小限制')
         chunks.push(chunk.subarray(0, bytesRead))
         abort(options.signal)
         options.onProgress?.(total, before.size)
@@ -170,7 +164,6 @@ export class AttachmentService implements AttachmentReader {
     // Copy before the first await: changing a caller's buffer cannot change an admitted snapshot.
     const bytes = Buffer.from(input.bytes), source = structuredClone(input.source), name = input.name, declared = input.declaredMediaType
     abort(options.signal)
-    if (bytes.byteLength > this.limit) throw new AttachmentError('source-too-large', '附件原件超过接收大小限制')
     const digest = hash(bytes), blobRef = { digest, byteLength: bytes.length }
     const provenance = { originalDigest: digest, originalByteLength: bytes.length, complete: true, downsampled: false }
     const representations: AttachmentRepresentation[] = [], gaps: AttachmentSnapshot['gaps'] = []
@@ -294,8 +287,7 @@ export class AttachmentService implements AttachmentReader {
     abort(options.signal)
     const { material, totalPages, selectedPages } = extracted
     if (!['pdf', 'docx', 'pptx'].includes(material.format) || material.format !== original.name.split('.').pop()?.toLowerCase() ||
-        material.version !== 1 || !Array.isArray(material.fragments) || !Array.isArray(material.assets) || !Array.isArray(material.gaps) ||
-        material.fragments.length > 100_000 || material.assets.length > 4096 || material.gaps.length > 100_000) throw new AttachmentError('invalid-extraction', '附件提取返回结构无效')
+        material.version !== 1 || !Array.isArray(material.fragments) || !Array.isArray(material.assets) || !Array.isArray(material.gaps)) throw new AttachmentError('invalid-extraction', '附件提取返回结构无效')
     if (material.format !== 'docx' && (!Number.isSafeInteger(totalPages) || totalPages! < 1 || !selectedPages ||
         !Number.isSafeInteger(selectedPages.from) || !Number.isSafeInteger(selectedPages.to) || selectedPages.from < 1 || selectedPages.to < selectedPages.from || selectedPages.to > totalPages! ||
         selectedPages.from !== (pages?.from ?? options.fromPage ?? 1) || selectedPages.to !== Math.min(pages?.to ?? totalPages!, (pages?.from ?? options.fromPage ?? 1) + (options.maxPages ?? totalPages!) - 1))) throw new AttachmentError('invalid-extraction', '附件提取页范围不一致')
@@ -303,12 +295,9 @@ export class AttachmentService implements AttachmentReader {
     const representations: AttachmentRepresentation[] = [], gaps: AttachmentSnapshot['gaps'] = []
     const assets = new Map(material.assets.map(asset => [asset.id, asset]))
     if (assets.size !== material.assets.length) throw new AttachmentError('invalid-extraction', '提取素材标识重复')
-    let outputBytes = 0, textCharacters = 0
     for (const asset of material.assets) {
       if (!(asset.bytes instanceof Uint8Array)) throw new AttachmentError('invalid-extraction', '提取素材不是有效字节')
-      outputBytes += asset.bytes.length
     }
-    if (outputBytes > MATERIAL_EXTRACTION_LIMITS.outputBytes) throw new AttachmentError('extraction-too-large', '附件提取表示超过容量上限')
     const blobs = new Map<string, Buffer>(), assetRepresentations = new Map<string, string>()
     for (const fragment of material.fragments) {
       abort(options.signal)
@@ -336,8 +325,6 @@ export class AttachmentService implements AttachmentReader {
         blobs.set(blobRef.digest, assetBytes); assetRepresentations.set(asset.id, id)
       } else {
         if (!['text', 'table', 'formula'].includes(fragment.kind) || typeof fragment.text !== 'string') throw new AttachmentError('invalid-extraction', '提取文本片段无效')
-        textCharacters += fragment.text.length
-        if (textCharacters > MATERIAL_EXTRACTION_LIMITS.textCharacters) throw new AttachmentError('extraction-too-large', '附件提取文本超过容量上限')
         const textBytes = Buffer.from(fragment.text), blobRef = { digest: hash(textBytes), byteLength: textBytes.length }
         representations.push({ id, kind: 'text', mediaType: 'text/plain', characters: fragment.text.length, blobRef, provenance })
         blobs.set(blobRef.digest, textBytes)

@@ -1,8 +1,7 @@
 import type { EditorStoreKernel } from '../editorStoreKernel'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
-import { MAX_PROJECT_SCENES } from '../../../shared/constants'
 import { courseProjectDocumentSchema } from '../../../shared/courseProjectSchema'
-import { resizeCourseSlideCanvas } from '../../../core/course/resizeSlideCanvas'
+import { resizeCourseSlideCanvas, resizeSlideSceneCanvas } from '../../../core/course/resizeSlideCanvas'
 import { courseSlideCanvas, isValidSlideCanvas, sameSlideCanvas, type SlideCanvasSize } from '../../../shared/slideCanvas'
 import {
   addCourseFlowPage,
@@ -82,11 +81,6 @@ export function createCourseStructureSlice(
           (surface) => surface.id === options.surfaceId && surface.type === 'slide',
         )
         const sceneCount = slideSurface?.type === 'slide' ? slideSurface.scenes.length : 0
-        if (sceneCount >= MAX_PROJECT_SCENES) {
-          const errorMessage = `工程已达到 ${MAX_PROJECT_SCENES} 个场景上限。请删除不需要的场景后再试。`
-          kernel.setFeedback({ errorMessage, statusMessage: null })
-          return { ok: false, reason: errorMessage }
-        }
         result = addCourseScene(project, {
           surfaceId: options.surfaceId,
           title: `场景 ${sceneCount + 1}`,
@@ -237,6 +231,30 @@ export function createCourseStructureSlice(
         return { ok: false, reason: '当前页面不能修改画布尺寸' }
       }
       return { ok: true }
+    },
+
+    resizeSlideSceneCanvas(surfaceId: string, sceneId: string, canvas: SlideCanvasSize | null): CourseStructureResult {
+      const project = kernel.tryReadDocument()
+      if (!project) return { ok: false, reason: '当前会话没有课程工程' }
+      try {
+        const resized = resizeSlideSceneCanvas(project, surfaceId, sceneId, canvas)
+        if (resized === project) return { ok: true }
+        const committed = courseProjectDocumentSchema.parse({
+          ...resized,
+          revision: project.revision + 1,
+          updatedAt: new Date().toISOString(),
+        })
+        const saved = kernel.persistDocument(committed, {
+          historyEntry: true,
+          statusMessage: canvas === null ? '本页已恢复课程默认尺寸' : '已修改本页尺寸',
+        })
+        if (saved) return { ok: true }
+        throw new Error('当前页面不能修改画布尺寸')
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : '页面尺寸修改失败'
+        kernel.setFeedback({ errorMessage: reason, statusMessage: null })
+        return { ok: false, reason }
+      }
     },
 
     updateCourseBackground(patch: CourseBackgroundPatch): CourseStructureResult {

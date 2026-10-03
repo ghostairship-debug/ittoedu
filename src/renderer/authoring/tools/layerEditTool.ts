@@ -17,13 +17,13 @@ export const layerEditInputSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('duplicate'), placement: layerPlacementSchema }).strict(),
   z.object({
     operation: z.literal('align'),
-    targets: z.array(authoringToolTargetWireV1Schema).min(2).max(200),
+    targets: z.array(authoringToolTargetWireV1Schema).min(2),
     mode: layerAlignModeSchema,
     primaryTarget: authoringToolTargetWireV1Schema.optional(),
   }).strict(),
   z.object({
     operation: z.literal('distribute'),
-    targets: z.array(authoringToolTargetWireV1Schema).min(3).max(200),
+    targets: z.array(authoringToolTargetWireV1Schema).min(3),
     axis: layerDistributeAxisSchema,
   }).strict(),
 ])

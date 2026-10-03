@@ -82,8 +82,22 @@ function validateConnection(connection: McpClientConnection): void {
     || connection.transport.cwd && !isAbsolute(connection.transport.cwd)) throw new Error('外部 MCP 进程必须使用绝对可执行文件和工作目录')
 }
 
-async function connectSdk(connection: McpClientConnection): Promise<McpClientLike> {
+/** The SDK always installs a timer, including for timeout=0. Tools use 0 as our
+ * signal-only request marker; retain the SDK's response and AbortSignal cleanup. */
+export function createMcpSdkClient(): Client {
   const client = new Client({ name: 'guoling', version: '2.0.0' })
+  const timers = client as unknown as {
+    _setupTimeout(messageId: number, timeout: number, ...rest: unknown[]): void
+  }
+  const setupTimeout = timers._setupTimeout.bind(client)
+  timers._setupTimeout = (messageId, timeout, ...rest) => {
+    if (timeout !== 0) setupTimeout(messageId, timeout, ...rest)
+  }
+  return client
+}
+
+async function connectSdk(connection: McpClientConnection): Promise<McpClientLike> {
+  const client = createMcpSdkClient()
   const transport = connection.transport.kind === 'streamable-http'
     ? new StreamableHTTPClientTransport(new URL(connection.transport.endpoint), {
       requestInit: connection.transport.bearer ? { headers: { Authorization: `Bearer ${connection.transport.bearer}` } } : undefined,
@@ -95,7 +109,7 @@ async function connectSdk(connection: McpClientConnection): Promise<McpClientLik
   catch (cause) { await transport.close().catch(() => undefined); throw cause }
 }
 
-function summarizeError(cause: unknown): string { return cause instanceof Error ? cause.message.slice(0, 500) : '外部服务没有返回可核对结果' }
+function summarizeError(cause: unknown): string { return cause instanceof Error ? cause.message : '外部服务没有返回可核对结果' }
 
 /** One host-managed external service; every run receives its own MCP session. */
 export class McpClientService {
@@ -163,9 +177,8 @@ export class McpClientService {
           const effect = configured.get(tool.name)
           if (!effect || !visible.has(tool.name)) continue
           if (!nameRule.test(tool.name) || tools.has(tool.name)) continue
-          if (Buffer.byteLength(JSON.stringify(tool.inputSchema), 'utf8') > 4 * 1024 * 1024) return { status: 'failed', reason: `工具 ${tool.name} 的单份 Schema 超过 4 MiB，未静默忽略该能力` }
           tools.set(tool.name, { name: `mcp.${this.connection.namespace}.${tool.name}`, remoteName: tool.name,
-            description: tool.description?.slice(0, 2000) ?? '', inputSchema: structuredClone(tool.inputSchema), effect })
+            description: tool.description ?? '', inputSchema: structuredClone(tool.inputSchema), effect })
         }
         cursor = result.nextCursor
         if (!cursor || [...visible].filter(name => configured.has(name)).every(name => tools.has(name))) { cursor = undefined; break }
@@ -181,7 +194,7 @@ export class McpClientService {
   async invoke(input: { runId: string; operationId: string; name: string; arguments: Record<string, unknown>; signal?: AbortSignal }): Promise<McpCallResult> {
     const run = this.requireRun(input.runId), service = this.connection?.namespace ?? 'unconfigured'
     const reject = (reason: string): McpCallResult => ({ status: 'rejected', service, tool: input.name, operationId: input.operationId, reason })
-    if (!input.operationId || input.operationId.length > 512 || !input.arguments || typeof input.arguments !== 'object' || Array.isArray(input.arguments)) return reject('外部工具参数或操作身份无效')
+    if (!input.operationId || !input.arguments || typeof input.arguments !== 'object' || Array.isArray(input.arguments)) return reject('外部工具参数或操作身份无效')
     if (run.stopped || input.signal?.aborted) return reject('任务已停止')
     const digest = createHash('sha256').update(JSON.stringify([input.name, input.arguments])).digest('hex')
     const prior = run.results.get(input.operationId)
@@ -220,7 +233,7 @@ export class McpClientService {
     try {
       const client = await this.client(run)
       const reply = await client.callTool({ name: tool.remoteName, arguments: structuredClone(input.arguments) }, undefined,
-        { signal: controller.signal, timeout: 30_000 })
+        { signal: controller.signal, timeout: 0 })
       if (run.stopped || controller.signal.aborted) return outcome('unknown', '任务停止后外部调用结果待核对，不会自动重试或应用')
       if (reply.isError) return outcome(tool.effect === 'write' ? 'unknown' : 'failed', '外部服务报告操作错误；修改结果需按原资源核对')
       const projected = this.project(run, reply.content, reply.structuredContent)
@@ -232,18 +245,13 @@ export class McpClientService {
 
   private project(run: RunState, blocks: readonly unknown[], structured: unknown): { content: McpContent[]; structuredContent?: unknown; truncated: boolean } {
     const content: McpContent[] = []
-    let textBudget = 50_000, truncated = false
-    for (const block of blocks.slice(0, 40)) {
+    for (const block of blocks) {
       if (!block || typeof block !== 'object') continue
       const item = block as Record<string, unknown>
       if (item.type === 'text' && typeof item.text === 'string') {
-        const text = item.text.slice(0, Math.min(16_000, textBudget))
-        const cut = text.length < item.text.length
-        content.push({ type: 'text', text, truncated: cut })
-        truncated ||= cut; textBudget -= text.length
+        content.push({ type: 'text', text: item.text, truncated: false })
       } else if ((item.type === 'image' || item.type === 'audio') && typeof item.data === 'string' && typeof item.mimeType === 'string') {
         const bytes = Buffer.from(item.data, 'base64')
-        if (bytes.byteLength > 5 * 1024 * 1024) { truncated = true; continue }
         const resourceId = randomUUID()
         run.resources.set(resourceId, { mimeType: item.mimeType, bytes })
         content.push({ type: 'binary', resourceId, mimeType: item.mimeType, byteLength: bytes.byteLength })
@@ -252,13 +260,7 @@ export class McpClientService {
           ...(typeof item.mimeType === 'string' ? { mimeType: item.mimeType } : {}) })
       }
     }
-    if (blocks.length > 40) truncated = true
-    let structuredContent: unknown
-    if (structured !== undefined) {
-      try { if (JSON.stringify(structured).length <= 50_000) structuredContent = structuredClone(structured); else truncated = true }
-      catch { truncated = true }
-    }
-    return { content, truncated, ...(structuredContent === undefined ? {} : { structuredContent }) }
+    return { content, truncated: false, ...(structured === undefined ? {} : { structuredContent: structuredClone(structured) }) }
   }
 
   readResource(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array } {

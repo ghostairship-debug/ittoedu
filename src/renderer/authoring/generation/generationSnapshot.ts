@@ -2,6 +2,7 @@ import { flowSelectionContextTarget } from '../../course/flowContextSelection'
 import { generationRequestSchema, MAX_GENERATION_PROMPT_BYTES, type GenerationRequest } from '../../../shared/generationContract'
 import { workspaceIdentityKey, type WorkspaceIdentityV1 } from '../../../shared/workspaceIdentity'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
+import { effectiveSceneCanvas } from '../../../shared/slideCanvas'
 import type { MaterialRecordV1 } from '../../../shared/materialContract'
 import type { AvailableComponentCatalogPackage } from '../../../shared/componentCatalog'
 import { captureCourseAuthoringTarget, type CourseAuthoringSessionToken } from '../courseAuthoringSession'
@@ -143,7 +144,7 @@ export function captureGenerationSnapshot(input: {
       .sort((a, b) => Number(b.target.owner === pageOwner) - Number(a.target.owner === pageOwner))
     for (const background of backgrounds) destinations.push({ kind: 'update', target: background.target })
     pages.push({ location, surfaceType: view.surfaceType,
-      ...(surface?.type === 'slide' ? { canvas: { ...surface.canvas } } : {}),
+      ...(surface?.type === 'slide' ? { canvas: effectiveSceneCanvas(surface, location.kind === 'slide-scene' ? surface.scenes.find(scene => scene.id === location.sceneId) : undefined), referenceCanvas: { ...surface.canvas } } : {}),
       ...(surface?.type === 'flow' ? { layout: { ...surface.layout, widthMode: surface.layout.widthMode ?? 'reading' },
         coordinates: { unit: 'CSS px', body: 'flow.content blocks reserve document space and reflow',
           paper: 'native.content template/properties.paperSpace=paper; origin is paper border box; follows document scroll; does not reserve space',

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-/** Logical size of a finite Slide canvas. One size applies to the whole course (Owner 2026-09-25). */
+/** Logical size of a finite Slide canvas. Scenes may override the course default. */
 export interface SlideCanvasSize {
   width: number
   height: number
@@ -29,13 +29,65 @@ export function sameSlideCanvas(a: Readonly<SlideCanvasSize>, b: Readonly<SlideC
   return a.width === b.width && a.height === b.height
 }
 
-/** The course's Slide canvas: the first Slide surface's size, or the legacy default when there is none. */
+/** The authored scene size, falling back to the course's shared Slide reference size. */
+export function effectiveSceneCanvas(
+  surface: { readonly canvas: Readonly<SlideCanvasSize> },
+  scene?: { readonly canvas?: Readonly<SlideCanvasSize> } | null,
+): SlideCanvasSize {
+  const canvas = scene?.canvas ?? surface.canvas
+  return { width: canvas.width, height: canvas.height }
+}
+
+export interface SharedSlideFrameMapping {
+  readonly scale: number
+  readonly offsetX: number
+  readonly offsetY: number
+}
+
+/** Shared layers keep one reference frame and are fitted, centered, to the current scene. */
+export function sharedSlideFrameMapping(
+  reference: Readonly<SlideCanvasSize>,
+  target: Readonly<SlideCanvasSize>,
+): SharedSlideFrameMapping {
+  const scale = Math.min(target.width / reference.width, target.height / reference.height)
+  return {
+    scale,
+    offsetX: (target.width - reference.width * scale) / 2,
+    offsetY: (target.height - reference.height * scale) / 2,
+  }
+}
+
+type SlideFrameGeometry = Partial<{ x: number; y: number; width: number; height: number }>
+
+/** Derives displayed geometry without adding omitted fields or changing the source frame. */
+export function mapSlideFrame<T extends SlideFrameGeometry>(frame: T, mapping: SharedSlideFrameMapping): T {
+  return {
+    ...frame,
+    ...(frame.x === undefined ? {} : { x: frame.x * mapping.scale + mapping.offsetX }),
+    ...(frame.y === undefined ? {} : { y: frame.y * mapping.scale + mapping.offsetY }),
+    ...(frame.width === undefined ? {} : { width: frame.width * mapping.scale }),
+    ...(frame.height === undefined ? {} : { height: frame.height * mapping.scale }),
+  }
+}
+
+/** Converts a displayed geometry edit back into the shared owner's one authored frame. */
+export function unmapSlideFrame<T extends SlideFrameGeometry>(frame: T, mapping: SharedSlideFrameMapping): T {
+  return {
+    ...frame,
+    ...(frame.x === undefined ? {} : { x: (frame.x - mapping.offsetX) / mapping.scale }),
+    ...(frame.y === undefined ? {} : { y: (frame.y - mapping.offsetY) / mapping.scale }),
+    ...(frame.width === undefined ? {} : { width: frame.width / mapping.scale }),
+    ...(frame.height === undefined ? {} : { height: frame.height / mapping.scale }),
+  }
+}
+
+/** The course's default Slide reference size, independent of per-scene overrides. */
 export function courseSlideCanvas(course: { readonly surfaces: readonly { readonly type: string; readonly canvas?: Readonly<SlideCanvasSize> }[] }): SlideCanvasSize {
   const surface = course.surfaces.find(value => value.type === 'slide' && value.canvas)
   return surface?.canvas ? { width: surface.canvas.width, height: surface.canvas.height } : { ...DEFAULT_SLIDE_CANVAS }
 }
 
-/** Index of every Slide surface whose size differs from the first one; a course keeps one Slide size. */
+/** The shared reference size is course-wide; scene overrides are independently authored. */
 export function mismatchedSlideCanvasIndexes(surfaces: readonly { readonly type: string; readonly canvas?: Readonly<SlideCanvasSize> }[]): number[] {
   const first = surfaces.find(value => value.type === 'slide' && value.canvas)?.canvas
   if (!first) return []

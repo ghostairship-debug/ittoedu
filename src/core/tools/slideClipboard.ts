@@ -1,10 +1,8 @@
 import { nanoid } from 'nanoid'
 import { remapDuplicatedInputState } from './inputAuthoringState'
-import { MAX_SCENE_NODES } from '../../shared/constants'
 import { resolveEffectiveGlobalLayerPlanes } from '../../shared/courseLayerComposition'
 import { isTeacherController } from '../../shared/teacherControllerRole'
 import {
-  MAX_SCENE_INTERACTIONS,
   isNodeMotionAction,
   isVideoInteractionAction,
   type InteractionRule,
@@ -24,6 +22,9 @@ import { buildSlideEditorView } from './slideLayerView'
 import { allocateCourseLayerOrder, sortScopedLayerList } from './layerOrder'
 import { rebuildTableItemIds } from './nativeNodeFactories'
 import { rebuildChartItemIds } from './chartIdentity'
+import { walkComposition } from '../../shared/composition/content'
+import { documentResourceReferences } from '../../shared/document/resources'
+import { regenerateFlowIdentities } from './flowDocumentModel'
 
 /** V8 duplicate/paste offset. R2-D owns consecutive insertion stagger for new inserts. */
 export const SLIDE_SCENE_CLIPBOARD_OFFSET = 20
@@ -184,6 +185,17 @@ export function collectSlideClipboardResourceReferences(
 ): V9SlideClipboardResourceReferences {
   const assetIds = new Set<string>()
   const packages = new Map<string, string>()
+  const nativeAssets = (content: Extract<LayerItem, { kind: 'native' }>['content']) => {
+    if (content.nativeType === 'image') assetIds.add(content.data.assetId)
+    else if (content.nativeType === 'video') {
+      assetIds.add(content.data.assetId)
+      if (content.data.poster.assetId) assetIds.add(content.data.poster.assetId)
+    }
+  }
+  const runtimeAssets = (runtime: Extract<LayerItem, { kind: 'runtime' }>['runtime']) => {
+    Object.values(runtime.assets).forEach(({ assetId }) => assetIds.add(assetId))
+    if (runtime.staticFallback?.assetId) assetIds.add(runtime.staticFallback.assetId)
+  }
   for (const item of items) {
     if (item.kind === 'component') {
       packages.set(item.component.packageId, item.component.version)
@@ -191,16 +203,23 @@ export function collectSlideClipboardResourceReferences(
       continue
     }
     if (item.kind === 'runtime') {
-      Object.values(item.runtime.assets).forEach(({ assetId }) => assetIds.add(assetId))
-      if (item.runtime.staticFallback?.assetId) assetIds.add(item.runtime.staticFallback.assetId)
+      runtimeAssets(item.runtime)
       continue
     }
-    if (item.content.nativeType === 'image') {
-      assetIds.add(item.content.data.assetId)
-    } else if (item.content.nativeType === 'video') {
-      assetIds.add(item.content.data.assetId)
-      if (item.content.data.poster.assetId) assetIds.add(item.content.data.poster.assetId)
+    if (item.kind === 'composition') {
+      Object.values(item.content.assets).forEach(({ assetId }) => assetIds.add(assetId))
+      walkComposition(item.content.root, node => {
+        if (node.kind === 'native') nativeAssets(node.content)
+        else if (node.kind === 'runtime') runtimeAssets(node.runtime)
+        else if (node.kind === 'document') {
+          const references = documentResourceReferences(node.content.blocks)
+          references.assets.forEach(id => assetIds.add(id))
+          references.components.forEach(value => packages.set(value.packageId, value.version))
+        }
+      })
+      continue
     }
+    nativeAssets(item.content)
   }
   return {
     assetIds: [...assetIds].sort(),
@@ -302,6 +321,23 @@ export function rewriteLayerInternalReferences(
   item: LayerItem,
   idMap: ReadonlyMap<string, string>,
 ): void {
+  if (item.kind === 'composition') {
+    const compositionIds = new Map(idMap)
+    walkComposition(item.content.root, node => compositionIds.set(node.id, `composition-${nanoid(10)}`))
+    walkComposition(item.content.root, node => {
+      node.id = compositionIds.get(node.id)!
+      if (node.kind === 'document') node.content.blocks = node.content.blocks.map(regenerateFlowIdentities)
+      else if (node.kind === 'native') {
+        if (node.content.nativeType === 'table') node.content.data = rebuildTableItemIds(node.content.data)
+        else if (node.content.nativeType === 'chart') node.content.data = rebuildChartItemIds(node.content.data)
+        else if (node.content.nativeType === 'formula') node.content.data.formulaId = `formula-${nanoid(10)}`
+      } else if (node.kind === 'runtime' && node.runtime.nodeBindings) {
+        node.runtime.nodeBindings = Object.fromEntries(Object.entries(node.runtime.nodeBindings)
+          .map(([key, id]) => [key, compositionIds.get(id) ?? id]))
+      }
+    })
+    return
+  }
   if (item.kind !== 'runtime' || !item.runtime.nodeBindings) return
   item.runtime.nodeBindings = Object.fromEntries(
     Object.entries(item.runtime.nodeBindings).map(([key, layerItemId]) => [
@@ -510,9 +546,6 @@ export function mutatePasteSlideSceneClipboard(
   }
   validateSlideClipboardResourceReferences(draft, clipboard.resourceReferences)
   const { surface, scene } = requireSlideLocation(draft, input.locationId)
-  if (scene.layerItems.length + clipboard.items.length > MAX_SCENE_NODES) {
-    throw new Error(`粘贴后将超过每场景 ${MAX_SCENE_NODES} 个图层的上限。`)
-  }
   const idMap = new Map<string, string>()
   for (const entry of clipboard.items) {
     idMap.set(entry.item.layerItemId, `${authoringDuplicateIdPrefix(entry.item)}-${nanoid(10)}`)
@@ -539,9 +572,6 @@ export function mutatePasteSlideSceneClipboard(
     }
   }
   const remapped = remapCopiedInteractionRules(clipboard.interactions, idMap, ruleIds, stateKeys)
-  if (scene.interactions.length + remapped.length > MAX_SCENE_INTERACTIONS) {
-    throw new Error(`当前范围最多 ${MAX_SCENE_INTERACTIONS} 条规则`)
-  }
   scene.interactions.push(...remapped)
   sortSlideSceneLayerItems(scene)
   return pastedIds
@@ -562,9 +592,6 @@ export function mutatePasteSlideGlobalClipboard(
   if (clipboard.projectId !== draft.id) {
     throw new Error('剪贴板不属于当前 H5 演示，请重新复制')
   }
-  if (draft.globalLayerItems.length + clipboard.items.length > MAX_SCENE_NODES) {
-    throw new Error(`粘贴后将超过全局层 ${MAX_SCENE_NODES} 个元素的上限。`)
-  }
   if (clipboard.items.some(({ entry }) => isTeacherController(entry.item))) {
     throw new Error(SLIDE_GLOBAL_CONTROLLER_CLIPBOARD_REASON)
   }
@@ -583,9 +610,6 @@ export function mutatePasteSlideGlobalClipboard(
     )
   }
   const remapped = remapCopiedInteractionRules(clipboard.interactions, idMap)
-  if (draft.globalInteractions.length + remapped.length > MAX_SCENE_INTERACTIONS) {
-    throw new Error(`全局层最多 ${MAX_SCENE_INTERACTIONS} 条规则`)
-  }
   const prepared = clipboard.items.map(({ entry }) => {
     const nextId = idMap.get(entry.item.layerItemId)!
     return {

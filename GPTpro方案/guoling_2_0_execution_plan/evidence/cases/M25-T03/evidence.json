@@ -1,0 +1,856 @@
+{
+  "case": "M25-T03",
+  "status": "passed",
+  "steps": [
+    "opened",
+    "viewport-resize-ok",
+    "flow-page-repeated-clicks-ok",
+    "flow-scroll-ok",
+    "hidden-restore-tab-ok",
+    "reload-preview-ok",
+    "isolation-refute-ok",
+    "dynamic-script-ok",
+    "offline-player-compat-ok"
+  ],
+  "layoutSizes": [
+    {
+      "width": 1000,
+      "height": 640,
+      "fixedInViewport": true,
+      "noticeVisible": true,
+      "iframeRectHeight": 458.5,
+      "paneHeight": 542.5
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "fixedInViewport": true,
+      "noticeVisible": true,
+      "iframeRectHeight": 938,
+      "paneHeight": 982.5
+    }
+  ],
+  "flowPageClicks": 3,
+  "flowEndScrolls": true,
+  "hiddenRestore": {
+    "pageAfterHidden": "2 / 3",
+    "flowCounterKept": true,
+    "cameraCounterKept": true
+  },
+  "errorNoticeFree": true,
+  "isolation": {
+    "own": {
+      "desktopAPI": false,
+      "require": false,
+      "process": false
+    },
+    "parentApiReadable": false,
+    "parentApiValue": "blocked",
+    "parentFrameCount": 4,
+    "otherFrames": 3,
+    "crossFrameReads": 0
+  },
+  "pathEscape": {
+    "relative": {
+      "status": 404,
+      "body": "Not found"
+    },
+    "encoded": {
+      "status": 404,
+      "body": "Not found"
+    }
+  },
+  "navigationIsolation": {
+    "appUrlStable": true,
+    "popupCount": 0
+  },
+  "dynamicExecution": {
+    "cameraFrame": 164,
+    "dynamicText": "脚本生成的文字不能直接编辑"
+  },
+  "offlinePlayer": {
+    "hasDesktopAPI": false,
+    "hasRequire": false,
+    "hasProcess": false,
+    "title": "三页互动课例夹具",
+    "counterButtons": 3,
+    "directSections": 3,
+    "pageIndexSet": [
+      "fixed-page",
+      "flow-page",
+      "camera-page"
+    ]
+  },
+  "electronProcess": {
+    "pid": 35928,
+    "exitCode": null,
+    "signalCode": null
+  },
+  "mainWindows": [
+    {
+      "id": 1,
+      "destroyed": false,
+      "url": "courseware-editor://app/index.html"
+    }
+  ],
+  "runDirectory": "D:\\果铃工作台\\output\\g20\\m23\\preview\\run-pRzfgs",
+  "workspace": "D:\\果铃工作台\\output\\g20\\m23\\preview\\run-pRzfgs\\workspace",
+  "page": {
+    "url": "courseware-editor://app/index.html",
+    "title": "果铃编辑器",
+    "text": "果\nworkspace\n切换\nAI 助手\n布局\n项目文件\n新建\n刷新\nworkspace\nlight-edit.html\nlinked-secret.txt（无法访问）\nreplacement.png\nsecurity-one.html\nsecurity-two.html\nsibling.html\nthree-sections.html\n会话列表\n新建会话\n文件 · security-two.html\n显示全部会话\n\n这个位置还没有会话，可以新建或查看全部。\n\nthree-sections.html\n×\nsibling.html\n×\nsecurity-one.html\n×\nsecurity-two.html\n×\n＋\n已保存\n保存\n文件\n预览\n源码\n编辑预览\n上一页\n3 / 3\n下一页\n更多\n当前会话\n新会话\n更多\nworkspace › three-sections.html\n发送首条消息后固定\n告诉我想做什么\n\n描述目标，或拖入材料，我们一起完善内容。\n\n连接模型后即可开始对话。\n\n连接模型\n整理材料\n↗\n制作演示\n↗\n+\n✓\n工作空间\n未配置对话模型\n▾\n发送\nEnter 发送 · Shift + Enter 换行",
+    "frames": [
+      {
+        "title": "HTML 预览",
+        "src": "courseware-preview://79aa8a4fc633145c30e858acc8e27f48.b6205db31ef97c88e7b33b10bec80dab.app/79aa8a4fc633145c30e858acc8e27f48b6205db31ef97c88e7b33b10bec80dab/file/three-sections.html",
+        "visible": true
+      },
+      {
+        "title": "HTML 预览",
+        "src": "courseware-preview://b39bb2245928e25e0b8efb871138344e.f925eafc3e8581811347fbf4da7502df.app/b39bb2245928e25e0b8efb871138344ef925eafc3e8581811347fbf4da7502df/file/sibling.html",
+        "visible": false
+      },
+      {
+        "title": "HTML 预览",
+        "src": "courseware-preview://4abc3475c209df65aa008328384a5365.2533a413199960b29935377ff04955f9.app/4abc3475c209df65aa008328384a53652533a413199960b29935377ff04955f9/file/security-one.html",
+        "visible": false
+      },
+      {
+        "title": "HTML 预览",
+        "src": "courseware-preview://29d1a6e7b1602e70543ead19a11aa073.f26aad5c67901c74ba16b7d2b6417f7a.app/29d1a6e7b1602e70543ead19a11aa073f26aad5c67901c74ba16b7d2b6417f7a/file/security-two.html",
+        "visible": false
+      }
+    ]
+  },
+  "documents": [
+    {
+      "documentId": "adec3cf1-ae11-4262-9742-a4dd9bfdaa46",
+      "epoch": "d975f3fc-5768-4788-9d74-71a0670123f1",
+      "revision": 0,
+      "dirty": false,
+      "binding": {
+        "kind": "untitled",
+        "suggestedName": "未命名 H5 演示.h5lesson"
+      },
+      "modelKind": "course-v9"
+    },
+    {
+      "documentId": "95a120d7-a023-4ca3-9e97-39737873714c",
+      "epoch": "1ef3273d-95f7-4a8b-ac2a-4db8471dc2b5",
+      "revision": 0,
+      "dirty": false,
+      "binding": {
+        "kind": "file",
+        "path": "D:\\果铃工作台\\output\\g20\\m23\\preview\\run-pRzfgs\\workspace\\three-sections.html",
+        "version": "1f54c00c3ad97d54c1489008d95e7d03e3053ab8b415f32910a6cf5f46ad6be8",
+        "bindingVersion": 1
+      },
+      "modelKind": "text",
+      "sourceLength": 6344,
+      "sourceSha256": "1f54c00c3ad97d54c1489008d95e7d03e3053ab8b415f32910a6cf5f46ad6be8"
+    },
+    {
+      "documentId": "e979912d-7105-4379-bd8c-b35dbc7ebea7",
+      "epoch": "c954da28-533f-4fba-89a5-0a1c5c191362",
+      "revision": 0,
+      "dirty": false,
+      "binding": {
+        "kind": "file",
+        "path": "D:\\果铃工作台\\output\\g20\\m23\\preview\\run-pRzfgs\\workspace\\sibling.html",
+        "version": "ad4b7cb3c3083c1e668dcf29aff4a4177364d4dbf8c9f56267f0bb8e3b76b30f",
+        "bindingVersion": 1
+      },
+      "modelKind": "text",
+      "sourceLength": 225,
+      "sourceSha256": "ad4b7cb3c3083c1e668dcf29aff4a4177364d4dbf8c9f56267f0bb8e3b76b30f"
+    },
+    {
+      "documentId": "b1f6b3dd-b9cb-4f55-8f31-77fc720562f0",
+      "epoch": "7c9744d8-7a80-45b9-aeb3-47c79fd65b8b",
+      "revision": 0,
+      "dirty": false,
+      "binding": {
+        "kind": "file",
+        "path": "D:\\果铃工作台\\output\\g20\\m23\\preview\\run-pRzfgs\\workspace\\security-one.html",
+        "version": "202ae011fde77580010c65f73d2f158848da26eb9f5b4d81753fd232e2ce9704",
+        "bindingVersion": 1
+      },
+      "modelKind": "text",
+      "sourceLength": 2407,
+      "sourceSha256": "202ae011fde77580010c65f73d2f158848da26eb9f5b4d81753fd232e2ce9704"
+    },
+    {
+      "documentId": "accce073-6f52-48c2-a173-fbbba8eaac27",
+      "epoch": "5e016614-c576-4502-ba7c-1ec8334a2eec",
+      "revision": 0,
+      "dirty": false,
+      "binding": {
+        "kind": "file",
+        "path": "D:\\果铃工作台\\output\\g20\\m23\\preview\\run-pRzfgs\\workspace\\security-two.html",
+        "version": "7c8801f39254accffe0eab7ad220095ce7777a218ef40c1d858361f2e8c23346",
+        "bindingVersion": 1
+      },
+      "modelKind": "text",
+      "sourceLength": 2407,
+      "sourceSha256": "7c8801f39254accffe0eab7ad220095ce7777a218ef40c1d858361f2e8c23346"
+    }
+  ],
+  "windows": [
+    {
+      "destroyed": false,
+      "url": "courseware-editor://app/index.html"
+    }
+  ],
+  "runtime": {
+    "console": [
+      "warning: %cElectron Security Warning (Insecure Content-Security-Policy) font-weight: bold; This renderer process has either no Content Security\n  Policy set or a policy with \"unsafe-eval\" enabled. This exposes users of\n  this app to unnecessary security risks.\n\nFor more information and help, consult\nhttps://electronjs.org/docs/tutorial/security.\nThis warning will not show up\nonce the app is packaged.",
+      "error: Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "error: Failed to load resource: the server responded with a status of 404 (Not Found)",
+      "error: Unsafe attempt to initiate navigation for frame with origin 'courseware-editor://app' from frame with URL 'courseware-preview://4abc3475c209df65aa008328384a5365.2533a413199960b29935377ff04955f9.app/4abc3475c209df65aa008328384a53652533a413199960b29935377ff04955f9/file/security-one.html'. The frame attempting navigation of the top-level window is sandboxed, but the flag of 'allow-top-navigation' or 'allow-top-navigation-by-user-activation' is not set.\n",
+      "error: Blocked opening 'https://g20-fixture.invalid/window' in a new window because the request was made in a sandboxed frame whose 'allow-popups' permission is not set."
+    ],
+    "pageErrors": [],
+    "requests": [
+      "GET courseware-editor://app/assets/main-CVF4xHsa.js",
+      "GET courseware-editor://app/assets/phaser.esm-BZvbyuOQ.js",
+      "GET courseware-editor://app/assets/schemas-B8qGOHz7.js",
+      "GET courseware-editor://app/assets/installBundledFontFaces-qP-ZZ29Y.js",
+      "GET courseware-editor://app/assets/preload-helper-DWOi38-R.js",
+      "GET courseware-editor://app/assets/publishedCapture-D9fWw1uY.js",
+      "GET courseware-editor://app/assets/textLayout-DZkcbbJi.js",
+      "GET courseware-editor://app/assets/publishedDynamicHosts-DA3qALzt.js",
+      "GET courseware-editor://app/assets/playerCapture-D05beIWU.js",
+      "GET courseware-editor://app/assets/dynamicCandidateAdmission-CqW_pnrP.js",
+      "GET courseware-editor://app/assets/materialExtraction-D9ZvXop9.js",
+      "GET courseware-editor://app/assets/schema-CgwgUA64.js",
+      "GET courseware-editor://app/assets/main-D9on01gd.css",
+      "GET courseware-editor://app/assets/noto-sans-sc-100-wght-normal-DrqXJETY.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-101-wght-normal-c94LAl5p.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-102-wght-normal-C1RtbCZr.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-103-wght-normal-DGHo20nu.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-104-wght-normal-CJT2ioDJ.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-105-wght-normal-BFoiJwz2.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-106-wght-normal-D6uUHw3w.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-107-wght-normal-kFQzJDLH.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-108-wght-normal-7aXvqIa2.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-109-wght-normal-CnjNbNmw.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-110-wght-normal-D2JBr045.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-111-wght-normal-ClFr5QXM.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-112-wght-normal-CiZxJMyY.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-113-wght-normal-OgQXOX6x.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-114-wght-normal-CRH9SDZu.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-115-wght-normal-BN__2iBG.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-116-wght-normal-vdFVzbO2.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-117-wght-normal-Dsz3vkzU.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-118-wght-normal-BPEb0gM9.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-119-wght-normal-BfzSEbFz.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-21-wght-normal-DIu_1ZBI.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-22-wght-normal-VXjdYcT-.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-23-wght-normal-4HrHKhpL.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-24-wght-normal-B58DWgHS.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-25-wght-normal-C3Jm6l7O.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-26-wght-normal-YNOygvr_.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-27-wght-normal-BP2pEGQH.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-28-wght-normal-BWPKDbtH.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-29-wght-normal-45aVmHn_.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-30-wght-normal-B8_s30jZ.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-31-wght-normal-DW0t445S.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-32-wght-normal-ShbWPcei.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-33-wght-normal-BOTZYTjM.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-34-wght-normal-BF1rqDSt.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-35-wght-normal-Bosspiyr.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-36-wght-normal-CtU9CyKw.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-37-wght-normal-ghDiyiuv.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-38-wght-normal-4Nz8k_dt.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-39-wght-normal-Ddtm1XVC.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-4-wght-normal-BRbPMj-C.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-40-wght-normal-BVn4-kgX.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-41-wght-normal-CZqajZnl.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-42-wght-normal-CQ4lY28u.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-43-wght-normal-psppu0d8.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-44-wght-normal-cbKJlTUe.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-45-wght-normal-MKIEVRIC.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-46-wght-normal-CErGc6Mt.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-47-wght-normal-C5Kgg1_m.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-48-wght-normal-DFMjDDY6.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-49-wght-normal-B7l_3BZr.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-5-wght-normal-DI846rD9.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-50-wght-normal-C5KfAmFp.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-51-wght-normal-C2bq6hC8.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-52-wght-normal-P18e_Y0j.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-53-wght-normal-Bgkuo2tF.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-54-wght-normal-DL5lmlUd.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-55-wght-normal-BV_Oy6IF.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-56-wght-normal-B4L7Hj8f.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-57-wght-normal-DU8YBsDj.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-58-wght-normal-CE0BKS9u.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-59-wght-normal-Azv2Ku9_.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-6-wght-normal-ozUCEY9O.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-60-wght-normal-C1lngC61.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-61-wght-normal-BxWkGF5M.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-62-wght-normal-CXXMAq-5.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-63-wght-normal-4La5uKvS.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-64-wght-normal-CbIuD2Eg.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-65-wght-normal-BGqvKda2.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-66-wght-normal-BvNozWOY.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-67-wght-normal-CC-WRBV-.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-68-wght-normal-c0FjfUaj.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-69-wght-normal-D596Jjl2.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-70-wght-normal-ColEcmtJ.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-71-wght-normal-ChZfXpdg.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-72-wght-normal-D1VyfEG3.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-73-wght-normal-DwSJRYPJ.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-74-wght-normal-Cte7o1QG.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-75-wght-normal-B0qL41rF.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-76-wght-normal-BPLMO_2x.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-77-wght-normal-Dkbi3pye.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-78-wght-normal-BFUXeSw6.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-79-wght-normal-DoJG4UTB.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-80-wght-normal-BEFypWOO.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-81-wght-normal-ed_TZlfo.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-82-wght-normal-DcxfR5OJ.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-83-wght-normal-C9UjAcMM.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-84-wght-normal-C7NxT478.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-85-wght-normal-DBcDBu1n.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-86-wght-normal-CLJIoPpl.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-87-wght-normal-DYfJ-vGE.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-88-wght-normal-ClNDOCGW.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-89-wght-normal-IQU_KQA8.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-90-wght-normal-BWcrRNoG.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-91-wght-normal-CGekvDdH.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-97-wght-normal-BsBHkXi3.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-98-wght-normal-BZqSA1r_.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-99-wght-normal-Q_IptJM5.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-cyrillic-wght-normal-CRA5_Pf1.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-latin-ext-wght-normal-CqPqLCfe.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-latin-wght-normal-DYAKOyvl.woff2",
+      "GET courseware-editor://app/assets/noto-sans-sc-vietnamese-wght-normal-y5SU35Rl.woff2",
+      "GET courseware-editor://app/assets/stix-two-math-latin-400-normal-tfF5U0vx.woff2",
+      "GET courseware-preview://79aa8a4fc633145c30e858acc8e27f48.b6205db31ef97c88e7b33b10bec80dab.app/79aa8a4fc633145c30e858acc8e27f48b6205db31ef97c88e7b33b10bec80dab/file/three-sections.html",
+      "GET courseware-preview://79aa8a4fc633145c30e858acc8e27f48.b6205db31ef97c88e7b33b10bec80dab.app/79aa8a4fc633145c30e858acc8e27f48b6205db31ef97c88e7b33b10bec80dab/_agent/html-preview-agent.iife.js",
+      "GET courseware-preview://b39bb2245928e25e0b8efb871138344e.f925eafc3e8581811347fbf4da7502df.app/b39bb2245928e25e0b8efb871138344ef925eafc3e8581811347fbf4da7502df/file/sibling.html",
+      "GET courseware-preview://b39bb2245928e25e0b8efb871138344e.f925eafc3e8581811347fbf4da7502df.app/b39bb2245928e25e0b8efb871138344ef925eafc3e8581811347fbf4da7502df/_agent/html-preview-agent.iife.js",
+      "GET courseware-preview://79aa8a4fc633145c30e858acc8e27f48.b6205db31ef97c88e7b33b10bec80dab.app/79aa8a4fc633145c30e858acc8e27f48b6205db31ef97c88e7b33b10bec80dab/file/three-sections.html",
+      "GET courseware-preview://79aa8a4fc633145c30e858acc8e27f48.b6205db31ef97c88e7b33b10bec80dab.app/79aa8a4fc633145c30e858acc8e27f48b6205db31ef97c88e7b33b10bec80dab/_agent/html-preview-agent.iife.js",
+      "GET courseware-preview://4abc3475c209df65aa008328384a5365.2533a413199960b29935377ff04955f9.app/4abc3475c209df65aa008328384a53652533a413199960b29935377ff04955f9/file/security-one.html",
+      "GET courseware-preview://4abc3475c209df65aa008328384a5365.2533a413199960b29935377ff04955f9.app/4abc3475c209df65aa008328384a53652533a413199960b29935377ff04955f9/_agent/html-preview-agent.iife.js",
+      "GET courseware-preview://29d1a6e7b1602e70543ead19a11aa073.f26aad5c67901c74ba16b7d2b6417f7a.app/29d1a6e7b1602e70543ead19a11aa073f26aad5c67901c74ba16b7d2b6417f7a/file/security-two.html",
+      "GET courseware-preview://29d1a6e7b1602e70543ead19a11aa073.f26aad5c67901c74ba16b7d2b6417f7a.app/29d1a6e7b1602e70543ead19a11aa073f26aad5c67901c74ba16b7d2b6417f7a/_agent/html-preview-agent.iife.js",
+      "GET courseware-preview://4abc3475c209df65aa008328384a5365.2533a413199960b29935377ff04955f9.app/4abc3475c209df65aa008328384a53652533a413199960b29935377ff04955f9/secret.txt",
+      "GET courseware-preview://4abc3475c209df65aa008328384a5365.2533a413199960b29935377ff04955f9.app/4abc3475c209df65aa008328384a53652533a413199960b29935377ff04955f9/file/%252e%252e%252fsecret.txt"
+    ],
+    "failedRequests": [],
+    "responses": [
+      {
+        "url": "courseware-editor://app/assets/phaser.esm-BZvbyuOQ.js",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/main-CVF4xHsa.js",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/schemas-B8qGOHz7.js",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/installBundledFontFaces-qP-ZZ29Y.js",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/preload-helper-DWOi38-R.js",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/textLayout-DZkcbbJi.js",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/publishedCapture-D9fWw1uY.js",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/publishedDynamicHosts-DA3qALzt.js",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/playerCapture-D05beIWU.js",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/dynamicCandidateAdmission-CqW_pnrP.js",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/materialExtraction-D9ZvXop9.js",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/schema-CgwgUA64.js",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/main-D9on01gd.css",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-104-wght-normal-CJT2ioDJ.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-100-wght-normal-DrqXJETY.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-101-wght-normal-c94LAl5p.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-103-wght-normal-DGHo20nu.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-102-wght-normal-C1RtbCZr.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-105-wght-normal-BFoiJwz2.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-106-wght-normal-D6uUHw3w.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-107-wght-normal-kFQzJDLH.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-109-wght-normal-CnjNbNmw.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-108-wght-normal-7aXvqIa2.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-110-wght-normal-D2JBr045.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-111-wght-normal-ClFr5QXM.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-115-wght-normal-BN__2iBG.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-113-wght-normal-OgQXOX6x.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-114-wght-normal-CRH9SDZu.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-116-wght-normal-vdFVzbO2.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-117-wght-normal-Dsz3vkzU.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-119-wght-normal-BfzSEbFz.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-118-wght-normal-BPEb0gM9.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-22-wght-normal-VXjdYcT-.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-23-wght-normal-4HrHKhpL.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-24-wght-normal-B58DWgHS.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-27-wght-normal-BP2pEGQH.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-25-wght-normal-C3Jm6l7O.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-26-wght-normal-YNOygvr_.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-112-wght-normal-CiZxJMyY.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-29-wght-normal-45aVmHn_.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-28-wght-normal-BWPKDbtH.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-30-wght-normal-B8_s30jZ.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-31-wght-normal-DW0t445S.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-33-wght-normal-BOTZYTjM.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-21-wght-normal-DIu_1ZBI.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-32-wght-normal-ShbWPcei.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-34-wght-normal-BF1rqDSt.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-35-wght-normal-Bosspiyr.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-36-wght-normal-CtU9CyKw.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-37-wght-normal-ghDiyiuv.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-38-wght-normal-4Nz8k_dt.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-39-wght-normal-Ddtm1XVC.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-4-wght-normal-BRbPMj-C.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-40-wght-normal-BVn4-kgX.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-42-wght-normal-CQ4lY28u.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-41-wght-normal-CZqajZnl.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-44-wght-normal-cbKJlTUe.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-43-wght-normal-psppu0d8.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-45-wght-normal-MKIEVRIC.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-47-wght-normal-C5Kgg1_m.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-46-wght-normal-CErGc6Mt.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-50-wght-normal-C5KfAmFp.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-51-wght-normal-C2bq6hC8.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-5-wght-normal-DI846rD9.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-52-wght-normal-P18e_Y0j.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-53-wght-normal-Bgkuo2tF.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-49-wght-normal-B7l_3BZr.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-54-wght-normal-DL5lmlUd.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-55-wght-normal-BV_Oy6IF.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-48-wght-normal-DFMjDDY6.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-56-wght-normal-B4L7Hj8f.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-57-wght-normal-DU8YBsDj.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-58-wght-normal-CE0BKS9u.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-59-wght-normal-Azv2Ku9_.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-60-wght-normal-C1lngC61.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-61-wght-normal-BxWkGF5M.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-6-wght-normal-ozUCEY9O.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-62-wght-normal-CXXMAq-5.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-65-wght-normal-BGqvKda2.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-63-wght-normal-4La5uKvS.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-64-wght-normal-CbIuD2Eg.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-66-wght-normal-BvNozWOY.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-68-wght-normal-c0FjfUaj.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-67-wght-normal-CC-WRBV-.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-69-wght-normal-D596Jjl2.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-70-wght-normal-ColEcmtJ.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-72-wght-normal-D1VyfEG3.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-73-wght-normal-DwSJRYPJ.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-71-wght-normal-ChZfXpdg.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-77-wght-normal-Dkbi3pye.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-75-wght-normal-B0qL41rF.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-76-wght-normal-BPLMO_2x.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-78-wght-normal-BFUXeSw6.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-79-wght-normal-DoJG4UTB.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-80-wght-normal-BEFypWOO.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-74-wght-normal-Cte7o1QG.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-82-wght-normal-DcxfR5OJ.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-84-wght-normal-C7NxT478.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-86-wght-normal-CLJIoPpl.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-87-wght-normal-DYfJ-vGE.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-81-wght-normal-ed_TZlfo.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-88-wght-normal-ClNDOCGW.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-89-wght-normal-IQU_KQA8.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-90-wght-normal-BWcrRNoG.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-91-wght-normal-CGekvDdH.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-99-wght-normal-Q_IptJM5.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-98-wght-normal-BZqSA1r_.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-latin-ext-wght-normal-CqPqLCfe.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-83-wght-normal-C9UjAcMM.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-cyrillic-wght-normal-CRA5_Pf1.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-97-wght-normal-BsBHkXi3.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-latin-wght-normal-DYAKOyvl.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-vietnamese-wght-normal-y5SU35Rl.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/stix-two-math-latin-400-normal-tfF5U0vx.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-editor://app/assets/noto-sans-sc-85-wght-normal-DBcDBu1n.woff2",
+        "status": 200
+      },
+      {
+        "url": "courseware-preview://79aa8a4fc633145c30e858acc8e27f48.b6205db31ef97c88e7b33b10bec80dab.app/79aa8a4fc633145c30e858acc8e27f48b6205db31ef97c88e7b33b10bec80dab/file/three-sections.html",
+        "status": 200
+      },
+      {
+        "url": "courseware-preview://79aa8a4fc633145c30e858acc8e27f48.b6205db31ef97c88e7b33b10bec80dab.app/79aa8a4fc633145c30e858acc8e27f48b6205db31ef97c88e7b33b10bec80dab/_agent/html-preview-agent.iife.js",
+        "status": 200
+      },
+      {
+        "url": "courseware-preview://b39bb2245928e25e0b8efb871138344e.f925eafc3e8581811347fbf4da7502df.app/b39bb2245928e25e0b8efb871138344ef925eafc3e8581811347fbf4da7502df/file/sibling.html",
+        "status": 200
+      },
+      {
+        "url": "courseware-preview://b39bb2245928e25e0b8efb871138344e.f925eafc3e8581811347fbf4da7502df.app/b39bb2245928e25e0b8efb871138344ef925eafc3e8581811347fbf4da7502df/_agent/html-preview-agent.iife.js",
+        "status": 200
+      },
+      {
+        "url": "courseware-preview://79aa8a4fc633145c30e858acc8e27f48.b6205db31ef97c88e7b33b10bec80dab.app/79aa8a4fc633145c30e858acc8e27f48b6205db31ef97c88e7b33b10bec80dab/file/three-sections.html",
+        "status": 200
+      },
+      {
+        "url": "courseware-preview://79aa8a4fc633145c30e858acc8e27f48.b6205db31ef97c88e7b33b10bec80dab.app/79aa8a4fc633145c30e858acc8e27f48b6205db31ef97c88e7b33b10bec80dab/_agent/html-preview-agent.iife.js",
+        "status": 200
+      },
+      {
+        "url": "courseware-preview://4abc3475c209df65aa008328384a5365.2533a413199960b29935377ff04955f9.app/4abc3475c209df65aa008328384a53652533a413199960b29935377ff04955f9/file/security-one.html",
+        "status": 200
+      },
+      {
+        "url": "courseware-preview://4abc3475c209df65aa008328384a5365.2533a413199960b29935377ff04955f9.app/4abc3475c209df65aa008328384a53652533a413199960b29935377ff04955f9/_agent/html-preview-agent.iife.js",
+        "status": 200
+      },
+      {
+        "url": "courseware-preview://29d1a6e7b1602e70543ead19a11aa073.f26aad5c67901c74ba16b7d2b6417f7a.app/29d1a6e7b1602e70543ead19a11aa073f26aad5c67901c74ba16b7d2b6417f7a/file/security-two.html",
+        "status": 200
+      },
+      {
+        "url": "courseware-preview://29d1a6e7b1602e70543ead19a11aa073.f26aad5c67901c74ba16b7d2b6417f7a.app/29d1a6e7b1602e70543ead19a11aa073f26aad5c67901c74ba16b7d2b6417f7a/_agent/html-preview-agent.iife.js",
+        "status": 200
+      },
+      {
+        "url": "courseware-preview://4abc3475c209df65aa008328384a5365.2533a413199960b29935377ff04955f9.app/4abc3475c209df65aa008328384a53652533a413199960b29935377ff04955f9/secret.txt",
+        "status": 404
+      },
+      {
+        "url": "courseware-preview://4abc3475c209df65aa008328384a5365.2533a413199960b29935377ff04955f9.app/4abc3475c209df65aa008328384a53652533a413199960b29935377ff04955f9/file/%252e%252e%252fsecret.txt",
+        "status": 404
+      }
+    ],
+    "popups": [],
+    "processLog": []
+  }
+}

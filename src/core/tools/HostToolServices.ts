@@ -2,7 +2,7 @@ import { z } from 'zod'
 import type { DocumentOperation, DocumentSnapshot } from '../../shared/workbench/document'
 import type { ToolDefinition, ToolResult, ToolTarget, ToolRunGrant } from '../../shared/workbench/tools'
 import type { ImageGenerationRequest, ImageJobSnapshot, ImageModelSelection } from '../../shared/workbench/images'
-import { buildToolCallSchema, type BuildCreateTicket, type BuildCreateLookup, type BuildBudget, type BuildImportArtifact, type BuildJobInput, type BuildJobSnapshot, type BuildToolCall } from '../../shared/workbench/build'
+import { buildToolCallSchema, type BuildCreateTicket, type BuildCreateLookup, type BuildImportArtifact, type BuildJobInput, type BuildJobSnapshot, type BuildToolCall } from '../../shared/workbench/build'
 import type { HostImageInput } from './imageResource'
 import type { ComputeArtifact, ComputeJobInput, ComputeJobSnapshot } from '../../shared/workbench/compute'
 import { DocumentRegistry } from '../documents/DocumentRegistry'
@@ -36,8 +36,7 @@ export interface HostToolServices {
   delegation?: {
     availability(): { ready: boolean; reason: string }
     startManaged(input: { runId: string; jobId: string; taskId: string; goal: string; workspaceRoot: string;
-      permission: 'workspace' | 'full'; materials?: readonly string[]; expectedArtifacts: readonly string[];
-      timeoutMs?: number }): Promise<HostDelegationSnapshot>
+      permission: 'workspace' | 'full'; materials?: readonly string[]; expectedArtifacts: readonly string[] }): Promise<HostDelegationSnapshot>
     readArtifact(runId: string, jobId: string, name: string): Promise<{
       artifact: { name: string; digest: string; byteLength: number }; bytes: Uint8Array }>
     cancel(runId: string, jobId: string): Promise<HostDelegationSnapshot>
@@ -75,26 +74,26 @@ export interface HostToolServices {
     execute(runId: string, call: BuildToolCall): Promise<unknown>
     artifact(runId: string, jobId: string, artifactId: string): Promise<BuildImportArtifact>
     cancelRun(runId: string): Promise<unknown>
-    policy?(runId: string, documentId: string): { allowedOrigins: readonly string[]; budget?: Partial<BuildBudget> } | undefined | Promise<{ allowedOrigins: readonly string[]; budget?: Partial<BuildBudget> } | undefined>
+    policy?(runId: string, documentId: string): { allowedOrigins: readonly string[] } | undefined | Promise<{ allowedOrigins: readonly string[] } | undefined>
   }
 }
 export type HostJobRef = { runId: string; kind: 'image' | 'build' | 'compute' | 'delegation'; jobId: string }
 export type HostJobView = { kind: HostJobRef['kind']; jobId: string; status: string; terminal: boolean; snapshot: unknown }
 export type ComputeRunInput = Omit<ComputeJobInput, 'runId' | 'jobId'>
-export type DelegationRunInput = { goal: string; materials?: readonly string[]; expectedArtifacts: readonly string[]; timeoutMs?: number }
+export type DelegationRunInput = { goal: string; materials?: readonly string[]; expectedArtifacts: readonly string[] }
 export type DelegationReadInput = { job: string; name: string; offset?: number; limit?: number; version?: string }
 type HostDelegationSnapshot = { jobId: string; status: string; terminal: boolean; stopped: boolean;
   reason?: string; artifacts: readonly { name: string; digest: string; byteLength: number }[] }
-const handle = z.string().min(1).max(512)
+const handle = z.string().min(1)
 // The currently supported OAuth and OpenAI-compatible Images routes accept these
 // common request options; decoding still preserves the actual raster format.
 const output = z.object({ size: z.union([z.literal('auto'), z.string().regex(/^\d{2,5}x\d{2,5}$/)]).optional(), quality: z.enum(['auto', 'low', 'medium', 'high']).optional(), format: z.literal('png').optional(), background: z.enum(['auto', 'opaque', 'transparent']).optional() }).strict()
 // A document target is required for a V9 insertion workflow, but workspace
 // image work has no reason to manufacture an empty V9 document.
-const imageInput = z.object({ target: handle.optional(), prompt: z.string().min(1).max(200_000), output: output.optional() }).strict()
+const imageInput = z.object({ target: handle.optional(), prompt: z.string().min(1), output: output.optional() }).strict()
 const schema = {
   'image.generate': imageInput,
-  'image.edit': imageInput.extend({ references: z.array(handle).min(1).max(5) }).strict(),
+  'image.edit': imageInput.extend({ references: z.array(handle).min(1) }).strict(),
   'image.status': z.object({ job: handle }).strict(),
   'build.create': z.object({ target: handle }).strict(),
   'build.read': buildToolCallSchema.options[1].omit({ type: true, jobId: true }).extend({ job: handle, path: buildToolCallSchema.options[1].shape.path.optional() }).strict(),
@@ -114,7 +113,7 @@ const descriptions: Record<HostToolName, string> = {
   'build.write': '写入受管 scratch 相对路径，现有准入制品随源码变更失效；不能写正式工程或宿主任意路径。',
   'build.compile': '仅对指定 Component/Runtime JavaScript 做语法编译，不执行候选。通过不等于协议、闭包或真实动态准入；继续 build.check。',
   'build.check': '执行正式协议、来源、资源闭包及受影响动态目标的隔离宿主准入，返回可读错误或准备好的 artifact；尚未应用文档。',
-  'build.logs': '分页读取构建日志和精确错误，用于同一任务修复；预算或无进展耗尽后停止。',
+  'build.logs': '分页读取构建日志和精确错误，用于同一任务修复。',
   'build.import': '导入已准入 artifact，重新验证原 document/epoch/revision/project/digest/readset，资源与内容一次提交和撤销；前提变化即冲突。',
 }
 export const hostToolCatalog = (Object.keys(schema) as HostToolName[]).map(name => ({ name, description: descriptions[name], inputSchema: schema[name], manual: { label: name, group: (name.endsWith('.read') || name.endsWith('.logs') || name.endsWith('.status') ? 'read' : 'edit') as 'read' | 'edit', targetKinds: (name.startsWith('build.') ? ['document'] : ['document', 'course-owner', 'course-object', 'course-background', 'flow-block']) as ToolDefinition['manual']['targetKinds'] } }))
@@ -177,7 +176,7 @@ export class HostToolCoordinator {
     if (!match) throw new Error('独立参考图句柄无效；请使用本任务已完成图片的 resource 字段')
     return { jobId: match[1]!, resourceId: match[2]! }
   }
-  supports(name: string) { return name === 'skills.read' || name === 'skills.list' ? !!this.services.skills : name === 'view.observe' ? !!this.services.observations : name === 'html.import' ? !!this.services.htmlImports
+  supports(name: string) { return name === 'course.createFromHtml' ? false : name === 'skills.read' || name === 'skills.list' ? !!this.services.skills : name === 'view.observe' ? !!this.services.observations : name === 'html.import' ? !!this.services.htmlImports
     : name === 'file.save' || name === 'document.export' ? !!this.services.deliveries
       : !isHostToolName(name) || (name.startsWith('image.') ? !!this.services.images : !!this.services.builds) }
   observePage(context: ViewObserveToolContext, input: unknown): Promise<ToolResult> {
@@ -436,7 +435,7 @@ export class HostToolCoordinator {
   private buildResult(value: unknown): ToolResult {
     if (value && typeof value === 'object' && 'jobId' in value) {
       const job = value as BuildJobSnapshot
-      return { kind: 'read', data: { job: job.jobId, status: job.status, sourceRevision: job.sourceRevision, writes: job.writes, checks: job.checks, deadline: job.deadline, ...(job.artifactId ? { artifact: job.artifactId, prepared: true } : {}) } }
+      return { kind: 'read', data: { job: job.jobId, status: job.status, sourceRevision: job.sourceRevision, writes: job.writes, checks: job.checks, ...(job.artifactId ? { artifact: job.artifactId, prepared: true } : {}) } }
     }
     if (value && typeof value === 'object' && 'job' in value) {
       const listed = value as { job: BuildJobSnapshot; files: unknown }
@@ -486,7 +485,7 @@ export class HostToolCoordinator {
       const policy = await this.services.builds!.policy?.(runId, snapshot.documentId)
       this.authority.active(runId, snapshot.documentId, snapshot.epoch)
       const digest = documentDigest(snapshot.model)
-      const frozen: BuildJobInput = { runId, target: { documentId: snapshot.documentId, projectId: snapshot.model.project.id, epoch: snapshot.epoch, baseRevision: snapshot.revision, modelDigest: digest }, readSet: [{ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, digest }], baseline: snapshot.model, allowedOrigins: policy?.allowedOrigins ?? snapshot.model.project.network?.connectOrigins ?? [], ...(policy?.budget ? { budget: policy.budget } : {}) }
+      const frozen: BuildJobInput = { runId, target: { documentId: snapshot.documentId, projectId: snapshot.model.project.id, epoch: snapshot.epoch, baseRevision: snapshot.revision, modelDigest: digest }, readSet: [{ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, digest }], baseline: snapshot.model, allowedOrigins: policy?.allowedOrigins ?? snapshot.model.project.network?.connectOrigins ?? [] }
       const value = await this.services.builds!.create(structuredClone(frozen), { operationId, requestDigest })
       if (value.runId !== runId || documentDigest(value.target) !== documentDigest(frozen.target) || documentDigest(value.readSet) !== documentDigest(frozen.readSet)) throw new Error('构建服务返回了不同冻结前提的任务')
       const job: BuildJob = { kind: 'build', runId, documentId: snapshot.documentId, epoch: snapshot.epoch, jobId: value.jobId, frozen: structuredClone(frozen) }

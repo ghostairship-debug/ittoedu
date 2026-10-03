@@ -111,7 +111,6 @@ const safeRelativePathSchema = z.string()
   )
 
 const uniqueStrings = (label: string) => z.array(z.string().min(1).max(120))
-  .max(100)
   .refine((values) => new Set(values).size === values.length, `${label}不能重复`)
 
 const semanticVersionPattern = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?$/
@@ -202,7 +201,7 @@ const componentCatalogPackageSchema = z.object({
 export const componentCatalogSchema = z.object({
   catalogVersion: z.literal(COMPONENT_CATALOG_VERSION),
   name: z.string().min(1).max(200).optional(),
-  packages: z.array(componentCatalogPackageSchema).max(2_000),
+  packages: z.array(componentCatalogPackageSchema),
 }).strict().superRefine((catalog, context) => {
   const identities = new Set<string>()
   const paths = new Set<string>()

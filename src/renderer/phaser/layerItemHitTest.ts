@@ -93,7 +93,8 @@ export function layerItemIsHittable(
   }
   return item.kind === 'native' ||
     item.kind === 'component' ||
-    item.kind === 'runtime'
+    item.kind === 'runtime' ||
+    item.kind === 'composition'
 }
 
 export function adaptLayerItemHit(

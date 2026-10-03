@@ -4,11 +4,6 @@ import type {
   CourseStateScalar,
 } from '../course-state/types'
 
-/** Defensive authoring limits; these are not normal courseware targets. */
-export const MAX_SCENE_INTERACTIONS = 1_000
-export const MAX_INTERACTION_CONDITIONS = 16
-export const MAX_INTERACTION_ACTIONS = 32
-
 /** Runtime-visible discriminators shared by Schema and generated AI contracts. */
 export const INTERACTION_TRIGGER_TYPES = [
   'node.click',

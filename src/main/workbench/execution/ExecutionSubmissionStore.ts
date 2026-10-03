@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { ExecutionStart } from '../../../shared/workbench/execution'
 import type { ExecutionSubmissionRecord } from '../../../shared/workbench/executionDesktop'
+import { executionContentOutputSchema } from '../../../shared/workbench/executionDesktop'
 
 export interface StoredExecutionSubmission extends ExecutionSubmissionRecord {
   schemaVersion: 1
@@ -42,6 +43,12 @@ export class ExecutionSubmissionStore {
       || record.start.taskId !== record.submissionId || record.start.conversationId !== record.conversationId
       || !Array.isArray(record.documents) || !Array.isArray(record.attachments) || !Array.isArray(record.attachmentIds)
       || !Number.isSafeInteger(record.createdAt) || !Number.isSafeInteger(record.updatedAt)) throw new Error('执行提交恢复记录无效')
+    if (record.contentOutput) executionContentOutputSchema.parse(record.contentOutput)
+    if (record.start.contentOutput) executionContentOutputSchema.parse(record.start.contentOutput)
+    // The public target remains the user's original selection; explicit continuation may rebase its range in start.
+    if (Boolean(record.contentOutput) !== Boolean(record.start.contentOutput)
+      || record.contentOutput?.documentId !== record.start.contentOutput?.documentId)
+      throw new Error('正文改写的冻结输出目标不一致')
     return record
   }
   private async write(record: StoredExecutionSubmission): Promise<void> {

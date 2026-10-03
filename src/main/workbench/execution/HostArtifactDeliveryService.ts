@@ -6,7 +6,6 @@ import path from 'node:path'
 import type { ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
 import { validateWorkspaceEntryName } from '../WorkspaceFiles'
 
-const MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const missing = (error: unknown) => (error as NodeJS.ErrnoException)?.code === 'ENOENT'
 const code = (error: unknown) => (error as NodeJS.ErrnoException)?.code
@@ -117,7 +116,7 @@ export class HostArtifactDeliveryService {
   }
 
   private file(operationId: string): string {
-    if (!operationId || operationId.length > 256) throw new Error('成果操作编号无效')
+    if (!operationId) throw new Error('成果操作编号无效')
     return path.join(this.options.journalDirectory, `${hash(Buffer.from(operationId))}.json`)
   }
   private async readRecord(operationId: string): Promise<DeliveryRecord | null> {
@@ -189,9 +188,9 @@ export class HostArtifactDeliveryService {
 
   async deliver(input: ArtifactDeliveryInput): Promise<ArtifactDeliveryResult> {
     if (this.stoppedRuns.has(input.runId)) throw new DeliveryStopped()
-    if (!input.runId || input.runId.length > 512 || !input.sourceId || input.sourceId.length > 512
+    if (!input.runId || !input.sourceId
       || !['image', 'compute'].includes(input.sourceKind)) throw new Error('成果来源身份无效')
-    if (!(input.bytes instanceof Uint8Array) || input.bytes.byteLength > MAX_ARTIFACT_BYTES) throw new Error('成果字节无效或超过 256 MiB')
+    if (!(input.bytes instanceof Uint8Array)) throw new Error('成果字节无效')
     const bytes = Uint8Array.from(input.bytes), digest = hash(bytes)
     const scope = await this.preflight(input)
     if (scope.approvalRequired && !input.approvedTargetPath) throw new Error('成果写入需要本次目标的明确批准')

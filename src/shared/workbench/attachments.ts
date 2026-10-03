@@ -8,8 +8,8 @@ const nonnegative = z.number().int().nonnegative()
 export const attachmentBlobRefSchema = z.object({ digest, byteLength: nonnegative }).strict()
 export type AttachmentBlobRef = z.infer<typeof attachmentBlobRefSchema>
 export const attachmentSourceSchema = z.object({
-  kind: z.enum(['paste', 'drop', 'file', 'workspace']), authorizationId: z.string().min(1).max(512).optional(),
-  pathHint: z.string().max(32767).optional(), readOnly: z.literal(true),
+  kind: z.enum(['paste', 'drop', 'file', 'workspace']), authorizationId: z.string().min(1).optional(),
+  pathHint: z.string().optional(), readOnly: z.literal(true),
 }).strict()
 export const attachmentProvenanceSchema = z.object({
   originalDigest: digest, originalByteLength: nonnegative, producer: z.enum(['original-v1', 'utf8-v1', 'sharp-verified-v1', 'pdfjs-v1', 'office-xml-v1']),
@@ -18,23 +18,23 @@ export const attachmentProvenanceSchema = z.object({
   range: z.object({ unit: z.enum(['characters', 'pages']), from: nonnegative, to: nonnegative, total: nonnegative }).strict().optional(),
 }).strict()
 export type AttachmentProvenance = z.infer<typeof attachmentProvenanceSchema>
-const representation = { id: z.string().min(1).max(512), mediaType: z.string().min(1).max(100), blobRef: attachmentBlobRefSchema, provenance: attachmentProvenanceSchema }
+const representation = { id: z.string().min(1), mediaType: z.string().min(1), blobRef: attachmentBlobRefSchema, provenance: attachmentProvenanceSchema }
 export const attachmentRepresentationSchema = z.discriminatedUnion('kind', [
   z.object({ ...representation, kind: z.literal('file') }).strict(),
   z.object({ ...representation, kind: z.literal('image'), width: z.number().int().positive(), height: z.number().int().positive() }).strict(),
   z.object({ ...representation, kind: z.literal('text'), characters: nonnegative }).strict(),
 ])
 export const attachmentSnapshotSchema = z.object({
-  schemaVersion: z.literal(1), id: z.uuid(), name: z.string().min(1).max(300), capturedAt: nonnegative,
+  schemaVersion: z.literal(1), id: z.uuid(), name: z.string().min(1), capturedAt: nonnegative,
   derivedFrom: z.uuid().optional(),
-  state: z.literal('added'), source: attachmentSourceSchema, mediaType: z.string().min(1).max(100), byteLength: nonnegative,
+  state: z.literal('added'), source: attachmentSourceSchema, mediaType: z.string().min(1), byteLength: nonnegative,
   digest, blobRef: attachmentBlobRefSchema, representations: z.array(attachmentRepresentationSchema),
   coverage: z.object({ format: z.enum(['pdf', 'docx', 'pptx']), imageMode: z.enum(['auto', 'all']).optional(), complete: z.boolean(), totalPages: z.number().int().positive().optional(), selectedPages: z.object({ from: z.number().int().positive(), to: z.number().int().positive() }).strict().optional() }).strict().optional(),
   gaps: z.array(z.object({ code: z.enum(['extraction-unavailable', 'extraction-gap', 'scanned-page', 'unsupported-image']), message: z.string().min(1), locator: z.object({ part: z.string(), page: z.number().int().positive().optional(), paragraph: z.number().int().positive().optional() }).strict().optional(), resolutionRepresentationId: z.string().optional() }).strict()),
 }).strict()
 export type AttachmentSnapshot = z.infer<typeof attachmentSnapshotSchema>
 export type AttachmentRepresentation = z.infer<typeof attachmentRepresentationSchema>
-export const inputAttachmentReferenceSchema = z.object({ attachmentId: z.uuid(), representationId: z.string().min(1).max(512), role: z.enum(['reference', 'target']).optional(), delivery: z.enum(['source', 'inline']).optional() }).strict()
+export const inputAttachmentReferenceSchema = z.object({ attachmentId: z.uuid(), representationId: z.string().min(1), role: z.enum(['reference', 'target']).optional(), delivery: z.enum(['source', 'inline']).optional() }).strict()
 export type InputAttachmentReference = z.infer<typeof inputAttachmentReferenceSchema>
 export interface AttachmentReader {
   readSnapshot?(attachmentId: string): Promise<AttachmentSnapshot>
@@ -55,13 +55,6 @@ export interface InputContext {
   context: readonly { message: ModelChatMessage; provenance: InputContextProvenance }[]
   attachments: readonly InputAttachmentReference[]
   writeScope?: readonly { documentId: string; targets: readonly ToolTarget[] }[]
-}
-export interface PayloadBudget {
-  maxSerializedBytes: number
-  maxOriginalBytes?: number
-  maxRepresentationBytes?: number
-  maxImagePixels?: number
-  maxTextCharacters?: number
 }
 export interface PayloadManifest {
   schemaVersion: 1

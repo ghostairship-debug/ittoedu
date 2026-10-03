@@ -1,12 +1,11 @@
 import { z } from 'zod'
 import { makeAuthoringAddress } from '../../../shared/authoringAddress'
-import { MAX_PROJECT_FONT_BYTES } from '../../../shared/fonts/projectFontFile'
 import { planProjectFontImport } from '../../course/projectFontImport'
 import { resolveAuthoringToolScope } from './authoringToolScope'
 import type { AuthoringToolDefinition } from './executeAuthoringTool'
 
-const schema = z.object({ filename: z.string().min(1).max(500),
-  base64: z.string().min(1).max(Math.ceil(MAX_PROJECT_FONT_BYTES / 3) * 4).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+const schema = z.object({ filename: z.string().min(1),
+  base64: z.string().min(1).regex(/^[A-Za-z0-9+/]*={0,2}$/).refine(value => value.length % 4 === 0, 'Base64 字符数必须为 4 的倍数'),
 }).strict()
 export const fontAssetTool: AuthoringToolDefinition<z.infer<typeof schema>> = {
   name: 'asset.font.import', inputSchema: schema,

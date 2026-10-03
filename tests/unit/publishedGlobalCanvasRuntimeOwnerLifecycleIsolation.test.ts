@@ -25,6 +25,7 @@ vi.mock('@/player/surfaces/runtime/publishedCanvasRuntimeMount', () => ({
       element: container,
       applyAuthoringContentValue: () => false,
       applyAuthoringTextOverrides: () => false,
+      updateSize() {},
       waitForReady: () => {
         calls.push('ready')
         return Promise.resolve()

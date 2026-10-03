@@ -169,8 +169,7 @@ test('M25-T02 terminal orphan in an isolated profile keeps its receipt and does 
     selection: { model: 'fixture-terminal', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat',
       baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'fixture-only' },
       billing: { kind: 'unknown' }, capabilities: { tools: 'unknown', vision: 'unknown', stream: 'unknown', reasoning: 'unknown' } } } }
-  await runs.save({ schemaVersion: 1, runId, version: 1, input,
-    budget: { maxRequests: 5, maxToolCalls: 5, maxContextBytes: 1_000_000 }, status: 'completed',
+  await runs.save({ schemaVersion: 1, runId, version: 1, input, status: 'completed',
     createdAt: now, updatedAt: now, messages: [], initialMessageCount: 0,
     requests: [{ requestId: 'known-finished', state: 'completed' }], tools: [] })
   await submissions.create({ schemaVersion: 1, submissionId, workspaceId, conversationId,

@@ -18,9 +18,6 @@ export interface PublicHttpResponse {
 
 export interface PublicHttpOptions {
   signal?: AbortSignal
-  timeoutMs?: number
-  maxBytes?: number
-  maxRedirects?: number
   resolve?: (hostname: string) => Promise<readonly { address: string; family: 4 | 6 }[]>
 }
 
@@ -85,37 +82,44 @@ export async function resolveWithSyntheticFallback(hostname: string,
     ? publicResolve() : answers
 }
 
-async function publicAddress(url: URL, resolver: NonNullable<PublicHttpOptions['resolve']>): Promise<{ address: string; family: 4 | 6 }> {
+async function publicAddress(url: URL, resolver: NonNullable<PublicHttpOptions['resolve']>, signal: AbortSignal): Promise<{ address: string; family: 4 | 6 }> {
+  signal.throwIfAborted()
   const hostname = url.hostname.replace(/^\[|\]$/g, '')
   if (isIP(hostname)) return { address: hostname, family: isIP(hostname) as 4 | 6 }
   let answers: readonly { address: string; family: 4 | 6 }[]
-  try { answers = await resolver(hostname) } catch { throw new PublicHttpError('dns-failed', '网页域名解析失败') }
+  let onAbort!: () => void
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    onAbort = () => reject(signal.reason)
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+  try { answers = await Promise.race([resolver(hostname), cancelled]) }
+  catch {
+    if (signal.aborted) throw signal.reason
+    throw new PublicHttpError('dns-failed', '网页域名解析失败')
+  } finally { signal.removeEventListener('abort', onAbort) }
   if (!answers.length || answers.some(answer => !isPublicAddress(answer.address)))
     throw new PublicHttpError('private-target', '网页域名解析到本机、私有或保留地址')
   return answers[0]!
 }
 
-function oneRequest(url: URL, address: { address: string; family: 4 | 6 }, signal: AbortSignal, maxBytes: number): Promise<{ status: number; location?: string; contentType: string; charset?: string; bytes: Uint8Array }> {
+function oneRequest(url: URL, address: { address: string; family: 4 | 6 }, signal: AbortSignal, activity: () => void): Promise<{ status: number; location?: string; contentType: string; charset?: string; bytes: Uint8Array }> {
   return new Promise((resolve, reject) => {
     const client = url.protocol === 'https:' ? httpsRequest : httpRequest
     const req = client(url, { method: 'GET', signal, headers: { Accept: 'text/html, text/plain, application/pdf;q=0.5', 'Accept-Encoding': 'identity',
       'User-Agent': 'GuolingResearch/2.0' }, lookup: (_host, options, callback) => options.all
         ? callback(null, [{ address: address.address, family: address.family }])
         : callback(null, address.address, address.family) }, response => {
+      activity()
       const status = response.statusCode ?? 0
       const location = typeof response.headers.location === 'string' ? response.headers.location : undefined
       const contentTypeHeader = String(response.headers['content-type'] ?? 'application/octet-stream')
       const contentType = contentTypeHeader.split(';', 1)[0]!.trim().toLowerCase()
       const charset = contentTypeHeader.match(/(?:^|;)\s*charset\s*=\s*["']?([^;"'\s]+)/i)?.[1]
       if (status >= 300 && status < 400) { response.resume(); resolve({ status, location, contentType, bytes: new Uint8Array() }); return }
-      const announced = Number(response.headers['content-length'] ?? 0)
-      if (announced > maxBytes) { response.destroy(new PublicHttpError('too-large', '网页正文超过读取上限')); return }
-      let size = 0
       const chunks: Buffer[] = []
       response.on('data', (chunk: Buffer) => {
-        size += chunk.byteLength
-        if (size > maxBytes) response.destroy(new PublicHttpError('too-large', '网页正文超过读取上限'))
-        else chunks.push(chunk)
+        activity()
+        chunks.push(chunk)
       })
       response.on('error', reject)
       response.on('end', () => resolve({ status, contentType, ...(charset ? { charset } : {}), bytes: Buffer.concat(chunks) }))
@@ -127,35 +131,42 @@ function oneRequest(url: URL, address: { address: string; family: 4 | 6 }, signa
 
 /** DNS answers are checked and pinned to the actual socket for every hop. */
 export async function fetchPublicResource(raw: string, options: PublicHttpOptions = {}): Promise<PublicHttpResponse> {
-  const timeoutMs = options.timeoutMs ?? 12_000, maxBytes = options.maxBytes ?? 2 * 1024 * 1024, maxRedirects = options.maxRedirects ?? 5
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000 || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 20 * 1024 * 1024
-    || !Number.isSafeInteger(maxRedirects) || maxRedirects < 0 || maxRedirects > 10) throw new PublicHttpError('invalid-limits', '网页读取限制无效')
   const controller = new AbortController()
+  let idleTimer: ReturnType<typeof setTimeout> | undefined
+  // Diagnose a stalled network operation; progress keeps a request alive regardless of total duration.
+  const activity = () => {
+    if (controller.signal.aborted) return
+    clearTimeout(idleTimer)
+    idleTimer = setTimeout(() => controller.abort(new PublicHttpError('timeout', '网页读取连续 5 分钟没有网络活动，请检查连接后重试')), 5 * 60_000)
+  }
+  activity()
   const onAbort = () => controller.abort()
   options.signal?.addEventListener('abort', onAbort, { once: true })
   if (options.signal?.aborted) controller.abort()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  timer.unref()
   try {
     let url = parsePublicUrl(raw)
     const resolver = options.resolve ?? (async (host: string) => resolveWithSyntheticFallback(host,
       async () => (await lookup(host, { all: true })).map(({ address, family }) => ({ address, family: family as 4 | 6 })),
       () => resolvePublicDnsOverHttps(host, controller.signal)))
-    for (let hop = 0; hop <= maxRedirects; hop++) {
-      if (controller.signal.aborted) throw new PublicHttpError('cancelled', '网页读取已取消或超时')
-      const address = await publicAddress(url, resolver)
-      const response = await oneRequest(url, address, controller.signal, maxBytes)
+    const visited = new Set<string>()
+    for (;;) {
+      if (controller.signal.aborted) throw new PublicHttpError('cancelled', '网页读取已取消')
+      if (visited.has(url.href)) throw new PublicHttpError('redirect-loop', '网页出现重复跳转循环')
+      visited.add(url.href)
+      const address = await publicAddress(url, resolver, controller.signal)
+      activity()
+      const response = await oneRequest(url, address, controller.signal, activity)
       if (response.status >= 300 && response.status < 400) {
-        if (!response.location || hop === maxRedirects) throw new PublicHttpError('redirect-limit', '网页跳转无效或超过上限')
+        if (!response.location) throw new PublicHttpError('invalid-redirect', '网页跳转缺少目标地址')
         url = parsePublicUrl(new URL(response.location, url).href)
         continue
       }
       if (response.status < 200 || response.status >= 300) throw new PublicHttpError('http-error', `网页返回 HTTP ${response.status}`)
       return { url: url.href, status: response.status, contentType: response.contentType, ...(response.charset ? { charset: response.charset } : {}), bytes: response.bytes }
     }
-    throw new PublicHttpError('redirect-limit', '网页跳转超过上限')
   } catch (cause) {
-    if (controller.signal.aborted) throw new PublicHttpError('cancelled', '网页读取已取消或超时')
+    if (controller.signal.aborted) throw controller.signal.reason instanceof PublicHttpError
+      ? controller.signal.reason : new PublicHttpError('cancelled', '网页读取已取消')
     throw cause
-  } finally { clearTimeout(timer); options.signal?.removeEventListener('abort', onAbort) }
+  } finally { clearTimeout(idleTimer); options.signal?.removeEventListener('abort', onAbort) }
 }

@@ -93,6 +93,10 @@ function applyDeveloperLayerItemJson(
   if (next.layerItemId !== current.layerItemId || next.kind !== current.kind) {
     throw new Error('对象 ID 和类型不可修改')
   }
+  if (next.kind === 'composition' && current.kind === 'composition'
+    && JSON.stringify(next.content) !== JSON.stringify(current.content)) {
+    throw new Error('请通过组合内容编辑入口修改内部内容；对象 JSON 可调整整体属性。')
+  }
   const store = useEditorStore.getState()
   const backend = selectSlideAuthoringBackend(store)
   const namedStateScene = row.owner === 'scene' && row.scopeToken.stateId !== null
@@ -143,7 +147,7 @@ function applyDeveloperLayerItemJson(
         )
         if (!propsResult.ok) return propsResult
         working = propsResult.nextSession ?? working
-      } else {
+      } else if (next.kind === 'runtime') {
         const runtimeResult = updateSlideRuntimeDefinition(working, next.layerItemId, {
           source: next.runtime.source,
           enabled: next.runtime.enabled,

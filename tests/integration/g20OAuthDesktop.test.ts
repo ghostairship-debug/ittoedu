@@ -4,14 +4,14 @@ import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
 import { OAuthDesktopService } from '../../src/main/workbench/providers/OAuthDesktopService'
 import { ExecutionSettingsDesktopService } from '../../src/main/workbench/providers/executionSettingsService'
 import type { CredentialEncryptionPort } from '../../src/main/workbench/providers/providerCredentials'
 
 const directories: string[] = [], servers: Server[] = []
-afterEach(async () => { await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) }))); await Promise.all(directories.splice(0).map(directory => fs.rm(directory, { recursive: true, force: true }))) })
+afterEach(async () => { vi.useRealTimers(); await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) }))); await Promise.all(directories.splice(0).map(directory => fs.rm(directory, { recursive: true, force: true }))) })
 function encryption(): CredentialEncryptionPort {
   const key = randomBytes(32)
   return { isEncryptionAvailable: () => true, encryptString: plaintext => { const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', key, iv)
@@ -39,6 +39,23 @@ async function tokenServer(handler?: (fields: URLSearchParams, response: ServerR
 }
 function callback(authorizationURL: string, state?: string) { const auth = new URL(authorizationURL), url = new URL(auth.searchParams.get('redirect_uri')!)
   url.search = new URLSearchParams({ state: state ?? auth.searchParams.get('state')!, code: 'new-owner-code' }).toString(); return url.toString() }
+
+it('human login remains pending beyond fifteen minutes and can finish through its real loopback callback', async () => {
+  const { store, saved } = await setup(); let authorizationURL = '', now = 1_000_000
+  const transport = await tokenServer()
+  const oauth = new OAuthDesktopService({ store, openExternal: async url => { authorizationURL = url }, callbackPort: 0, callbackHost: '127.0.0.1', fetch: transport, now: () => now })
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+  const started = await oauth.start(saved.connection.id, saved.connection.revision)
+  try {
+    now += 20 * 60_000
+    await vi.advanceTimersByTimeAsync(20 * 60_000)
+    vi.useRealTimers()
+    expect(oauth.status(started.loginId).status).toBe('pending')
+    expect((await store.read()).connections[0]?.hasCredential).toBe(false)
+    expect((await fetch(callback(authorizationURL))).status).toBe(200)
+    expect(oauth.status(started.loginId).status).toBe('connected')
+  } finally { vi.useRealTimers(); await oauth.cancel(started.loginId) }
+})
 
 it('real loopback login atomically saves current account and encrypted tokens, reopens, refreshes and revokes frozen revisions', async () => {
   const { directory, port, store, saved } = await setup(); let authorizationURL = '', now = 1_000_000, refreshes = 0

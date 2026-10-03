@@ -30,7 +30,6 @@
       },
       "slots": {
         "additionalProperties": {
-          "maxLength": 1200,
           "type": "string"
         },
         "propertyNames": {

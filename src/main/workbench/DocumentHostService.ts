@@ -18,6 +18,7 @@ import { createDocumentJournal, readDocumentFileVersion, readDocumentMarkdownRes
 import { DocumentToolGateway } from '../../core/tools/DocumentToolGateway'
 import { WorkspaceFiles, type WorkspaceFilesDependencies } from './WorkspaceFiles'
 import { DocumentFileCoordinator } from './DocumentFileCoordinator'
+import { FileArtifactService } from './FileArtifactService'
 import { prepareImageResource } from './admittedImageResource'
 import { createBlankCourseProject } from '../../core/course/createCourseProject'
 import { createDefaultTeacherControllerPackage } from '../../shared/defaultTeacherControllerComponent'
@@ -46,6 +47,7 @@ export class DocumentHostService {
   readonly tools: DocumentToolGateway
   readonly files: WorkspaceFiles
   readonly fileCoordinator: DocumentFileCoordinator
+  readonly artifacts: FileArtifactService
   private readonly journal
   private readonly drivers
   private readonly subscribed = new Set<string>()
@@ -63,6 +65,7 @@ export class DocumentHostService {
     this.fileCoordinator = new DocumentFileCoordinator(this.registry, this.journal, path.join(directory, 'binding-intents'))
     this.files = new WorkspaceFiles({ ...fileDependencies, aroundMutation: this.fileCoordinator.aroundMutation,
       aroundOperation: perform => this.fileCoordinator.withFileOperation(perform) })
+    this.artifacts = new FileArtifactService(this)
   }
 
   setEventSink(sink?: (event: DocumentEvent) => void): void { this.eventSink = sink }

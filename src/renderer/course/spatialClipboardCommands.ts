@@ -1,10 +1,9 @@
 import { rebuildTableItemIds } from '../../core/tools/nativeNodeFactories'
 import { rebuildChartItemIds } from '../../core/tools/chartIdentity'
+import { collectSlideClipboardResourceReferences, rewriteLayerInternalReferences } from '../../core/tools/slideClipboard'
 import { nanoid } from 'nanoid'
-import { MAX_SCENE_NODES } from '../../shared/constants'
 import { resolveEffectiveGlobalLayerPlanes } from '../../shared/courseLayerComposition'
 import {
-  MAX_SCENE_INTERACTIONS,
   isNodeMotionAction,
   isVideoInteractionAction,
   type InteractionRule,
@@ -204,32 +203,7 @@ function collectCopiedInteractionRules(
 }
 
 function collectResourceReferences(items: readonly LayerItem[]): SpatialClipboardResourceReferences {
-  const assetIds = new Set<string>()
-  const packages = new Map<string, string>()
-  for (const item of items) {
-    if (item.kind === 'component') {
-      packages.set(item.component.packageId, item.component.version)
-      if (item.staticFallbackAssetId) assetIds.add(item.staticFallbackAssetId)
-      continue
-    }
-    if (item.kind === 'runtime') {
-      Object.values(item.runtime.assets).forEach(({ assetId }) => assetIds.add(assetId))
-      if (item.runtime.staticFallback?.assetId) assetIds.add(item.runtime.staticFallback.assetId)
-      continue
-    }
-    if (item.content.nativeType === 'image') {
-      assetIds.add(item.content.data.assetId)
-    } else if (item.content.nativeType === 'video') {
-      assetIds.add(item.content.data.assetId)
-      if (item.content.data.poster.assetId) assetIds.add(item.content.data.poster.assetId)
-    }
-  }
-  return {
-    assetIds: [...assetIds].sort(),
-    componentPackages: [...packages]
-      .map(([packageId, version]) => ({ packageId, version }))
-      .sort((left, right) => left.packageId.localeCompare(right.packageId)),
-  }
+  return collectSlideClipboardResourceReferences(items)
 }
 
 function validateResourceReferences(
@@ -577,12 +551,6 @@ function validateClipboardForPaste(
   validateScopedVisibilityReferences(project, clipboard.items)
   validateRuntimeBindings(items, knownLayerItemIds)
   validateCopiedInteractionReferences(project, clipboard.interactions, knownLayerItemIds)
-  if (ownerItems(project, surface, clipboard.owner).length + items.length > MAX_SCENE_NODES) {
-    throw new Error(`粘贴后将超过当前图层范围 ${MAX_SCENE_NODES} 个元素的上限。`)
-  }
-  if (project.globalInteractions.length + clipboard.interactions.length > MAX_SCENE_INTERACTIONS) {
-    throw new Error(`当前作用域最多 ${MAX_SCENE_INTERACTIONS} 条互动规则`)
-  }
   return { surface, items }
 }
 
@@ -635,14 +603,7 @@ export function pasteSpatialClipboard(
         duplicate.locked = false
         duplicate.order = allocateCourseLayerOrder(draft, preferredOrder)
         preferredOrder = duplicate.order + 1
-        if (duplicate.kind === 'runtime' && duplicate.runtime.nodeBindings) {
-          duplicate.runtime.nodeBindings = Object.fromEntries(
-            Object.entries(duplicate.runtime.nodeBindings).map(([key, layerItemId]) => [
-              key,
-              layerIdMap.get(layerItemId) ?? layerItemId,
-            ]),
-          )
-        }
+        rewriteLayerInternalReferences(duplicate, layerIdMap)
         if (clipboard.owner === 'global') {
           draft.globalLayerItems.push({
             item: duplicate,

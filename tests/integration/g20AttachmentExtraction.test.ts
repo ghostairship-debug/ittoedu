@@ -133,3 +133,14 @@ it('accepts a real Office package above the former 32 MiB entry limit', async ()
   expect((await service.extract(source.id)).coverage).toMatchObject({ format: 'pptx', complete: true })
   expect((await service.readSnapshot(source.id)).byteLength).toBe(bytes.byteLength)
 })
+
+it('saves and reopens an extracted text representation beyond the former 16 MiB character quota', async () => {
+  const text = 'A'.repeat(16 * 1024 * 1024 + 1)
+  const service = await fixture({ extract: async () => ({ material: { version: 1, extractorVersion: 'fixture', format: 'docx',
+    fragments: [{ id: 'text', kind: 'text', locator: { part: 'word/document.xml', paragraph: 1 }, text }], assets: [], gaps: [] }, pageImages: [] }) })
+  const original = await service.receiveBytes({ name: 'long.docx', bytes: Uint8Array.from([80, 75, 3, 4]), source: { kind: 'drop' } })
+  const derived = await service.extract(original.id)
+  const reopened = new AttachmentService({ directory: roots.at(-1)! })
+  expect(new TextDecoder().decode((await reopened.readRepresentation(derived.id, 'extracted-1')).bytes)).toBe(text)
+  expect(await service.readSnapshot(original.id)).toEqual(original)
+})

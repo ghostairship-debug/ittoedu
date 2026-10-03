@@ -1,4 +1,5 @@
-import { captureDocumentReference } from './workbench/SelectionContextController'
+import { captureCompositionSelection, captureDocumentReference, workbenchSelection } from './workbench/SelectionContextController'
+import { findCompositionNode } from '../shared/composition/content'
 import { CourseAdvancedChrome, CourseEditorFrame } from './documents/CourseEditorChromeContext'
 import { CourseLightToolbar } from './documents/CourseLightToolbar'
 import { HtmlImportDialog, type HtmlImportDestination } from './documents/HtmlImportDialog'
@@ -1018,7 +1019,11 @@ export default function App() {
         exists: card => {
           const state = useEditorStore.getState(), project = selectActiveCourseProjectDocument(state), target = card.target
           if (!project || state.courseDocument.documentId !== card.documentId) return false
-          if (target.kind === 'course-object') return Boolean(locateCourseLayer(project, target.itemId))
+          if (target.kind === 'course-object') {
+            const item = locateCourseLayer(project, target.itemId)?.item
+            return Boolean(item && (!target.compositionNodeId
+              || item.kind === 'composition' && findCompositionNode(item.content.root, target.compositionNodeId)))
+          }
           const surface = target.kind === 'flow-block' ? project.surfaces.find(item => item.id === target.surfaceId) : undefined
           return target.kind === 'flow-block' && surface?.type === 'flow' && Boolean(findFlowBlockRecursive(surface.blocks, target.blockId))
         },
@@ -1041,6 +1046,17 @@ export default function App() {
           state.setEditingScope(global ? 'global' : 'scene')
           if (!global && target.stateId) state.setActivePresentationState(target.stateId)
           state.selectNode(target.itemId)
+          if (target.compositionNodeId) {
+            void workbenchSelection.prepare(card.documentId).then(snapshot => {
+              const current = useEditorStore.getState()
+              if (current.courseDocument.documentId !== card.documentId
+                || selectActiveCourseLocationId(current) !== target.locationId) return
+              workbenchSelection.setManual(card.documentId, captureCompositionSelection(snapshot, target.locationId,
+                target.itemId, target.compositionNodeId!, target.stateId, card.label))
+              elementCards.requestOpen(card.key)
+            }).catch(error => setError(error instanceof Error ? error.message : '所选内容已不存在。'))
+            return
+          }
           elementCards.requestOpen(card.key)
         },
       }}
@@ -1254,7 +1270,6 @@ export default function App() {
       <ExportSizeWarningDialog
         open={courseDelivery.largeHtmlByteLength !== null}
         byteLength={courseDelivery.largeHtmlByteLength ?? 0}
-        hardLimitBytes={courseDelivery.singleHtmlHardLimitBytes}
         onCancel={courseDelivery.cancelLargeHtml}
         onExportWebPackage={courseDelivery.exportLargeHtmlAsWebPackage}
         onContinueSingleHtml={courseDelivery.continueLargeHtml}

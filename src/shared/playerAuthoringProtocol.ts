@@ -7,6 +7,8 @@ import {
 import { nodeMotionActionSchema } from './interactionSchema'
 import type { NodeMotionAction } from './interactionTypes'
 import type { RuntimeAuthoringTargetUpdate } from './runtimeTypes'
+import type { PublishedCompositionLayerItem } from './publishedCourseTypes'
+import { publishedWebCompositionSchema } from './contracts/published-course-v2/schema'
 import { lightEditAssetOverridesSchema, lightEditTextOverridesSchema, type LightEditTextOverride } from './contracts/runtime/lightEdit'
 
 export interface PlayerAuthoringNativeNode {
@@ -51,6 +53,9 @@ export interface PlayerAuthoringContext {
 }
 
 export type PlayerAuthoringTarget =
+  | { kind: 'scene-canvas'; scope: 'scene' }
+  | { kind: 'composition-frame'; scope: PlayerAuthoringScope; nodeId: string }
+  | { kind: 'composition-content'; scope: PlayerAuthoringScope; nodeId: string }
   | {
       kind: 'native-node'
       scope: PlayerAuthoringScope
@@ -82,6 +87,9 @@ export type PlayerAuthoringTarget =
     }
 
 export type PlayerAuthoringPatch =
+  | { kind: 'scene-canvas'; target: Extract<PlayerAuthoringTarget, { kind: 'scene-canvas' }>; canvas: { width: number; height: number }; referenceCanvas?: { width: number; height: number } }
+  | { kind: 'composition-frame'; target: Extract<PlayerAuthoringTarget, { kind: 'composition-frame' }>; frame: { x: number; y: number; width: number; height: number }; rotation: number; opacity: number; visible: boolean }
+  | { kind: 'composition-content'; target: Extract<PlayerAuthoringTarget, { kind: 'composition-content' }>; content: PublishedCompositionLayerItem['content'] }
   | {
       kind: 'native-node'
       target: Extract<PlayerAuthoringTarget, { kind: 'native-node' }>
@@ -149,6 +157,9 @@ export const PLAYER_AUTHORING_CAPABILITIES = Object.freeze([
 export const PUBLISHED_AUTHORING_CAPABILITIES = Object.freeze([
   ...PLAYER_AUTHORING_CAPABILITIES,
   'runtime-content',
+  'composition-content',
+  'composition-frame',
+  'scene-canvas',
 ] as const)
 
 export type PlayerAuthoringCapabilities =
@@ -260,11 +271,18 @@ const componentLightEditsTargetSchema = z.object({
   scope: z.enum(['scene', 'global']),
   nodeId: identifier,
 }).strict()
+const compositionTargetSchema = z.object({ kind: z.literal('composition-content'), scope: z.enum(['scene', 'global']), nodeId: identifier }).strict()
+const compositionFrameTargetSchema = z.object({ kind: z.literal('composition-frame'), scope: z.enum(['scene', 'global']), nodeId: identifier }).strict()
+const sceneCanvasTargetSchema = z.object({ kind: z.literal('scene-canvas'), scope: z.literal('scene') }).strict()
+const authoringCanvasSchema = z.object({ width: z.number().finite().positive(), height: z.number().finite().positive() }).strict()
 const targetSchema = z.discriminatedUnion('kind', [
   nativeTargetSchema,
   sceneBackgroundTargetSchema,
   sceneOrderTargetSchema,
   runtimeContentTargetSchema,
+  compositionTargetSchema,
+  compositionFrameTargetSchema,
+  sceneCanvasTargetSchema,
 ])
 
 const legacyCapabilitiesSchema = z.tuple([
@@ -283,6 +301,9 @@ const publishedCapabilitiesSchema = z.tuple([
   z.literal('runtime-targets'),
   z.literal('component-targets'),
   z.literal('runtime-content'),
+  z.literal('composition-content'),
+  z.literal('composition-frame'),
+  z.literal('scene-canvas'),
 ])
 const readySchema = z.object({
   type: z.literal(PLAYER_AUTHORING_MESSAGE_TYPES.ready),
@@ -326,6 +347,9 @@ const authoringNativeNodeSchema = z.union([
 ])
 
 const patchSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('scene-canvas'), target: sceneCanvasTargetSchema, canvas: authoringCanvasSchema, referenceCanvas: authoringCanvasSchema.optional() }).strict(),
+  z.object({ kind: z.literal('composition-frame'), target: compositionFrameTargetSchema, frame: z.object({ x: z.number().finite(), y: z.number().finite(), width: z.number().finite().positive(), height: z.number().finite().positive() }).strict(), rotation: z.number().finite(), opacity: z.number().min(0).max(1), visible: z.boolean() }).strict(),
+  z.object({ kind: z.literal('composition-content'), target: compositionTargetSchema, content: publishedWebCompositionSchema }).strict(),
   z.object({
     kind: z.literal('native-node'),
     target: nativeTargetSchema,
@@ -463,7 +487,8 @@ function authoringTargetsEqual(
       expected.kind === 'runtime-content'
       && actual.nodeId === expected.nodeId
       && actual.key === expected.key
-    ))
+    )) && (actual.kind !== 'composition-content' || (expected.kind === 'composition-content' && actual.nodeId === expected.nodeId))
+    && (actual.kind !== 'composition-frame' || (expected.kind === 'composition-frame' && actual.nodeId === expected.nodeId))
 }
 
 /** Only the exact ACK for the snapshot's final command opens the edit canvas. */

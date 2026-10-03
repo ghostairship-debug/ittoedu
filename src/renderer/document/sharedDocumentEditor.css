@@ -40,3 +40,23 @@
 .document-generation-preview--markdown-blocks pre { white-space:pre-wrap; font-size:.9em; }
 .document-generation-preview[data-preview-structure=literal] { white-space:pre-wrap; }
 .document-generation-preview a { pointer-events:none; }
+.mermaid-preview{margin:0 0 6px;padding:10px;border:1px solid #e2e8f0;border-radius:6px;background:#ffffff;user-select:none;cursor:default}
+.mermaid-preview[data-state=empty],.mermaid-preview[data-state=loading]{border:0;padding:0;background:transparent}
+.mermaid-preview[data-state=loading]:empty{display:none}
+.mermaid-preview__svg{overflow-x:auto}
+.mermaid-preview__svg svg{max-width:100%;height:auto;display:block;margin:0 auto}
+.mermaid-preview__error{padding:8px;color:#b91c1c;font-size:13px;background:#fef2f2;border:1px solid #fecaca;border-radius:5px;white-space:pre-wrap}
+
+.shared-document-more__mode-notice{
+  max-width:280px;
+  margin:4px 6px 0;
+  padding:6px 10px;
+  font-size:12px;
+  line-height:1.4;
+  color:#991b1b;
+  background:#fef2f2;
+  border:1px solid #fecaca;
+  border-radius:5px;
+  white-space:normal;
+}
+

@@ -4,7 +4,10 @@ import { buildPublishedCourseV2Payload, collectPublishedCourseSourceIssues, coll
 import { AuthoringToolFailure } from './executeAuthoringTool'
 import { capturePublishedSurfacePng, waitForPublishedObservationReady } from '../../../player/surfaces/publishedCapture'
 import { bytesToBase64 } from '../../export/base64'
-import { exercisePublishedDynamicUpdates, exercisePublishedDynamicLifecycle } from '../../../player/surfaces/publishedDynamicUpdateProbe'
+import { exercisePublishedDynamicUpdates, exercisePublishedDynamicLifecycle, queryPublishedDynamicElements } from '../../../player/surfaces/publishedDynamicUpdateProbe'
+import { layerDynamicInstanceIds, projectDynamicInstanceInput, visitProjectDynamicInstances } from '../../../shared/composition/dynamic'
+import { walkComposition } from '../../../shared/composition/content'
+import { effectiveSceneCanvas } from '../../../shared/slideCanvas'
 import type { DynamicInstanceCapture } from '../../../shared/dynamicAdmissionContract'
 import { DYNAMIC_BEHAVIOR_SAMPLING, dynamicBehaviorObservationSchema, dynamicButtonCheckSchema, type DynamicBehaviorFrame, type DynamicBehaviorObservation, type DynamicButtonCheck, type DynamicButtonObservation } from '../../../shared/dynamicBehaviorObservation'
 import { resolveRuntimeDomButton } from '../generation/runtimeDomControlObservation'
@@ -46,7 +49,7 @@ function dynamicFallbackDiagnostics(
   targetLocationId: string,
   targetInstanceIds: readonly string[],
 ): string {
-  const markers = Array.from(root.querySelectorAll<HTMLElement>(dynamicFallbackSelector))
+  const markers = queryPublishedDynamicElements(root, dynamicFallbackSelector)
   const targetIds = new Set(targetInstanceIds)
   const describeRect = (element: HTMLElement) => {
     try {
@@ -94,21 +97,12 @@ function dynamicFallbackDiagnostics(
 
 function sourceIdentities(project: CourseProjectDocument, resources: HistoryResourceState, ids: readonly string[]) {
   const result: Record<string, string> = {}
-  const layer = (item: LayerItem) => {
-    if (!ids.includes(item.layerItemId)) return
-    if (item.kind === 'runtime') result[item.layerItemId] = componentRuntimeSourceIdentity(JSON.stringify({ runtime: item.runtime, frame: item.frame }))
-    if (item.kind === 'component') result[item.layerItemId] = componentRuntimeSourceIdentity(JSON.stringify({ component: item.component, contentIdentity: resources.componentPackages[item.component.packageId]?.contentSha256, props: item.props, frame: item.frame }))
-  }
-  const blocks = (items: FlowBlock[]) => items.forEach(item => {
-    if (item.type === 'section') blocks(item.blocks)
-    if (item.type === 'component' && ids.includes(item.id)) result[item.id] = componentRuntimeSourceIdentity(JSON.stringify({ component: item.component, contentIdentity: resources.componentPackages[item.component.packageId]?.contentSha256, props: item.props }))
-  })
-  project.globalLayerItems.forEach(entry => layer(entry.item))
-  project.surfaces.forEach(surface => {
-    surface.surfaceLayerItems.forEach(entry => layer(entry.item))
-    if (surface.type === 'slide') surface.scenes.forEach(scene => scene.layerItems.forEach(layer))
-    if (surface.type === 'spatial-2d') surface.world.layerItems.forEach(layer)
-    if (surface.type === 'flow') blocks(surface.blocks)
+  visitProjectDynamicInstances(project, entry => {
+    if (!ids.includes(entry.instanceId)) return
+    const component = entry.kind === 'component' ? entry.componentItem.component : undefined
+    const contentIdentity = component ? Object.values(resources.componentPackages).find(pkg =>
+      pkg.manifest.id === component.packageId && pkg.manifest.version === component.version)?.contentSha256 : undefined
+    result[entry.instanceId] = componentRuntimeSourceIdentity(JSON.stringify({ input: projectDynamicInstanceInput(entry), contentIdentity }))
   })
   return result
 }
@@ -118,15 +112,30 @@ function sourceIdentities(project: CourseProjectDocument, resources: HistoryReso
 function admissionProjection(project: CourseProjectDocument, instanceIds: readonly string[]): CourseProjectDocument {
   const next = structuredClone(project)
   const ids = new Set(instanceIds)
+  const contains = (item: LayerItem) => layerDynamicInstanceIds(item).some(id => ids.has(id))
   const activate = (item: LayerItem) => {
-    if (!ids.has(item.layerItemId)) return
+    if (!contains(item)) return
     item.visible = true
     item.playbackInitialVisibility = 'inherit'
     if (item.kind === 'runtime') item.runtime.enabled = true
+    if (item.kind === 'composition') walkComposition(item.content.root, node => {
+      if (node.kind === 'runtime' && ids.has(`${item.layerItemId}/${node.id}`)) node.runtime.enabled = true
+      if (node.kind === 'document') {
+        const expand = (blocks: FlowBlock[]): boolean => {
+          let found = false
+          for (const block of blocks) {
+            if (block.type === 'component' && ids.has(`${item.layerItemId}/${node.id}/${block.id}`)) found = true
+            if (block.type === 'section' && expand(block.blocks)) { block.collapsedByDefault = false; found = true }
+          }
+          return found
+        }
+        expand(node.content.blocks)
+      }
+    })
   }
-  next.globalLayerItems.forEach(entry => { activate(entry.item); if (ids.has(entry.item.layerItemId)) entry.visibility = { mode: 'all', locationIds: [] } })
+  next.globalLayerItems.forEach(entry => { activate(entry.item); if (contains(entry.item)) entry.visibility = { mode: 'all', locationIds: [] } })
   for (const surface of next.surfaces) {
-    surface.surfaceLayerItems.forEach(entry => { activate(entry.item); if (ids.has(entry.item.layerItemId)) entry.visibility = { mode: 'all', locationIds: [] } })
+    surface.surfaceLayerItems.forEach(entry => { activate(entry.item); if (contains(entry.item)) entry.visibility = { mode: 'all', locationIds: [] } })
     if (surface.type === 'flow') {
       const expandTargets = (blocks: FlowBlock[]): boolean => {
         let containsTarget = false
@@ -140,7 +149,7 @@ function admissionProjection(project: CourseProjectDocument, instanceIds: readon
     }
     if (surface.type === 'spatial-2d') {
       surface.world.layerItems.forEach(activate)
-      const worldTargets = surface.world.layerItems.filter(item => ids.has(item.layerItemId))
+      const worldTargets = surface.world.layerItems.filter(contains)
       if (worldTargets.length) {
         const left = Math.min(...worldTargets.map(item => item.frame.x))
         const top = Math.min(...worldTargets.map(item => item.frame.y))
@@ -149,12 +158,14 @@ function admissionProjection(project: CourseProjectDocument, instanceIds: readon
         const pose = { x: (left + right) / 2, y: (top + bottom) / 2, zoom: Math.min(1, 1152 / (right - left), 648 / (bottom - top)) }
         surface.camera.home = pose
         surface.camera.frames.forEach(frame => Object.assign(frame, pose))
-        surface.semanticZoom = surface.semanticZoom.map(rule => ({ ...rule, layerItemIds: rule.layerItemIds.filter(id => !ids.has(id)) })).filter(rule => rule.layerItemIds.length)
+        const layerIds = new Set(worldTargets.map(item => item.layerItemId))
+        surface.semanticZoom = surface.semanticZoom.map(rule => ({ ...rule, layerItemIds: rule.layerItemIds.filter(id => !layerIds.has(id)) })).filter(rule => rule.layerItemIds.length)
       }
     }
     if (surface.type === 'slide') for (const scene of surface.scenes) {
       scene.layerItems.forEach(activate)
-      for (const state of scene.presentation?.states ?? []) for (const id of ids) {
+      const layerIds = scene.layerItems.filter(contains).map(item => item.layerItemId)
+      for (const state of scene.presentation?.states ?? []) for (const id of layerIds) {
         const override = state.layerItemOverrides[id]
         if (override) { override.visible = true; override.playbackInitialVisibility = 'inherit' }
       }
@@ -173,7 +184,7 @@ export async function admitDynamicCandidate(project: CourseProjectDocument, reso
   const packages = collectPublishedCourseComponentKeys(project)
   resources = { ...resources, componentPackages: Object.fromEntries(Object.entries(resources.componentPackages).filter(([, pkg]) => packages.has(`${pkg.manifest.id}@${pkg.manifest.version}`))) }
   const api = typeof window !== 'undefined' ? window.desktopAPI?.dynamicAdmission : undefined
-  if (!api) return runDynamicCandidateHostSmoke(project, resources, targets, captureInstances, options)
+  if (!api) return runDynamicCandidateHostSmoke(project, resources, targets, captureInstances, { ...options, signal })
   const id = crypto.randomUUID()
   const payload = { project, captureInstances, observeBehavior: true, verificationMode: options.verificationMode ?? 'full-admission',
     ...(options.buttonCheck ? { buttonCheck: dynamicButtonCheckSchema.parse(options.buttonCheck) } : {}), targets: targets.map(target => ({ ...target, instanceIds: [...target.instanceIds] })),
@@ -202,13 +213,13 @@ export async function verifyDynamicCandidateBehavior(project: CourseProjectDocum
 /** Executes inside the disposable process, or the existing trusted browser Builder host. */
 export async function runDynamicCandidateHostSmoke(project: CourseProjectDocument, resources: HistoryResourceState,
   targets: readonly { locationId: string; stateId?: string | null; instanceIds: readonly string[] }[], captureInstances = false,
-  options: DynamicVerificationOptions & { capturePort?: DynamicBehaviorCapturePort } = {}): Promise<readonly DynamicInstanceCapture[]> {
+  options: DynamicVerificationOptions & { capturePort?: DynamicBehaviorCapturePort; signal?: AbortSignal } = {}): Promise<readonly DynamicInstanceCapture[]> {
+  if (options.signal?.aborted) throw new Error('动态准入已取消')
   if (options.buttonCheck && (options.verificationMode === 'public-props' || !options.capturePort?.clickAt
     || targets.filter(target => target.instanceIds.includes(options.buttonCheck!.instanceId)).length !== 1)) throw new Error('按钮检查需要唯一候选目标和真实独立窗口输入端口')
   await validateDynamicCandidateFallbackAssets(project, resources, targets.flatMap(target => target.instanceIds), options.assetResources)
   const captures: DynamicInstanceCapture[] = []
   const observed: DynamicBehaviorObservation[] = []
-  let captureBytes = 0
   const sources = { project, assetFiles: resources.assetFiles, components: resources.componentPackages, assetResources: options.assetResources }
   const fullAdmission = options.verificationMode !== 'public-props'
   const issues = fullAdmission ? collectPublishedCourseSourceIssues(sources) : []
@@ -226,6 +237,12 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
   const exercised = new Set<string>()
   let session: ReturnType<typeof createPublishedCourseSession> | undefined
   let runFailure: unknown
+  let cancel: (() => void) | undefined
+  const cancelled = options.signal ? new Promise<never>((_, reject) => {
+    cancel = () => reject(new Error('动态准入已取消'))
+    options.signal!.addEventListener('abort', cancel, { once: true })
+    if (options.signal!.aborted) cancel()
+  }) : undefined
   try {
   for (const { locationId, stateId, instanceIds } of targets) {
     const location = project.locations.find((entry) => entry.id === locationId)
@@ -241,7 +258,6 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
     const observation = () => frames.length ? dynamicBehaviorObservationSchema.parse({ version: 1, status: 'observed', mode: fullAdmission ? 'full-admission' : 'public-props',
       projectId: project.id, documentRevision: project.revision, locationId, stateId: initialStateId ?? null, instanceIds: [...instanceIds], sourceIdentities: sourceIdentities(project, resources, instanceIds),
       actions, frames, ...(buttonClick ? { buttonClick } : {}), elapsedMs: Math.max(0, Date.now() - startedAt), semanticVerdict: 'requires-review' }) : undefined
-    let timer: ReturnType<typeof setTimeout> | undefined
     let hostFailure: AuthoringToolFailure | undefined
     try {
       const firstTarget = !session
@@ -254,12 +270,11 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
         },
         onFailure: failure => { failures.push(String(failure.error)) } })
       const mountedSession = session
-      await Promise.race([
-        (async () => {
+      const work = (async () => {
           if (firstTarget) await mountedSession.mount(root)
           else await mountedSession.goToObservationTarget(locationId, initialStateId)
-          await waitForPublishedObservationReady(root)
-          const currentMounts = () => Array.from(root.querySelectorAll<HTMLElement>('.published-component-mount, .published-slide-phaser-component-mount, .published-surface-runtime-mount, .published-canvas-runtime-mount')).filter(element => {
+          await waitForPublishedObservationReady(root, options.signal)
+          const currentMounts = () => queryPublishedDynamicElements(activeSurfaceRoot(root, location.surfaceId), '.published-component-mount, .published-slide-phaser-component-mount, .published-surface-runtime-mount, .published-canvas-runtime-mount').filter(element => {
             // Reused sessions retain hidden hosts for other surfaces.
             const bounds = element.getBoundingClientRect()
             return bounds.width > 0 && bounds.height > 0
@@ -278,14 +293,12 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
           const sample = async (phase: DynamicBehaviorFrame['phase']) => {
             if (!active) throw new Error('动态观察已结束')
             if (!options.capturePort) return
-            await waitForPublishedObservationReady(root)
+            await waitForPublishedObservationReady(root, options.signal)
             const state = mountedSession.readObservationState()
             if (phase !== 'paused' && !state.ready) throw new Error('动态观察宿主未就绪')
             if (phase !== 'after-button-click' && (state.locationId !== locationId || state.stateId !== (initialStateId ?? null))) throw new Error('动态观察期间组件改变了待检查的位置或状态，需要检查实际跳转目标')
             const capture = await options.capturePort.captureFrame()
             if (!active) throw new Error('动态观察已结束')
-            captureBytes += capture.dataUrl.length
-            if (captureBytes > 48_000_000) throw new Error('动态观察图面超过本轮资源上限')
             frames.push({ ...capture, phase, elapsedMs: Math.max(0, capture.capturedAt - startedAt), stateVersion: state.stateVersion, publicState: JSON.parse(JSON.stringify(state.publicState)) })
           }
           if (options.capturePort && exerciseLifecycle) for (const at of DYNAMIC_BEHAVIOR_SAMPLING.runningAtMs) {
@@ -311,7 +324,7 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
           if (!suspended.ok) throw suspended.failure?.error ?? new Error('动态候选无法挂起')
           const resumed = await mountedSession.player.resumeSurface(location.surfaceId)
           if (!resumed.ok) throw resumed.failure?.error ?? new Error('动态候选无法恢复')
-          await waitForPublishedObservationReady(root)
+          await waitForPublishedObservationReady(root, options.signal)
           mountedElements = currentMounts()
           for (const id of instanceIds) if (!mountedElements.some(element => instanceId(element) === id)) throw new Error(`候选实例 ${id} 恢复后未实际挂载`)
           exerciseKeys.forEach(key => exercised.add(key))
@@ -323,31 +336,32 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
             const width = Math.round(owner.offsetWidth), height = Math.round(owner.offsetHeight)
             if (width <= 0 || height <= 0 || width > 4096 || height > 4096) throw new Error(`实例 ${id} 的后备图面尺寸超限或不可见`)
             const dataUrl = await capturePublishedSurfacePng({ root: owner, width, height, transparentBackground: true,
+              signal: options.signal,
               layers: [{ element: owner, x: 0, y: 0, width, height, rotation: 0, opacity: 1 }] })
             if (fullAdmission && element.dataset.componentInstanceId && !await componentHasVisibleContent(element, dataUrl)) {
               throw new AuthoringToolFailure([{ code: 'dynamic-component-empty-content',
                 message: `组件 ${id} 的 create 已返回，但实际宿主没有可见内容；请将创建的界面挂入 ctx.dom.root，并在就绪后提供实际绘制内容。`,
                 path: ['locations', locationId, 'instances', id, 'create'] }])
             }
-            captureBytes += dataUrl.length
-            if (captureBytes > 48_000_000) throw new Error('实例后备图面超过本轮资源上限')
             captures.push({ instanceId: id, locationId, width, height, dataUrl })
           }
           if (fullAdmission && (surface?.type === 'spatial-2d' || surface?.type === 'flow')) {
             // Flow's location JSON and Spatial's static camera pages are not
             // evidence that a candidate instance can prepare a capture. Probe
             // the mounted instances through the shared product capture barrier.
-            await capturePublishedSurfacePng({ root, width: 1280, height: 720,
+            await capturePublishedSurfacePng({ root, width: 1280, height: 720, signal: options.signal,
               layers: mountedElements.filter(element => instanceIds.includes(instanceId(element) ?? '')).map(element => {
                 const owner = dynamicCaptureOwner(element)
                 return { element: owner, x: 0, y: 0, width: Math.max(1, owner.clientWidth), height: Math.max(1, owner.clientHeight), rotation: 0, opacity: 1 }
               }) })
           } else if (fullAdmission) {
-            const capture = await mountedSession.player.captureSurface(location.surfaceId, { purpose: 'export', width: 1280, height: 720 })
+            const scene = surface?.type === 'slide' && location.kind === 'slide-scene' ? surface.scenes.find(scene => scene.id === location.sceneId) : undefined
+            const canvas = surface?.type === 'slide' ? effectiveSceneCanvas(surface, scene) : { width: 1280, height: 720 }
+            const capture = await mountedSession.player.captureSurface(location.surfaceId, { purpose: 'export', ...canvas })
             if (!capture.ok) throw new Error(`动态候选无法完成真实宿主捕获：${JSON.stringify(capture)}${failures.length ? `；${failures.join('；')}` : ''}`)
           }
           const activeRoot = activeSurfaceRoot(root, location.surfaceId)
-          if (activeRoot.querySelector(dynamicFallbackSelector)) {
+          if (queryPublishedDynamicElements(activeRoot, dynamicFallbackSelector).length) {
             throw new Error(`动态候选触发了静态后备：${dynamicFallbackDiagnostics(activeRoot, locationId, instanceIds)}`)
           }
           if (failures.length) throw new Error(failures.join('\n'))
@@ -391,9 +405,8 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
             await sample('after-button-click')
             if (failures.length) throw new Error(failures.join('\n'))
           }
-        })(),
-        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('动态候选真实宿主准入超时')), 12_000) }),
-      ])
+        })()
+      await (cancelled ? Promise.race([work, cancelled]) : work)
       const evidence = observation()
       if (evidence) { observed.push(evidence); options.onBehaviorEvidence?.([evidence]) }
       options.onTargetComplete?.()
@@ -403,13 +416,13 @@ export async function runDynamicCandidateHostSmoke(project: CourseProjectDocumen
         [...observed, ...(evidence ? [evidence] : []), ...(error instanceof AuthoringToolFailure ? error.behaviorEvidence ?? [] : [])])
     } finally {
       active = false
-      clearTimeout(timer)
     }
     if (hostFailure) throw hostFailure
     if (failures.length) throw new AuthoringToolFailure([{ code: 'dynamic-host-failed', message: failures.join('\n'), path: ['locations', locationId, 'instances', ...instanceIds] }], observed)
   }
   } catch (error) { runFailure = error }
   finally {
+    if (cancel) options.signal?.removeEventListener('abort', cancel)
     try { await session?.destroy() }
     catch (error) { runFailure = new AuthoringToolFailure([...(runFailure instanceof AuthoringToolFailure ? runFailure.diagnostics : []),
       { code: 'dynamic-host-destroy-failed', message: error instanceof Error ? error.message : String(error), path: ['destroy'] }], runFailure instanceof AuthoringToolFailure ? runFailure.behaviorEvidence : observed) }

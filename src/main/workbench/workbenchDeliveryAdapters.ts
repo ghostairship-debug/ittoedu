@@ -7,7 +7,6 @@ import type { DocumentSnapshot } from '../../shared/workbench/document'
 import type { ExportFormat } from '../../shared/workbench/toolPorts'
 import type { ToolRunGrant } from '../../shared/workbench/tools'
 import { isInsideRoot } from '../../shared/workbench/executionPermission'
-import { EXPORT_MAX_BYTES } from '../../shared/workbench/documentDelivery'
 import { startDirectory } from './execution/AgentFileService'
 
 type FileAccess = ToolRunGrant['fileAccess']
@@ -107,7 +106,7 @@ async function publishExport(filename: string, bytes: Uint8Array, expectedVersio
       throw Object.assign(new Error('导出目标已改变；原文件保留，请重新核对'), { code: 'export-version-conflict' })
   }
   try {
-    if (!bytes.byteLength || bytes.byteLength > EXPORT_MAX_BYTES) throw new Error('导出字节大小无效')
+    if (!bytes.byteLength) throw new Error('导出字节大小无效')
     signal?.throwIfAborted(); await check()
     const handle = await fs.open(temporary, 'wx')
     try { await handle.writeFile(bytes); await handle.sync() } finally { await handle.close() }
@@ -141,7 +140,6 @@ export const workbenchExportWriter = {
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error }
     if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('导出目标不是普通文件')
     const identity = stat.ino !== 0n ? `${stat.dev}:${stat.ino}` : null
-    if (stat.size > BigInt(EXPORT_MAX_BYTES)) return { fileVersion: 'oversize', sha256: 'oversize', publicationIdentity: identity }
     const handle = await fs.open(filename, 'r')
     try {
       const before = await handle.stat({ bigint: true })

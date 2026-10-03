@@ -32,9 +32,9 @@ const TOKEN_ENDPOINT = `${AUTH_ORIGIN}/oauth/token`
 const DEVICE_REDIRECT = `${AUTH_ORIGIN}/deviceauth/callback`
 const object = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === 'object' && !Array.isArray(v)
 const nonempty = (v: unknown): v is string => typeof v === 'string' && !!v.trim() && !/[\r\n]/.test(v)
-type Pending = { target: OAuthCredentialTarget; version: number; deadline: number; exchanging?: boolean } & (
+type Pending = { target: OAuthCredentialTarget; version: number; exchanging?: boolean } & (
   | { kind: 'browser'; state: string; verifier: string }
-  | { kind: 'device'; deviceAuthId: string; userCode: string; nextPollAt: number; intervalMs: number }
+  | { kind: 'device'; deviceAuthId: string; userCode: string; nextPollAt: number; intervalMs: number; expiresAt?: number }
 )
 function accountOf(accessToken: string): string {
   try {
@@ -64,12 +64,11 @@ export class ChatGPTOAuthClient {
   private async newPending(target: OAuthCredentialTarget) {
     if (!nonempty(target.credentialRef) || !nonempty(target.connectionId) || !Number.isSafeInteger(target.revision) || target.revision < 0
       || target.expectedAccountId !== undefined && !nonempty(target.expectedAccountId)) throw new ChatGPTOAuthError('invalid-target')
-    for (const [id, flow] of this.pending) if (flow.deadline <= this.now()) this.pending.delete(id)
+    for (const [id, flow] of this.pending) if (flow.kind === 'device' && !flow.exchanging && flow.expiresAt !== undefined && flow.expiresAt <= this.now()) this.pending.delete(id)
     // A new ceremony supersedes the old ceremony for the same credential reference.
     for (const [id, flow] of this.pending) if (flow.target.credentialRef === target.credentialRef) this.pending.delete(id)
-    if (this.pending.size >= 8) throw new ChatGPTOAuthError('too-many-login-attempts')
     const entry = await this.options.persistence.read(target.credentialRef)
-    return { target: structuredClone(target), version: entry.version, deadline: this.now() + 15 * 60_000 }
+    return { target: structuredClone(target), version: entry.version }
   }
   async beginAuthorization(target: OAuthCredentialTarget): Promise<{ loginId: string; authorizationURL: string }> {
     const base = await this.newPending(target), loginId = randomUUID()
@@ -84,7 +83,8 @@ export class ChatGPTOAuthClient {
   cancel(loginId: string): void { this.pending.delete(loginId) }
   private getPending(loginId: string): Pending {
     const flow = this.pending.get(loginId)
-    if (!flow || flow.deadline <= this.now()) { this.pending.delete(loginId); throw new ChatGPTOAuthError('login-expired-or-cancelled') }
+    // After provider authorization, the exchanged token has its own expiry.
+    if (!flow || flow.kind === 'device' && !flow.exchanging && flow.expiresAt !== undefined && flow.expiresAt <= this.now()) { this.pending.delete(loginId); throw new ChatGPTOAuthError('login-expired-or-cancelled') }
     return flow
   }
   async completeAuthorization(loginId: string, callbackURL: string, options: { signal?: AbortSignal } = {}): Promise<ChatGPTOAuthSummary> {
@@ -107,15 +107,19 @@ export class ChatGPTOAuthClient {
       return await this.persist(loginId, flow, token)
     } finally { if (this.pending.get(loginId) === flow) this.pending.delete(loginId) }
   }
-  async beginDeviceAuthorization(target: OAuthCredentialTarget, options: { signal?: AbortSignal } = {}): Promise<{ loginId: string; verificationURL: string; userCode: string; expiresAt: number; retryAfterMs: number }> {
+  async beginDeviceAuthorization(target: OAuthCredentialTarget, options: { signal?: AbortSignal } = {}): Promise<{ loginId: string; verificationURL: string; userCode: string; expiresAt?: number; retryAfterMs: number }> {
     const base = await this.newPending(target)
     const result = await this.request(`${AUTH_ORIGIN}/api/accounts/deviceauth/usercode`, { client_id: this.options.clientId }, false, options.signal)
     if (!nonempty(result.device_auth_id) || !nonempty(result.user_code)) throw new ChatGPTOAuthError('invalid-device-response')
     const interval = typeof result.interval === 'string' ? Number(result.interval) : result.interval
-    const intervalMs = typeof interval === 'number' && Number.isFinite(interval) && interval > 0 ? Math.max(1000, Math.min(60_000, interval * 1000)) : 5000
+    const intervalMs = typeof interval === 'number' && Number.isFinite(interval) && interval > 0 ? interval * 1000 : 5000
+    const expiresIn = typeof result.expires_in === 'string' ? Number(result.expires_in) : result.expires_in
+    if (expiresIn !== undefined && (typeof expiresIn !== 'number' || !Number.isFinite(expiresIn) || expiresIn <= 0)) throw new ChatGPTOAuthError('invalid-device-response')
+    // Only the provider can declare device-code expiry; browser login has no local deadline.
+    const expiresAt = expiresIn === undefined ? undefined : this.now() + expiresIn * 1000
     const loginId = randomUUID()
-    this.pending.set(loginId, { ...base, kind: 'device', deviceAuthId: result.device_auth_id, userCode: result.user_code, intervalMs, nextPollAt: this.now() + intervalMs })
-    return { loginId, verificationURL: `${AUTH_ORIGIN}/codex/device`, userCode: result.user_code, expiresAt: base.deadline, retryAfterMs: intervalMs }
+    this.pending.set(loginId, { ...base, kind: 'device', deviceAuthId: result.device_auth_id, userCode: result.user_code, intervalMs, nextPollAt: this.now() + intervalMs, ...(expiresAt === undefined ? {} : { expiresAt }) })
+    return { loginId, verificationURL: `${AUTH_ORIGIN}/codex/device`, userCode: result.user_code, retryAfterMs: intervalMs, ...(expiresAt === undefined ? {} : { expiresAt }) }
   }
   /** One poll per call, never earlier than the server interval. Host stops polling on cancel/window close. */
   async pollDeviceAuthorization(loginId: string, options: { signal?: AbortSignal } = {}): Promise<{ status: 'pending'; retryAfterMs: number } | { status: 'complete'; account: ChatGPTOAuthSummary }> {

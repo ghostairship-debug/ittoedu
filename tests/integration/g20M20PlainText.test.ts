@@ -78,7 +78,9 @@ it('M20-T02 local HTTP/SSE agent opens, reads, edits and creates formal text doc
       selection: { model: 'fixture-model', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat', baseURL: `http://127.0.0.1:${address.port}/v1`, accountId: 'fixture',
         auth: { kind: 'api-key', credentialRef: 'fixture' }, billing: { kind: 'unknown' }, capabilities: { tools: 'supported', stream: 'supported', vision: 'unsupported', reasoning: 'unknown' } } } })
     const result = await engine.wait(started.runId)
-    expect(result.status, JSON.stringify(result.tools.map(tool => tool.result))).toBe('completed')
+    // R3 之后 file.create 建立的新文件若 run 内未显式 file.save 落盘，run 状态为 partial（unconfirmedSave 门），
+    // 已 applied 的修改保留在宿主文档 session 中，由 host.saveToPath 显式持久化（见下方行）。
+    expect(result.status, JSON.stringify(result.tools.map(tool => tool.result))).toBe(intent === 'create' ? 'partial' : 'completed')
     expect(result.tools.map(tool => tool.result?.kind)).toEqual(['read', 'read', 'read', 'read', 'document-operation'])
     expect(turn).toBe(6)
   }
@@ -140,7 +142,9 @@ it('gives direct source write targets when opening .txt and creating .html', asy
         baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'fixture' },
         billing: { kind: 'unknown' }, capabilities: { tools: 'supported', stream: 'supported', vision: 'unsupported', reasoning: 'unknown' } } } })
     const run = await engine.wait(started.runId)
-    expect(run.status, JSON.stringify(run.tools.map(tool => tool.result))).toBe('completed')
+    // R3 之后 file.create 建立的 .html 新文件若 run 内未显式 file.save，run 状态为 partial（unconfirmedSave 门）；
+    // 修改仍 applied 到宿主文档 session，由后续 host 端显式持久化（见下方 readFile 断言验证磁盘原文未变）。
+    expect(run.status, JSON.stringify(run.tools.map(tool => tool.result))).toBe(intent === 'create' ? 'partial' : 'completed')
     expect(run.tools[1]?.result).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     const documentId = (run.tools[0]!.result as { data: { documentId: string } }).data.documentId
     expect((await host.internalAPI.read(documentId)).model).toMatchObject({ kind: 'text',

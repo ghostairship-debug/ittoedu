@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { DocumentHostAPI } from '../../shared/workbench/desktop'
 import type { DocumentSnapshot } from '../../shared/workbench/document'
 import type { CourseSurfaceDocument } from '../../shared/courseProjectTypes'
+import { effectiveSceneCanvas } from '../../shared/slideCanvas'
 import type { ImageResourceReference } from '../../shared/workbench/images'
 import type { ImageApplyCapture, ImageInsertionFrame, ImageResultOwner, ImageResultsDesktopAPI, ImageResultView } from '../../shared/workbench/imageResultsDesktop'
 import { workbenchSelection } from './SelectionContextController'
@@ -9,10 +10,13 @@ import './imageResultCard.css'
 
 const labels = { preparing: '准备中', running: '图片请求进行中', ready: '已生成，尚未应用', unapplied: '已生成，停止后尚未应用', stopped: '已停止', unknown: '结果未知；不会自动重发', failed: '图片请求失败' }
 const billingLabels = { metered: '按量付费', 'token-plan': 'Token Plan', subscription: '订阅', prepaid: '预付费', unknown: '未知' }
-function suggestedFrame(surface: CourseSurfaceDocument, resource: ImageResourceReference): ImageInsertionFrame {
+function suggestedFrame(surface: CourseSurfaceDocument, resource: ImageResourceReference, sceneId?: string): ImageInsertionFrame {
   const scale = Math.min(480 / resource.width, 320 / resource.height, 1)
   const width = Math.max(1, Math.round(resource.width * scale)), height = Math.max(1, Math.round(resource.height * scale))
-  if (surface.type === 'slide') return { x: surface.canvas.width - width - 48, y: surface.canvas.height - height - 48, width, height }
+  if (surface.type === 'slide') {
+    const canvas = effectiveSceneCanvas(surface, surface.scenes.find(scene => scene.id === sceneId))
+    return { x: canvas.width - width - 48, y: canvas.height - height - 48, width, height }
+  }
   if (surface.type === 'flow') return { x: Math.max(0, surface.layout.readingWidth - width - 32), y: 320, width, height }
   return { x: surface.camera.home.x + 160, y: surface.camera.home.y + 100, width, height }
 }
@@ -60,7 +64,7 @@ export function ImageResultCard({ api, owner, documents = window.desktopAPI?.doc
   const frame = parseFrame(frameValues)
   useEffect(() => {
     if (!surface || !resource) { setFrameValues({ x: '', y: '', width: '', height: '' }); return }
-    const suggested = suggestedFrame(surface, resource)
+    const suggested = suggestedFrame(surface, resource, location?.kind === 'slide-scene' ? location.sceneId : undefined)
     setFrameValues(Object.fromEntries(Object.entries(suggested).map(([key, value]) => [key, String(value)])) as typeof frameValues)
   }, [documentId, locationId, resourceId, surface?.id, resource?.width, resource?.height])
   const selection = documentId ? workbenchSelection.getManual(documentId) : null

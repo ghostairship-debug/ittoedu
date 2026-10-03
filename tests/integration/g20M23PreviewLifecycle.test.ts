@@ -175,6 +175,11 @@ describe('M23 preview lease lifecycle', () => {
         return { status: 'applied', revision: state.snapshot.revision, savedRevision: null, dirty: true,
           patch: { handle: request.target, kind: 'text', value: 'new' } }
       },
+      editSource: async () => {
+        commits += 1
+        state.snapshot.revision += 1
+        return { status: 'applied', revision: state.snapshot.revision, savedRevision: null, dirty: true, reload: true }
+      },
     })
     const request = { type: 'html-preview.edit' as const, operationId: 'human-op', documentId: 'document', epoch: 'epoch',
       baseRevision: 2, bindingVersion: 1, leaseId: lease.leaseId, loadId: lease.loadId, target: 'text-1',
@@ -185,5 +190,15 @@ describe('M23 preview lease lifecycle', () => {
     expect(commits).toBe(1)
     expect(await state.service.edit({ ...request, change: { kind: 'text', value: 'different' } })).toEqual({ status: 'rejected', reason: 'conflict' })
     expect(commits).toBe(1)
+    const sourceRequest = { ...request, type: 'html-preview.edit-source' as const, operationId: 'source-op',
+      baseRevision: state.snapshot.revision, command: { type: 'style' as const,
+        target: { kind: 'element' as const, from: 0, to: 10 }, patch: { gap: '16px' } } }
+    const sourceFirst = await state.service.editSource(sourceRequest)
+    expect(sourceFirst.status).toBe('applied')
+    expect(await state.service.editSource(sourceRequest)).toEqual(sourceFirst)
+    expect(commits).toBe(2)
+    expect(await state.service.editSource({ ...sourceRequest, command: { ...sourceRequest.command, patch: { gap: '24px' } } }))
+      .toEqual({ status: 'rejected', reason: 'conflict' })
+    expect(commits).toBe(2)
   })
 })

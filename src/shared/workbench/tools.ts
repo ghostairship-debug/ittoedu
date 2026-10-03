@@ -17,7 +17,7 @@ export type ToolTarget =
   | { kind: 'course-owner'; locationId: string; owner: 'scene' | 'global' | 'surface' | 'world'; stateId?: string; insertionOrigin?: { x: number; y: number } }
   | { kind: 'course-state'; locationId: string; stateId: string }
   | { kind: 'course-interaction'; locationId: string; ruleId: string; stateId?: string }
-  | { kind: 'course-object'; locationId: string; itemId: string; stateId?: string }
+  | { kind: 'course-object'; locationId: string; itemId: string; stateId?: string; compositionNodeId?: string }
   | { kind: 'flow-container'; surfaceId: string; parentId: string | null; index?: number }
   | { kind: 'flow-block'; surfaceId: string; blockId: string; parentId: string | null }
   | { kind: 'flow-range'; surfaceId: string; blockId: string; parentId: string | null; slot: DocumentSlot; from: number; to: number }

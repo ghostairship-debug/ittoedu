@@ -95,7 +95,7 @@ export function isolatePublishedDynamicItemPayload(
   const target = sceneMatches[0]
     ?? surfaceMatches[0]?.item
     ?? globalMatches[0]?.item
-  if (!target || (target.kind !== 'component' && target.kind !== 'runtime')) {
+  if (!target || (target.kind !== 'component' && target.kind !== 'runtime' && target.kind !== 'composition')) {
     throw new Error(`Published 图层“${layerItemId}”不是可实例捕获的动态图层`)
   }
   scene.layerItems = sceneMatches

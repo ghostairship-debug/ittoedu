@@ -99,7 +99,7 @@ it('M08-T04 keeps good snapshots while a failed read is retried, another failed 
   await waitFor(() => expect(references).toHaveLength(2))
   expect(api.cancel).toHaveBeenCalledWith(largeRequestId)
   const compiled = await new PayloadCompiler({ attachments: store, serializePayload: serializeModelRequest }).compile({
-    input: { id: 'm08', capturedAt: 1, instruction: '', context: [], attachments: sent }, selection, tools: [], budget: { maxSerializedBytes: 100_000 },
+    input: { id: 'm08', capturedAt: 1, instruction: '', context: [], attachments: sent }, selection, tools: [],
   })
   expect(compiled.manifest.explicitAttachments).toHaveLength(2)
   expect(compiled.serialized).toContain('GOOD ORIGINAL'); expect(compiled.serialized).toContain('BAD RECOVERED')

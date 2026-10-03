@@ -313,7 +313,7 @@ function sameJson(left: unknown, right: unknown): boolean {
 }
 
 function nativeItem(
-  layer: { item: { kind: string; content?: { nativeType: string } } },
+  layer: { item: { kind: string } },
 ): layer is { item: NativeLayerItem } {
   return layer.item.kind === 'native'
 }

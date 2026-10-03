@@ -12,23 +12,35 @@ import { operateWorkspaceFiles } from '../workspaceFilesDesktopService'
 
 export class AttachmentsDesktopService {
   readonly attachments: AttachmentService
-  private readonly grants = new Map<string, { path: string; kind: 'file' | 'workspace'; owner: number; expires: number }>()
+  private readonly grants = new Map<string, { path: string; kind: 'file' | 'workspace'; owner: number }>()
   private readonly extractions = new Map<string, { controller: AbortController; owner: number }>()
-  private readonly cancelled = new Map<string, number>()
-  private readonly gestures = new Map<string, { expires: number; result: Promise<AttachmentIntakeFile[]> }>()
+  private readonly cancelled = new Set<string>()
+  private readonly gestures = new Map<string, Promise<AttachmentIntakeFile[]>>()
+  private readonly windows = new Set<number>()
   constructor(directory: string) {
     const dev = process.env.VITE_DEV_SERVER_URL
     this.attachments = new AttachmentService({ directory, resolveAuthorizedPath: async id => {
       const grant = this.grants.get(id)
-      if (!grant || grant.expires < Date.now()) throw new AttachmentError('path-not-authorized', '附件文件读取授权已失效')
+      if (!grant) throw new AttachmentError('path-not-authorized', '附件文件读取授权已失效')
       return { path: grant.path, kind: grant.kind }
     }, extractor: createSandboxedAttachmentExtractor({ preloadPath: path.resolve(__dirname, '../../../preload/attachmentExtraction.js'),
       ...(dev ? { rendererURL: new URL('attachment-extraction.html', dev.endsWith('/') ? dev : `${dev}/`).href } : { rendererFile: path.resolve(__dirname, '../../../../dist-renderer/attachment-extraction.html') }),
     }) })
   }
+  private retainWindow(window: BrowserWindow): void {
+    const owner = window.webContents.id
+    if (this.windows.has(owner)) return
+    this.windows.add(owner)
+    window.webContents.once('destroyed', () => {
+      this.windows.delete(owner)
+      for (const [id, grant] of this.grants) if (grant.owner === owner) this.grants.delete(id)
+      for (const key of this.cancelled) if (key.startsWith(`${owner}:`)) this.cancelled.delete(key)
+      for (const key of this.gestures.keys()) if (key.startsWith(`${owner}:`)) this.gestures.delete(key)
+    })
+  }
   private grant(filename: string, window: BrowserWindow, kind: 'file' | 'workspace' = 'file'): AttachmentIntakeFile {
-    if (this.grants.size >= 2000) throw new AttachmentError('too-many-pending', '待处理附件过多')
-    const authorizationId = randomUUID(); this.grants.set(authorizationId, { path: filename, kind, owner: window.webContents.id, expires: Date.now() + 10 * 60_000 })
+    if (window.webContents.isDestroyed()) throw new AttachmentError('operation-cancelled', '附件窗口已关闭')
+    const authorizationId = randomUUID(); this.grants.set(authorizationId, { path: filename, kind, owner: window.webContents.id })
     return { authorizationId, name: path.basename(filename) }
   }
   private async controlled<T>(requestId: string, window: BrowserWindow, action: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -47,9 +59,7 @@ export class AttachmentsDesktopService {
   }
   private async dispatch(raw: unknown, window: BrowserWindow, onProgress?: (progress: AttachmentReadProgress) => void): Promise<unknown> {
     const input = attachmentsDesktopRequestSchema.parse(raw)
-    for (const [id, grant] of this.grants) if (grant.expires < Date.now()) this.grants.delete(id)
-    for (const [id, expires] of this.cancelled) if (expires < Date.now()) this.cancelled.delete(id)
-    for (const [id, gesture] of this.gestures) if (gesture.expires < Date.now()) this.gestures.delete(id)
+    this.retainWindow(window)
     switch (input.type) {
       case 'select': {
         const result = await dialog.showOpenDialog(window, { title: '添加附件', properties: ['openFile', 'multiSelections'], filters: [{ name: '图片与文档', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'pdf', 'docx', 'pptx', 'md', 'markdown', 'txt', 'csv'] }] })
@@ -58,9 +68,9 @@ export class AttachmentsDesktopService {
       case 'clipboard-files': {
         if (!window.isFocused()) throw new AttachmentError('clipboard-not-focused', '粘贴窗口未聚焦')
         const key = `${window.webContents.id}:${input.gestureId}`, prior = this.gestures.get(key)
-        if (prior) return prior.result
+        if (prior) return prior
         const result = readClipboardFileList().then(files => files.map(filename => this.grant(filename, window)))
-        this.gestures.set(key, { expires: Date.now() + 30_000, result }); return result
+        this.gestures.set(key, result); return result
       }
       case 'workspace-files': {
         return Promise.all(input.entryIds.map(async entryId => {
@@ -87,7 +97,7 @@ export class AttachmentsDesktopService {
         const key = `${window.webContents.id}:${input.requestId}`
         const running = this.extractions.get(key)
         if (running) running.controller.abort(new AttachmentError('operation-cancelled', '附件处理已取消'))
-        else this.cancelled.set(key, Date.now() + 60_000)
+        else this.cancelled.add(key)
         return
       }
       case 'extract': return this.controlled(input.requestId, window, signal => this.attachments.extract(input.attachmentId, { pages: input.pages, images: input.images ?? 'auto', signal,

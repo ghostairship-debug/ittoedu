@@ -14,6 +14,7 @@ import { ExecutionEventStore } from '../../src/main/workbench/execution/Executio
 import { AttachmentService } from '../../src/main/workbench/attachments/AttachmentService'
 import type { ModelProvider, ModelSelection } from '../../src/shared/workbench/modelProvider'
 import type { ExternalConnection } from '../../src/shared/workbench/external'
+import { externalGrantSchema } from '../../src/shared/workbench/external'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 import type { ToolResult } from '../../src/shared/workbench/tools'
 
@@ -24,6 +25,14 @@ const selection: ModelSelection = { model: 'fixture', connection: { id: 'fixture
   billing: { kind: 'unknown' }, capabilities: { tools: 'supported', stream: 'supported', vision: 'supported', reasoning: 'supported' } } }
 const reference = (snapshot: DocumentSnapshot) => ({ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
   writable: [{ kind: 'markdown-range' as const, from: 0, to: 3 }] })
+
+it('accepts large external task descriptions and document selections without artificial contract quotas', () => {
+  const document = { documentId: 'document', epoch: 'epoch', revision: 1, writable: [] }
+  const input = { workspaceId: 'space', conversationId: 'conversation', expectedRevision: 1,
+    instruction: '内容'.repeat(50_001), remainingWork: '任务'.repeat(50_001), documents: Array.from({ length: 101 }, () => document) }
+  expect(externalGrantSchema.parse(input)).toEqual(input)
+  expect(externalGrantSchema.safeParse({ ...input, documents: [] }).success).toBe(false)
+})
 async function fixture(provider: ModelProvider = { async *stream() { throw new Error('No model request expected') } }) {
   const directory = await mkdtemp(path.join(tmpdir(), 'g20-external-service-'))
   cleanups.push(() => rm(directory, { recursive: true, force: true }))
@@ -143,7 +152,7 @@ it('settles a real built-in run, transfers only receipts and frozen attachment r
   expect((await f.events.snapshot(f.owner.conversationId)).items.filter(item => item.source === 'external-mcp').some(item => ['usage', 'reasoning', 'run.end'].includes(item.type))).toBe(false)
 })
 
-it('fails closed on registration races, expiry and changed selections without renewing frozen authority', async () => {
+it('fails closed on registration races, explicit revocation and changed selections without renewing frozen authority', async () => {
   const f = await fixture()
   const input = { ...f.owner, expectedRevision: f.conversation.revision, instruction: '修改', documents: [reference(f.document)] }
   const write = vi.spyOn(f.conversations, 'updateConversation').mockRejectedValueOnce(new Error('registration lost'))
@@ -152,14 +161,36 @@ it('fails closed on registration races, expiry and changed selections without re
   const failed = (await f.service.list(f.owner))[0]
   expect(failed.status).toBe('revoked')
   await expect(f.host.tools.issueTarget(failed.runId, f.document.documentId, { kind: 'document' })).rejects.toThrow('任务已停止')
-  const granted = await f.service.grant({ ...input, lifetimeMs: 1000 })
+  const granted = await f.service.grant(input)
   const { client } = await connect(granted.connection)
-  f.advance(1001)
+  await f.service.revoke({ ...f.owner, connectionId: granted.connection.connectionId })
   await expect(client.listTools()).rejects.toThrow()
-  expect((await f.service.list(f.owner)).at(-1)!.status).toBe('expired')
+  expect((await f.service.list(f.owner)).at(-1)!.status).toBe('revoked')
   await expect(f.host.tools.issueTarget(granted.connection.runId, f.document.documentId, { kind: 'document' })).rejects.toThrow('任务已停止')
   await f.host.internalAPI.dispatch({ documentId: f.document.documentId, epoch: f.document.epoch, operationId: 'human', baseRevision: f.document.revision,
     actor: 'human', mutation: { type: 'command', command: { type: 'markdown.splice', from: 0, to: 0, text: 'H ' } } })
   await expect(f.service.grant({ ...input, expectedRevision: granted.conversation.revision })).rejects.toThrow('所选文档或范围已改变')
   expect(f.host.registry.get(f.document.documentId).read().model).toMatchObject({ source: 'H AAA BBB' })
+})
+
+it('keeps HTTP authorization and tickets usable beyond the former eight-hour and 4096-ticket limits until explicit revocation', async () => {
+  const f = await fixture()
+  const granted = await f.service.grant({ ...f.owner, expectedRevision: f.conversation.revision,
+    instruction: '长程修改', documents: [reference(f.document)] })
+  const { client, context } = await connect(granted.connection)
+  f.advance(8 * 60 * 60_000 + 1)
+  expect((await f.service.list(f.owner))[0].status).toBe('active')
+  // Re-reading context issues real host tickets over HTTP, without repeating document writes.
+  for (let count = 0; count < 256; count++) await client.readResource({ uri: 'guoling://task/context' })
+  const latest = await client.readResource({ uri: 'guoling://task/context' })
+  if (!('text' in latest.contents[0])) throw new Error('Task context must be text')
+  const next = JSON.parse(latest.contents[0].text)
+  const applied = await client.callTool({ name: 'text.replace', arguments: { ticket: next.operationTickets[0],
+    arguments: { target: context.documents[0].writable[0].target, content: '长程完成' } } })
+  expect(applied.structuredContent).toMatchObject({ result: { kind: 'document-operation', result: { status: 'applied' } } })
+  expect(f.host.registry.get(f.document.documentId).read().model).toMatchObject({ source: '长程完成 BBB' })
+  await f.service.revoke({ ...f.owner, connectionId: granted.connection.connectionId })
+  await expect(client.callTool({ name: 'text.replace', arguments: { ticket: next.operationTickets[1],
+    arguments: { target: context.documents[0].writable[0].target, content: '迟到' } } })).rejects.toThrow()
+  expect(f.host.registry.get(f.document.documentId).read().model).toMatchObject({ source: '长程完成 BBB' })
 })

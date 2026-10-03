@@ -403,7 +403,7 @@ test('M17-T04: remote script import succeeds while CSP blocks requests; local an
   const remote = createServer((request, response) => { remoteRequests.push(request.url ?? ''); response.writeHead(418); response.end('unauthorized') })
   await new Promise<void>(resolve => remote.listen(0, '127.0.0.1', resolve))
   const port = (remote.address() as { port: number }).port
-  writeFileSync(join(workspace, 'blocked.html'), `<!doctype html><html><head><meta charset="utf-8"><script src="https://127.0.0.1:${port}/remote-script.js"></script></head><body>${body}</body></html>`)
+  writeFileSync(join(workspace, 'blocked.html'), `<!doctype html><html><head><meta charset="utf-8"><script>window.__m17Csp=[];document.addEventListener('securitypolicyviolation',event=>window.__m17Csp.push({directive:event.effectiveDirective,blockedURI:event.blockedURI,disposition:event.disposition}))</script><script src="https://127.0.0.1:${port}/remote-script.js"></script></head><body>${body}</body></html>`)
   let app: ElectronApplication | undefined
   try {
     app = await launchSelectionApp(directory)
@@ -432,6 +432,12 @@ test('M17-T04: remote script import succeeds while CSP blocks requests; local an
     expect(JSON.stringify(afterImport.model)).toContain('remote-script.js')
     expect(afterImport.dirty).toBe(true)
     expect(readFileSync(join(workspace, courseName))).toEqual(diskBefore)
+    const remoteFrame = await importedFrame(page, 'last')
+    const violations = () => remoteFrame.locator('body').evaluate(() =>
+      (window as Window & { __m17Csp?: { directive: string; blockedURI: string; disposition: string }[] }).__m17Csp ?? [])
+    await expect.poll(async () => (await violations()).some(event => event.directive.startsWith('script-src') &&
+      event.blockedURI.includes(`https://127.0.0.1:${port}`) && event.disposition === 'enforce')).toBe(true)
+    writeFileSync(join(directory, 'csp-evidence.json'), JSON.stringify({ violations: await violations(), remoteRequests }, null, 2))
     expect(remoteRequests).toEqual([])
     expect(modelServer.requests).toEqual([])
     await page.screenshot({ path: join(shots, '01-remote-allowed-csp.png') })

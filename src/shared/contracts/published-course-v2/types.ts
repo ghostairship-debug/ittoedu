@@ -102,10 +102,16 @@ export interface PublishedRuntimeLayerItem extends PublishedLayerItemBase {
   }
 }
 
+export interface PublishedCompositionLayerItem extends PublishedLayerItemBase {
+  kind: 'composition'
+  content: import('../../composition/content').WebComposition<PublishedRuntimeLayerItem['runtime']>
+}
+
 export type PublishedLayerItem =
   | PublishedNativeLayerItem
   | PublishedComponentLayerItem
   | PublishedRuntimeLayerItem
+  | PublishedCompositionLayerItem
 
 export interface PublishedScopedLayerItem {
   item: PublishedLayerItem
@@ -143,6 +149,7 @@ export interface PublishedSlidePresentation {
 export interface PublishedSlideScene {
   id: string
   name: string
+  canvas?: SlideCanvasSize
   backgroundMode?: BackgroundMode
   backgroundColor: string
   backgroundAssetId?: string | null

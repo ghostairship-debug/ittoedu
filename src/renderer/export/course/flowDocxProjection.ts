@@ -10,6 +10,7 @@ import type {
 } from '../../../shared/contracts/published-course-v2/types'
 import { compareStableStrings } from '../../../shared/stableOrder'
 import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
+import { appendFlowCompositionPictureNodes, type FlowCompositionPictures } from './flowCompositionPictures'
 import {
   buildFlowPrintPlan,
   type FlowPrintNode,
@@ -79,6 +80,8 @@ export interface FlowDocxPageBox {
 }
 
 export interface BuildFlowDocxProjectionOptions {
+  /** Host-derived pictures only; author content is never rewritten for this projection. */
+  compositionPictures?: ReadonlyMap<string, FlowCompositionPictures>
   pageSize?: FlowPrintPageSize
   orientation?: FlowPrintOrientation
   blockTops?: Record<string, number>
@@ -223,6 +226,7 @@ export function buildFlowDocxProjection(
   const firstBlockId = surface.blocks[0]?.id ?? '__anchor_start__'
 
   const stagedItems: StagedItem[] = []
+  const paginatedCompositions: FlowCompositionPictures[] = []
 
   // 1. Process Surface Layer Items
   surface.surfaceLayerItems.forEach((entry, index) => {
@@ -369,7 +373,23 @@ export function buildFlowDocxProjection(
     let placeholderText: string | undefined
     let assetId: string | undefined
 
-    if (item.kind === 'native') {
+    if (item.kind === 'composition') {
+      const capture = options.compositionPictures?.get(item.layerItemId)
+      if (capture && capture.pictures.length > 1) {
+        paginatedCompositions.push({ ...capture, anchorBlockId })
+        layerReport.push({ surfaceId: targetSurfaceId, layerItemId: item.layerItemId, scope: 'surface', locationId: matchedLocationId,
+          fieldPath, disposition: 'static-fallback', reasonCode: 'composition-paginated-pictures', sourceFrame,
+          message: `Web 组合按实际播放器图面分为 ${capture.pictures.length} 段锚定到正文顺序，未将长区域缩成一张小图；DOCX 不保留 CSS 编辑与互动。` })
+        return
+      }
+      disposition = capture?.pictures.length ? 'static-fallback' : 'placeholder'
+      carrierKind = capture?.pictures.length ? 'image' : 'placeholder'
+      assetId = capture?.pictures[0]?.assetId
+      reasonCode = capture?.pictures.length ? 'composition-player-picture' : 'composition-capture-missing'
+      message = capture?.pictures.length ? 'Web 组合按实际播放器图面导出为静态图片，工程结构与专业数据继续可编辑。' : `Web 组合“${item.layerItemId}”尚无实际图面，DOCX 保留明确占位；未声称完成保真导出。`
+      placeholderText = `[Web 组合：${item.layerItemId}，实际图面缺失]`
+      if (!capture?.pictures.length) warnings.push(message)
+    } else if (item.kind === 'native') {
       if (item.content.nativeType === 'text') {
         disposition = 'editable-shape'
         carrierKind = 'textbox'
@@ -607,7 +627,23 @@ export function buildFlowDocxProjection(
     let placeholderText: string | undefined
     let assetId: string | undefined
 
-    if (item.kind === 'native') {
+    if (item.kind === 'composition') {
+      const capture = options.compositionPictures?.get(item.layerItemId)
+      if (capture && capture.pictures.length > 1) {
+        paginatedCompositions.push({ ...capture, anchorBlockId })
+        layerReport.push({ surfaceId: targetSurfaceId, layerItemId: item.layerItemId, scope: 'global', locationId: matchedLocationId,
+          fieldPath, disposition: 'static-fallback', reasonCode: 'composition-paginated-pictures', sourceFrame,
+          message: `全局 Web 组合按实际播放器图面分为 ${capture.pictures.length} 段仅呈现一次；DOCX 不保留 CSS 编辑与互动。` })
+        return
+      }
+      disposition = capture?.pictures.length ? 'static-fallback' : 'placeholder'
+      carrierKind = capture?.pictures.length ? 'image' : 'placeholder'
+      assetId = capture?.pictures[0]?.assetId
+      reasonCode = capture?.pictures.length ? 'composition-player-picture' : 'composition-capture-missing'
+      message = capture?.pictures.length ? '全局 Web 组合按实际播放器图面导出为静态图片，仅呈现一次。' : `全局 Web 组合“${item.layerItemId}”尚无实际图面，DOCX 保留明确占位。`
+      placeholderText = `[Web 组合：${item.layerItemId}，实际图面缺失]`
+      if (!capture?.pictures.length) warnings.push(message)
+    } else if (item.kind === 'native') {
       if (item.content.nativeType === 'text') {
         disposition = 'editable-shape'
         carrierKind = 'textbox'
@@ -844,7 +880,7 @@ export function buildFlowDocxProjection(
     pageSize,
     orientation,
     pageBox,
-    nodes: printPlan.nodes,
+    nodes: appendFlowCompositionPictureNodes(printPlan.nodes, paginatedCompositions),
     anchoredGroups,
     documentStartItems,
     footerItems,

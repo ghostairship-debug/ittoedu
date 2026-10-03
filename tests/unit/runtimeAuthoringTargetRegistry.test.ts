@@ -211,9 +211,10 @@ describe('RuntimeAuthoringTargetRegistry', () => {
     expect(onTargetsChanged).toHaveBeenCalledTimes(callsBeforeDestroy + 1)
   })
 
-  it('每层只在第 401 个合格自动目标出现时提示截断，目标不变也发布提示增减', async () => {
+  it('两层第 401 个合格自动目标仍可发现和解析，未绑定或不可测对象继续跳过', async () => {
     const underlay = document.createElement('div')
     const overlay = document.createElement('div')
+    document.body.append(underlay, overlay)
     for (const root of [underlay, overlay]) {
       vi.spyOn(root, 'getBoundingClientRect').mockReturnValue(rect(0, 0, 640, 360))
     }
@@ -257,19 +258,32 @@ describe('RuntimeAuthoringTargetRegistry', () => {
     await flushTargets()
     expect(onTargetsChanged).toHaveBeenCalledOnce()
 
+    const underlayExtra = addImage(underlay)
     const extra = addImage(overlay)
     await flushTargets()
     expect(onTargetsChanged).toHaveBeenCalledTimes(2)
-    expect(onTargetsChanged.mock.calls.at(-1)![0]).toMatchObject({ revision: 2, truncated: true })
-    expect(onTargetsChanged.mock.calls.at(-1)![0].targets).toEqual(first.targets)
+    const expanded = onTargetsChanged.mock.calls.at(-1)![0]
+    expect(expanded.revision).toBe(2)
+    expect(expanded.truncated).toBeUndefined()
+    expect(expanded.targets).toHaveLength(803)
+    for (const layer of ['underlay', 'overlay']) {
+      expect(expanded.targets.filter((target: { source: string; layer: string }) => target.source === 'auto' && target.layer === layer)).toHaveLength(401)
+    }
+    const extraTarget = expanded.targets.find((target: { targetId: string }) => registry.resolveAutomaticDomTarget(target.targetId) === extra)
+    expect(extraTarget).toMatchObject({ source: 'auto', kind: 'asset', key: 'hero', layer: 'overlay' })
+    expect(registry.resolveAutomaticDomTarget(extraTarget.targetId)).toBe(extra)
 
+    underlayExtra.remove()
     extra.remove()
     await flushTargets()
     expect(onTargetsChanged).toHaveBeenCalledTimes(3)
     expect(onTargetsChanged.mock.calls.at(-1)![0].truncated).toBeUndefined()
     expect(onTargetsChanged.mock.calls.at(-1)![0].targets).toEqual(first.targets)
+    expect(registry.resolveAutomaticDomTarget(extraTarget.targetId)).toBeNull()
     registry.destroy()
     expect(onTargetsChanged.mock.calls.at(-1)![0].targets).toEqual([])
     expect(onTargetsChanged.mock.calls.at(-1)![0].truncated).toBeUndefined()
+    underlay.remove()
+    overlay.remove()
   })
 })

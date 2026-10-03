@@ -9,6 +9,10 @@ import { useControllerDisplayRevision } from '../../authoring/controllerDisplayB
 import { chartCanvasTextPort } from '../../authoring/chartCanvasTextBridge'
 import { EditableChartView } from '../EditableChartView'
 import { useAssetObjectUrls } from '../useAssetObjectUrls'
+import { WebCompositionAuthoringContent, type CompositionAuthoringSelection } from '../../composition/WebCompositionAuthoringContent'
+import type { CompositionContentEdit } from '../../../shared/composition/edit'
+import { publishLayerItem } from '../../export/course/buildPublishedCourse'
+import type { PublishedCompositionLayerItem } from '../../../shared/publishedCourseTypes'
 import type { ChartTextDraft } from '../../authoring/chartTextDraft'
 import { Hand, Maximize2, Minus, MousePointer2, Play, Plus } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -108,6 +112,10 @@ export interface SpatialLocationWorkspaceProps {
   /** The keyboard's Ctrl+V and Ctrl+A, for the canvas right-click menu. */
   readonly onPaste?: () => void
   readonly onSelectAll?: () => void
+  readonly onEditComposition?: (layerItemId: string) => void
+  readonly onCompositionEdit?: (layerItemId: string, edit: CompositionContentEdit) => Promise<void>
+  readonly onCompositionSelection?: (selection: CompositionAuthoringSelection) => void
+  readonly selectedCompositionNode?: CompositionAuthoringSelection | null
 }
 
 function distanceToSegment(
@@ -175,11 +183,12 @@ const SPATIAL_MEDIA_FILL = {
 
 function spatialLayerPaintKind(item: {
   readonly kind: LayerItem['kind']
-  readonly content?: { readonly nativeType: string }
+  readonly content?: unknown
 }): string {
   if (item.kind === 'component') return 'external-component'
   if (item.kind === 'runtime') return 'runtime'
-  return item.content?.nativeType ?? item.kind
+  return item.kind === 'native' && item.content && typeof item.content === 'object' && 'nativeType' in item.content
+    ? String(item.content.nativeType) : item.kind
 }
 
 function spatialNativePaint(
@@ -353,6 +362,10 @@ export function SpatialLocationWorkspace({
   onDropWorkspaceMedia,
   onPaste,
   onSelectAll,
+  onEditComposition,
+  onCompositionEdit,
+  onCompositionSelection,
+  selectedCompositionNode,
 }: SpatialLocationWorkspaceProps) {
   const canvasMenu = useContextMenu()
   const selectionRef = useRef(selectionIds)
@@ -371,6 +384,17 @@ export function SpatialLocationWorkspace({
   const stageViewport = useMemo(() => logicalStageViewport(stageCanvas), [stageCanvas.width, stageCanvas.height])
   const hostRef = useRef<PublishedCourseSession | null>(null)
   const pointerActiveRef = useRef(false)
+  const [compositionSelection, setCompositionSelection] = useState<{ layerItemId: string; nodeId: string } | null>(null)
+  const [compositionPending, setCompositionPending] = useState(false)
+  const activeCompositionNode = selectedCompositionNode === undefined ? compositionSelection : selectedCompositionNode
+  const compositionSubmitting = useRef(false)
+  const submitComposition = async (layerItemId: string, edit: CompositionContentEdit) => {
+    if (!onCompositionEdit) throw new Error('当前组合内容不可编辑')
+    if (compositionSubmitting.current) throw new Error('上一处修改正在保存，请稍后再操作。')
+    compositionSubmitting.current = true; setCompositionPending(true)
+    try { await onCompositionEdit(layerItemId, edit) }
+    finally { compositionSubmitting.current = false; setCompositionPending(false) }
+  }
   const [viewportSize, setViewportSize] = useState({ width: 800, height: 450 })
   const [previewFrames, setPreviewFrames] = useState<readonly SpatialEditorWorldTransform[] | null>(null)
   const [previewCamera, setPreviewCamera] = useState<SpatialSessionCamera | null>(null)
@@ -550,6 +574,28 @@ export function SpatialLocationWorkspace({
   }, [])
 
   const assetUrls = useAssetObjectUrls(assetFiles, assetMimeTypes)
+  const compositionContents = useMemo(() => {
+    const content = new Map<string, PublishedCompositionLayerItem['content']>()
+    for (const layer of view.layers) {
+      if (layer.item.kind !== 'composition') continue
+      const published = publishLayerItem({ project, assetFiles, components: componentPackages }, layer.item as LayerItem)
+      if (published.kind === 'composition') content.set(layer.selectionId, published.content)
+    }
+    return content
+  }, [view.layers, project, assetFiles, componentPackages])
+  const renderComposition = (layer: (typeof view.layers)[number], size: { width: number; height: number }) => {
+    const content = compositionContents.get(layer.selectionId)
+    const editable = canvasMode === 'edit' && scope === layer.source && !layer.locked
+      && selectionIds.includes(layer.selectionId) && Boolean(onCompositionEdit)
+    return content ? <WebCompositionAuthoringContent
+      layerItemId={layer.selectionId} content={content} width={size.width} height={size.height}
+      sessionKey={`${documentId ?? view.projectId}:${view.surfaceId}`}
+      projectId={view.projectId} components={componentPackages} assetUrls={assetUrls} interactive={editable}
+      selectedNodeId={editable && activeCompositionNode?.layerItemId === layer.selectionId ? activeCompositionNode.nodeId : null}
+      onSelection={editable ? selected => { setCompositionSelection({ layerItemId: selected.layerItemId, nodeId: selected.nodeId }); onCompositionSelection?.(selected) } : undefined}
+      onEdit={editable ? edit => submitComposition(layer.selectionId, edit) : undefined} editingDisabled={compositionPending}
+    /> : null
+  }
 
   assertActiveSpatialEditorView(view)
 
@@ -694,8 +740,10 @@ export function SpatialLocationWorkspace({
         if (
           layer.item.kind !== 'native'
           && layer.item.kind !== 'component'
+          && layer.item.kind !== 'composition'
           && !globalRuntime
         ) return null
+        if (layer.item.kind === 'composition' && !layer.effectiveVisible) return null
         const preview = previewById.get(layer.selectionId)
         const frame = preview ?? layer.item.frame
         const paintKind = spatialLayerPaintKind(layer.item)
@@ -751,7 +799,7 @@ export function SpatialLocationWorkspace({
                 }))}
                 currentSceneId={view.activeLocation.locationId}
               />
-            ) : layer.item.kind === 'component' ? (
+            ) : layer.item.kind === 'composition' ? renderComposition(layer, size) : layer.item.kind === 'component' ? (
               <SpatialComponentItemContent
                 projectId={view.projectId}
                 layerItemId={layer.selectionId}
@@ -811,7 +859,7 @@ export function SpatialLocationWorkspace({
       className={`workspace workspace--${canvasMode} workspace--spatial`}
       data-testid="spatial-workspace"
     >
-      <NativeSelectionContext documentId={documentId} revision={project.revision} locationId={view.locationId} itemIds={selectionIds} enabled={canvasMode === 'edit'} textEditing={editingNode?.type === 'text' || formulaNode?.type === 'formula'} />
+      <NativeSelectionContext documentId={documentId} revision={project.revision} locationId={view.locationId} itemIds={selectionIds} enabled={canvasMode === 'edit' && !(activeCompositionNode && selectionIds.includes(activeCompositionNode.layerItemId))} ownsDocumentSelection={!activeCompositionNode || !selectionIds.includes(activeCompositionNode.layerItemId)} textEditing={editingNode?.type === 'text' || formulaNode?.type === 'formula'} />
       {canvasMenu.element}
       <div className="canvas-mode-switch" role="group" aria-label="画布模式">
         <button
@@ -915,6 +963,7 @@ export function SpatialLocationWorkspace({
         }}
         onPointerDown={(event) => {
           if (canvasMode !== 'edit' || event.button === 2) return
+          if ((event.target as Element).closest('[data-composition-authoring]')) return
           const stagePoint = readLogicalPointer(event.clientX, event.clientY)
           if (!stagePoint) return
           const pointer = { ...stagePoint, additive: event.shiftKey }
@@ -1042,6 +1091,14 @@ export function SpatialLocationWorkspace({
           if (canvasMode !== 'edit') return
           const stagePoint = readLogicalPointer(event.clientX, event.clientY)
           if (!stagePoint) return
+          const compositionHit = hitTestV9SpatialLayerItems(adaptV9SpatialEditorLayers(view.layers), {
+            world: clientToWorld(createSpatialWorldViewTransform(stageViewport, view.sessionCamera), stagePoint),
+            viewport: clientToWorld(createSpatialViewportOverlayTransform(stageViewport), stagePoint),
+          })
+          const compositionLayer = compositionHit && view.layers.find(layer => layer.selectionId === compositionHit.layerItemId)
+          if (compositionLayer?.item.kind === 'composition' && !compositionLayer.locked && compositionLayer.source === scope) {
+            event.preventDefault(); onEditComposition?.(compositionLayer.selectionId); return
+          }
           if (activeTextPreview?.target.kind === 'course-object') {
             const world = clientToWorld(createSpatialWorldViewTransform(
               stageViewport, view.sessionCamera,
@@ -1180,7 +1237,7 @@ export function SpatialLocationWorkspace({
                 })}
               </svg>
               {worldItems.map((layer) => {
-                if (layer.item.kind !== 'native' && layer.item.kind !== 'component') return null
+                if (layer.item.kind !== 'native' && layer.item.kind !== 'component' && layer.item.kind !== 'composition') return null
                 // A hidden object is not drawn, as on a slide; it cannot be clicked either (M21).
                 if (!layer.effectiveVisible) return null
                 const preview = previewById.get(layer.selectionId)
@@ -1212,7 +1269,7 @@ export function SpatialLocationWorkspace({
 
                     }}
                   >
-                    {layer.item.kind === 'component' ? (
+                    {layer.item.kind === 'composition' ? renderComposition(layer, size) : layer.item.kind === 'component' ? (
                       <SpatialComponentItemContent
                         projectId={view.projectId}
                         layerItemId={layer.selectionId}

@@ -22,9 +22,6 @@ function embeddedClipboardImages(html: string): File[] {
   const files: File[] = []
   for (const match of html.matchAll(htmlImage)) {
     const encoded = match[4].replace(/\s/g, '')
-    // The snapshot service has a 32 MiB source limit. Reject before decoding
-    // an oversized data URI in the renderer as well.
-    if (encoded.length > 44 * 1024 * 1024) throw new Error('粘贴图片超过附件大小限制')
     let bytes: Uint8Array<ArrayBuffer>
     try {
       const binary = atob(encoded)
@@ -34,7 +31,6 @@ function embeddedClipboardImages(html: string): File[] {
     catch { throw new Error('HTML 中的图片数据无效，请复制图片本身后重试') }
     const kind = match[3].toLowerCase()
     files.push(new File([bytes], `粘贴图片${files.length + 1}.${kind === 'jpeg' ? 'jpg' : kind}`, { type: `image/${kind}` }))
-    if (files.length > 200) throw new Error('每次最多添加 200 个附件')
   }
   return files
 }
@@ -104,7 +100,6 @@ export function AttachmentComposer({ api = window.desktopAPI?.attachments, value
   }
   const enqueue = (newJobs: IntakeJob[]) => { if (disabled || !api) return; updateJobs(jobs => [...jobs, ...newJobs]); pump() }
   const receive = (files: File[], source: 'paste' | 'drop') => {
-    if (files.length > 200) { setError('每次最多添加 200 个附件'); return }
     enqueue(files.map(file => ({ id: crypto.randomUUID(), name: file.name || '粘贴图片.png', state: 'queued', run: async (signal, progress, requestId) => {
       const bytes = await readAttachmentFile(file, signal, progress); signal.throwIfAborted()
       return api!.receive({ requestId, name: file.name || '粘贴图片.png', bytes, source, ...(file.type ? { mediaType: file.type } : {}) })

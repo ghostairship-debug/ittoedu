@@ -11,7 +11,6 @@ const run = (...tools: ExecutionToolRecord[]): ExecutionRunRecord => ({
   schemaVersion: 1, runId: 'run', version: 1, status: 'running', createdAt: 1, updatedAt: 1,
   input: { conversationId: 'conversation', taskId: 'task', instruction: '完成这份文件的修改',
     selection: {} as ExecutionRunRecord['input']['selection'], documents: [] },
-  budget: { maxRequests: null, maxToolCalls: null, maxContextBytes: 10000 },
   messages: [], initialMessageCount: 0, requests: [], tools,
 })
 const error = (code: string) => ({ kind: 'error' as const, code, message: code })

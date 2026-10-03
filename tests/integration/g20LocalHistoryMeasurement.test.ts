@@ -12,8 +12,7 @@ it('measures a 12 MiB synthetic checkpoint and verifies independent run persiste
   const payload = 'synthetic-not-user-data '.repeat(Math.ceil(12 * 1024 * 1024 / 24)).slice(0, 12 * 1024 * 1024)
   const record = (runId: string, content: string): ExecutionRunRecord => ({ schemaVersion: 1, runId, version: 1,
     input: { conversationId: 'fixture', taskId: runId, instruction: 'benchmark fixture', selection: {} as never, documents: [] },
-    status: 'completed', createdAt: 1, updatedAt: 1, initialMessageCount: 0, messages: [{ role: 'assistant', content }], requests: [], tools: [],
-    budget: { maxRequests: null, maxToolCalls: null, maxContextBytes: 32 * 1024 * 1024 } })
+    status: 'completed', createdAt: 1, updatedAt: 1, initialMessageCount: 0, messages: [{ role: 'assistant', content }], requests: [], tools: [] })
   const source = record('large', payload), delay = monitorEventLoopDelay({ resolution: 10 }); delay.enable()
   const values: Record<string, unknown> = { synthetic: true, contentBytes: Buffer.byteLength(payload) }
   const measure = async (name: string, task: () => unknown | Promise<unknown>) => { const at = performance.now(); const result = await task(); values[name] = performance.now() - at; return result }

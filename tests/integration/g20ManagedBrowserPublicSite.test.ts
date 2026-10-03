@@ -8,7 +8,7 @@ it.skipIf(process.env.GUOLING_REAL_BROWSER_WEB !== '1')('uses real public redire
   const base = resolve('output/g20/b23')
   await fs.mkdir(base, { recursive: true })
   const fixture = await fs.mkdtemp(join(base, 'browser-public-site-'))
-  const service = new ManagedBrowserMcpService({ scratchRoot: join(fixture, 'runs') })
+  const service = new ManagedBrowserMcpService({ scratchRoot: join(fixture, 'runs'), externalBackend: 'edge-mcp' })
   const invoke = (operationId: string, name: string, args: Record<string, unknown> = {}) => service.invoke({
     runId: 'public-site', operationId, name: `mcp.browser.${name}`, arguments: args })
   try {

@@ -1,5 +1,7 @@
 # 1.9 目录会话、文件目标与真实文档共编合同
 
+> 实现入口以 ARCHITECTURE_CONTRACT 为准。
+
 日期：2026-09-18。状态：**已确认的目标合同；批次 A 正在按本合同改运行代码（F01 归属／目标／保存）。Skill 未改。** 实施与差距统一见[完整实施方案](R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)。本文取代旧版强制课例身份、四阶段文件和固定布局要求；不改变 Course Project V9、Published V2、唯一工程事务及[统一正文合同](R19_SHARED_DOCUMENT_CONTENT_CONTRACT.md)。
 
 ## 1. 工作空间、项目与会话

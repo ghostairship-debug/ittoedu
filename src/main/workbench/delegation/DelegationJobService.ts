@@ -17,7 +17,6 @@ export interface DelegationJobInput {
   permission: ExecutionPermissionMode
   materials?: readonly string[]
   expectedArtifacts: readonly string[]
-  timeoutMs?: number
   /** Ephemeral inbound MCP grant. The bearer and revoke function are never persisted. */
   mcp?: CodexDelegationRequest['mcp']
 }
@@ -65,7 +64,7 @@ function inside(root: string, target: string): boolean {
   return relative === '' || relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
 }
 function artifactName(name: string): string {
-  if (!name || name.length > 256 || path.isAbsolute(name) || /[\0\\<>:"|?*]/.test(name)
+  if (!name || path.isAbsolute(name) || /[\0\\<>:"|?*]/.test(name)
     || name.split('/').some(part => !part || part === '.' || part === '..' || part.endsWith('.') || part.endsWith(' ')
       || /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(part)))
     throw new Error('委派成果路径必须是工作副本内的普通相对路径')
@@ -93,7 +92,7 @@ export class DelegationJobService {
   }
 
   private folder(jobId: string): string {
-    if (typeof jobId !== 'string' || !jobId || jobId.length > 512) throw new DelegationJobError('invalid-job', '委派作业身份无效')
+    if (typeof jobId !== 'string' || !jobId) throw new DelegationJobError('invalid-job', '委派作业身份无效')
     return path.join(this.directory, digest(jobId))
   }
   private stateFile(jobId: string): string { return path.join(this.folder(jobId), 'state.json') }
@@ -150,11 +149,11 @@ export class DelegationJobService {
     return copy
   }
 
-  /** Creates an isolated, bounded copy without letting the model choose a host write root. */
+  /** Creates an isolated copy without letting the model choose a host write root. */
   async startManaged(input: ManagedDelegationInput): Promise<DelegationJobSnapshot> {
     const materials = (input.materials ?? []).map(artifactName)
     if (new Set(materials).size !== materials.length)
-      throw new DelegationJobError('invalid-materials', '委派资料过多或重名')
+      throw new DelegationJobError('invalid-materials', '委派资料重名')
     if (!path.isAbsolute(input.workspaceRoot)) throw new DelegationJobError('workspace-root', '委派工作空间根无效')
     const workspaceRoot = await fs.realpath(input.workspaceRoot)
     if (!(await fs.stat(workspaceRoot)).isDirectory()) throw new DelegationJobError('workspace-root', '委派工作空间根不是文件夹')
@@ -168,13 +167,11 @@ export class DelegationJobService {
       throw new DelegationJobError('copy-unknown', '委派副本已存在但未见作业回执，未重复启动外部执行器')
     if (created) {
       try {
-        let total = 0
         for (const name of materials) {
           const source = await fs.realpath(path.join(workspaceRoot, ...name.split('/')))
           if (!inside(workspaceRoot, source)) throw new DelegationJobError('material-outside', '委派资料超出冻结工作空间')
           const before = await fs.stat(source)
-          if (!before.isFile() || before.size > 256 * 1024 * 1024 || total + before.size > 256 * 1024 * 1024)
-            throw new DelegationJobError('material-invalid', '委派资料类型或总量超出范围')
+          if (!before.isFile()) throw new DelegationJobError('material-invalid', '委派资料须为普通文件')
           const bytes = await fs.readFile(source)
           const after = await fs.stat(source)
           if (bytes.byteLength !== before.size || before.size !== after.size || before.mtimeMs !== after.mtimeMs)
@@ -182,7 +179,6 @@ export class DelegationJobService {
           const destination = path.join(copyRoot, ...name.split('/'))
           await fs.mkdir(path.dirname(destination), { recursive: true, mode: 0o700 })
           await fs.writeFile(destination, bytes, { flag: 'wx', mode: 0o600 })
-          total += bytes.byteLength
         }
       } catch (error) {
         if (inside(base, copyRoot) && copyRoot !== base) await fs.rm(copyRoot, { recursive: true, force: true })
@@ -198,7 +194,7 @@ export class DelegationJobService {
     catch (error) { await input.mcp?.revoke().catch(() => undefined); throw error }
   }
   private async startOwned(input: DelegationJobInput): Promise<DelegationJobSnapshot> {
-    if (!input.runId || !input.taskId?.trim() || !input.goal?.trim() || input.goal.length > 100_000
+    if (!input.runId || !input.taskId?.trim() || !input.goal?.trim()
       || !['workspace', 'full', 'read-only'].includes(input.permission) || !Array.isArray(input.expectedArtifacts)
       || input.expectedArtifacts.length < 1)
       throw new DelegationJobError('invalid-input', '委派目标、权限或声明成果无效')
@@ -207,7 +203,7 @@ export class DelegationJobService {
     const copyRoot = await this.scopedCopy(input.copyRoot)
     const requestDigest = digest(JSON.stringify({ runId: input.runId, taskId: input.taskId, goal: input.goal,
       copyRoot, permission: input.permission, materials: input.materials ?? [], expectedArtifacts,
-      timeoutMs: input.timeoutMs ?? 15 * 60_000, mcpEndpoint: input.mcp?.endpoint ?? null }))
+      mcpEndpoint: input.mcp?.endpoint ?? null }))
     return this.serial(input.jobId, async () => {
       const prior = await this.load(input.jobId)
       if (prior) {
@@ -244,7 +240,7 @@ export class DelegationJobService {
     const source = await fs.realpath(path.join(copyRoot, ...name.split('/')))
     if (!inside(copyRoot, source)) throw new DelegationJobError('artifact-outside', '委派成果离开批准副本')
     const stat = await fs.stat(source)
-    if (!stat.isFile() || !stat.size || stat.size > 256 * 1024 * 1024) throw new DelegationJobError('artifact-invalid', '委派成果为空、类型无效或过大')
+    if (!stat.isFile() || !stat.size) throw new DelegationJobError('artifact-invalid', '委派成果为空或类型无效')
     const bytes = await fs.readFile(source)
     if (bytes.byteLength !== stat.size) throw new DelegationJobError('artifact-changed', '委派成果读取期间发生变化')
     const output = path.join(this.folder(jobId), 'artifacts', digest(name))
@@ -259,22 +255,20 @@ export class DelegationJobService {
       await this.update(jobId, job => { if (!job.stopped) job.status = 'running' })
       result = await this.runner.run({ taskId: input.taskId, goal: input.goal, copyRoot,
         permission: input.permission, materials: input.materials, expectedArtifacts: input.expectedArtifacts,
-        timeoutMs: input.timeoutMs, mcp: input.mcp }, {
+        mcp: input.mcp }, {
         signal: active.controller.signal,
         onEvent: event => { void this.update(jobId, job => {
           job.logs = [...job.logs, { cursor: ++job.nextLogCursor, time: Date.now(), kind: event.kind,
             message: event.detail.slice(0, 1000) }].slice(-200)
         }).catch(() => undefined) },
         verify: async ({ artifacts }) => ({ accepted: artifacts.length === input.expectedArtifacts.length
-          && artifacts.every(artifact => artifact.bytes > 0 && artifact.bytes <= 256 * 1024 * 1024),
+          && artifacts.every(artifact => artifact.bytes > 0),
         detail: '声明成果已在批准副本内回读；等待父任务审阅和正式交付。' }),
       })
       const artifacts: DelegationJobArtifact[] = []
       if (result.status === 'verified' && !active.controller.signal.aborted) {
         for (const name of input.expectedArtifacts) {
           artifacts.push(await this.snapshotArtifact(jobId, copyRoot, name))
-          if (artifacts.reduce((total, artifact) => total + artifact.byteLength, 0) > 256 * 1024 * 1024)
-            throw new DelegationJobError('artifact-limit', '委派成果总量超过 256 MiB')
         }
       }
       await this.update(jobId, job => {

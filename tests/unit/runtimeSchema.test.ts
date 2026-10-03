@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  MAX_RUNTIME_SOURCE_BYTES,
-  runtimeDocumentSchema,
-} from '@/shared/runtimeSchema'
+import { runtimeDocumentSchema } from '@/shared/runtimeSchema'
 import type { RuntimeDocument } from '@/shared/runtimeTypes'
 
 function validRuntime(): RuntimeDocument {
@@ -60,16 +57,20 @@ describe('runtimeDocumentSchema', () => {
     }).success).toBe(false)
   })
 
-  it('按 UTF-8 字节数执行 2 MiB 源码上限', () => {
+  it('接受超过旧 2 MiB 的 UTF-8 源码和超过旧数量的内容与绑定', () => {
+    const count = 10_001
+    const values = Object.fromEntries(Array.from({ length: count }, (_, index) => [`text${index}`, '课件正文']))
     expect(runtimeDocumentSchema.safeParse({
       ...validRuntime(),
-      source: 'x'.repeat(MAX_RUNTIME_SOURCE_BYTES),
+      source: 'x'.repeat(2 * 1024 * 1024 + 1),
     }).success).toBe(true)
-
     expect(runtimeDocumentSchema.safeParse({
       ...validRuntime(),
-      source: '课'.repeat(Math.floor(MAX_RUNTIME_SOURCE_BYTES / 3) + 1),
-    }).success).toBe(false)
+      source: '课'.repeat(Math.floor(2 * 1024 * 1024 / 3) + 1),
+      content: { values, metadata: Object.fromEntries(Object.keys(values).map(key => [key, { maxLength: 1_000_001 }])) },
+      assets: Object.fromEntries(Object.keys(values).map(key => [key, { assetId: `asset-${key}` }])),
+      nodeBindings: Object.fromEntries(Object.keys(values).map(key => [key, `node-${key}`])),
+    }).success).toBe(true)
   })
 
   it('要求 content.values 全部为字符串且 metadata 只能引用已有文字', () => {

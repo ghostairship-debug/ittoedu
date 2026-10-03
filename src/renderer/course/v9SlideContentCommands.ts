@@ -1,10 +1,9 @@
-import { requireSlideAsset as requireAsset, planSlideTextInsertion, planSlideFormulaInsertion, planSlideShapeInsertion, planSlideImageInsertion, planSlideVideoInsertion, offsetDefaultSlideInsertion, slideSceneContext, appendOwnedLayer, appendSceneLayer, requireSceneScope, validateSlideLineFrame, validateSlideLineGeometry, type AddSlideTextLayerInput, type AddSlideFormulaLayerInput, type AddSlideShapeLayerInput, type AddSlideImageLayerInput, type AddSlideVideoLayerInput } from '../../core/tools/slideInsertion'
+import { requireSlideAsset as requireAsset, planSlideTextInsertion, planSlideFormulaInsertion, planSlideShapeInsertion, planSlideImageInsertion, planSlideVideoInsertion, offsetDefaultSlideInsertion, slideSceneContext, slideInsertionCanvas, appendOwnedLayer, appendSceneLayer, requireSceneScope, validateSlideLineFrame, validateSlideLineGeometry, type AddSlideTextLayerInput, type AddSlideFormulaLayerInput, type AddSlideShapeLayerInput, type AddSlideImageLayerInput, type AddSlideVideoLayerInput } from '../../core/tools/slideInsertion'
 export { offsetDefaultSlideInsertion, SLIDE_DEFAULT_INSERTION_COLUMNS, SLIDE_DEFAULT_INSERTION_OFFSET } from '../../core/tools/slideInsertion'
 export type { AddSlideTextLayerInput, AddSlideFormulaLayerInput, AddSlideShapeLayerInput, AddSlideImageLayerInput, AddSlideVideoLayerInput, SlideInsertionPoint } from '../../core/tools/slideInsertion'
 import { isTeacherController } from '../../shared/teacherControllerRole'
 import { commitResourceAwareAuthoringHistory } from '../authoring/resourceAwareAuthoringHistory'
 import { nanoid } from 'nanoid'
-import { courseSlideCanvas } from '../../shared/slideCanvas'
 import {
   applyComponentVariant,
   getComponentPropValue,
@@ -41,7 +40,7 @@ import {
   createExternalComponentNode,
 } from '../../core/tools/nativeNodeFactories'
 import { SLIDE_REJECT_LOCKED, SLIDE_REJECT_STALE_REVISION, SLIDE_REJECT_WRONG_OWNER, SlideCommandError, commitSlideProjectMutation, selectSlideEditorLayers, type SlideAuthoringSelection, type SlideAuthoringSessionRef, type SlideCommandOptions, type SlideCommandResult } from './slideEditorCommands'
-import { buildSlideEditorView, type SlideEditorLayerView } from '../../core/tools/slideLayerView'
+import { buildSlideEditorView, slideEditorFrameToSource, type SlideEditorLayerView } from '../../core/tools/slideLayerView'
 import {
   makeSlideAuthoringTarget,
   type SlideAuthoringSession,
@@ -506,7 +505,11 @@ export function addSlideShapeLayer(
   const stale = rejectIfStale(session, options.expectedRevision)
   if (stale) return stale
   try {
-    const planned = planSlideShapeInsertion(session.history.present, session, input, options.now)
+    // Direct-draw frames come from the displayed scene. Ordinary source parameters keep their authored meaning.
+    const sourceInput = input.frame && session.scope !== 'scene'
+      ? { ...input, frame: slideEditorFrameToSource(buildSlideEditorView({ project: session.history.present, locationId: session.selection.locationId, stateId: session.selection.stateId }), session.scope, input.frame) }
+      : input
+    const planned = planSlideShapeInsertion(session.history.present, session, sourceInput, options.now)
     return commitAdded(session, planned.project, planned.itemId)
   } catch (error) { return catchCommand(session, error) }
 }
@@ -542,6 +545,7 @@ export function updateSlideShapeLineGeometry(
     const lineGeometry = validateSlideLineGeometry(shapeType, input.lineGeometry)
     validateSlideLineFrame(input.frame)
     const effectiveFrame = layer.item.frame
+    const sourceFrame = slideEditorFrameToSource(buildSlideEditorView({ project: session.history.present, locationId: session.selection.locationId, stateId: session.selection.stateId }), layer.source, input.frame)
     const currentGeometry = (layer.item.content.data as { lineGeometry?: unknown }).lineGeometry
     const unchanged =
       effectiveFrame.x === input.frame.x &&
@@ -552,12 +556,12 @@ export function updateSlideShapeLineGeometry(
     if (unchanged) return succeed(session, false)
     const project = commitSlideProjectMutation(session.history.present, (draft) => {
       const writeFrame = (item: { frame: { x: number; y: number; width: number; height: number } }) => {
-        item.frame.x = input.frame.x
-        item.frame.y = input.frame.y
-        item.frame.width = input.frame.width
-        item.frame.height = input.frame.height
+        item.frame.x = sourceFrame.x
+        item.frame.y = sourceFrame.y
+        item.frame.width = sourceFrame.width
+        item.frame.height = sourceFrame.height
       }
-      if (session.scope === 'global') {
+      if (layer.source === 'global') {
         const globalEntry = draft.globalLayerItems.find((entry) => entry.item.layerItemId === layerItemId)
         if (!globalEntry || globalEntry.item.kind !== 'native') {
           throw new SlideCommandError('invalid-selection', '所选元素已失效，请重新选择')
@@ -569,7 +573,14 @@ export function updateSlideShapeLineGeometry(
         ) as typeof globalEntry.item.content.data
         return
       }
-      const { scene } = slideSceneContext(draft, session)
+      const { scene, surface } = slideSceneContext(draft, session)
+      if (layer.source === 'surface') {
+        const surfaceEntry = surface.surfaceLayerItems.find(entry => entry.item.layerItemId === layerItemId)
+        if (!surfaceEntry || surfaceEntry.item.kind !== 'native') throw new SlideCommandError('invalid-selection', '所选元素已失效，请重新选择')
+        writeFrame(surfaceEntry.item)
+        surfaceEntry.item.content.data = mergeCourseNativeData(surfaceEntry.item.content.data as Record<string, unknown>, { lineGeometry }) as typeof surfaceEntry.item.content.data
+        return
+      }
       const base = scene.layerItems.find((item) => item.layerItemId === layerItemId)
       if (!base || base.kind !== 'native') {
         throw new SlideCommandError('invalid-selection', '所选元素已失效，请重新选择')
@@ -586,8 +597,8 @@ export function updateSlideShapeLineGeometry(
       const override = state.layerItemOverrides[layerItemId] ?? {}
       const frame = { ...override.frame }
       for (const key of ['x', 'y', 'width', 'height'] as const) {
-        if (input.frame[key] === base.frame[key]) delete frame[key]
-        else frame[key] = input.frame[key]
+        if (sourceFrame[key] === base.frame[key]) delete frame[key]
+        else frame[key] = sourceFrame[key]
       }
       if (Object.keys(frame).length === 0) delete override.frame
       else override.frame = frame
@@ -671,6 +682,7 @@ export function addSlideComponentLayer(
         height: input.height ?? manifest?.defaultSize.height ?? 280,
         x: input.x,
         y: input.y,
+        canvas: slideInsertionCanvas(session.history.present, session),
       }),
       existingCount,
       input.x !== undefined || input.y !== undefined,
@@ -701,7 +713,7 @@ export function addSlideRuntimeLayer(
     const { scene } = slideSceneContext(session.history.present, session)
     const width = input.width ?? 640
     const height = input.height ?? 360
-    const canvas = courseSlideCanvas(session.history.present)
+    const canvas = slideInsertionCanvas(session.history.present, session)
     const frame = offsetFrame({
       x: input.x ?? (canvas.width - width) / 2,
       y: input.y ?? (canvas.height - height) / 2,

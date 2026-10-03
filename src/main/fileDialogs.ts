@@ -25,33 +25,6 @@ import {
   resolveRecentProjectPath,
 } from './projectPersistence'
 
-const MAX_PROJECT_BYTES = 256 * 1024 * 1024
-const MAX_IMAGE_BYTES = 100 * 1024 * 1024
-const MAX_AUDIO_BYTES = 100 * 1024 * 1024
-const MAX_VIDEO_BYTES = 200 * 1024 * 1024
-const MAX_COMPONENT_BYTES = 50 * 1024 * 1024
-const MAX_BATCH_FILES = 100
-const MAX_IMAGE_BATCH_BYTES = 256 * 1024 * 1024
-const MAX_AUDIO_BATCH_BYTES = 256 * 1024 * 1024
-const MAX_VIDEO_BATCH_BYTES = 256 * 1024 * 1024
-const MAX_COMPONENT_BATCH_BYTES = 256 * 1024 * 1024
-const MAX_HTML_BYTES = 256 * 1024 * 1024
-const MAX_EXPORT_BYTES = 512 * 1024 * 1024
-const MAX_PROJECT_OPEN_CONFIRMATIONS = 64
-
-export function batchCapacityIssue(
-  selectedIndex: number,
-  acceptedByteLength: number,
-  candidateByteLength: number,
-  maximumTotalBytes: number,
-): 'BATCH_FILE_COUNT_LIMIT' | 'BATCH_TOTAL_SIZE_LIMIT' | null {
-  if (selectedIndex >= MAX_BATCH_FILES) return 'BATCH_FILE_COUNT_LIMIT'
-  if (acceptedByteLength + candidateByteLength > maximumTotalBytes) {
-    return 'BATCH_TOTAL_SIZE_LIMIT'
-  }
-  return null
-}
-
 const imageMimeTypes = new Map<string, string>([
   ['.png', 'image/png'],
   ['.jpg', 'image/jpeg'],
@@ -110,11 +83,6 @@ function issueProjectOpenConfirmation(value: string, bytes: Uint8Array): string 
     recordPromise: null,
     confirmFile: prepareProjectFileObservation(value, bytes),
   })
-  while (projectOpenConfirmations.size > MAX_PROJECT_OPEN_CONFIRMATIONS) {
-    const oldestId = projectOpenConfirmations.keys().next().value
-    if (typeof oldestId !== 'string') break
-    projectOpenConfirmations.delete(oldestId)
-  }
   return confirmationId
 }
 
@@ -156,9 +124,8 @@ function ensureExtension(filePath: string, extension: string): string {
     : `${filePath}${extension}`
 }
 
-async function readFileWithLimit(
+async function readSelectedFile(
   filePath: string,
-  limit: number,
   errorTitle: string,
   errorCode: string,
 ): Promise<Uint8Array> {
@@ -183,15 +150,6 @@ async function readFileWithLimit(
       '请选择本机磁盘上的有效文件。',
     )
   }
-  if (stats.size > limit) {
-    throw new DesktopOperationError(
-      'FILE_TOO_LARGE',
-      errorTitle,
-      `所选文件超过 ${Math.round(limit / 1024 / 1024)} MB 限制。`,
-      '请压缩或精简文件内容后重试。',
-    )
-  }
-
   try {
     return new Uint8Array(await fs.readFile(filePath))
   } catch (error) {
@@ -240,7 +198,7 @@ function imageMatchesMime(bytes: Uint8Array, mimeType: string): boolean {
     )
   }
   if (mimeType === 'image/svg+xml') {
-    const prefix = Buffer.from(bytes.subarray(0, 64 * 1024))
+    const prefix = Buffer.from(bytes)
       .toString('utf8')
       .replace(/^\uFEFF/, '')
     return /<svg(?:\s|>)/i.test(prefix)
@@ -293,8 +251,6 @@ function rejectedFile(
 interface SelectFileBatchOptions<T extends OpenBinaryFileResult> {
   title: string
   filters: Array<{ name: string; extensions: string[] }>
-  maximumTotalBytes: number
-  totalLimitLabel: string
   fallback: DesktopErrorPayload
   read(filePath: string): Promise<T>
 }
@@ -313,40 +269,9 @@ async function selectFileBatch<T extends OpenBinaryFileResult>(
   const accepted: Array<T & BatchFileDigest> = []
   const rejected: BatchFileRejection[] = []
   let acceptedByteLength = 0
-  for (const [index, filePath] of result.filePaths.entries()) {
-    if (
-      batchCapacityIssue(index, acceptedByteLength, 0, options.maximumTotalBytes) ===
-      'BATCH_FILE_COUNT_LIMIT'
-    ) {
-      rejected.push(rejectedFile(
-        filePath,
-        new DesktopOperationError(
-          'BATCH_FILE_COUNT_LIMIT',
-          '批量导入数量过多',
-          `一次最多选择 ${MAX_BATCH_FILES} 个文件。`,
-          '请分成多个批次导入。',
-        ),
-        options.fallback,
-      ))
-      continue
-    }
+  for (const filePath of result.filePaths) {
     try {
       const file = await options.read(filePath)
-      if (
-        batchCapacityIssue(
-          index,
-          acceptedByteLength,
-          file.bytes.byteLength,
-          options.maximumTotalBytes,
-        ) === 'BATCH_TOTAL_SIZE_LIMIT'
-      ) {
-        throw new DesktopOperationError(
-          'BATCH_TOTAL_SIZE_LIMIT',
-          '批量导入总大小超限',
-          `加入“${file.name}”后会超过本批 ${options.totalLimitLabel} 限制。`,
-          '请减少本次文件数量，或先压缩大文件。',
-        )
-      }
       acceptedByteLength += file.bytes.byteLength
       accepted.push({ ...file, sha256: fileDigest(file.bytes) })
     } catch (error) {
@@ -391,9 +316,9 @@ export async function openProjectFile(
   return openSelectedProjectFile(result.filePaths[0])
 }
 
-/** Bounded disk read with no recent-file, observation, or open-confirmation mutation. */
+/** Disk read with no recent-file, observation, or open-confirmation mutation. */
 export async function readProjectFileBytes(filePath: string): Promise<Uint8Array> {
-  return readFileWithLimit(filePath, MAX_PROJECT_BYTES, '工程读取失败', 'PROJECT_READ_FAILED')
+  return readSelectedFile(filePath, '工程读取失败', 'PROJECT_READ_FAILED')
 }
 
 /** A user-selected workspace file shares the same archive validation and confirmation owner. */
@@ -421,9 +346,8 @@ export async function openRecentProjectFile(
   requestedPath: string,
 ): Promise<OpenProjectFileResult> {
   const filePath = await resolveRecentProjectPath(requestedPath)
-  const bytes = await readFileWithLimit(
+  const bytes = await readSelectedFile(
     filePath,
-    MAX_PROJECT_BYTES,
     '最近工程打开失败',
     'PROJECT_READ_FAILED',
   )
@@ -449,14 +373,6 @@ export async function saveProjectFile(
   window: BrowserWindow,
   input: SaveBinaryFileInput,
 ): Promise<SaveBinaryFileResult | null> {
-  if (input.bytes.byteLength > MAX_PROJECT_BYTES) {
-    throw new DesktopOperationError(
-      'PROJECT_TOO_LARGE',
-      '工程保存失败',
-      'H5 演示超过 256 MB 保存限制。',
-      '请删除未使用的大图片或组件资源后重试。',
-    )
-  }
   if (!hasZipSignature(input.bytes)) {
     throw new DesktopOperationError(
       'PROJECT_ARCHIVE_INVALID',
@@ -519,9 +435,8 @@ async function readImageSelection(filePath: string): Promise<SelectedImageResult
     )
   }
 
-  const bytes = await readFileWithLimit(
+  const bytes = await readSelectedFile(
     filePath,
-    MAX_IMAGE_BYTES,
     '图片读取失败',
     'IMAGE_READ_FAILED',
   )
@@ -559,8 +474,6 @@ export function selectImageFiles(
     filters: [
       { name: '支持的图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'] },
     ],
-    maximumTotalBytes: MAX_IMAGE_BATCH_BYTES,
-    totalLimitLabel: '256 MB',
     fallback: {
       code: 'IMAGE_READ_FAILED',
       title: '图片导入失败',
@@ -587,9 +500,8 @@ async function readMediaSelection(
       audio ? '请选择 MP3、OGG、WAV 或 M4A。' : '请选择 MP4 或 WebM。',
     )
   }
-  const bytes = await readFileWithLimit(
+  const bytes = await readSelectedFile(
     filePath,
-    audio ? MAX_AUDIO_BYTES : MAX_VIDEO_BYTES,
     `${label}读取失败`,
     `${kind.toUpperCase()}_READ_FAILED`,
   )
@@ -604,7 +516,7 @@ async function readMediaSelection(
   return { path: filePath, name: path.basename(filePath), mimeType, bytes }
 }
 
-/** Reuses the same byte limits and content checks as the native media picker. */
+/** Reuses the same format and content checks as the native media picker. */
 export async function readWorkspaceMediaSelection(filePath: string): Promise<Pick<WorkspaceMediaFile, 'name' | 'mimeType' | 'bytes' | 'mediaKind'>> {
   const extension = path.extname(filePath).toLocaleLowerCase('en-US')
   if (imageMimeTypes.has(extension)) {
@@ -658,8 +570,6 @@ function selectMediaFiles(
       name: `支持的${label}`,
       extensions: audio ? ['mp3', 'ogg', 'wav', 'm4a'] : ['mp4', 'webm'],
     }],
-    maximumTotalBytes: audio ? MAX_AUDIO_BATCH_BYTES : MAX_VIDEO_BATCH_BYTES,
-    totalLimitLabel: '256 MB',
     fallback: {
       code: `${kind.toUpperCase()}_READ_FAILED`,
       title: `${label}导入失败`,
@@ -685,9 +595,8 @@ export function selectVideoFiles(
 }
 
 async function readComponentSelection(filePath: string): Promise<OpenBinaryFileResult> {
-  const bytes = await readFileWithLimit(
+  const bytes = await readSelectedFile(
     filePath,
-    MAX_COMPONENT_BYTES,
     '组件导入失败',
     'COMPONENT_READ_FAILED',
   )
@@ -721,8 +630,6 @@ export function selectComponentFiles(
   return selectFileBatch(window, {
     title: '批量导入互动组件',
     filters: [{ name: '互动组件', extensions: ['h5component'] }],
-    maximumTotalBytes: MAX_COMPONENT_BATCH_BYTES,
-    totalLimitLabel: '256 MB',
     fallback: {
       code: 'COMPONENT_READ_FAILED',
       title: '组件导入失败',
@@ -738,15 +645,6 @@ export async function writeHtmlFile(
   suggestedName: string,
   html: string,
 ): Promise<{ path: string } | null> {
-  if (Buffer.byteLength(html, 'utf8') > MAX_HTML_BYTES) {
-    throw new DesktopOperationError(
-      'HTML_TOO_LARGE',
-      'HTML 导出失败',
-      '导出内容超过 256 MB 限制。',
-      '请删除未使用的大图片或组件资源后重试。',
-    )
-  }
-
   const result = await dialog.showSaveDialog(window, {
     title: '导出单 HTML',
     defaultPath: sanitizeSuggestedName(suggestedName, '.html'),
@@ -775,14 +673,12 @@ export async function writeWebPackageFile(
   suggestedName: string,
   bytes: Uint8Array,
 ): Promise<{ path: string } | null> {
-  if (bytes.byteLength === 0 || bytes.byteLength > MAX_EXPORT_BYTES) {
+  if (bytes.byteLength === 0) {
     throw new DesktopOperationError(
       'WEB_PACKAGE_SIZE_INVALID',
       '网页包导出失败',
-      bytes.byteLength === 0
-        ? '导出的网页包为空。'
-        : '导出的网页包超过 512 MB 限制。',
-      '请减少页面数量或压缩大图片后重试。',
+      '导出的网页包为空。',
+      '请重新执行导出；如果问题持续出现，请重新启动编辑器。',
     )
   }
   if (!hasZipSignature(bytes)) {
@@ -826,9 +722,8 @@ export async function peekProjectArchiveFile(
     path.extname(resolved).toLocaleLowerCase('en-US') !== '.h5lesson'
   ) return null
   try {
-    const bytes = await readFileWithLimit(
+    const bytes = await readSelectedFile(
       resolved,
-      MAX_PROJECT_BYTES,
       '工程预检失败',
       'PROJECT_PEEK_FAILED',
     )
@@ -842,15 +737,15 @@ export async function peekProjectArchiveFile(
 export async function writeBinaryExportFile(
   window: BrowserWindow,
   suggestedName: string,
-  extension: 'pptx' | 'pdf' | 'json' | 'docx',
+  extension: 'pptx' | 'pdf' | 'json' | 'docx' | 'h5component',
   bytes: Uint8Array,
 ): Promise<{ path: string } | null> {
-  if (bytes.byteLength === 0 || bytes.byteLength > MAX_EXPORT_BYTES) {
+  if (bytes.byteLength === 0) {
     throw new DesktopOperationError(
       'EXPORT_SIZE_INVALID',
       '文件导出失败',
-      bytes.byteLength === 0 ? '导出文件为空。' : '导出文件超过 512 MB 限制。',
-      '请减少页面数量或压缩大图片后重试。',
+      '导出文件为空。',
+      '请重新执行导出；如果问题持续出现，请重新启动编辑器。',
     )
   }
   const labels = {
@@ -858,6 +753,7 @@ export async function writeBinaryExportFile(
     pdf: 'PDF 文档',
     json: 'JSON 报告',
     docx: 'Word 讲义',
+    h5component: '结构资产',
   } as const
   const result = await dialog.showSaveDialog(window, {
     title: `导出${labels[extension]}`,

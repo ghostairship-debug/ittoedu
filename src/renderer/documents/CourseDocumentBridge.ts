@@ -1,5 +1,6 @@
 import type { DocumentHostAPI } from '../../shared/workbench/desktop'
 import type { DocumentModel, DocumentOperationResult, DocumentSnapshot } from '../../shared/workbench/document'
+import type { CompositionContentEdit } from '../../shared/composition/edit'
 import { normalizeWorkspacePath } from '../../shared/workspaceIdentity'
 import { CourseV9Driver } from '../../core/drivers/CourseV9Driver'
 import { bumpCourseAuthoringSessionGeneration } from '../authoring/courseAuthoringSession'
@@ -201,6 +202,18 @@ export class CourseDocumentBridge {
     return state.committed
   }
   /** The synchronous result is only a prepared local projection, never a commit receipt. */
+  async submitCompositionEdit(layerItemId: string, edit: CompositionContentEdit): Promise<DocumentOperationResult> {
+    const projection = this.active
+    if (!projection) throw new Error('课程文档服务尚未连接')
+    this.dynamicFallback.assertReady(projection.documentId)
+    this.visible.add(projection.documentId)
+    const result = await projection.edit({ type: 'composition.edit', layerItemId, edit })
+    if (this.active === projection) {
+      this.render()
+      this.ports.patch({ errorMessage: 'message' in result ? result.message : null, statusMessage: result.status === 'applied' ? '修改已应用' : null })
+    }
+    return result
+  }
   submit(patch: Record<string, unknown>, historyGroup?: string): boolean {
     const projection = this.active
     if (!projection) { this.lastSubmission = Promise.resolve(false); this.ports.patch({ errorMessage: '课程文档服务尚未连接，修改未提交' }); return false }

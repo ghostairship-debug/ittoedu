@@ -35,8 +35,7 @@ function executionFixture() {
   const run = (conversationId: string, runId: string): ExecutionRunRecord => ({
     schemaVersion: 1, runId, version: 1, input: { conversationId, taskId: 'task', instruction: 'instruction',
       selection: { connection: { id: 'connection', revision: 1, provider: 'fixture', protocol: 'openai-chat', baseURL: 'https://fixture.invalid/v1', accountId: 'account',
-        auth: { kind: 'api-key', credentialRef: 'private' }, billing: { kind: 'token-plan' }, capabilities: { tools: 'unknown', vision: 'unknown', stream: 'unknown', reasoning: 'unknown' } }, model: 'model' }, documents: [] },
-    budget: { maxRequests: 1, maxToolCalls: 1, maxContextBytes: 100 }, status: 'running', createdAt: 1, updatedAt: 1,
+        auth: { kind: 'api-key', credentialRef: 'private' }, billing: { kind: 'token-plan' }, capabilities: { tools: 'unknown', vision: 'unknown', stream: 'unknown', reasoning: 'unknown' } }, model: 'model' }, documents: [] }, status: 'running', createdAt: 1, updatedAt: 1,
     messages: [], initialMessageCount: 0, requests: [], tools: [],
   })
   const api = {
@@ -124,8 +123,10 @@ const settings = (): ExecutionSettingsAPI => ({
     connections: [{ connection: { id: 'connection', revision: 1, provider: 'fixture', protocol: 'openai-chat', baseURL: 'https://fixture.invalid/v1', accountId: 'account',
       auth: { kind: 'api-key', credentialRef: 'private' }, billing: { kind: 'token-plan' }, capabilities: { tools: 'unknown', vision: 'unknown', stream: 'unknown', reasoning: 'unknown' } }, hasCredential: true, revoked: false }],
     profile: { revision: 1, updatedAt: '2026-09-26T00:00:00.000Z', roles: { conversation: { connectionId: 'connection', model: 'fixture-model' }, vision: null, imageGenerate: null, imageEdit: null } } })),
+  knownModels: vi.fn(async () => []),
   probeCapabilities: vi.fn(async () => { throw new Error('unused') }), saveConnection: vi.fn(async () => { throw new Error('unused') }),
   saveProfile: vi.fn(async () => { throw new Error('unused') }), revokeConnection: vi.fn(async () => {}),
+  setModelFavorite: vi.fn(async () => []),
   discoverModels: vi.fn(async () => { throw new Error('unused') }), startOAuthLogin: vi.fn(async () => { throw new Error('unused') }),
   oauthLoginStatus: vi.fn(async () => { throw new Error('unused') }), cancelOAuthLogin: vi.fn(async () => {}),
 })

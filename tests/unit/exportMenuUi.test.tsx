@@ -179,7 +179,6 @@ describe('single HTML size warning', () => {
       <ExportSizeWarningDialog
         open
         byteLength={72 * 1024 * 1024}
-        hardLimitBytes={256 * 1024 * 1024}
         onCancel={() => undefined}
         onExportWebPackage={onPackage}
         onContinueSingleHtml={onContinue}
@@ -193,19 +192,21 @@ describe('single HTML size warning', () => {
     expect(onContinue).toHaveBeenCalledOnce()
   })
 
-  it('blocks single HTML when it exceeds the hard saving limit', () => {
+  it('allows single HTML beyond the former saving limit', () => {
+    const onContinue = vi.fn()
     render(
       <ExportSizeWarningDialog
         open
         byteLength={300 * 1024 * 1024}
-        hardLimitBytes={256 * 1024 * 1024}
         onCancel={() => undefined}
         onExportWebPackage={() => undefined}
-        onContinueSingleHtml={() => undefined}
+        onContinueSingleHtml={onContinue}
       />,
     )
 
-    expect(screen.getByText(/超过单 HTML/)).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /仍导出单 HTML/ })).not.toBeInTheDocument()
+    expect(screen.getByText(/300\.0 MB/)).toBeInTheDocument()
+    expect(screen.queryByText(/保存上限/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /仍导出单 HTML/ }))
+    expect(onContinue).toHaveBeenCalledOnce()
   })
 })

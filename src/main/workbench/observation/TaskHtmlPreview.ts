@@ -15,6 +15,7 @@ interface OwnedPreview {
   window: BrowserWindow
   leaseId?: string
   releaseProtocol(): void
+  rejectClosed(error: Error): void
   closed: boolean
 }
 type DocumentRequest = Parameters<HtmlActionPreviewPort['automationContextForDocument']>[0]
@@ -70,41 +71,44 @@ export class TaskHtmlPreview implements HtmlActionPreviewPort {
         return { webContentsId: window.webContents.id, processId: frame.processId, frameToken: frame.frameToken }
       }, agentBundlePath: this.options.agentBundlePath })
     partition.protocol.handle(HTML_PREVIEW_SCHEME, preview.handleProtocolRequest)
-    const owner: OwnedPreview = { documentId: input.documentId, key, preview, window, closed: false,
+    let rejectClosed!: (error: Error) => void
+    const closed = new Promise<never>((_, reject) => { rejectClosed = reject })
+    const owner: OwnedPreview = { documentId: input.documentId, key, preview, window, closed: false, rejectClosed,
       releaseProtocol: () => partition.protocol.unhandle(HTML_PREVIEW_SCHEME),
       context: Promise.resolve(null as never) }
     this.owned.set(input.runId, owner)
-    owner.context = (async () => {
-      try {
-        await window.loadURL(shell)
-        if (owner.closed) throw new Error('HTML 观察已停止')
-        const frame = window.webContents.mainFrame
-        policy.activateDocument({ processId: frame.processId, frameToken: frame.frameToken, documentToken: randomUUID() })
-        const snapshot = await this.options.readDocument(input.documentId)
-        if (snapshot.epoch !== input.epoch || snapshot.revision !== input.revision || snapshot.binding.kind !== 'file')
-          throw new Error('HTML 观察来源已变化，请重新读取')
-        const lease = await preview.open({ type: 'html-preview.open', documentId: input.documentId, epoch: input.epoch,
-          expectedBindingVersion: snapshot.binding.bindingVersion, tabId: `task-html:${input.runId}` })
-        if (owner.closed) throw new Error('HTML 观察已停止')
-        owner.leaseId = lease.leaseId; this.byLease.set(lease.leaseId, owner)
-        await window.webContents.mainFrame.executeJavaScript(`new Promise((resolve,reject)=>{
-          const frame=document.createElement('iframe');frame.title='Task HTML preview';
-          frame.setAttribute('sandbox','allow-scripts allow-same-origin');frame.referrerPolicy='no-referrer';
-          frame.style.cssText='display:block;border:0;width:100vw;height:100vh';
-          const timer=setTimeout(()=>{frame.remove();reject(new Error('HTML 任务预览加载超时'))},15000);
-          frame.onload=()=>{clearTimeout(timer);resolve(true)};frame.onerror=()=>{clearTimeout(timer);reject(new Error('HTML 任务预览加载失败'))};
-          frame.src=${JSON.stringify(lease.url)};document.body.append(frame);
-        })`)
-        if (owner.closed || this.stopped.has(input.runId!)) throw new Error('HTML 观察已停止')
-        return { ...await preview.automationContext(lease.leaseId, lease.loadId, input.revision), source: 'isolated' as const }
-      } catch (error) { this.close(owner); throw error }
-    })()
+    window.once('closed', () => this.close(owner))
+    window.webContents.once('render-process-gone', () => this.close(owner, new Error('HTML 任务预览宿主异常退出')))
+    owner.context = Promise.race([closed, (async () => {
+      await window.loadURL(shell)
+      if (owner.closed) throw new Error('HTML 观察已停止')
+      const frame = window.webContents.mainFrame
+      policy.activateDocument({ processId: frame.processId, frameToken: frame.frameToken, documentToken: randomUUID() })
+      const snapshot = await this.options.readDocument(input.documentId)
+      if (snapshot.epoch !== input.epoch || snapshot.revision !== input.revision || snapshot.binding.kind !== 'file')
+        throw new Error('HTML 观察来源已变化，请重新读取')
+      const lease = await preview.open({ type: 'html-preview.open', documentId: input.documentId, epoch: input.epoch,
+        expectedBindingVersion: snapshot.binding.bindingVersion, tabId: `task-html:${input.runId}` })
+      if (owner.closed) throw new Error('HTML 观察已停止')
+      owner.leaseId = lease.leaseId; this.byLease.set(lease.leaseId, owner)
+      await window.webContents.mainFrame.executeJavaScript(`new Promise((resolve,reject)=>{
+        const frame=document.createElement('iframe');frame.title='Task HTML preview';
+        frame.setAttribute('sandbox','allow-scripts allow-same-origin');frame.referrerPolicy='no-referrer';
+        frame.style.cssText='display:block;border:0;width:100vw;height:100vh';
+        const faultWait=setTimeout(()=>{frame.remove();reject(new Error('HTML 任务预览无响应'))},15000);
+        frame.onload=()=>{clearTimeout(faultWait);resolve(true)};frame.onerror=()=>{clearTimeout(faultWait);reject(new Error('HTML 任务预览加载失败'))};
+        frame.src=${JSON.stringify(lease.url)};document.body.append(frame);
+      })`)
+      if (owner.closed || this.stopped.has(input.runId!)) throw new Error('HTML 观察已停止')
+      return { ...await preview.automationContext(lease.leaseId, lease.loadId, input.revision), source: 'isolated' as const }
+    })()]).catch(error => { this.close(owner, error instanceof Error ? error : new Error(String(error))); throw error })
     return owner.context
   }
 
-  private close(owner: OwnedPreview): void {
+  private close(owner: OwnedPreview, error = new Error('HTML 任务预览已关闭')): void {
     if (owner.closed) return
     owner.closed = true
+    owner.rejectClosed(error)
     if (owner.leaseId) this.byLease.delete(owner.leaseId)
     for (const [runId, current] of this.owned) if (current === owner) this.owned.delete(runId)
     owner.preview.dispose()

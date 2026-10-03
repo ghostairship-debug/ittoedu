@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { courseProjectDocumentSchema } from '../courseProjectSchema'
+import { compositionContentEditSchema } from '../composition/editSchema'
 import type { DocumentEvent, DocumentModel, DocumentOperation, DocumentOperationResult, DocumentSnapshot } from './document'
 
 export interface DocumentFileObservation {
@@ -30,6 +31,7 @@ const command = z.discriminatedUnion('type', [
   z.object({ type: z.literal('markdown.replace'), source: z.string(), resources: resources.optional() }).strict(),
   z.object({ type: z.literal('course.replace'), project: courseProjectDocumentSchema, resources: resources.optional() }).strict(),
   z.object({ type: z.literal('course.object.patch'), locationId: id, itemId: id, patch: z.record(z.string(), z.unknown()) }).strict(),
+  z.object({ type: z.literal('composition.edit'), layerItemId: id, edit: compositionContentEditSchema }).strict(),
 ])
 const operation = z.object({
   documentId: id, epoch: id, operationId: id, baseRevision: z.number().int().nonnegative(),

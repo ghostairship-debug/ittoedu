@@ -9,9 +9,9 @@ export async function readClipboardFileList(): Promise<string[]> {
   const helper = app.isPackaged ? path.join(process.resourcesPath, 'clipboard-file-list', 'clipboard-file-list.exe')
     : path.join(app.getAppPath(), 'resources', 'clipboard-file-list', 'clipboard-file-list.exe')
   try {
-    const { stdout } = await run(helper, [], { windowsHide: true, timeout: 3000, maxBuffer: 2 * 1024 * 1024, encoding: 'utf8' })
+    const { stdout } = await run(helper, [], { windowsHide: true, maxBuffer: Infinity, encoding: 'utf8' })
     const files: unknown = JSON.parse(stdout)
-    if (!Array.isArray(files) || files.length > 200 || files.some(value => typeof value !== 'string' || !path.isAbsolute(value) || value.length > 32767)) throw new Error('invalid-list')
+    if (!Array.isArray(files) || files.some(value => typeof value !== 'string' || !path.isAbsolute(value) || value.length > 32767)) throw new Error('invalid-list')
     return files
   } catch { throw new Error('系统文件粘贴读取失败，请重试；云端或虚拟文件请先下载到本机或使用“添加附件”') }
 }

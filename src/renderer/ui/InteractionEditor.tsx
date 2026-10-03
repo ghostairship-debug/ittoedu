@@ -14,7 +14,6 @@ import { nanoid } from 'nanoid'
 import {
   isNodeMotionAction,
   isTerminalNavigationAction,
-  MAX_INTERACTION_CONDITIONS,
   type AudioActionTarget,
   type InteractionAction,
   type InteractionActionStep,
@@ -1314,7 +1313,7 @@ function CourseStateConditionsEditor({
       <button
         type="button"
         className="secondary-button"
-        disabled={!firstDeclaration || rule.conditions.length >= MAX_INTERACTION_CONDITIONS}
+        disabled={!firstDeclaration}
         onClick={() => {
           if (!firstDeclaration) return
           onChange([

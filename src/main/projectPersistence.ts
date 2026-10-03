@@ -11,10 +11,7 @@ import type {
 import { COURSE_PROJECT_SCHEMA_VERSION } from '../shared/courseProjectTypes'
 import { DesktopOperationError } from './errors'
 
-export const MAX_RECOVERY_PROJECT_BYTES = 256 * 1024 * 1024
-
 const MAX_RECENT_PROJECTS = 12
-const MAX_RECENT_FILE_BYTES = 128 * 1024
 const RECENT_FILE_VERSION = 1
 const RECOVERY_METADATA_VERSION = 1
 const PROJECT_DOCUMENT_PATH = 'project.json'
@@ -140,12 +137,10 @@ function parseRecentProject(value: unknown): RecentProjectEntry | null {
   if (
     typeof candidate.path !== 'string' ||
     candidate.path.length === 0 ||
-    candidate.path.length > 32_767 ||
     !path.isAbsolute(candidate.path) ||
     !hasProjectExtension(candidate.path) ||
     typeof candidate.name !== 'string' ||
     candidate.name.length === 0 ||
-    candidate.name.length > 260 ||
     !isFiniteTimestamp(candidate.lastOpenedAt)
   ) {
     return null
@@ -164,7 +159,6 @@ function parseRecoveryMetadata(value: unknown): RecoveryMetadataFile | null {
     candidate.version !== RECOVERY_METADATA_VERSION ||
     typeof candidate.projectName !== 'string' ||
     candidate.projectName.length === 0 ||
-    candidate.projectName.length > 160 ||
     !isFiniteTimestamp(candidate.savedAt) ||
     typeof candidate.sha256 !== 'string' ||
     !/^[a-f0-9]{64}$/u.test(candidate.sha256)
@@ -175,7 +169,6 @@ function parseRecoveryMetadata(value: unknown): RecoveryMetadataFile | null {
     candidate.projectPath !== undefined &&
     (typeof candidate.projectPath !== 'string' ||
       candidate.projectPath.length === 0 ||
-      candidate.projectPath.length > 32_767 ||
       !path.isAbsolute(candidate.projectPath) ||
       !hasProjectExtension(candidate.projectPath))
   ) {
@@ -208,10 +201,10 @@ async function atomicWrite(filePath: string, data: Uint8Array | string): Promise
   }
 }
 
-async function readJsonFile(filePath: string, maxBytes: number): Promise<unknown> {
+async function readJsonFile(filePath: string): Promise<unknown> {
   try {
     const stats = await fs.stat(filePath)
-    if (!stats.isFile() || stats.size <= 0 || stats.size > maxBytes) return null
+    if (!stats.isFile() || stats.size <= 0) return null
     return JSON.parse(await fs.readFile(filePath, 'utf8')) as unknown
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
@@ -220,7 +213,7 @@ async function readJsonFile(filePath: string, maxBytes: number): Promise<unknown
 }
 
 async function readRecentProjectsUnsafe(): Promise<RecentProjectEntry[]> {
-  const raw = await readJsonFile(recentProjectsPath(), MAX_RECENT_FILE_BYTES)
+  const raw = await readJsonFile(recentProjectsPath())
   if (typeof raw !== 'object' || raw === null) return []
   const file = raw as Record<string, unknown>
   if (file.version !== RECENT_FILE_VERSION || !Array.isArray(file.projects)) return []
@@ -319,17 +312,12 @@ export function resolveRecentProjectPath(requestedPath: string): Promise<string>
 
 export function writeRecoveryProject(input: RecoveryProjectInput): Promise<void> {
   return withPersistenceLock(async () => {
-    if (
-      input.bytes.byteLength === 0 ||
-      input.bytes.byteLength > MAX_RECOVERY_PROJECT_BYTES
-    ) {
+    if (input.bytes.byteLength === 0) {
       throw new DesktopOperationError(
         'RECOVERY_SIZE_INVALID',
         '自动恢复保存失败',
-        input.bytes.byteLength === 0
-          ? '恢复工程包为空。'
-          : '恢复工程包超过 256 MB 限制。',
-        '请删除未使用的大图片或组件资源，然后手动保存工程。',
+        '恢复工程包为空。',
+        '请立即手动保存工程；若问题持续出现，请重新启动编辑器。',
       )
     }
     if (!hasZipSignature(input.bytes)) {
@@ -380,11 +368,7 @@ export function readRecoveryProject(): Promise<RecoveryProjectResult | null> {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
       return null
     }
-    if (
-      !stats.isFile() ||
-      stats.size <= 0 ||
-      stats.size > MAX_RECOVERY_PROJECT_BYTES
-    ) {
+    if (!stats.isFile() || stats.size <= 0) {
       await clearRecoveryProjectUnsafe()
       return null
     }
@@ -405,7 +389,7 @@ export function readRecoveryProject(): Promise<RecoveryProjectResult | null> {
     }
 
     const digest = crypto.createHash('sha256').update(bytes).digest('hex')
-    const rawMetadata = await readJsonFile(recoveryMetadataPath(), MAX_RECENT_FILE_BYTES)
+    const rawMetadata = await readJsonFile(recoveryMetadataPath())
     const metadata = parseRecoveryMetadata(rawMetadata)
     const matchingMetadata = metadata?.sha256 === digest ? metadata : null
     return {

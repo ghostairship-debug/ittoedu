@@ -4,17 +4,17 @@ import type { ImageGenerationRequest, ImageJobTimingMark, ImageRequestProvenance
 import type { ModelConnectionSnapshot, ModelFailure, ModelJsonObject } from '../../../shared/workbench/modelProvider'
 import { CHATGPT_RESPONSES_BASE_URL } from '../providers/ChatGPTResponsesProvider'
 import { httpFailureKind } from '../providers/providerHttpFailure'
+import { waitForModelOperation } from '../providers/OpenAIChatProvider'
+import { IMAGE_RESPONSE_IDLE_TIMEOUT_MS, modelFetch, responseIdleTimeoutCode } from '../providers/modelFetch'
 import { prepareImageResource } from '../admittedImageResource'
 import { imageProvenance } from './imageRoute'
-import { decodeImageBase64, readBoundedImageJson } from './imageResponse'
+import { decodeImageBase64, readImageJson } from './imageResponse'
 import type { ImageProviderPort, ImageProviderReference, ImageProviderResult, ImageProviderRunOptions, ImageProviderTimingStage } from './ImageProviderPort'
 export type { ImageProviderPort, ImageProviderReference, ImageProviderResult, ImageProviderRunOptions, ImageProviderTimingStage } from './ImageProviderPort'
 
 export interface ChatGPTImageProviderOptions {
   credentialResolver(connection: Readonly<ModelConnectionSnapshot>): Promise<{ accessToken: string; accountId: string }>
   fetch?: typeof fetch
-  timeoutMs?: number
-  maxResponseBytes?: number
   now?: () => number
 }
 const object = (v: unknown): v is ModelJsonObject => v !== null && typeof v === 'object' && !Array.isArray(v)
@@ -26,10 +26,9 @@ export function serializeChatGPTImageRequest(request: ImageGenerationRequest, re
   if (connection.protocol !== 'chatgpt-responses' || connection.auth.kind !== 'oauth' || connection.baseURL !== CHATGPT_RESPONSES_BASE_URL
     || !nonempty(connection.id) || !nonempty(connection.auth.credentialRef) || !Number.isSafeInteger(connection.revision) || connection.revision < 1
     || !nonempty(connection.accountId) || !nonempty(imageModel) || !nonempty(request.prompt)
-    || request.prompt.length > 200_000 || !['generate', 'edit'].includes(request.operation)) throw new Error('invalid-image-request')
+    || !['generate', 'edit'].includes(request.operation)) throw new Error('invalid-image-request')
   if (request.operation === 'edit' ? references.length < 1 : references.length !== 0) throw new Error('invalid-edit-references')
   if ((request.referenceIds ?? []).length !== references.length || references.some((ref, index) => ref.referenceId !== request.referenceIds?.[index])) throw new Error('reference-identity-mismatch')
-  if (references.length > 5) throw new Error('unsupported-image-reference-count')
   if (capabilities?.[request.operation] === 'unsupported') throw new Error(`unsupported-image-${request.operation}`)
   if (references.length > 1 && capabilities?.multipleReferences === 'unsupported') throw new Error('unsupported-image-multiple-references')
   if (output.background === 'transparent' && capabilities?.transparent === 'unsupported') throw new Error('unsupported-image-transparent')
@@ -53,25 +52,23 @@ export class ChatGPTImageProvider implements ImageProviderPort {
     const timing = (stage: ImageProviderTimingStage, detail?: ImageJobTimingMark['detail']) => {
       try { options.onTiming?.(stage, detail) } catch { /* Diagnostics cannot alter the image request. */ }
     }
-    let attempted = false, timedOut = false, phase: ModelFailure['kind'] = 'configuration', response: Response | undefined
+    let attempted = false, phase: ModelFailure['kind'] = 'configuration', response: Response | undefined
     options.signal?.addEventListener('abort', abort, { once: true }); if (options.signal?.aborted) abort()
-    const timer = setTimeout(() => { timedOut = true; abort() }, this.options.timeoutMs ?? 180_000)
     try {
       const body = serializeChatGPTImageRequest(request, references)
       provenance.requestBytes = Buffer.byteLength(body); provenance.requestDigest = digest(body)
-      if (provenance.requestBytes > 96 * 1024 * 1024) throw new Error('image-request-too-large')
       for (const ref of references) {
         if (!['image/png', 'image/jpeg', 'image/webp'].includes(ref.mimeType)) throw new Error('unsupported-reference-format')
         await prepareImageResource(ref, () => 'reference')
       }
       timing('image.provider.prepared', { referenceCount: references.length, requestBytes: provenance.requestBytes })
       phase = 'auth'
-      const credential = await this.options.credentialResolver(request.selection.connection)
+      const credential = await waitForModelOperation(() => this.options.credentialResolver(request.selection.connection), controller.signal)
       if (credential.accountId !== request.selection.connection.accountId || !credential.accessToken || /[\r\n]/.test(credential.accessToken + credential.accountId)) throw new Error('account-mismatch')
       controller.signal.throwIfAborted(); phase = 'transport'; attempted = true
       // fetch invocation is observed here; it does not prove that bytes reached the server.
       timing('image.fetch.invoked', { requestBytes: provenance.requestBytes })
-      response = await (this.options.fetch ?? fetch)(provenance.endpoint, { method: 'POST', redirect: 'error', signal: controller.signal,
+      response = await modelFetch(this.options.fetch, IMAGE_RESPONSE_IDLE_TIMEOUT_MS)(provenance.endpoint, { method: 'POST', redirect: 'error', signal: controller.signal,
         headers: { Authorization: `Bearer ${credential.accessToken}`, 'chatgpt-account-id': credential.accountId, 'Content-Type': 'application/json',
           Accept: 'application/json', ...(/^[A-Za-z0-9_.:-]{1,200}$/.test(request.runId) ? { 'x-codex-image-turn-id': request.runId } : {}) }, body })
       timing('image.response.headers', { httpStatus: response.status })
@@ -86,9 +83,9 @@ export class ChatGPTImageProvider implements ImageProviderPort {
           ...(retryMs !== undefined && Number.isFinite(retryMs) ? { retryAfterMs: Math.max(0, Math.ceil(retryMs)) } : {}) } }
       }
       phase = 'protocol'
-      const payload = await readBoundedImageJson(response, this.options.maxResponseBytes ?? 96 * 1024 * 1024)
+      const payload = await readImageJson(response)
       const safeLabel = (value: unknown): string => {
-        if (!nonempty(value) || value.length > 512 || /[\u0000-\u001f\u007f]/.test(value) || value.includes(credential.accessToken)) throw new Error('invalid-image-provenance')
+        if (!nonempty(value) || /[\u0000-\u001f\u007f]/.test(value) || value.includes(credential.accessToken)) throw new Error('invalid-image-provenance')
         return value
       }
       if (payload.id != null) provenance.providerResponseId = safeLabel(payload.id)
@@ -122,23 +119,24 @@ export class ChatGPTImageProvider implements ImageProviderPort {
       if (warnings.size) provenance.outputWarnings = [...warnings]
       return { status: 'completed', images, provenance }
     } catch (error) {
-      const kind = controller.signal.aborted ? timedOut ? 'timeout' : 'aborted' : phase
+      const idleCode = controller.signal.aborted ? undefined : responseIdleTimeoutCode(error)
+      const kind = controller.signal.aborted ? 'aborted' : idleCode ? 'timeout' : phase
       const preflightMessages: Record<string, string> = {
         'unsupported-image-generate': '当前图片配置标记为不支持生成；请求未发送。',
         'unsupported-image-edit': '当前图片配置标记为不支持编辑；请求未发送。',
         'unsupported-image-multiple-references': '当前图片配置标记为不支持多张参考图；请求未发送。',
         'unsupported-image-transparent': '当前图片配置标记为不支持透明背景；请求未发送。',
-        'unsupported-image-reference-count': '当前图片接口最多接受五张参考图；请求未发送。',
         'unsupported-image-option': '当前图片接口不支持所选输出参数；请求未发送。',
         'invalid-image-size': '图片尺寸参数无效；请求未发送。',
       }
       const preflightCode = !attempted && phase === 'configuration' && error instanceof Error
         && Object.hasOwn(preflightMessages, error.message) ? error.message : undefined
       return { status: 'failed', provenance, failure: { outcome: attempted ? 'unknown' : 'not-sent', kind,
-        code: preflightCode ? `image-${preflightCode}` : `image-${kind}`,
-        message: preflightCode ? preflightMessages[preflightCode]! : attempted ? '图片请求未取得可用的完整结果，状态未知；未自动重试。' : '图片请求未发送，请检查所选连接、参数与参考图。' } }
+        code: idleCode ? `image-${idleCode}` : preflightCode ? `image-${preflightCode}` : `image-${kind}`,
+        message: idleCode ? '图片接口长时间未返回网络数据，连接已结束，结果状态未知；未自动重试。'
+          : preflightCode ? preflightMessages[preflightCode]! : attempted ? '图片请求未取得可用的完整结果，状态未知；未自动重试。' : '图片请求未发送，请检查所选连接、参数与参考图。' } }
     } finally {
-      clearTimeout(timer); options.signal?.removeEventListener('abort', abort); controller.abort()
+      options.signal?.removeEventListener('abort', abort); controller.abort()
       if (response?.body && !response.body.locked) await response.body.cancel().catch(() => undefined)
     }
   }

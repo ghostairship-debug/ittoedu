@@ -268,6 +268,37 @@ it('reports abort and truncated Responses as unknown once sent; HTTP rejection a
   expect(requests).toBe(3)
 })
 
+it('distinguishes active-stop aborts from real transport failures with a dedicated code and message', async () => {
+  let mode: 'abort' | 'refuse' = 'abort', sawRequest = false
+  const transport = await serve(async (req, res) => {
+    sawRequest = true
+    if (mode === 'refuse') { res.destroy(new Error('simulated network failure')); return }
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    res.write(frame({ type: 'response.created', response: { id: 'one', model: 'actual' } }))
+    // Keep the connection open; the test aborts the request below.
+  })
+  const provider = new ChatGPTResponsesProvider({ fetch: transport, credentialResolver: async () => ({ accessToken: 'own-token', accountId: 'account' }) })
+
+  const controller = new AbortController(), events: ModelEvent[] = []
+  for await (const event of provider.stream(request(), { signal: controller.signal })) {
+    events.push(event)
+    if (event.type === 'response.started') controller.abort()
+  }
+  const stopped = events.at(-1)
+  expect(stopped).toMatchObject({ type: 'response.failed', failure: { outcome: 'unknown', kind: 'aborted', code: 'chatgpt-aborted' } })
+  if (stopped?.type !== 'response.failed') throw new Error()
+  expect(stopped.failure.message).toContain('任务已停止')
+  expect(stopped.failure.message).toContain('模型请求被撤销')
+
+  mode = 'refuse'; sawRequest = false
+  const failed = await collect(provider, request())
+  expect(sawRequest).toBe(true)
+  const terminal = failed.at(-1)
+  expect(terminal).toMatchObject({ type: 'response.failed', failure: { kind: 'transport', code: 'chatgpt-transport' } })
+  if (terminal?.type !== 'response.failed') throw new Error()
+  expect(terminal.failure.message).not.toContain('任务已停止')
+})
+
 it('classifies ChatGPT structured 429 insufficient_quota without leaking its response', async () => {
   const transport = await serve(async (req, res) => {
     await body(req)
@@ -317,7 +348,7 @@ const jwt = (account = 'account', generation = 1) => `${Buffer.from('{}').toStri
 const target = { credentialRef: 'own-ref', connectionId: 'connection', revision: 1, expectedAccountId: 'account' }
 const callback = (url: string, state?: string) => `http://localhost:1455/auth/callback?state=${state ?? new URL(url).searchParams.get('state')}&code=own-code`
 
-it('OAuth local HTTP proves PKCE/state, serialized refresh, identity and revocation fencing without leaking credentials', async () => {
+it('OAuth local HTTP keeps human login pending beyond fifteen minutes and proves PKCE/state, refresh and revocation', async () => {
   let now = 1_000_000, exchanges = 0, refreshes = 0
   let challenge = '', hold = false, entered!: () => void, release: (() => void) | undefined
   const transport = await serve(async (req, res) => {
@@ -332,6 +363,7 @@ it('OAuth local HTTP proves PKCE/state, serialized refresh, identity and revocat
   const flow = await client.beginAuthorization(target), url = new URL(flow.authorizationURL); challenge = url.searchParams.get('code_challenge')!
   expect(url.origin).toBe('https://auth.openai.com'); expect(url.searchParams.get('code_challenge_method')).toBe('S256')
   await expect(client.completeAuthorization(flow.loginId, callback(flow.authorizationURL, 'wrong-state'))).rejects.toMatchObject({ code: 'state-or-callback-mismatch' }); expect(exchanges).toBe(0)
+  now += 20 * 60_000
   const account = await client.completeAuthorization(flow.loginId, callback(flow.authorizationURL))
   expect(account).toMatchObject({ accountId: 'account', credentialRef: 'own-ref' }); expect(JSON.stringify(account)).not.toContain('own-refresh')
   await expect(client.completeAuthorization(flow.loginId, callback(flow.authorizationURL))).rejects.toMatchObject({ code: 'login-expired-or-cancelled' })
@@ -362,8 +394,9 @@ it('device OAuth polls only on interval; cancelled in-flight login cannot save l
   const port = securePort(), client = new ChatGPTOAuthClient({ clientId: 'fixture', redirectURI: 'http://localhost:1455/auth/callback', originator: 'fixture', persistence: port, fetch: transport, now: () => now })
   const flow = await client.beginDeviceAuthorization(target)
   expect(flow.verificationURL).toBe('https://auth.openai.com/codex/device')
+  expect(flow).not.toHaveProperty('expiresAt')
   expect(await client.pollDeviceAuthorization(flow.loginId)).toEqual({ status: 'pending', retryAfterMs: 1000 }); expect(polls).toBe(0)
-  now += 1000; const reached = new Promise<void>(resolve => { entered = resolve }), completing = client.pollDeviceAuthorization(flow.loginId)
+  now += 20 * 60_000; const reached = new Promise<void>(resolve => { entered = resolve }), completing = client.pollDeviceAuthorization(flow.loginId)
   await reached; client.cancel(flow.loginId); release!()
   await expect(completing).rejects.toMatchObject({ code: 'login-expired-or-cancelled' }); expect((await port.read('own-ref')).credential).toBeNull()
   cancelled = true; const second = await client.beginDeviceAuthorization(target); now += 1000
@@ -371,8 +404,44 @@ it('device OAuth polls only on interval; cancelled in-flight login cannot save l
   expect(error).toMatchObject({ code: 'http-400' }); expect(String(error)).not.toContain('secret-own-refresh')
 })
 
+it('device OAuth honors the provider polling interval and actual device-code expiry', async () => {
+  let now = 1_000_000, polls = 0
+  const transport = await serve(async (req, res) => {
+    await body(req); res.setHeader('Content-Type', 'application/json')
+    if (req.url?.endsWith('/usercode')) { res.end(JSON.stringify({ device_auth_id: 'device-id', user_code: 'CODE', interval: 90, expires_in: 1200 })); return }
+    polls++; res.writeHead(403); res.end('{}')
+  })
+  const client = new ChatGPTOAuthClient({ clientId: 'fixture', redirectURI: 'http://localhost:1455/auth/callback', originator: 'fixture', persistence: securePort(), fetch: transport, now: () => now })
+  const flow = await client.beginDeviceAuthorization(target)
+  expect(flow).toMatchObject({ retryAfterMs: 90_000, expiresAt: now + 20 * 60_000 })
+  now += 60_000
+  expect(await client.pollDeviceAuthorization(flow.loginId)).toEqual({ status: 'pending', retryAfterMs: 30_000 }); expect(polls).toBe(0)
+  now += 30_000
+  expect(await client.pollDeviceAuthorization(flow.loginId)).toEqual({ status: 'pending', retryAfterMs: 90_000 }); expect(polls).toBe(1)
+  now = flow.expiresAt!
+  await expect(client.pollDeviceAuthorization(flow.loginId)).rejects.toMatchObject({ code: 'login-expired-or-cancelled' }); expect(polls).toBe(1)
+})
 
-it('M26 OAuth streams use activity/progress/total clocks rather than the old fixed idle-duration cutoff', async () => {
+it('device OAuth accepts valid tokens after provider authorization even if the former device code expires during exchange', async () => {
+  let now = 1_000_000, entered!: () => void, release!: () => void
+  const reached = new Promise<void>(resolve => { entered = resolve })
+  const transport = await serve(async (req, res) => {
+    await body(req); res.setHeader('Content-Type', 'application/json')
+    if (req.url?.endsWith('/usercode')) { res.end(JSON.stringify({ device_auth_id: 'device-id', user_code: 'CODE', interval: 1, expires_in: 60 })); return }
+    if (req.url?.endsWith('/deviceauth/token')) { res.end(JSON.stringify({ authorization_code: 'device-code', code_verifier: 'device-verifier' })); return }
+    entered(); await new Promise<void>(resolve => { release = resolve })
+    res.end(JSON.stringify({ access_token: jwt(), refresh_token: 'own-refresh', expires_in: 120 }))
+  })
+  const client = new ChatGPTOAuthClient({ clientId: 'fixture', redirectURI: 'http://localhost:1455/auth/callback', originator: 'fixture', persistence: securePort(), fetch: transport, now: () => now })
+  const flow = await client.beginDeviceAuthorization(target)
+  now += 1000
+  const completing = client.pollDeviceAuthorization(flow.loginId)
+  await reached; now += 60_000; release()
+  expect(await completing).toMatchObject({ status: 'complete', account: { accountId: 'account', expiresAt: now + 120_000 } })
+})
+
+
+it('OAuth streams remain live while upstream data continues beyond the former fixed cutoff', async () => {
   let requests = 0
   const transport = await serve(async (req, res) => {
     await body(req); requests++
@@ -386,11 +455,8 @@ it('M26 OAuth streams use activity/progress/total clocks rather than the old fix
       output: [{ type: 'message', role: 'assistant', content: [{ type: 'output_text', text: '完成' }] }] } }))
   })
   const credentialResolver = async () => ({ accessToken: 'purpose-token', accountId: 'account' })
-  const completed = await collect(new ChatGPTResponsesProvider({ fetch: transport, credentialResolver, timeoutMs: 100, progressTimeoutMs: 150, maxDurationMs: 600 }), request())
+  const completed = await collect(new ChatGPTResponsesProvider({ fetch: transport, credentialResolver }), request())
   expect(completed.at(-1)?.type).toBe('response.completed')
   expect(completed.filter(event => event.type === 'reasoning.delta')).toHaveLength(7)
-  const bounded = await collect(new ChatGPTResponsesProvider({ fetch: transport, credentialResolver, timeoutMs: 100, progressTimeoutMs: 150, maxDurationMs: 120 }), request())
-  expect(bounded.at(-1)).toMatchObject({ type: 'response.failed', failure: { kind: 'timeout', outcome: 'unknown' } })
-  expect(bounded.some(event => event.type === 'response.completed')).toBe(false)
-  expect(requests).toBe(2) // One transport attempt each; the provider itself never retries.
+  expect(requests).toBe(1) // The provider itself never retries.
 })

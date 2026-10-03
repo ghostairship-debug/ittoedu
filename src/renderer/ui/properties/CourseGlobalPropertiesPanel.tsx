@@ -445,12 +445,18 @@ function TeacherControllerProperties({
   )
 }
 
-function SlideCanvasSizeSection({
+export function SlideCanvasSizeSection({
   canvas,
   onApply,
+  title = '课程默认尺寸',
+  testId = 'slide-canvas-size',
+  hint = '未单独设置尺寸的页面将使用此规格。自由内容按比例调整，Web 自动布局区域重新排版。',
 }: {
   canvas: SlideCanvasSize
   onApply: (next: SlideCanvasSize) => void
+  title?: string
+  testId?: string
+  hint?: string
 }) {
   const [width, setWidth] = useState(String(canvas.width))
   const [height, setHeight] = useState(String(canvas.height))
@@ -464,8 +470,8 @@ function SlideCanvasSizeSection({
   const parsedHeight = Number(height)
   const parsed = slideCanvasSchema.safeParse({ width: parsedWidth, height: parsedHeight })
   return (
-    <section className="property-section" data-testid="slide-canvas-size">
-      <h3 className="property-title">画布尺寸</h3>
+    <section className="property-section" data-testid={testId}>
+      <h3 className="property-title">{title}</h3>
       <SelectField<string>
         label="预设"
         value={presetId}
@@ -482,16 +488,16 @@ function SlideCanvasSizeSection({
         }}
       />
       <div className="form-field">
-        <label htmlFor="slide-canvas-width">宽度</label>
-        <input id="slide-canvas-width" inputMode="numeric" value={width} onChange={(event) => { setPresetId(''); setWidth(event.target.value) }} />
+        <label htmlFor={`${testId}-width`}>宽度</label>
+        <input id={`${testId}-width`} inputMode="numeric" value={width} onChange={(event) => { setPresetId(''); setWidth(event.target.value) }} />
       </div>
       <div className="form-field">
-        <label htmlFor="slide-canvas-height">高度</label>
-        <input id="slide-canvas-height" inputMode="numeric" value={height} onChange={(event) => { setPresetId(''); setHeight(event.target.value) }} />
+        <label htmlFor={`${testId}-height`}>高度</label>
+        <input id={`${testId}-height`} inputMode="numeric" value={height} onChange={(event) => { setPresetId(''); setHeight(event.target.value) }} />
       </div>
-      <p className="property-hint">已有内容会按比例缩放。宽高须为 {SLIDE_CANVAS_MIN}–{SLIDE_CANVAS_MAX} 的整数。</p>
+      <p className="property-hint">{hint}宽高须为 {SLIDE_CANVAS_MIN}–{SLIDE_CANVAS_MAX} 的整数。</p>
       {!parsed.success && (
-        <p className="property-hint" role="alert" data-testid="slide-canvas-size-error">宽高须为 {SLIDE_CANVAS_MIN}–{SLIDE_CANVAS_MAX} 的整数。</p>
+        <p className="property-hint" role="alert" data-testid={`${testId}-error`}>宽高须为 {SLIDE_CANVAS_MIN}–{SLIDE_CANVAS_MAX} 的整数。</p>
       )}
       <button
         type="button"

@@ -3,7 +3,6 @@ import type { ProductivityContext } from '../../authoring/productivity'
 import type { EditorTransactionStep } from '../../authoring/editorTransaction'
 import { parsePptxImport, type PptxImportDraft } from '../../project/pptxImport'
 import { courseSlideCanvas } from '../../../shared/slideCanvas'
-import { PPTX_IMPORT_LIMITS } from '../../project/pptxPackage'
 import { planPptxImportTransaction } from '../../project/pptxImportTransaction'
 import type { ProductivityDialogProps } from './ProductivityDialog'
 
@@ -30,7 +29,6 @@ export function PptxImportForm({ getContext, onCommit, onClose }: ProductivityDi
     const request = ++sequence.current
     setPreview(null); setMessage(''); setBusy(true)
     try {
-      if (file.size > PPTX_IMPORT_LIMITS.fileBytes) throw new Error('PPTX 不能超过 32 MiB')
       const context = getContext()
       await stage(new Uint8Array(await file.arrayBuffer()), file.name, context, request)
     } catch (error) { if (sequence.current === request) setMessage(error instanceof Error ? error.message : 'PPTX 无法导入') }

@@ -1,8 +1,8 @@
 import { z } from 'zod'
 import type { ToolDefinition } from '../../shared/workbench/tools'
 
-const handle = z.string().min(1).max(512)
-const boundedText = z.string().min(1).max(200_000)
+const handle = z.string().min(1)
+const contentText = z.string().min(1)
 const job = z.object({ kind: z.enum(['image', 'build', 'compute', 'delegation']), job: handle }).strict()
 const noInput = z.object({}).strict()
 /** Agent-facing schemas are kept in the canonical catalog even when a connection is unavailable. */
@@ -11,25 +11,23 @@ export const workbenchServiceSchemas = {
   'job.wait': job.extend({ milliseconds: z.number().int().min(0).max(30_000) }).strict(),
   'job.logs': job.extend({ after: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(100).optional() }).strict(),
   'job.cancel': job,
-  'compute.run': z.object({ code: boundedText, outputNames: z.array(z.string().min(1).max(256)).optional(),
-    timeoutMs: z.number().int().min(1000).max(60 * 60_000).optional() }).strict(),
-  'delegate.start': z.object({ goal: boundedText, materials: z.array(z.string().min(1).max(256)).optional(),
-    expectedArtifacts: z.array(z.string().min(1).max(256)).min(1),
-    timeoutMs: z.number().int().min(1000).max(2 * 60 * 60_000).optional() }).strict(),
-  'delegate.read': z.object({ job: handle, name: z.string().min(1).max(256),
+  'compute.run': z.object({ code: contentText, outputNames: z.array(z.string().min(1)).optional() }).strict(),
+  'delegate.start': z.object({ goal: contentText, materials: z.array(z.string().min(1)).optional(),
+    expectedArtifacts: z.array(z.string().min(1)).min(1) }).strict(),
+  'delegate.read': z.object({ job: handle, name: z.string().min(1),
     offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(20_000).optional(),
     version: handle.optional() }).strict(),
-  'web.search': z.object({ query: z.string().min(1).max(1000), limit: z.number().int().min(1).max(20).optional(), cursor: handle.optional() }).strict(),
-  'web.open': z.object({ url: z.url().max(4096).optional(), sourceId: handle.optional(), version: handle.optional(),
+  'web.search': z.object({ query: z.string().min(1), limit: z.number().int().min(1).max(20).optional(), cursor: handle.optional() }).strict(),
+  'web.open': z.object({ url: z.url().optional(), sourceId: handle.optional(), version: handle.optional(),
     offset: z.number().int().nonnegative().optional(), limit: z.number().int().min(1).max(20_000).optional() }).strict()
-    .refine(input => !!input.url !== !!input.sourceId, '须指定 url 或已取得的 sourceId'),
+    .refine(input => !!input.url || !!input.sourceId, '须指定 url 或已取得的 sourceId'),
   'mcp.discover': noInput,
   'mcp.invoke': z.object({ name: handle, arguments: z.record(z.string(), z.unknown()), snapshotId: handle.optional() }).strict(),
   'mcp.resource': z.object({ resourceId: handle }).strict(),
   'media.discover': noInput,
-  'media.start': z.object({ kind: z.enum(['speech', 'video', 'music']), prompt: boundedText,
-    durationSeconds: z.number().positive().max(3600).optional(), language: z.string().min(1).max(50).optional(),
-    referenceResources: z.array(handle).max(5).optional() }).strict(),
+  'media.start': z.object({ kind: z.enum(['speech', 'video', 'music']), prompt: contentText,
+    durationSeconds: z.number().positive().optional(), language: z.string().min(1).optional(),
+    referenceResources: z.array(handle).optional() }).strict(),
 } as const
 export type WorkbenchServiceToolName = keyof typeof workbenchServiceSchemas
 export const isWorkbenchServiceTool = (name: string): name is WorkbenchServiceToolName => Object.hasOwn(workbenchServiceSchemas, name)

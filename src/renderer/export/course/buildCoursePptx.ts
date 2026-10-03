@@ -3,6 +3,8 @@ import { omitTeacherControllerFromStaticExport } from '../../../shared/teacherCo
 import { applyPptxShapeExtensions, type PptxShapeExtensions } from '../pptxShapeGeometry'
 import type PptxGenJS from 'pptxgenjs'
 import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
+import { effectiveSceneCanvas, sharedSlideFrameMapping, sameSlideCanvas, type SlideCanvasSize, type SharedSlideFrameMapping } from '../../../shared/slideCanvas'
+import { createPublishedCourseV2PrintCaptureSession } from '../playerCapture'
 import type { ImageNode } from '../../../shared/contracts/native-v1/types'
 import { renderImageNodeCanvas } from '../../../shared/imageEffects'
 import { nativeRenderInputFromPublishedItem, readonlyNativeRenderInputFromPublishedItem } from '../../../player/surfaces/native/publishedNativeRendering'
@@ -44,9 +46,7 @@ import {
   type CoursePublishSources,
 } from './buildPublishedCourse'
 import { isParsedPublishedCourseV2 } from '../../../player/surfaces/CoursePlayer'
-import {
-  renderPublishedSpatialFrameSvg,
-} from '../../../player/surfaces/spatial/publishedSpatialStaticRendering'
+import { renderPublishedSpatialFrameSvg, SPATIAL_EXPORT_VIEWPORT } from '../../../player/surfaces/spatial/publishedSpatialStaticRendering'
 import {
   auditCourseExportAssets,
   auditCourseExportFonts,
@@ -63,12 +63,13 @@ import {
 } from '../renderPptxRuntimeSnapshots'
 
 export interface BuildCoursePptxOptions {
+  captureSpatialPage?: (input: { published: PublishedCourseV2Payload; surface: PublishedSpatialSurface; page: CourseExportPage }) => string | Promise<string>
   captureDynamicItem?: (input: {
     published: PublishedCourseV2Payload
     surface: PublishedSlideSurface
     scene: PublishedSlideScene
     locationId: string
-    item: Extract<PublishedLayerItem, { kind: 'component' | 'runtime' }>
+    item: Extract<PublishedLayerItem, { kind: 'component' | 'runtime' | 'composition' }>
   }) => string | undefined | Promise<string | undefined>
   /** Test/host seam; production uses the formal Native image renderer. */
   renderNativeImage?: (input: {
@@ -91,6 +92,34 @@ export type BuildCoursePptxInput = CoursePublishSources | PublishedCourseV2Paylo
 const MAX_IMAGE_RENDER_RESOLUTION = 4
 const MAX_IMAGE_RENDER_PIXELS = 8_000_000
 const sharedMasters = new WeakMap<PptxGenJS, Map<string, string>>()
+
+/** Apply the shared contain mapping to drawing commands, including fonts and strokes. */
+function mappedDrawingTarget(target: PptxDrawingTarget, mapping: SharedSlideFrameMapping): PptxDrawingTarget {
+  if (mapping.scale === 1 && mapping.offsetX === 0 && mapping.offsetY === 0) return target
+  const scaledStyle = (value: unknown, key = ''): unknown => {
+    if (typeof value === 'number') return /^(?:fontSize|minFontSize|maxFontSize|.*FontSize|.*LineSize|pt|margin|colW|rowH|blur|offset|indent|hanging)$/.test(key) ? value * mapping.scale : value
+    if (Array.isArray(value)) return value.map(part => scaledStyle(part, key))
+    if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([name, part]) => [name,
+      name === 'width' && key === 'line' && typeof part === 'number' ? part * mapping.scale : scaledStyle(part, name)]))
+    return value
+  }
+  const options = <T extends object | undefined>(input: T): T => {
+    if (!input) return input
+    const output = scaledStyle(input) as Record<string, unknown>
+    for (const name of ['x', 'y', 'w', 'h']) {
+      const value = (input as Record<string, unknown>)[name]
+      if (typeof value === 'number') output[name] = value * mapping.scale + (name === 'x' ? mapping.offsetX / 96 : name === 'y' ? mapping.offsetY / 96 : 0)
+    }
+    return output as T
+  }
+  return {
+    addImage: input => target.addImage(options(input)),
+    addText: (text, input) => target.addText(Array.isArray(text) ? text.map(run => ({ ...run, options: scaledStyle(run.options) as typeof run.options })) : text, options(input)),
+    addShape: (shape, input) => target.addShape(shape, options(input)),
+    addTable: (rows, input) => target.addTable(rows.map(row => row.map(cell => typeof cell === 'object' ? { ...cell, options: scaledStyle(cell.options) as typeof cell.options } : cell)), options(input)),
+    addChart: (chart, data, input) => target.addChart(chart, data, options(input)),
+  }
+}
 
 function masterRepresentable(item: PublishedLayerItem): item is PublishedNativeLayerItem {
   if (item.kind !== 'native') return false
@@ -227,7 +256,7 @@ function isGlobalPublishedItem(
 function publishedDynamicSnapshotKey(
   published: PublishedCourseV2Payload,
   scene: PublishedSlideScene,
-  item: Extract<PublishedLayerItem, { kind: 'component' | 'runtime' }>,
+  item: Extract<PublishedLayerItem, { kind: 'component' | 'runtime' | 'composition' }>,
 ): string {
   const global = isGlobalPublishedItem(published, item.layerItemId)
   if (item.kind === 'component') {
@@ -364,13 +393,13 @@ async function addNativeItem(
   }
 }
 
-function addWarningNote(slide: PptxSlide, warnings: readonly string[]): void {
+function addWarningNote(slide: PptxSlide, warnings: readonly string[], size = { width: WIDE_SLIDE_WIDTH, height: WIDE_SLIDE_HEIGHT }): void {
   if (warnings.length === 0) return
   const text = `静态导出提示：${[...new Set(warnings)].join(' ')}`
   slide.addText(text, {
     x: 0.15,
-    y: WIDE_SLIDE_HEIGHT - 0.5,
-    w: WIDE_SLIDE_WIDTH - 0.3,
+    y: size.height - 0.5,
+    w: size.width - 0.3,
     h: 0.42,
     objectName: '导出差异说明',
     margin: 3,
@@ -419,10 +448,11 @@ function publishedSpatialWorldNotice(
     itemIndex,
     layerItemId: item.layerItemId,
   }
+  if (item.kind === 'composition') return { ...base, severity: 'info', message: `Web 组合“${item.layerItemId}”在 PPTX 中按实际播放器图面呈现；结构与专业数据在工程中继续可编辑。` }
   if (item.kind === 'component' || item.kind === 'runtime') {
     const fallbackId = item.kind === 'component'
       ? item.staticFallbackAssetId
-      : item.runtime.staticFallback?.assetId
+      : item.kind === 'runtime' ? item.runtime.staticFallback?.assetId : undefined
     if (fallbackId && resolveAsset(fallbackId)) {
       return {
         ...base,
@@ -524,11 +554,12 @@ async function addSlideScenePage(
   precomputedSnapshots: ReadonlyMap<string, string>,
   imageCache: Map<string, HTMLImageElement>,
   shapeExtensions: PptxShapeExtensions,
+  outputCanvas: SlideCanvasSize,
 ): Promise<string[]> {
-  const scale: CanvasScale = {
-    x: WIDE_SLIDE_WIDTH / surface.canvas.width,
-    y: WIDE_SLIDE_HEIGHT / surface.canvas.height,
-  }
+  const scale: CanvasScale = { x: 1 / 96, y: 1 / 96 }
+  const canvas = effectiveSceneCanvas(surface, scene)
+  const outputMapping = sharedSlideFrameMapping(canvas, outputCanvas)
+  const size = { width: outputCanvas.width / 96, height: outputCanvas.height / 96 }
   const sceneWarnings: string[] = []
   const composition = composePublishedSlideStaticPage(
     published,
@@ -537,6 +568,16 @@ async function addSlideScenePage(
     { includeGlobalLayerItems, locationId: page.locationId },
   )
   const { state } = composition
+  const itemTarget = (target: PptxDrawingTarget, id: string): PptxDrawingTarget => {
+    const authored = composition.frameMappings.get(id)!
+    return mappedDrawingTarget(target, {
+      scale: authored.scale * outputMapping.scale,
+      offsetX: authored.offsetX * outputMapping.scale + outputMapping.offsetX,
+      offsetY: authored.offsetY * outputMapping.scale + outputMapping.offsetY,
+    })
+  }
+  if (!sameSlideCanvas(canvas, outputCanvas)) pushReport(report, { severity: 'info', pageId: page.id,
+    message: `PPTX 使用首个场景 ${outputCanvas.width}×${outputCanvas.height} 的统一页面规格；“${scene.name}”按 ${canvas.width}×${canvas.height} 等比居中适配，作者页面不变。` })
   const effectiveBg = state
     ? resolveEffectiveBackground({
         owner: 'slide-state',
@@ -564,12 +605,15 @@ async function addSlideScenePage(
   if (masterItems.length) {
     const cache = sharedMasters.get(pptx) ?? new Map<string, string>()
     sharedMasters.set(pptx, cache)
-    const key = JSON.stringify([surface.id, masterItems])
+    const key = JSON.stringify([surface.id, canvas, outputCanvas, masterItems])
     masterName = cache.get(key)
     if (!masterName) {
       const objects: NonNullable<PptxGenJS.SlideMasterProps['objects']> = []
       const target = masterDrawingTarget(objects)
-      for (const item of masterItems) await addNativeItem(target, item, published, scale, sceneWarnings, imageCache, options, report, page.id, shapeExtensions)
+      for (const item of masterItems) {
+        const authored = composition.authoredItems.get(item.layerItemId)!
+        if (authored.kind === 'native') await addNativeItem(itemTarget(target, item.layerItemId), authored, published, scale, sceneWarnings, imageCache, options, report, page.id, shapeExtensions)
+      }
       masterName = `共享层_${cache.size + 1}`
       pptx.defineSlideMaster({ title: masterName, objects })
       cache.set(key, masterName)
@@ -580,12 +624,12 @@ async function addSlideScenePage(
   if (backgroundAssetId) {
     const background = resolvePublishedAssetData(published, backgroundAssetId)
     if (background) {
-      slide.addImage({
+      mappedDrawingTarget(slide, outputMapping).addImage({
         data: background,
         x: 0,
         y: 0,
-        w: WIDE_SLIDE_WIDTH,
-        h: WIDE_SLIDE_HEIGHT,
+        w: canvas.width / 96,
+        h: canvas.height / 96,
         objectName: `${scene.name} · 背景图片`,
       })
     } else {
@@ -599,10 +643,12 @@ async function addSlideScenePage(
     }
   }
   for (const item of composition.items.slice(masterItems.length)) {
-    if (item.kind === 'native') {
+    const authored = composition.authoredItems.get(item.layerItemId)!
+    const drawing = itemTarget(slide, item.layerItemId)
+    if (authored.kind === 'native') {
       await addNativeItem(
-        slide,
-        item,
+        drawing,
+        authored,
         published,
         scale,
         sceneWarnings,
@@ -622,11 +668,11 @@ async function addSlideScenePage(
           surface,
           scene,
           locationId: page.locationId,
-          item,
+          item: authored as Extract<PublishedLayerItem, { kind: 'component' | 'runtime' | 'composition' }>,
         })
       } else {
         captured = precomputedSnapshots.get(
-          publishedDynamicSnapshotKey(published, scene, item),
+          publishedDynamicSnapshotKey(published, scene, authored),
         )
       }
     } catch (cause) {
@@ -635,27 +681,29 @@ async function addSlideScenePage(
       pushReport(report, { severity: 'warning', message, pageId: page.id })
     }
     if (captured?.startsWith('data:image/')) {
-      addImage(slide, item, captured, scale, '实际运行快照')
+      addImage(drawing, authored, captured, scale, '实际运行快照')
+      if (item.kind === 'composition') pushReport(report, { severity: 'info', pageId: page.id, layerItemId: item.layerItemId,
+        message: `Web 组合“${item.layerItemId}”按实际播放器图面导出为图片；PPTX 不保留内部 CSS 布局编辑与互动，工程中的结构和专业数据保持可编辑。` })
       continue
     }
     const fallbackId = item.kind === 'component'
       ? item.staticFallbackAssetId
-      : item.runtime.staticFallback?.assetId
+      : item.kind === 'runtime' ? item.runtime.staticFallback?.assetId : undefined
     const fallback = fallbackId ? resolvePublishedAssetData(published, fallbackId) : undefined
     if (fallback) {
-      addImage(slide, item, fallback, scale, '作者静态后备')
+      addImage(drawing, authored, fallback, scale, '作者静态后备')
       sceneWarnings.push(`${item.kind} “${item.layerItemId}”在 PPTX 中使用作者静态后备。`)
     } else {
-      addPlaceholder(slide, item, scale, `${item.kind === 'component' ? '互动组件' : '互动运行时'}\n${item.layerItemId}`)
+      addPlaceholder(drawing, authored, scale, `${item.kind === 'component' ? '互动组件' : item.kind === 'composition' ? 'Web 组合' : '互动运行时'}\n${item.layerItemId}`)
       sceneWarnings.push(`${item.kind} “${item.layerItemId}”无快照或静态后备，已使用可选择占位，未静默省略。`)
     }
   }
   sceneWarnings.forEach((message) => options.onWarning?.(message))
-  addWarningNote(slide, sceneWarnings)
+  addWarningNote(slide, sceneWarnings, size)
   return sceneWarnings
 }
 
-function addSpatialFramePage(
+async function addSpatialFramePage(
   pptx: InstanceType<(typeof import('pptxgenjs'))['default']>,
   published: PublishedCourseV2Payload,
   surface: PublishedSpatialSurface,
@@ -663,8 +711,11 @@ function addSpatialFramePage(
   report: CourseExportReportItem[],
   warnings: string[],
   options: BuildCoursePptxOptions,
-): boolean {
-  const notices = collectPublishedPptxSpatialNotices(
+  outputCanvas: SlideCanvasSize,
+): Promise<boolean> {
+  const needsPlayerCapture = surface.world.layerItems.some(item => item.visible && item.kind === 'composition')
+    || surface.surfaceLayerItems.some(entry => entry.item.visible && entry.item.kind === 'composition' && locationVisibilityApplies(entry.visibility, page.locationId))
+  const notices = needsPlayerCapture ? [] : collectPublishedPptxSpatialNotices(
     surface,
     (assetId) => resolvePublishedAssetData(published, assetId),
     page.locationId,
@@ -679,11 +730,39 @@ function addSpatialFramePage(
       ...(notice.assetId ? { assetId: notice.assetId } : {}),
     })
   })
-  const { svg, viewport } = renderPublishedSpatialFrameSvg(
-    surface,
-    page.cameraFrameId,
-    (assetId) => resolvePublishedAssetData(published, assetId),
-  )
+  let dataUrl: string
+  let viewport: { width: number; height: number }
+  if (needsPlayerCapture) {
+    if (!page.locationId) {
+      pushReport(report, { severity: 'warning', pageId: page.id, message: `Spatial 镜头“${page.title}”没有课程位置，未能捕获包含 Web 组合的图面。` })
+      return false
+    }
+    try {
+      if (options.captureSpatialPage) dataUrl = await options.captureSpatialPage({ published, surface, page })
+      else {
+        const capture = await createPublishedCourseV2PrintCaptureSession({ payload: published, includeGlobalLayerItems: false })
+        try {
+          const result = await capture.capturePage({ locationId: page.locationId, surfaceId: surface.id,
+            ...(page.cameraFrameId ? { frameId: page.cameraFrameId } : {}), ...SPATIAL_EXPORT_VIEWPORT })
+          if (result.format !== 'data-url') throw new Error('Spatial 播放器没有返回图片')
+          dataUrl = result.content
+          for (const message of result.warnings ?? []) pushReport(report, { severity: 'warning', pageId: page.id, message })
+        } finally { await capture.destroy() }
+      }
+      if (!dataUrl.startsWith('data:image/')) throw new Error('Spatial 播放器没有返回有效图片')
+      viewport = SPATIAL_EXPORT_VIEWPORT
+      pushReport(report, { severity: 'info', pageId: page.id,
+        message: `Spatial 镜头“${page.title}”含 Web 组合，使用实际播放器图面；PPTX 保留静态镜头图片，工程内的结构、专业数据与互动保持原状。` })
+    } catch (cause) {
+      const message = `Spatial 镜头“${page.title}”实际播放器捕获失败：${cause instanceof Error ? cause.message : String(cause)}；该页未被替换为简化占位图。`
+      warnings.push(message); pushReport(report, { severity: 'warning', message, pageId: page.id }); options.onWarning?.(message)
+      return false
+    }
+  } else {
+    const rendered = renderPublishedSpatialFrameSvg(surface, page.cameraFrameId, (assetId) => resolvePublishedAssetData(published, assetId))
+    viewport = rendered.viewport
+    dataUrl = bytesToDataUrl(new TextEncoder().encode(rendered.svg), 'image/svg+xml')
+  }
   if (viewport.width === 1280 && viewport.height === 720 && surface.world.bounds.mode === 'infinite') {
     pushReport(report, {
       severity: 'error',
@@ -694,19 +773,19 @@ function addSpatialFramePage(
   }
   const slide = pptx.addSlide()
   slide.background = { color: 'FFFFFF' }
-  const dataUrl = bytesToDataUrl(new TextEncoder().encode(svg), 'image/svg+xml')
   const aspect = viewport.width / viewport.height
-  const wideAspect = WIDE_SLIDE_WIDTH / WIDE_SLIDE_HEIGHT
-  let width = WIDE_SLIDE_WIDTH
-  let height = WIDE_SLIDE_HEIGHT
+  const slideWidth = outputCanvas.width / 96, slideHeight = outputCanvas.height / 96
+  const wideAspect = slideWidth / slideHeight
+  let width = slideWidth
+  let height = slideHeight
   let x = 0
   let y = 0
   if (aspect > wideAspect) {
-    height = WIDE_SLIDE_WIDTH / aspect
-    y = (WIDE_SLIDE_HEIGHT - height) / 2
+    height = slideWidth / aspect
+    y = (slideHeight - height) / 2
   } else {
-    width = WIDE_SLIDE_HEIGHT * aspect
-    x = (WIDE_SLIDE_WIDTH - width) / 2
+    width = slideHeight * aspect
+    x = (slideWidth - width) / 2
   }
   slide.addImage({
     data: dataUrl,
@@ -808,7 +887,13 @@ export async function buildCoursePptx(
 
   const { default: PptxGenJS } = await import('pptxgenjs')
   const pptx = new PptxGenJS()
-  pptx.layout = 'LAYOUT_WIDE'
+  const firstSlidePage = slidePages[0]
+  const firstSlideSurface = firstSlidePage ? published.surfaces.find(surface => surface.id === firstSlidePage.surfaceId && surface.type === 'slide') : undefined
+  const outputCanvas = firstSlideSurface?.type === 'slide'
+    ? effectiveSceneCanvas(firstSlideSurface, firstSlideSurface.scenes.find(scene => scene.id === firstSlidePage.sceneId))
+    : { width: 1280, height: 720 }
+  pptx.defineLayout({ name: 'COURSE_CANVAS', width: outputCanvas.width / 96, height: outputCanvas.height / 96 })
+  pptx.layout = 'COURSE_CANVAS'
   pptx.author = APP_NAME
   pptx.company = APP_COMPANY
   pptx.title = published.title
@@ -843,6 +928,7 @@ export async function buildCoursePptx(
       precomputedSnapshots,
       imageCache,
       shapeExtensions,
+      outputCanvas,
     ))
     slideCount += 1
   }
@@ -852,7 +938,7 @@ export async function buildCoursePptx(
       candidate.id === page.surfaceId && candidate.type === 'spatial-2d'
     ))
     if (!surface) continue
-    if (addSpatialFramePage(
+    if (await addSpatialFramePage(
       pptx,
       published,
       surface,
@@ -860,6 +946,7 @@ export async function buildCoursePptx(
       report,
       warnings,
       options,
+      outputCanvas,
     )) slideCount += 1
   }
 

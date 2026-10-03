@@ -1,10 +1,9 @@
 import { extractOfficeMaterial, extractPdfMaterial, type MaterialExtractionOptions } from '../../project/materialExtraction'
-import { MATERIAL_EXTRACTION_LIMITS } from '../../../shared/materialExtraction'
 import type { AttachmentExtractionInput, AttachmentExtractionResult } from '../../../shared/workbench/attachments'
 
 /** Parses bytes only. Office XML is never mounted as HTML; macros and PDF actions are never executed. */
 export async function extractAttachmentMaterial(input: AttachmentExtractionInput, callOptions: { signal?: AbortSignal; onProgress?: (page: number, total: number) => void } = {}): Promise<AttachmentExtractionResult> {
-  if (!(input.bytes instanceof Uint8Array) || !input.bytes.length || input.bytes.length > MATERIAL_EXTRACTION_LIMITS.sourceBytes) throw new Error('材料须为非空且不超过 256 MiB')
+  if (!(input.bytes instanceof Uint8Array) || !input.bytes.length) throw new Error('材料须为非空文件')
   const format = input.filename.split('.').pop()?.toLowerCase()
   if (format !== 'pdf' && format !== 'docx' && format !== 'pptx') throw new Error('仅支持 PDF、DOCX 与 PPTX 提取')
   const onProgress = (page: number, total: number) => { callOptions.signal?.throwIfAborted(); callOptions.onProgress?.(page, total) }

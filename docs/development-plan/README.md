@@ -1,15 +1,15 @@
 # 开发文档入口
 
-> **2026-09-22 方案取代声明：** 当前目标以[果铃 2.0 收敛方案](../../果铃2.0收敛方案.md)及其[执行包](../../GPTpro方案/guoling_2_0_execution_plan/00_README.md)为准。旧总纲和 1.x 路线保留为历史与源码事实依据，不再是当前实施入口。本轮只修订方案，尚未开始新产品实现。
+> **2026-09-22 方案取代声明：** 当前目标以[果铃 2.0 收敛方案](../archive/2026-09-convergence/果铃2.0收敛方案.md)及其[执行包](../../GPTpro方案/guoling_2_0_execution_plan/00_README.md)为准。旧总纲和 1.x 路线保留为历史与源码事实依据，不再是当前实施入口。本轮只修订方案，尚未开始新产品实现。
 > 当前协调任务数量和状态只看自动生成的 [`TASK_BOARD.md`](TASK_BOARD.md)。
 
 ## 权威文件
 
-当前接手顺序：**[收敛稿](../../果铃2.0收敛方案.md) → [GPTpro 任务索引](../../GPTpro方案/guoling_2_0_execution_plan/03_TASK_INDEX.md) → [实施顺序](../../GPTpro方案/guoling_2_0_execution_plan/delivery/SEQUENCE.md) → [任务板](TASK_BOARD.md)**，随后按涉及的任务读取合同、源码和目标测试。共享接口先串行固定，再按实际写域推进独立叶子；不能从旧文档的将来时重新启动 1.x 待办。
+当前接手顺序：**[归档收敛稿](../archive/2026-09-convergence/果铃2.0收敛方案.md) → [GPTpro 任务索引](../../GPTpro方案/guoling_2_0_execution_plan/03_TASK_INDEX.md) → [实施顺序](../../GPTpro方案/guoling_2_0_execution_plan/delivery/SEQUENCE.md) → [任务板](TASK_BOARD.md)**，随后按涉及的任务读取合同、源码和目标测试。共享接口先串行固定，再按实际写域推进独立叶子；不能从旧文档的将来时重新启动 1.x 待办。
 
 | 文件 | 唯一职责 |
 |---|---|
-| [果铃 2.0 收敛方案](../../果铃2.0收敛方案.md) | 当前产品与架构决定、边界和成功标准 |
+| [果铃 2.0 收敛方案](../archive/2026-09-convergence/果铃2.0收敛方案.md) | 当前产品与架构决定、边界和成功标准 |
 | [GPTpro 执行包](../../GPTpro方案/guoling_2_0_execution_plan/00_README.md) | 当前任务、批次、接口样例和验收定义；状态不冒充实测 |
 | [旧开发总纲](../../COURSEWARE_DEVELOPMENT_PLAN.md) | 1.x 产品决定与路线的历史依据，已被当前方案取代 |
 | [架构合同](ARCHITECTURE_CONTRACT.md) | 技术不变量、状态分类、模块 Owner、carrier、可信扩展与协议负边界 |
@@ -19,6 +19,12 @@
 | [旧版本路线](roadmap/README.md) | 历史 1.2→2.0 DAG 与规格；当前次序以 GPTpro 执行包为准 |
 | [1.9 完整实施方案](R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md) | 历史 F00–F08 分包与 050/051/060 收口依据，不自动恢复待办 |
 | [V3.1 设计说明](../../双形态UI设计/00-设计说明.md) | 历史视觉参考；当前产品层级与默认行为以收敛稿为准 |
+
+进一步看 [ARCHITECTURE_CONTRACT](ARCHITECTURE_CONTRACT.md) 与 [WORKING_PROTOCOL](WORKING_PROTOCOL.md) 入口。
+
+## 待评审架构提案
+
+- [统一内容架构与重构方案](unified-content-architecture/README.md)：2026-10-03 讨论形成的架构层级、统一设计语言、内容/布局/编辑合同与实施工作包。当前仅为提案；未授权产品实施，不替代现行架构合同和任务登记。由当前路线图进入，不增加全局必读文件。
 
 ## 1.9 历史文档分工
 

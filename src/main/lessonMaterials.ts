@@ -2,15 +2,15 @@ import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
-import { MATERIAL_EXTRACTION_LIMITS as limits, type MaterialExtraction, type LessonMaterialTarget, type LessonMaterialRecord, type LessonMaterialRead } from '../shared/materialExtraction'
+import { type MaterialExtraction, type LessonMaterialTarget, type LessonMaterialRecord, type LessonMaterialRead } from '../shared/materialExtraction'
 
 const locator = z.object({ part: z.string().min(1).max(32767), page: z.number().int().positive().optional(), paragraph: z.number().int().positive().optional() }).strict()
-const fragment = z.object({ id: z.string().min(1).max(1024), kind: z.enum(['text', 'table', 'image', 'formula']), locator, text: z.string().max(limits.textCharacters).optional(), assetId: z.string().min(1).max(32767).optional() }).strict()
+const fragment = z.object({ id: z.string().min(1).max(1024), kind: z.enum(['text', 'table', 'image', 'formula']), locator, text: z.string().optional(), assetId: z.string().min(1).max(32767).optional() }).strict()
 const format = z.enum(['pdf', 'docx', 'pptx', 'text', 'image'])
 const gap = z.object({ locator, reason: z.string().min(1).max(4096), resolution: z.object({ kind: z.literal('read-page-image'), assetId: z.string().min(1).max(32767) }).strict().optional() }).strict()
-const extractionSchema = z.object({ version: z.literal(1), extractorVersion: z.string().min(1).max(100), format, fragments: z.array(fragment).min(1).max(100000), assets: z.array(z.object({ id: z.string().min(1).max(32767), mime: z.string().min(1).max(100), bytes: z.instanceof(Uint8Array) }).strict()).max(10000), gaps: z.array(gap).max(100000) }).strict()
+const extractionSchema = z.object({ version: z.literal(1), extractorVersion: z.string().min(1).max(100), format, fragments: z.array(fragment).min(1), assets: z.array(z.object({ id: z.string().min(1).max(32767), mime: z.string().min(1).max(100), bytes: z.instanceof(Uint8Array) }).strict()), gaps: z.array(gap) }).strict()
 const relative = z.string().min(1).max(32767).refine(value => !value.includes('\\') && !value.includes('\0') && !path.isAbsolute(value) && value.split('/').every(part => part !== '..' && part !== '.' && part !== ''))
-const recordSchema = z.object({ version: z.literal(1), id: z.uuid(), lessonId: z.string().min(1), title: z.string().min(1).max(300), createdAt: z.number().int().nonnegative(), sourceVersion: z.string().regex(/^[a-f0-9]{64}$/), extractionVersion: z.string().regex(/^[a-f0-9]{64}$/), sourcePath: relative, format, extractorVersion: z.string().min(1).max(100), fragments: z.array(fragment).min(1).max(100000), assets: z.array(z.object({ id: z.string().min(1), mime: z.string().min(1), path: relative, version: z.string().regex(/^[a-f0-9]{64}$/) }).strict()).max(10000), gaps: z.array(gap).max(100000) }).strict()
+const recordSchema = z.object({ version: z.literal(1), id: z.uuid(), lessonId: z.string().min(1), title: z.string().min(1).max(300), createdAt: z.number().int().nonnegative(), sourceVersion: z.string().regex(/^[a-f0-9]{64}$/), extractionVersion: z.string().regex(/^[a-f0-9]{64}$/), sourcePath: relative, format, extractorVersion: z.string().min(1).max(100), fragments: z.array(fragment).min(1), assets: z.array(z.object({ id: z.string().min(1), mime: z.string().min(1), path: relative, version: z.string().regex(/^[a-f0-9]{64}$/) }).strict()), gaps: z.array(gap) }).strict()
 const hash = (bytes: Uint8Array | string) => createHash('sha256').update(bytes).digest('hex')
 const assetExtension = (mime: string): string => ({ 'image/png': 'png', 'image/jpeg': 'jpg', 'image/svg+xml': 'svg', 'image/webp': 'webp', 'image/gif': 'gif', 'image/bmp': 'bmp', 'image/tiff': 'tiff', 'image/emf': 'emf', 'image/wmf': 'wmf' } as Record<string, string>)[mime] ?? 'bin'
 
@@ -41,9 +41,8 @@ export class LessonMaterials {
   import(target: LessonMaterialTarget, input: { title: string; original: Uint8Array; extraction: MaterialExtraction }): Promise<LessonMaterialRecord> {
     return this.serialized(async () => {
       const title = z.string().trim().min(1).max(300).parse(input.title)
-      if (!(input.original instanceof Uint8Array) || !input.original.length || input.original.length > limits.sourceBytes) throw new Error('原材料须为非空且不超过 32 MiB')
+      if (!(input.original instanceof Uint8Array) || !input.original.length) throw new Error('原材料须为非空文件')
       const extraction = extractionSchema.parse(input.extraction)
-      if (extraction.assets.reduce((n, a) => n + a.bytes.length, 0) > limits.outputBytes || extraction.fragments.reduce((n, f) => n + (f.text?.length ?? 0), 0) > limits.textCharacters) throw new Error('材料提取结果超过容量上限')
       const assets = new Set(extraction.assets.map(asset => asset.id))
       if (assets.size !== extraction.assets.length || new Set(extraction.fragments.map(f => f.id)).size !== extraction.fragments.length) throw new Error('材料片段或图片标识重复')
       for (const f of extraction.fragments) {
@@ -95,7 +94,7 @@ export class LessonMaterials {
       const directory = await this.directory(target)
       const record = await this.record(target, directory, input.id)
       if (record.extractionVersion !== input.extractionVersion) throw new Error('材料提取版本已变化，请重新读取目录')
-      const ids = new Set(z.array(z.string().min(1)).min(1).max(100000).parse(input.fragmentIds))
+      const ids = new Set(z.array(z.string().min(1)).min(1).parse(input.fragmentIds))
       const fragments = record.fragments.filter(f => ids.has(f.id))
       if (fragments.length !== ids.size) throw new Error('材料片段不存在')
       const root = path.dirname(directory)

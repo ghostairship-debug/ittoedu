@@ -18,11 +18,10 @@ export interface OAuthDesktopServiceOptions {
   fetch?: typeof fetch
   callbackPort?: number
   callbackHost?: 'localhost' | '127.0.0.1'
-  loginTimeoutMs?: number
   now?: () => number
 }
 type Session = { status: OAuthLoginStatus; connectionId: string; credentialRef: string; server: Server; client: ChatGPTOAuthClient;
-  controller: AbortController; timer: ReturnType<typeof setTimeout>; exchanging: boolean }
+  controller: AbortController; exchanging: boolean }
 function reply(response: ServerResponse, status: number, message: string) {
   response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'" })
   response.end(`<!doctype html><meta charset="utf-8"><title>果铃登录</title><p>${message}</p>`)
@@ -56,9 +55,8 @@ export class OAuthDesktopService {
       const redirectURI = `http://${host}:${address.port}/auth/callback`, client = this.createClient(redirectURI)
       const target = await this.options.store.reserveOAuthLogin(id, revision); credentialRef = target.credentialRef
       const started = await client.beginAuthorization(target)
-      const timer = setTimeout(() => { void this.cancel(started.loginId) }, this.options.loginTimeoutMs ?? 15 * 60_000); timer.unref()
       session = { status: { loginId: started.loginId, status: 'pending' }, connectionId: id, credentialRef, server, client,
-        controller: new AbortController(), timer, exchanging: false }
+        controller: new AbortController(), exchanging: false }
       this.sessions.set(started.loginId, session)
       // Keep bounded completed statuses for UI polling, never credentials or authorization codes.
       for (const [key, value] of this.sessions) if (this.sessions.size > 32 && value.status.status !== 'pending') this.sessions.delete(key)
@@ -98,7 +96,7 @@ export class OAuthDesktopService {
     if (!session) throw new ExecutionSettingsError('oauth-login-not-found', '此登录已结束，请刷新连接设置。')
     return structuredClone(session.status)
   }
-  private close(session: Session) { clearTimeout(session.timer); session.server.close() }
+  private close(session: Session) { session.server.close() }
   async cancel(loginId: string): Promise<void> {
     const session = this.sessions.get(loginId)
     if (!session || session.status.status !== 'pending') return

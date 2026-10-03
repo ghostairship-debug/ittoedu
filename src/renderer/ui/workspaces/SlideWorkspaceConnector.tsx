@@ -1,6 +1,8 @@
 import { projectWithBackgroundPreview } from '../../authoring/backgroundPreview'
 import { selectionObjectCommands } from '../../composition/selection/selectionObjectCommands'
-import { useMemo } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import type { CompositionAuthoringSelection } from '../../composition/WebCompositionAuthoringContent'
+import { CompositionSelectionContext } from '../../workbench/CompositionSelectionContext'
 import { useShallow } from 'zustand/react/shallow'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import type { CourseProjectDocument, LayerItem } from '../../../shared/courseProjectTypes'
@@ -20,6 +22,9 @@ import {
   reportTryRunInteractionDiagnostic,
 } from '../coursePlayerTryRun'
 import { sidecarFileIdsFrom } from '../workspaceSlidePreviewRebuild'
+import { useAssetObjectUrls } from '../useAssetObjectUrls'
+import { publishLayerItem } from '../../export/course/buildPublishedCourse'
+import { CompositionEditorDialog } from '../../composition/CompositionEditorDialog'
 import { captureLiveSceneBaseline, liveSceneChangesSince, liveSceneItemLabel, sceneWithLiveCarriers } from './liveSceneChanges'
 import {
   buildSlidePreviewRebuildKey,
@@ -46,6 +51,7 @@ interface SlideWorkspaceConnectorProps {
 
 function slidePreviewIdentityFromLayer(item: LayerItem): SlidePreviewIdentityNode | null {
   if (item.kind === 'runtime') return null
+  if (item.kind === 'composition') return { id: item.layerItemId, type: 'composition' }
   if (item.kind === 'component') {
     return {
       id: item.layerItemId,
@@ -199,6 +205,10 @@ export function SlideWorkspaceConnector({
   const dynamicFallbackState = useEditorStore(state => state.dynamicFallbackState)
   const retryDynamicFallback = useEditorStore(state => state.retryDynamicFallback)
   const discardDynamicFallback = useEditorStore(state => state.discardDynamicFallback)
+  const submitCompositionEdit = useEditorStore(state => state.submitCompositionEdit)
+  const [compositionEditor, setCompositionEditor] = useState<{ documentId: string; layerItemId: string } | null>(null)
+  const compositionCanvasRef = useRef<HTMLDivElement>(null)
+  const [compositionSelection, setCompositionSelection] = useState<{ documentId: string; locationId: string; selection: CompositionAuthoringSelection } | null>(null)
   const view = useMemo(() => {
     if (!project || !locationId) return null
     return buildSlideEditorView({
@@ -213,6 +223,16 @@ export function SlideWorkspaceConnector({
     ? projectV9EditingNodesWithDraft(backend, contentEdit)
     : [], [backend, contentEdit])
   const selectedNode = editingNodes.find((node) => node.id === selectedNodeId)
+  const selectedComposition = view?.layers.find(layer => layer.item.layerItemId === selectedNodeId && layer.item.kind === 'composition')?.item
+  const editingComposition = compositionEditor?.documentId === documentId
+    ? view?.layers.find(layer => layer.item.layerItemId === compositionEditor.layerItemId && layer.item.kind === 'composition')?.item : undefined
+  const publishedComposition = useMemo(() => {
+    if (!project || editingComposition?.kind !== 'composition') return null
+    const published = publishLayerItem({ project, assetFiles, components: componentPackages }, editingComposition as LayerItem)
+    return published.kind === 'composition' ? published : null
+  }, [project, editingComposition, assetFiles, componentPackages])
+  const assetMimeTypes = useMemo(() => Object.fromEntries(Object.entries(project?.assets ?? {}).map(([id, asset]) => [id, asset.mimeType])), [project?.assets])
+  const compositionAssetUrls = useAssetObjectUrls(assetFiles, assetMimeTypes)
   const sidecarFileIds = useMemo(
     () => sidecarFileIdsFrom(sidecar?.files, assetFiles),
     [assetFiles, sidecar],
@@ -420,7 +440,14 @@ export function SlideWorkspaceConnector({
     setSlideTextEditComposing,
   ])
 
+  const activeCompositionSelection = compositionSelection?.documentId === documentId && compositionSelection.locationId === locationId
+    && selectedComposition?.kind === 'composition' && selectedComposition.layerItemId === compositionSelection.selection.layerItemId
+    ? compositionSelection.selection : null
+  const selectCompositionContent = (selection: CompositionAuthoringSelection) => {
+    if (documentId && locationId) setCompositionSelection({ documentId, locationId, selection })
+  }
   return (
+    <div ref={compositionCanvasRef} style={{ display: 'grid', position: 'relative', minWidth: 0, minHeight: 0 }}>
     <SlideLocationWorkspace
       snapshot={snapshot}
       documentId={documentId}
@@ -429,6 +456,30 @@ export function SlideWorkspaceConnector({
       onAddVideo={onAddVideo}
       onSelectImageAsset={onSelectImageAsset}
       onDropWorkspaceMedia={onDropWorkspaceMedia}
+      onCompositionSelection={selectCompositionContent} selectedCompositionNode={activeCompositionSelection}
+      onCompositionEdit={canvasMode === 'edit' && documentId ? async (layerItemId, edit) => {
+        if (useEditorStore.getState().courseDocument.documentId !== documentId) throw new Error('当前文档已切换，请重新选择组合内容')
+        const result = await submitCompositionEdit(layerItemId, edit)
+        if (result.status !== 'applied' && result.status !== 'unchanged') throw new Error('message' in result ? result.message : '修改未完成')
+      } : undefined}
     />
+    <CompositionSelectionContext documentId={documentId} revision={project?.revision ?? 0} locationId={locationId}
+      stateId={activePresentationStateId} canvasRoot={compositionCanvasRef.current} enabled={canvasMode === 'edit'}
+      selection={activeCompositionSelection} onRestoreSelection={selectCompositionContent} />
+    {canvasMode === 'edit' && selectedComposition?.kind === 'composition' && documentId && <button type="button"
+      style={{ position: 'absolute', right: 24, bottom: 24, zIndex: 30 }}
+      disabled={selectedComposition.locked}
+      onClick={() => setCompositionEditor({ documentId, layerItemId: selectedComposition.layerItemId })}>编辑组合内容</button>}
+    {editingComposition?.kind === 'composition' && publishedComposition && compositionEditor && <CompositionEditorDialog
+      key={`${documentId}:${editingComposition.layerItemId}`}
+      item={editingComposition as import('../../../shared/courseProjectTypes').CompositionLayerItem}
+      content={publishedComposition.content} assetUrls={compositionAssetUrls} projectId={project?.id} components={componentPackages}
+      onEdit={async edit => {
+        if (useEditorStore.getState().courseDocument.documentId !== compositionEditor.documentId) throw new Error('当前文档已切换，请重新选择组合内容')
+        const result = await submitCompositionEdit(compositionEditor.layerItemId, edit)
+        if (result.status !== 'applied' && result.status !== 'unchanged') throw new Error('message' in result ? result.message : '修改未完成')
+      }}
+      onClose={() => setCompositionEditor(null)} />}
+    </div>
   )
 }

@@ -13,7 +13,7 @@ REPO = SOURCE.parents[1]
 PACKAGE_PATH = Path('GPTpro方案/guoling_2_0_execution_plan')
 DESIGN_PATH = Path('GPTpro方案/guoling_final_design_package')
 ENTRY_PATH = Path('GPTpro方案/README.md')
-CONVERGENCE_PATH = Path('果铃2.0收敛方案.md')
+CONVERGENCE_PATH = Path('docs/archive/2026-09-convergence/果铃2.0收敛方案.md')
 
 
 def read_json(path):

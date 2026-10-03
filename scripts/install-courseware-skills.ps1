@@ -26,7 +26,9 @@ if ([string]::IsNullOrWhiteSpace($DestinationRoot)) {
 
 $currentSkillNames = @(
   'orchestrate-courseware',
-  'build-courseware-project'
+  'build-courseware-project',
+  'edit-content',
+  'office-content'
 )
 $retiredSkillNames = @(
   'build-project-v7-courseware',

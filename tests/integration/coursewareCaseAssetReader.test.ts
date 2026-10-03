@@ -41,7 +41,7 @@ it('supplies V2 binary asset helpers and rejects lexical and linked escapes befo
         await expect(context.readAsset('linked/outside.bin')).rejects.toThrow('逃逸课例目录')
         await expect(context.readAsset('素材')).rejects.toThrow('不是文件')
         await expect(context.readAsset('missing.bin')).rejects.toThrow('不存在')
-        await expect(context.readAsset('large.bin')).rejects.toThrow('32 MiB')
+        expect((await context.readAsset('large.bin')).byteLength).toBe(32 * 1024 * 1024 + 1)
         checked = true
         throw completed
       } }),

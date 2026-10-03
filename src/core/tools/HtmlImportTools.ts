@@ -2,6 +2,14 @@ import { z } from 'zod'
 import type { HtmlImportDestination, HtmlImportReceipt, HtmlImportServicePort } from '../../shared/workbench/toolPorts'
 import type { ToolResult } from '../../shared/workbench/tools'
 
+export const createCourseFromHtmlInputSchema = z.object({ sourcePath: z.string().min(1), name: z.string().min(1).optional(), path: z.string().min(1).optional() }).strict()
+export const createCourseFromHtmlTool = {
+  name: 'course.createFromHtml',
+  description: '从已有 HTML 文件创建可编辑课件并保存。只提供源文件路径和可选作品名、目标文件夹；软件负责新建、保真导入、保存及恢复，不需已有课件或内部句柄。',
+  inputSchema: createCourseFromHtmlInputSchema,
+  manual: { label: '从 HTML 创建课件', group: 'edit' as const, targetKinds: [] as const },
+}
+
 export const htmlImportDestinationSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('slide-new'), surface: z.string().min(1), after: z.string().min(1).optional() }).strict(),
   z.object({ kind: z.literal('slide-existing'), location: z.string().min(1) }).strict(),

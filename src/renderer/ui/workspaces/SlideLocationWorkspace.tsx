@@ -20,6 +20,10 @@ import {
   Plus,
 } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { WebCompositionAuthoringContent, type CompositionAuthoringSelection } from '../../composition/WebCompositionAuthoringContent'
+import type { CompositionContentEdit } from '../../../shared/composition/edit'
+import type { WebCompositionMountHandle } from '../../../player/composition/mountWebComposition'
 import { useWorkspaceMediaSource } from '../../lessonWorkspace/workspaceMediaSourceContext'
 import { deliverWorkspaceMediaDrop, type WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
 import { WORKSPACE_MEDIA_DRAG_TYPE } from '../../lessonWorkspace/workspaceMediaDrag'
@@ -62,6 +66,7 @@ import {
 import { buildSlideEditorView, type SlideEditorLayerView, type SlideEditorView } from '../../../core/tools/slideLayerView'
 import { materializeNativeLayerItem } from '../../../shared/courseProjectSchema'
 import { nativeRenderInputFromV9Item } from '../../../player/surfaces/native/publishedNativeRendering'
+import { publishWebComposition, type CoursePublishSources } from '../../export/course/buildPublishedCourse'
 import { planNativeTextEdit } from '../../../core/tools/nativeText'
 import { cancelEditPreview, useEditPreview } from '../../workbench/EditPreviewProjection'
 import { TextEditOverlay } from '../TextEditOverlay'
@@ -96,7 +101,7 @@ import {
 import type { PublishedCourseSession } from '../../../player/surfaces/publishedDynamicHosts'
 import type { SlideLiveEditTargets } from '../../../player/surfaces/slide/SlidePublishedAdapter'
 import { courseLayerItemToEditorCanvasNode } from '../../store/slideEditorProjection'
-import type { LayerItem, NativeLayerItem } from '../../../shared/courseProjectTypes'
+import type { CompositionLayerItem, LayerItem, NativeLayerItem } from '../../../shared/courseProjectTypes'
 import type { LiveSceneBaseline, LiveSceneChanges } from './liveSceneChanges'
 import { isTeacherControllerLayerItem } from '../../../core/tools/globalLayers'
 import { runtimeTargetMatchesEditingContext } from '../../authoring/runtimeAuthoringContext'
@@ -218,6 +223,32 @@ function componentLightEditSync(view: SlideEditorView | null): ComponentLightEdi
 
 export type SlidePhaserNode = NonNullable<ReturnType<typeof courseLayerItemToEditorCanvasNode>>
 type AuthoringPatchNode = Extract<PlayerAuthoringPatch, { kind: 'native-node' }>['node']
+
+type CompositionContentSync = Map<string, Extract<PlayerAuthoringPatch, { kind: 'composition-content' }>>
+
+function compositionContentSync(view: SlideEditorView | null, sources: CoursePublishSources): CompositionContentSync {
+  const sync: CompositionContentSync = new Map()
+  for (const layer of view?.layers ?? []) {
+    if (layer.item.kind !== 'composition') continue
+    const scope = layer.source === 'global' ? 'global' : 'scene'
+    const nodeId = layer.selectionId
+    sync.set(`${scope}:${nodeId}`, {
+      kind: 'composition-content', target: { kind: 'composition-content', scope, nodeId },
+      content: publishWebComposition(sources, layer.item.content as CompositionLayerItem['content']),
+    })
+  }
+  return sync
+}
+
+/** A composition frame is geometry; its program/content tree has a separate update. */
+function publishedAuthoringFramePatch(scope: 'scene' | 'global', node: AuthoringPatchNode): PlayerAuthoringPatch {
+  if (node.type === 'composition') return {
+    kind: 'composition-frame', target: { kind: 'composition-frame', scope, nodeId: node.id },
+    frame: { x: node.x, y: node.y, width: node.width, height: node.height },
+    rotation: node.rotation, opacity: node.opacity, visible: node.visible,
+  }
+  return { kind: 'native-node', target: { kind: 'native-node', scope, nodeId: node.id }, node }
+}
 type SlidePhaserDocument = Parameters<EditorGameHandle['bridge']['loadScene']>[0]
 
 export type SlideCanvasMode = 'edit' | 'run'
@@ -333,7 +364,7 @@ export interface SlideWorkspacePreviewPort {
   readonly mount: (
     input: Pick<
       Parameters<typeof mountPublishedCourseAuthoring>[0],
-      'container' | 'sessionId' | 'scope' | 'onSessionCreated' | 'onMessage'
+      'container' | 'sessionId' | 'scope' | 'onSessionCreated' | 'onMessage' | 'onCompositionMount'
     >,
   ) => ReturnType<typeof mountPublishedCourseAuthoring>
 }
@@ -376,6 +407,9 @@ export interface SlideLocationWorkspaceProps {
   readonly onAddVideo: (x?: number, y?: number) => void
   readonly onSelectImageAsset: () => Promise<ImportedImageAsset | null>
   readonly onDropWorkspaceMedia?: WorkspaceMediaDropHandler
+  readonly onCompositionEdit?: (layerItemId: string, edit: CompositionContentEdit) => Promise<void>
+  readonly onCompositionSelection?: (selection: CompositionAuthoringSelection) => void
+  readonly selectedCompositionNode?: CompositionAuthoringSelection | null
 }
 
 interface FormulaEditSession {
@@ -497,6 +531,7 @@ function publishedAuthoringNodeFromLayerItem(item: LayerItem): AuthoringPatchNod
       props: structuredClone(item.props),
     }
   }
+  if (item.kind === 'composition') return courseLayerItemToEditorCanvasNode(item)
   return null
 }
 
@@ -542,16 +577,8 @@ function publishedAuthoringPatchesFromSlideView(
   const { localNodes, globalNodes, backgroundColor, backgroundAssetId } =
     extractPublishedAuthoringState(view, localSource)
   return [
-    ...localNodes.map((node): PlayerAuthoringPatch => ({
-      kind: 'native-node',
-      target: { kind: 'native-node', scope: 'scene', nodeId: node.id },
-      node,
-    })),
-    ...globalNodes.map((node): PlayerAuthoringPatch => ({
-      kind: 'native-node',
-      target: { kind: 'native-node', scope: 'global', nodeId: node.id },
-      node,
-    })),
+    ...localNodes.map((node) => publishedAuthoringFramePatch('scene', node)),
+    ...globalNodes.map((node) => publishedAuthoringFramePatch('global', node)),
     {
       kind: 'scene-background',
       target: { kind: 'scene-background', scope: 'scene' },
@@ -801,6 +828,9 @@ export function SlideLocationWorkspace({
   onAddVideo,
   onSelectImageAsset,
   onDropWorkspaceMedia,
+  onCompositionEdit,
+  onCompositionSelection,
+  selectedCompositionNode,
 }: SlideLocationWorkspaceProps) {
   const mediaSource = useWorkspaceMediaSource()
   const mediaSourceRef = useRef(mediaSource)
@@ -859,6 +889,18 @@ export function SlideLocationWorkspace({
   const gameRef = useRef<EditorGameHandle | null>(null)
   const publishedAuthoringHostRef = useRef<HTMLDivElement>(null)
   const publishedAuthoringSessionRef = useRef<PublishedCourseSession | null>(null)
+  const [compositionMounts, setCompositionMounts] = useState<ReadonlyMap<string, WebCompositionMountHandle>>(() => new Map())
+  const [compositionSelection, setCompositionSelection] = useState<CompositionAuthoringSelection | null>(null)
+  const [compositionPending, setCompositionPending] = useState(false)
+  const compositionSubmitting = useRef(false)
+  const activeCompositionNode = selectedCompositionNode === undefined ? compositionSelection : selectedCompositionNode
+  const submitComposition = async (layerItemId: string, edit: CompositionContentEdit) => {
+    if (!onCompositionEdit) throw new Error('当前组合内容不可编辑')
+    if (compositionSubmitting.current) throw new Error('上一处修改正在保存，请稍后再操作。')
+    compositionSubmitting.current = true; setCompositionPending(true)
+    try { await onCompositionEdit(layerItemId, edit) }
+    finally { compositionSubmitting.current = false; setCompositionPending(false) }
+  }
   const publishedAuthoringMountChainRef = useRef(Promise.resolve())
   const publishedAuthoringInitRef = useRef<{
     token: string
@@ -871,6 +913,8 @@ export function SlideLocationWorkspace({
   /** Rules the Published host already shows; edits, undo and redo patch the difference in place. */
   const syncedRuntimeOverridesRef = useRef<RuntimeOverrideSync | null>(null)
   const syncedComponentLightEditsRef = useRef<ComponentLightEditSync | null>(null)
+  const syncedCompositionContentRef = useRef<CompositionContentSync | null>(null)
+  const syncedAuthoringCanvasRef = useRef<string | null>(null)
   const previousComponentPackagesRef = useRef<
     Record<string, ComponentPackageData> | null
   >(null)
@@ -1076,6 +1120,43 @@ export function SlideLocationWorkspace({
     generationCurrent: acknowledgedPreviewGeneration === previewGeneration,
   })
 
+  const selectedCompositionLayer = selectedNodeIds.length === 1 && usePublishedAuthoring && onCompositionEdit
+    ? slideEditorView?.layers.find(layer => layer.selectionId === selectedNodeIds[0] && layer.item.kind === 'composition'
+      && layer.item.visible && !layer.item.locked && layer.item.hitPolicy !== 'pass-through' && canEditLayerInScope(layer, editingScope))
+    : undefined
+  const selectedCompositionItem = selectedCompositionLayer?.item.kind === 'composition' ? selectedCompositionLayer.item : undefined
+  const compositionHandle = selectedCompositionItem ? compositionMounts.get(selectedCompositionItem.layerItemId) : undefined
+  const compositionControlsHost = compositionHandle?.element.parentElement
+  const publishedSelectedComposition = useMemo(() => selectedCompositionItem && backend
+    ? publishWebComposition({ project: backend.getSession().history.present, assetFiles: {}, components: componentPackages }, selectedCompositionItem.content as CompositionLayerItem['content'])
+    : null, [selectedCompositionItem, backend, componentPackages])
+  const compositionEditing = Boolean(compositionHandle && compositionControlsHost && publishedSelectedComposition && authoringCanvasInteractive)
+  useLayoutEffect(() => {
+    // The Published owner keeps every live iframe. Only the selected structure receives authoring input.
+    const wrappers = [...compositionMounts].flatMap(([id, handle]) => {
+      const wrapper = handle.element.parentElement
+      if (!wrapper) return []
+      const previous = wrapper.style.pointerEvents
+      wrapper.style.pointerEvents = compositionEditing && id === selectedCompositionItem?.layerItemId ? 'auto' : 'none'
+      return [{ wrapper, previous }]
+    })
+    const inertOwners: HTMLElement[] = []
+    const hiddenOwners: HTMLElement[] = []
+    if (compositionEditing && compositionHandle) {
+      // Player keeps the authoring surface inert by default. Release only the selected iframe's path.
+      for (let element = compositionHandle.element.parentElement; element && element !== publishedAuthoringHostRef.current; element = element.parentElement) {
+        if (element.inert) { inertOwners.push(element); element.inert = false }
+        if (element.getAttribute('aria-hidden') === 'true') { hiddenOwners.push(element); element.removeAttribute('aria-hidden') }
+      }
+    }
+    return () => {
+      for (const { wrapper, previous } of wrappers) wrapper.style.pointerEvents = previous
+      for (const owner of inertOwners) owner.inert = true
+      for (const owner of hiddenOwners) owner.setAttribute('aria-hidden', 'true')
+    }
+  }, [compositionMounts, compositionEditing, selectedCompositionItem])
+  useEffect(() => { setCompositionSelection(null) }, [documentId, courseLocationId, editingScope, canvasMode, selectedCompositionItem?.layerItemId])
+
   // M15 -> Main: only current, host-observed automatic text/image hits are published.
   // This is a read-only observation; Main validates document identity and the canonical layer again.
   const dynamicContentPublisher = useMemo(() => new DynamicContentTargetPublisher(value => {
@@ -1254,6 +1335,8 @@ export function SlideLocationWorkspace({
     previousPublishedStateRef.current = null
     syncedRuntimeOverridesRef.current = null
     syncedComponentLightEditsRef.current = null
+    syncedCompositionContentRef.current = null
+    syncedAuthoringCanvasRef.current = null
     runtimeTargetsByHostRef.current.clear()
     componentTargetsByHostRef.current.clear()
     lastAuthoringTargetsRevisionRef.current = -1
@@ -1381,15 +1464,7 @@ export function SlideLocationWorkspace({
     const pending = [...pendingAuthoringNodesRef.current.values()]
     pendingAuthoringNodesRef.current.clear()
     for (const { scope, node } of pending) {
-      postAuthoringPatch({
-        kind: 'native-node',
-        target: {
-          kind: 'native-node',
-          scope,
-          nodeId: node.id,
-        },
-        node,
-      })
+      postAuthoringPatch(publishedAuthoringFramePatch(scope, node))
     }
   }, [postAuthoringPatch])
 
@@ -1577,7 +1652,7 @@ export function SlideLocationWorkspace({
   const syncCompleteAuthoringSnapshot = useCallback(() => {
     const currentSnapshot = readSnapshot()
     const view = currentSnapshot.view
-    if (!view) return null
+    if (!view || !currentSnapshot.backend) return null
     const authoringScope = publishedAuthoringInitRef.current?.authoringScope
       ?? currentSnapshot.backend?.getSnapshot().scope
       ?? currentSnapshot.editingScope
@@ -1592,10 +1667,20 @@ export function SlideLocationWorkspace({
     // The host was mounted from this document, so it already shows these rules.
     syncedRuntimeOverridesRef.current = runtimeOverrideSync(view)
     syncedComponentLightEditsRef.current = componentLightEditSync(view)
+    const sources = { project: currentSnapshot.backend.getSession().history.present, assetFiles: {}, components: currentSnapshot.componentPackages }
+    const compositions = compositionContentSync(view, sources)
+    syncedCompositionContentRef.current = compositions
     const patches = publishedAuthoringPatchesFromSlideView(
       view,
       localSource,
     )
+    patches.unshift(...compositions.values())
+    const canvasPatch: Extract<PlayerAuthoringPatch, { kind: 'scene-canvas' }> = {
+      kind: 'scene-canvas', target: { kind: 'scene-canvas', scope: 'scene' },
+      canvas: { ...view.canvas }, referenceCanvas: { ...view.referenceCanvas },
+    }
+    patches.unshift(canvasPatch)
+    syncedAuthoringCanvasRef.current = JSON.stringify([canvasPatch.canvas, canvasPatch.referenceCanvas])
     let lastCommand: PlayerAuthoringPatchCommand | null = null
     for (const patch of patches) {
       lastCommand = postAuthoringPatch(patch)
@@ -1613,7 +1698,18 @@ export function SlideLocationWorkspace({
     previousPublishedStateRef.current = null
     syncedRuntimeOverridesRef.current = null
     syncedComponentLightEditsRef.current = null
+    syncedCompositionContentRef.current = null
+    syncedAuthoringCanvasRef.current = null
   }, [])
+
+  useEffect(() => {
+    if (!slideEditorView || syncedAuthoringCanvasRef.current === null || canvasMode !== 'edit' || !authoringReadyRef.current) return
+    const value = JSON.stringify([slideEditorView.canvas, slideEditorView.referenceCanvas])
+    if (syncedAuthoringCanvasRef.current === value) return
+    if (!postAuthoringPatch({ kind: 'scene-canvas', target: { kind: 'scene-canvas', scope: 'scene' },
+      canvas: { ...slideEditorView.canvas }, referenceCanvas: { ...slideEditorView.referenceCanvas } })) return
+    syncedAuthoringCanvasRef.current = value
+  }, [canvasMode, postAuthoringPatch, slideEditorView])
 
   // M15: Runtime text edits (and their undo/redo) reach the live host as rule
   // patches, so the Runtime keeps its current state instead of restarting.
@@ -1647,6 +1743,18 @@ export function SlideLocationWorkspace({
     }
     syncedComponentLightEditsRef.current = current
   }, [canvasMode, postAuthoringPatch, slideEditorView])
+  useEffect(() => {
+    const synced = syncedCompositionContentRef.current
+    if (!synced || !backend || canvasMode !== 'edit' || !authoringReadyRef.current) return
+    const current = compositionContentSync(slideEditorView, {
+      project: backend.getSession().history.present, assetFiles: {}, components: componentPackages,
+    })
+    for (const [key, patch] of current) {
+      if (JSON.stringify(synced.get(key)?.content) === JSON.stringify(patch.content)) continue
+      if (!postAuthoringPatch(patch)) return
+    }
+    syncedCompositionContentRef.current = current
+  }, [backend, canvasMode, componentPackages, postAuthoringPatch, slideEditorView])
 
   const handlePublishedAuthoringMessage = useCallback((
     message: PlayerAuthoringHostMessage,
@@ -1752,6 +1860,13 @@ export function SlideLocationWorkspace({
     slideCanvas,
     syncCompleteAuthoringSnapshot,
   ])
+  const authoringMessageHandlerRef = useRef(handlePublishedAuthoringMessage)
+  authoringMessageHandlerRef.current = handlePublishedAuthoringMessage
+  // Message callbacks read the latest canvas/context without becoming mount
+  // identity. Resizing a page must not destroy its live program instances.
+  const dispatchPublishedAuthoringMessage = useCallback((message: PlayerAuthoringHostMessage) => {
+    authoringMessageHandlerRef.current(message)
+  }, [])
 
   useEffect(() => {
     const container = publishedAuthoringHostRef.current
@@ -1759,6 +1874,7 @@ export function SlideLocationWorkspace({
       const leftover = publishedAuthoringSessionRef.current
       publishedAuthoringSessionRef.current = null
       publishedAuthoringInitRef.current = null
+      setCompositionMounts(new Map())
       if (leftover) {
         enqueueSerial(publishedAuthoringMountChainRef, () => leftover.destroy())
       }
@@ -1792,6 +1908,7 @@ export function SlideLocationWorkspace({
       message: '正在挂载 Published V2 编辑宿主…',
     })
     const token = crypto.randomUUID()
+    setCompositionMounts(new Map())
     const authoringScope = publishedAuthoringOwnerScope
     publishedAuthoringInitRef.current = {
       token,
@@ -1811,7 +1928,16 @@ export function SlideLocationWorkspace({
             publishedAuthoringSessionRef.current = session
           }
         },
-        onMessage: handlePublishedAuthoringMessage,
+        onMessage: dispatchPublishedAuthoringMessage,
+        onCompositionMount: (layerItemId, handle) => {
+          if (publishedAuthoringInitRef.current?.token !== token) return
+          setCompositionMounts(previous => {
+            const next = new Map(previous)
+            if (handle) next.set(layerItemId, handle)
+            else next.delete(layerItemId)
+            return next
+          })
+        },
       }),
       {
         onReady: (session) => {
@@ -1831,6 +1957,7 @@ export function SlideLocationWorkspace({
           container.dataset.coursePlayerReady = 'false'
           if (publishedAuthoringInitRef.current?.token === token) {
             publishedAuthoringInitRef.current = null
+            setCompositionMounts(new Map())
           }
           publishedAuthoringSessionRef.current = null
           authoringReadyRef.current = false
@@ -1848,7 +1975,7 @@ export function SlideLocationWorkspace({
     authoringObservationReady,
     publishedAuthoringOwnerScope,
     failPublishedAuthoring,
-    handlePublishedAuthoringMessage,
+    dispatchPublishedAuthoringMessage,
     previewGeneration,
     usePublishedAuthoring,
   ])
@@ -3195,6 +3322,7 @@ export function SlideLocationWorkspace({
         // The quick bar and the right-click menus are portaled but still React children: their presses must not
         // hit-test the stage below (nor take the pointer, which would move their click onto the stage).
         if (outsideStage(event)) return
+        if (event.target instanceof Element && event.target.closest('[data-composition-authoring]')) return
         if (canvasMode === 'edit' && event.button === 0 &&
           activeTextPreview?.target.kind === 'course-object') {
           const domItemId = event.target instanceof Element
@@ -3612,7 +3740,7 @@ export function SlideLocationWorkspace({
         }
       }}
     >
-      <NativeSelectionContext documentId={documentId} revision={snapshot.projectRevision} locationId={courseLocationId} itemIds={selectedNodeIds} stateId={activePresentationStateId} sceneItemIds={slideEditorView?.layers.filter(layer => layer.source === 'scene').map(layer => layer.selectionId)} enabled={canvasMode === 'edit' && !liveScene} textEditing={Boolean(editingNode || editingFormulaNode)} bounds={id => {
+      <NativeSelectionContext documentId={documentId} revision={snapshot.projectRevision} locationId={courseLocationId} itemIds={selectedNodeIds} stateId={activePresentationStateId} sceneItemIds={slideEditorView?.layers.filter(layer => layer.source === 'scene').map(layer => layer.selectionId)} enabled={canvasMode === 'edit' && !liveScene && !(compositionEditing && activeCompositionNode)} ownsDocumentSelection={!compositionEditing || !activeCompositionNode} textEditing={Boolean(editingNode || editingFormulaNode)} bounds={id => {
         const layer = slideEditorView?.layers.find(value => value.selectionId === id), viewport = readCandidateViewport()
         if (!layer || !viewport) return null
         // A teacher controller is anchored where it is shown: collapsed, and kept on the page.
@@ -3743,8 +3871,8 @@ export function SlideLocationWorkspace({
               className="runtime-preview-frame published-authoring-host"
               data-testid="published-authoring-host"
               title="统一编辑画布"
-              inert
-              aria-hidden="true"
+              inert={!compositionEditing}
+              aria-hidden={!compositionEditing}
             />
           )}
           <div
@@ -3752,8 +3880,19 @@ export function SlideLocationWorkspace({
             className="canvas-stage canvas-stage--authoring"
             data-testid="canvas-stage"
             aria-hidden={canvasMode === 'run'}
-            style={useCoursePlayerTryRun ? { pointerEvents: 'none' } : undefined}
+            style={useCoursePlayerTryRun || compositionEditing ? { pointerEvents: 'none' } : undefined}
           />
+          {compositionEditing && selectedCompositionItem && compositionHandle && compositionControlsHost && publishedSelectedComposition && createPortal(
+            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 10 }}>
+              <WebCompositionAuthoringContent
+                layerItemId={selectedCompositionItem.layerItemId} existingHandle={compositionHandle}
+                content={publishedSelectedComposition} width={selectedCompositionItem.frame.width} height={selectedCompositionItem.frame.height}
+                assetUrls={{}} components={componentPackages} projectId={snapshot.projectId}
+                selectedNodeId={activeCompositionNode?.layerItemId === selectedCompositionItem.layerItemId ? activeCompositionNode.nodeId : null}
+                onSelection={selection => { setCompositionSelection(selection); onCompositionSelection?.(selection) }}
+                onEdit={edit => submitComposition(selectedCompositionItem.layerItemId, edit)} editingDisabled={compositionPending}
+              />
+            </div>, compositionControlsHost, selectedCompositionItem.layerItemId)}
           <SlideDynamicAuthoringOverlay
             interactive={authoringCanvasInteractive || liveEditInteractive}
             runtimeTargets={visibleRuntimeTargets}

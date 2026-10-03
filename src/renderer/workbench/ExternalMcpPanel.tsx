@@ -15,7 +15,7 @@ export interface ExternalMcpPanelProps {
   documentNames?: Record<string, string>
   onConversationChange(conversation: ConversationRecord): void
 }
-const statuses: Record<ExternalGrantView['status'], string> = { active: '已授权', expired: '已过期', revoked: '已撤销', closed: '已关闭' }
+const statuses: Record<ExternalGrantView['status'], string> = { active: '已授权', revoked: '已撤销', closed: '已关闭' }
 export function ExternalMcpPanel({ open, onClose, api, workspaceId, conversation, documents, instruction, documentNames, onConversationChange }: ExternalMcpPanelProps) {
   const generation = useRef(0), panel = useRef<HTMLElement>(null)
   const [grants, setGrants] = useState<ExternalGrantView[]>([])
@@ -23,7 +23,6 @@ export function ExternalMcpPanel({ open, onClose, api, workspaceId, conversation
   const [sourceRunId, setSourceRunId] = useState(''), [remaining, setRemaining] = useState('')
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('')
   const [client, setClient] = useState<'codex' | 'claude' | 'opencode'>('codex')
-  const [lifetime, setLifetime] = useState(30)
   const owner = { workspaceId, conversationId: conversation.conversationId }
   useEffect(() => {
     const ticket = ++generation.current
@@ -41,13 +40,13 @@ export function ExternalMcpPanel({ open, onClose, api, workspaceId, conversation
   }, [open, api, workspaceId, conversation.conversationId])
   if (!open) return null
   const selected = created && grants.find(grant => grant.connectionId === created.connection.connectionId)
-  const available = created && selected?.status === 'active' && selected.expiresAt > Date.now()
+  const available = created && selected?.status === 'active'
   const create = async () => {
     const ticket = generation.current
     setBusy(true); setError(''); setNotice('')
     try {
       const result = await api.grant({ ...owner, expectedRevision: conversation.revision, instruction,
-        documents, lifetimeMs: lifetime * 60_000, ...(sourceRunId ? { sourceRunId } : {}), remainingWork: remaining })
+        documents, ...(sourceRunId ? { sourceRunId } : {}), remainingWork: remaining })
       if (ticket !== generation.current) { await api.revoke({ ...owner, connectionId: result.connection.connectionId }); return }
       setCreated(result); onConversationChange(result.conversation)
       const next = await api.list(owner)
@@ -78,7 +77,7 @@ export function ExternalMcpPanel({ open, onClose, api, workspaceId, conversation
   }}>
     <section className="external-mcp-panel" role="dialog" aria-modal="true" aria-label="外部客户端连接" tabIndex={-1} ref={panel}>
       <header><h2>交给外部客户端</h2><button type="button" onClick={onClose} aria-label="关闭外部连接面板">关闭</button></header>
-      <p>授权仅适用于本机客户端和下面选中的文档，切换页面不会改变目标。果铃仍需保持打开。</p>
+      <p>授权仅适用于本机客户端和下面选中的文档，切换页面不会改变目标。授权不会自动过期，可随时主动撤销；退出果铃后连接关闭。</p>
       <ul aria-label="本次授权范围">{documents.map((doc, index) => <li key={doc.documentId}>
         {documentNames?.[doc.documentId] ?? `文档 ${index + 1}`}：{doc.writable.length === 0 ? '只读' : doc.writable.map(scope => scope.kind === 'document' ? '整个文档可修改'
           : scope.kind === 'markdown-range' ? `正文第 ${scope.from + 1}–${scope.to} 字符可修改` : scope.kind === 'flow-block' ? '选中的讲义块可修改' : '选中的对象可修改').join('；')}
@@ -89,13 +88,10 @@ export function ExternalMcpPanel({ open, onClose, api, workspaceId, conversation
         {conversation.runIndex.builtinRunIds.map((id, index) => <option value={id} key={id}>继续会话中的第 {index + 1} 次任务</option>)}
       </select></label>
       <label>剩余任务或补充要求<textarea value={remaining} onChange={event => setRemaining(event.target.value)} rows={3} placeholder="外部接手后还需要完成什么" disabled={busy} /></label>
-      <label>授权有效期<select value={lifetime} onChange={event => setLifetime(Number(event.target.value))} disabled={busy}>
-        <option value={15}>15 分钟</option><option value={30}>30 分钟</option><option value={60}>1 小时</option>
-      </select></label>
       <button type="button" disabled={busy || !documents.length || !instruction.trim() && !sourceRunId} onClick={() => { void create() }}>结算当前任务并创建授权</button>
       {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
       {available && <div className="external-mcp-config">
-        <p>授权有效至 {new Date(created.connection.expiresAt).toLocaleTimeString()}。凭据仅在本次创建后显示。</p>
+        <p>凭据仅在本次创建后显示；授权不会按时长自动失效。</p>
         <label>客户端<select value={client} onChange={event => setClient(event.target.value as typeof client)}><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="opencode">OpenCode</option></select></label>
         <p>先在启动客户端的 PowerShell 中设置本次凭据：</p>
         <textarea aria-label="本次授权环境变量" readOnly rows={2} value={`$env:GUOLING_MCP_TOKEN='${created.connection.bearer}'`} onFocus={event => event.target.select()} />

@@ -227,7 +227,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
        onContextualCommand={async (instruction, selection) => {
          if (!session.documentId) throw new Error('文档尚未就绪。')
          const snapshot = await workbenchSelection.prepare(session.documentId)
-         await workbenchSelection.request(captureMarkdownSelection(snapshot, selection), instruction)
+         await workbenchSelection.request(captureMarkdownSelection(snapshot, selection), instruction, true)
        }}
        onContextualDismiss={target => onContextualDismiss?.(bindTarget(target))} onUndo={() => session.undo()} onRedo={() => session.redo()} /></div>}
   </section>

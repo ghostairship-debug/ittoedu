@@ -27,7 +27,6 @@ export async function projectFileStatus(filename: string): Promise<ProjectFileSt
     if (!stamp.isFile()) return { status: 'changed', message: '工程文件已被替换或删除' }
     if (baseline.stamp && sameStamp(stamp, baseline.stamp)) return { status: 'current', message: '工程文件与已打开版本一致' }
     // Compare content only after an actual file-state change or the first check.
-    if (stamp.size > 256 * 1024 * 1024) return { status: 'changed', message: '磁盘工程文件已被外部程序替换' }
     const bytes = await fs.readFile(filename)
     const after = await fs.stat(filename)
     if (!sameStamp(stamp, after) || digest(bytes) !== baseline.digest) return { status: 'changed', message: '磁盘工程已被 CLI 或其他程序修改；内存草稿已保留，请另存为或重新打开磁盘版本' }

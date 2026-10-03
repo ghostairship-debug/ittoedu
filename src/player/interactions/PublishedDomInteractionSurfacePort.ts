@@ -14,6 +14,7 @@ export type PublishedInteractionNodeOwnership =
   | 'native'
   | 'component'
   | 'runtime'
+  | 'composition'
   | 'media'
   | 'teacher-controller'
 

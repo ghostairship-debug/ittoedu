@@ -76,6 +76,8 @@ export function courseLayerItemToEditorCanvasNode(item: LayerItem): EditorCanvas
       props: structuredClone(component.props),
     }
   }
+  // The Player paints this content. Phaser owns only its root transform handles.
+  if (item.kind === 'composition') return { ...base, type: 'composition' }
   if (item.kind !== 'native') return null
   const native = item as NativeLayerItem
   if (!NATIVE_NODE_TYPES.has(native.content.nativeType)) return null

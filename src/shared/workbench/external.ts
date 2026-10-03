@@ -4,20 +4,19 @@ import type { ConversationRecord } from './conversations'
 import type { InputAttachmentReference } from './attachments'
 import type { ToolTarget } from './tools'
 
-const id = z.string().min(1).max(512)
+const id = z.string().min(1)
 const owner = { workspaceId: id, conversationId: id }
 export const externalGrantSchema = z.object({
-  ...owner, expectedRevision: z.number().int().positive(), instruction: z.string().max(100_000),
-  documents: z.array(executionDocumentReferenceSchema).min(1).max(100),
-  lifetimeMs: z.number().int().min(1000).max(8 * 60 * 60_000).optional(),
-  sourceRunId: id.optional(), remainingWork: z.string().max(100_000).optional(),
+  ...owner, expectedRevision: z.number().int().positive(), instruction: z.string(),
+  documents: z.array(executionDocumentReferenceSchema).min(1),
+  sourceRunId: id.optional(), remainingWork: z.string().optional(),
 }).strict()
 export type ExternalGrantInput = z.infer<typeof externalGrantSchema>
 export const externalRequestSchema = z.discriminatedUnion('type', [
   externalGrantSchema.extend({ type: z.literal('grant') }),
   z.object({ type: z.literal('list'), ...owner }).strict(),
   z.object({ type: z.literal('revoke'), ...owner, connectionId: id }).strict(),
-  z.object({ type: z.literal('handoff'), ...owner, runId: id, remainingWork: z.string().max(100_000).optional() }).strict(),
+  z.object({ type: z.literal('handoff'), ...owner, runId: id, remainingWork: z.string().optional() }).strict(),
 ])
 export interface ExternalOwner { workspaceId: string; conversationId: string }
 export interface ExternalHandoff {
@@ -33,18 +32,18 @@ export interface ExternalHandoff {
   observe: 'guoling://task/context'
 }
 export interface ExternalConnection {
-  connectionId: string; runId: string; endpoint: string; bearer: string; expiresAt: number
+  connectionId: string; runId: string; endpoint: string; bearer: string
 }
 /** No credentials in listings, persisted conversation metadata or execution events. */
 export interface ExternalGrantView extends ExternalOwner {
-  connectionId: string; runId: string; expiresAt: number
-  status: 'active' | 'revoked' | 'expired' | 'closed'
+  connectionId: string; runId: string
+  status: 'active' | 'revoked' | 'closed'
   documents: ExecutionDocumentReference[]
 }
 export interface ExternalClientConfig {
   transport: 'streamable-http'
   endpoint: string
-  /** This is a short-lived local grant, not the provider API key or an OAuth flow. */
+  /** Local grant active until revoked or the host closes; never a provider API key or OAuth flow. */
   authorization: string
   codex: string
   claude: string

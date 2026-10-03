@@ -9,7 +9,7 @@ import { afterEach, beforeEach, expect, it } from 'vitest'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { HtmlSourceEditService } from '../../src/main/workbench/htmlPreview/HtmlSourceEditService'
 import type { HtmlPreviewEditContext } from '../../src/main/workbench/htmlPreview/HtmlPreviewService'
-import type { HtmlPreviewRequest } from '../../src/shared/workbench/htmlPreview'
+import { htmlPreviewRequestSchema, type HtmlPreviewRequest } from '../../src/shared/workbench/htmlPreview'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 import { HtmlPreviewPane } from '../../src/renderer/documentFiles/html/HtmlPreviewPane'
 import { mountHtmlPreviewAgent } from '../../src/player/htmlPreview/htmlPreviewAgent'
@@ -36,6 +36,27 @@ async function setup(source: string, entryName = 'lesson.html') {
     execute: operation => host.internalAPI.dispatch(operation), withFileAccess: work => host.fileCoordinator.withFileAccess(work) })
   return { root, filename, host, snapshot, lease, context, service }
 }
+
+it('saves a text edit beyond 64 KiB after more than 4096 target reports without losing the original selection', async () => {
+  const f = await setup('<html><body><p>old</p><button>keep</button></body></html>')
+  const report = { handle: 'selected', kind: 'text' as const, domPath: [{ name: 'html', index: 0 },
+    { name: 'body', index: 1 }, { name: 'p', index: 0 }], sectionOrder: null, rawText: 'old', attributeName: null,
+    rect: { x: 0, y: 0, width: 40, height: 20 }, scriptCreated: false }
+  const resolve = (targets: typeof report[]) => f.service.resolveTarget({ type: 'html-preview.resolve-target',
+    leaseId: 'lease', loadId: 'load', revision: f.snapshot.revision, targets }, f.context)
+  expect((await resolve([report])).targets[0].status).toBe('editable')
+  for (let batch = 0; batch < 64; batch++) await resolve(Array.from({ length: 64 }, (_, index) => ({ ...report, handle: `another-${batch}-${index}` })))
+  const value = '正文'.repeat(33_000)
+  const request = htmlPreviewRequestSchema.parse({ type: 'html-preview.edit', operationId: 'long-text',
+    documentId: f.snapshot.documentId, epoch: f.snapshot.epoch, baseRevision: f.snapshot.revision,
+    bindingVersion: f.lease.bindingVersion, leaseId: 'lease', loadId: 'load', target: 'selected', change: { kind: 'text', value } })
+  if (request.type !== 'html-preview.edit') throw new Error('Expected text edit')
+  expect(await f.service.edit(request, f.context)).toMatchObject({ status: 'applied' })
+  await f.host.internalAPI.save(f.snapshot.documentId)
+  expect(await fs.readFile(f.filename, 'utf8')).toBe(`<html><body><p>${value}</p><button>keep</button></body></html>`)
+  const reopened = await new DocumentHostService(path.join(f.root, 'reopen-journal')).open(f.filename)
+  expect(reopened.model).toMatchObject({ source: `<html><body><p>${value}</p><button>keep</button></body></html>` })
+})
 
 it('commits only the located text in one human History entry and supports undo', async () => {
   const f = await setup('<html>\r\n<body><p>same</p><p>same</p><button>+1</button></body></html>\r\n')

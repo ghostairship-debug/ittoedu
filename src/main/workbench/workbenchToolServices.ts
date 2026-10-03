@@ -29,6 +29,8 @@ import { ComputeJobService } from './compute/ComputeJobService'
 import { PINNED_PYTHON_IMAGE_ID, PodmanComputeBackend } from './compute/PodmanComputeBackend'
 import { WebResearchService } from './network/WebResearchService'
 import { ManagedBrowserMcpService, type ManagedBrowserGrant } from './externalTools/ManagedBrowserMcpService'
+import { createElectronEmbeddedBrowserFactory } from './browserEmbedded/ElectronEmbeddedBrowser'
+import type { EmbeddedBrowserViewport } from '../../shared/workbench/embeddedBrowser'
 import { BrowserActionApprovals, type BrowserActionApproval } from './externalTools/BrowserActionApprovals'
 import { MediaCapabilityService } from './media/MediaCapabilityService'
 import { DelegationJobService } from './delegation/DelegationJobService'
@@ -87,6 +89,10 @@ export async function controlWorkbenchBrowser(runId: string, action: 'status' | 
   browserActionApprovals?.invalidate(runId)
   return browserService.control(runId, action)
 }
+export function viewportWorkbenchBrowser(runId: string, input: EmbeddedBrowserViewport) {
+  if (!browserService) throw new Error('本任务尚未启动受管浏览器')
+  return browserService.viewport(runId, input)
+}
 
 export function workbenchBrowserApprovalContext(runId: string): { pageUrl?: string; snapshotId?: string } {
   if (!browserService) throw new Error('受管浏览器尚未安装')
@@ -122,10 +128,10 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   const delegationWriteVerified = process.env.GUOLING_CODEX_DELEGATION_WRITE_VERIFIED === '1'
   const jobs = new HostJobService({ images, builds, compute, delegation })
   const web = new WebResearchService()
-  // The installed Edge/Playwright MCP is the first concrete outgoing connection.
-  // External page changes require a separate UI decision for each exact observed action.
+  // Agent and human share the task's main-owned embedded page.
   const approvals = new BrowserActionApprovals()
   const mcp = new ManagedBrowserMcpService({ scratchRoot: path.join(directory, 'browser'),
+    embeddedBackend: createElectronEmbeddedBrowserFactory(context.getMainWindow),
     approveExternalAction: async input => approvals.consume({ runId: input.runId, operationId: input.operationId,
       tool: input.tool, arguments: input.arguments, snapshotId: input.snapshotId }) })
   // Speech/video/music have no verified provider adapter in the current connection set.

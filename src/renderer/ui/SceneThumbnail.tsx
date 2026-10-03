@@ -12,7 +12,7 @@ import {
   useEditorStore,
 } from '../store/editorStore'
 import { buildSceneThumbnailComposition } from './sceneThumbnailComposition'
-import { courseSlideCanvas, DEFAULT_SLIDE_CANVAS } from '../../shared/slideCanvas'
+import { DEFAULT_SLIDE_CANVAS, sharedSlideFrameMapping } from '../../shared/slideCanvas'
 
 const THUMB_WIDTH = 160
 
@@ -48,7 +48,7 @@ export function SceneThumbnail(props: {
       stateId: thumbnailStateId,
     })
   }, [document, locationId, thumbnailStateId])
-  const canvasSize = document ? courseSlideCanvas(document) : DEFAULT_SLIDE_CANVAS
+  const canvasSize = slideView?.canvas ?? DEFAULT_SLIDE_CANVAS
   const thumbHeight = Math.max(1, Math.round(THUMB_WIDTH * canvasSize.height / canvasSize.width))
   const scale = THUMB_WIDTH / canvasSize.width
   const composition = useMemo(() => {
@@ -118,6 +118,13 @@ export function SceneThumbnail(props: {
       }
       for (const entry of composition) {
         if (disposed) break
+        const sharedLayer = entry.source === 'global' || entry.source === 'surface'
+        const sharedMapping = slideView && sharedLayer
+          ? sharedSlideFrameMapping(slideView.referenceCanvas, slideView.canvas)
+          : { scale: 1, offsetX: 0, offsetY: 0 }
+        const itemScale = scale * sharedMapping.scale
+        const offsetX = sharedMapping.offsetX * scale
+        const offsetY = sharedMapping.offsetY * scale
         if (entry.kind === 'runtime-fallback') {
           const { fallback } = entry
           const meta = assets[fallback.assetId]
@@ -140,7 +147,8 @@ export function SceneThumbnail(props: {
               // layer; a surface fallback preserves those editable nodes.
               context.clearRect(0, 0, THUMB_WIDTH, thumbHeight)
             }
-            context.drawImage(image, 0, 0, THUMB_WIDTH, thumbHeight)
+            const fallbackCanvas = sharedLayer && slideView ? slideView.referenceCanvas : canvasSize
+            context.drawImage(image, offsetX, offsetY, fallbackCanvas.width * itemScale, fallbackCanvas.height * itemScale)
             context.restore()
           } catch {
             // Missing runtime fallback assets leave the editable thumbnail intact.
@@ -150,6 +158,7 @@ export function SceneThumbnail(props: {
 
         const { item } = entry
         if (item.kind === 'native') {
+          const scale = itemScale
           const node = materializeNativeLayerItem(item)
           const renderedText = node.type === 'text'
             ? renderTextNodeCanvas(node, node.width, scale)
@@ -161,8 +170,8 @@ export function SceneThumbnail(props: {
           const visualHeight = renderedText?.height ?? renderedFormula?.height ?? node.height
           context.save()
           context.translate(
-            (node.x + visualWidth / 2) * scale,
-            (node.y + visualHeight / 2) * scale,
+            (node.x + visualWidth / 2) * scale + offsetX,
+            (node.y + visualHeight / 2) * scale + offsetY,
           )
           context.rotate((node.rotation * Math.PI) / 180)
           context.globalAlpha = node.opacity
@@ -237,16 +246,16 @@ export function SceneThumbnail(props: {
           continue
         }
 
-        const width = item.frame.width * scale
-        const height = item.frame.height * scale
+        const width = item.frame.width * itemScale
+        const height = item.frame.height * itemScale
         const component = item.kind === 'component'
           ? components[item.component.packageId]
           : undefined
         const thumbnailUrl = component?.thumbnailUrl
         context.save()
         context.translate(
-          (item.frame.x + item.frame.width / 2) * scale,
-          (item.frame.y + item.frame.height / 2) * scale,
+          (item.frame.x + item.frame.width / 2) * itemScale + offsetX,
+          (item.frame.y + item.frame.height / 2) * itemScale + offsetY,
         )
         context.rotate((item.rotation * Math.PI) / 180)
         context.globalAlpha = item.opacity

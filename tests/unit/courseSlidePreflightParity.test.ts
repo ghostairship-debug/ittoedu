@@ -131,7 +131,42 @@ function countCode(
 }
 
 describe('Slide export-preflight V9 behavior', () => {
-  it('keeps the public V9 visual report item-for-item stable at fixed now', () => {
+  it('uses each scene canvas and maps shared references without changing authored frames', () => {
+    const project = blankV9Project()
+    const surface = slideSurface(project)
+    const scene = surface.scenes[0]!
+    scene.canvas = { width: 720, height: 1280 }
+    const local = textItem({ id: 'scene-bottom', x: 40 })
+    local.frame.y = 900
+    scene.layerItems = [local]
+    const shared = textItem({ id: 'reference-right', x: 900 })
+    const referenceFrame = structuredClone(shared.frame)
+    surface.surfaceLayerItems = [{ item: shared, visibility: { mode: 'all', locationIds: [] } }]
+
+    const inspect = () => collectCourseProjectSlideVisualPreflight(project, TARGET, NOW)
+    expect(inspect().items.filter(item => item.code === 'node-fully-outside-canvas')).toEqual([])
+    expect(inspect().items.filter(item => ['text-content-overflow', 'text-content-overflow-estimated'].includes(item.code) && item.nodeId === 'reference-right')).toEqual([])
+    expect(surface.canvas).toEqual({ width: 1280, height: 720 })
+    expect(shared.frame).toEqual(referenceFrame)
+
+    scene.canvas = { width: 640, height: 480 }
+    const narrow = inspect()
+    expect(narrow.items.filter(item => item.code === 'node-fully-outside-canvas')).toHaveLength(2)
+    expect(narrow.items.filter(item => item.code === 'node-fully-outside-canvas')).toEqual([
+      expect.objectContaining({ nodeId: 'scene-bottom', severity: 'warning', message: expect.stringContaining('640×480') }),
+      expect.objectContaining({ nodeId: 'scene-bottom', severity: 'warning', message: expect.stringContaining('640×480') }),
+    ])
+    expect(narrow.summary.canExport).toBe(true)
+    expect(shared.frame).toEqual(referenceFrame)
+
+    delete scene.canvas
+    expect(inspect().items.filter(item => item.code === 'node-fully-outside-canvas')).toEqual([
+      expect.objectContaining({ nodeId: 'scene-bottom', message: expect.stringContaining('1280×720') }),
+      expect.objectContaining({ nodeId: 'scene-bottom', message: expect.stringContaining('1280×720') }),
+    ])
+  })
+
+  it('reports fully outside visual content as nonblocking warnings at fixed now', () => {
     const report = collectCourseProjectSlideVisualPreflight(visualFixture(), TARGET, NOW)
 
     expect(report).toEqual({
@@ -142,7 +177,7 @@ describe('Slide export-preflight V9 behavior', () => {
       generatedAt: NOW.toISOString(),
       items: [
         {
-          severity: 'error',
+          severity: 'warning',
           code: 'node-fully-outside-canvas',
           message: '场景“对等场景”的母版画面中，节点“outside-a”完全位于 1280×720 画布之外。',
           target: 'pptx',
@@ -150,7 +185,7 @@ describe('Slide export-preflight V9 behavior', () => {
           nodeId: 'outside-a',
         },
         {
-          severity: 'error',
+          severity: 'warning',
           code: 'node-fully-outside-canvas',
           message: '场景“对等场景”的母版画面中，节点“outside-b”完全位于 1280×720 画布之外。',
           target: 'pptx',
@@ -158,7 +193,7 @@ describe('Slide export-preflight V9 behavior', () => {
           nodeId: 'outside-b',
         },
         {
-          severity: 'error',
+          severity: 'warning',
           code: 'node-fully-outside-canvas',
           message: '场景“对等场景”的状态“初始状态”中，节点“outside-b”完全位于 1280×720 画布之外。',
           target: 'pptx',
@@ -167,7 +202,7 @@ describe('Slide export-preflight V9 behavior', () => {
           nodeId: 'outside-b',
         },
         {
-          severity: 'error',
+          severity: 'warning',
           code: 'node-fully-outside-canvas',
           message: '场景“对等场景”的状态“初始状态”中，节点“outside-a”完全位于 1280×720 画布之外。',
           target: 'pptx',
@@ -184,7 +219,7 @@ describe('Slide export-preflight V9 behavior', () => {
           nodeId: 'contrast',
         },
       ],
-      summary: { error: 4, warning: 1, info: 0, total: 5, canExport: false },
+      summary: { error: 0, warning: 5, info: 0, total: 5, canExport: true },
     })
   })
 

@@ -22,11 +22,41 @@ vi.mock('electron', () => ({
 
 const roots: string[] = []
 afterEach(async () => {
+  vi.restoreAllMocks()
   for (const root of roots.splice(0)) {
     if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unsafe fixture root')
     await fs.rm(root, { recursive: true, force: true })
   }
   electronState.selectedPaths = []
+})
+
+it('reads and reopens a pasted UTF-8 attachment above the former 32 MiB renderer and IPC limit', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-large-attachment-source-')); roots.push(root)
+  const desktop = new AttachmentsDesktopService(path.join(root, 'managed'))
+  const text = 'A'.repeat(33 * 1024 * 1024), file = new File([text], 'large.txt', { type: 'text/plain' })
+  const bytes = await readAttachmentFile(file, new AbortController().signal, () => undefined)
+  const original = await desktop.operate({ type: 'receive', name: file.name, bytes, source: 'paste' }, owner) as AttachmentSnapshot
+  expect(original.byteLength).toBe(file.size)
+  const reopened = await desktop.attachments.readRepresentation(original.id, 'original-text')
+  expect(new TextDecoder().decode(reopened.bytes)).toBe(text)
+})
+
+it('keeps selected-file authorization beyond ten minutes and more than 2000 grants until release or window close', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-lasting-attachment-grants-')); roots.push(root)
+  const desktop = new AttachmentsDesktopService(path.join(root, 'managed')), filename = path.join(root, 'notes.txt')
+  await fs.writeFile(filename, '保留授权')
+  electronState.selectedPaths = Array.from({ length: 2001 }, () => filename)
+  const window = { webContents: Object.assign(new EventEmitter(), { id: 82, isDestroyed: () => false }) } as unknown as BrowserWindow
+  const selected = await desktop.operate({ type: 'select' }, window) as AttachmentIntakeFile[]
+  expect(selected).toHaveLength(2001)
+  vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 2 * 60 * 60_000)
+  const input = { type: 'receive-granted', authorizationId: selected[0].authorizationId, requestId: randomUUID() }
+  const received = await desktop.operate(input, window) as AttachmentSnapshot
+  expect(new TextDecoder().decode((await desktop.attachments.readRepresentation(received.id, 'original-text')).bytes)).toBe('保留授权')
+  await desktop.operate({ type: 'release', authorizationIds: selected.slice(0, 201).map(item => item.authorizationId!) }, window)
+  await expect(desktop.operate({ ...input, requestId: randomUUID() }, window)).rejects.toMatchObject({ code: 'attachment-path-not-authorized' })
+  window.webContents.emit('destroyed')
+  await expect(desktop.operate({ ...input, authorizationId: selected.at(-1)!.authorizationId, requestId: randomUUID() }, window)).rejects.toMatchObject({ code: 'attachment-path-not-authorized' })
 })
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const owner = { webContents: Object.assign(new EventEmitter(), { id: 81, isDestroyed: () => false }) } as unknown as BrowserWindow

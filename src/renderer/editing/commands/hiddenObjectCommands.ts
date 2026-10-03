@@ -4,12 +4,13 @@ import type { MenuCommand } from './CommandMenu'
 interface NamedItem {
   readonly kind: string
   readonly label?: string
-  readonly content?: { readonly nativeType?: string; readonly data?: unknown }
+  readonly content?: unknown
 }
 
 /** What a hidden object is called in the list: the start of its text, else its name. */
 export function hiddenObjectName(item: NamedItem): string {
-  const text = item.kind === 'native' && item.content?.nativeType === 'text' ? (item.content.data as { text?: unknown } | undefined)?.text : undefined
+  const content = item.content as { nativeType?: string; data?: { text?: unknown } } | undefined
+  const text = item.kind === 'native' && content?.nativeType === 'text' ? content.data?.text : undefined
   return (typeof text === 'string' ? text.trim().slice(0, 16) : '') || item.label || '对象'
 }
 

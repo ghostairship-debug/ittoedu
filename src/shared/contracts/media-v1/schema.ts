@@ -76,7 +76,7 @@ type CourseProjectAssetMeta = AssetMeta & {
 /** Exact Course Project V9 asset metadata profile. */
 export const courseProjectAssetMetaSchema: z.ZodType<CourseProjectAssetMeta> = z.object({
   id: courseProjectStableIdSchema,
-  filename: z.string().trim().min(1).max(500),
+  filename: z.string().trim().min(1),
   mimeType: z.string().trim().min(1).max(200),
   kind: z.enum(['image', 'audio', 'video', 'font']),
   path: courseProjectPortablePathSchema,

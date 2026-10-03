@@ -187,7 +187,7 @@ describe('G20 execution desktop integration', () => {
       expectedRevision: conversation.revision, text: '保留的输入', documents: [reference(document)] }) as { revision: number; inputDraft: string; frozenContextRefs: Array<{ revision: number }> }
     expect(drafted).toMatchObject({ inputDraft: '保留的输入', frozenContextRefs: [{ revision: 0 }] })
     await expect(service.operate({ type: 'draft', workspaceId: first.workspace.workspaceId, conversationId: conversation.conversationId,
-      expectedRevision: conversation.revision, text: '过期输入', documents: [reference(document)] })).rejects.toThrow('会话已被较新的草稿或操作更新')
+      expectedRevision: conversation.revision, text: '过期输入', documents: [reference(document)] })).rejects.toThrow('本条消息的草稿已在另一处更新')
     await expect(service.operate({ type: 'send', workspaceId: first.workspace.workspaceId, conversationId: conversation.conversationId,
       submissionId: '41111111-1111-4111-8111-111111111111', expectedRevision: drafted.revision, text: '不能发送', documents: [reference(document)] })).rejects.toThrow('尚未配置可用的对话与规划模型')
     expect(await service.operate({ type: 'conversation', workspaceId: first.workspace.workspaceId, conversationId: conversation.conversationId }))
@@ -319,7 +319,7 @@ it('M25 retires an orphan active submission without resurrecting its conversatio
   const now = Date.now(), taskId = 'orphan-active-submission', runId = 'orphan-active-run', conversationId = 'deleted-conversation'
   const input = { conversationId, taskId, instruction: '保留未知请求', selection: await settings.snapshot('conversation'),
     documents: [{ documentId: document.documentId, writable: [{ kind: 'document' as const }] }] }
-  await service.runs.save({ schemaVersion: 1, runId, version: 1, input, budget: { maxRequests: 5, maxToolCalls: 5, maxContextBytes: 1000000 },
+  await service.runs.save({ schemaVersion: 1, runId, version: 1, input,
     status: 'running', createdAt: now, updatedAt: now, messages: [], initialMessageCount: 0,
     requests: [{ requestId: 'dispatched-before-interruption', state: 'sending' }], tools: [] })
   await service.submissions.create({ schemaVersion: 1, submissionId: taskId, workspaceId: space.workspace.workspaceId, conversationId,
@@ -410,7 +410,7 @@ it.each(['resume-queue', 'run-queued', 'restart-resume'] as const)('reclaims an 
   f.service.setExternalRevoker(input => external.revokeConversation(input))
   try {
     await f.service.pauseQueueForExternal(identity.conversationId)
-    const grant = await external.grant({ ...identity, expectedRevision: conversation.revision, instruction: '外部任务', documents: [reference(f.document)], lifetimeMs: 60_000 })
+    const grant = await external.grant({ ...identity, expectedRevision: conversation.revision, instruction: '外部任务', documents: [reference(f.document)] })
     const submissionId = crypto.randomUUID()
     const queued = await f.service.operate({ type: 'send', ...identity, submissionId, expectedRevision: grant.conversation.revision,
       text: '需要接回的原要求', documents: [] }) as { submission: { state: string }; conversation: { revision: number } }

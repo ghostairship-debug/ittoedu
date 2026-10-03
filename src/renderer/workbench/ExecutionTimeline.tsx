@@ -1,6 +1,6 @@
 import { memo, useMemo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { executionDetailKeys, type ExecutionEventSearchPage, type ExecutionBlobRef, type ExecutionContent, type ExecutionItem, type ExecutionProjection } from '../../shared/workbench/executionEvents'
-import { executionActivity, executionDocumentFacts, executionTimelineIndex, readableExecutionData } from './executionTimelineModel'
+import { collapseInterruptedAttempts, executionActivity, executionDocumentFacts, executionTimelineIndex, readableExecutionData } from './executionTimelineModel'
 import './executionTimeline.css'
 import type { ImageResultsDesktopAPI } from '../../shared/workbench/imageResultsDesktop'
 import { ImageResultCard } from './ImageResultCard'
@@ -114,7 +114,7 @@ function QuestionRecord({ item, ended }: { item: ExecutionItem; ended: boolean }
     {item.data.error && item.data.status !== 'answered' && <p>{readableExecutionData(item.data.error)}</p>}
   </article>
 }
-function TimelineItem({ item, projection, readBlob, onLocateDocument, onOpenSavedFile, imageResults, workspaceId, expanded, onExpanded }: ExecutionTimelineProps & {
+const TimelineItem = memo(function TimelineItem({ item, projection, readBlob, onLocateDocument, onOpenSavedFile, imageResults, workspaceId, expanded, onExpanded }: ExecutionTimelineProps & {
   item: ExecutionItem; expanded: boolean; onExpanded(open: boolean): void;
 }) {
   const source = item.source === 'external-mcp' ? '外部 MCP · 仅显示实际工具事实' : ''
@@ -122,11 +122,11 @@ function TimelineItem({ item, projection, readBlob, onLocateDocument, onOpenSave
   const end = executionTimelineIndex(projection).ends.get(item.runId)
   if (item.type === 'tool' && item.source === 'builtin' && item.data.question) return <QuestionRecord item={item} ended={Boolean(end)} />
   const incompleteAfterEnd = Boolean(end && ['running', 'executing', 'pending', 'queued', 'stopping', 'waiting', 'approval'].includes(item.data.status ?? ''))
-  const displayedStatus = item.type === 'run.state' && end ? statusLabel(end.data.status) : incompleteAfterEnd ? '任务已结束' : statusLabel(item.data.status)
+  const displayedStatus = item.type === 'run.state' && end && !item.data.label ? statusLabel(end.data.status) : incompleteAfterEnd ? '任务已结束' : statusLabel(item.data.status)
   const operationItem = item.type === 'tool' || item.type === 'document.commit' || item.type === 'document.save'
   const application = ({ applied: '已应用', unchanged: '内容未变化', conflict: '应用冲突', denied: '未获应用授权', cancelled: '未应用（已取消）', failed: '应用失败' } as Record<string, string>)[facts.application ?? ''] ?? '未确认应用'
   const saving = ({ saved: '已保存', saving: '保存中', failed: '保存失败' } as Record<string, string>)[facts.save ?? ''] ?? '保存未确认'
-  const heading = readableExecutionData((item.type === 'run.state' ? titles[item.type] : item.data.label) || (item.type === 'tool' ? item.data.toolName : undefined) || titles[item.type])
+  const heading = readableExecutionData(item.data.label || (item.type === 'tool' ? item.data.toolName : undefined) || titles[item.type])
   const savedFile = item.type === 'tool' && item.source === 'builtin' && item.data.saveStatus === 'saved'
     && (item.data.toolName === 'file.write' || item.data.toolName === 'file.save')
   const body = <>
@@ -163,7 +163,15 @@ function TimelineItem({ item, projection, readBlob, onLocateDocument, onOpenSave
     {savedFile && onOpenSavedFile && <button type="button" className="execution-timeline__file-result" title={item.data.documentName}
       onClick={() => onOpenSavedFile(item.runId, item.itemId)}><span>{item.data.documentName ? `打开文件：${readableExecutionData(item.data.documentName)}` : '打开文件'}</span></button>}
   </article>
-}
+}, (previous, next) =>
+  previous.item === next.item
+  && previous.expanded === next.expanded
+  && previous.projection === next.projection
+  && previous.readBlob === next.readBlob
+  && previous.onLocateDocument === next.onLocateDocument
+  && previous.onOpenSavedFile === next.onOpenSavedFile
+  && previous.imageResults === next.imageResults
+  && previous.workspaceId === next.workspaceId)
 
 interface ReadingState { range: { start: number; end: number }; expanded: Set<string>; following: boolean; top: number }
 function HistorySearch({ searchEvents, readBlob, onClose }: Pick<ExecutionTimelineProps, 'searchEvents' | 'readBlob'> & { onClose(): void }) {
@@ -206,11 +214,12 @@ function TimelineBody({ projection, readBlob, onLocateDocument, onOpenSavedFile,
   const [expanded, setExpanded] = useState<Set<string>>(() => saved?.expanded ?? new Set())
   const [localSearchOpen, setLocalSearchOpen] = useState(false)
   const activity = useMemo(() => executionActivity(projection), [projection])
+  const collapsedItems = useMemo(() => collapseInterruptedAttempts(projection.items), [projection.items])
   const visibleEntries = useMemo(() => [
-    ...projection.items.slice(windowRange.start, windowRange.end).map((item, order) => ({ kind: 'item' as const, item, time: item.time, order })),
+    ...collapsedItems.slice(windowRange.start, windowRange.end).map((item, order) => ({ kind: 'item' as const, item, time: item.time, order })),
     ...userMessages.map((message, order) => ({ kind: 'message' as const, message, time: message.createdAt, order })),
   ].sort((left, right) => left.time - right.time || (left.kind === right.kind ? left.order - right.order : left.kind === 'message' ? -1 : 1)),
-  [projection.items, windowRange.start, windowRange.end, userMessages])
+  [collapsedItems, windowRange.start, windowRange.end, userMessages])
   const reading = useRef<ReadingState>({ range: windowRange, expanded, following, top: saved?.top ?? 0 })
   reading.current = { ...reading.current, range: windowRange, expanded, following }
   useEffect(() => () => { readings.set(projection.conversationId, reading.current) }, [readings, projection.conversationId])

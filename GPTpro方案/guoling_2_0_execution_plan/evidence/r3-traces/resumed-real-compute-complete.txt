@@ -1,0 +1,16 @@
+
+ RUN  v4.1.10 D:/果铃工作台
+
+stdout | tests/integration/g20R3LiveNativeJourney.test.ts > delivers a real-model compute report and a sourced research report through the native services
+{"evidence":"D:\\果铃工作台\\output\\g20\\r3\\native-live-6284bcde-1074-4375-b06a-12d4c2e97fe4","label":"compute-report","status":"completed","elapsedMs":71082,"requests":9,"tools":["file.list","file.read","skills.read","tools.load","compute.run","file.write","file.write","file.patch","job.wait","job.logs","artifact.save","artifact.save","file.read","file.read","file.write","file.list","task.note"],"files":["analyze_sales.py","sales.csv","sales_chart.svg","sales_report.css","sales_report.html","sales_results.json"]}
+
+stdout | tests/integration/g20R3LiveNativeJourney.test.ts > delivers a real-model compute report and a sourced research report through the native services
+{"evidence":"D:\\果铃工作台\\output\\g20\\r3\\native-live-6284bcde-1074-4375-b06a-12d4c2e97fe4","label":"compute-report-revision","status":"completed","elapsedMs":6770,"requests":5,"tools":["file.list","file.read","file.patch","file.grep"],"files":["analyze_sales.py","sales.csv","sales_chart.svg","sales_report.css","sales_report.html","sales_results.json"]}
+
+·
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  00:22:36
+   Duration  83.74s (transform 1.65s, setup 64ms, import 2.29s, tests 81.28s, environment 0ms)
+

@@ -29,6 +29,7 @@ export const HtmlDocumentEditor = forwardRef<PlainTextDocumentEditorHandle, Html
   const textDrafts = useMemo(() => new HtmlTextDrafts(), [committed.documentId, committed.epoch])
   const retained = useSyncExternalStore(textDrafts.subscribe, textDrafts.read)
   const leaseQueue = useRef<Promise<void>>(Promise.resolve())
+  const reloadPreview = useRef<(() => void) | null>(null)
   const committedSource = committed.model.kind === 'text' ? committed.model.source : ''
   useEffect(() => { textDrafts.reconcile(committedSource) }, [textDrafts, committedSource, committed.revision])
   useEffect(() => { onPendingDraftChange?.(retained.length > 0) }, [retained.length, onPendingDraftChange])
@@ -51,17 +52,25 @@ export const HtmlDocumentEditor = forwardRef<PlainTextDocumentEditorHandle, Html
     let opened: HtmlPreviewLease | null = null
     setLease(null)
     setPreviewError(null)
-    leaseQueue.current = leaseQueue.current.catch(() => {}).then(async () => {
-      if (!live) return
-      try {
-        const value = await files({ type: 'html-preview.open', documentId, epoch, expectedBindingVersion: bindingVersion, tabId })
-        opened = value
-        if (live) setLease(value)
-        else await files({ type: 'html-preview.release', leaseId: value.leaseId, tabId })
-      } catch (reason) { if (live) setPreviewError(reason instanceof Error ? reason.message : String(reason)) }
-    })
+    // A source reload creates a real new lease through the same owner. Keep the
+    // mounted pane and its view/drafts while Main replaces only this tab's lease.
+    const open = () => {
+      setPreviewError(null)
+      leaseQueue.current = leaseQueue.current.catch(() => {}).then(async () => {
+        if (!live) return
+        try {
+          const value = await files({ type: 'html-preview.open', documentId, epoch, expectedBindingVersion: bindingVersion, tabId })
+          opened = value
+          if (live) setLease(value)
+          else await files({ type: 'html-preview.release', leaseId: value.leaseId, tabId })
+        } catch (reason) { if (live) setPreviewError(reason instanceof Error ? reason.message : String(reason)) }
+      })
+    }
+    reloadPreview.current = open
+    open()
     return () => {
       live = false
+      if (reloadPreview.current === open) reloadPreview.current = null
       if (opened) leaseQueue.current = leaseQueue.current.then(async () => { await files({ type: 'html-preview.release', leaseId: opened!.leaseId, tabId }).catch(() => {}) })
     }
   }, [filename, documentId, epoch, bindingVersion, tabId, retry])
@@ -88,7 +97,9 @@ export const HtmlDocumentEditor = forwardRef<PlainTextDocumentEditorHandle, Html
     </details>}
     <div className="html-document-editor__preview" hidden={mode !== 'preview'}>
       {lease ? <HtmlPreviewPane lease={lease} committed={committed} tabId={tabId} textDrafts={textDrafts} active={active && mode === 'preview'}
-        onUndo={onUndo} onRedo={onRedo} onSave={onSave} toolbarLeading={viewControls} />
+        onUndo={onUndo} onRedo={onRedo} onSave={onSave} toolbarLeading={viewControls}
+        pendingSourceDraft={source !== committedSource} onReloadRequest={() => reloadPreview.current?.()}
+        reloadIssue={previewError} />
         : <p role={previewError ? 'alert' : 'status'}>{previewError ?? '正在准备 HTML 预览…'}{previewError && <button type="button" onClick={() => setRetry(value => value + 1)}>重试预览</button>}</p>}
     </div>
     <div className="html-document-editor__source" hidden={mode !== 'source'}>

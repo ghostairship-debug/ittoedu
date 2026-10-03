@@ -91,7 +91,7 @@ export class DynamicContentObservationStore {
       || !shortString(publication.locationId) || !shortString(publication.viewGeneration, 200)
       || !Number.isSafeInteger(publication.publicationSeq) || publication.publicationSeq < 0
       || publication.source !== 'authoring' && publication.source !== 'live'
-      || !Array.isArray(publication.targets) || publication.targets.length > 2_000) return false
+      || !Array.isArray(publication.targets)) return false
     const targets = publication.targets.map(hit => normalizeTarget(hit, publication))
     if (targets.some(hit => !hit)) return false
     const documentBarrier = this.documentBarriers.get(publication.documentId) ?? 0

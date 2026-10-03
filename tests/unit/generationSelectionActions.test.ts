@@ -147,6 +147,32 @@ function imageFixture(carrier: 'slide-base' | 'slide-state' | 'flow-body' | 'spa
 }
 
 describe('G1 I03 uses one exact image creation after the selected explanation', () => {
+  it('uses the current scene height for inserted images and falls back to the default canvas', async () => {
+    for (const layout of [
+      { canvas: { width: 720, height: 1280 }, y: 820, expectedHeight: 320 },
+      { canvas: { width: 640, height: 480 }, y: 310, expectedHeight: 66 },
+      { canvas: undefined, y: 70, expectedHeight: 320 },
+    ]) {
+      const { document } = imageFixture('slide-base')
+      const surface = document.surfaces[0]!
+      if (surface.type !== 'slide') throw new Error('Slide fixture required')
+      const scene = surface.scenes[0]!
+      if (layout.canvas) scene.canvas = layout.canvas
+      const anchor = scene.layerItems[0]!
+      anchor.frame.y = layout.y
+      const request = snapshot(document, ['anchor'], imageInstruction)
+      const action = request.selectionActions?.find(action => action.operation === 'insert-image-after')
+      if (!action || action.operation !== 'insert-image-after') throw new Error('Missing captured insertion')
+      const h = harness(document)
+      await h.apply(request, [{ id: 'illustration', tool: 'media.apply', carrier: 'native', destination: action.destination,
+        input: { kind: 'image', source: imageSource, preserveResolution: true } }])
+      const image = rows(h.read().document).find(row => row.item.kind === 'native' && row.item.content.nativeType === 'image')!
+      expect(image.item.frame).toMatchObject({ y: layout.y + 104, width: 320, height: layout.expectedHeight })
+      expect(locateCourseLayer(h.read().document, 'anchor')!.item).toEqual(anchor)
+      expect(surface.canvas).toEqual({ width: 1280, height: 720 })
+    }
+  })
+
   it.each(['slide-base', 'slide-state', 'flow-body', 'spatial-world'] as const)('inserts an actual resource on %s without replacing the explanation, with archive/Undo/Redo', async carrier => {
     const { document, stateId } = imageFixture(carrier), request = snapshot(document, ['anchor'], imageInstruction, stateId), h = harness(document)
     const action = request.selectionActions?.find(action => action.operation === 'insert-image-after')

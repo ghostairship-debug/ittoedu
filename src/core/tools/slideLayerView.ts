@@ -7,6 +7,7 @@ import type {
   LayerItem,
   SlideSurfaceDocument,
 } from '../../shared/courseProjectTypes'
+import { effectiveSceneCanvas, mapSlideFrame, sharedSlideFrameMapping, unmapSlideFrame } from '../../shared/slideCanvas'
 
 export type DeepReadonly<T> =
   T extends (...args: never[]) => unknown ? T :
@@ -49,6 +50,8 @@ export interface SlideEditorView {
   readonly sceneId: string
   readonly sceneName: string
   readonly canvas: { readonly width: number; readonly height: number }
+  /** Shared-layer edits are converted back to this owner's reference space. */
+  readonly referenceCanvas: { readonly width: number; readonly height: number }
   readonly backgroundColor: string
   readonly backgroundAssetId: string | null | undefined
   readonly presentation: SlideEditorPresentationView | null
@@ -60,6 +63,15 @@ export interface BuildSlideEditorViewInput {
   readonly locationId: string
   /** `undefined` follows the location; `null` deliberately shows the base scene. */
   readonly stateId?: string | null
+}
+
+/** GUI geometry follows the current scene; formal shared frames stay in the owner's reference space. */
+export function slideEditorFrameToSource<T extends Partial<{ x: number; y: number; width: number; height: number }>>(
+  view: Pick<SlideEditorView, 'canvas' | 'referenceCanvas'>,
+  source: SlideEditorLayerScope,
+  frame: T,
+): T {
+  return source === 'scene' ? { ...frame } : unmapSlideFrame(frame, sharedSlideFrameMapping(view.referenceCanvas, view.canvas))
 }
 
 function deepFreeze<T>(value: T): DeepReadonly<T> {
@@ -137,8 +149,12 @@ export function buildSlideEditorView(input: BuildSlideEditorViewInput): SlideEdi
   const { location, surface, scene } = resolveSlide(project, locationId)
   const stateId = input.stateId === undefined ? (location.stateId ?? null) : input.stateId
   const composition = composeSlideEditorLocation({ project, locationId, stateId })
+  const canvas = effectiveSceneCanvas(surface, scene)
+  const mapping = sharedSlideFrameMapping(surface.canvas, canvas)
   const layers = composition.entries.map((entry) => layerView(
-    entry.item,
+    entry.source === 'global' || entry.source === 'surface'
+      ? { ...entry.item, frame: mapSlideFrame(entry.item.frame, mapping) }
+      : entry.item,
     entry.source as SlideEditorLayerScope,
     entry.applicable,
     entry.mounted,
@@ -168,7 +184,8 @@ export function buildSlideEditorView(input: BuildSlideEditorViewInput): SlideEdi
     surfaceTitle: surface.title,
     sceneId: scene.id,
     sceneName: scene.name,
-    canvas: { ...surface.canvas },
+    canvas,
+    referenceCanvas: { ...surface.canvas },
     backgroundColor: composition.background!.color,
     backgroundAssetId: composition.background!.assetId,
     presentation,

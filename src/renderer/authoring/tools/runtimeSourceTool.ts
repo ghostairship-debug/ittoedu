@@ -7,7 +7,7 @@ import type { AuthoringToolDefinition } from './executeAuthoringTool'
 import { dynamicButtonCheckSchema, type DynamicBehaviorObservation } from '../../../shared/dynamicBehaviorObservation'
 import { courseRuntimeDefinitionSchema } from '../../../shared/courseProjectSchema'
 
-const schema = z.object({ source: z.string().min(1).max(2_000_000),
+const schema = z.object({ source: z.string().min(1),
   staticFallback: courseRuntimeDefinitionSchema.shape.staticFallback,
   observeButton: dynamicButtonCheckSchema.omit({ instanceId: true }).optional() }).strict()
 export const runtimeSourceTool: AuthoringToolDefinition<z.infer<typeof schema>> = {

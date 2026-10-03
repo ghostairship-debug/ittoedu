@@ -6,11 +6,6 @@ import {
   type RuntimeDocument,
 } from './types'
 
-export const MAX_RUNTIME_SOURCE_BYTES = 2 * 1024 * 1024
-export const MAX_RUNTIME_CONTENT_ENTRIES = 10_000
-export const MAX_RUNTIME_ASSET_BINDINGS = 10_000
-export const MAX_RUNTIME_NODE_BINDINGS = 10_000
-
 const safeRecordKeySchema = z
   .string()
   .min(1, '键名不能为空')
@@ -38,7 +33,7 @@ export const editableTextMetadataSchema = z.object({
   label: z.string().min(1).max(100).optional(),
   description: z.string().max(500).optional(),
   multiline: z.boolean().optional(),
-  maxLength: z.number().int().positive().max(1_000_000).optional(),
+  maxLength: z.number().int().positive().optional(),
 }).strict()
 
 export const editableTextContentSchema = z.object({
@@ -47,22 +42,7 @@ export const editableTextContentSchema = z.object({
   overrides: lightEditTextOverridesSchema.optional(),
 }).strict().superRefine((content, context) => {
   const valueKeys = Object.keys(content.values)
-  if (valueKeys.length > MAX_RUNTIME_CONTENT_ENTRIES) {
-    context.addIssue({
-      code: 'custom',
-      path: ['values'],
-      message: `可编辑文字不能超过 ${MAX_RUNTIME_CONTENT_ENTRIES} 项`,
-    })
-  }
-
   const metadataKeys = Object.keys(content.metadata ?? {})
-  if (metadataKeys.length > MAX_RUNTIME_CONTENT_ENTRIES) {
-    context.addIssue({
-      code: 'custom',
-      path: ['metadata'],
-      message: `文字元数据不能超过 ${MAX_RUNTIME_CONTENT_ENTRIES} 项`,
-    })
-  }
 
   const knownKeys = new Set(valueKeys)
   metadataKeys.forEach((key) => {
@@ -89,10 +69,6 @@ export const runtimeStaticFallbackSchema = z.object({
 const runtimeSourceSchema = z
   .string()
   .refine((source) => source.trim().length > 0, '运行时源码不能为空')
-  .refine(
-    (source) => new TextEncoder().encode(source).byteLength <= MAX_RUNTIME_SOURCE_BYTES,
-    `运行时源码不能超过 ${MAX_RUNTIME_SOURCE_BYTES} 字节（2 MiB）`,
-  )
 
 const runtimeDocumentBaseShape = {
   enabled: z.boolean(),
@@ -104,27 +80,7 @@ const runtimeDocumentBaseShape = {
   staticFallback: runtimeStaticFallbackSchema.optional(),
 } as const
 
-function validateRuntimeLimits(
-  runtime: Pick<RuntimeDocument, 'assets' | 'nodeBindings'>,
-  context: z.RefinementCtx,
-): void {
-  if (Object.keys(runtime.assets).length > MAX_RUNTIME_ASSET_BINDINGS) {
-    context.addIssue({
-      code: 'custom',
-      path: ['assets'],
-      message: `运行时素材绑定不能超过 ${MAX_RUNTIME_ASSET_BINDINGS} 项`,
-    })
-  }
-  if (Object.keys(runtime.nodeBindings ?? {}).length > MAX_RUNTIME_NODE_BINDINGS) {
-    context.addIssue({
-      code: 'custom',
-      path: ['nodeBindings'],
-      message: `运行时节点绑定不能超过 ${MAX_RUNTIME_NODE_BINDINGS} 项`,
-    })
-  }
-}
-
 export const runtimeDocumentSchema = z.object({
   runtimeApiVersion: z.literal(RUNTIME_API_VERSION),
   ...runtimeDocumentBaseShape,
-}).strict().superRefine(validateRuntimeLimits) satisfies z.ZodType<RuntimeDocument>
+}).strict() satisfies z.ZodType<RuntimeDocument>

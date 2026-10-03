@@ -30,7 +30,7 @@ export async function renderPptxColorChanges(bytes: Uint8Array, mimeType: string
   try {
     const image = new Image()
     await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = () => reject(new Error('图片颜色替换解码失败')); image.src = url })
-    if (!image.naturalWidth || image.naturalWidth * image.naturalHeight > 40_000_000) throw new Error('图片颜色替换尺寸无效')
+    if (!image.naturalWidth || !image.naturalHeight) throw new Error('图片颜色替换尺寸无效')
     const canvas = document.createElement('canvas')
     canvas.width = image.naturalWidth; canvas.height = image.naturalHeight
     const context = canvas.getContext('2d', { willReadFrequently: true })

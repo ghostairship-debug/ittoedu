@@ -116,6 +116,7 @@ export type PropertiesItemView =
   | SlideInputPropertiesView
   | PropertiesComponentView
   | PropertiesRuntimeView
+  | (PropertiesItemBase & { type: 'composition' })
 
 export type PropertiesPatch = DeepPartial<PropertiesItemView>
 
@@ -707,6 +708,12 @@ export function SlideNativeTypeFields({
   tableCommands: NativeTablePropertiesCommands | null
   chartCommands: ChartPropertiesCommands | null
 }) {
+  if (node.type === 'composition') return (
+    <section className="property-section">
+      <h3 className="property-title">组合内容</h3>
+      <p className="property-hint">这里调整组合的整体位置、尺寸与透明度；内部文字、图像和布局通过组合内容编辑入口修改。</p>
+    </section>
+  )
   if (spatialMode && node.type !== 'text' && node.type !== 'chart' && node.type !== 'table') {
     return (
       <section

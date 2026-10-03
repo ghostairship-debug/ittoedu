@@ -40,7 +40,7 @@ it('manages a real Edge MCP browser with per-action approval, scoped transfer an
   if (!address || typeof address === 'string') throw new Error('fixture server unavailable')
   const origin = `http://127.0.0.1:${address.port}`
   const approvals: string[] = []
-  const service = new ManagedBrowserMcpService({ scratchRoot, testLoopbackOrigin: origin,
+  const service = new ManagedBrowserMcpService({ scratchRoot, testLoopbackOrigin: origin, externalBackend: 'edge-mcp',
     approveExternalAction: async ({ tool, arguments: args, pageUrl }) => {
       approvals.push(tool)
       return pageUrl === `${origin}/` && (
@@ -66,7 +66,7 @@ it('manages a real Edge MCP browser with per-action approval, scoped transfer an
     expect(received).toHaveLength(0)
     await service.endRun('readonly')
 
-    const noApproval = new ManagedBrowserMcpService({ scratchRoot, testLoopbackOrigin: origin })
+    const noApproval = new ManagedBrowserMcpService({ scratchRoot, testLoopbackOrigin: origin, externalBackend: 'edge-mcp' })
     try {
       await noApproval.beginRun('missing-approval', { permission: 'workspace-write', allowedOrigins: [origin] })
       const noApprovalTools = await noApproval.discover('missing-approval')
@@ -180,7 +180,7 @@ it('resumes the same browser after a visible local login and keeps its cookie ou
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('fixture server unavailable')
   const origin = `http://127.0.0.1:${address.port}`, runId = 'login-task'
-  const service = new ManagedBrowserMcpService({ scratchRoot: join(fixture, 'runs'), testLoopbackOrigin: origin,
+  const service = new ManagedBrowserMcpService({ scratchRoot: join(fixture, 'runs'), testLoopbackOrigin: origin, externalBackend: 'edge-mcp',
     approveExternalAction: async input => input.tool === 'browser_click' && input.arguments.target === '#download'
       && input.pageUrl === `${origin}/protected` })
   const modelResults: unknown[] = []

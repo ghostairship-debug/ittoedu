@@ -8,7 +8,7 @@ import {
 import type { AuthoringToolDefinition } from './executeAuthoringTool'
 import { resolveAuthoringToolScope, insertionIndex } from './authoringToolScope'
 
-const name = z.string().trim().min(1).max(120)
+const name = z.string().trim().min(1)
 const ids = z.array(z.string().min(1)).min(1)
 export const slideStructureToolInputSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('add-page'), name: name.optional() }).strict(),

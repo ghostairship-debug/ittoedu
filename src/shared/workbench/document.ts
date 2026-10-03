@@ -1,6 +1,7 @@
 import type { DocumentSlot } from '../document/ports'
 import type { DocumentSaveIdentity } from './documentSave'
 import type { CourseProjectDocument } from '../courseProjectTypes'
+import type { CompositionContentEdit } from '../composition/edit'
 
 /** Document identity is independent of the file's project ID and its path. */
 export type DocumentId = string
@@ -30,6 +31,7 @@ export type DocumentCommand =
   | { type: 'markdown.replace'; source: string; resources?: DocumentResources }
   | { type: 'course.replace'; project: CourseProjectDocument; resources?: DocumentResources }
   | { type: 'course.object.patch'; locationId: string; itemId: string; patch: Record<string, unknown> }
+  | { type: 'composition.edit'; layerItemId: string; edit: CompositionContentEdit }
 
 export interface DocumentTextChanges {
   source: Array<{ from: number; to: number; inserted: number }>

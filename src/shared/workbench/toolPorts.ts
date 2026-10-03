@@ -14,7 +14,7 @@
  * receipt, because Main re-validates authority at the service boundary.
  */
 import type { DocumentOperationResult, DocumentSnapshot } from './document'
-import type { ModelFailure, ModelUsage } from './modelProvider'
+import type { ModelChatMessage, ModelFailure, ModelUsage } from './modelProvider'
 
 /** Capabilities that may read bundled authoring Skills. */
 export interface SkillServicePort {
@@ -128,6 +128,18 @@ export interface VisualAnalysisPort {
   }): Promise<
     | { status: 'analyzed'; conclusion: string; actualModel?: string; selection: { model: string; connection: string; billing: string } }
     | { status: 'vision-unavailable'; reason: string; outcome?: 'not-sent' | 'rejected' | 'unknown'; code?: string }
+  >
+  /** Direct message-image analysis used when a tool returned an image to a text-only conversation model. */
+  analyzeImage?(input: {
+    runId: string
+    sourceId: string
+    source: ModelChatMessage
+    question: string
+    signal?: AbortSignal
+    onRequestEvent?(event: VisualAnalysisRequestEvent): Promise<void>
+  }): Promise<
+    | { status: 'analyzed'; conclusion: string; actualModel?: string; selection: { model: string } }
+    | { status: 'vision-unavailable'; reason: string }
   >
 }
 

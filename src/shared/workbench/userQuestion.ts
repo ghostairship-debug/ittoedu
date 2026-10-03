@@ -3,36 +3,35 @@ import type { ModelToolDefinition } from './modelProvider'
 
 /** Built-in executor tool. It is not a document tool: never in ToolCatalog, the Gateway or the external MCP surface. */
 export const USER_QUESTION_TOOL = 'ask_user'
-export const USER_QUESTION_LIMITS = { question: 500, label: 80, description: 300, minOptions: 2, maxOptions: 6, other: 2000 } as const
 const responseKind = z.enum(['choice', 'free-text', 'confirm'])
 
 const optionSchema = z.object({
-  label: z.string().trim().min(1).max(USER_QUESTION_LIMITS.label),
-  description: z.string().trim().max(USER_QUESTION_LIMITS.description).optional(),
+  label: z.string().trim().min(1),
+  description: z.string().trim().optional(),
 }).strict()
-const options = z.array(optionSchema).max(USER_QUESTION_LIMITS.maxOptions)
+const options = z.array(optionSchema)
   .refine(value => new Set(value.map(option => option.label)).size === value.length, '选项名称不能重复')
-const questionShape = { question: z.string().trim().min(1).max(USER_QUESTION_LIMITS.question),
+const questionShape = { question: z.string().trim().min(1),
   options, multiple: z.boolean().optional(), responseKind: responseKind.optional() }
 const validQuestion = (value: { options: readonly { label: string }[]; multiple?: boolean; responseKind?: z.infer<typeof responseKind> },
   ctx: z.RefinementCtx) => {
   const kind = value.responseKind ?? 'choice'
-  const valid = kind === 'choice' ? value.options.length >= USER_QUESTION_LIMITS.minOptions
+  const valid = kind === 'choice' ? value.options.length >= 2
     : kind === 'free-text' ? value.options.length === 0 && value.multiple !== true
       : value.options.length === 1 && value.multiple !== true
-  if (!valid) ctx.addIssue({ code: 'custom', message: kind === 'choice' ? '选择题需要 2–6 个选项'
+  if (!valid) ctx.addIssue({ code: 'custom', message: kind === 'choice' ? '选择题需要至少两个选项'
     : kind === 'free-text' ? '自由回答不需要选项或多选' : '确认题需要一个确认按钮且不能多选' })
 }
 /** Model arguments. Invalid input is returned to the model as a tool error; nothing is shown as a question. */
 export const userQuestionInputSchema = z.object(questionShape).strict().superRefine(validQuestion)
 export type UserQuestionInput = z.infer<typeof userQuestionInputSchema>
 /** What the timeline and the option card show. */
-export const userQuestionViewSchema = z.object({ text: z.string().min(1).max(USER_QUESTION_LIMITS.question), options,
+export const userQuestionViewSchema = z.object({ text: z.string().min(1), options,
   multiple: z.boolean(), responseKind: responseKind.optional() }).strict().superRefine(validQuestion)
 export type UserQuestionView = z.infer<typeof userQuestionViewSchema>
 export const userAnswerSchema = z.object({
-  choices: z.array(z.number().int().nonnegative()).max(USER_QUESTION_LIMITS.maxOptions),
-  other: z.string().trim().min(1).max(USER_QUESTION_LIMITS.other).optional(),
+  choices: z.array(z.number().int().nonnegative()),
+  other: z.string().trim().min(1).optional(),
 }).strict()
 export type UserAnswer = z.infer<typeof userAnswerSchema>
 
@@ -66,7 +65,7 @@ export const USER_QUESTION_USAGE_GUIDANCE = `需要用户在几个明确方案�
 
 export const userQuestionToolDefinition: ModelToolDefinition = {
   name: USER_QUESTION_TOOL,
-  description: '向用户提一个需要其决定的问题。choice 给出 2–6 个选项，free-text 让用户填写文字且 options=[]，confirm 提供一个确认按钮。选择题另有“其他”输入，选项里不要再写“其他”。'
+  description: '向用户提一个需要其决定的问题。choice 给出至少两个选项，free-text 让用户填写文字且 options=[]，confirm 提供一个确认按钮。选择题另有“其他”输入，选项里不要再写“其他”。'
     + USER_QUESTION_USAGE_GUIDANCE
     + '调用后任务会等待用户回答，工具结果只含用户实际的选择（selected）和补充文字（other）；随后按用户的选择继续完成任务。',
   inputSchema: {
@@ -74,7 +73,7 @@ export const userQuestionToolDefinition: ModelToolDefinition = {
     properties: {
       question: { type: 'string', description: '一句话说明需要用户决定什么' },
       responseKind: { type: 'string', enum: ['choice', 'free-text', 'confirm'], description: '默认 choice；free-text 时 options=[]，confirm 时只有一个按钮' },
-      options: { type: 'array', minItems: 0, maxItems: 6, description: '选择题 2–6 项；自由回答 0 项；确认题 1 项',
+      options: { type: 'array', minItems: 0, description: '选择题至少两项；自由回答 0 项；确认题 1 项',
         items: { type: 'object', additionalProperties: false, required: ['label'], properties: {
           label: { type: 'string', description: '简短的选项名称' },
           description: { type: 'string', description: '可选：这个选项意味着什么' },

@@ -1,4 +1,4 @@
-import { MAX_INTERACTION_ACTIONS, MAX_INTERACTION_CONDITIONS, MAX_SCENE_INTERACTIONS, type InteractionRule } from '../../shared/interactionTypes'
+import type { InteractionRule } from '../../shared/interactionTypes'
 import { interactionRuleSchema } from '../../shared/interactionSchema'
 import type { CourseProjectDocument, LayerItem } from '../../shared/courseProjectTypes'
 import { SlideCommandError } from './slideInsertion'
@@ -100,12 +100,6 @@ export function validateRule(rule: InteractionRule): void {
   if (!parsed.success) {
     throw new Error(parsed.error.issues[0]?.message ?? '规则数据无效')
   }
-  if (parsed.data.conditions.length > MAX_INTERACTION_CONDITIONS) {
-    throw new Error(`单条规则最多 ${MAX_INTERACTION_CONDITIONS} 个条件`)
-  }
-  if (parsed.data.actions.length > MAX_INTERACTION_ACTIONS) {
-    throw new Error(`单条规则最多 ${MAX_INTERACTION_ACTIONS} 个动作`)
-  }
 }
 
 export function emptyRuleScopeMessage(): string {
@@ -116,12 +110,9 @@ export function planAddSlideInteractionRule(project: CourseProjectDocument, targ
   assertSceneScope(target)
   const id = rule.id.trim()
   if (!id) throw new Error('规则 ID 不能为空')
-    const currentRules = locateSceneInteractions(project, target.locationId)
+  const currentRules = locateSceneInteractions(project, target.locationId)
   if (currentRules.some((candidate) => candidate.id === id)) {
     throw new Error('规则 ID 已存在，请重新生成后重试')
-  }
-  if (currentRules.length >= MAX_SCENE_INTERACTIONS) {
-    throw new Error(`当前范围最多 ${MAX_SCENE_INTERACTIONS} 条规则`)
   }
   validateRule({ ...rule, id })
   assertRuleTargetsUnlocked(project, { ...rule, id })

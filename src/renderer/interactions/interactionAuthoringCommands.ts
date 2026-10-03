@@ -14,7 +14,6 @@ import {
   sceneInteractionsSchema,
 } from '@/shared/interactionSchema'
 import {
-  MAX_SCENE_INTERACTIONS,
   isNodeMotionAction,
   type InteractionRule,
 } from '@/shared/interactionTypes'
@@ -80,7 +79,6 @@ export type InteractionAuthoringPlanFailureCode =
   | 'invalid-template'
   | 'invalid-layer-target'
   | 'locked-layer'
-  | 'interaction-limit'
   | 'duplicate-rule'
   | 'rule-missing'
   | 'invalid-rule'
@@ -631,13 +629,6 @@ export function planApplyInteractionTemplate(
   if (invalidIdentity) return invalidIdentity
   const resolved = resolveCarrier(input.project, input.target)
   if (!resolved.ok) return resolved
-  if (resolved.value.rules.length >= MAX_SCENE_INTERACTIONS) {
-    return fail(
-      'interaction-limit',
-      `当前作用域最多可以保存 ${MAX_SCENE_INTERACTIONS} 条互动规则。`,
-    )
-  }
-
   let rule: InteractionRule
   try {
     rule = buildInteractionTemplateRule(input.template)

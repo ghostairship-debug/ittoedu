@@ -33,6 +33,8 @@ it('maps API declared reasoning levels without inventing options or replacing se
       return Response.json({ data: [
         { id: 'declared-model', effort: { supported_levels: ['low', 'high', 'max'], default_level: 'high' } },
         { id: 'undeclared-model', display_name: 'No declared effort' },
+        { id: 'public-alias-model', supported_reasoning_efforts: [{ reasoning_effort: 'low', description: 'Light thinking' }, 'high'], default_reasoning_effort: 'low' },
+        { id: 'explicit-empty', supported_reasoning_efforts: [], effort: { supported_levels: ['high'] } },
       ] })
     })
     const saved = await store.saveConnection({ connection: { provider: 'fixture', protocol: 'openai-chat',
@@ -48,6 +50,8 @@ it('maps API declared reasoning levels without inventing options or replacing se
 
     expect(result.models).toEqual([
       { id: 'declared-model', reasoningEfforts: [{ effort: 'low' }, { effort: 'high' }, { effort: 'max' }], defaultReasoningEffort: 'high' },
+      { id: 'explicit-empty', reasoningEfforts: [] },
+      { id: 'public-alias-model', reasoningEfforts: [{ effort: 'low', description: 'Light thinking' }, { effort: 'high' }], defaultReasoningEffort: 'low' },
       { id: 'undeclared-model', displayName: 'No declared effort' },
     ])
     expect(result).toMatchObject({ source: 'live', capabilitiesVerified: false })

@@ -1,8 +1,6 @@
 import type { DocumentSnapshot } from './document'
 import type { ExportBuildReply, ExportBuildRequest, ExportFormat } from './toolPorts'
 
-export const EXPORT_MAX_BYTES = 256 * 1024 * 1024
-
 export function exportExtension(format: ExportFormat): '.html' | '.zip' {
   return format === 'web-package' ? '.zip' : '.html'
 }
@@ -25,8 +23,8 @@ export function validateExportBuildReply(request: ExportBuildRequest, reply: Exp
     || file.relativePath.split('/').some(part => part === '.' || part === '..')) throw new Error('导出文件相对路径无效')
   const mimeType = request.format === 'web-package' ? 'application/zip' : 'text/html'
   if (file.mimeType !== mimeType) throw new Error('导出文件类型与格式不一致')
-  if (!(file.bytes instanceof Uint8Array) || file.bytes.byteLength === 0 || file.bytes.byteLength > EXPORT_MAX_BYTES)
-    throw new Error('导出文件为空或超过 256 MB 限制')
+  if (!(file.bytes instanceof Uint8Array) || file.bytes.byteLength === 0)
+    throw new Error('导出文件为空或字节类型无效')
   if (request.format === 'web-package' && (file.bytes[0] !== 0x50 || file.bytes[1] !== 0x4b))
     throw new Error('网页包不是有效 ZIP 数据')
   return file.bytes

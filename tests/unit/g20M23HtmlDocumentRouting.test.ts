@@ -37,6 +37,32 @@ it('starts HTML in an isolated preview and keeps its iframe when switching to so
   mounted.unmount(); cleanup()
 })
 
+it('reloads a changed HTML source with a fresh lease while keeping the view and releasing the latest lease on close', async () => {
+  let revision = 1, opens = 0
+  const workspaceFiles = vi.fn(async (request: { type: string; leaseId?: string }) => {
+    if (request.type !== 'html-preview.open') return { released: true }
+    opens++
+    return { leaseId: `lease-${opens}`, documentId: 'doc', epoch: 'epoch', revision, bindingVersion: 1,
+      loadId: `load-${opens}`, url: `courseware-preview://generation-${opens}.app/page.html` }
+  })
+  Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { workspaceFiles } })
+  const snapshot = (source: string) => ({ documentId: 'doc', epoch: 'epoch', revision,
+    model: { kind: 'text', source, resources: { assets: {}, components: {} } },
+    binding: { kind: 'file', path: '/lesson/page.html', version: 'v1', bindingVersion: 1 } }) as DocumentSnapshot
+  const props = { tabId: 'tab', committed: snapshot('<p>first</p>'), source: '<p>first</p>',
+    onDraft: vi.fn(), onUndo: vi.fn(), onRedo: vi.fn() }
+  const mounted = render(createElement(HtmlDocumentEditor, props))
+  const frame = await screen.findByTitle('HTML 预览')
+  await waitFor(() => expect(frame.getAttribute('src')).toBe('courseware-preview://generation-1.app/page.html'))
+  revision = 2
+  mounted.rerender(createElement(HtmlDocumentEditor, { ...props, committed: snapshot('<p>second</p>'), source: '<p>second</p>' }))
+  await waitFor(() => expect(frame.getAttribute('src')).toBe('courseware-preview://generation-2.app/page.html'))
+  expect(screen.getByTitle('HTML 预览')).toBe(frame)
+  expect(opens).toBe(2)
+  mounted.unmount()
+  await waitFor(() => expect(workspaceFiles).toHaveBeenCalledWith({ type: 'html-preview.release', leaseId: 'lease-2', tabId: 'tab' }))
+})
+
 it('retains light-edit input through hiding, source view and reload, including typing between optimistic save and ACK', async () => {
   const original = '<p>old</p>'
   const snapshot = (source: string, revision = 1) => ({ documentId: 'doc', epoch: 'epoch', revision,

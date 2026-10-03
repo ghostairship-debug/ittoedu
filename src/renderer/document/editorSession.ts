@@ -16,6 +16,7 @@ import { resolveFlowParagraphPresentation } from '../../shared/flowBodyPresentat
 import { flowFormulaBlockElement, flowInlineFormulaHtml } from '../../shared/document/render'
 import { previewCaretTransaction } from './editPreviewWidgets'
 import { createDocumentInputRuleResult, matchDocumentInputRule, type DocumentFormulaDraftRequest } from './documentInputRules'
+import { MermaidCodeBlockView } from './mermaidCodeBlockView'
 
 /** Sent from a document object (picture, chart, component) that was right-clicked, after selecting it (M21). */
 export const DOCUMENT_OBJECT_CONTEXT_MENU_EVENT = 'document-object-context-menu'
@@ -100,6 +101,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     nodeViews: {
       object: (node, view, getPos) => objectView(node, false, view, getPos),
       compound: (node, view, getPos) => objectView(node, true, view, getPos),
+      code_block: (node, current) => new MermaidCodeBlockView(node, current),
       ...(initial.presentation !== 'flow' ? { slot: (node: import('prosemirror-model').Node) => {
         const key = node.attrs.key as string, dom = document.createElement(key.startsWith('item:') ? 'li' : 'div')
         dom.dataset.documentSlot = key

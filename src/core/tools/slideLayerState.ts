@@ -1,5 +1,4 @@
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
-import { MAX_SCENE_NODES } from '../../shared/constants'
 import { commitCourseProjectMutation } from './courseProjectMutation'
 import { SlideCommandError, slideSceneContext } from './slideInsertion'
 import { buildSlideEditorView } from './slideLayerView'
@@ -49,7 +48,6 @@ export function planDuplicateSlideSceneLayers(project: CourseProjectDocument, lo
   if (new Set(layerItemIds).size !== layerItemIds.length) throw new SlideCommandError('invalid-selection', '选择中不能包含重复元素')
   const selected = layerItemIds.map(id => { const layer = layers.find(layer => layer.selectionId === id); if (!layer) throw new SlideCommandError('invalid-selection', '所选元素已失效，请重新选择'); return layer })
   if (selected.some(layer => layer.item.locked)) throw new SlideCommandError('locked', '当前元素已锁定')
-  if (layers.length + selected.length > MAX_SCENE_NODES) throw new Error(`复制后将超过每场景 ${MAX_SCENE_NODES} 个图层的上限。`)
   const clipboard = copySlideSceneClipboard({ scope: 'scene', history: { present: project }, selection: { locationId, stateId } }, layerItemIds)
   let createdIds: string[] = []
   const nextDocument = commitCourseProjectMutation(project, draft => { createdIds = mutatePasteSlideSceneClipboard(draft, { locationId, stateId, clipboard }) }, now)

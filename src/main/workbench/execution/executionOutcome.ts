@@ -13,12 +13,23 @@ export const fileCreated = (name: string, result?: ToolResult): boolean => name 
 export interface ServiceToolOutcome { status: 'failed' | 'unknown' | 'pending' | 'stopped' | 'saved' | 'generated' | 'written'; message: string }
 const fileMutations = new Set<string>(agentFileMutationNames)
 
+export function persistedToolWork(name: string, result?: ToolResult): boolean {
+  const status = serviceToolOutcome(name, result)?.status
+  return committed(result) || fileCreated(name, result) || status === 'saved' || status === 'written'
+}
+
 /** Only tools whose read receipt is itself a service job use its status for task settlement. */
 export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceToolOutcome | null => {
   if (name === 'html.import' && result?.kind === 'error' && result.code === 'html-import-cancelled')
     return { status: 'stopped', message: result.message }
   if (result?.kind !== 'read' || !result.data || typeof result.data !== 'object') return null
   const data = result.data as Record<string, unknown>
+  if (name === 'course.createFromHtml') {
+    if (data.status === 'saved' && data.saved === true) return { status: 'saved', message: 'HTML 课件已创建并保存' }
+    if (data.status === 'imported') return { status: 'failed', message: typeof data.saveError === 'string' ? data.saveError : 'HTML 已导入，保存尚未成功' }
+  }
+  if ((name === 'office.create' || name === 'office.edit') && data.status === 'saved' && data.saved === true)
+    return { status: 'saved', message: 'Office 文件已保存' }
   if (fileMutations.has(name) && data.operation && typeof data.operation === 'object') {
     const operation = data.operation as { status?: unknown; items?: { error?: { message?: string } }[] }
     if (operation.status === 'failed' || operation.status === 'cancelled' || operation.status === 'partial')
@@ -38,8 +49,8 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
   if (name === 'document.export' && data.status === 'generated') return { status: 'generated', message: '导出内容已生成，尚未写入文件' }
   if (name === 'document.export' && data.status === 'written') return { status: 'written', message: '导出文件已写入' }
   if (name === 'build.compile' && data.ok === false) return { status: 'failed', message: typeof data.message === 'string' ? data.message : '构建语法编译未通过' }
-  if (name === 'build.check' && (data.status === 'failed' || data.status === 'cancelled' || data.status === 'exhausted')) {
-    return { status: 'failed', message: data.status === 'failed' ? '构建检查未通过，请读取构建日志' : data.status === 'cancelled' ? '构建检查已取消' : '构建检查已耗尽预算' }
+  if (name === 'build.check' && (data.status === 'failed' || data.status === 'cancelled')) {
+    return { status: 'failed', message: data.status === 'failed' ? '构建检查未通过，请读取构建日志' : '构建检查已取消' }
   }
   if (name === 'web.search' || name === 'web.open' || name === 'mcp.discover' || name === 'mcp.invoke'
     || name === 'media.start' || name === 'compute.run' || name === 'delegate.start') {
@@ -327,6 +338,12 @@ export function runEndSummary(record: ExecutionRunRecord): string | undefined {
   const savedArtifacts = record.tools.filter(tool => tool.call.name === 'artifact.save'
     && serviceToolOutcome(tool.call.name, tool.result)?.status === 'written').length
   if (savedArtifacts) parts.push(`已保存 ${savedArtifacts} 项作业成果`)
+  const savedOffice = new Set(record.tools.filter(tool => (tool.call.name === 'office.create' || tool.call.name === 'office.edit')
+    && serviceToolOutcome(tool.call.name, tool.result)?.status === 'saved').flatMap(tool => {
+      const data = tool.result?.kind === 'read' ? tool.result.data as { path?: unknown } : undefined
+      return typeof data?.path === 'string' ? [data.path] : []
+    })).size
+  if (savedOffice) parts.push(`已保存 ${savedOffice} 个 Office 文件`)
   const attemptedJobs = new Set(record.tools.filter(tool => tool.call.name.startsWith('build.')).map(jobOf).filter((job): job is string => !!job))
   const imported = importedJobs(record)
   if ([...attemptedJobs].some(job => !imported.has(job))) parts.push('另有暂存构建未导入；正式文档是否保存以保存回执为准')

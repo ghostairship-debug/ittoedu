@@ -17,20 +17,43 @@ import { flowSurfaceIn, resolveFlowBlock, sliceFlowRichText, flowBlockLabel } fr
 import { flowBlocksAtParent, validateFlowInsertIndex } from './flowContent'
 import { flowTextSlot } from './flowTextSlot'
 import { documentTextLength } from '../../shared/document/content'
+import { findCompositionNode, walkComposition } from '../../shared/composition/content'
+import { isCourseLayerVisibleAtLocation } from '../../shared/courseProjectModel'
 
-export function containsTarget(allowed: ToolTarget, target: ToolTarget): boolean {
+export function containsTarget(allowed: ToolTarget, target: ToolTarget, model?: DocumentModel): boolean {
   if (allowed.kind === 'document') return true
   if (allowed.kind === 'course-audio' && target.kind === 'course-sound') return true
   if (allowed.kind === 'course-surface' && target.kind === 'course-background') return target.owner !== 'course' && allowed.surfaceId === target.surfaceId
   if (allowed.kind === 'course-owner' && allowed.owner === 'scene' && !allowed.stateId && target.kind === 'course-state') return allowed.locationId === target.locationId
   if (allowed.kind === 'course-owner' && allowed.owner === 'scene' && target.kind === 'course-interaction') return allowed.locationId === target.locationId && allowed.stateId === target.stateId
   if (allowed.kind === 'course-location' && (target.kind === 'course-object' || target.kind === 'course-interaction')) return allowed.locationId === target.locationId
+  if (allowed.kind === 'course-object' && target.kind === 'course-object') {
+    if (allowed.locationId !== target.locationId || allowed.itemId !== target.itemId || allowed.stateId !== target.stateId) return false
+    if (!allowed.compositionNodeId) return true
+    if (!target.compositionNodeId) return false
+    if (allowed.compositionNodeId === target.compositionNodeId) return true
+    if (model?.kind !== 'course-v9') return false
+    try {
+      const { item } = courseObjectContext(model, allowed)
+      const root = item.kind === 'composition' && findCompositionNode(item.content.root, allowed.compositionNodeId)
+      return !!root && !!findCompositionNode(root, target.compositionNodeId)
+    } catch { return false }
+  }
   if (allowed.kind === 'markdown-range' && target.kind === 'markdown-range') return target.from >= allowed.from && target.to <= allowed.to
   if (allowed.kind === 'flow-container' && allowed.index !== undefined) return documentDigest(allowed) === documentDigest(target)
   if (allowed.kind === 'flow-container' && (target.kind === 'flow-block' || target.kind === 'flow-range' || target.kind === 'flow-container')) return allowed.surfaceId === target.surfaceId && (allowed.parentId === null || allowed.parentId === target.parentId)
   if (allowed.kind === 'flow-block' && target.kind === 'flow-range') return allowed.surfaceId === target.surfaceId && allowed.blockId === target.blockId && allowed.parentId === target.parentId
   if (allowed.kind === 'flow-range' && target.kind === 'flow-range') return allowed.surfaceId === target.surfaceId && allowed.blockId === target.blockId && allowed.parentId === target.parentId && documentDigest(allowed.slot) === documentDigest(target.slot) && target.from >= allowed.from && target.to <= allowed.to
   return documentDigest(allowed) === documentDigest(target)
+}
+
+function courseObjectContext(model: Extract<DocumentModel, { kind: 'course-v9' }>, target: Extract<ToolTarget, { kind: 'course-object' }>) {
+  const location = model.project.locations.find(value => value.id === target.locationId)
+  const layer = locateCourseLayer(model.project, target.itemId)
+  if (!location || !layer || layer.source !== 'global' && (layer.surfaceId !== location.surfaceId || layer.source === 'scene' && (location.kind !== 'slide-scene' || layer.sceneId !== location.sceneId))) throw new Error('对象不属于指定页面')
+  if (target.compositionNodeId && layer.scoped && !isCourseLayerVisibleAtLocation(layer.scoped, location.id)) throw new Error('组合对象在指定页面不可见')
+  const context = target.stateId ? layerToolContext(model.project, target) : null
+  return { location, layer, item: context?.entry.item ?? layer.item, context }
 }
 
 export function backgroundOwner(model: DocumentModel, target: Extract<ToolTarget, { kind: 'course-background' }>) {
@@ -120,12 +143,16 @@ export function readTarget(model: DocumentModel, target: ToolTarget): unknown {
     return { locationId: target.locationId, rule }
   }
   if (target.kind === 'course-object') {
-    const location = model.project.locations.find(value => value.id === target.locationId)
-    const layer = locateCourseLayer(model.project, target.itemId)
-    if (!location || !layer || layer.source !== 'global' && (layer.surfaceId !== location.surfaceId || layer.source === 'scene' && (location.kind !== 'slide-scene' || layer.sceneId !== location.sceneId))) throw new Error('对象不属于指定页面')
+    const { location, layer, item, context } = courseObjectContext(model, target)
+    const owner = { source: layer.source, surfaceId: layer.surfaceId, sceneId: layer.sceneId, scoped: layer.scoped }
+    if (target.compositionNodeId) {
+      const node = item.kind === 'composition' && findCompositionNode(item.content.root, target.compositionNodeId)
+      if (!node) throw new Error('组合内部节点不存在或已移出此对象')
+      return { itemId: target.itemId, compositionNodeId: target.compositionNodeId, node, locked: item.locked,
+        ...(target.stateId ? { stateId: target.stateId } : {}), owner, location }
+    }
     // Include owner and location, not merely the item's content: a move cannot silently rebind a handle.
-    const context = target.stateId ? layerToolContext(model.project, target) : null
-    return { item: context?.entry.item ?? layer.item, ...(context ? { base: layer.item, stateId: target.stateId } : {}), owner: { source: layer.source, surfaceId: layer.surfaceId, sceneId: layer.sceneId, scoped: layer.scoped }, location }
+    return { item, ...(context ? { base: layer.item, stateId: target.stateId } : {}), owner, location }
   }
   const { fields, effective } = backgroundOwner(model, target)
   return { backgroundColor: fields.backgroundColor, backgroundAssetId: fields.backgroundAssetId, ...('backgroundMode' in fields ? { backgroundMode: fields.backgroundMode } : {}), effective }
@@ -153,6 +180,18 @@ export function targetFootprint(model: DocumentModel, target: ToolTarget): strin
     return documentDigest({ target: readTarget(model, target), presentation: scene?.presentation, items: composition.entries.filter(entry => entry.applicable), courseState: model.project.courseState })
   }
   if (model.kind === 'course-v9' && target.kind === 'course-object') {
+    if (target.compositionNodeId) {
+      const { item } = courseObjectContext(model, target)
+      const node = item.kind === 'composition' && findCompositionNode(item.content.root, target.compositionNodeId)
+      if (item.kind !== 'composition' || !node) throw new Error('组合内部节点不存在')
+      const keys = new Set<string>()
+      walkComposition(node, current => {
+        const values = current.kind === 'element' ? Object.values(current.attributes) : current.kind === 'text' ? [current.text] : []
+        for (const value of values) for (const match of value.matchAll(/cw-resource:([a-zA-Z0-9_.-]+)/g)) keys.add(match[1])
+      })
+      const assets = Object.fromEntries([...keys].sort().map(key => [key, item.content.assets[key]]))
+      return documentDigest({ target: readTarget(model, target), assets })
+    }
     const layer = locateCourseLayer(model.project, target.itemId)
     if (layer?.item.kind === 'native' && layer.item.content.nativeType === 'input') {
       const data = layer.item.content.data
@@ -233,6 +272,16 @@ export function childTargets(model: DocumentModel, target: ToolTarget): { target
   if (target.kind === 'course-state' && model.kind === 'course-v9') {
     const { surface, scene } = stateToolContext(model.project, target)
     return [{ target: { kind: 'course-background', owner: 'scene', surfaceId: surface.id, sceneId: scene.id, stateId: target.stateId }, label: '命名态背景' }]
+  }
+  if (target.kind === 'course-object' && model.kind === 'course-v9') {
+    readTarget(model, target)
+    const { item } = courseObjectContext(model, target)
+    if (item.kind !== 'composition') throw new Error('当前目标没有可列出的子项')
+    const root = target.compositionNodeId ? findCompositionNode(item.content.root, target.compositionNodeId)! : item.content.root
+    const nodes = target.compositionNodeId ? root.kind === 'element' ? root.children : [] : [root]
+    return nodes.map(node => ({ target: { ...target, compositionNodeId: node.id },
+      label: node.kind === 'element' ? node.tagName + (node.attributes.class ? ` .${node.attributes.class}` : '')
+        : node.kind === 'text' ? node.text.slice(0, 100) : node.kind === 'native' ? `原生 ${node.content.nativeType}` : node.kind }))
   }
   if (model.kind === 'course-v9' && (target.kind === 'flow-container' || target.kind === 'flow-block')) {
     const parentId = target.kind === 'flow-container' ? target.parentId : target.blockId

@@ -196,7 +196,7 @@ describe('M09-T04 built-in option-card questions', () => {
     const h = await fixture(provider, directory)
     // The durable state left by a process that died while the question was open.
     const runId = 'crashed-run', callId = 'crashed-request:0', now = Date.now()
-    const crashed: ExecutionRunRecord = { schemaVersion: 1, runId, version: 3, input: h.input, budget: { maxRequests: 24, maxToolCalls: 120, maxContextBytes: 1024 * 1024 },
+    const crashed: ExecutionRunRecord = { schemaVersion: 1, runId, version: 3, input: h.input,
       status: 'running', createdAt: now, updatedAt: now, messages: [], initialMessageCount: 0,
       requests: [{ requestId: 'crashed-request', state: 'completed' }],
       tools: [{ callId, providerCallId: 'ask-crashed', requestId: 'crashed-request', call: { name: USER_QUESTION_TOOL, input: question }, state: 'executing' }] }

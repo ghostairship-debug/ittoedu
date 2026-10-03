@@ -377,6 +377,13 @@ function deriveLayerInventory(
     return
   }
 
+  if (target.item.kind === 'composition') {
+    visitLeafValues(target.item.content, ['content'], (segments, value) => {
+      const field = segments.map(String).map(jsonPointerEscape).join('/')
+      addInventoryEntry(project, inventory, target, field, segments.slice(1).join('.'), value, undefined, segments)
+    })
+    return
+  }
   const content = target.item.content
   if (content.nativeType === 'text') {
     addInventoryEntry(project, inventory, target, 'content.data.text', '文字', content.data.text)

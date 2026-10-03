@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "semanticVersion": "c63c42d375affe484533f97169027639b29ab24708aa82637560a1eb9c7687c6",
+  "semanticVersion": "ce70d17e609790add09566f84f25ea4ebf0217c7ec25e1dd2966ffb7bd3b2199",
   "entries": [
     {
       "id": "asset.font.import",
@@ -305,7 +305,7 @@
           ]
         }
       ],
-      "summary": "插入已有、目录或候选组件。目标使用 create；父级条件按目标计算：只有 Flow 正文 parent:flow-body 必须提供当前工程或前序导入的真实图片 staticFallbackAssetId，Slide、Flow 浮层和 Spatial world 不受该 Flow-only 条件约束。Spatial world 可使用 operation:candidate 提交 Component API 4 文件候选；candidate 输入仍须满足本卡完整 Schema。优先复用已有组件包与可用后备素材，正文组件自然占位并随内容宽度排版。",
+      "summary": "插入已有、目录或候选组件。结构资产由软件组装为可编辑组合，Flow 中放到纸面并可随选中段落移动；无需后备截图。程序组件使用原 Component API 4，只有进入 Flow 正文 parent:flow-body 才必须提供真实图片 staticFallbackAssetId，Slide、Flow 浮层和 Spatial world 不受该条件约束。优先复用已有组件包与素材。",
       "dependencies": []
     },
     {
@@ -1001,7 +1001,7 @@
     {
       "id": "reference:build-courseware-project/build-method",
       "kind": "reference",
-      "label": "外部 Builder 与完整工程任务参考",
+      "label": "构建入口选择",
       "path": "skills/build-courseware-project/references/build-method.md",
       "scopes": [
         "slide:scene",
@@ -1020,13 +1020,13 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "外部 Builder 与完整工程任务参考",
-      "keywords": "# 外部 Builder 与完整工程任务参考 ## 外部案例 Builder V2 适用范围 ## 1. 外部案例冷启动 ## 2. 外部案例发现能力 ## 3. 载体所有权 ## 4. 资产与任务图（动手前） ## 5. 外部案例用产品 API 写工程 ## 6. 先做最高风险纵切 ## 7. 增量构建与 Worker ## 8. 保持可编辑 ## 9. 验证与交付 ## 停止条件 ### 软件内与外部 Builder V2 共用字节编码"
+      "summary": "构建入口选择",
+      "keywords": "# 构建入口选择"
     },
     {
       "id": "reference:build-courseware-project/current-capabilities",
       "kind": "reference",
-      "label": "当前能力路由",
+      "label": "仅查询当前任务所需能力",
       "path": "skills/build-courseware-project/references/current-capabilities.md",
       "scopes": [
         "slide:scene",
@@ -1045,13 +1045,13 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "当前能力路由",
-      "keywords": "# 当前能力路由 ## 索引与命令 ## V2 工具发现 ## 三种 Surface 与底层 Owner 导航 ## 编辑事实（GUI 与底层源码导航） ## 课程逻辑（状态 + 导航守卫；2026-08-27 Owner 追认保留） ## 仍按不可用处理"
+      "summary": "仅查询当前任务所需能力",
+      "keywords": "# 仅查询当前任务所需能力"
     },
     {
       "id": "reference:build-courseware-project/external-case-build",
       "kind": "reference",
-      "label": "任意课例目录构建",
+      "label": "明确使用外部 Builder V2 的任务",
       "path": "skills/build-courseware-project/references/external-case-build.md",
       "scopes": [
         "slide:scene",
@@ -1070,13 +1070,13 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "任意课例目录构建",
-      "keywords": "# 任意课例目录构建 ## 两个根目录不得混淆 ## 自主定位 editor-root ## 课例构建模块合同 ## 按需发现与复用示例 ## 调用与失败边界"
+      "summary": "明确使用外部 Builder V2 的任务",
+      "keywords": "# 明确使用外部 Builder V2 的任务"
     },
     {
       "id": "reference:build-courseware-project/html-draft-contract",
       "kind": "reference",
-      "label": "HTML 初稿的最小承载合同",
+      "label": "HTML 输入与分页",
       "path": "skills/build-courseware-project/references/html-draft-contract.md",
       "scopes": [
         "slide:scene",
@@ -1095,8 +1095,8 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "HTML 初稿的最小承载合同",
-      "keywords": "# HTML 初稿的最小承载合同"
+      "summary": "HTML 输入与分页",
+      "keywords": "# HTML 输入与分页"
     },
     {
       "id": "reference:build-courseware-project/main-progression",
@@ -1176,7 +1176,7 @@
     {
       "id": "reference:build-courseware-project/representation-capabilities",
       "kind": "reference",
-      "label": "表示选择短能力简介",
+      "label": "当前内容承载方式",
       "path": "skills/build-courseware-project/references/representation-capabilities.md",
       "scopes": [
         "slide:scene",
@@ -1195,13 +1195,38 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "表示选择短能力简介",
-      "keywords": "# 表示选择短能力简介"
+      "summary": "当前内容承载方式",
+      "keywords": "# 当前内容承载方式"
+    },
+    {
+      "id": "reference:build-courseware-project/script-resolve-editor-root",
+      "kind": "reference",
+      "label": "scripts/resolve-editor-root.mjs",
+      "path": "skills/build-courseware-project/scripts/resolve-editor-root.mjs",
+      "scopes": [
+        "slide:scene",
+        "slide:surface",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:surface",
+        "spatial-2d:global"
+      ],
+      "carriers": [
+        "native",
+        "recipe",
+        "existing-component",
+        "generated-component",
+        "runtime"
+      ],
+      "summary": "scripts/resolve-editor-root.mjs",
+      "keywords": ""
     },
     {
       "id": "reference:build-courseware-project/validation-boundaries",
       "kind": "reference",
-      "label": "初稿、局部精修与完整验收",
+      "label": "与任务结果对应的检查",
       "path": "skills/build-courseware-project/references/validation-boundaries.md",
       "scopes": [
         "slide:scene",
@@ -1220,8 +1245,8 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "初稿、局部精修与完整验收",
-      "keywords": "# 初稿、局部精修与完整验收 ## 默认初稿 ## 人主导局部精修 ## 用户要求的完整检查"
+      "summary": "与任务结果对应的检查",
+      "keywords": "# 与任务结果对应的检查"
     },
     {
       "id": "reference:component-api4/authoring",
@@ -1295,6 +1320,31 @@
       "keywords": "# 教学推进与操作边界"
     },
     {
+      "id": "reference:orchestrate-courseware/script-assemble-html",
+      "kind": "reference",
+      "label": "scripts/assemble-html.mjs",
+      "path": "skills/orchestrate-courseware/scripts/assemble-html.mjs",
+      "scopes": [
+        "slide:scene",
+        "slide:surface",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:surface",
+        "spatial-2d:global"
+      ],
+      "carriers": [
+        "native",
+        "recipe",
+        "existing-component",
+        "generated-component",
+        "runtime"
+      ],
+      "summary": "scripts/assemble-html.mjs",
+      "keywords": ""
+    },
+    {
       "id": "reference:orchestrate-courseware/teaching-design-quality",
       "kind": "reference",
       "label": "教学设计质量判断",
@@ -1318,6 +1368,31 @@
       ],
       "summary": "教学设计质量判断",
       "keywords": "# 教学设计质量判断 ## 从学习结果反推教学过程 ## 保证知识真正被教过 ## 互动必须承担认知作用 ## 教师与学生都要有可执行路径 ## 必须拒绝的退化形态 ## 提交确认前的整体复核"
+    },
+    {
+      "id": "reference:orchestrate-courseware/web-composition-examples",
+      "kind": "reference",
+      "label": "普通布局与可选专业内容",
+      "path": "skills/orchestrate-courseware/references/web-composition-examples.md",
+      "scopes": [
+        "slide:scene",
+        "slide:surface",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:surface",
+        "spatial-2d:global"
+      ],
+      "carriers": [
+        "native",
+        "recipe",
+        "existing-component",
+        "generated-component",
+        "runtime"
+      ],
+      "summary": "普通布局与可选专业内容",
+      "keywords": "# 普通布局与可选专业内容"
     },
     {
       "id": "reference:runtime-api2/authoring",
@@ -1496,7 +1571,7 @@
     {
       "id": "skill:build-courseware-project",
       "kind": "skill",
-      "label": "导入并交付初稿",
+      "label": "从 HTML 交付课件",
       "path": "skills/build-courseware-project/SKILL.md",
       "scopes": [
         "slide:scene",
@@ -1515,13 +1590,63 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "将已有教学 HTML 机械导入为可编辑课件并真实保存；默认交付初稿，选页精修由用户发起。",
-      "keywords": "# 导入并交付初稿"
+      "summary": "将已有本地 HTML 或创作好的 HTML 新建为可编辑课件并保存；适用于第三方页面导入、HTML 转课件和课件创作后的交付。",
+      "keywords": "# 从 HTML 交付课件"
+    },
+    {
+      "id": "skill:edit-content",
+      "kind": "skill",
+      "label": "在现有作品上修改",
+      "path": "skills/edit-content/SKILL.md",
+      "scopes": [
+        "slide:scene",
+        "slide:surface",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:surface",
+        "spatial-2d:global"
+      ],
+      "carriers": [
+        "native",
+        "recipe",
+        "existing-component",
+        "generated-component",
+        "runtime"
+      ],
+      "summary": "修改已有课件、文档或 HTML 的局部文字、图表、布局与互动；保留未选内容、人工调整和既有设计。适用于改写、换图、调整排版和局部精修，不用于新建作品或软件代码开发。",
+      "keywords": "# 在现有作品上修改"
+    },
+    {
+      "id": "skill:office-content",
+      "kind": "skill",
+      "label": "用内容交付 Office 文件",
+      "path": "skills/office-content/SKILL.md",
+      "scopes": [
+        "slide:scene",
+        "slide:surface",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:surface",
+        "spatial-2d:global"
+      ],
+      "carriers": [
+        "native",
+        "recipe",
+        "existing-component",
+        "generated-component",
+        "runtime"
+      ],
+      "summary": "新建或局部修改 Word、Excel、PowerPoint 原格式文件；适用于 DOCX 报告与表格、XLSX 数据与公式、PPTX 幻灯片文字，不用于课件导入或软件代码开发。",
+      "keywords": "# 用内容交付 Office 文件"
     },
     {
       "id": "skill:orchestrate-courseware",
       "kind": "skill",
-      "label": "生成教学初稿",
+      "label": "创作教学作品",
       "path": "skills/orchestrate-courseware/SKILL.md",
       "scopes": [
         "slide:scene",
@@ -1540,8 +1665,8 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "按教学材料生成内容完整的课件初稿；默认简短策划、整课 HTML，再交给 Builder 机械导入保存。支持指定阶段审阅与局部修订。",
-      "keywords": "# 生成教学初稿"
+      "summary": "根据教材、教案、主题或教学材料创作内容完整、视觉清晰的互动课件；负责内容、布局和互动设计，用普通 HTML/CSS 表达作品，再交给宿主组装保存。",
+      "keywords": "# 创作教学作品"
     },
     {
       "id": "slide.interaction",
@@ -1775,10 +1900,15 @@
     "skills/build-courseware-project/references/ppt-import-review.md",
     "skills/build-courseware-project/references/representation-capabilities.md",
     "skills/build-courseware-project/references/validation-boundaries.md",
+    "skills/build-courseware-project/scripts/resolve-editor-root.mjs",
+    "skills/edit-content/SKILL.md",
+    "skills/office-content/SKILL.md",
     "skills/orchestrate-courseware/SKILL.md",
     "skills/orchestrate-courseware/references/interaction-design.md",
     "skills/orchestrate-courseware/references/main-progression.md",
     "skills/orchestrate-courseware/references/teaching-design-quality.md",
+    "skills/orchestrate-courseware/references/web-composition-examples.md",
+    "skills/orchestrate-courseware/scripts/assemble-html.mjs",
     "tools/asset.font.import.json",
     "tools/asset.image.transform.json",
     "tools/asset.media.import.json",

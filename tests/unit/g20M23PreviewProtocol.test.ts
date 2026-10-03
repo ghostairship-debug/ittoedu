@@ -81,6 +81,13 @@ describe('M23 preview protocol', () => {
     expect(await readFile(path.join(root, 'style.css'), 'utf8')).toContain('media.example')
   })
 
+  it('reads a stylesheet dependency chain beyond eight passes and a one-MiB sheet without omitting its media', async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'g20-preview-deep-css-')); directories.push(root)
+    for (let index = 0; index < 9; index++) await writeFile(path.join(root, `style-${index}.css`), `@import "style-${index + 1}.css";`)
+    await writeFile(path.join(root, 'style-9.css'), `/*${' '.repeat(1024 * 1024)}*/body{background:url(https://media.example/deep.png)}`)
+    expect(await collectHtmlPreviewMediaUrls('<link rel="stylesheet" href="style-0.css">', root)).toContain('https://media.example/deep.png')
+  })
+
   it('normalizes classified protocol-relative media in preview responses only', () => {
     const media = ['https://images.example/a.png', 'https://video.example/a.mp4']
     const source = '<!-- //images.example/a.png --><img src="//images.example/a.png" srcset="//images.example/a.png 1x, //images.example/b.png 2x"><style>.hero{background:url(//images.example/a.png)}</style><video src="//video.example/a.mp4"></video>'

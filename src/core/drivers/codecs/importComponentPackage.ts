@@ -14,8 +14,7 @@ export interface ComponentThumbnailUrlPort {
   create(key: string, bytes: Uint8Array, mimeType: string): string
 }
 import { componentContentSha256 } from '../../../shared/componentContentIntegrity'
-
-const MAX_COMPONENT_UNCOMPRESSED_BYTES = 50 * 1024 * 1024
+import { compositionFragmentSchema } from '../../../shared/composition/fragment'
 
 export interface ImportedComponentPackage extends ComponentPackageData {
   key: string
@@ -32,17 +31,9 @@ export interface ParseComponentPackageOptions {
 function componentArchiveFilter(): {
   filter(file: { name: string; originalSize: number }): boolean
 } {
-  let totalUncompressedBytes = 0
   return {
     filter(file) {
       assertSafeArchivePath(file.name, 'component', { allowDirectory: true })
-      totalUncompressedBytes += file.originalSize
-      if (totalUncompressedBytes > MAX_COMPONENT_UNCOMPRESSED_BYTES) {
-        throw componentError(
-          '组件包解压后超过 50MB 限制。',
-          '请压缩组件素材，或移除不需要的文件后重试。',
-        )
-      }
       return !isArchiveDirectory(file.name)
     },
   }
@@ -191,16 +182,8 @@ export function parseComponentPackageFiles(
   options: ParseComponentPackageOptions = {},
 ): ImportedComponentPackage {
   const files = cloneFiles(inputFiles)
-  let totalBytes = 0
   for (const path of Object.keys(files)) {
     assertSafeArchivePath(path, 'component')
-    totalBytes += files[path]!.byteLength
-    if (totalBytes > MAX_COMPONENT_UNCOMPRESSED_BYTES) {
-      throw componentError(
-        '组件包解压后超过 50MB 限制。',
-        '请压缩组件素材，或移除不需要的文件后重试。',
-      )
-    }
   }
 
   const manifestBytes = files['manifest.json']
@@ -229,15 +212,31 @@ export function parseComponentPackageFiles(
   }
 
   assertSafeArchivePath(manifest.entry, 'component')
-  if (!manifest.entry.toLowerCase().endsWith('.js')) {
+  const compositionPackage = manifest.content?.kind === 'composition'
+  if (!compositionPackage && !manifest.entry.toLowerCase().endsWith('.js')) {
     throw componentError('组件 entry 必须指向一个 JavaScript 文件。')
   }
   const runtimeBytes = files[manifest.entry]
   if (runtimeBytes === undefined) {
-    throw componentError(`组件包缺少 runtime 文件“${manifest.entry}”。`)
+    throw componentError(`组件包缺少${compositionPackage ? '结构内容' : ' runtime '}文件“${manifest.entry}”。`)
   }
-  const runtimeSource = decodeUtf8(runtimeBytes, manifest.entry)
-  validateComponentRuntimeSource(runtimeSource)
+  let runtimeSource = ''
+  if (compositionPackage) {
+    const fragment = compositionFragmentSchema.parse(JSON.parse(decodeUtf8(runtimeBytes, manifest.entry)))
+    for (const [id, asset] of Object.entries(fragment.assets)) {
+      assertSafeArchivePath(asset.path, 'component')
+      if (asset.meta.id !== id || files[asset.path]?.byteLength !== asset.meta.byteLength) {
+        throw componentError(`结构片段素材“${id}”的描述或文件缺失。`)
+      }
+    }
+    for (const dependency of Object.values(fragment.components)) {
+      assertSafeArchivePath(dependency.root, 'component')
+      if (!files[`${dependency.root}/manifest.json`]) throw componentError('结构片段依赖的组件包内容缺失。')
+    }
+  } else {
+    runtimeSource = decodeUtf8(runtimeBytes, manifest.entry)
+    validateComponentRuntimeSource(runtimeSource)
+  }
 
   let thumbnailUrl: string | undefined
   if (manifest.thumbnail !== undefined) {

@@ -14,7 +14,7 @@ import { parsePptxChart } from './pptxChartImport'
 import { parsePptxEquation } from './pptxEquationImport'
 import { parsePptxCustomGeometry, parsePptxGradient, parsePptxBraceGeometry, parsePptxRoundCallout, parsePptxRightArrow } from './pptxShapeImport'
 import { parsePptxColorChanges, renderPptxColorChanges } from './pptxImageEffects'
-import { openPptxPackage, PPTX_IMPORT_LIMITS, PptxImportError, pptxReject, pptxRelationshipId, xmlAll, xmlChildren, xmlFirst, type PptxPackage, type PptxImportIssue } from './pptxPackage'
+import { openPptxPackage, PptxImportError, pptxReject, pptxRelationshipId, xmlAll, xmlChildren, xmlFirst, type PptxPackage, type PptxImportIssue } from './pptxPackage'
 
 import { nanoid } from 'nanoid'
 import type { InteractionRule } from '../../shared/contracts/interaction-v1/types'
@@ -109,7 +109,7 @@ export async function parsePptxImport(bytes: Uint8Array, canvas: SlideCanvasSize
         const sharedKey = source.sharedKey && `${source.sharedKey}:${JSON.stringify(theme)}`
         if (sharedKey && shared.has(sharedKey)) { sharedKeys.push(sharedKey); continue }
         if (['nvGrpSpPr', 'grpSpPr', 'extLst'].includes(object.localName)) continue
-        if (++objectCount > PPTX_IMPORT_LIMITS.objects) pptxReject('对象数量', '当前单次原生导入最多 20000 个对象；原材料保留，可按页范围提取')
+        objectCount++
         const itemStart = items.length
         const objectName = xmlFirst(object, 'cNvPr')?.getAttribute('name') || `对象 ${objectCount}`
         const reportStrokeSimplification = () => issues.push({ page, type: '边框样式', message: `“${objectName}”保留线宽及实线/虚线/点线类型；转角与虚线节奏按编辑器样式呈现` })
@@ -187,7 +187,6 @@ export async function parsePptxImport(bytes: Uint8Array, canvas: SlideCanvasSize
               const data = pkg.files[imageRel.target]!
               if (!data) pptxReject('损坏关系', '图片文件缺失')
               const dimensions = await readImageDimensions(data, mimeType)
-              if (dimensions.width * dimensions.height > 40_000_000) pptxReject('图片尺寸', '图片不能超过 4000 万像素')
               asset = createImageAssetImport({ name: imageRel.target.split('/').pop()!, mimeType, bytes: data }, { dimensions })
               assetByPath.set(imageRel.target, asset); assets.push(asset)
             }

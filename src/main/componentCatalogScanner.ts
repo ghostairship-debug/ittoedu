@@ -11,10 +11,6 @@ import {
   type ComponentCatalogTrust,
 } from '../shared/componentCatalog'
 
-const MAX_CATALOG_BYTES = 2 * 1024 * 1024
-const MAX_COMPONENT_BYTES = 50 * 1024 * 1024
-const MAX_THUMBNAIL_BYTES = 5 * 1024 * 1024
-
 export class ComponentCatalogScanError extends Error {
   constructor(
     readonly code: 'catalog-unreadable' | 'catalog-invalid',
@@ -73,10 +69,9 @@ async function resolveCatalogFilePath(
   return realTarget
 }
 
-async function readLimitedFile(filePath: string, limit: number): Promise<Uint8Array> {
+async function readCatalogFile(filePath: string): Promise<Uint8Array> {
   const stat = await fs.stat(filePath)
   if (!stat.isFile()) throw new Error('路径不是文件')
-  if (stat.size > limit) throw new Error(`文件超过 ${Math.round(limit / 1024 / 1024)} MiB 限制`)
   return new Uint8Array(await fs.readFile(filePath))
 }
 
@@ -105,10 +100,7 @@ export async function scanComponentCatalogDirectory(
   const fallbackLabel = path.basename(resolvedRoot) || '组件目录'
   let catalogBytes: Uint8Array
   try {
-    catalogBytes = await readLimitedFile(
-      path.join(resolvedRoot, 'catalog.json'),
-      MAX_CATALOG_BYTES,
-    )
+    catalogBytes = await readCatalogFile(path.join(resolvedRoot, 'catalog.json'))
   } catch (error) {
     throw new ComponentCatalogScanError(
       'catalog-unreadable',
@@ -146,7 +138,7 @@ export async function scanComponentCatalogDirectory(
     const identity = packageIdentity(pkg.packageId, pkg.version)
     try {
       const packagePath = await resolveCatalogFilePath(resolvedRoot, pkg.packagePath)
-      const bytes = await readLimitedFile(packagePath, MAX_COMPONENT_BYTES)
+      const bytes = await readCatalogFile(packagePath)
       const actualHash = createHash('sha256').update(bytes).digest('hex')
       if (actualHash !== pkg.sha256) {
         issues.push({
@@ -161,10 +153,7 @@ export async function scanComponentCatalogDirectory(
 
       let thumbnailDataUrl: string | undefined
       try {
-        const thumbnailBytes = await readLimitedFile(
-          await resolveCatalogFilePath(resolvedRoot, pkg.thumbnailPath),
-          MAX_THUMBNAIL_BYTES,
-        )
+        const thumbnailBytes = await readCatalogFile(await resolveCatalogFilePath(resolvedRoot, pkg.thumbnailPath))
         const mimeType = thumbnailMimeType(pkg.thumbnailPath)
         thumbnailDataUrl = `data:${mimeType};base64,${Buffer.from(thumbnailBytes).toString('base64')}`
       } catch (error) {
@@ -213,10 +202,7 @@ export async function readCatalogComponentPackage(
   const identity = packageIdentity(packageId, version)
   const pkg = source.packageIndex.get(identity)
   if (!pkg) throw new Error(`组件目录中不存在 ${identity}。`)
-  const bytes = await readLimitedFile(
-    await resolveCatalogFilePath(source.rootPath, pkg.packagePath),
-    MAX_COMPONENT_BYTES,
-  )
+  const bytes = await readCatalogFile(await resolveCatalogFilePath(source.rootPath, pkg.packagePath))
   const actualHash = createHash('sha256').update(bytes).digest('hex')
   if (actualHash !== pkg.sha256) {
     throw new Error(`组件 ${identity} 自上次扫描后已改变，实际 SHA-256 不匹配。`)

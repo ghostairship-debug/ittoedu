@@ -10,7 +10,7 @@ type Active = { runId: string; work: Promise<void>; process?: ComputeProcess; st
 const digest = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const forbidden = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$/i
 function safeName(name: string): string {
-  if (typeof name !== 'string' || name.length < 1 || name.length > 256 || name.includes('\\') || name.includes(':') || name.includes('\0')) throw new Error('作业文件名无效')
+  if (typeof name !== 'string' || name.length < 1 || name.includes('\\') || name.includes(':') || name.includes('\0')) throw new Error('作业文件名无效')
   const parts = name.split('/')
   if (parts.some(part => !part || part === '.' || part === '..' || part.endsWith('.') || part.endsWith(' ') || forbidden.test(part))) throw new Error('作业文件名无效')
   return parts.join('/')
@@ -35,7 +35,6 @@ export class ComputeJobError extends Error {
 export class ComputeJobService {
   private readonly directory: string
   private readonly active = new Map<string, Active>()
-  private capacity: Promise<void> = Promise.resolve()
   private readonly cancellations = new Map<string, Promise<ComputeJobSnapshot>>()
   private readonly tails = new Map<string, Promise<unknown>>()
   constructor(options: { directory: string; backend: PodmanComputeBackend; now?: () => Date }) {
@@ -44,7 +43,7 @@ export class ComputeJobService {
   private readonly backend: PodmanComputeBackend
   private readonly now: () => Date
   private folder(jobId: string) {
-    if (typeof jobId !== 'string' || !jobId || jobId.length > 512) throw new ComputeJobError('invalid-job', '计算作业身份无效')
+    if (typeof jobId !== 'string' || !jobId) throw new ComputeJobError('invalid-job', '计算作业身份无效')
     return path.join(this.directory, digest(jobId))
   }
   private stateFile(jobId: string) { return path.join(this.folder(jobId), 'state.json') }
@@ -102,19 +101,15 @@ export class ComputeJobService {
   private request(input: ComputeJobInput) {
     if (!input.runId || !input.jobId || input.language !== 'python' || typeof input.code !== 'string' && !input.program)
       throw new ComputeJobError('invalid-input', '计算任务缺少运行身份、Python 源码或程序')
-    if (input.code && input.code.length > 1024 * 1024) throw new ComputeJobError('input-limit', '计算源码超过上限')
     const inputs = (input.inputs ?? []).map(file => ({ name: safeName(file.name), bytes: Uint8Array.from(file.bytes) }))
     const outputNames = (input.outputNames ?? []).map(safeName)
     if (new Set(inputs.map(file => file.name)).size !== inputs.length
-      || new Set(outputNames).size !== outputNames.length || inputs.some(file => file.name === '__main__.py')
-      || inputs.reduce((total, file) => total + file.bytes.byteLength, 0) > 256 * 1024 * 1024)
-      throw new ComputeJobError('input-limit', '计算输入或输出声明超过上限或重名')
-    const timeoutMs = input.timeoutMs ?? 5 * 60_000
-    if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 60 * 60_000) throw new ComputeJobError('invalid-timeout', '计算时限无效')
+      || new Set(outputNames).size !== outputNames.length || inputs.some(file => file.name === '__main__.py'))
+      throw new ComputeJobError('invalid-input', '计算输入或输出声明重名')
     const program = input.program ?? 'python3', argv = input.argv ?? (input.code !== undefined ? ['/job/input/__main__.py'] : [])
     const requestDigest = digest(JSON.stringify({ runId: input.runId, language: input.language, code: input.code,
-      program, argv, inputs: inputs.map(file => ({ name: file.name, digest: digest(file.bytes) })), outputNames, timeoutMs }))
-    return { inputs, outputNames, timeoutMs, program, argv, requestDigest }
+      program, argv, inputs: inputs.map(file => ({ name: file.name, digest: digest(file.bytes) })), outputNames }))
+    return { inputs, outputNames, program, argv, requestDigest }
   }
   async start(input: ComputeJobInput): Promise<ComputeJobSnapshot> {
     const frozen = this.request(input)
@@ -162,7 +157,7 @@ export class ComputeJobService {
       if (stat.isSymbolicLink()) throw new ComputeJobError('output-symlink', '计算输出包含链接，未登记为成果')
     }
     const stat = await fs.stat(current)
-    if (!stat.isFile() || stat.size <= 0 || stat.size > 256 * 1024 * 1024) throw new ComputeJobError('output-invalid', '计算输出缺失、为空或超过上限')
+    if (!stat.isFile() || stat.size <= 0) throw new ComputeJobError('output-invalid', '计算输出缺失或为空')
     const bytes = await fs.readFile(current)
     if (name.endsWith('.json')) { try { JSON.parse(bytes.toString('utf8')) } catch { throw new ComputeJobError('output-invalid', 'JSON 计算结果无法解析') } }
     if (name.endsWith('.png') && !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new ComputeJobError('output-invalid', 'PNG 计算结果签名无效')
@@ -171,14 +166,10 @@ export class ComputeJobService {
   private async execute(jobId: string, root: string, frozen: ReturnType<ComputeJobService['request']>, containerName: string, active: Active): Promise<void> {
     let processStarted = false, processFinished = false
     let artifacts: ComputeArtifact[] = []
-    let release!: () => void
-    const previous = this.capacity
-    this.capacity = new Promise<void>(resolve => { release = resolve })
-    await previous.catch(() => undefined)
     try {
       if (active.cancelled) return
       active.starting = true
-      const process = await this.backend.start({ directory: root, program: frozen.program, argv: frozen.argv, timeoutMs: frozen.timeoutMs, containerName })
+      const process = await this.backend.start({ directory: root, program: frozen.program, argv: frozen.argv, containerName })
       processStarted = true
       active.process = process; active.starting = false
       if (active.cancelled) await process.cancel()
@@ -193,14 +184,11 @@ export class ComputeJobService {
       })
       if (outcome.exitCode === 0) for (const name of frozen.outputNames) {
         artifacts.push(await this.artifact(root, name))
-        if (artifacts.reduce((total, entry) => total + entry.byteLength, 0) > 256 * 1024 * 1024)
-          throw new ComputeJobError('output-limit', '计算成果总量超过 256 MiB，未登记为可交付成果')
       }
       await this.update(jobId, job => {
         job.artifacts = artifacts
         if (job.stopped || active.cancelled || outcome.cancelled)
           job.status = outcome.cancelled && !artifacts.length ? 'cancelled' : 'unapplied'
-        else if (outcome.timedOut) { job.status = 'failed'; job.reason = '计算达到运行时限，容器已停止。' }
         else if (outcome.exitCode === 0) job.status = 'ready'
         else { job.status = 'failed'; job.reason = `计算进程退出码 ${outcome.exitCode ?? 'unknown'}` }
       })
@@ -211,7 +199,7 @@ export class ComputeJobService {
         job.artifacts = artifacts
         job.logs = [...job.logs, ...this.logLines('system', job.reason)].slice(-200)
       }).catch(() => undefined)
-    } finally { release() }
+    }
   }
   private logLines(stream: 'stdout' | 'stderr' | 'system', source: string): ComputeJobLogs['entries'] {
     const now = Date.now()

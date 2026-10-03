@@ -33,11 +33,13 @@
 .html-preview-pane__notice button,
 .html-preview-light-edit button { cursor: pointer; }
 
-.html-preview-pane > iframe {
+.html-preview-pane__body { display:flex; flex:1 1 0; min-height:0; min-width:0; }
+.html-preview-pane__body > iframe {
   display: block;
   width: 100%;
   flex: 1;
   min-height: 0;
+  min-width: 0;
   border: 0;
   background: white;
 }
@@ -68,3 +70,16 @@
 .html-preview-light-edit textarea { box-sizing: border-box; width: 100%; resize: vertical; }
 .html-preview-light-edit__actions { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
 .html-preview-light-edit p[role="alert"] { margin: 8px 0 0; color: #a21b1b; }
+
+.html-structure-editor { width:300px; max-width:45%; flex:0 0 auto; overflow:auto; padding:10px; border-left:1px solid #dce1e7; background:#fff; font-size:12px; }
+.html-structure-editor__tabs,.html-structure-editor__actions { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:8px; }
+.html-structure-editor__tabs button[aria-pressed=true],.html-structure-editor__tree button[aria-pressed=true] { background:#e2f0e9; }
+.html-structure-editor__tree { max-height:240px; overflow:auto; margin-bottom:10px; }
+.html-structure-editor__tree ul { list-style:none; padding-left:12px; margin:0; }
+.html-structure-editor__tree button { border:0; background:transparent; text-align:left; cursor:pointer; padding:4px; max-width:100%; overflow-wrap:anywhere; }
+.html-structure-editor fieldset { border:1px solid #dce1e7; margin:10px 0; padding:8px; }
+.html-structure-editor label { display:block; margin-bottom:8px; }
+.html-structure-editor input,.html-structure-editor select,.html-structure-editor textarea { display:block; box-sizing:border-box; width:100%; margin-top:4px; }
+.html-structure-editor textarea { min-height:100px; resize:vertical; }
+.html-structure-editor pre { white-space:pre-wrap; overflow-wrap:anywhere; padding:8px; background:#f5f6f8; }
+.html-structure-editor p[role=alert] { color:#a21b1b; }

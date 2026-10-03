@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>社区园艺计划</title>
+<style>
+  body { margin:0; padding:40px; color:#183a31; background:#f0f4ef; font:18px/1.6 sans-serif; }
+  main { display:grid; grid-template-columns:1fr 1fr; gap:24px; max-width:1100px; margin:auto; }
+  .card { padding:24px; border-radius:18px; background:white; border:1px solid #ccd9cf; }
+  .card h2 { margin-top:0; }
+  @media (max-width:700px) { main { grid-template-columns:1fr; } .card { padding:16px; } }
+</style></head>
+<body><main id="garden">
+  <article id="left" class="card"><h2>播种</h2><p>观察土壤的湿度，记录第一天的变化。</p></article>
+  <article id="right" class="card"><h2>成长</h2><p id="live-title">原始计划</p><button id="next-day">记录一天</button><output id="days">0</output></article>
+</main>
+<script id="plan" type="application/json">{"title":"七天观察计划","days":0}</script>
+<script>
+  const plan = JSON.parse(document.getElementById('plan').textContent);
+  document.getElementById('live-title').textContent = plan.title;
+  document.getElementById('days').textContent = String(plan.days);
+  document.getElementById('next-day').addEventListener('click', () => {
+    plan.days += 1;
+    document.getElementById('days').textContent = String(plan.days);
+  });
+</script></body></html>

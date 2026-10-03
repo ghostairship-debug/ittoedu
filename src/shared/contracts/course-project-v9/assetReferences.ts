@@ -1,4 +1,6 @@
 import { DEFAULT_TEACHER_CONTROLLER_SOURCE } from '../../defaultTeacherControllerSource'
+import { visitCompositionReferences } from '../../composition/references'
+import { walkComposition } from '../../composition/content'
 import {
   getComponentPropValue,
   mergeComponentProps,
@@ -39,6 +41,7 @@ export type CourseAssetReferenceKind =
   | 'component-runtime-source'
   | 'component-context-unavailable'
   | 'flow-media'
+  | 'composition-asset'
 
 export interface CourseAssetReference {
   readonly assetId: string
@@ -472,6 +475,16 @@ export function analyzeCourseAssetReferences(
     item: LayerItem,
     location: ReferenceLocation,
   ): void => {
+    if (item.kind === 'composition') {
+      visitCompositionReferences(item.content, reference => {
+        if (reference.kind === 'asset') add(reference.id, 'composition-asset', 'direct', { ...location, path: [...location.path, 'content', ...reference.path] })
+      })
+      walkComposition(item.content.root, node => {
+        if (node.kind === 'runtime') scanRuntime(node.runtime, { ...location, path: [...location.path, 'content', 'root', node.id, 'runtime'] })
+        else if (node.kind === 'document') scanFlowBlocks(node.content.blocks, [...location.path, 'content', 'root', node.id, 'content', 'blocks'])
+      })
+      return
+    }
     if (item.kind === 'native') {
       scanNative(item, location)
       return

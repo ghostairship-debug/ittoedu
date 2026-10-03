@@ -1,4 +1,5 @@
 import type { InteractionRule } from '../../interactionTypes'
+import { visitCompositionReferences } from '../../composition/references'
 import type {
   CourseLocation,
   CourseProjectDocument,
@@ -90,6 +91,10 @@ function addLayerReferences(
   path: CourseProjectPath,
   emit: (reference: CourseProjectReference) => void,
 ): void {
+  if (item.kind === 'composition') {
+    visitCompositionReferences(item.content, reference => emit({ ...reference, path: [...path, 'content', ...reference.path] }))
+    return
+  }
   if (item.kind === 'component') {
     emit({
       kind: 'component',

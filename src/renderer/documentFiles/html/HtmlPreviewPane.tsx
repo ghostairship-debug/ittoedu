@@ -6,6 +6,7 @@ import { HtmlLightEditOverlay } from './HtmlLightEditOverlay'
 import { HtmlPreviewController, type HtmlSelectedTarget } from './htmlPreviewController'
 import type { HtmlTextDrafts } from './htmlTextDrafts'
 import './htmlPreview.css'
+import { HtmlStructureEditor } from './HtmlStructureEditor'
 
 type Patch = { handle: string; kind: 'text' | 'image'; value: string }
 type ChangeRecord = { revision: number; beforeSource: string; afterSource?: string; beforeValue: string; patch: Patch }
@@ -41,11 +42,15 @@ export interface HtmlPreviewPaneProps {
   /** True while the preview tab is shown; stale source refreshes on activation. */
   active?: boolean
   toolbarLeading?: ReactNode
+  pendingSourceDraft?: boolean
+  onReloadRequest?(): void
+  reloadIssue?: string | null
 }
 
 /** Keeps one sandbox frame mounted across canonical text revisions. */
-export function HtmlPreviewPane({ lease, committed, textDrafts, onUndo, onRedo, onSave, active = true, toolbarLeading }: HtmlPreviewPaneProps) {
-  useSyncExternalStore(textDrafts.subscribe, textDrafts.read)
+export function HtmlPreviewPane({ lease, committed, textDrafts, onUndo, onRedo, onSave, active = true, toolbarLeading,
+  pendingSourceDraft = false, onReloadRequest, reloadIssue }: HtmlPreviewPaneProps) {
+  const retainedDrafts = useSyncExternalStore(textDrafts.subscribe, textDrafts.read)
   const frame = useRef<HTMLIFrameElement>(null)
   const container = useRef<HTMLDivElement>(null)
   const controller = useRef<HtmlPreviewController | null>(null)
@@ -70,6 +75,7 @@ export function HtmlPreviewPane({ lease, committed, textDrafts, onUndo, onRedo, 
   const [frameReady, setFrameReady] = useState(false)
   const [modePending, setModePending] = useState(false)
   const [editMode, setEditMode] = useState(false)
+  const [structureOpen, setStructureOpen] = useState(false)
   useEffect(() => {
     if (!active) return
     const onTrustedHistory = (event: Event) => {
@@ -92,7 +98,8 @@ export function HtmlPreviewPane({ lease, committed, textDrafts, onUndo, onRedo, 
     pendingEdit.current = null
     setSelected(null)
     controller.current?.beginReload()
-    frame.current.src = lease.url
+    if (onReloadRequest) onReloadRequest()
+    else frame.current.src = lease.url
     setStale(false)
   }
 
@@ -205,18 +212,25 @@ export function HtmlPreviewPane({ lease, committed, textDrafts, onUndo, onRedo, 
         <button type="button" disabled={page >= pageCount - 1} onClick={() => controller.current?.navigate(page + 1)}>下一页</button>
       </div>}
       {editMode && <span className="html-preview-pane__edit-hint">双击文字 · 单击图片</span>}
+      <button type="button" aria-pressed={structureOpen} onClick={() => setStructureOpen(value => !value)}>结构与样式</button>
       <details className="html-preview-pane__more"><summary aria-label="预览更多操作">更多</summary>
         <button type="button" title="重新加载当前源码；页面内运行状态将重置，文档和未发送输入保持不变" onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); refreshPreservingView() }}>重新加载预览</button>
       </details>
       {ambiguous && <span role="status">分页结构不明确，按连续页面预览。</span>}
     </div>
     {responsiveNotice && <p role="status" className="html-preview-pane__notice">{responsiveNotice}</p>}
+    {reloadIssue && <p role="alert" className="html-preview-pane__notice">{reloadIssue}
+      <button type="button" onClick={refreshPreservingView}>重试预览</button></p>}
     {stale && <div role="status" className="html-preview-pane__notice">
       源码已从其他编辑入口变化。<button type="button" onClick={refreshPreservingView}>刷新预览</button>
     </div>}
+    <div className="html-preview-pane__body">
     <iframe ref={frame} title="HTML 预览" src={lease.url} sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer"
       style={{ pointerEvents: modePending ? 'none' : undefined }}
       onLoad={() => controller.current?.frameLoaded()} onError={() => { setModePending(false); setIssue('预览未能加载。可重新加载预览或切换源码；文档和输入均保留。') }} />
+    {structureOpen && <HtmlStructureEditor committed={committed} lease={lease}
+      pendingDraft={pendingSourceDraft || retainedDrafts.length > 0} loading={!frameReady} />}
+    </div>
     {selected && <HtmlLightEditOverlay target={selected} committed={committed} position={position}
       value={textDrafts.find(selected, source)?.value ?? selected.report.rawText}
       onValue={value => textDrafts.change(selected, source, value)}

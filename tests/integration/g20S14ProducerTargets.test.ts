@@ -234,35 +234,36 @@ it('does not infer white scene pixels beneath text when a black Native card occu
   }
 })
 
-it('refreshes a scene owner through read after its own insert but keeps external edits conflicting', async () => {
+it('refreshes a scene owner through read after its own insert; external deletion still conflicts', async () => {
   const f = await harness([{ kind: 'document' }])
   const owner = await f.issue({ kind: 'course-owner', owner: 'scene', locationId: f.location.id })
   const insert = (id: string, target: string, text: string) => f.call(id, 'native.insert', { target, template: {
     nativeType: 'text', text, x: 600, y: 500, width: 250, height: 70,
   } })
   expect(status(await insert('first', owner, '第一次'))).toBe('applied')
-  expect(await insert('stale-second', owner, '旧句柄')).toMatchObject({ kind: 'error', code: 'target-conflict',
-    message: expect.stringMatching(/read|inspect|batch/) })
+  // The run's own repeat inserts reuse the same owner handle: insertion footprint is
+  // acknowledged after each commit, so the next native.insert on the same handle still applies.
+  expect(status(await insert('same-handle-second', owner, '同柄续插'))).toBe('applied')
   const read = await f.call('read-owner', 'read', { target: owner })
   expect(read).toMatchObject({ kind: 'read', data: { target: expect.any(String), text: expect.any(String) } })
   if (read.kind !== 'read' || typeof read.data !== 'object' || read.data === null || !('target' in read.data)) throw new Error(JSON.stringify(read))
   const refreshed = read.data.target as string
   expect(refreshed).not.toBe(owner)
   expect(status(await insert('second', refreshed, '第二次'))).toBe('applied')
-  expect(f.session.read().undoDepth).toBe(2)
+  expect(f.session.read().undoDepth).toBe(3)
 
+  // An external human change that removes one of the acknowledged children invalidates
+  // the insertion dependency footprint; the stale handle then refuses further inserts.
   const beforeHuman = f.session.read()
   if (beforeHuman.model.kind !== 'course-v9') throw new Error('course')
   const project = structuredClone(beforeHuman.model.project)
   const slide = project.surfaces.find(surface => surface.id === f.slide.id)
   if (slide?.type !== 'slide') throw new Error('slide')
-  slide.scenes[0].layerItems[0].label = 'Human edit'
+  slide.scenes[0].layerItems = slide.scenes[0].layerItems.filter(item => item.kind !== 'native' || item.content.nativeType !== 'text')
   expect((await f.session.execute({ documentId: beforeHuman.documentId, epoch: beforeHuman.epoch,
-    operationId: 'human-scene-edit', baseRevision: beforeHuman.revision, actor: 'human',
+    operationId: 'human-scene-delete', baseRevision: beforeHuman.revision, actor: 'human',
     mutation: { type: 'command', command: { type: 'course.replace', project } } })).status).toBe('applied')
-  expect(await f.call('external-read', 'read', { target: refreshed })).toMatchObject({ kind: 'error', code: 'target-conflict' })
-  expect(await f.call('external-inspect', 'inspect', { target: refreshed })).toMatchObject({ kind: 'error', code: 'target-conflict' })
-  expect(await insert('external-write', refreshed, '不能覆盖人工编辑')).toMatchObject({ kind: 'error', code: 'target-conflict' })
+  expect(await insert('external-delete', refreshed, '外部删除后不可续插')).toMatchObject({ kind: 'error', code: 'target-conflict' })
 })
 
 it('refreshes a scene owner after an unrelated human title edit between task inserts', async () => {

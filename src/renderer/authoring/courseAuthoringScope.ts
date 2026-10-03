@@ -79,9 +79,7 @@ export function authoringAddressScopeForOwner(
 }
 
 export function carrierForLayerKind(kind: LayerItem['kind']): AuthoringCarrier {
-  if (kind === 'component') return 'component'
-  if (kind === 'runtime') return 'runtime'
-  return 'native'
+  return kind
 }
 
 export function createCourseAuthoringScope(input: {

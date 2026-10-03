@@ -1,18 +1,24 @@
 ---
 name: build-courseware-project
-description: 将已有教学 HTML 机械导入为可编辑课件并真实保存；默认交付初稿，选页精修由用户发起。
+description: 将已有本地 HTML 或创作好的 HTML 新建为可编辑课件并保存；适用于第三方页面导入、HTML 转课件和课件创作后的交付。
 ---
 
-# 导入并交付初稿
+# 从 HTML 交付课件
 
-读取当前框架和用户有效约束，保留已确认的页序、文字、图示和互动。使用正式文件、HTML 导入与保存工具；载体按用户要求和页面性质选择，简单映射交给宿主。不要求教师切换到编辑器仓库；只有外部案例构建才按需读 [外部 Builder](references/external-case-build.md)。
+取得用户指定或本任务已经生成的 HTML 文件，保留其内容、样式、资源和互动。直接导入第三方 HTML 时无需重新策划、改写正文或先套模板。
 
-框架遵循 [短 HTML 合同](references/html-draft-contract.md)。复用 HTML Runtime 的图文轻编辑能力，不为可编辑性把整页重写成 Native，也不在原 HTML 按钮上覆盖第二套原生按钮。共享脚本无法等价拆页时保留源码，说明具体依赖；不删除互动逻辑或隐藏问题页换取准入通过。必要时读 [短能力简介](references/representation-capabilities.md)，不默认创建表示规划文件。
+调用任务入口 `course.createFromHtml`：
 
-走 `file.create → html.import → file.save`。导入成功后立即保存目标 `.h5lesson`，使用本任务的整文档正式句柄；不传路径充当 target，不使用只读选区或正文写句柄保存整份文档。以保存回执的 savedRevision/currentRevision、dirty 状态为准。使用正式文件字节回读核对场景、资源和持久化版本；仅打开已有标签不是磁盘重开证据。
+```json
+{"sourcePath":"D:/课例/lesson.html","name":"斜抛运动","path":"D:/课例/斜抛运动.h5lesson"}
+```
 
-复用宿主编译、闭包和真实运行准入；默认不展开逐页 AI 视觉精修、全树遍历、未被请求的导出或旧文件清理。出现具体功能失败，或用户明确要求高质量成品/精修时，按需使用 `view.observe/html.observe`，复用本任务已有有效证据，不为少报错取消这些能力。用户要求导出时可更新本任务未被修改的同名输出；其他文件保留，不能先清空、删除再导出。
+只有 `sourcePath` 必填；`name` 是作品名称，`path` 是用户指定时提供的新工程保存位置。宿主负责建立工程、解析内容、分配身份、绑定资源、选择组合或程序载体、导入和保存。以本次任务结果返回的实际保存路径与状态交付，不再拆成创建文档、寻找内部句柄、导入、保存等模型回合。
 
-交付初稿位置、已完成内容和待精修／缺失项。核心教学呈现必须存在，不能把空骨架或失效互动称为完成；不声称未经验证的视觉或教学验收。初稿交付后由人选页、选对象，再用画布或元素 AI 卡局部修改；完整精修只在用户要求时进行。
+普通 HTML/CSS 可以直接输入。可识别的静态内容进入可编辑 Web 组合；需要整体执行的脚本与事件保留为 Runtime。不能把所有程序内部元素宣称为原生对象。局部组件问题按宿主诊断修复，保留原件与其他可用内容，不删除互动逻辑、不截图静态化、不叠加第二套按钮换取成功。
 
-按用户用途区分[教学推进](references/main-progression.md)。只有外部 Builder 或用户要求完整工程时再展开 [build-method.md](references/build-method.md)，不把它的完整 QA 义务施加给默认初稿。
+HTML 页面的普通结构、拆页适用条件及共享逻辑边界见 [HTML 输入与分页](references/html-draft-contract.md)；只有需要解释编辑能力差异时再读[承载方式](references/representation-capabilities.md)。不要求第三方源文件添加页编号、可编辑登记表或私有标记，不默认读取完整工程 Schema。
+
+交付实际保存的 `.h5lesson` 路径、已保留的主要内容与具体缺口。核心教学呈现必须存在；创建任务返回成功并不代表全部页面已经通过审美或教学验收。用户只要求导入时保留原有设计；要求创作或重新设计时使用 `orchestrate-courseware`；已有工程的局部修订使用 `edit-content`。导出只在用户要求且当前环境提供相应能力时进行。
+
+用户明确使用外部 Builder 时读取 [build-method.md](references/build-method.md)，该入口不作为普通导入的前置。

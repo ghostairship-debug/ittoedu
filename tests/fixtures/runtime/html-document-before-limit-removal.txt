@@ -1,0 +1,141 @@
+const __htmlDocumentPayload = {"version":1,"html":"<h1>取消额度前的受管页面</h1>","resourceKeys":[]};
+CoursewareRuntime.define({
+  protocol: 'surface-runtime', runtimeApiVersion: 3,
+  create(context) {
+    const iframe = context.dom.root.ownerDocument.createElement('iframe');
+    iframe.setAttribute('title', 'HTML 页面');
+    iframe.dataset.htmlDocumentRuntime = 'true';
+    iframe.style.cssText = 'display:block;border:0;width:100%;height:100%;';
+    const replacements = Object.create(null);
+    for (const key of __htmlDocumentPayload.resourceKeys) {
+      const url = context.assets.url(key);
+      // A URL inserted into HTML, CSS and JS literals must have no delimiter in any of them.
+      if (!/^[A-Za-z0-9:/?#[\]@!$()+,;=%._~-]+$/.test(url)) throw new Error('素材 URL 不能安全嵌入 HTML 页面');
+      replacements[key] = url;
+    }
+    const html = __htmlDocumentPayload.html.replace(/cw-resource:([a-f0-9]{64})/g, (token, key) => {
+      if (!Object.prototype.hasOwnProperty.call(replacements, key)) throw new Error('HTML 页面素材绑定缺失：' + key);
+      return replacements[key];
+    });
+    // srcdoc inherits the host CSP. Parser inserted inline scripts cannot run there,
+    // while same-origin Blob scripts are permitted by the host and export policies.
+    const scriptUrls = [];
+    function executableDocument(source) {
+      const parsed = new DOMParser().parseFromString(source, 'text/html');
+      const eventHandlers = [];
+      for (const element of parsed.querySelectorAll('*')) {
+        if (element.hasAttribute('data-cw-inline-handler')) throw new Error('HTML 页面事件标记冲突');
+        let id = null;
+        for (const attribute of Array.from(element.attributes)) {
+          if (!/^on[a-z]+$/i.test(attribute.name)) continue;
+          const eventName = attribute.name.slice(2).toLowerCase();
+          if (id === null) { id = String(eventHandlers.length); element.setAttribute('data-cw-inline-handler', id); }
+          eventHandlers.push([id, eventName, attribute.value]);
+          element.removeAttribute(attribute.name);
+        }
+      }
+      const handlerCode = '(function(){const specs=' + JSON.stringify(eventHandlers) + ';' +
+        'for(const element of document.querySelectorAll("[data-cw-inline-handler]")){' +
+        'const id=element.getAttribute("data-cw-inline-handler");' +
+        'for(const [key,eventName,body] of specs) if(key===id) element["on"+eventName]=new Function("event","with(document){with(this.form||{}){with(this){"+body+"}}}");' +
+        'element.removeAttribute("data-cw-inline-handler");}})();';
+      let flushUrl = null;
+      for (const script of Array.from(parsed.querySelectorAll('script'))) {
+        const type = (script.getAttribute('type') || '').trim().toLowerCase();
+        if (type && type !== 'module' && !/^(?:text|application)\/(?:javascript|ecmascript|x-javascript)$/.test(type)) continue;
+        if (!script.hasAttribute('src') && script.textContent) {
+          const url = URL.createObjectURL(new Blob([script.textContent], { type: 'text/javascript' }));
+          scriptUrls.push(url);
+          script.textContent = '';
+          script.setAttribute('src', url);
+          if (type !== 'module') { if (!script.hasAttribute('data-cw-defer')) script.removeAttribute('defer'); script.removeAttribute('async'); }
+          script.removeAttribute('data-cw-defer');
+        }
+        if (eventHandlers.length) {
+          if (!flushUrl) {
+            flushUrl = URL.createObjectURL(new Blob([handlerCode], { type: 'text/javascript' }));
+            scriptUrls.push(flushUrl);
+          }
+          const flush = parsed.createElement('script');
+          flush.setAttribute('src', flushUrl);
+          script.before(flush);
+        }
+      }
+      if (eventHandlers.length) {
+        if (!flushUrl) {
+          flushUrl = URL.createObjectURL(new Blob([handlerCode], { type: 'text/javascript' }));
+          scriptUrls.push(flushUrl);
+        }
+        const tail = parsed.createElement('script');
+        tail.setAttribute('src', flushUrl);
+        parsed.body.appendChild(tail);
+      }
+      for (const child of parsed.querySelectorAll('iframe[srcdoc]')) {
+        child.setAttribute('srcdoc', executableDocument(child.getAttribute('srcdoc') || '').html);
+      }
+      const doctype = source.match(/^\s*<!doctype[^>]*>/i)?.[0] || '';
+      return { html: doctype + parsed.documentElement.outerHTML, handlerCode: eventHandlers.length ? handlerCode : '' };
+    }
+    let executable;
+    try {
+      executable = executableDocument(html);
+    } catch (error) {
+      for (const url of scriptUrls) URL.revokeObjectURL(url);
+      throw error;
+    }
+    const executableHtml = executable.html;
+    let destroyed = false;
+    let suspended = false;
+    const pausedMedia = new Set();
+    let cancelReady = () => {};
+    const ready = new Promise((resolve, reject) => {
+      let pending = true;
+      const cleanup = () => { clearTimeout(timeout); iframe.removeEventListener('load', onLoad); iframe.removeEventListener('error', onError); };
+      const finish = (error) => { if (!pending) return; pending = false; cleanup(); if (error) delete iframe.dataset.htmlDocumentReady; error ? reject(error) : resolve(); };
+      const onLoad = () => {
+        // A connected iframe may also emit the initial about:blank load.
+        if (iframe.contentDocument?.URL !== 'about:srcdoc' || iframe.contentDocument.readyState !== 'complete') return;
+        try {
+          if (executable.handlerCode) {
+            const ChildFunction = iframe.contentWindow?.Function;
+            if (!ChildFunction) throw new Error('HTML 页面事件执行环境不可用');
+            new ChildFunction(executable.handlerCode)();
+          }
+          iframe.dataset.htmlDocumentReady = 'true';
+          finish();
+        } catch (error) { finish(error); }
+      };
+      const onError = () => finish(new Error('HTML 页面加载失败'));
+      const timeout = setTimeout(() => finish(new Error('HTML 页面加载超时')), 15000);
+      iframe.addEventListener('load', onLoad);
+      iframe.addEventListener('error', onError);
+      cancelReady = () => finish(new Error('HTML 页面已销毁'));
+    });
+    iframe.srcdoc = executableHtml;
+    context.dom.root.appendChild(iframe);
+    context.capture.waitUntil(ready);
+    return {
+      resize(width, height) { iframe.style.height = Math.max(1, height) + 'px'; },
+      setVisible(visible) { iframe.style.visibility = visible ? 'visible' : 'hidden'; },
+      suspend() {
+        if (destroyed || suspended) return;
+        suspended = true;
+        if (iframe.contentDocument) for (const media of iframe.contentDocument.querySelectorAll('audio,video')) {
+          if (!media.paused) { pausedMedia.add(media); media.pause(); }
+        }
+      },
+      resume() {
+        if (destroyed || !suspended) return;
+        suspended = false;
+        for (const media of pausedMedia) {
+          if (iframe.contentDocument?.contains(media)) {
+            try { Promise.resolve(media.play()).catch(() => {}); } catch {}
+          }
+        }
+        pausedMedia.clear();
+      },
+      prepareCapture() { return ready; },
+      destroy() { if (destroyed) return; destroyed = true; pausedMedia.clear(); cancelReady(); delete iframe.dataset.htmlDocumentReady; iframe.remove(); iframe.srcdoc = ''; for (const url of scriptUrls) URL.revokeObjectURL(url); },
+    };
+  },
+});

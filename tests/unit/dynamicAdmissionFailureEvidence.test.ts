@@ -5,7 +5,7 @@ import { runDynamicCandidateHostSmoke } from '@/renderer/authoring/tools/dynamic
 import { AuthoringToolFailure } from '@/renderer/authoring/tools/executeAuthoringTool'
 import type { CapturePublishedSurfaceOptions } from '@/player/surfaces/publishedCapture'
 
-const probe = vi.hoisted(() => ({ mounts: 0, destroys: 0, failMount: 1, failDestroy: false, fallbackMarker: false as false | 'inactive' | 'target', activeSurfaceId: '', locationId: '', stateId: null as string | null }))
+const probe = vi.hoisted(() => ({ mounts: 0, destroys: 0, failMount: 1, failDestroy: false, fallbackMarker: false as false | 'inactive' | 'target', activeSurfaceId: '', locationId: '', stateId: null as string | null, heldUpdates: null as Promise<void> | null }))
 const capturePublishedSurfacePng = vi.hoisted(() => vi.fn<(
   options: CapturePublishedSurfaceOptions,
 ) => Promise<string>>(async () => 'data:image/png;base64,AA=='))
@@ -13,7 +13,8 @@ vi.mock('@/renderer/authoring/tools/dynamicCandidateFallbackAssets', () => ({ va
 vi.mock('@/renderer/export/course/buildPublishedCourse', () => ({ buildPublishedCourseV2Payload: vi.fn(() => ({})), collectPublishedCourseSourceIssues: vi.fn(() => []) }))
 vi.mock('@/player/surfaces/publishedCapture', () => ({ waitForPublishedObservationReady: vi.fn(async () => {}), capturePublishedSurfacePng }))
 vi.mock('@/player/surfaces/publishedDynamicUpdateProbe', () => ({
-  exercisePublishedDynamicUpdates: vi.fn(async () => { if (probe.mounts === probe.failMount) throw new Error('updateProps rejected after sampled frames') }),
+  queryPublishedDynamicElements: (root: HTMLElement, selector: string) => Array.from(root.querySelectorAll<HTMLElement>(selector)),
+  exercisePublishedDynamicUpdates: vi.fn(async () => { if (probe.heldUpdates) await probe.heldUpdates; if (probe.mounts === probe.failMount) throw new Error('updateProps rejected after sampled frames') }),
   exercisePublishedDynamicLifecycle: vi.fn(async () => {}),
 }))
 vi.mock('@/player/surfaces/publishedDynamicHosts', () => ({ createPublishedCourseSession: (_payload: unknown, options: { initialLocationId: string; initialPresentationStateId?: string }) => ({
@@ -25,9 +26,37 @@ vi.mock('@/player/surfaces/publishedDynamicHosts', () => ({ createPublishedCours
 }) }))
 
 beforeEach(() => { probe.mounts = 0; probe.destroys = 0; probe.failMount = 1; probe.failDestroy = false; probe.fallbackMarker = false; probe.activeSurfaceId = ''; capturePublishedSurfacePng.mockClear(); vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, width: 100, height: 100, top: 0, left: 0, right: 100, bottom: 100, toJSON() {} }); vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({} as CanvasRenderingContext2D) })
-afterEach(() => { vi.restoreAllMocks() })
+afterEach(() => { probe.heldUpdates = null; vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('dynamic admission acquired failure evidence', () => {
+  it('allows a continuing target beyond the former whole-target deadline', async () => {
+    vi.useFakeTimers(); probe.failMount = 0
+    let finish!: () => void, settled = false
+    probe.heldUpdates = new Promise<void>(resolve => { finish = resolve })
+    const project = createBlankCourseProject()
+    const pending = runDynamicCandidateHostSmoke(project, { assetFiles: {}, componentPackages: {} },
+      [{ locationId: project.startLocationId, instanceIds: ['instance'] }]).catch(error => error).finally(() => { settled = true })
+    await vi.waitFor(() => expect(probe.mounts).toBe(1))
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(settled).toBe(false)
+    finish()
+    expect(await pending).toEqual([])
+    expect(probe.destroys).toBe(1)
+  })
+
+  it('cancels a stalled browser-host target and destroys its private session', async () => {
+    probe.failMount = 0
+    let finish!: () => void
+    probe.heldUpdates = new Promise<void>(resolve => { finish = resolve })
+    const project = createBlankCourseProject(), controller = new AbortController()
+    const pending = runDynamicCandidateHostSmoke(project, { assetFiles: {}, componentPackages: {} },
+      [{ locationId: project.startLocationId, instanceIds: ['instance'] }], false, { signal: controller.signal }).catch(error => error)
+    await vi.waitFor(() => expect(probe.mounts).toBe(1))
+    controller.abort()
+    expect((await pending).diagnostics[0].message).toBe('动态准入已取消')
+    expect(probe.destroys).toBe(1)
+    finish()
+  })
   it('retains sampled frames and only completed actions when later lifecycle work fails', async () => {
     const project = createBlankCourseProject(), before = document.body.childElementCount
     const error = await runDynamicCandidateHostSmoke(project, { assetFiles: {}, componentPackages: {} }, [{ locationId: project.startLocationId, instanceIds: ['instance'] }], false,

@@ -3,7 +3,8 @@ import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import type { DynamicInstanceCapture } from '../../shared/dynamicAdmissionContract'
 import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
 import { analyzeCourseAssetReferences } from '../../shared/contracts/course-project-v9/assetReferences'
-import { visitCourseFlowBlocks, visitCourseLayerItems } from '../../shared/courseProjectHealth/internal'
+import { projectDynamicInstanceInput, visitProjectDynamicInstances } from '../../shared/composition/dynamic'
+import { effectiveSceneCanvas } from '../../shared/slideCanvas'
 import type { DocumentModel } from '../../shared/workbench/document'
 import { documentDigest } from '../documents/documentDigest'
 
@@ -15,12 +16,9 @@ export function dynamicCaptureRefreshIds(model: CourseModel, before: CourseModel
   targets: readonly { locationId: string; instanceIds: readonly string[] }[]): ReadonlySet<string> {
   const instances = (project: CourseProjectDocument) => {
     const result = new Map<string, { value: unknown; packageId?: string; version?: string }>()
-    visitCourseLayerItems(project, ({ item, owner }) => {
-      if (item.kind === 'runtime') result.set(item.layerItemId, { value: { item, owner } })
-      else if (item.kind === 'component') result.set(item.layerItemId, { value: { item, owner }, packageId: item.component.packageId, version: item.component.version })
-    })
-    visitCourseFlowBlocks(project, ({ block, surfaceId }) => {
-      if (block.type === 'component') result.set(block.id, { value: { block, surfaceId }, packageId: block.component.packageId, version: block.component.version })
+    visitProjectDynamicInstances(project, entry => {
+      result.set(entry.instanceId, { value: projectDynamicInstanceInput(entry), ...(entry.kind === 'component'
+        ? { packageId: entry.componentItem.component.packageId, version: entry.componentItem.component.version } : {}) })
     })
     return result
   }
@@ -36,20 +34,24 @@ export function dynamicCaptureRefreshIds(model: CourseModel, before: CourseModel
   for (const [id, refs] of references.graph) {
     if (documentDigest({ meta: model.project.assets[id] ?? null, bytes: model.resources.assets[id] ?? null }) ===
       documentDigest({ meta: before.project.assets[id] ?? null, bytes: before.resources.assets[id] ?? null })) continue
-    for (const reference of refs) {
-      if (reference.layerItemId) refresh.add(reference.layerItemId)
-      if (reference.blockId) refresh.add(reference.blockId)
-    }
+    visitProjectDynamicInstances(model.project, entry => {
+      if (refs.some(reference => (reference.layerItemId !== undefined && reference.layerItemId === entry.layerItemId)
+        || reference.blockId === entry.instanceId
+        || (entry.kind === 'component' && 'id' in entry.componentItem && reference.blockId === entry.componentItem.id))) refresh.add(entry.instanceId)
+    })
   }
   for (const target of targets) {
     const location = model.project.locations.find(location => location.id === target.locationId)
     if (!location) throw new Error('准入位置已不在候选中')
     const surface = model.project.surfaces.find(surface => surface.id === location.surfaceId)
     const prior = before.project.surfaces.find(surface => surface.id === location.surfaceId)
-    const geometry = (value: typeof surface) => value?.type === 'flow' ? value.layout : value?.type === 'slide' ? value.canvas : value?.type === 'spatial-2d' ? value.camera : null
-    const presentation = surface?.type === 'slide' && location.kind === 'slide-scene' ? surface.scenes.find(scene => scene.id === location.sceneId)?.presentation : null
-    const oldPresentation = prior?.type === 'slide' && location.kind === 'slide-scene' ? prior.scenes.find(scene => scene.id === location.sceneId)?.presentation : null
-    if (documentDigest(geometry(surface)) !== documentDigest(geometry(prior)) || documentDigest(presentation ?? null) !== documentDigest(oldPresentation ?? null)) {
+    const scene = surface?.type === 'slide' && location.kind === 'slide-scene' ? surface.scenes.find(scene => scene.id === location.sceneId) : undefined
+    const priorScene = prior?.type === 'slide' && location.kind === 'slide-scene' ? prior.scenes.find(scene => scene.id === location.sceneId) : undefined
+    const geometry = (value: typeof surface, currentScene?: typeof scene) => value?.type === 'flow' ? value.layout
+      : value?.type === 'slide' ? { reference: value.canvas, effective: effectiveSceneCanvas(value, currentScene) }
+        : value?.type === 'spatial-2d' ? value.camera : null
+    if (documentDigest(geometry(surface, scene)) !== documentDigest(geometry(prior, priorScene))
+      || documentDigest(scene?.presentation ?? null) !== documentDigest(priorScene?.presentation ?? null)) {
       target.instanceIds.forEach(id => refresh.add(id))
     }
   }
@@ -104,19 +106,14 @@ export function applyDynamicInstanceCaptures(input: {
     assetFileChanges.push({ assetId: value.meta.id, after: value.bytes })
     return value.meta.id
   }
-  visitCourseLayerItems(project, ({ item }) => {
-    if (!refresh.has(item.layerItemId)) return
-    if (item.kind === 'component') item.staticFallbackAssetId = asset(item.layerItemId, item.staticFallbackAssetId, false)
-    else if (item.kind === 'runtime') {
-      const old = item.runtime.staticFallback
-      if (!old) throw new Error(`Runtime ${item.layerItemId} 未声明后备覆盖范围`)
-      item.runtime.staticFallback = { ...old, assetId: asset(item.layerItemId, old.assetId, true) }
-    } else throw new Error(`准入目标不是动态实例：${item.layerItemId}`)
-  })
-  visitCourseFlowBlocks(project, ({ block }) => {
-    if (!refresh.has(block.id)) return
-    if (block.type !== 'component') throw new Error(`准入目标不是动态正文实例：${block.id}`)
-    block.staticFallbackAssetId = asset(block.id, block.staticFallbackAssetId, false)
+  visitProjectDynamicInstances(project, entry => {
+    if (!refresh.has(entry.instanceId)) return
+    if (entry.kind === 'component') entry.componentItem.staticFallbackAssetId = asset(entry.instanceId, entry.componentItem.staticFallbackAssetId, false)
+    else {
+      const old = entry.runtime.staticFallback
+      if (!old) throw new Error(`Runtime ${entry.instanceId} 未声明后备覆盖范围`)
+      entry.runtime.staticFallback = { ...old, assetId: asset(entry.instanceId, old.assetId, true) }
+    }
   })
   for (const id of refresh) if (!applied.has(id)) throw new Error(`准入实例已不在候选中：${id}`)
   const references = analyzeCourseAssetReferences(project, { componentPackages: input.componentPackages })

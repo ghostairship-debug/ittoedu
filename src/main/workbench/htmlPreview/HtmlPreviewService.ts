@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import { documentDigest } from '../../../core/documents/documentDigest'
+import type { HtmlSourceEditOutcome } from '../../../shared/html/sourceEditCommands'
 import { scanHtmlSource } from '../../../shared/html/htmlSourceScanner'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -21,6 +22,7 @@ type OpenRequest = Extract<HtmlPreviewRequest, { type: 'html-preview.open' }>
 type ReleaseRequest = Extract<HtmlPreviewRequest, { type: 'html-preview.release' }>
 type ResolveRequest = Extract<HtmlPreviewRequest, { type: 'html-preview.resolve-target' }>
 type EditRequest = Extract<HtmlPreviewRequest, { type: 'html-preview.edit' }>
+type SourceEditRequest = Extract<HtmlPreviewRequest, { type: 'html-preview.edit-source' }>
 
 export interface HtmlPreviewMainFrame {
   webContentsId: number
@@ -56,6 +58,7 @@ export class HtmlPreviewUnavailableError extends Error {
 export interface HtmlPreviewEditPort {
   resolveTarget(request: ResolveRequest, context: HtmlPreviewEditContext): Promise<{ revision: number; targets: HtmlPreviewResolvedTarget[] }>
   edit(request: EditRequest, context: HtmlPreviewEditContext): Promise<HtmlPreviewEditOutcome>
+  editSource(request: SourceEditRequest, context: HtmlPreviewEditContext): Promise<HtmlSourceEditOutcome>
 }
 
 export interface HtmlPreviewServiceOptions {
@@ -118,7 +121,10 @@ export class HtmlPreviewService implements HtmlPreviewHost {
   private readonly policy: PreviewNetworkPolicy
   private readonly registerFrame: typeof registerHtmlPreviewFrameEntry
   private editPort: HtmlPreviewEditPort | null
-  private readonly editReceipts = new Map<string, { digest: string; leaseId: string; promise: Promise<HtmlPreviewEditOutcome> }>()
+  private readonly editReceipts = new Map<string, { digest: string; leaseId: string } & (
+    | { kind: 'light'; promise: Promise<HtmlPreviewEditOutcome> }
+    | { kind: 'source'; promise: Promise<HtmlSourceEditOutcome> }
+  )>()
   private disposed = false
 
   constructor(private readonly options: HtmlPreviewServiceOptions) {
@@ -288,7 +294,7 @@ export class HtmlPreviewService implements HtmlPreviewHost {
   async edit(request: EditRequest): Promise<HtmlPreviewEditOutcome> {
     const digest = documentDigest(request)
     const previous = this.editReceipts.get(request.operationId)
-    if (previous) return previous.digest === digest ? previous.promise : { status: 'rejected', reason: 'conflict' }
+    if (previous) return previous.kind === 'light' && previous.digest === digest ? previous.promise : { status: 'rejected', reason: 'conflict' }
     const promise = (async (): Promise<HtmlPreviewEditOutcome> => {
       const context = await this.context(request.leaseId, request.loadId)
       if (!context || context.lease.documentId !== request.documentId || context.lease.epoch !== request.epoch) return { status: 'rejected', reason: 'lease-released' }
@@ -297,7 +303,30 @@ export class HtmlPreviewService implements HtmlPreviewHost {
       if (!this.editPort) return { status: 'rejected', reason: 'not-editable' }
       return this.editPort.edit(request, context)
     })()
-    this.editReceipts.set(request.operationId, { digest, leaseId: request.leaseId, promise })
+    this.editReceipts.set(request.operationId, { kind: 'light', digest, leaseId: request.leaseId, promise })
+    try {
+      const outcome = await promise
+      if (outcome.status !== 'applied' && outcome.status !== 'unchanged') this.editReceipts.delete(request.operationId)
+      return outcome
+    } catch (error) {
+      this.editReceipts.delete(request.operationId)
+      throw error
+    }
+  }
+
+  async editSource(request: SourceEditRequest): Promise<HtmlSourceEditOutcome> {
+    const digest = documentDigest(request)
+    const previous = this.editReceipts.get(request.operationId)
+    if (previous) return previous.kind === 'source' && previous.digest === digest ? previous.promise : { status: 'rejected', reason: 'conflict' }
+    const promise = (async (): Promise<HtmlSourceEditOutcome> => {
+      const context = await this.context(request.leaseId, request.loadId)
+      if (!context || context.lease.documentId !== request.documentId || context.lease.epoch !== request.epoch) return { status: 'rejected', reason: 'lease-released' }
+      if (context.lease.bindingVersion !== request.bindingVersion) return { status: 'rejected', reason: 'stale-binding' }
+      if (context.snapshot.revision !== request.baseRevision) return { status: 'rejected', reason: 'stale-revision' }
+      if (!this.editPort) return { status: 'rejected', reason: 'not-editable' }
+      return this.editPort.editSource(request, context)
+    })()
+    this.editReceipts.set(request.operationId, { kind: 'source', digest, leaseId: request.leaseId, promise })
     try {
       const outcome = await promise
       if (outcome.status !== 'applied' && outcome.status !== 'unchanged') this.editReceipts.delete(request.operationId)

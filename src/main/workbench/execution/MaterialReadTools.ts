@@ -5,10 +5,10 @@ import type { AttachmentSnapshot, AttachmentRepresentation } from '../../../shar
 
 const identity = { attachmentId: z.uuid() }
 export const materialListSchema = z.object({ attachmentId: z.uuid().optional(), offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(100).default(30) }).strict()
-export const materialReadSchema = z.object({ ...identity, representationId: z.string().min(1).max(512),
-  offset: z.number().int().nonnegative().default(0), maxChars: z.number().int().min(1).max(12_000).default(6000) }).strict()
-export const materialFindSchema = z.object({ ...identity, query: z.string().min(1).max(200),
-  cursor: z.string().min(1).max(1024).optional(), limit: z.number().int().min(1).max(100).default(20) }).strict()
+export const materialReadSchema = z.object({ ...identity, representationId: z.string().min(1),
+  offset: z.number().int().nonnegative().default(0), maxChars: z.number().int().min(1).default(6000) }).strict()
+export const materialFindSchema = z.object({ ...identity, query: z.string().min(1),
+  cursor: z.string().min(1).optional(), limit: z.number().int().min(1).max(100).default(20) }).strict()
 export const materialExtractSchema = z.object({ ...identity, pages: z.object({ from: z.number().int().positive(), to: z.number().int().positive() }).strict().optional(), images: z.enum(['auto', 'all']).default('auto') }).strict()
 export const materialTools: ModelToolDefinition[] = [
   { name: 'material.list', description: '列出当前显式材料或宿主冻结历史材料的不可变来源、分块/实际页码、可用文本/原图和缺口；只列目录不代表正文已读。attachmentId 省略时列出授权材料，指定时分页列出其表示。', inputSchema: z.toJSONSchema(materialListSchema) as ModelToolDefinition['inputSchema'] },
@@ -119,7 +119,7 @@ export async function readMaterial(service: AttachmentService, ids: ReadonlySet<
 }
 
 const findCursorSchema = z.object({ attachmentId: z.uuid(), digest: z.string().regex(/^[a-f0-9]{64}$/),
-  query: z.string().min(1).max(200), representationIndex: z.number().int().nonnegative(), textOffset: z.number().int().nonnegative() }).strict()
+  query: z.string().min(1), representationIndex: z.number().int().nonnegative(), textOffset: z.number().int().nonnegative() }).strict()
 type FindCursor = z.infer<typeof findCursorSchema>
 const encodeCursor = (cursor: FindCursor) => Buffer.from(JSON.stringify(cursor)).toString('base64url')
 const decodeCursor = (cursor: string): FindCursor => {

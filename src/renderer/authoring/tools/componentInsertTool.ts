@@ -21,8 +21,8 @@ const schema = z.discriminatedUnion('operation', [
 ])
 export const componentInsertTool: AuthoringToolDefinition<z.infer<typeof schema>> = {
   name: 'component.insert', inputSchema: schema, usesResources: true,
-  conditions: [{ destination: 'create', parents: ['owner', 'flow-body'], requiredForParent: { parent: 'flow-body', field: 'staticFallbackAssetId' }, message: '组件插入使用 create；Flow 正文必须提供当前工程或前序导入的真实图片 staticFallbackAssetId。' }],
-  description: '插入已有、目录或候选组件。目标使用 create；父级条件按目标计算：只有 Flow 正文 parent:flow-body 必须提供当前工程或前序导入的真实图片 staticFallbackAssetId，Slide、Flow 浮层和 Spatial world 不受该 Flow-only 条件约束。Spatial world 可使用 operation:candidate 提交 Component API 4 文件候选；candidate 输入仍须满足本卡完整 Schema。优先复用已有组件包与可用后备素材，正文组件自然占位并随内容宽度排版。',
+  conditions: [{ destination: 'create', parents: ['owner', 'flow-body'], message: '组件插入使用 create；程序组件进入 Flow 正文须有真实后备图片。结构资产物化为可编辑纸面组合。' }],
+  description: '插入已有、目录或候选组件。结构资产由软件组装为可编辑组合，Flow 中放到纸面并可随选中段落移动；无需后备截图。程序组件使用原 Component API 4，只有进入 Flow 正文 parent:flow-body 才必须提供真实图片 staticFallbackAssetId，Slide、Flow 浮层和 Spatial world 不受该条件约束。优先复用已有组件包与素材。',
   async plan({ document, destination, value, resources, signal }) {
     const { target, surface, location, scope } = resolveAuthoringToolScope(document, destination)
     if (!resources) throw new Error('组件工具缺少当前工程资源')
@@ -46,16 +46,19 @@ export const componentInsertTool: AuthoringToolDefinition<z.infer<typeof schema>
         provenance: { sha256: file.sha256, importedAt: new Date().toISOString(), sourceLabel: entry.sourceLabel } })
     }
     if (!data || value.operation === 'existing' && !document.componentPackages[value.packageId]) throw new Error('工程内组件包不存在')
+    const composition = data.manifest.content?.kind === 'composition'
+    const documentBody = body && !composition
+    if (documentBody && !value.staticFallbackAssetId) throw new Error('程序组件进入 Flow 正文必须提供真实后备图片。结构资产可直接放到纸面。')
     const slideBase = surface.type === 'slide' ? openSlideAuthoringSession(document, { locationId: target.locationId }) : null
-    const planned = planComponentPackageInsertion({ document, componentPackages: resources.componentPackages, packages: [data],
-      staticFallbackAssetId: value.staticFallbackAssetId, flowPlacement: body ? 'document-block' : 'viewport-overlay',
+    const planned = planComponentPackageInsertion({ document, componentPackages: resources.componentPackages, assetFiles: resources.assetFiles, packages: [data],
+      staticFallbackAssetId: value.staticFallbackAssetId, flowPlacement: documentBody ? 'document-block' : 'viewport-overlay',
       target: { projectId: document.id, revision: document.revision, generation: target.sessionGeneration, locationId: target.locationId, stateId: target.stateId, scope: target.owner },
       slide: slideBase ? { ...slideBase, scope: target.owner === 'global' ? 'global' : 'scene', selection: { ...slideBase.selection, stateId: target.stateId } } : null,
       spatial: surface.type === 'spatial-2d' ? openSpatialAuthoringSession(document, { locationId: target.locationId }) : null,
       flow: location.kind === 'flow-block' && surface.type === 'flow' ? { history: createFlowEditorHistory(document), selection: { ...selectFlowEditorBlock(document, target.locationId, body ? surface.blocks.at(-1)!.id : location.blockId), authoringScope: target.owner === 'global' ? 'global' : 'page' } } : null,
     })
     let nextDocument = planned.step.nextDocument
-    if (parentBlockId !== null) for (const id of planned.layerItemIds) {
+    if (parentBlockId !== null && documentBody) for (const id of planned.layerItemIds) {
       const nextSurface = nextDocument.surfaces.find(entry => entry.id === surface.id)
       if (nextSurface?.type !== 'flow') throw new Error('正文表面已失效')
       const current = findFlowBlockRecursive(nextSurface.blocks, id), parent = findFlowBlockRecursive(nextSurface.blocks, parentBlockId)?.block
@@ -67,9 +70,9 @@ export const componentInsertTool: AuthoringToolDefinition<z.infer<typeof schema>
     const behaviorEvidence: DynamicBehaviorObservation[] = []
     if (value.operation === 'candidate') await admitDynamicCandidate(nextDocument, applyHistoryResourceChanges(resources, planned.step.resourceChanges, 'forward'), [{ locationId: target.locationId, stateId: target.stateId, instanceIds: planned.layerItemIds }], signal, false, { onBehaviorEvidence: evidence => behaviorEvidence.push(...evidence) })
     return { transaction: { ...planned.step, nextDocument, selectionHint: { kind: 'authoring-tool-selection', locationId: target.locationId, stateId: target.stateId, owner: target.owner,
-      ...(surface.type === 'flow' ? { flowCarrier: body ? 'block' : 'overlay' } : {}), itemIds: planned.layerItemIds } },
+      ...(surface.type === 'flow' ? { flowCarrier: documentBody ? 'block' : 'overlay' } : {}), itemIds: planned.layerItemIds } },
       affected: planned.layerItemIds.map(id => ({ id, operation: 'created' as const, ownerKey: target.ownerKey,
-        authoringAddress: body ? makeFlowBlockAuthoringAddress({ projectId: document.id, surfaceId: surface.id, blockId: id, carrier: 'component' })
-          : makeLayerItemAuthoringAddress({ projectId: document.id, owner: target.owner, surfaceId: surface.id, sceneId: scope.sceneId, kind: 'component', layerItemId: id }) })), ...(behaviorEvidence.length ? { behaviorEvidence } : {}) }
+        authoringAddress: documentBody ? makeFlowBlockAuthoringAddress({ projectId: document.id, surfaceId: surface.id, blockId: id, carrier: 'component' })
+          : makeLayerItemAuthoringAddress({ projectId: document.id, owner: target.owner, surfaceId: surface.id, sceneId: scope.sceneId, kind: composition ? 'composition' : 'component', layerItemId: id }) })), ...(behaviorEvidence.length ? { behaviorEvidence } : {}) }
   },
 }

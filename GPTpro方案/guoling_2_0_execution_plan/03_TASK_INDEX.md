@@ -2,7 +2,7 @@
 
 当前修订 v2.6：44 个 S/M 实施任务属于当前开发；验收按 `required_for` 区分当前开发和后续发行准备，延期用例不进入当前完成门。
 
-先读[根目录收敛稿](../../果铃2.0收敛方案.md)。任务依赖/批次以 task_registry.json 为准，验收以 acceptance_cases.json 为准。
+先读[归档的根目录收敛稿](../../docs/archive/2026-09-convergence/果铃2.0收敛方案.md)。任务依赖/批次以 task_registry.json 为准，验收以 acceptance_cases.json 为准。
 
 ## 短期：基础设施
 

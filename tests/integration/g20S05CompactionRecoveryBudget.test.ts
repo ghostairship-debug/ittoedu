@@ -5,6 +5,7 @@ import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
+import { estimateSerializedTokens, modelContextBudget } from '../../src/core/execution/modelContextBudget'
 import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEngine'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
@@ -58,12 +59,12 @@ async function writeEvidence(name: string, value: unknown) {
 }
 
 it('keeps committed and unresolved facts through compaction, lost tool ACK, network faults, restart, and multiple continuations', async () => {
-  let timeoutRequests = 0, disconnectedRequests = 0
+  let serviceErrorRequests = 0, disconnectedRequests = 0
   const server = createServer(async (request, response) => {
     for await (const _chunk of request) { /* Consume the actual HTTP model request. */ }
-    if (timeoutRequests === 0) {
-      timeoutRequests += 1
-      // Keep the accepted connection open until the provider's local deadline.
+    if (serviceErrorRequests === 0) {
+      serviceErrorRequests += 1
+      response.writeHead(503); response.end('service unavailable') // Explicit upstream failure, never a local generation deadline.
     } else {
       disconnectedRequests += 1
       response.destroy() // Accepted request, then lost the response connection.
@@ -73,7 +74,7 @@ it('keeps committed and unresolved facts through compaction, lost tool ACK, netw
   closeServers.push(async () => { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) })
   const port = (server.address() as { port: number }).port
   const localSelection: ModelSelection = { ...selection, connection: { ...selection.connection, baseURL: `http://127.0.0.1:${port}/v1` } }
-  const timeoutProvider = new OpenAIChatProvider({ credentialResolver: async () => 'fixture-key', timeoutMs: 120 })
+  const serviceErrorProvider = new OpenAIChatProvider({ credentialResolver: async () => 'fixture-key' })
   const requests: ModelRequest[] = []
   const provider: ModelProvider = { async *stream(request, options) {
     requests.push(structuredClone(request))
@@ -87,7 +88,7 @@ it('keeps committed and unresolved facts through compaction, lost tool ACK, netw
         return
       case 3:
       case 4:
-        yield* timeoutProvider.stream(request, options)
+        yield* serviceErrorProvider.stream(request, options)
         return
       case 5:
         yield complete(request, [{ id: 'fresh-read', name: 'read', input: { target: reference.target } }])
@@ -109,11 +110,9 @@ it('keeps committed and unresolved facts through compaction, lost tool ACK, netw
   const runs = new ExecutionRunStore(runDirectory)
   const events = new ExecutionEventStore({ directory: eventDirectory })
   const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider, runs, events })
-  const maxContextBytes = 35_000
   const input: ExecutionStart = { conversationId: 't09-conversation', taskId: 't09-original',
-    instruction: '把 AAA 改为 FIRST，再把 BBB 改为 SECOND', selection: localSelection,
-    documents: [{ documentId: document.documentId, writable: [{ kind: 'markdown-range', from: 0, to: 3 }] }],
-    budget: { maxContextBytes, maxRequests: 4 } }
+    instruction: '把 AAA 改为 FIRST，再把 BBB 改为 SECOND', selection: { ...localSelection, contextWindow: 50_000 },
+    documents: [{ documentId: document.documentId, writable: [{ kind: 'markdown-range', from: 0, to: 3 }] }] }
   const execute = host.tools.execute.bind(host.tools)
   const oldCalls: string[] = []
   vi.spyOn(host.tools, 'execute').mockImplementation(async (runId, callId, call) => {
@@ -154,16 +153,16 @@ it('keeps committed and unresolved facts through compaction, lost tool ACK, netw
   const remainingInput: ExecutionStart = { ...input, taskId: 't09-continue',
     documents: [{ documentId: document.documentId, writable: [{ kind: 'markdown-range', from: 6, to: 9 }] }] }
   const second = await restored.resume(first.runId, remainingInput)
-  const timedOut = await restored.wait(second.runId)
-  expect(timedOut).toMatchObject({ status: 'failed', requests: [{ state: 'failed', failure: { outcome: 'unknown', kind: 'timeout', code: 'timeout' } }] })
-  expect(requests).toHaveLength(3) // Neither recover nor timeout starts an automatic model retry.
-  expect(timeoutRequests).toBe(1)
+  const serviceFailed = await restored.wait(second.runId)
+  expect(serviceFailed).toMatchObject({ status: 'failed', requests: [{ state: 'failed', failure: { outcome: 'unknown', kind: 'server', code: 'http-503' } }] })
+  expect(requests).toHaveLength(3) // Neither recover nor upstream failure starts an automatic model retry.
+  expect(serviceErrorRequests).toBe(1)
   expect(disconnectedRequests).toBe(0)
   const firstContinuation = requests[2]!.messages.map(message => String(message.content)).join('\n')
   expect(firstContinuation).toContain('"status":"applied"')
   expect(firstContinuation).toContain('"pending"')
 
-  const third = await restored.resume(second.runId, { ...remainingInput, taskId: 't09-after-timeout' })
+  const third = await restored.resume(second.runId, { ...remainingInput, taskId: 't09-after-service-error' })
   const disconnected = await restored.wait(third.runId)
   expect(disconnected).toMatchObject({ status: 'failed', requests: [{ state: 'failed', failure: { outcome: 'unknown', kind: 'transport', code: 'transport' } }] })
   expect(requests).toHaveLength(4)
@@ -177,22 +176,23 @@ it('keeps committed and unresolved facts through compaction, lost tool ACK, netw
     scenario: 'S05-T09 local provider fault injection; no paid request',
     firstRun: { status: partial.status, compactedAtRequest: partial.compacted?.atRequest,
       committed: partial.tools[0]?.result, unresolved: partial.tools[1]?.result },
-    timeoutRun: { status: timedOut.status, failure: timedOut.requests[0]?.failure },
+    serviceErrorRun: { status: serviceFailed.status, failure: serviceFailed.requests[0]?.failure },
     disconnectedRun: { status: disconnected.status, failure: disconnected.requests[0]?.failure },
     finalRun: { status: final.status, continuedFrom: final.continuedFrom, toolNames: final.tools.map(tool => tool.call.name) },
-    requests: requests.length, timeoutHttpRequests: timeoutRequests, disconnectedHttpRequests: disconnectedRequests,
+    requests: requests.length, serviceErrorHttpRequests: serviceErrorRequests, disconnectedHttpRequests: disconnectedRequests,
     oldToolExecutions: oldCalls, resumedToolExecutions: resumedCalls,
     revision: snapshot.revision, undoDepth: snapshot.undoDepth,
     source: snapshot.model.kind === 'markdown' ? snapshot.model.source : null,
     secondContinuationRetainsOriginalGoal: secondContinuation.includes(input.instruction),
     secondContinuationRetainsCommit: secondContinuation.includes('"status":"applied"'),
     secondContinuationRetainsPendingTool: secondContinuation.includes('"pending"'),
-    secondContinuationRetainsUnknownRequest: secondContinuation.includes('"code":"timeout"'),
+    secondContinuationRetainsUnknownRequest: secondContinuation.includes('"code":"http-503"'),
     finalContinuationRetainsCommit: finalContinuation.includes('"status":"applied"'),
     finalContinuationRetainsPendingTool: finalContinuation.includes('"pending"'),
-    finalContinuationRetainsNetworkFailures: finalContinuation.includes('"code":"timeout"') && finalContinuation.includes('"code":"transport"'),
+    finalContinuationRetainsNetworkFailures: finalContinuation.includes('"code":"http-503"') && finalContinuation.includes('"code":"transport"'),
     maxSerializedRequestBytes: Math.max(...requests.map(request => Buffer.byteLength(serializeModelRequest(request), 'utf8'))),
-    budgetBytes: maxContextBytes,
+    maxEstimatedRequestTokens: Math.max(...requests.map(request => estimateSerializedTokens(serializeModelRequest(request)))),
+    modelInputTokens: modelContextBudget(input.selection).inputTokens,
   }
   const evidenceDirectory = path.join(process.cwd(), 'output', 'g20', 's05', 't09')
   await mkdir(evidenceDirectory, { recursive: true })
@@ -208,13 +208,13 @@ it('keeps committed and unresolved facts through compaction, lost tool ACK, netw
   expect(evidence.finalContinuationRetainsCommit).toBe(true)
   expect(evidence.finalContinuationRetainsPendingTool).toBe(true)
   expect(evidence.finalContinuationRetainsNetworkFailures).toBe(true)
-  expect(evidence.maxSerializedRequestBytes).toBeLessThanOrEqual(evidence.budgetBytes)
+  expect(evidence.maxEstimatedRequestTokens).toBeLessThanOrEqual(evidence.modelInputTokens)
   expect(oldCalls).toHaveLength(2)
   expect(resumedCalls).toHaveLength(2)
   expect(resumedCalls.every(call => !call.startsWith(`${first.runId}:`))).toBe(true)
   await events.readTiming('t09-conversation', 't09-original')
   await restoredEvents.readTiming('t09-conversation', 't09-continue')
-  await restoredEvents.readTiming('t09-conversation', 't09-after-timeout')
+  await restoredEvents.readTiming('t09-conversation', 't09-after-service-error')
   await restoredEvents.readTiming('t09-conversation', 't09-after-disconnect')
 })
 

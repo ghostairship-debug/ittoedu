@@ -13,6 +13,19 @@ const updates = new WeakMap<Element, (options?: DynamicUpdateProbeOptions) => Pr
 interface DynamicLifecycleProbe { suspend(): void | Promise<void>; resume(): void | Promise<void> }
 const lifecycles = new WeakMap<Element, DynamicLifecycleProbe>()
 
+/** Inspect the real mounted tree, including same-origin Web composition documents. */
+export function queryPublishedDynamicElements(root: Element, selector: string): HTMLElement[] {
+  const result: HTMLElement[] = Array.from(root.querySelectorAll<HTMLElement>(selector))
+  for (const iframe of root.querySelectorAll<HTMLIFrameElement>('iframe')) {
+    // An inaccessible document stays within its existing origin boundary.
+    try {
+      const nested = iframe.contentDocument?.documentElement
+      if (nested) result.push(...queryPublishedDynamicElements(nested, selector))
+    } catch { /* Cross-origin documents cannot expose host instances. */ }
+  }
+  return result
+}
+
 export function registerPublishedDynamicUpdateProbe(owner: Element, probe: (options?: DynamicUpdateProbeOptions) => Promise<void>, lifecycle?: DynamicLifecycleProbe): () => void {
   updates.set(owner, probe)
   if (lifecycle) lifecycles.set(owner, lifecycle)

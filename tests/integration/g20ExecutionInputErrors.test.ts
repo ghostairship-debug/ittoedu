@@ -74,6 +74,15 @@ it('explains a stale local selection while retaining committed edits, and never 
   expect(diagnostic).toHaveBeenCalled(); await f.assertPreserved()
 })
 
+it('refuses a composer draft saved on an older conversation revision with the specific draft-changed reason', async () => {
+  const f = await fixture()
+  vi.spyOn(diagnosticLog, 'append').mockResolvedValue(undefined)
+  const error = await rejection(f.service.operate({ type: 'draft', workspaceId: f.draft.workspaceId, conversationId: f.draft.conversationId,
+    expectedRevision: f.draft.revision - 1, text: '旧视图里的新草稿', documents: [], attachments: [] }))
+  expect(normalizeDesktopError(error, fallback)).toMatchObject({ code: 'execution-conversation-draft-changed', message: expect.stringContaining('草稿已在另一处更新') })
+  await f.assertPreserved()
+})
+
 it('keeps the IPC error envelope when diagnostics fail and stderr is unavailable', async () => {
   vi.spyOn(console, 'error').mockImplementation(() => { throw Object.assign(new Error('broken pipe'), { code: 'EPIPE' }) })
   vi.spyOn(diagnosticLog, 'append').mockRejectedValue(new Error('diagnostic disk unavailable'))

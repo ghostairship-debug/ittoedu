@@ -103,7 +103,7 @@ function resolveObject(snapshot: DocumentSnapshot, object: CourseObjectTarget): 
   const location = model.project.locations.find(candidate => candidate.id === object.locationId)
   const surface = location && model.project.surfaces.find(candidate => candidate.id === location.surfaceId)
   const located = locateCourseLayer(model.project, object.itemId)
-  if (!location || !surface || !located || located.item.kind === 'native'
+  if (!location || !surface || !located || (located.item.kind !== 'runtime' && located.item.kind !== 'component')
     || located.source !== 'global' && located.surfaceId !== surface.id
     || located.source === 'scene' && (location.kind !== 'slide-scene' || located.sceneId !== location.sceneId)
     || located.scoped && !isCourseLayerVisibleAtLocation(located.scoped, location.id)) return null
@@ -116,7 +116,9 @@ function resolveObject(snapshot: DocumentSnapshot, object: CourseObjectTarget): 
     locked = state.layerItemOverrides[located.item.layerItemId]?.locked ?? locked
   }
   if (locked) return null
-  return { model, locationId: location.id, surfaceId: surface.id, stateId, owner: located.source, item: located.item }
+  const item = located.item
+  if (item.kind !== 'runtime' && item.kind !== 'component') return null
+  return { model, locationId: location.id, surfaceId: surface.id, stateId, owner: located.source, item }
 }
 
 /** Discover V9 declared fields and only actual M15 rendered hits supplied by the host. */
@@ -275,7 +277,7 @@ export function planDynamicContentEdit(input: {
 
   const next = structuredClone(snapshot.model)
   const nextItem = locateCourseLayer(next.project, target.itemId)?.item
-  if (!nextItem || nextItem.kind === 'native') return reject('target-conflict', '图文目标已不存在')
+  if (!nextItem || (nextItem.kind !== 'runtime' && nextItem.kind !== 'component')) return reject('target-conflict', '图文目标已不存在')
   if (change.kind === 'text') {
     if (field.kind === 'runtime.value' && nextItem.kind === 'runtime') nextItem.runtime.content.values[field.key] = change.value
     else if ((field.kind === 'runtime.text' || field.kind === 'component.text')) writeTextRule(nextItem, field.original, field.region, change.value)

@@ -52,19 +52,35 @@ export class TimingTrace {
     return [...(await this.load(filename, conversationId, taskId)).marks.values()]
   }
   async append(filename: string, mark: ExecutionTimingMark): Promise<void> {
-    const state = await this.load(filename, mark.conversationId, mark.taskId)
-    const existing = state.marks.get(mark.markId)
-    if (existing) {
-      if (stable(existing) !== stable(mark)) throw new Error('计时标记身份冲突')
-      return
-    }
+    return this.appendBatch(filename, [mark])
+  }
+  /** One open + one writeFile + one sync for a bounded batch; same identity/torn guarantees as append. */
+  async appendBatch(filename: string, marks: readonly ExecutionTimingMark[]): Promise<void> {
+    if (!marks.length) return
+    const conversationId = marks[0]!.conversationId, taskId = marks[0]!.taskId
+    if (marks.some(mark => mark.conversationId !== conversationId || mark.taskId !== taskId)) throw new Error('一次计时追加只能属于一个任务')
+    const state = await this.load(filename, conversationId, taskId)
     if (state.torn) throw new Error('上次计时写入末尾不完整，原日志保留；未把不完整标记视为事实')
-    const payload = JSON.stringify(mark), line = JSON.stringify({ payload, sha256: digest(payload) }) + '\n'
+    const additions: ExecutionTimingMark[] = [], seen = new Map<string, ExecutionTimingMark>()
+    for (const mark of marks) {
+      const existing = state.marks.get(mark.markId) ?? seen.get(mark.markId)
+      if (existing) {
+        if (stable(existing) !== stable(mark)) throw new Error('计时标记身份冲突')
+        continue
+      }
+      seen.set(mark.markId, mark)
+      additions.push(mark)
+    }
+    if (!additions.length) return
+    const encoded = additions.map(mark => {
+      const payload = JSON.stringify(mark)
+      return JSON.stringify({ payload, sha256: digest(payload) }) + '\n'
+    }).join('')
     await fs.mkdir(path.dirname(filename), { recursive: true })
     try {
       const handle = await fs.open(filename + '.ndjson', 'a')
-      try { await handle.writeFile(line); await handle.sync() } finally { await handle.close() }
-      state.marks.set(mark.markId, structuredClone(mark))
+      try { await handle.writeFile(encoded); await handle.sync() } finally { await handle.close() }
+      for (const mark of additions) state.marks.set(mark.markId, structuredClone(mark))
       state.stamp = `${await stamp(filename)}|${await stamp(filename + '.ndjson')}`
     } catch (error) { this.cache.delete(filename); throw error }
   }

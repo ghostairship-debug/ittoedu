@@ -15,6 +15,7 @@ import type { ImageGenerationRequest } from '../../src/shared/workbench/images'
 
 const servers: Server[] = [], directories: string[] = []
 afterEach(async () => {
+  vi.useRealTimers()
   await Promise.all(servers.splice(0).map(server => new Promise<void>(resolve => { server.closeAllConnections(); server.close(() => resolve()) })))
   await Promise.all(directories.splice(0).map(directory => fs.rm(directory, { recursive: true, force: true })))
 })
@@ -111,7 +112,7 @@ it('sends one original image as multipart edit, preserves the original, and does
   expect(seen).toBe(2)
 })
 
-it('does not resend the same job after a 429 or a transport result with unknown delivery', async () => {
+it('does not retry inside the API adapter or resend a durable job with unknown delivery', async () => {
   let sent = 0
   const transport = await serve(async (req, res) => {
     sent++; await body(req)
@@ -119,10 +120,8 @@ it('does not resend the same job after a 429 or a transport result with unknown 
     res.end(JSON.stringify({ error: { code: 'rate_limit_exceeded' } }))
   })
   const provider = new OpenAIImagesApiProvider({ credentialResolver: async () => 'local-api-key', fetch: transport })
-  const service = new ImageGenerationService({ directory: await temporaryDirectory(), provider })
-  const limited = await service.run(request('limited'))
+  const limited = await provider.generate(request('limited'), [])
   expect(limited).toMatchObject({ status: 'failed', failure: { outcome: 'rejected', code: 'image-http-429', retryAfterMs: 7000 } })
-  expect(await service.run(request('limited'))).toEqual(limited)
   expect(sent).toBe(1)
 
   let invoked = 0
@@ -166,4 +165,44 @@ it('uses the same adapter for another explicitly enabled API root and its own mo
     endpoint: 'https://vendor.invalid/tenant/openai/images/generations', accountId: 'other-account',
     requestedImageModel: 'vendor-illustrate-v2' } })
   expect(sent).toBe(1)
+})
+
+
+it('keeps an injected Images API transport cancellable beyond the old five-minute total deadline', async () => {
+  const image = await sharp({ create: { width: 8, height: 8, channels: 4, background: '#2563eb' } }).png().toBuffer()
+  vi.useFakeTimers()
+  let finish!: (value: Response) => void, entered!: () => void, calls = 0
+  const reached = new Promise<void>(resolve => { entered = resolve })
+  const provider = new OpenAIImagesApiProvider({ credentialResolver: async () => 'local-api-key', fetch: async (_url, init) => {
+    calls++; entered()
+    return new Promise<Response>((resolve, reject) => {
+      finish = resolve
+      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+    })
+  } })
+  const running = provider.generate(request('long-images-api'), [])
+  await reached
+  await vi.advanceTimersByTimeAsync(12 * 60_000)
+  expect(calls).toBe(1)
+  finish(new Response(JSON.stringify({ created: 1, data: [{ b64_json: image.toString('base64') }] })))
+  expect(await running).toMatchObject({ status: 'completed' })
+  const stopReached = new Promise<void>(resolve => { entered = resolve })
+  const controller = new AbortController(), stopped = provider.generate(request('stopped-images-api'), [], { signal: controller.signal })
+  await stopReached
+  controller.abort()
+  expect(await stopped).toMatchObject({ status: 'failed', failure: { outcome: 'unknown', kind: 'aborted' } })
+})
+
+it('passes multiple authorized reference images as multipart content without an invented reference limit', async () => {
+  const image = await sharp({ create: { width: 8, height: 8, channels: 4, background: '#2563eb' } }).png().toBuffer()
+  const refs = Array.from({ length: 6 }, (_, index) => ({ referenceId: `ref-${index}`, bytes: image, mimeType: 'image/png', filename: `ref-${index}.png` }))
+  let images: FormDataEntryValue[] = []
+  const provider = new OpenAIImagesApiProvider({ credentialResolver: async () => 'local-api-key', fetch: async (_url, init) => {
+    images = (await new Request('https://fixture.invalid', init).formData()).getAll('image')
+    return new Response(JSON.stringify({ created: 1, data: [{ b64_json: image.toString('base64') }] }))
+  } })
+  const input = { ...request('many-edit-references', 'edit'), referenceIds: refs.map(ref => ref.referenceId), prompt: '内容'.repeat(110_000) }
+  expect(await provider.generate(input, refs)).toMatchObject({ status: 'completed' })
+  expect(images).toHaveLength(6)
+  expect(await Promise.all(images.map(async entry => Buffer.from(await (entry as File).arrayBuffer())))).toEqual(refs.map(ref => ref.bytes))
 })

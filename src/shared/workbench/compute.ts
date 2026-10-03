@@ -8,7 +8,6 @@ export interface ComputeJobInput {
   argv?: readonly string[]
   inputs?: readonly { name: string; bytes: Uint8Array }[]
   outputNames?: readonly string[]
-  timeoutMs?: number
 }
 export interface ComputeArtifact {
   name: string

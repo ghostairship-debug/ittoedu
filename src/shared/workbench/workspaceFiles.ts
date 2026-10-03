@@ -37,11 +37,6 @@ export interface WorkspacePptxFile {
   bytes: Uint8Array
 }
 
-/** Largest PPTX read for an import; the importer itself accepts the same size. */
-export const WORKSPACE_PPTX_MAX_BYTES = 256 * 1024 * 1024
-/** Largest ready-made H5 presentation a create-course request may carry. */
-export const WORKSPACE_COURSE_ARCHIVE_MAX_BYTES = 256 * 1024 * 1024
-
 export type WorkspaceListItem =
   | { status: 'accessible'; entryId: string; name: string; kind: WorkspaceEntryKind }
   | { status: 'blocked'; name: string; reason: 'outside-workspace' | 'unsupported-entry' }
@@ -89,9 +84,9 @@ export const workspaceFilesRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('watch'), ...scope }).strict(),
   // `archive` is a ready-made H5 presentation (e.g. made from a PPTX); main validates it before writing.
   z.object({ type: z.literal('create-course'), ...mutation, targetDirectoryId: id, name, canvas: slideCanvasSchema.optional(),
-    archive: z.instanceof(Uint8Array).refine(bytes => bytes.byteLength <= WORKSPACE_COURSE_ARCHIVE_MAX_BYTES, 'H5 演示文件过大').optional() }).strict(),
+    archive: z.instanceof(Uint8Array).optional() }).strict(),
   z.object({ type: z.literal('create-text'), ...mutation, targetDirectoryId: id, name }).strict(),
-  z.object({ type: z.literal('import-files'), ...mutation, targetDirectoryId: id, directories: z.array(documentRelativePathSchema).max(256).optional(), files: z.array(z.object({ name: documentRelativePathSchema, bytes: z.instanceof(Uint8Array) }).strict()).max(32).refine(files => files.reduce((total, file) => total + file.bytes.byteLength, 0) <= 64 * 1024 * 1024, '拖入文件总计不能超过 64 MiB') }).strict(),
+  z.object({ type: z.literal('import-files'), ...mutation, targetDirectoryId: id, directories: z.array(documentRelativePathSchema).optional(), files: z.array(z.object({ name: documentRelativePathSchema, bytes: z.instanceof(Uint8Array) }).strict()) }).strict(),
   z.object({ type: z.literal('list'), ...scope, directoryEntryId: id, cursor: z.string().optional(), limit: z.number().int().min(1).max(200).optional() }).strict(),
   z.object({ type: z.literal('resolve'), ...scope, entryId: id }).strict(),
   z.object({ type: z.literal('read-media'), ...scope, entryId: id }).strict(),
@@ -99,9 +94,9 @@ export const workspaceFilesRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('create-markdown'), ...mutation, targetDirectoryId: id, name }).strict(),
   z.object({ type: z.literal('mkdir'), ...mutation, targetDirectoryId: id, name }).strict(),
   z.object({ type: z.literal('rename'), ...mutation, sourceEntryId: id, name }).strict(),
-  z.object({ type: z.literal('copy'), ...mutation, sourceEntryIds: z.array(id).min(1).max(200), targetDirectoryId: id, resourcePolicy: z.enum(['copy', 'cancel']).optional() }).strict(),
-  z.object({ type: z.literal('move'), ...mutation, sourceEntryIds: z.array(id).min(1).max(200), targetWorkspaceId: id.optional(), targetDirectoryId: id, resourcePolicy: z.enum(['copy', 'cancel']).optional() }).strict(),
-  z.object({ type: z.literal('trash'), ...mutation, entryIds: z.array(id).min(1).max(200) }).strict(),
+  z.object({ type: z.literal('copy'), ...mutation, sourceEntryIds: z.array(id).min(1), targetDirectoryId: id, resourcePolicy: z.enum(['copy', 'cancel']).optional() }).strict(),
+  z.object({ type: z.literal('move'), ...mutation, sourceEntryIds: z.array(id).min(1), targetWorkspaceId: id.optional(), targetDirectoryId: id, resourcePolicy: z.enum(['copy', 'cancel']).optional() }).strict(),
+  z.object({ type: z.literal('trash'), ...mutation, entryIds: z.array(id).min(1) }).strict(),
   z.object({ type: z.literal('reveal'), ...mutation, entryId: id }).strict(),
   // HTML preview lease/edit family (M23). It carries no workspaceId on purpose: the
   // open document session already bounds what the preview may read, and the router

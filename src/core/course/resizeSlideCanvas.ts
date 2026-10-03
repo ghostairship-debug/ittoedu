@@ -11,6 +11,7 @@ import type {
 } from '../../shared/courseProjectTypes'
 import {
   courseSlideCanvas,
+  effectiveSceneCanvas,
   isValidSlideCanvas,
   sameSlideCanvas,
   type SlideCanvasSize,
@@ -46,7 +47,36 @@ export function resizeCourseSlideCanvas(
     if (surface.type !== 'slide') continue
     surface.canvas = { width: next.width, height: next.height }
     for (const entry of surface.surfaceLayerItems) scaleLayerItem(entry.item, s, dx, dy)
-    for (const scene of surface.scenes) scaleScene(scene, s, dx, dy)
+    for (const scene of surface.scenes) {
+      if (!scene.canvas) scaleScene(scene, old, next, s, dx, dy)
+    }
+  }
+  return courseProjectDocumentSchema.parse(draft)
+}
+
+/** Resizes one scene or restores inheritance; shared layers stay in their single reference space. */
+export function resizeSlideSceneCanvas(
+  project: CourseProjectDocument,
+  surfaceId: string,
+  sceneId: string,
+  next: SlideCanvasSize | null,
+): CourseProjectDocument {
+  if (next !== null && !isValidSlideCanvas(next)) throw new RangeError('画布尺寸无效')
+  const surface = project.surfaces.find((value): value is SlideSurfaceDocument => value.id === surfaceId && value.type === 'slide')
+  const scene = surface?.scenes.find((value) => value.id === sceneId)
+  if (!surface || !scene) throw new Error('当前页面已不存在')
+  if (next === null ? !scene.canvas : scene.canvas && sameSlideCanvas(scene.canvas, next)) return project
+
+  const old = effectiveSceneCanvas(surface, scene)
+  const target = next ?? surface.canvas
+  const draft = structuredClone(project)
+  const draftSurface = draft.surfaces.find((value): value is SlideSurfaceDocument => value.id === surfaceId && value.type === 'slide')!
+  const draftScene = draftSurface.scenes.find((value) => value.id === sceneId)!
+  if (next === null) delete draftScene.canvas
+  else draftScene.canvas = { ...next }
+  if (!sameSlideCanvas(old, target)) {
+    const s = Math.min(target.width / old.width, target.height / old.height)
+    scaleScene(draftScene, old, target, s, (target.width - old.width * s) / 2, (target.height - old.height * s) / 2)
   }
   return courseProjectDocumentSchema.parse(draft)
 }
@@ -59,12 +89,31 @@ function displaysOnSlide(entry: GlobalLayerEntry, slideLocationIds: readonly str
   return slideLocationIds.some((id) => !locationIds.includes(id))
 }
 
-function scaleScene(scene: SlideSceneDocument, s: number, dx: number, dy: number): void {
-  for (const item of scene.layerItems) scaleLayerItem(item, s, dx, dy)
+function scaleScene(scene: SlideSceneDocument, old: SlideCanvasSize, next: SlideCanvasSize, s: number, dx: number, dy: number): void {
+  const rx = next.width / old.width
+  const ry = next.height / old.height
+  for (const item of scene.layerItems) {
+    if (item.kind === 'composition') item.frame = reflowFrame(item.frame, rx, ry)
+    else scaleLayerItem(item, s, dx, dy)
+  }
   for (const state of scene.presentation?.states ?? []) {
     for (const [itemId, override] of Object.entries(state.layerItemOverrides)) {
-      state.layerItemOverrides[itemId] = scaleOverride(override, scene.layerItems.find((item) => item.layerItemId === itemId), s, dx, dy)
+      const item = scene.layerItems.find((candidate) => candidate.layerItemId === itemId)
+      state.layerItemOverrides[itemId] = item?.kind === 'composition' && override.frame
+        ? { ...override, frame: reflowFrame(override.frame, rx, ry) }
+        : scaleOverride(override, item, s, dx, dy)
     }
+  }
+}
+
+/** Automatic Web regions fill their resized slot; their CSS source owns the internal layout. */
+function reflowFrame<T extends Partial<LayerFrame>>(frame: T, rx: number, ry: number): T {
+  return {
+    ...frame,
+    ...(typeof frame.x === 'number' ? { x: frame.x * rx } : {}),
+    ...(typeof frame.y === 'number' ? { y: frame.y * ry } : {}),
+    ...(typeof frame.width === 'number' ? { width: frame.width * rx } : {}),
+    ...(typeof frame.height === 'number' ? { height: frame.height * ry } : {}),
   }
 }
 

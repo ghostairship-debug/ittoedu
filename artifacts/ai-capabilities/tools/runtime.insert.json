@@ -81,7 +81,7 @@
                 },
                 "maxLength": {
                   "exclusiveMinimum": 0,
-                  "maximum": 1000000,
+                  "maximum": 9007199254740991,
                   "type": "integer"
                 },
                 "multiline": {
@@ -99,7 +99,6 @@
             "items": {
               "$ref": "#/$defs/__schema6"
             },
-            "maxItems": 2000,
             "type": "array"
           },
           "values": {
@@ -121,17 +120,14 @@
         "additionalProperties": false,
         "properties": {
           "original": {
-            "maxLength": 2000,
             "minLength": 1,
             "type": "string"
           },
           "region": {
-            "maxLength": 500,
             "minLength": 1,
             "type": "string"
           },
           "text": {
-            "maxLength": 20000,
             "type": "string"
           }
         },

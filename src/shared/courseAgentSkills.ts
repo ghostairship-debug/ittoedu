@@ -3,4 +3,6 @@
 export const courseAgentMethodSkills = [
   { name: 'orchestrate-courseware' },
   { name: 'build-courseware-project' },
+  { name: 'edit-content' },
+  { name: 'office-content' },
 ] as const

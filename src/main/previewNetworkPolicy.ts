@@ -115,7 +115,7 @@ export class PreviewNetworkPolicy {
     owner: PreviewNetworkDocumentOwner,
   ): void {
     this.#assertActiveDocument(owner)
-    if (!/^[A-Za-z0-9._:-]{1,160}$/.test(input.leaseId)) {
+    if (!/^[A-Za-z0-9._:-]+$/.test(input.leaseId)) {
       throw new Error('Preview network lease id is invalid')
     }
     // Validate the complete replacement before changing the effective policy.

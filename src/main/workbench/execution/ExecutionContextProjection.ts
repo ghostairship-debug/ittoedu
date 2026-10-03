@@ -3,13 +3,26 @@ import type { ModelChatMessage } from '../../../shared/workbench/modelProvider'
 const imagePart = (part: unknown): part is { type: 'image_url'; image_url: { url: string } } => !!part && typeof part === 'object'
   && (part as { type?: unknown }).type === 'image_url' && typeof (part as { image_url?: { url?: unknown } }).image_url?.url === 'string'
 export const contextMessageId = (runId: string, index: number) => `run:${runId}:${index}`
+/** The text-only working view: image payloads stay host-retained; the model sees a reference note. */
+export function projectImagesForTextModel(messages: readonly ModelChatMessage[]): ModelChatMessage[] {
+  return messages.map(message => {
+    if (!Array.isArray(message.content) || !message.content.some(imagePart)) return message
+    let imageIndex = -1
+    const content = message.content.map(part => {
+      if (!imagePart(part)) return part
+      imageIndex++
+      return { type: 'text' as const, text: `图片由宿主保留；本连接不接收图片。需要时用 context.read 配合 imageIndexes=[${imageIndex}] 或独立视觉观察取回。` }
+    })
+    return { ...message, content }
+  })
+}
 export function contextSourceIndex(sourceId: string): { runId: string; index: number } | null {
   const matched = /^run:([^:]+):(\d+)$/.exec(sourceId), index = matched ? Number(matched[2]) : -1
   return matched && Number.isSafeInteger(index) && index >= 0 ? { runId: matched[1], index } : null
 }
 
 /** A disposable model working view. Original messages and native tool pairing remain owned by RunStore. */
-export function projectExecutionContext(runId: string, messages: readonly ModelChatMessage[], initialCount: number, retainToolTurns = 2) {
+export function projectExecutionContext(runId: string, messages: readonly ModelChatMessage[], initialCount: number, retainToolTurns = 2, textLimit?: number) {
   // A newly requested observation batch must reach the next model turn intact.
   // Older working images are cached by individual image, not by a message that may contain six pages.
   const lastAssistant = messages.map(message => message.role).lastIndexOf('assistant')
@@ -33,6 +46,7 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
   const assistantTurns = messages.flatMap((message, index) => index >= initialCount && message.role === 'assistant'
     && Array.isArray(message.tool_calls) && message.tool_calls.length ? [index] : [])
   const recentStart = retainToolTurns > 0 ? assistantTurns.at(-retainToolTurns) ?? initialCount : messages.length
+  const archiveThreshold = Number.isSafeInteger(textLimit) && textLimit! > 0 ? textLimit! : 8000
   let imagesArchived = 0, encodedImageBytesRemoved = 0, toolBytesRemoved = 0
   const projected = messages.map((message, index): ModelChatMessage => {
     if (index < initialCount && !(Array.isArray(message.content) && message.content.some(imagePart))) return message
@@ -48,7 +62,7 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
       })
       return { ...message, content }
     }
-    if (index < recentStart && message.role === 'tool' && typeof message.content === 'string' && message.content.length > 8000) {
+    if (index < recentStart && message.role === 'tool' && typeof message.content === 'string' && message.content.length > archiveThreshold) {
       let receipt: unknown
       try {
         const original = JSON.parse(message.content)
@@ -57,20 +71,21 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
           operationId: result.operationId, documentId: result.documentId, status: result.status, revision: result.revision,
         } } : {}) }
       } catch { /* The complete source remains readable even when a diagnostic wasn't JSON. */ }
+      const excerptLimit = Math.max(200, Math.floor(archiveThreshold * 0.55))
       const content = JSON.stringify({ archivedContext: sourceId, receipt, characters: message.content.length,
-        excerpt: message.content.slice(0, 1200), notice: '工作上下文片段，非完整结果；context.read 可按原位置重读。' })
+        excerpt: message.content.slice(0, excerptLimit), notice: '工作上下文片段，非完整结果；context.read 可按原位置重读。' })
       toolBytesRemoved += Buffer.byteLength(message.content, 'utf8') - Buffer.byteLength(content, 'utf8')
       return { ...message, content }
     }
     if (index < recentStart && message.role === 'assistant') {
       const tool_calls = Array.isArray(message.tool_calls) ? message.tool_calls.map(call => {
         if (!call || typeof call !== 'object' || Array.isArray(call) || !call.function || typeof call.function !== 'object'
-          || Array.isArray(call.function) || typeof call.function.arguments !== 'string' || call.function.arguments.length <= 8000) return call
+          || Array.isArray(call.function) || typeof call.function.arguments !== 'string' || call.function.arguments.length <= archiveThreshold) return call
         const argumentsText = JSON.stringify({ archivedArguments: sourceId, toolCallId: call.id, characters: call.function.arguments.length })
         toolBytesRemoved += Buffer.byteLength(call.function.arguments, 'utf8') - Buffer.byteLength(argumentsText, 'utf8')
         return { ...call, function: { ...call.function, arguments: argumentsText } }
       }) : undefined
-      const content = typeof message.content === 'string' && message.content.length > 8000
+      const content = typeof message.content === 'string' && message.content.length > archiveThreshold
         ? `历史过程文本（${message.content.length}字符）已保留于 ${sourceId}；context.read 可重读，当前以正式回执和目标为准。` : message.content
       if (typeof message.content === 'string' && typeof content === 'string') toolBytesRemoved += Buffer.byteLength(message.content) - Buffer.byteLength(content)
       return { ...message, content, ...(tool_calls ? { tool_calls } : {}) }

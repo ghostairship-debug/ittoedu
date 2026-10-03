@@ -10,7 +10,7 @@ export interface ImageModelSelection {
 /** Images API uses the exact root explicitly saved with the API connection. */
 export function openAIImagesEndpoint(connection: Pick<ModelConnectionSnapshot, 'protocol' | 'auth' | 'baseURL' | 'imageProtocol'>,
   operation: 'generate' | 'edit'): string {
-  if (connection.protocol !== 'openai-chat' || connection.auth.kind !== 'api-key' || connection.imageProtocol !== 'openai-images')
+  if (connection.protocol === 'chatgpt-responses' || connection.auth.kind !== 'api-key' || connection.imageProtocol !== 'openai-images')
     throw new Error('unsupported-image-connection')
   const root = new URL(connection.baseURL)
   if (root.protocol !== 'https:' || !root.hostname || root.username || root.password || root.search || root.hash

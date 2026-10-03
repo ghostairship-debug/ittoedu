@@ -7,7 +7,7 @@ export interface ModelConnectionSnapshot {
   id: string
   revision: number
   provider: string
-  protocol: 'openai-chat' | 'chatgpt-responses'
+  protocol: 'openai-chat' | 'openai-responses' | 'anthropic-messages' | 'chatgpt-responses'
   /** Explicit opt-in for the separately billed OpenAI-compatible Images endpoints. */
   imageProtocol?: 'openai-images' | null
   baseURL: string
@@ -24,12 +24,21 @@ export type ModelNativeToolCall = ModelJsonObject & {
 }
 export type ModelAssistantMessage = ModelChatMessage & {
   role: 'assistant'; content: string | null; tool_calls?: ModelNativeToolCall[]
-  nativeResponses?: { protocol: 'chatgpt-responses'; responseId: string; output: ModelJsonObject[] }
+  nativeResponses?: { protocol: 'chatgpt-responses' | 'openai-responses'; responseId: string; output: ModelJsonObject[] }
+  nativeAnthropic?: { content: ModelJsonObject[] }
 }
 export interface ModelToolDefinition { name: string; description: string; inputSchema: ModelJsonObject }
 export interface ModelSelection {
   connection: ModelConnectionSnapshot
   model: string
+  /** Frozen wire protocol; the underlying connection and credential identity stay unchanged. */
+  apiProtocol?: ModelConnectionSnapshot['protocol']
+  /** Optional upstream identity for capability lookup only; never replaces the requested model. */
+  capabilityModel?: string
+  /** Provider-declared token window for this model; absent falls back to a conservative host default. */
+  contextWindow?: number
+  /** Documented model output window, not a task or request quota. */
+  outputLimit?: number
   /** Provider-native options, e.g. thinking/reasoning_effort. Cannot replace routing/messages/tools/stream. */
   parameters?: ModelJsonObject
 }

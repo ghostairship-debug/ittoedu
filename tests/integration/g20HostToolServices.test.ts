@@ -229,17 +229,23 @@ it('recovers one persisted build-create ticket without old handles, duplicates o
 
 it('keeps an incomplete durable create reservation uncertain and never recreates scratch on retry', async () => {
   const root = await directory(), service = builds(root), baseline = fixture(), digest = documentDigest(baseline)
-  const frozen: BuildJobInput = { runId: 'run', target: { documentId: 'document', projectId: baseline.project.id, epoch: 'epoch', baseRevision: baseline.project.revision, modelDigest: digest }, readSet: [{ documentId: 'document', epoch: 'epoch', revision: baseline.project.revision, digest }], baseline, allowedOrigins: [], budget: { maxBytes: 1 } }
+  const frozen: BuildJobInput = { runId: 'run', target: { documentId: 'document', projectId: baseline.project.id, epoch: 'epoch', baseRevision: baseline.project.revision, modelDigest: digest }, readSet: [{ documentId: 'document', epoch: 'epoch', revision: baseline.project.revision, digest }], baseline, allowedOrigins: [] }
   const ticket = { operationId: 'host-operation', requestDigest: documentDigest({ name: 'build.create', input: { target: 't-frozen' } }) }
-  // Real disk initialization fails after durable reservation/baseline, before a completed state file.
-  await expect(service.create(frozen, ticket)).rejects.toMatchObject({ code: 'build-budget' })
+  // An existing directory blocks the first exclusive scratch write after reservation/baseline.
+  const open = fs.open.bind(fs)
+  const blockedWrite = vi.spyOn(fs, 'open').mockImplementation(async (filename, flags, mode) => {
+    if (String(filename).includes(`${path.sep}files${path.sep}`)) await fs.mkdir(filename)
+    return open(filename, flags, mode)
+  })
+  try { await expect(service.create(frozen, ticket)).rejects.toMatchObject({ code: 'EEXIST' }) }
+  finally { blockedWrite.mockRestore() }
   const restarted = builds(root), lookup = await restarted.lookupCreate('run', ticket)
   expect(lookup).toMatchObject({ status: 'unknown', runId: 'run', target: frozen.target })
   const before = (await fs.readdir(root)).sort()
   await expect(restarted.create(frozen, ticket)).rejects.toMatchObject({ code: 'build-create-unknown' })
   expect((await fs.readdir(root)).sort()).toEqual(before)
   expect(await restarted.lookupCreate('run', ticket)).toEqual(lookup)
-  await expect(restarted.create({ ...frozen, budget: undefined }, ticket)).rejects.toMatchObject({ code: 'operation-payload-mismatch' })
+  await expect(restarted.create({ ...frozen, allowedOrigins: ['https://changed.example'] }, ticket)).rejects.toMatchObject({ code: 'operation-payload-mismatch' })
   await expect(restarted.lookupCreate('run', { ...ticket, requestDigest: 'a'.repeat(64) })).rejects.toMatchObject({ code: 'operation-payload-mismatch' })
   if (lookup?.status !== 'unknown') throw new Error('unknown')
   await expect(fs.access(path.join(root, lookup.jobId, 'state.bin'))).rejects.toMatchObject({ code: 'ENOENT' })

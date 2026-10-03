@@ -112,7 +112,7 @@ it('blocks private redirect and subresource before either reaches its local serv
   })
   privateOrigin = await listen(privateServer)
   const origin = await listen(publicServer)
-  const service = new ManagedBrowserMcpService({ scratchRoot: join(fixture, 'browser'), testLoopbackOrigin: origin })
+  const service = new ManagedBrowserMcpService({ scratchRoot: join(fixture, 'browser'), testLoopbackOrigin: origin, externalBackend: 'edge-mcp' })
   const invoke = (operationId: string, name: string, args: Record<string, unknown>) => service.invoke({ runId: 'egress',
     operationId, name: `mcp.browser.${name}`, arguments: args })
   try {

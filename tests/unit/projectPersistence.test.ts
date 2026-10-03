@@ -33,7 +33,6 @@ import {
 } from '../../src/main/fileDialogs'
 import {
   listRecentProjects,
-  MAX_RECOVERY_PROJECT_BYTES,
   readRecoveryProject,
   recordRecentProject,
   writeRecoveryProject,
@@ -150,22 +149,11 @@ describe('projectPersistence', () => {
     await expect(fs.access(metadataPath)).rejects.toMatchObject({ code: 'ENOENT' })
   })
 
-  it('拒绝空包、超限包和伪 ZIP 恢复数据', async () => {
+  it('拒绝空包和伪 ZIP 恢复数据', async () => {
     await expect(
       writeRecoveryProject({
         projectName: '空工程.h5lesson',
         bytes: new Uint8Array(),
-      }),
-    ).rejects.toMatchObject({ code: 'RECOVERY_SIZE_INVALID' })
-
-    const oversized = new Uint8Array([0x50, 0x4b, 0x03, 0x04])
-    Object.defineProperty(oversized, 'byteLength', {
-      value: MAX_RECOVERY_PROJECT_BYTES + 1,
-    })
-    await expect(
-      writeRecoveryProject({
-        projectName: '超限工程.h5lesson',
-        bytes: oversized,
       }),
     ).rejects.toMatchObject({ code: 'RECOVERY_SIZE_INVALID' })
 
@@ -338,6 +326,33 @@ describe('projectPersistence', () => {
     await confirmProjectOpen(opened.confirmationId)
     expect((await listRecentProjects())[0]?.lastOpenedAt).toBe(promotedAt)
     expect(now).toHaveBeenCalledTimes(2)
+  })
+
+  it('打开、磁盘身份检查、保存和恢复不会因文件大小声明超过旧额度而拒绝', async () => {
+    const selectedPath = path.join(testRoot, 'large-course.h5lesson')
+    const bytes = makeV9RecoveryArchive('large-course')
+    await fs.writeFile(selectedPath, bytes)
+    const stats = await fs.stat(selectedPath)
+    vi.spyOn(fs, 'stat').mockResolvedValue(Object.assign(stats, { size: 600 * 1024 * 1024 }))
+    electronState.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: [selectedPath] })
+    const opened = await openProjectFile({} as Parameters<typeof openProjectFile>[0])
+    expect(opened).not.toBeNull()
+    await confirmProjectOpen(opened!.confirmationId)
+    expect(await saveProjectFile({} as Parameters<typeof saveProjectFile>[0], {
+      path: selectedPath, suggestedName: 'large-course', bytes,
+    })).toEqual({ path: selectedPath })
+    const projectName = '完整标题'.repeat(60)
+    await writeRecoveryProject({ projectName, projectPath: selectedPath, bytes })
+    expect(await readRecoveryProject()).toMatchObject({ projectName, projectPath: selectedPath })
+  })
+
+  it('后续文件选择不会因固定确认数量使尚待确认的打开操作失效', async () => {
+    const selectedPath = path.join(testRoot, 'pending-open.h5lesson')
+    await fs.writeFile(selectedPath, makeV9RecoveryArchive('pending'))
+    electronState.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: [selectedPath] })
+    const first = await openProjectFile({} as Parameters<typeof openProjectFile>[0])
+    for (let i = 0; i < 65; i++) await openProjectFile({} as Parameters<typeof openProjectFile>[0])
+    await expect(confirmProjectOpen(first!.confirmationId)).resolves.toBeUndefined()
   })
 
   it('rebuild AppData 目录保持隔离，且恢复层接受当前课程工程 zip', async () => {

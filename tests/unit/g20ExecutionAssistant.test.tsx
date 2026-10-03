@@ -6,11 +6,11 @@ import { WorkbenchSessionDock, WorkbenchSessionPortalProvider, useWorkbenchSessi
 import { ExecutionTimeline } from '../../src/renderer/workbench/ExecutionTimeline'
 import type { ConversationRecord, WorkspaceRecord } from '../../src/shared/workbench/conversations'
 import type { ExecutionRunRecord } from '../../src/shared/workbench/execution'
-import { EXECUTION_NO_PROGRESS, MODEL_REQUEST_BUDGET_EXHAUSTED } from '../../src/shared/workbench/execution'
 import type { ExecutionDesktopAPI } from '../../src/shared/workbench/executionDesktop'
 import { emptyExecutionProjection, foldExecutionEvents, type ExecutionEvent } from '../../src/shared/workbench/executionEvents'
 import type { ExecutionSettingsView } from '../../src/shared/workbench/executionSettings'
 import type { ExecutionSettingsAPI } from '../../src/shared/workbench/executionSettingsDesktop'
+import { executionInputMessages } from '../../src/shared/workbench/executionInputMessages'
 
 afterEach(() => { cleanup(); localStorage.clear(); vi.unstubAllGlobals() })
 
@@ -22,8 +22,7 @@ const conversation = (id: string, title: string, inputDraft = ''): ConversationR
 const run = (conversationId: string): ExecutionRunRecord => ({
   schemaVersion: 1, runId: 'run', version: 1, input: { conversationId, taskId: 'task', instruction: 'instruction',
     selection: { connection: { id: 'connection', revision: 1, provider: 'fixture', protocol: 'openai-chat', baseURL: 'https://fixture.invalid/v1', accountId: 'account',
-      auth: { kind: 'api-key', credentialRef: 'private' }, billing: { kind: 'token-plan' }, capabilities: { tools: 'unknown', vision: 'unknown', stream: 'unknown', reasoning: 'unknown' } }, model: 'model' }, documents: [] },
-  budget: { maxRequests: 1, maxToolCalls: 1, maxContextBytes: 100 }, status: 'running', createdAt: 1, updatedAt: 1,
+      auth: { kind: 'api-key', credentialRef: 'private' }, billing: { kind: 'token-plan' }, capabilities: { tools: 'unknown', vision: 'unknown', stream: 'unknown', reasoning: 'unknown' } }, model: 'model' }, documents: [] }, status: 'running', createdAt: 1, updatedAt: 1,
   messages: [], initialMessageCount: 0, requests: [], tools: [],
 })
 
@@ -91,6 +90,7 @@ const streamEvent = (sequence: number, text: string, endedRun?: string): Executi
 
 const settingsView = (configured: boolean): ExecutionSettingsView => ({
   secureStorageAvailable: true,
+  modelFavorites: [],
   connections: configured ? [{ connection: { id: 'connection', revision: 1, provider: 'fixture-provider', protocol: 'openai-chat', baseURL: 'https://fixture.invalid/v1', accountId: 'teacher-account',
     auth: { kind: 'api-key', credentialRef: 'private' }, billing: { kind: 'token-plan' }, capabilities: { tools: 'unknown', vision: 'unknown', stream: 'unknown', reasoning: 'unknown' } }, hasCredential: true, revoked: false }] : [],
   profile: { revision: 1, updatedAt: '2026-09-23T00:00:00.000Z', roles: { conversation: configured ? { connectionId: 'connection', model: 'fixture-model' } : null, vision: null, imageGenerate: null, imageEdit: null } },
@@ -99,6 +99,8 @@ const settingsFixture = (configured: boolean): ExecutionSettingsAPI => ({
   read: vi.fn(async () => settingsView(configured)),
   probeCapabilities: vi.fn(async () => { throw new Error('unused') }),
   saveConnection: vi.fn(async () => { throw new Error('unused') }), saveProfile: vi.fn(async () => { throw new Error('unused') }),
+  setModelFavorite: vi.fn(async () => []),
+  knownModels: vi.fn(async () => []),
   revokeConnection: vi.fn(async () => {}), discoverModels: vi.fn(async () => ({ connectionId: 'connection', connectionRevision: 1, models: [], capabilitiesVerified: false as const, source: 'live' as const, checkedAt: '2026-09-25T00:00:00.000Z' })),
   startOAuthLogin: vi.fn(async () => ({ loginId: 'login', status: 'pending' as const })),
   oauthLoginStatus: vi.fn(async () => ({ loginId: 'login', status: 'pending' as const })), cancelOAuthLogin: vi.fn(async () => {}),
@@ -218,6 +220,35 @@ it('preserves a focused unsent composer through the existing close handle and wa
   expect(input).toHaveFocus()
   await ref.current!.preserveDraft()
   expect(state.get('a')?.inputDraft).toBe('保持焦点，关闭后还要继续写。')
+})
+
+it('continues on a conversation revision Main wrote after a task ended instead of failing every later save and send', async () => {
+  // Main writes the ended task's restored input and its reply after this view last read the record; Main refuses the older revision.
+  const { api, state } = executionFixture([conversation('a', '会话 A', '继续')])
+  const refusal = () => new Error(`消息尚未发送：${executionInputMessages['conversation-draft-changed'][0]}`)
+  const draft = vi.mocked(api.draft).getMockImplementation()!, send = vi.mocked(api.send).getMockImplementation()!
+  vi.mocked(api.draft).mockImplementation(input => draft(input).catch(() => { throw refusal() }))
+  vi.mocked(api.send).mockImplementation(input => send(input).catch(() => { throw refusal() }))
+  const reply = (revision: number) => state.set('a', { ...state.get('a')!, revision, messages: [...state.get('a')!.messages,
+    { messageId: `reply-${revision}`, role: 'assistant' as const, text: '任务回复', runId: 'run', createdAt: revision, attachmentIds: [] }] })
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(true)} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  const composer = () => screen.getByRole('textbox', { name: '给创作助手发消息' })
+  await waitFor(() => expect(composer()).toHaveValue('继续'))
+  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-model'))
+  // The restored input sent unchanged is exactly the stored draft, so the same payload goes once more on the new revision.
+  reply(2)
+  fireEvent.keyDown(composer(), { key: 'Enter' })
+  await waitFor(() => expect(api.send).toHaveBeenCalledTimes(2))
+  expect(vi.mocked(api.send).mock.calls.map(([input]) => input.expectedRevision)).toEqual([1, 2])
+  await waitFor(() => expect(screen.getByRole('button', { name: '新建会话' })).toBeEnabled())
+  expect(composer()).toHaveValue('')
+  // A new teacher draft is saved on the latest record instead of the older revision.
+  reply(4)
+  fireEvent.change(composer(), { target: { value: '新的问题' } })
+  fireEvent.blur(composer())
+  await waitFor(() => expect(state.get('a')!.inputDraft).toBe('新的问题'))
+  expect(vi.mocked(api.draft).mock.calls.map(([input]) => input.expectedRevision)).toEqual([3, 4])
+  expect(screen.queryByRole('alert')).toBeNull()
 })
 
 it('restoring an old failed message keeps a different new draft until an explicit replacement choice', async () => {
@@ -441,7 +472,7 @@ it('M12 keeps a newer teacher draft when blur persistence overlaps an explicit c
   expect(api.send).not.toHaveBeenCalled()
 })
 
-function selectionContinuationFixture(fault: 'auth' | 'budget' | 'stalled' | 'unknown' = 'auth') {
+function selectionContinuationFixture(fault: 'auth' | 'transport' | 'unknown' = 'auth') {
   // Main stores frozen refs as `refs()` does and returns submissions in schema key
   // order (writable before selection); the restored composer view orders them differently.
   const range = { kind: 'markdown-range' as const, from: 2, to: 6 }
@@ -457,14 +488,9 @@ function selectionContinuationFixture(fault: 'auth' | 'budget' | 'stalled' | 'un
         revision: value.revision, writeScope: value.writable, ...(value.selection?.length ? { selection: value.selection } : {}) })) }
     state.set(saved.conversationId, saved); return structuredClone(saved)
   })
-  vi.mocked(api.run).mockResolvedValue(fault === 'budget' || fault === 'stalled'
-    ? { ...run('a'), status: 'partial', failure: fault === 'budget'
-      ? { code: MODEL_REQUEST_BUDGET_EXHAUSTED, message: '已达到本次 1 次模型请求上限' }
-      : { code: EXECUTION_NO_PROGRESS, message: '工具结果持续重复' },
-      requests: [{ requestId: 'request', state: 'completed' }] }
-    : { ...run('a'), status: 'failed', requests: [{ requestId: 'request', state: 'failed', failure: fault === 'auth'
+  vi.mocked(api.run).mockResolvedValue({ ...run('a'), status: 'failed', requests: [{ requestId: 'request', state: 'failed', failure: fault === 'auth'
       ? { outcome: 'rejected', kind: 'auth', code: 'http-401', message: 'HTTP 401', httpStatus: 401 }
-      : { outcome: 'unknown', kind: 'protocol', code: 'response-incomplete', message: '结果未知' } }] })
+      : { outcome: 'unknown', kind: fault === 'transport' ? 'transport' : 'protocol', code: 'response-incomplete', message: '结果未知' } }] })
   const documents = [{ documentId: 'doc', epoch: 'epoch', revision: 3, writable: [range], selection: [range] }]
   vi.mocked(api.submissions).mockResolvedValue([{ submissionId: 'submission', workspaceId: 'workspace', conversationId: 'a', state: 'accepted' as const,
     mode: 'queue' as const, text: '原任务', documents, attachments: [], runId: 'run',
@@ -494,26 +520,25 @@ it('M12 lets the teacher clear the restored draft and still continue the frozen 
   expect(vi.mocked(api.send).mock.calls[0][0]).toMatchObject({ text: '原任务', documents, retryOfRunId: 'run' })
 })
 
-it('shows a local request limit and explicitly continues the frozen task once', async () => {
-  const { api, documents } = selectionContinuationFixture('budget')
-  const retry = await screen.findByRole('button', { name: '继续此任务' })
-  expect(screen.getByRole('alert')).toHaveTextContent('本次已达到 1 次模型请求上限')
-  expect(screen.getByRole('alert')).toHaveTextContent('已提交的修改会保留')
+it('continues the frozen task once after an authentication failure', async () => {
+  const { api, documents } = selectionContinuationFixture('auth')
+  const retry = await screen.findByRole('button', { name: '连接恢复后继续此任务' })
+  expect(screen.getByRole('alert')).toHaveTextContent('模型连接认证失败')
   fireEvent.click(retry); fireEvent.click(retry)
   await waitFor(() => expect(api.send).toHaveBeenCalledTimes(1))
   expect(vi.mocked(api.send).mock.calls[0][0]).toMatchObject({ text: '原任务', documents, retryOfRunId: 'run' })
 })
 
-it('explains repeated tool results and offers a manual continuation', async () => {
-  const { api } = selectionContinuationFixture('stalled')
-  expect(await screen.findByRole('alert')).toHaveTextContent('工具结果持续重复，任务已暂停')
-  fireEvent.click(screen.getByRole('button', { name: '继续此任务' }))
+it('explains a transport interruption and offers a manual continuation', async () => {
+  const { api } = selectionContinuationFixture('transport')
+  expect(await screen.findByRole('alert')).toHaveTextContent('模型连接中断')
+  fireEvent.click(screen.getByRole('button', { name: '连接恢复后继续此任务' }))
   await waitFor(() => expect(api.send).toHaveBeenCalledTimes(1))
 })
 
-it('keeps a newer draft when the local request limit is reached', async () => {
-  const { api } = selectionContinuationFixture('budget')
-  const retry = await screen.findByRole('button', { name: '继续此任务' })
+it('keeps a newer draft when a connection fails', async () => {
+  const { api } = selectionContinuationFixture('auth')
+  const retry = await screen.findByRole('button', { name: '连接恢复后继续此任务' })
   fireEvent.change(screen.getByRole('textbox', { name: '给创作助手发消息' }), { target: { value: '新的草稿' } })
   fireEvent.click(retry)
   await screen.findByText(/输入框已有新的文字、附件或文档引用；新草稿已保留/)
@@ -523,7 +548,7 @@ it('keeps a newer draft when the local request limit is reached', async () => {
 it('does not label an unknown provider outcome as a local request limit', async () => {
   selectionContinuationFixture('unknown')
   await screen.findByRole('textbox', { name: '给创作助手发消息' })
-  expect(screen.queryByRole('button', { name: '继续此任务' })).toBeNull()
+  expect(screen.queryByRole('button', { name: '连接恢复后继续此任务' })).toBeNull()
   expect(screen.queryByText(/本次已达到.*模型请求上限/)).toBeNull()
 })
 
@@ -648,6 +673,7 @@ it('switches a verified configured conversation model from the composer and conf
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-provider · fixture-model · Token Plan'))
   fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
   const choices = screen.getByRole('group', { name: '对话模型选择' })
+  fireEvent.click(within(choices).getByRole('button', { name: '更多模型' }))
   expect(choices).toHaveTextContent('alternate-account · Token Plan')
   fireEvent.click(within(choices).getByRole('button', { name: /alternate-modelalternate-provider/ }))
   await waitFor(() => expect(settingsAPI.saveProfile).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 1,
@@ -674,6 +700,7 @@ it('offers a discovered model and provider-declared reasoning strengths without 
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-model'))
   fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
   const menu = screen.getByRole('group', { name: '对话模型选择' })
+  fireEvent.click(within(menu).getByRole('button', { name: '更多模型' }))
   const discovered = await within(menu).findByRole('button', { name: /目录模型/ })
   expect(discovered).toHaveTextContent('目录能力未验证')
   fireEvent.click(discovered)
@@ -734,11 +761,37 @@ it('offers documented GPT-6 OAuth strengths when the directory omits them withou
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('gpt-6-luna'))
   fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
   const effort = within(screen.getByRole('group', { name: '对话模型选择' })).getByRole('group', { name: '推理强度' })
-  await waitFor(() => expect(effort).toHaveTextContent('官方模型选项，当前连接未验证'))
+  await waitFor(() => expect(effort).toHaveTextContent('模型文档补充；当前连接目录未声明，实际支持尚未验证'))
+  expect(effort).not.toHaveTextContent('工具调用在此模式下要求 Responses')
   for (const label of ['关闭', '低', '中', '高', '极高', '最高']) expect(within(effort).getByRole('button', { name: label })).toBeInTheDocument()
   expect(within(effort).queryByRole('button', { name: '极低' })).toBeNull()
   fireEvent.click(within(effort).getByRole('button', { name: '最高' }))
-  await waitFor(() => expect(current.profile.roles.conversation?.parameters).toEqual({ reasoning_effort: 'max' }))
+  await waitFor(() => expect(current.profile.roles.conversation?.parameters).toEqual({ reasoning: { effort: 'max' } }))
+  expect(api.send).not.toHaveBeenCalled()
+})
+
+it('explains GPT Chat tool compatibility without blocking effort selection and removes the hint for thinking off', async () => {
+  const { api } = executionFixture([conversation('a', '课堂讨论')])
+  let current = settingsView(true)
+  current.profile.roles.conversation = { connectionId: 'connection', model: 'gpt-6-luna', parameters: { reasoning_effort: 'high' } }
+  const settingsAPI = settingsFixture(true)
+  vi.mocked(settingsAPI.read).mockImplementation(async () => structuredClone(current))
+  vi.mocked(settingsAPI.saveProfile).mockImplementation(async input => {
+    current = { ...current, profile: { ...current.profile, revision: current.profile.revision + 1, roles: input.roles } }
+    return structuredClone(current.profile)
+  })
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI}
+    captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('gpt-6-luna'))
+  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  const effort = screen.getByRole('group', { name: '推理强度' })
+  expect(effort).toHaveTextContent('工具调用在此模式下要求 Responses')
+  expect(within(effort).getByRole('button', { name: '最高' })).toBeEnabled()
+  fireEvent.click(within(effort).getByRole('button', { name: '关闭' }))
+  await waitFor(() => expect(screen.queryByRole('group', { name: '对话模型选择' })).toBeNull())
+  expect(current.profile.roles.conversation?.parameters).toEqual({ reasoning_effort: 'none' })
+  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  expect(screen.getByRole('group', { name: '推理强度' })).not.toHaveTextContent('工具调用在此模式下要求 Responses')
   expect(api.send).not.toHaveBeenCalled()
 })
 
@@ -759,11 +812,11 @@ it('uses explicit live OAuth effort declarations instead of documented fallbacks
   await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('gpt-6-astra'))
   fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
   const effort = within(screen.getByRole('group', { name: '对话模型选择' })).getByRole('group', { name: '推理强度' })
-  await waitFor(() => expect(effort).not.toHaveTextContent('官方模型选项'))
+  await waitFor(() => expect(effort).not.toHaveTextContent('模型文档补充'))
   expect(within(effort).getByRole('button', { name: '高' })).toBeInTheDocument()
   expect(within(effort).queryByRole('button', { name: '最高' })).toBeNull()
   expect(within(effort).queryByRole('button', { name: '关闭' })).toBeNull()
-  expect(effort).not.toHaveTextContent('官方模型选项')
+  expect(effort).not.toHaveTextContent('模型文档补充')
 })
 
 it('treats an explicit empty OAuth effort directory as authoritative', async () => {
@@ -787,7 +840,7 @@ it('treats an explicit empty OAuth effort directory as authoritative', async () 
   expect(within(effort).getByRole('button', { name: '默认' })).toBeInTheDocument()
 })
 
-it('puts current and familiar OAuth models first, explains their uses, and shortens an opaque account ID', async () => {
+it('shows only explicit favorites by default and exposes searchable connection groups in More without auto-favoriting OAuth models', async () => {
   const { api } = executionFixture([conversation('a', '课堂讨论')])
   const current = settingsView(true)
   const account = '123e4567-e89b-12d3-a456-426614173762'
@@ -795,6 +848,7 @@ it('puts current and familiar OAuth models first, explains their uses, and short
   current.connections[0]!.connection.protocol = 'chatgpt-responses'
   current.connections[0]!.connection.accountId = account
   current.connections[0]!.connection.auth.kind = 'oauth'
+  current.modelFavorites = [{ connectionId: 'connection', model: 'gpt-6-sol' }]
   const settingsAPI = settingsFixture(true)
   vi.mocked(settingsAPI.read).mockResolvedValue(current)
   vi.mocked(settingsAPI.discoverModels).mockResolvedValue({ connectionId: 'connection', connectionRevision: 1,
@@ -808,23 +862,141 @@ it('puts current and familiar OAuth models first, explains their uses, and short
   const menu = screen.getByRole('group', { name: '对话模型选择' })
   await within(menu).findByText(/日常创作与开发/)
   const effort = within(menu).getByRole('group', { name: '推理强度' })
-  const list = within(menu).getByRole('group', { name: '可用模型' })
+  const list = within(menu).getByRole('group', { name: '收藏模型' })
   expect(menu.children[1]).toBe(effort)
   expect(menu.children[2]).toBe(list)
-  expect(list).toContainElement(within(menu).getByRole('button', { name: /gpt-6-sol/ }))
+  expect(list).toContainElement(within(menu).getByRole('button', { name: /gpt-6-solopenai/ }))
   expect(list).not.toContainElement(within(menu).getByRole('button', { name: '管理模型与连接…' }))
   expect(menu).toHaveTextContent('ChatGPT 账号 · 尾号 3762')
   expect(menu).not.toHaveTextContent(account)
-  expect(menu).toHaveTextContent('简单、快速的任务')
-  expect(menu).toHaveTextContent('复杂任务与架构分析')
   expect(menu).toHaveTextContent('目录能力未验证')
-  expect(menu).toHaveTextContent('全部模型（另有 6 个）')
-  const text = menu.textContent ?? ''
-  expect(text.indexOf('fixture-model')).toBeLessThan(text.indexOf('gpt-6-sol'))
-  expect(text.indexOf('gpt-6-sol')).toBeLessThan(text.indexOf('gpt-6-luna'))
-  expect(text.indexOf('gpt-6-luna')).toBeLessThan(text.indexOf('gpt-6-astra'))
+  expect(within(list).queryByRole('button', { name: /fixture-model|gpt-6-luna|gpt-6-astra/ })).toBeNull()
+  expect(within(menu).queryByRole('textbox', { name: '搜索模型' })).toBeNull()
+  expect(settingsAPI.setModelFavorite).not.toHaveBeenCalled()
+  fireEvent.click(within(menu).getByRole('button', { name: '更多模型' }))
+  const groups = within(menu).getByRole('group', { name: '全部连接与模型' })
+  expect(within(groups).getByRole('group', { name: /连接 openai/ })).toHaveTextContent('简单、快速的任务')
+  expect(groups).toHaveTextContent('复杂任务与架构分析')
   fireEvent.change(within(menu).getByRole('textbox', { name: '搜索模型' }), { target: { value: 'older-4' } })
-  expect(within(menu).getByRole('button', { name: /older-4/ })).toBeInTheDocument()
+  expect(within(groups).getByRole('button', { name: /older-4openai/ })).toBeInTheDocument()
+  expect(within(groups).queryByRole('button', { name: /gpt-6-solopenai/ })).toBeNull()
+  expect(api.send).not.toHaveBeenCalled()
+})
+
+it('persists favorites by route without switching models, keeps them through directory failure, and preserves preferences on save failure', async () => {
+  const { api } = executionFixture([conversation('a', '课堂讨论')])
+  let current = settingsView(true)
+  current.profile.roles.conversation!.parameters = { temperature: 0.4 }
+  const alternate = structuredClone(current.connections[0]!)
+  alternate.connection.id = 'alternate'
+  alternate.connection.provider = 'second-provider'
+  alternate.connection.billing.kind = 'subscription'
+  current.connections.push(alternate)
+  const selected = structuredClone(current.profile.roles)
+  const settingsAPI = settingsFixture(true)
+  vi.mocked(settingsAPI.read).mockImplementation(async () => structuredClone(current))
+  vi.mocked(settingsAPI.discoverModels).mockImplementation(async id => {
+    if (id === 'connection') throw new Error('directory-unavailable')
+    return { connectionId: id, connectionRevision: 1, models: [{ id: 'fixture-model' }], capabilitiesVerified: false,
+      source: 'live', checkedAt: '2026-10-03T00:00:00.000Z' }
+  })
+  vi.mocked(settingsAPI.setModelFavorite).mockImplementation(async ({ connectionId, model, favorite }) => {
+    const remaining = (current.modelFavorites ?? []).filter(value => value.connectionId !== connectionId || value.model !== model)
+    current = { ...current, modelFavorites: favorite ? [...remaining, { connectionId, model }] : remaining }
+    return structuredClone(current.modelFavorites!)
+  })
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI}
+    captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-model'))
+  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  let menu = screen.getByRole('group', { name: '对话模型选择' })
+  expect(menu).toHaveTextContent('还没有收藏模型')
+  expect(within(menu).queryByRole('button', { name: /fixture-modelfixture-provider/ })).toBeNull()
+  fireEvent.click(within(menu).getByRole('button', { name: '更多模型' }))
+  const originalGroup = within(menu).getByRole('group', { name: /连接 fixture-provider/ })
+  fireEvent.click(within(originalGroup).getByRole('button', { name: /收藏 fixture-model/ }))
+  await waitFor(() => expect(within(originalGroup).getByRole('button', { name: /取消收藏 fixture-model/ })).toBeEnabled())
+  const otherGroup = within(menu).getByRole('group', { name: /连接 second-provider/ })
+  fireEvent.click(await within(otherGroup).findByRole('button', { name: /收藏 fixture-model/ }))
+  await waitFor(() => expect(current.modelFavorites).toEqual([
+    { connectionId: 'connection', model: 'fixture-model' }, { connectionId: 'alternate', model: 'fixture-model' },
+  ]))
+  expect(menu.querySelector('button button')).toBeNull()
+  expect(settingsAPI.saveProfile).not.toHaveBeenCalled()
+  expect(current.profile.roles).toEqual(selected)
+  fireEvent.click(within(menu).getByRole('button', { name: '返回收藏' }))
+  expect(within(menu).getByRole('group', { name: '收藏模型' }).querySelectorAll('.execution-assistant__model-option')).toHaveLength(2)
+  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  menu = screen.getByRole('group', { name: '对话模型选择' })
+  const favoriteList = within(menu).getByRole('group', { name: '收藏模型' })
+  expect(within(favoriteList).getByRole('button', { name: /fixture-modelfixture-provider/ })).toHaveAttribute('aria-pressed', 'true')
+  fireEvent.click(within(favoriteList).getByRole('button', { name: /取消收藏 fixture-model · fixture-provider/ }))
+  await waitFor(() => expect(current.modelFavorites).toEqual([{ connectionId: 'alternate', model: 'fixture-model' }]))
+  expect(current.profile.roles).toEqual(selected)
+  vi.mocked(settingsAPI.setModelFavorite).mockRejectedValueOnce(new Error('save-failed'))
+  fireEvent.click(within(favoriteList).getByRole('button', { name: /取消收藏 fixture-model · second-provider/ }))
+  await within(menu).findByRole('alert')
+  expect(menu).toHaveTextContent('收藏未保存；原偏好保留')
+  expect(within(favoriteList).getByRole('button', { name: /fixture-modelsecond-provider/ })).toBeInTheDocument()
+  expect(current.modelFavorites).toEqual([{ connectionId: 'alternate', model: 'fixture-model' }])
+  expect(current.profile.roles).toEqual(selected)
+  expect(api.send).not.toHaveBeenCalled()
+})
+
+it('shows favorites for revoked or missing connections as unavailable without changing the current role', async () => {
+  const { api } = executionFixture([conversation('a', '课堂讨论')])
+  const current = settingsView(true)
+  const revoked = structuredClone(current.connections[0]!)
+  revoked.connection.id = 'revoked'
+  revoked.revoked = true
+  current.connections.push(revoked)
+  current.modelFavorites = [{ connectionId: 'revoked', model: 'saved-model' }, { connectionId: 'removed', model: 'missing-model' }]
+  const settingsAPI = settingsFixture(true)
+  vi.mocked(settingsAPI.read).mockResolvedValue(current)
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI}
+    captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-model'))
+  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  const favorites = screen.getByRole('group', { name: '收藏模型' })
+  expect(within(favorites).getByRole('button', { name: /saved-modelfixture-provider/ })).toBeDisabled()
+  expect(within(favorites).getByRole('button', { name: /missing-modelremoved/ })).toBeDisabled()
+  expect(favorites).toHaveTextContent('连接不可用')
+  expect(settingsAPI.saveProfile).not.toHaveBeenCalled()
+  expect(api.send).not.toHaveBeenCalled()
+})
+
+it('maps DeepSeek reasoning off, restored low, and default from the UI while preserving unrelated advanced parameters', async () => {
+  const { api } = executionFixture([conversation('a', '课堂讨论')])
+  let current = settingsView(true)
+  current.connections[0]!.connection.provider = 'teamorouter'
+  current.profile.roles.conversation = { connectionId: 'connection', model: 'deepseek-flash',
+    parameters: { thinking: { type: 'enabled', extra: 'keep' }, reasoning_effort: 'max', temperature: 0.4 } }
+  const settingsAPI = settingsFixture(true)
+  vi.mocked(settingsAPI.read).mockImplementation(async () => structuredClone(current))
+  vi.mocked(settingsAPI.saveProfile).mockImplementation(async input => {
+    current = { ...current, profile: { ...current.profile, revision: current.profile.revision + 1, roles: input.roles } }
+    return structuredClone(current.profile)
+  })
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI}
+    captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('deepseek-flash'))
+  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  fireEvent.click(within(screen.getByRole('group', { name: '推理强度' })).getByRole('button', { name: '关闭' }))
+  await waitFor(() => expect(current.profile.roles.conversation?.parameters).toEqual({ thinking: { type: 'disabled', extra: 'keep' }, temperature: 0.4 }))
+  await waitFor(() => expect(screen.queryByRole('group', { name: '对话模型选择' })).toBeNull())
+  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  let effort = screen.getByRole('group', { name: '推理强度' })
+  expect(within(effort).getByRole('button', { name: '关闭' })).toHaveAttribute('aria-pressed', 'true')
+  expect(within(effort).getByRole('button', { name: '默认' })).toHaveAttribute('aria-pressed', 'false')
+  fireEvent.click(within(effort).getByRole('button', { name: '低' }))
+  await waitFor(() => expect(current.profile.roles.conversation?.parameters).toEqual({ thinking: { type: 'enabled', extra: 'keep' }, reasoning_effort: 'low', temperature: 0.4 }))
+  await waitFor(() => expect(screen.queryByRole('group', { name: '对话模型选择' })).toBeNull())
+  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  effort = screen.getByRole('group', { name: '推理强度' })
+  expect(within(effort).getByRole('button', { name: '低' })).toHaveAttribute('aria-pressed', 'true')
+  fireEvent.click(within(effort).getByRole('button', { name: '默认' }))
+  await waitFor(() => expect(current.profile.roles.conversation?.parameters).toEqual({ thinking: { extra: 'keep' }, temperature: 0.4 }))
   expect(api.send).not.toHaveBeenCalled()
 })
 
@@ -938,3 +1110,85 @@ it('displays conversation home location for folder, file, unhomed, missing, othe
   window.removeEventListener('guoling:reveal-in-explorer', listener)
 })
 
+
+
+it('automatically maps catalog Claude effort to Messages controls on the same metered connection', async () => {
+  const { api } = executionFixture([conversation('a', '课堂讨论')])
+  let current = settingsView(true)
+  current.connections[0]!.connection.baseURL = 'https://api.teamorouter.com/v1'
+  current.connections[0]!.connection.billing.kind = 'metered'
+  current.profile.roles.conversation = { connectionId: 'connection', model: 'claude-opus-4-6', parameters: { temperature: 0.4 } }
+  const settingsAPI = settingsFixture(true)
+  vi.mocked(settingsAPI.read).mockImplementation(async () => structuredClone(current))
+  vi.mocked(settingsAPI.discoverModels).mockResolvedValue({ connectionId: 'connection', connectionRevision: 1,
+    models: [{ id: 'claude-opus-4-6', metadata: { id: 'claude-opus-4-6', provider: 'anthropic', reasoning: { kind: 'effort', efforts: ['low', 'high', 'max'] } }, metadataSource: 'models.dev' }],
+    capabilitiesVerified: false, source: 'live', checkedAt: '2026-10-03T00:00:00.000Z' })
+  vi.mocked(settingsAPI.saveProfile).mockImplementation(async input => {
+    current = { ...current, profile: { ...current.profile, revision: current.profile.revision + 1, roles: input.roles } }
+    return structuredClone(current.profile)
+  })
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('claude-opus-4-6'))
+  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  const group = screen.getByRole('group', { name: '推理强度' })
+  fireEvent.click(await within(group).findByRole('button', { name: '最高' }))
+  await waitFor(() => expect(current.profile.roles.conversation?.parameters).toEqual({ temperature: 0.4, thinking: { type: 'adaptive' }, output_config: { effort: 'max' } }))
+  expect(current.connections[0]!.connection).toMatchObject({ protocol: 'openai-chat', billing: { kind: 'metered' } })
+  expect(api.send).not.toHaveBeenCalled()
+})
+
+it('selects a searchable capability reference for an unknown alias without JSON or changing its request model', async () => {
+  const { api } = executionFixture([conversation('a', '课堂讨论')])
+  let current = settingsView(true)
+  current.connections[0]!.connection.baseURL = 'https://api.teamorouter.com/v1'
+  current.profile.roles.conversation = { connectionId: 'connection', model: 'private-alias', parameters: { temperature: 0.4, thinking: { type: 'enabled', budget_tokens: 12000 } } }
+  const settingsAPI = settingsFixture(true)
+  vi.mocked(settingsAPI.knownModels).mockResolvedValue([{ id: 'anthropic/claude-opus-4-6', provider: 'another-router', reasoning: { kind: 'effort', efforts: ['none', 'low', 'high'] } },
+    { id: 'claude-opus-4-6', provider: 'anthropic', reasoning: { kind: 'effort', efforts: ['low', 'high', 'max'] } }, { id: 'gpt-5.4-mini', provider: 'openai' }])
+  vi.mocked(settingsAPI.read).mockImplementation(async () => structuredClone(current))
+  vi.mocked(settingsAPI.saveProfile).mockImplementation(async input => {
+    current = { ...current, profile: { ...current.profile, revision: current.profile.revision + 1, roles: input.roles } }
+    return structuredClone(current.profile)
+  })
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('private-alias'))
+  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  const reference = await screen.findByLabelText('参考型号')
+  await within(reference).findByRole('option', { name: 'claude-opus-4-6' })
+  fireEvent.change(screen.getByLabelText('搜索参考型号'), { target: { value: 'claude' } })
+  expect(within(reference).queryByRole('option', { name: 'gpt-5.4-mini' })).toBeNull()
+  fireEvent.change(reference, { target: { value: 'anthropic/claude-opus-4-6' } })
+  await waitFor(() => expect(current.profile.roles.conversation).toMatchObject({ model: 'private-alias', capabilityModel: 'anthropic/claude-opus-4-6', parameters: { temperature: 0.4 } }))
+  expect(within(screen.getByRole('group', { name: '推理强度' })).queryByRole('button', { name: '关闭' })).toBeNull()
+  fireEvent.click(await within(screen.getByRole('group', { name: '推理强度' })).findByRole('button', { name: '高' }))
+  await waitFor(() => expect(current.profile.roles.conversation?.parameters).toEqual({ temperature: 0.4, thinking: { type: 'adaptive' }, output_config: { effort: 'high' } }))
+  expect(current.profile.roles.conversation?.model).toBe('private-alias')
+  expect(current.profile.roles.conversation?.connectionId).toBe('connection')
+  expect(api.send).not.toHaveBeenCalled()
+})
+
+it('sets Haiku thinking tokens directly and supports disabling or default without fabricating a task limit', async () => {
+  const { api } = executionFixture([conversation('a', '课堂讨论')])
+  let current = settingsView(true)
+  current.connections[0]!.connection.baseURL = 'https://api.teamorouter.com/v1'
+  current.profile.roles.conversation = { connectionId: 'connection', model: 'claude-haiku-4-5', parameters: { temperature: 0.4 } }
+  const settingsAPI = settingsFixture(true)
+  vi.mocked(settingsAPI.read).mockImplementation(async () => structuredClone(current))
+  vi.mocked(settingsAPI.saveProfile).mockImplementation(async input => {
+    current = { ...current, profile: { ...current.profile, revision: current.profile.revision + 1, roles: input.roles } }
+    return structuredClone(current.profile)
+  })
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsAPI} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('claude-haiku-4-5'))
+  fireEvent.click(screen.getByRole('button', { name: '切换模型' }))
+  const group = screen.getByRole('group', { name: '思考 token 设置' })
+  expect(within(group).getByRole('button', { name: '开启思考' })).toBeDisabled()
+  fireEvent.change(screen.getByLabelText('思考 token 数'), { target: { value: '12000' } })
+  fireEvent.click(within(group).getByRole('button', { name: '开启思考' }))
+  await waitFor(() => expect(current.profile.roles.conversation?.parameters).toEqual({ temperature: 0.4, thinking: { type: 'enabled', budget_tokens: 12000 } }))
+  fireEvent.click(within(group).getByRole('button', { name: '关闭思考' }))
+  await waitFor(() => expect(current.profile.roles.conversation?.parameters).toEqual({ temperature: 0.4, thinking: { type: 'disabled' } }))
+  fireEvent.click(within(group).getByRole('button', { name: '默认' }))
+  await waitFor(() => expect(current.profile.roles.conversation?.parameters).toEqual({ temperature: 0.4 }))
+  expect(api.send).not.toHaveBeenCalled()
+})

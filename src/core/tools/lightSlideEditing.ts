@@ -13,6 +13,7 @@ import { locateSceneInteractions, planAddSlideInteractionRule, planUpdateSlideIn
 import { patchEffectiveLayerPropertiesAtTarget, materializeNamedStateItem } from './layerProperties'
 import { makeEffectiveLayerAuthoringAddress } from './layerCommands'
 import { locateCourseLayer } from '../drivers/course/layerProperties'
+import { effectiveSceneCanvas } from '../../shared/slideCanvas'
 
 export const LIGHT_SLIDE_OPACITIES = [1, 0.75, 0.5, 0.25] as const
 export const LIGHT_SLIDE_LINE_SPACING = [0, 4, 8, 16] as const
@@ -82,15 +83,16 @@ export function planSlideSceneBackground(project: CourseProjectDocument, locatio
 }
 
 export function planSlidePageAlignment(project: CourseProjectDocument, target: SlideLightTarget, alignment: SlidePageAlignment): CourseProjectDocument {
-  const { surface } = context(project, target)
+  const { surface, scene } = context(project, target)
+  const canvas = effectiveSceneCanvas(surface, scene)
   const item = effectiveItem(project, target)
   const radians = item.rotation * Math.PI / 180
   const boundsWidth = Math.abs(item.frame.width * Math.cos(radians)) + Math.abs(item.frame.height * Math.sin(radians))
   const boundsHeight = Math.abs(item.frame.width * Math.sin(radians)) + Math.abs(item.frame.height * Math.cos(radians))
   const left = item.frame.x + (item.frame.width - boundsWidth) / 2
   const top = item.frame.y + (item.frame.height - boundsHeight) / 2
-  const desiredLeft = alignment === 'left' ? 0 : alignment === 'center-x' ? (surface.canvas.width - boundsWidth) / 2 : alignment === 'right' ? surface.canvas.width - boundsWidth : left
-  const desiredTop = alignment === 'top' ? 0 : alignment === 'center-y' ? (surface.canvas.height - boundsHeight) / 2 : alignment === 'bottom' ? surface.canvas.height - boundsHeight : top
+  const desiredLeft = alignment === 'left' ? 0 : alignment === 'center-x' ? (canvas.width - boundsWidth) / 2 : alignment === 'right' ? canvas.width - boundsWidth : left
+  const desiredTop = alignment === 'top' ? 0 : alignment === 'center-y' ? (canvas.height - boundsHeight) / 2 : alignment === 'bottom' ? canvas.height - boundsHeight : top
   if (!['left', 'center-x', 'right', 'top', 'center-y', 'bottom'].includes(alignment)) throw new Error('不支持的页面对齐方式')
   return property(project, target, { frame: { x: item.frame.x + desiredLeft - left, y: item.frame.y + desiredTop - top } })
 }
@@ -153,7 +155,7 @@ export function planSlideAudioPlacement(project: CourseProjectDocument, input: S
   if (!existingAsset && (!input.bytes || input.bytes.length !== input.asset.byteLength)) throw new Error('音频资源字节缺失或长度不符')
   const sound = Object.values(project.media.audio.sounds).find(value => value.assetId === input.asset.id)
     ?? createCourseSoundDefinition(input.asset)
-  const node = createTextNode({ id: input.buttonId, name: `音频：${sound.name}`, text: `▶ ${sound.name}`, x: input.x, y: input.y, canvas: surface.canvas })
+  const node = createTextNode({ id: input.buttonId, name: `音频：${sound.name}`, text: `▶ ${sound.name}`, x: input.x, y: input.y, canvas: effectiveSceneCanvas(surface, scene) })
   const item = sceneNodeToCourseLayerItem(node)
   const rule: InteractionRule = { id: input.ruleId, enabled: true, trigger: { type: 'node.click', nodeId: item.layerItemId }, conditions: [], actions: [{ id: input.stepId, start: 'after-previous', delayMs: 0, action: { type: 'audio.play', soundId: sound.id, loop: false, ifPlaying: 'restart', lifetime: 'scene' } }] }
   const next = commitCourseProjectMutation(project, draft => {

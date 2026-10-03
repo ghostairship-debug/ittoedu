@@ -3,20 +3,15 @@ import type {
   ModelAssistantMessage, ModelConnectionSnapshot, ModelEvent, ModelFailure, ModelJson,
   ModelJsonObject, ModelNativeToolCall, ModelProvider, ModelRequest, ModelUsage,
 } from '../../../shared/workbench/modelProvider'
-import { ModelStreamClock } from './ModelStreamClock'
+import { effectiveModelProtocol } from '../../../shared/workbench/modelRouting'
 import { serverSentEvents } from './serverSentEvents'
+import { modelFetch, responseIdleTimeoutCode } from './modelFetch'
 import { httpFailureKind } from './providerHttpFailure'
 
 export interface OpenAIChatProviderOptions {
   /** Main-owned resolver. Product configuration uses secure references, never ambient environment keys. */
   credentialResolver(connection: Readonly<ModelConnectionSnapshot>): Promise<string>
   fetch?: typeof fetch
-  /** Maximum silence while waiting for a valid SSE data event; defaults to 120 seconds. */
-  timeoutMs?: number
-  progressTimeoutMs?: number
-  /** Optional explicit request deadline. Absent/null relies on activity and progress clocks. */
-  maxDurationMs?: number | null
-  maxResponseBytes?: number
   now?: () => number
   /** Receives only fixed-category protocol shape metadata, never response bytes. */
   onProtocolShape?: (diagnostic: ToolFragmentDiagnostic) => Promise<void> | void
@@ -104,7 +99,8 @@ function retryAfter(value: string | null, now: number): number | undefined {
   const date = Date.parse(value)
   return Number.isFinite(date) ? Math.max(0, date - now) : undefined
 }
-async function untilAbort<T>(work: () => Promise<T>, signal: AbortSignal): Promise<T> {
+/** Cancel a local wait without claiming an ignored upstream operation has stopped. */
+export async function waitForModelOperation<T>(work: () => Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted) throw new Error('aborted')
   let onAbort: () => void = () => undefined
   const interrupted = new Promise<never>((_resolve, reject) => {
@@ -129,14 +125,14 @@ export type ModelRequestPayload = Pick<ModelRequest, 'selection' | 'messages' | 
 function prepare(request: ModelRequestPayload) {
   const connection = request.selection.connection
   if (!request.selection.model || !connection.id || !connection.accountId || !connection.auth.credentialRef
-    || !validCounter(connection.revision) || connection.protocol !== 'openai-chat' || connection.auth.kind !== 'api-key') throw new Error('invalid-connection')
+    || !validCounter(connection.revision) || effectiveModelProtocol(request.selection) !== 'openai-chat' || connection.auth.kind !== 'api-key') throw new Error('invalid-connection')
   const base = new URL(connection.baseURL)
   if (base.username || base.password || base.search || base.hash || !['http:', 'https:'].includes(base.protocol)) throw new Error('invalid-endpoint')
   if (connection.capabilities.stream === 'unsupported' || (request.tools?.length && connection.capabilities.tools === 'unsupported')) throw new Error('unsupported-capability')
   if (connection.capabilities.vision === 'unsupported' && request.messages.some(message => Array.isArray(message.content)
     && message.content.some(part => object(part) && ['image_url', 'input_image'].includes(String(part.type))))) throw new Error('unsupported-vision')
   if (!request.messages.length) throw new Error('missing-messages')
-  if (request.messages.some(message => message.nativeResponses !== undefined)) throw new Error('incompatible-native-continuation')
+  if (request.messages.some(message => message.nativeResponses !== undefined || message.nativeAnthropic !== undefined)) throw new Error('incompatible-native-continuation')
   const parameters = request.selection.parameters ?? {}
   const reserved = ['model', 'messages', 'tools', 'stream', 'stream_options', 'n', 'api_key', 'apiKey', 'authorization', 'headers', 'base_url', 'baseURL']
   if (Object.keys(parameters).some(key => reserved.includes(key))) throw new Error('reserved-parameter')
@@ -148,7 +144,12 @@ function prepare(request: ModelRequestPayload) {
     const name = modelToolWireName(tool.name)
     if (names.has(name)) throw new Error('tool-name-collision')
     names.set(name, tool.name)
-    return { type: 'function', function: { name, description: tool.description, parameters: tool.inputSchema } }
+    // OpenAI-compatible providers require tool parameters to be a JSON schema rooted at `type: 'object'`.
+    // Preserve the caller's inputSchema untouched and only add the root type when absent.
+    const source = tool.inputSchema
+    const parameters = source && typeof source === 'object' && !Array.isArray(source) && source.type === undefined
+      ? { type: 'object', ...source } : source
+    return { type: 'function', function: { name, description: tool.description, parameters } }
   })
   const endpoint = connection.baseURL.replace(/\/+$/, '') + '/chat/completions'
   return { endpoint, names, body: { ...parameters, model: request.selection.model, messages: request.messages,
@@ -170,12 +171,11 @@ export class OpenAIChatProvider implements ModelProvider {
     const requestId = input.requestId
     const event = <T extends Omit<ModelEvent, 'requestId' | 'sequence'>>(value: T) => ({ ...value, requestId, sequence: ++sequence }) as unknown as ModelEvent
     const controller = new AbortController()
-    let timeout = false, attempted = false, httpStatus: number | undefined, providerRequestId: string | undefined
+    let attempted = false, httpStatus: number | undefined, providerRequestId: string | undefined
     let failureShape: Omit<ToolFragmentDiagnostic, 'code'> | undefined
     const abort = () => controller.abort()
     options.signal?.addEventListener('abort', abort, { once: true })
     if (options.signal?.aborted) abort()
-    const clock = new ModelStreamClock(this.options, () => { if (!controller.signal.aborted) { timeout = true; controller.abort() } })
     const ensureActive = () => { if (controller.signal.aborted) throw new Error('aborted') }
     let response: Response | undefined
     try {
@@ -188,7 +188,7 @@ export class OpenAIChatProvider implements ModelProvider {
         return
       }
       let credential: string
-      try { credential = await untilAbort(() => this.options.credentialResolver(request.selection.connection), controller.signal) }
+      try { credential = await waitForModelOperation(() => this.options.credentialResolver(request.selection.connection), controller.signal) }
       catch {
         ensureActive()
         yield event({ type: 'response.failed', failure: { outcome: 'not-sent', kind: 'auth', code: 'credential-unavailable', message: '无法读取所选连接的凭据；请求未发送。' } })
@@ -200,8 +200,7 @@ export class OpenAIChatProvider implements ModelProvider {
         return
       }
       attempted = true
-      clock.activity()
-      response = await (this.options.fetch ?? fetch)(prepared.endpoint, {
+      response = await modelFetch(this.options.fetch)(prepared.endpoint, {
         method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream', Authorization: `Bearer ${credential}` },
         body: serializeModelRequest(request), signal: controller.signal, redirect: 'error',
       })
@@ -226,10 +225,7 @@ export class OpenAIChatProvider implements ModelProvider {
       const native: ModelJsonObject = {}, choiceFields: ModelJsonObject = {}
       const chunks: ModelJson[] = []
       let responseId: string | undefined, actualModel: string | undefined, finishReason: string | undefined, done = false, usage: ModelUsage | undefined
-      for await (const data of serverSentEvents(response.body, this.options.maxResponseBytes ?? 16 * 1024 * 1024, () => clock.activity())) {
-        // The data event has arrived: downstream checkpointing and UI consumption
-        // cannot count as time spent waiting for the next upstream event.
-        clock.pause()
+      for await (const data of serverSentEvents(response.body)) {
         ensureActive()
         if (data === '[DONE]') { done = true; break }
         let chunk: ModelJsonObject
@@ -260,7 +256,6 @@ export class OpenAIChatProvider implements ModelProvider {
           const text = appendText(assistant, 'content', delta.content)
           const reasoning = appendText(assistant, 'reasoning_content', delta.reasoning_content)
           appendText(assistant, 'refusal', delta.refusal)
-          if (text || reasoning) clock.progress()
           if (text) { yield event({ type: 'text.delta', text }); ensureActive() }
           if (reasoning) { yield event({ type: 'reasoning.delta', text: reasoning }); ensureActive() }
           if (delta.tool_calls !== undefined && delta.tool_calls !== null) {
@@ -288,7 +283,6 @@ export class OpenAIChatProvider implements ModelProvider {
                 retain(call.function, fn, ['name', 'arguments'])
                 argumentsDelta = appendText(call.function, 'arguments', fn.arguments)
               }
-              if (argumentsDelta) clock.progress()
               yield event({ type: 'tool.delta', index, ...(call.id ? { id: call.id } : {}),
                 ...(call.function.name ? { name: prepared.names.get(call.function.name) ?? call.function.name } : {}), argumentsDelta })
               ensureActive()
@@ -300,7 +294,6 @@ export class OpenAIChatProvider implements ModelProvider {
             finishReason = choice.finish_reason
           }
         }
-        clock.resume()
       }
       ensureActive()
       if (!done || !responseId || !actualModel || !finishReason) throw new ProtocolError('incomplete-stream')
@@ -321,8 +314,9 @@ export class OpenAIChatProvider implements ModelProvider {
         toolCalls: ordered.map(([, call]) => ({ id: call.id, name: prepared.names.get(call.function.name)!, argumentsText: call.function.arguments })),
         finishReason, ...(usage ? { usage } : {}), nativeResponse })
     } catch (error) {
-      const kind: ModelFailure['kind'] = controller.signal.aborted ? timeout ? 'timeout' : 'aborted' : error instanceof ProtocolError ? 'protocol' : 'transport'
-      if (kind === 'transport' && this.options.onTransportDiagnostic) {
+      const idleCode = controller.signal.aborted ? undefined : responseIdleTimeoutCode(error)
+      const kind: ModelFailure['kind'] = controller.signal.aborted ? 'aborted' : idleCode ? 'timeout' : error instanceof ProtocolError ? 'protocol' : 'transport'
+      if ((kind === 'transport' || kind === 'timeout') && this.options.onTransportDiagnostic) {
         const report = this.options.onTransportDiagnostic, detail = transportDiagnostic(error, response, httpStatus)
         void Promise.resolve().then(() => report(detail)).catch(() => undefined)
       }
@@ -331,11 +325,11 @@ export class OpenAIChatProvider implements ModelProvider {
         void Promise.resolve().then(() => report(detail)).catch(() => undefined)
       }
       yield event({ type: 'response.failed', failure: { outcome: attempted ? 'unknown' : 'not-sent', kind,
-        code: error instanceof ProtocolError ? error.message : kind,
-        message: attempted ? '模型请求结果未能完整确认；片段与已提交工具保留，是否重试由执行器决定。' : '模型请求尚未发送。',
+        code: idleCode ?? (error instanceof ProtocolError ? error.message : kind),
+        message: idleCode ? '模型响应长时间未收到网络数据，连接已结束；是否重试由执行器决定，已提交工具不会重放。'
+          : attempted ? '模型请求结果未能完整确认；片段与已提交工具保留，是否重试由执行器决定。' : '模型请求尚未发送。',
         ...(httpStatus !== undefined ? { httpStatus } : {}), ...(providerRequestId ? { providerRequestId } : {}) } })
     } finally {
-      clock.dispose()
       options.signal?.removeEventListener('abort', abort)
       controller.abort()
       if (response?.body && !response.body.locked) await response.body.cancel().catch(() => undefined)

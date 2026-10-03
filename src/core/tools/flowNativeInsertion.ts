@@ -1,4 +1,4 @@
-import { CANVAS_WIDTH, CANVAS_HEIGHT, MAX_SCENE_NODES } from '../../shared/constants'
+import { CANVAS_WIDTH, CANVAS_HEIGHT } from '../../shared/constants'
 import type { CourseProjectDocument, LayerItem, NativeLayerItem } from '../../shared/courseProjectTypes'
 import type { ShapeType } from '../../shared/contracts/native-v1'
 import { sceneNodeToCourseLayerItem } from '../../shared/courseProjectModel'
@@ -12,12 +12,6 @@ export function appendOverlayItem(
   destination: { source: 'global' | 'surface'; surfaceId: string },
   item: LayerItem,
 ): void {
-  const ownerCount = destination.source === 'global'
-    ? draft.globalLayerItems.length
-    : flowSurfaceIn(draft, destination.surfaceId).surfaceLayerItems.length
-  if (ownerCount >= MAX_SCENE_NODES) {
-    throw new Error(`已达到 ${MAX_SCENE_NODES} 个节点上限`)
-  }
   item.order = allocateCourseLayerOrder(draft, item.order)
   const scoped = { item, visibility: { mode: 'all' as const, locationIds: [] } }
   if (destination.source === 'global') {

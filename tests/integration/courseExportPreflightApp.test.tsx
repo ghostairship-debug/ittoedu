@@ -62,7 +62,7 @@ vi.mock('../../src/renderer/export/exportSize', async (importOriginal) => {
   return {
     ...actual,
     utf8ByteLength: (value: string) => sizeProbe.forceWarning
-      ? actual.SINGLE_HTML_WARNING_BYTES + 1
+      ? 300 * 1024 * 1024
       : actual.utf8ByteLength(value),
   }
 })
@@ -563,7 +563,7 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
     expect(api.exportWebPackage).not.toHaveBeenCalled()
   })
 
-  it('keeps online-lightweight mode through preflight and the large HTML confirmation', async () => {
+  it('keeps online-lightweight mode through preflight and exports HTML beyond the former 256 MiB limit', async () => {
     const api = appApi()
     sizeProbe.forceWarning = true
     await renderAppWithCourse(loadCourseWithRemoteBackground(), api)
@@ -582,6 +582,7 @@ describe('ARCH-4 V9 HTML/Web export preflight', () => {
       name: '单 HTML 文件较大',
     })).toBeVisible()
     expect(api.exportHtml).not.toHaveBeenCalled()
+    expect(screen.getByText(/300\.0 MB/)).toBeVisible()
     fireEvent.click(screen.getByRole('button', { name: /仍导出单 HTML/ }))
 
     await waitFor(() => expect(api.exportHtml).toHaveBeenCalledOnce())
