@@ -1,7 +1,7 @@
 import { selectionReference, workbenchSelection, type ContextualEditRequest } from './SelectionContextController'
 import { elementCards } from './elementCards/elementCardController'
 import './selectionContext.css'
-import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
+import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { File, Folder } from 'lucide-react'
 import { dispatchRevealInExplorer } from './revealInExplorer'
@@ -1027,6 +1027,14 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     setPendingRestore(null)
     composerRef.current?.focus()
   }
+  // The dialog focuses its own button after it opens; the composer takes focus back only once the dialog is gone
+  // (confirm, cancel or Escape), so an early click cannot leave focus on a button that is about to be removed.
+  const cancelRestore = useCallback(() => setPendingRestore(null), [])
+  const restoreDialogOpen = pendingRestore !== null, restoreDialogWasOpen = useRef(false)
+  useLayoutEffect(() => {
+    if (restoreDialogWasOpen.current && !restoreDialogOpen) composerRef.current?.focus()
+    restoreDialogWasOpen.current = restoreDialogOpen
+  }, [restoreDialogOpen])
   const restoreSubmission = async (submission: ExecutionSubmissionRecord) => {
     await capturePromise.current
     if (activeRef.current?.conversationId !== submission.conversationId) return
@@ -1467,7 +1475,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     <ConfirmDialog open={pendingRestore !== null} title="输入框已有另一份草稿" message="恢复这条消息会替换当前文字、附件和引用。可以先保留当前输入，原消息仍在历史中。"
       confirmLabel="替换为这条消息" cancelLabel="保留当前输入"
       details={pendingRestore && <pre className="execution-assistant__restore-preview">{pendingRestore.text || `附件 ${pendingRestore.attachments.length} 个`}</pre>}
-      onCancel={() => { setPendingRestore(null); composerRef.current?.focus() }}
+      onCancel={cancelRestore}
       onConfirm={() => { if (pendingRestore) applyRestoredSubmission(pendingRestore) }} />
     {externalAPI && active && <ExternalMcpPanel open={externalOpen} onClose={() => setExternalOpen(false)} api={externalAPI}
       workspaceId={workspaceId} conversation={active} documents={documents} instruction={draft} documentNames={documentNames}
