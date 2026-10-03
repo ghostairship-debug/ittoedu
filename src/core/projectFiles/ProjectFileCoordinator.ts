@@ -54,14 +54,14 @@ export class ProjectFileCoordinator {
 
   stopRun(runId: string): void { this.versions.delete(runId) }
 
-  private remember(runId: string, documentId: string, file: ProjectFileRead, model: CourseModel): void {
+  remember(runId: string, documentId: string, file: ProjectFileRead, model: CourseModel): void {
     const run = this.versions.get(runId) ?? new Map<string, string>()
     run.set(`${documentId}\u0000${projectFileIdentity(file)}`, projectFileVersion(file, model.resources))
     this.versions.set(runId, run)
   }
 
   /** A whole-file write replaces only what this run has seen. */
-  private assertFresh(runId: string, snapshot: CourseSnapshot, file: ProjectFileRead): void {
+  assertFresh(runId: string, snapshot: CourseSnapshot, file: ProjectFileRead): void {
     const seen = this.versions.get(runId)?.get(`${snapshot.documentId}\u0000${projectFileIdentity(file)}`)
     if (seen === undefined) throw new ProjectFileError('read-required', `写入已有文件前请先读取：${file.path}`)
     if (seen !== projectFileVersion(file, snapshot.model.resources))
