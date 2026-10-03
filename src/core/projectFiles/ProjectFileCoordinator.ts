@@ -82,7 +82,7 @@ export class ProjectFileCoordinator {
     return { ...await this.host.admit(runId, operationId, requestDigest, snapshot, model), candidate: model }
   }
 
-  private async apply(runId: string, operationId: string, requestDigest: string, snapshot: CourseSnapshot, planned: PlannedChange): Promise<ToolResult> {
+  async apply(runId: string, operationId: string, requestDigest: string, snapshot: CourseSnapshot, planned: PlannedChange): Promise<ToolResult> {
     let committed = await this.commit(runId, operationId, requestDigest, snapshot, planned)
     const advisories: ToolAdvisory[] = planned.diagnostics.filter(item => item.level !== 'info')
       .map(item => ({ step: 0, code: 'html-import-warning' as const, message: item.message }))

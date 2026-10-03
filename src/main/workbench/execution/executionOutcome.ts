@@ -54,7 +54,8 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
   }
   if (name === 'web.search' || name === 'web.open' || name === 'mcp.discover' || name === 'mcp.invoke'
     || name === 'media.start' || name === 'compute.run' || name === 'delegate.start'
-    || name === 'image.search' || name === 'image.preview' || name === 'image.fetch' || name === 'asset.search') {
+    || name === 'image.search' || name === 'image.preview' || name === 'image.fetch' || name === 'asset.search'
+    || name === 'asset.use' || name === 'asset.save') {
     const message = typeof data.reason === 'string' ? data.reason.slice(0, 240) : '外部能力未返回可用成果'
     if (data.status === 'unknown') return { status: 'unknown', message }
     if (name === 'compute.run' && (data.status === 'preparing' || data.status === 'running'))

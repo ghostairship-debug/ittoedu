@@ -41,7 +41,8 @@ async function harness(model: CourseModel = fixture()) {
     projectFiles: { parsePage: parseWebComposition },
     openImages: { search: input => openImages.search(input), preview: input => openImages.preview(input),
       readPreview: (runId, resourceId) => openImages.readPreview(runId, resourceId), fetch: input => openImages.fetch(input) },
-    assetLibrary: { search: async input => ({ status: 'results', query: input.query, candidates: [], libraryComponents: 4 }) } } })
+    assetLibrary: { search: async input => ({ status: 'results', query: input.query, candidates: [], libraryEntries: 4 }),
+      read: async () => ({ status: 'rejected', reason: 'unused' }), save: async () => ({ status: 'saved' }) } } })
   const session = await registry.create(model, '秋天.h5lesson')
   const begin = async (runId: string, permission: 'workspace' | 'read-only') =>
     gateway.beginRun({ runId, actor: 'agent', documents: [{ documentId: session.documentId, writable: permission === 'read-only' ? [] : [{ kind: 'document' }] }],
@@ -126,7 +127,7 @@ it('keeps candidates per run and refuses downloads without a writable course', a
   await h.begin('reader', 'read-only')
   expect(data(await h.call('reader', 'search', 'image.search', { query: 'maple' }))).toMatchObject({ status: 'results' })
   expect(data(await h.call('reader', 'assets', 'asset.search', { query: '公转' })))
-    .toEqual({ status: 'results', query: '公转', candidates: [], libraryComponents: 4 })
+    .toEqual({ status: 'results', query: '公转', candidates: [], libraryEntries: 4 })
   expect(await h.call('reader', 'fetch', 'image.fetch', { image: 'img1' })).toMatchObject({ kind: 'error', code: 'not-authorized' })
   expect(await h.call('reader', 'fetch-path', 'image.fetch', { image: 'img1', path: 'assets/x.jpg' })).toMatchObject({ kind: 'error', code: 'not-authorized' })
   await h.begin('writer', 'workspace')

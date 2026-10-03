@@ -52,5 +52,5 @@ const descriptions: Record<WorkbenchServiceToolName, string> = {
 }
 export const workbenchServiceToolCatalog = (Object.keys(workbenchServiceSchemas) as WorkbenchServiceToolName[])
   .map(name => ({ name, description: descriptions[name], inputSchema: workbenchServiceSchemas[name],
-    manual: { label: name, group: (['job.cancel', 'compute.run', 'delegate.start', 'mcp.invoke', 'media.start', 'image.fetch'].includes(name) ? 'edit' : 'read') as 'read' | 'edit',
+    manual: { label: name, group: (['job.cancel', 'compute.run', 'delegate.start', 'mcp.invoke', 'media.start', 'image.fetch', 'asset.use', 'asset.save'].includes(name) ? 'edit' : 'read') as 'read' | 'edit',
       targetKinds: [] as ToolDefinition['manual']['targetKinds'] } }))

@@ -48,6 +48,10 @@ import { htmlImportInputSchema } from './HtmlImportTools'
 import { isProjectFileToolName } from './ProjectFileTools'
 import { ProjectFileCoordinator, type CourseModel, type CourseSnapshot, type ProjectFileCommit } from '../projectFiles/ProjectFileCoordinator'
 import { readProjectFile } from '../projectFiles/projectFileView'
+import { assetFilePath } from '../projectFiles/pageHtml'
+import { componentPathName, planComponentWrite } from '../projectFiles/definitionFiles'
+import { ProjectFileError } from '../projectFiles/slidePages'
+import { projectReferencePath } from '../../shared/composition/projectReferences'
 import { openImageAssetPath } from './AssetSourceTools'
 
 interface Run {
@@ -871,6 +875,76 @@ export class DocumentToolGateway implements ToolGateway {
       ...(current ? { advisories: [{ step: 0, code: 'html-import-warning' as const, message: `已替换原素材 ${target.path}，可撤销` }] } : {}) }
   }
 
+  /**
+   * asset.use: an HTML component of the library becomes `components/<name>.html` together with its assets,
+   * as one undoable change through the project-file component write (admission, or a draft with the reason).
+   */
+  private async useLibraryComponent(runId: string, operationId: string, requestDigest: string,
+    input: { packageId: string; version?: string; project?: string; path: string }): Promise<ToolResult> {
+    const name = componentPathName(projectReferencePath(input.path) ?? '')
+    if (name === undefined) throw new ToolError('invalid-path', '组件路径须为 components/<名称>.html')
+    const path = `components/${name}.html`
+    await this.projectDocument(runId, input.project, 'write')
+    const component = await this.hostTools.libraryComponent(runId, input.packageId, input.version)
+    if (component.status !== 'ready') return { kind: 'read', data: component }
+    const snapshot = await this.projectDocument(runId, input.project, 'write')
+    const existing = readProjectFile(snapshot.model.project, snapshot.model.resources, path)
+    if (existing) this.projectFiles.assertFresh(runId, snapshot, existing)
+    const assets = { ...snapshot.model.project.assets }, files = { ...snapshot.model.resources.assets }, conflicts: string[] = []
+    for (const asset of component.assets) {
+      const current = readProjectFile(snapshot.model.project, snapshot.model.resources, asset.path)
+      if (current) {
+        if (current.kind !== 'asset' || documentDigest(snapshot.model.resources.assets[current.assetId] ?? null) !== documentDigest(asset.bytes)) conflicts.push(asset.path)
+        continue
+      }
+      const kind = (['image', 'audio', 'video', 'font'] as const).find(prefix => asset.mimeType.startsWith(`${prefix}/`))
+      const filename = asset.path.split('/').at(-1)!
+      if (!kind) { conflicts.push(asset.path); continue }
+      if (kind === 'image') {
+        if (!this.options.prepareImage) throw new ToolError('unsupported-resource-preparation', '当前宿主未配置图片解码能力')
+        const prepared = await this.options.prepareImage({ bytes: asset.bytes, mimeType: asset.mimeType, filename }, this.createId)
+        assets[prepared.meta.id] = { ...prepared.meta, path: asset.path, filename, source: { kind: 'asset-library', title: component.name } }
+        files[prepared.meta.id] = prepared.bytes
+      } else {
+        const id = `asset_${this.createId()}`
+        assets[id] = { id, kind, filename, mimeType: asset.mimeType, path: asset.path, byteLength: asset.bytes.byteLength,
+          source: { kind: 'asset-library', title: component.name } }
+        files[id] = Uint8Array.from(asset.bytes)
+      }
+    }
+    if (conflicts.length) throw new ToolError('asset-conflict', `课件中已有内容不同或无法加入的同名素材：${conflicts.join('、')}；请先改名或删除后再使用此组件`)
+    try {
+      const planned = planComponentWrite({ ...snapshot.model.project, assets }, { ...snapshot.model.resources, assets: files }, path, component.html)
+      const result = await this.projectFiles.apply(runId, operationId, requestDigest, snapshot, planned)
+      return result.kind === 'document-operation' && existing
+        ? { ...result, advisories: [...result.advisories ?? [], { step: 0, code: 'html-import-warning' as const, message: `已用资产库中的“${component.name}”替换原组件 ${path}，可撤销` }] }
+        : result
+    } catch (error) {
+      if (error instanceof ProjectFileError) return { kind: 'error', code: error.code, message: error.message }
+      throw error
+    }
+  }
+
+  /** asset.save: a named component of the course and its assets go into the managed library. */
+  private async saveLibraryComponent(runId: string, input: { project?: string; path: string; description?: string;
+    subject?: string[]; schoolStage?: string[]; tags?: string[] }): Promise<ToolResult> {
+    const snapshot = await this.projectDocument(runId, input.project, 'read')
+    const { project, resources } = snapshot.model
+    const file = readProjectFile(project, resources, projectReferencePath(input.path) ?? input.path)
+    if (file?.kind !== 'component') throw new ToolError('not-found', `课件中没有这个组件：${input.path}；可先列出工程文件`)
+    if (file.draft) throw new ToolError('component-draft', `“${file.name}”是未通过准入的草稿，修好后再存入资产库`)
+    const assets = [...new Set(Object.values(project.components![file.name]!.assets).map(binding => binding.assetId))].map(assetId => {
+      const meta = project.assets[assetId], bytes = resources.assets[assetId]
+      if (!meta || !bytes) throw new ToolError('asset-unavailable', `组件用到的素材 ${meta ? assetFilePath(meta) : assetId} 没有可保存的内容`)
+      return { path: assetFilePath(meta), mimeType: meta.mimeType, bytes }
+    })
+    const unique = (values?: string[]) => values ? [...new Set(values)] : undefined
+    const course = snapshot.binding.kind === 'file' ? snapshot.binding.path.replace(/\\/g, '/').split('/').at(-1)! : snapshot.binding.suggestedName
+    return this.hostTools.saveLibraryComponent(runId, { name: file.name, html: file.content, assets, sourceCourse: course,
+      ...(input.description ? { description: input.description } : {}), ...(unique(input.subject) ? { subject: unique(input.subject) } : {}),
+      ...(unique(input.schoolStage) ? { schoolStage: unique(input.schoolStage) } : {}), ...(unique(input.tags) ? { tags: unique(input.tags) } : {}) })
+  }
+
   /** Host-only: open-library preview bytes for the run's next model request. */
   readOpenImagePreview(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array } {
     if (this.run(runId).stopped) throw new ToolError('run-stopped', '任务已停止')
@@ -1213,6 +1287,9 @@ export class DocumentToolGateway implements ToolGateway {
       if (call.name === 'image.preview') return this.hostTools.imagePreview(runId, value as { images: string[] })
       if (call.name === 'image.fetch') return this.fetchOpenImage(runId, operationId, requestDigest, value as { image: string; project?: string; path?: string })
       if (call.name === 'asset.search') return this.hostTools.assetSearch(runId, value as { query: string; limit?: number })
+      if (call.name === 'asset.use') return this.useLibraryComponent(runId, operationId, requestDigest, value as { packageId: string; version?: string; project?: string; path: string })
+      if (call.name === 'asset.save') return this.saveLibraryComponent(runId, value as { project?: string; path: string; description?: string;
+        subject?: string[]; schoolStage?: string[]; tags?: string[] })
     }
     if (call.name === 'view.observe') return this.hostTools.observePage({ runId, operationId,
       resolveTarget: async handle => {

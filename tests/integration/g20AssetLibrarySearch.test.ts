@@ -1,10 +1,11 @@
 // @vitest-environment node
-import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, expect, it } from 'vitest'
-import { readComponentLibrary, searchComponentLibrary } from '../../src/main/workbench/assetSources/componentLibrarySearch'
+import { managedComponentLibrary } from '../../src/main/componentCatalogSources'
+import { deleteHtmlComponent, saveHtmlComponent } from '../../src/main/htmlComponentLibrary'
+import { AssetLibraryService, readComponentLibrary, searchComponentLibrary, type ComponentLibrarySnapshot } from '../../src/main/workbench/assetSources/componentLibrarySearch'
 import type { AvailableComponentCatalogPackage } from '../../src/shared/componentCatalog'
 
 const roots: string[] = []
@@ -17,42 +18,50 @@ const entry = (overrides: Partial<AvailableComponentCatalogPackage>): AvailableC
   renderMode: 'dom', supportedScopes: ['scene'], quality: 'experimental', maintainer: 'fixture', verifiedCases: [],
   sourceId: 'component-catalog:fixture', sourceLabel: '测试目录', sourceTrust: 'trusted', ...overrides,
 })
+const snapshot = (packages: AvailableComponentCatalogPackage[]): ComponentLibrarySnapshot => ({ packages, htmlComponents: [], roots: new Map(), issues: 1 })
 
-it('reads the same catalog sources as the component library panel: built-ins plus teacher-added directories', async () => {
+it('reads every library directory: built-in packages, my library and teacher-added directories with their HTML components', async () => {
   const userData = await temporary(), external = await temporary()
-  const bytes = Buffer.from('fixture package')
-  await fs.mkdir(path.join(external, 'packages'))
-  await fs.writeFile(path.join(external, 'packages', 'orbit.h5component'), bytes)
-  await fs.writeFile(path.join(external, 'orbit.svg'), '<svg xmlns="http://www.w3.org/2000/svg"/>')
-  await fs.writeFile(path.join(external, 'catalog.json'), JSON.stringify({ catalogVersion: 1, name: '地理组件', packages: [{
-    packageId: 'com.example.earth-orbit', version: '1.2.0', name: '地球公转模拟', description: '拖动地球观察四季与太阳直射点变化',
-    subject: ['地理'], schoolStage: ['初中'], tags: ['公转', '四季'], packagePath: 'packages/orbit.h5component', thumbnailPath: 'orbit.svg',
-    sha256: createHash('sha256').update(bytes).digest('hex'), componentSchemaVersion: 4, runtimeApiVersion: 4, renderMode: 'dom',
-    supportedScopes: ['scene'], quality: 'experimental', maintainer: 'fixture', verifiedCases: [] }] }))
+  await saveHtmlComponent(managedComponentLibrary(userData), { name: '公转模拟', description: '拖动地球观察四季', tags: ['公转'],
+    html: '<!doctype html><html><body>公转</body></html>', assets: [] })
+  await saveHtmlComponent(external, { name: '拼读卡片', html: '<p>拼读</p>', assets: [] })
+  await fs.writeFile(path.join(external, 'catalog.json'), JSON.stringify({ catalogVersion: 1, name: '同事的组件', packages: [] }))
+  await fs.mkdir(path.join(external, 'html-components', 'broken'), { recursive: true })
+  await fs.writeFile(path.join(external, 'html-components', 'broken', 'component.json'), '{"format":"guoling-html-component"}')
   await fs.writeFile(path.join(userData, 'component-catalog-sources.json'), JSON.stringify({ version: 1, sources: [{ path: external, trust: 'prompt' }] }))
-  const library = await readComponentLibrary(process.cwd(), userData)
-  expect(library.packages.map(item => item.packageId)).toEqual(expect.arrayContaining([
-    'com.ittoedu.language.pinyin-annotation', 'com.ittoedu.visual.image-frame', 'com.example.earth-orbit']))
-  expect(library.packages.find(item => item.packageId === 'com.example.earth-orbit')).toMatchObject({ sourceLabel: '地理组件', sourceTrust: 'prompt' })
 
-  const found = searchComponentLibrary(library, '公转 四季', 5)
-  expect(found).toMatchObject({ status: 'results', candidates: [{ kind: 'component', packageId: 'com.example.earth-orbit', version: '1.2.0',
-    name: '地球公转模拟', subject: ['地理'], schoolStage: ['初中'], tags: ['公转', '四季'], source: '地理组件', trust: 'prompt', scopes: ['scene'] }] })
-  expect(found.candidates).toHaveLength(1)
-  expect(searchComponentLibrary(library, '拼音', 5).candidates[0]).toMatchObject({ packageId: 'com.ittoedu.language.pinyin-annotation', name: '汉语拼音标注' })
-  expect(searchComponentLibrary(await readComponentLibrary(process.cwd(), await temporary()), '公转', 5))
-    .toMatchObject({ candidates: [], hint: expect.stringContaining('没有匹配') })
+  const library = await readComponentLibrary(process.cwd(), userData)
+  expect(library.packages.map(item => item.packageId)).toEqual(expect.arrayContaining(['com.ittoedu.language.pinyin-annotation', 'com.ittoedu.visual.image-frame']))
+  expect(library.htmlComponents.map(item => [item.name, item.sourceLabel, item.sourceTrust, item.removable])).toEqual(expect.arrayContaining([
+    ['公转模拟', '我的资产库', 'trusted', true], ['拼读卡片', '同事的组件', 'prompt', false]]))
+  expect(library.issues).toBeGreaterThanOrEqual(1)
+
+  const found = searchComponentLibrary(library, '公转', 5)
+  expect(found.candidates).toEqual([expect.objectContaining({ kind: 'html-component', name: '公转模拟', source: '我的资产库', trust: 'trusted' })])
+  expect(found).not.toHaveProperty('note')
+  expect(searchComponentLibrary(library, '拼音', 5)).toMatchObject({ candidates: [{ kind: 'component-package', name: '汉语拼音标注' }],
+    note: expect.stringContaining('组件库面板插入') })
+  expect(searchComponentLibrary(library, '月相', 5)).toMatchObject({ candidates: [], hint: expect.stringContaining('没有匹配') })
+
+  const service = new AssetLibraryService({ load: () => readComponentLibrary(process.cwd(), userData), managedLibrary: managedComponentLibrary(userData) })
+  const unconfirmed = library.htmlComponents.find(item => item.name === '拼读卡片')!
+  expect(await service.read({ packageId: unconfirmed.packageId })).toMatchObject({ status: 'rejected', reason: expect.stringContaining('确认信任') })
+  const mine = library.htmlComponents.find(item => item.name === '公转模拟')!
+  expect(await service.read({ packageId: mine.packageId })).toMatchObject({ status: 'ready', name: '公转模拟', html: '<!doctype html><html><body>公转</body></html>', assets: [] })
+
+  await deleteHtmlComponent(managedComponentLibrary(userData), mine.entry)
+  expect((await readComponentLibrary(process.cwd(), userData)).htmlComponents.map(item => item.name)).toEqual(['拼读卡片'])
 })
 
-it('ranks by matched terms then field weight, keeps only the newest version and omits deprecated components', () => {
-  const library = { issues: 1, packages: [
+it('ranks by matched terms then field weight, keeps only the newest version and omits deprecated packages', () => {
+  const library = snapshot([
     entry({ packageId: 'com.example.quiz', name: '选择题', description: '四季知识小测', tags: ['测验'] }),
     entry({ packageId: 'com.example.seasons', name: '四季转盘', version: '1.9.0', tags: ['四季', '转盘'] }),
     entry({ packageId: 'com.example.seasons', name: '四季转盘（旧）', version: '1.10.0', tags: ['四季', '转盘'], sourceTrust: 'prompt' }),
     entry({ packageId: 'com.example.old', name: '四季旧组件', quality: 'deprecated' }),
-  ] }
+  ])
   const result = searchComponentLibrary(library, '四季 转盘', 10)
   expect(result.candidates.map(item => [item.packageId, item.version])).toEqual([['com.example.seasons', '1.10.0'], ['com.example.quiz', '1.0.0']])
-  expect(result).toMatchObject({ libraryComponents: 3, unreadable: 1 })
+  expect(result).toMatchObject({ libraryEntries: 3, unreadable: 1 })
   expect(searchComponentLibrary(library, '四季', 1).candidates).toHaveLength(1)
 })

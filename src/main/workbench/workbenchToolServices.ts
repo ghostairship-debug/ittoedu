@@ -40,7 +40,8 @@ import { imageRoute } from './images/imageRoute'
 import { executionSettingsStore, resolveOAuthCredential } from './providers/executionSettingsService'
 import { OpenImageService } from './assetSources/OpenImageService'
 import { openLibraryUserAgent, publicAssetHttp } from './assetSources/publicAssetHttp'
-import { readComponentLibrary, searchComponentLibrary } from './assetSources/componentLibrarySearch'
+import { AssetLibraryService, readComponentLibrary } from './assetSources/componentLibrarySearch'
+import { managedComponentLibrary } from '../componentCatalogSources'
 
 let installed = false
 let imageService: ImageGenerationService | undefined
@@ -132,6 +133,8 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   const jobs = new HostJobService({ images, builds, compute, delegation })
   const web = new WebResearchService()
   const openImages = new OpenImageService({ http: publicAssetHttp(openLibraryUserAgent(app.getVersion())) })
+  const assetLibrary = new AssetLibraryService({ load: () => readComponentLibrary(app.getAppPath(), app.getPath('userData')),
+    managedLibrary: managedComponentLibrary(app.getPath('userData')) })
   // Agent and human share the task's main-owned embedded page.
   const approvals = new BrowserActionApprovals()
   const mcp = new ManagedBrowserMcpService({ scratchRoot: path.join(directory, 'browser'),
@@ -244,8 +247,8 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     media,
     openImages: { search: input => openImages.search(input), preview: input => openImages.preview(input),
       readPreview: (runId, resourceId) => openImages.readPreview(runId, resourceId), fetch: input => openImages.fetch(input) },
-    assetLibrary: { search: async input => searchComponentLibrary(await readComponentLibrary(app.getAppPath(), app.getPath('userData')),
-      input.query.trim(), input.limit ?? 8) },
+    assetLibrary: { search: input => assetLibrary.search(input), read: input => assetLibrary.read(input),
+      save: ({ runId: _runId, ...input }) => assetLibrary.save(input) },
     beginRun: async grant => {
       if (grant.disclosedSettings && (await (await executionSettingsStore()).read()).profile.revision !== grant.disclosedSettings.profileRevision)
         throw new Error('模型或服务配置在发送时已变化；本次未请求模型，请核对后重新发送。')

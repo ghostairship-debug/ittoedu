@@ -53,7 +53,7 @@ function resolveCatalogPath(rootPath: string, relativePath: string): string {
   return target
 }
 
-async function resolveCatalogFilePath(
+export async function resolveCatalogFilePath(
   rootPath: string,
   relativePath: string,
 ): Promise<string> {
@@ -69,7 +69,7 @@ async function resolveCatalogFilePath(
   return realTarget
 }
 
-async function readCatalogFile(filePath: string): Promise<Uint8Array> {
+export async function readCatalogFile(filePath: string): Promise<Uint8Array> {
   const stat = await fs.stat(filePath)
   if (!stat.isFile()) throw new Error('路径不是文件')
   return new Uint8Array(await fs.readFile(filePath))
