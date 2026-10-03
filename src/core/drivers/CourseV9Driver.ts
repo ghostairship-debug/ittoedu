@@ -7,9 +7,20 @@ import { locateCourseLayer, normalizeEffectiveLayerPropertyPatch, writeBasePrope
 import { nativeLayerTextAutoSizeFrame, prepareNativeLayerTextMeasurement } from '../tools/nativeTextLayout'
 import { prepareNativeTextFrame, type AsyncNativeTextMeasurePort } from '../tools/prepareNativeTextFrame'
 import { applyCompositionContentEdit } from '../tools/compositionContent'
+import { normalizeCourseProjectInPlace } from '../course/normalizeCourseProject'
 
 function course(model: DocumentModel): asserts model is Extract<DocumentModel, { kind: 'course-v9' }> {
   if (model.kind !== 'course-v9') throw new TypeError('Course V9 Driver 不接受其他文档格式')
+}
+
+/** Every committed change keeps the software-maintained facts current (asset slots, component copies, in-page steps). */
+function committedProject(project: CourseProjectDocument): CourseProjectDocument {
+  let failure: unknown
+  try { normalizeCourseProjectInPlace(project) } catch (error) { failure = error }
+  // Malformed input reports its schema error rather than a normalization symptom.
+  const parsed = courseProjectDocumentSchema.parse(project)
+  if (failure) throw failure
+  return parsed
 }
 
 export interface CourseV9DriverOptions { measureTextFrame?: NativeTextFramePort; measureNativeTextAsync?: AsyncNativeTextMeasurePort }
@@ -58,7 +69,7 @@ export class CourseV9Driver implements DocumentDriver {
         return prepareNativeTextFrame(layer.item, frozenPatch, this.options.measureNativeTextAsync).then(measureTextFrame => {
           const { patch } = normalizeEffectiveLayerPropertyPatch(layer.item, layer.source, frozenPatch, { allowOwnedNativeData: true, measureTextFrame })
           writeBasePropertyPatch(layer.item, patch)
-          const next: DocumentModel = { kind: 'course-v9', project: courseProjectDocumentSchema.parse(project), resources: frozenResources }
+          const next: DocumentModel = { kind: 'course-v9', project: committedProject(project), resources: frozenResources }
           this.validate(next); return next
         })
       }
@@ -67,7 +78,7 @@ export class CourseV9Driver implements DocumentDriver {
       })
       writeBasePropertyPatch(layer.item, patch)
     } else throw new TypeError('Course V9 Driver 不支持该操作')
-    const next: DocumentModel = { kind: 'course-v9', project: courseProjectDocumentSchema.parse(project), resources: cloneDocumentResources(resources) }
+    const next: DocumentModel = { kind: 'course-v9', project: committedProject(project), resources: cloneDocumentResources(resources) }
     this.validate(next)
     return next
   }

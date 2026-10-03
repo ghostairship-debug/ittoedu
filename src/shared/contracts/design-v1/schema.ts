@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-import type { ProjectDesignTokens } from './types'
+import type { CourseTheme, CourseThemePackage, ProjectDesignTokens } from './types'
 
 const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/)
 
@@ -69,4 +69,19 @@ export const courseProjectDesignTokensSchema: z.ZodType<ProjectDesignTokens> = z
     label: z.string().trim().min(1).max(80),
     color: colorSchema,
   }).strict()).max(256),
+}).strict()
+
+const themeAssetIdSchema = z.string().trim().min(1).max(240)
+
+export const courseThemeSchema: z.ZodType<CourseTheme> = z.object({
+  css: z.string(),
+  assets: z.record(z.string().min(1), z.object({ assetId: themeAssetIdSchema }).strict()).optional(),
+}).strict()
+
+export const courseThemePackageSchema: z.ZodType<CourseThemePackage> = z.object({
+  format: z.literal('guoling-course-theme'),
+  version: z.literal(1),
+  name: z.string().trim().min(1).max(200),
+  designTokens: courseProjectDesignTokensSchema,
+  css: z.string(),
 }).strict()

@@ -1,6 +1,7 @@
 import { documentBlockSchema, documentContentSchema, walkDocument } from '../../document/content'
 import { createWebCompositionSchema } from '../../composition/schema'
 import { visitCompositionReferences } from '../../composition/references'
+import { walkComposition, type WebComposition } from '../../composition/content'
 import { nativeInputReferenceIssues, sceneNativeInputs } from '../../composition/nativeInputs'
 import { z } from 'zod'
 import { mismatchedSlideCanvasIndexes, slideCanvasSchema } from '../../slideCanvas'
@@ -15,7 +16,8 @@ export { courseStateDeclarationSchema } from '../course-state/schema'
 import { nativeContentSchemaByType, NATIVE_RENDERABLE_BASE_KEYS } from '../native-v1/schema'
 import type { NativeRenderInput } from '../native-v1/types'
 import { courseProjectEmbeddedComponentPackageMetaSchema } from '../component-v4/schema'
-import { courseProjectDesignTokensSchema } from '../design-v1/schema'
+import { courseProjectDesignTokensSchema, courseThemeSchema } from '../design-v1/schema'
+import { courseComponentNameIssue, courseComponentNameKey } from '../../composition/projectReferences'
 import { lightEditAssetOverridesSchema, lightEditTextOverridesSchema } from '../runtime/lightEdit'
 import {
   courseProjectAssetMetaSchema,
@@ -28,6 +30,7 @@ import {
   FLOW_BODY_LAYER_PLANES,
   GLOBAL_LAYER_PLANES,
   type GlobalLayerEntry,
+  type CourseComponentDefinition,
   type CourseProjectDocument,
   type CourseSurfaceDocument,
   type FlowBlock,
@@ -218,20 +221,23 @@ export const runtimeContentSchema = z.object({
   overrides: lightEditTextOverridesSchema.optional(),
 }).strict()
 
-export const courseRuntimeDefinitionSchema = z.object({
-  protocol: z.enum(['canvas-runtime', 'surface-runtime']),
-  runtimeApiVersion: z.union([z.literal(2), z.literal(3)]),
-  enabled: z.boolean(),
-  renderMode: z.enum(['phaser', 'dom', 'hybrid']),
-  source: z.string().trim().min(1),
-  content: runtimeContentSchema,
-  assets: z.record(z.string(), z.object({ assetId: stableIdSchema }).strict()),
-  nodeBindings: z.record(z.string(), stableIdSchema).optional(),
-  staticFallback: z.object({
-    assetId: stableIdSchema,
-    coverage: z.enum(['surface', 'scene']),
-  }).strict().optional(),
-}).strict().superRefine((runtime, context) => {
+export const runtimeDraftSchema = z.object({ reason: z.string().trim().min(1).max(2_000) }).strict()
+
+/** Shared by Runtime definitions, named components and their Published form. */
+export function addRuntimeDefinitionIssues(
+  runtime: {
+    protocol: 'canvas-runtime' | 'surface-runtime'
+    runtimeApiVersion: 2 | 3
+    enabled: boolean
+    renderMode: 'phaser' | 'dom' | 'hybrid'
+    content: { values: Record<string, string>; metadata?: Record<string, unknown> }
+    draft?: { reason: string }
+  },
+  context: z.RefinementCtx,
+): void {
+  if (runtime.draft && runtime.enabled) {
+    context.addIssue({ code: 'custom', path: ['draft'], message: 'A draft Runtime must be disabled' })
+  }
   const validPair =
     (runtime.protocol === 'canvas-runtime' && runtime.runtimeApiVersion === 2) ||
     (runtime.protocol === 'surface-runtime' && runtime.runtimeApiVersion === 3)
@@ -258,6 +264,45 @@ export const courseRuntimeDefinitionSchema = z.object({
       })
     }
   })
+}
+
+export const courseRuntimeDefinitionSchema = z.object({
+  protocol: z.enum(['canvas-runtime', 'surface-runtime']),
+  runtimeApiVersion: z.union([z.literal(2), z.literal(3)]),
+  enabled: z.boolean(),
+  renderMode: z.enum(['phaser', 'dom', 'hybrid']),
+  source: z.string().trim().min(1),
+  content: runtimeContentSchema,
+  assets: z.record(z.string(), z.object({ assetId: stableIdSchema }).strict()),
+  nodeBindings: z.record(z.string(), stableIdSchema).optional(),
+  staticFallback: z.object({
+    assetId: stableIdSchema,
+    coverage: z.enum(['surface', 'scene']),
+  }).strict().optional(),
+  draft: runtimeDraftSchema.optional(),
+}).strict().superRefine(addRuntimeDefinitionIssues)
+
+export const courseComponentDefinitionSchema: z.ZodType<CourseComponentDefinition> = z.object({
+  protocol: z.enum(['canvas-runtime', 'surface-runtime']),
+  runtimeApiVersion: z.union([z.literal(2), z.literal(3)]),
+  enabled: z.boolean(),
+  renderMode: z.enum(['phaser', 'dom', 'hybrid']),
+  source: z.string().trim().min(1),
+  content: runtimeContentSchema.omit({ overrides: true }),
+  assets: z.record(z.string(), z.object({ assetId: stableIdSchema }).strict()),
+  draft: runtimeDraftSchema.optional(),
+}).strict().superRefine(addRuntimeDefinitionIssues)
+
+/** Component names are file names: `components/<name>.html`. Unique ignoring case. */
+export const courseComponentsSchema = z.record(z.string(), courseComponentDefinitionSchema).superRefine((components, context) => {
+  const keys = new Set<string>()
+  for (const name of Object.keys(components)) {
+    const issue = courseComponentNameIssue(name)
+    if (issue) context.addIssue({ code: 'custom', path: [name], message: issue })
+    const key = courseComponentNameKey(name)
+    if (keys.has(key)) context.addIssue({ code: 'custom', path: [name], message: `组件名称重复（不区分大小写）：${name}` })
+    keys.add(key)
+  }
 })
 
 const nativeLayerItemSchema = z.object({
@@ -480,7 +525,10 @@ export const layerItemOverrideSchema = z.object({
   playbackInitialVisibility: z.enum(['inherit', 'hidden']).optional(),
   nativeData: z.record(z.string(), z.unknown()).optional(),
   componentProps: z.record(z.string(), z.unknown()).optional(),
+  compositionNodes: z.record(z.string(), z.object({ visible: z.boolean().optional() }).strict()).optional(),
 }).strict()
+
+export const fragmentStepSchema = z.number().int().nonnegative().max(10_000)
 
 const slidePresentationStateSchema = z.object({
   id: stableIdSchema,
@@ -490,6 +538,7 @@ const slidePresentationStateSchema = z.object({
   backgroundAssetId: stableIdSchema.nullable().optional(),
   layerItemOverrides: z.record(z.string(), layerItemOverrideSchema),
   layerItemOrder: z.array(stableIdSchema).optional(),
+  fragmentStep: fragmentStepSchema.optional(),
 }).strict()
 
 const slidePresentationSchema = z.object({
@@ -562,6 +611,11 @@ export const slideSceneSchema = z.object({
           message: 'componentProps can only override a component item',
         })
       }
+      compositionNodeOverrideIssues(item, override).forEach(issue => context.addIssue({
+        code: 'custom',
+        path: ['presentation', 'states', stateIndex, 'layerItemOverrides', itemId, 'compositionNodes', ...issue.path],
+        message: issue.message,
+      }))
       if (override.nativeData && item.kind === 'native') {
         if (Object.keys(override.nativeData).some((key) => nativeBaseKeys.has(key))) {
           context.addIssue({
@@ -600,6 +654,19 @@ export const slideSceneSchema = z.object({
     }
   })
 })
+
+/** Node states may only address nodes of the composition item they override. Shared with Published V2. */
+export function compositionNodeOverrideIssues(
+  item: { kind: string; content?: unknown },
+  override: { compositionNodes?: Record<string, unknown> },
+): Array<{ path: string[]; message: string }> {
+  if (!override.compositionNodes) return []
+  if (item.kind !== 'composition') return [{ path: [], message: 'compositionNodes can only override a composition item' }]
+  const ids = new Set<string>()
+  walkComposition((item.content as WebComposition<unknown>).root, node => ids.add(node.id))
+  return Object.keys(override.compositionNodes).filter(id => !ids.has(id))
+    .map(id => ({ path: [id], message: `State override references missing composition node: ${id}` }))
+}
 
 export const flowBlockSchema: z.ZodType<FlowBlock> = documentBlockSchema
 
@@ -979,6 +1046,8 @@ export const courseProjectDocumentSchema = z.object({
   componentPackages: z.record(z.string(), courseProjectEmbeddedComponentPackageMetaSchema),
   network: courseNetworkDeclarationSchema.optional(),
   designTokens: courseProjectDesignTokensSchema,
+  theme: courseThemeSchema.optional(),
+  components: courseComponentsSchema.optional(),
   media: courseProjectMediaSettingsSchema,
   playback: courseProjectPlaybackSettingsSchema,
   courseState: z.array(courseStateDeclarationSchema),
@@ -1180,6 +1249,9 @@ export const courseProjectDocumentSchema = z.object({
   }
 
   checkAsset(project.backgroundAssetId ?? undefined, ['backgroundAssetId'])
+  Object.entries(project.theme?.assets ?? {}).forEach(([key, binding]) => checkAsset(binding.assetId, ['theme', 'assets', key, 'assetId']))
+  Object.entries(project.components ?? {}).forEach(([name, component]) => Object.entries(component.assets).forEach(([key, binding]) =>
+    checkAsset(binding.assetId, ['components', name, 'assets', key, 'assetId'])))
   project.globalLayerItems.forEach((entry, index) => checkScoped(entry, ['globalLayerItems', index]))
   checkInteractionReferences(project.globalInteractions, ['globalInteractions'])
   project.surfaces.forEach((surface, surfaceIndex) => {

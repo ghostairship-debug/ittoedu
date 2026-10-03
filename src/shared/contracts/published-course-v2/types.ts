@@ -20,8 +20,8 @@ import type {
   SpatialSemanticZoomRule,
 } from '../course-project-v9/types'
 import type { InteractionRule } from '../interaction-v1/types'
-import type { ProjectDesignTokens } from '../design-v1/types'
-import type { ProjectMediaSettings } from '../media-v1/types'
+import type { CourseTheme, ProjectDesignTokens } from '../design-v1/types'
+import type { AssetSourceKind, ProjectMediaSettings } from '../media-v1/types'
 import type { ProjectPlaybackSettings } from '../playback-v1/types'
 import type { RuntimeRenderMode } from '../runtime/types'
 
@@ -99,6 +99,8 @@ export interface PublishedRuntimeLayerItem extends PublishedLayerItemBase {
     assets: Record<string, { assetId: string }>
     nodeBindings?: Record<string, string>
     staticFallback?: { assetId: string; coverage: 'surface' | 'scene' }
+    /** Saved but not admitted; the Player shows the reason instead of running it. */
+    draft?: { reason: string }
   }
 }
 
@@ -139,6 +141,8 @@ export interface PublishedSlidePresentationState {
   backgroundAssetId?: string | null
   layerItemOverrides: Record<string, LayerItemOverride>
   layerItemOrder?: string[]
+  /** Generated from in-page steps: the first `fragmentStep` fragments are shown. */
+  fragmentStep?: number
 }
 
 export interface PublishedSlidePresentation {
@@ -201,6 +205,17 @@ export interface PublishedSpatialSurface extends PublishedSurfaceBase {
   semanticZoom: SpatialSemanticZoomRule[]
 }
 
+/** A credit line of an attributed asset. */
+export interface PublishedCourseCredit {
+  assetId: string
+  kind: AssetSourceKind
+  title?: string
+  url?: string
+  author?: string
+  license?: { id: string; url?: string }
+  attribution: string
+}
+
 export type PublishedCourseSurface =
   | PublishedSlideSurface
   | PublishedFlowSurface
@@ -219,6 +234,9 @@ export interface PublishedCourseV2Payload {
   assets: Record<string, PublishedCourseAsset>
   components: Record<string, PublishedCourseComponent>
   designTokens: ProjectDesignTokens
+  theme?: CourseTheme
+  /** Present when at least one asset needs attribution. */
+  credits?: PublishedCourseCredit[]
   media: ProjectMediaSettings
   playback: ProjectPlaybackSettings
   courseState: CourseStateDeclaration[]
