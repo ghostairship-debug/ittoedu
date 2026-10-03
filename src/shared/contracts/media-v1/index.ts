@@ -10,7 +10,7 @@ export type {
   RuntimeAsset,
   RuntimeAssetMap,
 } from './types'
-export { ASSET_SOURCE_KINDS } from './types'
+export { ASSET_SOURCE_KIND_LABELS, ASSET_SOURCE_KINDS, assetSourceDetail, assetSourceSummary } from './types'
 export {
   assetMetaSchema,
   assetSourceSchema,
