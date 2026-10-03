@@ -62,15 +62,12 @@ it('returns a verified result only after a real artifact readback and caller ver
   expect(args[0]).not.toContain('--dangerously-bypass-approvals-and-sandbox')
 })
 
-it('does not launch without a verified boundary and still revokes a pre-created MCP grant', async () => {
+it('does not launch without a verified boundary', async () => {
   const { root } = await copyWith('')
-  const revoke = vi.fn(async () => undefined)
   const runner = new CodexDelegationRunner()
-  const result = await runner.run({ ...request(root), mcp: { endpoint: 'http://127.0.0.1:1234/mcp', bearer: 'test-bearer', revoke } },
-    { verify: vi.fn(async () => ({ accepted: true, detail: 'should not run' })) })
+  const result = await runner.run(request(root), { verify: vi.fn(async () => ({ accepted: true, detail: 'should not run' })) })
   expect(result.status).toBe('unconfigured')
   expect(result.reason).toContain('边界')
-  expect(revoke).toHaveBeenCalledTimes(1)
 })
 
 it('treats stop as unknown until the process tree is independently confirmed, and never verifies a late artifact', async () => {
@@ -82,13 +79,12 @@ it('treats stop as unknown until the process tree is independently confirmed, an
       setInterval(() => {}, 1000);
     });
   `)
-  const controller = new AbortController(), revoke = vi.fn(async () => undefined), verify = vi.fn()
+  const controller = new AbortController(), verify = vi.fn()
   const runner = new CodexDelegationRunner({ boundary: fixtureBoundary(root, fixture), inspectCli: ready })
-  const result = await runner.run({ ...request(root), mcp: { endpoint: 'http://127.0.0.1:1234/mcp', bearer: 'test-bearer', revoke } },
+  const result = await runner.run(request(root),
     { signal: controller.signal, onEvent: event => { if (event.kind === 'started') controller.abort() }, verify })
   expect(result.status).toBe('unknown')
   expect(result.externalChangesPossible).toBe(true)
-  expect(revoke).toHaveBeenCalledTimes(1)
   expect(verify).not.toHaveBeenCalled()
 })
 

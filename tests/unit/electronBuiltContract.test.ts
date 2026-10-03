@@ -21,7 +21,7 @@ it('loads the emitted canonical document, executor and external MCP modules in a
       assert.equal(model.kind, 'markdown');
       assert.equal(new TextDecoder().decode(driver.serialize(model)), '# 正式正文\r\n');
       assert.equal(typeof require(path.join(process.argv[1], 'main/workbench/execution/ExecutionEngine.js')).ExecutionEngine, 'function');
-      assert.equal(typeof require(path.join(process.argv[1], 'main/workbench/external/McpDocumentServer.js')).McpDocumentServer, 'function');
+      assert.equal(typeof require(path.join(process.argv[1], 'main/workbench/external/ExternalMcpService.js')).ExternalMcpService, 'function');
       process.stdout.write('electron-contracts-loaded');
     `, output], { cwd: root, windowsHide: true, encoding: 'utf8' })
     expect(result).toBe('electron-contracts-loaded')

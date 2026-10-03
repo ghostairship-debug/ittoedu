@@ -87,11 +87,11 @@ export function ExternalMcpPanel({ open, onClose, api }: ExternalMcpPanelProps) 
           <button type="button" disabled={busy} onClick={() => { void run(async () => { await copy(token ?? await api.revealToken()) }, '已复制令牌') }}>复制</button>
           <button type="button" disabled={busy} onClick={() => setConfirming(true)}>重新生成</button>
         </span></div>
-        <label>外部会话权限<select value={status.settings.permission} disabled={busy}
+        <label>外部会话权限<select aria-label="外部会话权限" value={status.settings.permission} disabled={busy}
           onChange={event => { void configure({ permission: event.target.value as ExecutionPermissionMode }, '新连接的会话将使用此档位；已连接的会话保持连接时的档位。') }}>
           {executionPermissionModes.map(mode => <option key={mode} value={mode}>{permissionLabels[mode]}</option>)}
         </select><small>{permissionDescriptions[status.settings.permission]}。档位在会话连接时冻结，由果铃主进程执行；需要询问时果铃会弹出确认。</small></label>
-        <label>点击窗口关闭按钮时<select value={status.settings.closeAction} disabled={busy}
+        <label>点击窗口关闭按钮时<select aria-label="点击窗口关闭按钮时" value={status.settings.closeAction} disabled={busy}
           onChange={event => { void configure({ closeAction: event.target.value as ExternalCloseAction }) }}>
           {(Object.keys(closeActions) as ExternalCloseAction[]).map(action => <option key={action} value={action}>{closeActions[action]}</option>)}
         </select></label>
@@ -104,7 +104,7 @@ export function ExternalMcpPanel({ open, onClose, api }: ExternalMcpPanelProps) 
           </li>)}</ul> : <p>暂无外部会话。</p>}
         </div>
         {configs && <div className="external-mcp-config">
-          <label>客户端<select value={client} onChange={event => setClient(event.target.value as Client)}>
+          <label>客户端<select aria-label="客户端" value={client} onChange={event => setClient(event.target.value as Client)}>
             {(Object.keys(clients) as Client[]).map(key => <option key={key} value={key}>{clients[key].label}</option>)}
           </select></label>
           {client !== 'opencode' && <>

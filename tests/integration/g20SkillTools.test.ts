@@ -1,6 +1,5 @@
 // @vitest-environment node
 import { createServer, type Server } from 'node:http'
-import { randomUUID } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -14,7 +13,7 @@ import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEng
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
 import { OpenAIChatProvider } from '../../src/main/workbench/providers/OpenAIChatProvider'
-import { McpDocumentServer, type ExternalConnection } from '../../src/main/workbench/external/McpDocumentServer'
+import { callTool, residentMcpFixture } from '../helpers/residentMcpFixture'
 import type { ExecutionStart } from '../../src/shared/workbench/execution'
 import type { ModelSelection } from '../../src/shared/workbench/modelProvider'
 import { courseAgentMethodSkills } from '../../src/shared/courseAgentSkills'
@@ -62,24 +61,6 @@ function selection(baseURL: string): ModelSelection {
   return { model: 'fixture-model', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat', baseURL,
     accountId: 'fixture-account', auth: { kind: 'api-key', credentialRef: 'fixture-secret-ref' }, billing: { kind: 'unknown' },
     capabilities: { tools: 'supported', stream: 'supported', vision: 'supported', reasoning: 'supported' } } }
-}
-function mcpClient(connection: ExternalConnection) {
-  let sequence = 0, session = ''
-  const request = async (method: string, params: unknown = {}) => {
-    const response = await fetch(connection.endpoint, { method: 'POST', headers: { Authorization: `Bearer ${connection.bearer}`,
-      'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-11-25',
-      ...(session ? { 'MCP-Session-Id': session } : {}) }, body: JSON.stringify({ jsonrpc: '2.0', id: ++sequence, method, params }) })
-    session = response.headers.get('mcp-session-id') ?? session
-    expect(response.status).toBe(200)
-    return (await response.json() as any).result
-  }
-  return { request, async initialize() {
-    await request('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'skill-test', version: '1' } })
-    const response = await fetch(connection.endpoint, { method: 'POST', headers: { Authorization: `Bearer ${connection.bearer}`,
-      'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-11-25', 'MCP-Session-Id': session },
-      body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) })
-    expect(response.status).toBe(202)
-  } }
 }
 
 describe('M24-T01 bundled Skill through real execution and MCP', () => {
@@ -142,17 +123,18 @@ describe('M24-T01 bundled Skill through real execution and MCP', () => {
 
   it('MCP tools/list exposes the same schema and tools/call returns the bundled read result', async () => {
     const h = await fixture()
-    const server = new McpDocumentServer({ registry: h.host.registry, gateway: h.host.tools, appendEvent: event => h.events.append(event) })
-    cleanups.push(() => server.close())
-    const connection = await server.grant({ workspaceId: 'space', conversationId: 'conversation', taskId: randomUUID(), instruction: '读取课件 Skill', documents: [] })
-    const client = mcpClient(connection); await client.initialize()
-    const tools = (await client.request('tools/list')).tools
-    const listed = tools.find((tool: any) => tool.name === 'skills.read')
+    const root = await mkdtemp(path.join(tmpdir(), 'g20-skill-mcp-'))
+    cleanups.push(() => rm(root, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 }))
+    const mcp = await residentMcpFixture({ host: h.host, directory: root, workspaceRoot: root, appendEvent: event => h.events.append(event) })
+    cleanups.push(() => mcp.close())
+    const client = await mcp.connect('skill-reader')
+    const tools = (await client.listTools()).tools
+    const listed = tools.find(tool => tool.name === 'skills.read')!
     const canonical = (await h.host.tools.describe()).find(tool => tool.name === 'skills.read')!
     expect(listed.description).toBe(canonical.description)
-    expect(listed.inputSchema.properties.arguments).toEqual(canonical.schema)
+    expect(listed.inputSchema.properties!.arguments).toEqual(canonical.schema)
     expect(canonical.schema).toEqual(z.toJSONSchema(skillReadInputSchema))
-    const reply = await client.request('tools/call', { name: 'skills.read', arguments: { arguments: { skill: skill.name, path: referencePath } } })
+    const reply = await callTool(client, 'skills.read', { skill: skill.name, path: referencePath })
     expect(reply.structuredContent.result).toMatchObject({ kind: 'read', data: { status: 'read', skill: skill.name,
       path: referencePath, version: skill.version, content: files[reference] } })
   })

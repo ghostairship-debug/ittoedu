@@ -22,6 +22,7 @@ export interface ExternalApproval { clientName: string; label: string; reason: '
 export interface ExternalFilePort {
   execute(context: AgentFileContext, name: AgentFileToolName, raw: unknown, operationId: string): Promise<AgentFileOutcome>
   preflightMutation(context: AgentFileContext, name: AgentFileMutationName, raw: unknown): Promise<{ paths: string[]; outside: boolean }>
+  releaseRun(runId: string): void
 }
 export interface ExternalMcpServiceOptions {
   settings: Pick<ResidentMcpSettingsStore, 'read' | 'update' | 'token' | 'regenerateToken'>
@@ -153,7 +154,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
   async stopSession(sessionId: string): Promise<ExternalMcpStatus> {
     const session = this.sessions.get(sessionId)
     if (!session) throw new Error('外部会话已不存在')
-    if (!session.stopped) { session.stopped = true; await this.options.gateway.stop(session.runId) }
+    if (!session.stopped) { session.stopped = true; await this.stopRun(session.runId) }
     return this.status()
   }
   /** Sessions whose calls have actually reached the app, for the close prompt. */
@@ -189,13 +190,17 @@ export class ExternalMcpService implements ResidentMcpHandler {
   private async closeSessions(): Promise<void> {
     const sessions = [...this.sessions.values()]
     this.sessions.clear()
-    await Promise.allSettled(sessions.map(session => this.options.gateway.stop(session.runId)))
+    await Promise.allSettled(sessions.map(session => this.stopRun(session.runId)))
+  }
+  private async stopRun(runId: string): Promise<void> {
+    try { await this.options.gateway.stop(runId) } finally { this.options.files.releaseRun(runId) }
   }
   private async currentWorkspace(): Promise<string> {
     const ui = await this.options.uiState().catch(() => null)
     for (const id of [ui?.workspaceId, this.lastWorkspaceId]) if (id && await this.options.conversations.readWorkspace(id)) return id
-    const first = (await this.options.conversations.listWorkspaces())[0]
-    if (first) return first.workspaceId
+    // No window answered: fall back to the most recently used registered space.
+    const recent = (await this.options.conversations.listWorkspaces()).sort((a, b) => b.updatedAt - a.updatedAt)[0]
+    if (recent) return recent.workspaceId
     throw new McpProtocolError(-32000, '果铃还没有打开任何工作空间。请先在果铃中打开工作空间，再重新连接。')
   }
   /** (Re)binds a session to a workspace with a fresh run; the previous run and all of its handles stop. */
@@ -208,7 +213,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     if (session.workspaceId !== workspaceId) { session.conversation = undefined; session.conversationId = undefined; session.taskId = randomUUID() }
     Object.assign(session, { runId, workspaceId, workspaceRoot: root, workspaceName: workspaceName(root), listChanged: true })
     this.lastWorkspaceId = workspaceId
-    if (previous) await this.options.gateway.stop(previous)
+    if (previous) await this.stopRun(previous)
   }
 
   async initialize(client: ResidentMcpClientInfo): Promise<{ sessionId: string; instructions: string }> {
@@ -231,7 +236,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     const session = this.sessions.get(sessionId)
     if (!session) return
     this.sessions.delete(sessionId)
-    void this.options.gateway.stop(session.runId).catch(() => undefined)
+    void this.stopRun(session.runId).catch(() => undefined)
   }
   async request(sessionId: string, call: ResidentMcpCall): Promise<unknown> {
     const session = this.sessions.get(sessionId)
@@ -436,6 +441,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
   private async traced(session: Session, tool: HostTool, ticket: string, input: unknown, run: () => Promise<ToolResult>): Promise<ToolResult> {
     if (tool.kind === 'service') return run()
     await this.emit(session, ticket, 'tool', { toolName: tool.name, label: tool.label, status: 'running', text: '已收到外部工具请求。' }, 'append')
+    await this.emit(session, ticket, 'tool', { status: 'running', text: '正在调用正式工具。' }, 'append')
     const result = await run()
     await this.emit(session, ticket, 'tool', { toolName: tool.name, label: tool.label, status: successful(result) ? 'completed' : 'failed',
       input: JSON.stringify(input), output: JSON.stringify(result),
