@@ -31,7 +31,8 @@ it('keeps a component that fails admission as a draft with its reason and still 
       throw new Error(`Unexpected tool: ${call.name}`)
     }),
   }
-  const service = new HtmlImportService({ session: { read: () => snapshot } as unknown as DocumentSession, gateway })
+  const service = new HtmlImportService({ session: { read: () => snapshot } as unknown as DocumentSession,
+    gateway: gateway as unknown as ConstructorParameters<typeof HtmlImportService>[0]['gateway'] })
   const ticket = await service.prepare({ operationId: 'op', runId: 'run', targetHandle: 'handle', sourcePath, locationId: project.locations[0]!.id })
   await service.admit(ticket)
   expect(checks).toBe(2)
