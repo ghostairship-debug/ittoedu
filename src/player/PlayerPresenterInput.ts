@@ -252,13 +252,24 @@ export class PlayerPresenterInput {
     this.handle(event, null)
   }
 
+  /**
+   * Keys from the stage, from no particular element or from a plain button (such
+   * as the run switch) belong to the course. Other regions of a host page, like a
+   * scrolling panel of the editor beside a try-run, keep theirs.
+   */
+  private fromStage(event: KeyboardEvent): boolean {
+    const element = (event.composedPath()[0] ?? event.target) as Element | null
+    if (!element || element.nodeType !== 1 || composedContains(this.root, element)) return true
+    return element.localName === 'body' || element.localName === 'html' || element.localName === 'button'
+  }
+
   private handle(event: KeyboardEvent, frame: Element | null): void {
     if (
       this.destroyed ||
       event.defaultPrevented ||
       event.isComposing ||
       isKeyboardOwnedEvent(event) ||
-      (frame !== null && insideKeyboardCapture(frame)) ||
+      (frame === null ? !this.fromStage(event) : insideKeyboardCapture(frame)) ||
       this.blocked()
     ) {
       return

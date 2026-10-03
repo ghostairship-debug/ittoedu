@@ -279,6 +279,24 @@ describe('PlayerPresenterInput', () => {
     expect(navigate).toHaveBeenCalledTimes(1)
   })
 
+  it('leaves keys to other regions of a host page beside the stage', () => {
+    const { root, navigate } = createInput()
+    const stageControl = document.createElement('div')
+    stageControl.tabIndex = 0
+    root.append(stageControl)
+    const panel = mount(document.createElement('div'))
+    panel.tabIndex = 0
+    const runSwitch = mount(document.createElement('button'))
+
+    expect(keydown('End', {}, panel).defaultPrevented).toBe(false)
+    expect(keydown('PageDown', {}, panel).defaultPrevented).toBe(false)
+    expect(navigate).not.toHaveBeenCalled()
+    expect(keydown('End', {}, stageControl).defaultPrevented).toBe(true)
+    expect(keydown('ArrowRight', {}, runSwitch).defaultPrevented).toBe(true)
+    expect(keydown('ArrowLeft', {}, document.body).defaultPrevented).toBe(true)
+    expect(navigate).toHaveBeenCalledTimes(3)
+  })
+
   it('removes its listener on destroy', () => {
     const { input, navigate } = createInput()
     input.destroy()
