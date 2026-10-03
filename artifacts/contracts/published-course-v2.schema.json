@@ -241,6 +241,107 @@
       ],
       "additionalProperties": false
     },
+    "theme": {
+      "type": "object",
+      "properties": {
+        "css": {
+          "type": "string"
+        },
+        "assets": {
+          "type": "object",
+          "propertyNames": {
+            "type": "string",
+            "minLength": 1
+          },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "assetId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240
+              }
+            },
+            "required": [
+              "assetId"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "css"
+      ],
+      "additionalProperties": false
+    },
+    "credits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "assetId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "user-material",
+              "model-svg",
+              "open-library",
+              "image-model",
+              "asset-library"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "url": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          },
+          "author": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "license": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "url": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2000
+              }
+            },
+            "required": [
+              "id"
+            ],
+            "additionalProperties": false
+          },
+          "attribution": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
+          }
+        },
+        "required": [
+          "assetId",
+          "kind",
+          "attribution"
+        ],
+        "additionalProperties": false
+      }
+    },
     "media": {
       "type": "object",
       "properties": {
@@ -1504,6 +1605,20 @@
                           "coverage"
                         ],
                         "additionalProperties": false
+                      },
+                      "draft": {
+                        "type": "object",
+                        "properties": {
+                          "reason": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000
+                          }
+                        },
+                        "required": [
+                          "reason"
+                        ],
+                        "additionalProperties": false
                       }
                     },
                     "required": [
@@ -2392,6 +2507,20 @@
                                   "required": [
                                     "assetId",
                                     "coverage"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "draft": {
+                                  "type": "object",
+                                  "properties": {
+                                    "reason": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 2000
+                                    }
+                                  },
+                                  "required": [
+                                    "reason"
                                   ],
                                   "additionalProperties": false
                                 }
@@ -3361,6 +3490,20 @@
                                       "coverage"
                                     ],
                                     "additionalProperties": false
+                                  },
+                                  "draft": {
+                                    "type": "object",
+                                    "properties": {
+                                      "reason": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 2000
+                                      }
+                                    },
+                                    "required": [
+                                      "reason"
+                                    ],
+                                    "additionalProperties": false
                                   }
                                 },
                                 "required": [
@@ -3652,6 +3795,21 @@
                                         "type": "string"
                                       },
                                       "additionalProperties": {}
+                                    },
+                                    "compositionNodes": {
+                                      "type": "object",
+                                      "propertyNames": {
+                                        "type": "string"
+                                      },
+                                      "additionalProperties": {
+                                        "type": "object",
+                                        "properties": {
+                                          "visible": {
+                                            "type": "boolean"
+                                          }
+                                        },
+                                        "additionalProperties": false
+                                      }
                                     }
                                   },
                                   "additionalProperties": false
@@ -3664,6 +3822,11 @@
                                   "minLength": 1,
                                   "maxLength": 240
                                 }
+                              },
+                              "fragmentStep": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 10000
                               }
                             },
                             "required": [
@@ -4381,6 +4544,20 @@
                                   "required": [
                                     "assetId",
                                     "coverage"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "draft": {
+                                  "type": "object",
+                                  "properties": {
+                                    "reason": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 2000
+                                    }
+                                  },
+                                  "required": [
+                                    "reason"
                                   ],
                                   "additionalProperties": false
                                 }
@@ -5360,6 +5537,20 @@
                                     "coverage"
                                   ],
                                   "additionalProperties": false
+                                },
+                                "draft": {
+                                  "type": "object",
+                                  "properties": {
+                                    "reason": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 2000
+                                    }
+                                  },
+                                  "required": [
+                                    "reason"
+                                  ],
+                                  "additionalProperties": false
                                 }
                               },
                               "required": [
@@ -6297,6 +6488,20 @@
                                   "required": [
                                     "assetId",
                                     "coverage"
+                                  ],
+                                  "additionalProperties": false
+                                },
+                                "draft": {
+                                  "type": "object",
+                                  "properties": {
+                                    "reason": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 2000
+                                    }
+                                  },
+                                  "required": [
+                                    "reason"
                                   ],
                                   "additionalProperties": false
                                 }
@@ -7306,6 +7511,20 @@
                   "required": [
                     "assetId",
                     "coverage"
+                  ],
+                  "additionalProperties": false
+                },
+                "draft": {
+                  "type": "object",
+                  "properties": {
+                    "reason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 2000
+                    }
+                  },
+                  "required": [
+                    "reason"
                   ],
                   "additionalProperties": false
                 }

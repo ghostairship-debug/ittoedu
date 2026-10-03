@@ -1,4 +1,5 @@
 import { buildFlowDocxWithCharts } from './flowChartImages'
+import { withCourseCreditsPage } from './courseCredits'
 import { appendFlowCompositionPictureNodes, captureFlowCompositionPictures, type FlowCompositionPictures } from './flowCompositionPictures'
 import { resolveFlowDocxPageBox } from './flowDocxProjection'
 import type { MixedPrintEntry } from '../../../shared/courseProjectTypes'
@@ -855,7 +856,7 @@ export async function buildCoursePrintArtifacts(
     const visualCoverageComplete = visualPages.every((page) => visualCaptures.has(page.id))
     const hasProducerError = report.some((item) => item.severity === 'error')
     if (visualCoverageComplete && !hasProducerError) {
-      const mixedHtml = buildMixedPrintDocumentHtml(published, pages, visualCaptures, flowPictures)
+      const mixedHtml = withCourseCreditsPage(buildMixedPrintDocumentHtml(published, pages, visualCaptures, flowPictures), published.credits)
       const mixedBytes = new TextEncoder().encode(mixedHtml)
       auditExportSize(mixedBytes, '混合打印 HTML', report)
       files.push({
@@ -868,7 +869,7 @@ export async function buildCoursePrintArtifacts(
         const capture = visualCaptures.get(page.id)!
         return capture.width === 1280 && capture.height === 720
       })
-        ? buildPdfPrintHtml(
+        ? withCourseCreditsPage(buildPdfPrintHtml(
             published.title,
             slidePages.map((page) => {
               const capture = visualCaptures.get(page.id)!
@@ -878,7 +879,7 @@ export async function buildCoursePrintArtifacts(
                 height: capture.height,
               }
             }),
-          )
+          ), published.credits)
         : mixedHtml
       const pdfBytes = new TextEncoder().encode(pdfHtml)
       auditExportSize(pdfBytes, 'PDF 打印 HTML', report)

@@ -7,6 +7,7 @@ import { nativeElementContentSchema } from '../../../shared/contracts/course-pro
 import { documentContentSchema } from '../../../shared/document/content'
 import { walkComposition, type CompositionNode, type WebComposition } from '../../../shared/composition/content'
 import type { ImportDiagnostic } from './types'
+import { EMBEDDED_SOURCE_ATTRIBUTE } from './extractHtmlResources'
 
 type HtmlNode = DefaultTreeAdapterTypes.ChildNode
 type HtmlElement = DefaultTreeAdapterTypes.Element
@@ -17,8 +18,12 @@ export interface ParseWebCompositionInput<TRuntime = never> {
   html: string
   assets?: Readonly<Record<string, { assetId: string }>>
   previous?: WebComposition<TRuntime>
-  /** Software-owned packing of an explicit independent iframe document. */
-  createEmbeddedRuntime?(html: string): TRuntime
+  /**
+   * Stores an independent iframe document as a named course component and
+   * returns its name; the iframe then refers to `components/<name>.html`.
+   * `hint` is the document's file name or title.
+   */
+  embedComponent?(html: string, hint: string): string
 }
 export type ParseWebCompositionResult<TRuntime = never> =
   | { kind: 'composition'; composition: WebComposition<TRuntime>; diagnostics: ParseWebCompositionDiagnostic[] }
@@ -195,8 +200,16 @@ function componentValue(node: HtmlElement): unknown {
   return JSON.parse(children.map(child => (child as DefaultTreeAdapterTypes.TextNode).value).join(''))
 }
 
+function componentNameHint(node: HtmlElement): string {
+  const source = attr(node, EMBEDDED_SOURCE_ATTRIBUTE) ?? attr(node, 'src')
+  const file = source?.split(/[?#]/, 1)[0]?.split(/[\\/]/).pop()?.replace(/\.html?$/i, '')
+  let decoded = file
+  try { decoded = file && decodeURIComponent(file) } catch { /* keep the written name */ }
+  return decoded?.trim() || attr(node, 'title')?.trim() || '网页组件'
+}
+
 function convertNode<TRuntime>(node: HtmlNode, diagnostics: ImportDiagnostic[], allocateId: () => string,
-  createEmbeddedRuntime?: (html: string) => TRuntime): CompositionNode<TRuntime> | undefined {
+  embedComponent?: (html: string, hint: string) => string): CompositionNode<TRuntime> | undefined {
   if (node.nodeName === '#text') return { id: newId(), kind: 'text', text: (node as DefaultTreeAdapterTypes.TextNode).value }
   if (node.nodeName === '#comment') return { id: newId(), kind: 'comment', text: (node as DefaultTreeAdapterTypes.CommentNode).data }
   if (!isElement(node)) return undefined
@@ -207,10 +220,11 @@ function convertNode<TRuntime>(node: HtmlNode, diagnostics: ImportDiagnostic[], 
     children: [],
   }
   const srcdoc = attr(node, 'srcdoc')
-  if (node.namespaceURI === HTML_NAMESPACE && node.tagName === 'iframe' && srcdoc !== undefined && createEmbeddedRuntime) {
-    delete result.attributes.src
+  if (node.namespaceURI === HTML_NAMESPACE && node.tagName === 'iframe' && srcdoc !== undefined && embedComponent) {
+    const name = embedComponent(srcdoc, componentNameHint(node))
     delete result.attributes.srcdoc
-    result.children = [{ id: newId(), kind: 'runtime', runtime: createEmbeddedRuntime(srcdoc) }]
+    delete result.attributes[EMBEDDED_SOURCE_ATTRIBUTE]
+    result.attributes.src = `../components/${name}.html`
     return result
   }
   if (node.namespaceURI === HTML_NAMESPACE && ['guoling-native', 'guoling-chart', 'guoling-document'].includes(node.tagName)) {
@@ -225,7 +239,7 @@ function convertNode<TRuntime>(node: HtmlNode, diagnostics: ImportDiagnostic[], 
     }
   }
   result.children = childrenOf(node).flatMap(child => {
-    const converted = convertNode<TRuntime>(child, diagnostics, allocateId, createEmbeddedRuntime)
+    const converted = convertNode<TRuntime>(child, diagnostics, allocateId, embedComponent)
     return converted ? [converted] : []
   })
   return result
@@ -353,7 +367,7 @@ function reconcileContentIds(next: unknown, previous: unknown, generated: Readon
 /** No file reads, resource platform, source execution, or author-supplied registration markers. */
 export function parseWebComposition<TRuntime = never>(input: ParseWebCompositionInput<TRuntime>): ParseWebCompositionResult<TRuntime> {
   const parsed = parse(input.html, { sourceCodeLocationInfo: true })
-  const reason = programReason(parsed.childNodes, Boolean(input.createEmbeddedRuntime))
+  const reason = programReason(parsed.childNodes, Boolean(input.embedComponent))
   if (reason) return { kind: 'program', html: input.html, reason, diagnostics: [{
     level: 'info', code: 'web-composition-program', message: 'HTML 含程序行为，保留完整源码交由现有 Runtime 运行。',
   }] }
@@ -361,7 +375,7 @@ export function parseWebComposition<TRuntime = never>(input: ParseWebComposition
   const generatedContentIds = new Set<string>()
   const allocateContentId = () => { const id = newId(); generatedContentIds.add(id); return id }
   const root: CompositionNode<TRuntime> = { id: newId(), kind: 'element', tagName: '#document', attributes: {}, children: parsed.childNodes.flatMap(node => {
-    const converted = convertNode<TRuntime>(node, diagnostics, allocateContentId, input.createEmbeddedRuntime)
+    const converted = convertNode<TRuntime>(node, diagnostics, allocateContentId, input.embedComponent)
     return converted ? [converted] : []
   }) }
   if (input.previous) reconcileIds(root, input.previous.root, generatedContentIds)

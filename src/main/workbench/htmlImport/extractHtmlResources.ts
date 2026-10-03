@@ -53,6 +53,10 @@ const MEDIA_TYPES: Record<string, string> = {
   mjs: 'text/javascript', json: 'application/json', wasm: 'application/wasm', txt: 'text/plain', html: 'text/html', htm: 'text/html',
 }
 const RAW_TEXT = new Set(['title', 'textarea', 'noscript'])
+/** Diagnostics of an unproven script that still reach the import result. */
+const reportedReference = (item: ImportDiagnostic) => item.level === 'error' || item.code === 'missing-relative-resource'
+/** Written source file of a local iframe document inlined as srcdoc. */
+export const EMBEDDED_SOURCE_ATTRIBUTE = 'data-guoling-source'
 
 const clip = (value: string, max = 64) => value.length <= max ? value : value.slice(0, max)
 const copyBytes = (bytes: Uint8Array) => new Uint8Array(bytes)
@@ -222,7 +226,7 @@ function rewriteRelative(reference: string, context: Context, baseDir: string, s
   const key = resolveRelative(baseDir, reference)
   const bytes = key ? siblings.get(key) : undefined
   if (!key || !bytes) {
-    addDiagnostic(sink, 'error', 'missing-relative-resource', `找不到相对资源 ${clip(reference, 180)}`, key ?? reference)
+    addDiagnostic(sink, 'warning', 'missing-relative-resource', `找不到相对资源 ${clip(reference, 180)}，已保留引用作为待填位置`, key ?? reference)
     return { value: reference, changed: false }
   }
   const mediaType = mediaTypeForPath(key)
@@ -510,7 +514,7 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
       const key = resolveRelative(baseDir, reference)
       const bytes = key ? siblings.get(key) : undefined
       if (/^https?:|^\/\//i.test(reference)) sink.remoteReferences.push({ url: reference, context: 'css-url', usage: 'stylesheet' })
-      else if (!key || !bytes) addDiagnostic(sink, 'error', 'missing-relative-resource', `找不到相对资源 ${clip(reference, 180)}`, key ?? reference)
+      else if (!key || !bytes) addDiagnostic(sink, 'warning', 'missing-relative-resource', `找不到相对资源 ${clip(reference, 180)}，已保留引用作为待填位置`, key ?? reference)
       else if (sink.cssStack.has(key)) addDiagnostic(sink, 'warning', 'css-import-cycle', `CSS @import 循环: ${key}`, reference)
       else if (!conditions) addDiagnostic(sink, 'warning', 'unsupported-css-import', 'CSS @import 条件无法解析，已保留原文；本地样式不能加载，请内联对应样式', reference)
       else {
@@ -717,7 +721,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
         // Reuse URL diagnostics without registering or rewriting module dependencies.
         const diagnosticSink = createSink()
         rewriteSingleUrl(reference, 'js-string', baseDir, diagnosticSink, siblings, false, 'script')
-        sink.diagnostics.push(...diagnosticSink.diagnostics.filter(item => item.level === 'error'))
+        sink.diagnostics.push(...diagnosticSink.diagnostics.filter(reportedReference))
         sink.remoteReferences.push(...diagnosticSink.remoteReferences)
       }
     }
@@ -860,7 +864,7 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
   }
   visit(root)
   if (preserveScript) {
-    outputSink.diagnostics.push(...sink.diagnostics.filter(item => item.level === 'error'))
+    outputSink.diagnostics.push(...sink.diagnostics.filter(reportedReference))
     outputSink.remoteReferences.push(...sink.remoteReferences)
     return code
   }
@@ -1087,9 +1091,11 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
             const content = transformHtml(decodeText(bytes), sink, siblings, directoryOf(key))
             sink.htmlStack.delete(key)
             src.drop = true
+            // The embedded document keeps the name of the file it came from.
+            tag.attrs.push({ name: EMBEDDED_SOURCE_ATTRIBUTE, rawName: EMBEDDED_SOURCE_ATTRIBUTE, hasValue: true, quote: '"', rawValue: '', value: reference, changed: true, drop: false })
             tag.attrs.push({ name: 'srcdoc', rawName: 'srcdoc', hasValue: true, quote: '"', rawValue: '', value: content, changed: true, drop: false })
           }
-        } else if (key) addDiagnostic(sink, 'error', 'missing-relative-resource', `找不到嵌入 HTML ${clip(reference, 180)}`, key)
+        } else if (key) addDiagnostic(sink, 'warning', 'missing-relative-resource', `找不到嵌入 HTML ${clip(reference, 180)}，已保留为待填组件`, key)
       }
       // Independent local documents become ordinary srcdoc before carrier selection.
       // Remote and unsupported embeddings retain their existing diagnostic and source.
@@ -1148,7 +1154,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
           i = tag.end
           continue
         } else if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(decoded) && !decoded.startsWith('#')) {
-          addDiagnostic(sink, 'error', 'missing-relative-resource', `找不到相对资源 ${clip(decoded, 180)}`, key ?? decoded)
+          addDiagnostic(sink, 'warning', 'missing-relative-resource', `找不到相对资源 ${clip(decoded, 180)}，已保留引用`, key ?? decoded)
         }
         if (managed) rewriteAttributes(tag, baseDir, sink, siblings, false)
         parts.push(tag.attrs.some(attribute => attribute.changed) ? rebuildStart(tag, tag.selfClosing) : html.slice(tagStart, tag.end))

@@ -7,7 +7,11 @@ import { mismatchedSlideCanvasIndexes, slideCanvasSchema } from '../../slideCanv
 import { teacherControllerRoleIssues } from '../../teacherControllerRole'
 import {
   addCanonicalLayerOrderIssues,
+  addRuntimeDefinitionIssues,
   backgroundModeSchema,
+  compositionNodeOverrideIssues,
+  fragmentStepSchema,
+  runtimeDraftSchema,
   courseLocationSchema,
   courseNavigationGuardSchema,
   flowBodyLayerPlaneSchema,
@@ -29,9 +33,10 @@ import {
 } from '../course-project-v9/schema'
 import { courseStateDeclarationSchema } from '../course-state/schema'
 import { courseStateScalarType } from '../course-state/types'
-import { courseProjectDesignTokensSchema } from '../design-v1/schema'
+import { courseProjectDesignTokensSchema, courseThemeSchema } from '../design-v1/schema'
 import { lightEditAssetOverridesSchema, lightEditTextOverridesSchema } from '../runtime/lightEdit'
 import { courseProjectMediaSettingsSchema } from '../media-v1/schema'
+import { ASSET_SOURCE_KINDS } from '../media-v1/types'
 import { nativeContentSchemaByType, NATIVE_RENDERABLE_BASE_KEYS } from '../native-v1/schema'
 import { courseProjectPlaybackSettingsSchema } from '../playback-v1/schema'
 import type { FlowBlock } from '../course-project-v9/types'
@@ -99,34 +104,8 @@ const publishedRuntimeSchema = z.object({
     assetId: stableIdSchema,
     coverage: z.enum(['surface', 'scene']),
   }).strict().optional(),
-}).strict().superRefine((runtime, context) => {
-  const validPair =
-    (runtime.protocol === 'canvas-runtime' && runtime.runtimeApiVersion === 2) ||
-    (runtime.protocol === 'surface-runtime' && runtime.runtimeApiVersion === 3)
-  if (!validPair) {
-    context.addIssue({
-      code: 'custom',
-      path: ['runtimeApiVersion'],
-      message: 'Runtime protocol and API version do not match',
-    })
-  }
-  if (runtime.protocol === 'surface-runtime' && runtime.renderMode !== 'dom') {
-    context.addIssue({
-      code: 'custom',
-      path: ['renderMode'],
-      message: 'Surface Runtime V1 currently supports DOM rendering only',
-    })
-  }
-  Object.keys(runtime.content.metadata ?? {}).forEach((key) => {
-    if (!Object.prototype.hasOwnProperty.call(runtime.content.values, key)) {
-      context.addIssue({
-        code: 'custom',
-        path: ['content', 'metadata', key],
-        message: `Runtime metadata references missing content key: ${key}`,
-      })
-    }
-  })
-})
+  draft: runtimeDraftSchema.optional(),
+}).strict().superRefine(addRuntimeDefinitionIssues)
 
 export const publishedWebCompositionSchema = createWebCompositionSchema(nativeElementContentSchema, publishedRuntimeSchema)
 
@@ -253,6 +232,7 @@ const publishedPresentationSchema = z.object({
     backgroundAssetId: stableIdSchema.nullable().optional(),
     layerItemOverrides: z.record(z.string(), layerItemOverrideSchema),
     layerItemOrder: z.array(stableIdSchema).optional(),
+    fragmentStep: fragmentStepSchema.optional(),
   }).strict()).min(1),
 }).strict().superRefine((presentation, context) => {
   const ids = presentation.states.map((state) => state.id)
@@ -309,6 +289,11 @@ const publishedSlideSceneSchema = z.object({
           message: 'componentProps can only override a component item',
         })
       }
+      compositionNodeOverrideIssues(item, override).forEach(issue => context.addIssue({
+        code: 'custom',
+        path: ['presentation', 'states', stateIndex, 'layerItemOverrides', itemId, 'compositionNodes', ...issue.path],
+        message: issue.message,
+      }))
       if (override.nativeData && item.kind === 'native') {
         if (Object.keys(override.nativeData).some((key) => nativeBaseKeys.has(key))) {
           context.addIssue({
@@ -1060,6 +1045,17 @@ function validatePublishedCourseSemantics(
   }
 }
 
+/** Credit lines of attributed assets, shown by the Player and appended to static exports. */
+const publishedCreditSchema = z.object({
+  assetId: stableIdSchema,
+  kind: z.enum(ASSET_SOURCE_KINDS),
+  title: z.string().trim().min(1).max(500).optional(),
+  url: z.string().trim().min(1).max(2_000).optional(),
+  author: z.string().trim().min(1).max(500).optional(),
+  license: z.object({ id: z.string().trim().min(1).max(100), url: z.string().trim().min(1).max(2_000).optional() }).strict().optional(),
+  attribution: z.string().trim().min(1).max(2_000),
+}).strict()
+
 export const publishedCourseV2Schema = z.object({
   format: z.literal(PUBLISHED_COURSE_FORMAT),
   formatVersion: z.literal(PUBLISHED_COURSE_VERSION),
@@ -1071,6 +1067,8 @@ export const publishedCourseV2Schema = z.object({
   assets: z.record(z.string(), publishedAssetSchema),
   components: z.record(z.string(), publishedComponentSchema),
   designTokens: courseProjectDesignTokensSchema,
+  theme: courseThemeSchema.optional(),
+  credits: z.array(publishedCreditSchema).optional(),
   media: courseProjectMediaSettingsSchema,
   playback: courseProjectPlaybackSettingsSchema,
   courseState: z.array(courseStateDeclarationSchema),
@@ -1083,6 +1081,9 @@ export const publishedCourseV2Schema = z.object({
   mixedPrintPlan: mixedPrintPlanSchema.optional(),
 }).strict().superRefine(validatePublishedCourseSemantics).superRefine((payload, context) => {
   teacherControllerRoleIssues(payload).forEach(issue => context.addIssue({ code: 'custom', ...issue }))
+  Object.entries(payload.theme?.assets ?? {}).forEach(([key, binding]) => {
+    if (!payload.assets[binding.assetId]) context.addIssue({ code: 'custom', path: ['theme', 'assets', key, 'assetId'], message: `Missing asset: ${binding.assetId}` })
+  })
   mismatchedSlideCanvasIndexes(payload.surfaces).forEach(index => context.addIssue({ code: 'custom', path: ['surfaces', index, 'canvas'], message: 'All Slide surfaces in a course must share one canvas size' }))
 })
 

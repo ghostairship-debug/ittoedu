@@ -7,11 +7,14 @@ import {
   Video,
 } from 'lucide-react'
 import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react'
-import type {
-  AudioChannel,
-  AssetMeta,
-  ProjectAudioSettings,
-  SoundDefinition,
+import {
+  assetSourceDetail,
+  assetSourceSummary,
+  type AudioChannel,
+  type AssetMeta,
+  type AssetSource,
+  type ProjectAudioSettings,
+  type SoundDefinition,
 } from '../../shared/contracts/media-v1'
 import {
   selectAudioSettings,
@@ -264,6 +267,7 @@ function AssetEntry({
   const dimensions = asset.width && asset.height
     ? ` · ${asset.width} × ${asset.height}`
     : ''
+  const source = (asset as AssetMeta & { source?: AssetSource }).source
 
   return (
     <article className={`media-entry media-entry--${asset.kind}`} data-testid={`asset-entry-${asset.id}`}>
@@ -287,6 +291,11 @@ function AssetEntry({
         {formatMediaSize(asset.byteLength)}
         {dimensions}
       </div>
+      {source ? (
+        <div className="media-entry__meta" data-testid={`asset-source-${asset.id}`} title={assetSourceDetail(source)}>
+          {assetSourceSummary(source)}
+        </div>
+      ) : null}
       {canPlaceOnCanvas && onAddToCanvas ? (
         <button
           type="button"

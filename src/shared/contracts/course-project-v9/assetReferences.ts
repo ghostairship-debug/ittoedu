@@ -42,6 +42,8 @@ export type CourseAssetReferenceKind =
   | 'component-context-unavailable'
   | 'flow-media'
   | 'composition-asset'
+  | 'theme-asset'
+  | 'component-definition'
 
 export interface CourseAssetReference {
   readonly assetId: string
@@ -551,6 +553,13 @@ export function analyzeCourseAssetReferences(
     { path: ['media', 'audio', 'sounds', soundKey, 'assetId'] },
   ))
   add(project.backgroundAssetId, 'course-background', 'direct', { path: ['backgroundAssetId'] })
+  Object.entries(project.theme?.assets ?? {}).forEach(([key, binding]) => add(
+    binding.assetId, 'theme-asset', 'direct', { path: ['theme', 'assets', key, 'assetId'] },
+  ))
+  // A component definition keeps its assets; pages that use it publish them through their copies.
+  Object.entries(project.components ?? {}).forEach(([name, component]) => Object.entries(component.assets).forEach(([key, binding]) => add(
+    binding.assetId, 'component-definition', 'conservative', { path: ['components', name, 'assets', key, 'assetId'] },
+  )))
   scanScopedLayers(project.globalLayerItems, ['globalLayerItems'])
 
   const surfaceBackgroundKind: Record<CourseSurfaceDocument['type'], CourseAssetReferenceKind> = {

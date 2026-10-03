@@ -60,7 +60,8 @@ describe('HTML import closure', () => {
 
   it.each(['./missing.js', 'http://example.test/mod.js', 'file:///C:/mod.js', 'blob:https://example.test/mod'])('diagnoses an explicitly bad module reference %s', reference => {
     const result = extractHtmlResources({ html: `<script type="module">import ${JSON.stringify(reference)}</script>` })
-    expect(validateHtmlImport(result).some(error => error.level === 'error')).toBe(true)
+    // A missing local module is reported for later repair; addresses that can never load stay errors of the source.
+    expect(validateHtmlImport(result).some(error => error.level === 'error' || error.code === 'missing-relative-resource')).toBe(true)
     expect(result.html).toContain(JSON.stringify(reference))
   })
 

@@ -1,5 +1,6 @@
 import { plainDocumentText } from '../../../shared/document/content'
 import type { CourseLocation, FlowBlock, FlowTableCell } from '../../../shared/courseProjectTypes'
+import type { CourseTheme, ProjectDesignTokens } from '../../../shared/contracts/design-v1/types'
 import type { TextRun, TextRunStyle } from '../../../shared/contracts/native-v1'
 import type {
   PublishedCourseAsset,
@@ -31,6 +32,9 @@ export interface FlowPublishedPlaybackDocument {
   readonly startLocationId: string
   readonly globalLayerItems: readonly PublishedGlobalLayerEntry[]
   readonly surfaces: readonly PublishedFlowSurface[]
+  /** Course theme for the Web content of the document. */
+  readonly designTokens?: ProjectDesignTokens
+  readonly theme?: CourseTheme
 }
 
 export type FlowPublishedPlaybackSource =
@@ -145,6 +149,8 @@ export function toFlowPublishedPlayback(
     startLocationId: source.startLocationId,
     globalLayerItems: cloneJson([...source.globalLayerItems]),
     surfaces: cloneJson(surfaces),
+    ...(source.designTokens ? { designTokens: cloneJson(source.designTokens) } : {}),
+    ...(source.theme ? { theme: cloneJson(source.theme) } : {}),
   }
 }
 

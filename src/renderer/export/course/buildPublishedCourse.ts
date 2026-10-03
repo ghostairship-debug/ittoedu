@@ -714,6 +714,7 @@ function publishSurface(
                   ...(state.layerItemOrder
                     ? { layerItemOrder: cloneJson(state.layerItemOrder) }
                     : {}),
+                  ...(state.fragmentStep !== undefined ? { fragmentStep: state.fragmentStep } : {}),
                 })),
               },
             }
@@ -749,6 +750,20 @@ function publishSurface(
     camera: cloneJson(surface.camera),
     semanticZoom: cloneJson(surface.semanticZoom),
   }
+}
+
+/** Credit lines travel with the published assets that need attribution. */
+function publishedCredits(project: CourseProjectDocument, assets: PublishedCourseV2Payload['assets']): Pick<PublishedCourseV2Payload, 'credits'> {
+  const credits = Object.values(project.assets).flatMap(asset => {
+    const source = asset.source
+    if (!source?.attribution || !assets[asset.id]) return []
+    return [{
+      assetId: asset.id, kind: source.kind, attribution: source.attribution,
+      ...(source.title ? { title: source.title } : {}), ...(source.author ? { author: source.author } : {}),
+      ...(source.url ? { url: source.url } : {}), ...(source.license ? { license: cloneJson(source.license) } : {}),
+    }]
+  }).sort((left, right) => left.assetId.localeCompare(right.assetId))
+  return credits.length ? { credits } : {}
 }
 
 /**
@@ -832,6 +847,8 @@ export function buildPublishedCourseV2Payload(
     assets,
     components,
     designTokens: cloneJson(project.designTokens),
+    ...(project.theme ? { theme: cloneJson(project.theme) } : {}),
+    ...publishedCredits(project, assets),
     media: cloneJson(project.media),
     playback: cloneJson(project.playback),
     courseState: cloneJson(project.courseState),

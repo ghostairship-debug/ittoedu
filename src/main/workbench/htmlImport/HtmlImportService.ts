@@ -3,6 +3,8 @@ import type { DocumentSession } from '../../../core/documents/DocumentSession'
 import type { ToolGateway, ToolResult } from '../../../shared/workbench/tools'
 import type { DocumentOperationResult } from '../../../shared/workbench/document'
 import { prepareHtmlCourseCandidate, type HtmlCourseCandidate } from './prepareHtmlCourseCandidate'
+import { normalizeCourseProjectInPlace } from '../../../core/course/normalizeCourseProject'
+import { courseProjectDocumentSchema } from '../../../shared/courseProjectSchema'
 import type { HtmlImportNetworkGrants } from './htmlImportNetworkGrants'
 
 import type { HtmlImportDestination } from '../../../shared/workbench/toolPorts'
@@ -188,17 +190,40 @@ export class HtmlImportService {
     if (record.state !== 'prepared') throw new Error('HTML 候选不可准入')
     record.state = 'checking'
     try {
-      const checked = read(await this.call(record.runId, `html:${ticket.operationId}:check`, 'build.check', { job: record.jobId }))
-      if (record.state !== 'checking') throw new Error('HTML 导入已取消')
-      if (checked.status !== 'ready' || typeof checked.artifact !== 'string') {
-        const logs = read(await this.call(record.runId, `html:${ticket.operationId}:logs`, 'build.logs', { job: record.jobId, after: 0, limit: 5000 }))
+      const check = async (stage: string) => {
+        const checked = read(await this.call(record.runId, `html:${ticket.operationId}:${stage}`, 'build.check', { job: record.jobId }))
+        if (record.state !== 'checking') throw new Error('HTML 导入已取消')
+        if (checked.status === 'ready' && typeof checked.artifact === 'string') return { artifact: checked.artifact, reasons: [] as string[] }
+        const logs = read(await this.call(record.runId, `html:${ticket.operationId}:${stage}-logs`, 'build.logs', { job: record.jobId, after: 0, limit: 5000 }))
         const entries = logs.entries as { level: string; message: string }[]
-        const reasons = entries.filter(entry => entry.level === 'error').slice(-3).map(entry => entry.message.slice(0, 200))
-        throw new Error(`HTML 候选未通过受控构建：${String(checked.status)}${reasons.length ? '\n' + reasons.join('\n') : ''}`)
+        return { status: String(checked.status), reasons: entries.filter(entry => entry.level === 'error').slice(-3).map(entry => entry.message.slice(0, 200)) }
       }
+      let checked = await check('check')
+      // A component that fails admission is kept as a draft with its reason; the page and course still import.
+      if (!checked.artifact && this.draftImportedComponents(record, checked.reasons[0] ?? '未通过受控准入')) {
+        read(await this.call(record.runId, `html:${ticket.operationId}:project-draft`, 'build.write',
+          { job: record.jobId, path: 'project.json', content: JSON.stringify(record.candidate.model.project) }))
+        checked = await check('check-draft')
+      }
+      if (!checked.artifact) throw new Error(`HTML 候选未通过受控构建：${checked.status}${checked.reasons.length ? '\n' + checked.reasons.join('\n') : ''}`)
       record.artifactId = checked.artifact
       record.state = 'ready'
     } catch (error) { if (this.records.get(ticket.operationId)?.state !== 'cancelled') record.state = 'failed'; throw error }
+  }
+
+  /** Marks the components this import introduced as drafts; false when there is none to draft. */
+  private draftImportedComponents(record: ImportRecord, reason: string): boolean {
+    const baseline = this.ports.session.read().model
+    const existing = baseline.kind === 'course-v9' ? baseline.project.components ?? {} : {}
+    const project = structuredClone(record.candidate.model.project)
+    const drafted = Object.entries(project.components ?? {}).filter(([name, component]) => !existing[name] && !component.draft)
+    if (!drafted.length) return false
+    for (const [, component] of drafted) { component.enabled = false; component.draft = { reason } }
+    normalizeCourseProjectInPlace(project)
+    record.candidate.model.project = courseProjectDocumentSchema.parse(project)
+    record.candidate.diagnostics.push(...drafted.map(([name]) => ({ level: 'warning' as const, code: 'component-draft',
+      message: `组件“${name}”未通过准入，已保存为草稿并显示原因占位：${reason}` })))
+    return true
   }
 
   async commit(ticket: HtmlImportTicket): Promise<DocumentOperationResult> {
