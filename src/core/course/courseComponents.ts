@@ -135,6 +135,13 @@ function definitionValue(runtime: CourseRuntimeDefinition | CourseComponentDefin
 
 const same = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
 
+function newDefinition(runtime: CourseRuntimeDefinition): CourseComponentDefinition {
+  return Object.fromEntries(DEFINITION_FIELDS.flatMap(field => {
+    const value = definitionValue(runtime, field)
+    return value === undefined ? [] : [[field, structuredClone(value)]]
+  })) as unknown as CourseComponentDefinition
+}
+
 function componentCopies(project: CourseProjectDocument): Map<string, { name: string; runtime: CourseRuntimeDefinition }> {
   const copies = new Map<string, { name: string; runtime: CourseRuntimeDefinition }>()
   visitIframes(project, (layerItemId, node, name) => {
@@ -154,14 +161,27 @@ function componentCopies(project: CourseProjectDocument): Map<string, { name: st
 export function applyComponentCopyEdits(previous: CourseProjectDocument, next: CourseProjectDocument): void {
   const before = componentCopies(previous)
   const written = new Map<string, unknown>()
+  const created = new Map<string, CourseComponentDefinition>()
   for (const [key, copy] of componentCopies(next)) {
     const stored = findCourseComponentName(next, copy.name)
     const prior = before.get(key)
     const comparable = prior && courseComponentNameKey(prior.name) === courseComponentNameKey(copy.name)
+    const createdHere = created.get(courseComponentNameKey(copy.name))
+    if (createdHere && !comparable) {
+      if (!same(createdHere, newDefinition(copy.runtime))) throw new TypeError(`同名组件“${copy.name}”带来了不同内容，未提交修改`)
+      continue
+    }
     if (stored === undefined) {
-      if (!comparable || !same(prior.runtime, copy.runtime)) {
-        throw new TypeError(`组件“${copy.name}”没有定义：页面中的组件内容由软件按 components/${copy.name}.html 维护，请先写入组件定义`)
+      if (comparable) {
+        if (!same(prior.runtime, copy.runtime)) {
+          throw new TypeError(`组件“${copy.name}”没有定义：页面中的组件内容由软件按 components/${copy.name}.html 维护，请先写入组件定义`)
+        }
+        continue
       }
+      // A page brought in with its component (paste, saved fragment) defines a name the course lacks.
+      const definition = newDefinition(copy.runtime)
+      created.set(courseComponentNameKey(copy.name), definition)
+      ;(next.components ??= {})[copy.name] = definition
       continue
     }
     if (!comparable) continue

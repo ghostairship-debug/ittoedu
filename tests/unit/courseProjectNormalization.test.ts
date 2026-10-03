@@ -207,6 +207,22 @@ describe('Course project normalization', () => {
     expect(() => driver.apply(model, { type: 'course.replace', project: undefinedComponent })).toThrow(/没有定义/)
   })
 
+  it('takes the definition of a component that a pasted page brings into a course without it', () => {
+    const driver = new CourseV9Driver()
+    const project = normalizeCourseProject(createBlankCourseProject({ id: 'c4', now: '2026-10-04T00:00:00.000Z', includeDefaultController: false, controls: 'none' }))
+    const model = { kind: 'course-v9' as const, project: courseProjectDocumentSchema.parse(project), resources: { assets: {}, components: {} } }
+    const pasted = structuredClone(model.project)
+    const item = { ...page(), order: 5 }
+    const visit = (node: Node): void => {
+      if (node.kind === 'element' && node.id === 'frame') node.children = [{ id: 'copy', kind: 'runtime', runtime: { ...definition(), content: { values: {} } } }]
+      if (node.kind === 'element') node.children.forEach(visit)
+    }
+    visit(item.content.root)
+    ;(pasted.surfaces[0] as SlideSurfaceDocument).scenes[0]!.layerItems.push(item)
+    const next = driver.apply(model, { type: 'course.replace', project: pasted }) as typeof model
+    expect(next.project.components).toEqual({ 公转模拟: definition() })
+  })
+
   it('normalizes every committed change through the driver', () => {
     const driver = new CourseV9Driver()
     const base = normalizeCourseProject(createBlankCourseProject({ id: 'c1', now: '2026-10-04T00:00:00.000Z', includeDefaultController: false, controls: 'none' }))
