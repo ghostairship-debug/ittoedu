@@ -116,6 +116,7 @@ function desktopHarness(options: DesktopHarnessOptions = {}): DesktopHarness {
     selectComponentPackage: vi.fn(async () => null),
     selectComponentPackages: vi.fn(async () => null),
     loadComponentCatalog: vi.fn(async () => ({ sources: [], packages: [], issues: [] })),
+    deleteComponentCatalogHtmlComponent: vi.fn(async () => { throw new Error('not used') }),
     selectComponentCatalogSource: vi.fn(async () => null),
     setComponentCatalogSourceTrust: vi.fn(async () => ({
       sources: [],
