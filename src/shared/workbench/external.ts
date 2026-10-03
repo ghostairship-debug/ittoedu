@@ -3,6 +3,7 @@ import { executionDocumentReferenceSchema, type ExecutionDocumentReference } fro
 import type { ConversationRecord } from './conversations'
 import type { InputAttachmentReference } from './attachments'
 import type { ToolTarget } from './tools'
+import { DEFAULT_PERMISSION_MODE, executionPermissionModeSchema } from './executionPermission'
 
 const id = z.string().min(1)
 const owner = { workspaceId: id, conversationId: id }
@@ -61,3 +62,19 @@ export interface ExternalMcpAPI {
   revoke(input: ExternalOwner & { connectionId: string }): Promise<void>
   handoff(input: ExternalOwner & { runId: string; remainingWork?: string }): Promise<ExternalHandoff>
 }
+
+/** Owner 2026-10-04: one fixed local endpoint for the explicitly started app; the user may change the port. */
+export const EXTERNAL_MCP_DEFAULT_PORT = 45123
+export const externalMcpPortSchema = z.number().int().min(1024).max(65535)
+export const externalCloseActionSchema = z.enum(['ask', 'tray', 'quit'])
+export type ExternalCloseAction = z.infer<typeof externalCloseActionSchema>
+export const externalMcpSettingsSchema = z.object({
+  enabled: z.boolean(), port: externalMcpPortSchema, permission: executionPermissionModeSchema,
+  /** What the window close button does; 'ask' shows the hide-to-tray prompt. */
+  closeAction: externalCloseActionSchema,
+}).strict()
+export type ExternalMcpSettings = z.infer<typeof externalMcpSettingsSchema>
+export const DEFAULT_EXTERNAL_MCP_SETTINGS: ExternalMcpSettings = { enabled: true, port: EXTERNAL_MCP_DEFAULT_PORT, permission: DEFAULT_PERMISSION_MODE, closeAction: 'ask' }
+/** running: listening; disabled: turned off in settings; port-in-use: the port could not be bound and nothing was started. */
+export type ExternalMcpState = 'running' | 'disabled' | 'port-in-use' | 'failed'
+export function externalMcpEndpoint(port: number): string { return `http://127.0.0.1:${port}/mcp` }
