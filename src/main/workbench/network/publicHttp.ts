@@ -1,7 +1,7 @@
 import { lookup } from 'node:dns/promises'
 import { request as httpRequest } from 'node:http'
 import { request as httpsRequest } from 'node:https'
-import { isIP } from 'node:net'
+import { BlockList, isIP } from 'node:net'
 import { resolvePublicDnsOverHttps } from './publicDnsOverHttps'
 
 export class PublicHttpError extends Error {
@@ -50,6 +50,10 @@ const blockedV4: readonly [number, number][] = [
   [0xe0000000, 4], [0xf0000000, 4],
 ]
 
+/** 2001:2::/48 is the IPv6 benchmarking range; like 198.18.0.0/15 it is handed out by fake-IP proxies. */
+const benchmarkV6 = new BlockList()
+benchmarkV6.addSubnet('2001:2::', 48, 'ipv6')
+
 /** This intentionally rejects special-use and documentation ranges too. */
 export function isPublicAddress(address: string): boolean {
   const family = isIP(address)
@@ -67,6 +71,7 @@ export function isPublicAddress(address: string): boolean {
   const normalized = address.replace(/^\[|\]$/g, '').toLowerCase()
   // 6to4/Teredo can tunnel to an otherwise forbidden IPv4 destination.
   if (normalized.startsWith('2002:') || normalized.startsWith('2001:0:') || normalized.startsWith('2001:db8:')) return false
+  if (benchmarkV6.check(normalized, 'ipv6')) return false
   const first = Number.parseInt(normalized.slice(0, 4), 16)
   return Number.isFinite(first) && first >= 0x2000 && first <= 0x3fff
 }
@@ -85,16 +90,18 @@ export function parsePublicUrl(raw: string): URL {
 }
 
 function isSyntheticProxyAddress(address: string): boolean {
-  const value = ipv4Number(address)
+  const family = isIP(address)
+  if (family === 6) return benchmarkV6.check(address, 'ipv6')
+  const value = family === 4 ? ipv4Number(address) : -1
   return value >= 0 && ((value & 0xfffe0000) >>> 0) === 0xc6120000
 }
 
-/** Never fallback for an actual private or mixed DNS answer. */
+/** Only an all-synthetic answer (198.18.0.0/15 or 2001:2::/48, either family) falls back; never an actual private or mixed one. */
 export async function resolveWithSyntheticFallback(hostname: string,
   systemResolve: () => Promise<readonly { address: string; family: 4 | 6 }[]>,
   publicResolve: () => Promise<readonly { address: string; family: 4 | 6 }[]>): Promise<readonly { address: string; family: 4 | 6 }[]> {
   const answers = await systemResolve()
-  return answers.length && answers.every(answer => answer.family === 4 && isSyntheticProxyAddress(answer.address))
+  return answers.length && answers.every(answer => isSyntheticProxyAddress(answer.address))
     ? publicResolve() : answers
 }
 

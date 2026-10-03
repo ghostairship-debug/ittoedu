@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { EventEmitter } from 'node:events'
 import { beforeEach, expect, it, vi } from 'vitest'
-import { fetchPublicResource } from '../../src/main/workbench/network/publicHttp'
+import { fetchPublicResource, isPublicAddress, resolveWithSyntheticFallback } from '../../src/main/workbench/network/publicHttp'
 import { publicAssetHttp } from '../../src/main/workbench/assetSources/publicAssetHttp'
 import { AssetHttpError } from '../../src/main/workbench/assetSources/assetSourceTypes'
 
@@ -72,4 +72,24 @@ it('adapts the public HTTP layer for the image libraries with JSON parsing and H
   await expect(http.getJson('https://commons.wikimedia.org/w/api.php')).rejects.toThrow('不是 JSON')
   respond(200, 'image/png', [Buffer.from([137, 80, 78, 71])])
   expect(await http.getBytes('https://upload.wikimedia.org/x.png', { maxBytes: 100 })).toMatchObject({ contentType: 'image/png', url: 'https://upload.wikimedia.org/x.png' })
+})
+
+it('falls back to public DNS only when every answer is a fake-IP proxy address, in either family', async () => {
+  // A real Clash fake-IP answer on the Owner machine (2026-10-04): both families from benchmarking ranges.
+  for (const address of ['2001:2::1', '2001:0002:0000::20', '2001:2:0:0:0:0:0:ffff']) expect(isPublicAddress(address)).toBe(false)
+  for (const address of ['2001:20::1', '2001:2:1::1']) expect(isPublicAddress(address)).toBe(true)
+  const real = [{ address: '93.184.216.34', family: 4 as const }]
+  const publicResolve = vi.fn(async () => real)
+  const synthetic = [{ address: '198.18.0.7', family: 4 as const }, { address: '2001:2::20', family: 6 as const }]
+  respond(200, 'application/json', [Buffer.from('{}')])
+  await fetchPublicResource('https://api.openverse.org/v1/images/', { resolve: host => resolveWithSyntheticFallback(host, async () => synthetic, publicResolve) })
+  expect(publicResolve).toHaveBeenCalledOnce()
+  expect(await resolveWithSyntheticFallback('v6-only', async () => [{ address: '2001:2::21', family: 6 }], publicResolve)).toEqual(real)
+
+  const mixed = [{ address: '198.18.0.7', family: 4 as const }, { address: '10.0.0.2', family: 4 as const }]
+  await expect(fetchPublicResource('https://api.openverse.org/v1/images/', { resolve: host => resolveWithSyntheticFallback(host, async () => mixed, publicResolve) }))
+    .rejects.toMatchObject({ code: 'private-target' })
+  const mixedV6 = [{ address: '2001:2::20', family: 6 as const }, { address: '93.184.216.34', family: 4 as const }]
+  expect(await resolveWithSyntheticFallback('mixed', async () => mixedV6, publicResolve)).toEqual(mixedV6)
+  expect(publicResolve).toHaveBeenCalledTimes(2)
 })
