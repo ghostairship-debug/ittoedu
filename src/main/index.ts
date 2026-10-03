@@ -103,6 +103,8 @@ app.on('certificate-error', (event, _contents, _url, _error, _certificate, callb
 app
   .whenReady()
   .then(async () => {
+    // A second launch only hands its arguments to the running instance (second-instance) and quits.
+    if (!singleInstanceLock) return
     if (process.platform === 'win32') {
       app.setAppUserModelId(APP_ID)
     }
