@@ -2,6 +2,8 @@ import type { ComponentPackageData } from '../../shared/componentTypes'
 import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
 import { FlowSurfaceHost } from '../../player/surfaces/flow/FlowSurfaceHost'
 import { PlaybackViewSession } from '../../player/playbackViewSession'
+import { PlayerPresenterInput } from '../../player/PlayerPresenterInput'
+import { buildCoursePlaybackSequence, edgePlaybackTarget, playbackNavigationProgress } from '../../player/navigation/coursePlaybackSequence'
 import { createLocationTryRunNavigation } from './locationTryRunNavigation'
 import { buildPublishedCourseV2Payload } from '../export/course/buildPublishedCourse'
 import { registerAuthoringObservationHost } from '../authoring/generation/authoringObservation'
@@ -25,6 +27,15 @@ export async function mountFlowLocationTryRun(input: {
   })
   let host!: FlowSurfaceHost
   const navigation = createLocationTryRunNavigation(published, () => host?.locationId ?? input.locationId)
+  const goTo = async (locationId: string): Promise<boolean> => {
+    try {
+      await host.setLocationId(locationId)
+      navigation.notify()
+      return true
+    } catch {
+      return false
+    }
+  }
   host = new FlowSurfaceHost(published, {
     navigation: navigation.port,
     locationId: input.locationId,
@@ -40,14 +51,7 @@ export async function mountFlowLocationTryRun(input: {
     },
     executeTeacherControllerAction: async (action) => {
       const target = navigation.target(action)
-      if (!target || target.kind !== 'flow-block') return false
-      try {
-        await host.setLocationId(target.id)
-        navigation.notify()
-        return true
-      } catch {
-        return false
-      }
+      return target?.kind === 'flow-block' ? goTo(target.id) : false
     },
   })
   const viewport = playbackView.mount(input.container)
@@ -58,8 +62,27 @@ export async function mountFlowLocationTryRun(input: {
     root: input.container, source: 'trial',
     read: () => ({ projectId: input.project.id, documentRevision: input.project.revision, ...host.readObservationState() }),
   })
+  // The same course keys as the exported player, limited to this surface like the controller.
+  const scenes = buildCoursePlaybackSequence(published)
+  const keys = new PlayerPresenterInput({
+    root: input.container,
+    keyboardNavigation: published.playback.keyboardNavigation,
+    presenter: published.playback.presenter,
+    navigate: (command) => {
+      const target = command.kind === 'edge'
+        ? published.locations.find(location => location.id
+          === edgePlaybackTarget(scenes, playbackNavigationProgress(scenes, host.locationId), command.edge)?.locationId)
+        : navigation.target({ type: `${command.kind}.${command.direction}` as const })
+      if (target?.kind !== 'flow-block' || target.surfaceId !== host.surfaceId) return false
+      void goTo(target.id)
+      return true
+    },
+    // A single Flow surface carries no authored presenter rules.
+    onAuthoredCommand: () => false,
+  })
   const destroyHost = host.destroy.bind(host)
   host.destroy = async () => {
+    keys.destroy()
     unregisterObservation()
     await destroyHost()
     playbackView.destroy()

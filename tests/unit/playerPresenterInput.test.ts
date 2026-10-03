@@ -17,29 +17,31 @@ function createInput(
   patch: Partial<PlayerPresenterInputOptions> = {},
 ): {
   input: PlayerPresenterInput
+  root: HTMLElement
   navigate: ReturnType<typeof vi.fn>
   authored: ReturnType<typeof vi.fn>
   feedback: ReturnType<typeof vi.fn>
 } {
+  const root = mount(document.createElement('div'))
   const navigate = vi.fn(() => true)
   const authored = vi.fn(() => true)
   const feedback = vi.fn()
   const input = new PlayerPresenterInput({
-    totalPages: 3,
+    root,
     keyboardNavigation: true,
     presenter: {
       enabled: true,
       strategy: 'scene-navigation',
       additionalBindings: [],
     },
-    onNavigate: navigate,
+    navigate,
     onAuthoredCommand: authored,
     onFeedback: feedback,
     dedupeMs: 0,
     ...patch,
   })
   inputs.push(input)
-  return { input, navigate, authored, feedback }
+  return { input, root, navigate, authored, feedback }
 }
 
 function keydown(
@@ -63,50 +65,52 @@ afterEach(() => {
 })
 
 describe('PlayerPresenterInput', () => {
-  it('uses the session step owner even when one location has multiple presentation steps', () => {
-    const step = vi.fn(() => true)
-    const { navigate } = createInput({ totalPages: 1, onStep: step })
-    keydown('PageDown')
-    keydown('ArrowRight')
-    keydown('PageUp')
-    expect(step.mock.calls).toEqual([['next'], ['next'], ['previous']])
+  it('maps ←/→ and PageUp/PageDown to steps, Shift+←/→ to scenes and Home/End to the first and last page', () => {
+    const { navigate } = createInput()
+    for (const [key, init] of [
+      ['ArrowRight', {}], ['ArrowLeft', {}], ['PageDown', {}], ['PageUp', {}],
+      ['ArrowRight', { shiftKey: true }], ['ArrowLeft', { shiftKey: true }], ['Home', {}], ['End', {}],
+    ] as const) {
+      expect(keydown(key, init).defaultPrevented).toBe(true)
+    }
+    expect(navigate.mock.calls.map(([command]) => command)).toEqual([
+      { kind: 'step', direction: 'next' }, { kind: 'step', direction: 'previous' },
+      { kind: 'step', direction: 'next' }, { kind: 'step', direction: 'previous' },
+      { kind: 'scene', direction: 'next' }, { kind: 'scene', direction: 'previous' },
+      { kind: 'edge', edge: 'first' }, { kind: 'edge', edge: 'last' },
+    ])
+  })
+
+  it('leaves every other modifier combination alone', () => {
+    const { navigate } = createInput()
+    for (const [key, init] of [
+      ['ArrowRight', { ctrlKey: true }], ['ArrowLeft', { altKey: true }], ['ArrowRight', { metaKey: true }],
+      ['ArrowRight', { shiftKey: true, ctrlKey: true }], ['Home', { shiftKey: true }], ['End', { ctrlKey: true }],
+      ['PageDown', { shiftKey: true }],
+    ] as const) {
+      expect(keydown(key, init).defaultPrevented).toBe(false)
+    }
     expect(navigate).not.toHaveBeenCalled()
   })
 
-  it('keeps Arrow navigation independent and maps standard presenter keys', () => {
-    const { input, navigate, authored } = createInput()
-
-    expect(keydown('ArrowRight').defaultPrevented).toBe(true)
-    expect(navigate).toHaveBeenLastCalledWith(1, 'next')
-
-    input.setIndex(1)
-    expect(keydown('PageDown').defaultPrevented).toBe(true)
-    expect(navigate).toHaveBeenLastCalledWith(2, 'next')
-
-    expect(keydown('PageUp').defaultPrevented).toBe(true)
-    expect(navigate).toHaveBeenLastCalledWith(0, 'previous')
-    expect(authored).not.toHaveBeenCalled()
-  })
-
-  it('keeps Arrow keys enabled when presenter controls are disabled', () => {
-    const { navigate } = createInput({
-      keyboardNavigation: true,
-      presenter: {
-        enabled: false,
-        strategy: 'scene-navigation',
-        additionalBindings: [],
-      },
+  it('keeps keyboard keys independent of presenter controls', () => {
+    const presenterOff = createInput({
+      presenter: { enabled: false, strategy: 'scene-navigation', additionalBindings: [] },
     })
-
     expect(keydown('PageDown').defaultPrevented).toBe(false)
-    expect(navigate).not.toHaveBeenCalled()
-    expect(keydown('ArrowRight').defaultPrevented).toBe(true)
-    expect(navigate).toHaveBeenCalledWith(1, 'next')
+    expect(keydown('End').defaultPrevented).toBe(true)
+    expect(presenterOff.navigate.mock.calls).toEqual([[{ kind: 'edge', edge: 'last' }]])
+    presenterOff.input.destroy()
+
+    const keyboardOff = createInput({ keyboardNavigation: false })
+    for (const key of ['ArrowRight', 'Home', 'End']) expect(keydown(key).defaultPrevented).toBe(false)
+    expect(keydown('ArrowRight', { shiftKey: true }).defaultPrevented).toBe(false)
+    expect(keydown('PageDown').defaultPrevented).toBe(true)
+    expect(keyboardOff.navigate.mock.calls).toEqual([[{ kind: 'step', direction: 'next' }]])
   })
 
-  it('dispatches authored commands without an implicit scene fallback', () => {
+  it('dispatches presenter keys as authored commands while keyboard keys still navigate', () => {
     const { navigate, authored } = createInput({
-      keyboardNavigation: false,
       presenter: {
         enabled: true,
         strategy: 'authored-command',
@@ -116,10 +120,11 @@ describe('PlayerPresenterInput', () => {
 
     keydown('PageDown')
     keydown('PageUp')
+    keydown('ArrowRight')
 
     expect(authored).toHaveBeenNthCalledWith(1, 'next')
     expect(authored).toHaveBeenNthCalledWith(2, 'previous')
-    expect(navigate).not.toHaveBeenCalled()
+    expect(navigate.mock.calls).toEqual([[{ kind: 'step', direction: 'next' }]])
   })
 
   it('matches additional bindings by key and the complete modifier signature', () => {
@@ -149,14 +154,14 @@ describe('PlayerPresenterInput', () => {
   })
 
   it('allows modified PageUp/PageDown as exact additional bindings', () => {
-    const { authored } = createInput({
+    const { navigate } = createInput({
       keyboardNavigation: false,
       presenter: {
         enabled: true,
-        strategy: 'authored-command',
+        strategy: 'scene-navigation',
         additionalBindings: [{
           id: 'remote-control-page-down',
-          command: 'next',
+          command: 'previous',
           key: 'PageDown',
           altKey: false,
           ctrlKey: true,
@@ -167,39 +172,26 @@ describe('PlayerPresenterInput', () => {
     })
 
     keydown('PageDown')
-    expect(authored).toHaveBeenCalledTimes(1)
     keydown('PageDown', { ctrlKey: true })
-    expect(authored).toHaveBeenCalledTimes(2)
+    expect(navigate.mock.calls).toEqual([[{ kind: 'step', direction: 'next' }], [{ kind: 'step', direction: 'previous' }]])
   })
 
-  it('reports boundaries and rejected navigation without scrolling the document', () => {
-    const { input, navigate, feedback } = createInput()
-
-    const first = keydown('PageUp')
-    expect(first.defaultPrevented).toBe(true)
-    expect(navigate).not.toHaveBeenCalled()
-    expect(feedback).toHaveBeenCalledWith(expect.objectContaining({
-      command: 'previous',
-      message: '已经是第一个场景',
-    }))
-
-    input.setIndex(1)
+  it('reports rejected navigation without scrolling the document', () => {
+    const { navigate, feedback } = createInput()
     navigate.mockReturnValue(false)
-    keydown('PageDown')
+
+    expect(keydown('PageUp').defaultPrevented).toBe(true)
     expect(feedback).toHaveBeenLastCalledWith(expect.objectContaining({
-      command: 'next',
-      message: '无法前进到下一场景',
+      command: { kind: 'step', direction: 'previous' },
+      message: '已到整课开头或当前无法返回',
     }))
-  })
-
-  it('reads the authoritative index after another course control navigates', () => {
-    let currentIndex = 0
-    const { navigate } = createInput({ readCurrentIndex: () => currentIndex })
-
-    currentIndex = 1
-    expect(keydown('ArrowLeft').defaultPrevented).toBe(true)
-
-    expect(navigate).toHaveBeenCalledWith(0, 'previous')
+    keydown('ArrowRight', { shiftKey: true })
+    expect(feedback).toHaveBeenLastCalledWith(expect.objectContaining({ message: '已是最后一个场景或当前无法继续' }))
+    keydown('Home')
+    expect(feedback).toHaveBeenLastCalledWith(expect.objectContaining({ message: '已在第一页或当前无法跳转' }))
+    navigate.mockReturnValue({ accepted: false, message: '请先完成练习' })
+    keydown('End')
+    expect(feedback).toHaveBeenLastCalledWith(expect.objectContaining({ message: '请先完成练习' }))
   })
 
   it('ignores repeat and hardware bounce inside the de-duplication window', () => {
@@ -229,43 +221,62 @@ describe('PlayerPresenterInput', () => {
     ['input', document.createElement('input')],
     ['textarea', document.createElement('textarea')],
     ['select', document.createElement('select')],
-  ])('does not steal presenter keys from %s', (_label, target) => {
+  ])('does not steal course keys from %s', (_label, target) => {
     const { navigate } = createInput()
     mount(target)
 
-    const event = keydown('PageDown', {}, target)
-
-    expect(event.defaultPrevented).toBe(false)
+    expect(keydown('PageDown', {}, target).defaultPrevented).toBe(false)
+    expect(keydown('Home', {}, target).defaultPrevented).toBe(false)
     expect(navigate).not.toHaveBeenCalled()
   })
 
-  it('uses the composed path so presenter keys stay inside Shadow DOM inputs', () => {
+  it('uses the composed path so course keys stay inside Shadow DOM inputs', () => {
     const { navigate } = createInput()
     const host = mount(document.createElement('div'))
     const shadowRoot = host.attachShadow({ mode: 'open' })
     const input = document.createElement('input')
     shadowRoot.append(input)
 
-    const event = keydown('PageDown', { composed: true }, input)
+    const event = keydown('ArrowRight', { composed: true, shiftKey: true }, input)
 
     expect(event.defaultPrevented).toBe(false)
     expect(navigate).not.toHaveBeenCalled()
   })
 
-  it('respects component keyboard ownership, composition, and open modals', () => {
-    let modalOpen = false
-    const { navigate } = createInput({ isModalOpen: () => modalOpen })
+  it('respects content keyboard ownership, content that handled the key and composition', () => {
+    const { navigate } = createInput()
     const component = mount(document.createElement('div'))
     const child = document.createElement('button')
     component.dataset.coursewareKeyboardCapture = 'true'
     component.append(child)
+    const handled = mount(document.createElement('button'))
+    handled.addEventListener('keydown', event => event.preventDefault())
 
     keydown('PageDown', {}, child)
+    keydown('ArrowRight', {}, handled)
     keydown('PageDown', { isComposing: true })
-    modalOpen = true
-    keydown('PageDown')
 
     expect(navigate).not.toHaveBeenCalled()
+  })
+
+  it('stays out of the way while its stage is inert, hidden or behind another modal dialog', () => {
+    const { root, navigate } = createInput()
+    root.setAttribute('inert', '')
+    expect(keydown('ArrowRight').defaultPrevented).toBe(false)
+    root.removeAttribute('inert')
+    root.hidden = true
+    expect(keydown('ArrowRight').defaultPrevented).toBe(false)
+    root.hidden = false
+
+    const dialog = mount(document.createElement('section'))
+    dialog.setAttribute('aria-modal', 'true')
+    expect(keydown('ArrowRight').defaultPrevented).toBe(false)
+    expect(navigate).not.toHaveBeenCalled()
+
+    // The course's own scene directory is a modal inside the stage.
+    root.append(dialog)
+    expect(keydown('ArrowRight').defaultPrevented).toBe(true)
+    expect(navigate).toHaveBeenCalledTimes(1)
   })
 
   it('removes its listener on destroy', () => {

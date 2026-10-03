@@ -6,36 +6,43 @@ import type {
 
 const DEFAULT_DEDUPE_MS = 120
 
+/**
+ * What a recognized key asks the course to do: a step or a scene forward/back,
+ * or the first/last page (the first step of the first/last scene).
+ */
+export type PlaybackKeyCommand =
+  | { readonly kind: 'step' | 'scene'; readonly direction: PresenterCommand }
+  | { readonly kind: 'edge'; readonly edge: 'first' | 'last' }
+
 export interface PresenterInputResult {
   accepted: boolean
   message?: string
 }
 
 export interface PresenterInputFeedback {
-  command: PresenterCommand
+  command: PlaybackKeyCommand
   source: 'keyboard-navigation' | 'presenter-standard' | 'presenter-additional'
   message: string
 }
 
 export interface PlayerPresenterInputOptions {
-  totalPages: number
+  /** The playback stage. Keys are heard on its window and inside the same-origin frames it contains. */
+  root: HTMLElement
   keyboardNavigation: boolean
   presenter: Readonly<ProjectPresenterSettings>
-  onNavigate(targetIndex: number, command: PresenterCommand): boolean | PresenterInputResult
-  /** Published scene/step owner judges its own boundaries; indexes stay capture-only. */
-  onStep?(command: PresenterCommand): boolean | PresenterInputResult
+  /** The playback session judges its own boundaries, guards and pending navigation. */
+  navigate(command: PlaybackKeyCommand): boolean | PresenterInputResult
   onAuthoredCommand(command: PresenterCommand): boolean | PresenterInputResult
   onFeedback?(feedback: PresenterInputFeedback): void
-  isModalOpen?(): boolean
-  /** Authoritative delivery-time index when navigation can also come from other controls. */
-  readCurrentIndex?(): number
   /** Injectable only so the hardware de-duplication window stays deterministic in tests. */
   now?(): number
   dedupeMs?: number
 }
 
 interface ResolvedInput {
-  command: PresenterCommand
+  command: PlaybackKeyCommand
+  /** Presenter keys follow the project's presenter strategy; keyboard keys always navigate. */
+  presenterCommand?: PresenterCommand
   source: PresenterInputFeedback['source']
   signature: string
 }
@@ -57,6 +64,24 @@ function noModifiers(event: KeyboardEvent): boolean {
   return !event.altKey && !event.ctrlKey && !event.shiftKey && !event.metaKey
 }
 
+/** ←/→ step, Shift+←/→ scene, Home/End first/last page. Every other modifier combination is left alone. */
+function keyboardCommand(event: KeyboardEvent): PlaybackKeyCommand | null {
+  if (event.altKey || event.ctrlKey || event.metaKey) return null
+  if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+    return { kind: event.shiftKey ? 'scene' : 'step', direction: event.key === 'ArrowRight' ? 'next' : 'previous' }
+  }
+  if (event.shiftKey) return null
+  if (event.key === 'Home') return { kind: 'edge', edge: 'first' }
+  if (event.key === 'End') return { kind: 'edge', edge: 'last' }
+  return null
+}
+
+function rejectedMessage(command: PlaybackKeyCommand): string {
+  if (command.kind === 'edge') return command.edge === 'first' ? '已在第一页或当前无法跳转' : '已在最后一页或当前无法跳转'
+  if (command.kind === 'scene') return command.direction === 'next' ? '已是最后一个场景或当前无法继续' : '已是第一个场景或当前无法返回'
+  return command.direction === 'next' ? '已到整课末尾或当前无法继续' : '已到整课开头或当前无法返回'
+}
+
 function inputSignature(event: KeyboardEvent): string {
   return [
     event.key,
@@ -67,25 +92,29 @@ function inputSignature(event: KeyboardEvent): string {
   ].join('\0')
 }
 
+const KEYBOARD_CAPTURE = '[data-courseware-keyboard-capture="true"]'
+
+// Element checks avoid instanceof: a key typed inside a page or component frame comes from another window.
 function isKeyboardOwnedTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false
+  const element = target as Element | null
+  if (!element || element.nodeType !== 1) return false
 
   if (
-    target.tagName === 'INPUT' ||
-    target.tagName === 'TEXTAREA' ||
-    target.tagName === 'SELECT' ||
-    target.isContentEditable ||
-    target.getAttribute('role') === 'slider'
+    element.tagName === 'INPUT' ||
+    element.tagName === 'TEXTAREA' ||
+    element.tagName === 'SELECT' ||
+    (element as HTMLElement).isContentEditable ||
+    element.getAttribute('role') === 'slider'
   ) {
     return true
   }
 
-  return Boolean(target.closest([
+  return Boolean(element.closest([
     '[contenteditable=""]',
     '[contenteditable="true"]',
     '[contenteditable="plaintext-only"]',
     '[role="slider"]',
-    '[data-courseware-keyboard-capture="true"]',
+    KEYBOARD_CAPTURE,
   ].join(', ')))
 }
 
@@ -93,6 +122,28 @@ function isKeyboardOwnedEvent(event: KeyboardEvent): boolean {
   // Events leaving a shadow root are retargeted to its host. The composed path
   // retains the actual editable/control node and is therefore authoritative.
   return event.composedPath().some(isKeyboardOwnedTarget)
+}
+
+/** A frame placed inside content that keeps the keyboard for itself. */
+function insideKeyboardCapture(element: Element): boolean {
+  for (let node: Node | null = element; node; node = node.parentNode ?? (node as ShadowRoot).host ?? null) {
+    if (node.nodeType === 1 && (node as Element).matches(KEYBOARD_CAPTURE)) return true
+  }
+  return false
+}
+
+function composedContains(root: Element, node: Node): boolean {
+  for (let current: Node | null = node; current; current = current.parentNode ?? (current as ShadowRoot).host ?? null) {
+    if (current === root) return true
+  }
+  return false
+}
+
+/** The frame that holds the document's focus, looking through open shadow roots. */
+function focusedFrame(document: Document): HTMLIFrameElement | null {
+  let active: Element | null = document.activeElement
+  while (active?.shadowRoot?.activeElement) active = active.shadowRoot.activeElement
+  return active?.localName === 'iframe' ? active as HTMLIFrameElement : null
 }
 
 function normalizeResult(
@@ -109,107 +160,106 @@ function normalizeResult(
     : { accepted: false, message: fallbackMessage }
 }
 
+interface BridgedFrame {
+  readonly frame: HTMLIFrameElement
+  readonly window: Window
+  readonly document: Document
+  dispose(): void
+}
+
 /**
- * Owns delivery-time step navigation keys. Direction keys remain an
- * independent author setting, while PageUp/PageDown and additional bindings
- * follow the project presenter strategy. The persisted scene-navigation value
- * uses the session step owner when supplied by the Published Course presenter.
+ * The one course key handler of the exported player, the editor's whole-course
+ * preview and its try-runs. ←/→ and Shift+←/→ and Home/End belong to the
+ * keyboard-navigation setting; PageUp/PageDown and additional bindings follow
+ * the project presenter strategy. Keys stay with inputs, editable content, IME
+ * composition and content that handled them. A key typed inside a same-origin
+ * page, component or Runtime frame of the stage is handled here once the frame
+ * has left it alone.
  */
 export class PlayerPresenterInput {
-  private readonly totalPages: number
+  private readonly root: HTMLElement
+  private readonly window: Window
   private readonly keyboardNavigation: boolean
   private readonly presenter: Readonly<ProjectPresenterSettings>
-  private readonly onNavigate: PlayerPresenterInputOptions['onNavigate']
-  private readonly onStep: PlayerPresenterInputOptions['onStep']
+  private readonly navigate: PlayerPresenterInputOptions['navigate']
   private readonly onAuthoredCommand: PlayerPresenterInputOptions['onAuthoredCommand']
   private readonly onFeedback: PlayerPresenterInputOptions['onFeedback']
-  private readonly isModalOpen: () => boolean
-  private readonly readCurrentIndex?: PlayerPresenterInputOptions['readCurrentIndex']
   private readonly now: () => number
   private readonly dedupeMs: number
-  private currentIndex = 0
+  private frames: BridgedFrame[] = []
   private lastSignature: string | null = null
   private lastAcceptedAt = Number.NEGATIVE_INFINITY
   private destroyed = false
 
   constructor(options: PlayerPresenterInputOptions) {
-    this.totalPages = Math.max(1, Math.trunc(options.totalPages))
+    const view = options.root.ownerDocument.defaultView
+    if (!view) throw new Error('播放按键需要已挂载的播放舞台')
+    this.root = options.root
+    this.window = view
     this.keyboardNavigation = options.keyboardNavigation
     this.presenter = options.presenter
-    this.onNavigate = options.onNavigate
-    this.onStep = options.onStep
+    this.navigate = options.navigate
     this.onAuthoredCommand = options.onAuthoredCommand
     this.onFeedback = options.onFeedback
-    this.isModalOpen = options.isModalOpen ?? (() => false)
-    this.readCurrentIndex = options.readCurrentIndex
     this.now = options.now ?? (() => performance.now())
     this.dedupeMs = Math.max(0, options.dedupeMs ?? DEFAULT_DEDUPE_MS)
-    window.addEventListener('keydown', this.handleKeyDown)
-  }
-
-  setIndex(index: number): void {
-    if (!Number.isFinite(index)) return
-    this.currentIndex = Math.min(
-      Math.max(0, Math.trunc(index)),
-      this.totalPages - 1,
-    )
+    view.addEventListener('keydown', this.handleKeyDown)
+    view.addEventListener('blur', this.handleBlur)
   }
 
   destroy(): void {
     if (this.destroyed) return
     this.destroyed = true
-    window.removeEventListener('keydown', this.handleKeyDown)
-  }
-
-  private currentIndexAtDelivery(): number {
-    const candidate = this.readCurrentIndex?.()
-    if (candidate === undefined || !Number.isFinite(candidate)) return this.currentIndex
-    this.currentIndex = Math.min(
-      Math.max(0, Math.trunc(candidate)),
-      this.totalPages - 1,
-    )
-    return this.currentIndex
+    this.window.removeEventListener('keydown', this.handleKeyDown)
+    this.window.removeEventListener('blur', this.handleBlur)
+    for (const frame of this.frames.splice(0)) frame.dispose()
   }
 
   private resolveInput(event: KeyboardEvent): ResolvedInput | null {
     const signature = inputSignature(event)
     if (this.presenter.enabled) {
-      if (noModifiers(event) && event.key === 'PageDown') {
-        return { command: 'next', source: 'presenter-standard', signature }
-      }
-      if (noModifiers(event) && event.key === 'PageUp') {
-        return { command: 'previous', source: 'presenter-standard', signature }
+      if (noModifiers(event) && (event.key === 'PageDown' || event.key === 'PageUp')) {
+        const direction = event.key === 'PageDown' ? 'next' : 'previous'
+        return { command: { kind: 'step', direction }, presenterCommand: direction, source: 'presenter-standard', signature }
       }
       const binding = this.presenter.additionalBindings.find(
         (candidate) => candidate.key === event.key && exactModifiers(event, candidate),
       )
       if (binding) {
         return {
-          command: binding.command,
+          command: { kind: 'step', direction: binding.command },
+          presenterCommand: binding.command,
           source: 'presenter-additional',
           signature,
         }
       }
     }
 
-    if (this.keyboardNavigation && noModifiers(event)) {
-      if (event.key === 'ArrowRight') {
-        return { command: 'next', source: 'keyboard-navigation', signature }
-      }
-      if (event.key === 'ArrowLeft') {
-        return { command: 'previous', source: 'keyboard-navigation', signature }
-      }
+    const command = this.keyboardNavigation ? keyboardCommand(event) : null
+    return command ? { command, source: 'keyboard-navigation', signature } : null
+  }
+
+  /** Keys belong to the course only while its stage is live: shown, not inert and not behind another modal dialog. */
+  private blocked(): boolean {
+    if (!this.root.isConnected || this.root.closest('[inert], [hidden]')) return true
+    for (const dialog of this.root.ownerDocument.querySelectorAll('[aria-modal="true"]')) {
+      if (!dialog.contains(this.root) && !this.root.contains(dialog) && !dialog.closest('[hidden]')) return true
     }
-    return null
+    return false
   }
 
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
+    this.handle(event, null)
+  }
+
+  private handle(event: KeyboardEvent, frame: Element | null): void {
     if (
       this.destroyed ||
       event.defaultPrevented ||
       event.isComposing ||
       isKeyboardOwnedEvent(event) ||
-      this.isModalOpen()
+      (frame !== null && insideKeyboardCapture(frame)) ||
+      this.blocked()
     ) {
       return
     }
@@ -232,38 +282,14 @@ export class PlayerPresenterInput {
     this.lastSignature = input.signature
     this.lastAcceptedAt = now
 
-    let result: PresenterInputResult
-    if (input.source === 'keyboard-navigation' ||
-      this.presenter.strategy === 'scene-navigation') {
-      if (this.onStep) {
-        result = normalizeResult(this.onStep(input.command), input.command === 'next' ? '已到整课末尾或当前无法继续' : '已到整课开头或当前无法返回')
-      } else {
-        const currentIndex = this.currentIndexAtDelivery()
-        const targetIndex = input.command === 'next'
-          ? currentIndex + 1
-          : currentIndex - 1
-        if (targetIndex < 0 || targetIndex >= this.totalPages) {
-          result = {
-            accepted: false,
-            message: input.command === 'next'
-              ? '已经是最后一个场景'
-              : '已经是第一个场景',
-          }
-        } else {
-          result = normalizeResult(
-            this.onNavigate(targetIndex, input.command),
-            input.command === 'next' ? '无法前进到下一场景' : '无法返回上一场景',
-          )
-        }
-      }
-    } else {
-      result = normalizeResult(
-        this.onAuthoredCommand(input.command),
-        input.command === 'next'
-          ? '当前场景没有可执行的“前进”规则'
-          : '当前场景没有可执行的“后退”规则',
-      )
-    }
+    const result = input.presenterCommand && this.presenter.strategy === 'authored-command'
+      ? normalizeResult(
+          this.onAuthoredCommand(input.presenterCommand),
+          input.presenterCommand === 'next'
+            ? '当前场景没有可执行的“前进”规则'
+            : '当前场景没有可执行的“后退”规则',
+        )
+      : normalizeResult(this.navigate(input.command), rejectedMessage(input.command))
 
     if (!result.accepted) {
       this.onFeedback?.({
@@ -272,5 +298,55 @@ export class PlayerPresenterInput {
         message: result.message ?? '演示命令未执行',
       })
     }
+  }
+
+  // Focus moving into a frame blurs the window that held it; the frame is then bridged.
+  private readonly handleBlur = (event: Event): void => {
+    const view = (event.currentTarget ?? this.window) as Window
+    view.setTimeout(() => {
+      if (this.destroyed) return
+      let document: Document
+      try { document = view.document } catch { return }
+      const frame = focusedFrame(document)
+      if (!frame || (view === this.window && !composedContains(this.root, frame))) return
+      this.bridge(frame)
+    }, 0)
+  }
+
+  private bridge(frame: HTMLIFrameElement): void {
+    const view = frame.contentWindow
+    let document: Document
+    try {
+      if (!view) return
+      document = view.document
+    } catch {
+      return // A cross-origin frame keeps its keys.
+    }
+    if (this.frames.some(entry => entry.frame === frame && entry.window === view && entry.document === document)) return
+    // Frames of earlier scenes, and documents a frame has since replaced, are let go.
+    this.frames = this.frames.filter((entry) => {
+      const current = entry.frame.isConnected && entry.frame.contentWindow === entry.window && entry.frame.contentDocument === entry.document
+      if (!current) entry.dispose()
+      return current
+    })
+    // The frame's own listeners decide first: the course listener is moved to the
+    // end of the frame window's list whenever a key starts there.
+    const handleFrameKey = (event: KeyboardEvent) => this.handle(event, frame)
+    const queue = () => {
+      view.removeEventListener('keydown', handleFrameKey)
+      view.addEventListener('keydown', handleFrameKey)
+    }
+    view.addEventListener('keydown', queue, true)
+    view.addEventListener('blur', this.handleBlur)
+    this.frames.push({
+      frame,
+      window: view,
+      document,
+      dispose: () => {
+        view.removeEventListener('keydown', queue, true)
+        view.removeEventListener('keydown', handleFrameKey)
+        view.removeEventListener('blur', this.handleBlur)
+      },
+    })
   }
 }

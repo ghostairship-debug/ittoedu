@@ -19,7 +19,7 @@ import {
   type PublishedCourseSession,
 } from '@/player/surfaces/publishedDynamicHosts'
 import { attachPublishedCoursePresenter } from '@/player/publishedCoursePresenter'
-import { adjacentPlaybackTarget, buildCoursePlaybackSequence, playbackNavigationProgress } from '@/player/navigation/coursePlaybackSequence'
+import { adjacentPlaybackTarget, buildCoursePlaybackSequence, edgePlaybackTarget, playbackNavigationProgress } from '@/player/navigation/coursePlaybackSequence'
 
 const NOW = '2026-08-17T21:00:00.000Z'
 
@@ -209,6 +209,18 @@ describe('published course Mixed navigation', () => {
     await session.goToIndex(payload.locations.length - 1)
     expect(await session.nextStep()).toBe(false)
     expect(session.getPlaybackProgress()).toMatchObject({ canNextStep: false, canNextScene: false })
+    // Home/End land on the first step of the first and last scene.
+    expect(session.requestPlaybackEdge('last')).toBe(false)
+    expect(session.requestPlaybackEdge('first')).toBe(true)
+    await vi.waitFor(() => expect(session.readObservationState()).toMatchObject({ ready: true, locationId: payload.startLocationId }))
+    expect(session.getPlaybackProgress()).toMatchObject({ sceneIndex: 0, stepIndex: 0 })
+    expect(session.requestPlaybackEdge('first')).toBe(false)
+    expect(await session.nextStep()).toBe(true)
+    expect(session.requestPlaybackEdge('first')).toBe(true)
+    await vi.waitFor(() => expect(session.getPlaybackProgress()).toMatchObject({ sceneIndex: 0, stepIndex: 0 }))
+    await vi.waitFor(() => expect(session.readObservationState().ready).toBe(true))
+    expect(session.requestPlaybackEdge('last')).toBe(true)
+    await vi.waitFor(() => expect(session.getPlaybackProgress()).toMatchObject({ sceneIndex: 3, stepIndex: 0 }))
     expect(payload).toEqual(before)
     container.remove()
   })
@@ -231,6 +243,9 @@ describe('published course Mixed navigation', () => {
     expect(adjacentPlaybackTarget(scenes, progress, 'scene', 'previous')?.locationId).toBe('flow-a')
     expect(adjacentPlaybackTarget(scenes, progress, 'scene', 'next')?.locationId).toBe('flow-return')
     expect(adjacentPlaybackTarget(scenes, playbackNavigationProgress(scenes, 'camera-c'), 'step', 'next')?.locationId).toBe('flow-return')
+    expect(edgePlaybackTarget(scenes, progress, 'first')?.locationId).toBe(payload.locations[0]!.id)
+    expect(edgePlaybackTarget(scenes, progress, 'last')?.locationId).toBe('flow-return')
+    expect(edgePlaybackTarget(scenes, playbackNavigationProgress(scenes, 'flow-return'), 'last')).toBeNull()
     expect(playbackNavigationProgress(scenes, 'camera-b')).toMatchObject({ stepIndex: 1 })
   })
 
@@ -791,6 +806,17 @@ describe('published course Mixed navigation', () => {
       expect(session.navigator.current?.kind).toBe('flow')
       expect(presenter.getCurrentSceneIndex()).toBe(2)
     })
+
+    // The exported player answers the course keys through the session's own navigation.
+    const press = async (key: string, shiftKey = false, kind: string) => {
+      await vi.waitFor(() => expect(session.readObservationState().ready).toBe(true))
+      window.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey, bubbles: true, cancelable: true }))
+      await vi.waitFor(() => expect(session.navigator.current?.kind).toBe(kind))
+    }
+    await press('End', false, 'spatial-2d')
+    await press('ArrowLeft', true, 'flow')
+    await press('Home', false, 'slide')
+    expect(presenter.getCurrentSceneIndex()).toBe(0)
 
     presenter.destroy()
     expect(window.__H5_LESSON_PLAYER__).toBeUndefined()
