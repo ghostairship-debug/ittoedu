@@ -104,15 +104,18 @@ export function renameCourseComponent(project: CourseProjectDocument, from: stri
   components[to] = definition
   const key = courseComponentNameKey(stored)
   visitIframes(next, (_layerItemId, node, referenced) => {
-    if (courseComponentNameKey(referenced) !== key) return
-    const src = node.attributes.src!
-    const end = src.search(/[?#]/)
-    const path = end < 0 ? src : src.slice(0, end)
-    const slash = path.lastIndexOf('/')
-    const extension = /\.html?$/i.exec(path)?.[0] ?? '.html'
-    node.attributes.src = `${path.slice(0, slash + 1)}${to}${extension}${end < 0 ? '' : src.slice(end)}`
+    if (courseComponentNameKey(referenced) === key) node.attributes.src = componentReferenceSrc(node.attributes.src!, to)
   })
   return next
+}
+
+/** The same written reference pointing at another component name. */
+function componentReferenceSrc(src: string, name: string): string {
+  const end = src.search(/[?#]/)
+  const path = end < 0 ? src : src.slice(0, end)
+  const slash = path.lastIndexOf('/')
+  const extension = /\.html?$/i.exec(path)?.[0] ?? '.html'
+  return `${path.slice(0, slash + 1)}${name}${extension}${end < 0 ? '' : src.slice(end)}`
 }
 
 /** Removes a definition; pages that still refer to it show a placeholder until it is written again. */
@@ -142,11 +145,13 @@ function newDefinition(runtime: CourseRuntimeDefinition): CourseComponentDefinit
   })) as unknown as CourseComponentDefinition
 }
 
-function componentCopies(project: CourseProjectDocument): Map<string, { name: string; runtime: CourseRuntimeDefinition }> {
-  const copies = new Map<string, { name: string; runtime: CourseRuntimeDefinition }>()
+type IframeNode = Extract<CompositionNode<CourseRuntimeDefinition>, { kind: 'element' }>
+
+function componentCopies(project: CourseProjectDocument): Map<string, { name: string; runtime: CourseRuntimeDefinition; node: IframeNode }> {
+  const copies = new Map<string, { name: string; runtime: CourseRuntimeDefinition; node: IframeNode }>()
   visitIframes(project, (layerItemId, node, name) => {
     const child = node.children.length === 1 ? node.children[0]! : undefined
-    if (child?.kind === 'runtime') copies.set(JSON.stringify([layerItemId, node.id]), { name, runtime: child.runtime })
+    if (child?.kind === 'runtime') copies.set(JSON.stringify([layerItemId, node.id]), { name, runtime: child.runtime, node })
   })
   return copies
 }
@@ -156,35 +161,52 @@ function componentCopies(project: CourseProjectDocument): Map<string, { name: st
  * Runtime source editor, an imported build artifact) changes the component
  * itself: exactly the changed fields are written to `project.components`, which
  * then rewrites every copy. Conflicting edits of one component are rejected.
- * Mutates `next`; `previous` is the committed state the change was made from.
+ * A page the commit brings in with its own component (paste, saved fragment)
+ * defines it; under a taken name with other content it gets a free name, as an
+ * HTML import would. Mutates `next`; `previous` is the committed state the change was made from.
  */
 export function applyComponentCopyEdits(previous: CourseProjectDocument, next: CourseProjectDocument): void {
   const before = componentCopies(previous)
   const written = new Map<string, unknown>()
-  const created = new Map<string, CourseComponentDefinition>()
+  /** Names this commit's own new copies defined, and the free names their other contents got. */
+  const introduced = new Set<string>()
+  const renamed = new Map<string, string>()
   for (const [key, copy] of componentCopies(next)) {
     const stored = findCourseComponentName(next, copy.name)
     const prior = before.get(key)
-    const comparable = prior && courseComponentNameKey(prior.name) === courseComponentNameKey(copy.name)
-    const createdHere = created.get(courseComponentNameKey(copy.name))
-    if (createdHere && !comparable) {
-      if (!same(createdHere, newDefinition(copy.runtime))) throw new TypeError(`同名组件“${copy.name}”带来了不同内容，未提交修改`)
-      continue
-    }
-    if (stored === undefined) {
-      if (comparable) {
-        if (!same(prior.runtime, copy.runtime)) {
-          throw new TypeError(`组件“${copy.name}”没有定义：页面中的组件内容由软件按 components/${copy.name}.html 维护，请先写入组件定义`)
-        }
+    if (!prior) {
+      const definition = newDefinition(copy.runtime)
+      if (stored === undefined) {
+        ;(next.components ??= {})[copy.name] = definition
+        introduced.add(courseComponentNameKey(copy.name))
         continue
       }
-      // A page brought in with its component (paste, saved fragment) defines a name the course lacks.
-      const definition = newDefinition(copy.runtime)
-      created.set(courseComponentNameKey(copy.name), definition)
-      ;(next.components ??= {})[copy.name] = definition
+      if (same(next.components![stored], definition)) continue
+      const original = findCourseComponentName(previous, stored)
+      // A definition the commit itself wrote decides what its new pages show.
+      const authored = original === undefined
+        ? !introduced.has(courseComponentNameKey(stored))
+        : !same(previous.components![original], next.components![stored])
+      if (authored) continue
+      const id = JSON.stringify([courseComponentNameKey(stored), definition])
+      let name = renamed.get(id)
+      if (name === undefined) {
+        name = uniqueCourseComponentName(next, stored)
+        next.components![name] = definition
+        introduced.add(courseComponentNameKey(name))
+        renamed.set(id, name)
+      }
+      copy.node.attributes.src = componentReferenceSrc(copy.node.attributes.src!, name)
       continue
     }
-    if (!comparable) continue
+    // The frame now names another component: its copy is stale and the name decides.
+    if (courseComponentNameKey(prior.name) !== courseComponentNameKey(copy.name)) continue
+    if (stored === undefined) {
+      if (!same(prior.runtime, copy.runtime)) {
+        throw new TypeError(`组件“${copy.name}”没有定义：页面中的组件内容由软件按 components/${copy.name}.html 维护，请先写入组件定义`)
+      }
+      continue
+    }
     const definition = next.components![stored]!
     const original = findCourseComponentName(previous, stored)
     const originalDefinition = original === undefined ? undefined : previous.components![original]

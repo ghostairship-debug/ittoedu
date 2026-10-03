@@ -223,6 +223,34 @@ describe('Course project normalization', () => {
     expect(next.project.components).toEqual({ 公转模拟: definition() })
   })
 
+  it('gives a pasted component a free name when the course has a different one of that name', () => {
+    const driver = new CourseV9Driver()
+    let project = normalizeCourseProject(createBlankCourseProject({ id: 'c5', now: '2026-10-04T00:00:00.000Z', includeDefaultController: false, controls: 'none' }))
+    ;(project.surfaces[0] as SlideSurfaceDocument).scenes[0]!.layerItems.push({ ...page(), order: 5 })
+    project = normalizeCourseProject(setCourseComponent(project, '公转模拟', definition()))
+    const model = { kind: 'course-v9' as const, project: courseProjectDocumentSchema.parse(project), resources: { assets: {}, components: {} } }
+    const pasted = structuredClone(model.project)
+    const other = definition('CoursewareRuntime.define({ create() { return { destroy() {} } } }) // other course')
+    const third = definition('CoursewareRuntime.define({ create() { return { destroy() {} } } }) // third course')
+    const paste = (layerItemId: string, order: number, value: CourseComponentDefinition) => {
+      const item = { ...page(), layerItemId, order }
+      const visit = (node: Node): void => {
+        if (node.kind === 'element' && node.id === 'frame') node.children = [{ id: 'copy', kind: 'runtime', runtime: { ...value } }]
+        if (node.kind === 'element') node.children.forEach(visit)
+      }
+      visit(item.content.root)
+      ;(pasted.surfaces[0] as SlideSurfaceDocument).scenes[0]!.layerItems.push(item)
+    }
+    paste('pasted-a', 6, other)
+    paste('pasted-b', 7, other)
+    paste('pasted-c', 8, third)
+    const next = driver.apply(model, { type: 'course.replace', project: pasted }) as typeof model
+    expect(next.project.components).toEqual({ 公转模拟: definition(), '公转模拟 2': other, '公转模拟 3': third })
+    const sources = scene(next.project).layerItems.map(item => JSON.stringify(item).match(/components\/([^"]+)\.html/)?.[1])
+    expect(sources).toEqual(['公转模拟', '公转模拟 2', '公转模拟 2', '公转模拟 3'])
+    expect(JSON.stringify(scene(next.project).layerItems[0])).toContain(definition().source)
+  })
+
   it('normalizes every committed change through the driver', () => {
     const driver = new CourseV9Driver()
     const base = normalizeCourseProject(createBlankCourseProject({ id: 'c1', now: '2026-10-04T00:00:00.000Z', includeDefaultController: false, controls: 'none' }))
