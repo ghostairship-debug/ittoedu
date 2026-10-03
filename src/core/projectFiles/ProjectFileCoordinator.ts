@@ -7,6 +7,7 @@ import { normalizeCourseProject } from '../course/normalizeCourseProject'
 import type { ImageAssetResource } from '../tools/imageAssetMetadata'
 import type { HostImageInput } from '../tools/imageResource'
 import { assetPathIssue, assetPathType, planAssetDelete, planAssetMove, planAssetWrite } from './assetFiles'
+import { docFiles, isDocPath, planDocDelete, planDocMove, planDocWrite, readDocFile } from './flowDocs'
 import { componentPathName, planComponentDelete, planComponentMove, planComponentWrite, planControllerWrite, planThemeWrite } from './definitionFiles'
 import type { PageParsePort } from './pageHtml'
 import { programsChanged, withProgramFallbacks } from './programs'
@@ -34,16 +35,24 @@ const READ_LIMIT = 100_000
 const failure = (code: string, message: string): ToolResult => ({ kind: 'error', code, message })
 const isPage = (project: CourseModel['project'], path: string) => !!parsePagePath(path) || slidePageFiles(project).some(page => page.path === path)
 
+/** Any project file, handouts included. */
+function readFile(model: Pick<CourseModel, 'project' | 'resources'>, path: string): ProjectFileRead | undefined {
+  const doc = docFiles(model.project).find(file => file.path === path)
+  if (doc) return { kind: 'doc', path, surfaceId: doc.surface.id, ...readDocFile(model.project, doc) }
+  return readProjectFile(model.project, model.resources, path)
+}
+
 /** The file an identity names now, after renames and reordering. */
 function fileByIdentity(model: CourseModel, identity: string): ProjectFileRead | undefined {
   const { project, resources } = model
   const [kind, value] = [identity.slice(0, identity.indexOf(':') < 0 ? undefined : identity.indexOf(':')), identity.slice(identity.indexOf(':') + 1)]
   const path = identity === 'theme' ? THEME_FILE : identity === 'controller' ? CONTROLLER_FILE
     : kind === 'page' ? slidePageFiles(project).find(page => page.sceneId === value)?.path
+      : kind === 'doc' ? docFiles(project).find(file => file.surface.id === value)?.path
       : kind === 'asset' ? assetFiles(project).find(file => file.meta.id === value)?.path
         : kind === 'component' ? Object.keys(project.components ?? {}).filter(name => courseComponentNameKey(name) === value).map(name => `components/${name}.html`)[0]
           : undefined
-  return path === undefined ? undefined : readProjectFile(project, resources, path)
+  return path === undefined ? undefined : readFile({ project, resources }, path)
 }
 
 /** Project files are a projection of the course; writes become one undoable canonical change. */
@@ -86,13 +95,18 @@ export class ProjectFileCoordinator {
     }
     if (path === THEME_FILE) return planThemeWrite(project, resources, content)
     if (path === CONTROLLER_FILE) return planControllerWrite(project, resources, content)
+    if (isDocPath(path)) {
+      const parse = this.host.parsePage()
+      if (!parse) throw new ProjectFileError('service-unavailable', '页面解析服务尚未就绪')
+      return planDocWrite({ project, resources, path, html: content, parse })
+    }
     if (componentPathName(path) !== undefined) return planComponentWrite(project, resources, path, content)
     if (isPage(project, path)) {
       const parse = this.host.parsePage()
       if (!parse) throw new ProjectFileError('service-unavailable', '页面解析服务尚未就绪')
       return planPageWrite({ project, resources, path, html: content, parse, createId: () => this.host.createId() })
     }
-    throw new ProjectFileError('unsupported-path', `不能写入 ${path}；可写 theme.css、slides/ 演示页、components/ 组件和 assets/ 素材`)
+    throw new ProjectFileError('unsupported-path', `不能写入 ${path}；可写 theme.css、slides/ 演示页、docs/ 讲义、components/ 组件和 assets/ 素材`)
   }
 
   private async commit(runId: string, operationId: string, requestDigest: string, snapshot: CourseSnapshot, planned: PlannedChange) {
@@ -128,12 +142,17 @@ export class ProjectFileCoordinator {
       if (name === 'project.list') {
         const input = projectFileToolSchemas[name].parse(raw)
         const snapshot = await this.host.document(runId, input.project, 'read')
-        return { kind: 'read', data: { files: listProjectFiles(snapshot.model.project, snapshot.model.resources) } }
+        const files = listProjectFiles(snapshot.model.project, snapshot.model.resources)
+        const docs = docFiles(snapshot.model.project).map(file => ({ path: file.path, type: '讲义',
+          ...(file.surface.surfaceLayerItems.length ? { note: `另有 ${file.surface.surfaceLayerItems.length} 个挂靠段落的独立对象` } : {}) }))
+        const after = files.reduce((last, file, index) => file.path.startsWith('slides') ? index : last, 0)
+        files.splice(after + 1, 0, ...docs)
+        return { kind: 'read', data: { files } }
       }
       if (name === 'project.read') {
         const input = projectFileToolSchemas[name].parse(raw)
         const snapshot = await this.host.document(runId, input.project, 'read')
-        const file = readProjectFile(snapshot.model.project, snapshot.model.resources, input.path)
+        const file = readFile(snapshot.model, input.path)
         if (!file) return failure('not-found', `没有这个文件：${input.path}；可先列出工程文件`)
         this.remember(runId, snapshot.documentId, file, snapshot.model)
         if (file.kind === 'asset') {
@@ -141,9 +160,9 @@ export class ProjectFileCoordinator {
           return { kind: 'read', data: asset }
         }
         const offset = input.offset ?? 0, end = Math.min(file.content.length, offset + (input.limit ?? READ_LIMIT))
-        const type = file.kind === 'page' ? file.type : file.kind === 'theme' ? '主题' : file.kind === 'controller' ? '教师控制台' : file.draft ? '组件草稿' : '组件'
+        const type = file.kind === 'page' ? file.type : file.kind === 'doc' ? '讲义' : file.kind === 'theme' ? '主题' : file.kind === 'controller' ? '教师控制台' : file.draft ? '组件草稿' : '组件'
         return { kind: 'read', data: { path: file.path, type,
-          ...(file.kind === 'page' && file.objects.length ? { objects: file.objects } : {}),
+          ...((file.kind === 'page' || file.kind === 'doc') && file.objects.length ? { objects: file.objects } : {}),
           ...(file.kind === 'component' && file.draft ? { draft: file.draft } : {}),
           content: file.content.slice(offset, end), ...(offset || end < file.content.length ? { offset, total: file.content.length } : {}),
           ...(end < file.content.length ? { nextOffset: end } : {}) } }
@@ -151,7 +170,7 @@ export class ProjectFileCoordinator {
       if (name === 'project.write' || name === 'project.edit') {
         const input = name === 'project.write' ? projectFileToolSchemas[name].parse(raw) : projectFileToolSchemas[name].parse(raw)
         const snapshot = await this.host.document(runId, input.project, 'write')
-        const current = readProjectFile(snapshot.model.project, snapshot.model.resources, input.path)
+        const current = readFile(snapshot.model, input.path)
         if ('from' in input) {
           if (current) this.assertFresh(runId, snapshot, current)
           const { source, ...file } = await this.host.readSource(runId, input.from)
@@ -182,6 +201,7 @@ export class ProjectFileCoordinator {
         if (slidePageFiles(project).some(page => page.path === input.from)) return await this.apply(runId, operationId, requestDigest, snapshot, planPageMove(project, resources, input.from, input.to))
         if (componentPathName(input.from) !== undefined) return await this.apply(runId, operationId, requestDigest, snapshot, planComponentMove(project, resources, input.from, input.to))
         if (input.from.startsWith('assets/')) return await this.apply(runId, operationId, requestDigest, snapshot, planAssetMove(project, resources, input.from, input.to))
+        if (isDocPath(input.from)) return await this.apply(runId, operationId, requestDigest, snapshot, planDocMove(project, resources, input.from, input.to))
         return failure('unsupported-path', `不能移动 ${input.from}；可移动演示页、组件和素材`)
       }
       const input = projectFileToolSchemas['project.delete'].parse(raw)
@@ -191,6 +211,7 @@ export class ProjectFileCoordinator {
       if (componentPathName(input.path) !== undefined) return await this.apply(runId, operationId, requestDigest, snapshot, planComponentDelete(project, resources, input.path))
       if (input.path === THEME_FILE) return await this.apply(runId, operationId, requestDigest, snapshot, planThemeWrite(project, resources, ''))
       if (input.path.startsWith('assets/')) return await this.apply(runId, operationId, requestDigest, snapshot, planAssetDelete(project, resources, input.path))
+      if (isDocPath(input.path)) return await this.apply(runId, operationId, requestDigest, snapshot, planDocDelete(project, resources, input.path))
       return failure('unsupported-path', `不能删除 ${input.path}；可删除演示页、组件、素材和主题`)
     } catch (error) {
       if (error instanceof ProjectFileError) return failure(error.code, error.message)

@@ -122,7 +122,8 @@ describe('slide page file round trip', () => {
     expect(html).not.toMatch(/cw-resource:|web_[0-9a-f-]{8}/)
     expect(html).toContain('src="../assets/')
     expect(html).toContain('url("../assets/')
-    expect(html).toContain('srcdoc="')
+    // The importer turns the embedded document into a named component the page refers to.
+    expect(html).toContain('src="../components/')
     expect(html).toContain('<guoling-chart><script type="application/json">')
     expect(html).not.toContain('"formulaId"')
     expect(html).toContain('<guoling-document><script type="application/json">')
@@ -134,7 +135,7 @@ describe('slide page file round trip', () => {
     if (parsed.kind !== 'composition') throw new Error('page should stay editable')
     expect(parsed.content).toEqual(page)
     expect(documentDigest(parsed.content)).toBe(documentDigest(page))
-    // Its embedded program keeps the admitted definition, including the static fallback.
+    // The page's component copy keeps its instance fields, including the static fallback.
     const runtime = nodes(parsed.content).find(node => node.kind === 'runtime')
     expect(runtime?.kind === 'runtime' && runtime.runtime.staticFallback).toBeTruthy()
     expect(serializePageHtml(parsed.content, project.assets)).toBe(html)

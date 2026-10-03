@@ -219,6 +219,7 @@ export function listProjectFiles(project: CourseProjectDocument, resources: Docu
 export type ProjectFileRead =
   | { kind: 'page'; path: string; type: string; content: string; objects: string[]; page: SlidePageFile }
   | { kind: 'theme'; path: string; content: string }
+  | { kind: 'doc'; path: string; content: string; objects: string[]; surfaceId: string }
   | { kind: 'component'; path: string; name: string; content: string; draft?: string }
   | { kind: 'asset'; path: string; mediaType: string; byteLength: number; width?: number; height?: number; content?: string; assetId: string }
   | { kind: 'controller'; path: string; content: string }
@@ -258,6 +259,6 @@ export function projectFileVersion(file: ProjectFileRead, resources: DocumentRes
 
 /** The stable object a file path currently addresses; survives renames and reordering. */
 export function projectFileIdentity(file: ProjectFileRead): string {
-  return file.kind === 'page' ? `page:${file.page.sceneId}` : file.kind === 'asset' ? `asset:${file.assetId}`
+  return file.kind === 'page' ? `page:${file.page.sceneId}` : file.kind === 'doc' ? `doc:${file.surfaceId}` : file.kind === 'asset' ? `asset:${file.assetId}`
     : file.kind === 'component' ? `component:${courseComponentNameKey(file.name)}` : file.kind
 }

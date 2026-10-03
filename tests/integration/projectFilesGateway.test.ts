@@ -243,7 +243,7 @@ describe('project files through the tool gateway', () => {
     applied(await f.call('e1', 'project.edit', { path: 'slides/02-观察.html', edits: [{ old: 'title="再看一次"', new: 'title="再观察一次"' }] }))
     expect(pass.count()).toBe(1)
     applied(await f.call('m1', 'project.move', { from: 'components/公转模拟.html', to: 'components/地球公转.html' }))
-    expect(data<{ content: string }>(await f.call('r2', 'project.read', { path: 'slides/01-导入.html' })).content).toContain('src="../components/%E5%9C%B0%E7%90%83%E5%85%AC%E8%BD%AC.html"')
+    expect(data<{ content: string }>(await f.call('r2', 'project.read', { path: 'slides/01-导入.html' })).content).toContain('src="../components/地球公转.html"')
 
     const refused = await harness({ admission: { async run() { return { ok: false, message: '组件脚本抛出错误' } } } as unknown as BuildAdmissionPort })
     applied(await refused.call('w1', 'project.write', { path: 'slides/01-导入.html', content: '<iframe src="../components/坏组件.html" title="坏"></iframe>' }))
@@ -314,5 +314,38 @@ describe('project files through the tool gateway', () => {
     expect(await readOnly.call('w2', 'project.write', { project: '课程/新课.h5lesson', path: 'slides/01-甲.html', content: '<p>甲</p>' }))
       .toMatchObject({ kind: 'error', code: 'not-authorized' })
     expect(await readOnly.call('w3', 'project.list', { project: '课程/别的.h5lesson' })).toMatchObject({ kind: 'error', message: '没有这个课件' })
+  })
+
+  it('creates and edits a handout as one Flow surface; headings are its locations', async () => {
+    const f = await harness()
+    const doc = '<h1>四季的成因</h1>\n<p>地轴倾斜 \\(\\theta\\approx 23.5\\)。</p>\n<h2>观察</h2>\n<ul><li>春分</li><li>夏至</li></ul>\n<h2>结论</h2>\n<p>四季由此而来。</p>'
+    const written = applied(await f.call('d1', 'project.write', { path: 'docs/讲义.html', content: doc }))
+    expect(written.affected).toEqual(['docs/讲义.html'])
+    expect(await f.files()).toEqual(expect.arrayContaining([{ path: 'docs/讲义.html', type: '讲义' }]))
+    const flow = () => f.project().surfaces.find(surface => surface.type === 'flow')!
+    expect(flow().title).toBe('讲义')
+    const labels = () => f.project().locations.filter(location => location.surfaceId === flow().id).map(location => location.label)
+    expect(labels()).toEqual(['四季的成因', '观察', '结论'])
+    const read = data<{ content: string; type: string }>(await f.call('r1', 'project.read', { path: 'docs/讲义.html' }))
+    expect(read.type).toBe('讲义')
+    expect(read.content).toContain('<h2>观察</h2>')
+    expect(read.content).not.toMatch(/block-|formula-|item-/)
+    expect(await f.call('d2', 'project.write', { path: 'docs/讲义.html', content: read.content }))
+      .toMatchObject({ kind: 'document-operation', result: { status: 'unchanged' } })
+    // Removing a heading removes its navigation location through the existing cleanup.
+    const surfaceIds = () => { const value = flow(); return value.type === 'flow' ? value.blocks.map(block => block.id) : [] }
+    const before = surfaceIds()
+    applied(await f.call('e1', 'project.edit', { path: 'docs/讲义.html', edits: [{ old: '<h2>结论</h2>', new: '' }, { old: '<li>夏至</li>', new: '<li>夏至（6 月）</li>' }] }))
+    expect(labels()).toEqual(['四季的成因', '观察'])
+    expect(surfaceIds()).toEqual(before.filter((_, index) => index !== 4))
+    expect(await f.call('e2', 'project.write', { path: 'docs/空.html', content: '<p>没有标题</p>' })).toMatchObject({ kind: 'error', code: 'heading-required' })
+    // An image whose asset does not exist yet is reported, not stored; the rest of the handout is unchanged.
+    const missing = await f.call('e3', 'project.edit', { path: 'docs/讲义.html', edits: [{ old: '<p>四季由此而来。</p>', new: '<p>四季由此而来。</p><figure><img src="../assets/轨道.svg" alt="轨道"></figure>' }] })
+    expect(missing).toMatchObject({ kind: 'document-operation', result: { status: 'unchanged' } })
+    expect(missing.kind === 'document-operation' && missing.advisories?.map(item => item.message).join('')).toContain('assets/轨道.svg')
+    applied(await f.call('m1', 'project.move', { from: 'docs/讲义.html', to: 'docs/地理讲义.html' }))
+    expect(flow().title).toBe('地理讲义')
+    applied(await f.call('x1', 'project.delete', { path: 'docs/地理讲义.html' }))
+    expect(f.project().surfaces.some(surface => surface.type === 'flow')).toBe(false)
   })
 })
