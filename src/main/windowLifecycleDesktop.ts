@@ -22,8 +22,9 @@ async function closeActivity(): Promise<CloseActivity> {
 export function installWindowLifecycle(getWindow: () => BrowserWindow | null): WindowLifecycle {
   const lifecycle = new WindowLifecycle({
     window: getWindow,
-    closeAction: async () => (await (await externalMcpService()).status()).settings.closeAction,
-    remember: async closeAction => (await externalMcpService()).configure({ closeAction }),
+    // Closing must keep working even if the connection service could not start: fall back to asking.
+    closeAction: () => externalMcpService().then(async service => (await service.status()).settings.closeAction).catch(() => 'ask' as const),
+    remember: closeAction => externalMcpService().then(service => service.configure({ closeAction })).catch(() => undefined),
     activity: closeActivity,
     prompt: (window, options) => dialog.showMessageBox(window as BrowserWindow, options),
     createTray: actions => {

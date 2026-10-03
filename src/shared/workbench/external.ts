@@ -64,7 +64,6 @@ export interface ExternalMcpAPI {
   /** The old token stops working immediately and every external session is disconnected. */
   regenerateToken(): Promise<{ token: string; status: ExternalMcpStatus }>
   stopSession(sessionId: string): Promise<ExternalMcpStatus>
-  onStatusChanged?(listener: (status: ExternalMcpStatus) => void): () => void
   /** The renderer answers Main's foreground-state queries; returns an unsubscribe function. */
   serveUiState?(provider: () => Promise<ExternalUiState>): () => void
 }
