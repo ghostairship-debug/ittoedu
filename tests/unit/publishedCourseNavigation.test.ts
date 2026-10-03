@@ -18,7 +18,7 @@ import {
   createPublishedCourseSession,
   type PublishedCourseSession,
 } from '@/player/surfaces/publishedDynamicHosts'
-import { attachPublishedCoursePresenter } from '@/player/publishedCoursePresenter'
+import { attachPublishedCourseKeys, attachPublishedCoursePresenter } from '@/player/publishedCoursePresenter'
 import { adjacentPlaybackTarget, buildCoursePlaybackSequence, edgePlaybackTarget, playbackNavigationProgress } from '@/player/navigation/coursePlaybackSequence'
 
 const NOW = '2026-08-17T21:00:00.000Z'
@@ -425,6 +425,11 @@ describe('published course Mixed navigation', () => {
     await session.goToIndex(1)
     expect(session.requestPlaybackNavigation('step', 'next')).toBe(false)
     expect(session.navigator.current?.index).toBe(1)
+    // A key stopped by the guard keeps the guard's message.
+    const keys = attachPublishedCourseKeys(container, session, payload.playback)
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
+    keys.destroy()
+    expect(container.querySelector('[data-published-navigation-feedback]')).toHaveTextContent('Flow 尚未解锁')
     await expect(session.nextStep()).rejects.toThrow()
     expect(session.navigator.current?.index).toBe(1)
     await session.goToIndex(0)

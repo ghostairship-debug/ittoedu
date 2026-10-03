@@ -890,6 +890,8 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   #audioDestroyStarted = false
   #interactionNavigationRunId: number | undefined
   #navigationGuardBypassTargetId: string | null = null
+  /** A guard message shown for the request in progress; the key's generic rejection does not replace it. */
+  #guardFeedbackShown = false
 
   override readObservationState(): ReturnType<PublishedCourseSession['readObservationState']> {
     const state = super.readObservationState()
@@ -1152,6 +1154,10 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     this.#localInteractionController?.enterScene(matched ? parentRunId : undefined)
   }
 
+  override reportPresenterFeedback(message: string): void {
+    if (!this.#guardFeedbackShown) super.reportPresenterFeedback(message)
+  }
+
   override dispatchPresenterCommand(command: PlaybackDirection): boolean {
     if (!this.#canAcceptHostAction()) return false
     const global = this.#globalInteractionController?.dispatchPresenterCommand(command) ?? false
@@ -1292,6 +1298,8 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
 
   #reportNavigationBlock(message: string, surfaceId: string): void {
     this.showNavigationFeedback(message, surfaceId)
+    this.#guardFeedbackShown = true
+    queueMicrotask(() => { this.#guardFeedbackShown = false })
     this.#services.reportDiagnostic?.({
       surfaceId,
       phase: 'execute',
