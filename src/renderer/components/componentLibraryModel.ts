@@ -1,4 +1,4 @@
-import type { AvailableComponentCatalogPackage } from '../../shared/componentCatalog'
+import type { AvailableComponentCatalogPackage, AvailableHtmlComponent } from '../../shared/componentCatalog'
 import type { ComponentPackageData } from '../../shared/componentTypes'
 import {
   compareSemanticVersions,
@@ -153,4 +153,27 @@ export function filterComponentLibraryPackages(
       ...entry.tags,
     ].join(' ').toLocaleLowerCase().includes(query)
   })
+}
+
+/** One card per HTML component entry (packageId within its directory), the newest saved version. */
+export function selectCurrentHtmlComponents(
+  entries: ReadonlyArray<AvailableHtmlComponent>,
+): AvailableHtmlComponent[] {
+  const selected = new Map<string, AvailableHtmlComponent>()
+  entries.forEach((entry) => {
+    const key = `${entry.sourceId}\u0000${entry.packageId}`
+    const current = selected.get(key)
+    if (!current || compareSemanticVersions(entry.version, current.version) > 0) selected.set(key, entry)
+  })
+  return [...selected.values()].sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
+}
+
+export function filterHtmlComponents(
+  entries: ReadonlyArray<AvailableHtmlComponent>,
+  query: string,
+): AvailableHtmlComponent[] {
+  const normalized = query.trim().toLocaleLowerCase()
+  if (!normalized) return [...entries]
+  return entries.filter((entry) => [entry.name, entry.description, entry.sourceCourse ?? '', ...entry.subject, ...entry.schoolStage, ...entry.tags]
+    .join(' ').toLocaleLowerCase().includes(normalized))
 }

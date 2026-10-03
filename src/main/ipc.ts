@@ -203,6 +203,11 @@ const componentCatalogPackageSchema = z.object({
   version: z.string().min(1).max(100),
 }).strict()
 
+const componentCatalogHtmlComponentSchema = z.object({
+  sourceId: z.string().min(1).max(200),
+  entry: z.string().min(1).max(300),
+}).strict()
+
 function requireNoArguments(args: unknown[]): void {
   if (args.length !== 0) {
     throw new z.ZodError([
@@ -837,6 +842,21 @@ export function registerIpcHandlers(context: IpcContext): void {
         input.packageId,
         input.version,
       )
+    },
+  )
+
+  registerSafeHandler(
+    IPC_CHANNELS.deleteComponentCatalogHtmlComponent,
+    context,
+    {
+      code: 'COMPONENT_CATALOG_HTML_DELETE_FAILED',
+      title: 'HTML 组件删除失败',
+      message: '无法从“我的资产库”删除这个 HTML 组件。',
+      suggestion: '请刷新组件库后重试。',
+    },
+    async (_event, args) => {
+      const input = componentCatalogHtmlComponentSchema.parse(requireSingleArgument(args))
+      return componentCatalogManager.deleteHtmlComponent(input.sourceId, input.entry)
     },
   )
 

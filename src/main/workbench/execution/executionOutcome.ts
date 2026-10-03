@@ -53,7 +53,9 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
     return { status: 'failed', message: data.status === 'failed' ? '构建检查未通过，请读取构建日志' : '构建检查已取消' }
   }
   if (name === 'web.search' || name === 'web.open' || name === 'mcp.discover' || name === 'mcp.invoke'
-    || name === 'media.start' || name === 'compute.run' || name === 'delegate.start') {
+    || name === 'media.start' || name === 'compute.run' || name === 'delegate.start'
+    || name === 'image.search' || name === 'image.preview' || name === 'image.fetch' || name === 'asset.search'
+    || name === 'asset.use' || name === 'asset.save') {
     const message = typeof data.reason === 'string' ? data.reason.slice(0, 240) : '外部能力未返回可用成果'
     if (data.status === 'unknown') return { status: 'unknown', message }
     if (name === 'compute.run' && (data.status === 'preparing' || data.status === 'running'))

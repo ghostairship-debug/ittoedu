@@ -1,13 +1,46 @@
 import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
+import { z } from 'zod'
 import { BUILT_IN_COMPONENT_CATALOG_DIRECTORY, trustForManagedCatalogDigest } from '../shared/builtInComponentCatalog'
-import type { ComponentCatalogTrust } from '../shared/componentCatalog'
+import type { AvailableHtmlComponent, ComponentCatalogIssue, ComponentCatalogTrust } from '../shared/componentCatalog'
+import { ComponentCatalogScanError, scanComponentCatalogDirectory, type ScannedComponentCatalogSource } from './componentCatalogScanner'
+import { MANAGED_COMPONENT_LIBRARY_DIRECTORY, scanHtmlComponents } from './htmlComponentLibrary'
 
-/** Built-ins always come from the application. External directories are additive. */
+/** Directories the user added in the component library panel (under userData). */
+export const COMPONENT_CATALOG_SOURCES_FILE = 'component-catalog-sources.json'
+export const configuredSourcesSchema = z.object({
+  version: z.literal(1),
+  sources: z.array(z.object({
+    path: z.string().min(1).max(32_767),
+    trust: z.enum(['trusted', 'prompt']),
+  }).strict()).max(100),
+}).strict()
+export type ConfiguredCatalogSource = z.infer<typeof configuredSourcesSchema>['sources'][number]
+
+export async function readConfiguredCatalogSources(userData: string): Promise<ConfiguredCatalogSource[]> {
+  try {
+    const text = await fs.readFile(path.join(userData, COMPONENT_CATALOG_SOURCES_FILE), 'utf8')
+    const parsed = configuredSourcesSchema.safeParse(JSON.parse(text) as unknown)
+    return parsed.success ? parsed.data.sources : []
+  } catch {
+    return []
+  }
+}
+
+export function canonicalCatalogPath(value: string): string {
+  const resolved = path.resolve(value)
+  return process.platform === 'win32' ? resolved.toLocaleLowerCase('en-US') : resolved
+}
+
+/** The managed library (“我的资产库”) that saved HTML components go to. */
+export const managedComponentLibrary = (userData: string) => path.join(userData, MANAGED_COMPONENT_LIBRARY_DIRECTORY)
+
+/** Built-ins always come from the application. External directories and the managed library are additive. */
 export async function defaultComponentCatalogSources(
   appRoot: string,
   externalDirectory = process.env.COURSEWARE_COMPONENTS_DIR,
+  managedLibrary?: string,
 ): Promise<Array<{ path: string; trust: ComponentCatalogTrust }>> {
   const builtInRoot = path.resolve(appRoot, BUILT_IN_COMPONENT_CATALOG_DIRECTORY)
   let trust: ComponentCatalogTrust = 'prompt'
@@ -18,18 +51,51 @@ export async function defaultComponentCatalogSources(
     // Keep the source so the scanner reports a missing built-in library.
   }
   const sources = [{ path: builtInRoot, trust }]
-  if (externalDirectory) {
-    const externalRoot = path.resolve(externalDirectory)
-    const samePath = process.platform === 'win32'
-      ? externalRoot.toLowerCase() === builtInRoot.toLowerCase()
-      : externalRoot === builtInRoot
-    if (!samePath) {
-      try {
-        if ((await fs.stat(path.join(externalRoot, 'catalog.json'))).isFile()) {
-          sources.push({ path: externalRoot, trust: 'prompt' })
-        }
-      } catch { /* An unavailable optional external source does not hide built-ins. */ }
-    }
+  for (const [directory, sourceTrust] of [[externalDirectory, 'prompt'], [managedLibrary, 'trusted']] as const) {
+    if (!directory) continue
+    const root = path.resolve(directory)
+    if (canonicalCatalogPath(root) === canonicalCatalogPath(builtInRoot)) continue
+    try {
+      if ((await fs.stat(path.join(root, 'catalog.json'))).isFile()) sources.push({ path: root, trust: sourceTrust })
+    } catch { /* An unavailable optional source does not hide built-ins. */ }
   }
   return sources
+}
+
+export interface ScannedCatalogSource extends ScannedComponentCatalogSource {
+  htmlComponents: AvailableHtmlComponent[]
+}
+
+/** One directory: its `.h5component` packages and its HTML components. */
+export async function scanCatalogSource(rootPath: string, trust: ComponentCatalogTrust, managedLibrary: string): Promise<ScannedCatalogSource> {
+  const scanned = await scanComponentCatalogDirectory(rootPath, trust)
+  const html = await scanHtmlComponents(scanned.rootPath, scanned.source, canonicalCatalogPath(scanned.rootPath) === canonicalCatalogPath(managedLibrary))
+  return { ...scanned, issues: [...scanned.issues, ...html.issues], htmlComponents: html.entries }
+}
+
+/** Every catalog source the component library panel shows, scanned without touching any shared state. */
+export async function scanComponentCatalogSources(appRoot: string, userData: string): Promise<{
+  sources: Map<string, ScannedCatalogSource>; issues: ComponentCatalogIssue[]
+}> {
+  const managed = managedComponentLibrary(userData)
+  const byPath = new Map<string, { path: string; trust: ComponentCatalogTrust }>()
+  for (const source of await defaultComponentCatalogSources(appRoot, undefined, managed)) byPath.set(canonicalCatalogPath(source.path), source)
+  for (const source of await readConfiguredCatalogSources(userData)) {
+    const key = canonicalCatalogPath(source.path)
+    if (byPath.get(key)?.trust !== 'built-in') byPath.set(key, source)
+  }
+  const sources = new Map<string, ScannedCatalogSource>(), issues: ComponentCatalogIssue[] = []
+  for (const source of byPath.values()) {
+    try {
+      const scanned = await scanCatalogSource(source.path, source.trust, managed)
+      sources.set(scanned.source.sourceId, scanned)
+    } catch (error) {
+      issues.push({
+        sourceLabel: path.basename(source.path) || '组件目录',
+        code: error instanceof ComponentCatalogScanError ? error.code : 'catalog-unreadable',
+        message: error instanceof Error ? error.message : '组件目录扫描失败。',
+      })
+    }
+  }
+  return { sources, issues }
 }

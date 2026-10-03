@@ -39,6 +39,10 @@ import { ChatGPTImageProvider } from './images/ChatGPTImageProvider'
 import { OpenAIImagesApiProvider } from './images/OpenAIImagesApiProvider'
 import { imageRoute } from './images/imageRoute'
 import { executionSettingsStore, resolveOAuthCredential } from './providers/executionSettingsService'
+import { OpenImageService } from './assetSources/OpenImageService'
+import { openLibraryUserAgent, publicAssetHttp } from './assetSources/publicAssetHttp'
+import { AssetLibraryService, readComponentLibrary } from './assetSources/componentLibrarySearch'
+import { managedComponentLibrary } from '../componentCatalogSources'
 
 let installed = false
 let imageService: ImageGenerationService | undefined
@@ -129,6 +133,9 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   const delegationWriteVerified = process.env.GUOLING_CODEX_DELEGATION_WRITE_VERIFIED === '1'
   const jobs = new HostJobService({ images, builds, compute, delegation })
   const web = new WebResearchService()
+  const openImages = new OpenImageService({ http: publicAssetHttp(openLibraryUserAgent(app.getVersion())) })
+  const assetLibrary = new AssetLibraryService({ load: () => readComponentLibrary(app.getAppPath(), app.getPath('userData')),
+    managedLibrary: managedComponentLibrary(app.getPath('userData')) })
   // Agent and human share the task's main-owned embedded page.
   const approvals = new BrowserActionApprovals()
   const mcp = new ManagedBrowserMcpService({ scratchRoot: path.join(directory, 'browser'),
@@ -240,6 +247,10 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     web,
     mcp,
     media,
+    openImages: { search: input => openImages.search(input), preview: input => openImages.preview(input),
+      readPreview: (runId, resourceId) => openImages.readPreview(runId, resourceId), fetch: input => openImages.fetch(input) },
+    assetLibrary: { search: input => assetLibrary.search(input), read: input => assetLibrary.read(input),
+      save: ({ runId: _runId, ...input }) => assetLibrary.save(input) },
     beginRun: async grant => {
       if (grant.disclosedSettings && (await (await executionSettingsStore()).read()).profile.revision !== grant.disclosedSettings.profileRevision)
         throw new Error('模型或服务配置在发送时已变化；本次未请求模型，请核对后重新发送。')
@@ -254,6 +265,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       deliverySignals.set(grant.runId, controller)
       try {
         web.beginRun(grant.runId)
+        openImages.beginRun(grant.runId)
         await mcp.beginRun(grant.runId, managedBrowserGrantForRun(grant))
         approvals.beginRun(grant.runId)
         media.beginRun(grant.runId, { writable: grant.actor === 'agent' && !!grant.fileAccess && grant.fileAccess.permission !== 'read-only', capabilities: [] })
@@ -262,13 +274,14 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
         approvals.revokeRun(grant.runId)
         frozenSkillRoots.delete(grant.runId); skillRootErrors.delete(grant.runId)
         await Promise.allSettled([web.stopRun(grant.runId), mcp.endRun(grant.runId), media.stopRun(grant.runId)])
-        web.endRun(grant.runId); media.endRun(grant.runId)
+        web.endRun(grant.runId); media.endRun(grant.runId); openImages.endRun(grant.runId)
         throw error
       }
     },
     stopRun: async runId => {
       approvals.revokeRun(runId)
       deliverySignals.get(runId)?.abort(); deliverySignals.delete(runId); observationImages.clearRun(runId); skills.release(runId)
+      openImages.stopRun(runId)
       frozenSkillRoots.delete(runId); skillRootErrors.delete(runId)
       await Promise.allSettled([web.stopRun(runId), mcp.stopRun(runId), media.stopRun(runId), ...(compute ? [compute.cancelRun(runId)] : [])])
     },

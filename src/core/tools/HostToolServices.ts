@@ -4,6 +4,7 @@ import type { ToolDefinition, ToolResult, ToolTarget, ToolRunGrant } from '../..
 import type { ImageGenerationRequest, ImageJobSnapshot, ImageModelSelection } from '../../shared/workbench/images'
 import { buildToolCallSchema, type BuildCreateTicket, type BuildCreateLookup, type BuildImportArtifact, type BuildJobInput, type BuildJobSnapshot, type BuildToolCall } from '../../shared/workbench/build'
 import type { HostImageInput } from './imageResource'
+import type { AssetSource } from '../../shared/contracts/media-v1'
 import type { ComputeArtifact, ComputeJobInput, ComputeJobSnapshot } from '../../shared/workbench/compute'
 import { DocumentRegistry } from '../documents/DocumentRegistry'
 import { documentDigest } from '../documents/documentDigest'
@@ -64,6 +65,24 @@ export interface HostToolServices {
     discover(runId: string): unknown
     start(runId: string, input: { kind: 'speech' | 'video' | 'music'; prompt: string; durationSeconds?: number; language?: string;
       referenceResources?: readonly string[] }, options?: { signal?: AbortSignal }): Promise<unknown>
+  }
+  /** Open-license image libraries; candidates and previews belong to one run. */
+  openImages?: {
+    search(input: { runId: string; query: string; limit?: number; page?: number; allowShareAlike?: boolean; signal?: AbortSignal }): Promise<unknown>
+    preview(input: { runId: string; images: readonly string[]; signal?: AbortSignal }): Promise<unknown>
+    readPreview(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array }
+    fetch(input: { runId: string; image: string; format?: 'jpeg' | 'png' | 'webp'; signal?: AbortSignal }): Promise<
+      | { status: 'ready'; file: HostImageInput; width: number; height: number; source: AssetSource }
+      | { status: 'failed' | 'rejected'; reason: string }>
+  }
+  /** The component library: search, an HTML component's files, and saving into the managed library. */
+  assetLibrary?: {
+    search(input: { runId: string; query: string; limit?: number }): Promise<unknown>
+    read(input: { runId: string; packageId: string; version?: string }): Promise<
+      | { status: 'ready'; packageId: string; version: string; name: string; html: string; assets: { path: string; mimeType: string; bytes: Uint8Array }[] }
+      | { status: 'rejected' | 'failed'; reason: string }>
+    save(input: { runId: string; name: string; description?: string; subject?: readonly string[]; schoolStage?: readonly string[];
+      tags?: readonly string[]; sourceCourse?: string; html: string; assets: readonly { path: string; mimeType: string; bytes: Uint8Array }[] }): Promise<unknown>
   }
   /** Freeze role/connection selections before the run can issue any service operation. */
   beginRun?(grant: ToolRunGrant): Promise<void>
@@ -347,6 +366,44 @@ export class HostToolCoordinator {
     this.writableRun(runId)
     return this.services.media ? { kind: 'read', data: await this.services.media.start(runId, input, { signal }) }
       : this.serviceUnavailable('媒体生成服务尚未配置')
+  }
+  async imageSearch(runId: string, input: { query: string; limit?: number; page?: number; allowShareAlike?: boolean }, signal?: AbortSignal): Promise<ToolResult> {
+    this.builtInRun(runId)
+    return this.services.openImages ? { kind: 'read', data: await this.services.openImages.search({ runId, ...input, signal }) }
+      : this.serviceUnavailable('开放图库服务尚未配置')
+  }
+  async imagePreview(runId: string, input: { images: readonly string[] }, signal?: AbortSignal): Promise<ToolResult> {
+    this.builtInRun(runId)
+    return this.services.openImages ? { kind: 'read', data: await this.services.openImages.preview({ runId, images: input.images, signal }) }
+      : this.serviceUnavailable('开放图库服务尚未配置')
+  }
+  /** Preview bytes go only to the run's next model request, never into a document. */
+  readImagePreview(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array } {
+    this.builtInRun(runId)
+    if (!this.services.openImages) throw new Error('开放图库服务尚未配置')
+    return this.services.openImages.readPreview(runId, resourceId)
+  }
+  /** One candidate's verified bytes and source; the Gateway places them as a project asset or a run resource. */
+  openImageFile(runId: string, image: string, format?: 'jpeg' | 'png' | 'webp', signal?: AbortSignal) {
+    this.writableRun(runId)
+    if (!this.services.openImages) throw new Error('开放图库服务尚未配置')
+    return this.services.openImages.fetch({ runId, image, ...(format ? { format } : {}), signal })
+  }
+  async assetSearch(runId: string, input: { query: string; limit?: number }): Promise<ToolResult> {
+    this.builtInRun(runId)
+    return this.services.assetLibrary ? { kind: 'read', data: await this.services.assetLibrary.search({ runId, ...input }) }
+      : this.serviceUnavailable('资产库检索服务尚未配置')
+  }
+  /** One HTML component's text and asset files for the Gateway, which writes them into a course. */
+  libraryComponent(runId: string, packageId: string, version?: string) {
+    this.writableRun(runId)
+    if (!this.services.assetLibrary) throw new Error('资产库服务尚未配置')
+    return this.services.assetLibrary.read({ runId, packageId, ...(version ? { version } : {}) })
+  }
+  async saveLibraryComponent(runId: string, input: Omit<Parameters<NonNullable<HostToolServices['assetLibrary']>['save']>[0], 'runId'>): Promise<ToolResult> {
+    this.writableRun(runId)
+    return this.services.assetLibrary ? { kind: 'read', data: await this.services.assetLibrary.save({ runId, ...input }) }
+      : this.serviceUnavailable('资产库服务尚未配置')
   }
   /** The caller proves sourceRunId belongs to its durable continuation lineage. */
   reissueImageForContinuation(currentRunId: string, sourceDocumentId: string, destinationDocumentId: string,
