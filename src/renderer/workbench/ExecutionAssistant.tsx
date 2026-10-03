@@ -21,6 +21,7 @@ import { effectiveModelProtocol } from '../../shared/workbench/modelRouting'
 import type { ExternalMcpAPI } from '../../shared/workbench/external'
 import { ExecutionSettingsPanel } from './ExecutionSettingsPanel'
 import { ExternalMcpPanel } from './ExternalMcpPanel'
+import { useExternalUiStateProvider } from './useExternalUiState'
 import { ExecutionTimeline, type ExecutionTimelineProps } from './ExecutionTimeline'
 import { ExecutionChangeReview, type ExecutionChangeReviewProps } from './ExecutionChangeReview'
 import type { UserCheckpointIndex } from '../../main/workbench/execution/CheckpointForkService'
@@ -122,6 +123,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
   const settingsAPI = suppliedSettingsAPI ?? window.desktopAPI?.executionSettings
   const externalAPI = suppliedExternalAPI ?? window.desktopAPI?.externalMcp
   const [workspaceId, setWorkspaceId] = useState('')
+  useExternalUiStateProvider(externalAPI, workspaceId, captureDocuments)
   // WorkspaceFiles and conversations keep separate registries. Only the relative
   // explorer path/kind crosses this boundary; conversation homes use this ID.
   const conversationScope = sessionScope && workspaceId
@@ -1058,19 +1060,6 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     } catch (failure) { setError(failure instanceof Error ? failure.message : '排队消息未能立即执行，原输入仍保留。') }
     finally { setBusy(false) }
   }
-  const openExternal = async () => {
-    if (!api || !externalAPI || !active || busy) return
-    setBusy(true); setError('')
-    try {
-      const refs = await (capturePromise.current ?? Promise.resolve(documentsRef.current))
-      if (!await prepareSend(refs.map(document => document.documentId))) throw new Error('引用文档的输入尚未同步，未打开外部交接。')
-      if (!contextFrozenRef.current) freezeDocuments(draftRef.current || '外部交接')
-      await persist()
-      await (capturePromise.current ?? Promise.resolve(documentsRef.current))
-      setExternalOpen(true)
-    } catch (failure) { setError(failure instanceof Error ? failure.message : '外部交接暂不可用。') }
-    finally { setBusy(false) }
-  }
 
   const onComposerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key !== 'Enter' || event.shiftKey || composingRef.current || event.nativeEvent.isComposing) return
@@ -1219,7 +1208,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
               <button type="button" onClick={() => { moreRef.current!.open = false; setHistorySearchOpen(value => !value) }} disabled={!active || !api}>搜索历史</button>
               <button type="button" onClick={() => { moreRef.current!.open = false; setReviewRunId(value => value ? null : active?.runIndex.builtinRunIds.at(-1) ?? null) }}
                 disabled={!active?.runIndex.builtinRunIds.length || !reviewLoader || !reviewRollback}>审阅本次变更</button>
-              <button type="button" onClick={() => { moreRef.current!.open = false; void openExternal() }} disabled={!active || busy || !externalAPI}>外部客户端</button>
+              <button type="button" onClick={() => { moreRef.current!.open = false; setExternalOpen(true) }} disabled={!externalAPI}>外部 AI 连接</button>
             </div>
           </details>
         </div>
@@ -1476,10 +1465,6 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       details={pendingRestore && <pre className="execution-assistant__restore-preview">{pendingRestore.text || `附件 ${pendingRestore.attachments.length} 个`}</pre>}
       onCancel={cancelRestore}
       onConfirm={() => { if (pendingRestore) applyRestoredSubmission(pendingRestore) }} />
-    {externalAPI && active && <ExternalMcpPanel open={externalOpen} onClose={() => setExternalOpen(false)} api={externalAPI}
-      workspaceId={workspaceId} conversation={active} documents={documents} instruction={draft} documentNames={documentNames}
-      onConversationChange={conversation => {
-        setConversations(value => updateConversation(value, conversation)); setActive(conversation); activeRef.current = conversation
-      }} />}
+    {externalAPI && <ExternalMcpPanel open={externalOpen} onClose={() => setExternalOpen(false)} api={externalAPI} />}
   </section>
 })

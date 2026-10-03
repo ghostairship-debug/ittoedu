@@ -16,7 +16,7 @@ export function trashWorkspaceWithDialog(window: BrowserWindow, documents: Docum
       entries: () => Promise.all(input.entryIds.map(entryId => operateWorkspaceFiles({ type: 'resolve', workspaceId: input.workspaceId, entryId }))),
       documents: async () => documents.registry.list(),
       hasWriters: async id => { const tasks = await execution.writableTasksForDocument(id)
-        return Boolean(tasks.runIds.length || tasks.submissionIds.length || external.writableConnectionsForDocument(id).length) },
+        return Boolean(tasks.runIds.length || tasks.submissionIds.length || external.writableSessionsForDocument(id).length) },
       confirm: async ({ entries, documents: affected, hasWriters }) => (await dialog.showMessageBox(window, {
         type: 'question', title: '移入回收站', message: `将 ${entries.length} 个项目移入系统回收站？`,
         detail: [hasWriters ? '确认后将停止这些文档的写入任务并撤销外部写权限。' : '',

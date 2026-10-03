@@ -11,6 +11,8 @@ export interface ResidentMcpCall {
   params: Record<string, unknown>
   /** true once the reply was fully written to a live connection; false if the client left or cancelled first. */
   delivery: Promise<boolean>
+  /** Queue a server notification sent on this request's reply stream before its result (e.g. tools/list_changed). */
+  notify(method: string, params?: Record<string, unknown>): void
 }
 /** Domain sessions, tools and authority live behind this port; the transport only authenticates and frames JSON-RPC. */
 export interface ResidentMcpHandler {
@@ -127,7 +129,7 @@ export class ResidentMcpServer {
         ...(typeof info.title === 'string' && info.title.trim() ? { title: info.title.trim() } : {}) }
       const opened = await this.handler.initialize(client)
       this.sessions.set(opened.sessionId, { version, initialized: false, inflight: new Map() })
-      return this.respond(response, 200, { jsonrpc: '2.0', id, result: { protocolVersion: version, capabilities: { tools: {} },
+      return this.respond(response, 200, { jsonrpc: '2.0', id, result: { protocolVersion: version, capabilities: { tools: { listChanged: true } },
         serverInfo: { name: 'guoling', title: '果铃', version: '2.0.0' }, instructions: opened.instructions } }, { 'MCP-Session-Id': opened.sessionId })
     }
     if (!sessionId) return this.respond(response, 400, rpcError(id, -32600, '缺少 MCP-Session-Id'))
@@ -147,9 +149,15 @@ export class ResidentMcpServer {
     const delivery = new Promise<boolean>(resolve => { settle = delivered => { if (!settled) { settled = true; resolve(delivered) } } })
     response.once('close', () => settle(response.writableFinished))
     session.inflight.set(id, settle)
+    const notifications: unknown[] = []
     try {
-      const result = await this.handler.request(sessionId, { requestId: id, method: message.method, params, delivery })
-      this.respond(response, 200, { jsonrpc: '2.0', id, result })
+      const result = await this.handler.request(sessionId, { requestId: id, method: message.method, params, delivery,
+        notify: (method, value) => { notifications.push({ jsonrpc: '2.0', method, ...(value ? { params: value } : {}) }) } })
+      const reply = { jsonrpc: '2.0', id, result }
+      if (!notifications.length) return this.respond(response, 200, reply)
+      // Streamable HTTP lets a POST reply carry server notifications ahead of the result as an SSE stream.
+      response.writeHead(200, { 'Cache-Control': 'no-store', 'Content-Type': 'text/event-stream' })
+      response.end([...notifications, reply].map(item => `event: message\ndata: ${JSON.stringify(item)}\n\n`).join(''))
     } catch (cause) {
       this.respond(response, 200, rpcError(id, cause instanceof McpProtocolError ? cause.code : -32603, cause instanceof Error ? cause.message : '请求未完成'))
     } finally { if (session.inflight.get(id) === settle) session.inflight.delete(id) }

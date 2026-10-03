@@ -5,6 +5,7 @@ import { AppState } from './appState'
 import { createMainWindow } from './createWindow'
 import { registerIpcHandlers, unregisterIpcHandlers } from './ipc'
 import { disposeNativeTextMeasurement } from './workbench/documentHost'
+import { startExternalMcpService } from './workbench/external/externalDesktopService'
 import {
   installEditorProtocol,
   installHtmlPreviewProtocol,
@@ -108,6 +109,9 @@ app
       getRendererEntryUrl: () => rendererEntryUrl,
       appState,
     })
+    // Default on; an occupied port only shows in settings and never blocks the window.
+    void startExternalMcpService().catch(error => diagnosticLog.append({ source: 'main', message: '外部连接服务未能启动',
+      details: { reason: error instanceof Error ? error.message : String(error) } }))
     appState.enqueueOpenFiles(await launchFileArguments(process.argv, process.cwd(), app.isPackaged))
     await openMainWindow()
 
