@@ -333,15 +333,16 @@ it('labels a recovered stale document reference and only refreshes it after expl
   await waitFor(() => expect(screen.queryByText(/原引用需要重新选择/)).toBeNull())
 })
 
-it('offers explicit reclaim for an externally paused queue through the existing resume operation', async () => {
-  const { api } = executionFixture([conversation('a', '外部任务会话')])
+it('offers an explicit resume for a user-paused queue through the existing resume operation', async () => {
+  const { api } = executionFixture([conversation('a', '暂停队列会话')])
   vi.mocked(api.submissions).mockResolvedValue([{ submissionId: '11111111-1111-4111-8111-111111111111', workspaceId: 'workspace', conversationId: 'a',
     state: 'queued', mode: 'queue', text: '已接收的要求', documents: [], attachments: [], createdAt: 1, updatedAt: 1,
-    queuePausedReason: 'external-handoff', model: { provider: 'fixture', model: 'fixture', accountId: 'fixture', billing: 'unknown' } }])
+    queuePausedReason: 'user', model: { provider: 'fixture', model: 'fixture', accountId: 'fixture', billing: 'unknown' } }])
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
-  fireEvent.click(await screen.findByRole('button', { name: '接回并继续排队任务' }))
+  expect(await screen.findByText(/后续任务已暂停，消息和草稿仍保留。/)).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: '继续排队任务' }))
   await waitFor(() => expect(api.resumeQueue).toHaveBeenCalledWith({ workspaceId: 'workspace', conversationId: 'a' }))
-  expect(screen.getByRole('button', { name: '接回并立即执行' })).toBeVisible()
+  expect(screen.getByRole('button', { name: '立即执行（先停止当前任务）' })).toBeVisible()
 })
 
 it('keeps the active conversation and draft while explorer selection filters homes and new sessions inherit the scope', async () => {

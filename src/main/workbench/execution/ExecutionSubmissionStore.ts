@@ -109,16 +109,16 @@ export class ExecutionSubmissionStore {
       return records.sort((a, b) => a.createdAt - b.createdAt || a.submissionId.localeCompare(b.submissionId)).map(clone)
     })
   }
-  private async readPauses(): Promise<Record<string, 'external-handoff' | 'user'>> {
+  private async readPauses(): Promise<Record<string, 'user'>> {
     let bytes: string
     try { bytes = await fs.readFile(this.pausesFile(), 'utf8') }
     catch (error) { if (missing(error)) return {}; throw error }
     const value = JSON.parse(bytes) as Record<string, unknown>
     if (!value || typeof value !== 'object' || Array.isArray(value)
-      || Object.values(value).some(reason => reason !== 'external-handoff' && reason !== 'user')) throw new Error('执行队列暂停记录无效')
-    return value as Record<string, 'external-handoff' | 'user'>
+      || Object.values(value).some(reason => reason !== 'user')) throw new Error('执行队列暂停记录无效')
+    return value as Record<string, 'user'>
   }
-  private async writePauses(pauses: Record<string, 'external-handoff' | 'user'>): Promise<void> {
+  private async writePauses(pauses: Record<string, 'user'>): Promise<void> {
     await fs.mkdir(this.directory, { recursive: true })
     const filename = this.pausesFile(), temporary = `${filename}.${randomUUID()}.tmp`
     try {
@@ -127,13 +127,13 @@ export class ExecutionSubmissionStore {
       await fs.rename(temporary, filename)
     } finally { await fs.rm(temporary, { force: true }).catch(() => undefined) }
   }
-  pause(conversationId: string, reason: 'external-handoff' | 'user' = 'external-handoff'): Promise<void> {
-    return this.serial(async () => { const pauses = await this.readPauses(); if (pauses[conversationId] !== 'external-handoff') pauses[conversationId] = reason; await this.writePauses(pauses) })
+  pause(conversationId: string): Promise<void> {
+    return this.serial(async () => { const pauses = await this.readPauses(); pauses[conversationId] = 'user'; await this.writePauses(pauses) })
   }
   resume(conversationId: string): Promise<void> {
     return this.serial(async () => { const pauses = await this.readPauses(); if (!(conversationId in pauses)) return; delete pauses[conversationId]; await this.writePauses(pauses) })
   }
-  pausedReason(conversationId: string): Promise<'external-handoff' | 'user' | undefined> {
+  pausedReason(conversationId: string): Promise<'user' | undefined> {
     return this.serial(async () => (await this.readPauses())[conversationId])
   }
 }

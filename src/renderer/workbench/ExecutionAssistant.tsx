@@ -1286,13 +1286,11 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
           <header><strong>{item.state === 'queued' ? `排队中${item.position ? ` · 第 ${item.position} 条` : ''}` : item.state === 'starting' ? '正在确认' : '未发送'}</strong>
             <small>{item.model.provider} · {item.model.model}</small></header>
           <p>{item.text || `附件 ${item.attachments.length} 个`}</p>
-          {item.queuePausedReason === 'external-handoff' && <p className="execution-assistant__submission-note">外部交接后内置队列保持暂停；接回任务会先结束外部授权。
-            <button type="button" disabled={busy} onClick={() => { void api?.resumeQueue({ workspaceId: item.workspaceId, conversationId: item.conversationId }).catch(cause => setError(String(cause))) }}>接回并继续排队任务</button></p>}
           {item.queuePausedReason === 'user' && <p className="execution-assistant__submission-note">后续任务已暂停，消息和草稿仍保留。
             <button type="button" disabled={busy} onClick={() => { void api?.resumeQueue({ workspaceId: item.workspaceId, conversationId: item.conversationId }).catch(cause => setError(String(cause))) }}>继续排队任务</button></p>}
           {item.failure && <p className="execution-assistant__submission-note">{item.failure.message}</p>}
           <div className="execution-assistant__submission-actions">
-            {item.state === 'queued' && <button type="button" onClick={() => void runQueuedNow(item)} disabled={busy}>{item.queuePausedReason === 'external-handoff' ? '接回并立即执行' : '立即执行（先停止当前任务）'}</button>}
+            {item.state === 'queued' && <button type="button" onClick={() => void runQueuedNow(item)} disabled={busy}>立即执行（先停止当前任务）</button>}
             {item.state === 'queued' && <button type="button" onClick={() => void removeQueued(item)} disabled={busy}>删除排队消息</button>}
             {(item.state === 'starting' || item.failure?.code === 'ack-unconfirmed') && <button type="button" onClick={() => void submit(item.mode, item)} disabled={busy}>用同一提交确认</button>}
             {(item.state === 'failed' || item.state === 'starting' && item.failure) && <button type="button" onClick={() => restoreSubmission(item)} disabled={busy}>恢复到输入框</button>}
