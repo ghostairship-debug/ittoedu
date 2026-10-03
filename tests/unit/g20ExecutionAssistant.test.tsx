@@ -145,11 +145,11 @@ it('keeps middle and tail text flowing through notification bursts while an old 
   expect(api.conversation).toHaveBeenCalledTimes(1) // The held terminal read did not block either text page.
 
   await act(async () => historicalRead.resolve(initial))
-  await waitFor(() => expect(api.conversation).toHaveBeenCalledTimes(5)) // One bounded hydration retry.
+  expect(api.conversation).toHaveBeenCalledTimes(1) // Main answers that read with its final record; nothing is polled again.
   vi.mocked(api.events).mockResolvedValueOnce({ events: [streamEvent(5, '继续')], cursor: 5, hasMore: false })
   await act(async () => emit(streamEvent(5, '继续')))
   expect(screen.getByRole('article', { name: '回复' })).toHaveTextContent('首段中段尾段继续')
-  expect(api.conversation).toHaveBeenCalledTimes(5)
+  expect(api.conversation).toHaveBeenCalledTimes(1)
 
   vi.mocked(api.events)
     .mockResolvedValueOnce({ events: [streamEvent(6, '补齐')], cursor: 6, hasMore: true })
@@ -158,7 +158,7 @@ it('keeps middle and tail text flowing through notification bursts while an old 
   await act(async () => emit(streamEvent(6, '补齐')))
   await act(async () => emit(streamEvent(6, '补齐')))
   expect(screen.getByRole('article', { name: '回复' })).toHaveTextContent('首段中段尾段继续补齐')
-  expect(api.conversation).toHaveBeenCalledTimes(5)
+  expect(api.conversation).toHaveBeenCalledTimes(1)
 })
 
 it('refreshes new terminal messages without replacing local draft attachments, newer revisions, or another conversation', async () => {

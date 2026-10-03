@@ -424,7 +424,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     let published = current
     let initial = true, catchingUp = false, catchUpPending = false, refreshingConversation = false
     const observedEndedRuns = new Set<string>(), pendingEndedRuns = new Set<string>()
-    // Terminal messages may be persisted just after run.end. Their bounded retry must
+    // Main writes a task's reply, its restored input and the next queued request after run.end, and serves a
+    // conversation read only after those writes, so one read per ended batch is its final record. The read must
     // never hold up the event cursor or repeat for old failures on every text update.
     const refreshConversation = () => {
       if (refreshingConversation || disposed || pendingEndedRuns.size === 0) return
@@ -437,15 +438,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
           if (selected?.conversationId === conversationId) {
             const needsReply = endedRuns.some(runId => !selected.messages.some(message => message.role === 'assistant' && message.runId === runId))
             if (!needsReply) continue
-            let latest: ConversationRecord | null = selected
-            for (let attempt = 0; attempt < 5 && !disposed; attempt += 1) {
-              if (attempt > 0) await new Promise(resolve => setTimeout(resolve, attempt * 25))
-              if (disposed) return
-              const value = await api.conversation(selected.workspaceId, conversationId)
-              if (!value) { latest = null; break }
-              latest = value
-              if (value.revision > selected.revision) break
-            }
+            const latest = await api.conversation(selected.workspaceId, conversationId)
             const activeNow = activeRef.current
             if (latest && !disposed && activeNow?.conversationId === conversationId && latest.revision > activeNow.revision) {
               const hasLocalDraft = draftRef.current !== activeNow.inputDraft || !sameAttachments(attachmentsRef.current, activeNow.inputAttachments)

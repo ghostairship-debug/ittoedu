@@ -148,7 +148,12 @@ export class ExecutionDesktopService {
       observeBodyStreaming: (selection, observation) => options.settings.recordBodyStreaming(selection, observation) })
     this.engine.subscribe(event => {
       this.eventSink?.(event)
-      if (event.type === 'run.end') { visualAnalysis.clearRun(event.runId); void this.afterRunEnd(event.runId).catch(() => undefined) }
+      if (event.type !== 'run.end') return
+      visualAnalysis.clearRun(event.runId)
+      // Before the object's next queued request can start.
+      this.recordElementResult(event.taskId)
+      // Queued on the conversation as the end is published, ahead of any read a view makes after seeing it.
+      void this.serial(event.conversationId, () => this.afterRunEnd(event.runId)).catch(() => undefined)
     })
     this.edits.subscribe(event => this.editSink?.(event))
   }
@@ -696,34 +701,31 @@ export class ExecutionDesktopService {
     await this.startNext(record.conversationId, undefined, true)
     return this.submissionResult((await this.submissions.read(record.submissionId))!)
   }
-  private async collectReply(runId: string) {
-    const run = await this.engine.read(runId)
-    if (!run) return
+  private async collectReply(run: ExecutionRunRecord) {
+    const runId = run.runId
     for (const workspace of await this.conversations.listWorkspaces()) {
-      const found = await this.conversations.readConversation({ workspaceId: workspace.workspaceId, conversationId: run.input.conversationId })
-      if (!found) continue
-      await this.serial(found.conversationId, async () => {
-        const current = await this.conversations.readConversation({ workspaceId: workspace.workspaceId, conversationId: found.conversationId })
-        if (!current || current.messages.some(message => message.role === 'assistant' && message.runId === runId)) return
-        const last = [...run.messages].reverse().find(message => message.role === 'assistant' && typeof message.content === 'string' && message.content)
-        if (!last || typeof last.content !== 'string') return
-        await this.conversations.updateConversation({ workspaceId: workspace.workspaceId, conversationId: found.conversationId, expectedRevision: current.revision,
-          patch: { messages: [...current.messages, { messageId: randomUUID(), role: 'assistant', text: last.content, createdAt: Date.now(), attachmentIds: [], runId }] } })
-      })
+      const current = await this.conversations.readConversation({ workspaceId: workspace.workspaceId, conversationId: run.input.conversationId })
+      if (!current || current.messages.some(message => message.role === 'assistant' && message.runId === runId)) continue
+      const last = [...run.messages].reverse().find(message => message.role === 'assistant' && typeof message.content === 'string' && message.content)
+      if (!last || typeof last.content !== 'string') return
+      await this.conversations.updateConversation({ workspaceId: workspace.workspaceId, conversationId: current.conversationId, expectedRevision: current.revision,
+        patch: { messages: [...current.messages, { messageId: randomUUID(), role: 'assistant', text: last.content, createdAt: Date.now(), attachmentIds: [], runId }] } })
     }
   }
+  /**
+   * Runs in the conversation's serial queue, entered when the end is published. Conversation reads wait in the same
+   * queue, so a view reading the record after it saw run.end gets everything written here: the restored input, the
+   * reply and the next queued request.
+   */
   private async afterRunEnd(runId: string): Promise<void> {
     const run = await this.engine.read(runId)
     if (!run) return
-    // Before the object's next queued request can start.
-    await this.recordElementResult(run.input.taskId)
     if (['failed', 'partial', 'interrupted'].includes(run.status)) {
       const record = await this.submissions.read(run.input.taskId)
-      if (record?.runId === runId && record.state === 'accepted')
-        await this.serial(run.input.conversationId, () => this.restoreFailedDraft(record))
+      if (record?.runId === runId && record.state === 'accepted') await this.restoreFailedDraft(record)
     }
-    await this.collectReply(runId)
-    await this.serial(run.input.conversationId, () => this.startNext(run.input.conversationId, run))
+    await this.collectReply(run)
+    await this.startNext(run.input.conversationId, run)
   }
   private runWritesDocument(run: ExecutionRunRecord, documentId: string): boolean {
     if (run.input.documents.some(document => document.documentId === documentId && document.writable.length > 0)) return true
@@ -847,7 +849,7 @@ export class ExecutionDesktopService {
       this.elementChanges.set(record.submissionId, new ElementChangeTracker(record.conversationId, reference.documentId, target, session, snapshot))
     } catch { /* A card's optional inverse never blocks the actual task. */ }
   }
-  private async recordElementResult(submissionId: string): Promise<void> { this.elementChanges.get(submissionId)?.finish() }
+  private recordElementResult(submissionId: string): void { this.elementChanges.get(submissionId)?.finish() }
   private elementChangeView(submissionId: string): ElementChangeView {
     return this.elementChanges.get(submissionId)?.view(submissionId) ?? { submissionId, state: 'none', fields: [] }
   }
@@ -872,7 +874,8 @@ export class ExecutionDesktopService {
           ...(input.element ? { element: input.element } : {}) })
         case 'set-conversation-home': return await this.serial(input.conversationId, async () => this.conversations.setConversationHome({ ...input,
           home: input.home ? await this.validateHome(input.workspaceId, input.home) : null }))
-        case 'conversation': return await this.conversations.readConversation(input)
+        // Behind Main's own writes queued on this conversation (a task's end, a send), so the record read is final.
+        case 'conversation': return await this.serial(input.conversationId, () => this.conversations.readConversation(input))
         case 'prepare-documents': return await this.serial(input.conversationId, () => this.prepareDocuments(input))
         case 'draft': return await this.serial('attachment-lifecycle', () => this.serial(input.conversationId, async () => {
           for (const ref of input.attachments) {
