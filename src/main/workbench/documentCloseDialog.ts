@@ -17,7 +17,7 @@ export function closeDocumentWithDialog(window: BrowserWindow, documents: Docume
       read: () => documents.registry.get(documentId).drain(),
       hasWritableTasks: async () => {
         const active = await execution.writableTasksForDocument(documentId)
-        return Boolean(active.runIds.length || active.submissionIds.length || external.writableConnectionsForDocument(documentId).length)
+        return Boolean(active.runIds.length || active.submissionIds.length || external.writableSessionsForDocument(documentId).length)
       },
       confirmStop: async () => (await dialog.showMessageBox(window, { type: 'question', title: '关闭正在修改的文档',
         message: '此文档还有可写任务或外部授权。停止这些任务后关闭文档？',

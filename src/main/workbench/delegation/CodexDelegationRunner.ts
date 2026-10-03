@@ -16,8 +16,6 @@ export interface CodexDelegationRequest {
   /** Relative paths inside copyRoot. These are read back, not automatically committed. */
   materials?: readonly string[]
   expectedArtifacts: readonly string[]
-  /** A task-scoped grant from ExternalMcpService; never placed on the command line or in a result. */
-  mcp?: { endpoint: string; bearer: string; revoke(): Promise<void> }
 }
 
 export interface DelegationArtifact {
@@ -88,7 +86,7 @@ export interface CodexCliInspection {
 }
 
 const STOP_WAIT_MS = 5000
-const REVOKE_WAIT_MS = 5000
+const STOP_BARRIER_WAIT_MS = 5000
 const MODEL = 'gpt-6-luna' as const
 const SPEED = 'priority' as const
 const execFileAsync = promisify(execFile)
@@ -112,13 +110,12 @@ async function readableInside(root: string, raw: string): Promise<string> {
   return actual
 }
 
-function childEnvironment(bearer?: string): NodeJS.ProcessEnv {
+function childEnvironment(): NodeJS.ProcessEnv {
   const keys = process.platform === 'win32'
     ? ['Path', 'PATH', 'PATHEXT', 'SystemRoot', 'SYSTEMROOT', 'WINDIR', 'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'CODEX_HOME', 'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY']
     : ['PATH', 'HOME', 'TMPDIR', 'CODEX_HOME', 'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY']
   const environment: NodeJS.ProcessEnv = {}
   for (const key of keys) if (process.env[key]) environment[key] = process.env[key]
-  if (bearer) environment.GUOLING_MCP_TOKEN = bearer
   return environment
 }
 
@@ -197,23 +194,11 @@ export class CodexDelegationRunner {
   constructor(private readonly options: CodexDelegationRunnerOptions = {}) {}
 
   async run(request: CodexDelegationRequest, options: CodexDelegationRunOptions): Promise<CodexDelegationResult> {
-    let revocation: Promise<void> | undefined
-    const scoped = request.mcp ? { ...request, mcp: { ...request.mcp,
-      revoke: () => revocation ??= request.mcp!.revoke() } } : request
-    let result: CodexDelegationResult
-    try { result = await this.execute(scoped, options) }
+    try { return await this.execute(request, options) }
     catch (cause) {
-      result = { ...base(request.taskId), status: 'unknown', externalChangesPossible: true,
+      return { ...base(request.taskId), status: 'unknown', externalChangesPossible: true,
         reason: `委派状态无法确定：${cause instanceof Error ? cause.message : String(cause)}` }
     }
-    if (scoped.mcp) {
-      const revoked = await observe(scoped.mcp.revoke(), undefined, REVOKE_WAIT_MS)
-      if (revoked.kind !== 'returned') {
-        result.status = 'unknown'
-        result.reason = '委派文档授权未能确认撤销；请先核实外部写入状态'
-      }
-    }
-    return result
   }
 
   private async execute(request: CodexDelegationRequest, options: CodexDelegationRunOptions): Promise<CodexDelegationResult> {
@@ -237,11 +222,6 @@ export class CodexDelegationRunner {
       if (!(await fs.stat(executable)).isFile()) throw new Error('执行器不是文件')
       materials = await Promise.all((request.materials ?? []).map(name => readableInside(root, name)))
       for (const name of request.expectedArtifacts) validRelative(root, name)
-      if (request.mcp) {
-        const endpoint = new URL(request.mcp.endpoint)
-        if (endpoint.protocol !== 'http:' || endpoint.hostname !== '127.0.0.1' || endpoint.pathname !== '/mcp'
-          || !request.mcp.bearer) throw new Error('外部文档授权端点无效')
-      }
     } catch (cause) { result.reason = cause instanceof Error ? cause.message : '委派输入无效'; return result }
     const scope = request.permission === 'read-only' ? 'read-only' : 'workspace'
     let boundaryReady = false
@@ -258,10 +238,7 @@ export class CodexDelegationRunner {
 
     const args = ['exec', '--json', '--ephemeral', '--ignore-user-config', '--skip-git-repo-check', '-m', MODEL, '-s',
       scope === 'read-only' ? 'read-only' : 'workspace-write', '-c', 'approval_policy="never"',
-      '-c', `service_tier="${SPEED}"`, '-C', root]
-    if (request.mcp) args.push('-c', `mcp_servers.guoling.url=${JSON.stringify(request.mcp.endpoint)}`,
-      '-c', 'mcp_servers.guoling.bearer_token_env_var="GUOLING_MCP_TOKEN"')
-    args.push('-')
+      '-c', `service_tier="${SPEED}"`, '-C', root, '-']
     const prompt = [request.goal.trim(), '', `Task: ${request.taskId}`, `Approved copy: ${root}`,
       'Only work inside this approved copy. Report changed files and checks. A claim of completion does not apply Guoling document edits.',
       ...(materials.length ? ['', 'Available materials:', ...materials.map(item => `- ${path.relative(root, item)}`)] : []),
@@ -275,7 +252,7 @@ export class CodexDelegationRunner {
     let child: ChildProcessWithoutNullStreams
     try {
       child = this.options.boundary!.launchRestricted({ copyRoot: root, permission: scope, executable,
-        args, options: { cwd: root, env: childEnvironment(request.mcp?.bearer), windowsHide: true, shell: false } })
+        args, options: { cwd: root, env: childEnvironment(), windowsHide: true, shell: false } })
     } catch (cause) { result.reason = `执行器启动失败：${cause instanceof Error ? cause.message : String(cause)}`; return result }
     result.externalChangesPossible = true
     let terminal: 'success' | 'failed' | undefined, summary = '', threadId: string | undefined
@@ -285,8 +262,7 @@ export class CodexDelegationRunner {
     let logError: Error | undefined
     log.on('error', error => { logError = error; child.stdout.resume() })
     log.on('drain', () => child.stdout.resume())
-    const redact = (value: string) => request.mcp?.bearer ? value.replaceAll(request.mcp.bearer, '[redacted]') : value
-    const notify = (event: DelegationEvent) => { try { options.onEvent?.({ ...event, detail: redact(event.detail) }) } catch { /* UI failure cannot alter the process result. */ } }
+    const notify = (event: DelegationEvent) => { try { options.onEvent?.(event) } catch { /* UI failure cannot alter the process result. */ } }
     let stopping = false, stopBarrier: Promise<void> | undefined, stopConfirmed = false
     let releaseStopWait!: () => void
     const stopWait = new Promise<null>(resolve => { releaseStopWait = () => resolve(null) })
@@ -294,8 +270,7 @@ export class CodexDelegationRunner {
       if (stopping) return
       stopping = true
       setTimeout(releaseStopWait, STOP_WAIT_MS).unref()
-      stopBarrier = Promise.allSettled([request.mcp?.revoke() ?? Promise.resolve(),
-        this.options.boundary!.stopRestricted(child).then(confirmed => { stopConfirmed = confirmed })]).then(() => undefined)
+      stopBarrier = this.options.boundary!.stopRestricted(child).then(confirmed => { stopConfirmed = confirmed }, () => undefined)
     }
     const receive = (chunk: Buffer) => {
       buffer += decoder.write(chunk)
@@ -304,11 +279,11 @@ export class CodexDelegationRunner {
         if (index < 0) break
         const line = buffer.slice(0, index).trim(); buffer = buffer.slice(index + 1)
         if (!line) continue
-        if (!logError && !log.write(redact(line) + '\n')) child.stdout.pause()
+        if (!logError && !log.write(line + '\n')) child.stdout.pause()
         try {
           const parsed = eventFromJson(JSON.parse(line))
           if (parsed.terminal) terminal = parsed.terminal
-          if (parsed.summary) summary = redact(parsed.summary)
+          if (parsed.summary) summary = parsed.summary
           if (parsed.threadId) threadId = parsed.threadId
           if (parsed.event) notify(parsed.event)
         } catch { protocolError = true; stop(); return }
@@ -328,29 +303,23 @@ export class CodexDelegationRunner {
     const exited = await Promise.race([exit, stopWait])
     buffer += decoder.end()
     if (buffer.trim()) {
-      try { const parsed = eventFromJson(JSON.parse(buffer)); if (parsed.terminal) terminal = parsed.terminal; if (parsed.summary) summary = redact(parsed.summary) }
+      try { const parsed = eventFromJson(JSON.parse(buffer)); if (parsed.terminal) terminal = parsed.terminal; if (parsed.summary) summary = parsed.summary }
       catch { protocolError = true }
     }
     await new Promise<void>(resolve => { if (logError) resolve(); else { log.once('error', () => resolve()); log.end(resolve) } })
     result.diagnosticFile = logError ? undefined : logPath
     if (logError) diagnostic += `\n事件日志落盘失败：${logError.message}`
     options.signal?.removeEventListener('abort', stop)
-    if (stopBarrier) await observe(stopBarrier, undefined, REVOKE_WAIT_MS)
+    if (stopBarrier) await observe(stopBarrier, undefined, STOP_BARRIER_WAIT_MS)
     result.threadId = threadId
     result.exitCode = exited?.code
     result.summary = summary || undefined
-    result.diagnostic = diagnostic ? redact(diagnostic.replace(/\u001b\[[0-9;]*m/g, '')).slice(-2000) : undefined
+    result.diagnostic = diagnostic ? diagnostic.replace(/\u001b\[[0-9;]*m/g, '').slice(-2000) : undefined
     if (stopping || options.signal?.aborted) {
       const proved = !!exited && stopConfirmed && (!options.confirmStopped || await options.confirmStopped().catch(() => false))
       result.status = proved ? 'cancelled' : 'unknown'
-      result.reason = proved ? '委派已停止；已发生的外部磁盘修改仍需检查' : '已撤销文档授权并请求停止，外部进程或副作用尚未完全核实'
+      result.reason = proved ? '委派已停止；已发生的外部磁盘修改仍需检查' : '已请求停止，外部进程或副作用尚未完全核实'
       return result
-    }
-    if (request.mcp) {
-      const revoked = await observe(request.mcp.revoke(), undefined, REVOKE_WAIT_MS)
-      if (revoked.kind !== 'returned') {
-        result.status = 'unknown'; result.reason = '外部执行器已退出，但文档写入授权未能确认撤销'; return result
-      }
     }
     if (!exited) { result.status = 'unknown'; result.reason = '外部进程退出状态未知'; return result }
     if (exited.error || protocolError || exited.code !== 0 || terminal !== 'success') {

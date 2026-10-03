@@ -7,7 +7,7 @@ import { trashWorkspaceWithDialog } from './workbench/workspaceTrashDialog'
 import { workspaceFilesRequestSchema } from '../shared/workbench/workspaceFiles'
 import { mediaFilesRequestSchema } from '../shared/workbench/mediaFiles'
 import { operateMediaFiles } from './workbench/mediaFilesDesktopService'
-import { operateExternalMcp, closeExternalMcpService } from './workbench/external/externalDesktopService'
+import { operateExternalMcp, closeExternalMcpService, attachExternalMcpWindow } from './workbench/external/externalDesktopService'
 import { operateExecutionSettings } from './workbench/providers/executionSettingsService'
 import { executionDesktopService } from './workbench/execution/ExecutionDesktopService'
 import { installDocumentSaveEvents } from './workbench/execution/DocumentSaveEvents'
@@ -295,6 +295,7 @@ let htmlPreviewClosedCleanup: (() => void) | undefined
 let dynamicContentObservations: DynamicContentObservationStore | undefined
 let dynamicContentChangeCleanup: (() => void) | undefined
 export function releaseAllHtmlPreviewLeases(): void { htmlPreview?.releaseAll() }
+let detachExternalMcpWindow: (() => void) | undefined
 export function registerIpcHandlers(context: IpcContext): void {
   let htmlActionsReady: Promise<void> | undefined
   installWorkbenchToolServices(context)
@@ -356,6 +357,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (input.type === 'ack') context.appState.acknowledgeOpenFile(input.id)
     return context.appState.pendingOpenFiles()
   })
+  detachExternalMcpWindow?.()
+  detachExternalMcpWindow = attachExternalMcpWindow(context.getMainWindow)
   registerSafeHandler(IPC_CHANNELS.externalMcp, context, {
     code: 'EXTERNAL_MCP_FAILED', title: '外部连接操作未完成', message: '外部连接未完成，请查看具体原因。', suggestion: '文档和已应用的修改已保留。',
   }, async (_event, args) => operateExternalMcp(requireSingleArgument(args)))
@@ -1051,6 +1054,7 @@ export function unregisterIpcHandlers(): void {
   if (saves) void saves.flush().finally(() => saves.dispose())
   const images = imageResults; imageResults = undefined
   if (images) { images.setEventSink(undefined); void images.flush().finally(() => images.dispose()) }
+  detachExternalMcpWindow?.(); detachExternalMcpWindow = undefined
   void closeExternalMcpService().catch(() => undefined)
   documentHost().setEventSink(undefined)
   for (const channel of Object.values(IPC_CHANNELS)) {

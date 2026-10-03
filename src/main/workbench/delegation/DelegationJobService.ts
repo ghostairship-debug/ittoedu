@@ -3,8 +3,7 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { waitForHostWork } from '../../../shared/workbench/jobWait'
 import type { ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
-import { CodexDelegationRunner, type CodexDelegationRequest, type DelegationEvent,
-  type CodexDelegationResult } from './CodexDelegationRunner'
+import { CodexDelegationRunner, type DelegationEvent, type CodexDelegationResult } from './CodexDelegationRunner'
 import { WindowsCodexSandboxBoundary } from './WindowsCodexSandboxBoundary'
 
 export interface DelegationJobInput {
@@ -17,10 +16,8 @@ export interface DelegationJobInput {
   permission: ExecutionPermissionMode
   materials?: readonly string[]
   expectedArtifacts: readonly string[]
-  /** Ephemeral inbound MCP grant. The bearer and revoke function are never persisted. */
-  mcp?: CodexDelegationRequest['mcp']
 }
-export type ManagedDelegationInput = Omit<DelegationJobInput, 'copyRoot' | 'materials' | 'mcp'> & {
+export type ManagedDelegationInput = Omit<DelegationJobInput, 'copyRoot' | 'materials'> & {
   /** Frozen workspace root from the parent run; only these named regular files enter the managed copy. */
   workspaceRoot: string
   materials?: readonly string[]
@@ -190,10 +187,6 @@ export class DelegationJobService {
   }
 
   async start(input: DelegationJobInput): Promise<DelegationJobSnapshot> {
-    try { return await this.startOwned(input) }
-    catch (error) { await input.mcp?.revoke().catch(() => undefined); throw error }
-  }
-  private async startOwned(input: DelegationJobInput): Promise<DelegationJobSnapshot> {
     if (!input.runId || !input.taskId?.trim() || !input.goal?.trim()
       || !['workspace', 'full', 'read-only'].includes(input.permission) || !Array.isArray(input.expectedArtifacts)
       || input.expectedArtifacts.length < 1)
@@ -202,14 +195,12 @@ export class DelegationJobService {
     if (new Set(expectedArtifacts).size !== expectedArtifacts.length) throw new DelegationJobError('invalid-input', '委派声明成果重名')
     const copyRoot = await this.scopedCopy(input.copyRoot)
     const requestDigest = digest(JSON.stringify({ runId: input.runId, taskId: input.taskId, goal: input.goal,
-      copyRoot, permission: input.permission, materials: input.materials ?? [], expectedArtifacts,
-      mcpEndpoint: input.mcp?.endpoint ?? null }))
+      copyRoot, permission: input.permission, materials: input.materials ?? [], expectedArtifacts }))
     return this.serial(input.jobId, async () => {
       const prior = await this.load(input.jobId)
       if (prior) {
         if (prior.runId !== input.runId || prior.requestDigest !== requestDigest)
           throw new DelegationJobError('job-conflict', '委派作业身份已绑定另一请求')
-        await input.mcp?.revoke().catch(() => undefined)
         if (!this.active.has(input.jobId) && !terminal(prior.status)) {
           prior.status = 'unknown'; prior.terminal = true
           prior.reason = '外部执行器在上次宿主运行后失去受管进程身份；副本变化待核对，未自动重放。'
@@ -254,8 +245,7 @@ export class DelegationJobService {
     try {
       await this.update(jobId, job => { if (!job.stopped) job.status = 'running' })
       result = await this.runner.run({ taskId: input.taskId, goal: input.goal, copyRoot,
-        permission: input.permission, materials: input.materials, expectedArtifacts: input.expectedArtifacts,
-        mcp: input.mcp }, {
+        permission: input.permission, materials: input.materials, expectedArtifacts: input.expectedArtifacts }, {
         signal: active.controller.signal,
         onEvent: event => { void this.update(jobId, job => {
           job.logs = [...job.logs, { cursor: ++job.nextLogCursor, time: Date.now(), kind: event.kind,
@@ -287,7 +277,6 @@ export class DelegationJobService {
         job.reason = error instanceof Error ? error.message.slice(0, 1000) : '委派作业失败'
         job.logs = [...job.logs, { cursor: ++job.nextLogCursor, time: Date.now(), kind: 'system' as const, message: job.reason }].slice(-200)
       }).catch(() => undefined)
-      if (!result) await input.mcp?.revoke().catch(() => undefined)
     }
   }
 

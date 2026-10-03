@@ -14,8 +14,13 @@ export interface DocumentClosePorts {
   onBlocked?(documentId: string, reason: 'cancelled' | 'failed' | 'changed'): void | Promise<void>
 }
 
+/** Installed by the window lifecycle: the hide-to-tray prompt runs before any save protection. 'handled' keeps the app running. */
+let beforeWindowClose: (() => Promise<'continue' | 'handled'>) | undefined
+export function setBeforeWindowClose(hook?: () => Promise<'continue' | 'handled'>): void { beforeWindowClose = hook }
+
 /** Decides close permission across every live document, independent of the foreground view. */
 export async function prepareDocumentWindowClose(ports: DocumentClosePorts): Promise<boolean> {
+  if (beforeWindowClose && await beforeWindowClose() === 'handled') return false
   const blocked = async (id: string, reason: 'cancelled' | 'failed' | 'changed') => {
     try { await ports.onBlocked?.(id, reason) } catch { /* Navigation cannot discard a retained draft. */ }
   }

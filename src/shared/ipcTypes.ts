@@ -193,6 +193,8 @@ export const IPC_CHANNELS = {
   imageResults: 'image-results:operate',
   imageResultsChanged: 'image-results:changed',
   externalMcp: 'external-mcp:operate',
+  externalMcpUiStateRequest: 'external-mcp:ui-state-request',
+  externalMcpUiStateReply: 'external-mcp:ui-state-reply',
   attachments: 'attachments:operate',
   execution: 'execution:operate',
   dynamicContentTargets: 'dynamic-content:publish-targets',

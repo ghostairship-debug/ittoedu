@@ -73,11 +73,7 @@ export class WindowsCodexSandboxBoundary implements CodexDelegationBoundaryPort 
     if (input.args.slice(0, expected.length).some((arg, index) => arg !== expected[index]))
       throw new Error('委派命令未固定 Luna Fast、权限与工作副本')
     const tail = input.args.slice(expected.length)
-    if (!(tail.length === 1 && tail[0] === '-') && !(tail.length === 5 && tail[0] === '-c'
-      && tail[1]?.startsWith('mcp_servers.guoling.url="http://127.0.0.1:')
-      && tail[1]?.endsWith('/mcp"') && tail[2] === '-c'
-      && tail[3] === 'mcp_servers.guoling.bearer_token_env_var="GUOLING_MCP_TOKEN"' && tail[4] === '-'))
-      throw new Error('委派命令包含未授权的 CLI 参数')
+    if (tail.length !== 1 || tail[0] !== '-') throw new Error('委派命令包含未授权的 CLI 参数')
     this.verified.delete(this.key(input.copyRoot, input.permission, input.executable))
     // The trusted CLI needs access to its own login and app-server state. Its model-generated
     // commands use the verified Windows sandbox via `exec -s`; wrapping the whole CLI would

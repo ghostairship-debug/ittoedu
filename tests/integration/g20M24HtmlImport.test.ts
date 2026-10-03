@@ -14,7 +14,6 @@ import { TextDriver } from '../../src/core/drivers/TextDriver'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { ControlledBuildService } from '../../src/main/workbench/build/ControlledBuildService'
-import { McpDocumentServer } from '../../src/main/workbench/external/McpDocumentServer'
 import { createDocumentJournal } from '../../src/main/workbench/documentJournal'
 import { HtmlImportNetworkGrants } from '../../src/main/workbench/htmlImport/htmlImportNetworkGrants'
 import { HtmlImportOperationStore } from '../../src/main/workbench/htmlImport/HtmlImportOperationStore'
@@ -236,52 +235,6 @@ describe('M24 g20-b18-c2 HTML section import orchestration', () => {
     if (item.kind !== 'runtime') throw new Error('wrong carrier')
     expect(unpackHtmlDocumentRuntimeSource(item.runtime.source)?.html).toBe(html)
   })
-  it('executes html.import through the external MCP HTTP bridge with the same canonical receipt', async () => {
-    const env = await setupTestEnvironment()
-    const server = new McpDocumentServer({ gateway: env.gateway, registry: env.registry,
-      appendEvent: async () => undefined })
-    const connection = await server.grant({ workspaceId: 'space', conversationId: 'conversation', taskId: 'import',
-      instruction: '导入 HTML', documents: [
-        { documentId: env.courseSession.documentId, writable: [{ kind: 'document' }] },
-        { documentId: env.htmlSession.documentId, writable: [] },
-      ] })
-    try {
-      let session = '', sequence = 0
-      const request = async (method: string, params: unknown = {}) => {
-        const response = await fetch(connection.endpoint, { method: 'POST', headers: {
-          Authorization: `Bearer ${connection.bearer}`, 'Content-Type': 'application/json',
-          Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-11-25',
-          ...(session ? { 'MCP-Session-Id': session } : {}),
-        }, body: JSON.stringify({ jsonrpc: '2.0', id: ++sequence, method, params }) })
-        session = response.headers.get('mcp-session-id') ?? session
-        expect(response.status).toBe(200)
-        return await response.json() as any
-      }
-      await request('initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'm24-fixture', version: '1' } })
-      const initialized = await fetch(connection.endpoint, { method: 'POST', headers: {
-        Authorization: `Bearer ${connection.bearer}`, 'Content-Type': 'application/json',
-        Accept: 'application/json, text/event-stream', 'MCP-Protocol-Version': '2025-11-25', 'MCP-Session-Id': session,
-      }, body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }) })
-      expect(initialized.status).toBe(202)
-      const context = JSON.parse((await request('resources/read', { uri: 'guoling://task/context' })).result.contents[0].text)
-      const catalog = (await request('tools/list')).result.tools
-      const canonical = (await env.gateway.describe(['html.import']))[0]!
-      expect(catalog.find((tool: any) => tool.name === 'html.import').inputSchema.properties.arguments).toEqual(canonical.schema)
-      const before = env.courseSession.read()
-      if (before.model.kind !== 'course-v9') throw new Error('wrong model')
-      const slide = before.model.project.surfaces.find(item => item.type === 'slide')!
-      const args = { source: context.documents[1].target, target: context.documents[0].target,
-        mode: 'sections', destinations: [{ kind: 'slide-new', surface: slide.id }] }
-      const ticket = context.operationTickets[0]
-      const call = await request('tools/call', { name: 'html.import', arguments: { ticket, arguments: args } })
-      expect(call.result.structuredContent.result).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
-      const lookup = await request('tools/call', { name: 'operation.lookup', arguments: { ticket, name: 'html.import', arguments: args } })
-      expect(lookup.result.structuredContent.result).toEqual(call.result.structuredContent.result)
-      expect(env.courseSession.read().undoDepth).toBe(before.undoDepth + 1)
-      expect(env.run).toHaveBeenCalledOnce()
-    } finally { await server.close() }
-  })
-
   it('uses the shared html.import schema and canonical gateway execute/lookup path', async () => {
     const env = await setupTestEnvironment()
     const runId = 'test-gateway-html-import'
