@@ -127,7 +127,9 @@ export class ResidentMcpServer {
       const info = params.clientInfo
       const client = { name: typeof info.name === 'string' && info.name.trim() ? info.name.trim() : '未命名客户端', version: typeof info.version === 'string' ? info.version : '',
         ...(typeof info.title === 'string' && info.title.trim() ? { title: info.title.trim() } : {}) }
-      const opened = await this.handler.initialize(client)
+      let opened: { sessionId: string; instructions: string }
+      try { opened = await this.handler.initialize(client) }
+      catch (cause) { return this.respond(response, 200, rpcError(id, cause instanceof McpProtocolError ? cause.code : -32603, cause instanceof Error ? cause.message : '初始化未完成')) }
       this.sessions.set(opened.sessionId, { version, initialized: false, inflight: new Map() })
       return this.respond(response, 200, { jsonrpc: '2.0', id, result: { protocolVersion: version, capabilities: { tools: { listChanged: true } },
         serverInfo: { name: 'guoling', title: '果铃', version: '2.0.0' }, instructions: opened.instructions } }, { 'MCP-Session-Id': opened.sessionId })

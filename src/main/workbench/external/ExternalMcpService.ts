@@ -170,7 +170,8 @@ export class ExternalMcpService implements ResidentMcpHandler {
   async stopForDocument(documentId: string): Promise<void> {
     await Promise.all(this.writableSessionsForDocument(documentId).map(async id => {
       const session = this.sessions.get(id)!
-      await this.bind(session, session.workspaceId)
+      // If the space can no longer be bound, the session stops instead of keeping its old authority.
+      try { await this.bind(session, session.workspaceId) } catch { session.stopped = true; await this.stopRun(session.runId); return }
       session.notices.push('用户在果铃中关闭或移走了你正在修改的文档；之前取得的文档句柄均已失效，如需继续请按路径重新打开。')
     }))
   }

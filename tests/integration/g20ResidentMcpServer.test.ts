@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { ResidentMcpServer, type ResidentMcpCall, type ResidentMcpHandler } from '../../src/main/workbench/external/ResidentMcpServer'
+import { McpProtocolError, ResidentMcpServer, type ResidentMcpCall, type ResidentMcpHandler } from '../../src/main/workbench/external/ResidentMcpServer'
 import { ResidentMcpSettingsStore } from '../../src/main/workbench/external/ResidentMcpSettings'
 import { DEFAULT_EXTERNAL_MCP_SETTINGS } from '../../src/shared/workbench/external'
 
@@ -90,6 +90,18 @@ it('keeps the local security boundary and drops every session when the token is 
   expect((await post(port, { Authorization: `Bearer ${TOKEN}` })).status).toBe(401)
   const renewed = await connect(port, NEXT)
   expect((await renewed.client.listTools()).tools).toHaveLength(1)
+})
+
+it('returns an initialize refusal to the client with its reason', async () => {
+  const server = new ResidentMcpServer({ initialize: async () => { throw new McpProtocolError(-32000, '果铃还没有打开任何工作空间。') },
+    terminate: () => undefined, request: async () => ({}) })
+  cleanups.push(() => server.stop())
+  const started = await server.start(0, TOKEN)
+  if (started.state !== 'running') throw new Error('not running')
+  const reply = await post(started.port, { Authorization: `Bearer ${TOKEN}` }, { jsonrpc: '2.0', id: 1, method: 'initialize',
+    params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'early', version: '1' } } })
+  expect(reply.status).toBe(200)
+  expect(await reply.json()).toMatchObject({ error: { code: -32000, message: '果铃还没有打开任何工作空间。' } })
 })
 
 it('reports whether each reply reached the client, including aborted requests and cancellations', async () => {
