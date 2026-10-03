@@ -21,6 +21,7 @@ import type {
   PublishedSpatialSurface,
 } from '../../../shared/publishedCourseTypes'
 import type { CourseBackgroundFields } from '../../../shared/effectiveBackground'
+import type { CourseTheme, ProjectDesignTokens } from '../../../shared/contracts/design-v1/types'
 
 export type SpatialCoordinateSpace = 'world' | 'viewport'
 export type SpatialLayerSource = 'world' | 'surface' | 'global'
@@ -45,6 +46,8 @@ export interface PublishedSpatialRuntimeInput {
   startLocationId: string
   playbackPathId: string | null
   courseBackground?: CourseBackgroundFields
+  /** Course theme for the Web content of the world. */
+  courseTheme?: { designTokens: ProjectDesignTokens; theme?: CourseTheme }
 }
 
 export interface SpatialTourStop {
@@ -210,6 +213,7 @@ export function clonePublishedSpatialInput(
     startLocationId: input.startLocationId,
     playbackPathId: input.playbackPathId,
     courseBackground: input.courseBackground ? structuredClone(input.courseBackground) : undefined,
+    ...(input.courseTheme ? { courseTheme: structuredClone(input.courseTheme) } : {}),
   }
 }
 
@@ -240,6 +244,7 @@ export function publishedSpatialInputFromCourse(
       backgroundColor: course.backgroundColor,
       backgroundAssetId: course.backgroundAssetId,
     },
+    courseTheme: { designTokens: course.designTokens, ...(course.theme ? { theme: course.theme } : {}) },
   })
 }
 

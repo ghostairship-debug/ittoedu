@@ -12,6 +12,17 @@ import { mountPublishedComponent, type PublishedComponentMountHandle, type Publi
 import { paintCompositionDocument, type CompositionDocumentComponent } from './documentContent'
 import type { PublishedInputDescriptor } from '../interactions/PublishedInteractionSurfacePort'
 import { bindPublishedNativeInputSubmit } from './nativeInput'
+import { componentReferenceName, assetReferencePath, resolveCssAssetReferences } from '../../shared/composition/projectReferences'
+import {
+  compositionHostStyleText,
+  HOST_NODE_ATTRIBUTE,
+  PENDING_ATTRIBUTE,
+  pendingImageUrl,
+  placeholderDocument,
+  placeholderElement,
+  resolveCompositionAttribute,
+  themeHtmlDocumentRuntimes,
+} from './compositionHostDocument'
 
 type Content = PublishedCompositionLayerItem['content']
 type Runtime = PublishedRuntimeLayerItem['runtime']
@@ -48,6 +59,8 @@ export interface WebCompositionMountOptions {
   height: number
   mode?: 'authoring' | 'playback' | 'capture'
   visible?: boolean
+  /** Course theme style text (`courseThemeStyleText`), applied to this document and the component documents in it. */
+  theme?: string
   resolveAsset(id: string): string | undefined
   session: PublishedSurfaceRuntimeSession
   courseState?: CourseStateStore
@@ -117,6 +130,40 @@ export function mountWebComposition(parent: HTMLElement, options: WebComposition
     const ref = current.assets[key]
     return ref ? options.resolveAsset(ref.assetId) ?? original : original
   })
+  const resolveStyleText = (value: string) => resolveCssAssetReferences(resolveUrl(value), current.assets, options.resolveAsset)
+  const isHostNode = (node: Node) => node.nodeType === 1 && (node as Element).hasAttribute(HOST_NODE_ATTRIBUTE)
+  let hostStyle: HTMLStyleElement | undefined
+  const ensureHostStyle = (): void => {
+    const container = dom?.head ?? dom?.documentElement
+    if (!dom || !container) return
+    if (!hostStyle) {
+      hostStyle = dom.createElement('style')
+      hostStyle.setAttribute(HOST_NODE_ATTRIBUTE, 'style')
+      hostStyle.textContent = compositionHostStyleText(options.theme, options.mode ?? 'playback')
+    }
+    if (container.firstChild !== hostStyle) container.insertBefore(hostStyle, container.firstChild)
+  }
+  /** Attributes as rendered: bound asset slots resolved; unfilled images and component frames show placeholders. */
+  const renderedAttributes = (content: Extract<ContentNode, { kind: 'element' }>, embedded: boolean): Record<string, string> => {
+    const tag = content.tagName.toLowerCase()
+    const component = tag === 'iframe' && content.attributes.src !== undefined ? componentReferenceName(content.attributes.src) : null
+    const result: Record<string, string> = {}
+    for (const [key, value] of Object.entries(content.attributes)) {
+      if (component && key.toLowerCase() === 'src') continue
+      result[key] = resolveCompositionAttribute(key, resolveUrl(value), current.assets, options.resolveAsset)
+    }
+    if (component && !embedded) {
+      result.srcdoc = placeholderDocument('待填组件', content.attributes.title || component)
+      result[PENDING_ATTRIBUTE] = 'component'
+    }
+    const src = content.attributes.src
+    if (tag === 'img' && src !== undefined && assetReferencePath(src) && result.src === src) {
+      result.src = pendingImageUrl(content.attributes.alt)
+      result[PENDING_ATTRIBUTE] = 'asset'
+      if (content.attributes.alt && result.title === undefined) result.title = content.attributes.alt
+    }
+    return result
+  }
   const destroyNode = (record: MountedNode) => {
     record.embedded?.dispose()
     record.disposeInput?.()
@@ -302,8 +349,12 @@ export function mountWebComposition(parent: HTMLElement, options: WebComposition
         record.signature = signature
       } else {
         if (!content.runtime.enabled) {
+          const draft = content.runtime.draft ? `draft:${content.runtime.draft.reason}` : undefined
+          if (record.signature === draft && !record.runtime) continue
           record.runtime?.destroy(); delete record.runtime; element.replaceChildren()
-          record.signature = undefined
+          // A component saved without admission shows why instead of running.
+          if (content.runtime.draft) element.append(placeholderElement(dom, '组件未通过检查', content.runtime.draft.reason))
+          record.signature = draft
           continue
         }
         const signature = JSON.stringify(content.runtime)
@@ -318,6 +369,7 @@ export function mountWebComposition(parent: HTMLElement, options: WebComposition
           record.runtime = content.runtime.protocol === 'surface-runtime'
             ? mountPublishedSurfaceRuntime(element, input)
             : mountPublishedCanvasRuntime(element, { ...input, sceneId: options.sceneId ?? options.instanceId, canvas: { width, height } })
+          if (options.theme) themeHtmlDocumentRuntimes(element, options.theme)
           record.signature = signature
           if (!record.runtime.ok) throw new Error(`组合互动区域无法运行：${id}`)
           if (suspended) record.runtime.suspend()
@@ -357,18 +409,18 @@ export function mountWebComposition(parent: HTMLElement, options: WebComposition
     if (!record) { record = { content, dom: makeNode(content) }; nodes.set(content.id, record) }
     record.content = content
     if (content.kind === 'text' || content.kind === 'comment') {
-      const text = content.kind === 'text' && record.dom.parentElement?.tagName === 'STYLE' ? resolveUrl(content.text) : content.text
+      const text = content.kind === 'text' && record.dom.parentElement?.tagName === 'STYLE' ? resolveStyleText(content.text) : content.text
       if (record.dom.nodeValue !== text) record.dom.nodeValue = text
     } else if (content.kind === 'element') {
       const embedded = content.tagName.toLowerCase() === 'iframe' && content.children.length === 1
         && content.children[0]?.kind === 'runtime'
       if (record.dom.nodeType === 1) {
         const element = record.dom as Element
+        const attributes = renderedAttributes(content, embedded)
         for (const attribute of Array.from(element.attributes)) {
-          if (attribute.name !== 'data-composition-node' && !(embedded && attribute.name === 'srcdoc') && !(attribute.name in content.attributes)) element.removeAttribute(attribute.name)
+          if (attribute.name !== 'data-composition-node' && !(embedded && attribute.name === 'srcdoc') && !(attribute.name in attributes)) element.removeAttribute(attribute.name)
         }
-        for (const [key, value] of Object.entries(content.attributes)) {
-          const resolved = resolveUrl(value)
+        for (const [key, resolved] of Object.entries(attributes)) {
           if (element.getAttribute(key) !== resolved) element.setAttribute(key, resolved)
         }
         element.setAttribute('data-composition-node', content.id)
@@ -406,14 +458,14 @@ export function mountWebComposition(parent: HTMLElement, options: WebComposition
       }
       if (record.embedded) { record.embedded.dispose(); delete record.embedded }
       let cursor = record.dom.firstChild
-      while (cursor?.nodeType === 10) cursor = cursor.nextSibling
+      while (cursor && (cursor.nodeType === 10 || isHostNode(cursor))) cursor = cursor.nextSibling
       for (const child of desired) {
         if (child === cursor) { cursor = cursor.nextSibling; continue }
         const movable = record.dom as Node & { moveBefore?(node: Node, before: Node | null): void }
         if (movable.moveBefore && child.isConnected && movable.isConnected) movable.moveBefore(child, cursor)
         else record.dom.insertBefore(child, cursor)
       }
-      for (const child of Array.from(record.dom.childNodes)) if (!desired.includes(child) && child.nodeType !== 10) record.dom.removeChild(child)
+      for (const child of Array.from(record.dom.childNodes)) if (!desired.includes(child) && child.nodeType !== 10 && !isHostNode(child)) record.dom.removeChild(child)
     } else (record.dom as Element).setAttribute('data-composition-node', content.id)
     return record.dom
   }
@@ -424,7 +476,8 @@ export function mountWebComposition(parent: HTMLElement, options: WebComposition
     if (root !== dom && root.parentNode !== dom) dom!.appendChild(root)
     for (const [id, record] of nodes) if (!used.has(id)) { destroyNode(record); record.dom.parentNode?.removeChild(record.dom); nodes.delete(id) }
     // A style text may have been constructed before its parent existed.
-    for (const record of nodes.values()) if (record.content.kind === 'text' && record.dom.parentElement?.tagName === 'STYLE') record.dom.nodeValue = resolveUrl(record.content.text)
+    for (const record of nodes.values()) if (record.content.kind === 'text' && record.dom.parentElement?.tagName === 'STYLE') record.dom.nodeValue = resolveStyleText(record.content.text)
+    ensureHostStyle()
     paintLeaves(); scheduleLayout()
   }
   const select = (event: PointerEvent) => {
