@@ -9,7 +9,8 @@ import { workbenchServiceToolCatalog } from '../../src/core/tools/WorkbenchServi
 import type { ComputeJobInput, ComputeJobSnapshot } from '../../src/shared/workbench/compute'
 import type { ExecutionPermissionMode } from '../../src/shared/workbench/executionPermission'
 
-const baseline = ['web.search', 'web.open', 'mcp.discover', 'mcp.invoke', 'mcp.resource', 'media.discover']
+const baseline = ['web.search', 'web.open', 'mcp.discover', 'mcp.invoke', 'mcp.resource', 'media.discover',
+  'image.search', 'image.preview', 'image.fetch']
 const jobs = ['job.status', 'job.wait', 'job.logs', 'job.cancel', 'compute.run', 'delegate.start', 'delegate.read']
 const serviceNames = new Set<string>(workbenchServiceToolCatalog.map(tool => tool.name))
 

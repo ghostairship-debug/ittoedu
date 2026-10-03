@@ -4,6 +4,7 @@ import type { ToolDefinition, ToolResult, ToolTarget, ToolRunGrant } from '../..
 import type { ImageGenerationRequest, ImageJobSnapshot, ImageModelSelection } from '../../shared/workbench/images'
 import { buildToolCallSchema, type BuildCreateTicket, type BuildCreateLookup, type BuildImportArtifact, type BuildJobInput, type BuildJobSnapshot, type BuildToolCall } from '../../shared/workbench/build'
 import type { HostImageInput } from './imageResource'
+import type { AssetSourceRecord } from '../../shared/workbench/assetSources'
 import type { ComputeArtifact, ComputeJobInput, ComputeJobSnapshot } from '../../shared/workbench/compute'
 import { DocumentRegistry } from '../documents/DocumentRegistry'
 import { documentDigest } from '../documents/documentDigest'
@@ -56,6 +57,15 @@ export interface HostToolServices {
     discover(runId: string): unknown
     start(runId: string, input: { kind: 'speech' | 'video' | 'music'; prompt: string; durationSeconds?: number; language?: string;
       referenceResources?: readonly string[] }, options?: { signal?: AbortSignal }): Promise<unknown>
+  }
+  /** Open-license image libraries; candidates and previews belong to one run. */
+  openImages?: {
+    search(input: { runId: string; query: string; limit?: number; page?: number; allowShareAlike?: boolean; signal?: AbortSignal }): Promise<unknown>
+    preview(input: { runId: string; images: readonly string[]; signal?: AbortSignal }): Promise<unknown>
+    readPreview(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array }
+    fetch(input: { runId: string; image: string; signal?: AbortSignal }): Promise<
+      | { status: 'ready'; file: HostImageInput; width: number; height: number; source: AssetSourceRecord }
+      | { status: 'failed' | 'rejected'; reason: string }>
   }
   /** Freeze role/connection selections before the run can issue any service operation. */
   beginRun?(grant: ToolRunGrant): Promise<void>
@@ -338,6 +348,33 @@ export class HostToolCoordinator {
     this.writableRun(runId)
     return this.services.media ? { kind: 'read', data: await this.services.media.start(runId, input, { signal }) }
       : this.serviceUnavailable('媒体生成服务尚未配置')
+  }
+  async imageSearch(runId: string, input: { query: string; limit?: number; page?: number; allowShareAlike?: boolean }, signal?: AbortSignal): Promise<ToolResult> {
+    this.builtInRun(runId)
+    return this.services.openImages ? { kind: 'read', data: await this.services.openImages.search({ runId, ...input, signal }) }
+      : this.serviceUnavailable('开放图库服务尚未配置')
+  }
+  async imagePreview(runId: string, input: { images: readonly string[] }, signal?: AbortSignal): Promise<ToolResult> {
+    this.builtInRun(runId)
+    return this.services.openImages ? { kind: 'read', data: await this.services.openImages.preview({ runId, images: input.images, signal }) }
+      : this.serviceUnavailable('开放图库服务尚未配置')
+  }
+  /** Preview bytes go only to the run's next model request, never into a document. */
+  readImagePreview(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array } {
+    this.builtInRun(runId)
+    if (!this.services.openImages) throw new Error('开放图库服务尚未配置')
+    return this.services.openImages.readPreview(runId, resourceId)
+  }
+  /** Downloaded bytes enter the existing image resource path; the model gets a run/document-bound handle. */
+  async imageFetch(runId: string, input: { image: string; target: string }, signal?: AbortSignal): Promise<ToolResult> {
+    this.writableRun(runId)
+    if (!this.services.openImages) return this.serviceUnavailable('开放图库服务尚未配置')
+    const { snapshot } = await this.authority.resolveImage(runId, input.target)
+    const fetched = await this.services.openImages.fetch({ runId, image: input.image, signal })
+    if (fetched.status !== 'ready') return { kind: 'read', data: fetched }
+    const resource = await this.authority.provideImage(runId, snapshot.documentId, fetched.file)
+    return { kind: 'read', data: { status: 'ready', resource, mimeType: fetched.file.mimeType, width: fetched.width, height: fetched.height,
+      byteLength: fetched.file.bytes.byteLength, source: fetched.source } }
   }
   /** The caller proves sourceRunId belongs to its durable continuation lineage. */
   reissueImageForContinuation(currentRunId: string, sourceDocumentId: string, destinationDocumentId: string,

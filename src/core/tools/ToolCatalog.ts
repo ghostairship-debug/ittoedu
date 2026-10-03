@@ -197,7 +197,8 @@ export function describeToolFamily(family: ToolFamily, allowedNames: readonly st
 const baselineTools = new Set(['read', 'inspect', 'listChildren', 'content.targets', 'skills.read', 'skills.list', 'view.observe', 'file.save', 'html.import', 'text.replace', 'flow.content',
   'course.createFromHtml',
   'image.generate', 'image.edit', 'image.status',
-  'web.search', 'web.open', 'mcp.discover', 'mcp.invoke', 'mcp.resource', 'media.discover'])
+  'web.search', 'web.open', 'mcp.discover', 'mcp.invoke', 'mcp.resource', 'media.discover',
+  'image.search', 'image.preview', 'image.fetch'])
 export function familyOfTool(name: string): ToolFamily | null {
   if (baselineTools.has(name) || name === 'batch') return null
   if (name.startsWith('job.') || name.startsWith('compute.') || name.startsWith('delegate.')) return 'jobs'

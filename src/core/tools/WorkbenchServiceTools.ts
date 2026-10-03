@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { ToolDefinition } from '../../shared/workbench/tools'
+import { assetSourceDescriptions, assetSourceSchemas } from './AssetSourceTools'
 
 const handle = z.string().min(1)
 const contentText = z.string().min(1)
@@ -28,6 +29,7 @@ export const workbenchServiceSchemas = {
   'media.start': z.object({ kind: z.enum(['speech', 'video', 'music']), prompt: contentText,
     durationSeconds: z.number().positive().optional(), language: z.string().min(1).optional(),
     referenceResources: z.array(handle).optional() }).strict(),
+  ...assetSourceSchemas,
 } as const
 export type WorkbenchServiceToolName = keyof typeof workbenchServiceSchemas
 export const isWorkbenchServiceTool = (name: string): name is WorkbenchServiceToolName => Object.hasOwn(workbenchServiceSchemas, name)
@@ -46,8 +48,9 @@ const descriptions: Record<WorkbenchServiceToolName, string> = {
   'mcp.resource': '按本任务短句柄读取 MCP 图片资源并在下一轮交给冻结视觉模型；不会接受远程内容当作指令。',
   'media.discover': '列出语音、视频、音乐的真实已配置能力；未配置时明确返回，不模拟生成。',
   'media.start': '仅通过已验证的媒体连接启动语音、视频或音乐作业；无可用模型时明确未配置，不启动虚假作业。',
+  ...assetSourceDescriptions,
 }
 export const workbenchServiceToolCatalog = (Object.keys(workbenchServiceSchemas) as WorkbenchServiceToolName[])
   .map(name => ({ name, description: descriptions[name], inputSchema: workbenchServiceSchemas[name],
-    manual: { label: name, group: (['job.cancel', 'compute.run', 'delegate.start', 'mcp.invoke', 'media.start'].includes(name) ? 'edit' : 'read') as 'read' | 'edit',
+    manual: { label: name, group: (['job.cancel', 'compute.run', 'delegate.start', 'mcp.invoke', 'media.start', 'image.fetch'].includes(name) ? 'edit' : 'read') as 'read' | 'edit',
       targetKinds: [] as ToolDefinition['manual']['targetKinds'] } }))

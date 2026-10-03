@@ -817,6 +817,11 @@ export class DocumentToolGateway implements ToolGateway {
   }
 
   /** Host-owned bytes stay out of tool receipts; the Engine may send verified images on the next model round. */
+  /** Host-only: open-library preview bytes for the run's next model request. */
+  readOpenImagePreview(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array } {
+    if (this.run(runId).stopped) throw new ToolError('run-stopped', '任务已停止')
+    return this.hostTools.readImagePreview(runId, resourceId)
+  }
   readMcpResource(runId: string, resourceId: string): Promise<{ mimeType: string; bytes: Uint8Array }> {
     return this.hostTools.readMcpResource(runId, resourceId)
   }
@@ -1070,6 +1075,9 @@ export class DocumentToolGateway implements ToolGateway {
       if (call.name === 'media.start') return this.hostTools.mediaStart(runId, value as {
         kind: 'speech' | 'video' | 'music'; prompt: string; durationSeconds?: number;
         language?: string; referenceResources?: readonly string[] })
+      if (call.name === 'image.search') return this.hostTools.imageSearch(runId, value as { query: string; limit?: number; page?: number; allowShareAlike?: boolean })
+      if (call.name === 'image.preview') return this.hostTools.imagePreview(runId, value as { images: string[] })
+      if (call.name === 'image.fetch') return this.hostTools.imageFetch(runId, value as { image: string; target: string })
     }
     if (call.name === 'view.observe') return this.hostTools.observePage({ runId, operationId,
       resolveTarget: async handle => {
