@@ -255,6 +255,11 @@ describe('PlayerPresenterInput', () => {
     keydown('PageDown', {}, child)
     keydown('ArrowRight', {}, handled)
     keydown('PageDown', { isComposing: true })
+    // A Runtime that listens on the window after the course started still decides first.
+    const keepEnd = (event: KeyboardEvent) => { if (event.key === 'End') event.preventDefault() }
+    window.addEventListener('keydown', keepEnd)
+    keydown('End')
+    window.removeEventListener('keydown', keepEnd)
 
     expect(navigate).not.toHaveBeenCalled()
   })

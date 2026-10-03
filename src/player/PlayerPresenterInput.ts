@@ -160,6 +160,22 @@ function normalizeResult(
     : { accepted: false, message: fallbackMessage }
 }
 
+/**
+ * Hears keydown on a window after every listener its content registered, even
+ * ones added later: content decides first whether a key is its own.
+ */
+function listenAfterContent(view: Window, handler: (event: KeyboardEvent) => void): () => void {
+  const queue = () => {
+    view.removeEventListener('keydown', handler)
+    view.addEventListener('keydown', handler)
+  }
+  view.addEventListener('keydown', queue, true)
+  return () => {
+    view.removeEventListener('keydown', queue, true)
+    view.removeEventListener('keydown', handler)
+  }
+}
+
 interface BridgedFrame {
   readonly frame: HTMLIFrameElement
   readonly window: Window
@@ -186,6 +202,7 @@ export class PlayerPresenterInput {
   private readonly onFeedback: PlayerPresenterInputOptions['onFeedback']
   private readonly now: () => number
   private readonly dedupeMs: number
+  private readonly stopKeys: () => void
   private frames: BridgedFrame[] = []
   private lastSignature: string | null = null
   private lastAcceptedAt = Number.NEGATIVE_INFINITY
@@ -203,14 +220,14 @@ export class PlayerPresenterInput {
     this.onFeedback = options.onFeedback
     this.now = options.now ?? (() => performance.now())
     this.dedupeMs = Math.max(0, options.dedupeMs ?? DEFAULT_DEDUPE_MS)
-    view.addEventListener('keydown', this.handleKeyDown)
+    this.stopKeys = listenAfterContent(view, this.handleKeyDown)
     this.watchFocus(view)
   }
 
   destroy(): void {
     if (this.destroyed) return
     this.destroyed = true
-    this.window.removeEventListener('keydown', this.handleKeyDown)
+    this.stopKeys()
     this.unwatchFocus(this.window)
     for (const frame of this.frames.splice(0)) frame.dispose()
   }
@@ -350,22 +367,14 @@ export class PlayerPresenterInput {
       if (!current) entry.dispose()
       return current
     })
-    // The frame's own listeners decide first: the course listener is moved to the
-    // end of the frame window's list whenever a key starts there.
-    const handleFrameKey = (event: KeyboardEvent) => this.handle(event, frame)
-    const queue = () => {
-      view.removeEventListener('keydown', handleFrameKey)
-      view.addEventListener('keydown', handleFrameKey)
-    }
-    view.addEventListener('keydown', queue, true)
+    const stopKeys = listenAfterContent(view, event => this.handle(event, frame))
     this.watchFocus(view)
     this.frames.push({
       frame,
       window: view,
       document,
       dispose: () => {
-        view.removeEventListener('keydown', queue, true)
-        view.removeEventListener('keydown', handleFrameKey)
+        stopKeys()
         this.unwatchFocus(view)
       },
     })
