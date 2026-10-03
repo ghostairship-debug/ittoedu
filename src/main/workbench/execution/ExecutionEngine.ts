@@ -831,7 +831,8 @@ export class ExecutionEngine {
     if (name === 'mcp.invoke') return null
     if (active.approveAll || !(mutationNames.has(name) || name === 'content.update' || fileMutationNames.has(name) || name === 'office.create' || name === 'office.edit' || name === 'artifact.save' || name === 'batch' || name === 'build.import'
       || name === 'html.import' || name === 'html.click' || name === 'html.input' || name === 'file.save' || name === 'document.export'
-      || name === 'job.cancel' || name === 'compute.run' || name === 'delegate.start' || name === 'mcp.invoke' || name === 'media.start')) return null
+      || name === 'job.cancel' || name === 'compute.run' || name === 'delegate.start' || name === 'mcp.invoke' || name === 'media.start'
+      || name === 'image.fetch' && typeof (tool.call.input as { path?: unknown } | null)?.path === 'string')) return null
     if (active.permission === 'ask') return 'ask'
     if (fileMutationNames.has(name) || name === 'office.create' || name === 'office.edit') return null
     if (active.permission === 'workspace' && active.outsideDocuments.size) {

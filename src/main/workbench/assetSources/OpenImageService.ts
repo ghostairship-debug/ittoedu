@@ -57,17 +57,24 @@ export interface OpenImageServiceOptions {
 
 const reasonOf = (cause: unknown, fallback: string) => cause instanceof Error && cause.message ? cause.message : fallback
 
-/** 下载内容统一核对与缩放：JPEG/PNG/WebP 且不超宽的原样保留；其余线稿、透明图转为 PNG，照片转为 JPEG。 */
-export async function normalizeImage(bytes: Uint8Array, maxWidth: number): Promise<{ bytes: Uint8Array; mimeType: string; width: number; height: number }> {
+export type ImageFileFormat = 'jpeg' | 'png' | 'webp'
+
+/**
+ * 下载内容统一核对与缩放：JPEG/PNG/WebP 且不超宽（并符合指定格式）的原样保留；
+ * 其余按指定格式转换，未指定时线稿、透明图转为 PNG，照片转为 JPEG。
+ */
+export async function normalizeImage(bytes: Uint8Array, maxWidth: number, format?: ImageFileFormat): Promise<{ bytes: Uint8Array; mimeType: string; width: number; height: number }> {
   const metadata = await sharp(bytes, { failOn: 'error' }).metadata().catch(() => { throw new Error('下载内容不是可识别的图片') })
-  const { format, width, height } = metadata
-  if (!format || !width || !height) throw new Error('下载内容不是可识别的图片')
-  if ((format === 'jpeg' || format === 'png' || format === 'webp') && width <= maxWidth && (metadata.pages ?? 1) === 1)
-    return { bytes, mimeType: `image/${format}`, width, height }
+  const { width, height } = metadata, actual = metadata.format
+  if (!actual || !width || !height) throw new Error('下载内容不是可识别的图片')
+  if ((actual === 'jpeg' || actual === 'png' || actual === 'webp') && (!format || format === actual) && width <= maxWidth && (metadata.pages ?? 1) === 1)
+    return { bytes, mimeType: `image/${actual}`, width, height }
+  const output: ImageFileFormat = format ?? (metadata.hasAlpha || actual === 'png' || actual === 'gif' || actual === 'svg' ? 'png' : 'jpeg')
   const resized = sharp(bytes, { failOn: 'error' }).rotate().resize({ width: maxWidth, withoutEnlargement: true })
-  const lossless = metadata.hasAlpha || format === 'png' || format === 'gif' || format === 'svg'
-  const { data, info } = await (lossless ? resized.png() : resized.jpeg({ quality: 85 })).toBuffer({ resolveWithObject: true })
-  return { bytes: new Uint8Array(data), mimeType: lossless ? 'image/png' : 'image/jpeg', width: info.width, height: info.height }
+  const encoded = output === 'png' ? resized.png() : output === 'webp' ? resized.webp({ quality: 85 })
+    : resized.flatten({ background: '#ffffff' }).jpeg({ quality: 85 })
+  const { data, info } = await encoded.toBuffer({ resolveWithObject: true })
+  return { bytes: new Uint8Array(data), mimeType: `image/${output}`, width: info.width, height: info.height }
 }
 
 function filenameFor(title: string, mimeType: string): string {
@@ -192,7 +199,7 @@ export class OpenImageService {
   }
 
   /** 下载选中候选的合适尺寸版本，核对并缩放，附上来源与署名。 */
-  async fetch(input: { runId: string; image: string; signal?: AbortSignal }): Promise<OpenImageFetchResult> {
+  async fetch(input: { runId: string; image: string; format?: ImageFileFormat; signal?: AbortSignal }): Promise<OpenImageFetchResult> {
     const run = this.run(input.runId)
     if (run.stopped) return { status: 'rejected', reason: '任务已停止' }
     const candidate = run.candidates.get(input.image)
@@ -203,7 +210,7 @@ export class OpenImageService {
           ? await commonsRendition(this.options.http, candidate.commonsTitle, FETCH_WIDTH, signal).catch(() => candidate.fileUrl)
           : candidate.fileUrl
         const response = await this.options.http.getBytes(url, { signal, maxBytes: DOWNLOAD_MAX_BYTES, headers: { Accept: IMAGE_ACCEPT } })
-        const image = await normalizeImage(response.bytes, FETCH_WIDTH)
+        const image = await normalizeImage(response.bytes, FETCH_WIDTH, input.format)
         return { status: 'ready' as const, file: { bytes: image.bytes, mimeType: image.mimeType, filename: filenameFor(candidate.title, image.mimeType) },
           width: image.width, height: image.height, source: openLibrarySource(candidate) }
       })

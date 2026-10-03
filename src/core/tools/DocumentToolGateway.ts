@@ -47,6 +47,8 @@ import { rotatedRectangleAabb } from '../../shared/geometry'
 import { htmlImportInputSchema } from './HtmlImportTools'
 import { isProjectFileToolName } from './ProjectFileTools'
 import { ProjectFileCoordinator, type CourseModel, type CourseSnapshot, type ProjectFileCommit } from '../projectFiles/ProjectFileCoordinator'
+import { readProjectFile } from '../projectFiles/projectFileView'
+import { openImageAssetPath } from './AssetSourceTools'
 
 interface Run {
   grant: ToolRunGrant
@@ -828,6 +830,47 @@ export class DocumentToolGateway implements ToolGateway {
   }
 
   /** Host-owned bytes stay out of tool receipts; the Engine may send verified images on the next model round. */
+  /**
+   * image.fetch: with `path` the download becomes the course asset stored there, filling same-named slots
+   * (replacing follows the project-file read rule); without it, a run resource for content.update/media.*.
+   */
+  private async fetchOpenImage(runId: string, operationId: string, requestDigest: string, input: { image: string; project?: string; path?: string }): Promise<ToolResult> {
+    const target = input.path === undefined ? undefined : openImageAssetPath(input.path)
+    if (target && 'error' in target) throw new ToolError('invalid-path', target.error)
+    const before = await this.projectDocument(runId, input.project, target ? 'write' : 'read')
+    if (!target) {
+      if (!this.run(runId).grant.documents.some(doc => doc.documentId === before.documentId && doc.writable.length > 0))
+        throw new ToolError('not-authorized', '本次任务对该课件没有可写范围')
+      const fetched = await this.hostTools.openImageFile(runId, input.image)
+      if (fetched.status !== 'ready') return { kind: 'read', data: fetched }
+      const resource = await this.provideImage(runId, before.documentId, fetched.file)
+      return { kind: 'read', data: { status: 'ready', resource, mimeType: fetched.file.mimeType, width: fetched.width, height: fetched.height,
+        byteLength: fetched.file.bytes.byteLength, source: fetched.source } }
+    }
+    const existing = readProjectFile(before.model.project, before.model.resources, target.path)
+    if (existing) this.projectFiles.assertFresh(runId, before, existing)
+    const fetched = await this.hostTools.openImageFile(runId, input.image, target.format)
+    if (fetched.status !== 'ready') return { kind: 'read', data: fetched }
+    const prepareImage = this.options.prepareImage
+    if (!prepareImage) throw new ToolError('unsupported-resource-preparation', '当前宿主未配置图片解码能力')
+    const prepared = await prepareImage({ ...fetched.file, filename: target.filename }, this.createId)
+    // The download takes a while: write over the course as it is now, under the same read rule.
+    const snapshot = await this.projectDocument(runId, input.project, 'write')
+    const current = readProjectFile(snapshot.model.project, snapshot.model.resources, target.path)
+    if (current) this.projectFiles.assertFresh(runId, snapshot, current)
+    if (current && current.kind !== 'asset') throw new ToolError('invalid-path', `${target.path} 不是素材文件`)
+    const id = current?.assetId ?? prepared.meta.id, { project, resources } = snapshot.model
+    const model: CourseModel = { kind: 'course-v9',
+      project: { ...project, assets: { ...project.assets, [id]: { ...prepared.meta, id, path: target.path, filename: target.filename, source: fetched.source } } },
+      resources: { ...resources, assets: { ...resources.assets, [id]: prepared.bytes } } }
+    const { result, model: after } = await this.commitProjectFiles(runId, operationId, requestDigest, snapshot, model)
+    if (result.kind !== 'document-operation' || result.result.status !== 'applied' && result.result.status !== 'unchanged') return result
+    const written = after && readProjectFile(after.project, after.resources, target.path)
+    if (written && after) this.projectFiles.remember(runId, snapshot.documentId, written, after)
+    return { ...result, affected: [target.path],
+      ...(current ? { advisories: [{ step: 0, code: 'html-import-warning' as const, message: `已替换原素材 ${target.path}，可撤销` }] } : {}) }
+  }
+
   /** Host-only: open-library preview bytes for the run's next model request. */
   readOpenImagePreview(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array } {
     if (this.run(runId).stopped) throw new ToolError('run-stopped', '任务已停止')
@@ -1168,7 +1211,7 @@ export class DocumentToolGateway implements ToolGateway {
         language?: string; referenceResources?: readonly string[] })
       if (call.name === 'image.search') return this.hostTools.imageSearch(runId, value as { query: string; limit?: number; page?: number; allowShareAlike?: boolean })
       if (call.name === 'image.preview') return this.hostTools.imagePreview(runId, value as { images: string[] })
-      if (call.name === 'image.fetch') return this.hostTools.imageFetch(runId, value as { image: string; target: string })
+      if (call.name === 'image.fetch') return this.fetchOpenImage(runId, operationId, requestDigest, value as { image: string; project?: string; path?: string })
       if (call.name === 'asset.search') return this.hostTools.assetSearch(runId, value as { query: string; limit?: number })
     }
     if (call.name === 'view.observe') return this.hostTools.observePage({ runId, operationId,

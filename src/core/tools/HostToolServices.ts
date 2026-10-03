@@ -66,7 +66,7 @@ export interface HostToolServices {
     search(input: { runId: string; query: string; limit?: number; page?: number; allowShareAlike?: boolean; signal?: AbortSignal }): Promise<unknown>
     preview(input: { runId: string; images: readonly string[]; signal?: AbortSignal }): Promise<unknown>
     readPreview(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array }
-    fetch(input: { runId: string; image: string; signal?: AbortSignal }): Promise<
+    fetch(input: { runId: string; image: string; format?: 'jpeg' | 'png' | 'webp'; signal?: AbortSignal }): Promise<
       | { status: 'ready'; file: HostImageInput; width: number; height: number; source: AssetSource }
       | { status: 'failed' | 'rejected'; reason: string }>
   }
@@ -371,16 +371,11 @@ export class HostToolCoordinator {
     if (!this.services.openImages) throw new Error('开放图库服务尚未配置')
     return this.services.openImages.readPreview(runId, resourceId)
   }
-  /** Downloaded bytes enter the existing image resource path; the model gets a run/document-bound handle. */
-  async imageFetch(runId: string, input: { image: string; target: string }, signal?: AbortSignal): Promise<ToolResult> {
+  /** One candidate's verified bytes and source; the Gateway places them as a project asset or a run resource. */
+  openImageFile(runId: string, image: string, format?: 'jpeg' | 'png' | 'webp', signal?: AbortSignal) {
     this.writableRun(runId)
-    if (!this.services.openImages) return this.serviceUnavailable('开放图库服务尚未配置')
-    const { snapshot } = await this.authority.resolveImage(runId, input.target)
-    const fetched = await this.services.openImages.fetch({ runId, image: input.image, signal })
-    if (fetched.status !== 'ready') return { kind: 'read', data: fetched }
-    const resource = await this.authority.provideImage(runId, snapshot.documentId, fetched.file)
-    return { kind: 'read', data: { status: 'ready', resource, mimeType: fetched.file.mimeType, width: fetched.width, height: fetched.height,
-      byteLength: fetched.file.bytes.byteLength, source: fetched.source } }
+    if (!this.services.openImages) throw new Error('开放图库服务尚未配置')
+    return this.services.openImages.fetch({ runId, image, ...(format ? { format } : {}), signal })
   }
   async assetSearch(runId: string, input: { query: string; limit?: number }): Promise<ToolResult> {
     this.builtInRun(runId)
