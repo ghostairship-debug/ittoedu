@@ -49,6 +49,20 @@
         ],
         "type": "object"
       },
+      "__schema11": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "type": "object"
+      },
       "__schema2": {
         "type": "boolean"
       },
@@ -186,6 +200,9 @@
           },
           "content": {
             "$ref": "#/$defs/__schema5"
+          },
+          "draft": {
+            "$ref": "#/$defs/__schema11"
           },
           "enabled": {
             "$ref": "#/$defs/__schema2"
