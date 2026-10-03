@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { AssetHttpError, type AssetHttpPort } from '../../src/main/workbench/assetSources/assetSourceTypes'
 import { commonsLicense, htmlText, openLibrarySource, openverseLicense } from '../../src/main/workbench/assetSources/licensePolicy'
 import { searchOpenverse } from '../../src/main/workbench/assetSources/openverse'
+import { commonsRendition, searchCommons } from '../../src/main/workbench/assetSources/wikimediaCommons'
 
 const unused = async (): Promise<never> => { throw new Error('unexpected download') }
 const jsonPort = (body: unknown) => {
@@ -105,5 +106,61 @@ describe('Openverse search', () => {
       .rejects.toThrow('Openverse 匿名访问次数已达上限')
     await expect(searchOpenverse(jsonPort({ detail: 'oops' }).port, { query: 'q', limit: 5, page: 1, allowShareAlike: false }))
       .rejects.toThrow('无法识别')
+  })
+})
+
+/** Shape copied from a real Commons API response (formatversion=2, 2026-10-04), trimmed. */
+const commonsPage = (index: number, title: string, overrides: Record<string, unknown>, meta: Record<string, string>) => ({
+  pageid: 3262268 + index, ns: 6, title, index, imageinfo: [{ width: 760, height: 590, mime: 'image/png',
+    url: `https://upload.wikimedia.org/wikipedia/commons/6/61/${title.slice(5).replaceAll(' ', '_')}?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original`,
+    thumburl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/61/x.png/500px-x.png?utm_source=commons.wikimedia.org',
+    descriptionurl: `https://commons.wikimedia.org/wiki/${title.replaceAll(' ', '_')}`,
+    extmetadata: Object.fromEntries(Object.entries(meta).map(([key, value]) => [key, { value, source: 'commons-desc-page' }])), ...overrides }],
+})
+
+describe('Wikimedia Commons search', () => {
+  it('searches files only, orders by search rank, strips tracking parameters and HTML, and filters licenses', async () => {
+    const { port, getJson } = jsonPort({ batchcomplete: true, continue: { gsroffset: 3, continue: 'gsroffset||' }, query: { pages: [
+      commonsPage(3, 'File:Share alike.png', {}, { License: 'cc-by-sa-4.0', LicenseShortName: 'CC BY-SA 4.0' }),
+      commonsPage(2, 'File:AxialTiltObliquity.png', {}, { License: 'cc-by-3.0', LicenseShortName: 'CC BY 3.0',
+        LicenseUrl: 'https://creativecommons.org/licenses/by/3.0', ObjectName: 'AxialTiltObliquity',
+        Artist: '<a href="//commons.wikimedia.org/w/index.php?title=User:Dna-webmaster" class="new">Dna-webmaster</a>',
+        ImageDescription: '<p>Description of relations between <b>Axial tilt</b> and the ecliptic.\n</p>' }),
+      commonsPage(1, 'File:Celestial poles and equator.svg', { width: 300, height: 270, mime: 'image/svg+xml' },
+        { License: 'cc0', LicenseShortName: 'CC0', LicenseUrl: 'http://creativecommons.org/publicdomain/zero/1.0/deed.en' }),
+      commonsPage(4, 'File:Small photo.jpg', { width: 200, mime: 'image/jpeg' }, { License: 'cc0', LicenseShortName: 'CC0' }),
+      commonsPage(5, 'File:Nc.jpg', {}, { License: 'cc-by-nc-2.0', LicenseShortName: 'CC BY-NC 2.0' }),
+    ] } })
+    const page = await searchCommons(port, { query: '地轴 倾斜', limit: 5, page: 2, allowShareAlike: false })
+    const request = new URL(getJson.mock.calls[0]![0])
+    expect(request.origin + request.pathname).toBe('https://commons.wikimedia.org/w/api.php')
+    expect(Object.fromEntries(request.searchParams)).toMatchObject({ action: 'query', generator: 'search', gsrnamespace: '6',
+      gsrsearch: '地轴 倾斜 filetype:bitmap|drawing', gsrlimit: '5', gsroffset: '5', prop: 'imageinfo', iiprop: 'url|size|mime|extmetadata' })
+    expect(page.candidates.map(item => item.commonsTitle)).toEqual(['File:Celestial poles and equator.svg', 'File:AxialTiltObliquity.png'])
+    expect(page).toMatchObject({ library: 'wikimedia-commons', excluded: 3, hasMore: true })
+    expect(page.candidates[0]).toMatchObject({ title: 'Celestial poles and equator', license: { code: 'cc0' }, width: 300 })
+    expect(page.candidates[1]).toEqual({ library: 'wikimedia-commons', providerId: '3262270', title: 'AxialTiltObliquity', author: 'Dna-webmaster',
+      license: { code: 'by', id: 'CC BY 3.0', url: 'https://creativecommons.org/licenses/by/3.0', attributionRequired: true },
+      sourceName: 'Wikimedia Commons', pageUrl: 'https://commons.wikimedia.org/wiki/File:AxialTiltObliquity.png',
+      fileUrl: 'https://upload.wikimedia.org/wikipedia/commons/6/61/AxialTiltObliquity.png',
+      previewUrl: 'https://upload.wikimedia.org/wikipedia/commons/thumb/6/61/x.png/500px-x.png?utm_source=commons.wikimedia.org',
+      commonsTitle: 'File:AxialTiltObliquity.png', width: 760, height: 590,
+      description: 'Description of relations between Axial tilt and the ecliptic.' })
+    expect((await searchCommons(port, { query: 'q', limit: 5, page: 1, allowShareAlike: true })).candidates).toHaveLength(3)
+  })
+
+  it('treats an empty search as no results, surfaces API errors, and resolves a sized rendition', async () => {
+    expect(await searchCommons(jsonPort({ batchcomplete: true }).port, { query: 'none', limit: 5, page: 1, allowShareAlike: false }))
+      .toEqual({ library: 'wikimedia-commons', candidates: [], excluded: 0, hasMore: false })
+    await expect(searchCommons(jsonPort({ error: { code: 'maxlag', info: 'Waiting for a database server' } }).port,
+      { query: 'q', limit: 5, page: 1, allowShareAlike: false })).rejects.toThrow('Waiting for a database server')
+    const { port, getJson } = jsonPort({ query: { pages: [{ title: 'File:Celestial poles and equator.svg', imageinfo: [{
+      url: 'https://upload.wikimedia.org/wikipedia/commons/f/f7/Celestial_poles_and_equator.svg',
+      thumburl: 'https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f7/Celestial_poles_and_equator.svg/1920px-Celestial_poles_and_equator.svg.png' }] }] } })
+    expect(await commonsRendition(port, 'File:Celestial poles and equator.svg', 1600))
+      .toBe('https://thumb.wikimedia.org/wikipedia/commons/thumb/f/f7/Celestial_poles_and_equator.svg/1920px-Celestial_poles_and_equator.svg.png')
+    expect(Object.fromEntries(new URL(getJson.mock.calls[0]![0]).searchParams)).toMatchObject({ titles: 'File:Celestial poles and equator.svg', iiurlwidth: '1600' })
+    await expect(commonsRendition(jsonPort({ query: { pages: [{ title: 'File:Gone.png', missing: true }] } }).port, 'File:Gone.png', 1600))
+      .rejects.toThrow('找不到')
   })
 })
