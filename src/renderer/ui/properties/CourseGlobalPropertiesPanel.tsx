@@ -570,7 +570,7 @@ function CourseGlobalEmptyPanel({
           </div>
         )}
         <ToggleRow
-          label="键盘左右键翻页"
+          label="键盘翻页"
           checked={empty.playback?.keyboardNavigation ?? true}
           onChange={(keyboardNavigation) => commands.updatePlayback({ keyboardNavigation })}
         />

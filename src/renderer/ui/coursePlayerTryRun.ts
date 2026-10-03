@@ -8,6 +8,7 @@ import {
   attachPublishedCourseStageFit,
   fitPublishedCourseStage,
 } from '../../player/surfaces/publishedStageFit'
+import { attachPublishedCourseKeys } from '../../player/publishedCoursePresenter'
 import { buildPublishedCourseV2Payload } from '../export/course/buildPublishedCourse'
 import type { PublishedCourseV2Payload } from '../../shared/publishedCourseTypes'
 import type { PlayerAuthoringHostMessage } from '../../shared/playerAuthoringProtocol'
@@ -226,6 +227,7 @@ export async function mountPublishedCourseTryRun(
 
     const destroySession = session.destroy.bind(session)
     session.destroy = async (): Promise<void> => {
+      keys?.destroy()
       unregisterObservation()
       try {
         await destroySession()
@@ -234,6 +236,8 @@ export async function mountPublishedCourseTryRun(
         await releaseLease()
       }
     }
+    // Preview and try-run answer the same keys as the exported player.
+    const keys = playback ? attachPublishedCourseKeys(input.container, session, published.playback) : null
     return mountedSession
   } catch (error) {
     try {

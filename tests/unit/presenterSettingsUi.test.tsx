@@ -131,6 +131,19 @@ describe('presenter settings editor', () => {
     ).toEqual([])
   })
 
+  it('describes the course keyboard keys and names one when it is tested', () => {
+    render(<PropertiesTab onReplaceImage={vi.fn()} />)
+    expect(screen.getByLabelText('键盘翻页')).toBeChecked()
+    expect(screen.getByText(/Shift\+←\/→ 上一场景\/下一场景，Home\/End 第一页\/最后一页/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '测试或添加翻页笔按键' }))
+    fireEvent.keyDown(window, { key: 'ArrowRight', code: 'ArrowRight', shiftKey: true })
+
+    expect(screen.getByRole('status')).toHaveTextContent('键盘已内建“下一场景”')
+    // A remote sending arrows may still be bound to authored rules.
+    expect(screen.getByRole('button', { name: '保存为前进键' })).toBeEnabled()
+  })
+
   it('saves a modified PageDown because only the unmodified key is built in', async () => {
     render(<PropertiesTab onReplaceImage={vi.fn()} />)
     fireEvent.click(screen.getByRole('button', { name: '测试或添加翻页笔按键' }))
