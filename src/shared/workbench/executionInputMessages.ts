@@ -12,7 +12,7 @@ export const executionInputMessages = {
   'model-connection-unavailable': ['本次模型角色的连接尚未接通或已撤销。', '打开模型设置，检查相应连接并重新登录或配置凭据后重试。'],
   'disclosed-settings-changed': ['模型或服务配置在发送时已变化，本次未请求模型。', '核对输入框下方当前显示的服务与模型后再次发送。'],
   'attachment-unavailable': ['有附件尚无可发送的表示，或其快照已不可读取。', '在附件卡中完成提取；若仍失败，移除该卡并重新添加附件后重试。'],
-  'conversation-draft-changed': ['本条消息的草稿已在另一处更新。', '重新打开当前会话，核对保留的草稿和附件后再发送。'],
+  'conversation-draft-changed': ['本条消息的草稿已在另一处更新。', '核对输入框中的文字和附件后再次发送，会按会话的最新记录处理。'],
   'submission-conflict': ['同一提交编号已用于不同消息，本次未重复发送。', '保留当前输入，核对消息列表后重新发送。'],
 } as const satisfies Record<string, readonly [string, string]>
 

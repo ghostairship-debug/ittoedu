@@ -1,7 +1,7 @@
 import { selectionReference, workbenchSelection, type ContextualEditRequest } from './SelectionContextController'
 import { elementCards } from './elementCards/elementCardController'
 import './selectionContext.css'
-import { forwardRef, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
+import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { File, Folder } from 'lucide-react'
 import { dispatchRevealInExplorer } from './revealInExplorer'
@@ -424,7 +424,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     let published = current
     let initial = true, catchingUp = false, catchUpPending = false, refreshingConversation = false
     const observedEndedRuns = new Set<string>(), pendingEndedRuns = new Set<string>()
-    // Terminal messages may be persisted just after run.end. Their bounded retry must
+    // Main writes a task's reply, its restored input and the next queued request after run.end, and serves a
+    // conversation read only after those writes, so one read per ended batch is its final record. The read must
     // never hold up the event cursor or repeat for old failures on every text update.
     const refreshConversation = () => {
       if (refreshingConversation || disposed || pendingEndedRuns.size === 0) return
@@ -437,15 +438,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
           if (selected?.conversationId === conversationId) {
             const needsReply = endedRuns.some(runId => !selected.messages.some(message => message.role === 'assistant' && message.runId === runId))
             if (!needsReply) continue
-            let latest: ConversationRecord | null = selected
-            for (let attempt = 0; attempt < 5 && !disposed; attempt += 1) {
-              if (attempt > 0) await new Promise(resolve => setTimeout(resolve, attempt * 25))
-              if (disposed) return
-              const value = await api.conversation(selected.workspaceId, conversationId)
-              if (!value) { latest = null; break }
-              latest = value
-              if (value.revision > selected.revision) break
-            }
+            const latest = await api.conversation(selected.workspaceId, conversationId)
             const activeNow = activeRef.current
             if (latest && !disposed && activeNow?.conversationId === conversationId && latest.revision > activeNow.revision) {
               const hasLocalDraft = draftRef.current !== activeNow.inputDraft || !sameAttachments(attachmentsRef.current, activeNow.inputAttachments)
@@ -792,13 +785,13 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     try {
       if (activeRef.current?.conversationId === conversation.conversationId) await persist()
       const latest = await api.conversation(conversation.workspaceId, conversation.conversationId)
-      if (!latest) throw new Error('Conversation no longer exists')
+      if (!latest) throw new Error('会话名称未保存：会话已不存在。')
       const saved = await api.renameConversation({ workspaceId: latest.workspaceId, conversationId: latest.conversationId,
         expectedRevision: latest.revision, title: title.trim() })
       setConversations(value => updateConversation(value, saved))
       if (activeRef.current?.conversationId === saved.conversationId) { setActive(saved); activeRef.current = saved }
       setRenamingId(null); setSessionMenuId(null)
-    } catch { setError('会话名称未保存，请重试。') }
+    } catch (failure) { setError(failure instanceof Error ? failure.message : '会话名称未保存，请重试。') }
     finally { setBusy(false) }
   }
 
@@ -852,7 +845,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     if (!api || !selected || submittingRef.current || attachmentBusy || !retry && !continueRun && !draftRef.current.trim() && attachmentsRef.current.length === 0) return
     if (!configured) { setError('尚未配置可用的对话模型。请先在模型设置中选择连接、模型和账号。'); return }
     submittingRef.current = true; setBusy(true); setError('')
-    let request: ExecutionSendInput | undefined
+    let request: ExecutionSendInput | undefined, sendInvoked = false
     try {
       if (retry) request = { workspaceId: retry.workspaceId, conversationId: retry.conversationId, submissionId: retry.submissionId,
         expectedRevision: selected.revision, text: retry.text, documents: structuredClone(retry.documents), attachments: structuredClone(retry.attachments),
@@ -914,6 +907,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         timedSubmissions.current.set(request.submissionId, { workspaceId: request.workspaceId, conversationId: request.conversationId })
       }
       const sent = request
+      sendInvoked = true
       const result = await api.send(sent).catch(async failure => {
         // Refused before acceptance: Main wrote this conversation after this view last read it (a reply, the next queued run).
         // The same payload is sent once more on that revision only when the stored draft is exactly this payload; any other
@@ -931,8 +925,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
       applySendResult(result)
       if (result.submission.state === 'failed') setError(result.submission.failure?.message ?? '消息未启动，输入和附件已恢复。')
     } catch (failure) {
-      let known: ExecutionSubmissionRecord | null = null
-      if (request) try { known = await api.submission({ workspaceId: request.workspaceId, conversationId: request.conversationId, submissionId: request.submissionId }) } catch { /* keep the exact local pending card */ }
+      let known: ExecutionSubmissionRecord | null = null, lookedUp = false
+      if (request) try { known = await api.submission({ workspaceId: request.workspaceId, conversationId: request.conversationId, submissionId: request.submissionId }); lookedUp = true } catch { /* keep the exact local pending card */ }
       if (known) {
         replaceSubmission(known)
         const latest = await api.conversation(known.workspaceId, known.conversationId).catch(() => null)
@@ -944,6 +938,9 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         setError(known.state === 'starting' ? '提交状态尚在确认中；再次确认会复用同一提交，不会创建第二次运行。' : known.failure?.message ?? '')
       } else if (request) {
         const closedDocument = isExecutionInputError(failure, 'document-session-changed')
+        // Main records a submission before anything runs: holding no record after the send settled, it refused this one
+        // and nothing ran. Only a send whose record cannot be read leaves the outcome unknown.
+        const reason = failure instanceof Error ? failure.message : '消息没有发送。'
         replaceSubmission({ submissionId: request.submissionId, workspaceId: request.workspaceId, conversationId: request.conversationId,
           state: 'failed', mode: request.mode ?? 'queue', text: request.text, documents: request.documents, attachments: request.attachments ?? [],
           ...(request.contentOutput ? { contentOutput: request.contentOutput } : {}),
@@ -951,6 +948,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
           model: { provider: connection?.connection.provider ?? '当前连接', model: conversationSelection?.model ?? '当前模型', accountId: connection?.connection.accountId ?? '', billing: connection?.connection.billing.kind ?? 'unknown' },
           createdAt: Date.now(), updatedAt: Date.now(), failure: closedDocument
             ? { code: 'document-session-changed', message: '目标文档已关闭或重新打开；本次未发送。可移除文档引用，核对草稿后重新发送。' }
+            : !sendInvoked ? { code: 'not-sent', message: `未发送：${reason}` }
+            : lookedUp ? { code: 'not-accepted', message: `已拒绝，未执行：${reason}` }
             : { code: 'ack-unconfirmed', message: '未确认执行器是否收到；输入和附件仍保留，可用同一提交再次确认。' } })
         setError(failure instanceof Error ? failure.message : '消息状态未确认；输入和附件仍保留。')
       } else setError(failure instanceof Error ? failure.message : '消息尚未发送；草稿已保留。')
@@ -1027,6 +1026,14 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     setPendingRestore(null)
     composerRef.current?.focus()
   }
+  // The dialog focuses its own button after it opens; the composer takes focus back only once the dialog is gone
+  // (confirm, cancel or Escape), so an early click cannot leave focus on a button that is about to be removed.
+  const cancelRestore = useCallback(() => setPendingRestore(null), [])
+  const restoreDialogOpen = pendingRestore !== null, restoreDialogWasOpen = useRef(false)
+  useLayoutEffect(() => {
+    if (restoreDialogWasOpen.current && !restoreDialogOpen) composerRef.current?.focus()
+    restoreDialogWasOpen.current = restoreDialogOpen
+  }, [restoreDialogOpen])
   const restoreSubmission = async (submission: ExecutionSubmissionRecord) => {
     await capturePromise.current
     if (activeRef.current?.conversationId !== submission.conversationId) return
@@ -1359,7 +1366,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
             <textarea ref={composerRef} aria-label="给创作助手发消息" aria-describedby="assistant-composer-hint" data-attachment-paste-target value={draft} disabled={!active} readOnly={busy} placeholder="描述你要讨论或完成的内容"
               onFocus={() => { setPlusOpen(false); setPermissionOpen(false) }}
               onCompositionStart={() => { composingRef.current = true }} onCompositionEnd={() => { composingRef.current = false }} onKeyDown={onComposerKeyDown}
-              onChange={event => { setDraft(event.target.value); draftRef.current = event.target.value; freezeDocuments(event.target.value) }} onBlur={() => { void persist().catch(() => setError('草稿未保存，请重试。')) }} />
+              onChange={event => { setDraft(event.target.value); draftRef.current = event.target.value; freezeDocuments(event.target.value) }} onBlur={() => { void persist().catch(failure => setError(failure instanceof Error ? failure.message : '草稿未保存，请重试。')) }} />
           </div>}
         </AttachmentComposer>
         <div className="execution-assistant__toolbar">
@@ -1467,7 +1474,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     <ConfirmDialog open={pendingRestore !== null} title="输入框已有另一份草稿" message="恢复这条消息会替换当前文字、附件和引用。可以先保留当前输入，原消息仍在历史中。"
       confirmLabel="替换为这条消息" cancelLabel="保留当前输入"
       details={pendingRestore && <pre className="execution-assistant__restore-preview">{pendingRestore.text || `附件 ${pendingRestore.attachments.length} 个`}</pre>}
-      onCancel={() => { setPendingRestore(null); composerRef.current?.focus() }}
+      onCancel={cancelRestore}
       onConfirm={() => { if (pendingRestore) applyRestoredSubmission(pendingRestore) }} />
     {externalAPI && active && <ExternalMcpPanel open={externalOpen} onClose={() => setExternalOpen(false)} api={externalAPI}
       workspaceId={workspaceId} conversation={active} documents={documents} instruction={draft} documentNames={documentNames}

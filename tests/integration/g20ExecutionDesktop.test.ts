@@ -509,3 +509,20 @@ it('stops current work after durably pausing its queue, and starts nothing until
   await f.service.engine.wait(after.runId)
   await waitForCompletedConversation(f.service, identity.workspaceId, identity.conversationId, after.runId)
 })
+
+it('answers a conversation read made on seeing run.end with the record Main writes after the task ends', async () => {
+  const f = await fixture(async () => new Response(`data: ${JSON.stringify({ id: 'reply', model: 'fixture-model', choices: [{ index: 0, delta: { role: 'assistant', content: '任务回复' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } }))
+  await configureConversation(f.settings, 'http://127.0.0.1:1/v1')
+  const space = await f.service.operate({ type: 'workspace', root: f.workspace }) as { workspace: { workspaceId: string } }
+  const conversation = await f.service.operate({ type: 'create-conversation', workspaceId: space.workspace.workspaceId }) as { conversationId: string; revision: number }
+  const identity = { workspaceId: space.workspace.workspaceId, conversationId: conversation.conversationId }
+  // A view reads the record as soon as it sees the end, before Main has written the reply.
+  let read: Promise<unknown> | undefined
+  f.service.setSinks(event => { if (event.type === 'run.end') read ??= f.service.operate({ type: 'conversation', ...identity }) })
+  const sent = await f.service.operate({ type: 'send', ...identity, submissionId: crypto.randomUUID(), expectedRevision: conversation.revision,
+    text: '请回复', documents: [] }) as { run: ExecutionRunRecord }
+  await f.service.engine.wait(sent.run.runId)
+  await expect.poll(() => read).toBeDefined()
+  expect(await read).toMatchObject({ messages: [{ role: 'user', text: '请回复' }, { role: 'assistant', runId: sent.run.runId, text: '任务回复' }] })
+  await waitForCompletedConversation(f.service, identity.workspaceId, identity.conversationId, sent.run.runId)
+})
