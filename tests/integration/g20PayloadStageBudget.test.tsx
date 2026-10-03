@@ -117,13 +117,15 @@ it('budgets the actual initial HTTP body with runtime context and PNG base64, th
   expect(large.toString('base64').length).toBeGreaterThan(8 * 1024 * 1024)
   const largeSnapshot = await service.attachments.receiveBytes({ name: 'large.png', bytes: large, source: { kind: 'paste' } })
   const largeRef = [{ attachmentId: largeSnapshot.id, representationId: 'original-image', role: 'reference' as const }]
-  const overflowConversation = await createConversation()
-  const overflowDraft = await service.operate({ type: 'draft', workspaceId: overflowConversation.workspaceId, conversationId: overflowConversation.conversationId,
-    expectedRevision: overflowConversation.revision, text: '超限仍保留', documents: [], attachments: largeRef }) as ConversationRecord
-  const overflow = await service.operate({ type: 'send', workspaceId: overflowConversation.workspaceId, conversationId: overflowConversation.conversationId,
-    submissionId: randomUUID(), expectedRevision: overflowDraft.revision, text: overflowDraft.inputDraft, documents: [], attachments: largeRef }) as ExecutionSendResult
-  expect(overflow.submission).toMatchObject({ state: 'failed', failure: { message: expect.stringContaining('超过发送预算') } })
-  expect(await service.operate({ type: 'conversation', workspaceId: overflowConversation.workspaceId, conversationId: overflowConversation.conversationId }))
-    .toMatchObject({ inputDraft: overflowDraft.inputDraft, inputAttachments: largeRef })
-  expect(wire).toHaveLength(3)
+  const largeConversation = await createConversation()
+  const largeDraft = await service.operate({ type: 'draft', workspaceId: largeConversation.workspaceId, conversationId: largeConversation.conversationId,
+    expectedRevision: largeConversation.revision, text: '大图照常发送', documents: [], attachments: largeRef }) as ConversationRecord
+  const largeSend = await service.operate({ type: 'send', workspaceId: largeConversation.workspaceId, conversationId: largeConversation.conversationId,
+    submissionId: randomUUID(), expectedRevision: largeDraft.revision, text: largeDraft.inputDraft, documents: [], attachments: largeRef }) as ExecutionSendResult
+  // No artificial send budget: the whole image reaches the vision-capable model.
+  expect(largeSend.submission.state).toBe('accepted')
+  if (!largeSend.run) throw new Error('Large submission did not start')
+  expect((await service.engine.wait(largeSend.run.runId)).status).toBe('completed')
+  expect(wire).toHaveLength(4)
+  expect(wire[3]!.raw.includes(`data:image/png;base64,${large.toString('base64')}`)).toBe(true)
 })
