@@ -10,21 +10,31 @@ export interface VisualAnalysisServiceOptions {
   observation: Pick<ObservationServicePort, 'readResource'>
 }
 
+type AnalysisResult = Awaited<ReturnType<VisualAnalysisPort['analyze']>>
+type Unavailable = Extract<AnalysisResult, { status: 'vision-unavailable' }>
+type RequestEvents = Parameters<VisualAnalysisPort['analyze']>[0]['onRequestEvent']
+
 export class VisualAnalysisService implements VisualAnalysisPort {
-  private readonly attempts = new Map<string, ReturnType<VisualAnalysisPort['analyze']>>()
+  private readonly attempts = new Map<string, Promise<AnalysisResult>>()
   private readonly unknownRuns = new Map<string, { status: 'vision-unavailable'; reason: string; outcome: 'unknown'; code: string }>()
   constructor(private readonly options: VisualAnalysisServiceOptions) {}
 
   analyze(input: { runId: string; observation: ObservationResult; question: string;
-    signal?: AbortSignal; onRequestEvent?: Parameters<VisualAnalysisPort['analyze']>[0]['onRequestEvent'] }): ReturnType<VisualAnalysisPort['analyze']> {
-    const unknown = this.unknownRuns.get(input.runId)
-    if (unknown) return Promise.resolve(unknown)
-    const key = `${input.runId}\u0000${input.observation.image.resourceId}`
-    const existing = this.attempts.get(key)
-    if (existing) return existing
-    const attempt = this.analyzeOnce(input)
-    this.attempts.set(key, attempt)
-    return attempt
+    signal?: AbortSignal; onRequestEvent?: RequestEvents }): Promise<AnalysisResult> {
+    return this.once(input.runId, input.observation.image.resourceId, () => this.analyzeOnce(input))
+  }
+
+  /** A tool returned this image message to a text-only conversation model; the frozen vision role describes it once. */
+  analyzeImage(input: { runId: string; sourceId: string; source: ModelChatMessage; question: string;
+    signal?: AbortSignal; onRequestEvent?: RequestEvents }): Promise<AnalysisResult> {
+    return this.once(input.runId, `message:${input.sourceId}`, async () => {
+      const selection = await this.visionSelection(input.runId, input.signal)
+      if ('status' in selection) return selection
+      const question = input.question.trim().slice(0, 2000)
+      return this.request(input, selection, [{ role: 'system',
+        content: '只分析附带的真实图片（来自本任务工具读取的材料或存档）。不得调用工具，不得猜测看不到的内容。用简明中文回答观察结论。' },
+      { role: 'user', content: input.source.content ?? '' }, { role: 'user', content: `问题：${question || '描述图片内容。'}` }])
+    })
   }
 
   clearRun(runId: string): void {
@@ -32,23 +42,45 @@ export class VisualAnalysisService implements VisualAnalysisPort {
     this.unknownRuns.delete(runId)
   }
 
-  private async analyzeOnce(input: { runId: string; observation: ObservationResult; question: string;
-    signal?: AbortSignal; onRequestEvent?: Parameters<VisualAnalysisPort['analyze']>[0]['onRequestEvent'] }): ReturnType<VisualAnalysisPort['analyze']> {
-    const selection = await this.options.frozenSelection(input.runId)
+  private once(runId: string, key: string, analyze: () => Promise<AnalysisResult>): Promise<AnalysisResult> {
+    const unknown = this.unknownRuns.get(runId)
+    if (unknown) return Promise.resolve(unknown)
+    const id = `${runId}\u0000${key}`
+    const existing = this.attempts.get(id)
+    if (existing) return existing
+    const attempt = analyze()
+    this.attempts.set(id, attempt)
+    return attempt
+  }
+
+  private async visionSelection(runId: string, signal?: AbortSignal): Promise<ModelSelection | Unavailable> {
+    const selection = await this.options.frozenSelection(runId)
     if (!selection) return { status: 'vision-unavailable', reason: '当前任务接受时没有配置可用的视觉模型' }
     if (selection.connection.capabilities.vision !== 'supported')
       return { status: 'vision-unavailable', reason: selection.connection.capabilities.vision === 'unknown'
         ? '当前任务冻结的视觉模型图片能力尚未验证' : '当前任务冻结的视觉模型连接不支持图片输入' }
-    if (input.signal?.aborted) return { status: 'vision-unavailable', reason: '视觉分析已取消' }
+    if (signal?.aborted) return { status: 'vision-unavailable', reason: '视觉分析已取消' }
+    return selection
+  }
+
+  private async analyzeOnce(input: { runId: string; observation: ObservationResult; question: string;
+    signal?: AbortSignal; onRequestEvent?: RequestEvents }): Promise<AnalysisResult> {
+    const selection = await this.visionSelection(input.runId, input.signal)
+    if ('status' in selection) return selection
     let resource: Awaited<ReturnType<ObservationServicePort['readResource']>>
     try { resource = await this.options.observation.readResource({ runId: input.runId, resourceId: input.observation.image.resourceId }) }
     catch { return { status: 'vision-unavailable', reason: '观察图片资源已过期或不属于本任务' } }
     const visual = observationModelMessage({ toolCallId: 'view.observe', target: input.observation.identity.locationId,
       observation: input.observation, bytes: resource.bytes, detail: 'high' })
     const question = input.question.trim().slice(0, 2000)
-    const messages: ModelChatMessage[] = [{ role: 'system',
+    return this.request(input, selection, [{ role: 'system',
       content: '只分析附带的真实页面截图。不得调用工具，不得猜测看不到的交互状态。用简明中文回答观察结论。' },
-    visual, { role: 'user', content: `问题：${question || '描述当前页面画面。'}` }]
+    visual, { role: 'user', content: `问题：${question || '描述当前页面画面。'}` }])
+  }
+
+  /** One no-tool request; an unknown outcome is remembered for the run and never resent. */
+  private async request(input: { runId: string; signal?: AbortSignal; onRequestEvent?: RequestEvents },
+    selection: ModelSelection, messages: ModelChatMessage[]): Promise<AnalysisResult> {
     const requestId = randomUUID()
     let sending = false, terminal = false
     try {

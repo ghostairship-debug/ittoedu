@@ -122,16 +122,23 @@ it('routes only current image bytes to vision while keeping the historical image
     expect(rereadRun.status).toBe('completed')
     expect(rereadRun.tools.map(tool => tool.call.name)).toEqual([name])
     expect(rereadRun.tools[0]?.result).toMatchObject({ kind: 'read' })
-    expect(requests).toHaveLength(requestStart + 2)
+    // The conversation stays on the text model; only the independent visual analysis receives the image bytes.
+    expect(requests).toHaveLength(requestStart + 3)
     expect(requests[requestStart]?.model).toBe('fixture-chat')
     const imageRequest = requests[requestStart + 1]!
     expect(imageRequest.model).toBe('fixture-vision')
     expect(imageRequest).toMatchObject({ path: '/vision/v1/chat/completions', authorization: 'Bearer vision-only' })
     expect(JSON.stringify(imageRequest.messages)).toContain(`data:image/png;base64,${red.toString('base64')}`)
+    expect(imageRequest.tools ?? []).toEqual([])
+    const continued = requests[requestStart + 2]!
+    expect(continued).toMatchObject({ model: 'fixture-chat', path: '/chat/v1/chat/completions', authorization: 'Bearer chat-only' })
     const callId = `reread-${name.replace('.', '-')}`
-    expect(imageRequest.messages.some(message => message.role === 'assistant'
+    expect(continued.messages.some(message => message.role === 'assistant'
       && message.tool_calls?.some(call => call.id === callId))).toBe(true)
-    expect(imageRequest.messages.some(message => message.role === 'tool' && message.tool_call_id === callId)).toBe(true)
+    expect(continued.messages.some(message => message.role === 'tool' && message.tool_call_id === callId)).toBe(true)
+    expect(JSON.stringify(continued.messages)).toContain('独立视觉分析')
+    expect(JSON.stringify(continued.messages)).not.toContain('data:image/')
+    expect(rereadRun.requests.map(request => request.kind ?? 'model')).toEqual(['model', 'visual-analysis', 'model'])
     expect(rereadRun.input.selection).toMatchObject({ model: 'fixture-chat' })
     expect(rereadRun.input.selectionSource?.role).toBe('conversation')
     expect(rereadRun.input.visionSelection).toMatchObject({ model: 'fixture-vision' })
