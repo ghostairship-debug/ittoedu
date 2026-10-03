@@ -1,4 +1,7 @@
+import { strFromU8, unzipSync } from 'fflate'
 import { describe, expect, it } from 'vitest'
+import { buildFlowDocx } from '../../src/renderer/export/course/flowDocx'
+import type { PublishedFlowSurface } from '../../src/shared/publishedCourseTypes'
 import { mountPublishedCredits } from '../../src/player/surfaces/publishedCredits'
 import { courseCreditLine, withCourseCreditsPage } from '../../src/renderer/export/course/courseCredits'
 import type { PublishedCourseCredit } from '../../src/shared/publishedCourseTypes'
@@ -17,6 +20,18 @@ describe('course credits', () => {
     expect(printed).toContain('CC-BY-4.0')
     expect(printed.endsWith('</body></html>')).toBe(true)
     expect(courseCreditLine(credit)).toContain('出处：https://commons.wikimedia.org/wiki/File:Earth.png')
+  })
+
+  it('closes a Flow DOCX with the credits section when there are credits', () => {
+    const surface: PublishedFlowSurface = { id: 'flow', title: '讲义', type: 'flow', surfaceLayerItems: [],
+      layout: { widthMode: 'fluid', readingWidth: 760, wideContentWidth: 1080 },
+      blocks: [{ id: 'p', type: 'paragraph', content: { inlines: [{ type: 'text', text: '正文' }] } }] }
+    const text = (bytes: Uint8Array) => strFromU8(unzipSync(bytes)['word/document.xml']!)
+    expect(text(buildFlowDocx(surface).bytes)).not.toContain('素材来源')
+    const documentXml = text(buildFlowDocx(surface, { credits: [credit] }).bytes)
+    expect(documentXml.indexOf('素材来源')).toBeGreaterThan(documentXml.indexOf('正文'))
+    expect(documentXml).toContain('<w:pStyle w:val="Heading2"/>')
+    expect(documentXml).toContain('“Earth” by NASA, CC BY 4.0（CC-BY-4.0')
   })
 
   it('shows a faint corner entry that opens and closes the list', () => {
