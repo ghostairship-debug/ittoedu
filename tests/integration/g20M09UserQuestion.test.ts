@@ -116,7 +116,9 @@ describe('M09-T04 built-in option-card questions', () => {
     const card = events.filter(event => event.itemId === callId)
     expect(card.map(event => event.data.status)).toEqual(['waiting', 'answered'])
     expect(card[1]!.data).toMatchObject({ toolName: USER_QUESTION_TOOL, answer: { choices: [1] }, question: { text: question.question } })
-    expect(events.filter(event => event.itemId === 'run-state').map(event => event.data.status)).toEqual(['running', 'waiting', 'running'])
+    const runStates = events.filter(event => event.itemId === 'run-state').map(event => event.data.status)
+    // Progress labels (e.g. 正在等待模型响应) repeat 'running'; the status itself goes running → waiting → running.
+    expect(runStates.filter((status, index) => status !== runStates[index - 1])).toEqual(['running', 'waiting', 'running'])
     expect(events.at(-1)).toMatchObject({ type: 'run.end', data: { status: 'completed' } })
   })
 

@@ -102,7 +102,12 @@ it('M08-T04 keeps good snapshots while a failed read is retried, another failed 
     input: { id: 'm08', capturedAt: 1, instruction: '', context: [], attachments: sent }, selection, tools: [],
   })
   expect(compiled.manifest.explicitAttachments).toHaveLength(2)
-  expect(compiled.serialized).toContain('GOOD ORIGINAL'); expect(compiled.serialized).toContain('BAD RECOVERED')
+  // Composer text files go as a source index the model reads on demand; the index names the kept snapshots.
+  expect(compiled.manifest.explicitAttachments.every(item => item.delivery === 'source')).toBe(true)
+  const delivered = await Promise.all(compiled.manifest.explicitAttachments.map(async item =>
+    Buffer.from((await store.readRepresentation(item.attachmentId, item.representationId)).bytes).toString()))
+  expect(delivered.sort()).toEqual(['BAD RECOVERED', 'GOOD ORIGINAL'])
+  expect(compiled.serialized).not.toContain('large.txt')
   expect(compiled.serialized).not.toContain('LLLLLLLL')
   expect(await fs.readFile(paths.get('good.txt')!, 'utf8')).toBe('GOOD ORIGINAL')
   expect(await fs.readFile(paths.get('bad.txt')!, 'utf8')).toBe('BAD RECOVERED')

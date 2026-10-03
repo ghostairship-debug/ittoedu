@@ -102,7 +102,8 @@ it.each([
   const details = card.querySelector('details')!
   act(() => { details.open = true; fireEvent(details, new Event('toggle')) })
   expect(within(card).getByText(uiFact)).toBeInTheDocument()
-  expect(within(card).getByText('未确认应用')).toBeInTheDocument()
+  // A non-document tool has no document application fact, so no application row is shown.
+  expect(within(card).queryByText('文档应用')).toBeNull()
 })
 
 it.each([false, true])('does not resend an unknown image operation under a fresh model call ID when stopped=%s', async stopped => {
