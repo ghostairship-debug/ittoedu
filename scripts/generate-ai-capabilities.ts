@@ -987,8 +987,9 @@ async function addDiscoveryArtifacts(projectRoot: string, files: Map<string, str
     }
   }
   resources.set('query-core.mjs', stripTypeScriptTypes(await fs.readFile(path.join(projectRoot, 'src/shared/courseAgentCapabilities.ts'), 'utf8')).split('\n').map(line => line.trimEnd()).join('\n'))
+  // Module comments name node_modules as linked, so a worktree whose node_modules is a junction emits the same bytes.
   const helper = await build({ entryPoints: [path.join(projectRoot, 'scripts/candidate-helper.ts')], bundle: true, write: false,
-    format: 'esm', platform: 'node', target: 'node20', minify: false, legalComments: 'none' })
+    format: 'esm', platform: 'node', target: 'node20', minify: false, legalComments: 'none', preserveSymlinks: true })
   resources.set('candidate-helper-core.mjs', helper.outputFiles[0]!.text)
   resources.set('candidate-helper.mjs', '// Run: node candidate-helper.mjs --request <request.json> --input <draft.json> [--check]\n// Draft: {summary,steps,afterCommit?}; IDs and version come from the request.\n// Precheck is not host commit. Keep native cwd; use absolute paths.\nimport "./candidate-helper-core.mjs";\n')
   resources.set('query.mjs', [

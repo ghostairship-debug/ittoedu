@@ -1163,12 +1163,15 @@ describe('AI capability manifest generation', () => {
       ],
       requiresTrustedDispatchedEvent: true,
     })
+    // Ordinary components and composition fragments are the two manifest variants.
     const component = parseFile<{
       manifestSchema: {
-        properties: {
-          schemaVersion: { const: number }
-          runtimeApiVersion: { const: number }
-        }
+        anyOf: Array<{
+          properties: {
+            schemaVersion: { const: number }
+            runtimeApiVersion: { const: number }
+          }
+        }>
       }
       publishedPlayback: {
         supportedSlices: Array<Record<string, unknown>>
@@ -1176,12 +1179,11 @@ describe('AI capability manifest generation', () => {
         notCovered: string[]
       }
     }>(generated.files, 'schemas/component-api4.json')
-    expect(component.manifestSchema.properties.schemaVersion.const).toBe(
-      COMPONENT_SCHEMA_VERSION,
-    )
-    expect(component.manifestSchema.properties.runtimeApiVersion.const).toBe(
-      COMPONENT_RUNTIME_API_VERSION,
-    )
+    expect(component.manifestSchema.anyOf).toHaveLength(2)
+    for (const variant of component.manifestSchema.anyOf) {
+      expect(variant.properties.schemaVersion.const).toBe(COMPONENT_SCHEMA_VERSION)
+      expect(variant.properties.runtimeApiVersion.const).toBe(COMPONENT_RUNTIME_API_VERSION)
+    }
     expect(component.publishedPlayback.supportedSlices).toEqual(
       parseFile<{
         components: {
