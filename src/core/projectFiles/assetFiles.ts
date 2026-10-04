@@ -1,6 +1,6 @@
 import { assetReferencePath, cssUrlReferences } from '../../shared/composition/projectReferences'
 import type { AssetSource } from '../../shared/contracts/media-v1/types'
-import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
+import type { CourseProjectDocument, FlowBlock } from '../../shared/courseProjectTypes'
 import type { DocumentResources } from '../../shared/workbench/document'
 import type { ImageAssetResource } from '../tools/imageAssetMetadata'
 import { assetFilePath, type PageNode } from './pageHtml'
@@ -42,7 +42,7 @@ export function planAssetWrite(project: CourseProjectDocument, resources: Docume
     identity: `asset:${id}`, diagnostics: [] }
 }
 
-/** Rewrite `../assets/<from>` references written in pages and the theme. */
+/** Rewrite `../assets/<from>` references written in pages, handout media and the theme. */
 function moveReferences(project: CourseProjectDocument, from: string, to: string): void {
   const rewrite = (value: string) => assetReferencePath(value) === from ? value.replace(from.slice('assets/'.length), to.slice('assets/'.length)) : value
   const css = (text: string) => {
@@ -54,7 +54,14 @@ function moveReferences(project: CourseProjectDocument, from: string, to: string
     }
     return output + text.slice(cursor)
   }
+  const sources = (blocks: FlowBlock[]) => {
+    for (const block of blocks) {
+      if (block.type === 'media' && block.source !== undefined) block.source = rewrite(block.source)
+      else if (block.type === 'section') sources(block.blocks)
+    }
+  }
   const visit = (node: PageNode) => {
+    if (node.kind === 'document') sources(node.content.blocks)
     if (node.kind !== 'element') return
     for (const [name, value] of Object.entries(node.attributes)) {
       const key = name.toLowerCase()
@@ -73,10 +80,11 @@ function moveReferences(project: CourseProjectDocument, from: string, to: string
     ...surface.type === 'slide' ? surface.scenes.flatMap(scene => scene.layerItems) : surface.type === 'spatial-2d' ? surface.world.layerItems : [],
   ])]
   for (const item of items) if (item.kind === 'composition') visit(item.content.root)
+  for (const surface of project.surfaces) if (surface.type === 'flow') sources(surface.blocks)
   if (project.theme) project.theme.css = css(project.theme.css)
 }
 
-/** Rename an asset file; pages and the theme that wrote its old path follow. */
+/** Rename an asset file; pages, handouts and the theme that wrote its old path follow. */
 export function planAssetMove(project: CourseProjectDocument, resources: DocumentResources, from: string, to: string): PlannedChange {
   const existing = assetFiles(project).find(file => file.path === from)?.meta
   if (!existing) throw new ProjectFileError('not-found', `没有这个素材：${from}`)

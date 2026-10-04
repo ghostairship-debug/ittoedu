@@ -142,7 +142,7 @@ export class ProjectFileCoordinator {
       if (name === 'project.list') {
         const input = projectFileToolSchemas[name].parse(raw)
         const snapshot = await this.host.document(runId, input.project, 'read')
-        const files = listProjectFiles(snapshot.model.project, snapshot.model.resources)
+        const files = listProjectFiles(snapshot.model.project, snapshot.model.resources, docFiles(snapshot.model.project))
         const docs = docFiles(snapshot.model.project).map(file => ({ path: file.path, type: '讲义',
           ...(file.surface.surfaceLayerItems.length ? { note: `另有 ${file.surface.surfaceLayerItems.length} 个挂靠段落的独立对象` } : {}) }))
         const after = files.reduce((last, file, index) => file.path.startsWith('slides') ? index : last, 0)

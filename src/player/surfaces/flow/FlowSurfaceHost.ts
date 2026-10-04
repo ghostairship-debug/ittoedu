@@ -108,6 +108,7 @@ import {
 import { capturePublishedSurfacePng } from '../publishedCapture'
 import { mountWebComposition, type WebCompositionMountHandle } from '../../composition/mountWebComposition'
 import { applyThemeVariables, pendingMediaElement, placeholderElement } from '../../composition/compositionHostDocument'
+import { findPublishedCourseComponent, mountCourseComponentBlock } from './courseComponentBlock'
 import { courseThemeStyleText, courseThemeVariables } from '../../../shared/contracts/design-v1/theme'
 
 type FlowRuntimeFailurePhase = 'register' | 'create' | 'lifecycle' | 'destroy'
@@ -213,7 +214,8 @@ export class FlowSurfaceHost {
   #toc: FlowRuntimeTocChrome | null = null
   #controller: TeacherControllerComponentHost | null = null
   readonly #teacherControllerSession: TeacherControllerRuntimeSessionStore
-  #componentHandles: PublishedComponentMountHandle[] = []
+  /** Body and overlay carriers the host shows, hides and destroys: components and named components. */
+  #componentHandles: Array<Pick<PublishedComponentMountHandle, 'element' | 'setVisible' | 'suspend' | 'resume' | 'destroy'>> = []
   #bodyLayoutCleanups: Array<() => void> = []
   readonly #globalInteractionVisibilityState: PublishedInteractionVisibilityState
   #interactionPort: PublishedDomInteractionSurfacePort | null = null
@@ -939,6 +941,35 @@ export class FlowSurfaceHost {
         : {}),
       onMountComponent: (handle) => {
         this.#componentHandles.push(handle)
+      },
+      mountCourseComponent: (block, figure) => {
+        const height = block.height ?? FLOW_COMPONENT_BLOCK_HEIGHT
+        const effects = this.#carrierEffects
+        const mount = () => {
+          const handle = mountCourseComponentBlock(figure, {
+            block,
+            runtime: findPublishedCourseComponent(this.#playback.courseComponents, block.name),
+            width: figure.clientWidth || surface.layout.readingWidth,
+            height,
+            mode: 'playback',
+            visible: this.#active,
+            ...(this.#playback.designTokens ? { theme: courseThemeStyleText({ designTokens: this.#playback.designTokens, theme: this.#playback.theme },
+              assetId => resolvePlaybackAssetUrl(this.#playback, assetId, this.#options.resolveAsset)) } : {}),
+            resolveAsset: assetId => resolvePlaybackAssetUrl(this.#playback, assetId, this.#options.resolveAsset),
+            session: this.#runtimeSession,
+            ...(effects.courseState ? { courseState: effects.courseState } : {}),
+            ...(effects.runtimeActions ? { actions: effects.runtimeActions } : {}),
+            reportError: error => this.#options.reportRuntimeError?.(block.id, 'lifecycle', error),
+          })
+          if (typeof ResizeObserver === 'function') {
+            const observer = new ResizeObserver(() => { if (figure.clientWidth > 0) handle.resize(figure.clientWidth, height) })
+            observer.observe(figure)
+            this.#bodyLayoutCleanups.push(() => observer.disconnect())
+          }
+          this.#componentHandles.push(handle)
+        }
+        if (this.#active) mount()
+        else this.#deferredCarrierMounts.push(mount)
       },
       onLayoutCleanup: cleanup => this.#bodyLayoutCleanups.push(cleanup),
     })
@@ -1735,6 +1766,8 @@ function renderFlowArticle(
     courseState?: CourseStateStoreContract
     componentActions?: Readonly<ComponentHostActions>
     onMountComponent?: (handle: PublishedComponentMountHandle) => void
+    /** Mounts the named component of a `course-component` block into its figure; without it the block shows a placeholder. */
+    mountCourseComponent?: (block: Extract<FlowBlock, { type: 'course-component' }>, figure: HTMLElement) => void
     onLayoutCleanup?: (cleanup: () => void) => void
     deferComponentMount?: (mount: () => void) => void
   },
@@ -1875,6 +1908,7 @@ function renderBlockDom(
     courseState?: CourseStateStoreContract
     componentActions?: Readonly<ComponentHostActions>
     onMountComponent?: (handle: PublishedComponentMountHandle) => void
+    mountCourseComponent?: (block: Extract<FlowBlock, { type: 'course-component' }>, figure: HTMLElement) => void
     onLayoutCleanup?: (cleanup: () => void) => void
     deferComponentMount?: (mount: () => void) => void
   },
@@ -2187,8 +2221,9 @@ function renderBlockDom(
         figure.style.float = block.wrap
         figure.style.margin = block.wrap === 'left' ? '0 16px 8px 0' : '0 0 8px 16px'
       } else figure.style.width = '100%'
-      figure.appendChild(placeholderElement(dom, '待填组件', block.title || block.name))
       parent.appendChild(figure)
+      if (options.mountCourseComponent) options.mountCourseComponent(block, figure)
+      else figure.appendChild(placeholderElement(dom, '待填组件', block.title || block.name))
       return
     }
   }

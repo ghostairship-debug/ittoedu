@@ -1,5 +1,6 @@
 import { analyzeCourseAssetReferences } from '../../../shared/contracts/course-project-v9/assetReferences'
 import { walkComposition } from '../../../shared/composition/content'
+import { courseComponentNameKey } from '../../../shared/composition/projectReferences'
 import type { ZodError, ZodIssue } from 'zod'
 import { componentRenderMode } from '../../../shared/componentCapabilities'
 import { componentContentSha256 } from '../../../shared/componentContentIntegrity'
@@ -13,6 +14,7 @@ import { courseProjectDocumentSchema } from '../../../shared/courseProjectSchema
 import type {
   ComponentLayerItem,
   CourseAssetMeta,
+  CourseComponentDefinition,
   CourseProjectDocument,
   CourseSurfaceDocument,
   FlowBlock,
@@ -753,6 +755,25 @@ function publishSurface(
 }
 
 /** Credit lines travel with the published assets that need attribution. */
+/** The published form of a named component, as `course-component` blocks mount it. */
+export function publishCourseComponent(definition: CourseComponentDefinition): PublishedRuntimeLayerItem['runtime'] {
+  const { source, ...data } = definition
+  return { ...cloneJson(data), code: encodePublishedCode(source) }
+}
+
+/** Definitions that blocks mount; page iframes publish theirs through their own copies. */
+function publishedCourseComponents(project: CourseProjectDocument): Pick<PublishedCourseV2Payload, 'courseComponents'> {
+  const used = new Set<string>()
+  const add = (block: FlowBlock) => { if (block.type === 'course-component') used.add(courseComponentNameKey(block.name)) }
+  for (const item of allLayerItems(project)) {
+    if (item.kind === 'composition') walkComposition(item.content.root, node => { if (node.kind === 'document') visitFlowBlocks(node.content.blocks, add) })
+  }
+  for (const surface of project.surfaces) if (surface.type === 'flow') visitFlowBlocks(surface.blocks, add)
+  const entries = Object.entries(project.components ?? {}).filter(([name]) => used.has(courseComponentNameKey(name)))
+    .sort(([left], [right]) => compareStableStrings(left, right))
+  return entries.length ? { courseComponents: Object.fromEntries(entries.map(([name, definition]) => [name, publishCourseComponent(definition)])) } : {}
+}
+
 function publishedCredits(project: CourseProjectDocument, assets: PublishedCourseV2Payload['assets']): Pick<PublishedCourseV2Payload, 'credits'> {
   const credits = Object.values(project.assets).flatMap(asset => {
     const source = asset.source
@@ -846,6 +867,7 @@ export function buildPublishedCourseV2Payload(
     ...(project.backgroundAssetId !== undefined ? { backgroundAssetId: project.backgroundAssetId } : {}),
     assets,
     components,
+    ...publishedCourseComponents(project),
     designTokens: cloneJson(project.designTokens),
     ...(project.theme ? { theme: cloneJson(project.theme) } : {}),
     ...publishedCredits(project, assets),

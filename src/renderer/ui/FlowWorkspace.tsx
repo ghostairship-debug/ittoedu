@@ -46,6 +46,7 @@ import type { ImportedImageAsset } from '../project/assetManager'
 import { WORKSPACE_MEDIA_DRAG_TYPE } from '../lessonWorkspace/workspaceMediaDrag'
 import { flowMediaDropAfterBlock } from './flow/flowMediaDropPosition'
 import { FlowPaperMedia } from './flow/FlowPaperMedia'
+import { FlowCourseComponentBlockView } from './flow/FlowCourseComponentBlockView'
 import { FlowMediaCropEditor } from './flow/FlowMediaCropEditor'
 import type { FlowMediaToolPort } from './flow/flowMediaCommands'
 import { measureFlowParagraphLayout, observeFlowParagraphLayout } from './flow/flowParagraphLayout'
@@ -613,6 +614,10 @@ export function FlowWorkspace({ documentId, toolbarContainer, view, sessionToken
               if (block.type === 'component') {
                 if ((block.wrap === 'left' || block.wrap === 'right') && host.parentElement) { host.parentElement.style.cssFloat = block.wrap; host.parentElement.style.width = '48%'; host.parentElement.style.margin = block.wrap === 'left' ? '0 16px 8px 0' : '0 0 8px 16px' }
                 root.render(<FlowComponentBlockView projectId={view.projectId} block={block} readingWidth={bodyWidth} componentPackages={componentPackages} assetUrls={assetUrls} />)
+              }
+              if (block.type === 'course-component') {
+                if ((block.wrap === 'left' || block.wrap === 'right') && host.parentElement) { host.parentElement.style.cssFloat = block.wrap; host.parentElement.style.width = '48%'; host.parentElement.style.margin = block.wrap === 'left' ? '0 16px 8px 0' : '0 0 8px 16px' }
+                root.render(<FlowCourseComponentBlockView block={block} width={bodyWidth} assetUrls={assetUrls} />)
               }
               if (block.type === 'chart') root.render(<EditableChartView id={block.id} chart={block.chart} width={bodyWidth} height={block.height}
                 onCommit={readOnly ? undefined : chart => { const receipt = run({ kind: 'patch-block', patch: { chart } }, block.id); return receipt.ok ? null : receipt.reason ?? '图表未提交' }}

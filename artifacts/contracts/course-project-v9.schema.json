@@ -8900,6 +8900,11 @@
               "minLength": 1,
               "maxLength": 240
             },
+            "source": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000
+            },
             "mediaKind": {
               "type": "string",
               "enum": [
@@ -9139,7 +9144,6 @@
           "required": [
             "id",
             "type",
-            "assetId",
             "mediaKind",
             "layout"
           ],
@@ -10981,6 +10985,46 @@
             "component",
             "props",
             "staticFallbackAssetId"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "type": {
+              "type": "string",
+              "const": "course-component"
+            },
+            "name": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 500
+            },
+            "height": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 10000
+            },
+            "wrap": {
+              "type": "string",
+              "enum": [
+                "none",
+                "left",
+                "right"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "type",
+            "name"
           ],
           "additionalProperties": false
         }

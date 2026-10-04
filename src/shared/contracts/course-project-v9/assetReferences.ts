@@ -1,6 +1,7 @@
 import { DEFAULT_TEACHER_CONTROLLER_SOURCE } from '../../defaultTeacherControllerSource'
 import { visitCompositionReferences } from '../../composition/references'
 import { walkComposition } from '../../composition/content'
+import { courseComponentNameKey } from '../../composition/projectReferences'
 import {
   getComponentPropValue,
   mergeComponentProps,
@@ -540,6 +541,11 @@ export function analyzeCourseAssetReferences(
           path: blockPath,
           blockId: block.id,
         })
+      } else if (block.type === 'course-component') {
+        // A block mounts the definition itself, so its assets go wherever the block goes.
+        const key = courseComponentNameKey(block.name)
+        const name = Object.keys(project.components ?? {}).find(candidate => courseComponentNameKey(candidate) === key)
+        if (name !== undefined) scanRuntime(project.components![name]!, { path: ['components', name], blockId: block.id })
       } else if (block.type === 'section') {
         scanFlowBlocks(block.blocks, [...blockPath, 'blocks'])
       }
