@@ -106,7 +106,7 @@ export interface DesktopAPI {
   attachments?: import('./workbench/attachmentsDesktop').AttachmentsDesktopAPI
   execution?: import('./workbench/executionDesktop').ExecutionDesktopAPI
   /** M15 renderer host publishes only already validated live authoring hits. Never model input. */
-  publishDynamicContentTargets?(input: Omit<import('../main/workbench/observation/DynamicContentObservationStore').DynamicContentPublication, 'senderId'>): Promise<boolean>
+  publishDynamicContentTargets?(input: import('./workbench/dynamicContentTargets').DynamicContentTargetsPublication): Promise<boolean>
   externalMcp?: import('./workbench/external').ExternalMcpAPI
   executionSettings?: import('./workbench/executionSettingsDesktop').ExecutionSettingsAPI
   workspaceFiles?: import('./workbench/workspaceFiles').WorkspaceFilesAPI
