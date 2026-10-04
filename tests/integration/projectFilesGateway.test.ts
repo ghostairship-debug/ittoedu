@@ -98,6 +98,40 @@ async function passingAdmission() {
 }
 
 describe('project files through the tool gateway', () => {
+  it('rebuilds formal HTML interactions in the canonical commit, binds forward files and cleans removed HTML without changing manual rules', async () => {
+    const model = blank()
+    model.project.globalInteractions.push({ id: 'manual-back', enabled: true, trigger: { type: 'presenter.command', command: 'previous' }, conditions: [],
+      actions: [{ id: 'manual-action', start: 'after-previous', delayMs: 0, action: { type: 'location.go', locationId: model.project.startLocationId } }] })
+    const f = await harness({ models: [model] })
+    const first = applied(await f.call('mapped-source', 'project.write', { path: 'slides/01-入口.html', content: '<a href="02-终点.html">下一页</a><button aria-controls="answer">切换答案</button><p id="answer" hidden>答案</p><a href="../spaces/地图.html#b">终点空间</a>' }))
+    expect(first.advisories).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining('尚不存在') })]))
+    const item = pageLayer(f.project())
+    if (item.kind !== 'composition') throw new Error('composition')
+    let button = '', answer = ''
+    walkComposition(item.content.root, node => { if (node.kind === 'element' && node.tagName === 'button') button = node.id; if (node.kind === 'element' && node.attributes.id === 'answer') answer = node.id })
+    const slide = f.project().surfaces.find(surface => surface.type === 'slide')!
+    if (slide.type !== 'slide') throw new Error('slide')
+    expect(slide.scenes[0]!.interactions).toEqual(expect.arrayContaining([expect.objectContaining({ trigger: { type: 'node.click', nodeId: `${item.layerItemId}/${button}` } })]))
+    expect(slide.scenes[0]!.interactions.flatMap(rule => rule.actions)).toEqual(expect.arrayContaining([expect.objectContaining({ action: expect.objectContaining({ type: 'node.enter', nodeId: `${item.layerItemId}/${answer}` }) })]))
+    applied(await f.call('mapped-target', 'project.write', { path: 'slides/02-终点.html', content: '<h2>终点</h2>' }))
+    applied(await f.call('mapped-space', 'project.write', { path: 'spaces/地图.html', content: '<section id="a" class="step"><h2>起点</h2></section><section id="b" class="step" data-x="1200"><a href="../slides/01-入口.html">返回入口</a></section>' }))
+    const surface = spaceFiles(f.project())[0]!.surface, target = f.project().locations.find(location => location.kind === 'spatial-camera' && location.cameraFrameId === surface.camera.frames[1]!.id)!.id
+    const rules = () => f.project().surfaces.flatMap(surface => surface.type === 'slide' ? surface.scenes.flatMap(scene => scene.interactions) : [])
+    expect(rules().flatMap(rule => rule.actions).map(step => step.action)).toContainEqual({ type: 'location.go', locationId: target })
+    expect(f.project().globalInteractions).toContainEqual(model.project.globalInteractions[0])
+    expect(f.project().globalInteractions.some(rule => rule.id.startsWith('project-html:'))).toBe(true)
+    const state = f.project().courseState.find(state => state.key.startsWith('project-html:visible:'))!
+    expect(state).toMatchObject({ valueType: 'boolean', defaultValue: false })
+    applied(await f.call('mapped-space-move', 'project.move', { from: 'spaces/地图.html', to: 'spaces/旅程.html' }))
+    expect(data<{ content: string }>(await f.call('mapped-source-read', 'project.read', { path: 'slides/01-入口.html' })).content).toContain('../spaces/旅程.html#b')
+    expect(rules().flatMap(rule => rule.actions).map(step => step.action)).toContainEqual({ type: 'location.go', locationId: target })
+    applied(await f.call('mapped-answer-remove', 'project.edit', { path: 'slides/01-入口.html', edits: [{ old: '<button aria-controls="answer">切换答案</button><p id="answer" hidden="">答案</p>', new: '' }] }))
+    expect(f.project().courseState.some(value => value.key === state.key)).toBe(false)
+    applied(await f.call('mapped-space-delete', 'project.delete', { path: 'spaces/旅程.html' }))
+    expect(rules().flatMap(rule => rule.actions).map(step => step.action)).not.toContainEqual({ type: 'location.go', locationId: target })
+    expect(f.project().globalInteractions).toEqual(model.project.globalInteractions)
+  })
+
   it('owns spatial HTML files in the canonical session, preserving human edits, identities, rename, save and delete', async () => {
     let saved = 0, bytes: Uint8Array | undefined
     const f = await harness({ deliveries: { async lookup() { return null }, async save() { saved++; bytes = driver.serialize(f.session.read().model); return { status: 'saved', path: '四季.h5lesson',
@@ -164,6 +198,7 @@ describe('project files through the tool gateway', () => {
     const empty = await harness({ admission: pass.admission })
     applied(await empty.call('controller-create', 'project.write', { path: 'controller/教师控制台.js', content: controller.runtimeSource }))
     expect(pass.count()).toBe(2)
+    expect(empty.project().componentPackages[controller.manifest.id]!.editableCopy).toBe(true)
     expect(data<{ content: string }>(await empty.call('controller-created-source', 'project.read', { path: 'controller/教师控制台.js' })).content).toBe(controller.runtimeSource)
   })
 

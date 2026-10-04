@@ -13,7 +13,7 @@ import type { PageParsePort } from './pageHtml'
 import { programsChanged, withProgramFallbacks } from './programs'
 import { assetFiles, CONTROLLER_FILE, listProjectFiles, projectFileIdentity, projectFileVersion, readProjectFile, slidePageFiles, THEME_FILE, type ProjectFileRead } from './projectFileView'
 import { parsePagePath, planPageDelete, planPageMove, planPageWrite, ProjectFileError, type PlannedChange } from './slidePages'
-import { rewriteMovedProjectLinks } from './projectNavigation'
+import { rewriteMovedProjectLinks, synchronizeProjectHtmlInteractions } from './projectNavigation'
 import { isSpacePath, planSpaceDelete, planSpaceMove, spaceFiles } from './spaceFiles'
 import { planSpaceWrite, readSpaceFile } from './spaceHtml'
 
@@ -130,13 +130,14 @@ export class ProjectFileCoordinator {
   }
 
   private async commit(runId: string, operationId: string, requestDigest: string, snapshot: CourseSnapshot, planned: PlannedChange) {
+    const diagnostics = synchronizeProjectHtmlInteractions(planned.project, (layerItemId, nodeId) => `${layerItemId}/${nodeId}`)
     // Normalize first so derived component copies count as running code and admission sees what will be committed.
     const project = normalizeCourseProject({ ...planned.project, revision: snapshot.model.project.revision, updatedAt: snapshot.model.project.updatedAt })
     const resources = withProgramFallbacks(project, planned.resources)
     const model: CourseModel = { kind: 'course-v9', project, resources }
     if (!planned.admission && !programsChanged(snapshot.model.project, project))
-      return { ...await this.host.commit(runId, operationId, requestDigest, snapshot, model), candidate: model }
-    return { ...await this.host.admit(runId, operationId, requestDigest, snapshot, model), candidate: model }
+      return { ...await this.host.commit(runId, operationId, requestDigest, snapshot, model), candidate: model, diagnostics }
+    return { ...await this.host.admit(runId, operationId, requestDigest, snapshot, model), candidate: model, diagnostics }
   }
 
   async apply(runId: string, operationId: string, requestDigest: string, snapshot: CourseSnapshot, planned: PlannedChange): Promise<ToolResult> {
@@ -151,6 +152,7 @@ export class ProjectFileCoordinator {
       advisories.push({ step: 0, code: 'html-import-warning', message: `组件未通过准入，已保存为草稿，页面显示占位与原因；修复后重新写入此文件。${reason}` })
     }
     const result = committed.result
+    advisories.push(...committed.diagnostics.map(item => ({ step: 0, code: 'html-import-warning' as const, message: item.message })))
     if (result.kind !== 'document-operation' || result.result.status !== 'applied' && result.result.status !== 'unchanged') return result
     const after = committed.model ?? committed.candidate
     const file = fileByIdentity(after, planned.identity)

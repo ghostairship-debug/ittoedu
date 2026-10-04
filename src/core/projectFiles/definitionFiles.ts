@@ -77,7 +77,7 @@ export function planControllerWrite(project: CourseProjectDocument, resources: D
   if (!current) {
     if (findGlobalTeacherController(project)) throw new ProjectFileError('missing-controller-source', '现有教师控制台源码不可读，请修复其组件包后重试')
     const pkg = createDefaultTeacherControllerPackage(), next = structuredClone(project)
-    const meta = next.componentPackages[pkg.manifest.id] ?? componentPackageMeta(pkg)
+    const meta = next.componentPackages[pkg.manifest.id] ?? componentPackageMeta(pkg, { editableCopy: true })
     const key = componentPackageKey(meta.packageId, meta.version)
     if (next.componentPackages[pkg.manifest.id] && !resources.components[key])
       throw new ProjectFileError('missing-controller-source', '工程引用的教师控制台包缺少源码，原包与独立导航已保留')
