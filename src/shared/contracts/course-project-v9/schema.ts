@@ -1020,7 +1020,8 @@ const mixedPrintEntrySchema: z.ZodType<MixedPrintEntry> = z.discriminatedUnion('
     id: stableIdSchema,
     kind: z.literal('spatial-frames'),
     surfaceId: stableIdSchema,
-    cameraFrameIds: z.array(stableIdSchema).min(1),
+    // Empty means all authored frames; a scenery-only surface has none yet.
+    cameraFrameIds: z.array(stableIdSchema),
   }).strict(),
 ])
 

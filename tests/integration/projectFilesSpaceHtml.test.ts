@@ -22,6 +22,20 @@ const space = (project: CourseProjectDocument) => spaceFiles(project)[0]!.surfac
 export const SPACE_HTML = '<!doctype html><html lang="zh"><head><style>.step { width:800px;height:450px;background:#eee } h2 { color:navy }</style></head><body><main id="impress"><!--作者注释--><section id="a" class="step" data-x="0" data-y="0"><h2>起点 &amp; 问题</h2><p class="fragment">观察</p><p class="fragment">解释</p></section><section id="b" class="step" data-x="1200" data-y="200" data-scale="2" data-rotate="30"><h2>结论</h2><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="5"></circle></svg></section><aside id="scenery" data-x="400" data-y="500" style="width:100px;height:100px">布景</aside></main></body></html>'
 
 describe('ordinary spatial HTML projection', () => {
+  it('saves a scenery-only space without inventing a stop or rejecting the rest of the course', () => {
+    const project = write(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }),
+      '<aside data-x="400" data-y="300">尚未规划镜头的布景</aside>')
+    const surface = space(project)
+    expect(surface.camera.frames).toEqual([])
+    expect(project.locations.filter(location => location.surfaceId === surface.id)).toEqual([])
+    expect(project.locations.some(location => location.id === project.startLocationId)).toBe(true)
+    const driver = new CourseV9Driver()
+    const reopened = driver.load(driver.serialize({ kind: 'course-v9', project, resources }))
+    if (reopened.kind !== 'course-v9') throw new Error('Expected course')
+    expect(readSpaceHtml(reopened.project, space(reopened.project))).toContain('尚未规划镜头的布景')
+    expect(buildPublishedCourseV2Payload({ project: reopened.project, assetFiles: {}, components: {} }).surfaces
+      .find(value => value.id === surface.id)).toBeDefined()
+  })
   it('plays the written spatial HTML with real turned/scaled composition carriers and stop fragments', async () => {
     const project = write(createBlankCourseProject({ includeDefaultController: false, controls: 'none' }), SPACE_HTML)
     const surface = space(project), item = [...spaceDocument(project, surface).objects.values()][0]!, second = [...spaceDocument(project, surface).objects.values()][1]!
