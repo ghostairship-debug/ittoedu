@@ -3,9 +3,9 @@ import { AssetHttpError, type AssetHttpPort } from './assetSourceTypes'
 
 const JSON_MAX_BYTES = 4 * 1024 * 1024
 
-/** 图库要求可识别的客户端标识（Wikimedia User-Agent 政策）；联系方式待 Owner 确认后替换。 */
+/** 图库要求可识别、带联系方式的客户端标识（Wikimedia User-Agent 政策）。 */
 export function openLibraryUserAgent(version: string): string {
-  return `GuolingWorkbench/${version} (courseware editor; https://github.com/ghostairship-debug/ittoedu)`
+  return `GuolingWorkbench/${version} (courseware editor; contact@good-learning.cn)`
 }
 
 /** 经现有公网访问层（逐跳 DNS 固定与私网拦截）访问开放图库。 */
