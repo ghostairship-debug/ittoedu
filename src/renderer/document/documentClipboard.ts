@@ -65,7 +65,8 @@ export async function prepareDocumentClipboard<T>(
         block.rows.forEach(row => { row.id = ids.get(row.id)!; row.cells = Object.fromEntries(Object.entries(row.cells).map(([key, value]) => [ids.get(key)!, value])) })
         block.merges?.forEach(merge => { merge.rowIds = merge.rowIds.map(id => ids.get(id)!); merge.columnIds = merge.columnIds.map(id => ids.get(id)!) })
       }
-      if (block.type === 'media') block.assetId = rewriteAsset(block.assetId)
+      // A copied picture travels with its asset; a pending slot stays a written reference.
+      if (block.type === 'media' && block.assetId) { block.assetId = rewriteAsset(block.assetId); delete block.source }
       if (block.type === 'component') {
         block.staticFallbackAssetId = rewriteAsset(block.staticFallbackAssetId)
         const mappings = staged.components.filter(item => item.from.packageId === block.component.packageId && item.from.version === block.component.version)

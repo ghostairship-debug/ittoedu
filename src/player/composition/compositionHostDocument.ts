@@ -121,3 +121,22 @@ export function themeHtmlDocumentRuntimes(root: Element, theme: string): void {
 export function applyThemeVariables(element: HTMLElement, variables: Readonly<Record<string, string>>): void {
   for (const [name, value] of Object.entries(variables)) element.style.setProperty(name, value)
 }
+
+/** A media block whose asset has not arrived yet: the image placeholder, or a box for audio and video. */
+export function pendingMediaElement(document: Document, block: { mediaKind: 'image' | 'audio' | 'video'; altText?: string; source?: string }): HTMLElement {
+  const description = block.altText || block.source || ''
+  if (block.mediaKind === 'image') {
+    const image = document.createElement('img')
+    image.src = pendingImageUrl(description)
+    image.alt = block.altText ?? ''
+    image.title = description
+    image.setAttribute(PENDING_ATTRIBUTE, 'asset')
+    image.style.maxWidth = '100%'
+    image.style.display = 'block'
+    return image
+  }
+  const box = placeholderElement(document, block.mediaKind === 'audio' ? '待填音频' : '待填视频', description)
+  box.setAttribute(PENDING_ATTRIBUTE, 'asset')
+  box.style.height = '96px'
+  return box
+}

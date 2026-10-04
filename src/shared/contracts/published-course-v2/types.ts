@@ -233,6 +233,8 @@ export interface PublishedCourseV2Payload {
   backgroundAssetId?: string | null
   assets: Record<string, PublishedCourseAsset>
   components: Record<string, PublishedCourseComponent>
+  /** Named components (`components/<name>.html`) that `course-component` blocks mount, keyed by their stored name. */
+  courseComponents?: Record<string, PublishedRuntimeLayerItem['runtime']>
   designTokens: ProjectDesignTokens
   theme?: CourseTheme
   /** Present when at least one asset needs attribution. */

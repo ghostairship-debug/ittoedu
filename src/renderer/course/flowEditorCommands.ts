@@ -227,7 +227,9 @@ export function replaceFlowMediaBlockAsset(
   return runMutation(document, (draft) => {
     const found = resolveFlowBlock(draft, target)
     if (found.block.type !== 'media') throw new Error('当前块不是媒体块')
+    // A chosen asset replaces the written reference the block was waiting on.
     found.block.assetId = assetId
+    delete found.block.source
     syncFlowCourseLocations(draft, target.surfaceId)
   }, '已替换素材', options)
 }
@@ -256,6 +258,7 @@ export function importAndReplaceFlowMediaBlock(
     const found = resolveFlowBlock(draft, target)
     if (found.block.type !== 'media') throw new Error('当前块不是媒体块')
     found.block.assetId = asset.id
+    delete found.block.source
     syncFlowCourseLocations(draft, target.surfaceId)
   }, '已替换素材', options)
 }

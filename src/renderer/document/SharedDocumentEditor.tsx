@@ -817,7 +817,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         openObjectMenu({ x: event.clientX, y: event.clientY }, '表格操作', [...activeTableMenu(), ...clipboardMenu()])
         return
       }
-      if (['media', 'chart', 'component', 'formula'].includes(block.type)) return
+      if (['media', 'chart', 'component', 'course-component', 'formula'].includes(block.type)) return
       event.preventDefault()
       openObjectMenu({ x: event.clientX, y: event.clientY }, '段落操作', [...activeBlockMenu(id), ...clipboardMenu()])
     }}

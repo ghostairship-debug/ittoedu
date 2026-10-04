@@ -1,4 +1,4 @@
-import type { CompositionLayerItem, CourseComponentDefinition, CourseProjectDocument, LayerItem, RuntimeLayerItem, SlideSceneDocument } from '../../shared/courseProjectTypes'
+import type { CompositionLayerItem, CourseComponentDefinition, CourseProjectDocument, FlowBlock, FlowSurfaceDocument, LayerItem, RuntimeLayerItem, SlideSceneDocument } from '../../shared/courseProjectTypes'
 import { assetReferencePath, componentReferenceName, courseComponentNameKey, cssUrlReferences } from '../../shared/composition/projectReferences'
 import type { DocumentResources } from '../../shared/workbench/document'
 import { unpackHtmlDocumentRuntimeSource } from '../../shared/runtime/htmlDocumentSource'
@@ -110,8 +110,18 @@ export function assetFiles(project: CourseProjectDocument) {
   return Object.values(project.assets).filter(meta => !hidden.has(meta.id)).map(meta => ({ path: assetFilePath(meta), meta }))
 }
 
-/** Asset slots a page or the theme refers to without a bound asset, and component names without a definition. */
-function pendingReferences(pages: readonly SlidePageFile[], project: CourseProjectDocument) {
+/** A handout file (`docs/<名称>.html`) and its Flow surface. */
+export interface HandoutFile { path: string; surface: FlowSurfaceDocument }
+
+function visitDocumentBlocks(blocks: readonly FlowBlock[], visit: (block: FlowBlock) => void): void {
+  for (const block of blocks) {
+    visit(block)
+    if (block.type === 'section') visitDocumentBlocks(block.blocks, visit)
+  }
+}
+
+/** Asset slots a page, handout or the theme refers to without a bound asset, and component names without a definition. */
+function pendingReferences(pages: readonly SlidePageFile[], project: CourseProjectDocument, docs: readonly HandoutFile[]) {
   const pending = new Map<string, { type: '待填素材' | '待写组件'; description?: string; usedBy: Set<string> }>()
   const add = (path: string, type: '待填素材' | '待写组件', usedBy: string, description?: string) => {
     const entry = pending.get(path) ?? { type, usedBy: new Set<string>() }
@@ -123,10 +133,19 @@ function pendingReferences(pages: readonly SlidePageFile[], project: CourseProje
     const path = assetReferencePath(value)
     if (path && !bound[path]) add(path, '待填素材', usedBy, description)
   }
+  const blocks = (values: readonly FlowBlock[], usedBy: string) => visitDocumentBlocks(values, block => {
+    if (block.type === 'media' && block.source !== undefined && !block.assetId) {
+      const path = assetReferencePath(block.source)
+      if (path) add(path, '待填素材', usedBy, block.altText)
+    } else if (block.type === 'course-component' && findCourseComponentName(project, block.name) === undefined) {
+      add(`components/${block.name}.html`, '待写组件', usedBy, block.title)
+    }
+  })
   for (const page of pages) {
     if (page.carrier?.kind !== 'composition') continue
     const bound = page.carrier.item.content.assets
     const visit = (node: PageNode) => {
+      if (node.kind === 'document') blocks(node.content.blocks, page.path)
       if (node.kind !== 'element') return
       const description = node.attributes.alt || node.attributes.title || node.attributes['aria-label']
       for (const [name, value] of Object.entries(node.attributes)) {
@@ -144,6 +163,7 @@ function pendingReferences(pages: readonly SlidePageFile[], project: CourseProje
     }
     visit(page.carrier.item.content.root)
   }
+  for (const doc of docs) blocks(doc.surface.blocks, doc.path)
   if (project.theme) cssUrlReferences(project.theme.css).forEach(reference => slot(reference.reference, project.theme!.assets ?? {}, THEME_FILE))
   return pending
 }
@@ -185,7 +205,7 @@ function objectSummary(scene: SlideSceneDocument, carrier: PageCarrier | undefin
   })
 }
 
-export function listProjectFiles(project: CourseProjectDocument, resources: DocumentResources): ProjectFileEntry[] {
+export function listProjectFiles(project: CourseProjectDocument, resources: DocumentResources, docs: readonly HandoutFile[] = []): ProjectFileEntry[] {
   const pages = slidePageFiles(project)
   const files: ProjectFileEntry[] = [{ path: THEME_FILE, type: '主题', ...(project.theme?.css.trim() ? {} : { note: '尚未写入' }) }]
   for (const page of pages) {
@@ -205,12 +225,17 @@ export function listProjectFiles(project: CourseProjectDocument, resources: Docu
       if (page.carrier?.kind === 'composition') visit(page.carrier.item.content.root)
       return found
     }).map(page => page.path)
+    for (const doc of docs) {
+      let found = false
+      visitDocumentBlocks(doc.surface.blocks, block => { found ||= block.type === 'course-component' && courseComponentNameKey(block.name) === key })
+      if (found) usedBy.push(doc.path)
+    }
     files.push({ path: `components/${name}.html`, type: definition.draft ? '组件草稿' : '组件',
       note: [definition.draft && `未通过准入：${definition.draft.reason}`, usedBy.length ? `引用页：${usedBy.join('、')}` : '尚无页面引用'].filter(Boolean).join('；') })
   }
   for (const { path, meta } of assetFiles(project)) files.push({ path, type: '素材',
     note: [meta.mimeType, meta.width && meta.height ? `${meta.width}×${meta.height}` : '', meta.source ? `来源：${meta.source.kind}` : ''].filter(Boolean).join('，') })
-  for (const [path, entry] of pendingReferences(pages, project)) files.push({ path, type: entry.type,
+  for (const [path, entry] of pendingReferences(pages, project, docs)) files.push({ path, type: entry.type,
     note: [entry.description && `说明：${entry.description}`, `引用：${[...entry.usedBy].join('、')}`].filter(Boolean).join('；') })
   if (controllerSource(project, resources)) files.push({ path: CONTROLLER_FILE, type: '教师控制台' })
   return files

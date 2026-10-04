@@ -21,6 +21,7 @@ import type {
 } from '../../../shared/contracts/native-v1'
 import { formulaAstToAccessibleText } from '../../../shared/formulaLinear'
 import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
+import { FLOW_COMPONENT_BLOCK_HEIGHT } from '../../../shared/flowBodyPresentation'
 import { applyTextRunStyle } from '../../../shared/textRuns'
 import type {
   FlowBlock,
@@ -215,7 +216,7 @@ function FlowMediaBlockProperties({
 }) {
   const { assets, commands } = context
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const asset = assets[block.assetId]
+  const asset = block.assetId ? assets[block.assetId] : undefined
   const sameKindAssets = Object.values(assets).filter(
     (candidate) => candidate.kind === block.mediaKind,
   )
@@ -228,6 +229,7 @@ function FlowMediaBlockProperties({
       <p className="property-hint">
         {FLOW_MEDIA_KIND_LABEL[block.mediaKind]}
         {asset?.filename ? ` · ${asset.filename}` : ''}
+        {block.source ? ` · ${block.assetId ? '引用' : '待填'} ${block.source}` : ''}
       </p>
       {block.mediaKind === 'image' || block.mediaKind === 'video' ? (
         <BufferedInput
@@ -262,12 +264,15 @@ function FlowMediaBlockProperties({
       <div data-testid="flow-replace-media">
         <SelectField
           label="替换素材"
-          value={block.assetId}
-          options={sameKindAssets.map((candidate) => ({
-            value: candidate.id,
-            label: candidate.filename || candidate.id,
-          }))}
-          onChange={(assetId) => commands.replaceMediaAsset(assetId)}
+          value={block.assetId ?? ''}
+          options={[
+            ...(block.assetId ? [] : [{ value: '', label: '（待填素材）' }]),
+            ...sameKindAssets.map((candidate) => ({
+              value: candidate.id,
+              label: candidate.filename || candidate.id,
+            })),
+          ]}
+          onChange={(assetId) => { if (assetId) commands.replaceMediaAsset(assetId) }}
         />
       </div>
       <input
@@ -486,6 +491,28 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
               />
             </div>
           </>
+        ) : null}
+        {block.type === 'course-component' ? (
+          <div data-testid="flow-course-component-properties">
+            <p className="property-hint">组件：components/{block.name}.html</p>
+            <BufferedInput label="标题" value={block.title ?? ''} onCommit={(title) => commands.patchSelectedBlock({ title })} />
+            <BufferedInput label="高度" type="number" min={80} max={4000} value={block.height ?? FLOW_COMPONENT_BLOCK_HEIGHT}
+              onCommit={(value) => { const height = Number(value); if (height >= 80 && height <= 4000) commands.patchSelectedBlock({ height }) }} />
+            <SelectField<'none' | 'left' | 'right'>
+              label="文字环绕"
+              value={block.wrap ?? 'none'}
+              options={[
+                { value: 'none', label: '不环绕（独占一行）' },
+                { value: 'left', label: '居左环绕' },
+                { value: 'right', label: '居右环绕' },
+              ]}
+              onChange={(wrap) => commands.patchSelectedBlock({ wrap })}
+            />
+            <div className="property-button-row" style={{ marginTop: 8 }}>
+              <button type="button" className="secondary-button" onClick={() => commands.moveSelectedBlock('up')}>上移</button>
+              <button type="button" className="secondary-button" onClick={() => commands.moveSelectedBlock('down')}>下移</button>
+            </div>
+          </div>
         ) : null}
         {block.type === 'list' ? (
           <ToggleRow
