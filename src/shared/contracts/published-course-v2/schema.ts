@@ -1,3 +1,4 @@
+import { compositionElementNodeIds } from '../../composition/content'
 import { documentContentSchema, walkDocument } from '../../document/content'
 import { createWebCompositionSchema } from '../../composition/schema'
 import { visitCompositionReferences } from '../../composition/references'
@@ -724,15 +725,20 @@ function validatePublishedCourseSemantics(
   }
 
   const knownLayerItemIds = new Set<string>()
-  published.globalLayerItems.forEach((entry) => knownLayerItemIds.add(entry.item.layerItemId))
+  const knownCompositionNodeIds = new Set<string>()
+  const addKnownItem = (item: { layerItemId: string; kind: string; content?: unknown }) => {
+    knownLayerItemIds.add(item.layerItemId)
+    compositionElementNodeIds(item).forEach(id => knownCompositionNodeIds.add(id))
+  }
+  published.globalLayerItems.forEach((entry) => addKnownItem(entry.item))
   published.surfaces.forEach((surface) => {
-    surface.surfaceLayerItems.forEach((entry) => knownLayerItemIds.add(entry.item.layerItemId))
+    surface.surfaceLayerItems.forEach((entry) => addKnownItem(entry.item))
     if (surface.type === 'slide') {
       surface.scenes.forEach((scene) => {
-        scene.layerItems.forEach((item) => knownLayerItemIds.add(item.layerItemId))
+        scene.layerItems.forEach((item) => addKnownItem(item))
       })
     } else if (surface.type === 'spatial-2d') {
-      surface.world.layerItems.forEach((item) => knownLayerItemIds.add(item.layerItemId))
+      surface.world.layerItems.forEach((item) => addKnownItem(item))
     }
   })
   const checkInteractionReferences = (
@@ -743,7 +749,7 @@ function validatePublishedCourseSemantics(
   ): void => {
     interactions.forEach((rule, ruleIndex) => {
       const checkLayerItem = (itemId: string, referencePath: PublishedSemanticPath): void => {
-        const known = localLayerItemIds?.has(itemId) || knownLayerItemIds.has(itemId)
+        const known = localLayerItemIds?.has(itemId) || knownLayerItemIds.has(itemId) || knownCompositionNodeIds.has(itemId)
         if (!known) {
           addPublishedSemanticIssue(
             context,

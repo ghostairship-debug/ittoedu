@@ -891,6 +891,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
   #interactionDestroyStarted = false
   #audioDestroyStarted = false
   #interactionNavigationRunId: number | undefined
+  #presentationOnlyNavigation = false
   #navigationGuardBypassTargetId: string | null = null
   /** A guard message shown for the request in progress; the key's generic rejection does not replace it. */
   #guardFeedbackShown = false
@@ -1108,7 +1109,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     this.#scenePicker?.close(false)
     if (transition) {
       this.interactionRuns.beginNavigation(this.#interactionNavigationRunId, transition.current?.locationId, transition.next.locationId)
-      this.#audioEvents.emit('scene:leave', { sceneId: transition.current?.locationId })
+      if (!this.#presentationOnlyNavigation) this.#audioEvents.emit('scene:leave', { sceneId: transition.current?.locationId })
       locationPreparedHost(this.#hostsById.get(transition.next.surfaceId))
         ?.preparePublishedLocation(transition.next.locationId, transition.forced)
     }
@@ -1142,7 +1143,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     this.clearNavigationFeedback()
     this.syncActiveSlot(state.surfaceId)
     this.movePublishedGlobalRuntimes(state.surfaceId)
-    this.#audioEvents.emit('scene:enter', { sceneId: state.locationId })
+    if (!this.#presentationOnlyNavigation) this.#audioEvents.emit('scene:enter', { sceneId: state.locationId })
     this.#mountInteractionControllers()
   }
 
@@ -1152,8 +1153,11 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     const parentRunId = this.#interactionNavigationRunId
     this.#interactionNavigationRunId = undefined
     const matched = this.interactionRuns.settleNavigation(parentRunId, state.locationId, this.readObservationState().stateId)
-    this.#globalInteractionController?.enterScene(matched ? parentRunId : undefined)
-    this.#localInteractionController?.enterScene(matched ? parentRunId : undefined)
+    if (!this.#presentationOnlyNavigation) {
+      this.#globalInteractionController?.enterScene(matched ? parentRunId : undefined)
+      this.#localInteractionController?.enterScene(matched ? parentRunId : undefined)
+    }
+    this.#presentationOnlyNavigation = false
   }
 
   override reportPresenterFeedback(message: string): void {
@@ -1435,6 +1439,10 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     if (!this.#claimTerminalNavigation(signal)) return false
     const runId = this.interactionRuns.prepareNavigation(signal, current.locationId, target.id, step.stateId)
     this.#interactionNavigationRunId = runId
+    // A different step in the current page keeps the page's interactions and audio.
+    // Explicit replay still enters the scene again, even when it targets another state.
+    this.#presentationOnlyNavigation = current.locationId === target.id && step.stateId !== undefined
+      && step.stateId !== this.readObservationState().stateId && options.force !== true
     if (options.bypassGuards) this.#navigationGuardBypassTargetId = target.id
     try {
       await this.navigator.goToLocation(target.id, {
@@ -1456,6 +1464,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
       throw error
     } finally {
       this.#navigationGuardBypassTargetId = null
+      this.#presentationOnlyNavigation = false
     }
   }
 

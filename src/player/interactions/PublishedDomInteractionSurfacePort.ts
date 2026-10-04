@@ -186,8 +186,8 @@ function elementStyle(element: HTMLElement | SVGElement): CSSStyleDeclaration {
 
 /**
  * Reusable DOM implementation of the Published controller's surface port.
- * One stable bubble listener delegates into renderer-supplied node handles;
- * no listener prevents default browser behavior or changes propagation.
+ * Bubble listeners delegate into renderer-supplied node handles, including the
+ * same-origin composition documents. Only a mapped link consumes its browser navigation.
  */
 export class PublishedDomInteractionSurfacePort implements PublishedInteractionSurfacePort {
   readonly localVisibilityState: PublishedInteractionVisibilityState
@@ -198,6 +198,7 @@ export class PublishedDomInteractionSurfacePort implements PublishedInteractionS
   readonly #activeMotions = new Map<string, ActiveMotion>()
   readonly #stateDisposers: Array<() => void> = []
   readonly #onRootClick = (event: Event): void => this.#delegateClick(event)
+  readonly #nestedDocuments = new Set<Document>()
   readonly #keyboardElements = new Map<HTMLElement | SVGElement, { tabindex: string | null; role: string | null }>()
   readonly #onRootKey = (event: KeyboardEvent): void => {
     if (!this.active || event.defaultPrevented || event.repeat || event.isComposing || (event.key !== 'Enter' && event.key !== ' ')) return
@@ -251,6 +252,7 @@ export class PublishedDomInteractionSurfacePort implements PublishedInteractionS
       this.#handles.set(handle.nodeId, handle)
     }
     this.#refreshStateSubscriptions()
+    this.#refreshNestedDocuments()
     this.#applyAllVisibility()
   }
 
@@ -329,6 +331,11 @@ export class PublishedDomInteractionSurfacePort implements PublishedInteractionS
     this.#cancelMotions()
     this.#root.removeEventListener('click', this.#onRootClick)
     this.#root.removeEventListener('keydown', this.#onRootKey)
+    for (const doc of this.#nestedDocuments) {
+      doc.removeEventListener('click', this.#onRootClick)
+      doc.removeEventListener('keydown', this.#onRootKey as EventListener)
+    }
+    this.#nestedDocuments.clear()
     this.#restoreKeyboardElements()
     for (const dispose of this.#stateDisposers.splice(0)) dispose()
     this.#clicks.clear()
@@ -376,28 +383,57 @@ export class PublishedDomInteractionSurfacePort implements PublishedInteractionS
     }
   }
 
+  #containsElement(element: Element): boolean {
+    let current = element
+    try {
+      while (current.ownerDocument !== this.#root.ownerDocument) {
+        const frame = current.ownerDocument.defaultView?.frameElement
+        if (!frame) return false
+        current = frame
+      }
+      return this.#root.contains(current)
+    } catch { return false }
+  }
+
+  #refreshNestedDocuments(): void {
+    const next = new Set<Document>()
+    for (const handle of this.#handles.values()) {
+      const element = handle.resolveElement()
+      if (element && element.ownerDocument !== this.#root.ownerDocument && this.#containsElement(element)) next.add(element.ownerDocument)
+    }
+    for (const doc of this.#nestedDocuments) if (!next.has(doc)) {
+      doc.removeEventListener('click', this.#onRootClick)
+      doc.removeEventListener('keydown', this.#onRootKey as EventListener)
+    }
+    for (const doc of next) if (!this.#nestedDocuments.has(doc)) {
+      doc.addEventListener('click', this.#onRootClick)
+      doc.addEventListener('keydown', this.#onRootKey as EventListener)
+    }
+    this.#nestedDocuments.clear()
+    for (const doc of next) this.#nestedDocuments.add(doc)
+  }
+
   #delegateClick(event: Event): void {
     if (!this.active) return
-    const ElementConstructor = this.#root.ownerDocument.defaultView?.Element
-    let candidate = ElementConstructor && event.target instanceof ElementConstructor
-      ? event.target as Element
-      : null
-    while (candidate && this.#root.contains(candidate)) {
+    let candidate = event.target && (event.target as Node).nodeType === 1 ? event.target as Element : null
+    while (candidate && this.#containsElement(candidate)) {
       const matched = this.#handleForElement(candidate)
       if (matched) {
         if (!this.#isAvailable(matched) || !this.#canBindClick(matched)) return
         const state = matched.visibilityState ?? this.localVisibilityState
         if (!state.resolve(matched.nodeId, this.#authoredVisible(matched))) return
         const registrations = this.#clicks.get(matched.nodeId)
-        if (!registrations?.size) return
-        for (const registration of [...registrations]) {
-          try {
-            registration.listener()
-          } catch {
-            // A controller callback is isolated from browser event dispatch.
+        if (registrations?.size) {
+          if (candidate.tagName.toLowerCase() === 'a') event.preventDefault()
+          for (const registration of [...registrations]) {
+            try {
+              registration.listener()
+            } catch {
+              // A controller callback is isolated from browser event dispatch.
+            }
           }
+          return
         }
-        return
       }
       if (candidate === this.#root) return
       candidate = candidate.parentElement
@@ -424,7 +460,7 @@ export class PublishedDomInteractionSurfacePort implements PublishedInteractionS
     if (purpose === 'motion' && !this.#canRunMotion(handle)) return null
     try {
       const element = handle.resolveElement()
-      if (!element || !this.#root.contains(element)) return null
+      if (!element || !this.#containsElement(element)) return null
       return element
     } catch {
       return null
