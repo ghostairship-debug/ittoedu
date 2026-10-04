@@ -1,15 +1,20 @@
 import type { AssetSource } from '../../../shared/contracts/media-v1'
 
-/** 默认只采用 CC0、公有领域和 CC BY；CC BY-SA 须教师同意；NC、ND 与授权不明一律排除。 */
-export type OpenLicenseCode = 'cc0' | 'pd' | 'by' | 'by-sa'
+/** 默认只采用 CC0、公有领域、CC BY 与图库自身的宽松授权；CC BY-SA 须教师同意；NC、ND 与授权不明一律排除。 */
+export type OpenLicenseCode = 'cc0' | 'pd' | 'by' | 'by-sa' | 'pixabay'
 
 export interface OpenLicense {
   code: OpenLicenseCode
   /** 授权简称，例如 “CC BY 4.0”“CC0 1.0”“公有领域”。 */
   id: string
   url?: string
+  /** 软件是否生成署名进入署名清单。 */
   attributionRequired: boolean
 }
+
+/** Pixabay Content License：不强制署名，但照常生成署名进入署名清单。 */
+export const pixabayLicense: OpenLicense = { code: 'pixabay', id: 'Pixabay Content License',
+  url: 'https://pixabay.com/service/license-summary/', attributionRequired: true }
 
 export interface LicensePolicy { allowShareAlike: boolean }
 
