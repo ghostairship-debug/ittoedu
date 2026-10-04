@@ -29,6 +29,7 @@ type FlowFormulaBlock = FlowBlockBase & {
 - `TextRunStyle` 的颜色、字体、字号、基线、粗斜体、下划线、删除线、强调/着重与高亮等有效语义保留；段落级样式仍在对应块。此处替换文字结构，不删减样式工具。
 - 行内代码使用文字原子的 `code:true`，链接使用同一原子的 `link`，相邻同地址片段可序列化为一个 Markdown 链接；禁止嵌套链接。代码围栏对应严格的 `FlowCodeBlock = FlowBlockBase & {type:'code'; code:string; language?:string}`，纯文本、不执行，保留换行；作者、Player 和 Word 分别以代码样式呈现。这些是源文既定代码/链接能力的明确存储，不借机增加代码执行平台。
 - 图表数据/配置、媒体布局、组件参数/包、章节嵌套、导航、浮层和资源字段沿各自正式 owner；不复制进正文编辑器库私有 JSON。正文中的复杂对象仍是正式 FlowBlock。
+- 媒体块 `media` 的 `assetId` 与 `source` 至少有一个：`source` 是原样保存的 `assets/...` 引用（待填槽位），软件按 `path === 'assets/<文件>'` 把 `assetId` 绑定到种类相同的现有素材、素材离开时去掉绑定；无 `source` 时 `assetId` 必填。2026-10-04 起新增 `course-component` 块 `{type:'course-component'; name; title?; height?; wrap?}`，按名称引用工程级命名组件（`project.components`，见 COURSE_PROJECT_V9 §8.2），定义不存在时显示 `title` 占位；现有 Component API 4 的 `component` 块不变。讲义文件（`docs/<名称>.html`）中二者分别写作 `<img src="../assets/…">` 与 `<iframe src="../components/<名称>.html" title height data-wrap>`，读写往返零改动。
 - V9 与 Published V2 同步使用新 Flow 定义并 `.strict()`。生产器、命令、保存/恢复、AI 工具/能力说明、Builder、Player、导出和受影响 fixtures 同批接到新结构；遇到旧字段或旧 AST 明确失败，不做猜测或静默剥离。
 - 046 先形成独立合同、共用纯类型/codec 与样例；正式 V9/Published 根类型、Schema 和工厂的切换由 048 连同直接 producer/consumer 作为可运行纵切交付，不能先把根 Schema 改坏后等待其他节点。新 consumer 闭合前不开放写入口；内部样例、能力生成物随新合同更新，不为历史 fixture 保留旧模型分支。
 - 目录、导航标签、搜索和观察使用唯一只读纯文本投影（文字输出 text、数学输出 accessibleText），不把投影回写为正文。公式改动同步更新默认可访问说明，人工明确编辑说明时保留该结果。
