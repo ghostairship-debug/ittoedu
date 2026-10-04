@@ -1,9 +1,11 @@
 // @vitest-environment node
-import { createServer as createHttpServer, type Server } from 'node:http'
+import { createServer as createHttpServer, request as httpRequest, type Server } from 'node:http'
 import { connect as netConnect, createServer as createNetServer, type AddressInfo, type Server as NetServer, type Socket } from 'node:net'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { PublicBrowserProxy } from '../../src/main/workbench/network/PublicBrowserProxy'
+import { resolvePublicDnsOverHttps } from '../../src/main/workbench/network/publicDnsOverHttps'
 import { fetchPublicResource } from '../../src/main/workbench/network/publicHttp'
-import { openProxyTunnel, parseProxyList, type ProxyRoute } from '../../src/main/workbench/network/systemProxy'
+import { openProxyTunnel, parseProxyList, setSystemProxyResolver, type ProxyRoute } from '../../src/main/workbench/network/systemProxy'
 
 const servers: (Server | NetServer)[] = []
 const sockets = new Set<Socket>()
@@ -135,5 +137,64 @@ describe('system proxy for public HTTP', () => {
     await expect(pending).rejects.toThrow('任务已停止')
     await expect(openProxyTunnel({ kind: 'http', host: '127.0.0.1', port: silent.port }, { host: 'public.example', port: 443 }, { timeoutMs: 50 }))
       .rejects.toThrow('连接超时')
+  })
+
+  it('sends the browser egress and the public DNS resolver through the system proxy after the same checks', async () => {
+    const echo = await listen(createNetServer(socket => socket.pipe(socket))), target = await site()
+    const tunnels = await connectProxy(echo.port), pages = await connectProxy(target.port)
+    let dialed = 0
+    const egress = (route: ProxyRoute) => new PublicBrowserProxy({ resolve: publicAnswer, proxy: async () => route,
+      connect: () => { dialed++; throw new Error('a proxied run must not dial directly') } })
+    const browser = egress(tunnels.route), address = new URL(await browser.start())
+    const tunnel = (authority: string) => new Promise<{ status: number; socket: Socket }>((resolve, reject) => {
+      const request = httpRequest({ hostname: address.hostname, port: Number(address.port), method: 'CONNECT', path: authority })
+      request.once('connect', (response, socket) => { sockets.add(socket); resolve({ status: response.statusCode ?? 0, socket }) })
+      request.once('error', reject)
+      request.end()
+    })
+    try {
+      const opened = await tunnel('public.example:443')
+      expect(opened.status).toBe(200)
+      opened.socket.write('ping')
+      expect(await new Promise(resolve => opened.socket.once('data', chunk => resolve(chunk.toString())))).toBe('ping')
+      expect((await tunnel('10.0.0.1:443')).status).toBe(403)
+      expect(tunnels.requested).toEqual(['public.example:443'])
+    } finally { await browser.stop() }
+
+    const forwarding = egress(pages.route), forwardAddress = new URL(await forwarding.start())
+    try {
+      const body = await new Promise<string>((resolve, reject) => {
+        const request = httpRequest({ hostname: forwardAddress.hostname, port: Number(forwardAddress.port), path: 'http://public.example/page',
+          headers: { host: 'public.example' } }, response => { let text = ''; response.on('data', chunk => { text += chunk }); response.on('end', () => resolve(text)) })
+        request.once('error', reject)
+        request.end()
+      })
+      expect(body).toBe('{"ok":true}')
+      expect(pages.requested).toEqual(['public.example:80'])
+      expect(target.seen).toEqual([{ host: 'public.example', url: '/page' }])
+    } finally { await forwarding.stop() }
+
+    const closed = await listen(createNetServer())
+    const port = closed.port
+    await new Promise<void>(resolve => closed.close(() => resolve()))
+    servers.splice(servers.indexOf(closed), 1)
+    const unreachable = egress({ kind: 'http', host: '127.0.0.1', port }), unreachableAddress = new URL(await unreachable.start())
+    try {
+      const failed = await new Promise<{ status: number; socket: Socket }>((resolve, reject) => {
+        const request = httpRequest({ hostname: unreachableAddress.hostname, port: Number(unreachableAddress.port), method: 'CONNECT', path: 'public.example:443' })
+        request.once('connect', (response, socket) => { sockets.add(socket); resolve({ status: response.statusCode ?? 0, socket }) })
+        request.once('error', reject)
+        request.end()
+      })
+      expect(failed.status).toBe(502)
+      expect(unreachable.stats()).toEqual({ deniedRequests: 0, allowedRequests: 1 })
+    } finally { await unreachable.stop() }
+    expect(dialed).toBe(0)
+
+    const refusing = await connectProxy(echo.port, true)
+    setSystemProxyResolver(async () => refusing.route)
+    try { await expect(resolvePublicDnsOverHttps('example.com')).rejects.toThrow('系统代理拒绝连接 cloudflare-dns.com:443') }
+    finally { setSystemProxyResolver(async () => ({ kind: 'direct' })) }
+    await vi.waitFor(() => expect(refusing.requested).toEqual(['cloudflare-dns.com:443', 'cloudflare-dns.com:443']))
   })
 })
