@@ -6,6 +6,7 @@ import { spatialGraphValuesEqual } from '../tools/spatialPath'
 import { fileStem } from './projectFileView'
 import { ProjectFileError, type PlannedChange } from './slidePages'
 import type { PageDiagnostic } from './pageHtml'
+import { compositionElementNodeIds } from '../../shared/composition/content'
 
 const SPACE_PATH = /^spaces\/([^/]+)\.html$/
 export interface SpaceFile { path: string; surface: SpatialSurfaceDocument }
@@ -54,10 +55,12 @@ export function planSpaceContentWrite(input: {
   }
   const itemIds = new Set(input.layerItems.map(item => item.layerItemId))
   const removedItems = new Set(surface.world.layerItems.filter(item => !itemIds.has(item.layerItemId)).map(item => item.layerItemId))
+  const nextNodes = new Set(input.layerItems.flatMap(compositionElementNodeIds))
+  const removedNodes = surface.world.layerItems.flatMap(compositionElementNodeIds).filter(id => !nextNodes.has(id))
   const frameIds = new Set(input.frames.map(frame => frame.id))
   const removed = project.locations.filter(location => location.kind === 'spatial-camera' && location.surfaceId === surface.id && !frameIds.has(location.cameraFrameId))
   const beforeLocations = project.locations.filter(location => location.surfaceId === surface.id)
-  surface.world.layerItems = structuredClone(input.layerItems)
+  surface.world.layerItems = structuredClone(input.layerItems).sort((a, b) => a.order - b.order)
   surface.camera.frames = structuredClone(input.frames)
   surface.world.paths = surface.world.paths?.flatMap(path => {
     const layerItemIds = path.layerItemIds.filter(id => itemIds.has(id))
@@ -76,7 +79,7 @@ export function planSpaceContentWrite(input: {
   project.locations = project.surfaces.flatMap(value => value.id === surface.id ? locations : project.locations.filter(location => location.surfaceId === value.id))
   if (!project.locations.some(location => location.id === project.startLocationId)) project.startLocationId = locations[0]?.id ?? project.locations[0]!.id
   repairRemovedCourseReferences(project, { removedLocationIds: new Set(removed.map(location => location.id)),
-    removedControllerTargetIds: controllerTargetIdsForLocations(removed), removedLayerItemIds: removedItems })
+    removedControllerTargetIds: controllerTargetIdsForLocations(removed), removedLayerItemIds: new Set([...removedItems, ...removedNodes]) })
   const printEntry = project.mixedPrintPlan?.entries.find(entry => entry.kind === 'spatial-frames' && entry.surfaceId === surface.id)
   if (printEntry?.kind === 'spatial-frames') printEntry.cameraFrameIds = input.frames.map(frame => frame.id)
   return { project, resources: input.resources, identity: `space:${surface.id}`, diagnostics: input.diagnostics }
@@ -100,7 +103,11 @@ export function planSpaceMove(project: CourseProjectDocument, resources: Documen
 export function planSpaceDelete(project: CourseProjectDocument, resources: DocumentResources, path: string): PlannedChange {
   const file = spaceFiles(project).find(value => value.path === path)
   if (!file) throw new ProjectFileError('not-found', `没有这个空间：${path}`)
-  const deleted = deleteCourseSurface(project, file.surface.id)
+  const prepared = structuredClone(project)
+  repairRemovedCourseReferences(prepared, { removedLocationIds: new Set(), removedLayerItemIds: new Set([
+    ...file.surface.world.layerItems, ...file.surface.surfaceLayerItems.map(entry => entry.item),
+  ].flatMap(compositionElementNodeIds)) })
+  const deleted = deleteCourseSurface(prepared, file.surface.id)
   if (!deleted.ok) throw new ProjectFileError('delete-refused', deleted.reason)
   return { project: deleted.project, resources, identity: `space:${file.surface.id}`, diagnostics: [] }
 }

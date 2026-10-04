@@ -284,14 +284,45 @@ export function parsePageHtml(html: string, options: {
     return { ...node, id: prior.id, attributes, children }
   }
   const align = (node: ElementNode, prior: ElementNode): PageNode[] => {
-    const pairs = commonPairs(node.children.map(child => next.signature(child, node)), prior.children.map(child => before.signature(child, prior)))
     const result: PageNode[] = new Array(node.children.length)
+    const claimed = new Set<number>()
+    const authorId = (child: PageNode) => child.kind === 'element' ? child.attributes.id : undefined
+    const counts = new Map<string, number>(), oldById = new Map<string, { value: PageNode; index: number }[]>()
+    node.children.forEach(child => { const id = authorId(child); if (id) counts.set(id, (counts.get(id) ?? 0) + 1) })
+    prior.children.forEach((value, index) => {
+      const id = authorId(value)
+      if (id) { const candidates = oldById.get(id) ?? []; candidates.push({ value, index }); oldById.set(id, candidates) }
+    })
+    // Ordinary HTML ids are author anchors, not software bookkeeping. A moved anchor keeps its object identity.
+    node.children.forEach((child, index) => {
+      const id = authorId(child)
+      if (!id || counts.get(id) !== 1) return
+      const candidates = (oldById.get(id) ?? []).filter(({ value }) => shapeOf(value) === shapeOf(child))
+      if (candidates.length !== 1) return
+      const old = candidates[0]!
+      result[index] = next.signature(child, node) === before.signature(old.value, prior) ? old.value : adopt(child, old.value)
+      claimed.add(old.index)
+    })
+    const nextSignatures = node.children.map(child => next.signature(child, node))
+    const oldSignatures = prior.children.map(child => before.signature(child, prior))
+    const nextCounts = new Map<string, number>(), oldMatches = new Map<string, { count: number; index: number }>()
+    nextSignatures.forEach(signature => nextCounts.set(signature, (nextCounts.get(signature) ?? 0) + 1))
+    oldSignatures.forEach((signature, index) => oldMatches.set(signature, { count: (oldMatches.get(signature)?.count ?? 0) + 1, index }))
+    // Unique unchanged subtrees survive movement even when the author supplied no HTML id.
+    nextSignatures.forEach((signature, index) => {
+      const match = oldMatches.get(signature)
+      if (result[index] !== undefined || nextCounts.get(signature) !== 1 || match?.count !== 1 || claimed.has(match.index)) return
+      result[index] = prior.children[match.index]!; claimed.add(match.index)
+    })
+    const pairs = commonPairs(nextSignatures, oldSignatures)
+      .filter(([i, j]) => result[i] === undefined && !claimed.has(j))
     for (const [i, j] of pairs) result[i] = prior.children[j]!
     const bounds: [number, number][] = [[-1, -1], ...pairs, [node.children.length, prior.children.length]]
     for (let gap = 0; gap + 1 < bounds.length; gap++) {
       const [fromI, fromJ] = bounds[gap]!, [toI, toJ] = bounds[gap + 1]!
-      const open = prior.children.slice(fromJ + 1, toJ)
+      const open = prior.children.slice(fromJ + 1, toJ).filter((_value, index) => !claimed.has(fromJ + 1 + index))
       for (let i = fromI + 1; i < toI; i++) {
+        if (result[i] !== undefined) continue
         const child = node.children[i]!
         const match = open.findIndex(candidate => shapeOf(candidate) === shapeOf(child))
         result[i] = match >= 0 ? adopt(child, open.splice(match, 1)[0]!) : child

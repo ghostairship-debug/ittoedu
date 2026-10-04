@@ -17,6 +17,9 @@ import { findCompositionNode, walkComposition } from '../../src/shared/compositi
 import type { BuildAdmissionPort } from '../../src/shared/workbench/build'
 import type { DocumentModel } from '../../src/shared/workbench/document'
 import type { ToolResult, ToolTarget } from '../../src/shared/workbench/tools'
+import { spaceFiles } from '../../src/core/projectFiles/spaceFiles'
+import { spaceDocument } from '../../src/core/projectFiles/spaceHtml'
+import { projectFileLocationId } from '../../src/core/projectFiles/ProjectFileCoordinator'
 
 type CourseModel = Extract<DocumentModel, { kind: 'course-v9' }>
 const driver = new CourseV9Driver()
@@ -95,6 +98,110 @@ async function passingAdmission() {
 }
 
 describe('project files through the tool gateway', () => {
+  it('rebuilds formal HTML interactions in the canonical commit, binds forward files and cleans removed HTML without changing manual rules', async () => {
+    const model = blank()
+    model.project.globalInteractions.push({ id: 'manual-back', enabled: true, trigger: { type: 'presenter.command', command: 'previous' }, conditions: [],
+      actions: [{ id: 'manual-action', start: 'after-previous', delayMs: 0, action: { type: 'location.go', locationId: model.project.startLocationId } }] })
+    const f = await harness({ models: [model] })
+    const first = applied(await f.call('mapped-source', 'project.write', { path: 'slides/01-入口.html', content: '<a href="02-终点.html">下一页</a><button aria-controls="answer">切换答案</button><p id="answer" hidden>答案</p><a href="../spaces/地图.html#b">终点空间</a>' }))
+    expect(first.advisories).toEqual(expect.arrayContaining([expect.objectContaining({ message: expect.stringContaining('尚不存在') })]))
+    const item = pageLayer(f.project())
+    if (item.kind !== 'composition') throw new Error('composition')
+    let button = '', answer = ''
+    walkComposition(item.content.root, node => { if (node.kind === 'element' && node.tagName === 'button') button = node.id; if (node.kind === 'element' && node.attributes.id === 'answer') answer = node.id })
+    const slide = f.project().surfaces.find(surface => surface.type === 'slide')!
+    if (slide.type !== 'slide') throw new Error('slide')
+    expect(slide.scenes[0]!.interactions).toEqual(expect.arrayContaining([expect.objectContaining({ trigger: { type: 'node.click', nodeId: `${item.layerItemId}/${button}` } })]))
+    expect(slide.scenes[0]!.interactions.flatMap(rule => rule.actions)).toEqual(expect.arrayContaining([expect.objectContaining({ action: expect.objectContaining({ type: 'node.enter', nodeId: `${item.layerItemId}/${answer}` }) })]))
+    applied(await f.call('mapped-target', 'project.write', { path: 'slides/02-终点.html', content: '<h2>终点</h2>' }))
+    applied(await f.call('mapped-space', 'project.write', { path: 'spaces/地图.html', content: '<section id="a" class="step"><h2>起点</h2></section><section id="b" class="step" data-x="1200"><a href="../slides/01-入口.html">返回入口</a></section>' }))
+    const surface = spaceFiles(f.project())[0]!.surface, target = f.project().locations.find(location => location.kind === 'spatial-camera' && location.cameraFrameId === surface.camera.frames[1]!.id)!.id
+    const rules = () => f.project().surfaces.flatMap(surface => surface.type === 'slide' ? surface.scenes.flatMap(scene => scene.interactions) : [])
+    expect(rules().flatMap(rule => rule.actions).map(step => step.action)).toContainEqual({ type: 'location.go', locationId: target })
+    expect(f.project().globalInteractions).toContainEqual(model.project.globalInteractions[0])
+    expect(f.project().globalInteractions.some(rule => rule.id.startsWith('project-html:'))).toBe(true)
+    const state = f.project().courseState.find(state => state.key.startsWith('project-html:visible:'))!
+    expect(state).toMatchObject({ valueType: 'boolean', defaultValue: false })
+    applied(await f.call('mapped-space-move', 'project.move', { from: 'spaces/地图.html', to: 'spaces/旅程.html' }))
+    expect(data<{ content: string }>(await f.call('mapped-source-read', 'project.read', { path: 'slides/01-入口.html' })).content).toContain('../spaces/旅程.html#b')
+    expect(rules().flatMap(rule => rule.actions).map(step => step.action)).toContainEqual({ type: 'location.go', locationId: target })
+    applied(await f.call('mapped-answer-remove', 'project.edit', { path: 'slides/01-入口.html', edits: [{ old: '<button aria-controls="answer">切换答案</button><p id="answer" hidden="">答案</p>', new: '' }] }))
+    expect(f.project().courseState.some(value => value.key === state.key)).toBe(false)
+    applied(await f.call('mapped-space-delete', 'project.delete', { path: 'spaces/旅程.html' }))
+    expect(rules().flatMap(rule => rule.actions).map(step => step.action)).not.toContainEqual({ type: 'location.go', locationId: target })
+    expect(f.project().globalInteractions).toEqual(model.project.globalInteractions)
+  })
+
+  it('owns spatial HTML files in the canonical session, preserving human edits, identities, rename, save and delete', async () => {
+    let saved = 0, bytes: Uint8Array | undefined
+    const f = await harness({ deliveries: { async lookup() { return null }, async save() { saved++; bytes = driver.serialize(f.session.read().model); return { status: 'saved', path: '四季.h5lesson',
+      documentId: f.session.documentId, epoch: f.session.read().epoch, savedRevision: f.session.read().revision, currentRevision: f.session.read().revision, dirty: false, warnings: [] } },
+      async export() { throw new Error('unused') } } })
+    applied(await f.call('space-write', 'project.write', { path: 'spaces/地图.html', content: '<style>.step{width:800px;height:450px}</style><main><section id="a" class="step" data-x="0"><h2>起点</h2><p class="fragment">观察</p><img src="../assets/地图.svg" alt="地图"></section><section id="b" class="step" data-x="1200" data-rotate="30"><h2>终点</h2></section><aside data-x="500">布景</aside></main>' }))
+    const before = spaceFiles(f.project())[0]!.surface
+    expect(await f.files()).toEqual(expect.arrayContaining([{ path: 'spaces/地图.html', type: '空间', note: '2 个停靠点' },
+      { path: 'assets/地图.svg', type: '待填素材', note: '说明：地图；引用：spaces/地图.html' }]))
+    const read = data<{ content: string }>(await f.call('space-read', 'project.read', { path: 'spaces/地图.html' })).content
+    expect(read).not.toContain('spacehtml'); expect(saved).toBe(0); expect(f.session.read().dirty).toBe(true)
+    expect(await f.call('space-roundtrip', 'project.write', { path: 'spaces/地图.html', content: read })).toMatchObject({ kind: 'document-operation', result: { status: 'unchanged' } })
+    const first = [...spaceDocument(f.project(), before).objects.values()][0]!
+    if (first.kind !== 'composition') throw new Error('composition')
+    let heading = ''
+    walkComposition(first.content.root, node => { if (node.kind === 'element' && node.tagName === 'h2') heading = node.id })
+    const snapshot = f.session.read()
+    await f.session.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch, operationId: 'space-human', actor: 'human', baseRevision: snapshot.revision,
+      mutation: { type: 'command', command: { type: 'composition.edit', layerItemId: first.layerItemId, edit: { type: 'style', nodeId: heading, patch: { color: 'red' } } } } })
+    expect(await f.call('space-stale', 'project.write', { path: 'spaces/地图.html', content: read })).toMatchObject({ kind: 'error', code: 'file-changed' })
+    applied(await f.call('space-edit', 'project.edit', { path: 'spaces/地图.html', edits: [{ old: '起点', new: '人工精修起点' }] }))
+    const after = spaceFiles(f.project())[0]!.surface
+    expect(after.camera.frames).toEqual(before.camera.frames)
+    expect(data<{ content: string }>(await f.call('space-refreshed', 'project.read', { path: 'spaces/地图.html' })).content).toContain('style="color: red;"')
+    applied(await f.call('space-move', 'project.move', { from: 'spaces/地图.html', to: 'spaces/旅程.html' }))
+    expect(spaceFiles(f.project())[0]!.surface.id).toBe(before.id)
+    expect(projectFileLocationId(f.session.read().model as CourseModel, 'spaces/旅程.html')).toBe(f.project().locations.find(location => location.surfaceId === before.id)!.id)
+    expect(data(await f.call('space-save', 'project.save', { project: '四季.h5lesson' }))).toMatchObject({ status: 'saved' })
+    expect(saved).toBe(1)
+    const reopened = driver.load(bytes!)
+    if (reopened.kind !== 'course-v9') throw new Error('course')
+    expect(spaceFiles(reopened.project)[0]!.surface).toEqual(spaceFiles(f.project())[0]!.surface)
+    applied(await f.call('space-delete', 'project.delete', { path: 'spaces/旅程.html' }))
+    expect(spaceFiles(f.project())).toEqual([])
+    expect(f.project().locations.some(location => location.surfaceId === before.id)).toBe(false)
+    expect(saved).toBe(1)
+  })
+
+  it('deletes only the default controller through the formal structural delete, retaining custom navigation and resources', async () => {
+    const pass = await passingAdmission()
+    const model = blank(), controller = createDefaultTeacherControllerPackage()
+    model.project = createBlankCourseProject()
+    model.resources.components[`${controller.manifest.id}@${controller.manifest.version}`] = controller.files
+    const installed = model.project.globalLayerItems.find(entry => entry.item.kind === 'component' && entry.item.role === 'teacher-controller')!
+    if (installed.item.kind !== 'component') throw new Error('controller')
+    const independent = { ...structuredClone(installed), item: { ...structuredClone(installed.item), layerItemId: 'custom-navigation', role: undefined, label: '自定义导航', order: installed.item.order + 1 } }
+    delete independent.item.role
+    model.project.globalLayerItems.push(independent)
+    model.project.assets['retained'] = { id: 'retained', kind: 'image', filename: '导航.svg', mimeType: 'image/svg+xml', path: 'assets/导航.svg', byteLength: 0 }
+    model.resources.assets['retained'] = new Uint8Array()
+    const f = await harness({ models: [model], admission: pass.admission })
+    applied(await f.call('controller-delete', 'project.delete', { path: 'controller/教师控制台.js' }))
+    expect(f.project().globalLayerItems.map(entry => entry.item.layerItemId)).toEqual(['custom-navigation'])
+    expect(f.project().assets).toEqual(model.project.assets)
+    expect((f.session.read().model as CourseModel).resources).toEqual(model.resources)
+    expect(f.project().playback.controls).toBe('none')
+    expect(await f.call('controller-delete-again', 'project.delete', { path: 'controller/教师控制台.js' })).toMatchObject({ kind: 'error', code: 'not-found' })
+    applied(await f.call('controller-restore', 'project.write', { path: 'controller/教师控制台.js', content: controller.runtimeSource }))
+    expect(pass.count()).toBe(1)
+    expect(f.project().globalLayerItems.filter(entry => entry.item.kind === 'component' && entry.item.role === 'teacher-controller')).toHaveLength(1)
+    expect(f.project().globalLayerItems.find(entry => entry.item.layerItemId === 'custom-navigation')).toEqual(independent)
+    expect(f.project().playback.controls).toBe('canvas')
+    expect(data<{ content: string }>(await f.call('controller-restored-source', 'project.read', { path: 'controller/教师控制台.js' })).content).toBe(controller.runtimeSource)
+    const empty = await harness({ admission: pass.admission })
+    applied(await empty.call('controller-create', 'project.write', { path: 'controller/教师控制台.js', content: controller.runtimeSource }))
+    expect(pass.count()).toBe(2)
+    expect(empty.project().componentPackages[controller.manifest.id]!.editableCopy).toBe(true)
+    expect(data<{ content: string }>(await empty.call('controller-created-source', 'project.read', { path: 'controller/教师控制台.js' })).content).toBe(controller.runtimeSource)
+  })
+
   it('updates ordinary file links on rename and reorder while preserving node and scene identities', async () => {
     const f = await harness()
     applied(await f.call('link-source', 'project.write', { path: 'slides/01-目录.html', content: '<a href="02-观察.html">观察</a><a href="#answer">页内</a><p id="answer">说明</p>' }))
