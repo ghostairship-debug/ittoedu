@@ -8,11 +8,11 @@ export const projectFileToolSchemas = {
   'project.list': z.object({ project }).strict(),
   'project.read': z.object({ project, path, offset: z.number().int().min(0).optional(), limit: z.number().int().min(1).max(200_000).optional() }).strict(),
   'project.write': z.union([
-    z.object({ project, path, content: z.string().max(4_000_000) }).strict(),
+    z.object({ project, path, content: z.string() }).strict(),
     /** Copy an image into assets/: a workspace file path or an image resource of this task. */
     z.object({ project, path, from: z.string().min(1).max(1000) }).strict(),
   ]),
-  'project.edit': z.object({ project, path, edits: z.array(z.object({ old: z.string().min(1), new: z.string() }).strict()).min(1).max(50) }).strict(),
+  'project.edit': z.object({ project, path, edits: z.array(z.object({ old: z.string().min(1), new: z.string() }).strict()).min(1) }).strict(),
   'project.move': z.object({ project, from: path, to: path }).strict(),
   'project.delete': z.object({ project, path }).strict(),
   'project.save': z.object({ project }).strict(),

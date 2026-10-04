@@ -7,7 +7,6 @@ import type { DocumentHostService } from '../DocumentHostService'
 import { parseWebComposition } from '../htmlImport/parseWebComposition'
 
 const IMAGE_TYPES: Record<string, string> = { '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' }
-const MAX_IMAGE_BYTES = 50 * 1024 * 1024
 
 /** The task's frozen file access decides what a path may name, as for the file tools. */
 async function permittedPath(requested: string, fileAccess: ToolRunGrant['fileAccess']): Promise<{ filename: string; inside: boolean }> {
@@ -28,7 +27,6 @@ export function createProjectFileServices(host: Pick<DocumentHostService, 'open'
       const { filename } = await permittedPath(requested, fileAccess)
       const mimeType = IMAGE_TYPES[path.extname(filename).toLowerCase()]
       if (!mimeType) throw new Error('只能复制 svg、png、jpg、webp 或 gif 图片')
-      if ((await fs.stat(filename)).size > MAX_IMAGE_BYTES) throw new Error('图片超过 50 MB')
       return { bytes: new Uint8Array(await fs.readFile(filename)), mimeType, filename: path.basename(filename) }
     },
     async openProject({ path: requested, fileAccess }) {

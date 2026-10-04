@@ -13,10 +13,21 @@ import type { PageParsePort } from './pageHtml'
 import { programsChanged, withProgramFallbacks } from './programs'
 import { assetFiles, CONTROLLER_FILE, listProjectFiles, projectFileIdentity, projectFileVersion, readProjectFile, slidePageFiles, THEME_FILE, type ProjectFileRead } from './projectFileView'
 import { parsePagePath, planPageDelete, planPageMove, planPageWrite, ProjectFileError, type PlannedChange } from './slidePages'
+import { rewriteMovedProjectLinks } from './projectNavigation'
+import { spaceFiles } from './spaceFiles'
 
 export type CourseModel = Extract<DocumentModel, { kind: 'course-v9' }>
 export type CourseSnapshot = DocumentSnapshot & { model: CourseModel }
 export interface ProjectFileCommit { result: ToolResult; model?: CourseModel }
+
+/** Public file -> observation location projection; a space with no stops has no observable location. */
+export function projectFileLocationId(model: CourseModel, path: string): string | undefined {
+  const page = slidePageFiles(model.project).find(page => page.path === path)
+  if (page) return page.locationId
+  const surface = docFiles(model.project).find(file => file.path === path)?.surface
+    ?? spaceFiles(model.project).find(file => file.path === path)?.surface
+  return surface ? model.project.locations.find(location => location.surfaceId === surface.id)?.id : undefined
+}
 
 /** Gateway-owned authority: grant checks, the canonical Session commit and the existing staging admission. */
 export interface ProjectFileHost {
@@ -120,6 +131,7 @@ export class ProjectFileCoordinator {
   }
 
   async apply(runId: string, operationId: string, requestDigest: string, snapshot: CourseSnapshot, planned: PlannedChange): Promise<ToolResult> {
+    rewriteMovedProjectLinks(snapshot.model.project, planned.project)
     let committed = await this.commit(runId, operationId, requestDigest, snapshot, planned)
     const advisories: ToolAdvisory[] = planned.diagnostics.filter(item => item.level !== 'info')
       .map(item => ({ step: 0, code: 'html-import-warning' as const, message: item.message }))
