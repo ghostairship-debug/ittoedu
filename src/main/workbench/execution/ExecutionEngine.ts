@@ -177,7 +177,7 @@ const imageTimingStages = new Set<ImageJobTimingMark['stage']>([
   'image.provider.prepared', 'image.fetch.invoked', 'image.response.headers', 'image.provider.finished',
   'image.resources.started', 'image.resources.finished',
 ])
-const toolLabel = (name: string) => ({ read: '读取内容', inspect: '检查对象', listChildren: '查看文档结构', 'content.targets': '发现动态图文', 'content.update': '修改动态图文', 'text.replace': '修改正文', 'object.update': '修改对象', batch: '批量修改', 'media.apply': '替换图片', 'media.insert': '插入图片', 'file.list': '列出文件', 'file.search': '搜索文件', 'file.open': '打开文件', 'file.create': '新建文件', 'file.write': '写入文件', 'file.read': '读取文件', 'file.patch': '修改文件', 'html.import': '导入 HTML', 'project.list': '列出工程文件', 'project.read': '读取工程文件', 'project.write': '写入工程文件', 'project.edit': '修改工程文件', 'project.move': '移动工程文件', 'project.delete': '删除工程文件', 'file.save': '保存文件', 'document.export': '导出文档', 'web.search': '搜索网页', 'web.open': '读取网页', 'image.search': '检索开放图库', 'image.preview': '查看候选图片', 'image.fetch': '取用开放图片', 'asset.search': '检索资产库', 'asset.use': '使用资产库组件', 'asset.save': '存入资产库', [LOAD_TOOLS]: '展开工具', [TASK_NOTE]: '更新任务笔记', [USER_QUESTION_TOOL]: '向你提问' }[name] ?? '执行操作')
+const toolLabel = (name: string) => ({ read: '读取内容', inspect: '检查对象', listChildren: '查看文档结构', 'content.targets': '发现动态图文', 'content.update': '修改动态图文', 'text.replace': '修改正文', 'object.update': '修改对象', batch: '批量修改', 'media.apply': '替换图片', 'media.insert': '插入图片', 'file.list': '列出文件', 'file.search': '搜索文件', 'file.open': '打开文件', 'file.create': '新建文件', 'file.write': '写入文件', 'file.read': '读取文件', 'file.patch': '修改文件', 'html.import': '导入 HTML', 'project.list': '列出工程文件', 'project.read': '读取工程文件', 'project.write': '写入工程文件', 'project.edit': '修改工程文件', 'project.move': '移动工程文件', 'project.delete': '删除工程文件', 'project.save': '保存课件', 'file.save': '保存文件', 'document.export': '导出文档', 'web.search': '搜索网页', 'web.open': '读取网页', 'image.search': '检索开放图库', 'image.preview': '查看候选图片', 'image.fetch': '取用开放图片', 'asset.search': '检索资产库', 'asset.use': '使用资产库组件', 'asset.save': '存入资产库', [LOAD_TOOLS]: '展开工具', [TASK_NOTE]: '更新任务笔记', [USER_QUESTION_TOOL]: '向你提问' }[name] ?? '执行操作')
 const secretField = /^(?:api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|authorization|credential(?:ref)?|bytes|base64|b64[_-]?json|image[_-]?data|data[-_]?url|binary|buffer)$/i
 const MAX_TOOL_INPUT_BYTES = 1024 * 1024
 function safeDetailString(value: string): string {
@@ -498,7 +498,7 @@ export class ExecutionEngine {
       if (!receipt) continue
       // A durable delivery rejection proves that publication did not happen.
       // Lookup/transport errors are not receipts and must leave the effect unknown.
-      const rejectedDelivery = (tool.call.name === 'file.save' || tool.call.name === 'document.export')
+      const rejectedDelivery = (tool.call.name === 'file.save' || tool.call.name === 'project.save' || tool.call.name === 'document.export')
         && receipt?.kind === 'error' && receipt.code === 'delivery-rejected'
       if (receipt?.kind !== 'document-operation' && receipt?.kind !== 'read' && !rejectedDelivery) continue
       tool.result = receipt
@@ -832,7 +832,7 @@ export class ExecutionEngine {
     if (name === 'mcp.invoke') return null
     if (active.approveAll || !(mutationNames.has(name) || name === 'content.update' || fileMutationNames.has(name) || name === 'office.create' || name === 'office.edit' || name === 'artifact.save' || name === 'batch' || name === 'build.import'
       || name === 'html.import' || name === 'html.click' || name === 'html.input' || name === 'file.save' || name === 'document.export'
-      || name === 'project.write' || name === 'project.edit' || name === 'project.move' || name === 'project.delete'
+      || name === 'project.write' || name === 'project.edit' || name === 'project.move' || name === 'project.delete' || name === 'project.save'
       || name === 'job.cancel' || name === 'compute.run' || name === 'delegate.start' || name === 'mcp.invoke' || name === 'media.start'
       || name === 'image.fetch' && typeof (tool.call.input as { path?: unknown } | null)?.path === 'string'
       || name === 'asset.use' || name === 'asset.save')) return null
@@ -1749,7 +1749,7 @@ export class ExecutionEngine {
     const fileReceipt = tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
       ? tool.result.data as { saved?: unknown; status?: unknown; dirty?: unknown; path?: unknown } : null
     const saved = tool.call.name === 'file.write' && fileReceipt?.saved === true
-      || tool.call.name === 'file.save' && fileReceipt?.status === 'saved' && fileReceipt.dirty === false
+      || (tool.call.name === 'file.save' || tool.call.name === 'project.save') && fileReceipt?.status === 'saved' && fileReceipt.dirty === false
     await this.event(record, tool.callId, 'tool', { toolName: tool.call.name, label: toolLabel(tool.call.name), status: serviceOutcome?.status
       ?? (tool.result?.kind === 'document-operation' ? 'returned' : imageReady ? 'ready' : success ? 'completed' : 'failed'),
       text: safeDetailString(tool.result?.kind === 'error' ? tool.result.message : serviceOutcome?.message

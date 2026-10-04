@@ -204,7 +204,7 @@ export class HostToolCoordinator {
     return { jobId: match[1]!, resourceId: match[2]! }
   }
   projectFileServices() { return this.services.projectFiles }
-  supports(name: string) { return name.startsWith('project.') ? !!this.services.projectFiles : name === 'course.createFromHtml' ? false : name === 'skills.read' || name === 'skills.list' ? !!this.services.skills : name === 'view.observe' ? !!this.services.observations : name === 'html.import' ? !!this.services.htmlImports
+  supports(name: string) { return name === 'project.save' ? !!this.services.deliveries : name.startsWith('project.') ? !!this.services.projectFiles : name === 'course.createFromHtml' ? false : name === 'skills.read' || name === 'skills.list' ? !!this.services.skills : name === 'view.observe' ? !!this.services.observations : name === 'html.import' ? !!this.services.htmlImports
     : name === 'file.save' || name === 'document.export' ? !!this.services.deliveries
       : !isHostToolName(name) || (name.startsWith('image.') ? !!this.services.images : !!this.services.builds) }
   observePage(context: ViewObserveToolContext, input: unknown): Promise<ToolResult> {

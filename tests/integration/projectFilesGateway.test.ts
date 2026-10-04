@@ -40,7 +40,8 @@ function data<T = Record<string, unknown>>(result: ToolResult): T {
 }
 
 async function harness(options: { models?: CourseModel[]; writable?: ToolTarget[]; admission?: BuildAdmissionPort
-  readFile?: NonNullable<HostToolServices['projectFiles']>['readFile']; unopened?: { model: CourseModel; writable: boolean } } = {}) {
+  readFile?: NonNullable<HostToolServices['projectFiles']>['readFile']; unopened?: { model: CourseModel; writable: boolean }
+  deliveries?: HostToolServices['deliveries'] } = {}) {
   let id = 0
   const registry = new DocumentRegistry({ drivers: [driver], createId: () => `doc-${++id}`, bindingKey: binding => binding.path,
     persistence: { async append() {}, async save() { throw new Error('unused') } } })
@@ -52,6 +53,7 @@ async function harness(options: { models?: CourseModel[]; writable?: ToolTarget[
       if (requested !== '课程/新课.h5lesson') throw new Error('没有这个课件')
       return { documentId: unopened.documentId, writable: options.unopened!.writable }
     } } : {}) } }
+  if (options.deliveries) services.deliveries = options.deliveries
   if (options.admission) {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'project-files-build-')); roots.push(root)
     services.builds = new ControlledBuildService({ directory: path.join(root, 'scratch'), admission: options.admission })
@@ -93,12 +95,40 @@ async function passingAdmission() {
 }
 
 describe('project files through the tool gateway', () => {
+  it('updates ordinary file links on rename and reorder while preserving node and scene identities', async () => {
+    const f = await harness()
+    applied(await f.call('link-source', 'project.write', { path: 'slides/01-目录.html', content: '<a href="02-观察.html">观察</a><a href="#answer">页内</a><p id="answer">说明</p>' }))
+    applied(await f.call('link-target', 'project.write', { path: 'slides/02-观察.html', content: '<h1>观察</h1>' }))
+    const before = pageLayer(f.project())
+    if (before.kind !== 'composition') throw new Error('composition')
+    const ids: string[] = []
+    walkComposition(before.content.root, node => ids.push(node.id))
+    applied(await f.call('rename-target', 'project.move', { from: 'slides/02-观察.html', to: 'slides/02-实验.html' }))
+    expect(data<{ content: string }>(await f.call('read-link', 'project.read', { path: 'slides/01-目录.html' })).content).toContain('href="../slides/02-实验.html"')
+    applied(await f.call('reorder-target', 'project.move', { from: 'slides/02-实验.html', to: 'slides/01-实验.html' }))
+    const after = pageLayer(f.project(), 1)
+    if (after.kind !== 'composition') throw new Error('composition')
+    const now: string[] = []
+    walkComposition(after.content.root, node => now.push(node.id))
+    expect(after.layerItemId).toBe(before.layerItemId)
+    expect(now).toEqual(ids)
+    const read = data<{ content: string }>(await f.call('read-renumbered-link', 'project.read', { path: 'slides/02-目录.html' }))
+    expect(read.content).toContain('href="../slides/01-实验.html"')
+    expect(read.content).toContain('href="#answer"')
+  })
+
   it('lists, creates, orders and reads slide pages as plain HTML, each write being one undoable change', async () => {
     const f = await harness()
+    const initial = f.project().surfaces.find(surface => surface.type === 'slide')!
+    if (initial.type !== 'slide') throw new Error('slide')
+    const initialSceneId = initial.scenes[0]!.id
     expect(await f.pages()).toEqual([{ path: 'slides/01-场景 1.html', type: '空白页' }])
     const first = applied(await f.call('w1', 'project.write', { path: 'slides/01-导入.html', content: PAGE }))
     expect(first.affected).toEqual(['slides/01-导入.html'])
     expect(await f.pages()).toEqual([{ path: 'slides/01-导入.html', type: '可编辑页' }])
+    const firstSurface = f.project().surfaces.find(surface => surface.type === 'slide')!
+    if (firstSurface.type !== 'slide') throw new Error('slide')
+    expect(firstSurface.scenes.map(scene => scene.id)).toEqual([initialSceneId])
     applied(await f.call('w2', 'project.write', { path: 'slides/02-观察.html', content: '<h1>观察</h1>' }))
     applied(await f.call('w3', 'project.write', { path: 'slides/02-讨论.html', content: '<h1>讨论</h1>' }))
     expect((await f.pages()).map(file => file.path)).toEqual(['slides/01-导入.html', 'slides/02-讨论.html', 'slides/03-观察.html'])
@@ -347,5 +377,25 @@ describe('project files through the tool gateway', () => {
     expect(flow().title).toBe('地理讲义')
     applied(await f.call('x1', 'project.delete', { path: 'docs/地理讲义.html' }))
     expect(f.project().surfaces.some(surface => surface.type === 'flow')).toBe(false)
+  })
+
+  it('saves a course named by path through the existing file.save delivery, never in a read-only task', async () => {
+    const saved: unknown[] = []
+    const deliveries: NonNullable<HostToolServices['deliveries']> = {
+      async save(input) { saved.push(input); return { status: 'saved', path: 'D:/课程/四季.h5lesson', documentId: input.documentId, epoch: input.epoch,
+        savedRevision: input.baseRevision, currentRevision: input.baseRevision, dirty: false, warnings: [] } },
+      async export() { throw new Error('unused') },
+      async lookup() { return null },
+    }
+    const f = await harness({ deliveries })
+    applied(await f.call('w1', 'project.write', { path: 'slides/01-导入.html', content: '<h1>四季</h1>' }))
+    expect(saved).toEqual([])
+    expect(f.session.read().dirty).toBe(true)
+    const receipt = data<{ status: string; dirty: boolean }>(await f.call('s1', 'project.save', { project: '四季.h5lesson' }))
+    expect(receipt).toMatchObject({ status: 'saved', dirty: false })
+    expect(saved).toEqual([expect.objectContaining({ documentId: f.session.documentId, baseRevision: f.session.read().revision })])
+    const readOnly = await harness({ deliveries, writable: [] })
+    expect(await readOnly.call('s2', 'project.save', {})).toMatchObject({ kind: 'error', code: 'not-authorized' })
+    expect(saved).toHaveLength(1)
   })
 })
