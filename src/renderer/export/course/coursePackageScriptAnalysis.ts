@@ -792,6 +792,47 @@ export interface JavaScriptConnectFacts {
   sites: JavaScriptConnectSiteFact[]
 }
 
+export type ScriptedMediaReference = { kind: 'media' | 'background'; url: string } | { kind: 'dynamic-media' }
+
+/**
+ * Media a page script names, in source order: `new Audio/Image('…')` (a non-literal argument is dynamic) and
+ * literal `element.style.backgroundImage = 'url(…)'`. An unparseable script proves no media dependency.
+ */
+export function scriptedMediaReferences(source: string): ScriptedMediaReference[] {
+  const references: ScriptedMediaReference[] = []
+  const visit = (value: unknown): void => {
+    if (!value || typeof value !== 'object') return
+    if (Array.isArray(value)) { value.forEach(visit); return }
+    const node = value as Record<string, unknown>
+    if (node.type === 'NewExpression') {
+      const callee = node.callee as Record<string, unknown> | undefined
+      if (callee?.type === 'Identifier' && (callee.name === 'Audio' || callee.name === 'Image')) {
+        const argument = Array.isArray(node.arguments) ? node.arguments[0] as Record<string, unknown> | undefined : undefined
+        if (argument?.type === 'Literal' && typeof argument.value === 'string') references.push({ kind: 'media', url: argument.value })
+        else if (argument) references.push({ kind: 'dynamic-media' })
+      }
+    }
+    if (node.type === 'AssignmentExpression') {
+      const target = node.left as Record<string, unknown> | undefined
+      const property = target?.property as Record<string, unknown> | undefined
+      const style = target?.object as Record<string, unknown> | undefined
+      const styleProperty = style?.property as Record<string, unknown> | undefined
+      const value = node.right as Record<string, unknown> | undefined
+      if (target?.type === 'MemberExpression' && property?.name === 'backgroundImage'
+        && style?.type === 'MemberExpression' && styleProperty?.name === 'style'
+        && value?.type === 'Literal' && typeof value.value === 'string') {
+        for (const match of value.value.matchAll(/url\(\s*(?:"([^"]+)"|'([^']+)'|([^\s)]+))\s*\)/gi)) {
+          const url = match[1] ?? match[2] ?? match[3]
+          if (url) references.push({ kind: 'background', url })
+        }
+      }
+    }
+    Object.values(node).forEach(visit)
+  }
+  try { visit(parseJavaScript(source, { ecmaVersion: 'latest', sourceType: 'module' })) } catch { /* No proven dependency. */ }
+  return references
+}
+
 /** Pure JS/connect facts from explicit source text. Does not emit HTML/ZIP or read Store. */
 export function analyzeJavaScriptConnect(source: string): JavaScriptConnectFacts {
   const scan = collectConnectCallSites(source)

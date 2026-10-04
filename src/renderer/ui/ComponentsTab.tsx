@@ -40,6 +40,7 @@ import { exportCompositionFragmentPackage } from '../components/compositionFragm
 import {
   selectActiveCourseProjectDocument,
   selectEditingScope,
+  selectSelectedNodeId,
   useEditorStore,
 } from '../store/editorStore'
 
@@ -480,6 +481,8 @@ export function ComponentsTab({
   const [detailsPackageId, setDetailsPackageId] = useState<string | null>(null)
   const components = useEditorStore((state) => state.componentPackages)
   const project = useEditorStore(selectActiveCourseProjectDocument)
+  const selectedNodeId = useEditorStore(selectSelectedNodeId)
+  const extractCompositionFragment = useEditorStore((state) => state.extractCompositionFragment)
   const editingScope = useEditorStore(selectEditingScope)
   const spatialScope = useEditorStore((state) => state.spatialSession?.scope ?? null)
   const addExternalComponentNode = useEditorStore((state) => state.addExternalComponentNode)
@@ -556,7 +559,7 @@ export function ComponentsTab({
       <div className="section-heading section-heading--spaced">
         <span>工程组件</span><span>{packages.length}</span>
       </div>
-      <CompositionFragmentActions />
+      <CompositionFragmentActions selectedId={selectedNodeId} project={project} extract={extractCompositionFragment} />
       <label className="component-project-search">
         <Search size={15} aria-hidden="true" />
         <input

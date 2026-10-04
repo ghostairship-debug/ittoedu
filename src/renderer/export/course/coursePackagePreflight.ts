@@ -1,4 +1,3 @@
-import { parse as parseJavaScript } from 'acorn'
 import type { ComponentPackageData } from '../../../shared/componentTypes'
 import { courseProjectDocumentSchema } from '../../../shared/courseProjectSchema'
 import type {
@@ -18,6 +17,7 @@ import {
   analyzeJavaScriptConnect,
   exactConnectOrigin,
   exactHttpsOrigin,
+  scriptedMediaReferences,
 } from './coursePackageScriptAnalysis'
 
 export type CoursePackageDelivery = 'standalone-html' | 'web-package'
@@ -267,39 +267,11 @@ function collectOfflineManagedHtmlRemoteMedia(
         if (inlineStyle) addBackgroundUrls(inlineStyle[1] ?? inlineStyle[2] ?? '')
       }
       for (const script of noComments.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)) {
-        try {
-          const ast = parseJavaScript(script[1]!, { ecmaVersion: 'latest', sourceType: 'module' })
-          const visit = (value: unknown): void => {
-            if (!value || typeof value !== 'object') return
-            if (Array.isArray(value)) { value.forEach(visit); return }
-            const node = value as Record<string, unknown>
-            if (node.type === 'NewExpression') {
-              const callee = node.callee as Record<string, unknown> | undefined
-              if (callee?.type === 'Identifier' && (callee.name === 'Audio' || callee.name === 'Image')) {
-                const argument = Array.isArray(node.arguments) ? node.arguments[0] as Record<string, unknown> | undefined : undefined
-                if (argument?.type === 'Literal' && typeof argument.value === 'string') add(argument.value)
-                else if (argument && declaredHttpsOrigins.length && !dynamicMediaPaths.includes(sourcePath)) dynamicMediaPaths.push(sourcePath)
-              }
-            }
-            if (node.type === 'AssignmentExpression') {
-              const target = node.left as Record<string, unknown> | undefined
-              const property = target?.property as Record<string, unknown> | undefined
-              const style = target?.object as Record<string, unknown> | undefined
-              const styleProperty = style?.property as Record<string, unknown> | undefined
-              const value = node.right as Record<string, unknown> | undefined
-              if (target?.type === 'MemberExpression' && property?.name === 'backgroundImage'
-                && style?.type === 'MemberExpression' && styleProperty?.name === 'style'
-                && value?.type === 'Literal' && typeof value.value === 'string') {
-                for (const match of value.value.matchAll(/url\(\s*(?:"([^"]+)"|'([^']+)'|([^\s)]+))\s*\)/gi)) {
-                  const url = match[1] ?? match[2] ?? match[3]
-                  if (url && declaredHttpsOrigins.includes(exactHttpsOrigin(url) ?? '')) add(url)
-                }
-              }
-            }
-            Object.values(node).forEach(visit)
-          }
-          visit(ast)
-        } catch { /* An unparseable script cannot prove a media dependency. */ }
+        for (const reference of scriptedMediaReferences(script[1]!)) {
+          if (reference.kind === 'media') add(reference.url)
+          else if (reference.kind === 'background') { if (declaredHttpsOrigins.includes(exactHttpsOrigin(reference.url) ?? '')) add(reference.url) }
+          else if (declaredHttpsOrigins.length && !dynamicMediaPaths.includes(sourcePath)) dynamicMediaPaths.push(sourcePath)
+        }
       }
       const markup = styleAndScript.replace(/<style\b[^>]*>[\s\S]*?<\/style\s*>/gi, '')
       for (const element of markup.matchAll(/<(img|audio|video|source|image)\b((?:[^"'<>]|"[^"]*"|'[^']*')*)>/gi)) {
