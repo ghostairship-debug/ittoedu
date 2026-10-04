@@ -72,6 +72,7 @@ globalLayerItems, globalInteractions, surfaces, mixedPrintPlan?
 - `type: 'spatial-2d'`
 - 包含二维世界定义 `world`，支持 infinite 或 finite 边界模式，包含世界图层元素 `world.layerItems`、路径 `paths?: SpatialPathDocument[]` 与关系连线 `relations?: SpatialRelationDocument[]`。
 - 包含相机配置 `camera: { home: SpatialCameraPose, frames: SpatialCameraFrame[] }`。`home` 与 `frames` 是作者持久化镜头；试运行/整课预览另有会话相机，支持自由平移缩放，且不因逛世界而写回这些字段。播放路径与切 `spatial-camera` location 仍做镜头巡游。
+- pose 的 `rotation?: number` 为度，缺省 0；frame 的 `targetLayerItemId?: string` 跟随同一 world 内的对象，由正式归一化更新中心、拟合 zoom 与旋转。手动设镜头取消跟随，删除目标保留最后 pose 并取消引用。V9 与 Published V2 使用同一字段；空间源与站内步骤详见[停靠点合同](../development-plan/creation-restructure/SPATIAL_STOP_STEPS.md)。
 - 包含语义缩放规则 `semanticZoom: SpatialSemanticZoomRule[]`。
 - 可选无限画布底色 `backgroundColor?: string`，缺省时视为白底（`#ffffff`）。
 
@@ -175,6 +176,7 @@ export type LayerItem = NativeLayerItem | ComponentLayerItem | RuntimeLayerItem
 ### 8.3 节点状态与页内步骤
 - `LayerItemOverride.compositionNodes?: Record<节点 id, { visible?: boolean }>`：任何呈现状态都可控制组合内部节点显隐（只用于 composition 图层，节点须存在）。
 - `SlidePresentationState.fragmentStep?: number` 标记来自页内步骤的状态：场景组合中 `class="fragment"` 的元素按图层存储顺序与文档顺序编号；初始状态为 0，生成状态 `fragment_step_<k>` 显示前 k 个，并复制初始状态的覆盖字段；没有该字段的状态是作者状态，保持原样并显示全部步骤。显式节点状态优先于步骤。播放时节点淡入，静态捕获显示全部步骤，编辑视图显示全部内容。
+- Spatial 的首次对象跟随停靠点按组合 `fragment` 派生到站 0 与其后的站内步骤，展开全部后才移动镜头；其 `fragment_step_<k>` 仅为会话导航状态，不在 V9/Published 新增 presentation 或第二持久序列。反向步进、精确重进、后续完整回看及编辑/捕获显隐遵循[停靠点合同](../development-plan/creation-restructure/SPATIAL_STOP_STEPS.md)。
 
 ### 8.4 待填素材
 - 组合中 `<img src="../assets/x.svg" alt="说明">` 原样保存；`assets/x.svg` 槽位绑定 `path === 'assets/x.svg'` 的素材（否则绑定唯一 `filename` 相同的素材），写在 `composition.assets['assets/x.svg']`。未绑定的项目内相对引用显示占位（`alt` / `title` 为说明）。

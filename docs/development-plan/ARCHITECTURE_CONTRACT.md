@@ -32,6 +32,7 @@
 - **编辑入口与目标**：主画布直接选择和手改组合内部元素，深入编辑弹窗复用同一命令及历史。元素 AI 使用软件捕获的内部选区，不能将整图层授权代替所选内容；模型使用宿主返回的内容短句柄，不填写内部编号。固定演示页的普通自由手改可直接写 px；原有比例按声明换算，仅当前受影响的复杂表达需要明确覆盖选择，不对普通拖拽新增确认。
 - **组合原生输入**：沿用原生输入的值、提交、判题、反馈与重置合同。Slide scene 的 `input.submit` 可引用软件生成的组合图层/内部输入路径；global、Flow、Spatial 与其他节点动作不因此扩大支持范围。临时输入值不回写正式工程，普通重排和尺寸变化不重置值；已配置规则随 V9/Published 保存。
 - **持续实例与表面**：Slide、Flow 和 Spatial 消费同一组合内容；保留翻页、阅读流和相机各自语义。内容、样式和外框增量更新不因宿主尺寸变化主动重建未改变的 Runtime 实例。捕获不移出再插回存活 iframe；不承诺任意程序源码替换后保留运行状态。嵌套 Runtime/文档 Component 的目标发现、编译、准入与后备写回使用同一正式叶子 visitor；静态 Web 不增加动态准入门。
+- **空间停靠（2026-10-04）**：Owner 已批准 impress.js `.step` 与 `data-x`/`data-y`/`data-scale`/`data-rotate` 源文约定；源文读写归工程内文件 owner。V9/Published 使用 `camera.frames` 的对象跟随引用和可选 rotation，软件维护身份、跟随取景及站内 fragment。画布是场景，镜头和 fragment 是步骤；展开当前站全部 fragment 后再移至下一站，站内增量显隐保留会话相机和存活实例，不创建第二持久顺序或要求 AI 登记。直接 consumer、返回/重进和编辑/捕获边界见[停靠点合同](creation-restructure/SPATIAL_STOP_STEPS.md)。
 - **页面规格**：Slide surface.canvas 是共享层的参考尺寸，scene.canvas 可覆盖当前页尺寸；`effectiveSceneCanvas` 是消费有效规格的入口。共享自由层通过同一 contain 映射及逆映射在当前页显示/编辑，仍只有一份正式对象；教师控制器保留其独立 dock/session 偏移。作品 viewport、应用可用区域和观察缩放分开，不以打开侧栏修改作品规格。
 - **结构化资产**：Component API4 manifest 可声明 `content:{kind:'composition'}`，以真实包 entry JSON 保存组合定义；实例化由软件分配身份、复用素材和依赖。使用已有组件库、资源与事务，不新建平行资产库。可执行包不接受该分支字段；结构化包不按 JavaScript 源码编译，发布收集实际实例依赖。
 - **第三方源码与导出**：普通 HTML 文件以源文本为唯一正式内容，临时 parse5 源位置不持久化为第二模型；可定位的结构、内联/共享 CSS 和 JSON 数据修改写回源文，未知程序/外部 CSS 保留源码入口。PPTX 使用首场景固定页面规格并 contain，其余页面明确适配；PDF 可保留不同页规格。Web 在 PDF/Office 中明确为实际 Player 图面，Flow 长图按格式分段，不冒称可编辑语义分页；可专业映射的正文仍保有编辑性。
