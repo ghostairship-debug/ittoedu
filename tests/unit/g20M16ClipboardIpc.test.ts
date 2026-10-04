@@ -7,17 +7,22 @@ const state = vi.hoisted(() => ({
 }))
 
 vi.mock('electron', () => ({
-  app: { getPath: () => 'D:/test' },
+  app: { getPath: () => 'D:/test', getAppPath: () => 'D:/test' },
   dialog: {},
   ipcMain: {
     removeHandler: (channel: string) => state.handlers.delete(channel),
     handle: (channel: string, handler: (event: unknown, ...args: unknown[]) => Promise<unknown>) => state.handlers.set(channel, handler),
+    on: vi.fn(), removeAllListeners: vi.fn(),
   },
 }))
-vi.mock('../../src/main/workbench/workbenchToolServices', () => ({ installWorkbenchToolServices: state.install }))
+vi.mock('../../src/main/workbench/workbenchToolServices', () => ({ installWorkbenchToolServices: state.install,
+  disposeWorkbenchExportPort: vi.fn(), acceptWorkbenchExportBuildReply: vi.fn(), workbenchImageService: vi.fn(), workbenchImageSelection: vi.fn() }))
 vi.mock('../../src/main/workbench/execution/ExecutionDesktopService', () => ({ executionDesktopService: () => new Promise(() => {}) }))
-vi.mock('../../src/main/workbench/workspaceFilesDesktopService', () => ({ subscribeWorkspaceFilesChanges: () => new Promise(() => {}) }))
-vi.mock('../../src/main/workbench/documentHost', () => ({ documentHost: () => ({ setEventSink: vi.fn() }) }))
+vi.mock('../../src/main/workbench/workspaceFilesDesktopService', () => ({ subscribeWorkspaceFilesChanges: () => new Promise(() => {}),
+  attachHtmlPreviewHost: () => new Promise(() => {}), operateWorkspaceFiles: vi.fn() }))
+vi.mock('../../src/main/protocols', () => ({ setHtmlPreviewProtocolHandler: vi.fn() }))
+vi.mock('../../src/main/workbench/documentHost', () => ({ documentHost: () => ({ setEventSink: vi.fn(),
+  subscribeEvents: () => () => undefined, subscribeClosed: () => () => undefined, tools: { configureDynamicContentServices: vi.fn() } }) }))
 vi.mock('../../src/main/diagnosticLog', () => ({ diagnosticLog: { append: vi.fn() }, exportDiagnosticReport: vi.fn() }))
 vi.mock('../../src/main/workbench/images/ImageResultsDesktopService', () => ({ ImageResultsDesktopService: class {} }))
 vi.mock('../../src/main/previewNetworkPolicy', () => ({ mainPreviewNetworkPolicy: {} }))
@@ -32,7 +37,7 @@ function fixture() {
     isFocused: vi.fn(() => true),
     cut: vi.fn(), copy: vi.fn(), paste: vi.fn(), pasteAndMatchStyle: vi.fn(),
   }
-  const window = { isDestroyed: () => false, isFocused: vi.fn(() => true), webContents: sender }
+  const window = { isDestroyed: () => false, isFocused: vi.fn(() => true), webContents: Object.assign(sender, { id: 1, once: vi.fn() }) }
   const event = { sender, senderFrame: frame }
   registerIpcHandlers({ getMainWindow: () => window as never, getRendererEntryUrl: () => frame.url, appState: {} as never })
   const handle = state.handlers.get(IPC_CHANNELS.editorClipboard)!
