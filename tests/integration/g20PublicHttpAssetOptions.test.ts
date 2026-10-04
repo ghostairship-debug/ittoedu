@@ -2,7 +2,7 @@
 import { EventEmitter } from 'node:events'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { fetchPublicResource, isPublicAddress, resolveWithSyntheticFallback } from '../../src/main/workbench/network/publicHttp'
-import { publicAssetHttp } from '../../src/main/workbench/assetSources/publicAssetHttp'
+import { openLibraryUserAgent, publicAssetHttp } from '../../src/main/workbench/assetSources/publicAssetHttp'
 import { AssetHttpError } from '../../src/main/workbench/assetSources/assetSourceTypes'
 
 const wire = vi.hoisted(() => ({ request: vi.fn() }))
@@ -60,10 +60,12 @@ it('stops a download over the byte limit, by declared length or while reading', 
 
 it('adapts the public HTTP layer for the image libraries with JSON parsing and HTTP status', async () => {
   const fetch = vi.fn(fetchPublicResource)
-  const http = publicAssetHttp('GuolingWorkbench/9.9.9 (test)', (url, options) => fetch(url, { ...options, resolve }))
+  expect(openLibraryUserAgent('9.9.9')).toBe('GuolingWorkbench/9.9.9 (courseware editor; contact@good-learning.cn)')
+  const http = publicAssetHttp(openLibraryUserAgent('9.9.9'), (url, options) => fetch(url, { ...options, resolve }))
   respond(200, 'application/json', [Buffer.from('{"results":[]}')])
   expect(await http.getJson('https://api.openverse.org/v1/images/?q=x', { headers: { Accept: 'application/json' } })).toEqual({ results: [] })
-  expect(wire.request.mock.calls[0]![1].headers).toMatchObject({ Accept: 'application/json', 'User-Agent': 'GuolingWorkbench/9.9.9 (test)' })
+  expect(wire.request.mock.calls[0]![1].headers).toMatchObject({ Accept: 'application/json',
+    'User-Agent': 'GuolingWorkbench/9.9.9 (courseware editor; contact@good-learning.cn)' })
   respond(429, 'application/json', [Buffer.from('{"detail":"throttled"}')])
   await expect(http.getJson('https://api.openverse.org/v1/images/?q=x')).rejects.toEqual(expect.objectContaining({ status: 429 }))
   respond(429, 'application/json', [])
