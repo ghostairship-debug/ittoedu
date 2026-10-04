@@ -16,7 +16,7 @@ export function previewBody(value: string, format: PreviewFormat): { dom: Docume
   const parsed = parseDocumentMarkdown(value, { target: 'file', createId: kind => `preview-${kind}-${++sequence}` })
   if (parsed.status !== 'valid') return raw()
   // Images, components and other carriers require admitted resources, which an incomplete edit does not own.
-  if (parsed.document.content.blocks.some(block => ['media', 'component', 'chart', 'section', 'callout'].includes(block.type))) return raw()
+  if (parsed.document.content.blocks.some(block => ['media', 'component', 'course-component', 'chart', 'section', 'callout'].includes(block.type))) return raw()
   const projected = toEditorDocument(parsed.document.content)
   if (format === 'markdown-inline' && (projected.childCount !== 1 || projected.firstChild?.type.name !== 'paragraph')) return raw()
   const content = format === 'markdown-inline' ? projected.firstChild!.content : projected.content

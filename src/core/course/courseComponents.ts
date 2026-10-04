@@ -8,20 +8,47 @@ import type {
   CourseComponentDefinition,
   CourseProjectDocument,
   CourseRuntimeDefinition,
+  FlowBlock,
   LayerItem,
 } from '../../shared/courseProjectTypes'
 
 /**
  * Named components (`components/<name>.html`). `project.components` is their
  * only owner; page iframes refer to them by name and the Runtime node under such
- * an iframe is a copy that normalization rewrites from the definition.
+ * an iframe is a copy that normalization rewrites from the definition. Flow
+ * `course-component` blocks refer to them by name and hold no copy.
  * All helpers are pure and return a new project.
  */
 
-export interface CourseComponentReference {
-  layerItemId: string
-  /** The iframe node that refers to the component. */
-  nodeId: string
+export type CourseComponentReference =
+  /** A page iframe (`nodeId`) of a composition. */
+  | { layerItemId: string; nodeId: string }
+  /** A `course-component` block of a handout. */
+  | { surfaceId: string; blockId: string }
+  /** A `course-component` block in a page's document leaf (`nodeId`). */
+  | { layerItemId: string; nodeId: string; blockId: string }
+
+type ComponentBlock = Extract<FlowBlock, { type: 'course-component' }>
+
+function visitBlocks(blocks: FlowBlock[], visit: (block: ComponentBlock) => void): void {
+  for (const block of blocks) {
+    if (block.type === 'course-component') visit(block)
+    else if (block.type === 'section') visitBlocks(block.blocks, visit)
+  }
+}
+
+/** Every `course-component` block, in handouts and in page documents. */
+function visitComponentBlocks(project: CourseProjectDocument, visit: (reference: CourseComponentReference, block: ComponentBlock) => void): void {
+  for (const { item, root } of compositionRoots(project)) {
+    const walk = (node: CompositionNode<CourseRuntimeDefinition>): void => {
+      if (node.kind === 'document') visitBlocks(node.content.blocks, block => visit({ layerItemId: item.layerItemId, nodeId: node.id, blockId: block.id }, block))
+      else if (node.kind === 'element') node.children.forEach(walk)
+    }
+    walk(root)
+  }
+  for (const surface of project.surfaces) {
+    if (surface.type === 'flow') visitBlocks(surface.blocks, block => visit({ surfaceId: surface.id, blockId: block.id }, block))
+  }
 }
 
 function compositionRoots(project: CourseProjectDocument): Array<{ item: LayerItem; root: CompositionNode<CourseRuntimeDefinition> }> {
@@ -67,12 +94,15 @@ export function uniqueCourseComponentName(project: CourseProjectDocument, wanted
   return name
 }
 
-/** Pages that use a component, in course order. */
+/** Page iframes, then blocks, that use a component, in course order. */
 export function courseComponentReferences(project: CourseProjectDocument, name: string): CourseComponentReference[] {
   const key = courseComponentNameKey(name)
   const result: CourseComponentReference[] = []
   visitIframes(project, (layerItemId, node, referenced) => {
     if (courseComponentNameKey(referenced) === key) result.push({ layerItemId, nodeId: node.id })
+  })
+  visitComponentBlocks(project, (reference, block) => {
+    if (courseComponentNameKey(block.name) === key) result.push(reference)
   })
   return result
 }
@@ -89,7 +119,7 @@ export function setCourseComponent(project: CourseProjectDocument, name: string,
   return next
 }
 
-/** Renames a component and rewrites every iframe reference to it. */
+/** Renames a component and rewrites every iframe and block reference to it. */
 export function renameCourseComponent(project: CourseProjectDocument, from: string, to: string): CourseProjectDocument {
   const issue = courseComponentNameIssue(to)
   if (issue) throw new TypeError(issue)
@@ -106,6 +136,9 @@ export function renameCourseComponent(project: CourseProjectDocument, from: stri
   visitIframes(next, (_layerItemId, node, referenced) => {
     if (courseComponentNameKey(referenced) === key) node.attributes.src = componentReferenceSrc(node.attributes.src!, to)
   })
+  visitComponentBlocks(next, (_reference, block) => {
+    if (courseComponentNameKey(block.name) === key) block.name = to
+  })
   return next
 }
 
@@ -118,7 +151,7 @@ function componentReferenceSrc(src: string, name: string): string {
   return `${path.slice(0, slash + 1)}${name}${extension}${end < 0 ? '' : src.slice(end)}`
 }
 
-/** Removes a definition; pages that still refer to it show a placeholder until it is written again. */
+/** Removes a definition; pages and blocks that still refer to it show a placeholder until it is written again. */
 export function deleteCourseComponent(project: CourseProjectDocument, name: string): CourseProjectDocument {
   const stored = findCourseComponentName(project, name)
   if (stored === undefined) return project

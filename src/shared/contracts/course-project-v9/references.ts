@@ -250,7 +250,7 @@ export function visitCourseProjectReferences(
     },
     block: (block, path) => {
       if (block.type === 'media') {
-        emit({ kind: 'asset', id: block.assetId, path: [...path, 'assetId'] })
+        if (block.assetId) emit({ kind: 'asset', id: block.assetId, path: [...path, 'assetId'] })
       } else if (block.type === 'component') {
         emit({ kind: 'component', id: block.component.packageId, version: block.component.version, path: [...path, 'component'] })
         emit({ kind: 'asset', id: block.staticFallbackAssetId, path: [...path, 'staticFallbackAssetId'] })

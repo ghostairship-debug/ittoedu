@@ -129,7 +129,11 @@ describe('handout file round trip', () => {
       <svg><circle r="3"/></svg>
     </main></body></html>`
     const parsed = parseFlowHtml(html, { parse: parseWebComposition, assets: model.project.assets })
-    expect(parsed.blocks.map(block => block.type)).toEqual(['heading', 'paragraph', 'media', 'list', 'table', 'callout', 'section', 'formula'])
+    expect(parsed.blocks.map(block => block.type)).toEqual(['heading', 'paragraph', 'media', 'list', 'table', 'callout', 'section', 'formula', 'media'])
+    // References stay as written; the missing picture is a pending slot that shows its alt text.
+    expect(parsed.blocks[2]).toMatchObject({ type: 'media', source: '../assets/地球.png', altText: '地球' })
+    expect(parsed.blocks[8]).toMatchObject({ type: 'media', source: '../assets/不存在.svg', altText: '缺图' })
+    expect(parsed.blocks[8]).not.toHaveProperty('assetId')
     const paragraph = parsed.blocks[1]!
     expect(paragraph.type === 'paragraph' && paragraph.content.inlines).toMatchObject([
       { type: 'text', text: '太阳直射点在 ' }, { type: 'text', text: '南北回归线', style: { bold: true } }, { type: 'text', text: ' 之间移动，角度约为 ' },
@@ -138,6 +142,6 @@ describe('handout file round trip', () => {
     expect(list.type === 'list' && list.items.map(item => item.content.inlines.map(inline => inline.type === 'text' ? inline.text : '').join(''))).toEqual(['春分', '夏至', '北半球昼最长'])
     const table = parsed.blocks[4]!
     expect(table.type === 'table' && table.merges).toEqual([{ rowIds: [table.type === 'table' ? table.rows[0]!.id : '', table.type === 'table' ? table.rows[1]!.id : ''], columnIds: [table.type === 'table' ? table.columns[0]!.id : ''] }])
-    expect(parsed.diagnostics.map(item => item.code).sort()).toEqual(['flow-missing-asset', 'flow-nested-list', 'flow-style', 'flow-unsupported'])
+    expect(parsed.diagnostics.map(item => item.code).sort()).toEqual(['flow-nested-list', 'flow-style', 'flow-unsupported'])
   })
 })

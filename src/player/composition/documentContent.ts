@@ -2,6 +2,7 @@ import type { DocumentBlock, DocumentContent, FlowTextContent } from '../../shar
 import { flowFormulaBlockElement, renderDocumentText } from '../../shared/document/render'
 import { buildNativeChartSvg } from '../../shared/nativeChartSvg'
 import { tableCellSpan } from '../../shared/tableMerge'
+import { pendingMediaElement, placeholderElement } from './compositionHostDocument'
 
 export type CompositionDocumentComponent = Extract<DocumentBlock, { type: 'component' }>
 export interface CompositionDocumentPaintOptions {
@@ -45,6 +46,11 @@ export function paintCompositionDocument(root: HTMLElement, content: DocumentCon
       }
       case 'media': {
         element = dom.createElement('figure')
+        if (!block.assetId) {
+          element.append(pendingMediaElement(dom, block))
+          if (block.caption) { const caption = dom.createElement('figcaption'); text(caption, block.caption); element.append(caption) }
+          break
+        }
         const media = dom.createElement(block.mediaKind === 'image' ? 'img' : block.mediaKind)
         const url = resolveAsset(block.assetId)
         if (!url) throw new Error(`正文素材不可用：${block.assetId}`)
@@ -86,6 +92,11 @@ export function paintCompositionDocument(root: HTMLElement, content: DocumentCon
         element = options.renderComponent(block)
         break
       }
+      case 'course-component':
+        // Named components run in handouts (Flow body) and page frames; inside a page document they show their name.
+        element = placeholderElement(dom, '组件', block.title || block.name)
+        element.style.height = `${block.height ?? 240}px`
+        break
     } } catch (cause) {
       const error = cause instanceof Error ? cause : new Error(String(cause))
       element = dom.createElement('aside')

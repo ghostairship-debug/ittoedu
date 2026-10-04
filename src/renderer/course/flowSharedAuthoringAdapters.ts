@@ -656,11 +656,12 @@ export function convertFlowMediaBlockToOverlay(
   if (!('block' in selected)) return selected
   if (selected.block.type !== 'media') return fail(FLOW_MEDIA_ONLY_CONVERT_REASON)
   if (selected.block.mediaKind === 'audio') return fail(FLOW_AUDIO_OVERLAY_REASON)
+  if (!selected.block.assetId) return fail('正文媒体还是待填素材，素材到位后才能转换为纸面对象')
   const asset = requireMediaAsset(document, selected.block.assetId)
   if (!('assetId' in asset)) return asset
   const blockId = selected.block.id
   const frame = options.frame ?? nativeMediaOverlay(document, {
-    assetId: selected.block.assetId,
+    assetId: asset.assetId,
     mediaKind: selected.block.mediaKind,
   }).frame
   const anchor = options.paragraphAnchor ?? { blockId, offsetY: 0, xRatio: 0.1 }

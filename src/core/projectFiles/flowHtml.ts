@@ -1,5 +1,5 @@
 import type { NativeChartContent, TextRunStyle } from '../../shared/contracts/native-v1/types'
-import { assetReferencePath } from '../../shared/composition/projectReferences'
+import { assetReferencePath, componentReferenceName, courseComponentNameIssue } from '../../shared/composition/projectReferences'
 import type { CourseAssetMeta, FlowBlock, FlowSurfaceDocument } from '../../shared/courseProjectTypes'
 import { describeDocumentMath, parseDocumentMath } from '../../shared/document/math'
 import { normalizeDocumentText, type FlowInline, type FlowTextContent, type InlineLink, type MathStyle } from '../../shared/document/content'
@@ -107,7 +107,8 @@ export function blockHtml(block: Block, context: FlowHtmlContext): string {
       const attributes = [block.layout !== 'content-width' ? ` data-layout="${block.layout}"` : '', block.wrap ? ` data-wrap="${block.wrap}"` : '',
         block.crop ? ` data-crop="${block.crop.left} ${block.crop.top} ${block.crop.right} ${block.crop.bottom}"` : '',
         block.cropX !== undefined ? ` data-crop-x="${block.cropX}"` : '', block.cropY !== undefined ? ` data-crop-y="${block.cropY}"` : ''].join('')
-      const src = escapeAttribute(assetSource(context.assets, block.assetId))
+      // A written reference stays as written; otherwise the asset's own file.
+      const src = escapeAttribute(block.source ?? (block.assetId ? assetSource(context.assets, block.assetId) : ''))
       const label = block.altText !== undefined ? (block.mediaKind === 'image' ? ` alt="${escapeAttribute(block.altText)}"` : ` aria-label="${escapeAttribute(block.altText)}"`) : ''
       const media = block.mediaKind === 'image' ? `<img src="${src}"${label}>` : `<${block.mediaKind} src="${src}"${label} controls></${block.mediaKind}>`
       return `<figure${attributes}>${media}${block.caption ? `<figcaption>${inlineHtml(block.caption)}</figcaption>` : ''}</figure>`
@@ -138,6 +139,8 @@ export function blockHtml(block: Block, context: FlowHtmlContext): string {
     case 'callout': return `<aside data-tone="${block.tone}">${block.title ? `<header>${inlineHtml(block.title)}</header>` : ''}<p>${inlineHtml(block.body)}</p></aside>`
     case 'section': return `<details${block.collapsedByDefault ? '' : ' open'}>\n<summary>${inlineHtml(block.title)}</summary>\n${block.blocks.map(child => blockHtml(child, context)).join('\n')}\n</details>`
     case 'component': return `<guoling-component name="${escapeAttribute(context.packageName(block.component.packageId))}"${block.wrap ? ` data-wrap="${block.wrap}"` : ''}></guoling-component>`
+    case 'course-component': return `<iframe src="../components/${escapeAttribute(block.name)}.html"${block.title ? ` title="${escapeAttribute(block.title)}"` : ''}${
+      block.height !== undefined ? ` height="${block.height}"` : ''}${block.wrap ? ` data-wrap="${block.wrap}"` : ''}></iframe>`
   }
 }
 
@@ -248,7 +251,7 @@ export function parseFlowHtml(html: string, options: { parse: PageParsePort; ass
       if (node.kind !== 'element') continue
       const tag = tagOf(node)
       if (tag === 'br') { out.push({ text: '\n', br: true, context }); continue }
-      if (tag === 'img' || tag === 'video' || tag === 'audio' || tag === 'figure') { hoisted.push(node); continue }
+      if (tag === 'img' || tag === 'video' || tag === 'audio' || tag === 'figure' || tag === 'iframe') { hoisted.push(node); continue }
       if (tag === 'script' || tag === 'style' || tag === 'template') continue
       let next: InlineContext = { ...context, style: applyCss(context.style, node) }
       if (tag === 'strong' || tag === 'b') next.style = { ...next.style, bold: true }
@@ -350,19 +353,21 @@ export function parseFlowHtml(html: string, options: { parse: PageParsePort; ass
     const tag = tagOf(element)
     const kind = tag === 'img' ? 'image' : tag === 'video' || tag === 'audio' ? tag : undefined
     const source = element.attributes.src ?? element.children.find((child): child is ElementNode => tagOf(child) === 'source')?.attributes.src
-    const meta = assetFor(source)
     if (!kind) return undefined
-    if (!meta || meta.kind !== kind) {
-      warn('flow-missing-asset', `讲义图片/媒体引用的素材不存在或类型不符，未写入：${source ?? '（无地址）'}；请先写入 assets/ 素材再引用`)
+    // The reference is kept as written; normalization binds it to the asset at that path, now or once it is written.
+    if (source === undefined || assetReferencePath(source) === null) {
+      warn('flow-missing-asset', `讲义图片/媒体只能引用 assets/ 下的素材，未写入：${source ?? '（无地址）'}`)
       return undefined
     }
+    const meta = assetFor(source)
+    if (meta && meta.kind !== kind) warn('flow-asset-kind', `${source} 不是${kind === 'image' ? '图片' : kind === 'video' ? '视频' : '音频'}素材，暂显示为待填占位`)
     const holder = figure ?? element
     const layout = holder.attributes['data-layout']
     const wrap = holder.attributes['data-wrap']
     const crop = holder.attributes['data-crop']?.trim().split(/\s+/).map(Number)
     const caption = figure?.children.find((child): child is ElementNode => tagOf(child) === 'figcaption')
     const altText = kind === 'image' ? element.attributes.alt : element.attributes['aria-label'] ?? element.attributes.title
-    return { id: stableFlowId('block'), type: 'media', assetId: meta.id, mediaKind: kind,
+    return { id: stableFlowId('block'), type: 'media', source, mediaKind: kind,
       ...(altText !== undefined ? { altText } : {}),
       ...(caption ? { caption: content(caption.children) } : {}),
       layout: layout === 'wide' || layout === 'full-width' ? layout : 'content-width',
@@ -370,6 +375,21 @@ export function parseFlowHtml(html: string, options: { parse: PageParsePort; ass
       ...(crop?.length === 4 && crop.every(Number.isFinite) ? { crop: { left: crop[0]!, top: crop[1]!, right: crop[2]!, bottom: crop[3]! } } : {}),
       ...(holder.attributes['data-crop-x'] !== undefined && Number.isFinite(Number(holder.attributes['data-crop-x'])) ? { cropX: Number(holder.attributes['data-crop-x']) } : {}),
       ...(holder.attributes['data-crop-y'] !== undefined && Number.isFinite(Number(holder.attributes['data-crop-y'])) ? { cropY: Number(holder.attributes['data-crop-y']) } : {}) }
+  }
+
+  /** `<iframe src="../components/<名称>.html">`: a named component, a placeholder until `components/<名称>.html` exists. */
+  function courseComponent(element: ElementNode): Of<'course-component'> | undefined {
+    const name = element.attributes.src === undefined ? null : componentReferenceName(element.attributes.src)
+    if (name === null || courseComponentNameIssue(name)) {
+      warn('flow-iframe', '讲义中的 iframe 只能引用 components/<名称>.html 组件；其他 iframe 已忽略')
+      return undefined
+    }
+    const height = cssLength(element.attributes.height ?? Object.fromEntries(declarations(element.attributes.style)).height ?? '')
+    const wrap = element.attributes['data-wrap']
+    return { id: stableFlowId('block'), type: 'course-component', name,
+      ...(element.attributes.title ? { title: element.attributes.title } : {}),
+      ...(height !== undefined && height > 0 && height <= 10_000 ? { height } : {}),
+      ...(wrap === 'none' || wrap === 'left' || wrap === 'right' ? { wrap } : {}) }
   }
 
   function table(element: ElementNode): Of<'table'> {
@@ -502,7 +522,7 @@ export function parseFlowHtml(html: string, options: { parse: PageParsePort; ass
         if (node.children.some(child => tagOf(child) === 'style')) warn('flow-style', '讲义的样式由课程主题 theme.css 负责；页内 <style> 未保留')
       } else if (tag === 'title' || tag === 'meta' || tag === 'link' || tag === 'template') continue
       else if (tag === 'style') { flush(); warn('flow-style', '讲义的样式由课程主题 theme.css 负责；页内 <style> 未保留') }
-      else if (tag === 'iframe') { flush(); warn('flow-iframe', '讲义暂不能嵌入组件页面（iframe）；已忽略，互动请放在演示页') }
+      else if (tag === 'iframe') block(courseComponent(node))
       else if (tag === 'svg' || tag === 'canvas' || tag === 'form' || tag === 'object' || tag === 'embed') { flush(); warn('flow-unsupported', `讲义不支持 <${tag}>；图示请写成 assets/ 下的 SVG 素材后用 <img> 引用`) }
       else buffer.push(node)
     }

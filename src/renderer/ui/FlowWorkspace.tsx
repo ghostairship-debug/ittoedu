@@ -330,6 +330,7 @@ export function FlowWorkspace({ documentId, toolbarContainer, view, sessionToken
     return {
       openCrop: () => {
         const snapshot = matchesCurrent()
+        if (snapshot && !snapshot.assetId) { setError('待填素材到位后才能裁剪'); return }
         if (snapshot && captured.documentId) setCropTarget({ documentId: captured.documentId, projectId: captured.projectId,
           surfaceId: captured.surfaceId, generation: captured.generation, revision: captured.revision, block: snapshot })
       },
@@ -607,7 +608,7 @@ export function FlowWorkspace({ documentId, toolbarContainer, view, sessionToken
                 if (selected) figure.dataset.flowMediaSelected = 'true'; else delete figure.dataset.flowMediaSelected
                 figure.style.setProperty(FLOW_MEDIA_INLINE_SIZE_CUSTOM_PROPERTY, projection.inlineSize)
                 Object.assign(figure.style, { outline: selected ? '2px solid #2563eb' : '', outlineOffset: selected ? '3px' : '', width: wrapped ? projection.wrappedOuterInlineSize : FLOW_MEDIA_INLINE_SIZE_REFERENCE, maxWidth: wrapped ? '100%' : FLOW_MEDIA_INLINE_SIZE_REFERENCE, inlineSize: wrapped ? projection.wrappedOuterInlineSize : FLOW_MEDIA_INLINE_SIZE_REFERENCE, maxInlineSize: wrapped ? '100%' : FLOW_MEDIA_INLINE_SIZE_REFERENCE, cssFloat: wrapped ? block.wrap : 'none', position: 'relative', left: wrapped ? '' : '50%', transform: wrapped ? '' : 'translateX(-50%)', margin: wrapped ? block.wrap === 'left' ? '0 16px 8px 0' : '0 0 8px 16px' : '0' })
-                root.render(block.mediaKind === 'image' ? <FlowPaperMedia block={block} url={assetUrls[block.assetId]} /> : renderFlowPaperMedia(block, assetUrls))
+                root.render(block.mediaKind === 'image' || !block.assetId ? <FlowPaperMedia block={block} url={block.assetId ? assetUrls[block.assetId] : undefined} /> : renderFlowPaperMedia(block, assetUrls))
               }
               if (block.type === 'component') {
                 if ((block.wrap === 'left' || block.wrap === 'right') && host.parentElement) { host.parentElement.style.cssFloat = block.wrap; host.parentElement.style.width = '48%'; host.parentElement.style.margin = block.wrap === 'left' ? '0 16px 8px 0' : '0 0 8px 16px' }
@@ -626,7 +627,7 @@ export function FlowWorkspace({ documentId, toolbarContainer, view, sessionToken
       && cropTarget.surfaceId === view.surfaceId && cropTarget.generation === sessionToken.generation
       && cropTarget.revision === view.revision && <div style={{ position: 'absolute', inset: 0, zIndex: 40, display: 'grid', placeItems: 'center', background: '#0008' }}>
         <div style={{ width: 'min(520px, 90%)', maxHeight: '90%', overflow: 'auto', padding: 20, borderRadius: 8, background: '#fff', boxShadow: '0 18px 48px #0004' }}>
-          <FlowMediaCropEditor block={cropTarget.block} url={assetUrls[cropTarget.block.assetId]} onCancel={() => setCropTarget(null)} onConfirm={patch => {
+          <FlowMediaCropEditor block={cropTarget.block} url={cropTarget.block.assetId ? assetUrls[cropTarget.block.assetId] : undefined} onCancel={() => setCropTarget(null)} onConfirm={patch => {
             const live = current.current
             const liveBlock = live.view.blocks.find(entry => entry.blockId === cropTarget.block.id)?.block
             if (live.documentId !== cropTarget.documentId || live.view.projectId !== cropTarget.projectId
@@ -649,7 +650,7 @@ function renderFlowPaperMedia(
   block: Extract<FlowBlock, { type: 'media' }>,
   assetUrls: Record<string, string>,
 ): ReactNode {
-  const url = assetUrls[block.assetId]
+  const url = block.assetId ? assetUrls[block.assetId] : undefined
   if (block.mediaKind === 'image') {
     return (
       <img

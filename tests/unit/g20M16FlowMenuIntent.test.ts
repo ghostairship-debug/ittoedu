@@ -124,7 +124,7 @@ describe('Flow menu authoring intent', () => {
     const next = h.session.history.present
     const block = flowSurfaceIn(next, h.session.selection.surfaceId).blocks.find(entry => entry.type === 'media')
     expect(block?.type).toBe('media')
-    if (!block || block.type !== 'media') throw new Error('missing media')
+    if (!block || block.type !== 'media' || !block.assetId) throw new Error('missing media')
     expect(next.assets[block.assetId]?.kind).toBe('image')
     expect(Array.from(h.sidecar.files[block.assetId]!)).toEqual(Array.from(bytes))
     expect(before.assets[block.assetId]).toBeUndefined()
@@ -201,7 +201,7 @@ describe('Flow menu authoring intent', () => {
       source: { kind: 'new', name, mimeType, bytes: Uint8Array.from([1, 2, 3]), duration: 3 } })
     expect(receipt.ok, receipt.reason).toBe(true)
     const block = flowSurfaceIn(h.session.history.present, h.session.selection.surfaceId).blocks.find(entry => entry.type === 'media')
-    if (!block || block.type !== 'media') throw new Error('missing media')
+    if (!block || block.type !== 'media' || !block.assetId) throw new Error('missing media')
     expect(block.mediaKind).toBe(mediaKind)
     expect(h.session.history.present.assets[block.assetId]?.kind).toBe(mediaKind)
     expect(h.sidecar.files[block.assetId]).toBeDefined()

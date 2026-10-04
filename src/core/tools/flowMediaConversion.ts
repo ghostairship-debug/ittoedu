@@ -13,7 +13,9 @@ export function floatFlowMediaBlock(
   if (!source || source.block.type !== 'media') throw new Error('找不到正文媒体')
   if (!input.anchor || !findFlowBlockRecursive(surface.blocks, input.anchor.blockId)) throw new Error('找不到当前页的挂靠段落')
   if (source.block.mediaKind === 'audio') throw new Error('音频不支持转换为纸面 Native')
-  if (!document.assets[source.block.assetId] || document.assets[source.block.assetId]?.kind !== source.block.mediaKind) throw new Error('正文媒体素材无效')
+  const assetId = source.block.assetId
+  if (!assetId) throw new Error('正文媒体还是待填素材，素材到位后才能转换为纸面对象')
+  if (document.assets[assetId]?.kind !== source.block.mediaKind) throw new Error('正文媒体素材无效')
   const layerItemId = stableFlowId('media', input.layerItemId)
   const captionBlockId = source.block.caption ? stableFlowId('block') : undefined
   const sourceIsAnchor = input.anchor.blockId === input.blockId
@@ -22,7 +24,7 @@ export function floatFlowMediaBlock(
     const target = flowSurfaceIn(draft, input.surfaceId)
     const found = findFlowBlockRecursive(target.blocks, input.blockId)!
     const media = found.block as FlowMediaBlock
-    const item = nativeMediaOverlay(draft, { assetId: media.assetId, mediaKind: media.mediaKind as 'image' | 'video', id: layerItemId, label: media.altText })
+    const item = nativeMediaOverlay(draft, { assetId, mediaKind: media.mediaKind as 'image' | 'video', id: layerItemId, label: media.altText })
     item.frame = { ...input.frame }
     if (item.content.nativeType === 'image' && media.mediaKind === 'image') {
       if (media.crop) item.content.data.crop = { ...media.crop }

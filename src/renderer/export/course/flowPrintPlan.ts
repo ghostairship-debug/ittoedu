@@ -56,7 +56,8 @@ export type FlowPrintNode =
       type: 'media'
       blockId: string
       mediaKind: 'image' | 'audio' | 'video'
-      assetId: string
+      /** Absent while the block is a pending slot (`source` without an asset yet). */
+      assetId?: string
       fallbackLabel: string
       altText?: string
       /** Derived static projection only; not part of the authored Flow block. */
@@ -82,7 +83,7 @@ export type FlowPrintNode =
       type: 'component'
       blockId: string
       fallbackLabel: string
-      staticFallbackAssetId: string
+      staticFallbackAssetId?: string
     }
 
 export interface FlowPrintPlan {
@@ -333,8 +334,8 @@ function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
         type: 'media',
         blockId: block.id,
         mediaKind: block.mediaKind,
-        assetId: block.assetId,
-        fallbackLabel: block.altText?.trim() || (block.caption ? plainDocumentText(block.caption).trim() : undefined) || block.assetId,
+        ...(block.assetId ? { assetId: block.assetId } : {}),
+        fallbackLabel: block.altText?.trim() || (block.caption ? plainDocumentText(block.caption).trim() : undefined) || block.source || block.assetId || '',
         ...(block.altText ? { altText: block.altText } : {}),
         ...(block.caption ? { caption: block.caption } : {}),
         ...(block.crop ? { crop: block.crop } : {}),
@@ -366,6 +367,12 @@ function printNodesForBlock(block: FlowBlock): FlowPrintNode[] {
         blockId: block.id,
         fallbackLabel: `${block.component.packageId}@${block.component.version}`,
         staticFallbackAssetId: block.staticFallbackAssetId,
+      }]
+    case 'course-component':
+      return [{
+        type: 'component',
+        blockId: block.id,
+        fallbackLabel: block.title || block.name,
       }]
   }
 }
@@ -407,7 +414,7 @@ function printNodeToHtml(
     case 'formula':
       return `<p data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="formula">${richTextToHtml({ inlines: [{ type: 'math', formulaId: node.blockId, latex: node.latex, accessibleText: node.accessibleText, style: node.style }] }, true)}</p>`
     case 'media': {
-      const assetUrl = node.mediaKind === 'image'
+      const assetUrl = node.mediaKind === 'image' && node.assetId
         ? options.resolveAssetUrl?.(node.assetId)?.trim()
         : undefined
       if (assetUrl) {
@@ -423,7 +430,7 @@ function printNodeToHtml(
           node.caption ? `<figcaption>${richTextToHtml(node.caption)}</figcaption>` : ''
         }</figure>`
       }
-      return `<figure data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="media-fallback"><p>[媒体后备：${escapeHtml(node.fallbackLabel)}]</p>${node.caption ? `<figcaption>${richTextToHtml(node.caption)}</figcaption>` : ''}</figure>`
+      return `<figure data-flow-print-block="${escapeHtml(node.blockId)}" data-flow-print="media-fallback"><p>[${node.assetId ? '媒体后备' : '待填素材'}：${escapeHtml(node.fallbackLabel)}]</p>${node.caption ? `<figcaption>${richTextToHtml(node.caption)}</figcaption>` : ''}</figure>`
     }
     case 'code':
       return `<pre data-flow-print-block="${escapeHtml(node.blockId)}"><code>${escapeHtml(node.code)}</code></pre>`

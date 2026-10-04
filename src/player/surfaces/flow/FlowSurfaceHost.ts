@@ -107,7 +107,7 @@ import {
 } from '../publishedCourseState'
 import { capturePublishedSurfacePng } from '../publishedCapture'
 import { mountWebComposition, type WebCompositionMountHandle } from '../../composition/mountWebComposition'
-import { applyThemeVariables } from '../../composition/compositionHostDocument'
+import { applyThemeVariables, pendingMediaElement, placeholderElement } from '../../composition/compositionHostDocument'
 import { courseThemeStyleText, courseThemeVariables } from '../../../shared/contracts/design-v1/theme'
 
 type FlowRuntimeFailurePhase = 'register' | 'create' | 'lifecycle' | 'destroy'
@@ -1975,8 +1975,11 @@ function renderBlockDom(
         figure.dataset.flowMediaInlineSize = projection.inlineSize
       }
 
-      const url = resolvePlaybackAssetUrl(options.playback, block.assetId, options.resolveAsset)
-      if (block.mediaKind === 'image' && url) {
+      const url = block.assetId ? resolvePlaybackAssetUrl(options.playback, block.assetId, options.resolveAsset) : undefined
+      if (!block.assetId) {
+        // A written asset slot that nothing fills yet.
+        figure.appendChild(pendingMediaElement(dom, block))
+      } else if (block.mediaKind === 'image' && url) {
         const image = dom.createElement('img')
         image.alt = block.altText ?? ''
         if (block.crop) {
@@ -2170,6 +2173,21 @@ function renderBlockDom(
       }
       if (options.deferComponentMount) options.deferComponentMount(mountInstance)
       else mountInstance()
+      parent.appendChild(figure)
+      return
+    }
+    case 'course-component': {
+      const figure = assignBlock(dom.createElement('figure'))
+      figure.className = 'flow-block-course-component'
+      figure.style.position = 'relative'
+      figure.style.height = `${block.height ?? FLOW_COMPONENT_BLOCK_HEIGHT}px`
+      figure.style.margin = '0'
+      if (block.wrap === 'left' || block.wrap === 'right') {
+        figure.style.width = '48%'
+        figure.style.float = block.wrap
+        figure.style.margin = block.wrap === 'left' ? '0 16px 8px 0' : '0 0 8px 16px'
+      } else figure.style.width = '100%'
+      figure.appendChild(placeholderElement(dom, '待填组件', block.title || block.name))
       parent.appendChild(figure)
       return
     }
