@@ -214,8 +214,13 @@ test('M03-T07 existing and manual objects use compact properties; Flow paragraph
     if (!replaced || replaced.kind !== 'native' || replaced.content.nativeType !== 'image') throw new Error('Replaced image missing')
     expect(Buffer.from(archive.assetFiles[replaced.content.data.assetId]!)).toEqual(readFileSync(replacementFile))
     const replacedAudio = flowBlocks(saved).find(block => block.id === audioBlock.id)
-    if (!replacedAudio || replacedAudio.type !== 'media') throw new Error('Replaced Flow audio missing')
-    expect(Buffer.from(archive.assetFiles[replacedAudio.assetId]!)).toEqual(readFileSync(replacementAudio))
+    if (!replacedAudio || replacedAudio.type !== 'media' || replacedAudio.mediaKind !== 'audio' || !replacedAudio.assetId)
+      throw new Error('Replaced Flow audio missing')
+    const audioAsset = archive.project.assets[replacedAudio.assetId]
+    if (!audioAsset || audioAsset.kind !== 'audio') throw new Error('Replaced Flow audio asset missing')
+    const audioBytes = archive.assetFiles[replacedAudio.assetId]
+    if (!audioBytes) throw new Error('Replaced Flow audio bytes missing')
+    expect(Buffer.from(audioBytes)).toEqual(readFileSync(replacementAudio))
     await page.locator('.workspace-document-tabs').getByRole('button', { name: `关闭 ${filename}`, exact: true }).click()
     await tree.getByRole('button', { name: filename, exact: true }).dblclick()
     const reopenedId = await frame.getAttribute('data-document-id')

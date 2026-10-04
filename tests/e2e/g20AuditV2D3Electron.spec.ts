@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { createCourseProjectArchive, openCourseProjectArchive } from '../../src/core/drivers/codecs/courseProjectArchive'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
-import type { ToolResult } from '../../src/shared/workbench/tools'
+import type { ToolResult, ToolTarget } from '../../src/shared/workbench/tools'
 import { liveCourse } from './helpers/g20M15Harness'
 import { openInWorkbench, root } from './helpers/g20M19Harness'
 import { canvasReady } from './helpers/g20M21Harness'
@@ -30,6 +30,7 @@ function overflowSource(count: number): string {
 const smallSource = `CoursewareRuntime.define({runtimeApiVersion:2,create(ctx){var p=document.createElement('p');p.textContent='另一个对象';p.style.cssText='position:absolute;left:8px;top:8px;font:16px sans-serif;';ctx.dom.root.appendChild(p);return{destroy:function(){p.remove()}}}});`
 
 type Discovery = { targets: Array<{ text?: string; source?: string; kind?: string }>; truncated?: boolean; notice?: string }
+type ListedTarget = { target: string; label: string; kind: ToolTarget['kind'] }
 
 async function closeApp(app: ElectronApplication | undefined) {
   await app?.evaluate(({ app: electronApp, BrowserWindow }) => {
@@ -82,32 +83,44 @@ test('D3: real Electron MCP observes Runtime auto-target truncation across add/d
     await canvasReady(page)
     await expect(page.locator('.published-authoring-host [data-d3-add]')).toBeVisible({ timeout: 60_000 })
 
-    const granted = await page.evaluate(async ({ folder, file }) => {
+    const connection = await page.evaluate(async ({ folder, file }) => {
       const desktop = window.desktopAPI
       const workspaceId = (await desktop.execution!.workspace(folder)).workspace.workspaceId
-      const conversation = await desktop.execution!.createConversation(workspaceId, 'D3 真实宿主截断验证')
       const document = (await desktop.documents!.list()).find(entry => entry.binding.kind === 'file' && entry.binding.path.endsWith(file))
       if (!document || document.model.kind !== 'course-v9') throw new Error('正式课件未打开')
       const location = document.model.project.locations.find(entry => entry.kind === 'slide-scene')
       if (!location) throw new Error('缺少 Slide 位置')
-      const result = await desktop.externalMcp!.grant({ workspaceId, conversationId: conversation.conversationId,
-        expectedRevision: conversation.revision, instruction: '观察动态图文目标上限',
-        documents: [{ documentId: document.documentId, epoch: document.epoch, revision: document.revision,
-          writable: [{ kind: 'course-object', locationId: location.id, itemId: 'quiz' },
-            { kind: 'course-object', locationId: location.id, itemId: 'd3-secondary-runtime' }] }] })
-      return { connection: result.connection }
+      const status = await desktop.externalMcp!.status()
+      if (status.state !== 'running') throw new Error(`Resident MCP 未运行：${status.message ?? status.state}`)
+      return { endpoint: status.endpoint, bearer: await desktop.externalMcp!.revealToken(), workspaceId,
+        documentId: document.documentId, locationLabel: location.label }
     }, { folder: workspace, file: COURSE })
 
     client = new Client({ name: 'guoling-d3-audit-e2e', version: '1' })
-    const transport = new StreamableHTTPClientTransport(new URL(granted.connection.endpoint),
-      { requestInit: { headers: { Authorization: `Bearer ${granted.connection.bearer}` } } })
+    const transport = new StreamableHTTPClientTransport(new URL(connection.endpoint),
+      { requestInit: { headers: { Authorization: `Bearer ${connection.bearer}` } } })
     await client.connect(transport)
-    const resource = await client.readResource({ uri: 'guoling://task/context' })
-    const body = resource.contents[0]
-    if (!body || !('text' in body)) throw new Error('MCP 上下文不是文字资源')
-    const context = JSON.parse(body.text) as { documents: Array<{ writable: Array<{ target: string }> }> }
-    const handles = context.documents[0]?.writable.map(item => item.target) ?? []
+    const readTool = async <T,>(name: string, input: Record<string, unknown>): Promise<T> => {
+      const response = await client!.callTool({ name, arguments: { arguments: input } })
+      const result = (response.structuredContent as { result: ToolResult }).result
+      if (result.kind !== 'read') throw new Error(`${name}: ${JSON.stringify(result)}`)
+      return result.data as T
+    }
+    await readTool('workspace.switch', { workspaceId: connection.workspaceId })
+    const opened = await readTool<{ target: string; documentId: string }>('file.open', { path: COURSE })
+    expect(opened.documentId).toBe(connection.documentId)
+    await readTool('tools.load', { families: ['content'] })
+    const locations = await readTool<ListedTarget[]>('listChildren', { target: opened.target })
+    const location = locations.find(entry => entry.kind === 'course-location' && entry.label === connection.locationLabel)
+    if (!location) throw new Error('MCP 未返回 Slide 页面句柄')
+    const nodes = await readTool<ListedTarget[]>('listChildren', { target: location.target })
+    const handles = [primary.label, secondary.label].map(label => {
+      const matches = nodes.filter(entry => entry.kind === 'course-object' && entry.label === label)
+      expect(matches).toHaveLength(1)
+      return matches[0]!.target
+    })
     expect(handles).toHaveLength(2)
+    expect(new Set(handles).size).toBe(2)
     const discover = async (target: string): Promise<Discovery> => {
       const response = await client!.callTool({ name: 'content.targets', arguments: { arguments: { target } } })
       const result = (response.structuredContent as { result: ToolResult }).result

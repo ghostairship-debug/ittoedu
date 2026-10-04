@@ -4,13 +4,14 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
-import type { ToolResult } from '../../src/shared/workbench/tools'
+import type { ToolResult, ToolTarget } from '../../src/shared/workbench/tools'
 import { openInWorkbench, root } from './helpers/g20M19Harness'
 import { canvasReady } from './helpers/g20M21Harness'
 import { liveCourse, liveCourseState, QUESTIONS } from './helpers/g20M15Harness'
 
 const COURSE = 'm15-dynamic-bridge.h5lesson'
 type Discovered = { target: string; kind: 'text' | 'image'; source: 'declared' | 'host-observed'; text?: string }
+type ListedTarget = { target: string; label: string; kind: ToolTarget['kind'] }
 
 test('M27-T03: real M15 host hits publish through Main and external MCP commits a Runtime text edit', async () => {
   test.skip(process.platform !== 'win32', 'Windows desktop acceptance path.')
@@ -42,36 +43,46 @@ test('M27-T03: real M15 host hits publish through Main and external MCP commits 
       .getByRole('button', { name: new RegExp(`^${QUESTIONS[0]}`) })).toBeVisible({ timeout: 60_000 })
     await expect(page.locator('.published-authoring-host [data-m15-card-picture]')).toBeVisible()
 
-    // The grant freezes the actual document identity and only these two canonical objects.
-    const granted = await page.evaluate(async ({ folder, file }) => {
+    // The resident session opens this workspace file and discovers its two canonical objects.
+    const connection = await page.evaluate(async ({ folder, file }) => {
       const desktop = window.desktopAPI
       const workspaceId = (await desktop.execution!.workspace(folder)).workspace.workspaceId
-      const conversation = await desktop.execution!.createConversation(workspaceId, '动态图文宿主桥接验证')
       const document = (await desktop.documents!.list()).find(entry => entry.binding.kind === 'file'
         && entry.binding.path.endsWith(file))
       if (!document || document.model.kind !== 'course-v9') throw new Error('正式课件未打开')
       const location = document.model.project.locations.find(entry => entry.kind === 'slide-scene')
       if (!location) throw new Error('缺少 Slide 位置')
-      const result = await desktop.externalMcp!.grant({ workspaceId, conversationId: conversation.conversationId,
-        expectedRevision: conversation.revision, instruction: '验证宿主观察到的图文目标，并修改小测验标题',
-        documents: [{ documentId: document.documentId, epoch: document.epoch, revision: document.revision,
-          writable: [{ kind: 'course-object', locationId: location.id, itemId: 'quiz' },
-            { kind: 'course-object', locationId: location.id, itemId: 'card' }] }] })
-      return { connection: result.connection, revision: document.revision }
+      const status = await desktop.externalMcp!.status()
+      if (status.state !== 'running') throw new Error(`Resident MCP 未运行：${status.message ?? status.state}`)
+      return { endpoint: status.endpoint, bearer: await desktop.externalMcp!.revealToken(), workspaceId,
+        documentId: document.documentId, revision: document.revision, locationLabel: location.label }
     }, { folder: workspace, file: COURSE })
-    evidence.documentRevision = granted.revision
+    evidence.documentRevision = connection.revision
     client = new Client({ name: 'guoling-m15-host-bridge-e2e', version: '1' })
-    const transport = new StreamableHTTPClientTransport(new URL(granted.connection.endpoint),
-      { requestInit: { headers: { Authorization: `Bearer ${granted.connection.bearer}` } } })
+    const transport = new StreamableHTTPClientTransport(new URL(connection.endpoint),
+      { requestInit: { headers: { Authorization: `Bearer ${connection.bearer}` } } })
     await client.connect(transport)
-    const resource = await client.readResource({ uri: 'guoling://task/context' })
-    const body = resource.contents[0]
-    if (!body || !('text' in body)) throw new Error('MCP 上下文不是文字资源')
-    const context = JSON.parse(body.text) as { documents: Array<{ writable: Array<{ target: string }> }>;
-      operationTickets: string[] }
-    const [quizObject, cardObject] = context.documents[0]!.writable
-    if (!quizObject?.target || !cardObject?.target || !context.operationTickets[0])
-      throw new Error('外部 MCP 未发放对象句柄或操作票据')
+    const readTool = async <T,>(name: string, input: Record<string, unknown>): Promise<T> => {
+      const response = await client!.callTool({ name, arguments: { arguments: input } })
+      const result = (response.structuredContent as { result: ToolResult }).result
+      if (result.kind !== 'read') throw new Error(`${name}: ${JSON.stringify(result)}`)
+      return result.data as T
+    }
+    await readTool('workspace.switch', { workspaceId: connection.workspaceId })
+    const opened = await readTool<{ target: string; documentId: string }>('file.open', { path: COURSE })
+    expect(opened.documentId).toBe(connection.documentId)
+    await readTool('tools.load', { families: ['content'] })
+    const locations = await readTool<ListedTarget[]>('listChildren', { target: opened.target })
+    const location = locations.find(entry => entry.kind === 'course-location' && entry.label === connection.locationLabel)
+    if (!location) throw new Error('MCP 未返回 Slide 页面句柄')
+    const nodes = await readTool<ListedTarget[]>('listChildren', { target: location.target })
+    const [quizObject, cardObject] = ['小测验', '词语卡片'].map(label => {
+      const matches = nodes.filter(entry => entry.kind === 'course-object' && entry.label === label)
+      expect(matches).toHaveLength(1)
+      return matches[0]!
+    })
+    if (!quizObject || !cardObject) throw new Error('MCP 未返回两个对象句柄')
+    expect(quizObject.target).not.toBe(cardObject.target)
     const discover = async (objectTarget: string): Promise<Discovered[]> => {
       const response = await client!.callTool({ name: 'content.targets', arguments: { arguments: { target: objectTarget } } })
       const result = (response.structuredContent as { result: ToolResult }).result
@@ -94,7 +105,7 @@ test('M27-T03: real M15 host hits publish through Main and external MCP commits 
 
     const changedText = '桥接验证：选出正确图片'
     const applied = await client.callTool({ name: 'content.update', arguments: {
-      ticket: context.operationTickets[0], arguments: { target: quizText.target, text: changedText },
+      arguments: { target: quizText.target, text: changedText },
     } })
     const receipt = (applied.structuredContent as { result: ToolResult }).result
     expect(receipt).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
@@ -102,7 +113,7 @@ test('M27-T03: real M15 host hits publish through Main and external MCP commits 
       { original: QUESTIONS[0], region: 'div>h2', text: changedText },
     ])
     const state = await liveCourseState(page, COURSE)
-    expect(state.revision).toBe(granted.revision + 1)
+    expect(state.revision).toBe(connection.revision + 1)
     await expect(page.locator('.published-authoring-host [data-m15-question]')).toHaveText(changedText, { timeout: 60_000 })
     evidence.receipt = receipt
     evidence.final = { revision: state.revision, overrides: state.quiz.overrides }

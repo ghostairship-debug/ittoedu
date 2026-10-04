@@ -8,7 +8,7 @@ import { componentContentSha256 } from '../../src/shared/componentContentIntegri
 import { componentPackageMeta } from '../../src/shared/componentPackageMeta'
 import { courseProjectDocumentSchema } from '../../src/shared/courseProjectSchema'
 import { BACKGROUND_E2E_ENV } from '../../src/main/windowVisibility'
-import type { ToolResult } from '../../src/shared/workbench/tools'
+import type { ToolResult, ToolTarget } from '../../src/shared/workbench/tools'
 import { cardPackage, liveCourse } from './helpers/g20M15Harness'
 import { openInWorkbench, root } from './helpers/g20M19Harness'
 import { canvasReady } from './helpers/g20M21Harness'
@@ -40,6 +40,7 @@ const SOURCE = `window.CoursewareComponent.define({id:'m15-card',runtimeApiVersi
 }});`
 
 type Discovery = { targets: Array<{ text?: string; source?: string; kind?: string }>; truncated?: boolean; notice?: string }
+type ListedTarget = { target: string; label: string; kind: ToolTarget['kind'] }
 
 async function closeApp(app: ElectronApplication | undefined) {
   await app?.evaluate(({ app: electronApp, BrowserWindow }) => {
@@ -113,31 +114,43 @@ test('D3: real Electron Component instances preserve declared targets and publis
     await expect(currentDeclared).toBeVisible()
     await expect(otherDeclared).toBeVisible()
 
-    const granted = await page.evaluate(async ({ folder, file }) => {
+    const connection = await page.evaluate(async ({ folder, file }) => {
       const desktop = window.desktopAPI
       const workspaceId = (await desktop.execution!.workspace(folder)).workspace.workspaceId
-      const conversation = await desktop.execution!.createConversation(workspaceId, 'D3 Component 真实宿主截断验证')
       const document = (await desktop.documents!.list()).find(entry => entry.binding.kind === 'file' && entry.binding.path.endsWith(file))
       if (!document || document.model.kind !== 'course-v9') throw new Error('正式课件未打开')
       const location = document.model.project.locations.find(entry => entry.kind === 'slide-scene')
       if (!location) throw new Error('缺少 Slide 位置')
-      const result = await desktop.externalMcp!.grant({ workspaceId, conversationId: conversation.conversationId,
-        expectedRevision: conversation.revision, instruction: '观察组件实例动态图文目标上限',
-        documents: [{ documentId: document.documentId, epoch: document.epoch, revision: document.revision,
-          writable: [{ kind: 'course-object', locationId: location.id, itemId: 'card' },
-            { kind: 'course-object', locationId: location.id, itemId: 'd3-secondary-component' }] }] })
-      return { connection: result.connection, documentRevision: document.revision }
+      const status = await desktop.externalMcp!.status()
+      if (status.state !== 'running') throw new Error(`Resident MCP 未运行：${status.message ?? status.state}`)
+      return { endpoint: status.endpoint, bearer: await desktop.externalMcp!.revealToken(), workspaceId,
+        documentId: document.documentId, documentRevision: document.revision, locationLabel: location.label }
     }, { folder: workspace, file: COURSE })
 
     client = new Client({ name: 'guoling-d3-component-audit-e2e', version: '1' })
-    await client.connect(new StreamableHTTPClientTransport(new URL(granted.connection.endpoint),
-      { requestInit: { headers: { Authorization: `Bearer ${granted.connection.bearer}` } } }))
-    const resource = await client.readResource({ uri: 'guoling://task/context' })
-    const body = resource.contents[0]
-    if (!body || !('text' in body)) throw new Error('MCP 上下文不是文字资源')
-    const context = JSON.parse(body.text) as { documents: Array<{ writable: Array<{ target: string }> }> }
-    const handles = context.documents[0]?.writable.map(item => item.target) ?? []
+    await client.connect(new StreamableHTTPClientTransport(new URL(connection.endpoint),
+      { requestInit: { headers: { Authorization: `Bearer ${connection.bearer}` } } }))
+    const readTool = async <T,>(name: string, input: Record<string, unknown>): Promise<T> => {
+      const response = await client!.callTool({ name, arguments: { arguments: input } })
+      const result = (response.structuredContent as { result: ToolResult }).result
+      if (result.kind !== 'read') throw new Error(`${name}: ${JSON.stringify(result)}`)
+      return result.data as T
+    }
+    await readTool('workspace.switch', { workspaceId: connection.workspaceId })
+    const opened = await readTool<{ target: string; documentId: string }>('file.open', { path: COURSE })
+    expect(opened.documentId).toBe(connection.documentId)
+    await readTool('tools.load', { families: ['content'] })
+    const locations = await readTool<ListedTarget[]>('listChildren', { target: opened.target })
+    const location = locations.find(entry => entry.kind === 'course-location' && entry.label === connection.locationLabel)
+    if (!location) throw new Error('MCP 未返回 Slide 页面句柄')
+    const nodes = await readTool<ListedTarget[]>('listChildren', { target: location.target })
+    const handles = [primary.label, secondary.label].map(label => {
+      const matches = nodes.filter(entry => entry.kind === 'course-object' && entry.label === label)
+      expect(matches).toHaveLength(1)
+      return matches[0]!.target
+    })
     expect(handles).toHaveLength(2)
+    expect(new Set(handles).size).toBe(2)
     const discover = async (target: string): Promise<Discovery> => {
       const response = await client!.callTool({ name: 'content.targets', arguments: { arguments: { target } } })
       const result = (response.structuredContent as { result: ToolResult }).result
@@ -160,7 +173,7 @@ test('D3: real Electron Component instances preserve declared targets and publis
     }, { timeout: 60_000, intervals: [250, 500, 1000] }).toBe(true)
     const initialValues = values(initial.current.data)
     const initialOther = values(initial.other.data)
-    evidence.initial = { targetCount: initialValues.length, otherCount: initialOther.length, declaredOverlayCount: 2, documentRevision: granted.documentRevision }
+    evidence.initial = { targetCount: initialValues.length, otherCount: initialOther.length, declaredOverlayCount: 2, documentRevision: connection.documentRevision }
 
     await page.locator('.published-authoring-host [data-d3-component-add="当前"]').dispatchEvent('click')
     await expect(currentList.locator('span')).toHaveCount(401)
@@ -204,7 +217,7 @@ test('D3: real Electron Component instances preserve declared targets and publis
       if (!document) throw new Error('正式课件已关闭')
       return document.revision
     }, COURSE)
-    expect(revision).toBe(granted.documentRevision)
+    expect(revision).toBe(connection.documentRevision)
     evidence.cleared = { targetCount: cleared.current.data.targets.length, otherUnchanged: true, noticeCleared: true, documentRevision: revision }
     writeFileSync(join(directory, 'evidence.json'), JSON.stringify(evidence, null, 2))
     // An actual Component instance needs a truthful per-instance limit diagnostic.
