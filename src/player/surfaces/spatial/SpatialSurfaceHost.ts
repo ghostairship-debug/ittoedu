@@ -93,6 +93,8 @@ import {
 } from '../publishedCapture'
 import type { SurfaceCapture, SurfaceCaptureRequest } from '../SurfaceHost'
 import { mountWebComposition, type WebCompositionMountHandle } from '../../composition/mountWebComposition'
+import { withCompositionNodeAttributes } from '../../../shared/composition/stateNodes'
+import { spatialFragmentNodeAttributes, spatialFragmentStepId, spatialFragmentStepIndex, spatialSteppingStops } from '../../../shared/composition/spatialStopSteps'
 import { applyThemeVariables } from '../../composition/compositionHostDocument'
 import { courseThemeStyleText, courseThemeVariables } from '../../../shared/contracts/design-v1/theme'
 import { createPublishedSurfaceRuntimeSession } from '../runtime/publishedSurfaceRuntimeMount'
@@ -602,6 +604,8 @@ export class SpatialSurfaceHost {
   readonly #compositionSession = createPublishedSurfaceRuntimeSession()
   #preparedRuntimeActivation: { locationId: string; forced: boolean } | null = null
   #pendingRuntimeActivation: { locationId: string; forced: boolean } | null = null
+  #fragmentStep = 0
+  #preparedPresentationState: { locationId: string; step: number; preserveCarriers: boolean } | null = null
 
   static fromPublishedCourse(
     course: PublishedCourseV2Payload,
@@ -700,6 +704,30 @@ export class SpatialSurfaceHost {
     // target cannot mutate either host.
     enterSpatialRuntimeLocation(this.#session, locationId)
     this.#preparedRuntimeActivation = { locationId, forced }
+  }
+
+  getPublishedPresentationStateId(): string | null {
+    const { surface, locations } = this.#session.input
+    return spatialSteppingStops(surface, locations).has(this.locationId) ? spatialFragmentStepId(this.#fragmentStep) : null
+  }
+
+  validatePublishedPresentationState(locationId: string, stateId: string | undefined): boolean {
+    const { surface, locations } = this.#session.input
+    if (!locations.some(location => location.id === locationId && location.kind === 'spatial-camera' && location.surfaceId === this.id)) return false
+    if (stateId === undefined) return true
+    const step = spatialFragmentStepIndex(stateId)
+    const stop = spatialSteppingStops(surface, locations).get(locationId)
+    return step !== undefined && stop !== undefined && step <= stop.count
+  }
+
+  preparePublishedPresentationState(locationId: string, stateId: string | undefined, preserveCarriers = false): boolean {
+    if (!this.validatePublishedPresentationState(locationId, stateId)) return false
+    this.#preparedPresentationState = { locationId, step: spatialFragmentStepIndex(stateId) ?? 0, preserveCarriers }
+    return true
+  }
+
+  cancelPreparedPublishedPresentationState(locationId: string): void {
+    if (this.#preparedPresentationState?.locationId === locationId) this.#preparedPresentationState = null
   }
 
   resetTeacherControllerSession(scope: 'surface' | 'course'): void {
@@ -956,7 +984,9 @@ export class SpatialSurfaceHost {
     const previousLocationId = this.#session.locationId
     const result = spatialRuntimeGoNext(this.#session)
     if (result.session.locationId !== previousLocationId) {
+      this.#fragmentStep = 0
       this.#commitLocationGeneration(result.session)
+      await this.#updateFragmentContents()
     } else {
       this.#session = result.session
       this.#updateWorldTransform()
@@ -970,7 +1000,9 @@ export class SpatialSurfaceHost {
     const previousLocationId = this.#session.locationId
     const result = spatialRuntimeGoPrevious(this.#session)
     if (result.session.locationId !== previousLocationId) {
+      this.#fragmentStep = 0
       this.#commitLocationGeneration(result.session)
+      await this.#updateFragmentContents()
     } else {
       this.#session = result.session
       this.#updateWorldTransform()
@@ -981,6 +1013,8 @@ export class SpatialSurfaceHost {
   }
 
   async setLocationId(locationId: string): Promise<void> {
+    const previousLocationId = this.locationId
+    const previousStep = this.#fragmentStep
     const preparedActivation = this.#preparedRuntimeActivation
     const pendingActivation = this.#pendingRuntimeActivation
     this.#preparedRuntimeActivation = null
@@ -990,13 +1024,34 @@ export class SpatialSurfaceHost {
       : preparedActivation?.locationId === locationId
         ? preparedActivation
         : null
-    const nextSession = enterSpatialRuntimeLocation(this.#session, locationId)
+    const preparedState = this.#preparedPresentationState?.locationId === locationId ? this.#preparedPresentationState : null
+    // Validate the location before consuming state or changing the live camera.
+    const enteredSession = enterSpatialRuntimeLocation(this.#session, locationId)
+    const inStopStep = preparedState?.preserveCarriers === true && locationId === this.locationId && this.#session.active
+    const nextSession = inStopStep ? this.#session : enteredSession
+    this.#preparedPresentationState = null
+    this.#fragmentStep = preparedState?.step ?? 0
     if (pendingActivation !== null) this.#carrierSideEffects.activate()
+    const replaceCarriers = activation?.forced === true && preparedState?.preserveCarriers !== true
     this.#commitLocationGeneration(
       nextSession,
-      activation?.forced === true,
+      replaceCarriers,
       pendingActivation !== null,
     )
+    if (!replaceCarriers && (previousLocationId !== locationId || previousStep !== this.#fragmentStep)) {
+      await this.#updateFragmentContents()
+    }
+  }
+
+  async #updateFragmentContents(): Promise<void> {
+    const { surface, locations } = this.#session.input
+    const attributes = spatialFragmentNodeAttributes(surface, locations, this.locationId, this.#fragmentStep)
+    await Promise.all([...this.#records.values()].map(record => {
+      const item = record.entry.item
+      return record.entry.source === 'world' && item.kind === 'composition' && attributes.has(item.layerItemId)
+        ? record.compositionHandle?.update(withCompositionNodeAttributes(item.content, attributes.get(item.layerItemId)))
+        : undefined
+    }))
   }
 
   async setPlaybackPath(playbackPathId: string | null): Promise<void> {
@@ -1493,9 +1548,11 @@ export class SpatialSurfaceHost {
       Object.assign(wrapper.style, { position: 'absolute', boxSizing: 'border-box', overflow: 'hidden', transformOrigin: 'center center' })
       const mount = () => {
         const courseTheme = this.#session.input.courseTheme
+        const { surface, locations } = this.#session.input
+        const attributes = entry.source === 'world' ? spatialFragmentNodeAttributes(surface, locations, this.locationId, this.#fragmentStep).get(item.layerItemId) : undefined
         const handle = mountWebComposition(wrapper, {
           instanceId: item.layerItemId,
-          content: item.content,
+          content: withCompositionNodeAttributes(item.content, attributes),
           width: item.frame.width,
           height: item.frame.height,
           ...(courseTheme ? { theme: courseThemeStyleText(courseTheme, this.#resolveAsset) } : {}),

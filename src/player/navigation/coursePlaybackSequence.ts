@@ -2,6 +2,7 @@ import type { TeacherControllerAction } from '../../shared/teacherControllerConf
 
 import type { PublishedCourseV2Payload } from '../../shared/publishedCourseTypes'
 import type { CourseLocation, CourseProjectDocument } from '../../shared/courseProjectTypes'
+import { spatialFragmentStepId, spatialSteppingStops } from '../../shared/composition/spatialStopSteps'
 
 export function playbackSceneKey(location: CourseLocation): string {
   return location.kind === 'slide-scene'
@@ -55,6 +56,8 @@ export function buildCoursePlaybackSequence(
 ): readonly CoursePlaybackScene[] {
   const scenes: Array<Omit<CoursePlaybackScene, 'steps'> & { steps: CoursePlaybackStep[] }> = []
   let previousKey: string | undefined
+  // A Spatial stop that follows an item steps through its fragments (`fragment_step_<k>`, 0 = arrival).
+  const steppingStops = new Map<string, ReturnType<typeof spatialSteppingStops>>()
   for (const location of payload.locations) {
     const surface = payload.surfaces.find(entry => entry.id === location.surfaceId)
     if (!surface) throw new Error(`Navigation surface ${location.surfaceId} is unavailable`)
@@ -86,7 +89,16 @@ export function buildCoursePlaybackSequence(
     if ((explicitStateId || presentation) && states.some(state => !state)) {
       throw new Error(`Navigation presentation state for ${location.id} is unavailable`)
     }
-    if (states.length) {
+    if (surface.type === 'spatial-2d' && !steppingStops.has(surface.id)) {
+      steppingStops.set(surface.id, spatialSteppingStops(surface, payload.locations))
+    }
+    const stepping = location.kind === 'spatial-camera' ? steppingStops.get(surface.id)?.get(location.id) : undefined
+    if (stepping) {
+      for (let step = 0; step <= stepping.count; step++) {
+        const stateId = spatialFragmentStepId(step)
+        scene.steps.push({ id: JSON.stringify([location.id, stateId]), locationId: location.id, stateId, name: step ? `步骤 ${step}` : location.label })
+      }
+    } else if (states.length) {
       for (const state of states) {
         if (!state) continue
         scene.steps.push({
