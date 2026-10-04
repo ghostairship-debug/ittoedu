@@ -1,10 +1,11 @@
 import { lookup } from 'node:dns/promises'
-import { createServer, request as httpRequest, type ClientRequest, type IncomingMessage, type ServerResponse } from 'node:http'
+import { createServer, request as httpRequest, type ClientRequest, type IncomingMessage, type RequestOptions, type ServerResponse } from 'node:http'
 import { connect as netConnect, isIP, type Socket } from 'node:net'
 import type { AddressInfo } from 'node:net'
 import type { Duplex } from 'node:stream'
 import { resolvePublicDnsOverHttps } from './publicDnsOverHttps'
 import { isPublicAddress, parsePublicUrl, resolveWithSyntheticFallback } from './publicHttp'
+import { openProxyTunnel, systemProxyRoute, type ProxyRouteResolver } from './systemProxy'
 
 type Address = { address: string; family: 4 | 6 }
 type DialOptions = { host: string; family: 4 | 6; port: number; timeout: number }
@@ -14,6 +15,8 @@ export interface PublicBrowserProxyOptions {
   resolve?: (hostname: string) => Promise<readonly Address[]>
   /** Test seam: production connects only to the numeric IP returned by resolve. */
   connect?: (options: DialOptions) => Socket
+  /** Test seam: production follows the system proxy after the same public checks. */
+  proxy?: ProxyRouteResolver
 }
 const HOP_HEADERS = new Set(['connection', 'proxy-connection', 'proxy-authorization', 'keep-alive',
   'transfer-encoding', 'te', 'trailer', 'upgrade'])
@@ -30,6 +33,7 @@ export class PublicBrowserProxy {
   private readonly testLoopbackOrigin?: string
   private readonly resolve: (hostname: string) => Promise<readonly Address[]>
   private readonly connect: (options: DialOptions) => Socket
+  private readonly proxy: ProxyRouteResolver
 
   constructor(options: PublicBrowserProxyOptions = {}) {
     this.testLoopbackOrigin = options.testLoopbackOrigin
@@ -37,6 +41,7 @@ export class PublicBrowserProxy {
       async () => (await lookup(hostname, { all: true })).map(value => ({ address: value.address, family: value.family as 4 | 6 })),
       () => resolvePublicDnsOverHttps(hostname, AbortSignal.timeout(10_000))))
     this.connect = options.connect ?? netConnect
+    this.proxy = options.proxy ?? systemProxyRoute
     this.server.on('connect', (request, socket, head) => { void this.tunnel(request, socket, head) })
     this.server.on('upgrade', (_request, socket) => {
       this.deniedRequests++
@@ -104,10 +109,20 @@ export class PublicBrowserProxy {
       const listed = String(headers.connection ?? '').split(',').map(value => value.trim().toLowerCase())
       for (const name of [...HOP_HEADERS, ...listed]) delete headers[name]
       headers.host = url.host
-      const outbound = httpRequest(url, { method: request.method, headers, timeout: 15_000, agent: false,
-        lookup: (_hostname, options, callback) => options.all
-          ? callback(null, [{ address: address.address, family: address.family }])
-          : callback(null, address.address, address.family) }, upstream => {
+      // Directly the socket is pinned to the checked address; through the system proxy the proxy reaches the checked host.
+      const route = await this.proxy(url.href)
+      let tunnel: Socket | undefined
+      // A failing system proxy is a gateway error, not a policy denial.
+      if (route.kind !== 'direct') try { tunnel = await openProxyTunnel(route, { host: url.hostname, port: Number(url.port) || 80 }, { timeoutMs: 15_000 }) }
+      catch { if (!response.headersSent) response.writeHead(502); response.end(); return }
+      if (tunnel) this.track(tunnel)
+      if (this.stopped) { tunnel?.destroy(); throw new Error('浏览器代理已停止') }
+      const options: RequestOptions = { method: request.method, headers, timeout: 15_000 }
+      if (tunnel) Object.assign(options, { createConnection: () => tunnel, defaultPort: 80 })
+      else Object.assign(options, { agent: false, lookup: ((_hostname, lookupOptions, callback) => lookupOptions.all
+        ? callback(null, [{ address: address.address, family: address.family }])
+        : callback(null, address.address, address.family)) satisfies NonNullable<RequestOptions['lookup']> })
+      const outbound = httpRequest(url, options, upstream => {
         upstream.on('error', () => response.destroy())
         if (this.stopped) { upstream.destroy(); response.destroy(); return }
         const responseHeaders = { ...upstream.headers }
@@ -146,16 +161,22 @@ export class PublicBrowserProxy {
       this.allowedRequests++
       const port = Number(url.port || 443)
       if (!Number.isSafeInteger(port) || port < 1 || port > 65535) throw new Error('连接端口无效')
-      const upstream = this.connect({ host: address.address, family: address.family, port, timeout: 15_000 })
+      const route = await this.proxy(url.href)
+      let upstream: Socket
+      if (route.kind === 'direct') upstream = this.connect({ host: address.address, family: address.family, port, timeout: 15_000 })
+      else try { upstream = await openProxyTunnel(route, { host: url.hostname, port }, { timeoutMs: 15_000 }) }
+      catch { client.end('HTTP/1.1 502 Bad Gateway\r\n\r\n'); return }
       this.track(upstream)
       let connected = false
-      upstream.once('connect', () => {
+      const ready = () => {
         if (this.stopped || client.destroyed) { upstream.destroy(); return }
         connected = true
         client.write('HTTP/1.1 200 Connection Established\r\n\r\n')
         if (head.length) upstream.write(head)
         client.pipe(upstream); upstream.pipe(client)
-      })
+      }
+      if (route.kind === 'direct') upstream.once('connect', ready)
+      else ready()
       upstream.on('timeout', () => upstream.destroy())
       upstream.on('error', () => {
         if (!connected) client.end('HTTP/1.1 502 Bad Gateway\r\n\r\n')

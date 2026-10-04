@@ -1,8 +1,10 @@
 import { lookup } from 'node:dns/promises'
-import { request as httpRequest } from 'node:http'
+import { request as httpRequest, type RequestOptions } from 'node:http'
 import { request as httpsRequest } from 'node:https'
-import { BlockList, isIP } from 'node:net'
+import { BlockList, isIP, type Socket } from 'node:net'
+import { connect as tlsConnect } from 'node:tls'
 import { resolvePublicDnsOverHttps } from './publicDnsOverHttps'
+import { openProxyTunnel, systemProxyRoute, type ProxyRoute, type ProxyRouteResolver } from './systemProxy'
 
 export class PublicHttpError extends Error {
   constructor(readonly code: string, message: string, readonly status?: number) { super(message); this.name = 'PublicHttpError' }
@@ -23,6 +25,8 @@ export interface PublicHttpOptions {
   headers?: { Accept?: string; 'User-Agent'?: string; 'Accept-Language'?: string }
   /** 响应正文超过此字节数时中止读取。 */
   maxBytes?: number
+  /** Test seam: production follows the system proxy for every hop. */
+  proxy?: ProxyRouteResolver
 }
 
 type RequestSettings = { headers: Record<string, string>; maxBytes?: number }
@@ -125,12 +129,24 @@ async function publicAddress(url: URL, resolver: NonNullable<PublicHttpOptions['
   return answers[0]!
 }
 
-function oneRequest(url: URL, address: { address: string; family: 4 | 6 }, signal: AbortSignal, activity: () => void, settings: RequestSettings): Promise<{ status: number; location?: string; contentType: string; charset?: string; bytes: Uint8Array }> {
+/** Through a proxy the checked host is reached by name; directly, the socket is pinned to the checked address. */
+async function proxiedConnection(url: URL, route: ProxyRoute, signal: AbortSignal): Promise<Socket | undefined> {
+  if (route.kind === 'direct') return undefined
+  const host = url.hostname.replace(/^\[|\]$/g, '')
+  const tunnel = await openProxyTunnel(route, { host, port: Number(url.port) || (url.protocol === 'https:' ? 443 : 80) }, { signal })
+  return url.protocol === 'https:' ? tlsConnect({ socket: tunnel, host, ...(isIP(host) ? {} : { servername: host }), ALPNProtocols: ['http/1.1'] }) : tunnel
+}
+
+function oneRequest(url: URL, address: { address: string; family: 4 | 6 }, connection: Socket | undefined, signal: AbortSignal, activity: () => void, settings: RequestSettings): Promise<{ status: number; location?: string; contentType: string; charset?: string; bytes: Uint8Array }> {
   return new Promise((resolve, reject) => {
     const client = url.protocol === 'https:' ? httpsRequest : httpRequest
-    const req = client(url, { method: 'GET', signal, headers: settings.headers, lookup: (_host, options, callback) => options.all
-        ? callback(null, [{ address: address.address, family: address.family }])
-        : callback(null, address.address, address.family) }, response => {
+    const requestOptions: RequestOptions = { method: 'GET', signal, headers: settings.headers }
+    // Without an agent the default port must be named, or Host would carry ":80"/":443".
+    if (connection) Object.assign(requestOptions, { createConnection: () => connection, defaultPort: url.protocol === 'https:' ? 443 : 80 })
+    else requestOptions.lookup = (_host, options, callback) => options.all
+      ? callback(null, [{ address: address.address, family: address.family }])
+      : callback(null, address.address, address.family)
+    const req = client(url, requestOptions, response => {
       activity()
       const status = response.statusCode ?? 0
       const location = typeof response.headers.location === 'string' ? response.headers.location : undefined
@@ -162,7 +178,7 @@ function oneRequest(url: URL, address: { address: string; family: 4 | 6 }, signa
   })
 }
 
-/** DNS answers are checked and pinned to the actual socket for every hop. */
+/** DNS answers are checked for every hop and pinned to the socket; with a system proxy the proxy connects to the checked host. */
 export async function fetchPublicResource(raw: string, options: PublicHttpOptions = {}): Promise<PublicHttpResponse> {
   const controller = new AbortController()
   let idleTimer: ReturnType<typeof setTimeout> | undefined
@@ -189,7 +205,9 @@ export async function fetchPublicResource(raw: string, options: PublicHttpOption
       visited.add(url.href)
       const address = await publicAddress(url, resolver, controller.signal)
       activity()
-      const response = await oneRequest(url, address, controller.signal, activity, settings)
+      const connection = await proxiedConnection(url, await (options.proxy ?? systemProxyRoute)(url.href), controller.signal)
+      activity()
+      const response = await oneRequest(url, address, connection, controller.signal, activity, settings)
       if (response.status >= 300 && response.status < 400) {
         if (!response.location) throw new PublicHttpError('invalid-redirect', '网页跳转缺少目标地址')
         url = parsePublicUrl(new URL(response.location, url).href)

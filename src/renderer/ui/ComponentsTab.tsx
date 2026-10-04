@@ -243,8 +243,9 @@ function HtmlComponentLibrarySection({ entries, onRefresh }: { entries: Availabl
     setDeleting(true)
     setError(null)
     try {
-      if (!window.desktopAPI) throw new Error('当前页面未运行在桌面环境中，不能删除资产库条目。')
-      await window.desktopAPI.deleteComponentCatalogHtmlComponent({ sourceId: entry.sourceId, entry: entry.entry })
+      const remove = window.desktopAPI?.deleteComponentCatalogHtmlComponent
+      if (!remove) throw new Error('当前页面未运行在桌面环境中，不能删除资产库条目。')
+      await remove({ sourceId: entry.sourceId, entry: entry.entry })
       setConfirming(null)
       onRefresh?.()
     } catch (cause) {

@@ -19,6 +19,7 @@ import {
   shouldShowApplicationWindows,
 } from './windowVisibility'
 import { APP_ID } from '../shared/constants'
+import { installSystemProxy } from './workbench/network/systemProxyDispatcher'
 
 if (!shouldShowApplicationWindows()) {
   BACKGROUND_E2E_CHROMIUM_SWITCHES.forEach((name) => {
@@ -111,6 +112,8 @@ app
 
     removeDiagnosticHandlers = diagnosticLog.installProcessHandlers()
     lifecycle = installWindowLifecycle(() => mainWindow)
+    // Every outbound request of the main process follows the system proxy (or PAC) from here on.
+    installSystemProxy(session.defaultSession)
 
     installEditorProtocol(session.defaultSession)
     installHtmlPreviewProtocol(session.defaultSession)

@@ -1,9 +1,10 @@
 import sharp from 'sharp'
 import type { AssetSource } from '../../../shared/contracts/media-v1'
 import type { HostImageInput } from '../../../core/tools/imageResource'
-import { type AssetHttpPort, type ImageSearchInput, type ImageSearchPage, type OpenImageCandidate, type OpenLibrary } from './assetSourceTypes'
+import { LibraryUnavailableError, type AssetHttpPort, type ImageSearchInput, type ImageSearchPage, type OpenImageCandidate, type OpenLibrary } from './assetSourceTypes'
 import { openLibrarySource } from './licensePolicy'
 import { searchOpenverse } from './openverse'
+import type { PixabaySource } from './pixabay'
 import { commonsRendition, searchCommons } from './wikimediaCommons'
 
 /** 课件用图取宽约 1600 像素的版本，更大的原图在本机缩小。 */
@@ -13,7 +14,7 @@ const DOWNLOAD_MAX_BYTES = 100 * 1024 * 1024
 const PREVIEW_MAX_BYTES = 20 * 1024 * 1024
 // Openverse 的缩略图接口只认含 */* 的 Accept（image/* 返回 406）。
 const IMAGE_ACCEPT = 'image/*,*/*;q=0.8'
-const libraryNames: Record<OpenLibrary, string> = { openverse: 'Openverse', 'wikimedia-commons': 'Wikimedia Commons' }
+const libraryNames: Record<OpenLibrary, string> = { openverse: 'Openverse', 'wikimedia-commons': 'Wikimedia Commons', pixabay: 'Pixabay' }
 
 /** 给模型看的候选；image 是本任务内的短句柄。 */
 export interface ImageCandidateView {
@@ -31,8 +32,8 @@ export interface ImageCandidateView {
 type Failure = { library: string; reason: string }
 export type OpenImageSearchResult =
   | { status: 'results'; query: string; licenses: string; candidates: readonly ImageCandidateView[]; excluded: number;
-      nextPage?: number; failures?: readonly Failure[]; hint?: string }
-  | { status: 'failed' | 'rejected'; reason: string; failures?: readonly Failure[] }
+      nextPage?: number; failures?: readonly Failure[]; unavailable?: readonly Failure[]; notice?: string; hint?: string }
+  | { status: 'failed' | 'rejected'; reason: string; failures?: readonly Failure[]; unavailable?: readonly Failure[] }
 export interface OpenImagePreview { image: string; resourceId: string; mimeType: string; byteLength: number; width: number; height: number }
 export type OpenImagePreviewResult =
   | { status: 'prepared'; previews: readonly OpenImagePreview[]; failures?: readonly { image: string; reason: string }[] }
@@ -51,7 +52,9 @@ interface RunState {
 }
 export interface OpenImageServiceOptions {
   http: AssetHttpPort
-  /** 测试可替换检索；生产按此顺序检索两个图库。 */
+  /** Pixabay（需要 API key）；未提供时不检索 Pixabay。 */
+  pixabay?: PixabaySource
+  /** 测试可替换检索；生产按此顺序检索各图库。 */
   libraries?: readonly [OpenLibrary, SearchLibrary][]
 }
 
@@ -87,7 +90,8 @@ export class OpenImageService {
   private readonly runs = new Map<string, RunState>()
   private readonly libraries: readonly [OpenLibrary, SearchLibrary][]
   constructor(private readonly options: OpenImageServiceOptions) {
-    this.libraries = options.libraries ?? [['wikimedia-commons', searchCommons], ['openverse', searchOpenverse]]
+    this.libraries = options.libraries ?? [...(options.pixabay ? [['pixabay', options.pixabay.search] as [OpenLibrary, SearchLibrary]] : []),
+      ['wikimedia-commons', searchCommons], ['openverse', searchOpenverse]]
   }
 
   beginRun(runId: string): void {
@@ -135,12 +139,14 @@ export class OpenImageService {
       settled = await this.call(run, input.signal, signal => Promise.allSettled(this.libraries.map(([, search]) =>
         search(this.options.http, { query, limit, page, allowShareAlike, signal }))))
     } catch (cause) { return { status: 'rejected', reason: reasonOf(cause, '任务已停止') } }
-    const failures: Failure[] = [], pages: ImageSearchPage[] = []
+    const failures: Failure[] = [], unavailable: Failure[] = [], pages: ImageSearchPage[] = []
     settled.forEach((result, index) => {
+      const library = libraryNames[this.libraries[index]![0]]
       if (result.status === 'fulfilled') pages.push(result.value)
-      else failures.push({ library: libraryNames[this.libraries[index]![0]], reason: reasonOf(result.reason, '检索未完成') })
+      else (result.reason instanceof LibraryUnavailableError ? unavailable : failures).push({ library, reason: reasonOf(result.reason, '检索未完成') })
     })
-    if (!pages.length) return { status: 'failed', reason: failures.map(item => `${item.library}：${item.reason}`).join('；'), failures }
+    if (!pages.length) return { status: 'failed', reason: [...failures, ...unavailable].map(item => `${item.library}：${item.reason}`).join('；'),
+      ...(failures.length ? { failures } : {}), ...(unavailable.length ? { unavailable } : {}) }
     // 各图库按相关度交替排列；同一文件（Openverse 也收录 Commons）只列一次。
     const seen = new Set<string>(), candidates: ImageCandidateView[] = []
     let excluded = pages.reduce((sum, item) => sum + item.excluded, 0)
@@ -159,7 +165,9 @@ export class OpenImageService {
     }
     return { status: 'results', query, licenses: allowShareAlike ? 'CC0、公有领域、CC BY、CC BY-SA' : 'CC0、公有领域、CC BY',
       candidates, excluded, ...(pages.some(item => item.hasMore) ? { nextPage: page + 1 } : {}),
-      ...(failures.length ? { failures } : {}),
+      ...(failures.length ? { failures } : {}), ...(unavailable.length ? { unavailable } : {}),
+      // Pixabay's terms: search results say where the images come from.
+      ...(candidates.some(item => item.source === 'Pixabay') ? { notice: '来源为 Pixabay 的图片来自 Pixabay（https://pixabay.com/）' } : {}),
       ...(candidates.length ? {} : { hint: '没有符合授权与尺寸要求的结果；可换用英文关键词或更通用的说法' }) }
   }
 

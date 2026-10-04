@@ -149,7 +149,7 @@ export interface DesktopAPI {
     version: string
   }): Promise<ComponentCatalogPackageFile>
   /** Deletes one HTML component of the managed library (“我的资产库”). */
-  deleteComponentCatalogHtmlComponent(input: {
+  deleteComponentCatalogHtmlComponent?(input: {
     sourceId: string
     entry: string
   }): Promise<ComponentCatalogSnapshot>

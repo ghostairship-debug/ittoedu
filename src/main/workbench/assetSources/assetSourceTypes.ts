@@ -1,6 +1,6 @@
 import type { OpenLicense } from './licensePolicy'
 
-export type OpenLibrary = 'openverse' | 'wikimedia-commons'
+export type OpenLibrary = 'openverse' | 'wikimedia-commons' | 'pixabay'
 
 /** 开放图库的一个检索结果，保留取图所需的地址，只在主进程内使用。 */
 export interface OpenImageCandidate {
@@ -53,6 +53,11 @@ export interface AssetHttpRequest {
 export interface AssetHttpPort {
   getJson(url: string, options?: AssetHttpRequest): Promise<unknown>
   getBytes(url: string, options: AssetHttpRequest & { maxBytes: number }): Promise<{ url: string; contentType: string; bytes: Uint8Array }>
+}
+
+/** 图库未启用（例如没有可用的 API key）；检索结果里说明原因，不算失败。 */
+export class LibraryUnavailableError extends Error {
+  constructor(message: string) { super(message); this.name = 'LibraryUnavailableError' }
 }
 
 /** 图库请求失败；status 为 HTTP 状态码（已知时）。 */
