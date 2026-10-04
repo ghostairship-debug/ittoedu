@@ -40,7 +40,8 @@ function data<T = Record<string, unknown>>(result: ToolResult): T {
 }
 
 async function harness(options: { models?: CourseModel[]; writable?: ToolTarget[]; admission?: BuildAdmissionPort
-  readFile?: NonNullable<HostToolServices['projectFiles']>['readFile']; unopened?: { model: CourseModel; writable: boolean } } = {}) {
+  readFile?: NonNullable<HostToolServices['projectFiles']>['readFile']; unopened?: { model: CourseModel; writable: boolean }
+  deliveries?: HostToolServices['deliveries'] } = {}) {
   let id = 0
   const registry = new DocumentRegistry({ drivers: [driver], createId: () => `doc-${++id}`, bindingKey: binding => binding.path,
     persistence: { async append() {}, async save() { throw new Error('unused') } } })
@@ -52,6 +53,7 @@ async function harness(options: { models?: CourseModel[]; writable?: ToolTarget[
       if (requested !== '课程/新课.h5lesson') throw new Error('没有这个课件')
       return { documentId: unopened.documentId, writable: options.unopened!.writable }
     } } : {}) } }
+  if (options.deliveries) services.deliveries = options.deliveries
   if (options.admission) {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'project-files-build-')); roots.push(root)
     services.builds = new ControlledBuildService({ directory: path.join(root, 'scratch'), admission: options.admission })
@@ -347,5 +349,23 @@ describe('project files through the tool gateway', () => {
     expect(flow().title).toBe('地理讲义')
     applied(await f.call('x1', 'project.delete', { path: 'docs/地理讲义.html' }))
     expect(f.project().surfaces.some(surface => surface.type === 'flow')).toBe(false)
+  })
+
+  it('saves a course named by path through the existing file.save delivery, never in a read-only task', async () => {
+    const saved: unknown[] = []
+    const deliveries: NonNullable<HostToolServices['deliveries']> = {
+      async save(input) { saved.push(input); return { status: 'saved', path: 'D:/课程/四季.h5lesson', documentId: input.documentId, epoch: input.epoch,
+        savedRevision: input.baseRevision, currentRevision: input.baseRevision, dirty: false, warnings: [] } },
+      async export() { throw new Error('unused') },
+      async lookup() { return null },
+    }
+    const f = await harness({ deliveries })
+    applied(await f.call('w1', 'project.write', { path: 'slides/01-导入.html', content: '<h1>四季</h1>' }))
+    const receipt = data<{ status: string; dirty: boolean }>(await f.call('s1', 'project.save', { project: '四季.h5lesson' }))
+    expect(receipt).toMatchObject({ status: 'saved', dirty: false })
+    expect(saved).toEqual([expect.objectContaining({ documentId: f.session.documentId, baseRevision: f.session.read().revision })])
+    const readOnly = await harness({ deliveries, writable: [] })
+    expect(await readOnly.call('s2', 'project.save', {})).toMatchObject({ kind: 'error', code: 'not-authorized' })
+    expect(saved).toHaveLength(1)
   })
 })

@@ -787,8 +787,8 @@ export class DocumentToolGateway implements ToolGateway {
         const prior = await this.hostTools.lookupMcp(runId, operationId)
         if (prior) return { kind: 'read', data: prior }
       }
-      if (input.name === 'html.import' || input.name === 'file.save' || input.name === 'document.export') {
-        const imported = await this.hostTools.lookup(runId, operationId, digest, input.name)
+      if (input.name === 'html.import' || input.name === 'file.save' || input.name === 'document.export' || input.name === 'project.save') {
+        const imported = await this.hostTools.lookup(runId, operationId, digest, input.name === 'project.save' ? 'file.save' : input.name)
         if (imported) return imported
       }
       return this.findReceipt(runId, operationId, digest) ?? await this.hostTools.lookup(runId, operationId, digest, input.name)
@@ -1130,6 +1130,15 @@ export class DocumentToolGateway implements ToolGateway {
     if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
     const definition = toolCatalog.find(tool => tool.name === call.name)
     if (!definition) throw new ToolError('unsupported-tool', '此工具尚未接入正式 Gateway')
+    if (call.name === 'project.save') {
+      // Save by course path through the existing file.save delivery: same permission, receipt and recovery.
+      if (!this.hostTools.supports(call.name)) throw new ToolError('service-unavailable', '文档保存服务尚未就绪')
+      const { project } = definition.inputSchema.parse(call.input) as { project?: string }
+      const snapshot = await this.projectDocument(runId, project, 'write')
+      const target = this.capture(runId, snapshot, { kind: 'document' }, true)
+      return this.hostTools.deliverDocument({ runId, operationId, requestDigest,
+        resolveHandle: handle => this.resolveWholeDocumentHandle(runId, handle, 'write') }, 'file.save', { target })
+    }
     if (isProjectFileToolName(call.name)) {
       if (!this.hostTools.supports(call.name)) throw new ToolError('service-unavailable', '工程文件服务尚未就绪')
       return this.projectFiles.execute(runId, operationId, requestDigest, call.name, call.input)
