@@ -4,6 +4,11 @@ import { describeTools, pendingToolMigrations, toolCatalog } from '../../src/cor
 import { layerItemPropertiesInputSchema } from '../../src/core/tools/toolSchemas'
 import { containsTarget, mapMarkdownRange } from '../../src/core/tools/ToolTargets'
 
+const schemaPropertyNames = (value: unknown): string[] => !value || typeof value !== 'object' ? []
+  : Array.isArray(value) ? value.flatMap(schemaPropertyNames)
+    : Object.entries(value).flatMap(([key, child]) => [
+      ...(key === 'properties' && child && typeof child === 'object' ? Object.keys(child) : []), ...schemaPropertyNames(child)])
+
 describe('G20 tool catalog and target mapping', () => {
   it('exports the executable registry as strict model schemas and manual metadata', () => {
     const tools = describeTools()
@@ -18,7 +23,8 @@ describe('G20 tool catalog and target mapping', () => {
         }
       } else expect(tool.schema.additionalProperties).toBe(false)
       expect(tool.manual.label.length).toBeGreaterThan(0)
-      expect(JSON.stringify(tool.schema)).not.toMatch(/documentId|epoch|operationId|baseRevision|grantId/)
+      // No internal identity is a model field; a description may still name one to warn against it.
+      expect(schemaPropertyNames(tool.schema).filter(name => /^(documentId|epoch|operationId|baseRevision|grantId)$/.test(name))).toEqual([])
     }
     expect(layerItemPropertiesInputSchema.safeParse({ frame: { width: -1 } }).success).toBe(false)
     expect(layerItemPropertiesInputSchema.safeParse({ projectId: 'forged' }).success).toBe(false)
