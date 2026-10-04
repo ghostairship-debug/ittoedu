@@ -324,7 +324,7 @@ describe('bundled font asset boundary', () => {
     expect(BUNDLED_FONT_FAMILIES).toEqual([BUNDLED_TEXT_FONT_FAMILY, BUNDLED_MATH_FONT_FAMILY])
   })
 
-  it('awaits the bundled faces before either entry point renders', () => {
+  it('awaits the bundled faces before the player and the metric-sensitive editor surfaces render', () => {
     const player = readFileSync(join(repoRoot, 'src/player/index.ts'), 'utf8')
     expect(player).toContain('await ensureBundledFonts()')
     // The exported bootstrap must stay synchronous; the wait lives in the
@@ -332,12 +332,15 @@ describe('bundled font asset boundary', () => {
     expect(player).toContain('export function bootstrapPlayer(): PublishedCourseSession | null')
     expect(player).toContain('bootstrapPlayerAfterFonts')
 
+    // The renderer shell mounts at once while the faces load; metric-sensitive surfaces wait in BundledFontBoundary.
     const renderer = readFileSync(join(repoRoot, 'src/renderer/main.tsx'), 'utf8')
     const installIndex = renderer.indexOf('installBundledFontFaces()')
-    const awaitIndex = renderer.indexOf('await ensureBundledFonts()')
+    const loadIndex = renderer.indexOf('void ensureBundledFonts()')
     const renderIndex = renderer.indexOf('createRoot(root).render(')
     expect(installIndex).toBeGreaterThanOrEqual(0)
-    expect(awaitIndex).toBeGreaterThan(installIndex)
-    expect(renderIndex).toBeGreaterThan(awaitIndex)
+    expect(loadIndex).toBeGreaterThan(installIndex)
+    expect(renderIndex).toBeGreaterThan(loadIndex)
+    expect(readFileSync(join(repoRoot, 'src/renderer/app/BundledFontBoundary.tsx'), 'utf8')).toContain('ensureBundledFonts().then(')
+    expect(readFileSync(join(repoRoot, 'src/renderer/App.tsx'), 'utf8')).toContain('<BundledFontBoundary>')
   })
 })

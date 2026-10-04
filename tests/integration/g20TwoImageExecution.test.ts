@@ -163,9 +163,14 @@ it('S08-T02 sends two distinct image cards as decoded image bytes while read sta
     expect.objectContaining({ attachmentId: first.id, originalDigest: digest(firstBytes) }),
   ]), observation: 'index-only' } })
   expect(rereadRun.tools[1]!.result).toMatchObject({ kind: 'read', data: { attachmentId: first.id, representationDigest: digest(firstBytes), observation: 'image-prepared-for-next-request' } })
-  const finalBody = JSON.parse(requests.at(-1)!.raw)
-  expect(finalBody.messages.at(-1).content[1].image_url.url).toBe(`data:image/png;base64,${firstBytes.toString('base64')}`)
+  // The text conversation model continues with the analysis; only the vision request carries the re-read bytes.
+  const analysisBody = JSON.parse(requests.at(-2)!.raw), finalBody = JSON.parse(requests.at(-1)!.raw)
+  expect(analysisBody.model).toBe('fixture-vision')
+  expect(JSON.stringify(analysisBody.messages)).toContain(`data:image/png;base64,${firstBytes.toString('base64')}`)
+  expect(finalBody.model).toBe('fixture-chat')
+  expect(JSON.stringify(finalBody.messages)).toContain('独立视觉分析')
+  expect(JSON.stringify(finalBody.messages)).not.toContain('data:image/')
   expect(rereadRun.initialPayload?.totals.imageBytes).toBe(0)
   expect(rereadRun.initialPayload?.readStatus).toBe('unknown')
-  expect(requests).toHaveLength(6)
+  expect(requests).toHaveLength(7)
 })

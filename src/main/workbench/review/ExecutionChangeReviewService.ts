@@ -5,6 +5,7 @@ import { readUtf8File } from '../readUtf8File'
 import type { ExecutionRunRecord, ExecutionToolRecord } from '../../../shared/workbench/execution'
 import type { ToolResult } from '../../../shared/workbench/tools'
 import type { ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
+import type { ChangeReviewAvailability, ChangeReviewEntry, ChangeReviewPage, ChangeRollbackResult } from '../../../shared/workbench/executionReview'
 import { isInsideRoot } from '../../../shared/workbench/executionPermission'
 import type { DocumentHostService } from '../DocumentHostService'
 import { createTextDriver } from '../../../core/drivers/TextDriver'
@@ -19,30 +20,6 @@ const samePath = (a: string, b: string) => process.platform === 'win32' ? a.toLo
 const recordData = (result: ToolResult | undefined): Record<string, unknown> | null =>
   result?.kind === 'read' && result.data !== null && typeof result.data === 'object' ? result.data as Record<string, unknown> : null
 
-export type ChangeReviewAvailability = 'ready' | 'conflict' | 'no-before-snapshot' | 'unverified' | 'external' | 'unsupported'
-export interface ChangeReviewEntry {
-  entryId: string
-  runId: string
-  callId: string
-  name: string
-  path: string | null
-  documentId?: string
-  status: 'applied' | 'unchanged' | 'partial' | 'reported' | 'failed' | 'unknown'
-  source: 'host-document' | 'host-file' | 'external'
-  beforeVersion?: string
-  afterVersion?: string
-  availability: ChangeReviewAvailability
-  reason?: string
-  /** Human-readable bounded preview; complete before bytes remain only in the local review store. */
-  preview?: { before: string; after: string; truncated: boolean }
-}
-export interface ChangeReviewPage {
-  total: number
-  entries: ChangeReviewEntry[]
-  nextOffset?: number
-  files: Array<{ path: string; entryIds: string[] }>
-}
-export type ChangeRollbackResult = { entryId: string; status: 'reverted' | 'conflict' | 'unavailable' | 'unknown'; message: string; documentId?: string; saved?: boolean }
 export interface ChangeReviewAuthority {
   workspaceRoot: string
   permission: ExecutionPermissionMode

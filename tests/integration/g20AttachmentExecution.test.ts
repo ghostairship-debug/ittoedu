@@ -42,7 +42,7 @@ async function fixture(baseURL: string) {
 async function backend() {
   const bodies: string[] = []
   const server = createServer(async (request, response) => {
-    let body = ''; for await (const chunk of request) body += chunk.toString(); bodies.push(body)
+    const chunks: Buffer[] = []; for await (const chunk of request) chunks.push(chunk); bodies.push(Buffer.concat(chunks).toString())
     response.writeHead(200, { 'Content-Type': 'text/event-stream' })
     response.end(`data: ${JSON.stringify({ id: 'fixture-response', model: 'configured-vision', choices: [{ index: 0, delta: { role: 'assistant', content: '附件已收到' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`)
   }); servers.push(server)
@@ -82,27 +82,36 @@ describe('attachment draft to canonical execution payload', () => {
     expect(followed.initialPayload!.automaticContext.some(item => item.provenance.kind === 'history' && item.provenance.id.includes(sent.run.runId))).toBe(true)
   })
 
-  it('preserves an actual oversized inline payload and accepts an unextracted original as a source index', async () => {
+  it('sends an actual large inline payload in full and accepts an unextracted original as a source index', async () => {
     const wire = await backend(), { service, conversation, identity } = await fixture(wire.baseURL)
-    const snapshot = await service.attachments.receiveBytes({ name: 'long.txt', bytes: Buffer.from('文'.repeat(3_000_000)), source: { kind: 'drop' } })
+    const text = '文'.repeat(3_000_000)
+    const snapshot = await service.attachments.receiveBytes({ name: 'long.txt', bytes: Buffer.from(text), source: { kind: 'drop' } })
     const attachments = [{ attachmentId: snapshot.id, representationId: 'original-text' }]
     const draft = await service.operate({ type: 'draft', ...identity, expectedRevision: conversation.revision, text: '不要丢弃', documents: [], attachments }) as ConversationRecord
-    const overflow = await service.operate({ type: 'send', ...identity, submissionId: randomUUID(), expectedRevision: draft.revision, text: draft.inputDraft, documents: [], attachments }) as { submission: { state: string; failure?: { message: string } } }
-    expect(overflow.submission.state).toBe('failed')
-    expect(overflow.submission.failure?.message).toContain('超过发送预算')
-    const retained = await service.operate({ type: 'conversation', ...identity }) as ConversationRecord
-    expect(retained).toMatchObject({ inputDraft: draft.inputDraft, inputAttachments: draft.inputAttachments })
+    // No artificial send budget: an unknown model window receives the whole inline text.
+    const large = await service.operate({ type: 'send', ...identity, submissionId: randomUUID(), expectedRevision: draft.revision, text: draft.inputDraft, documents: [], attachments }) as { run: ExecutionRunRecord; submission: { state: string } }
+    expect(large.submission.state).toBe('accepted')
+    const delivered = await service.engine.wait(large.run.runId)
+    expect(delivered.status).toBe('completed')
+    expect(delivered.initialPayload?.totals.representationBytes).toBe(Buffer.byteLength(text))
+    expect(wire.bodies).toHaveLength(1)
+    expect(wire.bodies[0]!.includes(text)).toBe(true)
+    let settled = await service.operate({ type: 'conversation', ...identity }) as ConversationRecord
+    for (let attempt = 0; attempt < 100 && !settled.messages.some(message => message.role === 'assistant' && message.runId === large.run.runId); attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 5))
+      settled = await service.operate({ type: 'conversation', ...identity }) as ConversationRecord
+    }
     const file = await service.attachments.receiveBytes({ name: 'original.pdf', bytes: Buffer.from('%PDF-1.7'), source: { kind: 'file' } })
     const pending = [{ attachmentId: file.id, representationId: 'original-file' }]
-    const revised = await service.operate({ type: 'draft', ...identity, expectedRevision: retained.revision, text: '', documents: [], attachments: pending }) as ConversationRecord
-    expect(wire.bodies).toEqual([])
+    const revised = await service.operate({ type: 'draft', ...identity, expectedRevision: settled.revision, text: '', documents: [], attachments: pending }) as ConversationRecord
+    expect(wire.bodies).toHaveLength(1)
     const unextracted = await service.operate({ type: 'send', ...identity, submissionId: randomUUID(), expectedRevision: revised.revision, text: '', documents: [], attachments: pending }) as { run: ExecutionRunRecord; submission: { state: string } }
     expect(unextracted.submission.state).toBe('accepted')
     const completed = await service.engine.wait(unextracted.run.runId)
     expect(completed.initialPayload?.explicitAttachments[0]).toMatchObject({ attachmentId: file.id, delivery: 'source' })
-    expect(wire.bodies).toHaveLength(1)
-    expect(wire.bodies[0]).toContain('index-only')
-    expect(wire.bodies[0]).not.toContain('%PDF-1.7')
+    expect(wire.bodies).toHaveLength(2)
+    expect(wire.bodies[1]).toContain('index-only')
+    expect(wire.bodies[1]).not.toContain('%PDF-1.7')
   })
 
   it('unifies paste/drop byte intake and preview, rejects raw path authority and removes only draft references', async () => {

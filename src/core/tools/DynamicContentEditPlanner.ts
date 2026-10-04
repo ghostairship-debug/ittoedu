@@ -13,6 +13,7 @@ import {
 import type { ComponentLayerItem, CourseProjectDocument, RuntimeLayerItem } from '../../shared/courseProjectTypes'
 import type { DocumentModel, DocumentSnapshot } from '../../shared/workbench/document'
 import type { ToolTarget } from '../../shared/workbench/tools'
+import type { DynamicContentObservedTarget } from '../../shared/workbench/dynamicContentTargets'
 
 type CourseModel = Extract<DocumentModel, { kind: 'course-v9' }>
 type CourseObjectTarget = Extract<ToolTarget, { kind: 'course-object' }>
@@ -37,14 +38,7 @@ export interface DynamicContentHostTarget {
     | { readonly kind: 'component.image'; readonly key: string; readonly expectedAssetId: string | null }
 }
 
-/** Normalized M15 host hits. The renderer/Player bridge supplies these, never model input. */
-export type DynamicContentObservedTarget =
-  | { readonly kind: 'runtime.text' | 'component.text'; readonly source: 'auto';
-      /** DocumentSnapshot revision stamped by the renderer bridge, not Player target-update sequence. */
-      readonly revision: number;
-      readonly locationId: string; readonly itemId: string; readonly original: string; readonly region?: string; readonly text: string }
-  | { readonly kind: 'component.image'; readonly source: 'auto'; readonly revision: number;
-      readonly locationId: string; readonly itemId: string; readonly assetKey: string }
+export type { DynamicContentObservedTarget }
 
 export interface DynamicContentDiscoveryInput {
   readonly target: CourseObjectTarget

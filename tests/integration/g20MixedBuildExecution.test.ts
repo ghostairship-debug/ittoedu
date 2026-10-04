@@ -118,7 +118,7 @@ it('keeps committed text and History when build checking is stopped, and rejects
   const { stored, end } = await durableEnd(f, started.runId)
   expect(stored.status).toBe('stopped')
   expect(end.data).toMatchObject({ status: 'stopped', text: expect.stringContaining('已保留 1 项正式文档修改') })
-  expect(end.data.text).toContain('构建尚未正式导入')
+  expect(end.data.text).toContain('另有暂存构建未导入')
   expect(end.data.text).not.toContain('构建检查已取消')
   expect(f.courseSession.read()).toMatchObject({ revision: 0, undoDepth: 0, model: { project: { title: f.project.title } } })
   const job = createdJob(stored)

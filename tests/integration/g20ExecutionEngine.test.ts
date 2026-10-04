@@ -917,7 +917,8 @@ it('archives whole OAuth rounds on actual wire and never resurrects old native p
     yield event
   } }
   const h = await fixture(provider)
-  const oauth = { ...selection, contextWindow: 4_000_000, connection: { ...selection.connection, provider: 'openai', protocol: 'chatgpt-responses' as const,
+  // A declared window whose soft pressure is reached on the fourth request (three complete rounds).
+  const oauth = { ...selection, contextWindow: 600_000, connection: { ...selection.connection, provider: 'openai', protocol: 'chatgpt-responses' as const,
     baseURL: CHATGPT_RESPONSES_BASE_URL, auth: { kind: 'oauth' as const, credentialRef: 'fixture-only' } } }
   const engine = new ExecutionEngine({ registry: h.registry, gateway: h.gateway, edits: h.edits, runs: h.runs,
     events: h.events, provider, serializePayload: serializeChatGPTResponsesRequest })

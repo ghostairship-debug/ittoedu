@@ -27,18 +27,18 @@ function mount(overrides: Partial<CourseLightToolbarProps> = {}, workbench = fal
   return actions
 }
 
-it('offers four compact insert actions and labels Slide audio as a sound-library import', () => {
+it('offers four compact insert actions and places Slide audio as a click-to-play button', () => {
   const actions = mount()
   fireEvent.click(screen.getByRole('button', { name: '插入' }))
   expect(screen.getByRole('button', { name: '添加文字' })).toBeEnabled()
   expect(screen.getByRole('button', { name: '添加图片' })).toBeEnabled()
   expect(screen.getByRole('button', { name: '添加视频' })).toBeEnabled()
-  expect(screen.getByRole('button', { name: '导入音频到声音库' })).toHaveTextContent('供互动播放')
+  expect(screen.getByRole('button', { name: '放置音频' })).toHaveTextContent('放置点击播放按钮')
   fireEvent.click(screen.getByRole('button', { name: '添加视频' }))
   expect(actions.video).toHaveBeenCalledOnce()
   expect(screen.queryByRole('button', { name: '添加视频' })).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: '插入' }))
-  fireEvent.click(screen.getByRole('button', { name: '导入音频到声音库' }))
+  fireEvent.click(screen.getByRole('button', { name: '放置音频' }))
   expect(actions.audio).toHaveBeenCalledOnce()
 })
 

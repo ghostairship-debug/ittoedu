@@ -155,6 +155,11 @@ export class CourseDocumentBridge {
     return (await this.host().recoverable()).filter(snapshot => snapshot.model.kind === 'course-v9' && !live.has(snapshot.documentId))
   }
   async discardRecovery(documentId: string): Promise<void> { await this.host().discardRecovery(documentId) }
+  /** A conflict refused the active document's input; its view keeps that draft and the external result. */
+  holdsRetainedConflict(): boolean {
+    const kind = this.active?.read().error?.kind
+    return kind === 'conflict' || kind === 'rejected'
+  }
   async drain(): Promise<DocumentSnapshot> {
     if (this.connecting) await this.connecting
     const projection = this.active

@@ -203,11 +203,14 @@ export class ExecutionDesktopService {
           }
         }
       }
+      // Reading the submissions records unreadable files, so the first workspace read reports them with the runs.
+      await this.submissions.list().catch(() => undefined)
+      // Cards are transient; unsubmitted input survives as an ordinary recoverable conversation draft. This
+      // changes which conversations exist, so the fast conversation list must already see it.
+      await this.clearElementCards().catch(() => undefined)
       // Slow segment: engine.recover walks every run and can take hundreds of ms per run with large checkpoints.
       const recoveryAndRebind = (async () => {
         await this.engine.recover()
-        // Cards are transient; unsubmitted input survives as an ordinary recoverable conversation draft.
-        await this.clearElementCards().catch(() => undefined)
         const refreshed = await this.runs.list()
         const submissions = await this.submissions.list()
         for (const record of submissions.filter(value => ['queued', 'starting', 'accepted'].includes(value.state))) {

@@ -1,19 +1,9 @@
 import { lightEditTextOverrideSchema } from '../../../shared/contracts/runtime/lightEdit'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
-import type { DynamicContentObservedTarget } from '../../../core/tools/DynamicContentEditPlanner'
+import type { DynamicContentObservedTarget, DynamicContentTargetsPublication } from '../../../shared/workbench/dynamicContentTargets'
 
-export interface DynamicContentPublication {
+export interface DynamicContentPublication extends DynamicContentTargetsPublication {
   readonly senderId: number
-  readonly documentId: string
-  readonly epoch: string
-  readonly revision: number
-  readonly locationId: string
-  readonly viewGeneration: string
-  /** Globally increasing for one sender/document, including generation changes. */
-  readonly publicationSeq: number
-  readonly source: 'authoring' | 'live'
-  readonly targets: readonly DynamicContentObservedTarget[]
-  readonly truncatedItemIds?: readonly string[]
 }
 
 export interface DynamicContentReadIdentity {

@@ -184,7 +184,7 @@ it('keeps a stable root handle current after an acknowledged edit', async () => 
   await gateway.stop(runId)
 })
 
-it('queries a terminal run lost tool receipt on recovery without replaying the old operation', async () => {
+it('queries a terminal run lost tool receipt when the task continues without replaying the old operation', async () => {
   let requests = 0
   const provider: ModelProvider = { async *stream(request) {
     requests += 1
@@ -204,9 +204,14 @@ it('queries a terminal run lost tool receipt on recovery without replaying the o
     runs: new ExecutionRunStore(h.runDirectory), events: new ExecutionEventStore({ directory: h.eventDirectory }) })
   expect(await reloaded.recover()).toEqual([])
   expect(await reloaded.recover()).toEqual([])
+  // Startup only republishes a terminal run's end; its lost receipt is queried once the task continues.
+  expect((await h.runs.read(run.runId))!.tools[0]).toMatchObject({ state: 'executing' })
+  expect(requests).toBe(2)
+  const continued = await reloaded.resume(run.runId, { ...h.input, taskId: 'continue' })
+  expect((await reloaded.wait(continued.runId)).status).toBe('completed')
   const restored = (await h.runs.read(run.runId))!
   expect(restored.tools[0]).toMatchObject({ state: 'returned', result: { kind: 'document-operation', result: { status: 'applied' } } })
-  expect(requests).toBe(2)
+  expect(requests).toBe(3)
   expect((await restoredHost.internalAPI.read(h.document.documentId))).toMatchObject({ revision: 1, undoDepth: 1, model: { source: 'FIRST BBB' } })
   expect((await h.events.snapshot('conversation')).items.filter(item => item.type === 'document.commit')).toHaveLength(1)
 })

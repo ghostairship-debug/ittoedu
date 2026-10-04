@@ -45,7 +45,8 @@ it('M11 rejects a recent-AI undo for A when B becomes active while A is draining
     await store().openCourseDocument('course-store-2.h5lesson')
     expect(store().courseDocument.documentId).toBe(b.documentId)
     releaseRead()
-    await expect(undo).rejects.toThrow('撤销目标文档已切换或变化')
+    // The drain before the undo already sees the switch and refuses; neither document changes.
+    await expect(undo).rejects.toThrow('等待课程输入期间已切换文档')
     expect(host.registry.get(a.documentId).read()).toMatchObject({
       revision: beforeA.revision, undoDepth: beforeA.undoDepth, undoHead: beforeA.undoHead, model: beforeA.model,
     })

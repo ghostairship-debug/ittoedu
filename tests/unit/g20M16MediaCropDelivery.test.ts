@@ -90,7 +90,8 @@ describe('M16 body media crop delivery', () => {
     const result = buildFlowDocx(surface(false), { resolveAsset: () => ({ bytes, mimeType: 'image/png' }) })
     const xml = strFromU8(unzipSync(result.bytes)['word/document.xml']!)
     expect(xml).not.toContain('<a:srcRect')
-    expect(xml).toContain('<wp:extent cx="5334000" cy="3000375"')
+    // An uncropped image keeps its own 8×4 aspect at the 560 px content width.
+    expect(xml).toContain('<wp:extent cx="5334000" cy="2667000"')
   })
 
   it('fails explicitly when cropped media has no readable intrinsic dimensions', () => {

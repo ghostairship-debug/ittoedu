@@ -1,13 +1,12 @@
 import { useState } from 'react'
 import { CopyPlus } from 'lucide-react'
-import { selectActiveCourseProjectDocument, selectSelectedNodeId, useEditorStore } from '../../store/editorStore'
+import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import { compositionLayerIn } from './compositionFragmentPackage'
 
-/** Extraction uses the current selection and existing document/resource transaction. */
-export function CompositionFragmentActions() {
-  const selectedId = useEditorStore(selectSelectedNodeId)
-  const project = useEditorStore(selectActiveCourseProjectDocument)
-  const extract = useEditorStore(state => state.extractCompositionFragment)
+/** Extraction uses the current selection and existing document/resource transaction (supplied by the Store adapter). */
+export function CompositionFragmentActions({ selectedId, project, extract }: {
+  selectedId: string | null; project: CourseProjectDocument | null; extract(layerItemId: string, name: string): string | null
+}) {
   const layer = selectedId && project ? compositionLayerIn(project, selectedId) : null
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState('')

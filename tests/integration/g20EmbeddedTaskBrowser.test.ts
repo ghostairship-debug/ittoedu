@@ -139,7 +139,8 @@ it('embeds the actual automated task page and resumes after human login without 
     const waiting = invoke('stop-long-wait', 'browser_wait_for', { time: 30 })
     await application.evaluate(async () => new Promise(done => setTimeout(done, 100)))
     await application.evaluate(async () => (globalThis as any).embeddedBrowserFixture.service.endRun('task'))
-    expect((await waiting).status).toBe('unknown')
+    // A read-only wait ended with the run sent no page action: rejected, not unknown.
+    expect((await waiting).status).toBe('rejected')
     expect(await fs.readdir(scratch)).toEqual([])
   } finally {
     await application.close()

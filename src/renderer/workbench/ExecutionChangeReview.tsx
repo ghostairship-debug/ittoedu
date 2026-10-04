@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { ChangeReviewEntry, ChangeReviewPage, ChangeRollbackResult } from '../../main/workbench/review/ExecutionChangeReviewService'
+import type { ChangeReviewEntry, ChangeReviewPage, ChangeRollbackResult } from '../../shared/workbench/executionReview'
 
 export interface ExecutionChangeReviewProps {
   runId: string

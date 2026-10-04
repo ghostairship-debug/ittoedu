@@ -34,9 +34,9 @@ async function fixture() {
   const reopen = () => new ExecutionEventStore({ directory: eventsDirectory })
   return { directory, host, events, document, reopen }
 }
-async function toolEvents(events: ExecutionEventStore, source: 'builtin' | 'external-mcp', conversationId = 'conversation') {
+async function toolEvents(events: ExecutionEventStore, source: 'builtin' | 'external-mcp', conversationId = 'conversation', update: 'append' | 'snapshot' = 'append') {
   const page = await events.readPage({ conversationId, limit: 100 })
-  return page.events.filter(event => event.type === 'tool' && event.source === source && event.data.status === 'running' && event.update === 'append' && event.data.text)
+  return page.events.filter(event => event.type === 'tool' && event.source === source && event.data.status === 'running' && event.update === update && event.data.text)
 }
 async function until<T>(read: () => Promise<T>, ready: (value: T) => boolean): Promise<T> {
   for (let attempt = 0; attempt < 200; attempt++) {
@@ -91,12 +91,13 @@ it('S07-T01 receives three real HTTP SSE tool fragments and reopens one built-in
     events: h.events, provider: new OpenAIChatProvider({ credentialResolver: async () => 'fixture-key' }) })
   const started = await engine.start({ conversationId: 'conversation', taskId: 'builtin-task', instruction: '读取当前文档', selection,
     documents: [{ documentId: h.document.documentId, writable: [] }] })
-  const increments = await until(() => toolEvents(h.reopen(), 'builtin'), rows => rows.length === 3)
-  expect(increments.map(row => row.data.text)).toEqual([1, 2, 3].map(index => `已收到工具参数片段 ${index}。`))
+  // The fragments of one call show live on one card as the tool being prepared (coalesced, never the argument text).
+  const increments = await until(() => toolEvents(h.reopen(), 'builtin', 'conversation', 'snapshot'), rows => rows.length > 0)
+  expect(increments.every(row => row.data.text === '正在准备读取内容…')).toBe(true)
   expect(new Set(increments.map(row => `${row.runId}:${row.itemId}`)).size).toBe(1)
   expect(JSON.stringify(increments)).not.toContain('PRIVATE_DOCUMENT_BODY')
   expect(JSON.stringify(increments)).not.toContain('fixture-key')
-  assertRunningCard(await h.reopen().snapshot('conversation'), 'builtin', increments.map(row => row.data.text!))
+  assertRunningCard(await h.reopen().snapshot('conversation'), 'builtin', ['正在准备读取内容…'])
   release.resolve()
   expect((await engine.wait(started.runId)).status).toBe('completed')
   expect(requests).toBe(2)

@@ -38,7 +38,7 @@ async function fixture() {
   const server = createServer((request, response) => { void (async () => {
     for await (const _chunk of request) { /* consume the real serialized payload */ }
     wire.push(request.url ?? '')
-    if (request.url === '/plan/v1/chat/completions') { response.writeHead(planAnswers.shift() ?? 500, { 'Retry-After': '30' }); response.end('{"error":{"message":"plan limit"}}'); return }
+    if (request.url === '/plan/v1/chat/completions') { response.writeHead(planAnswers.shift() ?? 500, { 'Retry-After': '1' }); response.end('{"error":{"message":"plan limit"}}'); return }
     if (request.url?.startsWith('/backend-api/codex/images/')) { response.writeHead(imageAnswers.shift() ?? 500); response.end('{"error":{"message":"subscription limit"}}'); return }
     if (request.url === '/metered/v1/chat/completions') {
       response.writeHead(200, { 'Content-Type': 'text/event-stream' })
@@ -67,24 +67,21 @@ async function fixture() {
   return { directory, baseURL, settings, wire, metered }
 }
 
-it('S05-T07 a token plan hitting 429 then 402 fails with the exact reason and never switches to the configured metered API', async () => {
+it('S05-T07 a token plan hitting 429 then 402 retries only the same plan and fails with the exact reason, never switching to the configured metered API', async () => {
   const f = await fixture()
   const desktop = new ExecutionDesktopService({ directory: path.join(f.directory, 'execution'), documents: new DocumentHostService(path.join(f.directory, 'documents')),
     settings: f.settings, authorizeWorkspaceRoot: async root => ({ resolvedPath: root }) })
   const space = await desktop.operate({ type: 'workspace', root: null }) as { workspace: { workspaceId: string } }
-  const outcomes = []
-  for (const text of ['套餐限流时', '套餐额度不足时']) {
-    const conversation = await desktop.operate({ type: 'create-conversation', workspaceId: space.workspace.workspaceId }) as ConversationRecord
-    const sent = await desktop.operate({ type: 'send', submissionId: randomUUID(), workspaceId: conversation.workspaceId, conversationId: conversation.conversationId,
-      expectedRevision: conversation.revision, text, documents: [], attachments: [] }) as ExecutionSendResult
-    const run = await desktop.engine.wait(sent.run!.runId)
-    expect(run.status).toBe('failed')
-    expect(run.input.selection.connection).toMatchObject({ provider: 'fixture-plan', billing: { kind: 'token-plan' } })
-    const failure = run.requests.at(-1)!.failure!
-    expect(failure.message).not.toMatch(invented)
-    outcomes.push({ kind: failure.kind, httpStatus: failure.httpStatus, requests: run.requests.length })
-  }
-  expect(outcomes).toEqual([{ kind: 'rate-limit', httpStatus: 429, requests: 1 }, { kind: 'quota', httpStatus: 402, requests: 1 }])
+  const conversation = await desktop.operate({ type: 'create-conversation', workspaceId: space.workspace.workspaceId }) as ConversationRecord
+  const sent = await desktop.operate({ type: 'send', submissionId: randomUUID(), workspaceId: conversation.workspaceId, conversationId: conversation.conversationId,
+    expectedRevision: conversation.revision, text: '套餐限流后额度不足时', documents: [], attachments: [] }) as ExecutionSendResult
+  const run = await desktop.engine.wait(sent.run!.runId)
+  expect(run.status).toBe('failed')
+  expect(run.input.selection.connection).toMatchObject({ provider: 'fixture-plan', billing: { kind: 'token-plan' } })
+  // 429 is temporary: the same plan is tried again after Retry-After; 402 quota ends the run.
+  expect(run.requests.map(request => ({ kind: request.failure?.kind, httpStatus: request.failure?.httpStatus })))
+    .toEqual([{ kind: 'rate-limit', httpStatus: 429 }, { kind: 'quota', httpStatus: 402 }])
+  for (const request of run.requests) expect(request.failure?.message).not.toMatch(invented)
   expect(f.wire).toEqual(['/plan/v1/chat/completions', '/plan/v1/chat/completions'])
   expect(JSON.stringify(await f.settings.read())).not.toMatch(invented)
 })
@@ -104,14 +101,14 @@ it('S05-T07 a subscription OAuth image role hitting 429 then 402 reports rate-li
     return { accessToken: entry.credential.accessToken, accountId: entry.credential.accountId }
   } })
   const images = new ImageGenerationService({ directory: path.join(f.directory, 'images'), provider, resolveReference: async () => { throw new Error('unused') } })
-  const results = []
-  for (const prompt of ['套餐限流时生图', '套餐额度不足时生图']) {
-    const job = await images.run({ jobId: randomUUID(), runId: 'plan-run', documentId: 'document-1', operation: 'generate', prompt, selection: roles.selection('plan-run', 'generate') })
-    expect(job.status).toBe('failed')
-    expect(job.provenance).toMatchObject({ accountId: 'subscription-account', billing: { kind: 'subscription' } })
-    expect(JSON.stringify(job)).not.toMatch(invented)
-    results.push({ kind: job.failure?.kind, httpStatus: job.failure?.httpStatus })
-  }
-  expect(results).toEqual([{ kind: 'rate-limit', httpStatus: 429 }, { kind: 'quota', httpStatus: 402 }])
+  const job = await images.run({ jobId: randomUUID(), runId: 'plan-run', documentId: 'document-1', operation: 'generate',
+    prompt: '套餐限流后额度不足时生图', selection: roles.selection('plan-run', 'generate') })
+  expect(job.status).toBe('failed')
+  expect(job.provenance).toMatchObject({ accountId: 'subscription-account', billing: { kind: 'subscription' } })
+  expect(JSON.stringify(job)).not.toMatch(invented)
+  // A definite 429 is tried again inside the same job and frozen route; 402 quota ends it.
+  expect(job.attempts?.map(attempt => ({ kind: attempt.failure?.kind, httpStatus: attempt.failure?.httpStatus })))
+    .toEqual([{ kind: 'rate-limit', httpStatus: 429 }, { kind: 'quota', httpStatus: 402 }])
+  expect(job.failure).toMatchObject({ kind: 'quota', httpStatus: 402 })
   expect(f.wire).toEqual(['/backend-api/codex/images/generations', '/backend-api/codex/images/generations'])
 })
