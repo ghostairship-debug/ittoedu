@@ -7,6 +7,7 @@ import {
 } from '../../shared/composition/projectReferences'
 import { sceneFragmentNodes } from '../../shared/composition/stateNodes'
 import { createDefaultSlidePresentation } from '../../shared/contracts/course-project-v9/presentation'
+import { courseSlideCanvas } from '../../shared/slideCanvas'
 import type {
   CompositionLayerItem,
   CourseComponentDefinition,
@@ -16,6 +17,7 @@ import type {
   LayerItem,
   SlidePresentationState,
   SlideSceneDocument,
+  SpatialSurfaceDocument,
 } from '../../shared/courseProjectTypes'
 
 type Node = CompositionNode<CourseRuntimeDefinition>
@@ -142,6 +144,28 @@ function syncComponentCopies(content: WebComposition<CourseRuntimeDefinition>, c
   })
 }
 
+/** Share of the course canvas left free on each side when a stop frames the item it follows. */
+export const SPATIAL_FOLLOW_MARGIN = 0.05
+
+/**
+ * Stops that follow a world item stand on its center and rotation and fit its size into the
+ * course canvas; a stop whose item is gone keeps its pose and becomes free.
+ */
+function syncFollowedCameraFrames(surface: SpatialSurfaceDocument, canvas: { width: number; height: number }): void {
+  const items = new Map(surface.world.layerItems.map(item => [item.layerItemId, item]))
+  for (const frame of surface.camera.frames) {
+    if (frame.targetLayerItemId === undefined) continue
+    const item = items.get(frame.targetLayerItemId)
+    if (!item) { delete frame.targetLayerItemId; continue }
+    const { x, y, width, height } = item.frame
+    frame.x = x + width / 2
+    frame.y = y + height / 2
+    frame.zoom = Math.min(1_000, canvas.width * (1 - 2 * SPATIAL_FOLLOW_MARGIN) / width, canvas.height * (1 - 2 * SPATIAL_FOLLOW_MARGIN) / height)
+    if (item.rotation) frame.rotation = item.rotation
+    else delete frame.rotation
+  }
+}
+
 function uniqueStateId(states: readonly SlidePresentationState[], wanted: string): string {
   const ids = new Set(states.map(state => state.id))
   let id = wanted
@@ -196,7 +220,8 @@ function syncFragmentStates(project: CourseProjectDocument, surfaceId: string, s
  * change of a course and on new candidates; idempotent. Mutates `project`.
  * - binds `assets/...` references of compositions, the theme and Flow media blocks to assets now present;
  * - rewrites page copies of named components from `project.components`;
- * - keeps the in-page step states of every Slide scene in step with its fragments.
+ * - keeps the in-page step states of every Slide scene in step with its fragments;
+ * - keeps Spatial stops that follow a world item on that item.
  */
 export function normalizeCourseProjectInPlace(project: CourseProjectDocument): void {
   const index = assetSlotIndex(project)
@@ -217,6 +242,7 @@ export function normalizeCourseProjectInPlace(project: CourseProjectDocument): v
   for (const surface of project.surfaces) {
     if (surface.type === 'slide') surface.scenes.forEach(scene => syncFragmentStates(project, surface.id, scene))
     else if (surface.type === 'flow') bindMediaSources(surface.blocks, index, kinds)
+    else syncFollowedCameraFrames(surface, courseSlideCanvas(project))
   }
 }
 

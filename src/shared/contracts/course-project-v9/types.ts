@@ -364,11 +364,22 @@ export interface SpatialCameraPose {
   x: number
   y: number
   zoom: number
+  /**
+   * Degrees, clockwise like layer rotation. Playback turns the world the opposite way about
+   * the pose center, so content rotated by this angle stands upright. Missing means 0.
+   */
+  rotation?: number
 }
 
 export interface SpatialCameraFrame extends SpatialCameraPose {
   id: string
   name: string
+  /**
+   * The world item this stop follows. Normalization keeps the pose on the item's center and
+   * rotation, with its size fitted to the course canvas; a stop without it is free. The
+   * item's `class="fragment"` elements are this stop's playback steps.
+   */
+  targetLayerItemId?: string
 }
 
 export interface SpatialSemanticZoomRule {
