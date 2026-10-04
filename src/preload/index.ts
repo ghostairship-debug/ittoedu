@@ -17,6 +17,7 @@ const IPC_CHANNELS = {
   executionEvent: 'execution:event',
   executionEdit: 'execution:edit',
   executionSettings: 'execution-settings:operate',
+  pixabaySettings: 'pixabay-settings:operate',
   workspaceFiles: 'workspace-files:operate',
   mediaFiles: 'media-files:operate',
   workspaceFilesChanged: 'workspace-files:changed',
@@ -241,6 +242,10 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     },
   },
   publishDynamicContentTargets: input => invoke(IPC_CHANNELS.dynamicContentTargets, input),
+  pixabaySettings: {
+    read: () => invoke(IPC_CHANNELS.pixabaySettings, { type: 'read' }),
+    saveKey: key => invoke(IPC_CHANNELS.pixabaySettings, { type: 'save-key', key }),
+  },
   executionSettings: {
     startOAuthLogin: (id, revision) => invoke(IPC_CHANNELS.executionSettings, { type: 'oauth-login-start', id, revision }),
     oauthLoginStatus: loginId => invoke(IPC_CHANNELS.executionSettings, { type: 'oauth-login-status', loginId }),

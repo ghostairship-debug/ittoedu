@@ -109,6 +109,7 @@ export interface DesktopAPI {
   publishDynamicContentTargets?(input: import('./workbench/dynamicContentTargets').DynamicContentTargetsPublication): Promise<boolean>
   externalMcp?: import('./workbench/external').ExternalMcpAPI
   executionSettings?: import('./workbench/executionSettingsDesktop').ExecutionSettingsAPI
+  pixabaySettings?: import('./workbench/pixabaySettingsDesktop').PixabaySettingsAPI
   workspaceFiles?: import('./workbench/workspaceFiles').WorkspaceFilesAPI
   mediaFiles?(input: import('./workbench/mediaFiles').MediaFilesRequest): Promise<import('./workbench/mediaFiles').MediaFileSnapshot>
   onWorkspaceFilesChanged?(listener: (event: import('./workbench/workspaceFiles').WorkspaceFilesChange) => void): () => void
@@ -201,6 +202,7 @@ export const IPC_CHANNELS = {
   executionEvent: 'execution:event',
   executionEdit: 'execution:edit',
   executionSettings: 'execution-settings:operate',
+  pixabaySettings: 'pixabay-settings:operate',
   workspaceFiles: 'workspace-files:operate',
   mediaFiles: 'media-files:operate',
   workspaceFilesChanged: 'workspace-files:changed',

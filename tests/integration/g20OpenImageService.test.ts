@@ -24,7 +24,7 @@ const raster = (width: number, height: number, format: 'png' | 'jpeg' | 'gif', a
     .toFormat(format).toBuffer().then(buffer => new Uint8Array(buffer))
 
 function service(files: Record<string, Uint8Array | Error>, libraries?: ConstructorParameters<typeof OpenImageService>[0]['libraries']) {
-  const getBytes = vi.fn(async (url: string, _options: { maxBytes: number; signal?: AbortSignal }) => {
+  const getBytes = vi.fn(async (url: string, _options: { maxBytes?: number; signal?: AbortSignal }) => {
     const file = files[url]
     if (!file) throw new AssetHttpError(`网页返回 HTTP 404`, 404)
     if (file instanceof Error) throw file
@@ -98,7 +98,7 @@ describe('open image service', () => {
     await open.search({ runId: 'run', query: 'tilt' })
     const diagram = await open.fetch({ runId: 'run', image: 'img1' })
     expect(new URL(getJson.mock.calls[0]![0]).searchParams.get('titles')).toBe('File:AxialTiltObliquity.png')
-    expect(getBytes.mock.calls[0]![1]).toMatchObject({ maxBytes: 100 * 1024 * 1024 })
+    expect(getBytes.mock.calls[0]![1]).not.toHaveProperty('maxBytes')
     expect(diagram).toMatchObject({ status: 'ready', width: 1600, height: 800, file: { mimeType: 'image/jpeg', filename: 'AxialTiltObliquity.jpg' },
       source: { kind: 'open-library', title: 'AxialTiltObliquity', author: 'Dna-webmaster', url: 'https://commons.wikimedia.org/wiki/File:AxialTiltObliquity.png',
         license: { id: 'CC BY 3.0', url: 'https://creativecommons.org/licenses/by/3.0/' },

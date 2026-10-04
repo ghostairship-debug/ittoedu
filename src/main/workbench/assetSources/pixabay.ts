@@ -41,7 +41,8 @@ export async function searchPixabay(http: AssetHttpPort, key: string, input: Ima
       throw new AssetHttpError('Pixabay 访问过于频繁（每分钟最多 100 次），请稍后再试', 429)
     if (cause instanceof AssetHttpError && (cause.status === 400 || cause.status === 401 || cause.status === 403))
       throw new AssetHttpError('Pixabay 拒绝了请求，API key 可能无效；请在设置中检查 Pixabay API key', cause.status)
-    throw cause
+    // Transport errors may include the request URL, whose query contains the key.
+    throw new AssetHttpError('Pixabay 检索未完成，请检查网络后重试', cause instanceof AssetHttpError ? cause.status : undefined)
   }
   if (!isRecord(body) || !Array.isArray(body.hits)) throw new AssetHttpError('Pixabay 返回了无法识别的检索结果')
   const hits = body.hits.slice(0, input.limit)
