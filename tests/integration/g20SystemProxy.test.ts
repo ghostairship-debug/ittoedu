@@ -6,6 +6,8 @@ import { PublicBrowserProxy } from '../../src/main/workbench/network/PublicBrows
 import { resolvePublicDnsOverHttps } from '../../src/main/workbench/network/publicDnsOverHttps'
 import { fetchPublicResource } from '../../src/main/workbench/network/publicHttp'
 import { openProxyTunnel, parseProxyList, setSystemProxyResolver, type ProxyRoute } from '../../src/main/workbench/network/systemProxy'
+import { createSystemProxyAgent, installSystemProxy } from '../../src/main/workbench/network/systemProxyDispatcher'
+import { Agent, getGlobalDispatcher, setGlobalDispatcher } from 'undici'
 
 const servers: (Server | NetServer)[] = []
 const sockets = new Set<Socket>()
@@ -196,5 +198,37 @@ describe('system proxy for public HTTP', () => {
     try { await expect(resolvePublicDnsOverHttps('example.com')).rejects.toThrow('系统代理拒绝连接 cloudflare-dns.com:443') }
     finally { setSystemProxyResolver(async () => ({ kind: 'direct' })) }
     await vi.waitFor(() => expect(refusing.requested).toEqual(['cloudflare-dns.com:443', 'cloudflare-dns.com:443']))
+  })
+
+  it('lets fetch-based services take the same per-connection decision, and installs it for the whole main process', async () => {
+    const target = await site(), proxy = await connectProxy(target.port)
+    const asked: string[] = []
+    const agent = createSystemProxyAgent(async url => { asked.push(url); return url.includes('model.example') ? proxy.route : { kind: 'direct' } })
+    try {
+      const proxied = await fetch('http://model.example:8443/v1/models', { dispatcher: agent } as RequestInit)
+      expect(await proxied.json()).toEqual({ ok: true })
+      const direct = await fetch(`http://127.0.0.1:${target.port}/direct`, { dispatcher: agent } as RequestInit)
+      expect(direct.status).toBe(200)
+      await direct.arrayBuffer()
+      expect(proxy.requested).toEqual(['model.example:8443'])
+      expect(asked).toEqual(['http://model.example:8443/', `http://127.0.0.1:${target.port}/`])
+      expect(target.seen.map(item => item.host)).toEqual(['model.example:8443', `127.0.0.1:${target.port}`])
+    } finally { await agent.close() }
+
+    // As main does after app ready: the session decides; plain fetch and public HTTP both follow it.
+    const previous = getGlobalDispatcher(), installed = await connectProxy(target.port)
+    const lookups: string[] = []
+    installSystemProxy({ resolveProxy: async url => { lookups.push(url); return url.startsWith('http://127.0.0.1') ? 'DIRECT' : `PROXY 127.0.0.1:${(installed.route as { port: number }).port}; DIRECT` } })
+    try {
+      expect((await fetch('http://oauth.example/token')).status).toBe(200)
+      await fetchPublicResource('http://public.example/installed', { resolve: publicAnswer })
+      expect(installed.requested).toEqual(['oauth.example:80', 'public.example:80'])
+      expect(lookups).toEqual(['http://oauth.example:80/', 'http://public.example/installed'])
+    } finally {
+      const current = getGlobalDispatcher()
+      setGlobalDispatcher(previous instanceof Agent ? previous : new Agent())
+      await (current as Agent).close()
+      setSystemProxyResolver(async () => ({ kind: 'direct' }))
+    }
   })
 })
