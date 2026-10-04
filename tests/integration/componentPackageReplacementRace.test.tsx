@@ -275,6 +275,7 @@ function componentApi(options: {
     selectComponentPackage,
     selectComponentPackages: vi.fn(async () => null),
     loadComponentCatalog: vi.fn(async () => CATALOG),
+    deleteComponentCatalogHtmlComponent: vi.fn(async () => { throw new Error('not used') }),
     selectComponentCatalogSource: vi.fn(async () => null),
     setComponentCatalogSourceTrust: vi.fn(async () => CATALOG),
     readComponentCatalogPackage,

@@ -79,15 +79,18 @@ it('M07-T07 "+" offers attachments and references; referencing a missing selecti
   expect(screen.queryByRole('menu', { name: '添加内容' })).toBeNull()
 })
 
-it('M07-T07 a queued message can run now: it leaves the queue and is sent as an explicit stop-and-continue', async () => {
+it('M07-T07 a queued message can run now: Main stops the current task and starts that same accepted submission', async () => {
   const queued: ExecutionSubmissionRecord = { submissionId: '11111111-1111-4111-8111-111111111111', workspaceId: 'workspace', conversationId: 'c1', state: 'queued', mode: 'queue',
     text: '排队的修改', documents: [], attachments: [], permission: 'ask', model: { provider: 'fixture-provider', model: 'fixture-model', accountId: 'account', billing: 'metered' }, createdAt: 1, updatedAt: 1, position: 1 }
-  const send = vi.fn<ExecutionDesktopAPI['send']>(async input => ({ submission: { ...queued, submissionId: input.submissionId, state: 'accepted', mode: 'adjust' }, conversation: structuredClone(conversation) }))
-  const deleteSubmission = vi.fn<ExecutionDesktopAPI['deleteSubmission']>(async () => ({ ...queued, state: 'cancelled' }))
-  render(<ExecutionAssistant root="C:/workspace" api={api([], { submissions: vi.fn(async () => [queued]), deleteSubmission, send })} settingsAPI={settingsAPI()}
+  const send = vi.fn<ExecutionDesktopAPI['send']>()
+  const deleteSubmission = vi.fn<ExecutionDesktopAPI['deleteSubmission']>()
+  const runQueued = vi.fn<NonNullable<ExecutionDesktopAPI['runQueued']>>(async () => ({ submission: { ...queued, state: 'accepted' }, conversation: structuredClone(conversation) }))
+  render(<ExecutionAssistant root="C:/workspace" api={api([], { submissions: vi.fn(async () => [queued]), deleteSubmission, send, runQueued })} settingsAPI={settingsAPI()}
     captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
   fireEvent.click(await screen.findByRole('button', { name: '立即执行（先停止当前任务）' }))
-  await waitFor(() => expect(send).toHaveBeenCalledTimes(1))
-  expect(deleteSubmission).toHaveBeenCalledWith({ workspaceId: 'workspace', conversationId: 'c1', submissionId: queued.submissionId })
-  expect(send.mock.calls[0]![0]).toMatchObject({ text: '排队的修改', mode: 'adjust', permission: 'ask' })
+  await waitFor(() => expect(runQueued).toHaveBeenCalledTimes(1))
+  // The accepted payload and identity are reused; no new message is sent and the queue entry is not deleted.
+  expect(runQueued).toHaveBeenCalledWith({ workspaceId: 'workspace', conversationId: 'c1', submissionId: queued.submissionId })
+  expect(send).not.toHaveBeenCalled()
+  expect(deleteSubmission).not.toHaveBeenCalled()
 })

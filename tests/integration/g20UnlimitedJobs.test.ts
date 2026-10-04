@@ -82,24 +82,22 @@ it('keeps a silent delegated process alive beyond former deadlines and honours u
   const runner = new CodexDelegationRunner({ inspectCli: async () => ({ ready: true, reason: 'fixture' }), boundary: {
     assertReady: async () => true, launchRestricted: () => process, stopRestricted: stop,
   } })
-  const revoke = vi.fn(async () => undefined), verify = vi.fn()
+  const verify = vi.fn()
   vi.useFakeTimers()
   let settled = false
   const work = runner.run({ taskId: 'fixture', goal: 'Long work', copyRoot: root, executablePath: globalThis.process.execPath,
-    permission: 'workspace', expectedArtifacts: [], mcp: { endpoint: 'http://127.0.0.1:1234/mcp', bearer: 'fixture', revoke } }, {
+    permission: 'workspace', expectedArtifacts: [] }, {
     signal: controller.signal, onEvent: event => { if (event.kind === 'started') entered() }, verify,
   }).then(result => { settled = true; return result })
   await started
   await vi.advanceTimersByTimeAsync(3 * 60 * 60_000)
   expect(settled).toBe(false)
   expect(stop).not.toHaveBeenCalled()
-  expect(revoke).not.toHaveBeenCalled()
   controller.abort()
   const result = await work
   if (result.diagnosticFile) roots.push(path.dirname(result.diagnosticFile))
   expect(result).toMatchObject({ status: 'cancelled', externalChangesPossible: true })
   expect(stop).toHaveBeenCalledOnce()
-  expect(revoke).toHaveBeenCalledOnce()
   expect(verify).not.toHaveBeenCalled()
 })
 

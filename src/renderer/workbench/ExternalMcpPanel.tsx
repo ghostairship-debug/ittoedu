@@ -1,111 +1,126 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ConversationRecord } from '../../shared/workbench/conversations'
-import type { ExecutionDocumentReference } from '../../shared/workbench/executionDesktop'
-import type { ExternalGrantResult, ExternalGrantView, ExternalMcpAPI } from '../../shared/workbench/external'
+import { executionPermissionModes, permissionDescriptions, permissionLabels, type ExecutionPermissionMode } from '../../shared/workbench/executionPermission'
+import { externalClientConfigs, type ExternalCloseAction, type ExternalMcpAPI, type ExternalMcpSettings, type ExternalMcpStatus } from '../../shared/workbench/external'
+import { ConfirmDialog } from '../ui/ConfirmDialog'
 import './ExternalMcpPanel.css'
 
 export interface ExternalMcpPanelProps {
   open: boolean
   onClose(): void
   api: ExternalMcpAPI
-  workspaceId: string
-  conversation: ConversationRecord
-  documents: ExecutionDocumentReference[]
-  instruction: string
-  documentNames?: Record<string, string>
-  onConversationChange(conversation: ConversationRecord): void
 }
-const statuses: Record<ExternalGrantView['status'], string> = { active: '已授权', revoked: '已撤销', closed: '已关闭' }
-export function ExternalMcpPanel({ open, onClose, api, workspaceId, conversation, documents, instruction, documentNames, onConversationChange }: ExternalMcpPanelProps) {
-  const generation = useRef(0), panel = useRef<HTMLElement>(null)
-  const [grants, setGrants] = useState<ExternalGrantView[]>([])
-  const [created, setCreated] = useState<ExternalGrantResult | null>(null)
-  const [sourceRunId, setSourceRunId] = useState(''), [remaining, setRemaining] = useState('')
+type Client = 'claude' | 'codex' | 'opencode' | 'gemini'
+const states: Record<ExternalMcpStatus['state'], string> = { running: '运行中', disabled: '已关闭', 'port-in-use': '端口被占用', failed: '未能启动' }
+const closeActions: Record<ExternalCloseAction, string> = { ask: '每次询问', tray: '隐藏到系统托盘', quit: '退出果铃' }
+const clients: Record<Client, { label: string; hint: string }> = {
+  claude: { label: 'Claude Code', hint: '在已设置环境变量的 PowerShell 中执行一次。Claude Code 会把令牌原样存入它的用户配置；重新生成令牌后先执行 claude mcp remove guoling 再重新添加。' },
+  codex: { label: 'Codex', hint: '合并到 Codex 的 config.toml（通常为 ~/.codex/config.toml）。令牌从环境变量读取。' },
+  opencode: { label: 'OpenCode', hint: '合并到 opencode.json。OpenCode 的远程请求头不保证展开环境变量，这里直接写入令牌；重新生成令牌后需更新。' },
+  gemini: { label: 'Gemini CLI', hint: '合并到 Gemini CLI 的 settings.json（通常为 ~/.gemini/settings.json）。令牌从环境变量读取。' },
+}
+const time = (value: number) => new Date(value).toLocaleTimeString('zh-CN', { hour12: false })
+const copy = (text: string) => navigator.clipboard.writeText(text)
+
+/** Status and configuration of the resident local MCP endpoint for external AI clients. */
+export function ExternalMcpPanel({ open, onClose, api }: ExternalMcpPanelProps) {
+  const panel = useRef<HTMLElement>(null)
+  const [status, setStatus] = useState<ExternalMcpStatus | null>(null)
+  const [token, setToken] = useState<string | null>(null)
+  const [port, setPort] = useState('')
+  const [client, setClient] = useState<Client>('claude')
+  const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('')
-  const [client, setClient] = useState<'codex' | 'claude' | 'opencode'>('codex')
-  const owner = { workspaceId, conversationId: conversation.conversationId }
   useEffect(() => {
-    const ticket = ++generation.current
-    setCreated(null); setGrants([]); setBusy(false); setError(''); setNotice(''); setRemaining('')
-    setSourceRunId(conversation.runIndex.builtinRunIds.at(-1) ?? '')
     if (!open) return
+    let live = true
+    setToken(null); setError(''); setNotice('')
     const prior = document.activeElement as HTMLElement | null
     panel.current?.focus()
-    const refresh = () => { void api.list({ workspaceId, conversationId: conversation.conversationId }).then(result => {
-      if (generation.current === ticket) setGrants(result)
-    }).catch(cause => { if (generation.current === ticket) setError(cause instanceof Error ? cause.message : '无法读取外部授权') }) }
-    refresh()
-    const interval = window.setInterval(refresh, 5000)
-    return () => { ++generation.current; window.clearInterval(interval); prior?.focus() }
-  }, [open, api, workspaceId, conversation.conversationId])
+    const refresh = (first = false) => { void api.status().then(value => {
+      if (!live) return
+      setStatus(value)
+      if (first) setPort(String(value.settings.port))
+    }).catch(cause => { if (live) setError(cause instanceof Error ? cause.message : '无法读取外部连接状态') }) }
+    refresh(true)
+    const interval = window.setInterval(refresh, 2000)
+    return () => { live = false; window.clearInterval(interval); prior?.focus() }
+  }, [open, api])
   if (!open) return null
-  const selected = created && grants.find(grant => grant.connectionId === created.connection.connectionId)
-  const available = created && selected?.status === 'active'
-  const create = async () => {
-    const ticket = generation.current
+  const run = async (action: () => Promise<void>, done?: string) => {
     setBusy(true); setError(''); setNotice('')
-    try {
-      const result = await api.grant({ ...owner, expectedRevision: conversation.revision, instruction,
-        documents, ...(sourceRunId ? { sourceRunId } : {}), remainingWork: remaining })
-      if (ticket !== generation.current) { await api.revoke({ ...owner, connectionId: result.connection.connectionId }); return }
-      setCreated(result); onConversationChange(result.conversation)
-      const next = await api.list(owner)
-      if (ticket === generation.current) {
-        setGrants(next)
-        setNotice('授权已创建。将配置交给本机客户端后，先让它读取本次任务与目标。')
-      }
-    } catch (cause) { if (ticket === generation.current) setError(cause instanceof Error ? cause.message : '外部授权未完成') }
-    finally { if (ticket === generation.current) setBusy(false) }
+    try { await action(); if (done) setNotice(done) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : '操作未完成') }
+    finally { setBusy(false) }
   }
-  const revoke = async (connectionId: string) => {
-    const ticket = generation.current
-    setBusy(true); setError('')
-    try {
-      await api.revoke({ ...owner, connectionId })
-      const next = await api.list(owner)
-      if (ticket === generation.current) { setGrants(next); if (created?.connection.connectionId === connectionId) setCreated(null); setNotice('授权已撤销，后续工具请求不能再修改文档。外部客户端自己的聊天不由果铃停止。') }
-    } catch (cause) { if (ticket === generation.current) setError(cause instanceof Error ? cause.message : '撤销未完成') }
-    finally { if (ticket === generation.current) setBusy(false) }
+  const configure = (patch: Partial<ExternalMcpSettings>, done?: string) => run(async () => setStatus(await api.configure(patch)), done)
+  const applyPort = () => {
+    const value = Number(port)
+    if (!Number.isInteger(value) || value < 1024 || value > 65535) { setError('端口需为 1024–65535 之间的整数'); return }
+    void configure({ port: value }, `端口已改为 ${value}；已配置的客户端需同步改用新地址。`)
   }
+  const regenerate = () => run(async () => {
+    const result = await api.regenerateToken()
+    setToken(result.token); setStatus(result.status)
+  }, '已重新生成令牌：旧令牌立即失效，所有外部会话已断开。请把新令牌更新到客户端。')
+  const configs = status ? externalClientConfigs(status.endpoint, token ?? undefined) : null
+  const active = status?.sessions.filter(session => !session.stopped) ?? []
   return <div className="external-mcp-backdrop" onKeyDown={event => {
-    if (event.key === 'Escape') { event.stopPropagation(); onClose() }
-    if (event.key === 'Tab') {
-      const controls = [...(panel.current?.querySelectorAll<HTMLElement>('button:not(:disabled),select:not(:disabled),textarea:not(:disabled),summary') ?? [])]
-      const next = event.shiftKey ? controls.at(-1) : controls[0]
-      if (next && (document.activeElement === panel.current || document.activeElement === (event.shiftKey ? controls[0] : controls.at(-1)))) { event.preventDefault(); next.focus() }
-    }
+    if (event.key === 'Escape' && !confirming) { event.stopPropagation(); onClose() }
   }}>
-    <section className="external-mcp-panel" role="dialog" aria-modal="true" aria-label="外部客户端连接" tabIndex={-1} ref={panel}>
-      <header><h2>交给外部客户端</h2><button type="button" onClick={onClose} aria-label="关闭外部连接面板">关闭</button></header>
-      <p>授权仅适用于本机客户端和下面选中的文档，切换页面不会改变目标。授权不会自动过期，可随时主动撤销；退出果铃后连接关闭。</p>
-      <ul aria-label="本次授权范围">{documents.map((doc, index) => <li key={doc.documentId}>
-        {documentNames?.[doc.documentId] ?? `文档 ${index + 1}`}：{doc.writable.length === 0 ? '只读' : doc.writable.map(scope => scope.kind === 'document' ? '整个文档可修改'
-          : scope.kind === 'markdown-range' ? `正文第 ${scope.from + 1}–${scope.to} 字符可修改` : scope.kind === 'flow-block' ? '选中的讲义块可修改' : '选中的对象可修改').join('；')}
-      </li>)}</ul>
-      {!documents.length && <p>请先在会话中选择需要交接的文档。</p>}
-      <label>任务来源<select value={sourceRunId} onChange={event => setSourceRunId(event.target.value)} disabled={busy}>
-        <option value="">当前输入的新任务</option>
-        {conversation.runIndex.builtinRunIds.map((id, index) => <option value={id} key={id}>继续会话中的第 {index + 1} 次任务</option>)}
-      </select></label>
-      <label>剩余任务或补充要求<textarea value={remaining} onChange={event => setRemaining(event.target.value)} rows={3} placeholder="外部接手后还需要完成什么" disabled={busy} /></label>
-      <button type="button" disabled={busy || !documents.length || !instruction.trim() && !sourceRunId} onClick={() => { void create() }}>结算当前任务并创建授权</button>
+    <section className="external-mcp-panel" role="dialog" aria-modal="true" aria-label="外部 AI 连接" tabIndex={-1} ref={panel}>
+      <header><h2>外部 AI 连接</h2><button type="button" onClick={onClose} aria-label="关闭外部连接设置">关闭</button></header>
+      <p>Claude Code、Codex、OpenCode、Gemini CLI 等本机客户端可通过下面的固定地址连接正在运行的果铃，配置一次即可长期使用。果铃需由你启动；关闭窗口时可隐藏到系统托盘继续服务。</p>
+      {!status ? <p role="status">正在读取状态…</p> : <>
+        <div className="external-mcp-row" aria-label="服务状态">
+          <span className={`external-mcp-state external-mcp-state--${status.state}`}>{states[status.state]}</span>
+          <label className="external-mcp-inline"><input type="checkbox" checked={status.settings.enabled} disabled={busy}
+            onChange={event => { void configure({ enabled: event.target.checked }) }} />启用外部连接服务</label>
+        </div>
+        {status.message && <p role="alert">{status.message}</p>}
+        <label>地址<span className="external-mcp-copyable"><input readOnly value={status.endpoint} aria-label="连接地址" />
+          <button type="button" onClick={() => { void copy(status.endpoint).then(() => setNotice('已复制地址')) }}>复制</button></span></label>
+        <label>端口<span className="external-mcp-copyable"><input inputMode="numeric" value={port} onChange={event => setPort(event.target.value)} aria-label="端口" disabled={busy} />
+          <button type="button" onClick={applyPort} disabled={busy || port === String(status.settings.port)}>应用端口</button></span></label>
+        <div className="external-mcp-field"><span>令牌</span><span className="external-mcp-copyable">
+          <input readOnly value={token ?? '••••••••••••••••'} aria-label="令牌" onFocus={event => event.target.select()} />
+          <button type="button" disabled={busy} onClick={() => { if (token) setToken(null); else void run(async () => setToken(await api.revealToken())) }}>{token ? '隐藏' : '显示'}</button>
+          <button type="button" disabled={busy} onClick={() => { void run(async () => { await copy(token ?? await api.revealToken()) }, '已复制令牌') }}>复制</button>
+          <button type="button" disabled={busy} onClick={() => setConfirming(true)}>重新生成</button>
+        </span></div>
+        <label>外部会话权限<select aria-label="外部会话权限" value={status.settings.permission} disabled={busy}
+          onChange={event => { void configure({ permission: event.target.value as ExecutionPermissionMode }, '新连接的会话将使用此档位；已连接的会话保持连接时的档位。') }}>
+          {executionPermissionModes.map(mode => <option key={mode} value={mode}>{permissionLabels[mode]}</option>)}
+        </select><small>{permissionDescriptions[status.settings.permission]}。档位在会话连接时冻结，由果铃主进程执行；需要询问时果铃会弹出确认。</small></label>
+        <label>点击窗口关闭按钮时<select aria-label="点击窗口关闭按钮时" value={status.settings.closeAction} disabled={busy}
+          onChange={event => { void configure({ closeAction: event.target.value as ExternalCloseAction }) }}>
+          {(Object.keys(closeActions) as ExternalCloseAction[]).map(action => <option key={action} value={action}>{closeActions[action]}</option>)}
+        </select></label>
+        <div className="external-mcp-field"><span>外部会话（{active.length} 个连接中）</span>
+          {status.sessions.length ? <ul aria-label="外部会话">{status.sessions.map(session => <li key={session.sessionId}>
+            <span>{session.clientName} · {session.workspaceName} · {permissionLabels[session.permission]} · {session.lastCallAt ? `最近调用 ${time(session.lastCallAt)}` : `连接于 ${time(session.connectedAt)}`}
+              {session.pendingCalls > 0 && ` · 正在处理 ${session.pendingCalls} 个调用`}{session.stopped && ' · 已停止'}</span>
+            {!session.stopped && <button type="button" disabled={busy} onClick={() => { void run(async () => setStatus(await api.stopSession(session.sessionId)),
+              `已停止 ${session.clientName} 的会话；它的后续调用会被拒绝，客户端可重新连接。`) }}>停止</button>}
+          </li>)}</ul> : <p>暂无外部会话。</p>}
+        </div>
+        {configs && <div className="external-mcp-config">
+          <label>客户端<select aria-label="客户端" value={client} onChange={event => setClient(event.target.value as Client)}>
+            {(Object.keys(clients) as Client[]).map(key => <option key={key} value={key}>{clients[key].label}</option>)}
+          </select></label>
+          {client !== 'opencode' && <>
+            <p>1. 在 PowerShell 中设置环境变量 GUOLING_MCP_TOKEN（{token ? '已填入当前令牌' : '先点上方“显示”填入令牌'}）：</p>
+            <textarea aria-label="设置环境变量" readOnly rows={2} value={configs.environment} onFocus={event => event.target.select()} />
+          </>}
+          <p>{client === 'opencode' ? '' : '2. '}{clients[client].hint}</p>
+          <textarea aria-label="客户端配置" readOnly rows={client === 'claude' ? 3 : 8} value={configs[client]} onFocus={event => event.target.select()} />
+          <button type="button" onClick={() => { void copy(configs[client]).then(() => setNotice(`已复制 ${clients[client].label} 配置`)) }}>复制配置</button>
+        </div>}
+      </>}
       {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-      {available && <div className="external-mcp-config">
-        <p>凭据仅在本次创建后显示；授权不会按时长自动失效。</p>
-        <label>客户端<select value={client} onChange={event => setClient(event.target.value as typeof client)}><option value="codex">Codex</option><option value="claude">Claude Code</option><option value="opencode">OpenCode</option></select></label>
-        <p>先在启动客户端的 PowerShell 中设置本次凭据：</p>
-        <textarea aria-label="本次授权环境变量" readOnly rows={2} value={`$env:GUOLING_MCP_TOKEN='${created.connection.bearer}'`} onFocus={event => event.target.select()} />
-        <p>{client === 'codex' ? '将以下内容合并到 Codex 的 config.toml。' : client === 'claude' ? '将以下内容合并到 .mcp.json，或用 --mcp-config 指定独立配置文件。' : '将以下内容合并到 opencode.json。'}</p>
-        <textarea aria-label="客户端配置" readOnly rows={8} value={created.config[client]} onFocus={event => event.target.select()} />
-        <details><summary>查看事实交接包（{created.handoff.committedFacts.length} 项已提交）</summary>
-          <textarea aria-label="事实交接包" readOnly rows={8} value={JSON.stringify(created.handoff, null, 2)} />
-        </details>
-      </div>}
-      {grants.length > 0 && <ul aria-label="已有外部授权">{grants.map((grant, index) => <li key={grant.connectionId}>
-        连接 {index + 1} · {statuses[grant.status]} · {grant.documents.length} 个文档
-        {grant.status === 'active' && <button type="button" onClick={() => { void revoke(grant.connectionId) }} disabled={busy}>撤销连接 {index + 1}</button>}
-      </li>)}</ul>}
-      <p className="external-mcp-limits">果铃只显示实际收到的工具调用与提交。外部聊天、用量和任务是否完成未知。云端客户端无法直接连接此本机地址；本连接不限制客户端自己的磁盘操作。</p>
+      <p className="external-mcp-limits">只监听本机 127.0.0.1，拒绝网页来源的请求；果铃只显示实际收到的工具调用与提交，外部客户端自己的对话、用量和磁盘操作不由果铃管理。云端客户端无法连接此本机地址。</p>
     </section>
+    <ConfirmDialog open={confirming} title="重新生成令牌" message="旧令牌会立即失效，所有外部会话会断开。之后需要把新令牌更新到各客户端。"
+      confirmLabel="重新生成" cancelLabel="取消" danger onCancel={() => setConfirming(false)}
+      onConfirm={() => { setConfirming(false); void regenerate() }} />
   </div>
 }

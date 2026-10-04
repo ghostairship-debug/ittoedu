@@ -5,6 +5,9 @@ import { AppState } from './appState'
 import { createMainWindow } from './createWindow'
 import { registerIpcHandlers, unregisterIpcHandlers } from './ipc'
 import { disposeNativeTextMeasurement } from './workbench/documentHost'
+import { startExternalMcpService } from './workbench/external/externalDesktopService'
+import { installWindowLifecycle } from './windowLifecycleDesktop'
+import type { WindowLifecycle } from './windowLifecycle'
 import {
   installEditorProtocol,
   installHtmlPreviewProtocol,
@@ -16,6 +19,7 @@ import {
   shouldShowApplicationWindows,
 } from './windowVisibility'
 import { APP_ID } from '../shared/constants'
+import { installSystemProxy } from './workbench/network/systemProxyDispatcher'
 
 if (!shouldShowApplicationWindows()) {
   BACKGROUND_E2E_CHROMIUM_SWITCHES.forEach((name) => {
@@ -31,6 +35,7 @@ const appState = new AppState()
 let mainWindow: BrowserWindow | null = null
 let rendererEntryUrl: string | null = null
 let removeDiagnosticHandlers: (() => void) | null = null
+let lifecycle: WindowLifecycle | null = null
 
 app.on('render-process-gone', (_event, contents, details) => {
   void diagnosticLog.append({
@@ -66,6 +71,8 @@ if (!singleInstanceLock) {
 async function openMainWindow(): Promise<void> {
   if (mainWindow && !mainWindow.isDestroyed()) {
     if (mainWindow.isMinimized()) mainWindow.restore()
+    // A window hidden in the tray comes back when the app is launched again.
+    mainWindow.show()
     mainWindow.focus()
     return
   }
@@ -73,6 +80,8 @@ async function openMainWindow(): Promise<void> {
   await createMainWindow(appState, (result) => {
     mainWindow = result.window
     rendererEntryUrl = result.rendererEntryUrl
+    // Logging off or shutting down Windows quits; it is never turned into a hide.
+    result.window.on('session-end', () => lifecycle?.requestQuit())
     result.window.once('closed', () => {
       mainWindow = null
       rendererEntryUrl = null
@@ -95,11 +104,16 @@ app.on('certificate-error', (event, _contents, _url, _error, _certificate, callb
 app
   .whenReady()
   .then(async () => {
+    // A second launch only hands its arguments to the running instance (second-instance) and quits.
+    if (!singleInstanceLock) return
     if (process.platform === 'win32') {
       app.setAppUserModelId(APP_ID)
     }
 
     removeDiagnosticHandlers = diagnosticLog.installProcessHandlers()
+    lifecycle = installWindowLifecycle(() => mainWindow)
+    // Every outbound request of the main process follows the system proxy (or PAC) from here on.
+    installSystemProxy(session.defaultSession)
 
     installEditorProtocol(session.defaultSession)
     installHtmlPreviewProtocol(session.defaultSession)
@@ -108,6 +122,9 @@ app
       getRendererEntryUrl: () => rendererEntryUrl,
       appState,
     })
+    // Default on; an occupied port only shows in settings and never blocks the window.
+    void startExternalMcpService().catch(error => diagnosticLog.append({ source: 'main', message: '外部连接服务未能启动',
+      details: { reason: error instanceof Error ? error.message : String(error) } }))
     appState.enqueueOpenFiles(await launchFileArguments(process.argv, process.cwd(), app.isPackaged))
     await openMainWindow()
 
@@ -131,6 +148,7 @@ app.on('window-all-closed', () => {
 })
 
 app.on('will-quit', () => {
+  lifecycle?.dispose()
   removeDiagnosticHandlers?.()
   removeDiagnosticHandlers = null
   unregisterIpcHandlers()

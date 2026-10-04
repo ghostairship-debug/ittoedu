@@ -124,8 +124,8 @@ export function checkImportBoundaries(edges: readonly ImportEdge[], files: Reado
   const catalog = 'src/core/tools/ToolCatalog.ts'
   const gateway = 'src/core/tools/DocumentToolGateway.ts'
   const engine = 'src/main/workbench/execution/ExecutionEngine.ts'
-  const mcp = 'src/main/workbench/external/McpDocumentServer.ts'
-  const required = [[gateway, catalog], [engine, gateway], [mcp, gateway]] as const
+  const external = 'src/main/workbench/external/ExternalMcpService.ts'
+  const required = [[gateway, catalog], [engine, gateway], [external, gateway]] as const
   for (const [from, to] of required) {
     if (!files.has(from) || !files.has(to) || !edges.some(edge => edge.from === from && edge.to === to)) {
       add('tool-schema-source', `required tool definition edge missing: ${from} -> ${to}`)
@@ -137,7 +137,9 @@ export function checkImportBoundaries(edges: readonly ImportEdge[], files: Reado
   // The 2.0 ExecutionEngine is the unified executor itself, not a transport wrapper:
   // it consumes the same-source ToolCatalog/AgentFileTools and declares only its own
   // meta-tool input schema, so it is constrained by the required chain edges above.
-  const toolTransports = [mcp,
+  // The resident ExternalMcpService plays the same role for external sessions; its
+  // HTTP framing lives in ResidentMcpServer, which is the transport checked below.
+  const toolTransports = ['src/main/workbench/external/ResidentMcpServer.ts',
     'src/main/workbench/providers/OpenAIChatProvider.ts',
     'src/main/workbench/providers/ChatGPTResponsesProvider.ts']
   for (const from of toolTransports) {

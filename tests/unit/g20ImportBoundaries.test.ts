@@ -6,11 +6,12 @@ const root = resolve(__dirname, '../..')
 const catalog = 'src/core/tools/ToolCatalog.ts'
 const gateway = 'src/core/tools/DocumentToolGateway.ts'
 const engine = 'src/main/workbench/execution/ExecutionEngine.ts'
-const mcp = 'src/main/workbench/external/McpDocumentServer.ts'
+const external = 'src/main/workbench/external/ExternalMcpService.ts'
+const transport = 'src/main/workbench/external/ResidentMcpServer.ts'
 const sourceChain: ImportEdge[] = [
   { from: gateway, specifier: './ToolCatalog', to: catalog },
   { from: engine, specifier: '../../../core/tools/DocumentToolGateway', to: gateway },
-  { from: mcp, specifier: '../../../core/tools/DocumentToolGateway', to: gateway },
+  { from: external, specifier: '../../../core/tools/DocumentToolGateway', to: gateway },
 ]
 
 describe('S11 determined import boundaries', () => {
@@ -28,14 +29,15 @@ describe('S11 determined import boundaries', () => {
       { from: 'src/renderer/example.ts', specifier: '../../main/localAgent/harness', to: 'src/main/localAgent/harness.ts' },
       { from: 'src/renderer/other.ts', specifier: 'node:child_process', to: null },
       { from: 'src/main/workbench/providers/OpenAIChatProvider.ts', specifier: '../../../renderer/ui/Canvas', to: 'src/renderer/ui/Canvas.tsx' },
-      { from: mcp, specifier: 'zod', to: null },
+      { from: transport, specifier: 'zod', to: null },
     ]
-    const violations = checkImportBoundaries(edges, new Set([catalog, gateway, engine, mcp,
+    const violations = checkImportBoundaries(edges, new Set([catalog, gateway, engine, external, transport,
       'src/main/workbench/providers/OpenAIChatProvider.ts',
       'src/main/workbench/providers/ChatGPTResponsesProvider.ts']))
     expect(violations.map(value => value.rule)).toEqual([
       'core-runtime', 'renderer-cli', 'renderer-cli', 'tool-schema-source', 'tool-schema-source', 'wrapper-canvas',
     ])
-    expect(violations.some(value => value.detail.includes(`${mcp} -> ${gateway}`))).toBe(true)
+    expect(violations.some(value => value.detail.includes(`${external} -> ${gateway}`))).toBe(true)
+    expect(violations.some(value => value.detail === `${transport} -> zod`)).toBe(true)
   })
 })

@@ -7,6 +7,7 @@ import type { ModelJsonObject } from '../../shared/workbench/modelProvider'
 import { readModelReasoningEffort, resolveModelReasoning, withModelReasoning, withoutManagedModelReasoning, type ResolvedModelReasoning } from '../../shared/workbench/modelReasoning'
 import { ModelThinkingBudgetControl } from './ModelThinkingBudgetControl'
 import { ModelReferencePicker } from './ModelReferencePicker'
+import { PixabaySettingsSection } from './PixabaySettingsSection'
 import { modelCapabilityIdentity, modelCapabilityRecord, type ProbedModelCapability } from '../../shared/workbench/modelCapabilities'
 import { openAIImagesEndpoint, supportsChatGPTOAuthImages, supportsOpenAIImages } from '../../shared/workbench/images'
 
@@ -373,6 +374,7 @@ export function ExecutionSettingsPanel({ open, entry = 'default', onClose, api: 
         <button type="button" className="secondary-button" onClick={close} disabled={busy} aria-label="关闭模型连接设置">关闭</button>
       </header>
       <p style={{ margin: 0 }}>接入 API 或登录 ChatGPT 后，在对话框右下角点选对话模型和强度。每项连接的计费来源都会显示；正在运行的任务保持发送时的选择。</p>
+      {entry === 'default' && <PixabaySettingsSection />}
       {entry === 'chatgpt-oauth' && <section aria-label="ChatGPT 登录" style={{ display: 'grid', gap: 10, justifyItems: 'start' }}>
         <p style={{ margin: 0 }}>通过系统浏览器登录 ChatGPT。登录不会自动更改对话、视觉或图片模型，也不会发起模型请求。</p>
         {oauthImageConnections.length > 1 && <label style={field}>ChatGPT 账号<select aria-label="ChatGPT 账号" value={selectedId} onChange={event => choose(oauthImageConnections.find(item => item.connection.id === event.target.value))}>

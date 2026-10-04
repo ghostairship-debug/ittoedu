@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { existsSync, lstatSync, realpathSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { writePixabayDefaultKey } from './build-pixabay-default-key.mjs'
 
 const workspace = realpathSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'))
 const output = path.resolve(workspace, 'dist-electron')
@@ -32,4 +33,10 @@ child.on('error', (error) => {
   console.error(error)
   process.exitCode = 1
 })
-child.on('exit', (code) => { process.exitCode = code ?? 1 })
+child.on('exit', async (code) => {
+  process.exitCode = code ?? 1
+  if (code === 0) {
+    try { await writePixabayDefaultKey(output) }
+    catch { console.error('Pixabay default key build failed'); process.exitCode = 1 }
+  }
+})

@@ -131,7 +131,7 @@ describe('durable execution submissions', () => {
     expect(fetchMock.mock.calls.length).toBe(3)
   })
 
-  it('persists an external handoff pause and cancels only writable document work before close without a late run', async () => {
+  it('persists a user queue pause and cancels only writable document work before close without a late run', async () => {
     let calls = 0
     const fetchMock = vi.fn((_: string | URL | Request, init?: RequestInit) => {
       calls += 1
@@ -154,15 +154,15 @@ describe('durable execution submissions', () => {
     await waitUntil(async () => fetchMock.mock.calls.length === 1)
     const queuedWrite = await send('32222222-2222-4222-8222-222222222222', running.conversation.revision, '排队可写', writable)
     const queuedRead = await send('33333333-3333-4333-8333-333333333333', queuedWrite.conversation.revision, '排队只读', readOnly)
-    await service.withConversation(conversation.conversationId, () => service.pauseQueueForExternal(conversation.conversationId))
+    await service.operate({ type: 'pause-queue', workspaceId: conversation.workspaceId, conversationId: conversation.conversationId, reason: 'user' })
     expect(await service.writableTasksForDocument(document.documentId)).toEqual({ runIds: [running.run!.runId], submissionIds: [queuedWrite.submission.submissionId] })
     expect(await service.stopTasksForDocument(document.documentId)).toEqual({ runIds: [running.run!.runId], submissionIds: [queuedWrite.submission.submissionId] })
     await new Promise(resolve => setTimeout(resolve, 20))
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const paused = await service.operate({ type: 'submission', workspaceId: conversation.workspaceId, conversationId: conversation.conversationId,
       submissionId: queuedRead.submission.submissionId }) as ExecutionSubmissionRecord
-    expect(paused).toMatchObject({ state: 'queued', queuePausedReason: 'external-handoff' })
-    await service.withConversation(conversation.conversationId, () => service.resumeBuiltinQueue(conversation.conversationId))
+    expect(paused).toMatchObject({ state: 'queued', queuePausedReason: 'user' })
+    await service.operate({ type: 'resume-queue', workspaceId: conversation.workspaceId, conversationId: conversation.conversationId })
     await waitUntil(async () => (await service.operate({ type: 'submission', workspaceId: conversation.workspaceId, conversationId: conversation.conversationId,
       submissionId: queuedRead.submission.submissionId }) as ExecutionSubmissionRecord).state === 'accepted')
     await waitUntil(async () => fetchMock.mock.calls.length === 2)

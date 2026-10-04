@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "semanticVersion": "f65d8fa3c2be78f79b9a9798581cc181279205e8c000f71ece9544292737e825",
+  "semanticVersion": "55ec7f1d9e89aaeb1dd92131d9dfa3075a7567e9debca3fa4597f1387d869704",
   "entries": [
     {
       "id": "asset.font.import",
@@ -1270,6 +1270,31 @@
       "summary": "正式协议同源的完整Markdown指南，保留自然换行供原生Read按需读取。"
     },
     {
+      "id": "reference:orchestrate-courseware/assets",
+      "kind": "reference",
+      "label": "补齐资产",
+      "path": "skills/orchestrate-courseware/references/assets.md",
+      "scopes": [
+        "slide:scene",
+        "slide:surface",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:surface",
+        "spatial-2d:global"
+      ],
+      "carriers": [
+        "native",
+        "recipe",
+        "existing-component",
+        "generated-component",
+        "runtime"
+      ],
+      "summary": "补齐资产",
+      "keywords": "# 补齐资产"
+    },
+    {
       "id": "reference:orchestrate-courseware/interaction-design",
       "kind": "reference",
       "label": "让互动产生可观察的学习",
@@ -1320,6 +1345,31 @@
       "keywords": "# 教学推进与操作边界"
     },
     {
+      "id": "reference:orchestrate-courseware/project-files",
+      "kind": "reference",
+      "label": "在工程里创作",
+      "path": "skills/orchestrate-courseware/references/project-files.md",
+      "scopes": [
+        "slide:scene",
+        "slide:surface",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:surface",
+        "spatial-2d:global"
+      ],
+      "carriers": [
+        "native",
+        "recipe",
+        "existing-component",
+        "generated-component",
+        "runtime"
+      ],
+      "summary": "在工程里创作",
+      "keywords": "# 在工程里创作"
+    },
+    {
       "id": "reference:orchestrate-courseware/script-assemble-html",
       "kind": "reference",
       "label": "scripts/assemble-html.mjs",
@@ -1343,6 +1393,31 @@
       ],
       "summary": "scripts/assemble-html.mjs",
       "keywords": ""
+    },
+    {
+      "id": "reference:orchestrate-courseware/teacher-controller",
+      "kind": "reference",
+      "label": "教师控制台",
+      "path": "skills/orchestrate-courseware/references/teacher-controller.md",
+      "scopes": [
+        "slide:scene",
+        "slide:surface",
+        "slide:global",
+        "flow:surface",
+        "flow:global",
+        "spatial-2d:world",
+        "spatial-2d:surface",
+        "spatial-2d:global"
+      ],
+      "carriers": [
+        "native",
+        "recipe",
+        "existing-component",
+        "generated-component",
+        "runtime"
+      ],
+      "summary": "教师控制台",
+      "keywords": "# 教师控制台"
     },
     {
       "id": "reference:orchestrate-courseware/teaching-design-quality",
@@ -1590,7 +1665,7 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "将已有本地 HTML 或创作好的 HTML 新建为可编辑课件并保存；适用于第三方页面导入、HTML 转课件和课件创作后的交付。",
+      "summary": "将已有第三方或外来 HTML 保真导入可编辑课件；适用于 HTML 转课件，不承担新课创作与已有工程续改。",
       "keywords": "# 从 HTML 交付课件"
     },
     {
@@ -1665,7 +1740,7 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "根据教材、教案、主题或教学材料创作内容完整、视觉清晰的互动课件；负责内容、布局和互动设计，用普通 HTML/CSS 表达作品，再交给宿主组装保存。",
+      "summary": "根据教材、教案或主题，分阶段创作可持续编辑的课件；产出教学策划，在工程内逐页搭框架、补素材与互动并局部精修。纯第三方 HTML 导入和已有作品的小改走对应 Skill。",
       "keywords": "# 创作教学作品"
     },
     {
@@ -1904,8 +1979,11 @@
     "skills/edit-content/SKILL.md",
     "skills/office-content/SKILL.md",
     "skills/orchestrate-courseware/SKILL.md",
+    "skills/orchestrate-courseware/references/assets.md",
     "skills/orchestrate-courseware/references/interaction-design.md",
     "skills/orchestrate-courseware/references/main-progression.md",
+    "skills/orchestrate-courseware/references/project-files.md",
+    "skills/orchestrate-courseware/references/teacher-controller.md",
     "skills/orchestrate-courseware/references/teaching-design-quality.md",
     "skills/orchestrate-courseware/references/web-composition-examples.md",
     "skills/orchestrate-courseware/scripts/assemble-html.mjs",

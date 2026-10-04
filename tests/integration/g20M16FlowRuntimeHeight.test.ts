@@ -4,6 +4,8 @@ import { observeSurfaceRuntimeContentSize } from '@/player/surfaces/runtime/surf
 import { resolveFlowRuntimePaperSlots } from '@/shared/flowRuntimePaperLayout'
 import type { PublishedRuntimeLayerItem } from '@/shared/publishedCourseTypes'
 
+const nextFrame = () => new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+
 function encodeSource(source: string): PublishedRuntimeLayerItem['runtime']['code'] {
   const bytes = new Uint8Array(source.length * 2)
   for (let index = 0; index < source.length; index += 1) { const code = source.charCodeAt(index); bytes[index * 2] = code & 0xff; bytes[index * 2 + 1] = code >>> 8 }
@@ -31,13 +33,17 @@ it('reports real Runtime content growth and shrink without remount or duplicate 
   const callbacks: FrameRequestCallback[] = []
   Object.defineProperty(view, 'requestAnimationFrame', { configurable: true, value: (callback: FrameRequestCallback) => { callbacks.push(callback); return callbacks.length } })
   Object.defineProperty(view, 'cancelAnimationFrame', { configurable: true, value: () => undefined })
-  let notifyResize: (() => void) | undefined
+  type ResizeEntries = Array<{ target: Element; contentRect: { width: number; height: number } }>
+  let resizeCallback: ((entries: ResizeEntries) => void) | undefined
+  let observed: Element[] = []
   let disconnected = 0
   Object.defineProperty(view, 'ResizeObserver', { configurable: true, value: class {
-    constructor(callback: () => void) { notifyResize = callback }
-    observe() {}
-    disconnect() { disconnected += 1 }
+    constructor(callback: (entries: ResizeEntries) => void) { resizeCallback = callback }
+    observe(target: Element) { observed.push(target) }
+    disconnect() { disconnected += 1; observed = [] }
   } })
+  // Like the browser, a notification reports the current size of every observed element.
+  const notifyResize = () => resizeCallback?.(observed.map(target => ({ target, contentRect: target.getBoundingClientRect() })))
   const flush = () => { while (callbacks.length) callbacks.shift()!(0) }
   let contentHeight = 1200
   Object.defineProperty(view.HTMLElement.prototype, 'getBoundingClientRect', { configurable: true, value: function (this: HTMLElement) {
@@ -69,8 +75,9 @@ it('reports real Runtime content growth and shrink without remount or duplicate 
   expect(registeredY[0]).toBeGreaterThan(9)
   const main = container.querySelector('main')
   expect(Reflect.get(view, '__m16Creates')).toBe(1)
+  notifyResize() // The initial observation only records sizes.
   contentHeight = 1600
-  notifyResize?.(); notifyResize?.()
+  notifyResize(); notifyResize()
   flush()
   expect(heights).toEqual([1200, 1600])
   handle.updateSize(640, 1600)
@@ -80,13 +87,14 @@ it('reports real Runtime content growth and shrink without remount or duplicate 
   expect(registeredY.at(-1)).toBeLessThan(registeredY[0]!)
   expect(container.querySelector('main')).toBe(main)
   expect(container.querySelector('[data-surface-runtime-root]')?.getAttribute('data-size')).toBe('640x1600')
+  // Only a real invalidation re-measures; the shrinking content reports its new size.
   contentHeight = 500
-  handle.updateSize(640, 1600)
+  notifyResize()
   flush()
   expect(heights).toEqual([1200, 1600, 500])
   expect(Reflect.get(view, '__m16Creates')).toBe(1)
   handle.destroy()
-  notifyResize?.()
+  notifyResize()
   flush()
   expect(heights).toEqual([1200, 1600, 500])
   expect(disconnected).toBeGreaterThan(0)
@@ -128,9 +136,10 @@ it('accepts a managed document as the content source and measures its page inste
   const observer = observeSurfaceRuntimeContentSize({ root, source: () => ({ kind: 'viewport', origin: page.body, viewportElements: new Set([page.body]) }), onHeightChange: height => heights.push(height) })
   await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
   expect(heights).toEqual([920])
+  // Only a real invalidation re-measures: the page content itself changes.
   pageHeight = 480
-  observer.refresh()
-  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  article.textContent = '较短的页面'
+  await nextFrame(); await nextFrame()
   expect(heights).toEqual([920, 480])
   observer.destroy()
   root.remove()
@@ -161,18 +170,18 @@ it.each([0.5, 2])('measures unscaled content at %sx and shrinks after a styleshe
   const observer = observeSurfaceRuntimeContentSize({ root, source: () => ({ kind: 'viewport', origin: root, viewportElements: new Set([root, wrapper]) }), onHeightChange: height => heights.push(height) })
   await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
   expect(heights).toEqual([1200])
+  // Only real DOM invalidations re-measure: the host grows while the content shrinks.
   hostHeight = 1200
   contentHeight = 500
-  observer.refresh()
-  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  root.style.height = '1200px'
+  await nextFrame(); await nextFrame()
   expect(heights).toEqual([1200, 500])
   wrapper.className = 'm16-viewport-fill'
   contentHeight = 1200
-  observer.refresh()
-  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  await nextFrame(); await nextFrame()
   contentHeight = 500
-  observer.refresh()
-  await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  content.dataset.step = 'shrunk'
+  await nextFrame(); await nextFrame()
   expect(heights).toEqual([1200, 500, 1200, 500])
   observer.destroy()
   root.remove()

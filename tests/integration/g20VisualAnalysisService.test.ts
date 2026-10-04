@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { VisualAnalysisService } from '../../src/main/workbench/execution/VisualAnalysisService'
-import type { ModelEvent, ModelSelection } from '../../src/shared/workbench/modelProvider'
+import type { ModelChatMessage, ModelEvent, ModelSelection } from '../../src/shared/workbench/modelProvider'
 import type { ObservationResult } from '../../src/shared/workbench/toolPorts'
 
 const bytes = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64'))
@@ -57,6 +57,24 @@ describe('frozen visual fallback', () => {
       .toMatchObject({ status: 'vision-unavailable', outcome: 'unknown' })
     expect(stream).toHaveBeenCalledOnce()
     expect(facts).toEqual(['sending', 'failed'])
+  })
+
+  it('analyzes a tool-returned image message once per source through the frozen selection', async () => {
+    const stream = vi.fn(async function* (_request: unknown): AsyncIterable<ModelEvent> {
+      yield { requestId: 'r', sequence: 1, type: 'response.completed', responseId: 'response', actualModel: 'actual-vision',
+        assistant: { role: 'assistant', content: '红色方块。' }, toolCalls: [], finishReason: 'stop', nativeResponse: {} }
+    })
+    const service = new VisualAnalysisService({ frozenSelection: () => selection,
+      provider: { stream }, observation: { readResource: vi.fn() } })
+    const source: ModelChatMessage = { role: 'user', content: [{ type: 'text', text: '已取回材料原图' },
+      { type: 'image_url', image_url: { url: `data:image/png;base64,${Buffer.from(bytes).toString('base64')}` } }] }
+    const input = { runId: 'run', sourceId: 'run:run:4', source, question: '图里是什么？' }
+    expect(await service.analyzeImage(input)).toMatchObject({ status: 'analyzed', conclusion: '红色方块。', selection: { model: 'vision-model' } })
+    expect(await service.analyzeImage(input)).toMatchObject({ status: 'analyzed' })
+    expect(stream).toHaveBeenCalledOnce()
+    expect(stream.mock.calls[0]![0]).toMatchObject({ selection, tools: [], messages: [
+      { role: 'system' }, { role: 'user', content: source.content }, { role: 'user', content: '问题：图里是什么？' },
+    ] })
   })
 
   it('refuses a frozen connection whose image capability is unknown', async () => {

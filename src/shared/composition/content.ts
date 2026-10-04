@@ -32,3 +32,13 @@ export function findCompositionNode<TRuntime>(root: CompositionNode<TRuntime>, i
   }
   return undefined
 }
+
+/** Formal DOM targets use the same software-owned address as the mounted composition. */
+export function compositionElementNodeIds(item: { layerItemId: string; kind: string; content?: unknown }): string[] {
+  if (item.kind !== 'composition') return []
+  const result: string[] = []
+  walkComposition((item.content as WebComposition<unknown>).root, node => {
+    if (node.kind === 'element') result.push(`${item.layerItemId}/${node.id}`)
+  })
+  return result
+}

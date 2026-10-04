@@ -145,11 +145,11 @@ it('keeps middle and tail text flowing through notification bursts while an old 
   expect(api.conversation).toHaveBeenCalledTimes(1) // The held terminal read did not block either text page.
 
   await act(async () => historicalRead.resolve(initial))
-  await waitFor(() => expect(api.conversation).toHaveBeenCalledTimes(5)) // One bounded hydration retry.
+  expect(api.conversation).toHaveBeenCalledTimes(1) // Main answers that read with its final record; nothing is polled again.
   vi.mocked(api.events).mockResolvedValueOnce({ events: [streamEvent(5, '继续')], cursor: 5, hasMore: false })
   await act(async () => emit(streamEvent(5, '继续')))
   expect(screen.getByRole('article', { name: '回复' })).toHaveTextContent('首段中段尾段继续')
-  expect(api.conversation).toHaveBeenCalledTimes(5)
+  expect(api.conversation).toHaveBeenCalledTimes(1)
 
   vi.mocked(api.events)
     .mockResolvedValueOnce({ events: [streamEvent(6, '补齐')], cursor: 6, hasMore: true })
@@ -158,7 +158,7 @@ it('keeps middle and tail text flowing through notification bursts while an old 
   await act(async () => emit(streamEvent(6, '补齐')))
   await act(async () => emit(streamEvent(6, '补齐')))
   expect(screen.getByRole('article', { name: '回复' })).toHaveTextContent('首段中段尾段继续补齐')
-  expect(api.conversation).toHaveBeenCalledTimes(5)
+  expect(api.conversation).toHaveBeenCalledTimes(1)
 })
 
 it('refreshes new terminal messages without replacing local draft attachments, newer revisions, or another conversation', async () => {
@@ -251,6 +251,53 @@ it('continues on a conversation revision Main wrote after a task ended instead o
   expect(screen.queryByRole('alert')).toBeNull()
 })
 
+it('labels a send Main refused before acceptance as not executed and keeps "unconfirmed" for an outcome it cannot read', async () => {
+  const { api } = executionFixture([conversation('a', '会话 A')])
+  vi.mocked(api.send).mockRejectedValue(new Error(`消息尚未发送：${executionInputMessages['vision-unsupported'][0]}`))
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(true)} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  // The composer remounts once the conversation is loaded.
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toBeEnabled())
+  await waitFor(() => expect(screen.getByLabelText('当前模型')).toHaveTextContent('fixture-model'))
+  const composer = screen.getByRole('textbox', { name: '给创作助手发消息' })
+  fireEvent.change(composer, { target: { value: '这张图是什么？' } })
+  fireEvent.keyDown(composer, { key: 'Enter' })
+  const refused = await screen.findByRole('article', { name: '待处理消息' })
+  await waitFor(() => expect(refused).toHaveTextContent('已拒绝，未执行'))
+  expect(refused).toHaveTextContent('已确认不支持图片输入')
+  expect(refused).not.toHaveTextContent('未确认执行器是否收到')
+  expect(within(refused).queryByRole('button', { name: '用同一提交确认' })).toBeNull()
+  expect(composer).toHaveValue('这张图是什么？')
+  // Only a send whose record cannot be read afterwards stays unknown and offers the same-submission confirmation.
+  const unreachable = new Error('桌面功能暂时不可用。请重新启动编辑器后重试。')
+  vi.mocked(api.send).mockRejectedValue(unreachable); vi.mocked(api.submission).mockRejectedValue(unreachable)
+  await waitFor(() => expect(screen.getByRole('button', { name: '发送' })).toBeEnabled())
+  fireEvent.keyDown(composer, { key: 'Enter' })
+  await waitFor(() => expect(screen.getAllByRole('article', { name: '待处理消息' })).toHaveLength(2))
+  const unknown = screen.getAllByRole('article', { name: '待处理消息' })[1]!
+  await waitFor(() => expect(unknown).toHaveTextContent('未确认执行器是否收到'))
+  expect(within(unknown).getByRole('button', { name: '用同一提交确认' })).toBeInTheDocument()
+})
+
+it('shows the specific reason Main gives when a blurred draft or a session rename is not saved', async () => {
+  const { api } = executionFixture([conversation('a', '会话 A')])
+  render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
+  await waitFor(() => expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toBeEnabled())
+  const draftRefusal = `草稿未保存：${executionInputMessages['attachment-unavailable'][0]}\n${executionInputMessages['attachment-unavailable'][1]}`
+  vi.mocked(api.draft).mockRejectedValueOnce(new Error(draftRefusal))
+  fireEvent.change(screen.getByRole('textbox', { name: '给创作助手发消息' }), { target: { value: '要保留的草稿' } })
+  fireEvent.blur(screen.getByRole('textbox', { name: '给创作助手发消息' }))
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(executionInputMessages['attachment-unavailable'][0]))
+  expect(screen.getByRole('alert')).toHaveTextContent('草稿未保存')
+  expect(screen.getByRole('textbox', { name: '给创作助手发消息' })).toHaveValue('要保留的草稿')
+  vi.mocked(api.renameConversation).mockRejectedValueOnce(new Error('会话名称未保存：会话刚被另一项操作更新（例如任务结束时写入的回复），这次操作没有生效。\n请再操作一次，会按最新记录处理。'))
+  fireEvent.click(screen.getByRole('button', { name: '管理会话 会话 A' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '重命名' }))
+  fireEvent.change(screen.getByRole('textbox', { name: '重命名 会话 A' }), { target: { value: '新名称' } })
+  fireEvent.click(screen.getByRole('button', { name: '保存' }))
+  await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('会话刚被另一项操作更新'))
+  expect(screen.getByRole('alert')).not.toHaveTextContent('请重试。')
+})
+
 it('restoring an old failed message keeps a different new draft until an explicit replacement choice', async () => {
   const { api } = executionFixture([conversation('a', '失败消息')])
   vi.mocked(api.submissions).mockResolvedValue([{ submissionId: '11111111-1111-4111-8111-111111111111', workspaceId: 'workspace', conversationId: 'a',
@@ -286,15 +333,16 @@ it('labels a recovered stale document reference and only refreshes it after expl
   await waitFor(() => expect(screen.queryByText(/原引用需要重新选择/)).toBeNull())
 })
 
-it('offers explicit reclaim for an externally paused queue through the existing resume operation', async () => {
-  const { api } = executionFixture([conversation('a', '外部任务会话')])
+it('offers an explicit resume for a user-paused queue through the existing resume operation', async () => {
+  const { api } = executionFixture([conversation('a', '暂停队列会话')])
   vi.mocked(api.submissions).mockResolvedValue([{ submissionId: '11111111-1111-4111-8111-111111111111', workspaceId: 'workspace', conversationId: 'a',
     state: 'queued', mode: 'queue', text: '已接收的要求', documents: [], attachments: [], createdAt: 1, updatedAt: 1,
-    queuePausedReason: 'external-handoff', model: { provider: 'fixture', model: 'fixture', accountId: 'fixture', billing: 'unknown' } }])
+    queuePausedReason: 'user', model: { provider: 'fixture', model: 'fixture', accountId: 'fixture', billing: 'unknown' } }])
   render(<ExecutionAssistant root="C:/workspace" api={api} settingsAPI={settingsFixture(false)} captureDocuments={vi.fn(async () => [])} prepareSend={vi.fn(async () => true)} />)
-  fireEvent.click(await screen.findByRole('button', { name: '接回并继续排队任务' }))
+  expect(await screen.findByText(/后续任务已暂停，消息和草稿仍保留。/)).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: '继续排队任务' }))
   await waitFor(() => expect(api.resumeQueue).toHaveBeenCalledWith({ workspaceId: 'workspace', conversationId: 'a' }))
-  expect(screen.getByRole('button', { name: '接回并立即执行' })).toBeVisible()
+  expect(screen.getByRole('button', { name: '立即执行（先停止当前任务）' })).toBeVisible()
 })
 
 it('keeps the active conversation and draft while explorer selection filters homes and new sessions inherit the scope', async () => {

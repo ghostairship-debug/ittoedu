@@ -43,7 +43,7 @@
   }
  ],
  "query": "query.mjs",
- "semanticVersion": "f65d8fa3c2be78f79b9a9798581cc181279205e8c000f71ece9544292737e825",
+ "semanticVersion": "55ec7f1d9e89aaeb1dd92131d9dfa3075a7567e9debca3fa4597f1387d869704",
  "tools": [
   {
    "carriers": [

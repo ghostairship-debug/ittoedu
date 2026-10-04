@@ -1249,6 +1249,13 @@ export const useEditorStore = create<EditorState>((set, get) => {
     },
     hasContentDraft: () => selectHasDirtyCourseContentDraft(get()),
   })
+  /** Leaving flushes the current input. A retained conflict cannot drain, but nothing of it is lost by leaving. */
+  const drainBeforeLeaving = async () => {
+    if (!documents.holdsRetainedConflict()) { await get().drainCourseDocument(); return }
+    await prepareCurrentFlowDynamicDrafts()
+    const prepared = courseLifecycleSlice.prepareCourseProjectPersistence()
+    if (!prepared.ok) throw new Error(prepared.reason)
+  }
 
   return {
     canvasMode: 'edit',
@@ -1312,7 +1319,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       try {
         await prepareCurrentFlowDynamicDrafts()
         if (request !== navigationIntent) return
-        await documents.activatePrepared(id, () => get().drainCourseDocument())
+        await documents.activatePrepared(id, drainBeforeLeaving)
       } catch (error) {
         if (request !== navigationIntent) return
         write({ errorMessage: error instanceof Error ? error.message : '切换失败，当前输入已保留' })
@@ -1373,7 +1380,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     async createCourseDocument(surface, canvas?) {
       const request = ++navigationIntent
       try {
-        if (documents.connection().documentId) await get().drainCourseDocument()
+        if (documents.connection().documentId) await drainBeforeLeaving()
         if (request !== navigationIntent) return
         const factory = surface === 'slide' ? () => createBlankCourseProject({ canvas }) : surface === 'flow' ? createBlankFlowCourseProject : createBlankSpatialCourseProject
         const bundle = withDefaultComponentController(factory())
@@ -1383,7 +1390,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     async createCourseDocumentFrom(project, assetFiles, componentPackages) {
       const request = ++navigationIntent
       try {
-        if (documents.connection().documentId) await get().drainCourseDocument()
+        if (documents.connection().documentId) await drainBeforeLeaving()
         if (request === navigationIntent) await documents.create(courseViewModel({ courseAssetSidecar: freezeCourseAssetSidecar(assetFiles), componentPackages }, project), `${project.title}.h5lesson`)
       } catch (error) { if (request === navigationIntent) throw error }
     },
@@ -1394,7 +1401,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
       const request = ++navigationIntent
       const load = async () => {
         try {
-          if (documents.connection().documentId) await get().drainCourseDocument()
+          if (documents.connection().documentId) await drainBeforeLeaving()
           if (request !== navigationIntent) return
           if (path) await documents.open(path)
           else await documents.create(courseViewModel({ courseAssetSidecar: freezeCourseAssetSidecar(assetFiles), componentPackages }, project), `${project.title}.h5lesson`)

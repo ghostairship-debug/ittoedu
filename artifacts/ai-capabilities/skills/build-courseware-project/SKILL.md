@@ -1,11 +1,11 @@
 ---
 name: build-courseware-project
-description: 将已有本地 HTML 或创作好的 HTML 新建为可编辑课件并保存；适用于第三方页面导入、HTML 转课件和课件创作后的交付。
+description: 将已有第三方或外来 HTML 保真导入可编辑课件；适用于 HTML 转课件，不承担新课创作与已有工程续改。
 ---
 
 # 从 HTML 交付课件
 
-取得用户指定或本任务已经生成的 HTML 文件，保留其内容、样式、资源和互动。直接导入第三方 HTML 时无需重新策划、改写正文或先套模板。
+取得用户指定的已有外来 HTML，保留其内容、样式、资源和互动。直接导入无需重新策划、改写正文或先套模板。新课创作从框架起写入工程内文件，不经过本入口。
 
 调用任务入口 `course.createFromHtml`：
 
@@ -19,6 +19,6 @@ description: 将已有本地 HTML 或创作好的 HTML 新建为可编辑课件�
 
 HTML 页面的普通结构、拆页适用条件及共享逻辑边界见 [HTML 输入与分页](references/html-draft-contract.md)；只有需要解释编辑能力差异时再读[承载方式](references/representation-capabilities.md)。不要求第三方源文件添加页编号、可编辑登记表或私有标记，不默认读取完整工程 Schema。
 
-交付实际保存的 `.h5lesson` 路径、已保留的主要内容与具体缺口。核心教学呈现必须存在；创建任务返回成功并不代表全部页面已经通过审美或教学验收。用户只要求导入时保留原有设计；要求创作或重新设计时使用 `orchestrate-courseware`；已有工程的局部修订使用 `edit-content`。导出只在用户要求且当前环境提供相应能力时进行。
+交付回执确认的 `.h5lesson` 路径、已保留的内容与具体诊断。缺资源、局部脚本错误按宿主结果说明占位或组件草稿，不丢弃其他可用页面。创建返回成功并不代表审美或教学验收。导入后续改用 `edit-content` 修改工程，不改外部源 HTML 后整份重导入。导出只在用户要求时进行。
 
 用户明确使用外部 Builder 时读取 [build-method.md](references/build-method.md)，该入口不作为普通导入的前置。

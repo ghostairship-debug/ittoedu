@@ -1,11 +1,13 @@
 import { lookup } from 'node:dns/promises'
-import { request as httpRequest } from 'node:http'
+import { request as httpRequest, type RequestOptions } from 'node:http'
 import { request as httpsRequest } from 'node:https'
-import { isIP } from 'node:net'
+import { BlockList, isIP, type Socket } from 'node:net'
+import { connect as tlsConnect } from 'node:tls'
 import { resolvePublicDnsOverHttps } from './publicDnsOverHttps'
+import { openProxyTunnel, systemProxyRoute, type ProxyRoute, type ProxyRouteResolver } from './systemProxy'
 
 export class PublicHttpError extends Error {
-  constructor(readonly code: string, message: string) { super(message); this.name = 'PublicHttpError' }
+  constructor(readonly code: string, message: string, readonly status?: number) { super(message); this.name = 'PublicHttpError' }
 }
 
 export interface PublicHttpResponse {
@@ -19,6 +21,24 @@ export interface PublicHttpResponse {
 export interface PublicHttpOptions {
   signal?: AbortSignal
   resolve?: (hostname: string) => Promise<readonly { address: string; family: 4 | 6 }[]>
+  /** 只可覆盖这三项，其余请求头固定不变。 */
+  headers?: { Accept?: string; 'User-Agent'?: string; 'Accept-Language'?: string }
+  /** 响应正文超过此字节数时中止读取。 */
+  maxBytes?: number
+  /** Test seam: production follows the system proxy for every hop. */
+  proxy?: ProxyRouteResolver
+}
+
+type RequestSettings = { headers: Record<string, string>; maxBytes?: number }
+
+function requestSettings(options: PublicHttpOptions): RequestSettings {
+  const headers: Record<string, string> = { Accept: 'text/html, text/plain, application/pdf;q=0.5', 'Accept-Encoding': 'identity',
+    'User-Agent': 'GuolingResearch/2.0' }
+  for (const name of ['Accept', 'User-Agent', 'Accept-Language'] as const) {
+    const value = options.headers?.[name]
+    if (typeof value === 'string' && value.trim() && !/[\r\n]/.test(value)) headers[name] = value
+  }
+  return { headers, ...(options.maxBytes !== undefined ? { maxBytes: options.maxBytes } : {}) }
 }
 
 function ipv4Number(address: string): number {
@@ -33,6 +53,10 @@ const blockedV4: readonly [number, number][] = [
   [0xc0a80000, 16], [0xc6120000, 15], [0xc6336400, 24], [0xcb007100, 24],
   [0xe0000000, 4], [0xf0000000, 4],
 ]
+
+/** 2001:2::/48 is the IPv6 benchmarking range; like 198.18.0.0/15 it is handed out by fake-IP proxies. */
+const benchmarkV6 = new BlockList()
+benchmarkV6.addSubnet('2001:2::', 48, 'ipv6')
 
 /** This intentionally rejects special-use and documentation ranges too. */
 export function isPublicAddress(address: string): boolean {
@@ -51,6 +75,7 @@ export function isPublicAddress(address: string): boolean {
   const normalized = address.replace(/^\[|\]$/g, '').toLowerCase()
   // 6to4/Teredo can tunnel to an otherwise forbidden IPv4 destination.
   if (normalized.startsWith('2002:') || normalized.startsWith('2001:0:') || normalized.startsWith('2001:db8:')) return false
+  if (benchmarkV6.check(normalized, 'ipv6')) return false
   const first = Number.parseInt(normalized.slice(0, 4), 16)
   return Number.isFinite(first) && first >= 0x2000 && first <= 0x3fff
 }
@@ -69,16 +94,18 @@ export function parsePublicUrl(raw: string): URL {
 }
 
 function isSyntheticProxyAddress(address: string): boolean {
-  const value = ipv4Number(address)
+  const family = isIP(address)
+  if (family === 6) return benchmarkV6.check(address, 'ipv6')
+  const value = family === 4 ? ipv4Number(address) : -1
   return value >= 0 && ((value & 0xfffe0000) >>> 0) === 0xc6120000
 }
 
-/** Never fallback for an actual private or mixed DNS answer. */
+/** Only an all-synthetic answer (198.18.0.0/15 or 2001:2::/48, either family) falls back; never an actual private or mixed one. */
 export async function resolveWithSyntheticFallback(hostname: string,
   systemResolve: () => Promise<readonly { address: string; family: 4 | 6 }[]>,
   publicResolve: () => Promise<readonly { address: string; family: 4 | 6 }[]>): Promise<readonly { address: string; family: 4 | 6 }[]> {
   const answers = await systemResolve()
-  return answers.length && answers.every(answer => answer.family === 4 && isSyntheticProxyAddress(answer.address))
+  return answers.length && answers.every(answer => isSyntheticProxyAddress(answer.address))
     ? publicResolve() : answers
 }
 
@@ -102,13 +129,24 @@ async function publicAddress(url: URL, resolver: NonNullable<PublicHttpOptions['
   return answers[0]!
 }
 
-function oneRequest(url: URL, address: { address: string; family: 4 | 6 }, signal: AbortSignal, activity: () => void): Promise<{ status: number; location?: string; contentType: string; charset?: string; bytes: Uint8Array }> {
+/** Through a proxy the checked host is reached by name; directly, the socket is pinned to the checked address. */
+async function proxiedConnection(url: URL, route: ProxyRoute, signal: AbortSignal): Promise<Socket | undefined> {
+  if (route.kind === 'direct') return undefined
+  const host = url.hostname.replace(/^\[|\]$/g, '')
+  const tunnel = await openProxyTunnel(route, { host, port: Number(url.port) || (url.protocol === 'https:' ? 443 : 80) }, { signal })
+  return url.protocol === 'https:' ? tlsConnect({ socket: tunnel, host, ...(isIP(host) ? {} : { servername: host }), ALPNProtocols: ['http/1.1'] }) : tunnel
+}
+
+function oneRequest(url: URL, address: { address: string; family: 4 | 6 }, connection: Socket | undefined, signal: AbortSignal, activity: () => void, settings: RequestSettings): Promise<{ status: number; location?: string; contentType: string; charset?: string; bytes: Uint8Array }> {
   return new Promise((resolve, reject) => {
     const client = url.protocol === 'https:' ? httpsRequest : httpRequest
-    const req = client(url, { method: 'GET', signal, headers: { Accept: 'text/html, text/plain, application/pdf;q=0.5', 'Accept-Encoding': 'identity',
-      'User-Agent': 'GuolingResearch/2.0' }, lookup: (_host, options, callback) => options.all
-        ? callback(null, [{ address: address.address, family: address.family }])
-        : callback(null, address.address, address.family) }, response => {
+    const requestOptions: RequestOptions = { method: 'GET', signal, headers: settings.headers }
+    // Without an agent the default port must be named, or Host would carry ":80"/":443".
+    if (connection) Object.assign(requestOptions, { createConnection: () => connection, defaultPort: url.protocol === 'https:' ? 443 : 80 })
+    else requestOptions.lookup = (_host, options, callback) => options.all
+      ? callback(null, [{ address: address.address, family: address.family }])
+      : callback(null, address.address, address.family)
+    const req = client(url, requestOptions, response => {
       activity()
       const status = response.statusCode ?? 0
       const location = typeof response.headers.location === 'string' ? response.headers.location : undefined
@@ -116,9 +154,20 @@ function oneRequest(url: URL, address: { address: string; family: 4 | 6 }, signa
       const contentType = contentTypeHeader.split(';', 1)[0]!.trim().toLowerCase()
       const charset = contentTypeHeader.match(/(?:^|;)\s*charset\s*=\s*["']?([^;"'\s]+)/i)?.[1]
       if (status >= 300 && status < 400) { response.resume(); resolve({ status, location, contentType, bytes: new Uint8Array() }); return }
+      const maxBytes = settings.maxBytes
+      const tooLarge = () => {
+        const error = new PublicHttpError('too-large', `网络资源超过 ${Math.max(1, Math.round((maxBytes ?? 0) / 1024 / 1024))} MB 上限，已停止下载`)
+        reject(error)
+        // Without an argument destroy emits no 'error' event, which may have no listener yet.
+        response.destroy()
+      }
+      if (maxBytes !== undefined && Number(response.headers['content-length']) > maxBytes) { tooLarge(); return }
       const chunks: Buffer[] = []
+      let received = 0
       response.on('data', (chunk: Buffer) => {
         activity()
+        received += chunk.length
+        if (maxBytes !== undefined && received > maxBytes) { tooLarge(); return }
         chunks.push(chunk)
       })
       response.on('error', reject)
@@ -129,7 +178,7 @@ function oneRequest(url: URL, address: { address: string; family: 4 | 6 }, signa
   })
 }
 
-/** DNS answers are checked and pinned to the actual socket for every hop. */
+/** DNS answers are checked for every hop and pinned to the socket; with a system proxy the proxy connects to the checked host. */
 export async function fetchPublicResource(raw: string, options: PublicHttpOptions = {}): Promise<PublicHttpResponse> {
   const controller = new AbortController()
   let idleTimer: ReturnType<typeof setTimeout> | undefined
@@ -149,19 +198,22 @@ export async function fetchPublicResource(raw: string, options: PublicHttpOption
       async () => (await lookup(host, { all: true })).map(({ address, family }) => ({ address, family: family as 4 | 6 })),
       () => resolvePublicDnsOverHttps(host, controller.signal)))
     const visited = new Set<string>()
+    const settings = requestSettings(options)
     for (;;) {
       if (controller.signal.aborted) throw new PublicHttpError('cancelled', '网页读取已取消')
       if (visited.has(url.href)) throw new PublicHttpError('redirect-loop', '网页出现重复跳转循环')
       visited.add(url.href)
       const address = await publicAddress(url, resolver, controller.signal)
       activity()
-      const response = await oneRequest(url, address, controller.signal, activity)
+      const connection = await proxiedConnection(url, await (options.proxy ?? systemProxyRoute)(url.href), controller.signal)
+      activity()
+      const response = await oneRequest(url, address, connection, controller.signal, activity, settings)
       if (response.status >= 300 && response.status < 400) {
         if (!response.location) throw new PublicHttpError('invalid-redirect', '网页跳转缺少目标地址')
         url = parsePublicUrl(new URL(response.location, url).href)
         continue
       }
-      if (response.status < 200 || response.status >= 300) throw new PublicHttpError('http-error', `网页返回 HTTP ${response.status}`)
+      if (response.status < 200 || response.status >= 300) throw new PublicHttpError('http-error', `网页返回 HTTP ${response.status}`, response.status)
       return { url: url.href, status: response.status, contentType: response.contentType, ...(response.charset ? { charset: response.charset } : {}), bytes: response.bytes }
     }
   } catch (cause) {

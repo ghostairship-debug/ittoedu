@@ -54,6 +54,30 @@ function conversationAttachmentIds(record: ConversationRecord): string[] {
   return [...new Set([...record.attachmentIds, ...record.inputAttachments.map(reference => reference.attachmentId),
     ...record.messages.flatMap(message => message.attachmentIds)])]
 }
+/** A refusal Main words itself: its fixed text is the reason the teacher sees. */
+const refused = (message: string) => new DesktopOperationError('execution-operation-refused', '会话操作未完成', message, '当前输入、附件和已应用的修改已保留。')
+/** Fixed reasons for the conversation record's own refusals. */
+const conversationStoreReasons: Record<ConversationStoreError['code'], readonly [message: string, suggestion: string]> = {
+  'revision-conflict': ['会话刚被另一项操作更新（例如任务结束时写入的回复），这次操作没有生效。', '请再操作一次，会按最新记录处理；当前输入和已应用的修改已保留。'],
+  'conversation-not-found': ['会话已不存在。', '请选择现有会话或新建会话；文件与已应用的修改没有删除。'],
+  'workspace-not-found': ['会话所在的工作空间记录已不存在。', '请重新打开工作空间；文件与已应用的修改没有删除。'],
+  'home-conflict': ['已有内容或已设定所属位置的会话不会改变归属。', '可以新建会话，再为它选择所属位置。'],
+  'store-corrupt': ['会话记录无法读取或不符合当前格式，本次没有写入。', '请查看诊断记录；文件与已应用的修改没有改变。'],
+  'identity-conflict': ['会话或工作空间身份与已有记录冲突，本次没有写入。', '请重试；若仍失败，请查看诊断记录。'],
+}
+const operationTitles: Partial<Record<string, string>> = { draft: '草稿未保存', 'rename-conversation': '会话名称未保存' }
+/** Every operation failure leaves with one fixed, specific reason; other exception text (paths, provider payloads) never crosses IPC. */
+function operationFailure(error: unknown, type: unknown): DesktopOperationError {
+  const title = typeof type === 'string' ? operationTitles[type] : undefined
+  if (error instanceof DesktopOperationError)
+    return title ? new DesktopOperationError(error.code, title, error.message, error.suggestion, { cause: error.cause }) : error
+  if (error instanceof ConversationStoreError) {
+    const [message, suggestion] = conversationStoreReasons[error.code]
+    return new DesktopOperationError(`execution-store-${error.code}`, title ?? '会话操作未完成', message, suggestion, { cause: error })
+  }
+  return new DesktopOperationError('execution-operation-failed', title ?? '会话操作未完成', '会话服务暂时无法完成操作。',
+    '请重试；若仍失败，请查看诊断记录。当前输入、附件和已应用的修改已保留。', { cause: error })
+}
 /** The space's session list leaves out the conversations behind element AI cards (M15). */
 function listed(records: ConversationRecord[]): ConversationRecord[] { return records.filter(record => !record.element) }
 /** An object or document block that still exists is the same target after other edits; a text range never is. */
@@ -124,13 +148,17 @@ export class ExecutionDesktopService {
       observeBodyStreaming: (selection, observation) => options.settings.recordBodyStreaming(selection, observation) })
     this.engine.subscribe(event => {
       this.eventSink?.(event)
-      if (event.type === 'run.end') { visualAnalysis.clearRun(event.runId); void this.afterRunEnd(event.runId).catch(() => undefined) }
+      if (event.type !== 'run.end') return
+      visualAnalysis.clearRun(event.runId)
+      // Before the object's next queued request can start.
+      this.recordElementResult(event.taskId)
+      // Queued on the conversation as the end is published, ahead of any read a view makes after seeing it.
+      void this.serial(event.conversationId, () => this.afterRunEnd(event.runId)).catch(() => undefined)
     })
     this.edits.subscribe(event => this.editSink?.(event))
   }
   setSinks(events?: (event: ExecutionEvent) => void, edits?: (event: EditEvent) => void) { this.eventSink = events; this.editSink = edits }
   setHtmlActions(service: HtmlActionService): void { this.engine.setHtmlActions(service) }
-  withConversation<T>(conversationId: string, action: () => Promise<T>): Promise<T> { return this.serial(conversationId, action) }
   private timing(conversationId: string, taskId: string, markId: string, stage: ExecutionTimingStage,
     extra: Pick<ExecutionTimingMark, 'sourceWallTimeMs' | 'detail'> = {},
     stamp = captureMainTiming()): void {
@@ -175,11 +203,14 @@ export class ExecutionDesktopService {
           }
         }
       }
+      // Reading the submissions records unreadable files, so the first workspace read reports them with the runs.
+      await this.submissions.list().catch(() => undefined)
+      // Cards are transient; unsubmitted input survives as an ordinary recoverable conversation draft. This
+      // changes which conversations exist, so the fast conversation list must already see it.
+      await this.clearElementCards().catch(() => undefined)
       // Slow segment: engine.recover walks every run and can take hundreds of ms per run with large checkpoints.
       const recoveryAndRebind = (async () => {
         await this.engine.recover()
-        // Cards are transient; unsubmitted input survives as an ordinary recoverable conversation draft.
-        await this.clearElementCards().catch(() => undefined)
         const refreshed = await this.runs.list()
         const submissions = await this.submissions.list()
         for (const record of submissions.filter(value => ['queued', 'starting', 'accepted'].includes(value.state))) {
@@ -237,12 +268,12 @@ export class ExecutionDesktopService {
   }
   private async changeReviewSource(input: { workspaceId: string; conversationId: string; runId: string }): Promise<{ run: ExecutionRunRecord; workspaceRoot: string }> {
     const run = await this.engine.read(input.runId)
-    if (!run) throw new Error('本次运行记录不存在')
-    if (run.input.conversationId !== input.conversationId) throw new Error('运行不属于当前会话')
+    if (!run) throw refused('本次运行记录不存在')
+    if (run.input.conversationId !== input.conversationId) throw refused('运行不属于当前会话')
     const conversation = await this.required(input.workspaceId, input.conversationId)
-    if (!conversation.runIndex.builtinRunIds.includes(input.runId)) throw new Error('运行不属于当前工作空间会话')
+    if (!conversation.runIndex.builtinRunIds.includes(input.runId)) throw refused('运行不属于当前工作空间会话')
     const workspace = await this.conversations.readWorkspace(input.workspaceId)
-    if (!workspace) throw new Error('当前工作空间不存在')
+    if (!workspace) throw refused('当前工作空间不存在')
     const root = (await this.options.authorizeWorkspaceRoot(workspace.rootPath)).resolvedPath
     return { run, workspaceRoot: root }
   }
@@ -267,13 +298,13 @@ export class ExecutionDesktopService {
   }
   private async validateHome(workspaceId: string, home: ConversationHomeInput): Promise<ConversationHomeInput> {
     const space = await this.conversations.readWorkspace(workspaceId)
-    if (!space) throw new Error('会话工作空间不存在')
+    if (!space) throw refused('会话工作空间不存在')
     const root = await fs.realpath(space.rootPath)
     const candidate = await fs.realpath(path.join(root, ...home.path.split('/')))
     const relative = path.relative(root, candidate)
-    if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('会话所属位置不在工作空间内')
+    if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw refused('会话所属位置不在工作空间内')
     const stat = await fs.stat(candidate)
-    if (home.kind === 'file' ? !stat.isFile() : !stat.isDirectory()) throw new Error('会话所属位置类型已改变')
+    if (home.kind === 'file' ? !stat.isFile() : !stat.isDirectory()) throw refused('会话所属位置类型已改变')
     return { kind: home.kind, path: relative.split(path.sep).join('/') }
   }
   private refs(documents: ExecutionDocumentReference[]) {
@@ -321,14 +352,14 @@ export class ExecutionDesktopService {
     try { filename = await fs.realpath(path.join(base, ...home.path.split('/'))) }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw executionInputError('home-file-missing', error); throw error }
     const relative = path.relative(base, filename)
-    if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw new Error('会话所属文件已移出获准的工作空间')
+    if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) throw refused('会话所属文件已移出获准的工作空间')
     return filename
   }
   private async prepareDocuments(input: Pick<ExecutionSendInput, 'workspaceId' | 'conversationId' | 'documents' | 'permission'>) {
     const current = await this.required(input.workspaceId, input.conversationId)
     if (input.documents.length || !current.home) return structuredClone(input.documents)
     const space = await this.conversations.readWorkspace(current.home.workspaceId ?? current.workspaceId)
-    if (!space) throw new Error('会话所属位置的工作空间不存在')
+    if (!space) throw refused('会话所属位置的工作空间不存在')
     const filename = await this.resolveHomeFile(space.rootPath, current.home)
     if (!filename) return []
     try { sourceFileKind(filename) } catch { return [] }
@@ -342,10 +373,10 @@ export class ExecutionDesktopService {
     // Main owns the permission level: read-only tasks receive no writable scope whatever the renderer sent.
     const permission = input.permission ?? DEFAULT_PERMISSION_MODE
     const space = await this.conversations.readWorkspace(current.workspaceId)
-    if (!space) throw new Error('会话工作空间不存在')
+    if (!space) throw refused('会话工作空间不存在')
     const homeWorkspaceId = current.home?.workspaceId ?? current.workspaceId
     const homeSpace = homeWorkspaceId === current.workspaceId ? space : await this.conversations.readWorkspace(homeWorkspaceId)
-    if (!homeSpace) throw new Error('会话所属位置的工作空间不存在')
+    if (!homeSpace) throw refused('会话所属位置的工作空间不存在')
     // A file home is the default document context only when the teacher did not pin another reference.
     // The binding is resolved by Main through the formal DocumentHost; home metadata itself grants no write.
     if (!input.documents.length && current.home?.kind === 'file' && !current.home.missing) {
@@ -405,10 +436,10 @@ export class ExecutionDesktopService {
     }
     if (input.contentOutput) {
       const output = input.contentOutput
-      if (permission === 'read-only') throw new Error('只读任务不能应用正文改写，请切换到可修改模式。')
+      if (permission === 'read-only') throw refused('只读任务不能应用正文改写，请切换到可修改模式。')
       if (!documents.some(document => document.documentId === output.documentId
         && document.selection?.some(target => JSON.stringify(target) === JSON.stringify(output.target))))
-        throw new Error('正文改写目标与本次固定选区不一致，请重新选择。')
+        throw refused('正文改写目标与本次固定选区不一致，请重新选择。')
     }
     const historyIndex = await conversationHistoryIndex(current, runId => this.engine.read(runId))
     const context = historyIndex.context
@@ -535,7 +566,7 @@ export class ExecutionDesktopService {
       if (seen.has(cursor.runId)) throw new Error('运行接续链存在循环')
       seen.add(cursor.runId); lineage.unshift(cursor)
       cursor = cursor.continuedFrom ? await this.engine.read(cursor.continuedFrom) : null
-      if (lineage[0]!.continuedFrom && !cursor) throw new Error('先前运行记录缺失，不能安全继续')
+      if (lineage[0]!.continuedFrom && !cursor) throw refused('先前运行记录缺失，不能安全继续')
     }
     return lineage
   }
@@ -569,18 +600,8 @@ export class ExecutionDesktopService {
     } catch (error) { throw executionInputError('document-range-changed', error) }
   }
 
-  /** Caller holds the conversation serial barrier during external grant/handoff. */
-  pauseQueueForExternal(conversationId: string): Promise<void> { return this.submissions.pause(conversationId) }
-  private async reclaimExternalQueue(current: ConversationRecord): Promise<boolean> {
-    if (await this.submissions.pausedReason(current.conversationId) !== 'external-handoff') return false
-    const portIds = current.runIndex.externalPortIds
-    // The external service installs this callback before it can grant access. Before that (including a
-    // fresh process), persisted connection ids are history and do not represent a live external writer.
-    if (portIds.length) await this.externalRevoker?.({ workspaceId: current.workspaceId, conversationId: current.conversationId, portIds: [...portIds] })
-    return true
-  }
-  /** Explicit only, after the caller has settled the external writer. */
-  async resumeBuiltinQueue(conversationId: string): Promise<void> {
+  /** Explicit resume of a user-paused queue; runs inside the conversation's serial barrier. */
+  private async resumeBuiltinQueue(conversationId: string): Promise<void> {
     await this.awaitRecoveryAndRebind()
     await this.submissions.resume(conversationId)
     await this.startNext(conversationId, undefined, true)
@@ -599,23 +620,23 @@ export class ExecutionDesktopService {
       const source = previous ? await this.submissions.read(previous.input.taskId) : null
       if (!previous || !source || source.runId !== previous.runId || source.workspaceId !== input.workspaceId
         || source.conversationId !== input.conversationId || !['failed', 'partial', 'interrupted'].includes(previous.status))
-        throw new Error('原任务尚不可继续，请先核对运行状态')
+        throw refused('原任务尚不可继续，请先核对运行状态')
       if (input.text !== source.text || JSON.stringify(input.documents) !== JSON.stringify(source.documents)
         || JSON.stringify(input.contentOutput ?? null) !== JSON.stringify(source.contentOutput ?? null)
         || JSON.stringify(input.attachments ?? []) !== JSON.stringify(source.attachments)
         || (input.permission ?? DEFAULT_PERMISSION_MODE) !== (source.permission ?? DEFAULT_PERMISSION_MODE))
-        throw new Error('继续运行必须使用原任务冻结的文字、目标和附件')
+        throw refused('继续运行必须使用原任务冻结的文字、目标和附件')
       const child = (await this.submissions.list()).find(record => record.retryOfRunId === previous!.runId
         && (record.state !== 'failed' || Boolean(record.runId)))
       if (child) return this.submissionResult(child)
     }
     const current = await this.required(input.workspaceId, input.conversationId)
     if (current.revision !== input.expectedRevision) throw executionInputError('conversation-draft-changed')
-    if (previous && await this.activeRun(current)) throw new Error('当前会话仍有运行中的任务，请等待结束后继续原任务')
+    if (previous && await this.activeRun(current)) throw refused('当前会话仍有运行中的任务，请等待结束后继续原任务')
     if (previous && (current.inputDraft && current.inputDraft !== input.text
       || current.inputAttachments.length && JSON.stringify(current.inputAttachments) !== JSON.stringify(input.attachments ?? [])
       || JSON.stringify(current.frozenContextRefs) !== JSON.stringify(this.refs(input.documents))))
-      throw new Error('输入框已有另一份草稿，请先处理后再继续原任务')
+      throw refused('输入框已有另一份草稿，请先处理后再继续原任务')
     this.timing(input.conversationId, input.submissionId, `${input.submissionId}:prepare:start`, 'submission.prepare.started')
     let record: StoredExecutionSubmission
     try {
@@ -627,7 +648,7 @@ export class ExecutionDesktopService {
         const original = input.documents.find(document => document.documentId === output.documentId)
         const index = original?.selection?.findIndex(target => JSON.stringify(target) === JSON.stringify(output.target)) ?? -1
         const target = preparedInput.documents.find(document => document.documentId === output.documentId)?.selection?.[index]
-        if (!target) throw new Error('原正文改写范围无法继续，请重新选择。')
+        if (!target) throw refused('原正文改写范围无法继续，请重新选择。')
         preparedInput.contentOutput = { ...output, target: structuredClone(target) }
       }
       record = await this.prepareSubmission(preparedInput, current, digest)
@@ -664,7 +685,7 @@ export class ExecutionDesktopService {
     if (active && record.mode === 'queue') return this.submissionResult(record)
     if (active && record.mode === 'adjust') {
       const stopped = await this.engine.stop(active.runId)
-      if (!stopped || ['queued', 'running', 'stopping'].includes(stopped.status)) throw new Error('当前任务尚未停止，立即调整仍在等待')
+      if (!stopped || ['queued', 'running', 'stopping'].includes(stopped.status)) throw refused('当前任务尚未停止，立即调整仍在等待')
       record = await this.submissions.update(record.submissionId, { continuation: this.continuation(stopped), updatedAt: Date.now() })
       record = await this.startSubmission(record, record.continuation)
       return this.submissionResult(record)
@@ -672,34 +693,31 @@ export class ExecutionDesktopService {
     await this.startNext(record.conversationId, undefined, true)
     return this.submissionResult((await this.submissions.read(record.submissionId))!)
   }
-  private async collectReply(runId: string) {
-    const run = await this.engine.read(runId)
-    if (!run) return
+  private async collectReply(run: ExecutionRunRecord) {
+    const runId = run.runId
     for (const workspace of await this.conversations.listWorkspaces()) {
-      const found = await this.conversations.readConversation({ workspaceId: workspace.workspaceId, conversationId: run.input.conversationId })
-      if (!found) continue
-      await this.serial(found.conversationId, async () => {
-        const current = await this.conversations.readConversation({ workspaceId: workspace.workspaceId, conversationId: found.conversationId })
-        if (!current || current.messages.some(message => message.role === 'assistant' && message.runId === runId)) return
-        const last = [...run.messages].reverse().find(message => message.role === 'assistant' && typeof message.content === 'string' && message.content)
-        if (!last || typeof last.content !== 'string') return
-        await this.conversations.updateConversation({ workspaceId: workspace.workspaceId, conversationId: found.conversationId, expectedRevision: current.revision,
-          patch: { messages: [...current.messages, { messageId: randomUUID(), role: 'assistant', text: last.content, createdAt: Date.now(), attachmentIds: [], runId }] } })
-      })
+      const current = await this.conversations.readConversation({ workspaceId: workspace.workspaceId, conversationId: run.input.conversationId })
+      if (!current || current.messages.some(message => message.role === 'assistant' && message.runId === runId)) continue
+      const last = [...run.messages].reverse().find(message => message.role === 'assistant' && typeof message.content === 'string' && message.content)
+      if (!last || typeof last.content !== 'string') return
+      await this.conversations.updateConversation({ workspaceId: workspace.workspaceId, conversationId: current.conversationId, expectedRevision: current.revision,
+        patch: { messages: [...current.messages, { messageId: randomUUID(), role: 'assistant', text: last.content, createdAt: Date.now(), attachmentIds: [], runId }] } })
     }
   }
+  /**
+   * Runs in the conversation's serial queue, entered when the end is published. Conversation reads wait in the same
+   * queue, so a view reading the record after it saw run.end gets everything written here: the restored input, the
+   * reply and the next queued request.
+   */
   private async afterRunEnd(runId: string): Promise<void> {
     const run = await this.engine.read(runId)
     if (!run) return
-    // Before the object's next queued request can start.
-    await this.recordElementResult(run.input.taskId)
     if (['failed', 'partial', 'interrupted'].includes(run.status)) {
       const record = await this.submissions.read(run.input.taskId)
-      if (record?.runId === runId && record.state === 'accepted')
-        await this.serial(run.input.conversationId, () => this.restoreFailedDraft(record))
+      if (record?.runId === runId && record.state === 'accepted') await this.restoreFailedDraft(record)
     }
-    await this.collectReply(runId)
-    await this.serial(run.input.conversationId, () => this.startNext(run.input.conversationId, run))
+    await this.collectReply(run)
+    await this.startNext(run.input.conversationId, run)
   }
   private runWritesDocument(run: ExecutionRunRecord, documentId: string): boolean {
     if (run.input.documents.some(document => document.documentId === documentId && document.writable.length > 0)) return true
@@ -764,9 +782,9 @@ export class ExecutionDesktopService {
       const record = await this.required(input.workspaceId, input.conversationId)
       await this.conversations.deleteConversation({ ...input, ports: {
         stopBuiltinRuns: async ({ runIds }) => { await Promise.all(runIds.map(runId => this.engine.stop(runId))) },
+        // Resident external sessions only log into the conversation; without the service there is nothing live to release.
         revokeExternalPorts: async ({ workspaceId, conversationId, portIds }) => {
-          if (portIds.length && !this.externalRevoker) throw new Error('外部授权尚未撤销，会话已保留')
-          if (portIds.length) await this.externalRevoker!({ workspaceId, conversationId, portIds: [...portIds] })
+          if (portIds.length) await this.externalRevoker?.({ workspaceId, conversationId, portIds: [...portIds] })
         },
         prepareResourceRelease: async owner => {
           await this.imageRetention?.prepare(owner); prepared = !!this.imageRetention
@@ -823,7 +841,7 @@ export class ExecutionDesktopService {
       this.elementChanges.set(record.submissionId, new ElementChangeTracker(record.conversationId, reference.documentId, target, session, snapshot))
     } catch { /* A card's optional inverse never blocks the actual task. */ }
   }
-  private async recordElementResult(submissionId: string): Promise<void> { this.elementChanges.get(submissionId)?.finish() }
+  private recordElementResult(submissionId: string): void { this.elementChanges.get(submissionId)?.finish() }
   private elementChangeView(submissionId: string): ElementChangeView {
     return this.elementChanges.get(submissionId)?.view(submissionId) ?? { submissionId, state: 'none', fields: [] }
   }
@@ -841,16 +859,17 @@ export class ExecutionDesktopService {
       // recovery so it observes the same durable truth as before the async split.
       if (!['workspace', 'conversations', 'create-conversation'].includes(input.type)) await this.awaitRecoveryAndRebind()
       switch (input.type) {
-        case 'workspace': return this.serial('workspace', () => this.workspace(input.root))
+        case 'workspace': return await this.serial('workspace', () => this.workspace(input.root))
         case 'conversations': return listed(await this.conversations.listConversations(input.workspaceId))
-        case 'create-conversation': return this.conversations.createConversation({ ...input,
+        case 'create-conversation': return await this.conversations.createConversation({ ...input,
           ...(input.home ? { home: await this.validateHome(input.workspaceId, input.home) } : {}),
           ...(input.element ? { element: input.element } : {}) })
-        case 'set-conversation-home': return this.serial(input.conversationId, async () => this.conversations.setConversationHome({ ...input,
+        case 'set-conversation-home': return await this.serial(input.conversationId, async () => this.conversations.setConversationHome({ ...input,
           home: input.home ? await this.validateHome(input.workspaceId, input.home) : null }))
-        case 'conversation': return this.conversations.readConversation(input)
-        case 'prepare-documents': return this.serial(input.conversationId, () => this.prepareDocuments(input))
-        case 'draft': return this.serial('attachment-lifecycle', () => this.serial(input.conversationId, async () => {
+        // Behind Main's own writes queued on this conversation (a task's end, a send), so the record read is final.
+        case 'conversation': return await this.serial(input.conversationId, () => this.conversations.readConversation(input))
+        case 'prepare-documents': return await this.serial(input.conversationId, () => this.prepareDocuments(input))
+        case 'draft': return await this.serial('attachment-lifecycle', () => this.serial(input.conversationId, async () => {
           for (const ref of input.attachments) {
             if (ref.delivery === 'source') {
               const snapshot = await this.attachments.readSnapshot(ref.attachmentId)
@@ -861,8 +880,8 @@ export class ExecutionDesktopService {
           return this.conversations.updateConversation({ ...input, patch: { inputDraft: input.text, inputAttachments: input.attachments, frozenContextRefs: this.refs(input.documents) } })
             .catch(error => { throw error instanceof ConversationStoreError && error.code === 'revision-conflict' ? executionInputError('conversation-draft-changed', error) : error })
         }))
-        case 'rename-conversation': return this.serial(input.conversationId, () => this.conversations.updateConversation({ ...input, patch: { title: input.title } }))
-        case 'delete-conversation': return this.serial('attachment-lifecycle', () => this.serial(input.conversationId, () => this.removeConversation(input)))
+        case 'rename-conversation': return await this.serial(input.conversationId, () => this.conversations.updateConversation({ ...input, patch: { title: input.title } }))
+        case 'delete-conversation': return await this.serial('attachment-lifecycle', () => this.serial(input.conversationId, () => this.removeConversation(input)))
         case 'send': {
           if (input.clientTiming) {
             this.rendererTiming(input.conversationId, input.submissionId, `${input.submissionId}:renderer:click`,
@@ -875,7 +894,7 @@ export class ExecutionDesktopService {
           this.timing(input.conversationId, input.submissionId, `${input.submissionId}:received`, 'submit.received',
             input.clientTiming ? { detail: { clockOffsetEstimateMs: performance.timeOrigin - input.clientTiming.invoke.timeOriginMs,
               clockOffsetMethod: 'timeOrigin' } } : {}, received)
-          return this.serial('attachment-lifecycle', () => this.serial(input.conversationId, () => this.send(input)))
+          return await this.serial('attachment-lifecycle', () => this.serial(input.conversationId, () => this.send(input)))
         }
         case 'timing': {
           const record = await this.submissions.read(input.submissionId)
@@ -886,53 +905,51 @@ export class ExecutionDesktopService {
         }
         case 'submission': {
           const record = await this.submissions.read(input.submissionId)
-          return record && record.workspaceId === input.workspaceId && record.conversationId === input.conversationId ? this.publicSubmission(record) : null
+          return record && record.workspaceId === input.workspaceId && record.conversationId === input.conversationId ? await this.publicSubmission(record) : null
         }
-        case 'submissions': return Promise.all((await this.submissions.list()).filter(record => record.workspaceId === input.workspaceId && record.conversationId === input.conversationId).map(record => this.publicSubmission(record)))
-        case 'run-queued': return this.serial(input.conversationId, async () => {
+        case 'submissions': return await Promise.all((await this.submissions.list()).filter(record => record.workspaceId === input.workspaceId && record.conversationId === input.conversationId).map(record => this.publicSubmission(record)))
+        case 'run-queued': return await this.serial(input.conversationId, async () => {
           await this.awaitRecoveryAndRebind()
           let record = await this.submissions.read(input.submissionId)
-          if (!record || record.workspaceId !== input.workspaceId || record.conversationId !== input.conversationId) throw new Error('排队消息不属于当前会话')
+          if (!record || record.workspaceId !== input.workspaceId || record.conversationId !== input.conversationId) throw refused('排队消息不属于当前会话')
           if (record.state !== 'queued') return this.submissionResult(record)
           const current = await this.required(input.workspaceId, input.conversationId), active = await this.activeRun(current)
-          if (await this.reclaimExternalQueue(current)) await this.submissions.resume(input.conversationId)
           if (active) {
             const stopped = await this.engine.stop(active.runId)
-            if (!stopped || ['queued', 'running', 'stopping'].includes(stopped.status)) throw new Error('当前任务尚未停止，排队消息仍保留')
+            if (!stopped || ['queued', 'running', 'stopping'].includes(stopped.status)) throw refused('当前任务尚未停止，排队消息仍保留')
             record = await this.submissions.update(record.submissionId, { continuation: this.continuation(stopped), updatedAt: Date.now() })
           }
           // The accepted payload and identity are reused. The user's newer composer draft is not touched.
           return this.submissionResult(await this.startSubmission(record, record.continuation))
         })
-        case 'delete-submission': return this.serial(input.conversationId, async () => {
+        case 'delete-submission': return await this.serial(input.conversationId, async () => {
           const record = await this.submissions.read(input.submissionId)
-          if (!record || record.workspaceId !== input.workspaceId || record.conversationId !== input.conversationId) throw new Error('排队消息不存在')
-          if (record.state !== 'queued') throw new Error('只有尚未启动的排队消息可以删除')
+          if (!record || record.workspaceId !== input.workspaceId || record.conversationId !== input.conversationId) throw refused('排队消息不存在')
+          if (record.state !== 'queued') throw refused('只有尚未启动的排队消息可以删除')
           return this.publicSubmission(await this.submissions.update(record.submissionId, { state: 'cancelled', updatedAt: Date.now(),
             failure: { code: 'cancelled-by-user', message: '已从队列移除。' } }))
         })
-        case 'pause-queue': return this.serial(input.conversationId, async () => {
+        case 'pause-queue': return await this.serial(input.conversationId, async () => {
           await this.required(input.workspaceId, input.conversationId)
-          await this.submissions.pause(input.conversationId, input.reason ?? 'external-handoff')
+          await this.submissions.pause(input.conversationId)
         })
-        case 'resume-queue': return this.serial(input.conversationId, async () => {
-          const current = await this.required(input.workspaceId, input.conversationId)
-          await this.reclaimExternalQueue(current)
+        case 'resume-queue': return await this.serial(input.conversationId, async () => {
+          await this.required(input.workspaceId, input.conversationId)
           await this.resumeBuiltinQueue(input.conversationId)
         })
         case 'browser-viewport': {
           const owner = await this.required(input.workspaceId, input.conversationId)
           const record = await this.engine.read(input.runId)
           if (!owner.runIndex.builtinRunIds.includes(input.runId) || record?.input.conversationId !== owner.conversationId)
-            throw new Error('浏览器不属于当前会话')
+            throw refused('浏览器不属于当前会话')
           const { viewportWorkbenchBrowser } = await import('../workbenchToolServices.js')
-          return viewportWorkbenchBrowser(input.runId, { visible: input.visible, ...(input.bounds ? { bounds: input.bounds } : {}) })
+          return await viewportWorkbenchBrowser(input.runId, { visible: input.visible, ...(input.bounds ? { bounds: input.bounds } : {}) })
         }
         case 'browser-control': {
           const owner = await this.required(input.workspaceId, input.conversationId)
           const record = await this.engine.read(input.runId)
           if (!owner.runIndex.builtinRunIds.includes(input.runId) || record?.input.conversationId !== owner.conversationId)
-            throw new Error('浏览器不属于当前会话')
+            throw refused('浏览器不属于当前会话')
           const { controlWorkbenchBrowser } = await import('../workbenchToolServices.js')
           try {
             if (input.action === 'status') return await controlWorkbenchBrowser(input.runId, 'status')
@@ -953,41 +970,41 @@ export class ExecutionDesktopService {
               '任务和输入已保留，可重试接管或继续任务，也可停止任务。', { cause })
           }
         }
-        case 'run': return this.engine.read(input.runId)
+        case 'run': return await this.engine.read(input.runId)
         case 'change-review': {
           const { run } = await this.changeReviewSource(input)
-          return this.changeReview.inspect(run, { offset: input.offset, limit: input.limit })
+          return await this.changeReview.inspect(run, { offset: input.offset, limit: input.limit })
         }
-        case 'change-rollback': return this.serial(`change-review:${input.runId}`, async () => {
+        case 'change-rollback': return await this.serial(`change-review:${input.runId}`, async () => {
           const { run, workspaceRoot } = await this.changeReviewSource(input)
           if (!['completed', 'partial', 'failed', 'stopped'].includes(run.status))
-            throw new Error('任务仍在运行，请先等待结束或停止后再回退')
+            throw refused('任务仍在运行，请先等待结束或停止后再回退')
           return this.changeReview.rollback(run, input.entryId, { workspaceRoot, permission: DEFAULT_PERMISSION_MODE })
         })
         case 'checkpoint': return (await this.checkpointSource(input)).checkpoint
-        case 'fork-checkpoint': return this.serial(input.conversationId, async () => {
+        case 'fork-checkpoint': return await this.serial(input.conversationId, async () => {
           const { run, checkpoint } = await this.checkpointSource(input)
           const fork = forkDraftFromCheckpoint({ source: checkpoint, run, instruction: input.instruction })
           const conversation = await this.conversations.createConversation({ workspaceId: input.workspaceId,
             title: fork.title, inputDraft: fork.inputDraft })
           return { conversation, fork }
         })
-        case 'stop': await this.awaitRecoveryAndRebind(); return this.engine.stop(input.runId)
+        case 'stop': await this.awaitRecoveryAndRebind(); return await this.engine.stop(input.runId)
         case 'approve': try { return await this.engine.decide(input) }
           catch (error) { throw new DesktopOperationError('execution-approval-rejected', '决定没有提交', error instanceof Error ? error.message : '这次修改暂时不能处理。', '修改仍在等待时可以重新选择；任务已停止或结束时，需要重新发送任务。', { cause: error }) }
         case 'answer': try { return await this.engine.answer(input) }
           catch (error) { throw new DesktopOperationError('execution-answer-rejected', '回答没有提交', error instanceof Error ? error.message : '这个问题暂时不能回答。', '问题仍在等待时可以重新选择；任务已停止或结束时，需要重新发送任务。', { cause: error }) }
-        case 'events': return this.events.readPage(input)
-        case 'search-events': return this.events.search(input)
-        case 'timeline': return this.events.snapshot(input.conversationId)
+        case 'events': return await this.events.readPage(input)
+        case 'search-events': return await this.events.search(input)
+        case 'timeline': return await this.events.snapshot(input.conversationId)
         case 'blob': return Buffer.from(await this.events.readBlob(input.conversationId, input.ref)).toString('utf8')
-        case 'edits': return this.edits.list(input.documentId)
+        case 'edits': return await this.edits.list(input.documentId)
         case 'element-change': return this.elementChangeView(input.submissionId)
-        case 'element-revert': return this.revertElement(input)
+        case 'element-revert': return await this.revertElement(input)
       }
     } catch (error) {
-      if (error instanceof DesktopOperationError) throw error
-      throw new DesktopOperationError('execution-operation-failed', '会话操作未完成', '会话服务暂时无法完成操作。', '请重试；若仍失败，请查看诊断记录。当前输入、附件和已应用的修改已保留。', { cause: error })
+      // Each branch above awaits its result (most settle later in a serial queue), so every failure reaches this mapping.
+      throw operationFailure(error, raw && typeof raw === 'object' ? (raw as { type?: unknown }).type : undefined)
     }
   }
 }

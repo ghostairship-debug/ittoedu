@@ -1,23 +1,35 @@
-import { request } from 'node:https'
+import { request, type RequestOptions } from 'node:https'
 import { isIP } from 'node:net'
+import { connect as tlsConnect } from 'node:tls'
+import { openProxyTunnel, systemProxyRoute } from './systemProxy'
 
 type Answer = { name?: unknown; type?: unknown; data?: unknown }
 type DnsJson = { Status?: unknown; TC?: unknown; Question?: unknown; Answer?: unknown }
 
-function query(hostname: string, type: 'A' | 'AAAA', signal?: AbortSignal): Promise<readonly { address: string; family: 4 | 6 }[]> {
+async function query(hostname: string, type: 'A' | 'AAAA', signal?: AbortSignal): Promise<readonly { address: string; family: 4 | 6 }[]> {
   const url = new URL('https://cloudflare-dns.com/dns-query')
   url.searchParams.set('name', hostname)
   url.searchParams.set('type', type)
+  const controller = new AbortController()
+  const onAbort = () => controller.abort()
+  signal?.addEventListener('abort', onAbort, { once: true })
+  if (signal?.aborted) controller.abort()
+  const timer = setTimeout(() => controller.abort(), 4000)
+  timer.unref()
+  const options: RequestOptions = { method: 'GET', signal: controller.signal,
+    headers: { Accept: 'application/dns-json', 'User-Agent': 'GuolingResearch/2.0' } }
+  try {
+    // The resolver itself follows the system proxy; the proxy reaches cloudflare-dns.com by name.
+    const route = await systemProxyRoute(url.href)
+    if (route.kind !== 'direct') {
+      const tunnel = await openProxyTunnel(route, { host: url.hostname, port: 443 }, { signal: controller.signal })
+      Object.assign(options, { defaultPort: 443,
+        createConnection: () => tlsConnect({ socket: tunnel, host: url.hostname, servername: url.hostname, ALPNProtocols: ['http/1.1'] }) })
+    }
+  } catch (cause) { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); throw cause }
   return new Promise((resolve, reject) => {
-    const controller = new AbortController()
-    const onAbort = () => controller.abort()
-    signal?.addEventListener('abort', onAbort, { once: true })
-    if (signal?.aborted) controller.abort()
-    const timer = setTimeout(() => controller.abort(), 4000)
-    timer.unref()
     const done = (cause?: unknown) => { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); if (cause) reject(cause) }
-    const req = request(url, { method: 'GET', signal: controller.signal,
-      headers: { Accept: 'application/dns-json', 'User-Agent': 'GuolingResearch/2.0' } }, response => {
+    const req = request(url, options, response => {
       if (response.statusCode !== 200 || !String(response.headers['content-type'] ?? '').toLowerCase().startsWith('application/dns-json')) {
         response.resume(); done(new Error('公共 DNS 查询失败')); return
       }

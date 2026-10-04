@@ -11,6 +11,28 @@ function readPublishedIndex(session: PublishedCourseSession): number {
 }
 
 /**
+ * Course keys of one mounted interactive Published session. The exported
+ * player, the editor's whole-course preview and its try-runs all attach here,
+ * so ←/→, Shift+←/→, Home/End and the presenter keys behave the same in each.
+ */
+export function attachPublishedCourseKeys(
+  root: HTMLElement,
+  session: PublishedCourseSession,
+  playback: Pick<PublishedCourseV2Payload['playback'], 'keyboardNavigation' | 'presenter'>,
+): PlayerPresenterInput {
+  return new PlayerPresenterInput({
+    root,
+    keyboardNavigation: playback.keyboardNavigation,
+    presenter: playback.presenter,
+    navigate: command => command.kind === 'edge'
+      ? session.requestPlaybackEdge(command.edge)
+      : session.requestPlaybackNavigation(command.kind, command.direction),
+    onAuthoredCommand: command => session.dispatchPresenterCommand(command),
+    onFeedback: feedback => session.reportPresenterFeedback(feedback.message),
+  })
+}
+
+/**
  * Delivery presenter for a Published Course V2 session: keyboard navigation
  * and a location-index bridge. This is not PlayerApp and does not wrap a
  * V8 Project/Scene payload.
@@ -30,18 +52,15 @@ export function attachPublishedCoursePresenter(
   payload: PublishedCourseV2Payload,
 ): PublishedCoursePresenter {
   const totalScenes = Math.max(1, session.listCatalog().length)
-  const presenter = payload.playback.presenter
 
   const readIndex = () => readPublishedIndex(session)
-  let presenterInput: PlayerPresenterInput | null = null
+  const presenterInput = attachPublishedCourseKeys(root, session, payload.playback)
   let destroyed = false
   let replayPending = false
 
   const goToIndex = (index: number): boolean => {
     if (index < 0 || index >= totalScenes) return false
-    void session.goToIndex(index).then(() => {
-      presenterInput?.setIndex(index)
-    }).catch((error) => {
+    void session.goToIndex(index).catch((error) => {
       console.error('课程翻页失败', error)
     })
     return true
@@ -50,29 +69,12 @@ export function attachPublishedCoursePresenter(
   const replayScene = (): boolean => {
     if (destroyed || replayPending || !session.canReplayScene()) return false
     replayPending = true
-    void session.replayScene().then((replayed) => {
-      if (!replayed || destroyed) return
-      presenterInput?.setIndex(readIndex())
-    }).catch((error) => {
+    void session.replayScene().catch((error) => {
       console.error('课程重播失败', error)
     }).finally(() => {
       replayPending = false
     })
     return true
-  }
-
-  if (payload.playback.keyboardNavigation || presenter.enabled) {
-    presenterInput = new PlayerPresenterInput({
-      totalPages: totalScenes,
-      keyboardNavigation: payload.playback.keyboardNavigation,
-      presenter,
-      onNavigate: (targetIndex) => goToIndex(targetIndex),
-      onStep: command => session.requestPlaybackNavigation('step', command),
-      onAuthoredCommand: command => session.dispatchPresenterCommand(command),
-      onFeedback: feedback => session.reportPresenterFeedback(feedback.message),
-      readCurrentIndex: readIndex,
-    })
-    presenterInput.setIndex(readIndex())
   }
 
   const publishedPresenter: PublishedCoursePresenter = {
@@ -92,7 +94,7 @@ export function attachPublishedCoursePresenter(
     destroy: () => {
       if (destroyed) return
       destroyed = true
-      presenterInput?.destroy()
+      presenterInput.destroy()
       if (window.__H5_LESSON_PLAYER__ === publishedPresenter) {
         delete window.__H5_LESSON_PLAYER__
       }

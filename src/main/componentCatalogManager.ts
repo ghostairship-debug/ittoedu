@@ -1,61 +1,26 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { app, dialog, type BrowserWindow } from 'electron'
-import { z } from 'zod'
 import type {
   ComponentCatalogPackageFile,
   ComponentCatalogSnapshot,
   ComponentCatalogTrust,
 } from '../shared/componentCatalog'
-import { defaultComponentCatalogSources } from './componentCatalogSources'
 import {
-  ComponentCatalogScanError,
-  readCatalogComponentPackage,
-  scanComponentCatalogDirectory,
-  type ScannedComponentCatalogSource,
-} from './componentCatalogScanner'
+  canonicalCatalogPath,
+  COMPONENT_CATALOG_SOURCES_FILE,
+  managedComponentLibrary,
+  readConfiguredCatalogSources,
+  scanCatalogSource,
+  scanComponentCatalogSources,
+  type ConfiguredCatalogSource,
+  type ScannedCatalogSource,
+} from './componentCatalogSources'
+import { readCatalogComponentPackage } from './componentCatalogScanner'
+import { deleteHtmlComponent } from './htmlComponentLibrary'
 
-const sourceConfigSchema = z.object({
-  version: z.literal(1),
-  sources: z.array(z.object({
-    path: z.string().min(1).max(32_767),
-    trust: z.enum(['trusted', 'prompt']),
-  }).strict()).max(100),
-}).strict()
-
-interface SourceConfig {
-  path: string
-  trust: 'trusted' | 'prompt'
-}
-
-interface DiscoveredSourceConfig {
-  path: string
-  trust: ComponentCatalogTrust
-}
-
-function canonicalPath(value: string): string {
-  const resolved = path.resolve(value)
-  return process.platform === 'win32'
-    ? resolved.toLocaleLowerCase('en-US')
-    : resolved
-}
-
-function configuredSourcesPath(): string {
-  return path.join(app.getPath('userData'), 'component-catalog-sources.json')
-}
-
-async function readConfiguredSources(): Promise<SourceConfig[]> {
-  try {
-    const text = await fs.readFile(configuredSourcesPath(), 'utf8')
-    const parsed = sourceConfigSchema.safeParse(JSON.parse(text) as unknown)
-    return parsed.success ? parsed.data.sources : []
-  } catch {
-    return []
-  }
-}
-
-async function writeConfiguredSources(sources: SourceConfig[]): Promise<void> {
-  const target = configuredSourcesPath()
+async function writeConfiguredSources(sources: ConfiguredCatalogSource[]): Promise<void> {
+  const target = path.join(app.getPath('userData'), COMPONENT_CATALOG_SOURCES_FILE)
   await fs.mkdir(path.dirname(target), { recursive: true })
   await fs.writeFile(
     target,
@@ -65,45 +30,24 @@ async function writeConfiguredSources(sources: SourceConfig[]): Promise<void> {
 }
 
 export class ComponentCatalogManager {
-  private readonly sources = new Map<string, ScannedComponentCatalogSource>()
+  private sources = new Map<string, ScannedCatalogSource>()
 
   private snapshot(): ComponentCatalogSnapshot {
     const values = [...this.sources.values()]
     return {
       sources: values.map((entry) => ({ ...entry.source })),
       packages: values.flatMap((entry) => entry.packages.map((pkg) => ({ ...pkg }))),
+      htmlComponents: values.flatMap((entry) => entry.htmlComponents.map((component) => ({ ...component }))),
       issues: values.flatMap((entry) => entry.issues.map((issue) => ({ ...issue }))),
     }
   }
 
   async load(): Promise<ComponentCatalogSnapshot> {
-    this.sources.clear()
-    const configured = await readConfiguredSources()
-    const defaults = await defaultComponentCatalogSources(app.getAppPath())
-    const byPath = new Map<string, DiscoveredSourceConfig>()
-    for (const source of defaults) byPath.set(canonicalPath(source.path), source)
-    for (const source of configured) {
-      const key = canonicalPath(source.path)
-      if (byPath.get(key)?.trust !== 'built-in') byPath.set(key, source)
-    }
-
-    const detachedIssues: ComponentCatalogSnapshot['issues'] = []
-    for (const source of byPath.values()) {
-      try {
-        const scanned = await scanComponentCatalogDirectory(source.path, source.trust)
-        this.sources.set(scanned.source.sourceId, scanned)
-      } catch (error) {
-        detachedIssues.push({
-          sourceLabel: path.basename(source.path) || '组件目录',
-          code: error instanceof ComponentCatalogScanError
-            ? error.code
-            : 'catalog-unreadable',
-          message: error instanceof Error ? error.message : '组件目录扫描失败。',
-        })
-      }
-    }
+    // A complete fresh scan replaces the previous state at once; reads never see a half-cleared map.
+    const scan = await scanComponentCatalogSources(app.getAppPath(), app.getPath('userData'))
+    this.sources = scan.sources
     const snapshot = this.snapshot()
-    snapshot.issues.push(...detachedIssues)
+    snapshot.issues.push(...scan.issues)
     return snapshot
   }
 
@@ -114,12 +58,12 @@ export class ComponentCatalogManager {
     })
     if (result.canceled || result.filePaths.length === 0) return null
     const selectedPath = path.resolve(result.filePaths[0]!)
-    const scanned = await scanComponentCatalogDirectory(selectedPath, 'prompt')
+    const scanned = await scanCatalogSource(selectedPath, 'prompt', managedComponentLibrary(app.getPath('userData')))
     this.sources.set(scanned.source.sourceId, scanned)
 
-    const configured = await readConfiguredSources()
-    const canonicalSelected = canonicalPath(selectedPath)
-    const next = configured.filter((source) => canonicalPath(source.path) !== canonicalSelected)
+    const configured = await readConfiguredCatalogSources(app.getPath('userData'))
+    const canonicalSelected = canonicalCatalogPath(selectedPath)
+    const next = configured.filter((source) => canonicalCatalogPath(source.path) !== canonicalSelected)
     next.push({ path: selectedPath, trust: 'prompt' })
     await writeConfiguredSources(next)
     return this.snapshot()
@@ -135,10 +79,13 @@ export class ComponentCatalogManager {
     source.packages.forEach((pkg) => {
       pkg.sourceTrust = trust
     })
+    source.htmlComponents.forEach((component) => {
+      component.sourceTrust = trust
+    })
 
-    const configured = await readConfiguredSources()
-    const sourcePath = canonicalPath(source.rootPath)
-    const next = configured.filter((item) => canonicalPath(item.path) !== sourcePath)
+    const configured = await readConfiguredCatalogSources(app.getPath('userData'))
+    const sourcePath = canonicalCatalogPath(source.rootPath)
+    const next = configured.filter((item) => canonicalCatalogPath(item.path) !== sourcePath)
     next.push({ path: source.rootPath, trust })
     await writeConfiguredSources(next)
     return this.snapshot()
@@ -152,6 +99,16 @@ export class ComponentCatalogManager {
     const source = this.sources.get(sourceId)
     if (!source) throw new Error('组件目录已失效，请重新扫描。')
     return readCatalogComponentPackage(source, packageId, version)
+  }
+
+  /** Only entries of the managed library (“我的资产库”) can be deleted from the panel. */
+  async deleteHtmlComponent(sourceId: string, entry: string): Promise<ComponentCatalogSnapshot> {
+    const source = this.sources.get(sourceId)
+    if (!source?.htmlComponents.some((component) => component.entry === entry && component.removable))
+      throw new Error('只能删除“我的资产库”中的 HTML 组件；请刷新组件库后重试。')
+    await deleteHtmlComponent(source.rootPath, entry)
+    this.sources.set(sourceId, await scanCatalogSource(source.rootPath, source.source.trust, managedComponentLibrary(app.getPath('userData'))))
+    return this.snapshot()
   }
 }
 

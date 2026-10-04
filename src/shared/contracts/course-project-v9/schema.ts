@@ -1,3 +1,4 @@
+import { compositionElementNodeIds } from '../../composition/content'
 import { documentBlockSchema, documentContentSchema, walkDocument } from '../../document/content'
 import { createWebCompositionSchema } from '../../composition/schema'
 import { visitCompositionReferences } from '../../composition/references'
@@ -1186,13 +1187,18 @@ export const courseProjectDocumentSchema = z.object({
   }
 
   const knownLayerItemIds = new Set<string>()
-  project.globalLayerItems.forEach((entry) => knownLayerItemIds.add(entry.item.layerItemId))
+  const knownCompositionNodeIds = new Set<string>()
+  const addKnownItem = (item: { layerItemId: string; kind: string; content?: unknown }) => {
+    knownLayerItemIds.add(item.layerItemId)
+    compositionElementNodeIds(item).forEach(id => knownCompositionNodeIds.add(id))
+  }
+  project.globalLayerItems.forEach((entry) => addKnownItem(entry.item))
   project.surfaces.forEach((surface) => {
-    surface.surfaceLayerItems.forEach((entry) => knownLayerItemIds.add(entry.item.layerItemId))
+    surface.surfaceLayerItems.forEach((entry) => addKnownItem(entry.item))
     if (surface.type === 'slide') {
-      surface.scenes.forEach((scene) => scene.layerItems.forEach((item) => knownLayerItemIds.add(item.layerItemId)))
+      surface.scenes.forEach((scene) => scene.layerItems.forEach((item) => addKnownItem(item)))
     } else if (surface.type === 'spatial-2d') {
-      surface.world.layerItems.forEach((item) => knownLayerItemIds.add(item.layerItemId))
+      surface.world.layerItems.forEach((item) => addKnownItem(item))
     }
   })
   const checkInteractionReferences = (
@@ -1203,7 +1209,7 @@ export const courseProjectDocumentSchema = z.object({
   ): void => {
     interactions.forEach((rule, ruleIndex) => {
       const checkLayerItem = (itemId: string, referencePath: Array<string | number>): void => {
-        const known = localLayerItemIds?.has(itemId) || knownLayerItemIds.has(itemId)
+        const known = localLayerItemIds?.has(itemId) || knownLayerItemIds.has(itemId) || knownCompositionNodeIds.has(itemId)
         if (!known) addReferenceIssue(context, referencePath, `Interaction references missing layer item: ${itemId}`)
       }
       const trigger = rule.trigger

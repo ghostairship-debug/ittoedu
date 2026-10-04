@@ -1,4 +1,4 @@
 interface:
   display_name: "创作互动课件"
-  short_description: "专注教学内容、视觉布局和互动，用熟悉的 HTML 与 CSS 创作完整作品"
-  default_prompt: "Use $orchestrate-courseware to create a complete, visually clear interactive course from my materials and deliver an editable saved project."
+  short_description: "策划、框架、资产与精修，在正式工程里逐页创作互动课件"
+  default_prompt: "Use $orchestrate-courseware to create an editable course in stages from my materials, keeping the plan and current project available for review."

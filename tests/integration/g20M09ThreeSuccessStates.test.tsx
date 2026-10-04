@@ -117,7 +117,8 @@ it('M09-T03 keeps tool, canonical application and disk save distinct after real 
     expand(rejectedCard); expand(appliedCard)
     expect(within(rejectedCard).getByText('已运行')).toBeInTheDocument()
     expect(within(rejectedCard).getByText('应用失败')).toBeInTheDocument()
-    expect(within(rejectedCard).getByText('保存未确认')).toBeInTheDocument()
+    // Without any save fact for a failed application, the card shows no save row.
+    expect(within(rejectedCard).queryByText('文件保存')).toBeNull()
     expect(within(appliedCard).getByText('已运行')).toBeInTheDocument()
     expect(within(appliedCard).getByText('已应用')).toBeInTheDocument()
     expect(within(appliedCard).getByText('保存失败')).toBeInTheDocument()

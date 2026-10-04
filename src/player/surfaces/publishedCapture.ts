@@ -191,6 +191,86 @@ export async function waitForPublishedObservationReady(root: HTMLElement, signal
   } finally { lifecycle.dispose() }
 }
 
+/** Longest a screenshot waits for page animations; later ones are photographed mid-way. */
+export const PUBLISHED_ANIMATION_SETTLE_MAX_MS = 5_000
+
+/** Running CSS animations, transitions and Web Animations below `root`, including shadow trees and same-origin frames. */
+function runningAnimationsBelow(root: Element): Animation[] {
+  const found = new Set<Animation>()
+  const read = (source: { getAnimations?: (options?: { subtree?: boolean }) => Animation[] } | null, options?: { subtree?: boolean }) => {
+    if (typeof source?.getAnimations !== 'function') return
+    try { for (const animation of source.getAnimations(options)) found.add(animation) } catch { /* A frame that went away has nothing left to wait for. */ }
+  }
+  read(root, { subtree: true })
+  visitComposedElements(root, (element) => {
+    if (isTag(element, 'iframe')) { try { read(element.contentDocument) } catch { /* Cross-origin frames cannot be reached. */ } }
+    if (element.shadowRoot) read(element.shadowRoot)
+  })
+  return [...found].filter(animation => animation.playState === 'running')
+}
+
+/** Milliseconds until a finite, time-driven animation ends; null for endless and scroll-driven ones. */
+function animationRemainingMs(animation: Animation): number | null {
+  const timing = animation.effect?.getComputedTiming()
+  const current = animation.currentTime ?? 0
+  const rate = animation.playbackRate
+  if (!timing || typeof timing.endTime !== 'number' || typeof current !== 'number' || !Number.isFinite(timing.endTime) || !rate) return null
+  return Math.max(0, (rate > 0 ? timing.endTime - current : current) / Math.abs(rate))
+}
+
+/**
+ * Lets entrance animations finish before a frame is observed: waits for the finite CSS animations, transitions and
+ * Web Animations of the page, its components and Runtimes (shadow trees and same-origin frames included), then for
+ * whatever they start in turn. Endless loops, paused animations and ones that cannot end within `maxWaitMs` are not
+ * waited for, so the wait is always bounded.
+ */
+export async function waitForPublishedAnimationsSettled(
+  root: HTMLElement,
+  options: { maxWaitMs?: number } = {},
+): Promise<void> {
+  const view = root.ownerDocument.defaultView
+  if (!view) return
+  const deadline = Date.now() + (options.maxWaitMs ?? PUBLISHED_ANIMATION_SETTLE_MAX_MS)
+  const frames = async (count: number) => {
+    for (let index = 0; index < count; index += 1) await new Promise<void>(resolve => view.requestAnimationFrame(() => resolve()))
+  }
+  // A script that starts an entrance on its first frames has not created its animation yet.
+  await frames(2)
+  for (;;) {
+    const left = deadline - Date.now()
+    if (left <= 0) return
+    let longest = -1
+    const waiting = runningAnimationsBelow(root).filter((animation) => {
+      const remaining = animationRemainingMs(animation)
+      if (remaining === null || remaining > left) return false
+      longest = Math.max(longest, remaining)
+      return true
+    })
+    if (!waiting.length) return
+    // A script may pause an animation half-way; its end is then re-read instead of awaited.
+    let timer = 0
+    await Promise.race([
+      Promise.allSettled(waiting.map(animation => animation.finished)),
+      new Promise<void>(resolve => { timer = view.setTimeout(resolve, Math.min(left, longest + 100)) }),
+    ])
+    view.clearTimeout(timer)
+    await frames(1)
+  }
+}
+
+/**
+ * A static capture shows the page as it settles without waiting: running finite CSS animations, transitions and
+ * Web Animations below the roots (shadow trees and same-origin frames included) jump to their end. Endless ones stay.
+ */
+function finishPublishedAnimations(roots: readonly Element[]): void {
+  const animations = new Set<Animation>()
+  for (const root of roots) for (const animation of runningAnimationsBelow(root)) animations.add(animation)
+  for (const animation of animations) {
+    if (animationRemainingMs(animation) === null) continue
+    try { animation.finish() } catch { /* An animation that cannot finish keeps its current frame. */ }
+  }
+}
+
 class PublishedCanvasSnapshots {
   readonly #snapshots = new WeakMap<HTMLCanvasElement, HTMLCanvasElement>()
 
@@ -1010,6 +1090,7 @@ export async function capturePublishedSurfacePng(
           'Published 静态捕获等待字体就绪已取消',
         )
       }
+      finishPublishedAnimations([options.root, ...options.layers.map((layer) => layer.element)])
       const geometry = options.resolveGeometryAfterReady?.() ?? options
       if (geometry.layers.length !== options.layers.length
         || geometry.layers.some((layer, index) => layer.element !== options.layers[index]?.element)) {

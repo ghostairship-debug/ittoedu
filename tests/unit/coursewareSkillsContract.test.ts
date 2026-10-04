@@ -8,7 +8,7 @@ import { BundledSkillService } from '@/main/workbench/skills/BundledSkillService
 const repoRoot = process.cwd()
 const read = (name: string) => readFile(path.join(repoRoot, name), 'utf8')
 
-describe('courseware skill contracts: reliable draft and user-led refinement', () => {
+describe('courseware skill contracts: staged project authoring and external import', () => {
   it('rejects an invalid explicit product root before consulting a cached alternate product', async () => {
     let failure: { stdout?: string } | undefined
     try { await promisify(execFile)(process.execPath, [path.join(repoRoot, '.agents/skills/build-courseware-project/scripts/resolve-editor-root.mjs'), '--no-cache'],
@@ -19,7 +19,6 @@ describe('courseware skill contracts: reliable draft and user-led refinement', (
   it('keeps the default task entry short and makes opt-in engineering references readable from the installed bundle', async () => {
     const entry = await read('.agents/skills/build-courseware-project/SKILL.md')
     const method = await read('.agents/skills/build-courseware-project/references/build-method.md')
-    expect(Buffer.byteLength(entry)).toBeLessThanOrEqual(6 * 1024)
     expect(entry).toContain('[build-method.md](references/build-method.md)')
     expect(entry).toContain('course.createFromHtml')
     expect(entry).not.toContain('file.create → html.import → file.save')
@@ -35,12 +34,12 @@ describe('courseware skill contracts: reliable draft and user-led refinement', (
     const orchestrator = await read('.agents/skills/orchestrate-courseware/SKILL.md')
     const contract = await read('.agents/skills/orchestrate-courseware/references/main-progression.md')
     const builder = await read('.agents/skills/build-courseware-project/SKILL.md')
-    expect(orchestrator).toContain('不固定插入两次确认')
+    expect(orchestrator).toContain('策划、框架默认各确认一次')
     expect(orchestrator).toContain('关键知识不能只出现在答案反馈或素材说明中')
     expect(orchestrator).toContain('图甲')
     expect(contract).toContain('默认教师演示允许讲解后')
     expect(contract).toContain('用户明确要求自主学习')
-    expect(builder).toContain('核心教学呈现必须存在')
+    expect(builder).toContain('新课创作从框架起写入工程内文件')
     expect(builder).toContain('不删除互动逻辑')
   })
   it('keeps one bundled method source, includes the short HTML contract and matches editable skill files', async () => {

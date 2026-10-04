@@ -106,9 +106,10 @@ export interface DesktopAPI {
   attachments?: import('./workbench/attachmentsDesktop').AttachmentsDesktopAPI
   execution?: import('./workbench/executionDesktop').ExecutionDesktopAPI
   /** M15 renderer host publishes only already validated live authoring hits. Never model input. */
-  publishDynamicContentTargets?(input: Omit<import('../main/workbench/observation/DynamicContentObservationStore').DynamicContentPublication, 'senderId'>): Promise<boolean>
+  publishDynamicContentTargets?(input: import('./workbench/dynamicContentTargets').DynamicContentTargetsPublication): Promise<boolean>
   externalMcp?: import('./workbench/external').ExternalMcpAPI
   executionSettings?: import('./workbench/executionSettingsDesktop').ExecutionSettingsAPI
+  pixabaySettings?: import('./workbench/pixabaySettingsDesktop').PixabaySettingsAPI
   workspaceFiles?: import('./workbench/workspaceFiles').WorkspaceFilesAPI
   mediaFiles?(input: import('./workbench/mediaFiles').MediaFilesRequest): Promise<import('./workbench/mediaFiles').MediaFileSnapshot>
   onWorkspaceFilesChanged?(listener: (event: import('./workbench/workspaceFiles').WorkspaceFilesChange) => void): () => void
@@ -148,6 +149,11 @@ export interface DesktopAPI {
     packageId: string
     version: string
   }): Promise<ComponentCatalogPackageFile>
+  /** Deletes one HTML component of the managed library (“我的资产库”). */
+  deleteComponentCatalogHtmlComponent?(input: {
+    sourceId: string
+    entry: string
+  }): Promise<ComponentCatalogSnapshot>
   exportHtml(input: {
     suggestedName: string
     html: string
@@ -188,12 +194,15 @@ export const IPC_CHANNELS = {
   imageResults: 'image-results:operate',
   imageResultsChanged: 'image-results:changed',
   externalMcp: 'external-mcp:operate',
+  externalMcpUiStateRequest: 'external-mcp:ui-state-request',
+  externalMcpUiStateReply: 'external-mcp:ui-state-reply',
   attachments: 'attachments:operate',
   execution: 'execution:operate',
   dynamicContentTargets: 'dynamic-content:publish-targets',
   executionEvent: 'execution:event',
   executionEdit: 'execution:edit',
   executionSettings: 'execution-settings:operate',
+  pixabaySettings: 'pixabay-settings:operate',
   workspaceFiles: 'workspace-files:operate',
   mediaFiles: 'media-files:operate',
   workspaceFilesChanged: 'workspace-files:changed',
@@ -227,6 +236,7 @@ export const IPC_CHANNELS = {
   selectComponentCatalogSource: 'component-catalog:select-source',
   setComponentCatalogSourceTrust: 'component-catalog:set-source-trust',
   readComponentCatalogPackage: 'component-catalog:read-package',
+  deleteComponentCatalogHtmlComponent: 'component-catalog:delete-html-component',
   peekProjectArchive: 'project:peek-archive',
   exportHtml: 'export:write-html',
   exportWebPackage: 'export:write-web-package',

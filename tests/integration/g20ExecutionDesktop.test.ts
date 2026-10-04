@@ -9,7 +9,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { ExecutionDesktopService } from '../../src/main/workbench/execution/ExecutionDesktopService'
 import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
-import { ExternalMcpService } from '../../src/main/workbench/external/ExternalMcpService'
 import type { CredentialEncryptionPort } from '../../src/main/workbench/providers/providerCredentials'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 import type { ExecutionRunRecord } from '../../src/shared/workbench/execution'
@@ -397,60 +396,6 @@ it.each(['pdf', 'pptx', 'png'])('starts a material-home conversation without ope
 })
 
 
-it.each(['resume-queue', 'run-queued', 'restart-resume'] as const)('reclaims an external handoff with %s through the existing stop barrier and queued identity', async action => {
-  const model = vi.fn(async () => new Response(`data: ${JSON.stringify({ id: 'reclaim', model: 'fixture-model', choices: [{ index: 0, delta: { role: 'assistant', content: '已继续任务' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } }))
-  const f = await fixture(model)
-  await configureConversation(f.settings, 'http://127.0.0.1:1/v1')
-  const space = await f.service.operate({ type: 'workspace', root: f.workspace }) as { workspace: { workspaceId: string } }
-  const conversation = await f.service.operate({ type: 'create-conversation', workspaceId: space.workspace.workspaceId }) as { conversationId: string; revision: number }
-  const identity = { workspaceId: space.workspace.workspaceId, conversationId: conversation.conversationId }
-  const external = new ExternalMcpService({ conversations: f.service.conversations, engine: f.service.engine,
-    registry: f.documents.registry, gateway: f.documents.tools, attachments: f.service.attachments,
-    appendEvent: input => f.service.appendExternalEvent(input) })
-  f.service.setExternalRevoker(input => external.revokeConversation(input))
-  try {
-    await f.service.pauseQueueForExternal(identity.conversationId)
-    const grant = await external.grant({ ...identity, expectedRevision: conversation.revision, instruction: '外部任务', documents: [reference(f.document)] })
-    const submissionId = crypto.randomUUID()
-    const queued = await f.service.operate({ type: 'send', ...identity, submissionId, expectedRevision: grant.conversation.revision,
-      text: '需要接回的原要求', documents: [] }) as { submission: { state: string }; conversation: { revision: number } }
-    expect(queued.submission.state).toBe('queued')
-    expect(model).not.toHaveBeenCalled()
-    let service = f.service
-    let release!: () => void
-    let reached!: () => void
-    const barrierReached = new Promise<void>(resolve => { reached = resolve })
-    if (action === 'restart-resume') {
-      await external.close()
-      service = new ExecutionDesktopService({ directory: path.join(f.root, 'desktop'), documents: f.documents, settings: f.settings,
-        authorizeWorkspaceRoot: f.authorizeWorkspaceRoot, fetch: model })
-    } else {
-      const stop = f.documents.tools.stop.bind(f.documents.tools)
-      vi.spyOn(f.documents.tools, 'stop').mockImplementationOnce(async runId => {
-        reached()
-        await new Promise<void>(resolve => { release = resolve })
-        return stop(runId)
-      })
-    }
-    const reclaim = service.operate({ type: action === 'run-queued' ? 'run-queued' : 'resume-queue', ...identity,
-      ...(action === 'run-queued' ? { submissionId } : {}) })
-    if (action !== 'restart-resume') {
-      await barrierReached
-      expect(model).not.toHaveBeenCalled()
-      release()
-    }
-    await reclaim
-    const stored = await service.submissions.read(submissionId)
-    expect(stored?.state).toBe('accepted')
-    expect((await service.engine.wait(stored!.runId!)).status).toBe('completed')
-    expect(model).toHaveBeenCalledTimes(1)
-    expect(await service.submissions.pausedReason(identity.conversationId)).toBeUndefined()
-    expect((await external.list(identity))[0]?.status).not.toBe('active')
-    const retained = await service.conversations.readConversation(identity)
-    expect(retained?.messages.find(message => message.role === 'user')?.text).toBe('需要接回的原要求')
-  } finally { await external.close() }
-})
-
 it('runs an accepted queued item with the original identity without replacing a newer composer draft', async () => {
   const f = await fixture(async () => new Response(`data: ${JSON.stringify({ id: 'queued', model: 'fixture-model', choices: [{ index: 0, delta: { role: 'assistant', content: '队列完成' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } }))
   await configureConversation(f.settings, 'http://127.0.0.1:1/v1')
@@ -508,4 +453,21 @@ it('stops current work after durably pausing its queue, and starts nothing until
   const after = await f.service.operate({ type: 'submission', ...identity, submissionId: second.submission.submissionId }) as { runId: string }
   await f.service.engine.wait(after.runId)
   await waitForCompletedConversation(f.service, identity.workspaceId, identity.conversationId, after.runId)
+})
+
+it('answers a conversation read made on seeing run.end with the record Main writes after the task ends', async () => {
+  const f = await fixture(async () => new Response(`data: ${JSON.stringify({ id: 'reply', model: 'fixture-model', choices: [{ index: 0, delta: { role: 'assistant', content: '任务回复' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`, { headers: { 'content-type': 'text/event-stream' } }))
+  await configureConversation(f.settings, 'http://127.0.0.1:1/v1')
+  const space = await f.service.operate({ type: 'workspace', root: f.workspace }) as { workspace: { workspaceId: string } }
+  const conversation = await f.service.operate({ type: 'create-conversation', workspaceId: space.workspace.workspaceId }) as { conversationId: string; revision: number }
+  const identity = { workspaceId: space.workspace.workspaceId, conversationId: conversation.conversationId }
+  // A view reads the record as soon as it sees the end, before Main has written the reply.
+  let read: Promise<unknown> | undefined
+  f.service.setSinks(event => { if (event.type === 'run.end') read ??= f.service.operate({ type: 'conversation', ...identity }) })
+  const sent = await f.service.operate({ type: 'send', ...identity, submissionId: crypto.randomUUID(), expectedRevision: conversation.revision,
+    text: '请回复', documents: [] }) as { run: ExecutionRunRecord }
+  await f.service.engine.wait(sent.run.runId)
+  await expect.poll(() => read).toBeDefined()
+  expect(await read).toMatchObject({ messages: [{ role: 'user', text: '请回复' }, { role: 'assistant', runId: sent.run.runId, text: '任务回复' }] })
+  await waitForCompletedConversation(f.service, identity.workspaceId, identity.conversationId, sent.run.runId)
 })

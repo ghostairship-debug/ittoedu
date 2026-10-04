@@ -7,8 +7,9 @@ import { trashWorkspaceWithDialog } from './workbench/workspaceTrashDialog'
 import { workspaceFilesRequestSchema } from '../shared/workbench/workspaceFiles'
 import { mediaFilesRequestSchema } from '../shared/workbench/mediaFiles'
 import { operateMediaFiles } from './workbench/mediaFilesDesktopService'
-import { operateExternalMcp, closeExternalMcpService } from './workbench/external/externalDesktopService'
+import { operateExternalMcp, closeExternalMcpService, attachExternalMcpWindow } from './workbench/external/externalDesktopService'
 import { operateExecutionSettings } from './workbench/providers/executionSettingsService'
+import { operatePixabaySettings } from './workbench/assetSources/pixabayDesktopService'
 import { executionDesktopService } from './workbench/execution/ExecutionDesktopService'
 import { installDocumentSaveEvents } from './workbench/execution/DocumentSaveEvents'
 import { attachmentsDesktopService } from './workbench/attachments/attachmentsDesktopService'
@@ -203,6 +204,11 @@ const componentCatalogPackageSchema = z.object({
   version: z.string().min(1).max(100),
 }).strict()
 
+const componentCatalogHtmlComponentSchema = z.object({
+  sourceId: z.string().min(1).max(200),
+  entry: z.string().min(1).max(300),
+}).strict()
+
 function requireNoArguments(args: unknown[]): void {
   if (args.length !== 0) {
     throw new z.ZodError([
@@ -290,6 +296,7 @@ let htmlPreviewClosedCleanup: (() => void) | undefined
 let dynamicContentObservations: DynamicContentObservationStore | undefined
 let dynamicContentChangeCleanup: (() => void) | undefined
 export function releaseAllHtmlPreviewLeases(): void { htmlPreview?.releaseAll() }
+let detachExternalMcpWindow: (() => void) | undefined
 export function registerIpcHandlers(context: IpcContext): void {
   let htmlActionsReady: Promise<void> | undefined
   installWorkbenchToolServices(context)
@@ -351,6 +358,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (input.type === 'ack') context.appState.acknowledgeOpenFile(input.id)
     return context.appState.pendingOpenFiles()
   })
+  detachExternalMcpWindow?.()
+  detachExternalMcpWindow = attachExternalMcpWindow(context.getMainWindow)
   registerSafeHandler(IPC_CHANNELS.externalMcp, context, {
     code: 'EXTERNAL_MCP_FAILED', title: '外部连接操作未完成', message: '外部连接未完成，请查看具体原因。', suggestion: '文档和已应用的修改已保留。',
   }, async (_event, args) => operateExternalMcp(requireSingleArgument(args)))
@@ -360,7 +369,8 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (!event.sender.isDestroyed()) event.sender.send(`${IPC_CHANNELS.attachments}:progress`, progress)
   }))
   registerSafeHandler(IPC_CHANNELS.execution, context, {
-    code: 'EXECUTION_FAILED', title: '会话操作未完成', message: '当前任务没有完成，请查看具体原因。', suggestion: '文档中已应用的修改已保留。',
+    // The service maps its own failures to specific reasons; this is left for a service that could not be reached.
+    code: 'EXECUTION_FAILED', title: '会话操作未完成', message: '会话服务暂时不可用。', suggestion: '请重试；若仍失败，请重新启动编辑器。当前输入和已应用的修改已保留。',
   }, async (_event, args) => {
     await htmlActionsReady
     const service = await executionDesktopService()
@@ -377,6 +387,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     code: 'EXECUTION_SETTINGS_FAILED', title: '模型连接设置未完成',
     message: '连接配置未能保存，请保留当前设置。', suggestion: '请检查连接配置及系统安全存储。',
   }, async (_event, args) => operateExecutionSettings(requireSingleArgument(args)))
+  registerSafeHandler(IPC_CHANNELS.pixabaySettings, context, {
+    code: 'PIXABAY_SETTINGS_FAILED', title: 'Pixabay 设置未完成',
+    message: 'Pixabay 设置未能保存，原配置已保留。', suggestion: '请检查系统安全存储。',
+  }, async (_event, args) => operatePixabaySettings(requireSingleArgument(args)))
   const documents = documentHost()
   dynamicContentChangeCleanup?.()
   const contentObservations = new DynamicContentObservationStore(async documentId => {
@@ -840,6 +854,21 @@ export function registerIpcHandlers(context: IpcContext): void {
   )
 
   registerSafeHandler(
+    IPC_CHANNELS.deleteComponentCatalogHtmlComponent,
+    context,
+    {
+      code: 'COMPONENT_CATALOG_HTML_DELETE_FAILED',
+      title: 'HTML 组件删除失败',
+      message: '无法从“我的资产库”删除这个 HTML 组件。',
+      suggestion: '请刷新组件库后重试。',
+    },
+    async (_event, args) => {
+      const input = componentCatalogHtmlComponentSchema.parse(requireSingleArgument(args))
+      return componentCatalogManager.deleteHtmlComponent(input.sourceId, input.entry)
+    },
+  )
+
+  registerSafeHandler(
     IPC_CHANNELS.exportHtml,
     context,
     {
@@ -1030,6 +1059,7 @@ export function unregisterIpcHandlers(): void {
   if (saves) void saves.flush().finally(() => saves.dispose())
   const images = imageResults; imageResults = undefined
   if (images) { images.setEventSink(undefined); void images.flush().finally(() => images.dispose()) }
+  detachExternalMcpWindow?.(); detachExternalMcpWindow = undefined
   void closeExternalMcpService().catch(() => undefined)
   documentHost().setEventSink(undefined)
   for (const channel of Object.values(IPC_CHANNELS)) {

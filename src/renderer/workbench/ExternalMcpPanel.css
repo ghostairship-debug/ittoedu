@@ -12,3 +12,13 @@
 .external-mcp-config { border-top: 1px solid #dbe2e9; padding-top: 12px; display: grid; gap: 10px; }
 .external-mcp-config textarea { font-family: ui-monospace, monospace; font-size: 12px; }
 .external-mcp-limits { color: #5c6978; font-size: 13px; line-height: 1.6; }
+.external-mcp-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.external-mcp-state { padding: 3px 10px; border-radius: 999px; font-size: 13px; background: #e7edf3; }
+.external-mcp-state--running { background: #dff3e6; color: #1d6b3a; }
+.external-mcp-state--port-in-use, .external-mcp-state--failed { background: #fbe4e4; color: #a32424; }
+.external-mcp-panel .external-mcp-inline { display: flex; align-items: center; gap: 6px; }
+.external-mcp-field { display: grid; gap: 5px; }
+.external-mcp-copyable { display: flex; gap: 6px; }
+.external-mcp-copyable input { flex: 1; min-width: 0; box-sizing: border-box; padding: 7px 8px; border: 1px solid #b8c4d0; border-radius: 6px; font: inherit; font-family: ui-monospace, monospace; font-size: 12px; }
+.external-mcp-panel small { color: #5c6978; line-height: 1.5; }
+.external-mcp-panel li { display: flex; justify-content: space-between; align-items: center; gap: 12px; }

@@ -9,12 +9,15 @@ const IPC_CHANNELS = {
   imageResults: 'image-results:operate',
   imageResultsChanged: 'image-results:changed',
   externalMcp: 'external-mcp:operate',
+  externalMcpUiStateRequest: 'external-mcp:ui-state-request',
+  externalMcpUiStateReply: 'external-mcp:ui-state-reply',
   attachments: 'attachments:operate',
   execution: 'execution:operate',
   dynamicContentTargets: 'dynamic-content:publish-targets',
   executionEvent: 'execution:event',
   executionEdit: 'execution:edit',
   executionSettings: 'execution-settings:operate',
+  pixabaySettings: 'pixabay-settings:operate',
   workspaceFiles: 'workspace-files:operate',
   mediaFiles: 'media-files:operate',
   workspaceFilesChanged: 'workspace-files:changed',
@@ -48,6 +51,7 @@ const IPC_CHANNELS = {
   selectComponentCatalogSource: 'component-catalog:select-source',
   setComponentCatalogSourceTrust: 'component-catalog:set-source-trust',
   readComponentCatalogPackage: 'component-catalog:read-package',
+  deleteComponentCatalogHtmlComponent: 'component-catalog:delete-html-component',
   peekProjectArchive: 'project:peek-archive',
   exportHtml: 'export:write-html',
   exportWebPackage: 'export:write-web-package',
@@ -147,10 +151,19 @@ async function invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
 const desktopAPI = Object.freeze<DesktopAPI>({
   htmlImport: { import: input => invoke(IPC_CHANNELS.htmlImport, input) },
   externalMcp: {
-    grant: input => invoke(IPC_CHANNELS.externalMcp, { type: 'grant', ...input }),
-    list: input => invoke(IPC_CHANNELS.externalMcp, { type: 'list', ...input }),
-    revoke: input => invoke(IPC_CHANNELS.externalMcp, { type: 'revoke', ...input }),
-    handoff: input => invoke(IPC_CHANNELS.externalMcp, { type: 'handoff', ...input }),
+    status: () => invoke(IPC_CHANNELS.externalMcp, { type: 'status' }),
+    configure: patch => invoke(IPC_CHANNELS.externalMcp, { type: 'configure', patch }),
+    revealToken: () => invoke(IPC_CHANNELS.externalMcp, { type: 'token' }),
+    regenerateToken: () => invoke(IPC_CHANNELS.externalMcp, { type: 'regenerate-token' }),
+    stopSession: sessionId => invoke(IPC_CHANNELS.externalMcp, { type: 'stop-session', sessionId }),
+    serveUiState(provider) {
+      const receive = (_event: Electron.IpcRendererEvent, requestId: unknown) => {
+        if (typeof requestId !== 'string') return
+        void provider().catch(() => ({})).then(state => ipcRenderer.send(IPC_CHANNELS.externalMcpUiStateReply, { requestId, state }))
+      }
+      ipcRenderer.on(IPC_CHANNELS.externalMcpUiStateRequest, receive)
+      return () => { ipcRenderer.removeListener(IPC_CHANNELS.externalMcpUiStateRequest, receive) }
+    },
   },
   attachments: {
     clipboardFiles: input => invoke(IPC_CHANNELS.attachments, { type: 'clipboard-files', ...input }),
@@ -229,6 +242,10 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     },
   },
   publishDynamicContentTargets: input => invoke(IPC_CHANNELS.dynamicContentTargets, input),
+  pixabaySettings: {
+    read: () => invoke(IPC_CHANNELS.pixabaySettings, { type: 'read' }),
+    saveKey: key => invoke(IPC_CHANNELS.pixabaySettings, { type: 'save-key', key }),
+  },
   executionSettings: {
     startOAuthLogin: (id, revision) => invoke(IPC_CHANNELS.executionSettings, { type: 'oauth-login-start', id, revision }),
     oauthLoginStatus: loginId => invoke(IPC_CHANNELS.executionSettings, { type: 'oauth-login-status', loginId }),
@@ -324,6 +341,10 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   ),
   readComponentCatalogPackage: (input) => invoke(
     IPC_CHANNELS.readComponentCatalogPackage,
+    input,
+  ),
+  deleteComponentCatalogHtmlComponent: (input) => invoke(
+    IPC_CHANNELS.deleteComponentCatalogHtmlComponent,
     input,
   ),
   exportHtml: (input) => invoke(IPC_CHANNELS.exportHtml, input),

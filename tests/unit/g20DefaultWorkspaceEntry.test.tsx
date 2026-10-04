@@ -38,7 +38,8 @@ describe('G20 default workspace entry has no embedded CLI dependency', () => {
       loadComponentCatalog: async () => ({ sources: [], packages: [], issues: [] }),
     } as unknown as DesktopAPI
     render(<App />)
-    expect(screen.getByTestId('course-paint')).toBeInTheDocument()
+    // The metric-sensitive editor mounts once the bundled fonts have loaded.
+    expect(await screen.findByTestId('course-paint')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '新建测试课件' }))
     await waitFor(() => expect(useEditorStore.getState().courseDocument.documents).toHaveLength(1))
     const active = useEditorStore.getState().courseDocument.documentId!

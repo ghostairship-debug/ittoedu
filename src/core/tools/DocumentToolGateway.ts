@@ -31,7 +31,7 @@ import { isSourceDocumentModel, type DocumentDriver, type DocumentSnapshot, type
 import type { ModelToolCall, ToolAdvisory, ToolDefinition, ToolGateway, ToolResult, ToolRunGrant, ToolTarget } from '../../shared/workbench/tools'
 import { DocumentRegistry } from '../documents/DocumentRegistry'
 import { documentDigest } from '../documents/documentDigest'
-import { batchInputSchemaFor, contentTargetsInputSchema, contentUpdateInputSchema, describeToolFamily, describeTools, familyOfTool, mutationCallSchema, mutationNamesIn, selectRunToolNames, toolCatalog, toolFamilies, visibleRunToolNames, type BatchMutationCall, type RunToolScope, type ToolFamily } from './ToolCatalog'
+import { batchInputSchemaFor, contentTargetsInputSchema, contentUpdateInputSchema, describeToolFamily, describeTools, familyOfTool, isCourseAuthoringTool, mutationCallSchema, mutationNamesIn, selectRunToolNames, toolCatalog, toolFamilies, visibleRunToolNames, type BatchMutationCall, type RunToolScope, type ToolFamily } from './ToolCatalog'
 import { discoverDynamicContentTargets, planDynamicContentEdit, type DynamicContentFallbackCapture, type DynamicContentHostTarget, type DynamicContentObservedTarget } from './DynamicContentEditPlanner'
 import { discoverCompositionContentTargets, planCompositionContentEdit, type CompositionContentHostTarget, type CompositionContentChange } from './CompositionContentEditPlanner'
 import { backgroundOwner, childTargets, containsTarget, insertionDependencyFootprint, mapMarkdownRange, readTarget, targetFootprint } from './ToolTargets'
@@ -47,12 +47,20 @@ import { changeFlowTableStructure } from './flowTableContentOperations'
 import { rotatedRectangleAabb } from '../../shared/geometry'
 import { htmlImportInputSchema } from './HtmlImportTools'
 import { isProjectFileToolName } from './ProjectFileTools'
-import { ProjectFileCoordinator, type CourseModel, type CourseSnapshot, type ProjectFileCommit } from '../projectFiles/ProjectFileCoordinator'
+import { skillReadInputSchema } from './SkillTools'
+import { ProjectFileCoordinator, projectFileLocationId, type CourseModel, type CourseSnapshot, type ProjectFileCommit } from '../projectFiles/ProjectFileCoordinator'
+import { readProjectFile } from '../projectFiles/projectFileView'
+import { assetFilePath } from '../projectFiles/pageHtml'
+import { componentPathName, planComponentWrite } from '../projectFiles/definitionFiles'
+import { ProjectFileError } from '../projectFiles/slidePages'
+import { projectReferencePath } from '../../shared/composition/projectReferences'
+import { openImageAssetPath } from './AssetSourceTools'
 
 interface Run {
   grant: ToolRunGrant
   toolScopes: RunToolScope[]
   loadedFamilies: Set<ToolFamily>
+  courseAuthoring?: boolean
   advertised?: { definitions: ToolDefinition[]; names: Set<string>; batchSchema?: z.ZodType;
     availableFamilies: { family: ToolFamily; description: string; count: number }[] }
   epochs: Map<string, string>
@@ -266,8 +274,11 @@ export class DocumentToolGateway implements ToolGateway {
     }
     const standaloneImage = run.grant.actor === 'agent' && !!run.grant.fileAccess?.workspaceRoot
       && run.grant.fileAccess.permission !== 'read-only'
-    const allowed = selectRunToolNames(scopes, { standaloneImage }).filter(name => this.hostTools.supports(name)
-      && (!isWorkbenchServiceTool(name) || run.grant.actor === 'agent' && !!run.grant.fileAccess))
+    const projectFiles = run.grant.fileAccess?.workspaceRoot && this.hostTools.projectFileServices()
+      ? run.grant.fileAccess.permission === 'read-only' ? 'read' as const : 'write' as const : undefined
+    const allowed = selectRunToolNames(scopes, { standaloneImage, projectFiles }).filter(name => this.hostTools.supports(name)
+      && (!isWorkbenchServiceTool(name) || run.grant.actor === 'agent' && !!run.grant.fileAccess)
+      && (!run.courseAuthoring || isCourseAuthoringTool(name)))
     const names = visibleRunToolNames(allowed, run.loadedFamilies)
     const batchMutationNames = mutationNamesIn(names)
     run.toolScopes = scopes
@@ -308,6 +319,8 @@ export class DocumentToolGateway implements ToolGateway {
     await this.describeRun(runId)
     return available
   }
+
+  usesProjectFileAuthoring(runId: string): boolean { return !!this.run(runId).courseAuthoring }
 
   /** Host-only lifecycle gate. Existing tasks are stopped by the caller before file work. */
   async withWriteTaskBarrier<T>(documentIds: readonly string[], work: () => T | Promise<T>): Promise<T> {
@@ -834,6 +847,122 @@ export class DocumentToolGateway implements ToolGateway {
   }
 
   /** Host-owned bytes stay out of tool receipts; the Engine may send verified images on the next model round. */
+  /**
+   * image.fetch: with `path` the download becomes the course asset stored there, filling same-named slots
+   * (replacing follows the project-file read rule); without it, a run resource for content.update/media.*.
+   */
+  private async fetchOpenImage(runId: string, operationId: string, requestDigest: string, input: { image: string; project?: string; path?: string }): Promise<ToolResult> {
+    const target = input.path === undefined ? undefined : openImageAssetPath(input.path)
+    if (target && 'error' in target) throw new ToolError('invalid-path', target.error)
+    const before = await this.projectDocument(runId, input.project, target ? 'write' : 'read')
+    if (!target) {
+      if (!this.run(runId).grant.documents.some(doc => doc.documentId === before.documentId && doc.writable.length > 0))
+        throw new ToolError('not-authorized', '本次任务对该课件没有可写范围')
+      const fetched = await this.hostTools.openImageFile(runId, input.image)
+      if (fetched.status !== 'ready') return { kind: 'read', data: fetched }
+      const resource = await this.provideImage(runId, before.documentId, fetched.file)
+      return { kind: 'read', data: { status: 'ready', resource, mimeType: fetched.file.mimeType, width: fetched.width, height: fetched.height,
+        byteLength: fetched.file.bytes.byteLength, source: fetched.source } }
+    }
+    const existing = readProjectFile(before.model.project, before.model.resources, target.path)
+    if (existing) this.projectFiles.assertFresh(runId, before, existing)
+    const fetched = await this.hostTools.openImageFile(runId, input.image, target.format)
+    if (fetched.status !== 'ready') return { kind: 'read', data: fetched }
+    const prepareImage = this.options.prepareImage
+    if (!prepareImage) throw new ToolError('unsupported-resource-preparation', '当前宿主未配置图片解码能力')
+    const prepared = await prepareImage({ ...fetched.file, filename: target.filename }, this.createId)
+    // The download takes a while: write over the course as it is now, under the same read rule.
+    const snapshot = await this.projectDocument(runId, input.project, 'write')
+    const current = readProjectFile(snapshot.model.project, snapshot.model.resources, target.path)
+    if (current) this.projectFiles.assertFresh(runId, snapshot, current)
+    if (current && current.kind !== 'asset') throw new ToolError('invalid-path', `${target.path} 不是素材文件`)
+    const id = current?.assetId ?? prepared.meta.id, { project, resources } = snapshot.model
+    const model: CourseModel = { kind: 'course-v9',
+      project: { ...project, assets: { ...project.assets, [id]: { ...prepared.meta, id, path: target.path, filename: target.filename, source: fetched.source } } },
+      resources: { ...resources, assets: { ...resources.assets, [id]: prepared.bytes } } }
+    const { result, model: after } = await this.commitProjectFiles(runId, operationId, requestDigest, snapshot, model)
+    if (result.kind !== 'document-operation' || result.result.status !== 'applied' && result.result.status !== 'unchanged') return result
+    const written = after && readProjectFile(after.project, after.resources, target.path)
+    if (written && after) this.projectFiles.remember(runId, snapshot.documentId, written, after)
+    return { ...result, affected: [target.path],
+      ...(current ? { advisories: [{ step: 0, code: 'html-import-warning' as const, message: `已替换原素材 ${target.path}，可撤销` }] } : {}) }
+  }
+
+  /**
+   * asset.use: an HTML component of the library becomes `components/<name>.html` together with its assets,
+   * as one undoable change through the project-file component write (admission, or a draft with the reason).
+   */
+  private async useLibraryComponent(runId: string, operationId: string, requestDigest: string,
+    input: { packageId: string; version?: string; project?: string; path: string }): Promise<ToolResult> {
+    const name = componentPathName(projectReferencePath(input.path) ?? '')
+    if (name === undefined) throw new ToolError('invalid-path', '组件路径须为 components/<名称>.html')
+    const path = `components/${name}.html`
+    await this.projectDocument(runId, input.project, 'write')
+    const component = await this.hostTools.libraryComponent(runId, input.packageId, input.version)
+    if (component.status !== 'ready') return { kind: 'read', data: component }
+    const snapshot = await this.projectDocument(runId, input.project, 'write')
+    const existing = readProjectFile(snapshot.model.project, snapshot.model.resources, path)
+    if (existing) this.projectFiles.assertFresh(runId, snapshot, existing)
+    const assets = { ...snapshot.model.project.assets }, files = { ...snapshot.model.resources.assets }, conflicts: string[] = []
+    for (const asset of component.assets) {
+      const current = readProjectFile(snapshot.model.project, snapshot.model.resources, asset.path)
+      if (current) {
+        if (current.kind !== 'asset' || documentDigest(snapshot.model.resources.assets[current.assetId] ?? null) !== documentDigest(asset.bytes)) conflicts.push(asset.path)
+        continue
+      }
+      const kind = (['image', 'audio', 'video', 'font'] as const).find(prefix => asset.mimeType.startsWith(`${prefix}/`))
+      const filename = asset.path.split('/').at(-1)!
+      if (!kind) { conflicts.push(asset.path); continue }
+      if (kind === 'image') {
+        if (!this.options.prepareImage) throw new ToolError('unsupported-resource-preparation', '当前宿主未配置图片解码能力')
+        const prepared = await this.options.prepareImage({ bytes: asset.bytes, mimeType: asset.mimeType, filename }, this.createId)
+        assets[prepared.meta.id] = { ...prepared.meta, path: asset.path, filename, source: { kind: 'asset-library', title: component.name } }
+        files[prepared.meta.id] = prepared.bytes
+      } else {
+        const id = `asset_${this.createId()}`
+        assets[id] = { id, kind, filename, mimeType: asset.mimeType, path: asset.path, byteLength: asset.bytes.byteLength,
+          source: { kind: 'asset-library', title: component.name } }
+        files[id] = Uint8Array.from(asset.bytes)
+      }
+    }
+    if (conflicts.length) throw new ToolError('asset-conflict', `课件中已有内容不同或无法加入的同名素材：${conflicts.join('、')}；请先改名或删除后再使用此组件`)
+    try {
+      const planned = planComponentWrite({ ...snapshot.model.project, assets }, { ...snapshot.model.resources, assets: files }, path, component.html)
+      const result = await this.projectFiles.apply(runId, operationId, requestDigest, snapshot, planned)
+      return result.kind === 'document-operation' && existing
+        ? { ...result, advisories: [...result.advisories ?? [], { step: 0, code: 'html-import-warning' as const, message: `已用资产库中的“${component.name}”替换原组件 ${path}，可撤销` }] }
+        : result
+    } catch (error) {
+      if (error instanceof ProjectFileError) return { kind: 'error', code: error.code, message: error.message }
+      throw error
+    }
+  }
+
+  /** asset.save: a named component of the course and its assets go into the managed library. */
+  private async saveLibraryComponent(runId: string, input: { project?: string; path: string; description?: string;
+    subject?: string[]; schoolStage?: string[]; tags?: string[] }): Promise<ToolResult> {
+    const snapshot = await this.projectDocument(runId, input.project, 'read')
+    const { project, resources } = snapshot.model
+    const file = readProjectFile(project, resources, projectReferencePath(input.path) ?? input.path)
+    if (file?.kind !== 'component') throw new ToolError('not-found', `课件中没有这个组件：${input.path}；可先列出工程文件`)
+    if (file.draft) throw new ToolError('component-draft', `“${file.name}”是未通过准入的草稿，修好后再存入资产库`)
+    const assets = [...new Set(Object.values(project.components![file.name]!.assets).map(binding => binding.assetId))].map(assetId => {
+      const meta = project.assets[assetId], bytes = resources.assets[assetId]
+      if (!meta || !bytes) throw new ToolError('asset-unavailable', `组件用到的素材 ${meta ? assetFilePath(meta) : assetId} 没有可保存的内容`)
+      return { path: assetFilePath(meta), mimeType: meta.mimeType, bytes }
+    })
+    const unique = (values?: string[]) => values ? [...new Set(values)] : undefined
+    const course = snapshot.binding.kind === 'file' ? snapshot.binding.path.replace(/\\/g, '/').split('/').at(-1)! : snapshot.binding.suggestedName
+    return this.hostTools.saveLibraryComponent(runId, { name: file.name, html: file.content, assets, sourceCourse: course,
+      ...(input.description ? { description: input.description } : {}), ...(unique(input.subject) ? { subject: unique(input.subject) } : {}),
+      ...(unique(input.schoolStage) ? { schoolStage: unique(input.schoolStage) } : {}), ...(unique(input.tags) ? { tags: unique(input.tags) } : {}) })
+  }
+
+  /** Host-only: open-library preview bytes for the run's next model request. */
+  readOpenImagePreview(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array } {
+    if (this.run(runId).stopped) throw new ToolError('run-stopped', '任务已停止')
+    return this.hostTools.readImagePreview(runId, resourceId)
+  }
   readMcpResource(runId: string, resourceId: string): Promise<{ mimeType: string; bytes: Uint8Array }> {
     return this.hostTools.readMcpResource(runId, resourceId)
   }
@@ -1171,7 +1300,22 @@ export class DocumentToolGateway implements ToolGateway {
         }
       }
     }
-    if (call.name === 'skills.read') return this.hostTools.readSkill(runId, call.input)
+    if (call.name === 'skills.read') {
+      const result = await this.hostTools.readSkill(runId, call.input)
+      const input = skillReadInputSchema.safeParse(call.input)
+      if (result.kind === 'read' && input.success && input.data.path === 'SKILL.md') {
+        const run = this.run(runId)
+        if (input.data.skill === 'orchestrate-courseware' || input.data.skill === 'edit-content') {
+          run.loadedFamilies.add('content')
+          run.courseAuthoring = input.data.skill === 'orchestrate-courseware'
+          run.advertised = undefined
+        } else if (input.data.skill === 'build-courseware-project') {
+          run.courseAuthoring = false
+          run.advertised = undefined
+        }
+      }
+      return result
+    }
     if (call.name === 'skills.list') return this.hostTools.listSkills(runId, call.input)
     if (isWorkbenchServiceTool(call.name)) {
       const value = workbenchServiceSchemas[call.name].parse(call.input) as Record<string, unknown>
@@ -1210,8 +1354,22 @@ export class DocumentToolGateway implements ToolGateway {
       if (call.name === 'media.start') return this.hostTools.mediaStart(runId, value as {
         kind: 'speech' | 'video' | 'music'; prompt: string; durationSeconds?: number;
         language?: string; referenceResources?: readonly string[] })
+      if (call.name === 'image.search') return this.hostTools.imageSearch(runId, value as { query: string; limit?: number; page?: number; allowShareAlike?: boolean })
+      if (call.name === 'image.preview') return this.hostTools.imagePreview(runId, value as { images: string[] })
+      if (call.name === 'image.fetch') return this.fetchOpenImage(runId, operationId, requestDigest, value as { image: string; project?: string; path?: string })
+      if (call.name === 'asset.search') return this.hostTools.assetSearch(runId, value as { query: string; limit?: number })
+      if (call.name === 'asset.use') return this.useLibraryComponent(runId, operationId, requestDigest, value as { packageId: string; version?: string; project?: string; path: string })
+      if (call.name === 'asset.save') return this.saveLibraryComponent(runId, value as { project?: string; path: string; description?: string;
+        subject?: string[]; schoolStage?: string[]; tags?: string[] })
     }
     if (call.name === 'view.observe') return this.hostTools.observePage({ runId, operationId,
+      resolveFileTarget: async (selector, path) => {
+        const snapshot = await this.projectDocument(runId, selector, 'read')
+        const locationId = projectFileLocationId(snapshot.model, path)
+        if (!locationId) return null
+        return { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
+          projectId: snapshot.model.project.id, locationId }
+      },
       resolveTarget: async handle => {
         const observed = await this.resolveObservationTarget(runId, handle)
         const snapshot = await this.registry.get(observed.documentId).drain()

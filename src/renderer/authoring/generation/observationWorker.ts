@@ -2,7 +2,7 @@ import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import { parseComponentPackageFiles } from '../../../core/drivers/codecs/importComponentPackage'
 import { buildPublishedCourseV2Payload, collectPublishedCourseComponentKeys } from '../../export/course/buildPublishedCourse'
 import { createPublishedCourseSession } from '../../../player/surfaces/publishedDynamicHosts'
-import { waitForPublishedObservationReady } from '../../../player/surfaces/publishedCapture'
+import { waitForPublishedAnimationsSettled, waitForPublishedObservationReady } from '../../../player/surfaces/publishedCapture'
 import { installBundledFontFaces } from '../../../shared/fonts/installBundledFontFaces'
 import { ensureBundledFonts } from '../../../shared/fonts/ensureBundledFonts'
 import './dynamicFallbackWorker'
@@ -47,7 +47,8 @@ export async function renderObservationSnapshot(input: ObservationWorkerInput): 
     // This read-only route bypasses teaching navigation guards in the isolated host.
     await session.goToObservationTarget(input.locationId)
     await waitForPublishedObservationReady(root)
-    await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
+    // Entrance animations and transitions finish before the frame is taken, so the page is seen as it settles.
+    await waitForPublishedAnimationsSettled(root)
     const actual = session.navigator.current?.locationId
     if (actual !== input.locationId) throw new Error('播放器未停留在请求的目标页')
     const location = input.project.locations.find(item => item.id === input.locationId)!

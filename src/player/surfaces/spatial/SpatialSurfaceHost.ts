@@ -599,6 +599,7 @@ export class SpatialSurfaceHost {
   #interactionPort: PublishedDomInteractionSurfacePort | null = null
   #interactionGeneration = 0
   #interactionNodes = new Map<string, PublishedInteractionNodeHandle>()
+  readonly #compositionInteractionNodeIds = new Set<string>()
   #active = false
   readonly #carrierSideEffects: PublishedCarrierSideEffectGate
   readonly #compositionSession = createPublishedSurfaceRuntimeSession()
@@ -1052,6 +1053,8 @@ export class SpatialSurfaceHost {
         ? record.compositionHandle?.update(withCompositionNodeAttributes(item.content, attributes.get(item.layerItemId)))
         : undefined
     }))
+    this.#refreshCompositionInteractionNodes()
+    this.#interactionPort?.refreshNodes(this.#interactionNodes.values(), ++this.#interactionGeneration)
   }
 
   async setPlaybackPath(playbackPathId: string | null): Promise<void> {
@@ -1374,6 +1377,7 @@ export class SpatialSurfaceHost {
     }
     this.#reconcileWorldVisibility()
     for (const record of this.#records.values()) this.#registerInteractionNode(record)
+    this.#refreshCompositionInteractionNodes()
     this.#interactionPort?.refreshNodes(
       this.#interactionNodes.values(),
       ++this.#interactionGeneration,
@@ -1409,6 +1413,16 @@ export class SpatialSurfaceHost {
       // Stable wrappers let an off-camera click binding become live after a pan
       // without remounting the one session-global controller.
       record.wrapper.style.display = withinCamera ? '' : 'none'
+    }
+  }
+
+  #refreshCompositionInteractionNodes(): void {
+    for (const nodeId of this.#compositionInteractionNodeIds) this.#interactionNodes.delete(nodeId)
+    this.#compositionInteractionNodeIds.clear()
+    for (const record of this.#records.values()) for (const node of record.compositionHandle?.interactionNodes(record.entry.source,
+      record.entry.source === 'global' ? this.#globalInteractionVisibilityState : undefined) ?? []) {
+      this.#interactionNodes.set(node.nodeId, node)
+      this.#compositionInteractionNodeIds.add(node.nodeId)
     }
   }
 
@@ -1568,6 +1582,13 @@ export class SpatialSurfaceHost {
         })
         if (record) record.compositionHandle = handle
         else compositionHandle = handle
+        void handle.ready.then(() => {
+          if (record && this.#records.get(item.layerItemId) === record) {
+            this.#refreshCompositionInteractionNodes()
+            this.#interactionPort?.refreshNodes(this.#interactionNodes.values(), ++this.#interactionGeneration)
+            if (this.#active) this.#options.onInteractionReady?.()
+          }
+        }).catch(() => undefined)
       }
       if (deferComponent) deferComponent(mount)
       else mount()

@@ -20,7 +20,8 @@ it('serializes the file write create/replace union as an object without changing
   }, messages: [{ role: 'user', content: 'fixture' }], tools: [write as ModelToolDefinition] }))
   expect(body.tools[0].function.parameters).toMatchObject({ type: 'object', oneOf: [{ type: 'object' }, { type: 'object' }] })
   expect(agentFileSchemas['file.write'].parse({ mode: 'create', path: 'lesson.html', content: '<h1>课例</h1>' }).mode).toBe('create')
-  expect(agentFileSchemas['file.write'].safeParse({ mode: 'replace', path: 'lesson.html', content: '<h1>课例</h1>' }).success).toBe(false)
+  // replace no longer needs a prior read; a supplied expectedVersion is still checked when writing.
+  expect(agentFileSchemas['file.write'].parse({ mode: 'replace', path: 'lesson.html', content: '<h1>课例</h1>' }).mode).toBe('replace')
 })
 
 const directories: string[] = []

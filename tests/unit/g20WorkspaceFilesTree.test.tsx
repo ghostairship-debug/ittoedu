@@ -213,11 +213,11 @@ it('displays creation menu items in correct order and wording in toolbar and con
   const itemBtn = await screen.findByRole('button', { name: 'item.md' })
   const createMenu = document.querySelector('.workspace-files-create-options')!
   const toolbarButtons = within(createMenu as HTMLElement).getAllByRole('menuitem').map(b => b.getAttribute('aria-label'))
-  expect(toolbarButtons.slice(0, 5)).toEqual(['新建 Markdown 文档', '新建 H5 演示', '从 PPT 新建 H5 演示', '新建文本文档', '新建文件夹'])
+  expect(toolbarButtons.slice(0, 6)).toEqual(['新建 Markdown 文档', '新建 H5 演示', '从 PPT 新建 H5 演示', '新建文本文档', '新建 HTML 文档', '新建文件夹'])
   fireEvent.contextMenu(itemBtn)
   const contextMenu = screen.getByRole('menu', { name: '文件菜单' })
   const contextButtons = within(contextMenu).getAllByRole('menuitem').map(b => b.getAttribute('aria-label'))
-  expect(contextButtons.slice(0, 5)).toEqual(['新建 Markdown 文档', '新建 H5 演示', '从 PPT 新建 H5 演示', '新建文本文档', '新建文件夹'])
+  expect(contextButtons.slice(0, 6)).toEqual(['新建 Markdown 文档', '新建 H5 演示', '从 PPT 新建 H5 演示', '新建文本文档', '新建 HTML 文档', '新建文件夹'])
 })
 
 it('prefills default names, numbers collisions with (2) and selects only the main stem on focus', async () => {

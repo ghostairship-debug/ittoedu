@@ -11,6 +11,7 @@ import { registerPublishedCaptureResource } from '../surfaces/publishedCapture'
 import { mountPublishedComponent, type PublishedComponentMountHandle, type PublishedComponentPackageSource } from '../surfaces/publishedComponentMount'
 import { paintCompositionDocument, type CompositionDocumentComponent } from './documentContent'
 import type { PublishedInputDescriptor } from '../interactions/PublishedInteractionSurfacePort'
+import type { PublishedInteractionNodeHandle, PublishedInteractionNodeSource, PublishedInteractionVisibilityState } from '../interactions/PublishedDomInteractionSurfacePort'
 import { bindPublishedNativeInputSubmit } from './nativeInput'
 import { componentReferenceName, projectReferencePath, resolveCssAssetReferences } from '../../shared/composition/projectReferences'
 import {
@@ -84,6 +85,7 @@ export interface WebCompositionMountHandle {
   observeLayout(nodeId: string): CompositionLayoutObservation | null
   describeInput(nodeId: string): PublishedInputDescriptor | null
   bindInputSubmit(nodeId: string, listener: (rawValue: string) => void): (() => void) | null
+  interactionNodes(source: PublishedInteractionNodeSource, visibilityState?: PublishedInteractionVisibilityState): PublishedInteractionNodeHandle[]
   waitForReady(): Promise<void>
   waitForObservationReady(): Promise<void>
   waitForCaptureReady(): Promise<void>
@@ -110,7 +112,7 @@ export function mountWebComposition(parent: HTMLElement, options: WebComposition
   const iframe = parent.ownerDocument.createElement('iframe')
   iframe.dataset.webComposition = options.instanceId
   iframe.title = '可编辑组合内容'
-  iframe.style.cssText = 'display:block;border:0;transform-origin:0 0;'
+  iframe.style.cssText = 'display:block;border:0;transform-origin:0 0;pointer-events:auto;'
   iframe.style.width = `${options.width}px`; iframe.style.height = `${options.height}px`
   const nodes = new Map<string, MountedNode>()
   const inputListeners = new Map<string, Set<(rawValue: string) => void>>()
@@ -529,6 +531,33 @@ export function mountWebComposition(parent: HTMLElement, options: WebComposition
   void ready.catch(error => { if (!destroyed) fail(error) })
   const handle: WebCompositionMountHandle = {
     ready, element: iframe, measure, observeLayout, describeInput, bindInputSubmit,
+    interactionNodes(source, visibilityState) {
+      if (destroyed || options.mode === 'authoring' || options.mode === 'capture') return []
+      return [...nodes.values()].flatMap(record => {
+        if (record.content.kind !== 'element' || record.dom.nodeType !== 1) return []
+        const element = record.dom as HTMLElement | SVGElement
+        const style = dom!.createElement('span').style
+        style.cssText = record.content.attributes.style ?? ''
+        const pointerEvents = style.pointerEvents
+        return [{ nodeId: inputId(record.content.id), source, ownership: 'native' as const,
+          ...(visibilityState ? { visibilityState } : {}),
+          resolveElement: () => element,
+          isInteractionAvailable: () => !destroyed && visible && !suspended && parent.contains(iframe)
+            && nodes.get(record.content.id) === record && element.isConnected,
+          canBindClick: () => true, canRunMotion: () => true,
+          authoredVisible: () => record.content.kind === 'element' && !Object.hasOwn(record.content.attributes, 'hidden'),
+          applyInteractionState(state) {
+            if (state.visible) element.removeAttribute('hidden')
+            else element.setAttribute('hidden', '')
+            element.style.pointerEvents = state.visible ? state.clickBound ? 'auto' : pointerEvents : 'none'
+          },
+          authoredMotionStyle: () => {
+            const computed = element.ownerDocument.defaultView!.getComputedStyle(element)
+            return { opacity: computed.opacity, transform: computed.transform }
+          },
+        } satisfies PublishedInteractionNodeHandle]
+      })
+    },
     async update(content) { await loaded; if (destroyed) return; try { apply(content); await waitForReady() } catch (error) { throw fail(error) } },
     resize(width, height) { iframe.style.width = `${width}px`; iframe.style.height = `${height}px`; scheduleLayout() },
     waitForReady, waitForObservationReady: waitForReady,

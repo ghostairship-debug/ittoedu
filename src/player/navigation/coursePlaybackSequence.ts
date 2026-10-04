@@ -50,6 +50,8 @@ export interface PlaybackNavigationViewPort {
 
 export type PlaybackDirection = 'next' | 'previous'
 export type PlaybackNavigationLevel = 'step' | 'scene'
+/** First or last page of the course (Home/End). */
+export type PlaybackEdge = 'first' | 'last'
 
 export function buildCoursePlaybackSequence(
   payload: Pick<PublishedCourseV2Payload, 'locations' | 'surfaces'> | Pick<CourseProjectDocument, 'locations' | 'surfaces'>,
@@ -154,4 +156,19 @@ export function adjacentPlaybackTarget(
   const scene = scenes[progress.sceneIndex + delta]
   if (!scene) return null
   return level === 'step' && direction === 'previous' ? scene.steps.at(-1)! : scene.steps[0]!
+}
+
+/**
+ * Home: the first step of the first scene, unless playback already stands there.
+ * End: the first step of the last scene, unless playback is already anywhere in it (End never goes back).
+ */
+export function edgePlaybackTarget(
+  scenes: readonly CoursePlaybackScene[],
+  progress: PlaybackNavigationProgress | null,
+  edge: PlaybackEdge,
+): CoursePlaybackStep | null {
+  if (!progress) return null
+  if (edge === 'last') return progress.sceneIndex === scenes.length - 1 ? null : scenes.at(-1)?.steps[0] ?? null
+  const step = scenes[0]?.steps[0]
+  return step && step.id !== progress.stepId ? step : null
 }

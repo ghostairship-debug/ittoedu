@@ -85,11 +85,12 @@ it.each([
   const details = card.querySelector('details')!
   act(() => { details.open = true; fireEvent(details, new Event('toggle')) })
   expect(within(card).getByText(uiFact)).toBeInTheDocument()
-  expect(within(card).getByText('未确认应用')).toBeInTheDocument()
+  // A build tool has no document application fact, so no application row is shown.
+  expect(within(card).queryByText('文档应用')).toBeNull()
   expect(screen.getByRole('article', { name: '任务结果' }).querySelector('header span')?.textContent).toContain(runLabel)
   mkdirSync(output, { recursive: true })
   writeFileSync(path.join(output, `${key}.json`), JSON.stringify({ tool, serviceReceipt: result, toolEvent: { status: event.data.status,
     text: 'text' in event.data ? event.data.text : undefined }, runStatus: run.status,
-    visible: { toolStatus: uiStatus, toolFact: uiFact, runLabel, documentApplication: '未确认应用' },
+    visible: { toolStatus: uiStatus, toolFact: uiFact, runLabel, documentApplication: null },
     limitation: 'The gateway read receipt is an injected contract fixture; this verifies the actual ExecutionEngine event and ExecutionTimeline text projection, not a full ControlledBuildService run.' }, null, 2))
 })

@@ -1,196 +1,240 @@
 // @vitest-environment node
-import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { afterEach, expect, it } from 'vitest'
+import { createServer, type Server } from 'node:net'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { Client } from '@modelcontextprotocol/sdk/client/index.js'
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
-import { ExternalMcpService } from '../../src/main/workbench/external/ExternalMcpService'
-import { ConversationStore } from '../../src/main/workbench/conversations/ConversationStore'
-import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEngine'
-import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
-import { AttachmentService } from '../../src/main/workbench/attachments/AttachmentService'
-import type { ModelProvider, ModelSelection } from '../../src/shared/workbench/modelProvider'
-import type { ExternalConnection } from '../../src/shared/workbench/external'
-import { externalGrantSchema } from '../../src/shared/workbench/external'
-import type { DocumentSnapshot } from '../../src/shared/workbench/document'
-import type { ToolResult } from '../../src/shared/workbench/tools'
+import { agentFileTools } from '../../src/core/tools/AgentFileTools'
+import type { ExternalFilePort } from '../../src/main/workbench/external/ExternalMcpService'
+import type { AgentFileService } from '../../src/main/workbench/execution/AgentFileService'
+import type { ExternalApproval } from '../../src/main/workbench/external/ExternalMcpService'
+import { callTool, residentMcpFixture } from '../helpers/residentMcpFixture'
 
 const cleanups: (() => Promise<unknown>)[] = []
-afterEach(async () => { vi.restoreAllMocks(); for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
-const selection: ModelSelection = { model: 'fixture', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat',
-  baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'unused-fixture' },
-  billing: { kind: 'unknown' }, capabilities: { tools: 'supported', stream: 'supported', vision: 'supported', reasoning: 'supported' } } }
-const reference = (snapshot: DocumentSnapshot) => ({ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
-  writable: [{ kind: 'markdown-range' as const, from: 0, to: 3 }] })
+afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
 
-it('accepts large external task descriptions and document selections without artificial contract quotas', () => {
-  const document = { documentId: 'document', epoch: 'epoch', revision: 1, writable: [] }
-  const input = { workspaceId: 'space', conversationId: 'conversation', expectedRevision: 1,
-    instruction: '内容'.repeat(50_001), remainingWork: '任务'.repeat(50_001), documents: Array.from({ length: 101 }, () => document) }
-  expect(externalGrantSchema.parse(input)).toEqual(input)
-  expect(externalGrantSchema.safeParse({ ...input, documents: [] }).success).toBe(false)
-})
-async function fixture(provider: ModelProvider = { async *stream() { throw new Error('No model request expected') } }) {
-  const directory = await mkdtemp(path.join(tmpdir(), 'g20-external-service-'))
-  cleanups.push(() => rm(directory, { recursive: true, force: true }))
+async function fixture(options: { confirm?: (request: ExternalApproval) => boolean | Promise<boolean>; files?: (files: AgentFileService) => ExternalFilePort;
+  permission?: 'full' | 'workspace' | 'ask' | 'read-only'; port?: number } = {}) {
+  const directory = await mkdtemp(path.join(tmpdir(), 'g20-resident-mcp-'))
+  cleanups.push(() => rm(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 }))
+  const workspace = path.join(directory, 'space'), second = path.join(directory, 'second')
+  await mkdir(workspace); await mkdir(second)
+  await writeFile(path.join(workspace, 'notes.md'), 'AAA BBB')
+  await writeFile(path.join(second, 'other.md'), '另一个空间')
   const host = new DocumentHostService(path.join(directory, 'documents'))
-  const conversations = new ConversationStore({ directory: path.join(directory, 'conversations') })
   const events = new ExecutionEventStore({ directory: path.join(directory, 'events') })
-  const runs = new ExecutionRunStore(path.join(directory, 'runs'))
-  const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, runs, events, provider })
-  const attachments = new AttachmentService({ directory: path.join(directory, 'attachments') })
-  let time = Date.now()
-  const service = new ExternalMcpService({ conversations, registry: host.registry, gateway: host.tools, engine, attachments,
-    appendEvent: event => events.append(event), now: () => time })
-  cleanups.push(() => service.close())
-  await conversations.registerWorkspace({ workspaceId: 'space', rootPath: directory, managed: true, authorization: 'managed' })
-  await conversations.registerWorkspace({ workspaceId: 'other-space', rootPath: directory, managed: true, authorization: 'managed' })
-  const conversation = await conversations.createConversation({ workspaceId: 'space', title: 'MCP 交接' })
-  const owner = { workspaceId: 'space', conversationId: conversation.conversationId }
-  const document = await host.internalAPI.create({ kind: 'markdown', source: 'AAA BBB', resources: { assets: {}, components: {} } }, '未保存.md')
-  return { directory, host, conversations, events, runs, engine, attachments, service, conversation, owner, document, advance: (ms: number) => { time += ms } }
+  const mcp = await residentMcpFixture({ host, directory, workspaceRoot: workspace, appendEvent: event => events.append(event), confirm: options.confirm, files: options.files,
+    settings: { ...(options.permission ? { permission: options.permission } : {}), ...(options.port !== undefined ? { port: options.port } : {}) } })
+  cleanups.push(() => mcp.close())
+  await mcp.conversations.registerWorkspace({ workspaceId: 'second', rootPath: await realpath(second), managed: false, authorization: 'user-selected' })
+  return { directory, workspace, second, host, events, ...mcp }
 }
-async function connect(connection: ExternalConnection) {
-  const client = new Client({ name: 'guoling-official-sdk-test', version: '1' })
-  const transport = new StreamableHTTPClientTransport(new URL(connection.endpoint), { requestInit: { headers: { Authorization: `Bearer ${connection.bearer}` } } })
-  await client.connect(transport)
-  cleanups.push(() => client.close())
-  const read = await client.readResource({ uri: 'guoling://task/context' })
-  if (!('text' in read.contents[0])) throw new Error('Task context must be text')
-  const context = JSON.parse(read.contents[0].text)
-  return { client, transport, context }
-}
+const data = (reply: { structuredContent: { result: any } }) => reply.structuredContent.result.data
 
-it('uses the official SDK transport for discovery, resources, canonical edits, retry and session reconnection', async () => {
+it('serves a resident session in the current workspace with the built-in tool selection, automatic tickets and canonical writes', async () => {
   const f = await fixture()
-  const granted = await f.service.grant({ ...f.owner, expectedRevision: f.conversation.revision, instruction: '修改 AAA', documents: [reference(f.document)] })
-  const { client, transport, context } = await connect(granted.connection)
-  const tools = await client.listTools()
-  const domain = (await f.host.tools.describe()).find(tool => tool.name === 'text.replace')!
-  expect(tools.tools.find(tool => tool.name === 'text.replace')!.inputSchema.properties!.arguments).toEqual(domain.schema)
-  expect((await client.listResources()).resources[0].uri).toBe('guoling://task/context')
-  const args = { ticket: context.operationTickets[0], arguments: { target: context.documents[0].writable[0].target, content: '你好😀' } }
-  const applied = await client.callTool({ name: 'text.replace', arguments: args })
+  const status = await f.service.status()
+  expect(status).toMatchObject({ state: 'running', settings: { enabled: true, permission: 'workspace' } })
+  const client = await f.connect('Claude Code')
+  const listed = (await client.listTools()).tools
+  const names = listed.map(tool => tool.name)
+  await f.host.tools.beginRun({ runId: 'builtin-like', actor: 'agent', documents: [], fileAccess: { permission: 'workspace', workspaceRoot: f.root } })
+  const builtin = await f.host.tools.describeRun('builtin-like')
+  expect(names).toEqual(expect.arrayContaining([...builtin.map(tool => tool.name), ...agentFileTools.map(tool => tool.name),
+    'course.createFromHtml', 'workspace.list', 'workspace.switch', 'workbench.state', 'operation.recent']))
+  for (const tool of builtin) expect(listed.find(item => item.name === tool.name)!.inputSchema.properties!.arguments).toEqual(tool.schema)
+  // Selection, not passthrough: course editing tools need an opened course document first.
+  expect((await f.host.tools.describe()).some(tool => tool.name === 'object.update')).toBe(true)
+  expect(names).not.toContain('object.update')
+
+  const read = await callTool(client, 'file.read', { path: 'notes.md' })
+  expect(read.isError).toBe(false)
+  expect(JSON.stringify(data(read))).toContain('AAA BBB')
+  const opened = await callTool(client, 'file.open', { path: 'notes.md' })
+  expect(data(opened)).toMatchObject({ writable: true })
+  const children = await callTool(client, 'listChildren', { target: data(opened).target })
+  const range = data(children)[0].target
+  const applied = await callTool(client, 'text.replace', { target: range, content: '你好😀 CCC' })
   expect(applied.structuredContent).toMatchObject({ result: { kind: 'document-operation', result: { status: 'applied' } } })
-  const lookedUp = await client.callTool({ name: 'operation.lookup', arguments: { ...args, name: 'text.replace' } })
-  const replay = await client.callTool({ name: 'text.replace', arguments: args })
-  const receipt = ((applied.structuredContent as Record<string, unknown>).result as Extract<ToolResult, { kind: 'document-operation' }>).result
-  expect(lookedUp.structuredContent).toMatchObject({ result: { kind: 'document-operation', result: receipt } })
-  expect(replay.structuredContent).toMatchObject({ result: { kind: 'document-operation', result: receipt } })
-  const snapshot = f.host.registry.get(f.document.documentId).read()
-  expect(snapshot.model).toMatchObject({ source: '你好😀 BBB' }); expect(snapshot.undoDepth).toBe(1)
-  await transport.terminateSession()
-  const reconnected = await connect(granted.connection)
-  expect(reconnected.context.documents[0].documentId).toBe(f.document.documentId)
+  expect(applied.structuredContent.ticket).toEqual(expect.any(String))
+  const document = f.host.registry.list().find(item => item.binding.kind === 'file' && item.binding.path.endsWith('notes.md'))!
+  expect(document).toMatchObject({ undoDepth: 1, dirty: true, model: { source: '你好😀 CCC' } })
+
+  const conversation = (await f.conversations.listConversations('space')).find(item => item.title === '外部 AI · Claude Code')!
+  expect(conversation.runIndex.externalPortIds).toEqual([status.sessions[0]?.sessionId ?? (await f.service.status()).sessions[0]!.sessionId])
+  const timeline = await f.events.snapshot(conversation.conversationId)
+  expect(timeline.items.every(item => item.source === 'external-mcp')).toBe(true)
+  expect(timeline.items.some(item => item.type === 'document.commit')).toBe(true)
+  expect(timeline.items.some(item => ['run.end', 'reasoning', 'usage'].includes(item.type))).toBe(false)
+  expect(JSON.stringify([conversation, timeline, await f.service.status()])).not.toContain(f.token())
+  expect(f.service.activity()).toEqual([{ clientName: 'Claude Code', pendingCalls: 0 }])
+
+  const large = '中文'.repeat(800_000)
+  const written = await callTool(client, 'file.write', { mode: 'create', path: 'large.md', content: large })
+  expect(written.isError).toBe(false)
+  expect(await readFile(path.join(f.workspace, 'large.md'), 'utf8')).toBe(large)
+})
+
+it('S12-T03 answers an undelivered write with its original receipt, executes again once delivered, and refuses late writes after stop', async () => {
+  let release!: () => void, gate: Promise<void> | undefined, executions = 0
+  const f = await fixture({ files: real => ({
+    execute: async (...args) => { if (args[1] === 'file.write') { executions++; await gate } return real.execute(...args) },
+    preflightMutation: (...args) => real.preflightMutation(...args), releaseRun: runId => real.releaseRun(runId),
+  }) })
+  const client = await f.connect('Codex')
+  const args = { mode: 'replace', path: 'notes.md', content: '第一版' }
+  gate = new Promise(resolve => { release = resolve })
+  const controller = new AbortController()
+  const first = client.callTool({ name: 'file.write', arguments: { arguments: args } }, undefined, { signal: controller.signal })
+  await expect.poll(() => executions).toBe(1)
+  controller.abort()
+  await expect(first).rejects.toThrow()
+  release()
+  const recent = async () => data(await callTool(client, 'operation.recent')).operations
+  await expect.poll(async () => (await recent())[0]?.delivered).toBe(false)
+  const replay = await callTool(client, 'file.write', args)
+  expect(replay.structuredContent.replayed).toBe(true)
+  expect(replay.structuredContent.ticket).toBe((await recent())[0].ticket)
+  expect(replay.content.some(item => item.text?.includes('未重复执行'))).toBe(true)
+  expect(executions).toBe(1)
+  await expect.poll(async () => (await recent())[0]?.delivered).toBe(true)
+  const again = await callTool(client, 'file.write', args)
+  expect(again.structuredContent.replayed).toBeUndefined()
+  expect(executions).toBe(2)
+  expect(await readFile(path.join(f.workspace, 'notes.md'), 'utf8')).toBe('第一版')
+
+  // An explicit ticket keeps the Gateway's exact-identity semantics: same call returns its receipt, altered payload is refused.
+  const opened = await callTool(client, 'file.open', { path: 'notes.md' })
+  const range = data(await callTool(client, 'listChildren', { target: data(opened).target }))[0].target
+  const explicit = await callTool(client, 'text.replace', { target: range, content: '第二版' }, 'client-ticket-1')
+  expect(explicit.structuredContent).toMatchObject({ ticket: 'client-ticket-1', result: { result: { status: 'applied' } } })
+  const repeated = await callTool(client, 'text.replace', { target: range, content: '第二版' }, 'client-ticket-1')
+  expect(repeated.structuredContent.result.result.operationId).toBe(explicit.structuredContent.result.result.operationId)
+  const altered = await callTool(client, 'text.replace', { target: range, content: '篡改' }, 'client-ticket-1')
+  expect(altered.structuredContent.result).toMatchObject({ kind: 'error', code: 'operation-payload-mismatch' })
+  const document = f.host.registry.list().find(item => item.binding.kind === 'file' && item.binding.path.endsWith('notes.md'))!
+  expect(document).toMatchObject({ undoDepth: 1, model: { source: '第二版' } })
+
+  const sessionId = (await f.service.status()).sessions[0]!.sessionId
+  await f.service.stopSession(sessionId)
+  await expect(callTool(client, 'file.write', { mode: 'replace', path: 'notes.md', content: '迟到' })).rejects.toThrow('已被用户在果铃中停止')
+  expect((await f.service.status()).sessions[0]).toMatchObject({ stopped: true })
+  expect(f.host.registry.get(document.documentId).read().model).toMatchObject({ source: '第二版' })
+  const reconnected = await f.connect('Codex')
+  expect((await callTool(reconnected, 'file.read', { path: 'notes.md' })).isError).toBe(false)
+})
+
+it('reports an occupied port without starting, recovers on a new port, and disconnects every session when the token is regenerated', async () => {
+  const blocker: Server = createServer()
+  await new Promise<void>(resolve => blocker.listen(0, '127.0.0.1', resolve))
+  cleanups.push(() => new Promise(resolve => blocker.close(resolve)))
+  const busy = (blocker.address() as { port: number }).port
+  const f = await fixture({ port: busy })
+  const occupied = await f.service.status()
+  expect(occupied).toMatchObject({ state: 'port-in-use', endpoint: `http://127.0.0.1:${busy}/mcp` })
+  expect(occupied.message).toContain(`端口 ${busy} 已被其他程序占用`)
+  expect(occupied.message).toContain('设置')
+  const running = await f.service.configure({ port: 0 })
+  expect(running.state).toBe('running')
+  const left = await f.connect('Gemini CLI'), right = await f.connect('OpenCode')
+  await callTool(left, 'workspace.list'); await callTool(right, 'workspace.list')
+  expect((await f.service.status()).sessions).toHaveLength(2)
+  const before = f.token()
+  const regenerated = await f.service.regenerateToken()
+  expect(regenerated.token).not.toBe(before)
+  expect(regenerated.status.sessions).toEqual([])
+  await expect(left.listTools()).rejects.toThrow()
+  await expect(f.connect('stale', before)).rejects.toThrow()
+  const renewed = await f.connect('OpenCode')
+  expect((await renewed.listTools()).tools.length).toBeGreaterThan(0)
+  const disabled = await f.service.configure({ enabled: false })
+  expect(disabled).toMatchObject({ state: 'disabled', sessions: [] })
+  await expect(renewed.listTools()).rejects.toThrow()
+})
+
+it('S12-T06 binds sessions to the app workspace, switches spaces, isolates handles and asks before writing outside', async () => {
+  const f = await fixture({ confirm: request => request.reason !== 'outside-workspace' })
+  f.ui.state = { workspaceId: 'second' }
+  const second = await f.connect('Codex')
+  expect(data(await callTool(second, 'workspace.list'))).toMatchObject({ current: 'second' })
+  expect(JSON.stringify(data(await callTool(second, 'file.read', { path: 'other.md' })))).toContain('另一个空间')
+  f.ui.state = { workspaceId: 'space' }
+  const first = await f.connect('Claude Code')
+  const opened = data(await callTool(first, 'file.open', { path: 'notes.md' }))
+  const foreign = await callTool(second, 'read', { target: opened.target })
+  expect(foreign.isError).toBe(true)
+  const outside = await callTool(first, 'file.write', { mode: 'create', path: path.join(f.second, 'leak.md'), content: '越界' })
+  expect(outside.structuredContent.result).toMatchObject({ kind: 'error', code: 'approval-denied' })
+  expect(f.approvals.at(-1)).toMatchObject({ clientName: 'Claude Code', reason: 'outside-workspace' })
+  await expect(readFile(path.join(f.second, 'leak.md'))).rejects.toThrow()
+  const switched = data(await callTool(second, 'workspace.switch', { workspaceId: 'space' }))
+  expect(switched).toMatchObject({ workspaceId: 'space' })
+  expect(JSON.stringify(data(await callTool(second, 'file.read', { path: 'notes.md' })))).toContain('AAA BBB')
+  expect((await callTool(second, 'file.read', { path: 'other.md' })).isError).toBe(true)
+})
+
+it('gives the foreground selection actionable handles through the read-only workbench state', async () => {
+  const f = await fixture()
+  const document = await f.host.internalAPI.open(path.join(f.workspace, 'notes.md'))
+  f.ui.state = { workspaceId: 'space', activeDocumentId: document.documentId,
+    selection: { documentId: document.documentId, targets: [{ kind: 'markdown-range', from: 4, to: 7 }] } }
+  const client = await f.connect('Claude Code')
+  const state = data(await callTool(client, 'workbench.state'))
+  expect(state.documents).toEqual([expect.objectContaining({ documentId: document.documentId, name: 'notes.md', active: true, dirty: false })])
+  expect(state.activeDocument).toMatchObject({ documentId: document.documentId, writable: true })
+  expect(state.selection.targets).toEqual([{ kind: 'markdown-range', target: expect.any(String) }])
+  expect(f.host.registry.get(document.documentId).read().revision).toBe(document.revision)
+  const applied = await callTool(client, 'text.replace', { target: state.selection.targets[0].target, content: '选中处' })
+  expect(applied.structuredContent.result).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  expect(f.host.registry.get(document.documentId).read().model).toMatchObject({ source: 'AAA 选中处' })
+})
+
+it('freezes the permission level per session: read-only hides changes and ask requires the host confirmation', async () => {
+  let allow = false
+  const f = await fixture({ permission: 'read-only', confirm: () => allow })
+  const reader = await f.connect('Gemini CLI')
+  const readerTools = (await reader.listTools()).tools.map(tool => tool.name)
+  expect(readerTools).toContain('file.read')
+  expect(readerTools).not.toContain('file.write')
+  expect(readerTools).not.toContain('course.createFromHtml')
+  expect((await callTool(reader, 'file.write', { mode: 'create', path: 'blocked.md', content: 'x' })).structuredContent.result).toMatchObject({ code: 'unknown-tool' })
+  await f.service.configure({ permission: 'ask' })
+  const asker = await f.connect('Codex')
+  const denied = await callTool(asker, 'file.write', { mode: 'create', path: 'asked.md', content: '询问后写入' })
+  expect(denied.structuredContent.result).toMatchObject({ code: 'approval-denied' })
+  expect(f.approvals.at(-1)).toMatchObject({ clientName: 'Codex', reason: 'ask' })
+  await expect(readFile(path.join(f.workspace, 'asked.md'))).rejects.toThrow()
+  allow = true
+  expect((await callTool(asker, 'file.write', { mode: 'create', path: 'asked.md', content: '询问后写入' })).isError).toBe(false)
+  expect(await readFile(path.join(f.workspace, 'asked.md'), 'utf8')).toBe('询问后写入')
+  expect((await reader.listTools()).tools.map(tool => tool.name)).not.toContain('file.write')
+})
+
+it('S12-T02 keeps concurrent clients on one Session and History, and a closing document revokes only its handles', async () => {
+  const f = await fixture()
+  const codex = await f.connect('Codex'), opencode = await f.connect('OpenCode')
+  const [left, right] = await Promise.all([codex, opencode].map(async client => data(await callTool(client, 'file.open', { path: 'notes.md' }))))
+  expect(left.documentId).toBe(right.documentId)
+  const results = await Promise.all([
+    callTool(codex, 'file.patch', { path: 'notes.md', oldText: 'AAA', newText: '中文😀' }),
+    callTool(opencode, 'file.patch', { path: 'notes.md', oldText: 'BBB', newText: 'END' }),
+  ])
+  expect(results.map(result => result.isError)).toEqual([false, false])
+  const conflict = await Promise.all([
+    callTool(codex, 'file.patch', { path: 'notes.md', oldText: 'END', newText: 'X' }),
+    callTool(opencode, 'file.patch', { path: 'notes.md', oldText: 'END', newText: 'Y' }),
+  ])
+  expect(conflict.filter(result => !result.isError)).toHaveLength(1)
   expect(f.host.registry.list()).toHaveLength(1)
-  expect(JSON.stringify(await f.service.list(f.owner))).not.toContain(granted.connection.bearer)
-  expect(granted.config.opencode).toContain('"oauth": false')
-  expect(granted.config.codex).toContain('bearer_token_env_var')
-  expect(JSON.stringify(granted.conversation)).not.toContain(granted.connection.bearer)
-  const initialize = await fetch(granted.connection.endpoint, { method: 'POST', headers: { Authorization: `Bearer ${granted.connection.bearer}`,
-    'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 'future-version', method: 'initialize', params: { protocolVersion: '2099-01-01', capabilities: {}, clientInfo: { name: 'future', version: '1' } } }) })
-  expect((await initialize.json()).result.protocolVersion).toBe('2025-11-25')
-  const readOnly = await f.service.grant({ ...f.owner, expectedRevision: granted.conversation.revision, instruction: '只读检查',
-    documents: [{ ...reference(snapshot), writable: [] }] })
-  const reader = await connect(readOnly.connection)
-  expect(f.service.writableConnectionsForDocument(f.document.documentId)).toEqual([{ ...f.owner, connectionId: granted.connection.connectionId }])
-  await f.service.stopForDocument(f.document.documentId)
-  expect(f.service.writableConnectionsForDocument(f.document.documentId)).toEqual([])
-  await expect(reconnected.client.listTools()).rejects.toThrow()
-  expect((await reader.client.listResources()).resources).toHaveLength(1)
-})
-
-it('settles a real built-in run, transfers only receipts and frozen attachment resources, then deletes through the revoke barrier', async () => {
-  let entered!: () => void
-  const waiting = new Promise<void>(resolve => { entered = resolve })
-  let requests = 0
-  const provider: ModelProvider = { async *stream(request, options) {
-    if (++requests === 1) {
-      const target = JSON.parse(String(request.messages[1].content).split('：')[1])[0].writable[0].target
-      const call = { id: 'first', name: 'text.replace', argumentsText: JSON.stringify({ target, content: 'NEW' }) }
-      yield { type: 'response.completed', requestId: request.requestId, responseId: 'fixture-response', sequence: 0, nativeResponse: {}, actualModel: 'fixture', finishReason: 'tool_calls',
-        toolCalls: [call], assistant: { role: 'assistant', content: '', tool_calls: [{ id: call.id, type: 'function', function: { name: call.name, arguments: call.argumentsText } }] } }
-    } else {
-      entered()
-      const signal = options?.signal
-      if (!signal) throw new Error('ExecutionEngine must pass cancellation')
-      await new Promise<void>(resolve => { if (signal.aborted) resolve(); else signal.addEventListener('abort', () => resolve(), { once: true }) })
-      signal.throwIfAborted()
-    }
-  } }
-  const f = await fixture(provider)
-  const attachment = await f.attachments.receiveBytes({ name: '材料.md', bytes: new TextEncoder().encode('必要附件😀'), source: { kind: 'paste' } })
-  const run = await f.engine.start({ conversationId: f.owner.conversationId, taskId: 'builtin-task', instruction: '先改后补充', selection,
-    documents: [{ documentId: f.document.documentId, writable: [{ kind: 'markdown-range', from: 4, to: 7 }] }] }, undefined, async record => {
-    await f.conversations.updateConversation({ ...f.owner, expectedRevision: f.conversation.revision,
-      patch: { inputAttachments: [{ attachmentId: attachment.id, representationId: 'original-text' }], runIndex: { ...f.conversation.runIndex, builtinRunIds: [record.runId] } } })
-  })
-  await waiting
-  const current = (await f.conversations.readConversation(f.owner))!
-  const before = f.host.registry.get(f.document.documentId).read()
-  expect(before.model).toMatchObject({ source: 'AAA NEW' })
-  const granted = await f.service.grant({ ...f.owner, expectedRevision: current.revision, instruction: '接着补充', sourceRunId: run.runId,
-    remainingWork: '只补充开头，保留 NEW', documents: [reference(before)] })
-  expect((await f.engine.read(run.runId))!.status).toBe('stopped')
-  expect(granted.handoff).toMatchObject({ originalGoal: '先改后补充', previousRun: run.runId, remainingWork: '只补充开头，保留 NEW' })
-  expect(granted.handoff.committedFacts).toHaveLength(1)
-  expect(granted.handoff.committedFacts[0]).toMatchObject({ status: 'applied', revision: before.revision })
-  const { client, context } = await connect(granted.connection)
-  expect(context.attachments[0]).toMatchObject({ provenance: { complete: true, downsampled: false }, gaps: [] })
-  const resource = await client.readResource({ uri: context.attachments[0].uri })
-  expect(resource.contents[0]).toMatchObject({ text: '必要附件😀' })
-  await expect(client.readResource({ uri: 'guoling://attachment/not-authorized' })).rejects.toThrow()
-  await expect(f.service.list({ ...f.owner, workspaceId: 'other-space' })).rejects.toThrow()
-  await f.conversations.deleteConversation({ ...f.owner, expectedRevision: granted.conversation.revision,
-    ports: { stopBuiltinRuns: async ({ runIds }) => { await Promise.all(runIds.map(id => f.engine.stop(id))) }, revokeExternalPorts: input => f.service.revokeConversation(input) } })
-  await expect(client.callTool({ name: 'text.replace', arguments: { ticket: context.operationTickets[0], arguments: { target: context.documents[0].writable[0].target, content: '迟到' } } })).rejects.toThrow()
-  expect(f.host.registry.get(f.document.documentId).read().model).toMatchObject({ source: 'AAA NEW' })
-  expect((await f.events.snapshot(f.owner.conversationId)).items.filter(item => item.source === 'external-mcp').some(item => ['usage', 'reasoning', 'run.end'].includes(item.type))).toBe(false)
-})
-
-it('fails closed on registration races, explicit revocation and changed selections without renewing frozen authority', async () => {
-  const f = await fixture()
-  const input = { ...f.owner, expectedRevision: f.conversation.revision, instruction: '修改', documents: [reference(f.document)] }
-  const write = vi.spyOn(f.conversations, 'updateConversation').mockRejectedValueOnce(new Error('registration lost'))
-  await expect(f.service.grant(input)).rejects.toThrow('registration lost')
-  write.mockRestore()
-  const failed = (await f.service.list(f.owner))[0]
-  expect(failed.status).toBe('revoked')
-  await expect(f.host.tools.issueTarget(failed.runId, f.document.documentId, { kind: 'document' })).rejects.toThrow('任务已停止')
-  const granted = await f.service.grant(input)
-  const { client } = await connect(granted.connection)
-  await f.service.revoke({ ...f.owner, connectionId: granted.connection.connectionId })
-  await expect(client.listTools()).rejects.toThrow()
-  expect((await f.service.list(f.owner)).at(-1)!.status).toBe('revoked')
-  await expect(f.host.tools.issueTarget(granted.connection.runId, f.document.documentId, { kind: 'document' })).rejects.toThrow('任务已停止')
-  await f.host.internalAPI.dispatch({ documentId: f.document.documentId, epoch: f.document.epoch, operationId: 'human', baseRevision: f.document.revision,
-    actor: 'human', mutation: { type: 'command', command: { type: 'markdown.splice', from: 0, to: 0, text: 'H ' } } })
-  await expect(f.service.grant({ ...input, expectedRevision: granted.conversation.revision })).rejects.toThrow('所选文档或范围已改变')
-  expect(f.host.registry.get(f.document.documentId).read().model).toMatchObject({ source: 'H AAA BBB' })
-})
-
-it('keeps HTTP authorization and tickets usable beyond the former eight-hour and 4096-ticket limits until explicit revocation', async () => {
-  const f = await fixture()
-  const granted = await f.service.grant({ ...f.owner, expectedRevision: f.conversation.revision,
-    instruction: '长程修改', documents: [reference(f.document)] })
-  const { client, context } = await connect(granted.connection)
-  f.advance(8 * 60 * 60_000 + 1)
-  expect((await f.service.list(f.owner))[0].status).toBe('active')
-  // Re-reading context issues real host tickets over HTTP, without repeating document writes.
-  for (let count = 0; count < 256; count++) await client.readResource({ uri: 'guoling://task/context' })
-  const latest = await client.readResource({ uri: 'guoling://task/context' })
-  if (!('text' in latest.contents[0])) throw new Error('Task context must be text')
-  const next = JSON.parse(latest.contents[0].text)
-  const applied = await client.callTool({ name: 'text.replace', arguments: { ticket: next.operationTickets[0],
-    arguments: { target: context.documents[0].writable[0].target, content: '长程完成' } } })
-  expect(applied.structuredContent).toMatchObject({ result: { kind: 'document-operation', result: { status: 'applied' } } })
-  expect(f.host.registry.get(f.document.documentId).read().model).toMatchObject({ source: '长程完成 BBB' })
-  await f.service.revoke({ ...f.owner, connectionId: granted.connection.connectionId })
-  await expect(client.callTool({ name: 'text.replace', arguments: { ticket: next.operationTickets[1],
-    arguments: { target: context.documents[0].writable[0].target, content: '迟到' } } })).rejects.toThrow()
-  expect(f.host.registry.get(f.document.documentId).read().model).toMatchObject({ source: '长程完成 BBB' })
+  expect(f.host.registry.get(left.documentId).read()).toMatchObject({ undoDepth: 3 })
+  expect(f.service.writableSessionsForDocument(left.documentId)).toHaveLength(2)
+  await f.service.stopForDocument(left.documentId)
+  expect(f.service.writableSessionsForDocument(left.documentId)).toEqual([])
+  const stale = await callTool(codex, 'read', { target: left.target })
+  expect(stale.isError).toBe(true)
+  expect(stale.content.some(item => item.text?.includes('句柄均已失效'))).toBe(true)
+  expect((await f.service.status()).sessions.every(session => !session.stopped)).toBe(true)
+  expect((await callTool(codex, 'file.read', { path: 'notes.md' })).isError).toBe(false)
 })

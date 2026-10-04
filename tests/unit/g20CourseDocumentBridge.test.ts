@@ -168,25 +168,28 @@ describe('G20 default course writer projection', () => {
     expect(state().errorMessage).toBeNull()
   })
 
-  it('prepares background course drafts for close, waits for their ACK and restores the foreground', async () => {
+  it('commits unfinished course input before leaving the document, waits for its ACK and keeps the new foreground through close preparation', async () => {
     const h = await host()
     state().addTextNode(); await state().drainCourseDocument()
     const itemId = selectSelectedNodeId(state())!
     state().beginTextEdit(itemId, 'properties'); state().updateTextEditDraft(itemId, 'background unfinished input', [])
     expect(state().v9ContentEdit).toBeTruthy()
-    await state().createCourseDocument('flow')
-    const foreground = state().courseDocument.documentId!
+    // Leaving the document (M16) commits its input first; the new document appears only after that ACK.
     const entered = deferred(), release = deferred()
     h.controls.after = async operation => { if (operation.documentId === h.first.documentId) { entered.resolve(); await release.promise } }
-    let settled = false
-    const prepared = state().drainAllCourseDocuments().then(value => { settled = true; return value })
+    let created = false
+    const creating = state().createCourseDocument('flow').then(() => { created = true })
     await entered.promise
-    expect(settled).toBe(false)
-    expect(state().courseDocument.documentId).toBe(foreground)
-    release.resolve(); await prepared
+    expect(created).toBe(false)
+    expect(state().courseDocument.documentId).toBe(h.first.documentId)
+    release.resolve(); await creating
+    const foreground = state().courseDocument.documentId!
+    expect(foreground).not.toBe(h.first.documentId)
     const actual = h.first.read().model
     if (actual.kind !== 'course-v9') throw new Error('fixture')
     expect(locateCourseLayer(actual.project, itemId)?.item).toMatchObject({ content: { data: { text: 'background unfinished input' } } })
+    h.controls.after = undefined
+    await state().drainAllCourseDocuments()
     expect(state().courseDocument.documentId).toBe(foreground)
     await state().activateCourseDocument(h.first.documentId)
     expect(state().v9ContentEdit).toBeNull()
@@ -266,6 +269,8 @@ describe('G20 default course writer projection', () => {
     expect(project().title).toBe('independent document')
     await state().activateCourseDocument(baseline.documentId)
     expect(project().title).toBe('retained human input'); expect(state().courseDocument.error).toBeTruthy(); noLocalHistory()
+    // Leaving lost nothing: the refused draft and the external result are both still there.
+    expect(h.first.read().model).toMatchObject({ project: { title: 'external preserved' } })
   })
 
   it('does not publish a tool committed receipt before the real main ACK and keeps the background destination explicit', async () => {

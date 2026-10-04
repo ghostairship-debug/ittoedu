@@ -753,7 +753,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   #authoringGeneration = 0
   #locationId: string
   #presentationStateId: string | undefined
-  #preparedPresentationState: { locationId: string; stateId: string | undefined } | null = null
+  #preparedPresentationState: { locationId: string; stateId: string | undefined; preserveCarriers: boolean } | null = null
   #preparedRuntimeActivation: { locationId: string; forced: boolean } | null = null
   #pendingRuntimeActivation: { locationId: string; forced: boolean } | null = null
   #completedActiveResetLocationId: string | null = null
@@ -1244,6 +1244,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
   preparePublishedPresentationState(
     locationId: string,
     stateId: string | undefined,
+    preserveCarriers = false,
   ): boolean {
     try {
       const location = resolveSlideLocation(this.#payload, this.id, locationId)
@@ -1251,6 +1252,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       this.#preparedPresentationState = {
         locationId,
         stateId: exactPresentationStateId(scene, stateId),
+        preserveCarriers,
       }
       return true
     } catch {
@@ -1597,6 +1599,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     const completedResetLocationId = this.#completedActiveResetLocationId
     this.#completedActiveResetLocationId = null
     this.#preparedRuntimeActivation = null
+    const preparedState = this.#preparedPresentationState
     const presentationStateId = this.#authoring
       ? this.#authoring.stateId === null
         ? undefined
@@ -1632,13 +1635,17 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
       return
     }
     this.#invalidateInteractions()
-    this.#interactionPort?.resetLocalVisibility()
     // Replaying the same state renders it again; only a change of state can update in place.
-    const inPlace = locationId === this.#locationId && presentationStateId !== this.#presentationStateId
+    const preserveInteractions = preparedState?.preserveCarriers === true && locationId === this.#locationId
+      && presentationStateId !== this.#presentationStateId
+    const inPlace = preserveInteractions
       && this.#applyStateInPlace(location.id, presentationStateId)
     this.#locationId = locationId
     this.#presentationStateId = presentationStateId
-    if (!inPlace) this.#render()
+    if (!inPlace) {
+      if (!preserveInteractions) this.#interactionPort?.resetLocalVisibility()
+      this.#render()
+    }
     this.#restoreInteractionsIfActive()
   }
 
@@ -1665,7 +1672,7 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
     }
     for (const { record, item } of updates) {
       record.item = item
-      void record.compositionHandle!.update(item.content).catch(error => this.#services?.reportDiagnostic?.({
+      void record.compositionHandle!.update(item.content).then(() => this.#refreshInteractionNodesFromRecords()).catch(error => this.#services?.reportDiagnostic?.({
         surfaceId: this.id, phase: 'mount', severity: 'error', message: error instanceof Error ? error.message : String(error), cause: error,
       }))
     }
@@ -1952,6 +1959,8 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
         record.source,
         record.applicable,
       )
+      for (const node of record.compositionHandle?.interactionNodes(record.source,
+        record.source === 'global' ? this.#globalInteractionVisibilityState : undefined) ?? []) this.#interactionNodes.set(node.nodeId, node)
     }
     this.#interactionPort?.refreshNodes(
       this.#interactionNodes.values(),
@@ -2544,6 +2553,12 @@ export class SlidePublishedAdapter implements SurfaceHost, PublishedAuthoringPat
             })
             mountedCompositionHandle = handle
             this.#compositionHandles.push(handle)
+            void handle.ready.then(() => {
+              if (this.#root?.contains(compositionWrap)) {
+                this.#refreshInteractionNodesFromRecords()
+                this.#restoreInteractionsIfActive()
+              }
+            }).catch(() => undefined)
             if (this.#authoring?.onCompositionMount) {
               const publish = this.#authoring.onCompositionMount, destroy = handle.destroy.bind(handle)
               let ended = false

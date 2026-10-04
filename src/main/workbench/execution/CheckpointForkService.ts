@@ -1,32 +1,6 @@
 import type { ConversationRecord } from '../../../shared/workbench/conversations'
 import type { ExecutionRunRecord } from '../../../shared/workbench/execution'
-
-export interface ContentVersionAtCheckpoint {
-  documentId: string
-  revision: number | null
-}
-
-export interface UserCheckpointIndex {
-  conversationId: string
-  conversationRevision: number
-  runId: string
-  runVersion: number
-  runStatus: ExecutionRunRecord['status']
-  recordedAt: number
-  /** Observed by the current document owner, not inferred from old writable targets. */
-  contentVersions: ContentVersionAtCheckpoint[]
-}
-
-export interface ForkDraft {
-  title: string
-  inputDraft: string
-  /** Model-maintained plan is display-only until the user explicitly edits it into the new draft. */
-  advisoryRemaining: string[]
-  source: UserCheckpointIndex
-  /** The caller must create a fresh conversation and use the normal send path. */
-  requiresFreshAuthorization: true
-  replaysPreviousCalls: false
-}
+import type { ContentVersionAtCheckpoint, ForkDraft, UserCheckpointIndex } from '../../../shared/workbench/executionReview'
 
 function bounded(value: string, limit: number): string {
   return value.length <= limit ? value : `${value.slice(0, limit - 1)}…`

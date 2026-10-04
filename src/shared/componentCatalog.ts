@@ -81,6 +81,8 @@ export interface ComponentCatalogIssue {
 export interface ComponentCatalogSnapshot {
   sources: ComponentCatalogSourceSnapshot[]
   packages: AvailableComponentCatalogPackage[]
+  /** HTML components (`html-components/<entry>/`) found in the same catalog directories. */
+  htmlComponents?: AvailableHtmlComponent[]
   issues: ComponentCatalogIssue[]
 }
 
@@ -228,4 +230,42 @@ export const componentCatalogSchema = z.object({
 
 export function parseComponentCatalog(value: unknown): ComponentCatalogV1 {
   return componentCatalogSchema.parse(value)
+}
+
+/**
+ * An HTML component in a component catalog directory: `html-components/<entry>/component.json`
+ * (this manifest), `component.html` (the `components/<name>.html` text of a course) and the asset
+ * files it refers to under `assets/`. The `.h5component` packages and `catalog.json` are unchanged.
+ */
+export const HTML_COMPONENT_FORMAT = 'guoling-html-component'
+
+const htmlComponentAssetPathSchema = safeRelativePathSchema
+  .refine(value => value.startsWith('assets/'), '素材路径须为 assets/ 下的相对路径')
+
+export const htmlComponentManifestSchema = z.object({
+  format: z.literal(HTML_COMPONENT_FORMAT),
+  formatVersion: z.literal(1),
+  packageId: z.string().min(3).max(200).regex(/^[a-z0-9]+(?:[._-][a-z0-9]+)+$/i, '组件 ID 格式无效'),
+  version: z.string().regex(semanticVersionPattern, '组件版本必须使用语义化版本'),
+  name: z.string().trim().min(1).max(100),
+  description: z.string().max(500).default(''),
+  subject: uniqueStrings('学科').default([]),
+  schoolStage: uniqueStrings('学段').default([]),
+  tags: uniqueStrings('标签').default([]),
+  /** The course it was saved from. */
+  sourceCourse: z.string().min(1).max(500).optional(),
+  savedAt: z.string().datetime().optional(),
+  assets: z.array(z.object({ path: htmlComponentAssetPathSchema, mimeType: z.string().min(1).max(200) }).strict()).max(500).default([]),
+}).strict()
+
+export type HtmlComponentManifest = z.infer<typeof htmlComponentManifestSchema>
+
+export interface AvailableHtmlComponent extends HtmlComponentManifest {
+  sourceId: string
+  sourceLabel: string
+  sourceTrust: ComponentCatalogTrust
+  /** Directory name under `html-components/`. */
+  entry: string
+  /** In the managed library (“我的资产库”), so the panel may delete it. */
+  removable: boolean
 }

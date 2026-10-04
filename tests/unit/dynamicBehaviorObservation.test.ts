@@ -12,7 +12,7 @@ vi.mock('@/main/previewNetworkPolicy', () => ({ PreviewNetworkPolicy: class { re
 vi.mock('electron', () => ({ session: { fromPartition: () => ({ clearStorageData: state.clearStorage }) }, BrowserWindow: class {
   destroyed = false
   webContents = {
-    setWindowOpenHandler: vi.fn(), on: vi.fn(), once: vi.fn(), getOSProcessId: () => 42,
+    setWindowOpenHandler: vi.fn(), setFrameRate: vi.fn(), on: vi.fn(), once: vi.fn(), getOSProcessId: () => 42,
     forcefullyCrashRenderer: vi.fn(() => state.rejectRun?.(new Error('renderer terminated'))),
     capturePage: vi.fn(async () => ({ toDataURL: () => png, getSize: () => ({ width: 1280, height: 720 }) })),
     executeJavaScript: vi.fn((source: string) => {
@@ -42,7 +42,7 @@ function request() {
   return { operation: 'run' as const, id: crypto.randomUUID(), payload: { project, assetFiles: {}, componentFiles: {}, observeBehavior: true, verificationMode: 'full-admission' as const,
     targets: [{ locationId: project.startLocationId, instanceIds: ['fixture-instance'] }] } }
 }
-function owner() { return { once: vi.fn(), removeListener: vi.fn(), getOSProcessId: () => 1 } as unknown as WebContents }
+function owner() { return { once: vi.fn(), removeListener: vi.fn(), isDestroyed: () => false, getOSProcessId: () => 1 } as unknown as WebContents }
 
 describe('Hidden dynamic observation transport', () => {
   it('captures actual worker compositor output through only the fixed product handshake', async () => {
