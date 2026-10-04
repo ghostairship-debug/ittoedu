@@ -48,7 +48,7 @@ async function socksProxy(targetPort: number) {
   const requested: { type: number; host: string; port: number }[] = []
   const proxy = await listen(createNetServer(client => {
     let stage = 0, buffered = Buffer.alloc(0)
-    client.on('data', chunk => {
+    client.on('data', (chunk: Buffer) => {
       buffered = Buffer.concat([buffered, chunk])
       if (stage === 0 && buffered.length >= 3) { buffered = buffered.subarray(3); stage = 1; client.write(Buffer.from([5, 0])) }
       if (stage !== 1 || buffered.length < 5) return
