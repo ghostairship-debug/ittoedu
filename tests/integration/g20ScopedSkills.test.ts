@@ -6,8 +6,45 @@ import path from 'node:path'
 import { BundledSkillService } from '../../src/main/workbench/skills/BundledSkillService'
 import { ScopedSkillService } from '../../src/main/workbench/skills/ScopedSkillService'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
+import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { createDefaultTeacherControllerPackage } from '../../src/shared/defaultTeacherControllerComponent'
+import { parseWebComposition } from '../../src/main/workbench/htmlImport/parseWebComposition'
 const directories: string[] = []
 afterEach(async () => { for (const dir of directories.splice(0)) await fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }) })
+
+it('reading the course method exposes project files before opening a course and keeps read-only authority', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-course-method-')); directories.push(root)
+  const host = new DocumentHostService(path.join(root, 'journals'))
+  const project = createBlankCourseProject({ title: '四季' })
+  const controller = createDefaultTeacherControllerPackage()
+  const session = await host.registry.create({ kind: 'course-v9', project, resources: { assets: {},
+    components: { [`${controller.manifest.id}@${controller.manifest.version}`]: controller.files } } }, '四季.h5lesson')
+  const initialRevision = session.read().revision
+  const skills = new BundledSkillService({ manifest: { skills: [
+    { name: 'orchestrate-courseware', description: '创作', path: 'skills/orchestrate-courseware/SKILL.md', references: [], version: 'one' },
+    { name: 'build-courseware-project', description: '导入', path: 'skills/build-courseware-project/SKILL.md', references: [], version: 'one' },
+  ] }, files: { 'skills/orchestrate-courseware/SKILL.md': '创作方法', 'skills/build-courseware-project/SKILL.md': '导入方法' } })
+  host.tools.configureHostServices({ skills, projectFiles: { parsePage: parseWebComposition,
+    openProject: async ({ fileAccess }) => ({ documentId: session.documentId, writable: fileAccess?.permission !== 'read-only' }) } })
+  for (const permission of ['workspace', 'read-only'] as const) {
+    const runId = `method-${permission}`
+    await host.tools.beginRun({ runId, actor: 'agent', documents: [], fileAccess: { permission, workspaceRoot: root } })
+    expect((await host.tools.describeRun(runId)).map(tool => tool.name)).not.toContain('project.write')
+    expect(await host.tools.execute(runId, 'method', { name: 'skills.read', input: { skill: 'orchestrate-courseware' } }))
+      .toMatchObject({ kind: 'read' })
+    const names = (await host.tools.describeRun(runId)).map(tool => tool.name)
+    expect(names).toEqual(expect.arrayContaining(['project.list', 'project.read']))
+    expect(names).not.toContain('html.import')
+    expect(names.some(name => name.startsWith('build.'))).toBe(false)
+    expect(names.includes('project.write')).toBe(permission !== 'read-only')
+    expect(await host.tools.execute(runId, 'list', { name: 'project.list', input: { project: '四季.h5lesson' } }))
+      .toMatchObject({ kind: 'read', data: { files: expect.arrayContaining([expect.objectContaining({ path: 'theme.css' })]) } })
+    if (permission === 'read-only') expect(await host.tools.execute(runId, 'write', { name: 'project.write', input: { path: 'theme.css', content: ':root { color: red }' } }))
+      .toMatchObject({ kind: 'error' })
+    await host.tools.stop(runId)
+  }
+  expect(session.read().revision).toBe(initialRevision)
+})
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-scoped-skill-')); directories.push(root)
   const workspace = path.join(root, 'workspace'), skills = path.join(workspace, '.agents', 'skills'), directory = path.join(skills, 'prepare-table')

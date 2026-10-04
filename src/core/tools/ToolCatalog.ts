@@ -146,14 +146,18 @@ export interface RunToolScope {
 }
 
 /** Model discovery is a run projection; it never changes the canonical MCP catalog. */
-export function selectRunToolNames(scopes: readonly RunToolScope[], options: { standaloneImage?: boolean } = {}): string[] {
+export function selectRunToolNames(scopes: readonly RunToolScope[], options: { standaloneImage?: boolean; projectFiles?: 'read' | 'write' } = {}): string[] {
+  const projectNames: string[] = options.projectFiles ? projectFileTools.filter(tool => options.projectFiles === 'write'
+    || tool.name === 'project.list' || tool.name === 'project.read').map(tool => tool.name) : []
   if (!scopes.length) return ['skills.read', 'skills.list', 'course.createFromHtml', ...workbenchServiceToolCatalog.map(tool => tool.name),
+    ...projectNames,
     ...(options.standaloneImage ? ['image.generate', 'image.edit', 'image.status'] : [])]
   if (scopes.some(scope => scope.kind === 'course-v9' && scope.wholeDocumentWritable))
     return toolCatalog.filter(tool => tool.name !== 'document.insert' || scopes.some(scope => scope.canInsertFlow)).map(tool => tool.name)
   const writable = new Set(scopes.flatMap(scope => scope.writableTargetKinds))
   const hasV9Write = scopes.some(scope => scope.kind === 'course-v9' && scope.writableTargetKinds.length > 0)
   const eligible = (name: string) => {
+    if (projectNames.includes(name)) return true
     if (workbenchServiceToolCatalog.some(tool => tool.name === name)) return true
     if (name === 'course.createFromHtml') return true
     if (name === 'read' || name === 'inspect' || name === 'listChildren' || name === 'skills.read' || name === 'skills.list') return true
@@ -175,6 +179,14 @@ export function selectRunToolNames(scopes: readonly RunToolScope[], options: { s
   const direct = toolCatalog.filter(tool => eligible(tool.name))
   const hasMutation = mutationNamesIn(direct.map(tool => tool.name)).length > 0
   return toolCatalog.filter(tool => direct.includes(tool) || tool.name === 'batch' && hasMutation).map(tool => tool.name)
+}
+
+/** Authoring uses project files; other tasks keep the canonical editing and import catalog. */
+export function isCourseAuthoringTool(name: string): boolean {
+  return name.startsWith('project.') || name.startsWith('skills.') || name.startsWith('image.')
+    || name.startsWith('asset.') || name.startsWith('web.') || name.startsWith('job.')
+    || name.startsWith('compute.') || name.startsWith('delegate.') || name.startsWith('mcp.')
+    || name.startsWith('media.') || ['content.targets', 'content.update', 'text.replace', 'view.observe', 'document.export'].includes(name)
 }
 
 export const toolFamilies = ['content', 'layout', 'navigation', 'interaction', 'media', 'build', 'jobs', 'office'] as const

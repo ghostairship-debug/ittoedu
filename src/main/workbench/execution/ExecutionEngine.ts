@@ -301,7 +301,8 @@ export class ExecutionEngine {
     if (this.options.files?.executeOffice && workspaceRoot) families.push({ family: 'office', description: 'Word、Excel、PowerPoint 内容与原文件保存', count: permission === 'read-only' ? 1 : 3 })
     return [...definitions.map(tool => ({ name: tool.name, description: tool.description, inputSchema: tool.schema as ModelJsonObject })),
       ...(this.options.files && workspaceRoot ? agentFileTools.filter(tool => permission !== 'read-only' || !fileMutationNames.has(tool.name)).map(tool => ({ ...tool, inputSchema: tool.inputSchema as ModelJsonObject })) : []),
-      ...(this.options.files && workspaceRoot && permission !== 'read-only' ? [{ name: createCourseFromHtmlTool.name, description: createCourseFromHtmlTool.description, inputSchema: z.toJSONSchema(createCourseFromHtmlInputSchema) as ModelJsonObject }] : []),
+      ...(this.options.files && workspaceRoot && permission !== 'read-only' && !this.options.gateway.usesProjectFileAuthoring(runId)
+        ? [{ name: createCourseFromHtmlTool.name, description: createCourseFromHtmlTool.description, inputSchema: z.toJSONSchema(createCourseFromHtmlInputSchema) as ModelJsonObject }] : []),
       ...(this.options.artifacts && workspaceRoot && permission !== 'read-only' ? [structuredClone(hostArtifactSaveTool)] : []),
       ...(this.officeLoadedRuns.has(runId) && this.options.files?.executeOffice && workspaceRoot
         ? officeContentTools.filter(tool => permission !== 'read-only' || tool.name === 'office.inspect').map(tool => structuredClone(tool)) : []),

@@ -31,7 +31,7 @@ import { isSourceDocumentModel, type DocumentDriver, type DocumentSnapshot, type
 import type { ModelToolCall, ToolAdvisory, ToolDefinition, ToolGateway, ToolResult, ToolRunGrant, ToolTarget } from '../../shared/workbench/tools'
 import { DocumentRegistry } from '../documents/DocumentRegistry'
 import { documentDigest } from '../documents/documentDigest'
-import { batchInputSchemaFor, contentTargetsInputSchema, contentUpdateInputSchema, describeToolFamily, describeTools, familyOfTool, mutationCallSchema, mutationNamesIn, selectRunToolNames, toolCatalog, toolFamilies, visibleRunToolNames, type BatchMutationCall, type RunToolScope, type ToolFamily } from './ToolCatalog'
+import { batchInputSchemaFor, contentTargetsInputSchema, contentUpdateInputSchema, describeToolFamily, describeTools, familyOfTool, isCourseAuthoringTool, mutationCallSchema, mutationNamesIn, selectRunToolNames, toolCatalog, toolFamilies, visibleRunToolNames, type BatchMutationCall, type RunToolScope, type ToolFamily } from './ToolCatalog'
 import { discoverDynamicContentTargets, planDynamicContentEdit, type DynamicContentFallbackCapture, type DynamicContentHostTarget, type DynamicContentObservedTarget } from './DynamicContentEditPlanner'
 import { discoverCompositionContentTargets, planCompositionContentEdit, type CompositionContentHostTarget, type CompositionContentChange } from './CompositionContentEditPlanner'
 import { backgroundOwner, childTargets, containsTarget, insertionDependencyFootprint, mapMarkdownRange, readTarget, targetFootprint } from './ToolTargets'
@@ -47,6 +47,7 @@ import { changeFlowTableStructure } from './flowTableContentOperations'
 import { rotatedRectangleAabb } from '../../shared/geometry'
 import { htmlImportInputSchema } from './HtmlImportTools'
 import { isProjectFileToolName } from './ProjectFileTools'
+import { skillReadInputSchema } from './SkillTools'
 import { ProjectFileCoordinator, type CourseModel, type CourseSnapshot, type ProjectFileCommit } from '../projectFiles/ProjectFileCoordinator'
 import { readProjectFile } from '../projectFiles/projectFileView'
 import { assetFilePath } from '../projectFiles/pageHtml'
@@ -59,6 +60,7 @@ interface Run {
   grant: ToolRunGrant
   toolScopes: RunToolScope[]
   loadedFamilies: Set<ToolFamily>
+  courseAuthoring?: boolean
   advertised?: { definitions: ToolDefinition[]; names: Set<string>; batchSchema?: z.ZodType;
     availableFamilies: { family: ToolFamily; description: string; count: number }[] }
   epochs: Map<string, string>
@@ -272,8 +274,11 @@ export class DocumentToolGateway implements ToolGateway {
     }
     const standaloneImage = run.grant.actor === 'agent' && !!run.grant.fileAccess?.workspaceRoot
       && run.grant.fileAccess.permission !== 'read-only'
-    const allowed = selectRunToolNames(scopes, { standaloneImage }).filter(name => this.hostTools.supports(name)
-      && (!isWorkbenchServiceTool(name) || run.grant.actor === 'agent' && !!run.grant.fileAccess))
+    const projectFiles = run.grant.fileAccess?.workspaceRoot && this.hostTools.projectFileServices()
+      ? run.grant.fileAccess.permission === 'read-only' ? 'read' as const : 'write' as const : undefined
+    const allowed = selectRunToolNames(scopes, { standaloneImage, projectFiles }).filter(name => this.hostTools.supports(name)
+      && (!isWorkbenchServiceTool(name) || run.grant.actor === 'agent' && !!run.grant.fileAccess)
+      && (!run.courseAuthoring || isCourseAuthoringTool(name)))
     const names = visibleRunToolNames(allowed, run.loadedFamilies)
     const batchMutationNames = mutationNamesIn(names)
     run.toolScopes = scopes
@@ -314,6 +319,8 @@ export class DocumentToolGateway implements ToolGateway {
     await this.describeRun(runId)
     return available
   }
+
+  usesProjectFileAuthoring(runId: string): boolean { return !!this.run(runId).courseAuthoring }
 
   /** Host-only lifecycle gate. Existing tasks are stopped by the caller before file work. */
   async withWriteTaskBarrier<T>(documentIds: readonly string[], work: () => T | Promise<T>): Promise<T> {
@@ -1284,7 +1291,22 @@ export class DocumentToolGateway implements ToolGateway {
         }
       }
     }
-    if (call.name === 'skills.read') return this.hostTools.readSkill(runId, call.input)
+    if (call.name === 'skills.read') {
+      const result = await this.hostTools.readSkill(runId, call.input)
+      const input = skillReadInputSchema.safeParse(call.input)
+      if (result.kind === 'read' && input.success && input.data.path === 'SKILL.md') {
+        const run = this.run(runId)
+        if (input.data.skill === 'orchestrate-courseware' || input.data.skill === 'edit-content') {
+          run.loadedFamilies.add('content')
+          run.courseAuthoring = input.data.skill === 'orchestrate-courseware'
+          run.advertised = undefined
+        } else if (input.data.skill === 'build-courseware-project') {
+          run.courseAuthoring = false
+          run.advertised = undefined
+        }
+      }
+      return result
+    }
     if (call.name === 'skills.list') return this.hostTools.listSkills(runId, call.input)
     if (isWorkbenchServiceTool(call.name)) {
       const value = workbenchServiceSchemas[call.name].parse(call.input) as Record<string, unknown>
