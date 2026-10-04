@@ -38,8 +38,7 @@ import { ChatGPTImageProvider } from './images/ChatGPTImageProvider'
 import { OpenAIImagesApiProvider } from './images/OpenAIImagesApiProvider'
 import { imageRoute } from './images/imageRoute'
 import { executionSettingsStore, resolveOAuthCredential } from './providers/executionSettingsService'
-import { OpenImageService } from './assetSources/OpenImageService'
-import { openLibraryUserAgent, publicAssetHttp } from './assetSources/publicAssetHttp'
+import { createWorkbenchOpenImageService } from './assetSources/pixabayDesktopService'
 import { AssetLibraryService, readComponentLibrary } from './assetSources/componentLibrarySearch'
 import { managedComponentLibrary } from '../componentCatalogSources'
 
@@ -132,7 +131,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   const delegationWriteVerified = process.env.GUOLING_CODEX_DELEGATION_WRITE_VERIFIED === '1'
   const jobs = new HostJobService({ images, builds, compute, delegation })
   const web = new WebResearchService()
-  const openImages = new OpenImageService({ http: publicAssetHttp(openLibraryUserAgent(app.getVersion())) })
+  const openImages = createWorkbenchOpenImageService(app.getVersion())
   const assetLibrary = new AssetLibraryService({ load: () => readComponentLibrary(app.getAppPath(), app.getPath('userData')),
     managedLibrary: managedComponentLibrary(app.getPath('userData')) })
   // Agent and human share the task's main-owned embedded page.

@@ -9,6 +9,7 @@ import { mediaFilesRequestSchema } from '../shared/workbench/mediaFiles'
 import { operateMediaFiles } from './workbench/mediaFilesDesktopService'
 import { operateExternalMcp, closeExternalMcpService } from './workbench/external/externalDesktopService'
 import { operateExecutionSettings } from './workbench/providers/executionSettingsService'
+import { operatePixabaySettings } from './workbench/assetSources/pixabayDesktopService'
 import { executionDesktopService } from './workbench/execution/ExecutionDesktopService'
 import { installDocumentSaveEvents } from './workbench/execution/DocumentSaveEvents'
 import { attachmentsDesktopService } from './workbench/attachments/attachmentsDesktopService'
@@ -382,6 +383,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     code: 'EXECUTION_SETTINGS_FAILED', title: '模型连接设置未完成',
     message: '连接配置未能保存，请保留当前设置。', suggestion: '请检查连接配置及系统安全存储。',
   }, async (_event, args) => operateExecutionSettings(requireSingleArgument(args)))
+  registerSafeHandler(IPC_CHANNELS.pixabaySettings, context, {
+    code: 'PIXABAY_SETTINGS_FAILED', title: 'Pixabay 设置未完成',
+    message: 'Pixabay 设置未能保存，原配置已保留。', suggestion: '请检查系统安全存储。',
+  }, async (_event, args) => operatePixabaySettings(requireSingleArgument(args)))
   const documents = documentHost()
   dynamicContentChangeCleanup?.()
   const contentObservations = new DynamicContentObservationStore(async documentId => {

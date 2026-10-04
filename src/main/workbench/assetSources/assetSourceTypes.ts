@@ -52,7 +52,7 @@ export interface AssetHttpRequest {
 /** 网络访问端口：生产由现有公网访问层实现，测试替换为固定响应。 */
 export interface AssetHttpPort {
   getJson(url: string, options?: AssetHttpRequest): Promise<unknown>
-  getBytes(url: string, options: AssetHttpRequest & { maxBytes: number }): Promise<{ url: string; contentType: string; bytes: Uint8Array }>
+  getBytes(url: string, options: AssetHttpRequest & { maxBytes?: number }): Promise<{ url: string; contentType: string; bytes: Uint8Array }>
 }
 
 /** 图库未启用（例如没有可用的 API key）；检索结果里说明原因，不算失败。 */

@@ -10,7 +10,6 @@ import { commonsRendition, searchCommons } from './wikimediaCommons'
 /** 课件用图取宽约 1600 像素的版本，更大的原图在本机缩小。 */
 export const FETCH_WIDTH = 1600
 const PREVIEW_SIZE = 480
-const DOWNLOAD_MAX_BYTES = 100 * 1024 * 1024
 const PREVIEW_MAX_BYTES = 20 * 1024 * 1024
 // Openverse 的缩略图接口只认含 */* 的 Accept（image/* 返回 406）。
 const IMAGE_ACCEPT = 'image/*,*/*;q=0.8'
@@ -217,7 +216,7 @@ export class OpenImageService {
         const url = candidate.commonsTitle
           ? await commonsRendition(this.options.http, candidate.commonsTitle, FETCH_WIDTH, signal).catch(() => candidate.fileUrl)
           : candidate.fileUrl
-        const response = await this.options.http.getBytes(url, { signal, maxBytes: DOWNLOAD_MAX_BYTES, headers: { Accept: IMAGE_ACCEPT } })
+        const response = await this.options.http.getBytes(url, { signal, headers: { Accept: IMAGE_ACCEPT } })
         const image = await normalizeImage(response.bytes, FETCH_WIDTH, input.format)
         return { status: 'ready' as const, file: { bytes: image.bytes, mimeType: image.mimeType, filename: filenameFor(candidate.title, image.mimeType) },
           width: image.width, height: image.height, source: openLibrarySource(candidate) }
@@ -227,4 +226,3 @@ export class OpenImageService {
     }
   }
 }
-
