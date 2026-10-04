@@ -48,7 +48,7 @@ import { rotatedRectangleAabb } from '../../shared/geometry'
 import { htmlImportInputSchema } from './HtmlImportTools'
 import { isProjectFileToolName } from './ProjectFileTools'
 import { skillReadInputSchema } from './SkillTools'
-import { ProjectFileCoordinator, type CourseModel, type CourseSnapshot, type ProjectFileCommit } from '../projectFiles/ProjectFileCoordinator'
+import { ProjectFileCoordinator, projectFileLocationId, type CourseModel, type CourseSnapshot, type ProjectFileCommit } from '../projectFiles/ProjectFileCoordinator'
 import { readProjectFile } from '../projectFiles/projectFileView'
 import { assetFilePath } from '../projectFiles/pageHtml'
 import { componentPathName, planComponentWrite } from '../projectFiles/definitionFiles'
@@ -1363,6 +1363,13 @@ export class DocumentToolGateway implements ToolGateway {
         subject?: string[]; schoolStage?: string[]; tags?: string[] })
     }
     if (call.name === 'view.observe') return this.hostTools.observePage({ runId, operationId,
+      resolveFileTarget: async (selector, path) => {
+        const snapshot = await this.projectDocument(runId, selector, 'read')
+        const locationId = projectFileLocationId(snapshot.model, path)
+        if (!locationId) return null
+        return { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
+          projectId: snapshot.model.project.id, locationId }
+      },
       resolveTarget: async handle => {
         const observed = await this.resolveObservationTarget(runId, handle)
         const snapshot = await this.registry.get(observed.documentId).drain()

@@ -9,6 +9,7 @@ import { DocumentHostService } from '../../src/main/workbench/DocumentHostServic
 import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
 import { createDefaultTeacherControllerPackage } from '../../src/shared/defaultTeacherControllerComponent'
 import { parseWebComposition } from '../../src/main/workbench/htmlImport/parseWebComposition'
+import { slidePageFiles } from '../../src/core/projectFiles/projectFileView'
 const directories: string[] = []
 afterEach(async () => { for (const dir of directories.splice(0)) await fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }) })
 
@@ -24,7 +25,17 @@ it('reading the course method exposes project files before opening a course and 
     { name: 'orchestrate-courseware', description: '创作', path: 'skills/orchestrate-courseware/SKILL.md', references: [], version: 'one' },
     { name: 'build-courseware-project', description: '导入', path: 'skills/build-courseware-project/SKILL.md', references: [], version: 'one' },
   ] }, files: { 'skills/orchestrate-courseware/SKILL.md': '创作方法', 'skills/build-courseware-project/SKILL.md': '导入方法' } })
-  host.tools.configureHostServices({ skills, projectFiles: { parsePage: parseWebComposition,
+  let observations = 0
+  host.tools.configureHostServices({ skills, observations: {
+    observe: async input => {
+      observations++
+      expect(input.locationId).toBe(slidePageFiles(project)[0]!.locationId)
+      return { source: 'isolated-published', identity: { documentId: input.documentId, epoch: input.epoch,
+        revision: input.revision, locationId: input.locationId }, coverage: { width: 1, height: 1 },
+        structure: [], diagnostics: [], image: { resourceId: 'page-picture', mimeType: 'image/png', width: 1, height: 1, byteLength: 1 } }
+    },
+    readResource: async () => ({ mimeType: 'image/png', bytes: new Uint8Array([1]) }),
+  }, projectFiles: { parsePage: parseWebComposition,
     openProject: async ({ fileAccess }) => ({ documentId: session.documentId, writable: fileAccess?.permission !== 'read-only' }) } })
   for (const permission of ['workspace', 'read-only'] as const) {
     const runId = `method-${permission}`
@@ -39,11 +50,16 @@ it('reading the course method exposes project files before opening a course and 
     expect(names.includes('project.write')).toBe(permission !== 'read-only')
     expect(await host.tools.execute(runId, 'list', { name: 'project.list', input: { project: '四季.h5lesson' } }))
       .toMatchObject({ kind: 'read', data: { files: expect.arrayContaining([expect.objectContaining({ path: 'theme.css' })]) } })
+    expect(await host.tools.execute(runId, 'observe', { name: 'view.observe', input: { path: slidePageFiles(project)[0]!.path } }))
+      .toMatchObject({ kind: 'read', data: { source: 'isolated-published' } })
+    expect(await host.tools.execute(runId, 'missing-page', { name: 'view.observe', input: { path: 'slides/99-不存在.html' } }))
+      .toMatchObject({ kind: 'error', code: 'target-not-found' })
     if (permission === 'read-only') expect(await host.tools.execute(runId, 'write', { name: 'project.write', input: { path: 'theme.css', content: ':root { color: red }' } }))
       .toMatchObject({ kind: 'error' })
     await host.tools.stop(runId)
   }
   expect(session.read().revision).toBe(initialRevision)
+  expect(observations).toBe(2)
 })
 async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-scoped-skill-')); directories.push(root)
