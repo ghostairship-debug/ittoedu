@@ -244,12 +244,12 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     const block = { ...node.attrs.data, id: node.attrs.id } as DocumentBlock
     const flow = options.presentation === 'flow'
     // Flow draws a divider as playback does: a real rule, not a label.
-    const tag = block.type === 'list' ? block.ordered ? 'ol' : 'ul' : block.type === 'quote' ? 'blockquote' : flow && block.type === 'divider' ? 'hr' : flow && block.type === 'callout' ? 'aside' : flow && ['media', 'chart', 'component'].includes(block.type) ? 'figure' : 'section'
+    const tag = block.type === 'list' ? block.ordered ? 'ol' : 'ul' : block.type === 'quote' ? 'blockquote' : flow && block.type === 'divider' ? 'hr' : flow && block.type === 'callout' ? 'aside' : flow && ['media', 'chart', 'component', 'course-component'].includes(block.type) ? 'figure' : 'section'
     const dom = flow ? flowBlockElement(node, tag) : document.createElement(tag)
     if (!flow) dom.className = `document-object document-${node.attrs.data.type}`
     dom.dataset.documentId = node.attrs.id
     let destroy: (() => void) | void
-    if (options.renderObject && ['media', 'chart', 'component'].includes(block.type)) {
+    if (options.renderObject && ['media', 'chart', 'component', 'course-component'].includes(block.type)) {
       const object = document.createElement('div'); object.contentEditable = 'false'; dom.append(object)
       // A click on the picture, chart or component itself (not its caption) selects the whole block, so its quick bar
       // opens as it does for objects on a page (M21). ProseMirror alone selects such a block only on Ctrl+click.
@@ -275,7 +275,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     } else if (!editableSlots && !(flow && block.type === 'divider')) dom.textContent = `${block.type} 对象`
     // ProseMirror owns every child of contentDOM. Keep editable captions separate
     // from the React media host so mounting the caption cannot remove the media.
-    const ownsRenderedObject = Boolean(options.renderObject && ['media', 'chart', 'component'].includes(block.type))
+    const ownsRenderedObject = Boolean(options.renderObject && ['media', 'chart', 'component', 'course-component'].includes(block.type))
     const contentDOM = editableSlots ? (flow || block.type === 'list') && !ownsRenderedObject ? dom : document.createElement('div') : undefined
     if (contentDOM && contentDOM !== dom) dom.append(contentDOM)
     return { dom, contentDOM, ignoreMutation: (mutation: MutationRecord | { type: 'selection'; target: globalThis.Node }) => mutation.type !== 'selection' && (!contentDOM || !contentDOM.contains(mutation.target)), destroy: () => destroy?.() }
@@ -318,7 +318,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     const assets = new Set<string>(); const components = new Set<string>()
     slice.content.descendants(node => {
       const data = node.attrs.data
-      if (data?.type === 'media') assets.add(data.assetId)
+      if (data?.type === 'media' && data.assetId) assets.add(data.assetId)
       if (data?.type === 'component') { assets.add(data.staticFallbackAssetId); components.add(`${data.component.packageId}@${data.component.version}`) }
     })
     const resources = { assets: options.document.resources.assets.filter(asset => assets.has(asset.assetId)), components: options.document.resources.components.filter(component => components.has(`${component.packageId}@${component.version}`)) }

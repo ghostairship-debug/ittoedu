@@ -35,6 +35,8 @@ export interface FlowPublishedPlaybackDocument {
   /** Course theme for the Web content of the document. */
   readonly designTokens?: ProjectDesignTokens
   readonly theme?: CourseTheme
+  /** Named components that `course-component` blocks mount. */
+  readonly courseComponents?: PublishedCourseV2Payload['courseComponents']
 }
 
 export type FlowPublishedPlaybackSource =
@@ -151,6 +153,7 @@ export function toFlowPublishedPlayback(
     surfaces: cloneJson(surfaces),
     ...(source.designTokens ? { designTokens: cloneJson(source.designTokens) } : {}),
     ...(source.theme ? { theme: cloneJson(source.theme) } : {}),
+    ...(source.courseComponents ? { courseComponents: cloneJson(source.courseComponents) } : {}),
   }
 }
 

@@ -341,10 +341,10 @@ describe('project files through the tool gateway', () => {
     expect(labels()).toEqual(['四季的成因', '观察'])
     expect(surfaceIds()).toEqual(before.filter((_, index) => index !== 4))
     expect(await f.call('e2', 'project.write', { path: 'docs/空.html', content: '<p>没有标题</p>' })).toMatchObject({ kind: 'error', code: 'heading-required' })
-    // An image whose asset does not exist yet is reported, not stored; the rest of the handout is unchanged.
-    const missing = await f.call('e3', 'project.edit', { path: 'docs/讲义.html', edits: [{ old: '<p>四季由此而来。</p>', new: '<p>四季由此而来。</p><figure><img src="../assets/轨道.svg" alt="轨道"></figure>' }] })
-    expect(missing).toMatchObject({ kind: 'document-operation', result: { status: 'unchanged' } })
-    expect(missing.kind === 'document-operation' && missing.advisories?.map(item => item.message).join('')).toContain('assets/轨道.svg')
+    // An image whose asset does not exist yet is kept as written, a pending slot the listing names.
+    applied(await f.call('e3', 'project.edit', { path: 'docs/讲义.html', edits: [{ old: '<p>四季由此而来。</p>', new: '<p>四季由此而来。</p><figure><img src="../assets/轨道.svg" alt="轨道"></figure>' }] }))
+    expect(await f.files()).toEqual(expect.arrayContaining([{ path: 'assets/轨道.svg', type: '待填素材', note: '说明：轨道；引用：docs/讲义.html' }]))
+    expect(data<{ content: string }>(await f.call('r3', 'project.read', { path: 'docs/讲义.html' })).content).toContain('<img src="../assets/轨道.svg" alt="轨道">')
     applied(await f.call('m1', 'project.move', { from: 'docs/讲义.html', to: 'docs/地理讲义.html' }))
     expect(flow().title).toBe('地理讲义')
     applied(await f.call('x1', 'project.delete', { path: 'docs/地理讲义.html' }))

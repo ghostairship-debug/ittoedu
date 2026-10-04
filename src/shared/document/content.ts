@@ -3,6 +3,7 @@ import { chartNativeContentObjectSchema } from '../contracts/native-v1/schema'
 import type { NativeChartContent, TextRunStyle } from '../contracts/native-v1/types'
 import { tableCellSpan, tableMergeIssues, tableMergeRegionSchema, type TableMergeRegion } from '../tableMerge'
 import { parseDocumentMath } from './math'
+import { assetReferencePath, courseComponentNameIssue } from '../composition/projectReferences'
 
 // The 048 root switch will consume these definitions; no legacy Flow writer uses them.
 export interface InlineLink { href: string; title?: string }
@@ -18,7 +19,11 @@ export type DocumentBlock = { id: string } & (
   | ({ type: 'quote'; content: FlowTextContent; citation?: FlowTextContent } & ParagraphStyle)
   | { type: 'list'; ordered: boolean; items: { id: string; content: FlowTextContent }[] }
   | { type: 'divider' }
-  | { type: 'media'; assetId: string; mediaKind: 'image' | 'audio' | 'video'; altText?: string; caption?: FlowTextContent; layout: 'content-width' | 'wide' | 'full-width'; wrap?: 'none' | 'left' | 'right'; crop?: { left: number; top: number; right: number; bottom: number }; cropX?: number; cropY?: number }
+  /**
+   * `source` is a written `assets/...` reference kept as written; software binds `assetId` to the asset
+   * now at that path and drops the binding when it goes. Without `source`, `assetId` is required.
+   */
+  | { type: 'media'; assetId?: string; source?: string; mediaKind: 'image' | 'audio' | 'video'; altText?: string; caption?: FlowTextContent; layout: 'content-width' | 'wide' | 'full-width'; wrap?: 'none' | 'left' | 'right'; crop?: { left: number; top: number; right: number; bottom: number }; cropX?: number; cropY?: number }
   | { type: 'table'; caption?: FlowTextContent; headerEnabled?: boolean; columns: { id: string; header: FlowTextContent }[]; rows: { id: string; cells: Record<string, FlowTextContent> }[]; merges?: TableMergeRegion[] }
   | { type: 'chart'; chart: NativeChartContent; height: number }
   | { type: 'formula'; formulaId: string; latex: string; accessibleText: string; style?: MathStyle }
@@ -26,6 +31,11 @@ export type DocumentBlock = { id: string } & (
   | { type: 'callout'; tone: 'note' | 'example' | 'warning' | 'conclusion'; title?: FlowTextContent; body: FlowTextContent }
   | { type: 'section'; title: FlowTextContent; collapsedByDefault: boolean; blocks: DocumentBlock[] }
   | { type: 'component'; component: { packageId: string; version: string }; props: Record<string, unknown>; staticFallbackAssetId: string; wrap?: 'none' | 'left' | 'right' }
+  /**
+   * A named course component (`components/<name>.html`). `project.components` owns its definition; the block
+   * keeps only the name and its own instance fields, and shows a placeholder titled `title` until the name exists.
+   */
+  | { type: 'course-component'; name: string; title?: string; height?: number; wrap?: 'none' | 'left' | 'right' }
 )
 
 export const documentIdSchema = z.string().min(1).max(240).refine(s => s === s.trim(), '身份不得含首尾空白')
@@ -52,12 +62,14 @@ const cropFraction = z.number().finite().min(0).max(1)
 const documentMediaCropSchema = z.object({
   left: cropFraction, top: cropFraction, right: cropFraction, bottom: cropFraction,
 }).strict()
-const media = z.object({ ...base, type: z.literal('media'), assetId: documentIdSchema,
+const media = z.object({ ...base, type: z.literal('media'), assetId: documentIdSchema.optional(),
+  source: z.string().min(1).max(2000).refine(value => assetReferencePath(value) !== null, '素材引用须指向 assets/ 下的文件').optional(),
   mediaKind: z.enum(['image', 'audio', 'video']), altText: z.string().max(4000).optional(),
   caption: documentTextContentSchema.optional(), layout: z.enum(['content-width', 'wide', 'full-width']),
   wrap: z.enum(['none', 'left', 'right']).optional(), crop: documentMediaCropSchema.optional(),
   cropX: cropFraction.optional(), cropY: cropFraction.optional(),
 }).strict().superRefine((block, ctx) => {
+  if (block.assetId === undefined && block.source === undefined) ctx.addIssue({ code: 'custom', path: ['assetId'], message: '媒体正文块需要素材或素材引用' })
   if (block.mediaKind !== 'image' && (block.crop || block.cropX !== undefined || block.cropY !== undefined)) {
     ctx.addIssue({ code: 'custom', path: ['crop'], message: '只有图片正文块可以裁剪' })
   }
@@ -97,6 +109,10 @@ export const documentBlockSchema: z.ZodType<DocumentBlock> = z.lazy(() => z.disc
   z.object({ ...base, type: z.literal('callout'), tone: z.enum(['note', 'example', 'warning', 'conclusion']), title: documentTextContentSchema.optional(), body: documentTextContentSchema }).strict(),
   z.object({ ...base, type: z.literal('section'), title: documentTextContentSchema, collapsedByDefault: z.boolean(), blocks: z.array(documentBlockSchema).max(100000) }).strict(),
   z.object({ ...base, type: z.literal('component'), component: z.object({ packageId: documentIdSchema, version: z.string().trim().min(1).max(100) }).strict(), props: z.record(z.string(), z.json()), staticFallbackAssetId: documentIdSchema, wrap: z.enum(['none', 'left', 'right']).optional() }).strict(),
+  z.object({ ...base, type: z.literal('course-component'),
+    name: z.string().superRefine((value, ctx) => { const issue = courseComponentNameIssue(value); if (issue) ctx.addIssue({ code: 'custom', message: issue }) }),
+    title: z.string().max(500).optional(), height: z.number().finite().positive().max(10_000).optional(),
+    wrap: z.enum(['none', 'left', 'right']).optional() }).strict(),
 ]))
 
 /** All editable body slots, including headers/captions that were formerly strings. */

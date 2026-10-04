@@ -157,6 +157,7 @@ export function flowBlockLabel(block: FlowBlock): string {
   if (block.type === 'code') return block.language ? `代码·${block.language}` : '代码'
   if (block.type === 'formula') return block.accessibleText.trim() || '公式'
   if (block.type === 'component') return `组件·${block.component.packageId}`
+  if (block.type === 'course-component') return block.title?.trim() || `组件·${block.name}`
   if (block.type === 'list') return (block.items[0] ? plainDocumentText(block.items[0].content).trim().slice(0, 48) : '') || '列表'
   if (block.type === 'chart') return block.chart.title?.trim() || '图表'
   if (block.type === 'table') return (block.caption ? plainDocumentText(block.caption).trim() : undefined) || '表格'

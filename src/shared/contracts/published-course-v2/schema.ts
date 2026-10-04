@@ -1,6 +1,7 @@
 import { documentContentSchema, walkDocument } from '../../document/content'
 import { createWebCompositionSchema } from '../../composition/schema'
 import { visitCompositionReferences } from '../../composition/references'
+import { courseComponentNameIssue } from '../../composition/projectReferences'
 import { nativeInputReferenceIssues, sceneNativeInputs } from '../../composition/nativeInputs'
 import { z } from 'zod'
 import { mismatchedSlideCanvasIndexes, slideCanvasSchema } from '../../slideCanvas'
@@ -1066,6 +1067,12 @@ export const publishedCourseV2Schema = z.object({
   backgroundAssetId: stableIdSchema.nullable().optional(),
   assets: z.record(z.string(), publishedAssetSchema),
   components: z.record(z.string(), publishedComponentSchema),
+  courseComponents: z.record(z.string(), publishedRuntimeSchema).superRefine((components, context) => {
+    for (const name of Object.keys(components)) {
+      const issue = courseComponentNameIssue(name)
+      if (issue) context.addIssue({ code: 'custom', path: [name], message: issue })
+    }
+  }).optional(),
   designTokens: courseProjectDesignTokensSchema,
   theme: courseThemeSchema.optional(),
   credits: z.array(publishedCreditSchema).optional(),
@@ -1084,6 +1091,9 @@ export const publishedCourseV2Schema = z.object({
   Object.entries(payload.theme?.assets ?? {}).forEach(([key, binding]) => {
     if (!payload.assets[binding.assetId]) context.addIssue({ code: 'custom', path: ['theme', 'assets', key, 'assetId'], message: `Missing asset: ${binding.assetId}` })
   })
+  Object.entries(payload.courseComponents ?? {}).forEach(([name, runtime]) => Object.entries(runtime.assets).forEach(([key, binding]) => {
+    if (!payload.assets[binding.assetId]) context.addIssue({ code: 'custom', path: ['courseComponents', name, 'assets', key, 'assetId'], message: `Missing asset: ${binding.assetId}` })
+  }))
   mismatchedSlideCanvasIndexes(payload.surfaces).forEach(index => context.addIssue({ code: 'custom', path: ['surfaces', index, 'canvas'], message: 'All Slide surfaces in a course must share one canvas size' }))
 })
 

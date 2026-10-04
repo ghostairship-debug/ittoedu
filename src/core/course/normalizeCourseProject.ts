@@ -12,6 +12,7 @@ import type {
   CourseComponentDefinition,
   CourseProjectDocument,
   CourseRuntimeDefinition,
+  FlowBlock,
   LayerItem,
   SlidePresentationState,
   SlideSceneDocument,
@@ -80,6 +81,19 @@ function bindAssetSlots(
   for (const slot of slots) {
     const assetId = index.get(slot)
     if (assetId) bindings[slot] = { assetId }
+  }
+}
+
+/** Media blocks written as `assets/...` show the asset now at that path when its kind fits, and wait otherwise. */
+function bindMediaSources(blocks: FlowBlock[], index: ReadonlyMap<string, string>, kinds: ReadonlyMap<string, string>): void {
+  for (const block of blocks) {
+    if (block.type === 'section') bindMediaSources(block.blocks, index, kinds)
+    else if (block.type === 'media' && block.source !== undefined) {
+      const path = assetReferencePath(block.source)
+      const assetId = path ? index.get(path) : undefined
+      if (assetId && kinds.get(assetId) === block.mediaKind) block.assetId = assetId
+      else delete block.assetId
+    }
   }
 }
 
@@ -180,16 +194,18 @@ function syncFragmentStates(project: CourseProjectDocument, surfaceId: string, s
 /**
  * Software-maintained facts derived from authored content. Runs after every
  * change of a course and on new candidates; idempotent. Mutates `project`.
- * - binds `assets/...` references of compositions and the theme to assets now present;
+ * - binds `assets/...` references of compositions, the theme and Flow media blocks to assets now present;
  * - rewrites page copies of named components from `project.components`;
  * - keeps the in-page step states of every Slide scene in step with its fragments.
  */
 export function normalizeCourseProjectInPlace(project: CourseProjectDocument): void {
   const index = assetSlotIndex(project)
+  const kinds = new Map(Object.values(project.assets).map(asset => [asset.id, asset.kind]))
   const components = project.components ?? {}
   for (const item of compositionItems(project)) {
     syncComponentCopies(item.content, components)
     bindAssetSlots(item.content.assets, compositionAssetSlots(item.content), index)
+    walk(item.content.root, node => { if (node.kind === 'document') bindMediaSources(node.content.blocks, index, kinds) })
   }
   if (project.theme) {
     const assets = { ...project.theme.assets }
@@ -200,6 +216,7 @@ export function normalizeCourseProjectInPlace(project: CourseProjectDocument): v
   if (project.components && !Object.keys(project.components).length) delete project.components
   for (const surface of project.surfaces) {
     if (surface.type === 'slide') surface.scenes.forEach(scene => syncFragmentStates(project, surface.id, scene))
+    else if (surface.type === 'flow') bindMediaSources(surface.blocks, index, kinds)
   }
 }
 

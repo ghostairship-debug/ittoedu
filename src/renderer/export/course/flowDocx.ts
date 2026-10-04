@@ -557,7 +557,7 @@ function renderPrintNode(
       })
       return formulaParagraph(node.latex, leadingContent, node.style)
     case 'media': {
-      if (node.mediaKind === 'image') {
+      if (node.mediaKind === 'image' && node.assetId) {
         const asset = context.resolveAsset(node.assetId)
         const extension = asset ? imageExtension(asset.mimeType) : null
         if (asset && extension) {
@@ -580,12 +580,13 @@ function renderPrintNode(
           }`
         }
       }
-      const reason = node.mediaKind === 'image' && node.crop
+      const reason = !node.assetId ? 'pending asset slot exported as a descriptive placeholder'
+        : node.mediaKind === 'image' && node.crop
         ? 'image crop could not be represented in DOCX; media exported as a descriptive fallback'
         : `${node.mediaKind} media exported as a descriptive fallback`
       context.warnings.push(`${node.blockId}: ${reason}`)
       context.report.push({ blockId: node.blockId, disposition: 'fallback', detail: reason })
-      return `${paragraph(`[媒体后备：${node.fallbackLabel}]`, { italic: true, leadingContent })}${node.caption ? paragraph(node.caption, { style: 'Caption' }) : ''}`
+      return `${paragraph(`[${node.assetId ? '媒体后备' : '待填素材'}：${node.fallbackLabel}]`, { italic: true, leadingContent })}${node.caption ? paragraph(node.caption, { style: 'Caption' }) : ''}`
     }
     case 'code':
       context.report.push({ blockId: node.blockId, disposition: 'preserved', detail: 'Native monospaced code paragraph' })

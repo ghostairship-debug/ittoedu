@@ -22,7 +22,7 @@ export function documentResourceReferences(blocks: readonly DocumentBlock[]) {
   const assets = new Set<string>()
   const components = new Map<string, { packageId: string; version: string }>()
   walkDocument(blocks, block => {
-    if (block.type === 'media') assets.add(block.assetId)
+    if (block.type === 'media' && block.assetId) assets.add(block.assetId)
     if (block.type === 'component') {
       assets.add(block.staticFallbackAssetId)
       components.set(JSON.stringify([block.component.packageId, block.component.version]), block.component)
