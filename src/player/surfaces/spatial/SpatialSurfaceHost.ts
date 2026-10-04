@@ -33,7 +33,9 @@ import {
   publishedSpatialInputFromCourse,
   publishedSpatialPaths,
   publishedSpatialRelations,
+  spatialScreenToWorld,
   spatialWorldGroupTransform,
+  spatialWorldToScreen,
   worldItemWithinRuntimeCamera,
   type PublishedSpatialRuntimeInput,
   type SpatialPlaybackEntry,
@@ -336,7 +338,8 @@ function createWorldItem(
 }
 
 function spatialWorldHtmlTransform(camera: SpatialRuntimeCamera): string {
-  return `translate(${camera.viewportWidth / 2}px, ${camera.viewportHeight / 2}px) scale(${camera.zoom}) translate(${-camera.x}px, ${-camera.y}px)`
+  const rotation = camera.rotation ? ` rotate(${-camera.rotation}deg)` : ''
+  return `translate(${camera.viewportWidth / 2}px, ${camera.viewportHeight / 2}px)${rotation} scale(${camera.zoom}) translate(${-camera.x}px, ${-camera.y}px)`
 }
 
 function createWorldVideoHtml(
@@ -1113,17 +1116,17 @@ export class SpatialSurfaceHost {
         })
         const world = coordinateSpace === 'world'
         const scale = world ? captureCamera.zoom : 1
+        // A world item is placed by its center, so a turned camera turns it about that center too.
+        const center = world
+          ? spatialWorldToScreen(captureCamera, { x: item.frame.x + item.frame.width / 2, y: item.frame.y + item.frame.height / 2 })
+          : { x: item.frame.x + item.frame.width / 2, y: item.frame.y + item.frame.height / 2 }
         layers.push({
           element: wrapper,
-          x: world
-            ? (item.frame.x - captureCamera.x) * captureCamera.zoom + width / 2
-            : item.frame.x,
-          y: world
-            ? (item.frame.y - captureCamera.y) * captureCamera.zoom + height / 2
-            : item.frame.y,
+          x: center.x - item.frame.width * scale / 2,
+          y: center.y - item.frame.height * scale / 2,
           width: item.frame.width * scale,
           height: item.frame.height * scale,
-          rotation: item.rotation,
+          rotation: item.rotation - (world ? captureCamera.rotation ?? 0 : 0),
           opacity: item.opacity,
         })
       }
@@ -1419,8 +1422,8 @@ export class SpatialSurfaceHost {
     const left = parseFloat(this.#root.style.left) || 0, top = parseFloat(this.#root.style.top) || 0
     const centerX = ((view.viewport.width / 2 - view.pan.x) / view.zoom - left) / scale
     const centerY = ((view.viewport.height / 2 - view.pan.y) / view.zoom - top) / scale
-    return { ...camera, x: camera.x + (centerX - camera.viewportWidth / 2) / camera.zoom,
-      y: camera.y + (centerY - camera.viewportHeight / 2) / camera.zoom,
+    const center = spatialScreenToWorld(camera, { x: centerX, y: centerY })
+    return { ...camera, x: center.x, y: center.y,
       zoom: camera.zoom * view.zoom,
       viewportWidth: view.viewport.width / scale, viewportHeight: view.viewport.height / scale }
   }

@@ -7,6 +7,7 @@ import {
   spatialCameraTourStops,
   spatialPosesEqual,
   spatialRuntimeCameraFromPose,
+  spatialRuntimeCameraPose,
   validateSpatialRuntimeCamera,
   type PublishedSpatialRuntimeInput,
   type SpatialRuntimeCamera,
@@ -145,10 +146,7 @@ export function spatialRuntimeGoPrevious(session: SpatialRuntimeSession): Spatia
   }
   if (session.tourIndex <= 0) {
     const home = session.input.surface.camera.home
-    const alreadyHome = spatialPosesEqual(
-      { x: session.camera.x, y: session.camera.y, zoom: session.camera.zoom },
-      home,
-    )
+    const alreadyHome = spatialPosesEqual(spatialRuntimeCameraPose(session.camera), home)
     if (alreadyHome && session.tourIndex <= 0) {
       return { session: copySession(session), atBoundary: true }
     }
@@ -252,10 +250,7 @@ export function selectSpatialRuntimePlaybackPath(
 export function spatialRuntimeAtStart(session: SpatialRuntimeSession): boolean {
   if (!session.camera) return true
   const home = session.input.surface.camera.home
-  return session.tourIndex <= 0 && spatialPosesEqual(
-    { x: session.camera.x, y: session.camera.y, zoom: session.camera.zoom },
-    home,
-  )
+  return session.tourIndex <= 0 && spatialPosesEqual(spatialRuntimeCameraPose(session.camera), home)
 }
 
 export function spatialRuntimeAtEnd(session: SpatialRuntimeSession): boolean {

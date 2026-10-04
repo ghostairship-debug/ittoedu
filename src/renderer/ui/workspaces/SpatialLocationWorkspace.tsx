@@ -1190,6 +1190,8 @@ export function SpatialLocationWorkspace({
                       top: frame.y - height / 2,
                       width,
                       height,
+                      // A turned stop shows the world region turned by its angle.
+                      ...(frame.rotation ? { transform: `rotate(${frame.rotation}deg)` } : {}),
                     }}
                   />
                 )
