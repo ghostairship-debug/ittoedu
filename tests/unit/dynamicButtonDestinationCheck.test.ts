@@ -7,7 +7,9 @@ const probe = vi.hoisted(() => ({ locationId: '', stateId: null as string | null
 vi.mock('@/renderer/authoring/tools/dynamicCandidateFallbackAssets', () => ({ validateDynamicCandidateFallbackAssets: vi.fn(async () => {}) }))
 vi.mock('@/renderer/export/course/buildPublishedCourse', () => ({ buildPublishedCourseV2Payload: vi.fn(() => ({})), collectPublishedCourseSourceIssues: vi.fn(() => []) }))
 vi.mock('@/player/surfaces/publishedCapture', () => ({ waitForPublishedObservationReady: vi.fn(async () => {}), capturePublishedSurfacePng: vi.fn(async () => 'data:image/png;base64,AA==') }))
-vi.mock('@/player/surfaces/publishedDynamicUpdateProbe', () => ({
+// The real element query walks the mounted tree; only the update/lifecycle exercises are stubbed.
+vi.mock('@/player/surfaces/publishedDynamicUpdateProbe', async importOriginal => ({
+  ...await importOriginal<typeof import('@/player/surfaces/publishedDynamicUpdateProbe')>(),
   exercisePublishedDynamicUpdates: vi.fn(async () => {}),
   exercisePublishedDynamicLifecycle: vi.fn(async () => {}),
 }))
