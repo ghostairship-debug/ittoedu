@@ -1038,6 +1038,7 @@ export class SpatialSurfaceHost {
       nextSession,
       replaceCarriers,
       pendingActivation !== null,
+      inStopStep,
     )
     if (!replaceCarriers && (previousLocationId !== locationId || previousStep !== this.#fragmentStep)) {
       await this.#updateFragmentContents()
@@ -1236,9 +1237,10 @@ export class SpatialSurfaceHost {
     nextSession: SpatialRuntimeSession,
     replaceCarriers = false,
     resumeCarriers = false,
+    preserveInteractions = false,
   ): void {
     this.#invalidateInteractions()
-    this.#interactionPort?.resetLocalVisibility()
+    if (!preserveInteractions) this.#interactionPort?.resetLocalVisibility()
     if (replaceCarriers) this.#destroyRecords()
     this.#session = nextSession
     this.#updateWorldTransform()

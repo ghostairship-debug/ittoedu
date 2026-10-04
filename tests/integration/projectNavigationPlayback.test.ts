@@ -119,7 +119,9 @@ it('a real link inside a Spatial composition advances the actual course location
   if (surface.type !== 'spatial-2d') throw new Error('Expected Spatial fixture')
   const card = surface.world.layerItems.find(item => item.layerItemId === 'a')!
   if (card.kind !== 'composition') throw new Error('Expected composition card')
-  const parsed = parsePageHtml('<!doctype html><html><body><h2>甲卡</h2><a href="#stop-b"><span>前往乙卡</span></a></body></html>',
+  const parsed = parsePageHtml(`<html><body><h2>甲卡</h2>
+    <button aria-controls="answer">切换答案</button><div id="answer" hidden>甲卡答案</div>
+    <p class="fragment">甲卡下一步</p><a href="#stop-b"><span>前往乙卡</span></a></body></html>`,
     { parse: parseWebComposition, assets: {} })
   if (parsed.kind !== 'composition') throw new Error('Expected static HTML composition')
   card.content = parsed.content
@@ -133,9 +135,23 @@ it('a real link inside a Spatial composition advances the actual course location
     const frame = page.frameLocator('iframe[data-web-composition="a"]')
     await frame.getByRole('link', { name: '前往乙卡' }).waitFor({ state: 'visible' })
     expect(await location(page)).toBe('stop-a')
+    const answer = frame.locator('#answer')
+    await frame.getByRole('button', { name: '切换答案' }).click()
+    await expect.poll(() => answer.isVisible(), { timeout: 1500 }).toBe(true)
+    expect(await page.evaluate(() => (window as any).session.nextStep())).toBe(true)
+    await frame.locator('.fragment').waitFor({ state: 'visible' })
+    expect(await answer.isVisible()).toBe(true)
+    await frame.getByRole('button', { name: '切换答案' }).click()
+    await expect.poll(() => answer.isVisible(), { timeout: 1500 }).toBe(false)
+    await frame.getByRole('button', { name: '切换答案' }).click()
+    await expect.poll(() => answer.isVisible(), { timeout: 1500 }).toBe(true)
     await frame.getByRole('link', { name: '前往乙卡' }).click()
     await expect.poll(() => location(page), { timeout: 1500 }).toBe('stop-b')
     await page.frameLocator('iframe[data-web-composition="b"]').getByRole('heading', { name: 'b', exact: true })
       .waitFor({ state: 'visible' })
+    await page.evaluate(() => (window as any).session.goToLocation('stop-a'))
+    await expect.poll(() => answer.isVisible(), { timeout: 1500 }).toBe(false)
+    await frame.getByRole('button', { name: '切换答案' }).click()
+    await expect.poll(() => answer.isVisible(), { timeout: 1500 }).toBe(true)
   } finally { await close(page) }
 })

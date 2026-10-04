@@ -98,8 +98,8 @@ export function mapHtmlInteractions(input: {
     if (!locationId || target.path === input.page.path && !target.anchor) continue
     add(address, '跳到课程位置', 'go', [{ type: 'location.go', locationId }])
   }
-  if (input.page.sceneId && declarations.size) {
-    const id = `${PREFIX}${input.page.sceneId}:reset`
+  if (declarations.size) {
+    const id = `${PREFIX}${input.page.sceneId ?? input.page.locationId}:reset`
     rules.push({ id, name: '恢复内容初始显示', enabled: true, trigger: { type: 'scene.enter' }, conditions: [],
       actions: [...declarations.values()].map((state, index) => ({ id: `${id}:${index}`, start: 'after-previous', delayMs: 0,
         action: { type: 'course-state.set', key: state.key, value: state.defaultValue } })) })
