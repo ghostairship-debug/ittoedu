@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { VisualAnalysisService } from '../../src/main/workbench/execution/VisualAnalysisService'
-import type { ModelEvent, ModelSelection } from '../../src/shared/workbench/modelProvider'
+import type { ModelChatMessage, ModelEvent, ModelSelection } from '../../src/shared/workbench/modelProvider'
 import type { ObservationResult } from '../../src/shared/workbench/toolPorts'
 
 const bytes = Uint8Array.from(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64'))
@@ -66,7 +66,7 @@ describe('frozen visual fallback', () => {
     })
     const service = new VisualAnalysisService({ frozenSelection: () => selection,
       provider: { stream }, observation: { readResource: vi.fn() } })
-    const source = { role: 'user' as const, content: [{ type: 'text', text: '已取回材料原图' },
+    const source: ModelChatMessage = { role: 'user', content: [{ type: 'text', text: '已取回材料原图' },
       { type: 'image_url', image_url: { url: `data:image/png;base64,${Buffer.from(bytes).toString('base64')}` } }] }
     const input = { runId: 'run', sourceId: 'run:run:4', source, question: '图里是什么？' }
     expect(await service.analyzeImage(input)).toMatchObject({ status: 'analyzed', conclusion: '红色方块。', selection: { model: 'vision-model' } })
