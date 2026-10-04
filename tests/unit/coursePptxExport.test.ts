@@ -14,13 +14,12 @@ import { buildCourseExportPageList } from '@/renderer/export/course/buildCourseP
 import { buildCoursePptx } from '@/renderer/export/course/buildCoursePptx'
 import { collectCourseProjectExportPreflight } from '@/renderer/export/exportPreflight'
 import { addPptxFormulaNode, addPptxShapeNode } from '@/renderer/export/pptxTextAndShape'
-import { WIDE_SLIDE_HEIGHT, WIDE_SLIDE_WIDTH } from '@/renderer/export/pptxShared'
 import { createBlankCourseProject } from '@/core/course/createCourseProject'
 import { parsePptxImport } from '@/renderer/project/pptxImport'
 import { mergeTableCells } from '@/renderer/course/tableContentOperations'
 import { planPptxImportTransaction } from '@/renderer/project/pptxImportTransaction'
 import { pptxInheritanceFixture, pptxCommonMappingFixture, pptxEditablePathsFixture } from '../fixtures/pptxImport'
-import { APP_COMPANY, APP_NAME, CANVAS_HEIGHT, CANVAS_WIDTH } from '@/shared/constants'
+import { APP_COMPANY, APP_NAME } from '@/shared/constants'
 import { createShapeNode, createTextNode, createFormulaNode, createTableNode, createChartNode, createTableLayerItem, createChartLayerItem } from '@/core/tools/nativeNodeFactories'
 import {
   listCourseProjectV9Fixtures,
@@ -970,10 +969,9 @@ describe('buildCoursePptx', () => {
     const ext = spXml.match(/<a:ext cx="(-?\d+)" cy="(-?\d+)"\/>/)
     expect(off).toBeTruthy()
     expect(ext).toBeTruthy()
-    const scaleX = WIDE_SLIDE_WIDTH / CANVAS_WIDTH
-    const scaleY = WIDE_SLIDE_HEIGHT / CANVAS_HEIGHT
-    const toEmuX = (px: number) => Math.round(914400 * px * scaleX)
-    const toEmuY = (px: number) => Math.round(914400 * px * scaleY)
+    // Pages take the scene canvas at 96 px per inch (1280×720 → exactly 13⅓ × 7.5 in).
+    const toEmuX = (px: number) => Math.round(914400 * px / 96)
+    const toEmuY = (px: number) => Math.round(914400 * px / 96)
     expect(Number(off![1])).toBe(toEmuX(100))
     expect(Number(off![2])).toBe(toEmuY(50))
     expect(Number(ext![1])).toBe(toEmuX(300))
