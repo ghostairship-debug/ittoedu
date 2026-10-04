@@ -248,7 +248,7 @@ export function resolveSpatialPlaybackSchedule(
         kind: 'camera-frame',
         frameId: frame.id,
         locationId: location.id,
-        pose: { x: frame.x, y: frame.y, zoom: frame.zoom },
+        pose: { x: frame.x, y: frame.y, zoom: frame.zoom, ...(frame.rotation ? { rotation: frame.rotation } : {}) },
         authoringAddress: spatialCameraFrameAuthoringAddress(project.id, surfaceId, frame.id),
       }
     })

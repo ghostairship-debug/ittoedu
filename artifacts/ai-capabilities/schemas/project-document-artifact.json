@@ -1534,6 +1534,15 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "rotation": {
+                "$ref": "#/$defs/__schema61",
+                "maximum": 36000,
+                "minimum": -36000,
+                "type": "number"
+              },
+              "targetLayerItemId": {
+                "$ref": "#/$defs/__schema1"
+              },
               "x": {
                 "$ref": "#/$defs/__schema61"
               },
@@ -1561,6 +1570,12 @@
         "home": {
           "additionalProperties": false,
           "properties": {
+            "rotation": {
+              "$ref": "#/$defs/__schema61",
+              "maximum": 36000,
+              "minimum": -36000,
+              "type": "number"
+            },
             "x": {
               "$ref": "#/$defs/__schema61"
             },

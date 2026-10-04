@@ -65,6 +65,12 @@
       "__schema0": {
         "additionalProperties": false,
         "properties": {
+          "rotation": {
+            "$ref": "#/$defs/__schema1",
+            "maximum": 36000,
+            "minimum": -36000,
+            "type": "number"
+          },
           "x": {
             "$ref": "#/$defs/__schema1"
           },

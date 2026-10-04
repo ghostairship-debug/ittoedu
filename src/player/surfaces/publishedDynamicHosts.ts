@@ -372,10 +372,12 @@ function unsupportedPublishedAuthoringMessage(
 
 interface PublishedInteractionCapableHost extends SurfaceHost {
   getPublishedInteractionSurfacePort(): PublishedInteractionSurfacePort | null
-  /** One-shot, session-only state request used by scene.go(targetStateId). */
+  /** One-shot state request for exact scene states and derived Spatial fragment steps.
+   * Spatial step navigation retains carriers; explicit replay still resets them. */
   preparePublishedPresentationState?(
     locationId: string,
     stateId: string | undefined,
+    preserveCarriers?: boolean,
   ): boolean
   validatePublishedPresentationState?(
     locationId: string,
@@ -414,8 +416,8 @@ function preparePublishedInitialPresentationState(
   const location = playback.locations.find((candidate) => (
     candidate.id === playback.startLocationId
   ))
-  if (!location || location.kind !== 'slide-scene') {
-    throw new Error('试运行初始命名状态只能用于明确的 Slide 场景位置。')
+  if (!location || (location.kind !== 'slide-scene' && location.kind !== 'spatial-camera')) {
+    throw new Error('试运行初始命名状态只能用于明确的 Slide 场景或 Spatial 停靠点。')
   }
   const targetHost = interactionCapableHost(
     hosts.find((host) => host.id === location.surfaceId),
@@ -1427,7 +1429,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
     if (!target || !current || signal.aborted) return false
     const force = options.force === true || step.stateId !== undefined
     if (current.locationId === target.id && !force) return false
-    const targetHost = target.kind === 'slide-scene' ? interactionCapableHost(this.#hostsById.get(target.surfaceId)) : null
+    const targetHost = interactionCapableHost(this.#hostsById.get(target.surfaceId))
     const prepareState = step.stateId !== undefined || (options.prepareInitialState === true && target.kind === 'slide-scene')
     if (prepareState && (!targetHost?.validatePublishedPresentationState || !targetHost.validatePublishedPresentationState(target.id, step.stateId))) return false
     if (!this.#claimTerminalNavigation(signal)) return false
@@ -1440,7 +1442,7 @@ class PublishedInteractionCourseSession extends PublishedCourseSession {
         recordHistory: options.recordHistory ?? current.locationId !== target.id,
         signal,
         ...(prepareState ? { prepareTransition: () => {
-          if (!targetHost?.preparePublishedPresentationState || !targetHost.preparePublishedPresentationState(target.id, step.stateId)) {
+          if (!targetHost?.preparePublishedPresentationState || !targetHost.preparePublishedPresentationState(target.id, step.stateId, options.force !== true)) {
             throw new Error(`Unable to prepare Published scene state for ${target.id}`)
           }
         } } : {}),
@@ -2132,6 +2134,22 @@ class SpatialPublishedAdapter implements SurfaceHost {
 
   preparePublishedLocation(locationId: string, forced: boolean): void {
     this.#host.preparePublishedLocation(locationId, forced)
+  }
+
+  getPublishedPresentationStateId(): string | null {
+    return this.#host.getPublishedPresentationStateId()
+  }
+
+  validatePublishedPresentationState(locationId: string, stateId: string | undefined): boolean {
+    return this.#host.validatePublishedPresentationState(locationId, stateId)
+  }
+
+  preparePublishedPresentationState(locationId: string, stateId: string | undefined, preserveCarriers = false): boolean {
+    return this.#host.preparePublishedPresentationState(locationId, stateId, preserveCarriers)
+  }
+
+  cancelPreparedPublishedPresentationState(locationId: string): void {
+    this.#host.cancelPreparedPublishedPresentationState(locationId)
   }
 
   async activate(): Promise<void> {
