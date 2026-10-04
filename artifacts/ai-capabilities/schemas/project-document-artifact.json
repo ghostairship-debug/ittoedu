@@ -1733,7 +1733,6 @@
               "items": {
                 "$ref": "#/$defs/__schema1"
               },
-              "minItems": 1,
               "type": "array"
             },
             "id": {

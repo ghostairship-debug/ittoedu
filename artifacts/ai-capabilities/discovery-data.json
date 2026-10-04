@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "semanticVersion": "55ec7f1d9e89aaeb1dd92131d9dfa3075a7567e9debca3fa4597f1387d869704",
+  "semanticVersion": "65f5779c57df70b1c21f0ec5d0ded77502ae07235cb874108857cd4b5237b7e8",
   "entries": [
     {
       "id": "asset.font.import",
@@ -1121,7 +1121,7 @@
         "runtime"
       ],
       "summary": "教学推进与操作边界",
-      "keywords": "# 教学推进与操作边界"
+      "keywords": "# 教学推进与操作边界\r"
     },
     {
       "id": "reference:build-courseware-project/page-design",
@@ -1342,7 +1342,7 @@
         "runtime"
       ],
       "summary": "教学推进与操作边界",
-      "keywords": "# 教学推进与操作边界"
+      "keywords": "# 教学推进与操作边界\r"
     },
     {
       "id": "reference:orchestrate-courseware/project-files",
@@ -1397,7 +1397,7 @@
     {
       "id": "reference:orchestrate-courseware/teacher-controller",
       "kind": "reference",
-      "label": "教师控制台",
+      "label": "教师控制台与自定义导航",
       "path": "skills/orchestrate-courseware/references/teacher-controller.md",
       "scopes": [
         "slide:scene",
@@ -1416,8 +1416,8 @@
         "generated-component",
         "runtime"
       ],
-      "summary": "教师控制台",
-      "keywords": "# 教师控制台"
+      "summary": "教师控制台与自定义导航",
+      "keywords": "# 教师控制台与自定义导航"
     },
     {
       "id": "reference:orchestrate-courseware/teaching-design-quality",

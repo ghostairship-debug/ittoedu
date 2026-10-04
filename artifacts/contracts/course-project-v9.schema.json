@@ -7349,7 +7349,6 @@
                     "maxLength": 240
                   },
                   "cameraFrameIds": {
-                    "minItems": 1,
                     "type": "array",
                     "items": {
                       "type": "string",
