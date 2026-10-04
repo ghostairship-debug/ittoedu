@@ -15,11 +15,13 @@ export async function validateDynamicCandidateFallbackAssets(project: CourseProj
     const assetId = entry.kind === 'runtime' ? entry.runtime.staticFallback?.assetId : entry.componentItem.staticFallbackAssetId
     if (assetId) fallbacks.push({ assetId, path: [...entry.path, ...(entry.kind === 'runtime' ? ['staticFallback', 'assetId'] : ['staticFallbackAssetId'])] })
   })
+  const decodedAssets = new Set<string>()
   for (const { assetId, path } of fallbacks) {
     const entry = Object.entries(project.assets).find(([key, meta]) => key === assetId || meta.id === assetId)
     try {
       if (!entry || entry[1].kind !== 'image') throw new Error('后备素材不是工程图片')
       const [key, meta] = entry
+      if (decodedAssets.has(meta.id)) continue
       let bytes = resources.assetFiles[meta.id] ?? resources.assetFiles[key]
       const resource = assetResources?.[meta.id] ?? assetResources?.[key]
       if (!bytes && resource) {
@@ -29,6 +31,7 @@ export async function validateDynamicCandidateFallbackAssets(project: CourseProj
       }
       if (!bytes?.length || bytes.byteLength !== meta.byteLength) throw new Error('后备图片的实际字节缺失或长度不匹配')
       await readImageDimensions(bytes, meta.mimeType)
+      decodedAssets.add(meta.id)
     } catch (error) {
       throw new AuthoringToolFailure([{ code: 'dynamic-fallback-image-invalid',
         message: `后备图片“${assetId}”不能完整解码：${error instanceof Error ? error.message : String(error)}`,
