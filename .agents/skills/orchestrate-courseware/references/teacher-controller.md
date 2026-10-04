@@ -4,7 +4,9 @@
 
 改造控制台时先读取 `controller/教师控制台.js`，可以局部修改，也可以重写其界面结构与行为。配色未明确指定时沿用课程主题的 `--color-background`、`--color-text`、`--color-accent`。自定义导航需要控制工程场景、步骤或目录时，可以复用下列宿主接口；自包含程序采用自己的导航时，按实际载体实现并检查用户要求的路径。
 
-控制台是宿主授权的唯一全局控制角色。保留现有 `CoursewareComponent.define`、身份、API 版本及生命周期，使用 `ctx.teacherController`，不从页面 DOM 或全局变量推测课程状态。
+关闭默认控制台用 `project.delete {path:"controller/教师控制台.js"}`，这是可撤销的工程修改，不删除独立导航。需要恢复时，可以将此前读取的源码用 `project.write` 写回同一路径，软件重新建立控制角色；不要另建第二份默认控制器。普通页面跳转也可直接使用相对链接，由软件接入正式导航。
+
+改造现有控制台时，它仍是宿主授权的唯一全局控制角色。保留现有 `CoursewareComponent.define`、身份、API 版本及生命周期，使用 `ctx.teacherController`，不从页面 DOM 或全局变量推测课程状态。普通页面和独立程序不自动取得这个角色。
 
 | 入口 | 用途 |
 |---|---|
