@@ -7001,6 +7001,11 @@
                         "type": "number",
                         "exclusiveMinimum": 0,
                         "maximum": 1000
+                      },
+                      "rotation": {
+                        "type": "number",
+                        "minimum": -36000,
+                        "maximum": 36000
                       }
                     },
                     "required": [
@@ -7035,6 +7040,16 @@
                           "type": "number",
                           "exclusiveMinimum": 0,
                           "maximum": 1000
+                        },
+                        "rotation": {
+                          "type": "number",
+                          "minimum": -36000,
+                          "maximum": 36000
+                        },
+                        "targetLayerItemId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 240
                         }
                       },
                       "required": [

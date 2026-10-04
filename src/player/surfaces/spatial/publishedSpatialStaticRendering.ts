@@ -12,6 +12,7 @@ import {
   collectSpatialPlaybackEntries,
   publishedSpatialInputFromCourse,
   spatialRuntimeCameraFromPose,
+  spatialWorldGroupTransform,
   worldItemWithinRuntimeCamera,
   type SpatialCoordinateSpace,
 } from './spatialModel'
@@ -273,7 +274,7 @@ export function renderPublishedSpatialFrameSvg(
     .filter((entry) => entry.coordinateSpace === 'viewport')
     .map((entry) => renderSpatialItemMarkup(entry.item, resolveAsset, entry.coordinateSpace))
     .join('')
-  const transform = `translate(${camera.viewportWidth / 2} ${camera.viewportHeight / 2}) scale(${camera.zoom}) translate(${-camera.x} ${-camera.y})`
+  const transform = spatialWorldGroupTransform(camera)
   const effectiveBg = resolveEffectiveBackground({
     owner: 'spatial-surface',
     course: options.published ?? {},

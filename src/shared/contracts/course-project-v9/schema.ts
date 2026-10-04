@@ -674,6 +674,7 @@ export const spatialCameraPoseSchema = z.object({
   x: finiteNumber,
   y: finiteNumber,
   zoom: finiteNumber.positive().max(1_000),
+  rotation: finiteNumber.min(-36_000).max(36_000).optional(),
 }).strict()
 
 export const spatialCameraFrameSchema = z.object({
@@ -682,7 +683,16 @@ export const spatialCameraFrameSchema = z.object({
   x: finiteNumber,
   y: finiteNumber,
   zoom: finiteNumber.positive().max(1_000),
+  rotation: finiteNumber.min(-36_000).max(36_000).optional(),
+  targetLayerItemId: stableIdSchema.optional(),
 }).strict()
+
+/** A followed stop names an item of the same world. */
+export function spatialCameraTargetIssues(surface: { camera: { frames: readonly { targetLayerItemId?: string }[] }; world: { layerItems: readonly { layerItemId: string }[] } }): { path: Array<string | number>; message: string }[] {
+  const itemIds = new Set(surface.world.layerItems.map(item => item.layerItemId))
+  return surface.camera.frames.flatMap((frame, index) => frame.targetLayerItemId === undefined || itemIds.has(frame.targetLayerItemId) ? []
+    : [{ path: ['camera', 'frames', index, 'targetLayerItemId'], message: `Camera frame follows a missing world item: ${frame.targetLayerItemId}` }])
+}
 
 const spatialPathStyleSchema = z.object({
   color: colorSchema.optional(),
@@ -833,6 +843,7 @@ const spatialSurfaceSchema = z.object({
   if (new Set(frameIds).size !== frameIds.length) {
     context.addIssue({ code: 'custom', path: ['camera', 'frames'], message: 'Camera frame ids must be unique' })
   }
+  spatialCameraTargetIssues(surface).forEach(issue => context.addIssue({ code: 'custom', ...issue }))
   const itemIds = new Set(surface.world.layerItems.map((item) => item.layerItemId))
   const ruleIds = new Set<string>()
   surface.semanticZoom.forEach((rule, index) => {

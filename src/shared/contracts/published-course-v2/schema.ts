@@ -28,6 +28,7 @@ import {
   runtimeContentSchema,
   spatialCameraFrameSchema,
   spatialCameraPoseSchema,
+  spatialCameraTargetIssues,
   spatialPathDocumentSchema,
   spatialRelationDocumentSchema,
   strictCourseInteractionsSchema,
@@ -460,6 +461,7 @@ const publishedSpatialSurfaceSchema = z.object({
   if (new Set(frameIds).size !== frameIds.length) {
     context.addIssue({ code: 'custom', path: ['camera', 'frames'], message: 'Camera frame ids must be unique' })
   }
+  spatialCameraTargetIssues(surface).forEach(issue => context.addIssue({ code: 'custom', ...issue }))
   const itemIds = new Set(surface.world.layerItems.map((item) => item.layerItemId))
   const ruleIds = new Set<string>()
   surface.semanticZoom.forEach((rule, index) => {

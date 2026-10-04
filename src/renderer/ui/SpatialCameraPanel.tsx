@@ -224,6 +224,8 @@ export function SpatialCameraPanel({
           )}
           <p className="property-hint">
             x {Math.round(frame.x)} y {Math.round(frame.y)} · {Math.round(frame.zoom * 100)}%
+            {frame.rotation ? ` · 旋转 ${Math.round(frame.rotation)}°` : ''}
+            {frame.targetLayerItemId ? ' · 跟随对象' : ''}
           </p>
           <button
             type="button"
@@ -273,7 +275,7 @@ export function SpatialCameraPanel({
       ))}
 
       <p className="property-hint">
-        首页镜头：x {Math.round(home.x)} y {Math.round(home.y)} · {Math.round(home.zoom * 100)}%。
+        首页镜头：x {Math.round(home.x)} y {Math.round(home.y)} · {Math.round(home.zoom * 100)}%{home.rotation ? ` · 旋转 ${Math.round(home.rotation)}°` : ''}。
       </p>
 
       <details className="simple-advanced-properties">

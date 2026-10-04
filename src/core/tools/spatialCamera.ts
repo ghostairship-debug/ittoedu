@@ -245,7 +245,8 @@ export function updateSpatialCameraFramePose(
   const surface = spatialSurfaceIn(project, surfaceId)
   const frame = spatialCameraFrameIn(surface, frameId)
   const validPose = validateSpatialCameraPose(pose)
-  if (frame.x === validPose.x && frame.y === validPose.y && frame.zoom === validPose.zoom) {
+  if (frame.x === validPose.x && frame.y === validPose.y && frame.zoom === validPose.zoom
+    && !frame.rotation && frame.targetLayerItemId === undefined) {
     return project
   }
 
@@ -254,6 +255,9 @@ export function updateSpatialCameraFramePose(
     draftFrame.x = validPose.x
     draftFrame.y = validPose.y
     draftFrame.zoom = validPose.zoom
+    // The stop takes exactly the view it was set from: upright, and no longer following an item.
+    delete draftFrame.rotation
+    delete draftFrame.targetLayerItemId
   }, now)
 
   return next

@@ -30,6 +30,8 @@ export interface SpatialRuntimeCamera {
   x: number
   y: number
   zoom: number
+  /** Degrees, as `SpatialCameraPose.rotation`: the world turns the opposite way about the center. */
+  rotation?: number
   viewportWidth: number
   viewportHeight: number
 }
@@ -84,6 +86,7 @@ export function validateSpatialRuntimeCamera(camera: SpatialRuntimeCamera): Spat
   finite(camera.x, 'camera.x')
   finite(camera.y, 'camera.y')
   positive(camera.zoom, 'camera.zoom')
+  if (camera.rotation !== undefined) finite(camera.rotation, 'camera.rotation')
   positive(camera.viewportWidth, 'camera.viewportWidth')
   positive(camera.viewportHeight, 'camera.viewportHeight')
   return { ...camera }
@@ -97,14 +100,24 @@ export function spatialRuntimeCameraFromPose(
     x: pose.x,
     y: pose.y,
     zoom: pose.zoom,
+    ...(pose.rotation ? { rotation: pose.rotation } : {}),
     viewportWidth: viewport.width,
     viewportHeight: viewport.height,
   })
 }
 
+/** Turns a vector by `degrees` (clockwise on screen, where y points down). */
+function turn(vector: { x: number; y: number }, degrees: number): { x: number; y: number } {
+  if (!degrees) return vector
+  const angle = degrees * Math.PI / 180, cos = Math.cos(angle), sin = Math.sin(angle)
+  return { x: vector.x * cos - vector.y * sin, y: vector.x * sin + vector.y * cos }
+}
+
+/** The SVG transform of the world group; the same order serves CSS with units. */
 export function spatialWorldGroupTransform(camera: SpatialRuntimeCamera): string {
   validateSpatialRuntimeCamera(camera)
-  return `translate(${camera.viewportWidth / 2} ${camera.viewportHeight / 2}) scale(${camera.zoom}) translate(${-camera.x} ${-camera.y})`
+  const rotation = camera.rotation ? ` rotate(${-camera.rotation})` : ''
+  return `translate(${camera.viewportWidth / 2} ${camera.viewportHeight / 2})${rotation} scale(${camera.zoom}) translate(${-camera.x} ${-camera.y})`
 }
 
 export function spatialWorldToScreen(
@@ -112,9 +125,10 @@ export function spatialWorldToScreen(
   point: { x: number; y: number },
 ): { x: number; y: number } {
   validateSpatialRuntimeCamera(camera)
+  const offset = turn({ x: (point.x - camera.x) * camera.zoom, y: (point.y - camera.y) * camera.zoom }, -(camera.rotation ?? 0))
   return {
-    x: (point.x - camera.x) * camera.zoom + camera.viewportWidth / 2,
-    y: (point.y - camera.y) * camera.zoom + camera.viewportHeight / 2,
+    x: offset.x + camera.viewportWidth / 2,
+    y: offset.y + camera.viewportHeight / 2,
   }
 }
 
@@ -123,9 +137,10 @@ export function spatialScreenToWorld(
   point: { x: number; y: number },
 ): { x: number; y: number } {
   validateSpatialRuntimeCamera(camera)
+  const offset = turn({ x: point.x - camera.viewportWidth / 2, y: point.y - camera.viewportHeight / 2 }, camera.rotation ?? 0)
   return {
-    x: (point.x - camera.viewportWidth / 2) / camera.zoom + camera.x,
-    y: (point.y - camera.viewportHeight / 2) / camera.zoom + camera.y,
+    x: offset.x / camera.zoom + camera.x,
+    y: offset.y / camera.zoom + camera.y,
   }
 }
 
@@ -133,10 +148,11 @@ export function panSpatialRuntimeCamera(
   camera: SpatialRuntimeCamera,
   screenDelta: { x: number; y: number },
 ): SpatialRuntimeCamera {
+  const delta = turn({ x: finite(screenDelta.x, 'pan.x'), y: finite(screenDelta.y, 'pan.y') }, camera.rotation ?? 0)
   return validateSpatialRuntimeCamera({
     ...camera,
-    x: camera.x - finite(screenDelta.x, 'pan.x') / camera.zoom,
-    y: camera.y - finite(screenDelta.y, 'pan.y') / camera.zoom,
+    x: camera.x - delta.x / camera.zoom,
+    y: camera.y - delta.y / camera.zoom,
   })
 }
 
@@ -168,8 +184,19 @@ export function spatialPosesEqual(
   return (
     Math.abs(left.x - right.x) <= epsilon &&
     Math.abs(left.y - right.y) <= epsilon &&
-    Math.abs(left.zoom - right.zoom) <= epsilon
+    Math.abs(left.zoom - right.zoom) <= epsilon &&
+    Math.abs((left.rotation ?? 0) - (right.rotation ?? 0)) <= epsilon
   )
+}
+
+/** The pose a camera shows, for comparisons with authored poses. */
+export function spatialRuntimeCameraPose(camera: SpatialRuntimeCamera): SpatialCameraPose {
+  return { x: camera.x, y: camera.y, zoom: camera.zoom, ...(camera.rotation ? { rotation: camera.rotation } : {}) }
+}
+
+/** An authored stop's pose, rotation included. */
+function framePose(frame: SpatialCameraPose): SpatialCameraPose {
+  return { x: frame.x, y: frame.y, zoom: frame.zoom, ...(frame.rotation ? { rotation: frame.rotation } : {}) }
 }
 
 export function isPublishedScopedVisible(
@@ -316,7 +343,7 @@ export function spatialCameraTourStops(
   }
   if (surface.camera.frames.length > 0) {
     return surface.camera.frames.map((frame) => ({
-      pose: { x: frame.x, y: frame.y, zoom: frame.zoom },
+      pose: framePose(frame),
       frameId: frame.id,
       locationId: locationForFrame(locations, surface.id, frame.id),
     }))
@@ -331,7 +358,7 @@ export function publishedPoseForLocation(
   const location = input.locations.find((candidate) => candidate.id === locationId)
   if (location?.kind === 'spatial-camera') {
     const frame = input.surface.camera.frames.find((candidate) => candidate.id === location.cameraFrameId)
-    if (frame) return { x: frame.x, y: frame.y, zoom: frame.zoom }
+    if (frame) return framePose(frame)
   }
   return { ...input.surface.camera.home }
 }
@@ -430,8 +457,11 @@ function worldRectIntersects(
   camera: SpatialRuntimeCamera,
   overscanPx = 100,
 ): boolean {
-  const width = camera.viewportWidth / camera.zoom
-  const height = camera.viewportHeight / camera.zoom
+  // A turned camera sees the world box that holds its turned viewport.
+  const angle = (camera.rotation ?? 0) * Math.PI / 180
+  const cos = Math.abs(Math.cos(angle)), sin = Math.abs(Math.sin(angle))
+  const width = (camera.viewportWidth * cos + camera.viewportHeight * sin) / camera.zoom
+  const height = (camera.viewportWidth * sin + camera.viewportHeight * cos) / camera.zoom
   const overscan = Math.max(0, overscanPx) / camera.zoom
   const view = {
     x: camera.x - width / 2 - overscan,

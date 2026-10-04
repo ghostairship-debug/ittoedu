@@ -170,6 +170,7 @@ export type LayerItem = NativeLayerItem | ComponentLayerItem | RuntimeLayerItem
 - `components?: Record<名称, CourseComponentDefinition>` 是组件定义的唯一所有者，名称即 `components/<名称>.html` 的主干：1–80 字符，不含 `\ / : * ? " < > | # %` 与控制字符，首尾不是空格或点，忽略大小写唯一。
 - 定义字段为 Runtime 的 `protocol`、`runtimeApiVersion`、`enabled`、`renderMode`、`source`、`content{values,metadata?}`、`assets` 与可选 `draft{reason}`（草稿必须 `enabled:false`，宿主显示原因占位）。
 - 页面以 `<iframe src="../components/<名称>.html" title="说明">` 引用；iframe 下的 Runtime 节点是软件从定义单向派生的副本，只保留实例字段 `staticFallback`、`nodeBindings`、`content.overrides`。提交中对副本定义字段的修改由驱动按字段写回定义；同一组件被改成不同内容或引用不存在的定义时拒绝。名称不存在时不生成副本，宿主显示待填占位。
+- 讲义（Flow 正文）用 `course-component` 块按名称引用组件：`{ type: 'course-component'; name; title?; height?; wrap? }`，不存副本；名称不存在时显示 `title`（缺省为名称）占位，定义为草稿时显示原因。组件改名同时改写块的 `name`。Published V2 `courseComponents?: Record<名称, 已发布 Runtime>` 携带被块引用的定义（键为存储名称，按名称忽略大小写匹配），其素材按直接引用进入发布；播放器与编辑器用同一挂载逻辑运行。页面正文（组合中的文档节点）里的此类块只显示名称占位，页面中请用 iframe 引用。
 
 ### 8.3 节点状态与页内步骤
 - `LayerItemOverride.compositionNodes?: Record<节点 id, { visible?: boolean }>`：任何呈现状态都可控制组合内部节点显隐（只用于 composition 图层，节点须存在）。
@@ -177,6 +178,7 @@ export type LayerItem = NativeLayerItem | ComponentLayerItem | RuntimeLayerItem
 
 ### 8.4 待填素材
 - 组合中 `<img src="../assets/x.svg" alt="说明">` 原样保存；`assets/x.svg` 槽位绑定 `path === 'assets/x.svg'` 的素材（否则绑定唯一 `filename` 相同的素材），写在 `composition.assets['assets/x.svg']`。未绑定的项目内相对引用显示占位（`alt` / `title` 为说明）。
+- 正文媒体块（讲义与组合中的文档节点）可写 `source`：原样保存的 `assets/...` 引用。规范化按同一规则把 `assetId` 绑定到该路径上种类相同的素材，素材删除或种类不符时去掉 `assetId`、显示待填占位（图片为带说明的占位图，音视频为说明框）；无 `source` 的块仍必须有 `assetId`。在编辑器里选定或替换素材会去掉 `source`。素材改名时引用随之改写；打印与 DOCX 输出“待填素材”说明。
 
 ### 8.5 素材来源（`CourseAssetMeta.source`）
 - `source?: { kind: 'user-material' | 'model-svg' | 'open-library' | 'image-model' | 'asset-library'; title?; url?; author?; license?: { id; url? }; attribution? }`。
