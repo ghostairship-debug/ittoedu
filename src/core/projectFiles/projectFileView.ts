@@ -121,7 +121,7 @@ function visitDocumentBlocks(blocks: readonly FlowBlock[], visit: (block: FlowBl
 }
 
 /** Asset slots a page, handout or the theme refers to without a bound asset, and component names without a definition. */
-function pendingReferences(pages: readonly SlidePageFile[], project: CourseProjectDocument, docs: readonly HandoutFile[]) {
+function pendingReferences(pages: readonly Pick<SlidePageFile, 'path' | 'carrier'>[], project: CourseProjectDocument, docs: readonly HandoutFile[]) {
   const pending = new Map<string, { type: '待填素材' | '待写组件'; description?: string; usedBy: Set<string> }>()
   const add = (path: string, type: '待填素材' | '待写组件', usedBy: string, description?: string) => {
     const entry = pending.get(path) ?? { type, usedBy: new Set<string>() }
@@ -198,15 +198,18 @@ export function componentText(definition: CourseComponentDefinition, project: Co
 }
 
 function objectSummary(scene: SlideSceneDocument, carrier: PageCarrier | undefined): string[] {
-  return [...scene.layerItems].sort((a, b) => a.order - b.order).filter(item => item !== carrier?.item).map(item => {
-    const kind = item.kind === 'native' ? NATIVE_KIND[item.content.nativeType] ?? '对象' : item.kind === 'component' ? '组件'
-      : item.kind === 'runtime' ? '程序' : '组合内容'
-    return item.label ? `${kind}“${item.label}”` : kind
-  })
+  return [...scene.layerItems].sort((a, b) => a.order - b.order).filter(item => item !== carrier?.item).map(projectObjectSummary)
 }
 
-export function listProjectFiles(project: CourseProjectDocument, resources: DocumentResources, docs: readonly HandoutFile[] = []): ProjectFileEntry[] {
+export function projectObjectSummary(item: LayerItem): string {
+  const kind = item.kind === 'native' ? NATIVE_KIND[item.content.nativeType] ?? '对象' : item.kind === 'component' ? '组件'
+    : item.kind === 'runtime' ? '程序' : '组合内容'
+  return item.label ? `${kind}“${item.label}”` : kind
+}
+
+export function listProjectFiles(project: CourseProjectDocument, resources: DocumentResources, docs: readonly HandoutFile[] = [], extra: readonly Pick<SlidePageFile, 'path' | 'carrier'>[] = []): ProjectFileEntry[] {
   const pages = slidePageFiles(project)
+  const references = [...pages, ...extra]
   const files: ProjectFileEntry[] = [{ path: THEME_FILE, type: '主题', ...(project.theme?.css.trim() ? {} : { note: '尚未写入' }) }]
   for (const page of pages) {
     const objects = objectSummary(page.scene, page.carrier)
@@ -214,7 +217,7 @@ export function listProjectFiles(project: CourseProjectDocument, resources: Docu
   }
   for (const [name, definition] of Object.entries(project.components ?? {})) {
     const key = courseComponentNameKey(name)
-    const usedBy = pages.filter(page => {
+    const usedBy = references.filter(page => {
       let found = false
       const visit = (node: PageNode) => {
         if (found || node.kind !== 'element') return
@@ -224,7 +227,7 @@ export function listProjectFiles(project: CourseProjectDocument, resources: Docu
       }
       if (page.carrier?.kind === 'composition') visit(page.carrier.item.content.root)
       return found
-    }).map(page => page.path)
+    }).map(page => page.path).filter((path, index, paths) => paths.indexOf(path) === index)
     for (const doc of docs) {
       let found = false
       visitDocumentBlocks(doc.surface.blocks, block => { found ||= block.type === 'course-component' && courseComponentNameKey(block.name) === key })
@@ -235,7 +238,7 @@ export function listProjectFiles(project: CourseProjectDocument, resources: Docu
   }
   for (const { path, meta } of assetFiles(project)) files.push({ path, type: '素材',
     note: [meta.mimeType, meta.width && meta.height ? `${meta.width}×${meta.height}` : '', meta.source ? `来源：${meta.source.kind}` : ''].filter(Boolean).join('，') })
-  for (const [path, entry] of pendingReferences(pages, project, docs)) files.push({ path, type: entry.type,
+  for (const [path, entry] of pendingReferences(references, project, docs)) files.push({ path, type: entry.type,
     note: [entry.description && `说明：${entry.description}`, `引用：${[...entry.usedBy].join('、')}`].filter(Boolean).join('；') })
   if (controllerSource(project, resources)) files.push({ path: CONTROLLER_FILE, type: '教师控制台' })
   return files
@@ -245,6 +248,7 @@ export type ProjectFileRead =
   | { kind: 'page'; path: string; type: string; content: string; objects: string[]; page: SlidePageFile }
   | { kind: 'theme'; path: string; content: string }
   | { kind: 'doc'; path: string; content: string; objects: string[]; surfaceId: string }
+  | { kind: 'space'; path: string; content: string; objects: string[]; surfaceId: string }
   | { kind: 'component'; path: string; name: string; content: string; draft?: string }
   | { kind: 'asset'; path: string; mediaType: string; byteLength: number; width?: number; height?: number; content?: string; assetId: string }
   | { kind: 'controller'; path: string; content: string }
@@ -284,6 +288,6 @@ export function projectFileVersion(file: ProjectFileRead, resources: DocumentRes
 
 /** The stable object a file path currently addresses; survives renames and reordering. */
 export function projectFileIdentity(file: ProjectFileRead): string {
-  return file.kind === 'page' ? `page:${file.page.sceneId}` : file.kind === 'doc' ? `doc:${file.surfaceId}` : file.kind === 'asset' ? `asset:${file.assetId}`
+  return file.kind === 'page' ? `page:${file.page.sceneId}` : file.kind === 'doc' ? `doc:${file.surfaceId}` : file.kind === 'space' ? `space:${file.surfaceId}` : file.kind === 'asset' ? `asset:${file.assetId}`
     : file.kind === 'component' ? `component:${courseComponentNameKey(file.name)}` : file.kind
 }

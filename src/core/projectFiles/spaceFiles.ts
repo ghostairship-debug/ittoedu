@@ -57,7 +57,7 @@ export function planSpaceContentWrite(input: {
   const frameIds = new Set(input.frames.map(frame => frame.id))
   const removed = project.locations.filter(location => location.kind === 'spatial-camera' && location.surfaceId === surface.id && !frameIds.has(location.cameraFrameId))
   const beforeLocations = project.locations.filter(location => location.surfaceId === surface.id)
-  surface.world.layerItems = structuredClone(input.layerItems)
+  surface.world.layerItems = structuredClone(input.layerItems).sort((a, b) => a.order - b.order)
   surface.camera.frames = structuredClone(input.frames)
   surface.world.paths = surface.world.paths?.flatMap(path => {
     const layerItemIds = path.layerItemIds.filter(id => itemIds.has(id))

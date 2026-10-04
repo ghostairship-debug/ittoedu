@@ -7,6 +7,15 @@ import { parseComponentPackageFiles } from '../drivers/codecs/importComponentPac
 import { parseProgramHtml } from './pageHtml'
 import { componentFile, controllerSource } from './projectFileView'
 import { ProjectFileError, type PlannedChange } from './slidePages'
+import { findGlobalTeacherController, makeGlobalLayerAuthoringAddress } from '../tools/globalLayers'
+import { deleteEffectiveLayerItems } from '../tools/layerCommands'
+import { createDefaultTeacherControllerPackage } from '../../shared/defaultTeacherControllerComponent'
+import { createTeacherControllerComponentItem } from '../../shared/teacherControllerItem'
+import { componentPackageMeta } from '../../shared/componentPackageMeta'
+import { courseSlideCanvas } from '../../shared/slideCanvas'
+import { synchronizeCourseTeacherControllerControls } from '../../shared/teacherControllerConsistency'
+import { allocateCourseLayerOrder, sortScopedLayerList } from '../tools/layerOrder'
+import { nanoid } from 'nanoid'
 
 const COMPONENT_PATH = /^components\/([^/]+)\.html$/
 
@@ -62,9 +71,27 @@ export function planComponentDelete(project: CourseProjectDocument, resources: D
  * `controller/教师控制台.js` is the entry source of the course's embedded controller package. A revision keeps
  * the package identity and version (as the editor's source revision does) and always goes through admission.
  */
-export function planControllerWrite(project: CourseProjectDocument, resources: DocumentResources, source: string): PlannedChange {
-  const current = controllerSource(project, resources)
-  if (!current) throw new ProjectFileError('not-found', '本课件没有教师控制台；需要时先在编辑器中添加')
+export function planControllerWrite(project: CourseProjectDocument, resources: DocumentResources, source: string, createId: () => string = nanoid): PlannedChange {
+  let current = controllerSource(project, resources)
+  let created = false
+  if (!current) {
+    if (findGlobalTeacherController(project)) throw new ProjectFileError('missing-controller-source', '现有教师控制台源码不可读，请修复其组件包后重试')
+    const pkg = createDefaultTeacherControllerPackage(), next = structuredClone(project)
+    const meta = next.componentPackages[pkg.manifest.id] ?? componentPackageMeta(pkg)
+    const key = componentPackageKey(meta.packageId, meta.version)
+    if (next.componentPackages[pkg.manifest.id] && !resources.components[key])
+      throw new ProjectFileError('missing-controller-source', '工程引用的教师控制台包缺少源码，原包与独立导航已保留')
+    const item = createTeacherControllerComponentItem(`teacher_controller_${createId()}`, courseSlideCanvas(project))
+    item.component = { packageId: meta.packageId, version: meta.version }
+    item.order = allocateCourseLayerOrder(project, item.order)
+    next.globalLayerItems.push({ item, visibility: { mode: 'all', locationIds: [] }, plane: 'overlay' })
+    sortScopedLayerList(next.globalLayerItems)
+    next.componentPackages[pkg.manifest.id] = meta
+    synchronizeCourseTeacherControllerControls(next)
+    resources = { ...resources, components: { ...resources.components, [key]: resources.components[key] ?? pkg.files } }
+    project = next; current = controllerSource(project, resources); created = true
+  }
+  if (!current) throw new ProjectFileError('missing-controller-source', '教师控制台组件包缺少入口源码')
   const key = componentPackageKey(current.packageId, current.version)
   const files = { ...resources.components[key]!, [current.entry]: new TextEncoder().encode(source) }
   let contentSha256: string
@@ -73,5 +100,15 @@ export function planControllerWrite(project: CourseProjectDocument, resources: D
   const next = structuredClone(project)
   next.componentPackages[current.packageId] = { ...next.componentPackages[current.packageId]!, contentSha256 }
   return { project: next, resources: { ...resources, components: { ...resources.components, [key]: files } }, identity: 'controller', diagnostics: [],
-    admission: source !== current.source }
+    admission: created || source !== current.source }
+}
+
+/** Remove the installed controller through the same structural delete as the editor; retain packages and other navigation. */
+export function planControllerDelete(project: CourseProjectDocument, resources: DocumentResources): PlannedChange {
+  const controller = findGlobalTeacherController(project)
+  if (!controller) throw new ProjectFileError('not-found', '本课件没有教师控制台')
+  const deleted = deleteEffectiveLayerItems(project, [{ locationId: project.startLocationId,
+    authoringAddress: makeGlobalLayerAuthoringAddress(project.id, controller.item.layerItemId, 'component') }])
+  if (!deleted.ok || !deleted.nextDocument) throw new ProjectFileError('delete-refused', deleted.reason ?? '无法删除教师控制台')
+  return { project: deleted.nextDocument, resources, identity: 'controller', diagnostics: [] }
 }
