@@ -1,152 +1,182 @@
 {
-  "schemaVersion": 4,
-  "runtimeApiVersion": 4,
-  "renderMode": "dom",
-  "supportedScopes": [
-    "scene"
-  ],
-  "id": "com.ittoedu.language.reading-annotation",
-  "name": "语文朗读标注",
+  "format": "guoling-component-library",
   "version": "1.1.0",
-  "description": "用可编辑标记文稿呈现重音、统一长停顿和文字上方的连读弧线",
-  "entry": "runtime.js",
-  "thumbnail": "thumbnail.svg",
-  "defaultSize": {
-    "width": 1120,
-    "height": 300
-  },
-  "minSize": {
-    "width": 520,
-    "height": 220
-  },
-  "preserveAspectRatio": false,
-  "assets": {},
-  "defaultProps": {
-    "content": {
-      "ariaLabel": "朗读标注练习",
-      "title": "朗读设计",
-      "markup": "盼望着，盼望着，// 东风来了，春天的脚步 **近了**。\n~小草偷偷地从土里钻出来~，嫩嫩的，绿绿的。",
-      "pauseSymbol": "∧",
-      "legendEmphasis": "重音",
-      "legendPause": "较长停顿",
-      "legendLiaison": "连读"
-    },
-    "fontSize": 42,
-    "titleSize": 24,
-    "legendSize": 24,
-    "lineHeight": 1.85,
-    "padding": 34,
-    "showTitle": true,
-    "showLegend": true,
-    "textColor": "#17324d",
-    "markColor": "#d94f3d",
-    "surface": "#fffdf7",
-    "borderColor": "#c9d9cd"
-  },
-  "editor": {
-    "properties": [
-      {
-        "key": "content.title",
-        "label": "标题",
-        "type": "text",
-        "maxLength": 60
-      },
-      {
-        "key": "content.markup",
-        "label": "朗读标注文稿",
-        "description": "用 **文字** 标重音，用 ~文字~ 标连读，用 // 插入统一的较长停顿符号。",
-        "type": "textarea",
-        "maxLength": 6000
-      },
-      {
-        "key": "content.pauseSymbol",
-        "label": "较长停顿符号",
-        "type": "text",
-        "maxLength": 8
-      },
-      {
-        "key": "content.legendEmphasis",
-        "label": "重音图例",
-        "type": "text",
-        "maxLength": 20
-      },
-      {
-        "key": "content.legendPause",
-        "label": "停顿图例",
-        "type": "text",
-        "maxLength": 20
-      },
-      {
-        "key": "content.legendLiaison",
-        "label": "连读图例",
-        "type": "text",
-        "maxLength": 20
-      },
-      {
-        "key": "fontSize",
-        "label": "正文字号",
-        "type": "number",
-        "min": 22,
-        "max": 96,
-        "step": 1,
-        "unit": "px"
-      },
-      {
-        "key": "lineHeight",
-        "label": "行高",
-        "type": "number",
-        "min": 1.4,
-        "max": 2.6,
-        "step": 0.05
-      },
-      {
-        "key": "legendSize",
-        "label": "图例字号",
-        "type": "number",
-        "min": 22,
-        "max": 52,
-        "step": 1,
-        "unit": "px"
-      },
-      {
-        "key": "padding",
-        "label": "内边距",
-        "type": "number",
-        "min": 12,
-        "max": 80,
-        "step": 1,
-        "unit": "px"
-      },
-      {
-        "key": "showTitle",
-        "label": "显示标题",
-        "type": "boolean"
-      },
-      {
-        "key": "showLegend",
-        "label": "显示图例",
-        "type": "boolean"
-      },
-      {
-        "key": "textColor",
-        "label": "文字颜色",
-        "type": "color"
-      },
-      {
-        "key": "markColor",
-        "label": "标记颜色",
-        "type": "color"
-      },
-      {
-        "key": "surface",
-        "label": "底色",
-        "type": "color"
-      },
-      {
-        "key": "borderColor",
-        "label": "边框颜色",
-        "type": "color"
+  "entry": {
+    "schemaVersion": 1,
+    "id": "com.ittoedu.language.reading-annotation",
+    "title": "语文朗读标注",
+    "definitions": {
+      "com.ittoedu.language.reading-annotation": {
+        "id": "com.ittoedu.language.reading-annotation",
+        "title": "语文朗读标注",
+        "version": "1.1.0",
+        "role": "content",
+        "implementation": {
+          "kind": "source",
+          "language": "javascript",
+          "workspace": {
+            "ownerId": "com.ittoedu.language.reading-annotation",
+            "entry": "runtime.js"
+          }
+        },
+        "dataSchema": {
+          "type": "object",
+          "properties": {
+            "content": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "title": "标题",
+                  "type": "string",
+                  "maxLength": 60
+                },
+                "markup": {
+                  "title": "朗读标注文稿",
+                  "type": "string",
+                  "description": "用 **文字** 标重音，用 ~文字~ 标连读，用 // 插入统一的较长停顿符号。",
+                  "maxLength": 6000
+                },
+                "pauseSymbol": {
+                  "title": "较长停顿符号",
+                  "type": "string",
+                  "maxLength": 8
+                },
+                "legendEmphasis": {
+                  "title": "重音图例",
+                  "type": "string",
+                  "maxLength": 20
+                },
+                "legendPause": {
+                  "title": "停顿图例",
+                  "type": "string",
+                  "maxLength": 20
+                },
+                "legendLiaison": {
+                  "title": "连读图例",
+                  "type": "string",
+                  "maxLength": 20
+                }
+              }
+            },
+            "fontSize": {
+              "title": "正文字号",
+              "type": "number",
+              "minimum": 22,
+              "maximum": 96,
+              "multipleOf": 1
+            },
+            "lineHeight": {
+              "title": "行高",
+              "type": "number",
+              "minimum": 1.4,
+              "maximum": 2.6,
+              "multipleOf": 0.05
+            },
+            "legendSize": {
+              "title": "图例字号",
+              "type": "number",
+              "minimum": 22,
+              "maximum": 52,
+              "multipleOf": 1
+            },
+            "padding": {
+              "title": "内边距",
+              "type": "number",
+              "minimum": 12,
+              "maximum": 80,
+              "multipleOf": 1
+            },
+            "showTitle": {
+              "title": "显示标题",
+              "type": "boolean"
+            },
+            "showLegend": {
+              "title": "显示图例",
+              "type": "boolean"
+            },
+            "textColor": {
+              "title": "文字颜色",
+              "type": "string",
+              "format": "color"
+            },
+            "markColor": {
+              "title": "标记颜色",
+              "type": "string",
+              "format": "color"
+            },
+            "surface": {
+              "title": "底色",
+              "type": "string",
+              "format": "color"
+            },
+            "borderColor": {
+              "title": "边框颜色",
+              "type": "string",
+              "format": "color"
+            }
+          },
+          "x-editor": {
+            "presets": []
+          }
+        }
       }
-    ]
+    },
+    "example": {
+      "rootIds": [
+        "example"
+      ],
+      "instances": {
+        "example": {
+          "id": "example",
+          "definitionId": "com.ittoedu.language.reading-annotation",
+          "data": {
+            "content": {
+              "ariaLabel": "朗读标注练习",
+              "title": "朗读设计",
+              "markup": "盼望着，盼望着，// 东风来了，春天的脚步 **近了**。\n~小草偷偷地从土里钻出来~，嫩嫩的，绿绿的。",
+              "pauseSymbol": "∧",
+              "legendEmphasis": "重音",
+              "legendPause": "较长停顿",
+              "legendLiaison": "连读"
+            },
+            "fontSize": 42,
+            "titleSize": 24,
+            "legendSize": 24,
+            "lineHeight": 1.85,
+            "padding": 34,
+            "showTitle": true,
+            "showLegend": true,
+            "textColor": "#17324d",
+            "markColor": "#d94f3d",
+            "surface": "#fffdf7",
+            "borderColor": "#c9d9cd"
+          },
+          "frame": {
+            "width": 1120,
+            "height": 300,
+            "transform": [
+              1,
+              0,
+              0,
+              1,
+              40,
+              40
+            ]
+          }
+        }
+      }
+    },
+    "assets": {}
+  },
+  "resources": {
+    "assets": {},
+    "components": {
+      "com.ittoedu.language.reading-annotation": {
+        "runtime.js": "components/com.ittoedu.language.reading-annotation/runtime.js"
+      }
+    }
+  },
+  "metadata": {
+    "description": "用可编辑标记文稿呈现重音、统一长停顿和文字上方的连读弧线"
   }
 }

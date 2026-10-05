@@ -1,4 +1,3 @@
-(function () {
   function objectValue(value) {
     return value && typeof value === 'object' ? value : {}
   }
@@ -77,17 +76,12 @@
     return svg
   }
 
-  window.CoursewareComponent.define({
-    id: 'com.ittoedu.language.reading-annotation',
-    runtimeApiVersion: 4,
+  export default {
+    mount: function (ctx) {
+      if (!ctx.root) throw new Error('此视觉组件需要内容根元素')
 
-    create: function (ctx) {
-      if (ctx.renderMode !== 'dom') {
-        throw new Error('朗读标注组件必须使用 renderMode=dom')
-      }
-
-      var root = ctx.dom.root
-      var props = ctx.props
+      var root = ctx.root
+      var props = ctx.instance.data
       var destroyed = false
 
       var style = document.createElement('style')
@@ -197,30 +191,18 @@
       }
 
       render()
-      ctx.capture.waitUntil(document.fonts && document.fonts.ready
-        ? document.fonts.ready
-        : Promise.resolve())
 
       return {
-        setMode: function () {},
-        resize: function () { render() },
-        updateProps: function (nextProps) {
+        update: function (nextInstance) {
+          var nextProps = nextInstance.data
           props = nextProps
           render()
         },
-        setVisible: function (visible) {
-          root.style.display = visible ? '' : 'none'
-          root.style.pointerEvents = visible ? '' : 'none'
-        },
-        suspend: function () {},
-        resume: function () {},
-        prepareCapture: function () { render() },
-        destroy: function () {
+        dispose: function () {
           if (destroyed) return
           destroyed = true
           root.replaceChildren()
         }
       }
     }
-  })
-})()
+  }

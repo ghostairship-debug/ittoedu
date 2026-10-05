@@ -38,21 +38,21 @@ export function createComponentPlatformMixedDeliveryFixture() {
     add('slide-title', 'guoling.text', title('串联电路观察'), 35, 25, 920, 68),
     add('slide-formula', 'guoling.formula', createFormulaComponentData('slide-ohm', 'V=IR'), 40, 104, 380, 75),
     add('slide-table', 'guoling.table', table, 40, 190, 420, 190),
-    add('slide-chart', 'guoling.chart', chart, 510, 125, 440, 290),
+    add('slide-chart', 'guoling.chart', chart, 510, 125, 410, 290),
     add('slide-image', 'guoling.image', createImageData('circuit-image', '串联电路示意图'), 45, 402, 265, 160),
-    add('slide-input', 'guoling.input', createInputData({ label: '填写电流关系', placeholder: '输入相等', acceptedAnswers: ['相等'] }), 330, 438, 360, 110),
-    add('slide-choice', 'guoling.choice', createChoiceData({ label: '断开开关后', options: [{ id: 'off', label: '灯泡熄灭' }, { id: 'on', label: '灯泡更亮' }], correctOptionIds: ['off'] }), 715, 437, 240, 110),
+    add('slide-input', 'guoling.input', createInputData({ label: '填写电流关系', placeholder: '输入相等', acceptedAnswers: ['相等'] }), 330, 590, 360, 110),
+    add('slide-choice', 'guoling.choice', createChoiceData({ label: '断开开关后', options: [{ id: 'off', label: '灯泡熄灭' }, { id: 'on', label: '灯泡更亮' }], correctOptionIds: ['off'] }), 860, 480, 140, 110),
   ]
   add('slide-group', 'guoling.group', {}, 0, 0, 1000, 700)
   const styled = createTextComponentData('原生专业样式：粗体 斜体 下划线 删除线')
   Object.assign(styled.appearance, { bold: true, italic: true, underline: true, strike: true, padding: 14,
     backgroundColor: '#dbeafe', backgroundOpacity: 1, borderColor: '#1d4ed8', borderOpacity: 1, borderWidth: 2, verticalAlign: 'middle' })
-  add('slide-styled-text', 'guoling.text', styled, 45, 590, 900, 70)
+  add('slide-styled-text', 'guoling.text', styled, 45, 590, 280, 70)
   add('slide-data-group', 'guoling.group', {}, 65, 180, 870, 280)
   instances['slide-data-group']!.frame!.transform = [0.9659258, 0.258819, -0.258819, 0.9659258, 65, 160]
   instances['slide-data-group']!.childIds = ['slide-table', 'slide-chart']
   instances['slide-table']!.frame!.transform = [1, 0, 0, 1, 0, 0]
-  instances['slide-chart']!.frame!.transform = [1, 0, 0, 1, 470, -70]
+  instances['slide-chart']!.frame!.transform = [1, 0, 0, 1, 470, -250]
   instances['slide-group']!.childIds = [...slide.filter(id => !['slide-table', 'slide-chart'].includes(id)), 'slide-data-group', 'slide-styled-text']
   // A slight rotation exercises native group geometry rather than a flattened screenshot.
   instances['slide-image']!.frame!.transform = [0.9961947, 0.0871557, -0.0871557, 0.9961947, 45, 402]
@@ -84,7 +84,8 @@ export function createComponentPlatformMixedDeliveryFixture() {
       { id: 'mixed-spatial', kind: 'spatial', title: '空间观察', childIds: spatial, designSize: { width: 1000, height: 700 }, spatial: {
         home: { x: 500, y: 350, zoom: 1 }, frames: [{ id: 'circuit-view', title: '电路', pose: { x: 500, y: 350, zoom: 1 } }, { id: 'results-view', title: '测量结果', pose: { x: 1250, y: 350, zoom: 1 } }],
       } }], global: { underlay: [], overlay: [] }, assets: { 'circuit-image': { id: 'circuit-image', path: 'assets/circuit.svg', mimeType: 'image/svg+xml', kind: 'image', width: 420, height: 250,
-        source: { kind: 'user-material', title: '本地测试电路示意图', author: '果铃工程测试', license: { id: 'CC0' } } } } })
+        remote: { url: 'https://mixed-delivery.test/circuit.svg' },
+        source: { kind: 'user-material', title: '本地测试电路示意图', url: 'https://mixed-delivery.test/credit', author: '果铃工程测试', license: { id: 'CC0' } } } } })
   const snapshot: DocumentSnapshot = { documentId: 'mixed-delivery-document', epoch: 'mixed-delivery-epoch', revision: project.revision,
     binding: { kind: 'untitled', suggestedName: `${project.title}.h5lesson` }, model: { kind: 'course-v10', project, resources }, dirty: false, saving: false, recoverable: true, undoDepth: 0, redoDepth: 0 }
   return { project, resources, snapshot, delivery: courseDeliverySnapshot(snapshot)!, archive: () => createCourseProjectV10Archive({ project, resources }) }

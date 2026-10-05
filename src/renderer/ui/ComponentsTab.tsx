@@ -4,7 +4,7 @@ import type { AvailableComponentCatalogPackage, AvailableHtmlComponent, Componen
 import type { ComponentDefinition } from '../../shared/contracts/component-platform/project'
 import type { FlowDeepInsertPort } from './RightSidebar'
 import { collectCourseComponentPackageUsage, type CourseComponentPackageUsage } from '../components/courseComponentPackageTransactions'
-import { collectComponentLibrarySubjects, filterComponentLibraryPackages, filterHtmlComponents, selectCurrentCatalogPackages, selectCurrentHtmlComponents, componentCatalogInstallStatus } from '../components/componentLibraryModel'
+import { collectComponentLibrarySubjects, filterComponentLibraryPackages, filterHtmlComponents, selectCurrentCatalogPackages, selectCurrentHtmlComponents, componentCatalogInstallStatus, selectProjectLibraryDefinitions } from '../components/componentLibraryModel'
 import { componentDefinitionEntry, insertComponentDefinitionAtTarget } from '../components/insertComponentPackages'
 import { createComponentAuthoringActions } from '../components/commitComponentPackageAuthoring'
 import { extractComponentLibraryEntry } from '../../core/components/library'
@@ -336,7 +336,7 @@ export function ComponentLibraryDialog({
 export function ComponentsTab({componentCatalog=EMPTY_CATALOG,onImportExternalComponents,onRefreshComponentCatalog,onAddCatalogComponents,onUpdateCatalogComponent,onReplaceComponent,onExtractSelection,onDeleteCatalogComponent}:ComponentsTabProps) {
   const project=useEditorStore(selectActiveCourseProjectDocument), kernel=useEditorStore(state=>state.courseKernel), view=useEditorStore(state=>state.courseView)
   const [libraryOpen,setLibraryOpen]=useState(false), [searchQuery,setSearchQuery]=useState(''),[detailsId,setDetailsId]=useState<string|null>(null),[extractName,setExtractName]=useState(''),[extracting,setExtracting]=useState(false)
-  const components=project?.definitions ?? {}, packages=Object.values(components).sort((a,b)=>(a.title??a.id).localeCompare(b.title??b.id,'zh-CN'))
+  const components=project?.definitions ?? {}, packages=selectProjectLibraryDefinitions(components)
   const current=selectCurrentCatalogPackages(componentCatalog.packages), query=searchQuery.trim().toLocaleLowerCase()
   const visible=packages.filter(data=>[data.title,data.id,data.version].join(' ').toLocaleLowerCase().includes(query))
   const report=(error:unknown)=>kernel.setFeedback({errorMessage:error instanceof Error?error.message:String(error)})

@@ -25,7 +25,7 @@ import { Plugin } from 'prosemirror-state'
 import { Decoration, DecorationSet } from 'prosemirror-view'
 import { createLayoutEditor, createDocumentDraftSession, DOCUMENT_OBJECT_CONTEXT_MENU_EVENT, type DocumentObjectContextMenuDetail, type DocumentOperation, type DocumentContentScope, type DocumentCommitResult } from './editorSession'
 import { documentBlockMenu, applyDocumentBlockCommand, type DocumentBlockCommand } from './documentBlockCommands'
-import { DocumentBlockHandle, documentBlockDragId } from './DocumentBlockHandle'
+import { DocumentBlockHandle, documentBlockDragId, DOCUMENT_BLOCK_DRAG_MIME } from './DocumentBlockHandle'
 import { documentTableCommandLabels, type DocumentTableCommand } from './documentTableCommands'
 import { changeDocumentTableFromEditorState, resolveDocumentTableEditorTarget } from './documentTableEditorPort'
 import { restoreDocumentTableSelection, type PreviousDocumentTableSelection } from './documentTableSelectionRestore'
@@ -163,6 +163,8 @@ export interface SharedDocumentEditorHandle {
   drain(): Promise<{ ready: boolean; source: string; diagnostics: DocumentDiagnostic[] }>
   /** Uses the same explicit discard as the draft UI, including the caller's cleanup. */
   discardDraft(): Promise<void>
+  /** Focus an existing last paragraph, or create one on an explicit end-of-document click. */
+  focusEndParagraph(): boolean
   getContextualEditTarget(): DocumentContextSelection | null
   /** Focus a committed editable paragraph without authoring a transaction. */
   focusBlock(blockId: string): boolean
@@ -615,6 +617,19 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     flush: () => ({ ready: !sourceComposing.current && !sourceInvalid.current && !restoredDiagnostics.current && (layout.current?.flush() ?? !draftSession.rejected), source: draft.current, diagnostics: diagnosticsRef.current }),
     drain, discardDraft: discardLocalDraft,
     getContextualEditTarget: () => contextualTargetRef.current,
+    focusEndParagraph: () => {
+      const editor = layout.current
+      if (!editor || mode !== 'layout' || latest.current.readOnly || editor.view.composing) return false
+      const view = editor.view, transaction = view.state.tr
+      if (view.state.doc.lastChild?.type !== documentEditorSchema.nodes.paragraph) {
+        editor.boundary()
+        transaction.insert(view.state.doc.content.size, documentEditorSchema.nodes.paragraph.create({ id: crypto.randomUUID(), data: { type: 'paragraph' } }))
+      }
+      transaction.setSelection(TextSelection.create(transaction.doc, transaction.doc.content.size - 1))
+      view.dispatch(transaction.scrollIntoView())
+      view.focus()
+      return true
+    },
     focusBlock: (blockId) => {
       const editor = layout.current
       if (!editor || mode !== 'layout' || latest.current.readOnly) return false
@@ -838,7 +853,6 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
           ? <div role="alert" className="shared-document-more__mode-notice">{commandError}</div>
           : null}
       </details>}
-      <button type="button" onClick={() => { void navigateHistory('undo') }}>撤销</button><button type="button" onClick={() => { void navigateHistory('redo') }}>重做</button>
       {mode === 'layout' && props.contentScope === 'formula' && <button type="button" onMouseDown={event => event.preventDefault()} onClick={openMath}>编辑公式</button>}
       {mode === 'layout' && props.contentScope !== 'formula' && <>
         {([['bold', '粗体'], ['italic', '斜体'], ['underline', '下划线'], ['strike', '删除线'], ['emphasis', '着重号']] as const).map(([key, label]) => <button key={key} type="button" onMouseDown={event => event.preventDefault()} aria-pressed={format.flags[key]} onClick={() => toggleStyle(key)}>{label}</button>)}
@@ -939,14 +953,15 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       {props.renderQuickBarMenu?.(contextualTarget)}
       {commandError && <span role="alert" className="selection-quick-bar__notice" title={commandError}>{commandError}</span>}
     </SelectionQuickBar>
-  return <div ref={attachRoot} onDragOver={event => { if (documentScope && event.dataTransfer.types.includes('application/x-guoling-document-block')) event.preventDefault() }}
-    onDrop={event => {
-      if (!documentScope) return
+  return <div ref={attachRoot} onDragOverCapture={event => { if (documentScope && event.dataTransfer.types.includes(DOCUMENT_BLOCK_DRAG_MIME)) { event.preventDefault(); event.stopPropagation() } }}
+    onDropCapture={event => {
+      if (!documentScope || !event.dataTransfer.types.includes(DOCUMENT_BLOCK_DRAG_MIME)) return
+      event.preventDefault(); event.stopPropagation()
+      if (props.readOnly || mode !== 'layout') return
       const sourceId = documentBlockDragId(event.dataTransfer)
       const target = (event.target as HTMLElement).closest<HTMLElement>('[data-flow-block-id]')
       const targetId = target?.dataset.flowBlockId
       if (!sourceId || !targetId || sourceId === targetId || !layout.current) return
-      event.preventDefault()
       const side = event.clientY < target!.getBoundingClientRect().top + target!.getBoundingClientRect().height / 2 ? 'before' : 'after'
       try {
         const content = fromEditorDocument(layout.current.view.state.doc)
@@ -986,15 +1001,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       }
     }
   }} onCompositionStartCapture={() => props.onCompositionChange?.(true, draft.current)} onCompositionEndCapture={() => queueMicrotask(() => props.onCompositionChange?.(false, draft.current))}>
-     {!props.readOnly && (props.toolbarHost ? createPortal(<>{documentScope && <details className="flow-document-more"><summary onMouseDown={event => event.preventDefault()} aria-label="更多正文操作">⋯</summary>
-       <button type="button" onMouseDown={event => event.preventDefault()} onClick={switchMode}>{mode === 'layout' ? '源文' : '正文'}</button>
-       {mode === 'source' && diagnostics.length > 0 && commandError
-         ? <div role="alert" className="shared-document-more__mode-notice">{commandError}</div>
-         : null}
-       <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => props.editPreview ? props.editPreview.cancel() : props.onUndo()}>撤销</button>
-       <button type="button" onMouseDown={event => event.preventDefault()} onClick={props.onRedo}>重做</button>
-       {discardButton}
-      </details>}{!documentScope && <>{props.contentScope === 'formula' && <button type="button" onMouseDown={event => event.preventDefault()} onClick={openMath}>编辑公式</button>}<button type="button" onMouseDown={event => event.preventDefault()} onClick={props.onUndo}>撤销</button><button type="button" onMouseDown={event => event.preventDefault()} onClick={props.onRedo}>重做</button></>}{editorForms}</>, props.toolbarHost) : <>{toolbar}{editorForms}</>)}
+     {!props.readOnly && (props.toolbarHost ? createPortal(<>{toolbar}{editorForms}</>, props.toolbarHost) : <>{toolbar}{editorForms}</>)}
      {quickBar}
      {objectMenu.element}
       {documentScope && mode === 'layout' && !props.readOnly && activeBlock && <DocumentBlockHandle blockId={activeBlock.id} rect={activeBlock.rect} commands={activeBlockMenu(activeBlock.id)} disabledReason={props.editPreview ? '正在生成的范围暂时只读' : null} />}

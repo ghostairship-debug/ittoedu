@@ -36,12 +36,23 @@ export function libraryCatalogPackage(entry: ComponentLibraryEntry, version: str
     quality: 'experimental', maintainer: '本地组件作者', verifiedCases: [], ...(metadata?.sourceCourse ? { source: { kind: 'local', reference: metadata.sourceCourse } as const } : {}) }
 }
 
+const metadataRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+
 /** Archives are the source; optional catalog metadata enriches discovery without blocking usable files. */
 export async function scanComponentCatalogDirectory(rootPath: string, trust: ComponentCatalogTrust): Promise<ScannedComponentCatalogSource> {
   const root = path.resolve(rootPath), sourceId = catalogSourceId(root), issues: ComponentCatalogIssue[] = []
-  let metadata: { name?: string; packages?: Partial<ComponentCatalogPackage>[] } = {}
-  try { metadata = JSON.parse(await fs.readFile(path.join(root, 'catalog.json'), 'utf8')) } catch { /* metadata is optional */ }
-  const label = metadata.name ?? path.basename(root), packages: AvailableComponentCatalogPackage[] = [], index = new Map<string, ComponentCatalogPackage>()
+  let metadata: { name?: string; packages?: unknown } = {}
+  try {
+    const parsed: unknown = JSON.parse(await fs.readFile(path.join(root, 'catalog.json'), 'utf8'))
+    if (metadataRecord(parsed)) metadata = parsed
+    else issues.push({ sourceId, sourceLabel: path.basename(root), code: 'catalog-invalid', message: 'catalog.json 不是元数据记录，已忽略；组件包仍按原文件读取。' })
+  } catch { /* metadata is optional */ }
+  const label = typeof metadata.name === 'string' ? metadata.name : path.basename(root), packages: AvailableComponentCatalogPackage[] = [], index = new Map<string, ComponentCatalogPackage>()
+  const packageMetadata: Partial<ComponentCatalogPackage>[] = []
+  if (Array.isArray(metadata.packages)) metadata.packages.forEach((item, itemIndex) => {
+    if (metadataRecord(item)) packageMetadata.push(item)
+    else issues.push({ sourceId, sourceLabel: label, code: 'catalog-invalid', message: `catalog.json packages[${itemIndex}] 不是元数据记录，已忽略；组件包仍按原文件读取。` })
+  })
   let entries: string[]
   try { entries = await fs.readdir(root, { recursive: true }) } catch (cause) { throw new ComponentCatalogScanError('catalog-unreadable', '组件目录无法读取。', { cause }) }
   for (const relative of entries.filter(file => file.toLowerCase().endsWith('.h5component'))) {
@@ -49,7 +60,8 @@ export async function scanComponentCatalogDirectory(rootPath: string, trust: Com
       const bytes = await readCatalogFile(await resolveCatalogFilePath(root, relative))
       const archive = importComponentLibraryArchive(bytes)
       const pkg = libraryCatalogPackage(archive.entry, archive.version, relative.replaceAll('\\', '/'), bytes, archive.metadata)
-      const extra = (Array.isArray(metadata.packages) ? metadata.packages : []).find(item => item.packageId === pkg.packageId && item.version === pkg.version)
+      for (const diagnostic of archive.diagnostics ?? []) issues.push({ sourceId, sourceLabel: label, packageId: pkg.packageId, code: 'catalog-invalid', message: `${relative}：${diagnostic.message}` })
+      const extra = packageMetadata.find(item => item.packageId === pkg.packageId && item.version === pkg.version)
       if (extra) Object.assign(pkg, { description: extra.description ?? pkg.description, subject: extra.subject ?? pkg.subject, schoolStage: extra.schoolStage ?? pkg.schoolStage, tags: extra.tags ?? pkg.tags, category: extra.category, thumbnailPath: extra.thumbnailPath ?? '', license: extra.license, source: extra.source ?? pkg.source })
       let thumbnailDataUrl: string | undefined
       if (pkg.thumbnailPath) {

@@ -1,4 +1,3 @@
-(function () {
   function objectValue(value) {
     return value && typeof value === 'object' ? value : {}
   }
@@ -11,19 +10,14 @@
     return typeof value === 'number' && Number.isFinite(value) ? value : fallback
   }
 
-  window.CoursewareComponent.define({
-    id: 'com.ittoedu.visual.image-frame',
-    runtimeApiVersion: 4,
+  export default {
+    mount: function (ctx) {
+      if (!ctx.root) throw new Error('此视觉组件需要内容根元素')
 
-    create: function (ctx) {
-      if (ctx.renderMode !== 'dom') {
-        throw new Error('图片装饰容器必须使用 renderMode=dom')
-      }
-
-      var root = ctx.dom.root
-      var props = ctx.props
+      var root = ctx.root
+      var props = ctx.instance.data
       var destroyed = false
-      var filterId = 'image-frame-' + String(ctx.instanceId).replace(/[^A-Za-z0-9_-]/g, '-')
+      var filterId = 'image-frame-' + String(ctx.instance.id).replace(/[^A-Za-z0-9_-]/g, '-')
 
       var style = document.createElement('style')
       style.textContent = [
@@ -111,7 +105,7 @@
       function render() {
         var values = objectValue(objectValue(props).content)
         var visualStyle = props.visualStyle === 'sticker' ? 'sticker' : 'brush'
-        var imageAssetId = stringValue(props.imageAssetId, '')
+        var imageAssetId = stringValue(props.assetId, '')
         var hasImage = Boolean(imageAssetId)
         stage.dataset.style = visualStyle
         stage.style.setProperty('--caption-space', props.showCaption === false ? '0px' : '3.2em')
@@ -124,7 +118,7 @@
         stage.style.setProperty('--shadow-distance', numberValue(props.shadowDistance, 12) + 'px')
         image.hidden = !hasImage
         placeholder.hidden = hasImage
-        if (hasImage) image.src = ctx.projectAssetUrl(imageAssetId)
+        if (hasImage) image.src = ctx.resources?.url(imageAssetId) || ''
         else image.removeAttribute('src')
         image.style.objectFit = props.fit === 'contain' ? 'contain' : 'cover'
         picture.setAttribute('aria-label', stringValue(values.alt, ''))
@@ -139,27 +133,15 @@
       }
 
       render()
-      ctx.capture.waitUntil(document.fonts && document.fonts.ready
-        ? document.fonts.ready
-        : Promise.resolve())
 
       return {
-        setMode: function () {},
-        resize: function () { render() },
-        updateProps: function (nextProps) { props = nextProps; render() },
-        setVisible: function (visible) {
-          root.style.display = visible ? '' : 'none'
-          root.style.pointerEvents = visible ? '' : 'none'
-        },
-        suspend: function () {},
-        resume: function () {},
-        prepareCapture: function () { render() },
-        destroy: function () {
+        update: function (nextInstance) {
+          var nextProps = nextInstance.data; props = nextProps; render() },
+        dispose: function () {
           if (destroyed) return
           destroyed = true
           root.replaceChildren()
         }
       }
     }
-  })
-})()
+  }

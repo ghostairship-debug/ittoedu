@@ -9,6 +9,7 @@ import { exportComponentLibraryArchive, importComponentLibraryArchive } from '..
 import { captureComponentPackageReplacementTarget, commitComponentReplacementAtTarget, type ComponentPackageReplacementTarget } from '../components/commitComponentPackageAuthoring'
 import { insertComponentPackagesAtTarget } from '../components/insertComponentPackages'
 import type { CourseInsertionOptions } from '../media/commitCourseMediaAuthoring'
+import { selectProjectLibraryDefinitions } from '../components/componentLibraryModel'
 
 export interface ComponentLibraryPorts {
   kernel: EditorStoreKernel
@@ -56,7 +57,7 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
     if (!view.project) return { entries, issues }
     const resources = view.views.find(item => item.documentId === view.activeDocumentId)?.model.resources
     if (!resources) return { entries, issues }
-    for (const definition of Object.values(view.project.definitions)) {
+    for (const definition of selectProjectLibraryDefinitions(view.project.definitions)) {
       const sample = Object.values(view.project.instances).find(instance => instance.definitionId === definition.id)
       if (!sample) continue
       try { entries.push(extractComponentLibraryEntry(view.project, resources, { id: definition.id, title: definition.title ?? definition.id, rootIds: [sample.id] }).entry) }

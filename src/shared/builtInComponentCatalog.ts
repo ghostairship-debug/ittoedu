@@ -5,7 +5,7 @@ export const BUILT_IN_COMPONENT_CATALOG_DIRECTORY = 'resources/built-in-componen
 
 /** SHA-256 of the reviewed official catalog shipped with this editor build. */
 export const BUILT_IN_COMPONENT_CATALOG_SHA256 =
-  'fedf8315a8a1cc636771760be95931b31dba7f6625b62adc8247d7eebf044573'
+  '4740e19e7b38a0b8b35abd2039a2fda54e91b323ca03faf9f47bc0289165757d'
 
 export function trustForManagedCatalogDigest(digest: string): ComponentCatalogTrust {
   return digest.toLocaleLowerCase('en-US') === BUILT_IN_COMPONENT_CATALOG_SHA256

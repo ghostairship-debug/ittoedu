@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { ComponentLibraryEntry } from '../../../shared/contracts/component-platform/library'
 import { componentAssetSchema, componentDefinitionSchema, componentInstanceSchema } from '../../../shared/contracts/component-platform/schema'
 import { assertSafeArchivePath } from '../../drivers/codecs/archivePath'
+import type { LibraryDiagnostic } from './types'
 
 export const COMPONENT_LIBRARY_ARCHIVE_FORMAT = 'guoling-component-library'
 const entrySchema = z.object({
@@ -15,11 +16,11 @@ const entrySchema = z.object({
 const manifestSchema = z.object({
   format: z.literal(COMPONENT_LIBRARY_ARCHIVE_FORMAT), version: z.string().min(1), entry: entrySchema,
   resources: z.object({ assets: z.record(z.string(), z.string()), components: z.record(z.string(), z.record(z.string(), z.string())) }),
-  metadata: z.object({ description: z.string().optional(), subject: z.array(z.string()).optional(), schoolStage: z.array(z.string()).optional(),
-    tags: z.array(z.string()).optional(), sourceCourse: z.string().optional() }).optional(),
 })
+const metadataSchema = z.object({ description: z.string().optional(), subject: z.array(z.string()).optional(), schoolStage: z.array(z.string()).optional(),
+  tags: z.array(z.string()).optional(), sourceCourse: z.string().optional() })
 export interface ComponentLibraryArchiveMetadata { description?: string; subject?: readonly string[]; schoolStage?: readonly string[]; tags?: readonly string[]; sourceCourse?: string }
-export interface ComponentLibraryArchive { entry: ComponentLibraryEntry; version: string; metadata?: ComponentLibraryArchiveMetadata }
+export interface ComponentLibraryArchive { entry: ComponentLibraryEntry; version: string; metadata?: ComponentLibraryArchiveMetadata; diagnostics?: LibraryDiagnostic[] }
 
 /** The existing package file service transports this archive; author identities remain software-owned. */
 export function exportComponentLibraryArchive(entry: ComponentLibraryEntry, version = Object.values(entry.definitions)[0]?.version ?? '1.0.0', metadata?: ComponentLibraryArchiveMetadata): Uint8Array {
@@ -43,9 +44,22 @@ export function exportComponentLibraryArchive(entry: ComponentLibraryEntry, vers
 export function importComponentLibraryArchive(bytes: Uint8Array): ComponentLibraryArchive {
   const files = unzipSync(bytes, { filter(file) { assertSafeArchivePath(file.name, 'component', { allowDirectory: true }); return !file.name.endsWith('/') } })
   if (!files['manifest.json']) throw new Error('组件条目缺少 manifest.json；原文件已保留。')
-  const raw = JSON.parse(strFromU8(files['manifest.json'])) as { format?: string }
+  const raw = JSON.parse(strFromU8(files['manifest.json'])) as { format?: string; metadata?: unknown }
   if (raw.format !== COMPONENT_LIBRARY_ARCHIVE_FORMAT) throw new Error('此文件不是 V10 组件库条目；旧组件格式不兼容，原文件已保留。')
   const manifest = manifestSchema.parse(raw)
+  const diagnostics: LibraryDiagnostic[] = []
+  let metadata: ComponentLibraryArchiveMetadata | undefined
+  if (raw.metadata !== undefined) {
+    if (raw.metadata && typeof raw.metadata === 'object' && !Array.isArray(raw.metadata)) {
+      const values: Record<string, unknown> = {}
+      for (const [field, schema] of Object.entries(metadataSchema.shape)) {
+        const result = schema.safeParse((raw.metadata as Record<string, unknown>)[field])
+        if (result.success) { if (result.data !== undefined) values[field] = result.data }
+        else diagnostics.push({ code: 'metadata-invalid', message: `metadata.${field} 格式不可用，已忽略；组件内容仍可使用。` })
+      }
+      metadata = values
+    } else diagnostics.push({ code: 'metadata-invalid', message: 'metadata 不是元数据记录，已忽略；组件内容仍可使用。' })
+  }
   const read = (file: string) => {
     assertSafeArchivePath(file, 'component')
     const value = files[file]
@@ -64,5 +78,5 @@ export function importComponentLibraryArchive(bytes: Uint8Array): ComponentLibra
     if (instance.childIds?.some(child => !entry.example.instances[child])) throw new Error(`条目子对象缺失：${id}`)
   }
   if (entry.example.rootIds.some(id => !entry.example.instances[id])) throw new Error('条目根对象不存在')
-  return { entry, version: manifest.version, ...(manifest.metadata ? { metadata: manifest.metadata } : {}) }
+  return { entry, version: manifest.version, ...(metadata ? { metadata } : {}), ...(diagnostics.length ? { diagnostics } : {}) }
 }

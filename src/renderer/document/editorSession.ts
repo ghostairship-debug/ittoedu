@@ -272,7 +272,8 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       return true
     },
     dispatchTransaction(transaction: Transaction) {
-      const applied = view.state.applyTransaction(transaction), state = applied.state
+      const applied = view.state.applyTransaction(transaction)
+      const state = applied.transactions.some(item => item.docChanged) ? identifyEditorState(applied.state) : applied.state
       applyState(state)
       if (transaction.docChanged && !composing) publish(transaction.getMeta('preparedResources'))
       else if (transaction.selectionSet && !transaction.docChanged) boundary()
@@ -291,6 +292,20 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   function applyState(state:EditorState):void {
     if(state.doc.eq(view.state.doc)){view.updateState(state);return}
     projectionMutation(()=>view.updateState(state))
+  }
+  /** Splits may create missing/duplicate identities while IME is still local.
+   * Repair attrs before any view consumer sees them, without replacing composing text. */
+  function identifyEditorState(state: EditorState): EditorState {
+    const repaired = renewEditorIdentities(state.doc, () => crypto.randomUUID())
+    if (repaired.eq(state.doc)) return state
+    const transaction = state.tr
+    state.doc.descendants((node, position) => {
+      if (node.isText) return
+      const identified = repaired.nodeAt(position)!
+      if (!node.sameMarkup(identified)) transaction.setNodeMarkup(position, undefined, identified.attrs, node.marks)
+    })
+    transaction.setStoredMarks(state.storedMarks)
+    return state.apply(transaction)
   }
   /** The document selection of `state`; undefined for a cell selection whose cells cannot be identified. */
   function describeSelection(state: EditorState): DocumentSelection | null | undefined {
@@ -425,13 +440,6 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   function publish(prepared?: { value: unknown; discard(): Promise<void> }) {
     if (prepared) draftSession.prepare(prepared)
     try {
-      const repaired = renewEditorIdentities(view.state.doc, () => crypto.randomUUID())
-      if (!repaired.eq(view.state.doc)) {
-        const { anchor, head } = view.state.selection
-        const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, repaired.content)
-        tr.setSelection(TextSelection.create(tr.doc, anchor, head))
-        applyState(view.state.apply(tr))
-      }
       const content = fromEditorDocument(view.state.doc)
       if (JSON.stringify(content) === JSON.stringify(draftSession.document.content)) return
       const now = Date.now()

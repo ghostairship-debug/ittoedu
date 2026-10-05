@@ -110,6 +110,15 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
   const viewSession=useRef<PlaybackViewSession|null>(null),[observationHost,setObservationHost]=useState<HTMLElement|null>(null)
   const [viewport,setViewport]=useState({width:0,height:0})
   const [formatHost, setFormatHost] = useState<HTMLDivElement | null>(null)
+  const [formatHeight, setFormatHeight] = useState(0)
+  useLayoutEffect(() => {
+    if (toolbarContainer || !formatHost) { setFormatHeight(0); return }
+    const measure = () => setFormatHeight(Math.ceil(formatHost.getBoundingClientRect().height) + 8)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(formatHost)
+    return () => observer.disconnect()
+  }, [toolbarContainer, formatHost])
   const [error, setError] = useState<string | null>(null)
   const [selection, setSelection] = useState<DocumentSelection | null>(null)
   const [crop, setCrop] = useState<{ target: CapturedCourseTarget; instance: ComponentInstance; data: ImageData } | null>(null)
@@ -401,8 +410,8 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       event.preventDefault();event.stopPropagation();runtime.selectInstances([instance.id],surfaceId)
       beginContentEdit(instance.id,'canvas')
     }}>
-    <div ref={setFormatHost} className="flow-document-format-host" />
-    <div ref={observationMount} style={{position:'absolute',inset:0}} data-page-backdrop="transparent" />
+    <div ref={setFormatHost} className="flow-document-format-host" style={{ left: 8, right: 8 }} />
+    <div ref={observationMount} style={{position:'absolute',inset:`${formatHeight}px 0 0`}} data-page-backdrop="transparent" />
     {observationHost && createPortal(<div ref={observationRoot} data-flow-observation-root="true">
     <div ref={observationContent} data-playback-content="true" style={{position:'absolute',inset:0,transformOrigin:'0 0'}}>
     <div ref={scroll} className="flow-workspace__scroll flow-media-query-root" data-testid="flow-workspace-scroll" data-flow-paper-scroll="true"
@@ -410,6 +419,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
         backgroundImage:background.assetId && assetUrls[background.assetId] ? `url("${assetUrls[background.assetId]}")` : undefined,
         backgroundSize:background.fit === 'fill' ? '100% 100%' : background.fit, backgroundPosition:'center',backgroundRepeat:'no-repeat' }}>
       <article ref={paper} className="flow-paper flow-body-content" data-testid="flow-paper" data-flow-reading-width={layout.readingWidth}
+        onClick={event => { if (!readOnly && event.target === event.currentTarget) editor.current?.focusEndParagraph() }}
         onDragOver={event => { if (onDropWorkspaceMedia && event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy' } }}
         onDrop={drop} style={{ position: 'relative', width: '100%', maxWidth: flowPaperMaxWidth(layout), minHeight: '100%', margin: '0 auto', padding: FLOW_BODY_PAPER_PADDING, background: layout.paperBackgroundColor, color: '#1f2937' }}>
         <style>{FLOW_BODY_CSS}</style>
@@ -518,6 +528,9 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
             if(note) {note.innerHTML=renderDocumentText(bodyLayout!.caption!);shell.append(note)}
             return () => {disposed=true;runtime.onElement(block.id,null);runtime.onTargetElement(block.id,null);resize?.disconnect();if(root) queueMicrotask(() => root.unmount());children?.remove();note?.remove();stage?.remove() }
           }} /></div>
+        {!readOnly && <button type="button" aria-label="继续输入正文" title="点击继续输入正文" data-flow-document-end="true"
+          onMouseDown={event => event.preventDefault()} onClick={() => editor.current?.focusEndParagraph()}
+          style={{ display: 'block', width: '100%', minHeight: 80, padding: 0, border: 0, background: 'transparent', cursor: 'text' }} />}
         {error && <p role="alert">{error}</p>}
         {floating.filter(id => project.instances[id].flowPlacement?.space === 'paper').map(id => <FlowFloatingInstance key={id} project={project} instanceId={id}
           readObservationScale={()=>viewSession.current?.state.zoom ?? 1}

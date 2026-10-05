@@ -21,23 +21,16 @@
       "category": "语文标注",
       "packagePath": "packages/reading-annotation.h5component",
       "thumbnailPath": "components/language/reading-annotation/thumbnail.svg",
-      "sha256": "b4b7b1104ff390f675811e4ca7460042b28f00aaa9f40614a4f79e56f00cb82a",
-      "componentSchemaVersion": 4,
-      "runtimeApiVersion": 4,
+      "sha256": "08ec29f2dccc4fe736de3cc2dff4c506e52c0499317903f12d7ce57b0b0704d7",
+      "componentSchemaVersion": 1,
+      "runtimeApiVersion": 5,
       "renderMode": "dom",
       "supportedScopes": [
         "scene"
       ],
       "quality": "experimental",
       "maintainer": "unassigned",
-      "verifiedCases": [
-        "component-catalog-v8-matrix:catalog-ui-roundtrip",
-        "component-catalog-v8-matrix:editor-player-thumbnail",
-        "component-catalog-v8-matrix:offline-html-web",
-        "component-catalog-v8-matrix:pdf-pptx-static",
-        "component-catalog-v8-matrix:lifecycle-error-isolation-25x4"
-      ],
-      "verifiedAt": "2026-08-12T16:46:41.614Z",
+      "verifiedCases": [],
       "source": {
         "kind": "handoff",
         "reference": "feedback-package:f0cd81e9642be799c7382bc84a46649e9e9d86031de2ceeb91d6c29cdb7c7a688/04/examples/language-annotation-components/reading-annotation"
@@ -68,23 +61,16 @@
       "category": "语文标注",
       "packagePath": "packages/pinyin-annotation.h5component",
       "thumbnailPath": "components/language/pinyin-annotation/thumbnail.svg",
-      "sha256": "9c18a0d9ca01bdd9d6c1e9353d46158dff20af5f842c26697c95454fcc6c911d",
-      "componentSchemaVersion": 4,
-      "runtimeApiVersion": 4,
+      "sha256": "761f5883af5490fe0c390d1195235ff6a5aaaafd072c918d8229cb929c6b9dba",
+      "componentSchemaVersion": 1,
+      "runtimeApiVersion": 5,
       "renderMode": "dom",
       "supportedScopes": [
         "scene"
       ],
       "quality": "experimental",
       "maintainer": "unassigned",
-      "verifiedCases": [
-        "component-catalog-v8-matrix:catalog-ui-roundtrip",
-        "component-catalog-v8-matrix:editor-player-thumbnail",
-        "component-catalog-v8-matrix:offline-html-web",
-        "component-catalog-v8-matrix:pdf-pptx-static",
-        "component-catalog-v8-matrix:lifecycle-error-isolation-25x4"
-      ],
-      "verifiedAt": "2026-08-12T16:46:41.614Z",
+      "verifiedCases": [],
       "source": {
         "kind": "handoff",
         "reference": "feedback-package:f0cd81e9642be799c7382bc84a46649e9e9d86031de2ceeb91d6c29cdb7c7a688/04/examples/language-annotation-components/pinyin-annotation"
@@ -116,9 +102,9 @@
       "category": "视觉容器",
       "packagePath": "packages/text-container.h5component",
       "thumbnailPath": "components/visual/text-container/thumbnail.svg",
-      "sha256": "f38781f797361dfd5afbda56958b824a5e95156f637befbf75ede57cf1edf7b1",
-      "componentSchemaVersion": 4,
-      "runtimeApiVersion": 4,
+      "sha256": "3be7793e5a447f7e1142a0fecfd5b9df69f06a6f14a5af54e4a6118ea27e2436",
+      "componentSchemaVersion": 1,
+      "runtimeApiVersion": 5,
       "renderMode": "dom",
       "supportedScopes": [
         "scene",
@@ -126,14 +112,7 @@
       ],
       "quality": "experimental",
       "maintainer": "unassigned",
-      "verifiedCases": [
-        "component-catalog-v8-matrix:catalog-ui-roundtrip",
-        "component-catalog-v8-matrix:editor-player-thumbnail",
-        "component-catalog-v8-matrix:offline-html-web",
-        "component-catalog-v8-matrix:pdf-pptx-static",
-        "component-catalog-v8-matrix:lifecycle-error-isolation-25x4"
-      ],
-      "verifiedAt": "2026-08-12T16:46:41.614Z",
+      "verifiedCases": [],
       "source": {
         "kind": "local",
         "reference": "components/visual/text-container"
@@ -163,9 +142,9 @@
       "category": "视觉容器",
       "packagePath": "packages/image-frame.h5component",
       "thumbnailPath": "components/visual/image-frame/thumbnail.svg",
-      "sha256": "b436247ab0a923643eb50f302c914bb71a2d88cd13ac5c41573638dfb067531a",
-      "componentSchemaVersion": 4,
-      "runtimeApiVersion": 4,
+      "sha256": "c93e99ff171e4faa92f01611ec25cd33584d53386c4bdd6dee8ba766838dbd51",
+      "componentSchemaVersion": 1,
+      "runtimeApiVersion": 5,
       "renderMode": "dom",
       "supportedScopes": [
         "scene",
@@ -173,14 +152,7 @@
       ],
       "quality": "experimental",
       "maintainer": "unassigned",
-      "verifiedCases": [
-        "component-catalog-v8-matrix:catalog-ui-roundtrip",
-        "component-catalog-v8-matrix:editor-player-thumbnail",
-        "component-catalog-v8-matrix:offline-html-web",
-        "component-catalog-v8-matrix:pdf-pptx-static",
-        "component-catalog-v8-matrix:lifecycle-error-isolation-25x4"
-      ],
-      "verifiedAt": "2026-08-12T16:46:41.614Z",
+      "verifiedCases": [],
       "source": {
         "kind": "local",
         "reference": "components/visual/image-frame"

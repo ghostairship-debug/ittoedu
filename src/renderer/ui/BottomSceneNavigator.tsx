@@ -119,6 +119,7 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
       const activeCamera = spatialViews[documentId]?.[card.key]?.activeCameraFrameId ?? null
       return <li key={card.key} className={'bottom-scene-card' + (card.kind !== 'slide' ? ' bottom-scene-card--' + card.kind : '') + (active ? ' bottom-scene-card--active' : '')}
         data-current-card={active} data-kind={card.kind} data-testid={(card.kind === 'slide' ? 'bottom-scene-' : 'bottom-page-') + card.key}
+        onClick={event => { if (!(event.target as Element).closest('button, input')) goTo(card.page) }}
         onContextMenu={event => openMenu(event, '页面操作', cardCommands(card))} {...dragProps(card)}>
         <button type="button" className="bottom-scene-card__main" aria-current={active ? 'page' : undefined} aria-label={'页面 ' + card.number + '：' + card.page.label} onClick={() => goTo(card.page)}>
           {card.kind === 'slide' ? <SceneThumbnail locationId={card.key} /> : <span className="bottom-scene-card__surface-mark" aria-hidden="true">{card.kind === 'flow' ? '文' : '空'}</span>}

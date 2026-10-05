@@ -29,6 +29,7 @@
   border: 1px solid var(--border, #d9d6ce);
   border-radius: 7px;
   background: var(--surface, #fff);
+  cursor: pointer;
   scroll-snap-align: nearest;
 }
 .bottom-scene-card--active { border-color: var(--green, #245b46); background: var(--green-soft, #e5f1e9); }

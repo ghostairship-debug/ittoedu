@@ -1,87 +1,224 @@
 {
-  "schemaVersion": 4,
-  "runtimeApiVersion": 4,
-  "renderMode": "dom",
-  "supportedScopes": [
-    "scene",
-    "global"
-  ],
-  "id": "com.ittoedu.visual.image-frame",
-  "name": "图片装饰容器",
+  "format": "guoling-component-library",
   "version": "1.0.0",
-  "description": "统一承载笔刷裁切和贴纸白边等图片装饰样式",
-  "entry": "runtime.js",
-  "thumbnail": "thumbnail.svg",
-  "defaultSize": {
-    "width": 760,
-    "height": 520
-  },
-  "minSize": {
-    "width": 180,
-    "height": 140
-  },
-  "preserveAspectRatio": false,
-  "assets": {},
-  "defaultProps": {
-    "content": {
-      "caption": "图片标题",
-      "alt": "装饰图片"
+  "entry": {
+    "schemaVersion": 1,
+    "id": "com.ittoedu.visual.image-frame",
+    "title": "图片装饰容器",
+    "definitions": {
+      "com.ittoedu.visual.image-frame": {
+        "id": "com.ittoedu.visual.image-frame",
+        "title": "图片装饰容器",
+        "version": "1.0.0",
+        "role": "content",
+        "implementation": {
+          "kind": "source",
+          "language": "javascript",
+          "workspace": {
+            "ownerId": "com.ittoedu.visual.image-frame",
+            "entry": "runtime.js"
+          }
+        },
+        "dataSchema": {
+          "type": "object",
+          "properties": {
+            "visualStyle": {
+              "title": "视觉样式",
+              "type": "string",
+              "oneOf": [
+                {
+                  "const": "brush",
+                  "title": "笔刷"
+                },
+                {
+                  "const": "sticker",
+                  "title": "贴纸"
+                }
+              ]
+            },
+            "assetId": {
+              "title": "展示图片",
+              "type": "string",
+              "format": "image-asset"
+            },
+            "content": {
+              "type": "object",
+              "properties": {
+                "caption": {
+                  "title": "图片标题",
+                  "type": "string",
+                  "maxLength": 100
+                },
+                "alt": {
+                  "title": "无障碍说明",
+                  "type": "string",
+                  "maxLength": 200
+                }
+              }
+            },
+            "showCaption": {
+              "title": "显示图片标题",
+              "type": "boolean"
+            },
+            "fit": {
+              "title": "图片适配",
+              "type": "string",
+              "oneOf": [
+                {
+                  "const": "cover",
+                  "title": "裁切铺满"
+                },
+                {
+                  "const": "contain",
+                  "title": "完整显示"
+                }
+              ]
+            },
+            "positionX": {
+              "title": "图片水平焦点",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "multipleOf": 1
+            },
+            "positionY": {
+              "title": "图片垂直焦点",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100,
+              "multipleOf": 1
+            },
+            "captionSize": {
+              "title": "标题字号",
+              "type": "number",
+              "minimum": 22,
+              "maximum": 64,
+              "multipleOf": 1
+            },
+            "captionColor": {
+              "title": "标题颜色",
+              "type": "string",
+              "format": "color"
+            },
+            "accentColor": {
+              "title": "强调颜色",
+              "type": "string",
+              "format": "color"
+            },
+            "borderWidth": {
+              "title": "贴纸白边",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 28,
+              "multipleOf": 1
+            },
+            "borderColor": {
+              "title": "贴纸纸边颜色",
+              "type": "string",
+              "format": "color"
+            },
+            "shadowEnabled": {
+              "title": "显示投影",
+              "type": "boolean"
+            },
+            "shadowOpacity": {
+              "title": "投影强度",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 0.5,
+              "multipleOf": 0.02
+            },
+            "shadowDistance": {
+              "title": "投影距离",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 30,
+              "multipleOf": 1
+            }
+          },
+          "required": [
+            "visualStyle",
+            "fit"
+          ],
+          "x-editor": {
+            "presets": [
+              {
+                "id": "brush",
+                "label": "笔刷图片",
+                "data": {
+                  "visualStyle": "brush",
+                  "fit": "cover",
+                  "showCaption": true
+                }
+              },
+              {
+                "id": "sticker",
+                "label": "贴纸图片",
+                "data": {
+                  "visualStyle": "sticker",
+                  "fit": "contain",
+                  "showCaption": false
+                }
+              }
+            ]
+          }
+        }
+      }
     },
-    "visualStyle": "brush",
-    "imageAssetId": "",
-    "fit": "cover",
-    "positionX": 50,
-    "positionY": 50,
-    "showCaption": true,
-    "captionSize": 28,
-    "captionColor": "#2f6f4e",
-    "accentColor": "#d95d42",
-    "borderWidth": 12,
-    "borderColor": "#fffdf6",
-    "shadowEnabled": true,
-    "shadowOpacity": 0.22,
-    "shadowDistance": 12
+    "example": {
+      "rootIds": [
+        "example"
+      ],
+      "instances": {
+        "example": {
+          "id": "example",
+          "definitionId": "com.ittoedu.visual.image-frame",
+          "data": {
+            "content": {
+              "caption": "图片标题",
+              "alt": "装饰图片"
+            },
+            "visualStyle": "brush",
+            "fit": "cover",
+            "positionX": 50,
+            "positionY": 50,
+            "showCaption": true,
+            "captionSize": 28,
+            "captionColor": "#2f6f4e",
+            "accentColor": "#d95d42",
+            "borderWidth": 12,
+            "borderColor": "#fffdf6",
+            "shadowEnabled": true,
+            "shadowOpacity": 0.22,
+            "shadowDistance": 12,
+            "assetId": ""
+          },
+          "frame": {
+            "width": 760,
+            "height": 520,
+            "transform": [
+              1,
+              0,
+              0,
+              1,
+              40,
+              40
+            ]
+          }
+        }
+      }
+    },
+    "assets": {}
   },
-  "editor": {
-    "properties": [
-      {
-        "key": "visualStyle",
-        "label": "视觉样式",
-        "type": "select",
-        "required": true,
-        "options": [
-          { "value": "brush", "label": "笔刷" },
-          { "value": "sticker", "label": "贴纸" }
-        ]
-      },
-      { "key": "imageAssetId", "label": "展示图片", "type": "image" },
-      { "key": "content.caption", "label": "图片标题", "type": "text", "maxLength": 100 },
-      { "key": "content.alt", "label": "无障碍说明", "type": "text", "maxLength": 200 },
-      { "key": "showCaption", "label": "显示图片标题", "type": "boolean" },
-      {
-        "key": "fit",
-        "label": "图片适配",
-        "type": "select",
-        "required": true,
-        "options": [
-          { "value": "cover", "label": "裁切铺满" },
-          { "value": "contain", "label": "完整显示" }
-        ]
-      },
-      { "key": "positionX", "label": "图片水平焦点", "type": "number", "min": 0, "max": 100, "step": 1 },
-      { "key": "positionY", "label": "图片垂直焦点", "type": "number", "min": 0, "max": 100, "step": 1 },
-      { "key": "captionSize", "label": "标题字号", "type": "number", "min": 22, "max": 64, "step": 1, "unit": "px" },
-      { "key": "captionColor", "label": "标题颜色", "type": "color" },
-      { "key": "accentColor", "label": "强调颜色", "type": "color" },
-      { "key": "borderWidth", "label": "贴纸白边", "type": "number", "min": 0, "max": 28, "step": 1, "unit": "px" },
-      { "key": "borderColor", "label": "贴纸纸边颜色", "type": "color" },
-      { "key": "shadowEnabled", "label": "显示投影", "type": "boolean" },
-      { "key": "shadowOpacity", "label": "投影强度", "type": "number", "min": 0, "max": 0.5, "step": 0.02 },
-      { "key": "shadowDistance", "label": "投影距离", "type": "number", "min": 0, "max": 30, "step": 1, "unit": "px" }
-    ]
+  "resources": {
+    "assets": {},
+    "components": {
+      "com.ittoedu.visual.image-frame": {
+        "runtime.js": "components/com.ittoedu.visual.image-frame/runtime.js"
+      }
+    }
   },
-  "presets": [
-    { "id": "brush", "label": "笔刷图片", "props": { "visualStyle": "brush", "fit": "cover", "showCaption": true } },
-    { "id": "sticker", "label": "贴纸图片", "props": { "visualStyle": "sticker", "fit": "contain", "showCaption": false } }
-  ]
+  "metadata": {
+    "description": "统一承载笔刷裁切和贴纸白边等图片装饰样式"
+  }
 }

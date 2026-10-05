@@ -4,16 +4,7 @@ import path from 'node:path'
 import { z } from 'zod'
 import { BUILT_IN_COMPONENT_CATALOG_DIRECTORY, trustForManagedCatalogDigest } from '../shared/builtInComponentCatalog'
 import type { AvailableHtmlComponent, ComponentCatalogIssue, ComponentCatalogTrust } from '../shared/componentCatalog'
-import { ComponentCatalogScanError, createBuiltInCatalogSource, scanComponentCatalogDirectory, type ScannedComponentCatalogSource } from './componentCatalogScanner'
-import type { ComponentLibraryEntry } from '../shared/contracts/component-platform/library'
-import type { ComponentDefinition, JsonValue } from '../shared/contracts/component-platform/project'
-import { TEXT_DEFINITION, FORMULA_DEFINITION } from '../components/text/adapters'
-import { createTextComponentData, createFormulaComponentData } from '../components/text/data'
-import { SHAPE_DEFINITION } from '../components/shape/authoring'
-import { defaultShapeData } from '../components/shape/data'
-import { TABLE_DEFINITION } from '../components/table/adapters'
-import { createTableData } from '../components/table/data'
-import { CHART_DEFINITION, createChartData } from '../components/chart'
+import { ComponentCatalogScanError, scanComponentCatalogDirectory, type ScannedComponentCatalogSource } from './componentCatalogScanner'
 import { MANAGED_COMPONENT_LIBRARY_DIRECTORY, scanHtmlComponents } from './htmlComponentLibrary'
 
 /** Directories the user added in the component library panel (under userData). */
@@ -44,20 +35,6 @@ export function canonicalCatalogPath(value: string): string {
 
 /** The managed library (“我的资产库”) that saved HTML components go to. */
 export const managedComponentLibrary = (userData: string) => path.join(userData, MANAGED_COMPONENT_LIBRARY_DIRECTORY)
-
-export function builtInComponentLibraryEntries(): ComponentLibraryEntry[] {
-  const entry = (definition: ComponentDefinition, data: unknown, width: number, height: number): ComponentLibraryEntry => ({
-    schemaVersion: 1, id: definition.id, title: definition.title ?? definition.id,
-    definitions: { [definition.id]: structuredClone(definition) },
-    example: { rootIds: ['example'], instances: { example: { id: 'example', definitionId: definition.id,
-      data: JSON.parse(JSON.stringify(data)) as JsonValue, frame: { width, height, transform: [1, 0, 0, 1, 40, 40] } } } },
-    assets: {}, resources: { assets: {}, components: {} },
-  })
-  return [entry(TEXT_DEFINITION, createTextComponentData('输入文字'), 400, 100),
-    entry(FORMULA_DEFINITION, createFormulaComponentData('formula', 'E=mc^2'), 300, 100),
-    entry(SHAPE_DEFINITION, defaultShapeData(), 260, 160), entry(TABLE_DEFINITION, createTableData(), 600, 160),
-    entry(CHART_DEFINITION, createChartData(), 600, 400)]
-}
 
 /** Built-ins always come from the application. External directories and the managed library are additive. */
 export async function defaultComponentCatalogSources(
@@ -109,10 +86,7 @@ export async function scanComponentCatalogSources(appRoot: string, userData: str
     if (byPath.get(key)?.trust !== 'built-in') byPath.set(key, source)
   }
   const sources = new Map<string, ScannedCatalogSource>(), issues: ComponentCatalogIssue[] = []
-  const builtins = createBuiltInCatalogSource(appRoot, builtInComponentLibraryEntries())
-  sources.set(builtins.source.sourceId, { ...builtins, htmlComponents: [] })
   for (const source of byPath.values()) {
-    if (canonicalCatalogPath(source.path) === canonicalCatalogPath(path.join(appRoot, BUILT_IN_COMPONENT_CATALOG_DIRECTORY))) continue
     try {
       const scanned = await scanCatalogSource(source.path, source.trust, managed)
       sources.set(scanned.source.sourceId, scanned)

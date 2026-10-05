@@ -7,7 +7,8 @@ import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../../src
 import { parseDocumentMarkdown, type MarkdownDocument } from '../../src/shared/document/markdown'
 import { Slice } from 'prosemirror-model'
 import { NodeSelection, TextSelection } from 'prosemirror-state'
-import { toEditorDocument } from '../../src/renderer/document/documentAdapter'
+import { fromEditorDocument, toEditorDocument } from '../../src/renderer/document/documentAdapter'
+import { documentEditorSchema } from '../../src/renderer/document/editorSchema'
 import { emptyDocumentResources } from '../../src/shared/document/resources'
 
 const geometry = ['getClientRects', 'getBoundingClientRect'] as const
@@ -32,6 +33,68 @@ function deferred<T>() {
 }
 
 describe('F0 actual draft ACK boundary', () => {
+  it('identifies new and split paragraphs before composition view consumers and waits for its end ACK before undo', async () => {
+    const factory = vi.spyOn(sessions, 'createLayoutEditor'), ack = deferred<boolean>()
+    const handle = createRef<SharedDocumentEditorHandle>(), onChange = vi.fn((_document: MarkdownDocument) => ack.promise), undo = vi.fn()
+    const toolbarHost = document.createElement('div'); document.body.append(toolbarHost)
+    const ui = render(<SharedDocumentEditor ref={handle} document={body('中文输入')} revision="original-doc:0" target="flow"
+      toolbarHost={toolbarHost} onChange={onChange} onDraft={() => {}} onUndo={undo} onRedo={() => {}} />)
+    const editor = factory.mock.results.at(-1)!.value, view = editor.view, originalParagraph = view.dom.firstChild
+    const typingMarks = [documentEditorSchema.marks.style.create({ value: { bold: true, color: '#123456' } })]
+    try {
+      await act(async () => {
+        view.focus()
+        fireEvent.compositionStart(view.dom)
+        const paragraph = documentEditorSchema.nodes.paragraph.create(null, documentEditorSchema.text('新增中文'))
+        const appended = view.state.tr.insert(view.state.doc.content.size, paragraph)
+        view.dispatch(appended.setSelection(TextSelection.create(appended.doc, 1)))
+        view.dispatch(view.state.tr.split(3))
+      })
+      expect(view.composing).toBe(true)
+      expect(view.dom.firstChild).toBe(originalParagraph)
+      const content = fromEditorDocument(view.state.doc), ids = content.blocks.map(block => block.id)
+      expect(ids[0]).toBe('body')
+      expect(ids.every(id => Boolean(id))).toBe(true)
+      expect(new Set(ids).size).toBe(3)
+      expect(view.state.doc.textContent).toBe('中文输入新增中文')
+      expect(view.state.selection.anchor).toBe(1)
+      expect(view.state.storedMarks).toBeNull()
+      expect(ui.getByRole('button', { name: '插入段落' })).toBeInTheDocument()
+      expect(within(toolbarHost).getByRole('button', { name: '粗体' })).toBeInTheDocument()
+      expect(ui.queryByRole('button', { name: '撤销' })).not.toBeInTheDocument()
+      expect(ui.queryByRole('button', { name: '重做' })).not.toBeInTheDocument()
+      expect(await handle.current!.drain()).toMatchObject({ ready: false })
+      expect(onChange).not.toHaveBeenCalled()
+      await act(async () => fireEvent.compositionEnd(view.dom))
+      const compositionEndedAt = Date.now()
+      await vi.waitFor(() => expect(onChange).toHaveBeenCalledTimes(1))
+      expect(onChange.mock.calls[0][0].content).toEqual(content)
+      expect(view.composing).toBe(false)
+      // jsdom advertises Safari, whose PM input boundary ignores a key for 500ms after compositionend.
+      if (/Apple Computer/.test(navigator.vendor)) await vi.waitFor(() => expect(Date.now() - compositionEndedAt).toBeGreaterThanOrEqual(500))
+      const undoKey = new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })
+      await act(async () => { view.dom.dispatchEvent(undoKey) })
+      expect(undoKey.defaultPrevented).toBe(true)
+      expect(undo).not.toHaveBeenCalled()
+      await act(async () => ack.resolve(true))
+      await vi.waitFor(() => expect(undo).toHaveBeenCalledTimes(1))
+      expect(await handle.current!.drain()).toMatchObject({ ready: true, diagnostics: [] })
+      expect(onChange).toHaveBeenCalledTimes(1)
+      expect(view.state.doc.textContent).toBe('中文输入新增中文')
+      // Pending input styles are a post-composition action: PM intentionally ends IME when they are added.
+      await act(async () => {
+        const appended = view.state.tr.insert(view.state.doc.content.size, documentEditorSchema.nodes.paragraph.create())
+        view.dispatch(appended.setSelection(TextSelection.create(appended.doc, appended.doc.content.size - 1)).setStoredMarks(typingMarks))
+      })
+      expect(view.state.storedMarks).toEqual(typingMarks)
+      expect(within(toolbarHost).getByRole('button', { name: '粗体' })).toHaveAttribute('aria-pressed', 'true')
+      expect(fromEditorDocument(view.state.doc).blocks.at(-1)!.id).toBeTruthy()
+      expect(await handle.current!.drain()).toMatchObject({ ready: true, diagnostics: [] })
+      expect(onChange).toHaveBeenCalledTimes(2)
+      expect(undo).toHaveBeenCalledTimes(1)
+    } finally { ui.unmount(); toolbarHost.remove() }
+  })
+
   it('explicitly discards restored rejected source and caller-owned handles before publishing canonical input', async () => {
     for (const entry of ['button', 'handle'] as const) {
       const events: string[] = [], restoredHandles = new Set(['private-source-files'])

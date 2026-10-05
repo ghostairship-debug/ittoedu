@@ -1,10 +1,20 @@
 import type { AvailableComponentCatalogPackage, AvailableHtmlComponent } from '../../shared/componentCatalog'
-import type { ComponentDefinition } from '../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, type ComponentDefinition } from '../../shared/contracts/component-platform/project'
+import { builtinComponentSourceKeys } from '../../core/components/source/builtinSources'
 import {
   compareSemanticVersions,
 } from './componentCatalogStatus'
 
 export const GENERAL_COMPONENT_SUBJECT = '通用组件'
+
+const internalImplementationKeys = new Set(builtinComponentSourceKeys)
+/** Engine definitions keep their editing actions; authored packages and custom definitions belong in this panel. */
+export function selectProjectLibraryDefinitions(definitions: Readonly<Record<string, ComponentDefinition>>): ComponentDefinition[] {
+  return Object.values(definitions).filter(definition => {
+    const key = componentDefinitionBuiltinKey(definition)
+    return !key || !internalImplementationKeys.has(key)
+  }).sort((left, right) => (left.title ?? left.id).localeCompare(right.title ?? right.id, 'zh-CN'))
+}
 
 const RECOMMENDED_SUBJECT_ORDER = [
   GENERAL_COMPONENT_SUBJECT,

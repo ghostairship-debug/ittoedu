@@ -1,4 +1,3 @@
-(function () {
   function objectValue(value) {
     return value && typeof value === 'object' ? value : {}
   }
@@ -27,17 +26,12 @@
     })
   }
 
-  window.CoursewareComponent.define({
-    id: 'com.ittoedu.language.pinyin-annotation',
-    runtimeApiVersion: 4,
+  export default {
+    mount: function (ctx) {
+      if (!ctx.root) throw new Error('此视觉组件需要内容根元素')
 
-    create: function (ctx) {
-      if (ctx.renderMode !== 'dom') {
-        throw new Error('汉语拼音标注组件必须使用 renderMode=dom')
-      }
-
-      var root = ctx.dom.root
-      var props = ctx.props
+      var root = ctx.root
+      var props = ctx.instance.data
       var destroyed = false
       var pinyinVisible = props.showPinyin !== false
       var locallyHidden = new Set()
@@ -106,18 +100,17 @@
       }
 
       function broadcastVisibility(visible) {
-        eventTarget.dispatchEvent(new CustomEvent('courseware:pinyin-visibility', { detail: { visible: visible } }))
+        ctx.scope.events.emit('courseware:pinyin-visibility', { visible: visible })
       }
 
-      function handleGlobalVisibility(event) {
-        if (!event || !event.detail || typeof event.detail.visible !== 'boolean') return
-        setGlobalVisibility(event.detail.visible)
+      function handleGlobalVisibility(value) {
+        if (!value || typeof value.visible !== 'boolean') return
+        setGlobalVisibility(value.visible)
       }
 
       showAll.addEventListener('click', function (event) { event.stopPropagation(); broadcastVisibility(true) })
       hideAll.addEventListener('click', function (event) { event.stopPropagation(); broadcastVisibility(false) })
-      var eventTarget = window && typeof window.addEventListener === 'function' ? window : root
-      eventTarget.addEventListener('courseware:pinyin-visibility', handleGlobalVisibility)
+      var unsubscribeVisibility = ctx.scope.events.subscribe('courseware:pinyin-visibility', handleGlobalVisibility)
       shell.addEventListener('click', function (event) {
         if (props.clickTogglesPinyin !== true || event.target !== shell) return
         broadcastVisibility(!pinyinVisible)
@@ -176,34 +169,22 @@
       }
 
       render()
-      ctx.capture.waitUntil(document.fonts && document.fonts.ready
-        ? document.fonts.ready
-        : Promise.resolve())
 
       return {
-        setMode: function () {},
-        resize: function () { render() },
-        updateProps: function (nextProps) {
+        update: function (nextInstance) {
+          var nextProps = nextInstance.data
           if (nextProps.showPinyin !== props.showPinyin) {
             pinyinVisible = nextProps.showPinyin !== false
           }
           props = nextProps
           render()
         },
-        setVisible: function (visible) {
-          root.style.display = visible ? '' : 'none'
-          root.style.pointerEvents = visible ? '' : 'none'
-        },
-        suspend: function () {},
-        resume: function () {},
-        prepareCapture: function () { render() },
-        destroy: function () {
+        dispose: function () {
           if (destroyed) return
           destroyed = true
-          eventTarget.removeEventListener('courseware:pinyin-visibility', handleGlobalVisibility)
+          unsubscribeVisibility()
           root.replaceChildren()
         }
       }
     }
-  })
-})()
+  }
