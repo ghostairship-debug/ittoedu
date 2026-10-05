@@ -143,6 +143,7 @@ export class ExecutionDesktopService {
     this.engine = new ExecutionEngine({ registry: options.documents.registry, gateway: options.documents.tools, runs: this.runs, events: this.events,
       subscribeSaves: listener => options.documents.subscribeSaves(listener),
       subscribeDocumentEvents: listener => options.documents.subscribeEvents(listener),
+      subscribeFileRelocations: listener => options.documents.fileCoordinator.subscribeRelocations(listener),
       edits: this.edits, provider, serializePayload, initialCompiler: new PayloadCompiler({ attachments: this.attachments, serializePayload }),
       files: new AgentFileService(options.documents), materials: this.attachments, visualAnalysis, changeReview: this.changeReview,
       artifacts: this.artifacts,

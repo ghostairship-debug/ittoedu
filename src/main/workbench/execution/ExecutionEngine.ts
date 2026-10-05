@@ -49,6 +49,8 @@ import { htmlActionModelMessage } from '../observation/HtmlActionModelInput'
 import { runToolRoundInOrder } from './ReadOnlyToolScheduler'
 import { continuationDocumentIds, reboundSavedDocumentBinding, savedDocumentBinding } from './savedDocumentBinding'
 import type { DocumentSaveFact, SavedCourseIdentity } from '../../../shared/workbench/documentSave'
+import { relocatedDocumentPath } from '../DocumentFileCoordinator'
+import type { WorkspaceMutationAction } from '../WorkspaceFiles'
 
 interface EditProjectionPort {
   begin(input: { runId: string; editId: string; toolCallId?: string; targetHandle: string }): Promise<unknown>
@@ -82,6 +84,8 @@ export interface ExecutionEngineOptions {
   subscribeSaves?(listener: (fact: DocumentSaveFact) => Promise<void>): () => void
   /** File moves and journal recovery publish the same formal session snapshots as the UI. */
   subscribeDocumentEvents?(listener: (event: DocumentEvent) => void): () => void
+  /** Successful formal moves also relocate saved identities whose sessions are closed. */
+  subscribeFileRelocations?(listener: (action: WorkspaceMutationAction) => Promise<void>): () => void
   /** Registers one exact external browser action after a human approved its current observation. */
   approveBrowserAction?(input: { runId: string; operationId: string; tool: 'browser_click' | 'browser_type' | 'browser_file_upload';
     arguments: Record<string, unknown>; snapshotId: string }): Promise<void> | void
@@ -259,6 +263,7 @@ export class ExecutionEngine {
       if (event.type !== 'changed' || event.operationId || event.snapshot.binding.kind !== 'file') return
       void this.observeDocumentSnapshot(event.snapshot).catch(() => undefined)
     })
+    options.subscribeFileRelocations?.(action => this.observeFileRelocation(action))
   }
   private async bindingRecords(): Promise<Map<string, ExecutionRunRecord>> {
     const records = new Map((await this.options.runs.list()).map(record => [record.runId, record]))
@@ -270,6 +275,25 @@ export class ExecutionEngine {
     const pending = this.saveBindingTail.catch(() => undefined).then(work)
     this.saveBindingTail = pending
     return pending
+  }
+  private observeFileRelocation(action: WorkspaceMutationAction): Promise<void> {
+    return this.queueDocumentBinding(async () => {
+      const records = await this.bindingRecords()
+      const bindings = new Map<string, SavedCourseIdentity>()
+      for (const record of records.values()) for (const documentId of trustedRunDocumentIds(record)) {
+        const stored = record.documentBindings?.[documentId]
+        if (!stored || bindings.has(documentId)) continue
+        const binding = this.savedBindings.get(documentId) ?? stored
+        const destination = relocatedDocumentPath(action, binding.path)
+        if (destination) bindings.set(documentId, { ...binding, path: destination })
+      }
+      // persistRecord projects this same cache into the existing run owner.
+      for (const [documentId, binding] of bindings) this.savedBindings.set(documentId, binding)
+      for (const record of records.values()) for (const [documentId, binding] of bindings) {
+        if (record.documentBindings?.[documentId] && trustedRunDocumentIds(record).includes(documentId))
+          await this.recordDocumentBinding(record.runId, documentId, binding)
+      }
+    })
   }
   /** Restore/open return formal snapshots without necessarily publishing a changed event. */
   observeDocumentSnapshot(observed: DocumentSnapshot): Promise<void> {

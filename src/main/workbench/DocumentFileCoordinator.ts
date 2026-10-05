@@ -13,9 +13,19 @@ const key = (filename: string) => process.platform === 'win32' ? path.resolve(fi
 const exists = async (filename: string) => { try { await fs.lstat(filename); return true } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error } }
 const inside = (filename: string, parent: string) => { const relative = path.relative(key(parent), key(filename)); return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative)) }
 
+/** Relocate an existing identity only through the exact formal file-operation source. */
+export function relocatedDocumentPath(action: WorkspaceMutationAction, filename: string): string | undefined {
+  if (action.kind !== 'rename' && action.kind !== 'move') return
+  const source = action.sources[0]
+  if (!source || !(source.kind === 'directory' ? inside(filename, source.resolvedPath) : key(filename) === key(source.resolvedPath))) return
+  if (!action.target) throw new Error('文件移动缺少正式目标')
+  return path.join(action.target.resolvedPath, path.relative(source.resolvedPath, filename))
+}
+
 /** A small physical-move intent repairs binding journals if the process dies between document ACKs. */
 export class DocumentFileCoordinator {
   private readonly access = new FileAccessQueue()
+  private readonly relocationListeners = new Set<(action: WorkspaceMutationAction) => Promise<void>>()
   private needsRepair = true
   private readonly unresolved = new Map<string, { paths: string[]; documentIds: string[]; message: string }>()
   get recoveryIssues(): string[] { return [...this.unresolved.values()].map(value => value.message) }
@@ -27,6 +37,11 @@ export class DocumentFileCoordinator {
       throw new Error(issue.message)
   }
   constructor(private readonly registry: DocumentRegistry, private readonly journal: ReturnType<typeof createDocumentJournal>, private readonly directory: string) {}
+
+  subscribeRelocations(listener: (action: WorkspaceMutationAction) => Promise<void>): () => void {
+    this.relocationListeners.add(listener)
+    return () => { this.relocationListeners.delete(listener) }
+  }
 
   async withFileAccess<T>(work: () => Promise<T>): Promise<T> {
     await this.repairBindings()
@@ -61,13 +76,28 @@ export class DocumentFileCoordinator {
     }
     return states
   }
-  private destination(action: WorkspaceMutationAction, binding: FileBinding, source: string): DocumentBinding {
+  private destination(action: WorkspaceMutationAction, binding: FileBinding): DocumentBinding {
     if (action.kind === 'trash') return { kind: 'untitled', suggestedName: path.basename(binding.path) }
-    if (!action.target) throw new Error('文件移动缺少正式目标')
-    return { ...binding, path: path.join(action.target.resolvedPath, path.relative(source, binding.path)), bindingVersion: binding.bindingVersion + 1 }
+    const destination = relocatedDocumentPath(action, binding.path)
+    if (!destination) throw new Error('文件移动缺少正式目标')
+    return { ...binding, path: destination, bindingVersion: binding.bindingVersion + 1 }
   }
 
   readonly aroundMutation: WorkspaceAroundMutation = async (action, perform) => {
+    const result = await this.coordinateMutation(action, perform)
+    if (result.status !== 'success' || action.kind !== 'rename' && action.kind !== 'move') return result
+    try {
+      for (const listener of this.relocationListeners) await listener(action)
+      return result
+    } catch (error) {
+      // The physical move and document rebind already succeeded. Throwing here would
+      // make WorkspaceFiles roll the file back after durable run bindings changed.
+      return { ...result, status: 'partial', error: { code: 'saved-binding-update-failed',
+        message: `文件已移动，但续作绑定持久化未完成：${error instanceof Error ? error.message : String(error)}` } }
+    }
+  }
+
+  private readonly coordinateMutation: WorkspaceAroundMutation = async (action, perform) => {
     const paths = [...action.sources.map(source => source.resolvedPath), ...(action.target ? [action.target.resolvedPath] : [])]
     this.assertResolved(paths)
     await this.journal.assertAvailable(paths)
@@ -79,7 +109,7 @@ export class DocumentFileCoordinator {
     if (!affected.length) return perform()
     const live = new Set(this.registry.list().map(snapshot => snapshot.documentId))
     const entries = affected.map(state => ({ documentId: state.documentId, before: state.binding as FileBinding,
-      after: this.destination(action, state.binding as FileBinding, source.resolvedPath) }))
+      after: this.destination(action, state.binding as FileBinding) }))
     const destinations = entries.flatMap(entry => [entry.before, ...(entry.after.kind === 'file' ? [entry.after] : [])])
     return this.registry.withFileBindings(entries.filter(entry => live.has(entry.documentId)).map(entry => entry.documentId), destinations, async leases => {
       // Capture after any earlier save finished; do not erase an existing external-file conflict.
@@ -88,7 +118,7 @@ export class DocumentFileCoordinator {
         if (current) {
           if (current.kind !== 'file' || !(source.kind === 'directory' ? inside(current.path, source.resolvedPath) : key(current.path) === key(source.resolvedPath))) {
             entries.splice(entries.indexOf(entry), 1)
-          } else { entry.before = current; entry.after = this.destination(action, current, source.resolvedPath) }
+          } else { entry.before = current; entry.after = this.destination(action, current) }
         }
       }
       if (!entries.length) return perform()

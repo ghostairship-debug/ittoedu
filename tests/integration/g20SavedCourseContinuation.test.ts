@@ -172,6 +172,37 @@ it('continues the original saved scope after a formal file rename and cold reope
   })
 })
 
+it('continues a clean closed saved target after a formal rename without manual reopen', async () => {
+  const f = await fixture()
+  await f.documents.saveToPath(f.document.documentId, f.filename)
+  await f.documents.settleSaveObservations()
+  await f.service.engine.settleDocumentBindings()
+  const savedBinding = (await f.service.runs.read(f.failed.runId))!.documentBindings![f.document.documentId]!
+  await f.documents.operate({ type: 'close', documentId: f.document.documentId })
+  expect(f.documents.registry.list()).toEqual([])
+  const root = await f.documents.files.registerRoot(f.root)
+  const children = await f.documents.files.listChildren({ workspaceId: root.workspaceId, directoryEntryId: root.rootEntryId })
+  const source = children.entries.find(entry => entry.status === 'accessible' && entry.name === 'lesson.h5lesson')!
+  if (source.status !== 'accessible') throw new Error('Expected saved fixture entry')
+  const renamedPath = path.join(f.root, 'renamed.h5lesson')
+  expect(await f.documents.files.rename({ operationId: randomUUID(), workspaceId: root.workspaceId,
+    sourceEntryId: source.entryId, name: 'renamed.h5lesson' })).toMatchObject({ status: 'success' })
+  expect(f.documents.registry.list()).toEqual([])
+  const retried = await f.retry()
+  const completed = await f.service.engine.wait(retried.run!.runId)
+  expect(completed.status, JSON.stringify(completed.failure)).toBe('completed')
+  const reopened = f.documents.registry.list().find(snapshot => snapshot.binding.kind === 'file' && snapshot.binding.path === renamedPath)!
+  expect(reopened).toMatchObject({ dirty: false, undoDepth: 0, model: { project: { id: f.project.id } } })
+  expect(reopened.documentId).not.toBe(f.document.documentId)
+  expect(completed.input.documents).toEqual([{ documentId: reopened.documentId,
+    writable: f.reference.writable, selection: f.reference.selection }])
+  expect((await f.service.runs.read(f.failed.runId))?.documentBindings?.[f.document.documentId])
+    .toEqual({ ...savedBinding, path: renamedPath })
+  expect((await f.service.submissions.read(retried.submission.submissionId))?.documents).toEqual(f.send.documents)
+  expect(completed.tools).toEqual([])
+  expect(f.calls()).toBe(2)
+})
+
 it('keeps saved binding durable when display flush fails and continues the reopened original scope without replay', async () => {
   const held = { next: deferred(), finish: deferred() }, f = await fixture('surface', true, held)
   const firstDisplayed = deferred(), displayRejected = deferred()
