@@ -1,163 +1,94 @@
-import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
-import type { AssetMeta } from '../../../shared/contracts/media-v1'
-import { slideSceneContext } from '../../../core/tools/slideInsertion'
-import { materializeNamedStateItem } from '../../../core/tools/layerProperties'
-import { isPublishedInteractionClickBindable } from '../../../shared/publishedInteractionSupport'
-import { planSlideAudioPlacement, planSlideLightOpacity, planSlideLightTextStyle, planSlidePageAlignment, planSlideSceneBackground, planSimpleSlideInteraction, readSimpleSlideInteraction, type SlideAudioPlacement, type SlidePageAlignment } from '../../../core/tools/lightSlideEditing'
-import { slideLightPageCommands, slideLightObjectCommands, type SlideLightCommand, type SlideLightObjectCommandState } from '../../editing/commands/slideLightCommands'
-import { createEditorTransactionStep, type EditorTransactionStep } from '../../authoring/editorTransaction'
+import type { EditorStoreKernel } from '../../store/editorStoreKernel'
+import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
+import { resolveComponentBackground, type ComponentAsset, type JsonObject } from '../../../shared/contracts/component-platform/project'
+import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
+import { componentIsLocked, componentParentMatrix } from '../crossSurfaceCommands'
+import { frameCorners, translateFrame, transformVector, invertMatrix } from '../../../core/components/geometry'
+import type { ComponentFrame } from '../../../shared/contracts/component-platform/frame'
+import { slideLightPageCommands, slideLightObjectCommands, type SlideLightCommand } from '../../editing/commands/slideLightCommands'
 
-interface SlideLightIdentity {
-  readonly documentId: string
-  readonly epoch: string
-  readonly projectId: string
-  readonly locationId: string
-  readonly stateId: string | null
-  readonly expectedRevision: number
-}
-
-/** Page actions need no selected object; both targets freeze one formal document identity. */
-export interface SlideLightPageTarget extends SlideLightIdentity { readonly kind: 'page' }
-export interface SlideLightObjectTarget extends SlideLightIdentity {
-  readonly kind: 'object'
-  readonly itemId: string
-}
+export interface SlideLightPageTarget extends CapturedCourseTarget { readonly kind: 'page' }
+export interface SlideLightObjectTarget extends CapturedCourseTarget { readonly kind: 'object'; readonly instanceId: string; readonly itemId: string }
 export type SlideLightSelectionSnapshot = SlideLightPageTarget | SlideLightObjectTarget
-
-export interface SlideLightCurrent {
-  readonly documentId: string
-  readonly epoch: string
-  readonly project: CourseProjectDocument
-  readonly locationId: string
-  readonly itemId: string | null
-  readonly stateId: string | null
-  readonly pending?: number
-}
-
-export interface SlideLightPageView {
-  readonly target: SlideLightPageTarget
-  readonly commands: readonly SlideLightCommand[]
-  readonly backgroundColor: string | null
-}
-
-export interface SlideLightObjectView {
-  readonly target: SlideLightObjectTarget
-  readonly commands: readonly SlideLightCommand[]
-  readonly fontFamily: string | null
-  readonly lineSpacing: number | null
-  readonly opacity: number
-}
-
-/** The composition root supplies its existing canonical transaction writer and ACK. */
+export interface SlideLightPageView { readonly target: SlideLightPageTarget; readonly commands: readonly SlideLightCommand[]; readonly backgroundColor: string | null }
+export interface SlideLightObjectView { readonly target: SlideLightObjectTarget; readonly commands: readonly SlideLightCommand[]; readonly fontFamily: string | null; readonly lineSpacing: number | null; readonly opacity: number }
 export interface SlideLightEditingOwner {
-  readCurrent(): SlideLightCurrent | null
-  commit(step: EditorTransactionStep, target: SlideLightSelectionSnapshot): Promise<boolean>
-  chooseAudio?(): Promise<{ readonly asset: AssetMeta; readonly bytes: Uint8Array } | null>
-  createId(): string
+  kernel: EditorStoreKernel
+  chooseAudio?(): Promise<{ readonly asset: ComponentAsset; readonly bytes: Uint8Array } | null>
+  placeAudio?(target: CapturedCourseTarget, selected: { readonly asset: ComponentAsset; readonly bytes: Uint8Array }): Promise<void>
+  setBackground?(target: CapturedCourseTarget, color: string): Promise<void>
+  runInteraction?(target: CapturedCourseTarget, kind: 'audio-play' | 'location-go', value: string): Promise<void>
+  readSounds?(target: CapturedCourseTarget): readonly { id: string; name: string }[]
 }
-
-const stale = () => new Error('选择或文档已改变，请重新选择后再试')
-
 export function createSlideLightEditingPort(owner: SlideLightEditingOwner) {
+  const { kernel } = owner
   const capturePage = (): SlideLightPageTarget | null => {
-    const current = owner.readCurrent()
-    return current && !current.pending ? Object.freeze({ kind: 'page', documentId: current.documentId, epoch: current.epoch,
-      projectId: current.project.id, locationId: current.locationId, stateId: current.stateId,
-      expectedRevision: current.project.revision }) : null
+    if (!kernel.readView().project || kernel.readView().pending) return null
+    const target = kernel.captureTarget()
+    return target.editingProject.surfaces.find(surface => surface.id === target.surfaceId)?.kind === 'slide' ? { ...target, kind: 'page' } : null
   }
   const captureObject = (): SlideLightObjectTarget | null => {
-    const current = owner.readCurrent()
-    return current?.itemId && !current.pending ? Object.freeze({ kind: 'object', documentId: current.documentId,
-      epoch: current.epoch, projectId: current.project.id, locationId: current.locationId, itemId: current.itemId,
-      stateId: current.stateId, expectedRevision: current.project.revision }) : null
-  }
-  const requireCurrent = (target: SlideLightSelectionSnapshot): CourseProjectDocument => {
-    const current = owner.readCurrent()
-    if (!current || current.pending || current.documentId !== target.documentId || current.epoch !== target.epoch ||
-      current.project.id !== target.projectId || current.project.revision !== target.expectedRevision ||
-      current.locationId !== target.locationId || current.stateId !== target.stateId ||
-      (target.kind === 'object' && current.itemId !== target.itemId)) throw stale()
-    return current.project
+    const page = capturePage()
+    return page?.instanceId && page.instanceIds.length === 1 ? { ...page, kind: 'object', instanceId: page.instanceId, itemId: page.instanceId } : null
   }
   const viewPage = (target: SlideLightPageTarget): SlideLightPageView => {
-    const project = requireCurrent(target)
-    const { scene } = slideSceneContext(project, { scope: 'scene', selection: { locationId: target.locationId, stateId: target.stateId } })
-    const state = scene.presentation?.states.find(value => value.id === target.stateId)
-    if (target.stateId && !state) throw stale()
-    return { target, commands: slideLightPageCommands({ stateBackgroundOverride: Boolean(state &&
-      (state.backgroundColor !== undefined || state.backgroundAssetId !== undefined)) }),
-    backgroundColor: scene.backgroundColor ?? null }
+    const surface = target.editingProject.surfaces.find(value => value.id === target.surfaceId)
+    if (!surface) throw new Error('页面已不存在')
+    const base = target.project.surfaces.find(value => value.id === target.surfaceId)
+    const state = base?.presentation?.states.find(value => value.id === target.activeStateId)
+    return { target, backgroundColor: resolveComponentBackground(target.editingProject,surface).color,
+      commands: slideLightPageCommands({stateBackgroundOverride:Boolean(state?.background)}).map(command => ({ ...command, disabledReason: command.kind === 'audio-import' ? owner.chooseAudio && owner.placeAudio ? null : '音频放置入口尚未接入' : command.disabledReason })) }
   }
   const viewObject = (target: SlideLightObjectTarget): SlideLightObjectView => {
-    const project = requireCurrent(target)
-    const { scene } = slideSceneContext(project, { scope: 'scene', selection: { locationId: target.locationId, stateId: target.stateId } })
-    const base = scene.layerItems.find(item => item.layerItemId === target.itemId)
-    if (!base) throw stale()
-    const state = scene.presentation?.states.find(value => value.id === target.stateId)
-    if (target.stateId && !state) throw stale()
-    const item = materializeNamedStateItem(base, state?.layerItemOverrides[base.layerItemId])
-    const audio = item.locked ? null : readSimpleSlideInteraction(project, target, 'audio.play')
-    const navigation = item.locked ? null : readSimpleSlideInteraction(project, target, 'location.go')
-    const commandState: SlideLightObjectCommandState = {
-      isText: item.kind === 'native' && item.content.nativeType === 'text', locked: item.locked,
-      clickBindable: isPublishedInteractionClickBindable(item),
-      complexAudioRule: Boolean(audio?.disabledReason && audio.disabledReason !== '此元素不支持点击互动'),
-      complexNavigationRule: Boolean(navigation?.disabledReason && navigation.disabledReason !== '此元素不支持点击互动'),
-      sounds: Object.values(project.media.audio.sounds).map(sound => ({ id: sound.id, name: sound.name })),
-      locations: project.locations.map(location => ({ id: location.id, label: location.label })),
-    }
-    const style = item.kind === 'native' && item.content.nativeType === 'text' ? item.content.data.style : null
-    return { target, commands: slideLightObjectCommands(commandState), fontFamily: style?.fontFamily ?? null,
-      lineSpacing: style?.lineSpacing ?? null, opacity: item.opacity }
+    const item = target.editingProject.instances[target.instanceId]
+    if (!item) throw new Error('对象已不存在')
+    const data = item.data && typeof item.data === 'object' && !Array.isArray(item.data) ? item.data as JsonObject : {}
+    const appearance = data.appearance && typeof data.appearance === 'object' && !Array.isArray(data.appearance) ? data.appearance as JsonObject : {}
+    const key = target.editingProject.definitions[item.definitionId]?.implementation
+    const commands = slideLightObjectCommands({ isText: key?.kind === 'builtin' && key.key === 'guoling.text', locked: componentIsLocked(target.editingProject,target.instanceId),
+      clickBindable: Boolean(owner.runInteraction), sounds: owner.readSounds?.(target) ?? [], locations: target.editingProject.surfaces.map(surface => ({ id: surface.id, label: surface.title })) })
+    return { target, commands, fontFamily: typeof appearance.fontFamily === 'string' ? appearance.fontFamily : null,
+      lineSpacing: typeof appearance.lineHeight === 'number' ? Math.round((appearance.lineHeight - 1) * Number(appearance.fontSize ?? 24)) : null,
+      opacity: typeof item.style?.opacity === 'number' ? item.style.opacity : 1 }
   }
-  const commit = async (target: SlideLightSelectionSnapshot, next: CourseProjectDocument,
-    addition?: { readonly meta: AssetMeta; readonly bytes: Uint8Array } | null, selectedItemId?: string): Promise<void> => {
-    const project = requireCurrent(target)
-    const step = createEditorTransactionStep(project, { projectId: target.projectId, baseRevision: target.expectedRevision,
-      nextDocument: next, resourceChanges: addition ? { assetFileChanges: [{ assetId: addition.meta.id, after: addition.bytes }] } : {},
-      ...(selectedItemId ? { selectionHint: { kind: 'authoring-tool-selection' as const, locationId: target.locationId,
-        stateId: target.stateId, owner: 'scene' as const, itemIds: [selectedItemId] } } : {}) })
-    if (step && !await owner.commit(step, target)) throw new Error('修改未提交，请重新选择后重试')
-  }
-  const placeAudio = async (target: SlideLightPageTarget): Promise<void> => {
-    requireCurrent(target)
-    if (!owner.chooseAudio) throw new Error('未连接音频文件选择入口')
+  const commit = (target: CapturedCourseTarget, edits: ComponentEdit[]) => kernel.editCaptured(kernel.capture(edits, target)).then(() => {})
+  const placeAudio = async (target: SlideLightPageTarget) => {
+    if (!owner.chooseAudio || !owner.placeAudio) throw new Error('音频放置入口尚未接入')
     const selected = await owner.chooseAudio()
-    if (!selected) return
-    const project = requireCurrent(target)
-    const input: SlideAudioPlacement = { locationId: target.locationId, stateId: target.stateId,
-      expectedRevision: target.expectedRevision, asset: selected.asset, bytes: selected.bytes,
-      buttonId: owner.createId(), ruleId: owner.createId(), stepId: owner.createId() }
-    const planned = planSlideAudioPlacement(project, input)
-    await commit(target, planned.project, planned.assetAddition, planned.itemId)
+    if (selected) await owner.placeAudio(target, selected)
   }
-  const runPage = async (target: SlideLightPageTarget, command: SlideLightCommand): Promise<void> => {
-    const project = requireCurrent(target)
-    const available = viewPage(target).commands.find(candidate => candidate.id === command.id)
+  const runPage = async (target: SlideLightPageTarget, command: SlideLightCommand) => {
+    const available = viewPage(target).commands.find(value => value.id === command.id)
     if (!available || available.disabledReason) throw new Error(available?.disabledReason ?? '当前页面操作不可用')
-    if (available.kind === 'audio-import') return placeAudio(target)
-    if (available.kind !== 'scene-background') throw new Error('当前页面操作不可用')
-    const next = planSlideSceneBackground(project, target.locationId, target.stateId, String(available.value), target.expectedRevision)
-    await commit(target, next)
+    if (available.kind === 'audio-import') await placeAudio(target)
+    else if (available.kind === 'scene-background') {
+      if(owner.setBackground) await owner.setBackground(target,String(available.value))
+      else { const surface=target.project.surfaces.find(value=>value.id===target.surfaceId)!; await commit(target,[{type:'surface.background.set',surfaceId:surface.id,background:{...surface.background,mode:'own',color:String(available.value)}}]) }
+    }
   }
-  const runObject = async (target: SlideLightObjectTarget, command: SlideLightCommand): Promise<void> => {
-    const project = requireCurrent(target)
-    const available = viewObject(target).commands.find(candidate => candidate.id === command.id)
+  const runObject = async (target: SlideLightObjectTarget, command: SlideLightCommand) => {
+    const available = viewObject(target).commands.find(value => value.id === command.id)
     if (!available || available.disabledReason) throw new Error(available?.disabledReason ?? '当前对象操作不可用')
-    const value = available.value
-    let next: CourseProjectDocument
+    const id = target.instanceId, value = available.value, item = target.editingProject.instances[id]
     switch (available.kind) {
-      case 'opacity': next = planSlideLightOpacity(project, target, value as 1 | 0.75 | 0.5 | 0.25); break
-      case 'font': next = planSlideLightTextStyle(project, target, { fontFamily: String(value) }); break
-      case 'line-spacing': next = planSlideLightTextStyle(project, target, { lineSpacing: value as 0 | 4 | 8 | 16 }); break
-      case 'page-align': next = planSlidePageAlignment(project, target, value as SlidePageAlignment); break
-      case 'audio-play': next = planSimpleSlideInteraction(project, target, 'audio.play', String(value), { ruleId: owner.createId(), stepId: owner.createId() }); break
-      case 'location-go': next = planSimpleSlideInteraction(project, target, 'location.go', String(value), { ruleId: owner.createId(), stepId: owner.createId() }); break
+      case 'opacity': return commit(target, [{ type: 'style.set', instanceId: id, path: ['opacity'], value: Number(value) }])
+      case 'font': return commit(target, [{ type: 'data.set', instanceId: id, path: ['appearance','fontFamily'], value: String(value) }])
+      case 'line-spacing': return commit(target, [{ type: 'data.set', instanceId: id, path: ['appearance','lineHeight'], value: 1 + Number(value) / Number((item.data as JsonObject)?.appearance && ((item.data as JsonObject).appearance as JsonObject).fontSize || 24) }])
+      case 'page-align': {
+        const surface = target.editingProject.surfaces.find(value => value.id === target.surfaceId)
+        if (!item.frame || !surface?.designSize) throw new Error('当前对象没有可对齐的页面 frame')
+        const corners = frameCorners(item.frame, componentParentMatrix(target.editingProject,id)), xs = corners.map(point => point.x), ys = corners.map(point => point.y)
+        const left = Math.min(...xs), right = Math.max(...xs), top = Math.min(...ys), bottom = Math.max(...ys)
+        const dx = value === 'left' ? -left : value === 'center-x' ? (surface.designSize.width - left - right) / 2 : value === 'right' ? surface.designSize.width - right : 0
+        const dy = value === 'top' ? -top : value === 'center-y' ? (surface.designSize.height - top - bottom) / 2 : value === 'bottom' ? surface.designSize.height - bottom : 0
+        return commit(target, [{ type: 'frame.set', instanceId: id, frame: translateFrame(item.frame, transformVector(invertMatrix(componentParentMatrix(target.editingProject,id)), { x: dx, y: dy })) as ComponentFrame }])
+      }
+      case 'audio-play': case 'location-go': if (owner.runInteraction) return owner.runInteraction(target, available.kind, String(value)); throw new Error('点击互动入口尚未接入')
       default: throw new Error('当前对象操作不可用')
     }
-    await commit(target, next, null, target.itemId)
   }
   return { capturePage, captureObject, viewPage, viewObject, runPage, runObject, placeAudio }
 }
-
 export type SlideLightEditingPort = ReturnType<typeof createSlideLightEditingPort>
+
+

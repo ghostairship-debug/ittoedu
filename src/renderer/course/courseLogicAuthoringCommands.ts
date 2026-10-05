@@ -2,10 +2,11 @@ import { courseStateDeclarationSchema } from '../../shared/contracts/course-stat
 import type { CourseStateDeclaration } from '../../shared/contracts/course-state/types'
 import { courseStateScalarType } from '../../shared/contracts/course-state/types'
 import { courseProjectLogicSchema } from '../../shared/contracts/component-platform/schema'
-import type { ComponentEdit, CourseProjectLogic, CourseProjectV10, JsonValue } from '../../shared/contracts/component-platform'
+import type { ComponentEdit, ComponentPresentation, CourseProjectLogic, CourseProjectV10, JsonObject, JsonValue } from '../../shared/contracts/component-platform'
+import { componentDefinitionBuiltinKey } from '../../shared/contracts/component-platform/project'
 import type { InteractionRule } from '../../shared/interactionTypes'
 import type { EditorStoreKernel } from '../store/editorStoreKernel'
-import { INTERACTIONS_DEFINITION, interactionRules } from '../interactions/componentInteractionAuthoring'
+import { interactionRules } from '../interactions/componentInteractionAuthoring'
 
 export type CourseNavigationGuard = CourseProjectLogic['navigationGuards'][number]
 export type CourseNetworkDeclaration = NonNullable<CourseProjectLogic['network']>
@@ -45,8 +46,12 @@ export function executeCourseLogicAuthoringCommand(project: CourseProjectV10, co
   const failure = validateTarget(project, command); if (failure) return failure
   try {
     const logic: CourseProjectLogic = structuredClone(project.logic ?? { courseState: [], navigationGuards: [] })
-    const behaviors = Object.values(project.instances).filter(instance => instance.definitionId === INTERACTIONS_DEFINITION.id)
-    const rules = behaviors.flatMap(instance => interactionRules(instance))
+    const behaviors = Object.values(project.instances).filter(instance => componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.interactions')
+    const stateRules = project.surfaces.flatMap(surface => (surface.presentation?.states ?? []).flatMap(state => behaviors.flatMap(instance => {
+      const data = state.overrides[instance.id]?.data
+      return data === undefined ? [] : [{ surfaceId: surface.id, stateId: state.id, instance, data, rules: interactionRules({ ...instance, data }) }]
+    })))
+    const rules = [...behaviors.flatMap(instance => interactionRules(instance)), ...stateRules.flatMap(slot => slot.rules)]
     const edits: ComponentEdit[] = []
     let statusMessage = ''
     if (command.kind.startsWith('course-state.')) {
@@ -71,12 +76,22 @@ export function executeCourseLogicAuthoringCommand(project: CourseProjectV10, co
           logic.courseState[index] = declaration
           if (declaration.key !== key) {
             for (const guard of logic.navigationGuards) guard.conditions = guard.conditions.map(condition => condition.key === key ? { ...condition, key: declaration.key } : condition)
+            const renameRules = (rules: readonly InteractionRule[]) => rules.map(rule => ({ ...rule,
+              conditions: rule.conditions.map(condition => (condition.type === 'course-state.exists' || condition.type === 'course-state.compare') && condition.key === key ? { ...condition, key: declaration.key } : condition),
+              actions: rule.actions.map(step => step.action.type === 'course-state.set' && step.action.key === key ? { ...step, action: { ...step.action, key: declaration.key } } : step) }))
             for (const instance of behaviors) {
-              const next = interactionRules(instance).map(rule => ({ ...rule,
-                conditions: rule.conditions.map(condition => (condition.type === 'course-state.exists' || condition.type === 'course-state.compare') && condition.key === key ? { ...condition, key: declaration.key } : condition),
-                actions: rule.actions.map(step => step.action.type === 'course-state.set' && step.action.key === key ? { ...step, action: { ...step.action, key: declaration.key } } : step) }))
+              const next = renameRules(interactionRules(instance))
               if (JSON.stringify(next) !== JSON.stringify(interactionRules(instance))) edits.push({ type: 'data.set', instanceId: instance.id, path: ['rules'], value: json(next) })
             }
+            const presentations = new Map<string, ComponentPresentation>()
+            for (const slot of stateRules) {
+              const next = renameRules(slot.rules)
+              if (JSON.stringify(next) === JSON.stringify(slot.rules)) continue
+              const presentation = presentations.get(slot.surfaceId) ?? structuredClone(project.surfaces.find(surface => surface.id === slot.surfaceId)!.presentation!)
+              presentation.states.find(state => state.id === slot.stateId)!.overrides[slot.instance.id]!.data = { ...(slot.data as JsonObject), rules: json(next) }
+              presentations.set(slot.surfaceId, presentation)
+            }
+            for (const [surfaceId, presentation] of presentations) edits.push({ type: 'surface.presentation.set', surfaceId, presentation })
           }
           statusMessage = `已更新状态“${declaration.key}”并同步引用`
         }
@@ -112,7 +127,7 @@ export async function commitCourseLogicAuthoringCommand(kernel: EditorStoreKerne
   try {
     const target = kernel.captureTarget(documentId), result = executeCourseLogicAuthoringCommand(target.project, command)
     if (!result.ok) return result
-    await kernel.editCaptured(kernel.capture(result.edits, target))
+    await kernel.editCaptured(kernel.capture(result.edits, { ...target, activeStateId: null }))
     return { ...result, historyEntry: true }
   } catch (error) { return reject('invalid-document', error instanceof Error ? error.message : String(error)) }
 }

@@ -9,6 +9,7 @@ import { CourseLogicAuthoringPanel } from './CourseLogicAuthoringPanel'
 import { courseLogicAuthoringView, commitCourseLogicAuthoringCommand } from '../course/courseLogicAuthoringCommands'
 import { TEACHER_CONTROLLER_DEFINITION, createTeacherControllerData, createTeacherControllerFrame } from '../../components/teacher-controller/data'
 import type { JsonValue } from '../../shared/contracts/component-platform'
+import { componentDefinitionBuiltinKey } from '../../shared/contracts/component-platform/project'
 
 export function AutomationTab() {
   const courseView = useEditorStore(state => state.courseView)
@@ -25,7 +26,7 @@ export function AutomationTab() {
   const commit = (change: (rules: InteractionRule[]) => InteractionRule[]) => {
     try {
       const target = kernel.captureTarget(documentId)
-      const current = componentInteractionView(target.project, surfaceId, scope === 'global')
+      const current = componentInteractionView(target.editingProject, surfaceId, scope === 'global')
       const edits = componentRuleEdits(target.project, current.target, change(structuredClone(current.rules)))
       void kernel.editCaptured(kernel.capture(edits, target)).catch(error => setError(String(error)))
     } catch (error) { setError(String(error)) }
@@ -37,9 +38,9 @@ export function AutomationTab() {
   })
   const remove = (ruleId: string) => commit(rules => rules.filter(rule => rule.id !== ruleId))
   const selectedNode = view.nodes.find(node => node.id === courseView.selectedInstanceId)
-  const controller = Object.values(project.instances).find(instance => instance.definitionId === TEACHER_CONTROLLER_DEFINITION.id)
+  const controller = Object.values(project.instances).find(instance => componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.navigation')
   const teacher = () => {
-    const captured = kernel.captureTarget(documentId), existing = Object.values(captured.project.instances).find(instance => instance.definitionId === TEACHER_CONTROLLER_DEFINITION.id)
+    const captured = kernel.captureTarget(documentId), existing = Object.values(captured.project.instances).find(instance => componentDefinitionBuiltinKey(captured.project.definitions[instance.definitionId]) === 'guoling.navigation')
     if (existing) { kernel.selectInstances([existing.id], surfaceId, documentId); setActiveTab('properties'); return }
     const id = crypto.randomUUID()
     const edits = [
@@ -81,7 +82,8 @@ export function AutomationTab() {
       revealTemplateTargetNodeIds={view.nodes.filter(node => node.visible && !node.locked).map(node => node.id)}
       onOpenClickRules={() => setClickRulesOpen(true)}
       onApplyRevealSequenceTemplate={intent => add(buildInteractionTemplateRule({ templateId: SCENE_ENTER_REVEAL_SEQUENCE_TEMPLATE_ID, ...intent,
-        conditions: scope === 'global' ? [{ type: 'scene.in', sceneIds: [surfaceId] }] : [] }))}
+        conditions: [...(scope === 'global' ? [{ type: 'scene.in' as const, sceneIds: [surfaceId] }] : []),
+          ...(courseView.activeStateId ? [{ type: 'presentation.in' as const, stateIds: [courseView.activeStateId] }] : [])] }))}
       onDuplicateRule={ruleId => commit(rules => { const index = rules.findIndex(rule => rule.id === ruleId); if (index >= 0) rules.splice(index + 1, 0, duplicateComponentRule(rules[index]!)); return rules })}
       onMoveRule={(ruleId, direction) => commit(rules => { const index = rules.findIndex(rule => rule.id === ruleId), next = index + direction; if (index >= 0 && next >= 0 && next < rules.length) [rules[index], rules[next]] = [rules[next]!, rules[index]!]; return rules })} />
     {clickRulesOpen && (selectedNode ? <InteractionEditor {...shared} selectedNode={selectedNode} /> : <p role="status">请在画布选择一个对象，再编辑点击规则。</p>)}
