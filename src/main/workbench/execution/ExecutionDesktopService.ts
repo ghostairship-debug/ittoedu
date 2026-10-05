@@ -1041,11 +1041,15 @@ export class ExecutionDesktopService {
 let singleton: Promise<ExecutionDesktopService> | undefined
 export function executionDesktopService(): Promise<ExecutionDesktopService> {
   return singleton ??= (async () => {
-    const [{ app }, { documentHost }, { executionSettingsStore }, { operateWorkspaceFiles }, { attachmentsDesktopService }] = await Promise.all([
+    const [{ app }, { documentHost }, { executionSettingsStore }, { operateWorkspaceFiles, authorizeWorkspaceFilesRoot }, { attachmentsDesktopService }] = await Promise.all([
       import('electron'), import('../documentHost.js'), import('../providers/executionSettingsService.js'), import('../workspaceFilesDesktopService.js'), import('../attachments/attachmentsDesktopService.js'),
     ])
     await app.whenReady()
-    return new ExecutionDesktopService({ directory: path.join(app.getPath('userData'), 'workbench-v2'), documents: documentHost(), settings: await executionSettingsStore(),
+    const directory = path.join(app.getPath('userData'), 'workbench-v2')
+    const managedRoot = path.join(directory, 'space')
+    await fs.mkdir(managedRoot, { recursive: true })
+    await authorizeWorkspaceFilesRoot(managedRoot)
+    return new ExecutionDesktopService({ directory, documents: documentHost(), settings: await executionSettingsStore(),
       attachments: (await attachmentsDesktopService()).attachments, authorizeWorkspaceRoot: root => operateWorkspaceFiles({ type: 'root', directory: root }) })
   })().catch(error => { singleton = undefined; throw error })
 }
