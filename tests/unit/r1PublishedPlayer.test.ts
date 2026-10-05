@@ -106,8 +106,11 @@ it('removes the fitted Flow wrapper when capturing only a source group body in i
   Object.defineProperties(root, { clientWidth: { value: 800 }, clientHeight: { value: 600 } })
   const target = document.createElement('div'), stage = document.createElement('div'), content = document.createElement('div'), children = document.createElement('div'), child = document.createElement('div')
   target.dataset.componentObject = 'group'; child.dataset.componentObject = 'child'
+  const runtimeRoot = document.createElement('div'), childRuntimeRoot = document.createElement('div'), peer = document.createElement('div')
+  runtimeRoot.dataset.componentInstanceId = 'group'; childRuntimeRoot.dataset.componentInstanceId = 'child'; peer.dataset.componentObject = 'peer'
+  runtimeRoot.textContent = 'Selected source body'; content.append(runtimeRoot); child.append(childRuntimeRoot)
   Object.assign(stage.style, { position: 'relative', width: '100%', height: '45px', transform: 'scale(0.5)' })
-  children.append(child); stage.append(content, children); target.append(stage); root.append(target)
+  children.append(child); stage.append(content, children); target.append(stage); root.append(target, peer)
   const input = payload()
   input.definitions.group = { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }
   input.instances.group = { id: 'group', definitionId: 'group', data: {}, frame: { width: 240, height: 120, transform: [0, 1, -1, 0, 40, 50] } }
@@ -117,6 +120,8 @@ it('removes the fitted Flow wrapper when capturing only a source group body in i
   expect(await prepareComponentOutputRegion({ payload: input, root, player, surfaceId: 'flow', instanceId: 'group' })).toEqual({ x: 0, y: 0, width: 240, height: 120 })
   expect(stage.style.height).toBe('100%'); expect(stage.style.transform).toBe('none')
   expect(target.style.transform).toBe('none'); expect(child.hidden).toBe(true)
+  expect(runtimeRoot.hidden).toBe(false); expect(runtimeRoot.closest('[hidden]')).toBeNull()
+  expect(childRuntimeRoot.hidden).toBe(true); expect(peer.hidden).toBe(true)
   expect(input.instances.group.frame?.transform).toEqual([0, 1, -1, 0, 40, 50])
 })
 

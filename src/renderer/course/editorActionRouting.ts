@@ -79,16 +79,26 @@ export function isEditorInteractiveControlTarget(target: EventTarget | null): bo
 }
 
 /** Shadow DOM retargets window events to the host, not the focused control. */
-export function isEditorTextInputEvent(event: Event): boolean {
-  if (isEditorTextInputTarget(event.target)
-    || event.composedPath().some(isEditorTextInputTarget)) return true
+function editorEventHasInputOwner(event: Event, ownsInput: (target: EventTarget | null) => boolean): boolean {
+  if (ownsInput(event.target)
+    || event.composedPath().some(ownsInput)) return true
   const ownerDocument = event.target instanceof Node ? event.target.ownerDocument : null
   let active: Element | null | undefined = (ownerDocument ?? document).activeElement
   while (active) {
-    if (isEditorTextInputTarget(active)) return true
+    if (ownsInput(active)) return true
     active = active.shadowRoot?.activeElement
   }
   return false
+}
+
+export function isEditorTextInputEvent(event: Event): boolean {
+  return editorEventHasInputOwner(event, isEditorTextInputTarget)
+}
+
+/** A range keeps its input keys, but has no native text undo to own History. */
+export function isEditorNativeHistoryEvent(event: KeyboardEvent): boolean {
+  return editorEventHasInputOwner(event, target => isEditorTextInputTarget(target)
+    && !(target instanceof HTMLInputElement && target.type === 'range'))
 }
 
 export function isEditorInteractiveControlEvent(event: KeyboardEvent): boolean {

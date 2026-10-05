@@ -50,10 +50,10 @@ export async function prepareComponentOutputRegion(input: {
     }
     player.runtime.afterProjectionMutation()
     for (const outer of root.querySelectorAll<HTMLElement>('[data-component-object],[data-component-instance-id]')) {
-      if (outer !== target && !outer.contains(target ?? null)) outer.hidden = true
+      const ownerId = outer.dataset.componentObject ?? outer.dataset.componentInstanceId
+      if (ownerId !== instanceId && !outer.contains(target)) outer.hidden = true
     }
-    if (target) target.hidden = false
-    for (const descendant of target.querySelectorAll<HTMLElement>('[data-component-object],[data-component-instance-id]')) descendant.hidden = true
+    target.hidden = false
   }
   const view = root.ownerDocument.defaultView
   if (!view) throw new Error('捕获窗口已关闭')

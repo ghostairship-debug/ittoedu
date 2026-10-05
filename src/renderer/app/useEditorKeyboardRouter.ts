@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import {
   isEditorInteractiveControlEvent,
+  isEditorNativeHistoryEvent,
   isEditorTextInputEvent,
   resolveKeyboardDeleteDisposition,
   type KeyboardDeleteSessionSnapshot,
@@ -57,7 +58,8 @@ export function useEditorKeyboardRouter(ports: EditorKeyboardActionPorts): void 
         return
       }
       // PM owns formal undo dispatch; source inputs own their unapplied draft.
-      if (isEditorTextInputEvent(event)) return
+      const historyShortcut = (event.ctrlKey || event.metaKey) && (key === 'z' || key === 'y')
+      if (historyShortcut ? isEditorNativeHistoryEvent(event) : isEditorTextInputEvent(event)) return
       if ((event.ctrlKey || event.metaKey) && key === 'z') {
         event.preventDefault()
         if (event.shiftKey) current.redo()

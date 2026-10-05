@@ -276,12 +276,26 @@ export class ComponentPlatformRuntime {
     this.layouts.get(instanceId)?.notify()
   }
   private placeRoot(parent: HTMLElement, root: HTMLElement): void {
+    if (root.parentElement === parent) return
     const connected = parent as HTMLElement & { moveBefore?(element: Element, before: Node | null): void }
     // Chromium's state-preserving DOM move also retains a source iframe's browsing context.
-    if (root.querySelector('iframe')) {
+    const frames = [...root.querySelectorAll('iframe')].map(frame => ({ frame, parent: frame.parentElement!, next: frame.nextSibling }))
+    if (frames.length) {
       if (!root.isConnected || !parent.isConnected || root.ownerDocument !== parent.ownerDocument || !connected.moveBefore)
         throw new Error('当前宿主无法保留已运行组件的内容环境，移动未执行')
-      connected.moveBefore(root, null)
+      // Moving an ancestor with live frames corrupts Chromium 150's connected-frame counter.
+      // Move the frames themselves while connected, then their empty wrapper, retaining each realm.
+      let moved = 0
+      try {
+        for (const entry of frames) { connected.moveBefore(entry.frame, null); moved++ }
+        connected.moveBefore(root, null)
+      } finally {
+        // Restore from the end so adjacent frames' saved next siblings are already back in place.
+        for (let index = moved - 1; index >= 0; index--) {
+          const entry = frames[index]!
+          ;(entry.parent as typeof connected).moveBefore!(entry.frame, entry.next)
+        }
+      }
     } else if (root.isConnected && parent.isConnected && connected.moveBefore) connected.moveBefore(root, null)
     else parent.append(root)
   }
