@@ -8,6 +8,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { scanComponentCatalogSources } from '../../src/main/componentCatalogSources'
 import { readCatalogComponentPackage } from '../../src/main/componentCatalogScanner'
 import { importComponentLibraryArchive } from '../../src/core/components/library/archive'
+import { prepareComponentLibraryInsertion } from '../../src/core/components/library/insert'
+import { professionalAssetIds } from '../../src/core/components/library/references'
 import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { componentCompilationInput } from '../../src/core/components/compilation/componentCompilationInput'
@@ -29,6 +31,38 @@ vi.mock('../../src/renderer/store/editorStore', () => ({
   selectEditingScope: () => 'scene',
 }))
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+
+it('keeps unset image package assets empty while diagnosing real missing asset identities', async () => {
+  const bytes = await fs.readFile(path.join(process.cwd(), 'resources/built-in-components/packages/image-frame.h5component'))
+  const { entry } = importComponentLibraryArchive(bytes)
+  expect(entry.example.instances.example.data).toMatchObject({ assetId: '' })
+  const project: CourseProjectV10 = { schemaVersion: 10, id: 'unset-image-course', revision: 0, title: 'Flow', definitions: {}, instances: {}, assets: {},
+    surfaces: [{ id: 'flow-page', kind: 'flow', title: '正文', childIds: [] }], global: { underlay: [], overlay: [] } }
+  const options = { container: { kind: 'surface' as const, surfaceId: 'flow-page' }, index: 0 }
+  const insertion = prepareComponentLibraryInsertion(project, entry, options)
+  expect(insertion.diagnostics).toEqual([])
+  expect(insertion.identities.assets.has('')).toBe(false)
+  expect(insertion.command.edits.filter(edit => edit.type === 'asset.add')).toEqual([])
+  const driver = new CourseV10Driver()
+  const model = driver.apply({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, insertion.command)
+  if (model.kind !== 'course-v10') throw new Error('Expected V10 course')
+  expect(model.project.instances[insertion.rootIds[0]].data).toMatchObject({ assetId: '' })
+  expect(Object.keys(model.project.assets)).toEqual([])
+  expect(professionalAssetIds({ assetId: '', originalAssetId: '', nested: { assetId: 'missing-photo', originalAssetId: 'missing-original' }, title: 'missing-photo' }))
+    .toEqual(['missing-photo', 'missing-original'])
+  const missing = structuredClone(entry)
+  missing.example.instances.example.data = { ...(missing.example.instances.example.data as JsonObject), assetId: 'missing-photo', originalAssetId: '', title: 'missing-photo' }
+  const unresolved = prepareComponentLibraryInsertion(project, missing, options)
+  expect(unresolved.diagnostics).toEqual([{ code: 'missing-asset', message: '保留了待修复的素材引用：missing-photo' }])
+  expect(unresolved.identities.assets.has('')).toBe(false)
+  expect(unresolved.identities.assets.get('missing-photo')).toBeTruthy()
+  const preserved = driver.apply({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, unresolved.command)
+  if (preserved.kind !== 'course-v10') throw new Error('Expected V10 course')
+  expect(preserved.project.instances[unresolved.rootIds[0]].data).toMatchObject({
+    assetId: unresolved.identities.assets.get('missing-photo'), originalAssetId: '', title: 'missing-photo',
+  })
+  expect(unresolved.command.edits.filter(edit => edit.type === 'asset.add')).toEqual([])
+})
 
 it('sends only catalog identity fields for batch Flow insertion, preparation, update and deletion', async () => {
   const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-l0-catalog-reference-'))

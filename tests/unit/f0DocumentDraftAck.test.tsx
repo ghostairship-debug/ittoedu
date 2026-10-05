@@ -123,7 +123,7 @@ describe('F0 actual draft ACK boundary', () => {
         expect(restoredHandles.size).toBe(1)
         await act(async () => {
           if (toolbarHost) {
-            fireEvent.click(within(toolbarHost).getByLabelText('更多正文操作'))
+            fireEvent.click(within(toolbarHost).getByRole('button', { name: '正文' }))
             fireEvent.click(within(toolbarHost).getByRole('button', { name: '丢弃待修草稿' }))
           } else await handle.current!.discardDraft()
         })

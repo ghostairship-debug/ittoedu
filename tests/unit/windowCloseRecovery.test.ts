@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AppState } from '../../src/main/appState'
 import { IPC_CHANNELS } from '../../src/shared/ipcTypes'
 
-const controls = vi.hoisted(() => ({ choice: 1, recoveryChoice: 0, dirty: true, clearRecovery: vi.fn(async () => undefined), clearFrames: vi.fn(), releaseLeases: vi.fn() }))
+const controls = vi.hoisted(() => ({ choice: 1, recoveryChoice: 0, dirty: true, crashed: false, clearRecovery: vi.fn(async () => undefined), clearFrames: vi.fn(), releaseLeases: vi.fn() }))
 vi.mock('electron', async () => {
   const { EventEmitter } = await import('node:events')
   const os = await import('node:os')
@@ -11,6 +11,7 @@ vi.mock('electron', async () => {
     destroyed = false
     private contents = Object.assign(new EventEmitter(), {
       id: 7,
+      isCrashed: () => controls.crashed,
       executeJavaScript: vi.fn(async () => controls.dirty),
       send: vi.fn(),
       mainFrame: { detached: false, send: vi.fn() },
@@ -51,10 +52,31 @@ async function openWindow() {
 }
 function requestId(window: { webContents: { send: unknown } }): string { return vi.mocked(window.webContents.send as (...args: unknown[]) => void).mock.calls.at(-1)?.[1] as string }
 async function settle() { await vi.advanceTimersByTimeAsync(0) }
-beforeEach(() => { vi.useFakeTimers(); controls.choice = 1; controls.recoveryChoice = 0; controls.dirty = true; vi.mocked(dialog.showMessageBox).mockClear(); controls.clearRecovery.mockClear(); controls.clearFrames.mockReset(); controls.releaseLeases.mockReset() })
+beforeEach(() => { vi.useFakeTimers(); controls.choice = 1; controls.recoveryChoice = 0; controls.dirty = true; controls.crashed = false; vi.mocked(dialog.showMessageBox).mockClear(); controls.clearRecovery.mockClear(); controls.clearFrames.mockReset(); controls.releaseLeases.mockReset() })
 afterEach(() => { ipcMain.removeAllListeners(); vi.useRealTimers() })
 
 describe('window close recovery handshake', () => {
+  it('skips a crashed renderer and closes only after an explicit confirmed-recovery choice', async () => {
+    controls.crashed = true
+    const { window, state } = await openWindow()
+    const contents = window.webContents
+    window.close(); await settle()
+    expect(dialog.showMessageBox).toHaveBeenCalledWith(window, expect.objectContaining({
+      title: '关闭前保全尚未完成', detail: expect.stringContaining('界面进程已退出'),
+    }))
+    expect(window.isDestroyed()).toBe(false)
+    expect(contents.executeJavaScript).not.toHaveBeenCalled()
+    expect(contents.send).not.toHaveBeenCalled()
+    expect(controls.clearRecovery).not.toHaveBeenCalled()
+    expect(state.setDirty).not.toHaveBeenCalled()
+    controls.recoveryChoice = 2
+    window.close(); await settle()
+    expect(window.isDestroyed()).toBe(true)
+    expect(contents.executeJavaScript).not.toHaveBeenCalled()
+    expect(contents.send).not.toHaveBeenCalled()
+    expect(controls.clearRecovery).not.toHaveBeenCalled()
+    expect(state.setDirty).not.toHaveBeenCalled()
+  })
   it('requires the matching renderer preserve success before a preserve close, without clearing legacy project recovery', async () => {
     const { window, state } = await openWindow()
     window.close()

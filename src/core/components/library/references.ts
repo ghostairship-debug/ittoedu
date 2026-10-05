@@ -73,7 +73,7 @@ export function professionalAssetIds(value: JsonValue): string[] {
     if (Array.isArray(current)) { current.forEach(visit); return }
     if (!current || typeof current !== 'object') return
     for (const [key, item] of Object.entries(current)) {
-      if ((key === 'assetId' || key === 'originalAssetId') && typeof item === 'string') ids.add(item)
+      if ((key === 'assetId' || key === 'originalAssetId') && typeof item === 'string' && item.length > 0) ids.add(item)
       else visit(item)
     }
   }

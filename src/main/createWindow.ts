@@ -270,7 +270,7 @@ export async function createMainWindow(
     void prepareDocumentWindowClose({
       list: () => documentHost().registry.list(),
       drain: async () => { await Promise.all(documentHost().registry.list().map(snapshot => documentHost().registry.get(snapshot.documentId).drain())) },
-      rendererDirty: () => Promise.race([
+      rendererDirty: () => window.webContents.isCrashed() ? Promise.resolve(true) : Promise.race([
         window.webContents.executeJavaScript(
           'Boolean(window.__COURSEWARE_EDITOR_DIRTY__)',
           true,
@@ -280,6 +280,10 @@ export async function createMainWindow(
       confirm: () => confirmClose(window),
       cancelled: () => closing.signal.aborted,
       prepareRenderer: async mode => {
+        if (window.webContents.isCrashed()) {
+          await offerCloseRecovery('界面进程已退出，无法完成关闭前输入保全。')
+          return false
+        }
         const prepared = await requestRendererBeforeClose(window, mode, closing.signal, () => {
           if (closeController === closing && !closing.signal.aborted) void offerCloseRecovery()
         })
