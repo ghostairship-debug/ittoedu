@@ -61,10 +61,9 @@ export function restoreImageOriginal(data: ImageData): ImageData {
   return { ...data, assetId: data.originalAssetId, crop: { left: 0, top: 0, right: 0, bottom: 0 } }
 }
 
-/** An explicit replacement starts a new recoverable original, after host resource admission. */
+/** Replacement starts a new recoverable original while retaining authored display edits. */
 export function replaceImageSource(data: ImageData, admittedAssetId: string): ImageData {
-  return imageDataSchema.parse({ ...data, assetId: admittedAssetId, originalAssetId: admittedAssetId,
-    crop: { left: 0, top: 0, right: 0, bottom: 0 } })
+  return imageDataSchema.parse({ ...data, assetId: admittedAssetId, originalAssetId: admittedAssetId })
 }
 
 export function imageAssetReferences(data: ImageData): string[] {

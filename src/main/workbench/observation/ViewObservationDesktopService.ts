@@ -83,6 +83,7 @@ export class ViewObservationDesktopService {
     const worker = new BrowserWindow({ width: size.width, height: size.height, useContentSize: true, frame: false, show: false,
       skipTaskbar: true, webPreferences: { session: isolatedSession, contextIsolation: true, sandbox: true,
         nodeIntegration: false, webSecurity: true, backgroundThrottling: false, offscreen: true } })
+    const workerContents = worker.webContents
     worker.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
     const entry = new URL('observation.html', this.options.rendererEntryUrl).toString()
     worker.webContents.on('will-navigate', (event, url) => { if (url !== entry) event.preventDefault() })
@@ -120,7 +121,7 @@ export class ViewObservationDesktopService {
       clearTimeout(faultWait)
       input.signal?.removeEventListener('abort', onAbort)
       worker.removeListener('closed', onClosed)
-      worker.webContents.removeListener('render-process-gone', onGone)
+      workerContents.removeListener('render-process-gone', onGone)
       if (!worker.isDestroyed()) worker.destroy()
       binarySources.clear()
       isolatedSession.protocol.unhandle('courseware-editor')

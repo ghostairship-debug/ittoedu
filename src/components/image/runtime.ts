@@ -1,7 +1,7 @@
 import type { ComponentFrame, ComponentInstance, ComponentRuntimeImplementation } from '../../shared/contracts/component-platform'
 import type { ImageNode } from '../../shared/contracts/native-v1/types'
 import { renderImageNodeCanvas } from '../../shared/imageEffects'
-import { cropGeometry } from '../../renderer/editing/crop/imageCrop'
+import { clampCrop, cropGeometry } from '../../renderer/editing/crop/imageCrop'
 import { imageDataSchema, type ImageData } from './data'
 
 export interface ResolvedImageAsset {
@@ -45,7 +45,10 @@ export function createImageRuntimeImplementation(
         host.style.filter = `brightness(${filters.brightness}) contrast(${filters.contrast}) saturate(${filters.saturation}) grayscale(${filters.grayscale}) blur(${filters.blur}px)`
         const geometry = cropGeometry({ ...data, frame: { width, height },
           source: { width: image.naturalWidth, height: image.naturalHeight } }).whole
+        const crop = clampCrop(data.crop)
         Object.assign(image.style, { left: `${geometry.x}px`, top: `${geometry.y}px`, width: `${geometry.width}px`, height: `${geometry.height}px`,
+          // Clip the discarded source pixels before the existing flip transform; contain margins remain empty.
+          clipPath: `inset(${crop.top * 100}% ${crop.right * 100}% ${crop.bottom * 100}% ${crop.left * 100}%)`,
           transform: `translate(${data.flipX ? '100%' : '0'}, ${data.flipY ? '100%' : '0'}) scale(${data.flipX ? -1 : 1}, ${data.flipY ? -1 : 1})` })
         canvas?.remove(); canvas = undefined; image.hidden = false
         delete host.dataset.imageDiagnostic
