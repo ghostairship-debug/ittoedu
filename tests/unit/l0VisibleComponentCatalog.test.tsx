@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { TextEncoder as NodeTextEncoder } from 'node:util'
 import { compileFunction, constants } from 'node:vm'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { scanComponentCatalogSources } from '../../src/main/componentCatalogSources'
 import { readCatalogComponentPackage } from '../../src/main/componentCatalogScanner'
@@ -14,6 +14,7 @@ import { componentCompilationInput } from '../../src/core/components/compilation
 import { createEsbuildComponentCompiler } from '../../src/main/workbench/contentApply/compilation/esbuildComponentCompiler'
 import { ComponentLibraryDialog, ComponentsTab } from '../../src/renderer/ui/ComponentsTab'
 import { useComponentLibrary, type ComponentLibraryPorts } from '../../src/renderer/app/useComponentLibrary'
+import type { AvailableComponentCatalogPackage } from '../../src/shared/componentCatalog'
 import type { EditorStoreKernel } from '../../src/renderer/store/editorStoreKernel'
 import type { CourseV10ViewState, CapturedComponentOperation, CapturedCourseTarget } from '../../src/renderer/documents/CourseV10DocumentBridge'
 import type { ComponentEdit } from '../../src/shared/contracts/component-platform/operations'
@@ -28,6 +29,74 @@ vi.mock('../../src/renderer/store/editorStore', () => ({
   selectEditingScope: () => 'scene',
 }))
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
+
+it('sends only catalog identity fields for batch Flow insertion, preparation, update and deletion', async () => {
+  const userData = await fs.mkdtemp(path.join(os.tmpdir(), 'guoling-l0-catalog-reference-'))
+  try {
+    const scan = await scanComponentCatalogSources(process.cwd(), userData)
+    const packages = [...scan.sources.values()].flatMap(source => source.packages)
+    expect(packages).toHaveLength(4)
+    const identity = (entry: AvailableComponentCatalogPackage) => ({ sourceId: entry.sourceId, packageId: entry.packageId, version: entry.version })
+    const reads: unknown[] = [], deletes: unknown[] = []
+    const assertReference = (input: Parameters<ComponentLibraryPorts['readCatalogPackage']>[0]) => {
+      // Main's read/delete handlers have the same strict three-field reference contract.
+      expect(Object.keys(input).sort()).toEqual(['packageId', 'sourceId', 'version'])
+      const entry = packages.find(pkg => pkg.sourceId === input.sourceId && pkg.packageId === input.packageId && pkg.version === input.version)
+      expect(entry).toBeDefined()
+      expect(input).toEqual(identity(entry!))
+    }
+    let model: Extract<DocumentModel, { kind: 'course-v10' }> = { kind: 'course-v10',
+      project: { schemaVersion: 10, id: 'flow-course', revision: 0, title: 'Flow', definitions: {}, instances: {}, assets: {},
+        surfaces: [{ id: 'flow-page', kind: 'flow', title: '正文', childIds: [] }], global: { underlay: [], overlay: [] } },
+      resources: { assets: {}, components: {} } }
+    let view = { project: model.project, activeDocumentId: 'flow-course', surfaceId: 'flow-page', selectedInstanceIds: [],
+      views: [{ documentId: 'flow-course', model }] } as unknown as CourseV10ViewState
+    const listeners = new Set<() => void>(), commands: CapturedComponentOperation[] = [], driver = new CourseV10Driver()
+    const kernel = { bridge: { subscribe(listener: () => void) { listeners.add(listener); return () => listeners.delete(listener) } },
+      readView: () => view, readDocument: () => model.project, readResources: () => model.resources,
+      captureTarget: () => ({ documentId: 'flow-course', epoch: 'epoch', project: model.project, resources: model.resources,
+        editingProject: model.project, activeStateId: null, surfaceId: 'flow-page', instanceIds: [], instanceId: null }),
+      capture: (edits: ComponentEdit[], target: CapturedCourseTarget) => ({ ...captureComponentOperation(target.project, edits), documentId: target.documentId, epoch: target.epoch }),
+      async editCaptured(captured: CapturedComponentOperation) {
+        commands.push(captured)
+        const { documentId: _documentId, epoch: _epoch, ...command } = captured
+        model = driver.apply(model, command) as typeof model
+        view = { ...view, project: model.project, views: [{ documentId: 'flow-course', model }] }
+        listeners.forEach(listener => listener())
+        return { status: 'applied', revision: model.project.revision }
+      }, selectInstances: vi.fn(), setFeedback: vi.fn(),
+    } as unknown as EditorStoreKernel
+    const busy: Promise<unknown>[] = []
+    const ports: ComponentLibraryPorts = { kernel, desktopAvailable: () => true, loadCatalog: async () => ({ packages, sources: [], issues: [] }),
+      async readCatalogPackage(input) {
+        assertReference(input); reads.push(input)
+        return readCatalogComponentPackage(scan.sources.get(input.sourceId)!, input.packageId, input.version)
+      }, async deleteCatalogPackage(input) {
+        assertReference(input); deletes.push(input)
+        return { packages, sources: [], issues: [] }
+      }, selectComponentPackage: async () => null, selectComponentPackages: async () => null,
+      runBusy(operation) { const pending = operation(); busy.push(pending); return pending }, commitStatus: vi.fn(), reportError: vi.fn() }
+    const hook = renderHook(() => useComponentLibrary(ports))
+    await act(async () => { await busy[0] })
+    await act(async () => { expect(await hook.result.current.prepareCatalogPackage(packages[0])).toMatchObject({ id: packages[0].packageId }) })
+    await act(async () => { expect(await hook.result.current.addCatalogPackages(packages)).toBe(true) })
+    expect(reads).toEqual([identity(packages[0]), ...packages.map(identity)])
+    expect(commands).toHaveLength(1)
+    expect(commands[0]).toMatchObject({ documentId: 'flow-course', epoch: 'epoch' })
+    expect(commands[0].edits.filter(edit => edit.type === 'instance.insert')).toHaveLength(4)
+    expect(model.project.surfaces[0].childIds).toHaveLength(4)
+    const roots = [...model.project.surfaces[0].childIds]
+    act(() => hook.result.current.requestCatalogUpdate(packages[0]))
+    expect(hook.result.current.catalogUpdateRequest).not.toBeNull()
+    await act(async () => { hook.result.current.confirmCatalogUpdate(); await busy.at(-1) })
+    expect(reads.at(-1)).toEqual(identity(packages[0]))
+    expect(commands).toHaveLength(2)
+    expect(model.project.surfaces[0].childIds).toEqual(roots)
+    await act(async () => { await hook.result.current.deleteCatalogPackage(packages[0]) })
+    expect(deletes).toEqual([identity(packages[0])])
+    expect(ports.reportError).not.toHaveBeenCalled()
+  } finally { await fs.rm(userData, { recursive: true, force: true }) }
+})
 
 it('shows shipped visual packages and authored definitions, then inserts, reopens and compiles/mounts the API 5 visual content', async () => {
   // Main's compiler receives Node byte arrays; jsdom otherwise replaces that constructor with another realm's.
