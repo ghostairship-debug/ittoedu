@@ -19,6 +19,7 @@ import {
   RangeField,
   SelectField,
   ToggleRow,
+  usePropertyDraftFlush,
 } from './PropertyControls'
 
 export type ChartType = NativeChartContent['chartType']
@@ -208,10 +209,14 @@ export function ChartProperties({
   const [dirty, setDirty] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
   const dirtyRef = useRef(false)
+  const targetRef = useRef(bindingKey)
+  const composingRef = useRef(false)
+  const baselineRef = useRef(draftSignature(node))
   const signatureRef = useRef(draftSignature(node))
   const preparedCanvasSignature = useRef<string | null>(null)
 
   const markDirty = () => {
+    if (!dirtyRef.current) { targetRef.current = bindingKey; baselineRef.current = draftSignature(node) }
     dirtyRef.current = true
     setDirty(true)
     setApplyError(null)
@@ -220,6 +225,7 @@ export function ChartProperties({
   // Rebase the local draft whenever the binding changes, or when canonical
   // data moves while no local edit is in flight (undo, external command).
   useEffect(() => {
+    if (dirtyRef.current && targetRef.current !== bindingKey) return
     const signature = draftSignature(node)
     if (signatureRef.current === signature) return
     signatureRef.current = signature
@@ -236,6 +242,7 @@ export function ChartProperties({
   // embeds the session revision, and every chart command bumps it; resetting
   // on revision would wipe an in-progress draft after unrelated style commits.
   useEffect(() => {
+    if (dirtyRef.current && targetRef.current !== bindingKey) return
     dirtyRef.current = false
     setDirty(false)
     setApplyError(null)
@@ -244,7 +251,7 @@ export function ChartProperties({
     signatureRef.current = draftSignature(node)
     setDraft(draftFromView(node))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [node.id])
+  }, [node.id, bindingKey])
 
   const validation = validateDraft(draft, chartType)
 
@@ -297,19 +304,25 @@ export function ChartProperties({
   }
 
   const applyDraft = () => {
-    if (!validation.candidate) return
+    if (targetRef.current !== bindingKey) { setApplyError('图表数据草稿对应的编辑目标已经改变，请取消草稿后重试。'); return false }
+    if (dirtyRef.current && baselineRef.current !== draftSignature(node)) { setApplyError('图表数据已在其他编辑入口改变，请取消此草稿后重试。'); return false }
+    if (composingRef.current || !validation.candidate) return false
     preview?.(null)
     const reason = commands.commitTableData(validation.candidate)
     if (reason) {
       setApplyError(reason)
-      return
+      return false
     }
     dirtyRef.current = false
     setDirty(false)
     setApplyError(null)
+    return true
   }
+  usePropertyDraftFlush(() => !dirtyRef.current || applyDraft())
 
   const resetDraft = () => {
+    targetRef.current = bindingKey
+    baselineRef.current = draftSignature(node)
     preview?.(null)
     dirtyRef.current = false
     setDirty(false)
@@ -472,6 +485,8 @@ export function ChartProperties({
         data-testid="chart-data-table"
         role="group"
         aria-label="图表数据表"
+        onCompositionStart={() => { composingRef.current = true }}
+        onCompositionEnd={() => { composingRef.current = false }}
         style={{
           display: 'grid',
           gridTemplateColumns: `minmax(88px, 1.2fr) repeat(${Math.max(draft.series.length, 1)}, minmax(72px, 1fr)) auto`,

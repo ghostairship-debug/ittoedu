@@ -220,7 +220,7 @@ export class WorkspaceFiles {
   }
 
   createFile(input: { operationId: string; workspaceId: string; targetDirectoryId: string; name: string;
-    format: 'markdown' | 'course-v9' | 'file'; bytes: Uint8Array; overwrite?: boolean }, beforeCommit?: () => void): Promise<WorkspaceOperationResult> {
+    format: 'markdown' | 'course-v9' | 'course-v10' | 'file'; bytes: Uint8Array; overwrite?: boolean }, beforeCommit?: () => void): Promise<WorkspaceOperationResult> {
     const bytes = Uint8Array.from(input.bytes)
     const digest = stableDigest({ ...input, bytes: createHash('sha256').update(bytes).digest('hex') })
     return this.runOnce(input.operationId, digest, async () => {

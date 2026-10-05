@@ -92,6 +92,7 @@ export interface ObservationServicePort {
     revision: number
     projectId: string
     locationId: string
+    stateId?: string | null
     viewGeneration?: string
     signal?: AbortSignal
   }): Promise<ObservationResult>
@@ -102,7 +103,7 @@ export interface ObservationServicePort {
 
 export type ObservationResult = {
   source: 'live' | 'isolated-published'
-  identity: { documentId: string; epoch: string; revision: number; locationId: string; viewGeneration?: string }
+  identity: { documentId: string; epoch: string; revision: number; locationId: string; stateId?: string | null; viewGeneration?: string }
   coverage: { width: number; height: number }
   structure: readonly string[]
   diagnostics: readonly string[]
@@ -201,6 +202,8 @@ export interface ExportBuildRequest {
   requestId: string
   identity: { documentId: string; epoch: string; revision: number; projectId: string }
   format: ExportFormat
+  /** Main requests local draft commit before capturing the immutable build snapshot. */
+  phase?: 'drain'
   /** Immutable copy supplied by Main; never the renderer's live store. */
   snapshot: DocumentSnapshot
 }
@@ -208,7 +211,7 @@ export interface ExportBuildRequest {
 export interface ExportBuildReply {
   requestId: string
   identity: ExportBuildRequest['identity']
-  status: 'generated' | 'failed' | 'cancelled'
+  status: 'generated' | 'drained' | 'failed' | 'cancelled'
   files?: readonly { relativePath: string; mimeType: string; bytes: Uint8Array }[]
   warnings: readonly string[]
   reason?: string

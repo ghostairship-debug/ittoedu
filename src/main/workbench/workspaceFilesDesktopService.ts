@@ -4,10 +4,9 @@ import { promises as fs } from 'node:fs'
 import { workspaceFilesRequestSchema, type RegisteredWorkspaceRoot, type WorkspaceFilesAPI, type WorkspaceFilesChange, type WorkspaceItemResult, type WorkspaceOperationResult } from '../../shared/workbench/workspaceFiles'
 import { UserFacingError } from '../../shared/errors'
 import type { WorkspaceFiles } from './WorkspaceFiles'
-import { createBlankCourseProject } from '../../core/course/createCourseProject'
+import { createBlankCourseProjectV10 } from '../../core/course/createCourseProjectV10'
 import { isHtmlPreviewRequest, type HtmlPreviewHost } from '../../shared/workbench/htmlPreview'
-import { createDefaultTeacherControllerPackage } from '../../shared/defaultTeacherControllerComponent'
-import { createCourseProjectArchive, openCourseProjectArchive } from '../../core/drivers/codecs/courseProjectArchive'
+import { createCourseProjectV10Archive, openCourseProjectV10Archive } from '../../core/drivers/codecs/courseProjectV10Archive'
 import { readWorkspaceMediaSelection } from '../fileDialogs'
 
 const pathKey = (value: string) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value)
@@ -151,15 +150,14 @@ export class WorkspaceFilesDesktopService {
         const old = this.preparedCourses.get(input.operationId)
         if (old && old.input !== identity) throw new Error('同一文件操作不能改变参数')
         if (!old && archive) {
-          // Only a valid V9 H5 presentation is written; anything else fails here, before the file exists.
-          try { openCourseProjectArchive(archive) } catch { throw new UserFacingError('无法新建 H5 演示', '转换得到的文件不是有效的 H5 演示。', '请重新选择 PPT 后再试。') }
+          try { openCourseProjectV10Archive(archive) } catch { throw new UserFacingError('无法新建 H5 演示', '此入口只支持 Project V10 归档，原文件未修改。', '请保留原件；对应导入功能接入后再导入。') }
           this.preparedCourses.set(input.operationId, { input: identity, bytes: Uint8Array.from(archive) })
         } else if (!old) {
-          const project = createBlankCourseProject({ title: input.name.replace(/\.h5lesson$/i, ''), canvas: input.canvas })
-          const component = createDefaultTeacherControllerPackage()
-          this.preparedCourses.set(input.operationId, { input: identity, bytes: createCourseProjectArchive({ project, assetFiles: {}, componentFiles: { [`${component.manifest.id}@${component.manifest.version}`]: component.files } }) })
+          const project = createBlankCourseProjectV10(input.name.replace(/\.h5lesson$/i, ''))
+          if (input.canvas) project.surfaces[0].designSize = { width: input.canvas.width, height: input.canvas.height }
+          this.preparedCourses.set(input.operationId, { input: identity, bytes: createCourseProjectV10Archive({ project, resources: { assets: {}, components: {} } }) })
         }
-        return this.files.createFile({ ...request, format: 'course-v9', bytes: this.preparedCourses.get(input.operationId)!.bytes })
+        return this.files.createFile({ ...request, format: 'course-v10', bytes: this.preparedCourses.get(input.operationId)!.bytes })
       }
       case 'import-files': {
         const items: WorkspaceItemResult[] = [], directories = new Map<string, string>([['', input.targetDirectoryId]])

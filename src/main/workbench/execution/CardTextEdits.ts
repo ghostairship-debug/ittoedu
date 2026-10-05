@@ -1,5 +1,4 @@
-import { documentTextLength, normalizeDocumentText, type FlowTextContent } from '../../../shared/document/content'
-import { sliceFlowRichText } from '../../../core/tools/flowDocumentModel'
+import { documentTextLength, normalizeDocumentText, sliceDocumentText, type FlowTextContent } from '../../../shared/document/content'
 import { mapMarkdownRange } from '../../../core/tools/ToolTargets'
 import { sameFieldValue } from '../../../core/drivers/course/elementFields'
 
@@ -9,7 +8,7 @@ export const sourceTextCodec: TextCodec<string> = {
   length: value => value.length, slice: (value, from, to) => value.slice(from, to), join: values => values.join(''), equal: (a, b) => a === b,
 }
 export const flowTextCodec: TextCodec<FlowTextContent> = {
-  length: documentTextLength, slice: sliceFlowRichText,
+  length: documentTextLength, slice: sliceDocumentText,
   join: values => normalizeDocumentText({ inlines: values.flatMap(value => value.inlines) }), equal: sameFieldValue,
 }
 export interface PeerTextOperation { id: string; direction: 'apply' | 'undo' | 'redo' }

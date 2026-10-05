@@ -61,9 +61,9 @@ export function courseAgentCapabilityDiskIndex(data                           ) 
 
 
 
-const surfaces = ['slide', 'flow', 'spatial-2d']
-const owners = ['global', 'surface', 'scene', 'world']
-const carriers = ['native', 'recipe', 'existing-component', 'generated-component', 'runtime']
+const surfaces = ['slide', 'flow', 'spatial']
+const owners = ['global', 'surface', 'instance']
+const carriers = ['component']
 const kinds = ['tool', 'recipe', 'component', 'protocol', 'skill', 'reference']
 const tasks = ['create', 'edit', 'repair', 'design']
 
@@ -85,13 +85,12 @@ function validateQuery(data                           , input                   
   if (input.detail !== undefined && !['summary', 'full'].includes(input.detail)) throw new Error('未知能力查询 detail')
   if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > 100)) throw new Error('能力查询数量须在 1 到 100 之间')
   if (input.ids !== undefined && (!Array.isArray(input.ids) || input.ids.length > 100 || input.ids.some(id => typeof id !== 'string' || !data.entries.some(entry => entry.id === id)))) throw new Error('未知能力 ID')
-  if (input.surface && input.owner && ((input.owner === 'scene' && input.surface !== 'slide') || (input.owner === 'world' && input.surface !== 'spatial-2d'))) throw new Error('能力查询 Surface 与 owner 不匹配')
 }
 
 function matchingVariants(entry                            , query                                  ) {
   const scopesMatch = (scopes          ) => scopes.some(scope => (!query.surface || scope.startsWith(`${query.surface}:`)) && (!query.owner || scope.endsWith(`:${query.owner}`)))
   return (entry.variants ?? [{ scopes: entry.scopes }]).filter(variant =>
-    (!query.operation || variant.operation === query.operation) && (!query.mode || variant.mode === query.mode)
+    (!query.operation || variant.operation === undefined || variant.operation === query.operation) && (!query.mode || variant.mode === undefined || variant.mode === query.mode)
     && (!query.carrier || (variant.carriers ?? entry.carriers).includes(query.carrier)) && scopesMatch(variant.scopes))
 }
 
@@ -255,9 +254,9 @@ export function readCourseAgentCapability(data                           , id   
     carriers: [...new Set(variants.flatMap(variant => variant.carriers ?? entry.carriers))], variants } : entry), content }
 }
 
-export const courseAgentCapabilityQueryHelp = '保持原生工作目录；node "<query.mjs绝对路径>" [--help] [--id <能力ID> | --query <关键词>] [--operation <操作>] [--mode <模式>] [--nativeType <类型>] [--surface <slide|flow|spatial-2d>] [--owner <global|surface|scene|world>] [--carrier <载体>] [--kind <种类>] [--task <create|edit|repair|design>] [--limit <1..100>] [--semanticVersion <当前版本>] [--summary]。无参数返回精简发现入口；定向查询默认返回完整卡片，--summary 只返回索引。'
+export const courseAgentCapabilityQueryHelp = '保持原生工作目录；node "<query.mjs绝对路径>" [--help] [--id <能力ID> | --query <关键词>] [--operation <操作>] [--mode <模式>] [--nativeType <类型>] [--surface <slide|flow|spatial>] [--owner <global|surface|instance>] [--carrier <component>] [--kind <种类>] [--task <create|edit|repair|design>] [--limit <1..100>] [--semanticVersion <当前版本>] [--summary]。无参数返回精简发现入口；定向查询默认返回完整卡片，--summary 只返回索引。'
 
-/** The generated CLI and app/Builder share parsing-independent query semantics. */
+/** The generated CLI and app share parsing-independent query semantics. */
 export function runCourseAgentCapabilityQuery(data                           , args                   ) {
   if (!args.length) return JSON.parse(data.files['discovery.json'] )
   if (args.length === 1 && ['--help', '-h'].includes(args[0] )) return courseAgentCapabilityQueryHelp

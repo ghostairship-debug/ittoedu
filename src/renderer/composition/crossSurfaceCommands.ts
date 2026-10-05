@@ -1,1082 +1,495 @@
 import type { EditorStoreKernel } from '../store/editorStoreKernel'
-import type { CourseResourceState } from '../store/courseResourceState'
-import { projectedAssetFiles } from '../store/courseResourceState'
-import type { SlidePersistExtra, SlideApplyBackendExtra } from '../store/slices/slideAuthoringSlice'
-import type { FlowPersistExtra } from '../store/slices/flowAuthoringSlice'
-import type { SpatialPersistExtra, SpatialGraphSelection } from '../store/slices/spatialAuthoringSlice'
-import type {
-  SpatialAuthoringIntent,
-  SpatialAuthoringReceipt,
-} from '../authoring/spatialAuthoringIntents'
-import type { EditorShellOwnedState } from '../store/slices/editorShellSlice'
-import type { CourseLifecycleOwnedState } from '../store/slices/courseLifecycleSlice'
-import type { createCourseStructureSlice } from '../store/slices/courseStructureSlice'
-import type {
-  SlideAuthoringBackend,
-  SlideAuthoringSnapshot,
-  SlideCommandResult,
-} from '../course/slideAuthoringBackend'
-import { createSlideAuthoringBackend, openSlideAuthoringSession } from '../course/slideAuthoringBackend'
-import type { FlowAuthoringSession } from '../project/createFlowCourseProject'
-import { createFlowEditorHistory, selectFlowEditorBlock } from '../course/flowEditorSlice'
-import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
-import type { FlowCommandResult } from '../course/flowEditorCommands'
-import type { FlowSharedAuthoringResult } from '../course/flowSharedAuthoringAdapters'
-import type { SpatialAuthoringSession, SpatialCommandResult } from '../course/spatialEditorCommands'
-import { openSpatialAuthoringSession } from '../course/spatialEditorCommands'
-import { freezeSpatialSession, succeedSpatialCommand, commitSpatialAuthoringHistory } from '../course/spatialAuthoringHistory'
-import {
-  detectActiveSurface,
-  dispatchActiveSurface,
-  planActivateCourseLocation,
-  type ActiveSurfaceKind,
-} from './surfaceRouter'
-import {
-  buildCourseAuthoringSessionForProject,
-  updateCourseAuthoringSessionItems,
-  type CourseAuthoringSession,
-} from '../authoring/courseAuthoringSession'
-import { emptyCourseAssetSidecar } from '../project/v9AssetAdapter'
-import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
-import {
-  type CourseEditorDropdownAction,
-  type CourseEditorPrimaryAction,
-} from '../course/courseEditorLayout'
-import type {
-  CaptureCourseProjectRecoveryResult,
-  CourseProjectPersistenceSnapshot,
-  CourseProjectPersistenceToken,
-  PrepareCourseProjectPersistenceResult,
-} from '../store/editorStore'
+import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
+import { containerChildIds, owningContainer, type ComponentContainer, type ComponentDefinition, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
+import type { ComponentFrame } from '../../shared/contracts/component-platform/frame'
+import { translateFrame, rotateFrame, reparentFrame, frameCorners, transformVector, invertMatrix, composeMatrices, IDENTITY_MATRIX, type AffineMatrix } from '../../core/components/geometry'
 import type { EditorCanvasNodePatch } from '../phaser/editorCanvasNode'
-import type { TextRun, TextRunStyle } from '../../shared/contracts/native-v1'
-import {
-  findCourseSlideScene,
-  type GlobalLayerSettingsPatch,
-} from '../store/v9LayerMutations'
-import {
-  findGlobalTeacherController,
-  type LayerCommandResult,
-} from '../course/effectiveLayerCommands'
-import type { EffectiveLayerProjection } from '../course/effectiveLayerProjection'
-import type { V9SlideContentEditSession } from '../authoring/v9SlideContentEdit'
-import type { FlowTextEditSession } from '../authoring/flowTextEdit'
-import type { SpatialWorldContentEditSession } from '../authoring/spatialWorldAuthoring'
-import {
-  createEditorSelectionSnapshot,
-  routeEditorAction as routeEditorActionCore,
-  type EditorFocusKind,
-  type EditorSelectionSnapshot,
-} from '../course/editorActionRouting'
-import { selectionSnapshotFromSession } from '../authoring/courseAuthoringSession'
-import type { EditorActionId } from '../course/editorActionTypes'
-import { LAYER_REJECT_STALE_REVISION } from '../course/effectiveLayerCommands'
-import { updateCourseAuthoringSessionRevision } from '../authoring/courseAuthoringSession'
+import type { TextRun } from '../../shared/contracts/native-v1'
+import type { EditorActionId, EditorFocusKind, EditorSelectionSnapshot } from '../course/editorActionTypes'
+import type { createCourseLifecycleSlice } from '../store/slices/courseLifecycleSlice'
+import type { createCourseStructureSlice } from '../store/slices/courseStructureSlice'
+import type { DocumentResources } from '../../shared/workbench/document'
+import { extractComponentLibraryEntry } from '../../core/components/library'
+import { rebindComponentLibraryImplementation } from '../../core/components/library/rebindSource'
+import { rebindDeclaredTargets, rebindProfessionalAssets, rebindWebAssets, sourceModuleBindings } from '../../core/components/library/references'
+import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
+import { componentRuleEdits, createComponentInteractionCopyIdentities, interactionBehavior, interactionRules, remapComponentInteractionData } from '../interactions/componentInteractionAuthoring'
+import { remapComponentInputData } from '../../components/input/authoring'
+import { inputDataSchema } from '../../components/input/data'
+import type { InteractionRule } from '../../shared/interactionTypes'
 
-type SurfaceNodeCommands = {
-  selectNodes(nodeIds: string[]): void
-  updateNodes(patches: Array<{ nodeId: string; patch: EditorCanvasNodePatch }>): void
-  updateNode(nodeId: string, patch: EditorCanvasNodePatch): void
-  copySelectedNodes(): void
-  pasteNodes(): void
-  deleteNode(nodeId: string): void
-  deleteSelectedNodes(): void
-  duplicateSelectedNodes(): void
-  duplicateNode(nodeId: string): void
+/** Surface-owned content commands; generic objects use the common canonical writer below. */
+export interface CrossSurfaceContentPorts {
+  addTextNode?(x?: number, y?: number): unknown
+  addFormulaNode?(x?: number, y?: number): unknown
+  addRectangleNode?(x?: number, y?: number): unknown
+  addShapeNode?(shape: string, x?: number, y?: number): unknown
+  addTableNode?(x?: number, y?: number): unknown
+  addChartNode?(chart: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number): unknown
+  beginTextEdit?(id: string, source?: 'canvas' | 'properties'): unknown
+  updateTextEditDraft?(id: string, text: string, runs: TextRun[], height?: number, width?: number): unknown
+  commitTextEdit?(): unknown
+  cancelTextEdit?(): unknown
+  ensureTeacherController?(): unknown
+  setSpatialEditingScope?(scope: 'global' | 'world' | 'surface'): unknown
+  readSpatialView?(): {scope: 'global'|'world'|'surface'}
 }
-
-export type CrossSurfaceSlidePorts = {
-  read(): {
-    slideBackend: SlideAuthoringBackend | null
-    slideCandidateSnapshot: SlideAuthoringSnapshot | null
-    v9ContentEdit: V9SlideContentEditSession | null
-  }
-  patch(patch: { v9ContentEdit?: null }): void
-  persist(result: SlideCommandResult, extra?: SlidePersistExtra): SlideCommandResult
-  applyBackend(backend: SlideAuthoringBackend, extra?: SlideApplyBackendExtra): void
-  commitDraft(): SlideAuthoringBackend | null
-  undo(): void
-  redo(): void
-  activateState(stateId: string | null): void
-  activateScene(sceneId: string): void
-  setScope(scope: 'global' | 'scene'): void
-  renameProject(title: string): void
-  addTextNode(x?: number, y?: number): void
-  addFormulaNode(x?: number, y?: number): void
-  addRectangleNode(x?: number, y?: number): void
-  addShapeNode(shapeType: string, x?: number, y?: number): void
-  addTableNode(x?: number, y?: number): void
-  addChartNode(chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number): void
-  beginTextEdit(nodeId: string, source?: 'canvas' | 'properties'): void
-  updateTextEditDraft(nodeId: string, text: string, runs: TextRun[], height?: number, width?: number): void
-  commitTextEdit(): void
-  cancelTextEdit(): void
-  selectNode(nodeId: string | null, additive?: boolean): void
-  ensureTeacherController(): void
-  commitSlideCandidateTextRunStyle(input: {
-    layerItemId: string
-    selectionStart: number
-    selectionEnd: number
-    patch: TextRunStyle
-    source?: 'canvas' | 'properties'
-  }): SlideCommandResult
-  updateGlobalLayerSettings(
-    nodeId: string,
-    patch: GlobalLayerSettingsPatch,
-  ): void
-  reorderNodes(nodeIds: string[]): void
-  moveGlobalLayerOwner(fromId: string, toId: string): void
-  setCandidateGlobalLayerLocationVisibility(nodeId: string, visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] }): void
-  setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean): void
-  deriveFocus(focus?: EditorFocusKind | EventTarget | null, shellEditingTextNodeId?: boolean): EditorFocusKind
-  executeAction(actionId: EditorActionId, live: EditorSelectionSnapshot): { ok: boolean; reason: string }
-  executeGlobalAction(actionId: EditorActionId, live: EditorSelectionSnapshot): { ok: boolean; reason: string }
-} & SurfaceNodeCommands
-
-export type CrossSurfaceFlowPorts = {
-  addTableNode(): void
-  addChartNode(chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number): void
-  read(): {
-    flowSession: FlowAuthoringSession | null
-    flowTextEdit: FlowTextEditSession | null
-  }
-  persist(
-    result: FlowCommandResult | FlowSharedAuthoringResult,
-    extra?: FlowPersistExtra,
-  ): FlowCommandResult | FlowSharedAuthoringResult
-  applyBackend(session: FlowAuthoringSession, extra?: SlideApplyBackendExtra): void
-  commitDraft(): boolean
-  undo(): void
-  redo(): void
-  setScope(scope: 'global' | 'scene'): void
-  renameProject(title: string): void
-  addTextNode(x?: number, y?: number): void
-  addFormulaNode(x?: number, y?: number): void
-  addRectangleNode(x?: number, y?: number): void
-  addShapeNode(shapeType: string, x?: number, y?: number): void
-  beginTextEdit(nodeId: string, source?: 'canvas' | 'properties'): void
-  updateTextEditDraft(nodeId: string, text: string, runs: TextRun[], height?: number, width?: number): void
-  commitTextEdit(): void
-  cancelTextEdit(): void
-  selectNode(nodeId: string | null, additive?: boolean): void
-  ensureTeacherController(): void
-  patch(patch: { flowTextEdit?: null }): void
-  activateBlock(locationId: string): boolean
-  updateGlobalLayerSettings(nodeId: string, patch: GlobalLayerSettingsPatch): void
-  reorderNodes(nodeIds: string[]): void
-  moveGlobalLayerOwner(fromId: string, toId: string): void
-  setCandidateGlobalLayerLocationVisibility(nodeId: string, visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] }): void
-  setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean): void
-  deriveFocus(): EditorFocusKind
-  executeAction(actionId: EditorActionId, live: EditorSelectionSnapshot): { ok: boolean; reason: string }
-  executeGlobalAction(actionId: EditorActionId, live: EditorSelectionSnapshot): { ok: boolean; reason: string }
-} & SurfaceNodeCommands
-
-export type CrossSurfaceSpatialPorts = {
-  addTableNode(x?: number, y?: number): void
-  addChartNode(chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number): void
-  read(): {
-    spatialSession: SpatialAuthoringSession | null
-    spatialContentEdit: SpatialWorldContentEditSession | null
-    spatialGraphSelection: SpatialGraphSelection | null
-    courseAuthoringSession: CourseAuthoringSession | null
-  }
-  persist(result: SpatialCommandResult, extra?: SpatialPersistExtra): SpatialCommandResult
-  applyBackend(session: SpatialAuthoringSession, extra?: SlideApplyBackendExtra): void
-  runAuthoringIntent(
-    target: import('../authoring/courseAuthoringSession').CourseAuthoringTarget,
-    intent: SpatialAuthoringIntent,
-  ): SpatialAuthoringReceipt
-  commitDraft(): SpatialAuthoringSession | null
-  undo(): void
-  redo(): void
-  setScope(scope: 'global' | 'world'): void
-  renameProject(title: string): void
-  addTextNode(x?: number, y?: number): void
-  addFormulaNode(x?: number, y?: number): void
-  addRectangleNode(x?: number, y?: number): void
-  addShapeNode(shapeType: string, x?: number, y?: number): void
-  beginTextEdit(nodeId: string, source?: 'canvas' | 'properties'): void
-  updateTextEditDraft(nodeId: string, text: string, runs: TextRun[], height?: number, width?: number): void
-  commitTextEdit(): void
-  cancelTextEdit(): void
-  selectNode(nodeId: string | null, additive?: boolean): void
-  ensureTeacherController(): void
-  commitSlideCandidateTextRunStyle(input: {
-    layerItemId: string
-    selectionStart: number
-    selectionEnd: number
-    patch: TextRunStyle
-    source?: 'canvas' | 'properties'
-  }): SpatialCommandResult
-  patch(patch: Partial<{
-    spatialContentEdit: null
-    spatialGraphSelection: SpatialGraphSelection | null
-    spatialPlaybackPathId: string | null
-  }>): void
-  activateCameraFrame(frameId: string): boolean
-  setSpatialGraphSelection(selection: SpatialGraphSelection | null): void
-  setScope(scope: 'global' | 'world'): void
-  updateGlobalLayerSettings(nodeId: string, patch: GlobalLayerSettingsPatch): void
-  reorderNodes(nodeIds: string[]): void
-  moveGlobalLayerOwner(fromId: string, toId: string): void
-  setCandidateGlobalLayerLocationVisibility(nodeId: string, visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] }): void
-  setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean): void
-  deriveFocus(shellEditingTextNodeId?: boolean): EditorFocusKind
-  executeAction(actionId: EditorActionId, live: EditorSelectionSnapshot, shellEditingTextNodeId?: boolean): { ok: boolean; reason: string }
-  executeGlobalAction(actionId: EditorActionId, live: EditorSelectionSnapshot): { ok: boolean; reason: string }
-} & SurfaceNodeCommands
-
-export type CrossSurfaceCommandPorts = {
-  detect(): ActiveSurfaceKind | null
+export interface CrossSurfaceCommandPorts {
   kernel: EditorStoreKernel
-  slide: CrossSurfaceSlidePorts
-  flow: CrossSurfaceFlowPorts
-  spatial: CrossSurfaceSpatialPorts
+  slide: CrossSurfaceContentPorts
+  flow: CrossSurfaceContentPorts
+  spatial: CrossSurfaceContentPorts
+  shell: { read(): { canvasMode: 'edit' | 'run'; editingTextNodeId: string | null; editingScope?: 'scene' | 'global' }; patch(patch: Record<string, unknown>): void | Promise<void> }
   structure: ReturnType<typeof createCourseStructureSlice>
-  shell: {
-    read(): EditorShellOwnedState
-    patch(patch: Partial<EditorShellOwnedState> & Record<string, unknown>): void
+  lifecycle: ReturnType<typeof createCourseLifecycleSlice>
+  /** Existing desktop editorClipboard bridge; commands and shortcuts share native events. */
+  requestClipboard?(command: 'copy' | 'cut' | 'paste'): Promise<void> | void
+}
+function sameContainer(left: ComponentContainer | null, right: ComponentContainer | null): boolean {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+export function componentParentMatrix(project: CourseProjectV10, id: string): AffineMatrix {
+  const owner = owningContainer(project, id)
+  if (owner?.kind !== 'instance') return IDENTITY_MATRIX
+  const parent = project.instances[owner.instanceId]
+  return composeMatrices(componentParentMatrix(project, parent.id), parent.frame?.transform ?? IDENTITY_MATRIX)
+}
+export function componentIsLocked(project: CourseProjectV10, id: string): boolean {
+  if (project.instances[id]?.locked) return true
+  const owner = owningContainer(project,id)
+  return owner?.kind === 'instance' ? componentIsLocked(project,owner.instanceId) : false
+}
+function selectedRoots(project: CourseProjectV10, ids: readonly string[]): string[] {
+  const selected = new Set(ids)
+  return [...new Set(ids)].filter(id => {
+    if (!project.instances[id]) return false
+    let owner = owningContainer(project, id)
+    while (owner?.kind === 'instance') {
+      if (selected.has(owner.instanceId)) return false
+      owner = owningContainer(project, owner.instanceId)
+    }
+    return true
+  })
+}
+function descendants(project: CourseProjectV10, roots: readonly string[], includeAttachments = true): string[] {
+  const found = new Set<string>()
+  const visit = (id: string) => {
+    if (found.has(id) || !project.instances[id]) return
+    found.add(id)
+    for (const child of project.instances[id].childIds ?? []) visit(child)
+    if (includeAttachments) for (const attachment of project.instances[id].attachments ?? []) visit(attachment.instanceId)
   }
-  lifecycle: {
-    read(): CourseLifecycleOwnedState
-    patch(patch: Partial<CourseLifecycleOwnedState> & Record<string, unknown>): void
-    prepareCourseProjectPersistence(): PrepareCourseProjectPersistenceResult
-    captureCourseProjectRecoverySnapshot(): CaptureCourseProjectRecoveryResult
-    acknowledgeCourseProjectSaved(path: string, token: CourseProjectPersistenceToken): boolean
-    reopenArchive(bytes: Uint8Array): Promise<boolean>
-    exportArchive(): Uint8Array | null
+  roots.forEach(visit)
+  return [...found]
+}
+export interface CourseObjectClipboardSource {
+  /** Software document identity; absent clipboard contexts receive imported resource identities. */
+  documentId?: string
+  project: CourseProjectV10
+  roots: readonly string[]
+  resources: DocumentResources
+  matrices?: Record<string, AffineMatrix>
+}
+interface ObjectClipboard extends CourseObjectClipboardSource {
+  matrices: Record<string, AffineMatrix>
+  moveAvailable?: boolean
+  removal?: Promise<void>
+}
+export interface CourseObjectPasteDestination {
+  capturedTarget: CapturedCourseTarget
+  container: ComponentContainer
+  index: number
+  /** Existing same-editor cut token owns this decision; a move restores the formal IDs. */
+  identity?: 'copy' | 'move'
+  /** Canvas duplicate/paste explicitly requests its offset; document paste keeps layout. */
+  offset?: { x: number; y: number }
+  keepOwner?: boolean
+}
+export interface CourseObjectPastePlan {
+  edits: ComponentEdit[]
+  idMap: ReadonlyMap<string, string>
+  assetIds: ReadonlyMap<string, string>
+  rootIds: string[]
+}
+/** Derives one canonical clone batch; callers combine it with their own document edits. */
+export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, destination: CourseObjectPasteDestination): CourseObjectPastePlan {
+  if (!source.roots.length) throw new Error('请先复制对象')
+  const target = destination.capturedTarget, project = target.editingProject
+  const moving = destination.identity === 'move'
+  const sameDocument = Boolean(source.documentId && source.documentId === target.documentId)
+  const copiedIds = descendants(source.project, source.roots), idMap = new Map(copiedIds.map(id => [id, moving ? id : crypto.randomUUID()]))
+  // The library's existing extractor owns source-module/resource closure, including
+  // private implementation workspaces. Clipboard does not infer bindings from code.
+  const entry = extractComponentLibraryEntry(source.project, source.resources, {
+    id: `clipboard_${crypto.randomUUID()}`, title: '复制对象', rootIds: [...source.roots],
+  }).entry
+  const components: DocumentResources['components'] = entry.resources.components
+  const componentIds = new Map(Object.keys(components).map(ownerId => [ownerId, moving && sameDocument ? ownerId : `component_${crypto.randomUUID()}`]))
+  const mapId = (id: string) => idMap.get(id) ?? id
+  const rules = new Map<string, string>(), actions = new Map<string, string>(), stateKeys = new Map<string, string>()
+  const professionalKey = (id: string) => {
+    const instance = source.project.instances[id], definition = source.project.definitions[instance.definitionId]
+    return definition?.implementation.kind === 'builtin' ? definition.implementation.key : instance.definitionId
   }
-  readResources(): CourseResourceState
-  readActiveLocationId(): string | null
-  hasDirtyContentDraft(): boolean
-  readProjection(): EffectiveLayerProjection | null
-  persistLayer: {
-    slide(result: LayerCommandResult, extra?: { statusMessage?: string | null }): unknown
-    spatial(result: LayerCommandResult, extra?: { statusMessage?: string | null; selectionIds?: readonly string[] }): unknown
-    flow(result: LayerCommandResult, extra?: { statusMessage?: string | null }): unknown
+  for (const id of copiedIds) if (professionalKey(id) === 'guoling.interactions') {
+    const copy = createComponentInteractionCopyIdentities(source.project.instances[id].data)
+    copy.rules.forEach((value, key) => rules.set(key, moving ? key : value)); copy.actions.forEach((value, key) => actions.set(key, moving ? key : value))
   }
+  // Managed input families live on the surface behavior, outside the input subtree.
+  // Copy only the explicitly registered family, retaining all unrelated author rules.
+  const familyIds = new Set(copiedIds.flatMap(id => professionalKey(id) === 'guoling.input'
+    ? inputDataSchema.parse(source.project.instances[id].data).answer?.ruleFamilyRuleIds ?? [] : []))
+  const family: InteractionRule[] = moving && sameDocument ? [] : Object.values(source.project.instances).flatMap(instance => professionalKey(instance.id) === 'guoling.interactions'
+    ? interactionRules(instance).filter(rule => familyIds.has(rule.id) && !rules.has(rule.id)) : [])
+  const familyData = JSON.parse(JSON.stringify({ rules: family })) as JsonValue
+  if (family.length) {
+    const copy = createComponentInteractionCopyIdentities(familyData)
+    copy.rules.forEach((value, key) => rules.set(key, moving ? key : value)); copy.actions.forEach((value, key) => actions.set(key, moving ? key : value))
+  }
+  const inputData = new Map<string, JsonValue>()
+  for (const id of copiedIds) if (professionalKey(id) === 'guoling.input') inputData.set(id, remapComponentInputData(source.project.instances[id].data,
+    { fromInstanceId: id, toInstanceId: mapId(id), rules, stateKeys }))
+  // As in page copy, references outside the copied graph remain explicit external targets.
+  // Only declared identities are rebound; prose and arbitrary component strings stay authored.
+  const rewrite = (value: JsonValue) => rebindDeclaredTargets(value, mapId, id => id)
+  const instances = copiedIds.map(id => {
+    const item = structuredClone(source.project.instances[id])
+    return { ...item, id: mapId(id), data: professionalKey(id) === 'guoling.interactions'
+      ? remapComponentInteractionData(item.data, { instances: idMap, surfaces: new Map<string, string>(), rules, actions, stateKeys })
+      : inputData.get(id) ?? rewrite(item.data),
+      ...(item.flowPlacement?.paragraphAnchor ? { flowPlacement: { ...item.flowPlacement, paragraphAnchor: {
+        ...item.flowPlacement.paragraphAnchor, blockId: mapId(item.flowPlacement.paragraphAnchor.blockId),
+      } } } : {}),
+      ...(item.style ? { style: rewrite(item.style) as typeof item.style } : {}),
+      ...(item.childIds ? { childIds: item.childIds.map(mapId) } : {}),
+      ...(item.attachments ? { attachments: item.attachments.map(attachment => ({ ...attachment,
+        instanceId: mapId(attachment.instanceId), target: attachment.target.kind === 'instance' ? { kind: 'instance' as const, instanceId: mapId(attachment.target.instanceId) } : attachment.target })) } : {}) }
+  })
+  const edits: ComponentEdit[] = []
+  if (stateKeys.size) {
+    const logic = structuredClone(project.logic ?? { courseState: [], navigationGuards: [] })
+    for (const [from, to] of stateKeys) {
+      const declaration = source.project.logic?.courseState.find(value => value.key === from)
+      if (declaration && !logic.courseState.some(value => value.key === to)) logic.courseState.push({ ...declaration, key: to })
+    }
+    if (logic.courseState.length !== (project.logic?.courseState.length ?? 0)) edits.push({ type: 'project.logic.set', logic })
+  }
+  const defMap = new Map<string, string>()
+  const definitions = Object.values(entry.definitions), assets = entry.assets
+  const assetIds = new Map(Object.keys(assets).map(id => [id, sameDocument ? id : `asset_${crypto.randomUUID()}`]))
+  for (const original of definitions) {
+    const implementation = original.implementation
+    // Match the library insertion's ownership rule: rebinding a shared source
+    // definition must not change the destination's existing instances.
+    const ownsReboundReferences = implementation.kind === 'source' && (implementation.workspace
+      || Object.keys(sourceModuleBindings(implementation)).length > 0 || Object.keys(assets).length > 0)
+    const collision = !(moving && sameDocument) && project.definitions[original.id] && (ownsReboundReferences || JSON.stringify(project.definitions[original.id]) !== JSON.stringify(original))
+    defMap.set(original.id, collision ? crypto.randomUUID() : original.id)
+  }
+  const identities = { instances: idMap, definitions: defMap, assets: assetIds, components: componentIds, surfaces: new Map<string, string>() }
+  const implementation = (value: ComponentDefinition['implementation']) => value.kind === 'source'
+    ? rebindComponentLibraryImplementation(value, identities, Object.keys(assets)) : structuredClone(value)
+  for (const [ownerId, files] of Object.entries(components)) {
+    if (moving && sameDocument && target.resources.components[ownerId]) continue
+    edits.push({ type: 'component.files.set', ownerId: componentIds.get(ownerId)!, expectedFiles: null,
+      files: Object.fromEntries(Object.entries(files).map(([path, bytes]) => [path, Uint8Array.from(bytes)])) })
+  }
+  for (const original of definitions) {
+    const definition: ComponentDefinition = { ...structuredClone(original), id: defMap.get(original.id)!, implementation: implementation(original.implementation) }
+    if (!project.definitions[definition.id]) edits.push({ type: 'definition.set', definition })
+  }
+  instances.forEach((item, index) => {
+    item.data = rebindProfessionalAssets(item.data, identities)
+    const rebound = rebindWebAssets(item, source.project.definitions[item.definitionId], identities)
+    item.data = rebound.data
+    item.definitionId = defMap.get(item.definitionId) ?? item.definitionId
+    if (item.implementationOverride) item.implementationOverride = implementation(entry.example.instances[copiedIds[index]]!.implementationOverride!)
+  })
+  // Cross-document resources receive the library's software-owned identities. An
+  // equal asset ID/metadata in another document does not identify the copied bytes.
+  for (const asset of Object.values(assets)) {
+    const id = assetIds.get(asset.id)!
+    if (!project.assets[id]) {
+      const bytes = entry.resources.assets[asset.id]
+      if (!bytes) throw new Error('复制对象缺少素材字节')
+      const extension = /\.[a-zA-Z0-9]+$/.exec(asset.path)?.[0] ?? ''
+      edits.push({ type: 'asset.add', asset: { ...structuredClone(asset), id,
+        path: sameDocument ? asset.path : `assets/${encodeURIComponent(id)}${extension}` }, bytes: Uint8Array.from(bytes) })
+    }
+  }
+  const selected = source.roots.map(mapId)
+  const groups = new Map<string, { owner: ComponentContainer; roots: string[] }>()
+  // Attached behaviors may be independently owned; each cloned instance is inserted exactly once.
+  const graphRoots = copiedIds.filter(id => { const owner = owningContainer(source.project,id); return owner?.kind !== 'instance' || !idMap.has(owner.instanceId) })
+  for (const oldRoot of graphRoots) {
+    const owner = destination.keepOwner ? owningContainer(project, oldRoot) ?? destination.container : destination.container
+    const rootId = mapId(oldRoot), root = instances.find(item => item.id === rootId)!
+    if (root.frame) {
+      const parent = owner.kind === 'instance' ? composeMatrices(componentParentMatrix(project, owner.instanceId), project.instances[owner.instanceId].frame?.transform ?? IDENTITY_MATRIX) : IDENTITY_MATRIX
+      root.frame = translateFrame(reparentFrame(root.frame, source.matrices?.[oldRoot] ?? componentParentMatrix(source.project,oldRoot), parent), (destination.offset ?? { x: 0, y: 0 })) as ComponentFrame
+    }
+    const key = JSON.stringify(owner), group = groups.get(key) ?? { owner, roots: [] }
+    group.roots.push(rootId); groups.set(key,group)
+  }
+  let first = true
+  for (const group of groups.values()) {
+    edits.push({ type: 'instance.insert', container: group.owner, index: sameContainer(group.owner, destination.container) ? destination.index : containerChildIds(project, group.owner).length, instances: first ? instances : [], rootIds: group.roots })
+    first = false
+  }
+  if (family.length) {
+    let owner = destination.container
+    while (owner.kind === 'instance') {
+      const parent = owningContainer(project, owner.instanceId)
+      if (!parent) throw new Error('粘贴目标归属已不存在')
+      owner = parent
+    }
+    const ruleTarget = owner.kind === 'global' ? { kind: 'project' as const } : { kind: 'surface' as const, surfaceId: owner.surfaceId }
+    const remapped = interactionRules({ id: 'clipboard-family', definitionId: 'guoling.interactions',
+      data: remapComponentInteractionData(familyData, { instances: idMap, surfaces: new Map<string, string>(), rules, actions, stateKeys }) })
+    edits.push(...componentRuleEdits(project, ruleTarget, [...interactionRules(interactionBehavior(project, ruleTarget)), ...remapped]))
+  }
+  return { edits, idMap, assetIds, rootIds: selected }
 }
 
-function openFlowAuthoringSessionAtLocation(
-  project: CourseProjectDocument,
-  locationId: string,
-): FlowAuthoringSession {
-  const parsed = courseProjectDocumentSchema.parse(structuredClone(project))
-  const location = parsed.locations.find(
-    (candidate) => candidate.id === locationId && candidate.kind === 'flow-block',
-  )
-  if (!location || location.kind !== 'flow-block') {
-    throw new Error(`找不到 Flow 位置：${locationId}`)
-  }
-  return {
-    history: createFlowEditorHistory(parsed),
-    selection: selectFlowEditorBlock(parsed, location.id, location.blockId),
-  }
-}
-
-function sameEditorSelectionSnapshot(
-  left: EditorSelectionSnapshot,
-  right: EditorSelectionSnapshot | null,
-): boolean {
-  const leftRange = left.textRange ?? null
-  const rightRange = right?.textRange ?? null
-  const sameTextRange = leftRange === null
-    ? rightRange === null
-    : rightRange !== null
-      && leftRange.blockId === rightRange.blockId
-      && leftRange.start === rightRange.start
-      && leftRange.end === rightRange.end
-      && leftRange.listItemId === rightRange.listItemId
-      && leftRange.tableRowId === rightRange.tableRowId
-      && leftRange.tableColumnId === rightRange.tableColumnId
-  return right !== null
-    && left.locationId === right.locationId
-    && left.revision === right.revision
-    && left.sessionGeneration === right.sessionGeneration
-    && left.surfaceKind === right.surfaceKind
-    && (left.stateId ?? null) === (right.stateId ?? null)
-    && left.scope === right.scope
-    && left.focus === right.focus
-    && sameTextRange
-    && left.itemIds.length === right.itemIds.length
-    && left.itemIds.every((itemId, index) => itemId === right.itemIds[index])
-}
-
+export const COURSE_OBJECT_CLIPBOARD_MIME = 'application/x-guoling-course-objects'
+/** Clipboard is transient user input; selection/history remain solely in Bridge/Session. */
 export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
-  /** The Slide scene and state edited before a try-run; leaving the try-run returns there. */
-  let runEntry: { sceneId: string; stateId: string | null } | null = null
-  /** 内核根选区镜像已删除：编辑范围一律从各 Surface 自有 session 派生。 */
-  const readSessionEditingScope = (): 'scene' | 'global' => {
-    const spatialSession = ports.spatial.read().spatialSession
-    if (spatialSession) return spatialSession.scope === 'global' ? 'global' : 'scene'
-    const flowSession = ports.flow.read().flowSession
-    if (flowSession) return flowSession.selection.authoringScope === 'global' ? 'global' : 'scene'
-    const slideSnapshot = ports.slide.read().slideCandidateSnapshot
-    if (slideSnapshot) return slideSnapshot.scope === 'global' ? 'global' : 'scene'
-    return 'scene'
+  const { kernel } = ports
+  let clipboard: ObjectClipboard | null = null
+  let clipboardToken: string | null = null
+  const report = (error: unknown) => kernel.setFeedback({ errorMessage: error instanceof Error ? error.message : String(error), statusMessage: null })
+  const current = () => kernel.readEditingDocument()
+  const surface = () => current().surfaces.find(value => value.id === kernel.readView().surfaceId)
+  const content = () => surface()?.kind === 'flow' ? ports.flow : surface()?.kind === 'spatial' ? ports.spatial : ports.slide
+  const scope = () => surface()?.kind==='spatial' && ports.spatial.readSpatialView ? ports.spatial.readSpatialView().scope==='global'?'global':'scene' : ports.shell.read().editingScope??'scene'
+  const delegate = <K extends keyof CrossSurfaceContentPorts>(name: K, ...args: Parameters<NonNullable<CrossSurfaceContentPorts[K]>>) => {
+    const fn = content()[name]
+    if (!fn) { report(new Error('当前表面尚未接入此操作')); return }
+    try {
+      const result = (fn as (...values: unknown[]) => unknown)(...args)
+      void Promise.resolve(result).catch(report)
+      return result
+    } catch (error) { report(error) }
+  }
+  const write = async (edits: ComponentEdit[], target = kernel.captureTarget(), selectedIds?: readonly string[]) => {
+    if (!edits.length) return
+    await kernel.editCaptured(kernel.capture(edits, target))
+    if (selectedIds) kernel.selectInstances(selectedIds, target.surfaceId, target.documentId)
+  }
+  const flush = () => content().commitTextEdit?.()
+  const run = (operation: () => Promise<void> | void) => { try { void Promise.resolve(operation()).catch(report) } catch (error) { report(error) } }
+  const navigateHistory = async (direction: 'undo' | 'redo'): Promise<boolean> => {
+    // Local draft submission can await Main. Retain its document even if the
+    // user browses another document while that ACK is pending.
+    const documentId = kernel.readView().activeDocumentId
+    if (!documentId) { report(new Error('当前会话没有课程工程')); return false }
+    try {
+      await flush()
+      await kernel.bridge[direction](documentId)
+      return true
+    } catch (error) { report(error); return false }
+  }
+  const requestClipboard = (command: 'copy' | 'cut' | 'paste') => run(async () => {
+    await flush()
+    if (ports.requestClipboard) await ports.requestClipboard(command)
+    else if (!document.execCommand(command)) throw new Error('当前环境无法执行系统剪贴板命令，请使用画布快捷键')
+  })
+  const remove = async (ids: readonly string[]) => {
+    const target = kernel.captureTarget(), roots = selectedRoots(target.project, ids)
+    if (roots.some(id => componentIsLocked(target.project,id))) throw new Error('锁定元素不能删除，请先解锁')
+    await write(roots.map(instanceId => ({ type: 'instance.remove', instanceId })), target, target.instanceIds.filter(id => !descendants(target.project, roots, false).includes(id)))
+  }
+  const captureClipboard = (ids: readonly string[]): ObjectClipboard => {
+    const project = structuredClone(current()), roots = selectedRoots(project, ids)
+    return { documentId: kernel.readView().activeDocumentId ?? undefined, project, roots, resources: structuredClone(kernel.readResources()), matrices: Object.fromEntries(roots.map(id => [id, componentParentMatrix(project, id)])) }
+  }
+  const paste = async (source: ObjectClipboard, keepOwner: boolean) => {
+    if (!source.roots.length) throw new Error('请先复制对象')
+    const target = kernel.captureTarget(), project = target.editingProject
+    const sourceOwner=owningContainer(source.project,source.roots[0])
+    const selectedOwner=target.instanceId?owningContainer(project,target.instanceId):null
+    const destination: ComponentContainer = scope()==='global' ? {kind:'global',plane:selectedOwner?.kind==='global'?selectedOwner.plane:sourceOwner?.kind==='global'?sourceOwner.plane:'overlay'} : { kind: 'surface', surfaceId: target.surfaceId ?? project.surfaces[0]?.id ?? '' }
+    const moving = Boolean(source.moveAvailable)
+    if (moving) source.moveAvailable = false
+    try {
+      // Freeze the destination before the cut ACK; a later tab switch cannot
+      // retarget paste. Only the first successful paste restores cut IDs.
+      await source.removal
+      const { edits, rootIds: selected } = prepareCourseObjectPaste(source, { capturedTarget: target, container: destination,
+        index: containerChildIds(project, destination).length, offset: { x: 20, y: 20 }, keepOwner, identity: moving ? 'move' : 'copy' })
+      await write(edits, target, selected)
+    } catch (error) { if (moving) source.moveAvailable = true; throw error }
+  }
+  const layout = async (kind: 'left'|'center'|'right'|'top'|'middle'|'bottom'|'horizontal'|'vertical') => {
+    const target = kernel.captureTarget(), project = target.editingProject
+    const ids = selectedRoots(project,target.instanceIds).filter(id=>!componentIsLocked(project,id)&&project.instances[id].frame)
+    const distribution = kind==='horizontal'||kind==='vertical'
+    if(ids.length<(distribution?3:2)) throw new Error(distribution?'至少需要 3 个未锁定对象':'至少需要 2 个未锁定对象')
+    const rootOwner=(id:string):ComponentContainer|null=>{let owner=owningContainer(project,id);while(owner?.kind==='instance')owner=owningContainer(project,owner.instanceId);return owner}
+    const firstOwner=rootOwner(ids[0])
+    if(ids.some(id=>!sameContainer(rootOwner(id),firstOwner))) throw new Error('不同归属的对象需要分别对齐')
+    const boxes=ids.map(id=>{const points=frameCorners(project.instances[id].frame!,componentParentMatrix(project,id));const xs=points.map(p=>p.x),ys=points.map(p=>p.y);return {id,left:Math.min(...xs),right:Math.max(...xs),top:Math.min(...ys),bottom:Math.max(...ys)}})
+    const left=Math.min(...boxes.map(box=>box.left)),right=Math.max(...boxes.map(box=>box.right)),top=Math.min(...boxes.map(box=>box.top)),bottom=Math.max(...boxes.map(box=>box.bottom))
+    const deltas = new Map<string,{x:number;y:number}>()
+    if(distribution) {
+      const horizontal=kind==='horizontal',ordered=boxes.slice().sort((a,b)=>horizontal?a.left-b.left:a.top-b.top)
+      const start=horizontal?ordered[0].left:ordered[0].top,end=horizontal?ordered[ordered.length-1].right:ordered[ordered.length-1].bottom
+      const sizes=ordered.map(box=>horizontal?box.right-box.left:box.bottom-box.top),gap=(end-start-sizes.reduce((a,b)=>a+b,0))/(ordered.length-1)
+      let cursor=start
+      ordered.forEach((box,index)=>{deltas.set(box.id,{x:horizontal?cursor-box.left:0,y:horizontal?0:cursor-box.top});cursor+=sizes[index]+gap})
+    } else boxes.forEach(box=>deltas.set(box.id,{x:kind==='left'?left-box.left:kind==='right'?right-box.right:kind==='center'?(left+right-box.left-box.right)/2:0,y:kind==='top'?top-box.top:kind==='bottom'?bottom-box.bottom:kind==='middle'?(top+bottom-box.top-box.bottom)/2:0}))
+    await write(boxes.flatMap(box=>{const delta=deltas.get(box.id)!;return delta.x===0&&delta.y===0?[]:[{type:'frame.set' as const,instanceId:box.id,frame:translateFrame(project.instances[box.id].frame!,transformVector(invertMatrix(componentParentMatrix(project,box.id)),delta)) as ComponentFrame}]}),target)
   }
   const commands = {
-    setCanvasMode(canvasMode: 'edit' | 'run') {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => {
-          if (
-            canvasMode === 'run'
-            && ports.spatial.read().spatialContentEdit
-            && !ports.spatial.commitDraft()
-          ) return
-          ports.spatial.patch({
-            spatialGraphSelection: canvasMode === 'run' ? null : ports.spatial.read().spatialGraphSelection,
-          })
-          ports.shell.patch({
-            canvasMode,
-            editingTextNodeId: null,
-            statusMessage: canvasMode === 'run'
-              ? '正在试运行；切回编辑可直接修改元素'
-              : '已返回无限画布编辑',
-          })
-          if (canvasMode === 'run') {
-            ports.spatial.selectNode(null)
-          }
-        },
-        flow: () => {
-          if (
-            canvasMode === 'run'
-            && ports.flow.read().flowTextEdit
-            && !ports.flow.commitDraft()
-          ) return
-          ports.shell.patch({
-            canvasMode,
-            statusMessage: canvasMode === 'run'
-              ? '正在运行当前流式讲义；切回编辑可继续改稿纸'
-              : '已返回流式讲义编辑',
-          })
-        },
-        slide: () => {
-          if (
-            ports.slide.read().v9ContentEdit
-            && !ports.slide.commitDraft()
-          ) return
-          const backend = ports.slide.read().slideBackend as SlideAuthoringBackend | null
-          if (backend && typeof backend.getSession === 'function') {
-            const session = backend.getSession()
-            const currentStateId = session.selection.stateId
-            const sceneId = backend.getSnapshot().sceneId
-            const scene = findCourseSlideScene(session.history.present, sceneId)
-            let nextStateId = currentStateId
-            if (canvasMode === 'run') {
-              // A try-run from 母版 starts at the scene's initial state, as playback does.
-              if (ports.shell.read().canvasMode !== 'run') runEntry = { sceneId, stateId: currentStateId }
-              if (currentStateId === null) nextStateId = scene?.presentation?.initialStateId ?? currentStateId
-            } else if (runEntry) {
-              const entry = runEntry
-              runEntry = null
-              const known = entry.stateId === null || Boolean(scene?.presentation?.states.some(state => state.id === entry.stateId))
-              if (entry.sceneId === sceneId && known) nextStateId = entry.stateId
-            }
-            if (nextStateId !== session.selection.stateId) {
-              ports.slide.activateState(nextStateId)
-            }
-          }
-          const slideSnapshot = ports.slide.read().slideCandidateSnapshot
-          ports.shell.patch({
-            canvasMode,
-            editingTextNodeId: null,
-            statusMessage: canvasMode === 'run'
-              ? '正在试运行；切回编辑可直接修改元素'
-              : '已返回状态编辑画布',
-          })
-          if (canvasMode === 'run' && slideSnapshot) {
-            ports.slide.selectNode(null)
-          }
-        },
-        sessionless: () => ports.kernel.failSessionless(),
-      })
+    setCanvasMode(canvasMode: 'edit' | 'run') { run(async () => { await flush(); ports.shell.patch({ canvasMode, editingTextNodeId: null }) }) },
+    setEditingScope(editingScope: 'scene' | 'global') { if(surface()?.kind==='spatial' && ports.spatial.setSpatialEditingScope) ports.spatial.setSpatialEditingScope(editingScope==='global'?'global':'world'); else ports.shell.patch({ editingScope }); kernel.selectInstances([]) },
+    activateCourseLocation(id: string) { run(async () => { await flush(); kernel.selectSurface(id); kernel.selectInstances([], id) }) },
+    setActiveScene(id: string) { commands.activateCourseLocation(id) },
+    async addCourseContent(...args: Parameters<typeof ports.structure.addCourseContent>) { const result = await ports.structure.addCourseContent(...args); if (result.ok && result.activatedLocationId) kernel.selectSurface(result.activatedLocationId); return result },
+    async addScene() { const result = await ports.structure.addScene(); if (result.ok && result.activatedLocationId) kernel.selectSurface(result.activatedLocationId); return result },
+    reorderCourseSurfaces(ids: string[]) { return ports.structure.reorderCourseSurfaces(ids) },
+    deleteCourseSurface(...args: Parameters<typeof ports.structure.deleteCourseSurface>) { return ports.structure.deleteCourseSurface(...args) },
+
+    deleteScene(id: string) { return ports.structure.deleteCourseSurface(id) },
+    undo() { return navigateHistory('undo') },
+    redo() { return navigateHistory('redo') },
+    setEditingTextNode(id: string | null) { ports.shell.patch({ editingTextNodeId: id }) },
+    beginTextEdit(id: string, source: 'canvas' | 'properties' = 'canvas') { delegate('beginTextEdit', id, source) },
+    updateTextEditDraft(id: string, text: string, runs: TextRun[], height?: number, width?: number) { delegate('updateTextEditDraft', id, text, runs, height, width) },
+    async commitTextEdit() { await flush() }, cancelTextEdit() { return delegate('cancelTextEdit') },
+    renameProject(title: string) { run(() => kernel.edit([{ type: 'project.title.set', title }]).then(() => {})) },
+    addTextNode(x?: number, y?: number) { return delegate('addTextNode', x, y) },
+    addFormulaNode(x?: number, y?: number) { return delegate('addFormulaNode', x, y) },
+    addRectangleNode(x?: number, y?: number) { return delegate('addRectangleNode', x, y) },
+    addShapeNode(shape: string, x?: number, y?: number) { return delegate('addShapeNode', shape, x, y) },
+    addTableNode(x?: number, y?: number) { return delegate('addTableNode', x, y) },
+    addChartNode(chart: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number) { return delegate('addChartNode', chart, x, y) },
+    ensureTeacherController() { return delegate('ensureTeacherController') },
+    selectNode(id: string | null, additive = false) {
+      const ids = kernel.readView().selectedInstanceIds
+      kernel.selectInstances(id === null ? [] : additive ? ids.includes(id) ? ids.filter(value => value !== id) : [...ids, id] : [id])
+      if (id) ports.shell.patch({ activeTab: 'properties' })
     },
-
-    setEditingScope(editingScope: 'scene' | 'global') {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.setScope(editingScope === 'global' ? 'global' : 'world'),
-        flow: () => ports.flow.setScope(editingScope === 'global' ? 'global' : 'scene'),
-        slide: () => ports.slide.setScope(editingScope === 'global' ? 'global' : 'scene'),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-
-    setSpatialGraphSelection(selection: SpatialGraphSelection | null) {
-      ports.spatial.setSpatialGraphSelection(selection)
-    },
-
-    activateCourseLocation(locationId: string) {
-      if (
-        ports.flow.read().flowTextEdit
-        && !ports.flow.commitDraft()
-      ) return
-      if (
-        ports.spatial.read().spatialContentEdit
-        && !ports.spatial.commitDraft()
-      ) return
-      if (
-        ports.slide.read().v9ContentEdit
-        && !ports.slide.commitDraft()
-      ) return
-      const project = ports.kernel.tryReadDocument()
-      if (!project) return
-      const slide = ports.slide.read()
-      const flow = ports.flow.read()
-      const spatial = ports.spatial.read()
-      const shell = ports.shell.read()
-      const requestedLocation = project.locations.find((candidate) => candidate.id === locationId)
-      if (
-        requestedLocation?.kind === 'spatial-camera'
-        && spatial.spatialSession?.selection.surfaceId === requestedLocation.surfaceId
-        && spatial.spatialSession.scope !== 'global'
-        && !shell.editingTextNodeId
-      ) {
-        ports.spatial.activateCameraFrame(requestedLocation.cameraFrameId)
-        return
-      }
-      const plan = planActivateCourseLocation({
-        project,
-        locationId,
-        snapshot: {
-          spatialLocationId: spatial.spatialSession?.selection.locationId ?? null,
-          flowLocationId: flow.flowSession?.selection.locationId ?? null,
-          slideLocationId: slide.slideCandidateSnapshot?.locationId ?? null,
-          editingScope: readSessionEditingScope(),
-          composing: Boolean(
-            flow.flowTextEdit?.composing ||
-            slide.v9ContentEdit ||
-            spatial.spatialContentEdit ||
-            shell.editingTextNodeId,
-          ),
-        },
-        authoringSession: ports.kernel.readAuthoringSession(),
-        buildSession: (id) => buildCourseAuthoringSessionForProject(project, id),
-      })
-      if (!plan.ok) {
-        ports.kernel.setFeedback({ errorMessage: plan.reason, statusMessage: null })
-        return
-      }
-      const nextAuthoringSession = plan.authoringSession
-      const canonicalHistory = spatial.spatialSession?.history
-        ?? flow.flowSession?.history
-        ?? (slide.slideBackend && typeof (slide.slideBackend as SlideAuthoringBackend).getSession === 'function'
-          ? (slide.slideBackend as SlideAuthoringBackend).getSession().history
-          : null)
-      if (!canonicalHistory) return
-      const resources = ports.readResources()
-      const lifecycle = ports.lifecycle.read()
-      const preserve = {
-        sidecar: resources.courseAssetSidecar ?? emptyCourseAssetSidecar(),
-        path: lifecycle.projectPath,
-        dirty: lifecycle.dirty,
-        componentPackages: resources.componentPackages,
-        statusMessage: null as string | null,
-        resourceHistory: {
-          sidecarPast: resources.courseAssetSidecarPast,
-          sidecarFuture: resources.courseAssetSidecarFuture,
-          componentPackagesPast: resources.courseComponentPackagesPast,
-          componentPackagesFuture: resources.courseComponentPackagesFuture,
-        },
-        ...(shell.canvasMode === 'run' ? { canvasMode: 'run' as const } : {}),
-      }
-
-      if (plan.kind === 'noop-same-location') {
-        ports.kernel.writeAuthoringSession(updateCourseAuthoringSessionItems(nextAuthoringSession, []))
-        if (plan.surface === 'spatial') ports.spatial.selectNode(null)
-        else if (plan.surface === 'flow') ports.flow.selectNode(null)
-        else ports.slide.selectNode(null)
-        if (plan.surface === 'spatial') {
-          ports.spatial.patch({ spatialContentEdit: null })
-          ports.shell.patch({ editingTextNodeId: null })
+    selectNodes(ids: string[]) { kernel.selectInstances(ids); if (ids.length) ports.shell.patch({ activeTab: 'properties' }) },
+    selectAllNodes() { commands.selectNodes(scope()==='global'?[...current().global.underlay,...current().global.overlay]:surface()?.childIds??[]) },
+    updateNodes(patches: Array<{ nodeId: string; patch: EditorCanvasNodePatch }>) { run(async () => {
+      const target = kernel.captureTarget(), edits: ComponentEdit[] = []
+      for (const { nodeId, patch } of patches) {
+        const item = target.editingProject.instances[nodeId]
+        if (!item) throw new Error('对象已不存在')
+        const statePatch = { ...(patch.name !== undefined ? { name: patch.name } : {}), ...(patch.visible !== undefined ? { visible: patch.visible } : {}), ...(patch.locked !== undefined ? { locked: patch.locked } : {}) }
+        if (Object.keys(statePatch).length) edits.push({ type: 'instance.patch', instanceId: nodeId, patch: statePatch })
+        const geometry = patch.frame !== undefined || ['x','y','width','height','rotation'].some(key => patch[key] !== undefined)
+        if (geometry && componentIsLocked(target.editingProject,nodeId)) continue
+        if (geometry && (item.frame || patch.frame)) {
+          let frame = structuredClone(((patch.frame as ComponentFrame | undefined) ?? item.frame)!)
+          if (patch.x !== undefined || patch.y !== undefined) frame = translateFrame(frame, { x: (patch.x ?? frame.transform[4]) - frame.transform[4], y: (patch.y ?? frame.transform[5]) - frame.transform[5] }) as ComponentFrame
+          if (patch.width !== undefined) frame.width = patch.width
+          if (patch.height !== undefined) frame.height = patch.height
+          if (patch.rotation !== undefined) frame = rotateFrame(frame, (patch.rotation - Math.atan2(frame.transform[1], frame.transform[0]) * 180 / Math.PI) * Math.PI / 180, { x: 0, y: 0 }) as ComponentFrame
+          edits.push({ type: 'frame.set', instanceId: nodeId, frame })
         }
-        return
+        if (componentIsLocked(target.editingProject,nodeId)) continue
+        if (patch.data !== undefined) edits.push({ type: 'data.set', instanceId: nodeId, path: [], value: structuredClone(patch.data) as JsonValue })
+        if (patch.opacity !== undefined) edits.push({ type: 'style.set', instanceId: nodeId, path: ['opacity'], value: patch.opacity })
+        if (patch.style && typeof patch.style === 'object') for (const [key,value] of Object.entries(patch.style)) edits.push({ type: 'style.set', instanceId: nodeId, path: [key], value: value as JsonValue })
       }
-      if (plan.kind === 'open-flow') {
-        const fresh = openFlowAuthoringSessionAtLocation(project, locationId)
-        ports.flow.applyBackend({ ...fresh, history: canonicalHistory }, preserve)
-        ports.kernel.writeAuthoringSession(nextAuthoringSession)
-        return
-      }
-      if (plan.kind === 'open-spatial') {
-        const fresh = openSpatialAuthoringSession(project, { locationId })
-        ports.spatial.applyBackend(freezeSpatialSession({ ...fresh, history: canonicalHistory }), preserve)
-        ports.kernel.writeAuthoringSession(nextAuthoringSession)
-        return
-      }
-      if (plan.kind === 'open-slide') {
-        ports.slide.applyBackend(
-          createSlideAuthoringBackend({
-            ...openSlideAuthoringSession(project, { locationId }),
-            history: canonicalHistory,
-          }),
-          preserve,
-        )
-        ports.kernel.writeAuthoringSession(nextAuthoringSession)
-        return
-      }
-      if (plan.kind === 'activate-slide-location' && slide.slideBackend) {
-        const result = ports.slide.persist(slide.slideBackend.activateLocation(plan.locationId, {
-          expectedRevision: project.revision,
-        }))
-        if (result.ok) {
-          ports.kernel.writeAuthoringSession(updateCourseAuthoringSessionItems(nextAuthoringSession, []))
+      await write(edits, target)
+    }) },
+    updateNode(nodeId: string, patch: EditorCanvasNodePatch) { commands.updateNodes([{ nodeId, patch }]) },
+    nudgeSelection(dx: number, dy: number) { run(async () => {
+      const target = kernel.captureTarget()
+      await write(selectedRoots(target.editingProject, target.instanceIds).filter(id => !componentIsLocked(target.editingProject,id) && target.editingProject.instances[id].frame).map(instanceId => {
+        const delta = transformVector(invertMatrix(componentParentMatrix(target.editingProject, instanceId)), { x: dx, y: dy })
+        return { type: 'frame.set', instanceId, frame: translateFrame(target.editingProject.instances[instanceId].frame!, delta) as ComponentFrame }
+      }), target)
+    }) },
+    alignSelectedNodes(mode: 'left'|'center'|'right'|'top'|'middle'|'bottom') { run(() => layout(mode)) },
+    distributeSelectedNodes(direction: 'horizontal'|'vertical') { run(() => layout(direction)) },
+    copySelectedNodes() { requestClipboard('copy') },
+    cutSelectedNodes() { requestClipboard('cut') },
+    pasteNodes() { requestClipboard('paste') },
+    copyCourseClipboard(data: DataTransfer | null, cut = false): boolean {
+      if (!data) return false
+      const ids = kernel.readView().selectedInstanceIds
+      if (!ids.length) return false
+      if (cut && ids.some(id => componentIsLocked(current(), id))) { report(new Error('锁定元素不能剪切')); return true }
+      try {
+        const copied = captureClipboard(ids)
+        if (!copied.roots.length) return false
+        const token = crypto.randomUUID()
+        data.clearData()
+        data.setData(COURSE_OBJECT_CLIPBOARD_MIME, token)
+        clipboard = copied; clipboardToken = token
+        if (cut) {
+          copied.moveAvailable = true
+          copied.removal = remove(ids)
+          // ClipboardEvent is synchronous; retain the ACK for paste and report
+          // a rejection without leaving an unhandled promise.
+          void copied.removal.catch(report)
         }
-      }
+        return true
+      } catch (error) { report(error); return true }
     },
-
-    addCourseContent(
-      action: CourseEditorPrimaryAction | CourseEditorDropdownAction,
-      options: { surfaceId?: string } = {},
-    ) {
-      const result = ports.structure.addCourseContent(action, options)
-      if (result.ok && result.activatedLocationId) {
-        commands.activateCourseLocation(result.activatedLocationId)
-      }
+    pasteCourseClipboard(data: DataTransfer | null): boolean {
+      if (!data || !clipboard || !clipboardToken || data.getData(COURSE_OBJECT_CLIPBOARD_MIME) !== clipboardToken) return false
+      run(() => paste(clipboard!, false))
+      return true
     },
-
-    addScene() {
-      const result = ports.structure.addScene()
-      if (result.ok && result.activatedLocationId) {
-        commands.activateCourseLocation(result.activatedLocationId)
-      }
+    duplicateSelectedNodes() { run(() => paste(captureClipboard(kernel.readView().selectedInstanceIds), true)) },
+    duplicateNode(id: string) { run(() => paste(captureClipboard([id]), true)) },
+    deleteNode(id: string) { run(() => remove([id])) }, deleteSelectedNodes() { run(() => remove(kernel.readView().selectedInstanceIds)) },
+    reorderNodes(ids: string[]) { run(async () => {
+      const target = kernel.captureTarget(), owner = owningContainer(target.editingProject, ids[0])
+      if (!owner || ids.some(id => !sameContainer(owningContainer(target.editingProject,id),owner))) throw new Error('只能在同一归属内调整层级')
+      const original = containerChildIds(target.editingProject,owner), unique = new Set(ids)
+      if (unique.size !== ids.length || ids.some(id => !original.includes(id))) throw new Error('图层列表已变化')
+      let index = 0
+      const ordered = original.map(id => unique.has(id) ? ids[index++]! : id)
+      const working=[...original],edits:ComponentEdit[]=[]
+      ordered.forEach((instanceId,index)=>{const previous=working.indexOf(instanceId);if(previous===index)return;edits.push({type:'instance.move',instanceId,container:owner,index});working.splice(previous,1);working.splice(index,0,instanceId)})
+      await write(edits, target)
+    }) },
+    moveCandidateLayerOwner(id: string, targetId: string) { run(async () => {
+      const target = kernel.captureTarget(), item = target.project.instances[id], owner = owningContainer(target.project,targetId)
+      if (!item || !owner) throw new Error('目标图层已不存在')
+      if (item.locked) throw new Error('对象已锁定')
+      const targetFrame = owner.kind === 'instance' ? composeMatrices(componentParentMatrix(target.project, owner.instanceId), target.project.instances[owner.instanceId].frame?.transform ?? IDENTITY_MATRIX) : IDENTITY_MATRIX
+      await write([{type:'instance.move',instanceId:id,container:owner,index:containerChildIds(target.project,owner).indexOf(targetId), ...(item.frame ? {frame: reparentFrame(item.frame,componentParentMatrix(target.project,id),targetFrame) as ComponentFrame} : {})}], target)
+    }) },
+    createLiveEditorSelectionSnapshot(focus?: EditorFocusKind | EventTarget | null): EditorSelectionSnapshot | null {
+      const view=kernel.readView(), project=view.editingProject, active=project?.surfaces.find(value=>value.id===view.surfaceId)
+      if (!project || !active) return null
+      return { locationId:active.id,revision:project.revision,sessionGeneration:view.activation,documentId:view.activeDocumentId ?? undefined,epoch:view.snapshot?.epoch,surfaceId:active.id,surfaceKind:active.kind,stateId:view.activeStateId,scope:scope()==='global'?'global':'location', focus:typeof focus==='string'?focus:ports.shell.read().editingTextNodeId?'text':view.selectedInstanceIds.length?'layer':'none', itemIds:[...view.selectedInstanceIds],items:view.selectedInstanceIds.map(itemId=>({itemId,locked:componentIsLocked(project,itemId)})) }
     },
-
-    reorderCourseSurfaces(surfaceIds: string[]) {
-      ports.structure.reorderCourseSurfaces(surfaceIds)
-    },
-
-    deleteCourseSurface(surfaceId: string) {
-      const project = ports.kernel.tryReadDocument()
-      const activeLocationId = ports.readActiveLocationId() ?? undefined
-      const active = activeLocationId && project
-        ? project.locations.find((location) => location.id === activeLocationId)
-        : undefined
-      if (active?.surfaceId === surfaceId && project) {
-        const fallback = project.locations.find((location) => location.surfaceId !== surfaceId)
-        if (fallback) commands.activateCourseLocation(fallback.id)
-      }
-      const result = ports.structure.deleteCourseSurface(surfaceId)
-      if (result.ok && result.activatedLocationId) {
-        commands.activateCourseLocation(result.activatedLocationId)
-      }
-    },
-
-    moveCourseSlideScene(locationId: string, targetSurfaceId: string, toIndex?: number) {
-      const result = ports.structure.moveCourseSlideScene(locationId, targetSurfaceId, toIndex)
-      if (result.ok && result.activatedLocationId) {
-        commands.activateCourseLocation(result.activatedLocationId)
-      }
-    },
-
-    setActiveScene(activeSceneId: string) {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.activateCameraFrame(activeSceneId),
-        flow: () => ports.flow.activateBlock(activeSceneId),
-        slide: () => {
-          if (
-            ports.slide.read().v9ContentEdit
-            && !ports.slide.commitDraft()
-          ) return
-          ports.slide.activateScene(activeSceneId)
-        },
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-
-    undo() {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.undo(),
-        flow: () => ports.flow.undo(),
-        slide: () => ports.slide.undo(),
-        sessionless: () => undefined,
-      })
-    },
-
-    redo() {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.redo(),
-        flow: () => ports.flow.redo(),
-        slide: () => ports.slide.redo(),
-        sessionless: () => undefined,
-      })
-    },
-
-    setEditingTextNode(editingTextNodeId: string | null) {
-      if (editingTextNodeId) commands.beginTextEdit(editingTextNodeId, 'canvas')
-      else commands.commitTextEdit()
-    },
-
-    beginTextEdit(nodeId: string, source: 'canvas' | 'properties' = 'canvas') {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.beginTextEdit(nodeId, source),
-        flow: () => ports.flow.beginTextEdit(nodeId, source),
-        slide: () => ports.slide.beginTextEdit(nodeId, source),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-
-    updateTextEditDraft(
-      nodeId: string,
-      text: string,
-      runs: TextRun[],
-      height?: number,
-      width?: number,
-    ) {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.updateTextEditDraft(nodeId, text, runs, height, width),
-        flow: () => ports.flow.updateTextEditDraft(nodeId, text, runs, height, width),
-        slide: () => ports.slide.updateTextEditDraft(nodeId, text, runs, height, width),
-        sessionless: () => undefined,
-      })
-    },
-
-    commitTextEdit() {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.commitTextEdit(),
-        flow: () => ports.flow.commitTextEdit(),
-        slide: () => ports.slide.commitTextEdit(),
-        sessionless: () => undefined,
-      })
-    },
-
-    cancelTextEdit() {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.cancelTextEdit(),
-        flow: () => ports.flow.cancelTextEdit(),
-        slide: () => ports.slide.cancelTextEdit(),
-        sessionless: () => undefined,
-      })
-    },
-
-    renameProject(title: string) {
-      const normalized = title.trim().slice(0, 80)
-      if (!normalized) {
-        ports.kernel.setFeedback({ errorMessage: '名称不能为空。' })
-        return
-      }
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.renameProject(normalized),
-        flow: () => ports.flow.renameProject(normalized),
-        slide: () => ports.slide.renameProject(normalized),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-
-    addTextNode(x?: number, y?: number) {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.addTextNode(x, y),
-        flow: () => ports.flow.addTextNode(x, y),
-        slide: () => ports.slide.addTextNode(x, y),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-
-    addFormulaNode(x?: number, y?: number) {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.addFormulaNode(x, y),
-        flow: () => ports.flow.addFormulaNode(x, y),
-        slide: () => ports.slide.addFormulaNode(x, y),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-
-    addRectangleNode(x?: number, y?: number) {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.addRectangleNode(x, y),
-        flow: () => ports.flow.addRectangleNode(x, y),
-        slide: () => ports.slide.addRectangleNode(x, y),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-
-    addShapeNode(shapeType: string, x?: number, y?: number) {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.addShapeNode(shapeType, x, y),
-        flow: () => ports.flow.addShapeNode(shapeType, x, y),
-        slide: () => ports.slide.addShapeNode(shapeType, x, y),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-
-    addTableNode(x?: number, y?: number) {
-      const detected = ports.detect()
-      if (detected === 'spatial') { ports.spatial.addTableNode(x, y); return }
-      if (detected === 'flow') { ports.flow.addTableNode(); return }
-      if (detected !== 'slide') {
-        ports.kernel.setFeedback({
-          errorMessage: detected === null
-            ? '当前 Course Project 没有可用的作者会话。'
-            : '表格只能添加到演示页场景内。',
-          statusMessage: null,
-        })
-        return
-      }
-      ports.slide.addTableNode(x, y)
-    },
-
-    addChartNode(chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number) {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.addChartNode(chartType, x, y),
-        flow: () => ports.flow.addChartNode(chartType, x, y),
-        slide: () => ports.slide.addChartNode(chartType, x, y),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-
-    selectNode(nodeId: string | null, additive = false) {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.selectNode(nodeId, additive),
-        flow: () => ports.flow.selectNode(nodeId, additive),
-        slide: () => ports.slide.selectNode(nodeId, additive),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-      if (nodeId) ports.shell.patch({ activeTab: 'properties' })
-    },
-
-    ensureTeacherController() {
-      const existed = Boolean(
-        ports.kernel.tryReadDocument()
-        && findGlobalTeacherController(ports.kernel.tryReadDocument()!),
-      )
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.ensureTeacherController(),
-        flow: () => ports.flow.ensureTeacherController(),
-        slide: () => ports.slide.ensureTeacherController(),
-        sessionless: () => ports.kernel.setFeedback({
-          errorMessage: '当前 Course Project 没有可用的作者会话。',
-          statusMessage: null,
-        }),
-      })
-      if (existed) ports.shell.patch({ activeTab: 'properties' })
-    },
-
-    selectNodes(nodeIds: string[]) {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.selectNodes(nodeIds),
-        flow: () => ports.flow.selectNodes(nodeIds),
-        slide: () => ports.slide.selectNodes(nodeIds),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-      if (nodeIds.length > 0) ports.shell.patch({ activeTab: 'properties' })
-    },
-    updateNodes(patches: Array<{ nodeId: string; patch: EditorCanvasNodePatch }>) {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.updateNodes(patches),
-        flow: () => ports.flow.updateNodes(patches),
-        slide: () => ports.slide.updateNodes(patches),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-    updateNode(nodeId: string, patch: EditorCanvasNodePatch) {
-      commands.updateNodes([{ nodeId, patch }])
-    },
-    nudgeSelection(dx: number, dy: number) {
-      const projection = ports.readProjection()
-      if (!projection) {
-        ports.kernel.failSessionless()
-        return
-      }
-      const patches = projection.unifiedRows
-        .filter((row) => row.selected && !row.locked)
-        .map((row) => ({
-          nodeId: row.id,
-          patch: { x: row.frame.x + dx, y: row.frame.y + dy },
-        }))
-      if (patches.length > 0) commands.updateNodes(patches)
-    },
-    updateGlobalLayerSettings(
-      nodeId: string,
-      patch: GlobalLayerSettingsPatch,
-    ) {
-      dispatchActiveSurface(ports.detect(), {
-        slide: () => ports.slide.updateGlobalLayerSettings(nodeId, patch),
-        spatial: () => ports.spatial.updateGlobalLayerSettings(nodeId, patch),
-        flow: () => ports.flow.updateGlobalLayerSettings(nodeId, patch),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-    copySelectedNodes() {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.copySelectedNodes(),
-        flow: () => ports.flow.copySelectedNodes(),
-        slide: () => ports.slide.copySelectedNodes(),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-    pasteNodes() {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.pasteNodes(),
-        flow: () => ports.flow.pasteNodes(),
-        slide: () => ports.slide.pasteNodes(),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-    reorderNodes(nodeIds: string[]) {
-      dispatchActiveSurface(ports.detect(), {
-        slide: () => ports.slide.reorderNodes(nodeIds),
-        spatial: () => ports.spatial.reorderNodes(nodeIds),
-        flow: () => ports.flow.reorderNodes(nodeIds),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-    deleteNode(nodeId: string) {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.deleteNode(nodeId),
-        flow: () => ports.flow.deleteNode(nodeId),
-        slide: () => ports.slide.deleteNode(nodeId),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-    deleteSelectedNodes() {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.deleteSelectedNodes(),
-        flow: () => ports.flow.deleteSelectedNodes(),
-        slide: () => ports.slide.deleteSelectedNodes(),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-    duplicateSelectedNodes() {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.duplicateSelectedNodes(),
-        flow: () => ports.flow.duplicateSelectedNodes(),
-        slide: () => ports.slide.duplicateSelectedNodes(),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-    duplicateNode(nodeId: string) {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.duplicateNode(nodeId),
-        flow: () => ports.flow.duplicateNode(nodeId),
-        slide: () => ports.slide.duplicateNode(nodeId),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-
-    commitSlideCandidateTextRunStyle(input: {
-      layerItemId: string
-      selectionStart: number
-      selectionEnd: number
-      patch: TextRunStyle
-      source?: 'canvas' | 'properties'
-    }): SlideCommandResult | SpatialCommandResult {
-      return dispatchActiveSurface<SlideCommandResult | SpatialCommandResult>(ports.detect(), {
-        spatial: () => ports.spatial.commitSlideCandidateTextRunStyle(input),
-        flow: () => ports.slide.commitSlideCandidateTextRunStyle(input),
-        slide: () => ports.slide.commitSlideCandidateTextRunStyle(input),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-
-    moveCandidateLayerOwner(fromId: string, toId: string) {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.moveGlobalLayerOwner(fromId, toId),
-        flow: () => ports.flow.moveGlobalLayerOwner(fromId, toId),
-        slide: () => ports.slide.moveGlobalLayerOwner(fromId, toId),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-
-    setCandidateGlobalLayerLocationVisibility(
-      nodeId: string,
-      visibility: { mode: 'all' | 'include' | 'exclude'; locationIds: string[] },
-    ) {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.setCandidateGlobalLayerLocationVisibility(nodeId, visibility),
-        flow: () => ports.flow.setCandidateGlobalLayerLocationVisibility(nodeId, visibility),
-        slide: () => ports.slide.setCandidateGlobalLayerLocationVisibility(nodeId, visibility),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-
-    setCandidateGlobalLayerVisibleAtLocation(nodeId: string, visible: boolean) {
-      dispatchActiveSurface(ports.detect(), {
-        spatial: () => ports.spatial.setCandidateGlobalLayerVisibleAtLocation(nodeId, visible),
-        flow: () => ports.flow.setCandidateGlobalLayerVisibleAtLocation(nodeId, visible),
-        slide: () => ports.slide.setCandidateGlobalLayerVisibleAtLocation(nodeId, visible),
-        sessionless: () => ports.kernel.failSessionless(),
-      })
-    },
-
-    exportV9SlideCandidateArchive() {
-      return ports.lifecycle.exportArchive()
-    },
-
-    reopenV9SlideCandidateArchive(bytes: Uint8Array) {
-      return ports.lifecycle.reopenArchive(bytes)
-    },
-
-    createLiveEditorSelectionSnapshot(focus?: EditorFocusKind | EventTarget | null) {
-      const project = ports.kernel.tryReadDocument()
-      if (!project) return null
-      const locationId = ports.readActiveLocationId()
-      if (!locationId) return null
-      let session = ports.kernel.readAuthoringSession()
-      const slide = ports.slide.read()
-      const flow = ports.flow.read()
-      const spatial = ports.spatial.read()
-      const shell = ports.shell.read()
-      const itemIds = flow.flowSession
-        ? (
-          flow.flowSession.selection.selectedOverlayIds.length > 0
-            ? flow.flowSession.selection.selectedOverlayIds
-            : flow.flowSession.selection.selectedBlockIds
-        )
-        : spatial.spatialSession
-          ? [...spatial.spatialSession.selection.selectionIds]
-          : [...(slide.slideCandidateSnapshot?.selection.selectionIds ?? [])]
-      if (!session) {
-        try {
-          session = buildCourseAuthoringSessionForProject(project, locationId, itemIds)
-        } catch {
-          return null
-        }
-      } else if (session.token.revision !== project.revision) {
-        session = updateCourseAuthoringSessionRevision(session, project.revision)
-      }
-      const scope = readSessionEditingScope() === 'global' ? 'global' : 'location'
-      let focusKind: EditorFocusKind
-      if (focus === 'text' || focus === 'block' || focus === 'overlay' || focus === 'layer' || focus === 'none') {
-        focusKind = focus
-      } else if (flow.flowSession) {
-        focusKind = ports.flow.deriveFocus()
-      } else if (spatial.spatialSession) {
-        focusKind = ports.spatial.deriveFocus(Boolean(shell.editingTextNodeId))
-      } else if (slide.slideBackend && typeof (slide.slideBackend as SlideAuthoringBackend).getSession === 'function') {
-        focusKind = ports.slide.deriveFocus(focus, Boolean(shell.editingTextNodeId))
-      } else {
-        focusKind = shell.editingTextNodeId ? 'text'
-          : itemIds.length > 0 ? 'layer' : 'none'
-      }
-      const stateId = slide.slideCandidateSnapshot?.stateId ?? null
-      return createEditorSelectionSnapshot({
-        ...selectionSnapshotFromSession(
-          updateCourseAuthoringSessionItems(session, itemIds),
-          { scope, focus: focusKind, stateId },
-        ),
-        textRange: flow.flowSession?.selection.textRange ?? null,
-      })
-    },
-
     routeEditorAction(actionId: EditorActionId, snapshot?: EditorSelectionSnapshot | null) {
-      const live = snapshot ?? commands.createLiveEditorSelectionSnapshot()
-      if (!live) {
-        const reason = '当前没有可路由的编辑会话'
-        ports.kernel.setFeedback({ errorMessage: reason, statusMessage: null })
-        return { actionId, ok: false, reason, adapter: 'none' as const }
+      const live=commands.createLiveEditorSelectionSnapshot()
+      if (!live || (snapshot && (snapshot.documentId!==live.documentId || snapshot.epoch!==live.epoch || snapshot.locationId!==live.locationId || snapshot.revision!==live.revision || snapshot.sessionGeneration!==live.sessionGeneration || snapshot.stateId!==live.stateId || snapshot.scope!==live.scope || JSON.stringify(snapshot.itemIds)!==JSON.stringify(live.itemIds)))) return {actionId,ok:false,reason:'选择或文档已改变',adapter:'none' as const}
+      if (live.focus==='text') return {actionId,ok:false,reason:'文字编辑中由正文处理此操作',adapter:'none' as const}
+      if (['cut','delete'].includes(actionId) && live.items?.some(item=>item.locked)) return {actionId,ok:false,reason:'锁定元素不能删除，请先解锁',adapter:'none' as const}
+      switch(actionId) {
+        case 'select-all': commands.selectAllNodes();break
+        case 'copy':commands.copySelectedNodes();break
+        case 'cut':commands.cutSelectedNodes();break
+        case 'paste':commands.pasteNodes();break
+        case 'duplicate':commands.duplicateSelectedNodes();break
+        case 'delete':commands.deleteSelectedNodes();break
+        case 'undo':commands.undo();break
+        case 'redo':commands.redo();break
       }
-      const currentLive = commands.createLiveEditorSelectionSnapshot()
-      if (!sameEditorSelectionSnapshot(live, currentLive)) {
-        ports.kernel.setFeedback({ errorMessage: LAYER_REJECT_STALE_REVISION, statusMessage: null })
-        return {
-          actionId,
-          ok: false,
-          reason: LAYER_REJECT_STALE_REVISION,
-          adapter: 'none' as const,
-        }
-      }
-      const result = routeEditorActionCore({
-        actionId,
-        snapshot: live,
-        adapters: {
-          slide: {
-            execute: (id) => ports.slide.executeAction(id, live),
-          },
-          flow: {
-            execute: (id) => ports.flow.executeAction(id, live),
-          },
-          spatial: {
-            execute: (id) => ports.spatial.executeAction(id, live, Boolean(ports.shell.read().editingTextNodeId)),
-          },
-          global: {
-            execute: (id) => {
-              if (id !== 'delete') return { ok: false, reason: `全局层尚未接入${id}` }
-              if (ports.flow.read().flowSession) {
-                return ports.flow.executeGlobalAction(id, live)
-              }
-              const backend = ports.slide.read().slideBackend
-              if (backend && typeof (backend as SlideAuthoringBackend).getSession === 'function') {
-                return ports.slide.executeGlobalAction(id, live)
-              }
-              if (ports.spatial.read().spatialSession) {
-                return ports.spatial.executeGlobalAction(id, live)
-              }
-              return { ok: false, reason: '没有可删除的选择' }
-            },
-          },
-        },
-      })
-      if (!result.ok) {
-        ports.kernel.setFeedback({ errorMessage: result.reason, statusMessage: null })
-      } else {
-        ports.kernel.setFeedback({ statusMessage: result.reason, errorMessage: null })
-      }
-      return result
+      return {actionId,ok:true,reason:'已受理编辑操作',adapter:live.surfaceKind}
     },
-
-    deleteScene(sceneId: string) {
-      const project = ports.kernel.tryReadDocument()
-      const location = project?.locations.find((candidate) =>
-        candidate.kind === 'slide-scene' &&
-        candidate.sceneId === sceneId &&
-        candidate.stateId === undefined,
-      )
-      if (!project || !location) return false
-      const surface = project.surfaces.find((candidate) => candidate.id === location.surfaceId)
-      const lastSceneOnSurface = surface?.type === 'slide' && surface.scenes.length <= 1
-      const remainingElsewhere = project.locations.some(
-        (candidate) => candidate.surfaceId !== location.surfaceId,
-      )
-      if (lastSceneOnSurface) {
-        if (!remainingElsewhere) return false
-        const activeLocationId = ports.readActiveLocationId()
-        const active = activeLocationId
-          ? project.locations.find((candidate) => candidate.id === activeLocationId)
-          : undefined
-        if (active?.surfaceId === location.surfaceId) {
-          const fallbackLocation = project.locations.find(
-            (candidate) => candidate.surfaceId !== location.surfaceId,
-          )
-          if (fallbackLocation) commands.activateCourseLocation(fallbackLocation.id)
-        }
-        const liveProject = ports.kernel.tryReadDocument() ?? project
-        const liveLocation = liveProject.locations.find((candidate) =>
-          candidate.kind === 'slide-scene' &&
-          candidate.sceneId === sceneId &&
-          candidate.stateId === undefined,
-        )
-        if (!liveLocation) return false
-        const result = ports.structure.deleteCourseLocation(liveLocation.id)
-        if (result.ok && result.activatedLocationId) {
-          commands.activateCourseLocation(result.activatedLocationId)
-        }
-        return result.ok
-      }
-      const backend = ports.slide.read().slideBackend as SlideAuthoringBackend | null
-      if (!backend || typeof backend.getSession !== 'function') {
-        const result = ports.structure.deleteCourseLocation(location.id)
-        if (result.ok && result.activatedLocationId) commands.activateCourseLocation(result.activatedLocationId)
-        return result.ok
-      }
-      const result = ports.slide.persist(backend.deleteScene(sceneId, {
-        expectedRevision: backend.getSnapshot().revision,
-      }))
-      return result.ok
-    },
-
-    prepareCourseProjectPersistence(): PrepareCourseProjectPersistenceResult {
-      return ports.lifecycle.prepareCourseProjectPersistence()
-    },
-
-    captureCourseProjectRecoverySnapshot(): CaptureCourseProjectRecoveryResult {
-      return ports.lifecycle.captureCourseProjectRecoverySnapshot()
-    },
-
-    acknowledgeCourseProjectSaved(path: string, token: CourseProjectPersistenceToken): boolean {
-      return ports.lifecycle.acknowledgeCourseProjectSaved(path, token)
-    },
+    prepareCourseProjectPersistence() { return ports.lifecycle.prepareCourseProjectPersistence() },
+    captureCourseProjectRecoverySnapshot() { return ports.lifecycle.captureCourseProjectRecoverySnapshot() },
+    acknowledgeCourseProjectSaved(path: string, token: Parameters<typeof ports.lifecycle.acknowledgeCourseProjectSaved>[1]) { return ports.lifecycle.acknowledgeCourseProjectSaved(path, token) },
   }
-
   return commands
 }
+export type CrossSurfaceCommands = ReturnType<typeof createCrossSurfaceCommands>
+
+
+
+
+
+
+

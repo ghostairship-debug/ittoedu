@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["vite/client", "node"] },
+  "include": [
+    "src/renderer/vite-env.d.ts",
+    "src/renderer/virtual-player-bundle.d.ts",
+    "src/shared/fonts/virtual-bundled-fonts.d.ts",
+    "src/player/global.d.ts",
+    "src/player/runtime-global.d.ts",
+    "src/renderer/main.tsx",
+    "src/renderer/components/SandboxComponentImplementation.ts",
+    "src/core/drivers/CourseV10Driver.ts",
+    "src/player/components/ComponentPlatformRuntime.ts"
+    ,"src/main/workbench/DocumentHostService.ts",
+    "src/player/componentPlatform/entry.ts"
+  ],
+  "exclude": ["node_modules", "release", "tests"]
+}

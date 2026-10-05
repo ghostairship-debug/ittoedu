@@ -1,12 +1,10 @@
 import { Plus, Trash2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import type {
-  LayerItem,
-  SpatialCameraFrame,
-  SpatialCameraPose,
-  SpatialPathDocument,
-  SpatialSemanticZoomRule,
-} from '../../shared/courseProjectTypes'
+import type { ComponentInstance, ComponentSpatialAuthoring, ComponentSpatialPose } from '../../shared/contracts/component-platform'
+type SpatialCameraFrame = ComponentSpatialAuthoring['frames'][number]
+type SpatialCameraPose = ComponentSpatialPose
+type SpatialPathDocument = NonNullable<ComponentSpatialAuthoring['paths']>[number]
+type SpatialSemanticZoomRule = NonNullable<ComponentSpatialAuthoring['semanticZoom']>[number]
 import { BufferedInput, PropertyDraftBoundary } from './properties/PropertyControls'
 
 const EMPTY_DRAFT_BINDINGS: ReadonlyMap<string, string> = new Map()
@@ -18,7 +16,7 @@ export interface SpatialCameraPanelProps {
   readonly sessionCamera: SpatialCameraPose | null
   readonly activeCameraFrameId: string | null
   readonly showCameraFrames: boolean
-  readonly worldLayerItems: readonly LayerItem[]
+  readonly worldInstances: readonly ComponentInstance[]
   readonly paths?: readonly SpatialPathDocument[]
   readonly playbackPathId?: string | null
   readonly semanticZoomRules: readonly SpatialSemanticZoomRule[]
@@ -36,11 +34,12 @@ export interface SpatialCameraPanelProps {
   readonly onDeleteFrame: (frameId: string) => void
   readonly onSetHome: () => void
   readonly onUpdateActiveFromSession?: () => void
+  readonly onUpdateFrameTarget?: (frameId: string, instanceId: string | null) => void
   readonly onActivateFrame: (frameId: string) => void
   readonly onFitWorldContent?: () => void
   readonly onPlaybackPathIdChange?: (pathId: string | null) => void
   readonly onAddSemanticZoomRule: (rule: {
-    layerItemIds: string[]
+    instanceIds: string[]
     minZoom: number
     maxZoom: number
     visible: boolean
@@ -64,7 +63,7 @@ export function SpatialCameraPanel({
   sessionCamera,
   activeCameraFrameId,
   showCameraFrames,
-  worldLayerItems,
+  worldInstances,
   paths = [],
   playbackPathId = null,
   semanticZoomRules,
@@ -82,6 +81,7 @@ export function SpatialCameraPanel({
   onDeleteFrame,
   onSetHome,
   onUpdateActiveFromSession,
+  onUpdateFrameTarget,
   onActivateFrame,
   onFitWorldContent,
   onPlaybackPathIdChange,
@@ -102,9 +102,11 @@ export function SpatialCameraPanel({
     setRuleVisible(true)
   }, [draftBindingKey])
 
-  const layerLabel = (layerItemId: string): string => (
-    worldLayerItems.find((candidate) => candidate.layerItemId === layerItemId)?.label || layerItemId
-  )
+  const layerLabel = (instanceId: string): string => {
+    const instance = worldInstances.find(candidate => candidate.id === instanceId)
+    const data = instance?.data
+    return data && typeof data === 'object' && !Array.isArray(data) && typeof data.title === 'string' ? data.title : instanceId
+  }
 
   const parsedRuleMinZoom = Number(ruleMinZoom)
   const parsedRuleMaxZoom = Number(ruleMaxZoom)
@@ -161,7 +163,7 @@ export function SpatialCameraPanel({
         >
           <option value="">按镜头顺序</option>
           {paths.map((path) => (
-            <option value={path.id} key={path.id}>{path.name}</option>
+            <option value={path.id} key={path.id}>{(path.title ?? path.id)}</option>
           ))}
         </select>
       </div>
@@ -203,9 +205,9 @@ export function SpatialCameraPanel({
               onStale={onDraftStale}
             >
               <BufferedInput
-                label={`重命名镜头 ${frame.name}`}
+                label={`重命名镜头 ${(frame.title ?? frame.id)}`}
                 disabled={disabled}
-                value={frame.name}
+                value={(frame.title ?? frame.id)}
                 onCommit={(name) => {
                   onRenameFrame(frame.id, name)
                   setEditingFrameId(null)
@@ -219,19 +221,27 @@ export function SpatialCameraPanel({
               disabled={disabled}
               onClick={() => onActivateFrame(frame.id)}
             >
-              {activeCameraFrameId === frame.id ? '当前 · ' : ''}{frame.name}
+              {activeCameraFrameId === frame.id ? '当前 · ' : ''}{(frame.title ?? frame.id)}
             </button>
           )}
           <p className="property-hint">
-            x {Math.round(frame.x)} y {Math.round(frame.y)} · {Math.round(frame.zoom * 100)}%
-            {frame.rotation ? ` · 旋转 ${Math.round(frame.rotation)}°` : ''}
-            {frame.targetLayerItemId ? ' · 跟随对象' : ''}
+            x {Math.round(frame.pose.x)} y {Math.round(frame.pose.y)} · {Math.round(frame.pose.zoom * 100)}%
+            {frame.pose.rotation ? ` · 旋转 ${Math.round(frame.pose.rotation)}°` : ''}
+            {frame.targetInstanceId ? ' · 跟随对象' : ''}
           </p>
+          {onUpdateFrameTarget && <label className="form-field">
+            <span>跟随对象</span>
+            <select className="form-input" aria-label={`镜头跟随对象 ${frame.title ?? frame.id}`} disabled={disabled}
+              value={frame.targetInstanceId ?? ''} onChange={event => onUpdateFrameTarget(frame.id, event.currentTarget.value || null)}>
+              <option value="">固定画面</option>
+              {worldInstances.map(instance => <option key={instance.id} value={instance.id}>{layerLabel(instance.id)}</option>)}
+            </select>
+          </label>}
           <button
             type="button"
             className="secondary-button"
             disabled={disabled}
-            aria-label={`重命名镜头 ${frame.name}`}
+            aria-label={`重命名镜头 ${(frame.title ?? frame.id)}`}
             onClick={() => setEditingFrameId(frame.id)}
           >
             重命名
@@ -240,7 +250,7 @@ export function SpatialCameraPanel({
             type="button"
             className="secondary-button"
             disabled={disabled || frame.id === frames[0]?.id}
-            aria-label={`上移镜头 ${frame.name}`}
+            aria-label={`上移镜头 ${(frame.title ?? frame.id)}`}
             onClick={() => moveFrameToward(frame.id, -1)}
           >
             上移
@@ -249,7 +259,7 @@ export function SpatialCameraPanel({
             type="button"
             className="secondary-button"
             disabled={disabled || frame.id === frames[frames.length - 1]?.id}
-            aria-label={`下移镜头 ${frame.name}`}
+            aria-label={`下移镜头 ${(frame.title ?? frame.id)}`}
             onClick={() => moveFrameToward(frame.id, 1)}
           >
             下移
@@ -265,8 +275,8 @@ export function SpatialCameraPanel({
           <button
             type="button"
             className="secondary-button secondary-button--danger"
-            disabled={disabled || frames.length <= 1}
-            aria-label={`删除镜头 ${frame.name}`}
+            disabled={disabled}
+            aria-label={`删除镜头 ${(frame.title ?? frame.id)}`}
             onClick={() => onDeleteFrame(frame.id)}
           >
             <Trash2 size={14} />
@@ -283,21 +293,21 @@ export function SpatialCameraPanel({
         <p className="property-hint">
           只改变当前缩放下的可见/细节策略，不会删除图层，也不会改动选区。
         </p>
-        {worldLayerItems.length === 0 ? (
+        {worldInstances.length === 0 ? (
           <p className="property-hint">当前空间表面还没有可参与语义缩放的世界图层。</p>
-        ) : worldLayerItems.map((item) => (
-          <label className="property-hint" key={item.layerItemId} data-layer-item-id={item.layerItemId}>
+        ) : worldInstances.map((item) => (
+          <label className="property-hint" key={item.id} data-layer-item-id={item.id}>
             <input
               type="checkbox"
               disabled={disabled}
-              checked={ruleLayerItemIds.includes(item.layerItemId)}
+              checked={ruleLayerItemIds.includes(item.id)}
               onChange={() => setRuleLayerItemIds((current) => (
-                current.includes(item.layerItemId)
-                  ? current.filter((id) => id !== item.layerItemId)
-                  : [...current, item.layerItemId]
+                current.includes(item.id)
+                  ? current.filter((id) => id !== item.id)
+                  : [...current, item.id]
               ))}
             />
-            {layerLabel(item.layerItemId)}
+            {layerLabel(item.id)}
           </label>
         ))}
         <div className="form-field">
@@ -339,7 +349,7 @@ export function SpatialCameraPanel({
           disabled={disabled || !canAddRule}
           onClick={() => {
             onAddSemanticZoomRule({
-              layerItemIds: ruleLayerItemIds,
+              instanceIds: ruleLayerItemIds,
               minZoom: parsedRuleMinZoom,
               maxZoom: parsedRuleMaxZoom,
               visible: ruleVisible,
@@ -352,7 +362,7 @@ export function SpatialCameraPanel({
         {semanticZoomRules.map((rule) => (
           <div className="form-field" key={rule.id} data-semantic-zoom-rule-id={rule.id}>
             <p className="property-hint">
-              {rule.layerItemIds.map((layerItemId) => layerLabel(layerItemId)).join('、') || '未选择图层'}
+              {rule.instanceIds.map((layerItemId) => layerLabel(layerItemId)).join('、') || '未选择图层'}
             </p>
             <PropertyDraftBoundary
               bindingKey={semanticRuleDraftBindings.get(rule.id) ?? draftBindingKey}
@@ -400,3 +410,4 @@ export function SpatialCameraPanel({
     </section>
   )
 }
+

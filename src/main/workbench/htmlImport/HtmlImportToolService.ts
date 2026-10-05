@@ -19,7 +19,7 @@ class HtmlImportOutcomeUnknownError extends Error {
 
 export interface HtmlImportToolServiceOptions {
   documents: { read(documentId: string): Promise<DocumentSnapshot>; get(documentId: string): DocumentSession }
-  gateway: Pick<DocumentToolGateway, 'execute' | 'executeInternalBuild' | 'issueTarget' | 'lookup' | 'operationIdentity' | 'stop'>
+  gateway: Pick<DocumentToolGateway, 'execute' | 'issueTarget' | 'lookup' | 'operationIdentity' | 'stop'>
   cancelJob(runId: string, jobId: string): Promise<void>
   networkGrants?: HtmlImportNetworkGrants
   operationStore: HtmlImportOperationStore

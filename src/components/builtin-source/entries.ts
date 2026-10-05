@@ -1,0 +1,23 @@
+/** Build inputs only. The application reads the generated artifact, never these paths. */
+export const BUILTIN_SOURCE_ENTRIES = {
+  'guoling.text': 'text.ts',
+  'guoling.formula': 'formula.ts',
+  'guoling.shape': 'shape.ts',
+  'guoling.table': 'table.ts',
+  'guoling.chart': 'chart.ts',
+  'guoling.image': 'image.ts',
+  'guoling.input': 'input.ts',
+  'guoling.choice': 'choice.ts',
+  'guoling.disclosure': 'disclosure.ts',
+  'guoling.popover': 'popover.ts',
+  'guoling.document-block': 'document-block.ts',
+  'guoling.web': 'web.ts',
+  'guoling.html-program': 'web.ts',
+  'guoling.group': 'group.ts',
+  'guoling.navigation': 'navigation.ts',
+  'guoling.audio': 'audio.ts',
+  'guoling.video': 'video.ts',
+  'guoling.interactions': 'interactions.ts',
+  'guoling.feedback': 'feedback.ts',
+  'guoling.visibility': 'visibility.ts',
+} as const

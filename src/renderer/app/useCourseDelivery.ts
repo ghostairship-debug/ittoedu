@@ -1,671 +1,173 @@
-import { buildFlowDocxWithCharts } from '../export/course/flowChartImages'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { sameDeliveryDocument, type CourseDeliverySnapshot } from './courseDeliverySnapshot'
-export type { CourseDeliverySnapshot } from './courseDeliverySnapshot'
-import { toUserMessage, UserFacingError } from '../../shared/errors'
-import { prepareBundledFontEmbedding } from '../export/bundledFontEmbedding'
-import {
-  buildPublishedCourseStandaloneHtml,
-  buildPublishedCourseWebPackageAsync,
-} from '../export/course/buildCoursePackages'
+import { buildComponentDelivery, type BuiltComponentDelivery, type ComponentDeliveryFinding, type ComponentDeliveryFormat, type ComponentDeliveryReport, type ComponentOutputCapture } from '../export/componentPlatform/delivery'
+import { buildComponentPublished, type ComponentCompilePort } from '../export/componentPlatform/buildHtml'
+import type { PublishedCourseV3 } from '../../shared/contracts/component-platform/published'
 import type { SingleHtmlExportMode } from '../export/course/coursePackagePreflight'
-import { buildCoursePptx } from '../export/course/buildCoursePptx'
-import { buildCoursePrintArtifacts } from '../export/course/buildCoursePrintArtifacts'
-import {
-  buildPublishedCourseV2Payload,
-  type CoursePublishSources,
-} from '../export/course/buildPublishedCourse'
-import { uniqueFlowDocxFilename } from '../export/course/flowDocx'
-import {
-  collectCourseProjectExportPreflight,
-  type CourseProjectExportPreflightReportV1,
-  type ExportPreflightItem,
-  type ExportPreflightTarget,
-} from '../export/exportPreflight'
-import {
-  SINGLE_HTML_WARNING_BYTES,
-  utf8ByteLength,
-} from '../export/exportSize'
-import { loadPlayerBundle } from '../export/loadPlayerBundle'
-import type { PublishedCourseSession } from '../../player/surfaces/publishedDynamicHosts'
-import { mountPublishedCourseTryRun, reportTryRunInteractionDiagnostic } from '../ui/coursePlayerTryRun'
+import { SINGLE_HTML_WARNING_BYTES, utf8ByteLength } from '../export/exportSize'
+import { mountPublishedCourseV3 } from '../../player/componentPlatform/publishedPlayer'
 import { beginSerializedSessionMount, enqueueSerial } from '../ui/serializedSessionMount'
+import { createComponentDeliveryCapture, type ComponentScreenshot } from '../export/componentPlatform/capture'
 
-export type CourseDeliveryFormat =
-  | 'single-html'
-  | 'web-package'
-  | 'pptx'
-  | 'pdf'
-  | 'docx'
-
-export interface CourseDeliveryIdentity {
-  readonly documentId: string
-  readonly epoch: string
-  readonly projectId: string
-  readonly revision: number
-}
-
-export interface CourseDeliveryPreviewFeedback {
-  readonly kind: 'loading' | 'error'
-  readonly title: string
-  readonly message: string
-}
-
-/**
- * Narrow App/desktop ports. Format producers are imported by this module;
- * do not pass the root Store or the full Preload API.
- */
+export type { CourseDeliverySnapshot } from './courseDeliverySnapshot'
+export type { ComponentDeliveryFinding, ComponentDeliveryReport } from '../export/componentPlatform/delivery'
+export type CourseDeliveryFormat = ComponentDeliveryFormat
+export interface CourseDeliveryPreviewFeedback { readonly kind: 'loading' | 'error'; readonly title: string; readonly message: string }
 export interface CourseDeliveryPorts {
   captureSnapshot(): Promise<CourseDeliverySnapshot | null>
   readCanonicalSnapshot(): CourseDeliverySnapshot | null
+  compileComponent: ComponentCompilePort
+  createOutputCapture?(payload: PublishedCourseV3): Promise<ComponentOutputCapture>
+  captureAuthoringObservation?: ComponentScreenshot
   runBusy<T>(operation: () => Promise<T>, fallback: string): Promise<T | undefined>
   commitStatus(message: string | null): void
   reportError(message: string): void
-  navigateFinding(item: ExportPreflightItem): void
-  exportHtml(input: {
-    suggestedName: string
-    html: string
-  }): Promise<{ path: string } | null>
-  exportWebPackage(input: {
-    suggestedName: string
-    bytes: Uint8Array
-  }): Promise<{ path: string } | null>
-  exportPdf(input: {
-    suggestedName: string
-    html: string
-  }): Promise<{ path: string } | null>
-  exportBinary(input: {
-    suggestedName: string
-    extension: 'pptx' | 'json' | 'docx'
-    bytes: Uint8Array
-  }): Promise<{ path: string } | null>
+  navigateFinding(item: ComponentDeliveryFinding): void
+  exportHtml(input: { suggestedName: string; html: string }): Promise<{ path: string } | null>
+  exportWebPackage(input: { suggestedName: string; bytes: Uint8Array }): Promise<{ path: string } | null>
+  exportPdf(input: { suggestedName: string; html: string }): Promise<{ path: string } | null>
+  exportBinary(input: { suggestedName: string; extension: 'pptx' | 'json' | 'docx'; bytes: Uint8Array }): Promise<{ path: string } | null>
 }
-
-export interface CourseDeliveryWatch {
-  readonly documentTrigger: unknown
-  readonly sidecarTrigger: unknown
-  readonly componentPackagesTrigger: unknown
-}
-
+export interface CourseDeliveryWatch { readonly documentTrigger: unknown; readonly sidecarTrigger: unknown; readonly componentPackagesTrigger: unknown }
 export interface CourseDeliveryApi {
   readonly exportProgress: 'generating' | 'saving' | 'cancelling' | null
   cancelExport(): void
   readonly previewOpen: boolean
   readonly previewFeedback: CourseDeliveryPreviewFeedback | null
-  readonly exportPreflightReport: CourseProjectExportPreflightReportV1 | null
+  readonly exportPreflightReport: ComponentDeliveryReport | null
   readonly largeHtmlByteLength: number | null
   bindPreviewHost(host: HTMLDivElement | null): void
   previousPreview(): void
   nextPreview(): void
   closePreview(): void
   openPreview(): void
-  exportCourse(format: CourseDeliveryFormat, singleHtmlMode?: SingleHtmlExportMode): void
+  exportCourse(format: CourseDeliveryFormat, mode?: SingleHtmlExportMode): void
   cancelPreflight(): void
   continuePreflightExport(): void
-  locatePreflightItem(item: ExportPreflightItem): void
+  locatePreflightItem(item: ComponentDeliveryFinding): void
   savePreflightReport(): void
   cancelLargeHtml(): void
   continueLargeHtml(): void
   exportLargeHtmlAsWebPackage(): void
 }
+interface PendingDelivery { snapshot: CourseDeliverySnapshot; format: CourseDeliveryFormat; mode: SingleHtmlExportMode; built: BuiltComponentDelivery }
 
-type CourseDeliveryTarget = 'full-preview' | ExportPreflightTarget
-
-interface PendingExport {
-  readonly snapshot: CourseDeliverySnapshot
-  readonly identity: CourseDeliveryIdentity
-  readonly format: ExportPreflightTarget
-  readonly singleHtmlMode: SingleHtmlExportMode | null
-}
-
-interface PendingLargeHtml {
-  readonly html: string
-  readonly mode: SingleHtmlExportMode
-  readonly title: string
-}
-
-function readableError(error: unknown, fallback: string): string {
-  if (error instanceof UserFacingError) {
-    console.error(error)
-    return `${error.title}：${error.message}\n${error.suggestion}`
-  }
-  if (error instanceof Error && error.message.trim()) {
-    console.error(error)
-    return error.message
-  }
-  return toUserMessage(error, fallback)
-}
-
-function courseDeliveryUnavailable(target: CourseDeliveryTarget): UserFacingError {
-  const title = target === 'full-preview'
-    ? '整课预览不可用'
-    : target === 'single-html'
-      ? '单 HTML 导出不可用'
-      : target === 'web-package'
-        ? '网页包导出不可用'
-        : target === 'pptx'
-          ? 'PPTX 导出不可用'
-          : 'PDF 导出不可用'
-  return new UserFacingError(
-    title,
-    '当前编辑会话没有可发布的 Course Project V9 文档。',
-    '请新建或重新打开受支持的课程工程后再试。',
-  )
-}
-
-function decodeUtf8(bytes: Uint8Array): string {
-  return new TextDecoder().decode(bytes)
-}
-
-function publishSources(snapshot: CourseDeliverySnapshot): CoursePublishSources {
-  return {
-    project: snapshot.project,
-    assetFiles: snapshot.assetFiles,
-    components: snapshot.components,
-  }
-}
-
-function snapshotIdentity(snapshot: CourseDeliverySnapshot): CourseDeliveryIdentity {
-  return {
-    documentId: snapshot.documentId, epoch: snapshot.epoch, projectId: snapshot.project.id,
-    revision: snapshot.revision,
-  }
-}
-
-function sameDeliveryIdentity(
-  left: CourseDeliveryIdentity,
-  right: CourseDeliveryIdentity,
-): boolean {
-  return sameDeliveryDocument(left, right) && left.projectId === right.projectId && left.revision === right.revision
-}
-
-function collectDeliveryPreflight(
-  snapshot: CourseDeliverySnapshot,
-  format: ExportPreflightTarget,
-  singleHtmlMode: SingleHtmlExportMode | null,
-): CourseProjectExportPreflightReportV1 {
-  return collectCourseProjectExportPreflight(
-    snapshot.project,
-    format,
-    {
-      assetFiles: snapshot.assetFiles,
-      components: snapshot.components,
-    },
-    new Date(),
-    {
-      playerBundle: loadPlayerBundle(),
-      ...(singleHtmlMode ? { singleHtmlMode } : {}),
-    },
-  )
-}
-
-export function useCourseDelivery(
-  ports: CourseDeliveryPorts,
-  watch: CourseDeliveryWatch,
-): CourseDeliveryApi {
-  const portsRef = useRef(ports)
-  portsRef.current = ports
-
-  const job = useRef<AbortController | null>(null)
-  const phase = useRef<CourseDeliveryApi['exportProgress']>(null)
+export function useCourseDelivery(ports: CourseDeliveryPorts, watch: CourseDeliveryWatch): CourseDeliveryApi {
+  const ref = useRef(ports); ref.current = ports
+  const job = useRef<AbortController | null>(null), phase = useRef<CourseDeliveryApi['exportProgress']>(null)
   const [exportProgress, setExportProgress] = useState<CourseDeliveryApi['exportProgress']>(null)
-  const cancelExport = useCallback(() => {
-    if (!job.current || exportProgress !== 'generating') return
-    job.current.abort(); phase.current = 'cancelling'; setExportProgress('cancelling')
-    portsRef.current.commitStatus('已取消导出，正在清理生成资源；不会继续写出待生成文件。')
-  }, [exportProgress])
-  useEffect(() => () => { if (phase.current !== 'saving') job.current?.abort() }, [])
-  const generate = useCallback((action: (signal: AbortSignal, beforeSave: () => void) => Promise<void>, fallback: string) => {
-    const controller = new AbortController(); job.current?.abort(); job.current = controller; phase.current = 'generating'; setExportProgress('generating')
-    void portsRef.current.runBusy(async () => {
-      const beforeSave = () => { controller.signal.throwIfAborted(); phase.current = 'saving'; setExportProgress('saving') }
-      try { controller.signal.throwIfAborted(); await action(controller.signal, beforeSave) }
-      catch (error) { if (!controller.signal.aborted) throw error }
-      finally { if (job.current === controller) { job.current = null; phase.current = null; setExportProgress(null); if (controller.signal.aborted) portsRef.current.commitStatus('导出已取消；取消后的内容未再写出，已完成文件保留。') } }
-    }, fallback)
-  }, [])
-  const capture = useCallback(async (expected?: CourseDeliverySnapshot | null) => {
-    const snapshot = await portsRef.current.captureSnapshot()
-    if (expected && snapshot && !sameDeliveryDocument(expected, snapshot)) throw new UserFacingError('导出已取消', '导出准备期间已切换文档。', '请在要导出的文档中重新执行导出；原文件未改动。')
-    return snapshot
-  }, [])
-
-  const [previewOpen, setPreviewOpen] = useState(false)
-  const [previewHost, setPreviewHost] = useState<HTMLDivElement | null>(null)
-  const previewSessionRef = useRef<PublishedCourseSession | null>(null)
-  const previewFitRef = useRef<(() => void) | null>(null)
-  const previewMountChainRef = useRef(Promise.resolve())
+  const [previewOpen, setPreviewOpen] = useState(false), [previewHost, setPreviewHost] = useState<HTMLDivElement | null>(null)
+  const [previewSnapshot, setPreviewSnapshot] = useState<CourseDeliverySnapshot | null>(null)
   const [previewFeedback, setPreviewFeedback] = useState<CourseDeliveryPreviewFeedback | null>(null)
-  const [exportPreflightReport, setExportPreflightReport] =
-    useState<CourseProjectExportPreflightReportV1 | null>(null)
+  const [exportPreflightReport, setExportPreflightReport] = useState<ComponentDeliveryReport | null>(null)
   const [largeHtmlByteLength, setLargeHtmlByteLength] = useState<number | null>(null)
-  const pendingExportRef = useRef<PendingExport | null>(null)
-  const pendingLargeHtmlRef = useRef<PendingLargeHtml | null>(null)
-
-  const writeSingleHtml = useCallback(async (
-    html: string,
-    mode: SingleHtmlExportMode,
-    title: string,
-  ) => {
-    const result = await portsRef.current.exportHtml({
-      suggestedName: `${title}.html`,
-      html,
+  const pending = useRef<PendingDelivery | null>(null), large = useRef<PendingDelivery | null>(null)
+  const preview = useRef<Awaited<ReturnType<typeof mountPublishedCourseV3>> | null>(null)
+  const chain = useRef(Promise.resolve())
+  useEffect(() => () => { if (phase.current !== 'saving') job.current?.abort() }, [])
+  const generate = useCallback((work: (signal: AbortSignal, beforeSave: () => void) => Promise<void>) => {
+    const controller = new AbortController(); job.current?.abort(); job.current = controller
+    phase.current = 'generating'; setExportProgress('generating')
+    void ref.current.runBusy(async () => {
+      const beforeSave = () => { controller.signal.throwIfAborted(); phase.current = 'saving'; setExportProgress('saving') }
+      try { await work(controller.signal, beforeSave) }
+      catch (error) { if (!controller.signal.aborted) throw error }
+      finally { if (job.current === controller) { job.current = null; phase.current = null; setExportProgress(null) } }
+    }, '导出失败，当前内容与原文件已保留。')
+  }, [])
+  const capture = useCallback(async (expected = ref.current.readCanonicalSnapshot()) => {
+    const value = await ref.current.captureSnapshot()
+    if (!value) throw new Error('当前会话没有可交付的 V10 工程，请新建或打开课程后再试。')
+    if (expected && !sameDeliveryDocument(value, expected)) throw new Error('准备交付期间已切换文档，请在目标文档重新执行。')
+    return value
+  }, [])
+  const build = useCallback((snapshot: CourseDeliverySnapshot, format: CourseDeliveryFormat, signal: AbortSignal, mode: SingleHtmlExportMode = 'offline-portable') =>
+    buildComponentDelivery(snapshot, format, { compile: ref.current.compileComponent,
+      createCapture: ref.current.createOutputCapture ?? (ref.current.captureAuthoringObservation
+        ? payload => createComponentDeliveryCapture(payload, ref.current.captureAuthoringObservation!) : undefined), signal, singleHtmlMode: mode }), [])
+  const write = useCallback(async (value: PendingDelivery, beforeSave: () => void) => {
+    const paths: string[] = []
+    for (const artifact of value.built.artifacts) {
+      beforeSave()
+      const result = artifact.extension === 'html'
+        ? await ref.current.exportHtml({ suggestedName: artifact.suggestedName, html: artifact.html! })
+        : artifact.extension === 'zip' ? await ref.current.exportWebPackage({ suggestedName: artifact.suggestedName, bytes: artifact.bytes! })
+        : artifact.extension === 'pdf' ? await ref.current.exportPdf({ suggestedName: artifact.suggestedName, html: artifact.html! })
+        : await ref.current.exportBinary({ suggestedName: artifact.suggestedName, extension: artifact.extension, bytes: artifact.bytes! })
+      if (!result) break
+      paths.push(result.path)
+    }
+    if (paths.length) ref.current.commitStatus(`已导出到 ${paths.length === 1 ? paths[0] : `${paths.length} 个文件`}${value.built.report.items.length ? `；${value.built.report.items.length} 项输出说明` : ''}`)
+  }, [])
+  const present = useCallback(async (value: PendingDelivery, beforeSave: () => void) => {
+    const html = value.built.artifacts[0]?.extension === 'html' ? value.built.artifacts[0].html : undefined
+    if (html && utf8ByteLength(html) > SINGLE_HTML_WARNING_BYTES) { large.current = value; setLargeHtmlByteLength(utf8ByteLength(html)); return }
+    await write(value, beforeSave)
+  }, [write])
+  const exportCourse = useCallback((format: CourseDeliveryFormat, mode: SingleHtmlExportMode = 'offline-portable') => {
+    const expected = ref.current.readCanonicalSnapshot()
+    generate(async (signal, beforeSave) => {
+      const snapshot = await capture(expected), built = await build(snapshot, format, signal, mode)
+      const value = { snapshot, format, mode, built }
+      if (built.report.items.some(item => item.severity !== 'info')) { pending.current = value; setExportPreflightReport(built.report) }
+      else await present(value, beforeSave)
     })
-    if (result) {
-      const label = mode === 'online-lightweight' ? '在线轻量单 HTML' : '离线便携单 HTML'
-      portsRef.current.commitStatus(`${label}已导出到 ${result.path}`)
-    }
-  }, [])
-
-  const emitHtml = useCallback((
-    snapshot: CourseDeliverySnapshot,
-    mode: SingleHtmlExportMode,
-  ) => {
-    generate(async (signal, beforeSave) => {
-      // The builders are synchronous, so the bundled font bytes have to be in
-      // hand before the build starts; this is the only await that can put them
-      // there. Free after the first export of a session, and free in any host
-      // whose byte source is already synchronous.
-      await prepareBundledFontEmbedding()
-      signal.throwIfAborted()
-      const html = buildPublishedCourseStandaloneHtml(publishSources(snapshot), {
-        playerBundle: loadPlayerBundle(),
-        singleHtmlMode: mode,
-      })
-      const byteLength = utf8ByteLength(html)
-      if (byteLength > SINGLE_HTML_WARNING_BYTES) {
-        pendingLargeHtmlRef.current = { html, mode, title: snapshot.project.title }
-        setLargeHtmlByteLength(byteLength)
-        return
-      }
-      beforeSave()
-      await writeSingleHtml(html, mode, snapshot.project.title)
-    }, '导出失败。请检查磁盘空间并重试。')
-  }, [generate, writeSingleHtml])
-
-  const emitWebPackage = useCallback((snapshot: CourseDeliverySnapshot) => {
-    generate(async (signal, beforeSave) => {
-      portsRef.current.commitStatus('正在生成网页包…')
-      await prepareBundledFontEmbedding()
-      signal.throwIfAborted()
-      const bytes = await buildPublishedCourseWebPackageAsync(
-        publishSources(snapshot),
-        loadPlayerBundle(),
-        signal,
-      )
-      beforeSave()
-      const result = await portsRef.current.exportWebPackage({
-        suggestedName: `${snapshot.project.title}-网页包.zip`,
-        bytes,
-      })
-      if (result) portsRef.current.commitStatus(`网页包已导出到 ${result.path}`)
-    }, '网页包导出失败。请检查磁盘空间并重试。')
-  }, [generate])
-
-  const emitPptx = useCallback((snapshot: CourseDeliverySnapshot) => {
-    generate(async (signal, beforeSave) => {
-      portsRef.current.commitStatus('正在生成可编辑 PPTX 对象…')
-      const built = await buildCoursePptx(publishSources(snapshot))
-      signal.throwIfAborted()
-      const producerErrors = built.report.filter((item) => item.severity === 'error')
-      if (producerErrors.length > 0 || built.bytes.byteLength === 0) {
-        const details = producerErrors
-          .slice(0, 4)
-          .map((item) => item.message)
-          .join('\n') || '未能生成 PPTX'
-        const remaining = producerErrors.length > 4
-          ? `\n另有 ${producerErrors.length - 4} 项阻断。`
-          : ''
-        throw new UserFacingError(
-          'PPTX 导出失败',
-          `${details}${remaining}`,
-          '请按提示修复内容或资源后重试；本次没有写出不完整 PPTX。',
-        )
-      }
-      beforeSave()
-      const result = await portsRef.current.exportBinary({
-        suggestedName: `${snapshot.project.title}.pptx`,
-        extension: 'pptx',
-        bytes: built.bytes,
-      })
-      if (result) {
-        const notes = built.warnings.length > 0
-          ? `；${built.warnings.length} 项内容已按导出说明处理`
-          : ''
-        portsRef.current.commitStatus(
-          `PPTX 已导出 ${built.slideCount} 页到 ${result.path}${notes}`,
-        )
-      }
-    }, 'PPTX 导出失败。请减少大图片数量后重试。')
-  }, [generate])
-
-  const emitPdf = useCallback((snapshot: CourseDeliverySnapshot) => {
-    generate(async (signal, beforeSave) => {
-      portsRef.current.commitStatus('正在渲染 PDF 页面…')
-      const artifacts = await buildCoursePrintArtifacts(publishSources(snapshot))
-      signal.throwIfAborted()
-      const producerErrors = artifacts.report.filter((item) => item.severity === 'error')
-      if (producerErrors.length > 0) {
-        const details = producerErrors
-          .slice(0, 4)
-          .map((item) => item.message)
-          .join('\n')
-        const remaining = producerErrors.length > 4
-          ? `\n另有 ${producerErrors.length - 4} 项阻断。`
-          : ''
-        throw new UserFacingError(
-          'PDF 导出失败',
-          `${details}${remaining}`,
-          '请按提示修复内容或资源后重试；本次没有写出不完整 PDF。',
-        )
-      }
-      const pdfFile = artifacts.files.find((file) => file.kind === 'pdf-html')
-      if (pdfFile) {
-        beforeSave()
-        const result = await portsRef.current.exportPdf({
-          suggestedName: `${snapshot.project.title}.pdf`,
-          html: decodeUtf8(pdfFile.bytes),
-        })
-        if (result) {
-          const notes = artifacts.warnings.length > 0
-            ? `；${artifacts.warnings.length} 项内容已按导出说明处理`
-            : ''
-          portsRef.current.commitStatus(`PDF 已导出到 ${result.path}${notes}`)
-        }
-        return
-      }
-      throw new UserFacingError(
-        'PDF 导出不完整',
-        'Published Course V2 未生成覆盖当前课程全部表面的 PDF 打印内容。',
-        '请检查导出预检与混合打印计划后重试；本次不会回退到旧版 V8 Slide 快照。',
-      )
-    }, 'PDF 导出失败。请减少大图片数量后重试。')
-  }, [generate])
-
-  const emitDocx = useCallback(() => {
-    const expected = portsRef.current.readCanonicalSnapshot()
-    generate(async (signal, beforeSave) => {
-      const snapshot = await capture(expected)
-      signal.throwIfAborted()
-      if (!snapshot) {
-        throw new Error('DOCX 讲义仅适用于当前课程工程中的流式讲义')
-      }
-      const published = buildPublishedCourseV2Payload(publishSources(snapshot))
-      const flowSurfaces = published.surfaces.filter((surface) => surface.type === 'flow')
-      if (flowSurfaces.length === 0) {
-        throw new Error('当前课程没有流式讲义，无法导出 DOCX')
-      }
-      const usedNames = new Set<string>()
-      const exportedPaths: string[] = []
-      let warningCount = 0
-      for (const flowSurface of flowSurfaces) {
-        phase.current = 'generating'; setExportProgress('generating')
-        signal.throwIfAborted()
-        const built = await buildFlowDocxWithCharts(published, flowSurface.id, {
-          resolveAsset: (assetId) => {
-            const meta = snapshot.project.assets[assetId]
-            const bytes = snapshot.assetFiles[assetId]
-            return meta && bytes
-              ? { bytes, mimeType: meta.mimeType, filename: meta.filename }
-              : undefined
-          },
-        })
-        signal.throwIfAborted()
-        warningCount += built.warnings.length
-        const suggestedName = uniqueFlowDocxFilename(flowSurface.title, usedNames)
-        usedNames.add(suggestedName)
-        beforeSave()
-        const result = await portsRef.current.exportBinary({
-          suggestedName,
-          extension: 'docx',
-          bytes: built.bytes,
-        })
-        if (result) exportedPaths.push(result.path)
-        else break // Cancelling one destination ends this multi-file export.
-      }
-      if (exportedPaths.length > 0) {
-        const notes = warningCount > 0
-          ? `；${warningCount} 项内容已按导出说明处理`
-          : ''
-        const destination = exportedPaths.length === 1
-          ? exportedPaths[0]
-          : `${exportedPaths.length} 个文件`
-        portsRef.current.commitStatus(
-          `DOCX 讲义已导出 ${exportedPaths.length}/${flowSurfaces.length} 份到 ${destination}${notes}`,
-        )
-      }
-    }, 'DOCX 导出失败。请先新增流式讲义页面后重试。')
-  }, [capture, generate])
-
-  const clearPreflight = useCallback(() => {
-    pendingExportRef.current = null
-    setExportPreflightReport(null)
-  }, [])
-
-  const cancelLargeHtml = useCallback(() => {
-    pendingLargeHtmlRef.current = null
-    setLargeHtmlByteLength(null)
-  }, [])
-
-  const openPreview = useCallback(() => {
-    void portsRef.current.runBusy(async () => {
-      if (!await capture()) {
-        throw courseDeliveryUnavailable('full-preview')
-      }
-      setPreviewFeedback({
-        kind: 'loading',
-        title: '正在准备整课预览',
-        message: '正在载入 CoursePlayer…',
-      })
-      setPreviewOpen(true)
-    }, '整课预览不可用。请重新打开课程工程后重试。')
-  }, [])
-
-  const closePreview = useCallback(() => {
-    setPreviewOpen(false)
-  }, [])
-
-  const previousPreview = useCallback(() => {
-    void previewSessionRef.current?.previous()
-  }, [])
-
-  const nextPreview = useCallback(() => {
-    void previewSessionRef.current?.next()
-  }, [])
-
-  const exportCourse = useCallback((
-    format: CourseDeliveryFormat,
-    singleHtmlMode: SingleHtmlExportMode = 'offline-portable',
-  ) => {
-    if (format === 'docx') {
-      emitDocx()
-      return
-    }
-    const expected = portsRef.current.readCanonicalSnapshot()
-    void portsRef.current.runBusy(async () => {
-    const requestedSingleHtmlMode = format === 'single-html' ? singleHtmlMode : null
-    const snapshot = await capture(expected)
-    if (!snapshot) {
-      pendingExportRef.current = null
-      throw courseDeliveryUnavailable(format)
-      return
-    }
-    pendingExportRef.current = {
-      snapshot,
-      identity: snapshotIdentity(snapshot),
-      format,
-      singleHtmlMode: requestedSingleHtmlMode,
-    }
-    setExportPreflightReport(collectDeliveryPreflight(
-      snapshot,
-      format,
-      requestedSingleHtmlMode,
-    ))
-    }, '课程交付不可用，请完成当前输入后重试。')
-  }, [capture, emitDocx])
-
+  }, [build, capture, generate, present])
+  const cancelPreflight = useCallback(() => { pending.current = null; setExportPreflightReport(null) }, [])
   const continuePreflightExport = useCallback(() => {
-    const report = exportPreflightReport
-    const pending = pendingExportRef.current
-    if (!report?.summary.canExport || !pending) return
-    void portsRef.current.runBusy(async () => {
-    const current = await capture(pending.snapshot)
-    if (pendingExportRef.current !== pending) return // Cancelled while the ACK barrier was pending.
-    if (!current) {
-      // The preflighted snapshot is only emitted for the session that passed
-      // preflight; a session without a publishable document fails loud.
-      clearPreflight()
-      void portsRef.current.runBusy(async () => {
-        throw courseDeliveryUnavailable(pending.format)
-      }, '课程交付不可用。请重新打开课程工程后重试。')
-      return
-    }
-    if (!sameDeliveryIdentity(snapshotIdentity(current), pending.identity)) {
-      pendingExportRef.current = {
-        snapshot: current,
-        identity: snapshotIdentity(current),
-        format: pending.format,
-        singleHtmlMode: pending.singleHtmlMode,
-      }
-      setExportPreflightReport(collectDeliveryPreflight(
-        current,
-        pending.format,
-        pending.singleHtmlMode,
-      ))
-      return
-    }
-    const singleHtmlMode = pending.singleHtmlMode ?? 'offline-portable'
-    clearPreflight()
-    if (report.target === 'single-html') emitHtml(pending.snapshot, singleHtmlMode)
-    else if (report.target === 'web-package') emitWebPackage(pending.snapshot)
-    else if (report.target === 'pptx') emitPptx(pending.snapshot)
-    else emitPdf(pending.snapshot)
-    }, '导出准备失败，当前输入和原文件已保留。')
-  }, [
-    capture,
-    clearPreflight,
-    emitHtml,
-    emitPdf,
-    emitPptx,
-    emitWebPackage,
-    exportPreflightReport,
-  ])
-
-  const locatePreflightItem = useCallback((item: ExportPreflightItem) => {
-    const current = portsRef.current.readCanonicalSnapshot()
-    const pending = pendingExportRef.current
-    if (
-      !current
-      || !pending
-      || !sameDeliveryIdentity(snapshotIdentity(current), pending.identity)
-    ) {
-      portsRef.current.reportError('导出预检结果已过期：工程已修改，请重新执行导出预检。')
-      clearPreflight()
-      return
-    }
-    portsRef.current.navigateFinding(item)
-    portsRef.current.commitStatus(`已定位导出预检问题：${item.message}`)
-    clearPreflight()
-  }, [clearPreflight])
-
-  const savePreflightReport = useCallback(() => {
-    const report = exportPreflightReport
-    if (!report) return
-    const title = pendingExportRef.current?.snapshot.project.title
-    void portsRef.current.runBusy(async () => {
-      const bytes = new TextEncoder().encode(`${JSON.stringify(report, null, 2)}\n`)
-      const result = await portsRef.current.exportBinary({
-        suggestedName: `${title ?? report.projectId}-${report.target}-preflight.json`,
-        extension: 'json',
-        bytes,
-      })
-      if (result) portsRef.current.commitStatus(`导出预检报告已保存到 ${result.path}`)
-    }, '导出预检报告保存失败。请换一个可写目录后重试。')
-  }, [exportPreflightReport])
-
+    const value = pending.current
+    if (!value) return
+    generate(async (signal, beforeSave) => {
+      const current = await capture(value.snapshot)
+      if (pending.current !== value) return
+      // New edits refresh the actual producer; revision is not a user-supplied delivery gate.
+      const built = current.revision === value.snapshot.revision ? value.built : await build(current, value.format, signal, value.mode)
+      cancelPreflight(); await present({ ...value, snapshot: current, built }, beforeSave)
+    })
+  }, [build, cancelPreflight, capture, generate, present])
+  const cancelLargeHtml = useCallback(() => { large.current = null; setLargeHtmlByteLength(null) }, [])
   const continueLargeHtml = useCallback(() => {
-    const pending = pendingLargeHtmlRef.current
-    cancelLargeHtml()
-    if (!pending) return
-    void portsRef.current.runBusy(
-      () => writeSingleHtml(pending.html, pending.mode, pending.title),
-      '单 HTML 导出失败。请改用网页包或检查磁盘空间。',
-    )
-  }, [cancelLargeHtml, writeSingleHtml])
-
-  const exportLargeHtmlAsWebPackage = useCallback(() => {
-    cancelLargeHtml()
-    exportCourse('web-package')
-  }, [cancelLargeHtml, exportCourse])
-
+    const value = large.current; cancelLargeHtml()
+    if (value) generate(async (signal, beforeSave) => {
+      const current = await capture(value.snapshot)
+      const built = current.revision === value.snapshot.revision ? value.built : await build(current, value.format, signal, value.mode)
+      await write({ ...value, snapshot: current, built }, beforeSave)
+    })
+  }, [build, cancelLargeHtml, capture, generate, write])
+  const savePreflightReport = useCallback(() => {
+    if (!exportPreflightReport) return
+    void ref.current.runBusy(async () => { await ref.current.exportBinary({ suggestedName: `${pending.current?.snapshot.project.title ?? '课程'}-导出说明.json`, extension: 'json', bytes: new TextEncoder().encode(JSON.stringify(exportPreflightReport, null, 2)) }) }, '输出说明保存失败。')
+  }, [exportPreflightReport])
+  const openPreview = useCallback(() => {
+    void ref.current.runBusy(async () => { const snapshot = await capture(); setPreviewSnapshot(snapshot); setPreviewOpen(true) }, '整课预览不可用。')
+  }, [capture])
   useEffect(() => {
-    if (!previewOpen || !previewHost) {
-      const leftover = previewSessionRef.current
-      previewSessionRef.current = null
-      if (leftover) enqueueSerial(previewMountChainRef, () => leftover.destroy())
+    if (!previewOpen || !previewHost || !previewSnapshot) {
+      const old = preview.current; preview.current = null
+      if (old) enqueueSerial(chain, () => old.dispose())
       return
     }
-    const snapshot = portsRef.current.readCanonicalSnapshot()
-    if (!snapshot) {
-      setPreviewOpen(false)
-      return
-    }
-    setPreviewFeedback({
-      kind: 'loading',
-      title: '正在准备整课预览',
-      message: '正在载入 CoursePlayer…',
+    setPreviewFeedback({ kind: 'loading', title: '正在准备整课预览', message: '正在载入当前课程…' })
+    return beginSerializedSessionMount(chain, async () => {
+      const result = await buildComponentPublished(previewSnapshot.snapshot, ref.current.compileComponent)
+      if (result.diagnostics.length) setPreviewFeedback({ kind: 'error', title: '部分内容待修复', message: result.diagnostics.map(item => item.message).join('；') })
+      const player = await mountPublishedCourseV3(result.payload, previewHost, { report: message => setPreviewFeedback({ kind: 'error', title: '部分内容尚未运行', message }) })
+      return { ...player, destroy: player.dispose }
+    }, {
+      onReady: player => { preview.current = player; setPreviewFeedback(current => current?.kind === 'error' ? current : null) },
+      onError: error => setPreviewFeedback({ kind: 'error', title: '整课预览启动失败', message: error instanceof Error ? error.message : String(error) }),
+      onCleanup: () => { preview.current = null },
     })
-    return beginSerializedSessionMount(previewMountChainRef, () => mountPublishedCourseTryRun({
-      container: previewHost,
-      project: snapshot.project,
-      assetFiles: snapshot.assetFiles,
-      components: snapshot.components,
-      onInteractionDiagnostic: reportTryRunInteractionDiagnostic,
-    }), {
-      onReady: (session) => {
-        previewFitRef.current?.()
-        previewSessionRef.current = session
-        setPreviewFeedback(null)
-      },
-      onError: (error) => {
-        setPreviewFeedback({
-          kind: 'error',
-          title: '整课预览启动失败',
-          message: readableError(error, '播放器未能完成启动。请关闭后重试。'),
-        })
-      },
-      onCleanup: () => {
-        previewFitRef.current?.()
-        previewFitRef.current = null
-        previewSessionRef.current = null
-      },
-    })
-  }, [
-    previewHost,
-    previewOpen,
-    watch.componentPackagesTrigger,
-    watch.documentTrigger,
-    watch.sidecarTrigger,
-  ])
-
+  }, [previewHost, previewOpen, previewSnapshot])
+  // An open preview is a frozen run. Author updates do not remount its answer state.
+  void watch
   return {
-    exportProgress, cancelExport,
-    previewOpen,
-    previewFeedback,
-    exportPreflightReport,
-    largeHtmlByteLength,
-    bindPreviewHost: setPreviewHost,
-    previousPreview,
-    nextPreview,
-    closePreview,
-    openPreview,
-    exportCourse,
-    cancelPreflight: clearPreflight,
-    continuePreflightExport,
-    locatePreflightItem,
-    savePreflightReport,
-    cancelLargeHtml,
-    continueLargeHtml,
-    exportLargeHtmlAsWebPackage,
+    exportProgress, cancelExport: () => { if (phase.current === 'generating') { job.current?.abort(); phase.current = 'cancelling'; setExportProgress('cancelling') } },
+    previewOpen, previewFeedback, exportPreflightReport, largeHtmlByteLength, bindPreviewHost: setPreviewHost,
+    previousPreview: () => { void preview.current?.previous() }, nextPreview: () => { void preview.current?.next() },
+    closePreview: () => setPreviewOpen(false), openPreview, exportCourse, cancelPreflight, continuePreflightExport,
+    locatePreflightItem: item => { const current = ref.current.readCanonicalSnapshot(); if (current && pending.current && sameDeliveryDocument(current, pending.current.snapshot)) ref.current.navigateFinding(item); cancelPreflight() },
+    savePreflightReport, cancelLargeHtml, continueLargeHtml,
+    exportLargeHtmlAsWebPackage: () => { cancelLargeHtml(); exportCourse('web-package') },
   }
 }

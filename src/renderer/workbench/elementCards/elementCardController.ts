@@ -92,6 +92,7 @@ interface CardRecord {
 
 /** One card per element: an object, or a document block, of one document. */
 export function elementCardKey(documentId: string, target: ExecutionSelectionTarget): string {
+  if (target.kind === 'course-instance') return `${documentId}:instance:${target.instanceId}:state:${target.stateId ?? ''}${target.dataPath ? `:${target.fieldScope ?? 'data'}:${JSON.stringify(target.dataPath)}` : ''}`
   if (target.kind === 'course-object') return `${documentId}:object:${target.itemId}${target.compositionNodeId ? `:composition:${target.compositionNodeId}` : ''}`
   if (target.kind === 'flow-block') return `${documentId}:block:${target.surfaceId}:${target.blockId}`
   throw new Error('元素 AI 卡只针对对象或文档块。')
@@ -313,9 +314,15 @@ export class ElementCardController {
     const alive = () => {
       if (this.cards.get(key) !== card || card.closing || pending.cancelled) throw new Error('发送已取消；未发送的输入保留。')
     }
+    // Capture now, before another send finishes. Queuing and subsequent browsing never retarget this request.
+    const prepared = (async () => card.kind === 'text' ? this.textCapture(card)
+      : typeof selected === 'function' ? selected() : selected)()
+      .then(capture => ({ capture }), error => ({ error }))
     try {
       await previous; alive()
-      const capture = card.kind === 'text' ? await this.textCapture(card) : typeof selected === 'function' ? await selected() : selected
+      const preparation = await prepared
+      if ('error' in preparation) throw preparation.error
+      const capture = preparation.capture
       alive()
       if (!capture || capture.documentId !== card.documentId || capture.targets.length !== 1
         || card.kind === 'element' && elementCardKey(capture.documentId, capture.targets[0]!) !== key)

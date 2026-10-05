@@ -1,278 +1,184 @@
 import type { EditorStoreKernel } from '../editorStoreKernel'
-import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
-import { courseProjectDocumentSchema } from '../../../shared/courseProjectSchema'
-import { resizeCourseSlideCanvas, resizeSlideSceneCanvas } from '../../../core/course/resizeSlideCanvas'
-import { courseSlideCanvas, isValidSlideCanvas, sameSlideCanvas, type SlideCanvasSize } from '../../../shared/slideCanvas'
-import {
-  addCourseFlowPage,
-  addCourseScene,
-  addCourseSlidePage,
-  addCourseSpatialPage,
-  deleteCourseLocation as applyDeleteCourseLocation,
-  deleteCourseSurface as applyDeleteCourseSurface,
-  duplicateCourseLocation as applyDuplicateCourseLocation,
-  renameCourseLocation as applyRenameCourseLocation,
-  renameCourseSurface as applyRenameCourseSurface,
-  moveCourseSlideScene as applyMoveCourseSlideScene,
-  reorderCourseSurfaces as applyReorderCourseSurfaces,
-  type CourseLocationCommandResult,
-} from '../../../core/tools/courseLocations'
-import {
-  updateCourseBackground as applyCourseBackgroundUpdate,
-  type CourseBackgroundPatch,
-} from '../../../core/tools/courseBackground'
-import {
-  deriveCourseEditorLayout,
-  type CourseEditorDropdownAction,
-  type CourseEditorPrimaryAction,
-} from '../../course/courseEditorLayout'
+import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
+import type { ComponentInstance, ComponentSurface, CourseProjectV10 } from '../../../shared/contracts/component-platform/project'
+import { rebindDeclaredTargets } from '../../../core/components/library/references'
+import { createComponentInteractionCopyIdentities, remapComponentInteractionData } from '../../interactions/componentInteractionAuthoring'
+import { remapComponentInputData } from '../../../components/input/authoring'
+import type { CapturedComponentOperation } from '../../documents/CourseV10DocumentBridge'
+import type { CourseEditorDropdownAction, CourseEditorPrimaryAction } from '../../course/courseEditorLayout'
+import type { SlideCanvasSize } from '../../../shared/slideCanvas'
+import { assertCourseSurfaceRemoval, createCourseSurface, LAST_COURSE_PAGE_REASON } from '../../../core/course/courseSurfaceStructure'
 
-export type CourseStructureResult = {
-  readonly ok: boolean
-  readonly reason?: string
-  readonly activatedLocationId?: string
-}
+export type CourseStructureResult = { readonly ok: boolean; readonly reason?: string; readonly activatedLocationId?: string }
+export type CourseStructurePorts = { readActiveLocationId(): string | null }
+export { LAST_COURSE_PAGE_REASON } from '../../../core/course/courseSurfaceStructure'
 
-export type CourseStructurePorts = {
-  readActiveLocationId(): string | null
-}
-
-export function createCourseStructureSlice(
-  kernel: EditorStoreKernel,
-  ports: CourseStructurePorts,
-) {
-  const persistCourseProjectCommand = (
-    result: CourseLocationCommandResult,
-    extra: { statusMessage?: string | null } = {},
-  ): CourseStructureResult => {
-    if (!result.ok) {
-      if (result.reason) {
-        kernel.setFeedback({ errorMessage: result.reason, statusMessage: null })
-      }
-      return { ok: false, reason: result.reason }
+/** Copies the owned graph once. Definitions/assets remain shared; internal targets follow the copy. */
+export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: string, createId = () => crypto.randomUUID()): { edits: ComponentEdit[]; surfaceId: string } {
+  const source = project.surfaces.find(surface => surface.id === surfaceId)
+  if (!source) throw new Error('页面已经不存在')
+  const ids = new Map<string, string>()
+  const visit = (id: string) => {
+    if (ids.has(id)) return
+    const instance = project.instances[id]
+    if (!instance) throw new Error('页面包含不存在的对象')
+    ids.set(id, createId())
+    instance.childIds?.forEach(visit)
+  }
+  source.childIds.forEach(visit)
+  const copiedSurfaceId = createId()
+  const rules = new Map<string, string>(), actions = new Map<string, string>(), stateKeys = new Map<string, string>()
+  const ruleIdentities = (data: ComponentInstance['data']) => {
+    const copy = createComponentInteractionCopyIdentities(data)
+    for (const [from, to] of copy.rules) if (!rules.has(from)) rules.set(from, to)
+    for (const [from, to] of copy.actions) if (!actions.has(from)) actions.set(from, to)
+  }
+  for (const id of ids.keys()) if (project.instances[id]!.definitionId === 'guoling.interactions') {
+    ruleIdentities(project.instances[id]!.data)
+    for (const state of source.presentation?.states ?? []) if (state.overrides[id]?.data !== undefined) ruleIdentities(state.overrides[id]!.data!)
+  }
+  const rebindInput = (instance: ComponentInstance) => remapComponentInputData(instance.data, {
+    fromInstanceId: instance.id, toInstanceId: ids.get(instance.id) ?? instance.id, rules, stateKeys,
+  })
+  // Allocate managed state keys before rebinding any rule condition/action.
+  for (const id of ids.keys()) if (project.instances[id]!.definitionId === 'guoling.input') {
+    rebindInput(project.instances[id]!)
+    for (const state of source.presentation?.states ?? []) if (state.overrides[id]?.data !== undefined) rebindInput({ ...project.instances[id]!, data: state.overrides[id]!.data! })
+  }
+  const identities = { instances: ids, surfaces: new Map([[surfaceId, copiedSurfaceId]]), rules, actions, stateKeys }
+  const rebindData = (instance: ComponentInstance) => instance.definitionId === 'guoling.interactions'
+    ? remapComponentInteractionData(instance.data, identities)
+    : instance.definitionId === 'guoling.input' ? rebindInput(instance)
+    : rebindDeclaredTargets(instance.data, value => ids.get(value) ?? value, value => value === surfaceId ? copiedSurfaceId : value)
+  const frameIds = new Map((source.spatial?.frames ?? []).map(frame => [frame.id, createId()]))
+  const instances: ComponentInstance[] = [...ids].map(([id, copiedId]) => {
+    const copy = structuredClone(project.instances[id]!)
+    return { ...copy, id: copiedId, data: rebindData(copy),
+      ...(copy.visibility ? { visibility: { ...copy.visibility,
+        surfaceIds: copy.visibility.surfaceIds.map(id => id === surfaceId ? copiedSurfaceId : id) } } : {}),
+      ...(copy.flowPlacement?.paragraphAnchor ? { flowPlacement: { ...copy.flowPlacement, paragraphAnchor: { ...copy.flowPlacement.paragraphAnchor,
+        blockId: ids.get(copy.flowPlacement.paragraphAnchor.blockId) ?? copy.flowPlacement.paragraphAnchor.blockId } } } : {}),
+      ...(copy.childIds ? { childIds: copy.childIds.map(child => ids.get(child)!) } : {}),
+      ...(copy.attachments ? { attachments: copy.attachments.map(attachment => ({ ...attachment,
+        instanceId: ids.get(attachment.instanceId) ?? attachment.instanceId,
+        target: attachment.target.kind === 'instance' ? { kind: 'instance' as const, instanceId: ids.get(attachment.target.instanceId) ?? attachment.target.instanceId }
+          : attachment.target.kind === 'surface' ? { kind: 'surface' as const, surfaceId: attachment.target.surfaceId === surfaceId ? copiedSurfaceId : attachment.target.surfaceId } : attachment.target,
+      })) } : {}),
     }
-    kernel.persistDocument(result.project, {
-      ...extra,
-      historyEntry: true,
-    })
-    return {
-      ok: true,
-      activatedLocationId: result.activatedLocationId,
+  })
+  const surface: ComponentSurface = { ...structuredClone(source), id: copiedSurfaceId, title: source.title + ' 副本', childIds: [] }
+  if (surface.presentation) surface.presentation.states = surface.presentation.states.map(state => ({ ...state,
+    overrides: Object.fromEntries(Object.entries(state.overrides).map(([id, override]) => [ids.get(id) ?? id, { ...override,
+      ...(override.data !== undefined ? { data: rebindData({ ...project.instances[id], data: override.data }) } : {}) }])),
+    ...(state.order ? { order: state.order.map(id => ids.get(id) ?? id) } : {}),
+  }))
+  if (surface.spatial) {
+    const instanceId = (id: string) => ids.get(id) ?? id
+    surface.spatial.frames = surface.spatial.frames.map(frame => ({ ...frame, id: frameIds.get(frame.id)!,
+      ...(frame.targetInstanceId ? { targetInstanceId: instanceId(frame.targetInstanceId) } : {}) }))
+    surface.spatial.paths = surface.spatial.paths?.map(path => ({ ...path, id: createId(), frameIds: path.frameIds.map(id => frameIds.get(id) ?? id),
+      ...(path.instanceIds ? { instanceIds: path.instanceIds.map(instanceId) } : {}) }))
+    surface.spatial.relations = surface.spatial.relations?.map(relation => ({ ...relation, id: createId(), sourceInstanceId: instanceId(relation.sourceInstanceId), targetInstanceId: instanceId(relation.targetInstanceId) }))
+    surface.spatial.semanticZoom = surface.spatial.semanticZoom?.map(rule => ({ ...rule, id: createId(), instanceIds: rule.instanceIds.map(instanceId) }))
+  }
+  const edits: ComponentEdit[] = [{ type: 'surface.insert', surface, index: project.surfaces.indexOf(source) + 1 }]
+  if (instances.length) edits.push({ type: 'instance.insert', container: { kind: 'surface', surfaceId: copiedSurfaceId }, index: 0,
+    instances, rootIds: source.childIds.map(id => ids.get(id)!) })
+  // Global decorations stay shared; the copied page inherits the source page's scope membership.
+  const visitedGlobals = new Set<string>()
+  const inheritGlobalScope = (id: string) => {
+    if (visitedGlobals.has(id)) return
+    visitedGlobals.add(id)
+    const instance = project.instances[id]
+    if (!instance) return
+    const visibility = instance.visibility
+    if (visibility && visibility.mode !== 'all' && visibility.surfaceIds.includes(surfaceId)) {
+      edits.push({ type: 'instance.patch', instanceId: id, patch: { visibility: { ...visibility,
+        surfaceIds: [...visibility.surfaceIds, copiedSurfaceId] } } })
+    }
+    instance.childIds?.forEach(inheritGlobalScope)
+  }
+  ;[...project.global.underlay, ...project.global.overlay].forEach(inheritGlobalScope)
+  if (project.logic && stateKeys.size) {
+    const logic = structuredClone(project.logic)
+    for (const [from, to] of stateKeys) {
+      const declaration = project.logic.courseState.find(state => state.key === from)
+      if (declaration && !logic.courseState.some(state => state.key === to)) logic.courseState.push({ ...declaration, key: to })
+    }
+    edits.push({ type: 'project.logic.set', logic })
+  }
+  return { edits, surfaceId: copiedSurfaceId }
+}
+
+export function createCourseStructureSlice(kernel: EditorStoreKernel, ports: CourseStructurePorts) {
+  const failure = (reason: string): CourseStructureResult => {
+    kernel.setFeedback({ errorMessage: reason, statusMessage: null })
+    return { ok: false, reason }
+  }
+  const commit = async (edits: ComponentEdit[], message: string, activatedLocationId?: string, captured?: CapturedComponentOperation): Promise<CourseStructureResult> => {
+    try {
+      if (edits.length) {
+        if (captured) await kernel.editCaptured(captured)
+        else await kernel.edit(edits)
+      }
+      kernel.setFeedback({ errorMessage: null, statusMessage: message })
+      return { ok: true, activatedLocationId }
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : '页面操作失败'
+      return failure(reason)
     }
   }
-
   return {
-    persistCourseProjectCommand,
-
-    addCourseContent(
-      action: CourseEditorPrimaryAction | CourseEditorDropdownAction,
-      options: { surfaceId?: string } = {},
-    ): CourseStructureResult {
-      const project = kernel.tryReadDocument()
-      if (!project) return { ok: false, reason: '当前会话没有课程工程' }
-      const expectedRevision = project.revision
-      let result: CourseLocationCommandResult
-      if (action === 'scene') {
-        if (!options.surfaceId) {
-          kernel.setFeedback({ errorMessage: '找不到当前 Slide 表面', statusMessage: null })
-          return { ok: false, reason: '找不到当前 Slide 表面' }
-        }
-        const slideSurface = project.surfaces.find(
-          (surface) => surface.id === options.surfaceId && surface.type === 'slide',
-        )
-        const sceneCount = slideSurface?.type === 'slide' ? slideSurface.scenes.length : 0
-        result = addCourseScene(project, {
-          surfaceId: options.surfaceId,
-          title: `场景 ${sceneCount + 1}`,
-          expectedRevision,
-        })
-      } else if (action === 'slide-page') {
-        result = addCourseSlidePage(project, { expectedRevision })
-      } else if (action === 'flow-page') {
-        result = addCourseFlowPage(project, { expectedRevision })
-      } else {
-        result = addCourseSpatialPage(project, { expectedRevision })
+    async addCourseContent(action: CourseEditorPrimaryAction | CourseEditorDropdownAction, options: { surfaceId?: string } = {}): Promise<CourseStructureResult> {
+      const project = kernel.readDocument()
+      const kind = action === 'flow-page' ? 'flow' : action === 'spatial-page' ? 'spatial' : 'slide'
+      const current = project.surfaces.find(surface => surface.id === options.surfaceId)
+      const surface = createCourseSurface(project, { kind, referenceSurfaceId: current?.id })
+      const index = action === 'scene' && current ? project.surfaces.indexOf(current) + 1 : project.surfaces.length
+      return commit([{ type: 'surface.insert', surface, index }], '已新增页面', surface.id)
+    },
+    addScene(): Promise<CourseStructureResult> {
+      const project = kernel.readDocument()
+      const surface = project.surfaces.find(value => value.id === ports.readActiveLocationId())
+      return this.addCourseContent(surface?.kind === 'flow' ? 'flow-page' : surface?.kind === 'spatial' ? 'spatial-page' : 'scene', { surfaceId: surface?.id })
+    },
+    reorderCourseSurfaces(surfaceIds: string[]): Promise<CourseStructureResult> {
+      const project = kernel.readDocument()
+      if (surfaceIds.length !== project.surfaces.length || new Set(surfaceIds).size !== surfaceIds.length || surfaceIds.some(id => !project.surfaces.some(s => s.id === id))) return Promise.resolve(failure('页面顺序已改变，请重新拖动'))
+      const order = project.surfaces.map(surface => surface.id)
+      const edits: ComponentEdit[] = []
+      surfaceIds.forEach((id, index) => { const previous = order.indexOf(id); if (previous !== index) { edits.push({ type: 'surface.move', surfaceId: id, index }); order.splice(previous, 1); order.splice(index, 0, id) } })
+      return commit(edits, '已调整页面顺序')
+    },
+    captureCourseSurfaceDelete(surfaceId: string): CapturedComponentOperation {
+      const target = kernel.captureTarget()
+      assertCourseSurfaceRemoval(target.project)
+      return kernel.capture([{ type: 'surface.remove', surfaceId }], target)
+    },
+    deleteCourseSurface(surfaceId: string, captured?: CapturedComponentOperation): Promise<CourseStructureResult> {
+      if (!captured) {
+        try { assertCourseSurfaceRemoval(kernel.readDocument()) }
+        catch { return Promise.resolve(failure(LAST_COURSE_PAGE_REASON)) }
       }
-      if (!result.ok) {
-        kernel.setFeedback({ errorMessage: result.reason, statusMessage: null })
-        return { ok: false, reason: result.reason }
-      }
-      const statusMessage = action === 'scene'
-        ? '已新建场景'
-        : action === 'slide-page'
-          ? '已新增演示页面'
-          : action === 'flow-page'
-            ? '已新增流式讲义'
-            : '已新增无限画布'
-      return persistCourseProjectCommand(result, { statusMessage })
+      return commit([{ type: 'surface.remove', surfaceId }], '已删除页面', undefined, captured)
     },
-
-    addScene(): CourseStructureResult {
-      const project = kernel.tryReadDocument()
-      if (!project) return { ok: false, reason: '当前会话没有课程工程' }
-      const layout = deriveCourseEditorLayout(project, ports.readActiveLocationId() ?? undefined)
-      if (layout.primary.action === 'scene' && layout.primary.surfaceId) {
-        return this.addCourseContent('scene', { surfaceId: layout.primary.surfaceId })
-      }
-      return this.addCourseContent(layout.primary.action)
-    },
-
-    reorderCourseSurfaces(surfaceIds: string[]): CourseStructureResult {
-      const project = kernel.tryReadDocument()
-      if (!project) return { ok: false, reason: '当前会话没有课程工程' }
-      return persistCourseProjectCommand(applyReorderCourseSurfaces(project, surfaceIds, {
-        expectedRevision: project.revision,
-        activeLocationId: ports.readActiveLocationId() ?? undefined,
-      }))
-    },
-
-    deleteCourseSurface(surfaceId: string): CourseStructureResult {
-      const project = kernel.tryReadDocument()
-      if (!project) return { ok: false, reason: '当前会话没有课程工程' }
-      const activeLocationId = ports.readActiveLocationId() ?? undefined
-      const result = applyDeleteCourseSurface(project, surfaceId, {
-        expectedRevision: project.revision,
-        activeLocationId,
-      })
-      if (!result.ok) {
-        kernel.setFeedback({ errorMessage: result.reason, statusMessage: null })
-        return { ok: false, reason: result.reason }
-      }
-      return persistCourseProjectCommand(result, { statusMessage: '已删除页面' })
-    },
-
-    moveCourseSlideScene(
-      locationId: string,
-      targetSurfaceId: string,
-      toIndex?: number,
-    ): CourseStructureResult {
-      const project = kernel.tryReadDocument()
-      if (!project) return { ok: false, reason: '当前会话没有课程工程' }
-      const result = applyMoveCourseSlideScene(project, locationId, targetSurfaceId, {
-        expectedRevision: project.revision,
-        toIndex,
-        activeLocationId: ports.readActiveLocationId() ?? undefined,
-      })
-      if (!result.ok) {
-        kernel.setFeedback({ errorMessage: result.reason, statusMessage: null })
-        return { ok: false, reason: result.reason }
-      }
-      return persistCourseProjectCommand(result, { statusMessage: '已调整演示页面' })
-    },
-
-    deleteCourseLocation(locationId: string): CourseStructureResult {
-      const project = kernel.tryReadDocument()
-      if (!project) return { ok: false, reason: '当前会话没有课程工程' }
-      const result = applyDeleteCourseLocation(project, locationId, {
-        expectedRevision: project.revision,
-        activeLocationId: ports.readActiveLocationId() ?? undefined,
-      })
-      if (!result.ok) {
-        kernel.setFeedback({ errorMessage: result.reason, statusMessage: null })
-        return { ok: false, reason: result.reason }
-      }
-      return persistCourseProjectCommand(result, { statusMessage: '场景已删除' })
-    },
-
-    /** Copies a Slide scene right after itself (M21 page bar); the caller activates the copy. */
-    duplicateCourseLocation(locationId: string): CourseStructureResult {
-      const project = kernel.tryReadDocument()
-      if (!project) return { ok: false, reason: '当前会话没有课程工程' }
-      return persistCourseProjectCommand(applyDuplicateCourseLocation(project, locationId, {
-        expectedRevision: project.revision,
-      }), { statusMessage: '已复制场景' })
-    },
-
-    renameCourseLocation(locationId: string, label: string): CourseStructureResult {
-      const project = kernel.tryReadDocument()
-      if (!project) return { ok: false, reason: '当前会话没有课程工程' }
-      return persistCourseProjectCommand(applyRenameCourseLocation(project, locationId, label, {
-        expectedRevision: project.revision,
-      }), { statusMessage: '已重命名' })
-    },
-
-    /** Renames a whole page (a Flow or Spatial surface, or a Slide page group). */
-    renameCourseSurface(surfaceId: string, name: string): CourseStructureResult {
-      const project = kernel.tryReadDocument()
-      if (!project) return { ok: false, reason: '当前会话没有课程工程' }
-      let next: CourseProjectDocument
+    deleteCourseLocation(surfaceId: string, captured?: CapturedComponentOperation): Promise<CourseStructureResult> { return this.deleteCourseSurface(surfaceId, captured) },
+    async duplicateCourseLocation(surfaceId: string): Promise<CourseStructureResult> {
       try {
-        next = applyRenameCourseSurface(project, surfaceId, name.trim())
-      } catch (error) {
-        const reason = error instanceof Error && error.message ? '名称无效或页面已不存在' : '重命名失败'
-        kernel.setFeedback({ errorMessage: reason, statusMessage: null })
-        return { ok: false, reason }
-      }
-      if (next === project) return { ok: true }
-      kernel.persistDocument(next, { historyEntry: true, statusMessage: '已重命名' })
-      return { ok: true }
+        const copy = duplicateSurfaceEdits(kernel.readDocument(), surfaceId)
+        return await commit(copy.edits, '已复制页面', copy.surfaceId)
+      } catch (error) { return failure(error instanceof Error ? error.message : '页面复制失败') }
     },
-
-    resizeSlideCanvas(next: SlideCanvasSize): CourseStructureResult {
-      const project = kernel.tryReadDocument()
-      if (!project) return { ok: false, reason: '当前会话没有课程工程' }
-      if (!isValidSlideCanvas(next)) {
-        kernel.setFeedback({ errorMessage: '画布宽高须为 320–8192 的整数', statusMessage: null })
-        return { ok: false, reason: '画布尺寸无效' }
-      }
-      if (sameSlideCanvas(courseSlideCanvas(project), next)) return { ok: true }
-      const resized = resizeCourseSlideCanvas(project, next)
-      const committed = courseProjectDocumentSchema.parse({
-        ...resized,
-        revision: project.revision + 1,
-        updatedAt: new Date().toISOString(),
-      })
-      const saved = kernel.persistDocument(committed, {
-        historyEntry: true,
-        statusMessage: '已修改画布尺寸',
-      })
-      if (!saved) {
-        kernel.setFeedback({ errorMessage: '当前页面不能修改画布尺寸', statusMessage: null })
-        return { ok: false, reason: '当前页面不能修改画布尺寸' }
-      }
-      return { ok: true }
+    renameCourseLocation(surfaceId: string, title: string): Promise<CourseStructureResult> { return this.renameCourseSurface(surfaceId, title) },
+    renameCourseSurface(surfaceId: string, title: string): Promise<CourseStructureResult> {
+      return commit([{ type: 'surface.title.set', surfaceId, title: title.trim() }], '已重命名')
     },
-
-    resizeSlideSceneCanvas(surfaceId: string, sceneId: string, canvas: SlideCanvasSize | null): CourseStructureResult {
-      const project = kernel.tryReadDocument()
-      if (!project) return { ok: false, reason: '当前会话没有课程工程' }
-      try {
-        const resized = resizeSlideSceneCanvas(project, surfaceId, sceneId, canvas)
-        if (resized === project) return { ok: true }
-        const committed = courseProjectDocumentSchema.parse({
-          ...resized,
-          revision: project.revision + 1,
-          updatedAt: new Date().toISOString(),
-        })
-        const saved = kernel.persistDocument(committed, {
-          historyEntry: true,
-          statusMessage: canvas === null ? '本页已恢复课程默认尺寸' : '已修改本页尺寸',
-        })
-        if (saved) return { ok: true }
-        throw new Error('当前页面不能修改画布尺寸')
-      } catch (error) {
-        const reason = error instanceof Error ? error.message : '页面尺寸修改失败'
-        kernel.setFeedback({ errorMessage: reason, statusMessage: null })
-        return { ok: false, reason }
-      }
+    resizeSlideCanvas(designSize: SlideCanvasSize): Promise<CourseStructureResult> {
+      const edits: ComponentEdit[] = kernel.readDocument().surfaces.filter(surface => surface.kind === 'slide').map(surface => ({ type: 'surface.designSize.set', surfaceId: surface.id, designSize }))
+      return commit(edits, '已修改画布尺寸')
     },
-
-    updateCourseBackground(patch: CourseBackgroundPatch): CourseStructureResult {
-      const project = kernel.tryReadDocument()
-      if (!project) return { ok: false, reason: '当前会话没有课程工程' }
-      const result = applyCourseBackgroundUpdate(project, patch, {
-        expectedRevision: project.revision,
-      })
-      if (!result.ok) {
-        kernel.setFeedback({ errorMessage: result.reason, statusMessage: null })
-        return { ok: false, reason: result.reason }
-      }
-      if (!result.historyEntry) return { ok: true }
-      kernel.persistDocument(result.project, {
-        historyEntry: true,
-        statusMessage: '已更新课程背景',
-      })
-      return { ok: true }
+    resizeSlideSceneCanvas(surfaceId: string, _sceneId: string, designSize: SlideCanvasSize | null): Promise<CourseStructureResult> {
+      return commit([{ type: 'surface.designSize.set', surfaceId, designSize }], designSize ? '已修改本页尺寸' : '已恢复默认尺寸')
     },
   }
 }

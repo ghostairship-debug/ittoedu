@@ -1,0 +1,54 @@
+{
+  "description": "按唯一 oldText 或明确 range 局部修改 UTF-8 文件，expectedVersion 可省略；提供时仍校验版本。原文不存在、匹配不唯一或版本冲突时，先读当前内容修正，勿重复旧补丁。已打开文件只提交文档事务。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "expectedVersion": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "newText": {
+        "type": "string"
+      },
+      "oldText": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "path": {
+        "maxLength": 32767,
+        "minLength": 1,
+        "type": "string"
+      },
+      "range": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "to": {
+            "maximum": 9007199254740991,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "path",
+      "oldText",
+      "newText"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "name": "file.patch",
+  "version": 1
+}

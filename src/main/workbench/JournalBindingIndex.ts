@@ -37,7 +37,7 @@ export class JournalBindingIndex {
         || !Number.isSafeInteger(entry.offset) || entry.offset < 0
         || !Number.isSafeInteger(entry.sequence) || entry.sequence < 0
         || !Number.isSafeInteger(entry.revision) || !entry.epoch
-        || !['text', 'markdown', 'course-v9'].includes(entry.kind)
+        || !['text', 'markdown', 'course-v9', 'course-v10'].includes(entry.kind)
         || !entry.binding || !['file', 'untitled'].includes(entry.binding.kind)
         || entry.binding.kind === 'file' && (!path.isAbsolute(entry.binding.path)
           || !Number.isSafeInteger(entry.binding.bindingVersion))) return null

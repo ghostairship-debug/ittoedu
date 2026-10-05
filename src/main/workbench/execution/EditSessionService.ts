@@ -4,9 +4,7 @@ import type { ToolTarget } from '../../../shared/workbench/tools'
 import { DocumentRegistry } from '../../../core/documents/DocumentRegistry'
 import type { DocumentToolGateway } from '../../../core/tools/DocumentToolGateway'
 import { documentDigest } from '../../../core/documents/documentDigest'
-import { mapMarkdownRange, readTarget, targetFootprint } from '../../../core/tools/ToolTargets'
-import { locateCourseLayer } from '../../../core/drivers/course/layerProperties'
-import { isRichTextFlowBlock, resolveFlowBlock } from '../../../core/tools/flowDocumentModel'
+import { courseInstanceContext, mapMarkdownRange, readCourseInstanceText, readTarget, targetFootprint } from '../../../core/tools/ToolTargets'
 
 type EditGateway = Pick<DocumentToolGateway, 'resolveEditTarget' | 'operationIdentity'>
 interface Entry {
@@ -30,16 +28,9 @@ export class EditSessionError extends Error {
 function editable(model: DocumentModel, target: ToolTarget): EditTarget {
   readTarget(model, target)
   if (target.kind === 'markdown-range') return target
-  if (model.kind !== 'course-v9') throw new Error('正文目标不属于课程文档')
-  if (target.kind === 'course-object') {
-    const item = locateCourseLayer(model.project, target.itemId)?.item
-    if (!item || item.kind !== 'native' || item.content.nativeType !== 'text' || item.locked) throw new Error('当前对象不是可编辑的 Native 文字')
+  if (target.kind === 'course-instance') {
+    if (courseInstanceContext(model, target).instance.locked || readCourseInstanceText(model, target) === null) throw new Error('当前对象不是可编辑的文字字段')
     return target
-  }
-  if (target.kind === 'flow-range') return target
-  if (target.kind === 'flow-block') {
-    const { block } = resolveFlowBlock(model.project, target)
-    if (isRichTextFlowBlock(block) || block.type === 'callout' || block.type === 'code') return target
   }
   throw new Error('此目标不支持正文生成预览')
 }

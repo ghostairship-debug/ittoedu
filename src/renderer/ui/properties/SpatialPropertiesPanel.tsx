@@ -1,21 +1,14 @@
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
-import type {
-  LayerItem,
-  SpatialPathDocument,
-  SpatialPathStyle,
-  SpatialRelationKind,
-  SpatialSemanticZoomRule,
-} from '../../../shared/courseProjectTypes'
+import type { ComponentInstance, ComponentSpatialAuthoring, ComponentSpatialPose } from '../../../shared/contracts/component-platform'
+type SpatialPathDocument = NonNullable<ComponentSpatialAuthoring['paths']>[number]
+type SpatialPathStyle = NonNullable<SpatialPathDocument['style']>
+type SpatialRelationKind = NonNullable<ComponentSpatialAuthoring['relations']>[number]['kind']
+type SpatialSemanticZoomRule = NonNullable<ComponentSpatialAuthoring['semanticZoom']>[number]
 import {
-  resolveEffectiveBackground,
   type CourseBackgroundFields,
   type SpatialSurfaceBackgroundFields,
 } from '../../../shared/effectiveBackground'
-import {
-  spatialEditorWorldLayerItems,
-  type SpatialEditorView,
-  type SpatialSessionCamera,
-} from '../../course/spatialEditorView'
+import type { propertiesEffectiveBackground } from './componentProperties'
 import { SpatialCameraPanel } from '../SpatialCameraPanel'
 import { SpatialPathEditor } from '../SpatialPathEditor'
 import { FlowSpatialInteractionUnavailableSection } from './FlowSpatialInteractionUnavailableSection'
@@ -30,6 +23,7 @@ export interface SpatialPropertiesCommands {
   readonly setShowCameraFrames: (show: boolean) => void
   readonly addCameraFrame: () => void
   readonly renameCameraFrame: (frameId: string, name: string) => void
+  readonly updateCameraFrameTarget?: (frameId: string, instanceId: string | null) => void
   readonly reorderCameraFrame: (frameId: string, toIndex: number) => void
   readonly deleteCameraFrame: (frameId: string) => void
   readonly setHome: () => void
@@ -38,7 +32,7 @@ export interface SpatialPropertiesCommands {
   readonly fitWorldContent: () => void
   readonly setPlaybackPathId: (pathId: string | null) => void
   readonly addSemanticZoomRule: (rule: {
-    layerItemIds: string[]
+    instanceIds: string[]
     minZoom: number
     maxZoom: number
     visible: boolean
@@ -49,20 +43,22 @@ export interface SpatialPropertiesCommands {
   ) => void
   readonly deleteSemanticZoomRule: (ruleId: string) => void
   readonly addPath: (input: {
-    name: string
-    layerItemIds: string[]
+    title: string
+    instanceIds: string[]
+    frameIds?: string[]
     style?: SpatialPathStyle
-  }) => void
+  }) => void | Promise<unknown>
   readonly renamePath: (pathId: string, name: string) => void
   readonly updatePathStyle: (pathId: string, style: SpatialPathStyle) => void
-  readonly reorderPathWaypoints: (pathId: string, layerItemIds: string[]) => void
+  readonly reorderPathWaypoints: (pathId: string, instanceIds: string[]) => void
+  readonly reorderPathFrames?: (pathId: string, frameIds: string[]) => void
   readonly deletePath: (pathId: string) => void
   readonly addRelation: (input: {
-    sourceLayerItemId: string
-    targetLayerItemId: string
+    sourceInstanceId: string
+    targetInstanceId: string
     kind: SpatialRelationKind
     label?: string
-  }) => void
+  }) => void | Promise<unknown>
   readonly updateRelationLabel: (relationId: string, label: string) => void
   readonly updateRelationKind: (relationId: string, kind: SpatialRelationKind) => void
   readonly deleteRelation: (relationId: string) => void
@@ -79,12 +75,22 @@ export interface SpatialPropertiesDraftBindings {
 
 export interface SpatialPropertiesContext {
   readonly kind: SpatialPropertiesKind
-  readonly view: SpatialEditorView
+  readonly view: {
+    readonly surfaceId: string
+    readonly surfaceTitle: string
+    readonly spatial: ComponentSpatialAuthoring
+    readonly worldInstances: readonly ComponentInstance[]
+    readonly backgroundMode: 'inherit' | 'own'
+    readonly backgroundColor?: string
+    readonly backgroundAssetId?: string | null
+    readonly effectiveBackground: ReturnType<typeof propertiesEffectiveBackground>
+  }
   /** Course-wide background fields, needed only to resolve the Spatial surface's effective preview. */
   readonly course: CourseBackgroundFields
   readonly assets: Readonly<Record<string, AssetMeta>>
-  readonly sessionCamera: SpatialSessionCamera
+  readonly sessionCamera: ComponentSpatialPose
   readonly showCameraFrames: boolean
+  readonly activeCameraFrameId: string | null
   readonly playbackPathId: string | null
   readonly selectedPathId: string | null
   readonly selectedRelationId: string | null
@@ -96,17 +102,6 @@ export interface SpatialPropertiesContext {
   } | null
 }
 
-function worldLayerItemsFromView(view: SpatialEditorView): LayerItem[] {
-  return spatialEditorWorldLayerItems(view).map((item) => item as LayerItem)
-}
-
-function pathsFromView(view: SpatialEditorView): SpatialPathDocument[] {
-  return view.worldGraph.paths.map((entry) => entry.path as SpatialPathDocument)
-}
-
-function semanticZoomFromView(view: SpatialEditorView): SpatialSemanticZoomRule[] {
-  return view.visibilityRules.map((rule) => rule as SpatialSemanticZoomRule)
-}
 
 function SpatialPathRelationFields({
   context,
@@ -119,9 +114,10 @@ function SpatialPathRelationFields({
   return (
     <SpatialPathEditor
       surfaceTitle={view.surfaceTitle}
-      worldLayerItems={worldLayerItemsFromView(view)}
-      paths={pathsFromView(view)}
-      relations={view.worldGraph.relations.map((entry) => entry.relation)}
+      worldInstances={view.worldInstances}
+      paths={view.spatial.paths ?? []}
+      frames={view.spatial.frames}
+      relations={view.spatial.relations ?? []}
       pageSection={pageSection}
       selectedPathId={context.selectedPathId}
       selectedRelationId={context.selectedRelationId}
@@ -133,6 +129,7 @@ function SpatialPathRelationFields({
       onRenamePath={commands.renamePath}
       onUpdatePathStyle={commands.updatePathStyle}
       onReorderPathWaypoints={commands.reorderPathWaypoints}
+      onReorderPathFrames={commands.reorderPathFrames}
       onDeletePath={commands.deletePath}
       onAddRelation={commands.addRelation}
       onUpdateRelationLabel={commands.updateRelationLabel}
@@ -144,15 +141,7 @@ function SpatialPathRelationFields({
 
 function SpatialPageProperties({ context }: { context: SpatialPropertiesContext }) {
   const { view, sessionCamera, commands } = context
-  const effective = resolveEffectiveBackground({
-    owner: 'spatial-surface',
-    course: context.course,
-    surface: {
-      backgroundMode: view.backgroundMode,
-      backgroundColor: view.backgroundColor,
-      backgroundAssetId: view.backgroundAssetId,
-    },
-  })
+  const effective = view.effectiveBackground
   return (
     <>
       <SharedBackgroundProperties
@@ -173,15 +162,15 @@ function SpatialPageProperties({ context }: { context: SpatialPropertiesContext 
       />
       <SpatialCameraPanel
         surfaceTitle={view.surfaceTitle}
-        frames={[...view.camera.frames]}
-        home={view.camera.home}
+        frames={view.spatial.frames}
+        home={view.spatial.home}
         sessionCamera={sessionCamera}
-        activeCameraFrameId={view.camera.activeFrameId}
+        activeCameraFrameId={context.activeCameraFrameId}
         showCameraFrames={context.showCameraFrames}
-        worldLayerItems={worldLayerItemsFromView(view)}
-        paths={pathsFromView(view)}
+        worldInstances={view.worldInstances}
+        paths={view.spatial.paths ?? []}
         playbackPathId={context.playbackPathId}
-        semanticZoomRules={semanticZoomFromView(view)}
+        semanticZoomRules={view.spatial.semanticZoom ?? []}
         sessionCameraLabel={`${Math.round(sessionCamera.zoom * 100)}%`}
         draftBindingKey={context.draftBindings.surface}
         frameDraftBindings={context.draftBindings.cameraFrames}
@@ -190,6 +179,7 @@ function SpatialPageProperties({ context }: { context: SpatialPropertiesContext 
         onShowCameraFramesChange={commands.setShowCameraFrames}
         onAddFrame={commands.addCameraFrame}
         onRenameFrame={commands.renameCameraFrame}
+        onUpdateFrameTarget={commands.updateCameraFrameTarget}
         onReorderFrame={commands.reorderCameraFrame}
         onDeleteFrame={commands.deleteCameraFrame}
         onSetHome={commands.setHome}

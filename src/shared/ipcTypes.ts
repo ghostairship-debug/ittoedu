@@ -95,7 +95,20 @@ export interface PreviewNetworkPolicyInput {
   remoteAssetUrls: string[]
 }
 
+export interface ComponentBootstrapInput {
+  leaseId: string
+  html: string
+  connectOrigins?: string[]
+  remoteAssetUrls?: string[]
+}
+export interface ComponentBootstrapLease { leaseId: string; url: string }
+
 export type EditorClipboardCommand = 'cut' | 'copy' | 'paste' | 'paste-plain'
+
+export type CaptureObservationInput = { x: number; y: number; width: number; height: number } | {
+  kind: 'published'; published: import('./contracts/component-platform/published').PublishedCourseV3;
+  surfaceId: string; stateId?: string | null; instanceId?: string; spatialFrameId?: string;
+}
 
 export interface DesktopAPI {
   launchFiles?(input: { type: 'list' } | { type: 'ack'; id: string }): Promise<Array<{ id: string; path: string }>>
@@ -119,10 +132,11 @@ export interface DesktopAPI {
   lessonFiles?: import('./lessonDocumentDesktop').LessonDocumentDesktopAPI
   lesson?(input: import('./lessonDesktopContract').LessonDesktopRequest): Promise<import('./lessonDesktopContract').LessonDesktopResult>
   legacyPpt(input: { operation: 'select' | 'cancel' }): Promise<LegacyPptImportResult | null>
-  captureAuthoringObservation?(input: { x: number; y: number; width: number; height: number }): Promise<{ dataUrl: string; capturedAt: number; width: number; height: number }>
+  captureAuthoringObservation?(input: CaptureObservationInput): Promise<{ dataUrl: string; capturedAt: number; width: number; height: number }>
   dynamicAdmission?(input: DynamicAdmissionRequest): Promise<DynamicAdmissionResult>
   materials(input: MaterialRequest): Promise<MaterialRecordV1[]>
   openProject(): Promise<OpenProjectFileResult | null>
+  compileComponent(input: import('../core/components/compilation/types').ComponentCompilationInput): Promise<import('../core/components/compilation/types').ComponentCompilationResult>
   listRecentProjects(): Promise<RecentProjectEntry[]>
   openRecentProject(input: { path: string }): Promise<OpenProjectFileResult>
   confirmProjectOpen(input: ConfirmProjectOpenInput): Promise<void>
@@ -149,6 +163,8 @@ export interface DesktopAPI {
     packageId: string
     version: string
   }): Promise<ComponentCatalogPackageFile>
+  installComponentLibraryEntry(input: { bytes: Uint8Array }): Promise<ComponentCatalogSnapshot>
+  deleteComponentCatalogPackage(input: { sourceId: string; packageId: string; version: string }): Promise<ComponentCatalogSnapshot>
   /** Deletes one HTML component of the managed library (“我的资产库”). */
   deleteComponentCatalogHtmlComponent?(input: {
     sourceId: string
@@ -176,6 +192,8 @@ export interface DesktopAPI {
   }): Promise<{ path: string } | null>
   setPreviewNetworkPolicy(input: PreviewNetworkPolicyInput): Promise<void>
   releasePreviewNetworkPolicy(input: { leaseId: string }): Promise<void>
+  createComponentBootstrap?(input: ComponentBootstrapInput): Promise<ComponentBootstrapLease>
+  releaseComponentBootstrap?(input: { leaseId: string }): Promise<void>
   setDirtyState(dirty: boolean): Promise<void>
   onRequestSave(handler: () => void): () => void
   onRequestFocusDocument?(handler: (documentId: string) => void): () => void
@@ -190,6 +208,7 @@ export interface DesktopAPI {
 }
 
 export const IPC_CHANNELS = {
+  componentCompilation: 'component:compile',
   htmlImport: 'html-import:operate',
   imageResults: 'image-results:operate',
   imageResultsChanged: 'image-results:changed',
@@ -236,6 +255,8 @@ export const IPC_CHANNELS = {
   selectComponentCatalogSource: 'component-catalog:select-source',
   setComponentCatalogSourceTrust: 'component-catalog:set-source-trust',
   readComponentCatalogPackage: 'component-catalog:read-package',
+  installComponentLibraryEntry: 'component-catalog:install-entry',
+  deleteComponentCatalogPackage: 'component-catalog:delete-package',
   deleteComponentCatalogHtmlComponent: 'component-catalog:delete-html-component',
   peekProjectArchive: 'project:peek-archive',
   exportHtml: 'export:write-html',
@@ -247,6 +268,8 @@ export const IPC_CHANNELS = {
   previewNetworkDocumentToken: 'preview-network:document-token',
   setPreviewNetworkPolicy: 'preview-network:set',
   releasePreviewNetworkPolicy: 'preview-network:release',
+  createComponentBootstrap: 'component-bootstrap:create',
+  releaseComponentBootstrap: 'component-bootstrap:release',
   dirtyState: 'app:dirty-state',
   editorClipboard: 'editor:clipboard',
   requestSave: 'app:request-save',

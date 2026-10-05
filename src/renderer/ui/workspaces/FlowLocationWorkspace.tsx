@@ -1,181 +1,28 @@
-import type { FlowDocumentDraft } from '../../authoring/flowDocumentDraft'
-import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import { useState, type CSSProperties } from 'react'
 import { MousePointer2, Play } from 'lucide-react'
-import type { ComponentPackageData } from '../../../shared/componentTypes'
-import type { AssetMeta } from '../../../shared/contracts/media-v1'
-import type { FlowEditorSelection } from '../../course/flowEditorSlice'
-import {
-  assertActiveFlowEditorView,
-  type FlowEditorView,
-} from '../../course/flowEditorView'
-import type { FlowTextEditSession } from '../../authoring/flowTextEdit'
-import type { CourseAuthoringSessionToken } from '../../authoring/courseAuthoringSession'
-import {
-} from '../coursePlayerTryRun'
-import {
-  beginSerializedSessionMount,
-  enqueueSerial,
-} from '../serializedSessionMount'
+import type { FlowWorkspaceProps } from '../FlowWorkspace'
 import { FlowWorkspace } from '../FlowWorkspace'
 import { FLOW_WORKSPACE_HEADER_HEIGHT } from '../FlowBlockContextToolbar'
-import type { FlowCurrentSessionCommandPort } from '../flow/useFlowTextAuthoringController'
-import type { WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
-import type { ImportedImageAsset } from '../../project/assetManager'
-import type { FlowWorkspaceProps } from '../FlowWorkspace'
-
 export type FlowCanvasMode = 'edit' | 'run'
 export type FlowEditingScope = 'scene' | 'global'
-export interface FlowTryRunSession {
-  destroy(): void | Promise<void>
+export interface FlowTryRunSession { destroy(): void | Promise<void> }
+export interface FlowLocationWorkspaceProps extends FlowWorkspaceProps {
+  canvasMode: FlowCanvasMode
+  editingScope: FlowEditingScope
+  onCanvasModeChange(mode: FlowCanvasMode): void
 }
-
-export interface FlowLocationWorkspaceProps {
-  readonly publishCompositionContent?: FlowWorkspaceProps['publishCompositionContent']
-  readonly onEditComposition?: FlowWorkspaceProps['onEditComposition']
-  readonly onCompositionEdit?: FlowWorkspaceProps['onCompositionEdit']
-  readonly onCompositionSelection?: FlowWorkspaceProps['onCompositionSelection']
-  readonly selectedCompositionNode?: FlowWorkspaceProps['selectedCompositionNode']
-  readonly documentId?: string | null
-  readonly view: FlowEditorView
-  readonly sessionToken: CourseAuthoringSessionToken
-  readonly assets: Readonly<Record<string, AssetMeta>>
-  readonly selection: FlowEditorSelection | null
-  readonly documentDraft?: FlowDocumentDraft | null
-  readonly textEdit: FlowTextEditSession | null
-  readonly previewTextEdit?: FlowTextEditSession | null
-  readonly canvasMode: FlowCanvasMode
-  readonly editingScope: FlowEditingScope
-  readonly assetFiles: Record<string, Uint8Array>
-  readonly componentPackages: Record<string, ComponentPackageData>
-  readonly commands: FlowCurrentSessionCommandPort
-  readonly onCanvasModeChange: (mode: FlowCanvasMode) => void
-  readonly onMountTryRun: (container: HTMLElement) => Promise<FlowTryRunSession>
-  readonly onDropWorkspaceMedia?: WorkspaceMediaDropHandler
-  readonly onSelectImageAsset: () => Promise<ImportedImageAsset | null>
-  readonly onStatus?: (message: string) => void
-}
-
-export function FlowLocationWorkspace({
-  documentId,
-  view,
-  sessionToken,
-  assets,
-  selection,
-  textEdit,
-  documentDraft,
-  previewTextEdit,
-  canvasMode,
-  editingScope,
-  assetFiles,
-  componentPackages,
-  commands,
-  onCanvasModeChange,
-  onMountTryRun,
-  onDropWorkspaceMedia,
-  onSelectImageAsset,
-  onStatus,
-  publishCompositionContent,
-  onEditComposition,
-  onCompositionEdit,
-  onCompositionSelection,
-  selectedCompositionNode,
-}: FlowLocationWorkspaceProps) {
+/** The original shell keeps a single mounted body while switching edit/run. R0 owns every implementation. */
+export function FlowLocationWorkspace(props: FlowLocationWorkspaceProps) {
   const [toolbarContainer, setToolbarContainer] = useState<HTMLDivElement | null>(null)
-  const tryRunRef = useRef<HTMLDivElement>(null)
-  const tryRunMountChainRef = useRef(Promise.resolve())
-  const hostRef = useRef<FlowTryRunSession | null>(null)
-
-  useEffect(() => {
-    const container = tryRunRef.current
-    if (!container) return
-    if (canvasMode !== 'run') {
-      const leftover = hostRef.current
-      hostRef.current = null
-      if (leftover) enqueueSerial(tryRunMountChainRef, async () => {
-        await leftover.destroy()
-      })
-      return
-    }
-    return beginSerializedSessionMount(tryRunMountChainRef, () => onMountTryRun(container), {
-      onReady: (mounted) => {
-        hostRef.current = mounted
-      },
-      onCleanup: () => {
-        hostRef.current = null
-      },
-    })
-  }, [canvasMode, onMountTryRun, view])
-
-  useEffect(() => () => {
-    enqueueSerial(tryRunMountChainRef, async () => {
-      await hostRef.current?.destroy()
-      hostRef.current = null
-    })
-  }, [])
-
-  assertActiveFlowEditorView(view)
-
-  return (
-    <main
-      className={`workspace workspace--${canvasMode} workspace--flow`}
-      data-testid="flow-workspace-shell"
-      data-flow-not-slide-stage="true"
-      style={{ '--flow-workspace-header-height': `${FLOW_WORKSPACE_HEADER_HEIGHT}px` } as CSSProperties}
-    >
-      <div ref={setToolbarContainer} className="flow-workspace-toolbar-host" data-testid="flow-workspace-toolbar-host" />
-      <div className="canvas-mode-switch" role="group" aria-label="画布模式">
-        <button
-          type="button"
-          className={canvasMode === 'edit' ? 'canvas-mode-switch__active' : ''}
-          aria-pressed={canvasMode === 'edit'}
-          onClick={() => onCanvasModeChange('edit')}
-        >
-          <MousePointer2 size={13} />编辑状态
-        </button>
-        <button
-          type="button"
-          className={canvasMode === 'run' ? 'canvas-mode-switch__active' : ''}
-          aria-pressed={canvasMode === 'run'}
-          onClick={() => onCanvasModeChange('run')}
-        >
-          <Play size={13} />当前位置试运行
-        </button>
-      </div>
-      <div className={`canvas-label${editingScope === 'global' ? ' canvas-label--global' : ''}`}>
-        {editingScope === 'global' ? '全局层 · 视口浮层' : view.surfaceTitle}
-      </div>
-      <div className="canvas-viewport">
-        {canvasMode === 'edit' ? (
-          <FlowWorkspace
-            documentId={documentId}
-            toolbarContainer={toolbarContainer}
-            view={view}
-            sessionToken={sessionToken}
-            assets={assets}
-            selection={selection}
-            textEdit={textEdit}
-            documentDraft={documentDraft}
-            previewTextEdit={previewTextEdit}
-            commands={commands}
-            assetFiles={assetFiles}
-            componentPackages={componentPackages}
-            onDropWorkspaceMedia={onDropWorkspaceMedia}
-            onSelectImageAsset={onSelectImageAsset}
-            onStatus={onStatus}
-            publishCompositionContent={publishCompositionContent}
-            onEditComposition={onEditComposition}
-            onCompositionEdit={canvasMode === 'edit' ? onCompositionEdit : undefined}
-            onCompositionSelection={canvasMode === 'edit' ? onCompositionSelection : undefined}
-            selectedCompositionNode={canvasMode === 'edit' ? selectedCompositionNode : null}
-          />
-        ) : null}
-        <div
-          ref={tryRunRef}
-          className="flow-try-run-host"
-          data-testid="flow-try-run-host"
-          hidden={canvasMode !== 'run'}
-        />
-      </div>
-    </main>
-  )
+  const surface = props.project.surfaces.find(value => value.id === props.surfaceId)
+  return <main className={`workspace workspace--${props.canvasMode} workspace--flow`} data-testid="flow-workspace-shell"
+    data-flow-not-slide-stage="true" style={{ '--flow-workspace-header-height': `${FLOW_WORKSPACE_HEADER_HEIGHT}px` } as CSSProperties}>
+    <div ref={setToolbarContainer} className="flow-workspace-toolbar-host" data-testid="flow-workspace-toolbar-host" />
+    <div className="canvas-mode-switch" role="group" aria-label="画布模式">
+      <button type="button" className={props.canvasMode === 'edit' ? 'canvas-mode-switch__active' : ''} aria-pressed={props.canvasMode === 'edit'} onClick={() => props.onCanvasModeChange('edit')}><MousePointer2 size={13} />编辑状态</button>
+      <button type="button" className={props.canvasMode === 'run' ? 'canvas-mode-switch__active' : ''} aria-pressed={props.canvasMode === 'run'} onClick={() => props.onCanvasModeChange('run')}><Play size={13} />当前位置试运行</button>
+    </div>
+    <div className={`canvas-label${props.editingScope === 'global' ? ' canvas-label--global' : ''}`}>{props.editingScope === 'global' ? '全局层 · 视口浮层' : surface?.title}</div>
+    <div className="canvas-viewport"><FlowWorkspace {...props} toolbarContainer={toolbarContainer} readOnly={props.canvasMode === 'run'} /></div>
+  </main>
 }

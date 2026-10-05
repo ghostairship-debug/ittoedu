@@ -16,6 +16,7 @@ export type SlideLineDrawTool = 'line' | 'elbow-arrow' | null
 
 export type EditorShellOwnedState = {
   activeTab: EditorShellTab
+  editingScope: EditingScope
   canvasMode: CanvasMode
   statusMessage: string | null
   errorMessage: string | null

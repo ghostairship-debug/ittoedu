@@ -9,12 +9,13 @@
 .lesson-workspace-toolbar-actions{flex-shrink:0}
 .lesson-workspace-toolbar .lesson-workspace-brand{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:8px;background:var(--apricot,#d88755);color:#fffefa;font-size:13px;font-weight:700;flex-shrink:0}
 
-.lesson-workspace-shell button,.lesson-workspace-shell input,.lesson-workspace-shell select,.lesson-workspace-shell textarea{font:inherit}
+:where(.lesson-workspace-shell) :where(button,input,select,textarea){font:inherit}
 /* The shell's plain button look stays out of the embedded Slide/Flow/Spatial workspace: its canvas controls and
    the see-through boxes over editable Runtime and component text keep their editor styles (a filled box hid the text). */
-.lesson-workspace-shell button:where(:not(.workspace button)){cursor:pointer;border:1px solid var(--border,#d9d6ce);border-radius:8px;padding:7px 12px;background:var(--surface,#fffefa);color:var(--ink,#17221d);transition:background .14s ease,border-color .14s ease}
-.lesson-workspace-shell button:where(:not(.workspace button)):hover{background:var(--surface-muted,#ece9e1)}
-.lesson-workspace-shell button:where(:not(.workspace button)):disabled{cursor:not-allowed;opacity:.5}
+/* Defaults have lower specificity than the professional controls, including sidebar icon/tool buttons. */
+:where(.lesson-workspace-shell) button:where(:not(.workspace button)){cursor:pointer;border:1px solid var(--border,#d9d6ce);border-radius:8px;padding:7px 12px;background:var(--surface,#fffefa);color:var(--ink,#17221d);transition:background .14s ease,border-color .14s ease}
+:where(.lesson-workspace-shell) button:where(:not(.workspace button)):hover{background:var(--surface-muted,#ece9e1)}
+:where(.lesson-workspace-shell) button:where(:not(.workspace button)):disabled{cursor:not-allowed;opacity:.5}
 /* The shell's plain button look must not swallow the primary and danger styles (hover turned them into dark text on green). */
 .lesson-workspace-shell .primary-button{border-color:transparent;background:#245b46;color:#fff}
 .lesson-workspace-shell .primary-button:hover:not(:disabled){background:#2e7057}

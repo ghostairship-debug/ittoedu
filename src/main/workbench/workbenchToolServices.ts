@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
 import type { BrowserWindow } from 'electron'
 import type { HostToolServices } from '../../core/tools/HostToolServices'
@@ -9,10 +10,6 @@ import { ScopedSkillService, type SkillRoot } from './skills/ScopedSkillService'
 import { EnabledSkillRootStore } from './skills/EnabledSkillRootStore'
 import { BundledSkillService } from './skills/BundledSkillService'
 import bundledSkills from '../../shared/generated/bundledSkills.json'
-import { ControlledBuildService } from './build/ControlledBuildService'
-import { htmlImportNetworkGrants } from './htmlImport/htmlImportNetworkGrants'
-import { HtmlImportToolService } from './htmlImport/HtmlImportToolService'
-import { HtmlImportOperationStore } from './htmlImport/HtmlImportOperationStore'
 import { createProjectFileServices } from './projectFiles/projectFileServices'
 import { ViewObservationService } from './observation/ViewObservationService'
 import { ViewObservationDesktopService } from './observation/ViewObservationDesktopService'
@@ -22,7 +19,6 @@ import { ExecutionRunStore } from './execution/ExecutionRunStore'
 import { DocumentDeliveryOperationStore } from './delivery/DocumentDeliveryOperationStore'
 import { DocumentExportPort } from './delivery/DocumentExportPort'
 import { resolveExportDestination, resolveSaveDestination, workbenchExportWriter } from './workbenchDeliveryAdapters'
-import { createElectronBuildAdmission } from './build/ElectronBuildAdmission'
 import { frozenImageRoles } from './images/frozenImageRoles'
 import { ImageGenerationService } from './images/ImageGenerationService'
 import { HostJobService } from './jobs/HostJobService'
@@ -40,8 +36,8 @@ import { OpenAIImagesApiProvider } from './images/OpenAIImagesApiProvider'
 import { imageRoute } from './images/imageRoute'
 import { executionSettingsStore, resolveOAuthCredential } from './providers/executionSettingsService'
 import { createWorkbenchOpenImageService } from './assetSources/pixabayDesktopService'
-import { AssetLibraryService, readComponentLibrary } from './assetSources/componentLibrarySearch'
-import { managedComponentLibrary } from '../componentCatalogSources'
+import { AssetLibraryService } from './assetSources/componentLibrarySearch'
+import { componentCatalogManager } from '../componentCatalogManager'
 
 let installed = false
 let imageService: ImageGenerationService | undefined
@@ -114,13 +110,6 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       (imageRoute(request) === 'chatgpt-oauth' ? oauthImages : apiImages).generate(request, references, options) },
     resolveReference: (runId, documentId, resource) => host.tools.readImageResource(runId, documentId, resource),
   })
-  const builds = new ControlledBuildService({ directory: path.join(directory, 'builds'), admission: {
-    run(payload, signal) {
-      const window = context.getMainWindow(), entry = context.getRendererEntryUrl()
-      if (!window || window.isDestroyed() || !entry) throw new Error('当前没有可用的准入窗口，请恢复应用窗口后重试。')
-      return createElectronBuildAdmission(window.webContents, entry).run(payload, signal)
-    },
-  } })
   const configuredImage = process.env.GUOLING_COMPUTE_IMAGE
   const computeImage = configuredImage && /^sha256:[a-f0-9]{64}$/.test(configuredImage) ? configuredImage : PINNED_PYTHON_IMAGE_ID
   const compute = new ComputeJobService({ directory: path.join(directory, 'compute'),
@@ -130,11 +119,10 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   // The installed Codex CLI rejected both real command and patch writes. An operator must
   // verify an actual authorized copy write before enabling product-paid delegation.
   const delegationWriteVerified = process.env.GUOLING_CODEX_DELEGATION_WRITE_VERIFIED === '1'
-  const jobs = new HostJobService({ images, builds, compute, delegation })
+  const jobs = new HostJobService({ images, compute, delegation })
   const web = new WebResearchService()
   const openImages = createWorkbenchOpenImageService(app.getVersion())
-  const assetLibrary = new AssetLibraryService({ load: () => readComponentLibrary(app.getAppPath(), app.getPath('userData')),
-    managedLibrary: managedComponentLibrary(app.getPath('userData')) })
+  const assetLibrary = new AssetLibraryService({ catalog: componentCatalogManager })
   // Agent and human share the task's main-owned embedded page.
   const approvals = new BrowserActionApprovals()
   const mcp = new ManagedBrowserMcpService({ scratchRoot: path.join(directory, 'browser'),
@@ -143,13 +131,6 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       tool: input.tool, arguments: input.arguments, snapshotId: input.snapshotId }) })
   // Speech/video/music have no verified provider adapter in the current connection set.
   const media = new MediaCapabilityService()
-  const htmlImports = new HtmlImportToolService({
-    documents: { read: documentId => host.registry.get(documentId).drain(), get: documentId => host.registry.get(documentId) },
-    gateway: host.tools,
-    cancelJob: async (runId, jobId) => { await builds.execute(runId, { type: 'cancel', jobId }) },
-    networkGrants: htmlImportNetworkGrants,
-    operationStore: new HtmlImportOperationStore(path.join(directory, 'html-import-operations')),
-  })
   const observationImages = new ObservationImageStore()
   const observations = new ViewObservationService({
     snapshot: documentId => host.registry.get(documentId).drain(),
@@ -193,6 +174,13 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   }
   const deliveries = new DocumentDeliveryService({
     documents: { read: documentId => host.registry.get(documentId).drain(),
+      prepareDrafts: async (documentId, epoch) => {
+        const snapshot = await host.registry.get(documentId).drain()
+        if (snapshot.epoch !== epoch || snapshot.model.kind !== 'course-v10') throw new Error('导出目标已关闭或重开')
+        const reply = await currentExportPort().build({ requestId: randomUUID(), phase: 'drain', format: 'html-offline', snapshot,
+          identity: { documentId, epoch, revision: snapshot.revision, projectId: snapshot.model.project.id } })
+        if (reply.status !== 'drained') throw new Error(reply.reason ?? '课件编辑尚未完成，未生成导出')
+      },
       saveWithFact: (documentId, filename, identity) => host.saveWithFact(documentId, filename, identity),
       lookupSave: (documentId, identity) => host.lookupSave(documentId, identity),
       withFileLease: (documentId, work) => host.registry.get(documentId).withFileLease(lease => work(() => lease.read())) },
@@ -216,7 +204,6 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     signalForRun: runId => deliverySignals.get(runId)?.signal,
   })
   const services: HostToolServices = {
-    htmlImports,
     projectFiles: createProjectFileServices(host),
     deliveries,
     observations: {
@@ -288,9 +275,6 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       run: (request, options) => images.start(request, options), read: id => images.read(id),
       stop: id => images.stop(id), readResource: id => images.readResource(id),
       readReadyResourceFromJob: input => images.readReadyResourceFromJob(input) },
-    builds: { create: (input, ticket) => builds.create(input, ticket), lookupCreate: (runId, ticket) => builds.lookupCreate(runId, ticket), execute: (runId, call) => builds.execute(runId, call),
-      artifact: (runId, jobId, artifactId) => builds.artifact(runId, jobId, artifactId), cancelRun: runId => builds.cancelRun(runId),
-      policy: (runId, documentId) => htmlImportNetworkGrants.policy(runId, documentId, () => host.registry.get(documentId).read()) },
   }
   host.tools.configureHostServices(services)
   imageService = images

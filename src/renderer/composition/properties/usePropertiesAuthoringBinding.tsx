@@ -1,1617 +1,394 @@
-import { readTeacherControllerConfig } from '../../../shared/teacherControllerConfig'
-import { captureFlowEditorAuthoringTarget } from '../../course/flowEditorView'
-import * as tableContent from '../../course/tableContentOperations'
-import type { NativeTableContent } from '../../../shared/contracts/native-v1'
+import { useRef } from 'react'
+import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
+import type { ComponentInstance, JsonValue } from '../../../shared/contracts/component-platform/project'
+import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
+import type { TextRunEdit } from '../../../shared/textRuns'
+import { formatTextComponentRange, replaceTextComponentRange, textComponentDataSchema, type TextComponentData } from '../../../components/text/data'
+import { parseTableData, tableCellContent } from '../../../components/table/data'
+import { editTableData, type TableEdit } from '../../../components/table/edit'
 import { createChartPropertiesCommands } from '../../ui/properties/chartPropertiesCommands'
-import type { EffectiveBackgroundOwner } from '../../../shared/effectiveBackground'
-import { connectChartCanvasText } from '../../authoring/chartCanvasTextBridge'
-import { configureSlideInputAtTarget } from '../../course/v9SlideContentCommands'
-import { inspectInputRuleFamily } from '../../../core/tools/inputRuleFamily'
-import { makeAuthoringAddress } from '../../../shared/authoringAddress'
-import type { TextNode } from '../../../shared/contracts/native-v1'
-import { resolveEffectiveBackground } from '../../../shared/effectiveBackground'
-import { rotatedRectangleAabb } from '../../../shared/geometry'
-import { renderTextNodeCanvas } from '../../../shared/textLayout'
-import { applyTextRunEdits, planTextRunRemap } from '../../../shared/textRuns'
-import type { EditorCanvasNodePatch } from '../../phaser/editorCanvasNode'
-import {
-  patchEffectiveLayerPropertiesAtTargets,
-  type EffectiveLayerCommandTarget,
-} from '../../course/effectiveLayerCommands'
-import {
-  executeFlowDelete,
-} from '../../course/flowEditorCommands'
-import {
-  captureSpatialEditorAuthoringTarget,
-} from '../../course/spatialEditorView'
-import {
-  addSlideSceneInteractionRule,
-  deleteSlideSceneInteractionRule,
-} from '../../course/v9SlideActionCommands'
-import {
-  commitSlideMultiLayerIntentAtTargets,
-  patchSlideLayerPropertiesAtTarget,
-  setSlideSimpleEntranceAnimation,
-  type SlideMultiLayerPropertiesIntent,
-} from '../../course/v9SlideContentCommands'
-import type {
-  SlideAuthoringTarget,
-  SlideCommandResult,
-} from '../../course/slideEditorCommands'
-import type { SlideAuthoringSession } from '../../course/slideAuthoringBackend'
-import {
-  commitSlideTableLastCellAndAppendRow,
-  deleteSlideTableColumn,
-  deleteSlideTableRow,
-  insertSlideTableColumn,
-  insertSlideTableRow,
-  patchSlideTableCellStyle,
-  patchSlideTableCellText,
-  patchSlideTableColumnWidth,
-  patchSlideTableRowHeight,
-  patchSlideTableStyle,
-  reorderSlideTableColumns,
-  reorderSlideTableRows,
-  changeSlideTableMerge,
-} from '../../course/v9TableCommands'
-import {
-  patchSlideChartStyle,
-  patchSlideChartTitle,
-  patchSlideChartType,
-  replaceSlideChartTableData,
-} from '../../course/v9ChartCommands'
-import { interactionLayerTargetFromItem } from '../../course/slideInteractionView'
-import type {
-  SpatialAuthoringIntent,
-} from '../../authoring/spatialAuthoringIntents'
-import type {
-  SpatialWorldContentEditSession,
-  V9SlideTextContentDraft,
-} from '../../authoring/spatialWorldAuthoring'
-import type { CourseAuthoringTarget } from '../../authoring/courseAuthoringSession'
-import { COURSE_AUTHORING_STALE_SESSION_REASON } from '../../authoring/courseAuthoringSession'
-import {
-  applyV9SlideContentEditRunStyle,
-  commitV9SlideContentEdit,
-} from '../../authoring/v9SlideContentEdit'
-import type { InteractionAuthoringTarget } from '../../interactions/interactionAuthoringCommands'
-import { selectActiveCourseProjectDocument, useEditorStore } from '../../store/editorStore'
-import { courseSlideCanvas, effectiveSceneCanvas } from '../../../shared/slideCanvas'
-import type { InteractionEditorProps } from '../../ui/InteractionEditor'
+import type { AssetMeta } from '../../../shared/contracts/media-v1'
+import { useEditorStore, selectEditingScope } from '../../store/editorStore'
+import { projectWithSlideContentDraft } from '../../store/slices/slideAuthoringSlice'
+import { selectPropertiesAuthoringReadModel } from './PropertiesAuthoringReadModel'
+import { componentPropertiesEdits, propertiesEffectiveBackground, propertiesFeedbackTargets, propertiesText } from '../../ui/properties/componentProperties'
 import type { PropertiesContext } from '../../ui/properties/PropertiesContext'
-import {
-  selectPropertiesAuthoringReadModel,
-  type PropertiesOwnerReadModel,
-} from './PropertiesAuthoringReadModel'
+import type { SlideNativeTextCommands, PropertiesPatch, SlideNativePropertiesContext } from '../../ui/properties/SlideNativePropertiesPanel'
 import { buildFlowPropertiesOwner } from '../../ui/properties/FlowPropertiesContextBuilder'
-import { buildRuntimePropertiesContexts } from '../../ui/properties/RuntimePropertiesContextBuilder'
 import { buildSpatialPropertiesOwner } from '../../ui/properties/SpatialPropertiesContextBuilder'
-import type {
-  CourseGlobalPropertiesContext,
-} from '../../ui/properties/CourseGlobalPropertiesPanel'
-import type {
-  MultiSelectionAlignment,
-  MultiSelectionPropertiesContext,
-} from '../../ui/properties/MultiSelectionPropertiesPanel'
-import {
-  effectivePatchFromProperties,
-  normalizePropertiesPatch,
-} from '../../ui/properties/propertiesItemView'
-import type {
-  PropertiesItemView,
-  PropertiesPatch,
-  SlideNativePropertiesContext,
-  SlideNativeTextCommands,
-} from '../../ui/properties/SlideNativePropertiesPanel'
+import type { BackgroundPreviewTarget } from '../../authoring/backgroundPreview'
+import { buildCourseGlobalPropertiesOwner } from '../../ui/properties/CourseGlobalPropertiesContextBuilder'
+import { buildRuntimePropertiesContexts } from '../../ui/properties/RuntimePropertiesContextBuilder'
+import { applyComponentOperation, captureComponentOperation } from '../../../core/drivers/courseV10Operations'
+import { inspectComponentInputRules, configureComponentInputRules } from '../../../components/input/authoring'
+import { chartDataSchema } from '../../../components/chart/data'
+import { useCourseEditorActions } from '../../documents/CourseEditorActionsContext'
 
-const STALE_PROPERTY_TARGET = '属性编辑目标已经改变，未写入工程。请重新选择后重试。'
+const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue
+const STALE = '属性草稿对应的编辑目标已经改变，请按 Esc 放弃草稿后重试。'
 
-function ownerIdentityKey(read: PropertiesOwnerReadModel): string {
-  const { identity } = read
-  return JSON.stringify([
-    identity.projectId,
-    identity.revision,
-    identity.generation,
-    identity.locationId,
-    identity.owner,
-    identity.stateId,
-    read.selectedNodeIds,
-    read.selectedRows.map((row) => [
-      row.id,
-      row.authoringAddress,
-      row.owner,
-      row.ownerKey,
-      row.scopeToken.locationId,
-      row.scopeToken.stateId,
-    ]),
-  ])
+interface TextPropertySession {
+  key: string
+  target: CapturedCourseTarget
+  instanceId: string
+  initial: TextComponentData
+  current: TextComponentData
+  group: string
+  composing: boolean
+  sharedDraft: boolean
 }
 
-function propertyDraftBindingKey(
-  read: PropertiesOwnerReadModel,
-  itemId?: string,
-): string {
-  return JSON.stringify([
-    ownerIdentityKey(read),
-    itemId ?? null,
-  ])
+function rangeReplacement(before: string, after: string): TextRunEdit {
+  const old = Array.from(before), next = Array.from(after)
+  let start = 0, end = old.length, tail = next.length
+  while (start < end && start < tail && old[start] === next[start]) ++start
+  while (end > start && tail > start && old[end - 1] === next[tail - 1]) { --end; --tail }
+  return { start, end, original: old.slice(start, end).join(''), replacement: next.slice(start, tail).join('') }
 }
 
-function makeSlideTarget(
-  read: PropertiesOwnerReadModel,
-): SlideAuthoringTarget | null {
-  const row = read.selectedRow
-  const session = read.slideSessionIdentity
-  if (
-    !row
-    || !session
-    || row.owner === 'world'
-    || (session.scope !== row.owner && !(session.scope === 'scene' && row.isTeacherController))
-    || session.locationId !== row.scopeToken.locationId
-    || session.stateId !== row.scopeToken.stateId
-    || session.revision !== read.identity.revision
-  ) return null
-  return Object.freeze({
-    sessionId: session.sessionId,
-    revision: session.revision,
-    generation: session.generation,
-    authoringAddress: row.authoringAddress,
-    scope: row.owner,
-    layerItemId: row.id,
-  })
-}
-
-function sameSlideTarget(
-  read: PropertiesOwnerReadModel,
-  target: SlideAuthoringTarget,
-): boolean {
-  const current = makeSlideTarget(read)
-  return Boolean(current
-    && current.sessionId === target.sessionId
-    && current.revision === target.revision
-    && current.generation === target.generation
-    && current.authoringAddress === target.authoringAddress
-    && current.scope === target.scope
-    && current.layerItemId === target.layerItemId)
-}
-
-function sameSlideTargetIdentity(
-  read: PropertiesOwnerReadModel,
-  target: SlideAuthoringTarget,
-): boolean {
-  const current = makeSlideTarget(read)
-  return Boolean(current
-    && current.sessionId === target.sessionId
-    && current.generation === target.generation
-    && current.scope === target.scope
-    && current.layerItemId === target.layerItemId)
-}
-
-function sameSlideContentTarget(
-  read: PropertiesOwnerReadModel,
-  itemTarget: SlideAuthoringTarget,
-  contentTarget: SlideAuthoringTarget,
-  field: string,
-): boolean {
-  const row = read.selectedRow
-  const projectId = read.identity.projectId
-  if (
-    !row
-    || !projectId
-    || !sameSlideTarget(read, itemTarget)
-    || contentTarget.sessionId !== itemTarget.sessionId
-    || contentTarget.revision !== itemTarget.revision
-    || contentTarget.generation !== itemTarget.generation
-    || contentTarget.scope !== itemTarget.scope
-    || contentTarget.layerItemId !== itemTarget.layerItemId
-  ) return false
-  return contentTarget.authoringAddress === makeAuthoringAddress({
-    projectId,
-    scope: contentTarget.scope,
-    surfaceId: contentTarget.scope === 'global' ? undefined : row.scopeToken.surfaceId,
-    sceneId: contentTarget.scope === 'scene' ? row.scopeToken.sceneId ?? undefined : undefined,
-    carrier: 'native',
-    layerItemId: contentTarget.layerItemId,
-    field,
-  })
-}
-
-function dummyTextCommands(): SlideNativeTextCommands {
-  return {
-    beginEdit: () => undefined,
-    commitEdit: () => undefined,
-    cancelEdit: () => undefined,
-    updateDraft: () => undefined,
-    toggleStyle: () => undefined,
-  }
-}
-
-function videoDiagnostics(read: PropertiesOwnerReadModel, node: PropertiesItemView): string[] {
-  if (node.type !== 'video') return []
-  return Object.values(read.interactionWarnings)
-    .flatMap((messages) => messages)
-    .filter((message, index, all) => all.indexOf(message) === index)
-}
-
-function componentPort(read: PropertiesOwnerReadModel, node: PropertiesItemView) {
-  if (node.type !== 'external-component') return null
-  const packed = read.componentManifests[node.component.packageId]
-  return packed ? { manifest: packed.manifest, assets: read.assets } : null
-}
-
-function presentationView(read: PropertiesOwnerReadModel) {
-  return read.identity.owner === 'scene'
-    ? {
-        stateName: read.activeState?.name ?? null,
-        overriddenCount: read.selectedRows.filter((row) => row.stateOverrideApplied).length,
-      }
-    : null
-}
-
-function computedMultiUpdates(
-  items: readonly PropertiesItemView[],
-  mode: MultiSelectionAlignment | 'distribute-horizontal' | 'distribute-vertical',
-): Array<{ nodeId: string; patch: EditorCanvasNodePatch }> {
-  const unlocked = items.filter((item) => !item.locked)
-  if (mode.startsWith('distribute-') ? unlocked.length < 3 : unlocked.length < 2) return []
-  const boundsById = new Map(unlocked.map((item) => [item.id, rotatedRectangleAabb(item)]))
-  if (mode === 'distribute-horizontal' || mode === 'distribute-vertical') {
-    const horizontal = mode === 'distribute-horizontal'
-    const sorted = [...unlocked].sort((left, right) => {
-      const leftBounds = boundsById.get(left.id)!
-      const rightBounds = boundsById.get(right.id)!
-      return horizontal
-        ? leftBounds.left - rightBounds.left
-        : leftBounds.top - rightBounds.top
-    })
-    const first = boundsById.get(sorted[0]!.id)!
-    const last = boundsById.get(sorted.at(-1)!.id)!
-    const span = horizontal ? last.right - first.left : last.bottom - first.top
-    const totalSize = sorted.reduce((sum, item) => {
-      const bounds = boundsById.get(item.id)!
-      return sum + (horizontal ? bounds.width : bounds.height)
-    }, 0)
-    const gap = (span - totalSize) / (sorted.length - 1)
-    let cursor = horizontal ? first.left : first.top
-    const translations = new Map<string, number>()
-    for (const item of sorted) {
-      const bounds = boundsById.get(item.id)!
-      const current = horizontal ? bounds.left : bounds.top
-      translations.set(item.id, cursor - current)
-      cursor += (horizontal ? bounds.width : bounds.height) + gap
-    }
-    return unlocked.map((item) => {
-      const delta = translations.get(item.id) ?? 0
-      return {
-        nodeId: item.id,
-        patch: horizontal ? { x: item.x + delta } : { y: item.y + delta },
-      }
-    })
-  }
-  const bounds = [...boundsById.values()]
-  const left = Math.min(...bounds.map((item) => item.left))
-  const right = Math.max(...bounds.map((item) => item.right))
-  const top = Math.min(...bounds.map((item) => item.top))
-  const bottom = Math.max(...bounds.map((item) => item.bottom))
-  return unlocked.map((item) => {
-    const visual = boundsById.get(item.id)!
-    let dx = 0
-    let dy = 0
-    if (mode === 'left') dx = left - visual.left
-    else if (mode === 'center') dx = (left + right) / 2 - visual.centerX
-    else if (mode === 'right') dx = right - visual.right
-    else if (mode === 'top') dy = top - visual.top
-    else if (mode === 'middle') dy = (top + bottom) / 2 - visual.centerY
-    else dy = bottom - visual.bottom
-    return { nodeId: item.id, patch: { x: item.x + dx, y: item.y + dy } }
-  })
-}
-
-export function usePropertiesAuthoringBinding({
-  onReplaceImage,
-}: {
-  onReplaceImage(): void
-}): PropertiesContext {
+/** Original controls bind to a captured V10 document/selection. Session remains the only writer/history owner. */
+export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onReplaceImage: () => void }): PropertiesContext {
   const read = useEditorStore(selectPropertiesAuthoringReadModel)
-  const runFlowAuthoringIntent = useEditorStore((state) => state.runFlowAuthoringIntent)
-  const convertFlowOverlayComponentAtTarget = useEditorStore(
-    (state) => state.convertFlowOverlayComponentAtTarget,
-  )
-  const applyFlowCommand = useEditorStore((state) => state.applyFlowCommand)
-  const runSpatialAuthoringIntent = useEditorStore((state) => state.runSpatialAuthoringIntent)
-  const runSlideFieldTextIntent = useEditorStore((state) => state.runSlideFieldTextIntent)
-  const applySlideCandidateCommand = useEditorStore((state) => state.applySlideCandidateCommand)
-  const updateRuntimePropertyAtTarget = useEditorStore((state) => state.updateRuntimePropertyAtTarget)
-  const updateRuntimeContentTextAtTarget = useEditorStore((state) => state.updateRuntimeContentTextAtTarget)
-  const beginTextEdit = useEditorStore((state) => state.beginTextEdit)
-  const updateTextEditDraft = useEditorStore((state) => state.updateTextEditDraft)
-  const commitTextEdit = useEditorStore((state) => state.commitTextEdit)
-  const cancelTextEdit = useEditorStore((state) => state.cancelTextEdit)
-  const clearNodePresentationOverride = useEditorStore(
-    (state) => state.clearNodePresentationOverride,
-  )
-  const updateScene = useEditorStore((state) => state.updateScene)
-  const updateSceneBackground = useEditorStore((state) => state.updateSceneBackground)
-  const importSceneBackgroundAsset = useEditorStore((state) => state.importSceneBackgroundAsset)
-  const updateSlideSurfaceBackground = useEditorStore((state) => state.updateSlideSurfaceBackground)
-  const importSlideSurfaceBackgroundAsset = useEditorStore(
-    (state) => state.importSlideSurfaceBackgroundAsset,
-  )
-  const updatePresentationState = useEditorStore((state) => state.updatePresentationState)
-  const updateCourseBackground = useEditorStore((state) => state.updateCourseBackground)
-  const resizeSlideCanvas = useEditorStore((state) => state.resizeSlideCanvas)
-  const resizeSlideSceneCanvas = useEditorStore((state) => state.resizeSlideSceneCanvas)
-  const setPreviewBackgroundColor = useEditorStore((state) => state.setPreviewBackgroundColor)
-  const updatePlayback = useEditorStore((state) => state.updatePlayback)
-  const updateDesignTokens = useEditorStore((state) => state.updateDesignTokens)
-  const ensureTeacherController = useEditorStore((state) => state.ensureTeacherController)
-  const manageTeacherControllerComponent = useEditorStore((state) => state.manageTeacherControllerComponent)
-  const setCandidateGlobalLayerVisibleAtLocation = useEditorStore(
-    (state) => state.setCandidateGlobalLayerVisibleAtLocation,
-  )
-  const setCandidateGlobalLayerLocationVisibility = useEditorStore(
-    (state) => state.setCandidateGlobalLayerLocationVisibility,
-  )
-  const updateGlobalLayerSettings = useEditorStore((state) => state.updateGlobalLayerSettings)
-  const addGlobalInteractionRule = useEditorStore((state) => state.addGlobalInteractionRule)
-  const deleteGlobalInteractionRule = useEditorStore((state) => state.deleteGlobalInteractionRule)
-  const updateInteractionRuleAtTarget = useEditorStore(
-    (state) => state.updateInteractionRuleAtTarget,
-  )
-  const setActiveTab = useEditorStore((state) => state.setActiveTab)
-  const setError = useEditorStore((state) => state.setError)
-  const setStatus = useEditorStore((state) => state.setStatus)
-
-  const readLive = () => selectPropertiesAuthoringReadModel(useEditorStore.getState())
-
-  const reportError = (message: string) => {
-    setError(message)
-    setStatus(null)
+  const kernel = useEditorStore(state => state.courseKernel)
+  const actions = useCourseEditorActions()
+  const textSession = useRef<TextPropertySession | null>(null)
+  const cellSession = useRef<{ key: string; cellId: string; baseline: string; baselineContent: ReturnType<typeof tableCellContent>;
+    group: string; composing: boolean; sharedDraft: boolean } | null>(null)
+  const key = JSON.stringify([read.documentId, read.epoch, read.surface?.id, read.activeStateId, read.selectedInstanceIds, read.editingGlobal])
+  const feedback = (value: { kind: 'error' | 'status'; message: string }) => kernel.setFeedback(value.kind === 'error'
+    ? { errorMessage: value.message, statusMessage: null } : { errorMessage: null, statusMessage: value.message })
+  const report = (error: unknown) => feedback({ kind: 'error', message: error instanceof Error ? error.message : String(error) })
+  const liveTarget = (): CapturedCourseTarget => {
+    const current = kernel.readView()
+    if (JSON.stringify([current.activeDocumentId, current.snapshot?.epoch, current.surfaceId, current.activeStateId, current.selectedInstanceIds, selectEditingScope(useEditorStore.getState()) === 'global']) !== key) throw new Error(STALE)
+    return kernel.captureTarget(read.documentId ?? undefined)
   }
-  const reportStatus = (message: string) => {
-    setError(null)
-    setStatus(message)
+  const sharedDraftFor = (target: CapturedCourseTarget) => {
+    const draft = useEditorStore.getState().slideContentEdit
+    return draft && draft.target.documentId === target.documentId && draft.target.epoch === target.epoch
+      && draft.target.surfaceId === target.surfaceId && draft.target.activeStateId === target.activeStateId ? draft : null
   }
-  const previewBackground = (color: string | null, owner: EffectiveBackgroundOwner) => {
-    const { projectId, revision, generation, locationId, stateId } = read.identity
-    if (!projectId || !locationId) return
-    const target = { projectId, revision, generation, locationId, stateId, owner }
-    if (color !== null && ownerIdentityKey(readLive()) !== ownerIdentityKey(read)) return
-    setPreviewBackgroundColor(color === null ? null : { target, color }, target)
+  const editingInstance = (target: CapturedCourseTarget, instanceId: string): ComponentInstance | null => {
+    const base = target.editingProject.instances[instanceId]
+    if (!base) return null
+    const draft = sharedDraftFor(target)
+    if (draft?.instanceId !== instanceId) return base
+    return projectWithSlideContentDraft(target.editingProject, draft, { documentId: target.documentId, epoch: target.epoch,
+      surfaceId: target.surfaceId, activeStateId: target.activeStateId }).instances[instanceId]
   }
-  const capturedOwnerKey = ownerIdentityKey(read)
-  const ownerIsLive = () => ownerIdentityKey(readLive()) === capturedOwnerKey
-  const requireLiveOwner = () => {
-    if (ownerIsLive()) return true
-    reportError(STALE_PROPERTY_TARGET)
-    return false
+  const submit = (edits: ComponentEdit[], target = liveTarget(), group?: string): void => {
+    if (!edits.length) return
+    const activePreview = useEditorStore.getState().previewBackgroundColor
+    if (activePreview && activePreview.target.documentId === target.documentId && activePreview.target.epoch === target.epoch
+      && activePreview.target.surfaceId === target.surfaceId && activePreview.target.stateId === target.activeStateId
+      && (activePreview.target.owner !== 'instance' || activePreview.target.instanceId === target.instanceId))
+      useEditorStore.getState().setPreviewBackgroundColor(null, activePreview.target)
+    const shared = sharedDraftFor(target)
+    const draftEdits = shared ? edits.filter(edit => (edit.type === 'data.set' || edit.type === 'frame.set') && edit.instanceId === shared.instanceId) : []
+    if (shared && draftEdits.length) {
+      const project = { ...target.editingProject, instances: { ...target.editingProject.instances,
+        [shared.instanceId]: editingInstance(target, shared.instanceId)! } }
+      const next = applyComponentOperation(project, captureComponentOperation(project, draftEdits))
+      useEditorStore.getState().updateSlideDataDraft(next.instances[shared.instanceId].data)
+      const frameEdits = draftEdits.filter((edit): edit is Extract<ComponentEdit, { type: 'frame.set' }> => edit.type === 'frame.set')
+      if (frameEdits.length) useEditorStore.getState().updateSlideFrameDraft(frameEdits.at(-1)!.frame)
+      edits = edits.filter(edit => !draftEdits.includes(edit))
+      if (!edits.length) return
+    }
+    void kernel.editCaptured(kernel.capture(edits, target), group).catch(report)
   }
-  const previewSelectedNative = (patch: PropertiesPatch | null) => {
-    const { projectId, revision, generation, locationId, stateId } = read.identity
-    const node = read.selectedView
-    const row = read.selectedRow
-    if (!projectId || !locationId || !node || !row) return
-    const target = { projectId, revision, generation, locationId, stateId, owner: 'native' as const, authoringAddress: row.authoringAddress }
-    if (patch === null) { setPreviewBackgroundColor(null, target); return }
-    if (!ownerIsLive()) return
-    const effective = effectivePatchFromProperties(row.item, normalizePropertiesPatch(node, patch))
-    const nativeData = effective.nativeData ?? (effective.nativeTextStyle ? { style: effective.nativeTextStyle } : undefined)
-    if (nativeData) setPreviewBackgroundColor({ target, color: '', nativeData }, target)
+  const run = (action: () => unknown) => { try { void Promise.resolve(action()).catch(report) } catch (error) { report(error) } }
+  const preview = (edits: ComponentEdit[] | null, owner: BackgroundPreviewTarget['owner'] = 'instance') => {
+    if (!edits) {
+      const current = useEditorStore.getState().previewBackgroundColor
+      if (current && current.target.documentId === read.documentId && current.target.epoch === read.epoch
+        && current.target.surfaceId === read.surface?.id && current.target.stateId === read.activeStateId
+        && current.target.owner === owner && (owner !== 'instance' || current.target.instanceId === read.selectedInstance?.id))
+        useEditorStore.getState().setPreviewBackgroundColor(null, current.target)
+      return
+    }
+    const target = liveTarget()
+    const captured: BackgroundPreviewTarget = { documentId: target.documentId, epoch: target.epoch, surfaceId: target.surfaceId,
+      stateId: target.activeStateId, owner, ...(owner === 'instance' && target.instanceId ? { instanceId: target.instanceId } : {}) }
+    useEditorStore.getState().setPreviewBackgroundColor(edits ? { target: captured, edits } : null, captured)
   }
-
-  const runtimeContexts = buildRuntimePropertiesContexts({
-    view: read.runtimeView,
-    editingScope: read.editingScope,
-    updateProperty: updateRuntimePropertyAtTarget,
-    updateContentText: updateRuntimeContentTextAtTarget,
-    report: (feedback) => {
-      if (feedback.kind === 'error') reportError(feedback.message)
-      else reportStatus(feedback.message)
+  const patch = (value: PropertiesPatch) => run(() => {
+    const target = liveTarget(), instance = target.instanceId ? editingInstance(target, target.instanceId) : null
+    if (!instance) throw new Error('所选组件已不存在。')
+    submit(componentPropertiesEdits(instance, target.project.definitions[instance.definitionId], value), target)
+  })
+  const assets: Record<string, AssetMeta> = Object.fromEntries(Object.values(read.project?.assets ?? {}).map(asset => [asset.id, {
+    ...asset, filename: asset.filename ?? asset.path.split(/[\\/]/u).at(-1) ?? asset.id,
+    mimeType: asset.mimeType ?? 'application/octet-stream', byteLength: asset.byteLength ?? read.resources.assets[asset.id]?.byteLength ?? 0,
+    kind: asset.kind ?? (asset.mimeType?.startsWith('audio/') ? 'audio' : asset.mimeType?.startsWith('video/') ? 'video' : asset.mimeType?.startsWith('font/') ? 'font' : 'image'),
+  }]))
+  const openAutomation = () => useEditorStore.getState().setActiveTab('automation')
+  const textCommands: SlideNativeTextCommands = {
+    beginEdit: source => {
+      try {
+        const target = liveTarget(), instanceId = target.instanceId
+        if (!instanceId) throw new Error('请先选择文字。')
+        if (source === 'canvas') { useEditorStore.getState().beginTextEdit(instanceId, 'canvas'); return }
+        const shared = read.surface?.kind !== 'flow' ? useEditorStore.getState().beginSlideDataEdit(instanceId, 'properties') : null
+        if (read.surface?.kind !== 'flow' && !shared) throw new Error('请先完成当前内容编辑。')
+        const data = textComponentDataSchema.parse(shared?.data ?? target.editingProject.instances[instanceId].data)
+        if (textSession.current?.key !== key) textSession.current = { key, target, instanceId,
+          initial: structuredClone(data), current: data, group: `properties-text:${crypto.randomUUID()}`, composing: false, sharedDraft: Boolean(shared) }
+      } catch (error) { report(error) }
     },
-  })
-  const flowOwner = buildFlowPropertiesOwner({
-    view: read.flow?.view ?? null,
-    selection: read.flow?.selection ?? null,
-    assets: read.flow?.assets ?? {},
-    textEdit: read.flow?.textEdit ?? null,
-    authoringToken: read.authoringToken,
-    course: read.course,
-    runIntent: runFlowAuthoringIntent,
-    convertOverlayComponent: convertFlowOverlayComponentAtTarget,
-    reportError,
-    setPreviewBackgroundColor: color => previewBackground(color, 'flow-surface'),
-  })
-  const spatialOwner = buildSpatialPropertiesOwner({
-    view: read.spatial?.view ?? null,
-    course: read.course,
-    assets: read.assets,
-    scope: read.spatial?.scope ?? 'world',
-    selectionIds: read.spatial?.selectionIds ?? [],
-    showCameraFrames: read.spatial?.showCameraFrames ?? false,
-    contentEdit: read.spatial?.contentEdit ?? null,
-    graphSelection: read.spatial?.graphSelection ?? null,
-    playbackPathId: read.spatial?.playbackPathId ?? null,
-    authoringToken: read.authoringToken,
-    runIntent: runSpatialAuthoringIntent,
-    reportError,
-    professionalInteraction: {
-      editingScopeGlobal: read.editingScope === 'global',
-      onOpenAutomation: () => setActiveTab('automation'),
-    },
-    setPreviewBackgroundColor: color => previewBackground(color, 'spatial-surface'),
-  })
-
-  if (flowOwner.status === 'stale') {
-    return { kind: 'stale-target', reason: flowOwner.reason }
+    updateDraft: (nextText, suppliedEdit) => run(() => {
+      let session = textSession.current
+      if (!session || session.key !== key) { textCommands.beginEdit('properties'); session = textSession.current }
+      if (!session || session.key !== key) throw new Error(STALE)
+      const target = liveTarget()
+      const before = propertiesText(session.current)
+      const edit = suppliedEdit && Array.from(before).slice(suppliedEdit.start, suppliedEdit.end).join('') === suppliedEdit.original
+        ? suppliedEdit : rangeReplacement(before, nextText)
+      if (edit.replacement.includes('\uFFFC')) throw new Error('行内公式保持为原子；新增公式请使用正文公式控件。')
+      const inlines = session.current.content.inlines
+      let offset = 0
+      const inherited = inlines.find(inline => {
+        offset += inline.type === 'text' ? Array.from(inline.text).length : 1
+        return offset >= edit.start
+      })?.style
+      session.current = replaceTextComponentRange(session.current, edit.start, edit.end,
+        { inlines: edit.replacement ? [{ type: 'text', text: edit.replacement, ...(inherited ? { style: inherited } : {}) }] : [] })
+      if (session.composing && !session.sharedDraft) return kernel.bridge.updateComposition(json(session.current.content), session.target.documentId)
+      submit([{ type: 'data.set', instanceId: session.instanceId, path: ['content'], value: json(session.current.content) }], target, session.group)
+    }),
+    setComposing: composing => run(() => {
+      const session = textSession.current
+      if (!session || session.key !== key) throw new Error(STALE)
+      if (session.composing === composing) return
+      session.composing = composing
+      if (session.sharedDraft) { useEditorStore.getState().setSlideTextEditComposing(composing); return }
+      if (composing) kernel.bridge.beginComposition(session.instanceId, ['content'], session.target.documentId)
+      else return kernel.bridge.endComposition(session.target.documentId)
+    }),
+    commitEdit: () => run(() => { const session = textSession.current; if (session?.key !== key || session.composing) return;
+      textSession.current = null; if (session.sharedDraft) return useEditorStore.getState().commitSlideContentEdit() }),
+    cancelEdit: () => run(() => {
+      const session = textSession.current
+      if (!session || session.key !== key) return
+      if (session.sharedDraft) {
+        const shared = useEditorStore.getState().slideContentEdit
+        if (shared?.instanceId === session.instanceId && shared.target.documentId === session.target.documentId && shared.target.epoch === session.target.epoch)
+          useEditorStore.getState().cancelTextEdit()
+        textSession.current = null; return
+      }
+      const target = liveTarget()
+      submit([{ type: 'data.set', instanceId: session.instanceId, path: ['content'], value: json(session.initial.content) }], target, session.group)
+      textSession.current = null
+    }),
+    toggleStyle: (field, range) => run(() => {
+      const target = liveTarget(), instanceId = target.instanceId
+      if (!instanceId) return
+      const data = textComponentDataSchema.parse(read.project!.instances[instanceId].data)
+      const display = propertiesText(data), from = Array.from(display.slice(0, range.start)).length, to = Array.from(display.slice(0, range.end)).length
+      if (from === to) { patch({ style: { [field]: !data.appearance[field] } } as PropertiesPatch); return }
+      const styled = formatTextComponentRange(data, from, to, { [field]: !data.appearance[field] })
+      submit([{ type: 'data.set', instanceId, path: ['content'], value: json(styled.content) }], target)
+      if (textSession.current?.key === key) textSession.current.current = styled
+    }),
   }
-  if (spatialOwner.status === 'stale') {
-    return { kind: 'stale-target', reason: spatialOwner.reason }
+  const node = read.selectedView, selected = read.selectedInstance
+  const tableChange = (edit: TableEdit | ((source: ReturnType<typeof parseTableData>) => TableEdit)) => run(() => {
+    const target = liveTarget(), instanceId = target.instanceId
+    if (!instanceId) return
+    const source = parseTableData(read.project!.instances[instanceId].data)
+    const next = editTableData(source, typeof edit === 'function' ? edit(source) : edit)
+    submit([{ type: 'data.set', instanceId, path: [], value: json(next) }], target)
+  })
+  const tableCell = (cellId: string) => {
+    const target = liveTarget(), instanceId = target.instanceId
+    if (!instanceId) throw new Error('表格已不存在。')
+    const table = parseTableData(read.project!.instances[instanceId].data)
+    for (const [row, item] of table.rows.entries()) for (const [column, cell] of item.cells.entries()) {
+      if (cell.id === cellId) { const content = tableCellContent(cell); return { target, instanceId,
+        path: ['rows', String(row), 'cells', String(column), cell.content ? 'content' : 'text'], content, rich: Boolean(cell.content),
+        value: content.inlines.map(inline => inline.type === 'text' ? inline.text : '\uFFFC').join('') } }
+    }
+    throw new Error('单元格已不存在。')
   }
-  const captureSpatialLayerTarget = (nodeId: string): CourseAuthoringTarget | null => {
-    const spatial = read.spatial
-    const token = read.authoringToken
-    if (!spatial || !token) return null
+  const nextCellContent = (content: ReturnType<typeof tableCellContent>, text: string) => {
+    const data = textComponentDataSchema.parse({ content }), edit = rangeReplacement(propertiesText(data), text)
+    if (edit.replacement.includes('\uFFFC')) throw new Error('表格公式保持为原子；新增公式请使用正文专业编辑器。')
+    let offset = 0
+    const style = content.inlines.find(inline => { offset += inline.type === 'text' ? Array.from(inline.text).length : 1; return offset >= edit.start })?.style
+    return replaceTextComponentRange(data, edit.start, edit.end, { inlines: edit.replacement ? [{ type: 'text', text: edit.replacement, ...(style ? { style } : {}) }] : [] }).content
+  }
+  const moved = (ids: string[], id: string, direction: -1 | 1) => {
+    const index = ids.indexOf(id), next = index + direction
+    if (index >= 0 && next >= 0 && next < ids.length) { ids.splice(index, 1); ids.splice(next, 0, id) }
+    return ids
+  }
+  const table: SlideNativePropertiesContext['commands']['table'] = node?.type === 'table' ? {
+    beginCellEdit: cellId => run(() => {
+      const cell = tableCell(cellId)
+      if (cellSession.current?.key !== key || cellSession.current.cellId !== cellId) cellSession.current = {
+        key, cellId, baseline: cell.value, baselineContent: structuredClone(cell.content), group: `properties-cell:${crypto.randomUUID()}`, composing: false,
+        sharedDraft: useEditorStore.getState().slideContentEdit?.instanceId === cell.instanceId }
+    }),
+    updateCellDraft: (cellId, text, composing) => run(() => {
+      const cell = tableCell(cellId)
+      if (cellSession.current?.key !== key || cellSession.current.cellId !== cellId) table!.beginCellEdit(cellId)
+      const session = cellSession.current!
+      const value = cell.rich ? json(nextCellContent(cell.content, text)) : text
+      if (session.sharedDraft) { useEditorStore.getState().setSlideTextEditComposing(composing); session.composing = composing;
+        submit([{ type: 'data.set', instanceId: cell.instanceId, path: cell.path, value }], cell.target, session.group); return }
+      if (composing && !session.composing) { kernel.bridge.beginComposition(cell.instanceId, cell.path, cell.target.documentId); session.composing = true }
+      if (session.composing) {
+        void kernel.bridge.updateComposition(value, cell.target.documentId).then(() => {
+          if (!composing) { session.composing = false; return kernel.bridge.endComposition(cell.target.documentId) }
+        }).catch(report)
+      } else submit([{ type: 'data.set', instanceId: cell.instanceId, path: cell.path, value }], cell.target, session.group)
+    }),
+    cancelCellEdit: cellId => run(() => {
+      const session = cellSession.current
+      if (session?.key === key && session.cellId === cellId) {
+        const cell = tableCell(cellId)
+        if (cell.value !== session.baseline) submit([{ type: 'data.set', instanceId: cell.instanceId, path: cell.path,
+          value: cell.rich ? json(session.baselineContent) : session.baseline }], cell.target, session.group)
+        cellSession.current = null
+      }
+    }),
+    commitCellText: (cellId, text) => run(() => {
+      const cell = tableCell(cellId)
+      if (cell.value !== text) submit([{ type: 'data.set', instanceId: cell.instanceId, path: cell.path,
+        value: cell.rich ? json(nextCellContent(cell.content, text)) : text }], cell.target, cellSession.current?.group)
+      cellSession.current = null
+    }),
+    commitLastCellAndAppendRow: (cellId, text) => tableChange({ kind: 'last-cell-append', cellId, content: nextCellContent(tableCell(cellId).content, text) }),
+    mergeCells: region => tableChange({ kind: 'merge', region }),
+    splitCells: (rowId, columnId) => tableChange({ kind: 'split', rowId, columnId }),
+    patchStyle: stylePatch => tableChange({ kind: 'table-style', stylePatch }),
+    patchCellStyle: (cellId, stylePatch) => tableChange({ kind: 'cell-style', cellId, stylePatch }),
+    setRowHeight: (rowId, height) => tableChange({ kind: 'row-height', rowId, height }),
+    setColumnWidth: (columnId, width) => tableChange({ kind: 'column-width', columnId, width }),
+    insertRow: (referenceRowId, position) => tableChange({ kind: 'insert-row', referenceRowId, position }),
+    deleteRow: rowId => tableChange({ kind: 'delete-row', rowId }),
+    moveRow: (rowId, direction) => tableChange(source => ({ kind: 'reorder-rows', orderedRowIds: moved(source.rows.map(row => row.id), rowId, direction) })),
+    insertColumn: (referenceColumnId, position) => tableChange({ kind: 'insert-column', referenceColumnId, position }),
+    deleteColumn: columnId => tableChange({ kind: 'delete-column', columnId }),
+    moveColumn: (columnId, direction) => tableChange(source => ({ kind: 'reorder-columns', orderedColumnIds: moved(source.columns.map(column => column.id), columnId, direction) })),
+  } : null
+  const chartData = node?.type === 'chart' && selected ? chartDataSchema.parse(selected.data) : null
+  const chart = node?.type === 'chart' && chartData ? createChartPropertiesCommands(chartData, next => {
     try {
-      return captureSpatialEditorAuthoringTarget({
-        view: spatial.view,
-        sessionToken: token,
-        target: { kind: 'layer', layerItemId: nodeId, field: 'item' },
-      })
-    } catch {
-      return null
-    }
-  }
-  const runSpatialLayerUpdates = (
-    targets: readonly CourseAuthoringTarget[],
-    updates: readonly { readonly nodeId: string; readonly patch: EditorCanvasNodePatch }[],
-    capturedEdit: SpatialWorldContentEditSession | null,
-  ) => {
-    if (!targets[0] || targets.length !== updates.length || !requireLiveOwner()) return
-    const receipt = runSpatialAuthoringIntent(targets[0], {
-      kind: 'patch-layers',
-      updates: updates.map((update, index) => ({
-        target: targets[index]!,
-        patch: update.patch,
-      })),
-      expectedSelectionIds: [...(read.spatial?.selectionIds ?? [])],
-      expectedContentEdit: capturedEdit,
-    })
-    if (!receipt.ok) reportError(receipt.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON)
-  }
-
-  if (read.selectedViews.length > 1) {
-    const viewsById = new Map(read.selectedViews.map((item) => [item.id, item]))
-    const rowsById = new Map(read.selectedRows.map((row) => [row.id, row]))
-    const items = read.selectedNodeIds.flatMap((id) => {
-      const item = viewsById.get(id)
-      return item ? [item] : []
-    })
-    if (items.length !== read.selectedNodeIds.length) {
-      return { kind: 'stale-target', reason: '所选元素已失效，请重新选择。' }
-    }
-    const flowMode = Boolean(read.flow)
-    const spatialMode = Boolean(read.spatial)
-    const slideSession = read.slideSessionIdentity
-    const slideTargets = !read.flow && !read.spatial && slideSession
-      ? read.selectedNodeIds.flatMap((id) => {
-          const row = rowsById.get(id)
-          if (
-            !row
-            || row.owner === 'world'
-            || row.owner !== slideSession.scope
-            || row.scopeToken.locationId !== slideSession.locationId
-            || row.scopeToken.stateId !== slideSession.stateId
-          ) return []
-          return [Object.freeze({
-            sessionId: slideSession.sessionId,
-            revision: slideSession.revision,
-            generation: slideSession.generation,
-            authoringAddress: row.authoringAddress,
-            scope: slideSession.scope,
-            layerItemId: row.id,
-          }) satisfies SlideAuthoringTarget]
-        })
-      : []
-    const slideMode = slideTargets.length === read.selectedNodeIds.length
-    const flowTargets = flowMode && read.flow
-      ? read.selectedNodeIds.flatMap((id) => {
-          const row = rowsById.get(id)
-          if (
-            !row
-            || (row.owner !== 'global' && row.owner !== 'surface')
-            || row.scopeToken.locationId !== read.flow!.selection.locationId
-          ) return []
-          return [Object.freeze({
-            authoringAddress: row.authoringAddress,
-            locationId: row.scopeToken.locationId,
-            stateId: null,
-          }) satisfies EffectiveLayerCommandTarget]
-        })
-      : []
-    const spatialTargets = spatialMode
-      ? items.map((item) => captureSpatialLayerTarget(item.id))
-      : []
-    const capturedEdit = read.spatial?.contentEdit ?? null
-    if (
-      (!slideMode && !spatialMode && !flowMode)
-      || (flowMode && flowTargets.length !== read.selectedNodeIds.length)
-    ) {
-      return { kind: 'stale-target', reason: COURSE_AUTHORING_STALE_SESSION_REASON }
-    }
-    const runFlowMultiUpdates = (
-      updates: readonly { readonly nodeId: string; readonly patch: EditorCanvasNodePatch }[],
-    ) => {
-      if (!read.flow || !requireLiveOwner()) return
-      const live = readLive().flow
-      if (!live) {
-        reportError(STALE_PROPERTY_TARGET)
-        return
-      }
-      const targetsById = new Map(read.selectedNodeIds.map((id, index) => [id, flowTargets[index]!]))
-      const planned = [] as Parameters<typeof patchEffectiveLayerPropertiesAtTargets>[1][number][]
-      for (const update of updates) {
-        const target = targetsById.get(update.nodeId)
-        const row = rowsById.get(update.nodeId)
-        if (!target || !row) {
-          reportError(STALE_PROPERTY_TARGET)
-          return
+      const target = liveTarget(), current = chartDataSchema.parse(target.editingProject.instances[node.id].data), edits: ComponentEdit[] = []
+      for (const field of ['title', 'chartType', 'categories', 'series'] as const) if (JSON.stringify(chartData[field]) !== JSON.stringify(next[field]))
+        edits.push({ type: 'data.set', instanceId: node.id, path: [field], value: json(next[field]) })
+      if (JSON.stringify(chartData.style) !== JSON.stringify(next.style)) {
+        const style: Record<string, unknown> = next.chartType !== current.chartType ? { ...next.style } : { ...current.style }
+        if (next.chartType === current.chartType) for (const field of new Set([...Object.keys(chartData.style), ...Object.keys(next.style)])) {
+          const before = Reflect.get(chartData.style, field), after = Reflect.get(next.style, field)
+          if (JSON.stringify(before) === JSON.stringify(after)) continue
+          if (after === undefined) delete style[field]; else style[field] = after
         }
-        planned.push({
-          target,
-          patch: effectivePatchFromProperties(
-            row.item,
-            update.patch as PropertiesPatch,
-          ),
-        })
+        edits.push({ type: 'data.set', instanceId: node.id, path: ['style'], value: json(style) })
       }
-      const result = patchEffectiveLayerPropertiesAtTargets(
-        live.document,
-        planned,
-        { expectedRevision: read.identity.revision },
-      )
-      applyFlowCommand(result, { statusMessage: result.reason ?? null })
+      submit(edits, target); return null
     }
-    const applyUpdates = (
-      updates: readonly { readonly nodeId: string; readonly patch: EditorCanvasNodePatch }[],
-    ) => {
-      if (updates.length === 0) return
-      if (spatialMode) {
-        if (spatialTargets.some((target) => !target)) {
-          reportError(COURSE_AUTHORING_STALE_SESSION_REASON)
-          return
-        }
-        runSpatialLayerUpdates(
-          spatialTargets as CourseAuthoringTarget[],
-          updates,
-          capturedEdit,
-        )
-        return
-      }
-      if (flowMode) {
-        runFlowMultiUpdates(updates)
-        return
-      }
-      reportError(STALE_PROPERTY_TARGET)
-    }
-    const runSlideMulti = (intent: SlideMultiLayerPropertiesIntent) => {
-      if (!slideMode || !slideSession) {
-        reportError(STALE_PROPERTY_TARGET)
-        return
-      }
-      const result = applySlideCandidateCommand((session) => (
-        commitSlideMultiLayerIntentAtTargets(
-          session,
-          { targets: slideTargets, intent },
-          { expectedRevision: slideSession.revision },
-        )
-      ))
-      if (!result.ok) reportError(result.reason ?? STALE_PROPERTY_TARGET)
-    }
-    const context: MultiSelectionPropertiesContext = {
-      kind: 'multi-selection',
-      items,
-      spatialMode,
-      presentation: presentationView(read),
-      commands: {
-        setVisible: (visible) => slideMode
-          ? runSlideMulti({ kind: 'set-visible', visible })
-          : applyUpdates(items.map((item) => ({ nodeId: item.id, patch: { visible } }))),
-        setLocked: (locked) => slideMode
-          ? runSlideMulti({ kind: 'set-locked', locked })
-          : applyUpdates(items.map((item) => ({ nodeId: item.id, patch: { locked } }))),
-        align: (mode) => slideMode
-          ? runSlideMulti({ kind: 'align', mode })
-          : applyUpdates(computedMultiUpdates(items, mode)),
-        distribute: (axis) => slideMode
-          ? runSlideMulti({ kind: 'distribute', axis })
-          : applyUpdates(computedMultiUpdates(
-              items,
-              axis === 'horizontal' ? 'distribute-horizontal' : 'distribute-vertical',
-            )),
-        duplicate: spatialMode || flowMode ? null : () => runSlideMulti({ kind: 'duplicate' }),
-        remove: spatialMode
-          ? null
-          : flowMode
-            ? () => {
-                if (!read.flow || !requireLiveOwner()) return
-                const live = readLive().flow
-                if (!live) {
-                  reportError(STALE_PROPERTY_TARGET)
-                  return
-                }
-                const result = executeFlowDelete(
-                  live.document,
-                  read.flow.selection,
-                  { expectedRevision: read.identity.revision },
-                )
-                applyFlowCommand(result, { statusMessage: result.reason ?? null })
-              }
-            : () => runSlideMulti({ kind: 'delete' }),
-      },
-      unavailableReason: spatialMode
-        ? 'Spatial 多选复制与删除尚未接入一次提交，因此当前不会执行部分写入。'
-        : flowMode
-          ? 'Flow 多选复制尚未接入一次提交；删除与批量属性仍可正常使用。'
-        : null,
-    }
-    return context
+    catch (error) { return error instanceof Error ? error.message : String(error) }
+  }, report) : null
+  const selectedContext: SlideNativePropertiesContext | null = node && selected ? {
+    kind: 'slide-native', draftBindingKey: key, view: node, target: { layerItemId: selected.id },
+    disabledReason: read.error, contentEditingEnabled: true, spatialMode: read.surface?.kind === 'spatial',
+    frameEditingEnabled: Boolean(selected.frame), flowOrSpatial: read.surface?.kind !== 'slide', editingScopeGlobal: read.selectedIsGlobal,
+    notices: { surfaceBaseEditing: false, sceneOwner: read.surface?.kind === 'slide' && !read.selectedIsGlobal,
+      presentationStateName: read.surface?.presentation?.states.find(state => state.id === read.activeStateId)?.title ?? null,
+      stateOverrideApplied: Boolean(read.activeStateId && read.surface?.presentation?.states.find(state => state.id === read.activeStateId)?.overrides[selected.id]) },
+    videoDiagnostics: [], animation: null, interaction: null, globalInteraction: null,
+    component: read.project?.definitions[selected.definitionId] ? { definition: read.project.definitions[selected.definitionId], instance: selected, assets: read.project.assets,
+      onChange: data => run(() => submit([{ type: 'data.set', instanceId: selected.id, path: [], value: data }])),
+      onPreview: data => run(() => preview(data===null?null:[{type:'data.set',instanceId:selected.id,path:[],value:data}])) } : null,
+    runtime: read.project?.definitions[selected.definitionId] ? buildRuntimePropertiesContexts({ scope: read.selectedIsGlobal ? 'global' : 'scene',
+      definition: read.project.definitions[selected.definitionId], instance: selected, assetCount: Object.keys(read.project.assets).length,
+      components: read.resources?.components,
+      setEnabled: visible => patch({ visible }), editSource: () => run(() => { liveTarget(); useEditorStore.getState().setActiveTab('developer') }) }) : null,
+    commands: { patch, preview: value => run(() => { const target = liveTarget(); const instance = target.instanceId ? editingInstance(target, target.instanceId) : null;
+      preview(value && instance ? componentPropertiesEdits(instance, target.project.definitions[instance.definitionId], value) : null) }),
+      replaceImage: () => run(() => { liveTarget(); onReplaceImage() }),
+      transformImage: actions?.transformImage ? async operations => { liveTarget(); await actions.transformImage!(operations) } : undefined,
+      clearPresentationOverride: () => run(() => {
+        const target = liveTarget(), surface = target.project.surfaces.find(value => value.id === target.surfaceId)
+        if (!surface?.presentation || !target.activeStateId || !target.instanceId) return
+        const presentation = structuredClone(surface.presentation)
+        delete presentation.states.find(state => state.id === target.activeStateId)!.overrides[target.instanceId]
+        submit([{ type: 'surface.presentation.set', surfaceId: surface.id, presentation }], target)
+      }),
+      openAutomation, openProfessionalAutomation: openAutomation, text: textCommands, table, chart,
+      input: node.type === 'input' && read.project && read.surface ? {
+        inspection: inspectComponentInputRules(read.project, read.surface.id, selected.id),
+        feedbackTargets: propertiesFeedbackTargets(read.project, read.surface.id, selected.id),
+        configure: request => { try { return configureComponentInputRules(kernel, liveTarget(), request) } catch (error) { return error instanceof Error ? error.message : String(error) } },
+      } : null }, onFeedback: feedback,
+  } : null
+  const global = buildCourseGlobalPropertiesOwner({ read, selectedContext, assets, key, liveTarget, submit, preview,
+    ensureTeacherController: async () => { await useEditorStore.getState().ensureTeacherController() },
+    editSource: () => run(() => { liveTarget(); useEditorStore.getState().setActiveTab('developer') }), openAutomation, report })
+  if (global) return global
+  const flow = buildFlowPropertiesOwner({ read, kernel, actions: useEditorStore.getState(), documentSelection: useEditorStore.getState().flowContextSelection ?? null,
+    selectedContext, assets, liveTarget, submit, preview, report })
+  const spatial = buildSpatialPropertiesOwner({ read, kernel, actions: useEditorStore.getState(), assets, liveTarget, submit, preview, report })
+  if (flow) return flow
+  if (read.selectedInstanceIds.length === 0 && spatial) return spatial
+  if (read.selectedInstanceIds.length > 1) return {
+    kind: 'multi-selection', items: read.selectedViews, spatialMode: read.surface?.kind === 'spatial', presentation: null, unavailableReason: null,
+    commands: { setVisible: visible => run(() => submit(read.selectedInstanceIds.map(instanceId => ({ type: 'instance.patch', instanceId, patch: { visible } })))),
+      setLocked: locked => run(() => submit(read.selectedInstanceIds.map(instanceId => ({ type: 'instance.patch', instanceId, patch: { locked } })))),
+      align: mode => run(() => { liveTarget(); return useEditorStore.getState().alignSelectedNodes(mode) }),
+      distribute: axis => run(() => { liveTarget(); return useEditorStore.getState().distributeSelectedNodes(axis) }),
+      duplicate: () => run(() => { liveTarget(); return useEditorStore.getState().duplicateSelectedNodes() }), remove: () => run(() => { liveTarget(); return useEditorStore.getState().deleteSelectedNodes() }) },
   }
-
-  if (
-    flowOwner.status === 'active'
-    && flowOwner.context
-    && flowOwner.context.kind !== 'flow-page'
-  ) return { ...flowOwner.context, commands: { ...flowOwner.context.commands, previewNative: patch => {
-    const blockId = read.flow?.selection.selectedBlockId
-    const block = read.flow?.view.blocks.find(entry => entry.blockId === blockId)?.block
-    if (block?.type !== 'chart') { previewSelectedNative(patch); return }
-    const { projectId, revision, generation, locationId, stateId } = read.identity
-    if (!projectId || !locationId) return
-    const target = { projectId, revision, generation, locationId, stateId, owner: 'flow-chart' as const, authoringAddress: block.id }
-    if (patch === null) { setPreviewBackgroundColor(null, target); return }
-    if (ownerIsLive()) setPreviewBackgroundColor({ target, color: '', nativeData: patch }, target)
-  },
-    previewTextColor: color => {
-      if (!read.flow) return
-      const { projectId, revision, generation, locationId, stateId } = read.identity
-      if (!projectId || !locationId) return
-      const target = { projectId, revision, generation, locationId, stateId, owner: 'flow-text' as const,
-        authoringAddress: read.flow.selection.selectedBlockId ?? '' }
-      if (color === null) { setPreviewBackgroundColor(null, target); return }
-      if (ownerIsLive()) setPreviewBackgroundColor({ target, color, flowText: { selection: read.flow.selection, edit: read.flow.textEdit } }, target)
-    },
-  } }
-
-  if (
-    spatialOwner.status === 'active'
-    && !spatialOwner.editingGlobal
-    && spatialOwner.graphContext
-  ) return spatialOwner.graphContext
-
-  if (read.selectedNodeIds.length > 0 && read.selectedViews.length === 0) {
-    return { kind: 'stale-target', reason: '所选元素已失效，请重新选择。' }
-  }
-
-  const slideTarget = makeSlideTarget(read)
-  const node = read.selectedView
-  const selectedRow = read.selectedRow
-
-  if (
-    node
-    && selectedRow
-    && !read.flow
-    && !read.spatial
-    && !slideTarget
-  ) {
-    return { kind: 'stale-target', reason: COURSE_AUTHORING_STALE_SESSION_REASON }
-  }
-
-  const patchSelectedNode = (patch: PropertiesPatch) => {
-    if (!node || !selectedRow || !requireLiveOwner()) return
-    const normalized = normalizePropertiesPatch(node, patch)
-    if (read.spatial) {
-      const target = captureSpatialLayerTarget(node.id)
-      if (!target) {
-        reportError(COURSE_AUTHORING_STALE_SESSION_REASON)
-        return
-      }
-      runSpatialLayerUpdates(
-        [target],
-        [{ nodeId: node.id, patch: normalized as EditorCanvasNodePatch }],
-        read.spatial.contentEdit,
-      )
-      return
-    }
-    if (read.flow && read.authoringToken) {
-      // A global object on a Flow page (the teacher controller among them) is patched as that page's overlay (M19).
-      const target = captureFlowEditorAuthoringTarget({ view: read.flow.view, sessionToken: read.authoringToken, target: { kind: 'overlay', layerItemId: node.id } })
-      const result = runFlowAuthoringIntent(target, { kind: 'patch-overlay-properties', patch: normalized as Record<string, unknown> })
-      if (!result.ok) reportError(result.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON)
-      return
-    }
-    if (slideTarget) {
-      const result = applySlideCandidateCommand((session) => (
-        patchSlideLayerPropertiesAtTarget(
-              session,
-              slideTarget,
-              effectivePatchFromProperties(selectedRow.item, normalized),
-              { expectedRevision: slideTarget.revision },
-            )
-      ))
-      if (!result.ok) reportError(result.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON)
-      return
-    }
-    reportError(COURSE_AUTHORING_STALE_SESSION_REASON)
-  }
-
-  const createSlideTextCommands = (textNode: TextNode): SlideNativeTextCommands => {
-    if (!slideTarget) return dummyTextCommands()
-    const boundEdit = read.textEdit?.kind === 'text'
-      && read.textEdit.target.layerItemId === textNode.id
-      && sameSlideContentTarget(read, slideTarget, read.textEdit.target, 'content.data.text')
-      ? read.textEdit
-      : null
-    const readBoundEdit = () => {
-      const live = readLive()
-      return boundEdit
-        && Object.is(live.textEdit, boundEdit)
-        && sameSlideContentTarget(live, slideTarget, boundEdit.target, 'content.data.text')
-        ? boundEdit
-        : null
-    }
-    return {
-      beginEdit: (source) => {
-        if (!sameSlideTargetIdentity(readLive(), slideTarget)) {
-          reportError(STALE_PROPERTY_TARGET)
-          return false
-        }
-        if (readBoundEdit()?.source === source) return false
-        beginTextEdit(textNode.id, source)
-        const live = readLive()
-        return Boolean(
-          live.textEdit?.kind === 'text'
-          && live.textEdit.source === source
-          && live.textEdit.target.layerItemId === textNode.id
-          && sameSlideTargetIdentity(live, slideTarget),
-        )
-      },
-      commitEdit: () => {
-        if (readBoundEdit()) commitTextEdit()
-      },
-      cancelEdit: () => {
-        if (readBoundEdit()) cancelTextEdit()
-      },
-      updateDraft: (text, editRange) => {
-        const edit = readBoundEdit()
-        if (!edit) return
-        const draft = edit.draft as V9SlideTextContentDraft
-        const mapping = editRange
-          ? applyTextRunEdits(draft.text, draft.runs, [editRange])
-          : planTextRunRemap(draft.text, text, draft.runs)
-        if (!mapping.ok || mapping.text !== text) return
-        const runs = mapping.runs
-        const width = draft.width ?? textNode.width
-        const height = draft.height ?? textNode.height
-        const draftNode = { ...textNode, text, runs, width, height }
-        const rendered = textNode.style.overflow === 'auto-height'
-          ? renderTextNodeCanvas(draftNode, width)
-          : null
-        updateTextEditDraft(
-          textNode.id,
-          text,
-          runs,
-          rendered?.height ?? height,
-          rendered?.width ?? width,
-        )
-      },
-      toggleStyle: (key, selection) => {
-        if (!sameSlideTarget(readLive(), slideTarget)) return
-        if (selection.end > selection.start) {
-          const edit = readBoundEdit()
-          if (!edit) return
-          const styledEdit = applyV9SlideContentEditRunStyle(
-            edit,
-            selection.start,
-            selection.end,
-            { [key]: true },
-          )
-          const result = applySlideCandidateCommand(
-            (session) => commitV9SlideContentEdit(session, styledEdit, {
-              expectedRevision: edit.target.revision,
-              expectedGeneration: edit.target.generation,
-            }),
-            { clearContentEdit: true },
-          )
-          if (!result.ok) reportError(result.reason ?? STALE_PROPERTY_TARGET)
-          return
-        }
-        patchSelectedNode({ style: { [key]: !textNode.style[key] } } as PropertiesPatch)
-      },
-    }
-  }
-
-  const createSpatialTextCommands = (textNode: TextNode): SlideNativeTextCommands => {
-    const capturedEdit = read.spatial?.contentEdit ?? null
-    const layerTarget = captureSpatialLayerTarget(textNode.id)
-    const boundEdit = capturedEdit?.kind === 'text'
-      && capturedEdit.target.layerItemId === textNode.id
-      && capturedEdit.courseTarget
-      ? capturedEdit
-      : null
-    const readBoundEdit = () => {
-      const live = readLive().spatial?.contentEdit ?? null
-      return ownerIsLive() && boundEdit && Object.is(live, boundEdit) ? boundEdit : null
-    }
-    const dispatch = (
-      target: CourseAuthoringTarget,
-      intent: SpatialAuthoringIntent,
-    ) => {
-      const receipt = runSpatialAuthoringIntent(target, intent)
-      if (!receipt.ok) reportError(receipt.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON)
-    }
-    return {
-      beginEdit: (source) => {
-        if (!layerTarget || !requireLiveOwner() || readBoundEdit()) return
-        dispatch(layerTarget, {
-          kind: 'begin-content-edit',
-          source,
-          expectedEdit: capturedEdit,
-          expectedContentEdit: capturedEdit,
-        })
-      },
-      commitEdit: () => {
-        const edit = readBoundEdit()
-        if (!edit || !edit.courseTarget) return
-        const draft = edit.draft as V9SlideTextContentDraft
-        dispatch(edit.courseTarget, {
-          kind: 'commit-text-content-edit',
-          expectedEdit: edit,
-          expectedContentEdit: edit,
-          text: draft.text,
-          runs: draft.runs,
-          width: draft.width,
-          height: draft.height,
-        })
-      },
-      cancelEdit: () => {
-        const edit = readBoundEdit()
-        if (!edit?.courseTarget) return
-        dispatch(edit.courseTarget, {
-          kind: 'cancel-content-edit',
-          expectedEdit: edit,
-          expectedContentEdit: edit,
-        })
-      },
-      setComposing: (composing) => {
-        const edit = readBoundEdit()
-        if (!edit?.courseTarget || edit.composing === composing) return
-        dispatch(edit.courseTarget, {
-          kind: 'set-content-edit-composing',
-          expectedEdit: edit,
-          expectedContentEdit: edit,
-          composing,
-        })
-      },
-      updateDraft: (text, editRange) => {
-        const edit = readBoundEdit()
-        if (!edit?.courseTarget) return
-        const draft = edit.draft as V9SlideTextContentDraft
-        const mapping = editRange
-          ? applyTextRunEdits(draft.text, draft.runs, [editRange])
-          : planTextRunRemap(draft.text, text, draft.runs)
-        if (!mapping.ok || mapping.text !== text) return
-        const runs = mapping.runs
-        const width = draft.width ?? textNode.width
-        const height = draft.height ?? textNode.height
-        const draftNode = { ...textNode, text, runs, width, height }
-        const rendered = textNode.style.overflow === 'auto-height'
-          ? renderTextNodeCanvas(draftNode, width)
-          : null
-        dispatch(edit.courseTarget, {
-          kind: 'update-text-content-edit',
-          expectedEdit: edit,
-          expectedContentEdit: edit,
-          text,
-          runs,
-          width: rendered?.width ?? width,
-          height: rendered?.height ?? height,
-        })
-      },
-      toggleStyle: (key, selection) => {
-        const edit = readBoundEdit()
-        if (edit?.courseTarget && selection.end > selection.start) {
-          dispatch(edit.courseTarget, {
-            kind: 'commit-text-run-style',
-            expectedEdit: edit,
-            expectedContentEdit: edit,
-            selectionStart: selection.start,
-            selectionEnd: selection.end,
-            patch: { [key]: true },
-          })
-          return
-        }
-        patchSelectedNode({ style: { [key]: !textNode.style[key] } } as PropertiesPatch)
-      },
-    }
-  }
-
-  const textCommands = node?.type === 'text'
-    ? read.spatial
-      ? createSpatialTextCommands(node)
-      : slideTarget
-        ? createSlideTextCommands(node)
-        : dummyTextCommands()
-    : dummyTextCommands()
-
-  const slideTableCommands = (): SlideNativePropertiesContext['commands']['table'] => {
-    if (node?.type === 'table' && read.spatial) {
-      const target = captureSpatialLayerTarget(node.id)
-      const item = selectedRow?.item
-      if (!target || read.spatial.scope !== 'world' || item?.kind !== 'native' || item.content.nativeType !== 'table') return null
-      const tableData = item.content.data
-      const readEdit = () => ownerIsLive() ? readLive().spatial?.contentEdit ?? null : null
-      const change = (operation: (table: NativeTableContent) => NativeTableContent) => {
-        if (!requireLiveOwner()) return
-        try {
-          const edit = readEdit()
-          let table = tableData
-          if (edit?.kind === 'field-text' && edit.target.layerItemId === node.id && edit.tableCellId) {
-            table = tableContent.patchTableCellText(table, { cellId: edit.tableCellId, text: (edit.draft as { text: string }).text })
-          }
-          const result = runSpatialAuthoringIntent(target, { kind: 'replace-table', table: operation(table), expectedContentEdit: edit })
-          if (!result.ok) reportError(result.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON)
-        } catch (error) { reportError(error instanceof Error ? error.message : '表格修改失败') }
-      }
-      const move = (ids: string[], id: string, direction: -1 | 1) => {
-        const index = ids.indexOf(id)
-        const next = index + direction
-        if (index < 0 || next < 0 || next >= ids.length) return ids
-        ids.splice(index, 1); ids.splice(next, 0, id)
-        return ids
-      }
-      return {
-        beginCellEdit: cellId => {
-          const edit = readEdit()
-          const result = runSpatialAuthoringIntent(target, { kind: 'begin-content-edit', tableCellId: cellId, source: 'properties', expectedEdit: edit, expectedContentEdit: edit })
-          if (!result.ok) reportError(result.reason ?? '表格编辑失败')
-        },
-        updateCellDraft: (cellId, text, composing) => {
-          if (!requireLiveOwner()) return
-          let edit = readEdit()
-          if (!edit) {
-            const currentTarget = captureSpatialLayerTarget(node.id)
-            if (!currentTarget) return
-            const begun = runSpatialAuthoringIntent(currentTarget, { kind: 'begin-content-edit', tableCellId: cellId, source: 'properties', expectedEdit: null, expectedContentEdit: null })
-            if (!begun.ok) return
-            edit = begun.edit ?? null
-          }
-          if (edit?.kind === 'field-text' && edit.tableCellId === cellId && edit.courseTarget) {
-            runSpatialAuthoringIntent(edit.courseTarget, { kind: 'update-table-content-edit', expectedEdit: edit, expectedContentEdit: edit, text, composing })
-          }
-        },
-        cancelCellEdit: cellId => {
-          const edit = readEdit()
-          if (edit?.kind === 'field-text' && edit.tableCellId === cellId && edit.courseTarget) runSpatialAuthoringIntent(edit.courseTarget, { kind: 'cancel-content-edit', expectedEdit: edit, expectedContentEdit: edit })
-        },
-        commitCellText: (cellId, text) => change(table => tableContent.patchTableCellText(table, { cellId, text })),
-        mergeCells: region => change(table => tableContent.mergeTableCells(table, region)),
-        splitCells: (rowId, columnId) => change(table => tableContent.splitTableCells(table, { rowId, columnId })),
-        commitLastCellAndAppendRow: (cellId, text) => change(table => tableContent.commitTableLastCellAndAppendRow(table, { cellId, text }).table),
-        patchStyle: stylePatch => change(table => tableContent.patchTableStyle(table, { stylePatch })),
-        patchCellStyle: (cellId, stylePatch) => change(table => tableContent.patchTableCellStyle(table, { cellId, stylePatch })),
-        setRowHeight: (rowId, height) => change(table => tableContent.patchTableRowHeight(table, { rowId, height })),
-        setColumnWidth: (columnId, width) => change(table => tableContent.patchTableColumnWidth(table, { columnId, width })),
-        insertRow: (referenceRowId, position) => change(table => tableContent.insertTableRow(table, { referenceRowId, position })),
-        deleteRow: rowId => change(table => tableContent.deleteTableRow(table, { rowId })),
-        moveRow: (rowId, direction) => change(table => tableContent.reorderTableRows(table, { orderedRowIds: move(table.rows.map(row => row.id), rowId, direction) })),
-        insertColumn: (referenceColumnId, position) => change(table => tableContent.insertTableColumn(table, { referenceColumnId, position })),
-        deleteColumn: columnId => change(table => tableContent.deleteTableColumn(table, { columnId })),
-        moveColumn: (columnId, direction) => change(table => tableContent.reorderTableColumns(table, { orderedColumnIds: move(table.columns.map(column => column.id), columnId, direction) })),
-      }
-    }
-    if (node?.type !== 'table' || !slideTarget || read.flow || read.spatial) return null
-    const tableNode = node
-    const target = slideTarget
-    const options = { expectedRevision: target.revision }
-    const run = (
-      execute: (session: SlideAuthoringSession) => SlideCommandResult,
-    ) => {
-      if (!requireLiveOwner()) return
-      const result = applySlideCandidateCommand((session) => execute(session), { clearContentEdit: true })
-      if (!result.ok) reportError(result.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON)
-    }
-    const movedIds = (ids: readonly string[], id: string, direction: -1 | 1) => {
-      const index = ids.indexOf(id)
-      const nextIndex = index + direction
-      if (index < 0 || nextIndex < 0 || nextIndex >= ids.length) return null
-      const next = [...ids]
-      next.splice(index, 1)
-      next.splice(nextIndex, 0, id)
-      return next
-    }
-    const readCellEdit = (cellId: string) => {
-      const current = readLive()
-      if (!sameSlideTargetIdentity(current, target)) return null
-      const edit = current.textEdit
-      return edit?.kind === 'field-text' && edit.target.layerItemId === target.layerItemId
-        && edit.textField?.kind === 'table-cell' && edit.textField.cellId === cellId ? edit : null
-    }
-    return {
-      beginCellEdit: (cellId) => {
-        if (!requireLiveOwner()) return
-        const result = runSlideFieldTextIntent({ kind: 'begin-field', target, field: { kind: 'table-cell', cellId } })
-        if (!result.ok) reportError(result.reason)
-      },
-      updateCellDraft: (cellId, text, composing) => {
-        let edit = readCellEdit(cellId)
-        if (!edit) {
-          const live = readLive()
-          if (!sameSlideTargetIdentity(live, target)) return
-          const currentTarget = makeSlideTarget(live)
-          if (!currentTarget) return
-          const begun = runSlideFieldTextIntent({ kind: 'begin-field', target: currentTarget, field: { kind: 'table-cell', cellId } })
-          if (!begun.ok) { reportError(begun.reason); return }
-          edit = begun.edit
-        }
-        if (edit) runSlideFieldTextIntent({ kind: 'update-field', expectedEdit: edit, text, composing })
-      },
-      cancelCellEdit: (cellId) => {
-        const edit = readCellEdit(cellId)
-        if (edit) runSlideFieldTextIntent({ kind: 'cancel', expectedEdit: edit })
-      },
-      commitCellText: (cellId, text) => run((session) => (
-        patchSlideTableCellText(session, { layerItemId: target.layerItemId, cellId, text }, options)
-      )),
-      mergeCells: region => run(session => changeSlideTableMerge(session, { layerItemId: target.layerItemId, kind: 'merge', region }, options)),
-      splitCells: (rowId, columnId) => run(session => changeSlideTableMerge(session, { layerItemId: target.layerItemId, kind: 'split', rowId, columnId }, options)),
-      commitLastCellAndAppendRow: (cellId, text) => run((session) => (
-        commitSlideTableLastCellAndAppendRow(session, { layerItemId: target.layerItemId, cellId, text }, options)
-      )),
-      patchStyle: (stylePatch) => run((session) => (
-        patchSlideTableStyle(session, { layerItemId: target.layerItemId, stylePatch }, options)
-      )),
-      patchCellStyle: (cellId, stylePatch) => run((session) => (
-        patchSlideTableCellStyle(session, { layerItemId: target.layerItemId, cellId, stylePatch }, options)
-      )),
-      setRowHeight: (rowId, height) => run((session) => (
-        patchSlideTableRowHeight(session, { layerItemId: target.layerItemId, rowId, height }, options)
-      )),
-      setColumnWidth: (columnId, width) => run((session) => (
-        patchSlideTableColumnWidth(session, { layerItemId: target.layerItemId, columnId, width }, options)
-      )),
-      insertRow: (referenceRowId, position) => run((session) => (
-        insertSlideTableRow(session, { layerItemId: target.layerItemId, referenceRowId, position }, options)
-      )),
-      deleteRow: (rowId) => run((session) => (
-        deleteSlideTableRow(session, { layerItemId: target.layerItemId, rowId }, options)
-      )),
-      moveRow: (rowId, direction) => {
-        const orderedRowIds = movedIds(tableNode.rows.map((row) => row.id), rowId, direction)
-        if (!orderedRowIds) return
-        run((session) => (
-          reorderSlideTableRows(session, { layerItemId: target.layerItemId, orderedRowIds }, options)
-        ))
-      },
-      insertColumn: (referenceColumnId, position) => run((session) => (
-        insertSlideTableColumn(session, { layerItemId: target.layerItemId, referenceColumnId, position }, options)
-      )),
-      deleteColumn: (columnId) => run((session) => (
-        deleteSlideTableColumn(session, { layerItemId: target.layerItemId, columnId }, options)
-      )),
-      moveColumn: (columnId, direction) => {
-        const orderedColumnIds = movedIds(tableNode.columns.map((column) => column.id), columnId, direction)
-        if (!orderedColumnIds) return
-        run((session) => (
-          reorderSlideTableColumns(session, { layerItemId: target.layerItemId, orderedColumnIds }, options)
-        ))
-      },
-    }
-  }
-
-  const slideChartCommands = (): SlideNativePropertiesContext['commands']['chart'] => {
-    if (node?.type === 'chart' && read.spatial) {
-      const target = captureSpatialLayerTarget(node.id)
-      const item = selectedRow?.item
-      if (!target || read.spatial.scope !== 'world' || item?.kind !== 'native' || item.content.nativeType !== 'chart') return null
-      return { ...createChartPropertiesCommands(item.content.data, chart => {
-        if (!requireLiveOwner()) return COURSE_AUTHORING_STALE_SESSION_REASON
-        const receipt = runSpatialAuthoringIntent(target, { kind: 'replace-chart', chart, expectedContentEdit: read.spatial!.contentEdit })
-        return receipt.ok ? null : receipt.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON
-      }, reportError), connectCanvasText: port => connectChartCanvasText(target, port) }
-    }
-    if (node?.type !== 'chart' || !slideTarget || read.flow || read.spatial) return null
-    const target = slideTarget
-    const options = { expectedRevision: target.revision }
-    const run = (
-      execute: (session: SlideAuthoringSession) => SlideCommandResult,
-    ) => {
-      if (!requireLiveOwner()) return
-      const result = applySlideCandidateCommand((session) => execute(session))
-      if (!result.ok) reportError(result.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON)
-    }
-    return {
-      connectCanvasText: (port) => connectChartCanvasText(target, port),
-      patchTitle: (title) => run((session) => (
-        patchSlideChartTitle(session, { layerItemId: target.layerItemId, title }, options)
-      )),
-      patchType: (newType, retainedSeriesId) => run((session) => (
-        patchSlideChartType(
-          session,
-          { layerItemId: target.layerItemId, newChartType: newType, retainedSeriesId },
-          options,
-        )
-      )),
-      patchStyle: (stylePatch) => run((session) => (
-        patchSlideChartStyle(session, { layerItemId: target.layerItemId, stylePatch }, options)
-      )),
-      commitTableData: (candidateData) => {
-        if (!requireLiveOwner()) return COURSE_AUTHORING_STALE_SESSION_REASON
-        const result = applySlideCandidateCommand((session) => (
-          replaceSlideChartTableData(
-            session,
-            { layerItemId: target.layerItemId, candidateData },
-            options,
-          )
-        ))
-        return result.ok ? null : (result.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON)
-      },
-    }
-  }
-
-  const sharedCommands = (): SlideNativePropertiesContext['commands'] => ({
-    preview: previewSelectedNative,
-    input: node?.type === 'input' && slideTarget && read.scene ? {
-      inspection: inspectInputRuleFamily(node.id, node, read.scene.interactions),
-      feedbackTargets: read.interactionNodes.filter(item => item.id !== node.id).map(item => ({ id: item.id, name: item.name })),
-      configure: request => {
-        if (!requireLiveOwner()) return COURSE_AUTHORING_STALE_SESSION_REASON
-        const result = applySlideCandidateCommand(session => configureSlideInputAtTarget(session, slideTarget, request))
-        return result.ok ? null : result.reason ?? '输入配置提交失败'
-      },
-    } : null,
-    patch: patchSelectedNode,
-    replaceImage: () => {
-      if (requireLiveOwner()) onReplaceImage()
-    },
-    clearPresentationOverride: () => {
-      if (node && read.activeState && requireLiveOwner()) {
-        clearNodePresentationOverride(node.id)
-      }
-    },
-    openAutomation: () => {
-      if (ownerIsLive()) setActiveTab('automation')
-    },
-    openProfessionalAutomation: () => {
-      if (ownerIsLive()) setActiveTab('automation')
-    },
-    text: textCommands,
-    table: slideTableCommands(),
-    chart: slideChartCommands(),
+  if (selectedContext) return selectedContext
+  if (read.selectedInstanceIds.length) return { kind: 'stale-target', reason: read.error ?? '所选组件已不存在。' }
+  const surface = read.surface
+  if (!surface || !read.project) return { kind: 'stale-target', reason: read.error ?? '当前没有打开的课件。' }
+  const baseSurface = read.baseProject?.surfaces.find(value => value.id === surface.id) ?? surface
+  const background = baseSurface.background
+  const activeState = baseSurface.presentation?.states.find(value => value.id === read.activeStateId) ?? null
+  const backgroundFields = { backgroundMode: background?.mode ?? 'inherit' as const, backgroundColor: background?.color, backgroundAssetId: background?.assetId }
+  const updateBackground = (value: { backgroundMode?: 'inherit' | 'own'; backgroundColor?: string; backgroundAssetId?: string | null }) => run(() => {
+    const target = liveTarget(), current = target.project.surfaces.find(item => item.id === surface.id)?.background
+    submit([{ type: 'surface.background.set', surfaceId: surface.id, background: { ...current,
+      ...(value.backgroundMode === undefined ? {} : { mode: value.backgroundMode }),
+      ...(value.backgroundColor === undefined ? {} : { color: value.backgroundColor, mode: 'own' }),
+      ...(value.backgroundAssetId === undefined ? {} : { assetId: value.backgroundAssetId, mode: 'own' }),
+    } }], target)
   })
-
-  const sceneInteraction = (): InteractionEditorProps | null => {
-    if (
-      read.identity.owner !== 'scene'
-      || read.flow
-      || read.spatial
-      || !node
-      || !selectedRow
-      || !read.scene
-      || !read.identity.projectId
-      || !read.identity.locationId
-      || !slideTarget
-    ) return null
-    const target: InteractionAuthoringTarget = Object.freeze({
-      carrier: 'slide-scene',
-      projectId: read.identity.projectId,
-      baseRevision: read.identity.revision,
-      locationId: read.identity.locationId,
-      activeStateId: read.identity.stateId,
-    })
-    const scene = {
-      id: read.scene.id,
-      name: read.scene.name,
-      nodes: read.interactionNodes,
-      interactions: read.scene.interactions,
-      presentation: read.slideScenes.find((candidate) => candidate.id === read.scene?.id)?.presentation,
-    }
-    return {
-      scene,
-      selectedNode: interactionLayerTargetFromItem(selectedRow.item),
-      activeStateId: read.identity.stateId,
-      scenes: read.slideScenes,
-      locations: read.interactionLocations,
-      sounds: read.sounds,
-      courseState: read.courseState,
-      ruleWarnings: read.interactionWarnings,
-      onAddRule: (rule) => {
-        if (!requireLiveOwner()) return
-        const result = applySlideCandidateCommand((session) => (
-          addSlideSceneInteractionRule(session, rule, {
-            expectedRevision: target.baseRevision,
-          })
-        ))
-        if (!result.ok) reportError(result.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON)
-      },
-      onUpdateRule: (ruleId, patch) => {
-        if (!requireLiveOwner()) return
-        const result = updateInteractionRuleAtTarget(target, ruleId, patch)
-        if (!result.ok) reportError(result.reason)
-      },
-      onDeleteRule: (ruleId) => {
-        if (!requireLiveOwner()) return
-        const result = applySlideCandidateCommand((session) => (
-          deleteSlideSceneInteractionRule(session, ruleId, {
-            expectedRevision: target.baseRevision,
-          })
-        ))
-        if (!result.ok) reportError(result.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON)
-      },
-    }
-  }
-
-  const globalInteraction = (): InteractionEditorProps | null => {
-    if (
-      !read.selectedIsGlobal
-      || read.flow
-      || read.spatial
-      || !node
-      || !selectedRow
-      || !read.identity.projectId
-    ) return null
-    const target: InteractionAuthoringTarget = Object.freeze({
-      carrier: 'global',
-      projectId: read.identity.projectId,
-      baseRevision: read.identity.revision,
-      ...(read.identity.locationId ? { activeLocationId: read.identity.locationId } : {}),
-      activeStateId: read.identity.stateId,
-    })
-    return {
-      scene: {
-        id: read.scene?.id ?? selectedRow.ownerKey,
-        name: read.scene?.name ?? '当前页',
-        nodes: read.interactionNodes,
-        interactions: read.globalInteractions,
-        presentation: read.slideScenes.find((candidate) => candidate.id === read.scene?.id)?.presentation,
-      },
-      selectedNode: interactionLayerTargetFromItem(selectedRow.item),
-      sourceScope: 'global',
-      sourceNodes: read.globalSourceNodes,
-      sourceRules: read.globalInteractions,
-      activeStateId: read.identity.stateId,
-      scenes: read.slideScenes,
-      locations: read.interactionLocations,
-      sounds: read.sounds,
-      courseState: read.courseState,
-      onAddRule: (rule) => {
-        if (requireLiveOwner()) addGlobalInteractionRule(rule)
-      },
-      onUpdateRule: (ruleId, patch) => {
-        if (!requireLiveOwner()) return
-        const result = updateInteractionRuleAtTarget(target, ruleId, patch)
-        if (!result.ok) reportError(result.reason)
-      },
-      onDeleteRule: (ruleId) => {
-        if (requireLiveOwner()) deleteGlobalInteractionRule(ruleId)
-      },
-    }
-  }
-
-  const feedback = (value: { kind: 'error' | 'status'; message: string }) => {
-    if (value.kind === 'error') reportError(value.message)
-    else reportStatus(value.message)
-  }
-
-  const projectCommands = {
-    updatePlayback: (patch: Parameters<typeof updatePlayback>[0]) => {
-      if (requireLiveOwner()) updatePlayback(patch)
-    },
-    ensureTeacherController: () => {
-      if (requireLiveOwner()) ensureTeacherController()
-    },
-    updateDesignTokens: (tokens: Parameters<typeof updateDesignTokens>[0]) => {
-      if (requireLiveOwner()) updateDesignTokens(tokens)
-    },
-    setVisibleAtLocation: (nodeId: string, visible: boolean) => {
-      if (
-        nodeId === read.selectedRow?.id
-        && read.selectedRow.owner === 'global'
-        && requireLiveOwner()
-      ) setCandidateGlobalLayerVisibleAtLocation(nodeId, visible)
-    },
-    setLocationVisibility: (
-      nodeId: string,
-      visibility: Parameters<typeof setCandidateGlobalLayerLocationVisibility>[1],
-    ) => {
-      if (
-        nodeId === read.selectedRow?.id
-        && read.selectedRow.owner === 'global'
-        && requireLiveOwner()
-      ) setCandidateGlobalLayerLocationVisibility(nodeId, visibility)
-    },
-    resizeSlideCanvas: (canvas: Parameters<typeof resizeSlideCanvas>[0]) => {
-      if (requireLiveOwner()) resizeSlideCanvas(canvas)
-    },
-    updateLayerSettings: (
-      nodeId: string,
-      patch: Parameters<typeof updateGlobalLayerSettings>[1],
-    ) => {
-      if (
-        nodeId === read.selectedRow?.id
-        && read.selectedRow.owner === 'global'
-        && requireLiveOwner()
-      ) updateGlobalLayerSettings(nodeId, patch)
-    },
-  }
-
-  const emptyGlobalContext = (): CourseGlobalPropertiesContext => ({
-    kind: 'course-global',
-    draftBindingKey: null,
-    mode: 'empty',
-    disabledReason: null,
-    empty: {
-      globalLayerCount: read.globalSummary.count,
-      underlayCount: read.globalSummary.underlayCount,
-      overlayCount: read.globalSummary.overlayCount,
-      runtimeAvailable: read.runtimeView?.availability === 'available',
-      playback: read.globalSummary.playback,
-      hasTeacherController: read.globalSummary.hasTeacherController,
-      designTokens: read.globalSummary.designTokens,
-      canvas: courseSlideCanvas(selectActiveCourseProjectDocument(useEditorStore.getState()) ?? { surfaces: [] }),
-      background: {
-        color: read.course.backgroundColor,
-        assetId: read.course.backgroundAssetId,
-        effective: resolveEffectiveBackground({ owner: 'course', course: read.course }),
-        assets: read.assets,
-      },
-    },
-    layer: null,
-    selected: null,
-    runtime: runtimeContexts.global,
-    interaction: null,
-    flowOrSpatial: Boolean(read.flow || read.spatial),
-    editingScopeGlobal: read.editingScope === 'global',
-    commands: {
-      patch: () => undefined,
-      replaceImage: onReplaceImage,
-      clearPresentationOverride: () => undefined,
-      updateCourseBackground: (patch) => {
-        previewBackground(null, 'course')
-        if (requireLiveOwner()) updateCourseBackground(patch)
-      },
-      previewCourseBackground: (patch) => {
-        previewBackground(patch.backgroundColor ?? null, 'course')
-      },
-      ...projectCommands,
-      openProfessionalAutomation: () => {
-        if (ownerIsLive()) setActiveTab('automation')
-      },
-      text: dummyTextCommands(),
-    },
-    onFeedback: feedback,
+  const importBackground = (file: { name: string; mimeType: string; bytes: Uint8Array }) => run(() => {
+    const target = liveTarget(), id = crypto.randomUUID()
+    submit([{ type: 'asset.add', asset: { id, path: `assets/${id}/${file.name}`, mimeType: file.mimeType }, bytes: file.bytes },
+      { type: 'surface.background.set', surfaceId: surface.id, background: { ...background, mode: 'own', assetId: id } }], target)
   })
-
-  if (!node || !selectedRow) {
-    if (read.selectedIsGlobal) return emptyGlobalContext()
-    if (flowOwner.status === 'active' && flowOwner.context) return flowOwner.context
-    if (spatialOwner.status === 'active') return spatialOwner.pageContext
-    if (read.identity.owner === 'surface') return { kind: 'empty-surface' }
-    const scene = read.scene
-    const sceneId = scene?.id ?? null
-    const activeState = read.activeState
-    const stateId = activeState?.id ?? null
-    const surfaceDoc = read.slideSurface
-    const surfaceId = surfaceDoc?.id ?? null
-    const surfaceEffective = surfaceDoc
-      ? resolveEffectiveBackground({ owner: 'slide-surface', course: read.course, surface: surfaceDoc })
-      : null
-    const sceneEffective = scene && surfaceDoc
-      ? resolveEffectiveBackground({ owner: 'slide-scene', course: read.course, surface: surfaceDoc, scene })
-      : null
-    const stateEffective = scene && surfaceDoc && activeState
-      ? resolveEffectiveBackground({
-          owner: 'slide-state', course: read.course, surface: surfaceDoc, scene, state: activeState,
-        })
-      : null
-    return {
-      kind: 'empty-scene',
-      draftBindingKey: propertyDraftBindingKey(read, sceneId ?? undefined),
-      assets: read.assets,
-      slideSurface: surfaceDoc && surfaceEffective
-        ? {
-            id: surfaceDoc.id,
-            backgroundMode: surfaceDoc.backgroundMode ?? 'inherit',
-            backgroundColor: surfaceDoc.backgroundColor,
-            backgroundAssetId: surfaceDoc.backgroundAssetId,
-            effective: surfaceEffective,
-          }
-        : null,
-      scene: scene && sceneEffective
-        ? {
-            id: scene.id,
-            name: scene.name,
-            backgroundMode: scene.backgroundMode ?? 'own',
-            backgroundColor: scene.backgroundColor,
-            backgroundAssetId: scene.backgroundAssetId,
-            effective: sceneEffective,
-            interactionCount: scene.interactions.length,
-            stateName: activeState?.name ?? null,
-            ...(surfaceDoc ? { canvas: { effective: effectiveSceneCanvas(surfaceDoc, scene), inherited: !scene.canvas } } : {}),
-          }
-        : null,
-      state: activeState && stateEffective
-        ? {
-            id: activeState.id,
-            name: activeState.name,
-            backgroundColor: activeState.backgroundColor,
-            backgroundAssetId: activeState.backgroundAssetId,
-            effective: stateEffective,
-          }
-        : null,
-      runtime: runtimeContexts.scene,
-      commands: {
-        updateName: (name) => {
-          if (sceneId && requireLiveOwner()) updateScene(sceneId, { name })
-        },
-        resizeCanvas: (canvas) => {
-          if (surfaceId && sceneId && requireLiveOwner()) resizeSlideSceneCanvas(surfaceId, sceneId, canvas)
-        },
-        updateSlideSurfaceBackground: (patch) => {
-          previewBackground(null, 'slide-surface')
-          if (surfaceId && requireLiveOwner()) updateSlideSurfaceBackground(surfaceId, patch)
-        },
-        previewSlideSurfaceBackground: (patch) => {
-          previewBackground(patch.backgroundColor ?? null, 'slide-surface')
-        },
-        importSlideSurfaceBackgroundAsset: (file) => {
-          if (surfaceId && requireLiveOwner()) importSlideSurfaceBackgroundAsset(surfaceId, file)
-        },
-        updateSceneBackground: (patch) => {
-          previewBackground(null, 'slide-scene')
-          if (sceneId && requireLiveOwner()) updateSceneBackground(sceneId, patch)
-        },
-        previewSceneBackground: (patch) => {
-          previewBackground(patch.backgroundColor ?? null, 'slide-scene')
-        },
-        importSceneBackgroundAsset: (file) => {
-          if (sceneId && requireLiveOwner()) importSceneBackgroundAsset(sceneId, file)
-        },
-        updateStateBackground: (patch) => {
-          previewBackground(null, 'slide-state')
-          if (stateId && requireLiveOwner()) updatePresentationState(stateId, patch)
-        },
-        previewStateBackground: (patch) => {
-          previewBackground(patch.backgroundColor ?? null, 'slide-state')
-        },
-        // Both only ever run in the "currently overridden" direction: the
-        // shared control shows this action solely when an override exists.
-        // Passing the scene's own raw value triggers updatePresentationState's
-        // existing convergence-to-undefined rule (deleting the override), the
-        // one place Named state expresses "inherit" — no state mode added.
-        inheritStateColor: () => {
-          if (!stateId || !scene || !requireLiveOwner()) return
-          updatePresentationState(stateId, { backgroundColor: scene.backgroundColor })
-        },
-        inheritStateAsset: () => {
-          if (!stateId || !scene || !requireLiveOwner()) return
-          updatePresentationState(stateId, { backgroundAssetId: scene.backgroundAssetId })
-        },
-        openAutomation: () => {
-          if (ownerIsLive()) setActiveTab('automation')
-        },
-        openProfessionalAutomation: () => {
-          if (ownerIsLive()) setActiveTab('automation')
-        },
-      },
-      onStale: () => reportError(STALE_PROPERTY_TARGET),
-    }
-  }
-
-  const notices = {
-    surfaceBaseEditing: read.identity.owner === 'surface' && !read.flow && !read.spatial,
-    sceneOwner: read.identity.owner === 'scene' && !read.flow && !read.spatial,
-    presentationStateName: read.activeState?.name ?? null,
-    stateOverrideApplied: Boolean(selectedRow.stateOverrideApplied),
-  }
-  const selectedComponent = componentPort(read, node)
-
-  if (read.selectedIsGlobal) {
-    const controller = node.type === 'external-component' && read.selectedRow?.item.kind === 'component' && read.selectedRow.item.role === 'teacher-controller'
-        ? readTeacherControllerConfig(node.props) : null
-    return {
-      kind: 'course-global',
-      ...(flowOwner.status === 'active' && flowOwner.globalFormulaAuthoring ? { formulaAuthoring: flowOwner.globalFormulaAuthoring } : {}),
-      ...(read.flow && read.authoringToken && !controller ? {
-        flowPlacement: {
-          paperSpace: selectedRow.item.paperSpace === 'paper' ? 'paper' as const : 'viewport' as const,
-          onChange: (paperSpace: 'paper' | 'viewport') => {
-            if (!requireLiveOwner() || !read.flow || !read.authoringToken) return
-            const target = captureFlowEditorAuthoringTarget({ view: read.flow.view, sessionToken: read.authoringToken, target: { kind: 'overlay', layerItemId: node.id } })
-            const result = runFlowAuthoringIntent(target, { kind: 'patch-overlay-paper-space', paperSpace, expectedEdit: read.flow.textEdit })
-            if (!result.ok) reportError(result.reason ?? STALE_PROPERTY_TARGET)
-          },
-        },
-      } : {}),
-      draftBindingKey: propertyDraftBindingKey(read, node.id),
-      mode: 'selected',
-      disabledReason: null,
-      empty: null,
-      layer: read.globalLayer,
-      selected: {
-        view: node,
-        notices,
-        contentEditingEnabled: !read.spatial || read.spatial.scope === 'world',
-        spatialMode: Boolean(read.spatial),
-        videoDiagnostics: videoDiagnostics(read, node),
-        controller,
-        controllerComponent: read.selectedRow?.item.kind === 'component' && read.selectedRow.item.role === 'teacher-controller',
-        controllerScenes: read.slideScenes,
-        component: selectedComponent,
-      },
-      runtime: null,
-      interaction: globalInteraction(),
-      flowOrSpatial: Boolean(read.flow || read.spatial),
-      editingScopeGlobal: read.editingScope === 'global',
-      commands: {
-        ...sharedCommands(),
-        ...projectCommands,
-        manageTeacherControllerComponent: (itemId, operation) => {
-          if (!requireLiveOwner()) return
-          try { manageTeacherControllerComponent(itemId, operation) }
-          catch (error) { reportError(error instanceof Error ? error.message : String(error)) }
-        },
-        editControllerSource: () => { setActiveTab('developer') },
-        // Course background editing lives in the empty (nothing-selected)
-        // global view only; a selected node has no use for it.
-        updateCourseBackground: () => undefined,
-      },
-      onFeedback: feedback,
-    }
-  }
-
-  const animation = read.identity.owner === 'scene'
-    && !read.spatial
-    && slideTarget
-    ? {
-        layerItemId: node.id,
-        interactions: read.scene?.interactions ?? [],
-        activeStateId: read.identity.stateId,
-        onChange: (config: Parameters<typeof setSlideSimpleEntranceAnimation>[2]) => {
-          if (!sameSlideTarget(readLive(), slideTarget)) {
-            reportError(STALE_PROPERTY_TARGET)
-            return
-          }
-          const result = applySlideCandidateCommand((session) => (
-            setSlideSimpleEntranceAnimation(session, node.id, config, {
-              expectedRevision: slideTarget.revision,
-            })
-          ))
-          if (!result.ok) reportError(result.reason ?? COURSE_AUTHORING_STALE_SESSION_REASON)
-        },
-        onOpenProfessional: () => {
-          if (!sameSlideTarget(readLive(), slideTarget)) return
-          setActiveTab('automation')
-        },
-      }
-    : null
-
-  return {
-    kind: 'slide-native',
-    draftBindingKey: propertyDraftBindingKey(read, node.id),
-    view: node,
-    target: { layerItemId: node.id },
-    disabledReason: null,
-    contentEditingEnabled: !read.spatial || read.spatial.scope === 'world',
-    spatialMode: Boolean(read.spatial),
-    flowOrSpatial: Boolean(read.flow || read.spatial),
-    editingScopeGlobal: read.editingScope === 'global',
-    notices,
-    videoDiagnostics: videoDiagnostics(read, node),
-    animation,
-    interaction: sceneInteraction(),
-    globalInteraction: null,
-    component: selectedComponent,
-    commands: sharedCommands(),
-    onFeedback: feedback,
-  }
+  const changeStateBackground = (value: { backgroundColor?: string; backgroundAssetId?: string | null }, inherit?: 'color' | 'assetId') => run(() => {
+    const target = liveTarget(), current = target.project.surfaces.find(value => value.id === surface.id)
+    if (!current?.presentation || !target.activeStateId) throw new Error('请先选择展示状态。')
+    const presentation = structuredClone(current.presentation), state = presentation.states.find(value => value.id === target.activeStateId)!
+    const background = { ...state.background, ...(value.backgroundColor === undefined ? {} : { color: value.backgroundColor, mode: 'own' as const }),
+      ...(value.backgroundAssetId === undefined ? {} : { assetId: value.backgroundAssetId, mode: 'own' as const }) }
+    if (inherit) delete background[inherit]
+    state.background = background
+    submit([{ type: 'surface.presentation.set', surfaceId: surface.id, presentation }], target)
+  })
+  const previewSurface = (value: { backgroundColor?: string | null }) => run(() => preview(value.backgroundColor == null ? null : [
+    { type: 'surface.background.set', surfaceId: surface.id, background: { ...background, mode: 'own', color: value.backgroundColor } }], 'surface'))
+  return { kind: 'empty-scene', draftBindingKey: key, surfaceOnly: true, assets, slideSurface: null,
+    state: activeState ? { id: activeState.id, name: activeState.title, backgroundColor: activeState.background?.color, backgroundAssetId: activeState.background?.assetId,
+      effective: propertiesEffectiveBackground(read.project, baseSurface, activeState) } : null,
+    scene: { id: surface.id, name: surface.title, ...backgroundFields, backgroundColor: background?.color ?? '#ffffff',
+      effective: propertiesEffectiveBackground(read.project, baseSurface),
+      interactionCount: Object.values(read.project.instances).flatMap(instance => instance.attachments ?? []).filter(value => value.target.kind === 'surface' && value.target.surfaceId === surface.id).length,
+      stateName: activeState?.title ?? null,
+      canvas: { effective: surface.designSize ?? { width: 1280, height: 720 }, inherited: !surface.designSize } }, runtime: null,
+    commands: { updateName: title => run(() => submit([{ type: 'surface.title.set', surfaceId: surface.id, title }])),
+      resizeCanvas: designSize => run(() => submit([{ type: 'surface.designSize.set', surfaceId: surface.id, designSize }])),
+      updateSceneBackground: updateBackground, updateSlideSurfaceBackground: updateBackground,
+      previewSceneBackground: previewSurface, previewSlideSurfaceBackground: previewSurface,
+      importSceneBackgroundAsset: importBackground, importSlideSurfaceBackgroundAsset: importBackground,
+      updateStateBackground: changeStateBackground, inheritStateColor: () => changeStateBackground({}, 'color'), inheritStateAsset: () => changeStateBackground({}, 'assetId'),
+      previewStateBackground: value => run(() => preview(value.backgroundColor == null ? null : [
+        { type: 'surface.background.set', surfaceId: surface.id, background: { ...surface.background, mode: 'own', color: value.backgroundColor } }], 'state')),
+      openAutomation, openProfessionalAutomation: openAutomation }, onStale: () => report(STALE) }
 }

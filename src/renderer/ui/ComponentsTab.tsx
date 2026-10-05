@@ -1,240 +1,39 @@
-import {
-  Box,
-  Check,
-  ChevronLeft,
-  Download,
-  Info,
-  Library,
-  LocateFixed,
-  MoreVertical,
-  RefreshCw,
-  Search,
-  ShieldAlert,
-  Trash2,
-  Upload,
-  X,
-} from 'lucide-react'
+import { Box, Check, ChevronLeft, Download, Info, Library, LocateFixed, MoreVertical, RefreshCw, Search, ShieldAlert, Trash2, Upload, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import type {
-  AvailableComponentCatalogPackage,
-  AvailableHtmlComponent,
-  ComponentCatalogSnapshot,
-} from '../../shared/componentCatalog'
-import { componentSupportsScope } from '../../shared/componentCapabilities'
-import { flowInsertCommand, type FlowInsertDestination } from './flow/flowInsertCommands'
+import type { AvailableComponentCatalogPackage, AvailableHtmlComponent, ComponentCatalogSnapshot } from '../../shared/componentCatalog'
+import type { ComponentDefinition } from '../../shared/contracts/component-platform/project'
 import type { FlowDeepInsertPort } from './RightSidebar'
-import type { ComponentPackageData } from '../../shared/componentTypes'
-import { componentCatalogInstallStatus } from '../components/componentCatalogStatus'
-import {
-  collectCourseComponentPackageUsage,
-  type CourseComponentPackageUsage,
-} from '../components/courseComponentPackageTransactions'
-import { selectFlowEditorBlock } from '../course/flowEditorSlice'
-import {
-  collectComponentLibrarySubjects,
-  filterComponentLibraryPackages,
-  filterHtmlComponents,
-  selectCurrentCatalogPackages,
-  selectCurrentHtmlComponents,
-} from '../components/componentLibraryModel'
-import { CompositionFragmentActions } from '../components/compositionFragments/CompositionFragmentActions'
-import { CompositionFragmentPreview } from '../components/compositionFragments/CompositionFragmentPreview'
-import { exportCompositionFragmentPackage } from '../components/compositionFragments/compositionFragmentPackage'
-import {
-  selectActiveCourseProjectDocument,
-  selectEditingScope,
-  selectSelectedNodeId,
-  useEditorStore,
-} from '../store/editorStore'
-
+import { collectCourseComponentPackageUsage, type CourseComponentPackageUsage } from '../components/courseComponentPackageTransactions'
+import { collectComponentLibrarySubjects, filterComponentLibraryPackages, filterHtmlComponents, selectCurrentCatalogPackages, selectCurrentHtmlComponents, componentCatalogInstallStatus } from '../components/componentLibraryModel'
+import { componentDefinitionEntry, insertComponentDefinitionAtTarget } from '../components/insertComponentPackages'
+import { createComponentAuthoringActions } from '../components/commitComponentPackageAuthoring'
+import { extractComponentLibraryEntry } from '../../core/components/library'
+import { exportComponentLibraryArchive } from '../../core/components/library/archive'
+import { selectActiveCourseProjectDocument, selectEditingScope, useEditorStore } from '../store/editorStore'
 interface ComponentsTabProps {
   onFlowInsert?: FlowDeepInsertPort
   componentCatalog?: ComponentCatalogSnapshot
   onImportExternalComponents?(): void
   onRefreshComponentCatalog?(): void
-  onAddCatalogComponents?(
-    entries: AvailableComponentCatalogPackage[],
-  ): boolean | Promise<boolean>
+  onAddCatalogComponents?(entries: AvailableComponentCatalogPackage[]): boolean | Promise<boolean>
   onUpdateCatalogComponent?(entry: AvailableComponentCatalogPackage): void
-  onReplaceComponent?(packageId: string): void
+  onReplaceComponent?(definitionId: string): void
+  onExtractSelection?(title: string): Promise<void>
+  onDeleteCatalogComponent?(entry: AvailableComponentCatalogPackage): Promise<void>
 }
-
-const EMPTY_CATALOG: ComponentCatalogSnapshot = {
-  sources: [],
-  packages: [],
-  issues: [],
+const EMPTY_CATALOG: ComponentCatalogSnapshot = { sources: [], packages: [], issues: [] }
+const installStatusLabels = { available: '可加入工程', embedded: '已加入工程', 'update-available': '有新版本', 'embedded-newer': '工程版本更新' }
+const qualityLabels = { experimental: '试验', candidate: '候选', stable: '稳定', deprecated: '已弃用' }
+function CatalogThumbnail({entry}: {entry: AvailableComponentCatalogPackage}) { return entry.thumbnailDataUrl ? <img src={entry.thumbnailDataUrl} alt="" /> : <Box size={20} /> }
+function closeContainingMenu(target: HTMLElement) { target.closest('details')?.removeAttribute('open') }
+function ComponentDetailsDialog({data,entry,usage,onClose}: {data?: ComponentDefinition;entry?: AvailableComponentCatalogPackage;usage?: CourseComponentPackageUsage;onClose():void}) {
+  useEffect(() => { const close=(event:KeyboardEvent)=>{if(event.key==='Escape')onClose()};window.addEventListener('keydown',close);return()=>window.removeEventListener('keydown',close) },[onClose])
+  return <div className="modal-backdrop" data-testid="component-details-dialog"><section className="modal component-details-dialog" role="dialog" aria-modal="true" aria-labelledby="component-details-title">
+    <div className="component-details-dialog__header"><div><span>组件详情</span><h2 id="component-details-title">{data?.title ?? entry?.name ?? data?.id}</h2></div><button type="button" className="icon-button" aria-label="关闭组件详情" onClick={onClose}><X size={17}/></button></div>
+    <dl className="component-details-dialog__list"><div><dt>组件 ID</dt><dd>{data?.id ?? entry?.packageId}</dd></div><div><dt>版本</dt><dd>{data?.version ?? entry?.version ?? '未标版本'}</dd></div><div><dt>来源</dt><dd>{entry?.sourceLabel ?? (data?.implementation.kind==='builtin'?'内置实现':'工程源码')}</dd></div>{usage&&<div><dt>工程实例</dt><dd>页面 {usage.sceneInstanceCount} · 全局 {usage.globalInstanceCount}</dd></div>}</dl>
+    {entry?.description&&<p className="component-details-dialog__description">{entry.description}</p>}<div className="modal__actions"><button type="button" className="primary-button" onClick={onClose}>完成</button></div>
+  </section></div>
 }
-
-const installStatusLabels = {
-  available: '可加入工程',
-  embedded: '已加入工程',
-  'update-available': '有新版本',
-  'embedded-newer': '工程版本更新',
-  'hash-conflict': '同版本哈希冲突',
-  'embedded-unverified': '已加入·历史哈希缺失',
-} as const
-
-const qualityLabels = {
-  experimental: '试验',
-  candidate: '候选',
-  stable: '稳定',
-  deprecated: '已弃用',
-} as const
-
-function ComponentThumbnail({ data }: { data: ComponentPackageData }) {
-  if (data.thumbnailUrl) return <img src={data.thumbnailUrl} alt="" />
-  return <Box size={20} />
-}
-
-function CatalogThumbnail({ entry }: { entry: AvailableComponentCatalogPackage }) {
-  if (entry.thumbnailDataUrl) return <img src={entry.thumbnailDataUrl} alt="" />
-  return <Box size={20} />
-}
-
-function setComponentDragData(
-  event: React.DragEvent,
-  packageId: string,
-  label: string,
-  presetId?: string,
-) {
-  const value = presetId
-    ? `component-preset:${encodeURIComponent(packageId)}:${encodeURIComponent(presetId)}`
-    : `component:${packageId}`
-  event.dataTransfer.effectAllowed = 'copy'
-  event.dataTransfer.setData('application/x-courseware-element', value)
-  event.dataTransfer.setData('text/plain', label)
-}
-
-function closeContainingMenu(target: HTMLElement) {
-  target.closest('details')?.removeAttribute('open')
-}
-
-function locateFlowBlockUsage(surfaceId: string, blockId: string) {
-  const fail = (message: string) => {
-    const state = useEditorStore.getState()
-    state.setStatus(null)
-    state.setError(message)
-  }
-  const state = useEditorStore.getState()
-  const document = selectActiveCourseProjectDocument(state)
-  if (!document) return
-  const location = document.locations.find((candidate) => (
-    candidate.kind === 'flow-block'
-    && candidate.surfaceId === surfaceId
-    && candidate.blockId === blockId
-  )) ?? document.locations.find((candidate) => (
-    candidate.kind === 'flow-block' && candidate.surfaceId === surfaceId
-  ))
-  if (!location || location.kind !== 'flow-block') {
-    fail('该组件所在的流式讲义没有可激活的位置；请从页面列表打开该讲义后手动选择组件。')
-    return
-  }
-  state.activateCourseLocation(location.id)
-  const activated = useEditorStore.getState()
-  const activeDocument = selectActiveCourseProjectDocument(activated)
-  if (
-    !activeDocument
-    || activated.flowSession?.selection.surfaceId !== surfaceId
-    || activated.flowSession.selection.locationId !== location.id
-  ) {
-    fail('无法切换到该组件所在的流式讲义；请从页面列表打开该讲义后重试。')
-    return
-  }
-  try {
-    activated.applyFlowSelection(selectFlowEditorBlock(activeDocument, location.id, blockId))
-  } catch {
-    fail('无法选中该组件在流式讲义中的内容块；请在讲义中手动选择。')
-    return
-  }
-  const confirmed = useEditorStore.getState().flowSession?.selection
-  if (
-    confirmed?.surfaceId !== surfaceId
-    || confirmed.locationId !== location.id
-    || confirmed.selectedBlockId !== blockId
-  ) {
-    fail('无法选中该组件在流式讲义中的内容块；请在讲义中手动选择。')
-    return
-  }
-  const latest = useEditorStore.getState()
-  latest.setError(null)
-  latest.setStatus('已定位组件使用位置')
-}
-
-interface ComponentDetailsDialogProps {
-  data?: ComponentPackageData
-  entry?: AvailableComponentCatalogPackage
-  usage?: CourseComponentPackageUsage
-  onClose(): void
-}
-
-function emptyCourseComponentPackageUsage(packageId: string): CourseComponentPackageUsage {
-  return {
-    packageId,
-    packageExists: false,
-    references: [],
-    sceneInstanceCount: 0,
-    globalInstanceCount: 0,
-    totalInstanceCount: 0,
-  }
-}
-
-function ComponentDetailsDialog({ data, entry, usage, onClose }: ComponentDetailsDialogProps) {
-  const packageId = data?.manifest.id ?? entry?.packageId ?? ''
-  const name = data?.manifest.name ?? entry?.name ?? packageId
-  const version = data?.manifest.version ?? entry?.version ?? ''
-  const sourceLabel = data?.provenance?.sourceLabel ?? entry?.sourceLabel ?? '来源未登记'
-  const sha256 = data?.provenance?.sha256 ?? entry?.sha256
-  const scopes = data?.manifest.supportedScopes ?? entry?.supportedScopes ?? []
-  const renderMode = data?.manifest.renderMode ?? entry?.renderMode
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onClose])
-
-  return (
-    <div className="modal-backdrop" data-testid="component-details-dialog">
-      <section className="modal component-details-dialog" role="dialog" aria-modal="true" aria-labelledby="component-details-title">
-        <div className="component-details-dialog__header">
-          <div>
-            <span>组件详情</span>
-            <h2 id="component-details-title">{name}</h2>
-          </div>
-          <button type="button" className="icon-button" aria-label="关闭组件详情" onClick={onClose}>
-            <X size={17} />
-          </button>
-        </div>
-        <dl className="component-details-dialog__list">
-          <div><dt>组件 ID</dt><dd>{packageId}</dd></div>
-          <div><dt>版本</dt><dd>{version}</dd></div>
-          <div><dt>来源</dt><dd>{sourceLabel}</dd></div>
-          <div><dt>渲染方式</dt><dd>{renderMode ?? '未知'}</dd></div>
-          <div><dt>可用层</dt><dd>{scopes.map((scope) => scope === 'scene' ? '场景' : '全局').join('、')}</dd></div>
-          {entry && <div><dt>质量状态</dt><dd>{qualityLabels[entry.quality]}</dd></div>}
-          {usage && <div><dt>工程实例</dt><dd>场景 {usage.sceneInstanceCount} · 全局 {usage.globalInstanceCount}</dd></div>}
-          {entry?.license && (
-            <div><dt>许可证</dt><dd>{entry.license.status === 'declared' ? entry.license.expression : '尚未确认'}</dd></div>
-          )}
-          {sha256 && <div className="component-details-dialog__wide"><dt>SHA-256</dt><dd>{sha256}</dd></div>}
-          {entry?.releaseBlockers && entry.releaseBlockers.length > 0 && (
-            <div className="component-details-dialog__wide component-details-dialog__warning">
-              <dt>发布阻断</dt><dd>{entry.releaseBlockers.join('、')}</dd>
-            </div>
-          )}
-        </dl>
-        {data?.manifest.content?.kind === 'composition' && <CompositionFragmentPreview data={data} />}
-        {entry?.description && <p className="component-details-dialog__description">{entry.description}</p>}
-        <div className="modal__actions">
-          <button type="button" className="primary-button" onClick={onClose}>完成</button>
-        </div>
-      </section>
-    </div>
-  )
-}
-
 /** HTML components saved from courses; AI reuses them by name, the panel only lists and deletes them. */
 function HtmlComponentLibrarySection({ entries, onRefresh }: { entries: AvailableHtmlComponent[]; onRefresh?(): void }) {
   const [confirming, setConfirming] = useState<string | null>(null)
@@ -298,11 +97,12 @@ function HtmlComponentLibrarySection({ entries, onRefresh }: { entries: Availabl
 
 interface ComponentLibraryDialogProps {
   catalog: ComponentCatalogSnapshot
-  components: Record<string, ComponentPackageData>
+  components: Record<string, ComponentDefinition>
   onClose(): void
   onRefresh?(): void
   onAdd?(entries: AvailableComponentCatalogPackage[]): boolean | Promise<boolean>
   onUpdate?(entry: AvailableComponentCatalogPackage): void
+  onDelete?(entry: AvailableComponentCatalogPackage): void | Promise<void>
 }
 
 export function ComponentLibraryDialog({
@@ -312,10 +112,11 @@ export function ComponentLibraryDialog({
   onRefresh,
   onAdd,
   onUpdate,
+  onDelete,
 }: ComponentLibraryDialogProps) {
   const entries = useMemo(
     () => selectCurrentCatalogPackages(
-      catalog.packages.filter((entry) => entry.sourceTrust === 'built-in'),
+      catalog.packages,
     ),
     [catalog.packages],
   )
@@ -330,6 +131,7 @@ export function ComponentLibraryDialog({
   const [category, setCategory] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [adding, setAdding] = useState(false)
+  const [addError, setAddError] = useState<string | null>(null)
   const [detailsEntry, setDetailsEntry] = useState<AvailableComponentCatalogPackage | null>(null)
   const visibleEntries = useMemo(() => filterComponentLibraryPackages(entries, {
     query,
@@ -338,7 +140,6 @@ export function ComponentLibraryDialog({
     category,
   }), [category, entries, query, schoolStage, subject])
   const selectableVisibleIds = visibleEntries
-    .filter((entry) => ['available', 'embedded'].includes(componentCatalogInstallStatus(entry, components[entry.packageId])))
     .map((entry) => entry.packageId)
   const selectedEntries = entries.filter((entry) => selectedIds.has(entry.packageId))
   const htmlComponents = useMemo(() => selectCurrentHtmlComponents(catalog.htmlComponents ?? []), [catalog.htmlComponents])
@@ -380,8 +181,8 @@ export function ComponentLibraryDialog({
           <ChevronLeft size={16} />返回编辑器
         </button>
         <div>
-          <h2 id="component-library-title">内置组件库</h2>
-          <p>选择后直接添加到当前画布；已加入工程的组件会复用现有包。</p>
+          <h2 id="component-library-title">组件与资产库</h2>
+          <p>选择后直接添加到当前画布；已加入工程的组件会复用现有定义。</p>
         </div>
         <button type="button" className="secondary-button" disabled={!onRefresh} onClick={onRefresh}>
           <RefreshCw size={14} />刷新
@@ -393,7 +194,7 @@ export function ComponentLibraryDialog({
           <Search size={16} aria-hidden="true" />
           <input
             type="search"
-            aria-label="搜索内置组件"
+            aria-label="搜索组件"
             placeholder="搜索名称、用途或标签"
             value={query}
             onChange={(event) => setQuery(event.currentTarget.value)}
@@ -436,16 +237,10 @@ export function ComponentLibraryDialog({
               <Check size={13} />全选当前结果
             </button>
           </div>
-          {catalog.issues.some((issue) =>
-            catalog.sources.some((source) =>
-              source.trust === 'built-in' && source.sourceId === issue.sourceId,
-            ),
-          ) && (
-            <div className="component-library__issues" role="status">
-              <ShieldAlert size={16} />
-              <span>内置组件库有完整性问题；失效包已停止展示。</span>
-            </div>
+          {catalog.issues.length > 0 && (
+            <div className="component-library__issues" role="status"><ShieldAlert size={16} /><span>{catalog.issues.map(issue => issue.message).join('；')}</span></div>
           )}
+          {addError && <div className="component-library__issues" role="alert">{addError}</div>}
           {visibleEntries.length === 0 ? (
             <div className="empty-state component-library__empty">
               {entries.length === 0 ? '当前没有可用的内置组件。' : '没有符合筛选条件的组件。'}
@@ -454,12 +249,12 @@ export function ComponentLibraryDialog({
             <div className="component-library__grid">
               {visibleEntries.map((entry) => {
                 const status = componentCatalogInstallStatus(entry, components[entry.packageId])
-                const selectable = status === 'available' || status === 'embedded'
+                const selectable = true
                 const selected = selectedIds.has(entry.packageId)
                 return (
                   <article
                     key={entry.packageId}
-                    className={`component-library-card${selected ? ' is-selected' : ''}${status === 'hash-conflict' ? ' has-conflict' : ''}`}
+                    className={`component-library-card${selected ? ' is-selected' : ''}`}
                     data-testid={`catalog-component-${entry.packageId}`}
                   >
                     <label className={`component-library-card__select${selectable ? '' : ' is-disabled'}`}>
@@ -491,6 +286,7 @@ export function ComponentLibraryDialog({
                       <button type="button" className="secondary-button" onClick={() => setDetailsEntry(entry)}>
                         <Info size={13} />详情
                       </button>
+                      {entry.removable && onDelete && <button type="button" className="secondary-button" onClick={() => void onDelete(entry)}><Trash2 size={13} />删除库条目</button>}
                       {status === 'update-available' && (
                         <button type="button" className="secondary-button" disabled={!onUpdate} onClick={() => onUpdate?.(entry)}>
                           <RefreshCw size={13} />审阅更新
@@ -516,17 +312,18 @@ export function ComponentLibraryDialog({
           disabled={selectedEntries.length === 0 || !onAdd || adding}
           onClick={() => {
             if (!onAdd || adding) return
-            setAdding(true)
-            void Promise.resolve(onAdd(selectedEntries))
+            setAdding(true); setAddError(null)
+            void Promise.resolve().then(() => onAdd(selectedEntries))
               .then((completed) => {
                 if (!completed) return
                 setSelectedIds(new Set())
                 onClose()
               })
+              .catch(error => setAddError(error instanceof Error ? error.message : String(error)))
               .finally(() => setAdding(false))
           }}
         >
-          {adding ? '正在校验…' : `添加到画布${selectedEntries.length > 0 ? `（${selectedEntries.length}）` : ''}`}
+          {adding ? '正在添加…' : `添加到画布${selectedEntries.length > 0 ? `（${selectedEntries.length}）` : ''}`}
         </button>
       </footer>
       {detailsEntry && (
@@ -536,263 +333,46 @@ export function ComponentLibraryDialog({
   )
 }
 
-export function ComponentsTab({
-  onFlowInsert,
-  componentCatalog = EMPTY_CATALOG,
-  onImportExternalComponents,
-  onRefreshComponentCatalog,
-  onAddCatalogComponents,
-  onUpdateCatalogComponent,
-  onReplaceComponent,
-}: ComponentsTabProps) {
-  const [libraryOpen, setLibraryOpen] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
-  const [detailsPackageId, setDetailsPackageId] = useState<string | null>(null)
-  const components = useEditorStore((state) => state.componentPackages)
-  const project = useEditorStore(selectActiveCourseProjectDocument)
-  const selectedNodeId = useEditorStore(selectSelectedNodeId)
-  const extractCompositionFragment = useEditorStore((state) => state.extractCompositionFragment)
-  const editingScope = useEditorStore(selectEditingScope)
-  const spatialScope = useEditorStore((state) => state.spatialSession?.scope ?? null)
-  const addExternalComponentNode = useEditorStore((state) => state.addExternalComponentNode)
-  const flowSession = useEditorStore((state) => state.flowSession)
-  const flowInsertPort = flowSession?.selection.authoringScope === 'page' ? onFlowInsert : undefined
-  const insertFlowComponent = (destination: FlowInsertDestination, packageId: string, presetId?: string) => {
-    const command = flowInsertCommand(destination, 'component')
-    if (command && flowInsertPort) flowInsertPort(command, { packageId, ...(presetId ? { presetId } : {}) })
+export function ComponentsTab({componentCatalog=EMPTY_CATALOG,onImportExternalComponents,onRefreshComponentCatalog,onAddCatalogComponents,onUpdateCatalogComponent,onReplaceComponent,onExtractSelection,onDeleteCatalogComponent}:ComponentsTabProps) {
+  const project=useEditorStore(selectActiveCourseProjectDocument), kernel=useEditorStore(state=>state.courseKernel), view=useEditorStore(state=>state.courseView)
+  const [libraryOpen,setLibraryOpen]=useState(false), [searchQuery,setSearchQuery]=useState(''),[detailsId,setDetailsId]=useState<string|null>(null),[extractName,setExtractName]=useState(''),[extracting,setExtracting]=useState(false)
+  const components=project?.definitions ?? {}, packages=Object.values(components).sort((a,b)=>(a.title??a.id).localeCompare(b.title??b.id,'zh-CN'))
+  const current=selectCurrentCatalogPackages(componentCatalog.packages), query=searchQuery.trim().toLocaleLowerCase()
+  const visible=packages.filter(data=>[data.title,data.id,data.version].join(' ').toLocaleLowerCase().includes(query))
+  const report=(error:unknown)=>kernel.setFeedback({errorMessage:error instanceof Error?error.message:String(error)})
+  const insert=(id:string,destination:'document'|'paper'='document')=>{
+    const target=kernel.captureTarget(),state=useEditorStore.getState()
+    const camera=target.project.surfaces.find(surface=>surface.id===target.surfaceId)?.kind==='spatial'&&selectEditingScope(state)!=='global'
+      ? state.readSpatialView(target.surfaceId??'',target.documentId).camera:null
+    void insertComponentDefinitionAtTarget(kernel,target,id,undefined,{destination,...(camera?{center:{x:camera.x,y:camera.y}}:{})}).then(result=>{if(!result.ok)report(result.reason)})
   }
-  const deleteComponentPackage = useEditorStore((state) => state.deleteComponentPackage)
-  const packages = useMemo(() => Object.values(components).sort((left, right) =>
-    left.manifest.name.localeCompare(right.manifest.name, 'zh-CN'),
-  ), [components])
-  const normalizedQuery = searchQuery.trim().toLocaleLowerCase()
-  const visiblePackages = packages.filter((data) => [
-    data.manifest.name,
-    data.manifest.id,
-    data.manifest.version,
-    data.provenance?.sourceLabel ?? '',
-    ...(data.manifest.presets?.map((preset) => preset.label) ?? []),
-  ].join(' ').toLocaleLowerCase().includes(normalizedQuery))
-  const currentCatalogEntries = useMemo(
-    () => selectCurrentCatalogPackages(componentCatalog.packages),
-    [componentCatalog.packages],
-  )
-  const detailsData = detailsPackageId ? components[detailsPackageId] : undefined
-  const detailsEntry = detailsPackageId
-    ? currentCatalogEntries.find((entry) => entry.packageId === detailsPackageId)
-    : undefined
-  const detailsUsage = detailsPackageId
-    ? project
-      ? collectCourseComponentPackageUsage(project, detailsPackageId)
-      : emptyCourseComponentPackageUsage(detailsPackageId)
-    : undefined
-
-  const locateFirstUsage = (packageId: string) => {
-    const state = useEditorStore.getState()
-    const document = selectActiveCourseProjectDocument(state)
-    if (!document) return
-    const usage = collectCourseComponentPackageUsage(document, packageId)
-    const reference = usage.references[0]
-    if (!reference) return
-    if (reference.carrier === 'flow-block' && reference.surfaceId) {
-      locateFlowBlockUsage(reference.surfaceId, reference.instanceId)
-      return
-    }
-    if (reference.scope === 'global') {
-      state.setEditingScope('global')
-    } else if (reference.sceneId) {
-      state.setActiveScene(reference.sceneId)
-    } else if (reference.surfaceId) {
-      const location = document.locations.find((candidate) => (
-        candidate.surfaceId === reference.surfaceId
-      ))
-      if (location) state.activateCourseLocation(location.id)
-    }
-    useEditorStore.getState().selectNode(reference.instanceId)
-    useEditorStore.getState().setStatus('已定位组件使用位置')
-  }
-
-  return (
-    <div className="components-tab" data-testid="components-tab">
-      <div className="component-entry-actions">
-        <button type="button" className="component-entry-action" data-testid="open-component-library" onClick={() => setLibraryOpen(true)}>
-          <Library size={20} />
-          <span><strong>打开内置组件库</strong><small>按通用和学科浏览，可多选添加到画布</small></span>
-        </button>
-        <button type="button" className="component-entry-action" data-testid="import-external-components" disabled={!onImportExternalComponents} onClick={onImportExternalComponents}>
-          <Upload size={20} />
-          <span><strong>导入外部组件</strong><small>校验后直接加入；仅选择可信来源</small></span>
-        </button>
-      </div>
-
-      <div className="section-heading section-heading--spaced">
-        <span>工程组件</span><span>{packages.length}</span>
-      </div>
-      <CompositionFragmentActions selectedId={selectedNodeId} project={project} extract={extractCompositionFragment} />
-      <label className="component-project-search">
-        <Search size={15} aria-hidden="true" />
-        <input
-          type="search"
-          aria-label="搜索工程组件"
-          placeholder="搜索工程组件"
-          value={searchQuery}
-          onChange={(event) => setSearchQuery(event.currentTarget.value)}
-        />
-      </label>
-      {visiblePackages.length === 0 ? (
-        <div className="empty-state">
-          {packages.length === 0
-            ? '工程中还没有组件。请从内置组件库加入，或导入外部组件。'
-            : `没有找到“${searchQuery.trim()}”。`}
-        </div>
-      ) : (
-        <div className="project-component-list">
-          {visiblePackages.map((data) => {
-            const structure = data.manifest.content?.kind === 'composition'
-            const packageId = data.manifest.id
-            const usage = project
-              ? collectCourseComponentPackageUsage(project, packageId)
-              : emptyCourseComponentPackageUsage(packageId)
-            const isSpatial = spatialScope !== null
-            const manifestScopeSupported = componentSupportsScope(
-              data.manifest,
-              isSpatial ? 'scene' : editingScope,
-            )
-            const scopeSupported = isSpatial
-              ? spatialScope === 'world' && manifestScopeSupported
-              : manifestScopeSupported
-            const draggable = structure || isSpatial || flowInsertPort ? false : scopeSupported
-            const insertionDisabledReason = spatialScope === 'surface'
-              ? '表面共享层暂不支持插入组件；请切换到无限画布世界层。'
-              : spatialScope === 'global'
-                ? '无限画布全局层暂不支持插入组件；请切换到无限画布世界层。'
-                : spatialScope === 'world' && !manifestScopeSupported
-                  ? '该组件未声明支持场景层，不能插入无限画布世界层。'
-                  : editingScope === 'global'
-                    ? '该组件不支持全局层；仍可从右侧菜单管理。'
-                    : '该组件不支持场景层；仍可从右侧菜单管理。'
-            const catalogEntry = currentCatalogEntries.find((entry) => entry.packageId === packageId)
-            const catalogStatus = catalogEntry
-              ? componentCatalogInstallStatus(catalogEntry, data)
-              : null
-            const canUpdate = catalogStatus === 'update-available'
-            return (
-              <article className="project-component-card" key={packageId} data-testid={`component-package-${packageId}`}>
-                <div className="project-component-card__main">
-                  <button
-                    type="button"
-                    className="component-card"
-                    data-testid={`component-${packageId}`}
-                    draggable={draggable}
-                    disabled={!scopeSupported}
-                    title={scopeSupported
-                      ? `插入“${data.manifest.name}”`
-                      : insertionDisabledReason}
-                    onDragStart={draggable
-                      ? (event) => setComponentDragData(event, packageId, data.manifest.name)
-                      : undefined}
-                    onClick={scopeSupported ? () => flowInsertPort && !structure ? insertFlowComponent('document', packageId) : addExternalComponentNode(packageId) : undefined}
-                  >
-                    <span className="component-thumb"><ComponentThumbnail data={data} /></span>
-                    <span>
-                      <span className="component-name">{data.manifest.name}</span>
-                      <span className="component-version">v{data.manifest.version} · {data.provenance?.sourceLabel ?? '工程组件'}</span>
-                      <span className="component-version">{structure ? '结构资产 · 插入后独立编辑' : `场景 ${usage.sceneInstanceCount} · 全局 ${usage.globalInstanceCount}`}{canUpdate ? ' · 有更新' : ''}</span>
-                    </span>
-                    <Box size={15} />
-                  </button>
-                  {flowInsertPort && !structure && <button type="button" disabled={!scopeSupported} aria-label={`将${data.manifest.name}放到纸面上`}
-                    onClick={() => insertFlowComponent('paper', packageId)}>放到纸面上</button>}
-                  <details className="project-component-menu">
-                    <summary aria-label={`管理${data.manifest.name}`} title="组件管理"><MoreVertical size={17} /></summary>
-                    <div className="project-component-menu__panel" role="menu">
-                      <button type="button" role="menuitem" onClick={(event) => {
-                        closeContainingMenu(event.currentTarget)
-                        setDetailsPackageId(packageId)
-                      }}><Info size={14} />查看详情</button>
-                      {structure && <button type="button" role="menuitem" onClick={event => {
-                        closeContainingMenu(event.currentTarget)
-                        void (async () => {
-                          try {
-                            const desktop = window.desktopAPI
-                            if (!desktop) throw new Error('请在桌面软件中导出结构资产。')
-                            const result = await desktop.exportBinary({ suggestedName: `${data.manifest.name}.h5component`, extension: 'h5component', bytes: exportCompositionFragmentPackage(data) })
-                            if (result) useEditorStore.getState().setStatus(`结构资产已导出：${result.path}`)
-                          } catch (error) { useEditorStore.getState().setError(error instanceof Error ? error.message : '结构资产导出失败。') }
-                        })()
-                      }}><Download size={14} />导出结构资产</button>}
-                      <button type="button" role="menuitem" disabled={!canUpdate || !onUpdateCatalogComponent} onClick={(event) => {
-                        closeContainingMenu(event.currentTarget)
-                        if (catalogEntry) onUpdateCatalogComponent?.(catalogEntry)
-                      }}><RefreshCw size={14} />更新组件</button>
-                      <button type="button" role="menuitem" disabled={!onReplaceComponent} onClick={(event) => {
-                        closeContainingMenu(event.currentTarget)
-                        onReplaceComponent?.(packageId)
-                      }}><Upload size={14} />替换组件包</button>
-                      <button type="button" role="menuitem" disabled={usage.totalInstanceCount === 0} onClick={(event) => {
-                        closeContainingMenu(event.currentTarget)
-                        locateFirstUsage(packageId)
-                      }}><LocateFixed size={14} />定位使用位置</button>
-                      <button type="button" role="menuitem" className="is-danger" disabled={usage.totalInstanceCount > 0} title={usage.totalInstanceCount > 0 ? '仍有实例引用，需先删除实例。' : '从工程移除未使用的组件包。'} onClick={(event) => {
-                        closeContainingMenu(event.currentTarget)
-                        deleteComponentPackage(packageId)
-                      }}><Trash2 size={14} />从工程移除</button>
-                    </div>
-                  </details>
-                </div>
-                {data.manifest.presets && data.manifest.presets.length > 0 && (
-                  <div className="project-component-presets" aria-label={`${data.manifest.name}预设`}>
-                    {data.manifest.presets.map((preset) => (
-                      <button
-                        type="button"
-                        key={preset.id}
-                        disabled={!scopeSupported}
-                        draggable={draggable}
-                        title={scopeSupported ? preset.description : insertionDisabledReason}
-                        onDragStart={draggable
-                          ? (event) => setComponentDragData(event, packageId, `${data.manifest.name} · ${preset.label}`, preset.id)
-                          : undefined}
-                        onClick={scopeSupported
-                          ? () => flowInsertPort ? insertFlowComponent('document', packageId, preset.id) : addExternalComponentNode(packageId, undefined, undefined, preset.id)
-                          : undefined}
-                      >
-                        {preset.label}
-                      </button>
-                    ))}
-                    {flowInsertPort && data.manifest.presets.map(preset => <button type="button" key={`${preset.id}-paper`}
-                      disabled={!scopeSupported} aria-label={`将${preset.label} 放到纸面上`}
-                      onClick={() => insertFlowComponent('paper', packageId, preset.id)}>纸面 · {preset.label}</button>)}
-                  </div>
-                )}
-                {!scopeSupported && (
-                  <div className="project-component-card__hint">
-                    {insertionDisabledReason}
-                  </div>
-                )}
-              </article>
-            )
-          })}
-        </div>
-      )}
-
-      {libraryOpen && (
-        <ComponentLibraryDialog
-          catalog={componentCatalog}
-          components={components}
-          onClose={() => setLibraryOpen(false)}
-          onRefresh={onRefreshComponentCatalog}
-          onAdd={onAddCatalogComponents}
-          onUpdate={onUpdateCatalogComponent}
-        />
-      )}
-      {detailsPackageId && detailsData && (
-        <ComponentDetailsDialog
-          data={detailsData}
-          entry={detailsEntry}
-          usage={detailsUsage}
-          onClose={() => setDetailsPackageId(null)}
-        />
-      )}
-    </div>
-  )
+  const extract=async()=>{setExtracting(true);try {if(onExtractSelection)await onExtractSelection(extractName);else {
+    const target=kernel.captureTarget();if(!extractName.trim()||!target.instanceIds.length)throw new Error('请填写名称并选择对象。')
+    const {entry,diagnostics}=extractComponentLibraryEntry(target.project,target.resources,{id:`library_${crypto.randomUUID()}`,title:extractName.trim(),rootIds:[...target.instanceIds]})
+    if(!window.desktopAPI?.installComponentLibraryEntry)throw new Error('当前环境没有组件库保存入口。')
+    await window.desktopAPI.installComponentLibraryEntry({bytes:exportComponentLibraryArchive(entry)});onRefreshComponentCatalog?.()
+    kernel.setFeedback({statusMessage:'已存入我的资产库',errorMessage:diagnostics.length?diagnostics.map(item=>item.message).join('\n'):null})
+  }setExtractName('')}catch(error){report(error)}finally{setExtracting(false)}}
+  return <div className="components-tab" data-testid="components-tab">
+    <div className="component-entry-actions"><button type="button" className="component-entry-action" data-testid="open-component-library" onClick={()=>setLibraryOpen(true)}><Library size={20}/><span><strong>打开组件与资产库</strong><small>按通用和学科浏览，可多选添加到画布</small></span></button><button type="button" className="component-entry-action" data-testid="import-external-components" disabled={!onImportExternalComponents} onClick={onImportExternalComponents}><Upload size={20}/><span><strong>导入外部组件</strong><small>保留源码与资源，可继续编辑</small></span></button></div>
+    <div className="section-heading section-heading--spaced"><span>工程组件</span><span>{packages.length}</span></div>
+    <div className="composition-fragment-actions"><input aria-label="资产名称" placeholder="为所选对象命名" value={extractName} onChange={event=>setExtractName(event.currentTarget.value)}/><button type="button" disabled={!view.selectedInstanceIds.length||!extractName.trim()||extracting} onClick={()=>void extract()}>提炼到我的资产库</button></div>
+    <label className="component-project-search"><Search size={15}/><input type="search" aria-label="搜索工程组件" placeholder="搜索工程组件" value={searchQuery} onChange={event=>setSearchQuery(event.currentTarget.value)}/></label>
+    {!visible.length?<div className="empty-state">{packages.length?'没有符合条件的组件。':'工程中还没有组件。请从组件库加入，或导入外部组件。'}</div>:<div className="project-component-list">{visible.map(data=>{
+      const id=data.id, usage=collectCourseComponentPackageUsage(project!,id),entry=current.find(value=>value.packageId===id),status=entry?componentCatalogInstallStatus(entry,data):null
+      return <article className="project-component-card" key={id} data-testid={`component-package-${id}`}><div className="project-component-card__main">
+        <button type="button" className="component-card" data-testid={`component-${id}`} draggable={usage.totalInstanceCount>0} onDragStart={event=>{event.dataTransfer.effectAllowed='copy';event.dataTransfer.setData('application/x-courseware-element',`component:${id}`);event.dataTransfer.setData('text/plain',data.title??id)}} onClick={()=>insert(id)}><span className="component-card__thumbnail"><Box size={20}/></span><span><strong>{data.title??id}</strong><small>{data.version??'工程定义'} · {usage.totalInstanceCount} 个实例</small></span><Box size={15}/></button>
+        {project?.surfaces.find(surface=>surface.id===view.surfaceId)?.kind==='flow'&&<button type="button" aria-label={`将${data.title??id}放到纸面上`} onClick={()=>insert(id,'paper')}>放到纸面上</button>}
+        <details className="project-component-menu"><summary aria-label={`管理${data.title??id}`}><MoreVertical size={17}/></summary><div className="project-component-menu__panel" role="menu">
+          <button type="button" role="menuitem" onClick={event=>{closeContainingMenu(event.currentTarget);setDetailsId(id)}}><Info size={14}/>查看详情</button>
+          <button type="button" role="menuitem" disabled={!usage.totalInstanceCount} onClick={()=>void(async()=>{try{if(!window.desktopAPI)throw new Error('请在桌面软件中导出资产。');await window.desktopAPI.exportBinary({suggestedName:`${data.title??id}.h5component`,extension:'h5component',bytes:exportComponentLibraryArchive(componentDefinitionEntry(kernel,id))})}catch(error){report(error)}})()}><Download size={14}/>导出结构资产</button>
+          <button type="button" role="menuitem" disabled={status!=='update-available'||!onUpdateCatalogComponent} onClick={()=>entry&&onUpdateCatalogComponent?.(entry)}><RefreshCw size={14}/>更新组件</button>
+          <button type="button" role="menuitem" disabled={!onReplaceComponent} onClick={()=>onReplaceComponent?.(id)}><Upload size={14}/>替换组件包</button>
+          <button type="button" role="menuitem" disabled={!usage.totalInstanceCount} onClick={()=>{const ref=usage.references[0];kernel.selectInstances([ref.instanceId],ref.surfaceId??view.surfaceId)}}><LocateFixed size={14}/>定位使用位置</button>
+          <button type="button" role="menuitem" className="is-danger" disabled={usage.totalInstanceCount>0} onClick={()=>void createComponentAuthoringActions(kernel).deleteComponentPackage(id)}><Trash2 size={14}/>从工程移除</button>
+        </div></details></div></article>
+    })}</div>}
+    {libraryOpen&&<ComponentLibraryDialog catalog={componentCatalog} components={components} onClose={()=>setLibraryOpen(false)} onRefresh={onRefreshComponentCatalog} onAdd={onAddCatalogComponents} onUpdate={onUpdateCatalogComponent} onDelete={onDeleteCatalogComponent}/>}
+    {detailsId&&components[detailsId]&&<ComponentDetailsDialog data={components[detailsId]} entry={current.find(entry=>entry.packageId===detailsId)} usage={collectCourseComponentPackageUsage(project!,detailsId)} onClose={()=>setDetailsId(null)}/>}
+  </div>
 }

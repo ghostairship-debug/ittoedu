@@ -36,10 +36,13 @@ export function validateDocumentResources(blocks: readonly DocumentBlock[], reso
   const assetIds = resources.assets.map(a => a.assetId)
   const packageIds = resources.components.map(c => JSON.stringify([c.packageId, c.version]))
   if (new Set(assetIds).size !== assetIds.length || new Set(packageIds).size !== packageIds.length) throw new Error('重复的资源映射')
-  const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every(v => b.includes(v))
-  if (!sameSet(assetIds, refs.assets)) throw new Error('资源映射缺少或多出素材')
-  if (!sameSet(packageIds, refs.components.map(c => JSON.stringify([c.packageId, c.version])))) throw new Error('资源映射缺少或多出组件包版本')
-  if (target === 'file' && [...resources.assets, ...resources.components].some(r => r.source.kind !== 'relative')) throw new Error('真实 Markdown 保存需要课例内相对资源，不能保留 project 引用')
+  const referencedPackages = refs.components.map(c => JSON.stringify([c.packageId, c.version]))
+  // A local editor may share its parent's resource context. Serialization already
+  // selects each block's references; unused mappings do not become saved content.
+  if (refs.assets.some(id => !assetIds.includes(id))) throw new Error('资源映射缺少素材')
+  if (referencedPackages.some(id => !packageIds.includes(id))) throw new Error('资源映射缺少组件包版本')
+  if (target === 'file' && (resources.assets.some(r => refs.assets.includes(r.assetId) && r.source.kind !== 'relative')
+    || resources.components.some(r => referencedPackages.includes(JSON.stringify([r.packageId, r.version])) && r.source.kind !== 'relative'))) throw new Error('真实 Markdown 保存需要课例内相对资源，不能保留 project 引用')
 }
 export const documentObjectSchema = z.object({ kind: z.literal('flow-block'), block: documentBlockSchema, resources: documentResourcesSchema }).strict().superRefine((value, ctx) => {
   try { documentContentSchema.parse({ blocks: [value.block] }); validateDocumentResources([value.block], value.resources) } catch (e) { ctx.addIssue({ code: 'custom', path: ['resources'], message: (e as Error).message }) }

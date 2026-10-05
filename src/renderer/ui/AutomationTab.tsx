@@ -1,316 +1,89 @@
-import { useMemo } from 'react'
-import type { InteractionCondition } from '../../shared/interactionTypes'
-import { collectCourseProjectHealth } from '../../shared/courseProjectHealth'
-import {
-  selectGlobalInteractionAuthoringView,
-  selectLocalInteractionAuthoringView,
-  type AvailableLocalInteractionAuthoringView,
-  type GlobalInteractionAuthoringView,
-} from '../interactions/interactionAuthoringView'
-import type { InteractionAuthoringTarget } from '../interactions/interactionAuthoringCommands'
-import { SCENE_ENTER_REVEAL_SEQUENCE_TEMPLATE_ID } from '../interactions/interactionTemplates'
-import {
-  useEditorStore,
-  selectActiveCourseLocationId,
-  selectActiveCourseProjectDocument,
-  selectActiveScene,
-  selectEditingNodes,
-  selectEditingScope,
-  selectSelectedNodeId,
-  selectSlideAuthoringSnapshot,
-} from '../store/editorStore'
-import {
-  SceneAutomationEditor,
-  type RevealSequenceTemplateIntent,
-} from './InteractionEditor'
+import { useState } from 'react'
+import type { InteractionRule } from '../../shared/interactionTypes'
+import { useEditorStore, selectEditingScope } from '../store/editorStore'
+import { componentInteractionView, componentRuleEdits, duplicateComponentRule } from '../interactions/componentInteractionAuthoring'
+import { buildInteractionTemplateRule, SCENE_ENTER_REVEAL_SEQUENCE_TEMPLATE_ID } from '../interactions/interactionTemplates'
+import { previewComponentMotion } from '../interactions/componentMotionPreview'
+import { SceneAutomationEditor, InteractionEditor } from './InteractionEditor'
 import { CourseLogicAuthoringPanel } from './CourseLogicAuthoringPanel'
-
-type AvailableInteractionAuthoringView =
-  | AvailableLocalInteractionAuthoringView
-  | GlobalInteractionAuthoringView
-
-function authoringTargetFromView(
-  view: AvailableInteractionAuthoringView,
-): InteractionAuthoringTarget {
-  if (view.carrier === 'slide-scene') {
-    return {
-      carrier: 'slide-scene',
-      projectId: view.projectId,
-      baseRevision: view.revision,
-      locationId: view.locationId,
-      activeStateId: view.activeStateId,
-    }
-  }
-  return {
-    carrier: 'global',
-    projectId: view.projectId,
-    baseRevision: view.revision,
-    activeStateId: view.activeStateId,
-    ...(view.activeLocationId ? { activeLocationId: view.activeLocationId } : {}),
-  }
-}
-
-function templateConditionsFromView(
-  view: AvailableInteractionAuthoringView,
-): InteractionCondition[] {
-  const conditions: InteractionCondition[] = []
-  if (view.carrier === 'global' && view.activeSlideSceneId) {
-    conditions.push({ type: 'scene.in', sceneIds: [view.activeSlideSceneId] })
-  }
-  if (view.activeStateId) {
-    conditions.push({ type: 'presentation.in', stateIds: [view.activeStateId] })
-  }
-  return conditions
-}
+import { courseLogicAuthoringView, commitCourseLogicAuthoringCommand } from '../course/courseLogicAuthoringCommands'
+import { TEACHER_CONTROLLER_DEFINITION, createTeacherControllerData, createTeacherControllerFrame } from '../../components/teacher-controller/data'
+import type { JsonValue } from '../../shared/contracts/component-platform'
 
 export function AutomationTab() {
-  const scene = useEditorStore(selectActiveScene)
-  const editingNodes = useEditorStore(selectEditingNodes)
-  const editingScope = useEditorStore(selectEditingScope)
-  const selectedNodeId = useEditorStore(selectSelectedNodeId)
-  const courseProject = useEditorStore(selectActiveCourseProjectDocument)
-  const activeLocationId = useEditorStore(selectActiveCourseLocationId)
-  const slideAuthoringSnapshot = useEditorStore(selectSlideAuthoringSnapshot)
-  const addInteractionRule = useEditorStore((state) => state.addInteractionRule)
-  const deleteInteractionRule = useEditorStore((state) => state.deleteInteractionRule)
-  const duplicateInteractionRule = useEditorStore(
-    (state) => state.duplicateInteractionRule,
-  )
-  const moveInteractionRule = useEditorStore((state) => state.moveInteractionRule)
-  const addGlobalInteractionRule = useEditorStore(
-    (state) => state.addGlobalInteractionRule,
-  )
-  const deleteGlobalInteractionRule = useEditorStore(
-    (state) => state.deleteGlobalInteractionRule,
-  )
-  const duplicateGlobalInteractionRule = useEditorStore(
-    (state) => state.duplicateGlobalInteractionRule,
-  )
-  const moveGlobalInteractionRule = useEditorStore(
-    (state) => state.moveGlobalInteractionRule,
-  )
-  const applyInteractionTemplateAtTarget = useEditorStore(
-    (state) => state.applyInteractionTemplateAtTarget,
-  )
-  const updateInteractionRuleAtTarget = useEditorStore(
-    (state) => state.updateInteractionRuleAtTarget,
-  )
-  const applyCourseLogicAuthoringCommand = useEditorStore(
-    (state) => state.applyCourseLogicAuthoringCommand,
-  )
-  const setActiveTab = useEditorStore((state) => state.setActiveTab)
-  const setCanvasMode = useEditorStore((state) => state.setCanvasMode)
-  const setError = useEditorStore((state) => state.setError)
-
-  const activeSlideStateId = slideAuthoringSnapshot?.locationId === activeLocationId
-    ? slideAuthoringSnapshot.stateId
-    : null
-
-  const authoringView = useMemo(() => {
-    if (!courseProject) return null
-    if (editingScope === 'global') {
-      return selectGlobalInteractionAuthoringView(
-        courseProject,
-        activeLocationId,
-        activeSlideStateId,
-      )
-    }
-    return activeLocationId
-      ? selectLocalInteractionAuthoringView(
-          courseProject,
-          activeLocationId,
-          activeSlideStateId,
-        )
-      : null
-  }, [activeLocationId, activeSlideStateId, courseProject, editingScope])
-
-  const diagnostics = useMemo(
-    () => courseProject
-      ? collectCourseProjectHealth(courseProject, { assetFiles: {}, componentFiles: {} })
-      : [],
-    [courseProject],
-  )
-  const ruleWarnings = useMemo(() => {
-    const warnings: Record<string, string[]> = {}
-    if (!authoringView || authoringView.availability !== 'available') return warnings
-    for (const finding of diagnostics) {
-      if (finding.severity !== 'warning' || !finding.layerItemId) continue
-      for (const rule of authoringView.rules) {
-        const trigger = rule.trigger
-        if ('nodeId' in trigger && trigger.nodeId === finding.layerItemId) {
-          warnings[rule.id] = [...(warnings[rule.id] ?? []), finding.message]
-        }
+  const courseView = useEditorStore(state => state.courseView)
+  const kernel = useEditorStore(state => state.courseKernel)
+  const initialScope = useEditorStore(selectEditingScope)
+  const setCanvasMode = useEditorStore(state => state.setCanvasMode)
+  const setActiveTab = useEditorStore(state => state.setActiveTab)
+  const setError = useEditorStore(state => state.setError)
+  const [scope, setScope] = useState<'scene' | 'global'>(initialScope)
+  const [clickRulesOpen, setClickRulesOpen] = useState(false)
+  const project = courseView.project, surfaceId = courseView.surfaceId, documentId = courseView.activeDocumentId
+  if (!project || !surfaceId || !documentId) return <div className="properties-scroll" data-testid="automation-tab"><section className="property-section interaction-overview"><h2>互动与动画</h2><p>请打开课件并选择一个页面。</p></section></div>
+  const view = componentInteractionView(courseView.editingProject ?? project, surfaceId, scope === 'global')
+  const commit = (change: (rules: InteractionRule[]) => InteractionRule[]) => {
+    try {
+      const target = kernel.captureTarget(documentId)
+      const current = componentInteractionView(target.project, surfaceId, scope === 'global')
+      const edits = componentRuleEdits(target.project, current.target, change(structuredClone(current.rules)))
+      void kernel.editCaptured(kernel.capture(edits, target)).catch(error => setError(String(error)))
+    } catch (error) { setError(String(error)) }
+  }
+  const add = (rule: InteractionRule) => commit(rules => [...rules, rule])
+  const update = (ruleId: string, patch: Partial<Omit<InteractionRule, 'id'>>) => commit(rules => {
+    if (!rules.some(rule => rule.id === ruleId)) throw new Error('互动规则已不存在')
+    return rules.map(rule => rule.id === ruleId ? { ...rule, ...patch } : rule)
+  })
+  const remove = (ruleId: string) => commit(rules => rules.filter(rule => rule.id !== ruleId))
+  const selectedNode = view.nodes.find(node => node.id === courseView.selectedInstanceId)
+  const controller = Object.values(project.instances).find(instance => instance.definitionId === TEACHER_CONTROLLER_DEFINITION.id)
+  const teacher = () => {
+    const captured = kernel.captureTarget(documentId), existing = Object.values(captured.project.instances).find(instance => instance.definitionId === TEACHER_CONTROLLER_DEFINITION.id)
+    if (existing) { kernel.selectInstances([existing.id], surfaceId, documentId); setActiveTab('properties'); return }
+    const id = crypto.randomUUID()
+    const edits = [
+      ...(captured.project.definitions[TEACHER_CONTROLLER_DEFINITION.id] ? [] : [{ type: 'definition.set' as const, definition: TEACHER_CONTROLLER_DEFINITION }]),
+      { type: 'instance.insert' as const, container: { kind: 'global' as const, plane: 'overlay' as const }, index: captured.project.global.overlay.length,
+        rootIds: [id], instances: [{ id, definitionId: TEACHER_CONTROLLER_DEFINITION.id, name: '教师控制台', data: JSON.parse(JSON.stringify(createTeacherControllerData())) as JsonValue,
+          frame: createTeacherControllerFrame(captured.project.surfaces.find(surface => surface.id === surfaceId)?.designSize) }] },
+    ]
+    void kernel.editCaptured(kernel.capture(edits, captured)).then(() => {
+      if (kernel.readView().activeDocumentId === documentId && kernel.readView().surfaceId === surfaceId) {
+        kernel.selectInstances([id], surfaceId, documentId); setActiveTab('properties')
       }
-    }
-    return warnings
-  }, [authoringView, diagnostics])
-
-  if (!courseProject || !authoringView) {
-    return (
-      <div className="properties-scroll" data-testid="automation-tab">
-        <section className="property-section interaction-overview" role="status">
-          <h2>互动与动画</h2>
-          <p>当前课程位置尚未准备好互动编辑，请重新选择一个页面。</p>
-        </section>
-      </div>
-    )
+    }).catch(error => setError(String(error)))
   }
-
-  const courseLogicPanel = (
-    <CourseLogicAuthoringPanel
-      project={courseProject}
-      onCommand={applyCourseLogicAuthoringCommand}
-    />
-  )
-
-  if (authoringView.availability === 'unavailable') {
-    return (
-      <div className="properties-scroll" data-testid="automation-tab">
-        <section
-          className="property-section interaction-overview"
-          data-testid="local-interaction-unavailable"
-          role="status"
-        >
-          <h2>互动与动画</h2>
-          <p>当前 Flow 或 Spatial 页面没有本地互动规则载体。</p>
-          <p className="property-hint">切换到“全局”范围可编辑整课共享规则；Slide 页面仍可编辑场景规则。</p>
-        </section>
-        {courseLogicPanel}
-      </div>
-    )
-  }
-
-  const interactionView = authoringView
-  const authoringTarget = authoringTargetFromView(interactionView)
-  const availableNodeIds = new Set(interactionView.nodes.map((node) => node.id))
-  const revealTemplateTargetNodeIds = interactionView.nodes
-    .filter((node) => node.visible && !node.locked)
-    .map((node) => node.id)
-  const sourceNodes = editingNodes.filter((node) => availableNodeIds.has(node.id))
-  const applyRevealSequenceTemplate = (intent: RevealSequenceTemplateIntent) => {
-    applyInteractionTemplateAtTarget(authoringTarget, {
-      templateId: SCENE_ENTER_REVEAL_SEQUENCE_TEMPLATE_ID,
-      ruleId: intent.ruleId,
-      actionIds: intent.actionIds,
-      targetLayerItemIds: intent.targetLayerItemIds,
-      conditions: templateConditionsFromView(interactionView),
-      name: intent.name,
-    })
-  }
-  const updateRule = (
-    ruleId: string,
-    patch: Parameters<typeof updateInteractionRuleAtTarget>[2],
-  ) => {
-    updateInteractionRuleAtTarget(authoringTarget, ruleId, patch)
-  }
-  const openClickRules = () => {
-    if (
-      interactionView.carrier === 'global'
-      && interactionView.activeSurfaceType !== 'slide'
-    ) {
-      setError('当前 Flow 或 Spatial 页面不在元素属性中提供全局点击规则写入；可继续使用这里的全局模板与专业字段。')
-      return
-    }
-    setActiveTab('properties')
-  }
-  const sharedProps = {
-    scene,
-    selectedNodeId,
-    sourceNodes,
-    sourceRules: interactionView.rules,
-    activeStateId: interactionView.activeStateId,
-    authoringStates: interactionView.states,
-    scenes: interactionView.sceneReferences,
-    locations: interactionView.locationReferences,
-    sounds: courseProject.media.audio.sounds,
-    courseState: courseProject.courseState,
-    ruleWarnings,
-    revealTemplateTargetNodeIds,
-    conditionSceneId: interactionView.carrier === 'global'
-      ? interactionView.activeSlideSceneId
-      : interactionView.sceneId,
-    onOpenClickRules: openClickRules,
-    onApplyRevealSequenceTemplate: applyRevealSequenceTemplate,
+  const shared = {
+    scene: view.scene, sourceNodes: view.nodes, sourceRules: view.rules,
+    selectedNodeId: courseView.selectedInstanceId, sourceScope: scope,
+    activeStateId: courseView.activeStateId, scenes: view.scenes, locations: view.locations, sounds: project.media?.audio.sounds ?? {},
+    courseState: project.logic?.courseState ?? [],
+    onAddRule: add, onUpdateRule: update, onDeleteRule: remove,
     onRunPreview: () => setCanvasMode('run'),
-    onUpdateRule: updateRule,
+    onPreviewNodeMotion: (action: Parameters<typeof previewComponentMotion>[0]['action'], delayMs: number) => {
+      previewComponentMotion({ target: kernel.captureTarget(documentId), action, delayMs })
+    },
   }
-
-  if (interactionView.carrier === 'global') {
-    const legacyGlobalWritesAvailable = interactionView.activeSurfaceType === 'slide'
-    const rejectUnavailableGlobalWrite = () => {
-      setError('当前 Flow 或 Spatial 页面只开放原子模板与专业字段更新；请在 Slide 页面管理其他全局规则操作。')
-    }
-    return (
-      <div className="properties-scroll" data-testid="automation-tab">
-        <section className="property-section interaction-overview">
-          <h2>互动与动画</h2>
-          <p>用“当—如果—就”组织行为。点击交互在属性中维护，其他事件规则集中在这里。</p>
-        </section>
-        {courseLogicPanel}
-        <SceneAutomationEditor
-          {...sharedProps}
-          sourceScope="global"
-          legacyRuleActionsAvailable={legacyGlobalWritesAvailable}
-          legacyRuleActionsUnavailableReason={legacyGlobalWritesAvailable
-            ? undefined
-            : '当前 Flow 或 Spatial 页面仅开放原子模板与专业字段更新；其他全局规则操作请在 Slide 页面完成。'}
-          onAddRule={legacyGlobalWritesAvailable
-            ? addGlobalInteractionRule
-            : rejectUnavailableGlobalWrite}
-          onDeleteRule={legacyGlobalWritesAvailable
-            ? deleteGlobalInteractionRule
-            : rejectUnavailableGlobalWrite}
-          onDuplicateRule={legacyGlobalWritesAvailable
-            ? duplicateGlobalInteractionRule
-            : () => {
-                rejectUnavailableGlobalWrite()
-                return null
-              }}
-          onMoveRule={legacyGlobalWritesAvailable
-            ? moveGlobalInteractionRule
-            : rejectUnavailableGlobalWrite}
-        />
-      </div>
-    )
-  }
-
-  return (
-    <div className="properties-scroll" data-testid="automation-tab">
-      <section className="property-section interaction-overview">
-        <h2>互动与动画</h2>
-        <p>先从模板开始，再用“当—如果—就”微调。这里不重复显示元素单击规则。</p>
-      </section>
-      {courseLogicPanel}
-      {diagnostics.length > 0 ? (
-        <section
-          className="property-section automation-diagnostics"
-          aria-labelledby="automation-diagnostics-title"
-        >
-          <h3 className="property-title" id="automation-diagnostics-title">
-            需要处理的映射
-          </h3>
-          {diagnostics.map((diagnostic) => (
-            <p
-              key={`${diagnostic.code}:${diagnostic.layerItemId ?? diagnostic.path.join('.')}`}
-              className="property-hint"
-              role="alert"
-            >
-              {diagnostic.message}
-            </p>
-          ))}
-        </section>
-      ) : null}
-      <SceneAutomationEditor
-        {...sharedProps}
-        onAddRule={(rule) => addInteractionRule(interactionView.sceneId, rule)}
-        onDeleteRule={(ruleId) => deleteInteractionRule(interactionView.sceneId, ruleId)}
-        onDuplicateRule={(ruleId) => {
-          duplicateInteractionRule(interactionView.sceneId, ruleId)
-        }}
-        onMoveRule={(ruleId, direction) => {
-          moveInteractionRule(interactionView.sceneId, ruleId, direction)
-        }}
-      />
-    </div>
-  )
+  return <div className="properties-scroll" data-testid="automation-tab">
+    <section className="property-section interaction-overview"><h2>互动与动画</h2><p>用“当—如果—就”组织行为，点击规则与可改源码的动效使用同一工程。</p>
+      <label>作用范围<select aria-label="互动作用范围" value={scope} onChange={event => setScope(event.target.value as typeof scope)}><option value="scene">当前页面</option><option value="global">整个课件</option></select></label>
+      <button className="secondary-button" onClick={teacher}>{controller ? '编辑教师控制台' : '添加教师控制台'}</button>
+      {controller && <button className="secondary-button" onClick={() => {
+        const target = kernel.captureTarget(documentId)
+        const current = target.project.instances[controller.id]
+        if (!current) { setError('教师控制台已不存在'); return }
+        void kernel.editCaptured(kernel.capture([{ type: 'data.set', instanceId: current.id, path: ['enabled'], value: !(current.data && typeof current.data === 'object' && !Array.isArray(current.data) && current.data.enabled !== false) }], target)).catch(error => setError(String(error)))
+      }}>启用／关闭默认控制台</button>}
+    </section>
+    <CourseLogicAuthoringPanel key={documentId} project={courseLogicAuthoringView(project)} onCommand={command => commitCourseLogicAuthoringCommand(kernel, documentId, command)} />
+    <SceneAutomationEditor {...shared} authoringStates={view.scene.presentation?.states ?? []} conditionSceneId={scope === 'global' ? surfaceId : null}
+      revealTemplateTargetNodeIds={view.nodes.filter(node => node.visible && !node.locked).map(node => node.id)}
+      onOpenClickRules={() => setClickRulesOpen(true)}
+      onApplyRevealSequenceTemplate={intent => add(buildInteractionTemplateRule({ templateId: SCENE_ENTER_REVEAL_SEQUENCE_TEMPLATE_ID, ...intent,
+        conditions: scope === 'global' ? [{ type: 'scene.in', sceneIds: [surfaceId] }] : [] }))}
+      onDuplicateRule={ruleId => commit(rules => { const index = rules.findIndex(rule => rule.id === ruleId); if (index >= 0) rules.splice(index + 1, 0, duplicateComponentRule(rules[index]!)); return rules })}
+      onMoveRule={(ruleId, direction) => commit(rules => { const index = rules.findIndex(rule => rule.id === ruleId), next = index + direction; if (index >= 0 && next >= 0 && next < rules.length) [rules[index], rules[next]] = [rules[next]!, rules[index]!]; return rules })} />
+    {clickRulesOpen && (selectedNode ? <InteractionEditor {...shared} selectedNode={selectedNode} /> : <p role="status">请在画布选择一个对象，再编辑点击规则。</p>)}
+  </div>
 }

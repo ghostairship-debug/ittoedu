@@ -5,6 +5,7 @@ import type { DisclosedExecutionSettings } from './executionDesktop'
 import type { ExecutionPermissionMode } from './executionPermission'
 import type { ConversationHome } from './conversations'
 import type { EditTarget } from './editSession'
+import type { SavedCourseIdentity } from './documentSave'
 
 /** Explicit host-bound authoring output. This is task metadata, never model-authored tool arguments. */
 export interface ExecutionContentOutput {
@@ -65,6 +66,8 @@ export interface ExecutionModelRecord {
   state: 'sending' | 'completed' | 'failed'
   actualModel?: string
   responseId?: string
+  /** Actual provider terminal label; tool arguments are validated independently. */
+  finishReason?: string
   failure?: ModelFailure
   payload?: { phase: 'initial' | 'dynamic'; digest: string; serializedBytes: number }
   /** Provider-reported counters, not balances; used to size the working context. */
@@ -83,6 +86,8 @@ export interface WorkingNote {
   openQuestions: string[]
   risks: string[]
 }
+/** Main-observed saved V10 identity; it locates the same work without granting additional targets. */
+export type ExecutionDocumentBinding = SavedCourseIdentity
 export interface ExecutionRunRecord {
   schemaVersion: 1
   runId: string
@@ -96,6 +101,8 @@ export interface ExecutionRunRecord {
   initialPayload?: PayloadManifest
   /** File bindings observed by Main at run preparation; used only to locate ancestor resources. */
   documentPaths?: Record<string, string>
+  /** Successful save/open bindings, keyed by the document session actually associated with this run. */
+  documentBindings?: Record<string, ExecutionDocumentBinding>
   requests: ExecutionModelRecord[]
   tools: ExecutionToolRecord[]
   failure?: { code: string; message: string; outcome?: ModelFailure['outcome'] }

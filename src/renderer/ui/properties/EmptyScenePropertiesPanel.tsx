@@ -55,6 +55,7 @@ export interface EmptySceneStateView {
 
 export interface EmptyScenePropertiesContext {
   readonly kind: 'empty-scene'
+  readonly surfaceOnly?: boolean
   readonly draftBindingKey: string
   readonly assets: Readonly<Record<string, AssetMeta>>
   readonly slideSurface: EmptySceneSlideSurfaceView | null
@@ -93,7 +94,7 @@ export function EmptyScenePropertiesPanel({
 }) {
   const { scene, slideSurface, state } = context
   const availableTabs: EmptySceneBackgroundOwnerTab[] = [
-    'slide-surface',
+    ...(context.surfaceOnly ? [] : ['slide-surface'] as const),
     'scene',
     ...(state ? (['state'] as const) : []),
   ]
@@ -113,13 +114,13 @@ export function EmptyScenePropertiesPanel({
         <section className={`state-editing-notice${scene?.stateName ? ' state-editing-notice--override' : ''}`}>
           <Layers3 size={15} />
           <div>
-            <strong>{scene?.stateName ? `当前预览：状态“${scene.stateName}”` : '当前预览：母版'}</strong>
+            <strong>{scene?.stateName ? `当前预览：状态“${scene.stateName}”` : context.surfaceOnly ? '当前表面' : '当前预览：母版'}</strong>
             <span>下方“背景编辑对象”决定颜色/图片写入哪一层，与当前预览的状态无关。</span>
           </div>
         </section>
         <section className="property-section">
-          <h3 className="property-title"><Palette size={14} />场景</h3>
-          <BufferedInput label="场景名称" value={scene?.name ?? ''} onCommit={context.commands.updateName} />
+          <h3 className="property-title"><Palette size={14} />{context.surfaceOnly ? '页面' : '场景'}</h3>
+          <BufferedInput label={context.surfaceOnly ? '页面名称' : '场景名称'} value={scene?.name ?? ''} onCommit={context.commands.updateName} />
         </section>
         {scene?.canvas && context.commands.resizeCanvas && (
           <>
@@ -128,11 +129,11 @@ export function EmptyScenePropertiesPanel({
               canvas={scene.canvas.effective}
               title="本页尺寸"
               testId="scene-canvas-size"
-              hint={scene.canvas.inherited ? '当前跟随课程默认尺寸。应用后只改变本页；自由内容按比例调整，Web 自动布局重新排版。' : '本页使用单独的尺寸。自由内容按比例调整，Web 自动布局重新排版。'}
+              hint={context.surfaceOnly ? scene.canvas.inherited ? '当前使用宿主默认尺寸。应用后只改变本页尺寸。' : '本页使用单独的尺寸；已有对象的位置与大小保持。' : scene.canvas.inherited ? '当前跟随课程默认尺寸。应用后只改变本页；自由内容按比例调整，Web 自动布局重新排版。' : '本页使用单独的尺寸。自由内容按比例调整，Web 自动布局重新排版。'}
               onApply={(canvas) => context.commands.resizeCanvas?.(canvas)}
             />
             {!scene.canvas.inherited && (
-              <button type="button" className="secondary-button" data-testid="scene-canvas-inherit" onClick={() => context.commands.resizeCanvas?.(null)}>恢复课程默认尺寸</button>
+              <button type="button" className="secondary-button" data-testid="scene-canvas-inherit" onClick={() => context.commands.resizeCanvas?.(null)}>{context.surfaceOnly ? '恢复默认尺寸' : '恢复课程默认尺寸'}</button>
             )}
           </>
         )}
@@ -152,7 +153,7 @@ export function EmptyScenePropertiesPanel({
               data-testid={`background-owner-tab-${tab}`}
               onClick={() => setOwnerTab(tab)}
             >
-              {OWNER_TAB_LABEL[tab]}
+              {context.surfaceOnly && tab === 'scene' ? '当前表面' : OWNER_TAB_LABEL[tab]}
             </button>
           ))}
         </div>
@@ -178,7 +179,7 @@ export function EmptyScenePropertiesPanel({
         {activeTab === 'scene' && scene && (
           <SharedBackgroundProperties
             key={`scene-background:${scene.id}`}
-            ownerLabel="场景"
+            ownerLabel={context.surfaceOnly ? '当前表面' : '场景'}
             color={scene.backgroundColor}
             assetId={scene.backgroundAssetId}
             assets={context.assets}

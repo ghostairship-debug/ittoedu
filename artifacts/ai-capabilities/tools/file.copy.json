@@ -1,0 +1,34 @@
+{
+  "description": "把 sources 复制到 destination 文件夹，逐项返回成功或失败；不默认覆盖。GUI 打开且未保存的源默认按磁盘版本复制并在 outcome 中标记 copied=disk-version；需要复制当前草稿时显式传 flushFirst=true，模型应自行先 file.save 或接受失败。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "destination": {
+        "maxLength": 32767,
+        "minLength": 1,
+        "type": "string"
+      },
+      "flushFirst": {
+        "type": "boolean"
+      },
+      "sources": {
+        "items": {
+          "maxLength": 32767,
+          "minLength": 1,
+          "type": "string"
+        },
+        "minItems": 1,
+        "type": "array"
+      }
+    },
+    "required": [
+      "sources",
+      "destination"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "name": "file.copy",
+  "version": 1
+}

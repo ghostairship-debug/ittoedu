@@ -1,31 +1,27 @@
 import { z } from 'zod'
-import type { DocumentOperation, DocumentSnapshot } from '../../shared/workbench/document'
-import type { ToolDefinition, ToolResult, ToolTarget, ToolRunGrant } from '../../shared/workbench/tools'
+import type { DocumentSnapshot } from '../../shared/workbench/document'
+import type { ToolResult, ToolTarget, ToolRunGrant } from '../../shared/workbench/tools'
 import type { ImageGenerationRequest, ImageJobSnapshot, ImageModelSelection } from '../../shared/workbench/images'
-import { buildToolCallSchema, type BuildCreateTicket, type BuildCreateLookup, type BuildImportArtifact, type BuildJobInput, type BuildJobSnapshot, type BuildToolCall } from '../../shared/workbench/build'
 import type { HostImageInput } from './imageResource'
 import type { AssetSource } from '../../shared/contracts/media-v1'
+import type { ComponentLibraryEntry } from '../../shared/contracts/component-platform/library'
 import type { ComputeArtifact, ComputeJobInput, ComputeJobSnapshot } from '../../shared/workbench/compute'
 import { DocumentRegistry } from '../documents/DocumentRegistry'
 import { documentDigest } from '../documents/documentDigest'
 import type { SkillServicePort } from '../../shared/workbench/toolPorts'
 import { executeSkillRead, executeSkillList } from './SkillTools'
-import { executeHtmlImport, htmlImportReceiptResult } from './HtmlImportTools'
 import { documentDeliveryReceiptResult, executeDocumentDeliveryTool } from './DocumentDeliveryTools'
 import { executeViewObserveTool, type ViewObserveToolContext } from './ViewObserveTools'
-import type { DocumentDeliveryServicePort, HtmlImportServicePort, ObservationServicePort } from '../../shared/workbench/toolPorts'
-import type { PageParsePort } from '../projectFiles/pageHtml'
+import type { DocumentDeliveryServicePort, ObservationServicePort } from '../../shared/workbench/toolPorts'
+import { handleToolTarget, hasRunWrite, toolRegistrationFor, type ToolSupportContext } from './ToolRegistration'
 
 /** Main supplies real services. Neither their implementations nor credentials enter core. */
 export interface HostToolServices {
   skills?: SkillServicePort
-  htmlImports?: HtmlImportServicePort
   deliveries?: DocumentDeliveryServicePort
   observations?: ObservationServicePort
-  /** Project files: the existing HTML importer parser reads pages back; workspace files are read under the task's file access. */
+  /** Course paths open through the formal document host under the frozen file grant. */
   projectFiles?: {
-    parsePage: PageParsePort
-    readFile?(input: { runId: string; path: string; fileAccess: ToolRunGrant['fileAccess'] }): Promise<HostImageInput>
     /** Open a course named by path through the document host, within the task's file access. */
     openProject?(input: { runId: string; path: string; fileAccess: ToolRunGrant['fileAccess'] }): Promise<{ documentId: string; writable: boolean }>
   }
@@ -75,14 +71,14 @@ export interface HostToolServices {
       | { status: 'ready'; file: HostImageInput; width: number; height: number; source: AssetSource }
       | { status: 'failed' | 'rejected'; reason: string }>
   }
-  /** The component library: search, an HTML component's files, and saving into the managed library. */
+  /** The same Component API 5 catalog used by the component panel. */
   assetLibrary?: {
     search(input: { runId: string; query: string; limit?: number }): Promise<unknown>
     read(input: { runId: string; packageId: string; version?: string }): Promise<
-      | { status: 'ready'; packageId: string; version: string; name: string; html: string; assets: { path: string; mimeType: string; bytes: Uint8Array }[] }
+      | { status: 'ready'; packageId: string; version: string; name: string; entry: ComponentLibraryEntry }
       | { status: 'rejected' | 'failed'; reason: string }>
-    save(input: { runId: string; name: string; description?: string; subject?: readonly string[]; schoolStage?: readonly string[];
-      tags?: readonly string[]; sourceCourse?: string; html: string; assets: readonly { path: string; mimeType: string; bytes: Uint8Array }[] }): Promise<unknown>
+    save(input: { runId: string; entry: ComponentLibraryEntry; description?: string; subject?: readonly string[]; schoolStage?: readonly string[];
+      tags?: readonly string[]; sourceCourse?: string }): Promise<unknown>
   }
   /** Freeze role/connection selections before the run can issue any service operation. */
   beginRun?(grant: ToolRunGrant): Promise<void>
@@ -95,16 +91,8 @@ export interface HostToolServices {
     readResource(resourceId: string): Promise<HostImageInput>
     readReadyResourceFromJob?(input: { jobId: string; sourceRunId: string; sourceDocumentId: string; resourceId: string }): Promise<HostImageInput>
   }
-  builds?: {
-    create(input: BuildJobInput, ticket: BuildCreateTicket): Promise<BuildJobSnapshot>
-    lookupCreate(runId: string, ticket: BuildCreateTicket): Promise<BuildCreateLookup | null>
-    execute(runId: string, call: BuildToolCall): Promise<unknown>
-    artifact(runId: string, jobId: string, artifactId: string): Promise<BuildImportArtifact>
-    cancelRun(runId: string): Promise<unknown>
-    policy?(runId: string, documentId: string): { allowedOrigins: readonly string[] } | undefined | Promise<{ allowedOrigins: readonly string[] } | undefined>
-  }
 }
-export type HostJobRef = { runId: string; kind: 'image' | 'build' | 'compute' | 'delegation'; jobId: string }
+export type HostJobRef = { runId: string; kind: 'image' | 'compute' | 'delegation'; jobId: string }
 export type HostJobView = { kind: HostJobRef['kind']; jobId: string; status: string; terminal: boolean; snapshot: unknown }
 export type ComputeRunInput = Omit<ComputeJobInput, 'runId' | 'jobId'>
 export type DelegationRunInput = { goal: string; materials?: readonly string[]; expectedArtifacts: readonly string[] }
@@ -115,53 +103,46 @@ const handle = z.string().min(1)
 // The currently supported OAuth and OpenAI-compatible Images routes accept these
 // common request options; decoding still preserves the actual raster format.
 const output = z.object({ size: z.union([z.literal('auto'), z.string().regex(/^\d{2,5}x\d{2,5}$/)]).optional(), quality: z.enum(['auto', 'low', 'medium', 'high']).optional(), format: z.literal('png').optional(), background: z.enum(['auto', 'opaque', 'transparent']).optional() }).strict()
-// A document target is required for a V9 insertion workflow, but workspace
-// image work has no reason to manufacture an empty V9 document.
+// Document work binds resources to its captured target; workspace work needs no empty course.
 const imageInput = z.object({ target: handle.optional(), prompt: z.string().min(1), output: output.optional() }).strict()
 const schema = {
   'image.generate': imageInput,
   'image.edit': imageInput.extend({ references: z.array(handle).min(1) }).strict(),
   'image.status': z.object({ job: handle }).strict(),
-  'build.create': z.object({ target: handle }).strict(),
-  'build.read': buildToolCallSchema.options[1].omit({ type: true, jobId: true }).extend({ job: handle, path: buildToolCallSchema.options[1].shape.path.optional() }).strict(),
-  'build.write': buildToolCallSchema.options[2].omit({ type: true, jobId: true }).extend({ job: handle }).strict(),
-  'build.compile': buildToolCallSchema.options[3].omit({ type: true, jobId: true }).extend({ job: handle }).strict(),
-  'build.check': buildToolCallSchema.options[4].omit({ type: true, jobId: true }).extend({ job: handle }).strict(),
-  'build.logs': buildToolCallSchema.options[5].omit({ type: true, jobId: true }).extend({ job: handle }).strict(),
-  'build.import': z.object({ job: handle, artifact: handle }).strict(),
 } as const
 export type HostToolName = keyof typeof schema
 const descriptions: Record<HostToolName, string> = {
-  'image.generate': '通过任务开始时冻结的 GPT OAuth 或已显式启用的 OpenAI Images API 连接生成真实图片。target 可省略以生成独立工作空间资源；有 target 时继续使用 V9 资源句柄。返回持久任务状态，ready 不等于文件或文档交付；当前只请求 PNG、auto/low/medium/high 画质。',
-  'image.edit': '编辑本任务已有图片；独立图片的 references 使用生成结果中的 job@resourceId 句柄，宿主核对原作业及真实字节。target 可省略以保留独立成果；有 target 时继续使用 V9 资源句柄。未知结果不自动重发。',
+  'image.generate': '通过任务开始时冻结的 GPT OAuth 或已显式启用的 OpenAI Images API 连接生成图片。target 绑定当前获授权的课件或对象，省略时生成独立工作空间资源。ready 返回本任务资源，可用 project.apply from 插入或 media.apply 原位替换；ready 本身未写入工程。当前请求 PNG、auto/low/medium/high 画质。',
+  'image.edit': '编辑已有图片。课件 references 可用本任务图片资源，或当前文档的整张专业图片/图片素材句柄；独立图片用 job@resourceId。宿主读取原字节并使用冻结连接。返回资源须经 project.apply 或 media.apply 正式应用；未知结果不自动重发。',
   'image.status': '查询本任务图片状态；ready 返回已校验的本任务图片资源身份，不返回 base64 或临时 URL。',
-  'build.create': '从有整份文档写权限的 V9 文档句柄建立受管 scratch，冻结当前基线和读集合；不会修改正式文档。',
-  'build.read': '读取构建 scratch 的相对路径文件，支持分页；省略 path 列出文件和任务状态。',
-  'build.write': '写入受管 scratch 相对路径，现有准入制品随源码变更失效；不能写正式工程或宿主任意路径。',
-  'build.compile': '仅对指定 Component/Runtime JavaScript 做语法编译，不执行候选。通过不等于协议、闭包或真实动态准入；继续 build.check。',
-  'build.check': '执行正式协议、来源、资源闭包及受影响动态目标的隔离宿主准入，返回可读错误或准备好的 artifact；尚未应用文档。',
-  'build.logs': '分页读取构建日志和精确错误，用于同一任务修复。',
-  'build.import': '导入已准入 artifact，重新验证原 document/epoch/revision/project/digest/readset，资源与内容一次提交和撤销；前提变化即冲突。',
 }
-export const hostToolCatalog = (Object.keys(schema) as HostToolName[]).map(name => ({ name, description: descriptions[name], inputSchema: schema[name], manual: { label: name, group: (name.endsWith('.read') || name.endsWith('.logs') || name.endsWith('.status') ? 'read' : 'edit') as 'read' | 'edit', targetKinds: (name.startsWith('build.') ? ['document'] : ['document', 'course-owner', 'course-object', 'course-background', 'flow-block']) as ToolDefinition['manual']['targetKinds'] } }))
+interface HostImageToolHandler {
+  run(name: HostToolName, input: z.infer<(typeof schema)[HostToolName]>): Promise<ToolResult>
+}
+const registerImage = toolRegistrationFor<HostImageToolHandler>()
+export const hostToolCatalog = (Object.keys(schema) as HostToolName[]).map(name => registerImage({ name, description: descriptions[name], inputSchema: schema[name],
+  manual: { label: name, group: name === 'image.status' ? 'read' : 'edit', targetKinds: ['document', 'course-surface', 'course-instance'] },
+}, {
+  capability: name === 'image.status' ? 'read' : 'resource', effect: name === 'image.status' ? null : 'image-generation',
+  supports: context => context.images !== false && (context.standaloneImage === true || hasRunWrite(context, ['course-instance'], 'course-v10')),
+  targets: (input, resolver) => 'target' in input && input.target ? handleToolTarget({ target: input.target }, resolver) : [],
+  handler: (context, input) => context.run(name, input),
+}))
+export function hostToolRegistration(name: string) { return hostToolCatalog.find(tool => tool.name === name) }
 export const isHostToolName = (name: string): name is HostToolName => Object.hasOwn(schema, name)
 interface HostAuthority {
-  resolve(runId: string, target: string): Promise<{ snapshot: DocumentSnapshot; target: ToolTarget }>
   resolveImage(runId: string, target: string): Promise<{ snapshot: DocumentSnapshot; target: ToolTarget }>
   active(runId: string, documentId: string, epoch: string): void
-  actor(runId: string): DocumentOperation['actor']
-  applied(runId: string, before: DocumentSnapshot, after: DocumentSnapshot): void
   ownsDocument(runId: string, documentId: string): boolean
   provideImage(runId: string, documentId: string, source: HostImageInput): Promise<string>
   readImage(runId: string, documentId: string, resource: string): Promise<HostImageInput>
 }
 interface Job { runId: string; documentId: string; epoch: string; jobId: string }
 interface ImageJob extends Job { kind: 'image'; scope: 'document' | 'workspace'; controller: AbortController; resources: Map<string, string> }
-interface BuildJob extends Job { kind: 'build'; frozen: BuildJobInput }
 
-/** Service work prepares results. Only import executes an acknowledged canonical operation. */
+/** Service work prepares resources; the Gateway owns canonical document operations. */
 export class HostToolCoordinator {
-  private readonly jobs = new Map<string, ImageJob | BuildJob>()
+  private readonly jobs = new Map<string, ImageJob>()
   private readonly runs = new Map<string, { grant: ToolRunGrant; stopped: boolean;
     computeJobs: Set<string>; pendingCompute: Set<Promise<ComputeJobSnapshot>>;
     delegationJobs: Set<string>; pendingDelegation: Set<Promise<HostDelegationSnapshot>> }>()
@@ -204,9 +185,12 @@ export class HostToolCoordinator {
     return { jobId: match[1]!, resourceId: match[2]! }
   }
   projectFileServices() { return this.services.projectFiles }
-  supports(name: string) { return name === 'project.save' ? !!this.services.deliveries : name.startsWith('project.') ? !!this.services.projectFiles : name === 'course.createFromHtml' ? false : name === 'skills.read' || name === 'skills.list' ? !!this.services.skills : name === 'view.observe' ? !!this.services.observations : name === 'html.import' ? !!this.services.htmlImports
-    : name === 'file.save' || name === 'document.export' ? !!this.services.deliveries
-      : !isHostToolName(name) || (name.startsWith('image.') ? !!this.services.images : !!this.services.builds) }
+  supportContext(): ToolSupportContext {
+    return { images: !!this.services.images, skills: !!this.services.skills, deliveries: !!this.services.deliveries,
+      observations: !!this.services.observations, projectFiles: !!this.services.projectFiles, jobs: !!this.services.jobs,
+      compute: !!this.services.compute, delegation: !!this.services.delegation, web: !!this.services.web,
+      mcp: !!this.services.mcp, media: !!this.services.media, openImages: !!this.services.openImages, assetLibrary: !!this.services.assetLibrary }
+  }
   observePage(context: ViewObserveToolContext, input: unknown): Promise<ToolResult> {
     if (!this.services.observations) return Promise.resolve({ kind: 'error', code: 'service-unavailable', message: '画面观察服务尚未就绪' })
     return executeViewObserveTool(this.services.observations, context, input)
@@ -218,10 +202,6 @@ export class HostToolCoordinator {
   deliverDocument(context: { runId: string; operationId: string; requestDigest: string; resolveHandle(handle: string, access: 'write'): Promise<{ documentId: string; epoch: string; revision: number }> }, name: 'file.save' | 'document.export', input: unknown): Promise<ToolResult> {
     if (!this.services.deliveries) return Promise.resolve({ kind: 'error', code: 'service-unavailable', message: '文档保存与导出服务尚未就绪' })
     return executeDocumentDeliveryTool(this.services.deliveries, context, name, input)
-  }
-  importHtml(context: { runId: string; operationId: string; requestDigest: string; resolveHandle(handle: string, access: 'read' | 'write'): Promise<{ documentId: string; epoch: string; revision: number; bindingVersion: number | null }> }, input: unknown): Promise<ToolResult> {
-    if (!this.services.htmlImports) return Promise.resolve({ kind: 'error', code: 'service-unavailable', message: 'HTML 导入服务尚未就绪' })
-    return executeHtmlImport(this.services.htmlImports, context, input)
   }
   readSkill(runId: string, input: unknown): Promise<ToolResult> {
     if (!this.services.skills) return Promise.resolve({ kind: 'error', code: 'service-unavailable', message: '随附 Skill 尚未就绪' })
@@ -394,16 +374,21 @@ export class HostToolCoordinator {
     return this.services.assetLibrary ? { kind: 'read', data: await this.services.assetLibrary.search({ runId, ...input }) }
       : this.serviceUnavailable('资产库检索服务尚未配置')
   }
-  /** One HTML component's text and asset files for the Gateway, which writes them into a course. */
+  /** One complete API 5 example for the canonical project writer. */
   libraryComponent(runId: string, packageId: string, version?: string) {
     this.writableRun(runId)
     if (!this.services.assetLibrary) throw new Error('资产库服务尚未配置')
     return this.services.assetLibrary.read({ runId, packageId, ...(version ? { version } : {}) })
   }
-  async saveLibraryComponent(runId: string, input: Omit<Parameters<NonNullable<HostToolServices['assetLibrary']>['save']>[0], 'runId'>): Promise<ToolResult> {
+  async saveLibraryComponent(runId: string, operationId: string, input: Omit<Parameters<NonNullable<HostToolServices['assetLibrary']>['save']>[0], 'runId'>): Promise<ToolResult> {
     this.writableRun(runId)
-    return this.services.assetLibrary ? { kind: 'read', data: await this.services.assetLibrary.save({ runId, ...input }) }
-      : this.serviceUnavailable('资产库服务尚未配置')
+    const existing = this.results.get(operationId)
+    if (existing) return structuredClone(await existing)
+    const result: Promise<ToolResult> = this.services.assetLibrary
+      ? this.services.assetLibrary.save({ runId, ...input }).then(data => ({ kind: 'read', data }))
+      : Promise.resolve(this.serviceUnavailable('资产库服务尚未配置'))
+    this.results.set(operationId, result)
+    return structuredClone(await result)
   }
   /** The caller proves sourceRunId belongs to its durable continuation lineage. */
   reissueImageForContinuation(currentRunId: string, sourceDocumentId: string, destinationDocumentId: string,
@@ -432,7 +417,6 @@ export class HostToolCoordinator {
       ...(this.services.stopRun ? [this.services.stopRun(runId)] : []),
       ...(this.services.observations?.stopRun ? [this.services.observations.stopRun(runId)] : []),
       ...[...this.jobs.values()].filter((job): job is ImageJob => job.runId === runId && job.kind === 'image').map(job => this.services.images!.stop(job.jobId)),
-      ...(this.services.builds ? [this.services.builds.cancelRun(runId)] : []),
       ...(this.services.compute ? [this.services.compute.cancelRun(runId)] : []),
       ...(this.services.delegation ? [this.services.delegation.cancelRun(runId)] : []),
       ...(run?.pendingCompute ? [...run.pendingCompute].map(async pending => { const result = await pending; await this.services.compute?.cancel(runId, result.jobId) }) : []),
@@ -444,34 +428,26 @@ export class HostToolCoordinator {
     ])
   }
   invoke(runId: string, operationId: string, requestDigest: string, name: HostToolName, raw: unknown): Promise<ToolResult> {
-    if (!this.supports(name)) return Promise.resolve({ kind: 'error', code: 'service-unavailable', message: '宿主未配置该正式服务' })
-    const input = schema[name].parse(raw)
-    if (name === 'image.status' || name === 'build.read' || name === 'build.logs') return this.execute(runId, operationId, requestDigest, name, input)
+    const registration = hostToolRegistration(name)!
+    if (!registration.supports(this.supportContext())) return Promise.resolve({ kind: 'error', code: 'service-unavailable', message: '宿主未配置该正式服务' })
+    const invoke = () => registration.handler({ run: (toolName, input) => this.execute(runId, operationId, requestDigest, toolName, input) }, raw)
+    if (registration.capability === 'read') return invoke()
     const existing = this.results.get(operationId)
     if (existing) return existing.then(result => structuredClone(result))
-    const promise = this.execute(runId, operationId, requestDigest, name, input)
+    const promise = invoke()
     this.results.set(operationId, promise)
     return promise.then(result => structuredClone(result))
   }
   /** Recovery queries only; no registration of edit authority or reconstruction of a task. */
   async lookup(runId: string, operationId: string, requestDigest: string, name: string): Promise<ToolResult | null> {
+    if (name === 'asset.save') return this.results.has(operationId) ? structuredClone(await this.results.get(operationId)!) : null
     if ((name === 'file.save' || name === 'document.export') && this.services.deliveries) {
       const receipt = await this.services.deliveries.lookup({ runId, operationId, requestDigest })
       return receipt ? documentDeliveryReceiptResult(receipt) : null
     }
-    if (name === 'html.import' && this.services.htmlImports) {
-      const receipt = await this.services.htmlImports.lookup({ runId, operationId, requestDigest })
-      return receipt ? htmlImportReceiptResult(receipt) : null
-    }
-    if (name !== 'build.create' || !this.services.builds) return null
-    const result = await this.services.builds.lookupCreate(runId, { operationId, requestDigest })
-    if (!result) return null
-    const target = result.status === 'created' ? result.job.target : result.target
-    if (!this.authority.ownsDocument(runId, target.documentId)) throw new Error('原构建文档不属于当前恢复授权')
-    if (result.status === 'unknown') return { kind: 'error', code: 'build-create-unknown', message: '上次构建创建中断，完成情况未知；原暂存和票据保留，不会自动新建或重放。' }
-    return this.buildResult(result.job)
+    return null
   }
-  private get(runId: string, id: string, kind: 'image' | 'build') {
+  private get(runId: string, id: string, kind: 'image') {
     const job = this.jobs.get(id)
     if (!job || job.runId !== runId || job.kind !== kind) throw new Error('服务任务句柄不属于当前任务')
     if (job.kind === 'image' && job.scope === 'workspace') {
@@ -497,17 +473,6 @@ export class HostToolCoordinator {
     }
     return { kind: 'read', data: { job: job.jobId, ...(job.scope === 'workspace' ? { scope: 'workspace' } : { documentId: job.documentId }), status: snapshot.status, stopped: snapshot.stopped, resources, provenance: snapshot.provenance,
       ...(snapshot.failure ? { failure: snapshot.failure } : {}), ...(snapshot.timing?.length ? { timing: snapshot.timing } : {}) } }
-  }
-  private buildResult(value: unknown): ToolResult {
-    if (value && typeof value === 'object' && 'jobId' in value) {
-      const job = value as BuildJobSnapshot
-      return { kind: 'read', data: { job: job.jobId, status: job.status, sourceRevision: job.sourceRevision, writes: job.writes, checks: job.checks, ...(job.artifactId ? { artifact: job.artifactId, prepared: true } : {}) } }
-    }
-    if (value && typeof value === 'object' && 'job' in value) {
-      const listed = value as { job: BuildJobSnapshot; files: unknown }
-      return { kind: 'read', data: { ...(this.buildResult(listed.job) as Extract<ToolResult, { kind: 'read' }>).data as object, files: listed.files } }
-    }
-    return { kind: 'read', data: value }
   }
   private async execute(runId: string, operationId: string, requestDigest: string, name: HostToolName, input: z.infer<(typeof schema)[HostToolName]>): Promise<ToolResult> {
     if (name === 'image.generate' || name === 'image.edit') {
@@ -535,7 +500,7 @@ export class HostToolCoordinator {
       const jobId = schema[name].parse(input).job
       const known = this.jobs.get(jobId)
       if (known) return this.imageResult(this.get(runId, jobId, 'image') as ImageJob, await this.services.images!.read(jobId))
-      // A recovered standalone result has no V9 target handle to reconstruct.
+      // A recovered standalone result needs no document target handle to reconstruct.
       // The durable owner and frozen workspace scope still prove its authority.
       const snapshot = await this.services.images!.read(jobId), scope = this.workspaceImageScope(runId)
       if (snapshot.runId !== runId || snapshot.documentId !== scope) throw new Error('图片作业不属于当前任务工作空间')
@@ -543,42 +508,7 @@ export class HostToolCoordinator {
       this.jobs.set(jobId, recovered)
       return this.imageResult(recovered, snapshot)
     }
-    if (name === 'build.create') {
-      const recovered = await this.lookup(runId, operationId, requestDigest, name)
-      if (recovered) return recovered
-      const { snapshot, target } = await this.authority.resolve(runId, schema[name].parse(input).target)
-      if (target.kind !== 'document' || snapshot.model.kind !== 'course-v9') throw new Error('构建导入要求整份 V9 文档授权，不接受局部范围')
-      const policy = await this.services.builds!.policy?.(runId, snapshot.documentId)
-      this.authority.active(runId, snapshot.documentId, snapshot.epoch)
-      const digest = documentDigest(snapshot.model)
-      const frozen: BuildJobInput = { runId, target: { documentId: snapshot.documentId, projectId: snapshot.model.project.id, epoch: snapshot.epoch, baseRevision: snapshot.revision, modelDigest: digest }, readSet: [{ documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, digest }], baseline: snapshot.model, allowedOrigins: policy?.allowedOrigins ?? snapshot.model.project.network?.connectOrigins ?? [] }
-      const value = await this.services.builds!.create(structuredClone(frozen), { operationId, requestDigest })
-      if (value.runId !== runId || documentDigest(value.target) !== documentDigest(frozen.target) || documentDigest(value.readSet) !== documentDigest(frozen.readSet)) throw new Error('构建服务返回了不同冻结前提的任务')
-      const job: BuildJob = { kind: 'build', runId, documentId: snapshot.documentId, epoch: snapshot.epoch, jobId: value.jobId, frozen: structuredClone(frozen) }
-      this.jobs.set(job.jobId, job)
-      try { this.authority.active(runId, job.documentId, job.epoch) } catch (error) { await this.services.builds!.cancelRun(runId); throw error }
-      return this.buildResult(value)
-    }
-    const value = input as { job: string }, job = this.get(runId, value.job, 'build') as BuildJob
-    if (name === 'build.import') {
-      const artifact = await this.services.builds!.artifact(runId, job.jobId, schema[name].parse(input).artifact)
-      if (artifact.artifactId !== schema[name].parse(input).artifact || !artifact.admission.ok || artifact.jobId !== job.jobId || artifact.runId !== runId || documentDigest(artifact.target) !== documentDigest(job.frozen.target) || documentDigest(artifact.readSet) !== documentDigest(job.frozen.readSet)) throw new Error('准入制品与冻结构建任务不符')
-      const session = this.registry.get(job.documentId), current = await session.drain()
-      this.authority.active(runId, job.documentId, job.epoch)
-      if (current.epoch !== artifact.target.epoch || current.revision !== artifact.target.baseRevision || current.model.kind !== 'course-v9' || current.model.project.id !== artifact.target.projectId || documentDigest(current.model) !== artifact.target.modelDigest) return { kind: 'error', code: 'build-target-conflict', message: '构建前提已改变，制品未导入；不会替换为最新版本绕过冲突' }
-      if (artifact.command.project.id !== artifact.target.projectId || artifact.command.project.revision !== artifact.target.baseRevision || !artifact.command.resources) throw new Error('构建制品的工程身份、基线或资源闭包无效')
-      const result = await session.execute({ documentId: job.documentId, epoch: artifact.target.epoch, baseRevision: artifact.target.baseRevision, operationId, requestDigest, runId, actor: this.authority.actor(runId), mutation: { type: 'command', command: artifact.command } })
-      if (result.status === 'applied') {
-        const after = await session.drain()
-        if (after.revision === result.revision && after.epoch === current.epoch) this.authority.applied(runId, current, after)
-      }
-      return { kind: 'document-operation', result, affected: [] }
-    }
-    const { job: _job, ...parameters } = input as Record<string, unknown>
-    const type = name === 'build.compile' ? 'syntax' : name.slice('build.'.length)
-    const call = name === 'build.read' && !parameters.path ? { type: 'list', jobId: job.jobId } : { type, jobId: job.jobId, ...parameters }
-    const result = await this.services.builds!.execute(runId, buildToolCallSchema.parse(call))
-    this.authority.active(runId, job.documentId, job.epoch)
-    return this.buildResult(result)
+
+    throw new Error('宿主服务工具不受支持')
   }
 }

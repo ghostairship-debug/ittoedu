@@ -26,7 +26,7 @@ import {
   updateFlowTextDraft,
   type FlowFormulaDraft,
   type FlowTextEditSession,
-} from '../../authoring/flowTextEdit'
+} from '../../authoring/flowTextInput'
 import type {
   FlowAuthoringIntent,
   FlowAuthoringReceipt,

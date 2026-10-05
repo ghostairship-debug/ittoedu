@@ -35,7 +35,9 @@ async function waitForPrintableDocument(
       return {
         imageCount: images.length,
         loadedImageCount: images.filter((image) => image.naturalWidth > 0).length,
-        pageCount: document.querySelectorAll('.page').length,
+        // Fixed captures are explicit pages; Flow is a semantic reading body
+        // whose physical page count is determined by Chromium pagination.
+        pageCount: document.querySelectorAll('.page, [data-component-print-surface]').length,
       };
     })()
   `, true) as PrintableDocumentState
@@ -54,6 +56,12 @@ export async function exportPdfFromHtml(
   suggestedName: string,
   html: string,
 ): Promise<{ path: string } | null> {
+  const bytes = await renderPdfFromHtml(html, parent)
+  return writeBinaryExportFile(parent, suggestedName, 'pdf', bytes)
+}
+
+/** The same Chromium carrier is used by interactive export and direct output verification. */
+export async function renderPdfFromHtml(html: string, parent?: BrowserWindowType): Promise<Uint8Array> {
   const temporaryPath = path.join(
     app.getPath('temp'),
     `${APP_PDF_TEMP_FILE_PREFIX}${crypto.randomUUID()}.html`,
@@ -84,7 +92,7 @@ export async function exportPdfFromHtml(
       preferCSSPageSize: true,
       margins: { top: 0, bottom: 0, left: 0, right: 0 },
     })
-    return writeBinaryExportFile(parent, suggestedName, 'pdf', new Uint8Array(bytes))
+    return new Uint8Array(bytes)
   } finally {
     if (window && !window.isDestroyed()) window.destroy()
     await fs.unlink(temporaryPath).catch(() => undefined)

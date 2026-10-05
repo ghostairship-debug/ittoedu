@@ -1,3 +1,4 @@
+import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
 /** The sole product catalog. UI, Builder and generated capabilities project this value. */
 export const RECIPE_CATALOG = [
   { id: 'cover-v1', version: 1, label: '封面', fields: [
@@ -44,7 +45,7 @@ export const RECIPE_CATALOG = [
 export type RecipeId = typeof RECIPE_CATALOG[number]['id']
 export interface RecipeInput {
   readonly recipeId: RecipeId
-  readonly target: { readonly projectId: string; readonly revision: number; readonly locationId: string; readonly sessionGeneration?: number }
+  readonly target: CapturedCourseTarget
   readonly slots: Readonly<Record<string, string>>
   readonly accentTokenId?: string
 }

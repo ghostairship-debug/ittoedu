@@ -1,0 +1,38 @@
+{
+  "description": "在开放授权图库（Wikimedia Commons、Openverse，免费、无需账号）检索照片类图片，返回候选短句柄、标题、作者、授权、来源站点和尺寸。只需说明要什么图；授权筛选、下载、存储与署名由软件完成。默认只含 CC0、公有领域和 CC BY；仅当教师经 ask_user 明确同意使用 CC BY-SA（相同方式共享）后才设 allowShareAlike。英文关键词通常结果更多；limit 为每个图库的候选数。示意图优先直接画 SVG。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "allowShareAlike": {
+        "type": "boolean"
+      },
+      "limit": {
+        "maximum": 20,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "page": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "query": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "query"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "read",
+    "label": "image.search",
+    "targetKinds": []
+  },
+  "name": "image.search",
+  "version": 1
+}

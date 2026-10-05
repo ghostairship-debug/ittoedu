@@ -34,6 +34,8 @@ export interface ExtractHtmlResourcesInput {
 
 export interface ExtractHtmlResourcesResult {
   html: string
+  /** Local ES-module source stays editable; runtime compilation is a projection. */
+  modules?: Record<string, string>
   resources: ExtractedResource[]
   remoteReferences: RemoteReference[]
   diagnostics: ImportDiagnostic[]

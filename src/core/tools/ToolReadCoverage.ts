@@ -1,5 +1,6 @@
 import { documentDigest } from '../documents/documentDigest'
 import type { ToolTarget } from '../../shared/workbench/tools'
+import type { CourseInstanceRange } from './ToolTargets'
 
 export interface SourceSplice { from: number; to: number; inserted: number }
 export interface FlowSplice extends SourceSplice {
@@ -7,6 +8,18 @@ export interface FlowSplice extends SourceSplice {
   parentId: string | null
   blockId: string
   slot: Extract<ToolTarget, { kind: 'flow-range' }>['slot']
+}
+export interface ComponentTextSplice extends SourceSplice {
+  surfaceId: string
+  instanceId: string
+  stateId?: string | null
+  fieldScope?: 'data' | 'flowLayout'
+  dataPath: string[]
+}
+export function mapAcknowledgedComponentRange<T extends CourseInstanceRange>(range: T, edits: readonly ComponentTextSplice[]): T {
+  return mapAcknowledgedRange(range, edits.filter(edit => edit.surfaceId === range.surfaceId && edit.instanceId === range.instanceId
+    && (edit.stateId ?? null) === (range.stateId ?? null) && (edit.fieldScope ?? 'data') === (range.fieldScope ?? 'data')
+    && documentDigest(edit.dataPath) === documentDigest(range.dataPath)))
 }
 type Range = { from: number; to: number }
 /** Exact host-acknowledged edits, never a heuristic diff or a new grant. */

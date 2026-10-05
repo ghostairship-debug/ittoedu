@@ -20,13 +20,16 @@ import { TaskHtmlPreview } from './workbench/observation/TaskHtmlPreview'
 import { HtmlActionService } from './workbench/observation/HtmlActionService'
 import { HtmlActionDesktopPort } from './workbench/observation/HtmlActionDesktopPort'
 import { ObservationImageStore } from './workbench/observation/ObservationImageStore'
-import { DynamicContentObservationStore, type DynamicContentPublication } from './workbench/observation/DynamicContentObservationStore'
-import { DynamicContentFallbackCaptureService } from './workbench/observation/DynamicContentFallbackCaptureService'
+import { ViewObservationDesktopService } from './workbench/observation/ViewObservationDesktopService'
+import { publishedCourseV3Schema } from '../shared/contracts/component-platform/published'
 import { setHtmlPreviewProtocolHandler } from './protocols'
 import path from 'node:path'
 import type { BrowserWindow, IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { app, dialog, ipcMain } from 'electron'
 import { documentHost } from './workbench/documentHost'
+import { componentCompilationInputSchema } from '../shared/workbench/componentCompilation'
+import { InMemoryComponentCompilation } from '../core/components/compilation/InMemoryComponentCompilation'
+import { createEsbuildComponentCompiler } from './workbench/contentApply/compilation/esbuildComponentCompiler'
 import { documentHostRequestSchema } from '../shared/workbench/desktop'
 import { z } from 'zod'
 import {
@@ -96,7 +99,7 @@ export interface IpcContext {
 const documentExportBuildReplySchema = z.object({
   requestId: z.string().uuid(),
   identity: z.object({ documentId: z.string().min(1), epoch: z.string().min(1), revision: z.number().int().nonnegative(), projectId: z.string().min(1) }).strict(),
-  status: z.enum(['generated', 'failed', 'cancelled']),
+  status: z.enum(['generated', 'drained', 'failed', 'cancelled']),
   files: z.array(z.object({ relativePath: z.string(), mimeType: z.string(), bytes: z.instanceof(Uint8Array) }).strict()).max(1).optional(),
   warnings: z.array(z.string()),
   reason: z.string().optional(),
@@ -183,6 +186,9 @@ const previewNetworkPolicySchema = z.object({
 const previewNetworkReleaseSchema = z.object({
   leaseId: previewNetworkLeaseIdSchema,
   documentToken: z.string().uuid(),
+}).strict()
+const componentBootstrapSchema = previewNetworkReleaseSchema.extend({
+  html: z.string(), connectOrigins: z.array(z.string().min(1)).optional(), remoteAssetUrls: z.array(z.string().min(1)).optional(),
 }).strict()
 
 const dirtySchema = z.boolean()
@@ -293,8 +299,6 @@ let imageResults: ImageResultsDesktopService | undefined
 let workspaceFileEventGeneration = 0
 let htmlPreview: HtmlPreviewService | undefined
 let htmlPreviewClosedCleanup: (() => void) | undefined
-let dynamicContentObservations: DynamicContentObservationStore | undefined
-let dynamicContentChangeCleanup: (() => void) | undefined
 export function releaseAllHtmlPreviewLeases(): void { htmlPreview?.releaseAll() }
 let detachExternalMcpWindow: (() => void) | undefined
 export function registerIpcHandlers(context: IpcContext): void {
@@ -392,28 +396,6 @@ export function registerIpcHandlers(context: IpcContext): void {
     message: 'Pixabay 设置未能保存，原配置已保留。', suggestion: '请检查系统安全存储。',
   }, async (_event, args) => operatePixabaySettings(requireSingleArgument(args)))
   const documents = documentHost()
-  dynamicContentChangeCleanup?.()
-  const contentObservations = new DynamicContentObservationStore(async documentId => {
-    try { return await documents.registry.get(documentId).drain() } catch { return null }
-  })
-  dynamicContentObservations = contentObservations
-  documents.tools.configureDynamicContentServices({ observations: contentObservations,
-    fallback: new DynamicContentFallbackCaptureService({ rendererEntryUrl: context.getRendererEntryUrl }) })
-  dynamicContentChangeCleanup = documents.subscribeEvents(event =>
-    contentObservations.clearDocument(event.type === 'changed' ? event.snapshot.documentId : event.documentId))
-  const mainWindow = context.getMainWindow()
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    const senderId = mainWindow.webContents.id
-    mainWindow.webContents.once('destroyed', () => contentObservations.clearSender(senderId))
-  }
-  registerSafeHandler(IPC_CHANNELS.dynamicContentTargets, context, {
-    code: 'DYNAMIC_CONTENT_TARGETS_FAILED', title: '动态图文目标未能更新',
-    message: '当前画面的图文目标未能确认。', suggestion: '请重新打开当前页面后再试。',
-  }, async (event, args) => {
-    const raw = requireSingleArgument(args)
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false
-    return contentObservations.publish({ ...raw, senderId: event.sender.id } as DynamicContentPublication)
-  })
   htmlPreviewClosedCleanup?.()
   htmlPreview?.dispose()
   const preview = new HtmlPreviewService({
@@ -433,10 +415,24 @@ export function registerIpcHandlers(context: IpcContext): void {
     withFileAccess: work => documents.fileCoordinator.withFileAccess(work),
   }))
   htmlPreview = preview
+  registerSafeHandler(IPC_CHANNELS.createComponentBootstrap, context, {
+    code: 'COMPONENT_BOOTSTRAP_FAILED', title: '组件内容加载失败',
+    message: '未能创建组件内容环境。', suggestion: '请查看具体原因并保留组件源码。',
+  }, (event, args) => {
+    const { documentToken, ...input } = componentBootstrapSchema.parse(requireSingleArgument(args))
+    return preview.createComponentBootstrap(input, previewNetworkDocumentOwner(event, documentToken))
+  })
+  registerSafeHandler(IPC_CHANNELS.releaseComponentBootstrap, context, {
+    code: 'COMPONENT_BOOTSTRAP_RELEASE_FAILED', title: '组件内容清理失败',
+    message: '未能清理已关闭的组件内容环境。', suggestion: '请关闭当前工程后重试。',
+  }, (event, args) => {
+    const input = previewNetworkReleaseSchema.parse(requireSingleArgument(args))
+    preview.releaseComponentBootstrap(input.leaseId, previewNetworkDocumentOwner(event, input.documentToken))
+  })
   const taskPreview = new TaskHtmlPreview({ live: preview,
     readDocument: documentId => documents.registry.get(documentId).drain(),
     agentBundlePath: path.join(app.getAppPath(), 'dist-renderer', 'html-preview-agent.iife.js') })
-  mainWindow?.webContents.once('destroyed', () => taskPreview.dispose())
+  context.getMainWindow()?.webContents.once('destroyed', () => taskPreview.dispose())
   htmlActionsReady = executionDesktopService().then(service => {
     if (generation !== workspaceFileEventGeneration) return
     service.setHtmlActions(new HtmlActionService({ preview: taskPreview, frames: new HtmlActionDesktopPort(), images: new ObservationImageStore() }))
@@ -480,6 +476,11 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (input.type !== 'save-dialog') return documents.operate(input)
     return saveDocumentWithDialog(requireWindow(context), documents, input.documentId, input.saveAs, input.suggestedDirectory)
   })
+  const componentCompilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
+  registerSafeHandler(IPC_CHANNELS.componentCompilation, context, {
+    code: 'COMPONENT_COMPILE_FAILED', title: '组件源码未能编译',
+    message: '源码和参数已保留。', suggestion: '请查看组件诊断并修复源码。',
+  }, async (_event, args) => componentCompilation.compile(componentCompilationInputSchema.parse(requireSingleArgument(args))))
   registerSafeHandler(IPC_CHANNELS.mediaFiles, context, {
     code: 'MEDIA_FILE_OPERATION_FAILED', title: '媒体文件操作未完成',
     message: '当前修改已保留。', suggestion: '请查看具体原因后重试。',
@@ -504,8 +505,27 @@ export function registerIpcHandlers(context: IpcContext): void {
     code: 'OBSERVATION_CAPTURE_FAILED', title: '当前画面尚未同步',
     message: '无法读取当前画面。', suggestion: '请等待画面呈现完成后重试。',
   }, async (event, args) => {
-    const rect = z.object({ x: z.number().finite().nonnegative(), y: z.number().finite().nonnegative(),
-      width: z.number().finite().positive().max(16384), height: z.number().finite().positive().max(16384) }).strict().parse(requireSingleArgument(args))
+    const input = z.union([
+      z.object({ x: z.number().finite().nonnegative(), y: z.number().finite().nonnegative(),
+        width: z.number().finite().positive().max(16384), height: z.number().finite().positive().max(16384) }).strict(),
+      z.object({ kind: z.literal('published'), published: publishedCourseV3Schema, surfaceId: z.string().min(1),
+        stateId: z.string().min(1).nullable().optional(), instanceId: z.string().min(1).optional(), spatialFrameId: z.string().min(1).optional() }).strict(),
+    ]).parse(requireSingleArgument(args))
+    if ('published' in input) {
+      const entry = context.getRendererEntryUrl()
+      if (!entry || event.sender.isDestroyed()) throw new Error('输出捕获宿主已关闭')
+      const controller = new AbortController(), abort = () => controller.abort()
+      event.sender.once('destroyed', abort)
+      try {
+        const result = await new ViewObservationDesktopService({ rendererEntryUrl: entry }).capturePublished({
+          published: input.published, locationId: input.surfaceId, stateId: input.stateId,
+          instanceId: input.instanceId, spatialFrameId: input.spatialFrameId, signal: controller.signal,
+        })
+        return { dataUrl: `data:image/png;base64,${Buffer.from(result.png).toString('base64')}`,
+          capturedAt: Date.now(), width: result.width, height: result.height }
+      } finally { event.sender.removeListener('destroyed', abort) }
+    }
+    const rect = input
     const window = context.getMainWindow()
     if (!window || event.sender.isDestroyed()) throw new Error('观察窗口已关闭')
     const zoom = event.sender.getZoomFactor()
@@ -868,6 +888,21 @@ export function registerIpcHandlers(context: IpcContext): void {
     },
   )
 
+  registerSafeHandler(IPC_CHANNELS.installComponentLibraryEntry, context, {
+    code: 'COMPONENT_LIBRARY_INSTALL_FAILED', title: '组件保存失败',
+    message: '无法将组件写入“我的资产库”。', suggestion: '请检查组件内容和目录写入权限。',
+  }, async (_event, args) => {
+    const input = z.object({ bytes: z.instanceof(Uint8Array) }).strict().parse(requireSingleArgument(args))
+    return componentCatalogManager.install(input.bytes)
+  })
+  registerSafeHandler(IPC_CHANNELS.deleteComponentCatalogPackage, context, {
+    code: 'COMPONENT_LIBRARY_DELETE_FAILED', title: '组件删除失败',
+    message: '无法从“我的资产库”删除这个组件。', suggestion: '请刷新组件库后重试。',
+  }, async (_event, args) => {
+    const input = componentCatalogPackageSchema.parse(requireSingleArgument(args))
+    return componentCatalogManager.deletePackage(input.sourceId, input.packageId, input.version)
+  })
+
   registerSafeHandler(
     IPC_CHANNELS.exportHtml,
     context,
@@ -1045,9 +1080,6 @@ export function registerIpcHandlers(context: IpcContext): void {
 
 export function unregisterIpcHandlers(): void {
   workspaceFileEventGeneration++
-  dynamicContentChangeCleanup?.(); dynamicContentChangeCleanup = undefined
-  dynamicContentObservations = undefined
-  documentHost().tools.configureDynamicContentServices({})
   ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildReply)
   disposeWorkbenchExportPort()
   htmlPreviewClosedCleanup?.(); htmlPreviewClosedCleanup = undefined

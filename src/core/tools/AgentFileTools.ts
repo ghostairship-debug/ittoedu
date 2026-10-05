@@ -4,18 +4,20 @@ import type { ExecutionPermissionMode } from '../../shared/workbench/executionPe
 import type { DocumentKind } from '../../shared/workbench/document'
 import type { ModelJsonObject } from '../../shared/workbench/modelProvider'
 import type { OfficeContentToolName } from './OfficeContentTools'
+import type { ToolResult } from '../../shared/workbench/tools'
+import { toolRegistrationFor } from './ToolRegistration'
 
 const path = z.string().min(1).max(32767)
 const version = z.string().min(1)
 const content = z.string()
 const paths = z.array(path).min(1)
 export const agentFileSchemas = {
-  'file.list': z.object({ path: path.optional(), cursor: z.string().uuid().optional(), limit: z.number().int().min(1).max(100).optional() }).strict(),
-  'file.search': z.object({ path: path.optional(), cursor: z.string().uuid().optional(), query: z.string().min(1), limit: z.number().int().min(1).max(100).optional() }).strict(),
+  'file.list': z.object({ path: path.optional(), cursor: z.string().uuid().optional(), limit: z.number().int().min(1).optional() }).strict(),
+  'file.search': z.object({ path: path.optional(), cursor: z.string().uuid().optional(), query: z.string().min(1), limit: z.number().int().min(1).optional() }).strict(),
   'file.open': z.object({ path }).strict(),
-  'file.create': z.object({ path: path.optional(), name: z.string().min(1), kind: z.enum(['markdown', 'text', 'html', 'course-v9']).optional() }).strict(),
+  'file.create': z.object({ path: path.optional(), name: z.string().min(1), kind: z.enum(['markdown', 'text', 'html', 'course-v10']).optional() }).strict(),
   'file.read': z.object({ path, cursor: z.string().min(1).optional(), limit: z.number().int().min(1).optional() }).strict(),
-  'file.grep': z.object({ path: path.optional(), query: z.string().min(1), cursor: z.string().uuid().optional(), limit: z.number().int().min(1).max(100).optional() }).strict(),
+  'file.grep': z.object({ path: path.optional(), query: z.string().min(1), cursor: z.string().uuid().optional(), limit: z.number().int().min(1).optional() }).strict(),
   'file.write': z.discriminatedUnion('mode', [
     z.object({ mode: z.literal('create'), path, content }).strict(),
     z.object({ mode: z.literal('replace'), path, content, expectedVersion: version.optional() }).strict(),
@@ -29,10 +31,13 @@ export const agentFileSchemas = {
   'file.trash': z.object({ paths }).strict(),
 } as const
 export type AgentFileToolName = keyof typeof agentFileSchemas
-export type AgentFileMutationName = Extract<AgentFileToolName, 'file.create' | 'file.write' | 'file.patch' | 'file.mkdir' | 'file.copy' | 'file.move' | 'file.rename' | 'file.trash'>
-export const agentFileMutationNames: readonly AgentFileMutationName[] = ['file.create', 'file.write', 'file.patch', 'file.mkdir', 'file.copy', 'file.move', 'file.rename', 'file.trash']
+const fileCapabilities = {
+  'file.list': 'read', 'file.search': 'read', 'file.open': 'read', 'file.create': 'write', 'file.read': 'read', 'file.grep': 'read',
+  'file.write': 'write', 'file.patch': 'write', 'file.mkdir': 'write', 'file.copy': 'write', 'file.move': 'write', 'file.rename': 'write', 'file.trash': 'write',
+} as const satisfies Record<AgentFileToolName, 'read' | 'write'>
+export type AgentFileMutationName = { [Name in AgentFileToolName]: typeof fileCapabilities[Name] extends 'write' ? Name : never }[AgentFileToolName]
 export const isAgentFileTool = (name: string): name is AgentFileToolName => Object.hasOwn(agentFileSchemas, name)
-export const agentFileTools = (Object.keys(agentFileSchemas) as AgentFileToolName[]).map(name => ({
+const fileDescriptors = (Object.keys(agentFileSchemas) as AgentFileToolName[]).map(name => ({
   name,
   description: ({
     'file.list': '列出文件夹内容。path 可用绝对路径或工作空间相对路径；省略时从会话所属位置开始。返回有界列表；截断时用同 path 和返回的 nextCursor 续页，目录变化需重读。',
@@ -49,8 +54,29 @@ export const agentFileTools = (Object.keys(agentFileSchemas) as AgentFileToolNam
     'file.rename': '重命名文件或文件夹，已打开文档的路径绑定由宿主协调；不默认覆盖。',
     'file.trash': '把指定文件或文件夹移入系统回收站；逐项返回结果，不永久删除。',
   })[name],
+  inputSchema: agentFileSchemas[name],
+}))
+
+export interface AgentFileToolHandler {
+  /** Engine retains file preflight, opened-document attachment and the existing physical writer. */
+  execute(name: AgentFileToolName, input: unknown): Promise<ToolResult>
+}
+const registerFile = toolRegistrationFor<AgentFileToolHandler>()
+export const agentFileRegistrations = fileDescriptors.map(tool => registerFile({ ...tool,
+  manual: { label: tool.name, group: fileCapabilities[tool.name] === 'read' ? 'read' : 'edit', targetKinds: [] },
+}, {
+  capability: fileCapabilities[tool.name], effect: fileCapabilities[tool.name] === 'write' ? 'file-write' : null,
+  supports: context => context.files === true,
+  // Physical paths come from the existing file preflight, rather than model-supplied document identities.
+  targets: () => undefined,
+  handler: (context, input) => context.execute(tool.name, input),
+}))
+export function agentFileRegistration(name: string) { return agentFileRegistrations.find(tool => tool.name === name) }
+export const isAgentFileMutation = (name: string): name is AgentFileMutationName => agentFileRegistration(name)?.capability === 'write'
+export const agentFileMutationNames: readonly AgentFileMutationName[] = agentFileRegistrations.map(tool => tool.name).filter(isAgentFileMutation)
+export const agentFileTools = agentFileRegistrations.map(tool => ({ name: tool.name, description: tool.description,
   // Every file tool takes an object, including the create/replace union.
-  inputSchema: { ...(z.toJSONSchema(agentFileSchemas[name]) as ModelJsonObject), type: 'object' },
+  inputSchema: { ...(z.toJSONSchema(tool.inputSchema) as ModelJsonObject), type: 'object' },
 }))
 
 export interface AgentFileContext {

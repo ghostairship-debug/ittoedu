@@ -1,4 +1,4 @@
-import type { CourseSurfaceType } from '../../shared/courseProjectTypes'
+import type { ComponentSurface } from '../../shared/contracts/component-platform/project'
 
 /** Minimal action ids aligned with product shortcuts; extend donor ids, do not fork. */
 export const EDITOR_ACTION_IDS = [
@@ -22,7 +22,7 @@ export const EDITOR_WRITE_ACTION_IDS = [
 
 export type EditorWriteActionId = (typeof EDITOR_WRITE_ACTION_IDS)[number]
 
-export type EditorSurfaceKind = Extract<CourseSurfaceType, 'slide' | 'flow' | 'spatial-2d'>
+export type EditorSurfaceKind = ComponentSurface['kind'] | 'spatial-2d'
 
 export type EditorAuthoringScope = 'location' | 'global'
 
@@ -43,6 +43,9 @@ export interface EditorTextRangeSnapshot {
 }
 
 export interface EditorSelectionSnapshot {
+  readonly documentId?: string
+  readonly epoch?: string
+  readonly surfaceId?: string
   readonly locationId: string
   readonly revision: number
   readonly sessionGeneration: number

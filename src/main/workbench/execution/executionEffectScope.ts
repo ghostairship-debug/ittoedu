@@ -4,6 +4,7 @@ import { isInsideRoot } from '../../../shared/workbench/executionPermission'
 export interface UnresolvedEffect { names: readonly string[]; targets?: ExecutionToolRecord['effectTargets']; paths?: string[] }
 
 const sameDocumentOverlap = (a: ToolTarget, b: ToolTarget) => {
+  if (a.kind === 'course-instance' && b.kind === 'course-instance') return a.instanceId === b.instanceId
   if (a.kind === 'course-object' && b.kind === 'course-object') return a.itemId === b.itemId
   if ((a.kind === 'flow-range' || a.kind === 'flow-block') && (b.kind === 'flow-range' || b.kind === 'flow-block'))
     return a.surfaceId === b.surfaceId && a.blockId === b.blockId

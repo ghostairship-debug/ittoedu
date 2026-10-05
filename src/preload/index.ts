@@ -5,6 +5,7 @@ import type { AttachmentReadProgress } from '../shared/workbench/attachmentsDesk
 // Sandboxed preloads cannot require local CommonJS modules at runtime. Keep this
 // whitelist self-contained; the shared declaration remains the source of API types.
 const IPC_CHANNELS = {
+  componentCompilation: 'component:compile',
   htmlImport: 'html-import:operate',
   imageResults: 'image-results:operate',
   imageResultsChanged: 'image-results:changed',
@@ -51,6 +52,8 @@ const IPC_CHANNELS = {
   selectComponentCatalogSource: 'component-catalog:select-source',
   setComponentCatalogSourceTrust: 'component-catalog:set-source-trust',
   readComponentCatalogPackage: 'component-catalog:read-package',
+  installComponentLibraryEntry: 'component-catalog:install-entry',
+  deleteComponentCatalogPackage: 'component-catalog:delete-package',
   deleteComponentCatalogHtmlComponent: 'component-catalog:delete-html-component',
   peekProjectArchive: 'project:peek-archive',
   exportHtml: 'export:write-html',
@@ -62,6 +65,8 @@ const IPC_CHANNELS = {
   previewNetworkDocumentToken: 'preview-network:document-token',
   setPreviewNetworkPolicy: 'preview-network:set',
   releasePreviewNetworkPolicy: 'preview-network:release',
+  createComponentBootstrap: 'component-bootstrap:create',
+  releaseComponentBootstrap: 'component-bootstrap:release',
   dirtyState: 'app:dirty-state',
   editorClipboard: 'editor:clipboard',
   requestSave: 'app:request-save',
@@ -241,7 +246,6 @@ const desktopAPI = Object.freeze<DesktopAPI>({
       return () => { ipcRenderer.removeListener(IPC_CHANNELS.executionEdit, receive) }
     },
   },
-  publishDynamicContentTargets: input => invoke(IPC_CHANNELS.dynamicContentTargets, input),
   pixabaySettings: {
     read: () => invoke(IPC_CHANNELS.pixabaySettings, { type: 'read' }),
     saveKey: key => invoke(IPC_CHANNELS.pixabaySettings, { type: 'save-key', key }),
@@ -315,6 +319,7 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   dynamicAdmission: (input) => invoke(IPC_CHANNELS.dynamicAdmission, input),
   materials: (input) => invoke(IPC_CHANNELS.materials, input),
   openProject: () => invoke(IPC_CHANNELS.openProject),
+  compileComponent: input => invoke(IPC_CHANNELS.componentCompilation, input),
   listRecentProjects: () => invoke(IPC_CHANNELS.listRecentProjects),
   openRecentProject: (input) => invoke(IPC_CHANNELS.openRecentProject, input),
   confirmProjectOpen: (input) => invoke(IPC_CHANNELS.confirmProjectOpen, input),
@@ -347,6 +352,8 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     IPC_CHANNELS.deleteComponentCatalogHtmlComponent,
     input,
   ),
+  installComponentLibraryEntry: input => invoke(IPC_CHANNELS.installComponentLibraryEntry, input),
+  deleteComponentCatalogPackage: input => invoke(IPC_CHANNELS.deleteComponentCatalogPackage, input),
   exportHtml: (input) => invoke(IPC_CHANNELS.exportHtml, input),
   exportWebPackage: (input) => invoke(IPC_CHANNELS.exportWebPackage, input),
   exportBinary: (input) => invoke(IPC_CHANNELS.exportBinary, input),
@@ -360,6 +367,12 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     return () => ipcRenderer.removeListener(IPC_CHANNELS.documentExportBuildRequest, listener)
   },
   sendDocumentExportBuildReply: reply => ipcRenderer.send(IPC_CHANNELS.documentExportBuildReply, reply),
+  createComponentBootstrap: input => invoke(IPC_CHANNELS.createComponentBootstrap, {
+    ...input, documentToken: requirePreviewNetworkDocumentToken(),
+  }),
+  releaseComponentBootstrap: input => invoke(IPC_CHANNELS.releaseComponentBootstrap, {
+    ...input, documentToken: requirePreviewNetworkDocumentToken(),
+  }),
   setPreviewNetworkPolicy: (input) => invoke(IPC_CHANNELS.setPreviewNetworkPolicy, {
     ...input,
     documentToken: requirePreviewNetworkDocumentToken(),

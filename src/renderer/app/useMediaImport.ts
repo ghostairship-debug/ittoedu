@@ -1,819 +1,160 @@
 import { useCallback, useRef, useState } from 'react'
-import type { CourseAuthoringTarget } from '../authoring/courseAuthoringSession'
-import type { AssetKind, AssetMeta } from '../../shared/contracts/media-v1/types'
+import type { AssetMeta } from '../../shared/contracts/media-v1/types'
+import type { SelectedFileBatch, SelectedImageResult, SelectedImageBatchFile, SelectedMediaResult, SelectedMediaBatchFile } from '../../shared/ipcTypes'
 import type { WorkspaceMediaDropRequest } from '../lessonWorkspace/workspaceMediaDrop'
-import { toUserMessage, UserFacingError } from '../../shared/errors'
-import type {
-  BatchFileRejection,
-  SelectedFileBatch,
-  SelectedImageBatchFile,
-  SelectedImageResult,
-  SelectedMediaResult,
-  SelectedMediaBatchFile,
-} from '../../shared/ipcTypes'
-import {
-  createImageAssetImport,
-  createMediaAssetImport,
-  readImageDimensions,
-  readMediaMetadata,
-  type ImportedImageAsset,
-} from '../project/assetManager'
-import {
-  commitMediaBatchImport,
-  MEDIA_BATCH_CANVAS_LIMIT,
-  planMediaBatchImport,
-  type MediaBatchLibraryFallback,
-} from '../project/mediaBatch'
-import {
-  dedupeCourseMediaImports,
-  freezeCourseAssetSidecar,
-  prepareHashedMediaBatch,
-  type CourseAssetSidecar,
-  type CourseImportedAsset,
-} from '../project/v9AssetAdapter'
+import type { EditorStoreKernel } from '../store/editorStoreKernel'
+import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
+import { createImageAssetImport, createMediaAssetImport, readImageDimensions, readMediaMetadata, type ImportedImageAsset } from '../project/assetManager'
+import { captureCourseInsertionTarget, importCourseMediaLibrary, insertCourseMedia, replaceCourseImageAtTarget,
+  importCourseSounds, replaceCourseMediaAtTarget, type ImportedAssetBatchItem, type CourseInsertionOptions } from '../media/commitCourseMediaAuthoring'
 
-export interface MediaImportIdentity {
-  readonly projectId: string
-  readonly revision: number
-  readonly locationId: string | null
-  readonly sessionGeneration: number
-  readonly surfaceId: string | null
-  readonly owner: string | null
-  readonly ownerKey: string | null
-}
-
-export interface MediaLibraryTarget {
-  readonly projectId: string
-  readonly documentRevision: number
-}
-
-export interface MediaLibrarySnapshot {
-  readonly assets: Readonly<Record<string, AssetMeta>>
-  readonly files: Readonly<Record<string, Uint8Array>>
-}
-
-export interface MediaCandidateContext {
-  readonly assets: Readonly<Record<string, AssetMeta>>
-  readonly sidecar: CourseAssetSidecar
-}
-
-export interface MediaImportItem {
-  readonly meta: AssetMeta
-  readonly bytes: Uint8Array
-}
-
+export interface MediaImportItem extends ImportedAssetBatchItem {}
+export interface MediaImportIssue { readonly name: string; readonly message: string }
 export interface PreparedTargetMedia {
-  readonly asset: AssetMeta
+  readonly asset: import('../../shared/contracts/component-platform/project').ComponentAsset
   readonly bytes: Uint8Array
-  readonly source: { readonly kind: 'existing'; readonly assetId: string }
-    | { readonly kind: 'new'; readonly meta: AssetMeta; readonly bytes: Uint8Array }
-  /** Recheck immediately before the caller's canonical transaction. */
+  readonly source: { readonly kind: 'existing'; readonly assetId: string } | { readonly kind: 'new'; readonly meta: AssetMeta; readonly bytes: Uint8Array }
   assertCurrent(): void
 }
-
 export interface TargetMediaSelection<T extends object> {
   readonly kind: 'image' | 'video' | 'audio'
-  /** Capture the caller's document, location and selection before opening the picker. */
   captureTarget(): T | null
   isTargetCurrent(target: Readonly<T>): boolean
 }
-
-export interface MediaImportIssue {
-  readonly name: string
-  readonly message: string
-}
-
-export interface MediaBatchOutcome {
-  readonly label: string
-  readonly completedCount: number
-  readonly duplicateCount: number
-  readonly issues: readonly MediaImportIssue[]
-  readonly libraryFallback?: MediaBatchLibraryFallback
-}
-
-export interface MediaReplacementCommitResult {
-  readonly ok: boolean
-  readonly reason?: string
-}
-
-export interface MediaLibraryCommitResult {
-  readonly ok: boolean
-  readonly reason?: string
-}
-
-export interface FlowAudioPlacementResult {
-  readonly completedCount: number
-  readonly issues: readonly MediaImportIssue[]
-}
-
-export interface MediaCandidatePlacement {
-  readonly items: readonly MediaImportItem[]
-  readonly nativeType?: 'image' | 'video' | 'audio'
-  readonly mode?: 'add' | 'library'
-  readonly x?: number
-  readonly y?: number
-}
-
-/**
- * Narrow App/desktop ports. Hash/dedupe and canvas placement stay in domain
- * or Store adapters; this module only sequences capture → read → recheck → commit.
- */
+/** Desktop pickers remain caller-owned; formal resources and placement have one Kernel writer. */
 export interface MediaImportPorts {
-  captureIdentity(): MediaImportIdentity | null
-  captureDocumentId?(): string | null
-  captureSurfaceKind?(): 'slide' | 'flow' | 'spatial' | null
-  captureFlowAudioTarget?(): MediaImportIdentity | null
-  captureLibraryTarget(): MediaLibraryTarget | null
-  captureImageReplacementTarget(): CourseAuthoringTarget | null
-  readMediaLibrarySnapshot(): MediaLibrarySnapshot | null
-  readCandidateMediaContext(): MediaCandidateContext | null
-  /** Current formal Course Project resources, captured before the file picker. */
-  readCourseMediaContext?(): MediaCandidateContext | null
-  replaceImageAtTarget(
-    target: CourseAuthoringTarget,
-    asset: AssetMeta,
-    bytes: Uint8Array,
-  ): MediaReplacementCommitResult
-  importAssetsAtTarget(
-    target: MediaLibraryTarget,
-    items: readonly MediaImportItem[],
-  ): MediaLibraryCommitResult
-  placeImageNodes(
-    items: readonly MediaImportItem[],
-    position?: { x?: number; y?: number },
-  ): string[]
-  placeVideoNodes(
-    items: readonly MediaImportItem[],
-    position?: { x?: number; y?: number },
-  ): string[]
-  placeFlowAudioNodes?(items: readonly MediaImportItem[]): Promise<FlowAudioPlacementResult>
-  placeFlowMediaAt?(item: MediaImportItem, afterBlockId: string | null): { ok: boolean; reason?: string; blockId?: string }
-  importSounds(items: readonly MediaImportItem[]): string[]
-  commitCandidateMedia(input: MediaCandidatePlacement): void
+  kernel: EditorStoreKernel
+  capturePlacement?(target: CapturedCourseTarget): CourseInsertionOptions
   selectImage(): Promise<SelectedImageResult | null>
   selectImages(): Promise<SelectedFileBatch<SelectedImageBatchFile> | null>
   selectAudios(): Promise<SelectedFileBatch<SelectedMediaBatchFile> | null>
-  /** Single-file audio picker for a caller-owned insertion transaction. */
   selectAudio?(): Promise<SelectedMediaResult | null>
   selectVideos(): Promise<SelectedFileBatch<SelectedMediaBatchFile> | null>
-  /** One video for replacing the selected one (M21). */
   selectVideo?(): Promise<SelectedMediaResult | null>
-  replaceSelectedVideo?(asset: AssetMeta, bytes: Uint8Array): MediaReplacementCommitResult
   runBusy<T>(operation: () => Promise<T>, fallback: string): Promise<T | undefined>
   commitStatus(message: string | null): void
   reportError(message: string): void
 }
-
 export interface MediaImportApi {
-  selectAndImportImage(
-    mode: 'add' | 'library' | 'replace',
-    position?: { x?: number; y?: number },
-  ): Promise<void>
-  selectAndImportVideo(
-    mode: 'add' | 'library',
-    position?: { x?: number; y?: number },
-  ): Promise<void>
+  selectAndImportImage(mode: 'add' | 'library' | 'replace', position?: { x?: number; y?: number }): Promise<void>
+  selectAndImportVideo(mode: 'add' | 'library', position?: { x?: number; y?: number }): Promise<void>
   selectAndImportAudio(): Promise<void>
-  /** Pick a video file and put it in place of the selected video, keeping its frame. */
   replaceSelectedVideo(): Promise<void>
   selectAndInsertFlowAudio(): Promise<void>
   importWorkspaceMedia(request: WorkspaceMediaDropRequest): Promise<{ ok: boolean; reason?: string; assetId?: string; soundId?: string }>
   selectImageAsset(): Promise<ImportedImageAsset | null>
   selectVideoAsset(): Promise<MediaImportItem | null>
   selectAudioAsset(): Promise<MediaImportItem | null>
+  selectMediaAsset(kind: 'image' | 'video' | 'audio'): Promise<MediaImportItem | null>
   selectTargetMedia<T extends object>(input: TargetMediaSelection<T>): Promise<PreparedTargetMedia | null>
   batchOperationSummary: { title: string; summary: string } | null
   clearBatchSummary(): void
 }
-
-function readableError(error: unknown, fallback: string): string {
-  if (error instanceof UserFacingError) {
-    console.error(error)
-    return `${error.title}：${error.message}\n${error.suggestion}`
-  }
-  if (error instanceof Error && error.message.trim()) {
-    console.error(error)
-    return error.message
-  }
-  return toUserMessage(error, fallback)
+async function prepare(file: Pick<SelectedMediaResult, 'name' | 'mimeType' | 'bytes'>, kind: 'image' | 'video' | 'audio'): Promise<MediaImportItem> {
+  if (kind === 'image') return createImageAssetImport(file, { dimensions: await readImageDimensions(file.bytes, file.mimeType) })
+  return createMediaAssetImport(file, kind, await readMediaMetadata(file.bytes, file.mimeType, kind))
 }
-
-function desktopRejections(issues: BatchFileRejection[]): MediaImportIssue[] {
-  return issues.map((issue) => ({
-    name: issue.name,
-    message: `${issue.message} ${issue.suggestion}`,
-  }))
+/** Original imported filename is preserved in the managed path; the ID remains software-owned. */
+function namedAsset(item: MediaImportItem): MediaImportItem {
+  const safe = item.meta.filename.replace(/[\\/:*?"<>|]/g, '_')
+  return { ...item, meta: { ...item.meta, path: `assets/${item.meta.id}/${safe}`,
+    source: item.meta.source ?? { kind: 'user-material', title: item.meta.filename } } }
 }
-
-function formatBatchIssueSummary(issues: readonly MediaImportIssue[]): string {
-  const shown = issues.slice(0, 5).map((issue) => `• ${issue.name}：${issue.message}`)
-  if (issues.length > shown.length) {
-    shown.push(`• 其他 ${issues.length - shown.length} 个文件未导入`)
-  }
-  return shown.join('\n')
-}
-
-function sameIdentity(
-  left: MediaImportIdentity | null,
-  right: MediaImportIdentity | null,
-): boolean {
-  if (!left || !right) return left === right
-  return left.projectId === right.projectId
-    && left.revision === right.revision
-    && left.locationId === right.locationId
-    && left.sessionGeneration === right.sessionGeneration
-    && left.surfaceId === right.surfaceId
-    && left.owner === right.owner
-    && left.ownerKey === right.ownerKey
-}
-
-function assertFreshIdentity(
-  started: MediaImportIdentity | null,
-  current: MediaImportIdentity | null,
-  title: string,
-): void {
-  if (!started) return
-  if (!sameIdentity(started, current)) {
-    throw new UserFacingError(
-      title,
-      '工程已发生变化；请重新选择文件后再试。',
-      '请重新选择目标后再试。',
-    )
-  }
-}
-
-function asCommitItems(items: readonly CourseImportedAsset[]): MediaImportItem[] {
-  return items.map((item) => ({ meta: item.meta, bytes: item.bytes }))
-}
-
 export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
-  const portsRef = useRef(ports)
-  portsRef.current = ports
-
-  const [batchOperationSummary, setBatchOperationSummary] = useState<{
-    title: string
-    summary: string
-  } | null>(null)
-
-  const reportBatchOutcome = useCallback((input: MediaBatchOutcome) => {
-    const details = [
-      `已完成 ${input.completedCount} 项`,
-      input.duplicateCount > 0 ? `内容重复 ${input.duplicateCount} 项（已复用素材）` : '',
-      input.issues.length > 0 ? `失败 ${input.issues.length} 项` : '',
-      input.libraryFallback === 'batch-size'
-        ? '数量过多，已只加入媒体库'
-        : '',
-      input.libraryFallback === 'scene-capacity'
-        ? '当前层容量不足，已改为只加入媒体库'
-        : '',
-    ].filter(Boolean)
-    portsRef.current.commitStatus(`${input.label}：${details.join('；')}`)
-    if (input.issues.length > 0) {
-      portsRef.current.reportError(
-        `${input.label}部分文件未完成：\n${formatBatchIssueSummary(input.issues)}`,
-      )
-      setBatchOperationSummary({
-        title: `${input.label}结果`,
-        summary: [
-          ...details,
-          '',
-          '未完成：',
-          ...input.issues.map((issue) => `- ${issue.name}：${issue.message}`),
-        ].join('\n'),
-      })
-    }
+  const current = useRef(ports); current.current = ports
+  const [batchOperationSummary, setBatchOperationSummary] = useState<{ title: string; summary: string } | null>(null)
+  const summarize = useCallback((title: string, completed: number, issues: MediaImportIssue[]) => {
+    const summary = [`已完成 ${completed} 项`, ...issues.map(issue => `${issue.name}：${issue.message}`)].join('\n')
+    setBatchOperationSummary({ title, summary }); current.current.commitStatus(`${title}：已完成 ${completed} 项`)
+    if (issues.length) current.current.reportError(issues.map(issue => `${issue.name}：${issue.message}`).join('\n'))
   }, [])
-
-  const prepareSelection = useCallback(async <T extends {
-    name: string
-    mimeType: string
-    bytes: Uint8Array
-    sha256: string
-  }>(
-    files: T[],
-    kind: AssetKind,
-    decode: (file: T) => Promise<CourseImportedAsset>,
-    snapshot: MediaLibrarySnapshot | null,
-  ) => {
-    const assets = snapshot?.assets ?? {}
-    const assetFiles = snapshot?.files ?? {}
-    return prepareHashedMediaBatch(
-      files,
-      kind,
-      assets,
-      assetFiles,
-      decode,
-      (error) => readableError(error, '文件无法解码。'),
-    )
-  }, [])
-
-  const tryInjectCandidateMedia = useCallback(async (input: {
-    started: MediaImportIdentity | null
-    title: string
-    kind: AssetKind
-    items: readonly CourseImportedAsset[]
-    nativeType?: 'image' | 'video' | 'audio'
-    mode?: 'add' | 'library'
-    position?: { x?: number; y?: number }
-  }): Promise<boolean> => {
-    const context = portsRef.current.readCandidateMediaContext()
-    if (!context) return false
-    const deduped = await dedupeCourseMediaImports(
-      input.kind,
-      context.assets,
-      context.sidecar,
-      input.items,
-    )
-    assertFreshIdentity(input.started, portsRef.current.captureIdentity(), input.title)
-    const items = input.mode === 'add' ? deduped.placements : deduped.additions
-    portsRef.current.commitCandidateMedia({
-      items: asCommitItems(items),
-      nativeType: input.nativeType,
-      mode: input.mode,
-      ...(typeof input.position?.x === 'number' ? { x: input.position.x } : {}),
-      ...(typeof input.position?.y === 'number' ? { y: input.position.y } : {}),
-    })
-    return true
-  }, [])
-
-  const importIntoCapturedLibrary = useCallback((
-    target: MediaLibraryTarget,
-    items: readonly CourseImportedAsset[],
-    title: string,
-  ) => {
-    const result = portsRef.current.importAssetsAtTarget(target, asCommitItems(items))
-    if (!result.ok) {
-      throw new UserFacingError(
-        title,
-        result.reason ?? '工程已发生变化；请重新选择文件后再试。',
-        '工程已发生变化；请重新选择文件后再试。',
-      )
-    }
-  }, [])
-
-  const selectAndImportImage = useCallback(
-    async (
-      mode: 'add' | 'library' | 'replace',
-      position?: { x?: number; y?: number },
-    ) => {
-      await portsRef.current.runBusy(async () => {
-        const started = portsRef.current.captureIdentity()
-        if (mode === 'replace') {
-          const target = portsRef.current.captureImageReplacementTarget()
-          if (!target) {
-            throw new UserFacingError(
-              '无法替换图片',
-              '当前没有可替换的 Slide 图片。',
-              '请先选择当前幻灯片中的图片，再点击“替换图片”。',
-            )
-          }
-          const file = await portsRef.current.selectImage()
-          if (!file) return
-          assertFreshIdentity(started, portsRef.current.captureIdentity(), '无法替换图片')
-          const dimensions = await readImageDimensions(file.bytes, file.mimeType)
-          assertFreshIdentity(started, portsRef.current.captureIdentity(), '无法替换图片')
-          const imported = createImageAssetImport(file, { dimensions })
-          const result = portsRef.current.replaceImageAtTarget(
-            target,
-            imported.meta,
-            imported.bytes,
-          )
-          if (!result.ok) {
-            throw new UserFacingError(
-              '无法替换图片',
-              result.reason ?? '请重新选择目标图片，再次点击“替换图片”。',
-              '请重新选择目标图片，再次点击“替换图片”。',
-            )
-          }
-          return
-        }
-
-        const libraryTarget = portsRef.current.captureLibraryTarget()
-        if (!libraryTarget) {
-          throw new UserFacingError(
-            '无法导入图片',
-            '当前没有可写入的 Course Project。',
-            '请重新打开或新建 H5 演示后再试。',
-          )
-        }
-        const librarySnapshot = portsRef.current.readMediaLibrarySnapshot()
-        const batch = await portsRef.current.selectImages()
-        if (!batch) return
-        assertFreshIdentity(started, portsRef.current.captureIdentity(), '图片批量入库已取消')
-        const prepared = await prepareSelection(
-          batch.accepted,
-          'image',
-          async (file) => {
-            const dimensions = await readImageDimensions(file.bytes, file.mimeType)
-            const imported = createImageAssetImport(file, { dimensions })
-            return { meta: imported.meta, bytes: imported.bytes }
-          },
-          librarySnapshot,
-        )
-        assertFreshIdentity(started, portsRef.current.captureIdentity(), '图片批量入库已取消')
-        const issues = [...desktopRejections(batch.rejected), ...prepared.decodeFailures]
-        const importPlan = planMediaBatchImport(
-          mode,
-          prepared.placements.length,
-          MEDIA_BATCH_CANVAS_LIMIT,
-        )
-        if (importPlan.destination === 'library') {
-          importIntoCapturedLibrary(libraryTarget, prepared.additions, '图片批量入库已取消')
-          reportBatchOutcome({
-            label: mode === 'library' ? '图片批量入库' : '图片批量添加',
-            completedCount: prepared.additions.length,
-            duplicateCount: prepared.duplicateCount,
-            issues,
-            ...(importPlan.overflowToLibrary
-              ? { libraryFallback: 'batch-size' as const }
-              : {}),
-          })
-          return
-        }
-        if (await tryInjectCandidateMedia({
-          started,
-          title: '图片批量入库已取消',
-          kind: 'image',
-          items: mode === 'library' ? prepared.additions : prepared.placements,
-          nativeType: 'image',
-          mode,
-          position,
-        })) {
-          reportBatchOutcome({
-            label: mode === 'library' ? '图片批量入库' : '图片批量添加',
-            completedCount: mode === 'library'
-              ? prepared.additions.length
-              : prepared.placements.length,
-            duplicateCount: prepared.duplicateCount,
-            issues,
-          })
-          return
-        }
-        const commitResult = commitMediaBatchImport({
-          plan: importPlan,
-          placements: prepared.placements,
-          additions: prepared.additions,
-          placeOnCanvas: (items) => (
-            portsRef.current.placeImageNodes(asCommitItems(items), position)
-          ),
-          importIntoLibrary: (items) => (
-            importIntoCapturedLibrary(libraryTarget, items, '图片批量入库已取消')
-          ),
-        })
-        reportBatchOutcome({
-          label: mode === 'library' ? '图片批量入库' : '图片批量添加',
-          completedCount: commitResult.completedCount,
-          duplicateCount: prepared.duplicateCount,
-          issues,
-          libraryFallback: commitResult.libraryFallback,
-        })
-      }, '图片读取失败。请重新选择受支持的图片。')
-    },
-    [importIntoCapturedLibrary, prepareSelection, reportBatchOutcome, tryInjectCandidateMedia],
-  )
-
-  const selectImageAsset = useCallback(async (): Promise<ImportedImageAsset | null> => {
-    const imported = await portsRef.current.runBusy(async () => {
-      const file = await portsRef.current.selectImage()
-      if (!file) return null
-      const dimensions = await readImageDimensions(file.bytes, file.mimeType)
-      return createImageAssetImport(file, { dimensions })
-    }, '图片读取失败。请重新选择受支持的图片。')
-    return imported ?? null
-  }, [])
-
-  const selectVideoAsset = useCallback(async (): Promise<MediaImportItem | null> => {
-    const imported = await portsRef.current.runBusy(async () => {
-      const select = portsRef.current.selectVideo
-      if (!select) throw new UserFacingError('无法选择视频', '当前界面不支持选择视频。', '请重新打开编辑器后再试。')
-      const file = await select()
-      if (!file) return null
-      const metadata = await readMediaMetadata(file.bytes, file.mimeType, 'video')
-      const asset = createMediaAssetImport(file, 'video', metadata)
-      return { meta: asset.meta, bytes: asset.bytes }
-    }, '视频读取失败。请重新选择受支持的 MP4 或 WebM 文件。')
-    return imported ?? null
-  }, [])
-
-  const selectAudioAsset = useCallback(async (): Promise<MediaImportItem | null> => {
-    const imported = await portsRef.current.runBusy(async () => {
-      const select = portsRef.current.selectAudio
-      if (!select) throw new UserFacingError('无法选择声音', '当前界面不支持选择声音。', '请重新打开编辑器后再试。')
-      const file = await select()
-      if (!file) return null
-      const metadata = await readMediaMetadata(file.bytes, file.mimeType, 'audio')
-      const asset = createMediaAssetImport(file, 'audio', metadata)
-      return { meta: asset.meta, bytes: asset.bytes }
-    }, '声音读取失败。请重新选择受支持的 MP3、OGG、WAV 或 M4A 文件。')
-    return imported ?? null
-  }, [])
-
-  const selectTargetMedia = useCallback(async <T extends object>(
-    input: TargetMediaSelection<T>,
-  ): Promise<PreparedTargetMedia | null> => {
-    // Freeze before entering App's action queue, not when the native picker opens.
-    const target = input.captureTarget()
-    const frozenTarget = target ? Object.freeze({ ...target }) as Readonly<T> : null
-    const started = portsRef.current.captureIdentity()
-    const context = portsRef.current.readCourseMediaContext?.()
-    const title = '媒体插入已取消'
-    const assertCurrent = () => {
-      if (!frozenTarget) throw new Error('当前没有可用的媒体插入目标。')
-      if (!started || !context) throw new Error('当前没有可写入的课程媒体资源。')
-      assertFreshIdentity(started, portsRef.current.captureIdentity(), title)
-      if (!input.isTargetCurrent(frozenTarget)) {
-        throw new UserFacingError(title, '文档或选区已变化，请重新选择媒体。', '请重新选择插入位置后再试。')
+  const batch = useCallback(async (kind: 'image' | 'video' | 'audio', mode: 'add' | 'library', position?: { x?: number; y?: number }) => {
+    await current.current.runBusy(async () => {
+      const owner = current.current, target = captureCourseInsertionTarget(owner.kernel)
+      const placement = { ...owner.capturePlacement?.(target), ...position }
+      const selected = await (kind === 'image' ? owner.selectImages() : kind === 'video' ? owner.selectVideos() : owner.selectAudios())
+      if (!selected) return
+      const issues: MediaImportIssue[] = selected.rejected.map(issue => ({ name: issue.name, message: `${issue.message} ${issue.suggestion}` }))
+      const items: MediaImportItem[] = []
+      for (const file of selected.accepted) {
+        try { items.push(namedAsset(await prepare(file, kind))) }
+        catch (error) { issues.push({ name: file.name, message: error instanceof Error ? error.message : String(error) }) }
       }
-    }
-    let failure: unknown
-    let failed = false
-    const prepared = await portsRef.current.runBusy(async () => {
-      try {
-        assertCurrent()
-        const select = input.kind === 'image' ? portsRef.current.selectImage
-          : input.kind === 'video' ? portsRef.current.selectVideo : portsRef.current.selectAudio
-        if (!select) throw new Error('当前界面不支持选择此类媒体。')
-        const file = await select()
-        if (!file) return null
-        assertCurrent()
-        const imported = input.kind === 'image'
-          ? createImageAssetImport(file, { dimensions: await readImageDimensions(file.bytes, file.mimeType) })
-          : createMediaAssetImport(file, input.kind,
-            await readMediaMetadata(file.bytes, file.mimeType, input.kind))
-        assertCurrent()
-        const deduped = await dedupeCourseMediaImports(input.kind, context!.assets, context!.sidecar, [imported])
-        assertCurrent()
-        const placement = deduped.placements[0]
-        if (!placement) throw new Error('所选媒体素材未准备完成。')
-        const source = deduped.additions.length === 0
-          ? { kind: 'existing' as const, assetId: placement.meta.id }
-          : { kind: 'new' as const, meta: placement.meta, bytes: placement.bytes }
-        return { asset: placement.meta, bytes: placement.bytes, source, assertCurrent }
-      } catch (error) {
-        // runBusy reports the failure; preserve rejection for Flow/Slide callers.
-        failed = true
-        failure = error
+      let completed = 0
+      if (items.length) {
+        if (mode === 'library') {
+          if (kind === 'audio') await importCourseSounds(owner.kernel, target, items)
+          else await importCourseMediaLibrary(owner.kernel, target, items)
+          completed = items.length
+        }
+        else {
+          try { completed = (await insertCourseMedia(owner.kernel, target, items, placement)).instanceIds.length }
+          catch (error) {
+            // Keep successfully decoded source resources when placement reports a local failure.
+            if (kind !== 'image') await importCourseMediaLibrary(owner.kernel, target, items)
+            issues.push({ name: '插入', message: `${error instanceof Error ? error.message : String(error)}${kind !== 'image' ? '；有效素材已保存到原工程媒体库' : ''}` })
+          }
+        }
+      }
+      summarize(`${kind === 'image' ? '图片' : kind === 'video' ? '视频' : '音频'}${mode === 'library' ? '入库' : '添加'}`, completed, issues)
+    }, '媒体文件读取或提交失败，原内容保留。')
+  }, [summarize])
+  const selectAndImportImage = useCallback(async (mode: 'add' | 'library' | 'replace', position?: { x?: number; y?: number }) => {
+    if (mode !== 'replace') return batch('image', mode, position)
+    await current.current.runBusy(async () => {
+      const owner = current.current, target = captureCourseInsertionTarget(owner.kernel)
+      const selected = await owner.selectImage(); if (!selected) return
+      await replaceCourseImageAtTarget(owner.kernel, target, namedAsset(await prepare(selected, 'image')))
+      owner.commitStatus('图片已替换，原位置、大小与其他对象保持')
+    }, '图片替换失败，原图仍保留。')
+  }, [batch])
+  const pickAsset = useCallback(async (kind: 'image' | 'video' | 'audio'): Promise<MediaImportItem | null> => {
+    return await current.current.runBusy(async () => {
+      const owner = current.current
+      const selected = kind === 'image' ? await owner.selectImage() : kind === 'video' ? await owner.selectVideo?.() : await owner.selectAudio?.()
+      return selected ? namedAsset(await prepare(selected, kind)) : null
+    }, '媒体文件读取失败。') ?? null
+  }, [])
+  const selectTargetMedia = useCallback(async <T extends object>(input: TargetMediaSelection<T>): Promise<PreparedTargetMedia | null> => {
+    const target = input.captureTarget(); if (!target) return null
+    const item = await pickAsset(input.kind); if (!item) return null
+    const assertCurrent = () => { if (!input.isTargetCurrent(target)) throw new Error('捕获的原媒体目标已失效，请重新选择文件') }
+    assertCurrent()
+    return { asset: { ...item.meta }, bytes: item.bytes,
+      source: { kind: 'new', meta: item.meta, bytes: item.bytes }, assertCurrent }
+  }, [pickAsset])
+  const importWorkspaceMedia = useCallback(async (request: WorkspaceMediaDropRequest) => {
+    try {
+      const owner = current.current
+      if (!request.target.documentId) throw new Error('拖入目标没有正式文档')
+      const target = request.target.captured
+      if (target.project.id !== request.target.projectId || target.project.revision !== request.target.revision
+        || target.surfaceId !== request.target.surfaceId || target.documentId !== request.target.documentId) throw new Error('原拖入目标不一致，请重新拖入')
+      const items: MediaImportItem[] = []
+      for (const file of request.items) items.push(namedAsset(await prepare(file, file.mediaKind)))
+      if (!items.length) return { ok: false, reason: '没有可导入的媒体' }
+      const options = request.placement.surface === 'flow' ? { afterInstanceId: request.placement.afterBlockId } : request.placement
+      try { await insertCourseMedia(owner.kernel, target, items, options) }
+      catch (error) {
+        if (items.every(item => item.meta.kind !== 'image')) await importCourseMediaLibrary(owner.kernel, target, items)
         throw error
       }
-    }, '媒体读取失败。请重新选择受支持的文件。')
-    if (failed) throw failure
-    return prepared ?? null
+      return { ok: true, assetId: items[0].meta.id }
+    } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : String(error) } }
   }, [])
-
-  const selectAndImportAudio = useCallback(async () => {
-    await portsRef.current.runBusy(async () => {
-      const started = portsRef.current.captureIdentity()
-      const librarySnapshot = portsRef.current.readMediaLibrarySnapshot()
-      const batch = await portsRef.current.selectAudios()
-      if (!batch) return
-      assertFreshIdentity(started, portsRef.current.captureIdentity(), '声音批量入库已取消')
-      const prepared = await prepareSelection(
-        batch.accepted,
-        'audio',
-        async (file) => {
-          const metadata = await readMediaMetadata(file.bytes, file.mimeType, 'audio')
-          const imported = createMediaAssetImport(file, 'audio', metadata)
-          return { meta: imported.meta, bytes: imported.bytes }
-        },
-        librarySnapshot,
-      )
-      assertFreshIdentity(started, portsRef.current.captureIdentity(), '声音批量入库已取消')
-      if (await tryInjectCandidateMedia({
-        started,
-        title: '声音批量入库已取消',
-        kind: 'audio',
-        items: prepared.additions,
-        nativeType: 'audio',
-        mode: 'library',
-      })) {
-        reportBatchOutcome({
-          label: '声音批量入库',
-          completedCount: prepared.additions.length,
-          duplicateCount: prepared.duplicateCount,
-          issues: [...desktopRejections(batch.rejected), ...prepared.decodeFailures],
-        })
-        return
-      }
-      portsRef.current.importSounds(asCommitItems(prepared.additions))
-      reportBatchOutcome({
-        label: '声音批量入库',
-        completedCount: prepared.additions.length,
-        duplicateCount: prepared.duplicateCount,
-        issues: [...desktopRejections(batch.rejected), ...prepared.decodeFailures],
-      })
-    }, '声音读取失败。请重新选择受支持的声音文件。')
-  }, [prepareSelection, reportBatchOutcome, tryInjectCandidateMedia])
-
-  const selectAndInsertFlowAudio = useCallback(async () => {
-    await portsRef.current.runBusy(async () => {
-      const started = portsRef.current.captureFlowAudioTarget?.() ?? null
-      if (!started || !portsRef.current.placeFlowAudioNodes) {
-        throw new UserFacingError(
-          '无法插入音频',
-          '当前不是可编辑的 Flow 文档页。',
-          '请切换到 Flow 当前文档页后再试。',
-        )
-      }
-      const librarySnapshot = portsRef.current.readMediaLibrarySnapshot()
-      const batch = await portsRef.current.selectAudios()
-      if (!batch) return
-      assertFreshIdentity(started, portsRef.current.captureFlowAudioTarget?.() ?? null, '音频插入已取消')
-      const prepared = await prepareSelection(
-        batch.accepted,
-        'audio',
-        async (file) => {
-          const metadata = await readMediaMetadata(file.bytes, file.mimeType, 'audio')
-          const imported = createMediaAssetImport(file, 'audio', metadata)
-          return { meta: imported.meta, bytes: imported.bytes }
-        },
-        librarySnapshot,
-      )
-      assertFreshIdentity(started, portsRef.current.captureFlowAudioTarget?.() ?? null, '音频插入已取消')
-      const placed = prepared.placements.length > 0
-        ? await portsRef.current.placeFlowAudioNodes!(asCommitItems(prepared.placements))
-        : { completedCount: 0, issues: [] }
-      reportBatchOutcome({
-        label: 'Flow 正文音频插入',
-        completedCount: placed.completedCount,
-        duplicateCount: prepared.duplicateCount,
-        issues: [...desktopRejections(batch.rejected), ...prepared.decodeFailures, ...placed.issues],
-      })
-    }, '音频读取失败。请重新选择受支持的声音文件。')
-  }, [prepareSelection, reportBatchOutcome])
-
-  const importWorkspaceMedia = useCallback(async (request: WorkspaceMediaDropRequest): Promise<{ ok: boolean; reason?: string; assetId?: string; soundId?: string }> => {
-    if (request.items.length !== 1) return { ok: false, reason: '请一次拖入一个媒体文件；多文件尚不能作为同一笔插入。' }
-    const file = request.items[0]!
-    const matchesTarget = () => {
-      const current = portsRef.current.captureIdentity()
-      return current?.projectId === request.target.projectId
-        && current.revision === request.target.revision
-        && current.locationId === request.target.locationId
-        && current.surfaceId === request.target.surfaceId
-        && current.sessionGeneration === request.target.sessionGeneration
-        && portsRef.current.captureDocumentId?.() === request.target.documentId
-        && portsRef.current.captureSurfaceKind?.() === request.placement.surface
-    }
-    if (!matchesTarget()) return { ok: false, reason: '文档或插入位置已改变，请重新拖入媒体。' }
-    const started = portsRef.current.captureIdentity()
-    let failure = '媒体拖入未完成，请重新选择目标。'
-    const result = await portsRef.current.runBusy(async () => {
-      try {
-        if (file.bytes.byteLength === 0 || !file.workspaceId || !file.entryId) {
-          throw new Error('工作空间媒体文件无效，请重新从资源树拖入。')
-        }
-        const snapshot = portsRef.current.readMediaLibrarySnapshot()
-        if (!snapshot) throw new Error('当前没有可写入的课程媒体资源。')
-        const imported = file.mediaKind === 'image'
-          ? createImageAssetImport(file, { dimensions: await readImageDimensions(file.bytes, file.mimeType) })
-          : createMediaAssetImport(file, file.mediaKind, await readMediaMetadata(file.bytes, file.mimeType, file.mediaKind))
-        const deduped = await dedupeCourseMediaImports(file.mediaKind, snapshot.assets, freezeCourseAssetSidecar(snapshot.files), [imported])
-        if (!matchesTarget()) throw new Error('文档或插入位置已改变，请重新拖入媒体。')
-        assertFreshIdentity(started, portsRef.current.captureIdentity(), '媒体拖入已取消')
-        const item = asCommitItems(deduped.placements)[0]
-        if (!item) throw new Error('媒体文件没有可插入的内容。')
-        if (request.placement.surface === 'flow') {
-          const placed = portsRef.current.placeFlowMediaAt?.(item, request.placement.afterBlockId)
-          if (!placed?.ok) throw new Error(placed?.reason ?? 'Flow 正文未接受媒体插入。')
-        } else if (file.mediaKind === 'audio') {
-          const soundIds = portsRef.current.importSounds([item])
-          if (soundIds.length !== 1 || !soundIds[0]) throw new Error('当前文档未接受声音库导入。')
-          return { ok: true as const, assetId: item.meta.id, soundId: soundIds[0] }
-        } else if (file.mediaKind === 'image') {
-          if (portsRef.current.placeImageNodes([item], request.placement).length !== 1) throw new Error('当前画布未接受图片插入。')
-        } else if (file.mediaKind === 'video') {
-          if (portsRef.current.placeVideoNodes([item], request.placement).length !== 1) throw new Error('当前画布未接受视频插入。')
-        }
-        return { ok: true as const, assetId: item.meta.id }
-      } catch (error) {
-        failure = error instanceof Error ? error.message : '媒体拖入未完成。'
-        throw error
-      }
-    }, '媒体拖入失败。请重新从资源树拖入。')
-    return result ?? { ok: false, reason: failure }
-  }, [])
-
-  const selectAndImportVideo = useCallback(async (
-    mode: 'add' | 'library',
-    position?: { x?: number; y?: number },
-  ) => {
-    await portsRef.current.runBusy(async () => {
-      const started = portsRef.current.captureIdentity()
-      const libraryTarget = portsRef.current.captureLibraryTarget()
-      if (!libraryTarget) {
-        throw new UserFacingError(
-          '无法导入视频',
-          '当前没有可写入的 Course Project。',
-          '请重新打开或新建 H5 演示后再试。',
-        )
-      }
-      const librarySnapshot = portsRef.current.readMediaLibrarySnapshot()
-      const batch = await portsRef.current.selectVideos()
-      if (!batch) return
-      assertFreshIdentity(started, portsRef.current.captureIdentity(), '视频批量入库已取消')
-      const prepared = await prepareSelection(
-        batch.accepted,
-        'video',
-        async (file) => {
-          const metadata = await readMediaMetadata(file.bytes, file.mimeType, 'video')
-          const imported = createMediaAssetImport(file, 'video', metadata)
-          return { meta: imported.meta, bytes: imported.bytes }
-        },
-        librarySnapshot,
-      )
-      assertFreshIdentity(started, portsRef.current.captureIdentity(), '视频批量入库已取消')
-      const issues = [...desktopRejections(batch.rejected), ...prepared.decodeFailures]
-      const importPlan = planMediaBatchImport(
-        mode,
-        prepared.placements.length,
-        MEDIA_BATCH_CANVAS_LIMIT,
-      )
-      if (importPlan.destination === 'library') {
-        importIntoCapturedLibrary(libraryTarget, prepared.additions, '视频批量入库已取消')
-        reportBatchOutcome({
-          label: mode === 'add' ? '视频批量添加' : '视频批量入库',
-          completedCount: prepared.additions.length,
-          duplicateCount: prepared.duplicateCount,
-          issues,
-          ...(importPlan.overflowToLibrary
-            ? { libraryFallback: 'batch-size' as const }
-            : {}),
-        })
-        return
-      }
-      if (await tryInjectCandidateMedia({
-        started,
-        title: '视频批量入库已取消',
-        kind: 'video',
-        items: mode === 'library' ? prepared.additions : prepared.placements,
-        nativeType: 'video',
-        mode,
-        position,
-      })) {
-        reportBatchOutcome({
-          label: mode === 'add' ? '视频批量添加' : '视频批量入库',
-          completedCount: mode === 'add'
-            ? prepared.placements.length
-            : prepared.additions.length,
-          duplicateCount: prepared.duplicateCount,
-          issues,
-        })
-        return
-      }
-      const commitResult = commitMediaBatchImport({
-        plan: importPlan,
-        placements: prepared.placements,
-        additions: prepared.additions,
-        placeOnCanvas: (items) => (
-          portsRef.current.placeVideoNodes(asCommitItems(items), position)
-        ),
-        importIntoLibrary: (items) => (
-          importIntoCapturedLibrary(libraryTarget, items, '视频批量入库已取消')
-        ),
-      })
-      reportBatchOutcome({
-        label: mode === 'add' ? '视频批量添加' : '视频批量入库',
-        completedCount: commitResult.completedCount,
-        duplicateCount: prepared.duplicateCount,
-        issues,
-        libraryFallback: commitResult.libraryFallback,
-      })
-    }, '视频读取失败。请重新选择 MP4 或 WebM 文件。')
-  }, [importIntoCapturedLibrary, prepareSelection, reportBatchOutcome, tryInjectCandidateMedia])
-
-  const clearBatchSummary = useCallback(() => {
-    setBatchOperationSummary(null)
-  }, [])
-
   const replaceSelectedVideo = useCallback(async () => {
-    await portsRef.current.runBusy(async () => {
-      const select = portsRef.current.selectVideo, replace = portsRef.current.replaceSelectedVideo
-      if (!select || !replace) throw new UserFacingError('无法替换视频', '当前界面不支持替换视频。', '请在演示页中选中视频后再试。')
-      const started = portsRef.current.captureIdentity()
-      const file = await select()
-      if (!file) return
-      assertFreshIdentity(started, portsRef.current.captureIdentity(), '无法替换视频')
-      const metadata = await readMediaMetadata(file.bytes, file.mimeType, 'video')
-      assertFreshIdentity(started, portsRef.current.captureIdentity(), '无法替换视频')
-      const imported = createMediaAssetImport(file, 'video', metadata)
-      const result = replace(imported.meta, imported.bytes)
-      if (!result.ok) throw new UserFacingError('无法替换视频', result.reason ?? '视频替换未完成。', '请重新选中当前演示页中的视频，再点击“替换视频”。')
-      portsRef.current.commitStatus('视频已替换，位置和大小保持不变')
-    }, '视频替换失败，当前视频仍保留。')
+    await current.current.runBusy(async () => {
+      const owner = current.current, target = captureCourseInsertionTarget(owner.kernel)
+      const selected = await owner.selectVideo?.(); if (!selected) return
+      const item = namedAsset(await prepare(selected, 'video'))
+      await replaceCourseMediaAtTarget(owner.kernel, target, item)
+      owner.commitStatus('视频已替换，原播放参数、位置与其他对象保持')
+    }, '视频替换失败，原视频保留。')
   }, [])
-
-  return {
-    selectAndImportImage,
-    selectAndImportVideo,
-    selectAndImportAudio,
-    replaceSelectedVideo,
-    selectAndInsertFlowAudio,
-    importWorkspaceMedia,
-    selectImageAsset,
-    selectVideoAsset,
-    selectAudioAsset,
-    selectTargetMedia,
-    batchOperationSummary,
-    clearBatchSummary,
-  }
+  return { selectAndImportImage,
+    selectAndImportVideo: (mode, position) => batch('video', mode, position), selectAndImportAudio: () => batch('audio', 'library'),
+    replaceSelectedVideo, selectAndInsertFlowAudio: () => batch('audio', 'add'), importWorkspaceMedia,
+    selectImageAsset: () => pickAsset('image'), selectVideoAsset: () => pickAsset('video'), selectAudioAsset: () => pickAsset('audio'),
+    selectMediaAsset: pickAsset,
+    selectTargetMedia, batchOperationSummary, clearBatchSummary: () => setBatchOperationSummary(null) }
 }

@@ -2,17 +2,16 @@ import type { DocumentSnapshot } from '../../shared/workbench/document'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { APP_NAME } from '../../shared/constants'
 import type { SlideCanvasSize } from '../../shared/slideCanvas'
-import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
-import type { ComponentPackageData } from '../../shared/componentTypes'
+import type { CourseProjectV10 } from '../../shared/contracts/component-platform/project'
+import type { DocumentResources } from '../../shared/workbench/document'
 import type {
   OpenProjectFileResult,
   RecentProjectEntry,
   RecoveryProjectResult,
 } from '../../shared/ipcTypes'
 export interface CanonicalCourseProjectSnapshot {
-  readonly project: CourseProjectDocument
-  readonly assetFiles: Record<string, Uint8Array>
-  readonly componentPackages: Record<string, ComponentPackageData>
+  readonly project: CourseProjectV10
+  readonly resources: DocumentResources
 }
 
 export type CourseProjectDraftPreparation<TToken> =
@@ -43,24 +42,22 @@ export type CourseProjectRecoveryCapture =
 export interface CourseProjectLifecycleIdentity {
   readonly projectId: string
   readonly revision: number
-  readonly sessionGeneration: number
-  readonly epoch: number
+  readonly documentId: string
+  readonly epoch: string
 }
 
 export interface CourseProjectOpenedLoad {
-  readonly project: CourseProjectDocument
+  readonly project: CourseProjectV10
   readonly path: string | null
-  readonly assetFiles: Record<string, Uint8Array>
-  readonly componentPackages: Record<string, ComponentPackageData>
+  readonly resources: DocumentResources
   readonly dirty?: boolean
   readonly statusMessage?: string
 }
 
 /** The content of a course that does not exist yet as a document. */
 export interface CourseProjectContent {
-  project: CourseProjectDocument
-  assetFiles: Record<string, Uint8Array>
-  componentPackages: Record<string, ComponentPackageData>
+  project: CourseProjectV10
+  resources: DocumentResources
 }
 
 export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
@@ -74,7 +71,7 @@ export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
     save(saveAs?: boolean): Promise<DocumentSnapshot | null>
     drain(): Promise<DocumentSnapshot>
   }
-  captureIdentity(): Omit<CourseProjectLifecycleIdentity, 'epoch'>
+  captureIdentity(): CourseProjectLifecycleIdentity
   prepareDraft?(): CourseProjectDraftPreparation<TDraftToken>
   acknowledgeSaved?(path: string, token: TDraftToken): boolean
   captureRecoverySnapshot?(): CourseProjectRecoveryCapture
@@ -153,7 +150,7 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
   const refresh = useCallback(async () => { try { setRecentProjects(await ref.current.listRecentProjects()) } catch { ref.current.reportError('最近工程列表暂不可读取') } }, [])
   const same = (before: ReturnType<typeof ports.captureIdentity>) => {
     const now = ref.current.captureIdentity()
-    return before.projectId === now.projectId && before.revision === now.revision && before.sessionGeneration === now.sessionGeneration
+    return before.projectId === now.projectId && before.revision === now.revision && before.documentId === now.documentId && before.epoch === now.epoch
   }
   const replace = useCallback(async (work: () => Promise<void>, options?: CourseProjectReplacementOptions): Promise<boolean> => {
     const result = await ref.current.runBusy(async () => {
@@ -210,9 +207,9 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
         if (!saved || !snapshot || saved.documentId !== snapshot.documentId || options?.isCurrent?.() === false) return false
         if (saved.binding.kind !== 'file') return false
         const current = service().snapshot()
-        if (current?.documentId !== saved.documentId) return false
-        await ref.current.onProjectSaved?.({ projectId: saved.model.kind === 'course-v9' ? saved.model.project.id : '', path: saved.binding.path, previousPath, saveAs })
-        const allSaved = !current.dirty && !ref.current.hasUnsavedChanges()
+        await ref.current.onProjectSaved?.({ projectId: saved.model.kind === 'course-v10' ? saved.model.project.id : '', path: saved.binding.path, previousPath, saveAs })
+        const allSaved = !saved.dirty && (current?.documentId === saved.documentId
+          ? !current.dirty && !ref.current.hasUnsavedChanges() : true)
         ref.current.commitStatus(allSaved ? `已保存到 ${saved.binding.path}` : '已保存启动保存时的版本；后续修改尚未保存')
         await refresh()
         return allSaved

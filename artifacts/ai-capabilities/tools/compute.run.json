@@ -1,0 +1,32 @@
+{
+  "description": "在已配置的受限 Python 后端异步运行代码，返回持久 job；仅能看到显式给定的 scratch，无宿主文件/网络。未配置固定镜像时明确失败。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "code": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "outputNames": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "code"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "compute.run",
+    "targetKinds": []
+  },
+  "name": "compute.run",
+  "version": 1
+}

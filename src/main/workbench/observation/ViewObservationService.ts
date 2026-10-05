@@ -26,11 +26,11 @@ export class ViewObservationService implements ObservationServicePort {
   async observe(input: Parameters<ObservationServicePort['observe']>[0]): Promise<ObservationResult> {
     const identity: ViewObservationIdentity = { documentId: input.documentId, epoch: input.epoch,
       revision: input.revision, locationId: input.locationId,
+      ...(input.stateId === undefined ? {} : { stateId: input.stateId }),
       ...(input.viewGeneration === undefined ? {} : { viewGeneration: input.viewGeneration }) }
     if (input.signal?.aborted || this.stopped.has(input.runId)) throw new Error('观察已取消')
     const snapshot = await this.options.snapshot(input.documentId)
     assertFresh(snapshot, identity, input.projectId)
-    const frozen = structuredClone(snapshot)
     let capture: ViewObservationCapture | null = null
     let source: ObservationResult['source'] = 'isolated-published'
     // A missing generation cannot prove the mounted host belongs to this view.

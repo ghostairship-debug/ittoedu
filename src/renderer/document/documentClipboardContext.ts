@@ -6,6 +6,9 @@ import type { ComponentPackageData, EmbeddedComponentPackageMeta } from '../../s
 import { documentResourcesSchema, type DocumentResources } from '../../shared/document/resources'
 import { componentPackageMeta } from '../../shared/componentPackageMeta'
 import { parseComponentPackageFiles } from '../../core/drivers/codecs/importComponentPackage'
+import { courseProjectV10Schema } from '../../shared/contracts/component-platform/schema'
+import { extractComponentLibraryEntry } from '../../core/components/library'
+import type { CourseObjectClipboardSource } from '../composition/crossSurfaceCommands'
 
 const bytesSchema = z.array(z.number().int().min(0).max(255))
 const contextSchema = z.object({
@@ -17,6 +20,57 @@ const contextSchema = z.object({
   }).strict() }).strict()),
 }).strict()
 export type DocumentClipboardContext = z.infer<typeof contextSchema>
+
+/** Formal V10 bytes are separate from the PM manifest and native file packages. */
+const courseContextSchema = z.object({
+  kind: z.literal('cw-course-v10-resources'),
+  documentId: z.string().optional(),
+  project: courseProjectV10Schema,
+  roots: z.array(z.string()),
+  resources: z.object({
+    assets: z.record(z.string(), bytesSchema),
+    components: z.record(z.string(), z.record(z.string(), bytesSchema)),
+  }).strict(),
+  matrices: z.record(z.string(), z.tuple([z.number(), z.number(), z.number(), z.number(), z.number(), z.number()])).optional(),
+  diagnostics: z.array(z.string()),
+}).strict()
+export type CourseDocumentClipboardContext = z.infer<typeof courseContextSchema>
+
+/** Capture once from the source document; library extraction owns the closure. */
+export function createCourseDocumentClipboardContext(source: CourseObjectClipboardSource): CourseDocumentClipboardContext {
+  const { entry, diagnostics } = source.roots.length ? extractComponentLibraryEntry(source.project, source.resources, {
+    id: `clipboard_${crypto.randomUUID()}`, title: '复制正文对象', rootIds: [...source.roots],
+  }) : { entry: { resources: { assets: {}, components: {} } }, diagnostics: [] }
+  return courseContextSchema.parse({
+    kind: 'cw-course-v10-resources', documentId: source.documentId,
+    project: structuredClone(source.project), roots: [...source.roots],
+    resources: {
+      assets: Object.fromEntries(Object.entries(entry.resources.assets).map(([id, bytes]) => [id, Array.from(bytes)])),
+      components: Object.fromEntries(Object.entries(entry.resources.components).map(([id, files]) => [id,
+        Object.fromEntries(Object.entries(files).map(([path, bytes]) => [path, Array.from(bytes)]))])),
+    },
+    matrices: source.matrices, diagnostics: diagnostics.map(value => value.message),
+  })
+}
+
+export function readCourseDocumentClipboardContext(input: unknown): CourseObjectClipboardSource & { diagnostics: string[] } {
+  const context = courseContextSchema.parse(input)
+  return {
+    documentId: context.documentId, project: context.project, roots: context.roots, matrices: context.matrices,
+    resources: {
+      assets: Object.fromEntries(Object.entries(context.resources.assets).map(([id, bytes]) => [id, Uint8Array.from(bytes)])),
+      components: Object.fromEntries(Object.entries(context.resources.components).map(([id, files]) => [id,
+        Object.fromEntries(Object.entries(files).map(([path, bytes]) => [path, Uint8Array.from(bytes)]))])),
+    },
+    diagnostics: context.diagnostics,
+  }
+}
+
+export function selectCourseDocumentClipboardContext(input: unknown, roots: readonly string[]): CourseDocumentClipboardContext {
+  const source = readCourseDocumentClipboardContext(input)
+  if (roots.some(id => !source.roots.includes(id))) throw new Error('复制正文对象不在捕获的资源闭包中')
+  return createCourseDocumentClipboardContext({ ...source, roots })
+}
 type AssetRef = DocumentResources['assets'][number]
 type ComponentRef = DocumentResources['components'][number]
 

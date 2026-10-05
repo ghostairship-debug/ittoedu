@@ -1,62 +1,57 @@
-import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
-import { parseComponentPackageFiles } from '../../../core/drivers/codecs/importComponentPackage'
-import { buildPublishedCourseV2Payload, collectPublishedCourseComponentKeys } from '../../export/course/buildPublishedCourse'
-import { createPublishedCourseSession } from '../../../player/surfaces/publishedDynamicHosts'
-import { waitForPublishedAnimationsSettled, waitForPublishedObservationReady } from '../../../player/surfaces/publishedCapture'
+import type { PublishedCourseV3 } from '../../../shared/contracts/component-platform/published'
+import { mountPublishedCourseV3 } from '../../../player/componentPlatform/publishedPlayer'
+import { prepareComponentOutputRegion } from '../../../player/componentPlatform/outputCapture'
 import { installBundledFontFaces } from '../../../shared/fonts/installBundledFontFaces'
 import { ensureBundledFonts } from '../../../shared/fonts/ensureBundledFonts'
-import './dynamicFallbackWorker'
 
 export interface ObservationWorkerInput {
-  project: CourseProjectDocument
+  published: PublishedCourseV3
+  /** The observation protocol retains its existing name; this is a V10 surface id. */
   locationId: string
-  assets: Record<string, string>
-  assetResources: Record<string, { url: string; byteLength: number }>
-  components: Record<string, Record<string, string>>
-  componentResources?: Record<string, Record<string, { url: string; byteLength: number }>>
+  stateId?: string | null
+  diagnostics?: string[]
+  bootstrapBaseUrl?: string
+  instanceId?: string
+  spatialFrameId?: string
 }
-export interface ObservationWorkerResult { locationId: string; structure: string[]; diagnostics: string[] }
+export interface ObservationWorkerResult { locationId: string; stateId: string | null; structure: string[]; diagnostics: string[]; rect?: { x: number; y: number; width: number; height: number } }
 
 function decode(value: string): Uint8Array { return Uint8Array.from(atob(value), character => character.charCodeAt(0)) }
 
-/** Fixed product entrypoint. Main captures pixels outside this renderer after readiness. */
+/** Main captures the real pixels of this fixed isolated renderer entrypoint. */
 export async function renderObservationSnapshot(input: ObservationWorkerInput): Promise<ObservationWorkerResult> {
-  if (!input.project.locations.some(location => location.id === input.locationId)) throw new Error('观察目标页不存在')
+  const surface = input.published.surfaces.find(value => value.id === input.locationId)
+  if (!surface) throw new Error('观察目标页不存在')
   installBundledFontFaces()
   await ensureBundledFonts()
-  const assetFiles = Object.fromEntries(Object.entries(input.assets).map(([key, bytes]) => [key, decode(bytes)]))
-  const components = Object.fromEntries(await Promise.all([...collectPublishedCourseComponentKeys(input.project)].map(async key => {
-    const source = input.componentResources?.[key]
-    const files = source ? Object.fromEntries(await Promise.all(Object.entries(source).map(async ([name, resource]) => {
-      const response = await fetch(resource.url)
-      if (!response.ok) throw new Error(`组件文件不可读取：${name}`)
-      const bytes = new Uint8Array(await response.arrayBuffer())
-      if (bytes.byteLength !== resource.byteLength) throw new Error(`组件文件长度已改变：${name}`)
-      return [name, bytes] as const
-    }))) : Object.fromEntries(Object.entries(input.components[key] ?? {}).map(([name, bytes]) => [name, decode(bytes)]))
-    return [key, parseComponentPackageFiles(files)] as const
-  })))
-  const payload = buildPublishedCourseV2Payload({ project: input.project, assetFiles, assetResources: input.assetResources, components })
-  const root = document.createElement('div')
+  const root = document.createElement('div'), size = surface.designSize ?? { width: 1280, height: 720 }
   root.id = 'observation-root'
-  Object.assign(root.style, { width: '1280px', height: '720px', overflow: 'hidden', position: 'fixed', inset: '0' })
+  Object.assign(root.style, { width: `${size.width}px`, height: `${size.height}px`, overflow: 'hidden', position: 'fixed', inset: '0' })
   document.body.replaceChildren(root)
-  const session = createPublishedCourseSession(payload, { initialLocationId: input.locationId })
+  const diagnostics = [...(input.diagnostics ?? [])]
+  const player = await mountPublishedCourseV3(input.published, root, { capture: true, keyboardNavigation: false,
+    initialSurfaceId: input.locationId, initialStateId: input.stateId ?? null, report: message => diagnostics.push(message),
+    componentBootstrap: input.bootstrapBaseUrl ? {
+      async createComponentBootstrap({ leaseId, html }) { const url = new URL(encodeURIComponent(leaseId), input.bootstrapBaseUrl); url.searchParams.set('html', html); return { leaseId, url: url.href } },
+      async releaseComponentBootstrap() {},
+    } : undefined })
   try {
-    await session.mount(root)
-    // This read-only route bypasses teaching navigation guards in the isolated host.
-    await session.goToObservationTarget(input.locationId)
-    await waitForPublishedObservationReady(root)
-    // Entrance animations and transitions finish before the frame is taken, so the page is seen as it settles.
-    await waitForPublishedAnimationsSettled(root)
-    const actual = session.navigator.current?.locationId
-    if (actual !== input.locationId) throw new Error('播放器未停留在请求的目标页')
-    const location = input.project.locations.find(item => item.id === input.locationId)!
-    return { locationId: actual, structure: [location.label, location.kind], diagnostics: [] }
-  } catch (error) {
-    await session.destroy()
-    throw error
-  }
+    const rect = await prepareComponentOutputRegion({ payload: input.published, root, player, surfaceId: input.locationId,
+      instanceId: input.instanceId, spatialFrameId: input.spatialFrameId })
+    const actual = player.navigation.read().locationId, stateId = player.navigation.currentStateId()
+    if (actual !== input.locationId || stateId !== (input.stateId ?? null)) throw new Error('播放器未停留在请求的页面和状态')
+    const structure = [surface.title, surface.kind]
+    const visit = (ids: readonly string[]) => { for (const id of ids) {
+      const instance = input.published.instances[id]
+      if (!instance) continue
+      structure.push(instance.name ?? input.published.definitions[instance.definitionId]?.title ?? id)
+      visit(instance.childIds ?? [])
+    } }
+    visit([...input.published.global.underlay, ...surface.childIds, ...input.published.global.overlay])
+    // The owner destroys the isolated BrowserWindow after capture; keep this world
+    // mounted until those pixels have actually been read.
+    return { locationId: actual, stateId, structure, diagnostics, ...(input.instanceId ? { rect } : {}) }
+  } catch (error) { await player.dispose(); throw error }
 }
 
 Object.defineProperty(window, '__COURSEWARE_OBSERVATION_RUN__', {

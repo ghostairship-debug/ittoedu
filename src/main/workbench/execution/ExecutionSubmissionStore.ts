@@ -41,13 +41,17 @@ export class ExecutionSubmissionStore {
       || !['queued', 'starting', 'accepted', 'failed', 'cancelled'].includes(record.state)
       || !['queue', 'adjust'].includes(record.mode) || !record.digest || !record.start
       || record.start.taskId !== record.submissionId || record.start.conversationId !== record.conversationId
-      || !Array.isArray(record.documents) || !Array.isArray(record.attachments) || !Array.isArray(record.attachmentIds)
+      || !Array.isArray(record.documents) || !Array.isArray(record.start.documents) || !Array.isArray(record.attachments) || !Array.isArray(record.attachmentIds)
       || !Number.isSafeInteger(record.createdAt) || !Number.isSafeInteger(record.updatedAt)) throw new Error('执行提交恢复记录无效')
     if (record.contentOutput) executionContentOutputSchema.parse(record.contentOutput)
     if (record.start.contentOutput) executionContentOutputSchema.parse(record.start.contentOutput)
-    // The public target remains the user's original selection; explicit continuation may rebase its range in start.
+    // Public retry retains the original selection; Main may rebind the same indexed document in start.
+    const documentIndex = record.contentOutput ? record.documents.findIndex(document => document.documentId === record.contentOutput!.documentId) : -1
+    const continuedDocument = Boolean(record.retryOfRunId) && documentIndex >= 0
+      && record.documents.length === record.start.documents.length
+      && record.start.documents[documentIndex]?.documentId === record.start.contentOutput?.documentId
     if (Boolean(record.contentOutput) !== Boolean(record.start.contentOutput)
-      || record.contentOutput?.documentId !== record.start.contentOutput?.documentId)
+      || record.contentOutput?.documentId !== record.start.contentOutput?.documentId && !continuedDocument)
       throw new Error('正文改写的冻结输出目标不一致')
     return record
   }

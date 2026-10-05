@@ -1,0 +1,38 @@
+{
+  "description": "把检索到的 Component API 5 条目及其实际资源插入课件。path 使用 project.list/read 返回的页面路径或对象路径；页面表示末尾插入，对象表示在该对象后插入。软件生成身份与处理依赖，一次撤销可恢复。未确认信任的目录需在组件库面板确认。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "packageId": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "path": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "project": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "version": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "packageId",
+      "path"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "asset.use",
+    "targetKinds": []
+  },
+  "name": "asset.use",
+  "version": 1
+}

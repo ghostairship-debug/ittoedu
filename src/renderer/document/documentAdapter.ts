@@ -127,7 +127,7 @@ export function renewEditorIdentities(doc: PMNode, createId: () => string, copie
     const ids = new Map(inherited)
     const renew = (id: string) => { const value = createId(); ids.set(id, value); return value }
     if ('id' in attrs) {
-      const duplicate = !attrs.id || copied || seen.has(attrs.id)
+      const duplicate = attrs.data?.type !== 'course-instance' && (!attrs.id || copied || seen.has(attrs.id))
       if (duplicate) {
         attrs.id = renew(attrs.id)
         attrs.data = structuredClone(attrs.data)

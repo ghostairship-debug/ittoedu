@@ -1,50 +1,43 @@
 # 在工程里创作
 
-这些是正式课件内容的文件视图，不是磁盘上另一份 HTML。读取包含教师的当前修改；软件负责解析、身份、资源、提交与撤销。
+这些是正式课件内容的文件视图。读取包含教师的当前修改，软件负责身份、资源、事务和撤销；页面顺序变化后路径也可能变化，使用本次 `project.list/read` 返回的路径。
 
-| 路径 | 内容 |
+已有工程先 `project.list`。新课用 `file.create {name:"四季的成因.h5lesson",kind:"course-v10"}` 新建一次，软件建立空工程和教师控制台。已有用户指定课件则继续使用，不创建同名文件重做。仅有一个课件时省略 `project`；多个课件时填写实际文件名或路径。
+
+| 文件视图 | 内容与作用 |
 |---|---|
-| `theme.css` | 整课共享样式，页面不必复制 |
-| `slides/01-导入.html` | 一页一个演示场景，序号表示顺序 |
-| `docs/讲义.html` | 连续正文，自然高度，标题提供阅读导航 |
-| `spaces/知识旅程.html` | 空间布景和镜头停靠点，适合知识地图与镜头叙事 |
-| `components/公转模拟.html` | 独立互动程序，页面用 iframe 引用 |
-| `assets/地轴.svg` | SVG 或图片，页面用 img 引用 |
-| `controller/教师控制台.js` | 现有教师控制台源码，确有需要时才修改；[接口说明](teacher-controller.md) |
+| `pages` | 页面目录与顺序；新增页面的目标 |
+| `theme.css` | 整课主题样式 |
+| `pages/01-导入.json` | 页面结构、表面类型与人工位置；可向该页插入内容或明确重做 |
+| 页面对应的 `.html` | 软件能提供 HTML 投影时的当前布局内容 |
+| 页面目录里的 `.data.json`、`.style.json` | 单个对象的正式专业数据与样式 |
+| 页面对应的 `.body.html`、`.body.md` | Flow 连续正文；保留专业语义、浮层和人工位置 |
+| 页面对应的 `.spatial.json` | Spatial 镜头、停靠点、路径和对象引用 |
+| `components/` 中的 `.definition.json`、`.view.ts/js` 或 `.source/…` | 共享定义及其源码；源码修改作用于未独立实现的实例 |
+| 页面目录里的 `.view.ts/js` 或 `.source/…` | 当前实例的独立源码与完整文件集 |
+| `global/underlay/`、`global/overlay/` | 全局对象，包括当前教师控制台 |
+| 已列出的素材路径 | 工程内图片、声音和其他资源 |
 
-开始框架时，已有工程先 `project.list`。新课用 `file.create` 新建一次 `<课名>.h5lesson`，软件建好空工程与控制台；后续都使用 `project.*`。仅有一个课件时省略 `project`；多个课件时填文件名或路径，不转抄内部句柄。
+上表路径只是形状示例，名称和序号由软件从当前工程生成，不手工登记或推算。
+
+修改先读目标，再调用 `project.apply {path,content}`；`content` 是该文件的完整新文本，软件只提交实际改变的正式字段。也可用 `project.apply {path,from}` 读取任务已授权工作区里的源文件及实际相对资源闭包。读取后若人工修改与本次改动冲突，保留输入并重新读取目标，不覆盖教师的新改。
+
+框架通过同一入口操作：
 
 ```json
-{"name":"四季的成因.h5lesson"}
+{"path":"pages","intent":"surface.add","kind":"slide","title":"观察地轴"}
 ```
 
-上例是 `file.create` 的输入。已有用户指定课件则直接使用，不能创建同名文件重做。
+新页之后按回执或重新 `project.list` 取得真实路径。现有页面用 `surface.move` 调整顺序，`before` 填已观察的另一页路径，省略即移到末尾；`surface.title` 携带 `title` 改名；`surface.remove` 删除该页。身份、顺序和引用由软件维护。
 
-写 `theme.css` 和页面用 `project.write {path,content}`。已有文件先 `project.read`；小改用 `project.edit {path,edits:[{old,new}]}`，原文唯一才能定位。原样回写不产生修改。第一张演示页会填入新课初始空白场景；其余新路径生成新场景。改序或改名用 `project.move`，删除用 `project.delete`，引用由软件维护。
+向页面结构路径添加内容用 `intent:"insert"`，用户明确整页重做时用 `intent:"redo"`。普通局部修改用对象文件或已有 HTML 投影，不用重做覆盖人工位置。页面内容可以使用普通 HTML/CSS；简单示意图可内联 SVG，实际图片和组件引用沿用读取内容与当前工具返回的路径。
 
-页面用熟悉的 HTML/CSS 布局。简单图示可以内联 SVG；待填图片用 `<img src="../assets/地轴.svg" alt="地轴倾斜23.5度的示意图">`；模拟用 `<iframe src="../components/公转模拟.html" title="观察倾斜地轴保持指向不变" height="420"></iframe>`。引用尚未提供时软件显示占位，内容写入后自动填充，不需要登记表。
+Flow 正文使用其 `.body.html` 或 `.body.md`，保留源文中软件生成的专业对象引用。Spatial 用 `.spatial.json` 修改镜头：`stops` 表示顺序停靠点，`target`、`objects` 引用已观察对象路径，`paths.stops` 使用该源文件中的停靠点序号。软件维护稳定身份，修改镜头不重排世界对象。
 
-组件写完整独立 HTML/CSS/JS，由软件做准入并更新引用页。失败时保留草稿及原因，修该组件即可。它自行处理的方向键应调用 `preventDefault()`；没处理的翻页键由宿主接管。页面没有脚本时静态结构可编辑；含脚本的页面允许按整页程序承载，但编辑粒度不同，不要依赖整课脚本切换隐藏页面。
+复杂实验、模拟和游戏可以作为独立内容程序插入；需要继续改源码时读取对象实际的源码文件。共享定义源码与实例独立源码是两种明确范围，按用户意图选择。默认实现、专业数据与外部资源保持可编辑；局部无法处理的内容保留原文并报告诊断，不把静态截图当成功。
 
-`class="fragment"` 表示按文档顺序逐条出现。步骤、场景、教师控制台、快捷键默认使用同一播放状态。用户有明确导航设计时，可以改造控制台或关闭它后自写独立导航，按哪种更方便选择。默认键位：方向键及 PageUp/Down 推进步骤，Shift+方向键切场景，Home/End 到首尾；自定义导航保留用户要求的操作方式。
+默认导航、快捷键和教师控制台复用同一运行状态。用户有明确导航设计时，可以改造控制台或关闭默认界面后自写独立导航，详见[教师控制台](teacher-controller.md)。程序自己处理的按键应阻止重复处理；未处理的翻页键交给宿主。
 
-简单互动直接写普通 HTML：`<a href="#answer">显示答案</a><div id="answer" hidden>答案内容</div>` 展开答案；`<button aria-controls="answer">切换答案</button>` 切换显隐；`<a href="../slides/03-总结.html">查看总结</a>` 跳到已有页面。软件生成正式规则，未写出的页面补齐后自动接通链接，改名时一并维护；复杂状态联动仍放独立组件。
+检查关键页用 `view.observe {path:"本次读取的页面路径"}`，多个课件时另填 `project`。观察不改变教师当前页面或文档；需要确认互动时执行对应操作并查看结果。
 
-空间采用熟悉的 impress.js 写法，不需要引入 impress.js 脚本：
-
-```html
-<style>.step { width: 1000px; height: 600px; }</style>
-<section id="intro" class="step" data-x="0" data-y="0">
-  <h1>从地轴方向观察</h1><p class="fragment">倾斜方向保持不变</p>
-  <a href="#orbit">观察公转</a>
-</section>
-<section id="orbit" class="step" data-x="1600" data-y="400" data-scale="1.2" data-rotate="20">
-  <h2>沿轨道继续观察</h2>
-</section>
-```
-
-`data-x/y` 表达作者设计的中心位置，`data-scale` 为正比例，`data-rotate` 为角度；对象大小用普通像素宽高或简单 class/id/tag 样式表达，未指定则使用课程画布。软件负责对象外框、镜头和身份换算，拖拽缩放后的当前布局也能读回。`.step` 依文档顺序成为停靠点，站内 fragment 展开后再前往下一站；带位置属性而无 `.step` 的区块仅作布景。用普通 ID 链接到另一停靠点。带脚本的整份空间按程序承载；需要分别编辑世界对象时保持空间框架无脚本，将程序放到引用组件。
-
-检查关键页用 `view.observe {path:"slides/02-实验.html"}`；多个课件时另填 `project`，不必先查句柄。观察不改变教师当前页面或文档。
-
-修改只进正式工程与恢复稿。需要落盘才 `project.save`，多个工程时填写 `project`。策划 MD 是普通工作区文件，用 `file.write` 保存；它和工程的保存状态分别说明。
+修改进入正式工程与恢复稿。只有用户要求落盘时才 `project.save`。策划 MD 是普通工作区文件，通过 `file.write` 保存；策划与工程的保存状态分别说明。

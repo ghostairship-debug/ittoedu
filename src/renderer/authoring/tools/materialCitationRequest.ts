@@ -1,19 +1,11 @@
-import type { MaterialRecordV1 } from '../../../shared/materialContract'
-import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
-import { courseAuthoringScopeFromLocation } from '../courseAuthoringScope'
+import { materialRecordV1Schema, type MaterialRecordV1 } from '../../../shared/materialContract'
+import type { EditorStoreKernel } from '../../store/editorStoreKernel'
+import { captureCourseInsertionTarget } from '../../media/commitCourseMediaAuthoring'
+import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
 
-export function createMaterialCitationRequest(input: {
-  document: CourseProjectDocument; locationId: string; sessionGeneration: number; material: MaterialRecordV1
-}) {
-  const { document, locationId, sessionGeneration, material } = input
-  const scope = courseAuthoringScopeFromLocation({ project: document, locationId })
-  const surfaceType = document.surfaces.find(surface => surface.id === scope.surfaceId)!.type
-  return { version: 1, requestId: crypto.randomUUID(), tool: 'material.citation', input: material,
-    destination: { kind: 'create', scope: {
-      projectId: document.id, documentRevision: document.revision, revisionPolicy: { kind: 'exact' }, sessionGeneration,
-      surfaceType, surfaceId: scope.surfaceId, locationId: scope.locationId, stateId: scope.stateId,
-      owner: scope.owner, ownerKey: scope.ownerKey,
-      parent: surfaceType === 'flow' ? { kind: 'flow-body', parentBlockId: null } : { kind: 'owner' }, insertion: { kind: 'append' },
-    } },
-  }
+/** Capture before material lookup or dialog completion; never reconstruct a V9 destination. */
+export function createMaterialCitationRequest(input: { kernel: EditorStoreKernel; material: MaterialRecordV1; target?: CapturedCourseTarget }) {
+  return { tool: 'material.citation' as const, target: input.target ?? captureCourseInsertionTarget(input.kernel),
+    material: materialRecordV1Schema.parse(input.material) }
 }
+export type MaterialCitationRequest = ReturnType<typeof createMaterialCitationRequest>

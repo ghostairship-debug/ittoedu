@@ -1,56 +1,32 @@
-import type { CourseAuthoringSessionToken } from '../authoring/courseAuthoringSession'
-import type { ProductivityContext } from '../authoring/productivity'
-import { createEditorTransactionStep, type EditorTransactionStep } from '../authoring/editorTransaction'
-import { planRecipe } from '../recipes/applyRecipe'
-import type { RecipeInput } from '../recipes/recipeCatalog'
+import type { ProductivityContext, DesignProductionStep } from '../authoring/productivity'
+import type { EditorStoreKernel } from '../store/editorStoreKernel'
 
 interface DesignProductionPorts {
-  readContext(): ProductivityContext | null
-  prepare(): { ok: true } | { ok: false; reason: string }
-  persist(step: EditorTransactionStep, message: string): boolean
-  activate(locationId: string): void
-  feedback(reason: string): void
+  kernel: Pick<EditorStoreKernel, 'captureTarget' | 'editCaptured' | 'readView' | 'selectSurface' | 'setFeedback'>
+  hasContentDraft?(): boolean
 }
-
-/** Composes existing planners with the one active Surface transaction owner. */
-export function createDesignProductionActions(ports: DesignProductionPorts) {
-  const prepare = () => {
-    const result = ports.prepare()
-    if (!result.ok) { ports.feedback(result.reason); return null }
-    return ports.readContext()
+/** UI previews carry their captured document through the one formal Session writer. */
+export function createDesignProductionActions({ kernel }: DesignProductionPorts) {
+  const readContext = (documentId?: string): ProductivityContext | null => {
+    try { const target = kernel.captureTarget(documentId); return { document: target.editingProject, target } }
+    catch { return null }
   }
-  const matches = (current: CourseAuthoringSessionToken, captured: CourseAuthoringSessionToken) =>
-    current.generation === captured.generation && current.locationId === captured.locationId
-    && current.surfaceType === captured.surfaceType && current.revision === captured.revision
   return {
-    prepareDesignProduction: prepare,
-    readDesignProductionContext: ports.readContext,
-    commitDesignProduction(step: EditorTransactionStep, captured: CourseAuthoringSessionToken): boolean {
-      const context = prepare()
-      if (!context) return false
-      if (!matches(context.sessionToken, captured) || context.document.id !== step.projectId
-        || context.document.revision !== step.baseRevision) {
-        ports.feedback('工程或页面已改变，请重新预览后再应用')
+    prepareDesignProduction: readContext,
+    readDesignProductionContext: readContext,
+    async commitDesignProduction(step: DesignProductionStep): Promise<boolean> {
+      try {
+        const { createdSurfaceId, originSurfaceId, ...command } = step
+        const result = await kernel.editCaptured(command)
+        if (!('revision' in result)) throw new Error(result.message)
+        const current = kernel.readView()
+        if (createdSurfaceId && current.activeDocumentId === step.documentId && current.surfaceId === originSurfaceId) kernel.selectSurface(createdSurfaceId, step.documentId)
+        kernel.setFeedback({ errorMessage: null, statusMessage: '已应用设计修改，可一次撤销' })
+        return true
+      } catch (error) {
+        kernel.setFeedback({ errorMessage: error instanceof Error ? error.message : '设计修改未能提交' })
         return false
       }
-      return ports.persist(step, '已应用设计修改，可一次撤销')
-    },
-    applyCourseRecipe(input: RecipeInput, captured: CourseAuthoringSessionToken): boolean {
-      const context = prepare()
-      if (!context) return false
-      if (!matches(context.sessionToken, captured)
-        || input.target.locationId !== context.sessionToken.locationId
-        || input.target.revision !== context.document.revision
-        || (input.target.sessionGeneration !== undefined && input.target.sessionGeneration !== context.sessionToken.generation)) {
-        ports.feedback('配方目标已过期，请重新打开配方')
-        return false
-      }
-      const result = planRecipe(context.document, input)
-      if (!result.ok) { ports.feedback(result.reason); return false }
-      const step = createEditorTransactionStep(context.document, result.plan)
-      if (!step || !ports.persist(step, '已新建配方页，可继续编辑')) return false
-      ports.activate(result.createdLocationId)
-      return true
     },
   }
 }

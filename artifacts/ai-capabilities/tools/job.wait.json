@@ -1,0 +1,40 @@
+{
+  "description": "有界等待本任务的图片、受限计算或有限委派作业；milliseconds 最多 30000。等待超时返回当前状态，不重发原作业。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "job": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "kind": {
+        "enum": [
+          "image",
+          "compute",
+          "delegation"
+        ],
+        "type": "string"
+      },
+      "milliseconds": {
+        "maximum": 30000,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "kind",
+      "job",
+      "milliseconds"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "read",
+    "label": "job.wait",
+    "targetKinds": []
+  },
+  "name": "job.wait",
+  "version": 1
+}

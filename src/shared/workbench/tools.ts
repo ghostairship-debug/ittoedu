@@ -8,6 +8,8 @@ import type { ConversationHome } from './conversations'
 export type ToolTarget =
   | { kind: 'document' }
   | { kind: 'markdown-range'; from: number; to: number }
+  /** V10 instance/subtree or a data field. Text offsets count code points; math is one atom. */
+  | { kind: 'course-instance'; surfaceId: string; instanceId: string; stateId?: string | null; fieldScope?: 'data' | 'flowLayout'; dataPath?: string[]; from?: number; to?: number }
   | { kind: 'course-audio' }
   | { kind: 'course-sound'; soundId: string }
   | { kind: 'course-asset'; assetId: string }

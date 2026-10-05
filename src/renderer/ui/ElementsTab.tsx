@@ -21,7 +21,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ShapeType } from '../../shared/contracts/native-v1'
 import { renderShapeCanvas } from '../../shared/canvasShapeRenderer'
 import { createShapeNode } from '../../core/tools/nativeNodeFactories'
-import { useEditorStore, selectMediaAssets, selectAudioSettings, selectEditingScope } from '../store/editorStore'
+import { useEditorStore, selectCourseView, selectEditingScope } from '../store/editorStore'
+import { captureCourseInsertionTarget, insertCourseElement, readCourseMediaLibrary, readCourseAudioSettings,
+  mediaAuthoringError, ensureCourseTeacherController, type CourseElementKind } from '../media/commitCourseMediaAuthoring'
+import { owningContainer } from '../../shared/contracts/component-platform/project'
 import type { EditingScope } from '../store/slices/editorShellSlice'
 import { MediaTab } from './MediaTab'
 import { FlowInsertMenu } from './flow/FlowInsertMenu'
@@ -66,11 +69,11 @@ const SURFACE_INSERTION_HINT: Record<AuthoringSurface, Record<AuthoringScope, st
   },
   flow: {
     scene: '流式讲义：单击添加文档块；图形添加为页面浮层。当前不可从面板拖入。',
-    global: 'Flow 全局层：图形添加为全局浮层；文字和公式仍添加到当前文档页，图片和视频暂不可用。',
+    global: 'Flow 全局层：添加的组件跨页面持续存在。',
   },
   spatial: {
     scene: '无限画布：单击添加世界元素。当前不可从面板拖入。',
-    global: '无限画布全局层：文本、公式、图片、视频和图形当前不可用；请切换到当前画布后添加世界元素。',
+    global: '无限画布全局层：添加的组件跨页面持续存在。',
   },
 }
 
@@ -81,11 +84,11 @@ const GLOBAL_SCOPE_NOTICE: Record<AuthoringSurface, { title: string; body: strin
   },
   flow: {
     title: 'Flow 全局层',
-    body: '在上方快速添加中，当前只有图形会添加为跨页全局浮层；文字和公式仍添加到当前文档页，图片和视频暂不可用。',
+    body: '这里添加的组件属于全局图层，跨页面持续存在。',
   },
   spatial: {
     title: '无限画布全局层',
-    body: '当前全局层不能插入文本、公式、图片、视频或图形。切换到当前画布后，可添加世界元素。',
+    body: '这里添加的组件属于全局图层；世界元素在当前画布中保持自己的位置。',
   },
 }
 
@@ -93,41 +96,10 @@ function insertionCapability(
   surface: AuthoringSurface,
   scope: AuthoringScope,
   kind: InsertableElementKind,
-  spatialScope?: SpatialInsertionScope,
+  _spatialScope?: SpatialInsertionScope,
 ): InsertionCapability {
-  if (surface === 'slide') {
-    if (kind === 'table' || kind === 'chart') {
-      return scope === 'scene'
-        ? { enabled: true, draggable: true, carrier: 'free-node' }
-        : { enabled: false, draggable: false, carrier: 'unavailable' }
-    }
-    return {
-      enabled: true,
-      draggable: true,
-      carrier: scope === 'global' ? 'global-layer-item' : 'free-node',
-    }
-  }
-  if ((kind === 'chart' || kind === 'table') && scope === 'global') {
-    return { enabled: false, draggable: false, carrier: 'unavailable' }
-  }
-  if (surface === 'spatial') {
-    return spatialScope === 'world'
-      ? { enabled: true, draggable: false, carrier: 'world-item' }
-      : { enabled: false, draggable: false, carrier: 'unavailable' }
-  }
-  if (scope === 'global') {
-    if (kind === 'shape') {
-      return { enabled: true, draggable: false, carrier: 'global-layer-item' }
-    }
-    if (kind === 'image' || kind === 'video') {
-      return { enabled: false, draggable: false, carrier: 'unavailable' }
-    }
-  }
-  return {
-    enabled: true,
-    draggable: false,
-    carrier: kind === 'shape' ? 'page-overlay' : 'document-block',
-  }
+  return { enabled: true, draggable: surface === 'slide', carrier: scope === 'global' ? 'global-layer-item'
+    : surface === 'slide' ? 'free-node' : surface === 'spatial' ? 'world-item' : kind === 'shape' ? 'page-overlay' : 'document-block' }
 }
 
 function insertionTitle(
@@ -156,10 +128,10 @@ function insertionTitle(
       ? `${label}：单击添加全局自由节点；也可拖入演示页画布定位`
       : `${label}：单击添加自由节点；也可拖入演示页画布定位`
   }
-  if (surface === 'spatial') return `${label}：单击添加世界元素`
-  if (scope === 'global' && kind === 'shape') {
+  if (scope === 'global') {
     return `${label}：单击添加全局浮层`
   }
+  if (surface === 'spatial') return `${label}：单击添加世界元素`
   const carrier = kind === 'shape'
     ? '页面浮层'
     : kind === 'text'
@@ -171,9 +143,7 @@ function insertionTitle(
         : kind === 'image'
           ? '文中图片块'
           : '文中视频块'
-  return scope === 'global'
-    ? `${label}：单击仍添加${carrier}（不会添加到全局层）`
-    : `${label}：单击添加${carrier}`
+  return `${label}：单击添加${carrier}`
 }
 
 const ADD_CATEGORIES: Array<{ id: AddCategory; label: string }> = [
@@ -241,22 +211,34 @@ export function ElementsTab({
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [showChartPicker])
-  const addTextNode = useEditorStore((state) => state.addTextNode)
-  const addFormulaNode = useEditorStore((state) => state.addFormulaNode)
-  const addShapeNode = useEditorStore((state) => state.addShapeNode)
+  const kernel = useEditorStore(state => state.courseKernel)
+  const view = useEditorStore(selectCourseView)
+  const addElement = (kind: CourseElementKind, options: Parameters<typeof insertCourseElement>[3] = {}) => {
+    try {
+      const target = captureCourseInsertionTarget(kernel), owner = target.instanceId ? owningContainer(target.project, target.instanceId) : null
+      const camera = target.project.surfaces.find(surface => surface.id === target.surfaceId)?.kind === 'spatial' && editingScope !== 'global'
+        ? useEditorStore.getState().readSpatialView(target.surfaceId ?? '', target.documentId).camera : null
+      void insertCourseElement(kernel, target, kind,
+        { ...(editingScope === 'global' ? { container: owner?.kind === 'global' ? owner : { kind: 'global' as const, plane: 'overlay' as const } } : {}),
+          ...(camera ? { center: { x: camera.x, y: camera.y } } : {}), ...options }).catch(error => mediaAuthoringError(kernel, error))
+    }
+    catch (error) { mediaAuthoringError(kernel, error) }
+  }
+  const addTextNode = () => addElement('text')
+  const addFormulaNode = () => addElement('formula')
+  const addShapeNode = (shapeType: ShapeType) => addElement('shape', { shapeType })
   const slideDrawTool = useEditorStore((state) => state.slideDrawTool)
   const setSlideDrawTool = useEditorStore((state) => state.setSlideDrawTool)
-  const addTableNode = useEditorStore((state) => state.addTableNode)
-  const addInputNode = useEditorStore(state => state.addInputNode)
-  const inputAvailable = useEditorStore(state => state.slideBackend?.getSession().scope === 'scene')
-  const addChartNode = useEditorStore((state) => state.addChartNode)
-  const mediaAssets = useEditorStore(selectMediaAssets)
-  const audioSettings = useEditorStore(selectAudioSettings)
+  const addTableNode = () => addElement('table')
+  const addInputNode = () => addElement('input')
+  const inputAvailable = Boolean(view.project && view.surfaceId)
+  const addChartNode = (chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut') => addElement('chart', { chartType })
+  const mediaAssets = useMemo(() => readCourseMediaLibrary(view).assets, [view])
+  const audioSettings = useMemo(() => readCourseAudioSettings(view), [view])
   const editingScope = useEditorStore(selectEditingScope)
-  const spatialInsertionScope = useEditorStore<SpatialInsertionScope | null>((state) => (
-    state.spatialSession?.scope ?? null
-  ))
-  const flowSessionActive = useEditorStore((state) => Boolean(state.flowSession))
+  const surfaceKind = view.project?.surfaces.find(surface => surface.id === view.surfaceId)?.kind
+  const spatialInsertionScope: SpatialInsertionScope | null = surfaceKind === 'spatial' ? editingScope === 'global' ? 'global' : 'world' : null
+  const flowSessionActive = surfaceKind === 'flow'
   const authoringSurface: AuthoringSurface = spatialInsertionScope
     ? 'spatial'
     : flowSessionActive
@@ -265,9 +247,7 @@ export function ElementsTab({
   const surfaceInsertionHint = authoringSurface === 'spatial'
     ? spatialInsertionScope === 'world'
       ? '无限画布：单击添加世界元素。当前不可从面板拖入。'
-      : spatialInsertionScope === 'surface'
-        ? '表面共享层暂不支持插入元素；请切换到无限画布世界层。'
-        : '无限画布全局层暂不支持插入元素；请切换到无限画布世界层。'
+      : '无限画布全局层：单击添加跨页面组件。'
     : SURFACE_INSERTION_HINT[authoringSurface][editingScope]
   const globalScopeNotice = GLOBAL_SCOPE_NOTICE[authoringSurface]
   const textInsertion = insertionCapability(authoringSurface, editingScope, 'text', spatialInsertionScope ?? undefined)
@@ -277,7 +257,7 @@ export function ElementsTab({
   const shapeInsertion = insertionCapability(authoringSurface, editingScope, 'shape', spatialInsertionScope ?? undefined)
   const tableInsertion = insertionCapability(authoringSurface, editingScope, 'table', spatialInsertionScope ?? undefined)
   const chartInsertion = insertionCapability(authoringSurface, editingScope, 'chart', spatialInsertionScope ?? undefined)
-  const ensureTeacherController = useEditorStore((state) => state.ensureTeacherController)
+  const ensureTeacherController = () => { void ensureCourseTeacherController(kernel).catch(error => mediaAuthoringError(kernel, error)) }
   const categories = ADD_CATEGORIES
   const normalizedQuery = searchQuery.trim().toLocaleLowerCase()
   const searching = normalizedQuery.length > 0

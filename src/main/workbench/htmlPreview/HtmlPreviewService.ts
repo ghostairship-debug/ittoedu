@@ -5,6 +5,7 @@ import { scanHtmlSource } from '../../../shared/html/htmlSourceScanner'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
+import type { ComponentBootstrapInput, ComponentBootstrapLease } from '../../../shared/ipcTypes'
 import type {
   HtmlPreviewEditOutcome, HtmlPreviewHost, HtmlPreviewLease, HtmlPreviewRequest,
   HtmlPreviewResolvedTarget,
@@ -87,6 +88,17 @@ interface ActiveLease {
   unregisterFrame: () => void
 }
 
+interface ActiveBootstrapLease {
+  public: ComponentBootstrapLease
+  token: string
+  entryHtml: string
+  webContentsId: number
+  owner: PreviewNetworkDocumentOwner
+  connectOrigins: string[]
+  mediaOrigins: string[]
+  unregisterFrame(): void
+}
+
 function sameOwner(a: PreviewNetworkDocumentOwner, b: PreviewNetworkDocumentOwner | null): boolean {
   return b !== null && a.processId === b.processId && a.frameToken === b.frameToken && a.documentToken === b.documentToken
 }
@@ -117,7 +129,8 @@ function injectEarlyPreviewAgent(source: string, script: string): string {
 
 export class HtmlPreviewService implements HtmlPreviewHost {
   private readonly leases = new Map<string, ActiveLease>()
-  private readonly byToken = new Map<string, ActiveLease>()
+  private readonly bootstrapLeases = new Map<string, ActiveBootstrapLease>()
+  private readonly byToken = new Map<string, ActiveLease | ActiveBootstrapLease>()
   private readonly policy: PreviewNetworkPolicy
   private readonly registerFrame: typeof registerHtmlPreviewFrameEntry
   private editPort: HtmlPreviewEditPort | null
@@ -169,6 +182,39 @@ export class HtmlPreviewService implements HtmlPreviewHost {
     finally {
       try { this.policy.releasePreviewLease(lease.public.leaseId, lease.owner) } catch { /* A new top document already cleared its leases. */ }
     }
+  }
+
+  private removeBootstrap(lease: ActiveBootstrapLease): void {
+    if (this.bootstrapLeases.get(lease.public.leaseId) !== lease) return
+    this.bootstrapLeases.delete(lease.public.leaseId); this.byToken.delete(lease.token)
+    try { lease.unregisterFrame() }
+    finally {
+      try { this.policy.releasePreviewLease(lease.public.leaseId, lease.owner) } catch { /* Navigation already retired this owner. */ }
+    }
+  }
+
+  /** A component's in-memory content realm uses the existing isolated preview origin. */
+  createComponentBootstrap(input: ComponentBootstrapInput, owner: PreviewNetworkDocumentOwner): ComponentBootstrapLease {
+    if (this.disposed) throw new Error('HTML preview service is disposed')
+    const current = this.currentOwner()
+    if (!current || !sameOwner(owner, current.owner)) throw new Error('Component bootstrap main document is not active')
+    if (this.bootstrapLeases.has(input.leaseId) || this.leases.has(input.leaseId)) throw new Error('Component bootstrap lease already exists')
+    const token = randomBytes(32).toString('hex')
+    const result = { leaseId: input.leaseId, url: htmlPreviewFileUrl(token, 'component.html') }
+    const connectOrigins = [...input.connectOrigins ?? []], mediaUrls = [...input.remoteAssetUrls ?? []]
+    this.policy.replacePreviewLease({ leaseId: result.leaseId, connectOrigins, remoteAssetUrls: mediaUrls }, owner)
+    let unregisterFrame: () => void
+    try { unregisterFrame = this.registerFrame(result.url, current.frame.webContentsId) }
+    catch (error) { this.policy.releasePreviewLease(result.leaseId, owner); throw error }
+    const lease: ActiveBootstrapLease = { public: result, token, entryHtml: input.html, webContentsId: current.frame.webContentsId,
+      owner: { ...owner }, connectOrigins, mediaOrigins: [...new Set(mediaUrls.map(value => new URL(value).origin))], unregisterFrame }
+    this.bootstrapLeases.set(result.leaseId, lease); this.byToken.set(token, lease)
+    return result
+  }
+
+  releaseComponentBootstrap(leaseId: string, owner: PreviewNetworkDocumentOwner): void {
+    const lease = this.bootstrapLeases.get(leaseId)
+    if (lease && sameOwner(lease.owner, owner)) this.removeBootstrap(lease)
   }
 
   async open(request: OpenRequest): Promise<HtmlPreviewLease> {
@@ -248,7 +294,10 @@ export class HtmlPreviewService implements HtmlPreviewHost {
     for (const lease of this.leases.values()) if (lease.tabId === tabId) this.removeLease(lease)
   }
 
-  releaseAll(): void { for (const lease of this.leases.values()) this.removeLease(lease) }
+  releaseAll(): void {
+    for (const lease of this.leases.values()) this.removeLease(lease)
+    for (const lease of this.bootstrapLeases.values()) this.removeBootstrap(lease)
+  }
   dispose(): void { this.releaseAll(); this.disposed = true }
 
   private async context(leaseId: string, loadId: string): Promise<HtmlPreviewEditContext | null> {
@@ -345,6 +394,15 @@ export class HtmlPreviewService implements HtmlPreviewHost {
     if (!target) return notFound(method)
     const lease = this.byToken.get(target.token)
     if (!lease) return notFound(method)
+    if ('entryHtml' in lease) {
+      const current = this.currentOwner()
+      if (!current || current.frame.webContentsId !== lease.webContentsId || !sameOwner(lease.owner, current.owner)) {
+        this.removeBootstrap(lease); return notFound(method)
+      }
+      if (target.kind !== 'file' || target.relativePath !== 'component.html' || target.hasQuery) return notFound(method)
+      return htmlPreviewResponse(lease.entryHtml, { contentType: 'text/html; charset=utf-8', method,
+        mediaOrigins: lease.mediaOrigins, connectOrigins: lease.connectOrigins })
+    }
     const snapshot = await this.snapshotFor(lease)
     if (!snapshot) { this.removeLease(lease); return notFound(method) }
     if (target.kind === 'agent') {

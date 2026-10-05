@@ -1,0 +1,34 @@
+{
+  "description": "下载选中的图库候选。path 使用 project.list/read 返回的页面或对象路径：图片对象表示原位替换，页面或其他对象表示插入。来源、授权与署名随素材保存，替换保留人工位置与图片效果，可撤销。省略 path 返回本任务图片 resource，可用 project.apply 的 from 插入或替换。project 与工程文件工具相同。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "image": {
+        "maxLength": 100,
+        "minLength": 1,
+        "type": "string"
+      },
+      "path": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "project": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "image"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "image.fetch",
+    "targetKinds": []
+  },
+  "name": "image.fetch",
+  "version": 1
+}

@@ -1,80 +1,94 @@
-import type { SlideSceneDocument } from '../../../shared/courseProjectTypes'
-import { analyzeTextNodeLayout } from '../../../shared/textLayout'
+import { documentTextContentSchema, normalizeDocumentText, type FlowTextContent } from '../../../shared/document/content'
+import type { JsonValue } from '../../../shared/contracts/component-platform/project'
+import { componentValueAt, equalComponentValue } from '../../../core/drivers/courseV10Operations'
 import { planTextRunRemap } from '../../../shared/textRuns'
-import { commitCourseProjectMutation } from '../../../core/tools/courseProjectMutation'
-import { createEditorTransactionStep } from '../editorTransaction'
-import type { ProductivityApplyResult, ProductivityContext } from './index'
-import { cloneReferencePage } from './referenceClone'
+import type { TextRun } from '../../../shared/contracts/native-v1/types'
+import { textComponentDataSchema } from '../../../components/text/data'
+import { measureTextComponent, renderTextComponent } from '../../../components/text/render'
+import { designProductionStep, type ProductivityContext, type ProductivityApplyResult } from './index'
+import { prepareReferenceClone } from './referenceClone'
 
-export interface RemixSlot { id: string; label: string; original: string; replacement: string; capacity: string; issue?: string }
-export interface StyleRemixPreview {
-  projectId: string
-  revision: number
-  sessionToken: ProductivityContext['sessionToken']
-  sourceSceneId: string
-  sourceLabel: string
-  slots: RemixSlot[]
-  issues: string[]
+export interface RemixSlot { id: string; instanceId: string; dataPath: string[]; label: string; original: string; replacement: string; capacity: string; issue?: string; warning?: string }
+export interface StyleRemixPreview { projectId: string; revision: number; target: ProductivityContext['target']; sourceSceneId: string; sourceLabel: string; slots: RemixSlot[]; issues: string[] }
+function reference(context: ProductivityContext, surfaceId: string) {
+  const surface = context.document.surfaces.find(value => value.kind === 'slide' && value.id === surfaceId)
+  if (!surface) throw new Error('参考页不存在，请重新选择')
+  return surface
 }
-
-function reference(context: ProductivityContext, sceneId: string): SlideSceneDocument {
-  const surface = context.document.surfaces.find(s => s.type === 'slide' && s.scenes.some(scene => scene.id === sceneId))
-  if (!surface || surface.type !== 'slide') throw new Error('参考页不存在，请重新选择')
-  return surface.scenes.find(s => s.id === sceneId)!
-}
-
-/** Explicit transient slots, never persisted as a Recipe or private project state. */
-export function previewStyleRemix(context: ProductivityContext, sceneId: string, replacements: Readonly<Record<string, string>>): StyleRemixPreview {
-  const scene = reference(context, sceneId)
-  const issues: string[] = []
-  if (scene.interactions.length || (scene.presentation?.states.length ?? 0) > 1 || scene.presentation?.states.some(s => Object.keys(s.layerItemOverrides).length)) issues.push(`${scene.name}：暂不支持带交互或状态覆盖的参考页`)
-  const slots: RemixSlot[] = []
-  for (const item of scene.layerItems) {
-    if (item.kind !== 'native') { issues.push(`${scene.name} / ${item.label}：暂不支持动态载体`); continue }
-    if (item.content.nativeType !== 'text') continue
-    const data = item.content.data
-    const replacement = replacements[item.layerItemId]
-    let issue = replacement === undefined || !replacement.trim() ? '请填写此槽位' : undefined
-    const mapping = planTextRunRemap(data.text, replacement ?? data.text, data.runs)
-    if (!mapping.ok) issue = mapping.reason
-    const layout = analyzeTextNodeLayout({ ...data, text: mapping.ok ? mapping.text : data.text, runs: mapping.ok ? mapping.runs : data.runs, type: 'text', id: item.layerItemId, name: item.label, ...item.frame, rotation: item.rotation, opacity: item.opacity, visible: item.visible, locked: item.locked, playbackInitialVisibility: item.playbackInitialVisibility })
-    // A skeleton keeps its geometry. Even auto-height must fit the original box.
-    if (!issue && (layout.overflowsWidth || layout.overflowsHeight)) issue = '文字超出参考文本框，请缩短内容或先扩大参考页文本框'
-    slots.push({ id: item.layerItemId, label: item.label, original: data.text, replacement: replacement ?? '', capacity: `${item.frame.width} × ${item.frame.height}，${Number(layout.fontSize.toFixed(2))}px；${layout.measurementMode === 'deterministic-fallback' ? '估算排版' : '字体实测'}，保持原框`, ...(issue ? { issue } : {}) })
+function replaceRich(content: FlowTextContent, text: string): FlowTextContent {
+  if (content.inlines.some(inline => inline.type !== 'text')) throw new Error('公式与文字混排请在原文选区中编辑')
+  let offset = 0
+  const runs: TextRun[] = content.inlines.map(inline => {
+    const value = inline.type === 'text' ? inline.text : '', start = offset; offset += Array.from(value).length
+    return { start, end: offset, style: { ...inline.style } }
+  })
+  const mapped = planTextRunRemap(content.inlines.map(inline => inline.type === 'text' ? inline.text : '').join(''), text, runs)
+  if (!mapped.ok) throw new Error(mapped.reason)
+  const atoms = content.inlines.flatMap(inline => inline.type === 'text' ? Array.from(inline.text).map(text => ({ ...inline, text })) : [])
+  for (const edit of [...mapped.edits].reverse()) {
+    const source = atoms[edit.start] ?? atoms[edit.start - 1] ?? { type: 'text' as const, text: '' }
+    atoms.splice(edit.start, edit.end - edit.start, ...Array.from(edit.replacement).map(text => ({ ...source, text })))
   }
-  if (!slots.length) issues.push(`${scene.name}：没有可替换的原生文字槽位`)
-  for (const id of Object.keys(replacements)) if (!slots.some(slot => slot.id === id)) issues.push(`槽位 ${id} 已不存在`)
-  return { projectId: context.document.id, revision: context.document.revision, sessionToken: { ...context.sessionToken }, sourceSceneId: sceneId, sourceLabel: scene.name, slots, issues }
+  return normalizeDocumentText({ inlines: atoms })
 }
 
-export function applyStyleRemix(context: ProductivityContext, preview: StyleRemixPreview, assetFiles: Readonly<Record<string, Uint8Array>>): ProductivityApplyResult {
+export function previewStyleRemix(context: ProductivityContext, sourceSceneId: string, replacements: Readonly<Record<string, string>>, options: { measure?: boolean } = {}): StyleRemixPreview {
+  const surface = reference(context, sourceSceneId), slots: RemixSlot[] = [], issues: string[] = []
+  const visit = (instanceId: string, value: unknown, dataPath: string[]) => {
+    if (!value || typeof value !== 'object') return
+    const parsed = documentTextContentSchema.safeParse(value)
+    if (parsed.success) {
+      const item = context.document.instances[instanceId]!, id = `${instanceId}:${JSON.stringify(dataPath)}`
+      if (parsed.data.inlines.some(inline => inline.type !== 'text')) { issues.push(`${item.name ?? instanceId}：保留公式混排，请在原页局部精修`); return }
+      const original = parsed.data.inlines.map(inline => inline.type === 'text' ? inline.text : '').join(''), replacement = replacements[id] ?? ''
+      let issue = replacement.trim() ? undefined : '请填写此槽位'
+      if (!issue) try { replaceRich(parsed.data, replacement) } catch (error) { issue = error instanceof Error ? error.message : '无法保留文字格式' }
+      const frame = item.frame
+      let warning: string | undefined
+      const textData = textComponentDataSchema.safeParse(item.data)
+      if (options.measure && !issue && frame && textData.success && dataPath.length === 1 && dataPath[0] === 'content' && typeof document !== 'undefined') {
+        const next = { ...textData.data, content: replaceRich(parsed.data, replacement) }
+        const layout = measureTextComponent(renderTextComponent(document, next), frame, next.sizing)
+        if (layout.overflows || layout.height > frame.height + 0.5) warning = '实际文字排版超出原框；副本创建后可继续调整文本框或缩短文字'
+      }
+      slots.push({ id, instanceId, dataPath, label: item.name ?? context.document.definitions[item.definitionId]?.title ?? instanceId, original, replacement,
+        capacity: frame ? `${frame.width} × ${frame.height}，保持原框` : '保持原排版', ...(issue ? { issue } : {}), ...(warning ? { warning } : {}) })
+      return
+    }
+    if (Array.isArray(value)) value.forEach((child, index) => visit(instanceId, child, [...dataPath, String(index)]))
+    else for (const [key, child] of Object.entries(value)) if (!['source', 'props', 'metadata'].includes(key)) visit(instanceId, child, [...dataPath, key])
+  }
+  const instance = (id: string) => {
+    const item = context.document.instances[id]!
+    const implementation = item.implementationOverride ?? context.document.definitions[item.definitionId]?.implementation
+    if (!item.locked && implementation?.kind === 'builtin') visit(id, item.data, [])
+    item.childIds?.forEach(instance)
+  }
+  surface.childIds.forEach(instance)
+  if (!slots.length) issues.push('参考页没有可直接替换的正式文字槽位')
+  for (const id of Object.keys(replacements)) if (!slots.some(slot => slot.id === id)) throw new Error(`槽位 ${id} 已不存在`)
+  return { projectId: context.document.id, revision: context.document.revision, target: context.target, sourceSceneId, sourceLabel: surface.title, slots, issues }
+}
+
+export function applyStyleRemix(context: ProductivityContext, preview: StyleRemixPreview, _assetFiles: Readonly<Record<string, Uint8Array>> = {}): ProductivityApplyResult {
   try {
-    const token = context.sessionToken, before = preview.sessionToken
-    if (context.document.id !== preview.projectId || context.document.revision !== preview.revision || token.generation !== before.generation || token.locationId !== before.locationId || token.surfaceType !== before.surfaceType) throw new Error('预览已过期，请重新预览')
+    if (context.target.documentId !== preview.target.documentId || context.target.epoch !== preview.target.epoch) throw new Error('预览目标已改变')
     const checked = previewStyleRemix(context, preview.sourceSceneId, Object.fromEntries(preview.slots.map(slot => [slot.id, slot.replacement])))
-    const failures = [...checked.issues, ...checked.slots.filter(slot => slot.issue).map(slot => `${slot.label}：${slot.issue}`)]
-    if (failures.length) throw new Error(failures.join('\n'))
-    const source = reference(context, preview.sourceSceneId)
-    const cloned = cloneReferencePage(context, source.id, assetFiles)
-    if (!cloned.ok || !cloned.step) return cloned
-    const step = cloned.step
-    const newSceneId = (step.selectionHint as { sceneId: string }).sceneId
-    const nextDocument = commitCourseProjectMutation(context.document, draft => {
-      // Clone already prepared the complete identity/resource closure without writes.
-      Object.assign(draft, structuredClone(step.nextDocument))
-      const copy = reference({ ...context, document: draft }, newSceneId)
-      copy.name = `${source.name} 改写`
-      checked.slots.forEach(slot => {
-        const index = source.layerItems.findIndex(item => item.layerItemId === slot.id)
-        const item = copy.layerItems[index]!
-        if (item.kind !== 'native' || item.content.nativeType !== 'text') throw new Error(`槽位 ${slot.label} 已失效`)
-        const mapping = planTextRunRemap(item.content.data.text, slot.replacement, item.content.data.runs)
-        if (!mapping.ok) throw new Error(mapping.reason)
-        item.content.data.runs = mapping.runs
-        item.content.data.text = mapping.text
-      })
-      draft.locations.forEach(location => { if (location.kind === 'slide-scene' && location.sceneId === copy.id) location.label = copy.name })
-    })
-    return { ok: true, step: createEditorTransactionStep(context.document, { ...step, nextDocument }) }
+    const content = (slots: RemixSlot[]) => slots.map(({ warning: _warning, ...slot }) => slot)
+    if (!equalComponentValue(content(checked.slots), content(preview.slots))) throw new Error('参考内容已变化，请重新预览')
+    const failures = checked.slots.filter(slot => slot.issue).map(slot => `${slot.label}：${slot.issue}`)
+    if (!checked.slots.length || failures.length) throw new Error(failures.join('\n') || '没有可替换的文字槽位')
+    const clone = prepareReferenceClone(context, preview.sourceSceneId)
+    clone.surface.title = `${clone.source.title} 改写`
+    for (const slot of checked.slots) {
+      const id = clone.ids.get(slot.instanceId)!, item = clone.instances.find(instance => instance.id === id)!
+      const field = componentValueAt({ ...context.document, instances: { ...context.document.instances, [id]: item } }, ['instances', id, 'data', ...slot.dataPath])
+      const parsed = documentTextContentSchema.parse(field.value)
+      let parent = item.data as Record<string, unknown>
+      for (const part of slot.dataPath.slice(0, -1)) parent = parent[part] as Record<string, unknown>
+      if (!slot.dataPath.length) item.data = replaceRich(parsed, slot.replacement) as unknown as JsonValue
+      else parent[slot.dataPath.at(-1)!] = replaceRich(parsed, slot.replacement)
+    }
+    return { ok: true, step: { ...designProductionStep(context, clone.edits), createdSurfaceId: clone.surface.id } }
   } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : '样板改写失败' } }
 }

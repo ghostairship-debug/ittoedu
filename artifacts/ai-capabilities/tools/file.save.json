@@ -1,0 +1,34 @@
+{
+  "description": "保存已打开文档的当前正式内容。target 使用宿主返回的文档短句柄，destination 仅用于另存为。返回确切保存版本与脏状态。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "destination": {
+        "maxLength": 1024,
+        "minLength": 1,
+        "type": "string"
+      },
+      "target": {
+        "description": "file.open/create 返回的 data.target 文档短句柄；不是文件路径、documentId 或正文 writableTarget。",
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "target"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "保存文件",
+    "targetKinds": [
+      "document"
+    ]
+  },
+  "name": "file.save",
+  "version": 1
+}

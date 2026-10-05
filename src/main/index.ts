@@ -4,7 +4,6 @@ import { launchFileArguments } from './launchFileArguments'
 import { AppState } from './appState'
 import { createMainWindow } from './createWindow'
 import { registerIpcHandlers, unregisterIpcHandlers } from './ipc'
-import { disposeNativeTextMeasurement } from './workbench/documentHost'
 import { startExternalMcpService } from './workbench/external/externalDesktopService'
 import { installWindowLifecycle } from './windowLifecycleDesktop'
 import type { WindowLifecycle } from './windowLifecycle'
@@ -85,7 +84,6 @@ async function openMainWindow(): Promise<void> {
     result.window.once('closed', () => {
       mainWindow = null
       rendererEntryUrl = null
-      disposeNativeTextMeasurement()
     })
   })
 }
@@ -152,5 +150,4 @@ app.on('will-quit', () => {
   removeDiagnosticHandlers?.()
   removeDiagnosticHandlers = null
   unregisterIpcHandlers()
-  disposeNativeTextMeasurement()
 })

@@ -8,12 +8,13 @@ import type { ExportFormat } from '../../shared/workbench/toolPorts'
 import type { ToolRunGrant } from '../../shared/workbench/tools'
 import { isInsideRoot } from '../../shared/workbench/executionPermission'
 import { startDirectory } from './execution/AgentFileService'
+import { prepareComponentDeliveryParent } from './delivery/componentProjectDelivery'
 
 type FileAccess = ToolRunGrant['fileAccess']
 
 async function authorizedPath(candidate: string, scope: FileAccess, bindingDirectory?: string): Promise<string> {
   if (!path.isAbsolute(candidate) || candidate.includes('\u0000')) throw new Error('目标必须是有效的绝对路径')
-  const parent = await fs.realpath(path.dirname(candidate))
+  const parent = await prepareComponentDeliveryParent(candidate, scope)
   if (!(await fs.lstat(parent)).isDirectory()) throw new Error('目标文件夹不可用')
   if (scope?.permission === 'read-only') throw new Error('只读任务不能写入文件')
   if (scope?.permission === 'workspace') {

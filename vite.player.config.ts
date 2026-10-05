@@ -7,7 +7,7 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: false,
     lib: {
-      entry: resolve(__dirname, 'src/player/index.ts'),
+      entry: resolve(__dirname, 'src/player/componentPlatform/entry.ts'),
       name: 'CoursewarePlayer',
       formats: ['iife'],
       fileName: () => 'player.iife.js',

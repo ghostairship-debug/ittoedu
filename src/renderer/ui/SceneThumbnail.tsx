@@ -1,315 +1,123 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { materializeNativeLayerItem } from '../../shared/courseProjectSchema'
-import { renderShapeCanvas } from '../../shared/canvasShapeRenderer'
-import { renderFormulaNodeCanvas } from '../../shared/formulaRenderer'
+import { isComponentVisibleAtSurface, resolveComponentBackground, resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
+import type { ComponentInstance } from '../../shared/contracts/component-platform/project'
+import { applyComponentPaintStyle } from '../../player/components/componentPlacementStyle'
+import { componentFrameStyle } from '../../player/surfaces/spatial/componentSpatialAdapter'
+import { formulaComponentDataSchema, textComponentDataSchema } from '../../components/text/data'
+import { renderFormulaComponent, renderTextComponent, applyTextComponentLayout, measureTextComponent } from '../../components/text/render'
+import { shapeDataSchema } from '../../components/shape/data'
+import { renderShape } from '../../components/shape/render'
+import { parseTableData } from '../../components/table/data'
+import { renderTableSvg } from '../../components/table/render'
+import { chartDataSchema } from '../../components/chart/data'
+import { renderChart } from '../../components/chart/render'
+import { imageDataSchema } from '../../components/image/data'
 import { renderImageNodeCanvas } from '../../shared/imageEffects'
-import { renderTextNodeCanvas } from '../../shared/textLayout'
-import { buildSlideEditorView, resolveSlideThumbnailStateId } from '../../core/tools/slideLayerView'
-import {
-  selectActiveCourseLocationId,
-  selectActiveCourseProjectDocument,
-  selectMediaAssetFiles,
-  useEditorStore,
-} from '../store/editorStore'
-import { buildSceneThumbnailComposition } from './sceneThumbnailComposition'
-import { DEFAULT_SLIDE_CANVAS, sharedSlideFrameMapping } from '../../shared/slideCanvas'
+import type { ImageNode } from '../../shared/contracts/native-v1/types'
+import { useEditorStore } from '../store/editorStore'
 
-const THUMB_WIDTH = 160
-
-export function SceneThumbnail(props: {
-  locationId?: string
-  /**
-   * Out-of-scope callers may still pass a V8 scene. Drawing always uses the
-   * active Course Project V9 document and thumbnail state.
-   */
-  scene?: object
-} = {}) {
-  const ref = useRef<HTMLCanvasElement>(null)
-  const [shouldRender, setShouldRender] = useState(false)
-  const document = useEditorStore(selectActiveCourseProjectDocument)
-  const storeLocationId = useEditorStore(selectActiveCourseLocationId)
-  const locationId = props.locationId ?? storeLocationId
-  const assets = document?.assets ?? {}
-  const assetFiles = useEditorStore(selectMediaAssetFiles)
-  const components = useEditorStore((state) => state.componentPackages)
-  const thumbnailStateId = useMemo(() => {
-    if (!document || !locationId) return null
-    const location = document.locations.find((candidate) => candidate.id === locationId)
-    if (!location || location.kind !== 'slide-scene') return null
-    return resolveSlideThumbnailStateId(document, locationId)
-  }, [document, locationId])
-  const slideView = useMemo(() => {
-    if (!document || !locationId) return null
-    const location = document.locations.find((candidate) => candidate.id === locationId)
-    if (!location || location.kind !== 'slide-scene') return null
-    return buildSlideEditorView({
-      project: document,
-      locationId,
-      stateId: thumbnailStateId,
-    })
-  }, [document, locationId, thumbnailStateId])
-  const canvasSize = slideView?.canvas ?? DEFAULT_SLIDE_CANVAS
-  const thumbHeight = Math.max(1, Math.round(THUMB_WIDTH * canvasSize.height / canvasSize.width))
-  const scale = THUMB_WIDTH / canvasSize.width
-  const composition = useMemo(() => {
-    if (!document || !locationId || !slideView) return []
-    return buildSceneThumbnailComposition({
-      project: document,
-      locationId,
-      stateId: thumbnailStateId,
-    })
-  }, [document, locationId, slideView, thumbnailStateId])
-
+/** Static thumbnail rendering reuses professional paint functions and never mounts a runtime world. */
+export function SceneThumbnail({ locationId }: { locationId?: string; scene?: object } = {}) {
+  const view = useEditorStore(state => state.courseView)
+  const host = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(false)
+  const surfaceId = locationId ?? view.surfaceId
+  const source = view.project?.surfaces.find(surface => surface.id === surfaceId)
+  const project = useMemo(() => view.project ? resolveComponentPresentation(view.project, surfaceId ?? null,
+    source?.presentation?.thumbnailStateId ?? source?.presentation?.initialStateId ?? null) : null,
+  [view.project, surfaceId, source?.presentation])
+  const resources = view.views.find(item => item.documentId === view.activeDocumentId)?.model.resources ?? view.snapshot?.model.resources
   useEffect(() => {
-    const canvas = ref.current
-    if (!canvas) return
-    if (typeof IntersectionObserver === 'undefined') {
-      setShouldRender(true)
-      return
-    }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (!entries.some((entry) => entry.isIntersecting)) return
-        setShouldRender(true)
-        observer.disconnect()
-      },
-      { rootMargin: '240px 0px' },
-    )
-    observer.observe(canvas)
+    const element = host.current
+    if (!element) return
+    if (typeof IntersectionObserver === 'undefined') { setVisible(true); return }
+    const observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) { setVisible(true); observer.disconnect() } }, { rootMargin: '240px 0px' })
+    observer.observe(element)
     return () => observer.disconnect()
   }, [])
-
   useEffect(() => {
-    if (!shouldRender) return
-    const canvas = ref.current
-    const context = canvas?.getContext('2d')
-    if (!canvas || !context) return
+    const element = host.current, surface = project?.surfaces.find(value => value.id === surfaceId)
+    if (!element || !visible || !project || !surface) return
     let disposed = false
-    const urls: string[] = []
-    const draw = async () => {
-      context.clearRect(0, 0, THUMB_WIDTH, thumbHeight)
-      context.fillStyle = slideView?.backgroundColor ?? '#ffffff'
-      context.fillRect(0, 0, THUMB_WIDTH, thumbHeight)
-      const backgroundAssetId = slideView?.backgroundAssetId
-      if (backgroundAssetId) {
-        const meta = assets[backgroundAssetId]
-        const bytes = assetFiles[backgroundAssetId]
-        if (meta && bytes) {
-          const url = URL.createObjectURL(new Blob(
-            [Uint8Array.from(bytes)],
-            { type: meta.mimeType },
-          ))
-          urls.push(url)
+    const urls = new Map<string, string>()
+    const assetUrl = (id: string): string | null => {
+      if (urls.has(id)) return urls.get(id)!
+      const bytes = resources?.assets[id]
+      if (!bytes) return null
+      const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes)], { type: project.assets[id]?.mimeType }))
+      urls.set(id, url); return url
+    }
+    const dom = element.ownerDocument
+    const size = surface.designSize ?? { width: 1280, height: 720 }
+    const background = resolveComponentBackground(project, surface)
+    const page = dom.createElement('div')
+    Object.assign(page.style, { position: 'absolute', left: '0', top: '0', width: size.width + 'px', height: size.height + 'px',
+      transformOrigin: '0 0', pointerEvents: 'none', overflow: 'hidden', backgroundColor: background.color })
+    if (background.assetId) {
+      const url = assetUrl(background.assetId)
+      if (url) Object.assign(page.style, { backgroundImage: 'url("' + url + '")', backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit, backgroundRepeat: 'no-repeat', backgroundPosition: 'center' })
+    }
+    const diagnostics: string[] = []
+    const label = (target: HTMLElement, instance: ComponentInstance, reason: string) => {
+      target.dataset.thumbnailDiagnostic = reason
+      const definition = project.definitions[instance.definitionId]
+      target.textContent = definition?.title ?? instance.name ?? instance.definitionId
+      Object.assign(target.style, { border: '1px solid #5b9cff', background: '#e6efff', color: '#244778', display: 'grid', placeItems: 'center', fontSize: '20px', overflow: 'hidden' })
+      diagnostics.push((definition?.title ?? instance.definitionId) + '：' + reason)
+      element.title = diagnostics.join('\n')
+    }
+    const paint = (id: string, parent: HTMLElement) => {
+      const instance = project.instances[id], definition = instance && project.definitions[instance.definitionId]
+      if (!instance || !definition || !isComponentVisibleAtSurface(instance, surface.id) || definition.role === 'behavior') return
+      const wrapper = dom.createElement('div'), content = dom.createElement('div')
+      applyComponentPaintStyle(wrapper, instance)
+      Object.assign(wrapper.style, componentFrameStyle(instance.frame))
+      Object.assign(content.style, { width: '100%', height: '100%' })
+      wrapper.append(content); parent.append(wrapper)
+      const implementation = instance.implementationOverride ?? definition.implementation
+      const width = instance.frame?.width ?? 320, height = instance.frame?.height ?? 160
+      try {
+        if (implementation.kind === 'source') label(content, instance, '源码组件的静态缩略图；实际效果见预览')
+        else if (implementation.key === 'guoling.text') {
+          const data = textComponentDataSchema.parse(instance.data), text = renderTextComponent(dom, data)
+          content.append(text)
+          if (instance.frame) applyTextComponentLayout(text, measureTextComponent(text, instance.frame, data.sizing))
+        } else if (implementation.key === 'guoling.formula') content.append(renderFormulaComponent(dom, formulaComponentDataSchema.parse(instance.data)))
+        else if (implementation.key === 'guoling.shape') {
+          const canvas = dom.createElement('canvas'); canvas.width = Math.max(1, Math.ceil(width)); canvas.height = Math.max(1, Math.ceil(height))
+          Object.assign(canvas.style, { width: '100%', height: '100%' })
+          const context = canvas.getContext('2d'); if (!context) throw new Error('Canvas 不可用')
+          renderShape(context, shapeDataSchema.parse(instance.data), { width, height }); content.append(canvas)
+        } else if (implementation.key === 'guoling.table') content.innerHTML = renderTableSvg(parseTableData(instance.data), width, height, instance.id)
+        else if (implementation.key === 'guoling.chart') content.append(renderChart(dom, chartDataSchema.parse(instance.data), width, height, instance.id))
+        else if (implementation.key === 'guoling.image') {
+          const data = imageDataSchema.parse(instance.data), url = assetUrl(data.assetId)
+          if (!url) throw new Error('图片资源缺失')
           const image = new Image()
-          image.src = url
-          try {
-            await image.decode()
+          image.onload = () => {
             if (disposed) return
-            const sourceWidth = image.naturalWidth || meta.width || THUMB_WIDTH
-            const sourceHeight = image.naturalHeight || meta.height || thumbHeight
-            const scale = Math.max(THUMB_WIDTH / sourceWidth, thumbHeight / sourceHeight)
-            const width = sourceWidth * scale
-            const height = sourceHeight * scale
-            context.drawImage(image, (THUMB_WIDTH - width) / 2, (thumbHeight - height) / 2, width, height)
-          } catch {
-            // The authored background colour remains a visible fallback.
+            try {
+              const node: ImageNode = { ...data, id, name: data.alt, type: 'image', x: 0, y: 0, width, height, rotation: 0, opacity: 1, visible: true, locked: false, playbackInitialVisibility: 'inherit', preserveAspectRatio: true, safeAreas: [] }
+              const canvas = renderImageNodeCanvas(image, image.naturalWidth, image.naturalHeight, node, width, height)
+              Object.assign(canvas.style, { width: '100%', height: '100%' }); content.replaceChildren(canvas)
+            } catch (error) { label(content, instance, error instanceof Error ? error.message : '图片预览失败') }
           }
-        }
-      }
-      for (const entry of composition) {
-        if (disposed) break
-        const sharedLayer = entry.source === 'global' || entry.source === 'surface'
-        const sharedMapping = slideView && sharedLayer
-          ? sharedSlideFrameMapping(slideView.referenceCanvas, slideView.canvas)
-          : { scale: 1, offsetX: 0, offsetY: 0 }
-        const itemScale = scale * sharedMapping.scale
-        const offsetX = sharedMapping.offsetX * scale
-        const offsetY = sharedMapping.offsetY * scale
-        if (entry.kind === 'runtime-fallback') {
-          const { fallback } = entry
-          const meta = assets[fallback.assetId]
-          const bytes = assetFiles[fallback.assetId]
-          if (!meta || !bytes) continue
-          const url = URL.createObjectURL(new Blob(
-            [Uint8Array.from(bytes)],
-            { type: meta.mimeType },
-          ))
-          urls.push(url)
-          const image = new Image()
+          image.onerror = () => { if (!disposed) label(content, instance, '图片预览无法解码') }
           image.src = url
-          try {
-            await image.decode()
-            if (disposed) break
-            context.save()
-            context.globalAlpha = 1
-            if (fallback.coverage === 'scene') {
-              // A full-scene fallback replaces everything below its authored
-              // layer; a surface fallback preserves those editable nodes.
-              context.clearRect(0, 0, THUMB_WIDTH, thumbHeight)
-            }
-            const fallbackCanvas = sharedLayer && slideView ? slideView.referenceCanvas : canvasSize
-            context.drawImage(image, offsetX, offsetY, fallbackCanvas.width * itemScale, fallbackCanvas.height * itemScale)
-            context.restore()
-          } catch {
-            // Missing runtime fallback assets leave the editable thumbnail intact.
-          }
-          continue
-        }
-
-        const { item } = entry
-        if (item.kind === 'native') {
-          const scale = itemScale
-          const node = materializeNativeLayerItem(item)
-          const renderedText = node.type === 'text'
-            ? renderTextNodeCanvas(node, node.width, scale)
-            : null
-          const renderedFormula = node.type === 'formula'
-            ? renderFormulaNodeCanvas(node, node.width, node.height, scale)
-            : null
-          const visualWidth = renderedText?.width ?? renderedFormula?.width ?? node.width
-          const visualHeight = renderedText?.height ?? renderedFormula?.height ?? node.height
-          context.save()
-          context.translate(
-            (node.x + visualWidth / 2) * scale + offsetX,
-            (node.y + visualHeight / 2) * scale + offsetY,
-          )
-          context.rotate((node.rotation * Math.PI) / 180)
-          context.globalAlpha = node.opacity
-          if (node.type === 'shape') {
-            context.scale(scale, scale)
-            context.translate(-node.width / 2, -node.height / 2)
-            renderShapeCanvas(context, node)
-          } else if (node.type === 'text') {
-            context.drawImage(
-              renderedText!.canvas,
-              -renderedText!.width * scale / 2,
-              -renderedText!.height * scale / 2,
-              renderedText!.width * scale,
-              renderedText!.height * scale,
-            )
-          } else if (node.type === 'formula') {
-            context.drawImage(
-              renderedFormula!.canvas,
-              -renderedFormula!.width * scale / 2,
-              -renderedFormula!.height * scale / 2,
-              renderedFormula!.width * scale,
-              renderedFormula!.height * scale,
-            )
-          } else if (node.type === 'image') {
-            const meta = assets[node.assetId]
-            const bytes = assetFiles[node.assetId]
-            if (meta && bytes) {
-              const url = URL.createObjectURL(new Blob([Uint8Array.from(bytes)], { type: meta.mimeType }))
-              urls.push(url)
-              const image = new Image()
-              image.src = url
-              try {
-                await image.decode()
-                if (!disposed) {
-                  const rendered = renderImageNodeCanvas(
-                    image,
-                    image.naturalWidth || meta.width || node.width,
-                    image.naturalHeight || meta.height || node.height,
-                    node,
-                    node.width,
-                    node.height,
-                    scale,
-                  )
-                  context.drawImage(rendered, -node.width * scale / 2, -node.height * scale / 2, node.width * scale, node.height * scale)
-                }
-              } catch {
-                // Missing thumbnails remain represented by the empty frame.
-              }
-            }
-          } else if (node.type === 'video') {
-            const width = node.width * scale
-            const height = node.height * scale
-            context.fillStyle = '#0b1120'
-            context.fillRect(-width / 2, -height / 2, width, height)
-            context.fillStyle = '#f8fafc'
-            context.beginPath()
-            context.moveTo(-4, -7)
-            context.lineTo(9, 0)
-            context.lineTo(-4, 7)
-            context.closePath()
-            context.fill()
-          } else {
-            const width = node.width * scale
-            const height = node.height * scale
-            context.fillStyle = '#f8fafc'
-            context.strokeStyle = '#cbd5e1'
-            context.lineWidth = 1
-            context.fillRect(-width / 2, -height / 2, width, height)
-            context.strokeRect(-width / 2, -height / 2, width, height)
-          }
-          context.restore()
-          continue
-        }
-
-        const width = item.frame.width * itemScale
-        const height = item.frame.height * itemScale
-        const component = item.kind === 'component'
-          ? components[item.component.packageId]
-          : undefined
-        const thumbnailUrl = component?.thumbnailUrl
-        context.save()
-        context.translate(
-          (item.frame.x + item.frame.width / 2) * itemScale + offsetX,
-          (item.frame.y + item.frame.height / 2) * itemScale + offsetY,
-        )
-        context.rotate((item.rotation * Math.PI) / 180)
-        context.globalAlpha = item.opacity
-        context.fillStyle = '#151d2b'
-        context.fillRect(-width / 2, -height / 2, width, height)
-        let thumbnailDrawn = false
-        if (thumbnailUrl) {
-          const image = new Image()
-          image.src = thumbnailUrl
-          try {
-            await image.decode()
-            if (!disposed) {
-              const naturalWidth = image.naturalWidth || item.frame.width
-              const naturalHeight = image.naturalHeight || item.frame.height
-              const fit = Math.min(width / naturalWidth, height / naturalHeight)
-              const drawWidth = naturalWidth * fit
-              const drawHeight = naturalHeight * fit
-              context.drawImage(
-                image,
-                -drawWidth / 2,
-                -drawHeight / 2,
-                drawWidth,
-                drawHeight,
-              )
-              thumbnailDrawn = true
-            }
-          } catch {
-            // Fall through to the labelled component frame below.
-          }
-        }
-        context.strokeStyle = 'rgba(91, 156, 255, 0.8)'
-        context.lineWidth = 1
-        context.strokeRect(-width / 2, -height / 2, width, height)
-        if (!thumbnailDrawn) {
-          context.fillStyle = '#cfe1ff'
-          context.font = '600 8px "Microsoft YaHei", sans-serif'
-          context.textAlign = 'center'
-          context.textBaseline = 'middle'
-          context.fillText(
-            component?.manifest.name ?? item.label,
-            0,
-            0,
-            Math.max(12, width - 8),
-          )
-        }
-        context.restore()
-      }
+        } else if (implementation.key !== 'guoling.group') label(content, instance, '此组件的静态缩略图；实际效果见预览')
+      } catch (error) { label(content, instance, error instanceof Error ? error.message : '组件预览失败') }
+      instance.childIds?.forEach(child => paint(child, wrapper))
     }
-    void draw()
-    return () => {
-      disposed = true
-      urls.forEach((url) => URL.revokeObjectURL(url))
-    }
-  }, [assetFiles, assets, components, composition, scale, shouldRender, slideView, thumbHeight])
-
-  return <canvas ref={ref} className="scene-thumbnail" width={THUMB_WIDTH} height={thumbHeight} aria-hidden="true" />
+    element.replaceChildren(page)
+    project.global.underlay.forEach(id => paint(id, page)); surface.childIds.forEach(id => paint(id, page)); project.global.overlay.forEach(id => paint(id, page))
+    const fit = () => { const width = element.clientWidth || 160; const height = element.clientHeight || width * size.height / size.width; const scale = Math.min(width / size.width, height / size.height)
+      page.style.transform = 'translate(' + (width - size.width * scale) / 2 + 'px,' + (height - size.height * scale) / 2 + 'px) scale(' + scale + ')' }
+    fit()
+    const observer = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(fit)
+    observer?.observe(element)
+    element.title = diagnostics.join('\n')
+    return () => { disposed = true; observer?.disconnect(); for (const url of urls.values()) URL.revokeObjectURL(url); page.remove() }
+  }, [project, surfaceId, resources, visible])
+  const ratio = source?.designSize ?? { width: 1280, height: 720 }
+  return <div ref={host} className="scene-thumbnail" style={{ position: 'relative', aspectRatio: ratio.width + '/' + ratio.height, overflow: 'hidden' }} aria-hidden="true" />
 }

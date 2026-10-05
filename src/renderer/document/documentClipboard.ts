@@ -7,11 +7,13 @@ export interface PreparedClipboardResources<T> {
   resources: DocumentResources
   assetIds: Record<string, string>
   components: { from: ComponentIdentity; to: ComponentIdentity }[]
+  /** Formal instance identities allocated by the destination's existing clone planner. */
+  identities?: Record<string, string>
   prepared: T
 }
 export interface DocumentClipboardResourcePort<T> {
   /** Stage bytes/packages only. The canonical owner commits this handle with the body. */
-  prepareResources(input: { resources: DocumentResources; targetResources: DocumentResources }): Promise<PreparedClipboardResources<T>>
+  prepareResources(input: { resources: DocumentResources; targetResources: DocumentResources; content: DocumentContent; identities: Record<string, string>; identity?: 'copy' | 'move' }): Promise<PreparedClipboardResources<T>>
   discard(prepared: T): Promise<void>
 }
 export interface PreparedDocumentClipboard<T> {
@@ -22,7 +24,7 @@ export interface PreparedDocumentClipboard<T> {
 /** No live document or registry mutation occurs here. Caller must discard on stale target
  * or rejected commit, and pass the handle to its single canonical resource/body commit. */
 export async function prepareDocumentClipboard<T>(
-  source: { content: DocumentContent; resources: DocumentResources },
+  source: { content: DocumentContent; resources: DocumentResources; identity?: 'copy' | 'move' },
   targetResources: DocumentResources,
   port: DocumentClipboardResourcePort<T>,
   createId: () => string = () => crypto.randomUUID(),
@@ -31,23 +33,25 @@ export async function prepareDocumentClipboard<T>(
   const resources = documentResourcesSchema.parse(source.resources)
   validateDocumentResources(content.blocks, resources)
   const target = documentResourcesSchema.parse(targetResources)
-  const staged = await port.prepareResources({ resources, targetResources: target })
+  const ids = new Map<string, string>()
+  const oldIds = new Set<string>()
+  walkDocument(content.blocks, block => {
+    oldIds.add(block.id)
+    if (block.type === 'formula') oldIds.add(block.formulaId)
+    if (block.type === 'list') block.items.forEach(item => oldIds.add(item.id))
+    if (block.type === 'table') { block.rows.forEach(row => oldIds.add(row.id)); block.columns.forEach(column => oldIds.add(column.id)) }
+    for (const slot of documentTextSlots(block)) for (const atom of slot.content.inlines) if (atom.type === 'math') oldIds.add(atom.formulaId)
+  })
+  const generated = new Set<string>()
+  for (const id of oldIds) {
+    if (source.identity === 'move') { ids.set(id, id); continue }
+    const next = createId()
+    if (oldIds.has(next) || generated.has(next)) throw new Error('复制身份生成器返回重复身份')
+    generated.add(next); ids.set(id, next)
+  }
+  const staged = await port.prepareResources({ resources, targetResources: target, content, identities: Object.fromEntries(ids), identity: source.identity ?? 'copy' })
   try {
-    const ids = new Map<string, string>()
-    const oldIds = new Set<string>()
-    walkDocument(content.blocks, block => {
-      oldIds.add(block.id)
-      if (block.type === 'formula') oldIds.add(block.formulaId)
-      if (block.type === 'list') block.items.forEach(item => oldIds.add(item.id))
-      if (block.type === 'table') { block.rows.forEach(row => oldIds.add(row.id)); block.columns.forEach(column => oldIds.add(column.id)) }
-      for (const slot of documentTextSlots(block)) for (const atom of slot.content.inlines) if (atom.type === 'math') oldIds.add(atom.formulaId)
-    })
-    const generated = new Set<string>()
-    for (const id of oldIds) {
-      const next = createId()
-      if (oldIds.has(next) || generated.has(next)) throw new Error('复制身份生成器返回重复身份')
-      generated.add(next); ids.set(id, next)
-    }
+    for (const [id,next] of Object.entries(staged.identities ?? {})) if(oldIds.has(id))ids.set(id,next)
     const rewriteAsset = (id: string) => {
       if (!Object.hasOwn(staged.assetIds, id)) throw new Error(`尚未准备素材：${id}`)
       return staged.assetIds[id]

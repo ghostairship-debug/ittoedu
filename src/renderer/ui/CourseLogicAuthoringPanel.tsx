@@ -1,18 +1,18 @@
 import { useState, type ReactNode } from 'react'
 import type {
-  CourseNavigationGuard,
-  CourseProjectDocument,
   CourseStateCondition,
   CourseStateDeclaration,
-} from '../../shared/courseProjectTypes'
+} from '../../shared/contracts/course-state/types'
 import type {
+  CourseNavigationGuard,
+  CourseLogicAuthoringView,
   CourseLogicAuthoringCommand,
   CourseLogicAuthoringResult,
 } from '../course/courseLogicAuthoringCommands'
 
 interface CourseLogicAuthoringPanelProps {
-  project: CourseProjectDocument
-  onCommand(command: CourseLogicAuthoringCommand): CourseLogicAuthoringResult
+  project: CourseLogicAuthoringView
+  onCommand(command: CourseLogicAuthoringCommand): Promise<CourseLogicAuthoringResult>
 }
 
 type CourseStateValueType = CourseStateDeclaration['valueType']
@@ -36,8 +36,8 @@ interface GuardConditionDraft {
 interface GuardDraft {
   id: string
   allSources: boolean
-  fromLocationIds: string[]
-  toLocationIds: string[]
+  fromSurfaceIds: string[]
+  toSurfaceIds: string[]
   match: CourseNavigationGuard['match']
   conditions: GuardConditionDraft[]
   message: string
@@ -80,7 +80,7 @@ function nextStableId(prefix: string, used: ReadonlySet<string>): string {
 
 function stateDraftFrom(
   declaration: CourseStateDeclaration | null,
-  project: CourseProjectDocument,
+  project: CourseLogicAuthoringView,
 ): StateDraft {
   if (!declaration) {
     return {
@@ -165,7 +165,7 @@ function conditionDraftFrom(
 }
 
 function newConditionDraft(
-  project: CourseProjectDocument,
+  project: CourseLogicAuthoringView,
 ): GuardConditionDraft {
   return {
     type: 'exists',
@@ -179,7 +179,7 @@ function newConditionDraft(
 
 function guardDraftFrom(
   guard: CourseNavigationGuard | null,
-  project: CourseProjectDocument,
+  project: CourseLogicAuthoringView,
 ): GuardDraft {
   if (!guard) {
     return {
@@ -188,8 +188,8 @@ function guardDraftFrom(
         new Set(project.navigationGuards.map((candidate) => candidate.id)),
       ),
       allSources: true,
-      fromLocationIds: [],
-      toLocationIds: project.locations[0] ? [project.locations[0].id] : [],
+      fromSurfaceIds: [],
+      toSurfaceIds: project.surfaces[0] ? [project.surfaces[0].id] : [],
       match: 'all',
       conditions: [newConditionDraft(project)],
       message: '尚未满足进入条件',
@@ -197,9 +197,9 @@ function guardDraftFrom(
   }
   return {
     id: guard.id,
-    allSources: guard.fromLocationIds === undefined,
-    fromLocationIds: [...(guard.fromLocationIds ?? [])],
-    toLocationIds: [...guard.toLocationIds],
+    allSources: guard.fromSurfaceIds === undefined,
+    fromSurfaceIds: [...(guard.fromSurfaceIds ?? [])],
+    toSurfaceIds: [...guard.toSurfaceIds],
     match: guard.match,
     conditions: guard.conditions.map(conditionDraftFrom),
     message: guard.message,
@@ -261,14 +261,14 @@ function compareValueFromDraft(
 
 function guardFromDraft(
   draft: GuardDraft,
-  project: CourseProjectDocument,
+  project: CourseLogicAuthoringView,
 ): { ok: true; guard: CourseNavigationGuard } | { ok: false; reason: string } {
   const id = draft.id.trim()
   if (!id) return { ok: false, reason: '守卫 ID 不能为空。' }
-  if (!draft.allSources && draft.fromLocationIds.length === 0) {
+  if (!draft.allSources && draft.fromSurfaceIds.length === 0) {
     return { ok: false, reason: '请选择至少一个来源位置，或启用“所有来源位置”。' }
   }
-  if (draft.toLocationIds.length === 0) {
+  if (draft.toSurfaceIds.length === 0) {
     return { ok: false, reason: '导航守卫必须选择至少一个目标位置。' }
   }
   if (draft.conditions.length === 0) {
@@ -296,8 +296,8 @@ function guardFromDraft(
     guard: {
       id,
       effect: 'block',
-      ...(draft.allSources ? {} : { fromLocationIds: [...draft.fromLocationIds] }),
-      toLocationIds: [...draft.toLocationIds],
+      ...(draft.allSources ? {} : { fromSurfaceIds: [...draft.fromSurfaceIds] }),
+      toSurfaceIds: [...draft.toSurfaceIds],
       match: draft.match,
       conditions,
       message,
@@ -315,9 +315,9 @@ function toggleId(
 }
 
 interface StateDeclarationEditorProps {
-  project: CourseProjectDocument
+  project: CourseLogicAuthoringView
   declaration: CourseStateDeclaration | null
-  onCommand(command: CourseLogicAuthoringCommand): CourseLogicAuthoringResult
+  onCommand(command: CourseLogicAuthoringCommand): Promise<CourseLogicAuthoringResult>
   onDone?(): void
 }
 
@@ -331,7 +331,7 @@ function StateDeclarationEditor({
   const [feedback, setFeedback] = useState<string | null>(null)
   const editorName = declaration?.key ?? '新状态'
 
-  const save = () => {
+  const save = async () => {
     const parsed = declarationFromDraft(draft)
     if (!parsed.ok) {
       setFeedback(parsed.reason)
@@ -351,14 +351,14 @@ function StateDeclarationEditor({
           baseRevision: project.revision,
           declaration: parsed.declaration,
         }
-    const result = onCommand(command)
+    const result = await onCommand(command)
     setFeedback(result.ok ? null : result.reason)
     if (result.ok) onDone?.()
   }
 
-  const remove = () => {
+  const remove = async () => {
     if (!declaration) return
-    const result = onCommand({
+    const result = await onCommand({
       kind: 'course-state.delete',
       projectId: project.id,
       baseRevision: project.revision,
@@ -466,9 +466,9 @@ function StateDeclarationEditor({
 }
 
 interface NavigationGuardEditorProps {
-  project: CourseProjectDocument
+  project: CourseLogicAuthoringView
   guard: CourseNavigationGuard | null
-  onCommand(command: CourseLogicAuthoringCommand): CourseLogicAuthoringResult
+  onCommand(command: CourseLogicAuthoringCommand): Promise<CourseLogicAuthoringResult>
   onDone?(): void
 }
 
@@ -495,7 +495,7 @@ function NavigationGuardEditor({
     }))
   }
 
-  const save = () => {
+  const save = async () => {
     const parsed = guardFromDraft(draft, project)
     if (!parsed.ok) {
       setFeedback(parsed.reason)
@@ -515,14 +515,14 @@ function NavigationGuardEditor({
           baseRevision: project.revision,
           guard: parsed.guard,
         }
-    const result = onCommand(command)
+    const result = await onCommand(command)
     setFeedback(result.ok ? null : result.reason)
     if (result.ok) onDone?.()
   }
 
-  const remove = () => {
+  const remove = async () => {
     if (!guard) return
-    const result = onCommand({
+    const result = await onCommand({
       kind: 'navigation-guard.delete',
       projectId: project.id,
       baseRevision: project.revision,
@@ -559,44 +559,44 @@ function NavigationGuardEditor({
           />
           所有来源位置
         </label>
-        {!draft.allSources ? project.locations.map((location) => (
+        {!draft.allSources ? project.surfaces.map((location) => (
           <label className="toggle-row" key={`from-${location.id}`}>
             <input
               type="checkbox"
-              aria-label={`来源位置 ${location.label}`}
-              checked={draft.fromLocationIds.includes(location.id)}
+              aria-label={`来源位置 ${location.title}`}
+              checked={draft.fromSurfaceIds.includes(location.id)}
               onChange={(event) => setDraft((current) => ({
                 ...current,
-                fromLocationIds: toggleId(
-                  current.fromLocationIds,
+                fromSurfaceIds: toggleId(
+                  current.fromSurfaceIds,
                   location.id,
                   event.target.checked,
                 ),
               }))}
             />
-            {location.label}
+            {location.title}
           </label>
         )) : null}
       </fieldset>
 
       <fieldset className="form-field">
         <legend>目标位置</legend>
-        {project.locations.map((location) => (
+        {project.surfaces.map((location) => (
           <label className="toggle-row" key={`to-${location.id}`}>
             <input
               type="checkbox"
-              aria-label={`目标位置 ${location.label}`}
-              checked={draft.toLocationIds.includes(location.id)}
+              aria-label={`目标位置 ${location.title}`}
+              checked={draft.toSurfaceIds.includes(location.id)}
               onChange={(event) => setDraft((current) => ({
                 ...current,
-                toLocationIds: toggleId(
-                  current.toLocationIds,
+                toSurfaceIds: toggleId(
+                  current.toSurfaceIds,
                   location.id,
                   event.target.checked,
                 ),
               }))}
             />
-            {location.label}
+            {location.title}
           </label>
         ))}
       </fieldset>
@@ -893,7 +893,7 @@ export function CourseLogicAuthoringPanel({
             key={`${project.revision}:guard:${guard.id}`}
             summary={(
               <>
-                {guard.id} · {guard.match} · {guard.toLocationIds.length} 个目标
+                {guard.id} · {guard.match} · {guard.toSurfaceIds.length} 个目标
               </>
             )}
           >
@@ -929,3 +929,4 @@ export function CourseLogicAuthoringPanel({
     </LazyDetails>
   )
 }
+

@@ -63,7 +63,6 @@ interface Session {
 }
 
 const STOPPED = '此外部会话已被用户在果铃中停止，后续调用不会执行。如需继续，请在客户端重新连接（重新初始化 MCP 会话）。'
-const TICKET_HINT = '可选。通常省略：果铃自动为每次调用编号。仅当你要显式重试某个已提交调用时，传入其回执里的 ticket 并保持工具名和 arguments 完全相同。'
 const loadToolsSchema = z.object({ families: z.array(z.enum(toolFamilies)).min(1) }).strict()
 const serviceSchemas = {
   'workspace.list': z.object({}).strict(),
@@ -246,8 +245,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     if (call.method === 'tools/list') {
       session.listChanged = false
       return { tools: (await this.catalog(session)).map(tool => ({ name: tool.name, title: tool.label, description: tool.description,
-        inputSchema: { type: 'object', additionalProperties: false, properties: { arguments: tool.schema, ticket: { type: 'string', description: TICKET_HINT } },
-          ...(Array.isArray(tool.schema.required) && tool.schema.required.length || tool.schema.anyOf || tool.schema.oneOf ? { required: ['arguments'] } : {}) },
+        inputSchema: tool.schema,
         ...(tool.read ? { annotations: { readOnlyHint: true } } : {}) })) }
     }
     if (call.method !== 'tools/call') throw new McpProtocolError(-32601, '不支持此 MCP 方法')
@@ -274,9 +272,10 @@ export class ExternalMcpService implements ResidentMcpHandler {
 
   private async callTool(session: Session, call: ResidentMcpCall): Promise<unknown> {
     const name = typeof call.params.name === 'string' ? call.params.name : ''
-    const envelope = call.params.arguments === undefined ? {} : call.params.arguments
-    if (!record(envelope) || Object.keys(envelope).some(key => key !== 'arguments' && key !== 'ticket')) throw new McpProtocolError(-32602, '工具参数应为 { arguments, ticket? }')
-    const input = envelope.arguments === undefined ? {} : envelope.arguments, supplied = envelope.ticket
+    const input = call.params.arguments ?? {}
+    if (!record(input)) throw new McpProtocolError(-32602, '工具 arguments 必须是对象')
+    // Optional explicit replay identity is transport metadata, never part of a tool's input schema.
+    const supplied = record(call.params._meta) ? call.params._meta['guoling/ticket'] : undefined
     if (supplied !== undefined && (typeof supplied !== 'string' || !/^[A-Za-z0-9_.:-]{1,200}$/.test(supplied))) throw new McpProtocolError(-32602, 'ticket 无效；通常省略即可')
     const tool = (await this.catalog(session)).find(item => item.name === name)
     if (!tool) return this.reply(session, failure('unknown-tool', '工具不存在，或在本会话的权限与已打开的文档下不可用。可先打开文档，或用 tools.load 展开工具族。'))
@@ -336,7 +335,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
         session.listChanged = true
         return { kind: 'read', data: { loaded: families.filter(family => available.some(item => item.family === family)), available } }
       }
-      if (!tool.read && session.permission === 'ask' && tool.kind !== 'file'
+      if (!tool.read && session.permission === 'ask' && tool.kind !== 'file' && tool.kind !== 'course'
         && !await this.options.confirm({ clientName: session.clientName, label: tool.label, reason: 'ask' })) return failure('approval-denied', '用户未批准此次修改，未执行。')
       if (tool.kind === 'gateway') return await this.options.gateway.execute(runId, ticket, { name: tool.name, input })
       if (tool.kind === 'file') return await this.file(session, runId, ticket, tool, input, true)
@@ -345,7 +344,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
         lookupChild: async callId => session.children.get(callId) ?? null,
         executeChild: async (callId, child: ModelToolCall) => {
           const result = isAgentFileTool(child.name)
-            ? await this.file(session, runId, callId, { name: child.name, label: fileLabels[child.name], kind: 'file', read: false, description: '', schema: {} }, child.input, false)
+            ? await this.file(session, runId, callId, { name: child.name, label: tool.label, kind: 'file', read: false, description: '', schema: {} }, child.input, true)
             : await this.options.gateway.execute(runId, callId, child)
           session.children.set(callId, result)
           return result
@@ -366,7 +365,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     }
     const outcome = await this.options.files.execute(context, name, input, this.options.gateway.operationIdentity(runId, ticket))
     if (!outcome.opened) return { kind: 'read', data: outcome.data }
-    const writable = await this.options.gateway.attachRunDocument(runId, outcome.opened.documentId, outcome.opened.writable)
+    const writable = await this.options.gateway.attachRunDocument(runId, outcome.opened.documentId, outcome.opened.writable, 'select')
     const target = await this.options.gateway.issueTarget(runId, outcome.opened.documentId, { kind: 'document' })
     session.listChanged = true
     return { kind: 'read', data: { ...outcome.data as object, target, writable } }
@@ -403,7 +402,8 @@ export class ExternalMcpService implements ResidentMcpHandler {
     const handles = async (documentId: string) => {
       const snapshot = this.options.registry.list().find(item => item.documentId === documentId)
       if (!snapshot) return null
-      const writable = await this.options.gateway.attachRunDocument(runId, documentId, writableFor(snapshot.binding.kind === 'file' ? snapshot.binding.path : undefined))
+      const writable = await this.options.gateway.attachRunDocument(runId, documentId,
+        writableFor(snapshot.binding.kind === 'file' ? snapshot.binding.path : undefined), documentId === ui?.activeDocumentId ? 'initialize' : undefined)
       session.listChanged = true
       return { writable, target: await this.options.gateway.issueTarget(runId, documentId, { kind: 'document' }) }
     }

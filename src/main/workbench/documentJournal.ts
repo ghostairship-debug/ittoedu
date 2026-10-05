@@ -78,7 +78,7 @@ function checkState(state: DurableDocumentState, documentId: string): void {
       !Array.isArray(state.operations) || !Array.isArray(state.stoppedRuns)) throw new Error('恢复日志状态无效')
   const models = [state.model, ...state.past.flatMap(item => [item.before, item.after]), ...state.future.flatMap(item => [item.before, item.after])]
   for (const model of models) {
-    if (!model || !['markdown', 'text', 'course-v9'].includes(model.kind) || !model.resources ||
+    if (!model || !['markdown', 'text', 'course-v9', 'course-v10'].includes(model.kind) || !model.resources ||
         ((model.kind === 'markdown' || model.kind === 'text') && typeof model.source !== 'string')) throw new Error('恢复日志文档无效')
     const bytes = [...Object.values(model.resources.assets), ...Object.values(model.resources.components).flatMap(files => Object.values(files))]
     if (bytes.some(value => !(value instanceof Uint8Array))) throw new Error('恢复日志资源无效')
@@ -453,7 +453,7 @@ export function createDocumentJournal(options: { directory: string }): DocumentJ
     try { intent = JSON.parse(bytes) as SaveIntent } catch { throw new Error('保存恢复记录损坏') }
     if (intent.schemaVersion !== 1 || intent.documentId !== documentId || !intent.epoch ||
       !Number.isSafeInteger(intent.revision) || intent.revision < 0 ||
-      !['markdown', 'text', 'course-v9'].includes(intent.kind) ||
+      !['markdown', 'text', 'course-v9', 'course-v10'].includes(intent.kind) ||
       !intent.sourceBinding || !['file', 'untitled'].includes(intent.sourceBinding.kind) ||
       (intent.sourceBinding.kind === 'file' && (!path.isAbsolute(intent.sourceBinding.path) ||
         !Number.isSafeInteger(intent.sourceBinding.bindingVersion) || intent.sourceBinding.bindingVersion < 1 ||

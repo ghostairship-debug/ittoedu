@@ -27,7 +27,7 @@ export class AgentFileText {
   }
 
   private async source(filename: string): Promise<Source> {
-    if (sourceFileKind(filename) === 'course-v9') throw new Error('H5 演示须通过正式文档工具读取，不能按普通 UTF-8 源文处理')
+    if (sourceFileKind(filename) === 'course-v10') throw new Error('H5 演示须通过正式文档工具读取，不能按普通 UTF-8 源文处理')
     const snapshot = this.live(filename)
     if (snapshot) {
       if (!isSourceDocumentModel(snapshot.model)) throw new Error('当前文档不是普通源文件')
@@ -39,7 +39,7 @@ export class AgentFileText {
   }
 
   async read(context: AgentFileContext, filename: string, limit = 8_000, cursor?: string, _operationId: string = randomUUID()): Promise<AgentFileOutcome> {
-    if (sourceFileKind(filename) === 'course-v9') throw new Error('H5 演示须通过正式文档工具读取')
+    if (sourceFileKind(filename) === 'course-v10') throw new Error('H5 演示须通过正式文档工具读取')
     const opened = this.live(filename)
     if (!opened) {
       const position = cursor ? this.pages.get(cursor) : undefined
@@ -186,7 +186,7 @@ export class AgentFileText {
   }
 
   private assertText(filename: string, content: string): void {
-    if (sourceFileKind(filename) === 'course-v9') throw new Error('不能把普通源文写入 H5 演示归档')
+    if (sourceFileKind(filename) === 'course-v10') throw new Error('不能把普通源文写入 H5 演示归档')
     textDriver.validate({ kind: 'text', source: content, resources: { assets: {}, components: {} } })
   }
 }

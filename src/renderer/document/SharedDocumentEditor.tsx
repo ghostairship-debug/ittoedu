@@ -20,7 +20,10 @@ import { parseDocumentMarkdown, serializeDocumentMarkdown, type MarkdownDocument
 import type { DocumentDiagnostic, DocumentSelection, DocumentContextSelection } from '../../shared/document/ports'
 import { mapDocumentSelectionToSource, type MarkdownSourceMap } from '../../shared/document/markdownSourceMap'
 import type { TextRunStyle } from '../../shared/contracts/native-v1/types'
-import { createLayoutEditor, DOCUMENT_OBJECT_CONTEXT_MENU_EVENT, type DocumentObjectContextMenuDetail, type DocumentOperation } from './editorSession'
+import { buildFlowTextStyleCss } from '../../shared/flowRichText'
+import { Plugin } from 'prosemirror-state'
+import { Decoration, DecorationSet } from 'prosemirror-view'
+import { createLayoutEditor, createDocumentDraftSession, DOCUMENT_OBJECT_CONTEXT_MENU_EVENT, type DocumentObjectContextMenuDetail, type DocumentOperation, type DocumentContentScope, type DocumentCommitResult } from './editorSession'
 import { documentBlockMenu, applyDocumentBlockCommand, type DocumentBlockCommand } from './documentBlockCommands'
 import { DocumentBlockHandle, documentBlockDragId } from './DocumentBlockHandle'
 import { documentTableCommandLabels, type DocumentTableCommand } from './documentTableCommands'
@@ -30,7 +33,7 @@ import { fromEditorDocument, toEditorDocument } from './documentAdapter'
 import { documentEditorSchema } from './editorSchema'
 import { NodeSelection, Selection, TextSelection, type EditorState } from 'prosemirror-state'
 import { CellSelection } from 'prosemirror-tables'
-import { toggleMark, setBlockType } from 'prosemirror-commands'
+import { toggleMark } from 'prosemirror-commands'
 import { describeDocumentMath, parseDocumentMath } from '../../shared/document/math'
 import { type DocumentBlock } from '../../shared/document/content'
 import type { DocumentClipboardResourcePort } from './documentClipboard'
@@ -61,11 +64,37 @@ function visibleEditorBounds(editor: HTMLElement): { left: number; right: number
   return { left, right, top, bottom }
 }
 
-export function readDocumentFormatting(state: EditorState) {
+export type DocumentInlineStyleDefaults = (blockId: string) => TextRunStyle | undefined
+function inlineBlockId(state: EditorState, position: number): string {
+  const point = state.doc.resolve(position)
+  for (let depth = point.depth; depth > 0; depth--) {
+    const id = point.node(depth).attrs.id
+    if (typeof id === 'string') return id
+  }
+  return ''
+}
+/** Presentation only: defaults never become document marks, inlines or history. */
+export function documentInlineDefaultDecorations(state: EditorState, defaults?: DocumentInlineStyleDefaults): DecorationSet {
+  if (!defaults) return DecorationSet.empty
+  const decorations: Decoration[] = []
+  state.doc.descendants((node, position) => {
+    if (!node.isInline || node.type === documentEditorSchema.nodes.hard_break) return
+    const base = defaults(inlineBlockId(state, position))
+    if (!base) return
+    const own = node.marks.find(mark => mark.type === documentEditorSchema.marks.style)?.attrs.value ?? {}
+    const style = node.type === documentEditorSchema.nodes.math
+      ? { ...(base.fontSize === undefined ? {} : { fontSize: base.fontSize }), ...(base.color === undefined ? {} : { color: base.color }), ...node.attrs.data.style, ...own }
+      : { ...base, ...own }
+    const css = buildFlowTextStyleCss(style)
+    if (css) decorations.push(Decoration.inline(position, position + node.nodeSize, { style: css, 'data-document-inline-defaults': 'true' }))
+  })
+  return DecorationSet.create(state.doc, decorations)
+}
+export function readDocumentFormatting(state: EditorState, defaults?: DocumentInlineStyleDefaults) {
   const samples: TextRunStyle[] = []
-  const sample = (marks: typeof state.selection.$from.parent.marks) => samples.push(marks.find(mark => mark.type === documentEditorSchema.marks.style)?.attrs.value ?? {})
-  if (state.selection.empty) sample(state.storedMarks ?? state.selection.$from.marks())
-  else for (const range of state.selection.ranges) state.doc.nodesBetween(range.$from.pos, range.$to.pos, node => { if (node.isInline && !node.isTextblock) sample(node.marks) })
+  const sample = (marks: typeof state.selection.$from.parent.marks, position: number) => samples.push({ ...defaults?.(inlineBlockId(state, position)), ...marks.find(mark => mark.type === documentEditorSchema.marks.style)?.attrs.value })
+  if (state.selection.empty) sample(state.storedMarks ?? state.selection.$from.marks(), state.selection.from)
+  else for (const range of state.selection.ranges) state.doc.nodesBetween(range.$from.pos, range.$to.pos, (node, position) => { if (node.isInline && !node.isTextblock) sample(node.marks, position) })
   const values = <T,>(get: (style: TextRunStyle) => T): T | 'mixed' => {
     const first = get(samples[0] ?? {})
     return samples.some(style => get(style) !== first) ? 'mixed' : first
@@ -76,20 +105,32 @@ export function readDocumentFormatting(state: EditorState) {
 
 export interface SharedDocumentEditorProps {
   toolbarHost?: HTMLElement | null
+  /** The caller's saved field shape; the full document editor remains the default. */
+  contentScope?: DocumentContentScope
+  /** Host-owned whole-text defaults, resolved per formal block; explicit run false/null wins. */
+  inlineStyleDefaults?: DocumentInlineStyleDefaults
   document: MarkdownDocument
   revision: string
   sourceDraft?: string
+  /** Diagnostics retained with a rejected local draft when its workspace is restored. */
+  sourceDiagnostics?: readonly DocumentDiagnostic[]
   sourceMap?: MarkdownSourceMap
   initialMode?: 'layout' | 'source'
   readOnly?: boolean
   renderObject?(block: DocumentBlock, container: HTMLElement): (() => void) | void
   runtimeSpacers?: readonly { readonly blockId: string; readonly height: number }[]
   objectRevision?: unknown
+  beforeProjectionMutation?():void
+  afterProjectionMutation?():void
   clipboardContext?: unknown
   clipboardResourcePort?(context: unknown): DocumentClipboardResourcePort<unknown>
   target?: 'flow' | 'file'
   resolveImage?: MarkdownOptions['resolveImage']
-  onChange(document: MarkdownDocument, operation: DocumentOperation): boolean | void
+  onChange(document: MarkdownDocument, operation: DocumentOperation): DocumentCommitResult
+  /** Local editable content, before the caller's formal commit ACK. */
+  onDocumentDraft?(document: MarkdownDocument, operation: DocumentOperation): void
+  /** Explicit discard only; releases caller-owned draft handles restored outside this view. */
+  onDiscardDraft?(): void
   onDraft(source: string, diagnostics: DocumentDiagnostic[]): void
   onCompositionChange?(composing: boolean, source: string): void
   onSelection?(selection: DocumentSelection | null): void
@@ -115,7 +156,13 @@ export interface SharedDocumentEditorProps {
   onRedo(): void
 }
 export interface SharedDocumentEditorHandle {
+  /** Applies a future typing style at the actual PM caret; it creates no document transaction. */
+  applyInlineStyle(style: TextRunStyle): boolean
   flush(): { ready: boolean; source: string; diagnostics: DocumentDiagnostic[] }
+  /** Flush local input and wait for its actual commit ACK before save/history/navigation. */
+  drain(): Promise<{ ready: boolean; source: string; diagnostics: DocumentDiagnostic[] }>
+  /** Uses the same explicit discard as the draft UI, including the caller's cleanup. */
+  discardDraft(): Promise<void>
   getContextualEditTarget(): DocumentContextSelection | null
   /** Focus a committed editable paragraph without authoring a transaction. */
   focusBlock(blockId: string): boolean
@@ -128,9 +175,13 @@ export interface SharedDocumentEditorHandle {
 /** The caller owns persistence and undo; neither editor installs a history extension. */
 export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, SharedDocumentEditorProps>(function SharedDocumentEditor(props, ref) {
   const latest = useRef(props); latest.current = props
+  const documentScope = (props.contentScope ?? 'document') === 'document'
   const [format, setFormat] = useState<ReturnType<typeof readDocumentFormatting>>({ fontFamily: undefined, fontSize: undefined, flags: { bold: false, italic: false, underline: false, strike: false, emphasis: false } })
-  const [mode, setMode] = useState<'layout' | 'source'>(props.initialMode ?? (props.sourceDraft === undefined ? 'layout' : 'source'))
-  const [diagnostics, setDiagnostics] = useState<DocumentDiagnostic[]>([])
+  const [mode, setMode] = useState<'layout' | 'source'>(documentScope ? props.initialMode ?? (props.sourceDraft === undefined ? 'layout' : 'source') : 'layout')
+  const [diagnostics, setDiagnostics] = useState<DocumentDiagnostic[]>(() => [...(props.sourceDiagnostics ?? [])])
+  const diagnosticsRef = useRef<DocumentDiagnostic[]>([...(props.sourceDiagnostics ?? [])])
+  const restoredDiagnostics = useRef(Boolean(props.sourceDiagnostics?.length))
+  function reportDiagnostics(issues: DocumentDiagnostic[]) { diagnosticsRef.current = issues; setDiagnostics(issues) }
   const [mathDraft, setMathDraft] = useState<{ latex: string; accessibleText: string; display: boolean; formulaId: string; from: number; to: number } | null>(null)
   const [activeBlock, setActiveBlock] = useState<{ id: string; rect: { left: number; top: number; height: number } } | null>(null)
   const [linkDraft, setLinkDraft] = useState<string | null>(null)
@@ -166,6 +217,10 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const pointerGesture = usePointerGesture(rootElement)
   const toolbarRef = useRef<HTMLDivElement>(null)
   const draft = useRef(props.sourceDraft ?? serializeDocumentMarkdown(props.document, props.target))
+  const draftSession = useRef(createDocumentDraftSession(props.document)).current
+  const draftOwner = useRef<SharedDocumentEditorProps | null>(null)
+  const sourceInvalid = useRef(false)
+  const latestOperation = useRef<string | null>(null)
   const layoutHost = useRef<HTMLDivElement>(null)
   const sourceHost = useRef<HTMLDivElement>(null)
   const layout = useRef<ReturnType<typeof createLayoutEditor> | null>(null)
@@ -179,13 +234,17 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   const contextualTargetRef = useRef<DocumentContextSelection | null>(null)
   const suppliedProjection = useMemo<MarkdownProjection>(() => {
     const source = props.sourceDraft ?? serializeDocumentMarkdown(props.document, props.target)
+    if (!documentScope) return { source, document: props.document, sourceMap: { blocks: [] } }
     if (props.sourceMap) return { source, document: props.document, sourceMap: props.sourceMap }
     const result = parseDocumentMarkdown(source, { createId: () => crypto.randomUUID(), target: props.target, resolveImage: props.resolveImage })
     if (result.status === 'valid' && sameMarkdownContent(result.document, props.document)) { bindMarkdownIdentities(result, props.document); return result }
     return { source, document: props.document, sourceMap: { blocks: [] } }
-  }, [props.sourceMap, props.sourceDraft, props.document, props.target, props.revision])
+  }, [props.sourceMap, props.sourceDraft, props.document, props.target, props.revision, documentScope])
   const projection = useRef(suppliedProjection), receivedProjection = useRef(suppliedProjection)
-  if (receivedProjection.current !== suppliedProjection) { projection.current = suppliedProjection; receivedProjection.current = suppliedProjection }
+  if (receivedProjection.current !== suppliedProjection) {
+    if (!draftSession.retained && !sourceInvalid.current && !restoredDiagnostics.current) { projection.current = suppliedProjection; draftSession.receive(suppliedProjection.document) }
+    receivedProjection.current = suppliedProjection
+  }
   const fallbackMap = projection.current.sourceMap
   const mapRef = useRef(fallbackMap); mapRef.current = fallbackMap
   const restoreSourceSelection = useRef(false)
@@ -230,10 +289,13 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     }
     return () => { window.removeEventListener('scroll', position, true); window.removeEventListener('resize', position); observer?.disconnect(); mutation?.disconnect() }
   }, [contextualTarget, mode, localPin])
-  const fail = (message: string) => setDiagnostics([{ message, offset: 0, endOffset: 0, line: 1, column: 1 }])
+  const fail = (message: string) => reportDiagnostics([{ message, offset: 0, endOffset: 0, line: 1, column: 1 }])
   const previewBlocked = () => setCommandError('正在生成的范围暂时只读。请先停止生成，再编辑这一处。')
   const pinPlugin = useMemo(() => pinnedSelectionPlugin(), [])
   const previewPlugin = useMemo(() => layoutPreviewPlugin(previewBlocked), [])
+  const inlineDefaultsPlugin = useMemo(() => new Plugin({ props: {
+    decorations: state => documentInlineDefaultDecorations(state, latest.current.inlineStyleDefaults),
+  } }), [])
   function publishContextualTarget(target: DocumentContextSelection | null) {
     manualTarget.current = target
     latest.current.onContextualTargetChange?.(target)
@@ -261,7 +323,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     const ranges = mapped.status === 'mapped' ? mapped.ranges : null
     const blockId = selection.kind === 'cells' ? selection.tableId : selection.kind === 'object' ? selection.blockId : selection.head.blockId
     const block = latest.current.document.content.blocks.find(item => item.id === blockId)
-    const labels: Record<string, string> = { paragraph: '段落', heading: '标题', quote: '引用', list: '列表项', table: '单元格', formula: '公式', media: '媒体', chart: '图表', component: '互动组件', divider: '分隔线' }
+    const labels: Record<string, string> = { paragraph: '段落', heading: '标题', quote: '引用', list: '列表项', table: '单元格', formula: '公式', media: '媒体', chart: '图表', component: '互动组件', 'course-instance': '组件', divider: '分隔线' }
     publishContextualTarget({ selection, ranges, revision: latest.current.revision, mode: 'layout', source: draft.current,
       label: selection.kind === 'cells' ? '所选单元格' : selection.kind === 'text' && selection.anchor.blockId !== selection.head.blockId ? '所选内容' : labels[block?.type ?? ''] ?? '所选对象',
       ...(mapped.status === 'unmapped' ? { message: mapped.message } : {}) })
@@ -274,21 +336,27 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   }
   function acceptSource(text: string) {
     draft.current = text
-    const current = latest.current
+    const current = draftSession.retained || sourceInvalid.current ? draftOwner.current ?? latest.current : latest.current
+    draftOwner.current = current
+    restoredDiagnostics.current = false
     const result = parseDocumentMarkdown(text, { createId: () => crypto.randomUUID(), target: current.target, resolveImage: current.resolveImage, previous: projection.current })
-    setDiagnostics(result.diagnostics)
+    sourceInvalid.current = result.status !== 'valid'
+    reportDiagnostics(result.diagnostics)
     current.onDraft(text, result.diagnostics)
     if (result.status === 'valid') {
       projection.current = result; mapRef.current = result.sourceMap
       if (Date.now() - sourceGroup.current.time > 800) sourceGroup.current.id = crypto.randomUUID()
       sourceGroup.current.time = Date.now()
-      const accepted = current.onChange(result.document, { operationId: crypto.randomUUID(), historyGroup: sourceGroup.current.id, source: 'source' })
-      if (accepted === false) { const issues = [{ message: '正文未能提交，请修正后重试或丢弃草稿', offset: 0, endOffset: 0, line: 1, column: 1 }]; setDiagnostics(issues); current.onDraft(text, issues); return false }
+      const operation: DocumentOperation = { operationId: crypto.randomUUID(), historyGroup: sourceGroup.current.id, source: 'source' }
+      current.onDocumentDraft?.(result.document, operation)
+      const accepted = draftSession.publish(result.document, operation, (document, operation) => commit(document, operation, current))
+      if (accepted instanceof Promise) void accepted.catch(fail)
+      if (accepted === false) return false
     }
     return result.status === 'valid'
   }
   function updateActiveBlock(state: EditorState) {
-    if (mode !== 'layout' || !state.selection.empty || !(state.selection instanceof TextSelection)) { setActiveBlock(null); return }
+    if (!documentScope || mode !== 'layout' || !state.selection.empty || !(state.selection instanceof TextSelection)) { setActiveBlock(null); return }
     const point = editorPositionToPoint(state.doc, state.selection.head)
     const id = point?.blockId
     const element = id ? [...(editorRoot.current?.querySelectorAll<HTMLElement>('[data-flow-block-id]') ?? [])].find(node => node.dataset.flowBlockId === id) : null
@@ -406,30 +474,51 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     { id: 'table-delete', label: '删除表格', group: '表格', danger: true,
       disabledReason: latest.current.editPreview ? '正在生成的范围暂时只读' : null, run: () => run('delete-table') }]
   }
-  const options = () => ({ presentation: latest.current.target === 'flow' ? 'flow' as const : undefined, stateChanged: (state: EditorState) => { setFormat(readDocumentFormatting(state)); updateActiveBlock(state) }, requestMathDraft: (request: { from: number; to: number; display: true; latex: ''; formulaId: string }) => setMathDraft({ ...request, accessibleText: '' }), document: projection.current.document, sourceMap: mapRef.current, revision: latest.current.revision,
-    projectionPlugins: [previewPlugin, pinPlugin], projectionClipboard: (view: Parameters<typeof layoutPreviewClipboard>[0], event: ClipboardEvent, cut: boolean) => {
+  const options = () => ({ draftSession, contentScope: latest.current.contentScope, presentation: latest.current.target === 'flow' ? 'flow' as const : undefined, stateChanged: (state: EditorState) => { setFormat(readDocumentFormatting(state, latest.current.inlineStyleDefaults)); updateActiveBlock(state) }, requestMathDraft: (request: { from: number; to: number; display: true; latex: ''; formulaId: string }) => setMathDraft({ ...request, accessibleText: '' }), document: projection.current.document, sourceMap: mapRef.current, revision: latest.current.revision,
+    projectionPlugins: [previewPlugin, pinPlugin, inlineDefaultsPlugin], projectionClipboard: (view: Parameters<typeof layoutPreviewClipboard>[0], event: ClipboardEvent, cut: boolean) => {
       const handled = layoutPreviewClipboard(view, event, cut)
       if (handled && cut) previewBlocked()
       return handled
     },
     readOnly: latest.current.readOnly, renderObject: latest.current.renderObject, objectRevision: latest.current.objectRevision,
+    beforeProjectionMutation:latest.current.beforeProjectionMutation,afterProjectionMutation:latest.current.afterProjectionMutation,
     runtimeSpacers: latest.current.runtimeSpacers,
     clipboardContext: latest.current.clipboardContext, clipboardResourcePort: latest.current.clipboardResourcePort,
     change: (document: MarkdownDocument, operation: DocumentOperation) => {
+      const owner = draftSession.retained ? draftOwner.current ?? latest.current : latest.current
+      draftOwner.current = owner
       const current = projection.current
-      const text = latest.current.target === 'file' ? editMarkdownSource(draft.current, current.document, document, current.sourceMap,
-        { createId: () => crypto.randomUUID(), target: 'file', resolveImage: latest.current.resolveImage }) : serializeDocumentMarkdown(document, latest.current.target)
-      const parsed = parseDocumentMarkdown(text, { createId: () => crypto.randomUUID(), target: latest.current.target, resolveImage: latest.current.resolveImage })
-      if (parsed.status !== 'valid') throw new Error('修改无法完整对应源文，原输入仍保留。')
-      bindMarkdownIdentities(parsed, document); projection.current = parsed; mapRef.current = parsed.sourceMap
-      draft.current = text; setDiagnostics([]); latest.current.onDraft(text, [])
-      const result = latest.current.onChange(document, operation)
-      if (result === false) { const issues = [{ message: '正文未能提交，请修正后重试或丢弃草稿', offset: 0, endOffset: 0, line: 1, column: 1 }]; setDiagnostics(issues); latest.current.onDraft(draft.current, issues); setMode('source') }
-      return result
+      const text = documentScope && owner.target === 'file' ? editMarkdownSource(draft.current, current.document, document, current.sourceMap,
+        { createId: () => crypto.randomUUID(), target: 'file', resolveImage: owner.resolveImage }) : serializeDocumentMarkdown(document, owner.target)
+      if (documentScope) {
+        const parsed = parseDocumentMarkdown(text, { createId: () => crypto.randomUUID(), target: owner.target, resolveImage: owner.resolveImage })
+        if (parsed.status !== 'valid') throw new Error('修改无法完整对应源文，原输入仍保留。')
+        bindMarkdownIdentities(parsed, document); projection.current = parsed; mapRef.current = parsed.sourceMap
+      } else projection.current = { source: text, document, sourceMap: { blocks: [] } }
+      draft.current = text; reportDiagnostics([]); owner.onDraft(text, []); owner.onDocumentDraft?.(document, operation)
+      return commit(document, operation, owner)
     },
     selection: publishLayoutSelection,
-    undo: () => latest.current.editPreview ? latest.current.editPreview.cancel() : latest.current.onUndo(), redo: () => latest.current.onRedo(), diagnostic: fail,
+    undo: (draftSession.retained ? draftOwner.current ?? latest.current : latest.current).editPreview?.cancel
+      ?? (draftSession.retained ? draftOwner.current ?? latest.current : latest.current).onUndo,
+    redo: (draftSession.retained ? draftOwner.current ?? latest.current : latest.current).onRedo, diagnostic: fail,
   })
+  function commit(document: MarkdownDocument, operation: DocumentOperation, owner: SharedDocumentEditorProps): DocumentCommitResult {
+    latestOperation.current = operation.operationId
+    try {
+      const result = owner.onChange(document, operation)
+      if (result instanceof Promise) return result.then(accepted => {
+        if (accepted === false && latestOperation.current === operation.operationId) rejectCommit('正文未能提交，请修正后重试或丢弃草稿', owner.onDraft)
+        return accepted
+      }, failure => { if (latestOperation.current === operation.operationId) rejectCommit(failure instanceof Error ? failure.message : String(failure), owner.onDraft); return false })
+      if (result === false) rejectCommit('正文未能提交，请修正后重试或丢弃草稿', owner.onDraft)
+      return result
+    } catch (error) { rejectCommit(error instanceof Error ? error.message : String(error), owner.onDraft); return false }
+  }
+  function rejectCommit(message: string, notify = latest.current.onDraft) {
+    const issues = [{ message, offset: 0, endOffset: 0, line: 1, column: 1 }]
+    reportDiagnostics(issues); notify(draft.current, issues)
+  }
   useEffect(() => {
     if (mode === 'layout' && layoutHost.current) {
       const editor = createLayoutEditor(layoutHost.current, options()); layout.current = editor
@@ -448,7 +537,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     if (mode === 'source' && sourceHost.current) {
       source.current = new SourceView({ parent: sourceHost.current, state: SourceState.create({ doc: draft.current, extensions: [sourcePinnedSelectionField, ...sourcePreviewExtensions(previewBlocked), markdown(), foldGutter(), SourceView.lineWrapping, SourceState.readOnly.of(Boolean(latest.current.readOnly)),
         SourceView.contentAttributes.of({ 'aria-label': '正文源文编辑' }),
-        sourceKeymap.of([{ key: 'Mod-z', run: () => { latest.current.editPreview ? latest.current.editPreview.cancel() : latest.current.onUndo(); return true } }, { key: 'Mod-Shift-z', run: () => { latest.current.onRedo(); return true } }]),
+        sourceKeymap.of([{ key: 'Mod-z', run: () => { void navigateHistory('undo'); return true } }, { key: 'Mod-Shift-z', run: () => { void navigateHistory('redo'); return true } }]),
         SourceView.domEventHandlers({ compositionstart: () => { sourceComposing.current = true }, compositionend: (_event, view) => { sourceComposing.current = false; queueMicrotask(() => { if (source.current === view) { acceptSource(view.state.doc.toString()); publishSourceSelection(view) } }) } }),
         SourceView.updateListener.of(update => {
           if (update.docChanged) { draft.current = update.state.doc.toString(); if (!sourceComposing.current && !syncingSource.current) acceptSource(draft.current) }
@@ -460,14 +549,24 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       const folds = [...draft.current.matchAll(/^```cw-object-v1\s*\n[\s\S]*?^```/gm)].map(match => foldEffect.of({ from: match.index! + match[0].indexOf('\n'), to: match.index! + match[0].length - 3 }))
       if (folds.length) source.current.dispatch({ effects: folds })
       publishSourceSelection(editor)
-      setDiagnostics(parseDocumentMarkdown(draft.current, { createId: () => crypto.randomUUID(), target: latest.current.target, resolveImage: latest.current.resolveImage }).diagnostics)
+      if (!draftSession.rejected) {
+        const parsed = parseDocumentMarkdown(draft.current, { createId: () => crypto.randomUUID(), target: latest.current.target, resolveImage: latest.current.resolveImage })
+        sourceInvalid.current = parsed.status !== 'valid'
+        if (!restoredDiagnostics.current) reportDiagnostics(parsed.diagnostics)
+      }
       if (focusAfterSwitch.current) { editor.focus(); focusAfterSwitch.current = false }
       return () => { sourceSelection.current = { anchor: editor.state.selection.main.anchor, head: editor.state.selection.main.head }; editor.destroy(); if (source.current === editor) source.current = null; sourceComposing.current = false }
     }
   }, [mode])
   useEffect(() => { layout.current?.update(options()) }, [props.document, props.revision, props.objectRevision, props.runtimeSpacers, props.readOnly])
   useEffect(() => {
-    if (sourceComposing.current) return
+    const editor = layout.current
+    if (!editor) return
+    editor.view.setProps({})
+    setFormat(readDocumentFormatting(editor.view.state, props.inlineStyleDefaults))
+  }, [props.inlineStyleDefaults, mode])
+  useEffect(() => {
+    if (sourceComposing.current || draftSession.retained || sourceInvalid.current || restoredDiagnostics.current) return
     const text = props.sourceDraft ?? serializeDocumentMarkdown(props.document, props.target)
     if (text === draft.current) return
     draft.current = text
@@ -480,9 +579,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       source.current.dispatch({ changes: { from, to: before, insert: text.slice(from, after) }, effects: sourcePreviewEffect.of(null) })
       syncingSource.current = false
     }
-    const result = parseDocumentMarkdown(text, { createId: () => crypto.randomUUID(), target: props.target, resolveImage: props.resolveImage })
-    setDiagnostics(result.diagnostics)
-  }, [props.revision, props.sourceDraft])
+    reportDiagnostics(documentScope ? parseDocumentMarkdown(text, { createId: () => crypto.randomUUID(), target: props.target, resolveImage: props.resolveImage }).diagnostics : [])
+  }, [props.revision, props.sourceDraft, documentScope])
   useEffect(() => {
     if (layout.current) {
       const view = layout.current.view
@@ -500,7 +598,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     publishContextualTarget(null)
   }, [props.revision])
   useEffect(() => {
-    const pins = (props.pinnedTargets ?? []).filter(target => target.kind !== 'course-object').map(target => ({ editId: 'pinned-selection', target, value: '', cancel() {} }))
+    const pins = (props.pinnedTargets ?? []).filter(target => target.kind !== 'course-object' && target.kind !== 'course-surface').map(target => ({ editId: 'pinned-selection', target, value: '', cancel() {} }))
     if (layout.current) {
       const view = layout.current.view
       view.dispatch(view.state.tr.setMeta(pinnedSelectionKey, [...pins.flatMap(pin => { const range = layoutPreviewRange(view.state.doc, pin, mapRef.current); return range ? [range] : [] }), ...(localPin?.mode === 'layout' && localPin.revision === props.revision ? [localPin] : [])]))
@@ -508,7 +606,14 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     if (source.current) source.current.dispatch({ effects: sourcePinnedSelectionEffect.of([...pins.flatMap(pin => { const range = sourcePreviewRange(pin, mapRef.current); return range ? [range] : [] }), ...(localPin?.mode === 'source' && localPin.revision === props.revision ? [localPin] : [])]) })
   }, [mode, props.pinnedTargets, props.revision, fallbackMap, localPin])
   useImperativeHandle(ref, () => ({
-    flush: () => ({ ready: !sourceComposing.current && (layout.current?.flush() ?? true), source: draft.current, diagnostics }),
+    applyInlineStyle: patch => {
+      const editor = layout.current
+      if (!editor || mode !== 'layout' || latest.current.readOnly || editor.view.composing || !editor.view.state.selection.empty) return false
+      style(patch)
+      return true
+    },
+    flush: () => ({ ready: !sourceComposing.current && !sourceInvalid.current && !restoredDiagnostics.current && (layout.current?.flush() ?? !draftSession.rejected), source: draft.current, diagnostics: diagnosticsRef.current }),
+    drain, discardDraft: discardLocalDraft,
     getContextualEditTarget: () => contextualTargetRef.current,
     focusBlock: (blockId) => {
       const editor = layout.current
@@ -559,6 +664,34 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       return true
     },
   }), [diagnostics, mode])
+  async function drain() {
+    if (sourceComposing.current || source.current?.composing || sourceInvalid.current || restoredDiagnostics.current) return { ready: false, source: draft.current, diagnostics: diagnosticsRef.current }
+    const ready = layout.current ? await layout.current.drain() : await draftSession.drain()
+    return { ready, source: draft.current, diagnostics: diagnosticsRef.current }
+  }
+  async function navigateHistory(direction: 'undo' | 'redo') {
+    const owner = draftSession.retained ? draftOwner.current ?? latest.current : latest.current
+    if (direction === 'undo' && owner.editPreview) { owner.editPreview.cancel(); return }
+    if (!(await drain()).ready) return
+    try { await (direction === 'undo' ? owner.onUndo() : owner.onRedo()) }
+    catch (error) { fail(error instanceof Error ? error.message : String(error)) }
+  }
+  async function discardLocalDraft() {
+    if (sourceComposing.current || source.current?.composing || layout.current?.view.composing) return
+    const owner = draftOwner.current ?? latest.current
+    await draftSession.drain()
+    if (!await draftSession.discard(latest.current.document)) return
+    owner.onDiscardDraft?.()
+    draftOwner.current = null; sourceInvalid.current = false; restoredDiagnostics.current = false; latestOperation.current = null
+    const current = latest.current, text = serializeDocumentMarkdown(current.document, current.target)
+    const parsed = documentScope ? parseDocumentMarkdown(text, { createId: () => crypto.randomUUID(), target: current.target, resolveImage: current.resolveImage }) : null
+    if (parsed?.status === 'valid') { bindMarkdownIdentities(parsed, current.document); projection.current = parsed }
+    else projection.current = { source: text, document: current.document, sourceMap: { blocks: [] } }
+    mapRef.current = projection.current.sourceMap; draft.current = text
+    reportDiagnostics([]); latest.current.onDraft(draft.current, [])
+    layout.current?.update(options())
+    setMode('layout')
+  }
   function switchMode() {
     publishContextualTarget(null)
     if (mode === 'layout') {
@@ -588,8 +721,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     const { state } = editor.view
     const type = documentEditorSchema.marks.style
     const tr = state.tr
-    // A null value ("无高亮") removes the property instead of storing it.
-    const merged = (current: TextRunStyle) => Object.fromEntries(Object.entries({ ...current, ...patch }).filter(([, value]) => value !== null && value !== undefined)) as TextRunStyle
+    // Under host defaults, explicit null means "no highlight", rather than inheriting the host color.
+    const merged = (current: TextRunStyle) => Object.fromEntries(Object.entries({ ...current, ...patch }).filter(([key, value]) => value !== undefined && (value !== null || key === 'highlightColor' && latest.current.inlineStyleDefaults !== undefined))) as TextRunStyle
     if (state.selection.empty) {
       const current = (state.storedMarks ?? state.selection.$from.marks()).find(mark => mark.type === type)?.attrs.value ?? {}
       tr.addStoredMark(type.create({ value: merged(current) }))
@@ -605,7 +738,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     layout.current?.syncDomTextSelection()
     const state = layout.current?.view.state
     if (!state) return
-    style({ [key]: readDocumentFormatting(state).flags[key] !== true })
+    style({ [key]: readDocumentFormatting(state, latest.current.inlineStyleDefaults).flags[key] !== true })
   }
   function clearFormatting() {
     const editor = layout.current
@@ -625,9 +758,17 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     if (!editor) return
     editor.syncDomTextSelection()
     const type = value === 'paragraph' ? 'paragraph' : 'heading'
-    const node = editor.view.state.selection.$from.parent
-    editor.boundary()
-    setBlockType(documentEditorSchema.nodes[type], { id: node.attrs.id, data: { ...node.attrs.data, type, ...(type === 'paragraph' ? {} : { level: Number(value) }) } })(editor.view.state, editor.view.dispatch)
+    const nodeType = documentEditorSchema.nodes[type]
+    const { state } = editor.view, transaction = state.tr, visited = new Set<number>()
+    for (const range of state.selection.ranges) state.doc.nodesBetween(range.$from.pos, range.$to.pos, (node, position) => {
+      if (!node.isTextblock || visited.has(position)) return
+      visited.add(position)
+      const point = state.doc.resolve(position), index = point.index()
+      if (node.type !== nodeType && !point.parent.canReplaceWith(index, index + 1, nodeType)) return
+      const attrs = { ...node.attrs, data: { ...node.attrs.data, type, ...(type === 'paragraph' ? {} : { level: Number(value) }) } }
+      if (!node.hasMarkup(nodeType, attrs)) transaction.setNodeMarkup(position, nodeType, attrs)
+    })
+    if (transaction.docChanged) { editor.boundary(); editor.view.dispatch(transaction.scrollIntoView()) }
     editor.view.focus()
   }
   function dismissContextualTarget() {
@@ -661,17 +802,27 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     const editor = layout.current
     if (!editor) return
     const { selection } = editor.view.state
+    if (props.contentScope === 'formula') {
+      editor.view.state.doc.descendants((node, from) => {
+        if (node.type.name !== 'formula') return true
+        const data = node.attrs.data
+        setMathDraft({ latex: data.latex, accessibleText: data.accessibleText ?? '', display: true, formulaId: data.formulaId, from, to: from + node.nodeSize })
+        return false
+      })
+      return
+    }
     const node = selection instanceof NodeSelection ? selection.node : null
     const data = node?.type.name === 'math' || node?.type.name === 'formula' ? node.attrs.data : null
-    setMathDraft({ latex: data?.latex ?? 'x^2', accessibleText: data?.accessibleText ?? '', display: node?.type.name === 'formula', formulaId: data?.formulaId ?? crypto.randomUUID(), from: selection.from, to: selection.to })
+    setMathDraft({ latex: data?.latex ?? 'x^2', accessibleText: data?.accessibleText ?? '', display: documentScope && node?.type.name === 'formula', formulaId: data?.formulaId ?? crypto.randomUUID(), from: selection.from, to: selection.to })
   }
   function applyMath() {
     const editor = layout.current
     if (!editor || !mathDraft) return
     try {
       const parsedMath = parseDocumentMath(mathDraft.latex)
-      const data = { type: 'math', formulaId: mathDraft.formulaId, latex: mathDraft.latex, accessibleText: mathDraft.accessibleText || describeDocumentMath(parsedMath) }
       const current = editor.view.state.doc.nodeAt(mathDraft.from)
+      const data = { type: 'math', formulaId: mathDraft.formulaId, latex: mathDraft.latex, accessibleText: mathDraft.accessibleText || describeDocumentMath(parsedMath),
+        ...(current?.attrs.data?.style ? { style: current.attrs.data.style } : {}) }
       let node = mathDraft.display ? documentEditorSchema.nodes.formula.create({ id: current?.type.name === 'formula' ? current.attrs.id : crypto.randomUUID(), data: { ...data, type: 'formula' } }) : documentEditorSchema.nodes.math.create({ data })
       if (!mathDraft.display && current?.type.name === 'formula') node = documentEditorSchema.nodes.paragraph.create({ id: current.attrs.id, data: { type: 'paragraph' } }, node)
       editor.boundary()
@@ -679,15 +830,17 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       setMathDraft(null); editor.view.focus()
     } catch (error) { fail(error instanceof Error ? error.message : String(error)) }
   }
+  const discardButton = diagnostics.length > 0 && <button type="button" onClick={() => { void discardLocalDraft().catch(error => fail(error instanceof Error ? error.message : String(error))) }}>丢弃待修草稿</button>
   const toolbar = <div ref={toolbarRef} tabIndex={-1} className="shared-document-toolbar" onPointerDownCapture={() => layout.current?.syncDomTextSelection()} role="toolbar" aria-label="正文工具">
-      <details className="shared-document-more"><summary onMouseDown={event => event.preventDefault()} aria-label="更多正文操作">⋯</summary>
+      {documentScope && <details className="shared-document-more"><summary onMouseDown={event => event.preventDefault()} aria-label="更多正文操作">⋯</summary>
         <button type="button" onMouseDown={event => event.preventDefault()} onClick={switchMode}>{mode === 'layout' ? '源文' : '正文'}</button>
         {mode === 'source' && diagnostics.length > 0 && commandError
           ? <div role="alert" className="shared-document-more__mode-notice">{commandError}</div>
           : null}
-      </details>
-      <button type="button" onClick={() => props.editPreview ? props.editPreview.cancel() : props.onUndo()}>撤销</button><button type="button" onClick={props.onRedo}>重做</button>
-      {mode === 'layout' && <>
+      </details>}
+      <button type="button" onClick={() => { void navigateHistory('undo') }}>撤销</button><button type="button" onClick={() => { void navigateHistory('redo') }}>重做</button>
+      {mode === 'layout' && props.contentScope === 'formula' && <button type="button" onMouseDown={event => event.preventDefault()} onClick={openMath}>编辑公式</button>}
+      {mode === 'layout' && props.contentScope !== 'formula' && <>
         {([['bold', '粗体'], ['italic', '斜体'], ['underline', '下划线'], ['strike', '删除线'], ['emphasis', '着重号']] as const).map(([key, label]) => <button key={key} type="button" onMouseDown={event => event.preventDefault()} aria-pressed={format.flags[key]} onClick={() => toggleStyle(key)}>{label}</button>)}
         <label>字号<input aria-label="字号" type="number" min="8" max="400" value={format.fontSize === 'mixed' ? '' : format.fontSize ?? ''} placeholder={format.fontSize === 'mixed' ? '混合' : '默认'} onChange={event => { const value = Number(event.target.value); if (value >= 8 && value <= 400) style({ fontSize: value }) }} /></label>
         <label>字体<select aria-label="字体" value={format.fontFamily === 'mixed' ? '__mixed' : format.fontFamily ?? ''} onChange={event => { if (event.target.value && event.target.value !== '__mixed') style({ fontFamily: event.target.value }) }}><option value="">默认字体</option>{format.fontFamily === 'mixed' && <option value="__mixed">混合字体</option>}{format.fontFamily && format.fontFamily !== 'mixed' && !FONT_FAMILY_OPTIONS.some(option => option.family === format.fontFamily) && <option value={format.fontFamily}>{format.fontFamily}</option>}{FONT_FAMILY_OPTIONS.map(option => <option key={option.family} value={option.family}>{option.label}</option>)}</select></label>
@@ -698,9 +851,9 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => { const editor = layout.current; if (editor) toggleMark(documentEditorSchema.marks.code)(editor.view.state, editor.view.dispatch) }}>行内代码</button>
         <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => { const state = layout.current?.view.state; setLinkDraft(state?.selection.$from.marks().find(mark => mark.type === documentEditorSchema.marks.link)?.attrs.href ?? '') }}>链接</button>
         <button type="button" onMouseDown={event => event.preventDefault()} onClick={openMath}>公式</button>
-        <select aria-label="段落类型" defaultValue="paragraph" onChange={event => applyParagraphType(event.target.value)}><option value="paragraph">正文</option>{[1,2,3,4,5,6].map(level => <option key={level} value={level}>标题 {level}</option>)}</select>
+        {documentScope && <select aria-label="段落类型" defaultValue="paragraph" onChange={event => applyParagraphType(event.target.value)}><option value="paragraph">正文</option>{[1,2,3,4,5,6].map(level => <option key={level} value={level}>标题 {level}</option>)}</select>}
       </>}
-      {diagnostics.length > 0 && <button type="button" onClick={() => { draft.current = serializeDocumentMarkdown(props.document, props.target); setDiagnostics([]); props.onDraft(draft.current, []); setMode('layout') }}>丢弃待修草稿</button>}
+      {discardButton}
     </div>
   const editorForms = <>
     {linkDraft !== null && <form className="shared-document-form" aria-label="链接编辑" onSubmit={event => {
@@ -715,7 +868,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     {mathDraft && <form className="shared-document-form" aria-label="公式编辑" onSubmit={event => { event.preventDefault(); applyMath() }}>
       <label>LaTeX<input value={mathDraft.latex} onChange={event => setMathDraft({ ...mathDraft, latex: event.target.value })} /></label>
       <label>朗读说明<input value={mathDraft.accessibleText} onChange={event => setMathDraft({ ...mathDraft, accessibleText: event.target.value })} /></label>
-      <label><input type="checkbox" checked={mathDraft.display} onChange={event => setMathDraft({ ...mathDraft, display: event.target.checked })} />独立公式</label>
+      {documentScope && <label><input type="checkbox" checked={mathDraft.display} onChange={event => setMathDraft({ ...mathDraft, display: event.target.checked })} />独立公式</label>}
       <button type="submit">应用公式</button><button type="button" onClick={() => setMathDraft(null)}>取消</button>
     </form>}
   </>
@@ -747,7 +900,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
           setLinkDraft(state?.selection.$from.marks().find(mark => mark.type === documentEditorSchema.marks.link)?.attrs.href ?? '')
         }} />
         <QuickBarButton label="当前选区公式" icon={<Sigma size={14} />} onClick={openMath} />
-        {['段落', '标题'].includes(contextualTarget.label) && <QuickBarPopoverButton label="当前段落类型" text="段落" popupRole="menu">
+         {documentScope && ['段落', '标题'].includes(contextualTarget.label) && <QuickBarPopoverButton label="当前段落类型" text="段落" popupRole="menu">
           {close => <div className="selection-quick-bar__menu" role="menu" aria-label="当前段落类型">
             {[['paragraph', '正文'], ...[1, 2, 3, 4, 5, 6].map(level => [String(level), `标题 ${level}`])].map(([value, label]) => <button key={value} type="button" role="menuitem"
               onMouseDown={event => event.preventDefault()} onClick={() => { close(); applyParagraphType(value!) }}>{label}</button>)}
@@ -786,8 +939,9 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       {props.renderQuickBarMenu?.(contextualTarget)}
       {commandError && <span role="alert" className="selection-quick-bar__notice" title={commandError}>{commandError}</span>}
     </SelectionQuickBar>
-  return <div ref={attachRoot} onDragOver={event => { if (event.dataTransfer.types.includes('application/x-guoling-document-block')) event.preventDefault() }}
+  return <div ref={attachRoot} onDragOver={event => { if (documentScope && event.dataTransfer.types.includes('application/x-guoling-document-block')) event.preventDefault() }}
     onDrop={event => {
+      if (!documentScope) return
       const sourceId = documentBlockDragId(event.dataTransfer)
       const target = (event.target as HTMLElement).closest<HTMLElement>('[data-flow-block-id]')
       const targetId = target?.dataset.flowBlockId
@@ -817,13 +971,13 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         openObjectMenu({ x: event.clientX, y: event.clientY }, '表格操作', [...activeTableMenu(), ...clipboardMenu()])
         return
       }
-      if (['media', 'chart', 'component', 'course-component', 'formula'].includes(block.type)) return
+      if (['media', 'chart', 'component', 'course-component', 'course-instance', 'formula'].includes(block.type)) return
       event.preventDefault()
-      openObjectMenu({ x: event.clientX, y: event.clientY }, '段落操作', [...activeBlockMenu(id), ...clipboardMenu()])
+      openObjectMenu({ x: event.clientX, y: event.clientY }, documentScope ? '段落操作' : '文字操作', [...(documentScope ? activeBlockMenu(id) : []), ...clipboardMenu()])
     }}
     className={`shared-document-editor${props.target === 'flow' ? ' shared-document-editor--flow' : ''}`} onKeyDown={event => {
     if (event.key === 'Escape' && contextualTarget) { event.preventDefault(); setDismissedGeneration(targetGeneration) }
-    if (event.key === '/' && mode === 'layout' && !event.nativeEvent.isComposing && !props.readOnly && activeBlock && layout.current) {
+    if (documentScope && event.key === '/' && mode === 'layout' && !event.nativeEvent.isComposing && !props.readOnly && activeBlock && layout.current) {
       const selection = layout.current.view.state.selection
       if (selection.empty && selection.$from.depth === 1 && selection.$from.parent.type === documentEditorSchema.nodes.paragraph && selection.$from.parent.content.size === 0) {
         event.preventDefault()
@@ -832,17 +986,18 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       }
     }
   }} onCompositionStartCapture={() => props.onCompositionChange?.(true, draft.current)} onCompositionEndCapture={() => queueMicrotask(() => props.onCompositionChange?.(false, draft.current))}>
-     {!props.readOnly && (props.toolbarHost ? createPortal(<><details className="flow-document-more"><summary onMouseDown={event => event.preventDefault()} aria-label="更多正文操作">⋯</summary>
+     {!props.readOnly && (props.toolbarHost ? createPortal(<>{documentScope && <details className="flow-document-more"><summary onMouseDown={event => event.preventDefault()} aria-label="更多正文操作">⋯</summary>
        <button type="button" onMouseDown={event => event.preventDefault()} onClick={switchMode}>{mode === 'layout' ? '源文' : '正文'}</button>
        {mode === 'source' && diagnostics.length > 0 && commandError
          ? <div role="alert" className="shared-document-more__mode-notice">{commandError}</div>
          : null}
        <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => props.editPreview ? props.editPreview.cancel() : props.onUndo()}>撤销</button>
        <button type="button" onMouseDown={event => event.preventDefault()} onClick={props.onRedo}>重做</button>
-     </details>{editorForms}</>, props.toolbarHost) : <>{toolbar}{editorForms}</>)}
+       {discardButton}
+      </details>}{!documentScope && <>{props.contentScope === 'formula' && <button type="button" onMouseDown={event => event.preventDefault()} onClick={openMath}>编辑公式</button>}<button type="button" onMouseDown={event => event.preventDefault()} onClick={props.onUndo}>撤销</button><button type="button" onMouseDown={event => event.preventDefault()} onClick={props.onRedo}>重做</button></>}{editorForms}</>, props.toolbarHost) : <>{toolbar}{editorForms}</>)}
      {quickBar}
      {objectMenu.element}
-      {mode === 'layout' && !props.readOnly && activeBlock && <DocumentBlockHandle blockId={activeBlock.id} rect={activeBlock.rect} commands={activeBlockMenu(activeBlock.id)} disabledReason={props.editPreview ? '正在生成的范围暂时只读' : null} />}
+      {documentScope && mode === 'layout' && !props.readOnly && activeBlock && <DocumentBlockHandle blockId={activeBlock.id} rect={activeBlock.rect} commands={activeBlockMenu(activeBlock.id)} disabledReason={props.editPreview ? '正在生成的范围暂时只读' : null} />}
      {props.editPreview && <div className="document-generation-status" role="status">正文正在生成，生成部分尚未保存。<button type="button" onClick={props.editPreview.cancel}>停止生成</button>{commandError && <span role="alert">{commandError}</span>}</div>}
      {mode === 'layout' ? <div ref={layoutHost} /> : <div ref={sourceHost} />}
     {diagnostics.length > 0 && <ul role="alert">{diagnostics.map((diagnostic, index) => <li key={index}><button type="button" onClick={() => { const editor = source.current; if (!editor) return; const position = Math.min(editor.state.doc.length, diagnostic.offset); editor.dispatch({ selection: { anchor: position }, effects: SourceView.scrollIntoView(position) }); editor.focus() }}>第 {diagnostic.line} 行：{diagnostic.message}</button></li>)}</ul>}

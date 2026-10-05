@@ -8,7 +8,7 @@ import type { RuntimeAuthoringTarget, RuntimeAuthoringTargetUpdate } from '../..
 import type { StageRect } from '../../authoring/stageViewportTransform'
 import type { DeepReadonly } from '../../course/flowEditorView'
 import { beginRuntimeTargetEditSession, validateRuntimeTargetEditSession, type RuntimeTargetEditSession } from '../../authoring/runtimeTargetEditSession'
-import { registerAuthoringObservationDraft } from '../../authoring/generation/authoringObservation'
+import { registerAuthoringObservationDraft } from '../../authoring/canvasDraftRegistry'
 import { registerFlowDynamicDraft } from '../../composition/runtime/flowDynamicDraftPreparation'
 import { flowComponentLightEditCommands, type FlowComponentLightEditTarget } from '../../composition/runtime/flowDynamicLightEditCommands'
 import type { DynamicFallbackIntent } from '../../composition/runtime/precommitDynamicFallback'

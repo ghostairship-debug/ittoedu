@@ -37,7 +37,8 @@ import { sourceFileKind } from '../../../shared/workbench/sourceFileKind'
 import { continueDocumentTargets } from './continuationTargets'
 import { ElementChangeTracker } from './ElementChangeTracker'
 import { diagnosticLog } from '../../diagnosticLog'
-import { readTarget } from '../../../core/tools/ToolTargets'
+import { isCourseInstanceRange, readTarget } from '../../../core/tools/ToolTargets'
+import { matchesSavedDocument } from './savedDocumentBinding'
 import { isSourceDocumentModel } from '../../../shared/workbench/document'
 import type { ElementChangeView, ElementRevertResult } from '../../../shared/workbench/executionDesktop'
 
@@ -82,7 +83,8 @@ function operationFailure(error: unknown, type: unknown): DesktopOperationError 
 function listed(records: ConversationRecord[]): ConversationRecord[] { return records.filter(record => !record.element) }
 /** An object or document block that still exists is the same target after other edits; a text range never is. */
 function targetStillExists(snapshot: DocumentSnapshot, target: ExecutionDocumentReference['writable'][number]): boolean {
-  if (target.kind !== 'course-object' && target.kind !== 'flow-block') return false
+  if (target.kind !== 'course-object' && target.kind !== 'flow-block' && target.kind !== 'course-instance' && target.kind !== 'course-surface') return false
+  if (target.kind === 'course-instance' && (target.from !== undefined || target.to !== undefined)) return false
   try { readTarget(snapshot.model, target); return true } catch { return false }
 }
 /** Main owns spaces, task freezes and runs. Mounting a view only reads/subscribes. */
@@ -139,6 +141,8 @@ export class ExecutionDesktopService {
       provider, observation: { readResource: input => options.documents.tools.readObservationResource(input.runId, input.resourceId) },
     })
     this.engine = new ExecutionEngine({ registry: options.documents.registry, gateway: options.documents.tools, runs: this.runs, events: this.events,
+      subscribeSaves: listener => options.documents.subscribeSaves(listener),
+      subscribeDocumentEvents: listener => options.documents.subscribeEvents(listener),
       edits: this.edits, provider, serializePayload, initialCompiler: new PayloadCompiler({ attachments: this.attachments, serializePayload }),
       files: new AgentFileService(options.documents), materials: this.attachments, visualAnalysis, changeReview: this.changeReview,
       artifacts: this.artifacts,
@@ -199,7 +203,8 @@ export class ExecutionDesktopService {
         for (const reference of record.input.documents) {
           if (!this.options.documents.registry.list().some(document => document.documentId === reference.documentId)) {
             // Preserve the durable identity needed for receipt lookup. A conflicting open binding remains an explicit gap.
-            await this.options.documents.internalAPI.restore(reference.documentId).catch(() => undefined)
+            const restored = await this.options.documents.internalAPI.restore(reference.documentId).catch(() => undefined)
+            if (restored) await this.engine.observeDocumentSnapshot(restored)
           }
         }
       }
@@ -584,7 +589,7 @@ export class ExecutionDesktopService {
       if (recoveryPath && live.some(snapshot => snapshot.documentId !== recovery.documentId
         && snapshot.binding.kind === 'file' && pathKey(snapshot.binding.path) === pathKey(recoveryPath))) throw conflict()
       if (!live.some(snapshot => snapshot.documentId === recovery.documentId)) {
-        try { await this.options.documents.internalAPI.restore(recovery.documentId) }
+        try { await this.engine.observeDocumentSnapshot(await this.options.documents.internalAPI.restore(recovery.documentId)) }
         catch (error) { throw new DesktopOperationError('execution-recovery-failed', '恢复稿无法打开',
           '上次任务的未保存修改尚未恢复，原任务不能安全继续。', '请先处理文档恢复问题，再继续原任务。', { cause: error }) }
       }
@@ -596,8 +601,25 @@ export class ExecutionDesktopService {
     let source = lineage.at(-1)
     while (source && !ownRuns.has(source.runId)) { ownRuns.add(source.runId); source = source.taskContinuedFrom ? byId.get(source.taskContinuedFrom) : undefined }
     try {
-      return await Promise.all(documents.map(reference => continueDocumentTargets(this.options.documents.registry.get(reference.documentId), reference, ownRuns)))
-    } catch (error) { throw executionInputError('document-range-changed', error) }
+      return await Promise.all(documents.map(async reference => {
+        const live = this.options.documents.registry.list().find(snapshot => snapshot.documentId === reference.documentId)
+        if (live) return continueDocumentTargets(this.options.documents.registry.get(reference.documentId), reference, ownRuns)
+        const binding = [...lineage].reverse().map(run => run.documentBindings?.[reference.documentId]).find(Boolean)
+        if (!binding) throw refused('原任务没有可用的正式保存关联。请对当前打开的文件重新授权续作。')
+        const reopened = await this.options.documents.open(binding.path)
+        if (!matchesSavedDocument(binding, reopened)) throw refused('保存位置现在不是原课件。请核对文件并重新授权续作。')
+        const ranges = [...reference.writable, ...(reference.selection ?? [])]
+          .some(target => target.kind === 'markdown-range' || isCourseInstanceRange(target))
+        if (ranges && (reference.epoch !== binding.epoch || reference.revision !== binding.savedRevision
+          || reopened.binding.kind !== 'file' || reopened.binding.version !== binding.fileVersion))
+          throw refused('原文字范围与重开的保存版本无法对应。请在当前课件重新选择该范围。')
+        return continueDocumentTargets(this.options.documents.registry.get(reopened.documentId),
+          { ...reference, documentId: reopened.documentId, epoch: reopened.epoch }, ownRuns)
+      }))
+    } catch (error) {
+      if (error instanceof DesktopOperationError) throw error
+      throw executionInputError('document-range-changed', error)
+    }
   }
 
   /** Explicit resume of a user-paused queue; runs inside the conversation's serial barrier. */
@@ -609,6 +631,10 @@ export class ExecutionDesktopService {
   private async send(input: ExecutionSendInput): Promise<ExecutionSendResult> {
     // Submit paths consult durable run state and the engine; they must see the recovery of any prior run.
     await this.awaitRecoveryAndRebind()
+    if (input.retryOfRunId) {
+      await this.options.documents.settleSaveObservations()
+      await this.engine.settleDocumentBindings()
+    }
     const digest = this.digest(input), existing = await this.submissions.read(input.submissionId)
     if (existing) {
       if (existing.digest !== digest || existing.workspaceId !== input.workspaceId || existing.conversationId !== input.conversationId) throw executionInputError('submission-conflict')
@@ -645,11 +671,13 @@ export class ExecutionDesktopService {
       const preparedInput = lineage ? { ...input, documents: await this.continuationDocuments(lineage, input.documents) } : input
       if (lineage && input.contentOutput) {
         const output = input.contentOutput
-        const original = input.documents.find(document => document.documentId === output.documentId)
+        const documentIndex = input.documents.findIndex(document => document.documentId === output.documentId)
+        const original = input.documents[documentIndex]
         const index = original?.selection?.findIndex(target => JSON.stringify(target) === JSON.stringify(output.target)) ?? -1
-        const target = preparedInput.documents.find(document => document.documentId === output.documentId)?.selection?.[index]
-        if (!target) throw refused('原正文改写范围无法继续，请重新选择。')
-        preparedInput.contentOutput = { ...output, target: structuredClone(target) }
+        const preparedDocument = preparedInput.documents[documentIndex]
+        const target = preparedDocument?.selection?.[index]
+        if (!target || target.kind === 'course-surface') throw refused('原正文改写范围无法继续，请重新选择。')
+        preparedInput.contentOutput = { ...output, documentId: preparedDocument!.documentId, target: structuredClone(target) }
       }
       record = await this.prepareSubmission(preparedInput, current, digest)
       if (previous) {

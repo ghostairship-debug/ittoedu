@@ -29,7 +29,6 @@ import {
   selectCanRedoActiveSurface,
   selectCanUndoActiveSurface,
   selectHasUnsavedCourseChanges,
-  selectSlideSceneList,
   useEditorStore,
 } from '../store/editorStore'
 
@@ -119,9 +118,9 @@ export function TopToolbar({
   const redo = useEditorStore((state) => state.redo)
   const renameProject = useEditorStore((state) => state.renameProject)
   const courseDocument = useEditorStore(selectActiveCourseProjectDocument)
-  const slideScenes = useEditorStore(selectSlideSceneList)
+  const surfaces = courseDocument?.surfaces ?? []
   const projectTitle = courseDocument?.title ?? ''
-  const hasFlowSurface = Boolean(courseDocument?.surfaces.some((surface) => surface.type === 'flow'))
+  const hasFlowSurface = Boolean(courseDocument?.surfaces.some((surface) => surface.kind === 'flow'))
   const [editingTitle, setEditingTitle] = useState(false)
   const [titleDraft, setTitleDraft] = useState(projectTitle)
   useEffect(() => setTitleDraft(projectTitle), [projectTitle])
@@ -131,8 +130,8 @@ export function TopToolbar({
     else setTitleDraft(projectTitle)
     setEditingTitle(false)
   }
-  const sceneIndex = slideScenes.findIndex(
-    (scene) => scene.id === activeSceneId,
+  const sceneIndex = surfaces.findIndex(
+    (surface) => surface.id === activeSceneId,
   )
 
   return (
@@ -300,7 +299,7 @@ export function TopToolbar({
           </button>
         )}
         <span className="toolbar__scene-index">
-          场景 {sceneIndex + 1} / {slideScenes.length}
+          场景 {sceneIndex + 1} / {surfaces.length}
         </span>
       </div>
 

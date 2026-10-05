@@ -1,40 +1,50 @@
 # 开发文档入口
 
-> **2026-09-22 方案取代声明：** 当前目标以[果铃 2.0 收敛方案](../archive/2026-09-convergence/果铃2.0收敛方案.md)及其[执行包](../../GPTpro方案/guoling_2_0_execution_plan/00_README.md)为准。旧总纲和 1.x 路线保留为历史与源码事实依据，不再是当前实施入口。本轮只修订方案，尚未开始新产品实现。
-> 当前协调任务数量和状态只看自动生成的 [`TASK_BOARD.md`](TASK_BOARD.md)。
+> **2026-10-05 唯一当前方案：** [稳定基线恢复与 V10 渐进替换完整并发计划](component-platform-refactor/BASELINE_FIRST_V10_EXECUTION_PLAN.md)。先保全当前成果、恢复 V10 前成熟完整前端，再沿既有解耦端口渐进替换；每个 UI 模块修改前明确合同必要性或已证问题。方案由 Root 撰写、Astra 技术审阅，Luna 不参与计划设计或正文。
+>
+> **2026-10-05 Owner 已授权本计划全部产品实施。** B0 已完整保全冻结候选，当前迁移承载为 `D:/果铃恢复候选/20261005-v10-migration`，从 027d 成熟前端渐进接入现 V10 模块。真实模型调用暂不授权，发布继续暂停。原 N/L 目标全部保留，实际工程与 UI 证据按对应范围记录。
+>
+> 实际协调状态只看自动生成的[任务板](TASK_BOARD.md)。方案保存不创建产品任务卡，不表示派发、通过或 Owner 接受。
 
 ## 权威文件
 
-当前接手顺序：**[归档收敛稿](../archive/2026-09-convergence/果铃2.0收敛方案.md) → [GPTpro 任务索引](../../GPTpro方案/guoling_2_0_execution_plan/03_TASK_INDEX.md) → [实施顺序](../../GPTpro方案/guoling_2_0_execution_plan/delivery/SEQUENCE.md) → [任务板](TASK_BOARD.md)**，随后按涉及的任务读取合同、源码和目标测试。共享接口先串行固定，再按实际写域推进独立叶子；不能从旧文档的将来时重新启动 1.x 待办。
+接手时先确定[任务板](TASK_BOARD.md)的实际写锁，再读总方案相关章节和执行计划对应任务，按需读取合同、直接源码与目标测试。N00a 数据贯通与 N00b 可替换编辑探针分开；独立叶子立即并行，不等待所有纯类型冻结或 GJS 成败。不要求每位执行者通读全部方案和历史任务。
 
 | 文件 | 唯一职责 |
 |---|---|
-| [果铃 2.0 收敛方案](../archive/2026-09-convergence/果铃2.0收敛方案.md) | 当前产品与架构决定、边界和成功标准 |
-| [GPTpro 执行包](../../GPTpro方案/guoling_2_0_execution_plan/00_README.md) | 当前任务、批次、接口样例和验收定义；状态不冒充实测 |
+| [统一组件总方案](component-platform-refactor/ARCHITECTURE_AND_REFACTOR_PLAN.md) | 当前产品与架构目标、职责、边界和取舍 |
+| [稳定基线恢复与 V10 渐进替换计划](component-platform-refactor/BASELINE_FIRST_V10_EXECUTION_PLAN.md) | 当前唯一执行方案：基线保全、完整前端复用、逐模块动机、精确 owner、DAG 与真实 UI 切换证据 |
+| [原执行计划与历史任务索引](component-platform-refactor/EXECUTION_PLAN.md) | 原 N/L 目标和历史拆解，新计划映射其完整范围；旧阶段起跑不自动执行 |
+| [旧创作管线补充方案](component-platform-refactor/AUTHORING_PIPELINE_UNIFICATION_EXECUTION_PLAN.md) | 历史问题与接口材料，不作为当前起跑安排 |
+| [旧成熟 UI 接入补充方案](component-platform-refactor/UI_REINTEGRATION_EXECUTION_PLAN.md) | 成熟模块与端口复用材料，当前 owner 与顺序由新计划确定 |
+| [Luna 机械执行入口](component-platform-refactor/LUNA_EXECUTION_PROMPT.md) | 确定命令的机械执行边界；开发计划和技术取舍归 Root/Astra，当前不启动执行 |
 | [旧开发总纲](../../COURSEWARE_DEVELOPMENT_PLAN.md) | 1.x 产品决定与路线的历史依据，已被当前方案取代 |
-| [架构合同](ARCHITECTURE_CONTRACT.md) | 技术不变量、状态分类、模块 Owner、carrier、可信扩展与协议负边界 |
+| [架构合同](ARCHITECTURE_CONTRACT.md) | 已确定的技术不变量及当前实现边界；新字段随直接 producer／consumer 实施收口 |
 | [工作协议](WORKING_PROTOCOL.md) | 默认开发闭环、停止条件、敏感变更、协调、验证、Git 与完成定义 |
 | [任务板](TASK_BOARD.md) | 当前 queued / active / blocked 任务摘要；由脚本生成，不可手改 |
 | [任务卡模板](TASK_CARD_TEMPLATE.md) | 仅多执行者、重叠写入、跨会话、交接或阻断时使用的 6 字段模板 |
-| [旧版本路线](roadmap/README.md) | 历史 1.2→2.0 DAG 与规格；当前次序以 GPTpro 执行包为准 |
+| [旧版本路线](roadmap/README.md) | 历史 1.2→2.0 DAG 与规格，不恢复为当前排期 |
 | [1.9 完整实施方案](R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md) | 历史 F00–F08 分包与 050/051/060 收口依据，不自动恢复待办 |
-| [V3.1 设计说明](../../双形态UI设计/00-设计说明.md) | 历史视觉参考；当前产品层级与默认行为以收敛稿为准 |
+| [V3.1 设计说明](../../双形态UI设计/00-设计说明.md) | 历史视觉参考，未涉及的有效工作台行为继续复用 |
 
 进一步看 [ARCHITECTURE_CONTRACT](ARCHITECTURE_CONTRACT.md) 与 [WORKING_PROTOCOL](WORKING_PROTOCOL.md) 入口。
 
-## 待评审架构提案
+## 实现状态与历史依据
 
-- [统一内容架构与重构方案](unified-content-architecture/README.md)：2026-10-03 讨论形成的架构层级、统一设计语言、内容/布局/编辑合同与实施工作包。当前仅为提案；未授权产品实施，不替代现行架构合同和任务登记。由当前路线图进入，不增加全局必读文件。
+- 目标仍为独立 Project V10、Published V3、Component API 5；现 V10 候选与冻结增量保留。成熟原版及新候选分开，以新计划的实际承载和证据为准，不因文档称完整软件已恢复。
+- 稳定基线恢复与渐进替换已获授权并进入实施；冻结来源与成熟原版分别保留，迁移工作树当前仍是 dirty engineering candidate。M 负责协调，I 独占共享中心与迁移装配；独立 review、最小检查和真实 UI 证据各按实际范围记录。发布继续暂停，Skill 能力在真实公共入口闭合后同步。
+- [上一轮统一内容方案与记录](unified-content-architecture/README.md)：U/W 实施范围与证据，不能再标成整体“未授权提案”，也不能视为本轮新架构通过。
+- [果铃 2.0 收敛稿](../archive/2026-09-convergence/果铃2.0收敛方案.md)与 [GPTpro 执行包](../../GPTpro方案/guoling_2_0_execution_plan/00_README.md)：已归档的路线、接口背景及复用实现索引；仅在直接相关时读取。
 
 ## 1.9 历史文档分工
 
 | 文档组 | 应如何使用 |
 |---|---|
-| [共用编辑方案](R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md)及正文／文件合同 | 已有能力的实现依据、技术边界与分项证据；当前派工以收敛稿与 GPTpro 执行包为准 |
+| [共用编辑方案](R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md)及正文／文件合同 | 已有能力的实现依据与分项证据；新派工以统一组件执行计划为准 |
 | [U01–U10 任务包](R19_PRODUCT_USABILITY_EXECUTION_TASKS.md)、[原可用性方案](R19_PRODUCT_USABILITY_IMPROVEMENT_PLAN.md) | 已实施批次的设计参考，不能当作当前待执行列表；工作台默认不强制四阶段 |
 | [U01–U10 记录](reviews/2026-09-17-r19-usability-execution.md)、[有限收尾记录](reviews/2026-09-17-r19-limited-closeout.md) | 复用已有工程证据；不证明整个 1.9 已完成 |
 | [1.9 路线与验收规格](roadmap/1.9/README.md) | 历史 DAG、节点规格及 050/051/060 证据，不作为当前实施次序 |
-| [长期产品研究](../../果铃_AI原生文件与内容工作台_产品方案_V2.0.md) | 后续候选与讨论材料；Office、HTML、插件不能据此进入当前范围 |
+| [长期产品研究](../archive/long-term-research/果铃_AI原生文件与内容工作台_产品方案_V2.0.md) | 后续候选与讨论材料；Office、HTML、插件不能据此进入当前范围 |
 | [历史总纲快照](../archive/2026-09-planning/2026-09-17-development-route-history.md) | 仅追溯多轮讨论，不读作当前任务 |
 
 ## 辅助材料
@@ -52,8 +62,8 @@
 
 ## 阅读路由
 
-- 决定当前做什么、为什么做、成功标准是什么：读收敛稿与 GPTpro 执行包。
-- 启动当前任务：按 GPTpro 任务索引和实施顺序，以届时 HEAD、源码、合同和目标测试核实；方案任务不是协调状态，满足依赖、当前事实与写锁后才按协议实例化。旧路线节点不自动恢复。
+- 决定当前做什么与成功标准：读统一组件总方案相应章节；决定如何分工与先后：读执行计划。
+- 启动任务：核对工作树中真实的已集成基线、直接接口与写锁，不能只用 HEAD 推断未提交成果已经包含。计划任务只有实际委派时才实例化，旧路线节点不自动恢复。
 - 修改 Schema、持久化、Surface、global/surface 图层、教师控制器、Published/Player、Runtime/Component、网络、导出或稳定身份：补读架构合同的相关条目。
 - 决定是否建卡、如何协调、敏感改动补什么检查、何时停止验证或怎样合入：只读工作协议，不从总纲或 AGENTS 复制规则。
 - 查看谁正在做什么：只读任务板和对应任务卡；历史阶段名与完成卡不得自动恢复为任务。

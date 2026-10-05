@@ -1,19 +1,18 @@
-import type { NativeChartContent } from '../../../shared/contracts/native-v1'
-import { chartNativeContentObjectSchema } from '../../../shared/contracts/native-v1'
-import { changeChartType, replaceChartTableData, patchChartStyle } from '../../course/chartContentOperations'
+import { chartDataSchema, type ChartData } from '../../../components/chart/data'
+import { changeChartType, replaceChartTableData, patchChartStyle } from '../../../components/chart/contentOperations'
 import type { ChartPropertiesCommands } from './ChartProperties'
 
 /** Value-only editor adapter; target/revision/history are owned by its caller. */
 export function createChartPropertiesCommands(
-  chart: NativeChartContent,
-  commit: (next: NativeChartContent) => string | null,
+  chart: ChartData,
+  commit: (next: ChartData) => string | null,
   report: (reason: string) => void,
 ): ChartPropertiesCommands {
-  const apply = (build: () => NativeChartContent): string | null => {
-    try { return commit(chartNativeContentObjectSchema.parse(build())) }
+  const apply = (build: () => ChartData): string | null => {
+    try { return commit(chartDataSchema.parse(build())) }
     catch (error) { return error instanceof Error ? error.message : '图表数据无效' }
   }
-  const run = (build: () => NativeChartContent) => { const error = apply(build); if (error) report(error) }
+  const run = (build: () => ChartData) => { const error = apply(build); if (error) report(error) }
   return {
     patchTitle: title => run(() => ({ ...chart, title })),
     patchType: (type, series) => run(() => changeChartType(chart, type, series)),

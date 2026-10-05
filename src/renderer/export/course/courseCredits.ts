@@ -1,4 +1,17 @@
 import type { PublishedCourseCredit } from '../../../shared/publishedCourseTypes'
+import type { ComponentAsset } from '../../../shared/contracts/component-platform/project'
+
+/** Current formal assets carry provenance separately from their delivery address. */
+export function collectComponentAssetCredits(assets: Readonly<Record<string, Pick<ComponentAsset, 'id' | 'source'>>>): PublishedCourseCredit[] {
+  return Object.values(assets).flatMap(asset => {
+    const source = asset.source
+    if (!source?.attribution) return []
+    return [{ assetId: asset.id, kind: source.kind, attribution: source.attribution,
+      ...(source.title ? { title: source.title } : {}), ...(source.author ? { author: source.author } : {}),
+      ...(source.url ? { url: source.url } : {}), ...(source.license ? { license: { ...source.license } } : {}),
+    }]
+  }).sort((left, right) => left.assetId.localeCompare(right.assetId))
+}
 
 /** One readable credit line: attribution, licence and source page. */
 export function courseCreditLine(credit: PublishedCourseCredit): string {

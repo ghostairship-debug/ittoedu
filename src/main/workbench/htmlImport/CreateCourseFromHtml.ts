@@ -2,6 +2,7 @@ import path from 'node:path'
 import type { ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
 import type { SaveReceipt } from '../../../shared/workbench/toolPorts'
 import type { ModelToolCall, ToolResult } from '../../../shared/workbench/tools'
+import type { DocumentOperationResult } from '../../../shared/workbench/document'
 
 export interface CreateCourseFromHtmlInput {
   sourcePath: string
@@ -10,7 +11,7 @@ export interface CreateCourseFromHtmlInput {
   path?: string
 }
 
-export type CreateCourseFromHtmlChild = 'file.open' | 'file.create' | 'html.import' | 'file.save'
+export type CreateCourseFromHtmlChild = 'file.open' | 'file.create' | 'project.list' | 'project.apply' | 'file.save'
 
 export interface CreateCourseFromHtmlPorts {
   /** Query the existing child call and its original receipt. Unknown outcomes must not return null. */
@@ -46,6 +47,14 @@ function data(result: ToolResult): Record<string, unknown> | null {
 
 function failure(code: string, message: string): ToolResult { return { kind: 'error', code, message } }
 
+function committedReceipt(value: unknown, documentId: string): value is Extract<DocumentOperationResult, { status: 'applied' | 'unchanged' }> {
+  if (!value || typeof value !== 'object') return false
+  const receipt = value as Record<string, unknown>
+  return (receipt.status === 'applied' || receipt.status === 'unchanged') && receipt.documentId === documentId
+    && typeof receipt.operationId === 'string' && typeof receipt.beforeRevision === 'number' && typeof receipt.revision === 'number'
+    && receipt.persistence === 'recoverable'
+}
+
 /** Compose existing operations; this use case owns no document state, journal or writer. */
 export async function createCourseFromHtml(
   input: CreateCourseFromHtmlInput, context: CreateCourseFromHtmlContext, ports: CreateCourseFromHtmlPorts,
@@ -67,14 +76,13 @@ export async function createCourseFromHtml(
   const sourceResult = await child('open-source', 'file.open', () => ({ path: input.sourcePath }))
   if (sourceResult.kind === 'error') return sourceResult
   const source = data(sourceResult)
-  if (typeof source?.documentId !== 'string' || source.kind !== 'text'
-    || typeof source.path !== 'string' || !/\.html?$/i.test(source.path))
-    return failure('invalid-html-source', '来源不是已打开的 HTML 文本文档；没有创建课件')
+  if (typeof source?.documentId !== 'string' || typeof source.path !== 'string')
+    return failure('invalid-html-source', '来源文件未打开；没有创建课件')
 
-  const requestedName = input.name ?? (path.basename(source.path).replace(/\.html?$/i, '') || '课件')
+  const requestedName = input.name ?? (path.parse(source.path).name || '课件')
   const name = /\.h5lesson$/i.test(requestedName) ? requestedName : `${requestedName}.h5lesson`
   const createdResult = await child('create', 'file.create', () => ({
-    name, kind: 'course-v9', ...(input.path === undefined ? {} : { path: input.path }),
+    name, kind: 'course-v10', ...(input.path === undefined ? {} : { path: input.path }),
   }))
   if (createdResult.kind === 'error') return createdResult
   const created = data(createdResult)
@@ -89,31 +97,43 @@ export async function createCourseFromHtml(
     const reopened = await child('open-target', 'file.open', () => ({ path: created.path }))
     if (reopened.kind === 'error') return reopened
     const opened = data(reopened)
-    if (typeof opened?.documentId !== 'string' || opened.kind !== 'course-v9')
+    if (typeof opened?.documentId !== 'string' || opened.kind !== 'course-v10')
       return failure('course-open-failed', `课件文件已创建但未打开：${created.path}；HTML 尚未导入`)
     documentId = opened.documentId
   }
   const targetDocumentId = documentId
-  const imported = await child('import', 'html.import', async () => ({
-    source: await ports.documentTarget(source.documentId as string, 'read'),
-    target: await ports.documentTarget(targetDocumentId, 'write'),
+  const project = await ports.documentTarget(targetDocumentId, 'write')
+  const listed = await child('list-target', 'project.list', () => ({ project }))
+  if (listed.kind === 'error') return listed
+  const files = data(listed)?.files
+  const targetPath = Array.isArray(files) ? files.find(file => file && typeof file === 'object'
+    && file.type === 'structure' && typeof file.path === 'string' && file.path.startsWith('pages/'))?.path : undefined
+  if (typeof targetPath !== 'string') return failure('course-target-missing', `课件文件已创建，但没有可导入的页面：${created.path}`)
+  const applied = await child('import', 'project.apply', () => ({
+    project, path: targetPath, from: source.path, intent: 'insert',
   }))
-  if (imported.kind === 'error') return { ...imported, message: `${imported.message}；课件文件：${created.path}` }
-  if (imported.kind !== 'document-operation'
-    || imported.result.status !== 'applied' && imported.result.status !== 'unchanged')
-    return failure('html-import-failed', `${imported.kind === 'document-operation' && 'message' in imported.result ? imported.result.message : 'HTML 未提交'}；课件文件：${created.path}`)
+  if (applied.kind === 'error') return { ...applied, message: `${applied.message}；课件文件：${created.path}` }
+  const application = data(applied), receipt = applied.kind === 'document-operation' ? applied.result : application?.receipt
+  if (!committedReceipt(receipt, targetDocumentId)) {
+    const diagnostics = Array.isArray(application?.diagnostics) ? application.diagnostics.map(item => item?.message).filter(message => typeof message === 'string').join('；') : ''
+    return failure('html-import-failed', `${diagnostics || 'HTML 未得到正式提交回执'}；课件文件：${created.path}`)
+  }
+  const imported: Extract<ToolResult, { kind: 'document-operation' }> = { kind: 'document-operation', result: receipt,
+    affected: Array.isArray(application?.insertedIds) ? application.insertedIds.filter(id => typeof id === 'string') : [],
+    ...(Array.isArray(application?.diagnostics) ? { advisories: application.diagnostics.filter(item => typeof item?.message === 'string')
+      .map(item => ({ step: 0, code: 'html-import-warning' as const, message: item.message + (typeof item.reference === 'string' ? ` (${item.reference})` : '') })) } : {}) }
 
   const saved = await child('save', 'file.save', async () => ({
     target: await ports.documentTarget(targetDocumentId, 'write'),
   }))
   if (saved.kind === 'error' && /outcome-unknown/.test(saved.code))
     return { ...saved, message: `HTML 已导入 ${created.path}；${saved.message}` }
-  const receipt = data(saved) as Partial<SaveReceipt> | null
-  const savedSuccessfully = receipt?.status === 'saved' && receipt.documentId === targetDocumentId
+  const saveReceipt = data(saved) as Partial<SaveReceipt> | null
+  const savedSuccessfully = saveReceipt?.status === 'saved' && saveReceipt.documentId === targetDocumentId
   const result: CreatedCourseFromHtml = {
     status: savedSuccessfully ? 'saved' : 'imported', sourcePath: source.path, path: created.path,
     documentId: targetDocumentId, saved: savedSuccessfully, import: imported, save: saved,
-    ...(!savedSuccessfully ? { saveError: saved.kind === 'error' ? saved.message : receipt?.reason ?? 'HTML 已导入，但尚未确认保存成功' } : {}),
+    ...(!savedSuccessfully ? { saveError: saved.kind === 'error' ? saved.message : saveReceipt?.reason ?? 'HTML 已导入，但尚未确认保存成功' } : {}),
   }
   return { kind: 'read', data: result }
 }

@@ -31,6 +31,8 @@ export type DocumentBlock = { id: string } & (
   | { type: 'callout'; tone: 'note' | 'example' | 'warning' | 'conclusion'; title?: FlowTextContent; body: FlowTextContent }
   | { type: 'section'; title: FlowTextContent; collapsedByDefault: boolean; blocks: DocumentBlock[] }
   | { type: 'component'; component: { packageId: string; version: string }; props: Record<string, unknown>; staticFallbackAssetId: string; wrap?: 'none' | 'left' | 'right' }
+  /** A V10 editor projection. `id` is the formal instance identity; the host owns content and geometry. */
+  | { type: 'course-instance'; title?: string }
   /**
    * A named course component (`components/<name>.html`). `project.components` owns its definition; the block
    * keeps only the name and its own instance fields, and shows a placeholder titled `title` until the name exists.
@@ -109,6 +111,8 @@ export const documentBlockSchema: z.ZodType<DocumentBlock> = z.lazy(() => z.disc
   z.object({ ...base, type: z.literal('callout'), tone: z.enum(['note', 'example', 'warning', 'conclusion']), title: documentTextContentSchema.optional(), body: documentTextContentSchema }).strict(),
   z.object({ ...base, type: z.literal('section'), title: documentTextContentSchema, collapsedByDefault: z.boolean(), blocks: z.array(documentBlockSchema).max(100000) }).strict(),
   z.object({ ...base, type: z.literal('component'), component: z.object({ packageId: documentIdSchema, version: z.string().trim().min(1).max(100) }).strict(), props: z.record(z.string(), z.json()), staticFallbackAssetId: documentIdSchema, wrap: z.enum(['none', 'left', 'right']).optional() }).strict(),
+  // Match the formal V10 identity contract, without a filename or display-name restriction.
+  z.object({ id: z.string().min(1), type: z.literal('course-instance'), title: z.string().optional() }).strict(),
   z.object({ ...base, type: z.literal('course-component'),
     name: z.string().superRefine((value, ctx) => { const issue = courseComponentNameIssue(value); if (issue) ctx.addIssue({ code: 'custom', message: issue }) }),
     title: z.string().max(500).optional(), height: z.number().finite().positive().max(10_000).optional(),
@@ -160,3 +164,21 @@ export function normalizeDocumentText(content: FlowTextContent): FlowTextContent
   }
   return { inlines: result }
 }
+
+export function sliceDocumentText(
+  content: FlowTextContent,
+  start: number,
+  end: number,
+): FlowTextContent {
+  const from = Math.max(0, Math.min(documentTextLength(content), start))
+  const to = Math.max(from, Math.min(documentTextLength(content), end))
+  let cursor = 0
+  return normalizeDocumentText({ inlines: content.inlines.flatMap(inline => {
+    const size = inline.type === 'math' ? 1 : Array.from(inline.text).length
+    const left = Math.max(0, from - cursor), right = Math.min(size, to - cursor)
+    cursor += size
+    if (right <= left) return []
+    return [inline.type === 'math' ? structuredClone(inline) : { ...structuredClone(inline), text: Array.from(inline.text).slice(left, right).join('') }]
+  }) })
+}
+

@@ -2,8 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { BrowserWindow, session } from 'electron'
 import sharp from 'sharp'
 import { locateCourseLayer } from '../../../core/drivers/course/layerProperties'
-import type { DynamicContentFallbackPort } from '../../../core/tools/DocumentToolGateway'
-import type { DynamicContentHostTarget } from '../../../core/tools/DynamicContentEditPlanner'
+import type { DynamicContentFallbackCapture, DynamicContentHostTarget } from '../../../core/tools/DynamicContentEditPlanner'
 import { isCourseLayerVisibleAtLocation } from '../../../shared/courseProjectModel'
 import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
 import type { DocumentModel } from '../../../shared/workbench/document'
@@ -67,7 +66,7 @@ export function prepareDynamicContentFallbackCapture(input: {
 }
 
 /** Candidate pixels come from the exact Published layer, never BrowserWindow.capturePage(). */
-export class DynamicContentFallbackCaptureService implements DynamicContentFallbackPort {
+export class DynamicContentFallbackCaptureService {
   private readonly active = new Map<string, Set<AbortController>>()
   constructor(private readonly options: DynamicContentFallbackCaptureOptions) {}
 
@@ -76,7 +75,8 @@ export class DynamicContentFallbackCaptureService implements DynamicContentFallb
     for (const controller of this.active.get(runId) ?? []) controller.abort()
   }
 
-  capture: DynamicContentFallbackPort['capture'] = async input => {
+  capture = async (input: { runId: string; documentId: string; target: DynamicContentHostTarget;
+    candidate: CourseModel }): Promise<DynamicContentFallbackCapture> => {
     if (input.documentId !== input.target.documentId) throw new Error('候选截图文档身份不匹配')
     const upstream = this.options.signalForRun?.(input.runId)
     if (this.options.signalForRun && !upstream || upstream?.aborted) throw new Error('动态图文截图已取消')

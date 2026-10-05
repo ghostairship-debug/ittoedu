@@ -16,7 +16,7 @@ export const documentExportInputSchema = z.object({
 export const documentDeliveryTools = [
   { name: 'file.save' as const, description: '保存已打开文档的当前正式内容。target 使用宿主返回的文档短句柄，destination 仅用于另存为。返回确切保存版本与脏状态。', inputSchema: fileSaveInputSchema,
     manual: { label: '保存文件', group: 'edit' as const, targetKinds: ['document'] as const } },
-  { name: 'document.export' as const, description: '将已授权的 Course V9 文档导出为离线单 HTML、在线单 HTML 或网页包，返回生成与写盘的真实状态。同任务同文档的既有导出未被修改时可原位更新；其他同名文件不覆盖，不需先删除旧文件。', inputSchema: documentExportInputSchema,
+  { name: 'document.export' as const, description: '将已授权的课件文档导出为离线单 HTML、在线单 HTML 或网页包，返回生成与写盘的真实状态。Project V10 使用同一 Published V3 输出。同任务同文档的既有导出未被修改时可原位更新；其他同名文件不覆盖，不需先删除旧文件。', inputSchema: documentExportInputSchema,
     manual: { label: '导出文档', group: 'edit' as const, targetKinds: ['document'] as const } },
 ]
 

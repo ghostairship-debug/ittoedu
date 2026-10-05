@@ -1,0 +1,62 @@
+{
+  "description": "直接写入完整普通 UTF-8 内容（含 Markdown、HTML 和代码）。mode=create 新建并保存文件，要求路径不存在，无需先 file.create。mode=replace 覆盖文件当前内容，无需先 file.read；如携带 expectedVersion 则校验版本一致后再写入，不一致时报版本冲突。替换已打开文件只提交文档事务，不自动保存。以返回的 saved 确认落盘。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "mode": {
+            "const": "create",
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 32767,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "path",
+          "content"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "expectedVersion": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "mode": {
+            "const": "replace",
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 32767,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "path",
+          "content"
+        ],
+        "type": "object"
+      }
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "name": "file.write",
+  "version": 1
+}

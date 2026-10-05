@@ -20,6 +20,7 @@ type Sink = {
   resources: Map<string, ExtractedResource>
   remoteReferences: RemoteReference[]
   diagnostics: ImportDiagnostic[]
+  modules: Map<string, string>
   cssStack: Set<string>
   htmlStack: Set<string>
 }
@@ -61,7 +62,7 @@ export const EMBEDDED_SOURCE_ATTRIBUTE = 'data-guoling-source'
 const clip = (value: string, max = 64) => value.length <= max ? value : value.slice(0, max)
 const copyBytes = (bytes: Uint8Array) => new Uint8Array(bytes)
 const placeholder = (key: string) => `cw-resource:${key}`
-const createSink = (): Sink => ({ resources: new Map(), remoteReferences: [], diagnostics: [], cssStack: new Set(), htmlStack: new Set() })
+const createSink = (): Sink => ({ resources: new Map(), remoteReferences: [], diagnostics: [], modules: new Map(), cssStack: new Set(), htmlStack: new Set() })
 
 function addDiagnostic(sink: Sink, level: ImportDiagnostic['level'], code: string, message: string, reference?: string) {
   sink.diagnostics.push(reference === undefined ? { level, code, message } : { level, code, message, reference })
@@ -583,6 +584,24 @@ const modulepreloadShapes = new Set([
   '(function(){let e=document.createElement(`link`).relList;if(e&&e.supports&&e.supports(`modulepreload`))return;for(let e of document.querySelectorAll(`link[rel="modulepreload"]`))n(e);function n(e){if(e.ep)return;e.ep=!0;let n={credentials:`same-origin`};fetch(e.href,n)}})();',
 ].map(code => modulepreloadShape(((parse(code, { ecmaVersion: 'latest' }) as unknown as JavaScriptNode).body as JavaScriptNode[])[0].expression as JavaScriptNode)))
 
+/** Mark before descending so cyclic imports keep one editable source file. */
+function collectModule(reference: string, baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>): void {
+  const key = resolveRelative(baseDir, reference)
+  if (!key) {
+    addDiagnostic(sink, 'warning', 'unresolved-module-reference', `模块引用无法从当前资源根读取：${reference}；源码已保留`, reference)
+    return
+  }
+  if (sink.modules.has(key)) return
+  const bytes = siblings.get(key)
+  if (!bytes) {
+    addDiagnostic(sink, 'warning', 'missing-relative-resource', `找不到本地模块 ${key}；原引用与其他内容已保留`, key)
+    return
+  }
+  const source = decodeText(bytes)
+  sink.modules.set(key, source)
+  sink.modules.set(key, rewriteJavaScript(source, 'module', directoryOf(key), sink, siblings, `模块 ${key}`))
+}
+
 function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>, scriptLabel = '脚本'): string {
   type Node = JavaScriptNode
   let root: Node
@@ -716,13 +735,16 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     if (['ImportDeclaration', 'ExportAllDeclaration', 'ImportExpression'].includes(node.type) || (node.type === 'ExportNamedDeclaration' && node.source)) {
       const source = node.source as Node | undefined
       const reference = source && staticString(source)
-      addDiagnostic(outputSink, 'warning', 'unsupported-module-graph', `模块依赖 ${reference ? clip(reference, 100) : '（动态引用）'} 已保留，但本地 import 引用在课件中无法解析，该页脚本不会运行；请把脚本合并为单文件。远程模块被 CSP 阻止，请内联模块`)
-      if (reference && /^(?:\.{1,2}\/|\/|[a-zA-Z][a-zA-Z0-9+.-]*:)/.test(reference)) {
-        // Reuse URL diagnostics without registering or rewriting module dependencies.
-        const diagnosticSink = createSink()
-        rewriteSingleUrl(reference, 'js-string', baseDir, diagnosticSink, siblings, false, 'script')
-        sink.diagnostics.push(...diagnosticSink.diagnostics.filter(reportedReference))
-        sink.remoteReferences.push(...diagnosticSink.remoteReferences)
+      if (reference && /^(?:\.{1,2}\/)/.test(reference)) collectModule(reference, baseDir, outputSink, siblings)
+      else {
+        addDiagnostic(outputSink, 'warning', 'unresolved-module-reference',
+          `模块引用 ${reference ? clip(reference, 100) : '（运行时动态表达式）'} 已保留；仅可静态读取的本地模块进入工程，其他依赖在运行时报告`, reference ?? undefined)
+        if (reference && /^(?:\/|[a-zA-Z][a-zA-Z0-9+.-]*:)/.test(reference)) {
+          const diagnosticSink = createSink()
+          rewriteSingleUrl(reference, 'js-string', baseDir, diagnosticSink, siblings, false, 'script')
+          outputSink.diagnostics.push(...diagnosticSink.diagnostics.filter(reportedReference))
+          outputSink.remoteReferences.push(...diagnosticSink.remoteReferences)
+        }
       }
     }
     const memberName = (member: Node): string | null => closureProof.memberName(member) ?? null
@@ -1179,7 +1201,11 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
         if (/^data:/i.test(decoded)) addDiagnostic(sink, 'warning', 'unsupported-script-source', 'data URI 脚本源保留原文；不对其重写资源闭包', clip(decoded))
         const key = resolveRelative(baseDir, decoded)
         const bytes = key ? siblings.get(key) : undefined
-        if (bytes && key && ['js', 'mjs'].includes(extensionOf(decoded))) {
+        const moduleScript = javascriptKind(attributeBy(tag.attrs, 'type')?.rawValue ?? null) === 'module'
+        if (moduleScript && !/^(?:[a-zA-Z][a-zA-Z0-9+.-]*:|\/\/)/.test(decoded)) {
+          // Keep the module script URL and its directory relation in author HTML.
+          collectModule(decoded, baseDir, sink, siblings)
+        } else if (bytes && key && ['js', 'mjs'].includes(extensionOf(decoded))) {
           const type = attributeBy(tag.attrs, 'type')?.rawValue ?? null
           const scriptKind = javascriptKind(type)
           const base = directoryOf(key)
@@ -1190,6 +1216,9 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
           src.drop = true
           if (scriptKind !== 'module' && attributeBy(tag.attrs, 'defer') && !attributeBy(tag.attrs, 'async')) tag.attrs.push({
             name: 'data-cw-defer', rawName: 'data-cw-defer', hasValue: false, quote: '', rawValue: '', value: '', changed: true, drop: false,
+          })
+          if (scriptKind === 'script' && attributeBy(tag.attrs, 'async')) tag.attrs.push({
+            name: 'data-cw-async', rawName: 'data-cw-async', hasValue: false, quote: '', rawValue: '', value: '', changed: true, drop: false,
           })
           inlined = true
         } else if (bytes && key) {
@@ -1230,5 +1259,5 @@ export function extractHtmlResources(input: ExtractHtmlResourcesInput): ExtractH
   const sink = createSink()
   const siblings = siblingMap(input.siblingFiles)
   const html = transformHtml(input.html, sink, siblings)
-  return { html, resources: [...sink.resources.values()], remoteReferences: sink.remoteReferences, diagnostics: sink.diagnostics }
+  return { html, ...(sink.modules.size ? { modules: Object.fromEntries(sink.modules) } : {}), resources: [...sink.resources.values()], remoteReferences: sink.remoteReferences, diagnostics: sink.diagnostics }
 }

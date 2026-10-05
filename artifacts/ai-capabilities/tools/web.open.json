@@ -1,0 +1,40 @@
+{
+  "description": "打开公网 http(s) 页面或本任务搜索来源，返回有界正文、URL 和版本；逐跳校验公网目标，长文用 offset 续读。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "limit": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "offset": {
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "sourceId": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "url": {
+        "format": "uri",
+        "type": "string"
+      },
+      "version": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "read",
+    "label": "web.open",
+    "targetKinds": []
+  },
+  "name": "web.open",
+  "version": 1
+}

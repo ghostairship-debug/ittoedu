@@ -27,6 +27,7 @@ import type {
   ArrowHead,
   FeatherMode,
   FormulaNode,
+  FormulaAstNode,
   ImageFit,
   ImageNode,
   NativeRenderableNode,
@@ -44,6 +45,7 @@ import { SharedShapeProperties } from './SharedShapeProperties'
 import { NativeColorPreviewContext } from './NativeColorPreview'
 import { SlideInputProperties, type SlideInputPropertiesCommands, type SlideInputPropertiesView } from './SlideInputProperties'
 import { formulaAstToAccessibleText } from '../../../shared/formulaLinear'
+import { describeDocumentMath, parseDocumentMath } from '../../../shared/document/math'
 import { isVerticalWritingMode } from '../../../shared/textLayout'
 import type { TextRunEdit } from '../../../shared/textRuns'
 import {
@@ -55,13 +57,18 @@ import type { ComponentManifest } from '../../../shared/componentTypes'
 import type { InteractionRule } from '../../../shared/interactionTypes'
 import { NativeColorInput as ColorInput } from './NativeColorPreview'
 import { ComponentPropertiesEditor } from '../ComponentPropertiesEditor'
+import type { ComponentAsset, ComponentDefinition, ComponentInstance, JsonValue } from '../../../shared/contracts/component-platform/project'
+import type { ImageData } from '../../../components/image/data'
+import type { ImageTransformOperation } from '../../../shared/imageTransformContract'
+import { ImagePixelTransformProperties } from './ImagePixelTransformProperties'
+import { RuntimePropertiesPanel, type RuntimePropertiesContext } from './RuntimePropertiesPanel'
 import { FormulaAuthoringEditor, type FormulaAuthoringBinding } from '../FormulaAuthoringEditor'
 import {
   InteractionEditor,
   type InteractionEditorProps,
 } from '../InteractionEditor'
 import { SimpleEntranceAnimationEditor } from '../SimpleEntranceAnimationEditor'
-import type { SlideSimpleEntranceAnimationConfig } from '../../course/v9SlideContentCommands'
+import type { SlideSimpleEntranceAnimationConfig } from '../../course/simpleEntranceAnimation'
 import { FlowSpatialInteractionUnavailableSection } from './FlowSpatialInteractionUnavailableSection'
 import {
   BufferedInput,
@@ -110,13 +117,23 @@ export type PropertiesRuntimeView = PropertiesItemBase & {
 }
 
 export type PropertiesItemView =
-  | NativeRenderableNode
+  | Exclude<NativeRenderableNode, FormulaNode | ImageNode>
+  | PropertiesImageView
+  | PropertiesFormulaView
   | NativeTablePropertiesView
   | (PropertiesItemBase & ChartPropertiesView)
   | SlideInputPropertiesView
   | PropertiesComponentView
   | PropertiesRuntimeView
   | (PropertiesItemBase & { type: 'composition' })
+
+export type PropertiesFormulaView = Omit<FormulaNode, 'ast'> & {
+  ast: FormulaAstNode | null
+  /** Formal LaTeX remains editable when it has no representation in the linear AST. */
+  latex?: string
+}
+
+export type PropertiesImageView = ImageNode & Partial<Pick<ImageData, 'originalAssetId' | 'filters'>>
 
 export type PropertiesPatch = DeepPartial<PropertiesItemView>
 
@@ -150,6 +167,9 @@ export interface SlideNativePropertiesContext {
   readonly spatialMode: boolean
   readonly flowOrSpatial: boolean
   readonly editingScopeGlobal: boolean
+  readonly frameEditingEnabled?: boolean
+  readonly frameDimensionsEditingEnabled?: boolean
+  readonly runtime?: RuntimePropertiesContext | null
   readonly notices: SlideNativeNoticesView
   readonly videoDiagnostics: readonly string[]
   readonly animation: {
@@ -162,13 +182,17 @@ export interface SlideNativePropertiesContext {
   readonly interaction: InteractionEditorProps | null
   readonly globalInteraction: InteractionEditorProps | null
   readonly component: {
-    readonly manifest: ComponentManifest
-    readonly assets: Readonly<Record<string, AssetMeta>>
+    readonly definition: ComponentDefinition
+    readonly instance: ComponentInstance
+    readonly assets: Readonly<Record<string, ComponentAsset>>
+    readonly onChange: (data: JsonValue) => void
+    readonly onPreview?: (data: JsonValue | null) => void
   } | null
   readonly commands: {
     readonly patch: (patch: PropertiesPatch) => void
     readonly preview?: (patch: PropertiesPatch | null) => void
     readonly replaceImage: () => void
+    readonly transformImage?: (operations: readonly ImageTransformOperation[]) => Promise<void>
     readonly clearPresentationOverride: () => void
     readonly openAutomation: () => void
     readonly openProfessionalAutomation: () => void
@@ -183,12 +207,14 @@ export interface SlideNativePropertiesContext {
 export function CommonNodeProperties({
   node,
   showGeometryFields = true,
+  showDimensions = true,
   showPlaybackInitialState = true,
   update,
 }: {
   node: PropertiesItemView
-  /** Flow 节点没有画布几何语义；传 false 可隐藏 X/Y、旋转与透明度字段。 */
+  /** Reading layout owns Flow body position; its root X/Y and rotation are not free-frame controls. */
   showGeometryFields?: boolean
+  showDimensions?: boolean
   /** Flow 节点不参与互动播放的初始显隐；传 false 可隐藏该字段。 */
   showPlaybackInitialState?: boolean
   update(patch: PropertiesPatch): void
@@ -205,7 +231,7 @@ export function CommonNodeProperties({
         <BufferedInput label="X" type="number" step={0.1} value={Number(node.x.toFixed(1))} onCommit={(x) => update({ x: Number(x) })} />
         <BufferedInput label="Y" type="number" step={0.1} value={Number(node.y.toFixed(1))} onCommit={(y) => update({ y: Number(y) })} />
       </div>}
-      <div className="coordinate-grid">
+      {showDimensions && <div className="coordinate-grid">
         <BufferedInput
           label="宽"
           type="number"
@@ -230,16 +256,16 @@ export function CommonNodeProperties({
             : undefined}
           onCommit={(height) => update({ height: Number(height) })}
         />
-      </div>
-      {autoSizedText && (
+      </div>}
+      {showDimensions && autoSizedText && (
         <p className="property-hint">
           {verticalAutoSizedText
             ? '竖排时宽度自动适应内容；高度可直接输入或拖动画布上下边缘调整。'
             : '横排时高度自动适应内容；宽度可直接输入或拖动画布左右边缘调整。'}
         </p>
       )}
-      {showGeometryFields && <div className="coordinate-grid">
-        <BufferedInput label="旋转角度" type="number" min={-36000} max={36000} step={1} value={Number(node.rotation.toFixed(1))} onCommit={(rotation) => update({ rotation: Number(rotation) })} />
+      <div className="coordinate-grid">
+        {showGeometryFields && <BufferedInput label="旋转角度" type="number" min={-36000} max={36000} step={1} value={Number(node.rotation.toFixed(1))} onCommit={(rotation) => update({ rotation: Number(rotation) })} />}
         <BufferedInput
           label="透明度 %"
           type="number"
@@ -251,7 +277,7 @@ export function CommonNodeProperties({
             opacity: transparencyPercentToOpacity(Number(transparency)),
           })}
         />
-      </div>}
+      </div>
       <ToggleRow label="显示图层" checked={node.visible} onChange={(visible) => update({ visible })} />
       <button type="button" className="secondary-button" style={{ width: '100%' }} onClick={() => update({ locked: !node.locked })}>
         {node.locked ? <Unlock size={14} /> : <Lock size={14} />}
@@ -423,17 +449,19 @@ export function TextProperties({
           style: { backgroundOpacity: transparencyPercentToOpacity(value) },
         })}
       />
-      <RangeField label="文本框圆角" value={style.cornerRadius} min={0} max={Math.min(node.width, node.height) / 2} suffix="px" onChange={(cornerRadius) => update({ style: { cornerRadius } })} />
+      <RangeField label="文本框圆角" value={style.cornerRadius} min={0} max={node.width && node.height ? Math.min(node.width, node.height) / 2 : Math.max(200, style.cornerRadius)} suffix="px" onChange={(cornerRadius) => update({ style: { cornerRadius } })} />
     </section>
   )
 }
 
 function FormulaProperties({ node, update, formulaAuthoring }: {
   formulaAuthoring?: FormulaAuthoringBinding
-  node: FormulaNode
+  node: PropertiesFormulaView
   update(patch: PropertiesPatch): void
 }) {
-  const generatedAccessibleText = formulaAstToAccessibleText(node.ast)
+  const generatedAccessibleText = node.latex === undefined
+    ? node.ast ? formulaAstToAccessibleText(node.ast) : node.accessibleText
+    : describeDocumentMath(parseDocumentMath(node.latex))
   const normalizeAccessibleText = (value: string) => value.replace(/\s+/gu, '')
   const accessibilityAutomatic = normalizeAccessibleText(node.accessibleText) ===
     normalizeAccessibleText(generatedAccessibleText)
@@ -443,6 +471,8 @@ function FormulaProperties({ node, update, formulaAuthoring }: {
       <h3 className="property-title"><Sigma size={14} />公式</h3>
       <FormulaAuthoringEditor
         node={node}
+        latexSource={node.latex}
+        onCommitLatex={(latex, accessibleText) => update({ latex, accessibleText })}
         onCommit={(ast, accessibleText) => update({
           ast,
           accessibleText,
@@ -522,10 +552,12 @@ function FormulaProperties({ node, update, formulaAuthoring }: {
   )
 }
 
-export function ImageProperties({ node, update, onReplaceImage }: {
-  node: ImageNode
+export function ImageProperties({ node, update, onReplaceImage, onTransformImage, imageAsset }: {
+  node: PropertiesImageView
   update(patch: PropertiesPatch): void
   onReplaceImage(): void
+  onTransformImage?: (operations: readonly ImageTransformOperation[]) => Promise<void>
+  imageAsset?: ComponentAsset
 }) {
   const replaceSafeArea = (
     index: number,
@@ -539,6 +571,9 @@ export function ImageProperties({ node, update, onReplaceImage }: {
     <section className="property-section">
       <h3 className="property-title"><ImageIcon size={14} />图片</h3>
       <button type="button" className="secondary-button" style={{ width: '100%', marginBottom: 12 }} onClick={onReplaceImage}><ImageIcon size={14} />替换图片</button>
+      {node.originalAssetId && <button type="button" className="secondary-button"
+        disabled={node.assetId === node.originalAssetId && Object.values(node.crop).every(value => value === 0)}
+        onClick={() => update({ assetId: node.originalAssetId, crop: { left: 0, top: 0, right: 0, bottom: 0 } })}>恢复原图</button>}
       <SelectField<ImageFit> label="显示方式" value={node.fit} options={[{ value: 'contain', label: '适应（完整显示）' }, { value: 'cover', label: '填充（允许裁剪）' }, { value: 'stretch', label: '拉伸' }]} onChange={(fit) => update({ fit })} />
       <ToggleRow label="保持宽高比" checked={node.preserveAspectRatio} onChange={(preserveAspectRatio) => update({ preserveAspectRatio })} />
       <div className="button-row">
@@ -565,9 +600,17 @@ export function ImageProperties({ node, update, onReplaceImage }: {
           <RangeField label={node.fit === 'cover' ? '填充焦点 Y' : '框内位置 Y'} value={node.cropY * 100} min={0} max={100} suffix="%" onChange={(cropY) => update({ cropY: cropY / 100 })} />
         </>
       )}
-      <RangeField label="圆角" value={node.cornerRadius} min={0} max={Math.min(node.width, node.height) / 2} suffix="px" onChange={(cornerRadius) => update({ cornerRadius })} />
+      <RangeField label="圆角" value={node.cornerRadius} min={0} max={node.width && node.height ? Math.min(node.width, node.height) / 2 : Math.max(200, node.cornerRadius)} suffix="px" onChange={(cornerRadius) => update({ cornerRadius })} />
       <SelectField<FeatherMode> label="羽化形状" value={node.feather.mode} options={[{ value: 'rectangle', label: '矩形边缘' }, { value: 'ellipse', label: '椭圆/径向' }]} onChange={(mode) => update({ feather: { mode } })} />
       <RangeField label="羽化强度" value={node.feather.amount} min={0} max={100} suffix="%" onChange={(amount) => update({ feather: { amount } })} />
+      {node.filters && <>
+        <RangeField label="亮度" value={node.filters.brightness * 100} min={0} max={300} suffix="%" onChange={brightness => update({ filters: { brightness: brightness / 100 } })} />
+        <RangeField label="对比度" value={node.filters.contrast * 100} min={0} max={300} suffix="%" onChange={contrast => update({ filters: { contrast: contrast / 100 } })} />
+        <RangeField label="饱和度" value={node.filters.saturation * 100} min={0} max={300} suffix="%" onChange={saturation => update({ filters: { saturation: saturation / 100 } })} />
+        <RangeField label="灰度" value={node.filters.grayscale * 100} min={0} max={100} suffix="%" onChange={grayscale => update({ filters: { grayscale: grayscale / 100 } })} />
+        <RangeField label="模糊" value={node.filters.blur} min={0} max={30} suffix="px" onChange={blur => update({ filters: { blur } })} />
+      </>}
+      {onTransformImage&&<ImagePixelTransformProperties key={node.assetId} asset={imageAsset} transform={onTransformImage}/>}
       <div className="property-subsection-header">
         <div>
           <strong>图片安全区</strong>
@@ -694,6 +737,8 @@ export function SlideNativeTypeFields({
   tableCommands,
   chartCommands,
   formulaAuthoring,
+  onTransformImage,
+  imageAsset,
 }: {
   formulaAuthoring?: FormulaAuthoringBinding
   node: PropertiesItemView
@@ -702,6 +747,8 @@ export function SlideNativeTypeFields({
   spatialMode: boolean
   videoDiagnostics: readonly string[]
   onReplaceImage(): void
+  onTransformImage?: (operations: readonly ImageTransformOperation[]) => Promise<void>
+  imageAsset?: ComponentAsset
   onOpenAutomation?: () => void
   textCommands: SlideNativeTextCommands
   draftBindingKey: string
@@ -714,20 +761,6 @@ export function SlideNativeTypeFields({
       <p className="property-hint">这里调整组合的整体位置、尺寸与透明度；内部文字、图像和布局通过组合内容编辑入口修改。</p>
     </section>
   )
-  if (spatialMode && node.type !== 'text' && node.type !== 'chart' && node.type !== 'table') {
-    return (
-      <section
-        className="property-section"
-        data-testid="spatial-type-properties-unavailable"
-        role="status"
-      >
-        <h3 className="property-title">类型属性</h3>
-        <p className="property-hint">
-          当前 Spatial 载体只开放上方可写入真实图层的通用属性；此类型的专属属性尚未接入 canonical 历史，因此已隐藏可提交控件。
-        </p>
-      </section>
-    )
-  }
   return (
     <>
       {node.type === 'text' && (
@@ -738,13 +771,13 @@ export function SlideNativeTypeFields({
           textCommands={textCommands}
         />
       )}
-      {!spatialMode && node.type === 'formula' && (
+      {node.type === 'formula' && (
         <FormulaProperties node={node} update={update} formulaAuthoring={formulaAuthoring} />
       )}
-      {!spatialMode && node.type === 'image' && (
-        <ImageProperties node={node} update={update} onReplaceImage={onReplaceImage} />
+      {node.type === 'image' && (
+        <ImageProperties node={node} update={update} onReplaceImage={onReplaceImage} onTransformImage={onTransformImage} imageAsset={imageAsset} />
       )}
-      {!spatialMode && node.type === 'video' && (
+      {node.type === 'video' && (
         <VideoProperties
           node={node}
           update={update}
@@ -752,7 +785,7 @@ export function SlideNativeTypeFields({
           onOpenAutomation={onOpenAutomation}
         />
       )}
-      {!spatialMode && node.type === 'shape' && (
+      {node.type === 'shape' && (
         <SharedShapeProperties node={node} update={update} />
       )}
       {node.type === 'table' && tableCommands && (
@@ -855,7 +888,8 @@ export function SlideNativePropertiesPanel({
         notices={notices}
         onClearPresentationOverride={commands.clearPresentationOverride}
       />
-      <CommonNodeProperties node={node} update={update} />
+      <CommonNodeProperties node={node} update={update} showGeometryFields={context.frameEditingEnabled !== false}
+        showDimensions={(context.frameDimensionsEditingEnabled ?? context.frameEditingEnabled) !== false} />
       {animation && (
         <SimpleEntranceAnimationEditor
           layerItemId={animation.layerItemId}
@@ -876,6 +910,8 @@ export function SlideNativePropertiesPanel({
         spatialMode={spatialMode}
         videoDiagnostics={videoDiagnostics}
         onReplaceImage={commands.replaceImage}
+        onTransformImage={commands.transformImage}
+        imageAsset={node.type==='image'?component?.assets[node.assetId]:undefined}
         onOpenAutomation={!notices.surfaceBaseEditing
           ? commands.openAutomation
           : undefined}
@@ -897,16 +933,17 @@ export function SlideNativePropertiesPanel({
         <>
           <section className="property-section">
             <h3 className="property-title"><Box size={14} />外部组件</h3>
-            <div className="form-field"><label>组件名称</label><div className="readonly-value">{component?.manifest.name ?? node.name}</div></div>
+            <div className="form-field"><label>组件名称</label><div className="readonly-value">{component?.definition.title ?? node.name}</div></div>
             <div className="form-field"><label>组件 ID</label><div className="readonly-value">{node.component.packageId}</div></div>
             <div className="form-field"><label>版本</label><div className="readonly-value">{node.component.version}</div></div>
           </section>
           {component && (
             <ComponentPropertiesEditor
-              manifest={component.manifest}
-              node={node}
+              definition={component.definition}
+              node={component.instance}
               assets={component.assets}
-              onChange={(props) => update({ props })}
+              onChange={component.onChange}
+              onPreview={component.onPreview}
             />
           )}
         </>
@@ -914,6 +951,7 @@ export function SlideNativePropertiesPanel({
       {interaction && (
         <InteractionEditor {...interaction} />
       )}
+      {context.runtime && <RuntimePropertiesPanel context={context.runtime} />}
     </PropertyDraftBoundary>
     </NativeColorPreviewContext.Provider>
   )

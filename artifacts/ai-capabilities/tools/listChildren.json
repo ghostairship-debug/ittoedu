@@ -1,0 +1,39 @@
+{
+  "description": "分页列出文档、表面或组件的直接子项，并取得短句柄；写权限仍按冻结目标逐项判定。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "cursor": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "limit": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "target": {
+        "maxLength": 100,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "target"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "read",
+    "label": "列出子项",
+    "targetKinds": [
+      "document",
+      "course-surface",
+      "course-instance"
+    ]
+  },
+  "name": "listChildren",
+  "version": 1
+}

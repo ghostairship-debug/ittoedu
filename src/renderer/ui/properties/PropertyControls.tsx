@@ -20,6 +20,25 @@ interface PropertyDraftBindingValue {
 
 const PropertyDraftBindingContext = createContext<PropertyDraftBindingValue | null>(null)
 
+const pendingPropertyDrafts = new Set<() => boolean>()
+
+/** Saving commits focused property drafts without moving focus. IME retains its native composition. */
+export async function flushPropertiesDrafts(): Promise<boolean> {
+  let complete = true
+  for (const flush of [...pendingPropertyDrafts]) if (!flush()) complete = false
+  return complete
+}
+
+export function usePropertyDraftFlush(flush: () => boolean): void {
+  const current = useRef(flush)
+  current.current = flush
+  useLayoutEffect(() => {
+    const run = () => current.current()
+    pendingPropertyDrafts.add(run)
+    return () => { pendingPropertyDrafts.delete(run) }
+  }, [])
+}
+
 export function usePropertyDraftBindingKey(): string {
   return useContext(PropertyDraftBindingContext)?.key ?? 'unbound'
 }
@@ -105,8 +124,10 @@ export function BufferedInput({
     staleNotified: false,
     onCommit,
   })
-  const stale = sessionRef.current.phase !== 'idle'
-    && sessionRef.current.bindingKey !== currentBindingKey
+  const stale = sessionRef.current.phase !== 'idle' && (
+    sessionRef.current.bindingKey !== currentBindingKey
+    || (currentValue !== sessionRef.current.baseline && currentValue !== sessionRef.current.draft)
+  )
 
   useLayoutEffect(() => {
     const session = sessionRef.current
@@ -123,8 +144,10 @@ export function BufferedInput({
     if (draft !== current.value) setDraft(current.value)
   }, [currentBindingKey, currentValue, draft, onCommit])
 
-  const sessionIsStale = () => sessionRef.current.phase !== 'idle'
-    && sessionRef.current.bindingKey !== currentRef.current.bindingKey
+  const sessionIsStale = () => sessionRef.current.phase !== 'idle' && (
+    sessionRef.current.bindingKey !== currentRef.current.bindingKey
+    || (currentRef.current.value !== sessionRef.current.baseline && currentRef.current.value !== sessionRef.current.draft)
+  )
   const rejectStale = () => {
     const session = sessionRef.current
     if (!sessionIsStale()) return false
@@ -159,10 +182,7 @@ export function BufferedInput({
     setDraft(current.value)
   }
   const commit = (candidate = sessionRef.current.draft) => {
-    if (rejectStale()) {
-      rebaseCurrent()
-      return
-    }
+    if (rejectStale()) return
     const session = sessionRef.current
     let next = candidate
     if (type === 'number') {
@@ -188,6 +208,13 @@ export function BufferedInput({
     setDraft(next)
     if (changed) callback(next)
   }
+  usePropertyDraftFlush(() => {
+    const session = sessionRef.current
+    if (session.phase === 'idle') return true
+    if (session.phase === 'composing' || session.phase === 'blur-pending' || rejectStale()) return false
+    commit()
+    return true
+  })
   return (
     <div className="form-field">
       <label>{label}</label>
@@ -219,7 +246,9 @@ export function BufferedInput({
         }}
         onCompositionEnd={(event) => {
           if (rejectStale()) {
-            rebaseCurrent()
+            sessionRef.current.phase = 'editing'
+            sessionRef.current.draft = event.currentTarget.value
+            setDraft(event.currentTarget.value)
             return
           }
           const session = sessionRef.current
@@ -414,6 +443,12 @@ export function RangeField({
     setDraft(clamped)
     if (changed) callback(clamped)
   }
+  usePropertyDraftFlush(() => {
+    if (!sessionRef.current.active) return true
+    if (rejectStale()) return false
+    commit(sessionRef.current.draft)
+    return true
+  })
   return (
     <div className="form-field range-field">
       <label><span>{label}</span><span>{Number(draft.toFixed(2))}{suffix}</span></label>
@@ -643,10 +678,7 @@ export function TextContentTextarea({
 
   const finishCommit = () => {
     const session = sessionRef.current
-    if (rejectStale()) {
-      rebaseCurrent()
-      return
-    }
+    if (rejectStale()) return
     const commit = session.onCommit
     session.phase = 'idle'
     session.baseline = session.draft
@@ -655,13 +687,21 @@ export function TextContentTextarea({
     compositionCaptureRef.current = null
     commit()
   }
+  usePropertyDraftFlush(() => {
+    const session = sessionRef.current
+    if (session.phase === 'idle') return true
+    if (session.phase === 'composing' || session.phase === 'blur-pending' || rejectStale()) return false
+    finishCommit()
+    return true
+  })
 
   const finishComposition = (finalDraft: string) => {
     queueMicrotask(() => {
       const session = sessionRef.current
       if (session.phase === 'idle') return
       if (rejectStale()) {
-        rebaseCurrent()
+        session.onCompositionChange?.(false)
+        session.phase = 'editing'
         return
       }
       const shouldCommit = session.phase === 'blur-pending'
@@ -744,7 +784,11 @@ export function TextContentTextarea({
         }}
         onCompositionEnd={(event) => {
           if (rejectStale()) {
-            rebaseCurrent()
+            const session = sessionRef.current
+            session.onCompositionChange?.(false)
+            session.phase = 'editing'
+            session.draft = event.currentTarget.value
+            setDraft(event.currentTarget.value)
             return
           }
           const session = sessionRef.current
@@ -775,6 +819,7 @@ export function TextContentTextarea({
           if (event.key === 'Escape') {
             event.preventDefault()
             if (rejectStale()) {
+              session.onCancel()
               rebaseCurrent()
             } else {
               const baseline = session.baseline

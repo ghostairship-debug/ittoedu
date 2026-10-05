@@ -1,6 +1,5 @@
 import { z } from 'zod'
-import { courseProjectDocumentSchema } from '../courseProjectSchema'
-import { compositionContentEditSchema } from '../composition/editSchema'
+import { componentOperationBatchSchema, courseProjectV10Schema } from '../contracts/component-platform/schema'
 import type { DocumentEvent, DocumentModel, DocumentOperation, DocumentOperationResult, DocumentSnapshot } from './document'
 
 export interface DocumentFileObservation {
@@ -24,14 +23,14 @@ const resources = z.object({ assets: z.record(z.string(), bytes), components: z.
 const model = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('markdown'), source: z.string(), resources }).strict(),
   z.object({ kind: z.literal('text'), source: z.string(), resources }).strict(),
-  z.object({ kind: z.literal('course-v9'), project: courseProjectDocumentSchema, resources }).strict(),
+  z.object({ kind: z.literal('course-v10'), project: courseProjectV10Schema, resources }).strict(),
 ])
-const command = z.discriminatedUnion('type', [
+const command = z.union([
+  componentOperationBatchSchema,
+  z.discriminatedUnion('type', [
   z.object({ type: z.literal('markdown.splice'), from: z.number().int().nonnegative(), to: z.number().int().nonnegative(), text: z.string(), resources: resources.optional() }).strict(),
   z.object({ type: z.literal('markdown.replace'), source: z.string(), resources: resources.optional() }).strict(),
-  z.object({ type: z.literal('course.replace'), project: courseProjectDocumentSchema, resources: resources.optional() }).strict(),
-  z.object({ type: z.literal('course.object.patch'), locationId: id, itemId: id, patch: z.record(z.string(), z.unknown()) }).strict(),
-  z.object({ type: z.literal('composition.edit'), layerItemId: id, edit: compositionContentEditSchema }).strict(),
+  ]),
 ])
 const operation = z.object({
   documentId: id, epoch: id, operationId: id, baseRevision: z.number().int().nonnegative(),

@@ -1,450 +1,125 @@
-import {
-  courseNavigationGuardSchema,
-  courseNetworkDeclarationSchema,
-  courseStateDeclarationSchema,
-} from '../../shared/courseProjectSchema'
-import type {
-  CourseNavigationGuard,
-  CourseNetworkDeclaration,
-  CourseProjectDocument,
-  CourseStateDeclaration,
-} from '../../shared/courseProjectTypes'
-import { commitCourseProjectMutation } from '../../core/tools/courseProjectMutation'
+import { courseStateDeclarationSchema } from '../../shared/contracts/course-state/schema'
+import type { CourseStateDeclaration } from '../../shared/contracts/course-state/types'
+import { courseStateScalarType } from '../../shared/contracts/course-state/types'
+import { courseProjectLogicSchema } from '../../shared/contracts/component-platform/schema'
+import type { ComponentEdit, CourseProjectLogic, CourseProjectV10, JsonValue } from '../../shared/contracts/component-platform'
+import type { InteractionRule } from '../../shared/interactionTypes'
+import type { EditorStoreKernel } from '../store/editorStoreKernel'
+import { INTERACTIONS_DEFINITION, interactionRules } from '../interactions/componentInteractionAuthoring'
 
-export type CourseLogicAuthoringFailureCode =
-  | 'project-mismatch'
-  | 'stale-revision'
-  | 'state-key-exists'
-  | 'state-not-found'
-  | 'state-referenced'
-  | 'state-type-referenced'
-  | 'guard-id-exists'
-  | 'guard-not-found'
-  | 'no-change'
-  | 'invalid-document'
-
-export interface CourseLogicAuthoringTarget {
-  readonly projectId: string
-  readonly baseRevision: number
+export type CourseNavigationGuard = CourseProjectLogic['navigationGuards'][number]
+export type CourseNetworkDeclaration = NonNullable<CourseProjectLogic['network']>
+export interface CourseLogicAuthoringView {
+  id: string; revision: number; courseState: CourseStateDeclaration[]; navigationGuards: CourseNavigationGuard[]
+  surfaces: { id: string; title: string }[]
 }
-
+export function courseLogicAuthoringView(project: CourseProjectV10): CourseLogicAuthoringView {
+  return { id: project.id, revision: project.revision, courseState: project.logic?.courseState ?? [],
+    navigationGuards: project.logic?.navigationGuards ?? [], surfaces: project.surfaces.map(({ id, title }) => ({ id, title })) }
+}
+export interface CourseLogicAuthoringTarget { readonly projectId: string; readonly baseRevision: number }
 export type CourseLogicAuthoringCommand = CourseLogicAuthoringTarget & (
-  | {
-      readonly kind: 'course-state.add'
-      readonly declaration: CourseStateDeclaration
-    }
-  | {
-      readonly kind: 'course-state.update'
-      readonly key: string
-      readonly declaration: CourseStateDeclaration
-    }
-  | {
-      readonly kind: 'course-state.delete'
-      readonly key: string
-    }
-  | {
-      readonly kind: 'navigation-guard.add'
-      readonly guard: CourseNavigationGuard
-    }
-  | {
-      readonly kind: 'navigation-guard.update'
-      readonly guardId: string
-      readonly guard: CourseNavigationGuard
-    }
-  | {
-      readonly kind: 'navigation-guard.delete'
-      readonly guardId: string
-    }
-)
-
-export type CourseLogicAuthoringResult =
-  | {
-      readonly ok: true
-      readonly project: CourseProjectDocument
-      readonly historyEntry: true
-      readonly statusMessage: string
-    }
-  | {
-      readonly ok: false
-      readonly code: CourseLogicAuthoringFailureCode
-      readonly reason: string
-      readonly historyEntry: false
-    }
-
-export interface CourseLogicAuthoringOptions {
-  readonly now?: string
-}
-
-class CourseLogicAuthoringError extends Error {
-  constructor(
-    readonly code: CourseLogicAuthoringFailureCode,
-    message: string,
-  ) {
-    super(message)
-    this.name = 'CourseLogicAuthoringError'
-  }
-}
-
-function reject(
-  code: CourseLogicAuthoringFailureCode,
-  reason: string,
-): CourseLogicAuthoringResult {
-  return { ok: false, code, reason, historyEntry: false }
-}
-
-function structurallyEqual(left: unknown, right: unknown): boolean {
-  if (Object.is(left, right)) return true
-  if (Array.isArray(left) && Array.isArray(right)) {
-    return left.length === right.length
-      && left.every((value, index) => structurallyEqual(value, right[index]))
-  }
-  if (
-    typeof left !== 'object'
-    || left === null
-    || typeof right !== 'object'
-    || right === null
-    || Array.isArray(left)
-    || Array.isArray(right)
-  ) {
-    return false
-  }
-  const leftRecord = left as Record<string, unknown>
-  const rightRecord = right as Record<string, unknown>
-  const leftKeys = Object.keys(leftRecord)
-  const rightKeys = Object.keys(rightRecord)
-  return leftKeys.length === rightKeys.length
-    && leftKeys.every((key) => (
-      Object.hasOwn(rightRecord, key)
-      && structurallyEqual(leftRecord[key], rightRecord[key])
-    ))
-}
-
-function forEachInteractionRule(
-  project: CourseProjectDocument,
-  visit: (rule: CourseProjectDocument['globalInteractions'][number]) => void,
-): void {
-  project.globalInteractions.forEach(visit)
-  project.surfaces.forEach((surface) => {
-    if (surface.type !== 'slide') return
-    surface.scenes.forEach((scene) => scene.interactions.forEach(visit))
-  })
-}
-
-function stateReferenceGuardIds(
-  project: CourseProjectDocument,
-  key: string,
-): string[] {
-  return project.navigationGuards.flatMap((guard) => (
-    guard.conditions.some((condition) => condition.key === key)
-      ? [guard.id]
-      : []
-  ))
-}
-
-function stateReferenceRuleIds(
-  project: CourseProjectDocument,
-  key: string,
-  mode: 'all' | 'type-sensitive' = 'all',
-): string[] {
-  const ids = new Set<string>()
-  forEachInteractionRule(project, (rule) => {
-    const conditionReference = rule.conditions.some((condition) => (
-      (condition.type === 'course-state.exists'
-        || condition.type === 'course-state.compare')
-      && condition.key === key
-      && (mode === 'all' || condition.type === 'course-state.compare')
-    ))
-    const actionReference = rule.actions.some((step) => (
-      step.action.type === 'course-state.set' && step.action.key === key
-    ))
-    if (conditionReference || actionReference) ids.add(rule.id)
-  })
-  return [...ids]
-}
-
-function renameInteractionCourseStateReferences(
-  project: CourseProjectDocument,
-  previousKey: string,
-  nextKey: string,
-): void {
-  forEachInteractionRule(project, (rule) => {
-    rule.conditions = rule.conditions.map((condition) => (
-      (condition.type === 'course-state.exists'
-        || condition.type === 'course-state.compare')
-      && condition.key === previousKey
-        ? { ...condition, key: nextKey }
-        : condition
-    ))
-    rule.actions = rule.actions.map((step) => (
-      step.action.type === 'course-state.set'
-      && step.action.key === previousKey
-        ? { ...step, action: { ...step.action, key: nextKey } }
-        : step
-    ))
-  })
-}
-
-function validateTarget(
-  project: CourseProjectDocument,
-  command: CourseLogicAuthoringTarget,
-): CourseLogicAuthoringResult | null {
-  if (command.projectId !== project.id) {
-    return reject('project-mismatch', '课程逻辑命令不属于当前工程，请重新打开专业编辑器。')
-  }
-  if (command.baseRevision !== project.revision) {
-    return reject('stale-revision', '课程逻辑已被其他操作更新，请重新检查后再保存。')
-  }
+  | { kind: 'course-state.add'; declaration: CourseStateDeclaration }
+  | { kind: 'course-state.update'; key: string; declaration: CourseStateDeclaration }
+  | { kind: 'course-state.delete'; key: string }
+  | { kind: 'navigation-guard.add'; guard: CourseNavigationGuard }
+  | { kind: 'navigation-guard.update'; guardId: string; guard: CourseNavigationGuard }
+  | { kind: 'navigation-guard.delete'; guardId: string })
+export type CourseLogicAuthoringFailureCode = 'project-mismatch' | 'stale-revision' | 'state-key-exists' | 'state-not-found'
+  | 'state-referenced' | 'state-type-referenced' | 'guard-id-exists' | 'guard-not-found' | 'no-change' | 'invalid-document'
+export type CourseLogicAuthoringResult = { ok: true; edits: ComponentEdit[]; statusMessage: string; historyEntry: boolean }
+  | { ok: false; code: CourseLogicAuthoringFailureCode; reason: string; historyEntry: false }
+const reject = (code: CourseLogicAuthoringFailureCode, reason: string): CourseLogicAuthoringResult => ({ ok: false, code, reason, historyEntry: false })
+class LogicError extends Error { constructor(readonly code: CourseLogicAuthoringFailureCode, message: string) { super(message) } }
+const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue
+const referencesState = (rule: InteractionRule, key: string, sensitive = false) => rule.conditions.some(condition =>
+  (condition.type === 'course-state.exists' || condition.type === 'course-state.compare') && condition.key === key && (!sensitive || condition.type === 'course-state.compare'))
+  || rule.actions.some(step => step.action.type === 'course-state.set' && step.action.key === key)
+function validateTarget(project: CourseProjectV10, target: CourseLogicAuthoringTarget): CourseLogicAuthoringResult | null {
+  if (project.id !== target.projectId) return reject('project-mismatch', '逻辑草稿属于另一工程，请重新打开编辑器。')
+  if (project.revision !== target.baseRevision) return reject('stale-revision', '工程已更新，请检查当前逻辑后再保存。')
   return null
 }
-
-function applyMutation(
-  project: CourseProjectDocument,
-  command: CourseLogicAuthoringCommand,
-): { mutate: (draft: CourseProjectDocument) => void; statusMessage: string } {
-  switch (command.kind) {
-    case 'course-state.add': {
-      const declaration = courseStateDeclarationSchema.parse(command.declaration)
-      if (project.courseState.some((state) => state.key === declaration.key)) {
-        throw new CourseLogicAuthoringError(
-          'state-key-exists',
-          `课程状态“${declaration.key}”已经存在。`,
-        )
-      }
-      return {
-        mutate: (draft) => {
-          draft.courseState.push(structuredClone(declaration))
-        },
-        statusMessage: `已添加课程状态“${declaration.key}”`,
-      }
-    }
-
-    case 'course-state.update': {
-      const declaration = courseStateDeclarationSchema.parse(command.declaration)
-      const currentIndex = project.courseState.findIndex((state) => state.key === command.key)
-      if (currentIndex < 0) {
-        throw new CourseLogicAuthoringError(
-          'state-not-found',
-          `找不到课程状态“${command.key}”。`,
-        )
-      }
-      const current = project.courseState[currentIndex]!
-      if (
-        declaration.key !== command.key
-        && project.courseState.some((state) => state.key === declaration.key)
-      ) {
-        throw new CourseLogicAuthoringError(
-          'state-key-exists',
-          `课程状态“${declaration.key}”已经存在。`,
-        )
-      }
-      if (current.valueType !== declaration.valueType) {
-        const compareGuardIds = project.navigationGuards.flatMap((guard) => (
-          guard.conditions.some((condition) => (
-            condition.key === command.key && condition.type === 'compare'
-          ))
-            ? [guard.id]
-            : []
-        ))
-        const interactionRuleIds = stateReferenceRuleIds(
-          project,
-          command.key,
-          'type-sensitive',
-        )
-        if (compareGuardIds.length > 0 || interactionRuleIds.length > 0) {
-          const references = [
-            ...(compareGuardIds.length > 0
-              ? [`守卫 ${compareGuardIds.join('、')}`]
-              : []),
-            ...(interactionRuleIds.length > 0
-              ? [`互动规则 ${interactionRuleIds.join('、')}`]
-              : []),
-          ]
-          throw new CourseLogicAuthoringError(
-            'state-type-referenced',
-            `状态“${command.key}”正被${references.join('及')}按当前类型使用；请先调整比较条件或赋值动作，再修改类型。`,
-          )
+/** Plans canonical C1 edits; the host DocumentSession owns revision/history. */
+export function executeCourseLogicAuthoringCommand(project: CourseProjectV10, command: CourseLogicAuthoringCommand): CourseLogicAuthoringResult {
+  const failure = validateTarget(project, command); if (failure) return failure
+  try {
+    const logic: CourseProjectLogic = structuredClone(project.logic ?? { courseState: [], navigationGuards: [] })
+    const behaviors = Object.values(project.instances).filter(instance => instance.definitionId === INTERACTIONS_DEFINITION.id)
+    const rules = behaviors.flatMap(instance => interactionRules(instance))
+    const edits: ComponentEdit[] = []
+    let statusMessage = ''
+    if (command.kind.startsWith('course-state.')) {
+      const key = command.kind === 'course-state.add' ? command.declaration.key : 'key' in command ? command.key : ''
+      const index = logic.courseState.findIndex(state => state.key === key)
+      if (command.kind === 'course-state.add') {
+        const declaration = courseStateDeclarationSchema.parse(command.declaration)
+        if (index >= 0) throw new LogicError('state-key-exists', `状态“${key}”已经存在。`)
+        logic.courseState.push(declaration); statusMessage = `已添加状态“${key}”`
+      } else if (command.kind === 'course-state.update' || command.kind === 'course-state.delete') {
+        if (index < 0) throw new LogicError('state-not-found', `找不到状态“${key}”。`)
+        const sensitive = command.kind === 'course-state.update' && logic.courseState[index]!.valueType !== command.declaration.valueType
+        const referenced = logic.navigationGuards.some(guard => guard.conditions.some(condition => condition.key === key && (!sensitive || condition.type === 'compare')))
+          || rules.some(rule => referencesState(rule, key, sensitive))
+        if (command.kind === 'course-state.delete') {
+          if (referenced) throw new LogicError('state-referenced', `状态“${key}”仍被守卫或互动使用，请先调整引用。`)
+          logic.courseState.splice(index, 1); statusMessage = `已删除状态“${key}”`
+        } else {
+          const declaration = courseStateDeclarationSchema.parse(command.declaration)
+          if (sensitive && referenced) throw new LogicError('state-type-referenced', `状态“${key}”被比较或赋值使用，请先调整这些操作。`)
+          if (declaration.key !== key && logic.courseState.some(state => state.key === declaration.key)) throw new LogicError('state-key-exists', '新状态键已经存在。')
+          logic.courseState[index] = declaration
+          if (declaration.key !== key) {
+            for (const guard of logic.navigationGuards) guard.conditions = guard.conditions.map(condition => condition.key === key ? { ...condition, key: declaration.key } : condition)
+            for (const instance of behaviors) {
+              const next = interactionRules(instance).map(rule => ({ ...rule,
+                conditions: rule.conditions.map(condition => (condition.type === 'course-state.exists' || condition.type === 'course-state.compare') && condition.key === key ? { ...condition, key: declaration.key } : condition),
+                actions: rule.actions.map(step => step.action.type === 'course-state.set' && step.action.key === key ? { ...step, action: { ...step.action, key: declaration.key } } : step) }))
+              if (JSON.stringify(next) !== JSON.stringify(interactionRules(instance))) edits.push({ type: 'data.set', instanceId: instance.id, path: ['rules'], value: json(next) })
+            }
+          }
+          statusMessage = `已更新状态“${declaration.key}”并同步引用`
         }
       }
-      if (
-        structurallyEqual(current, declaration)
-        && declaration.key === command.key
-      ) {
-        throw new CourseLogicAuthoringError('no-change', '课程状态没有发生变化。')
+    } else if (command.kind === 'navigation-guard.add' || command.kind === 'navigation-guard.update' || command.kind === 'navigation-guard.delete') {
+      const index = command.kind === 'navigation-guard.add' ? -1 : logic.navigationGuards.findIndex(guard => guard.id === command.guardId)
+      if (command.kind !== 'navigation-guard.add' && index < 0) throw new LogicError('guard-not-found', '导航守卫已经不存在。')
+      if (command.kind === 'navigation-guard.delete') logic.navigationGuards.splice(index, 1)
+      else {
+        const guard = courseProjectLogicSchema.shape.navigationGuards.element.parse(command.guard)
+        if (logic.navigationGuards.some((value, i) => value.id === guard.id && i !== index)) throw new LogicError('guard-id-exists', '导航守卫身份重复。')
+        const surfaces = new Set(project.surfaces.map(surface => surface.id))
+        if ([...(guard.fromSurfaceIds ?? []), ...guard.toSurfaceIds].some(id => !surfaces.has(id))) throw new LogicError('invalid-document', '守卫引用的页面已不存在。')
+        for (const condition of guard.conditions) {
+          const declaration = logic.courseState.find(state => state.key === condition.key)
+          if (!declaration) throw new LogicError('invalid-document', `守卫引用的状态“${condition.key}”未声明。`)
+          if (condition.type === 'compare' && (courseStateScalarType(condition.value) !== declaration.valueType
+            || !['eq', 'neq'].includes(condition.operator) && declaration.valueType !== 'number')) {
+            throw new LogicError('invalid-document', `状态“${condition.key}”的比较值或运算不符合其类型。`)
+          }
+        }
+        if (index < 0) logic.navigationGuards.push(guard); else logic.navigationGuards[index] = guard
       }
-      return {
-        mutate: (draft) => {
-          draft.courseState[currentIndex] = structuredClone(declaration)
-          if (declaration.key === command.key) return
-          draft.navigationGuards.forEach((guard) => {
-            guard.conditions = guard.conditions.map((condition) => (
-              condition.key === command.key
-                ? { ...condition, key: declaration.key }
-                : condition
-            ))
-          })
-          renameInteractionCourseStateReferences(
-            draft,
-            command.key,
-            declaration.key,
-          )
-        },
-        statusMessage: declaration.key === command.key
-          ? `已更新课程状态“${command.key}”`
-          : `已将课程状态“${command.key}”改为“${declaration.key}”，并同步守卫与互动规则`,
-      }
+      statusMessage = command.kind === 'navigation-guard.delete' ? '已删除导航守卫' : '已保存导航守卫'
     }
-
-    case 'course-state.delete': {
-      const currentIndex = project.courseState.findIndex((state) => state.key === command.key)
-      if (currentIndex < 0) {
-        throw new CourseLogicAuthoringError(
-          'state-not-found',
-          `找不到课程状态“${command.key}”。`,
-        )
-      }
-      const guardIds = stateReferenceGuardIds(project, command.key)
-      const interactionRuleIds = stateReferenceRuleIds(project, command.key)
-      if (guardIds.length > 0 || interactionRuleIds.length > 0) {
-        const references = [
-          ...(guardIds.length > 0 ? [`守卫 ${guardIds.join('、')}`] : []),
-          ...(interactionRuleIds.length > 0
-            ? [`互动规则 ${interactionRuleIds.join('、')}`]
-            : []),
-        ]
-        throw new CourseLogicAuthoringError(
-          'state-referenced',
-          `状态“${command.key}”仍被${references.join('及')}使用；请先删除或调整这些引用。`,
-        )
-      }
-      return {
-        mutate: (draft) => {
-          draft.courseState.splice(currentIndex, 1)
-        },
-        statusMessage: `已删除课程状态“${command.key}”`,
-      }
-    }
-
-    case 'navigation-guard.add': {
-      const guard = courseNavigationGuardSchema.parse(command.guard)
-      if (project.navigationGuards.some((candidate) => candidate.id === guard.id)) {
-        throw new CourseLogicAuthoringError(
-          'guard-id-exists',
-          `导航守卫“${guard.id}”已经存在。`,
-        )
-      }
-      return {
-        mutate: (draft) => {
-          draft.navigationGuards.push(structuredClone(guard))
-        },
-        statusMessage: `已添加导航守卫“${guard.id}”`,
-      }
-    }
-
-    case 'navigation-guard.update': {
-      const guard = courseNavigationGuardSchema.parse(command.guard)
-      const currentIndex = project.navigationGuards.findIndex(
-        (candidate) => candidate.id === command.guardId,
-      )
-      if (currentIndex < 0) {
-        throw new CourseLogicAuthoringError(
-          'guard-not-found',
-          `找不到导航守卫“${command.guardId}”。`,
-        )
-      }
-      if (
-        guard.id !== command.guardId
-        && project.navigationGuards.some((candidate) => candidate.id === guard.id)
-      ) {
-        throw new CourseLogicAuthoringError(
-          'guard-id-exists',
-          `导航守卫“${guard.id}”已经存在。`,
-        )
-      }
-      if (structurallyEqual(project.navigationGuards[currentIndex], guard)) {
-        throw new CourseLogicAuthoringError('no-change', '导航守卫没有发生变化。')
-      }
-      return {
-        mutate: (draft) => {
-          draft.navigationGuards[currentIndex] = structuredClone(guard)
-        },
-        statusMessage: `已更新导航守卫“${guard.id}”`,
-      }
-    }
-
-    case 'navigation-guard.delete': {
-      const currentIndex = project.navigationGuards.findIndex(
-        (candidate) => candidate.id === command.guardId,
-      )
-      if (currentIndex < 0) {
-        throw new CourseLogicAuthoringError(
-          'guard-not-found',
-          `找不到导航守卫“${command.guardId}”。`,
-        )
-      }
-      return {
-        mutate: (draft) => {
-          draft.navigationGuards.splice(currentIndex, 1)
-        },
-        statusMessage: `已删除导航守卫“${command.guardId}”`,
-      }
-    }
-  }
-
-  throw new CourseLogicAuthoringError(
-    'invalid-document',
-    '不支持的课程逻辑命令。',
-  )
+    const parsed = courseProjectLogicSchema.parse(logic)
+    if (JSON.stringify(project.logic ?? { courseState: [], navigationGuards: [] }) === JSON.stringify(parsed) && !edits.length) return reject('no-change', '课程逻辑没有变化。')
+    edits.unshift({ type: 'project.logic.set', logic: parsed })
+    return { ok: true, edits, statusMessage, historyEntry: false }
+  } catch (error) { return reject(error instanceof LogicError ? error.code : 'invalid-document', error instanceof Error ? error.message : String(error)) }
 }
-
-/**
- * Applies one top-level V9 course-logic edit. The existing strict project
- * schema parses the complete candidate before it can enter any authoring
- * history, so location/state references and comparison types stay canonical.
- */
-export function executeCourseLogicAuthoringCommand(
-  project: CourseProjectDocument,
-  command: CourseLogicAuthoringCommand,
-  options: CourseLogicAuthoringOptions = {},
-): CourseLogicAuthoringResult {
-  const targetFailure = validateTarget(project, command)
-  if (targetFailure) return targetFailure
-
+export async function commitCourseLogicAuthoringCommand(kernel: EditorStoreKernel, documentId: string, command: CourseLogicAuthoringCommand): Promise<CourseLogicAuthoringResult> {
   try {
-    const plan = applyMutation(project, command)
-    const next = commitCourseProjectMutation(project, plan.mutate, options.now)
-    return {
-      ok: true,
-      project: next,
-      historyEntry: true,
-      statusMessage: plan.statusMessage,
-    }
-  } catch (error) {
-    if (error instanceof CourseLogicAuthoringError) {
-      return reject(error.code, error.message)
-    }
-    return reject(
-      'invalid-document',
-      error instanceof Error && error.message.trim()
-        ? `课程逻辑未保存：${error.message}`
-        : '课程逻辑未通过 Course Project V9 校验。',
-    )
-  }
+    const target = kernel.captureTarget(documentId), result = executeCourseLogicAuthoringCommand(target.project, command)
+    if (!result.ok) return result
+    await kernel.editCaptured(kernel.capture(result.edits, target))
+    return { ...result, historyEntry: true }
+  } catch (error) { return reject('invalid-document', error instanceof Error ? error.message : String(error)) }
 }
-
-export function replaceCourseNetworkDeclaration(
-  project: CourseProjectDocument,
-  target: CourseLogicAuthoringTarget,
-  network: CourseNetworkDeclaration,
-  options: CourseLogicAuthoringOptions = {},
-): CourseLogicAuthoringResult {
-  const failure = validateTarget(project, target)
-  if (failure) return failure
+export function replaceCourseNetworkDeclaration(project: CourseProjectV10, target: CourseLogicAuthoringTarget, network: CourseNetworkDeclaration): CourseLogicAuthoringResult {
+  const failure = validateTarget(project, target); if (failure) return failure
   try {
-    const parsed = courseNetworkDeclarationSchema.parse(network)
-    if (structurallyEqual(project.network ?? {}, parsed)) return reject('no-change', '课程网络声明未变化')
-    return { ok: true, project: commitCourseProjectMutation(project, (draft) => { draft.network = parsed }, options.now),
-      historyEntry: true, statusMessage: '已更新课程网络声明' }
-  } catch (error) {
-    return reject('invalid-document', error instanceof Error ? error.message : '课程网络声明无效')
-  }
+    const logic = courseProjectLogicSchema.parse({ ...(project.logic ?? { courseState: [], navigationGuards: [] }), network })
+    return { ok: true, edits: [{ type: 'project.logic.set', logic }], statusMessage: '已更新课程网络声明', historyEntry: false }
+  } catch (error) { return reject('invalid-document', error instanceof Error ? error.message : String(error)) }
 }

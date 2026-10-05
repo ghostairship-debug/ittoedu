@@ -1,0 +1,88 @@
+{
+  "description": "观察课件页面的真实画面。工程文件使用 project.list 返回的页面或对象 path；多个课件时用 project 指明文件名或路径。也可用已授权 target，组件目标保留捕获的页面和展示状态。可观察非当前页，不更改文档、选区或播放状态。purpose 默认 required；用户要求的检查保持 required，自行添加的可选诊断可用 diagnostic。诊断不可用会保留未验证说明，不表示检查通过。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "anyOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "enum": [
+              "auto",
+              "low",
+              "high"
+            ],
+            "type": "string"
+          },
+          "purpose": {
+            "enum": [
+              "required",
+              "diagnostic"
+            ],
+            "type": "string"
+          },
+          "target": {
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "target"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "enum": [
+              "auto",
+              "low",
+              "high"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "project": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "purpose": {
+            "enum": [
+              "required",
+              "diagnostic"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "path"
+        ],
+        "type": "object"
+      }
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "read",
+    "label": "查看页面",
+    "targetKinds": [
+      "course-surface",
+      "course-instance",
+      "course-location",
+      "course-owner",
+      "course-state",
+      "course-object",
+      "document"
+    ]
+  },
+  "name": "view.observe",
+  "version": 1
+}

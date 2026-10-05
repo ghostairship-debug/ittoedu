@@ -1,18 +1,5 @@
-export type TeacherControllerAction =
-  | { type: 'step.previous' }
-  | { type: 'step.next' }
-  | { type: 'scene.previous' }
-  | { type: 'scene.next' }
-  | { type: 'scene.replay' }
-  | { type: 'course.restart' }
-  | { type: 'scene.open-picker' }
-  | {
-      type: 'scene.go'
-      sceneId: string
-      targetStateId?: string
-    }
-  | { type: 'audio.toggle-mute' }
-  | { type: 'player.fullscreen.toggle' }
+import type { TeacherControllerAction } from './contracts/component-platform/teacherController'
+export type { TeacherControllerAction } from './contracts/component-platform/teacherController'
 
 export interface TeacherControllerButton {
   id: string

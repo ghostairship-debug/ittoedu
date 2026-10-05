@@ -1,69 +1,79 @@
-import { useMemo } from 'react'
-import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
-import { selectActiveCourseProjectDocument, selectActiveSceneId, selectEditingScope, selectEffectiveLayerProjection, useEditorStore } from '../../store/editorStore'
+import { useSyncExternalStore } from 'react'
+import type { ComponentAuthorSpot } from '../../../shared/contracts/component-platform'
+import { documentTextContentSchema, plainDocumentText } from '../../../shared/document/content'
+import { replaceCourseInstanceText } from '../../../core/tools/ToolTargets'
+import type { ComponentPlatformRuntime } from '../../../player/components/ComponentPlatformRuntime'
+import type { CapturedCourseTarget, CourseV10DocumentBridge } from '../../documents/CourseV10DocumentBridge'
+import { componentIsLocked } from '../crossSurfaceCommands'
+import { authorSpotEdits } from '../../componentPlatform/surfaces/slide/authorSpots'
+import { useEditorStore } from '../../store/editorStore'
 
+interface DocumentRuntime { world: ComponentPlatformRuntime; bridge: CourseV10DocumentBridge }
+const documents = new Map<string, DocumentRuntime>()
+const listeners = new Set<() => void>()
+let version = 0
+const changed = () => { version++; for (const listener of listeners) listener() }
+const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener) } }
 
-export interface RuntimeLightEditView {
-  readonly source: string
-  readonly overrides: readonly LightEditTextOverride[]
-  readonly locked: boolean
+/** An index of mounted worlds, never another runtime or a content owner. */
+export function registerRuntimeLightEditDocument(documentId: string, world: ComponentPlatformRuntime, bridge: CourseV10DocumentBridge): () => void {
+  const entry = { world, bridge }
+  documents.set(documentId, entry)
+  const stop = world.subscribeAuthorSpots(changed)
+  changed()
+  return () => { stop(); if (documents.get(documentId) === entry) { documents.delete(documentId); changed() } }
 }
 
-/** Live view of one Runtime's source and rules; re-renders only when they change. */
-export function useRuntimeLightEditView(itemId: string): RuntimeLightEditView | null {
-  const key = useEditorStore((state) => {
-    const row = selectEffectiveLayerProjection(state)?.unifiedRows
-      .find(candidate => candidate.id === itemId && candidate.item.kind === 'runtime')
-    return row && row.item.kind === 'runtime'
-      ? JSON.stringify([row.item.runtime.source, row.item.runtime.content.overrides ?? [], row.locked])
-      : ''
-  })
-  return useMemo(() => {
-    if (!key) return null
-    const [source, overrides, locked] = JSON.parse(key) as [string, LightEditTextOverride[], boolean]
-    return { source, overrides, locked }
-  }, [key])
-}
-
+export interface RuntimePageTextEntry { spot: ComponentAuthorSpot; text: string }
+export interface RuntimeLightEditView { documentId: string; entries: readonly RuntimePageTextEntry[]; locked: boolean }
+export interface CapturedRuntimePageText { target: CapturedCourseTarget; spot: ComponentAuthorSpot; bridge: CourseV10DocumentBridge }
 export type RuntimePageTextResult = { readonly ok: true; readonly changed: boolean } | { readonly ok: false; readonly reason: string }
 
-/** Page-text edits enter the dynamic fallback precommit lane; an ACK owns content and fallback together. */
-export const runtimeLightEditCommands = {
-  read(itemId: string): RuntimeLightEditView | null {
-    const row = selectEffectiveLayerProjection(useEditorStore.getState())?.unifiedRows
-      .find(candidate => candidate.id === itemId && candidate.item.kind === 'runtime')
-    if (!row || row.item.kind !== 'runtime') return null
-    return { source: row.item.runtime.source, overrides: row.item.runtime.content.overrides ?? [], locked: row.locked }
-  },
+function read(itemId: string, documentId = useEditorStore.getState().courseView.activeDocumentId): RuntimeLightEditView | null {
+  if (!documentId) return null
+  const entry = documents.get(documentId), project = entry?.bridge.read().views.find(view => view.documentId === documentId)?.model.project
+  if (!entry || !project?.instances[itemId]) return null
+  const entries = entry.world.authorSpots().flatMap(spot => {
+    if (spot.instanceId !== itemId || spot.kind !== 'text') return []
+    const rich = documentTextContentSchema.safeParse(spot.initialValue)
+    const text = typeof spot.initialValue === 'string' ? spot.initialValue : rich.success ? plainDocumentText(rich.data) : null
+    return text === null ? [] : [{ spot, text }]
+  })
+  return { documentId, entries, locked: componentIsLocked(project, itemId) }
+}
 
-  /** Replace one text everywhere the Runtime renders it (a rule without a region). */
-  async setPageText(itemId: string, original: string, text: string): Promise<RuntimePageTextResult> {
-    const state = useEditorStore.getState()
-    const document = selectActiveCourseProjectDocument(state)
-    const projection = selectEffectiveLayerProjection(state)
-    const documentId = state.courseDocument.documentId
-    if (!document || !projection?.locationId || !documentId) return { ok: false, reason: '当前没有可编辑的 H5 演示页面' }
-    const target = state.captureRuntimeContentTextTarget({
-      projectId: document.id,
-      scope: selectEditingScope(state),
-      sceneId: projection.surfaceType === 'spatial-2d' || projection.surfaceType === 'flow' ? projection.locationId : selectActiveSceneId(state),
-      targetId: `page-text:${itemId}`,
-      nodeId: itemId,
-      kind: 'text',
-      key: '',
-      lightEdit: { original },
-    })
-    if (!target) return { ok: false, reason: '这个 Runtime 已锁定或不在当前编辑范围，未写入修改' }
-    const submission = state.submitDynamicFallbackIntent({
-      kind: 'runtime.text', documentId, locationId: projection.locationId, itemId, projectId: document.id, target, value: text,
-    })
-    if (!submission) return { ok: false, reason: '页面文字暂时无法提交，草稿已保留' }
+export function useRuntimeLightEditView(itemId: string): RuntimeLightEditView | null {
+  const view = useEditorStore(state => state.courseView)
+  useSyncExternalStore(subscribe, () => version)
+  return read(itemId, view.activeDocumentId)
+}
+
+export const runtimeLightEditCommands = {
+  read,
+  capturePageText(documentId: string, spot: ComponentAuthorSpot): CapturedRuntimePageText {
+    const entry = documents.get(documentId)
+    if (!entry) throw new Error('此文档的运行内容尚未就绪')
+    const target = entry.bridge.captureTarget(documentId)
+    if (componentIsLocked(target.editingProject, spot.instanceId)) throw new Error('这个对象已锁定，请先解锁')
+    const current = entry.world.authorSpots().find(value => value.id === spot.id && value.mountGeneration === spot.mountGeneration)
+    if (!current) throw new Error('此处运行内容已更换，请重新打开文字编辑')
+    return { target, spot: structuredClone(current), bridge: entry.bridge }
+  },
+  async setPageText(captured: CapturedRuntimePageText, text: string): Promise<RuntimePageTextResult> {
     try {
-      const result = await submission.settled
-      if (result.status !== 'applied' && result.status !== 'unchanged') return { ok: false, reason: result.reason }
-      return { ok: true, changed: result.status === 'applied' }
-    } catch (error) {
-      return { ok: false, reason: error instanceof Error ? error.message : '页面文字提交失败，草稿已保留' }
-    }
+      const { target, spot, bridge } = captured
+      const entry = documents.get(target.documentId)
+      if (entry?.bridge !== bridge || !entry.world.authorSpots().some(value => value.id === spot.id && value.mountGeneration === spot.mountGeneration))
+        throw new Error('原运行内容已更换，文字草稿已保留')
+      const rich = documentTextContentSchema.safeParse(spot.initialValue)
+      const edits = rich.success && spot.dataPath && !spot.sourceRegion
+        ? [replaceCourseInstanceText({ kind: 'course-v10', project: target.editingProject, resources: target.resources },
+          { kind: 'course-instance', surfaceId: target.surfaceId ?? '', instanceId: spot.instanceId, dataPath: spot.dataPath }, text)]
+        : authorSpotEdits(target.editingProject, spot, text, target.resources)
+      const previous = rich.success ? plainDocumentText(rich.data) : spot.initialValue
+      if (text === previous) return { ok: true, changed: false }
+      await bridge.editCaptured(bridge.capture(edits, target))
+      return { ok: true, changed: true }
+    } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : '页面文字提交失败，草稿已保留' } }
   },
 }

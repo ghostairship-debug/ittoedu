@@ -1,15 +1,12 @@
-import { locateCourseLayer } from '../../core/drivers/course/layerProperties'
 import type { SlideEditorView } from '../../core/tools/slideLayerView'
 import { useSyncExternalStore } from 'react'
 import type { DocumentContextSelection } from '../../shared/document/ports'
 import type { DocumentSnapshot } from '../../shared/workbench/document'
 import type { ExecutionDocumentReference, ExecutionSelectionTarget } from '../../shared/workbench/executionDesktop'
-import { readTarget } from '../../core/tools/ToolTargets'
-import { findFlowBlockRecursive } from '../../core/tools/flowDocumentModel'
-import { resolveFlowContextSelection } from '../../core/tools/flowTextSlot'
+import { containsTarget, readTarget } from '../../core/tools/ToolTargets'
 import type { ExecutionContentOutput } from '../../shared/workbench/execution'
-import { isRichTextFlowBlock } from '../../core/tools/flowDocumentModel'
-import type { FlowTextContent } from '../../shared/document/content'
+import { courseInstanceContext, isCourseInstanceRange, readCourseInstanceText, type CourseInstanceTarget } from '../../core/tools/ToolTargets'
+import type { DocumentSlot } from '../../shared/document/ports'
 
 export interface SelectionCapture {
   documentId: string
@@ -24,28 +21,29 @@ export interface ContextualEditRequest { selection: SelectionCapture; instructio
 export function captureSelection(snapshot: DocumentSnapshot, targets: readonly ExecutionSelectionTarget[], label: string, source?: string): SelectionCapture {
   if (!targets.length) throw new Error('没有选中内容，请先选择明确的修改范围。')
   for (const target of targets) {
-    if ((target.kind === 'markdown-range' || target.kind === 'flow-range') && target.from >= target.to) throw new Error('选区为空，不会扩大到整份文档。')
+    if ((target.kind === 'markdown-range' || target.kind === 'flow-range' || isCourseInstanceRange(target)) && target.from >= target.to) throw new Error('选区为空，不会扩大到整份文档。')
     readTarget(snapshot.model, target)
   }
   return { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, targets: structuredClone([...targets]), label, ...(source !== undefined ? { source } : {}) }
 }
 /** The host owner determines whether an object can carry a named scene state. */
 export function captureCourseObjectSelection(snapshot: DocumentSnapshot, locationId: string, itemIds: readonly string[], stateId?: string | null): SelectionCapture {
-  if (snapshot.model.kind !== 'course-v9') throw new Error('当前文档不是 H5 演示。')
-  const project = snapshot.model.project
-  return captureSelection(snapshot, itemIds.map(itemId => {
-    const owner = locateCourseLayer(project, itemId)
-    if (!owner) throw new Error('所选对象已不存在。')
-    return { kind: 'course-object', locationId, itemId, ...(owner.source === 'scene' && stateId ? { stateId } : {}) }
-  }), `所选 ${itemIds.length} 个对象${stateId ? '（当前命名态）' : ''}`)
+  return captureCourseInstanceSelection(snapshot, locationId, itemIds, `所选 ${itemIds.length} 个对象${stateId ? '（当前命名态）' : ''}`, stateId)
+}
+export function captureCourseInstanceSelection(snapshot: DocumentSnapshot, surfaceId: string, instanceIds: readonly string[], label = `所选 ${instanceIds.length} 个对象`, stateId?: string | null): SelectionCapture {
+  return captureSelection(snapshot, instanceIds.map(instanceId => ({ kind: 'course-instance', surfaceId, instanceId, stateId: stateId ?? null })), label)
+}
+export function captureCourseInstanceRange(snapshot: DocumentSnapshot, surfaceId: string, instanceId: string, dataPath: readonly string[], from: number, to: number, label = '所选文字', stateId?: string | null, fieldScope: 'data' | 'flowLayout' = 'data'): SelectionCapture {
+  return captureSelection(snapshot, [{ kind: 'course-instance', surfaceId, instanceId, stateId: stateId ?? null, ...(fieldScope !== 'data' ? { fieldScope } : {}), dataPath: [...dataPath], from, to }], label)
 }
 /** Composition addresses belong to the software; an element card freezes only the selected subtree. */
 export function captureCompositionSelection(snapshot: DocumentSnapshot, locationId: string, itemId: string, nodeId: string,
   stateId?: string | null, label = '所选内容'): SelectionCapture {
-  const object = captureCourseObjectSelection(snapshot, locationId, [itemId], stateId)
-  const target = object.targets[0]
-  if (target?.kind !== 'course-object') throw new Error('所选组合内容已不存在。')
-  return captureSelection(snapshot, [{ ...target, compositionNodeId: nodeId }], label)
+  if (snapshot.model.kind !== 'course-v10') throw new Error('当前文档不是 Project V10。')
+  const root: CourseInstanceTarget = { kind: 'course-instance', surfaceId: locationId, instanceId: itemId, stateId: stateId ?? null }
+  const target: CourseInstanceTarget = { ...root, instanceId: nodeId }
+  if (!containsTarget(root, target, snapshot.model)) throw new Error('所选内部内容不是这个组件的正式子实例。')
+  return captureSelection(snapshot, [target], label)
 }
 export function matchesCourseObjectState(target: Extract<ExecutionSelectionTarget, { kind: 'course-object' }>, locationId: string | null | undefined, stateId: string | null | undefined, sceneOwned: boolean): boolean {
   return target.locationId === locationId && target.stateId === (sceneOwned ? stateId ?? undefined : undefined)
@@ -63,22 +61,45 @@ export function captureMarkdownSelection(snapshot: DocumentSnapshot, value: Docu
 }
 /** One block of a Flow document as a whole, found by its identity whatever else changed (an element AI card, M15). */
 export function captureFlowBlock(snapshot: DocumentSnapshot, surfaceId: string, blockId: string, label: string): SelectionCapture {
-  if (snapshot.model.kind !== 'course-v9') throw new Error('当前文档不是 H5 演示。')
-  const surface = snapshot.model.project.surfaces.find(item => item.id === surfaceId)
-  if (!surface || surface.type !== 'flow') throw new Error('讲义已不存在。')
-  const block = findFlowBlockRecursive(surface.blocks, blockId)
-  if (!block) throw new Error('所选正文块已不存在。')
-  return captureSelection(snapshot, [{ kind: 'flow-block', surfaceId, blockId, parentId: block.parentId }], label)
+  return captureCourseInstanceSelection(snapshot, surfaceId, [blockId], label)
+}
+/** The document editor's semantic slot resolves once to its actual component data field. */
+export function courseInstanceSlotPath(data: unknown, slot: DocumentSlot): string[] {
+  const value = data as Record<string, unknown>
+  if (slot.kind === 'field') return [slot.field]
+  const index = (key: string, id: string) => {
+    const values = value[key]
+    const found = Array.isArray(values) ? values.findIndex(item => item?.id === id) : -1
+    if (found < 0) throw new Error('所选正文位置已不存在。')
+    return String(found)
+  }
+  if (slot.kind === 'item') return ['items', index('items', slot.itemId), 'content']
+  if (slot.kind === 'header') return ['columns', index('columns', slot.columnId), 'header']
+  const rowIndex = index('rows', slot.rowId), row = (value.rows as Array<{ cells: unknown }>)[Number(rowIndex)]!
+  if (Array.isArray(row.cells)) {
+    const cellIndex = row.cells.findIndex(cell => cell?.columnId === slot.columnId)
+    if (cellIndex < 0) throw new Error('所选表格单元格已不存在。')
+    const cell = row.cells[cellIndex] as Record<string, unknown>
+    return ['rows', rowIndex, 'cells', String(cellIndex), Object.hasOwn(cell, 'content') ? 'content' : 'text']
+  }
+  if (!row.cells || typeof row.cells !== 'object' || !Object.hasOwn(row.cells, slot.columnId)) throw new Error('所选表格单元格已不存在。')
+  return ['rows', rowIndex, 'cells', slot.columnId]
 }
 export function captureFlowSelection(snapshot: DocumentSnapshot, surfaceId: string, value: DocumentContextSelection): SelectionCapture {
-  if (snapshot.model.kind !== 'course-v9' || !value.selection) throw new Error('请在正文中选择要修改的内容。')
-  const surface = snapshot.model.project.surfaces.find(item => item.id === surfaceId)
-  if (!surface || surface.type !== 'flow') throw new Error('讲义已不存在。')
-  const target = resolveFlowContextSelection(surface.blocks, snapshot.revision, value.selection)
-  const block = findFlowBlockRecursive(surface.blocks, target.blockId)
-  if (!block) throw new Error('所选正文块已不存在。')
-  const base = { surfaceId, blockId: target.blockId, parentId: block.parentId }
-  return captureSelection(snapshot, [target.kind === 'text' ? { kind: 'flow-range', ...base, slot: target.textRange.slot, from: target.textRange.start, to: target.textRange.end } : { kind: 'flow-block', ...base }], value.label)
+  if (snapshot.model.kind !== 'course-v10' || !value.selection) throw new Error('请在正文中选择要修改的内容。')
+  const selected = value.selection
+  if (selected.revision !== String(snapshot.revision)) throw new Error('正文选区已改变，请重新选择。')
+  if (selected.kind === 'object') return captureFlowBlock(snapshot, surfaceId, selected.blockId, value.label)
+  if (selected.kind !== 'text') throw new Error('请选择一个明确的正文或文字范围。')
+  if (selected.anchor.blockId !== selected.head.blockId || JSON.stringify(selected.anchor.slot) !== JSON.stringify(selected.head.slot)) {
+    throw new Error('跨正文块或跨字段选区请分别修改；不会扩大到整页。')
+  }
+  const instanceId = selected.anchor.blockId, instance = snapshot.model.project.instances[instanceId]
+  if (!instance) throw new Error('所选正文块已不存在。')
+  const caption = selected.anchor.slot.kind === 'field' && selected.anchor.slot.field === 'caption' && instance.flowLayout?.caption !== undefined
+  const path = courseInstanceSlotPath(caption ? instance.flowLayout : instance.data, selected.anchor.slot)
+  return captureCourseInstanceRange(snapshot, surfaceId, instanceId, path,
+    Math.min(selected.anchor.offset, selected.head.offset), Math.max(selected.anchor.offset, selected.head.offset), value.label, undefined, caption ? 'flowLayout' : 'data')
 }
 
 /** Renderer selection/pin projection. It cannot dispatch edits or widen host write grants. */
@@ -135,17 +156,14 @@ export class SelectionContextController {
     let contentOutput: ExecutionContentOutput | undefined
     const target = selection.targets.length === 1 ? selection.targets[0] : undefined
     if (contentOnly && target) {
-      const current = readTarget(snapshot.model, target) as { item?: { kind?: string; locked?: boolean; content?: { nativeType?: string } } }
-      const block = snapshot.model.kind === 'course-v9' && target.kind === 'flow-block'
-        ? snapshot.model.project.surfaces.find(surface => surface.id === target.surfaceId && surface.type === 'flow') : undefined
-      const flow = block?.type === 'flow' ? findFlowBlockRecursive(block.blocks, target.kind === 'flow-block' ? target.blockId : '')?.block : undefined
-      const flowContent = target.kind === 'flow-range' ? (current as { content?: FlowTextContent }).content
-        : flow && isRichTextFlowBlock(flow) ? flow.content : flow?.type === 'callout' ? flow.body : undefined
-      const plainFlow = !flowContent?.inlines.some(inline => inline.type === 'math')
-      if (target.kind === 'markdown-range' || target.kind === 'flow-range' && plainFlow
-        || target.kind === 'course-object' && current.item?.kind === 'native' && current.item.content?.nativeType === 'text' && !current.item.locked
-        || flow && plainFlow && (isRichTextFlowBlock(flow) || flow.type === 'callout' || flow.type === 'code'))
+      if (target.kind === 'course-instance') {
+        const { instance } = courseInstanceContext(snapshot.model, target)
+        const content = readCourseInstanceText(snapshot.model, target)
+        if (!instance.locked && content !== null && (typeof content === 'string' || !content.inlines.some(inline => inline.type === 'math')))
+          contentOutput = { kind: 'replace-text', documentId: selection.documentId, target: structuredClone(target) }
+      } else if (target.kind === 'markdown-range') {
         contentOutput = { kind: 'replace-text', documentId: selection.documentId, target: structuredClone(target) }
+      }
     }
     this.requestHandler({ selection: structuredClone(selection), instruction, ...(contentOutput ? { contentOutput } : {}) })
   }
@@ -159,9 +177,19 @@ export function selectionReference(value: SelectionCapture, writable: boolean): 
   return { documentId: value.documentId, epoch: value.epoch, revision: value.revision, selection: structuredClone(value.targets), writable: writable ? structuredClone(value.targets) : [] }
 }
 
-export function captureDocumentReference(snapshot: DocumentSnapshot, writable: boolean): ExecutionDocumentReference {
-  const manual = workbenchSelection.getManual(snapshot.documentId)
+export function captureDocumentReference(snapshot: DocumentSnapshot, writable: boolean, surfaceId?: string | null,
+  manual = workbenchSelection.getManual(snapshot.documentId)): ExecutionDocumentReference {
+  const selection = manual && manual.epoch === snapshot.epoch && manual.revision === snapshot.revision
+    ? structuredClone(manual.targets) : surfaceId ? [{ kind: 'course-surface' as const, surfaceId }] : undefined
+  if (selection) for (const target of selection) readTarget(snapshot.model, target)
   return { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
-    writable: writable ? [{ kind: 'document' }] : [],
-    ...(manual && manual.epoch === snapshot.epoch && manual.revision === snapshot.revision ? { selection: structuredClone(manual.targets) } : {}) }
+    writable: writable ? [{ kind: 'document' }] : [], ...(selection ? { selection } : {}) }
+}
+/** Freeze the visible focus before draining pending edits; it is context, not a narrower write grant. */
+export async function captureCourseDocumentReference(focus: { documentId: string; surfaceId: string | null }, writable: boolean,
+  prepare: (documentId: string) => Promise<DocumentSnapshot>): Promise<ExecutionDocumentReference> {
+  const { documentId, surfaceId } = focus, manual = workbenchSelection.getManual(documentId)
+  const snapshot = await prepare(documentId)
+  if (snapshot.documentId !== documentId) throw new Error('捕获的文档已改变，请重新发送。')
+  return captureDocumentReference(snapshot, writable, surfaceId, manual)
 }

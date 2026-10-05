@@ -1,22 +1,22 @@
 import type { DocumentSnapshot } from '../../shared/workbench/document'
-import type { ComponentPackageData } from '../../shared/componentTypes'
-import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
-import { componentPackagesFromArchive } from '../components/componentPackageStore'
+import type { DocumentResources } from '../../shared/workbench/document'
+import type { CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 
 export interface CourseDeliverySnapshot {
   readonly documentId: string
   readonly epoch: string
   readonly revision: number
-  readonly project: CourseProjectDocument
+  readonly project: CourseProjectV10
+  readonly snapshot: DocumentSnapshot
+  readonly resources: DocumentResources
   readonly assetFiles: Readonly<Record<string, Uint8Array>>
-  readonly components: Readonly<Record<string, ComponentPackageData>>
 }
 /** drain already owns a structured clone, including every resource byte. Do not reread the active view. */
 export function courseDeliverySnapshot(snapshot: DocumentSnapshot | null): CourseDeliverySnapshot | null {
-  if (snapshot?.model.kind !== 'course-v9') return null
+  if (snapshot?.model.kind !== 'course-v10') return null
   const model = snapshot.model
   return { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, project: model.project,
-    assetFiles: model.resources.assets, components: componentPackagesFromArchive(model.project, model.resources.components) }
+    snapshot, resources: model.resources, assetFiles: model.resources.assets }
 }
 export function sameDeliveryDocument(left: Pick<CourseDeliverySnapshot, 'documentId' | 'epoch'>, right: Pick<CourseDeliverySnapshot, 'documentId' | 'epoch'>): boolean {
   return left.documentId === right.documentId && left.epoch === right.epoch

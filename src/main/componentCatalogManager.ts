@@ -16,7 +16,8 @@ import {
   type ConfiguredCatalogSource,
   type ScannedCatalogSource,
 } from './componentCatalogSources'
-import { readCatalogComponentPackage } from './componentCatalogScanner'
+import { readCatalogComponentPackage, resolveCatalogFilePath } from './componentCatalogScanner'
+import { importComponentLibraryArchive } from '../core/components/library/archive'
 import { deleteHtmlComponent } from './htmlComponentLibrary'
 
 async function writeConfiguredSources(sources: ConfiguredCatalogSource[]): Promise<void> {
@@ -99,6 +100,29 @@ export class ComponentCatalogManager {
     const source = this.sources.get(sourceId)
     if (!source) throw new Error('组件目录已失效，请重新扫描。')
     return readCatalogComponentPackage(source, packageId, version)
+  }
+
+  /** Library files remain separate from project instances and their local overrides. */
+  async install(bytes: Uint8Array): Promise<ComponentCatalogSnapshot> {
+    const archive = importComponentLibraryArchive(bytes)
+    const root = managedComponentLibrary(app.getPath('userData'))
+    const directory = path.join(root, 'packages')
+    await fs.mkdir(directory, { recursive: true })
+    const filename = path.join(directory, `${encodeURIComponent(archive.entry.id)}@${encodeURIComponent(archive.version)}.h5component`)
+    const temporary = `${filename}.tmp`
+    await fs.writeFile(temporary, bytes)
+    await fs.rename(temporary, filename)
+    return this.load()
+  }
+
+  async deletePackage(sourceId: string, packageId: string, version: string): Promise<ComponentCatalogSnapshot> {
+    const source = this.sources.get(sourceId)
+    const root = managedComponentLibrary(app.getPath('userData'))
+    if (!source || canonicalCatalogPath(source.rootPath) !== canonicalCatalogPath(root)) throw new Error('只能删除“我的资产库”中的组件条目。')
+    const pkg = source.packageIndex.get(`${packageId}@${version}`)
+    if (!pkg) throw new Error('库条目已不存在，请刷新。')
+    await fs.unlink(await resolveCatalogFilePath(root, pkg.packagePath))
+    return this.load()
   }
 
   /** Only entries of the managed library (“我的资产库”) can be deleted from the panel. */

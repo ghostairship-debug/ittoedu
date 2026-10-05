@@ -1,220 +1,87 @@
 import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
-import {
-  componentCatalogSchema,
-  type AvailableComponentCatalogPackage,
-  type ComponentCatalogIssue,
-  type ComponentCatalogPackage,
-  type ComponentCatalogPackageFile,
-  type ComponentCatalogSourceSnapshot,
-  type ComponentCatalogTrust,
-} from '../shared/componentCatalog'
+import type { AvailableComponentCatalogPackage, ComponentCatalogIssue, ComponentCatalogPackage, ComponentCatalogPackageFile, ComponentCatalogSourceSnapshot, ComponentCatalogTrust } from '../shared/componentCatalog'
+import { exportComponentLibraryArchive, importComponentLibraryArchive } from '../core/components/library/archive'
+import type { ComponentLibraryArchiveMetadata } from '../core/components/library/archive'
+import type { ComponentLibraryEntry } from '../shared/contracts/component-platform/library'
 
 export class ComponentCatalogScanError extends Error {
-  constructor(
-    readonly code: 'catalog-unreadable' | 'catalog-invalid',
-    message: string,
-    options?: ErrorOptions,
-  ) {
-    super(message, options)
-    this.name = 'ComponentCatalogScanError'
-  }
+  constructor(readonly code: 'catalog-unreadable' | 'catalog-invalid', message: string, options?: ErrorOptions) { super(message, options); this.name = 'ComponentCatalogScanError' }
 }
-
 export interface ScannedComponentCatalogSource {
   source: ComponentCatalogSourceSnapshot
   rootPath: string
   packages: AvailableComponentCatalogPackage[]
   issues: ComponentCatalogIssue[]
   packageIndex: ReadonlyMap<string, ComponentCatalogPackage>
+  memoryPackages?: ReadonlyMap<string, Uint8Array>
+}
+export const catalogPackageIdentity = (id: string, version: string) => `${id}@${version}`
+export const catalogSourceId = (root: string) => `component-catalog:${createHash('sha256').update(path.resolve(root).toLocaleLowerCase('en-US')).digest('hex').slice(0, 24)}`
+export async function resolveCatalogFilePath(root: string, relative: string): Promise<string> {
+  const [realRoot, realFile] = await Promise.all([fs.realpath(root), fs.realpath(path.resolve(root, relative))])
+  const relation = path.relative(realRoot, realFile)
+  if (!relation || relation === '..' || relation.startsWith(`..${path.sep}`) || path.isAbsolute(relation)) throw new Error(`目录路径越界：${relative}`)
+  return realFile
+}
+export async function readCatalogFile(file: string): Promise<Uint8Array> {
+  if (!(await fs.stat(file)).isFile()) throw new Error('路径不是文件')
+  return Uint8Array.from(await fs.readFile(file))
+}
+export function libraryCatalogPackage(entry: ComponentLibraryEntry, version: string, packagePath: string, bytes: Uint8Array, metadata?: ComponentLibraryArchiveMetadata): ComponentCatalogPackage {
+  return { packageId: entry.id, version, name: entry.title, description: metadata?.description ?? `可编辑组件 · ${entry.example.rootIds.length} 个根对象`,
+    subject: [...(metadata?.subject ?? [])], schoolStage: [...(metadata?.schoolStage ?? [])], tags: [...(metadata?.tags ?? [])], packagePath, thumbnailPath: '', sha256: createHash('sha256').update(bytes).digest('hex'),
+    componentSchemaVersion: 1, runtimeApiVersion: 5, renderMode: 'dom', supportedScopes: ['scene', 'global'],
+    quality: 'experimental', maintainer: '本地组件作者', verifiedCases: [], ...(metadata?.sourceCourse ? { source: { kind: 'local', reference: metadata.sourceCourse } as const } : {}) }
 }
 
-function sourceIdForPath(rootPath: string): string {
-  const resolved = path.resolve(rootPath)
-  const normalized = process.platform === 'win32'
-    ? resolved.toLocaleLowerCase('en-US')
-    : resolved
-  const digest = createHash('sha256').update(normalized).digest('hex').slice(0, 24)
-  return `component-catalog:${digest}`
-}
-
-function pathEscapesRoot(relative: string): boolean {
-  return relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)
-}
-
-function resolveCatalogPath(rootPath: string, relativePath: string): string {
-  const resolvedRoot = path.resolve(rootPath)
-  const target = path.resolve(resolvedRoot, ...relativePath.replaceAll('\\', '/').split('/'))
-  const relative = path.relative(resolvedRoot, target)
-  if (relative === '' || pathEscapesRoot(relative)) {
-    throw new Error(`目录路径越界：${relativePath}`)
-  }
-  return target
-}
-
-export async function resolveCatalogFilePath(
-  rootPath: string,
-  relativePath: string,
-): Promise<string> {
-  const lexicalTarget = resolveCatalogPath(rootPath, relativePath)
-  const [realRoot, realTarget] = await Promise.all([
-    fs.realpath(rootPath),
-    fs.realpath(lexicalTarget),
-  ])
-  const relative = path.relative(realRoot, realTarget)
-  if (relative === '' || pathEscapesRoot(relative)) {
-    throw new Error(`目录路径经符号链接越界：${relativePath}`)
-  }
-  return realTarget
-}
-
-export async function readCatalogFile(filePath: string): Promise<Uint8Array> {
-  const stat = await fs.stat(filePath)
-  if (!stat.isFile()) throw new Error('路径不是文件')
-  return new Uint8Array(await fs.readFile(filePath))
-}
-
-function thumbnailMimeType(relativePath: string): string {
-  switch (path.extname(relativePath).toLocaleLowerCase('en-US')) {
-    case '.png': return 'image/png'
-    case '.jpg':
-    case '.jpeg': return 'image/jpeg'
-    case '.webp': return 'image/webp'
-    case '.gif': return 'image/gif'
-    case '.svg': return 'image/svg+xml'
-    default: throw new Error('缩略图必须是 PNG、JPG、WebP、GIF 或 SVG')
-  }
-}
-
-function packageIdentity(packageId: string, version: string): string {
-  return `${packageId}@${version}`
-}
-
-export async function scanComponentCatalogDirectory(
-  rootPath: string,
-  trust: ComponentCatalogTrust,
-): Promise<ScannedComponentCatalogSource> {
-  const resolvedRoot = path.resolve(rootPath)
-  const sourceId = sourceIdForPath(resolvedRoot)
-  const fallbackLabel = path.basename(resolvedRoot) || '组件目录'
-  let catalogBytes: Uint8Array
-  try {
-    catalogBytes = await readCatalogFile(path.join(resolvedRoot, 'catalog.json'))
-  } catch (error) {
-    throw new ComponentCatalogScanError(
-      'catalog-unreadable',
-      '无法读取目录根部的 catalog.json。',
-      { cause: error },
-    )
-  }
-
-  let rawCatalog: unknown
-  try {
-    rawCatalog = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(catalogBytes))
-  } catch (error) {
-    throw new ComponentCatalogScanError(
-      'catalog-invalid',
-      'catalog.json 不是有效的 UTF-8 JSON。',
-      { cause: error },
-    )
-  }
-  const parsed = componentCatalogSchema.safeParse(rawCatalog)
-  if (!parsed.success) {
-    const first = parsed.error.issues[0]
-    throw new ComponentCatalogScanError(
-      'catalog-invalid',
-      `catalog.json 校验失败：${first?.path.join('.') || 'catalog'} ${first?.message ?? '字段无效'}。`,
-      { cause: parsed.error },
-    )
-  }
-
-  const label = parsed.data.name ?? fallbackLabel
-  const packages: AvailableComponentCatalogPackage[] = []
-  const issues: ComponentCatalogIssue[] = []
-  const packageIndex = new Map<string, ComponentCatalogPackage>()
-
-  for (const pkg of parsed.data.packages) {
-    const identity = packageIdentity(pkg.packageId, pkg.version)
+/** Archives are the source; optional catalog metadata enriches discovery without blocking usable files. */
+export async function scanComponentCatalogDirectory(rootPath: string, trust: ComponentCatalogTrust): Promise<ScannedComponentCatalogSource> {
+  const root = path.resolve(rootPath), sourceId = catalogSourceId(root), issues: ComponentCatalogIssue[] = []
+  let metadata: { name?: string; packages?: Partial<ComponentCatalogPackage>[] } = {}
+  try { metadata = JSON.parse(await fs.readFile(path.join(root, 'catalog.json'), 'utf8')) } catch { /* metadata is optional */ }
+  const label = metadata.name ?? path.basename(root), packages: AvailableComponentCatalogPackage[] = [], index = new Map<string, ComponentCatalogPackage>()
+  let entries: string[]
+  try { entries = await fs.readdir(root, { recursive: true }) } catch (cause) { throw new ComponentCatalogScanError('catalog-unreadable', '组件目录无法读取。', { cause }) }
+  for (const relative of entries.filter(file => file.toLowerCase().endsWith('.h5component'))) {
     try {
-      const packagePath = await resolveCatalogFilePath(resolvedRoot, pkg.packagePath)
-      const bytes = await readCatalogFile(packagePath)
-      const actualHash = createHash('sha256').update(bytes).digest('hex')
-      if (actualHash !== pkg.sha256) {
-        issues.push({
-          sourceId,
-          sourceLabel: label,
-          packageId: pkg.packageId,
-          code: 'package-hash-mismatch',
-          message: `组件 ${identity} 的实际 SHA-256 与 catalog.json 不一致，已停止发现。`,
-        })
-        continue
-      }
-
+      const bytes = await readCatalogFile(await resolveCatalogFilePath(root, relative))
+      const archive = importComponentLibraryArchive(bytes)
+      const pkg = libraryCatalogPackage(archive.entry, archive.version, relative.replaceAll('\\', '/'), bytes, archive.metadata)
+      const extra = (Array.isArray(metadata.packages) ? metadata.packages : []).find(item => item.packageId === pkg.packageId && item.version === pkg.version)
+      if (extra) Object.assign(pkg, { description: extra.description ?? pkg.description, subject: extra.subject ?? pkg.subject, schoolStage: extra.schoolStage ?? pkg.schoolStage, tags: extra.tags ?? pkg.tags, category: extra.category, thumbnailPath: extra.thumbnailPath ?? '', license: extra.license, source: extra.source ?? pkg.source })
       let thumbnailDataUrl: string | undefined
-      try {
-        const thumbnailBytes = await readCatalogFile(await resolveCatalogFilePath(resolvedRoot, pkg.thumbnailPath))
-        const mimeType = thumbnailMimeType(pkg.thumbnailPath)
-        thumbnailDataUrl = `data:${mimeType};base64,${Buffer.from(thumbnailBytes).toString('base64')}`
-      } catch (error) {
-        issues.push({
-          sourceId,
-          sourceLabel: label,
-          packageId: pkg.packageId,
-          code: 'thumbnail-unreadable',
-          message: `组件 ${identity} 的缩略图无法读取：${error instanceof Error ? error.message : '未知错误'}。`,
-        })
+      if (pkg.thumbnailPath) {
+        try {
+          const thumbnail = await readCatalogFile(await resolveCatalogFilePath(root, pkg.thumbnailPath))
+          const extension = path.extname(pkg.thumbnailPath).slice(1).toLowerCase()
+          thumbnailDataUrl = `data:image/${extension === 'svg' ? 'svg+xml' : extension === 'jpg' ? 'jpeg' : extension};base64,${Buffer.from(thumbnail).toString('base64')}`
+        } catch (cause) { issues.push({ sourceId, sourceLabel: label, packageId: pkg.packageId, code: 'thumbnail-unreadable', message: `缩略图缺失；组件仍可使用：${String(cause)}` }) }
       }
-
-      packages.push({
-        ...pkg,
-        sourceId,
-        sourceLabel: label,
-        sourceTrust: trust,
-        ...(thumbnailDataUrl === undefined ? {} : { thumbnailDataUrl }),
-      })
-      packageIndex.set(identity, pkg)
-    } catch (error) {
-      issues.push({
-        sourceId,
-        sourceLabel: label,
-        packageId: pkg.packageId,
-        code: 'package-unreadable',
-        message: `组件 ${identity} 无法读取：${error instanceof Error ? error.message : '未知错误'}。`,
-      })
-    }
+      index.set(catalogPackageIdentity(pkg.packageId, pkg.version), pkg)
+      packages.push({ ...pkg, sourceId, sourceLabel: label, sourceTrust: trust, thumbnailDataUrl })
+    } catch (cause) { issues.push({ sourceId, sourceLabel: label, code: 'package-unreadable', message: `${relative}：${cause instanceof Error ? cause.message : String(cause)}` }) }
   }
-
-  return {
-    source: { sourceId, label, trust, packageCount: packages.length },
-    rootPath: resolvedRoot,
-    packages,
-    issues,
-    packageIndex,
-  }
+  return { source: { sourceId, label, trust, packageCount: packages.length }, rootPath: root, packages, issues, packageIndex: index }
 }
 
-export async function readCatalogComponentPackage(
-  source: ScannedComponentCatalogSource,
-  packageId: string,
-  version: string,
-): Promise<ComponentCatalogPackageFile> {
-  const identity = packageIdentity(packageId, version)
-  const pkg = source.packageIndex.get(identity)
-  if (!pkg) throw new Error(`组件目录中不存在 ${identity}。`)
-  const bytes = await readCatalogFile(await resolveCatalogFilePath(source.rootPath, pkg.packagePath))
-  const actualHash = createHash('sha256').update(bytes).digest('hex')
-  if (actualHash !== pkg.sha256) {
-    throw new Error(`组件 ${identity} 自上次扫描后已改变，实际 SHA-256 不匹配。`)
-  }
-  return {
-    sourceId: source.source.sourceId,
-    sourceLabel: source.source.label,
-    sourceTrust: source.source.trust,
-    packageId,
-    version,
-    sha256: actualHash,
-    name: path.basename(pkg.packagePath),
-    bytes,
-  }
+export function createBuiltInCatalogSource(root: string, entries: ComponentLibraryEntry[]): ScannedComponentCatalogSource {
+  const sourceId = 'component-catalog:builtins-v10', label = '内置组件', memoryPackages = new Map<string, Uint8Array>()
+  const packages = entries.map(entry => {
+    const version = Object.values(entry.definitions)[0]?.version ?? '1.0.0', bytes = exportComponentLibraryArchive(entry, version)
+    memoryPackages.set(catalogPackageIdentity(entry.id, version), bytes)
+    return { ...libraryCatalogPackage(entry, version, `builtin/${encodeURIComponent(entry.id)}.h5component`, bytes), sourceId, sourceLabel: label, sourceTrust: 'built-in' as const }
+  })
+  return { source: { sourceId, label, trust: 'built-in', packageCount: packages.length }, rootPath: root, packages, issues: [],
+    packageIndex: new Map(packages.map(pkg => [catalogPackageIdentity(pkg.packageId, pkg.version), pkg])), memoryPackages }
+}
+export async function readCatalogComponentPackage(source: ScannedComponentCatalogSource, packageId: string, version: string): Promise<ComponentCatalogPackageFile> {
+  const identity = catalogPackageIdentity(packageId, version), pkg = source.packageIndex.get(identity)
+  if (!pkg) throw new Error('组件目录条目已不存在，请刷新。')
+  const bytes = source.memoryPackages?.get(identity) ?? await readCatalogFile(await resolveCatalogFilePath(source.rootPath, pkg.packagePath))
+  const archive = importComponentLibraryArchive(bytes)
+  if (archive.entry.id !== packageId || archive.version !== version) throw new Error('组件文件身份已改变，请刷新目录。')
+  return { sourceId: source.source.sourceId, sourceLabel: source.source.label, sourceTrust: source.source.trust, packageId, version,
+    sha256: createHash('sha256').update(bytes).digest('hex'), name: path.basename(pkg.packagePath), bytes: Uint8Array.from(bytes) }
 }

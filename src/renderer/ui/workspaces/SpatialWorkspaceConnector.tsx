@@ -1,217 +1,82 @@
-import { projectWithBackgroundPreview } from '../../authoring/backgroundPreview'
-import { useCallback, useMemo, useRef, useState } from 'react'
-import type { CompositionAuthoringSelection } from '../../composition/WebCompositionAuthoringContent'
-import { CompositionSelectionContext } from '../../workbench/CompositionSelectionContext'
-import type { CompositionLayerItem } from '../../../shared/courseProjectTypes'
-import { publishWebComposition } from '../../export/course/buildPublishedCourse'
-import { CompositionEditorDialog } from '../../composition/CompositionEditorDialog'
-import { useAssetObjectUrls } from '../useAssetObjectUrls'
-import type { ComponentPackageData } from '../../../shared/componentTypes'
-import type { CourseAuthoringSession } from '../../authoring/courseAuthoringSession'
-import type { SpatialAuthoringCommandPort } from '../../authoring/spatialAuthoringIntents'
-import type { SpatialWorldContentEditSession } from '../../authoring/spatialWorldAuthoring'
-import type { SpatialAuthoringSession } from '../../course/spatialEditorCommands'
-import {
-  buildSpatialEditorView,
-  captureSpatialEditorAuthoringTarget,
-  spatialEditorStableTargets,
-  SPATIAL_SESSIONLESS_ERROR,
-  type SpatialEditorGraphSelection,
-} from '../../course/spatialEditorView'
-import { selectMediaAssetFiles, useEditorStore } from '../../store/editorStore'
-import { selectionObjectCommands } from '../../composition/selection/selectionObjectCommands'
-import { mountPublishedCourseTryRun, reportTryRunInteractionDiagnostic } from '../coursePlayerTryRun'
+import { useEffect } from 'react'
+import { useShallow } from 'zustand/react/shallow'
+import { useEditorStore } from '../../store/editorStore'
+import { useCourseV10Runtime } from '../../components/CourseV10RuntimeView'
+import { createSpatialStateCameraPort } from '../../componentPlatform/surfaces/spatial/stateCamera'
+import { initialSpatialSurfaceView } from '../../store/slices/spatialAuthoringSlice'
 import { SpatialLocationWorkspace } from './SpatialLocationWorkspace'
 import type { WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
+import { resolveComponentBackground } from '../../../shared/contracts/component-platform'
+import { projectWithBackgroundPreview } from '../../authoring/backgroundPreview'
 
-type SpatialWorkspaceStore = {
-  readonly spatialSession: SpatialAuthoringSession | null
-  readonly courseAuthoringSession: CourseAuthoringSession | null
-  readonly canvasMode: 'edit' | 'run'
-  readonly spatialContentEdit: SpatialWorldContentEditSession | null
-  readonly spatialPlaybackPathId: string | null
-  readonly componentPackages: Record<string, ComponentPackageData>
-  readonly spatialGraphSelection: SpatialEditorGraphSelection | null
-  readonly runSpatialAuthoringIntent: SpatialAuthoringCommandPort['run']
-  readonly setCanvasMode: (mode: 'edit' | 'run') => void
-}
-
-function selectSpatialSession(state: SpatialWorkspaceStore) { return state.spatialSession }
-function selectCourseAuthoringSession(state: SpatialWorkspaceStore) { return state.courseAuthoringSession }
-function selectCanvasMode(state: SpatialWorkspaceStore) { return state.canvasMode }
-function selectSpatialContentEdit(state: SpatialWorkspaceStore) { return state.spatialContentEdit }
-function selectSpatialPlaybackPathId(state: SpatialWorkspaceStore) { return state.spatialPlaybackPathId }
-function selectComponentPackages(state: SpatialWorkspaceStore) { return state.componentPackages }
-function selectSpatialGraphSelection(state: SpatialWorkspaceStore) { return state.spatialGraphSelection }
-function selectRunSpatialAuthoringIntent(state: SpatialWorkspaceStore) { return state.runSpatialAuthoringIntent }
-function selectSetCanvasMode(state: SpatialWorkspaceStore) { return state.setCanvasMode }
-
+/** The original workspace consumes the active document's one World and canonical writer. */
 export function SpatialWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWorkspaceMedia?: WorkspaceMediaDropHandler }) {
-  const documentId = useEditorStore((state) => state.courseDocument.documentId)
-  const session = useEditorStore(selectSpatialSession)
-  const authoringSession = useEditorStore(selectCourseAuthoringSession)
-  const canvasMode = useEditorStore(selectCanvasMode)
-  const contentEdit = useEditorStore(selectSpatialContentEdit)
-  const playbackPathId = useEditorStore(selectSpatialPlaybackPathId)
-  const assetFiles = useEditorStore(selectMediaAssetFiles)
-  const componentPackages = useEditorStore(selectComponentPackages)
-  const graphSelection = useEditorStore(selectSpatialGraphSelection)
-  const runSpatialAuthoringIntent = useEditorStore(selectRunSpatialAuthoringIntent)
-  const setCanvasMode = useEditorStore(selectSetCanvasMode)
-  const submitCompositionEdit = useEditorStore(state => state.submitCompositionEdit)
-  const [compositionEditor, setCompositionEditor] = useState<{ documentId: string; layerItemId: string } | null>(null)
-  const compositionCanvasRef = useRef<HTMLDivElement>(null)
-  const [compositionSelection, setCompositionSelection] = useState<{ documentId: string; locationId: string; selection: CompositionAuthoringSelection } | null>(null)
-  const captureRuntimeContentTextTarget = useEditorStore(
-    (state) => state.captureRuntimeContentTextTarget,
-  )
-  const updateRuntimeContentTextAtTarget = useEditorStore(
-    (state) => state.updateRuntimeContentTextAtTarget,
-  )
-  const commands = useMemo<SpatialAuthoringCommandPort>(() => ({
-    run: runSpatialAuthoringIntent,
-  }), [runSpatialAuthoringIntent])
-  const runtimeContentAuthoring = useMemo(() => ({
-    captureRuntimeContentTextTarget,
-    updateRuntimeContentTextAtTarget,
-  }), [captureRuntimeContentTextTarget, updateRuntimeContentTextAtTarget])
-  const previewBackgroundColor = useEditorStore((state) => state.previewBackgroundColor)
-  const view = useMemo(() => {
-    if (!session) return null
-    return buildSpatialEditorView({
-      project: projectWithBackgroundPreview(session.history.present, canvasMode === 'edit' ? previewBackgroundColor : null, {
-        locationId: session.selection.locationId, stateId: null, generation: authoringSession?.token.generation ?? -1,
+  const runtime = useCourseV10Runtime()
+  const source = useEditorStore(useShallow(state => ({
+    views: state.spatialViewStates, canvasMode: state.canvasMode, activation: state.courseView.activation,
+    contentEdit: state.slideContentEdit, previewBackgroundColor: state.previewBackgroundColor, courseView: state.courseView,
+  })))
+  const surface = runtime.project.surfaces.find(value => value.id === runtime.surfaceId && value.kind === 'spatial')
+  const surfaceId = surface?.id
+  const view = surfaceId ? source.views[runtime.documentId]?.[surfaceId] ?? initialSpatialSurfaceView(surface?.spatial?.home) : initialSpatialSurfaceView()
+  useEffect(() => { runtime.setPlaying(source.canvasMode === 'run'); return () => runtime.setPlaying(false) }, [runtime.documentId, runtime.setPlaying, source.canvasMode])
+  useEffect(() => { runtime.navigation.changed() }, [runtime.navigation, view.activeCameraFrameId, view.playbackPathId, view.playbackStepIndex, view.viewport])
+  useEffect(() => {
+    if (!surfaceId) return
+    const state = () => useEditorStore.getState(), documentId = runtime.documentId
+    if (!state().spatialViewStates[documentId]?.[surfaceId]) state().initializeSpatialView(surfaceId, documentId)
+    const camera = createSpatialStateCameraPort({
+      read: () => state().readSpatialView(surfaceId, documentId).camera,
+      set: pose => state().setSpatialSessionCamera(pose, surfaceId, documentId),
+      subscribe: listener => useEditorStore.subscribe((next, previous) => {
+        const pose = next.spatialViewStates[documentId]?.[surfaceId]?.camera
+        const old = previous.spatialViewStates[documentId]?.[surfaceId]?.camera
+        if (pose && pose !== old) listener(pose)
       }),
-      locationId: session.selection.locationId,
-      sessionCamera: session.sessionCamera,
     })
-  }, [session, previewBackgroundColor, authoringSession, canvasMode])
-  const assetMimeTypes = useMemo(() => session
-    ? Object.fromEntries(
-      Object.entries(session.history.present.assets).map(([id, meta]) => [id, meta.mimeType]),
-    )
-    : {}, [session])
-  const compositionAssetUrls = useAssetObjectUrls(assetFiles, assetMimeTypes)
-  const editingComposition = compositionEditor?.documentId === documentId
-    ? view?.layers.find(layer => layer.selectionId === compositionEditor.layerItemId && layer.item.kind === 'composition')?.item : undefined
-  const selectedComposition = view?.layers.find(layer => layer.item.kind === 'composition'
-    && session?.selection.selectionIds.includes(layer.selectionId))?.item
-  const publishedComposition = useMemo(() => session && editingComposition?.kind === 'composition'
-    ? publishWebComposition({ project: session.history.present, assetFiles, components: componentPackages }, editingComposition.content as CompositionLayerItem['content'])
-    : null, [session, editingComposition, assetFiles, componentPackages])
-  const targets = view ? spatialEditorStableTargets(view) : []
-  const authoringTargets = useMemo(() => {
-    if (!view || !authoringSession) return null
-    if (
-      authoringSession.token.surfaceType !== 'spatial-2d'
-      || authoringSession.token.locationId !== view.locationId
-      || authoringSession.token.revision !== view.revision
-    ) return null
-    try {
-      const worldTarget = captureSpatialEditorAuthoringTarget({
-        view,
-        sessionToken: authoringSession.token,
-        target: { kind: 'world', field: 'world' },
-      })
-      const layerTarget = (layerItemId: string, field: 'frame' | 'item') => captureSpatialEditorAuthoringTarget({
-        view,
-        sessionToken: authoringSession.token,
-        target: { kind: 'layer', layerItemId, field },
-      })
-      const layerTargets = new Map(view.layers.map((layer) => [layer.selectionId, layerTarget(layer.selectionId, 'frame')] as const))
-      // Property patches (showing a hidden object again) address the whole item.
-      const layerItemTargets = new Map(view.layers.map((layer) => [layer.selectionId, layerTarget(layer.selectionId, 'item')] as const))
-      return { worldTarget, layerTargets, layerItemTargets }
-    } catch {
-      return null
-    }
-  }, [authoringSession, view])
-  const tryRunSnapshot = useMemo(() => session
-    ? {
-      project: session.history.present,
-      locationId: session.selection.locationId,
-      playbackPathId,
-      assetFiles,
-      componentPackages,
-    }
-    : null, [assetFiles, componentPackages, playbackPathId, session])
-  const onMountTryRun = useCallback((container: HTMLElement) => {
-    if (!tryRunSnapshot) throw new Error('not-spatial-session')
-    return mountPublishedCourseTryRun({
-      container,
-      project: tryRunSnapshot.project,
-      assetFiles: tryRunSnapshot.assetFiles,
-      components: tryRunSnapshot.componentPackages,
-      locationId: tryRunSnapshot.locationId,
-      playbackPathId: tryRunSnapshot.playbackPathId,
-      onInteractionDiagnostic: reportTryRunInteractionDiagnostic,
+    const unregister = runtime.registerCamera(surfaceId, camera, {
+      frameId: () => state().readSpatialView(surfaceId, documentId).activeCameraFrameId,
+      selectFrame: id => state().setSpatialActiveCameraFrameId(id, surfaceId, documentId),
+      pathId: () => state().readSpatialView(surfaceId, documentId).playbackPathId,
+      stepIndex: () => state().readSpatialView(surfaceId, documentId).playbackStepIndex,
+      selectStep: index => state().setSpatialPlaybackStepIndex(index, surfaceId, documentId),
+      viewport: () => state().readSpatialView(surfaceId, documentId).viewport
+        ?? state().courseView.views.find(value => value.documentId === documentId)?.model.project.surfaces.find(value => value.id === surfaceId)?.designSize
+        ?? { width: 1280, height: 720 },
     })
-  }, [tryRunSnapshot])
-
-  if (!session || !view || !authoringTargets) {
-    return (
-      <main className="workspace workspace--spatial" data-testid="spatial-workspace-sessionless"
-        data-spatial-not-slide-stage="true" role="alert">
-        <p className="property-hint">{SPATIAL_SESSIONLESS_ERROR}</p>
-      </main>
-    )
-  }
-
-  const activeCompositionSelection = compositionSelection?.documentId === documentId && compositionSelection.locationId === view.locationId
-    && selectedComposition?.kind === 'composition' && selectedComposition.layerItemId === compositionSelection.selection.layerItemId
-    ? compositionSelection.selection : null
-  const selectCompositionContent = (selection: CompositionAuthoringSelection) => {
-    if (documentId) setCompositionSelection({ documentId, locationId: view.locationId, selection })
-  }
-  return (
-    <div ref={compositionCanvasRef} style={{ display: 'grid', position: 'relative', minWidth: 0, minHeight: 0 }}>
-    <SpatialLocationWorkspace
-      documentId={documentId}
-      view={view}
-      showCameraFrames={session.showCameraFrames}
-      targets={targets}
-      selectionIds={session.selection.selectionIds}
-      graphSelection={graphSelection}
-      canvasMode={canvasMode}
-      scope={session.scope}
-      contentEdit={contentEdit}
-      assetFiles={assetFiles}
-      assetMimeTypes={assetMimeTypes}
-      componentPackages={componentPackages}
-      project={session.history.present}
-      runtimeContentAuthoring={runtimeContentAuthoring}
-      worldTarget={authoringTargets.worldTarget}
-      layerTargets={authoringTargets.layerTargets}
-      layerItemTargets={authoringTargets.layerItemTargets}
-      commands={commands}
-      onCanvasModeChange={setCanvasMode}
-      onPaste={selectionObjectCommands.paste}
-      onSelectAll={selectionObjectCommands.selectAll}
-      onMountTryRun={onMountTryRun}
-      onDropWorkspaceMedia={onDropWorkspaceMedia}
-      onCompositionSelection={selectCompositionContent} selectedCompositionNode={activeCompositionSelection}
-      onCompositionEdit={canvasMode === 'edit' && documentId ? async (layerItemId, edit) => {
-        if (useEditorStore.getState().courseDocument.documentId !== documentId) throw new Error('当前文档已切换，请重新选择组合内容')
-        const result = await submitCompositionEdit(layerItemId, edit)
-        if (result.status !== 'applied' && result.status !== 'unchanged') throw new Error('message' in result ? result.message : '修改未完成')
-      } : undefined}
-      onEditComposition={layerItemId => { if (documentId) setCompositionEditor({ documentId, layerItemId }) }}
-    />
-    <CompositionSelectionContext documentId={documentId} revision={session.history.present.revision} locationId={view.locationId}
-      canvasRoot={compositionCanvasRef.current} enabled={canvasMode === 'edit'}
-      selection={activeCompositionSelection} onRestoreSelection={selectCompositionContent} />
-    {canvasMode === 'edit' && selectedComposition?.kind === 'composition' && documentId && <button type="button"
-      style={{ position: 'absolute', right: 24, bottom: 24, zIndex: 30 }} disabled={selectedComposition.locked}
-      onClick={() => setCompositionEditor({ documentId, layerItemId: selectedComposition.layerItemId })}>编辑组合内容</button>}
-    {canvasMode === 'edit' && editingComposition?.kind === 'composition' && publishedComposition && compositionEditor && <CompositionEditorDialog
-      key={`${documentId}:${editingComposition.layerItemId}`}
-      item={editingComposition as CompositionLayerItem} content={publishedComposition}
-      assetUrls={compositionAssetUrls} projectId={session.history.present.id} components={componentPackages}
-      onEdit={async edit => {
-        if (useEditorStore.getState().courseDocument.documentId !== compositionEditor.documentId) throw new Error('当前文档已切换，请重新选择组合内容')
-        const result = await submitCompositionEdit(compositionEditor.layerItemId, edit)
-        if (result.status !== 'applied' && result.status !== 'unchanged') throw new Error('message' in result ? result.message : '修改未完成')
-      }} onClose={() => setCompositionEditor(null)} />}
-    </div>
-  )
+    return () => { unregister(); camera.dispose() }
+  }, [runtime.documentId, surfaceId, runtime.registerCamera])
+  if (!surface) return <main className="workspace workspace--spatial" role="alert"><p className="property-hint">请先选择一个空间页面。</p></main>
+  const state = () => useEditorStore.getState()
+  const projection = source.canvasMode === 'edit' ? projectWithBackgroundPreview(runtime.project, source.previewBackgroundColor,
+    runtime.documentId, surface.id, source.courseView.activeStateId, source.courseView.snapshot?.epoch) : runtime.project
+  const projectedSurface = projection.surfaces.find(value => value.id === surface.id)!
+  const background = resolveComponentBackground(projection, projectedSurface)
+  const safe = (result: unknown) => { void Promise.resolve(result).catch(error => state().setError(error instanceof Error ? error.message : String(error))) }
+  return <SpatialLocationWorkspace documentId={runtime.documentId} project={projection} surface={projectedSurface} view={view}
+    activeStateId={source.courseView.activeStateId}
+    selectionIds={runtime.selectedInstanceIds} canvasMode={source.canvasMode} renderInstance={id => runtime.renderInstance(id, projection)}
+    backgroundAssetUrl={background.assetId ? runtime.world.assetUrl(background.assetId) : null}
+    onViewportChange={size => state().setSpatialViewport(size, surface.id, runtime.documentId)}
+    captureTarget={() => state().courseKernel.captureTarget(runtime.documentId)}
+    onEdits={(edits, captured = state().courseKernel.captureTarget(runtime.documentId)) => state().courseKernel.editCaptured(state().courseKernel.capture(edits, captured))}
+    onSelect={ids => runtime.selectInstances(ids, surface.id)}
+    onCamera={pose => state().setSpatialSessionCamera(pose, surface.id, runtime.documentId)}
+    onActivateFrame={id => state().activateSpatialCameraFrame(surface.id, id)}
+    onGraphSelect={selection => state().setSpatialGraphSelection(selection, surface.id)}
+    onCanvasModeChange={mode => { safe(state().commitTextEdit().then(() => state().setCanvasMode(mode))) }}
+    onEditContent={id => { runtime.selectInstances([id], surface.id); state().setActiveTab('properties') }}
+    contentEdit={source.contentEdit?.target.documentId === runtime.documentId && source.contentEdit.target.surfaceId === surface.id
+      && source.contentEdit.target.activeStateId === source.courseView.activeStateId ? source.contentEdit : null}
+    contentEditor={{ read: () => {
+      const draft = state().slideContentEdit
+      return draft?.target.documentId === runtime.documentId && draft.target.surfaceId === surface.id
+        && draft.target.activeStateId === state().courseView.activeStateId ? draft : null
+    },
+      begin: id => state().beginSlideDataEdit(id), update: (data, composing, height) => state().updateSlideDataDraft(data, composing, height),
+      setComposing: active => state().setSlideTextEditComposing(active),
+      commit: () => state().commitTextEdit(), cancel: () => state().cancelTextEdit(), undo: () => { safe(state().undo()) }, redo: () => { safe(state().redo()) }, report: message => state().setError(message) }}
+    onPaste={() => { safe(state().pasteNodes()) }} onSelectAll={() => state().selectAllNodes()}
+    onShowInstances={ids => { safe(state().updateNodes(ids.map(nodeId => ({ nodeId, patch: { visible: true } })))); runtime.selectInstances(ids, surface.id) }}
+    onDropWorkspaceMedia={onDropWorkspaceMedia} activation={source.activation} />
 }

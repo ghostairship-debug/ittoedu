@@ -1,0 +1,17 @@
+{
+  "description": "列出本次任务已授权的外部 MCP 工具及读写效果；未配置连接时返回未配置。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "read",
+    "label": "mcp.discover",
+    "targetKinds": []
+  },
+  "name": "mcp.discover",
+  "version": 1
+}

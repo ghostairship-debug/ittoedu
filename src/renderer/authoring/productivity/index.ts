@@ -1,166 +1,135 @@
-import { documentTextSlots, normalizeDocumentText, type FlowInline, type FlowTextContent } from '../../../shared/document/content'
-import type { CourseProjectDocument, FlowBlock, LayerItem } from '../../../shared/courseProjectTypes'
-import type { TextRun } from '../../../shared/contracts/native-v1/types'
-import { applyTextRunEdits, applyTextRunStyle, remapTextRuns, type TextRunEdit } from '../../../shared/textRuns'
-import { resolveEffectiveBackground, type EffectiveBackgroundRequest } from '../../../shared/effectiveBackground'
-import type { CourseAuthoringSessionToken } from '../courseAuthoringSession'
-import { createEditorTransactionStep, type EditorTransactionStep } from '../editorTransaction'
-import { commitCourseProjectMutation } from '../../../core/tools/courseProjectMutation'
+import { documentTextContentSchema, normalizeDocumentText, type FlowInline, type FlowTextContent } from '../../../shared/document/content'
+import type { CourseProjectV10, JsonValue } from '../../../shared/contracts/component-platform/project'
+import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
+import { captureComponentOperation, equalComponentValue, presentationComponentEdits } from '../../../core/drivers/courseV10Operations'
+import type { CapturedComponentOperation, CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
 
-export interface ProductivityContext { document: CourseProjectDocument; sessionToken: CourseAuthoringSessionToken }
+export interface ProductivityContext { document: CourseProjectV10; target: CapturedCourseTarget }
+export type DesignProductionStep = CapturedComponentOperation & { createdSurfaceId?: string; originSurfaceId?: string | null }
 export type ProductivityScope = 'page' | 'surface' | 'course'
 export type ColorProperty = 'text' | 'fill' | 'stroke' | 'background' | 'all'
 export type ProductivityRequest = { kind: 'text'; scope: ProductivityScope; find: string; replacement: string } | { kind: 'color'; scope: ProductivityScope; tokenId: string; property: ColorProperty }
 export interface ProductivityPreviewItem { id: string; target: string; owner: string; property: string; oldValue: string; newValue: string }
-export interface ProductivityPreview { projectId: string; revision: number; sessionToken: CourseAuthoringSessionToken; request: ProductivityRequest; items: ProductivityPreviewItem[]; unsupported: string[] }
-type Field = { id: string; target: string; owner: string; property: string; value: string; color?: ColorProperty; write(value: string, replacement?: { find: string; replacement: string }): void }
-type Bag = Record<string, unknown>
-const bag = (value: object): Bag => value as unknown as Bag
+export interface ProductivityPreview { projectId: string; revision: number; target: CapturedCourseTarget; request: ProductivityRequest; items: ProductivityPreviewItem[]; unsupported: string[] }
+export type ProductivityApplyResult = { ok: true; step: DesignProductionStep | null } | { ok: false; reason: string }
+type Field = ProductivityPreviewItem & { color?: ColorProperty; write(value: string, replacement?: { find: string; replacement: string }): void }
+const colors: Record<string, ColorProperty> = { color: 'text', textColor: 'text', fill: 'fill', fillColor: 'fill', borderColor: 'stroke', stroke: 'stroke', strokeColor: 'stroke', backgroundColor: 'background', highlightColor: 'background' }
+const textKeys = new Set(['text', 'title', 'label', 'name', 'placeholder', 'altText', 'caption', 'citation', 'body', 'header'])
 
-function fields(document: CourseProjectDocument, token: CourseAuthoringSessionToken, scope: ProductivityScope) {
-  const result: Field[] = []; const unsupported: string[] = []
-  const location = document.locations.find(l => l.id === token.locationId)
-  if (!location) throw new Error('当前页面已失效')
-  const add = (object: object, key: string, target: string, owner: string, color?: ColorProperty) => {
-    const record = bag(object); const value = record[key]
+function fields(document: CourseProjectV10, target: CapturedCourseTarget, scope: ProductivityScope) {
+  const result: Field[] = [], unsupported: string[] = []
+  if (!document.surfaces.some(surface => surface.id === target.surfaceId)) throw new Error('捕获页面已不存在')
+  const add = (object: Record<string, unknown>, key: string, id: string, owner: string, label: string, color?: ColorProperty) => {
+    const value = object[key]
     if (typeof value !== 'string') return
-    result.push({ id: `${owner}/${target}/${key}/${result.length}`, target, owner, property: key, value, color, write(next, replacement) {
-      if (key === 'text' && Array.isArray(record.runs)) {
-        const runs = record.runs as TextRun[]
+    result.push({ id, owner, target: label, property: key, oldValue: value, newValue: '', color, write(next) { object[key] = next } })
+  }
+  const rich = (content: FlowTextContent, id: string, owner: string, label: string) => {
+    let group: Extract<FlowInline, { type: 'text' }>[] = [], groupIndex = 0
+    const flush = () => {
+      if (!group.length) return
+      const original = group, value = original.map(inline => inline.text).join(''); group = []
+      result.push({ id: `${id}/text/${groupIndex++}`, owner, target: label, property: '正文', oldValue: value, newValue: '', write(next, replacement) {
+        const start = content.inlines.indexOf(original[0]!)
+        if (start < 0) throw new Error('正文目标已变化')
+        const atoms = original.flatMap(inline => Array.from(inline.text).map(text => ({ ...inline, text })))
         if (replacement) {
-          const edits: TextRunEdit[] = []
-          for (let index = value.indexOf(replacement.find); index >= 0; index = value.indexOf(replacement.find, index + replacement.find.length)) {
-            const start = Array.from(value.slice(0, index)).length
-            edits.push({ start, end: start + Array.from(replacement.find).length, original: replacement.find, replacement: replacement.replacement })
+          const offsets: number[] = []
+          for (let offset = value.indexOf(replacement.find); offset >= 0; offset = value.indexOf(replacement.find, offset + replacement.find.length)) offsets.push(offset)
+          for (const offset of offsets.reverse()) {
+            const from = Array.from(value.slice(0, offset)).length, length = Array.from(replacement.find).length
+            const source = atoms[from] ?? original[0]!
+            atoms.splice(from, length, ...Array.from(replacement.replacement).map(text => ({ ...source, text })))
           }
-          const mapped = applyTextRunEdits(value, runs, edits)
-          if (!mapped.ok) throw new Error(mapped.reason)
-          record.runs = mapped.runs
-        } else record.runs = remapTextRuns(value, next, runs)
-      }
-      record[key] = next
-    } })
-  }
-  const style = (object: object, target: string, owner: string) => {
-    for (const [key, category] of Object.entries({ color: 'text', textColor: 'text', fillColor: 'fill', borderColor: 'stroke', strokeColor: 'stroke', backgroundColor: 'background', highlightColor: 'background' } as const)) add(object, key, target, owner, category)
-  }
-  const rich = (object: object, target: string, owner: string, flow = true) => {
-    add(object, 'text', target, owner)
-    const runs = bag(object).runs
-    if (flow && typeof bag(object).text === 'string' && bag(object).text) {
-      const richText = object as { text: string; runs?: TextRun[] }
-      const colors = [...new Set((richText.runs ?? []).map(r => r.style.color).filter(Boolean))]
-      result.push({ id: `${owner}/${target}/全文颜色/${result.length}`, owner, target, property: '全文颜色', value: colors.length ? colors.join(' / ') : '默认文字色', color: 'text', write(value) { richText.runs = applyTextRunStyle(richText.text, richText.runs ?? [], 0, Array.from(richText.text).length, { color: value }) } })
-    } else if (Array.isArray(runs)) runs.forEach((r: TextRun, i) => style(r.style, `${target}/格式${i + 1}`, owner))
-  }
-  const layer = (item: LayerItem, owner: string) => {
-    const target = `${item.label} (${item.layerItemId})`
-    if (item.kind !== 'native') { unsupported.push(`${owner} · ${target}：组件参数和运行时代码不参与批量修改`); return }
-    const content = item.content
-    if ('style' in content.data) style(content.data.style, target, owner)
-    if (content.nativeType === 'text') rich(content.data, target, owner, false)
-    else if (content.nativeType === 'table') content.data.rows.forEach(r => r.cells.forEach(c => { add(c, 'text', `${target}/单元格${c.id}`, owner); if (c.style) style(c.style, `${target}/单元格${c.id}`, owner) }))
-    else if (content.nativeType === 'chart') {
-      add(content.data, 'title', target, owner)
-      content.data.categories.forEach(c => add(c, 'label', `${target}/分类${c.id}`, owner))
-      content.data.series.forEach(s => { add(s, 'name', `${target}/系列${s.id}`, owner); add(s, 'color', `${target}/系列${s.id}`, owner, 'fill') })
-    } else if (content.nativeType === 'input') add(content.data, 'placeholder', target, owner)
-    
-  }
-  const bodyText = (content: FlowTextContent, target: string, owner: string) => {
-    const groups: Extract<FlowInline, { type: 'text' }>[][] = []
-    let group: Extract<FlowInline, { type: 'text' }>[] = []
-    for (const inline of content.inlines) {
-      if (inline.type === 'text') group.push(inline)
-      else { if (group.length) groups.push(group); group = [] }
+        } else atoms.splice(0, atoms.length, { ...original[0]!, text: next })
+        content.inlines.splice(start, original.length, ...normalizeDocumentText({ inlines: atoms }).inlines)
+      } })
     }
-    if (group.length) groups.push(group)
-    for (const original of groups) {
-      const value = original.map(inline => inline.text).join('')
-      result.push({ id: `${owner}/${target}/text/${result.length}`, target, owner, property: '正文', value,
-        write(next, replacement) {
-          const start = content.inlines.indexOf(original[0]!)
-          if (start < 0) throw new Error('正文目标已变化')
-          let atoms = original.flatMap(inline => Array.from(inline.text).map(text => ({ ...inline, text })))
-          if (replacement) {
-            const matches: number[] = []
-            for (let offset = value.indexOf(replacement.find); offset >= 0; offset = value.indexOf(replacement.find, offset + replacement.find.length)) matches.push(offset)
-            for (const offset of matches.reverse()) {
-              const from = Array.from(value.slice(0, offset)).length, length = Array.from(replacement.find).length
-              const source = atoms[from] ?? original[0]!
-              atoms.splice(from, length, ...Array.from(replacement.replacement).map(text => ({ ...source, text })))
-            }
-          } else atoms = [{ ...original[0]!, text: next }]
-          content.inlines.splice(start, original.length, ...normalizeDocumentText({ inlines: atoms }).inlines)
-        } })
+    for (const inline of content.inlines) { if (inline.type === 'text') group.push(inline); else flush() }
+    flush()
+    if (content.inlines.length) result.push({ id: `${id}/color`, owner, target: label, property: '全文颜色', color: 'text', oldValue: [...new Set(content.inlines.map(inline => inline.style?.color).filter(Boolean))].join(' / ') || '默认文字色', newValue: '', write(value) { for (const inline of content.inlines) inline.style = { ...inline.style, color: value } } })
+  }
+  const visit = (value: unknown, path: string[], owner: string, label: string, style: boolean) => {
+    if (!value || typeof value !== 'object') return
+    if (documentTextContentSchema.safeParse(value).success) { rich(value as FlowTextContent, path.join('/'), owner, label); return }
+    if (Array.isArray(value)) { value.forEach((child, index) => visit(child, [...path, String(index)], owner, label, style)); return }
+    const object = value as Record<string, unknown>
+    for (const [key, child] of Object.entries(object)) {
+      if (key === 'source' || key === 'props' || key === 'metadata' || key.endsWith('Id') || key.endsWith('Ids')) continue
+      if (colors[key] && typeof child === 'string') add(object, key, [...path, key].join('/'), owner, label, colors[key])
+      else if (!style && textKeys.has(key) && typeof child === 'string') add(object, key, [...path, key].join('/'), owner, label)
+      else visit(child, [...path, key], owner, label, style)
     }
-    if (content.inlines.length) result.push({ id: `${owner}/${target}/color/${result.length}`, target, owner, property: '全文颜色', color: 'text', value: [...new Set(content.inlines.map(inline => inline.style?.color).filter(Boolean))].join(' / ') || '默认文字色', write(value) { for (const inline of content.inlines) inline.style = { ...inline.style, color: value } } })
   }
-  const blocks = (items: FlowBlock[], owner: string) => items.forEach(block => {
-    const target = `${block.type} (${block.id})`
-    for (const slot of documentTextSlots(block)) bodyText(slot.content, `${target}/${slot.key}`, owner)
-    if (block.type === 'section') blocks(block.blocks, owner)
-    else if (block.type === 'media') add(block, 'altText', target, owner)
-    else if (block.type === 'chart') {
-      add(block.chart, 'title', target, owner); style(block.chart.style, target, owner)
-      block.chart.categories.forEach(c => add(c, 'label', `${target}/分类${c.id}`, owner))
-      block.chart.series.forEach(series => { add(series, 'name', `${target}/系列${series.id}`, owner); add(series, 'color', `${target}/系列${series.id}`, owner, 'fill') })
-    } else if (block.type === 'formula' || block.type === 'component' || block.type === 'code') unsupported.push(`${owner} · ${target}：${block.type} 不支持本次批量修改`)
-  })
-  const background = (object: object, owner: string, request: EffectiveBackgroundRequest) => {
-    const effective = resolveEffectiveBackground(request)
-    result.push({ id: `${owner}/backgroundColor/${result.length}`, owner, target: '背景', property: 'backgroundColor', value: effective.color, color: 'background', write(value) {
-      bag(object).backgroundColor = value
-      if (request.owner !== 'course' && request.owner !== 'slide-state') { bag(object).backgroundMode = 'own'; bag(object).backgroundAssetId = effective.assetId }
-    } })
+  const seen = new Set<string>()
+  const instance = (id: string, owner: string) => {
+    if (seen.has(id)) return
+    seen.add(id)
+    const item = document.instances[id]; if (!item) return
+    const definition = document.definitions[item.definitionId]
+    const label = `${item.name ?? definition?.title ?? item.definitionId} (${id})`
+    if (item.locked) unsupported.push(`${owner} · ${label}：对象已锁定`)
+    else if ((item.implementationOverride ?? definition?.implementation)?.kind !== 'builtin') unsupported.push(`${owner} · ${label}：自定义组件的数据和源码保留原样`)
+    else { visit(item.data, [id, 'data'], owner, label, false); visit(item.style, [id, 'style'], owner, label, true) }
+    item.childIds?.forEach(child => instance(child, owner))
   }
-  if (scope === 'course') { document.globalLayerItems.forEach(e => layer(e.item, '整课全局')); background(document, '整课', { owner: 'course', course: document }) }
-  document.surfaces.forEach(surface => {
-    if (scope !== 'course' && surface.id !== location.surfaceId) return
-    const owner = `${surface.title} (${surface.id})`
-    // Shared owners are included only by an explicit Surface/course scope.
-    if (scope !== 'page') surface.surfaceLayerItems.forEach(e => layer(e.item, `${owner}/共享层`))
-    if (scope !== 'page' || surface.type !== 'slide') background(surface, owner, { owner: surface.type === 'slide' ? 'slide-surface' : surface.type === 'flow' ? 'flow-surface' : 'spatial-surface', course: document, surface })
-    if (surface.type === 'slide') surface.scenes.forEach(scene => {
-      if (scope === 'page' && (location.kind !== 'slide-scene' || scene.id !== location.sceneId)) return
-      const sceneOwner = `${owner}/${scene.name}`
-      scene.layerItems.forEach(item => layer(item, sceneOwner)); background(scene, sceneOwner, { owner: 'slide-scene', course: document, surface, scene })
-      if (scene.presentation?.states.some(s => Object.keys(s.layerItemOverrides).length)) unsupported.push(`${sceneOwner}：演示状态覆盖值不参与批量修改，可能覆盖母版样式`)
-    })
-    else if (surface.type === 'flow') blocks(surface.blocks, owner)
-    else surface.world.layerItems.forEach(item => layer(item, owner))
-  })
+  const background = (object: { background?: { mode?: 'inherit' | 'own'; color?: string } }, id: string, owner: string) => {
+    result.push({ id: `${id}/background`, owner, target: '背景', property: 'backgroundColor', color: 'background', oldValue: object.background?.color ?? document.background?.color ?? '#ffffff', newValue: '', write(color) { object.background = { ...object.background, mode: 'own', color } } })
+  }
+  if (scope === 'course') background(document, 'project', '整课')
+  for (const surface of document.surfaces) {
+    if (scope !== 'course' && surface.id !== target.surfaceId) continue
+    surface.childIds.forEach(id => instance(id, surface.title)); background(surface, surface.id, surface.title)
+  }
+  if (scope !== 'page') for (const id of [...document.global.underlay, ...document.global.overlay]) instance(id, '整课全局')
   return { fields: result, unsupported }
 }
 
 export function createProductivityPreview(context: ProductivityContext, request: ProductivityRequest): ProductivityPreview {
   if (request.kind === 'text' && !request.find) throw new Error('请输入查找文字')
-  const color = request.kind === 'color' ? context.document.designTokens.colors.find(t => t.id === request.tokenId)?.color : undefined
+  const color = request.kind === 'color' ? context.document.designTokens?.colors.find(token => token.id === request.tokenId)?.color : undefined
   if (request.kind === 'color' && !color) throw new Error('项目颜色已失效，请重新选择')
-  const collected = fields(context.document, context.sessionToken, request.scope)
+  const collected = fields(context.document, context.target, request.scope)
   const items = collected.fields.flatMap(field => {
-    if (request.kind === 'text' ? field.color || !field.value.includes(request.find) : !field.color || (request.property !== 'all' && field.color !== request.property)) return []
-    const newValue = request.kind === 'text' ? field.value.split(request.find).join(request.replacement) : color!
-    return newValue === field.value ? [] : [{ id: field.id, target: field.target, owner: field.owner, property: field.property, oldValue: field.value, newValue }]
+    if (request.kind === 'text' ? field.color || !field.oldValue.includes(request.find) : !field.color || (request.property !== 'all' && field.color !== request.property)) return []
+    const newValue = request.kind === 'text' ? field.oldValue.split(request.find).join(request.replacement) : color!
+    return newValue === field.oldValue ? [] : [{ id: field.id, target: field.target, owner: field.owner, property: field.property, oldValue: field.oldValue, newValue }]
   })
-  return { projectId: context.document.id, revision: context.document.revision, sessionToken: { ...context.sessionToken }, request: { ...request }, items, unsupported: collected.unsupported }
+  return { projectId: context.document.id, revision: context.document.revision, target: context.target, request: { ...request }, items, unsupported: collected.unsupported }
 }
 export function createTextReplacePreview(context: ProductivityContext, request: Omit<Extract<ProductivityRequest, { kind: 'text' }>, 'kind'>) { return createProductivityPreview(context, { ...request, kind: 'text' }) }
 export function createTokenApplyPreview(context: ProductivityContext, request: Omit<Extract<ProductivityRequest, { kind: 'color' }>, 'kind'>) { return createProductivityPreview(context, { ...request, kind: 'color' }) }
-export type ProductivityApplyResult = { ok: true; step: EditorTransactionStep | null } | { ok: false; reason: string }
+
+export function designProductionStep(context: ProductivityContext, edits: ComponentEdit[]): DesignProductionStep {
+  const mapped = presentationComponentEdits(context.target.project, context.target.surfaceId, context.target.activeStateId, edits)
+  return { ...captureComponentOperation(context.target.project, mapped), documentId: context.target.documentId, epoch: context.target.epoch, originSurfaceId: context.target.surfaceId }
+}
+function changedFields(before: unknown, after: unknown, path: string[], write: (path: string[], value: JsonValue) => void): void {
+  if (equalComponentValue(before, after)) return
+  if (!before || !after || typeof before !== 'object' || typeof after !== 'object' || documentTextContentSchema.safeParse(after).success
+    || Array.isArray(before) !== Array.isArray(after) || Array.isArray(after) && (before as unknown[]).length !== after.length) { write(path, after as JsonValue); return }
+  for (const [key, value] of Object.entries(after)) changedFields((before as Record<string, unknown>)[key], value, [...path, key], write)
+}
+
 export function applyProductivityPreview(context: ProductivityContext, preview: ProductivityPreview, selectedIds: readonly string[]): ProductivityApplyResult {
   try {
-    const token = context.sessionToken, before = preview.sessionToken
-    if (context.document.id !== preview.projectId || context.document.revision !== preview.revision || token.generation !== before.generation || token.locationId !== before.locationId || token.surfaceType !== before.surfaceType) throw new Error('预览已过期，请重新预览')
+    if (context.target.documentId !== preview.target.documentId || context.target.epoch !== preview.target.epoch || context.target.surfaceId !== preview.target.surfaceId || context.target.activeStateId !== preview.target.activeStateId) throw new Error('预览目标已改变，请重新预览')
     const fresh = createProductivityPreview(context, preview.request)
-    if (JSON.stringify(fresh.items) !== JSON.stringify(preview.items)) throw new Error('内容已变化，请重新预览')
+    if (!equalComponentValue(fresh.items, preview.items)) throw new Error('内容已变化，请重新预览')
     const selected = new Set(selectedIds)
-    if (selected.size !== selectedIds.length || selectedIds.some(id => !fresh.items.some(i => i.id === id))) throw new Error('选择项无效，请重新预览')
+    if (selected.size !== selectedIds.length || selectedIds.some(id => !fresh.items.some(item => item.id === id))) throw new Error('选择项无效，请重新预览')
     if (!selected.size) return { ok: true, step: null }
-    const nextDocument = commitCourseProjectMutation(context.document, draft => {
-      const editable = fields(draft, token, preview.request.scope).fields
-      fresh.items.filter(i => selected.has(i.id)).forEach(item => editable.find(f => f.id === item.id)!.write(item.newValue, preview.request.kind === 'text' ? preview.request : undefined))
-    })
-    return { ok: true, step: createEditorTransactionStep(context.document, { projectId: context.document.id, baseRevision: context.document.revision, nextDocument, resourceChanges: {} }) }
+    const draft = structuredClone(context.document)
+    const editable = fields(draft, context.target, preview.request.scope).fields
+    fresh.items.filter(item => selected.has(item.id)).forEach(item => editable.find(field => field.id === item.id)!.write(item.newValue, preview.request.kind === 'text' ? preview.request : undefined))
+    const edits: ComponentEdit[] = []
+    for (const [id, after] of Object.entries(draft.instances)) {
+      const before = context.document.instances[id]!
+      changedFields(before.data, after.data, [], (path, value) => edits.push({ type: 'data.set', instanceId: id, path, value }))
+      if (after.style) changedFields(before.style, after.style, [], (path, value) => edits.push({ type: 'style.set', instanceId: id, path, value }))
+    }
+    if (!equalComponentValue(context.document.background, draft.background)) edits.push({ type: 'project.background.set', background: draft.background ?? null })
+    for (const surface of draft.surfaces) if (!equalComponentValue(context.document.surfaces.find(before => before.id === surface.id)?.background, surface.background)) edits.push({ type: 'surface.background.set', surfaceId: surface.id, background: surface.background ?? null })
+    return { ok: true, step: designProductionStep(context, edits) }
   } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : '批量修改失败' } }
 }

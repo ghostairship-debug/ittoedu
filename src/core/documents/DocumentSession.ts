@@ -61,7 +61,7 @@ export class DocumentSession {
   static async create(input: CreateDocumentSession, driver: DocumentDriver, persistence: DocumentPersistence): Promise<DocumentSession> {
     if (!input.documentId || !input.epoch || input.model.kind !== driver.kind) throw new Error('无效文档身份或 Driver')
     driver.validate(input.model)
-    const revision = input.model.kind === 'course-v9' ? input.model.project.revision : 0
+    const revision = input.model.kind === 'course-v9' || input.model.kind === 'course-v10' ? input.model.project.revision : 0
     const state: DurableDocumentState = {
       schemaVersion: 1, documentId: input.documentId, epoch: input.epoch, sequence: 0,
       revision, savedRevision: input.saved ? revision : null,
@@ -110,10 +110,10 @@ export class DocumentSession {
     return () => { this.commitListeners.delete(listener) }
   }
 
-  private notify(operationId?: string): void {
+  private notify(operationId?: string, appliedChanges?: Extract<DocumentOperationResult, { revision: number }>['appliedChanges']): void {
     for (const listener of this.listeners) {
       // A disconnected/throwing view cannot turn a durable success into a retry.
-      try { listener({ type: 'changed', snapshot: this.read(), ...(operationId ? { operationId } : {}) }) } catch { /* view owns its failure */ }
+      try { listener({ type: 'changed', snapshot: this.read(), ...(operationId ? { operationId } : {}), ...(appliedChanges ? { appliedChanges } : {}) }) } catch { /* view owns its failure */ }
     }
   }
 
@@ -208,6 +208,7 @@ export class DocumentSession {
         }
         this.driver.validate(candidate)
       } catch (error) {
+        if (error instanceof Error && 'code' in error && error.code === 'component-field-conflict') return this.reject(id, 'conflict', error.code, error.message)
         return this.reject(id, 'failed', 'invalid-operation', error instanceof Error ? error.message : '文档操作无效')
       }
       const changed = documentDigest(candidate) !== documentDigest(this.state.model)
@@ -219,6 +220,7 @@ export class DocumentSession {
       const result: DocumentOperationResult = {
         status: changed ? 'applied' : 'unchanged', documentId: this.state.documentId,
         operationId: id, beforeRevision: this.state.revision, revision: next.revision, persistence: 'recoverable',
+        ...(this.driver.describeChanges ? { appliedChanges: this.driver.describeChanges(this.state.model, next.model) } : {}),
       }
       next.sequence += 1
       const sourceCommand = operation.mutation.type === 'command' && operation.mutation.command.type === 'markdown.splice'
@@ -237,7 +239,7 @@ export class DocumentSession {
           try { listener(commit) } catch { /* Observer failures never turn a durable success into a replay. */ }
         }
       }
-      this.notify(id)
+      this.notify(id, result.appliedChanges)
       return structuredClone(result)
     })
   }

@@ -9,6 +9,7 @@ import { DocumentDeliveryOperationStore, type DeliveryOperationRecord } from './
 export interface DocumentDeliveryServiceOptions {
   documents: {
     read(documentId: string): Promise<DocumentSnapshot>
+    prepareDrafts?(documentId: string, epoch: string): Promise<void>
     saveWithFact(documentId: string, filename?: string, identity?: DocumentSaveIdentity): Promise<{ snapshot: DocumentSnapshot; savedRevision: number }>
     lookupSave?(documentId: string, identity: DocumentSaveIdentity): Promise<SaveReceipt | null>
     withFileLease<T>(documentId: string, work: (read: () => DocumentSnapshot) => Promise<T>): Promise<T>
@@ -123,12 +124,14 @@ export class DocumentDeliveryService implements DocumentDeliveryServicePort {
     await this.started({ runId: input.runId, operationId: input.operationId, requestDigest: input.requestDigest, kind: 'export', status: 'started' })
     let writing = false
     try {
-      const snapshot = await this.options.documents.read(input.documentId)
-      if (snapshot.epoch !== input.epoch || snapshot.revision !== input.revision || snapshot.model.kind !== 'course-v9')
-        throw new Error('只有当前版本的 Course V9 文档可从此工具导出')
       const signal = this.options.signalForRun?.(input.runId)
       signal?.throwIfAborted()
       await this.options.authorize({ runId: input.runId, documentId: input.documentId, operation: 'export' })
+      await this.options.documents.prepareDrafts?.(input.documentId, input.epoch)
+      signal?.throwIfAborted()
+      const snapshot = await this.options.documents.read(input.documentId)
+      if (snapshot.epoch !== input.epoch || snapshot.model.kind !== 'course-v10')
+        throw new Error('此工具只导出当前正式 V10 文档；目标文档已关闭或重开时请重新选择')
       const request: ExportBuildRequest = { requestId: randomUUID(),
         identity: { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, projectId: snapshot.model.project.id },
         format: input.format, snapshot: structuredClone(snapshot) }

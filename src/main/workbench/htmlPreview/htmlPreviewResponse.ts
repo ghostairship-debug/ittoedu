@@ -14,11 +14,17 @@ const BASE_CSP = [
   "sandbox allow-scripts allow-same-origin",
 ]
 
-export function htmlPreviewContentSecurityPolicy(mediaOrigins: readonly string[]): string {
+export function htmlPreviewContentSecurityPolicy(mediaOrigins: readonly string[], connectOrigins: readonly string[] = []): string {
   const allowed = [...new Set(mediaOrigins)].filter(value => {
     try {
       const url = new URL(value)
       return url.protocol === 'https:' && url.origin === value && !url.username && !url.password
+    } catch { return false }
+  }).sort()
+  const connections = [...new Set(connectOrigins)].filter(value => {
+    try {
+      const url = new URL(value)
+      return ['https:', 'wss:'].includes(url.protocol) && url.origin === value && !url.username && !url.password
     } catch { return false }
   }).sort()
   const media = `'self' data: blob:${allowed.length ? ` ${allowed.join(' ')}` : ''}`
@@ -26,16 +32,17 @@ export function htmlPreviewContentSecurityPolicy(mediaOrigins: readonly string[]
     ...BASE_CSP.slice(0, 3),
     `img-src ${media}`,
     `media-src ${media}`,
-    ...BASE_CSP.slice(3),
+    ...BASE_CSP.slice(3).map(directive => directive === "connect-src 'self'"
+      ? `${directive}${connections.length ? ` ${connections.join(' ')}` : ''}` : directive),
   ].join('; ')
 }
 
 export function htmlPreviewResponse(
   body: Uint8Array | string | null,
-  input: { status?: number; contentType?: string; mediaOrigins?: readonly string[]; method?: string } = {},
+  input: { status?: number; contentType?: string; mediaOrigins?: readonly string[]; connectOrigins?: readonly string[]; method?: string } = {},
 ): Response {
   const headers = new Headers({
-    'Content-Security-Policy': htmlPreviewContentSecurityPolicy(input.mediaOrigins ?? []),
+    'Content-Security-Policy': htmlPreviewContentSecurityPolicy(input.mediaOrigins ?? [], input.connectOrigins),
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'no-referrer',
     'Cache-Control': 'no-store',

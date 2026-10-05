@@ -7,7 +7,6 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
-  type KeyboardCoordinateGetter,
 } from '@dnd-kit/core'
 import {
   SortableContext,
@@ -17,7 +16,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Box,
   ArrowDown,
@@ -37,49 +36,69 @@ import {
   Video,
   SlidersHorizontal,
   Sigma,
+  Table,
+  BarChart3,
+  Globe,
+  Folder,
+  Volume2,
+  Code2,
+  TextCursorInput,
+  ListChecks,
+  PanelTop,
+  FileText,
+  Zap,
+  MessageSquare,
 } from 'lucide-react'
-import type { CourseSurfaceType, FlowBodyLayerPlane } from '../../shared/courseProjectTypes'
-import type { EditorCanvasNode } from '../phaser/editorCanvasNode'
+import { containerChildIds, owningContainer, type ComponentFlowPlacement } from '../../shared/contracts/component-platform/project'
+import { componentIsLocked } from '../composition/crossSurfaceCommands'
+import { componentDefinitionPresentation } from './properties/componentDefinitionPresentation'
 import {
-  SPATIAL_CROSS_COORDINATE_MOVE_REASON,
-  isSpatialCrossCoordinateOwnerMove,
-} from '../course/effectiveLayerCommands'
-import { patchFlowOverlayBodyPlane } from '../course/flowSharedAuthoringAdapters'
-import {
-  courseLayerItemToEditorCanvasNode,
-  describeLayerImpact,
-  visualFrontToBackRows,
-  type EffectiveLayerProjectionRow,
-} from '../course/read-model'
-import { selectFlowOverlay } from '../course/flowEditorSlice'
-import {
-  selectActiveScene,
-  selectEditingNodes,
   selectEditingScope,
-  selectEffectiveLayerProjection,
-  selectSelectedNodeIds,
-  selectSlideBackendKind,
   useEditorStore,
 } from '../store/editorStore'
 
 const nodeIcon = {
-  text: Type,
-  formula: Sigma,
-  image: ImageIcon,
-  video: Video,
-  shape: Square,
-  'teacher-controller': SlidersHorizontal,
-  'external-component': Box,
+  'guoling.text': Type,
+  'guoling.formula': Sigma,
+  'guoling.image': ImageIcon,
+  'guoling.video': Video,
+  'guoling.shape': Square,
+  'guoling.navigation': SlidersHorizontal,
+  'guoling.table': Table,
+  'guoling.chart': BarChart3,
+  'guoling.audio': Volume2,
+  'guoling.web': Globe,
+  'guoling.html-program': Globe,
+  'guoling.group': Folder,
+  'guoling.input': TextCursorInput,
+  'guoling.choice': ListChecks,
+  'guoling.disclosure': ChevronDown,
+  'guoling.popover': PanelTop,
+  'guoling.document-block': FileText,
+  'guoling.interactions': Zap,
+  'guoling.feedback': MessageSquare,
+  'guoling.visibility': Eye,
+  source: Code2,
+  behavior: Zap,
+  component: Box,
 } as const
 
-type NodesTabRowNode = Pick<EditorCanvasNode, 'id' | 'name' | 'type' | 'visible' | 'locked'>
+interface NodesTabRowNode {
+  id: string
+  name: string
+  type: string
+  typeLabel: string
+  visible: boolean
+  locked: boolean
+}
 
 interface SortableNodeProps {
   node: NodesTabRowNode
   selected: boolean
+  dragDisabled?: boolean
   sourceLabel?: string
   impactLabel?: string
-  bodyPlane?: FlowBodyLayerPlane
+  bodyPlane?: ComponentFlowPlacement['plane']
   onMoveAcrossBody?: () => void
   onSelect(additive: boolean): void
   onDelete(): void
@@ -92,6 +111,7 @@ interface SortableNodeProps {
 function SortableNode({
   node,
   selected,
+  dragDisabled,
   sourceLabel,
   impactLabel,
   bodyPlane,
@@ -110,7 +130,7 @@ function SortableNode({
   const [draftName, setDraftName] = useState(node.name)
   const selectTimerRef = useRef<number | null>(null)
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: node.id })
+    useSortable({ id: node.id, disabled: node.locked || dragDisabled })
 
   useEffect(() => setDraftName(node.name), [node.name])
   useEffect(() => () => {
@@ -145,7 +165,7 @@ function SortableNode({
       >
         <GripVertical size={14} />
       </button>
-      <span className="node-type-icon" title={node.type}>
+      <span className="node-type-icon" title={node.typeLabel}>
         <Icon size={15} />
       </span>
       {editing ? (
@@ -261,82 +281,6 @@ function SortableNode({
   )
 }
 
-function listedTeacherControllerRow(
-  visualRows: readonly EffectiveLayerProjectionRow[],
-): EffectiveLayerProjectionRow | undefined {
-  return visualRows.find((row) => row.isTeacherController && row.owner === 'global')
-    ?? visualRows.find((row) => row.isTeacherController)
-}
-
-export function groupedVisualRows(visualRows: readonly EffectiveLayerProjectionRow[]): readonly {
-  readonly id: 'global-overlay' | 'surface' | 'scene' | 'world' | 'global-underlay'
-  readonly label: string
-  readonly rows: readonly EffectiveLayerProjectionRow[]
-}[] {
-  const specs = [
-    { id: 'global-overlay' as const, label: '全局 Overlay', owner: 'global' as const },
-    { id: 'surface' as const, label: '本页', owner: 'surface' as const },
-    { id: 'scene' as const, label: '场景', owner: 'scene' as const },
-    { id: 'world' as const, label: '世界', owner: 'world' as const },
-    { id: 'global-underlay' as const, label: '全局 Underlay', owner: 'global' as const },
-  ]
-  const listedController = listedTeacherControllerRow(visualRows)
-  return specs.flatMap((spec) => {
-    const rows = visualRows.filter((row) => {
-      if (row.isTeacherController) {
-        return spec.id === 'global-overlay' && row === listedController
-      }
-      if (spec.id === 'global-overlay') {
-        return row.owner === 'global' && row.globalPlane === 'overlay'
-      }
-      if (spec.id === 'global-underlay') {
-        return row.owner === 'global' && row.globalPlane === 'underlay'
-      }
-      return row.owner === spec.owner
-    })
-    return rows.length === 0 ? [] : [{ id: spec.id, label: spec.label, rows }]
-  })
-}
-
-type FlowLayerGroupId =
-  | 'global-overlay'
-  | 'surface-overlay'
-  | 'surface-underlay'
-  | 'global-underlay'
-
-interface FlowLayerGroup {
-  readonly id: FlowLayerGroupId
-  readonly label: string
-  readonly rows: readonly EffectiveLayerProjectionRow[]
-}
-
-export function groupedFlowVisualRows(
-  visualRows: readonly EffectiveLayerProjectionRow[],
-): readonly FlowLayerGroup[] {
-  const specs = [
-    { id: 'global-overlay' as const, label: '全课 Overlay' },
-    { id: 'surface-overlay' as const, label: '正文上方' },
-    { id: 'surface-underlay' as const, label: '正文下方' },
-    { id: 'global-underlay' as const, label: '全课 Underlay' },
-  ]
-  return specs.flatMap((spec) => {
-    const rows = visualRows.filter((row) => {
-      if (row.isTeacherController) return false
-      if (spec.id === 'global-overlay') {
-        return row.owner === 'global' && row.globalPlane !== 'underlay'
-      }
-      if (spec.id === 'global-underlay') {
-        return row.owner === 'global' && row.globalPlane === 'underlay'
-      }
-      if (spec.id === 'surface-underlay') {
-        return row.owner === 'surface' && row.flowBodyPlane === 'underlay'
-      }
-      return row.owner === 'surface' && row.flowBodyPlane !== 'underlay'
-    })
-    return rows.length === 0 ? [] : [{ ...spec, rows }]
-  })
-}
-
 const FLOW_BODY_BOUNDARY_ID = 'flow-body-boundary'
 
 function FlowBodyBoundaryRow() {
@@ -360,360 +304,81 @@ function FlowBodyBoundaryRow() {
   )
 }
 
-function rowAsNode(row: EffectiveLayerProjectionRow): NodesTabRowNode {
-  const projected = courseLayerItemToEditorCanvasNode(row.item)
-  if (projected) return projected
-  return {
-    id: row.id,
-    name: row.name,
-    type: row.isTeacherController ? 'teacher-controller' : 'shape',
-    visible: !row.hidden,
-    locked: row.locked,
-  }
-}
-
-export function isForeignTeacherControllerDrop(
-  from: EffectiveLayerProjectionRow,
-  to: EffectiveLayerProjectionRow,
-): boolean {
-  if (!from.isTeacherController && !to.isTeacherController) return false
-  return from.owner !== 'global' || to.owner !== 'global' || from.ownerKey !== to.ownerKey
-}
-
-export function isCrossGlobalPlaneDrop(
-  from: EffectiveLayerProjectionRow,
-  to: EffectiveLayerProjectionRow,
-): boolean {
-  return from.owner === 'global' && to.owner === 'global' &&
-    from.globalPlane !== null && to.globalPlane !== null &&
-    from.globalPlane !== to.globalPlane
-}
-
-export function isRejectedSpatialOwnerDrop(
-  surfaceType: CourseSurfaceType,
-  from: EffectiveLayerProjectionRow,
-  to: EffectiveLayerProjectionRow,
-): boolean {
-  if (surfaceType !== 'spatial-2d' || from.ownerKey === to.ownerKey) return false
-  return (from.isTeacherController && from.owner === 'global' && to.owner !== 'global') ||
-    isSpatialCrossCoordinateOwnerMove(from.item, from.owner, to.owner)
-}
-
-function layerKeyboardCoordinates(
-  rowsRef: { current: readonly EffectiveLayerProjectionRow[] | null },
-): KeyboardCoordinateGetter {
-  return (event, args) => {
-    const rows = rowsRef.current
-    const activeId = String(args.context.active?.id ?? args.active)
-    const activeRow = rows?.find((row) => row.id === activeId)
-    if (!rows || !activeRow) {
-      return sortableKeyboardCoordinates(event, args)
-    }
-    const droppableContainers = args.context.droppableContainers
-    return sortableKeyboardCoordinates(event, {
-      ...args,
-      context: {
-        ...args.context,
-        droppableContainers: {
-          get: (id) => droppableContainers.get(id),
-          getEnabled: () => droppableContainers.getEnabled().filter((entry) => {
-            const row = rows.find((candidate) => candidate.id === String(entry.id))
-            if (!row) return true
-            return row.reorderGroupKey === activeRow.reorderGroupKey
-          }),
-          toArray: () => droppableContainers.toArray(),
-          getNodeFor: (id) => droppableContainers.getNodeFor(id),
-        } as typeof droppableContainers,
-      },
-    })
-  }
-}
-
-function flowOverlaySourceLabel(row: EffectiveLayerProjectionRow): string {
-  const owner = row.owner === 'global'
-    ? `全课 ${row.globalPlane === 'underlay' ? 'Underlay' : 'Overlay'}`
-    : `当前 Flow 页面 · 正文${row.flowBodyPlane === 'underlay' ? '下方' : '上方'}`
-  const positioning = row.item.paperSpace === 'paper' ? '跟随稿纸' : '钉在视口'
-  return `归属：${owner} · 定位：${positioning}${row.isTeacherController ? ' · 不可下沉' : ''}`
-}
-
-function effectiveLayerSourceLabel(row: EffectiveLayerProjectionRow): string {
-  if (row.owner !== 'global') return row.sourceLabel
-  const plane = row.globalPlane === 'underlay' ? 'Underlay' : 'Overlay'
-  return row.isTeacherController ? `全课 ${plane}、不可下沉` : `全课 ${plane}`
-}
-
 export function NodesTab() {
-  const scene = useEditorStore(selectActiveScene)
-  const v8Nodes = useEditorStore(selectEditingNodes)
-  const projection = useEditorStore(selectEffectiveLayerProjection)
-  const backendKind = useEditorStore(selectSlideBackendKind)
-  const spatialSession = useEditorStore((state) => state.spatialSession)
-  const flowSession = useEditorStore((state) => state.flowSession)
-  const editingScope = useEditorStore(selectEditingScope)
-  const candidate = (backendKind === 'slide-authoring' || Boolean(spatialSession) || Boolean(flowSession)) && projection !== null
-  const unifiedRows = candidate ? projection.unifiedRows : null
-  const visualRows = unifiedRows ? visualFrontToBackRows(unifiedRows) : null
-  const rawLayerGroups = visualRows ? groupedVisualRows(visualRows) : null
-  const layerGroups = rawLayerGroups
-    ? rawLayerGroups.flatMap((group) => {
-        const rows = editingScope === 'global'
-          ? group.rows
-          : group.rows.filter((row) => !row.isTeacherController)
-        return rows.length === 0 ? [] : [{ ...group, rows }]
-      })
-    : null
-  const flowPageMode = Boolean(flowSession) && editingScope !== 'global'
-  const flowLayerGroups = flowPageMode && visualRows ? groupedFlowVisualRows(visualRows) : null
-  const displayedLayerGroups = flowLayerGroups ?? layerGroups
-  const nodes = displayedLayerGroups
-    ? displayedLayerGroups.flatMap((group) => group.rows.map(rowAsNode))
-    : [...v8Nodes].reverse()
-  const selectedNodeIds = useEditorStore(selectSelectedNodeIds)
-  const selectNode = useEditorStore((state) => state.selectNode)
-  const setActiveTab = useEditorStore((state) => state.setActiveTab)
-  const deleteNode = useEditorStore((state) => state.deleteNode)
-  const duplicateNode = useEditorStore((state) => state.duplicateNode)
-  const updateNode = useEditorStore((state) => state.updateNode)
-  const reorderNodes = useEditorStore((state) => state.reorderNodes)
-  const visualRowsRef = useRef(visualRows)
-  visualRowsRef.current = visualRows
-  const skipControllerCoordinates = useMemo(
-    () => layerKeyboardCoordinates(visualRowsRef),
-    [],
-  )
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: skipControllerCoordinates }),
-  )
-
-  const moveFlowSurfaceRow = (
-    row: EffectiveLayerProjectionRow,
-    bodyPlane: FlowBodyLayerPlane,
-  ) => {
-    const state = useEditorStore.getState()
-    const flow = state.flowSession
-    if (!flow || row.owner !== 'surface') return
-    const selection = selectFlowOverlay(
-      flow.history.present,
-      flow.selection.locationId,
-      [row.id],
-      'page',
-    )
-    const result = patchFlowOverlayBodyPlane(
-      flow.history.present,
-      selection,
-      bodyPlane,
-      { expectedRevision: flow.history.present.revision },
-    )
-    state.applyFlowCommand(result, {
-      statusMessage: result.ok ? (result.reason ?? null) : null,
-    })
+  const view = useEditorStore(state => state.courseView)
+  const scope = useEditorStore(selectEditingScope)
+  const selectNode = useEditorStore(state => state.selectNode)
+  const setActiveTab = useEditorStore(state => state.setActiveTab)
+  const deleteNode = useEditorStore(state => state.deleteNode)
+  const duplicateNode = useEditorStore(state => state.duplicateNode)
+  const updateNode = useEditorStore(state => state.updateNode)
+  const reorderNodes = useEditorStore(state => state.reorderNodes)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }))
+  const project=view.editingProject, surface=project?.surfaces.find(value=>value.id===view.surfaceId)
+  if(!project || !surface) return <div className="nodes-tree" data-testid="nodes-tab"><div className="empty-state">当前没有可编辑页面</div></div>
+  const flowPage=surface.kind==='flow'&&scope!=='global'
+  const flowOverlays=(plane:'overlay'|'underlay')=>surface.childIds.filter(id=>project.instances[id]?.flowPlacement?.plane===plane)
+  const groups = [
+    {id:'global-overlay',label:'全局 Overlay',ids:project.global.overlay},
+    ...(scope==='global'?[]:flowPage?[
+      {id:'surface-overlay',label:'正文上方',ids:flowOverlays('overlay')},
+      {id:'flow-body',label:'正文',ids:[]},
+      {id:'surface-underlay',label:'正文下方',ids:flowOverlays('underlay')},
+    ]:[{id:'surface',label:surface.title,ids:surface.childIds}]),
+    {id:'global-underlay',label:'全局 Underlay',ids:project.global.underlay},
+  ]
+  const allIds=groups.flatMap(group=>group.ids)
+  const sortableIds=allIds.flatMap(function collect(id:string):string[]{ return [id,...(project.instances[id]?.childIds??[]).flatMap(collect)] })
+  const updatePlacement=(id:string,plane:'underlay'|'overlay')=>{
+    const state=useEditorStore.getState(),target=state.courseKernel.captureTarget(),item=target.project.instances[id]
+    if(!item?.flowPlacement) return
+    void state.courseKernel.editCaptured(state.courseKernel.capture([{type:'instance.flowPlacement.set',instanceId:id,flowPlacement:{...item.flowPlacement,plane}}],target)).catch(error=>state.setError(error instanceof Error?error.message:String(error)))
   }
-
-  const onDragEnd = ({ active, over }: DragEndEvent) => {
-    if (!over || active.id === over.id) return
-    if (visualRows && unifiedRows) {
-      const oldIndex = visualRows.findIndex((row) => row.id === active.id)
-      if (flowPageMode && over.id === FLOW_BODY_BOUNDARY_ID) {
-        if (oldIndex < 0) return
-        const from = visualRows[oldIndex]!
-        if (from.owner !== 'surface') return
-        moveFlowSurfaceRow(
-          from,
-          from.flowBodyPlane === 'underlay' ? 'overlay' : 'underlay',
-        )
-        return
-      }
-      const newIndex = visualRows.findIndex((row) => row.id === over.id)
-      if (oldIndex < 0 || newIndex < 0) return
-      const from = visualRows[oldIndex]!
-      const overRow = visualRows[newIndex]!
-      if (
-        flowPageMode &&
-        from.owner === 'surface' &&
-        overRow.owner === 'surface' &&
-        from.flowBodyPlane !== overRow.flowBodyPlane
-      ) {
-        moveFlowSurfaceRow(from, overRow.flowBodyPlane ?? 'overlay')
-        return
-      }
-      if (from.reorderGroupKey !== overRow.reorderGroupKey) {
-        reorderNodes([from.id, overRow.id])
-        return
-      }
-      const ownerVisual = visualRows.filter(
-        (row) => row.reorderGroupKey === from.reorderGroupKey,
-      )
-      const ownerOld = ownerVisual.findIndex((row) => row.id === from.id)
-      const ownerNew = ownerVisual.findIndex((row) => row.id === overRow.id)
-      if (ownerOld < 0 || ownerNew < 0) return
-      reorderNodes(
-        arrayMove(ownerVisual, ownerOld, ownerNew)
-          .reverse()
-          .map((row) => row.id),
-      )
-      return
+  const onDragEnd=({active,over}:DragEndEvent)=>{
+    if(!over || active.id===over.id) return
+    const owner = owningContainer(project,String(active.id))
+    const from=project.instances[String(active.id)],to=project.instances[String(over.id)]
+    if(flowPage&&from?.flowPlacement && String(over.id)==='flow-body-boundary') {
+      updatePlacement(String(active.id),from.flowPlacement.plane==='overlay'?'underlay':'overlay');return
     }
-    const visualNodes = [...v8Nodes].reverse()
-    const oldIndex = visualNodes.findIndex((node) => node.id === active.id)
-    const newIndex = visualNodes.findIndex((node) => node.id === over.id)
-    if (oldIndex < 0 || newIndex < 0) return
-    reorderNodes(
-      arrayMove(visualNodes, oldIndex, newIndex)
-        .reverse()
-        .map((node) => node.id),
-    )
+    if(flowPage&&(from?.flowPlacement?.plane!==to?.flowPlacement?.plane||from?.flowPlacement?.space!==to?.flowPlacement?.space)) { useEditorStore.getState().setError('不同正文平面或定位的浮层需要分别调整'); return }
+    const ids = owner ? containerChildIds(project,owner).filter(id=>!flowPage || (project.instances[id]?.flowPlacement?.plane===from?.flowPlacement?.plane&&project.instances[id]?.flowPlacement?.space===from?.flowPlacement?.space)) : []
+    const group={ids}
+    if(!group || !group.ids.includes(String(over.id))) { useEditorStore.getState().setError('只能在同一归属和平面内调整层级'); return }
+    const visual=[...group.ids].reverse()
+    const next=arrayMove(visual,visual.indexOf(String(active.id)),visual.indexOf(String(over.id))).reverse()
+    reorderNodes(next)
   }
-
-  const renderLayerRow = (row: EffectiveLayerProjectionRow) => {
-    const node = rowAsNode(row)
-    const bodyPlane = row.owner === 'surface' && row.flowBodyPlane !== null
-      ? row.flowBodyPlane
-      : null
-    return (
-      <SortableNode
-        key={node.id}
-        node={node}
-        selected={selectedNodeIds.includes(node.id)}
-        sourceLabel={flowSession
-          ? flowOverlaySourceLabel(row)
-          : effectiveLayerSourceLabel(row)}
-        impactLabel={describeLayerImpact(row.impact)}
-        {...(flowPageMode && bodyPlane
-          ? {
-              bodyPlane,
-              onMoveAcrossBody: () => moveFlowSurfaceRow(
-                row,
-                bodyPlane === 'overlay' ? 'underlay' : 'overlay',
-              ),
-            }
-          : {})}
-        onSelect={(additive) => {
-          selectNode(node.id, additive)
-          if (additive) setActiveTab('layers')
-        }}
-        onDelete={() => deleteNode(node.id)}
-        onDuplicate={() => duplicateNode(node.id)}
-        onRename={(name) => updateNode(node.id, { name })}
-        onToggleVisible={() => updateNode(node.id, { visible: !node.visible })}
-        onToggleLocked={() => updateNode(node.id, { locked: !node.locked })}
-      />
-    )
-  }
-
-  const renderLayerGroup = (group: {
-    readonly id: string
-    readonly label: string
-    readonly rows: readonly EffectiveLayerProjectionRow[]
-  }) => (
-    <section
-      key={group.id}
-      className="nodes-layer-group"
-      data-testid={`nodes-layer-group-${group.id}`}
-    >
-      <h3 className="nodes-layer-group__title">{group.label}</h3>
-      {group.rows.map(renderLayerRow)}
-    </section>
-  )
-
-  return (
-    <div className="nodes-tree" data-testid="nodes-tab">
-      <div className="tree-root" onClick={() => selectNode(null)}>
-        <ChevronDown size={14} />
-        <Layers3 size={15} />
-        <span>
-          {flowSession
-            ? (editingScope === 'global' ? '全课浮层' : '正文与浮层')
-            : candidate
-              ? '有效图层'
-              : editingScope === 'global' ? '全局元素' : scene.name}
-        </span>
-        {selectedNodeIds.length > 0 && <span className="tree-selection-count">已选 {selectedNodeIds.length}</span>}
-      </div>
-      <div data-testid={flowSession ? 'flow-overlay-layers' : undefined}>
-        {flowSession ? (
-          <>
-            <h3 className="nodes-layer-group__title">
-              {editingScope === 'global' ? '全课浮层' : '合成顺序'}
-            </h3>
-            <div className="tree-order-note" data-testid="flow-overlay-placement">
-              {editingScope === 'global'
-                ? '归属：全课 · 定位：钉在视口'
-                : '页面浮层可排在正文上方或下方；正文内部顺序在稿纸中编辑。'}
-            </div>
-          </>
-        ) : null}
-        {!flowPageMode && nodes.length === 0 ? (
-          <div className="empty-state">
-            {flowSession
-              ? '全课还没有可管理的浮层。'
-              : editingScope === 'global' ? '全局层还没有组件' : '当前场景还没有节点'}
-            {flowSession ? null : (
-              <>
-                <br />
-                从“元素”面板加入{editingScope === 'global' ? '全局内容' : '内容'}
-              </>
-            )}
-          </div>
-        ) : (
-          <>
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragEnd={onDragEnd}
-          >
-            <SortableContext
-              items={nodes.map((node) => node.id)}
-              strategy={verticalListSortingStrategy}
-            >
-              <div className="nodes-list">
-                {flowPageMode ? (
-                  <>
-                    {flowLayerGroups?.filter((group) => group.id === 'global-overlay').map(renderLayerGroup)}
-                    {flowLayerGroups?.filter((group) => group.id === 'surface-overlay').map(renderLayerGroup)}
-                    <FlowBodyBoundaryRow />
-                    {flowLayerGroups?.filter((group) => group.id === 'surface-underlay').map(renderLayerGroup)}
-                    {flowLayerGroups?.filter((group) => group.id === 'global-underlay').map(renderLayerGroup)}
-                  </>
-                ) : displayedLayerGroups ? displayedLayerGroups.map(renderLayerGroup) : nodes.map((node) => (
-                  <SortableNode
-                    key={node.id}
-                    node={node}
-                    selected={selectedNodeIds.includes(node.id)}
-                    onSelect={(additive) => {
-                      selectNode(node.id, additive)
-                      if (additive) setActiveTab('layers')
-                    }}
-                    onDelete={() => deleteNode(node.id)}
-                    onDuplicate={() => duplicateNode(node.id)}
-                    onRename={(name) => updateNode(node.id, { name })}
-                    onToggleVisible={() => updateNode(node.id, { visible: !node.visible })}
-                    onToggleLocked={() => updateNode(node.id, { locked: !node.locked })}
-                  />
-                ))}
-              </div>
-            </SortableContext>
-          </DndContext>
-          <div
-            className="tree-order-note"
-            data-testid={spatialSession ? 'spatial-layer-move-note' : undefined}
-          >
-            {flowSession
-              ? editingScope === 'global'
-                ? '这里只管理归属全课的浮层；可在同一 Underlay / Overlay 分组内调整前后层级。'
-                : '拖到“正文”边界或使用上下按钮即可跨越正文；同一侧内可拖动排序。全课浮层仍只在各自平面内排序。'
-              : spatialSession
-              ? `同一定位内可拖动排序；${SPATIAL_CROSS_COORDINATE_MOVE_REASON}`
-              : candidate
-              ? '同一来源内可拖动排序；全课图层还必须位于同一 Underlay / Overlay 分组。跨来源不能通过排序移动。'
-              : editingScope === 'global'
-                ? '列表顺序控制同一全局层级内的前后关系；underlay / overlay 在属性中设置。'
-                : '列表最上方就是画面最上层；拖动条目可改变层级。'}
-          </div>
-          </>
-        )}
-      </div>
+  const renderItem=(id:string,depth=0):ReactNode=>{
+    const item=project.instances[id]
+    if(!item) return null
+    const definition=project.definitions[item.definitionId]
+    const presentation=componentDefinitionPresentation(definition)
+    const node={id,name:item.name??presentation.title,type:presentation.iconType,
+      typeLabel:`${presentation.title} · ${presentation.category}`,visible:item.visible!==false,locked:item.locked===true}
+    return <div key={id} style={depth?{paddingLeft:depth*16}:undefined}>
+      <SortableNode node={node} dragDisabled={componentIsLocked(project,id)} selected={view.selectedInstanceIds.includes(id)} sourceLabel={depth?'编组内对象':item.flowPlacement?.space==='viewport'?'钉在视口':item.flowPlacement?'跟随稿纸':undefined}
+        {...(flowPage&&item.flowPlacement?{bodyPlane:item.flowPlacement.plane,onMoveAcrossBody:()=>updatePlacement(id,item.flowPlacement!.plane==='overlay'?'underlay':'overlay')}:{})}
+        onSelect={additive=>{selectNode(id,additive);if(additive)setActiveTab('layers')}}
+        onDelete={()=>deleteNode(id)} onDuplicate={()=>duplicateNode(id)} onRename={name=>updateNode(id,{name})}
+        onToggleVisible={()=>updateNode(id,{visible:!node.visible})} onToggleLocked={()=>updateNode(id,{locked:!node.locked})}/>
+      {item.childIds?.slice().reverse().map(child=>renderItem(child,depth+1))}
     </div>
-  )
+  }
+  return <div className="nodes-tree" data-testid="nodes-tab">
+    <div className="tree-root" onClick={()=>selectNode(null)}><ChevronDown size={14}/><Layers3 size={15}/><span>{scope==='global'?'全局元素':surface.title}</span>
+      {view.selectedInstanceIds.length>0&&<span className="tree-selection-count">已选 {view.selectedInstanceIds.length}</span>}</div>
+    {!allIds.length&&!flowPage?<div className="empty-state">当前还没有对象<br/>从“元素”面板加入内容</div>:<DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+      <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+        <div className="nodes-list">{groups.filter(group=>group.ids.length||group.id==='flow-body').map(group=>group.id==='flow-body'?<FlowBodyBoundaryRow key={group.id}/>:<section key={group.id} className="nodes-layer-group" data-testid={`nodes-layer-group-${group.id}`}>
+          <h3 className="nodes-layer-group__title">{group.label}</h3>{group.ids.slice().reverse().map(id=>renderItem(id))}
+        </section>)}</div>
+      </SortableContext>
+    </DndContext>}
+    <div className="tree-order-note">{flowPage?'正文内部顺序在稿纸中编辑；浮层可移到正文上方或下方，同一定位和平面内可拖动排序。':'列表最上方就是同一归属的最上层；隐藏对象仍可从这里显示，锁定对象仍可选择。'}</div>
+  </div>
 }
+
+
+
+

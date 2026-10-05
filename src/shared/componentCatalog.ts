@@ -32,8 +32,8 @@ export interface ComponentCatalogPackage {
   packagePath: string
   thumbnailPath: string
   sha256: string
-  componentSchemaVersion: 4
-  runtimeApiVersion: 4
+  componentSchemaVersion: 1
+  runtimeApiVersion: 5
   renderMode: 'dom' | 'phaser' | 'hybrid'
   supportedScopes: Array<'scene' | 'global'>
   quality: ComponentCatalogQuality
@@ -63,6 +63,8 @@ export interface AvailableComponentCatalogPackage extends ComponentCatalogPackag
   sourceLabel: string
   sourceTrust: ComponentCatalogTrust
   thumbnailDataUrl?: string
+  /** Only the managed personal-library file service may delete this entry. */
+  removable?: boolean
 }
 
 export interface ComponentCatalogIssue {
@@ -135,8 +137,8 @@ const componentCatalogPackageSchema = z.object({
   packagePath: safeRelativePathSchema,
   thumbnailPath: safeRelativePathSchema,
   sha256: z.string().regex(/^[0-9a-f]{64}$/, '哈希必须是小写 SHA-256'),
-  componentSchemaVersion: z.literal(4),
-  runtimeApiVersion: z.literal(4),
+  componentSchemaVersion: z.literal(1),
+  runtimeApiVersion: z.literal(5),
   renderMode: z.enum(['dom', 'phaser', 'hybrid']),
   supportedScopes: z.array(z.enum(['scene', 'global']))
     .min(1)

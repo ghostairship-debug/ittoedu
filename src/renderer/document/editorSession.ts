@@ -22,10 +22,72 @@ import { MermaidCodeBlockView } from './mermaidCodeBlockView'
 export const DOCUMENT_OBJECT_CONTEXT_MENU_EVENT = 'document-object-context-menu'
 export interface DocumentObjectContextMenuDetail { x: number; y: number; blockId: string }
 
-export interface DocumentOperation { operationId: string; historyGroup: string; source: 'layout' | 'source'; preparedResources?: unknown }
+export interface DocumentOperation {
+  operationId: string; historyGroup: string; source: 'layout' | 'source'
+  preparedResources?: unknown
+  /** All still-local resource batches; the canonical caller assembles them with the body. */
+  preparedResourceBatches?: readonly unknown[]
+}
+export type DocumentContentScope = 'document' | 'inline-text' | 'formula'
+export type DocumentCommitResult = boolean | void | Promise<boolean | void>
+/** Editable content stays local until its caller acknowledges the formal transaction. */
+export function createDocumentDraftSession(initial: MarkdownDocument) {
+  let document = initial, failed = false, sequence = 0
+  const pending = new Set<Promise<boolean | void>>()
+  const prepared = new Set<{ value: unknown; discard(): Promise<void> }>()
+  return {
+    get document() { return document },
+    get retained() { return pending.size > 0 || failed || prepared.size > 0 },
+    get rejected() { return failed },
+    prepare(batch: { value: unknown; discard(): Promise<void> }) { prepared.add(batch) },
+    receive(next: MarkdownDocument) {
+      if (pending.size || failed || prepared.size) return false
+      document = next
+      return true
+    },
+    publish(next: MarkdownDocument, operation: DocumentOperation, commit: LayoutEditorOptions['change']): DocumentCommitResult {
+      document = next
+      const current = ++sequence
+      const resources = [...prepared]
+      if (resources.length) operation = { ...operation, preparedResources: resources.length === 1 ? resources[0].value : undefined,
+        preparedResourceBatches: resources.map(batch => batch.value) }
+      const acceptedResources = (accepted: boolean | void) => { if (accepted !== false) resources.forEach(batch => prepared.delete(batch)) }
+      try {
+        const result = commit(next, operation)
+        if (result instanceof Promise) {
+          failed = false
+          const ack = result.then(accepted => { acceptedResources(accepted); if (current === sequence) failed = accepted === false; return accepted }, error => {
+            if (current === sequence) failed = true
+            throw error
+          })
+          pending.add(ack)
+          void ack.then(() => pending.delete(ack), () => pending.delete(ack))
+          return ack
+        }
+        acceptedResources(result)
+        failed = result === false
+        return result
+      } catch (error) { failed = true; throw error }
+    },
+    async drain() {
+      while (pending.size) await Promise.allSettled([...pending])
+      return !failed
+    },
+    async discard(next: MarkdownDocument) {
+      if (pending.size) return false
+      for (const batch of prepared) { await batch.discard(); prepared.delete(batch) }
+      sequence++; failed = false; document = next
+      return true
+    },
+  }
+}
+export type DocumentDraftSession = ReturnType<typeof createDocumentDraftSession>
 export interface LayoutEditorOptions {
   document: MarkdownDocument; revision: string; sourceMap?: MarkdownSourceMap
-  change(document: MarkdownDocument, operation: DocumentOperation): boolean | void
+  change(document: MarkdownDocument, operation: DocumentOperation): DocumentCommitResult
+  /** Shared by layout/source views of one editor; it owns no formal history. */
+  draftSession?: DocumentDraftSession
+  contentScope?: DocumentContentScope
   stateChanged?(state: EditorState): void
   requestMathDraft?(draft: DocumentFormulaDraftRequest): void
   selection?(selection: DocumentSelection | null): void
@@ -37,6 +99,8 @@ export interface LayoutEditorOptions {
   runtimeSpacers?: readonly { readonly blockId: string; readonly height: number }[]
   renderObject?(block: DocumentBlock, container: HTMLElement): (() => void) | void
   objectRevision?: unknown
+  beforeProjectionMutation?():void
+  afterProjectionMutation?():void
   clipboardContext?: unknown
   clipboardResourcePort?(context: unknown): DocumentClipboardResourcePort<unknown>
   projectionPlugins?: Plugin[]
@@ -44,6 +108,7 @@ export interface LayoutEditorOptions {
 }
 export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOptions) {
   let options = initial
+  const draftSession = initial.draftSession ?? createDocumentDraftSession(initial.document)
   let composing = false
   let group = crypto.randomUUID()
   let lastInput = 0
@@ -51,17 +116,22 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   const editorId = crypto.randomUUID()
   let pendingCut: string | null = null
   let plainPastePending = false
+  const preparations = new Set<Promise<void>>()
   let plainPasteTimer: ReturnType<typeof setTimeout> | null = null
   const clearPlainPaste = () => { plainPastePending = false; if (plainPasteTimer) clearTimeout(plainPasteTimer); plainPasteTimer = null }
   const clipboardType = 'application/x-cw-document-slice'
   const boundary = () => { group = crypto.randomUUID(); lastInput = 0 }
   const view = new EditorView(element, {
     state: EditorState.create({ doc: toEditorDocument(initial.document.content), plugins: [...(initial.projectionPlugins ?? []), new Plugin({ view(view) { options.stateChanged?.(view.state); return { update(view) { options.stateChanged?.(view.state) } } } }), keymap({
-      'Mod-z': () => { boundary(); options.undo(); return true },
-      'Mod-Shift-z': () => { boundary(); options.redo(); return true },
-      'Mod-y': () => { boundary(); options.redo(); return true },
+      'Mod-z': () => { boundary(); void navigateHistory('undo'); return true },
+      'Mod-Shift-z': () => { boundary(); void navigateHistory('redo'); return true },
+      'Mod-y': () => { boundary(); void navigateHistory('redo'); return true },
       'Shift-Enter': chainCommands(exitCode, (state, dispatch) => { dispatch?.(state.tr.replaceSelectionWith(schema.nodes.hard_break.create()).scrollIntoView()); return true }),
       Enter: (state, dispatch, currentView) => {
+        if (options.contentScope === 'formula') return true
+        if (options.contentScope === 'inline-text') {
+          boundary(); dispatch?.(state.tr.replaceSelectionWith(schema.nodes.hard_break.create()).scrollIntoView()); return true
+        }
         if (state.selection.$from.parent.type.name === 'slot') {
           if (state.selection.$from.parent.attrs.key.startsWith('item:')) {
             const tr = state.tr.deleteSelection()
@@ -148,6 +218,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     },
     handleTextInput: (currentView, from, to, text) => {
       if (options.readOnly) return false
+      if (options.contentScope && options.contentScope !== 'document') return false
       const match = matchDocumentInputRule(currentView.state, from, to, text, composing || currentView.composing)
       if (!match) return false
       try {
@@ -179,13 +250,20 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
           payload.resources.components.forEach((component: MarkdownDocument['resources']['components'][number]) => components.set(`${component.packageId}@${component.version}`, component))
           options = { ...options, document: { ...options.document, resources: { assets: [...assets.values()], components: [...components.values()] } } }
         }
-        if ((payload.resources.assets.length || payload.resources.components.length) && options.clipboardResourcePort && payload.editorId !== editorId) {
-          void pastePrepared(payload)
+        const slice = Slice.fromJSON(schema, payload.slice)
+        let formalInstances = false
+        slice.content.descendants(node => { if (node.attrs.data?.type === 'course-instance') formalInstances = true })
+        const formalContext = payload.context?.kind === 'cw-course-v10-resources'
+        const needsPreparation = payload.resources.assets.length || payload.resources.components.length || formalInstances || formalContext
+        const requiresPreparation = payload.editorId !== editorId || formalInstances && !moved || formalContext
+        if (needsPreparation && options.clipboardResourcePort && requiresPreparation) {
+          const preparation = pastePrepared(payload, moved ? 'move' : 'copy')
+          preparations.add(preparation)
+          void preparation.then(() => preparations.delete(preparation), error => { preparations.delete(preparation); options.diagnostic(error instanceof Error ? error.message : String(error)) })
           return true
         }
-        if ((payload.resources.assets.length || payload.resources.components.length) && payload.editorId !== editorId) throw new Error('此文档尚未连接跨文档素材接入口，请先导入引用素材再粘贴')
+        if (needsPreparation && requiresPreparation) throw new Error('此文档尚未连接跨文档素材接入口，请先导入引用素材再粘贴')
         if (payload.resources.assets.some((asset: { assetId: string }) => !options.document.resources.assets.some(current => current.assetId === asset.assetId)) || payload.resources.components.some((component: { packageId: string; version: string }) => !options.document.resources.components.some(current => current.packageId === component.packageId && current.version === component.version))) throw new Error('跨文档粘贴需要先接入对象引用的素材与组件资源')
-        const slice = Slice.fromJSON(schema, payload.slice)
         pendingCut = null
         const doc = schema.nodes.doc.create(null, slice.content)
         const copied = renewEditorIdentities(doc, () => crypto.randomUUID(), !moved)
@@ -195,7 +273,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     },
     dispatchTransaction(transaction: Transaction) {
       const applied = view.state.applyTransaction(transaction), state = applied.state
-      view.updateState(state)
+      applyState(state)
       if (transaction.docChanged && !composing) publish(transaction.getMeta('preparedResources'))
       else if (transaction.selectionSet && !transaction.docChanged) boundary()
       // Decoration refreshes and preview-owned caret relocation must not become
@@ -206,6 +284,14 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       if (described !== undefined) options.selection?.(described)
     },
   })
+  function projectionMutation<T>(work:()=>T):T {
+    options.beforeProjectionMutation?.()
+    try{return work()}finally{options.afterProjectionMutation?.()}
+  }
+  function applyState(state:EditorState):void {
+    if(state.doc.eq(view.state.doc)){view.updateState(state);return}
+    projectionMutation(()=>view.updateState(state))
+  }
   /** The document selection of `state`; undefined for a cell selection whose cells cannot be identified. */
   function describeSelection(state: EditorState): DocumentSelection | null | undefined {
     if (state.selection instanceof CellSelection) {
@@ -222,34 +308,37 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     const head = editorPositionToPoint(state.doc, state.selection.head)
     return anchor && head ? { revision: options.revision, kind: 'text', anchor, head } : null
   }
-  async function pastePrepared(payload: { slice: unknown; resources: MarkdownDocument['resources']; context?: unknown }) {
-    const targetState = view.state; const revision = options.revision
+  async function pastePrepared(payload: { slice: unknown; resources: MarkdownDocument['resources']; context?: unknown }, identity: 'copy' | 'move') {
+    const targetState = view.state, targetOptions = options; const revision = targetOptions.revision
     let port: DocumentClipboardResourcePort<unknown> | undefined
     let prepared: Awaited<ReturnType<typeof prepareDocumentClipboard>> | undefined
     try {
-      port = options.clipboardResourcePort!(payload.context)
+      port = targetOptions.clipboardResourcePort!(payload.context)
       const slice = Slice.fromJSON(schema, payload.slice)
-      const source = { content: fromEditorDocument(schema.nodes.doc.create(null, slice.content)), resources: payload.resources }
-      prepared = await prepareDocumentClipboard(source, options.document.resources, port)
-      if (view.isDestroyed || view.state !== targetState || options.revision !== revision) { await port.discard(prepared.prepared); return }
+      const source = { content: fromEditorDocument(schema.nodes.doc.create(null, slice.content)), resources: payload.resources, identity }
+      prepared = await prepareDocumentClipboard(source, targetOptions.document.resources, port)
+      if (view.isDestroyed || !view.state.doc.eq(targetState.doc) || !view.state.selection.eq(targetState.selection) || options.revision !== revision) { await port.discard(prepared.prepared); return }
       const assets = new Map(options.document.resources.assets.map(asset => [asset.assetId, asset])); prepared.document.resources.assets.forEach(asset => assets.set(asset.assetId, asset))
       const components = new Map(options.document.resources.components.map(component => [`${component.packageId}@${component.version}`, component])); prepared.document.resources.components.forEach(component => components.set(`${component.packageId}@${component.version}`, component))
       options = { ...options, document: { ...options.document, resources: { assets: [...assets.values()], components: [...components.values()] } } }
       const fragment = toEditorDocument(prepared.document.content).content
       const transaction = view.state.tr.replaceSelection(new Slice(fragment, slice.openStart, slice.openEnd)).setMeta('preparedResources', { value: prepared.prepared, discard: () => port!.discard(prepared!.prepared) })
+      pendingCut = null
       view.dispatch(transaction)
-    } catch (error) { if (prepared) await port?.discard(prepared.prepared); options.diagnostic(error instanceof Error ? error.message : String(error)) }
+    } catch (error) { if (prepared) await port?.discard(prepared.prepared); targetOptions.diagnostic(error instanceof Error ? error.message : String(error)) }
   }
   function objectView(node: import('prosemirror-model').Node, editableSlots: boolean, owner: EditorView, getPos: () => number | undefined) {
     const block = { ...node.attrs.data, id: node.attrs.id } as DocumentBlock
     const flow = options.presentation === 'flow'
     // Flow draws a divider as playback does: a real rule, not a label.
-    const tag = block.type === 'list' ? block.ordered ? 'ol' : 'ul' : block.type === 'quote' ? 'blockquote' : flow && block.type === 'divider' ? 'hr' : flow && block.type === 'callout' ? 'aside' : flow && ['media', 'chart', 'component', 'course-component'].includes(block.type) ? 'figure' : 'section'
+    const tag = block.type === 'list' ? block.ordered ? 'ol' : 'ul' : block.type === 'quote' ? 'blockquote' : flow && block.type === 'divider' ? 'hr' : flow && block.type === 'callout' ? 'aside' : flow && ['media', 'chart', 'component', 'course-component', 'course-instance'].includes(block.type) ? 'figure' : 'section'
     const dom = flow ? flowBlockElement(node, tag) : document.createElement(tag)
     if (!flow) dom.className = `document-object document-${node.attrs.data.type}`
     dom.dataset.documentId = node.attrs.id
+    // renderObject runs before ProseMirror applies outer decorations.
+    dom.dataset.flowBlockId = node.attrs.id
     let destroy: (() => void) | void
-    if (options.renderObject && ['media', 'chart', 'component', 'course-component'].includes(block.type)) {
+    if (options.renderObject && ['media', 'chart', 'component', 'course-component', 'course-instance'].includes(block.type)) {
       const object = document.createElement('div'); object.contentEditable = 'false'; dom.append(object)
       // A click on the picture, chart or component itself (not its caption) selects the whole block, so its quick bar
       // opens as it does for objects on a page (M21). ProseMirror alone selects such a block only on Ctrl+click.
@@ -261,12 +350,14 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         return true
       }
       object.addEventListener('mousedown', event => {
+        if (options.readOnly) return
         if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return
         event.preventDefault()
         selectBlock()
       })
       // A right-click selects the object the same way and asks the editor for its menu.
       object.addEventListener('contextmenu', event => {
+        if (options.readOnly) return
         event.preventDefault()
         if (!selectBlock()) return
         dom.dispatchEvent(new CustomEvent<DocumentObjectContextMenuDetail>(DOCUMENT_OBJECT_CONTEXT_MENU_EVENT, { bubbles: true, detail: { x: event.clientX, y: event.clientY, blockId: node.attrs.id } }))
@@ -275,7 +366,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     } else if (!editableSlots && !(flow && block.type === 'divider')) dom.textContent = `${block.type} 对象`
     // ProseMirror owns every child of contentDOM. Keep editable captions separate
     // from the React media host so mounting the caption cannot remove the media.
-    const ownsRenderedObject = Boolean(options.renderObject && ['media', 'chart', 'component', 'course-component'].includes(block.type))
+    const ownsRenderedObject = Boolean(options.renderObject && ['media', 'chart', 'component', 'course-component', 'course-instance'].includes(block.type))
     const contentDOM = editableSlots ? (flow || block.type === 'list') && !ownsRenderedObject ? dom : document.createElement('div') : undefined
     if (contentDOM && contentDOM !== dom) dom.append(contentDOM)
     return { dom, contentDOM, ignoreMutation: (mutation: MutationRecord | { type: 'selection'; target: globalThis.Node }) => mutation.type !== 'selection' && (!contentDOM || !contentDOM.contains(mutation.target)), destroy: () => destroy?.() }
@@ -323,7 +414,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     })
     const resources = { assets: options.document.resources.assets.filter(asset => assets.has(asset.assetId)), components: options.document.resources.components.filter(component => components.has(`${component.packageId}@${component.version}`)) }
     let context: unknown
-    try { context = typeof options.clipboardContext === 'function' ? options.clipboardContext(resources) : options.clipboardContext }
+    try { context = typeof options.clipboardContext === 'function' ? options.clipboardContext(resources, fromEditorDocument(schema.nodes.doc.create(null, slice.content))) : options.clipboardContext }
     catch (error) { event.preventDefault(); options.diagnostic(error instanceof Error ? error.message : String(error)); return true }
     event.clipboardData.setData(clipboardType, JSON.stringify({ editorId, cutToken, slice: slice.toJSON(), resources, context }))
     event.clipboardData.setData('text/plain', slice.content.textBetween(0, slice.content.size, '\n', node => node.attrs.data?.accessibleText ?? ''))
@@ -332,16 +423,17 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     return true
   }
   function publish(prepared?: { value: unknown; discard(): Promise<void> }) {
+    if (prepared) draftSession.prepare(prepared)
     try {
       const repaired = renewEditorIdentities(view.state.doc, () => crypto.randomUUID())
       if (!repaired.eq(view.state.doc)) {
         const { anchor, head } = view.state.selection
         const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, repaired.content)
         tr.setSelection(TextSelection.create(tr.doc, anchor, head))
-        view.updateState(view.state.apply(tr))
+        applyState(view.state.apply(tr))
       }
       const content = fromEditorDocument(view.state.doc)
-      if (JSON.stringify(content) === JSON.stringify(options.document.content)) return
+      if (JSON.stringify(content) === JSON.stringify(draftSession.document.content)) return
       const now = Date.now()
       if (now - lastInput > 800) boundary()
       lastInput = now
@@ -351,9 +443,10 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         components: options.document.resources.components.filter(component => refs.components.some(ref => ref.packageId === component.packageId && ref.version === component.version)),
       } }
       options = { ...options, document }
-      const result = options.change(document, { operationId: crypto.randomUUID(), historyGroup: group, source: 'layout', ...(prepared ? { preparedResources: prepared.value } : {}) })
-      if (result === false) void prepared?.discard()
-    } catch (error) { void prepared?.discard(); options.diagnostic(error instanceof Error ? error.message : String(error)) }
+      const owner = options
+      const result = draftSession.publish(document, { operationId: crypto.randomUUID(), historyGroup: group, source: 'layout', ...(prepared ? { preparedResources: prepared.value } : {}) }, owner.change)
+      if (result instanceof Promise) void result.catch(error => owner.diagnostic(error instanceof Error ? error.message : String(error)))
+    } catch (error) { options.diagnostic(error instanceof Error ? error.message : String(error)) }
   }
   function syncDomTextSelection() {
     if (composing || view.composing || options.readOnly || view.isDestroyed || !view.hasFocus() ||
@@ -395,7 +488,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       const anchor = cell(kept.anchor), head = cell(kept.head)
       selection = anchor >= 0 && head >= 0 ? CellSelection.create(doc, anchor, head) : null
     }
-    if (selection) view.updateState(view.state.apply(view.state.tr.setSelection(selection)))
+    if (selection) applyState(view.state.apply(view.state.tr.setSelection(selection)))
   }
   /** A closed top-level replacement is required when a changed node contains a table. */
   function tableReplacement(before: import('prosemirror-model').Node, after: import('prosemirror-model').Node) {
@@ -445,10 +538,12 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     if (kept?.kind !== 'text') return
     const anchor = pointPosition(view.state.doc, kept.anchor), head = pointPosition(view.state.doc, kept.head)
     if (anchor === null || head === null) return
-    view.updateState(view.state.apply(view.state.tr.setSelection(TextSelection.create(view.state.doc, anchor, head))))
+    applyState(view.state.apply(view.state.tr.setSelection(TextSelection.create(view.state.doc, anchor, head))))
   }
   function update(next: LayoutEditorOptions) {
     if (composing) { deferred = next; return }
+    // An older ACK or external update may refresh view options, but cannot replace pending/rejected input.
+    if (!draftSession.receive(next.document)) next = { ...next, document: draftSession.document }
     const changed = JSON.stringify(next.document.content) !== JSON.stringify(options.document.content)
     const refreshObjects = next.objectRevision !== options.objectRevision
     const refreshSpacers = JSON.stringify(next.runtimeSpacers) !== JSON.stringify(options.runtimeSpacers)
@@ -466,17 +561,39 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
           ? view.state.tr.replaceWith(closed.from, closed.beforeEnd, document.content.cut(closed.from, closed.afterEnd))
           : view.state.tr.replace(from, to, document.slice(from, nextTo))
         transaction.setMeta('canonicalUpdate', true)
-        view.updateState(view.state.apply(transaction))
+        applyState(view.state.apply(transaction))
         if (closed) restoreTextSelection(kept)
         reselect(kept)
       }
     }
-    if (refreshObjects) view.setProps({ nodeViews: { ...view.props.nodeViews, object: (node, current, getPos) => objectView(node, false, current, getPos), compound: (node, current, getPos) => objectView(node, true, current, getPos) } })
+    if (refreshObjects) projectionMutation(()=>view.setProps({ nodeViews: { ...view.props.nodeViews, object: (node, current, getPos) => objectView(node, false, current, getPos), compound: (node, current, getPos) => objectView(node, true, current, getPos) } }))
     if (refreshSpacers) view.setProps({ decorations: view.props.decorations })
+  }
+  async function drain() {
+    if (composing || view.composing) return false
+    while (preparations.size) await Promise.allSettled([...preparations])
+    if (view.isDestroyed || composing || view.composing) return false
+    publish(); boundary()
+    return draftSession.drain()
+  }
+  function navigateHistory(direction: 'undo' | 'redo'): Promise<void> {
+    const owner = options
+    const invoke = () => {
+      try { return Promise.resolve(owner[direction]()).then(() => {}, error => owner.diagnostic(error instanceof Error ? error.message : String(error))) }
+      catch (error) { owner.diagnostic(error instanceof Error ? error.message : String(error)); return Promise.resolve() }
+    }
+    if (!composing && !view.composing && !preparations.size) {
+      publish(); boundary()
+      if (!draftSession.retained) return invoke()
+    }
+    return drain().then(ready => { if (ready) return invoke() })
   }
   return { view, update, boundary, syncDomTextSelection,
     requestPlainPaste: () => { clearPlainPaste(); plainPastePending = true; plainPasteTimer = setTimeout(clearPlainPaste, 3000); return clearPlainPaste },
-    flush: () => { if (composing) return false; publish(); boundary(); return true }, destroy: () => { clearPlainPaste(); view.destroy() },
+    flush: () => { if (composing || view.composing || preparations.size) return false; publish(); boundary(); return !draftSession.rejected },
+    drain,
+    discardDraft: async (next: LayoutEditorOptions) => { if (!await draftSession.discard(next.document)) return false; update(next); return true },
+    destroy: () => { clearPlainPaste(); projectionMutation(()=>view.destroy()) },
     /** Current selection at the current revision, for re-reporting it after a committed edit such as formatting. */
     readSelection: () => describeSelection(view.state) ?? null }
 }

@@ -1,220 +1,164 @@
-import { sha256 } from '@noble/hashes/sha256'
-import { listCourseSoundReferences } from './courseAudio'
-import { spatialSurfaceIn } from './spatialInsertion'
-import { spatialPathIn } from './spatialPath'
-import { spatialRelationIn } from './spatialRelation'
-import { stateToolContext, stateChildren } from './presentationStateTools'
-import { layerToolContext } from './layerEditing'
-import { locateRule, locateSceneInteractions } from './slideInteractions'
-import { composeCourseProjectLocation } from '../../shared/courseLayerComposition'
 import { isSourceDocumentModel, type DocumentModel } from '../../shared/workbench/document'
 import type { ToolTarget } from '../../shared/workbench/tools'
-import { locateCourseLayer } from '../drivers/course/layerProperties'
-import { resolveNativeOwner } from './nativeOwner'
 import { documentDigest } from '../documents/documentDigest'
-import { resolveEffectiveBackground } from '../../shared/effectiveBackground'
-import { flowSurfaceIn, resolveFlowBlock, sliceFlowRichText, flowBlockLabel } from './flowDocumentModel'
-import { flowBlocksAtParent, validateFlowInsertIndex } from './flowContent'
-import { flowTextSlot } from './flowTextSlot'
-import { documentTextLength } from '../../shared/document/content'
-import { findCompositionNode, walkComposition } from '../../shared/composition/content'
-import { isCourseLayerVisibleAtLocation } from '../../shared/courseProjectModel'
+import { owningContainer, resolveComponentPresentation, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
+import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
+import { componentFieldIdentityPaths, componentValueAt } from '../drivers/courseV10Operations'
+import { documentTextLength, documentTextContentSchema, normalizeDocumentText, sliceDocumentText, type FlowTextContent } from '../../shared/document/content'
+
+export type CourseInstanceTarget = Extract<ToolTarget, { kind: 'course-instance' }>
+export type CourseInstanceRange = CourseInstanceTarget & { dataPath: string[]; from: number; to: number }
+export function isCourseInstanceRange(target: ToolTarget): target is CourseInstanceRange {
+  return target.kind === 'course-instance' && target.dataPath !== undefined && target.from !== undefined && target.to !== undefined
+}
+export function instanceRootOwner(project: CourseProjectV10, instanceId: string) {
+  let owner = owningContainer(project, instanceId)
+  while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
+  return owner
+}
+export function courseInstanceContext(model: DocumentModel, target: CourseInstanceTarget) {
+  if (model.kind !== 'course-v10') throw new Error('对象目标需要 Project V10 文档')
+  if (target.stateId && !model.project.surfaces.find(value => value.id === target.surfaceId)?.presentation?.states.some(value => value.id === target.stateId)) throw new Error('捕获的展示状态已不存在')
+  const project = resolveComponentPresentation(model.project, target.surfaceId, target.stateId ?? null)
+  const instance = project.instances[target.instanceId]
+  const surface = model.project.surfaces.find(value => value.id === target.surfaceId)
+  const owner = instanceRootOwner(model.project, target.instanceId)
+  if (!instance || !surface || !owner || owner.kind === 'surface' && owner.surfaceId !== surface.id) throw new Error('对象不属于捕获的表面')
+  const field = target.dataPath === undefined ? undefined : componentValueAt(project, ['instances', instance.id, target.fieldScope ?? 'data', ...target.dataPath])
+  if (field && !field.exists) throw new Error('所选数据字段已不存在')
+  return { project, instance, surface, owner, ...(field ? { value: field.value } : {}) }
+}
+/** Existing row/item/cell identities along this exact field path; never search or rebind another slot. */
+export function courseInstanceFieldIdentity(model: DocumentModel, target: CourseInstanceTarget) {
+  const { project } = courseInstanceContext(model, target)
+  if (!target.dataPath) return []
+  const path = ['instances', target.instanceId, target.fieldScope ?? 'data', ...target.dataPath]
+  return componentFieldIdentityPaths(project, path).map(identity => ({ path: identity, ...componentValueAt(project, identity) }))
+}
+/** The effective native text implementation has one body field; other objects keep explicit slots. */
+export function courseInstanceTextTarget(model: DocumentModel, target: CourseInstanceTarget): CourseInstanceTarget {
+  if (target.dataPath !== undefined || target.fieldScope === 'flowLayout') return target
+  const { project, instance } = courseInstanceContext(model, target)
+  const implementation = instance.implementationOverride ?? project.definitions[instance.definitionId]?.implementation
+  return implementation?.kind === 'builtin' && implementation.key === 'guoling.text'
+    ? { ...target, dataPath: ['content'] } : target
+}
+/** A real data field, never text searched elsewhere in an implementation or the document. */
+export function readCourseInstanceText(model: DocumentModel, target: CourseInstanceTarget): string | FlowTextContent | null {
+  target = courseInstanceTextTarget(model, target)
+  const { value } = courseInstanceContext(model, target)
+  if (target.fieldScope === 'flowLayout' && (target.dataPath?.length !== 1 || target.dataPath[0] !== 'caption')) return null
+  if (typeof value === 'string') return value
+  const parsed = documentTextContentSchema.safeParse(value)
+  return parsed.success ? parsed.data : null
+}
+export function sliceCourseInstanceText(value: string | FlowTextContent, from: number, to: number): string | FlowTextContent {
+  const length = typeof value === 'string' ? Array.from(value).length : documentTextLength(value)
+  if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to <= from || to > length) throw new Error('所选文字范围已失效')
+  return typeof value === 'string' ? Array.from(value).slice(from, to).join('') : sliceDocumentText(value, from, to)
+}
+/** Canonical data edit for content-only generation, preserving unselected rich text and its formatting. */
+export function replaceCourseInstanceText(model: DocumentModel, target: CourseInstanceTarget, text: string): ComponentEdit {
+  target = courseInstanceTextTarget(model, target)
+  const { instance } = courseInstanceContext(model, target)
+  if (instance.locked) throw new Error('所选内容已锁定，请先解锁')
+  const value = readCourseInstanceText(model, target)
+  if (value === null || !target.dataPath) throw new Error('当前目标不是可直接改写的文字字段')
+  const from = target.from ?? 0, to = target.to ?? (typeof value === 'string' ? Array.from(value).length : documentTextLength(value))
+  if (target.from !== undefined || target.to !== undefined) sliceCourseInstanceText(value, from, to)
+  let next: string | FlowTextContent
+  if (typeof value === 'string') {
+    const chars = Array.from(value)
+    next = chars.slice(0, from).join('') + text + chars.slice(to).join('')
+  } else {
+    const selected = sliceDocumentText(value, from, to).inlines.find(inline => inline.type === 'text')
+    next = normalizeDocumentText({ inlines: [...sliceDocumentText(value, 0, from).inlines,
+      { type: 'text', text, ...(selected?.style ? { style: selected.style } : {}) },
+      ...sliceDocumentText(value, to, documentTextLength(value)).inlines] })
+  }
+  return courseInstanceTextEdit(model, target, next)
+}
+/** A scoped text value writes its original authored field, including Flow media captions. */
+export function courseInstanceTextEdit(model: DocumentModel, target: CourseInstanceTarget, value: string | FlowTextContent): ComponentEdit {
+  target = courseInstanceTextTarget(model, target)
+  const { instance } = courseInstanceContext(model, target)
+  if (!target.dataPath) throw new Error('当前目标没有可编辑的文字字段')
+  if ((target.fieldScope ?? 'data') === 'data') return { type: 'data.set', instanceId: instance.id, path: [...target.dataPath], value: value as unknown as JsonValue }
+  if (!instance.flowLayout || target.dataPath.length !== 1 || target.dataPath[0] !== 'caption' || typeof value === 'string') throw new Error('当前 Flow 字段不是可编辑的富文本题注')
+  return { type: 'instance.flowLayout.set', instanceId: instance.id, flowLayout: { ...structuredClone(instance.flowLayout), caption: structuredClone(value) } }
+}
 
 export function containsTarget(allowed: ToolTarget, target: ToolTarget, model?: DocumentModel): boolean {
+  const kinds = ['document', 'markdown-range', 'course-instance', 'course-surface', 'course-asset']
+  if (!kinds.includes(allowed.kind) || !kinds.includes(target.kind)) return false
   if (allowed.kind === 'document') return true
-  if (allowed.kind === 'course-audio' && target.kind === 'course-sound') return true
-  if (allowed.kind === 'course-surface' && target.kind === 'course-background') return target.owner !== 'course' && allowed.surfaceId === target.surfaceId
-  if (allowed.kind === 'course-owner' && allowed.owner === 'scene' && !allowed.stateId && target.kind === 'course-state') return allowed.locationId === target.locationId
-  if (allowed.kind === 'course-owner' && allowed.owner === 'scene' && target.kind === 'course-interaction') return allowed.locationId === target.locationId && allowed.stateId === target.stateId
-  if (allowed.kind === 'course-location' && (target.kind === 'course-object' || target.kind === 'course-interaction')) return allowed.locationId === target.locationId
-  if (allowed.kind === 'course-object' && target.kind === 'course-object') {
-    if (allowed.locationId !== target.locationId || allowed.itemId !== target.itemId || allowed.stateId !== target.stateId) return false
-    if (!allowed.compositionNodeId) return true
-    if (!target.compositionNodeId) return false
-    if (allowed.compositionNodeId === target.compositionNodeId) return true
-    if (model?.kind !== 'course-v9') return false
-    try {
-      const { item } = courseObjectContext(model, allowed)
-      const root = item.kind === 'composition' && findCompositionNode(item.content.root, allowed.compositionNodeId)
-      return !!root && !!findCompositionNode(root, target.compositionNodeId)
-    } catch { return false }
+  if (allowed.kind === 'course-surface' && target.kind === 'course-instance' && model?.kind === 'course-v10') {
+    const owner = instanceRootOwner(model.project, target.instanceId)
+    return allowed.surfaceId === target.surfaceId && owner?.kind === 'surface' && owner.surfaceId === allowed.surfaceId
+  }
+  if (allowed.kind === 'course-instance' && target.kind === 'course-instance') {
+    if (allowed.surfaceId !== target.surfaceId || (allowed.stateId ?? null) !== (target.stateId ?? null)) return false
+    if (allowed.instanceId !== target.instanceId) {
+      if (allowed.dataPath || model?.kind !== 'course-v10') return false
+      let owner = owningContainer(model.project, target.instanceId)
+      while (owner?.kind === 'instance') {
+        if (owner.instanceId === allowed.instanceId) return true
+        owner = owningContainer(model.project, owner.instanceId)
+      }
+      return false
+    }
+    if (!allowed.dataPath) return true
+    if ((allowed.fieldScope ?? 'data') !== (target.fieldScope ?? 'data')) return false
+    if (!target.dataPath || !allowed.dataPath.every((part, index) => part === target.dataPath![index])) return false
+    if (!isCourseInstanceRange(allowed)) return true
+    return isCourseInstanceRange(target) && target.dataPath.length === allowed.dataPath.length && target.from >= allowed.from && target.to <= allowed.to
   }
   if (allowed.kind === 'markdown-range' && target.kind === 'markdown-range') return target.from >= allowed.from && target.to <= allowed.to
-  if (allowed.kind === 'flow-container' && allowed.index !== undefined) return documentDigest(allowed) === documentDigest(target)
-  if (allowed.kind === 'flow-container' && (target.kind === 'flow-block' || target.kind === 'flow-range' || target.kind === 'flow-container')) return allowed.surfaceId === target.surfaceId && (allowed.parentId === null || allowed.parentId === target.parentId)
-  if (allowed.kind === 'flow-block' && target.kind === 'flow-range') return allowed.surfaceId === target.surfaceId && allowed.blockId === target.blockId && allowed.parentId === target.parentId
-  if (allowed.kind === 'flow-range' && target.kind === 'flow-range') return allowed.surfaceId === target.surfaceId && allowed.blockId === target.blockId && allowed.parentId === target.parentId && documentDigest(allowed.slot) === documentDigest(target.slot) && target.from >= allowed.from && target.to <= allowed.to
   return documentDigest(allowed) === documentDigest(target)
 }
 
-function courseObjectContext(model: Extract<DocumentModel, { kind: 'course-v9' }>, target: Extract<ToolTarget, { kind: 'course-object' }>) {
-  const location = model.project.locations.find(value => value.id === target.locationId)
-  const layer = locateCourseLayer(model.project, target.itemId)
-  if (!location || !layer || layer.source !== 'global' && (layer.surfaceId !== location.surfaceId || layer.source === 'scene' && (location.kind !== 'slide-scene' || layer.sceneId !== location.sceneId))) throw new Error('对象不属于指定页面')
-  if (target.compositionNodeId && layer.scoped && !isCourseLayerVisibleAtLocation(layer.scoped, location.id)) throw new Error('组合对象在指定页面不可见')
-  const context = target.stateId ? layerToolContext(model.project, target) : null
-  return { location, layer, item: context?.entry.item ?? layer.item, context }
-}
-
-export function backgroundOwner(model: DocumentModel, target: Extract<ToolTarget, { kind: 'course-background' }>) {
-  if (model.kind !== 'course-v9') throw new Error('背景目标需要 V9 文档')
-  const course = model.project
-  if (target.owner === 'course') {
-    if (target.surfaceId || target.sceneId || target.stateId) throw new Error('课程背景不能包含页面坐标')
-    return { fields: course, effective: resolveEffectiveBackground({ owner: 'course', course }) }
-  }
-  const surface = course.surfaces.find(value => value.id === target.surfaceId)
-  if (!surface) throw new Error('背景 Surface 不存在')
-  if (surface.type !== 'slide') {
-    if (target.owner !== 'surface' || target.sceneId || target.stateId) throw new Error('Flow/Spatial 背景必须属于 Surface')
-    return { fields: surface, effective: resolveEffectiveBackground({ owner: surface.type === 'flow' ? 'flow-surface' : 'spatial-surface', course, surface }) }
-  }
-  if (target.owner === 'surface') {
-    if (target.sceneId || target.stateId) throw new Error('Surface 背景不能包含场景坐标')
-    return { fields: surface, effective: resolveEffectiveBackground({ owner: 'slide-surface', course, surface }) }
-  }
-  const scene = surface.scenes.find(value => value.id === target.sceneId)
-  if (!scene) throw new Error('背景场景不存在')
-  if (target.stateId) {
-    const state = scene.presentation?.states.find(value => value.id === target.stateId)
-    if (!state) throw new Error('背景命名态不存在')
-    return { fields: state, effective: resolveEffectiveBackground({ owner: 'slide-state', course, surface, scene, state }) }
-  }
-  return { fields: scene, effective: resolveEffectiveBackground({ owner: 'slide-scene', course, surface, scene }) }
-}
-
 export function readTarget(model: DocumentModel, target: ToolTarget): unknown {
-  if (target.kind === 'document') return isSourceDocumentModel(model) ? model.source : { title: model.project.title, locations: model.project.locations.map(value => ({ id: value.id, kind: value.kind })) }
+  if (target.kind === 'document') {
+    if (isSourceDocumentModel(model)) return model.source
+    if (model.kind === 'course-v10') return { title: model.project.title, surfaces: model.project.surfaces.map(value => ({ id: value.id, kind: value.kind })) }
+    throw new Error('当前工具只支持 Project V10、Markdown 和 Text 文档')
+  }
   if (target.kind === 'markdown-range') {
     if (!isSourceDocumentModel(model) || !Number.isSafeInteger(target.from) || !Number.isSafeInteger(target.to) || target.from < 0 || target.to < target.from || target.to > model.source.length) throw new Error('正文范围无效')
     return model.source.slice(target.from, target.to)
   }
-  if (model.kind !== 'course-v9') throw new Error('目标需要 V9 文档')
-  if (target.kind === 'flow-container') {
-    const blocks = flowBlocksAtParent(flowSurfaceIn(model.project, target.surfaceId).blocks, target.parentId)
-    validateFlowInsertIndex(target.index ?? blocks.length, blocks.length)
-    return { surfaceId: target.surfaceId, parentId: target.parentId, index: target.index, children: blocks.map(block => block.id) }
+  if (model.kind !== 'course-v10') throw new Error('组件目标需要 Project V10 文档')
+  if (target.kind === 'course-instance') {
+    const { instance, value } = courseInstanceContext(model, target)
+    if (isCourseInstanceRange(target)) {
+      const content = readCourseInstanceText(model, target)
+      if (content === null) throw new Error('所选字段不是文字')
+      return sliceCourseInstanceText(content, target.from, target.to)
+    }
+    return target.dataPath === undefined ? instance : value
   }
-  if (target.kind === 'flow-block' || target.kind === 'flow-range') {
-    const { block, parentId } = resolveFlowBlock(model.project, target)
-    if (target.kind === 'flow-block') return { block, parentId }
-    const content = flowTextSlot(block, target.slot).get()
-    if (!Number.isSafeInteger(target.from) || !Number.isSafeInteger(target.to) || target.from < 0 || target.from > target.to || target.to > documentTextLength(content)) throw new Error('正文范围已失效')
-    return { content: sliceFlowRichText(content, target.from, target.to), parentId }
-  }
-  if (target.kind === 'course-state') {
-    const { surface, scene, state } = stateToolContext(model.project, target)
-    return { surfaceId: surface.id, sceneId: scene.id, locationId: target.locationId, state }
-  }
-  if (target.kind === 'course-owner') {
-    const { location, surface, items, center } = resolveNativeOwner(model.project, target)
-    const scene = surface.type === 'slide' && location.kind === 'slide-scene' ? surface.scenes.find(scene => scene.id === location.sceneId) : undefined
-    return { location, owner: target.owner, stateId: target.stateId, center, children: items.map(item => item.layerItemId), ...(target.owner === 'scene' ? { interactions: scene?.interactions } : {}) }
-  }
-  if (target.kind === 'course-audio') return model.project.media.audio
-  if (target.kind === 'course-sound') {
-    const sound = model.project.media.audio.sounds[target.soundId]
-    if (!sound) throw new Error('声音不存在')
-    return { sound, asset: model.project.assets[sound.assetId], references: listCourseSoundReferences(model.project, target.soundId) }
+  if (target.kind === 'course-surface') {
+    const surface = model.project.surfaces.find(value => value.id === target.surfaceId)
+    if (!surface) throw new Error('表面已不存在')
+    return surface
   }
   if (target.kind === 'course-asset') {
     const asset = model.project.assets[target.assetId]
-    if (!asset) throw new Error('素材不存在')
+    if (!asset) throw new Error('素材已不存在')
     return asset
   }
-  if (target.kind === 'spatial-graph') {
-    const surface = spatialSurfaceIn(model.project, target.surfaceId)
-    return { surfaceId: surface.id, graph: target.graph, entity: target.graph === 'path' ? spatialPathIn(surface, target.graphId) : spatialRelationIn(surface, target.graphId) }
-  }
-  if (target.kind === 'course-surface') {
-    const surface = model.project.surfaces.find(surface => surface.id === target.surfaceId)
-    if (!surface) throw new Error('表面不存在')
-    return { surface, locations: model.project.locations.filter(location => location.surfaceId === surface.id) }
-  }
-  if (target.kind === 'course-location') {
-    const location = model.project.locations.find(value => value.id === target.locationId)
-    if (!location) throw new Error('页面不存在')
-    return location
-  }
-  if (target.kind === 'course-interaction') {
-    const rule = locateRule(model.project, { scope: 'scene', locationId: target.locationId }, target.ruleId)
-    if (!rule) throw new Error('互动规则不存在或已移出指定场景')
-    resolveNativeOwner(model.project, { kind: 'course-owner', owner: 'scene', locationId: target.locationId, stateId: target.stateId })
-    return { locationId: target.locationId, rule }
-  }
-  if (target.kind === 'course-object') {
-    const { location, layer, item, context } = courseObjectContext(model, target)
-    const owner = { source: layer.source, surfaceId: layer.surfaceId, sceneId: layer.sceneId, scoped: layer.scoped }
-    if (target.compositionNodeId) {
-      const node = item.kind === 'composition' && findCompositionNode(item.content.root, target.compositionNodeId)
-      if (!node) throw new Error('组合内部节点不存在或已移出此对象')
-      return { itemId: target.itemId, compositionNodeId: target.compositionNodeId, node, locked: item.locked,
-        ...(target.stateId ? { stateId: target.stateId } : {}), owner, location }
-    }
-    // Include owner and location, not merely the item's content: a move cannot silently rebind a handle.
-    return { item, ...(context ? { base: layer.item, stateId: target.stateId } : {}), owner, location }
-  }
-  const { fields, effective } = backgroundOwner(model, target)
-  return { backgroundColor: fields.backgroundColor, backgroundAssetId: fields.backgroundAssetId, ...('backgroundMode' in fields ? { backgroundMode: fields.backgroundMode } : {}), effective }
+  throw new Error('当前工具不支持此目标；请重新选择组件、表面或素材')
 }
 
 export function targetFootprint(model: DocumentModel, target: ToolTarget): string {
-  if (target.kind === 'course-asset' && model.kind === 'course-v9') return documentDigest({ asset: readTarget(model, target), bytesDigest: model.resources.assets[target.assetId] ? sha256(model.resources.assets[target.assetId]) : undefined })
-  if (target.kind === 'course-location' && model.kind === 'course-v9') {
-    const location = model.project.locations.find(location => location.id === target.locationId)
-    if (!location) throw new Error('页面不存在')
-    const surface = model.project.surfaces.find(surface => surface.id === location.surfaceId)!
-    const siblings = model.project.locations.filter(entry => entry.surfaceId === surface.id)
-    const content = surface.type === 'slide' && location.kind === 'slide-scene' && siblings.length > 1 ? surface.scenes.find(scene => scene.id === location.sceneId) : surface
-    return documentDigest({ location, content })
-  }
-  if (target.kind === 'course-state' && model.kind === 'course-v9') {
-    const { scene } = stateToolContext(model.project, target)
-    return documentDigest({ target: readTarget(model, target), scene })
-  }
-  if (model.kind === 'course-v9' && (target.kind === 'course-interaction' || target.kind === 'course-owner' && target.owner === 'scene')) {
-    const composition = composeCourseProjectLocation({ project: model.project, locationId: target.locationId, stateId: target.stateId ?? null })
-    const surface = model.project.surfaces.find(surface => surface.id === composition.surfaceId)
-    const location = model.project.locations.find(location => location.id === target.locationId)
-    const scene = surface?.type === 'slide' && location?.kind === 'slide-scene' ? surface.scenes.find(scene => scene.id === location.sceneId) : undefined
-    return documentDigest({ target: readTarget(model, target), presentation: scene?.presentation, items: composition.entries.filter(entry => entry.applicable), courseState: model.project.courseState })
-  }
-  if (model.kind === 'course-v9' && target.kind === 'course-object') {
-    if (target.compositionNodeId) {
-      const { item } = courseObjectContext(model, target)
-      const node = item.kind === 'composition' && findCompositionNode(item.content.root, target.compositionNodeId)
-      if (item.kind !== 'composition' || !node) throw new Error('组合内部节点不存在')
-      const keys = new Set<string>()
-      walkComposition(node, current => {
-        const values = current.kind === 'element' ? Object.values(current.attributes) : current.kind === 'text' ? [current.text] : []
-        for (const value of values) for (const match of value.matchAll(/cw-resource:([a-zA-Z0-9_.-]+)/g)) keys.add(match[1])
-      })
-      const assets = Object.fromEntries([...keys].sort().map(key => [key, item.content.assets[key]]))
-      return documentDigest({ target: readTarget(model, target), assets })
-    }
-    const layer = locateCourseLayer(model.project, target.itemId)
-    if (layer?.item.kind === 'native' && layer.item.content.nativeType === 'input') {
-      const data = layer.item.content.data
-      const rules = model.project.surfaces.flatMap(surface => surface.type === 'slide' ? surface.scenes.flatMap(scene => scene.interactions) : [])
-      return documentDigest({ target: readTarget(model, target), rules: rules.filter(rule => data.ruleFamilyRuleIds.includes(rule.id) || rule.trigger.type === 'input.submit' && rule.trigger.nodeId === target.itemId), declarations: model.project.courseState.filter(entry => entry.key === data.stateKey || entry.key === data.validityKey) })
-    }
-  }
-  if (target.kind === 'flow-range' && model.kind === 'course-v9') {
-    const { block, parentId } = resolveFlowBlock(model.project, target)
-    // A whole-slot read dependency refuses unproven offset shifts while allowing other slots/blocks to change.
-    return documentDigest({ type: block.type, parentId, slot: flowTextSlot(block, target.slot).get() })
+  if (target.kind === 'course-instance' && model.kind === 'course-v10') {
+    const context = courseInstanceContext(model, target)
+    return documentDigest({ definitionId: context.instance.definitionId, owner: owningContainer(model.project, target.instanceId),
+      stateId: target.stateId ?? null, ...(target.dataPath ? { fieldScope: target.fieldScope ?? 'data', dataPath: target.dataPath } : {}),
+      ...(target.dataPath ? { fieldIdentity: courseInstanceFieldIdentity(model, target) } : {}),
+      value: target.dataPath ? context.value : context.instance })
   }
   return documentDigest(readTarget(model, target))
-}
-
-/** An insertion depends on the actual parent and sibling order, not sibling text or styling. */
-export function insertionDependencyFootprint(model: DocumentModel, target: ToolTarget): string {
-  if (model.kind !== 'course-v9') throw new Error('插入目标需要 V9 文档')
-  if (target.kind === 'flow-container') return documentDigest(readTarget(model, target))
-  if (target.kind !== 'course-owner') throw new Error('插入目标需要图层 owner 或正文容器')
-  const { location, surface, items } = resolveNativeOwner(model.project, target)
-  return documentDigest({ locationId: location.id, surfaceId: surface.id,
-    owner: target.owner, stateId: target.stateId ?? null, children: items.map(item => item.layerItemId) })
 }
 
 /** Conservative verified mapping for a single disjoint source edit; ambiguous/overlapping edits conflict. */
@@ -258,53 +202,20 @@ export function mapSequenceRange<T, R extends { from: number; to: number }>(
 }
 
 export function childTargets(model: DocumentModel, target: ToolTarget): { target: ToolTarget; label: string }[] {
+  if (model.kind === 'course-v10' && (target.kind === 'course-surface' || target.kind === 'course-instance')) {
+    readTarget(model, target)
+    const ids = target.kind === 'course-surface' ? model.project.surfaces.find(value => value.id === target.surfaceId)!.childIds
+      : target.dataPath ? [] : model.project.instances[target.instanceId].childIds ?? []
+    return ids.map(instanceId => ({ target: { kind: 'course-instance', surfaceId: target.surfaceId, instanceId, ...(target.kind === 'course-instance' ? { stateId: target.stateId ?? null } : {}) },
+      label: model.project.instances[instanceId].name ?? model.project.definitions[model.project.instances[instanceId].definitionId]?.title ?? '所选对象' }))
+  }
   if (target.kind === 'document') {
     if (isSourceDocumentModel(model)) return [{ target: { kind: 'markdown-range', from: 0, to: model.source.length }, label: '正文' }]
-    const locations = model.project.locations.map(location => ({ target: { kind: 'course-location' as const, locationId: location.id }, label: location.label }))
-    return [...locations.slice(0, 1), { target: { kind: 'course-background', owner: 'course' }, label: '课程背景' }, ...locations.slice(1), ...model.project.surfaces.map(surface => ({ target: { kind: 'course-surface' as const, surfaceId: surface.id }, label: surface.title })), { target: { kind: 'course-audio' }, label: '音频设置与声音库' }, ...Object.values(model.project.assets).map(asset => ({ target: { kind: 'course-asset' as const, assetId: asset.id }, label: asset.filename }))]
+    if (model.kind === 'course-v10') return [
+      ...model.project.surfaces.map(surface => ({ target: { kind: 'course-surface' as const, surfaceId: surface.id }, label: surface.title })),
+      ...Object.values(model.project.assets).map(asset => ({ target: { kind: 'course-asset' as const, assetId: asset.id }, label: asset.path })),
+    ]
+    throw new Error('当前工具只支持 Project V10、Markdown 和 Text 文档')
   }
-  if (target.kind === 'course-audio' && model.kind === 'course-v9') return Object.values(model.project.media.audio.sounds).map(sound => ({ target: { kind: 'course-sound', soundId: sound.id }, label: sound.name }))
-  if (target.kind === 'course-surface' && model.kind === 'course-v9') {
-    readTarget(model, target)
-    const surface = model.project.surfaces.find(surface => surface.id === target.surfaceId)!
-    return [{ target: { kind: 'course-background', owner: 'surface', surfaceId: surface.id }, label: '表面背景' }, ...model.project.locations.filter(location => location.surfaceId === target.surfaceId).map(location => ({ target: { kind: 'course-location' as const, locationId: location.id }, label: location.label })), ...(surface.type === 'spatial-2d' ? [...(surface.world.paths ?? []).map(path => ({ target: { kind: 'spatial-graph' as const, graph: 'path' as const, surfaceId: surface.id, graphId: path.id }, label: path.name })), ...(surface.world.relations ?? []).map(relation => ({ target: { kind: 'spatial-graph' as const, graph: 'relation' as const, surfaceId: surface.id, graphId: relation.id }, label: relation.label ?? '关系连线' }))] : [])]
-  }
-  if (target.kind === 'course-state' && model.kind === 'course-v9') {
-    const { surface, scene } = stateToolContext(model.project, target)
-    return [{ target: { kind: 'course-background', owner: 'scene', surfaceId: surface.id, sceneId: scene.id, stateId: target.stateId }, label: '命名态背景' }]
-  }
-  if (target.kind === 'course-object' && model.kind === 'course-v9') {
-    readTarget(model, target)
-    const { item } = courseObjectContext(model, target)
-    if (item.kind !== 'composition') throw new Error('当前目标没有可列出的子项')
-    const root = target.compositionNodeId ? findCompositionNode(item.content.root, target.compositionNodeId)! : item.content.root
-    const nodes = target.compositionNodeId ? root.kind === 'element' ? root.children : [] : [root]
-    return nodes.map(node => ({ target: { ...target, compositionNodeId: node.id },
-      label: node.kind === 'element' ? node.tagName + (node.attributes.class ? ` .${node.attributes.class}` : '')
-        : node.kind === 'text' ? node.text.slice(0, 100) : node.kind === 'native' ? `原生 ${node.content.nativeType}` : node.kind }))
-  }
-  if (model.kind === 'course-v9' && (target.kind === 'flow-container' || target.kind === 'flow-block')) {
-    const parentId = target.kind === 'flow-container' ? target.parentId : target.blockId
-    const blocks = flowBlocksAtParent(flowSurfaceIn(model.project, target.surfaceId).blocks, parentId)
-    return blocks.map(block => ({ target: { kind: 'flow-block', surfaceId: target.surfaceId, parentId, blockId: block.id }, label: flowBlockLabel(block) }))
-  }
-  if (target.kind === 'course-owner' && model.kind === 'course-v9') {
-    const { location, surface, items } = resolveNativeOwner(model.project, target)
-    const background = target.owner === 'global' ? [] : target.owner === 'scene' && location.kind === 'slide-scene'
-      ? [{ target: { kind: 'course-background' as const, owner: 'scene' as const, surfaceId: surface.id, sceneId: location.sceneId, ...(target.stateId ? { stateId: target.stateId } : {}) }, label: target.stateId ? '命名态背景' : '场景背景' }]
-      : [{ target: { kind: 'course-background' as const, owner: 'surface' as const, surfaceId: surface.id }, label: '表面背景' }]
-    return [...background, ...(target.owner === 'scene' ? stateChildren(model.project, target.locationId).filter(child => !target.stateId || child.target.kind === 'course-state' && child.target.stateId === target.stateId) : []), ...items.map(item => ({ target: { kind: 'course-object' as const, locationId: target.locationId, itemId: item.layerItemId, ...(target.stateId ? { stateId: target.stateId } : {}) }, label: item.label })), ...(target.owner === 'scene' ? locateSceneInteractions(model.project, target.locationId).map(rule => ({ target: { kind: 'course-interaction' as const, locationId: target.locationId, ruleId: rule.id, ...(target.stateId ? { stateId: target.stateId } : {}) }, label: rule.name ?? '互动规则' })) : [])]
-  }
-  if (target.kind !== 'course-location' || model.kind !== 'course-v9') throw new Error('当前目标没有可列出的子项')
-  readTarget(model, target)
-  const location = model.project.locations.find(value => value.id === target.locationId)!
-  const surface = model.project.surfaces.find(value => value.id === location.surfaceId)!
-  const ids = [...model.project.globalLayerItems.map(value => value.item.layerItemId), ...surface.surfaceLayerItems.map(value => value.item.layerItemId)]
-  if (surface.type === 'slide' && location.kind === 'slide-scene') ids.push(...(surface.scenes.find(value => value.id === location.sceneId)?.layerItems.map(value => value.layerItemId) ?? []))
-  if (surface.type === 'spatial-2d') ids.push(...surface.world.layerItems.map(value => value.layerItemId))
-  const background = surface.type === 'slide' && location.kind === 'slide-scene'
-    ? { target: { kind: 'course-background' as const, owner: 'scene' as const, surfaceId: surface.id, sceneId: location.sceneId }, label: '场景背景' }
-    : { target: { kind: 'course-background' as const, owner: 'surface' as const, surfaceId: surface.id }, label: '表面背景' }
-  return [background, ...[{ target: { kind: 'course-owner' as const, locationId: location.id, owner: surface.type === 'slide' ? 'scene' as const : surface.type === 'flow' ? 'surface' as const : 'world' as const }, label: surface.type === 'spatial-2d' ? '世界内容创建位置' : '页面图层创建位置' }], ...(surface.type === 'flow' ? [{ target: { kind: 'flow-container' as const, surfaceId: surface.id, parentId: null }, label: '正文' }] : []),
-    ...stateChildren(model.project, location.id), ...ids.map(itemId => ({ target: { kind: 'course-object' as const, locationId: target.locationId, itemId }, label: locateCourseLayer(model.project, itemId)?.item.label ?? itemId }))]
+  throw new Error('当前目标没有可列出的子项')
 }

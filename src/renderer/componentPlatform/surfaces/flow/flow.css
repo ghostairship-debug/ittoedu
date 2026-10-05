@@ -1,0 +1,11 @@
+.component-flow-viewport { width: 100%; height: 100%; overflow: auto; overflow-anchor: none; position: relative; padding: 24px; box-sizing: border-box; }
+.component-flow-paper { max-width: 900px; margin: 0 auto; background: white; color: #17202e; padding: 32px; min-height: 100%; box-sizing: border-box; }
+.component-flow-block { position: relative; margin-block: 12px; box-sizing: border-box; }
+.component-flow-block[data-selected] { outline: 1px solid #5288ce; outline-offset: 4px; }
+.component-flow-text { overflow-wrap: anywhere; white-space: pre-wrap; }
+.component-flow-block-actions { display: flex; gap: 6px; padding-block: 4px; }
+.component-flow-block-actions button, .component-flow-collapse { font: inherit; font-size: 13px; cursor: pointer; }
+.component-flow-children { padding-inline-start: 16px; border-inline-start: 2px solid #dce4ee; }
+.component-flow-children[hidden] { display: none; }
+.component-flow-runtime { width: 100%; min-width: 0; }
+.component-flow-text .shared-document-editor { white-space: normal; }

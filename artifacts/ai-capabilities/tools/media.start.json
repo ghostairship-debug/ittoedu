@@ -1,0 +1,49 @@
+{
+  "description": "仅通过已验证的媒体连接启动语音、视频或音乐作业；无可用模型时明确未配置，不启动虚假作业。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "durationSeconds": {
+        "exclusiveMinimum": 0,
+        "type": "number"
+      },
+      "kind": {
+        "enum": [
+          "speech",
+          "video",
+          "music"
+        ],
+        "type": "string"
+      },
+      "language": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "prompt": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "referenceResources": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": "array"
+      }
+    },
+    "required": [
+      "kind",
+      "prompt"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "media.start",
+    "targetKinds": []
+  },
+  "name": "media.start",
+  "version": 1
+}

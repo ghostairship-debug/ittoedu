@@ -1,994 +1,276 @@
-import { missingTeacherControllerTransaction } from '../../components/teacherControllerComponent'
-import { commitResourceAwareAuthoringHistory, authoringLegacyHistoryEntryCount } from '../../authoring/resourceAwareAuthoringHistory'
-import type { ComponentPackageData } from '../../../shared/componentTypes'
-import { readAuthoringToolSelection } from '../../../shared/authoringToolContract'
-import { selectSlideToolResult } from '../../authoring/toolSelection'
-import type { CourseProjectDocument } from '../../../shared/courseProjectTypes'
-import type { CourseAssetSidecar } from '../../project/v9AssetAdapter'
-import { emptyCourseAssetSidecar } from '../../project/v9AssetAdapter'
-import { createBlankCourseProject } from '../../../core/course/createCourseProject'
-import {
-  createSlideAuthoringBackend,
-  openSlideAuthoringSession,
-  slideAuthoringGeneration,
-  type SlideAuthoringBackend,
-  type SlideAuthoringSession,
-  type SlideAuthoringSnapshot,
-  type SlideCommandResult,
-} from '../../course/slideAuthoringBackend'
-import { selectSlideEditorLayers, commitSlideEditorTransactionHistory, commitSlideProjectMutation } from '../../course/slideEditorCommands'
-import {
-  addSlideFormulaLayer,
-  addSlideShapeLayer,
-  addSlideTextLayer,
-} from '../../course/v9SlideContentCommands'
-import { addSlideTableLayer } from '../../course/v9TableCommands'
-import { addSlideChartLayer } from '../../course/v9ChartCommands'
-import { addSlideInputLayer } from '../../course/v9SlideContentCommands'
-import {
-  beginV9SlideContentEdit,
-  beginV9SlideChartTextEdit,
-  beginV9SlideFieldTextEdit,
-  updateV9SlideFieldTextDraft,
-  updateV9SlideChartTextDraft,
-  type SlideFieldTextIntent,
-  type SlideFieldTextReceipt,
-  cancelV9SlideContentEdit,
-  commitV9SlideContentEdit,
-  markV9SlideContentComposing,
-  updateV9SlideContentTextDraft,
-} from '../../authoring/v9SlideContentEdit'
-import {
-  findGlobalTeacherController,
-  locateCourseLayer,
-  restoreDefaultTeacherController,
-  type LayerCommandResult,
-} from '../../course/effectiveLayerCommands'
-import type { CourseMediaCommandResult } from '../../course/v9MediaAudioCommands'
-import type { ShapeType } from '../../../shared/contracts/native-v1'
-import type { NativeLineGeometry } from '../../../shared/contracts/native-v1/types'
-import { createFormulaNode, createShapeNode, createTextNode } from '../../../core/tools/nativeNodeFactories'
-import { normalizeNewNodeGeometry, sessionFromLayerResult } from '../v9LayerMutations'
+import { type ComponentAuthorSpot, type ComponentContainer, type ComponentDefinition, type ComponentEdit, type ComponentFrame, type ComponentImplementation, type ComponentPresentation, type CourseProjectV10, type JsonValue } from '../../../shared/contracts/component-platform'
 import type { TextRun } from '../../../shared/contracts/native-v1'
-import type { V9SlideClipboardPayload } from '../../../core/tools/slideClipboard'
-import {
-  isV9SlideContentDraftDirty,
-  type V9SlideContentEditSession,
-  type V9SlideTextContentDraft,
-} from '../../authoring/v9SlideContentEdit'
-import {
-  createSessionToken,
-  updateCourseAuthoringSessionItems,
-  updateCourseAuthoringSessionRevision,
-  type CourseAuthoringSession,
-} from '../../authoring/courseAuthoringSession'
-import type { EditorTransactionStep } from '../../authoring/editorTransaction'
-import {
-  exclusiveInactiveSurfaces,
-} from '../../composition/surfaceRouter'
-import { executeSlideAuthoringCommand, isSlideAuthoringBackend, type SlideBackend } from '../slideBackendPort'
-import {
-  SESSIONLESS_COURSE_REASON,
-  commitSurfaceResourcePersist,
-  type EditorStoreKernel,
-} from '../editorStoreKernel'
-import {
-  continuedCourseResourceStacks,
-  readCourseResourceState,
-  type CourseResourceHistoryContinuation,
-  type CourseResourceState,
-} from '../courseResourceState'
+import type { NativeLineGeometry } from '../../../shared/contracts/native-v1/types'
+import { createTextData, createFormulaData, TEXT_DEFINITION, FORMULA_DEFINITION, textComponentDataSchema } from '../../../components/text'
+import { defaultShapeData, SHAPE_DEFINITION, shapeDataSchema } from '../../../components/shape'
+import { createTableData, TABLE_DEFINITION } from '../../../components/table'
+import { createChartData, CHART_DEFINITION, chartDataSchema } from '../../../components/chart'
+import { createTeacherControllerData, TEACHER_CONTROLLER_DEFINITION } from '../../../components/teacher-controller'
+import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
+import type { EditorStoreKernel } from '../editorStoreKernel'
 import { createSlideOwnedCommands } from './slideOwnedCommands'
-import { buildCandidateEffectiveLayers } from '../../course/activeSurfaceProjection'
+import { componentIsLocked } from '../../composition/crossSurfaceCommands'
+import { insertComponentDefinitionAtTarget } from '../../components/insertComponentPackages'
+import { authorSpotEdits, dataWithSpotEdit } from '../../componentPlatform/surfaces/slide/authorSpots'
 
-export type SlideOwnedState = {
-  slideBackend: SlideBackend
-  slideCandidateSnapshot: SlideAuthoringSnapshot | null
-  slideCandidateClipboard: V9SlideClipboardPayload | null
-  v9ContentEdit: V9SlideContentEditSession | null
+export interface SlideContentEdit {
+  instanceId: string
+  definitionId: string
+  target: CapturedCourseTarget
+  data: JsonValue
+  originalData: JsonValue
+  frame?: ComponentFrame | null
+  composing: boolean
+  source: 'canvas' | 'properties'
+  authorSpot?: ComponentAuthorSpot
+  spotText?: string
+  implementation?: ComponentImplementation
 }
-
-export type SlidePersistExtra = {
-  clipboard?: V9SlideClipboardPayload | null
-  statusMessage?: string | null
-  clearContentEdit?: boolean
-  sidecar?: CourseAssetSidecar
-  sidecarDirection?: 'undo' | 'redo'
-  componentPackages?: Record<string, ComponentPackageData>
-  transactionStep?: EditorTransactionStep
-  courseAuthoringSession?: CourseAuthoringSession
+export function hasSlideContentDraftChanges(edit: SlideContentEdit): boolean {
+  return JSON.stringify(edit.data) !== JSON.stringify(edit.originalData) || edit.frame !== undefined || Boolean(edit.implementation)
+    || Boolean(edit.authorSpot && edit.spotText !== edit.authorSpot.initialValue)
 }
-
-export type SlidePersistSnapshot = SlideOwnedState & {
-  resources: CourseResourceState
-  dirty: boolean
-  authoringSession: CourseAuthoringSession | null
+/** The one private draft is projected only into its captured document, surface and named state. */
+export function projectWithSlideContentDraft(project: CourseProjectV10,
+  edit: SlideContentEdit | null, context: { documentId: string; epoch?: string; surfaceId: string | null; activeStateId: string | null }): CourseProjectV10 {
+  if (!edit || edit.target.documentId !== context.documentId || edit.target.epoch !== context.epoch
+    || edit.target.surfaceId !== context.surfaceId || edit.target.activeStateId !== context.activeStateId
+    || edit.target.project.id !== project.id || project.instances[edit.instanceId]?.definitionId !== edit.definitionId) return project
+  const instance = { ...project.instances[edit.instanceId], data: structuredClone(edit.data),
+    ...(edit.implementation ? { implementationOverride: structuredClone(edit.implementation) } : {}) }
+  if (edit.frame !== undefined) { if (edit.frame) instance.frame = structuredClone(edit.frame); else delete instance.frame }
+  return { ...project, instances: { ...project.instances, [edit.instanceId]: instance } }
 }
-
-export type SlidePersistCommit = Record<string, unknown>
-
-export type SlideApplyBackendExtra = {
-  sidecar?: CourseAssetSidecar
-  path?: string | null
-  dirty?: boolean
-  statusMessage?: string | null
-  componentPackages?: Record<string, ComponentPackageData>
-  clearClipboard?: boolean
-  canvasMode?: 'edit' | 'run'
-  resourceHistory?: CourseResourceHistoryContinuation
+/** UI drafts only. Bridge remains the sole selection/document owner. */
+export interface SlideOwnedState {
+  slideContentEdit: SlideContentEdit | null
+  slideDrawTool: 'line' | 'elbow-arrow' | null
 }
-
-export type SlideAuthoringPorts = {
+export function createInitialSlideOwnedState(): SlideOwnedState {
+  return { slideContentEdit: null, slideDrawTool: null }
+}
+export interface SlideAuthoringPorts {
   read(): SlideOwnedState
   patch(patch: Partial<SlideOwnedState>): void
-  persist(result: SlideCommandResult, extra?: SlidePersistExtra): SlideCommandResult
-  applyBackend(backend: SlideAuthoringBackend, extra?: SlideApplyBackendExtra): void
+  readEditingScope?(): 'scene' | 'global'
 }
+export type SlidePersistExtra = { statusMessage?: string | null }
+const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue
 
-export function persistSlideCandidateResult(
-  snapshot: SlidePersistSnapshot,
-  commit: (patch: SlidePersistCommit) => void,
-  result: SlideCommandResult,
-  extra: SlidePersistExtra = {},
-): SlideCommandResult {
-  if (!isSlideAuthoringBackend(snapshot.slideBackend)) return result
-  if (!result.ok) {
-    if (result.reason) {
-      commit({ errorMessage: result.reason, statusMessage: null })
-    }
-    return result
+export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: SlideAuthoringPorts) {
+  const report = (error: unknown) => kernel.setFeedback({ errorMessage: error instanceof Error ? error.message : String(error) })
+  const submit = (edits: ComponentEdit[], group?: string) => kernel.edit(edits, group).catch(error => { report(error); throw error })
+  const insertionContainer = (target: CapturedCourseTarget): ComponentContainer => ports.readEditingScope?.() === 'global'
+    ? { kind: 'global', plane: 'overlay' }
+    : { kind: 'surface', surfaceId: target.surfaceId! }
+  const insert = async (definition: ComponentDefinition, data: unknown, width: number, height: number, x = 80, y = 80, target = kernel.captureTarget()) => {
+    const surface = target.project.surfaces.find(value => value.id === target.surfaceId)
+    if (!surface) throw new Error('请先选择一个内容页面')
+    const id = crypto.randomUUID(), container = insertionContainer(target)
+    const edits: ComponentEdit[] = []
+    if (!target.project.definitions[definition.id]) edits.push({ type: 'definition.set', definition })
+    edits.push({ type: 'instance.insert', container, index: container.kind === 'global' ? target.project.global[container.plane].length : surface.childIds.length,
+      rootIds: [id], instances: [{ id, definitionId: definition.id, data: json(data), frame: { width, height, transform: [1, 0, 0, 1, x, y] } }] })
+    await kernel.editCaptured(kernel.capture(edits, target))
+    kernel.selectInstances([id], surface.id, target.documentId)
+    return id
   }
-  let nextBackend = result.nextSession
-    ? createSlideAuthoringBackend(result.nextSession)
-    : snapshot.slideBackend
-  const editedLayerItemId = extra.clearContentEdit
-    ? snapshot.v9ContentEdit?.target.layerItemId
-    : undefined
-  if (editedLayerItemId) {
-    const liveSnapshot = nextBackend.getSnapshot()
-    if (!liveSnapshot.selection.selectionIds.includes(editedLayerItemId)) {
-      const restored = nextBackend.selectLayers([editedLayerItemId], false, {
-        expectedRevision: liveSnapshot.revision,
-      })
-      if (restored.ok && restored.nextSession) {
-        nextBackend = createSlideAuthoringBackend(restored.nextSession)
+  const beginSlideDataEdit = (instanceId: string, source: 'canvas' | 'properties' = 'canvas') => {
+    const previous = ports.read().slideContentEdit
+    if (previous?.instanceId === instanceId && previous.target.documentId === kernel.readView().activeDocumentId) return previous
+    if (previous) { kernel.setFeedback({ statusMessage: '请先完成当前文字编辑' }); return null }
+    const target = kernel.captureTarget(), instance = target.project.instances[instanceId]
+    if (!instance || componentIsLocked(target.editingProject, instanceId)) return null
+    const effective = target.editingProject.instances[instanceId]
+    const edit: SlideContentEdit = { instanceId, definitionId: instance.definitionId, target, data: structuredClone(effective.data), originalData: structuredClone(effective.data), composing: false, source }
+    ports.patch({ slideContentEdit: edit })
+    return edit
+  }
+  const updateSlideDataDraft = (data: unknown, composing?: boolean, height?: number) => {
+    const edit = ports.read().slideContentEdit
+    if (!edit) return
+    const originalFrame = edit.target.editingProject.instances[edit.instanceId]?.frame
+    const frameBase = edit.frame === undefined ? originalFrame : edit.frame
+    const frame = frameBase && height !== undefined && Number.isFinite(height) && height > frameBase.height + 0.5 ? { ...frameBase, height } : edit.frame
+    const nextData = json(data)
+    if (edit && (JSON.stringify(nextData) !== JSON.stringify(edit.data) || (composing ?? edit.composing) !== edit.composing || JSON.stringify(frame) !== JSON.stringify(edit.frame)))
+      ports.patch({ slideContentEdit: { ...edit, data: nextData, composing: composing ?? edit.composing, frame } })
+  }
+  const updateSlideFrameDraft = (frame: ComponentFrame | null) => {
+    const edit = ports.read().slideContentEdit
+    if (!edit) return
+    const original = edit.target.editingProject.instances[edit.instanceId]?.frame ?? null
+    const value = JSON.stringify(frame) === JSON.stringify(original) ? undefined : structuredClone(frame)
+    if (JSON.stringify(value) !== JSON.stringify(edit.frame)) ports.patch({ slideContentEdit: { ...edit, frame: value } })
+  }
+  const beginSlideSpotEdit = (spot: ComponentAuthorSpot, target = kernel.captureTarget()) => {
+    if (typeof spot.initialValue !== 'string') { report('请使用此对象的专业内容编辑器'); return null }
+    const previous = ports.read().slideContentEdit
+    if (previous) { report('请先完成当前文字编辑'); return null }
+    const instance = target.editingProject.instances[spot.instanceId]
+    if (!instance || componentIsLocked(target.editingProject, spot.instanceId)) return null
+    try { authorSpotEdits(target.editingProject, spot, spot.initialValue, target.resources) } catch (error) { report(error); return null }
+    const edit: SlideContentEdit = { instanceId: instance.id, definitionId: instance.definitionId, target,
+      data: structuredClone(instance.data), originalData: structuredClone(instance.data), composing: false, source: 'canvas', authorSpot: structuredClone(spot), spotText: spot.initialValue }
+    ports.patch({ slideContentEdit: edit }); return edit
+  }
+  const updateSlideSpotDraft = (value: string, composing?: boolean) => {
+    const edit = ports.read().slideContentEdit
+    if (!edit?.authorSpot) return
+    const operations = authorSpotEdits(edit.target.editingProject, edit.authorSpot, value, edit.target.resources)
+    const operation = operations.find(operation => operation.type === 'data.set' || operation.type === 'implementation.set')
+    const instance = edit.target.editingProject.instances[edit.instanceId]
+    const originalImplementation = instance.implementationOverride ?? edit.target.editingProject.definitions[instance.definitionId]?.implementation
+    ports.patch({ slideContentEdit: { ...edit, spotText: value, composing: composing ?? edit.composing,
+      ...(operation?.type === 'data.set' ? { data: dataWithSpotEdit(edit.data, operation) }
+        : operation?.type === 'implementation.set' && operation.implementation && !operations.some(value => value.type === 'component.files.set')
+          ? { implementation: JSON.stringify(operation.implementation) === JSON.stringify(originalImplementation) ? undefined : operation.implementation } : {}) } })
+  }
+  const pendingCommits = new WeakMap<SlideContentEdit, Promise<void>>()
+  const commitTextEdit = (): Promise<void> => {
+    const edit = ports.read().slideContentEdit
+    if (!edit) return Promise.resolve()
+    const existing = pendingCommits.get(edit)
+    if (existing) return existing
+    if (edit.composing) return Promise.reject(new Error('请先完成正在输入的文字'))
+    const pending = (async () => {
+      if (hasSlideContentDraftChanges(edit)) {
+        const edits: ComponentEdit[] = edit.authorSpot && edit.spotText !== undefined
+          ? authorSpotEdits(edit.target.editingProject, edit.authorSpot, edit.spotText, edit.target.resources) : []
+        if (!edit.authorSpot && JSON.stringify(edit.originalData) !== JSON.stringify(edit.data)) edits.push({ type: 'data.set', instanceId: edit.instanceId, path: [], value: edit.data })
+        if (edit.frame !== undefined) edits.push({ type: 'frame.set', instanceId: edit.instanceId, frame: edit.frame })
+        if (!edit.authorSpot && edit.implementation) edits.push({ type: 'implementation.set', instanceId: edit.instanceId, implementation: edit.implementation })
+        const command = kernel.capture(edits, edit.target)
+        try { await kernel.editCaptured(command) } catch (error) { report(error); throw error }
+        if (edit.implementation || edit.authorSpot?.sourceRegion?.encoding)
+          kernel.setFeedback({ statusMessage: '组件源码已更新并重新加载内容，程序内部运行现场可能重置。' })
       }
-    }
+      if (ports.read().slideContentEdit === edit) ports.patch({ slideContentEdit: null })
+    })()
+    pendingCommits.set(edit, pending)
+    const clear = () => { pendingCommits.delete(edit) }
+    void pending.then(clear, clear)
+    return pending
   }
-  const nextSnapshot = nextBackend.getSnapshot()
-  const generation = slideAuthoringGeneration(nextSnapshot.sessionId)
-  const documentChanged =
-    nextBackend.getSession().history.present !== snapshot.slideBackend.getSession().history.present
-  const keepEdit = extra.clearContentEdit
-    ? null
-    : snapshot.v9ContentEdit && snapshot.v9ContentEdit.target.generation === generation
-      && (
-        !documentChanged
-        || snapshot.v9ContentEdit.composing
-        || isV9SlideContentDraftDirty(snapshot.v9ContentEdit)
-      )
-      ? snapshot.v9ContentEdit
-      : null
-  const nextHistory = nextBackend.getSession().history
-  if (
-    extra.transactionStep &&
-    result.resourceTransition &&
-    extra.transactionStep.resourceChanges !== result.resourceTransition.resourceChanges
-  ) {
-    throw new Error('Slide 历史资源增量与编辑事务不一致')
+  const addShapeNode = (type: string, x?: number, y?: number) =>
+    insert(SHAPE_DEFINITION, shapeDataSchema.parse(defaultShapeData(type as Parameters<typeof defaultShapeData>[0])), 200, 140, x, y)
+  const mutatePresentation = async (recipe: (presentation: ComponentPresentation) => void, captured = kernel.captureTarget()) => {
+    const surface = captured.project.surfaces.find(value => value.id === captured.surfaceId)
+    if (!surface || surface.kind !== 'slide') throw new Error('请先选择一个演示页面')
+    const presentation = structuredClone(surface.presentation ?? { states: [] })
+    recipe(presentation)
+    return kernel.editCaptured(kernel.capture([{ type: 'surface.presentation.set', surfaceId: surface.id, presentation }], captured))
   }
-  const resourceAware = result.resourceTransition !== undefined || extra.transactionStep !== undefined
-  const committed = commitSurfaceResourcePersist(snapshot.resources, {
-    document: nextHistory.present,
-    applyDocument: snapshot.slideBackend.getSession().history.present,
-    transactionStep: extra.transactionStep,
-    resourceTransition: result.resourceTransition,
-    sidecar: resourceAware ? undefined : extra.sidecar,
-    sidecarDirection: resourceAware ? undefined : extra.sidecarDirection,
-    componentPackages: resourceAware ? undefined : extra.componentPackages,
-    historyEntry: result.historyEntry,
-    legacyPastCount: authoringLegacyHistoryEntryCount(nextHistory.past),
-    legacyFutureCount: authoringLegacyHistoryEntryCount(nextHistory.future),
-  })
-  const historyDirection = extra.sidecarDirection ?? (
-    result.resourceTransition
-      ? result.resourceTransition.resourceDirection === 'inverse' ? 'undo' : 'redo'
-      : undefined
-  )
-  const nextCourseAuthoringSession = extra.courseAuthoringSession ?? (
-    historyDirection && snapshot.authoringSession
-      ? updateCourseAuthoringSessionItems({
-          token: createSessionToken({
-            locationId: nextSnapshot.locationId,
-            surfaceType: 'slide',
-            revision: nextHistory.present.revision,
-          }, snapshot.authoringSession.token.generation + 1),
-          itemIds: snapshot.authoringSession.itemIds,
-        }, nextSnapshot.selection.selectionIds)
-      : snapshot.authoringSession
-        ? updateCourseAuthoringSessionItems(
-            updateCourseAuthoringSessionRevision(snapshot.authoringSession, nextHistory.present.revision),
-            nextSnapshot.selection.selectionIds,
-          )
-        : undefined
-  )
-  commit({
-    slideBackend: nextBackend,
-    slideCandidateSnapshot: nextSnapshot,
-    ...committed,
-    dirty: resourceAware || extra.sidecarDirection || result.historyEntry
-      ? true
-      : snapshot.dirty,
-    ...(extra.clipboard !== undefined
-      ? { slideCandidateClipboard: extra.clipboard }
-      : {}),
-    v9ContentEdit: keepEdit,
-    ...(extra.clearContentEdit || (snapshot.v9ContentEdit && !keepEdit)
-      ? { editingTextNodeId: null }
-      : {}),
-    errorMessage: null,
-    ...(extra.statusMessage !== undefined ? { statusMessage: extra.statusMessage } : {}),
-    ...(nextCourseAuthoringSession
-      ? { courseAuthoringSession: nextCourseAuthoringSession }
-      : {}),
-  })
-  return result
-}
-
-export function applyV9BackendState(
-  backend: SlideAuthoringBackend,
-  extra: {
-    sidecar?: CourseAssetSidecar
-    path?: string | null
-    dirty?: boolean
-    statusMessage?: string | null
-    componentPackages?: Record<string, ComponentPackageData>
-    clearClipboard?: boolean
-    canvasMode?: 'edit' | 'run'
-    resourceHistory?: CourseResourceHistoryContinuation
-    currentClipboard?: V9SlideClipboardPayload | null
-  } = {},
-): SlidePersistCommit {
-  const snapshot = backend.getSnapshot()
-  const sidecar = extra.sidecar ?? emptyCourseAssetSidecar()
-  const courseProject = backend.getSession().history.present
+  const requireState = (presentation: ComponentPresentation, id: string) => {
+    const state = presentation.states.find(value => value.id === id)
+    if (!state) throw new Error('演示状态已不存在')
+    return state
+  }
   return {
-    ...exclusiveInactiveSurfaces('slide'),
-    slideBackend: backend,
-    slideCandidateSnapshot: snapshot,
-    slideCandidateClipboard: extra.clearClipboard === false
-      ? extra.currentClipboard ?? null
-      : null,
-    v9ContentEdit: null,
-    ...continuedCourseResourceStacks(extra.resourceHistory),
-    courseAssetSidecar: sidecar,
-    editingTextNodeId: null,
-    slideDrawTool: null,
-    canvasMode: extra.canvasMode ?? 'edit',
-    errorMessage: null,
-    dirty: extra.dirty ?? false,
-    projectPath: extra.path === undefined ? null : extra.path,
-    statusMessage: extra.statusMessage ?? `已打开“${courseProject.title}”`,
-    componentPackages: extra.componentPackages ?? {},
-  }
-}
-
-export function createSlideAuthoringSlice(
-  kernel: EditorStoreKernel,
-  slide: SlideAuthoringPorts,
-): {
-  injectV9SlideCandidateBackend(backend: SlideAuthoringBackend): void
-  clearV9SlideCandidateBackend(): void
-  runSlideCandidateCommand(
-    run: (backend: SlideAuthoringBackend) => SlideCommandResult,
-  ): SlideCommandResult
-  applySlideCandidateSession(session: SlideAuthoringSession): void
-  applySlideCandidateCommand(
-    run: (session: SlideAuthoringSession) => SlideCommandResult,
-    extra?: SlidePersistExtra,
-  ): SlideCommandResult
-  duplicateScene(sceneId: string): void
-  reorderScenes(sceneIds: string[]): void
-  commitDraft(): SlideAuthoringBackend | null
-  runSlideFieldTextIntent(intent: SlideFieldTextIntent): SlideFieldTextReceipt
-  commitDraftForPersistence(): { ok: true } | { ok: false; reason: string }
-  materializeDraft(document: CourseProjectDocument): { readonly ok: true; readonly document: CourseProjectDocument } | { readonly ok: false; readonly reason: string }
-  undo(): void
-  redo(): void
-  activateState(stateId: string | null): void
-  activateScene(sceneId: string): void
-  setScope(scope: 'global' | 'scene'): void
-  renameProject(title: string): void
-  updateScene(sceneId: string, patch: {
-    name?: string
-  }): void
-  setActivePresentationState(stateId: string | null): void
-  addPresentationState(name?: string): void
-  duplicatePresentationState(stateId: string): void
-  renamePresentationState(stateId: string, name: string): void
-  deletePresentationState(stateId: string): boolean
-  addTextNode(x?: number, y?: number): void
-  addFormulaNode(x?: number, y?: number): void
-  addRectangleNode(x?: number, y?: number): void
-  addShapeNode(shapeType: string, x?: number, y?: number): void
-  drawSlideShapeNode(input: {
-    shapeType: 'line' | 'elbow-arrow'
-    frame: { x: number; y: number; width: number; height: number }
-    lineGeometry: NativeLineGeometry
-  }): void
-  addTableNode(x?: number, y?: number): void
-  addInputNode(): void
-  addChartNode(chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number): void
-  beginTextEdit(nodeId: string, source?: 'canvas' | 'properties'): void
-  updateTextEditDraft(nodeId: string, text: string, runs: TextRun[], height?: number, width?: number): void
-  setSlideTextEditComposing(composing: boolean): void
-  commitTextEdit(): void
-  cancelTextEdit(): void
-  selectNode(nodeId: string | null, additive?: boolean): void
-  ensureTeacherController(): void
-  persistLayerCommand(result: LayerCommandResult, extra?: SlidePersistExtra): SlideCommandResult
-  persistMediaResult(result: CourseMediaCommandResult): CourseMediaCommandResult
-  persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean
-  persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
-} & ReturnType<typeof createSlideOwnedCommands> {
-  const runCandidateSession = (
-    run: (session: SlideAuthoringSession) => SlideCommandResult,
-    extra?: SlidePersistExtra,
-  ): SlideCommandResult => {
-    const backend = slide.read().slideBackend
-    if (!isSlideAuthoringBackend(backend)) {
-      return {
-        ok: false,
-        reason: 'not-slide-authoring-backend',
-        historyEntry: false,
+    ...createSlideOwnedCommands(kernel, { ...ports, submit }),
+    beginSlideDataEdit, updateSlideDataDraft, updateSlideFrameDraft, beginSlideSpotEdit, updateSlideSpotDraft, beginTextEdit: beginSlideDataEdit,
+    async setActivePresentationState(stateId: string | null, captured = kernel.captureTarget()) {
+      if (ports.read().slideContentEdit?.target.documentId === captured.documentId) await commitTextEdit()
+      kernel.bridge.selectPresentationState(captured.documentId, stateId, captured.surfaceId ?? undefined)
+    },
+    async addPresentationState(name = '新状态', captured = kernel.captureTarget()) {
+      const id = crypto.randomUUID()
+      await mutatePresentation(presentation => { presentation.states.push({ id, title: name, overrides: {} }) }, captured)
+      kernel.bridge.selectPresentationState(captured.documentId, id, captured.surfaceId ?? undefined)
+      return id
+    },
+    async duplicatePresentationState(stateId: string, captured = kernel.captureTarget()) {
+      const id = crypto.randomUUID()
+      await mutatePresentation(presentation => {
+        const source = requireState(presentation, stateId), index = presentation.states.indexOf(source)
+        presentation.states.splice(index + 1, 0, { ...structuredClone(source), id, title: source.title + ' 副本' })
+      }, captured)
+      kernel.bridge.selectPresentationState(captured.documentId, id, captured.surfaceId ?? undefined)
+      return id
+    },
+    renamePresentationState(stateId: string, title: string, captured?: CapturedCourseTarget) {
+      return mutatePresentation(presentation => { requireState(presentation, stateId).title = title }, captured)
+    },
+    async deletePresentationState(stateId: string, captured = kernel.captureTarget()) {
+      await mutatePresentation(presentation => {
+        requireState(presentation, stateId)
+        presentation.states = presentation.states.filter(state => state.id !== stateId)
+        if (presentation.initialStateId === stateId) presentation.initialStateId = null
+        if (presentation.thumbnailStateId === stateId) presentation.thumbnailStateId = null
+      }, captured)
+      return true
+    },
+    setInitialPresentationState(stateId: string | null, captured?: CapturedCourseTarget) {
+      return mutatePresentation(presentation => { if (stateId) requireState(presentation, stateId); presentation.initialStateId = stateId }, captured)
+    },
+    setThumbnailPresentationState(stateId: string | null, captured?: CapturedCourseTarget) {
+      return mutatePresentation(presentation => { if (stateId) requireState(presentation, stateId); presentation.thumbnailStateId = stateId }, captured)
+    },
+    clearPresentationStateOverrides(stateId: string, captured?: CapturedCourseTarget) {
+      return mutatePresentation(presentation => {
+        const state = requireState(presentation, stateId)
+        state.overrides = {}; delete state.order; delete state.background
+      }, captured)
+    },
+    updateTextEditDraft(instanceId: string, text: string, runs: TextRun[], _height?: number, _width?: number) {
+      const edit = ports.read().slideContentEdit
+      if (!edit || edit.instanceId !== instanceId) return
+      const data = textComponentDataSchema.parse(edit.data)
+      if (data.content.inlines.some(inline => inline.type === 'math')) throw new Error('请在专业文字编辑器中编辑行内公式')
+      const chars = Array.from(text), inlines: { type: 'text'; text: string; style?: TextRun['style'] }[] = []
+      for (let index = 0; index < chars.length; index++) {
+        const style = Object.assign({}, ...runs.filter(run => index >= run.start && index < run.end).map(run => run.style))
+        const previous = inlines.at(-1)
+        if (previous && JSON.stringify(previous.style) === JSON.stringify(style)) previous.text += chars[index]
+        else inlines.push({ type: 'text', text: chars[index]!, style })
       }
-    }
-    return slide.persist(run(backend.getSession()), extra)
-  }
-
-  const commitDraft = (): SlideAuthoringBackend | null => {
-    const owned = slide.read()
-    const backend = owned.slideBackend
-    if (!isSlideAuthoringBackend(backend)) return null
-    if (!owned.v9ContentEdit) return backend
-    const result = commitV9SlideContentEdit(backend.getSession(), owned.v9ContentEdit, { componentPackages: kernel.readResources().componentPackages })
-    if (!result.ok) {
-      slide.persist(result)
-      return null
-    }
-    slide.persist(result, { clearContentEdit: true })
-    const next = slide.read().slideBackend
-    return isSlideAuthoringBackend(next) ? next : null
-  }
-
-  const commitTextEdit = (): void => {
-    const owned = slide.read()
-    const backend = owned.slideBackend
-    if (!isSlideAuthoringBackend(backend) || !owned.v9ContentEdit) return
-    slide.persist(
-      commitV9SlideContentEdit(backend.getSession(), owned.v9ContentEdit, { componentPackages: kernel.readResources().componentPackages }),
-      { clearContentEdit: true },
-    )
-  }
-
-  const addShapeNode = (shapeType: string, x?: number, y?: number): void => {
-    const packages = kernel.readResources().componentPackages
-    const placed = typeof x === 'number' || typeof y === 'number'
-      ? normalizeNewNodeGeometry(createShapeNode(shapeType as ShapeType, { x, y }), packages)
-      : null
-    runCandidateSession(
-      (session) => addSlideShapeLayer(session, {
-        shapeType: shapeType as ShapeType,
-        ...(placed ? { x: placed.x, y: placed.y } : {}),
-      }, { expectedRevision: session.history.present.revision }),
-      { statusMessage: '已添加形状' },
-    )
-  }
-
-  const selectNode = (nodeId: string | null, additive = false): void => {
-    const owned = slide.read()
-    const backend = owned.slideBackend
-    if (!isSlideAuthoringBackend(backend)) {
-      kernel.failSessionless()
-    }
-    if (owned.v9ContentEdit && !commitDraft()) return
-    const live = slide.read().slideBackend
-    if (!isSlideAuthoringBackend(live)) return
-    if (nodeId === null) {
-      slide.persist(live.selectLayers([], additive, {
-        expectedRevision: live.getSnapshot().revision,
-      }))
-      return
-    }
-    const projection = buildCandidateEffectiveLayers({
-      slideBackend: live,
-      spatialSession: null,
-      flowSession: null,
-    })
-    const row = projection?.unifiedRows.find((candidate) => candidate.id === nodeId)
-    const nextScope = row?.isTeacherController && live.getSession().scope === 'scene'
-      ? 'scene'
-      : row?.owner === 'global' || row?.owner === 'surface' || row?.owner === 'scene'
-      ? row.owner
-      : live.getSession().scope
-    if (nextScope !== live.getSession().scope) {
-      slide.persist(live.setScope(nextScope, {
-        expectedRevision: live.getSnapshot().revision,
-      }))
-      const scoped = slide.read().slideBackend
-      if (!isSlideAuthoringBackend(scoped)) return
-      slide.persist(scoped.selectLayers([nodeId], additive, {
-        expectedRevision: scoped.getSnapshot().revision,
-      }))
-      return
-    }
-    slide.persist(live.selectLayers([nodeId], additive, {
-      expectedRevision: live.getSnapshot().revision,
-    }))
-  }
-
-  return {
-    injectV9SlideCandidateBackend(backend) {
-      if (!isSlideAuthoringBackend(backend)) return
-      slide.applyBackend(backend, {
-        sidecar: emptyCourseAssetSidecar(),
-        dirty: false,
-        statusMessage: null,
-        path: null,
-      })
+      updateSlideDataDraft({ ...data, content: { inlines } })
     },
-    clearV9SlideCandidateBackend() {
-      slide.applyBackend(
-        createSlideAuthoringBackend(openSlideAuthoringSession(createBlankCourseProject())),
-        {
-          sidecar: emptyCourseAssetSidecar(),
-          dirty: false,
-          statusMessage: null,
-          path: null,
-        },
-      )
-    },
-    runSlideCandidateCommand(run) {
-      return slide.persist(
-        executeSlideAuthoringCommand(slide.read().slideBackend, run),
-      )
-    },
-    applySlideCandidateSession(session) {
-      if (!isSlideAuthoringBackend(slide.read().slideBackend)) return
-      slide.persist({
-        ok: true,
-        nextSession: session,
-        historyEntry: false,
-      })
-    },
-    applySlideCandidateCommand(run, extra) {
-      return runCandidateSession(run, extra)
-    },
-    duplicateScene(sceneId) {
-      const backend = slide.read().slideBackend
-      if (!isSlideAuthoringBackend(backend)) {
-        kernel.setFeedback({ errorMessage: SESSIONLESS_COURSE_REASON, statusMessage: null })
-        return
-      }
-      slide.persist(backend.duplicateScene(sceneId, {
-        expectedRevision: backend.getSnapshot().revision,
-      }))
-    },
-    reorderScenes(sceneIds) {
-      const backend = slide.read().slideBackend
-      if (!isSlideAuthoringBackend(backend)) {
-        kernel.setFeedback({ errorMessage: SESSIONLESS_COURSE_REASON, statusMessage: null })
-        return
-      }
-      slide.persist(backend.reorderScenes(sceneIds, {
-        expectedRevision: backend.getSnapshot().revision,
-      }))
-    },
-    commitDraft,
-    runSlideFieldTextIntent(intent) {
-      const owned = slide.read()
-      const backend = owned.slideBackend
-      if (!isSlideAuthoringBackend(backend)) return { ok: false, reason: SESSIONLESS_COURSE_REASON }
-      const session = backend.getSession()
-      if (intent.kind === 'begin-chart' || intent.kind === 'begin-field') {
-        if (owned.v9ContentEdit) return { ok: false, reason: '请先完成当前文字编辑' }
-        const target = intent.target
-        if (target.sessionId !== session.sessionId || target.generation !== session.generation || target.revision !== session.history.present.revision || target.scope !== session.scope) {
-          return { ok: false, reason: 'stale-revision' }
-        }
-        const begun = intent.kind === 'begin-chart'
-          ? beginV9SlideChartTextEdit(session, target.layerItemId, intent.field)
-          : beginV9SlideFieldTextEdit(session, target.layerItemId, intent.field, kernel.readResources().componentPackages)
-        if (!begun.ok) return begun
-        if (begun.edit.target.authoringAddress !== target.authoringAddress) return { ok: false, reason: 'stale-target' }
-        slide.patch({ v9ContentEdit: begun.edit })
-        return begun
-      }
-      const edit = owned.v9ContentEdit
-      if (!edit || !Object.is(edit, intent.expectedEdit)) return { ok: false, reason: 'stale-revision' }
-      if (intent.kind === 'cancel') {
-        slide.patch({ v9ContentEdit: null })
-        return { ok: true, edit: null }
-      }
-      if (intent.kind === 'update-chart') {
-        if (edit.kind !== 'chart-text' || edit.target.revision !== session.history.present.revision || edit.target.generation !== session.generation) return { ok: false, reason: 'stale-revision' }
-        const next = updateV9SlideChartTextDraft(edit, intent.draft, intent.composing)
-        slide.patch({ v9ContentEdit: next })
-        return { ok: true, edit: next }
-      }
-      if (intent.kind === 'update-field') {
-        if (edit.kind !== 'field-text' || edit.target.revision !== session.history.present.revision || edit.target.generation !== session.generation) return { ok: false, reason: 'stale-revision' }
-        const next = updateV9SlideFieldTextDraft(edit, intent.text, intent.composing)
-        slide.patch({ v9ContentEdit: next })
-        return { ok: true, edit: next }
-      }
-      const result = commitV9SlideContentEdit(session, edit, { componentPackages: kernel.readResources().componentPackages })
-      if (!result.ok) return { ok: false, reason: result.reason ?? '文字提交失败' }
-      slide.persist(result, { clearContentEdit: true })
-      return { ok: true, edit: null }
-    },
-    commitDraftForPersistence(): { ok: true } | { ok: false; reason: string } {
-      const owned = slide.read()
-      const backend = owned.slideBackend
-      const edit = owned.v9ContentEdit
-      if (!edit || !isSlideAuthoringBackend(backend)) return { ok: true }
-      if (edit.composing) return { ok: false, reason: 'composing' }
-      if (isV9SlideContentDraftDirty(edit)) {
-        if (edit.target.revision !== backend.getSession().history.present.revision) {
-          return { ok: false, reason: 'stale-revision' }
-        }
-        const result = commitV9SlideContentEdit(backend.getSession(), edit, { componentPackages: kernel.readResources().componentPackages })
-        if (!result.ok) {
-          return { ok: false, reason: result.reason ?? '无法提交活动文字草稿' }
-        }
-        slide.persist(result, { clearContentEdit: true })
-      } else {
-        slide.patch({ v9ContentEdit: null })
-      }
-      return { ok: true }
-    },
-    materializeDraft(document: CourseProjectDocument): { readonly ok: true; readonly document: CourseProjectDocument } | { readonly ok: false; readonly reason: string } {
-      const owned = slide.read()
-      const edit = owned.v9ContentEdit
-      if (edit?.kind === 'chart-text' || edit?.kind === 'field-text') {
-        if (!isSlideAuthoringBackend(owned.slideBackend)) return { ok: false, reason: SESSIONLESS_COURSE_REASON }
-        const session = owned.slideBackend.getSession()
-        const result = commitV9SlideContentEdit(
-          { ...session, history: { ...session.history, present: document } }, { ...edit, composing: false },
-          { componentPackages: kernel.readResources().componentPackages },
-        )
-        return result.ok && result.nextSession
-          ? { ok: true, document: result.nextSession.history.present }
-          : { ok: false, reason: result.reason ?? '无法恢复图表文字草稿' }
-      }
-      if (!edit || edit.kind !== 'text') return { ok: true, document }
-      const clone = structuredClone(document)
-      const located = locateCourseLayer(clone, edit.target.layerItemId)
-      const item = located?.item
-      if (item && item.kind === 'native' && item.content.nativeType === 'text') {
-        const draft = edit.draft as V9SlideTextContentDraft
-        const data = item.content.data as { text: string; runs?: unknown }
-        data.text = draft.text
-        if (draft.runs) data.runs = structuredClone(draft.runs)
-        if (draft.width !== undefined) item.frame.width = draft.width
-        if (draft.height !== undefined) item.frame.height = draft.height
-      }
-      return { ok: true, document: clone }
-    },
-    undo() {
-      slide.patch({ v9ContentEdit: null })
-      void kernel.navigateHistory('undo').catch(error => kernel.setFeedback({ errorMessage: String(error) }))
-    },
-    redo() {
-      slide.patch({ v9ContentEdit: null })
-      void kernel.navigateHistory('redo').catch(error => kernel.setFeedback({ errorMessage: String(error) }))
-    },
-    activateState(stateId) {
-      const backend = slide.read().slideBackend
-      if (!isSlideAuthoringBackend(backend)) {
-        kernel.failSessionless()
-      }
-      slide.persist(backend.activateState(stateId, {
-        expectedRevision: backend.getSnapshot().revision,
-      }))
-    },
-    activateScene(sceneId) {
-      const backend = slide.read().slideBackend
-      if (!isSlideAuthoringBackend(backend)) {
-        kernel.failSessionless()
-      }
-      slide.persist(backend.activateScene(sceneId, {
-        expectedRevision: backend.getSnapshot().revision,
-      }))
-    },
-    setScope(scope) {
-      const backend = slide.read().slideBackend
-      if (!isSlideAuthoringBackend(backend)) {
-        kernel.failSessionless()
-      }
-      slide.persist(backend.setScope(scope, {
-        expectedRevision: backend.getSnapshot().revision,
-      }))
-    },
-    renameProject(title) {
-      const backend = slide.read().slideBackend
-      if (!isSlideAuthoringBackend(backend)) {
-        kernel.failSessionless()
-      }
-      if (title === backend.getSession().history.present.title) return
-      runCandidateSession((session) => {
-        const project = commitSlideProjectMutation(session.history.present, (draft) => {
-          draft.title = title
-        })
-        return {
-          ok: true,
-          nextSession: {
-            ...session,
-            history: commitResourceAwareAuthoringHistory(session.history, project),
-          },
-          historyEntry: true,
-          selection: session.selection,
-        }
-      }, { statusMessage: `已重命名为“${title}”` })
-    },
-    updateScene(sceneId, patch) {
-      runCandidateSession((session) => {
-        const project = commitSlideProjectMutation(session.history.present, (draft) => {
-          for (const surface of draft.surfaces) {
-            if (surface.type !== 'slide') continue
-            const scene = surface.scenes.find((item) => item.id === sceneId)
-            if (!scene) continue
-            if (patch.name !== undefined && patch.name.trim()) scene.name = patch.name.trim()
-            draft.locations.forEach((location) => {
-              if (location.kind === 'slide-scene' && location.sceneId === sceneId && location.stateId === undefined) {
-                location.label = `${surface.title} · ${scene.name}`
-              }
-            })
-          }
-        })
-        return {
-          ok: true,
-          historyEntry: true,
-          nextSession: {
-            ...session,
-            history: commitResourceAwareAuthoringHistory(session.history, project),
-          },
-          selection: session.selection,
-        }
-      })
-    },
-    setActivePresentationState(stateId) {
-      const owned = slide.read()
-      const live = owned.v9ContentEdit ? commitDraft() : owned.slideBackend
-      if (!isSlideAuthoringBackend(live)) {
-        kernel.failSessionless()
-        return
-      }
-      slide.persist(live.activateState(stateId, {
-        expectedRevision: live.getSnapshot().revision,
-      }))
-    },
-    addPresentationState(name) {
-      const backend = slide.read().slideBackend
-      if (!isSlideAuthoringBackend(backend)) {
-        kernel.failSessionless()
-      }
-      const nextName = name?.trim() || '状态'
-      slide.persist(backend.addState(nextName, {
-        expectedRevision: backend.getSnapshot().revision,
-      }), { statusMessage: `已新增状态“${nextName}”` })
-    },
-    duplicatePresentationState(stateId) {
-      const backend = slide.read().slideBackend
-      if (!isSlideAuthoringBackend(backend)) {
-        kernel.failSessionless()
-      }
-      slide.persist(backend.duplicateState(stateId, {
-        expectedRevision: backend.getSnapshot().revision,
-      }), { statusMessage: '已复制状态' })
-    },
-    renamePresentationState(stateId, name) {
-      const nextName = name.trim()
-      if (!nextName) return
-      const backend = slide.read().slideBackend
-      if (!isSlideAuthoringBackend(backend)) {
-        kernel.failSessionless()
-      }
-      slide.persist(backend.renameState(stateId, nextName, {
-        expectedRevision: backend.getSnapshot().revision,
-      }))
-    },
-    deletePresentationState(stateId) {
-      const backend = slide.read().slideBackend
-      if (!isSlideAuthoringBackend(backend)) return false
-      const result = slide.persist(backend.deleteState(stateId, {
-        expectedRevision: backend.getSnapshot().revision,
-      }), { statusMessage: '状态已删除' })
-      return result.ok
-    },
-    addTextNode(x, y) {
-      const packages = kernel.readResources().componentPackages
-      const placed = typeof x === 'number' || typeof y === 'number'
-        ? normalizeNewNodeGeometry(createTextNode(x, y), packages)
-        : null
-      runCandidateSession(
-        (session) => addSlideTextLayer(session, {
-          ...(placed ? { x: placed.x, y: placed.y } : {}),
-        }, { expectedRevision: session.history.present.revision }),
-        { statusMessage: '已添加文本' },
-      )
-    },
-    addFormulaNode(x, y) {
-      const packages = kernel.readResources().componentPackages
-      const placed = typeof x === 'number' || typeof y === 'number'
-        ? normalizeNewNodeGeometry(createFormulaNode({ x, y }), packages)
-        : null
-      runCandidateSession(
-        (session) => addSlideFormulaLayer(session, {
-          ...(placed ? { x: placed.x, y: placed.y } : {}),
-        }, { expectedRevision: session.history.present.revision }),
-        { statusMessage: '已添加公式' },
-      )
-    },
-    addRectangleNode(x, y) {
-      addShapeNode('rectangle', x, y)
-    },
-    addShapeNode,
-    drawSlideShapeNode(input) {
-      runCandidateSession(
-        (session) => addSlideShapeLayer(session, {
-          shapeType: input.shapeType,
-          frame: input.frame,
-          lineGeometry: input.lineGeometry,
-        }, { expectedRevision: session.history.present.revision }),
-        { statusMessage: input.shapeType === 'line' ? '已绘制直线' : '已绘制折线箭头' },
-      )
-    },
-    addTableNode(x, y) {
-      runCandidateSession(
-        (session) => addSlideTableLayer(session, {
-          ...(typeof x === 'number' ? { x } : {}),
-          ...(typeof y === 'number' ? { y } : {}),
-        }, { expectedRevision: session.history.present.revision }),
-        { statusMessage: '已添加表格' },
-      )
-    },
-    addInputNode() {
-      runCandidateSession(session => addSlideInputLayer(session, {}, { expectedRevision: session.history.present.revision }),
-        { statusMessage: '已添加填空题与正确/错误反馈，可在属性中配置答案' })
-    },
-    addChartNode(chartType, x, y) {
-      runCandidateSession(
-        (session) => addSlideChartLayer(session, {
-          chartType,
-          ...(typeof x === 'number' ? { x } : {}),
-          ...(typeof y === 'number' ? { y } : {}),
-        }, { expectedRevision: session.history.present.revision }),
-        { statusMessage: '已添加图表' },
-      )
-    },
-    beginTextEdit(nodeId, source = 'canvas') {
-      const owned = slide.read()
-      const backend = owned.slideBackend
-      if (!isSlideAuthoringBackend(backend)) {
-        kernel.failSessionless()
-      }
-      if (
-        owned.v9ContentEdit?.target.layerItemId === nodeId &&
-        owned.v9ContentEdit.source === source
-      ) {
-        return
-      }
-      if (owned.v9ContentEdit && !commitDraft()) return
-      const next = slide.read().slideBackend
-      if (!isSlideAuthoringBackend(next)) return
-      const begun = beginV9SlideContentEdit({
-        backend: next,
-        layerItemId: nodeId,
-        source,
-      })
-      if (!begun.ok) {
-        kernel.setFeedback({ errorMessage: begun.reason, statusMessage: null })
-        return
-      }
-      slide.patch({ v9ContentEdit: begun.edit })
-    },
-    updateTextEditDraft(nodeId, text, runs, height, width) {
-      const edit = slide.read().v9ContentEdit
-      if (!edit || edit.target.layerItemId !== nodeId || edit.kind !== 'text') return
-      slide.patch({
-        v9ContentEdit: updateV9SlideContentTextDraft(edit, {
-          text,
-          runs,
-          ...(width !== undefined ? { width } : {}),
-          ...(height !== undefined ? { height } : {}),
-        }),
-      })
-    },
-    setSlideTextEditComposing(composing) {
-      const edit = slide.read().v9ContentEdit
-      if (!edit || edit.composing === composing) return
-      slide.patch({ v9ContentEdit: markV9SlideContentComposing(edit, composing) })
+    setSlideTextEditComposing(composing: boolean) {
+      const edit = ports.read().slideContentEdit
+      if (edit) ports.patch({ slideContentEdit: { ...edit, composing } })
     },
     commitTextEdit,
-    cancelTextEdit() {
-      const owned = slide.read()
-      const backend = owned.slideBackend
-      if (isSlideAuthoringBackend(backend) && owned.v9ContentEdit) {
-        cancelV9SlideContentEdit(backend.getSession(), owned.v9ContentEdit)
-      }
-      slide.patch({ v9ContentEdit: null })
+    commitSlideContentEdit: commitTextEdit,
+    cancelTextEdit() { ports.patch({ slideContentEdit: null }) },
+    async commitDraftForPersistence(documentId?: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+      if (documentId && ports.read().slideContentEdit?.target.documentId !== documentId) return { ok: true }
+      try { await commitTextEdit(); return { ok: true } } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : String(error) } }
     },
-    selectNode,
-    ensureTeacherController() {
-      const backend = slide.read().slideBackend
-      if (!isSlideAuthoringBackend(backend)) {
-        kernel.setFeedback({
-          errorMessage: '当前 Course Project 没有可用的作者会话。',
-          statusMessage: null,
-        })
-        return
-      }
-      const document = backend.getSession().history.present
-      const result = restoreDefaultTeacherController(document, {
-        expectedRevision: document.revision,
-        preserveAuthoringLock: true,
-      })
-      if (!result.ok || !result.nextDocument) {
-        kernel.setFeedback({ errorMessage: result.reason, statusMessage: null })
-        return
-      }
-      if (result.createdLayerItemId && !document.globalLayerItems.some(e => e.item.layerItemId === result.createdLayerItemId)) {
-        const step = missingTeacherControllerTransaction(document, result.nextDocument!, result.createdLayerItemId)
-        if (step && kernel.persistTransaction(step, '已恢复组件教师控制台')) selectNode(result.createdLayerItemId)
-        return
-      }
-      const mapped = sessionFromLayerResult(backend.getSession(), result)
-      const controllerId = result.createdLayerItemId
-        ?? findGlobalTeacherController(result.nextDocument)?.item.layerItemId
-        ?? null
-      if (!mapped.ok || !mapped.nextSession) {
-        kernel.setFeedback({ errorMessage: mapped.reason ?? result.reason, statusMessage: null })
-        return
-      }
-      slide.persist({
-        ...mapped,
-        nextSession: {
-          ...mapped.nextSession,
-          scope: 'global',
-          selection: {
-            ...mapped.nextSession.selection,
-            selectionIds: controllerId
-              ? [controllerId]
-              : mapped.nextSession.selection.selectionIds,
-          },
-        },
-      }, { statusMessage: result.reason })
+    addTextNode: (x?: number, y?: number) => insert(TEXT_DEFINITION, createTextData('双击编辑文字'), 320, 80, x, y),
+    addFormulaNode: (x?: number, y?: number) => insert(FORMULA_DEFINITION, createFormulaData(crypto.randomUUID(), 'x^2'), 240, 100, x, y),
+    addRectangleNode: (x?: number, y?: number) => addShapeNode('rectangle', x, y),
+    addShapeNode,
+    drawSlideShapeNode(input: { shapeType: 'line' | 'elbow-arrow'; frame: { x: number; y: number; width: number; height: number }; lineGeometry: NativeLineGeometry }, target?: CapturedCourseTarget) {
+      return insert(SHAPE_DEFINITION, shapeDataSchema.parse({ ...defaultShapeData(input.shapeType), lineGeometry: input.lineGeometry }),
+        Math.max(1, input.frame.width), Math.max(1, input.frame.height), input.frame.x, input.frame.y, target)
     },
-    persistLayerCommand(result: LayerCommandResult, extra: SlidePersistExtra = {}): SlideCommandResult {
-      return persistSlideLayerCommand(slide, result, extra)
+    addTableNode: (x?: number, y?: number) => insert(TABLE_DEFINITION, createTableData(), 600, 120, x, y),
+    addChartNode(type: 'bar' | 'line' | 'area' | 'pie' | 'donut' = 'bar', x?: number, y?: number) {
+      const initial = createChartData()
+      const style = type === 'pie' || type === 'donut'
+        ? { backgroundColor: initial.style.backgroundColor, backgroundOpacity: initial.style.backgroundOpacity,
+            fontFamily: initial.style.fontFamily, fontSize: initial.style.fontSize, textColor: initial.style.textColor,
+            showLegend: initial.style.showLegend, legendPosition: initial.style.legendPosition, showDataLabels: initial.style.showDataLabels,
+            ...(type === 'donut' ? { holeSize: 50 } : {}) } : initial.style
+      return insert(CHART_DEFINITION, chartDataSchema.parse({ ...initial, chartType: type, style }), 560, 360, x, y)
     },
-    persistMediaResult(result: CourseMediaCommandResult): CourseMediaCommandResult {
-      return persistSlideMediaResult(slide, result)
+    async addExternalComponentNode(packageId: string, x?: number, y?: number, presetId?: string) {
+      const target = kernel.captureTarget(), container = insertionContainer(target)
+      const result = await insertComponentDefinitionAtTarget(kernel, target, packageId, presetId, { x, y, container })
+      if (!result.ok) kernel.setFeedback({ errorMessage: result.reason ?? '组件未插入当前工程' })
+      return result
     },
-    persistTransaction(step: EditorTransactionStep, statusMessage: string): boolean {
-      return persistSlideTransaction(kernel, slide, step, statusMessage)
+    async ensureTeacherController() {
+      const target = kernel.captureTarget()
+      const existing = Object.values(target.project.instances).find(instance => instance.definitionId === TEACHER_CONTROLLER_DEFINITION.id)
+      if (existing) { kernel.selectInstances([existing.id], target.surfaceId, target.documentId); return }
+      const id = crypto.randomUUID(), edits: ComponentEdit[] = []
+      if (!target.project.definitions[TEACHER_CONTROLLER_DEFINITION.id]) edits.push({ type: 'definition.set', definition: TEACHER_CONTROLLER_DEFINITION })
+      edits.push({ type: 'instance.insert', container: { kind: 'global', plane: 'overlay' }, index: target.project.global.overlay.length, rootIds: [id],
+        instances: [{ id, definitionId: TEACHER_CONTROLLER_DEFINITION.id, data: json(createTeacherControllerData()), frame: { width: 360, height: 72, transform: [1, 0, 0, 1, 24, 24] } }] })
+      await kernel.editCaptured(kernel.capture(edits, target))
+      kernel.selectInstances([id], target.surfaceId, target.documentId)
     },
-    persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean {
-      return persistSlideDocument(slide, document, options)
-    },
-    ...createSlideOwnedCommands(kernel, slide),
   }
-}
-
-export function persistSlideLayerCommand(
-  slide: SlideAuthoringPorts,
-  result: LayerCommandResult,
-  extra: SlidePersistExtra = {},
-): SlideCommandResult {
-  const backend = slide.read().slideBackend
-  if (!isSlideAuthoringBackend(backend)) {
-    return {
-      ok: false,
-      reason: 'not-slide-authoring-backend',
-      historyEntry: false,
-    }
-  }
-  return slide.persist(sessionFromLayerResult(backend.getSession(), result), extra)
-}
-
-export function persistSlideMediaResult(
-  slide: SlideAuthoringPorts,
-  result: CourseMediaCommandResult,
-): CourseMediaCommandResult {
-  slide.persist({
-    ok: result.ok,
-    reason: result.reason,
-    nextSession: result.nextSession,
-    historyEntry: result.historyEntry,
-    selection: result.selection,
-  }, {
-    sidecar: result.sidecar,
-    statusMessage: result.ok ? result.reason ?? null : undefined,
-  })
-  return result
-}
-
-export function slidePersistSnapshotFrom(
-  owned: SlideOwnedState,
-  resources: CourseResourceState,
-  dirty: boolean,
-  authoringSession: CourseAuthoringSession | null,
-): SlidePersistSnapshot {
-  return {
-    ...owned,
-    resources: readCourseResourceState(resources),
-    dirty,
-    authoringSession,
-  }
-}
-
-export function persistSlideTransaction(
-  kernel: EditorStoreKernel,
-  slide: SlideAuthoringPorts,
-  step: EditorTransactionStep,
-  statusMessage: string,
-): boolean {
-  const backend = slide.read().slideBackend
-  if (!isSlideAuthoringBackend(backend)) return false
-  const session = backend.getSession()
-  const authoringSession = kernel.readAuthoringSession()
-  const hint = readAuthoringToolSelection(step.selectionHint)
-  const selected = hint ? selectSlideToolResult(step.nextDocument, hint) : null
-  const selection = selected?.selection ?? session.selection
-  const persisted = slide.persist({
-    ok: true,
-    nextSession: {
-      ...session,
-      history: commitSlideEditorTransactionHistory(session.history, step),
-      selection,
-      scope: selected?.owner ?? session.scope,
-    },
-    historyEntry: true,
-    selection,
-    resourceTransition: {
-      resourceChanges: step.resourceChanges,
-      resourceDirection: 'forward',
-    },
-  }, {
-    transactionStep: step,
-    statusMessage,
-    ...(authoringSession
-      ? {
-          courseAuthoringSession: updateCourseAuthoringSessionItems(
-            { token: createSessionToken({ locationId: selection.locationId, surfaceType: 'slide', revision: step.nextDocument.revision },
-              authoringSession.token.generation + (selection.locationId !== session.selection.locationId || selection.stateId !== session.selection.stateId ? 1 : 0)), itemIds: [] },
-            hint ? selection.selectionIds : authoringSession.itemIds,
-          ),
-        }
-      : {}),
-  })
-  return persisted.ok
-}
-
-export function persistSlideDocument(
-  slide: SlideAuthoringPorts,
-  document: CourseProjectDocument,
-  options?: { statusMessage?: string | null; historyEntry?: boolean },
-): boolean {
-  const backend = slide.read().slideBackend
-  if (!isSlideAuthoringBackend(backend)) return false
-  const session = backend.getSession()
-  const history = options?.historyEntry
-    ? commitResourceAwareAuthoringHistory(session.history, document)
-    : { ...session.history, present: document }
-  slide.persist({
-    ok: true,
-    nextSession: { ...session, history },
-    historyEntry: Boolean(options?.historyEntry),
-    selection: session.selection,
-  }, {
-    statusMessage: options?.statusMessage,
-  })
-  return true
 }

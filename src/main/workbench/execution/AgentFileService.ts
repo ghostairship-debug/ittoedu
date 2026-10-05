@@ -12,9 +12,8 @@ import type { OfficeFormat } from '../../../shared/workbench/officeFiles'
 import type { OfficeFileService } from '../office/OfficeFileService'
 import { isInsideRoot } from '../../../shared/workbench/executionPermission'
 import type { DocumentHostService } from '../DocumentHostService'
-import { createBlankCourseProject } from '../../../core/course/createCourseProject'
-import { createDefaultTeacherControllerPackage } from '../../../shared/defaultTeacherControllerComponent'
-import { createCourseProjectArchive } from '../../../core/drivers/codecs/courseProjectArchive'
+import { createBlankCourseProjectV10 } from '../../../core/course/createCourseProjectV10'
+import { createCourseProjectV10Archive } from '../../../core/drivers/codecs/courseProjectV10Archive'
 import { validateWorkspaceEntryName } from '../WorkspaceFiles'
 
 export function startDirectory(context: Pick<AgentFileContext, 'workspaceRoot' | 'conversationHomeRoot' | 'conversationHome'>): { directory: string; fallback: boolean } {
@@ -24,9 +23,10 @@ export function startDirectory(context: Pick<AgentFileContext, 'workspaceRoot' |
   return { directory: path.resolve(context.conversationHomeRoot ?? context.workspaceRoot, relative), fallback: !!home.missing }
 }
 
-function createKind(name: string, requested?: 'markdown' | 'text' | 'html' | 'course-v9'): 'markdown' | 'text' | 'html' | 'course-v9' {
+function createKind(name: string, requested?: 'markdown' | 'text' | 'html' | 'course-v10'): 'markdown' | 'text' | 'html' | 'course-v10' {
   const detected = /\.html$/i.test(name) ? 'html' : sourceFileKind(name)
   const kind = requested ?? detected
+  if (kind === 'course-v9') throw new Error('此入口只创建 Project V10，旧格式原件不转换')
   if (kind !== detected && !(kind === 'text' && sourceFileKind(name) === 'text')) throw new Error(`文件名与${kind}格式不符`)
   return kind
 }
@@ -260,14 +260,13 @@ export class AgentFileService implements AgentFilePort {
       && !(context.approvedOutsidePaths ?? []).some(approved => isInsideRoot(approved, path.join(directory, input.name))))
       throw new Error('工作空间外新建文件需要明确批准')
     const root = await this.host.files.registerRoot(directory)
-    const bytes = kind === 'course-v9' ? (() => {
-      const project = createBlankCourseProject({ title: input.name.replace(/\.h5lesson$/i, '') })
-      const component = createDefaultTeacherControllerPackage()
-      return createCourseProjectArchive({ project, assetFiles: {}, componentFiles: { [`${component.manifest.id}@${component.manifest.version}`]: component.files } })
+    const bytes = kind === 'course-v10' ? (() => {
+      const project = createBlankCourseProjectV10(input.name.replace(/\.h5lesson$/i, ''))
+      return createCourseProjectV10Archive({ project, resources: { assets: {}, components: {} } })
     })() : Buffer.from('', 'utf8')
     context.assertActive?.()
     const receipt = await this.host.files.createFile({ operationId, workspaceId: root.workspaceId, targetDirectoryId: root.rootEntryId,
-      name: input.name, format: kind === 'course-v9' ? 'course-v9' : kind === 'markdown' && /\.md$/i.test(input.name) ? 'markdown' : 'file', bytes }, context.assertActive).catch(error => { throw new AgentFileOutcomeUnknown(error instanceof Error ? error.message : String(error)) })
+      name: input.name, format: kind === 'course-v10' ? 'course-v10' : kind === 'markdown' && /\.md$/i.test(input.name) ? 'markdown' : 'file', bytes }, context.assertActive).catch(error => { throw new AgentFileOutcomeUnknown(error instanceof Error ? error.message : String(error)) })
     const created = receipt.items.find(item => item.status === 'success' && item.targetPath)
     if (!created?.targetPath) return { data: { operation: receipt, homeMissingFallback: fallback } }
     const snapshot = await this.host.open(created.targetPath).catch(() => null)
@@ -275,7 +274,7 @@ export class AgentFileService implements AgentFilePort {
       openError: '文件已创建，但暂时无法打开；请检查目录后用 file.open 重试' } }
     return { data: { operation: receipt, path: created.targetPath, homeMissingFallback: fallback, documentId: snapshot.documentId }, opened: {
       documentId: snapshot.documentId, kind: snapshot.model.kind, name: created.targetPath,
-      writable: context.permission === 'full' || isInsideRoot(context.workspaceRoot, created.targetPath),
+      writable: this.mayWrite(context, created.targetPath),
     } }
   }
   private async rootFor(context: AgentFileContext, paths: string[]) {

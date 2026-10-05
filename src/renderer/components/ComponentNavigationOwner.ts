@@ -1,0 +1,256 @@
+import type { CourseProjectV10, TeacherControllerAction, TeacherControllerPort, TeacherControllerSnapshot } from '../../shared/contracts/component-platform'
+import type { ComponentSpatialCameraPort } from '../../player/surfaces/spatial/componentSpatialAdapter'
+import { spatialFramePose, spatialTourSteps, spatialFragmentProgress } from '../../player/surfaces/spatial/componentPlatform/graph'
+import { componentSurfaceGeometryTargets } from '../../player/componentPlatform/spatialTargets'
+import { componentFragmentStateKey } from '../../player/componentPlatform/fragments'
+import { matchesPublishedCourseStateCondition } from '../../player/surfaces/publishedCourseState'
+import type { AudioManager } from '../../player/AudioManager'
+
+export interface ComponentCameraBinding {
+  frameId(): string | null
+  selectFrame(frameId: string | null): void
+  pathId?(): string | null
+  stepIndex?(): number | null
+  selectStep?(index: number | null): void
+  viewport?(): { width: number; height: number }
+}
+/** A surface's existing observation state remains its only view owner. */
+export interface ComponentObservationBinding {
+  readZoom(): number
+  setZoom(zoom: number): void
+  reset(): void
+}
+
+interface NavigationPorts {
+  project(): CourseProjectV10
+  surfaceId(): string | null
+  interactive?(): boolean
+  select(surfaceId: string): void | Promise<void>
+  stateId?(): string | null
+  selectState?(stateId: string | null, surfaceId: string): void | Promise<void>
+  courseState?: { get<T = unknown>(key: string): T | undefined; set?(key: string, value: number): void }
+  audio?(): AudioManager | undefined
+  report?(message: string): void
+  restart?(): void | Promise<void>
+  viewportBounds?(): { left: number; top: number; right: number; bottom: number } | undefined
+}
+
+/** Surface and camera view state are supplied by their owner; no author data is changed here. */
+export class ComponentNavigationOwner implements TeacherControllerPort {
+  private readonly listeners = new Set<() => void>()
+  /** Authored defaults apply until the first session collapse action. */
+  private collapsed: boolean | undefined
+  private zoom = 1
+  private offset = { x: 0, y: 0 }
+  private readonly states = new Map<string, string | null>()
+  private readonly fragmentCache = new Map<string, { html: string; count: number }>()
+  private readonly cameras = new Map<string, { camera: ComponentSpatialCameraPort; binding?: ComponentCameraBinding; frameId: string | null; stepIndex: number | null; off(): void }>()
+  private readonly observations = new Map<string, ComponentObservationBinding>()
+  private transition?: AbortController
+  private retired = false
+  constructor(private readonly ports: NavigationPorts) {}
+  subscribe = (listener: () => void) => { if (this.retired) return () => {}; this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
+  changed = () => { if (!this.retired) { this.applyFragments(); for (const listener of this.listeners) listener() } }
+  registerCamera = (surfaceId: string, camera: ComponentSpatialCameraPort, binding?: ComponentCameraBinding) => {
+    if (this.retired) return () => {}
+    this.cameras.get(surfaceId)?.off()
+    const entry = { camera, binding, frameId: null as string | null, stepIndex: null as number | null, off: () => {} }
+    this.cameras.set(surfaceId, entry)
+    entry.off = camera.subscribe(this.changed)
+    return () => { entry.off(); if (this.cameras.get(surfaceId) === entry) this.cameras.delete(surfaceId) }
+  }
+  registerObservation = (surfaceId: string, binding: ComponentObservationBinding): (() => void) => {
+    if (this.retired) return () => {}
+    this.observations.set(surfaceId, binding); this.changed()
+    return () => { if (this.observations.get(surfaceId) === binding) this.observations.delete(surfaceId) }
+  }
+  currentStateId = (): string | null => {
+    if (this.ports.stateId) return this.ports.stateId()
+    const surface = this.activeSurface()
+    return surface ? this.states.has(surface.id) ? this.states.get(surface.id)! : surface.presentation?.initialStateId ?? null : null
+  }
+  private activeSurface() { return this.ports.project().surfaces.find(value => value.id === this.ports.surfaceId()) }
+  private viewport(surfaceId: string) {
+    return this.cameras.get(surfaceId)?.binding?.viewport?.()
+      ?? this.ports.project().surfaces.find(value => value.id === surfaceId)?.designSize ?? { width: 960, height: 640 }
+  }
+  private steps(surfaceId = this.ports.surfaceId()) {
+    const project = this.ports.project(), surface = project.surfaces.find(value => value.id === surfaceId), entry = this.cameras.get(surface?.id ?? '')
+    if (surface?.kind === 'spatial') return spatialTourSteps(surface.spatial, entry?.binding?.pathId?.() ?? null,
+      this.viewport(surface.id), componentSurfaceGeometryTargets(project, surface.id), this.fragmentCounts())
+    return (surface?.presentation?.states ?? []).map(state => ({ frameId: state.id, title: state.title }))
+  }
+  private fragmentCounts(): ReadonlyMap<string, number> {
+    const counts = new Map<string, number>()
+    for (const instance of Object.values(this.ports.project().instances)) {
+      const implementation = this.ports.project().definitions[instance.definitionId]?.implementation
+      const data = instance.data, html = data && typeof data === 'object' && !Array.isArray(data) ? data.html : undefined
+      if (implementation?.kind !== 'builtin' || !['guoling.web', 'guoling.html-program'].includes(implementation.key) || typeof html !== 'string') continue
+      let cached = this.fragmentCache.get(instance.id)
+      if (cached?.html !== html) { cached = { html, count: new DOMParser().parseFromString(html, 'text/html').querySelectorAll('.fragment').length }; this.fragmentCache.set(instance.id, cached) }
+      if (cached.count) counts.set(instance.id, cached.count)
+    }
+    return counts
+  }
+  private applyFragments(): void {
+    if (!this.ports.courseState?.set) return
+    const surface = this.activeSurface(), counts = this.fragmentCounts()
+    if (surface?.kind !== 'spatial') { for (const [id, count] of counts) this.ports.courseState.set(componentFragmentStateKey(id), count); return }
+    const entry = this.cameras.get(surface.id), index = entry?.binding?.stepIndex ? entry.binding.stepIndex() : entry?.stepIndex ?? null
+    const steps = spatialTourSteps(surface.spatial, entry?.binding?.pathId?.() ?? null, this.viewport(surface.id), componentSurfaceGeometryTargets(this.ports.project(), surface.id), counts)
+    const progress = spatialFragmentProgress(steps, index, counts)
+    for (const [id, count] of progress) if (this.ports.courseState.get(componentFragmentStateKey(id)) !== count) this.ports.courseState.set(componentFragmentStateKey(id), count)
+  }
+  private stepIndex(): number {
+    const surface = this.activeSurface(), entry = this.cameras.get(surface?.id ?? '')
+    if (surface?.kind === 'spatial') {
+      const index = entry?.binding?.stepIndex ? entry.binding.stepIndex() : entry?.stepIndex
+      if (index !== null && index !== undefined) return index + 1
+      const id = entry?.binding?.frameId() ?? entry?.frameId
+      return this.steps().findIndex(step => step.frameId === id && id !== null) + 1
+    }
+    return this.steps().findIndex(step => step.frameId === this.currentStateId()) + 1
+  }
+  private async presentState(surfaceId: string, stateId: string | null, signal?: AbortSignal): Promise<boolean> {
+    if (signal?.aborted) return false
+    const surface = this.ports.project().surfaces.find(value => value.id === surfaceId)
+    if (!surface) return false
+    if (surface.kind !== 'spatial' || stateId && surface.presentation?.states.some(state => state.id === stateId)) {
+      this.states.set(surfaceId, stateId)
+      await this.ports.selectState?.(stateId, surfaceId)
+      if (signal?.aborted) return false
+      this.changed(); return true
+    }
+    const entry = this.cameras.get(surfaceId)
+    if (!entry || !surface.spatial) return stateId === null
+    const frame = surface.spatial.frames.find(value => value.id === stateId)
+    const pose = stateId ? frame && spatialFramePose(frame, this.viewport(surfaceId), componentSurfaceGeometryTargets(this.ports.project(), surfaceId)) : surface.spatial.home
+    if (!pose || !await entry.camera.present(pose, { signal }) || signal?.aborted) return false
+    if (entry.binding) entry.binding.selectFrame(stateId)
+    else entry.frameId = stateId
+    entry.binding?.selectStep?.(null); entry.stepIndex = null
+    this.changed(); return true
+  }
+  private async presentStep(index: number, signal?: AbortSignal, surfaceId = this.ports.surfaceId()): Promise<boolean> {
+    if (signal?.aborted) return false
+    const surface = this.ports.project().surfaces.find(value => value.id === surfaceId), step = this.steps(surfaceId)[index]
+    if (!surface || !step) return false
+    if (surface.kind !== 'spatial') return this.presentState(surface.id, step.frameId, signal)
+    const entry = this.cameras.get(surface.id)
+    if (!entry || !('pose' in step)) return false
+    const previousIndex = entry.binding?.stepIndex?.() ?? entry.stepIndex
+    const previous = previousIndex === null ? undefined : this.steps(surfaceId)[previousIndex]
+    const sameFragmentStop = previous && 'pose' in previous && step.fragmentInstanceId !== undefined
+      && previous.fragmentInstanceId === step.fragmentInstanceId && previous.frameId === step.frameId && previous.instanceId === step.instanceId
+    // Revealing another fragment at this stop keeps the teacher's current pan/zoom.
+    if (!sameFragmentStop && !await entry.camera.present(step.pose, { signal }) || signal?.aborted) return false
+    if (entry.binding) entry.binding.selectFrame(step.frameId)
+    else entry.frameId = step.frameId
+    if (entry.binding?.selectStep) entry.binding.selectStep(index)
+    else entry.stepIndex = index
+    this.changed(); return true
+  }
+  private blocked(destination: string, report = false): boolean {
+    const guard = this.ports.project().logic?.navigationGuards.find(value => value.toSurfaceIds.includes(destination)
+      && (!value.fromSurfaceIds?.length || value.fromSurfaceIds.includes(this.ports.surfaceId() ?? ''))
+      && (value.match === 'all' ? value.conditions.every(condition => matchesPublishedCourseStateCondition(this.ports.courseState ?? { get: () => undefined }, condition))
+        : value.conditions.some(condition => matchesPublishedCourseStateCondition(this.ports.courseState ?? { get: () => undefined }, condition))))
+    if (guard && report) this.ports.report?.(guard.message)
+    return Boolean(guard)
+  }
+  read = (): TeacherControllerSnapshot => {
+    const project = this.ports.project(), id = this.ports.surfaceId(), sceneIndex = project.surfaces.findIndex(surface => surface.id === id)
+    const steps = this.steps(), stepIndex = this.stepIndex()
+    return { locationId: id, interactive: this.ports.interactive?.() ?? true, scenes: project.surfaces.map(surface => ({ id: surface.id, name: surface.title })),
+      progress: sceneIndex < 0 ? null : { sceneIndex, sceneCount: project.surfaces.length, sceneName: project.surfaces[sceneIndex].title,
+        stepIndex, stepCount: steps.length + 1, stepName: steps[stepIndex - 1]?.title ?? '' },
+      collapsed: this.collapsed, zoom: this.observations.get(id ?? '')?.readZoom() ?? this.cameras.get(id ?? '')?.camera.read().zoom ?? this.zoom,
+      muted: this.ports.audio?.()?.muted() ?? false, fullscreen: typeof document !== 'undefined' && Boolean(document.fullscreenElement) }
+  }
+  canExecute = (action: TeacherControllerAction): boolean => {
+    if (this.retired || this.ports.interactive?.() === false) return false
+    const state = this.read(), index = state.progress?.sceneIndex ?? -1
+    if (action.type === 'step.previous' && this.stepIndex() > 0 || action.type === 'step.next' && this.stepIndex() < this.steps().length) return true
+    if (action.type === 'scene.previous' || action.type === 'step.previous') return index > 0 && !this.blocked(state.scenes[index - 1].id)
+    if (action.type === 'scene.next' || action.type === 'step.next') return index >= 0 && index < state.scenes.length - 1 && !this.blocked(state.scenes[index + 1].id)
+    if (action.type === 'scene.go') return this.ports.project().surfaces.some(surface => surface.id === action.sceneId
+      && (!action.targetStateId || surface.presentation?.states.some(value => value.id === action.targetStateId) || surface.spatial?.frames.some(frame => frame.id === action.targetStateId)))
+      && !this.blocked(action.sceneId)
+    return action.type === 'scene.replay' && index >= 0 || action.type === 'course.restart' && state.scenes.length > 0
+      || action.type === 'audio.toggle-mute' && Boolean(this.ports.audio?.()) || action.type === 'scene.open-picker' || action.type === 'player.fullscreen.toggle'
+  }
+  execute = async (action: TeacherControllerAction, signal?: AbortSignal): Promise<boolean> => {
+    if (this.retired || signal?.aborted) return false
+    if (!this.canExecute(action)) { if (action.type === 'scene.go') this.blocked(action.sceneId, true); return false }
+    if (action.type === 'audio.toggle-mute' || action.type === 'player.fullscreen.toggle' || action.type === 'scene.open-picker') return this.executeNavigation(action, signal)
+    const request = new AbortController(), previous = this.transition
+    this.transition = request
+    previous?.abort()
+    const abort = () => request.abort()
+    signal?.addEventListener('abort', abort, { once: true })
+    if (signal?.aborted) abort()
+    try { return await this.executeNavigation(action, request.signal) }
+    finally {
+      signal?.removeEventListener('abort', abort)
+      if (this.transition === request) this.transition = undefined
+      request.abort()
+    }
+  }
+  /** Replaces pending navigation without changing the last committed location. */
+  cancel = () => { const request = this.transition; this.transition = undefined; request?.abort() }
+  dispose = () => {
+    if (this.retired) return
+    this.retired = true; this.cancel()
+    for (const entry of this.cameras.values()) entry.off()
+    this.cameras.clear(); this.observations.clear(); this.listeners.clear(); this.states.clear(); this.fragmentCache.clear()
+  }
+  private async executeNavigation(action: TeacherControllerAction, signal?: AbortSignal): Promise<boolean> {
+    if (signal?.aborted) return false
+    const state = this.read(), index = state.progress?.sceneIndex ?? -1
+    if (action.type === 'step.previous' && this.stepIndex() > 0) return this.stepIndex() === 1 ? this.presentState(state.locationId!, null, signal) : this.presentStep(this.stepIndex() - 2, signal)
+    if (action.type === 'step.next' && this.stepIndex() < this.steps().length) return this.presentStep(this.stepIndex(), signal)
+    let destination: string | undefined, stateId: string | null | undefined
+    if (action.type === 'scene.previous' || action.type === 'step.previous') destination = state.scenes[index - 1].id
+    else if (action.type === 'scene.next' || action.type === 'step.next') destination = state.scenes[index + 1].id
+    else if (action.type === 'scene.go') { destination = action.sceneId; stateId = action.targetStateId }
+    else if (action.type === 'scene.replay') { destination = state.locationId!; stateId = this.activeSurface()?.presentation?.initialStateId ?? null }
+    else if (action.type === 'course.restart') { await this.ports.restart?.(); if (signal?.aborted) return false; destination = state.scenes[0].id }
+    else if (action.type === 'scene.open-picker') return false // The builtin opens its own directory from read().scenes.
+    else if (action.type === 'audio.toggle-mute') this.ports.audio?.()?.toggleMuted()
+    else if (action.type === 'player.fullscreen.toggle') {
+      if (document.fullscreenElement) await document.exitFullscreen()
+      else await document.documentElement.requestFullscreen()
+    }
+    if (destination) {
+      if (this.blocked(destination, true)) return false
+      await this.ports.select(destination)
+      if (signal?.aborted) return false
+      const surface = this.ports.project().surfaces.find(value => value.id === destination)
+      const last = action.type === 'step.previous' ? this.steps(destination).length - 1 : -1
+      if (!(last >= 0 ? await this.presentStep(last, signal, destination)
+        : await this.presentState(destination, stateId === undefined ? surface?.presentation?.initialStateId ?? null : stateId, signal))) return false
+    }
+    this.changed(); return true
+  }
+  setCollapsed = (value: boolean) => { if (!this.retired) { this.collapsed = value; this.changed() } }
+  moveBy = (dx: number, dy: number) => { if (!this.retired && Number.isFinite(dx) && Number.isFinite(dy)) { this.offset = { x: this.offset.x + dx, y: this.offset.y + dy }; this.changed() } }
+  setZoom = (value: number) => {
+    if (this.retired || !Number.isFinite(value) || value <= 0) return
+    const id = this.ports.surfaceId() ?? '', observation = this.observations.get(id), camera = this.cameras.get(id)?.camera
+    if (observation) observation.setZoom(value)
+    else if (camera) camera.set({ ...camera.read(), zoom: value })
+    else this.zoom = value
+    this.changed()
+  }
+  resetView = () => {
+    if (this.retired) return
+    this.zoom = 1; this.offset = { x: 0, y: 0 }
+    const surface = this.activeSurface(), id = surface?.id ?? '', observation = this.observations.get(id), camera = this.cameras.get(id)?.camera
+    if (observation) observation.reset()
+    else if (camera && surface?.spatial) camera.set(surface.spatial.home)
+    this.changed()
+  }
+  viewportBounds = () => this.retired ? undefined : this.ports.viewportBounds?.()
+  placement = () => ({ ...this.offset, zoom: this.zoom })
+}
+

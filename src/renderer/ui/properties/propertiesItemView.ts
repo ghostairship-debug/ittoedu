@@ -3,7 +3,7 @@ import type {
   TextNode,
 } from '../../../shared/contracts/native-v1'
 import type { LayerItem } from '../../../shared/courseProjectTypes'
-import type { EffectiveLayerPropertiesPatchAtTarget } from '../../course/effectiveLayerCommands'
+import type { EffectiveLayerPropertiesPatchAtTarget } from '../../../core/tools/layerProperties'
 import { nativeTextAutoSizeFrame, type NativeTextLayoutPatch } from '../../authoring/nativeTextLayout'
 import type {
   PropertiesItemBase,

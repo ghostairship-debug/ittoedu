@@ -1,0 +1,274 @@
+{
+  "apiVersion": 5,
+  "definitionSchema": {
+    "$defs": {
+      "__schema0": {
+        "anyOf": [
+          {
+            "type": "null"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "string"
+          },
+          {
+            "items": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "type": "array"
+          },
+          {
+            "additionalProperties": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          }
+        ]
+      }
+    },
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "dataSchema": {
+        "additionalProperties": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "propertyNames": {
+          "type": "string"
+        },
+        "type": "object"
+      },
+      "id": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "implementation": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "key": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "kind": {
+                "const": "builtin",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "key"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "dependencies": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "kind": {
+                "const": "source",
+                "type": "string"
+              },
+              "language": {
+                "enum": [
+                  "javascript",
+                  "typescript"
+                ],
+                "type": "string"
+              },
+              "moduleBindings": {
+                "additionalProperties": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "propertyNames": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "resourceBindings": {
+                "additionalProperties": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "source": {
+                "type": "string"
+              },
+              "workspace": {
+                "additionalProperties": false,
+                "properties": {
+                  "entry": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "ownerId": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "ownerId",
+                  "entry"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "kind",
+              "language"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "professionalBuiltinKey": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "role": {
+        "enum": [
+          "content",
+          "behavior",
+          "mixed"
+        ],
+        "type": "string"
+      },
+      "title": {
+        "type": "string"
+      },
+      "version": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "id",
+      "role",
+      "implementation"
+    ],
+    "type": "object"
+  },
+  "implementationSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "const": "builtin",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "key"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "dependencies": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "const": "source",
+            "type": "string"
+          },
+          "language": {
+            "enum": [
+              "javascript",
+              "typescript"
+            ],
+            "type": "string"
+          },
+          "moduleBindings": {
+            "additionalProperties": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "propertyNames": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "resourceBindings": {
+            "additionalProperties": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "propertyNames": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "source": {
+            "type": "string"
+          },
+          "workspace": {
+            "additionalProperties": false,
+            "properties": {
+              "entry": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "ownerId": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "ownerId",
+              "entry"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "kind",
+          "language"
+        ],
+        "type": "object"
+      }
+    ]
+  },
+  "note": "组件 mount/update/dispose 和 scope、目标、事件、状态、媒体、互动、教师控制器端口取自正式合同。相关类型保留原源码引用路径；实际端口由当前宿主提供。",
+  "source": "src/shared/contracts/component-platform/runtime.ts",
+  "types": {
+    "src/shared/contracts/component-platform/frame.ts": "/** Maps local content coordinates to the owning parent's coordinates. */\nexport type AffineTransform = [number, number, number, number, number, number]\n\nexport interface ComponentFrame {\n  width: number\n  height: number\n  transform: AffineTransform\n}\n\nexport const identityTransform = (): AffineTransform => [1, 0, 0, 1, 0, 0]\n",
+    "src/shared/contracts/component-platform/motion.ts": "/** Temporary local transforms compose after the current author transform. */\nexport interface MotionFrame {\n  readonly transform?: string\n  /** Temporary opacity scale, sampled when a task starts. */\n  readonly opacity?: number\n}\n\nexport interface MotionKeyframe extends MotionFrame {\n  readonly offset?: number\n  readonly easing?: string\n}\n\n/** Serializable timing supported by the shared motion presentation service. */\nexport interface MotionTiming {\n  readonly delay?: number\n  readonly direction?: 'normal' | 'reverse' | 'alternate' | 'alternate-reverse'\n  readonly duration?: number | 'auto'\n  readonly easing?: string\n  readonly endDelay?: number\n  readonly fill?: 'none' | 'forwards' | 'backwards' | 'both' | 'auto'\n  readonly iterationStart?: number\n  readonly iterations?: number\n}\n\nexport interface ComponentMotionContext {\n  readonly signal: AbortSignal\n  readonly reducedMotion: boolean\n  /** Resolves only after the host applies the frame; false means this task retired. */\n  write(frame: MotionFrame): Promise<boolean>\n  nextFrame(): Promise<{ readonly elapsed: number } | null>\n  animate(frames: readonly MotionKeyframe[], timing: MotionTiming): Promise<boolean>\n  onCleanup(cleanup: () => void): void\n}\n\n/** Executed in the calling implementation's realm; functions never cross the host port. */\nexport type ComponentMotionProgram = (context: ComponentMotionContext) => void | Promise<void>\nexport type ComponentMotionOutcome =\n  | { readonly status: 'completed' | 'cancelled' }\n  | { readonly status: 'failed'; readonly error: unknown }\n\nexport interface ComponentMotionTask {\n  readonly finished: Promise<ComponentMotionOutcome>\n  cancel(): void\n}\n\nexport interface ComponentMotionPort {\n  /** A channel is private to this source mount and target. */\n  replace(channel: string, program: ComponentMotionProgram): ComponentMotionTask\n}\n",
+    "src/shared/contracts/component-platform/project.ts": "import type { FlowTextContent } from '../../document/content'\r\nimport type { ComponentFrame } from './frame'\r\nimport type { CourseStateDeclaration, CourseStateCondition } from '../course-state/types'\r\nimport type { ProjectDesignTokens, CourseTheme } from '../design-v1/types'\r\nimport type { ProjectPlaybackSettings } from '../playback-v1/types'\r\nimport type { AssetSource, ProjectMediaSettings } from '../media-v1/types'\r\n\r\nexport type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue }\r\nexport type JsonObject = { [key: string]: JsonValue }\r\nexport type ComponentRole = 'content' | 'behavior' | 'mixed'\r\n\r\nexport type ComponentImplementation =\r\n  | { kind: 'builtin'; key: string }\r\n  | ({ kind: 'source'; language: 'javascript' | 'typescript'; dependencies?: string[];\r\n      /** Original module specifiers map to definitions within this source owner. */\r\n      moduleBindings?: Record<string, string>;\r\n      /** Software-owned resource names preserve source lookups when library assets receive new identities. */\r\n      resourceBindings?: Record<string, string> } & (\r\n      | { source: string; workspace?: never }\r\n      /** Files, including the entry, live only in DocumentResources.components[ownerId]. */\r\n      | { workspace: { ownerId: string; entry: string }; source?: never }\r\n    ))\r\n\r\nexport interface ComponentDefinition {\r\n  readonly id: string\r\n  role: ComponentRole\r\n  implementation: ComponentImplementation\r\n  /** Professional schemas belong to the definition, never to an editor carrier. */\r\n  dataSchema?: JsonObject\r\n  /** Retains professional authoring when the definition uses custom source. */\r\n  professionalBuiltinKey?: string\r\n  version?: string\r\n  title?: string\r\n}\r\n\r\n/** Authoring identity only. Runtime always resolves the effective implementation. */\r\nexport function componentDefinitionBuiltinKey(definition: ComponentDefinition | undefined): string | undefined {\r\n  return definition?.implementation.kind === 'builtin' ? definition.implementation.key : definition?.professionalBuiltinKey\r\n}\r\n\r\nexport type ComponentTarget =\r\n  | { kind: 'instance'; instanceId: string }\r\n  | { kind: 'surface'; surfaceId: string }\r\n  | { kind: 'project' }\r\n\r\nexport interface BehaviorAttachment {\r\n  instanceId: string\r\n  target: ComponentTarget\r\n}\r\n\r\nexport interface ComponentInstance<Data = JsonValue> {\r\n  readonly id: string\r\n  definitionId: string\r\n  name?: string\r\n  visible?: boolean\r\n  visibility?: { mode: 'all' | 'include' | 'exclude'; surfaceIds: string[] }\r\n  locked?: boolean\r\n  playbackInitialVisibility?: 'inherit' | 'hidden'\r\n  flowPlacement?: ComponentFlowPlacement\r\n  flowLayout?: ComponentFlowBodyLayout\r\n  data: Data\r\n  style?: JsonObject\r\n  frame?: ComponentFrame\r\n  /** The sole ownership and ordering relation; parent indexes are derived. */\r\n  childIds?: string[]\r\n  attachments?: BehaviorAttachment[]\r\n  implementationOverride?: ComponentImplementation\r\n}\r\n\r\nexport interface ComponentBackground {\r\n  mode?: 'inherit' | 'own'\r\n  color?: string\r\n  assetId?: string | null\r\n  fit?: 'cover' | 'contain' | 'fill'\r\n}\r\nexport interface ComponentFlowBodyLayout {\r\n  width: 'content-width' | 'wide' | 'full-width'\r\n  wrap?: 'none' | 'left' | 'right'\r\n  caption?: FlowTextContent\r\n}\r\nexport interface ComponentFlowPlacement {\r\n  space: 'paper' | 'viewport'\r\n  plane: 'overlay' | 'underlay'\r\n  paragraphAnchor?: { blockId: string; offsetY: number; xRatio: number }\r\n}\r\nexport interface ComponentFlowAuthoring {\r\n  layout: { widthMode?: 'fluid' | 'reading'; readingWidth: number; wideContentWidth: number; paperBackgroundColor?: string }\r\n}\r\nexport interface ComponentPresentationState {\r\n  id: string\r\n  title: string\r\n  overrides: Record<string, { data?: JsonValue; style?: JsonObject; frame?: ComponentFrame | null; visible?: boolean }>\r\n  /** Display order only; the surface childIds remains the ownership relation. */\r\n  order?: string[]\r\n  background?: ComponentBackground\r\n}\r\nexport interface ComponentPresentation {\r\n  states: ComponentPresentationState[]\r\n  initialStateId?: string | null\r\n  thumbnailStateId?: string | null\r\n}\r\nexport interface CourseProjectLogic {\r\n  courseState: CourseStateDeclaration[]\r\n  navigationGuards: { id: string; effect: 'block'; fromSurfaceIds?: string[]; toSurfaceIds: string[];\r\n    match: 'all' | 'any'; conditions: CourseStateCondition[]; message: string }[]\r\n  network?: { connectOrigins?: string[] }\r\n}\r\n\r\nexport interface ComponentSurface {\r\n  id: string\r\n  kind: 'slide' | 'flow' | 'spatial'\r\n  title: string\r\n  childIds: string[]\r\n  designSize?: { width: number; height: number }\r\n  spatial?: ComponentSpatialAuthoring\r\n  background?: ComponentBackground\r\n  flow?: ComponentFlowAuthoring\r\n  presentation?: ComponentPresentation\r\n}\r\n\r\n/** Pose x/y are the viewport center in world coordinates; rotation is degrees. */\r\nexport interface ComponentSpatialPose { x: number; y: number; zoom: number; rotation?: number }\r\nexport interface ComponentSpatialAuthoring {\r\n  home: ComponentSpatialPose\r\n  frames: { id: string; title?: string; pose: ComponentSpatialPose; targetInstanceId?: string }[]\r\n  paths?: { id: string; title?: string; frameIds: string[]; instanceIds?: string[];\r\n    style?: { color?: string; width?: number; dash?: 'solid' | 'dashed' | 'dotted' } }[]\r\n  relations?: { id: string; sourceInstanceId: string; targetInstanceId: string; label?: string; kind: 'line' | 'arrow' | 'bidirectional' }[]\r\n  semanticZoom?: { id: string; instanceIds: string[]; minZoom: number; maxZoom: number; visible: boolean }[]\r\n}\r\n\r\nexport interface ComponentAsset {\r\n  id: string\r\n  path: string\r\n  mimeType?: string\r\n  filename?: string\r\n  kind?: 'image' | 'audio' | 'video' | 'font'\r\n  byteLength?: number\r\n  width?: number\r\n  height?: number\r\n  duration?: number\r\n  /** HTTPS delivery of the same embedded bytes; provenance remains in source. */\r\n  remote?: { url: string }\r\n  source?: AssetSource\r\n}\r\n\r\nexport interface CourseProjectV10 {\r\n  schemaVersion: 10\r\n  id: string\r\n  revision: number\r\n  title: string\r\n  background?: ComponentBackground\r\n  designTokens?: ProjectDesignTokens\r\n  theme?: CourseTheme\r\n  playback?: ProjectPlaybackSettings\r\n  media?: ProjectMediaSettings\r\n  logic?: CourseProjectLogic\r\n  definitions: Record<string, ComponentDefinition>\r\n  instances: Record<string, ComponentInstance>\r\n  surfaces: ComponentSurface[]\r\n  global: { underlay: string[]; overlay: string[] }\r\n  assets: Record<string, ComponentAsset>\r\n}\r\n\r\nexport type ComponentContainer =\r\n  | { kind: 'instance'; instanceId: string }\r\n  | { kind: 'surface'; surfaceId: string }\r\n  | { kind: 'global'; plane: 'underlay' | 'overlay' }\r\n\r\nexport function containerChildIds(project: CourseProjectV10, container: ComponentContainer): string[] {\r\n  if (container.kind === 'global') return project.global[container.plane]\r\n  if (container.kind === 'surface') {\r\n    const surface = project.surfaces.find(value => value.id === container.surfaceId)\r\n    if (!surface) throw new Error(`表面已不存在：${container.surfaceId}`)\r\n    return surface.childIds\r\n  }\r\n  const instance = project.instances[container.instanceId]\r\n  if (!instance?.childIds) throw new Error(`容器已不存在：${container.instanceId}`)\r\n  return instance.childIds\r\n}\r\n\r\nexport function owningContainer(project: CourseProjectV10, instanceId: string): ComponentContainer | null {\r\n  for (const plane of ['underlay', 'overlay'] as const) if (project.global[plane].includes(instanceId)) return { kind: 'global', plane }\r\n  for (const surface of project.surfaces) if (surface.childIds.includes(instanceId)) return { kind: 'surface', surfaceId: surface.id }\r\n  for (const instance of Object.values(project.instances)) if (instance.childIds?.includes(instanceId)) return { kind: 'instance', instanceId: instance.id }\r\n  return null\r\n}\r\n\r\nexport function isComponentVisibleAtSurface(instance: Pick<ComponentInstance, 'visible' | 'visibility'>, surfaceId: string): boolean {\r\n  if (instance.visible === false) return false\r\n  const scope = instance.visibility\r\n  return !scope || scope.mode === 'all' || (scope.mode === 'include' ? scope.surfaceIds.includes(surfaceId) : !scope.surfaceIds.includes(surfaceId))\r\n}\r\n\r\n/** One effective paint rule for editors, Player and output. */\r\nexport function resolveComponentBackground(project: Pick<CourseProjectV10, 'background'>, surface?: Pick<ComponentSurface, 'background'>, state?: Pick<ComponentPresentationState, 'background'>): { color: string; assetId: string | null; fit: 'cover' | 'contain' | 'fill' } {\r\n  const base = project.background\r\n  const selected = surface?.background?.mode === 'own' ? surface.background : base\r\n  const result = { color: selected?.color ?? '#ffffff', assetId: selected?.assetId ?? null, fit: selected?.fit ?? 'cover' as const }\r\n  const override = state?.background\r\n  if (!override || override.mode === 'inherit') return result\r\n  return { color: override.color ?? result.color, assetId: override.assetId === undefined ? result.assetId : override.assetId,\r\n    fit: override.fit ?? result.fit }\r\n}\r\n\r\n/** A disposable render/edit projection. It never becomes an authoring write source. */\r\nexport function resolveComponentPresentation(project: CourseProjectV10, surfaceId: string | null, stateId: string | null): CourseProjectV10 {\r\n  const surface = project.surfaces.find(value => value.id === surfaceId)\r\n  const state = surface?.presentation?.states.find(value => value.id === stateId)\r\n  if (!surface || !state) return project\r\n  const instances = { ...project.instances }\r\n  for (const [id, override] of Object.entries(state.overrides)) if (instances[id]) {\r\n    const { frame, ...fields } = override\r\n    const instance = { ...instances[id], ...fields }\r\n    if (frame === null) delete instance.frame\r\n    else if (frame !== undefined) instance.frame = frame\r\n    instances[id] = instance\r\n  }\r\n  const order = state.order?.filter(id => surface.childIds.includes(id))\r\n  const projectedSurface = { ...surface,\r\n    ...(order ? { childIds: [...order, ...surface.childIds.filter(id => !order.includes(id))] } : {}),\r\n    ...(state.background ? { background: { mode: 'own' as const, ...resolveComponentBackground(project, surface, state) } } : {}),\r\n  }\r\n  return { ...project, instances, surfaces: project.surfaces.map(value => value.id === surfaceId ? projectedSurface : value) }\r\n}\r\n",
+    "src/shared/contracts/component-platform/runtime.ts": "import type { ComponentFrame } from './frame'\nimport type { ComponentInstance, ComponentTarget, JsonValue } from './project'\nimport type { TeacherControllerPort } from './teacherController'\nimport type { ComponentMotionPort } from './motion'\nimport type { InteractionAction, InteractionTrigger } from '../../interactionTypes'\n\nexport type ComponentMediaChannel = 'music' | 'narration' | 'sfx' | 'ui' | 'video'\nexport interface ComponentMediaState { paused: boolean; currentTime: number; loop: boolean }\nexport type ComponentMediaCommand =\n  | { type: 'play' } | { type: 'pause' } | { type: 'seek'; seconds: number }\n  | { type: 'loop'; value: boolean } | { type: 'mix'; volume: number; muted: boolean }\nexport interface ComponentMediaRegistrationOptions {\n  kind: 'audio' | 'video'\n  channel: ComponentMediaChannel\n  volume: number\n  muted: boolean\n  initial: ComponentMediaState\n}\nexport interface ComponentMediaRegistration {\n  update(options: Partial<Pick<ComponentMediaRegistrationOptions, 'channel' | 'volume' | 'muted'>>): void\n  report(state: ComponentMediaState, event?: 'play' | 'pause' | 'ended'): void\n  dispose(): void\n}\n/** The callback executes in its caller's realm; transport carries commands and acknowledgements only. */\nexport interface ComponentMediaPort {\n  register(options: ComponentMediaRegistrationOptions, command: (command: ComponentMediaCommand) => boolean | Promise<boolean>): ComponentMediaRegistration\n  interruptBackground(mode: 'none' | 'duck' | 'pause' | 'stop'): { release(): void }\n}\nexport interface ComponentInteractionPort {\n  currentSurfaceId(): string | null\n  currentStateId(): string | null\n  courseState: { get(key: string): unknown; set(key: string, value: unknown): void }\n  subscribeTrigger(trigger: InteractionTrigger, listener: (payload?: unknown) => void): () => void\n  executeAction(action: InteractionAction, context: { signal: AbortSignal; ruleId: string; stepId: string; restartFromBeginning: boolean }): boolean | void | PromiseLike<boolean | void>\n  report(message: string): void\n}\nexport interface ComponentPresentationPort {\n  feedback(text?: string): { setText(text: string): Promise<boolean>; dispose(): void }\n  visibility(visible?: boolean): { setVisible(visible: boolean): Promise<boolean>; dispose(): void }\n}\n\n/** Every mounted implementation receives a fresh scope; state never writes author data. */\nexport interface ComponentRuntimeScope {\n  readonly runScopeId: string\n  readonly instanceId: string\n  readonly generation: number\n  readonly signal: AbortSignal\n  isActive(): boolean\n  cleanup(dispose: () => void): void\n  target(reference: ComponentTarget): ComponentRuntimeTarget | null\n  events: {\n    emit(name: string, value: JsonValue): void\n    subscribe(name: string, listener: (value: JsonValue) => void): () => void\n  }\n  state: {\n    get(name: string): JsonValue | undefined\n    set(name: string, value: JsonValue): void\n    subscribe(name: string, listener: (value: JsonValue | undefined) => void): () => void\n  }\n}\n\nexport interface ComponentRuntimeTarget {\n  readonly instanceId: string\n  /** Headless targets and behavior instances need no DOM root. */\n  readonly element?: HTMLElement\n  readonly motion?: ComponentMotionPort\n  readonly presentation?: ComponentPresentationPort\n  read(): JsonValue\n  emit(name: string, value: JsonValue): void\n}\n\n/** Ephemeral author observations; identity and mount generation belong to the host. */\nexport interface ComponentAuthorSpotInput {\n  kind: 'text' | 'image'\n  dataPath?: string[]\n  sourceRegion?: { kind: 'implementation' | 'data'; path?: string[]; start: number; end: number;\n    encoding?: 'html-text' | 'html-attribute' }\n  initialValue: JsonValue\n  localBounds: ComponentFrame\n}\nexport interface ComponentAuthorSpot extends ComponentAuthorSpotInput {\n  id: string\n  instanceId: string\n  mountGeneration: number\n}\n\n/** Host-derived layout, not author metadata. Only Flow owns the natural height of a reading block. */\nexport type ComponentLayoutInput =\n  | { mode: 'free-frame' | 'flow-viewport'; inlineSize: number; blockSize: number }\n  | { mode: 'flow-content'; inlineSize: number }\n\nexport interface ComponentLayoutSizeReport {\n  /** The host input width used for this measurement, never the content's scrollWidth. */\n  inlineSize: number\n  blockSize: number\n}\n\n/** Bound to one instance/mount generation; retired ports cannot report into a replacement generation. */\nexport interface ComponentLayoutPort {\n  read(): ComponentLayoutInput\n  subscribe(listener: (layout: ComponentLayoutInput) => void): () => void\n  /** A display observation only. The Surface accepts it for the current width and never writes History. */\n  reportSize(report: ComponentLayoutSizeReport): void\n}\n\nexport interface ComponentRuntimeContext<Data = JsonValue> {\n  readonly instance: ComponentInstance<Data>\n  readonly scope: ComponentRuntimeScope\n  readonly root?: HTMLElement\n  readonly teacherController?: TeacherControllerPort\n  /** Read-only URLs for assets already owned by this document; no file-system access. */\n  readonly resources?: { url(assetId: string): string | undefined }\n  readonly media?: ComponentMediaPort\n  readonly interactions?: ComponentInteractionPort\n  readonly authoring?: { register(spot: ComponentAuthorSpotInput): () => void }\n  readonly layout?: ComponentLayoutPort\n}\n\nexport interface MountedComponent<Data = JsonValue> {\n  update(instance: ComponentInstance<Data>): void | Promise<void>\n  updatePlacement?(frame: ComponentFrame | undefined): void\n  dispose(): void | Promise<void>\n}\n\nexport interface ComponentRuntimeImplementation<Data = JsonValue> {\n  mount(context: ComponentRuntimeContext<Data>): MountedComponent<Data> | Promise<MountedComponent<Data>>\n}\n",
+    "src/shared/contracts/component-platform/teacherController.ts": "import { z } from 'zod'\n\nexport type TeacherControllerAction =\n  | { type: 'step.previous' }\n  | { type: 'step.next' }\n  | { type: 'scene.previous' }\n  | { type: 'scene.next' }\n  | { type: 'scene.replay' }\n  | { type: 'course.restart' }\n  | { type: 'scene.open-picker' }\n  | { type: 'audio.toggle-mute' }\n  | { type: 'player.fullscreen.toggle' }\n  | { type: 'scene.go'; sceneId: string; targetStateId?: string }\n\nexport const teacherControllerActionSchema: z.ZodType<TeacherControllerAction> = z.union([\n  z.object({ type: z.enum(['step.previous', 'step.next', 'scene.previous', 'scene.next', 'scene.replay', 'course.restart', 'scene.open-picker', 'audio.toggle-mute', 'player.fullscreen.toggle']) }).strict(),\n  z.object({ type: z.literal('scene.go'), sceneId: z.string().min(1), targetStateId: z.string().optional() }).strict(),\n])\nexport interface TeacherControllerSnapshot {\n  locationId: string | null\n  /** Live host interaction mode; the author's component data and frame are unchanged. */\n  interactive?: boolean\n  scenes: readonly { id: string; name: string }[]\n  progress: { sceneIndex: number; sceneCount: number; stepIndex: number; stepCount: number; sceneName: string; stepName: string } | null\n  /** Unset until the session overrides the authored initial state. */\n  collapsed?: boolean\n  zoom: number\n  muted: boolean\n  fullscreen: boolean\n}\n/** One navigation/view owner is shared by the builtin and source proxy. */\nexport interface TeacherControllerPort {\n  read(): TeacherControllerSnapshot\n  subscribe(listener: () => void): () => void\n  /** Actual playback region in the owning document's viewport CSS pixels. */\n  viewportBounds?(): { left: number; top: number; right: number; bottom: number } | undefined\n  canExecute(action: TeacherControllerAction): boolean\n  execute(action: TeacherControllerAction): Promise<boolean>\n  setCollapsed(value: boolean): void\n  moveBy(dx: number, dy: number): void\n  setZoom(value: number): void\n  resetView(): void\n}\n",
+    "src/shared/contracts/interaction-v1/types.ts": "import type { RuntimePresentationTransition } from '../runtime/types'\nimport type {\n  CourseStateCondition,\n  CourseStateScalar,\n} from '../course-state/types'\n\n/** Runtime-visible discriminators shared by Schema and generated AI contracts. */\nexport const INTERACTION_TRIGGER_TYPES = [\n  'node.click',\n  'scene.enter',\n  'presentation.enter',\n  'component.event',\n  'runtime.event',\n  'audio.ended',\n  'video.started',\n  'video.paused',\n  'video.ended',\n  'video.time',\n  'node.activated',\n  'animation.completed',\n  'presenter.command',\n  'input.submit',\n] as const\n\nexport const INTERACTION_CONDITION_TYPES = [\n  'presentation.in',\n  'scene.in',\n  'course-state.exists',\n  'course-state.compare',\n] as const\n\nexport const INTERACTION_ACTION_TYPES = [\n  'step.next',\n  'step.previous',\n  'presentation.set',\n  'scene.go',\n  'location.go',\n  'scene.next',\n  'scene.previous',\n  'scene.replay',\n  'course.restart',\n  'course-state.set',\n  'audio.play',\n  'audio.pause',\n  'audio.resume',\n  'audio.stop',\n  'audio.toggle-mute',\n  'video.play',\n  'video.pause',\n  'video.restart',\n  'video.stop',\n  'video.toggle',\n  'video.seek',\n  'node.enter',\n  'node.exit',\n] as const\n\nexport type AudioChannel = 'music' | 'narration' | 'sfx' | 'ui'\n\nexport interface InputSubmitTrigger {\n  type: 'input.submit'\n  nodeId: string\n}\n\nexport type InteractionTrigger =\n  | { type: 'node.click'; nodeId: string }\n  | { type: 'scene.enter' }\n  | { type: 'presentation.enter'; stateId: string }\n  | { type: 'component.event'; nodeId: string; eventName: string }\n  | {\n      type: 'runtime.event'\n      scope: 'scene' | 'global'\n      eventName: string\n    }\n  | { type: 'audio.ended'; soundId: string }\n  | { type: 'video.started'; nodeId: string }\n  | { type: 'video.paused'; nodeId: string }\n  | { type: 'video.ended'; nodeId: string }\n  | { type: 'video.time'; nodeId: string; seconds: number }\n  | { type: 'node.activated'; nodeId: string }\n  | { type: 'animation.completed'; actionId: string }\n  | { type: 'presenter.command'; command: 'next' | 'previous' }\n  | InputSubmitTrigger\n\nexport type InteractionCourseStateCondition =\n  | (Omit<Extract<CourseStateCondition, { type: 'exists' }>, 'type'> & {\n      type: 'course-state.exists'\n    })\n  | (Omit<Extract<CourseStateCondition, { type: 'compare' }>, 'type'> & {\n      type: 'course-state.compare'\n    })\n\n/** Different conditions are ANDed. State ids inside one condition are ORed. */\nexport type InteractionCondition =\n  | {\n      type: 'presentation.in'\n      stateIds: string[]\n    }\n  | {\n      type: 'scene.in'\n      sceneIds: string[]\n    }\n  | InteractionCourseStateCondition\n\ntype AssertExactly<Left, Right> =\n  [Exclude<Left, Right>, Exclude<Right, Left>] extends [never, never]\n    ? true\n    : never\n\nconst triggerTypesMatchContract: AssertExactly<\n  InteractionTrigger['type'],\n  (typeof INTERACTION_TRIGGER_TYPES)[number]\n> = true\n\nconst conditionTypesMatchContract: AssertExactly<\n  InteractionCondition['type'],\n  (typeof INTERACTION_CONDITION_TYPES)[number]\n> = true\n\nexport type AudioActionTarget =\n  | { kind: 'sound'; soundId: string }\n  | { kind: 'channel'; channel: AudioChannel }\n  | { kind: 'all' }\n\nexport interface AudioPlayAction {\n  type: 'audio.play'\n  soundId: string\n  volume?: number\n  loop?: boolean\n  fadeInMs?: number\n  lifetime?: 'scene' | 'course'\n  ifPlaying?: 'restart' | 'continue' | 'ignore'\n}\n\nexport interface AudioPauseAction {\n  type: 'audio.pause'\n  target: AudioActionTarget\n  fadeOutMs?: number\n}\n\nexport interface AudioResumeAction {\n  type: 'audio.resume'\n  target: AudioActionTarget\n  fadeInMs?: number\n}\n\nexport interface AudioStopAction {\n  type: 'audio.stop'\n  target: AudioActionTarget\n  fadeOutMs?: number\n}\n\nexport interface AudioToggleMuteAction {\n  type: 'audio.toggle-mute'\n  target: AudioActionTarget\n}\n\nexport type AudioInteractionAction =\n  | AudioPlayAction\n  | AudioPauseAction\n  | AudioResumeAction\n  | AudioStopAction\n  | AudioToggleMuteAction\n\nexport type VideoInteractionAction =\n  | { type: 'video.play'; nodeId: string }\n  | { type: 'video.pause'; nodeId: string }\n  | { type: 'video.restart'; nodeId: string }\n  | { type: 'video.stop'; nodeId: string }\n  | { type: 'video.toggle'; nodeId: string }\n  | { type: 'video.seek'; nodeId: string; seconds: number }\n\nexport interface CourseStateSetAction {\n  type: 'course-state.set'\n  key: string\n  value: CourseStateScalar\n}\n\nexport type MotionEffect = 'none' | 'fade' | 'slide' | 'scale'\nexport type MotionDirection = 'left' | 'right' | 'up' | 'down'\nexport type MotionEasing = 'linear' | 'ease-in' | 'ease-out' | 'ease-in-out'\n\ninterface NodeMotionActionBase {\n  nodeId: string\n  durationMs: number\n  easing: MotionEasing\n}\n\ntype NodeMotionDescriptor =\n  | { effect: 'slide'; direction: MotionDirection }\n  | { effect: Exclude<MotionEffect, 'slide'>; direction?: never }\n\n/** A host-level entrance/exit action. Timing lives on its enclosing step. */\nexport type NodeMotionAction = (\n  | { type: 'node.enter' }\n  | { type: 'node.exit' }\n) & NodeMotionActionBase & NodeMotionDescriptor\n\n/** Payload family used by both sequential and parallel Project V8 action steps. */\nexport type InteractionActionPayload =\n  | { type: 'step.next' }\n  | { type: 'step.previous' }\n  | {\n      type: 'presentation.set'\n      stateId: string\n      transition?: RuntimePresentationTransition\n    }\n  | {\n      type: 'scene.go'\n      sceneId: string\n      /** Omit to enter the target scene's authored initial state. */\n      targetStateId?: string\n    }\n  | { type: 'scene.next' }\n  | { type: 'location.go'; locationId: string }\n  | { type: 'scene.previous' }\n  | { type: 'scene.replay' }\n  | { type: 'course.restart' }\n  | CourseStateSetAction\n  | AudioInteractionAction\n  | VideoInteractionAction\n  | NodeMotionAction\n\n/** Action payload carried by a Project V8 interaction step. */\nexport type InteractionAction = InteractionActionPayload\n\nconst actionTypesMatchContract: AssertExactly<\n  InteractionActionPayload['type'],\n  (typeof INTERACTION_ACTION_TYPES)[number]\n> = true\n\nvoid triggerTypesMatchContract\nvoid conditionTypesMatchContract\nvoid actionTypesMatchContract\n\nexport interface InteractionActionStep {\n  /** Stable within one scene/global interaction scope; completion triggers reference it. */\n  id: string\n  start: 'after-previous' | 'with-previous'\n  /** Relative to the triggering event or previous completed action group. */\n  delayMs: number\n  action: InteractionActionPayload\n}\n\nexport interface InteractionRule {\n  id: string\n  name?: string\n  enabled: boolean\n  trigger: InteractionTrigger\n  conditions: InteractionCondition[]\n  /** Steps execute as sequential/parallel groups. Terminal navigation owns the last group. */\n  actions: InteractionActionStep[]\n}\n\nexport type TerminalNavigationAction = Extract<\n  InteractionActionPayload,\n  {\n    type:\n      | 'step.next'\n      | 'step.previous'\n      | 'scene.go'\n      | 'location.go'\n      | 'scene.next'\n      | 'scene.previous'\n      | 'scene.replay'\n      | 'course.restart'\n  }\n>\n\nconst terminalNavigationTypes = new Set<InteractionActionPayload['type']>([\n  'step.next',\n  'step.previous',\n  'scene.go',\n  'location.go',\n  'scene.next',\n  'scene.previous',\n  'scene.replay',\n  'course.restart',\n])\n\nexport function isTerminalNavigationAction(\n  action: InteractionActionPayload,\n): action is TerminalNavigationAction {\n  return terminalNavigationTypes.has(action.type)\n}\n\nexport function isAudioInteractionAction(\n  action: InteractionActionPayload,\n): action is AudioInteractionAction {\n  return action.type.startsWith('audio.')\n}\n\nexport function isVideoInteractionAction(\n  action: InteractionActionPayload,\n): action is VideoInteractionAction {\n  return action.type.startsWith('video.')\n}\n\nexport function isNodeMotionAction(\n  action: InteractionActionPayload,\n): action is NodeMotionAction {\n  return action.type === 'node.enter' || action.type === 'node.exit'\n}\n"
+  }
+}

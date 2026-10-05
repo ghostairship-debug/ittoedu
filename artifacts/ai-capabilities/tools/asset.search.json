@@ -1,0 +1,30 @@
+{
+  "description": "检索与组件库面板相同的 Component API 5 条目，按名称、标签、学科、学段和说明匹配，返回 packageId、版本、来源与信任状态；可用 asset.use 插入。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "limit": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "query": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "query"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "read",
+    "label": "asset.search",
+    "targetKinds": []
+  },
+  "name": "asset.search",
+  "version": 1
+}

@@ -1,4 +1,4 @@
-import { DocumentSaveFailure, type DocumentSaveIdentity } from '../../shared/workbench/documentSave'
+import { DocumentSaveFailure, type DocumentSaveFact, type DocumentSaveIdentity, type SavedCourseIdentity } from '../../shared/workbench/documentSave'
 import type { SaveReceipt } from '../../shared/workbench/toolPorts'
 import { documentDigest } from '../../core/documents/documentDigest'
 import { sourceFileKind } from '../../shared/workbench/sourceFileKind'
@@ -9,9 +9,9 @@ import { DocumentRegistry } from '../../core/documents/DocumentRegistry'
 import type { DocumentSession, DocumentSaveObserver } from '../../core/documents/DocumentSession'
 import { createMarkdownDriver } from '../../core/drivers/MarkdownDriver'
 import { createTextDriver, TextEncodingError } from '../../core/drivers/TextDriver'
-import { createCourseV9Driver } from '../../core/drivers/CourseV9Driver'
-import type { AsyncNativeTextMeasurePort } from '../../core/tools/prepareNativeTextFrame'
-import { isSourceDocumentModel, type DocumentDriver, type DocumentEvent, type DocumentKind, type DocumentModel, type DocumentSnapshot } from '../../shared/workbench/document'
+import { createCourseV10Driver } from '../../core/drivers/CourseV10Driver'
+import { checkComponentExpectations, ComponentOperationConflict } from '../../core/drivers/courseV10Operations'
+import { isSourceDocumentModel, type DocumentDriver, type DocumentEvent, type DocumentKind, type DocumentModel, type DocumentSnapshot, type DocumentOperation, type DocumentOperationResult } from '../../shared/workbench/document'
 import { DesktopOperationError } from '../errors'
 import { documentHostRequestSchema, type DocumentHostRequest, type DocumentHostAPI, type DocumentFileObservation, type ReconcileDocumentFile } from '../../shared/workbench/desktop'
 import { createDocumentJournal, readDocumentFileVersion, readDocumentMarkdownResources } from './documentJournal'
@@ -20,8 +20,11 @@ import { WorkspaceFiles, type WorkspaceFilesDependencies } from './WorkspaceFile
 import { DocumentFileCoordinator } from './DocumentFileCoordinator'
 import { FileArtifactService } from './FileArtifactService'
 import { prepareImageResource } from './admittedImageResource'
-import { createBlankCourseProject } from '../../core/course/createCourseProject'
-import { createDefaultTeacherControllerPackage } from '../../shared/defaultTeacherControllerComponent'
+import { createBlankCourseProjectV10 } from '../../core/course/createCourseProjectV10'
+import { InMemoryComponentCompilation } from '../../core/components/compilation/InMemoryComponentCompilation'
+import { createEsbuildComponentCompiler } from './contentApply/compilation/esbuildComponentCompiler'
+import { ContentApplyService } from './contentApply/applyService'
+import { readComponentProjectFileInput, prepareComponentProjectFileSource } from './projectFiles/componentPlatformFileInput'
 
 function canonicalKey(filename: string): string {
   return process.platform === 'win32' ? filename.toLowerCase() : filename
@@ -35,11 +38,7 @@ async function loadDocumentModel(driver: DocumentDriver, bytes: Uint8Array): Pro
   }
 }
 
-export type DocumentSaveFact = { saveId: string; documentId: string; epoch: string; documentName: string; time: number } & (
-  | { status: 'saving'; revision: number }
-  | { status: 'saved'; savedRevision: number; currentRevision: number }
-  | { status: 'failed'; revision: number; error: string }
-)
+export type { DocumentSaveFact } from '../../shared/workbench/documentSave'
 
 /** App-owned singleton, independent of renderer lifetime and active surface. */
 export class DocumentHostService {
@@ -53,15 +52,36 @@ export class DocumentHostService {
   private readonly subscribed = new Set<string>()
   private eventSink?: (event: DocumentEvent) => void
   private readonly eventListeners = new Set<(event: DocumentEvent) => void>()
-  private readonly saveListeners = new Set<(fact: DocumentSaveFact) => void>()
+  private readonly saveListeners = new Set<(fact: DocumentSaveFact) => unknown>()
+  private readonly saveObservations = new Set<Promise<void>>()
   private readonly closeListeners = new Set<(documentId: string) => void>()
   private bootstrapping?: Promise<DocumentSnapshot>
 
-  constructor(directory: string, fileDependencies: Pick<WorkspaceFilesDependencies, 'trashItem' | 'showItemInFolder' | 'fileOperations'> = {}, rendering: { measureNativeTextAsync?: AsyncNativeTextMeasurePort } = {}) {
-    this.drivers = [createMarkdownDriver(), createTextDriver(), createCourseV9Driver(rendering)]
+  constructor(directory: string, fileDependencies: Pick<WorkspaceFilesDependencies, 'trashItem' | 'showItemInFolder' | 'fileOperations'> = {}) {
+    this.drivers = [createMarkdownDriver(), createTextDriver(), createCourseV10Driver()]
     this.journal = createDocumentJournal({ directory })
     this.registry = new DocumentRegistry({ persistence: this.journal, drivers: this.drivers, createId: randomUUID, bindingKey: binding => canonicalKey(binding.path) })
-    this.tools = new DocumentToolGateway(this.registry, this.drivers, randomUUID, { prepareImage: prepareImageResource, ...rendering })
+    const compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
+    this.tools = new DocumentToolGateway(this.registry, this.drivers, randomUUID, { prepareImage: prepareImageResource,
+      componentContent: {
+        source: (from, fileAccess) => readComponentProjectFileInput({ from, fileAccess }),
+        prepareSource: prepareComponentProjectFileSource,
+        apply: input => new ContentApplyService({
+          session: { project: () => input.baseline.model.project,
+            resources: () => input.baseline.model.resources,
+            dispatch: async command => {
+              input.assertActive()
+              const current = await this.registry.get(input.baseline.documentId).drain()
+              input.assertActive()
+              return this.dispatch({ documentId: current.documentId, epoch: input.baseline.epoch, baseRevision: current.revision,
+                operationId: input.operationId, requestDigest: input.requestDigest, actor: input.actor, runId: input.runId,
+                mutation: { type: 'command', command } })
+            } },
+          measure: async request => (await import('./contentApply/measurement/ElectronHtmlDesignMeasurement.js')).measureHtmlAtDesignViewport(request),
+          compilation,
+        }).apply(input.request),
+      },
+    })
     this.fileCoordinator = new DocumentFileCoordinator(this.registry, this.journal, path.join(directory, 'binding-intents'))
     this.files = new WorkspaceFiles({ ...fileDependencies, aroundMutation: this.fileCoordinator.aroundMutation,
       aroundOperation: perform => this.fileCoordinator.withFileOperation(perform) })
@@ -76,21 +96,33 @@ export class DocumentHostService {
     return () => this.eventListeners.delete(listener)
   }
 
-  subscribeSaves(listener: (fact: DocumentSaveFact) => void): () => void { this.saveListeners.add(listener); return () => this.saveListeners.delete(listener) }
+  subscribeSaves(listener: (fact: DocumentSaveFact) => unknown): () => void { this.saveListeners.add(listener); return () => this.saveListeners.delete(listener) }
   /** A document session closed (its tab or window); what belonged to it can be cleared (M15 element AI cards). */
   subscribeClosed(listener: (documentId: string) => void): () => void { this.closeListeners.add(listener); return () => this.closeListeners.delete(listener) }
+  /** Continuation awaits returned save-consumer ACKs; display observers return immediately. */
+  async settleSaveObservations(): Promise<void> {
+    await Promise.all([...this.saveObservations])
+  }
   private publishSave(fact: DocumentSaveFact): void {
-    for (const listener of this.saveListeners) { try { listener(structuredClone(fact)) } catch { /* File saving is independent of timeline/diagnostic consumers. */ } }
+    for (const listener of this.saveListeners) {
+      try {
+        const observation = listener(structuredClone(fact))
+        if (observation instanceof Promise) {
+          const pending = observation.then(() => undefined, () => undefined)
+          this.saveObservations.add(pending)
+          void pending.finally(() => this.saveObservations.delete(pending))
+        }
+      } catch { /* File saving is independent of timeline/diagnostic consumers. */ }
+    }
   }
 
   bootstrapCourse(): Promise<DocumentSnapshot> {
-    const live = this.registry.list().find(snapshot => snapshot.model.kind === 'course-v9')
+    const live = this.registry.list().find(snapshot => snapshot.model.kind === 'course-v10')
     if (live) return Promise.resolve(live)
     if (!this.bootstrapping) {
-      const project = createBlankCourseProject()
-      const controller = createDefaultTeacherControllerPackage()
-      this.bootstrapping = this.registry.create({ kind: 'course-v9', project,
-        resources: { assets: {}, components: { [`${controller.manifest.id}@${controller.manifest.version}`]: controller.files } },
+      const project = createBlankCourseProjectV10()
+      this.bootstrapping = this.registry.create({ kind: 'course-v10', project,
+        resources: { assets: {}, components: {} },
       }, `${project.title}.h5lesson`, true).then(session => this.attach(session))
         .finally(() => { this.bootstrapping = undefined })
     }
@@ -105,7 +137,7 @@ export class DocumentHostService {
     restore: documentId => this.operate({ type: 'restore', documentId }) as Promise<DocumentSnapshot>,
     open: filename => this.open(filename),
     read: documentId => this.registry.get(documentId).drain(),
-    dispatch: operation => this.registry.get(operation.documentId).execute(operation),
+    dispatch: operation => this.dispatch(operation),
     lookup: async (documentId, operationId) => this.registry.get(documentId).lookupOperation(operationId),
     save: (documentId, filename) => this.saveToPath(documentId, filename),
     observeFile: documentId => this.observeFile(documentId),
@@ -129,6 +161,23 @@ export class DocumentHostService {
   }
 
   get recoveryIssues(): readonly string[] { return [...this.fileCoordinator.recoveryIssues, ...this.journal.recoveryIssues] }
+
+  /** Replan only known local reads; Session still performs the final CAS and durable commit. */
+  private async dispatch(input: DocumentOperation): Promise<DocumentOperationResult> {
+    const session = this.registry.get(input.documentId)
+    if (input.mutation.type !== 'command' || input.mutation.command.type !== 'component-platform.apply') return session.execute(input)
+    const requestDigest = input.requestDigest ?? documentDigest(input)
+    const known = session.lookupRequest({ ...input, requestDigest })
+    if (known) return known
+    const snapshot = await session.drain()
+    if (snapshot.epoch !== input.epoch || snapshot.model.kind !== 'course-v10' || input.baseRevision > snapshot.revision) return session.execute(input)
+    try { checkComponentExpectations(snapshot.model.project, input.mutation.command) }
+    catch (error) {
+      if (!(error instanceof ComponentOperationConflict)) throw error
+      return { status: 'conflict', documentId: input.documentId, operationId: input.operationId, code: error.code, message: error.message, applied: false }
+    }
+    return session.execute({ ...input, requestDigest, baseRevision: snapshot.revision })
+  }
   async assertFileAvailable(filename: string): Promise<void> { this.fileCoordinator.assertResolved([filename]); await this.journal.assertAvailable([filename]) }
 
   private kind(filename: string): DocumentKind { return sourceFileKind(filename) }
@@ -228,12 +277,25 @@ export class DocumentHostService {
     const initial = this.registry.get(documentId).read(), saveId = randomUUID()
     const base = { saveId, documentId, epoch: initial.epoch }
     let observedRevision = initial.revision, terminal = false, enteredSession = false
+    let savingProjectId: string | undefined
     let documentName = initial.binding.kind === 'file' ? path.basename(initial.binding.path) : initial.binding.suggestedName
     const observer: DocumentSaveObserver = progress => {
       onProgress?.(progress)
       documentName = progress.binding.kind === 'file' ? path.basename(progress.binding.path) : progress.binding.suggestedName
-      if (progress.status === 'saving') { enteredSession = true; observedRevision = progress.revision; this.publishSave({ ...base, documentName, time: Date.now(), status: 'saving', revision: progress.revision }) }
-      else if (progress.status === 'saved') { terminal = true; this.publishSave({ ...base, documentName, time: Date.now(), status: 'saved', savedRevision: progress.savedRevision, currentRevision: progress.currentRevision }) }
+      if (progress.status === 'saving') {
+        enteredSession = true; observedRevision = progress.revision
+        // The observer runs synchronously inside the session's captured-save turn.
+        const captured = this.registry.get(documentId).read()
+        savingProjectId = captured.model.kind === 'course-v10' ? captured.model.project.id : undefined
+        this.publishSave({ ...base, documentName, time: Date.now(), status: 'saving', revision: progress.revision })
+      } else if (progress.status === 'saved') {
+        terminal = true
+        const savedBinding: SavedCourseIdentity | undefined = savingProjectId && progress.binding.kind === 'file'
+          ? { kind: 'course-v10', path: progress.binding.path, projectId: savingProjectId, epoch: initial.epoch,
+            savedRevision: progress.savedRevision, fileVersion: progress.binding.version } : undefined
+        this.publishSave({ ...base, documentName, time: Date.now(), status: 'saved', savedRevision: progress.savedRevision,
+          currentRevision: progress.currentRevision, ...(savedBinding ? { savedBinding } : {}) })
+      }
       else { terminal = true; this.publishSave({ ...base, documentName, time: Date.now(), status: 'failed', revision: progress.revision, error: progress.error instanceof Error ? progress.error.message : String(progress.error) }) }
     }
     return this.fileCoordinator.withFileAccess(async () => {
@@ -273,7 +335,7 @@ export class DocumentHostService {
       case 'create': return this.attach(await this.registry.create(input.model, input.suggestedName))
       case 'open': return this.open(input.path)
       case 'read': return this.registry.get(input.documentId).drain()
-      case 'dispatch': return this.registry.get(input.operation.documentId).execute(input.operation)
+      case 'dispatch': return this.dispatch(input.operation)
       case 'lookup': return this.registry.get(input.documentId).lookupOperation(input.operationId)
       case 'save': return this.saveToPath(input.documentId, input.path)
       case 'save-dialog': throw new Error('保存对话框需要应用窗口')

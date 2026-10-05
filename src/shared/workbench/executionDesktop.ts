@@ -10,15 +10,24 @@ import { userAnswerSchema, type UserAnswer } from './userQuestion'
 import { approvalDecisionSchema, executionPermissionModeSchema, type ApprovalDecision, type ExecutionPermissionMode } from './executionPermission'
 
 const id = z.string().min(1), index = z.number().int().nonnegative()
-export const executionSelectionTargetSchema = z.discriminatedUnion('kind', [
+const executionEditTargetSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('markdown-range'), from: index, to: index }).strict().refine(value => value.to > value.from),
+  z.object({ kind: z.literal('course-instance'), surfaceId: id, instanceId: id, stateId: id.nullable().optional(),
+    fieldScope: z.enum(['data', 'flowLayout']).optional(), dataPath: z.array(id).optional(), from: index.optional(), to: index.optional(),
+  }).strict().refine(value => value.from === undefined && value.to === undefined
+    || value.dataPath !== undefined && value.from !== undefined && value.to !== undefined && value.to > value.from,
+  '文字范围需要真实字段和非空范围'),
   z.object({ kind: z.literal('course-object'), locationId: id, itemId: id, stateId: id.optional(), compositionNodeId: id.optional() }).strict(),
   z.object({ kind: z.literal('flow-block'), surfaceId: id, blockId: id, parentId: id.nullable() }).strict(),
   z.object({ kind: z.literal('flow-range'), surfaceId: id, blockId: id, parentId: id.nullable(), slot: documentSlotSchema, from: index, to: index }).strict().refine(value => value.to > value.from),
 ])
+export const executionSelectionTargetSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('course-surface'), surfaceId: id }).strict(),
+  ...executionEditTargetSchema.options,
+])
 export type ExecutionSelectionTarget = z.infer<typeof executionSelectionTargetSchema>
 export const executionContentOutputSchema = z.object({ kind: z.literal('replace-text'), documentId: id,
-  target: executionSelectionTargetSchema }).strict()
+  target: executionEditTargetSchema }).strict()
 const scope = z.union([z.object({ kind: z.literal('document') }).strict(), executionSelectionTargetSchema])
 export const executionDocumentReferenceSchema = z.object({ documentId: id, epoch: id, revision: index, writable: z.array(scope), selection: z.array(executionSelectionTargetSchema).min(1).optional() }).strict()
 export type ExecutionDocumentReference = z.infer<typeof executionDocumentReferenceSchema>

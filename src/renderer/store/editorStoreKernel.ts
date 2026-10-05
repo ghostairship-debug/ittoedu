@@ -1,26 +1,7 @@
-import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
-import type { CourseAssetSidecar } from '../project/v9AssetAdapter'
-import { emptyCourseAssetSidecar } from '../project/v9AssetAdapter'
-import type { ComponentPackageData } from '../../shared/componentTypes'
-import {
-  applyEditorTransactionStep,
-  type EditorTransactionStep,
-} from '../authoring/editorTransaction'
-import {
-  applyHistoryResourceChanges,
-  commitCourseResourceState,
-  type CourseResourceState,
-  type CourseResourceTransition,
-  type HistoryResourceState,
-} from './courseResourceState'
-import {
-  createSessionToken,
-  surfaceTypeForLocation,
-  updateCourseAuthoringSessionItems,
-  updateCourseAuthoringSessionRevision,
-  type CourseAuthoringSession,
-} from '../authoring/courseAuthoringSession'
-
+import type { CourseProjectV10 } from '../../shared/contracts/component-platform/project'
+import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
+import type { DocumentResources, DocumentOperationResult, DocumentSnapshot } from '../../shared/workbench/document'
+import type { CourseV10DocumentBridge, CourseV10ViewState, CapturedCourseTarget, CapturedComponentOperation } from '../documents/CourseV10DocumentBridge'
 export const SESSIONLESS_COURSE_REASON = '当前会话没有课程工程'
 
 export type EditorFeedback = {
@@ -33,179 +14,65 @@ export interface CourseTransactionCommitPolicy {
 }
 
 export type EditorStoreKernel = {
-  tryReadDocument(): CourseProjectDocument | null
-  readDocument(): CourseProjectDocument
-  readAuthoringSession(): CourseAuthoringSession | null
-  writeAuthoringSession(session: CourseAuthoringSession | undefined): void
-  readResources(): CourseResourceState
-  commitResources(
-    next: Pick<
-      CourseResourceState,
-      | 'courseAssetSidecar'
-      | 'courseAssetSidecarPast'
-      | 'courseAssetSidecarFuture'
-      | 'courseComponentPackagesPast'
-      | 'courseComponentPackagesFuture'
-      | 'componentPackages'
-    >,
-  ): void
-  applyResourceStep(input: {
-    document: CourseProjectDocument
-    sidecar: CourseAssetSidecar
-    componentPackages: Readonly<Record<string, ComponentPackageData>>
-    transactionStep?: EditorTransactionStep
-    resourceTransition?: CourseResourceTransition
-  }): HistoryResourceState | null
+  readonly bridge: CourseV10DocumentBridge
+  tryReadDocument(): CourseProjectV10 | null
+  readDocument(): CourseProjectV10
+  readEditingDocument(): CourseProjectV10
+  readView(): CourseV10ViewState
+  readResources(): DocumentResources
+  edit(edits: ComponentEdit[], historyGroup?: string, documentId?: string): Promise<DocumentOperationResult>
+  captureTarget(documentId?: string): CapturedCourseTarget
+  capture(edits: ComponentEdit[], target?: CapturedCourseTarget): CapturedComponentOperation
+  editCaptured(command: CapturedComponentOperation, historyGroup?: string): Promise<DocumentOperationResult>
+  selectInstances(instanceIds: readonly string[], surfaceId?: string | null, documentId?: string): void
+  selectSurface(surfaceId: string, documentId?: string): void
   setFeedback(feedback: EditorFeedback): void
-  markDirty(dirty?: boolean): void
   readDirty(): boolean
   waitForCommit(): Promise<boolean>
-  drain(): Promise<unknown>
+  drain(): Promise<DocumentSnapshot[]>
   navigateHistory(direction: 'undo' | 'redo'): Promise<void>
-  persistDocument(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
-  persistTransaction(step: EditorTransactionStep, statusMessage: string, policy?: CourseTransactionCommitPolicy): boolean
   failSessionless(reason?: string): never
 }
 
 export type EditorStoreKernelHost = {
-  tryReadDocument(): CourseProjectDocument | null
-  readAuthoringSession(): CourseAuthoringSession | null
-  writeAuthoringSession(session: CourseAuthoringSession | undefined): void
-  readResources(): CourseResourceState
-  commit(patch: Record<string, unknown>): void
-  readDirty(): boolean
-  waitForCommit(): Promise<boolean>
-  drain(): Promise<unknown>
-  navigateHistory(direction: 'undo' | 'redo'): Promise<void>
-  persistDocument?(document: CourseProjectDocument, options?: { statusMessage?: string | null; historyEntry?: boolean }): boolean
-  persistTransaction(step: EditorTransactionStep, statusMessage: string, policy?: CourseTransactionCommitPolicy): boolean
+  bridge: CourseV10DocumentBridge
+  commit(patch: EditorFeedback): void
 }
 
+/** The existing slices share the same document projection and Main-owned history. */
 export function createEditorStoreKernel(host: EditorStoreKernelHost): EditorStoreKernel {
+  const bridge = host.bridge
   return {
-    tryReadDocument: host.tryReadDocument,
+    bridge,
+    tryReadDocument: () => bridge.read().project,
     readDocument() {
-      const document = host.tryReadDocument()
-      if (!document) throw new Error(SESSIONLESS_COURSE_REASON)
-      return document
+      const project = bridge.read().project
+      if (!project) throw new Error(SESSIONLESS_COURSE_REASON)
+      return project
     },
-    readAuthoringSession: host.readAuthoringSession,
-    writeAuthoringSession: host.writeAuthoringSession,
-    readResources: host.readResources,
-    commitResources(next) {
-      host.commit(next)
+    readEditingDocument() { const project = bridge.read().editingProject; if (!project) throw new Error(SESSIONLESS_COURSE_REASON); return project },
+    readView: bridge.read,
+    readResources() {
+      const view = bridge.read()
+      return view.views.find(item => item.documentId === view.activeDocumentId)?.model.resources
+        ?? view.snapshot?.model.resources ?? { assets: {}, components: {} }
     },
-    applyResourceStep: applyEditorResourceStep,
-    setFeedback(feedback) {
-      host.commit(feedback)
+    edit: (edits, historyGroup, documentId) => bridge.edit(edits, historyGroup, documentId),
+    captureTarget: documentId => bridge.captureTarget(documentId),
+    capture: (edits, target) => bridge.capture(edits, target),
+    editCaptured: (command, historyGroup) => bridge.editCaptured(command, historyGroup),
+    selectInstances(instanceIds, surfaceId, documentId = bridge.read().activeDocumentId ?? '') {
+      bridge.selectInstances(documentId, instanceIds, surfaceId)
     },
-    markDirty(dirty = true) {
-      host.commit({ dirty })
+    selectSurface(surfaceId, documentId = bridge.read().activeDocumentId ?? '') {
+      bridge.selectSurface(documentId, surfaceId)
     },
-    readDirty: host.readDirty,
-    waitForCommit: host.waitForCommit,
-    drain: host.drain,
-    navigateHistory: host.navigateHistory,
-    persistDocument(document, options) {
-      return host.persistDocument ? host.persistDocument(document, options) : false
-    },
-    persistTransaction(step, statusMessage, policy) {
-      return host.persistTransaction(step, statusMessage, policy)
-    },
-    failSessionless(reason = SESSIONLESS_COURSE_REASON): never {
-      throw new Error(reason)
-    },
+    setFeedback: host.commit,
+    readDirty: () => Boolean(bridge.read().snapshot?.dirty || bridge.read().pending),
+    waitForCommit: () => bridge.drain().then(() => true, () => false),
+    drain: () => bridge.drain(),
+    navigateHistory: direction => bridge[direction](),
+    failSessionless(reason = SESSIONLESS_COURSE_REASON): never { throw new Error(reason) },
   }
 }
 
-export function applyEditorResourceStep(input: {
-  document: CourseProjectDocument
-  sidecar: CourseAssetSidecar
-  componentPackages: Readonly<Record<string, ComponentPackageData>>
-  transactionStep?: EditorTransactionStep
-  resourceTransition?: CourseResourceTransition
-}): HistoryResourceState | null {
-  if (
-    input.transactionStep
-    && input.resourceTransition
-    && input.transactionStep.resourceChanges !== input.resourceTransition.resourceChanges
-  ) {
-    throw new Error('作者历史资源增量与编辑事务不一致')
-  }
-  if (input.transactionStep) {
-    return applyEditorTransactionStep({
-      document: input.document,
-      resources: {
-        componentPackages: input.componentPackages,
-        assetFiles: input.sidecar.files,
-      },
-    }, input.transactionStep, 'forward').resources
-  }
-  if (input.resourceTransition) {
-    return applyHistoryResourceChanges({
-      componentPackages: input.componentPackages,
-      assetFiles: input.sidecar.files,
-    }, input.resourceTransition.resourceChanges, input.resourceTransition.resourceDirection)
-  }
-  return null
-}
-
-export function commitSurfaceResourcePersist(
-  current: CourseResourceState,
-  input: {
-    document: CourseProjectDocument
-    applyDocument?: CourseProjectDocument
-    transactionStep?: EditorTransactionStep
-    resourceTransition?: CourseResourceTransition
-    sidecar?: CourseAssetSidecar
-    sidecarDirection?: 'undo' | 'redo'
-    componentPackages?: Record<string, ComponentPackageData>
-    historyEntry?: boolean
-    legacyPastCount: number
-    legacyFutureCount: number
-  },
-): ReturnType<typeof commitCourseResourceState> {
-  const presentSidecar = current.courseAssetSidecar ?? emptyCourseAssetSidecar()
-  const applied = applyEditorResourceStep({
-    document: input.applyDocument ?? input.document,
-    sidecar: presentSidecar,
-    componentPackages: current.componentPackages,
-    transactionStep: input.transactionStep,
-    resourceTransition: input.resourceTransition,
-  })
-  return commitCourseResourceState(current, {
-    document: input.document,
-    appliedResources: applied,
-    sidecar: applied ? undefined : input.sidecar,
-    sidecarDirection: applied ? undefined : input.sidecarDirection,
-    componentPackages: applied ? undefined : input.componentPackages,
-    historyEntry: input.historyEntry,
-    legacyPastCount: input.legacyPastCount,
-    legacyFutureCount: input.legacyFutureCount,
-  })
-}
-
-export function courseSessionAfterSurfaceHistory(
-  current: CourseAuthoringSession | null,
-  project: CourseProjectDocument,
-  locationId: string,
-  input: {
-    transactionStep?: EditorTransactionStep
-    resourceTransition?: CourseResourceTransition
-    sidecarDirection?: 'undo' | 'redo'
-  },
-): CourseAuthoringSession | undefined {
-  if (!current) return undefined
-  if (input.transactionStep) {
-    return updateCourseAuthoringSessionRevision(current, project.revision)
-  }
-  if (!input.resourceTransition && !input.sidecarDirection) return undefined
-  return updateCourseAuthoringSessionItems({
-    token: createSessionToken({
-      locationId,
-      surfaceType: surfaceTypeForLocation(project, locationId),
-      revision: project.revision,
-    }, current.token.generation + 1),
-    itemIds: current.itemIds,
-  }, current.itemIds)
-}

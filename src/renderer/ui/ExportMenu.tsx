@@ -45,11 +45,11 @@ export function ExportMenu({ busy, hasFlowSurface, onExport, variant = 'toolbar'
       <div className="export-menu__title">选择导出格式</div>
       <button type="button" role="menuitem" data-testid={testId('export-single-html')} className="export-menu__item" onClick={(event) => choose(event, 'single-html', 'offline-portable')}>
         <FileDown size={18} />
-        <span><strong>离线便携单 HTML</strong><small>资源全部内嵌，无网络也能使用，文件较大</small></span>
+        <span><strong>离线便携单 HTML</strong><small>工程资源内嵌；组件中的网络功能仍需连接</small></span>
       </button>
       <button type="button" role="menuitem" data-testid={testId('export-single-html-online')} className="export-menu__item" onClick={(event) => choose(event, 'single-html', 'online-lightweight')}>
         <FileDown size={18} />
-        <span><strong>在线轻量单 HTML</strong><small>保留已声明的远程素材地址，文件较小但依赖网络</small></span>
+        <span><strong>在线单 HTML</strong><small>保留组件原有网络逻辑与工程资源</small></span>
       </button>
       <button type="button" role="menuitem" data-testid={testId('export-web-package')} className="export-menu__item" onClick={(event) => choose(event, 'web-package')}>
         <Archive size={18} />

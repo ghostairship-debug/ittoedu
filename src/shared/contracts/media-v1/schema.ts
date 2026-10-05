@@ -25,7 +25,7 @@ const soundDefinitionSchema = z.object({
 const narrationDuckingSchema = z.object({
   enabled: z.boolean(),
   musicVolume: unitInterval,
-  fadeMs: finiteNumber.min(0).max(10_000),
+  fadeMs: finiteNumber.min(0),
 }).strict()
 
 export const projectMediaSettingsSchema: z.ZodType<ProjectMediaSettings> = z.object({
@@ -57,7 +57,7 @@ const courseProjectPortablePathSchema = z.string().min(1).refine(
   (value) => !/^(?:[a-zA-Z]:[\\/]|[\\/]{2}|\/)/.test(value),
   'Path must be project-relative',
 )
-const courseProjectAssetRemoteDeliveryUrlSchema = z.string().trim().min(1).max(2_000).refine(
+export const assetRemoteDeliveryUrlSchema = z.string().trim().min(1).max(2_000).refine(
   (value) => {
     try {
       const url = new URL(value)
@@ -107,7 +107,7 @@ export const courseProjectAssetMetaSchema: z.ZodType<CourseProjectAssetMeta> = z
   height: finiteNumber.positive().optional(),
   duration: finiteNumber.nonnegative().optional(),
   remote: z.object({
-    url: courseProjectAssetRemoteDeliveryUrlSchema,
+    url: assetRemoteDeliveryUrlSchema,
   }).strict().optional(),
   source: assetSourceSchema.optional(),
 }).strict()
@@ -132,7 +132,7 @@ export const courseProjectSoundDefinitionSchema = z.object({
 const courseProjectNarrationDuckingSchema = z.object({
   enabled: z.boolean(),
   musicVolume: unitInterval,
-  fadeMs: finiteNumber.nonnegative().max(10_000),
+  fadeMs: finiteNumber.nonnegative(),
 }).strict()
 
 export const courseProjectAudioSettingsSchema = z.object({

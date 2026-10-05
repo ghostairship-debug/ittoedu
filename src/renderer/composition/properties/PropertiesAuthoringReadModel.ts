@@ -1,459 +1,84 @@
-import type { CourseAuthoringSessionToken } from '../../authoring/courseAuthoringSession'
-import { updateCourseAuthoringSessionRevision } from '../../authoring/courseAuthoringSession'
-import type { FlowTextEditSession } from '../../authoring/flowTextEdit'
-import type {
-  SpatialGraphSelection,
-} from '../../authoring/spatialAuthoringIntents'
-import type { SpatialWorldContentEditSession } from '../../authoring/spatialWorldAuthoring'
-import { findGlobalTeacherController } from '../../../core/tools/globalLayers'
-import { buildFlowEditorView, type FlowEditorView } from '../../course/flowEditorView'
-import type { FlowEditorSelection } from '../../course/flowEditorSlice'
-import type { EffectiveLayerProjectionRow } from '../../course/effectiveLayerProjection'
-import { isTeacherControllerLayerItem, readGlobalLayerScenePlane } from '../../../core/tools/globalLayers'
-import {
-  buildSpatialEditorView,
-  type SpatialEditorView,
-} from '../../course/spatialEditorView'
-import {
-  collectV9InteractionRuleWarnings,
-  interactionLayerTargetFromItem,
-  type InteractionLayerTarget,
-  v9CourseLocations,
-  v9SlideScenes,
-} from '../../course/slideInteractionView'
-import { selectRuntimeInspectorAuthoringView } from '../../runtime/runtimeInspectorAuthoringView'
-import {
-  selectActiveCourseLocationId,
-  selectActiveCourseProjectDocument,
-  selectActivePresentationStateId,
-  selectCandidateGlobalLayerItems,
-  selectEditingScope,
-  selectEffectiveLayerProjection,
-  selectSelectedNodeIds,
-  selectSlideAuthoringSnapshot,
-  type EditorState,
-} from '../../store/editorStore'
-import { isCourseLayerVisibleAtLocation } from '../../../shared/courseProjectModel'
-import type {
-  CourseLocation,
-  CourseProjectDocument,
-  SlideSceneDocument,
-  SlideSurfaceDocument,
-} from '../../../shared/courseProjectTypes'
-import type {
-  CourseBackgroundFields,
-  SlideSurfaceBackgroundFields,
-} from '../../../shared/effectiveBackground'
-import type { ProjectPlaybackSettings } from '../../../shared/contracts/playback-v1'
-import type {
-  V9SlideContentEditSession,
-  V9SlideFormulaContentDraft,
-  V9SlideTextContentDraft,
-} from '../../authoring/v9SlideContentEdit'
-import type { RuntimeInspectorAuthoringView } from '../../runtime/runtimeInspectorAuthoringView'
-import { slideAuthoringGeneration } from '../../course/slideAuthoringBackend'
-import type { CourseGlobalLayerView } from '../../ui/properties/CourseGlobalPropertiesPanel'
-import {
-  propertiesViewFromLayerItem,
-} from '../../ui/properties/propertiesItemView'
+import type { ComponentInstance, ComponentSurface, CourseProjectV10 } from '../../../shared/contracts/component-platform/project'
+import { owningContainer } from '../../../shared/contracts/component-platform/project'
+import type { DocumentResources } from '../../../shared/workbench/document'
+import type { EditorState } from '../../store/editorStore'
+import { selectEditingScope } from '../../store/editorStore'
+import { projectWithSlideContentDraft } from '../../store/slices/slideAuthoringSlice'
+import { componentPropertiesView } from '../../ui/properties/componentProperties'
 import type { PropertiesItemView } from '../../ui/properties/SlideNativePropertiesPanel'
-
-export interface FlowPropertiesReadModel {
-  /** Internal owner snapshot used only by the composition command adapter. */
-  readonly document: CourseProjectDocument
-  readonly view: FlowEditorView
-  readonly selection: FlowEditorSelection
-  readonly assets: CourseProjectDocument['assets']
-  readonly textEdit: FlowTextEditSession | null
-}
-
-export interface SpatialPropertiesReadModel {
-  readonly view: SpatialEditorView
-  readonly scope: 'global' | 'surface' | 'world'
-  readonly selectionIds: readonly string[]
-  readonly contentEdit: SpatialWorldContentEditSession | null
-  readonly graphSelection: SpatialGraphSelection | null
-  readonly playbackPathId: string | null
-  readonly showCameraFrames: boolean
-}
-
-export interface PropertiesSceneReadModel extends Pick<SlideSceneDocument, 'backgroundMode' | 'canvas'> {
-  readonly id: string
-  readonly name: string
-  readonly backgroundColor: string
-  readonly backgroundAssetId: string | null | undefined
-  readonly interactions: SlideSceneDocument['interactions']
-  readonly presentation: SlideSceneDocument['presentation']
-}
-
-export interface PropertiesSlideSurfaceReadModel extends SlideSurfaceBackgroundFields {
-  readonly id: string
-  readonly canvas: SlideSurfaceDocument['canvas']
-}
+import { frameCorners } from '../../../core/components/geometry'
+import { componentParentMatrix } from '../crossSurfaceCommands'
 
 export interface PropertiesOwnerReadModel {
-  readonly identity: {
-    readonly projectId: string | null
-    readonly revision: number
-    readonly generation: number
-    readonly locationId: string | null
-    readonly owner: 'scene' | 'surface' | 'global'
-    readonly stateId: string | null
-  }
-  readonly authoringToken: CourseAuthoringSessionToken | null
-  readonly flow: FlowPropertiesReadModel | null
-  readonly spatial: SpatialPropertiesReadModel | null
-  readonly editingScope: 'scene' | 'global'
-  readonly propertiesOwner: 'scene' | 'surface' | 'global'
-  readonly selectedNodeIds: readonly string[]
-  readonly selectedRows: readonly EffectiveLayerProjectionRow[]
+  readonly documentId: string | null
+  readonly epoch: string | null
+  readonly activeStateId: string | null
+  readonly editingGlobal: boolean
+  readonly project: CourseProjectV10 | null
+  readonly baseProject: CourseProjectV10 | null
+  readonly surface: ComponentSurface | null
+  readonly selectedInstanceIds: readonly string[]
+  readonly selectedInstances: readonly ComponentInstance[]
   readonly selectedViews: readonly PropertiesItemView[]
-  readonly selectedRow: EffectiveLayerProjectionRow | null
+  readonly selectedInstance: ComponentInstance | null
   readonly selectedView: PropertiesItemView | null
-  readonly activeState: {
-    readonly id: string
-    readonly name: string
-    readonly backgroundColor: string | undefined
-    readonly backgroundAssetId: string | null | undefined
-  } | null
-  readonly scene: PropertiesSceneReadModel | null
-  /** The Slide surface owning `scene` (or the active surface with no scene yet). */
-  readonly slideSurface: PropertiesSlideSurfaceReadModel | null
-  /** Course-wide background fields; the effective-background chain's root. Always available. */
-  readonly course: CourseBackgroundFields
-  readonly slideScenes: ReturnType<typeof v9SlideScenes>
-  readonly interactionLocations: ReturnType<typeof v9CourseLocations>
-  readonly interactionNodes: readonly InteractionLayerTarget[]
-  readonly interactionWarnings: ReturnType<typeof collectV9InteractionRuleWarnings>
-  readonly globalInteractions: CourseProjectDocument['globalInteractions']
-  readonly globalSourceNodes: readonly InteractionLayerTarget[]
-  readonly sounds: CourseProjectDocument['media']['audio']['sounds']
-  readonly courseState: CourseProjectDocument['courseState']
-  readonly assets: CourseProjectDocument['assets']
-  readonly componentManifests: Readonly<Record<string, {
-    readonly manifest: EditorState['componentPackages'][string]['manifest']
-  }>>
-  readonly globalLayer: CourseGlobalLayerView | null
-  readonly globalSummary: {
-    readonly count: number
-    readonly underlayCount: number
-    readonly overlayCount: number
-    readonly hasTeacherController: boolean
-    readonly playback: ProjectPlaybackSettings | undefined
-    readonly designTokens: CourseProjectDocument['designTokens'] | null
-  }
   readonly selectedIsGlobal: boolean
-  readonly runtimeView: RuntimeInspectorAuthoringView | null
-  readonly slideSessionIdentity: {
-    readonly sessionId: string
-    readonly revision: number
-    readonly generation: number
-    readonly scope: 'scene' | 'surface' | 'global'
-    readonly locationId: string
-    readonly stateId: string | null
-  } | null
-  readonly textEdit: V9SlideContentEditSession | null
+  readonly resources: DocumentResources
+  readonly error: string | null
 }
 
-function activeSlideScene(
-  project: CourseProjectDocument | null,
-  locationId: string | null,
-  snapshotSceneId: string | null,
-): SlideSceneDocument | null {
-  if (!project) return null
-  for (const surface of project.surfaces) {
-    if (surface.type !== 'slide') continue
-    if (snapshotSceneId) {
-      const scene = surface.scenes.find((candidate) => candidate.id === snapshotSceneId)
-      if (scene) return scene
-    }
-    if (locationId) {
-      const location = project.locations.find((candidate) => candidate.id === locationId)
-      if (location?.kind === 'slide-scene' && location.surfaceId === surface.id) {
-        return surface.scenes.find((candidate) => candidate.id === location.sceneId) ?? null
-      }
-    }
-    if (surface.scenes[0]) return surface.scenes[0]
-  }
-  return null
-}
+const cache = new WeakMap<EditorState, PropertiesOwnerReadModel>()
 
-function activeSlideSurface(
-  project: CourseProjectDocument | null,
-  locationId: string | null,
-  snapshotSurfaceId: string | null,
-): SlideSurfaceDocument | null {
-  if (!project) return null
-  const isSlide = (candidate: CourseProjectDocument['surfaces'][number]): candidate is SlideSurfaceDocument => (
-    candidate.type === 'slide'
-  )
-  if (snapshotSurfaceId) {
-    const surface = project.surfaces.find((candidate) => candidate.id === snapshotSurfaceId && isSlide(candidate))
-    if (surface && isSlide(surface)) return surface
-  }
-  if (locationId) {
-    const location = project.locations.find((candidate) => candidate.id === locationId)
-    if (location?.kind === 'slide-scene') {
-      const surface = project.surfaces.find((candidate) => candidate.id === location.surfaceId && isSlide(candidate))
-      if (surface && isSlide(surface)) return surface
-    }
-  }
-  return project.surfaces.find(isSlide) ?? null
-}
-
-function candidateLocationVisibilityLabel(
-  location: CourseLocation,
-  surfaces: CourseProjectDocument['surfaces'],
-): string {
-  if (location.kind !== 'slide-scene') return location.label
-  const surface = surfaces.find((item) => item.id === location.surfaceId)
-  if (!surface || surface.type !== 'slide') return location.label
-  return surface.scenes.find((item) => item.id === location.sceneId)?.name ?? location.label
-}
-
-function buildGlobalLayerView(
-  nodeId: string,
-  project: CourseProjectDocument,
-  locationId: string,
-): CourseGlobalLayerView | null {
-  const entry = project.globalLayerItems.find(
-    (candidate) => candidate.item.layerItemId === nodeId,
-  )
-  if (!entry) return null
-  return {
-    nodeId,
-    visibleHere: isCourseLayerVisibleAtLocation(entry, locationId),
-    visibility: entry.visibility,
-    scenePlane: readGlobalLayerScenePlane(project, nodeId),
-    isController: entry.item.kind === 'component' ? entry.item.role === 'teacher-controller' : isTeacherControllerLayerItem(entry.item),
-    locationKind: project.locations.find((location) => location.id === locationId)?.kind,
-    locations: project.locations.map((location) => ({
-      id: location.id,
-      label: candidateLocationVisibilityLabel(location, project.surfaces),
-    })),
-  }
-}
-
-/**
- * Named, read-only projection for Properties. The complete editor state and
- * Course document stop here; the UI adapter receives only owner views and
- * stable scalar identities.
- */
-const propertiesReadModelCache = new WeakMap<EditorState, PropertiesOwnerReadModel>()
-
-function propertiesViewWithSlideContentDraft(
-  row: EffectiveLayerProjectionRow,
-  edit: V9SlideContentEditSession | null,
-): PropertiesItemView {
-  const view = propertiesViewFromLayerItem(row.item)
-  if (
-    !edit
-    || edit.target.layerItemId !== row.id
-    || edit.target.scope !== row.owner
-  ) return view
-  if (edit.kind === 'text' && view.type === 'text') {
-    const draft = edit.draft as V9SlideTextContentDraft
-    return {
-      ...view,
-      text: draft.text,
-      runs: structuredClone(draft.runs),
-      ...(typeof draft.width === 'number' ? { width: draft.width } : {}),
-      ...(typeof draft.height === 'number' ? { height: draft.height } : {}),
-    }
-  }
-  if (edit.kind === 'formula' && view.type === 'formula') {
-    const draft = edit.draft as V9SlideFormulaContentDraft
-    return {
-      ...view,
-      ast: structuredClone(draft.ast),
-      ...(draft.accessibleText === undefined
-        ? {}
-        : { accessibleText: draft.accessibleText }),
-    }
-  }
-  return view
-}
-
+/** A Properties-only projection. The Bridge owns documents, selection and pending edits. */
 export function selectPropertiesAuthoringReadModel(state: EditorState): PropertiesOwnerReadModel {
-  const cached = propertiesReadModelCache.get(state)
+  const cached = cache.get(state)
   if (cached) return cached
-  const project = selectActiveCourseProjectDocument(state)
-  const locationId = selectActiveCourseLocationId(state)
-  const snapshot = selectSlideAuthoringSnapshot(state)
-  const projection = selectEffectiveLayerProjection(state)
-  const flowSession = state.flowSession
-  const spatialSession = state.spatialSession
-  const pageOwner = !flowSession && !spatialSession && snapshot?.scope
-    ? snapshot.scope
-    : selectEditingScope(state)
-  const selectedRows = (projection?.unifiedRows ?? []).filter((row) => (
-    selectSelectedNodeIds(state).includes(row.id)
-  ))
-  const selectedRow = selectedRows.length === 1 ? selectedRows[0]! : null
-  const propertiesOwner = selectedRow?.isTeacherController ? 'global' : pageOwner
-  const selectedViews = selectedRows.map((row) => (
-    propertiesViewWithSlideContentDraft(row, state.v9ContentEdit)
-  ))
-  const selectedView = selectedRow
-    ? propertiesViewWithSlideContentDraft(selectedRow, state.v9ContentEdit)
-    : null
-  const scene = activeSlideScene(project, locationId, snapshot?.sceneId ?? null)
-  const slideSurfaceDoc = activeSlideSurface(project, locationId, snapshot?.surfaceId ?? null)
-  const course: CourseBackgroundFields = project
-    ? { backgroundColor: project.backgroundColor, backgroundAssetId: project.backgroundAssetId }
-    : {}
-  const activeState = selectActivePresentationStateId(state) === null
-    ? null
-    : scene?.presentation?.states.find(
-        (candidate) => candidate.id === selectActivePresentationStateId(state),
-      ) ?? null
-  const candidateGlobalItems = selectCandidateGlobalLayerItems(state)
-  const globalEntries = candidateGlobalItems ?? project?.globalLayerItems ?? []
-  const globalRows = (projection?.unifiedRows ?? []).filter((row) => row.owner === 'global')
-  const globalCount = globalRows.length > 0 ? globalRows.length : globalEntries.length
-  const underlayCount = globalRows.filter((row) => row.globalPlane === 'underlay').length
-  const runtimeAuthoringSession = project && state.courseAuthoringSession
-    ? updateCourseAuthoringSessionRevision(state.courseAuthoringSession, project.revision)
-    : null
-  const activeLocation = project?.locations.find((candidate) => candidate.id === locationId)
-  const runtimeView = project && locationId && runtimeAuthoringSession
-    ? selectRuntimeInspectorAuthoringView({
-        project,
-        locationId,
-        editingScope: selectEditingScope(state),
-        activeStateId: activeLocation?.kind === 'slide-scene'
-          ? selectActivePresentationStateId(state)
-          : null,
-        sessionToken: runtimeAuthoringSession.token,
-      })
-    : null
-  const flow = flowSession
-    ? {
-        document: flowSession.history.present,
-        view: buildFlowEditorView({
-          project: flowSession.history.present,
-          locationId: flowSession.selection.locationId,
-        }),
-        selection: flowSession.selection,
-        assets: flowSession.history.present.assets,
-        textEdit: state.flowTextEdit,
-      }
-    : null
-  const spatial = spatialSession
-    ? {
-        view: buildSpatialEditorView({
-          project: spatialSession.history.present,
-          locationId: spatialSession.selection.locationId,
-          sessionCamera: spatialSession.sessionCamera,
-        }),
-        scope: spatialSession.scope,
-        selectionIds: spatialSession.selection.selectionIds,
-        contentEdit: state.spatialContentEdit,
-        graphSelection: state.spatialGraphSelection,
-        playbackPathId: state.spatialPlaybackPathId,
-        showCameraFrames: spatialSession.showCameraFrames,
-      }
-    : null
-  const selectedIsGlobal = propertiesOwner === 'global'
-    || Boolean(globalEntries.some((entry) => entry.item.layerItemId === selectedView?.id))
-    || Boolean(selectedRow?.isTeacherController)
-  const slideScenes = project ? v9SlideScenes(project) : []
-  const interactionLocations = project ? v9CourseLocations(project) : []
-  const interactionNodes = (projection?.unifiedRows ?? []).map((row) => (
-    interactionLayerTargetFromItem(row.item)
-  ))
-  const interactionWarnings = project && scene
-    ? collectV9InteractionRuleWarnings(project, scene.interactions)
-    : {}
-  const controller = project ? findGlobalTeacherController(project) : null
+  const view = state.courseView
+  const draft = state.slideContentEdit
+  const effective = view.editingProject
+  const project = effective ? projectWithSlideContentDraft(effective, draft, { documentId: view.activeDocumentId ?? '',
+    epoch: view.snapshot?.epoch, surfaceId: view.surfaceId, activeStateId: view.activeStateId }) : effective
+  const selectedInstances = project
+    ? view.selectedInstanceIds.flatMap(id => project.instances[id] ? [project.instances[id]!] : [])
+    : []
+  let error: string | null = view.error
+  const selectedViews = selectedInstances.flatMap(instance => {
+    try {
+      const item = componentPropertiesView(instance, project!.definitions[instance.definitionId])
+      // Multi-selection statistics use world corners; single-item editors retain parent-local frame fields.
+      if (selectedInstances.length <= 1 || !instance.frame) return [item]
+      const corners = frameCorners(instance.frame, componentParentMatrix(project!, instance.id))
+      const x = Math.min(...corners.map(point => point.x)), y = Math.min(...corners.map(point => point.y))
+      return [{ ...item, x, y,
+        width: Math.max(...corners.map(point => point.x)) - x,
+        height: Math.max(...corners.map(point => point.y)) - y }]
+    }
+    catch (problem) {
+      error ??= problem instanceof Error ? problem.message : '此组件的专业数据无法读取。'
+      return []
+    }
+  })
+  const selectedInstance = selectedInstances.length === 1 ? selectedInstances[0]! : null
+  let container = project && selectedInstance ? owningContainer(project, selectedInstance.id) : null
+  while (project && container?.kind === 'instance') container = owningContainer(project, container.instanceId)
   const result: PropertiesOwnerReadModel = {
-    identity: {
-      projectId: project?.id ?? null,
-      revision: project?.revision ?? 0,
-      generation: snapshot
-        ? slideAuthoringGeneration(snapshot.sessionId)
-        : state.courseAuthoringSession?.token.generation ?? 0,
-      locationId,
-      owner: propertiesOwner,
-      stateId: selectActivePresentationStateId(state),
-    },
-    authoringToken: state.courseAuthoringSession?.token ?? null,
-    flow,
-    spatial,
-    editingScope: selectEditingScope(state),
-    propertiesOwner,
-    selectedNodeIds: selectSelectedNodeIds(state),
-    selectedRows,
+    documentId: view.activeDocumentId,
+    epoch: view.snapshot?.epoch ?? null,
+    activeStateId: view.activeStateId,
+    editingGlobal: selectEditingScope(state) === 'global',
+    project,
+    baseProject: view.project,
+    surface: project?.surfaces.find(surface => surface.id === view.surfaceId) ?? null,
+    selectedInstanceIds: view.selectedInstanceIds,
+    selectedInstances,
     selectedViews,
-    selectedRow,
-    selectedView,
-    activeState: activeState
-      ? {
-          id: activeState.id,
-          name: activeState.name,
-          backgroundColor: activeState.backgroundColor,
-          backgroundAssetId: activeState.backgroundAssetId,
-        }
-      : null,
-    scene: scene
-      ? {
-          id: scene.id,
-          name: scene.name,
-          canvas: scene.canvas,
-          backgroundMode: scene.backgroundMode,
-          backgroundColor: scene.backgroundColor,
-          backgroundAssetId: scene.backgroundAssetId,
-          interactions: scene.interactions,
-          presentation: scene.presentation,
-        }
-      : null,
-    slideSurface: slideSurfaceDoc
-      ? {
-          id: slideSurfaceDoc.id,
-          canvas: slideSurfaceDoc.canvas,
-          backgroundMode: slideSurfaceDoc.backgroundMode,
-          backgroundColor: slideSurfaceDoc.backgroundColor,
-          backgroundAssetId: slideSurfaceDoc.backgroundAssetId,
-        }
-      : null,
-    course,
-    slideScenes,
-    interactionLocations,
-    interactionNodes,
-    interactionWarnings,
-    globalInteractions: project?.globalInteractions ?? [],
-    globalSourceNodes: globalEntries.map((entry) => interactionLayerTargetFromItem(entry.item)),
-    sounds: project?.media.audio.sounds ?? {},
-    courseState: project?.courseState ?? [],
-    assets: project?.assets ?? {},
-    componentManifests: Object.fromEntries(Object.entries(state.componentPackages).map(
-      ([id, packed]) => [id, { manifest: packed.manifest }],
-    )),
-    globalLayer: project && locationId && selectedView
-      ? buildGlobalLayerView(selectedView.id, project, locationId)
-      : null,
-    globalSummary: {
-      count: globalCount,
-      underlayCount,
-      overlayCount: globalCount - underlayCount,
-      hasTeacherController: Boolean(controller),
-      playback: project?.playback,
-      designTokens: project?.designTokens ?? null,
-    },
-    selectedIsGlobal,
-    runtimeView,
-    slideSessionIdentity: snapshot
-      ? {
-          sessionId: snapshot.sessionId,
-          revision: snapshot.revision,
-          generation: slideAuthoringGeneration(snapshot.sessionId),
-          scope: snapshot.scope,
-          locationId: snapshot.locationId,
-          stateId: snapshot.stateId,
-        }
-      : null,
-    textEdit: state.v9ContentEdit,
+    selectedInstance,
+    selectedView: selectedViews.length === 1 ? selectedViews[0]! : null,
+    selectedIsGlobal: container?.kind === 'global',
+    resources: view.views.find(item => item.documentId === view.activeDocumentId)?.model.resources
+      ?? view.snapshot?.model.resources ?? { assets: {}, components: {} },
+    error,
   }
-  propertiesReadModelCache.set(state, result)
+  cache.set(state, result)
   return result
 }

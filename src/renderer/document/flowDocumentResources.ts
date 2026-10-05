@@ -1,81 +1,123 @@
-import type { AssetMeta } from '../../shared/contracts/media-v1'
-import type { ComponentPackageData, EmbeddedComponentPackageMeta } from '../../shared/contracts/component-v4'
-import type { CourseProjectDocument, FlowBlock } from '../../shared/courseProjectTypes'
+import type { ComponentEdit, CourseProjectV10 } from '../../shared/contracts/component-platform'
+import type { DocumentBlock } from '../../shared/document/content'
+import { walkDocument } from '../../shared/document/content'
 import type { DocumentResources } from '../../shared/document/resources'
 import { documentResourcesSchema } from '../../shared/document/resources'
+import { applyComponentOperation, captureComponentOperation } from '../../core/drivers/courseV10Operations'
+import { flowDocumentEdits } from '../../core/components/document/flowDocumentProjection'
+import { owningContainer } from '../../shared/contracts/component-platform/project'
+import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
+import { prepareCourseObjectPaste, type CourseObjectClipboardSource } from '../composition/crossSurfaceCommands'
 import type { DocumentClipboardResourcePort } from './documentClipboard'
-import { replaceFlowDocumentContent, type FlowCommandResult } from '../course/flowEditorCommands'
-import { createEditorTransactionStep, type EditorTransactionStep } from '../authoring/editorTransaction'
-import type { HistoryResourceChanges } from '../store/courseResourceState'
 
-type AssetReference = DocumentResources['assets'][number]
-type ComponentReference = DocumentResources['components'][number]
-export type FlowDocumentResourceTarget = Pick<CourseProjectDocument, 'id' | 'revision' | 'assets' | 'componentPackages'>
-export type ResolvedDocumentAsset = { meta: AssetMeta; bytes: Uint8Array }
+/** Opaque preparation; its captured project, files and body share one destination. */
 export interface FlowPreparedDocumentResources {
-  readonly projectId: string
-  readonly baseRevision: number
-  readonly assets: Record<string, AssetMeta>
-  readonly componentPackages: Record<string, EmbeddedComponentPackageMeta>
-  readonly resourceChanges: HistoryResourceChanges
+  readonly target: CapturedCourseTarget
+  readonly edits: readonly ComponentEdit[]
 }
-const staged = new WeakSet<object>()
-const extension = (filename: string) => /\.([a-z0-9]{1,12})$/i.exec(filename)?.[1]?.toLowerCase() ?? 'bin'
+const staged = new WeakSet<FlowPreparedDocumentResources>()
 
-/** Source ownership is captured by the resolver, never inferred from an asset ID. */
+function preparedBatches(values: readonly unknown[]): FlowPreparedDocumentResources[] {
+  return [...new Set(values)].map(value => {
+    if (!value || typeof value !== 'object' || !staged.has(value as FlowPreparedDocumentResources)) throw new Error('正文资源准备已失效')
+    return value as FlowPreparedDocumentResources
+  })
+}
+function sameOwner(left: CapturedCourseTarget, right: CapturedCourseTarget): boolean {
+  return left.documentId === right.documentId && left.epoch === right.epoch && left.project.id === right.project.id
+    && left.surfaceId === right.surfaceId && left.activeStateId === right.activeStateId
+}
+function preparedProject(target: CapturedCourseTarget, batches: readonly FlowPreparedDocumentResources[]): CourseProjectV10 {
+  let project = target.editingProject
+  for (const batch of batches) {
+    if (!sameOwner(target, batch.target)) throw new Error('正文资源不属于当前捕获目标')
+    project = applyComponentOperation(project, captureComponentOperation(project, [...batch.edits]))
+  }
+  return project
+}
+
+/** Includes pending bytes only for subsequent preparation, never a second resource writer. */
+function preparedTarget(target: CapturedCourseTarget, batches: readonly FlowPreparedDocumentResources[]): CapturedCourseTarget {
+  const base = batches[0]?.target ?? target
+  const resources = structuredClone(base.resources)
+  for (const batch of batches) for (const edit of batch.edits) {
+    if (edit.type === 'asset.add') resources.assets[edit.asset.id] = edit.bytes.slice()
+    if (edit.type === 'component.files.set') {
+      if (edit.files) resources.components[edit.ownerId] = structuredClone(edit.files)
+      else delete resources.components[edit.ownerId]
+    }
+  }
+  const project = preparedProject(base, batches)
+  return { ...base, project, editingProject: project, resources }
+}
+/** Copying a retained local object uses the same staged identity/files snapshot as its body. */
+export function captureFlowPreparedDocumentResources(target:CapturedCourseTarget,values:readonly FlowPreparedDocumentResources[]):CapturedCourseTarget {
+  const batches=values.filter(value=>staged.has(value) && sameOwner(value.target,target))
+  return batches.length ? preparedTarget(target,batches):target
+}
+
+/** The existing clone planner owns IDs, declared references, assets and private source files. */
 export function createFlowDocumentResourcePort(input: {
-  target: FlowDocumentResourceTarget
-  resolveAsset(ref: AssetReference): Promise<ResolvedDocumentAsset>
-  prepareComponent(ref: ComponentReference, target: FlowDocumentResourceTarget): Promise<{ meta: EmbeddedComponentPackageMeta; data: ComponentPackageData }>
-  createId?: () => string
+  target: CapturedCourseTarget
+  source: CourseObjectClipboardSource
+  pending?(): readonly FlowPreparedDocumentResources[]
+  onPrepared?(prepared: FlowPreparedDocumentResources): void
+  onDiscard?(prepared: FlowPreparedDocumentResources): void
 }): DocumentClipboardResourcePort<FlowPreparedDocumentResources> {
-  const target = structuredClone(input.target)
+  const target = structuredClone(input.target), source = structuredClone(input.source)
   return {
-    async prepareResources({ resources }) {
+    async prepareResources({ resources, content, identity }) {
       documentResourcesSchema.parse(resources)
-      const prepared: FlowPreparedDocumentResources = { projectId: target.id, baseRevision: target.revision, assets: {}, componentPackages: {}, resourceChanges: { assetFileChanges: [], componentPackageChanges: [] } }
-      const mapped: DocumentResources = { assets: [], components: [] }
-      const assetIds: Record<string, string> = {}
-      const components: { from: { packageId: string; version: string }; to: { packageId: string; version: string } }[] = []
-      for (const ref of resources.assets) {
-        const resolved = await input.resolveAsset(ref)
-        const id = (input.createId ?? (() => crypto.randomUUID()))()
-        if (target.assets[id] || prepared.assets[id]) throw new Error('素材身份生成冲突')
-        const bytes = resolved.bytes.slice()
-        if (!bytes.byteLength) throw new Error('复制的素材为空')
-        prepared.assets[id] = { ...resolved.meta, id, path: `assets/${id}.${extension(resolved.meta.filename)}`, byteLength: bytes.byteLength }
-        prepared.resourceChanges.assetFileChanges!.push({ assetId: id, after: bytes })
-        assetIds[ref.assetId] = id
-        mapped.assets.push({ assetId: id, source: { kind: 'project' } })
-      }
-      for (const ref of resources.components) {
-        const resolved = await input.prepareComponent(ref, target)
-        const id = resolved.meta.packageId
-        if (target.componentPackages[id] && target.componentPackages[id]!.contentSha256 !== resolved.meta.contentSha256) throw new Error('组件包身份冲突，须由包 Owner 准备独立副本')
-        if (resolved.meta.version !== resolved.data.manifest.version || id !== resolved.data.manifest.id) throw new Error('组件包准备结果身份不一致')
-        if (!target.componentPackages[id]) {
-          prepared.componentPackages[id] = structuredClone(resolved.meta)
-          prepared.resourceChanges.componentPackageChanges!.push({ packageId: id, after: structuredClone(resolved.data) })
+      const previous = (input.pending?.() ?? []).filter(value => staged.has(value) && sameOwner(value.target, target))
+      const destination = preparedTarget(target, previous)
+      const chosen = new Set<string>()
+      walkDocument(content.blocks, block => { if (source.project.instances[block.id]) chosen.add(block.id) })
+      const roots = [...chosen].filter(id => {
+        let owner = owningContainer(source.project, id)
+        while (owner?.kind === 'instance') {
+          if (chosen.has(owner.instanceId)) return false
+          owner = owningContainer(source.project, owner.instanceId)
         }
-        components.push({ from: { packageId: ref.packageId, version: ref.version }, to: { packageId: id, version: resolved.meta.version } })
-        mapped.components.push({ packageId: id, version: resolved.meta.version, source: { kind: 'project' } })
-      }
-      staged.add(prepared)
-      return { resources: mapped, assetIds, components, prepared }
+        return true
+      })
+      if (resources.components.length) throw new Error('当前正文组件需要正式 V10 实例及源码，不能只粘贴旧组件包引用')
+      const plan = roots.length ? prepareCourseObjectPaste({ ...source, roots }, {
+        capturedTarget: destination, container: { kind: 'surface', surfaceId: target.surfaceId! },
+        index: destination.editingProject.surfaces.find(surface => surface.id === target.surfaceId)!.childIds.length,
+        identity: identity ?? 'copy',
+      }) : { edits: [], idMap: new Map<string, string>(), assetIds: new Map<string, string>(), rootIds: [] }
+      const assetIds = Object.fromEntries(plan.assetIds)
+      const mapped: DocumentResources = { assets: resources.assets.map(ref => {
+        const assetId = assetIds[ref.assetId]
+        if (!assetId) throw new Error(`复制素材没有正式实例闭包：${ref.assetId}`)
+        return { assetId, source: { kind: 'project' } }
+      }), components: [] }
+      const prepared: FlowPreparedDocumentResources = { target: previous[0]?.target ?? target, edits: plan.edits }
+      staged.add(prepared); input.onPrepared?.(prepared)
+      return { resources: mapped, assetIds, components: [], identities: Object.fromEntries(plan.idMap), prepared }
     },
-    async discard(prepared) { staged.delete(prepared) },
+    async discard(prepared) { staged.delete(prepared); input.onDiscard?.(prepared) },
   }
 }
 
-/** Produces one existing canonical transaction; no project, sidecar, or History writes. */
-export function prepareFlowDocumentResourceTransaction(document: CourseProjectDocument, surfaceId: string, blocks: FlowBlock[], prepared: unknown): { result: FlowCommandResult; step: EditorTransactionStep | null } {
-  const fail = (reason: string) => ({ result: { ok: false, historyEntry: false, reason } as FlowCommandResult, step: null })
-  if (!prepared || typeof prepared !== 'object' || !staged.has(prepared)) return fail('正文资源准备已失效')
-  const resources = prepared as FlowPreparedDocumentResources
-  if (resources.projectId !== document.id || resources.baseRevision !== document.revision) return fail('正文资源目标已变化，请重新粘贴')
-  const candidate = { ...document, assets: { ...document.assets, ...resources.assets }, componentPackages: { ...document.componentPackages, ...resources.componentPackages } }
-  const result = replaceFlowDocumentContent(candidate, surfaceId, blocks, { expectedRevision: document.revision })
-  if (!result.ok || !result.nextDocument) return { result, step: null }
-  const step = createEditorTransactionStep(document, { projectId: document.id, baseRevision: document.revision, nextDocument: result.nextDocument, resourceChanges: resources.resourceChanges })
-  return { result, step }
+/** Resolves the editor's provisional object shell before the formal ACK is rendered. */
+export function projectFlowPreparedResources(target: CapturedCourseTarget, values: readonly FlowPreparedDocumentResources[]): CourseProjectV10 {
+  const batches = values.filter(value => staged.has(value) && sameOwner(value.target, target))
+  return batches.length ? preparedProject(batches[0].target, batches) : target.editingProject
+}
+
+/** One formal operation contains every resource edit and the complete body projection. */
+export function prepareFlowDocumentResourceTransaction(target: CapturedCourseTarget, surfaceId: string, blocks: DocumentBlock[], values: readonly unknown[]): {
+  target: CapturedCourseTarget; edits: ComponentEdit[]; prepared: readonly FlowPreparedDocumentResources[]
+} {
+  const batches = preparedBatches(values), captured = batches[0]?.target ?? target
+  if (!sameOwner(captured, target) || captured.surfaceId !== surfaceId) throw new Error('正文资源目标已变化，请回到原稿后继续')
+  const project = preparedProject(captured, batches)
+  return { target: captured, edits: [...batches.flatMap(batch => [...batch.edits]), ...flowDocumentEdits(project, surfaceId, blocks,captured.editingProject)], prepared: batches }
+}
+export function releaseFlowPreparedResources(values: readonly FlowPreparedDocumentResources[]): void {
+  values.forEach(value => staged.delete(value))
+}
+export function retainedFlowPreparedResources(target: CapturedCourseTarget, values: readonly FlowPreparedDocumentResources[]): FlowPreparedDocumentResources[] {
+  return values.filter(value => staged.has(value) && sameOwner(value.target,target))
 }

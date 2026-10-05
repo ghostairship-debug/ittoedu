@@ -1,0 +1,42 @@
+{
+  "description": "将已授权的课件文档导出为离线单 HTML、在线单 HTML 或网页包，返回生成与写盘的真实状态。Project V10 使用同一 Published V3 输出。同任务同文档的既有导出未被修改时可原位更新；其他同名文件不覆盖，不需先删除旧文件。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "destination": {
+        "maxLength": 1024,
+        "minLength": 1,
+        "type": "string"
+      },
+      "format": {
+        "enum": [
+          "html-offline",
+          "html-online",
+          "web-package"
+        ],
+        "type": "string"
+      },
+      "target": {
+        "maxLength": 200,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "target",
+      "format"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "导出文档",
+    "targetKinds": [
+      "document"
+    ]
+  },
+  "name": "document.export",
+  "version": 1
+}

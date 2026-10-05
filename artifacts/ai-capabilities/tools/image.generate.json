@@ -1,0 +1,72 @@
+{
+  "description": "通过任务开始时冻结的 GPT OAuth 或已显式启用的 OpenAI Images API 连接生成图片。target 绑定当前获授权的课件或对象，省略时生成独立工作空间资源。ready 返回本任务资源，可用 project.apply from 插入或 media.apply 原位替换；ready 本身未写入工程。当前请求 PNG、auto/low/medium/high 画质。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "output": {
+        "additionalProperties": false,
+        "properties": {
+          "background": {
+            "enum": [
+              "auto",
+              "opaque",
+              "transparent"
+            ],
+            "type": "string"
+          },
+          "format": {
+            "const": "png",
+            "type": "string"
+          },
+          "quality": {
+            "enum": [
+              "auto",
+              "low",
+              "medium",
+              "high"
+            ],
+            "type": "string"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "const": "auto",
+                "type": "string"
+              },
+              {
+                "pattern": "^\\d{2,5}x\\d{2,5}$",
+                "type": "string"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "prompt": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "target": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "prompt"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "image.generate",
+    "targetKinds": [
+      "document",
+      "course-surface",
+      "course-instance"
+    ]
+  },
+  "name": "image.generate",
+  "version": 1
+}

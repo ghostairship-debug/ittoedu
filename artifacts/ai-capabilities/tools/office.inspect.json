@@ -1,0 +1,21 @@
+{
+  "description": "读取现有 DOCX、XLSX 或 PPTX 的真实正文、表格、单元格或幻灯片文字。宿主识别原文件格式并提供可编辑位置和当前版本，不要求处理压缩包或 XML。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "path": {
+        "maxLength": 32767,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "path"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "name": "office.inspect",
+  "version": 1
+}

@@ -1,39 +1,14 @@
-import type { RuntimeInspectorAuthoringView } from '../../runtime/runtimeInspectorAuthoringView'
-import type {
-  RuntimeInspectorCommitResult,
-  RuntimePropertiesContext,
-} from './RuntimePropertiesPanel'
-
-export interface RuntimePropertiesContexts {
-  readonly scene: RuntimePropertiesContext
-  readonly global: RuntimePropertiesContext
-}
-
+import type { RuntimePropertiesContext } from './RuntimePropertiesPanel'
+import type { ComponentDefinition, ComponentInstance } from '../../../shared/contracts/component-platform/project'
+import type { DocumentResources } from '../../../shared/workbench/document'
+/** Source management uses the actual implementation. Editable data stays in ComponentPropertiesEditor. */
 export function buildRuntimePropertiesContexts(input: {
-  readonly view: RuntimeInspectorAuthoringView | null
-  readonly editingScope: 'scene' | 'global'
-  readonly updateProperty: RuntimePropertiesContext['commands']['updateProperty']
-  readonly updateContentText: RuntimePropertiesContext['commands']['updateContentText']
-  readonly report: (feedback: { kind: 'error' | 'success'; message: string }) => void
-}): RuntimePropertiesContexts {
-    const build = (scope: 'scene' | 'global'): RuntimePropertiesContext => ({
-      kind: 'runtime',
-      scope,
-      view: input.editingScope === scope ? input.view : null,
-      disabledReason: input.editingScope === scope
-        && input.view
-        && input.view.availability !== 'available'
-        ? input.view.label
-        : null,
-      commands: {
-        updateProperty: (target, update) => (
-          input.updateProperty(target, update) as RuntimeInspectorCommitResult
-        ),
-        updateContentText: (target, value) => (
-          input.updateContentText(target, value) as RuntimeInspectorCommitResult
-        ),
-      },
-      onFeedback: input.report,
-    })
-    return { scene: build('scene'), global: build('global') }
+  scope: 'scene' | 'global'; definition: ComponentDefinition; instance: ComponentInstance
+  components?: DocumentResources['components']
+  assetCount: number; disabledReason?: string | null; setEnabled(enabled: boolean): void; editSource(): void
+}): RuntimePropertiesContext | null {
+  if ((input.instance.implementationOverride ?? input.definition.implementation).kind !== 'source') return null
+  return { kind: 'runtime', scope: input.scope, definition: input.definition, instance: input.instance,
+    assetCount: input.assetCount, components: input.components, disabledReason: input.disabledReason ?? null,
+    commands: { setEnabled: input.setEnabled, editSource: input.editSource } }
 }

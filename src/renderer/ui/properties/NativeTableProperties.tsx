@@ -14,6 +14,8 @@ import {
   FontFamilyPicker,
   RangeField,
   SelectField,
+  usePropertyDraftBindingKey,
+  usePropertyDraftFlush,
 } from './PropertyControls'
 import type { PropertiesItemBase } from './SlideNativePropertiesPanel'
 import { tableCellSpan, type TableMergeRegion } from '../../../shared/tableMerge'
@@ -74,6 +76,19 @@ function TableCellInput({
   const composingRef = useRef(false)
   const pendingBlurRef = useRef(false)
   const baselineRef = useRef(value)
+  const bindingKey = usePropertyDraftBindingKey()
+  const targetRef = useRef(bindingKey)
+  const draftRef = useRef(draft)
+  draftRef.current = draft
+  const stale = () => editingRef.current && targetRef.current !== bindingKey
+  usePropertyDraftFlush(() => {
+    if (!editingRef.current) return true
+    if (composingRef.current || pendingBlurRef.current || stale()) return false
+    commands.commitCellText(cellId, draftRef.current)
+    editingRef.current = false
+    baselineRef.current = draftRef.current
+    return true
+  })
 
   useEffect(() => {
     if (!editingRef.current) {
@@ -89,6 +104,8 @@ function TableCellInput({
       aria-label={`单元格 ${rowId} / ${columnId}`}
       value={draft}
       onFocus={() => {
+        if (stale()) return
+        targetRef.current = bindingKey
         pendingBlurRef.current = false
         editingRef.current = true
         baselineRef.current = draft
@@ -96,15 +113,18 @@ function TableCellInput({
         commands.beginCellEdit(cellId)
       }}
       onChange={(event) => {
+        if (stale()) return
         setDraft(event.currentTarget.value)
         commands.updateCellDraft(cellId, event.currentTarget.value, composingRef.current)
       }}
       onCompositionStart={() => {
+        if (stale()) return
         composingRef.current = true
         commands.updateCellDraft(cellId, draft, true)
       }}
       onCompositionEnd={(event) => {
         composingRef.current = false
+        if (stale()) { pendingBlurRef.current = false; return }
         setDraft(event.currentTarget.value)
         commands.updateCellDraft(cellId, event.currentTarget.value, false)
         if (pendingBlurRef.current) {
@@ -115,6 +135,7 @@ function TableCellInput({
         }
       }}
       onBlur={() => {
+        if (stale()) return
         if (!editingRef.current) return
         if (composingRef.current) { pendingBlurRef.current = true; return }
         editingRef.current = false
@@ -125,6 +146,7 @@ function TableCellInput({
       onKeyDown={(event) => {
         if (composingRef.current || event.nativeEvent.isComposing) return
         if (event.key === 'Enter' || event.key === 'Tab') {
+          if (stale()) return
           event.preventDefault()
           editingRef.current = false
           baselineRef.current = draft
@@ -132,7 +154,9 @@ function TableCellInput({
         } else if (event.key === 'Escape') {
           event.preventDefault()
           editingRef.current = false
-          commands.cancelCellEdit(cellId)
+          if (targetRef.current === bindingKey) commands.cancelCellEdit(cellId)
+          else baselineRef.current = value
+          targetRef.current = bindingKey
           setDraft(baselineRef.current)
           event.currentTarget.blur()
         }

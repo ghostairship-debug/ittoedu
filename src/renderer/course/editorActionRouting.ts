@@ -1,4 +1,4 @@
-import { shouldIgnoreSlideLayerDeleteForFocus } from './v9SlideActionCommands'
+import { shouldIgnoreSlideLayerDeleteForFocus } from './editorAuthoringFocus'
 import {
   EDITOR_LOCKED_WRITE_REASON,
   EDITOR_TEXT_FOCUS_LAYER_DELETE_REASON,
@@ -42,7 +42,7 @@ export function resolveEditorAdapterKind(
   snapshot: EditorSelectionSnapshot,
 ): EditorActionAdapterKind {
   if (snapshot.scope === 'global') return 'global'
-  if (snapshot.surfaceKind === 'spatial-2d') return 'spatial'
+  if (snapshot.surfaceKind === 'spatial' || snapshot.surfaceKind === 'spatial-2d') return 'spatial'
   return snapshot.surfaceKind
 }
 
@@ -79,7 +79,7 @@ export function isEditorInteractiveControlTarget(target: EventTarget | null): bo
 }
 
 /** Shadow DOM retargets window events to the host, not the focused control. */
-export function isEditorTextInputEvent(event: KeyboardEvent): boolean {
+export function isEditorTextInputEvent(event: Event): boolean {
   if (isEditorTextInputTarget(event.target)
     || event.composedPath().some(isEditorTextInputTarget)) return true
   const ownerDocument = event.target instanceof Node ? event.target.ownerDocument : null
@@ -105,13 +105,13 @@ export interface KeyboardDeleteSessionSnapshot {
   readonly hasCourseProject: boolean
   readonly selection: EditorSelectionSnapshot | null
   readonly contentEditable: boolean
-  readonly hasFlowSession: boolean
-  readonly flowComposing: boolean
-  readonly flowTextFocus: boolean
-  readonly flowHasSelection: boolean
-  readonly hasSlideBackend: boolean
-  readonly slideTextEdit: boolean
-  readonly slideFormulaEdit: boolean
+  readonly hasFlowSession?: boolean
+  readonly flowComposing?: boolean
+  readonly flowTextFocus?: boolean
+  readonly flowHasSelection?: boolean
+  readonly hasSlideBackend?: boolean
+  readonly slideTextEdit?: boolean
+  readonly slideFormulaEdit?: boolean
   readonly slideTagName?: string
   readonly selectedNodeCount: number
   readonly editingText: boolean
@@ -126,7 +126,8 @@ export function resolveKeyboardDeleteDisposition(
 ): KeyboardDeleteDisposition {
   if (snapshot.hasCourseProject) {
     if (!snapshot.selection) return { action: 'ignore' }
-    if (snapshot.selection.focus === 'text' && snapshot.contentEditable) {
+    if (snapshot.contentEditable || snapshot.flowComposing || snapshot.flowTextFocus
+      || snapshot.slideTextEdit || snapshot.slideFormulaEdit || snapshot.editingText) {
       return { action: 'ignore' }
     }
     return { action: 'route', snapshot: snapshot.selection }

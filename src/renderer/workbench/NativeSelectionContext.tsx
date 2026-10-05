@@ -17,9 +17,7 @@ import { usePropertiesContext } from '../ui/properties/PropertiesContextAdapter'
 import type { PropertiesContext } from '../ui/properties/PropertiesContext'
 import type { FlowPropertiesContext } from '../ui/properties/FlowPropertiesPanel'
 import type { PropertiesItemView, PropertiesPatch } from '../ui/properties/SlideNativePropertiesPanel'
-import { normalizePropertiesPatch, propertiesViewFromLayerItem } from '../ui/properties/propertiesItemView'
-import type { LayerItem } from '../../shared/courseProjectTypes'
-import { captureCourseObjectSelection, matchesCourseObjectState, usePinnedSelection, workbenchSelection } from './SelectionContextController'
+import { captureCourseInstanceSelection, usePinnedSelection, workbenchSelection } from './SelectionContextController'
 import { RuntimePageTextList } from './RuntimePageText'
 import './selectionContext.css'
 
@@ -43,7 +41,7 @@ function matchesGlobalObject(context: PropertiesContext, itemIds: readonly strin
 }
 /** A Flow paper object selected alone, as the properties context reports it. */
 function matchesFlowOverlay(context: PropertiesContext, itemIds: readonly string[]): context is FlowPropertiesContext {
-  return context.kind === 'flow-overlay' && itemIds.length === 1 && context.selection.selectedOverlayIds.length === 1 && context.selection.selectedOverlayIds[0] === itemIds[0]
+  return (context.kind === 'flow-page' || context.kind === 'flow-block' || context.kind === 'flow-component') && itemIds.length === 1 && context.native?.view.id === itemIds[0]
 }
 
 const FONT_SIZE_MIN = 8, FONT_SIZE_MAX = 400
@@ -119,16 +117,16 @@ function ObjectActions({ view, patch, replaceImage, editText, extra = {} }: { vi
 const MULTI_ALIGN = [['left', '左对齐'], ['center', '水平居中'], ['right', '右对齐'], ['top', '顶对齐'], ['middle', '垂直居中'], ['bottom', '底对齐']] as const
 const sortedIds = (ids: readonly string[]) => JSON.stringify([...ids].sort())
 
-export function NativeSelectionContext({ documentId, revision, locationId, itemIds, stateId, sceneItemIds = [], enabled, bounds, textEditing = false, ownsDocumentSelection = true }: {
-  documentId?: string | null; revision: number; locationId?: string | null; itemIds: readonly string[]; stateId?: string | null; sceneItemIds?: readonly string[]; enabled: boolean
+export function NativeSelectionContext({ documentId, revision, surfaceId, locationId: legacyLocationId, itemIds, stateId, sceneItemIds = [], enabled, bounds, textEditing = false, ownsDocumentSelection = true }: {
+  documentId?: string | null; revision: number; surfaceId?: string | null; locationId?: string | null; itemIds: readonly string[]; stateId?: string | null; sceneItemIds?: readonly string[]; enabled: boolean
   bounds?(itemId: string): Box | null
   /** The text editing toolbar owns the selection while its text is edited. */
   textEditing?: boolean
   /** Whether this control reports the document's current selection; Flow's text selection reports its own. */
   ownsDocumentSelection?: boolean
 }) {
+  const locationId = surfaceId ?? legacyLocationId
   const marker = useRef<HTMLSpanElement>(null)
-  const replacement = useRef<HTMLInputElement>(null)
   const [root, setRoot] = useState<HTMLElement | null>(null)
   const actions = useCourseEditorActions()
   const context = usePropertiesContext({ onReplaceImage: () => actions?.replaceImage() })
@@ -161,17 +159,20 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
   useEffect(() => { setNotice(''); setCropping(null) }, [documentId, locationId, ids, stateId])
   useEffect(() => {
     if (!documentId || !ownsDocumentSelection) return
+    let active = true
     void workbenchSelection.observe(documentId, revision, snapshot => enabled && locationId && itemIds.length
-      ? captureCourseObjectSelection(snapshot, locationId, itemIds, stateId) : null)
+      ? captureCourseInstanceSelection(snapshot, locationId, itemIds, undefined, stateId) : null, () => active)
+    return () => { active = false }
   }, [documentId, revision, locationId, ids, stateId, enabled, ownsDocumentSelection])
   useLayoutEffect(() => {
     if (!root) return
-    const selectedPinned = pinned?.targets.flatMap(t => t.kind === 'course-object' && matchesCourseObjectState(t, locationId, stateId, sceneItemIds.includes(t.itemId)) ? [t.itemId] : []) ?? []
+    const selectedPinned = pinned?.targets.flatMap(t => t.kind === 'course-instance' && t.surfaceId === locationId && (t.stateId ?? null) === (stateId ?? null) ? [t.instanceId] : []) ?? []
     const locate = (id: string): Box | null => {
       const explicit = bounds?.(id)
       if (explicit) return explicit
       // A teacher controller is anchored where it is shown (collapsed, kept in view), not at its stored full frame.
       const element = [...root.querySelectorAll<HTMLElement>('[data-controller-authoring-id]')].find(element => element.dataset.controllerAuthoringId === id)
+        ?? [...root.querySelectorAll<HTMLElement>('[data-component-instance]')].find(element => element.dataset.componentInstance === id)
         ?? [...root.querySelectorAll<HTMLElement>('[data-layer-item-id]')].find(element => element.dataset.layerItemId === id)
       const rect = element?.getBoundingClientRect()
       return rect ? { left: rect.left, top: rect.top, width: rect.width, height: rect.height } : null
@@ -205,23 +206,25 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
     editText: global.selected.contentEditingEnabled && global.selected.view.type === 'text' ? () => run(() => global.commands.text.beginEdit('canvas'), report) : undefined,
     controller: Boolean(global.selected.controllerComponent) }
   else if (overlay) {
-    const entry = overlay.view.overlayLayers.find(item => item.selectionId === itemIds[0])
-    if (entry) {
-      const view = propertiesViewFromLayerItem(entry.item as LayerItem)
-      single = { view, disabledReason: null, patch: value => run(() => overlay.commands.patchOverlayProperties(normalizePropertiesPatch(view, value)), report),
-        replaceImage: () => replacement.current?.click() }
+    const native = overlay.native
+    if (native) {
+      const view = native.view
+      single = { view, disabledReason: native.disabledReason, patch: value => run(() => native.commands.patch(value), report),
+        editText: native.contentEditingEnabled ? () => run(() => native.commands.text.beginEdit('canvas'), report) : undefined,
+        replaceImage: actions ? () => run(native.commands.replaceImage, report) : undefined }
     }
   }
   // Commands report a failure next to the bar instead of throwing into React.
   const guarded = (items: MenuCommand[]): MenuCommand[] => items.map(item => ({ ...item, run: () => run(item.run, report) }))
-  // Capture when sending, so the request always names the objects selected now.
+  // This render's document and scope stay fixed while preparation drains its pending input.
   const captureSelected = async () => {
     if (!documentId || !locationId) throw new Error('文档尚未就绪，请重新选择。')
-    return captureCourseObjectSelection(await workbenchSelection.prepare(documentId), locationId, itemIds, stateId)
+    const selectedIds = [...itemIds]
+    return captureCourseInstanceSelection(await workbenchSelection.prepare(documentId), locationId, selectedIds, undefined, stateId)
   }
   // One object has its own AI card (M15); several objects still go to the assistant as one request.
   const ai = single && documentId && locationId && itemIds.length === 1
-    ? <ElementAiButton documentId={documentId} target={{ kind: 'course-object', locationId, itemId: itemIds[0]! }} label={elementLabel(single.view)} capture={captureSelected} />
+    ? <ElementAiButton documentId={documentId} target={{ kind: 'course-instance', surfaceId: locationId, instanceId: itemIds[0]!, stateId: stateId ?? null }} label={elementLabel(single.view)} capture={captureSelected} />
     : <QuickBarAiButton targetLabel={itemIds.length > 1 ? `所选 ${itemIds.length} 个对象` : '所选对象'}
       onSubmit={async instruction => { await workbenchSelection.request(await captureSelected(), instruction) }} />
   let content: ReactNode = null
@@ -340,11 +343,6 @@ export function NativeSelectionContext({ documentId, revision, locationId, itemI
     onCommit={result => { setCropping(null); cropPatch({ x: result.frame.x, y: result.frame.y, width: result.frame.width, height: result.frame.height, crop: result.crop }) }}
     onCancel={() => setCropping(null)} /> : null
   return <span ref={marker} className="native-selection-context" aria-hidden="true">
-    {overlay && <input ref={replacement} type="file" accept="image/*" hidden tabIndex={-1} aria-label="替换浮层图片文件" onChange={event => {
-      const file = event.target.files?.[0]; event.target.value = ''
-      if (file) void file.arrayBuffer().then(bytes => overlay.commands.importReplacementMedia({ name: file.name, mimeType: file.type, bytes: new Uint8Array(bytes) }))
-        .catch(() => report('图片读取失败'))
-    }} />}
     {pinnedBoxes.map((box, index) => <span key={index} aria-hidden="true" data-pinned-object="true" className="native-selection-context__pinned"
       style={{ left: box.left, top: box.top, width: box.width, height: box.height, transform: box.rotation ? `rotate(${box.rotation}deg)` : undefined }} />)}
     {content && <SelectionQuickBar label="选中对象快捷工具" anchor={anchor} bounds={view} suspended={gesture || textEditing || cropping !== null} selectionKey={`${documentId}:${locationId}:${stateId}:${ids}`} aboveOffset={ROTATION_HANDLE_CLEARANCE}>

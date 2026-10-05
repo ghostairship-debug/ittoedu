@@ -10,7 +10,7 @@ import { SpatialPropertiesPanel } from './SpatialPropertiesPanel'
 export function PropertiesPanelRouter({ context }: { context: PropertiesContext }) {
   switch (context.kind) {
     case 'flow-block':
-    case 'flow-overlay':
+    case 'flow-component':
     case 'flow-page':
       return <FlowPropertiesPanel context={context} />
     case 'spatial-page':

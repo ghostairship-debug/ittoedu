@@ -1,584 +1,171 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import type {
-  AvailableComponentCatalogPackage,
-  ComponentCatalogSnapshot,
-} from '../../shared/componentCatalog'
-import type { ComponentPackageData } from '../../shared/componentTypes'
-import { toUserMessage, UserFacingError } from '../../shared/errors'
-import type {
-  OpenBinaryFileResult,
-  SelectedBinaryBatchFile,
-  SelectedFileBatch,
-} from '../../shared/ipcTypes'
-import { componentCatalogInstallStatus } from '../components/componentCatalogStatus'
-import { planCatalogBatchJoin } from '../components/componentLibraryModel'
-import type { ComponentInsertionTarget } from '../components/insertComponentPackages'
-import {
-  componentPackageSha256,
-  importComponentPackageAsync,
-} from '../../core/drivers/codecs/importComponentPackage'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import type { AvailableComponentCatalogPackage, ComponentCatalogSnapshot } from '../../shared/componentCatalog'
+import type { ComponentLibraryEntry } from '../../shared/contracts/component-platform/library'
+import type { OpenBinaryFileResult, SelectedBinaryBatchFile, SelectedFileBatch } from '../../shared/ipcTypes'
+import type { EditorStoreKernel } from '../store/editorStoreKernel'
+import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
+import { extractComponentLibraryEntry } from '../../core/components/library'
+import { exportComponentLibraryArchive, importComponentLibraryArchive } from '../../core/components/library/archive'
+import { captureComponentPackageReplacementTarget, commitComponentReplacementAtTarget, type ComponentPackageReplacementTarget } from '../components/commitComponentPackageAuthoring'
+import { insertComponentPackagesAtTarget } from '../components/insertComponentPackages'
+import type { CourseInsertionOptions } from '../media/commitCourseMediaAuthoring'
 
-export interface ComponentLibraryIdentity {
-  readonly projectId: string
-  readonly revision: number
-  readonly sessionGeneration?: number
-  readonly locationId?: string | null
-  readonly surfaceId?: string | null
-  readonly owner?: string | null
-  readonly ownerKey?: string | null
-}
-
-export interface ComponentPackageTarget {
-  readonly projectId: string
-  readonly documentRevision: number
-  readonly packageId: string
-}
-
-export interface ComponentPackageReplacementCommitResult {
-  readonly ok: boolean
-  readonly reason?: string
-}
-
-export interface ComponentCatalogPackageBytes {
-  readonly bytes: Uint8Array
-  readonly sha256: string
-}
-
-export interface ComponentPackageReplacementRequest {
-  readonly mode: 'replace'
-  readonly packageId: string
-  readonly target: ComponentPackageTarget
-  readonly packageData: ComponentPackageData
-  readonly sourceFileName: string
-}
-
-export interface CatalogPackageUpdateRequest {
-  readonly mode: 'update'
-  readonly entries: AvailableComponentCatalogPackage[]
-}
-
-/**
- * Narrow App/desktop ports. Catalog/Package identity stays in domain modules;
- * this hook only sequences capture → validate → recheck → commit.
- */
 export interface ComponentLibraryPorts {
-  captureIdentity(): ComponentLibraryIdentity | null
-  captureReplacementTarget(packageId: string): ComponentPackageTarget | null
-  readInstalledPackages(): Readonly<Record<string, ComponentPackageData>>
-  replacePackageAtTarget(
-    target: ComponentPackageTarget,
-    packageData: ComponentPackageData,
-  ): ComponentPackageReplacementCommitResult
-  captureInsertionTarget(): ComponentInsertionTarget | null
-  insertPackages(target: ComponentInsertionTarget, packages: readonly ComponentPackageData[]): { ok: boolean; reason?: string }
+  kernel: EditorStoreKernel
+  capturePlacement?(target: CapturedCourseTarget): CourseInsertionOptions
   selectComponentPackage(): Promise<OpenBinaryFileResult | null>
   selectComponentPackages(): Promise<SelectedFileBatch<SelectedBinaryBatchFile> | null>
   desktopAvailable(): boolean
   loadCatalog(): Promise<ComponentCatalogSnapshot>
-  readCatalogPackage(input: {
-    sourceId: string
-    packageId: string
-    version: string
-  }): Promise<ComponentCatalogPackageBytes>
+  readCatalogPackage(input: { sourceId: string; packageId: string; version: string }): Promise<{ bytes: Uint8Array; sha256: string }>
+  installLibraryEntry?(bytes: Uint8Array): Promise<ComponentCatalogSnapshot>
+  deleteCatalogPackage?(input: { sourceId: string; packageId: string; version: string }): Promise<ComponentCatalogSnapshot>
   runBusy<T>(operation: () => Promise<T>, fallback: string): Promise<T | undefined>
   commitStatus(message: string | null): void
   reportError(message: string): void
 }
-
+export interface ComponentPackageReplacementRequest { mode: 'replace'; packageId: string; target: ComponentPackageReplacementTarget; packageData: ComponentLibraryEntry; sourceFileName: string }
+export interface CatalogPackageUpdateRequest { mode: 'update'; entries: AvailableComponentCatalogPackage[]; target: ComponentPackageReplacementTarget }
 export interface ComponentLibraryApi {
   componentCatalog: ComponentCatalogSnapshot
+  installedEntries: ComponentLibraryEntry[]
   replacementRequest: ComponentPackageReplacementRequest | null
   catalogUpdateRequest: CatalogPackageUpdateRequest | null
   importExternalPackages(): void
   replacePackage(packageId: string): void
   refreshCatalog(): void
   addCatalogPackages(entries: AvailableComponentCatalogPackage[]): Promise<boolean>
-  prepareCatalogPackage(entry: AvailableComponentCatalogPackage): Promise<ComponentPackageData | null>
+  prepareCatalogPackage(entry: AvailableComponentCatalogPackage): Promise<ComponentLibraryEntry | null>
   requestCatalogUpdate(entry: AvailableComponentCatalogPackage): void
   confirmReplacement(): void
   cancelReplacement(): void
   confirmCatalogUpdate(): void
   cancelCatalogUpdate(): void
+  extractSelection(title: string): Promise<void>
+  deleteCatalogPackage(entry: AvailableComponentCatalogPackage): Promise<void>
 }
-
-const EMPTY_COMPONENT_CATALOG: ComponentCatalogSnapshot = {
-  sources: [],
-  packages: [],
-  issues: [],
-}
-
-function readableError(error: unknown, fallback: string): string {
-  if (error instanceof UserFacingError) {
-    console.error(error)
-    return `${error.title}：${error.message}\n${error.suggestion}`
-  }
-  if (error instanceof Error && error.message.trim()) {
-    console.error(error)
-    return error.message
-  }
-  return toUserMessage(error, fallback)
-}
-
-function sameIdentity(
-  left: ComponentLibraryIdentity | null,
-  right: ComponentLibraryIdentity | null,
-): boolean {
-  if (!left || !right) return left === right
-  return left.projectId === right.projectId && left.revision === right.revision
-}
-
-function assertFreshIdentity(
-  started: ComponentLibraryIdentity | null,
-  current: ComponentLibraryIdentity | null,
-  title: string,
-  suggestion: string,
-): void {
-  if (!started) return
-  if (!sameIdentity(started, current)) {
-    throw new UserFacingError(
-      title,
-      '工程或组件状态已发生变化，请重新开始。',
-      suggestion,
-    )
-  }
-}
-
-function assertSameProject(
-  started: ComponentLibraryIdentity | null,
-  current: ComponentLibraryIdentity | null,
-  title: string,
-  suggestion: string,
-): void {
-  if (!started) return
-  if (!current || started.projectId !== current.projectId) {
-    throw new UserFacingError(
-      title,
-      '工程或组件状态已发生变化，请重新开始。',
-      suggestion,
-    )
-  }
-}
-
-function samePreparationIdentity(left: ComponentLibraryIdentity, right: ComponentLibraryIdentity | null): boolean {
-  return Boolean(right)
-    && left.projectId === right!.projectId
-    && left.revision === right!.revision
-    && left.sessionGeneration === right!.sessionGeneration
-    && left.locationId === right!.locationId
-    && left.surfaceId === right!.surfaceId
-    && left.owner === right!.owner
-    && left.ownerKey === right!.ownerKey
-}
-
-function catalogEntryMatches(
-  snapshot: ComponentCatalogSnapshot,
-  entry: Pick<AvailableComponentCatalogPackage, 'sourceId' | 'sourceLabel' | 'sourceTrust' | 'packageId' | 'version' | 'sha256'>,
-): boolean {
-  return snapshot.packages.some(candidate => candidate.sourceId === entry.sourceId
-    && candidate.sourceLabel === entry.sourceLabel
-    && candidate.sourceTrust === entry.sourceTrust
-    && candidate.packageId === entry.packageId
-    && candidate.version === entry.version
-    && candidate.sha256 === entry.sha256)
-}
-
+const EMPTY: ComponentCatalogSnapshot = { sources: [], packages: [], issues: [] }
 export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibraryApi {
-  const portsRef = useRef(ports)
-  portsRef.current = ports
-
-  const [componentCatalog, setComponentCatalog] = useState<ComponentCatalogSnapshot>(
-    EMPTY_COMPONENT_CATALOG,
-  )
-  const componentCatalogRef = useRef(componentCatalog)
-  componentCatalogRef.current = componentCatalog
-  const [replacementRequest, setReplacementRequest] = useState<
-    ComponentPackageReplacementRequest | null
-  >(null)
-  const [catalogUpdateRequest, setCatalogUpdateRequest] = useState<
-    CatalogPackageUpdateRequest | null
-  >(null)
-
-  const importExternalPackages = useCallback(() => {
-    void portsRef.current.runBusy(async () => {
-      const started = portsRef.current.captureIdentity()
-      const insertionTarget = portsRef.current.captureInsertionTarget()
-      if (!insertionTarget) throw new Error('请先打开可编辑的画布。')
-      const batch = await portsRef.current.selectComponentPackages()
-      if (!batch) return
-      const issues = batch.rejected.map((item) =>
-        `${item.name}：${item.title}；${item.message}；${item.suggestion}`,
-      )
-      const packagesById = new Map<string, ComponentPackageData>()
-      const currentPackages = { ...portsRef.current.readInstalledPackages() }
-      for (const file of batch.accepted) {
-        try {
-          const imported = await importComponentPackageAsync(file.bytes, {
-            provenance: {
-              sha256: file.sha256,
-              importedAt: new Date().toISOString(),
-              sourceLabel: `手动导入：${file.name}`,
-            },
-          })
-          const packageId = imported.manifest.id
-          const duplicateInBatch = packagesById.get(packageId)
-          if (duplicateInBatch) {
-            issues.push(
-              `${file.name}：同一批次已包含组件 ${packageId} ` +
-              `v${duplicateInBatch.manifest.version}，请每个 ID 只选择一个版本。`,
-            )
-            continue
-          }
-          const existing = currentPackages[packageId]
-          if (existing) {
-            const sameLockedPackage =
-              existing.manifest.version === imported.manifest.version &&
-              existing.provenance?.sha256 === imported.provenance?.sha256
-            issues.push(sameLockedPackage
-              ? `${file.name}：工程已经包含完全相同的组件，已跳过。`
-              : `${file.name}：工程已包含 ${packageId} v${existing.manifest.version}；请从工程组件菜单审阅更新或替换。`)
-            continue
-          }
-          packagesById.set(packageId, imported)
-        } catch (error) {
-          issues.push(`${file.name}：${readableError(error, '组件包内容无效。')}`)
-        }
-      }
-
-      const packages = [...packagesById.values()]
-      assertFreshIdentity(
-        started,
-        portsRef.current.captureIdentity(),
-        '外部组件导入已取消',
-        '请重新选择 .h5component 文件后再试。',
-      )
-      const latestPackages = portsRef.current.readInstalledPackages()
-      for (const next of packages) {
-        if (latestPackages[next.manifest.id]) {
-          throw new UserFacingError(
-            '外部组件导入已取消',
-            '工程内组件状态在读取期间发生变化。',
-            '请重新选择 .h5component 文件后再试。',
-          )
-        }
-      }
-      if (packages.length === 0) {
-        portsRef.current.commitStatus('外部组件导入未改变工程')
-        if (issues.length > 0) {
-          portsRef.current.reportError(`没有可加入工程的组件：\n${issues.slice(0, 8).join('\n')}`)
-        }
-        return
-      }
-      const inserted = portsRef.current.insertPackages(insertionTarget, packages)
-      if (!inserted.ok) throw new Error(inserted.reason ?? '组件添加失败。')
-      portsRef.current.commitStatus(
-        issues.length > 0
-          ? `已添加 ${packages.length} 个外部组件到画布，${issues.length} 项未加入`
-          : `已添加 ${packages.length} 个外部组件到画布`,
-      )
-      if (issues.length > 0) {
-        portsRef.current.reportError(
-          `已加入 ${packages.length} 个组件；另有 ${issues.length} 项未加入：\n` +
-          issues.slice(0, 8).join('\n'),
-        )
-      }
-    }, '外部组件读取失败。请重新选择 .h5component 文件。')
+  const current = useRef(ports); current.current = ports
+  const view = useSyncExternalStore(ports.kernel.bridge.subscribe, ports.kernel.readView, ports.kernel.readView)
+  const [componentCatalog, setCatalog] = useState<ComponentCatalogSnapshot>(EMPTY)
+  const [replacementRequest, setReplacement] = useState<ComponentPackageReplacementRequest | null>(null)
+  const [catalogUpdateRequest, setUpdate] = useState<CatalogPackageUpdateRequest | null>(null)
+  const installed = useMemo(() => {
+    const entries: ComponentLibraryEntry[] = [], issues: string[] = []
+    if (!view.project) return { entries, issues }
+    const resources = view.views.find(item => item.documentId === view.activeDocumentId)?.model.resources
+    if (!resources) return { entries, issues }
+    for (const definition of Object.values(view.project.definitions)) {
+      const sample = Object.values(view.project.instances).find(instance => instance.definitionId === definition.id)
+      if (!sample) continue
+      try { entries.push(extractComponentLibraryEntry(view.project, resources, { id: definition.id, title: definition.title ?? definition.id, rootIds: [sample.id] }).entry) }
+      catch (error) { issues.push(`${definition.title ?? definition.id}：${error instanceof Error ? error.message : String(error)}`) }
+    }
+    return { entries, issues }
+  }, [view.project, ports.kernel])
+  const installedEntries = installed.entries
+  useEffect(() => { if (installed.issues.length) current.current.reportError(installed.issues.join('\n')) }, [installed])
+  const refreshCatalog = useCallback(() => {
+    if (!current.current.desktopAvailable()) return
+    void current.current.runBusy(async () => { setCatalog(await current.current.loadCatalog()) }, '组件目录读取失败。')
   }, [])
-
-  const replacePackage = useCallback((packageId: string) => {
-    void portsRef.current.runBusy(async () => {
-      const started = portsRef.current.captureIdentity()
-      const target = portsRef.current.captureReplacementTarget(packageId)
-      if (!target) {
-        throw new UserFacingError(
-          '组件替换已取消',
-          `工程中不存在可替换的组件包“${packageId}”。`,
-          '请刷新工程组件列表后重试。',
-        )
-      }
-      const file = await portsRef.current.selectComponentPackage()
-      if (!file) return
-      assertSameProject(
-        started,
-        portsRef.current.captureIdentity(),
-        '组件替换已取消',
-        '请刷新工程组件列表后重试。',
-      )
-      const sha256 = await componentPackageSha256(file.bytes)
-      const imported = await importComponentPackageAsync(file.bytes, {
-        provenance: {
-          sha256,
-          importedAt: new Date().toISOString(),
-          sourceLabel: `手动替换：${file.name}`,
-        },
-      })
-      if (imported.manifest.id !== packageId) {
-        throw new UserFacingError(
-          '组件替换已取消',
-          `所选包 ID 为“${imported.manifest.id}”，与工程组件“${packageId}”不一致。`,
-          '请选择同一组件 ID 的新版本；需要并存的组件应作为新包导入。',
-        )
-      }
-      setReplacementRequest({
-        mode: 'replace',
-        packageId,
-        target,
-        packageData: imported,
-        sourceFileName: file.name,
-      })
-    }, '组件替换包读取失败，工程内原版本已保留。')
+  useEffect(refreshCatalog, [refreshCatalog])
+  const prepareCatalogPackage = useCallback(async (entry: AvailableComponentCatalogPackage) => {
+    return await current.current.runBusy(async () => {
+      const file = await current.current.readCatalogPackage(entry)
+      const archive = importComponentLibraryArchive(file.bytes)
+      if (archive.entry.id !== entry.packageId || archive.version !== entry.version) throw new Error('目录组件身份已改变，请刷新。')
+      return archive.entry
+    }, '组件条目读取失败，原工程保留。') ?? null
   }, [])
-
-  const confirmReplacement = useCallback(() => {
-    const request = replacementRequest
-    setReplacementRequest(null)
-    if (!request) return
-    void portsRef.current.runBusy(async () => {
-      const result = portsRef.current.replacePackageAtTarget(request.target, request.packageData)
-      if (!result.ok) {
-        throw new UserFacingError(
-          '组件替换失败',
-          result.reason ?? '工程或组件状态已发生变化，请重新开始替换。',
-          '工程或组件状态已发生变化，请重新开始替换。',
-        )
+  const addCatalogPackages = useCallback(async (entries: AvailableComponentCatalogPackage[]) => {
+    const target = current.current.kernel.captureTarget()
+    const placement = current.current.capturePlacement?.(target) ?? {}
+    const completed = await current.current.runBusy(async () => {
+      const prepared: ComponentLibraryEntry[] = []
+      for (const entry of entries) {
+        const file = await current.current.readCatalogPackage(entry)
+        const archive = importComponentLibraryArchive(file.bytes)
+        if (archive.entry.id !== entry.packageId || archive.version !== entry.version) throw new Error('目录条目身份已改变，请刷新。')
+        prepared.push(archive.entry)
       }
-    }, '组件替换失败，工程内原版本已保留。')
-  }, [replacementRequest])
-
-  const cancelReplacement = useCallback(() => {
-    setReplacementRequest(null)
-  }, [])
-
-  const performCatalogPackageOperation = useCallback(async (
-    entries: AvailableComponentCatalogPackage[],
-    mode: 'add' | 'update',
-  ): Promise<boolean> => {
-    const completed = await portsRef.current.runBusy(async () => {
-      const started = portsRef.current.captureIdentity()
-      const insertionTarget = mode === 'add' ? portsRef.current.captureInsertionTarget() : null
-      if (mode === 'add' && !insertionTarget) throw new Error('请先打开可编辑的画布。')
-      const installedBefore = portsRef.current.readInstalledPackages()
-      const pendingEntries = mode === 'add'
-        ? planCatalogBatchJoin(entries, installedBefore).entries
-        : entries
-      const updateEntry = pendingEntries[0]
-      if (
-        mode === 'update' &&
-        (!updateEntry || componentCatalogInstallStatus(
-          updateEntry,
-          installedBefore[updateEntry.packageId],
-        ) !== 'update-available')
-      ) {
-        throw new UserFacingError(
-          '组件更新已取消',
-          '工程内组件与目录状态已发生变化。',
-          '请刷新组件目录，重新审阅版本和哈希后再试。',
-        )
-      }
-      const updateTarget = mode === 'update' && updateEntry
-        ? portsRef.current.captureReplacementTarget(updateEntry.packageId)
-        : null
-      if (mode === 'update' && !updateTarget) {
-        throw new UserFacingError(
-          '组件更新已取消',
-          '工程内组件替换目标已经失效。',
-          '请刷新组件目录，重新审阅版本和哈希后再试。',
-        )
-      }
-
-      const importedPackages: ComponentPackageData[] = []
-      for (const entry of pendingEntries) {
-        const file = await portsRef.current.readCatalogPackage({
-          sourceId: entry.sourceId,
-          packageId: entry.packageId,
-          version: entry.version,
-        })
-        if (file.sha256 !== entry.sha256) {
-          throw new UserFacingError(
-            '组件目录已改变',
-            `组件“${entry.name}”读取到的包哈希与当前目录快照不一致。`,
-            '请刷新组件库并重新确认该版本。',
-          )
-        }
-        importedPackages.push(await importComponentPackageAsync(file.bytes, {
-          expectedId: entry.packageId,
-          expectedVersion: entry.version,
-          provenance: {
-            sha256: file.sha256,
-            importedAt: new Date().toISOString(),
-            sourceLabel: entry.sourceLabel,
-          },
-        }))
-      }
-      assertSameProject(
-        started,
-        portsRef.current.captureIdentity(),
-        mode === 'update' ? '组件更新已取消' : '组件加入已取消',
-        '请刷新组件目录，重新审阅版本和哈希后再试。',
-      )
-      if (mode === 'update') {
-        const result = portsRef.current.replacePackageAtTarget(
-          updateTarget!,
-          importedPackages[0]!,
-        )
-        if (!result.ok) {
-          throw new UserFacingError(
-            '组件更新已取消',
-            result.reason ?? '工程或组件状态已发生变化，请刷新组件目录后重试。',
-            '工程或组件状态已发生变化，请刷新组件目录后重试。',
-          )
-        }
-        return true
-      }
-      const latestPackages = portsRef.current.readInstalledPackages()
-      for (const entry of pendingEntries) {
-        if (componentCatalogInstallStatus(
-          entry,
-          latestPackages[entry.packageId],
-        ) !== 'available') {
-          throw new UserFacingError(
-            '组件加入已取消',
-            '工程内组件状态在目录读取期间发生变化。',
-            '请返回组件库重新选择，避免覆盖刚刚完成的修改。',
-          )
-        }
-      }
-      const importedById = new Map(importedPackages.map(data => [data.manifest.id, data]))
-      const toInsert = entries.map(entry => importedById.get(entry.packageId) ?? installedBefore[entry.packageId])
-      if (toInsert.some(data => !data)) throw new Error('组件包已失效，请刷新后重新添加。')
-      const inserted = portsRef.current.insertPackages(insertionTarget!, toInsert as ComponentPackageData[])
-      if (!inserted.ok) throw new Error(inserted.reason ?? '组件添加失败。')
-      portsRef.current.commitStatus(`已添加 ${toInsert.length} 个组件到当前画布`)
+      const result = await insertComponentPackagesAtTarget(current.current.kernel, target, prepared, placement)
+      if (!result.ok) throw new Error(result.reason)
+      current.current.commitStatus(`已添加 ${entries.length} 个组件到原画布`)
       return true
-    }, mode === 'update'
-      ? '组件更新失败，工程内原版本已保留。'
-      : '目录组件嵌入失败，工程未改变。')
+    }, '组件添加未完成。')
     return completed === true
   }, [])
-
-  const prepareCatalogPackage = useCallback(async (
-    entry: AvailableComponentCatalogPackage,
-  ): Promise<ComponentPackageData | null> => {
-    const started = portsRef.current.captureIdentity()
-    const expected = {
-      sourceId: entry.sourceId,
-      sourceLabel: entry.sourceLabel,
-      sourceTrust: entry.sourceTrust,
-      packageId: entry.packageId,
-      version: entry.version,
-      sha256: entry.sha256,
-    }
-    const prepared = await portsRef.current.runBusy(async () => {
-      const changed = () => new UserFacingError(
-        '组件选择已取消',
-        '工程、会话或组件目录已发生变化。',
-        '请刷新组件目录并重新选择。',
-      )
-      const assertCurrent = () => {
-        if (!started || !samePreparationIdentity(started, portsRef.current.captureIdentity())
-          || !catalogEntryMatches(componentCatalogRef.current, expected)) throw changed()
+  const importExternalPackages = useCallback(() => {
+    const target = current.current.kernel.captureTarget()
+    const placement = current.current.capturePlacement?.(target) ?? {}
+    void current.current.runBusy(async () => {
+      const batch = await current.current.selectComponentPackages()
+      if (!batch) return
+      const entries: ComponentLibraryEntry[] = [], problems = batch.rejected.map(item => `${item.name}：${item.message}`)
+      for (const file of batch.accepted) {
+        try {
+          const archive = importComponentLibraryArchive(file.bytes)
+          if (current.current.installLibraryEntry) setCatalog(await current.current.installLibraryEntry(file.bytes))
+          entries.push(archive.entry)
+        } catch (error) { problems.push(`${file.name}：${error instanceof Error ? error.message : String(error)}`) }
       }
-      assertCurrent()
-      const installed = portsRef.current.readInstalledPackages()[expected.packageId]
-      const status = componentCatalogInstallStatus(entry, installed)
-      if (status === 'embedded' && installed) {
-        assertCurrent()
-        if (portsRef.current.readInstalledPackages()[expected.packageId] !== installed) throw changed()
-        return installed
+      if (entries.length) {
+        const result = await insertComponentPackagesAtTarget(current.current.kernel, target, entries, placement)
+        if (!result.ok) throw new Error(result.reason)
+        current.current.commitStatus(`已添加 ${entries.length} 个外部组件`)
       }
-      if (status !== 'available') throw changed()
-      const file = await portsRef.current.readCatalogPackage({
-        sourceId: expected.sourceId,
-        packageId: expected.packageId,
-        version: expected.version,
-      })
-      if (file.sha256 !== expected.sha256 || await componentPackageSha256(file.bytes) !== expected.sha256) {
-        throw new UserFacingError('组件目录已改变', '组件包哈希与当前目录快照不一致。', '请刷新组件目录后重试。')
-      }
-      const imported = await importComponentPackageAsync(file.bytes, {
-        expectedId: expected.packageId,
-        expectedVersion: expected.version,
-        provenance: {
-          sha256: expected.sha256,
-          importedAt: new Date().toISOString(),
-          sourceLabel: expected.sourceLabel,
-        },
-      })
-      assertCurrent()
-      if (componentCatalogInstallStatus(entry, portsRef.current.readInstalledPackages()[expected.packageId]) !== 'available') throw changed()
-      return imported
-    }, '目录组件读取失败，工程未改变。')
-    return prepared ?? null
+      if (problems.length) current.current.reportError(problems.join('\n'))
+    }, '外部组件读取失败，原件保留。')
   }, [])
-
-  const addCatalogPackages = useCallback(async (
-    entries: AvailableComponentCatalogPackage[],
-  ): Promise<boolean> => {
-    const installed = portsRef.current.readInstalledPackages()
-    const selected = entries.filter(entry => {
-      const status = componentCatalogInstallStatus(entry, installed[entry.packageId])
-      return status === 'available' || status === 'embedded'
-    })
-    if (selected.length !== entries.length || selected.length === 0) {
-      portsRef.current.reportError('组件目录状态已改变，请刷新后重新选择。')
-      return false
-    }
-    return performCatalogPackageOperation(selected, 'add')
-  }, [performCatalogPackageOperation])
-
-  const requestCatalogUpdate = useCallback((
-    entry: AvailableComponentCatalogPackage,
-  ) => {
-    setCatalogUpdateRequest({ entries: [entry], mode: 'update' })
+  const replacePackage = useCallback((id: string) => {
+    const target = captureComponentPackageReplacementTarget(current.current.kernel, id)
+    if (!target) { current.current.reportError('待替换组件已不存在。'); return }
+    void current.current.runBusy(async () => {
+      const file = await current.current.selectComponentPackage()
+      if (!file) return
+      setReplacement({ mode: 'replace', packageId: id, target, packageData: importComponentLibraryArchive(file.bytes).entry, sourceFileName: file.name })
+    }, '替换组件读取失败，原版本保留。')
   }, [])
-
-  const confirmCatalogUpdate = useCallback(() => {
-    const request = catalogUpdateRequest
-    setCatalogUpdateRequest(null)
+  const confirmReplacement = useCallback(() => {
+    const request = replacementRequest; setReplacement(null)
     if (!request) return
-    void performCatalogPackageOperation(request.entries, request.mode)
-  }, [catalogUpdateRequest, performCatalogPackageOperation])
-
-  const cancelCatalogUpdate = useCallback(() => {
-    setCatalogUpdateRequest(null)
+    void current.current.runBusy(async () => {
+      const result = await commitComponentReplacementAtTarget(current.current.kernel, request.target, request.packageData)
+      if (!result.ok) throw new Error(result.reason)
+    }, '组件替换失败，原版本保留。')
+  }, [replacementRequest])
+  const requestCatalogUpdate = useCallback((entry: AvailableComponentCatalogPackage) => {
+    const target = captureComponentPackageReplacementTarget(current.current.kernel, entry.packageId)
+    if (target) setUpdate({ mode: 'update', entries: [entry], target })
+    else current.current.reportError('工程中没有此组件定义，无法更新。')
   }, [])
-
-  const refreshCatalog = useCallback(() => {
-    void portsRef.current.runBusy(async () => {
-      const snapshot = await portsRef.current.loadCatalog()
-      componentCatalogRef.current = snapshot
-      setComponentCatalog(snapshot)
-    }, '组件目录刷新失败。')
+  const confirmCatalogUpdate = useCallback(() => {
+    const request = catalogUpdateRequest; setUpdate(null)
+    if (!request) return
+    void current.current.runBusy(async () => {
+      const file = await current.current.readCatalogPackage(request.entries[0])
+      const result = await commitComponentReplacementAtTarget(current.current.kernel, request.target, importComponentLibraryArchive(file.bytes).entry)
+      if (!result.ok) throw new Error(result.reason)
+    }, '组件更新失败。')
+  }, [catalogUpdateRequest])
+  const extractSelection = useCallback(async (title: string) => {
+    const kernel = current.current.kernel, target: CapturedCourseTarget = kernel.captureTarget()
+    if (!title.trim() || !target.instanceIds.length) throw new Error('请输入名称并选择需要提炼的对象。')
+    const { entry, diagnostics } = extractComponentLibraryEntry(target.project, target.resources, { id: `library_${crypto.randomUUID()}`, title: title.trim(), rootIds: [...target.instanceIds] })
+    if (!current.current.installLibraryEntry) throw new Error('组件库保存入口尚未连接，工程原件保留。')
+    setCatalog(await current.current.installLibraryEntry(exportComponentLibraryArchive(entry)))
+    current.current.commitStatus(`已将“${entry.title}”保存到我的资产库`)
+    if (diagnostics.length) current.current.reportError(diagnostics.map(item => item.message).join('\n'))
   }, [])
-
-  useEffect(() => {
-    if (!portsRef.current.desktopAvailable()) return
-    let cancelled = false
-    void portsRef.current.loadCatalog().then((snapshot) => {
-      if (!cancelled) {
-        componentCatalogRef.current = snapshot
-        setComponentCatalog(snapshot)
-      }
-    }).catch((error) => {
-      if (cancelled) return
-      console.error('读取组件目录失败', error)
-      portsRef.current.reportError('本地组件目录读取失败；仍可手动导入 .h5component。')
-    })
-    return () => { cancelled = true }
+  const deleteCatalogPackage = useCallback(async (entry: AvailableComponentCatalogPackage) => {
+    await current.current.runBusy(async () => {
+      if (!current.current.deleteCatalogPackage) throw new Error('库删除入口尚未连接。')
+      setCatalog(await current.current.deleteCatalogPackage(entry))
+    }, '库条目删除失败，原库条目保留。')
   }, [])
-
-  return {
-    componentCatalog,
-    replacementRequest,
-    catalogUpdateRequest,
-    importExternalPackages,
-    replacePackage,
-    refreshCatalog,
-    addCatalogPackages,
-    prepareCatalogPackage,
-    requestCatalogUpdate,
-    confirmReplacement,
-    cancelReplacement,
-    confirmCatalogUpdate,
-    cancelCatalogUpdate,
-  }
+  return { componentCatalog, installedEntries, replacementRequest, catalogUpdateRequest, importExternalPackages, replacePackage, refreshCatalog,
+    addCatalogPackages, prepareCatalogPackage, requestCatalogUpdate, confirmReplacement, cancelReplacement: () => setReplacement(null),
+    confirmCatalogUpdate, cancelCatalogUpdate: () => setUpdate(null), extractSelection, deleteCatalogPackage }
 }

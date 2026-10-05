@@ -1,50 +1,42 @@
-export default String.raw`(function () {
-  'use strict'
-  window.CoursewareComponent.define({
-    id: 'com.ittoedu.teaching.sort-order', runtimeApiVersion: 4,
-    create: function (ctx) {
-      var root = ctx.dom.root, props = ctx.props, mode = ctx.mode, suspended = false, order = [], items = [], expected = [], problem = ''
-      function parse() {
-        items = String(props.items || '').split('\n').filter(function (line) { return line.trim() }).map(function (line) {
-          var parts = line.split('|'); return { id: parts[0].trim(), text: (parts[1] || '').trim() }
-        })
-        expected = String(props.correctOrder || '').split(',').map(function (id) { return id.trim() })
-        var ids = items.map(function (item) { return item.id })
-        problem = items.length < 2 || items.some(function (item) { return !item.id || !item.text }) || new Set(ids).size !== ids.length || expected.length !== ids.length || new Set(expected).size !== ids.length || expected.some(function (id) { return ids.indexOf(id) < 0 }) ? '配置无效：项目 ID 必须唯一，正确顺序必须恰好包含全部项目。' : ''
-        order = ids.slice()
+/** Runs in the content realm; all transient interaction state belongs to its mount. */
+export default String.raw`
+export default {
+  mount({root,instance,scope,interactions}) {
+    if (!root) throw new Error('教学互动需要内容根元素')
+    let data=instance.data, disposed=false, order=[], assignments={}, selected='', progress=0, feedback=''
+    const make=(tag,text)=>{const element=root.ownerDocument.createElement(tag);if(text!==undefined)element.textContent=String(text);return element}
+    const active=()=>!disposed&&scope.isActive()
+    function reset(){order=(data.items||[]).map(item=>item.id);assignments={};selected='';progress=Number(data.initialStep||0);feedback=''}
+    function button(text,action,focusId,direction){const element=make('button',text);element.type='button';element.addEventListener('click',()=>{if(active()){action();render(focusId,direction)}});return element}
+    function answer(correct){feedback=correct?data.success:data.failure;scope.events.emit('answer',{correct})}
+    function render(focusId,direction){
+      if(!active())return
+      root.replaceChildren()
+      const style=make('style');style.textContent='.teaching-interaction{height:100%;box-sizing:border-box;overflow:auto;padding:20px;border-radius:16px;background:#f1f5f9;font:22px sans-serif;color:#172554}.teaching-interaction button{font:inherit;background:white;border:1px solid #94a3b8;border-radius:6px;padding:8px 14px;margin:6px;cursor:pointer}.teaching-interaction button:focus-visible{outline:3px solid #2563eb}.teaching-interaction .row{display:flex;align-items:center;gap:10px;padding:8px}.teaching-interaction .label{flex:1}.teaching-interaction .status{min-height:32px;margin-top:12px}'
+      const shell=make('div');shell.className='teaching-interaction'
+      if(data.mode==='reveal'){
+        (data.steps||[]).slice(0,progress).forEach((step,index)=>shell.append(make('p',(index+1)+'. '+step)))
+        const next=button('下一步 →',()=>{progress=Math.min((data.steps||[]).length,progress+1);scope.state.set('progress',progress)})
+        next.disabled=progress>=(data.steps||[]).length;shell.append(next)
+      }else if(data.mode==='choice'){
+        (data.options||[]).forEach((text,index)=>shell.append(button(String.fromCharCode(65+index)+'. '+text,()=>answer(index===data.correct))))
+      }else if(data.mode==='classify'){
+        ;(data.items||[]).forEach(item=>shell.append(button(item.text+(assignments[item.id]?' → '+assignments[item.id]:''),()=>{selected=item.id;feedback='已选：'+item.text})))
+        ;(data.groups||[]).forEach(group=>shell.append(button(group,()=>{if(selected){assignments[selected]=group;feedback='已归入：'+group}})))
+        shell.append(button('检查答案',()=>answer((data.items||[]).every(item=>assignments[item.id]===item.group))))
+      }else{
+        order.forEach((id,index)=>{const item=data.items.find(value=>value.id===id),row=make('div');row.className='row';const label=make('span',(index+1)+'. '+item.text);label.className='label';row.append(label)
+          ;[-1,1].forEach(delta=>{const move=button(delta<0?'上移':'下移',()=>{[order[index],order[index+delta]]=[order[index+delta],order[index]]},id,delta);move.setAttribute('aria-label',item.text+(delta<0?'上移':'下移'));move.disabled=index+delta<0||index+delta>=order.length;row.append(move)
+            if(focusId===id&&direction===delta)queueMicrotask(()=>{if(active()&&move.isConnected){if(!move.disabled)move.focus();else row.querySelector('button:not(:disabled)')?.focus()}})
+          });shell.append(row)})
+        shell.append(button('检查答案',()=>answer(order.every((id,index)=>id===(data.correctOrder||[])[index]))))
       }
-      function make(tag, text) { var el = document.createElement(tag); if (text) el.textContent = text; return el }
-      function render(message, focusId, direction) {
-        root.replaceChildren()
-        var style = make('style'); style.textContent = ':host{display:block;width:100%;height:100%}.sort{box-sizing:border-box;height:100%;overflow:auto;padding:20px;background:#f1f5f9;border-radius:16px;font:22px "Noto Sans SC","Microsoft YaHei",sans-serif;color:#172554}.row{display:flex;align-items:center;gap:12px;padding:8px;border-bottom:1px solid #cbd5e1}.label{flex:1}button{color:inherit;font:inherit;border:1px solid #94a3b8;background:white;border-radius:6px;padding:5px 12px;margin:4px;cursor:pointer}button:focus-visible{outline:3px solid #2563eb}.status{min-height:32px;margin-top:12px}'
-        var shell = make('div'); shell.className = 'sort'
-        var enabled = mode === 'preview' && !suspended && !problem
-        order.forEach(function (id, index) {
-          var item = items.find(function (candidate) { return candidate.id === id }), row = make('div'), label = make('span', (index + 1) + '. ' + item.text)
-          row.className = 'row'; label.className = 'label'; row.append(label)
-          ;[-1, 1].forEach(function (delta) {
-            var button = make('button', delta < 0 ? '上移' : '下移'); button.type = 'button'; button.setAttribute('aria-label', item.text + (delta < 0 ? '上移' : '下移'))
-            button.disabled = !enabled || index + delta < 0 || index + delta >= order.length
-            button.addEventListener('click', function () { var other = order[index + delta]; order[index + delta] = id; order[index] = other; render('', id, delta) })
-            row.append(button)
-            if (focusId === id && direction === delta) queueMicrotask(function () { if (!button.disabled) button.focus(); else row.querySelector('button:not(:disabled)')?.focus() })
-          }); shell.append(row)
-        })
-        var check = make('button', '检查答案'), reset = make('button', '重置'); check.type = reset.type = 'button'; check.disabled = reset.disabled = !enabled
-        check.addEventListener('click', function () { var correct = order.every(function (id, index) { return id === expected[index] }); render(String((props.content || {})[correct ? 'success' : 'failure'] || (correct ? '正确' : '请再试一次'))); ctx.emit('answer', { correct: correct }) })
-        reset.addEventListener('click', function () { parse(); render('已重置') })
-        var status = make('div', problem || message || '用上移、下移按钮调整顺序，然后检查答案。'); status.className = 'status'; status.setAttribute('role', 'status')
-        shell.append(check, reset, status); root.append(style, shell)
-      }
-      parse(); render()
-      return {
-        setMode: function (next) { mode = next; parse(); render() },
-        updateProps: function (next) { props = next; parse(); render() }, resize: function () {},
-        setVisible: function (visible) { root.style.display = visible ? '' : 'none' },
-        suspend: function () { suspended = true; render() }, resume: function () { suspended = false; render() },
-        prepareCapture: function () { parse(); render() }, destroy: function () { root.replaceChildren() },
-      }
-    },
-  })
-})()
+      shell.append(button('重置',()=>{reset();feedback='已重置'}));const status=make('div',feedback);status.className='status';status.setAttribute('role','status');shell.append(status);root.append(style,shell)
+    }
+    reset();render()
+    const offEnter=interactions?.subscribeTrigger({type:'scene.enter'},()=>{if(data.mode==='reveal'&&active()){reset();scope.state.set('progress',progress);render()}})
+    if(offEnter)scope.cleanup(offEnter)
+    return {update(next){data=next.data;reset();render()},dispose(){disposed=true;offEnter?.();root.replaceChildren()}}
+  }
+}
 `

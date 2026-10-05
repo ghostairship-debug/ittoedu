@@ -13,6 +13,8 @@ import type {
 
 export interface EditorKeyboardActionPorts {
   isReadOnly(): boolean
+  /** Runtime/embedded content can retain all keys while it owns focus. */
+  ownsKeyboard?(event: KeyboardEvent): boolean
   captureDeleteSnapshot(target: EventTarget | null): KeyboardDeleteSessionSnapshot
   routeEditorAction(
     actionId: EditorActionId,
@@ -20,6 +22,7 @@ export interface EditorKeyboardActionPorts {
   ): Pick<EditorActionResult, 'ok' | 'reason'>
   deleteSelectedNodes(): void
   copySelection(): void
+  cutSelection?(): void
   pasteClipboard(): void
   duplicateSelection(): void
   nudgeSelection(dx: number, dy: number): void
@@ -44,13 +47,18 @@ export function useEditorKeyboardRouter(ports: EditorKeyboardActionPorts): void 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const current = portsRef.current
-      if (current.isReadOnly() || event.defaultPrevented || event.isComposing
-        || isEditorTextInputEvent(event)) return
+      if (current.isReadOnly() || current.ownsKeyboard?.(event) || event.defaultPrevented || event.isComposing || event.keyCode === 229) return
       const key = event.key.toLowerCase()
       if ((event.ctrlKey || event.metaKey) && key === 's') {
         event.preventDefault()
+        // Save owns the existing draft/ACK flush. It must also receive Ctrl+S
+        // from PM, properties and source inputs without moving their focus.
         current.saveProject(event.shiftKey)
-      } else if ((event.ctrlKey || event.metaKey) && key === 'z') {
+        return
+      }
+      // PM owns formal undo dispatch; source inputs own their unapplied draft.
+      if (isEditorTextInputEvent(event)) return
+      if ((event.ctrlKey || event.metaKey) && key === 'z') {
         event.preventDefault()
         if (event.shiftKey) current.redo()
         else current.undo()
@@ -68,11 +76,14 @@ export function useEditorKeyboardRouter(ports: EditorKeyboardActionPorts): void 
         current.selectAll()
       } else if ((event.ctrlKey || event.metaKey) && key === 'c') {
         if (window.getSelection()?.toString()) return
-        event.preventDefault()
-        current.copySelection()
+        // Native copy emits ClipboardEvent so the current OS clipboard receives
+        // either text owned by its editor or the software-owned object marker.
+        return
       } else if ((event.ctrlKey || event.metaKey) && key === 'v') {
-        event.preventDefault()
-        current.pasteClipboard()
+        return
+      } else if ((event.ctrlKey || event.metaKey) && key === 'x') {
+        if (window.getSelection()?.toString() || !current.cutSelection) return
+        return
       } else if ((event.ctrlKey || event.metaKey) && key === 'd') {
         event.preventDefault()
         current.duplicateSelection()

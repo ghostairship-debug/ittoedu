@@ -16,13 +16,10 @@ import {
   type ProjectAudioSettings,
   type SoundDefinition,
 } from '../../shared/contracts/media-v1'
-import {
-  selectAudioSettings,
-  selectMediaAssetFiles,
-  selectMediaAssets,
-  useEditorStore,
-} from '../store/editorStore'
-import type { ProjectAudioSettingsPatch } from '../media/commitCourseMediaAuthoring'
+import { selectCourseView, selectEditingScope, useEditorStore } from '../store/editorStore'
+import { owningContainer } from '../../shared/contracts/component-platform/project'
+import { readCourseMediaLibrary, readCourseAudioSettings, updateCourseAudioSettings, updateCourseSound,
+  removeCourseAsset, insertCourseLibraryAsset, captureCourseInsertionTarget, mediaAuthoringError, type ProjectAudioSettingsPatch } from '../media/commitCourseMediaAuthoring'
 import { flowInsertCommand, type FlowInsertDestination, type FlowInsertKind } from './flow/flowInsertCommands'
 import type { FlowDeepInsertPort } from './RightSidebar'
 
@@ -439,34 +436,39 @@ export function MediaTab({
   showAdvancedAudioSettings = true,
   filterQuery = '',
 }: MediaTabProps) {
-  const assets = useEditorStore(selectMediaAssets)
-  const assetFiles = useEditorStore(selectMediaAssetFiles)
-  const audioSettings = useEditorStore(selectAudioSettings)
+  const kernel = useEditorStore(state => state.courseKernel)
+  const view = useEditorStore(selectCourseView)
+  const editingScope = useEditorStore(selectEditingScope)
+  const library = useMemo(() => readCourseMediaLibrary(view), [view])
+  const assets = library.assets, assetFiles = library.files
+  const audioSettings = readCourseAudioSettings(view)
   const sounds = audioSettings.sounds
-  const updateAudioSettings = useEditorStore((state) => state.updateAudioSettings)
-  const updateSound = useEditorStore((state) => state.updateSound)
-  const deleteSound = useEditorStore((state) => state.deleteSound)
-  const deleteAsset = useEditorStore((state) => state.deleteAsset)
-  const addImageNode = useEditorStore((state) => state.addImageNode)
-  const addVideoNode = useEditorStore((state) => state.addVideoNode)
-  const flowSession = useEditorStore((state) => state.flowSession)
-  const flowInsertPort = flowSession?.selection.authoringScope === 'page' ? onFlowInsert : undefined
-  const spatialScope = useEditorStore((state) => state.spatialSession?.scope ?? null)
-  const insertFlowLibraryMedia = useEditorStore((state) => state.insertFlowLibraryMedia)
-  const setError = useEditorStore((state) => state.setError)
-  const spatialPlacementDisabled = spatialScope !== null && spatialScope !== 'world'
-  const spatialPlacementDisabledReason = spatialScope === 'surface'
-    ? '表面共享层暂不支持插入媒体；请切换到无限画布世界层。'
-    : spatialScope === 'global'
-      ? '无限画布全局层暂不支持插入媒体；请切换到无限画布世界层。'
-      : undefined
+  const run = (operation: Promise<unknown>) => { void operation.catch(error => mediaAuthoringError(kernel, error)) }
+  const updateAudioSettings = (patch: ProjectAudioSettingsPatch) => run(updateCourseAudioSettings(kernel, patch))
+  const updateSound = (id: string, patch: Partial<Omit<SoundDefinition, 'id'>>) => run(updateCourseSound(kernel, id, patch))
+  const deleteSound = (id: string) => run(updateCourseSound(kernel, id, null))
+  const deleteAsset = (id: string) => run(removeCourseAsset(kernel, id))
+  const addImageNode = (asset: AssetMeta, _bytes: Uint8Array) => {
+    try {
+      const target = captureCourseInsertionTarget(kernel), owner = target.instanceId ? owningContainer(target.project, target.instanceId) : null
+      const camera = target.project.surfaces.find(surface => surface.id === target.surfaceId)?.kind === 'spatial' && editingScope !== 'global'
+        ? useEditorStore.getState().readSpatialView(target.surfaceId ?? '', target.documentId).camera : null
+      run(insertCourseLibraryAsset(kernel, asset.id,
+        editingScope === 'global' ? { container: owner?.kind === 'global' ? owner : { kind: 'global', plane: 'overlay' } }
+          : camera ? { center: { x: camera.x, y: camera.y } } : {}, target))
+    } catch (error) { mediaAuthoringError(kernel, error) }
+  }
+  const addVideoNode = addImageNode
+  const flowSession = editingScope !== 'global' && view.project?.surfaces.find(surface => surface.id === view.surfaceId)?.kind === 'flow'
+  const flowInsertPort = flowSession ? onFlowInsert : undefined
+  const spatialPlacementDisabled = false
+  const spatialPlacementDisabledReason = undefined
 
   const insertFlowAsset = (
     assetId: string,
     request?: { altKey?: boolean; menuAction?: 'insert-document' | 'insert-overlay' },
   ) => {
-    const result = insertFlowLibraryMedia(assetId, request)
-    if (!result.ok && result.reason) setError(result.reason)
+    run(insertCourseLibraryAsset(kernel, assetId, { destination: request?.altKey || request?.menuAction === 'insert-overlay' ? 'paper' : 'document' }))
   }
 
   const insertFlowAssetCommand = (destination: FlowInsertDestination, kind: FlowInsertKind, assetId: string) => {

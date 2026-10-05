@@ -1,4109 +1,616 @@
-import { resolveSlideSelectionLayer } from '../../workbench/SelectionContextController'
+import { Hand, Maximize2, Minus, MousePointer2, Play, Plus } from 'lucide-react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { resolveComponentBackground, isComponentVisibleAtSurface, type ComponentAuthorSpot, type ComponentEdit, type ComponentFrame, type CourseProjectV10 } from '../../../shared/contracts/component-platform'
+import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
+import type { SlideContentEdit } from '../../store/slices/slideAuthoringSlice'
 import { NativeSelectionContext } from '../../workbench/NativeSelectionContext'
-import { useCourseEditorActions } from '../../documents/CourseEditorActionsContext'
-import { slideLightMenuItems } from '../../editing/quickbar/SlideLightActions'
-import { QUICK_BAR_SELECTOR } from '../../editing/quickbar/usePointerGesture'
-import { useContextMenu, type MenuCommand } from '../../editing/commands/CommandMenu'
+import { useContextMenu } from '../../editing/commands/CommandMenu'
 import { OBJECT_EDIT_EVENT, requestObjectContextMenu } from '../../editing/commands/objectContextMenu'
-import { hiddenObjectCommands, hiddenObjectName } from '../../editing/commands/hiddenObjectCommands'
-import type { LightEditTextOverride } from '../../../shared/contracts/runtime/lightEdit'
-import type { DynamicFallbackIntent, DynamicFallbackResult, DynamicFallbackTaskState } from '../../composition/runtime/precommitDynamicFallback'
-import { canEditLayerInScope } from '../../../shared/teacherControllerRole'
-import { controllerDisplayFrame, useControllerDisplayRevision } from '../../authoring/controllerDisplayBounds'
-import {
-  Hand,
-  LoaderCircle,
-  Maximize2,
-  Minus,
-  MousePointer2,
-  Play,
-  Plus,
-} from 'lucide-react'
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
-import { WebCompositionAuthoringContent, type CompositionAuthoringSelection } from '../../composition/WebCompositionAuthoringContent'
-import type { CompositionContentEdit } from '../../../shared/composition/edit'
-import type { WebCompositionMountHandle } from '../../../player/composition/mountWebComposition'
+import { componentPaintStyle } from '../../../player/components/componentPlacementStyle'
+import { componentIsLocked } from '../../composition/crossSurfaceCommands'
+import { componentDefinitionPresentation } from '../properties/componentDefinitionPresentation'
+import { frameContainsPoint, frameToSpaceMatrix, invertMatrix, transformPoint, type AffineMatrix, type GeometryPoint } from '../../../core/components/geometry'
+import { componentFrameStyle, freeSurfaceTargets, freeTargetBounds, selectedFreeTargets, hitFreeObject, sameFreeTarget,
+  type FreeObjectTarget, type FreeResizeHandle } from '../../componentPlatform/surfaces/slide'
+import { createSlideWorkspaceAuthoringController, listSlideWorkspaceHitTargets, proposeSlideLineHandle, type SlideWorkspaceAuthoringResult } from '../workspaceSlideAuthoring'
+import { createStageViewportTransform, clampStageViewportZoom, stageViewportPanRange } from '../../authoring/stageViewportTransform'
+import { resolveNativeLinePoints, normalizeStraightLineAuthoring, normalizeElbowLineAuthoring } from '../../../shared/nativeLineGeometry'
+import { snapLinePoint, collectLineSnapAxes } from '../../authoring/slideLineAuthoring'
+import type { NativeLineGeometry } from '../../../shared/contracts/native-v1/types'
+import { shapeDataSchema } from '../../../components/shape'
+import { SlideLayerSelectionOverlay } from './SlideLayerSelectionOverlay'
+import { useSlideNativeTextEditor } from './useSlideNativeTextEditor'
 import { useWorkspaceMediaSource } from '../../lessonWorkspace/workspaceMediaSourceContext'
 import { deliverWorkspaceMediaDrop, type WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
 import { WORKSPACE_MEDIA_DRAG_TYPE } from '../../lessonWorkspace/workspaceMediaDrag'
-import type {
-  ComponentAuthoringImageTarget,
-  ComponentAuthoringLightEditText,
-  ComponentAuthoringTextTarget,
-  ComponentPackageData,
-} from '../../../shared/componentTypes'
-import { getComponentPropValue } from '../../../shared/componentProps'
-import type { RuntimeAuthoringTarget } from '../../../shared/runtimeTypes'
-import {
-  PLAYER_AUTHORING_MESSAGE_TYPES,
-  PLAYER_AUTHORING_PROTOCOL_VERSION,
-  isPlayerAuthoringSnapshotAck,
-  parsePlayerAuthoringReadyMessage,
-  playerAuthoringSnapshotBarrierForCommand,
-  type PlayerAuthoringPatch,
-  type PlayerAuthoringPatchCommand,
-  type PlayerAuthoringHostMessage,
-  type PlayerAuthoringSnapshotBarrier,
-  type PlayerComponentAuthoringTargetsMessage,
-  type PlayerRuntimeAuthoringTargetsMessage,
-} from '../../../shared/playerAuthoringProtocol'
-import { createEditorGame, type EditorGameHandle } from '../../phaser/createEditorGame'
-import { onElementAnimationPreviewRequested } from '../../phaser/elementAnimationPreviewBus'
-import { hitTestV9SlideLayerItems } from '../../phaser/v9SlideHitAdapter'
-import {
-  commitV9SlideContentEdit,
-  updateV9SlideContentFormulaDraft,
-  type V9SlideContentEditSession,
-} from '../../authoring/v9SlideContentEdit'
-import {
-  createSlideWorkspaceAuthoringController,
-  listSlideWorkspaceHitTargets,
-  mergeSlidePreviewIntoNodes,
-  type SlideLinePreview,
-  type SlideWorkspaceCommandPort,
-} from '../workspaceSlideAuthoring'
-import { buildSlideEditorView, type SlideEditorLayerView, type SlideEditorView } from '../../../core/tools/slideLayerView'
-import { materializeNativeLayerItem } from '../../../shared/courseProjectSchema'
-import { nativeRenderInputFromV9Item } from '../../../player/surfaces/native/publishedNativeRendering'
-import { publishWebComposition, type CoursePublishSources } from '../../export/course/buildPublishedCourse'
-import { planNativeTextEdit } from '../../../core/tools/nativeText'
-import { cancelEditPreview, useEditPreview } from '../../workbench/EditPreviewProjection'
-import { TextEditOverlay } from '../TextEditOverlay'
-import { SlideLayerSelectionOverlay } from './SlideLayerSelectionOverlay'
-import { useSlideNativeTextEditor } from './useSlideNativeTextEditor'
-import { makeSlideAuthoringTarget } from '../../course/slideAuthoringBackend'
-import { FormulaEditDialog } from '../FormulaEditDialog'
-import { renderTextNodeCanvas } from '../../../shared/textLayout'
-import {
-  clientToWorld,
-  createStageViewportTransform,
-  rotatedRectIntersectsStage,
-  STAGE_RESIZE_HANDLE_DIRECTIONS,
-  STAGE_VIEWPORT_HEIGHT,
-  STAGE_VIEWPORT_WIDTH,
-  type StageRect,
-  type StagePanRange,
-  type StageSelectionOverlayGeometry,
-  stageViewportPanRange,
-} from '../../authoring/stageViewportTransform'
-import { DEFAULT_SLIDE_CANVAS, type SlideCanvasSize } from '../../../shared/slideCanvas'
-import { workspaceTryRunHostProps } from '../../../shared/pageFrame'
-
-import {
-  type mountPublishedCourseAuthoring,
-  type mountPublishedCourseTryRun,
-} from '../coursePlayerTryRun'
-import {
-  beginSerializedSessionMount,
-  enqueueSerial,
-} from '../serializedSessionMount'
-import type { PublishedCourseSession } from '../../../player/surfaces/publishedDynamicHosts'
-import type { SlideLiveEditTargets } from '../../../player/surfaces/slide/SlidePublishedAdapter'
-import { courseLayerItemToEditorCanvasNode } from '../../store/slideEditorProjection'
-import type { CompositionLayerItem, LayerItem, NativeLayerItem } from '../../../shared/courseProjectTypes'
-import type { LiveSceneBaseline, LiveSceneChanges } from './liveSceneChanges'
-import { isTeacherControllerLayerItem } from '../../../core/tools/globalLayers'
-import { runtimeTargetMatchesEditingContext } from '../../authoring/runtimeAuthoringContext'
-import {
-  beginComponentTextEditSession,
-  componentTextEditSessionMatchesContext,
-  componentTextTargetMatchesSession,
-  resolveComponentTextEdit,
-  type ComponentTextEditContext,
-  type ComponentTextEditSession,
-} from '../../authoring/componentTextEditSession'
-import { isAuthoringCanvasInteractive } from '../../authoring/authoringReadiness'
-import { authoringObservationDraftToken } from '../../authoring/generation/authoringObservation'
-import { registerPublishedCaptureResource, waitForPublishedObservationReady } from '../../../player/surfaces/publishedCapture'
-import { SlideAuthoringObservationReady } from './slideAuthoringObservationReady'
-import {
-  beginRuntimeTargetEditSession,
-  runtimeTargetEditSessionMatchesContext,
-  runtimeTargetMatchesEditSession,
-  validateRuntimeTargetEditSession,
-  type RuntimeTargetEditContext,
-  type RuntimeTargetEditSession,
-} from '../../authoring/runtimeTargetEditSession'
-import type { CourseRuntimeContentTextTarget } from '../../runtime/runtimeContentTextAuthoringCommands'
-import type { CourseRuntimeAssetReplacementTarget } from '../../runtime/courseRuntimeTransactions'
 import type { ImportedImageAsset } from '../../project/assetManager'
-import type { FormulaNode, TextNode, TextRun } from '../../../shared/contracts/native-v1'
-import type { NativeLineGeometry } from '../../../shared/contracts/native-v1/types'
-import { resolveNativeLinePoints } from '../../../shared/nativeLineGeometry'
-import {
-  collectLineSnapAxes,
-  drawLineAuthoringGeometry,
-  snapLinePoint,
-} from '../../authoring/slideLineAuthoring'
-import type {
-  SlideAuthoringBackend,
-  SlideAuthoringSession,
-  SlideCommandResult,
-} from '../../course/slideAuthoringBackend'
-import {
-  SlideDynamicAuthoringOverlay,
-  type SlidePreviewFeedback,
-  type SlideRuntimeTextEditSession,
-} from './SlideDynamicAuthoringOverlay'
-import {
-  collectDynamicContentTargets,
-  DynamicContentTargetPublisher,
-  type DynamicContentPublication,
-} from './dynamicContentTargetPublication'
-
-export const SLIDE_SESSIONLESS_ERROR = '没有活动的 Slide 编辑会话，不能从旧工程恢复界面'
-
-export function slideDynamicFallbackFailureMessage(result: DynamicFallbackResult): string | null {
-  if (result.status === 'unknown') return `${result.reason} 提交结果尚未确认，请重试核实`
-  if (result.status === 'blocked') return `${result.reason} 当前修改尚未处理，请先处理前序任务`
-  if (result.status === 'failed' || result.status === 'conflict') return `${result.reason} 未写入修改`
-  return null
-}
-
-export async function runSlideDynamicFallbackSubmission(
-  intent: DynamicFallbackIntent,
-  submit: (intent: DynamicFallbackIntent) => { taskId: string; settled: Promise<DynamicFallbackResult> } | null,
-  setStatus: (message: string) => void,
-  labels: { pending: string; applied: string; unchanged: string },
-): Promise<'applied' | 'unchanged' | null> {
-  let submission: ReturnType<typeof submit>
-  try {
-    submission = submit(intent)
-  } catch (error) {
-    setStatus(`${error instanceof Error ? error.message : String(error)} 未写入修改`)
-    return null
-  }
-  if (!submission) {
-    setStatus('当前文档无法提交动态内容，未写入修改')
-    return null
-  }
-  setStatus(labels.pending)
-  try {
-    const result = await submission.settled
-    const failure = slideDynamicFallbackFailureMessage(result)
-    if (failure || (result.status !== 'applied' && result.status !== 'unchanged')) {
-      setStatus(failure ?? '动态内容提交结果尚未确认，请重试核实')
-      return null
-    }
-    setStatus(result.status === 'applied' ? labels.applied : labels.unchanged)
-    return result.status
-  } catch (error) {
-    setStatus(`${error instanceof Error ? error.message : String(error)} 提交结果尚未确认，请重试核实`)
-    return null
-  }
-}
-
-type RuntimeOverrideSync = Map<string, { scope: 'scene' | 'global'; nodeId: string; json: string; overrides: readonly LightEditTextOverride[] }>
-
-/** M15: every Runtime's light-edit rules on this location, keyed by authoring scope and item. */
-function runtimeOverrideSync(view: SlideEditorView | null): RuntimeOverrideSync {
-  const sync: RuntimeOverrideSync = new Map()
-  for (const layer of view?.layers ?? []) {
-    if (layer.item.kind !== 'runtime') continue
-    const scope = layer.source === 'global' ? 'global' : 'scene'
-    const overrides = (layer.item.runtime.content.overrides ?? []) as readonly LightEditTextOverride[]
-    sync.set(`${scope}:${layer.item.layerItemId}`, { scope, nodeId: layer.item.layerItemId, json: JSON.stringify(overrides), overrides })
-  }
-  return sync
-}
-
-/** M15: each component's light edits (text rules and replaced pictures) as the live host last received them. */
-type ComponentLightEditSync = Map<string, { scope: 'scene' | 'global'; nodeId: string; json: string; textOverrides: readonly LightEditTextOverride[]; assetOverrides: Readonly<Record<string, { assetId: string }>> }>
-function componentLightEditSync(view: SlideEditorView | null): ComponentLightEditSync {
-  const sync: ComponentLightEditSync = new Map()
-  for (const layer of view?.layers ?? []) {
-    if (layer.item.kind !== 'component') continue
-    const scope = layer.source === 'global' ? 'global' : 'scene'
-    const textOverrides = (layer.item.textOverrides ?? []) as readonly LightEditTextOverride[], assetOverrides = layer.item.assetOverrides ?? {}
-    sync.set(`${scope}:${layer.item.layerItemId}`, { scope, nodeId: layer.item.layerItemId, json: JSON.stringify([textOverrides, assetOverrides]), textOverrides, assetOverrides })
-  }
-  return sync
-}
-
-export type SlidePhaserNode = NonNullable<ReturnType<typeof courseLayerItemToEditorCanvasNode>>
-type AuthoringPatchNode = Extract<PlayerAuthoringPatch, { kind: 'native-node' }>['node']
-
-type CompositionContentSync = Map<string, Extract<PlayerAuthoringPatch, { kind: 'composition-content' }>>
-
-function compositionContentSync(view: SlideEditorView | null, sources: CoursePublishSources): CompositionContentSync {
-  const sync: CompositionContentSync = new Map()
-  for (const layer of view?.layers ?? []) {
-    if (layer.item.kind !== 'composition') continue
-    const scope = layer.source === 'global' ? 'global' : 'scene'
-    const nodeId = layer.selectionId
-    sync.set(`${scope}:${nodeId}`, {
-      kind: 'composition-content', target: { kind: 'composition-content', scope, nodeId },
-      content: publishWebComposition(sources, layer.item.content as CompositionLayerItem['content']),
-    })
-  }
-  return sync
-}
-
-/** A composition frame is geometry; its program/content tree has a separate update. */
-function publishedAuthoringFramePatch(scope: 'scene' | 'global', node: AuthoringPatchNode): PlayerAuthoringPatch {
-  if (node.type === 'composition') return {
-    kind: 'composition-frame', target: { kind: 'composition-frame', scope, nodeId: node.id },
-    frame: { x: node.x, y: node.y, width: node.width, height: node.height },
-    rotation: node.rotation, opacity: node.opacity, visible: node.visible,
-  }
-  return { kind: 'native-node', target: { kind: 'native-node', scope, nodeId: node.id }, node }
-}
-type SlidePhaserDocument = Parameters<EditorGameHandle['bridge']['loadScene']>[0]
+import { authorSpotEdits, authorSpotImageEdits } from '../../componentPlatform/surfaces/slide/authorSpots'
+import { readTeacherControllerConfig } from '../../../shared/teacherControllerConfig'
+import type { TeacherControllerPort } from '../../../shared/contracts/component-platform/teacherController'
 
 export type SlideCanvasMode = 'edit' | 'run'
-export type SlideEditingScope = 'scene' | 'global'
-
-export interface SlideWorkspaceSnapshot {
-  readonly view: SlideEditorView | null
-  readonly locationId: string | null
-  readonly backend: SlideAuthoringBackend | null
-  readonly backendKind: 'slide-authoring' | 'unavailable'
-  readonly componentPackages: Record<string, ComponentPackageData>
-  readonly sidecarFileIds: readonly string[]
-  readonly editingScope: SlideEditingScope
-  readonly presentationStateId: string | null
-  readonly canvasMode: SlideCanvasMode
-  readonly editingNodes: readonly SlidePhaserNode[]
-  readonly selectedNodeIds: readonly string[]
-  readonly selectedNode: SlidePhaserNode | undefined
-  readonly editingTextNodeId: string | null
-  readonly contentEdit: V9SlideContentEditSession | null
-  readonly sceneId: string
-  readonly projectId: string
-  readonly projectRevision: number
-  readonly sessionGeneration: number
-  readonly previewRebuildKey: string
-  readonly tryRunMountKey: string | null
-  /** Armed direct-draw tool; `null` keeps the canvas in select mode. */
-  readonly drawTool: SlideLineDrawTool
-}
-
 export type SlideLineDrawTool = 'line' | 'elbow-arrow' | null
-
 export interface SlideLineDrawCommit {
-  readonly shapeType: 'line' | 'elbow-arrow'
-  readonly frame: { readonly x: number; readonly y: number; readonly width: number; readonly height: number }
-  readonly lineGeometry: NativeLineGeometry
+  shapeType: 'line' | 'elbow-arrow'
+  frame: { x: number; y: number; width: number; height: number }
+  lineGeometry: NativeLineGeometry
 }
-
-export interface SlideWorkspaceCanvasPort {
-  readonly setCanvasMode: (mode: SlideCanvasMode) => void
-  readonly setStatus: (message: string) => void
-  readonly setDrawTool: (tool: SlideLineDrawTool) => void
-  /** M15 运行现场: the editor follows the try-run to the page it is on. */
-  readonly showLocation?: (locationId: string) => void
+export interface SlideWorkspaceSnapshot {
+  project: CourseProjectV10 | null
+  documentId: string | null
+  surfaceId: string | null
+  selectedInstanceIds: readonly string[]
+  canvasMode: SlideCanvasMode
+  contentEdit: SlideContentEdit | null
+  drawTool: SlideLineDrawTool
+  activation: number
+  activeStateId: string | null
+  assetUrls: Record<string, string>
+  editingScope?: 'scene' | 'global'
 }
-
-export interface SlideWorkspaceSelectionPort {
-  readonly selectNodes: (ids: readonly string[]) => void
-  readonly selectNode: (id: string) => void
-  /** The keyboard's Ctrl+V and Ctrl+A, for the canvas right-click menu. */
-  readonly paste?: () => void
-  readonly selectAll?: () => void
-}
-
-export interface SlideWorkspaceContentPort {
-  readonly beginTextEdit: (nodeId: string, origin: 'canvas') => void
-  readonly commitTextEdit: () => void
-  readonly cancelTextEdit: () => void
-  readonly updateTextEditDraft: (
-    nodeId: string,
-    text: string,
-    runs: TextRun[],
-    height?: number,
-    width?: number,
-  ) => void
-  readonly setTextEditComposing: (composing: boolean) => void
-  readonly updateNode: (nodeId: string, patch: Record<string, unknown>) => void
-  readonly updateNodes: (
-    nodes: ReadonlyArray<{ nodeId: string; patch: Record<string, unknown> }>,
-  ) => void
-  readonly addTextNode: (x: number, y: number) => void
-  readonly addFormulaNode: (x: number, y: number) => void
-  readonly addRectangleNode: (x: number, y: number) => void
-  readonly addShapeNode: (shapeType: string, x: number, y: number) => void
-  /** Commits one completed direct line draw as a single history transaction. */
-  readonly drawShapeNode: (input: SlideLineDrawCommit) => void
-  readonly addTableNode: (x: number, y: number) => void
-  readonly addChartNode: (
-    chartType: 'bar' | 'line' | 'area' | 'pie' | 'donut',
-    x: number,
-    y: number,
-  ) => void
-  readonly addExternalComponentNode: (
-    packageId: string,
-    x: number,
-    y: number,
-    presetId?: string,
-  ) => void
-}
-
-export interface SlideWorkspaceRuntimePort {
-  readonly captureRuntimeContentTextTarget: (
-    session: Readonly<RuntimeTargetEditSession>,
-  ) => CourseRuntimeContentTextTarget | null
-  readonly captureRuntimeAssetReplacementTarget: (
-    session: Readonly<RuntimeTargetEditSession>,
-  ) => CourseRuntimeAssetReplacementTarget | null
-  readonly submitDynamicFallbackIntent: (intent: DynamicFallbackIntent) => { taskId: string; settled: Promise<DynamicFallbackResult> } | null
-  readonly dynamicFallbackState: (documentId: string) => readonly DynamicFallbackTaskState[]
-  readonly retryDynamicFallback: (taskId: string) => Promise<DynamicFallbackResult>
-  readonly discardDynamicFallback: (taskId: string) => void
-}
-
-export interface SlideWorkspaceAuthoringPort extends SlideWorkspaceCommandPort {
-  readonly runFieldTextIntent: (intent: import('../../authoring/v9SlideContentEdit').SlideFieldTextIntent) => import('../../authoring/v9SlideContentEdit').SlideFieldTextReceipt
-  readonly applySlideCommand: (
-    run: (session: SlideAuthoringSession) => SlideCommandResult,
-    extra?: { clearContentEdit?: boolean },
-  ) => SlideCommandResult
-}
-
-export interface SlideWorkspacePreviewPort {
-  readonly mount: (
-    input: Pick<
-      Parameters<typeof mountPublishedCourseAuthoring>[0],
-      'container' | 'sessionId' | 'scope' | 'onSessionCreated' | 'onMessage' | 'onCompositionMount'
-    >,
-  ) => ReturnType<typeof mountPublishedCourseAuthoring>
-}
-
-/** M15 运行现场: what the paused try-run page needs to know about the document, answered by the connector. */
-export interface SlideWorkspaceLiveScenePort {
-  /** Remembers the document as the page shows it now. */
-  readonly capture: () => LiveSceneBaseline | null
-  /** How the document changed since; null when the page cannot take it (the live page then ends). */
-  readonly changesSince: (baseline: LiveSceneBaseline, sceneId: string) => LiveSceneChanges | null
-  /** The scene of a Slide page with a Runtime or component, which can be edited where the try-run is. */
-  readonly sceneWithCarriers: (locationId: string) => string | null
-  readonly itemLabel: (sceneId: string, itemId: string) => string
-}
-
-export interface SlideWorkspaceTryRunPort {
-  readonly mount: (
-    container: HTMLElement,
-    /** M15 运行现场: a page loaded again after an edit starts in its state, with the course state it had. */
-    resume?: { readonly stateId: string | null; readonly courseState: Readonly<Record<string, unknown>> | null },
-  ) => ReturnType<typeof mountPublishedCourseTryRun>
-}
-
 export interface SlideWorkspacePorts {
-  readonly canvas: SlideWorkspaceCanvasPort
-  readonly selection: SlideWorkspaceSelectionPort
-  readonly content: SlideWorkspaceContentPort
-  readonly runtime: SlideWorkspaceRuntimePort
-  readonly authoring: SlideWorkspaceAuthoringPort
-  readonly preview: SlideWorkspacePreviewPort
-  readonly tryRun: SlideWorkspaceTryRunPort
-  readonly liveScene?: SlideWorkspaceLiveScenePort
+  read(): SlideWorkspaceSnapshot
+  capture(documentId?: string): CapturedCourseTarget
+  commit(edits: ComponentEdit[], target: CapturedCourseTarget, group?: string): Promise<unknown>
+  edit(edits: ComponentEdit[], group?: string): Promise<unknown>
+  select(ids: readonly string[]): void
+  selectSurface(id: string): void
+  setCanvasMode(mode: SlideCanvasMode): void
+  resetPlayback?(playing?: boolean): Promise<void>
+  setDrawTool(tool: SlideLineDrawTool): void
+  report(message: string): void
+  paste(): void
+  selectAll(): void
+  beginTextEdit(id: string): SlideContentEdit | null
+  beginSpotEdit?(spot: ComponentAuthorSpot, target?: CapturedCourseTarget): SlideContentEdit | null
+  updateSpotDraft?(value: string, composing?: boolean): void
+  authorSpots?(): readonly ComponentAuthorSpot[]
+  subscribeAuthorSpots?(listener: () => void): () => void
+  registerObservation?(surfaceId: string, binding: { readZoom(): number; setZoom(value: number): void; reset(): void }): () => void
+  navigationChanged?(): void
+  teacherController?: Pick<TeacherControllerPort, 'read' | 'subscribe' | 'setCollapsed'>
+  updateDataDraft(data: unknown, composing?: boolean, height?: number): void
+  setTextComposing?(active: boolean): void
+  commitTextEdit(): Promise<void>
+  cancelTextEdit(): void
+  undo(): void
+  redo(): void
+  onElement(id: string, element: HTMLElement | null): void
+  onTargetElement(id: string, element: HTMLElement | null): void
+  addTextNode(x?: number, y?: number): void
+  addFormulaNode(x?: number, y?: number): void
+  addRectangleNode(x?: number, y?: number): void
+  addShapeNode(type: string, x?: number, y?: number): void
+  addTableNode(x?: number, y?: number): void
+  addChartNode(type: 'bar' | 'line' | 'area' | 'pie' | 'donut', x?: number, y?: number): void
+  addExternalComponentNode(id: string, x?: number, y?: number, presetId?: string): void
+  drawShapeNode(input: SlideLineDrawCommit, target?: CapturedCourseTarget): void
 }
-
 export interface SlideLocationWorkspaceProps {
-  readonly snapshot: SlideWorkspaceSnapshot
-  readonly documentId?: string | null
-  readonly ports: SlideWorkspacePorts
-  readonly onAddImage: (x?: number, y?: number) => void
-  readonly onAddVideo: (x?: number, y?: number) => void
-  readonly onSelectImageAsset: () => Promise<ImportedImageAsset | null>
-  readonly onDropWorkspaceMedia?: WorkspaceMediaDropHandler
-  readonly onCompositionEdit?: (layerItemId: string, edit: CompositionContentEdit) => Promise<void>
-  readonly onCompositionSelection?: (selection: CompositionAuthoringSelection) => void
-  readonly selectedCompositionNode?: CompositionAuthoringSelection | null
+  snapshot: SlideWorkspaceSnapshot
+  ports: SlideWorkspacePorts
+  documentId?: string | null
+  onAddImage(x?: number, y?: number): void
+  onAddVideo(x?: number, y?: number): void
+  onSelectImageAsset(): Promise<ImportedImageAsset | null>
+  onDropWorkspaceMedia?: WorkspaceMediaDropHandler
 }
 
-interface FormulaEditSession {
-  projectId: string
-  scope: 'scene' | 'global'
-  sceneId: string
-  stateId: string | null
-  nodeId: string
+/** One stable professional slot per instance; geometry is exclusively the authored affine frame. */
+function SlideInstance({ id, project, surfaceId, preview, ports }: {
+  id: string; project: CourseProjectV10; surfaceId: string; preview: Record<string, ComponentFrame>; ports: SlideWorkspacePorts
+}) {
+  const instance = project.instances[id]
+  const bind = useCallback((element: HTMLDivElement | null) => ports.onElement(id, element), [id, ports.onElement])
+  const bindTarget = useCallback((element: HTMLDivElement | null) => ports.onTargetElement(id, element), [id, ports.onTargetElement])
+  if (!instance || project.definitions[instance.definitionId]?.role === 'behavior') return null
+  return <div ref={bindTarget} data-component-instance={id} data-layer-item-id={id} hidden={!isComponentVisibleAtSurface(instance, surfaceId)}
+    style={{ ...componentPaintStyle(instance, project.definitions[instance.definitionId]) as CSSProperties, ...componentFrameStyle(preview[id] ?? instance.frame) }}>
+    <div ref={bind} data-component-render={id} style={{ width: '100%', height: '100%' }} />
+    {instance.childIds?.map(child => <SlideInstance key={child} id={child} project={project} surfaceId={surfaceId} preview={preview} ports={ports} />)}
+  </div>
 }
+const emptyPreview = (): SlideWorkspaceAuthoringResult => ({ preview: {}, guides: [], marquee: null })
+const controls = '.canvas-mode-switch,.canvas-view-controls,.canvas-label,.live-scene-bar,.command-menu,.selection-quick-bar,.text-edit-overlay,.text-edit-toolbar,[data-component-professional-editor]'
+const outsideStage = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest(controls))
 
-function phaserDocumentFromView(
-  view: SlideEditorView,
-  editingScope: SlideEditingScope,
-): SlidePhaserDocument {
-  const source = editingScope === 'global' ? 'global' : 'scene'
-  const nodes = view.layers.flatMap((layer) => {
-    if (!canEditLayerInScope(layer, source)) return []
-    const node = courseLayerItemToEditorCanvasNode(layer.item as LayerItem)
-    return node ? [node] : []
-  })
-  if (editingScope === 'global') {
-    return {
-      id: '__editor_global_layer__',
-      name: '全局层',
-      backgroundColor: view.backgroundColor,
-      backgroundAssetId: view.backgroundAssetId ?? undefined,
-      nodes,
-    }
+function displayedTeacherController(project: CourseProjectV10, surfaceId: string, selectedIds: readonly string[]) {
+  const controllers: CourseProjectV10['instances'][string][] = []
+  const visit = (id: string) => {
+    const instance = project.instances[id]
+    if (!instance || !isComponentVisibleAtSurface(instance, surfaceId)) return
+    const definition = project.definitions[instance.definitionId]
+    const implementation = instance.implementationOverride ?? definition?.implementation
+    const data = instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data : {}
+    if (data.enabled !== false && (instance.definitionId === 'guoling.navigation' || implementation?.kind === 'builtin' && implementation.key === 'guoling.navigation')) controllers.push(instance)
+    instance.childIds?.forEach(visit)
   }
-  return {
-    id: view.sceneId,
-    name: view.sceneName,
-    backgroundColor: view.backgroundColor,
-    backgroundAssetId: view.backgroundAssetId ?? undefined,
-    nodes,
-  }
+  const surface = project.surfaces.find(value => value.id === surfaceId)
+  const roots = [...project.global.underlay, ...(surface?.childIds ?? []), ...project.global.overlay]
+  roots.forEach(visit)
+  const selected = controllers.filter(instance => selectedIds.includes(instance.id))
+  return selected.length === 1 ? selected[0] : controllers.length === 1 ? controllers[0] : undefined
 }
 
-function nodesEqual(
-  previous: SlidePhaserNode,
-  next: SlidePhaserNode,
-) {
-  return JSON.stringify(previous) === JSON.stringify(next)
-}
-
-function withDirectionAwareTextAutoSize(
-  node: SlidePhaserNode | undefined,
-  patch: Partial<Pick<SlidePhaserNode, 'x' | 'y' | 'width' | 'height' | 'rotation'>>,
-): typeof patch {
-  const overflow = node?.style?.overflow
-  if (node?.type !== 'text' || overflow !== 'auto-height') {
-    return patch
-  }
-  const candidate = {
-    ...node,
-    ...patch,
-  }
-  const rendered = renderTextNodeCanvas(candidate as TextNode, candidate.width)
-  return {
-    ...patch,
-    width: rendered.width,
-    height: rendered.height,
-  }
-}
-
-function pointInsideRotatedBounds(
-  point: { x: number; y: number },
-  bounds: { x: number; y: number; width: number; height: number },
-  rotation: number,
-): boolean {
-  const centerX = bounds.x + bounds.width / 2
-  const centerY = bounds.y + bounds.height / 2
-  const radians = -rotation * Math.PI / 180
-  const dx = point.x - centerX
-  const dy = point.y - centerY
-  const localX = dx * Math.cos(radians) - dy * Math.sin(radians)
-  const localY = dx * Math.sin(radians) + dy * Math.cos(radians)
-  return Math.abs(localX) <= bounds.width / 2 &&
-    Math.abs(localY) <= bounds.height / 2
-}
-
-function nativeSlideLayer(
-  layers: readonly SlideEditorLayerView[],
-  layerItemId: string,
-  nativeType: NativeLayerItem['content']['nativeType'],
-): NativeLayerItem | null {
-  const layer = layers.find((candidate) => candidate.selectionId === layerItemId)
-  if (!layer || layer.item.kind !== 'native') return null
-  if (layer.item.content.nativeType !== nativeType) return null
-  return layer.item as NativeLayerItem
-}
-
-function localPublishedAuthoringSource(
-  scope: 'scene' | 'surface' | 'global' | undefined,
-): 'scene' | 'surface' {
-  return scope === 'surface' ? 'surface' : 'scene'
-}
-
-/** V9/r11-031 paint frame for a complete Published authoring patch. Not a Scene snapshot. */
-function publishedAuthoringNodeFromLayerItem(item: LayerItem): AuthoringPatchNode | null {
-  if (item.kind === 'native') {
-    return nativeRenderInputFromV9Item(item)
-  }
-  if (item.kind === 'component') {
-    return {
-      id: item.layerItemId,
-      name: item.label,
-      type: 'external-component',
-      x: item.frame.x,
-      y: item.frame.y,
-      width: item.frame.width,
-      height: item.frame.height,
-      rotation: item.rotation,
-      opacity: item.opacity,
-      visible: item.visible,
-      locked: item.locked,
-      playbackInitialVisibility: item.playbackInitialVisibility,
-      component: structuredClone(item.component),
-      props: structuredClone(item.props),
-    }
-  }
-  if (item.kind === 'composition') return courseLayerItemToEditorCanvasNode(item)
-  return null
-}
-
-interface PublishedAuthoringSnapshotState {
-  readonly localNodes: AuthoringPatchNode[]
-  readonly globalNodes: AuthoringPatchNode[]
-  readonly backgroundColor: string
-  readonly backgroundAssetId: string | null
-}
-
-function extractPublishedAuthoringState(
-  view: ReturnType<typeof buildSlideEditorView> | null,
-  localSource: 'scene' | 'surface',
-): PublishedAuthoringSnapshotState {
-  if (!view) {
-    return {
-      localNodes: [],
-      globalNodes: [],
-      backgroundColor: '#ffffff',
-      backgroundAssetId: null,
-    }
-  }
-  const localNodes: AuthoringPatchNode[] = []
-  const globalNodes: AuthoringPatchNode[] = []
-  for (const layer of view.layers) {
-    const node = publishedAuthoringNodeFromLayerItem(layer.item as LayerItem)
-    if (!node) continue
-    if (layer.source === 'global') globalNodes.push(node)
-    else if (layer.source === localSource) localNodes.push(node)
-  }
-  return {
-    localNodes,
-    globalNodes,
-    backgroundColor: view.backgroundColor,
-    backgroundAssetId: view.backgroundAssetId ?? null,
-  }
-}
-
-function publishedAuthoringPatchesFromSlideView(
-  view: ReturnType<typeof buildSlideEditorView>,
-  localSource: 'scene' | 'surface',
-): PlayerAuthoringPatch[] {
-  const { localNodes, globalNodes, backgroundColor, backgroundAssetId } =
-    extractPublishedAuthoringState(view, localSource)
-  return [
-    ...localNodes.map((node) => publishedAuthoringFramePatch('scene', node)),
-    ...globalNodes.map((node) => publishedAuthoringFramePatch('global', node)),
-    {
-      kind: 'scene-background',
-      target: { kind: 'scene-background', scope: 'scene' },
-      backgroundColor,
-      backgroundAssetId,
-    },
-    {
-      kind: 'scene-order',
-      target: { kind: 'scene-order', scope: 'scene' },
-      nodeIds: localNodes.map((node) => node.id),
-    },
-  ]
-}
-
-/** A press whose target lies outside the stage's own DOM: portaled React children such as the quick bar and menus. */
-function outsideStage(event: { target: EventTarget; currentTarget: EventTarget }): boolean {
-  return !(event.target instanceof Node && event.currentTarget instanceof Node && event.currentTarget.contains(event.target))
-}
-
-function isEditableKeyboardTarget(target: EventTarget | null): boolean {
-  return target instanceof HTMLElement && (
-    target instanceof HTMLInputElement ||
-    target instanceof HTMLTextAreaElement ||
-    target instanceof HTMLSelectElement ||
-    target.isContentEditable
-  )
-}
-
-type RuntimePreviewFeedback = {
-  kind: 'loading' | 'error'
-  title: string
-  message: string
-} | null
-
-/** M15 运行现场: a try-run page paused for editing where it is. */
-interface LiveScene {
-  readonly sceneId: string
-  readonly locationId: string
-  /** Try-run mount key of the paused session; it changes only to load the page again. */
-  readonly mountKey: string | null
-  /** Why the page has to be loaded again to show an edit, while it waits for the teacher. */
-  readonly reload: string | null
-  /** The page is being loaded again, with the edits it could not take in place. */
-  readonly reloading: boolean
-}
-let liveReloadSequence = 0
-
-
-interface AuthoringTargetSnapshot<T> {
-  targets: ReadonlyArray<Readonly<T>>
-  truncatedItemIds: readonly string[]
-}
-
-function combineAuthoringTargets<T>(snapshots: Iterable<AuthoringTargetSnapshot<T>>): AuthoringTargetSnapshot<T> {
-  const values = [...snapshots]
-  return { targets: values.flatMap(value => value.targets), truncatedItemIds: values.flatMap(value => value.truncatedItemIds) }
-}
-
-function sanitizeRuntimeAuthoringTargets(
-  update: PlayerRuntimeAuthoringTargetsMessage['update'],
-  hostKey: string,
-  stage: SlideCanvasSize = DEFAULT_SLIDE_CANVAS,
-): ReadonlyArray<Readonly<RuntimeAuthoringTarget>> {
-  if (
-    (update.scope !== 'scene' && update.scope !== 'global') ||
-    (update.scope === 'scene' &&
-      (typeof update.sceneId !== 'string' || !update.sceneId.trim()))
-  ) {
-    return []
-  }
-  const sanitized: RuntimeAuthoringTarget[] = []
-  for (const candidate of update.targets) {
-    if (
-      !candidate ||
-      candidate.scope !== update.scope ||
-      candidate.sceneId !== update.sceneId ||
-      (candidate.kind !== 'text' && candidate.kind !== 'asset') ||
-      (candidate.layer !== 'underlay' && candidate.layer !== 'overlay') ||
-      (candidate.source !== 'registered' && candidate.source !== 'dom' && candidate.source !== 'auto') ||
-      typeof candidate.targetId !== 'string' ||
-      !candidate.targetId ||
-      candidate.targetId.length > 256 ||
-      typeof candidate.nodeId !== 'string' ||
-      !candidate.nodeId ||
-      candidate.nodeId.length > 256 ||
-      typeof candidate.key !== 'string' ||
-      // Host-recognised text (M15) has no content key; everything else needs one.
-      (!candidate.key && !(candidate.kind === 'text' && candidate.lightEdit)) ||
-      candidate.key.length > 256
-    ) {
-      continue
-    }
-    const lightEdit = candidate.lightEdit
-    if (lightEdit && (
-      typeof lightEdit.original !== 'string' || !lightEdit.original || lightEdit.original.length > 2_000
-      || typeof lightEdit.region !== 'string' || !lightEdit.region || lightEdit.region.length > 500
-      || typeof lightEdit.text !== 'string' || lightEdit.text.length > 20_000
-    )) continue
-    if (!candidate.bounds || typeof candidate.bounds !== 'object') continue
-    const { x, y, width, height } = candidate.bounds
-    if (![x, y, width, height].every(Number.isFinite)) continue
-    const left = Math.max(0, x)
-    const top = Math.max(0, y)
-    const right = Math.min(stage.width, x + width)
-    const bottom = Math.min(stage.height, y + height)
-    if (right <= left || bottom <= top) continue
-    sanitized.push(Object.freeze({
-      ...candidate,
-      targetId: `${hostKey}:${candidate.nodeId}:${candidate.targetId}`,
-      ...(typeof candidate.label === 'string'
-        ? { label: candidate.label.slice(0, 120) }
-        : { label: undefined }),
-      ...(lightEdit
-        ? { lightEdit: Object.freeze({ original: lightEdit.original, region: lightEdit.region, text: lightEdit.text }) }
-        : {}),
-      bounds: Object.freeze({
-        x: left,
-        y: top,
-        width: right - left,
-        height: bottom - top,
-      }),
-    }))
-  }
-  return Object.freeze(sanitized)
-}
-
-/** M15: the original text, region and shown text of text a component renders itself, or null when malformed. */
-function sanitizeComponentLightEdit(value: unknown): ComponentAuthoringLightEditText | null {
-  if (!value || typeof value !== 'object') return null
-  const { original, region, text } = value as Record<string, unknown>
-  return typeof original === 'string' && original.length > 0 && original.length <= 2_000 && typeof region === 'string' && region.length <= 500
-    && typeof text === 'string' && text.length <= 20_000 ? { original, region, text } : null
-}
-
-/** M15: pictures of a component's manifest assets that the host found; replacing one overrides that asset. */
-function sanitizeComponentImageTargets(
-  update: PlayerComponentAuthoringTargetsMessage['update'],
-  hostKey: string,
-  stage: SlideCanvasSize = DEFAULT_SLIDE_CANVAS,
-): ReadonlyArray<Readonly<ComponentAuthoringImageTarget>> {
-  const sanitized: ComponentAuthoringImageTarget[] = []
-  for (const candidate of update.targets) {
-    if (!candidate || candidate.kind !== 'component-image' || candidate.source !== 'auto' || candidate.scope !== update.scope
-      || candidate.sceneId !== update.sceneId || candidate.nodeId !== update.nodeId || typeof candidate.targetId !== 'string'
-      || !candidate.targetId || candidate.targetId.length > 256 || typeof candidate.componentId !== 'string' || !candidate.componentId
-      || typeof candidate.assetKey !== 'string' || !candidate.assetKey || candidate.assetKey.length > 200 || !Number.isFinite(candidate.rotation)
-      || !candidate.bounds || typeof candidate.bounds !== 'object') continue
-    const { x, y, width, height } = candidate.bounds
-    if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) continue
-    if (!rotatedRectIntersectsStage(candidate.bounds, candidate.rotation, stage)) continue
-    sanitized.push(Object.freeze({ ...candidate, targetId: `component:${hostKey}:${candidate.targetId}`, label: '图片', bounds: Object.freeze({ x, y, width, height }) }))
-  }
-  return Object.freeze(sanitized)
-}
-
-function sanitizeComponentAuthoringTargets(
-  update: PlayerComponentAuthoringTargetsMessage['update'],
-  hostKey: string,
-  stage: SlideCanvasSize = DEFAULT_SLIDE_CANVAS,
-): ReadonlyArray<Readonly<ComponentAuthoringTextTarget>> {
-  if (
-    (update.scope !== 'scene' && update.scope !== 'global') ||
-    typeof update.nodeId !== 'string' ||
-    !update.nodeId ||
-    update.nodeId.length > 256 ||
-    (update.scope === 'scene' &&
-      (typeof update.sceneId !== 'string' || !update.sceneId.trim()))
-  ) {
-    return []
-  }
-  const sanitized: ComponentAuthoringTextTarget[] = []
-  for (const candidate of update.targets) {
-    // Text the component renders itself has no prop key; its edits become rules (M15).
-    const lightEdit = candidate?.kind === 'component-text' && candidate.source === 'auto' ? sanitizeComponentLightEdit(candidate.lightEdit) : null
-    if (
-      !candidate ||
-      candidate.kind !== 'component-text' ||
-      candidate.scope !== update.scope ||
-      candidate.sceneId !== update.sceneId ||
-      candidate.nodeId !== update.nodeId ||
-      (candidate.source !== 'registered' && candidate.source !== 'dom' && !lightEdit) ||
-      typeof candidate.targetId !== 'string' ||
-      !candidate.targetId ||
-      candidate.targetId.length > 256 ||
-      typeof candidate.componentId !== 'string' ||
-      !candidate.componentId ||
-      candidate.componentId.length > 256 ||
-      typeof candidate.key !== 'string' ||
-      (lightEdit ? candidate.key !== '' : !candidate.key) ||
-      candidate.key.length > 256 ||
-      typeof candidate.multiline !== 'boolean' ||
-      !Number.isFinite(candidate.rotation)
-    ) {
-      continue
-    }
-    if (!candidate.bounds || typeof candidate.bounds !== 'object') continue
-    const { x, y, width, height } = candidate.bounds
-    if (
-      ![x, y, width, height].every(Number.isFinite) ||
-      width <= 0 ||
-      height <= 0
-    ) {
-      continue
-    }
-    if (!rotatedRectIntersectsStage(candidate.bounds, candidate.rotation, stage)) {
-      continue
-    }
-    const maxLength = candidate.maxLength
-    sanitized.push(Object.freeze({
-      ...candidate,
-      targetId: `component:${hostKey}:${candidate.targetId}`,
-      label: typeof candidate.label === 'string' && candidate.label.trim()
-        ? candidate.label.slice(0, 120)
-        : (lightEdit?.text || candidate.key).slice(0, 120),
-      ...(lightEdit ? { lightEdit: Object.freeze(lightEdit) } : {}),
-      ...(
-        maxLength === undefined ||
-        (Number.isSafeInteger(maxLength) && maxLength > 0 && maxLength <= 1_000_000)
-          ? { maxLength }
-          : { maxLength: undefined }
-      ),
-      bounds: Object.freeze({
-        x,
-        y,
-        width,
-        height,
-      }),
-    }))
-  }
-  return Object.freeze(sanitized)
-}
-
-type CanvasAuthoringHit =
-  | { kind: 'runtime'; target: Readonly<RuntimeAuthoringTarget> }
-  | { kind: 'component'; target: Readonly<ComponentAuthoringTextTarget> }
-  | { kind: 'component-image'; target: Readonly<ComponentAuthoringImageTarget> }
-
-
-
-
-
-export function SlideLocationWorkspace({
-  snapshot,
-  documentId,
-  ports,
-  onAddImage,
-  onAddVideo,
-  onSelectImageAsset,
-  onDropWorkspaceMedia,
-  onCompositionEdit,
-  onCompositionSelection,
-  selectedCompositionNode,
-}: SlideLocationWorkspaceProps) {
-  const mediaSource = useWorkspaceMediaSource()
-  const mediaSourceRef = useRef(mediaSource)
-  mediaSourceRef.current = mediaSource
-  const [mediaDragOver, setMediaDragOver] = useState(false)
-  const {
-    view: slideEditorView,
-    locationId: courseLocationId,
-    backend,
-    backendKind: slideBackendKind,
-    canvasMode,
-    editingScope,
-    selectedNodeIds,
-    selectedNode,
-    editingTextNodeId,
-    presentationStateId: activePresentationStateId,
-    componentPackages,
-    sidecarFileIds,
-    contentEdit,
-  } = snapshot
-  // The view rebuilds its canvas object on every revision; key the stage by value so the Phaser game, transforms
-  // and callbacks that depend on it are only rebuilt when the course canvas size really changes.
-  const slideCanvasWidth = slideEditorView?.canvas.width ?? DEFAULT_SLIDE_CANVAS.width
-  const slideCanvasHeight = slideEditorView?.canvas.height ?? DEFAULT_SLIDE_CANVAS.height
-  const slideCanvas = useMemo(() => ({ width: slideCanvasWidth, height: slideCanvasHeight }), [slideCanvasWidth, slideCanvasHeight])
-  const snapshotRef = useRef(snapshot)
-  snapshotRef.current = snapshot
-  const documentIdRef = useRef(documentId)
-  documentIdRef.current = documentId
-  useEffect(() => () => { documentIdRef.current = null }, [])
-  const readSnapshot = () => snapshotRef.current
-  const canvasMenu = useContextMenu()
-  const slideLight = useCourseEditorActions()?.slideLight
-  // Hidden objects stay findable on the canvas (M21): the label counts them, and a menu shows them again.
-  const hiddenLayers = slideEditorView?.layers.filter((layer) => !layer.item.visible && canEditLayerInScope(layer, editingScope)) ?? []
-  const hiddenMenu = (): MenuCommand[] => hiddenObjectCommands(
-    hiddenLayers.map((layer) => ({ id: layer.selectionId, name: hiddenObjectName(layer.item) })),
-    // Shown again and selected, so the teacher sees what came back.
-    (ids) => { ports.content.updateNodes(ids.map((nodeId) => ({ nodeId, patch: { visible: true } }))); ports.selection.selectNodes(ids) },
-  )
-  // Opens an object's own editor on request (the quick bar's and menus' 编辑公式).
-  const formulaEditRef = useRef<((nodeId: string) => boolean) | null>(null)
-  useEffect(() => {
-    const root = workspaceRef.current
-    if (!root) return
-    const request = (event: Event) => {
-      const itemId = (event as CustomEvent<{ itemId: string }>).detail?.itemId
-      if (itemId && formulaEditRef.current?.(itemId)) event.preventDefault()
-    }
-    root.addEventListener(OBJECT_EDIT_EVENT, request)
-    return () => root.removeEventListener(OBJECT_EDIT_EVENT, request)
-  }, [])
-  const workspaceRef = useRef<HTMLDivElement>(null)
-  const stageViewportRef = useRef<HTMLDivElement>(null)
-  const gameHostRef = useRef<HTMLDivElement>(null)
-  const gameRef = useRef<EditorGameHandle | null>(null)
-  const publishedAuthoringHostRef = useRef<HTMLDivElement>(null)
-  const publishedAuthoringSessionRef = useRef<PublishedCourseSession | null>(null)
-  const [compositionMounts, setCompositionMounts] = useState<ReadonlyMap<string, WebCompositionMountHandle>>(() => new Map())
-  const [compositionSelection, setCompositionSelection] = useState<CompositionAuthoringSelection | null>(null)
-  const [compositionPending, setCompositionPending] = useState(false)
-  const compositionSubmitting = useRef(false)
-  const activeCompositionNode = selectedCompositionNode === undefined ? compositionSelection : selectedCompositionNode
-  const submitComposition = async (layerItemId: string, edit: CompositionContentEdit) => {
-    if (!onCompositionEdit) throw new Error('当前组合内容不可编辑')
-    if (compositionSubmitting.current) throw new Error('上一处修改正在保存，请稍后再操作。')
-    compositionSubmitting.current = true; setCompositionPending(true)
-    try { await onCompositionEdit(layerItemId, edit) }
-    finally { compositionSubmitting.current = false; setCompositionPending(false) }
-  }
-  const publishedAuthoringMountChainRef = useRef(Promise.resolve())
-  const publishedAuthoringInitRef = useRef<{
-    token: string
-    initialSceneId: string
-    initialStateId: string | null
-    authoringScope: 'scene' | 'surface' | 'global'
-  } | null>(null)
-  const previousSceneRef = useRef<SlidePhaserDocument | null>(null)
-  const previousPublishedStateRef = useRef<PublishedAuthoringSnapshotState | null>(null)
-  /** Rules the Published host already shows; edits, undo and redo patch the difference in place. */
-  const syncedRuntimeOverridesRef = useRef<RuntimeOverrideSync | null>(null)
-  const syncedComponentLightEditsRef = useRef<ComponentLightEditSync | null>(null)
-  const syncedCompositionContentRef = useRef<CompositionContentSync | null>(null)
-  const syncedAuthoringCanvasRef = useRef<string | null>(null)
-  const previousComponentPackagesRef = useRef<
-    Record<string, ComponentPackageData> | null
-  >(null)
-  const authoringReadyRef = useRef(false)
-  const authoringRevisionRef = useRef(0)
-  const authoringSnapshotBarrierRef =
-    useRef<PlayerAuthoringSnapshotBarrier | null>(null)
-  const lastAuthoringTargetsRevisionRef = useRef(-1)
-  const pendingAuthoringNodesRef = useRef(new Map<string, {
-    scope: 'scene' | 'global'
-    node: AuthoringPatchNode
-  }>())
-  const authoringFrameRef = useRef<number | null>(null)
-  const authoringObservationReady = useMemo(() => new SlideAuthoringObservationReady(), [])
-  const runtimeTargetsByHostRef = useRef(new Map<
-    string,
-    AuthoringTargetSnapshot<RuntimeAuthoringTarget>
-  >())
-  const componentTargetsByHostRef = useRef(new Map<
-    string,
-    AuthoringTargetSnapshot<ComponentAuthoringTextTarget>
-  >())
-  const componentImageTargetsByHostRef = useRef(new Map<string, ReadonlyArray<Readonly<ComponentAuthoringImageTarget>>>())
-  const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null)
-  const [previewFeedback, setPreviewFeedback] = useState<RuntimePreviewFeedback>(null)
-  const [previewRetryRevision, setPreviewRetryRevision] = useState(0)
-  const [acknowledgedPreviewGeneration, setAcknowledgedPreviewGeneration] =
-    useState<object | null>(null)
-  const editPreview = useEditPreview(documentId, snapshot.projectRevision)
-  const activeTextPreview = canvasMode === 'edit' && documentId &&
-    editPreview?.documentId === documentId && editPreview.status !== 'aborted' &&
-    editPreview.sequence >= 0 && editPreview.target.kind === 'course-object' &&
-    editPreview.target.locationId === courseLocationId && resolveSlideSelectionLayer(slideEditorView, editPreview.target) ? editPreview : null
-  const previewPaintedRef = useRef<{ locationId: string; itemId: string; stateId?: string } | null>(null)
-  const [runtimeTargetSnapshot, setRuntimeTargetSnapshot] =
-    useState<AuthoringTargetSnapshot<RuntimeAuthoringTarget>>({ targets: [], truncatedItemIds: [] })
-  const [componentTargetSnapshot, setComponentTargetSnapshot] =
-    useState<AuthoringTargetSnapshot<ComponentAuthoringTextTarget>>({ targets: [], truncatedItemIds: [] })
-  const runtimeTargets = runtimeTargetSnapshot.targets
-  const componentTargets = componentTargetSnapshot.targets
-  const [componentImageTargets, setComponentImageTargets] = useState<ReadonlyArray<Readonly<ComponentAuthoringImageTarget>>>([])
-  const [replacingComponentImageTargetId, setReplacingComponentImageTargetId] = useState<string | null>(null)
-  const replacingComponentImageTargetIdsRef = useRef(new Set<string>())
-  /** M15: the draft of text a component renders itself (no prop field draft backs it). */
-  const [componentAutoValue, setComponentAutoValue] = useState('')
-  const [activeRuntimeTextSession, setActiveRuntimeTextSession] =
-    useState<Readonly<SlideRuntimeTextEditSession> | null>(null)
-  const [activeComponentTextSession, setActiveComponentTextSession] =
-    useState<Readonly<ComponentTextEditSession> | null>(null)
-  const [activeFormulaEditSession, setActiveFormulaEditSession] =
-    useState<Readonly<FormulaEditSession> | null>(null)
-  const [replacingRuntimeAssetTargetId, setReplacingRuntimeAssetTargetId] =
-    useState<string | null>(null)
-  const replacingRuntimeAssetTargetIdsRef = useRef(new Set<string>())
-  const [dynamicRecoveryView, setDynamicRecoveryView] = useState<{ documentId: string | null; tasks: readonly DynamicFallbackTaskState[] }>({ documentId: null, tasks: [] })
-  const dynamicRecoveryTasks = dynamicRecoveryView.documentId === (documentId ?? null) ? dynamicRecoveryView.tasks : []
-  const [recoveringDynamicTaskId, setRecoveringDynamicTaskId] = useState<string | null>(null)
-  const [hoveredAuthoringTargetId, setHoveredAuthoringTargetId] =
-    useState<string | null>(null)
-  const [stageViewportSize, setStageViewportSize] = useState({
-    width: STAGE_VIEWPORT_WIDTH,
-    height: STAGE_VIEWPORT_HEIGHT,
-  })
+/** Original workspace chrome and event routes, with V10 replacing the former Phaser/V9 writer. */
+export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo, onSelectImageAsset, onDropWorkspaceMedia }: SlideLocationWorkspaceProps) {
+  const latest = useRef({ snapshot, ports }); latest.current = { snapshot, ports }
+  const workspaceRef = useRef<HTMLElement>(null), stageViewportRef = useRef<HTMLDivElement>(null), stageRef = useRef<HTMLDivElement>(null)
+  const [viewport, setViewport] = useState({ x: 0, y: 0, width: 960, height: 640 })
   const [view, setView] = useState({ zoom: 1, x: 0, y: 0 })
-  const [panning, setPanning] = useState(false)
-  const spacePressedRef = useRef(false)
-  const backendRef = useRef(backend)
-  backendRef.current = backend
-  const commandPortRef = useRef(ports.authoring)
-  commandPortRef.current = ports.authoring
-  const slideAuthoringRef = useRef(createSlideWorkspaceAuthoringController({
-    getBackend: () => backendRef.current,
-    commandPort: {
-      run: (run) => commandPortRef.current.run(run),
-      afterSelectLayers: (command) => commandPortRef.current.afterSelectLayers?.(command),
-    },
-  }))
-  
-  const candidatePointerActiveRef = useRef(false)
-  
-  const courseTryRunRef = useRef<HTMLDivElement>(null)
-  const courseTryRunSessionRef = useRef<PublishedCourseSession | null>(null)
-  const courseTryRunMountChainRef = useRef(Promise.resolve())
-  const [tryRunFeedback, setTryRunFeedback] = useState<RuntimePreviewFeedback>(null)
-  const [tryRunEpoch, setTryRunEpoch] = useState(0)
-  // M15 运行现场: back from the try-run, the page stays paused where it is and its Runtimes' and components' text
-  // and pictures are edited there. The document it shows, and the try-run mount key it stays mounted under.
-  const [liveScene, setLiveScene] = useState<LiveScene | null>(null)
-  const liveSceneRef = useRef(liveScene)
-  liveSceneRef.current = liveScene
-  const liveAcceptingRef = useRef(false)
-  const liveTargetGenerationRef = useRef<string | null>(null)
-  const liveShownRef = useRef<LiveSceneBaseline | null>(null)
-  const liveResumeRef = useRef<{ stateId: string | null; courseState: Record<string, unknown> | null } | null>(null)
-  // A resumed try-run stays mounted while the document only changed by edits it has taken in place.
-  const [tryRunKeyAlias, setTryRunKeyAlias] = useState<{ projectKey: string; mountKey: string } | null>(null)
-  
-  const controllerDisplayRevision = useControllerDisplayRevision()
-  const [layerOverlay, setLayerOverlay] = useState<StageSelectionOverlayGeometry | null>(null)
-  const needsLayerOverlay = Boolean(slideEditorView?.layers.some(layer =>
-    selectedNodeIds.includes(layer.selectionId) && (isTeacherControllerLayerItem(layer.item) || (layer.item.kind === 'native' &&
-    ['table', 'chart', 'input'].includes(layer.item.content.nativeType)))))
-  const drawTool = snapshot.drawTool
-  const drawGestureRef = useRef<{
-    pointerId: number
-    shapeType: 'line' | 'elbow-arrow'
-    startWorld: { x: number; y: number }
-  } | null>(null)
-  const [drawPreview, setDrawPreview] = useState<{
-    readonly points: ReadonlyArray<{ readonly x: number; readonly y: number }>
-    readonly guides: { readonly x?: number; readonly y?: number } | null
-  } | null>(null)
-  const [lineDragGuides, setLineDragGuides] = useState<{
-    readonly x?: number
-    readonly y?: number
-  } | null>(null)
-  const panRef = useRef<{
-    pointerId: number
-    clientX: number
-    clientY: number
-    originX: number
-    originY: number
-  } | null>(null)
-  const portsRef = useRef(ports)
-  portsRef.current = ports
-
+  const viewRef = useRef(view); viewRef.current = view
+  const [panning, setPanning] = useState(false), [mediaDragOver, setMediaDragOver] = useState(false)
+  const [preview, setPreview] = useState(emptyPreview)
+  const [drawPreview, setDrawPreview] = useState<{ start: GeometryPoint; end: GeometryPoint } | null>(null)
+  const [linePreview, setLinePreview] = useState<{ instanceId: string; frame: ComponentFrame; geometry: NativeLineGeometry } | null>(null)
+  const [spots, setSpots] = useState<readonly ComponentAuthorSpot[]>(() => ports.authorSpots?.() ?? [])
+  const [replacingSpot, setReplacingSpot] = useState<string | null>(null)
+  const [hoveredSpot, setHoveredSpot] = useState<string | null>(null)
+  const [liveScene, setLiveScene] = useState(false), [resettingScene, setResettingScene] = useState(false)
+  const [, refreshNavigation] = useState(0)
+  useEffect(() => ports.teacherController?.subscribe(() => refreshNavigation(value => value + 1)), [ports.teacherController])
+  useEffect(() => { setLiveScene(false) }, [snapshot.documentId])
+  useEffect(() => { if (snapshot.canvasMode === 'run') setLiveScene(true) }, [snapshot.canvasMode, snapshot.documentId])
+  const resetScene = async (playing: boolean) => {
+    if (!ports.resetPlayback) return
+    const documentId = snapshot.documentId
+    setResettingScene(true)
+    try {
+      await ports.resetPlayback(playing)
+      if (latest.current.ports.read().documentId !== documentId) return
+      ports.setCanvasMode(playing ? 'run' : 'edit')
+      setLiveScene(playing)
+    } catch (error) { ports.report(error instanceof Error ? error.message : String(error)) }
+    finally { setResettingScene(false) }
+  }
   useEffect(() => {
-    // Draw-tool arming belongs to one Slide scene canvas: switching scene,
-    // scope or canvas mode disarms it and drops any in-flight draw preview
-    // without writing history.
-    drawGestureRef.current = null
-    setDrawPreview(null)
-    setLineDragGuides(null)
-    if (readSnapshot().drawTool !== null) portsRef.current.canvas.setDrawTool(null)
-  }, [canvasMode, editingScope, courseLocationId])
-
-  const useCoursePlayerTryRun = Boolean(snapshot.projectId && (canvasMode === 'run' || liveScene))
-  const usePublishedAuthoring = Boolean(snapshot.projectId && canvasMode === 'edit' && !liveScene)
-  const liveEditInteractive = Boolean(liveScene && !liveScene.reloading)
-  const publishedAuthoringOwnerScope = backend?.getSnapshot().scope ?? editingScope
-  const tryRunMountKey = snapshot.tryRunMountKey
-  const effectiveTryRunMountKey = liveScene
-    ? liveScene.mountKey
-    : tryRunKeyAlias && tryRunKeyAlias.projectKey === tryRunMountKey ? tryRunKeyAlias.mountKey : tryRunMountKey
-  const effectiveTryRunMountKeyRef = useRef(effectiveTryRunMountKey)
-  effectiveTryRunMountKeyRef.current = effectiveTryRunMountKey
-  const readCandidateViewport = useCallback(() => {
-    const viewport = stageViewportRef.current
-    if (!viewport) return null
-    const rect = viewport.getBoundingClientRect()
-    if (rect.width <= 0 || rect.height <= 0) return null
-    return {
-      viewport: {
-        x: rect.left,
-        y: rect.top,
-        width: rect.width,
-        height: rect.height,
-      },
-      zoom: view.zoom,
-      pan: { x: view.x, y: view.y },
-      stage: slideCanvas,
-      fit: 'page' as const,
-    }
-  }, [slideCanvas, view.x, view.y, view.zoom])
-
-  
-
-  useLayoutEffect(() => {
-    if (candidatePointerActiveRef.current) return
-    const viewport = readCandidateViewport()
-    setLayerOverlay(needsLayerOverlay && canvasMode === 'edit' && viewport
-      ? slideAuthoringRef.current.overlayGeometry(viewport) : null)
-  }, [needsLayerOverlay, canvasMode, slideEditorView, selectedNodeIds, readCandidateViewport, stageViewportSize, controllerDisplayRevision])
-
-  const stageTransform = useMemo(() => createStageViewportTransform({
-    viewport: {
-      x: 0,
-      y: 0,
-      width: stageViewportSize.width,
-      height: stageViewportSize.height,
-    },
-    zoom: view.zoom,
-    pan: { x: view.x, y: view.y },
-    stage: slideCanvas,
-    fit: 'page',
-  }), [slideCanvas, stageViewportSize.height, stageViewportSize.width, view.x, view.y, view.zoom])
-  // The teacher controller keeps to the visible part of the page; tell it when panning or zooming moves that part (M19).
-  useEffect(() => { window.document.dispatchEvent(new Event('controller-authoring-viewport')) }, [stageTransform])
-  const previewRebuildKey = snapshot.previewRebuildKey
-  const previewGeneration = useMemo<object>(() => ({}), [
-    canvasMode,
-    publishedAuthoringOwnerScope,
-    previewRebuildKey,
-    previewRetryRevision,
-  ])
-  const observationGenerationRef = useRef(previewGeneration)
-  observationGenerationRef.current = previewGeneration
-  const authoringCanvasInteractive = isAuthoringCanvasInteractive({
-    canvasMode,
-    playerReady: authoringReadyRef.current,
-    snapshotPending: authoringSnapshotBarrierRef.current !== null,
-    hasPreviewFeedback: previewFeedback !== null,
-    generationCurrent: acknowledgedPreviewGeneration === previewGeneration,
+    const update = () => setSpots(ports.authorSpots?.() ?? [])
+    const stop = ports.subscribeAuthorSpots?.(update); update()
+    return stop
+  }, [ports.authorSpots, ports.subscribeAuthorSpots])
+  const pointer = useRef<number | null>(null), space = useRef(false)
+  const deferredPointer = useRef<{ id: number; documentId: string | null; surfaceId: string | null; stateId: string | null;
+    start: { x: number; y: number; additive: boolean; altKey: boolean }; latest: { x: number; y: number; shiftKey: boolean; altKey: boolean }; ended: boolean } | null>(null)
+  const pan = useRef<{ id: number; start: GeometryPoint; x: number; y: number } | null>(null)
+  const draw = useRef<{ target: CapturedCourseTarget; start: GeometryPoint; type: 'line' | 'elbow-arrow' } | null>(null)
+  const line = useRef<{ target: CapturedCourseTarget; initial: FreeObjectTarget; instanceId: string; handle: 'start' | 'end' | 'elbow'; matrix: AffineMatrix; frame: ComponentFrame; geometry: NativeLineGeometry } | null>(null)
+  const mediaSource = useWorkspaceMediaSource(), mediaSourceRef = useRef(mediaSource); mediaSourceRef.current = mediaSource
+  const canvasMenu = useContextMenu()
+  const project = snapshot.project
+  const surface = project?.surfaces.find(value => value.id === snapshot.surfaceId)
+  const canvas = surface?.designSize ?? { width: 960, height: 640 }
+  const stageTransform = useMemo(() => createStageViewportTransform({ viewport, stage: canvas, fit: 'page', zoom: view.zoom, pan: { x: view.x, y: view.y } }),
+    [viewport, canvas.width, canvas.height, view])
+  const scale = stageTransform.scale
+  const mapping = (): AffineMatrix => {
+    const rect = stageRef.current?.getBoundingClientRect()
+    return rect ? [rect.width / canvas.width, 0, 0, rect.height / canvas.height, rect.left, rect.top] : [scale, 0, 0, scale, 0, 0]
+  }
+  const surfacePoint = (x: number, y: number) => transformPoint(invertMatrix(mapping()), { x, y })
+  const state = () => {
+    const current = latest.current.ports.read()
+    return current.project && current.surfaceId && current.documentId
+      ? { project: current.project, surfaceId: current.surfaceId, documentId: current.documentId, selectedInstanceIds: current.selectedInstanceIds,
+          activeStateId: current.activeStateId, editingScope: current.editingScope } : null
+  }
+  const authoring = useRef<ReturnType<typeof createSlideWorkspaceAuthoringController> | null>(null)
+  if (!authoring.current) authoring.current = createSlideWorkspaceAuthoringController({
+    read: state, capture: () => latest.current.ports.capture(), select: ids => latest.current.ports.select(ids),
+    commit: (edits, target, group) => latest.current.ports.commit(edits, target, group), report: message => latest.current.ports.report(message),
   })
-
-  const selectedCompositionLayer = selectedNodeIds.length === 1 && usePublishedAuthoring && onCompositionEdit
-    ? slideEditorView?.layers.find(layer => layer.selectionId === selectedNodeIds[0] && layer.item.kind === 'composition'
-      && layer.item.visible && !layer.item.locked && layer.item.hitPolicy !== 'pass-through' && canEditLayerInScope(layer, editingScope))
-    : undefined
-  const selectedCompositionItem = selectedCompositionLayer?.item.kind === 'composition' ? selectedCompositionLayer.item : undefined
-  const compositionHandle = selectedCompositionItem ? compositionMounts.get(selectedCompositionItem.layerItemId) : undefined
-  const compositionControlsHost = compositionHandle?.element.parentElement
-  const publishedSelectedComposition = useMemo(() => selectedCompositionItem && backend
-    ? publishWebComposition({ project: backend.getSession().history.present, assetFiles: {}, components: componentPackages }, selectedCompositionItem.content as CompositionLayerItem['content'])
-    : null, [selectedCompositionItem, backend, componentPackages])
-  const compositionEditing = Boolean(compositionHandle && compositionControlsHost && publishedSelectedComposition && authoringCanvasInteractive)
   useLayoutEffect(() => {
-    // The Published owner keeps every live iframe. Only the selected structure receives authoring input.
-    const wrappers = [...compositionMounts].flatMap(([id, handle]) => {
-      const wrapper = handle.element.parentElement
-      if (!wrapper) return []
-      const previous = wrapper.style.pointerEvents
-      wrapper.style.pointerEvents = compositionEditing && id === selectedCompositionItem?.layerItemId ? 'auto' : 'none'
-      return [{ wrapper, previous }]
-    })
-    const inertOwners: HTMLElement[] = []
-    const hiddenOwners: HTMLElement[] = []
-    if (compositionEditing && compositionHandle) {
-      // Player keeps the authoring surface inert by default. Release only the selected iframe's path.
-      for (let element = compositionHandle.element.parentElement; element && element !== publishedAuthoringHostRef.current; element = element.parentElement) {
-        if (element.inert) { inertOwners.push(element); element.inert = false }
-        if (element.getAttribute('aria-hidden') === 'true') { hiddenOwners.push(element); element.removeAttribute('aria-hidden') }
-      }
-    }
-    return () => {
-      for (const { wrapper, previous } of wrappers) wrapper.style.pointerEvents = previous
-      for (const owner of inertOwners) owner.inert = true
-      for (const owner of hiddenOwners) owner.setAttribute('aria-hidden', 'true')
-    }
-  }, [compositionMounts, compositionEditing, selectedCompositionItem])
-  useEffect(() => { setCompositionSelection(null) }, [documentId, courseLocationId, editingScope, canvasMode, selectedCompositionItem?.layerItemId])
-
-  // M15 -> Main: only current, host-observed automatic text/image hits are published.
-  // This is a read-only observation; Main validates document identity and the canonical layer again.
-  const dynamicContentPublisher = useMemo(() => new DynamicContentTargetPublisher(value => {
-    const api = typeof window === 'undefined' ? undefined : (window.desktopAPI as typeof window.desktopAPI & {
-      publishDynamicContentTargets?: (input: DynamicContentPublication) => Promise<boolean>
-    })?.publishDynamicContentTargets
-    return api ? api(value) : Promise.resolve()
-  }), [])
-  const [dynamicDocumentEventVersion, setDynamicDocumentEventVersion] = useState(0)
-  const [dynamicDocumentClosed, setDynamicDocumentClosed] = useState(false)
-  const [verifiedDynamicDocument, setVerifiedDynamicDocument] = useState<{
-    candidateKey: string; epoch: string; revision: number
-  } | null>(null)
-  const dynamicTargetSource: 'authoring' | 'live' | null = liveScene
-    ? liveScene.locationId === courseLocationId && liveEditInteractive && liveAcceptingRef.current
-      && liveTargetGenerationRef.current && canvasMode === 'edit' ? 'live' : null
-    : usePublishedAuthoring && authoringCanvasInteractive && publishedAuthoringInitRef.current?.token
-      ? 'authoring' : null
-  const dynamicViewGeneration = dynamicTargetSource === 'live' ? liveTargetGenerationRef.current
-    : dynamicTargetSource === 'authoring' ? publishedAuthoringInitRef.current?.token : null
-  const observedDynamicTargets = useMemo(() => slideEditorView && courseLocationId
-    && slideEditorView.locationId === courseLocationId && slideEditorView.revision === snapshot.projectRevision
-    ? collectDynamicContentTargets({
-      revision: snapshot.projectRevision, locationId: courseLocationId, sceneId: snapshot.sceneId,
-      layers: slideEditorView.layers, runtime: runtimeTargets, componentText: componentTargets,
-      componentImage: componentImageTargets,
-      truncatedItemIds: [...runtimeTargetSnapshot.truncatedItemIds, ...componentTargetSnapshot.truncatedItemIds],
-    }) : { targets: [], truncatedItemIds: [] }, [slideEditorView, courseLocationId, snapshot.projectRevision, snapshot.sceneId,
-    runtimeTargetSnapshot, componentTargetSnapshot, componentImageTargets])
-  const dynamicCandidate = documentId && courseLocationId && dynamicTargetSource && dynamicViewGeneration
-    && (observedDynamicTargets.targets.length > 0 || (observedDynamicTargets.truncatedItemIds?.length ?? 0) > 0)
-    && snapshot.projectId && snapshot.sessionGeneration >= 0
-    ? { documentId, projectId: snapshot.projectId, revision: snapshot.projectRevision,
-      locationId: courseLocationId, sessionGeneration: snapshot.sessionGeneration,
-      viewGeneration: dynamicViewGeneration, source: dynamicTargetSource, ...observedDynamicTargets }
-    : null
-  const dynamicCandidateKey = dynamicCandidate ? JSON.stringify([
-    dynamicCandidate.documentId, dynamicCandidate.projectId, dynamicCandidate.revision,
-    dynamicCandidate.locationId, dynamicCandidate.sessionGeneration, dynamicCandidate.viewGeneration,
-    dynamicCandidate.source,
-  ]) : ''
-  const dynamicCandidateRef = useRef({ candidate: dynamicCandidate, key: dynamicCandidateKey })
-  dynamicCandidateRef.current = { candidate: dynamicCandidate, key: dynamicCandidateKey }
-
+    const element = stageViewportRef.current
+    if (!element) return
+    const update = () => setViewport({ x: 0, y: 0, width: Math.max(1, element.clientWidth), height: Math.max(1, element.clientHeight) })
+    update()
+    const observer = new ResizeObserver(update); observer.observe(element)
+    return () => observer.disconnect()
+  }, [Boolean(project)])
   useEffect(() => {
-    const documents = window.desktopAPI?.documents
-    if (!documentId || !documents) return
-    return documents.subscribe(event => {
-      if (event.type === 'closed' ? event.documentId !== documentId : event.snapshot.documentId !== documentId) return
-      dynamicContentPublisher.clear()
-      setVerifiedDynamicDocument(null)
-      setDynamicDocumentClosed(event.type === 'closed')
-      setDynamicDocumentEventVersion(version => version + 1)
-    })
-  }, [documentId, dynamicContentPublisher])
-  useEffect(() => { setDynamicDocumentClosed(false) }, [documentId])
-
-  useEffect(() => {
-    const captured = dynamicCandidateRef.current
-    const documents = window.desktopAPI?.documents
-    if (!captured.candidate || !captured.key || !documents || dynamicDocumentClosed) return
-    let cancelled = false
-    void documents.read(captured.candidate.documentId).then(document => {
-      const current = dynamicCandidateRef.current
-      if (cancelled || !current.candidate || current.key !== captured.key) return
-      if (document.documentId !== current.candidate.documentId || document.revision !== current.candidate.revision
-        || document.model.kind !== 'course-v9' || document.model.project.id !== current.candidate.projectId
-        || document.model.project.revision !== current.candidate.revision) return
-      setVerifiedDynamicDocument({ candidateKey: captured.key, epoch: document.epoch, revision: document.revision })
-    }).catch(() => undefined)
-    return () => { cancelled = true }
-  }, [dynamicCandidateKey, dynamicDocumentClosed, dynamicDocumentEventVersion])
-
-  useLayoutEffect(() => {
-    if (!dynamicCandidate || !verifiedDynamicDocument || verifiedDynamicDocument.candidateKey !== dynamicCandidateKey
-      || verifiedDynamicDocument.revision !== dynamicCandidate.revision || dynamicDocumentClosed) {
-      dynamicContentPublisher.clear()
-      return
-    }
-    dynamicContentPublisher.replace({ documentId: dynamicCandidate.documentId, epoch: verifiedDynamicDocument.epoch,
-      revision: dynamicCandidate.revision, locationId: dynamicCandidate.locationId,
-      viewGeneration: dynamicCandidate.viewGeneration, source: dynamicCandidate.source,
-      targets: dynamicCandidate.targets, truncatedItemIds: dynamicCandidate.truncatedItemIds })
-  }, [dynamicCandidate, dynamicCandidateKey, verifiedDynamicDocument, dynamicDocumentClosed, dynamicContentPublisher])
-  // React development StrictMode remounts effects without reconstructing memoized refs.
-  useEffect(() => () => dynamicContentPublisher.clear(), [dynamicContentPublisher])
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.code === 'Space' && !isEditableKeyboardTarget(event.target)) {
-        spacePressedRef.current = true
-      }
-    }
-    const onKeyUp = (event: KeyboardEvent) => {
-      if (event.code === 'Space') spacePressedRef.current = false
-    }
-    const onBlur = () => {
-      spacePressedRef.current = false
-      panRef.current = null
-      setPanning(false)
-    }
-    window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('keyup', onKeyUp)
-    window.addEventListener('blur', onBlur)
-    return () => {
-      window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('keyup', onKeyUp)
-      window.removeEventListener('blur', onBlur)
-    }
-  }, [])
-
-  // The view keeps its pan within reach of the page: an axis that fits sits in place, a larger one scrolls edge to
-  // edge. Otherwise zooming out after scrolling sideways, or a page of another size, leaves the page off-centre with
-  // nothing left to scroll.
-  const viewWithinReach = useCallback((current: { zoom: number; x: number; y: number }) => {
-    if (!(stageViewportSize.width > 0 && stageViewportSize.height > 0)) return current
-    const range = stageViewportPanRange(createStageViewportTransform({
-      viewport: { x: 0, y: 0, width: stageViewportSize.width, height: stageViewportSize.height },
-      zoom: current.zoom, pan: { x: current.x, y: current.y }, stage: slideCanvas, fit: 'page',
-    }))
-    const within = (value: number, axis: StagePanRange | null) => axis ? Math.max(axis.min, Math.min(axis.max, value)) : 0
-    const x = within(current.x, range.x), y = within(current.y, range.y)
-    return x === current.x && y === current.y ? current : { ...current, x, y }
-  }, [slideCanvas, stageViewportSize.height, stageViewportSize.width])
-  const setZoom = useCallback((zoom: number) => {
-    setView(current => viewWithinReach({ ...current, zoom: Math.max(0.5, Math.min(2, Math.round(zoom * 20) / 20)) }))
-  }, [viewWithinReach])
-  useEffect(() => { setView(viewWithinReach) }, [viewWithinReach])
-  // Another page or document opens at its top: the previous page's scroll never carries over.
-  useEffect(() => { setView(current => current.x === 0 && current.y === 0 ? current : { ...current, x: 0, y: 0 }) }, [documentId, courseLocationId])
-
-  const resetView = useCallback(() => {
+    authoring.current?.cancelGesture(); pointer.current = null; deferredPointer.current = null; pan.current = null; draw.current = null; line.current = null
+    setPreview(emptyPreview()); setDrawPreview(null); setLinePreview(null); setPanning(false)
     setView({ zoom: 1, x: 0, y: 0 })
+  }, [snapshot.documentId, snapshot.surfaceId, snapshot.activeStateId, snapshot.canvasMode, snapshot.editingScope])
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.code === 'Space' && !outsideStage(event.target) && !(event.target instanceof Element && event.target.closest('input,textarea,[contenteditable="true"]'))) {
+        space.current = event.type === 'keydown'
+        if (space.current) event.preventDefault()
+      }
+      if (event.key === 'Escape' && pointer.current !== null) {
+        authoring.current?.cancelGesture(); pointer.current = null; deferredPointer.current = null; draw.current = null; line.current = null
+        setPreview(emptyPreview()); setDrawPreview(null); setLinePreview(null)
+      }
+    }
+    const blur = () => { space.current = false; pan.current = null; setPanning(false) }
+    window.addEventListener('keydown', onKey); window.addEventListener('keyup', onKey); window.addEventListener('blur', blur)
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('keyup', onKey); window.removeEventListener('blur', blur) }
   }, [])
-
-  const measureStageViewport = useCallback(() => {
-    const viewport = stageViewportRef.current
-    if (!viewport) return
-    const rect = viewport.getBoundingClientRect()
-    if (rect.width <= 0 || rect.height <= 0) return
-    setStageViewportSize((current) => (
-      current.width === rect.width && current.height === rect.height
-        ? current
-        : { width: rect.width, height: rect.height }
-    ))
-  }, [])
-
-  // The workbench can resize the Slide region in the same React commit as an
-  // insert or a toolbar change. Keep the painted stage on the current viewport
-  // dimensions before a pointer is converted back to world coordinates.
-  useLayoutEffect(() => { measureStageViewport() })
-
+  // Retain the mature viewport rule: a fitting axis recentres; a zoomed axis stays within reach.
+  const viewWithinReach = useCallback((current: typeof view) => {
+    const range = stageViewportPanRange(createStageViewportTransform({ viewport, stage: canvas, fit: 'page', zoom: current.zoom, pan: current }))
+    const x = range.x ? Math.max(range.x.min, Math.min(range.x.max, current.x)) : 0
+    const y = range.y ? Math.max(range.y.min, Math.min(range.y.max, current.y)) : 0
+    return x === current.x && y === current.y ? current : { ...current, x, y }
+  }, [viewport, canvas.width, canvas.height])
+  const setZoom = useCallback((zoom: number) => setView(current => viewWithinReach({ ...current, zoom: clampStageViewportZoom(zoom) })), [viewWithinReach])
+  useEffect(() => { setView(viewWithinReach) }, [viewWithinReach])
+  const resetView = useCallback(() => setView({ zoom: 1, x: 0, y: 0 }), [])
   useLayoutEffect(() => {
-    const viewport = stageViewportRef.current
-    if (!viewport) return
-    const observer = new ResizeObserver(measureStageViewport)
-    observer.observe(viewport)
-    window.addEventListener('resize', measureStageViewport)
-    return () => {
-      observer.disconnect()
-      window.removeEventListener('resize', measureStageViewport)
-    }
-  }, [snapshot.projectId, slideEditorView?.surfaceId, measureStageViewport])
-
-  const failPublishedAuthoring = useCallback((token: string, message: string) => {
-    if (publishedAuthoringInitRef.current?.token !== token) return
-    publishedAuthoringInitRef.current = null
-    authoringReadyRef.current = false
-    authoringSnapshotBarrierRef.current = null
-    setAcknowledgedPreviewGeneration(null)
-    if (authoringFrameRef.current !== null) {
-      window.cancelAnimationFrame(authoringFrameRef.current)
-      authoringFrameRef.current = null
-    }
-    pendingAuthoringNodesRef.current.clear()
-    previousPublishedStateRef.current = null
-    syncedRuntimeOverridesRef.current = null
-    syncedComponentLightEditsRef.current = null
-    syncedCompositionContentRef.current = null
-    syncedAuthoringCanvasRef.current = null
-    runtimeTargetsByHostRef.current.clear()
-    componentTargetsByHostRef.current.clear()
-    lastAuthoringTargetsRevisionRef.current = -1
-    setRuntimeTargetSnapshot({ targets: [], truncatedItemIds: [] })
-    setComponentTargetSnapshot({ targets: [], truncatedItemIds: [] })
-    setComponentImageTargets([]); componentImageTargetsByHostRef.current.clear()
-    setActiveRuntimeTextSession(null)
-    setActiveComponentTextSession(null)
-    setHoveredAuthoringTargetId(null)
-    setReplacingRuntimeAssetTargetId(null)
-    setPreviewFeedback({
-      kind: 'error',
-      title: '统一画布启动失败',
-      message,
-    })
-  }, [])
-
-  const retryRuntimePreview = useCallback(() => {
-    setPreviewFeedback({
-      kind: 'loading',
-      title: '正在重新准备画布',
-      message: '正在重新创建 Published 编辑宿主…',
-    })
-    setPreviewRetryRevision((revision) => revision + 1)
-  }, [])
-
-  const postAuthoringPatch = useCallback((patch: PlayerAuthoringPatch) => {
-    const init = publishedAuthoringInitRef.current
-    const session = publishedAuthoringSessionRef.current
-    if (
-      !init ||
-      !session ||
-      !authoringReadyRef.current
-    ) {
-      if (init && authoringSnapshotBarrierRef.current) {
-        failPublishedAuthoring(
-          init.token,
-          '编辑画布在初始同步期间失去连接。请重新载入画布。',
-        )
-      }
-      return null
-    }
-    const currentSnapshot = readSnapshot()
-    const sceneId = currentSnapshot.sceneId
-    if (!sceneId) {
-      if (init && authoringSnapshotBarrierRef.current) {
-        failPublishedAuthoring(
-          init.token,
-          '当前 Slide 位置没有可用的 V9 场景，无法同步编辑画布。',
-        )
-      }
-      return null
-    }
-    authoringRevisionRef.current += 1
-    const command: PlayerAuthoringPatchCommand = {
-      type: PLAYER_AUTHORING_MESSAGE_TYPES.patch,
-      protocolVersion: PLAYER_AUTHORING_PROTOCOL_VERSION,
-      sessionId: init.token,
-      requestId: crypto.randomUUID(),
-      revision: authoringRevisionRef.current,
-      context: {
-        sceneId,
-        stateId: currentSnapshot.presentationStateId,
-      },
-      patch,
-    }
-    try {
-      const pending = session.applyAuthoringCommand(command).then((response) => {
-        if (response.type === PLAYER_AUTHORING_MESSAGE_TYPES.error) throw new Error(response.message)
-      })
-      authoringObservationReady.track(observationGenerationRef.current, pending)
-      void pending.catch((error) => {
-        failPublishedAuthoring(
-          command.sessionId,
-          error instanceof Error
-            ? `编辑画布更新失败：${error.message}`
-            : '编辑画布更新失败。',
-        )
-      })
-    } catch {
-      if (authoringSnapshotBarrierRef.current) {
-        failPublishedAuthoring(
-          init.token,
-          '编辑画布在初始同步期间无法继续发送更新。请重新载入画布。',
-        )
-      }
-      return null
-    }
-    // Property-panel edits may arrive while the initial snapshot is still
-    // applying. Move the gate forward so an older snapshot ACK cannot expose
-    // a canvas that is still catching up with the editor store.
-    if (authoringSnapshotBarrierRef.current) {
-      authoringSnapshotBarrierRef.current =
-        playerAuthoringSnapshotBarrierForCommand(command)
-    }
-    return command
-  }, [authoringObservationReady, failPublishedAuthoring])
-
-  useEffect(() => onElementAnimationPreviewRequested(({ action, delayMs }) => {
-    const currentSnapshot = readSnapshot()
-    const currentNode = currentSnapshot.editingNodes.find(
-      (node) => node.id === action.nodeId,
-    )
-    if (!currentNode) {
-      ports.canvas.setStatus('动画预览目标已失效，请重新选择')
-      return
-    }
-    const posted = postAuthoringPatch({
-      kind: 'preview-node-motion',
-      target: {
-        kind: 'native-node',
-        scope: currentSnapshot.editingScope,
-        nodeId: currentNode.id,
-      },
-      action,
-      delayMs,
-    })
-    if (!posted) {
-      ports.canvas.setStatus('编辑画布尚未就绪，请稍后重试动画预览')
-    }
-  }), [postAuthoringPatch])
-
-  const flushAuthoringNodePatches = useCallback(() => {
-    authoringFrameRef.current = null
-    const pending = [...pendingAuthoringNodesRef.current.values()]
-    pendingAuthoringNodesRef.current.clear()
-    for (const { scope, node } of pending) {
-      postAuthoringPatch(publishedAuthoringFramePatch(scope, node))
-    }
-  }, [postAuthoringPatch])
-
-  useLayoutEffect(() => {
-    const owner = stageViewportRef.current
-    if (!owner || !usePublishedAuthoring) return
-    const waitForReady = async () => {
-      const generation = observationGenerationRef.current
-      // An observation can arrive before the scheduled frame flush. Submit the
-      // existing latest-node queue, then await its actual Published ACKs.
-      if (authoringFrameRef.current !== null) {
-        window.cancelAnimationFrame(authoringFrameRef.current)
-        flushAuthoringNodePatches()
-      }
-      await authoringObservationReady.waitForReady(generation)
-      const host = publishedAuthoringHostRef.current
-      if (!host || !authoringReadyRef.current || authoringSnapshotBarrierRef.current) {
-        throw new Error('当前 Slide Published 画布尚未完成同步')
-      }
-      // The ACK installs Native DOM synchronously; its images may still be
-      // decoding. Resolve readiness from the current child tree after the queue.
-      await waitForPublishedObservationReady(host)
-      await authoringObservationReady.waitForReady(generation)
-    }
-    return registerPublishedCaptureResource(owner, {
-      waitForCaptureReady: waitForReady,
-      waitForObservationReady: waitForReady,
-    })
-  }, [authoringObservationReady, flushAuthoringNodePatches, usePublishedAuthoring])
-
-  const queueAuthoringNodePatch = useCallback((
-    scope: 'scene' | 'global',
-    node: AuthoringPatchNode,
-  ) => {
-    const owner = readSnapshot().view?.layers.find(layer => layer.selectionId === node.id)?.source
-    const targetScope = owner === 'global' ? 'global' : scope
-    pendingAuthoringNodesRef.current.set(
-      `${targetScope}:${node.id}`,
-      { scope: targetScope, node: structuredClone(node) },
-    )
-    if (authoringFrameRef.current !== null) return
-    authoringFrameRef.current = window.requestAnimationFrame(
-      flushAuthoringNodePatches,
-    )
-  }, [flushAuthoringNodePatches])
-
-  const paintSlideTransformPreview = useCallback((
-    preview: Parameters<typeof mergeSlidePreviewIntoNodes>[1],
-  ) => {
-    const currentSnapshot = readSnapshot()
-    const painted = mergeSlidePreviewIntoNodes(currentSnapshot.editingNodes, preview)
-    // New Native content is not a legacy Phaser node. Paint its transient frame
-    // through the same formal render input used for initial/committed content.
-    for (const transform of preview ?? []) {
-      const layer = currentSnapshot.view?.layers.find(item => item.selectionId === transform.nodeId)
-      if (!layer || layer.item.kind !== 'native' ||
-        !['table', 'chart', 'input'].includes(layer.item.content.nativeType)) continue
-      const item = structuredClone(layer.item) as NativeLayerItem
-      item.frame = { ...item.frame, x:transform.x, y:transform.y, width:transform.width, height:transform.height }
-      item.rotation = transform.rotation
-      queueAuthoringNodePatch(currentSnapshot.editingScope, nativeRenderInputFromV9Item(item))
-    }
-    const handle = gameRef.current
-    for (const node of painted) {
-      const current = currentSnapshot.editingNodes.find((item) => item.id === node.id)
-      const normalized = {
-        ...node,
-        ...withDirectionAwareTextAutoSize(current, {
-          x: node.x,
-          y: node.y,
-          width: node.width,
-          height: node.height,
-          rotation: node.rotation,
-        }),
-      } as AuthoringPatchNode
-      handle?.bridge.applyNode(normalized)
-      queueAuthoringNodePatch(currentSnapshot.editingScope, normalized)
-    }
-  }, [queueAuthoringNodePatch])
-
-  const syncCommittedTextNode = useCallback((nodeId: string) => {
-    const node = readSnapshot().editingNodes.find((item) => item.id === nodeId)
-    if (node) {
-      gameRef.current?.bridge.applyNode(node)
-      queueAuthoringNodePatch(readSnapshot().editingScope, node)
-    }
-    gameRef.current?.bridge.setTextEditing(null)
-  }, [queueAuthoringNodePatch])
-
-  /** Live paint for one line handle drag: frame + geometry follow the pointer. */
-  const paintSlideLinePreview = useCallback((
-    linePreview: SlideLinePreview,
-  ) => {
-    const currentSnapshot = readSnapshot()
-    const current = currentSnapshot.editingNodes.find((item) => item.id === linePreview.nodeId)
-    if (!current) return
-    const normalized = {
-      ...current,
-      x: linePreview.frame.x,
-      y: linePreview.frame.y,
-      width: linePreview.frame.width,
-      height: linePreview.frame.height,
-      lineGeometry: structuredClone(linePreview.lineGeometry),
-    } as AuthoringPatchNode
-    gameRef.current?.bridge.applyNode(normalized)
-    queueAuthoringNodePatch(currentSnapshot.editingScope, normalized)
-  }, [queueAuthoringNodePatch])
-
-  const revertSlideDragPreview = useCallback(() => {
-    const currentSnapshot = readSnapshot()
-    // Pointer cancellation must repaint every transient Native frame as well as
-    // the line geometry. The project was never mutated during the gesture.
-    for (const layer of currentSnapshot.view?.layers ?? []) {
-      if (layer.source === (currentSnapshot.backend?.getSession().scope ?? currentSnapshot.editingScope) &&
-        layer.item.kind === 'native' && ['table', 'chart', 'input'].includes(layer.item.content.nativeType)) {
-        queueAuthoringNodePatch(currentSnapshot.editingScope, nativeRenderInputFromV9Item(layer.item as NativeLayerItem))
-      }
-    }
-    for (const node of currentSnapshot.editingNodes) {
-      gameRef.current?.bridge.applyNode(node)
-      queueAuthoringNodePatch(currentSnapshot.editingScope, node as AuthoringPatchNode)
-    }
-  }, [queueAuthoringNodePatch])
-
-  useLayoutEffect(() => {
-    if (!candidatePointerActiveRef.current) return
-    // A navigation, scope switch or external commit cannot retarget a gesture
-    // that started from different geometry. Pointer-up must then write nothing.
-    candidatePointerActiveRef.current = false
-    revertSlideDragPreview()
-    const viewport = readCandidateViewport()
-    if (viewport) {
-      slideAuthoringRef.current.cancelGesture(viewport)
-      setLayerOverlay(slideAuthoringRef.current.overlayGeometry(viewport))
-    }
-    setLineDragGuides(null)
-  }, [snapshot.projectId, courseLocationId, activePresentationStateId, publishedAuthoringOwnerScope,
-    canvasMode, backend?.getSession().history.present.revision])
-
+    if (!snapshot.surfaceId) return
+    return ports.registerObservation?.(snapshot.surfaceId, { readZoom: () => viewRef.current.zoom, setZoom, reset: resetView })
+  }, [ports.registerObservation, snapshot.surfaceId, setZoom, resetView])
+  useEffect(() => { ports.navigationChanged?.() }, [view.zoom, ports.navigationChanged])
+  const wheel = useRef({ view, stageTransform, mode: snapshot.canvasMode }); wheel.current = { view, stageTransform, mode: snapshot.canvasMode }
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      if (isEditableKeyboardTarget(event.target)) return
-      if (drawGestureRef.current || readSnapshot().drawTool !== null) {
-        drawGestureRef.current = null
-        setDrawPreview(null)
-        portsRef.current.canvas.setDrawTool(null)
-        return
-      }
-      if (candidatePointerActiveRef.current) {
-        revertSlideDragPreview()
-        const viewport = readCandidateViewport()
-        if (viewport) {
-          slideAuthoringRef.current.cancelGesture(viewport)
-          setLayerOverlay(slideAuthoringRef.current.overlayGeometry(viewport))
-        }
-        candidatePointerActiveRef.current = false
-        setLineDragGuides(null)
-      }
-    }
-    const onBlur = () => {
-      if (candidatePointerActiveRef.current) {
-        revertSlideDragPreview()
-        const viewport = readCandidateViewport()
-        if (viewport) {
-          slideAuthoringRef.current.cancelGesture(viewport)
-          setLayerOverlay(slideAuthoringRef.current.overlayGeometry(viewport))
-        }
-        candidatePointerActiveRef.current = false
-        setLineDragGuides(null)
-      }
-      if (drawGestureRef.current) {
-        drawGestureRef.current = null
-        setDrawPreview(null)
-      }
-    }
-    window.addEventListener('keydown', onKeyDown)
-    window.addEventListener('blur', onBlur)
-    return () => {
-      window.removeEventListener('keydown', onKeyDown)
-      window.removeEventListener('blur', onBlur)
-    }
-  }, [revertSlideDragPreview])
-
-  const syncCompleteAuthoringSnapshot = useCallback(() => {
-    const currentSnapshot = readSnapshot()
-    const view = currentSnapshot.view
-    if (!view || !currentSnapshot.backend) return null
-    const authoringScope = publishedAuthoringInitRef.current?.authoringScope
-      ?? currentSnapshot.backend?.getSnapshot().scope
-      ?? currentSnapshot.editingScope
-    if (authoringFrameRef.current !== null) {
-      window.cancelAnimationFrame(authoringFrameRef.current)
-      authoringFrameRef.current = null
-    }
-    pendingAuthoringNodesRef.current.clear()
-    const localSource = localPublishedAuthoringSource(authoringScope)
-    const currentState = extractPublishedAuthoringState(view, localSource)
-    previousPublishedStateRef.current = structuredClone(currentState)
-    // The host was mounted from this document, so it already shows these rules.
-    syncedRuntimeOverridesRef.current = runtimeOverrideSync(view)
-    syncedComponentLightEditsRef.current = componentLightEditSync(view)
-    const sources = { project: currentSnapshot.backend.getSession().history.present, assetFiles: {}, components: currentSnapshot.componentPackages }
-    const compositions = compositionContentSync(view, sources)
-    syncedCompositionContentRef.current = compositions
-    const patches = publishedAuthoringPatchesFromSlideView(
-      view,
-      localSource,
-    )
-    patches.unshift(...compositions.values())
-    const canvasPatch: Extract<PlayerAuthoringPatch, { kind: 'scene-canvas' }> = {
-      kind: 'scene-canvas', target: { kind: 'scene-canvas', scope: 'scene' },
-      canvas: { ...view.canvas }, referenceCanvas: { ...view.referenceCanvas },
-    }
-    patches.unshift(canvasPatch)
-    syncedAuthoringCanvasRef.current = JSON.stringify([canvasPatch.canvas, canvasPatch.referenceCanvas])
-    let lastCommand: PlayerAuthoringPatchCommand | null = null
-    for (const patch of patches) {
-      lastCommand = postAuthoringPatch(patch)
-      if (!lastCommand) return null
-    }
-    return lastCommand
-  }, [postAuthoringPatch])
-
-  useEffect(() => () => {
-    if (authoringFrameRef.current !== null) {
-      window.cancelAnimationFrame(authoringFrameRef.current)
-      authoringFrameRef.current = null
-    }
-    pendingAuthoringNodesRef.current.clear()
-    previousPublishedStateRef.current = null
-    syncedRuntimeOverridesRef.current = null
-    syncedComponentLightEditsRef.current = null
-    syncedCompositionContentRef.current = null
-    syncedAuthoringCanvasRef.current = null
-  }, [])
-
-  useEffect(() => {
-    if (!slideEditorView || syncedAuthoringCanvasRef.current === null || canvasMode !== 'edit' || !authoringReadyRef.current) return
-    const value = JSON.stringify([slideEditorView.canvas, slideEditorView.referenceCanvas])
-    if (syncedAuthoringCanvasRef.current === value) return
-    if (!postAuthoringPatch({ kind: 'scene-canvas', target: { kind: 'scene-canvas', scope: 'scene' },
-      canvas: { ...slideEditorView.canvas }, referenceCanvas: { ...slideEditorView.referenceCanvas } })) return
-    syncedAuthoringCanvasRef.current = value
-  }, [canvasMode, postAuthoringPatch, slideEditorView])
-
-  // M15: Runtime text edits (and their undo/redo) reach the live host as rule
-  // patches, so the Runtime keeps its current state instead of restarting.
-  useEffect(() => {
-    const synced = syncedRuntimeOverridesRef.current
-    if (!synced || canvasMode !== 'edit' || !authoringReadyRef.current) return
-    const current = runtimeOverrideSync(slideEditorView)
-    for (const [key, entry] of current) {
-      if (synced.get(key)?.json === entry.json) continue
-      if (!postAuthoringPatch({
-        kind: 'runtime-text-overrides',
-        target: { kind: 'runtime-text-overrides', scope: entry.scope, nodeId: entry.nodeId },
-        overrides: entry.overrides,
-      })) return
-    }
-    syncedRuntimeOverridesRef.current = current
-  }, [canvasMode, postAuthoringPatch, slideEditorView])
-  // M15: a component's light edits (and their undo/redo) reach the live host the same way.
-  useEffect(() => {
-    const synced = syncedComponentLightEditsRef.current
-    if (!synced || canvasMode !== 'edit' || !authoringReadyRef.current) return
-    const current = componentLightEditSync(slideEditorView)
-    for (const [key, entry] of current) {
-      if (synced.get(key)?.json === entry.json) continue
-      if (!postAuthoringPatch({
-        kind: 'component-light-edits',
-        target: { kind: 'component-light-edits', scope: entry.scope, nodeId: entry.nodeId },
-        textOverrides: entry.textOverrides,
-        assetOverrides: entry.assetOverrides,
-      })) return
-    }
-    syncedComponentLightEditsRef.current = current
-  }, [canvasMode, postAuthoringPatch, slideEditorView])
-  useEffect(() => {
-    const synced = syncedCompositionContentRef.current
-    if (!synced || !backend || canvasMode !== 'edit' || !authoringReadyRef.current) return
-    const current = compositionContentSync(slideEditorView, {
-      project: backend.getSession().history.present, assetFiles: {}, components: componentPackages,
-    })
-    for (const [key, patch] of current) {
-      if (JSON.stringify(synced.get(key)?.content) === JSON.stringify(patch.content)) continue
-      if (!postAuthoringPatch(patch)) return
-    }
-    syncedCompositionContentRef.current = current
-  }, [backend, canvasMode, componentPackages, postAuthoringPatch, slideEditorView])
-
-  const handlePublishedAuthoringMessage = useCallback((
-    message: PlayerAuthoringHostMessage,
-  ) => {
-    const init = publishedAuthoringInitRef.current
-    if (!init || message.sessionId !== init.token) return
-    if (message.type === PLAYER_AUTHORING_MESSAGE_TYPES.ready) {
-      if (authoringReadyRef.current) return
-      const parsed = parsePlayerAuthoringReadyMessage(message)
-      if (!parsed.ok) {
-        failPublishedAuthoring(
-          init.token,
-          `编辑画布握手无效：${parsed.message}。请重新载入画布。`,
-        )
-        return
-      }
-      if (
-        parsed.ready.context.sceneId !== init.initialSceneId ||
-        parsed.ready.context.stateId !== init.initialStateId
-      ) {
-        failPublishedAuthoring(
-          init.token,
-          '编辑画布返回了不一致的场景或状态。请重新载入画布。',
-        )
-        return
-      }
-      authoringReadyRef.current = true
-      setPreviewFeedback({
-        kind: 'loading',
-        title: '正在同步编辑画布',
-        message: 'Published 宿主已启动，正在应用当前画面的完整快照…',
-      })
-      const lastCommand = syncCompleteAuthoringSnapshot()
-      if (!lastCommand) {
-        failPublishedAuthoring(
-          init.token,
-          '当前画面的完整快照未能发送。请重新载入画布。',
-        )
-        return
-      }
-      authoringSnapshotBarrierRef.current =
-        playerAuthoringSnapshotBarrierForCommand(lastCommand)
-      return
-    }
-    if (message.type === PLAYER_AUTHORING_MESSAGE_TYPES.ack) {
-      const barrier = authoringSnapshotBarrierRef.current
-      if (!barrier || !isPlayerAuthoringSnapshotAck(message, barrier)) return
-      if (pendingAuthoringNodesRef.current.size > 0) {
-        if (authoringFrameRef.current !== null) {
-          window.cancelAnimationFrame(authoringFrameRef.current)
-        }
-        flushAuthoringNodePatches()
-        return
-      }
-      authoringSnapshotBarrierRef.current = null
-      setAcknowledgedPreviewGeneration(previewGeneration)
-      setPreviewFeedback(null)
-      return
-    }
-    if (message.type === PLAYER_AUTHORING_MESSAGE_TYPES.runtimeTargets) {
-      if (message.revision <= lastAuthoringTargetsRevisionRef.current) return
-      lastAuthoringTargetsRevisionRef.current = message.revision
-      const hostKey = `${message.update.scope}:${message.update.sceneId ?? ''}`
-      runtimeTargetsByHostRef.current.set(
-        hostKey,
-        { targets: sanitizeRuntimeAuthoringTargets(message.update, hostKey, slideCanvas),
-          truncatedItemIds: message.update.truncatedItemIds ?? [] },
-      )
-      setRuntimeTargetSnapshot(combineAuthoringTargets(runtimeTargetsByHostRef.current.values()))
-      return
-    }
-    if (message.type === PLAYER_AUTHORING_MESSAGE_TYPES.componentTargets) {
-      if (message.revision <= lastAuthoringTargetsRevisionRef.current) return
-      lastAuthoringTargetsRevisionRef.current = message.revision
-      const hostKey = [
-        message.update.scope,
-        message.update.sceneId ?? '',
-        message.update.nodeId,
-      ].join(':')
-      componentTargetsByHostRef.current.set(
-        hostKey,
-        { targets: sanitizeComponentAuthoringTargets(message.update, hostKey, slideCanvas),
-          truncatedItemIds: message.update.truncated ? [message.update.nodeId] : [] },
-      )
-      componentImageTargetsByHostRef.current.set(hostKey, sanitizeComponentImageTargets(message.update, hostKey, slideCanvas))
-      setComponentTargetSnapshot(combineAuthoringTargets(componentTargetsByHostRef.current.values()))
-      setComponentImageTargets([...componentImageTargetsByHostRef.current.values()].flat())
-      return
-    }
-    if (message.type !== PLAYER_AUTHORING_MESSAGE_TYPES.error) return
-    if (authoringSnapshotBarrierRef.current) {
-      failPublishedAuthoring(
-        init.token,
-        `初始画面同步失败：${message.message}。请重新载入画布。`,
-      )
-      return
-    }
-    ports.canvas.setStatus(`画布同步未应用：${message.message}`)
-  }, [
-    failPublishedAuthoring,
-    flushAuthoringNodePatches,
-    previewGeneration,
-    slideCanvas,
-    syncCompleteAuthoringSnapshot,
-  ])
-  const authoringMessageHandlerRef = useRef(handlePublishedAuthoringMessage)
-  authoringMessageHandlerRef.current = handlePublishedAuthoringMessage
-  // Message callbacks read the latest canvas/context without becoming mount
-  // identity. Resizing a page must not destroy its live program instances.
-  const dispatchPublishedAuthoringMessage = useCallback((message: PlayerAuthoringHostMessage) => {
-    authoringMessageHandlerRef.current(message)
-  }, [])
-
-  useEffect(() => {
-    const container = publishedAuthoringHostRef.current
-    if (!usePublishedAuthoring || !container) {
-      const leftover = publishedAuthoringSessionRef.current
-      publishedAuthoringSessionRef.current = null
-      publishedAuthoringInitRef.current = null
-      setCompositionMounts(new Map())
-      if (leftover) {
-        enqueueSerial(publishedAuthoringMountChainRef, () => leftover.destroy())
-      }
-      return
-    }
-
-    const mountSnapshot = readSnapshot()
-    const locationId = mountSnapshot.locationId
-    if (!locationId || !mountSnapshot.sceneId) {
-      setPreviewFeedback({
-        kind: 'error',
-        title: '统一画布创建失败',
-        message: '当前 Slide 场景没有可用的 V9 Published 位置。',
-      })
-      return
-    }
-    authoringObservationReady.begin(previewGeneration)
-    authoringReadyRef.current = false
-    authoringRevisionRef.current = 0
-    authoringSnapshotBarrierRef.current = null
-    lastAuthoringTargetsRevisionRef.current = -1
-    runtimeTargetsByHostRef.current.clear()
-    componentTargetsByHostRef.current.clear()
-    setRuntimeTargetSnapshot({ targets: [], truncatedItemIds: [] })
-    setComponentTargetSnapshot({ targets: [], truncatedItemIds: [] })
-    setComponentImageTargets([]); componentImageTargetsByHostRef.current.clear()
-    setAcknowledgedPreviewGeneration(null)
-    setPreviewFeedback({
-      kind: 'loading',
-      title: '正在准备编辑画布',
-      message: '正在挂载 Published V2 编辑宿主…',
-    })
-    const token = crypto.randomUUID()
-    setCompositionMounts(new Map())
-    const authoringScope = publishedAuthoringOwnerScope
-    publishedAuthoringInitRef.current = {
-      token,
-      initialSceneId: mountSnapshot.sceneId,
-      initialStateId: mountSnapshot.presentationStateId,
-      authoringScope,
-    }
-
-    return beginSerializedSessionMount(
-      publishedAuthoringMountChainRef,
-      () => ports.preview.mount({
-        container,
-        sessionId: token,
-        scope: authoringScope,
-        onSessionCreated: (session) => {
-          if (publishedAuthoringInitRef.current?.token === token) {
-            publishedAuthoringSessionRef.current = session
-          }
-        },
-        onMessage: dispatchPublishedAuthoringMessage,
-        onCompositionMount: (layerItemId, handle) => {
-          if (publishedAuthoringInitRef.current?.token !== token) return
-          setCompositionMounts(previous => {
-            const next = new Map(previous)
-            if (handle) next.set(layerItemId, handle)
-            else next.delete(layerItemId)
-            return next
-          })
-        },
-      }),
-      {
-        onReady: (session) => {
-          if (publishedAuthoringInitRef.current?.token !== token) return
-          publishedAuthoringSessionRef.current = session
-          container.dataset.coursePlayerReady = 'true'
-        },
-        onError: (error) => {
-          console.error('Published 编辑宿主启动失败', error)
-          failPublishedAuthoring(
-            token,
-            error instanceof Error ? error.message : 'Published 编辑宿主未能完成启动。',
-          )
-        },
-        onCleanup: () => {
-          authoringObservationReady.end(previewGeneration)
-          container.dataset.coursePlayerReady = 'false'
-          if (publishedAuthoringInitRef.current?.token === token) {
-            publishedAuthoringInitRef.current = null
-            setCompositionMounts(new Map())
-          }
-          publishedAuthoringSessionRef.current = null
-          authoringReadyRef.current = false
-          authoringSnapshotBarrierRef.current = null
-          runtimeTargetsByHostRef.current.clear()
-          componentTargetsByHostRef.current.clear()
-          setRuntimeTargetSnapshot({ targets: [], truncatedItemIds: [] })
-          setComponentTargetSnapshot({ targets: [], truncatedItemIds: [] })
-          setComponentImageTargets([]); componentImageTargetsByHostRef.current.clear()
-          setAcknowledgedPreviewGeneration(null)
-        },
-      },
-    )
-  }, [
-    authoringObservationReady,
-    publishedAuthoringOwnerScope,
-    failPublishedAuthoring,
-    dispatchPublishedAuthoringMessage,
-    previewGeneration,
-    usePublishedAuthoring,
-  ])
-
-  // M15 运行现场 ------------------------------------------------------------------------------------------------------
-  const clearLiveTargets = useCallback(() => {
-    liveTargetGenerationRef.current = null
-    runtimeTargetsByHostRef.current.clear()
-    componentTargetsByHostRef.current.clear()
-    componentImageTargetsByHostRef.current.clear()
-    setRuntimeTargetSnapshot({ targets: [], truncatedItemIds: [] })
-    setComponentTargetSnapshot({ targets: [], truncatedItemIds: [] })
-    setComponentImageTargets([])
-    setActiveRuntimeTextSession(null)
-    setActiveComponentTextSession(null)
-    setHoveredAuthoringTargetId(null)
-  }, [])
-  /** The paused page's Runtime and component targets take the place of the editor's. */
-  const acceptLiveTargets = useCallback((targets: SlideLiveEditTargets) => {
-    if (!liveAcceptingRef.current || !liveTargetGenerationRef.current) return
-    if (targets.kind === 'runtime') {
-      const hostKey = `${targets.update.scope}:${targets.update.sceneId ?? ''}`
-      runtimeTargetsByHostRef.current.set(hostKey, {
-        targets: sanitizeRuntimeAuthoringTargets(targets.update, hostKey, slideCanvas),
-        truncatedItemIds: targets.update.truncatedItemIds ?? [],
-      })
-      setRuntimeTargetSnapshot(combineAuthoringTargets(runtimeTargetsByHostRef.current.values()))
-      return
-    }
-    const update = targets.update
-    const hostKey = [update.scope, update.sceneId ?? '', update.nodeId].join(':')
-    componentTargetsByHostRef.current.set(hostKey, {
-      targets: sanitizeComponentAuthoringTargets(update, hostKey, slideCanvas),
-      truncatedItemIds: update.truncated ? [update.nodeId] : [],
-    })
-    componentImageTargetsByHostRef.current.set(hostKey, sanitizeComponentImageTargets(update, hostKey, slideCanvas))
-    setComponentTargetSnapshot(combineAuthoringTargets(componentTargetsByHostRef.current.values()))
-    setComponentImageTargets([...componentImageTargetsByHostRef.current.values()].flat())
-  }, [slideCanvas])
-  const acceptLiveTargetsRef = useRef(acceptLiveTargets)
-  acceptLiveTargetsRef.current = acceptLiveTargets
-  /** Ends the live page; in the editor the session goes and the editing canvas comes back. */
-  const endLiveScene = useCallback((message?: string) => {
-    liveAcceptingRef.current = false
-    courseTryRunSessionRef.current?.endLiveEdit(false)
-    liveShownRef.current = null
-    liveResumeRef.current = null
-    clearLiveTargets()
-    setLiveScene(null)
-    if (message) portsRef.current.canvas.setStatus(message)
-  }, [clearLiveTargets])
-  const endLiveSceneRef = useRef(endLiveScene)
-  endLiveSceneRef.current = endLiveScene
-  /** Back from the try-run: a page with Runtimes or components stays paused where it is, to be edited there. */
-  const returnToEdit = useCallback(() => {
-    const ports = portsRef.current
-    const session = courseTryRunSessionRef.current
-    const current = readSnapshot()
-    if (current.canvasMode === 'run' && session && ports.liveScene && current.editingScope === 'scene' && !liveSceneRef.current) {
-      const position = session.readObservationState()
-      const baseline = ports.liveScene.capture()
-      if (position.ready && baseline && ports.liveScene.sceneWithCarriers(position.locationId)) {
-        liveAcceptingRef.current = true
-        liveTargetGenerationRef.current = crypto.randomUUID()
-        const started = session.beginLiveEdit(acceptLiveTargets)
-        if (started) {
-          session.playbackView?.reset()
-          resetView()
-          if (started.locationId !== current.locationId) ports.canvas.showLocation?.(started.locationId)
-          liveShownRef.current = baseline
-          setLiveScene({ sceneId: started.sceneId, locationId: started.locationId, mountKey: effectiveTryRunMountKeyRef.current, reload: null, reloading: false })
-          ports.canvas.setCanvasMode('edit')
-          ports.canvas.setStatus('运行现场：双击 Runtime 或组件里的文字、图片即可修改；点“继续运行”从这里接着运行')
-          return
-        }
-        liveAcceptingRef.current = false
-        liveTargetGenerationRef.current = null
-      }
-    }
-    ports.canvas.setCanvasMode('edit')
-  }, [acceptLiveTargets, resetView])
-  /**
-   * Brings the paused page up to the document: new text rules of its Runtimes and components go in place; a replaced
-   * picture or keyed text waits for the teacher to load the page again; any other change ends the live page.
-   */
-  const syncLiveScene = useCallback(() => {
-    const live = liveSceneRef.current, shown = liveShownRef.current, session = courseTryRunSessionRef.current
-    const current = readSnapshot(), port = portsRef.current.liveScene
-    if (!live || live.reloading || !shown || !port || shown.key === current.tryRunMountKey) return
-    const changes = port.changesSince(shown, live.sceneId)
-    if (!changes) {
-      endLiveScene('运行现场已结束：H5 演示还有其他修改，已回到编辑画面')
-      return
-    }
-    const reloads = changes.reloads.map(entry => entry.label)
-    for (const patch of changes.patches) {
-      if (session?.applyLiveEdit(patch) !== 'applied') reloads.push(port.itemLabel(live.sceneId, patch.target.nodeId))
-    }
-    const reload = reloads.length
-      ? `“${reloads[0]}”要重新加载这一页后才会显示这项修改。重新加载后页面从头开始运行，页面位置和课程状态保留。`
-      : null
-    // Until it is loaded again the page still shows the document it had; later edits are compared with that one.
-    if (!reload) liveShownRef.current = port.capture()
-    if (reload !== live.reload) setLiveScene({ ...live, reload })
-  }, [endLiveScene])
-  useEffect(() => { syncLiveScene() }, [tryRunMountKey, liveScene?.reloading, syncLiveScene])
-  /** Carries on running from where the page was paused; the resumed session already shows every edit. */
-  const continueLiveScene = useCallback(() => {
-    syncLiveScene()
-    const live = liveSceneRef.current, session = courseTryRunSessionRef.current
-    if (!live || !session || live.reload || live.reloading) return
-    const key = readSnapshot().tryRunMountKey
-    liveAcceptingRef.current = false
-    setTryRunKeyAlias(key && live.mountKey ? { projectKey: key, mountKey: live.mountKey } : null)
-    portsRef.current.canvas.setCanvasMode('run')
-    session.endLiveEdit(true)
-    liveShownRef.current = null
-    clearLiveTargets()
-    setLiveScene(null)
-  }, [clearLiveTargets, syncLiveScene])
-  /** Loads the page again with the edits it could not take in place, in its state and with its course state. */
-  const reloadLiveScene = useCallback(() => {
-    const live = liveSceneRef.current, session = courseTryRunSessionRef.current
-    if (!live || !session || live.reloading) return
-    const position = session.readObservationState()
-    liveResumeRef.current = { stateId: position.stateId, courseState: session.readCourseStateSnapshot() }
-    liveAcceptingRef.current = false
-    session.endLiveEdit(false)
-    clearLiveTargets()
-    setLiveScene({ ...live, reload: null, reloading: true, mountKey: `${readSnapshot().tryRunMountKey ?? ''}#${++liveReloadSequence}` })
-  }, [clearLiveTargets])
-  // Leaving the page, the scene scope or the document ends the live page; running again from elsewhere resumes it.
-  const liveSeenInEditRef = useRef(false)
-  useEffect(() => {
-    const live = liveSceneRef.current
-    if (!live) {
-      liveSeenInEditRef.current = false
-      return
-    }
-    if (!snapshot.projectId || courseLocationId !== live.locationId || editingScope !== 'scene') {
-      endLiveScene('运行现场已结束：已离开这一页')
-    } else if (canvasMode === 'edit') {
-      liveSeenInEditRef.current = true
-    } else if (liveSeenInEditRef.current) {
-      if (live.reload || live.reloading) endLiveScene()
-      else continueLiveScene()
-    }
-  }, [canvasMode, continueLiveScene, courseLocationId, editingScope, endLiveScene, snapshot.projectId])
-
-  useEffect(() => {
-    const container = courseTryRunRef.current
-    if (!useCoursePlayerTryRun || !snapshot.projectId || !container || !effectiveTryRunMountKey) {
-      const leftover = courseTryRunSessionRef.current
-      courseTryRunSessionRef.current = null
-      if (leftover) {
-        enqueueSerial(courseTryRunMountChainRef, () => leftover.destroy())
-      }
-      setTryRunFeedback(null)
-      setTryRunKeyAlias(null)
-      return
-    }
-    setTryRunFeedback({
-      kind: 'loading',
-      title: '正在准备当前位置试运行',
-      message: '正在载入 CoursePlayer…',
-    })
-    const mountSnapshot = readSnapshot()
-    const locationId = mountSnapshot.locationId
-    if (!mountSnapshot.projectId) {
-      setTryRunFeedback(null)
-      return
-    }
-    const resume = liveResumeRef.current
-    liveResumeRef.current = null
-    return beginSerializedSessionMount(courseTryRunMountChainRef, () => ports.tryRun.mount(container, resume ?? undefined), {
-      onReady: (session) => {
-        courseTryRunSessionRef.current = session
-        container.dataset.coursePlayerReady = 'true'
-        setTryRunFeedback(null)
-        setTryRunEpoch((current) => current + 1)
-        // Loaded again for an edit on the live page: pause it again at once, now showing the edit.
-        if (resume && liveSceneRef.current) {
-          liveAcceptingRef.current = true
-          liveTargetGenerationRef.current = crypto.randomUUID()
-          const started = session.beginLiveEdit(acceptLiveTargetsRef.current)
-          const baseline = portsRef.current.liveScene?.capture() ?? null
-          if (started && baseline) {
-            liveShownRef.current = baseline
-            setLiveScene(live => live && { ...live, sceneId: started.sceneId, reloading: false })
-          } else {
-            endLiveSceneRef.current('运行现场已结束：重新加载后这一页没能暂停')
-          }
-        }
-      },
-      onError: (error) => {
-        console.error('CoursePlayer 试运行启动失败', error)
-        setTryRunFeedback({
-          kind: 'error',
-          title: '当前位置试运行启动失败',
-          message: error instanceof Error ? error.message : '播放器未能完成启动。请重试。',
-        })
-      },
-      onCleanup: () => {
-        container.dataset.coursePlayerReady = 'false'
-        courseTryRunSessionRef.current = null
-      },
-    })
-  }, [effectiveTryRunMountKey, useCoursePlayerTryRun])
-
-  useEffect(() => {
-    const session = courseTryRunSessionRef.current
-    if (!useCoursePlayerTryRun || !session || !courseLocationId || liveSceneRef.current) return
-    void session.goToLocation(courseLocationId).catch((error) => {
-      console.error('CoursePlayer 试运行跳转失败', error)
-    })
-  }, [courseLocationId, tryRunEpoch, useCoursePlayerTryRun])
-
-  const document = useMemo<SlidePhaserDocument>(() => {
-    if (!slideEditorView) {
-      return {
-        id: '__editor_empty_slide__',
-        name: '',
-        backgroundColor: '#ffffff',
-        interactions: [],
-        nodes: [],
-      }
-    }
-    return phaserDocumentFromView(slideEditorView, editingScope)
-  }, [editingScope, slideEditorView])
-
-  const slideSceneId = slideEditorView?.sceneId ?? ''
-  const courseProjectId = snapshot.projectId || undefined
-
-  const editingNode = useMemo(() => {
-    if (!editingTextNodeId || !slideEditorView) return undefined
-    const item = nativeSlideLayer(slideEditorView.layers, editingTextNodeId, 'text')
-    return item ? materializeNativeLayerItem(item) as TextNode : undefined
-  }, [editingTextNodeId, slideEditorView])
-  const editingFormulaNode = useMemo<FormulaNode | undefined>(() => {
-    const session = activeFormulaEditSession
-    if (
-      !session ||
-      !slideEditorView ||
-      !courseProjectId ||
-      canvasMode !== 'edit' ||
-      session.projectId !== courseProjectId ||
-      session.scope !== editingScope ||
-      session.sceneId !== slideSceneId ||
-      session.stateId !== activePresentationStateId
-    ) {
-      return undefined
-    }
-    const item = nativeSlideLayer(slideEditorView.layers, session.nodeId, 'formula')
-    return item ? materializeNativeLayerItem(item) as FormulaNode : undefined
-  }, [
-    activeFormulaEditSession,
-    activePresentationStateId,
-    canvasMode,
-    courseProjectId,
-    editingScope,
-    slideEditorView,
-    slideSceneId,
-  ])
-
-  useEffect(() => {
-    if (activeFormulaEditSession && !editingFormulaNode) {
-      setActiveFormulaEditSession(null)
-    }
-  }, [activeFormulaEditSession, editingFormulaNode])
-  const visibleRuntimeTargets = useMemo(
-    () => runtimeTargets.filter((target) => (
-      (target.kind === 'text' || target.kind === 'asset') &&
-      runtimeTargetMatchesEditingContext(target, editingScope, slideSceneId)
-    )),
-    [editingScope, runtimeTargets, slideSceneId],
-  )
-  const visibleComponentTargets = useMemo(
-    () => componentTargets.filter((target) => {
-      if (target.scope !== editingScope) return false
-      if (target.scope === 'scene' && target.sceneId !== slideSceneId) return false
-      const layer = slideEditorView?.layers.find((candidate) => candidate.selectionId === target.nodeId)
-      return Boolean(
-        layer &&
-        layer.item.kind === 'component' &&
-        layer.item.visible &&
-        !layer.item.locked,
-      )
-    }),
-    [componentTargets, editingScope, slideEditorView, slideSceneId],
-  )
-  const visibleComponentImageTargets = useMemo(
-    () => componentImageTargets.filter((target) => {
-      if (target.scope !== editingScope) return false
-      if (target.scope === 'scene' && target.sceneId !== slideSceneId) return false
-      const layer = slideEditorView?.layers.find((candidate) => candidate.selectionId === target.nodeId)
-      return Boolean(layer && layer.item.kind === 'component' && layer.item.visible && !layer.item.locked)
-    }),
-    [componentImageTargets, editingScope, slideEditorView, slideSceneId],
-  )
-  const activeComponentTextTarget = useMemo(() => {
-    if (
-      !activeComponentTextSession ||
-      !courseProjectId ||
-      !componentTextEditSessionMatchesContext(activeComponentTextSession, {
-        projectId: courseProjectId,
-        scope: editingScope,
-        sceneId: slideSceneId,
-        stateId: activePresentationStateId,
-      })
-    ) {
-      return undefined
-    }
-    return visibleComponentTargets.find((target) => (
-      componentTextTargetMatchesSession(target, activeComponentTextSession)
-    ))
-  }, [
-    activeComponentTextSession,
-    activePresentationStateId,
-    courseProjectId,
-    editingScope,
-    slideSceneId,
-    visibleComponentTargets,
-  ])
-  const componentEditingLayer = useMemo(() => {
-    if (!activeComponentTextSession || !activeComponentTextTarget || !slideEditorView) {
-      return null
-    }
-    const layer = slideEditorView.layers.find((candidate) => (
-      candidate.selectionId === activeComponentTextSession.nodeId
-    ))
-    if (!layer || layer.item.kind !== 'component') return null
-    if (
-      layer.item.component.packageId !== activeComponentTextSession.componentId ||
-      layer.item.component.version !== activeComponentTextSession.componentVersion
-    ) {
-      return null
-    }
-    return layer
-  }, [activeComponentTextSession, activeComponentTextTarget, slideEditorView])
-  const componentDraftRef = useRef(contentEdit)
-  componentDraftRef.current = contentEdit
-  const componentEditingValue = activeComponentTextSession?.source === 'auto' ? componentAutoValue
-    : contentEdit?.kind === 'field-text' && contentEdit.textField?.kind === 'component-prop'
-      ? (contentEdit.draft as import('../../authoring/layerTextField').LayerTextDraft).text
-      : activeComponentTextSession?.initialValue ?? ''
-  useEffect(() => {
-    if (activeComponentTextSession && activeComponentTextSession.source !== 'auto' && (contentEdit?.kind !== 'field-text' || contentEdit.textField?.kind !== 'component-prop')) {
-      setActiveComponentTextSession(null)
-    }
-  }, [contentEdit, activeComponentTextSession])
-  const activeRuntimeTextTarget = useMemo(() => {
-    if (
-      !activeRuntimeTextSession ||
-      !courseProjectId ||
-      activeRuntimeTextSession.liveSession.kind !== 'text' ||
-      !runtimeTargetEditSessionMatchesContext(activeRuntimeTextSession.liveSession, {
-        projectId: courseProjectId,
-        scope: editingScope,
-        sceneId: slideSceneId,
-      })
-    ) {
-      return undefined
-    }
-    return visibleRuntimeTargets.find((target) => (
-      runtimeTargetMatchesEditSession(target, activeRuntimeTextSession.liveSession)
-    ))
-  }, [
-    activeRuntimeTextSession,
-    courseProjectId,
-    editingScope,
-    slideSceneId,
-    visibleRuntimeTargets,
-  ])
-  const activeRuntimeTextValue = activeRuntimeTextSession?.courseTarget.initialValue ?? ''
-
-  useEffect(() => {
-    if (
-      canvasMode !== 'edit' ||
-      !activeRuntimeTextSession ||
-      !activeRuntimeTextTarget
-    ) {
-      setActiveRuntimeTextSession(null)
-    }
-  }, [activeRuntimeTextSession, activeRuntimeTextTarget, canvasMode])
-
-  useEffect(() => {
-    if (
-      canvasMode !== 'edit' ||
-      !activeComponentTextSession ||
-      !activeComponentTextTarget
-    ) {
-      setActiveComponentTextSession(null)
-    }
-  }, [activeComponentTextSession, activeComponentTextTarget, canvasMode])
-
-  const currentComponentTextEditContext = useCallback(
-    (): ComponentTextEditContext => {
-      const currentSnapshot = readSnapshot()
-      const nodes = currentSnapshot.editingNodes
-      const visibleComponentNodeIds = new Set(nodes.flatMap((node) => (
-        node.type === 'external-component' && node.visible && !node.locked
-          ? [node.id]
-          : []
-      )))
-      return {
-        projectId: currentSnapshot.projectId,
-        scope: currentSnapshot.editingScope,
-        sceneId: currentSnapshot.sceneId,
-        stateId: currentSnapshot.presentationStateId,
-        nodes,
-        componentPackages: currentSnapshot.componentPackages,
-        // Read the synchronous host registry rather than React render state so
-        // a blur racing with target cleanup can never commit a retired target.
-        targets: [...componentTargetsByHostRef.current.values()]
-          .flatMap(value => value.targets)
-          .filter((target) => (
-            target.scope === currentSnapshot.editingScope &&
-            (target.scope === 'global' ||
-              target.sceneId === currentSnapshot.sceneId) &&
-            visibleComponentNodeIds.has(target.nodeId)
-          )),
-      }
-    },
-    [],
-  )
-
-  const currentRuntimeTargetEditContext = useCallback(
-    (): RuntimeTargetEditContext => {
-      const currentSnapshot = readSnapshot()
-      return {
-        projectId: currentSnapshot.projectId,
-        scope: currentSnapshot.editingScope,
-        sceneId: currentSnapshot.sceneId,
-        stateId: currentSnapshot.presentationStateId,
-        // Read the synchronous host registry so a commit racing with target
-        // cleanup cannot write into a replacement Runtime that happens to use
-        // the same content or asset key.
-        targets: [...runtimeTargetsByHostRef.current.values()]
-          .flatMap(value => value.targets)
-          .filter((target) => (
-            (target.kind === 'text' || target.kind === 'asset') &&
-            runtimeTargetMatchesEditingContext(
-              target,
-              currentSnapshot.editingScope,
-              currentSnapshot.sceneId,
-            )
-          )),
-      }
-    },
-    [],
-  )
-
-  const beginComponentTextEdit = useCallback((
-    target: Readonly<ComponentAuthoringTextTarget>,
-  ) => {
-    ports.content.commitTextEdit()
-    const result = beginComponentTextEditSession(
-      target,
-      currentComponentTextEditContext(),
-    )
-    if (!result.ok) {
-      ports.canvas.setStatus(
-        result.reason === 'context-changed'
-          ? '组件文字编辑上下文已切换，请重新选择'
-          : '组件文字目标已失效，请重新选择',
-      )
-      setActiveComponentTextSession(null)
-      return
-    }
-    ports.selection.selectNode(result.session.nodeId)
-    if (result.session.source === 'auto') {
-      // Text the component renders itself: no prop draft; the edit becomes a rule when committed.
-      componentDraftRef.current = null
-      setComponentAutoValue(result.value)
-      setActiveRuntimeTextSession(null)
-      setActiveComponentTextSession(result.session)
-      return
-    }
-    const backendSession = backendRef.current?.getSession()
-    if (!backendSession) return
-    const begun = ports.authoring.runFieldTextIntent({
-      kind: 'begin-field', target: makeSlideAuthoringTarget(backendSession, result.session.nodeId, 'item'),
-      field: { kind: 'component-prop', packageId: result.session.componentId, version: result.session.componentVersion, key: result.session.key },
-    })
-    if (!begun.ok) { ports.canvas.setStatus(begun.reason); return }
-    componentDraftRef.current = begun.edit
-    setActiveRuntimeTextSession(null)
-    setActiveComponentTextSession(result.session)
-  }, [currentComponentTextEditContext])
-
-  const refreshDynamicRecoveryTasks = useCallback(() => {
-    setDynamicRecoveryView({ documentId: documentId ?? null, tasks: documentId ? ports.runtime.dynamicFallbackState(documentId).filter(task =>
-      task.status === 'failed' || task.status === 'conflict' || task.status === 'blocked' || task.status === 'unknown') : [] })
-  }, [documentId, ports.runtime])
-  useEffect(() => { refreshDynamicRecoveryTasks() }, [refreshDynamicRecoveryTasks])
-
-  const submitDynamicFallback = useCallback(async (
-    intent: DynamicFallbackIntent,
-    labels: { pending: string; applied: string; unchanged: string },
-  ): Promise<'applied' | 'unchanged' | null> => {
-    try {
-      return await runSlideDynamicFallbackSubmission(intent, ports.runtime.submitDynamicFallbackIntent,
-        message => { if (documentIdRef.current === intent.documentId) ports.canvas.setStatus(message) }, labels)
-    } finally {
-      refreshDynamicRecoveryTasks()
-    }
-  }, [ports.canvas, ports.runtime, refreshDynamicRecoveryTasks])
-
-  const retryDynamicFallback = useCallback(async (taskId: string) => {
-    setRecoveringDynamicTaskId(taskId)
-    ports.canvas.setStatus('正在重试并核实动态内容提交结果')
-    try {
-      const result = await ports.runtime.retryDynamicFallback(taskId)
-      const failure = slideDynamicFallbackFailureMessage(result)
-      if (documentIdRef.current === documentId) ports.canvas.setStatus(failure ?? (result.status === 'applied' ? '动态内容及静态后备图已确认' : '动态内容没有变化'))
-    } catch (error) {
-      if (documentIdRef.current === documentId) ports.canvas.setStatus(error instanceof Error ? error.message : String(error))
-    } finally {
-      refreshDynamicRecoveryTasks()
-      setRecoveringDynamicTaskId(null)
-    }
-  }, [documentId, ports.canvas, ports.runtime, refreshDynamicRecoveryTasks])
-
-  const discardDynamicFallback = useCallback((taskId: string) => {
-    try {
-      ports.runtime.discardDynamicFallback(taskId)
-      ports.canvas.setStatus('已放弃未写入的动态内容修改')
-    } catch (error) {
-      ports.canvas.setStatus(error instanceof Error ? error.message : String(error))
-    } finally {
-      refreshDynamicRecoveryTasks()
-    }
-  }, [ports.canvas, ports.runtime, refreshDynamicRecoveryTasks])
-
-  const commitComponentText = useCallback(async (
-    session: Readonly<ComponentTextEditSession>,
-    value: string,
-  ) => {
-    const result = resolveComponentTextEdit(
-      session,
-      value,
-      currentComponentTextEditContext(),
-    )
-    if (!result.ok) {
-      ports.canvas.setStatus(
-        result.reason === 'context-changed'
-          ? '组件文字编辑上下文已切换，未写入修改'
-          : '组件文字目标已失效，未写入修改',
-      )
-      setActiveComponentTextSession(null)
-      return
-    }
-    if (session.source === 'auto' && session.lightEdit) {
-      if (!documentId || !courseLocationId) { ports.canvas.setStatus('当前页面无法提交组件文字，未写入修改'); return }
-      const status = await submitDynamicFallback({
-        kind: 'component.text', documentId, projectId: session.projectId, locationId: courseLocationId, itemId: session.nodeId,
-        original: session.lightEdit.original, ...(session.lightEdit.region ? { region: session.lightEdit.region } : {}), text: value, expectedText: session.initialValue,
-      }, { pending: '正在生成静态后备图，组件文字尚未写入', applied: '已更新组件文字；组件源码没有改动', unchanged: '组件文字没有变化' })
-      if (status) setActiveComponentTextSession(current => current === session ? null : current)
-      return
-    }
-    const draft = componentDraftRef.current
-    if (!draft || draft.kind !== 'field-text' || draft.textField?.kind !== 'component-prop') return
-    const committed = ports.authoring.runFieldTextIntent({ kind: 'commit', expectedEdit: draft })
-    if (!committed.ok) { ports.canvas.setStatus(committed.reason); return }
-    componentDraftRef.current = null
-    ports.canvas.setStatus(
-      session.stateId === null || session.scope === 'global'
-        ? '已更新组件文字'
-        : '已更新当前演示状态中的组件文字',
-    )
-    setActiveComponentTextSession(null)
-  }, [currentComponentTextEditContext, documentId, courseLocationId, submitDynamicFallback])
-
-  const beginRuntimeTextEdit = useCallback((
-    target: Readonly<RuntimeAuthoringTarget>,
-  ) => {
-    if (target.kind !== 'text') return
-    ports.content.commitTextEdit()
-    const result = beginRuntimeTargetEditSession(
-      target,
-      currentRuntimeTargetEditContext(),
-    )
-    if (!result.ok) {
-      ports.canvas.setStatus(
-        result.reason === 'context-changed'
-          ? '运行时文字编辑上下文已切换，请重新选择'
-          : '运行时文字目标已失效，请重新选择',
-      )
-      setActiveRuntimeTextSession(null)
-      return
-    }
-    const courseTarget = ports.runtime.captureRuntimeContentTextTarget(result.session)
-    if (!courseTarget) {
-      ports.canvas.setStatus('运行时文字目标没有可提交的 V9 作者地址，或当前 Runtime 已锁定')
-      setActiveRuntimeTextSession(null)
-      return
-    }
-    setActiveComponentTextSession(null)
-    setActiveRuntimeTextSession(Object.freeze({
-      liveSession: result.session,
-      courseTarget,
-    }))
-  }, [currentRuntimeTargetEditContext])
-
-  const commitRuntimeText = useCallback(async (
-    session: Readonly<SlideRuntimeTextEditSession>,
-    value: string,
-  ) => {
-    const result = validateRuntimeTargetEditSession(
-      session.liveSession,
-      currentRuntimeTargetEditContext(),
-    )
-    if (!result.ok) {
-      ports.canvas.setStatus(
-        result.reason === 'context-changed'
-          ? '运行时文字编辑上下文已切换，未写入修改'
-          : '运行时文字目标已失效，未写入修改',
-      )
-      setActiveRuntimeTextSession(null)
-      return
-    }
-    if (!documentId || !courseLocationId) {
-      ports.canvas.setStatus('当前页面无法提交运行时文字，未写入修改')
-      return
-    }
-    const status = await submitDynamicFallback({
-      kind: 'runtime.text', documentId, projectId: session.liveSession.projectId, locationId: courseLocationId,
-      itemId: session.courseTarget.courseTarget.itemId, target: session.courseTarget, value,
-    }, {
-      pending: '正在生成静态后备图，运行时文字尚未写入',
-      applied: session.courseTarget.courseTarget.owner === 'global'
-        ? '已更新全局运行时文字；此内容由整课共享'
-        : '已更新运行时文字；此内容由当前场景的所有状态共享',
-      unchanged: '运行时文字没有变化',
-    })
-    // Light-edit rules reach the host through the rule sync; only keyed text is patched here.
-    if (status === 'applied' && !session.courseTarget.override) {
-      const target = session.courseTarget.courseTarget
-      postAuthoringPatch({
-        kind: 'runtime-content',
-        target: {
-          kind: 'runtime-content',
-          scope: target.owner === 'global' ? 'global' : 'scene',
-          nodeId: target.itemId,
-          key: session.courseTarget.contentKey,
-        },
-        value,
-      })
-    }
-    if (status) setActiveRuntimeTextSession(current => current === session ? null : current)
-  }, [currentRuntimeTargetEditContext, documentId, courseLocationId, postAuthoringPatch, submitDynamicFallback])
-
-  const replaceRuntimeAsset = useCallback(async (
-    target: Readonly<RuntimeAuthoringTarget>,
-  ) => {
-    if (target.kind !== 'asset' || replacingRuntimeAssetTargetIdsRef.current.has(target.targetId)) return
-    const started = beginRuntimeTargetEditSession(
-      target,
-      currentRuntimeTargetEditContext(),
-    )
-    if (!started.ok) {
-      ports.canvas.setStatus(
-        started.reason === 'context-changed'
-          ? '运行时图片编辑上下文已切换，请重新选择'
-          : '运行时图片目标已失效，请重新选择',
-      )
-      return
-    }
-    const session = started.session
-    const courseTarget = ports.runtime.captureRuntimeAssetReplacementTarget(session)
-    if (!courseTarget) {
-      ports.canvas.setStatus('运行时图片目标没有可提交的 V9 作者地址，请重新选择')
-      return
-    }
-    replacingRuntimeAssetTargetIdsRef.current.add(session.targetId)
-    setReplacingRuntimeAssetTargetId(session.targetId)
-    try {
-      const imported = await onSelectImageAsset()
-      if (!imported) return
-      const result = validateRuntimeTargetEditSession(
-        session,
-        currentRuntimeTargetEditContext(),
-      )
-      if (!result.ok) {
-        ports.canvas.setStatus(
-          result.reason === 'context-changed'
-            ? '运行时图片编辑上下文已切换，未写入修改'
-            : '运行时图片目标已失效，未写入修改',
-        )
-        return
-      }
-      if (readSnapshot().projectRevision !== courseTarget.courseTarget.documentRevision) {
-        ports.canvas.setStatus('工程内容已改变，运行时图片目标已过期，未写入修改')
-        return
-      }
-      if (!documentId || !courseLocationId) {
-        ports.canvas.setStatus('当前页面无法提交运行时图片，未写入修改')
-        return
-      }
-      await submitDynamicFallback({
-        kind: 'runtime.asset', documentId, projectId: session.projectId, locationId: courseLocationId,
-        itemId: courseTarget.courseTarget.itemId, target: courseTarget, asset: imported.meta, bytes: imported.bytes,
-      }, {
-        pending: '正在生成静态后备图，运行时图片尚未写入',
-        applied: courseTarget.courseTarget.owner === 'global'
-          ? '已替换全局运行时图片；此素材由整课共享'
-          : '已替换运行时图片；此素材由当前场景的所有状态共享',
-        unchanged: '运行时图片未改变',
-      })
-    } finally {
-      replacingRuntimeAssetTargetIdsRef.current.delete(session.targetId)
-      setReplacingRuntimeAssetTargetId(replacingRuntimeAssetTargetIdsRef.current.values().next().value ?? null)
-    }
-  }, [
-    currentRuntimeTargetEditContext,
-    onSelectImageAsset,
-    documentId,
-    courseLocationId,
-    submitDynamicFallback,
-  ])
-
-  /** M15: replaces a picture a component shows from its package with a managed image; the component is rebuilt with it. */
-  const replaceComponentImage = useCallback(async (target: Readonly<ComponentAuthoringImageTarget>) => {
-    if (replacingComponentImageTargetIdsRef.current.has(target.targetId)) return
-    const sourceRevision = readSnapshot().projectRevision
-    replacingComponentImageTargetIdsRef.current.add(target.targetId)
-    setReplacingComponentImageTargetId(target.targetId)
-    try {
-      const imported = await onSelectImageAsset()
-      if (!imported) return
-      const current = componentImageTargetsByHostRef.current
-      const currentSnapshot = readSnapshot()
-      if (documentIdRef.current !== documentId || currentSnapshot.projectId !== snapshot.projectId || currentSnapshot.locationId !== courseLocationId || currentSnapshot.projectRevision !== sourceRevision ||
-        ![...current.values()].flat().some(candidate => candidate.targetId === target.targetId)) {
-        ports.canvas.setStatus('组件图片目标已失效，未写入修改')
-        return
-      }
-      if (!documentId || !courseLocationId) {
-        ports.canvas.setStatus('当前页面无法提交组件图片，未写入修改')
-        return
-      }
-      await submitDynamicFallback({
-        kind: 'component.asset', documentId, projectId: snapshot.projectId, locationId: courseLocationId, itemId: target.nodeId,
-        assetKey: target.assetKey, asset: imported.meta, bytes: imported.bytes,
-      }, { pending: '正在生成静态后备图，组件图片尚未写入', applied: '已替换组件图片；组件源码没有改动', unchanged: '组件图片未改变' })
-    } finally {
-      replacingComponentImageTargetIdsRef.current.delete(target.targetId)
-      setReplacingComponentImageTargetId(replacingComponentImageTargetIdsRef.current.values().next().value ?? null)
-    }
-  }, [onSelectImageAsset, documentId, courseLocationId, snapshot.projectId, submitDynamicFallback])
-
-  const canvasAuthoringHitAtClientPoint = useCallback((
-    clientX: number,
-    clientY: number,
-  ): CanvasAuthoringHit | null => {
-    const viewport = stageViewportRef.current
-    if (!viewport || !(authoringCanvasInteractive || liveEditInteractive)) return null
-    const rect = viewport.getBoundingClientRect()
-    if (rect.width <= 0 || rect.height <= 0) return null
-    const transform = createStageViewportTransform({
-      viewport: {
-        x: rect.left,
-        y: rect.top,
-        width: rect.width,
-        height: rect.height,
-      },
-      zoom: view.zoom,
-      pan: { x: view.x, y: view.y },
-      stage: slideCanvas,
-      fit: 'page',
-    })
-    const point = clientToWorld(transform, { x: clientX, y: clientY })
-    const ordered = [...visibleRuntimeTargets].sort((left, right) => (
-      (left.layer === 'overlay' ? 1 : 0) -
-      (right.layer === 'overlay' ? 1 : 0)
-    ))
-    const runtimeTarget = ordered.reverse().find((candidate) => (
-      point.x >= candidate.bounds.x &&
-      point.x <= candidate.bounds.x + candidate.bounds.width &&
-      point.y >= candidate.bounds.y &&
-      point.y <= candidate.bounds.y + candidate.bounds.height
-    )) ?? null
-    if (runtimeTarget?.layer === 'overlay') {
-      return { kind: 'runtime', target: runtimeTarget }
-    }
-    const componentTarget = [...visibleComponentTargets].reverse().find(
-      (candidate) => pointInsideRotatedBounds(
-        point,
-        candidate.bounds,
-        candidate.rotation,
-      ),
-    )
-    if (componentTarget) {
-      return { kind: 'component', target: componentTarget }
-    }
-    // A picture the component shows from its package (M15): double-clicking it replaces it.
-    const componentImage = [...visibleComponentImageTargets].reverse().find(
-      (candidate) => pointInsideRotatedBounds(point, candidate.bounds, candidate.rotation),
-    )
-    if (componentImage) return { kind: 'component-image', target: componentImage }
-    if (
-      runtimeTarget?.layer === 'underlay' &&
-      (slideEditorView?.layers ?? []).some((layer) => (
-        layer.effectiveVisible &&
-        pointInsideRotatedBounds(point, {
-          x: layer.item.frame.x,
-          y: layer.item.frame.y,
-          width: layer.item.frame.width,
-          height: layer.item.frame.height,
-        }, layer.item.rotation)
-      ))
-    ) {
-      return null
-    }
-    return runtimeTarget ? { kind: 'runtime', target: runtimeTarget } : null
-  }, [
-    authoringCanvasInteractive,
-    liveEditInteractive,
-    slideCanvas,
-    slideEditorView,
-    visibleRuntimeTargets,
-    view.x,
-    view.y,
-    view.zoom,
-    visibleComponentTargets,
-    visibleComponentImageTargets,
-  ])
-
-  useLayoutEffect(() => {
-    const host = gameHostRef.current
-    if (!host) return
-    const handle = createEditorGame(host, {
-      fixedLogicalSize: true,
-      stage: slideCanvas,
-    })
-    gameRef.current = handle
-    const findCanvas = () => {
-      const element = host.querySelector('canvas')
-      if (element) setCanvas(element)
-    }
-    findCanvas()
-    const observer = new MutationObserver(findCanvas)
-    observer.observe(host, { childList: true })
-
-    const unsubscribers = [
-      handle.bridge.onNodeSelected(({ nodeIds, additive }) => {
-        const currentSnapshot = readSnapshot()
-        // The formula dialog is modal. A DOM-native formula double click can
-        // still leave one delayed selection event queued in the underlying
-        // Phaser canvas; accepting it would clear the content edit that the
-        // same gesture just opened.
-        if (currentSnapshot.contentEdit?.kind === 'formula') return
-        if (!additive) {
-          if (
-            nodeIds.length === currentSnapshot.selectedNodeIds.length &&
-            nodeIds.every((nodeId, index) => nodeId === currentSnapshot.selectedNodeIds[index])
-          ) return
-          ports.selection.selectNodes(nodeIds)
-          return
-        }
-        const merged = new Set(currentSnapshot.selectedNodeIds)
-        for (const nodeId of nodeIds) {
-          if (merged.has(nodeId)) merged.delete(nodeId)
-          else merged.add(nodeId)
-        }
-        ports.selection.selectNodes([...merged])
-      }),
-      handle.bridge.onNodesTransformPreview(({ nodes }) => {
-        const currentSnapshot = readSnapshot()
-        if (currentSnapshot.canvasMode !== 'edit') return
-        const currentById = new Map(
-          currentSnapshot.editingNodes.map((node) => [node.id, node]),
-        )
-        for (const { nodeId, ...patch } of nodes) {
-          const current = currentById.get(nodeId)
-          if (!current) continue
-          const normalizedPatch = withDirectionAwareTextAutoSize(
-            current,
-            patch,
-          )
-          queueAuthoringNodePatch(
-            currentSnapshot.editingScope,
-            { ...current, ...normalizedPatch } as AuthoringPatchNode,
-          )
-        }
-      }),
-      handle.bridge.onNodeMoveEnd(() => {}),
-      handle.bridge.onNodesMoveEnd(() => {}),
-      handle.bridge.onNodeResizeEnd(() => {}),
-      handle.bridge.onNodeRotateEnd(() => {}),
-      handle.bridge.onNodesTransformEnd(() => {}),
-      handle.bridge.onTextDoubleClick((nodeId) => {
-        setActiveFormulaEditSession(null)
-        setActiveComponentTextSession(null)
-        setActiveRuntimeTextSession(null)
-        ports.selection.selectNode(nodeId)
-        ports.content.beginTextEdit(nodeId, 'canvas')
-      }),
-      handle.bridge.onFormulaDoubleClick((nodeId) => { startFormulaEdit(nodeId) }),
-    ]
-    // The quick bar's and the menu's 编辑公式 open the same editor as a double-click.
-    function startFormulaEdit(nodeId: string): boolean {
-      const currentSnapshot = readSnapshot()
-      const view = currentSnapshot.view
-      if (!view || currentSnapshot.canvasMode !== 'edit') return false
-      const item = nativeSlideLayer(view.layers, nodeId, 'formula')
-      if (!item) return false
-      if (currentSnapshot.editingTextNodeId) {
-        ports.content.cancelTextEdit()
-        handle.bridge.setTextEditing(null)
-      }
-      setActiveComponentTextSession(null)
-      setActiveRuntimeTextSession(null)
-      ports.selection.selectNode(nodeId)
-      ports.content.beginTextEdit(nodeId, 'canvas')
-      setActiveFormulaEditSession({
-        projectId: currentSnapshot.projectId,
-        scope: currentSnapshot.editingScope,
-        sceneId: view.sceneId,
-        stateId: currentSnapshot.presentationStateId,
-        nodeId,
-      })
-      return true
-    }
-    formulaEditRef.current = startFormulaEdit
-
-    return () => {
-      formulaEditRef.current = null
-      observer.disconnect()
-      unsubscribers.forEach((unsubscribe) => unsubscribe())
-      handle.destroy()
-      gameRef.current = null
-      setCanvas(null)
-    }
-  }, [queueAuthoringNodePatch, slideCanvas])
-
-  useLayoutEffect(() => {
-    // Scale.NONE deliberately leaves sizing to the unified stage, but Phaser
-    // then does not observe ancestor CSS transforms. Refresh its cached canvas
-    // bounds after every zoom/pan commit so pointer coordinates stay in the
-    // same 1280×720 space as the Player and authoring targets.
-    gameRef.current?.game.scale.refresh()
-  }, [
-    stageTransform.scale,
-    stageTransform.stageRect.x,
-    stageTransform.stageRect.y,
-  ])
-
-  useEffect(() => {
-    const handle = gameRef.current
-    if (!handle) return
-    const previous = previousSceneRef.current
-    const componentsChanged =
-      previousComponentPackagesRef.current !== componentPackages
-    const editingId = readSnapshot().editingTextNodeId
-
-    if (
-      previous &&
-      previous.id === document.id &&
-      !componentsChanged &&
-      editingId
-    ) {
-      const previousIds = previous.nodes.map((node) => node.id).join('|')
-      const nextIds = document.nodes.map((node) => node.id).join('|')
-      const authoringScope = publishedAuthoringInitRef.current?.authoringScope
-        ?? backend?.getSnapshot().scope
-        ?? editingScope
-      const localSource = localPublishedAuthoringSource(authoringScope)
-      const currentPublished = extractPublishedAuthoringState(slideEditorView, localSource)
-      const prevPublished = previousPublishedStateRef.current
-      const publishedDirty = prevPublished ? (
-        prevPublished.backgroundColor !== currentPublished.backgroundColor
-        || prevPublished.backgroundAssetId !== currentPublished.backgroundAssetId
-        || prevPublished.localNodes.map((n) => n.id).join('|') !== currentPublished.localNodes.map((n) => n.id).join('|')
-        || prevPublished.globalNodes.map((n) => n.id).join('|') !== currentPublished.globalNodes.map((n) => n.id).join('|')
-        || currentPublished.localNodes.some((node) => {
-          if (node.id === editingId) return false
-          const before = prevPublished.localNodes.find((item) => item.id === node.id)
-          return !before || !nodesEqual(before, node)
-        })
-        || currentPublished.globalNodes.some((node) => {
-          if (node.id === editingId) return false
-          const before = prevPublished.globalNodes.find((item) => item.id === node.id)
-          return !before || !nodesEqual(before, node)
-        })
-      ) : false
-      const othersDirty =
-        previousIds !== nextIds
-        || previous.backgroundColor !== document.backgroundColor
-        || previous.backgroundAssetId !== document.backgroundAssetId
-        || document.nodes.some((node) => {
-          if (node.id === editingId) return false
-          const before = previous.nodes.find((item) => item.id === node.id)
-          return !before || !nodesEqual(before, node)
-        })
-        || publishedDirty
-      if (!othersDirty) return
-    }
-
-    if (
-      !previous ||
-      previous.id !== document.id ||
-      componentsChanged
-    ) {
-      handle.bridge.loadScene(document, componentPackages)
-    } else {
-      const previousById = new Map(previous.nodes.map((node) => [node.id, node]))
-      const nextById = new Map(document.nodes.map((node) => [node.id, node]))
-      previous.nodes.forEach((node) => {
-        if (!nextById.has(node.id)) handle.bridge.removeNode(node.id)
-      })
-      document.nodes.forEach((node) => {
-        const before = previousById.get(node.id)
-        if (!before) handle.bridge.addNode(node)
-        else if (!nodesEqual(before, node) && node.id !== editingId) {
-          handle.bridge.applyNode(node)
-        }
-      })
-      const previousIds = previous.nodes.map((node) => node.id).join('|')
-      const nextIds = document.nodes.map((node) => node.id).join('|')
-      if (previousIds !== nextIds) {
-        handle.bridge.reorderNodes(document.nodes.map((node) => node.id))
-      }
-    }
-    if (canvasMode === 'edit' && authoringReadyRef.current) {
-      const authoringScope = publishedAuthoringInitRef.current?.authoringScope
-        ?? backend?.getSnapshot().scope
-        ?? editingScope
-      const localSource = localPublishedAuthoringSource(authoringScope)
-      const currentPublished = extractPublishedAuthoringState(slideEditorView, localSource)
-      const previousPublished = previousPublishedStateRef.current
-
-      if (previousPublished) {
-        const previousLocalById = new Map(
-          previousPublished.localNodes.map((node) => [node.id, node]),
-        )
-        for (const node of currentPublished.localNodes) {
-          if (node.id === editingId) continue
-          const before = previousLocalById.get(node.id)
-          if (!before || !nodesEqual(before, node)) {
-            queueAuthoringNodePatch('scene', node)
-          }
-        }
-
-        const previousGlobalById = new Map(
-          previousPublished.globalNodes.map((node) => [node.id, node]),
-        )
-        for (const node of currentPublished.globalNodes) {
-          if (node.id === editingId) continue
-          const before = previousGlobalById.get(node.id)
-          if (!before || !nodesEqual(before, node)) {
-            queueAuthoringNodePatch('global', node)
-          }
-        }
-
-        if (editingScope === 'scene') {
-          if (
-            previousPublished.backgroundColor !== currentPublished.backgroundColor ||
-            previousPublished.backgroundAssetId !== currentPublished.backgroundAssetId
-          ) {
-            postAuthoringPatch({
-              kind: 'scene-background',
-              target: { kind: 'scene-background', scope: 'scene' },
-              backgroundColor: currentPublished.backgroundColor,
-              backgroundAssetId: currentPublished.backgroundAssetId,
-            })
-          }
-          const previousOrder = previousPublished.localNodes.map((node) => node.id).join('|')
-          const nextOrder = currentPublished.localNodes.map((node) => node.id).join('|')
-          if (previousOrder !== nextOrder) {
-            postAuthoringPatch({
-              kind: 'scene-order',
-              target: { kind: 'scene-order', scope: 'scene' },
-              nodeIds: currentPublished.localNodes.map((node) => node.id),
-            })
-          }
-        }
-      }
-
-      previousPublishedStateRef.current = structuredClone(currentPublished)
-      if (editingId && previousPublishedStateRef.current && previousPublished) {
-        const oldLocal = previousPublished.localNodes.find((node) => node.id === editingId)
-        if (oldLocal) {
-          const idx = previousPublishedStateRef.current.localNodes.findIndex((node) => node.id === editingId)
-          if (idx >= 0) {
-            previousPublishedStateRef.current.localNodes[idx] = structuredClone(oldLocal)
-          }
-        }
-        const oldGlobal = previousPublished.globalNodes.find((node) => node.id === editingId)
-        if (oldGlobal) {
-          const idx = previousPublishedStateRef.current.globalNodes.findIndex((node) => node.id === editingId)
-          if (idx >= 0) {
-            previousPublishedStateRef.current.globalNodes[idx] = structuredClone(oldGlobal)
-          }
-        }
-      }
-    }
-    previousSceneRef.current = structuredClone(document)
-    previousComponentPackagesRef.current = componentPackages
-    if (editingId && previous) {
-      const oldNode = previous.nodes.find((node) => node.id === editingId)
-      if (oldNode) {
-        const index = previousSceneRef.current.nodes.findIndex((node) => node.id === editingId)
-        if (index >= 0) {
-          previousSceneRef.current.nodes[index] = structuredClone(oldNode)
-        }
-      }
-    }
-  }, [
-    backend,
-    canvasMode,
-    componentPackages,
-    document,
-    editingScope,
-    postAuthoringPatch,
-    queueAuthoringNodePatch,
-    slideEditorView,
-  ])
-
-  useEffect(() => {
-    const previous = previewPaintedRef.current
-    const target = activeTextPreview?.target.kind === 'course-object'
-      ? activeTextPreview.target : null
-    const paintCanonical = (itemId: string) => {
-      const layer = slideEditorView?.layers.find((candidate) => candidate.selectionId === itemId)
-      if (!layer || layer.item.kind !== 'native' || layer.item.content.nativeType !== 'text') return
-      const item = layer.item as NativeLayerItem
-      const node = courseLayerItemToEditorCanvasNode(item)
-      if (node) gameRef.current?.bridge.applyNode(node)
-      queueAuthoringNodePatch(layer.source === 'global' ? 'global' : 'scene', nativeRenderInputFromV9Item(item))
-    }
-    if (previous && previous.locationId === courseLocationId &&
-      (!target || previous.itemId !== target.itemId || previous.stateId !== target.stateId)) {
-      paintCanonical(previous.itemId)
-      previewPaintedRef.current = null
-    }
-    if (!target || !slideEditorView || !courseLocationId) return
-    const layer = resolveSlideSelectionLayer(slideEditorView, target)
-    if (!layer || layer.item.kind !== 'native' || layer.item.content.nativeType !== 'text') return
-    const item = structuredClone(layer.item) as NativeLayerItem
-    if (item.content.nativeType !== 'text') return
-    const planned = planNativeTextEdit(item.content.data, { text: activeTextPreview!.value })
-    item.content = { nativeType: 'text', data: {
-      ...item.content.data,
-      text: activeTextPreview!.value,
-      runs: planned.ok ? planned.data.runs : [],
-    } }
-    const node = courseLayerItemToEditorCanvasNode(item)
-    if (node) gameRef.current?.bridge.applyNode(node)
-    queueAuthoringNodePatch(layer.source === 'global' ? 'global' : 'scene', nativeRenderInputFromV9Item(item))
-    previewPaintedRef.current = { locationId: courseLocationId, itemId: target.itemId, ...(target.stateId ? { stateId: target.stateId } : {}) }
-  }, [activeTextPreview, acknowledgedPreviewGeneration, courseLocationId, queueAuthoringNodePatch, slideEditorView])
-
-  useEffect(() => {
-    if (!activeTextPreview || activeTextPreview.status !== 'active') return
-    const onUndo = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey) || event.shiftKey || event.key.toLowerCase() !== 'z') return
-      if (isEditableKeyboardTarget(event.target)) return
-      event.preventDefault()
-      event.stopImmediatePropagation()
-      void cancelEditPreview(activeTextPreview)
-    }
-    window.addEventListener('keydown', onUndo, true)
-    return () => window.removeEventListener('keydown', onUndo, true)
-  }, [activeTextPreview])
-
-  useEffect(() => {
-    gameRef.current?.bridge.selectNodes(needsLayerOverlay ? [] : [...selectedNodeIds])
-  }, [selectedNodeIds, needsLayerOverlay])
-
-  useEffect(() => {
-    gameRef.current?.bridge.setTextEditing(editingTextNodeId)
-    if (!editingTextNodeId && selectedNode?.type === 'text') {
-      gameRef.current?.bridge.applyNode(selectedNode)
-    }
-  }, [editingTextNodeId, selectedNode])
-
-  const nativeTextEditor = useSlideNativeTextEditor({
-    readEdit: () => readSnapshot().contentEdit,
-    runFieldTextIntent: intent => ports.authoring.runFieldTextIntent(intent),
-    readBackend: () => backendRef.current,
-    readHost: () => publishedAuthoringHostRef.current,
-    readTransform: () => { const viewport = readCandidateViewport(); return viewport ? createStageViewportTransform(viewport) : null },
-    apply: command => ports.authoring.applySlideCommand(command, { clearContentEdit: true }),
-    report: message => ports.canvas.setStatus(message),
-  }, `${snapshot.projectId}:${courseLocationId}:${activePresentationStateId}:${publishedAuthoringOwnerScope}:${canvasMode}`)
-
-  const readDropPoint = (clientX: number, clientY: number) => {
-    const viewport = stageViewportRef.current
-    if (!viewport) return null
-    const viewportRect = viewport.getBoundingClientRect()
-    if (viewportRect.width <= 0 || viewportRect.height <= 0) return null
-    const transform = createStageViewportTransform({
-      viewport: {
-        x: viewportRect.left,
-        y: viewportRect.top,
-        width: viewportRect.width,
-        height: viewportRect.height,
-      },
-      zoom: view.zoom,
-      pan: { x: view.x, y: view.y },
-      stage: slideCanvas,
-      fit: 'page',
-    })
-    const rect = transform.stageRect
-    if (
-      clientX < rect.x ||
-      clientX > rect.x + rect.width ||
-      clientY < rect.y ||
-      clientY > rect.y + rect.height
-    ) {
-      return null
-    }
-    return clientToWorld(transform, { x: clientX, y: clientY })
-  }
-
-  const onDrop = (event: React.DragEvent) => {
-    event.preventDefault()
-    if (event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE)) {
-      event.stopPropagation()
-      setMediaDragOver(false)
-      if (canvasMode !== 'edit' || editingScope !== 'scene' || !courseLocationId || !slideEditorView || !onDropWorkspaceMedia) {
-        ports.canvas.setStatus('请切换到可编辑的场景内容层后拖入媒体')
-        return
-      }
-      const point = readDropPoint(event.clientX, event.clientY)
-      if (!point) { ports.canvas.setStatus('请将媒体拖到画布内'); return }
-      const target = { documentId: documentId ?? null, projectId: snapshot.projectId, revision: snapshot.projectRevision,
-        locationId: courseLocationId, surfaceId: slideEditorView.surfaceId, sessionGeneration: snapshot.sessionGeneration }
-      const raw = event.dataTransfer.getData(WORKSPACE_MEDIA_DRAG_TYPE)
-      void deliverWorkspaceMediaDrop(raw, mediaSource, { surface: 'slide', x: point.x, y: point.y }, target, onDropWorkspaceMedia,
-        () => mediaSourceRef.current.directory === mediaSource.directory && mediaSourceRef.current.files === mediaSource.files)
-        .then(result => { if (!result.ok) ports.canvas.setStatus(result.reason ?? '媒体未插入') })
-      return
-    }
-    if (canvasMode !== 'edit') return
-    const value = event.dataTransfer.getData('application/x-courseware-element')
-    if (!value) return
-    const point = readDropPoint(event.clientX, event.clientY)
-    if (!point) return
-    const { x, y } = point
-    if (value === 'text') ports.content.addTextNode(x, y)
-    else if (value === 'formula') ports.content.addFormulaNode(x, y)
-    else if (value === 'rectangle') ports.content.addRectangleNode(x, y)
-    else if (value === 'table') ports.content.addTableNode(x, y)
-    else if (value.startsWith('chart:')) {
-      ports.content.addChartNode(
-        value.slice('chart:'.length) as 'bar' | 'line' | 'area' | 'pie' | 'donut',
-        x,
-        y,
-      )
-    }
-    else if (value.startsWith('shape:')) {
-      ports.content.addShapeNode(value.slice('shape:'.length), x, y)
-    }
-    else if (value === 'image') onAddImage(x, y)
-    else if (value === 'video') onAddVideo(x, y)
-    else if (value.startsWith('component-preset:')) {
-      const [encodedPackageId, encodedPresetId] = value
-        .slice('component-preset:'.length)
-        .split(':', 2)
-      if (encodedPackageId && encodedPresetId) {
-        ports.content.addExternalComponentNode(
-          decodeURIComponent(encodedPackageId),
-          x,
-          y,
-          decodeURIComponent(encodedPresetId),
-        )
-      }
-    }
-    else if (value.startsWith('component:')) {
-      ports.content.addExternalComponentNode(value.slice('component:'.length), x, y)
-    }
-  }
-
-  const wheelZoom = useRef({ canvasMode, view, stageTransform, live: false })
-  wheelZoom.current = { canvasMode, view, stageTransform, live: liveScene !== null }
-  const hasStage = Boolean(snapshot.projectId && slideEditorView)
-  useEffect(() => {
-    // React attaches wheel listeners as passive; Ctrl+wheel zoom must keep the window itself from zooming.
     const element = workspaceRef.current
     if (!element) return
     const zoomByWheel = (event: WheelEvent) => {
-      const { canvasMode, view, stageTransform, live } = wheelZoom.current
-      if (canvasMode !== 'edit' || live) return
-      if (event.ctrlKey || event.metaKey) {
-        event.preventDefault()
-        setZoom(view.zoom + (event.deltaY < 0 ? 0.1 : -0.1))
-        return
-      }
-      // A page taller (or, zoomed, wider) than the canvas scrolls with the wheel, as in playback.
-      const range = stageViewportPanRange(stageTransform)
-      const sideways = event.shiftKey && !event.deltaX
-      const dx = sideways ? event.deltaY : event.deltaX, dy = sideways ? 0 : event.deltaY
-      const x = range.x && dx ? Math.max(range.x.min, Math.min(range.x.max, view.x - dx)) : view.x
-      const y = range.y && dy ? Math.max(range.y.min, Math.min(range.y.max, view.y - dy)) : view.y
-      if (x === view.x && y === view.y) return
-      event.preventDefault()
-      setView(current => ({ ...current, x, y }))
+      const current = wheel.current
+      if (current.mode !== 'edit' || outsideStage(event.target)) return
+      if (event.ctrlKey || event.metaKey) { event.preventDefault(); setZoom(current.view.zoom + (event.deltaY < 0 ? 0.1 : -0.1)); return }
+      const range = stageViewportPanRange(current.stageTransform)
+      const sideways = event.shiftKey && !event.deltaX, dx = sideways ? event.deltaY : event.deltaX, dy = sideways ? 0 : event.deltaY
+      const x = range.x && dx ? Math.max(range.x.min, Math.min(range.x.max, current.view.x - dx)) : current.view.x
+      const y = range.y && dy ? Math.max(range.y.min, Math.min(range.y.max, current.view.y - dy)) : current.view.y
+      if (x === current.view.x && y === current.view.y) return
+      event.preventDefault(); setView(previous => ({ ...previous, x, y }))
     }
     element.addEventListener('wheel', zoomByWheel, { passive: false })
     return () => element.removeEventListener('wheel', zoomByWheel)
-  }, [hasStage, setZoom])
-
-  if (!snapshot.projectId || !slideEditorView) {
-    return (
-      <main
-        className="workspace"
-        data-testid="slide-workspace-sessionless"
-        role="alert"
-      >
-        <p className="property-hint">{SLIDE_SESSIONLESS_ERROR}</p>
-      </main>
-    )
+  }, [Boolean(project), setZoom])
+  const nativeText = useSlideNativeTextEditor({
+    project: project ?? { schemaVersion: 10, id: '', revision: 0, title: '', definitions: {}, instances: {}, surfaces: [], global: { underlay: [], overlay: [] }, assets: {} },
+    surfaceId: snapshot.surfaceId ?? '', edit: snapshot.contentEdit?.target.documentId === snapshot.documentId ? snapshot.contentEdit : null,
+    begin: ports.beginTextEdit, update: ports.updateDataDraft, updateSpot: ports.updateSpotDraft, setComposing: ports.setTextComposing, commit: ports.commitTextEdit, cancel: ports.cancelTextEdit,
+    undo: ports.undo, redo: ports.redo, host: () => stageRef.current, report: ports.report,
+  }, snapshot.documentId + ':' + snapshot.surfaceId + ':' + snapshot.activeStateId)
+  useEffect(() => {
+    const root = workspaceRef.current
+    if (!root) return
+    const edit = (event: Event) => {
+      const id = (event as CustomEvent<{ itemId: string }>).detail.itemId, current = latest.current.ports.read()
+      if (current.canvasMode !== 'edit' || !current.project?.instances[id]) return
+      const instance = current.project.instances[id], kind = componentDefinitionPresentation(current.project.definitions[instance.definitionId]).builtinKey
+      if (kind === 'guoling.text' || kind === 'guoling.formula') {
+        if (latest.current.ports.beginTextEdit(id)) event.preventDefault()
+      } else {
+        const spot = latest.current.ports.authorSpots?.().find(value => value.instanceId === id && value.kind === 'text' && typeof value.initialValue === 'string')
+        if (spot && latest.current.ports.beginSpotEdit?.(spot)) event.preventDefault()
+      }
+    }
+    root.addEventListener(OBJECT_EDIT_EVENT, edit)
+    return () => root.removeEventListener(OBJECT_EDIT_EVENT, edit)
+  }, [Boolean(project)])
+  const spotTargets = listSlideWorkspaceHitTargets(state()).flatMap(target => spots.filter(spot => spot.instanceId === target.instanceId).map(spot => ({
+    spot, target, frame: { ...spot.localBounds, transform: [...frameToSpaceMatrix(spot.localBounds,
+      frameToSpaceMatrix(target.frame, target.parentToSurface))] as ComponentFrame['transform'] },
+  })))
+  const snapLine = (at: GeometryPoint, disabled = false, exclude?: string) => snapLinePoint(at, collectLineSnapAxes(
+    listSlideWorkspaceHitTargets(state()).map(target => {
+      const bounds = freeTargetBounds(target)
+      return { layerItemId: target.instanceId, bounds: { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height, rotation: 0 },
+        hittable: true, locked: componentIsLocked(project!, target.instanceId) }
+    }), exclude, canvas), scale, disabled).point
+  const spotAt = (at: GeometryPoint) => [...spotTargets].reverse().find(value => frameContainsPoint(value.frame, at))?.spot
+  const beginSpot = (spot: ComponentAuthorSpot, at: GeometryPoint, client: GeometryPoint, captured?: CapturedCourseTarget): boolean => {
+    if (spot.kind !== 'text') return false
+    const opened = typeof spot.initialValue === 'string' ? Boolean(ports.beginSpotEdit?.(spot, captured)) : nativeText.begin(spot.instanceId, at, client)
+    if (opened) ports.select([spot.instanceId])
+    return opened
   }
-
-  return (
-    <main
-      ref={workspaceRef}
-      className={`workspace workspace--${canvasMode}${liveScene ? ' workspace--live' : ''}`}
-      aria-label="画布"
-      style={drawTool ? { cursor: 'crosshair' } : undefined}
-      onDragOver={(event) => {
-        if (canvasMode !== 'edit') return
-        if (onDropWorkspaceMedia && event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE)) {
-          event.preventDefault()
-          event.dataTransfer.dropEffect = 'copy'
-          setMediaDragOver(Boolean(readDropPoint(event.clientX, event.clientY)) && editingScope === 'scene')
-          return
+  const replaceSpot = async (spot: ComponentAuthorSpot, target = ports.capture()) => {
+    if (componentIsLocked(target.editingProject, spot.instanceId)) return
+    try {
+      // Capture the registered address and document before opening the asynchronous picker.
+      authorSpotEdits(target.editingProject, spot, spot.initialValue, target.resources)
+      setReplacingSpot(spot.id)
+      const imported = await onSelectImageAsset()
+      if (!imported) return
+      await ports.commit(authorSpotImageEdits(target.editingProject, spot, imported, target.resources), target, crypto.randomUUID())
+      if (spot.sourceRegion?.kind === 'implementation' || spot.sourceRegion?.encoding)
+        ports.report('图片地址已写入并重新加载组件内容，程序内部运行现场可能重置。')
+    } catch (error) { ports.report(error instanceof Error ? error.message : String(error)) }
+    finally { setReplacingSpot(null) }
+  }
+  const readDropPoint = (x: number, y: number) => {
+    if (!stageRef.current) return null
+    const point = surfacePoint(x, y)
+    return point.x >= 0 && point.x <= canvas.width && point.y >= 0 && point.y <= canvas.height ? point : null
+  }
+  const onDrop = (event: React.DragEvent) => {
+    event.preventDefault(); setMediaDragOver(false)
+    if (snapshot.canvasMode !== 'edit' || !project || !surface) return
+    const at = readDropPoint(event.clientX, event.clientY)
+    if (!at) { ports.report('请将媒体拖到画布内'); return }
+    if (event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE) && onDropWorkspaceMedia) {
+      const source = mediaSource
+      void deliverWorkspaceMediaDrop(event.dataTransfer.getData(WORKSPACE_MEDIA_DRAG_TYPE), source, { surface: 'slide', ...at },
+        { documentId: snapshot.documentId, projectId: project.id, revision: project.revision, locationId: surface.id, surfaceId: surface.id, sessionGeneration: snapshot.activation,
+          captured: ports.capture(snapshot.documentId ?? undefined) },
+        onDropWorkspaceMedia, () => mediaSourceRef.current.directory === source.directory && mediaSourceRef.current.files === source.files)
+        .then(result => { if (!result.ok) ports.report(result.reason ?? '媒体未插入') })
+      return
+    }
+    // The mature palette's drag MIME is retained.
+    const item = event.dataTransfer.getData('application/x-courseware-element')
+    if (item === 'text') ports.addTextNode(at.x, at.y)
+    else if (item === 'formula') ports.addFormulaNode(at.x, at.y)
+    else if (item === 'rectangle') ports.addRectangleNode(at.x, at.y)
+    else if (item === 'table') ports.addTableNode(at.x, at.y)
+    else if (item.startsWith('chart:')) ports.addChartNode(item.slice(6) as Parameters<typeof ports.addChartNode>[0], at.x, at.y)
+    else if (item.startsWith('shape:')) ports.addShapeNode(item.slice(6), at.x, at.y)
+    else if (item === 'image') onAddImage(at.x, at.y)
+    else if (item === 'video') onAddVideo(at.x, at.y)
+    else if (item.startsWith('component-preset:')) {
+      const [packageId, presetId] = item.slice(17).split(':', 2)
+      if (packageId && presetId) ports.addExternalComponentNode(decodeURIComponent(packageId), at.x, at.y, decodeURIComponent(presetId))
+    } else if (item.startsWith('component:')) ports.addExternalComponentNode(item.slice(10), at.x, at.y)
+  }
+  if (!project || !surface) return <main className="workspace" data-testid="slide-workspace-sessionless" role="alert"><p className="property-hint">请先打开或新建课件。</p></main>
+  const controller = displayedTeacherController(project, surface.id, snapshot.selectedInstanceIds)
+  const controllerData = controller?.data && typeof controller.data === 'object' && !Array.isArray(controller.data) ? controller.data : {}
+  const controllerConfig = controller && readTeacherControllerConfig(controllerData)
+  const controllerCollapsed = Boolean(controllerConfig?.collapsible && (ports.teacherController?.read().collapsed ?? controllerConfig.defaultCollapsed))
+  const effectiveProject = { ...project, instances: Object.fromEntries(Object.entries(project.instances).map(([id, instance]) =>
+    [id, linePreview?.instanceId === id ? { ...instance, frame: linePreview.frame } : preview.preview[id] ? { ...instance, frame: preview.preview[id] } : instance])) }
+  const targets = freeSurfaceTargets(effectiveProject, surface.id), selected = selectedFreeTargets(targets, snapshot.selectedInstanceIds)
+  const editableSelected = selected.filter(target => !componentIsLocked(project, target.instanceId))
+  const viewportBounds = stageViewportRef.current?.getBoundingClientRect()
+  const viewportScale = viewportBounds ? viewportBounds.width / viewport.width : 1
+  const chromeMatrix: AffineMatrix = [scale * viewportScale, 0, 0, scale * viewportScale,
+    (viewportBounds?.left ?? 0) + stageTransform.stageRect.x * viewportScale, (viewportBounds?.top ?? 0) + stageTransform.stageRect.y * viewportScale]
+  const background = resolveComponentBackground(project, surface)
+  const backgroundUrl = background.assetId ? snapshot.assetUrls[background.assetId] : undefined
+  const hidden = freeSurfaceTargets(project, surface.id).filter(target => project.instances[target.instanceId]?.visible === false)
+  const hiddenMenu = () => hidden.map(target => ({
+    id: 'show.' + target.instanceId, label: project.instances[target.instanceId].name ?? project.definitions[project.instances[target.instanceId].definitionId]?.title ?? '对象',
+    run: () => { void ports.edit([{ type: 'instance.patch', instanceId: target.instanceId, patch: { visible: true } }]).catch(error => ports.report(String(error))) },
+  }))
+  const selectedInstance = selected.length === 1 ? project.instances[selected[0].instanceId] : null
+  const selectedImplementation = selectedInstance && (selectedInstance.implementationOverride ?? project.definitions[selectedInstance.definitionId]?.implementation)
+  const selectedLine = editableSelected.length === 1 && selectedImplementation?.kind === 'builtin' && selectedImplementation.key === 'guoling.shape'
+    ? shapeDataSchema.safeParse(selectedInstance!.data) : null
+  const lineGeometry = selectedLine?.success ? linePreview?.geometry ?? selectedLine.data.lineGeometry : null
+  const linePoints = selectedLine?.success && lineGeometry && selected.length === 1
+    ? resolveNativeLinePoints(lineGeometry, selected[0].frame.width, selected[0].frame.height).map(at => transformPoint(frameToSpaceMatrix(selected[0].frame, selected[0].parentToSurface), at)) : null
+  const stop = (event: React.PointerEvent) => { event.preventDefault(); event.stopPropagation() }
+  return <main ref={workspaceRef} className={'workspace workspace--' + snapshot.canvasMode + (liveScene ? ' workspace--live' : '')} aria-label="画布"
+    style={snapshot.drawTool ? { cursor: 'crosshair' } : undefined}
+    onDragOver={event => {
+      if (snapshot.canvasMode !== 'edit') return
+      if (event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE) || event.dataTransfer.types.includes('application/x-courseware-element')) {
+        event.preventDefault(); event.dataTransfer.dropEffect = 'copy'
+        setMediaDragOver(Boolean(readDropPoint(event.clientX, event.clientY)))
+      }
+    }} onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setMediaDragOver(false) }} onDrop={onDrop}
+    onPointerDownCapture={event => {
+      if (outsideStage(event.target) || snapshot.canvasMode !== 'edit') return
+      if (event.button === 1 || (event.button === 0 && space.current)) {
+        stop(event); pan.current = { id: event.pointerId, start: { x: event.clientX, y: event.clientY }, x: view.x, y: view.y }
+        setPanning(true); event.currentTarget.setPointerCapture(event.pointerId); return
+      }
+      if (event.button !== 0) return
+      if (snapshot.contentEdit) {
+        if (snapshot.contentEdit.composing || snapshot.drawTool) return
+        stop(event); pointer.current = event.pointerId; event.currentTarget.setPointerCapture(event.pointerId)
+        const pending = { id: event.pointerId, documentId: snapshot.documentId, surfaceId: snapshot.surfaceId, stateId: snapshot.activeStateId,
+          start: { x: event.clientX, y: event.clientY, additive: event.shiftKey || event.ctrlKey || event.metaKey, altKey: event.altKey },
+          latest: { x: event.clientX, y: event.clientY, shiftKey: event.shiftKey, altKey: event.altKey }, ended: false }
+        deferredPointer.current = pending
+        const active = document.activeElement
+        if (active instanceof HTMLElement && active.matches('input,textarea,[contenteditable="true"]')) active.blur()
+        void ports.commitTextEdit().then(async () => {
+          if (deferredPointer.current !== pending) return
+          deferredPointer.current = null
+          const current = latest.current.ports.read()
+          if (current.documentId !== pending.documentId || current.surfaceId !== pending.surfaceId || current.activeStateId !== pending.stateId || current.contentEdit) return
+          setPreview(authoring.current!.pointerDown(pending.start, mapping()))
+          if (pending.ended) setPreview(await authoring.current!.pointerUp(pending.latest, mapping()))
+          else setPreview(authoring.current!.pointerMove(pending.latest, mapping()))
+        }).catch(error => {
+          if (deferredPointer.current === pending) deferredPointer.current = null
+          pointer.current = null
+          ports.report(error instanceof Error ? error.message : String(error))
+        })
+        return
+      }
+      stop(event); pointer.current = event.pointerId; event.currentTarget.setPointerCapture(event.pointerId)
+      const at = surfacePoint(event.clientX, event.clientY)
+      if (snapshot.drawTool) { const start = snapLine(at, event.altKey); draw.current = { start, type: snapshot.drawTool, target: ports.capture() }; setDrawPreview({ start, end: start }); return }
+      const handle = event.target instanceof Element ? event.target.closest('[data-handle]')?.getAttribute('data-handle') as FreeResizeHandle | 'rotate' | null : null
+      const lineHandle = event.target instanceof Element ? event.target.closest('[data-line-handle]')?.getAttribute('data-line-handle') as 'start' | 'end' | 'elbow' | null : null
+      if (lineHandle && selected.length === 1 && lineGeometry) {
+        line.current = { target: ports.capture(), initial: selected[0], instanceId: selected[0].instanceId, handle: lineHandle,
+          matrix: frameToSpaceMatrix(selected[0].frame, selected[0].parentToSurface), frame: selected[0].frame, geometry: lineGeometry }
+        return
+      }
+      setPreview(authoring.current!.pointerDown({ x: event.clientX, y: event.clientY, additive: event.shiftKey || event.ctrlKey || event.metaKey, altKey: event.altKey }, mapping(), handle ?? undefined))
+    }}
+    onPointerMoveCapture={event => {
+      if (pan.current?.id === event.pointerId) { stop(event); const p = pan.current; setView(current => ({ ...current, x: p.x + event.clientX - p.start.x, y: p.y + event.clientY - p.start.y })); return }
+      if (pointer.current !== event.pointerId) {
+        if (snapshot.canvasMode === 'edit') setHoveredSpot(spotAt(surfacePoint(event.clientX, event.clientY))?.id ?? null)
+        return
+      }
+      stop(event)
+      if (deferredPointer.current?.id === event.pointerId) {
+        deferredPointer.current.latest = { x: event.clientX, y: event.clientY, shiftKey: event.shiftKey, altKey: event.altKey }; return
+      }
+      const at = surfacePoint(event.clientX, event.clientY)
+      if (draw.current) { setDrawPreview({ start: draw.current.start, end: snapLine(at, event.altKey) }); return }
+      if (line.current) {
+        const value = line.current, proposal = proposeSlideLineHandle(value.initial, value.geometry, value.handle, snapLine(at, event.altKey, value.instanceId))
+        if (proposal) setLinePreview({ instanceId: value.instanceId, ...proposal }); return
+      }
+      setPreview(authoring.current!.pointerMove({ x: event.clientX, y: event.clientY, altKey: event.altKey, shiftKey: event.shiftKey }, mapping()))
+    }}
+    onPointerUpCapture={event => {
+      if (pan.current?.id === event.pointerId) { stop(event); pan.current = null; setPanning(false); event.currentTarget.releasePointerCapture(event.pointerId); return }
+      if (pointer.current !== event.pointerId) return
+      stop(event); pointer.current = null; event.currentTarget.releasePointerCapture(event.pointerId)
+      if (deferredPointer.current?.id === event.pointerId) {
+        deferredPointer.current.latest = { x: event.clientX, y: event.clientY, shiftKey: event.shiftKey, altKey: event.altKey }
+        deferredPointer.current.ended = true; return
+      }
+      if (draw.current) {
+        const current = draw.current, at = snapLine(surfacePoint(event.clientX, event.clientY), event.altKey); draw.current = null; setDrawPreview(null)
+        if (Math.hypot(at.x - current.start.x, at.y - current.start.y) < 3 / scale) return
+        const proposal = current.type === 'line' ? normalizeStraightLineAuthoring(current.start, at)
+          : normalizeElbowLineAuthoring(current.start, at, 'horizontal', (current.start.x + at.x) / 2)
+        if (proposal) ports.drawShapeNode({ shapeType: current.type, ...proposal }, current.target)
+        ports.setDrawTool(null); return
+      }
+      if (line.current) {
+        const current = line.current, now = state()
+        line.current = null; setLinePreview(null)
+        const actual = listSlideWorkspaceHitTargets(now).find(value => value.instanceId === current.instanceId)
+        if (!now || now.documentId !== current.target.documentId || now.surfaceId !== current.target.surfaceId || now.activeStateId !== current.target.activeStateId
+          || !actual || !sameFreeTarget(current.initial, actual) || componentIsLocked(now.project, current.instanceId)) {
+          ports.report('对象位置或编辑目标已变化，本次端点拖动已取消'); return
         }
-        if (
-          event.dataTransfer.types.includes(
-            'application/x-courseware-element',
-          )
-        ) {
-          event.preventDefault()
-          event.dataTransfer.dropEffect = 'copy'
-        }
-      }}
-      onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setMediaDragOver(false) }}
-      onDrop={onDrop}
-      onPointerDownCapture={(event) => {
-        // The quick bar and the right-click menus are portaled but still React children: their presses must not
-        // hit-test the stage below (nor take the pointer, which would move their click onto the stage).
-        if (outsideStage(event)) return
-        if (event.target instanceof Element && event.target.closest('[data-composition-authoring]')) return
-        if (canvasMode === 'edit' && event.button === 0 &&
-          activeTextPreview?.target.kind === 'course-object') {
-          const domItemId = event.target instanceof Element
-            ? event.target.closest('[data-layer-item-id]')?.getAttribute('data-layer-item-id')
-            : null
-          const viewport = readCandidateViewport()
-          const world = viewport && clientToWorld(createStageViewportTransform(viewport), {
-            x: event.clientX,
-            y: event.clientY,
-          })
-          const hitItemId = domItemId ?? (world
-            ? hitTestV9SlideLayerItems(listSlideWorkspaceHitTargets(backendRef.current), world)?.layerItemId
-            : null)
-          if (hitItemId === activeTextPreview.target.itemId) {
-            event.preventDefault()
-            event.stopPropagation()
-            ports.canvas.setStatus('正在生成文字；完成或停止后可编辑此对象')
-            return
-          }
-        }
-        // A paused try-run page (M15 运行现场) keeps its place: no panning, no native gestures.
-        if (
-          canvasMode === 'edit' && !liveScene &&
-          (event.button === 1 || (event.button === 0 && spacePressedRef.current))
-        ) {
-          event.preventDefault()
-          event.stopPropagation()
-          event.currentTarget.setPointerCapture(event.pointerId)
-          panRef.current = {
-            pointerId: event.pointerId,
-            clientX: event.clientX,
-            clientY: event.clientY,
-            originX: view.x,
-            originY: view.y,
-          }
-          setPanning(true)
-          return
-        }
-        if (
-          slideBackendKind !== 'slide-authoring' ||
-          canvasMode !== 'edit' ||
-          liveScene !== null ||
-          event.button !== 0
-        ) return
-        if (
-          event.target instanceof Element &&
-          event.target.closest(
-            '.canvas-authoring-target, .canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .formula-edit-dialog, .canvas-mode-switch, .canvas-view-controls, .canvas-label',
-          )
-        ) return
-        const currentSnapshot = readSnapshot()
-        if (currentSnapshot.editingTextNodeId || currentSnapshot.contentEdit) {
-          event.preventDefault()
-          event.stopPropagation()
-          const editingId = currentSnapshot.editingTextNodeId
-          if (editingId) {
-            ports.content.commitTextEdit()
-            syncCommittedTextNode(editingId)
-          }
-          return
-        }
-        const viewport = readCandidateViewport()
-        if (!viewport) return
-        if (currentSnapshot.drawTool) {
-          const transform = createStageViewportTransform(viewport)
-          const world = clientToWorld(transform, { x: event.clientX, y: event.clientY })
-          const snapped = snapLinePoint(
-            world,
-            collectLineSnapAxes(listSlideWorkspaceHitTargets(backendRef.current), undefined, slideCanvas),
-            transform.scale,
-            event.altKey,
-          )
-          drawGestureRef.current = {
-            pointerId: event.pointerId,
-            shapeType: currentSnapshot.drawTool,
-            startWorld: snapped.point,
-          }
-          setDrawPreview({ points: [snapped.point], guides: snapped.guideX !== undefined || snapped.guideY !== undefined ? { x: snapped.guideX, y: snapped.guideY } : null })
-          event.currentTarget.setPointerCapture(event.pointerId)
-          event.preventDefault()
-          event.stopPropagation()
-          return
-        }
-        
-        const result = slideAuthoringRef.current.pointerDown({
-          x: event.clientX,
-          y: event.clientY,
-          additive: event.shiftKey || event.ctrlKey || event.metaKey,
-          altKey: event.altKey,
-        }, viewport)
-        if (result.kind !== 'slide-authoring') return
-        candidatePointerActiveRef.current = true
-        setLayerOverlay(result.overlay ?? null)
-        paintSlideTransformPreview(result.preview)
-        if (result.linePreview) paintSlideLinePreview(result.linePreview)
-        setLineDragGuides(result.guides ?? null)
-        event.currentTarget.setPointerCapture(event.pointerId)
-        event.preventDefault()
-        event.stopPropagation()
-      }}
-      onPointerMoveCapture={(event) => {
-        const pan = panRef.current
-        if (!pan || pan.pointerId !== event.pointerId) {
-          const draw = drawGestureRef.current
-          if (draw && draw.pointerId === event.pointerId) {
-            const viewport = readCandidateViewport()
-            if (viewport) {
-              const transform = createStageViewportTransform(viewport)
-              const world = clientToWorld(transform, { x: event.clientX, y: event.clientY })
-              const snapped = snapLinePoint(
-                world,
-                collectLineSnapAxes(listSlideWorkspaceHitTargets(backendRef.current), undefined, slideCanvas),
-                transform.scale,
-                event.altKey,
-              )
-              const authored = drawLineAuthoringGeometry(draw.shapeType, draw.startWorld, snapped.point)
-              if (authored) {
-                const points = resolveNativeLinePoints(
-                  authored.lineGeometry,
-                  authored.frame.width,
-                  authored.frame.height,
-                ).map((point) => ({ x: authored.frame.x + point.x, y: authored.frame.y + point.y }))
-                setDrawPreview({
-                  points,
-                  guides: snapped.guideX !== undefined || snapped.guideY !== undefined
-                    ? { x: snapped.guideX, y: snapped.guideY }
-                    : null,
-                })
-              } else {
-                setDrawPreview({
-                  points: [draw.startWorld, snapped.point],
-                  guides: snapped.guideX !== undefined || snapped.guideY !== undefined
-                    ? { x: snapped.guideX, y: snapped.guideY }
-                    : null,
-                })
-              }
-            }
-            event.preventDefault()
-            event.stopPropagation()
-            return
-          }
-          
-          if (
-            slideBackendKind === 'slide-authoring' &&
-            candidatePointerActiveRef.current
-          ) {
-            const viewport = readCandidateViewport()
-            if (viewport) {
-              const moved = slideAuthoringRef.current.pointerMove({
-                x: event.clientX,
-                y: event.clientY,
-                altKey: event.altKey,
-              }, viewport)
-              if (moved.kind === 'slide-authoring') {
-                setLayerOverlay(moved.overlay ?? null)
-                paintSlideTransformPreview(moved.preview)
-                if (moved.linePreview) paintSlideLinePreview(moved.linePreview)
-                setLineDragGuides(moved.guides ?? null)
-              }
-              event.preventDefault()
-              event.stopPropagation()
-              return
-            }
-          }
-          const hit = canvasAuthoringHitAtClientPoint(event.clientX, event.clientY)
-          setHoveredAuthoringTargetId((current) => (
-            current === hit?.target.targetId
-              ? current
-              : hit?.target.targetId ?? null
-          ))
-          return
-        }
-        event.preventDefault()
-        event.stopPropagation()
-        setView((current) => ({
-          ...current,
-          x: pan.originX + event.clientX - pan.clientX,
-          y: pan.originY + event.clientY - pan.clientY,
-        }))
-      }}
-      onPointerUpCapture={(event) => {
-        const draw = drawGestureRef.current
-        if (draw && draw.pointerId === event.pointerId) {
-          drawGestureRef.current = null
-          setDrawPreview(null)
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId)
-          }
-          const viewport = readCandidateViewport()
-          if (viewport) {
-            const transform = createStageViewportTransform(viewport)
-            const world = clientToWorld(transform, { x: event.clientX, y: event.clientY })
-            const rawDistance = Math.hypot(world.x - draw.startWorld.x, world.y - draw.startWorld.y)
-            if (rawDistance >= 3) {
-              const snapped = snapLinePoint(
-                world,
-                collectLineSnapAxes(listSlideWorkspaceHitTargets(backendRef.current), undefined, slideCanvas),
-                transform.scale,
-                event.altKey,
-              )
-              const authored = drawLineAuthoringGeometry(draw.shapeType, draw.startWorld, snapped.point)
-              if (authored) {
-                ports.content.drawShapeNode({
-                  shapeType: draw.shapeType,
-                  frame: authored.frame,
-                  lineGeometry: authored.lineGeometry,
-                })
-              }
-            }
-          }
-          ports.canvas.setDrawTool(null)
-          event.preventDefault()
-          event.stopPropagation()
-          return
-        }
-        
-        if (
-          slideBackendKind === 'slide-authoring' &&
-          candidatePointerActiveRef.current
-        ) {
-          const viewport = readCandidateViewport()
-          if (viewport) {
-            const raised = slideAuthoringRef.current.pointerUp({
-              x: event.clientX,
-              y: event.clientY,
-              altKey: event.altKey,
-            }, viewport)
-            if (raised.kind === 'slide-authoring') {
-              setLayerOverlay(raised.overlay ?? null)
-              paintSlideTransformPreview(raised.preview)
-              if (raised.linePreview) paintSlideLinePreview(raised.linePreview)
-              setLineDragGuides(raised.guides ?? null)
-            }
-          }
-          candidatePointerActiveRef.current = false
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId)
-          }
-          event.preventDefault()
-          event.stopPropagation()
-          return
-        }
-        if (panRef.current?.pointerId !== event.pointerId) return
-        event.preventDefault()
-        event.stopPropagation()
-        panRef.current = null
-        setPanning(false)
-        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-          event.currentTarget.releasePointerCapture(event.pointerId)
-        }
-      }}
-      onPointerCancelCapture={(event) => {
-        const draw = drawGestureRef.current
-        if (draw && draw.pointerId === event.pointerId) {
-          drawGestureRef.current = null
-          setDrawPreview(null)
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId)
-          }
-          event.preventDefault()
-          event.stopPropagation()
-          return
-        }
-        if (
-          slideBackendKind === 'slide-authoring' &&
-          candidatePointerActiveRef.current
-        ) {
-          revertSlideDragPreview()
-          const viewport = readCandidateViewport()
-          if (viewport) {
-            slideAuthoringRef.current.cancelGesture(viewport)
-            setLayerOverlay(slideAuthoringRef.current.overlayGeometry(viewport))
-          }
-          candidatePointerActiveRef.current = false
-          setLineDragGuides(null)
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId)
-          }
-          event.preventDefault()
-          event.stopPropagation()
-          return
-        }
-        
-        if (panRef.current?.pointerId === event.pointerId) {
-          panRef.current = null
-          setPanning(false)
-          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-            event.currentTarget.releasePointerCapture(event.pointerId)
-          }
-        }
-      }}
-      onPointerLeave={() => setHoveredAuthoringTargetId(null)}
-      onContextMenu={(event) => {
-        // M21 right-click: what lies under the pointer is selected as a click would and gets the selection's menu (the
-        // quick bar's owner builds it from the same commands); empty canvas gets the canvas menu.
-        if (outsideStage(event)) return
-        if (event.target instanceof Element && event.target.closest(`${QUICK_BAR_SELECTOR}, .command-menu, .canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .formula-edit-dialog, .canvas-mode-switch, .canvas-view-controls`)) return
-        event.preventDefault()
-        if (canvasMode !== 'edit' || slideBackendKind !== 'slide-authoring' || !authoringCanvasInteractive) return
-        const currentSnapshot = readSnapshot()
-        if (currentSnapshot.editingTextNodeId || currentSnapshot.contentEdit || currentSnapshot.drawTool) return
-        const viewport = readCandidateViewport()
-        if (!viewport) return
-        const point = { x: event.clientX, y: event.clientY }
-        const root = event.currentTarget
-        if (slideAuthoringRef.current.contextTarget(point, viewport)) {
-          const spot = canvasAuthoringHitAtClientPoint(point.x, point.y)
-          const extra: MenuCommand[] = !spot ? []
-            : spot.kind === 'component' ? [{ id: 'component.edit-text', label: '编辑此处文字', group: 'spot', run: () => beginComponentTextEdit(spot.target) }]
-            : spot.kind === 'component-image' ? [{ id: 'component.replace-image', label: '替换此处图片…', group: 'spot', run: () => { void replaceComponentImage(spot.target) } }]
-            : spot.target.kind === 'text' ? [{ id: 'runtime.edit-text', label: '编辑此处文字', group: 'spot', run: () => beginRuntimeTextEdit(spot.target) }]
-            : [{ id: 'runtime.replace-image', label: '替换此处图片…', group: 'spot', run: () => { void replaceRuntimeAsset(spot.target) } }]
-          // The selection owner re-renders with the new selection first.
-          window.setTimeout(() => { requestObjectContextMenu(root, { ...point, itemIds: readSnapshot().selectedNodeIds, extra }) }, 0)
-          return
-        }
-        if (currentSnapshot.selectedNodeIds.length) ports.selection.selectNodes([])
-        const world = clientToWorld(createStageViewportTransform(viewport), point)
-        const noPort = '当前界面不支持此操作'
-        const pageTarget = slideLight?.capturePage()
-        const pageView = pageTarget ? slideLight?.viewPage(pageTarget) : null
-        const pageItems = pageTarget && pageView ? slideLightMenuItems(pageView.commands, command => {
-          void slideLight!.runPage(pageTarget, command).catch(error => ports.canvas.setStatus(error instanceof Error ? error.message : '页面操作失败'))
-        }) : []
-        canvasMenu.open(point, '画布操作', [
-          { id: 'canvas.paste', label: '粘贴', shortcut: 'Ctrl+V', group: 'clipboard', run: () => ports.selection.paste?.(), disabledReason: ports.selection.paste ? null : noPort },
-          { id: 'canvas.select-all', label: '全选', shortcut: 'Ctrl+A', group: 'clipboard', run: () => ports.selection.selectAll?.(), disabledReason: ports.selection.selectAll ? null : noPort },
-          { id: 'canvas.insert-text', label: '在此插入文字', group: 'insert', run: () => ports.content.addTextNode(world.x, world.y) },
-          { id: 'canvas.insert-image', label: '在此插入图片…', group: 'insert', run: () => onAddImage(world.x, world.y) },
-          { id: 'canvas.insert-video', label: '在此插入视频…', group: 'insert', run: () => onAddVideo(world.x, world.y) },
-          { id: 'canvas.insert-rectangle', label: '在此插入矩形', group: 'insert', run: () => ports.content.addRectangleNode(world.x, world.y) },
-          { id: 'canvas.insert-formula', label: '在此插入公式', group: 'insert', run: () => ports.content.addFormulaNode(world.x, world.y) },
-          { id: 'canvas.hidden', label: '找回隐藏的对象', group: 'view', run: () => canvasMenu.open(point, '隐藏的对象', hiddenMenu()),
-            disabledReason: hiddenLayers.length ? null : '本页没有隐藏的对象' },
-          { id: 'canvas.try-run', label: '当前位置试运行', group: 'view', run: () => ports.canvas.setCanvasMode('run') },
-          ...pageItems,
-        ])
-      }}
-      onDoubleClickCapture={(event) => {
-        if (outsideStage(event)) return
-        if (activeTextPreview?.target.kind === 'course-object') {
-          const viewport = readCandidateViewport()
-          const world = viewport && clientToWorld(createStageViewportTransform(viewport), {
-            x: event.clientX,
-            y: event.clientY,
-          })
-          const hit = world && hitTestV9SlideLayerItems(listSlideWorkspaceHitTargets(backendRef.current), world)
-          if (hit?.layerItemId === activeTextPreview.target.itemId) {
-            event.preventDefault()
-            event.stopPropagation()
-            ports.canvas.setStatus('正在生成文字；完成或停止后可编辑此对象')
-            return
-          }
-        }
-        if (
-          !(authoringCanvasInteractive || liveEditInteractive) ||
-          (event.target instanceof Element &&
-            event.target.closest(
-              '.canvas-authoring-target, .canvas-plain-text-editor, .text-edit-overlay, .text-edit-toolbar, .formula-edit-dialog',
-            ))
-        ) {
-          return
-        }
-        if (slideBackendKind === 'slide-authoring' && !liveScene) {
-          const viewport = readCandidateViewport()
-          if (!viewport) return
-          const world = clientToWorld(createStageViewportTransform(viewport), {
-            x: event.clientX,
-            y: event.clientY,
-          })
-          const layerHit = hitTestV9SlideLayerItems(
-            listSlideWorkspaceHitTargets(backendRef.current),
-            world,
-          )
-          if (layerHit) {
-            if (layerHit.nativeType === 'table' || layerHit.nativeType === 'chart') {
-              ports.selection.selectNode(layerHit.layerItemId)
-              if (nativeTextEditor.begin(layerHit.layerItemId, world, {x:event.clientX,y:event.clientY})) {
-                event.preventDefault()
-                event.stopPropagation()
-              }
-              return
-            }
-            if (layerHit.nativeType === 'text' || layerHit.nativeType === 'formula') {
-              event.preventDefault()
-              event.stopPropagation()
-              const currentSnapshot = readSnapshot()
-              ports.selection.selectNode(layerHit.layerItemId)
-              ports.content.beginTextEdit(layerHit.layerItemId, 'canvas')
-              if (layerHit.nativeType === 'formula') {
-                setActiveFormulaEditSession({
-                  projectId: currentSnapshot.projectId,
-                  scope: currentSnapshot.editingScope,
-                  sceneId: currentSnapshot.sceneId,
-                  stateId: currentSnapshot.presentationStateId,
-                  nodeId: layerHit.layerItemId,
-                })
-              }
-              return
-            }
-          }
-        }
-        const hit = canvasAuthoringHitAtClientPoint(event.clientX, event.clientY)
-        if (!hit) return
-        event.preventDefault()
-        event.stopPropagation()
-        if (hit.kind === 'component') {
-          beginComponentTextEdit(hit.target)
-        } else if (hit.kind === 'component-image') {
-          void replaceComponentImage(hit.target)
-        } else if (hit.target.kind === 'text') {
-          beginRuntimeTextEdit(hit.target)
-        } else {
-          void replaceRuntimeAsset(hit.target)
-        }
-      }}
-    >
-      <NativeSelectionContext documentId={documentId} revision={snapshot.projectRevision} locationId={courseLocationId} itemIds={selectedNodeIds} stateId={activePresentationStateId} sceneItemIds={slideEditorView?.layers.filter(layer => layer.source === 'scene').map(layer => layer.selectionId)} enabled={canvasMode === 'edit' && !liveScene && !(compositionEditing && activeCompositionNode)} ownsDocumentSelection={!compositionEditing || !activeCompositionNode} textEditing={Boolean(editingNode || editingFormulaNode)} bounds={id => {
-        const layer = slideEditorView?.layers.find(value => value.selectionId === id), viewport = readCandidateViewport()
-        if (!layer || !viewport) return null
-        // A teacher controller is anchored where it is shown: collapsed, and kept on the page.
-        const transform = createStageViewportTransform(viewport)
-        const frame = isTeacherControllerLayerItem(layer.item) ? controllerDisplayFrame(layer.item, layer.item.frame, slideCanvas) : layer.item.frame
-        return { left: transform.stageRect.x + frame.x * transform.scale, top: transform.stageRect.y + frame.y * transform.scale,
-          width: frame.width * transform.scale, height: frame.height * transform.scale, rotation: layer.item.rotation }
+        const proposal = proposeSlideLineHandle(current.initial, current.geometry, current.handle,
+          snapLine(surfacePoint(event.clientX, event.clientY), event.altKey, current.instanceId))
+        if (proposal && (JSON.stringify(proposal.geometry) !== JSON.stringify(current.geometry) || JSON.stringify(proposal.frame) !== JSON.stringify(current.frame)))
+          void ports.commit([{ type: 'frame.set', instanceId: current.instanceId, frame: proposal.frame },
+            { type: 'data.set', instanceId: current.instanceId, path: ['lineGeometry'], value: proposal.geometry }], current.target, crypto.randomUUID())
+            .catch(error => ports.report(String(error)))
+        return
+      }
+      void authoring.current!.pointerUp({ x: event.clientX, y: event.clientY, shiftKey: event.shiftKey, altKey: event.altKey }, mapping()).then(setPreview)
+      // Remove the transient preview immediately; ACK projection owns subsequent values.
+      setPreview(emptyPreview())
+    }}
+    onPointerCancelCapture={event => {
+      if (pointer.current !== event.pointerId) return
+      pointer.current = null; deferredPointer.current = null; draw.current = null; line.current = null; authoring.current?.cancelGesture()
+      setPreview(emptyPreview()); setDrawPreview(null); setLinePreview(null)
+    }}
+    onContextMenu={event => {
+      if (outsideStage(event.target) || snapshot.canvasMode !== 'edit' || snapshot.contentEdit || snapshot.drawTool) return
+      event.preventDefault()
+      const point = { x: event.clientX, y: event.clientY }, root = event.currentTarget
+      const at = surfacePoint(point.x, point.y), spot = spotAt(at), captured = ports.capture()
+      if (spot) {
+        ports.select([spot.instanceId])
+        const locked = componentIsLocked(project, spot.instanceId)
+        const extra = [{ id: 'spot.' + spot.id, label: spot.kind === 'image' ? '替换此处图片…' : spot.sourceRegion?.kind === 'implementation' ? '编辑此处源码片段' : '编辑此处文字',
+          group: 'edit', disabledReason: locked ? '对象已锁定' : null,
+          run: () => { if (spot.kind === 'image') void replaceSpot(spot, captured); else beginSpot(spot, at, point, captured) } }]
+        window.setTimeout(() => requestObjectContextMenu(root, { ...point, itemIds: [spot.instanceId], extra }), 0); return
+      }
+      const hit = authoring.current!.contextTarget(point, mapping())
+      if (hit) { window.setTimeout(() => requestObjectContextMenu(root, { ...point, itemIds: ports.read().selectedInstanceIds }), 0); return }
+      ports.select([])
+      canvasMenu.open(point, '画布操作', [
+        { id: 'canvas.paste', label: '粘贴', shortcut: 'Ctrl+V', group: 'clipboard', run: ports.paste },
+        { id: 'canvas.select-all', label: '全选', shortcut: 'Ctrl+A', group: 'clipboard', run: ports.selectAll },
+        { id: 'canvas.insert-text', label: '在此插入文字', group: 'insert', run: () => ports.addTextNode(at.x, at.y) },
+        { id: 'canvas.insert-image', label: '在此插入图片…', group: 'insert', run: () => onAddImage(at.x, at.y) },
+        { id: 'canvas.insert-video', label: '在此插入视频…', group: 'insert', run: () => onAddVideo(at.x, at.y) },
+        { id: 'canvas.insert-rectangle', label: '在此插入矩形', group: 'insert', run: () => ports.addRectangleNode(at.x, at.y) },
+        { id: 'canvas.insert-formula', label: '在此插入公式', group: 'insert', run: () => ports.addFormulaNode(at.x, at.y) },
+        { id: 'canvas.hidden', label: '找回隐藏的对象', group: 'view', run: () => canvasMenu.open(point, '隐藏的对象', hiddenMenu()), disabledReason: hidden.length ? null : '本页没有隐藏的对象' },
+        { id: 'canvas.try-run', label: '当前位置试运行', group: 'view', run: () => ports.setCanvasMode('run') },
+      ])
+    }}
+    onDoubleClickCapture={event => {
+      if (outsideStage(event.target) || snapshot.canvasMode !== 'edit' || snapshot.contentEdit || snapshot.drawTool) return
+      const at = surfacePoint(event.clientX, event.clientY), client = { x: event.clientX, y: event.clientY }, spot = spotAt(at)
+      if (spot && (spot.kind === 'image' || beginSpot(spot, at, client))) {
+        event.preventDefault(); event.stopPropagation()
+        if (spot.kind === 'image') void replaceSpot(spot)
+        return
+      }
+      const hit = hitFreeObject(listSlideWorkspaceHitTargets(state()), at, true)
+      if (hit && nativeText.begin(hit.instanceId, at, { x: event.clientX, y: event.clientY })) {
+        event.preventDefault(); event.stopPropagation(); ports.select([hit.instanceId])
+      }
+    }}>
+    <NativeSelectionContext documentId={snapshot.documentId} revision={project.revision} locationId={surface.id} itemIds={snapshot.selectedInstanceIds}
+      stateId={snapshot.activeStateId} sceneItemIds={surface.childIds} enabled={snapshot.canvasMode === 'edit'} textEditing={Boolean(snapshot.contentEdit)}
+      bounds={id => {
+        const target = targets.find(value => value.instanceId === id), rect = stageRef.current?.getBoundingClientRect()
+        if (!target || !rect) return null
+        const bounds = freeTargetBounds(target)
+        return { left: rect.left + bounds.left * scale, top: rect.top + bounds.top * scale, width: bounds.width * scale, height: bounds.height * scale }
       }} />
-      <div className="canvas-mode-switch" role="group" aria-label="画布模式">
-        <button
-          type="button"
-          className={canvasMode === 'edit' ? 'canvas-mode-switch__active' : ''}
-          aria-pressed={canvasMode === 'edit'}
-          onClick={returnToEdit}
-        >
-          <MousePointer2 size={13} />编辑状态
-        </button>
-        <button
-          type="button"
-          className={canvasMode === 'run' ? 'canvas-mode-switch__active' : ''}
-          aria-pressed={canvasMode === 'run'}
-          disabled={Boolean(liveScene?.reload || liveScene?.reloading)}
-          onClick={() => { if (liveSceneRef.current) continueLiveScene(); else ports.canvas.setCanvasMode('run') }}
-        >
-          <Play size={13} />当前位置试运行
-        </button>
-        {useCoursePlayerTryRun && !liveScene ? (
-          <div
-            role="group"
-            aria-label="试运行翻页"
-            data-testid="course-try-run-chrome"
-            style={{ display: 'flex', gap: 6, marginLeft: 8 }}
-          >
-            <button
-              type="button"
-              data-testid="course-try-run-previous"
-              onClick={() => void courseTryRunSessionRef.current?.previous()}
-            >
-              上一页
-            </button>
-            <button
-              type="button"
-              data-testid="course-try-run-next"
-              onClick={() => void courseTryRunSessionRef.current?.next()}
-            >
-              下一页
-            </button>
-          </div>
-        ) : null}
-      </div>
-      {liveScene && (
-        <div className="live-scene-bar" role="region" aria-label="运行现场" data-testid="live-scene-bar">
-          <strong>运行现场</strong>
-          <span className="live-scene-bar__message" role="status">
-            {liveScene.reloading
-              ? '正在按修改重新加载这一页…'
-              : liveScene.reload ?? '已停在试运行的这一刻。双击 Runtime 或组件里的文字、图片即可修改。'}
-          </span>
-          {liveScene.reload && !liveScene.reloading && (
-            <button type="button" className="live-scene-bar__primary" onClick={reloadLiveScene}>重新加载</button>
-          )}
-          <button type="button" disabled={Boolean(liveScene.reload) || liveScene.reloading} onClick={continueLiveScene}>
-            <Play size={13} />继续运行
-          </button>
-          <button type="button" onClick={() => endLiveScene('已回到编辑画面')}>回到编辑画面</button>
+    <div className="canvas-mode-switch" role="group" aria-label="画布模式">
+      <button type="button" className={snapshot.canvasMode === 'edit' ? 'canvas-mode-switch__active' : ''} aria-pressed={snapshot.canvasMode === 'edit'} onClick={() => ports.setCanvasMode('edit')}><MousePointer2 size={13} />编辑状态</button>
+      <button type="button" className={snapshot.canvasMode === 'run' ? 'canvas-mode-switch__active' : ''} aria-pressed={snapshot.canvasMode === 'run'} onClick={() => ports.setCanvasMode('run')}><Play size={13} />当前位置试运行</button>
+      {snapshot.canvasMode === 'run' && <div role="group" aria-label="试运行翻页" data-testid="course-try-run-chrome" style={{ display: 'flex', gap: 6, marginLeft: 8 }}>
+        <button type="button" data-testid="course-try-run-previous" onClick={() => { const index = project.surfaces.findIndex(value => value.id === surface.id); if (index > 0) ports.selectSurface(project.surfaces[index - 1].id) }}>上一页</button>
+        <button type="button" data-testid="course-try-run-next" onClick={() => { const index = project.surfaces.findIndex(value => value.id === surface.id); if (index < project.surfaces.length - 1) ports.selectSurface(project.surfaces[index + 1].id) }}>下一页</button>
+        {ports.resetPlayback && <button type="button" disabled={resettingScene} onClick={() => { void resetScene(true) }}>从初始状态重播</button>}
+      </div>}
+    </div>
+    {snapshot.canvasMode === 'edit' && liveScene && <div className="live-scene-bar" role="region" aria-label="运行现场" data-testid="live-scene-bar">
+      <strong>运行现场</strong><span className="live-scene-bar__message" role="status">{resettingScene ? '正在恢复初始编辑画面…' : '宿主互动与媒体已暂停；自定义脚本可能继续运行。源码修改会重新加载组件。'}</span>
+      <button type="button" disabled={resettingScene} onClick={() => ports.setCanvasMode('run')}><Play size={13} />继续运行</button>
+      {ports.resetPlayback && <button type="button" disabled={resettingScene} onClick={() => { void resetScene(false) }}>回到编辑画面</button>}
+    </div>}
+    {snapshot.canvasMode === 'edit' && <div className="canvas-view-controls" role="group" aria-label="画布视图">
+      <button type="button" aria-label="缩小画布" onClick={() => setZoom(view.zoom - 0.1)}><Minus size={14} /></button>
+      <output aria-label="画布缩放比例">{Math.round(view.zoom * 100)}%</output>
+      <button type="button" aria-label="放大画布" onClick={() => setZoom(view.zoom + 0.1)}><Plus size={14} /></button>
+      <button type="button" aria-label="适合窗口" title="重置缩放与平移" onClick={resetView}><Maximize2 size={14} /></button>
+      {controllerConfig?.collapsible && ports.teacherController && <button type="button" data-teacher-controller-authoring-collapse={controller!.id}
+        aria-label={controllerCollapsed ? '展开教师控制台' : '收起教师控制台'} aria-expanded={!controllerCollapsed}
+        style={{ width: 'auto', paddingInline: 8, whiteSpace: 'nowrap' }}
+        onClick={() => ports.teacherController!.setCollapsed(!controllerCollapsed)}>{controllerCollapsed ? '展开控制台' : '收起控制台'}</button>}
+      <span title="Ctrl+滚轮缩放；按住空格或鼠标中键拖动画布"><Hand size={13} /></span>
+    </div>}
+    <div className={'canvas-label' + (snapshot.editingScope === 'global' ? ' canvas-label--global' : '')}>{canvas.width} × {canvas.height} · {snapshot.editingScope === 'global'
+      ? `全局层 · ${project.global.underlay.length + project.global.overlay.length} 个元素`
+      : `${surface.title} · ${snapshot.activeStateId ? surface.presentation?.states.find(value => value.id === snapshot.activeStateId)?.title ?? '状态' : '母版'}`}
+      {snapshot.canvasMode === 'edit' && hidden.length > 0 && <button type="button" className="canvas-label__hidden" onClick={event => {
+        const rect = event.currentTarget.getBoundingClientRect(); canvasMenu.open({ x: rect.left, y: rect.bottom + 4 }, '隐藏的对象', hiddenMenu())
+      }}>{hidden.length} 个隐藏对象</button>}
+    </div>
+    <div ref={stageViewportRef} className="canvas-viewport" data-workspace-media-drop={mediaDragOver || undefined}
+      style={mediaDragOver ? { boxShadow: 'inset 0 0 0 3px #245b46' } : undefined}
+      data-observation-source={snapshot.canvasMode === 'edit' ? 'authoring' : undefined} data-observation-project-id={project.id}
+      data-observation-revision={project.revision} data-observation-surface-id={surface.id} data-observation-location-id={surface.id}
+      data-observation-state-id={snapshot.activeStateId ?? ''} data-observation-ready="true">
+      <div ref={stageRef} className="canvas-stage-stack" data-panning={panning || undefined}
+        style={{ left: stageTransform.stageRect.x, top: stageTransform.stageRect.y, width: canvas.width, height: canvas.height,
+          transform: 'scale(' + scale + ')', transition: 'none', visibility: 'visible', backgroundColor: background.color,
+          backgroundImage: backgroundUrl ? 'url(' + JSON.stringify(backgroundUrl) + ')' : undefined, backgroundRepeat: 'no-repeat',
+          backgroundPosition: 'center', backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit }}>
+        <div className="canvas-stage canvas-stage--authoring" data-testid="canvas-stage" style={{ position: 'absolute', inset: 0, visibility: 'visible', pointerEvents: 'auto' }}>
+          {project.global.underlay.map(id => <SlideInstance key={id} id={id} project={project} surfaceId={surface.id} preview={linePreview ? { ...preview.preview, [linePreview.instanceId]: linePreview.frame } : preview.preview} ports={ports} />)}
+          {project.surfaces.filter(value => value.kind === 'slide').map(value => <div key={value.id} hidden={value.id !== surface.id} style={{ position: 'absolute', inset: 0 }}>
+            {value.childIds.map(id => <SlideInstance key={id} id={id} project={project} surfaceId={value.id} preview={linePreview ? { ...preview.preview, [linePreview.instanceId]: linePreview.frame } : preview.preview} ports={ports} />)}
+          </div>)}
+          {project.global.overlay.map(id => <SlideInstance key={id} id={id} project={project} surfaceId={surface.id} preview={linePreview ? { ...preview.preview, [linePreview.instanceId]: linePreview.frame } : preview.preview} ports={ports} />)}
         </div>
-      )}
-      {canvasMode === 'edit' && !liveScene && (
-        <div className="canvas-view-controls" role="group" aria-label="画布视图">
-          <button type="button" aria-label="缩小画布" onClick={() => setZoom(view.zoom - 0.1)}>
-            <Minus size={14} />
-          </button>
-          <output aria-label="画布缩放比例">{Math.round(view.zoom * 100)}%</output>
-          <button type="button" aria-label="放大画布" onClick={() => setZoom(view.zoom + 0.1)}>
-            <Plus size={14} />
-          </button>
-          <button type="button" aria-label="适合窗口" title="重置缩放与平移" onClick={resetView}>
-            <Maximize2 size={14} />
-          </button>
-          <span title="Ctrl+滚轮缩放；按住空格或鼠标中键拖动画布">
-            <Hand size={13} />
-          </span>
-        </div>
-      )}
-      <div className={`canvas-label${editingScope === 'global' ? ' canvas-label--global' : ''}`}>
-        {slideCanvas.width} × {slideCanvas.height} · {editingScope === 'global'
-          ? `全局层 · ${slideEditorView?.layers.filter((layer) => layer.source === 'global').length ?? 0} 个元素`
-          : `${slideEditorView?.sceneName ?? ''} · ${activePresentationStateId === null
-            ? '母版'
-            : slideEditorView?.presentation?.states.find((state) => state.active)?.name
-              ?? '状态'}`}
-        {canvasMode === 'edit' && !liveScene && hiddenLayers.length > 0 && <button type="button" className="canvas-label__hidden"
-          onClick={(event) => {
-            const rect = event.currentTarget.getBoundingClientRect()
-            canvasMenu.open({ x: rect.left, y: rect.bottom + 4 }, '隐藏的对象', hiddenMenu())
-          }}>{hiddenLayers.length} 个隐藏对象</button>}
+        {snapshot.canvasMode === 'edit' && <div data-slide-authoring-hit-plane="" style={{ position: 'absolute', inset: 0, zIndex: 10, pointerEvents: 'auto' }} />}
+        {snapshot.canvasMode === 'edit' && !snapshot.contentEdit && <div className="canvas-authoring-targets" data-testid="runtime-authoring-targets" aria-label="画布可编辑内容" style={{ zIndex: 12 }}>
+          {spotTargets.map(({ spot, frame }) => <button key={spot.id} type="button" className={'canvas-authoring-target canvas-authoring-target--' + (spot.kind === 'image' ? 'asset' : 'text') + (hoveredSpot === spot.id ? ' canvas-authoring-target--hovered' : '')}
+            aria-label={spot.kind === 'image' ? '双击替换此处图片' : '双击编辑此处文字'} disabled={spot.id === replacingSpot}
+            onFocus={() => setHoveredSpot(spot.id)} onBlur={() => setHoveredSpot(null)} onClick={() => {
+              const at = transformPoint(frame.transform, { x: frame.width / 2, y: frame.height / 2 })
+              if (spot.kind === 'image') void replaceSpot(spot); else beginSpot(spot, at, transformPoint(mapping(), at))
+            }}
+            style={{ ...componentFrameStyle(frame), zIndex: 12 }}><span className="canvas-authoring-target__badge" aria-hidden="true">{spot.kind === 'image' ? '替图' : 'T'}</span></button>)}
+        </div>}
+        {snapshot.canvasMode === 'edit' && nativeText.editor}
+        {(preview.guides.length > 0 || preview.marquee || drawPreview || linePoints) && snapshot.canvasMode === 'edit' && <svg className="canvas-line-overlay" data-testid="canvas-line-overlay"
+          width={canvas.width} height={canvas.height} viewBox={'0 0 ' + canvas.width + ' ' + canvas.height}
+          style={{ position: 'absolute', left: 0, top: 0, zIndex: 13, pointerEvents: 'none', overflow: 'visible' }}>
+          {preview.guides.map((guide, index) => <line key={index} x1={guide.axis === 'x' ? guide.value : 0} y1={guide.axis === 'y' ? guide.value : 0}
+            x2={guide.axis === 'x' ? guide.value : canvas.width} y2={guide.axis === 'y' ? guide.value : canvas.height} stroke="#ff4d9d" strokeWidth={1 / scale} />)}
+          {preview.marquee && <rect x={Math.min(preview.marquee.start.x, preview.marquee.end.x)} y={Math.min(preview.marquee.start.y, preview.marquee.end.y)}
+            width={Math.abs(preview.marquee.end.x - preview.marquee.start.x)} height={Math.abs(preview.marquee.end.y - preview.marquee.start.y)} fill="#2563eb22" stroke="#2563eb" strokeWidth={1 / scale} />}
+          {drawPreview && <line x1={drawPreview.start.x} y1={drawPreview.start.y} x2={drawPreview.end.x} y2={drawPreview.end.y} stroke="#3b82f6" strokeWidth={2 / scale} strokeDasharray="6 4" />}
+          {linePoints && <><polyline points={linePoints.map(p => p.x + ',' + p.y).join(' ')} fill="none" stroke="#2563eb" strokeWidth={1 / scale} />
+            {linePoints.map((at, index) => (index === 0 || index === linePoints.length - 1 || linePoints.length === 4 && index === 1) &&
+              <circle key={index} data-line-handle={index === 0 ? 'start' : index === linePoints.length - 1 ? 'end' : 'elbow'}
+                cx={at.x} cy={at.y} r={5 / scale} fill="#fff" stroke="#2563eb" style={{ pointerEvents: 'auto' }} />)}</>}
+        </svg>}
       </div>
-      <div ref={stageViewportRef} className="canvas-viewport"
-        data-workspace-media-drop={mediaDragOver || undefined}
-        style={mediaDragOver ? { boxShadow: 'inset 0 0 0 3px #245b46' } : undefined}
-        data-observation-source={canvasMode === 'edit' ? 'authoring' : undefined}
-        data-observation-project-id={snapshot.projectId}
-        data-observation-revision={snapshot.projectRevision}
-        data-observation-session-generation={snapshot.sessionGeneration}
-        data-observation-surface-id={slideEditorView.surfaceId}
-        data-observation-location-id={courseLocationId}
-        data-observation-state-id={activePresentationStateId ?? ''}
-        data-observation-ready={authoringCanvasInteractive ? 'true' : 'false'}
-        data-observation-draft-token={authoringObservationDraftToken(snapshot.contentEdit)}
-      >
-        <div
-          className="canvas-stage-stack"
-          data-panning={panning || undefined}
-          style={{
-            left: stageTransform.stageRect.x,
-            top: stageTransform.stageRect.y,
-            width: slideCanvas.width,
-            height: slideCanvas.height,
-            transform: `scale(${stageTransform.scale})`,
-            // Geometry must change atomically: the Player, Phaser hit proxies and
-            // authoring targets all consume this transform in the same frame.
-            transition: 'none',
-          }}
-        >
-          {usePublishedAuthoring && (
-            <div
-              ref={publishedAuthoringHostRef}
-              className="runtime-preview-frame published-authoring-host"
-              data-testid="published-authoring-host"
-              title="统一编辑画布"
-              inert={!compositionEditing}
-              aria-hidden={!compositionEditing}
-            />
-          )}
-          <div
-            ref={gameHostRef}
-            className="canvas-stage canvas-stage--authoring"
-            data-testid="canvas-stage"
-            aria-hidden={canvasMode === 'run'}
-            style={useCoursePlayerTryRun || compositionEditing ? { pointerEvents: 'none' } : undefined}
-          />
-          {compositionEditing && selectedCompositionItem && compositionHandle && compositionControlsHost && publishedSelectedComposition && createPortal(
-            <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 10 }}>
-              <WebCompositionAuthoringContent
-                layerItemId={selectedCompositionItem.layerItemId} existingHandle={compositionHandle}
-                content={publishedSelectedComposition} width={selectedCompositionItem.frame.width} height={selectedCompositionItem.frame.height}
-                assetUrls={{}} components={componentPackages} projectId={snapshot.projectId}
-                selectedNodeId={activeCompositionNode?.layerItemId === selectedCompositionItem.layerItemId ? activeCompositionNode.nodeId : null}
-                onSelection={selection => { setCompositionSelection(selection); onCompositionSelection?.(selection) }}
-                onEdit={edit => submitComposition(selectedCompositionItem.layerItemId, edit)} editingDisabled={compositionPending}
-              />
-            </div>, compositionControlsHost, selectedCompositionItem.layerItemId)}
-          <SlideDynamicAuthoringOverlay
-            interactive={authoringCanvasInteractive || liveEditInteractive}
-            runtimeTargets={visibleRuntimeTargets}
-            componentTargets={visibleComponentTargets}
-            componentImageTargets={visibleComponentImageTargets}
-            replacingComponentImageTargetId={replacingComponentImageTargetId}
-            onComponentImageActivate={(target) => { void replaceComponentImage(target) }}
-            hoveredTargetId={hoveredAuthoringTargetId}
-            replacingRuntimeAssetTargetId={replacingRuntimeAssetTargetId}
-            activeRuntimeTextSession={activeRuntimeTextSession}
-            activeRuntimeTextTarget={activeRuntimeTextTarget}
-            activeRuntimeTextValue={activeRuntimeTextValue}
-            activeComponentTextSession={activeComponentTextSession}
-            activeComponentTextTarget={activeComponentTextTarget}
-            componentEditingReady={Boolean(componentEditingLayer)}
-            componentEditingValue={componentEditingValue}
-            previewFeedback={useCoursePlayerTryRun ? null : previewFeedback}
-            showPreparing={!useCoursePlayerTryRun && !usePublishedAuthoring}
-            onHoverTarget={setHoveredAuthoringTargetId}
-            onRuntimeTargetActivate={(target) => {
-              if (target.kind === 'text') beginRuntimeTextEdit(target)
-              else {
-                setActiveComponentTextSession(null)
-                void replaceRuntimeAsset(target)
-              }
-            }}
-            onComponentTargetActivate={beginComponentTextEdit}
-            onCommitRuntimeText={commitRuntimeText}
-            onCancelRuntimeText={() => setActiveRuntimeTextSession(null)}
-            onCommitComponentText={commitComponentText}
-            onComponentDraftChange={(text, composing) => {
-              if (activeComponentTextSession?.source === 'auto') { setComponentAutoValue(text); return }
-              const draft = componentDraftRef.current
-              if (!draft || draft.kind !== 'field-text' || draft.textField?.kind !== 'component-prop') return
-              const result = ports.authoring.runFieldTextIntent({ kind: 'update-field', expectedEdit: draft, text, composing })
-              if (result.ok) componentDraftRef.current = result.edit
-            }}
-            onCancelComponentText={() => {
-              const draft = componentDraftRef.current
-              if (draft?.kind === 'field-text' && draft.textField?.kind === 'component-prop') ports.authoring.runFieldTextIntent({ kind: 'cancel', expectedEdit: draft })
-              componentDraftRef.current = null
-              setActiveComponentTextSession(null)
-            }}
-            onRetryPreview={retryRuntimePreview}
-          />
-          {dynamicRecoveryTasks.length > 0 && (
-            <div role="alert" aria-label="动态内容待处理修改" style={{ position: 'absolute', right: 16, bottom: 16, zIndex: 30, maxWidth: 340, padding: 12, background: '#fff', color: '#1f2937', border: '1px solid #b45309', borderRadius: 8, boxShadow: '0 4px 16px #0003' }}>
-              <strong>动态内容修改需要处理</strong>
-              {dynamicRecoveryTasks.map((task, index) => (
-                <div key={task.taskId} style={{ marginTop: 8 }}>
-                  <div>第 {index + 1} 项：{task.reason ?? '动态内容修改尚未完成'}{task.status === 'unknown' ? '；提交结果尚未确认' : ''}</div>
-                  <button type="button" disabled={recoveringDynamicTaskId !== null} onClick={() => { void retryDynamicFallback(task.taskId) }}>重试并核实</button>
-                  {task.status !== 'unknown' && <button type="button" disabled={recoveringDynamicTaskId !== null} onClick={() => discardDynamicFallback(task.taskId)}>放弃修改</button>}
-                </div>
-              ))}
-            </div>
-          )}
-          {nativeTextEditor.editor}
-          {canvasMenu.element}
-          {(drawPreview || lineDragGuides) && (
-            <svg
-              className="canvas-line-overlay"
-              data-testid="canvas-line-overlay"
-              viewBox={`0 0 ${slideCanvas.width} ${slideCanvas.height}`}
-              width={slideCanvas.width}
-              height={slideCanvas.height}
-              style={{
-                position: 'absolute',
-                left: 0,
-                top: 0,
-                pointerEvents: 'none',
-                overflow: 'visible',
-              }}
-            >
-              {(lineDragGuides?.x ?? drawPreview?.guides?.x) !== undefined && (
-                <line
-                  x1={lineDragGuides?.x ?? drawPreview?.guides?.x ?? 0}
-                  y1={0}
-                  x2={lineDragGuides?.x ?? drawPreview?.guides?.x ?? 0}
-                  y2={slideCanvas.height}
-                  stroke="#ff4d9d"
-                  strokeWidth={1}
-                />
-              )}
-              {(lineDragGuides?.y ?? drawPreview?.guides?.y) !== undefined && (
-                <line
-                  x1={0}
-                  y1={lineDragGuides?.y ?? drawPreview?.guides?.y ?? 0}
-                  x2={slideCanvas.width}
-                  y2={lineDragGuides?.y ?? drawPreview?.guides?.y ?? 0}
-                  stroke="#ff4d9d"
-                  strokeWidth={1}
-                />
-              )}
-              {drawPreview && drawPreview.points.length >= 2 && (
-                <polyline
-                  points={drawPreview.points.map((point) => `${point.x},${point.y}`).join(' ')}
-                  fill="none"
-                  stroke="#3b82f6"
-                  strokeWidth={2}
-                  strokeDasharray="6 4"
-                />
-              )}
-            </svg>
-          )}
-        </div>
-        <div
-          ref={courseTryRunRef}
-          className="course-try-run-host"
-          data-testid="course-try-run-host"
-          data-page-backdrop="transparent"
-          {...workspaceTryRunHostProps()}
-          hidden={!useCoursePlayerTryRun}
-          inert={liveScene !== null}
-          data-live-scene={liveScene ? 'paused' : undefined}
-        />
-        {tryRunFeedback && useCoursePlayerTryRun ? (
-          <div
-            className={`runtime-preview-loading runtime-preview-loading--${tryRunFeedback.kind} course-try-run-feedback`}
-            role={tryRunFeedback.kind === 'error' ? 'alert' : 'status'}
-            aria-live="polite"
-          >
-            <div className="runtime-preview-loading__panel">
-              {tryRunFeedback.kind === 'loading' && (
-                <LoaderCircle
-                  className="runtime-preview-loading__spinner"
-                  size={24}
-                  aria-hidden="true"
-                />
-              )}
-              <strong>{tryRunFeedback.title}</strong>
-              <span>{tryRunFeedback.message}</span>
-            </div>
-          </div>
-        ) : null}
-      </div>
-      
-      {canvasMode === 'edit' && needsLayerOverlay && layerOverlay ? <SlideLayerSelectionOverlay overlay={layerOverlay} /> : null}
-      {canvasMode === 'edit' && editingFormulaNode && (
-        <FormulaEditDialog
-          key={`${editingFormulaNode.id}:${activePresentationStateId ?? 'base'}`}
-          node={editingFormulaNode}
-          onCancel={() => {
-            ports.content.cancelTextEdit()
-            setActiveFormulaEditSession(null)
-          }}
-          onCommit={(ast, accessibleText) => {
-            const currentSnapshot = readSnapshot()
-            const backend = currentSnapshot.backend
-            if (!backend || currentSnapshot.contentEdit?.kind !== 'formula') {
-              ports.canvas.setStatus('公式编辑会话已失效，请取消后重新打开')
-              return
-            }
-            const edited = updateV9SlideContentFormulaDraft(currentSnapshot.contentEdit, {
-              ast,
-              accessibleText,
-            })
-            const result = ports.authoring.applySlideCommand(
-              (session) => commitV9SlideContentEdit(session, edited),
-              { clearContentEdit: true },
-            )
-            if (!result.ok) {
-              ports.canvas.setStatus(result.reason ?? '公式修改未能应用，请重试')
-              return
-            }
-            setActiveFormulaEditSession(null)
-          }}
-        />
-      )}
-      {canvasMode === 'edit' && editingNode && workspaceRef.current && (gameHostRef.current || canvas) && (
-        <TextEditOverlay
-          key={editingNode.id}
-          node={editingNode}
-          stage={slideCanvas}
-          workspace={workspaceRef.current}
-          canvas={gameHostRef.current ?? canvas!}
-          onPreview={(text, runs) => {
-            const draftNode = { ...editingNode, text, runs }
-            const rendered = editingNode.style.overflow === 'auto-height'
-              ? renderTextNodeCanvas(draftNode)
-              : null
-            ports.content.updateTextEditDraft(
-              editingNode.id,
-              text,
-              runs,
-              rendered?.height ?? editingNode.height,
-              rendered?.width ?? editingNode.width,
-            )
-          }}
-          onCompositionChange={ports.content.setTextEditComposing}
-          onCommit={(text, runs) => {
-            const draftNode = { ...editingNode, text, runs }
-            const rendered = editingNode.style.overflow === 'auto-height'
-              ? renderTextNodeCanvas(draftNode)
-              : null
-            ports.content.updateTextEditDraft(
-              editingNode.id,
-              text,
-              runs,
-              rendered?.height ?? editingNode.height,
-              rendered?.width ?? editingNode.width,
-            )
-            ports.content.commitTextEdit()
-            syncCommittedTextNode(editingNode.id)
-          }}
-          onCancel={() => {
-            ports.content.cancelTextEdit()
-            syncCommittedTextNode(editingNode.id)
-          }}
-        />
-      )}
-    </main>
-  )
+    </div>
+    {snapshot.canvasMode === 'edit' && !snapshot.contentEdit && <SlideLayerSelectionOverlay targets={editableSelected} scale={scale} surfaceToPointer={chromeMatrix} lineHandles={Boolean(linePoints)} />}
+    {canvasMenu.element}
+  </main>
 }

@@ -357,7 +357,7 @@ export async function parsePptxImport(bytes: Uint8Array, canvas: SlideCanvasSize
       report(error, page, '已跳过页面')
     }
   }
-  if (!slides.some(slide => slide.items.length || slide.sharedKeys?.some(key => shared.get(key)?.length))) throw new PptxImportError([...issues, { type: '无可导入内容', message: '没有可转换的对象，工程未写入；可在源软件转换对象或另存图片后补入。' }])
+  if (!slides.length) throw new PptxImportError([...issues, { type: '无可导入页面', message: '没有可解析的页面，工程未写入；请检查源文件后重试。' }])
   // Reserve one common order interval below every scene; import metadata is not persisted.
   let order = 0
   for (const group of shared.values()) for (const item of group) item.order = order++

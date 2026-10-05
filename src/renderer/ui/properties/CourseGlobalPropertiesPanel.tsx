@@ -16,6 +16,7 @@ import type { RuntimeLayer } from '../../../shared/runtimeTypes'
 import type { LocationVisibility } from '../../../shared/courseProjectTypes'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import type { ComponentManifest } from '../../../shared/componentTypes'
+import type { ComponentAsset, ComponentDefinition, ComponentInstance, JsonValue } from '../../../shared/contracts/component-platform/project'
 import type { EffectiveBackground } from '../../../shared/effectiveBackground'
 import { SLIDE_CANVAS_MAX, SLIDE_CANVAS_MIN, SLIDE_CANVAS_PRESETS, slideCanvasSchema, type SlideCanvasSize } from '../../../shared/slideCanvas'
 import { NativeColorInput as ColorInput, NativeColorPreviewContext } from './NativeColorPreview'
@@ -41,6 +42,8 @@ import {
   CommonNodeProperties,
   SlideNativeNotices,
   SlideNativeTypeFields,
+  SlideNativePropertiesPanel,
+  type SlideNativePropertiesContext,
   type PropertiesItemView,
   type PropertiesPatch,
   type SlideNativeNoticesView,
@@ -77,7 +80,7 @@ export interface CourseGlobalEmptyView {
     readonly effective: EffectiveBackground
     readonly assets: Readonly<Record<string, AssetMeta>>
   }
-  readonly canvas: SlideCanvasSize
+  readonly canvas: SlideCanvasSize | null
 }
 
 export interface TeacherControllerSceneView {
@@ -94,6 +97,7 @@ export interface CourseGlobalPropertiesContext {
   readonly flowPlacement?: { readonly paperSpace: 'paper' | 'viewport'; readonly onChange: (paperSpace: 'paper' | 'viewport') => void }
   readonly draftBindingKey: string | null
   readonly mode: 'empty' | 'selected'
+  readonly native?: SlideNativePropertiesContext | null
   readonly disabledReason: string | null
   readonly empty: CourseGlobalEmptyView | null
   readonly layer: CourseGlobalLayerView | null
@@ -107,8 +111,11 @@ export interface CourseGlobalPropertiesContext {
     readonly controllerComponent?: boolean
     readonly controllerScenes: readonly TeacherControllerSceneView[]
     readonly component: {
-      readonly manifest: ComponentManifest
-      readonly assets: Readonly<Record<string, AssetMeta>>
+      readonly definition: ComponentDefinition
+      readonly instance: ComponentInstance
+      readonly assets: Readonly<Record<string, ComponentAsset>>
+      readonly onChange: (data: JsonValue) => void
+      readonly onPreview?: (data: JsonValue | null) => void
     } | null
   } | null
   readonly runtime: RuntimePropertiesContext | null
@@ -531,7 +538,7 @@ function CourseGlobalEmptyPanel({
           全局层是所有页面共用的内容：文字、图片、图形和组件都可统一布置，并可设置场景可见范围。
         </p>
       </section>
-      <SlideCanvasSizeSection canvas={empty.canvas} onApply={commands.resizeSlideCanvas} />
+      {empty.canvas && <SlideCanvasSizeSection canvas={empty.canvas} title="当前演示页尺寸" hint="只改变当前演示页尺寸；已有对象的位置与大小保持。" onApply={commands.resizeSlideCanvas} />}
       <SharedBackgroundProperties
         ownerLabel="课程"
         color={empty.background.color}
@@ -606,9 +613,11 @@ export function CourseGlobalPropertiesPanel({
 }) {
   if (context.mode === 'empty') {
     return (
+      <PropertyDraftBoundary bindingKey={context.draftBindingKey ?? 'global-property-target-unavailable'} onStale={() => context.onFeedback({ kind: 'error', message: '属性草稿对应的编辑目标已经改变，请按 Esc 放弃草稿后重试。' })}>
       <div className="properties-scroll" data-testid="properties-tab">
         <CourseGlobalEmptyPanel context={context} />
       </div>
+      </PropertyDraftBoundary>
     )
   }
   const selected = context.selected
@@ -622,6 +631,9 @@ export function CourseGlobalPropertiesPanel({
   }
   const node = selected.view
   const update = context.commands.patch
+  if (context.native && !selected.controllerComponent) return <div className="properties-scroll" data-testid="properties-tab">
+    <SlideNativePropertiesPanel context={context.native} afterCommon={layer ? <GlobalLayerSettings view={layer} commands={context.commands} /> : undefined} />
+  </div>
   return (
     <NativeColorPreviewContext.Provider value={context.commands.preview}>
     <PropertyDraftBoundary
@@ -646,8 +658,9 @@ export function CourseGlobalPropertiesPanel({
             { title: '导出', matches: key => key === 'includeInStaticExports' },
             { title: '自定义参数', matches: () => true },
           ]}
-          manifest={selected.component.manifest} node={node} assets={selected.component.assets}
-          onChange={props => update({ props })}
+          definition={selected.component.definition} node={selected.component.instance} assets={selected.component.assets}
+          onChange={selected.component.onChange}
+          onPreview={selected.component.onPreview}
         />}
         {selected.controller && Array.isArray(node.props.buttons) && <details className="property-section controller-property-details">
           <summary>按钮与动作</summary>
@@ -714,16 +727,16 @@ export function CourseGlobalPropertiesPanel({
         <>
           <section className="property-section">
             <h3 className="property-title"><Box size={14} />外部组件</h3>
-            <div className="form-field"><label>组件名称</label><div className="readonly-value">{selected.component?.manifest.name ?? node.name}</div></div>
+            <div className="form-field"><label>组件名称</label><div className="readonly-value">{selected.component?.definition.title ?? node.name}</div></div>
             <div className="form-field"><label>组件 ID</label><div className="readonly-value">{node.component.packageId}</div></div>
             <div className="form-field"><label>版本</label><div className="readonly-value">{node.component.version}</div></div>
           </section>
           {selected.component && (
             <ComponentPropertiesEditor
-              manifest={selected.component.manifest}
-              node={node}
+              definition={selected.component.definition}
+              node={selected.component.instance}
               assets={selected.component.assets}
-              onChange={(props) => update({ props })}
+              onChange={selected.component.onChange}
             />
           )}
         </>

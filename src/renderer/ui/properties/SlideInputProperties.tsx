@@ -10,7 +10,7 @@ export type SlideInputPropertiesView = PropertiesItemBase & NativeInputContent &
 export interface SlideInputPropertiesCommands {
   inspection: ReturnType<typeof inspectInputRuleFamily>
   feedbackTargets: readonly { id: string; name: string }[]
-  configure(request: { mode: 'apply' | 'rebuild'; config: InputRuleConfig } | { mode: 'unmanage' }): string | null
+  configure(request: { mode: 'apply' | 'rebuild'; config: InputRuleConfig } | { mode: 'unmanage' }): Promise<string | null> | string | null
 }
 
 export function SlideInputProperties({ node, commands, patch }: {
@@ -28,7 +28,7 @@ export function SlideInputProperties({ node, commands, patch }: {
   const motion = (id: string, show: boolean): InteractionActionPayload => ({
     type: show ? 'node.enter' : 'node.exit', nodeId: id, effect: 'none', durationMs: 0, easing: 'linear',
   })
-  const apply = (mode: 'apply' | 'rebuild') => {
+  const apply = async (mode: 'apply' | 'rebuild') => {
     if (answerType === 'number' && (!min.trim() || !max.trim())) { setError('请填写数值范围'); return }
     const unchangedFeedback = initial && correctId === feedbackId(initial.correct) && errorId === feedbackId(initial.error)
     const feedback = {
@@ -41,7 +41,7 @@ export function SlideInputProperties({ node, commands, patch }: {
     const config: InputRuleConfig = answerType === 'text'
       ? { answerType, answers: answers.split('\n'), ...feedback }
       : { answerType, min: Number(min), max: Number(max), ...feedback }
-    setError(commands.configure({ mode, config }))
+    try { setError(await commands.configure({ mode, config })) } catch (error) { setError(error instanceof Error ? error.message : String(error)) }
   }
   return <section className="property-section">
     <h3>填空题</h3>
@@ -63,7 +63,7 @@ export function SlideInputProperties({ node, commands, patch }: {
       </select></label>)}
     {error && <p role="alert">{error}</p>}
     {commands.inspection.conflict ? <div className="property-actions">
-      <button type="button" className="secondary-button" onClick={() => setError(commands.configure({ mode: 'unmanage' }))}>保留手改</button>
+      <button type="button" className="secondary-button" onClick={async () => { try { setError(await commands.configure({ mode: 'unmanage' })) } catch (error) { setError(error instanceof Error ? error.message : String(error)) } }}>保留手改</button>
       <button type="button" className="secondary-button" onClick={() => apply('rebuild')}>按当前配置重建</button>
     </div> : <button type="button" className="primary-button" onClick={() => apply('apply')}>应用判题配置</button>}
     <p className="property-hint">文本忽略大小写、全半角和多余空白；数值上下界相同时为精确答案。正确/错误反馈文字可直接编辑画布上的对应文本。</p>

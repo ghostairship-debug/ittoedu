@@ -1,12 +1,9 @@
-import { createBlankCourseProject } from '../../core/course/createCourseProject'
-import { createCourseProjectArchive } from '../../core/drivers/codecs/courseProjectArchive'
-import { deleteCourseSurface } from '../../core/tools/courseLocations'
-import type { ComponentPackageData } from '../../shared/componentTypes'
-import { courseProjectDocumentSchema } from '../../shared/courseProjectSchema'
-import type { CourseProjectDocument } from '../../shared/courseProjectTypes'
+import { createBlankCourseProjectV10 } from '../../core/course/createCourseProjectV10'
+import { CourseV10Driver } from '../../core/drivers/CourseV10Driver'
+import { createTeacherControllerFrame } from '../../components/teacher-controller/data'
+import type { CourseProjectV10 } from '../../shared/contracts/component-platform'
+import type { DocumentResources } from '../../shared/workbench/document'
 import { SLIDE_CANVAS_MAX, SLIDE_CANVAS_MIN, SLIDE_CANVAS_PRESETS, type SlideCanvasSize } from '../../shared/slideCanvas'
-import { componentPackagesToArchiveFiles } from '../components/componentPackageStore'
-import { withDefaultComponentController } from '../components/teacherControllerComponent'
 import { parsePptxImport } from './pptxImport'
 import { planPptxImportTransaction } from './pptxImportTransaction'
 import { openPptxPackage, pptxReject, xmlFirst, type PptxImportIssue } from './pptxPackage'
@@ -25,9 +22,8 @@ export function pptxCourseCanvas(bytes: Uint8Array): SlideCanvasSize {
 }
 
 export interface PptxCourse {
-  project: CourseProjectDocument
-  assetFiles: Record<string, Uint8Array>
-  componentPackages: Record<string, ComponentPackageData>
+  project: CourseProjectV10
+  resources: DocumentResources
   issues: PptxImportIssue[]
 }
 
@@ -35,23 +31,23 @@ export interface PptxCourse {
 export async function createCourseFromPptx(bytes: Uint8Array, title: string): Promise<PptxCourse> {
   const canvas = pptxCourseCanvas(bytes)
   const draft = await parsePptxImport(bytes, canvas)
-  const bundle = withDefaultComponentController(createBlankCourseProject({ title, canvas }))
-  const blankPage = bundle.project.surfaces[0]!.id
-  // The import adds the PPT's pages as a new Slide page; the blank page the course started with goes.
-  const step = planPptxImportTransaction(bundle.project, draft, title)
-  const removed = deleteCourseSurface(step.nextDocument, blankPage)
-  if (!removed.ok) throw new Error(removed.reason)
-  return {
-    project: courseProjectDocumentSchema.parse(removed.project),
-    assetFiles: Object.fromEntries(draft.assets.map(asset => [asset.meta.id, asset.bytes])),
-    componentPackages: bundle.componentPackages,
-    issues: draft.issues,
-  }
+  const project = createBlankCourseProjectV10(title)
+  project.surfaces = []
+  for (const id of project.global.overlay) if (project.instances[id].definitionId === 'guoling.navigation') project.instances[id].frame = createTeacherControllerFrame(canvas)
+  const driver = new CourseV10Driver()
+  const resources: DocumentResources = { assets: {}, components: {} }
+  const target = { documentId: crypto.randomUUID(), epoch: crypto.randomUUID(), project, resources,
+    surfaceId: null, instanceId: null, instanceIds: [], activeStateId: null, editingProject: project }
+  const step = planPptxImportTransaction(target, draft, title, { canvas, source: { bytes, filename: `${title}.pptx` } })
+  const model = driver.apply({ kind: 'course-v10', project, resources },
+    { type: step.type, edits: step.edits, expected: step.expected })
+  if (model.kind !== 'course-v10') throw new Error('PPT 导入没有产生 V10 工程')
+  return { project: model.project, resources: model.resources, issues: draft.issues }
 }
 
 /** The .h5lesson bytes of a course made from a PPT. */
 export function pptxCourseArchive(course: PptxCourse): Uint8Array<ArrayBuffer> {
-  const bytes = createCourseProjectArchive({ project: course.project, assetFiles: course.assetFiles, componentFiles: componentPackagesToArchiveFiles(course.componentPackages) })
+  const bytes = new CourseV10Driver().serialize({ kind: 'course-v10', project: course.project, resources: course.resources })
   // File requests carry ArrayBuffer-backed bytes; the zip output already is one.
   return bytes.buffer instanceof ArrayBuffer ? bytes as Uint8Array<ArrayBuffer> : Uint8Array.from(bytes)
 }

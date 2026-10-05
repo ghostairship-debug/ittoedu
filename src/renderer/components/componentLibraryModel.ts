@@ -1,8 +1,7 @@
 import type { AvailableComponentCatalogPackage, AvailableHtmlComponent } from '../../shared/componentCatalog'
-import type { ComponentPackageData } from '../../shared/componentTypes'
+import type { ComponentDefinition } from '../../shared/contracts/component-platform/project'
 import {
   compareSemanticVersions,
-  componentCatalogInstallStatus,
 } from './componentCatalogStatus'
 
 export const GENERAL_COMPONENT_SUBJECT = '通用组件'
@@ -95,7 +94,7 @@ export function selectCurrentCatalogPackages(
 /** Flow's insert menu offers one current built-in package per ID until it is embedded. */
 export function selectAvailableBuiltInCatalogPackages(
   entries: ReadonlyArray<AvailableComponentCatalogPackage>,
-  components: Readonly<Record<string, ComponentPackageData>>,
+  components: Readonly<Record<string, ComponentDefinition>>,
 ): AvailableComponentCatalogPackage[] {
   return selectCurrentCatalogPackages(entries.filter((entry) => entry.sourceTrust === 'built-in'))
     .filter((entry) => componentCatalogInstallStatus(entry, components[entry.packageId]) === 'available')
@@ -116,7 +115,7 @@ export interface CatalogBatchJoinPlan {
 /** Trust is evaluated only after already embedded package IDs are removed. */
 export function planCatalogBatchJoin(
   entries: ReadonlyArray<AvailableComponentCatalogPackage>,
-  components: Readonly<Record<string, ComponentPackageData>>,
+  components: Readonly<Record<string, ComponentDefinition>>,
 ): CatalogBatchJoinPlan {
   const pending = entries.filter((entry) =>
     componentCatalogInstallStatus(entry, components[entry.packageId]) === 'available',
@@ -176,4 +175,11 @@ export function filterHtmlComponents(
   if (!normalized) return [...entries]
   return entries.filter((entry) => [entry.name, entry.description, entry.sourceCourse ?? '', ...entry.subject, ...entry.schoolStage, ...entry.tags]
     .join(' ').toLocaleLowerCase().includes(normalized))
+}
+
+/** Catalog byte identity is metadata; author availability follows the formal definition version. */
+export function componentCatalogInstallStatus(entry: Pick<AvailableComponentCatalogPackage, 'version'>, definition?: ComponentDefinition): 'available' | 'embedded' | 'update-available' | 'embedded-newer' {
+  if (!definition) return 'available'
+  const difference = compareSemanticVersions(entry.version, definition.version ?? '1.0.0')
+  return difference > 0 ? 'update-available' : difference < 0 ? 'embedded-newer' : 'embedded'
 }

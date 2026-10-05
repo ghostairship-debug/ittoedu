@@ -1,396 +1,95 @@
-import type {
-  CourseAuthoringSessionToken,
-  CourseAuthoringTarget,
-} from '../../authoring/courseAuthoringSession'
-import { COURSE_AUTHORING_STALE_SESSION_REASON } from '../../authoring/courseAuthoringSession'
+import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
+import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
+import type { EditorStoreKernel } from '../../store/editorStoreKernel'
+import type { PropertiesOwnerReadModel } from '../../composition/properties/PropertiesAuthoringReadModel'
 import type { AssetMeta } from '../../../shared/contracts/media-v1'
-import type { CourseBackgroundFields } from '../../../shared/effectiveBackground'
-import type {
-  SpatialAuthoringIntent,
-  SpatialAuthoringIntentInput,
-  SpatialAuthoringReceipt,
-  SpatialGraphSelection,
-} from '../../authoring/spatialAuthoringIntents'
-import type { SpatialWorldContentEditSession } from '../../authoring/spatialWorldAuthoring'
-import {
-  captureSpatialEditorAuthoringTarget,
-  type SpatialEditorAuthoringTargetInput,
-  type SpatialEditorView,
-} from '../../course/spatialEditorView'
-import type {
-  SpatialPropertiesCommands,
-  SpatialPropertiesContext,
-} from './SpatialPropertiesPanel'
-
-export type SpatialPropertiesOwnerResult =
-  | { readonly status: 'inactive' }
-  | {
-      readonly status: 'stale'
-      readonly reason: string
-      readonly locationId: string
-      readonly editingGlobal: boolean
-    }
-  | {
-      readonly status: 'active'
-      readonly locationId: string
-      readonly editingGlobal: boolean
-      readonly scope: 'global' | 'surface' | 'world'
-      readonly graphSelection: SpatialGraphSelection | null
-      readonly pageContext: SpatialPropertiesContext
-      readonly graphContext: SpatialPropertiesContext | null
-    }
-
-function draftBindingKey(target: CourseAuthoringTarget): string {
-  return JSON.stringify([
-    target.projectId,
-    target.documentRevision,
-    target.sessionGeneration,
-    target.surfaceType,
-    target.locationId,
-    target.surfaceId,
-    target.owner,
-    target.ownerKey,
-    target.itemId,
-    target.authoringAddress,
-  ])
-}
-
-function createCommands(input: {
-  readonly view: SpatialEditorView
-  readonly sessionToken: CourseAuthoringSessionToken
-  readonly contentEdit: SpatialWorldContentEditSession | null
-  readonly showCameraFrames: boolean
-  readonly playbackPathId: string | null
-  readonly runIntent: (
-    target: CourseAuthoringTarget,
-    intent: SpatialAuthoringIntent,
-  ) => SpatialAuthoringReceipt
-  readonly reportError: (message: string) => void
-  readonly setPreviewBackgroundColor?: (color: string | null) => void
-}): SpatialPropertiesCommands {
-  const capture = (target: SpatialEditorAuthoringTargetInput) => (
-    captureSpatialEditorAuthoringTarget({
-      view: input.view,
-      sessionToken: input.sessionToken,
-      target,
-    })
-  )
-  const run = (target: SpatialEditorAuthoringTargetInput, intent: SpatialAuthoringIntentInput) => (
-    input.runIntent(capture(target), {
-      ...intent,
-      expectedContentEdit: input.contentEdit,
-    } as SpatialAuthoringIntent)
-  )
-  const world = (field: string, intent: SpatialAuthoringIntentInput) => (
-    run({ kind: 'world', field }, intent)
-  )
-  const camera = (frameId: string, field: string, intent: SpatialAuthoringIntentInput) => (
-    run({ kind: 'camera-frame', frameId, field }, intent)
-  )
-  const path = (pathId: string, field: string, intent: SpatialAuthoringIntentInput) => (
-    run({ kind: 'path', pathId, field }, intent)
-  )
-  const relation = (relationId: string, field: string, intent: SpatialAuthoringIntentInput) => (
-    run({ kind: 'relation', relationId, field }, intent)
-  )
-  const semantic = (ruleId: string, field: string, intent: SpatialAuthoringIntentInput) => (
-    run({ kind: 'semantic-rule', ruleId, field }, intent)
-  )
-  return {
-    setBackgroundColor: (backgroundColor) => run(
-      { kind: 'surface', field: 'backgroundColor' },
-      { kind: 'set-surface-background', backgroundColor },
-    ),
-    updateBackground: (patch) => {
-      input.setPreviewBackgroundColor?.(null)
-      return run(
-        { kind: 'surface', field: 'background' },
-        { kind: 'set-surface-background-patch', patch },
-      )
-    },
-    previewBackground: (patch) => {
-      input.setPreviewBackgroundColor?.(patch.backgroundColor ?? null)
-    },
-    setShowCameraFrames: (show) => world('session.showCameraFrames', {
-      kind: 'set-show-camera-frames',
-      show,
-      expectedShow: input.showCameraFrames,
-    }),
-    addCameraFrame: () => world('camera.frames', {
-      kind: 'add-camera-frame',
-      expectedCamera: input.view.sessionCamera,
-    }),
-    renameCameraFrame: (frameId, name) => camera(
-      frameId,
-      'camera.frames.name',
-      { kind: 'rename-camera-frame', name },
-    ),
-    reorderCameraFrame: (frameId, toIndex) => camera(
-      frameId,
-      'camera.frames.order',
-      {
-        kind: 'reorder-camera-frame',
-        toIndex,
-        expectedFrameIds: input.view.camera.frames.map((frame) => frame.id),
-      },
-    ),
-    deleteCameraFrame: (frameId) => camera(
-      frameId,
-      'camera.frames',
-      { kind: 'delete-camera-frame' },
-    ),
-    setHome: () => world('camera.home', {
-      kind: 'set-camera-home-from-session',
-      expectedCamera: input.view.sessionCamera,
-    }),
-    updateActiveFromSession: () => {
-      const frameId = input.view.camera.activeFrameId
-      if (!frameId) return
-      camera(frameId, 'camera.frames.pose', {
-        kind: 'update-camera-frame-from-session',
-        expectedCamera: input.view.sessionCamera,
-      })
-    },
-    activateFrame: (frameId) => camera(
-      frameId,
-      'session.activeCameraFrameId',
-      { kind: 'activate-camera-frame' },
-    ),
-    fitWorldContent: () => world('session.camera', {
-      kind: 'fit-world-content',
-      viewportWidth: 1280,
-      viewportHeight: 720,
-      expectedCamera: input.view.sessionCamera,
-    }),
-    setPlaybackPathId: (pathId) => world('session.playbackPathId', {
-      kind: 'set-playback-path',
-      pathId,
-      expectedPathId: input.playbackPathId,
-      ...(pathId
-        ? { pathTarget: capture({ kind: 'path', pathId, field: 'world.paths' }) }
-        : {}),
-    }),
-    addSemanticZoomRule: (rule) => world('semanticZoom', {
-      kind: 'add-semantic-rule',
-      rule,
-    }),
-    updateSemanticZoomRule: (ruleId, patch) => semantic(
-      ruleId,
-      Object.keys(patch).length === 1
-        ? `semanticZoom.${Object.keys(patch)[0]}`
-        : 'semanticZoom',
-      { kind: 'update-semantic-rule', patch },
-    ),
-    deleteSemanticZoomRule: (ruleId) => semantic(
-      ruleId,
-      'semanticZoom',
-      { kind: 'delete-semantic-rule' },
-    ),
-    addPath: (pathInput) => world('world.paths', { kind: 'add-path', input: pathInput }),
-    renamePath: (pathId, name) => path(pathId, 'world.paths.name', {
-      kind: 'rename-path',
-      name,
-    }),
-    updatePathStyle: (pathId, style) => path(pathId, 'world.paths.style', {
-      kind: 'update-path-style',
-      style,
-    }),
-    reorderPathWaypoints: (pathId, layerItemIds) => path(
-      pathId,
-      'world.paths.layerItemIds',
-      { kind: 'reorder-path-waypoints', layerItemIds },
-    ),
-    deletePath: (pathId) => path(pathId, 'world.paths', { kind: 'delete-path' }),
-    addRelation: (relationInput) => world('world.relations', {
-      kind: 'add-relation',
-      input: relationInput,
-    }),
-    updateRelationLabel: (relationId, label) => relation(
-      relationId,
-      'world.relations.label',
-      { kind: 'update-relation-label', label },
-    ),
-    updateRelationKind: (relationId, relationKind) => relation(
-      relationId,
-      'world.relations.kind',
-      { kind: 'update-relation-kind', relationKind },
-    ),
-    deleteRelation: (relationId) => relation(
-      relationId,
-      'world.relations',
-      { kind: 'delete-relation' },
-    ),
-    reportError: input.reportError,
-  }
-}
-
-function buildContext(input: {
-  readonly kind: SpatialPropertiesContext['kind']
-  readonly view: SpatialEditorView
-  readonly course: CourseBackgroundFields
-  readonly assets: Readonly<Record<string, AssetMeta>>
-  readonly sessionToken: CourseAuthoringSessionToken
-  readonly contentEdit: SpatialWorldContentEditSession | null
-  readonly showCameraFrames: boolean
-  readonly playbackPathId: string | null
-  readonly graphSelection: SpatialGraphSelection | null
-  readonly commands: SpatialPropertiesCommands
-  readonly professionalInteraction?: SpatialPropertiesContext['professionalInteraction']
-}): SpatialPropertiesContext {
-  const capture = (target: SpatialEditorAuthoringTargetInput) => (
-    captureSpatialEditorAuthoringTarget({
-      view: input.view,
-      sessionToken: input.sessionToken,
-      target,
-    })
-  )
-  return {
-    kind: input.kind,
-    view: input.view,
-    course: input.course,
-    assets: input.assets,
-    sessionCamera: input.view.sessionCamera,
-    showCameraFrames: input.showCameraFrames,
-    playbackPathId: input.playbackPathId,
-    selectedPathId: input.graphSelection?.kind === 'path'
-      ? input.graphSelection.id
-      : null,
-    selectedRelationId: input.graphSelection?.kind === 'relation'
-      ? input.graphSelection.id
-      : null,
-    draftBindings: {
-      surface: draftBindingKey(capture({ kind: 'surface', field: 'surface' })),
-      cameraFrames: new Map(input.view.camera.frames.map((frame) => [
-        frame.id,
-        draftBindingKey(capture({
-          kind: 'camera-frame',
-          frameId: frame.id,
-          field: 'camera.frames',
-        })),
-      ])),
-      paths: new Map(input.view.worldGraph.paths.map((entry) => [
-        entry.pathId,
-        draftBindingKey(capture({
-          kind: 'path',
-          pathId: entry.pathId,
-          field: 'world.paths',
-        })),
-      ])),
-      relations: new Map(input.view.worldGraph.relations.map((entry) => [
-        entry.relationId,
-        draftBindingKey(capture({
-          kind: 'relation',
-          relationId: entry.relationId,
-          field: 'world.relations',
-        })),
-      ])),
-      semanticRules: new Map(input.view.visibilityRules.map((rule) => [
-        rule.id,
-        draftBindingKey(capture({
-          kind: 'semantic-rule',
-          ruleId: rule.id,
-          field: 'semanticZoom',
-        })),
-      ])),
-    },
-    commands: input.commands,
-    professionalInteraction: input.professionalInteraction,
-  }
-}
+import type { SpatialPropertiesContext } from './SpatialPropertiesPanel'
+import type { createSpatialAuthoringSlice } from '../../store/slices/spatialAuthoringSlice'
+import { propertiesEffectiveBackground } from './componentProperties'
 
 export function buildSpatialPropertiesOwner(input: {
-  readonly view: SpatialEditorView | null
-  readonly course: CourseBackgroundFields
-  readonly assets: Readonly<Record<string, AssetMeta>>
-  readonly scope: 'global' | 'surface' | 'world'
-  readonly selectionIds: readonly string[]
-  readonly showCameraFrames: boolean
-  readonly contentEdit: SpatialWorldContentEditSession | null
-  readonly graphSelection: SpatialGraphSelection | null
-  readonly playbackPathId: string | null
-  readonly authoringToken: CourseAuthoringSessionToken | null
-  readonly runIntent: (
-    target: CourseAuthoringTarget,
-    intent: SpatialAuthoringIntent,
-  ) => SpatialAuthoringReceipt
-  readonly reportError: (message: string) => void
-  readonly professionalInteraction?: SpatialPropertiesContext['professionalInteraction']
-  readonly setPreviewBackgroundColor?: (color: string | null) => void
-}): SpatialPropertiesOwnerResult {
-    const { view } = input
-    if (!view) return { status: 'inactive' }
-    const editingGlobal = input.scope === 'global'
-    const token = input.authoringToken
-    if (
-      !token
-      || token.surfaceType !== 'spatial-2d'
-      || token.locationId !== view.locationId
-      || token.revision !== view.revision
-    ) {
-      return {
-        status: 'stale',
-        reason: COURSE_AUTHORING_STALE_SESSION_REASON,
-        locationId: view.locationId,
-        editingGlobal,
-      }
-    }
-    const graphTargetExists = !input.graphSelection || (
-      input.graphSelection.kind === 'path'
-        ? view.worldGraph.paths.some((entry) => entry.pathId === input.graphSelection!.id)
-        : view.worldGraph.relations.some((entry) => entry.relationId === input.graphSelection!.id)
-    )
-    if (!graphTargetExists) {
-      return {
-        status: 'stale',
-        reason: '所选空间关系已失效，请重新选择。',
-        locationId: view.locationId,
-        editingGlobal,
-      }
-    }
-    const commands = createCommands({
-      view,
-      sessionToken: token,
-      contentEdit: input.contentEdit,
-      showCameraFrames: input.showCameraFrames,
-      playbackPathId: input.playbackPathId,
-      runIntent: input.runIntent,
-      reportError: input.reportError,
-      setPreviewBackgroundColor: input.setPreviewBackgroundColor,
-    })
-    const pageContext = buildContext({
-      kind: 'spatial-page',
-      view,
-      course: input.course,
-      assets: input.assets,
-      sessionToken: token,
-      contentEdit: input.contentEdit,
-      showCameraFrames: input.showCameraFrames,
-      playbackPathId: input.playbackPathId,
-      graphSelection: null,
-      commands,
-      professionalInteraction: input.professionalInteraction,
-    })
-    return {
-      status: 'active',
-      locationId: view.locationId,
-      editingGlobal,
-      scope: input.scope,
-      graphSelection: input.graphSelection,
-      pageContext,
-      graphContext: input.graphSelection
-        ? buildContext({
-            kind: 'spatial-graph',
-            view,
-            course: input.course,
-            assets: input.assets,
-            sessionToken: token,
-            contentEdit: input.contentEdit,
-            showCameraFrames: input.showCameraFrames,
-            playbackPathId: input.playbackPathId,
-            graphSelection: input.graphSelection,
-            commands,
-            professionalInteraction: input.professionalInteraction,
-          })
-        : null,
-    }
+  read: PropertiesOwnerReadModel
+  kernel: EditorStoreKernel
+  actions: Pick<ReturnType<typeof createSpatialAuthoringSlice>,
+    'readSpatialView' | 'setSpatialShowCameraFrames' | 'addSpatialCameraFrameFromSession' | 'renameSpatialCameraFrame'
+    | 'updateSpatialCameraFrameTarget' | 'reorderSpatialCameraFrames' | 'deleteSpatialCameraFrame' | 'setSpatialCameraHomeFromSession'
+    | 'updateActiveSpatialCameraFrameFromSession' | 'activateSpatialCameraFrame' | 'fitSpatialSessionToWorldContent'
+    | 'setSpatialPlaybackPathId' | 'addSpatialSemanticZoomRule' | 'updateSpatialSemanticZoomRule' | 'deleteSpatialSemanticZoomRule'
+    | 'addSpatialPath' | 'updateSpatialPath' | 'deleteSpatialPath' | 'addSpatialRelation' | 'updateSpatialRelation' | 'deleteSpatialRelation'>
+  assets: Readonly<Record<string, AssetMeta>>
+  liveTarget(): CapturedCourseTarget
+  submit(edits: ComponentEdit[], target?: CapturedCourseTarget): void
+  report(error: unknown): void
+  preview(edits: ComponentEdit[] | null, owner?: 'surface' | 'instance'): void
+}): SpatialPropertiesContext | null {
+  const { read, actions } = input
+  const surface = read.surface
+  if (surface?.kind !== 'spatial' || !read.documentId || !read.project) return null
+  const view = actions.readSpatialView(surface.id, read.documentId)
+  const spatial = surface.spatial ?? { home: { x: 0, y: 0, zoom: 1 }, frames: [] }
+  const binding = JSON.stringify([read.documentId, read.epoch, surface.id, read.activeStateId])
+  const run = (action: () => unknown) => { try { input.liveTarget(); void Promise.resolve(action()).catch(input.report) } catch (error) { input.report(error) } }
+  const create = async (action: (target: CapturedCourseTarget) => unknown) => {
+    try { return await action(input.liveTarget()) }
+    catch (error) { input.report(error); throw error }
+  }
+  const patchBackground: SpatialPropertiesContext['commands']['updateBackground'] = patch => run(() => {
+    const target = input.liveTarget(), current = target.project.surfaces.find(value => value.id === surface.id)?.background
+    input.submit([{ type: 'surface.background.set', surfaceId: surface.id, background: { ...current,
+      ...(patch.backgroundMode === undefined ? {} : { mode: patch.backgroundMode }),
+      ...(patch.backgroundColor === undefined ? {} : { color: patch.backgroundColor, mode: 'own' }),
+      ...(patch.backgroundAssetId === undefined ? {} : { assetId: patch.backgroundAssetId, mode: 'own' }),
+    } }], target)
+  })
+  const ids = (roots: readonly string[]): string[] => roots.flatMap(id => [id, ...ids(read.project!.instances[id]?.childIds ?? [])])
+  return {
+    kind: view.graphSelection ? 'spatial-graph' : 'spatial-page',
+    view: { surfaceId: surface.id, surfaceTitle: surface.title, spatial,
+      backgroundMode: surface.background?.mode ?? 'inherit', backgroundColor: surface.background?.color,
+      effectiveBackground: propertiesEffectiveBackground(read.project, surface),
+      backgroundAssetId: surface.background?.assetId, worldInstances: ids(surface.childIds).map(id => read.project!.instances[id]).filter(Boolean) },
+    course: { backgroundColor: read.project.background?.color, backgroundAssetId: read.project.background?.assetId },
+    assets: input.assets, sessionCamera: view.camera, showCameraFrames: view.showCameraFrames, activeCameraFrameId: view.activeCameraFrameId, playbackPathId: view.playbackPathId,
+    selectedPathId: view.graphSelection?.kind === 'path' ? view.graphSelection.id : null,
+    selectedRelationId: view.graphSelection?.kind === 'relation' ? view.graphSelection.id : null,
+    draftBindings: { surface: binding,
+      cameraFrames: new Map(spatial.frames.map(frame => [frame.id, `${binding}:frame:${frame.id}`])),
+      paths: new Map((spatial.paths ?? []).map(path => [path.id, `${binding}:path:${path.id}`])),
+      relations: new Map((spatial.relations ?? []).map(relation => [relation.id, `${binding}:relation:${relation.id}`])),
+      semanticRules: new Map((spatial.semanticZoom ?? []).map(rule => [rule.id, `${binding}:rule:${rule.id}`])) },
+    commands: {
+      setBackgroundColor: backgroundColor => patchBackground({ backgroundColor }), updateBackground: patchBackground,
+      previewBackground: patch => run(() => input.preview(patch.backgroundColor == null ? null : [
+        { type: 'surface.background.set', surfaceId: surface.id, background: { ...surface.background, mode: 'own', color: patch.backgroundColor } }], 'surface')),
+      setShowCameraFrames: show => actions.setSpatialShowCameraFrames(show, surface.id),
+      addCameraFrame: () => run(() => actions.addSpatialCameraFrameFromSession(surface.id, input.liveTarget())),
+      renameCameraFrame: (frameId, title) => run(() => actions.renameSpatialCameraFrame(surface.id, frameId, title, input.liveTarget())),
+      updateCameraFrameTarget: (frameId, instanceId) => run(() => actions.updateSpatialCameraFrameTarget(surface.id, frameId, instanceId, input.liveTarget())),
+      reorderCameraFrame: (frameId, toIndex) => run(() => {
+        const target = input.liveTarget(), values = [...(target.project.surfaces.find(value => value.id === surface.id)?.spatial?.frames ?? [])].map(frame => frame.id)
+        const from = values.indexOf(frameId)
+        if (from >= 0) { values.splice(from, 1); values.splice(Math.max(0, Math.min(toIndex, values.length)), 0, frameId) }
+        return actions.reorderSpatialCameraFrames(surface.id, values, target)
+      }),
+      deleteCameraFrame: frameId => run(() => actions.deleteSpatialCameraFrame(surface.id, frameId, input.liveTarget())),
+      setHome: () => run(() => actions.setSpatialCameraHomeFromSession(surface.id, input.liveTarget())),
+      updateActiveFromSession: () => run(() => actions.updateActiveSpatialCameraFrameFromSession(surface.id, input.liveTarget())),
+      activateFrame: frameId => actions.activateSpatialCameraFrame(surface.id, frameId),
+      fitWorldContent: () => actions.fitSpatialSessionToWorldContent(undefined, surface.id),
+      setPlaybackPathId: pathId => actions.setSpatialPlaybackPathId(pathId, surface.id),
+      addSemanticZoomRule: rule => run(() => actions.addSpatialSemanticZoomRule(surface.id, rule)),
+      updateSemanticZoomRule: (ruleId, patch) => run(() => actions.updateSpatialSemanticZoomRule(surface.id, ruleId, patch, input.liveTarget())),
+      deleteSemanticZoomRule: ruleId => run(() => actions.deleteSpatialSemanticZoomRule(surface.id, ruleId, input.liveTarget())),
+      addPath: path => create(target => actions.addSpatialPath(surface.id, path, target)),
+      renamePath: (pathId, title) => run(() => actions.updateSpatialPath(surface.id, pathId, { title }, input.liveTarget())),
+      updatePathStyle: (pathId, style) => run(() => actions.updateSpatialPath(surface.id, pathId, { style }, input.liveTarget())),
+      reorderPathWaypoints: (pathId, instanceIds) => run(() => actions.updateSpatialPath(surface.id, pathId, { instanceIds, frameIds: [] }, input.liveTarget())),
+      reorderPathFrames: (pathId, frameIds) => run(() => actions.updateSpatialPath(surface.id, pathId, { frameIds, instanceIds: [] }, input.liveTarget())),
+      deletePath: pathId => run(() => actions.deleteSpatialPath(surface.id, pathId, input.liveTarget())),
+      addRelation: relation => create(target => actions.addSpatialRelation(surface.id, relation, target)),
+      updateRelationLabel: (relationId, label) => run(() => actions.updateSpatialRelation(surface.id, relationId, { label }, input.liveTarget())),
+      updateRelationKind: (relationId, kind) => run(() => actions.updateSpatialRelation(surface.id, relationId, { kind }, input.liveTarget())),
+      deleteRelation: relationId => run(() => actions.deleteSpatialRelation(surface.id, relationId, input.liveTarget())), reportError: input.report,
+    },
+  }
 }

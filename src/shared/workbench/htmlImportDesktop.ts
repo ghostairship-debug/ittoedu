@@ -9,8 +9,10 @@ export const htmlImportDesktopRequestSchema = z.object({
   documentId: id,
   epoch: id,
   revision: z.number().int().nonnegative(),
-  locationId: id,
-  anchorBlockId: id.optional(),
+  surfaceId: id,
+  anchorInstanceId: id.optional(),
+  stateId: id.nullable().optional(),
+  viewport: z.object({ width: z.number().int().positive(), height: z.number().int().positive() }).strict().optional(),
   source: z.discriminatedUnion('kind', [
     z.object({ kind: z.literal('file'), path: filePath }).strict(),
     z.object({ kind: z.literal('choose') }).strict(),

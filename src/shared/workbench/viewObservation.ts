@@ -12,7 +12,7 @@ export const viewObserveInputSchema = z.union([
 export type ViewObserveInput = z.infer<typeof viewObserveInputSchema>
 
 export type ViewObservationIdentity = ObservationResult['identity']
-export type ViewObservationSnapshot = DocumentSnapshot & { model: Extract<DocumentModel, { kind: 'course-v9' }> }
+export type ViewObservationSnapshot = DocumentSnapshot & { model: Extract<DocumentModel, { kind: 'course-v10' }> }
 export interface ViewObservationCapture {
   identity: ViewObservationIdentity
   png: Uint8Array
@@ -24,13 +24,14 @@ export interface ViewObservationCapture {
 
 export function sameObservationIdentity(a: ViewObservationIdentity, b: ViewObservationIdentity): boolean {
   return a.documentId === b.documentId && a.epoch === b.epoch && a.revision === b.revision
-    && a.locationId === b.locationId && a.viewGeneration === b.viewGeneration
+    && a.locationId === b.locationId && (a.stateId ?? null) === (b.stateId ?? null) && a.viewGeneration === b.viewGeneration
 }
 
 export function observationSnapshotMatches(snapshot: DocumentSnapshot, identity: ViewObservationIdentity,
   projectId: string): snapshot is ViewObservationSnapshot {
   return snapshot.documentId === identity.documentId && snapshot.epoch === identity.epoch
-    && snapshot.revision === identity.revision && snapshot.model.kind === 'course-v9'
+    && snapshot.revision === identity.revision && snapshot.model.kind === 'course-v10'
     && snapshot.model.project.id === projectId
-    && snapshot.model.project.locations.some(location => location.id === identity.locationId)
+    && snapshot.model.project.surfaces.some(surface => surface.id === identity.locationId
+      && (!identity.stateId || surface.presentation?.states.some(state => state.id === identity.stateId)))
 }
