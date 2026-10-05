@@ -369,6 +369,23 @@ Windows真实中文IME不能用keyboard.type中文或合成composition冒充。�
 | NativeText聚焦用例 | N0/F0 | 断言通过但Vitest因PM/jsdom getClientRects退出1；整体不能记green |
 | HMR Context报错 | R0/A0 | 当时存在多版本URL污染；静态Provider实际包裹Workspace，不据此盲加Provider |
 
+### 10.1 当前实施状态（2026-10-06，产品 cut 7dc933c5）
+
+上表与 B0 中的起始调查、冻结材料和未来步骤保留为 2026-10-05 的历史记录。当前 Owner 已授权全部产品开发；本节以迁移树 7dc933c5 和原任务卡的实际证据更新状态，不把旧快照中的断点继续称为当前故障，也不把局部修复写成全部 N/L 完成。
+
+| 范围 | 当前实现与有效证据 | 保留的界线 |
+|---|---|---|
+| 文档核、首链与专业属性 | 独立 Project V10、Published V3、API5、Main唯一History与captured/ACK已集成；UI1保存后新进程冷开续编、UI2属性/显示裁剪/替图保crop及range撤销、UI6共享/私有源码/恢复默认/保存冷开已有实证 | 普通保存冷开不替代恢复稿恢复；OS IME与原生文件选择器没有完整现场证据 |
+| Flow 正文、资源与投影 | FlowWorkspace实际传clipboard context/resource port并等待正式ACK，prepared正文/实例/同名资产/私有相对源码一批提交已有针对性证据。7dc修复真实样式回写进入PM观察器的重建循环；新Main冷开11个正文DOM/ViewDesc和4个iframe/父级身份稳定，可信drag改变正式顺序，尾段输入后CtrlZ保留重排 | actual库插入与资源集成用例不冒称native跨文档剪贴板整链；本次QA未保存，正常保留恢复稿关闭，旧有效保存/冷开证据继续复用 |
+| 用户三项引用补审 | 三项初核均存在，eaa3bbf58f42157d97352aafb09e4c30622a8488修后同直接反例由3fail到3/3、exit0/979ms。互动为新ID1/旧ID0；visibility目标true/源false且unbound有诊断；正文100→180时浮层110→190，保留偏移、横比与frame，普通文本未替换。Sol独立核actualdiff/raw；e978a14c身份尾项和8bb28f空asset引用分别闭合 | 只证明这些局部引用属性，不声称全软件无回退；旧QA ghost没有被静默改写 |
+| Teacher、运行与关闭 | UI5运行/暂停/继续/重播已有实际观察。7dc checkbox列宽恢复横向标签及右列控件，布尔修改可正式撤销；独立clean Main普通docclose后QA消失且alerts/toasts为空。真实pending/composition/exact unknown ACK保留诊断由4个V10生命周期用例证明 | 首次dirty docclose遗漏harness原生choice，已保留为准备缺口；不把clean UI观测当全部pending或系统IME矩阵 |
+| 内容应用、工程文件与导入 | H1/H2已有Desktop HTML与resident MCP V10 import/save、canonical资源/源码事务、live rename后cold reopen续作证据；实际Electron局部CSS redo保留邻项且呈现320×96、28px、作者颜色和input5。成熟UI的HTML/PPTX导入编辑与保存revision10后新Main冷开已观察；Q2投影/正式批次与专业源文consumer已接线 | 非web专业HTML适用范围按adapter实际能力与局部诊断报告；不能由普通content编辑推全部redo，也不将仅未观察的dirty摄入直接定为实现故障 |
+| 正常关闭后再改名的续作 | 新只读审计缩到clean close→canonical rename/move→continue：close会discard journal及binding索引；旧run保存路径可能无法随之改变。原live rename用例不覆盖这一顺序。Q2已接独立叶窄任务，核现有权威绑定读取与直接反例 | 当前仅静态断口，尚无新反例或修复候选；dirty/recoverable有先restore再observe路径，不归为同一故障，不建立通知镜像平台 |
+| 发布、实际预览与格式输出 | singleHtmlMode已由useCourseDelivery传入producer，离线/在线两模式均生成；混合独立Player已有可信作答。L03实际预览走ViewObservationDesktopService的冻结V3 snapshot与同一World，正式七图manifest保留各cut来源；unused 1×1 seed没有被冒充截图。最新6f交付制品完整且报告error0，正式课件PDF实际950253B、7页/7PNG已独立目视核查 | PPTX原生table/chart的15°旋转partial路线已批准，格式诊断保留。Word原生正文/表格/图表编辑保存冷读有效；Word自身PDF导出新条件仍不返回，锚图/图像native视觉缺口保留，停止无新证据的重复；课件PDF不替代Word PDF |
+| 完整N/L与旧consumer退出 | 现Main只注册V10及普通Markdown/Text，Renderer单V10Bridge/Kernel，源Skill与同源能力已同步；旧V9文件存在不等于活writer，按实际注册退出，不清仓式删除。GJS按既定可替换适配定位，不新增无信息增益的比较门 | 页面全菜单/整卡空白点击、Spatial路径与站内分步、像素变换/恢复原图、native跨doc复制及恢复稿续编按现有集成证据与未观察属性分别对账；不能仅Q2修完便称全部目标完成 |
+
+本轮仅对相关变化做最小充分检查：Flow投影1例、正常关闭4例、一次Renderer构建（main-B7de-Fqn.js），复用未变Main/Player/默认source JSON及Office产物，不重跑旧矩阵。E3/P0新观察各自正常退出，独立review仅读现有raw/PNG。当前任务仍active；真实模型比较未获本轮授权，发布继续暂停，Owner艺术接受另记。完整证据路径与精确回执在[现任务卡](../tasks/component-platform-refactor/baseline-v10-implementation.md)。
+
 ## 11. 复用来源与证据边界
 
 | 材料 | 可复用内容 | 不能扩大为 |
