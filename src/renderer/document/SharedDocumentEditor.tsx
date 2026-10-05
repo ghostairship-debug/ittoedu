@@ -846,13 +846,14 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     } catch (error) { fail(error instanceof Error ? error.message : String(error)) }
   }
   const discardButton = diagnostics.length > 0 && <button type="button" onClick={() => { void discardLocalDraft().catch(error => fail(error instanceof Error ? error.message : String(error))) }}>丢弃待修草稿</button>
+  const modeControls = <>
+    <button type="button" onMouseDown={event => event.preventDefault()} onClick={switchMode}>{mode === 'layout' ? '源文' : '正文'}</button>
+    {mode === 'source' && diagnostics.length > 0 && commandError
+      ? <div role="alert" className="shared-document-more__mode-notice">{commandError}</div>
+      : null}
+  </>
   const toolbar = <div ref={toolbarRef} tabIndex={-1} className="shared-document-toolbar" onPointerDownCapture={() => layout.current?.syncDomTextSelection()} role="toolbar" aria-label="正文工具">
-      {documentScope && <details className="shared-document-more"><summary onMouseDown={event => event.preventDefault()} aria-label="更多正文操作">⋯</summary>
-        <button type="button" onMouseDown={event => event.preventDefault()} onClick={switchMode}>{mode === 'layout' ? '源文' : '正文'}</button>
-        {mode === 'source' && diagnostics.length > 0 && commandError
-          ? <div role="alert" className="shared-document-more__mode-notice">{commandError}</div>
-          : null}
-      </details>}
+      {documentScope && (props.target === 'flow' ? modeControls : <details className="shared-document-more"><summary onMouseDown={event => event.preventDefault()} aria-label="更多正文操作">⋯</summary>{modeControls}</details>)}
       {mode === 'layout' && props.contentScope === 'formula' && <button type="button" onMouseDown={event => event.preventDefault()} onClick={openMath}>编辑公式</button>}
       {mode === 'layout' && props.contentScope !== 'formula' && <>
         {([['bold', '粗体'], ['italic', '斜体'], ['underline', '下划线'], ['strike', '删除线'], ['emphasis', '着重号']] as const).map(([key, label]) => <button key={key} type="button" onMouseDown={event => event.preventDefault()} aria-pressed={format.flags[key]} onClick={() => toggleStyle(key)}>{label}</button>)}
