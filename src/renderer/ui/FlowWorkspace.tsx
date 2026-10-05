@@ -214,41 +214,43 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       (probe as any)[key]=value;const normalized=(probe as any)[key]
       if((element.style as any)[key]!==normalized)(element.style as any)[key]=normalized
     }}
-    for (const element of paper.current?.querySelectorAll<HTMLElement>('[data-flow-block-id]') ?? []) {
-      const instance = latest.current.project.instances[element.dataset.flowBlockId!]
-      element.dataset.componentFlowId = instance?.id ?? ''
-      if(instance){
-        const definition = latest.current.project.definitions[instance.definitionId]
-        const signature=JSON.stringify([componentPaintStyle(instance,definition),instance.visible])
-        if(bodyPaint.current.get(element)!==signature){
-          applyComponentPaintStyle(element,instance,definition)
-          const display=componentPaintStyle(instance,definition).display
-          element.style.display=instance.visible===false ? 'none':typeof display==='string' ? display:''
-          bodyPaint.current.set(element,signature)
+    editor.current?.paintProjection(() => {
+      for (const element of paper.current?.querySelectorAll<HTMLElement>('[data-flow-block-id]') ?? []) {
+        const instance = latest.current.project.instances[element.dataset.flowBlockId!]
+        element.dataset.componentFlowId = instance?.id ?? ''
+        if(instance){
+          const definition = latest.current.project.definitions[instance.definitionId]
+          const signature=JSON.stringify([componentPaintStyle(instance,definition),instance.visible])
+          if(bodyPaint.current.get(element)!==signature){
+            applyComponentPaintStyle(element,instance,definition)
+            const display=componentPaintStyle(instance,definition).display
+            element.style.display=instance.visible===false ? 'none':typeof display==='string' ? display:''
+            bodyPaint.current.set(element,signature)
+          }
         }
-      }
-      const key = instance && latest.current.project.definitions[instance.definitionId]?.implementation
-      if (key?.kind === 'builtin' && key.key === 'guoling.text' && !instance.implementationOverride) {
-        const data=textComponentDataSchema.parse(instance.data),presentation=textAppearanceStyles(data.appearance,data.sizing)
-        const {height:_height,display:_display,flexDirection:_direction,justifyContent:_justify,...box}=presentation.box
-        const {height:_contentHeight,...content}=presentation.content
-        style(element,{...box,...content})
-      }
-      if(key?.kind === 'builtin' && key.key === 'guoling.table' && !instance.implementationOverride) {
-        const data=parseTableData(instance.data),table=element.querySelector<HTMLTableElement>('table'),measured=layoutTable(data)
-        if(table)style(table,{width:`${measured.width}px`,maxWidth:'100%',borderCollapse:'collapse',tableLayout:'fixed'})
-        const header=table?.querySelector<HTMLElement>('tr')
-        if(header)style(header,{display:data.headerEnabled===false ? 'none':''})
-        for(const row of data.rows)for(const cell of row.cells) {
-          const slot=element.querySelector<HTMLElement>(`[data-document-slot="${CSS.escape(`cell:${JSON.stringify([row.id,cell.columnId])}`)}"]`),owner=slot?.closest<HTMLElement>('td,th')
-          const effective=measured.cells.find(value=>value.id===cell.id)?.style,column=data.columns.find(value=>value.id===cell.columnId)
-          if(owner && effective)style(owner,{width:`${column?.width ?? 200}px`,height:`${row.height}px`,padding:`${effective.cellPadding}px`,backgroundColor:effective.fillColor,color:effective.textColor,
-            fontFamily:effective.fontFamily,fontSize:`${effective.fontSize}px`,fontWeight:effective.bold ? '700':'400',fontStyle:effective.italic ? 'italic':'normal',textAlign:effective.horizontalAlign,verticalAlign:effective.verticalAlign,
-            border:`${effective.borderWidth}px ${effective.lineStyle} ${effective.borderColor}`})
+        const key = instance && latest.current.project.definitions[instance.definitionId]?.implementation
+        if (key?.kind === 'builtin' && key.key === 'guoling.text' && !instance.implementationOverride) {
+          const data=textComponentDataSchema.parse(instance.data),presentation=textAppearanceStyles(data.appearance,data.sizing)
+          const {height:_height,display:_display,flexDirection:_direction,justifyContent:_justify,...box}=presentation.box
+          const {height:_contentHeight,...content}=presentation.content
+          style(element,{...box,...content})
         }
+        if(key?.kind === 'builtin' && key.key === 'guoling.table' && !instance.implementationOverride) {
+          const data=parseTableData(instance.data),table=element.querySelector<HTMLTableElement>('table'),measured=layoutTable(data)
+          if(table)style(table,{width:`${measured.width}px`,maxWidth:'100%',borderCollapse:'collapse',tableLayout:'fixed'})
+          const header=table?.querySelector<HTMLElement>('tr')
+          if(header)style(header,{display:data.headerEnabled===false ? 'none':''})
+          for(const row of data.rows)for(const cell of row.cells) {
+            const slot=element.querySelector<HTMLElement>(`[data-document-slot="${CSS.escape(`cell:${JSON.stringify([row.id,cell.columnId])}`)}"]`),owner=slot?.closest<HTMLElement>('td,th')
+            const effective=measured.cells.find(value=>value.id===cell.id)?.style,column=data.columns.find(value=>value.id===cell.columnId)
+            if(owner && effective)style(owner,{width:`${column?.width ?? 200}px`,height:`${row.height}px`,padding:`${effective.cellPadding}px`,backgroundColor:effective.fillColor,color:effective.textColor,
+              fontFamily:effective.fontFamily,fontSize:`${effective.fontSize}px`,fontWeight:effective.bold ? '700':'400',fontStyle:effective.italic ? 'italic':'normal',textAlign:effective.horizontalAlign,verticalAlign:effective.verticalAlign,
+              border:`${effective.borderWidth}px ${effective.lineStyle} ${effective.borderColor}`})
+          }
+        }
+        if (instance) runtime.onTargetElement(instance.id, element)
       }
-      if (instance) runtime.onTargetElement(instance.id, element)
-    }
+    })
   },()=>viewSession.current?.state.zoom ?? 1) : undefined, [project,surfaceId, runtime.onTargetElement,observationHost])
   useEffect(() => {
     const capture = (): FlowMenuPageCapture => {

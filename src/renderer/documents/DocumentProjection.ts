@@ -250,7 +250,13 @@ export class DocumentProjection {
     if (this.disposed) return
     if (event.type === 'changed') this.accept(event.snapshot, event.operationId, false, event.appliedChanges)
     else if (event.documentId === this.documentId && event.epoch === this.state.committed?.epoch) {
-      this.problem({ kind: 'closed', code: 'document-closed', message: '文档会话已关闭，未确认输入仍保留。' })
+      if (this.queue.length || this.composition || this.state.draft || this.state.retainedComposition || this.previewTail || this.precommitGate) {
+        this.problem({ kind: 'closed', code: 'document-closed', message: '文档会话已关闭，未确认输入仍保留。' })
+      } else {
+        // Main emits closed before closeWithDialog returns. A drained view has no lost input.
+        this.update({ connected: false })
+        this.dispose()
+      }
     }
   }
 

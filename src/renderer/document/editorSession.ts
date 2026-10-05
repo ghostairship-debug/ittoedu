@@ -289,6 +289,19 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     options.beforeProjectionMutation?.()
     try{return work()}finally{options.afterProjectionMutation?.()}
   }
+  /** Flow paints its own wrappers and table geometry; those DOM writes are not author input. */
+  function paintProjection(paint: () => void): void {
+    // Keep this PM implementation detail here. Flush real pending input before excluding
+    // only the synchronous projection writes, including during an active composition.
+    const observer = (view as unknown as { domObserver: {
+      forceFlush(): void; flush(): void; stop(): void; start(): void
+    } }).domObserver
+    observer.forceFlush()
+    observer.flush()
+    if (view.isDestroyed) return
+    observer.stop()
+    try { paint() } finally { if (!view.isDestroyed) observer.start() }
+  }
   function applyState(state:EditorState):void {
     if(state.doc.eq(view.state.doc)){view.updateState(state);return}
     projectionMutation(()=>view.updateState(state))
@@ -596,7 +609,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     }
     return drain().then(ready => { if (ready) return invoke() })
   }
-  return { view, update, boundary, syncDomTextSelection,
+  return { view, update, boundary, syncDomTextSelection, paintProjection,
     requestPlainPaste: () => { clearPlainPaste(); plainPastePending = true; plainPasteTimer = setTimeout(clearPlainPaste, 3000); return clearPlainPaste },
     flush: () => { if (composing || view.composing || preparations.size) return false; publish(); boundary(); return !draftSession.rejected },
     drain,

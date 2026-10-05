@@ -4080,7 +4080,7 @@ button:disabled {
 }
 
 .component-properties-editor .property-row--checkbox {
-  grid-template-columns: 18px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 18px;
   align-items: center;
   color: var(--text-secondary);
 }

@@ -156,6 +156,8 @@ export interface SharedDocumentEditorProps {
   onRedo(): void
 }
 export interface SharedDocumentEditorHandle {
+  /** Apply synchronous layout projection without treating its wrapper styles as author input. */
+  paintProjection(paint: () => void): void
   /** Applies a future typing style at the actual PM caret; it creates no document transaction. */
   applyInlineStyle(style: TextRunStyle): boolean
   flush(): { ready: boolean; source: string; diagnostics: DocumentDiagnostic[] }
@@ -608,6 +610,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     if (source.current) source.current.dispatch({ effects: sourcePinnedSelectionEffect.of([...pins.flatMap(pin => { const range = sourcePreviewRange(pin, mapRef.current); return range ? [range] : [] }), ...(localPin?.mode === 'source' && localPin.revision === props.revision ? [localPin] : [])]) })
   }, [mode, props.pinnedTargets, props.revision, fallbackMap, localPin])
   useImperativeHandle(ref, () => ({
+    paintProjection: paint => { layout.current?.paintProjection(paint) },
     applyInlineStyle: patch => {
       const editor = layout.current
       if (!editor || mode !== 'layout' || latest.current.readOnly || editor.view.composing || !editor.view.state.selection.empty) return false
