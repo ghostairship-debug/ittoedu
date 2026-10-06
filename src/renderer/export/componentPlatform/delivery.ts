@@ -8,7 +8,7 @@ import type { SingleHtmlExportMode } from '../course/coursePackagePreflight'
 import { uniqueFlowDocxFilename } from '../docxFilename'
 import type { PdfPrintImage } from '../course/pdfPrintHtml'
 import { bytesToDataUrl } from '../base64'
-import { resolveCourseProjectDiagnosticTargetRoute } from '../../diagnostics/projectHealthNavigation'
+import { resolveCourseProjectDeliveryFindingRoute } from '../../diagnostics/projectHealthNavigation'
 
 export type ComponentDeliveryFormat = 'single-html' | 'web-package' | 'pptx' | 'pdf' | 'docx'
 export interface ComponentDeliveryFinding {
@@ -58,11 +58,9 @@ export async function buildComponentDelivery(snapshot: CourseDeliverySnapshot, f
   const check = () => options.signal?.throwIfAborted()
   const note = (values: readonly { code: string; message: string; severity?: ComponentDeliveryFinding['severity']; surfaceId?: string; instanceId?: string; path?: readonly (string | number)[] }[]) => {
     items.push(...values.map(value => {
-      const path = value.path, kind = path?.[0], id = path?.[1]
-      const route = typeof id === 'string' && ['instances', 'definitions', 'assets'].includes(String(kind))
-        ? resolveCourseProjectDiagnosticTargetRoute(project, kind === 'instances' ? { projectId: project.id, kind: 'instance', instanceId: id }
-          : kind === 'definitions' ? { projectId: project.id, kind: 'definition', definitionId: id } : { projectId: project.id, kind: 'asset', assetId: id }) : undefined
-      return { ...value, ...(route?.surfaceId ? { surfaceId: route.surfaceId } : {}), ...(route?.instanceId ? { instanceId: route.instanceId } : {}), severity: value.severity ?? 'warning' }
+      const route = resolveCourseProjectDeliveryFindingRoute(project, value)
+      return { ...value, ...(route.available && route.surfaceId ? { surfaceId: route.surfaceId } : {}),
+        ...(route.available && route.instanceId ? { instanceId: route.instanceId } : {}), severity: value.severity ?? 'warning' }
     }))
   }
   check()

@@ -8,12 +8,11 @@ import {
 } from 'lucide-react'
 import { useMemo } from 'react'
 import {
-  collectCourseProjectHealth,
+  collectComponentProjectHealth,
   summarizeCourseProjectHealth,
-  type CourseProjectHealthFinding,
-} from '../../shared/courseProjectHealth'
+  type ComponentProjectHealthFinding,
+} from '../../shared/componentProjectHealth'
 import { resolveCourseProjectHealthRoute } from '../diagnostics/projectHealthNavigation'
-import { componentPackagesToArchiveFiles } from '../components/componentPackageStore'
 import {
   selectActiveCourseProjectDocument,
   selectMediaAssetFiles,
@@ -61,15 +60,13 @@ function OpenProjectHealthPanel({
 }: Omit<ProjectHealthPanelProps, 'open'>) {
   const courseProject = useEditorStore(selectActiveCourseProjectDocument)
   const assetFiles = useEditorStore(selectMediaAssetFiles)
-  const componentPackages = useEditorStore((state) => state.componentPackages)
   const diagnostics = useMemo(
     () => courseProject
-      ? collectCourseProjectHealth(courseProject, {
+      ? collectComponentProjectHealth(courseProject, {
           assetFiles,
-          componentFiles: componentPackagesToArchiveFiles(componentPackages),
         })
       : [],
-    [assetFiles, componentPackages, courseProject],
+    [assetFiles, courseProject],
   )
   const summary = useMemo(
     () => summarizeCourseProjectHealth(diagnostics),
@@ -77,14 +74,14 @@ function OpenProjectHealthPanel({
   )
   const grouped = useMemo(
     () => severityOrder.flatMap((severity) => {
-      const groups = new Map<string, CourseProjectHealthFinding[]>()
+      const groups = new Map<string, ComponentProjectHealthFinding[]>()
       for (const item of diagnostics.filter(item => item.severity === severity)) {
-        const target = item.target
-        const surface = 'surfaceId' in target
-          ? courseProject?.surfaces.find(surface => surface.id === target.surfaceId)
+        const route = courseProject ? resolveCourseProjectHealthRoute(courseProject, item) : null
+        const surface = route?.available && route.surfaceId
+          ? courseProject?.surfaces.find(surface => surface.id === route.surfaceId)
           : undefined
         const label = surface
-          ? `${surface.type === 'slide' ? '演示页' : surface.type === 'flow' ? '流式讲义' : '无限画布'} · ${surface.title}`
+          ? `${surface.kind === 'slide' ? '演示页' : surface.kind === 'flow' ? '流式讲义' : '无限画布'} · ${surface.title}`
           : '整课与资源'
         groups.set(label, [...(groups.get(label) ?? []), item])
       }
@@ -93,14 +90,15 @@ function OpenProjectHealthPanel({
     [diagnostics, courseProject],
   )
 
-  const locate = (diagnostic: CourseProjectHealthFinding) => {
-    if (!courseProject) return
-    const route = resolveCourseProjectHealthRoute(courseProject, diagnostic)
+  const locate = (diagnostic: ComponentProjectHealthFinding) => {
     const store = useEditorStore.getState()
-    if (route.locationId) store.activateCourseLocation(route.locationId)
+    const current = selectActiveCourseProjectDocument(store)
+    if (!current) return
+    const route = resolveCourseProjectHealthRoute(current, diagnostic)
+    if (!route.available) { store.setStatus(route.reason); return }
+    if (route.surfaceId) store.courseKernel.selectSurface(route.surfaceId)
     store.setEditingScope(route.scope)
-    if (route.layerItemId) store.selectNode(route.layerItemId)
-    if (route.blockId) store.selectNode(route.blockId)
+    store.courseKernel.selectInstances(route.instanceId ? [route.instanceId] : [], route.surfaceId)
     store.setActiveTab(route.tab)
     store.setStatus(`已定位：${diagnostic.message}`)
     onClose()

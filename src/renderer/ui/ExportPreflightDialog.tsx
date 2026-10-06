@@ -1,23 +1,24 @@
 import { AlertCircle, AlertTriangle, CheckCircle2, FileJson } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import type {
-  CourseProjectExportPreflightReportV1,
-  ExportPreflightItem,
-} from '../export/exportPreflight'
+  ComponentDeliveryReport,
+  ComponentDeliveryFinding,
+} from '../export/componentPlatform/delivery'
 
 interface ExportPreflightDialogProps {
-  report: CourseProjectExportPreflightReportV1 | null
+  report: ComponentDeliveryReport | null
   onCancel(): void
   onContinue(): void
-  onLocate(item: ExportPreflightItem): void
+  onLocate(item: ComponentDeliveryFinding): void
   onSaveReport(): void
 }
 
-const targetLabels: Record<CourseProjectExportPreflightReportV1['target'], string> = {
+const targetLabels: Record<ComponentDeliveryReport['target'], string> = {
   'single-html': '单 HTML',
   'web-package': '网页包',
   pdf: 'PDF',
   pptx: 'PPTX',
+  docx: 'DOCX',
 }
 
 const severityLabels = {
@@ -26,7 +27,7 @@ const severityLabels = {
   info: '说明',
 }
 
-function SeverityIcon({ severity }: Pick<ExportPreflightItem, 'severity'>) {
+function SeverityIcon({ severity }: Pick<ComponentDeliveryFinding, 'severity'>) {
   if (severity === 'error') return <AlertCircle size={16} />
   if (severity === 'warning') return <AlertTriangle size={16} />
   return <CheckCircle2 size={16} />
@@ -84,11 +85,11 @@ export function ExportPreflightDialog({
         </header>
         <div className="export-preflight__list" aria-label="导出预检问题">
           {report.items.map((item, index) => {
-            const locatable = Boolean(item.diagnosticTarget || item.sceneId || item.nodeId)
+            const locatable = Boolean(item.surfaceId || item.instanceId || item.path?.length)
             return (
               <article
                 className={`export-preflight__item is-${item.severity}`}
-                key={`${item.code}:${item.sceneId ?? ''}:${item.stateId ?? ''}:${item.nodeId ?? ''}:${index}`}
+                key={`${item.code}:${item.surfaceId ?? ''}:${item.instanceId ?? ''}:${index}`}
               >
                 <SeverityIcon severity={item.severity} />
                 <div>
