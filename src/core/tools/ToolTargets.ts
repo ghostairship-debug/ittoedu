@@ -181,7 +181,7 @@ export function mapSequenceRange<T, R extends { from: number; to: number }>(
     // snapshots. A frozen range remains usable only if every point maps it alike.
     let earliest = before.length
     while (earliest > 0 && before[earliest - 1] === after[earliest - 1 + added]) earliest -= 1
-    if (from < range.from) return { ...range, from: range.from + added, to: range.to + added }
+    if (from <= range.from) return { ...range, from: range.from + added, to: range.to + added }
     if (earliest >= range.to && earliest > range.from) return { ...range }
     throw new Error(earliest < from ? '重复文字导致范围映射不唯一，请重新读取目标' : '正文目标已发生重叠修改，请重新读取目标')
   }

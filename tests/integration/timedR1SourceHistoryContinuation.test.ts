@@ -58,6 +58,17 @@ it('continues a source selection through a disjoint disk reconciliation after re
   expect(continued.selection).toEqual(continued.writable)
 })
 
+it('continues an unchanged source selection when disk text is inserted exactly at its start', async () => {
+  const f = await fixture()
+  await fs.writeFile(f.filename, 'HEADER\nTARGET\nrest')
+  const disk = await f.host.observeFile(f.opened.documentId)
+  await f.host.reconcileFile({ documentId: f.opened.documentId, epoch: f.opened.epoch,
+    baseRevision: f.opened.revision, bindingVersion: disk.bindingVersion, version: disk.version, choice: 'disk' })
+  const continued = await f.continueCurrent()
+  expect(continued.writable).toEqual([{ kind: 'markdown-range', from: 7, to: 13 }])
+  expect(continued.selection).toEqual(continued.writable)
+  expect(f.session.read()).toMatchObject({ revision: 1, dirty: false, undoDepth: 1 })
+})
 it('continues a plain-text selection through coalesced human typing after recovery', async () => {
   const f = await fixture('TARGET\nrest', 'txt')
   await f.replace('TARGET\nrest!', 'typing')
