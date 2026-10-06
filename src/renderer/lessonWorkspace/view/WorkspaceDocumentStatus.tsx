@@ -7,7 +7,7 @@ export function documentSaveLabel(snapshot: DocumentSnapshot): string {
   if (snapshot.saving) return '保存中'
   if (snapshot.saveError) return '保存失败'
   if (snapshot.recovered && snapshot.dirty) return '恢复稿 · 原文件未保存'
-  return snapshot.dirty ? '未保存' : '已保存'
+  return snapshot.dirty ? '未保存' : snapshot.binding.kind === 'file' ? '已保存' : '尚未保存'
 }
 
 function saveFailureMessage(error: string): string {
@@ -36,7 +36,7 @@ export function WorkspaceDocumentStatus({ api, documentId }: { api?: DocumentHos
     return () => { active = false; stop() }
   }, [api, documentId])
   if (!current || current.documentId !== documentId) return null
-  return <span className="workspace-document-status" role="status" data-save-state={current.saving ? 'saving' : current.saveError ? 'failed' : current.dirty ? 'dirty' : 'saved'}>
+  return <span className="workspace-document-status" role="status" data-save-state={current.saving ? 'saving' : current.saveError ? 'failed' : current.dirty ? 'dirty' : current.binding.kind === 'file' ? 'saved' : 'untitled'}>
     {documentSaveLabel(current)}
     {current.saveError && <span className="workspace-document-status__error">{saveFailureMessage(current.saveError)}当前稿仍保留，可重试或另存。</span>}
   </span>
