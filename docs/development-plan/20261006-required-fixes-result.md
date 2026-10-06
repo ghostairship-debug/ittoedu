@@ -1,6 +1,6 @@
 # 2026-10-06 剩余问题本批实施结果
 
-正式承载为 `D:/果铃恢复候选/20261005-v10-migration`。本批沿唯一执行方案完成 L、M、R1–R5 和一批 R6，保留已有成果，不恢复已撤回项。代码 cut 为 `873674f2`；L/M 零模型真实闭环与 R1 原页一次性能对照已完成。没有调用收费产品模型，没有发布。
+实施时承载为 `D:/果铃恢复候选/20261005-v10-migration`；2026-10-06 已归并到 `D:/果铃工作台` 的 main，旧工作树已按[归并记录](20261006-main-consolidation.md)保全并清理。本批沿唯一执行方案完成 L、M、R1–R5 和一批 R6，保留已有成果，不恢复已撤回项。代码 cut 为 `873674f2`；L/M 零模型真实闭环与 R1 原页一次性能对照已完成。没有调用收费产品模型，没有发布。
 
 ## 已集成修复
 
@@ -9,9 +9,9 @@
 | L 图层 | `77f3c246`、`027598b6` | 测得的有效 stacking context 保留为正式组，交错装饰进入同父有序项，普通 block background 保持下层；独立文字/专业对象保既有编辑。聚焦 6/6。公开链发现的主题 canvas 重复另在现 Sandbox 修复：framed defaultWeb 的 transport html/body 不重复施加整课背景，作者局部 body CSS、后代 paint 与完整程序 canvas 保留；真实 5 realm 反例 1/1。最终公共观察和真实离线 HTML 画面通过。 |
 | M 后台 MCP | `4e8b73e4`、`56d79ac7`、`52703451`、`873674f2` | 同一 Electron Main 启动正式 DocumentHost、文件与 Resident MCP，不挂载工作台主 App；观察/导出按需隐藏 worker。SDK 样例使用真实 flat MCP schema。首次观察等待非零内容 frame 的 fonts ready 与两次 rAF；零 viewport 隐藏 iframe 不加入绘制屏障。后台开/改/保存/导出/正常退出/新 Main 冷开已完成，首次公开观察呈现完整。 |
 | R1 targets 成本 | `c5cb4de5` | 静态默认 Web 不构造、传递整课作者 values；Source、HTMLProgram、执行面和未知结构保完整同步读取，同 realm 不降级。纯检查 2/2、真实 native carrier 1/1：静态 mount/update targets 各 394B、target 构造调用 0，跨未访页同步读取、原生表单状态/源码修改正常，释放后 iframe 为 0。[证据](D:/果铃恢复候选/20261006-required-evidence/r1)。 |
-| R2 背景预览 | `2b5c3dbf`、`55cb791f` | V10 瞬态投影使用完整目标身份；取消/换选撤预览，确认一次提交、Undo 正确。3 个基础检查加同对象文字草稿、换选取消各 1 个检查均通过；预览 0 正式 dispatch/History，人工 affine frame、邻对象与同对象未提交文字草稿保留。[原始结果](D:/果铃恢复候选/20261006-required-leaves/r2/output/required-r2-background-preview/result.json)。 |
-| R3 健康/导出诊断 | `e6f17f82`、`55cb791f` | 健康面板按需消费当前 V10 collector/resources，健康和导出共用 owningContainer 导航 router；删除、外工程及无归属目标明确不可定位。预检消费现 ComponentDeliveryReport，保 DOCX、warning 与 canExport。3 个直接测试文件 6/6；原工具输出已留存，没有重跑 HTML 导出。[原始结果](D:/果铃恢复候选/20261006-required-leaves/r3/output/required-r3-checks/result.json)。 |
-| R4 样板改写 | `618f6095` | V10 参考页消费现内核槽位，正式提交等待真实 ACK；pending 禁重复提交/切模式/取消，失败保表单和预览。保原 frame、格式、独立可编辑副本、一次 Undo 和内核真实 slot.issue/warning。真实 Host/Bridge/Session 4/4，窄类型检查通过。[结果](D:/果铃恢复候选/20261006-required-leaves/r4/output/required-r4-remix/vitest-ack-final.txt)。 |
+| R2 背景预览 | `2b5c3dbf`、`55cb791f` | V10 瞬态投影使用完整目标身份；取消/换选撤预览，确认一次提交、Undo 正确。3 个基础检查加同对象文字草稿、换选取消各 1 个检查均通过；预览 0 正式 dispatch/History，人工 affine frame、邻对象与同对象未提交文字草稿保留。[原始结果](D:/果铃恢复候选/20261006-required-evidence/integration/leaf-checks/r2/output/required-r2-background-preview/result.json)。 |
+| R3 健康/导出诊断 | `e6f17f82`、`55cb791f` | 健康面板按需消费当前 V10 collector/resources，健康和导出共用 owningContainer 导航 router；删除、外工程及无归属目标明确不可定位。预检消费现 ComponentDeliveryReport，保 DOCX、warning 与 canExport。3 个直接测试文件 6/6；原工具输出已留存，没有重跑 HTML 导出。[原始结果](D:/果铃恢复候选/20261006-required-evidence/integration/leaf-checks/r3/output/required-r3-checks/result.json)。 |
+| R4 样板改写 | `618f6095` | V10 参考页消费现内核槽位，正式提交等待真实 ACK；pending 禁重复提交/切模式/取消，失败保表单和预览。保原 frame、格式、独立可编辑副本、一次 Undo 和内核真实 slot.issue/warning。真实 Host/Bridge/Session 4/4，窄类型检查通过。[结果](D:/果铃恢复候选/20261006-required-evidence/integration/leaf-checks/r4/output/required-r4-remix/vitest-ack-final.txt)。 |
 | R5 媒体声明 | `f8eed88f` | 补 required captured 声明，与三 Surface 已有真实捕获和转发一致；复用有效媒体证据，没有重跑全矩阵。 |
 | R6 共享测试迁移 | `b89d8937`、`785aaa8f` | 迁 `courseDocumentHost` 及直接 workspace/lifecycle fixture 到真实 V10 Host/Bridge/Session；保正式身份、frame、History/保存断言。迁移揭示的晚到 save ACK 改为仅确认发起文档。三 fixture 18/18，三个维护根历史直接类型诊断 8→0。[类型范围](D:/果铃恢复候选/20261006-required-evidence/r6/type-scope-result.json)。 |
 

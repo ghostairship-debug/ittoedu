@@ -39,3 +39,6 @@ resources/file-publish/*.exe
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Local authoring inputs and profiles are user material, not product source.
+scratch/
