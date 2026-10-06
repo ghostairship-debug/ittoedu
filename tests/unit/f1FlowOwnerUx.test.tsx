@@ -22,7 +22,7 @@ vi.mock('../../src/renderer/store/editorStore', () => ({ useEditorStore: (select
 vi.mock('../../src/renderer/components/CourseV10RuntimeView', () => ({ useCourseV10Runtime: () => probe.runtime }))
 vi.mock('../../src/renderer/ui/useAssetObjectUrls', () => ({ useAssetObjectUrls: () => ({}) }))
 import { FlowLocationWorkspace } from '../../src/renderer/ui/workspaces/FlowLocationWorkspace'
-import { drainFlowWorkspace } from '../../src/renderer/ui/FlowWorkspace'
+import { drainFlowWorkspace } from '../../src/renderer/document/flowWorkspaceRegistry'
 
 const geometry = ['getClientRects', 'getBoundingClientRect'] as const
 const descriptors = geometry.map(key => Object.getOwnPropertyDescriptor(Range.prototype, key))

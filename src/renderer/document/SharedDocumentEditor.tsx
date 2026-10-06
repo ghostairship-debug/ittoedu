@@ -277,7 +277,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     return null
   }
   useEffect(() => {
-    if (!contextualTarget) { setQuickBarPlace(null); return }
+    if (!documentScope || !contextualTarget) { setQuickBarPlace(null); return }
     const position = () => {
       const editor = editorRoot.current
       if (!editor) return
@@ -297,7 +297,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       mutation?.observe(parent, { attributes: true, attributeFilter: ['style', 'class'] })
     }
     return () => { window.removeEventListener('scroll', position, true); window.removeEventListener('resize', position); observer?.disconnect(); mutation?.disconnect() }
-  }, [contextualTarget, mode, localPin])
+  }, [documentScope, contextualTarget, mode, localPin])
   const fail = (message: string) => reportDiagnostics([{ message, offset: 0, endOffset: 0, line: 1, column: 1 }])
   const previewBlocked = () => setCommandError('正在生成的范围暂时只读。请先停止生成，再编辑这一处。')
   const pinPlugin = useMemo(() => pinnedSelectionPlugin(), [])
@@ -874,6 +874,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => { const editor = layout.current; if (editor) toggleMark(documentEditorSchema.marks.code)(editor.view.state, editor.view.dispatch) }}>行内代码</button>
         <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => { const state = layout.current?.view.state; setLinkDraft(state?.selection.$from.marks().find(mark => mark.type === documentEditorSchema.marks.link)?.attrs.href ?? '') }}>链接</button>
         <button type="button" onMouseDown={event => event.preventDefault()} onClick={openMath}>公式</button>
+        {!documentScope && <button type="button" onMouseDown={event => event.preventDefault()} onClick={clearFormatting}>清除文字格式</button>}
         {documentScope && <select aria-label="段落类型" value={format.paragraphType} onChange={event => applyParagraphType(event.target.value)}><option value="" disabled>段落类型</option><option value="paragraph">正文</option>{[1,2,3,4,5,6].map(level => <option key={level} value={level}>标题 {level}</option>)}</select>}
       </>}
       {discardButton}
@@ -908,7 +909,8 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     && (textSelection.anchor.blockId !== textSelection.head.blockId || JSON.stringify(textSelection.anchor.slot) !== JSON.stringify(textSelection.head.slot)
       || textSelection.anchor.offset !== textSelection.head.offset))
   const cellTextTools = !!(contextualTarget && mode === 'layout' && contextualTarget.selection?.kind === 'cells')
-  const quickBar = contextualTarget && !props.readOnly && !props.contextualCardSuppressed && quickBarPlace
+  // Component text/formula already has the full toolbar; document selections also need contextual actions.
+  const quickBar = documentScope && contextualTarget && !props.readOnly && !props.contextualCardSuppressed && quickBarPlace
     && <SelectionQuickBar anchor={quickBarPlace.anchor} bounds={quickBarPlace.bounds} label="选中内容快捷工具" selectionKey={selectionKey}
       suspended={pointerGesture || dismissedGeneration === targetGeneration}>
       {(textTools || cellTextTools) && <>

@@ -38,6 +38,7 @@ interface NavigationPorts {
 /** Surface and camera view state are supplied by their owner; no author data is changed here. */
 export class ComponentNavigationOwner implements TeacherControllerPort {
   private readonly listeners = new Set<() => void>()
+  private readonly replayListeners = new Set<(surfaceId: string) => void>()
   /** Authored defaults apply until the first session collapse action. */
   private collapsed: boolean | undefined
   private zoom = 1
@@ -50,6 +51,12 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
   private retired = false
   constructor(private readonly ports: NavigationPorts) {}
   subscribe = (listener: () => void) => { if (this.retired) return () => {}; this.listeners.add(listener); return () => { this.listeners.delete(listener) } }
+  /** Explicit same-scene entry, after navigation/presentation succeeds. */
+  subscribeSceneReplay = (listener: (surfaceId: string) => void) => {
+    if (this.retired) return () => {}
+    this.replayListeners.add(listener)
+    return () => { this.replayListeners.delete(listener) }
+  }
   changed = () => { if (!this.retired) { this.applyFragments(); for (const listener of this.listeners) listener() } }
   registerCamera = (surfaceId: string, camera: ComponentSpatialCameraPort, binding?: ComponentCameraBinding) => {
     if (this.retired) return () => {}
@@ -202,7 +209,7 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
     if (this.retired) return
     this.retired = true; this.cancel()
     for (const entry of this.cameras.values()) entry.off()
-    this.cameras.clear(); this.observations.clear(); this.listeners.clear(); this.states.clear(); this.fragmentCache.clear()
+    this.cameras.clear(); this.observations.clear(); this.listeners.clear(); this.replayListeners.clear(); this.states.clear(); this.fragmentCache.clear()
   }
   private async executeNavigation(action: TeacherControllerAction, signal?: AbortSignal): Promise<boolean> {
     if (signal?.aborted) return false
@@ -222,13 +229,16 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
       else await document.documentElement.requestFullscreen()
     }
     if (destination) {
-      if (this.blocked(destination, true)) return false
+      // A course reset must reach its start even when reset state blocks ordinary visits there.
+      if (action.type !== 'course.restart' && this.blocked(destination, true)) return false
       await this.ports.select(destination)
       if (signal?.aborted) return false
       const surface = this.ports.project().surfaces.find(value => value.id === destination)
       const last = action.type === 'step.previous' ? this.steps(destination).length - 1 : -1
       if (!(last >= 0 ? await this.presentStep(last, signal, destination)
         : await this.presentState(destination, stateId === undefined ? surface?.presentation?.initialStateId ?? null : stateId, signal))) return false
+      if (signal?.aborted) return false
+      if (action.type === 'scene.replay') for (const listener of this.replayListeners) listener(destination)
     }
     this.changed(); return true
   }

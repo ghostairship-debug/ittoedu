@@ -72,7 +72,7 @@ export class ComponentPlatformRuntime {
     resolveSource?(implementation: Extract<ComponentImplementation, { kind: 'source' }>, signal: AbortSignal): Promise<PreparedComponentRuntime>
     report?(message: string): void
     builtins?: ReadonlyMap<string, ComponentRuntimeImplementation>
-    teacherController?: TeacherControllerPort
+    teacherController?: TeacherControllerPort & { subscribeSceneReplay?(listener: (surfaceId: string) => void): () => void }
     resolveBuiltin?(key: string, signal: AbortSignal): Promise<PreparedComponentRuntime>
     mode?: 'edit' | 'play' | 'capture'
   } = {}) {
@@ -146,7 +146,7 @@ export class ComponentPlatformRuntime {
       reportError: (error, phase, _scope, id) => options.report?.(`${id} ${phase}：${error instanceof Error ? error.message : String(error)}`),
     })
     let locationId: string | null | undefined
-    this.stopNavigation = options.teacherController?.subscribe(() => {
+    const stopNavigation = options.teacherController?.subscribe(() => {
       const current = options.teacherController!.read().locationId
       if (locationId !== current) {
         if (locationId) this.audioEvents.emit('scene:leave', { sceneId: locationId })
@@ -156,6 +156,15 @@ export class ComponentPlatformRuntime {
       }
       if (this.mode !== 'edit' || this.playing) this.interactions.applyAllVisibility()
     })
+    const stopReplay = options.teacherController?.subscribeSceneReplay?.(surfaceId => {
+      if (this.retired || !this.playing || options.teacherController!.read().locationId !== surfaceId) return
+      // Same-scene replay retires only that scene's audio, retaining global playback and mounts.
+      this.audioEvents.emit('scene:leave', { sceneId: surfaceId })
+      this.audioEvents.emit('scene:enter', { sceneId: surfaceId })
+      this.emit('__runtime.scene.replay', surfaceId)
+      this.interactions.applyAllVisibility()
+    })
+    this.stopNavigation = () => { stopNavigation?.(); stopReplay?.() }
   }
 
   /** A mount owns one measured layout projection; reports never become author operations. */
@@ -362,8 +371,9 @@ export class ComponentPlatformRuntime {
       catch (error) { sourceSignature = String(error) }
     }
     const environmentSignature = effective.kind === 'source' || effective.kind === 'builtin' && ['guoling.web', 'guoling.html-program'].includes(effective.key)
-      ? JSON.stringify([[...(this.project?.logic?.network?.connectOrigins ?? [])].sort(), sourceSignature]) : undefined
+      ? JSON.stringify([...(this.project?.logic?.network?.connectOrigins ?? [])].sort()) : undefined
     const handle = await this.host.sync({ runScopeId: this.runScopeId, instance, definition, root, environmentSignature,
+      preparationSignature: effective.kind === 'source' ? JSON.stringify(sourceSignature) : undefined,
       canProject: definition.role === 'behavior' ? () => this.behaviorCanProject(id) : undefined })
     if (!handle?.scope.isActive()) return handle
     const implementation = instance.implementationOverride ?? definition.implementation

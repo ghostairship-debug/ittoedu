@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { flowMenuPaperPlacement } from '../../src/renderer/ui/flow/flowMenuPaperPlacement'
-import type { FlowMenuPageCapture } from '../../src/renderer/ui/FlowWorkspace'
+import type { FlowMenuPageCapture } from '../../src/renderer/document/flowWorkspaceRegistry'
 
 type CapturedPage = Extract<FlowMenuPageCapture, { ok: true }>
 const page: CapturedPage = {

@@ -14,7 +14,8 @@ const probe = vi.hoisted(()=>({state:{} as Record<string,unknown>,runtime:{} as 
 vi.mock('../../src/renderer/store/editorStore',()=>({useEditorStore:(select:(state:typeof probe.state)=>unknown)=>select(probe.state)}))
 vi.mock('../../src/renderer/components/CourseV10RuntimeView',()=>({useCourseV10Runtime:()=>probe.runtime}))
 vi.mock('../../src/renderer/ui/useAssetObjectUrls',()=>({useAssetObjectUrls:()=>({})}))
-import { FlowWorkspace, drainFlowWorkspace } from '../../src/renderer/ui/FlowWorkspace'
+import { FlowWorkspace } from '../../src/renderer/ui/FlowWorkspace'
+import { drainFlowWorkspace } from '../../src/renderer/document/flowWorkspaceRegistry'
 import { FlowMediaCropEditor } from '../../src/renderer/ui/flow/FlowMediaCropEditor'
 const geometry = ['getClientRects','getBoundingClientRect'] as const
 const descriptors = geometry.map(key=>Object.getOwnPropertyDescriptor(Range.prototype,key))

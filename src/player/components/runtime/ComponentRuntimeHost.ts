@@ -9,6 +9,8 @@ export type ComponentRuntimePorts = Pick<ComponentRuntimeScope, 'target' | 'even
 /** A transient loaded module, not a second author definition or source store. */
 export interface PreparedComponentRuntime {
   implementation: ComponentRuntimeImplementation
+  /** Exact loaded code/CSS/modules; preparation inputs remain independently tracked. */
+  artifactIdentity?: string
   release?(): void | Promise<void>
 }
 
@@ -35,6 +37,8 @@ export interface ComponentRuntimeRequest {
   root?: HTMLElement
   /** Content-environment changes retire only the affected source generation. */
   environmentSignature?: string
+  /** Complete compiler input, including stored files not reached by the loaded module. */
+  preparationSignature?: string
   /** Inactive surface behaviors keep their generation without reconnecting absent visuals. */
   canProject?(): boolean
 }
@@ -49,6 +53,7 @@ interface RuntimeRecord extends ComponentRuntimeHandle {
   mounted?: MountedComponent
   request: ComponentRuntimeRequest
   signature: string
+  generationSignature: string
   updates: Promise<void>
   cancel(): void
   release(): Promise<void>
@@ -68,21 +73,41 @@ interface RuntimeSlot {
   retiring: Promise<void>
 }
 
-function implementationSignature(request: ComponentRuntimeRequest): string {
+function webSource(request: ComponentRuntimeRequest): unknown {
   const implementation = request.instance.implementationOverride ?? request.definition.implementation
   const data = request.instance.data
   // HTML and local modules jointly own their iframe generation. Source replacement
   // retires old globals, timers and pending module evaluation through the existing realm lifecycle.
-  const webSource = implementation.kind === 'builtin' && ['guoling.web', 'guoling.html-program'].includes(implementation.key)
+  return implementation.kind === 'builtin' && ['guoling.web', 'guoling.html-program'].includes(implementation.key)
     && data && typeof data === 'object' && !Array.isArray(data) ? [data.html, data.modules, data.moduleGraph] : undefined
+}
+
+function implementationSignature(request: ComponentRuntimeRequest): string {
+  const implementation = request.instance.implementationOverride ?? request.definition.implementation
   return JSON.stringify([
     request.definition.id, request.definition.version,
-    implementation, webSource, request.environmentSignature,
+    implementation, webSource(request), request.environmentSignature, request.preparationSignature,
   ])
 }
 
+function environmentIdentity(request: ComponentRuntimeRequest): string {
+  const implementation = request.instance.implementationOverride ?? request.definition.implementation
+  return JSON.stringify([
+    request.definition.id, request.definition.version, request.definition.role,
+    implementation.kind, implementation.kind === 'builtin' ? implementation.key
+      : Object.entries(implementation.resourceBindings ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+    request.environmentSignature,
+  ])
+}
+
+function generationSignature(request: ComponentRuntimeRequest, prepared: PreparedComponentRuntime): string {
+  return prepared.artifactIdentity === undefined ? implementationSignature(request)
+    : JSON.stringify([environmentIdentity(request), prepared.artifactIdentity, webSource(request)])
+}
+
 function contentSignature(instance: ComponentInstance): string {
-  const { frame: _frame, ...content } = instance
+  // Implementation input is consumed by preparation; unchanged loaded code does not reset author data.
+  const { frame: _frame, implementationOverride: _implementation, ...content } = instance
   return JSON.stringify(content)
 }
 
@@ -112,19 +137,11 @@ export class ComponentRuntimeHost {
       instances.set(request.instance.id, slot)
     }
     const signature = implementationSignature(request)
-    if (request.canProject?.() === false) {
-      const pending = slot.preparing
-      pending?.controller.abort(); slot.preparing = undefined
-      const previous = slot.active
-      // A hidden surface defers presentation updates, not source revocation.
-      // Source/environment replacement still retires the old generation now.
-      if (previous && (previous.signature !== signature || previous.request.root !== request.root)) {
-        slot.active = undefined; previous.cancel()
-        slot.retiring = Promise.all([slot.retiring, previous.release(), pending?.record?.release()]).then(() => {})
-      } else if (pending?.record) {
-        slot.retiring = Promise.all([slot.retiring, pending.record.release()]).then(() => {})
-      }
-      return Promise.resolve(slot.active ?? null)
+    const previous = slot.active
+    // Known permissions/bindings/root changes revoke immediately, even before preparation settles.
+    if (previous && (environmentIdentity(previous.request) !== environmentIdentity(request) || previous.request.root !== request.root)) {
+      slot.active = undefined; previous.cancel()
+      slot.retiring = Promise.all([slot.retiring, previous.release()]).then(() => {})
     }
     if (slot.preparing?.signature === signature && slot.preparing.request.root === request.root) {
       slot.preparing.request = request
@@ -205,23 +222,26 @@ export class ComponentRuntimeHost {
         await releasePrepared()
         return null
       }
-      if (pending.request.canProject?.() === false) {
-        const previous = slot.active
-        if (previous && (previous.signature !== pending.signature || previous.request.root !== pending.request.root)) {
-          slot.active = undefined; previous.cancel()
-          slot.retiring = Promise.all([slot.retiring, previous.release()]).then(() => {})
-        }
-        if (slot.preparing === pending) slot.preparing = undefined
+      const previous = slot.active
+      const readySignature = generationSignature(pending.request, prepared)
+      if (previous?.scope.isActive() && previous.generationSignature === readySignature && previous.request.root === pending.request.root) {
+        // Detached preparation acquired no mounted lease. Release it and retain the active generation.
         await releasePrepared()
-        return null
+        if (controller.signal.aborted || slot.preparing !== pending || slot.active !== previous) return null
+        previous.signature = pending.signature
+        slot.preparing = undefined
+        // Hidden data remains pending: do not advance record.request until it can be projected.
+        if (pending.request.canProject?.() === false) return previous
+        previous.updates = previous.updates.catch(() => {}).then(() => this.update(previous, pending.request))
+        await previous.updates
+        return previous.scope.isActive() ? previous : null
       }
 
-      // Preparation has succeeded. Old host calls stop before any new lifecycle starts.
-      const previous = slot.active
+      // A genuinely changed loaded module stops old host calls before any new lifecycle starts.
       if (previous) {
         slot.active = undefined
         previous.cancel()
-        slot.retiring = previous.release()
+        slot.retiring = Promise.all([slot.retiring, previous.release()]).then(() => {})
       }
       await slot.retiring
       if (controller.signal.aborted || slot.preparing !== pending) {
@@ -234,7 +254,7 @@ export class ComponentRuntimeHost {
         return null
       }
 
-      record = this.record(pending.request, pending.signature, controller, releasePrepared)
+      record = this.record(pending.request, pending.signature, readySignature, controller, releasePrepared)
       pending.record = record
       if (record.root) pending.request.root!.append(record.root)
       const authoring = this.options.authoring?.(record.scope.runScopeId, record.scope.instanceId, record.scope.generation)
@@ -323,7 +343,7 @@ export class ComponentRuntimeHost {
   }
 
   private record(
-    request: ComponentRuntimeRequest, signature: string, controller: AbortController,
+    request: ComponentRuntimeRequest, signature: string, generationSignature: string, controller: AbortController,
     releaseModule: () => Promise<void>,
   ): RuntimeRecord {
     const ports = this.options.ports(request.runScopeId, request.instance.id)
@@ -416,7 +436,7 @@ export class ComponentRuntimeHost {
       root.style.height = '100%'
     }
     const record: RuntimeRecord = {
-      scope, root, request, signature, updates: Promise.resolve(), cancel,
+      scope, root, request, signature, generationSignature, updates: Promise.resolve(), cancel,
       release: () => release ??= (async () => {
         cancel()
         try { const mounted = await record.mount?.catch(() => null); await mounted?.dispose() }

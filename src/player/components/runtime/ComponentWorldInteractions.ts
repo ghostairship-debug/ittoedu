@@ -170,7 +170,15 @@ export class ComponentWorldInteractions {
         const run = scope.events.subscribe('__runtime.playing', value => {
           if (value === true && (trigger.type === 'scene.enter' || currentStateId() === trigger.stateId)) listener()
         })
-        return () => { stopped = true; off(); run() }
+        const replay = trigger.type === 'scene.enter' ? scope.events.subscribe('__runtime.scene.replay', surfaceId => {
+          if (stopped || !scope.isActive() || !world.active() || surfaceId !== currentSurfaceId()) return
+          const project = world.project()
+          if (!project) return
+          let owner = owningContainer(project, scope.instanceId)
+          while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
+          if (owner?.kind === 'surface' && owner.surfaceId === surfaceId) listener()
+        }) : () => {}
+        return () => { stopped = true; off(); run(); replay() }
       }
       if (trigger.type === 'component.event' || trigger.type === 'runtime.event') {
         return scope.events.subscribe('__component.event', value => {

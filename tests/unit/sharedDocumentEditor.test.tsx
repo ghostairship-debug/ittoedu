@@ -2,7 +2,7 @@ import * as editorSession from '@/renderer/document/editorSession'
 import { FONT_FAMILY_OPTIONS } from '@/shared/fonts/fontFamilyCatalog'
 import { describe, expect, it, vi } from 'vitest'
 import { StrictMode } from 'react'
-import { render, cleanup, act, fireEvent } from '@testing-library/react'
+import { render, cleanup, act, fireEvent, within } from '@testing-library/react'
 import { SharedDocumentEditor } from '@/renderer/document/SharedDocumentEditor'
 import { serializeDocumentMarkdown } from '@/shared/document/markdown'
 import { TextSelection } from 'prosemirror-state'
@@ -26,6 +26,50 @@ function mount() {
   return { ...editor, change, undo, redo, diagnostic, cleanup: () => { editor.destroy(); element.remove() } }
 }
 describe('sharedDocumentEditor', () => {
+  it('uses one full toolbar for inline range and caret formatting while retaining Flow selection tools', () => {
+    const factory = vi.spyOn(editorSession, 'createLayoutEditor')
+    const bounds = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 100, 600, 400))
+    const initial = { content: { blocks: [{ id: 'toolbar-body', type: 'paragraph' as const,
+      content: { inlines: [{ type: 'text' as const, text: 'alpha beta' }] } }] }, resources: emptyDocumentResources() }
+    const props = { document: initial, revision: '1', onChange: vi.fn(), onDraft() {}, onUndo() {}, onRedo() {} }
+    const toolbarHost = document.createElement('div'); document.body.append(toolbarHost)
+    try {
+      const inline = render(<SharedDocumentEditor {...props} contentScope="inline-text" toolbarHost={toolbarHost} />)
+      const editor = factory.mock.results.at(-1)!.value as ReturnType<typeof createLayoutEditor>
+      act(() => { editor.view.focus(); editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 1, 6))) })
+      expect(inline.queryByRole('toolbar', { name: '选中内容快捷工具' })).toBeNull()
+      const full = within(toolbarHost).getByRole('toolbar', { name: '正文工具' })
+      fireEvent.click(within(full).getByRole('button', { name: '粗体' }))
+      let block = fromEditorDocument(editor.view.state.doc).blocks[0]
+      expect(block.type === 'paragraph' && block.content.inlines[0]).toMatchObject({ text: 'alpha', style: { bold: true } })
+      fireEvent.click(within(full).getByRole('button', { name: '清除文字格式' }))
+      block = fromEditorDocument(editor.view.state.doc).blocks[0]
+      expect(block.type === 'paragraph' && block.content.inlines.every(value => value.type !== 'text' || !value.style?.bold)).toBe(true)
+      act(() => editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, editor.view.state.doc.content.size - 1))))
+      fireEvent.click(within(full).getByRole('button', { name: '粗体' }))
+      act(() => editor.view.dispatch(editor.view.state.tr.insertText('!')))
+      block = fromEditorDocument(editor.view.state.doc).blocks[0]
+      expect(block.type === 'paragraph' && block.content.inlines.at(-1)).toMatchObject({ text: '!', style: { bold: true } })
+      fireEvent.click(within(full).getByRole('button', { name: '清除文字格式' }))
+      act(() => editor.view.dispatch(editor.view.state.tr.insertText('?')))
+      block = fromEditorDocument(editor.view.state.doc).blocks[0]
+      expect(block.type === 'paragraph' && block.content.inlines.at(-1)).toMatchObject({ text: '?' })
+      const lastInline = block.type === 'paragraph' ? block.content.inlines.at(-1) : undefined
+      expect(lastInline?.type === 'text' && lastInline.style?.bold).toBeFalsy()
+      inline.unmount()
+
+      const flow = render(<SharedDocumentEditor {...props} target="flow" />)
+      const flowEditor = factory.mock.results.at(-1)!.value as ReturnType<typeof createLayoutEditor>
+      act(() => { flowEditor.view.focus(); flowEditor.view.dispatch(flowEditor.view.state.tr.setSelection(TextSelection.create(flowEditor.view.state.doc, 1, 6))) })
+      const compact = flow.getByRole('toolbar', { name: '选中内容快捷工具' })
+      expect(within(compact).getByRole('button', { name: '当前选区加粗' })).toBeVisible()
+      fireEvent.click(within(compact).getByRole('button', { name: '当前选区加粗' }))
+      fireEvent.click(within(compact).getByRole('button', { name: '更多文字格式' }))
+      fireEvent.click(flow.getByRole('menuitem', { name: '清除文字格式' }))
+      const flowBlock = fromEditorDocument(flowEditor.view.state.doc).blocks[0]
+      expect(flowBlock.type === 'paragraph' && flowBlock.content.inlines.every(value => value.type !== 'text' || !value.style?.bold)).toBe(true)
+    } finally { cleanup(); toolbarHost.remove(); factory.mockRestore(); bounds.mockRestore() }
+  })
   it('retains Flow presentation views through resource refresh without changing document content', () => {
     const element = document.createElement('div'); document.body.append(element)
     const flowDocument = { content: { blocks: [

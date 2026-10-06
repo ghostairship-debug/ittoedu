@@ -28,8 +28,6 @@ import type { BrowserWindow, IpcMainEvent, IpcMainInvokeEvent } from 'electron'
 import { app, dialog, ipcMain } from 'electron'
 import { documentHost } from './workbench/documentHost'
 import { componentCompilationInputSchema } from '../shared/workbench/componentCompilation'
-import { InMemoryComponentCompilation } from '../core/components/compilation/InMemoryComponentCompilation'
-import { createEsbuildComponentCompiler } from './workbench/contentApply/compilation/esbuildComponentCompiler'
 import { documentHostRequestSchema } from '../shared/workbench/desktop'
 import { z } from 'zod'
 import {
@@ -476,11 +474,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     if (input.type !== 'save-dialog') return documents.operate(input)
     return saveDocumentWithDialog(requireWindow(context), documents, input.documentId, input.saveAs, input.suggestedDirectory)
   })
-  const componentCompilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
   registerSafeHandler(IPC_CHANNELS.componentCompilation, context, {
     code: 'COMPONENT_COMPILE_FAILED', title: '组件源码未能编译',
     message: '源码和参数已保留。', suggestion: '请查看组件诊断并修复源码。',
-  }, async (_event, args) => componentCompilation.compile(componentCompilationInputSchema.parse(requireSingleArgument(args))))
+  }, async (_event, args) => documents.compilation.compile(componentCompilationInputSchema.parse(requireSingleArgument(args))))
   registerSafeHandler(IPC_CHANNELS.mediaFiles, context, {
     code: 'MEDIA_FILE_OPERATION_FAILED', title: '媒体文件操作未完成',
     message: '当前修改已保留。', suggestion: '请查看具体原因后重试。',

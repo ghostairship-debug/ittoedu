@@ -137,7 +137,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     captureIsolated: input => {
       const entry = context.getRendererEntryUrl()
       if (!entry) throw new Error('当前没有可用的画面观察入口')
-      return new ViewObservationDesktopService({ rendererEntryUrl: entry }).captureIsolated(input)
+      return new ViewObservationDesktopService({ rendererEntryUrl: entry, compilation: host.compilation }).captureIsolated(input)
     },
     images: observationImages,
   })

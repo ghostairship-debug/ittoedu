@@ -53,7 +53,7 @@ import { ExportPreflightDialog } from './ui/ExportPreflightDialog'
 import { RightSidebar } from './ui/RightSidebar'
 import { ScenePanel } from './ui/ScenePanel'
 import { CourseBottomNavigation } from './ui/BottomSceneNavigator'
-import { requestFlowBlockFocus, requestFlowBlockSelection } from './ui/FlowWorkspace'
+import { requestFlowBlockFocus, requestFlowBlockSelection } from './document/flowWorkspaceRegistry'
 import { TopToolbar } from './ui/TopToolbar'
 import { Workspace } from './ui/Workspace'
 import { ProjectHealthPanel } from './ui/ProjectHealthPanel'
@@ -172,9 +172,8 @@ export default function App() {
   const rawDocuments = window.desktopAPI?.documents
   function prepareSourceClose(documentIds?: readonly string[]): boolean {
     const state = useEditorStore.getState(), issue = componentSourceCloseIssue(state.courseBridge, documentIds)
-    if (!issue) return true
-    state.setError(issue.message)
-    return false
+    state.setError(issue?.message ?? null)
+    return !issue
   }
   const documentsWithSaveDirectory = useMemo<DocumentHostAPI | null>(() => rawDocuments ? {
     ...rawDocuments,

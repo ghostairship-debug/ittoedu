@@ -43,7 +43,6 @@ import { textAppearanceStyles } from '../../components/text/render'
 import type { SlideContentEdit } from '../store/slices/slideAuthoringSlice'
 import { flowRangeDataPath } from '../componentPlatform/surfaces/flow/documentSelection'
 import { WORKSPACE_MEDIA_DRAG_TYPE } from '../lessonWorkspace/workspaceMediaDrag'
-import type { TextRunStyle } from '../../shared/contracts/native-v1'
 import { useWorkspaceMediaSource } from '../lessonWorkspace/workspaceMediaSourceContext'
 import { deliverWorkspaceMediaDrop } from '../lessonWorkspace/workspaceMediaDrop'
 import { flowMediaDropAfterBlock } from './flow/flowMediaDropPosition'
@@ -53,6 +52,8 @@ import type { DocumentResources } from '../../shared/document/resources'
 import { createCourseDocumentClipboardContext, readCourseDocumentClipboardContext } from '../document/documentClipboardContext'
 import { createFlowDocumentResourcePort, captureFlowPreparedDocumentResources,prepareFlowDocumentResourceTransaction, projectFlowPreparedResources, releaseFlowPreparedResources, retainedFlowPreparedResources, type FlowPreparedDocumentResources } from '../document/flowDocumentResources'
 import { assertFlowStructureEditsAllowed, flowStructureDisabledReason } from '../authoring/flowStructureEdits'
+import { registerFlowMenuCapture, registerFlowWorkspaceFlush, registerFlowWorkspaceDrain, registerFlowCaretFormat, registerFlowBlockFocus,
+  registerFlowBlockSelection, type FlowBlockFocusRequest, type FlowMenuPageCapture } from '../document/flowWorkspaceRegistry'
 
 export interface FlowWorkspaceProps {
   documentId: string
@@ -65,28 +66,6 @@ export interface FlowWorkspaceProps {
   onSelectMediaAsset?(kind: FlowMediaKind): Promise<ImportedImageAsset | null>
   onStatus?(message: string): void
 }
-export interface FlowBlockFocusRequest { documentId: string; surfaceId: string; blockId: string; revision: number }
-export type FlowMenuPageCapture = { ok: false; reason: string } | { ok: true; documentId: string; projectId: string; revision: number;
-  locationId: string; surfaceId: string; generation: number; selectedBlockId: string | null; selectionSignature: string;
-  paperWidth: number; bodyWidth: number; paragraphRects: readonly FlowParagraphBlockRect[] }
-const flowMenuCaptureListeners = new Set<() => FlowMenuPageCapture>()
-const focusListeners = new Set<(request: FlowBlockFocusRequest) => boolean>()
-const selectionListeners = new Set<() => void>()
-const flushListeners = new Map<string, () => { ok: boolean; reason?: string }>()
-const drainListeners = new Map<string, () => Promise<{ ok: boolean; reason?: string }>>()
-const caretFormatListeners = new Map<string, (style: TextRunStyle) => boolean>()
-let pendingSelection: { documentId: string; surfaceId: string; blockId: string; expires: number } | null = null
-export function captureFlowMenuPage(): FlowMenuPageCapture {
-  return flowMenuCaptureListeners.size === 1 ? [...flowMenuCaptureListeners][0]() : { ok: false, reason: '当前 Flow 页面尚未就绪' }
-}
-export function flushFlowWorkspace(documentId: string): { ok: boolean; reason?: string } { return flushListeners.get(documentId)?.() ?? { ok: true } }
-export async function drainFlowWorkspace(documentId: string): Promise<{ ok: boolean; reason?: string }> { return drainListeners.get(documentId)?.() ?? flushFlowWorkspace(documentId) }
-export function applyFlowCaretStyle(documentId: string, style: TextRunStyle): boolean { return caretFormatListeners.get(documentId)?.(style) ?? false }
-export function requestFlowBlockFocus(request: FlowBlockFocusRequest): boolean { return [...focusListeners].some(listener => listener(request)) }
-export function requestFlowBlockSelection(request: { documentId: string; surfaceId: string; blockId: string }): void {
-  pendingSelection = { ...request, expires: Date.now() + 2000 }; selectionListeners.forEach(listener => listener())
-}
-
 /** Original paper/editor/chrome, projected directly from V10. The shared editor keeps text focus and IME. */
 export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer, readOnly = false, onDropWorkspaceMedia, onSelectImageAsset, onSelectMediaAsset, onStatus }: FlowWorkspaceProps) {
   const runtime = useCourseV10Runtime()
@@ -202,12 +181,9 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     return result && (!result.ready || result.diagnostics.length)
       ? { ok: false, reason: result.diagnostics[0]?.message ?? '正文草稿尚未完成' } : { ok: true }
   }, [])
-  useEffect(() => { flushListeners.set(documentId, flush); return () => { flushListeners.delete(documentId) } }, [documentId, flush])
-  useEffect(() => { drainListeners.set(documentId, drain); return () => { drainListeners.delete(documentId) } }, [documentId, drain])
-  useEffect(() => {
-    caretFormatListeners.set(documentId, style => editor.current?.applyInlineStyle(style) ?? false)
-    return () => { caretFormatListeners.delete(documentId) }
-  }, [documentId])
+  useEffect(() => registerFlowWorkspaceFlush(documentId, flush), [documentId, flush])
+  useEffect(() => registerFlowWorkspaceDrain(documentId, drain), [documentId, drain])
+  useEffect(() => registerFlowCaretFormat(documentId, style => editor.current?.applyInlineStyle(style) ?? false), [documentId])
   useLayoutEffect(() => paper.current ? observeFlowParagraphLayout(paper.current, rects => {
     const nextLayout={width:(paper.current?.getBoundingClientRect().width ?? 0)/(viewSession.current?.state.zoom ?? 1),rects}
     setPaperLayout(previous=>JSON.stringify(previous)===JSON.stringify(nextLayout) ? previous:nextLayout)
@@ -264,7 +240,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
         generation: bridge.read().activation, selectedBlockId, selectionSignature: JSON.stringify(value.selection), paperWidth: width,
         bodyWidth: Math.max(0, width - 72), paragraphRects: paper.current ? measureFlowParagraphLayout(paper.current,scale) : [] }
     }
-    flowMenuCaptureListeners.add(capture); return () => { flowMenuCaptureListeners.delete(capture) }
+    return registerFlowMenuCapture(capture)
   }, [documentId, surfaceId, bridge, flush])
   useEffect(() => {
     const focus = (request: FlowBlockFocusRequest) => {
@@ -274,17 +250,15 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       if (accepted) value.runtime.selectInstances([request.blockId], surfaceId)
       return accepted
     }
-    const select = () => {
-      const request = pendingSelection
-      if (!request || request.expires < Date.now()) { pendingSelection = null; return }
-      if (request.documentId !== documentId || request.surfaceId !== surfaceId || !latest.current.project.instances[request.blockId]) return
-      latest.current.runtime.selectInstances([request.blockId], surfaceId)
-      editor.current?.selectBlock(request.blockId)
-      paper.current?.querySelector<HTMLElement>(`[data-flow-block-id="${CSS.escape(request.blockId)}"]`)?.scrollIntoView({ block: 'nearest' })
-      pendingSelection = null
-    }
-    focusListeners.add(focus); selectionListeners.add(select); select()
-    return () => { focusListeners.delete(focus); selectionListeners.delete(select) }
+    const releaseFocus = registerFlowBlockFocus(focus)
+    const releaseSelection = registerFlowBlockSelection(documentId, surfaceId, blockId => {
+      if (!latest.current.project.instances[blockId]) return false
+      latest.current.runtime.selectInstances([blockId], surfaceId)
+      editor.current?.selectBlock(blockId)
+      paper.current?.querySelector<HTMLElement>(`[data-flow-block-id="${CSS.escape(blockId)}"]`)?.scrollIntoView({ block: 'nearest' })
+      return true
+    })
+    return () => { releaseFocus(); releaseSelection() }
   }, [documentId, surfaceId, project.revision])
   const edit = async (edits: ComponentEdit[]) => {
     const target = bridge.captureTarget(documentId)

@@ -2,7 +2,7 @@ import { MIN_NODE_SIZE } from '../../../shared/constants'
 import type { LayerFrame } from '../../../shared/courseProjectTypes'
 import type { FlowMenuParagraphAnchor } from '../../../core/tools/flowMenuPaperInsertion'
 import { flowParagraphAnchorAt } from '../../../shared/flowParagraphAnchors'
-import type { FlowMenuPageCapture } from '../FlowWorkspace'
+import type { FlowMenuPageCapture } from '../../document/flowWorkspaceRegistry'
 
 type CapturedPage = Extract<FlowMenuPageCapture, { ok: true }>
 

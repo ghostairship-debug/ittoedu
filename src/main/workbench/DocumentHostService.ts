@@ -47,6 +47,8 @@ export class DocumentHostService {
   readonly files: WorkspaceFiles
   readonly fileCoordinator: DocumentFileCoordinator
   readonly artifacts: FileArtifactService
+  /** Main consumers share compilation output; each runtime still owns its own load lease. */
+  readonly compilation: Pick<InMemoryComponentCompilation, 'compile'>
   private readonly journal
   private readonly drivers
   private readonly subscribed = new Set<string>()
@@ -61,7 +63,7 @@ export class DocumentHostService {
     this.drivers = [createMarkdownDriver(), createTextDriver(), createCourseV10Driver()]
     this.journal = createDocumentJournal({ directory })
     this.registry = new DocumentRegistry({ persistence: this.journal, drivers: this.drivers, createId: randomUUID, bindingKey: binding => canonicalKey(binding.path) })
-    const compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
+    this.compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
     this.tools = new DocumentToolGateway(this.registry, this.drivers, randomUUID, { prepareImage: prepareImageResource,
       componentContent: {
         source: (from, fileAccess) => readComponentProjectFileInput({ from, fileAccess }),
@@ -78,7 +80,7 @@ export class DocumentHostService {
                 mutation: { type: 'command', command } })
             } },
           measure: async request => (await import('./contentApply/measurement/ElectronHtmlDesignMeasurement.js')).measureHtmlAtDesignViewport(request),
-          compilation,
+          compilation: this.compilation,
         }).apply(input.request),
       },
     })

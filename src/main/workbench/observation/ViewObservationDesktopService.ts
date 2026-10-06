@@ -12,6 +12,8 @@ import type { PublishedCourseV3 } from '../../../shared/contracts/component-plat
 
 export interface ViewObservationDesktopOptions {
   rendererEntryUrl: string
+  /** The app supplies its DocumentHost owner; standalone capture compiles lazily when needed. */
+  compilation?: Pick<InMemoryComponentCompilation, 'compile'>
   /** Main supplies a trusted mounted-host capture that returns null unless its identity matches. */
   liveCapture?(input: { identity: ViewObservationIdentity; signal?: AbortSignal }): Promise<ViewObservationCapture | null>
 }
@@ -23,8 +25,12 @@ type PublishedCapture = Omit<ViewObservationCapture, 'identity'>
 
 /** A no-preload, isolated Published playback host. It never navigates the user's editor. */
 export class ViewObservationDesktopService {
-  private readonly compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
-  constructor(private readonly options: ViewObservationDesktopOptions) {}
+  private readonly compilation: Pick<InMemoryComponentCompilation, 'compile'>
+  constructor(private readonly options: ViewObservationDesktopOptions) {
+    let standalone: InMemoryComponentCompilation | undefined
+    this.compilation = options.compilation ?? { compile: input =>
+      (standalone ??= new InMemoryComponentCompilation(createEsbuildComponentCompiler())).compile(input) }
+  }
 
   captureLive = async (input: { identity: ViewObservationIdentity; signal?: AbortSignal }): Promise<ViewObservationCapture | null> =>
     this.options.liveCapture ? this.options.liveCapture(input) : null

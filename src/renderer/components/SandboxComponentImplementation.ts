@@ -775,7 +775,10 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
   })
   try {
     if (signal.aborted) release()
-    return { release, implementation: {
+    return { release, artifactIdentity: JSON.stringify([
+      artifact.format, artifact.code, artifact.css,
+      Object.entries(artifact.modules ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+    ]), implementation: {
       async mount(context) {
         scope = context.scope
         mediaPort = context.media; interactionPort = context.interactions
