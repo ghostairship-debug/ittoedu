@@ -12,12 +12,12 @@
 ## 2026-10-01 — R3 收口 starter
 
 - 启动 R3（最后一轮收口）：聚焦 `task_registry.json` 中残留的 blocked/failed/partial，按"L06 v2 完整前移"边界本地验证；不打新款，不发新凭据。
-- 详细执行链与真实运行证据见 [2026-10-02 实施记录](archive/2026-10-development/reviews/2026-10-02-harness-production-convergence-implementation.md)。
+- 详细执行链与真实运行证据见 [2026-10-02 实施记录](archive/README.md#历史原文)。
 
 ## 2026-09-29 — 完整 L06 v2 前移为当前 2.0 最终收口
 
 - 完整 [L06 v2.0](../GPTpro方案/guoling_2_0_execution_plan/long_term/L06.md) 由长期后置前移至当前 2.0 最终闭合；新增 M25–M30（B19–B24）与 30 项验收进入权威登记，旧 38 任务/205 通过、REL 六段、partial 与 M14-T05 原范围接受保留。
-- 收敛根方案追加 §7E；本轮只改方案、登记、阅读器与计划维护工具，不改产品、不发模型调用。详见 [归档的果铃2.0收敛方案.md](archive/2026-09-convergence/果铃2.0收敛方案.md) §7E。
+- 收敛根方案追加 §7E；本轮只改方案、登记、阅读器与计划维护工具，不改产品、不发模型调用。详见 [归档的果铃2.0收敛方案.md](archive/2.0-历史收敛方案.md) §7E。
 
 ## 2026-09-28 — B18 创作链收口
 

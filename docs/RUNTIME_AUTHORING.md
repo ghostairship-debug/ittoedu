@@ -1,6 +1,6 @@
 # 局部程序与运行开发指南
 
-当前工作走统一 Component API 5 运行合同。[旧 Runtime API 2/3 指南](archive/2026-10-document-baseline/docs--RUNTIME_AUTHORING.md)记录旧载体与宿主，不能据其内部 reserved 接口声称当前公开能力。
+当前工作走统一 Component API 5 运行合同。[旧 Runtime API 2/3 指南](archive/README.md#历史原文)记录旧载体与宿主，不能据其内部 reserved 接口声称当前公开能力。
 
 复杂实验、模拟、游戏或连续机制写成独立组件；普通文字、媒体和简单互动优先使用当前专业数据与软件已有状态体系。组件内部自有排版，页面几何与邻居由正式 frame/编组/顺序承担。
 

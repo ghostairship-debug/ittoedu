@@ -1391,9 +1391,9 @@ N00a 用真实样本细化自有节点存储形状、最小语义操作字段和
 | [独立讨论方案：统一组件与自由画布编辑](../../../独立讨论方案-统一组件与自由画布编辑-2026-10-04.md) | 已有组件、数据、视图与浏览器排版思路；本方案进一步纳入功能组件和整体合同重写 |
 | [创作链路根因与修复方案](../../../output/courseware-ceiling/20261004-mars/03-创作链路根因与修复方案.md) | 已发现的机械阻塞、导入／测量／诊断问题；output 证据属于本机产物 |
 | [GrapesJS 原型证据](../../../output/architecture-spike/grapesjs-20261004/evidence.json) | 技术选型的有限实测，不是产品验收 |
-| [上一轮统一内容重构方案](../../archive/2026-10-development/unified-content-architecture/REFACTOR_PLAN.md) | 旧 U/W 工作的范围与历史，不作为本轮兼容限制 |
-| [上一轮执行日志](../../archive/2026-10-development/unified-content-architecture/EXECUTION_LOG.md) | 既有实施与评审记录，保留原证据边界 |
-| [创作流程重构接手记录](../../archive/2026-10-development/creation-restructure/TAKEOVER_2026-10-04.md) | 已集成的阶段流程、导航与 MCP 事实 |
+| [上一轮统一内容重构方案](../../archive/README.md#历史原文) | 旧 U/W 工作的范围与历史，不作为本轮兼容限制 |
+| [上一轮执行日志](../../archive/README.md#历史原文) | 既有实施与评审记录，保留原证据边界 |
+| [创作流程重构接手记录](../../archive/README.md#历史原文) | 已集成的阶段流程、导航与 MCP 事实 |
 | [架构合同](../ARCHITECTURE_CONTRACT.md) | 当前代码的旧合同；实施时相关域需按本方案整体替换 |
 | [工作协议](../WORKING_PROTOCOL.md) | 最小充分验证、真实结果和单一 owner 的执行约束 |
 | [任务板](../TASK_BOARD.md) | 实际协调状态；本文工作包不代表已创建或完成的任务 |

@@ -8,7 +8,7 @@
 
 教师可以在 Flow 中直接创作正文图文和文字、图片、图形浮层，完整编辑图形属性，并把这些作者内容保真导出为一份连续 DOCX；正文仍遵循文档流、块级排版、布局与环绕。Slide 同时支持可编辑填空题以及 Table、Chart、Line，并能在 Scene、命名状态和三 Surface 的既有所有权范围内编辑背景；结果可保存、重开、撤销、在 Player 运行并进入适用导出。Table、Chart 与 input 是经过批准的严格 V9 Native 窄增量，不以 HTML、Component 或 Runtime 伪装。旧 V9 工程继续读取；不修改 V9 版本号，不引入 V10。
 
-本版先修复 Native 作者态增量陈旧、Table/Chart 命名状态误写 base 与合法 Slide surface 命令被拒绝，再完成 input 全纵切、表格末格 Tab 原子提交及透明度、图表完整圆环/样式/轴范围、合法 HEX 取消和真实连续预览。初始 parser 接线、常用色板、统一图表入口继续保留；1.2 已承诺能力不能延后到 S1。[本地复审基线](../../../archive/2026-09-development/reviews/1.2-local-review-2026-09-05.md) 固化 F1–F5、L1–L6 与验证限制，责任和退出顺序见 [执行指南 §2](EXECUTION_GUIDE.md)。
+本版先修复 Native 作者态增量陈旧、Table/Chart 命名状态误写 base 与合法 Slide surface 命令被拒绝，再完成 input 全纵切、表格末格 Tab 原子提交及透明度、图表完整圆环/样式/轴范围、合法 HEX 取消和真实连续预览。初始 parser 接线、常用色板、统一图表入口继续保留；1.2 已承诺能力不能延后到 S1。[本地复审基线](../../../archive/README.md#历史原文) 固化 F1–F5、L1–L6 与验证限制，责任和退出顺序见 [执行指南 §2](EXECUTION_GUIDE.md)。
 
 Flow/Spatial 图表扩展和项目色板/Token 范围应用已列入 [1.3](../1.3/README.md)必选路线；1.2 对未支持位置只保留清晰的限制说明，不出现五张重复禁用图表卡，不提前修改容器 Schema 或能力索引。
 

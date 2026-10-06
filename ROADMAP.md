@@ -15,4 +15,4 @@
 
 按当前用户目标、直接源码和可信失败释放具体范围。存量测试迁移、native 根因、实际作品质量和发行/媒体连接的已知边界见状态页；没有新的指令时，不自动重派历史 N/L、旧 S/M 或旧版本路线。
 
-历史 2.0 的签收与延期原文见[旧路线图](docs/archive/2026-10-document-baseline/ROADMAP.md)和[执行包](GPTpro方案/guoling_2_0_execution_plan/00_README.md)。阶段变化见[CHANGELOG](CHANGELOG.md)，技术目标见[统一组件方案](docs/development-plan/component-platform-refactor/ARCHITECTURE_AND_REFACTOR_PLAN.md)。
+历史 2.0 的签收与延期原文见[旧路线图](docs/archive/README.md#历史原文)和[执行包](GPTpro方案/guoling_2_0_execution_plan/00_README.md)。阶段变化见[CHANGELOG](CHANGELOG.md)，技术目标见[统一组件方案](docs/development-plan/component-platform-refactor/ARCHITECTURE_AND_REFACTOR_PLAN.md)。

@@ -503,7 +503,7 @@ Owner以后明确开始实施后：
 
 本地路线由源码与真实行为决定；外部案例只帮助选择迁移方法，不能证明本地根因。
 
-本次独立评估来源：[Claude](../../archive/2026-10-development/plan-reviews/2026-10-05-claude-opus-5.5-review-of-baseline-first-v10-plan.md)、[KimiCode](../../archive/2026-10-development/plan-reviews/BASELINE_FIRST_V10_EXECUTION_PLAN-审查报告-KimiCode独立审查-2026-10-05.md)、[Antigravity](../../archive/2026-10-development/plan-reviews/Antigravity评估报告.md)、[DeepSeek](../../archive/2026-10-development/plan-reviews/DeepSeek评估报告.md)、[Grok](../../archive/2026-10-development/plan-reviews/BASELINE_FIRST_V10审查报告-Grok评估-20261005.md)、[MuseSpark](../../archive/2026-10-development/plan-reviews/BASELINE_FIRST_V10审查报告-MuseSpark评估-20261005.md)。采纳已核实的owner/首链/ACK/续作/输出缺口，修正已过时或把静态存在推为活故障的论断；具体事实与证据边界见第10节，不以评估数量证明方案或产品通过。
+本次独立评估来源：[Claude](../../archive/README.md#历史原文)、[KimiCode](../../archive/README.md#历史原文)、[Antigravity](../../archive/README.md#历史原文)、[DeepSeek](../../archive/README.md#历史原文)、[Grok](../../archive/README.md#历史原文)、[MuseSpark](../../archive/README.md#历史原文)。采纳已核实的owner/首链/ACK/续作/输出缺口，修正已过时或把静态存在推为活故障的论断；具体事实与证据边界见第10节，不以评估数量证明方案或产品通过。
 
 - [GitHub 官方：Removing jQuery from GitHub.com](https://github.blog/engineering/engineering-principles/removing-jquery-from-github-frontend/)：分步替换与保全实际调用边界的案例。对本计划的推论是沿成熟动作端口迁移，不复制其历史兼容机制。
 - [VS Code：Getting started with Notebooks](https://code.visualstudio.com/blogs/2021/08/05/notebooks)、[VS Code：Custom notebooks](https://code.visualstudio.com/blogs/2021/11/08/custom-notebooks)：编辑器复用与实际体验演进的案例。对本计划的推论是需要旧→新行为参照，不能由复用editor推完整体验已保全。

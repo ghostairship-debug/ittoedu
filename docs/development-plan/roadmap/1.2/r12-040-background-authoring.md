@@ -6,7 +6,7 @@
 
 ## Outcome / current evidence
 
-当前 additive 字段、effective-background resolver、六 owner UI、固定常用色板和稳定目标控件绑定已存在。[本地复审 F2、L4 / P2](../../../archive/2026-09-development/reviews/1.2-local-review-2026-09-05.md) 确认真正剩余缺口：`onPreviewChange` 未接实际调用者；聚焦 HEX 后输入合法颜色，Esc 触发 blur，旧 draft 被误提交。按 [共享实施合同](IMPLEMENTATION_CONTRACT.md) §7.3 修复共享生命周期与真实 preview 接线，不重新建设色板、字段或背景继承。原生色盘连续拖动尚无本轮完整证据。
+当前 additive 字段、effective-background resolver、六 owner UI、固定常用色板和稳定目标控件绑定已存在。[本地复审 F2、L4 / P2](../../../archive/README.md#历史原文) 确认真正剩余缺口：`onPreviewChange` 未接实际调用者；聚焦 HEX 后输入合法颜色，Esc 触发 blur，旧 draft 被误提交。按 [共享实施合同](IMPLEMENTATION_CONTRACT.md) §7.3 修复共享生命周期与真实 preview 接线，不重新建设色板、字段或背景继承。原生色盘连续拖动尚无本轮完整证据。
 
 ## Read first
 

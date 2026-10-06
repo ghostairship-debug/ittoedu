@@ -1,6 +1,6 @@
 # R3 续接工程与验收增量（2026-10-02）
 
-基线 `main@28bdd7f5`，保留中断工作树，未提交／推送。完整实施、失败去向、实际资源和剩余边界见[实施记录](../../../docs/archive/2026-10-development/reviews/2026-10-02-harness-production-convergence-implementation.md)。本文是当前增量证据，不改写 B19–B24／旧 REL 或 Owner 接受。
+基线 `main@28bdd7f5`，保留中断工作树，未提交／推送。完整实施、失败去向、实际资源和剩余边界见[实施记录](../../../docs/archive/README.md#历史原文)。本文是当前增量证据，不改写 B19–B24／旧 REL 或 Owner 接受。
 
 | 用例 | 本次状态 | 证据与实际覆盖 |
 |---|---|---|

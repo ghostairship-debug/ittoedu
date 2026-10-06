@@ -6,7 +6,7 @@
 
 ## Outcome / current evidence
 
-本节点的启动前提是所有依赖纵切逐项通过 Acceptance；[2026-09-05 本地复审](../../../archive/2026-09-development/reviews/1.2-local-review-2026-09-05.md) 仍存在 F1–F5、L1–L6，不能沿用“所有功能已交付”的结论。上游修复及真实 carrier 证据齐备后，本节点只做跨功能 health/preflight、键盘可达、能力声明与 Published 完整性闭合，不接管上游实现或重写合同。
+本节点的启动前提是所有依赖纵切逐项通过 Acceptance；[2026-09-05 本地复审](../../../archive/README.md#历史原文) 仍存在 F1–F5、L1–L6，不能沿用“所有功能已交付”的结论。上游修复及真实 carrier 证据齐备后，本节点只做跨功能 health/preflight、键盘可达、能力声明与 Published 完整性闭合，不接管上游实现或重写合同。
 
 ## Read first
 

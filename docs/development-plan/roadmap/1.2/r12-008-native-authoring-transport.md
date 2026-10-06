@@ -6,7 +6,7 @@
 
 ## Outcome / current evidence
 
-2026-09-05 [本地复审 L1 / P1](../../../archive/2026-09-development/reviews/1.2-local-review-2026-09-05.md)：初始快照已经接受新 Native，但真实 UI 修改 Chart 类型/数据后作者画布持续呈现旧柱图，进入试运行重建才读到新值。`SlideLocationWorkspace` 后续更新遍历经 `courseLayerItemToEditorCanvasNode` 过滤的 `document.nodes`，Table/Chart/input 不在旧六类投影中。当前修复对象是增量 producer，不再以已修复的初始 parser 拒绝为前提；input 的可见作者入口仍由其 delivery 交付。
+2026-09-05 [本地复审 L1 / P1](../../../archive/README.md#历史原文)：初始快照已经接受新 Native，但真实 UI 修改 Chart 类型/数据后作者画布持续呈现旧柱图，进入试运行重建才读到新值。`SlideLocationWorkspace` 后续更新遍历经 `courseLayerItemToEditorCanvasNode` 过滤的 `document.nodes`，Table/Chart/input 不在旧六类投影中。当前修复对象是增量 producer，不再以已修复的初始 parser 拒绝为前提；input 的可见作者入口仍由其 delivery 交付。
 
 依照 [共同传输合同](IMPLEMENTATION_CONTRACT.md) §2.2，让初始与增量从同一正式 Native render input 构建。已有 strict parser、frame guard 与 materializer 继续复用；只有发现与本轮 producer 的真实不一致才在同一 Owner 内调整，保持 V9/Published 版本和持久化语义不变。
 

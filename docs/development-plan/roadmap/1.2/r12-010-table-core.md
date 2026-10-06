@@ -6,7 +6,7 @@
 
 ## Outcome / current evidence
 
-Table factory 和专用命令已存在。[本地复审 L2、L3 / P1](../../../archive/2026-09-development/reviews/1.2-local-review-2026-09-05.md) 确认：命名状态的 cell text 直接改写 scene base，合法 Slide surface Table 被 `requireSceneScope` 拒绝；L5 / P2 的末格 Tab 分两笔提交，第二笔因旧 revision 失败。本节点按 [共享实施合同](IMPLEMENTATION_CONTRACT.md) §2.3/§3 修复 canonical owner/state 边界，并提供末格提交+追加行的原子命令；不重建工厂，不在此接管 UI/painter。
+Table factory 和专用命令已存在。[本地复审 L2、L3 / P1](../../../archive/README.md#历史原文) 确认：命名状态的 cell text 直接改写 scene base，合法 Slide surface Table 被 `requireSceneScope` 拒绝；L5 / P2 的末格 Tab 分两笔提交，第二笔因旧 revision 失败。本节点按 [共享实施合同](IMPLEMENTATION_CONTRACT.md) §2.3/§3 修复 canonical owner/state 边界，并提供末格提交+追加行的原子命令；不重建工厂，不在此接管 UI/painter。
 
 ## Read first
 

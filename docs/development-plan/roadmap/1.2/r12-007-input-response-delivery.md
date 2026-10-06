@@ -8,7 +8,7 @@
 
 `r12-006-input-response-contract` 只让协议可解析并显式 unsupported。本节点按 [共享实施合同](IMPLEMENTATION_CONTRACT.md) §5 把创建/配置、canonical rule family、原子 session 写入、Published DOM、PPTX、诊断和能力索引交付为一个 Slide-only 纵切。
 
-[本地复审 F1 / P1](../../../archive/2026-09-development/reviews/1.2-local-review-2026-09-05.md) 确认 Controller 跳过提交、真实 Slide port 的 describe/bind 返回 null、Store 缺少 `setMany`，作者工厂/简洁配置/规则族链也未完整交付。只删除 warning、接一个 mock port 或让 Schema fixture 通过均不能关闭本项；这些缺口仍属 1.2，不推到 1.3/S1。
+[本地复审 F1 / P1](../../../archive/README.md#历史原文) 确认 Controller 跳过提交、真实 Slide port 的 describe/bind 返回 null、Store 缺少 `setMany`，作者工厂/简洁配置/规则族链也未完整交付。只删除 warning、接一个 mock port 或让 Schema fixture 通过均不能关闭本项；这些缺口仍属 1.2，不推到 1.3/S1。
 
 共同 Native 作者态接线先由 `r12-008-native-authoring-transport` 闭合。本节点再验证 input 从可见 UI 创建、修改与保存重开都能完成真实宿主同步，不能只证明运行态 submit 或独立 painter 成功。
 

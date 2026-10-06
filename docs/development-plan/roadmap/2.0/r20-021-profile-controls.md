@@ -13,7 +13,7 @@
 
 ## 开始前与阅读入口
 
-按[产品方案第5–8节](../../../archive/2026-09-development/plans/AGENT_AUTHORING_LONG_TERM_PLAN.md)、[开发计划](../../AI_ASSISTANT_DELIVERY_PLAN.md)、[架构合同](../../ARCHITECTURE_CONTRACT.md)、[工作协议](../../WORKING_PROTOCOL.md)及[共同实施合同](../1.8/IMPLEMENTATION_CONTRACT.md)核对当前依赖和写锁。
+按[产品方案第5–8节](../../../archive/README.md#历史原文)、[开发计划](../../AI_ASSISTANT_DELIVERY_PLAN.md)、[架构合同](../../ARCHITECTURE_CONTRACT.md)、[工作协议](../../WORKING_PROTOCOL.md)及[共同实施合同](../1.8/IMPLEMENTATION_CONTRACT.md)核对当前依赖和写锁。
 
 - [courseAgentSkills.ts](../../../../src/shared/courseAgentSkills.ts)、[profile.ts](../../../../src/main/localAgent/profile.ts)、[candidateStaging.ts](../../../../src/main/localAgent/candidateStaging.ts)：产品Skill内容、请求选择和会话资源。
 - [编排Skill](../../../../.agents/skills/orchestrate-courseware/SKILL.md)、[构建Skill](../../../../.agents/skills/build-courseware-project/SKILL.md)及相关references：现有方法与质量判断；在开发中作为产品资料读取。

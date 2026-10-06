@@ -10,7 +10,7 @@
 
 以普通教师提示在三CLI完成理解、编辑、验证和人工交替，并让实际Build Skill从外部课例目录按需构建/修订；关闭G01–G12当前阻断后形成S3可复核工程候选。
 
-2026-09-10当前汇合见[本轮实施记录](../../../archive/2026-09-development/reviews/2026-09-10-latency-completion.md)：路径、分段时间、真实按钮事实反馈、会话临时占用恢复及受影响文字/图片/排版/互动/OpenCode T11已通过，原有限槽位与未变边界按有效范围复用。Owner临时将Claude Code接入DeepSeek后，`deepseek-flash[1M]` / max的可滚动预览、零写待应用、应用后finish、Undo/Redo和保存重开已通过，本次待补代表项已补齐，可移交060。原Sonnet/high 503保留为失败；不外推临时后端图像理解，不将新旧配置混算性能，也不把工作树材料入口称为S3已就绪或accepted。下列日期段是历史起点，不能覆盖该当前结论。
+2026-09-10当前汇合见[本轮实施记录](../../../archive/README.md#历史原文)：路径、分段时间、真实按钮事实反馈、会话临时占用恢复及受影响文字/图片/排版/互动/OpenCode T11已通过，原有限槽位与未变边界按有效范围复用。Owner临时将Claude Code接入DeepSeek后，`deepseek-flash[1M]` / max的可滚动预览、零写待应用、应用后finish、Undo/Redo和保存重开已通过，本次待补代表项已补齐，可移交060。原Sonnet/high 503保留为失败；不外推临时后端图像理解，不将新旧配置混算性能，也不把工作树材料入口称为S3已就绪或accepted。下列日期段是历史起点，不能覆盖该当前结论。
 
 2026-09-08当前证据已包含真实三表面观察、Flow助手停靠与新HTML、共享组件全实例准入、104两个外部工程片段及Native文字自动尺寸；真实CLI已有尝试按各自模型和配置保留。G01–G12分别登记工程通过、实际自然任务通过、失败和未验。103/050三CLI有限重复矩阵尚待汇合，不能用这些子路径、CLI启动或内部协议提示代替一般编辑完成。
 
@@ -22,7 +22,7 @@
 
 - [docs/development-plan/AI_ASSISTANT_DELIVERY_PLAN.md](../../AI_ASSISTANT_DELIVERY_PLAN.md)
 - [docs/development-plan/AI_ASSISTANT_VSCODE_BENCHMARK_ASSESSMENT.md](../../AI_ASSISTANT_VSCODE_BENCHMARK_ASSESSMENT.md)
-- [docs/development-plan/reviews/1.8-ai-assistant-gap-register.md](../../../archive/2026-09-development/reviews/1.8-ai-assistant-gap-register.md)
+- [docs/development-plan/reviews/1.8-ai-assistant-gap-register.md](../../../archive/README.md#历史原文)
 - [tests/e2e/stabilizationCoreUsability.spec.ts](../../../../tests/e2e/stabilizationCoreUsability.spec.ts)
 - [tests/unit/coursewareCaseBuilder.test.ts](../../../../tests/unit/coursewareCaseBuilder.test.ts)
 

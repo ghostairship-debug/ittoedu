@@ -15,7 +15,7 @@
 
 ## 开始前与阅读入口
 
-按[产品方案第4–8节](../../../archive/2026-09-development/plans/AGENT_AUTHORING_LONG_TERM_PLAN.md)、[开发计划第5–6节](../../AI_ASSISTANT_DELIVERY_PLAN.md)、[架构合同](../../ARCHITECTURE_CONTRACT.md)、[工作协议](../../WORKING_PROTOCOL.md)及[共同实施合同](../1.8/IMPLEMENTATION_CONTRACT.md)核对已完成输入和真实写锁。
+按[产品方案第4–8节](../../../archive/README.md#历史原文)、[开发计划第5–6节](../../AI_ASSISTANT_DELIVERY_PLAN.md)、[架构合同](../../ARCHITECTURE_CONTRACT.md)、[工作协议](../../WORKING_PROTOCOL.md)及[共同实施合同](../1.8/IMPLEMENTATION_CONTRACT.md)核对已完成输入和真实写锁。
 
 - [CourseChatPanel.tsx](../../../../src/renderer/ui/chat/CourseChatPanel.tsx)、[App.tsx](../../../../src/renderer/App.tsx)：现有工作台和真实动作接线。
 - [generationSnapshot.ts](../../../../src/renderer/authoring/generation/generationSnapshot.ts)、[prepareGenerationCandidate.ts](../../../../src/renderer/authoring/generation/prepareGenerationCandidate.ts)：当前观察、候选和唯一提交。

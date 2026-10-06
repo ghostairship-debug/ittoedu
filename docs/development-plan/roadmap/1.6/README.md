@@ -2,7 +2,7 @@
 
 ## 结果与边界
 
-2026-09-06 源码候选为 `v1.6.0-rc.1`，实现与已运行检查见 [1.6 开发记录](../../../archive/2026-09-development/reviews/1.6-development-2026-09-06.md)。三种真实 CLI 最新复验通过；独立候选的 147 项目标单测与 11 项目标 E2E 全部通过。本版为 engineering candidate，S3 教师 accepted 待 1.8 统一签署；协调状态以任务板为准。
+2026-09-06 源码候选为 `v1.6.0-rc.1`，实现与已运行检查见 [1.6 开发记录](../../../archive/README.md#历史原文)。三种真实 CLI 最新复验通过；独立候选的 147 项目标单测与 11 项目标 E2E 全部通过。本版为 engineering candidate，S3 教师 accepted 待 1.8 统一签署；协调状态以任务板为准。
 
 应用能探测并安全启动用户已安装、已自行登录的 Codex、Claude、OpenCode CLI，统一消费会话事件、恢复和取消，但不读取或保存 API Key。CLI 保留自己的模型规划、工具循环、Skills 和子任务能力；应用只提供进程 / 会话 harness，不实现第二套 Agent Runner。
 

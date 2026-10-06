@@ -5,7 +5,7 @@
 - Optional: 否
 - Write locks: `contracts-schema`, `ai-session`, `chat-ui`, `generated-index`, `store-kernel`
 
-日期：2026-09-18。本文是目标规格，当前实施次序、事实和验收统一见[完整实施方案](../../../archive/2026-09-development/plans/R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)；本轮仅文档重建。
+日期：2026-09-18。本文是目标规格，当前实施次序、事实和验收统一见[完整实施方案](../../../archive/README.md#历史原文)；本轮仅文档重建。
 
 ## 目标与现状
 默认像通用 Agent 桌面端接受任务、读取材料并持续完成课件，同时保留教学知识获得路径和质量约束。导入材料、策划不再是强制步骤；无固定四稿/四次确认。用户明确要求先审稿时才在真实当前制品暂停。对应 F07 与 V08/V09/V11，现有自动/手动四阶段代码和 Skill 需真实迁移，文档更新不等于已改。

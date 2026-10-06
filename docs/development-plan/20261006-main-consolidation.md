@@ -11,7 +11,7 @@
 - 删除前逐一断开目录连接；保留 main 的实际依赖目录。仅关闭已定位到旧目录的遗留编译/验收进程，未终止通用 Codex、Node 或浏览器会话。
 - 本地资料保存在 `D:/果铃开发归档/20261006-main-consolidation`，其中 `preservation.json` 对应原路径、Git 引用和 materials 位置；`removal.json` 记录实际清理结果。可再生依赖及 dist 缓存不逐树复制。
 - 用户课件、素材、历史样本和独立验证证据保留。main 的 scratch 作为本地用户材料排除于源码提交；两个临时 `.audit-3way` 目录归档到 `main-local`。
-- R2/R3/R4 原工作树内的检查记录迁到 `D:/果铃恢复候选/20261006-required-evidence/integration/leaf-checks`，已修正[上一批结果报告](20261006-required-fixes-result.md)的实际链接。
+- R2/R3/R4 原工作树内的检查记录迁到 `D:/果铃开发归档/evidence/20261006-required-evidence/integration/leaf-checks`，已修正[上一批结果报告](20261006-required-fixes-result.md)的实际链接。
 
 ## 最小验证与剩余边界
 

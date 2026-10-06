@@ -1,9 +1,0 @@
-
- RUN  v4.1.10 D:/果铃工作台
-
-
- Test Files  1 passed (1)
-      Tests  1 passed | 13 skipped (14)
-   Start at  01:34:53
-   Duration  1.30s (transform 598ms, setup 71ms, import 879ms, tests 244ms, environment 0ms)
-

@@ -45,7 +45,7 @@ R3 之后的美学与 rework 不进入 2.0 验收；Owner 后续单独定优先�
 
 ## 新架构提案（待评审，未启动实施）
 
-- [统一内容架构与重构方案](archive/2026-10-development/unified-content-architecture/README.md)（2026-10-03）：通用 Agent 与软件职责、Skill/执行方式、Web 与专业节点融合、持续布局、三表面、资产及多格式工作台；包含设计语言、源码迁移工作包和最小验证。当前仅完成方案，不替换现行合同、不改写 2.0 签收与任务状态。
+- [统一内容架构与重构方案](archive/README.md#历史原文)（2026-10-03）：通用 Agent 与软件职责、Skill/执行方式、Web 与专业节点融合、持续布局、三表面、资产及多格式工作台；包含设计语言、源码迁移工作包和最小验证。当前仅完成方案，不替换现行合同、不改写 2.0 签收与任务状态。
 
 ## 长期方向（不进 2.0 完成门）
 
@@ -67,4 +67,4 @@ R3 之后的美学与 rework 不进入 2.0 验收；Owner 后续单独定优先�
 | [development-plan/reviews/](development-plan/reviews/) | 历次实施与只读评审记录（按日期归档） |
 | Git 标签 `internal-prototype-1.7.0` | 旧 1.6/1.7 二进制、哈希与构建说明 |
 
-归档材料仅作历史参考；当前决策以 [AGENTS.md](../AGENTS.md) 长期授权段、归档 [果铃2.0收敛方案.md](archive/2026-09-convergence/果铃2.0收敛方案.md) 与 `task_registry.json` / `acceptance_cases.json` 同源 JSON 为准。
+归档材料仅作历史参考；当前决策以 [AGENTS.md](../AGENTS.md) 长期授权段、归档 [果铃2.0收敛方案.md](archive/2.0-历史收敛方案.md) 与 `task_registry.json` / `acceptance_cases.json` 同源 JSON 为准。

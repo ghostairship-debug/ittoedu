@@ -1,6 +1,6 @@
 # 统一组件开发指南（API 5）
 
-当前正式合同是 Project V10 + Component API 5。源类型以 [project](../src/shared/contracts/component-platform/project.ts)、[runtime](../src/shared/contracts/component-platform/runtime.ts)、[operations](../src/shared/contracts/component-platform/operations.ts) 与 [Schema](../src/shared/contracts/component-platform/schema.ts) 为准，旧 V4 包指南仅作[历史材料](archive/2026-10-document-baseline/docs--COMPONENT_AUTHORING.md)。
+当前正式合同是 Project V10 + Component API 5。源类型以 [project](../src/shared/contracts/component-platform/project.ts)、[runtime](../src/shared/contracts/component-platform/runtime.ts)、[operations](../src/shared/contracts/component-platform/operations.ts) 与 [Schema](../src/shared/contracts/component-platform/schema.ts) 为准，旧 V4 包指南仅作[历史材料](archive/README.md#历史原文)。
 
 ## 定义、实例与实现
 

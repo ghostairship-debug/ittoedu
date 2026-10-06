@@ -6,9 +6,9 @@
 - Write locks: `ai-session`, `cli-adapters`, `chat-ui`
 - Gaps: G07, G09
 
-日期：2026-09-18。当前实施见[主方案 F01/F07/F08 与 V11](../../../archive/2026-09-development/plans/R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)，本轮只重建文档；沿用下述原生上下文/计时边界。
+日期：2026-09-18。当前实施见[主方案 F01/F07/F08 与 V11](../../../archive/README.md#历史原文)，本轮只重建文档；沿用下述原生上下文/计时边界。
 
-**证据分工：** 旧课例身份下的原生 compact/usage 与接续证据可复用，见[共用方案 4.3](../../../archive/2026-09-development/plans/R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md#43-已通过组合与必须保留的修复历史)。目录会话、冻结文件目标、无四稿之后必须重验：归属、当前冻结文件、不重放已提交、材料版本失效。不单独立项从零重做 043。
+**证据分工：** 旧课例身份下的原生 compact/usage 与接续证据可复用，见[共用方案 4.3](../../../archive/README.md#历史原文)。目录会话、冻结文件目标、无四稿之后必须重验：归属、当前冻结文件、不重放已提交、材料版本失效。不单独立项从零重做 043。
 
 ## 结果与现状
 
@@ -20,7 +20,7 @@
 
 ## 开始前与阅读入口
 
-按[产品方案第5–8节](../../../archive/2026-09-development/plans/AGENT_AUTHORING_LONG_TERM_PLAN.md)、[开发计划](../../AI_ASSISTANT_DELIVERY_PLAN.md)、[架构合同](../../ARCHITECTURE_CONTRACT.md)、[工作协议](../../WORKING_PROTOCOL.md)与[共同实施合同](../1.8/IMPLEMENTATION_CONTRACT.md)核对范围、当前依赖和写锁。
+按[产品方案第5–8节](../../../archive/README.md#历史原文)、[开发计划](../../AI_ASSISTANT_DELIVERY_PLAN.md)、[架构合同](../../ARCHITECTURE_CONTRACT.md)、[工作协议](../../WORKING_PROTOCOL.md)与[共同实施合同](../1.8/IMPLEMENTATION_CONTRACT.md)核对范围、当前依赖和写锁。
 
 - [harness.ts](../../../../src/main/localAgent/harness.ts)、[repository.ts](../../../../src/main/localAgent/repository.ts)：唯一任务阶段、原生会话和恢复。
 - [profile.ts](../../../../src/main/localAgent/profile.ts)、[localAgentTaskContract.ts](../../../../src/shared/localAgentTaskContract.ts)：当前任务锚点、事件与usage。

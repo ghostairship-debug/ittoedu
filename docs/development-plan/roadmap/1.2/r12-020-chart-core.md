@@ -6,7 +6,7 @@
 
 ## Outcome / current evidence
 
-Chart factory 与命令已存在。[本地复审 L2、L3 / P1](../../../archive/2026-09-development/reviews/1.2-local-review-2026-09-05.md) 的正式命令反例确认：命名状态标题改写 base，schema-valid Slide surface 图表被 scene-only guard 拒绝。本节点按 [共享实施合同](IMPLEMENTATION_CONTRACT.md) §2.3/§4 修复 owner/state 写入并保全既有类型、数据及稳定 ID，不重做五类 factory 或接管 F3–F5 painter 修复。
+Chart factory 与命令已存在。[本地复审 L2、L3 / P1](../../../archive/README.md#历史原文) 的正式命令反例确认：命名状态标题改写 base，schema-valid Slide surface 图表被 scene-only guard 拒绝。本节点按 [共享实施合同](IMPLEMENTATION_CONTRACT.md) §2.3/§4 修复 owner/state 写入并保全既有类型、数据及稳定 ID，不重做五类 factory 或接管 F3–F5 painter 修复。
 
 ## Read first
 

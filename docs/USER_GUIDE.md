@@ -26,4 +26,4 @@
 
 后台宿主可在无需工作台主界面的情况下启动，指定绝对 workspace，使用软件返回的实际 endpoint 和连接配置。相对文件名按宿主 workspace 解析。客户端 detach 不关闭共享宿主；专用宿主经正常停止保留事务和恢复事实。
 
-教学方法见[编排 Skill](../.agents/skills/orchestrate-courseware/SKILL.md)，局部修改见[edit-content](../.agents/skills/edit-content/SKILL.md)，外来 HTML 见[导入 Skill](../.agents/skills/build-courseware-project/SKILL.md)。旧用户指南保存在[历史正文](archive/2026-10-document-baseline/docs--USER_GUIDE.md)，不按它的旧协议、界面或 CLI 路线开展当前工作。
+教学方法见[编排 Skill](../.agents/skills/orchestrate-courseware/SKILL.md)，局部修改见[edit-content](../.agents/skills/edit-content/SKILL.md)，外来 HTML 见[导入 Skill](../.agents/skills/build-courseware-project/SKILL.md)。旧用户指南保存在[历史正文](archive/README.md#历史原文)，不按它的旧协议、界面或 CLI 路线开展当前工作。

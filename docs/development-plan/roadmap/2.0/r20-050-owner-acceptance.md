@@ -13,7 +13,7 @@ Owner在同一候选实际复核软件内部完整课件创作、三CLI能力与
 
 ## 开始前与阅读入口
 
-核对[产品方案](../../../archive/2026-09-development/plans/AGENT_AUTHORING_LONG_TERM_PLAN.md)、[开发计划第6节](../../AI_ASSISTANT_DELIVERY_PLAN.md)、[工作协议](../../WORKING_PROTOCOL.md)、[架构合同](../../ARCHITECTURE_CONTRACT.md)、[共同实施合同](../1.8/IMPLEMENTATION_CONTRACT.md)和[保全矩阵](../PRESERVATION_MATRIX.md)。
+核对[产品方案](../../../archive/README.md#历史原文)、[开发计划第6节](../../AI_ASSISTANT_DELIVERY_PLAN.md)、[工作协议](../../WORKING_PROTOCOL.md)、[架构合同](../../ARCHITECTURE_CONTRACT.md)、[共同实施合同](../1.8/IMPLEMENTATION_CONTRACT.md)和[保全矩阵](../PRESERVATION_MATRIX.md)。
 
 - [020内部全流程](r20-020-public-authoring.md)、[021实际内置Skill](r20-021-profile-controls.md)、[022材料支持](r20-022-materials-privacy-controls.md)：教师实际操作范围。
 - [025有限开发对照](r20-025-plugin-workflow-parity.md)、[040三CLI证据](r20-040-three-cli-acceptance.md)、[041 PPTX验收](r20-041-pptx-production-acceptance.md)：有效支持、质量/速度和独立人工能力。

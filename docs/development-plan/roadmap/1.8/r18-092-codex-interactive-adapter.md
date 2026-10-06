@@ -10,7 +10,7 @@
 
 Codex app-server接收真实图片/文件、公开可读事件、提问回答和中途纠正，支持同任务多回合及准确取消；与相同配置和用户授权的外部Codex保留原生文件、终端、网络、工具连接、Skills及子任务能力。
 
-V2 app-server transport与原生接线已集成。2026-09-08[审查](../../../archive/2026-09-development/reviews/1.8-first-batch-review.md)中的RPC失败收口、turn模型接线及原生授权修复保留为已实施基础；其有效证据继续复用，不再把漏传model、固定read-only/never或统一decline写成当前实施起点。
+V2 app-server transport与原生接线已集成。2026-09-08[审查](../../../archive/README.md#历史原文)中的RPC失败收口、turn模型接线及原生授权修复保留为已实施基础；其有效证据继续复用，不再把漏传model、固定read-only/never或统一decline写成当前实施起点。
 
 本轮按[AI编辑最短路径统一方案](../../../../AI编辑最短路径产品决策报告.md)第6、7节补剩余缺口：同模式输出Schema仍内嵌本轮requestId；usage按错误平面字段读取；候选信封在终态解析前进入正文；首次模型配置及有条件结束需与共享Owner接通。原生记录中的27条用量可用于事故取证，不代表当前应用已能正确计量，也不等于已精确取得27次底层请求边界。
 

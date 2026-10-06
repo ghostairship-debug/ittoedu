@@ -5,7 +5,7 @@
 - Optional: 否
 - Write locks: `contracts-schema`, `main-preload`, `ai-session`, `chat-ui`, `workspace-shell`, `app-save-recovery`
 
-日期：2026-09-18。本文是目标规格，当前实施次序、事实和验收统一见[完整实施方案](../../../archive/2026-09-development/plans/R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)；本轮仅文档重建。
+日期：2026-09-18。本文是目标规格，当前实施次序、事实和验收统一见[完整实施方案](../../../archive/README.md#历史原文)；本轮仅文档重建。
 
 ## 目标与现状
 根目录或项目里的普通 Markdown 可直接打开、手改、AI 改稿、保存重开与部分撤回，不要求课例引用或四阶段角色。复用047正文核心及既有文件会话；补目录聊天 documentTarget 真实接线。对应 F04，V04/V07/V09。

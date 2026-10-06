@@ -1,6 +1,6 @@
 # Published V3 与输出指南
 
-本路径保留为现有发布检查脚本的文档入口，当前正文描述 Published Course V3；旧 PublishedLesson V1 原文在[归档](archive/2026-10-document-baseline/docs--PUBLISHED_LESSON_V1.md)。文件名不是协议版本事实。
+本路径保留为现有发布检查脚本的文档入口，当前正文描述 Published Course V3；旧 PublishedLesson V1 原文在[归档](archive/README.md#历史原文)。文件名不是协议版本事实。
 
 作者工程使用 Project V10，Published V3 是运行投影，正式 Schema 在 [published.ts](../src/shared/contracts/component-platform/published.ts)。作品中的定义、实例、表面、资源、行为与控制器沿这一合同运行；不把旧 Published V2 包裹当当前输出。
 

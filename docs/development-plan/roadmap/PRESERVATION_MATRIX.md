@@ -65,9 +65,9 @@ Owner 于2026-09-06接受当前1.4–1.5范围，见[S2记录](../acceptance/S2-
 
 | ID | 当前必须保留的行为 | 最低有效证据 | 禁止的降级方式 |
 | --- | --- | --- | --- |
-| PM-34 | Authoring Facade 通过 canonical target / scope 和 revision 提交一次文档与资源事务；动态 Component/Runtime 经真实宿主准入，失败、超时与迟到结果零写入。 | `tests/unit/authoringSurfaceTools.test.ts` 与[1.4复核](../../archive/2026-09-development/reviews/1.4-tools-builder-2026-09-06.md)中的动态浏览器准入及失败隔离证据。 | 不得开放私有写入口、复制第二历史、绕过真实宿主或将未支持的Spatial world Runtime描述为可用。 |
+| PM-34 | Authoring Facade 通过 canonical target / scope 和 revision 提交一次文档与资源事务；动态 Component/Runtime 经真实宿主准入，失败、超时与迟到结果零写入。 | `tests/unit/authoringSurfaceTools.test.ts` 与[1.4复核](../../archive/README.md#历史原文)中的动态浏览器准入及失败隔离证据。 | 不得开放私有写入口、复制第二历史、绕过真实宿主或将未支持的Spatial world Runtime描述为可用。 |
 | PM-35 | Builder V2 经产品管理的 Chromium 会话调用同一工具，正式工厂创建工程，仅接受已登记finish结果；工程可重开，适用离线内容可连续操作。 | `tests/unit/coursewareCaseBuilder.test.ts`、`tests/unit/coursewareAuthoringRunner.test.ts` 与1.4复核中的真实CLI、archive和HTML纵切。 | 不得建立第二命令实现、接受未登记结果，或用mock声称动态宿主已通过。 |
-| PM-36 | 材料缓存按projectId与规范化路径隔离；导入、搜索、可见引用和删除可用；Save As新身份不复制旧缓存，删除材料不删除已写入工程的引用。 | [1.5复核](../../archive/2026-09-development/reviews/1.5-materials-content-2026-09-06.md)中材料事务与桌面材料库证据。 | 不得把缓存/trace写入工程或导出，跨工程串库，或删除已持久化正文引用。 |
+| PM-36 | 材料缓存按projectId与规范化路径隔离；导入、搜索、可见引用和删除可用；Save As新身份不复制旧缓存，删除材料不删除已写入工程的引用。 | [1.5复核](../../archive/README.md#历史原文)中材料事务与桌面材料库证据。 | 不得把缓存/trace写入工程或导出，跨工程串库，或删除已持久化正文引用。 |
 | PM-37 | PPTX预览明示遗漏，经确认后原子导入可编辑普通图文、线条、分组、裁剪图、占位符与未合并表格；共享装饰按位置可见，整体Undo/Redo、保存重开与适用导出保持一致。有限正数小框可同步，源允许的自动扩框保留正文。 | `tests/unit/courseProjectArchive.test.ts`、`tests/unit/coursePptxExport.test.ts`、`tests/unit/playerAuthoringProtocol.test.ts` 与 `tests/e2e/stabilizationCoreUsability.spec.ts` 的母版/表格、线条和真实29页用例；本机原始样本不是仓库fixture。 | 不得静默丢普通受支持对象、混淆共享与实例owner、将取消/坏包/stale提交为成功，或恢复自动图片后备和外部渲染依赖。复杂对象继续明确提示，不承诺全保真。 |
 | PM-38 | Remix从受支持普通Native参考页重映射身份并替换明确文字槽位，预览后单事务提交；内容QA只读返回四类带目标与依据的finding。 | `tests/unit/courseProjectArchive.test.ts`、`tests/unit/courseProjectHealth.test.ts` 及1.5复核中的PPTX/Remix与内容QA桌面证据。 | 不得复制隐藏动态状态、绕过缺槽/超长/stale检查，或由QA自动改写答案和正文、宣称任意学科正确性。 |
 

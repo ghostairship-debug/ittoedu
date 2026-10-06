@@ -1,2 +1,0 @@
-title -> {"handle":"title","status":"not-editable","reason":"unsupported-target"}
-textarea -> {"handle":"textarea","status":"not-editable","reason":"unsupported-target"}

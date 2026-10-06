@@ -4,7 +4,7 @@
 
 > **当前入口（2026-10-02）：** 本执行包已全部 verified 并作为历史实施规格存档。当前 2.0 收口完成事实与下一步（发行准备 + media + ACP + 长期方向）以 [ROADMAP.md](../../ROADMAP.md) 为准；长期技术合同见 [docs/development-plan/ARCHITECTURE_CONTRACT.md](../../docs/development-plan/ARCHITECTURE_CONTRACT.md)。
 
-**当前修订：执行包v2.5 · L06 v2.0 · 2026-09-29。** 先读[归档的根目录收敛方案§7E](../../docs/archive/2026-09-convergence/果铃2.0收敛方案.md)，再读[L06完整技术方案](long_term/L06.md)。L06虽然保留long_term路径，已经整体前移为当前2.0最终闭合项。
+**当前修订：执行包v2.5 · L06 v2.0 · 2026-09-29。** 先读[归档的根目录收敛方案§7E](../../docs/archive/2.0-历史收敛方案.md)，再读[L06完整技术方案](long_term/L06.md)。L06虽然保留long_term路径，已经整体前移为当前2.0最终闭合项。
 
 ## 当前范围与状态
 
