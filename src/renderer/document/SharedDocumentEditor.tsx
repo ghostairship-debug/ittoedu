@@ -52,9 +52,9 @@ function findDocumentBlock(blocks: readonly DocumentBlock[], id: string): Docume
 }
 
 function visibleEditorBounds(editor: HTMLElement): { left: number; right: number; top: number; bottom: number } {
-  const bounds = editor.getBoundingClientRect()
-  let left = Math.max(8, bounds.left), right = Math.min(window.innerWidth - 8, bounds.right)
-  let top = Math.max(8, bounds.top), bottom = Math.min(window.innerHeight - 8, bounds.bottom)
+  // The portal uses the visible viewport; short document content does not clip its toolbar.
+  let left = 8, right = window.innerWidth - 8
+  let top = 8, bottom = window.innerHeight - 8
   for (let parent = editor.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
     const style = getComputedStyle(parent)
     const rect = parent.getBoundingClientRect()
