@@ -317,8 +317,9 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       definition: read.project.definitions[selected.definitionId], instance: selected, assetCount: Object.keys(read.project.assets).length,
       components: read.resources?.components,
       setEnabled: visible => patch({ visible }), editSource: () => run(() => { liveTarget(); useEditorStore.getState().setActiveTab('developer') }) }) : null,
-    commands: { patch, preview: value => run(() => { const target = liveTarget(); const instance = target.instanceId ? editingInstance(target, target.instanceId) : null;
-      preview(value && instance ? componentPropertiesEdits(instance, target.project.definitions[instance.definitionId], value) : null) }),
+    commands: { patch, preview: value => run(() => { if (value === null) return preview(null)
+      const target = liveTarget(); const instance = target.instanceId ? editingInstance(target, target.instanceId) : null
+      preview(instance ? componentPropertiesEdits(instance, target.project.definitions[instance.definitionId], value) : null) }),
       replaceImage: () => run(() => { liveTarget(); onReplaceImage() }),
       transformImage: actions?.transformImage ? async operations => { liveTarget(); await actions.transformImage!(operations) } : undefined,
       clearPresentationOverride: () => run(() => {

@@ -12,7 +12,7 @@ import { applyComponentOperation, captureComponentOperation } from '../../src/co
 import { flowTextStyleEdits } from '../../src/renderer/componentPlatform/surfaces/flow/documentSelection'
 import { createImageData, IMAGE_DEFINITION } from '../../src/components/image'
 import { defaultShapeData, SHAPE_DEFINITION } from '../../src/components/shape'
-import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform/project'
+import { resolveComponentPresentation, type CourseProjectV10 } from '../../src/shared/contracts/component-platform/project'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { CourseV10DocumentBridge } from '../../src/renderer/documents/CourseV10DocumentBridge'
 import { createEditorStoreKernel } from '../../src/renderer/store/editorStoreKernel'
@@ -29,6 +29,7 @@ import { AUDIO_DEFINITION } from '../../src/components/media/adapters'
 import { createAudioData } from '../../src/components/media/data'
 import { createTableData } from '../../src/components/table/data'
 import { TableComponentEditor } from '../../src/components/table/editor'
+import { projectWithSlideContentDraft } from '../../src/renderer/store/slices/slideAuthoringSlice'
 const dispose: Array<() => Promise<void>> = []
 afterEach(async () => { cleanup(); for (const action of dispose.splice(0).reverse()) await action() })
 const frame = { width: 220, height: 90, transform: [1.5, .4, .7, 1.2, 35, 42] as [number,number,number,number,number,number] }
@@ -157,6 +158,92 @@ it('projects only the matching preview target without mutating the formal projec
   expect(project).toEqual(before);expect(result.revision).toBe(project.revision)
   expect(projectWithBackgroundPreview(project,preview,'doc','slide',null,'new-epoch')).toBe(project)
   expect(projectWithBackgroundPreview(project,preview,'doc','slide','state','epoch')).toBe(project)
+  expect(projectWithBackgroundPreview(project,preview,'other-doc','slide',null,'epoch')).toBe(project)
+  const retiredInstance={...project,instances:{...project.instances}};delete retiredInstance.instances.shape
+  expect(projectWithBackgroundPreview(retiredInstance,preview,'doc','slide',null,'epoch')).toBe(retiredInstance)
+  const retiredSurface={...project,surfaces:[]}
+  expect(projectWithBackgroundPreview(retiredSurface,preview,'doc','slide',null,'epoch')).toBe(retiredSurface)
+
+  project.surfaces[0].presentation={states:[{id:'state',title:'人工状态',overrides:{shape:{frame:{...frame,width:333}}}}]}
+  const resolved=resolveComponentPresentation(project,'slide','state')
+  const statePreview={...preview,target:{...preview.target,stateId:'state'},edits:componentPropertiesEdits(resolved.instances.shape,project.definitions.shape,{style:{fillColor:'#abcdef'}})}
+  expect(projectWithBackgroundPreview(resolved,statePreview,'doc','slide','state','epoch').instances.shape.frame).toEqual(resolved.instances.shape.frame)
+  expect(projectWithBackgroundPreview(before,statePreview,'doc','slide','state','epoch')).toBe(before)
+
+  const actions=useEditorStore.getState(),newPreview={...preview,target:{...preview.target,documentId:'new-doc'}}
+  actions.setPreviewBackgroundColor(newPreview)
+  actions.setPreviewBackgroundColor(null,preview.target)
+  expect(useEditorStore.getState().previewBackgroundColor).toBe(newPreview)
+  for(const target of [{...newPreview.target,epoch:'retired'},{...newPreview.target,surfaceId:'other'},
+    {...newPreview.target,stateId:'other'},{...newPreview.target,owner:'surface' as const},{...newPreview.target,instanceId:'neighbor'}]){
+    actions.setPreviewBackgroundColor(null,target)
+    expect(useEditorStore.getState().previewBackgroundColor).toBe(newPreview)
+  }
+  actions.setPreviewBackgroundColor(null,newPreview.target)
+  expect(useEditorStore.getState().previewBackgroundColor).toBeNull()
+})
+it('previews, cancels, confirms and undoes an original color control through the Bridge without committing the text draft or frame',async()=>{
+  const directory=await mkdtemp(path.join(tmpdir(),'guoling-properties-preview-'));dispose.push(()=>rm(directory,{recursive:true,force:true}))
+  const service=new DocumentHostService(path.join(directory,'recovery')),project=fixture()
+  const first=await service.internalAPI.create({kind:'course-v10',project,resources:{assets:{},components:{}}},'颜色预览.h5lesson')
+  const unavailable=async():Promise<never>=>{throw new Error('fixture no dialog')},dispatch=vi.fn(service.internalAPI.dispatch)
+  const api:DocumentHostAPI={...service.internalAPI,dispatch,bootstrapCourse:()=>service.bootstrapCourse(),saveWithDialog:unavailable,close:unavailable,closeWithDialog:unavailable,discardRecovery:unavailable,subscribe:listener=>service.subscribeEvents(listener)}
+  await useEditorStore.getState().connectCourseDocuments(api)
+  const actions=useEditorStore.getState()
+  actions.cancelTextEdit();actions.setPreviewBackgroundColor(null);actions.selectNode('text')
+  actions.beginSlideDataEdit('text','canvas');actions.updateSlideDataDraft(createTextData('保留未提交文字'),false,160)
+  const draft=useEditorStore.getState().slideContentEdit!
+  actions.selectNode('shape')
+  render(<PropertiesTab onReplaceImage={()=>{}}/>)
+  const input=screen.getByLabelText('填充色'),before=await service.internalAPI.read(first.documentId)
+  const rendered=()=>{
+    const state=useEditorStore.getState(),view=state.courseView
+    return projectWithBackgroundPreview(projectWithSlideContentDraft(view.editingProject!,state.slideContentEdit,
+      {documentId:first.documentId,epoch:view.snapshot?.epoch,surfaceId:view.surfaceId,activeStateId:view.activeStateId}),
+    state.previewBackgroundColor,view.activeDocumentId,view.surfaceId,view.activeStateId,view.snapshot?.epoch)
+  }
+  input.focus();fireEvent.change(input,{target:{value:'#abcdef'}})
+  expect(rendered().instances.shape.data).toMatchObject({style:{fillColor:'#abcdef'}})
+  expect(rendered().instances.shape.frame).toEqual(frame)
+  expect(rendered().instances.text.data).toEqual(draft.data)
+  expect(rendered().instances.text.frame?.height).toBe(160)
+  expect(await service.internalAPI.read(first.documentId)).toMatchObject({revision:before.revision,dirty:before.dirty,undoDepth:0})
+  expect(dispatch).not.toHaveBeenCalled()
+  fireEvent.keyDown(input,{key:'Escape'})
+  expect(useEditorStore.getState().previewBackgroundColor).toBeNull()
+  expect(rendered().instances.shape).toEqual(project.instances.shape)
+  expect(useEditorStore.getState().slideContentEdit).toBe(draft)
+  input.focus();fireEvent.change(input,{target:{value:'#123456'}})
+  await act(async()=>{fireEvent.keyDown(input,{key:'Enter'});await actions.courseKernel.waitForCommit()})
+  expect(dispatch).toHaveBeenCalledOnce()
+  const committed=await service.internalAPI.read(first.documentId)
+  expect(committed).toMatchObject({revision:before.revision+1,undoDepth:1,model:{kind:'course-v10',project:{instances:{shape:{data:{style:{fillColor:'#123456'}},frame},text:project.instances.text}}}})
+  expect(useEditorStore.getState().previewBackgroundColor).toBeNull()
+  expect(useEditorStore.getState().slideContentEdit).toBe(draft)
+  await act(async()=>{await actions.courseKernel.navigateHistory('undo')})
+  expect((await service.internalAPI.read(first.documentId)).undoDepth).toBe(0)
+  expect(actions.courseKernel.readDocument().instances.shape).toEqual(project.instances.shape)
+  expect(useEditorStore.getState().slideContentEdit).toBe(draft)
+  expect(rendered().instances.text.data).toEqual(draft.data)
+  await act(async()=>{actions.selectNode('text')})
+  const textColor=screen.getByLabelText('文字颜色'),afterUndo=await service.internalAPI.read(first.documentId),callsAfterUndo=dispatch.mock.calls.length
+  textColor.focus();fireEvent.change(textColor,{target:{value:'#fedcba'}})
+  expect(rendered().instances.text.data).toMatchObject({content:{inlines:[{type:'text',text:'保留未提交文字'}]},appearance:{color:'#fedcba'}})
+  expect(rendered().instances.text.frame).toEqual({...frame,height:160})
+  expect(useEditorStore.getState().slideContentEdit).toBe(draft)
+  expect(await service.internalAPI.read(first.documentId)).toMatchObject({revision:afterUndo.revision,dirty:afterUndo.dirty,undoDepth:0})
+  expect(dispatch).toHaveBeenCalledTimes(callsAfterUndo)
+  fireEvent.keyDown(textColor,{key:'Escape'})
+  expect(useEditorStore.getState().previewBackgroundColor).toBeNull()
+  expect(rendered().instances.text.data).toEqual(draft.data)
+  expect(useEditorStore.getState().slideContentEdit).toBe(draft)
+  textColor.focus();fireEvent.change(textColor,{target:{value:'#aa11aa'}})
+  expect(useEditorStore.getState().previewBackgroundColor?.target.instanceId).toBe('text')
+  await act(async()=>{actions.selectNode('neighbor')})
+  expect(useEditorStore.getState().previewBackgroundColor).toBeNull()
+  expect(useEditorStore.getState().slideContentEdit).toBe(draft)
+  expect(dispatch).toHaveBeenCalledTimes(callsAfterUndo)
+  actions.cancelTextEdit()
 })
 it('binds the original PropertiesTab text field to the shared canvas draft and saves without blur',async()=>{
   const directory=await mkdtemp(path.join(tmpdir(),'guoling-properties-ui-'));dispose.push(()=>rm(directory,{recursive:true,force:true}))
