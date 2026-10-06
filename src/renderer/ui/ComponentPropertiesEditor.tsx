@@ -8,26 +8,38 @@ export interface ComponentPropertiesEditorProps {
   definition: ComponentDefinition
   node: ComponentInstance
   assets?: Readonly<Record<string, ComponentAsset>>
-  onChange(nextData: JsonValue): void
+  onChange(nextData: JsonValue): void | Promise<void>
   onPreview?(nextData: JsonValue | null): void
   title?: string
   groups?: readonly {title:string;matches(key:string):boolean}[]
 }
-function StructuredField({label,value,onChange,structured=true,maxLength,placeholder}:{label:string;value:JsonValue;onChange(value:JsonValue):void;structured?:boolean;maxLength?:number;placeholder?:string}){
+function StructuredField({label,value,onChange,structured=true,maxLength,placeholder}:{label:string;value:JsonValue;onChange(value:JsonValue):void|Promise<void>;structured?:boolean;maxLength?:number;placeholder?:string}){
   const source=()=>structured?JSON.stringify(value,null,2):String(value??'')
   const bindingKey=usePropertyDraftBindingKey(),[draft,setDraft]=useState(source),[error,setError]=useState('')
-  const session=useRef<{key:string;dirty:boolean;composing:boolean;blurPending:boolean;commit:(value:JsonValue)=>void}>({key:bindingKey,dirty:false,composing:false,blurPending:false,commit:onChange})
-  const fresh=()=>({key:bindingKey,dirty:false,composing:false,blurPending:false,commit:onChange})
+  const session=useRef<{key:string;dirty:boolean;composing:boolean;blurPending:boolean;serial:number;pending?:Promise<boolean>;commit:(value:JsonValue)=>void|Promise<void>}>({key:bindingKey,dirty:false,composing:false,blurPending:false,serial:0,commit:onChange})
+  const fresh=()=>({key:bindingKey,dirty:false,composing:false,blurPending:false,serial:0,commit:onChange})
   useEffect(()=>{if(!session.current.dirty){setDraft(source());setError('');session.current=fresh()}else if(session.current.key===bindingKey)session.current.commit=onChange},[value,bindingKey,onChange])
   const reset=()=>{session.current=fresh();setDraft(source());setError('')}
-  const commit=(candidate=draft)=>{
+  const commit=(candidate=draft):boolean|Promise<boolean>=>{
+    if(session.current.pending)return session.current.pending
     if(!session.current.dirty)return true
     if(session.current.composing)return false
     if(session.current.key!==bindingKey){setError('编辑目标已改变；输入保留，请按 Esc 放弃后重试。');return false}
-    try{const parsed=structured?JSON.parse(candidate) as JsonValue:candidate;session.current.commit(parsed);session.current.dirty=false;setError('');return true}catch{setError('请输入有效的 JSON；输入保留，尚未改写工程。');return false}
+    let parsed:JsonValue
+    try{parsed=structured?JSON.parse(candidate) as JsonValue:candidate}catch{setError('请输入有效的 JSON；输入保留，尚未改写工程。');return false}
+    const owner=session.current,serial=owner.serial
+    const finish=()=>{if(session.current===owner){if(owner.serial===serial&&!owner.composing&&!owner.blurPending)owner.dirty=false;setError('');return !owner.dirty}return true}
+    const fail=(error:unknown)=>{if(session.current===owner)setError(error instanceof Error?error.message:String(error));return false}
+    try{
+      const result=owner.commit(parsed)
+      if(!result)return finish()
+      const pending=Promise.resolve(result).then(()=>{owner.pending=undefined;return finish()},error=>{owner.pending=undefined;return fail(error)})
+      owner.pending=pending
+      return pending
+    }catch(error){return fail(error)}
   }
   usePropertyDraftFlush(()=>commit())
-  return <><textarea aria-label={label} rows={structured?5:draft.includes('\n')?4:2} maxLength={maxLength} placeholder={placeholder} value={draft} onFocus={()=>{if(!session.current.dirty)session.current=fresh()}} onChange={event=>{session.current.dirty=true;setDraft(event.currentTarget.value)}} onBlur={()=>{if(session.current.composing)session.current.blurPending=true;else commit()}} onCompositionStart={()=>{session.current.composing=true}} onCompositionEnd={event=>{session.current.composing=false;if(session.current.blurPending){session.current.blurPending=false;commit(event.currentTarget.value)}}} onKeyDown={event=>{if(event.key==='Escape'&&!session.current.composing)reset()}}/>{error&&<small role="alert" className="component-property-description">{error}</small>}</>
+  return <><textarea aria-label={label} rows={structured?5:draft.includes('\n')?4:2} maxLength={maxLength} placeholder={placeholder} value={draft} onFocus={()=>{if(!session.current.dirty)session.current=fresh()}} onChange={event=>{session.current.dirty=true;session.current.serial++;setDraft(event.currentTarget.value)}} onBlur={()=>{if(session.current.composing)session.current.blurPending=true;else commit()}} onCompositionStart={()=>{session.current.composing=true}} onCompositionEnd={event=>{session.current.composing=false;if(session.current.blurPending){session.current.blurPending=false;commit(event.currentTarget.value)}}} onKeyDown={event=>{if(event.key==='Escape'&&!session.current.composing)reset()}}/>{error&&<small role="alert" className="component-property-description">{error}</small>}</>
 }
 /** The original properties panel now edits the definition's formal author data. */
 export function ComponentPropertiesEditor({definition,node,assets={},onChange,onPreview,title,groups}:ComponentPropertiesEditorProps){
@@ -81,7 +93,7 @@ export function ComponentPropertiesEditor({definition,node,assets={},onChange,on
         onPreviewChange={onPreview?color=>onPreview(color===null?null:updatedData(path,color)):undefined}/>
       :typeof displayed==='boolean'||metadata.type==='boolean'?<input aria-label={label} type="checkbox" checked={displayed===true} onChange={event=>change(event.currentTarget.checked)}/>
       :typeof displayed==='number'||metadata.type==='number'||metadata.type==='integer'?<BufferedInput label={label} type="number" value={typeof displayed==='number'?displayed:''} min={metadata.minimum} max={metadata.maximum} step={metadata.step??(metadata.type==='integer'?1:undefined)}
-        onCommit={next=>{const number=Number(next);if(Number.isFinite(number))change(number)}}/>
+        onCommit={next=>{const number=Number(next);if(Number.isFinite(number))return change(number)}}/>
       :metadata.choices.length?<select aria-label={label} value={typeof displayed==='string'?displayed:''} onChange={event=>change(event.currentTarget.value||undefined)}>
         {displayed===undefined&&<option value="">未选择</option>}
         {typeof displayed==='string'&&!metadata.choices.some(option=>option.value===displayed)&&<option value={displayed}>{displayed}</option>}

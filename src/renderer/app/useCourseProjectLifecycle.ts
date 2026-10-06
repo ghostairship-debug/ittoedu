@@ -97,6 +97,8 @@ export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
   beforeSave?(): Promise<boolean>
   beforeReplace?(): Promise<boolean>
   onProjectReplaced?(): void
+  /** A local authoring owner may retain input that has not entered DocumentSession. */
+  prepareBeforeClose?(): boolean
   preserveBeforeClose?(mode?: 'save' | 'preserve'): Promise<boolean>
   subscribePreserveAndCloseRequest?(handler: () => Promise<boolean>): () => void
   onProjectSaved?(input: { projectId: string; path: string; previousPath: string | null; saveAs: boolean }): Promise<void>
@@ -227,7 +229,13 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
     if (ref.current.desktopAvailable()) void ref.current.setWindowDirtyState(watch.dirty).catch(() => undefined)
   }, [watch.dirty, watch.projectTitle])
   const prepareBeforeClose = useCallback(async (mode: 'save' | 'preserve'): Promise<boolean> => {
-    try { if (service().snapshot()) await service().drain(); return await (ref.current.preserveBeforeClose?.(mode) ?? Promise.resolve(true)) }
+    try {
+      if (ref.current.prepareBeforeClose?.() === false) return false
+      if (service().snapshot()) await service().drain()
+      if (ref.current.prepareBeforeClose?.() === false) return false
+      if (!(await (ref.current.preserveBeforeClose?.(mode) ?? Promise.resolve(true)))) return false
+      return ref.current.prepareBeforeClose?.() !== false
+    }
     catch (error) { ref.current.reportError(error instanceof Error ? error.message : '输入未确认，已取消关闭'); return false }
   }, [])
   useEffect(() => ref.current.desktopAvailable() ? ref.current.subscribeSaveAndCloseRequest(() => prepareBeforeClose('save')) : undefined, [prepareBeforeClose])

@@ -20,16 +20,17 @@ interface PropertyDraftBindingValue {
 
 const PropertyDraftBindingContext = createContext<PropertyDraftBindingValue | null>(null)
 
-const pendingPropertyDrafts = new Set<() => boolean>()
+type PropertyDraftFlush = () => boolean | Promise<boolean>
+const pendingPropertyDrafts = new Set<PropertyDraftFlush>()
 
 /** Saving commits focused property drafts without moving focus. IME retains its native composition. */
 export async function flushPropertiesDrafts(): Promise<boolean> {
   let complete = true
-  for (const flush of [...pendingPropertyDrafts]) if (!flush()) complete = false
+  for (const flush of [...pendingPropertyDrafts]) if (!await flush()) complete = false
   return complete
 }
 
-export function usePropertyDraftFlush(flush: () => boolean): void {
+export function usePropertyDraftFlush(flush: PropertyDraftFlush): void {
   const current = useRef(flush)
   current.current = flush
   useLayoutEffect(() => {
@@ -75,7 +76,7 @@ interface BufferedInputProps {
   title?: string
   placeholder?: string
   allowEmpty?: boolean
-  onCommit(value: string): void
+  onCommit(value: string): void | Promise<void>
 }
 
 export function BufferedInput({
@@ -95,6 +96,7 @@ export function BufferedInput({
   const currentBindingKey = draftBinding?.key ?? 'unbound-property-draft'
   const currentValue = String(value)
   const [draft, setDraft] = useState(currentValue)
+  const [commitError, setCommitError] = useState('')
   const [, setSessionEpoch] = useState(0)
   type Phase = 'idle' | 'editing' | 'composing' | 'blur-pending'
   const currentRef = useRef({
@@ -115,7 +117,8 @@ export function BufferedInput({
     baseline: string
     draft: string
     staleNotified: boolean
-    onCommit: (value: string) => void
+    onCommit: (value: string) => void | Promise<void>
+    pending?: Promise<boolean>
   }>({
     phase: 'idle',
     bindingKey: currentBindingKey,
@@ -166,6 +169,8 @@ export function BufferedInput({
     session.draft = current.value
     session.staleNotified = false
     session.onCommit = current.onCommit
+    session.pending = undefined
+    setCommitError('')
     setDraft(current.value)
     setSessionEpoch((epoch) => epoch + 1)
   }
@@ -181,15 +186,16 @@ export function BufferedInput({
     session.onCommit = current.onCommit
     setDraft(current.value)
   }
-  const commit = (candidate = sessionRef.current.draft) => {
-    if (rejectStale()) return
+  const commit = (candidate = sessionRef.current.draft): boolean | Promise<boolean> => {
     const session = sessionRef.current
+    if (session.pending) return session.pending
+    if (rejectStale()) return false
     let next = candidate
     if (type === 'number') {
       const parsed = Number(candidate)
       if (!Number.isFinite(parsed)) {
         rebaseCurrent()
-        return
+        return true
       }
       const clamped = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, parsed))
       next = String(clamped)
@@ -197,23 +203,47 @@ export function BufferedInput({
       next = candidate.trim()
     } else {
       rebaseCurrent()
-      return
+      return true
     }
     const callback = session.onCommit
     const changed = next !== session.baseline
-    session.phase = 'idle'
-    session.baseline = next
     session.draft = next
     session.staleNotified = false
     setDraft(next)
-    if (changed) callback(next)
+    setCommitError('')
+    const finish = () => {
+      session.baseline = next
+      if (session.draft === next && session.phase !== 'composing' && session.phase !== 'blur-pending') session.phase = 'idle'
+      setSessionEpoch(epoch => epoch + 1)
+      return session.phase === 'idle'
+    }
+    const fail = (error: unknown) => {
+      setCommitError(error instanceof Error ? error.message : String(error))
+      return false
+    }
+    if (!changed) return finish()
+    try {
+      const result = callback(next)
+      if (!result) return finish()
+      const pending = Promise.resolve(result).then(() => {
+        if (session.pending !== pending) return true
+        session.pending = undefined
+        return finish()
+      }, error => {
+        if (session.pending !== pending) return false
+        session.pending = undefined
+        return fail(error)
+      })
+      session.pending = pending
+      return pending
+    } catch (error) { return fail(error) }
   }
   usePropertyDraftFlush(() => {
     const session = sessionRef.current
+    if (session.pending) return session.pending
     if (session.phase === 'idle') return true
     if (session.phase === 'composing' || session.phase === 'blur-pending' || rejectStale()) return false
-    commit()
-    return true
+    return commit()
   })
   return (
     <div className="form-field">
@@ -227,7 +257,7 @@ export function BufferedInput({
         max={max}
         step={step}
         disabled={disabled}
-        aria-invalid={stale || undefined}
+        aria-invalid={stale || Boolean(commitError) || undefined}
         title={stale ? '属性草稿对应的编辑目标已经改变，请按 Esc 放弃草稿后重试。' : title}
         placeholder={placeholder}
         onFocus={beginSession}
@@ -285,12 +315,15 @@ export function BufferedInput({
               session.phase = 'idle'
               session.draft = session.baseline
               session.staleNotified = false
+              session.pending = undefined
+              setCommitError('')
               setDraft(session.baseline)
             }
             event.currentTarget.blur()
           }
         }}
       />
+      {commitError && <small role="alert">{commitError}</small>}
     </div>
   )
 }

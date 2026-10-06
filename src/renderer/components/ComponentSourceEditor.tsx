@@ -56,6 +56,26 @@ function sourceValuesEqual(left: SourceValue, right: SourceValue): boolean {
   const names = Object.keys(left.files)
   return names.length === Object.keys(right.files).length && names.every(name => sameFile(left.files[name], right.files[name]))
 }
+/** The source owner reports unfinished input; closing never applies or discards it. */
+export function componentSourceCloseIssue(bridge: CourseV10DocumentBridge, documentIds?: readonly string[]): {
+  documentId: string; epoch: string; instanceId: string; message: string
+} | undefined {
+  for (const draft of drafts.get(bridge)?.values() ?? []) {
+    const session = draft.session
+    if (!session || documentIds && !documentIds.includes(session.target.documentId)) continue
+    const changed = !sourceValuesEqual(draft.value, readSource(session.implementation, session.target.resources)) || Boolean(draft.newPath.trim())
+    if (!draft.busy && !draft.composing && !changed) continue
+    const snapshot = bridge.read().documents.find(value => value.documentId === session.target.documentId && value.epoch === session.target.epoch)
+    const documentName = snapshot ? snapshot.binding.kind === 'file'
+      ? snapshot.binding.path.split(/[\\/]/).at(-1) : snapshot.binding.suggestedName : session.target.project.title
+    const scope = session.scope.kind === 'definition' ? '共享定义源码' : '当前实例源码'
+    const state = draft.busy ? '正在等待应用结果' : draft.composing ? '输入法组合尚未结束' : '尚未应用'
+    const message = `“${documentName} / ${draft.name}”的${scope}${state}，已取消关闭并保留草稿。请回到该文档，在“开发 → 组件代码 → ${scope}”点击“保存实现”或“放弃草稿”后再关闭。`
+    draft.message = message
+    for (const notify of draft.listeners) notify()
+    return { documentId: session.target.documentId, epoch: session.target.epoch, instanceId: session.instanceId, message }
+  }
+}
 export function componentSourceSessionEdits(session: SourceSession, value: SourceValue, forceIndependent = false): ComponentEdit[] {
   if (!session.implementation) throw new Error('此实现尚未提供可编辑源码。')
   if (!forceIndependent && sourceValuesEqual(value, readSource(session.implementation, session.target.resources))) return []
@@ -206,7 +226,10 @@ export function ComponentSourceEditor({ instance, implementation, bridge, report
       </select></label>
       <button disabled={disabled || draft.composing || !file} onClick={() => { const files = { ...value.files }; delete files[value.selected]; change({ ...value, files, selected: Object.keys(files)[0] ?? value.entry }) }}>删除当前文件</button>
     </div>}
-    <div><label>新增文件路径<input aria-label="新增组件源码文件路径" value={draft.newPath} disabled={disabled || draft.composing} onChange={event => { draft.newPath = event.target.value; render() }} /></label>
+    <div><label>新增文件路径<input aria-label="新增组件源码文件路径" value={draft.newPath} disabled={disabled || draft.composing} onChange={event => {
+      try { capture(); draft.newPath = event.target.value; render() }
+      catch (error) { draft.message = String(error); render() }
+    }} /></label>
       <button disabled={disabled || draft.composing || !draft.newPath.trim()} onClick={addFile}>新增文件</button></div>
     {value.workspace && !Object.hasOwn(value.files, value.entry) && <p role="status">入口文件“{value.entry}”缺失。现有文件仍可编辑；请新增该文件或选择已有入口后应用。</p>}
     {file?.text === null && <p role="status">“{value.selected}”不是 UTF-8 文本，字节会随源码完整保留。请选择文本文件进行编辑。</p>}

@@ -76,8 +76,8 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
     return projectWithSlideContentDraft(target.editingProject, draft, { documentId: target.documentId, epoch: target.epoch,
       surfaceId: target.surfaceId, activeStateId: target.activeStateId }).instances[instanceId]
   }
-  const submit = (edits: ComponentEdit[], target = liveTarget(), group?: string): void => {
-    if (!edits.length) return
+  const submit = (edits: ComponentEdit[], target = liveTarget(), group?: string): Promise<void> => {
+    if (!edits.length) return Promise.resolve()
     const activePreview = useEditorStore.getState().previewBackgroundColor
     if (activePreview && activePreview.target.documentId === target.documentId && activePreview.target.epoch === target.epoch
       && activePreview.target.surfaceId === target.surfaceId && activePreview.target.stateId === target.activeStateId
@@ -93,11 +93,22 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       const frameEdits = draftEdits.filter((edit): edit is Extract<ComponentEdit, { type: 'frame.set' }> => edit.type === 'frame.set')
       if (frameEdits.length) useEditorStore.getState().updateSlideFrameDraft(frameEdits.at(-1)!.frame)
       edits = edits.filter(edit => !draftEdits.includes(edit))
-      if (!edits.length) return
+      if (!edits.length) return Promise.resolve()
     }
-    void kernel.editCaptured(kernel.capture(edits, target), group).catch(report)
+    const pending = kernel.editCaptured(kernel.capture(edits, target), group).then(() => undefined)
+    // Event-only consumers still report failures; buffered consumers receive the original ACK.
+    void pending.catch(report)
+    return pending
   }
   const run = (action: () => unknown) => { try { void Promise.resolve(action()).catch(report) } catch (error) { report(error) } }
+  const commit = (action: () => Promise<void>): Promise<void> => {
+    try { return action() } catch (error) {
+      report(error)
+      const pending = Promise.reject<void>(error)
+      void pending.catch(() => {})
+      return pending
+    }
+  }
   const preview = (edits: ComponentEdit[] | null, owner: BackgroundPreviewTarget['owner'] = 'instance') => {
     if (!edits) {
       const current = useEditorStore.getState().previewBackgroundColor
@@ -112,10 +123,10 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       stateId: target.activeStateId, owner, ...(owner === 'instance' && target.instanceId ? { instanceId: target.instanceId } : {}) }
     useEditorStore.getState().setPreviewBackgroundColor(edits ? { target: captured, edits } : null, captured)
   }
-  const patch = (value: PropertiesPatch) => run(() => {
+  const patch = (value: PropertiesPatch) => commit(() => {
     const target = liveTarget(), instance = target.instanceId ? editingInstance(target, target.instanceId) : null
     if (!instance) throw new Error('所选组件已不存在。')
-    submit(componentPropertiesEdits(instance, target.project.definitions[instance.definitionId], value), target)
+    return submit(componentPropertiesEdits(instance, target.project.definitions[instance.definitionId], value), target)
   })
   const assets: Record<string, AssetMeta> = Object.fromEntries(Object.values(read.project?.assets ?? {}).map(asset => [asset.id, {
     ...asset, filename: asset.filename ?? asset.path.split(/[\\/]/u).at(-1) ?? asset.id,
@@ -300,7 +311,7 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       stateOverrideApplied: Boolean(read.activeStateId && read.surface?.presentation?.states.find(state => state.id === read.activeStateId)?.overrides[selected.id]) },
     videoDiagnostics: [], animation: null, interaction: null, globalInteraction: null,
     component: read.project?.definitions[selected.definitionId] ? { definition: read.project.definitions[selected.definitionId], instance: selected, assets: read.project.assets,
-      onChange: data => run(() => submit([{ type: 'data.set', instanceId: selected.id, path: [], value: data }])),
+      onChange: data => commit(() => submit([{ type: 'data.set', instanceId: selected.id, path: [], value: data }])),
       onPreview: data => run(() => preview(data===null?null:[{type:'data.set',instanceId:selected.id,path:[],value:data}])) } : null,
     runtime: read.project?.definitions[selected.definitionId] ? buildRuntimePropertiesContexts({ scope: read.selectedIsGlobal ? 'global' : 'scene',
       definition: read.project.definitions[selected.definitionId], instance: selected, assetCount: Object.keys(read.project.assets).length,

@@ -185,11 +185,11 @@ export interface SlideNativePropertiesContext {
     readonly definition: ComponentDefinition
     readonly instance: ComponentInstance
     readonly assets: Readonly<Record<string, ComponentAsset>>
-    readonly onChange: (data: JsonValue) => void
+    readonly onChange: (data: JsonValue) => void | Promise<void>
     readonly onPreview?: (data: JsonValue | null) => void
   } | null
   readonly commands: {
-    readonly patch: (patch: PropertiesPatch) => void
+    readonly patch: (patch: PropertiesPatch) => void | Promise<void>
     readonly preview?: (patch: PropertiesPatch | null) => void
     readonly replaceImage: () => void
     readonly transformImage?: (operations: readonly ImageTransformOperation[]) => Promise<void>

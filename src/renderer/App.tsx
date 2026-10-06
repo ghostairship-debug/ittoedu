@@ -71,6 +71,7 @@ import { BundledFontBoundary } from './app/BundledFontBoundary'
 import { confirmPptxLosses } from './project/confirmPptxLosses'
 import { createCourseFromPptx, pptxCourseStem } from './project/pptxCourseCreation'
 import { CourseV10RuntimeView } from './components/CourseV10RuntimeView'
+import { componentSourceCloseIssue } from './components/ComponentSourceEditor'
 import type { DocumentSnapshot } from '../shared/workbench/document'
 import { resolveComponentPresentation } from '../shared/contracts/component-platform'
 import { projectWithBackgroundPreview } from './authoring/backgroundPreview'
@@ -169,10 +170,21 @@ export default function App() {
   }, [])
   const saveDirectory = useRef<SaveDirectoryContext | null>(null)
   const rawDocuments = window.desktopAPI?.documents
+  function prepareSourceClose(documentIds?: readonly string[]): boolean {
+    const state = useEditorStore.getState(), issue = componentSourceCloseIssue(state.courseBridge, documentIds)
+    if (!issue) return true
+    state.setError(issue.message)
+    return false
+  }
   const documentsWithSaveDirectory = useMemo<DocumentHostAPI | null>(() => rawDocuments ? {
     ...rawDocuments,
     saveWithDialog: (documentId, saveAs, suggestedDirectory) => rawDocuments.saveWithDialog(documentId, saveAs, suggestedDirectory ?? saveDirectory.current ?? undefined),
-    closeWithDialog: (documentId, suggestedDirectory, discardOnly) => rawDocuments.closeWithDialog(documentId, suggestedDirectory ?? saveDirectory.current ?? undefined, discardOnly),
+    closeWithDialog: async (documentId, suggestedDirectory, discardOnly) => {
+      // Bridge.close calls this after the Store/Projection drain; input entered while
+      // those awaits were pending must still keep its original tab and source draft.
+      if (!prepareSourceClose([documentId])) return false
+      return rawDocuments.closeWithDialog(documentId, suggestedDirectory ?? saveDirectory.current ?? undefined, discardOnly)
+    },
   } : null, [rawDocuments])
   const setSaveDirectory = useCallback((directory: SaveDirectoryContext | null) => { saveDirectory.current = directory }, [])
   const [lessonDirty, setLessonDirty] = useState(false)
@@ -317,6 +329,7 @@ export default function App() {
       await useEditorStore.getState().drainAllCourseDocuments()
       return true
     },
+    prepareBeforeClose: () => prepareSourceClose(),
     subscribePreserveAndCloseRequest: handler => window.desktopAPI?.onRequestPreserveAndClose?.(async () => {
       const ready = await handler()
       return { ready, ...(ready && saveDirectory.current ? { suggestedDirectory: saveDirectory.current } : {}) }
@@ -664,7 +677,10 @@ export default function App() {
       courseDocuments={{ documents: courseConnection.documents, activation: courseConnection.activation,
         activeDocumentId: courseConnection.activeDocumentId,
         activate: id => useEditorStore.getState().activateCourseDocument(id),
-        close: id => useEditorStore.getState().closeCourseDocument(id) }}
+        close: async id => {
+          if (!prepareSourceClose([id])) return false
+          return useEditorStore.getState().closeCourseDocument(id)
+        } }}
       prepareCourseDocuments={async ids => { await useEditorStore.getState().drainAllCourseDocuments(ids) }}
       captureCourseDocument={async writable => {
         const state = useEditorStore.getState(), { activeDocumentId, surfaceId } = state.courseView
