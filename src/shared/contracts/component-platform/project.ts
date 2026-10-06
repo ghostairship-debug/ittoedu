@@ -186,6 +186,13 @@ export function owningContainer(project: CourseProjectV10, instanceId: string): 
   return null
 }
 
+/** An object's editing lock includes its containing groups. */
+export function componentIsLocked(project: CourseProjectV10, id: string): boolean {
+  if (project.instances[id]?.locked) return true
+  const owner = owningContainer(project, id)
+  return owner?.kind === 'instance' ? componentIsLocked(project, owner.instanceId) : false
+}
+
 export function isComponentVisibleAtSurface(instance: Pick<ComponentInstance, 'visible' | 'visibility'>, surfaceId: string): boolean {
   if (instance.visible === false) return false
   const scope = instance.visibility

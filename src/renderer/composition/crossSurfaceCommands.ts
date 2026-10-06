@@ -1,6 +1,6 @@
 import type { EditorStoreKernel } from '../store/editorStoreKernel'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
-import { containerChildIds, owningContainer, type ComponentContainer, type ComponentDefinition, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, componentIsLocked, containerChildIds, owningContainer, type ComponentContainer, type ComponentDefinition, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
 import type { ComponentFrame } from '../../shared/contracts/component-platform/frame'
 import { translateFrame, rotateFrame, reparentFrame, frameCorners, transformVector, invertMatrix, composeMatrices, IDENTITY_MATRIX, type AffineMatrix } from '../../core/components/geometry'
 import type { EditorCanvasNodePatch } from '../phaser/editorCanvasNode'
@@ -11,7 +11,8 @@ import type { createCourseStructureSlice } from '../store/slices/courseStructure
 import type { DocumentResources } from '../../shared/workbench/document'
 import { extractComponentLibraryEntry } from '../../core/components/library'
 import { rebindComponentLibraryImplementation } from '../../core/components/library/rebindSource'
-import { rebindDeclaredTargets, rebindProfessionalAssets, rebindWebAssets, sourceModuleBindings } from '../../core/components/library/references'
+import { componentAssetIds, rebindDeclaredTargets, rebindProfessionalAssets, rebindWebAssets, sourceAssetIds, sourceModuleBindings } from '../../core/components/library/references'
+import type { LibraryDiagnostic } from '../../core/components/library/types'
 import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
 import { componentRuleEdits, createComponentInteractionCopyIdentities, interactionBehavior, interactionRules, remapComponentInteractionData } from '../interactions/componentInteractionAuthoring'
 import { remapComponentInputData } from '../../components/input/authoring'
@@ -54,11 +55,7 @@ export function componentParentMatrix(project: CourseProjectV10, id: string): Af
   const parent = project.instances[owner.instanceId]
   return composeMatrices(componentParentMatrix(project, parent.id), parent.frame?.transform ?? IDENTITY_MATRIX)
 }
-export function componentIsLocked(project: CourseProjectV10, id: string): boolean {
-  if (project.instances[id]?.locked) return true
-  const owner = owningContainer(project,id)
-  return owner?.kind === 'instance' ? componentIsLocked(project,owner.instanceId) : false
-}
+export { componentIsLocked } from '../../shared/contracts/component-platform/project'
 function selectedRoots(project: CourseProjectV10, ids: readonly string[]): string[] {
   const selected = new Set(ids)
   return [...new Set(ids)].filter(id => {
@@ -110,6 +107,7 @@ export interface CourseObjectPastePlan {
   idMap: ReadonlyMap<string, string>
   assetIds: ReadonlyMap<string, string>
   rootIds: string[]
+  diagnostics: LibraryDiagnostic[]
 }
 /** Derives one canonical clone batch; callers combine it with their own document edits. */
 export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, destination: CourseObjectPasteDestination): CourseObjectPastePlan {
@@ -120,16 +118,29 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
   const copiedIds = descendants(source.project, source.roots), idMap = new Map(copiedIds.map(id => [id, moving ? id : crypto.randomUUID()]))
   // The library's existing extractor owns source-module/resource closure, including
   // private implementation workspaces. Clipboard does not infer bindings from code.
-  const entry = extractComponentLibraryEntry(source.project, source.resources, {
+  const extracted = extractComponentLibraryEntry(source.project, source.resources, {
     id: `clipboard_${crypto.randomUUID()}`, title: '复制对象', rootIds: [...source.roots],
-  }).entry
+  })
+  const entry = extracted.entry, diagnostics = extracted.diagnostics.filter(item => item.code === 'missing-asset')
   const components: DocumentResources['components'] = entry.resources.components
   const componentIds = new Map(Object.keys(components).map(ownerId => [ownerId, moving && sameDocument ? ownerId : `component_${crypto.randomUUID()}`]))
   const mapId = (id: string) => idMap.get(id) ?? id
+  const surfaceIds = new Map<string, string>()
+  const topOwner = (value: CourseProjectV10, owner: ComponentContainer | null): ComponentContainer | null => {
+    while (owner?.kind === 'instance') owner = owningContainer(value, owner.instanceId)
+    return owner
+  }
+  const destinationOwner = topOwner(project, destination.container)
+  const destinationSurfaceId = destinationOwner?.kind === 'surface' ? destinationOwner.surfaceId : target.surfaceId
+  if (!sameDocument && destinationSurfaceId) for (const id of copiedIds) {
+    const owner = topOwner(source.project, owningContainer(source.project, id))
+    if (owner?.kind === 'surface') surfaceIds.set(owner.surfaceId, destinationSurfaceId)
+  }
+  const mapSurfaceId = (id: string) => surfaceIds.get(id) ?? id
   const rules = new Map<string, string>(), actions = new Map<string, string>(), stateKeys = new Map<string, string>()
   const professionalKey = (id: string) => {
     const instance = source.project.instances[id], definition = source.project.definitions[instance.definitionId]
-    return definition?.implementation.kind === 'builtin' ? definition.implementation.key : instance.definitionId
+    return componentDefinitionBuiltinKey(definition)
   }
   for (const id of copiedIds) if (professionalKey(id) === 'guoling.interactions') {
     const copy = createComponentInteractionCopyIdentities(source.project.instances[id].data)
@@ -151,19 +162,21 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
     { fromInstanceId: id, toInstanceId: mapId(id), rules, stateKeys }))
   // As in page copy, references outside the copied graph remain explicit external targets.
   // Only declared identities are rebound; prose and arbitrary component strings stay authored.
-  const rewrite = (value: JsonValue) => rebindDeclaredTargets(value, mapId, id => id)
+  const rewrite = (value: JsonValue) => rebindDeclaredTargets(value, mapId, mapSurfaceId)
   const instances = copiedIds.map(id => {
     const item = structuredClone(source.project.instances[id])
     return { ...item, id: mapId(id), data: professionalKey(id) === 'guoling.interactions'
-      ? remapComponentInteractionData(item.data, { instances: idMap, surfaces: new Map<string, string>(), rules, actions, stateKeys })
+      ? remapComponentInteractionData(item.data, { instances: idMap, surfaces: surfaceIds, rules, actions, stateKeys })
       : inputData.get(id) ?? rewrite(item.data),
+      ...(item.visibility ? { visibility: { ...item.visibility, surfaceIds: item.visibility.surfaceIds.map(mapSurfaceId) } } : {}),
       ...(item.flowPlacement?.paragraphAnchor ? { flowPlacement: { ...item.flowPlacement, paragraphAnchor: {
         ...item.flowPlacement.paragraphAnchor, blockId: mapId(item.flowPlacement.paragraphAnchor.blockId),
       } } } : {}),
       ...(item.style ? { style: rewrite(item.style) as typeof item.style } : {}),
       ...(item.childIds ? { childIds: item.childIds.map(mapId) } : {}),
       ...(item.attachments ? { attachments: item.attachments.map(attachment => ({ ...attachment,
-        instanceId: mapId(attachment.instanceId), target: attachment.target.kind === 'instance' ? { kind: 'instance' as const, instanceId: mapId(attachment.target.instanceId) } : attachment.target })) } : {}) }
+        instanceId: mapId(attachment.instanceId), target: attachment.target.kind === 'instance' ? { kind: 'instance' as const, instanceId: mapId(attachment.target.instanceId) }
+          : attachment.target.kind === 'surface' ? { kind: 'surface' as const, surfaceId: mapSurfaceId(attachment.target.surfaceId) } : attachment.target })) } : {}) }
   })
   const edits: ComponentEdit[] = []
   if (stateKeys.size) {
@@ -176,17 +189,22 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
   }
   const defMap = new Map<string, string>()
   const definitions = Object.values(entry.definitions), assets = entry.assets
-  const assetIds = new Map(Object.keys(assets).map(id => [id, sameDocument ? id : `asset_${crypto.randomUUID()}`]))
+  const referencedAssets = new Set(Object.keys(assets))
+  for (const instance of Object.values(entry.example.instances)) {
+    for (const id of componentAssetIds(instance, entry.definitions[instance.definitionId])) referencedAssets.add(id)
+  }
+  for (const definition of definitions) for (const id of sourceAssetIds(definition.implementation)) referencedAssets.add(id)
+  const assetIds = new Map([...referencedAssets].map(id => [id, sameDocument ? id : `asset_${crypto.randomUUID()}`]))
   for (const original of definitions) {
     const implementation = original.implementation
     // Match the library insertion's ownership rule: rebinding a shared source
     // definition must not change the destination's existing instances.
     const ownsReboundReferences = implementation.kind === 'source' && (implementation.workspace
-      || Object.keys(sourceModuleBindings(implementation)).length > 0 || Object.keys(assets).length > 0)
+      || Object.keys(sourceModuleBindings(implementation)).length > 0 || referencedAssets.size > 0)
     const collision = !(moving && sameDocument) && project.definitions[original.id] && (ownsReboundReferences || JSON.stringify(project.definitions[original.id]) !== JSON.stringify(original))
     defMap.set(original.id, collision ? crypto.randomUUID() : original.id)
   }
-  const identities = { instances: idMap, definitions: defMap, assets: assetIds, components: componentIds, surfaces: new Map<string, string>() }
+  const identities = { instances: idMap, definitions: defMap, assets: assetIds, components: componentIds, surfaces: surfaceIds }
   const implementation = (value: ComponentDefinition['implementation']) => value.kind === 'source'
     ? rebindComponentLibraryImplementation(value, identities, Object.keys(assets)) : structuredClone(value)
   for (const [ownerId, files] of Object.entries(components)) {
@@ -211,7 +229,7 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
     const id = assetIds.get(asset.id)!
     if (!project.assets[id]) {
       const bytes = entry.resources.assets[asset.id]
-      if (!bytes) throw new Error('复制对象缺少素材字节')
+      if (!bytes) continue
       const extension = /\.[a-zA-Z0-9]+$/.exec(asset.path)?.[0] ?? ''
       edits.push({ type: 'asset.add', asset: { ...structuredClone(asset), id,
         path: sameDocument ? asset.path : `assets/${encodeURIComponent(id)}${extension}` }, bytes: Uint8Array.from(bytes) })
@@ -245,10 +263,10 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
     }
     const ruleTarget = owner.kind === 'global' ? { kind: 'project' as const } : { kind: 'surface' as const, surfaceId: owner.surfaceId }
     const remapped = interactionRules({ id: 'clipboard-family', definitionId: 'guoling.interactions',
-      data: remapComponentInteractionData(familyData, { instances: idMap, surfaces: new Map<string, string>(), rules, actions, stateKeys }) })
+      data: remapComponentInteractionData(familyData, { instances: idMap, surfaces: surfaceIds, rules, actions, stateKeys }) })
     edits.push(...componentRuleEdits(project, ruleTarget, [...interactionRules(interactionBehavior(project, ruleTarget)), ...remapped]))
   }
-  return { edits, idMap, assetIds, rootIds: selected }
+  return { edits, idMap, assetIds, rootIds: selected, diagnostics }
 }
 
 export const COURSE_OBJECT_CLIPBOARD_MIME = 'application/x-guoling-course-objects'
@@ -315,9 +333,10 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
       // Freeze the destination before the cut ACK; a later tab switch cannot
       // retarget paste. Only the first successful paste restores cut IDs.
       await source.removal
-      const { edits, rootIds: selected } = prepareCourseObjectPaste(source, { capturedTarget: target, container: destination,
+      const { edits, rootIds: selected, diagnostics } = prepareCourseObjectPaste(source, { capturedTarget: target, container: destination,
         index: containerChildIds(project, destination).length, offset: { x: 20, y: 20 }, keepOwner, identity: moving ? 'move' : 'copy' })
       await write(edits, target, selected)
+      if (diagnostics.length) kernel.setFeedback({ errorMessage: [...new Set(diagnostics.map(item => item.message))].join('\n') })
     } catch (error) { if (moving) source.moveAvailable = true; throw error }
   }
   const layout = async (kind: 'left'|'center'|'right'|'top'|'middle'|'bottom'|'horizontal'|'vertical') => {

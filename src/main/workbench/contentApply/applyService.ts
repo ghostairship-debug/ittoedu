@@ -5,7 +5,7 @@ import { assertCourseSurfaceRemoval, createCourseSurface } from '../../../core/c
 import type { InMemoryComponentCompilation } from '../../../core/components/compilation/InMemoryComponentCompilation'
 import { componentCompilationInput } from '../../../core/components/compilation/componentCompilationInput'
 import type { HtmlAssembly } from '../../../core/contentApply/assembly/htmlAssembly'
-import { owningContainer, resolveComponentPresentation, type ComponentContainer, type ComponentEdit, type ComponentImplementation, type CourseProjectV10, type JsonObject, type JsonValue } from '../../../shared/contracts/component-platform'
+import { owningContainer, resolveComponentPresentation, type ComponentContainer, type ComponentDefinition, type ComponentEdit, type ComponentImplementation, type CourseProjectV10, type JsonObject, type JsonValue } from '../../../shared/contracts/component-platform'
 import { prepareContentResources, type PreparedContentResources } from './resources/contentResources'
 import type { HtmlDesignMeasurementRequest } from './measurement/ElectronHtmlDesignMeasurement'
 import { prepareMeasurementDocument } from './measurement/prepareMeasurementDocument'
@@ -47,8 +47,10 @@ function resourceEdits(prepared: PreparedContentResources, createId: () => strin
   }
   return { edits, bindings, urls }
 }
-function hasSourceProgram(draft: ContentObjectDraft): boolean {
-  return draft.definitionId === 'guoling.html-program' || draft.implementationOverride?.kind === 'source' || (draft.children ?? []).some(hasSourceProgram)
+function hasSourceProgram(draft: ContentObjectDraft, definitions: Readonly<Record<string, ComponentDefinition>>): boolean {
+  const implementation = draft.implementationOverride ?? definitions[draft.definitionId]?.implementation
+  return implementation?.kind === 'builtin' && implementation.key === 'guoling.html-program'
+    || implementation?.kind === 'source' || (draft.children ?? []).some(child => hasSourceProgram(child, definitions))
 }
 
 /** All callers share this preparation service. Only its Session port can change formal state. */
@@ -127,7 +129,8 @@ export class ContentApplyService {
         drafts = assembled.drafts ?? [assembled.draft]
         edits.push(...assembled.definitions.map(definition => ({ type: 'definition.set' as const, definition })))
         diagnostics.push(...assembled.diagnostics)
-        unverified = drafts.some(hasSourceProgram)
+        const definitions = { ...project.definitions, ...Object.fromEntries(assembled.definitions.map(definition => [definition.id, definition])) }
+        unverified = drafts.some(draft => hasSourceProgram(draft, definitions))
       }
     }
     if (request.source.kind === 'data' && request.target.kind === 'instance'
@@ -158,7 +161,7 @@ export class ContentApplyService {
     diagnostics.push(...compiled.diagnostics)
     unusable ||= compiled.failed && request.source.kind === 'data'
     unverified ||= sourceImplementations.length > 0
-    if (request.source.kind === 'objects') unverified ||= request.source.objects.some(hasSourceProgram)
+    if (request.source.kind === 'objects') unverified ||= request.source.objects.some(draft => hasSourceProgram(draft, compilationProject.definitions))
     signal?.throwIfAborted()
     return planContentApply({ project: baseProject, request, createId: this.createId, drafts, edits, diagnostics, unusable, unverified })
   }

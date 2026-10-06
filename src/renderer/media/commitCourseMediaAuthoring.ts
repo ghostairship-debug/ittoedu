@@ -1,7 +1,7 @@
 import { nanoid } from 'nanoid'
 import type { AssetMeta, AssetSource, AudioChannel, ProjectAudioSettings, SoundDefinition } from '../../shared/contracts/media-v1'
 import type { ComponentAsset, ComponentContainer, ComponentDefinition, ComponentInstance, JsonValue } from '../../shared/contracts/component-platform/project'
-import { containerChildIds, owningContainer } from '../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, containerChildIds, owningContainer } from '../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import type { EditorStoreKernel } from '../store/editorStoreKernel'
 import type { CapturedCourseTarget, CourseV10ViewState } from '../documents/CourseV10DocumentBridge'
@@ -162,8 +162,7 @@ export async function insertCoursePreparedMedia(kernel: EditorStoreKernel, targe
 }
 export async function replaceCourseImageAtTarget(kernel: EditorStoreKernel, target: CapturedCourseTarget, item: ImportedAssetBatchItem): Promise<void> {
   const instance = target.instanceId ? target.editingProject.instances[target.instanceId] : undefined
-  if (!instance || target.project.definitions[instance.definitionId]?.implementation.kind !== 'builtin'
-    || (target.project.definitions[instance.definitionId]?.implementation as { key: string }).key !== 'guoling.image') throw new Error('请先选择要替换的图片')
+  if (!instance || componentDefinitionBuiltinKey(target.project.definitions[instance.definitionId]) !== 'guoling.image') throw new Error('请先选择要替换的图片')
   const data = replaceImageSource(imageDataSchema.parse(instance.data), item.meta.id)
   await kernel.editCaptured(kernel.capture([...assetEdits(target, [item]), { type: 'data.set', instanceId: instance.id, path: [], value: data }], target))
 }
@@ -172,7 +171,7 @@ export async function transformCourseImageAtTarget(kernel: EditorStoreKernel, ta
   operations: readonly ImageTransformOperation[]): Promise<void> {
   const instance = target.instanceId ? target.editingProject.instances[target.instanceId] : undefined
   const definition = instance ? target.project.definitions[instance.definitionId] : undefined
-  if (!instance || definition?.implementation.kind !== 'builtin' || definition.implementation.key !== 'guoling.image') {
+  if (!instance || componentDefinitionBuiltinKey(definition) !== 'guoling.image') {
     throw new Error('请选择要变换的图片')
   }
   const data = imageDataSchema.parse(instance.data)
@@ -189,7 +188,7 @@ export async function replaceCourseMediaAtTarget(kernel: EditorStoreKernel, targ
   if (item.meta.kind === 'image') return replaceCourseImageAtTarget(kernel, target, item)
   const instance = target.instanceId ? target.editingProject.instances[target.instanceId] : undefined
   const definition = instance ? target.project.definitions[instance.definitionId] : undefined
-  const key = definition?.implementation.kind === 'builtin' ? definition.implementation.key : null
+  const key = componentDefinitionBuiltinKey(definition)
   if (!instance || key !== `guoling.${item.meta.kind}` || (item.meta.kind !== 'video' && item.meta.kind !== 'audio')) throw new Error('请选择同类型的原媒体进行替换')
   const data = item.meta.kind === 'audio' ? replaceAudioSource(audioDataSchema.parse(instance.data), item.meta.id)
     : replaceVideoSource(videoDataSchema.parse(instance.data), item.meta.id)

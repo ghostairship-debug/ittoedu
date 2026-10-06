@@ -26,7 +26,8 @@ function bounds(frame: ComponentFrame) {
 /** Reading order owns the block position; a bounded local component keeps its intrinsic stage size. */
 function flowBodyDraft(draft: ContentObjectDraft, definitions: Readonly<Record<string, ComponentDefinition>>): ContentObjectDraft {
   const implementation = draft.implementationOverride ?? definitions[draft.definitionId]?.implementation
-  const bounded = ['guoling.web', 'guoling.html-program'].includes(draft.definitionId) || Boolean(draft.children?.length) || implementation?.kind === 'source'
+  const bounded = implementation?.kind === 'builtin' && ['guoling.web', 'guoling.html-program'].includes(implementation.key)
+    || Boolean(draft.children?.length) || implementation?.kind === 'source'
   if (bounded && draft.frame) return { ...draft, frame: { width: draft.frame.width, height: draft.frame.height, transform: [1, 0, 0, 1, 0, 0] } }
   const { frame: _frame, ...flowDraft } = draft
   return flowDraft
@@ -113,6 +114,7 @@ export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan
     const flow = container.kind === 'surface' && project.surfaces.find(surface => surface.id === container.surfaceId)?.kind === 'flow'
     const definitions = { ...project.definitions, ...(request.source.kind === 'objects'
       ? Object.fromEntries((request.source.definitions ?? []).map(definition => [definition.id, definition])) : {}) }
+    for (const edit of edits) if (edit.type === 'definition.set') definitions[edit.definition.id] = edit.definition
     const placed = request.intent === 'insert' ? placeNewRoots(project, container, drafts, diagnostics, definitions)
       : flow ? drafts.map(draft => flowBodyDraft(draft, definitions)) : drafts
     edits.push({ type: 'instance.insert', container, index, instances, rootIds: placed.map(allocate) })

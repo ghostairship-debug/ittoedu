@@ -95,10 +95,10 @@ export function isEditorTextInputEvent(event: Event): boolean {
   return editorEventHasInputOwner(event, isEditorTextInputTarget)
 }
 
-/** A range keeps its input keys, but has no native text undo to own History. */
+/** Non-text range/checkbox controls keep their input keys, not native text undo. */
 export function isEditorNativeHistoryEvent(event: KeyboardEvent): boolean {
   return editorEventHasInputOwner(event, target => isEditorTextInputTarget(target)
-    && !(target instanceof HTMLInputElement && target.type === 'range'))
+    && !(target instanceof HTMLInputElement && (target.type === 'range' || target.type === 'checkbox')))
 }
 
 export function isEditorInteractiveControlEvent(event: KeyboardEvent): boolean {

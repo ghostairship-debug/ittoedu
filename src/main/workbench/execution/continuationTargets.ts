@@ -48,6 +48,13 @@ export async function continueDocumentTargets(session: DocumentSession, referenc
         }
         continue
       }
+      if (change.sourceChange) {
+        if (change.sourceChange.kind === 'unchanged') continue
+        const { before, after } = change.sourceChange
+        const moved = own ? traceSourceRange(before, after, target.from, target.to) : null
+        target = moved ? { ...target, ...moved } : mapMarkdownRange(before, after, target)
+        continue
+      }
       if (!change.before || !change.after) throw new Error('原选区历史不足以确认当前位置，请重新选择')
       if (target.kind === 'markdown-range' && isSourceDocumentModel(change.before) && isSourceDocumentModel(change.after)) {
         const moved = own ? traceSourceRange(change.before.source, change.after.source, target.from, target.to) : null

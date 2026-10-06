@@ -1,7 +1,9 @@
 import type {
   DocumentBinding, DocumentDriver, DocumentEvent, DocumentModel, DocumentOperation,
   DocumentOperationResult, DocumentPersistence, DocumentSnapshot, DurableDocumentState,
+  DocumentSourceChange,
 } from '../../shared/workbench/document'
+import { isSourceDocumentModel } from '../../shared/workbench/document'
 import { documentDigest } from './documentDigest'
 import { DocumentSaveFailure, type DocumentSaveIdentity, type DocumentSaveProof } from '../../shared/workbench/documentSave'
 
@@ -30,6 +32,11 @@ function operationDigest(operation: DocumentOperation): string {
   if (!operation.requestDigest) return documentDigest(operation)
   return documentDigest({ documentId: operation.documentId, operationId: operation.operationId,
     actor: operation.actor, runId: operation.runId, requestDigest: operation.requestDigest })
+}
+
+function sourceChange(before: DocumentModel, after: DocumentModel): DocumentSourceChange | undefined {
+  if (before.kind !== after.kind || !isSourceDocumentModel(before) || !isSourceDocumentModel(after)) return
+  return before.source === after.source ? { kind: 'unchanged' } : { kind: 'changed', before: before.source, after: after.source }
 }
 
 
@@ -226,8 +233,9 @@ export class DocumentSession {
       const sourceCommand = operation.mutation.type === 'command' && operation.mutation.command.type === 'markdown.splice'
         ? operation.mutation.command : null
       const textChanges = operation.textChanges ?? (sourceCommand ? { source: [{ from: sourceCommand.from, to: sourceCommand.to, inserted: sourceCommand.text.length }], flow: [] } : undefined)
+      const source = changed ? sourceChange(this.state.model, next.model) : undefined
       next.operations.push({ operationId: id, digest, result, actor: operation.actor, ...(operation.runId ? { runId: operation.runId } : {}),
-        ...(textChanges ? { textChanges: structuredClone(textChanges) } : {}) })
+        ...(textChanges ? { textChanges: structuredClone(textChanges) } : {}), ...(source ? { sourceChange: source } : {}) })
       try { await this.persistence.append(structuredClone(next)) }
       catch (error) { return this.reject(id, 'failed', 'recovery-write-failed', error instanceof Error ? error.message : '恢复稿写入失败，修改未提交') }
       const before = this.state.model
@@ -288,10 +296,17 @@ export class DocumentSession {
       const next = structuredClone(this.state)
       if (documentDigest(loaded.model) !== documentDigest(next.model)) {
         const operationId = `disk:${next.documentId}:${next.sequence + 1}`
-        next.past.push({ operationId, actor: 'external', before: next.model, after: structuredClone(loaded.model) })
+        const beforeRevision = next.revision
+        next.past.push({ operationId, actor: 'external', beforeRevision, revision: beforeRevision + 1,
+          before: next.model, after: structuredClone(loaded.model) })
         next.future = []
         next.revision += 1
         next.model = this.driver.withRevision(loaded.model, next.revision)
+        const source = sourceChange(this.state.model, next.model)
+        next.operations.push({ operationId, actor: 'external',
+          digest: documentDigest({ operationId, beforeRevision, revision: next.revision, bindingVersion: input.bindingVersion, version: loaded.version }),
+          result: { status: 'applied', documentId: next.documentId, operationId, beforeRevision, revision: next.revision, persistence: 'recoverable' },
+          ...(source ? { sourceChange: source } : {}) })
       }
       next.binding = { ...this.state.binding, version: loaded.version }
       next.savedRevision = loaded.matchesDisk ? next.revision : null

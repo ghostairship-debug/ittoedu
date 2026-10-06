@@ -42,6 +42,11 @@ export interface DocumentTextChanges {
   flow: Array<{ surfaceId: string; parentId: string | null; blockId: string; slot: DocumentSlot; from: number; to: number; inserted: number }>
 }
 
+/** Actual source facts for range continuation; resources and Undo remain in the document History. */
+export type DocumentSourceChange =
+  | { kind: 'unchanged' }
+  | { kind: 'changed'; before: string; after: string }
+
 /** Host-owned envelope. Providers receive domain arguments, never this authority. */
 export interface DocumentOperation {
   documentId: DocumentId
@@ -106,7 +111,8 @@ export interface DurableDocumentState {
   model: DocumentModel
   past: DocumentHistoryEntry[]
   future: DocumentHistoryEntry[]
-  operations: { operationId: string; digest: string; result: DocumentOperationResult; actor?: DocumentOperation['actor']; runId?: string; textChanges?: DocumentTextChanges }[]
+  operations: { operationId: string; digest: string; result: DocumentOperationResult; actor?: DocumentOperation['actor']; runId?: string;
+    textChanges?: DocumentTextChanges; sourceChange?: DocumentSourceChange }[]
   stoppedRuns: string[]
 }
 

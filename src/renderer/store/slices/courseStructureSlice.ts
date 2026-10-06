@@ -1,6 +1,7 @@
 import type { EditorStoreKernel } from '../editorStoreKernel'
 import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
 import type { ComponentInstance, ComponentSurface, CourseProjectV10 } from '../../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey } from '../../../shared/contracts/component-platform/project'
 import { rebindDeclaredTargets } from '../../../core/components/library/references'
 import { createComponentInteractionCopyIdentities, remapComponentInteractionData } from '../../interactions/componentInteractionAuthoring'
 import { remapComponentInputData } from '../../../components/input/authoring'
@@ -28,12 +29,13 @@ export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: stri
   source.childIds.forEach(visit)
   const copiedSurfaceId = createId()
   const rules = new Map<string, string>(), actions = new Map<string, string>(), stateKeys = new Map<string, string>()
+  const professionalKey = (instance: ComponentInstance) => componentDefinitionBuiltinKey(project.definitions[instance.definitionId])
   const ruleIdentities = (data: ComponentInstance['data']) => {
     const copy = createComponentInteractionCopyIdentities(data)
     for (const [from, to] of copy.rules) if (!rules.has(from)) rules.set(from, to)
     for (const [from, to] of copy.actions) if (!actions.has(from)) actions.set(from, to)
   }
-  for (const id of ids.keys()) if (project.instances[id]!.definitionId === 'guoling.interactions') {
+  for (const id of ids.keys()) if (professionalKey(project.instances[id]!) === 'guoling.interactions') {
     ruleIdentities(project.instances[id]!.data)
     for (const state of source.presentation?.states ?? []) if (state.overrides[id]?.data !== undefined) ruleIdentities(state.overrides[id]!.data!)
   }
@@ -41,14 +43,14 @@ export function duplicateSurfaceEdits(project: CourseProjectV10, surfaceId: stri
     fromInstanceId: instance.id, toInstanceId: ids.get(instance.id) ?? instance.id, rules, stateKeys,
   })
   // Allocate managed state keys before rebinding any rule condition/action.
-  for (const id of ids.keys()) if (project.instances[id]!.definitionId === 'guoling.input') {
+  for (const id of ids.keys()) if (professionalKey(project.instances[id]!) === 'guoling.input') {
     rebindInput(project.instances[id]!)
     for (const state of source.presentation?.states ?? []) if (state.overrides[id]?.data !== undefined) rebindInput({ ...project.instances[id]!, data: state.overrides[id]!.data! })
   }
   const identities = { instances: ids, surfaces: new Map([[surfaceId, copiedSurfaceId]]), rules, actions, stateKeys }
-  const rebindData = (instance: ComponentInstance) => instance.definitionId === 'guoling.interactions'
+  const rebindData = (instance: ComponentInstance) => professionalKey(instance) === 'guoling.interactions'
     ? remapComponentInteractionData(instance.data, identities)
-    : instance.definitionId === 'guoling.input' ? rebindInput(instance)
+    : professionalKey(instance) === 'guoling.input' ? rebindInput(instance)
     : rebindDeclaredTargets(instance.data, value => ids.get(value) ?? value, value => value === surfaceId ? copiedSurfaceId : value)
   const frameIds = new Map((source.spatial?.frames ?? []).map(frame => [frame.id, createId()]))
   const instances: ComponentInstance[] = [...ids].map(([id, copiedId]) => {

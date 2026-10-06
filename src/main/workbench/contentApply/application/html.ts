@@ -52,21 +52,27 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
   const isDefaultImplementation = (existing: ComponentDefinition, expected: ComponentDefinition) =>
     existing.role === expected.role && existing.implementation.kind === 'builtin'
       && expected.implementation.kind === 'builtin' && existing.implementation.key === expected.implementation.key
+  const definitionFor = (expected: ComponentDefinition): ComponentDefinition => {
+    const existing = definitions.get(expected.id) ?? options.definitions[expected.id]
+    if (!existing) { definitions.set(expected.id, expected); return expected }
+    if (isDefaultImplementation(existing, expected)) return existing
+    // Source editing keeps the original definition identity. New HTML uses a
+    // default implementation under its own identity without changing old instances.
+    const reusable = [...definitions.values(), ...Object.values(options.definitions)]
+      .find(value => isDefaultImplementation(value, expected))
+    if (reusable) return reusable
+    let id = `${expected.id}.builtin`, suffix = 2
+    while (definitions.has(id) || Object.hasOwn(options.definitions, id)) id = `${expected.id}.builtin-${suffix++}`
+    const definition = { ...expected, id }
+    definitions.set(id, definition)
+    return definition
+  }
   const draft = (object: HtmlAssemblyObject): ContentObjectDraft => {
     const professional = professionalHtmlDraft(object, resourceBindings, options.createFormulaId, assembly.supportCss)
     if (professional?.kind === 'native') {
-      const existing = options.definitions[professional.definition.id]
-      if (!existing || isDefaultImplementation(existing, professional.definition)) {
-        if (!existing) definitions.set(professional.definition.id, professional.definition)
-        return professional.draft
-      }
-      diagnostics.push({ level: 'warning', code: 'html-professional-definition-conflict', sourcePath: object.sourcePath,
-        message: `专业定义 ${professional.definition.id} 已由另一实现占用；保留该对象为 Web，未覆盖既有定义。`, repairable: true })
+      return { ...professional.draft, definitionId: definitionFor(professional.definition).id }
     } else if (professional?.kind === 'web') diagnostics.push(professional.diagnostic)
-    const definition = WEB_DEFINITIONS.find(value => value.id === (object.kind === 'program' ? 'guoling.html-program' : 'guoling.web'))!
-    const existing = options.definitions[definition.id]
-    if (!existing) definitions.set(definition.id, definition)
-    else if (!isDefaultImplementation(existing, definition)) throw new Error('内置 Web 定义身份已由另一实现占用')
+    const definition = definitionFor(WEB_DEFINITIONS.find(value => value.id === (object.kind === 'program' ? 'guoling.html-program' : 'guoling.web'))!)
     const originalContent = object.content?.kind === 'element' && object.content.tagName === 'body'
       ? { ...object.content, tagName: 'div' } : object.content
     const measuredStyle = object.kind === 'program' ? object.style : measuredFragmentBoxStyle(object.style)
@@ -87,10 +93,7 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
       ...(object.kind === 'group' ? { children: orderedChildren(object).map(draft) } : {}) }
   }
   if (options.flow && assembly.root.kind !== 'program' && assembly.flowCoupled) {
-    const definition = WEB_DEFINITIONS.find(value => value.id === 'guoling.web')!
-    const existing = options.definitions[definition.id]
-    if (existing && !isDefaultImplementation(existing, definition)) throw new Error('内置 Web 定义身份已由另一实现占用')
-    if (!existing) definitions.set(definition.id, definition)
+    const definition = definitionFor(WEB_DEFINITIONS.find(value => value.id === 'guoling.web')!)
     // One responsive DOM owns the coupled CSS/disclosure layout. Do not turn its
     // descendants into a fixed free-frame stage or stamp used pixel heights into it.
     const root: ContentObjectDraft = { definitionId: definition.id, data: {
