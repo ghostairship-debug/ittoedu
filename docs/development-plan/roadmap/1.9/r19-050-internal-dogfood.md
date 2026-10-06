@@ -5,13 +5,13 @@
 - Optional: 否
 - Write locks: `chat-ui`
 
-日期：2026-09-18。本文是目标规格，当前实施次序、事实和验收统一见[完整实施方案](../../R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)；本轮仅文档重建。
+日期：2026-09-18。本文是目标规格，当前实施次序、事实和验收统一见[完整实施方案](../../../archive/2026-09-development/plans/R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)；本轮仅文档重建。
 
 ## 目标与现状
 本节点尚未完成。先按主方案 F00–F08 修实际阻断，再闭合040–049组合；051独立汇入060。保留已有效局部证据，不用旧四阶段用例、单次聊天、静态适配或启动后取消冒充完整链。代表链用按任务创作和用户明确审稿两条路径，不固定四稿。原电路 revision27 返回入口失败以最新有限收尾/候选记录为准，早期成功不能覆盖。原样本不可达则记录缺失，用当前等价反例（Flow ID 写入 `scene.go` 必须失败可见），不得声称旧课例已修。
 
 ## 范围与入口
-[主方案验收矩阵](../../R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md) V01–V15、[文件合同](../../R19_LESSON_DOCUMENT_WORKSPACE_CONTRACT.md)、[历史证据](../../R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md#4-剩余范围与滚动批次)。真实源码入口是 CourseChatPanel、harness/repository、材料 Owner、prepareGenerationCandidate、useCourseProjectLifecycle；跨域缺陷回实际 Owner 修，不在测试里代写作品。
+[主方案验收矩阵](../../../archive/2026-09-development/plans/R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md) V01–V15、[文件合同](../../../archive/2026-09-development/plans/R19_LESSON_DOCUMENT_WORKSPACE_CONTRACT.md)、[历史证据](../../../archive/2026-09-development/plans/R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md#4-剩余范围与滚动批次)。真实源码入口是 CourseChatPanel、harness/repository、材料 Owner、prepareGenerationCandidate、useCourseProjectLifecycle；跨域缺陷回实际 Owner 修，不在测试里代写作品。
 
 ## 代表链与验收
 1. 从真实根目录直接建会话，不建课例/课件也能处理材料；按需建项目。至少两项不同教学目标覆盖“直接完成作品”与“用户先审当前文档再继续”，不能为测试强迫固定四稿。

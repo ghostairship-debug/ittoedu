@@ -2,7 +2,7 @@
 
 ## 产品方案 V2.0 · 边界收敛与互联网研究版
 
-**主应用轻编辑 · HTML 混合编辑 · 专业软件插件接力**  
+**主应用轻编辑 · HTML 混合编辑 · 专业软件插件接力**\
 2026年9月16日｜适用项目：果铃（原一途／ittoedu）
 
 本文件是一份可独立阅读的产品方案，替代V1.1中与最新边界冲突的要求，不代表已实现功能或已确认开发排期。
@@ -574,89 +574,89 @@ HTML含静态页、动态框架、图表、Canvas和缺源码构建包；Office�
 
 核查日期：2026年9月16日。公开能力、实际可用版本、分发许可及收费分别核对。以下是本方案实际采用的主要依据；未把官网宣传作为兼容率或用户效果证据。
 
-**[S01] Canva Code 2.0 官方发布说明**  
+**[S01] Canva Code 2.0 官方发布说明**\
 HTML导入与直接／AI编辑；未披露任意HTML的完整内部模型。 [查看来源](https://www.canva.com/newsroom/news/Canva-Code/)
 
-**[S02] 灵犀产品文档**  
+**[S02] 灵犀产品文档**\
 独立任务、文件、Skills；检索与正文版本有差异，不据插件预告推断全面可用。 [查看来源](https://www.lingxi.cn/docs)
 
-**[S03] Claude Cowork 官方产品页**  
+**[S03] Claude Cowork 官方产品页**\
 文件与工具任务导向；不采用未实测性能与效率宣传。 [查看来源](https://claude.com/product/cowork)
 
-**[S04] Obsidian：How Obsidian stores data**  
+**[S04] Obsidian：How Obsidian stores data**\
 本地文件、外部编辑和索引缓存思路。 [查看来源](https://obsidian.md/help/data-storage)
 
-**[S05] Lovable：How we built the Visual Edits feature**  
+**[S05] Lovable：How we built the Visual Edits feature**\
 2025-03-13技术文章；编译期标识与源码AST，不等于任意外部页兼容。 [查看来源](https://lovable.dev/blog/visual-edits)
 
-**[S06] Builder：Registering Custom Components**  
+**[S06] Builder：Registering Custom Components**\
 代码组件注册及带类型属性输入。 [查看来源](https://www.builder.io/c/docs/custom-components-setup)
 
-**[S07] Gamma：Content and layouts**  
+**[S07] Gamma：Content and layouts**\
 结构化布局与修改参考。 [查看来源](https://help.gamma.app/en/articles/11029130-what-s-the-fastest-way-to-transform-content-and-layouts)
 
-**[S08] 飞象老师：开发者应用商店介绍**  
+**[S08] 飞象老师：开发者应用商店介绍**\
 教学输入与互动生成；属于开发者说明，不是独立效果测试。 [查看来源](https://apps.apple.com/jp/app/飞象老师/id6744599772)
 
-**[S09] Electron：Security**  
+**[S09] Electron：Security**\
 外部内容隔离、沙箱和宿主接口边界。 [查看来源](https://www.electronjs.org/docs/latest/tutorial/security)
 
-**[S10] Microsoft：Open XML SDK for Office**  
+**[S10] Microsoft：Open XML SDK for Office**\
 Office包与XML元素操作，不提供排版兼容担保。 [查看来源](https://learn.microsoft.com/en-us/office/open-xml/open-xml-sdk)
 
-**[S11] openpyxl：Tutorial**  
+**[S11] openpyxl：Tutorial**\
 官方提示未知内容及图形的读写损失风险。 [查看来源](https://openpyxl.readthedocs.io/en/stable/tutorial.html)
 
-**[S12] SheetJS CE：Formulae**  
+**[S12] SheetJS CE：Formulae**\
 公式读写不自动计算结果。 [查看来源](https://docs.sheetjs.com/docs/csf/features/formulae/)
 
-**[S13] Microsoft：Create and format shapes in PowerPoint add-ins**  
+**[S13] Microsoft：Create and format shapes in PowerPoint add-ins**\
 原生形状创建、位置、格式和删除。 [查看来源](https://learn.microsoft.com/en-us/office/dev/add-ins/powerpoint/shapes)
 
-**[S14] Microsoft：Specify Office hosts and API requirements**  
+**[S14] Microsoft：Specify Office hosts and API requirements**\
 宿主与requirement set可用性检测。 [查看来源](https://learn.microsoft.com/en-us/office/dev/add-ins/develop/specify-office-hosts-and-api-requirements)
 
 # 附录B｜研究证据与使用边界
 
 核查日期：2026年9月16日。公开能力、实际可用版本、分发许可及收费分别核对。以下是本方案实际采用的主要依据；未把官网宣传作为兼容率或用户效果证据。
 
-**[S15] WPS：加载项概述**  
+**[S15] WPS：加载项概述**\
 任务窗格、JS操作与发布路径变化。 [查看来源](https://open.wps.cn/documents/app-integration-dev/wps365/client/wpsoffice/wps-integration-mode/wps-addin-development/addin-overview)
 
-**[S16] WPS：加载项开发说明**  
+**[S16] WPS：加载项开发说明**\
 加载项结构、window.wps与系统集成。 [查看来源](https://open.wps.cn/documents/app-integration-dev/wps365/client/wpsoffice/wps-integration-mode/wps-addin-development/wps-addin-development-instructions)
 
-**[S17] Microsoft：Automatically open a task pane with a document**  
+**[S17] Microsoft：Automatically open a task pane with a document**\
 明确说明2026-03-02起Marketplace自动打开限制。 [查看来源](https://learn.microsoft.com/en-us/office/dev/add-ins/develop/automatically-open-a-task-pane-with-a-document)
 
-**[S18] SuperDoc：How SuperDoc works**  
+**[S18] SuperDoc：How SuperDoc works**\
 OOXML文档引擎与编辑／自动化路径，仍需验证活动会话。 [查看来源](https://docs.superdoc.dev/resources/how-superdoc-works/)
 
-**[S19] SuperDoc DOCX Engine Proprietary License**  
+**[S19] SuperDoc DOCX Engine Proprietary License**\
 2026-07-14版本；开源外层与专有引擎分开许可。 [查看来源](https://docs.superdoc.dev/resources/docx-engine-license/)
 
-**[S20] Univer 官方仓库 README**  
+**[S20] Univer 官方仓库 README**\
 Apache-2.0 OSS核心与Pro扩展能力边界。 [查看来源](https://github.com/dream-num/univer)
 
-**[S21] Univer：Sheets import and export**  
+**[S21] Univer：Sheets import and export**\
 文件交换需要相应后端／版本，不能从核心许可推断全部免费。 [查看来源](https://docs.univer.ai/guides/sheets/features/import-export)
 
-**[S22] ONLYOFFICE：Automation API**  
+**[S22] ONLYOFFICE：Automation API**\
 外部自动化为Docs Developer额外付费能力。 [查看来源](https://api.onlyoffice.com/docs/docs-api/usage-api/automation-api/)
 
-**[S23] WPS WebOffice：JSSDK**  
+**[S23] WPS WebOffice：JSSDK**\
 JSSDK通信桥及服务依赖，与客户端加载项不同。 [查看来源](https://open.wps.cn/documents/app-integration-dev/docs-center/online-preview-edit/web/jssdk)
 
-**[S24] PDF.js：Getting Started**  
+**[S24] PDF.js：Getting Started**\
 解析、渲染和查看器层，不等于完整原文编辑内核。 [查看来源](https://mozilla.github.io/pdf.js/getting_started/index.html)
 
-**[G1] ittoedu：README（本次读取）**  
+**[G1] ittoedu：README（本次读取）**\
 原生工程、简洁／专业、组件与运行时作者目标；文档陈述未经运行验收。 [查看来源](https://github.com/ghostairship-debug/ittoedu/blob/c42cef38f5b7a0d0093550b9deb7b9809053ef50/README.md)
 
-**[G2] ittoedu：开发总纲（本次读取）**  
+**[G2] ittoedu：开发总纲（本次读取）**\
 CLI路线、内部信任前提、唯一写入者与能力保留。 [查看来源](https://github.com/ghostairship-debug/ittoedu/blob/c42cef38f5b7a0d0093550b9deb7b9809053ef50/COURSEWARE_DEVELOPMENT_PLAN.md)
 
-**[G3] ittoedu：当前提交**  
+**[G3] ittoedu：当前提交**\
 2026-09-14 18:00 UTC（北京时间9月15日）；不表示本次完成测试。 [查看来源](https://github.com/ghostairship-debug/ittoedu/commit/c42cef38f5b7a0d0093550b9deb7b9809053ef50)
 
 **内部基线：**本会话 V1.0、V1.1 产品方案及用户最新边界。V2.0保留任务／资料复用和文件连续性，取消重型Office手工编辑的前置要求。

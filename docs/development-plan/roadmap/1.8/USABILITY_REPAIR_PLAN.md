@@ -1,6 +1,6 @@
 # 1.8 可用性整改：视口、绘制、组件源码修改与剩余基线
 
-2026-09-07，依据 Owner 最新反馈定位并更新方案。本轮只完成调查、隔离样例复现和开发文档更新，未实施下面的产品修复。已有工作区修改继续保留；前轮修复范围见 [聊天与 Flow 修复记录](../../reviews/chat-flow-usability-2026-09-07.md)。
+2026-09-07，依据 Owner 最新反馈定位并更新方案。本轮只完成调查、隔离样例复现和开发文档更新，未实施下面的产品修复。已有工作区修改继续保留；前轮修复范围见 [聊天与 Flow 修复记录](../../../archive/2026-09-development/reviews/chat-flow-usability-2026-09-07.md)。
 
 当前安排由[三表面架构整合与路线调整方案](../../THREE_SURFACE_ARCHITECTURE_INTEGRATION_PLAN.md)统一承接：保留本页U01–U11/R01–R09编号、结果与证据，R01/R06可独立先交付；Flow坐标、Spatial重复绘制纳入正式Owner迁移，人工/AI包修改汇合后接线。新增15个1.8节点已进入manifest与版本规格，1.9–2.0新增扩张等待1.8整合与S3；没有实施下面的新修复，也没有新增active状态。
 
@@ -12,7 +12,7 @@ Owner 随后明确：本次缩放需求针对**试运行与预览**。编辑态�
 
 同日继续补充：Flow 组件从浮层转入正文受阻，以及专业开发中组件 `Runtime.js` / `Manifest.json` 不能直接修改，分别纳入 U10/R08 与 U11/R09。本轮仍先定位和更新方案；人工代码编辑与 R05 的 AI 代码修改共用工程组件包的正式事务路径。
 
-当前实施状态补充：U07/U08的Codex调用与OpenCode格式修复已完成，基础聊天及组件源码各两轮真实流程通过；修复前事实保留用于解释问题，当前证据见[CLI修复记录](../../reviews/1.8-cli-call-format-repair.md)。
+当前实施状态补充：U07/U08的Codex调用与OpenCode格式修复已完成，基础聊天及组件源码各两轮真实流程通过；修复前事实保留用于解释问题，当前证据见[CLI修复记录](../../../archive/2026-09-development/reviews/1.8-cli-call-format-repair.md)。
 
 ## 1. 已定位的问题与证据
 
@@ -24,7 +24,7 @@ Owner 随后明确：本次缩放需求针对**试运行与预览**。编辑态�
 | U04 | Spatial 编辑态共享横幅的深色圆角卡片是独立绘制实现造成的，用户截图中的差异不是单纯位置偏移。 | `SpatialLocationWorkspace.tsx` 的 `renderHudLayer` 固定深底、白字、13px、圆角和居中；`spatialNativePaint` 将 Native 文本化为字符串。运行侧使用正式 Native painter，保留文本样式。 | P1，用户可见样式错误 |
 | U05 | Slide/Flow 的试运行与整课预览缺少主动缩放，Spatial 运行态已有自由相机缩放；需要统一播放中的观察操作。 | `coursePlayerTryRun.ts`/`publishedStageFit.ts` 只按容器自动 fit，未提供用户 zoom；Flow 的 wheel 处理文档滚动，Slide 无对应播放 zoom 入口。Spatial runtime 已有相机缩放模型。已核实 Slide 编辑态的 100%→110% 按钮，但它与本项需求无关。 | P2，播放观察能力与一致性 |
 | U06 | 工程包含完整组件包，但当前聊天快照未交付被选组件的源码工作副本，也未给出包替换所需的精确目标。 | `courseProjectArchive.ts` 保存/恢复包文件；`generationSnapshot.ts` 只有工程包元数据、目录摘要和实例 targets；`CandidateStaging.create` 只落请求及 Skills。`component.package` 已有整包替换、引用实例准入及资源事务，却要求精确 `componentPackageAddress`。 | P1，已嵌入组件的内部修改链路受阻 |
-| U07 | OpenCode 新传输首轮生成/应用成功，第二轮非法 JSON 被正确拒绝；缺少候选标记也曾导致无候选。格式错误没有进入既有唯一一次修复机会。 | [前轮记录](../../reviews/chat-flow-usability-2026-09-07.md)；`CourseChatPanel.tsx` 在取得合法 candidate 后才进入 `captureGenerationRepair`，候选解析异常在其外部直接退出。 | P1，真实多轮编辑失败；严格拒绝本身正确 |
+| U07 | OpenCode 新传输首轮生成/应用成功，第二轮非法 JSON 被正确拒绝；缺少候选标记也曾导致无候选。格式错误没有进入既有唯一一次修复机会。 | [前轮记录](../../../archive/2026-09-development/reviews/chat-flow-usability-2026-09-07.md)；`CourseChatPanel.tsx` 在取得合法 candidate 后才进入 `captureGenerationRepair`，候选解析异常在其外部直接退出。 | P1，真实多轮编辑失败；严格拒绝本身正确 |
 | U08 | 当前 Codex 真实请求超时；旧 exec 对照同样超时，不能据此认定新适配器独有故障，也不能宣称当前真实 Codex 通过。 | 前轮新旧传输对照及失败记录。Claude 当前完整纵切已通过。 | 外部服务/验收阻断，暂不定为产品 P1 |
 | U09 | 删除 include 可见范围中的最后一个页面，会删除对应全局条目，历史用例中的教师控制器因此消失。 | 当前 `globalEditorStore.test.ts:410` 聚焦重现失败；`courseReferenceCleanup.ts/removeDeletedLocationVisibility` 对空 include 执行 `entries.splice`，`deleteSlideSceneFromDraft` 调用该清理。不是仅测试投影漏显。 | P1，删除操作意外影响全局控制器及其配置 |
 | U10 | Flow 组件浮层已有“转回正文”入口，但普通插入没有后备图，转换因此被拒绝；缺少从实际组件自动生成后备图并完成转换的闭环。 | `FlowPropertiesPanel.tsx:802` 的按钮连接 `convert-overlay-to-document`；`flowSharedAuthoringAdapters.ts:798` 要求有效 `staticFallbackAssetId`。`insertComponentPackagesAtTarget` 未传入该资源，普通插入默认浮层；属性入口只调用同步转换，不提供生成后备图步骤。 | P1，受支持的组件正文创作流程受阻 |
@@ -36,7 +36,7 @@ Owner 2026-09-07确认“步负责场景内部播放次序，场景只负责场�
 
 完整结果、兼容边界、唯一Owner、写域和精确验收见[导航分层工作包](r18-085-navigation-levels.md)。R10衔接R01全局控制器保全、R02/03三表面生命周期和R04观察控制：同画布镜头走步骤，跨画布才换场景；步进到首末边界自动进入相邻场景，目录分层；重播回场景起始步骤，恢复视图只改zoom/pan。键盘/翻页笔/动态接口一并对齐，旧deep link和显式location跳转不丢。
 
-DAG新增r18-085→086→087，r18-060另等087；r18-083已通过范围不作废。085–087已实施并通过真实Electron/离线HTML验证，见[导航结束记录](../../reviews/1.8-navigation-level-exit.md)；CLI修复独立记录。
+DAG新增r18-085→086→087，r18-060另等087；r18-083已通过范围不作废。085–087已实施并通过真实Electron/离线HTML验证，见[导航结束记录](../../../archive/2026-09-development/reviews/1.8-navigation-level-exit.md)；CLI修复独立记录。
 
 ### 实际窗口与拖拽证据
 
@@ -61,7 +61,7 @@ Spatial 原因由 Owner 两张实际截图与直接 painter 源码共同确认�
 
 本轮执行 `npx vitest run tests/unit/globalEditorStore.test.ts -t 'canonicalizes include/exclude' --reporter=dot`，结果为 1 失败、13 跳过，仍在删除 include 唯一引用页后找不到原控制器。历史独立 1.6 基线也出现同一失败，属于既有问题；本轮按 Owner 要求正式纳入整改。
 
-过去全量结果中的另外三项已有结论：基准 HTML 随 Player 更新后其 7 项检查通过；Runtime 作者宿主和路线检查的两个超时均在唯一一次聚焦复跑中通过。保留当时证据，不恢复为三个当前缺陷，不延长时限或修改断言制造全绿。现有基线记录见 [开发记录](../../reviews/1.7-1.8-development-2026-09-07.md)。
+过去全量结果中的另外三项已有结论：基准 HTML 随 Player 更新后其 7 项检查通过；Runtime 作者宿主和路线检查的两个超时均在唯一一次聚焦复跑中通过。保留当时证据，不恢复为三个当前缺陷，不延长时限或修改断言制造全绿。现有基线记录见 [开发记录](../../../archive/2026-09-development/reviews/1.7-1.8-development-2026-09-07.md)。
 
 ### 组件转换与专业开发的补充定位
 

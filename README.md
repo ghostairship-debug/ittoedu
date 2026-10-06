@@ -1,44 +1,32 @@
 # 果铃工作台
 
-面向教师的互动课件创作与 AI 工作台：把"取得资料 → 理解 → 计算/生成 → 观察修改 → 保存导出"的完整闭环装进一个 Electron 桌面应用,教育课件是首发场景,工作台、文件、会话、工具保持通用。
+面向教师的可编辑课件与通用内容工作台。模型负责内容，软件负责身份、资源、装配、事务、保存与交付；人工编辑与 AI 使用同一正式工程。
 
-## 2.0 真实状态(2026-10-02)
+当前开发目录为 `D:/果铃工作台` 的 `main`。版本及范围见[当前状态](docs/development-plan/CURRENT_STATUS.md)：正式作者工程为 **Project V10**，运行发布投影为 **Published V3**，组件接口为 **Component API 5**。文档中旧 V9、Runtime API 2/3、Component API 4 记录属于历史或遗留维护材料，不能作为当前生产入口。
 
-- 全部 44 个 S/M 任务 `verified`;241 项验收用例 232 项 `passed`,9 项既定为 Owner 延期(不计入 2.0 完成门)。
-- M30-T08 Owner 终局签收已落盘,扩展 2.0 范围(M25–M30 / B19–B24 / 30 项新增验收)整体闭合。
-- 权威状态以 `task_registry.json` + `acceptance_cases.json` 同源 JSON 为准;自动化最多证 `engineering candidate`,`accepted` 由 Owner 实际验收。
+已验证范围、未完成事项和发行暂停状态以当前状态页及其原始证据为准；旧执行包的通过数量不代表新架构整体或教学质量已经签收。
 
-## 技术栈
+## 启动
 
-- Electron(主进程 / preload / renderer 编辑器 / Published V2 Player 宿主)
-- 持久化:Course Project **V9**(`schemaVersion: 9`,V8 `.h5lesson` 拒绝导入)
-- 发布物:**Published Course V2**
-- 扩展协议:**Runtime API 2/3**(自由运行时)、**Component API 4**(互动组件)
-- 统一自建执行器覆盖编辑、图像与受控构建/导入;API/Token Plan 为主、OAuth 可选;外部 Codex / Claude / OpenCode 经同一 MCP Server 使用工具
-- 主进程每文档 DocumentSession 为唯一正式 writer/History,renderer 是投影
+Windows 10/11 x64、Node.js；首次依赖准备用 `npm ci`。双击 `启动课件编辑器.cmd`，或运行 `npm start`；已有制品可用 `npm run start:quick`。开发使用 `npm run dev`。
 
-## 专用文档索引
-
-| 主题 | 入口 |
-|---|---|
-| 永久开发原则(可用性、简单实现、最小充分验证;模型/软件分工;一致性保护边界) | [AGENTS.md](AGENTS.md) "永久原则" 节 |
-| 架构合同(架构不变量与禁止动作) | [docs/development-plan/ARCHITECTURE_CONTRACT.md](docs/development-plan/ARCHITECTURE_CONTRACT.md) |
-| 工作协议(开发闭环、写锁、停止条件、完成定义) | [docs/development-plan/WORKING_PROTOCOL.md](docs/development-plan/WORKING_PROTOCOL.md) |
-| 2.0 执行包(任务/批次/验收主索引) | [GPTpro方案/guoling_2_0_execution_plan/00_README.md](GPTpro方案/guoling_2_0_execution_plan/00_README.md) |
-| 当前进度与路线图 | [ROADMAP.md](ROADMAP.md) |
-| 里程碑变更日志 | [CHANGELOG.md](CHANGELOG.md) |
-
-## 历史归档
-
-历史规划快照、被取代方案与各轮评估只保留在 [docs/archive/](docs/archive/),不再视为当前实施清单;当前决策以 [AGENTS.md](AGENTS.md)、归档 [果铃2.0收敛方案.md](docs/archive/2026-09-convergence/果铃2.0收敛方案.md) 与同源 JSON 登记为准。
-
-## 快速开始
-
-Windows 10/11 x64,Node.js LTS。双击根目录 `启动课件编辑器.cmd`,或:
+外部 MCP 可直接运行后台宿主，无需打开工作台主界面：
 
 ```powershell
-npm ci
-npm start
+npm run --silent mcp:server -- --workspace "<绝对目录>" --ready-json
 ```
 
-开发用 `npm run dev`;验证用 `npm run typecheck`、`npm test`、`npm run test:e2e`、`npm run verify`。
+连接使用返回的实际 endpoint、workspace 与认证信息，协议为 HTTP MCP。[后台连接样例](scripts/connect-mcp.ts)支持正式打开、应用和用户要求保存时的 `project.save`；客户端断开不关闭共享宿主。
+
+## 文档入口
+
+| 目的 | 入口 |
+|---|---|
+| 操作和创作 | [用户指南](docs/USER_GUIDE.md) |
+| 开发定位、当前剩余与验证 | [开发入口](docs/development-plan/README.md)、[当前状态](docs/development-plan/CURRENT_STATUS.md) |
+| 架构与执行规则 | [架构合同](docs/development-plan/ARCHITECTURE_CONTRACT.md)、[工作协议](docs/development-plan/WORKING_PROTOCOL.md)、[AGENTS.md](AGENTS.md) |
+| 工程、组件和输出格式 | [文档导航](docs/README.md)、[组件指南](docs/COMPONENT_AUTHORING.md)、[输出指南](docs/PUBLISHED_LESSON_V1.md) |
+| 阶段变化 | [路线图](ROADMAP.md)、[变更记录](CHANGELOG.md) |
+| 历史原文与证据 | [归档索引](docs/archive/README.md) |
+
+开发验证按变更选择最小有效检查；`typecheck`、测试和发行脚本的当前限制见状态页，不以全量命令代替具体行为证据。

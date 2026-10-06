@@ -5,7 +5,7 @@
 - Optional: 否
 - Write locks: `app-save-recovery`, `store-slide`, `authoring-interaction`, `published-slide`, `export-pptx`
 
-日期：2026-09-18 状态勘误。**已支持媒体/简单效果的分项证据有效，见[共用方案第 4 节](../../R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md#4-剩余范围与滚动批次)；禁止从零重做，不扩复杂时间线。** 本轮未触及也须在 060 核对其有效性。实施次序见[主方案](../../R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)批次 E。
+日期：2026-09-18 状态勘误。**已支持媒体/简单效果的分项证据有效，见[共用方案第 4 节](../../../archive/2026-09-development/plans/R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md#4-剩余范围与滚动批次)；禁止从零重做，不扩复杂时间线。** 本轮未触及也须在 060 核对其有效性。实施次序见[主方案](../../../archive/2026-09-development/plans/R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)批次 E。
 
 ## 结果与现状
 

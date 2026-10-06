@@ -13,7 +13,7 @@
 
 ## 开始前与阅读入口
 
-核对[产品方案第6/8节](../../AGENT_AUTHORING_LONG_TERM_PLAN.md)、[开发计划](../../AI_ASSISTANT_DELIVERY_PLAN.md)、[架构合同](../../ARCHITECTURE_CONTRACT.md)、[工作协议](../../WORKING_PROTOCOL.md)与[共同实施合同](../1.8/IMPLEMENTATION_CONTRACT.md)。
+核对[产品方案第6/8节](../../../archive/2026-09-development/plans/AGENT_AUTHORING_LONG_TERM_PLAN.md)、[开发计划](../../AI_ASSISTANT_DELIVERY_PLAN.md)、[架构合同](../../ARCHITECTURE_CONTRACT.md)、[工作协议](../../WORKING_PROTOCOL.md)与[共同实施合同](../1.8/IMPLEMENTATION_CONTRACT.md)。
 
 - [materialContract.ts](../../../../src/shared/materialContract.ts)、[materialRepository.ts](../../../../src/main/materialRepository.ts)、[materialService.ts](../../../../src/main/materialService.ts)：原件/提取状态、片段读取和缓存删除。
 - [MaterialLibraryDialog.tsx](../../../../src/renderer/ui/MaterialLibraryDialog.tsx)、[CourseChatPanel.tsx](../../../../src/renderer/ui/chat/CourseChatPanel.tsx)：上传、来源、取消默认引用和错误恢复。

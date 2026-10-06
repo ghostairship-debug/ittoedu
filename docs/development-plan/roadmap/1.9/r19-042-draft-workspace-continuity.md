@@ -6,7 +6,7 @@
 - Write locks: `contracts-schema`, `ai-session`, `app-save-recovery`, `chat-ui`, `main-preload`
 - Gaps: G09
 
-日期：2026-09-18。本文是目标规格，当前实施次序、事实和验收统一见[完整实施方案](../../R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)；本轮仅文档重建。
+日期：2026-09-18。本文是目标规格，当前实施次序、事实和验收统一见[完整实施方案](../../../archive/2026-09-development/plans/R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)；本轮仅文档重建。
 
 ## 目标与现状
 工作空间/项目目录独立承载会话，文件打开才形成当前编辑上下文；首次保存不断对话，Save As 隔离工程执行身份。无需 lesson.json、固定四稿或 .h5lesson 才开始。对应 F01，V01/V02/V04。

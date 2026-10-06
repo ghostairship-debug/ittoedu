@@ -5,19 +5,19 @@
 - Optional: 否
 - Write locks: `main-preload`, `contracts-schema`, `generated-index`, `workspace-shell`
 
-日期：2026-09-18。当前实施见[主方案 F04/F07、V08](../../R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)。已有效格式证据复用，重点补路径/@/粘贴入口和目录归属；本轮不执行测试。
+日期：2026-09-18。当前实施见[主方案 F04/F07、V08](../../../archive/2026-09-development/plans/R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)。已有效格式证据复用，重点补路径/@/粘贴入口和目录归属；本轮不执行测试。
 
 ## 结果与现状
 
-材料通过目录已有文件、路径、@、附件或粘贴进入任务，无强制导入/采用步骤。按任务需要读取正文、必要图示和出处，整理成果需要独立交付时写真实目录，再按页/片段/表格/图片读取；已独立整理材料不依赖共享原件继续存在。区分已引用、实际读取、已用于创作。归属遵循[目录与文件合同](../../R19_LESSON_DOCUMENT_WORKSPACE_CONTRACT.md)，消费042目录作用域与真实文件引用，不要求lesson标识，不另建材料库或旧缓存迁移。
+材料通过目录已有文件、路径、@、附件或粘贴进入任务，无强制导入/采用步骤。按任务需要读取正文、必要图示和出处，整理成果需要独立交付时写真实目录，再按页/片段/表格/图片读取；已独立整理材料不依赖共享原件继续存在。区分已引用、实际读取、已用于创作。归属遵循[目录与文件合同](../../../archive/2026-09-development/plans/R19_LESSON_DOCUMENT_WORKSPACE_CONTRACT.md)，消费042目录作用域与真实文件引用，不要求lesson标识，不另建材料库或旧缓存迁移。
 
 “已读”按本次教学范围判断：原件有效、整体结构可取得，且该范围需要的内容和图像已有实际读取结果。无关附录未读不阻塞当前创作；影响教学正确性的缺页/图示仍需补齐或说明缺口。保留原件/提取/片段的既有状态与版本证据，不新增“全材料理解”状态，也不把范围内已读推断为整份材料全部理解。
 
-PDF、DOCX、PPTX及文本已有分项实现与证据，见[共用编辑方案历史证据](../../R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md#4-剩余范围与滚动批次)。旧“仅文本/2MB”的入口描述不能代表当前全部能力；开工核对实际 lessonMaterialDesktopService/lessonMaterials 及本次入口，复用未受影响格式，不重建提取器。三格式原件各自读取和真实创作消费仍为必选。2.0/022 继续完善其他承诺格式与生产数据控制，不能承接本节点尚未完成的 PDF/DOCX/PPTX 基本支持，不建设向量平台。
+PDF、DOCX、PPTX及文本已有分项实现与证据，见[共用编辑方案历史证据](../../../archive/2026-09-development/plans/R19_SHARED_DOCUMENT_EDITOR_IMPLEMENTATION_PLAN.md#4-剩余范围与滚动批次)。旧“仅文本/2MB”的入口描述不能代表当前全部能力；开工核对实际 lessonMaterialDesktopService/lessonMaterials 及本次入口，复用未受影响格式，不重建提取器。三格式原件各自读取和真实创作消费仍为必选。2.0/022 继续完善其他承诺格式与生产数据控制，不能承接本节点尚未完成的 PDF/DOCX/PPTX 基本支持，不建设向量平台。
 
 ## 开始前与阅读入口
 
-依据[产品方案第6节](../../AGENT_AUTHORING_LONG_TERM_PLAN.md)、[开发计划](../../AI_ASSISTANT_DELIVERY_PLAN.md)、[架构合同](../../ARCHITECTURE_CONTRACT.md)、[工作协议](../../WORKING_PROTOCOL.md)和[共同实施合同](../1.8/IMPLEMENTATION_CONTRACT.md)。r15-020的正式规格在[1.5索引](../1.5/README.md)，不是另一个不存在的独立文件。
+依据[产品方案第6节](../../../archive/2026-09-development/plans/AGENT_AUTHORING_LONG_TERM_PLAN.md)、[开发计划](../../AI_ASSISTANT_DELIVERY_PLAN.md)、[架构合同](../../ARCHITECTURE_CONTRACT.md)、[工作协议](../../WORKING_PROTOCOL.md)和[共同实施合同](../1.8/IMPLEMENTATION_CONTRACT.md)。r15-020的正式规格在[1.5索引](../1.5/README.md)，不是另一个不存在的独立文件。
 
 - [materialContract.ts](../../../../src/shared/materialContract.ts)：当前记录、请求、来源与容量限制。
 - [materialRepository.ts](../../../../src/main/materialRepository.ts)、[materialService.ts](../../../../src/main/materialService.ts)：持久材料、导入、搜索和读取。

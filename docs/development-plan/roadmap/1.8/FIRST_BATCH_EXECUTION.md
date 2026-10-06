@@ -1,12 +1,12 @@
 # 1.8当前执行包：准确编辑、短操作与可靠结束
 
-> 2026-09-10：[延迟修复与工程收尾](LATENCY_COMPLETION_PLAN.md)的路径、计时、实际互动核对及Windows会话持久化修复已集成；OpenCode 使用 OpenAI OAuth Luna 默认，受影响代表用例通过。Owner临时接入DeepSeek后Claude Code文字预览已补验通过；[原记录](../../reviews/2026-09-10-latency-completion.md)保留Sonnet 503及当时状态；[最终工程验收](../../reviews/2026-09-10-final-acceptance.md)已完成约定工程范围与失败修复，Owner S3仍未签署。下文A/B/C/D及原有限矩阵按有效范围复用，不作为整批重开指令。
+> 2026-09-10：[延迟修复与工程收尾](LATENCY_COMPLETION_PLAN.md)的路径、计时、实际互动核对及Windows会话持久化修复已集成；OpenCode 使用 OpenAI OAuth Luna 默认，受影响代表用例通过。Owner临时接入DeepSeek后Claude Code文字预览已补验通过；[原记录](../../../archive/2026-09-development/reviews/2026-09-10-latency-completion.md)保留Sonnet 503及当时状态；[最终工程验收](../../../archive/2026-09-development/reviews/2026-09-10-final-acceptance.md)已完成约定工程范围与失败修复，Owner S3仍未签署。下文A/B/C/D及原有限矩阵按有效范围复用，不作为整批重开指令。
 
-2026-09-09按[统一方案](../../../../AI编辑最短路径产品决策报告.md)与[开发计划](../../AI_ASSISTANT_DELIVERY_PLAN.md)更新并经用户授权实施。文件名沿用首批入口以保留引用；下文定义本批结果边界，实际完成范围与保留失败见[实施记录](../../reviews/2026-09-09-short-path-implementation.md)。089–104相关实现已集成，9月8日Claude身份、退出收口、配置链和Flow修复及有效证据按未变范围复用，不再全部重开；当前协调仍只看任务板。
+2026-09-09按[统一方案](../../../../AI编辑最短路径产品决策报告.md)与[开发计划](../../AI_ASSISTANT_DELIVERY_PLAN.md)更新并经用户授权实施。文件名沿用首批入口以保留引用；下文定义本批结果边界，实际完成范围与保留失败见[实施记录](../../../archive/2026-09-development/reviews/2026-09-09-short-path-implementation.md)。089–104相关实现已集成，9月8日Claude身份、退出收口、配置链和Flow修复及有效证据按未变范围复用，不再全部重开；当前协调仍只看任务板。
 
 ## 1. 当前起点
 
-先读总纲“当前开发路线”、任务板/工作协议、[共同实施合同](IMPLEMENTATION_CONTRACT.md)相关条目、本包和本次节点的直接源码/测试。[历史审查](../../reviews/1.8-first-batch-review.md)与[预检](../../reviews/1.8-first-batch-preflight.md)是证据来源，不覆盖当前源码事实。旧只读/白名单探针不证明完整原生能力，也不证明当前仍有相同限制。
+先读总纲“当前开发路线”、任务板/工作协议、[共同实施合同](IMPLEMENTATION_CONTRACT.md)相关条目、本包和本次节点的直接源码/测试。[历史审查](../../../archive/2026-09-development/reviews/1.8-first-batch-review.md)与[预检](../../../archive/2026-09-development/reviews/1.8-first-batch-preflight.md)是证据来源，不覆盖当前源码事实。旧只读/白名单探针不证明完整原生能力，也不证明当前仍有相同限制。
 
 | 已有基础 | 当前应补的结果 |
 | --- | --- |

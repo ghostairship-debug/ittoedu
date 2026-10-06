@@ -6,7 +6,7 @@
 
 ## Outcome / current evidence
 
-当前已有 Chart commands、数据编辑器及统一图表入口。[本地复审 F3–F5 / P2](../../reviews/1.2-local-review-2026-09-05.md) 确认完整圆/环退化、网格/轴/标签/左右图例未消费、柱图叠画折线/点及自定义轴范围溢出。L1 增量同步和 L2/L3 owner/state 分别由 `r12-008-native-authoring-transport`、`r12-020-chart-core` 先闭合；本节点按 [共享实施合同](IMPLEMENTATION_CONTRACT.md) §2.2/§2.3/§4/§7.4 修复真实 painter 与交付链，不重新整理已经统一的入口。
+当前已有 Chart commands、数据编辑器及统一图表入口。[本地复审 F3–F5 / P2](../../../archive/2026-09-development/reviews/1.2-local-review-2026-09-05.md) 确认完整圆/环退化、网格/轴/标签/左右图例未消费、柱图叠画折线/点及自定义轴范围溢出。L1 增量同步和 L2/L3 owner/state 分别由 `r12-008-native-authoring-transport`、`r12-020-chart-core` 先闭合；本节点按 [共享实施合同](IMPLEMENTATION_CONTRACT.md) §2.2/§2.3/§4/§7.4 修复真实 painter 与交付链，不重新整理已经统一的入口。
 
 ## Read first
 

@@ -1,10 +1,10 @@
 # 果铃统一组件架构与整体重构方案
 
 > 日期：2026-10-04  
-> 状态：当前目标总方案；开发入口已同步，执行级安排见[执行计划](EXECUTION_PLAN.md)。产品实施尚未因文档更新而启动，不代表新架构已通过验收。  
+> 状态：保留已批准的技术目标与职责设计；实施已进入 main，实际范围见[当前状态](../CURRENT_STATUS.md)。方案目标不自动表示完整软件已验收。
 > 范围：通用 Agent 工作台中的内容创作、深度编辑、互动运行、资产沉淀及课件三表面；Office 等文档保留自己的原格式文档模型。  
 > 决策依据：本会话 Owner 的最新决定。此前冻结、版本约束、实现路线和兼容要求可以被本方案替代；不为旧工程建设兼容分支。  
-> 本次交付：按 Owner 后续确认同步 AGENTS.md、开发入口、架构合同和必要协议文字，并细化执行计划；不修改产品代码、实际任务状态或用户作品，不构建发行包。  
+> 当时交付：2026-10-04 规划与入口同步。其后源码实施和 main 合入已有独立记录；不沿用“尚未启动”作为当前事实，发行仍暂停。
 > 修订来源：Antigravity、Grok、dsh、muse、Kimi、Claude、space bunny 的评审输入及之后的 Owner 讨论；意见处理见 §24.4。评审中的执行命令不构成独立授权。
 > 开发模型与调度：以[执行计划的模型表](EXECUTION_PLAN.md#model-routing)为唯一配置落点；启动使用[Luna 执行提示词](LUNA_EXECUTION_PROMPT.md)。主 Luna 只调度与转交，常规实现与集成用分级 Sol，固定 Astra xhigh 专家参与架构／高难问题，机械执行另交 Luna 子智能体。
 
@@ -1391,9 +1391,9 @@ N00a 用真实样本细化自有节点存储形状、最小语义操作字段和
 | [独立讨论方案：统一组件与自由画布编辑](../../../独立讨论方案-统一组件与自由画布编辑-2026-10-04.md) | 已有组件、数据、视图与浏览器排版思路；本方案进一步纳入功能组件和整体合同重写 |
 | [创作链路根因与修复方案](../../../output/courseware-ceiling/20261004-mars/03-创作链路根因与修复方案.md) | 已发现的机械阻塞、导入／测量／诊断问题；output 证据属于本机产物 |
 | [GrapesJS 原型证据](../../../output/architecture-spike/grapesjs-20261004/evidence.json) | 技术选型的有限实测，不是产品验收 |
-| [上一轮统一内容重构方案](../unified-content-architecture/REFACTOR_PLAN.md) | 旧 U/W 工作的范围与历史，不作为本轮兼容限制 |
-| [上一轮执行日志](../unified-content-architecture/EXECUTION_LOG.md) | 既有实施与评审记录，保留原证据边界 |
-| [创作流程重构接手记录](../creation-restructure/TAKEOVER_2026-10-04.md) | 已集成的阶段流程、导航与 MCP 事实 |
+| [上一轮统一内容重构方案](../../archive/2026-10-development/unified-content-architecture/REFACTOR_PLAN.md) | 旧 U/W 工作的范围与历史，不作为本轮兼容限制 |
+| [上一轮执行日志](../../archive/2026-10-development/unified-content-architecture/EXECUTION_LOG.md) | 既有实施与评审记录，保留原证据边界 |
+| [创作流程重构接手记录](../../archive/2026-10-development/creation-restructure/TAKEOVER_2026-10-04.md) | 已集成的阶段流程、导航与 MCP 事实 |
 | [架构合同](../ARCHITECTURE_CONTRACT.md) | 当前代码的旧合同；实施时相关域需按本方案整体替换 |
 | [工作协议](../WORKING_PROTOCOL.md) | 最小充分验证、真实结果和单一 owner 的执行约束 |
 | [任务板](../TASK_BOARD.md) | 实际协调状态；本文工作包不代表已创建或完成的任务 |

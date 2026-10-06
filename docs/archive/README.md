@@ -1,10 +1,17 @@
-# 历史资料
+# 历史文档与证据索引
 
-此目录保留已被当前路线或统一方案承接的设计、评估输入，不作为当前任务清单或验收结论。
+当前开发读[开发入口](../development-plan/README.md)和[当前状态](../development-plan/CURRENT_STATUS.md)。这里保存原日期、范围、实施结果与审计意见，不恢复旧任务、不新增当前授权，也不把历史完成数字当 V10 整体签收。
 
-- `2026-09-planning/`：9 月 2 日综合核验、9 月 4 日路线与 1.2 设计，以及 9 月 9 日八份最短路径独立评估。
-- 当前权威入口：[开发总纲](../../COURSEWARE_DEVELOPMENT_PLAN.md)、[架构合同](../development-plan/ARCHITECTURE_CONTRACT.md)、[任务板](../development-plan/TASK_BOARD.md)。
-- 最短路径历史综合裁决见[统一方案](../../AI编辑最短路径产品决策报告.md)；9 月 10 日验收只代表当日范围，不代表当前候选状态。
-- [2026-09-17 总纲历史快照](2026-09-planning/2026-09-17-development-route-history.md)：从当前总纲移出的多轮过程，保留来源链接；当前开发请从总纲第 5.1 节及前端专项进入。
+| 资料 | 位置与用途 |
+|---|---|
+| 旧当前入口的完整正文 | [2026-10 文档基线](2026-10-document-baseline/README.md)，含旧总纲/README/路线图/用户与协议指南 |
+| 1.x/1.9 方案和原始实施评审 | [2026-09 开发历史](2026-09-development/README.md) |
+| 创作与统一内容重构、评审、旧协调卡和规划外评 | [2026-10 开发历史](2026-10-development/README.md) |
+| 2026-10-06 三路创作/原生崩溃/Antigravity 审计及统一执行方案 | [作者链路审计](2026-10-authoring-audit/README.md)；已执行结果从当前状态进入 |
+| V9 格式与兼容原文 | [V9 历史合同](v9-contracts/README.md)，不代表正式 Host 仍接受它们 |
+| 2.0 历史规划与签收范围 | [收敛方案](2026-09-convergence/README.md)、[GPTpro 执行包](../../GPTpro方案/guoling_2_0_execution_plan/00_README.md) |
+| 更早被替代方案 | `2026-09-*-superseded`、`2026-09-obsolete-features`、`long-term-research` 等目录，按原日期读取 |
 
-2026-09-11 清理时，第三方调研下载目录 `.verification/`、`_verify/` 和旧源码 ZIP 移至本地忽略目录 `output/repository-hygiene-20260911/`，保留追溯材料而不纳入源码仓库。当前验收引用的 `output/` 证据不移动。本机 Skill 定位文件 `editor-root.local.json` 保留本地并忽略。
+本次归档移动原文并调整实际链接，未删除原结果或替换失败记录。原文中的绝对路径、旧 PID、原模型目录和当日环境只属历史观测；若旧源码位置已退出，应以原 commit 或归档快照恢复查阅，不从它们推断当前故障。
+
+完整本地原始材料保存在 `D:/果铃开发归档/20261006-main-consolidation`，工作树保全映射为 `preservation.json`。桌面“审计报告”的 49 个文件完整副本在 `desktop-audits`；仓库保留关键审计正文，辅助 JSON、脚本、图片和运行期 Skill 镜像从该完整副本读取。

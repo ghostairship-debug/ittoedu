@@ -6,7 +6,7 @@
 - Write locks: `chat-ui`, `ai-session`, `workspace-shell`, `props-shared`
 - Gaps: G05, G09
 
-日期：2026-09-18。本文是目标规格，当前实施次序、事实和验收统一见[完整实施方案](../../R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)；本轮仅文档重建。
+日期：2026-09-18。本文是目标规格，当前实施次序、事实和验收统一见[完整实施方案](../../../archive/2026-09-development/plans/R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)；本轮仅文档重建。
 
 ## 目标与现状
 接入真实工作空间、可选文件夹项目、项目及工作空间会话、内容标签和自由停靠。已完成的树导航/模型控制行保留；修复单实例、工具密度、复制、目标提示和项目会话管理。对应 F02/F03/F05/F07，V03–V06/V10。

@@ -5,7 +5,7 @@
 - Optional: 否
 - Write locks: `chat-ui`, `ai-session`
 
-日期：2026-09-18。本文是目标规格，当前实施次序、事实和验收统一见[完整实施方案](../../R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)；本轮仅文档重建。
+日期：2026-09-18。本文是目标规格，当前实施次序、事实和验收统一见[完整实施方案](../../../archive/2026-09-development/plans/R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)；本轮仅文档重建。
 
 ## 目标与现状
 目录是会话归属，文件是消息级编辑目标；无课件也能恢复指定 conversationId。现有持久化、原生记录和目录分流可复用；全局 ID 命中未校验 owner、指定历史难达与轮询全库扫描仍需关闭。落实主方案 F01/F03，对应 V01/V02/V11。

@@ -171,7 +171,7 @@ B 更彻底，A 改动更小；选择前应各做一次真实任务对比可读�
 [^L3]: 当时本地协议快照 `output/r18-codex-protocol/codex_app_server_protocol.v2.schemas.json`（未纳入版本控制，当前 checkout 未保留）：`ThreadStartParams` 含 `model, config, developerInstructions, baseInstructions, serviceTier`；`TurnStartParams` 含 `outputSchema, serviceTier, serviceTierForTurn`。这是历史快照结论，不代表当前协议复核。
 [^L4]: [`src/renderer/authoring/generation/generationCapabilities.ts`](../../../src/renderer/authoring/generation/generationCapabilities.ts)（5,200 字节预算与遍历顺序）；[`src/shared/courseAgentCapabilities.ts:159`](../../../src/shared/courseAgentCapabilities.ts)（`readCourseAgentCapability`，本文用它计算卡片字节数）；[`src/shared/generated/courseAgentCapabilities.json`](../../../src/shared/generated/courseAgentCapabilities.json)（55 条目）。
 [^L5]: [`scripts/build-architecture-baseline-fixtures.ts:107-117`](../../../scripts/build-architecture-baseline-fixtures.ts)（`PNG_BYTES`）；[`src/renderer/project/imageTransform.ts`](../../../src/renderer/project/imageTransform.ts)（关键块 CRC 校验）。
-[^L6]: [`docs/development-plan/AI_ASSISTANT_VSCODE_BENCHMARK_ASSESSMENT.md:106-118`](../../development-plan/AI_ASSISTANT_VSCODE_BENCHMARK_ASSESSMENT.md)（W01–W11 工作包）；[`docs/development-plan/reviews/1.8-ai-assistant-gap-register.md:23`](../../development-plan/reviews/1.8-ai-assistant-gap-register.md)（G07）。
+[^L6]: [`docs/development-plan/AI_ASSISTANT_VSCODE_BENCHMARK_ASSESSMENT.md:106-118`](../../development-plan/AI_ASSISTANT_VSCODE_BENCHMARK_ASSESSMENT.md)（W01–W11 工作包）；[`docs/development-plan/reviews/1.8-ai-assistant-gap-register.md:23`](../2026-09-development/reviews/1.8-ai-assistant-gap-register.md)（G07）。
 
 ### 外部来源（访问日期 2026-09-09）
 

@@ -9,10 +9,10 @@
 > **12.11：暂停新的功能补丁。** 方法：[S0_STABILITY_EXPLORATION_PLAN.md](S0_STABILITY_EXPLORATION_PLAN.md)。
 > 12.10：流式讲义「先能读、再近 Word」走车道 G（G0–G3）已合入 `main`。计划见 `G0_FLOW_NEAR_WORD_PLAN.md`（历史链接目标未随本归档保留）。不要重做 F1–F3 / G0–G3 / P1–P8 / Q1–Q8。
 > 12.9：V9 作者工程 Schema 软冻结（additive 可选字段仍允许；不等于 Editor 1.0 已发布）。流式讲义作者界面走车道 F（F1–F3）。计划见 `F0_FLOW_AUTHORING_PLAN.md`（历史链接目标未随本归档保留）。不要重做 P1–P8 或 Q1–Q8。
-> 12.8：编排/构建 Skill 与无限画布运行态自由逛。不得宣称 Editor 1.0 已发布。  
+> 12.8：编排/构建 Skill 与无限画布运行态自由逛。不得宣称 Editor 1.0 已发布。\
 > 12.7：教师回归缺陷走车道 Q（Q1–Q8 已合入 `main`）。定位见 `Q0_DIAGNOSIS.md`（历史链接目标未随本归档保留），切分见 `Q0_FIX_PLAN.md`（历史链接目标未随本归档保留）。不要重做 P1–P8 或 Q1–Q8。
-> 12.4：剩余任务卡写成逐步算法 + 文件防火墙，供高性价比第三方工人执行；父代理只合入与复检。  
-> 12.3：P8 Flow/Spatial 互动组件；P1/P3/P4 已合入后可领取 P8。  
+> 12.4：剩余任务卡写成逐步算法 + 文件防火墙，供高性价比第三方工人执行；父代理只合入与复检。\
+> 12.3：P8 Flow/Spatial 互动组件；P1/P3/P4 已合入后可领取 P8。\
 > 12.2：车道 P（P1–P7）。合同冻结仍是 T0–T6。
 
 本包取代已删除的 `docs/tasks/v8-to-v9-rebuild/**`。不要领取 R0–R8，不要从 `f272756` 再开 worktree。
@@ -155,7 +155,7 @@ T3 与 T5 均已合入。不要再改 `editorStore` 后端命名，也不要再�
 
 **红项优先。** T6 工程门禁已合入 `main`。绿过的 `check:contracts` 不要重跑（除非本卡改了 `scripts/generate-contracts.ts` 或 `artifacts/contracts/**`）。不要每次修改后跑 T6 五条命令。
 
-禁止在中间任务运行：`npm test`、`npm run test:e2e`、`npm run build:desktop`、`npm run verify`、`npm run verify:full`。  
+禁止在中间任务运行：`npm test`、`npm run test:e2e`、`npm run build:desktop`、`npm run verify`、`npm run verify:full`。\
 本轮例外：只有 `T1_A_MOVE.md`（历史链接目标未随本归档保留）、`T6_TC_TESTS.md`（历史链接目标未随本归档保留） 与 `G2A_ADDITIVE_SCHEMA.md`（历史链接目标未随本归档保留） 允许 `npm run typecheck`。`T1_C_AUDIT.md`（历史链接目标未随本归档保留） 不要跑 typecheck。
 
 **全量验证只在 T6，且整轮五条只在红项清完后跑一次。**

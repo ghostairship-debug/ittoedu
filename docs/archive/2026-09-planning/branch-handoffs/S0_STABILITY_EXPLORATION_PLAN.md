@@ -80,7 +80,7 @@ src/main/index.ts
 
 ### 2.2 运行时有两套（有时三套）世界
 
-合同边界见 [EDITOR_1_0_ARCHITECTURE_BOUNDARY.md](../../../contracts/EDITOR_1_0_ARCHITECTURE_BOUNDARY.md)，这是对的，必须保持：
+合同边界见 [EDITOR_1_0_ARCHITECTURE_BOUNDARY.md](../../v9-contracts/EDITOR_1_0_ARCHITECTURE_BOUNDARY.md)，这是对的，必须保持：
 
 - 编辑：Slide → Phaser；Flow / Spatial → 各自 DOM 容器。
 - 试运行 / 整课预览：CoursePlayer + `SlidePublishedAdapter` / `FlowSurfaceHost` / `SpatialSurfaceHost`。

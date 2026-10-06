@@ -5,13 +5,13 @@
 - Optional: 否
 - Write locks: `none`
 
-日期：2026-09-18。本文是目标规格，当前实施次序、事实和验收统一见[完整实施方案](../../R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)；本轮仅文档重建。
+日期：2026-09-18。本文是目标规格，当前实施次序、事实和验收统一见[完整实施方案](../../../archive/2026-09-development/plans/R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)；本轮仅文档重建。
 
 ## 目标与现状
 050完整教师链及051媒体线通过，040–049全部必选结果闭合，形成可审阅的1.9 engineering candidate。当前未完成；本次计划重建不创建候选标签、不发布、不签accepted。
 
 ## 执行入口与职责
-以[主方案](../../R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)、[1.9索引](README.md)、[工作协议](../../WORKING_PROTOCOL.md)与050/051有效证据为准。只汇合候选证据，产品缺陷回其Owner取得相应写域修复；不新建任务/记录/验证平台。
+以[主方案](../../../archive/2026-09-development/plans/R19_FRONTEND_SPECIAL_IMPLEMENTATION_PLAN.md)、[1.9索引](README.md)、[工作协议](../../WORKING_PROTOCOL.md)与050/051有效证据为准。只汇合候选证据，产品缺陷回其Owner取得相应写域修复；不新建任务/记录/验证平台。
 
 ## 收口步骤
 1. 对照 V01–V15 和13个路线节点核对完成、已验、未验；复用未受影响的正文/Flow/Word、材料、PPTX及1.8证据，源码和实际测试候选必须一致。

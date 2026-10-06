@@ -1,8 +1,8 @@
 # 1.8 延迟修复与工程收尾执行方案
 
-2026-09-10，Owner 要求先更新方案再实施。本文件接续 9 月 9 日已集成范围，不重开已完成的短候选、finish、能力缓存、图片事务及组件 patch；当前协调仍只看任务板。上一批实际通过与保留失败见[实施记录](../../reviews/2026-09-09-short-path-implementation.md)。
+2026-09-10，Owner 要求先更新方案再实施。本文件接续 9 月 9 日已集成范围，不重开已完成的短候选、finish、能力缓存、图片事务及组件 patch；当前协调仍只看任务板。上一批实际通过与保留失败见[实施记录](../../../archive/2026-09-development/reviews/2026-09-09-short-path-implementation.md)。
 
-本轮执行结果：[9 月 10 日实施记录](../../reviews/2026-09-10-latency-completion.md)。A–D 已集成并经聚焦逻辑与真实宿主验证；E 的文字、图片、排版、互动及 OpenCode T11 代表用例通过。F 已汇合有效旧证据并准备完整 PPTX/课件复核入口。Owner 随后临时将 Claude Code 接入 DeepSeek，本次 `deepseek-flash[1M]` / max 的真实预览、应用和恢复用例通过，103 本次待补代表项已补齐；060 同候选现场、版本检查与 Owner S3 仍未完成。新旧配置与全部失败分别保留，不宣称整体提速。
+本轮执行结果：[9 月 10 日实施记录](../../../archive/2026-09-development/reviews/2026-09-10-latency-completion.md)。A–D 已集成并经聚焦逻辑与真实宿主验证；E 的文字、图片、排版、互动及 OpenCode T11 代表用例通过。F 已汇合有效旧证据并准备完整 PPTX/课件复核入口。Owner 随后临时将 Claude Code 接入 DeepSeek，本次 `deepseek-flash[1M]` / max 的真实预览、应用和恢复用例通过，103 本次待补代表项已补齐；060 同候选现场、版本检查与 Owner S3 仍未完成。新旧配置与全部失败分别保留，不宣称整体提速。
 
 ## 1. 本次决定与证据
 

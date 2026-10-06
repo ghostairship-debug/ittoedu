@@ -1,3 +1,5 @@
+> 2026-10-06 阅读定位：本文保留原日期的设计、工作包或交接提示；旧目录/PID/卡片不是当前状态，不自动恢复派发。main 实施范围、已验证证据和未完成事项见[CURRENT_STATUS](../CURRENT_STATUS.md)。
+
 # Luna 机械执行入口
 
 > 2026-10-05。文件名保留历史链接；当前开发方案由 Root/Astra 撰写与决定，Luna 不担任方案作者。唯一方案为[稳定基线恢复与 V10 渐进替换完整并发计划](BASELINE_FIRST_V10_EXECUTION_PLAN.md)。旧“主 Luna 自动实施”正文已被本次 Owner 指令取代，可从 Git 历史追溯。

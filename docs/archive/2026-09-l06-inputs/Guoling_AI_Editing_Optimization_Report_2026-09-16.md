@@ -1,8 +1,8 @@
 # 果铃现有能力与 AI 编辑优化报告
 
-**审查日期：2026 年 9 月 16 日**  
-**仓库：`ghostairship-debug/ittoedu`**  
-**固定基线：`main@c42cef38f5b7a0d0093550b9deb7b9809053ef50`**  
+**审查日期：2026 年 9 月 16 日**\
+**仓库：`ghostairship-debug/ittoedu`**\
+**固定基线：`main@c42cef38f5b7a0d0093550b9deb7b9809053ef50`**\
 **范围：增强现有原生课件、Component、Runtime 的创作与编辑；暂不涉及外部 HTML 编辑。**
 
 ---

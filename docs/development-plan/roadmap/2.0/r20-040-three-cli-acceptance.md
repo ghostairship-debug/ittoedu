@@ -13,7 +13,7 @@
 
 ## 开始前与阅读入口
 
-按[产品方案第7–8节](../../AGENT_AUTHORING_LONG_TERM_PLAN.md)、[开发计划第6节](../../AI_ASSISTANT_DELIVERY_PLAN.md)、[T01–T12对标](../../AI_ASSISTANT_VSCODE_BENCHMARK_ASSESSMENT.md)、[工作协议](../../WORKING_PROTOCOL.md)与[共同实施合同](../1.8/IMPLEMENTATION_CONTRACT.md)核对同一候选、真实支持和剩余项。
+按[产品方案第7–8节](../../../archive/2026-09-development/plans/AGENT_AUTHORING_LONG_TERM_PLAN.md)、[开发计划第6节](../../AI_ASSISTANT_DELIVERY_PLAN.md)、[T01–T12对标](../../AI_ASSISTANT_VSCODE_BENCHMARK_ASSESSMENT.md)、[工作协议](../../WORKING_PROTOCOL.md)与[共同实施合同](../1.8/IMPLEMENTATION_CONTRACT.md)核对同一候选、真实支持和剩余项。
 
 - [localAgentTaskContract.ts](../../../../src/shared/localAgentTaskContract.ts)、[harness.ts](../../../../src/main/localAgent/harness.ts)：任务、意图、原生映射、停止和实际提交证据。
 - [CourseChatPanel.tsx](../../../../src/renderer/ui/chat/CourseChatPanel.tsx)、[prepareGenerationCandidate.ts](../../../../src/renderer/authoring/generation/prepareGenerationCandidate.ts)：软件入口与唯一工程结果。

@@ -10,7 +10,7 @@
 
 UI可取得三CLI真实模型、推理强度、有效配置与会话能力，用户选择可被原生确认并实际进入请求；不再硬编码low或Big Pickle。同一账号、版本、工作上下文和授权下保留原生配置，不因进入GUI裁剪原生工具或默默提高权限。
 
-2026-09-08[首批审查](../../reviews/1.8-first-batch-review.md)中的偏好未接入请求、原生配置及失败收口修复已进入后续集成；其仍有效的接线和反例证据继续复用，不再作为整节点重启的实施起点。当前Harness已在open后configure，Codex也已向turn/start传入所选model/effort。
+2026-09-08[首批审查](../../../archive/2026-09-development/reviews/1.8-first-batch-review.md)中的偏好未接入请求、原生配置及失败收口修复已进入后续集成；其仍有效的接线和反例证据继续复用，不再作为整节点重启的实施起点。当前Harness已在open后configure，Codex也已向turn/start传入所选model/effort。
 
 本轮剩余修复以[AI编辑最短路径统一方案](../../../../AI编辑最短路径产品决策报告.md)第6节为准：Codex仍先按目录默认模型创建thread，再应用所选模型；配置目录的重复查询、失效和错误状态须按真实链路完善。OpenCode当前UI无法选择模型的完整根因尚未复现，不能将models.dev刷新日志当作已确认根因。初始化接线改进不表示已证明提速幅度，配置对象或目录发现成功也不代替请求生效。具体实施组织见[执行包](FIRST_BATCH_EXECUTION.md)。
 

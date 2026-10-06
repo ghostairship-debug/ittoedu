@@ -6,6 +6,8 @@ Future changes to this file require Owner confirmation.
 
 2026-10-04 Owner 已确认本次开发入口与文档同步。此确认覆盖本轮冲突条款的更新，不取消未来修改本文件仍需 Owner 确认的规则。
 
+2026-10-06 Owner 本次“历史文档、目录卫生、归档整合和更新”指令覆盖当前实现事实及入口引用同步；不改变既有权限、模型费用或发布授权。
+
 ## 永久原则
 
 ### 长期开发原则：可用性、简单实现与最小充分验证（Owner 2026-09-30）
@@ -34,7 +36,7 @@ Future changes to this file require Owner confirmation.
 - 真实模型测试以 API 为主：开发主路由为 TeamoRouter（provider `teamorouter`，`https://api.teamorouter.com/v1`）的 DeepSeek，第二路由为 DeepSeek 官方 API；均已获 Owner 授权用于 S05/S06/S11/S13/S14 及 REL 中适用的 DeepSeek 文本/视觉、规划与工具调用，可按验证需要自主运行和必要重跑。记录实际路由、模型 ID、账号计费类型与能力；模型 ID 在探针时按供应商实时目录钉定，首选 V4.1 Flash，不把 dsh 模型列表当供应商权威目录，不混写 `deepseek-flash` 与 `deepseek-v4-flash`。开发测试只在运行时读取 `TEAMOROUTER_API_KEY` / `DEEPSEEK_API_KEY`；产品凭据使用自己的安全存储，内部测试模型与产品默认设置分离。
 - 2026-09-23 Owner 决定首轮上线 GPT OAuth，使用当前账号通过正式登录流程接入，前期由该连接生图；所需登录与 OAuth 图像验证已授权，无需再次索要账号选择。独立图片 API 的供应商与账号待定，不作为 B05 前置；GPT OAuth 登录、实际图像模型/执行者/计费及生成编辑能力仍须在 S05/S14/P5 实测，不能将账号授权记为接通或通过。DeepSeek 授权不延伸为任意图像 API 授权，不静默切换收费路径。
 - 既有 CLI 授权只用于 S12-T01、M12-T05 等确需外部客户端的用例：Codex / OpenCode 只用 Luna，Claude 只用已授权 DeepSeek；按各 CLI 当时实际配置记录模型和路由，不推断 Luna 的历史路由。运行前核对脚本、所选模型及实际路由；不得因排障改用未授权模型，exclude/skip/零匹配不算通过。已授权路径可按相关变化或新假设自主验证、必要重跑，不因付费重复索要许可；无法确认路由或能力时先做不收费检查并记录缺口，不无限重复同因付费请求。
-- 当前目标为[统一组件架构与整体重构方案](docs/development-plan/component-platform-refactor/ARCHITECTURE_AND_REFACTOR_PLAN.md)，实施依赖、写域与最小证据见[执行计划](docs/development-plan/component-platform-refactor/EXECUTION_PLAN.md)。本轮取代旧 V9 冻结、旧载体与冲突的准入／排期要求；[2.0 收敛方案](docs/archive/2026-09-convergence/果铃2.0收敛方案.md)及[GPTpro 执行包](GPTpro方案/guoling_2_0_execution_plan/00_README.md)保留为历史与可复用实现依据，不自动派发旧任务。API/Token Plan 为主、OAuth 可选、统一执行器和外部 MCP 的有效产品方向继续保留。
+- 当前实现、证据与剩余范围先读[当前状态](docs/development-plan/CURRENT_STATUS.md)；技术目标为[统一组件架构与整体重构方案](docs/development-plan/component-platform-refactor/ARCHITECTURE_AND_REFACTOR_PLAN.md)，原工作包设计见[执行计划](docs/development-plan/component-platform-refactor/EXECUTION_PLAN.md)，不把它当实际协调状态。旧 V9 冻结、旧载体与冲突的准入／排期要求不适用；[2.0 收敛方案](docs/archive/2026-09-convergence/果铃2.0收敛方案.md)及[GPTpro 执行包](GPTpro方案/guoling_2_0_execution_plan/00_README.md)为历史与可复用依据，不自动派发旧任务。API/Token Plan 为主、OAuth 可选、统一执行器和外部 MCP 的有效产品方向继续保留。
 - 开始产品代码实现、缺陷修复或代码评审前，读[开发入口](docs/development-plan/README.md)、本次涉及的方案／执行条目、[任务板](docs/development-plan/TASK_BOARD.md)及直接源码、合同和目标测试；不默认通读所有历史任务。计划工作包不是协调状态，实际委派才创建任务卡；不得把 planned 或已派发写成已运行、已合入。
 - 涉及 Schema/持久化、Surface、global/surface 图层、教师控制器、Published/Player、Runtime/Component、网络、导出或稳定身份时，行动前必须补读 [架构合同](docs/development-plan/ARCHITECTURE_CONTRACT.md) 的相关条目。
 - 默认开发闭环、任务协调、写锁、验证停止条件与完成定义遵循[工作协议](docs/development-plan/WORKING_PROTOCOL.md)。在可用执行资源内尽量铺满已就绪、非重叠写域；纯算法与资源叶子不等待全部合同或 GJS 选型。共享文件同一时间只有一个 writer，主执行者按实际接口分批接线；不复制合同、另建调度平台或为每批达到可发布质量而串行等待。最小充分检查通过即停止，必要构建按变化准备一次，不隐式触发 CLI／付费矩阵，零匹配不算通过。
@@ -42,7 +44,7 @@ Future changes to this file require Owner confirmation.
 
 ## 自动加载硬边界
 
-- **当前实现与目标分开**：同步入口时源码仍使用 Course Project V9、Published V2、Runtime API 2/3 与 Component API 4；本轮目标为独立 Project V10、Published V3 与 Component API 5。旧禁止 V10／V3、载体冻结与仅 additive 的限制不适用于本轮。新格式不兼容旧工程、不建转换器；保留用户原件。格式、writer、保存与实际 consumer 在接线时对应切换，不把文档目标称为已实现。
+- **当前实现与目标分开**：main 正式工程使用 Project V10、Published V3、Component API 5，Main DocumentHost 已注册 CourseV10 driver。旧格式类型、测试和原文仍有遗留，但不是当前生产入口或兼容承诺；已验证范围与未完成事项以当前状态及原始证据为准，不声称完整软件、教学质量或所有类型检查已通过。新格式不兼容旧工程、不建转换器，保留用户原件。
 - **正式内容独立**：果铃 Schema 是唯一作者语义，GrapesJS／ProseMirror 等只是可替换编辑投影。Slide／Spatial 保存自由 frame、编组与顺序，Flow 延续阅读顺序；组件内部自有排版。HTML/CSS 仅在新建或明确重做的自由范围测量装配，局部编辑不重排整页、不覆盖人工位置。
 - **组件统一而非算法重造**：内容、原生专业节点、行为与动效共用定义／实例／运行合同；现有专业算法、DocumentSession、资源、保存和文件服务优先复用。Phaser 退出主编辑几何，仅作局部游戏／模拟引擎。新类型不依赖旧载体类型，旧载体不新增 consumer；同一文档不同时启用两套 writer／几何 owner。
 - **执行与正式写入**：内置 Agent 保持通用，外部客户端经同源 Gateway/MCP 使用能力；每文档 DocumentSession 持有正式 History。权限四档、任务目标／授权冻结、文档身份与路径／ViewState 分离继续有效；删除会话不删除用户文件。普通修改进入工程及恢复稿，保存按用户要求落盘。
@@ -64,7 +66,7 @@ Future changes to this file require Owner confirmation.
 ## 当前阶段授权
 
 - Owner 已批准统一组件整体重构的方向、不保留旧兼容，并授权技术路线由主执行者决定。Owner 在 2026-10-04 明确选择继续执行 [LUNA_EXECUTION_PROMPT.md](docs/development-plan/component-platform-refactor/LUNA_EXECUTION_PROMPT.md) 中的全部目标，因此仅为该目标授权按执行计划恢复产品实现，覆盖之前的“本次不启动产品实现”限制；这次选择仍不授权真实模型调用，发布继续暂停。文档同步授权、已批准架构、隔离 worktree/任务卡与实际状态规则继续有效；不把计划并发数写成已派发智能体数量。
-- 进入实施时按[执行计划](docs/development-plan/component-platform-refactor/EXECUTION_PLAN.md)滚动释放已就绪任务；无需重新审批已经明确的新格式、可替换编辑器及职责边界。实际任务状态只看任务卡／任务板，旧 active 卡需核对实际锁与未完成范围，不能直接抹除或冒称完成。
+- main 已合入基线恢复与本批修复；后续按用户目标、当前状态及直接源码释放具体任务，无需重新审批已明确的新格式、可替换编辑器及职责边界。旧卡已无产品写锁并转存历史，未完成范围保留在当前状态，不冒称完成；实际新派发仍按工作协议建卡并生成任务板。
 - 普通无新增持续费用、可分发的开源技术选择可自主决定。新凭据、采购、管理员安装、未授权付费路径或新的产品能力取舍仍报告具体问题；本轮已批准的持久化重构不再作为重复审批理由。
 - Office、模型连接、内嵌浏览器等复用既有服务，不扩入本轮重写。未配置媒体能力如实说明，已有文本／图像授权不扩为任意新供应商。
 - 发布继续暂停。历史 M25–M30／L06 与 U/W 实施记录保留为对应范围的证据，不代表本轮新架构已完成。

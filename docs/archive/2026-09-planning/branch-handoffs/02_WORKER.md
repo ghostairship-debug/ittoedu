@@ -14,11 +14,11 @@
 
 1. 不要在 `/workspace` 上直接改。只用自己的 isolated worktree。
 2. `git fetch origin main`。
-3. 从任务卡写明的基线建分支。  
-   - 历史 T/P 卡：不要再领取。  
-   - 历史车道 Q（Q1–Q8）：不要再领取。  
-   - 历史车道 F（F1–F3）：不要再领取。  
-   - 历史车道 G（G0–G3）：不要再领取。  
+3. 从任务卡写明的基线建分支。\
+   - 历史 T/P 卡：不要再领取。\
+   - 历史车道 Q（Q1–Q8）：不要再领取。\
+   - 历史车道 F（F1–F3）：不要再领取。\
+   - 历史车道 G（G0–G3）：不要再领取。\
    - 其它新卡：从 `origin/main` 建 `cursor/<task-slug>-0ab9`。
 4. 不属于本任务的脏文件一律不要 add。
 5. 每个逻辑步骤一次 commit。任务卡若要求「重命名 / 行为」分开，就两次 commit。
@@ -38,7 +38,7 @@
 
 默认只跑任务卡「最小验证」里列出的命令（通常 1–2 个 Vitest 文件），外加 `git diff --check`。
 
-禁止：`npm test`、`npm run test:e2e`、`npm run build:desktop`、`npm run verify`、`npm run verify:full`。  
+禁止：`npm test`、`npm run test:e2e`、`npm run build:desktop`、`npm run verify`、`npm run verify:full`。\
 默认也禁止 `npm run typecheck`。
 
 **红项优先，尽量少跑全量：**

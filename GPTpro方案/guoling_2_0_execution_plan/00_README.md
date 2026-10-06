@@ -1,6 +1,8 @@
+> 历史执行包原文：当前实现与剩余见[CURRENT_STATUS](../../docs/development-plan/CURRENT_STATUS.md)。正文保留原修订期措辞、机器登记与证据，不自动派发旧节点。
+
 # 果铃工作台｜2.0完整收口实施方案
 
-> **当前入口（2026-10-02）：** 本执行包已全部 verified 并作为历史实施规格存档。当前 2.0 收口完成事实与下一步（发行准备 + media + ACP + 长期方向）以 [ROADMAP.md](../../docs/ROADMAP.md) 为准；长期技术合同见 [docs/development-plan/ARCHITECTURE_CONTRACT.md](../../docs/development-plan/ARCHITECTURE_CONTRACT.md)。
+> **当前入口（2026-10-02）：** 本执行包已全部 verified 并作为历史实施规格存档。当前 2.0 收口完成事实与下一步（发行准备 + media + ACP + 长期方向）以 [ROADMAP.md](../../ROADMAP.md) 为准；长期技术合同见 [docs/development-plan/ARCHITECTURE_CONTRACT.md](../../docs/development-plan/ARCHITECTURE_CONTRACT.md)。
 
 **当前修订：执行包v2.5 · L06 v2.0 · 2026-09-29。** 先读[归档的根目录收敛方案§7E](../../docs/archive/2026-09-convergence/果铃2.0收敛方案.md)，再读[L06完整技术方案](long_term/L06.md)。L06虽然保留long_term路径，已经整体前移为当前2.0最终闭合项。
 

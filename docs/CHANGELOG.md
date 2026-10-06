@@ -12,7 +12,7 @@
 ## 2026-10-01 — R3 收口 starter
 
 - 启动 R3（最后一轮收口）：聚焦 `task_registry.json` 中残留的 blocked/failed/partial，按"L06 v2 完整前移"边界本地验证；不打新款，不发新凭据。
-- 详细执行链与真实运行证据见 [2026-10-02 实施记录](development-plan/reviews/2026-10-02-harness-production-convergence-implementation.md)。
+- 详细执行链与真实运行证据见 [2026-10-02 实施记录](archive/2026-10-development/reviews/2026-10-02-harness-production-convergence-implementation.md)。
 
 ## 2026-09-29 — 完整 L06 v2 前移为当前 2.0 最终收口
 

@@ -1,6 +1,13 @@
 # 变更日志(时间倒序)
 
-只记录影响产品合同、范围、Owner 授权或工程基线的里程碑;权威状态以 `task_registry.json` + `acceptance_cases.json` 同源 JSON 为准。
+只记录有日期的阶段变化；当前实现与剩余范围以 [CURRENT_STATUS](docs/development-plan/CURRENT_STATUS.md) 及原始证据为准。旧执行包 JSON 只对应当时验收范围。
+
+## 2026-10-06 — V10 修复、main 归并与文档收拢
+
+- L/M/R1–R5 及一批 R6 已集成，零模型 MCP 编辑/保存/冷开/导出和相关实际画面、独立 review 完成；原页单次性能对照及限制见[修复结果](docs/development-plan/20261006-required-fixes-result.md)。
+- 验证候选快进到 main；辅助工作树和原未提交成果保全后清理，主目录启动验证通过，归并提交为 `162b435a`。
+- 当前文档入口改为 V10/V3/API5，旧总纲、旧任务卡和评审正文归档。历史未签收范围、类型债和 native 根因未完全验证继续保留，不用文档清理宣布新验收完成。
+- 发布仍暂停。
 
 ## 2026-10-02 — M30-T08 Owner 终局签收(passed),扩展 2.0 闭合
 

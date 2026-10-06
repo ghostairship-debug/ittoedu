@@ -4,7 +4,7 @@
 
 2026-09-09按[AI编辑最短路径统一方案](../../../../AI编辑最短路径产品决策报告.md)、[开发计划](../../AI_ASSISTANT_DELIVERY_PLAN.md)及[共同合同](IMPLEMENTATION_CONTRACT.md)更新当前执行安排。1.8仍承担当前可用性修复、完整原生CLI必要接线、工程观察/编辑反馈和效率基础；未命名/首存、材料和自动/手动归1.9，不再有105。
 
-089–104相关实现已集成，已有Flow新导出、共享组件全实例、外部Builder片段和Native文字自动尺寸的有效工程证据；三CLI/双入口与S3仍待正式汇合。[G01–G12](../../reviews/1.8-ai-assistant-gap-register.md)、9月8日[四项审查](../../reviews/1.8-first-batch-review.md)及旧[原生预检](../../reviews/1.8-first-batch-preflight.md)保留为历史来源，其有效修复证据继续复用。9月9日已按[当前执行包](FIRST_BATCH_EXECUTION.md)集成图片正例/诊断、Codex初始化/用量/消息、能力与实例patch发现、短目标/资产引用、条件终结和失败帧/预算/回执接线；实际宿主样本、原始失败和剩余边界见[实施记录](../../reviews/2026-09-09-short-path-implementation.md)。本文不保存协调状态，也不将旧反例作为整批重新开工前置。
+089–104相关实现已集成，已有Flow新导出、共享组件全实例、外部Builder片段和Native文字自动尺寸的有效工程证据；三CLI/双入口与S3仍待正式汇合。[G01–G12](../../../archive/2026-09-development/reviews/1.8-ai-assistant-gap-register.md)、9月8日[四项审查](../../../archive/2026-09-development/reviews/1.8-first-batch-review.md)及旧[原生预检](../../../archive/2026-09-development/reviews/1.8-first-batch-preflight.md)保留为历史来源，其有效修复证据继续复用。9月9日已按[当前执行包](FIRST_BATCH_EXECUTION.md)集成图片正例/诊断、Codex初始化/用量/消息、能力与实例patch发现、短目标/资产引用、条件终结和失败帧/预算/回执接线；实际宿主样本、原始失败和剩余边界见[实施记录](../../../archive/2026-09-development/reviews/2026-09-09-short-path-implementation.md)。本文不保存协调状态，也不将旧反例作为整批重新开工前置。
 
 当前A批并行关闭图片、配置/可读消息、发现/提示缺口并补最小计量；B批在共同合同下完成短操作、条件终结、结构化失败、预算和真实回执；C批用已有patch/多步候选完成复杂修改，可随A/B推进；D批以准确小修改、整页/批量关系调整、实例/共享组件及实际互动分别验证并汇合受影响证据。复杂编辑先用好已有patch和多步候选，新缓存/细粒度补丁只在实测瓶颈成立后推进。核心编辑不留到1.9/2.0；Native/Recipe/Existing Component不等待Generated动态准入。
 
@@ -14,7 +14,7 @@ CLI拥有自己的规划与工具循环，宿主仍提供不可变观察并以�
 
 ## 既有证据与任务 DAG
 
-[三表面整合](../../THREE_SURFACE_ARCHITECTURE_INTEGRATION_PLAN.md)、[场景/步骤分层](r18-085-navigation-levels.md)及[CLI调用/格式修复](../../reviews/1.8-cli-call-format-repair.md)的有效证据按原范围保留。Owner已批准Flow D1方案A；089的实际可达性、093的恢复等已通过路径仅在相关变化、新失败或证据失效时补检，不重新启动历史整合。原[可用性整改方案](USABILITY_REPAIR_PLAN.md)和[整合结束记录](../../reviews/1.8-surface-integration-exit.md)保留追溯。
+[三表面整合](../../THREE_SURFACE_ARCHITECTURE_INTEGRATION_PLAN.md)、[场景/步骤分层](r18-085-navigation-levels.md)及[CLI调用/格式修复](../../../archive/2026-09-development/reviews/1.8-cli-call-format-repair.md)的有效证据按原范围保留。Owner已批准Flow D1方案A；089的实际可达性、093的恢复等已通过路径仅在相关变化、新失败或证据失效时补检，不重新启动历史整合。原[可用性整改方案](USABILITY_REPAIR_PLAN.md)和[整合结束记录](../../../archive/2026-09-development/reviews/1.8-surface-integration-exit.md)保留追溯。
 
 下面全部节点保留原ID、目标、依赖和写锁，manifest与此表保存同一DAG；当前只更新受影响的验收要求，详细执行仍归既有规格。010–087中“仅补接线/一次快照/仅JSON事件”的历史边界已由090–104正式演进，不能覆盖当前能力，也不能用历史Acceptance回避新增要求。两条PPTX图示/旧OLE公式仍是本版必选。
 

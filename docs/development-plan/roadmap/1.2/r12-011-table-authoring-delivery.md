@@ -6,7 +6,7 @@
 
 ## Outcome / current evidence
 
-当前已存在 Table commands、可见入口和 renderer。[本地复审 L5、L6 / P2](../../reviews/1.2-local-review-2026-09-05.md) 确认末格编辑后 Tab 只保存文本、追加行因旧 revision 失败，以及正式 painter 忽略部分填充/边框透明度。L1 增量同步由 `r12-008-native-authoring-transport`、L2/L3 owner/state 与 L5 复合命令由 `r12-010-table-core` 先闭合；本节点按 [共享实施合同](IMPLEMENTATION_CONTRACT.md) §2.2/§2.3/§3 完成真实 UI/painter/保存/导出验收。
+当前已存在 Table commands、可见入口和 renderer。[本地复审 L5、L6 / P2](../../../archive/2026-09-development/reviews/1.2-local-review-2026-09-05.md) 确认末格编辑后 Tab 只保存文本、追加行因旧 revision 失败，以及正式 painter 忽略部分填充/边框透明度。L1 增量同步由 `r12-008-native-authoring-transport`、L2/L3 owner/state 与 L5 复合命令由 `r12-010-table-core` 先闭合；本节点按 [共享实施合同](IMPLEMENTATION_CONTRACT.md) §2.2/§2.3/§3 完成真实 UI/painter/保存/导出验收。
 
 ## Read first
 
