@@ -25,6 +25,7 @@ import { insertComponentDefinitionAtTarget, insertComponentPackagesAtTarget } fr
 import { selectCurrentCatalogPackages } from './components/componentLibraryModel'
 import { useCourseDelivery } from './app/useCourseDelivery'
 import { courseDeliverySnapshot } from './app/courseDeliverySnapshot'
+import { resolveCourseProjectDeliveryFindingRoute } from './diagnostics/projectHealthNavigation'
 import { useCourseProjectLifecycle } from './app/useCourseProjectLifecycle'
 import { useFlowDocumentRecovery } from './app/useFlowDocumentRecovery'
 import { captureFlowMenuTarget, insertFlowMenu as commitFlowMenu, type FlowInsertCommand } from './ui/flow/flowInsertCommands'
@@ -116,10 +117,9 @@ function CourseWorkspaces(props: ComponentProps<typeof Workspace>) {
   return <>{view.views.map(document => {
     const active = document.documentId === view.activeDocumentId
     const epoch = view.documents.find(snapshot => snapshot.documentId === document.documentId)?.epoch
-    const effective = projectWithBackgroundPreview(resolveComponentPresentation(document.model.project, document.surfaceId, document.activeStateId),
-      preview, document.documentId, document.surfaceId, document.activeStateId, epoch)
-    const renderProject = projectWithSlideContentDraft(effective, contentDraft, { documentId: document.documentId, epoch,
+    const effective = projectWithSlideContentDraft(resolveComponentPresentation(document.model.project, document.surfaceId, document.activeStateId), contentDraft, { documentId: document.documentId, epoch,
       surfaceId: document.surfaceId, activeStateId: document.activeStateId })
+    const renderProject = projectWithBackgroundPreview(effective, preview, document.documentId, document.surfaceId, document.activeStateId, epoch)
     return <div key={document.documentId} hidden={!active} style={active ? { display: 'flex', flex: 1, minHeight: 0 } : undefined}>
       <CourseV10RuntimeView documentId={document.documentId} model={document.model} surfaceId={document.surfaceId}
         activeStateId={document.activeStateId}
@@ -237,17 +237,17 @@ export default function App() {
   const errorMessage = useEditorStore((state) => state.errorMessage)
   const statusMessage = useEditorStore((state) => state.statusMessage)
   const courseProjectHealthDiagnostics = useMemo(
-    () => activeCourseDocument
+    () => activeCourseDocument && projectHealthOpen
       ? collectComponentProjectHealth(activeCourseDocument, {
           assetFiles: sidecarFiles,
         })
       : null,
-    [activeCourseDocument, sidecarFiles],
+    [activeCourseDocument, sidecarFiles, projectHealthOpen],
   )
   const projectHealthSummary = useMemo(
     () => courseProjectHealthDiagnostics
       ? summarizeCourseProjectHealth(courseProjectHealthDiagnostics)
-      : { error: 0, warning: 0, info: 0, total: 0, canExport: true },
+      : null,
     [courseProjectHealthDiagnostics],
   )
 
@@ -478,9 +478,14 @@ export default function App() {
     reportError: setError,
     navigateFinding(item) {
       const state = useEditorStore.getState()
-      if (item.surfaceId) state.courseKernel.selectSurface(item.surfaceId)
-      if (item.instanceId) state.courseKernel.selectInstances([item.instanceId], item.surfaceId)
-      state.setActiveTab('properties')
+      const project = state.courseView.project
+      if (!project) return
+      const route = resolveCourseProjectDeliveryFindingRoute(project, item)
+      if (!route.available) { state.setStatus(route.reason); return }
+      if (route.surfaceId) state.courseKernel.selectSurface(route.surfaceId)
+      state.setEditingScope(route.scope)
+      state.courseKernel.selectInstances(route.instanceId ? [route.instanceId] : [], route.surfaceId)
+      state.setActiveTab(route.tab)
     },
     compileComponent: input => desktopApi().compileComponent(input),
     captureAuthoringObservation: rect => desktopApi().captureAuthoringObservation!(rect),

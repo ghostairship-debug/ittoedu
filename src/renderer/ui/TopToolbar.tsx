@@ -41,7 +41,7 @@ interface TopToolbarProps {
   recentProjects: RecentProjectEntry[]
   onOpenRecent(path: string): void
   onSave(saveAs?: boolean): void
-  healthSummary: CourseProjectHealthSummary
+  healthSummary: CourseProjectHealthSummary | null
   onOpenHealth(): void
   onOpenRecipes?(): void
   onOpenProductivity?(): void
@@ -305,7 +305,7 @@ export function TopToolbar({
 
       <ToolButton
         label="工程检查"
-        title={healthSummary.total === 0
+        title={!healthSummary ? '打开工程检查' : healthSummary.total === 0
           ? '工程检查：未发现问题'
           : `工程检查：${healthSummary.error} 个错误，${healthSummary.warning} 个提醒`}
         disabled={busy}
@@ -313,7 +313,7 @@ export function TopToolbar({
       >
         <span className="tool-button__badge-anchor">
           <ShieldCheck size={18} />
-          {healthSummary.total > 0 && (
+          {healthSummary && healthSummary.total > 0 && (
             <small className={healthSummary.error > 0 ? 'is-error' : 'is-warning'}>
               {healthSummary.total > 99 ? '99+' : healthSummary.total}
             </small>

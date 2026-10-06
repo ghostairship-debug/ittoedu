@@ -27,18 +27,18 @@ export function SlideWorkspaceConnector(props: SlideWorkspaceConnectorProps) {
   const read = (): SlideWorkspaceSnapshot => {
     const state = useEditorStore.getState(), view = state.courseBridge.read()
     return {
-      project: view.editingProject && view.activeDocumentId ? projectWithSlideContentDraft(projectWithBackgroundPreview(view.editingProject, state.previewBackgroundColor,
-        view.activeDocumentId, view.surfaceId, view.activeStateId, view.snapshot?.epoch), state.slideContentEdit,
-        { documentId: view.activeDocumentId, epoch: view.snapshot?.epoch, surfaceId: view.surfaceId, activeStateId: view.activeStateId }) : null,
+      project: view.editingProject && view.activeDocumentId ? projectWithBackgroundPreview(projectWithSlideContentDraft(view.editingProject, state.slideContentEdit,
+        { documentId: view.activeDocumentId, epoch: view.snapshot?.epoch, surfaceId: view.surfaceId, activeStateId: view.activeStateId }), state.previewBackgroundColor,
+        view.activeDocumentId, view.surfaceId, view.activeStateId, view.snapshot?.epoch) : null,
       documentId: view.activeDocumentId, surfaceId: view.surfaceId, selectedInstanceIds: view.selectedInstanceIds,
       activation: view.activation, activeStateId: view.activeStateId,
       canvasMode: state.canvasMode, contentEdit: state.slideContentEdit, drawTool: state.slideDrawTool, assetUrls, editingScope: state.editingScope,
     }
   }
   const snapshot: SlideWorkspaceSnapshot = {
-    project: source.courseView.editingProject && source.courseView.activeDocumentId ? projectWithSlideContentDraft(projectWithBackgroundPreview(source.courseView.editingProject, source.backgroundPreview,
-      source.courseView.activeDocumentId, source.courseView.surfaceId, source.courseView.activeStateId, source.courseView.snapshot?.epoch), source.contentEdit,
-      { documentId: source.courseView.activeDocumentId, epoch: source.courseView.snapshot?.epoch, surfaceId: source.courseView.surfaceId, activeStateId: source.courseView.activeStateId }) : null,
+    project: source.courseView.editingProject && source.courseView.activeDocumentId ? projectWithBackgroundPreview(projectWithSlideContentDraft(source.courseView.editingProject, source.contentEdit,
+      { documentId: source.courseView.activeDocumentId, epoch: source.courseView.snapshot?.epoch, surfaceId: source.courseView.surfaceId, activeStateId: source.courseView.activeStateId }), source.backgroundPreview,
+      source.courseView.activeDocumentId, source.courseView.surfaceId, source.courseView.activeStateId, source.courseView.snapshot?.epoch) : null,
     documentId: source.courseView.activeDocumentId, surfaceId: source.courseView.surfaceId, selectedInstanceIds: source.courseView.selectedInstanceIds,
     activation: source.courseView.activation, activeStateId: source.courseView.activeStateId,
     canvasMode: source.canvasMode, contentEdit: source.contentEdit, drawTool: source.drawTool, assetUrls, editingScope: source.editingScope,
