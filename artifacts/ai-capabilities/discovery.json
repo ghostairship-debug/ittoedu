@@ -23,7 +23,7 @@
   ],
   "query": "query.mjs",
   "scope": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
-  "semanticVersion": "ec7ba71eddcf1443f469265d8515769894189fa9d918857ebf95d35dfd1797bf",
+  "semanticVersion": "1e1fdb8d0bf9f169b23b18bff7df40130f147809de685b12195ae0ee1bb2c403",
   "tools": [
     {
       "id": "asset.save",

@@ -14,7 +14,7 @@
         "skills/orchestrate-courseware/references/web-composition-examples.md",
         "skills/orchestrate-courseware/scripts/assemble-html.mjs"
       ],
-      "version": "3dc99bf5d82403676ee6f111bda97521236abe75b2bac5972ee2dbdc75d18eb2"
+      "version": "e32c421e5be767fb8a48b810002b3e3b58fb96cd89004c1a9479bdc4d954699c"
     },
     {
       "description": "将已有第三方或外来 HTML 保真导入可编辑课件；适用于 HTML 转课件，不承担新课创作与已有工程续改。",
@@ -39,7 +39,7 @@
       "name": "edit-content",
       "path": "skills/edit-content/SKILL.md",
       "references": [],
-      "version": "ee5a330e69849d0e0461ffca89d6da96f4415248d992d19786d053790052a135"
+      "version": "49470dded205109eb79e6ab7cf7e3cc21d2b8c309d5691ee517dca592ef7c896"
     },
     {
       "description": "新建或局部修改 Word、Excel、PowerPoint 原格式文件；适用于 DOCX 报告与表格、XLSX 数据与公式、PPTX 幻灯片文字，不用于课件导入或软件代码开发。",
