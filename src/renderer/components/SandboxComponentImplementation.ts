@@ -38,10 +38,60 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
   let resourceUrls: Record<string, string> = {}
   let resourceBindings: Readonly<Record<string, string>> = {}
   let layoutInput: ComponentLayoutInput | undefined
+  let fragmentThemeCanvas = false
   const layoutListeners = new Set<(layout: ComponentLayoutInput) => void>()
   const applyFragmentLayout = () => {
     if (!fragmentDefaults || authoredDocument) return
     fragmentDefaults.textContent = `html,body,#component-root{width:100%;height:${layoutInput?.mode === 'flow-content' ? 'auto' : '100%'};margin:0}`
+  }
+  const writeCourseTheme = (value: unknown) => {
+    courseStyle.textContent = typeof value === 'string' ? value : ''
+    if (!fragmentThemeCanvas || !courseStyle.sheet) return
+    // The course canvas paints once in the formal surface/group. A framed builtin Web
+    // fragment has an implicit transport document, not another authored canvas.
+    // Keep inherited theme typography and descendant paint; only exclude that
+    // transport html/body from the course theme's background declarations.
+    const selectors = (text: string) => {
+      const values: string[] = []
+      let start = 0, depth = 0, quote = '', escaped = false
+      for (let index = 0; index < text.length; index++) {
+        const character = text[index]!
+        if (escaped) { escaped = false; continue }
+        if (character === '\\') { escaped = true; continue }
+        if (quote) { if (character === quote) quote = ''; continue }
+        if (character === '"' || character === "'") quote = character
+        else if (character === '(' || character === '[') depth++
+        else if (character === ')' || character === ']') depth--
+        else if (character === ',' && depth === 0) { values.push(text.slice(start, index).trim()); start = index + 1 }
+      }
+      values.push(text.slice(start).trim())
+      return values
+    }
+    const visit = (owner: CSSStyleSheet | CSSGroupingRule) => {
+      for (let index = 0; index < owner.cssRules.length; index++) {
+        const rule = owner.cssRules[index]!
+        if (rule instanceof CSSStyleRule) {
+          const paint = Array.from(rule.style).filter(name => name === 'background' || name.startsWith('background-'))
+          if (!paint.length) continue
+          const original = selectors(rule.selectorText)
+          const projected = original.map(selector => {
+            try {
+              return document.documentElement.matches(selector) || document.body.matches(selector)
+                ? `${selector}:not(:where(html,body))` : selector
+            } catch { return selector }
+          })
+          if (projected.every((selector, index) => selector === original[index])) continue
+          const style = document.createElement('span').style
+          for (const name of paint) {
+            style.setProperty(name, rule.style.getPropertyValue(name), rule.style.getPropertyPriority(name))
+            rule.style.removeProperty(name)
+          }
+          owner.insertRule(`${projected.join(',')}{${style.cssText}}`, index + 1)
+          index++
+        } else if ('cssRules' in rule) visit(rule as CSSGroupingRule)
+      }
+    }
+    visit(courseStyle.sheet)
   }
   const cleanups = new Set<() => void>(), listeners = new Map<string, Set<(value: unknown) => void>>()
   let authorSpotSequence = 0
@@ -184,13 +234,14 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
         } finally { URL.revokeObjectURL(url) }
       } else if (message.type === 'mount') {
         if (authoredDocument && document.readyState === 'loading') await new Promise<void>(resolve => document.addEventListener('DOMContentLoaded', () => resolve(), { once: true }))
-        courseStyle.textContent = typeof message.themeCss === 'string' ? message.themeCss : ''
         document.querySelector('style[data-component-initial-theme]')?.remove()
         resourceUrls = message.resources as Record<string, string> ?? {}
         resourceBindings = message.resourceBindings as Record<string, string> ?? {}
         layoutInput = message.layout as ComponentLayoutInput | undefined
         applyFragmentLayout()
         instance = message.instance as ComponentInstance
+        fragmentThemeCanvas = Boolean(message.visual && message.documentKind === 'fragment' && message.builtinKey === 'guoling.web' && instance.frame)
+        writeCourseTheme(message.themeCss)
         originalHtml = typeof message.authorHtml === 'string' ? message.authorHtml : undefined
         observeHtml = message.htmlAuthoring === true
         generation = message.generation as number
@@ -362,7 +413,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
         }
       } else if (message.type === 'update') {
         if (!active) return
-        courseStyle.textContent = typeof message.themeCss === 'string' ? message.themeCss : ''
+        writeCourseTheme(message.themeCss)
         resourceUrls = message.resources as Record<string, string> ?? {}
         instance = message.instance as ComponentInstance
         updateResourceCss(message.resourceCss)
@@ -386,7 +437,7 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
       } else if (message.type === 'notification') {
         if (!active) return
         const kind = message.kind as string, name = message.name as string
-        if (kind === 'event' && name === '__runtime.theme') courseStyle.textContent = typeof message.value === 'string' ? message.value : ''
+        if (kind === 'event' && name === '__runtime.theme') writeCourseTheme(message.value)
         if (kind === 'event' && name === '__runtime.resources') {
           resourceUrls = message.value as Record<string, string> ?? {}
           fragmentBox.refreshResources(document, resourceUrls)
