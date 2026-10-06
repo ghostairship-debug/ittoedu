@@ -209,9 +209,9 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
         if (!saved || !snapshot || saved.documentId !== snapshot.documentId || options?.isCurrent?.() === false) return false
         if (saved.binding.kind !== 'file') return false
         const current = service().snapshot()
+        if (current?.documentId !== saved.documentId || current.epoch !== snapshot.epoch || saved.epoch !== snapshot.epoch) return false
         await ref.current.onProjectSaved?.({ projectId: saved.model.kind === 'course-v10' ? saved.model.project.id : '', path: saved.binding.path, previousPath, saveAs })
-        const allSaved = !saved.dirty && (current?.documentId === saved.documentId
-          ? !current.dirty && !ref.current.hasUnsavedChanges() : true)
+        const allSaved = !saved.dirty && !current.dirty && !ref.current.hasUnsavedChanges()
         ref.current.commitStatus(allSaved ? `已保存到 ${saved.binding.path}` : '已保存启动保存时的版本；后续修改尚未保存')
         await refresh()
         return allSaved
