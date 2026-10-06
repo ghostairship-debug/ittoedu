@@ -152,7 +152,8 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
     }
     elements.push({ sourcePath: pathOf(element), tagName: element.localName, namespace: element.namespaceURI ?? undefined,
       attributes: Object.fromEntries(Array.from(element.attributes, attribute => [attribute.name, attribute.value])), sourceHtml: element.outerHTML,
-      style: styleOf(style), pseudoElements, frame, geometryIssue,
+      style: styleOf(style), parentDisplay: element.parentElement ? (styles.get(element.parentElement) ?? getComputedStyle(element.parentElement)).display : undefined,
+      pseudoElements, frame, geometryIssue,
       children: Array.from(element.childNodes).flatMap<MeasuredHtmlChild>(child => {
         if (child instanceof Element) return [{ kind: 'element' as const, index: indices.get(child)! }]
         if (child.nodeType === Node.TEXT_NODE) return [{ kind: 'text' as const, text: child.textContent ?? '' }]

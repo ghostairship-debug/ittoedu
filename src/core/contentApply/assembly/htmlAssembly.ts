@@ -21,6 +21,8 @@ export interface MeasuredHtmlElement {
   attributes: Record<string, string>
   sourceHtml: string
   style: Record<string, string>
+  /** Measured parent layout, needed to distinguish flex/grid z-index and order. */
+  parentDisplay?: string
   pseudoElements: Record<string, Record<string, string>>
   children: MeasuredHtmlChild[]
   frame?: AffineFrame
@@ -64,15 +66,16 @@ export interface HtmlAssemblyObject {
   style: Record<string, string>
   pseudoElements: Record<string, Record<string, string>>
   /** Browser ordering inputs for L19 to assign one formal parent order. */
-  stacking?: { zIndex: string; layoutOrder: string }
+  stacking?: { zIndex: string; layoutOrder: string; positioned?: boolean }
   content?: HtmlObjectContent
   /** Program source is retained, never converted to a static image. */
   program?: { html: string; reason: string }
   /** Static interactive HTML/CSS keeps one browser document, without computed child styles. */
   retainedSource?: { html: string; reason: string }
   children: HtmlAssemblyObject[]
-  /** Pure paint does not become a selectable author object. */
-  decorations: { sourcePath: readonly number[]; frame: AffineFrame; content: HtmlObjectContent }[]
+  /** Pure paint has no text/media role, but participates in the same measured paint order. */
+  decorations: { sourcePath: readonly number[]; frame: AffineFrame; content: HtmlObjectContent;
+    stacking?: HtmlAssemblyObject['stacking']; interleaves?: boolean }[]
   /** Hidden or non-affine regions retain source when they have no usable free frame. */
   sourceRegions: HtmlSourceRegion[]
 }
@@ -106,6 +109,27 @@ function hasPaint(element: MeasuredHtmlElement): boolean {
     || style['box-shadow'] && style['box-shadow'] !== 'none'
     || ['top', 'right', 'bottom', 'left'].some(side => parseFloat(style[`border-${side}-width`] ?? '0') > 0 && style[`border-${side}-style`] !== 'none')
     || Object.keys(element.pseudoElements).length)
+}
+
+function stackingOf(element: MeasuredHtmlElement): NonNullable<HtmlAssemblyObject['stacking']> {
+  const style = element.style
+  const layoutItem = /^(?:inline-)?(?:flex|grid)$/.test(element.parentDisplay ?? '')
+  const positioned = ['relative', 'absolute', 'fixed', 'sticky'].includes(style.position ?? '')
+  return { zIndex: positioned || layoutItem ? style['z-index'] ?? 'auto' : 'auto',
+    layoutOrder: layoutItem ? style.order ?? '0' : '0' }
+}
+
+/** Context boundaries are atomic in their parent, even when the wrapper has no paint. */
+function hasStackingContext(element: MeasuredHtmlElement): boolean {
+  const style = element.style
+  return stackingOf(element).zIndex !== 'auto'
+    || ['fixed', 'sticky'].includes(style.position ?? '')
+    || ['transform', 'translate', 'rotate', 'scale', 'filter', 'backdrop-filter', 'perspective'].some(name => Boolean(style[name] && style[name] !== 'none'))
+    || Number(style.opacity ?? '1') < 1
+    || style.isolation === 'isolate'
+    || Boolean(style['mix-blend-mode'] && style['mix-blend-mode'] !== 'normal')
+    || /(?:^|\s)(?:layout|paint|strict|content)(?:\s|$)/.test(style.contain ?? '')
+    || /(?:^|,\s*)(?:transform|opacity|filter|perspective)(?:\s*,|$)/.test(style['will-change'] ?? '')
 }
 
 function sourceProgramReason(element: MeasuredHtmlElement): string | undefined {
@@ -183,7 +207,7 @@ export function assembleMeasuredHtml(capture: HtmlDesignCapture, source: HtmlAss
     }
     const kind = kindOf(index)
     // Layout-only wrappers disappear after measurement; their children keep exact parent coordinates.
-    if (kind === 'group' && !SEMANTIC_GROUP.has(value.tagName) && !hasPaint(value)
+    if (kind === 'group' && !SEMANTIC_GROUP.has(value.tagName) && !hasPaint(value) && !hasStackingContext(value)
       && !value.attributes['aria-label'] && !value.attributes.title
       && (!value.style.transform || value.style.transform === 'none')
       && (!value.style.rotate || value.style.rotate === 'none')
@@ -195,14 +219,17 @@ export function assembleMeasuredHtml(capture: HtmlDesignCapture, source: HtmlAss
     }
     const frame = reparentFrame(value.frame, IDENTITY_MATRIX, parentToViewport)
     if (kind === 'decoration') {
-      if (hasPaint(value)) parent.decorations.push({ sourcePath: value.sourcePath, frame, content: contentOf(index, true) })
+      if (hasPaint(value)) parent.decorations.push({ sourcePath: value.sourcePath, frame, content: contentOf(index, true),
+        stacking: { ...stackingOf(value), positioned: hasStackingContext(value) || ['relative', 'absolute', 'fixed', 'sticky'].includes(value.style.position ?? '') },
+        interleaves: hasStackingContext(value) || ['relative', 'absolute', 'fixed', 'sticky'].includes(value.style.position ?? '')
+          || /^(?:inline-)?(?:flex|grid)$/.test(value.parentDisplay ?? '') })
       return
     }
     const label = value.attributes['aria-label'] || value.attributes.title || value.attributes.alt
       || textOf(index).trim().replace(/\s+/g, ' ').slice(0, 80) || value.attributes.id || value.tagName
     const object: HtmlAssemblyObject = { kind, label, sourcePath: value.sourcePath, frame,
       style: htmlObjectStyle(value.style, kind === 'group'), pseudoElements: value.pseudoElements,
-      stacking: { zIndex: value.style['z-index'] ?? 'auto', layoutOrder: value.style.order ?? '0' },
+      stacking: { ...stackingOf(value), positioned: hasStackingContext(value) || ['relative', 'absolute', 'fixed', 'sticky'].includes(value.style.position ?? '') },
       children: [], decorations: [], sourceRegions: [] }
     parent.children.push(object)
     const scope = sourceScopes.get(index)

@@ -27,19 +27,40 @@ function contentHtml(content: HtmlObjectContent, rawText = false): string {
   return `${open}${content.children.map(child => contentHtml(child, ['style', 'script'].includes(content.tagName))).join('')}</${content.tagName}>`
 }
 
-function decorationHtml(object: HtmlAssemblyObject): string {
-  return object.decorations.map(decoration => {
-    const frame = decoration.frame
-    return `<div style="position:absolute;left:0;top:0;width:${frame.width}px;height:${frame.height}px;transform-origin:0 0;transform:matrix(${frame.transform.join(',')})">${contentHtml(decoration.content)}</div>`
-  }).join('') + object.sourceRegions.map(region => region.html).join('')
-}
-
 /** One ordered parent list; measured stacking values are consumed here and then discarded. */
 function orderedChildren(object: HtmlAssemblyObject): HtmlAssemblyObject[] {
   const numeric = (value?: string) => value !== undefined && Number.isFinite(Number(value)) ? Number(value) : 0
-  return object.children.map((child, index) => ({ child, index })).sort((a, b) =>
-    numeric(a.child.stacking?.zIndex) - numeric(b.child.stacking?.zIndex)
-      || numeric(a.child.stacking?.layoutOrder) - numeric(b.child.stacking?.layoutOrder) || a.index - b.index).map(value => value.child)
+  // A parent iframe paints before all detached children. Decorations that can
+  // interleave with those children therefore need their own ordinary Web frame.
+  const children = [...object.children, ...object.decorations.filter(value => value.interleaves).map<HtmlAssemblyObject>(decoration => ({
+    kind: 'web', label: '装饰', sourcePath: decoration.sourcePath, frame: decoration.frame,
+    style: decoration.content.kind === 'element' ? decoration.content.style : {},
+    pseudoElements: decoration.content.kind === 'element' ? decoration.content.pseudoElements : {},
+    content: decoration.content, stacking: decoration.stacking, children: [], decorations: [], sourceRegions: [],
+  }))]
+  const sourceOrder = (a: readonly number[], b: readonly number[]) => {
+    for (let index = 0; index < Math.min(a.length, b.length); index++) if (a[index] !== b[index]) return a[index]! - b[index]!
+    return a.length - b.length
+  }
+  const phase = (child: HtmlAssemblyObject) => {
+    const z = numeric(child.stacking?.zIndex)
+    return z < 0 ? 0 : z > 0 ? 3 : child.stacking?.positioned ? 2 : 1
+  }
+  return children.map((child, index) => ({ child, index })).sort((a, b) =>
+    phase(a.child) - phase(b.child) || numeric(a.child.stacking?.zIndex) - numeric(b.child.stacking?.zIndex)
+      || numeric(a.child.stacking?.layoutOrder) - numeric(b.child.stacking?.layoutOrder)
+      || sourceOrder(a.child.sourcePath, b.child.sourcePath) || a.index - b.index).map(value => value.child)
+}
+
+function backgroundDecorationHtml(object: HtmlAssemblyObject): string {
+  // Ordinary in-flow block backgrounds paint below in-flow text, even when the
+  // block follows that text in DOM order and overlaps it through negative margin.
+  return object.decorations.filter(value => !value.interleaves).map(decoration => {
+    const frame = decoration.frame
+    const content = decoration.content.kind === 'element'
+      ? { ...decoration.content, style: measuredFragmentBoxStyle(decoration.content.style) } : decoration.content
+    return `<div style="position:absolute;left:0;top:0;width:${frame.width}px;height:${frame.height}px;transform-origin:0 0;transform:matrix(${frame.transform.join(',')})">${contentHtml(content)}</div>`
+  }).join('')
 }
 
 export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: Record<string, string>, options: {
@@ -79,7 +100,7 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
     const content = object.kind !== 'program' && originalContent?.kind === 'element'
       ? { ...originalContent, style: measuredFragmentBoxStyle(originalContent.style) } : originalContent
     let html = object.retainedSource?.html ?? object.program?.html ?? (content ? contentHtml(content) : '')
-    const retained = decorationHtml(object)
+    const retained = backgroundDecorationHtml(object) + object.sourceRegions.map(region => region.html).join('')
     if (retained) {
       const closing = content?.kind === 'element' && !VOID.has(content.tagName) ? `</${content.tagName}>` : ''
       html = closing && html.endsWith(closing) ? html.slice(0, -closing.length) + retained + closing : html + retained
