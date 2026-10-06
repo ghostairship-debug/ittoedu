@@ -118,7 +118,9 @@ export class ViewObservationDesktopService {
         // painted frame before Chromium can compose the first complete capture.
         await Promise.all(worker.webContents.mainFrame.framesInSubtree.filter(frame => !frame.detached).map(async frame => {
           try {
-            await frame.executeJavaScript('(async () => { await document.fonts.ready; await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); })()')
+            // Chromium pauses rAF for display:none frames; their viewport is
+            // empty and contributes no pixels to this capture.
+            await frame.executeJavaScript('(async () => { if (!innerWidth || !innerHeight) return; await document.fonts.ready; await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); })()')
           } catch (error) { if (!frame.detached) throw error }
         }))
         if (input.signal?.aborted) throw new Error('观察已取消')
