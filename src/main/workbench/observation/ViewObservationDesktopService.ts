@@ -114,6 +114,14 @@ export class ViewObservationDesktopService {
           locationId: string; stateId: string | null; structure: string[]; diagnostics: string[]; rect?: { x: number; y: number; width: number; height: number } }
         if (input.signal?.aborted) throw new Error('观察已取消')
         if (outcome.locationId !== input.locationId || (outcome.stateId ?? null) !== (input.stateId ?? null)) throw new Error('观察宿主加载了错误页面或状态')
+        // Mount ACKs describe DOM state. Each content realm must submit its own
+        // painted frame before Chromium can compose the first complete capture.
+        await Promise.all(worker.webContents.mainFrame.framesInSubtree.filter(frame => !frame.detached).map(async frame => {
+          try {
+            await frame.executeJavaScript('(async () => { await document.fonts.ready; await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); })()')
+          } catch (error) { if (!frame.detached) throw error }
+        }))
+        if (input.signal?.aborted) throw new Error('观察已取消')
         const rect = outcome.rect
         const bitmap = await worker.webContents.capturePage(rect ? { x: Math.floor(rect.x), y: Math.floor(rect.y),
           width: Math.ceil(rect.width), height: Math.ceil(rect.height) } : undefined)
