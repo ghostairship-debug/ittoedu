@@ -12,15 +12,15 @@ import { interactionActionSchema, interactionTriggerSchema } from '../../shared/
 import { htmlDocumentKind } from '../../shared/html/documentKind'
 import { isMeasuredWebFragmentBox, measuredFragmentExtent } from '../../components/web/measuredFragmentBox'
 import { authoredDocumentBootstrap, installAuthoredDocumentPrograms } from '../../components/web/authoredDocumentBootstrap'
-import type { WebRuntimeData } from '../../components/web/moduleGraph'
+import { webRuntimeTargetProfile, type RuntimeTargetProfile, type WebRuntimeData } from '../../components/web/moduleGraph'
 import { refreshWebResourceReferences } from '../../components/web/resources'
 
-export interface RuntimeTargetSnapshot { reference: ComponentTarget; instanceId: string; value: JsonValue }
+export interface RuntimeTargetSnapshot { reference: ComponentTarget; instanceId: string; value?: JsonValue }
 export interface ComponentBootstrapTransport {
   createComponentBootstrap(input: ComponentBootstrapInput): Promise<ComponentBootstrapLease>
   releaseComponentBootstrap(input: { leaseId: string }): Promise<void>
 }
-interface SnapshotPorts { state(): Record<string, JsonValue>; targets(): RuntimeTargetSnapshot[]; instance?(value: ComponentInstance): ComponentInstance<JsonValue | WebRuntimeData> | Promise<ComponentInstance<JsonValue | WebRuntimeData>>; teacherController?: TeacherControllerPort; htmlAuthoring?: boolean; builtinKey?: string; connectOrigins?(): readonly string[]; themeCss?(): string; resources?(): Record<string, string>; resourceBindings?: Readonly<Record<string, string>>; bootstrap?: ComponentBootstrapTransport }
+interface SnapshotPorts { state(): Record<string, JsonValue>; targets(profile: RuntimeTargetProfile): RuntimeTargetSnapshot[]; instance?(value: ComponentInstance): ComponentInstance<JsonValue | WebRuntimeData> | Promise<ComponentInstance<JsonValue | WebRuntimeData>>; teacherController?: TeacherControllerPort; htmlAuthoring?: boolean; builtinKey?: string; connectOrigins?(): readonly string[]; themeCss?(): string; resources?(): Record<string, string>; resourceBindings?: Readonly<Record<string, string>>; bootstrap?: ComponentBootstrapTransport }
 
 /** Serialized trusted bridge only. Author code arrives through its dedicated port. */
 function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isMeasuredWebFragmentBox; extent: typeof measuredFragmentExtent; refreshResources: typeof refreshWebResourceReferences }, authoredDocument?: { release(): void }) {
@@ -468,6 +468,13 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
   const channel = new MessageChannel(), port = channel.port1
   let scope: ComponentRuntimeScope | undefined, authoring: ComponentRuntimeContext['authoring'], layoutPort: ComponentLayoutPort | undefined, disposed = false, sequence = 0
   let authorInstance: ComponentInstance | undefined
+  // A full realm can retain author-created handlers/timers across content updates.
+  // Only its existing retirement lifecycle may reset this transport choice.
+  let targetProfile: RuntimeTargetProfile | undefined
+  const targetsFor = (instance: ComponentInstance<JsonValue | WebRuntimeData>) => {
+    if (targetProfile !== 'full') targetProfile = webRuntimeTargetProfile(snapshots.builtinKey, instance.data)
+    return snapshots.targets(targetProfile)
+  }
   let readyResolve!: () => void, readyReject!: (error: Error) => void
   const ready = new Promise<void>((resolve, reject) => { readyResolve = resolve; readyReject = reject })
   // Preparation can be cancelled before mount starts waiting for the handshake.
@@ -831,13 +838,13 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
         iframe.src = htmlUrl
         await ready; await request('prepare', { artifact })
         await request('mount', { instance: projected, generation: scope.generation, runScopeId: scope.runScopeId,
-          visual: Boolean(context.root), state: snapshots.state(), targets: snapshots.targets(), teacher: teacherSnapshot(), htmlAuthoring: snapshots.htmlAuthoring,
+          visual: Boolean(context.root), state: snapshots.state(), targets: targetsFor(projected), teacher: teacherSnapshot(), htmlAuthoring: snapshots.htmlAuthoring,
           media: Boolean(mediaPort), interaction: interactionSnapshot(),
           layout: layoutPort?.read(),
           fragmentStateKey: componentFragmentStateKey(context.instance.id), themeCss: snapshots.themeCss?.(), resources: snapshots.resources?.(), resourceBindings: snapshots.resourceBindings,
           authorHtml, documentKind, builtinKey: snapshots.builtinKey, resourceCss: typeof data?.css === 'string' ? data.css : undefined })
         if (!scope.isActive()) throw new Error('组件挂载已取消')
-        return { update: async instance => { authorInstance = instance; return request('update', { instance: await snapshots.instance?.(instance) ?? instance, state: snapshots.state(), targets: snapshots.targets(), themeCss: snapshots.themeCss?.(), resources: snapshots.resources?.(), interaction: interactionSnapshot(),
+        return { update: async instance => { authorInstance = instance; const projected = await snapshots.instance?.(instance) ?? instance; return request('update', { instance: projected, state: snapshots.state(), targets: targetsFor(projected), themeCss: snapshots.themeCss?.(), resources: snapshots.resources?.(), interaction: interactionSnapshot(),
             resourceCss: instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) && typeof instance.data.css === 'string' ? instance.data.css : undefined,
             authorHtml: snapshots.htmlAuthoring && instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data.html : undefined }) },
           updatePlacement: frame => {

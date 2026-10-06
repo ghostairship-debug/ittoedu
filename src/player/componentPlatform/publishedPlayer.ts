@@ -96,11 +96,11 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
       const compiled = (source as Extract<PublishedImplementation, { kind: 'source' }>).compiled
       if (!compiled) throw new Error('此源码未附可执行ESM；原始源码已保留')
       return prepareSandboxComponent({ format: 'esm', code: compiled.code, css: compiled.css ?? '', diagnostics: [] }, signal,
-        { state: () => player.runtime.stateSnapshot(), targets: () => player.runtime.targetSnapshots(), teacherController: navigation,
+        { state: () => player.runtime.stateSnapshot(), targets: () => player.runtime.targetSnapshots('full'), teacherController: navigation,
           connectOrigins: () => model.project.logic?.network?.connectOrigins ?? [], themeCss: () => player.runtime.themeCss(), resources: () => player.runtime.resourceUrls(), resourceBindings: source.resourceBindings, bootstrap: options.componentBootstrap })
     },
     resolveBuiltin: (_key, signal) => prepareSandboxComponent({ format: 'esm', code: webContentRealmSource(), css: '', diagnostics: [] }, signal,
-      { builtinKey: _key, state: () => player.runtime.stateSnapshot(), targets: () => player.runtime.targetSnapshots(), teacherController: navigation,
+      { builtinKey: _key, state: () => player.runtime.stateSnapshot(), targets: profile => player.runtime.targetSnapshots(profile), teacherController: navigation,
         instance: instance => resolveWebResourceBindings(instance, id => player.runtime.contentAssetUrl(id) ?? payload.assets[id]?.url, options.report), htmlAuthoring: true,
         connectOrigins: () => model.project.logic?.network?.connectOrigins ?? [], themeCss: () => player.runtime.themeCss(), resources: () => player.runtime.resourceUrls(), bootstrap: options.componentBootstrap }),
   })

@@ -25,6 +25,7 @@ import { componentLayoutInput } from '../../components/web/measuredFragmentBox'
 import { componentCompilationInput } from '../../core/components/compilation/componentCompilationInput'
 import { flowObjectExtent } from '../../core/components/geometry/flowObjectExtent'
 import type { ComponentLayoutInput, ComponentLayoutPort, ComponentInstance } from '../../shared/contracts/component-platform'
+import type { RuntimeTargetProfile } from '../../components/web/moduleGraph'
 
 type Listener = (value: JsonValue | undefined) => void
 /** A run owns transient state and leases. It never writes author data or History. */
@@ -493,10 +494,15 @@ export class ComponentPlatformRuntime {
   previewMotion(action: import('../../shared/interactionTypes').NodeMotionAction, signal: AbortSignal): Promise<boolean> {
     return this.interactions.motion(action, { signal, ruleId: 'editor-preview', stepId: 'editor-preview', restartFromBeginning: true }, true)
   }
-  targetSnapshots(): Array<{ reference: ComponentTarget; instanceId: string; value: JsonValue }> {
+  targetSnapshots(): Array<{ reference: ComponentTarget; instanceId: string; value: JsonValue }>
+  targetSnapshots(profile: 'full'): Array<{ reference: ComponentTarget; instanceId: string; value: JsonValue }>
+  targetSnapshots(profile: RuntimeTargetProfile): Array<{ reference: ComponentTarget; instanceId: string; value?: JsonValue }>
+  targetSnapshots(profile: RuntimeTargetProfile = 'full'): Array<{ reference: ComponentTarget; instanceId: string; value?: JsonValue }> {
     if (!this.project) return []
     const references: ComponentTarget[] = [{ kind: 'project' }, ...this.project.surfaces.map(surface => ({ kind: 'surface' as const, surfaceId: surface.id })),
       ...Object.keys(this.project.instances).map(instanceId => ({ kind: 'instance' as const, instanceId }))]
+    if (profile === 'references') return references.map(reference => ({ reference,
+      instanceId: reference.kind === 'instance' ? reference.instanceId : reference.kind === 'surface' ? reference.surfaceId : this.project!.id }))
     return references.flatMap(reference => { const target = this.target(reference); return target ? [{ reference, instanceId: target.instanceId, value: target.read() }] : [] })
   }
   dispose(): Promise<void> {

@@ -87,14 +87,14 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
       mode: player ? 'play' : 'edit',
       teacherController: navigation,
       resolveBuiltin: (_key, signal) => prepareSandboxComponent({ format: 'esm', code: webContentRealmSource(), css: '', diagnostics: [] }, signal,
-        { builtinKey: _key, state: () => runtime.stateSnapshot(), targets: () => runtime.targetSnapshots(), instance: async value => resolveWebResourceBindings(await projectWebModuleGraph(value, input => window.desktopAPI.compileComponent(input), message => callbacks.current.report(message)), id => runtime.contentAssetUrl(id), message => callbacks.current.report(message)), htmlAuthoring: true, teacherController: navigation,
+        { builtinKey: _key, state: () => runtime.stateSnapshot(), targets: profile => runtime.targetSnapshots(profile), instance: async value => resolveWebResourceBindings(await projectWebModuleGraph(value, input => window.desktopAPI.compileComponent(input), message => callbacks.current.report(message)), id => runtime.contentAssetUrl(id), message => callbacks.current.report(message)), htmlAuthoring: true, teacherController: navigation,
           connectOrigins: () => current.current.project.logic?.network?.connectOrigins ?? [], themeCss: () => runtime.themeCss(), resources: () => runtime.resourceUrls() }),
       resolveSource: async (implementation, signal) => {
         const input = componentCompilationInput(current.current.project, implementation, current.current.resources)
         const compilation = await window.desktopAPI.compileComponent(input)
         if (signal.aborted) throw new Error('组件源码准备已取消')
         if (compilation.status === 'failed') throw new Error(compilation.diagnostics.map(value => `${value.file ?? ''}:${value.line ?? ''} ${value.message}`).join('\n'))
-        return prepareSandboxComponent(compilation.artifact, signal, { state: () => runtime.stateSnapshot(), targets: () => runtime.targetSnapshots(), teacherController: navigation,
+        return prepareSandboxComponent(compilation.artifact, signal, { state: () => runtime.stateSnapshot(), targets: () => runtime.targetSnapshots('full'), teacherController: navigation,
           connectOrigins: () => current.current.project.logic?.network?.connectOrigins ?? [], themeCss: () => runtime.themeCss(), resources: () => runtime.resourceUrls(), resourceBindings: implementation.resourceBindings })
       },
     })
