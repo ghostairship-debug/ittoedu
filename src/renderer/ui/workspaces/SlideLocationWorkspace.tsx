@@ -178,6 +178,10 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
   const canvasMenu = useContextMenu()
   const project = snapshot.project
   const surface = project?.surfaces.find(value => value.id === snapshot.surfaceId)
+  const visitedSurfaces = useMemo(() => new Set<string>(), [snapshot.documentId, project?.id])
+  useLayoutEffect(() => {
+    if (surface?.kind === 'slide') visitedSurfaces.add(surface.id)
+  }, [visitedSurfaces, surface?.id, surface?.kind])
   const canvas = surface?.designSize ?? { width: 960, height: 640 }
   const stageTransform = useMemo(() => createStageViewportTransform({ viewport, stage: canvas, fit: 'page', zoom: view.zoom, pan: { x: view.x, y: view.y } }),
     [viewport, canvas.width, canvas.height, view])
@@ -579,7 +583,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
           backgroundPosition: 'center', backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit }}>
         <div className="canvas-stage canvas-stage--authoring" data-testid="canvas-stage" style={{ position: 'absolute', inset: 0, visibility: 'visible', pointerEvents: 'auto' }}>
           {project.global.underlay.map(id => <SlideInstance key={id} id={id} project={project} surfaceId={surface.id} preview={linePreview ? { ...preview.preview, [linePreview.instanceId]: linePreview.frame } : preview.preview} ports={ports} />)}
-          {project.surfaces.filter(value => value.kind === 'slide').map(value => <div key={value.id} hidden={value.id !== surface.id} style={{ position: 'absolute', inset: 0 }}>
+          {project.surfaces.filter(value => value.kind === 'slide' && (value.id === surface.id || visitedSurfaces.has(value.id))).map(value => <div key={value.id} hidden={value.id !== surface.id} style={{ position: 'absolute', inset: 0 }}>
             {value.childIds.map(id => <SlideInstance key={id} id={id} project={project} surfaceId={value.id} preview={linePreview ? { ...preview.preview, [linePreview.instanceId]: linePreview.frame } : preview.preview} ports={ports} />)}
           </div>)}
           {project.global.overlay.map(id => <SlideInstance key={id} id={id} project={project} surfaceId={surface.id} preview={linePreview ? { ...preview.preview, [linePreview.instanceId]: linePreview.frame } : preview.preview} ports={ports} />)}
