@@ -1,0 +1,8 @@
+# remaining-required-20261006 剩余问题统一修复
+
+- Status / Owner: active / Root（唯一集成 writer；L/M/R1/R2/R3/R4/R6 在隔离 worktree，Reviewer 只读）
+- Outcome / Evidence: Owner 2026-10-06 明确授权桌面 20261006-剩余问题统一执行方案 L、M、R1–R5 及一批 R6。接手 bc4628bd，工作树干净；旧卡无产品写锁，未见候选 Electron 活跃进程；历史探针进程保留。已实际派发七个独立实现域、一个性能证据域和独立 Reviewer；不重派已完成及撤回项，不调用收费模型、不发布。
+- Write scope: 正式承载 D:/果铃恢复候选/20261005-v10-migration；Root 独占本卡、TASK_BOARD、共享 App/生成接线及 R5 workspaceMediaDrop.ts，顺序集成。隔离根 D:/果铃恢复候选/20261006-required-leaves：L=l 的 htmlAssembly/browserCapture/application/html 和必要 placement；M=m 的 launcher/package/Main/IPC/观察服务/export builder-worker；R1=r1 的 moduleGraph/ComponentPlatformRuntime/SandboxComponentImplementation/CourseV10RuntimeView/publishedPlayer；R2=r2 的 backgroundPreview；R3=r3 的 health panel/router/export dialog/delivery route；R4=r4 的 StyleRemixForm；R6=r6 的有界共享测试 helper 与直接 fixture。各域只写直接目标测试，额外共享路径回 Root 协调。重要结构引用指定方案，保唯一 Session/History、Source 同步读、GUI 草稿、权限根、既有输入和人工 frame；Reviewer 审实际 diff 和保留行为。原工作区与用户样本只读，QA 用独立副本/profile/端口。
+- Write locks: main-preload, published-dynamic, published-producer, diagnostics, app-save-recovery, props-shared, workspace-shell
+- Acceptance: L 同父 bg1/gradient2/context5 绘制正确且文字可编辑；M 无工作台 App 后台启动、真实 workspace/owner/ready、按需观察导出 worker、attach/detach 和正常 owned stop；R1 静态 references 跳过 values，执行面/Source full 与单调升级；R2 瞬态完整身份和正式一次提交/Undo；R3 现 collector/report 唯一路由；R4 V10 槽位和真实 ACK；R5 required captured；R6 一个真实 V10 测试调用闭包。真实闭环证明 committed、保存冷开和 HTML 输出，各层事实分别记录。
+- Validation: 各包方案规定 1–3 个聚焦检查；L/M 共用一次零模型 SDK optics apply/observe/局部编辑/save/export/正常退出/冷开；R1 同原 rev32/pg4 一次公开观察与载荷/构造次数/内存/释放对照。沿用有效旧证据，相关构建只准备一次；重要结构候选独立 review，不跑全矩阵，不将未复现 native 说成根因已完全修复。
