@@ -16,7 +16,7 @@ import {
   clearHtmlPreviewFrameEntries,
 } from './security'
 import { askMediaCapture } from './mediaCapturePrompt'
-import { editorEntryUrl } from './protocols'
+import { resolveRendererEntryUrl } from './rendererEntry'
 import { documentHost } from './workbench/documentHost'
 import { releaseAllHtmlPreviewLeases } from './ipc'
 import { saveDocumentWithDialog } from './workbench/documentSaveDialog'
@@ -39,23 +39,6 @@ function getPreloadPath(): string {
 function getIconPath(): string | undefined {
   const iconPath = path.join(app.getAppPath(), 'resources', 'icons', 'icon.png')
   return fs.existsSync(iconPath) ? iconPath : undefined
-}
-
-function parseDevelopmentServerUrl(): URL | null {
-  if (app.isPackaged || !process.env.VITE_DEV_SERVER_URL) return null
-
-  let url: URL
-  try {
-    url = new URL(process.env.VITE_DEV_SERVER_URL)
-  } catch {
-    throw new Error('VITE_DEV_SERVER_URL 不是有效地址。')
-  }
-
-  const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]'])
-  if (url.protocol !== 'http:' || !loopbackHosts.has(url.hostname)) {
-    throw new Error('开发服务器只能使用本机 HTTP 地址。')
-  }
-  return url
 }
 
 async function confirmClose(window: BrowserWindow): Promise<DocumentCloseChoice> {
@@ -121,8 +104,9 @@ export async function createMainWindow(
   appState: AppState,
   onCreated?: (result: MainWindowResult) => void,
 ): Promise<MainWindowResult> {
-  const developmentServerUrl = parseDevelopmentServerUrl()
-  const rendererEntryUrl = developmentServerUrl?.toString() ?? editorEntryUrl()
+  const rendererEntryUrl = resolveRendererEntryUrl()
+  const resolvedEntry = new URL(rendererEntryUrl)
+  const developmentServerUrl = resolvedEntry.protocol === 'http:' ? resolvedEntry : null
 
   const baseNetworkOrigins = new Set<string>()
   if (developmentServerUrl) {

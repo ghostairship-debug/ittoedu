@@ -8,15 +8,19 @@ import { executionDesktopService } from '../execution/ExecutionDesktopService'
 import { AgentFileService } from '../execution/AgentFileService'
 import { documentHost } from '../documentHost'
 import { createElectronCredentialEncryption } from '../providers/providerCredentials'
-import { operateWorkspaceFiles } from '../workspaceFilesDesktopService'
+import { authorizeWorkspaceFilesRoot, operateWorkspaceFiles } from '../workspaceFilesDesktopService'
 import { ExternalMcpService, type ExternalApproval } from './ExternalMcpService'
 import { ResidentMcpSettingsStore } from './ResidentMcpSettings'
 
 let singleton: Promise<ExternalMcpService> | undefined
 let mainWindow: (() => BrowserWindow | null) | undefined
 let uiState: (() => Promise<ExternalUiState | null>) | undefined
+let headless = false
+
+export function configureHeadlessExternalMcp(): void { headless = true }
 
 async function confirmExternalChange(request: ExternalApproval): Promise<boolean> {
+  if (headless) throw new Error('后台宿主无法显示交互授权；请使用已授权工作空间内路径，或连接图形宿主完成批准。')
   const options: MessageBoxOptions = { type: 'question', title: '外部 AI 请求修改', message: `外部 AI · ${request.clientName} 请求「${request.label}」`,
     detail: [request.reason === 'ask' ? '此外部会话的权限为「修改前询问」。' : '修改目标位于当前工作空间之外。',
       ...(request.paths?.length ? ['涉及：', ...request.paths] : [])].join('\n'),
@@ -93,3 +97,14 @@ export async function operateExternalMcp(raw: unknown): Promise<unknown> {
 /** Default on: listen when the app starts; an occupied port is reported in settings without affecting the rest of the app. */
 export async function startExternalMcpService(): Promise<void> { await (await externalMcpService()).start() }
 export async function closeExternalMcpService(): Promise<void> { if (singleton) await (await singleton).close() }
+
+/** Explicit CLI workspace grants the same root authorization as native workspace selection. */
+export async function bindHeadlessMcpWorkspace(directory: string): Promise<string> {
+  const root = await authorizeWorkspaceFilesRoot(directory), execution = await executionDesktopService()
+  const normalize = (value: string) => process.platform === 'win32' ? value.toLowerCase() : value
+  const previous = (await execution.conversations.listWorkspaces()).find(space => normalize(space.rootPath) === normalize(root.resolvedPath))
+  const workspace = previous ?? await execution.conversations.registerWorkspace({ workspaceId: randomUUID(), rootPath: root.resolvedPath,
+    managed: false, authorization: 'user-selected' })
+  await (await externalMcpService()).setInitialWorkspace(workspace.workspaceId)
+  return root.resolvedPath
+}

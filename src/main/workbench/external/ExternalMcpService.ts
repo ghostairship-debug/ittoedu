@@ -105,6 +105,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
   private message?: string
   private lifecycle: Promise<unknown> = Promise.resolve()
   private lastWorkspaceId?: string
+  private readonly requests = new Set<Promise<unknown>>()
   private readonly now: () => number
   constructor(private readonly options: ExternalMcpServiceOptions) { this.now = options.now ?? Date.now }
 
@@ -181,7 +182,25 @@ export class ExternalMcpService implements ResidentMcpHandler {
       session.conversation = undefined; session.conversationId = undefined
     }
   }
-  close(): Promise<void> { return this.serial(async () => { this.state = 'disabled'; await this.server.stop(); await this.closeSessions() }) }
+  close(): Promise<void> { return this.serial(async () => {
+    this.state = 'disabled'; await this.server.stop(); await this.closeSessions()
+    // Transport disposal is not completion of the received tool calls or their event/journal ACKs.
+    await Promise.allSettled([...this.requests])
+  }) }
+
+  /** Startup chooses a registered, already-authorized root; it grants no extra authority. */
+  async setInitialWorkspace(workspaceId: string): Promise<void> {
+    if (!await this.options.conversations.readWorkspace(workspaceId)) throw new Error('后台工作空间未登记')
+    this.lastWorkspaceId = workspaceId
+  }
+
+  async connectionInfo(): Promise<{ endpoint: string; workspace: string; workspaceId: string; permission: ExecutionPermissionMode }> {
+    const status = await this.status()
+    if (status.state !== 'running') throw new Error(status.message ?? '外部 MCP 未在监听')
+    const workspaceId = await this.currentWorkspace(), workspace = await this.options.conversations.readWorkspace(workspaceId)
+    if (!workspace) throw new Error('宿主工作空间已移除')
+    return { endpoint: status.endpoint, workspaceId, workspace: await this.options.workspaceRoot(workspace.rootPath), permission: status.settings.permission }
+  }
 
   private view(session: Session): ExternalSessionView {
     return { sessionId: session.sessionId, clientName: session.clientName, workspaceId: session.workspaceId, workspaceName: session.workspaceName,
@@ -237,7 +256,9 @@ export class ExternalMcpService implements ResidentMcpHandler {
     const session = this.sessions.get(sessionId)
     if (!session) return
     this.sessions.delete(sessionId)
-    void this.stopRun(session.runId).catch(() => undefined)
+    const stopping = this.stopRun(session.runId).catch(() => undefined)
+    this.requests.add(stopping)
+    void stopping.finally(() => this.requests.delete(stopping))
   }
   async request(sessionId: string, call: ResidentMcpCall): Promise<unknown> {
     const session = this.sessions.get(sessionId)
@@ -250,7 +271,10 @@ export class ExternalMcpService implements ResidentMcpHandler {
         ...(tool.read ? { annotations: { readOnlyHint: true } } : {}) })) }
     }
     if (call.method !== 'tools/call') throw new McpProtocolError(-32601, '不支持此 MCP 方法')
-    const result = await this.callTool(session, call)
+    const pending = this.callTool(session, call)
+    this.requests.add(pending)
+    let result: unknown
+    try { result = await pending } finally { this.requests.delete(pending) }
     if (session.listChanged) { session.listChanged = false; call.notify('notifications/tools/list_changed') }
     return result
   }

@@ -27,6 +27,8 @@
     "build:renderer": "vite build --config vite.renderer.config.ts",
     "build:electron": "node scripts/build-electron.mjs",
     "start:quick": "node scripts/prepare-source-launch.mjs && cross-env VITE_DEV_SERVER_URL= tsx scripts/launch-electron.ts .",
+    "mcp:server": "tsx scripts/launch-mcp-server.ts",
+    "mcp:connect": "tsx scripts/connect-mcp.ts",
     "build:file-publish-helper": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-file-publish-helper.ps1",
     "build:clipboard-helper": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/build-clipboard-helper.ps1",
     "build:built-in-components": "node resources/built-in-components/scripts/build-components.mjs",

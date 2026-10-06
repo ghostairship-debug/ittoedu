@@ -18,6 +18,7 @@ import { DocumentDeliveryService } from './delivery/DocumentDeliveryService'
 import { ExecutionRunStore } from './execution/ExecutionRunStore'
 import { DocumentDeliveryOperationStore } from './delivery/DocumentDeliveryOperationStore'
 import { DocumentExportPort } from './delivery/DocumentExportPort'
+import { HeadlessDocumentExportWorker } from './delivery/HeadlessDocumentExportWorker'
 import { resolveExportDestination, resolveSaveDestination, workbenchExportWriter } from './workbenchDeliveryAdapters'
 import { frozenImageRoles } from './images/frozenImageRoles'
 import { ImageGenerationService } from './images/ImageGenerationService'
@@ -47,11 +48,15 @@ let browserActionApprovals: BrowserActionApprovals | undefined
 let browserService: ManagedBrowserMcpService | undefined
 let exportPort: DocumentExportPort | undefined
 let exportOwnerId: number | undefined
+let headlessExportWorker: HeadlessDocumentExportWorker | undefined
 export function acceptWorkbenchExportBuildReply(reply: ExportBuildReply, senderId: number): boolean {
   return exportPort?.accept(reply, senderId) ?? false
 }
 export function disposeWorkbenchExportPort(): void {
   exportPort?.dispose(); exportPort = undefined; exportOwnerId = undefined
+}
+export function disposeHeadlessWorkbenchWorkers(): void {
+  headlessExportWorker?.dispose(); headlessExportWorker = undefined
 }
 export function workbenchImageService(): ImageGenerationService {
   if (!imageService) throw new Error('图片服务尚未安装')
@@ -99,9 +104,14 @@ export function workbenchBrowserApprovalContext(runId: string): { pageUrl?: stri
   return browserService.approvalContext(runId)
 }
 /** One DocumentHost owns the Gateway used by the built-in Engine and all external MCP clients. */
-export function installWorkbenchToolServices(context: { getMainWindow(): BrowserWindow | null; getRendererEntryUrl(): string | null }): void {
+export function installWorkbenchToolServices(context: { getMainWindow(): BrowserWindow | null; getRendererEntryUrl(): string | null; headless?: boolean }): void {
   if (installed) return
   const host = documentHost(), directory = path.join(app.getPath('userData'), 'workbench-v2')
+  if (context.headless) {
+    const entry = context.getRendererEntryUrl()
+    if (!entry) throw new Error('后台导出资源入口不可用')
+    headlessExportWorker = new HeadlessDocumentExportWorker(entry, host.compilation)
+  }
   const roles = frozenImageRoles(async role => (await executionSettingsStore()).snapshot(role))
   const oauthImages = new ChatGPTImageProvider({ credentialResolver: resolveOAuthCredential })
   const apiImages = new OpenAIImagesApiProvider({ credentialResolver: connection => executionSettingsStore().then(store => store.resolveCredential(connection)) })
@@ -177,6 +187,8 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       prepareDrafts: async (documentId, epoch) => {
         const snapshot = await host.registry.get(documentId).drain()
         if (snapshot.epoch !== epoch || snapshot.model.kind !== 'course-v10') throw new Error('导出目标已关闭或重开')
+        // This branch exists only on the dedicated Main host, never an attachment to GUI.
+        if (context.headless) return
         const reply = await currentExportPort().build({ requestId: randomUUID(), phase: 'drain', format: 'html-offline', snapshot,
           identity: { documentId, epoch, revision: snapshot.revision, projectId: snapshot.model.project.id } })
         if (reply.status !== 'drained') throw new Error(reply.reason ?? '课件编辑尚未完成，未生成导出')
@@ -192,7 +204,8 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     resolveSaveDestination: ({ runId, snapshot, requested }) => resolveSaveDestination(runId, snapshot, requested, id => host.tools.runFileAccess(id)),
     resolveExportDestination: ({ runId, snapshot, requested, format, suggestedName }) =>
       resolveExportDestination(runId, snapshot, requested, suggestedName, format, id => host.tools.runFileAccess(id)),
-    build: { build: (request, signal) => currentExportPort().build(request, signal) },
+    build: { build: (request, signal) => context.headless
+      ? headlessExportWorker!.build(request, signal) : currentExportPort().build(request, signal) },
     writer: workbenchExportWriter,
     withFileOperation: work => host.fileCoordinator.withFileOperation(work),
     assertExportTarget: async filename => {
