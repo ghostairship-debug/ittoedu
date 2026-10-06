@@ -1,9 +1,34 @@
 // @vitest-environment node
 import path from 'node:path'
+import os from 'node:os'
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
-import { readExplicitMcpConnection, requireCurrentProjectSave } from '../../scripts/mcpSdkClient'
+import { connectExplicitMcp, readExplicitMcpConnection, requireCurrentProjectSave } from '../../scripts/mcpSdkClient'
+import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
+import { residentMcpFixture } from '../helpers/residentMcpFixture'
 
 describe('direct MCP SDK connection facts', () => {
+  it('calls the actual resident schema with flat arguments and detaches without stopping its owner', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'direct-mcp-sdk-example-'))
+    let fixture: Awaited<ReturnType<typeof residentMcpFixture>> | undefined
+    let sdk: Awaited<ReturnType<typeof connectExplicitMcp>> | undefined
+    try {
+      const workspace = path.join(directory, 'workspace'); await mkdir(workspace)
+      await writeFile(path.join(workspace, 'example.md'), 'Existing editable document')
+      fixture = await residentMcpFixture({ host: new DocumentHostService(path.join(directory, 'documents')), directory, workspaceRoot: workspace })
+      const connection = readExplicitMcpConnection({ endpoint: (await fixture.service.status()).endpoint, token: fixture.token() })
+      sdk = await connectExplicitMcp(connection)
+      const opened = await sdk.call('file.open', { path: 'example.md' })
+      expect(opened.isError).toBe(false)
+      expect(opened.structuredContent).toMatchObject({ result: { kind: 'read', data: { target: expect.any(String), writable: true } } })
+      await sdk.detach(); sdk = undefined
+      expect((await fixture.service.status()).state).toBe('running')
+      expect(fixture.service.server.listeningPort).toBeGreaterThan(0)
+    } finally {
+      await sdk?.detach(); await fixture?.close()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
   it('uses explicit ready/configuration credentials and retains the owner workspace', () => {
     expect(readExplicitMcpConnection({ endpoint: 'http://127.0.0.1:45888/mcp', token: 'explicit', workspaceId: 'existing-owner-space', pid: 123 }))
       .toEqual({ endpoint: 'http://127.0.0.1:45888/mcp', token: 'explicit', workspaceId: 'existing-owner-space' })

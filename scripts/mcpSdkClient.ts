@@ -24,7 +24,7 @@ export async function connectExplicitMcp(connection: ExplicitMcpConnection, name
   catch (error) { await client.close().catch(() => undefined); throw error }
   return {
     client,
-    call: (name: string, args: Record<string, unknown> = {}) => client.callTool({ name, arguments: { arguments: args } }),
+    call: (name: string, args: Record<string, unknown> = {}) => client.callTool({ name, arguments: args }),
     detach: () => client.close(),
   }
 }
