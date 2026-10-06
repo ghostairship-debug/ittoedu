@@ -42,3 +42,7 @@ Thumbs.db
 
 # Local authoring inputs and profiles are user material, not product source.
 scratch/
+
+# Local archived evidence, profiles and recovery material stay in this checkout,
+# but are not product sources or remote Git payloads.
+docs/archive/local/
