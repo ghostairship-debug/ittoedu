@@ -12,6 +12,7 @@ import { ExecutionEventStore } from '../../src/main/workbench/execution/Executio
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import type { ModelEvent, ModelProvider, ModelRequest, ModelSelection } from '../../src/shared/workbench/modelProvider'
 import type { ToolResult } from '../../src/shared/workbench/tools'
+import type { ContentApplyResult } from '../../src/core/contentApply/planning/types'
 import { residentMcpFixture, type ResidentToolReply } from '../helpers/residentMcpFixture'
 
 const callTool = async (client: Client, name: string, args: Record<string, unknown> = {}) =>
@@ -96,7 +97,9 @@ it('projects canonical receipts through public MCP and built-in messages while r
         changes: data.receipt.appliedChanges.changes.map(({ value: _value, ...change }: any) => change) })
       expect(receipt).toMatchObject({ documentId: document.documentId, operationId: data.receipt.operationId,
         beforeRevision: data.receipt.beforeRevision, revision: data.receipt.revision, persistence: 'recoverable', status: 'applied' })
-      expect(projected.data).toMatchObject({ input: data.input, insertedIds: data.insertedIds, diagnostics: data.diagnostics })
+      expect(projected.data).toMatchObject({ input: { intent: 'canonical', edits: [{ type: 'project.theme.set', fields: ['theme'] }] },
+        insertedIds: data.insertedIds, diagnostics: data.diagnostics })
+      expect(JSON.stringify(projected.data)).not.toContain(css)
       expect(JSON.stringify(data.input)).toContain(css)
       const direct: ToolResult = { kind: 'document-operation', result: data.receipt, affected: ['stable-handle'] }
       expect(modelToolResult('object.update', direct)).toEqual({ ...direct, result: receipt })
@@ -116,3 +119,67 @@ it('projects canonical receipts through public MCP and built-in messages while r
     await rm(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 })
   }
 })
+
+it.each(['committed', 'not_committed', 'unchanged', 'unknown'] as const)(
+  'projects %s HTML/original bytes through both message exits without changing raw run results', async commit => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'creation-apply-input-'))
+    let mcp: Awaited<ReturnType<typeof residentMcpFixture>> | undefined
+    try {
+      const workspaceRoot = path.join(directory, 'workspace')
+      await mkdir(workspaceRoot)
+      const host = new DocumentHostService(path.join(directory, 'documents'))
+      const document = await host.internalAPI.create({ kind: 'course-v10', project: createBlankCourseProjectV10('Input'),
+        resources: { assets: {}, components: {} } }, 'input-projection.h5lesson')
+      const source = '<html><body>原件正文不能随回执回传</body></html>'
+      const data: ContentApplyResult = { commit, usability: commit === 'not_committed' ? 'unusable' : commit === 'unknown' ? 'unverified' : 'usable',
+        delivery: 'not_requested', insertedIds: [], diagnostics: [{ code: 'fixture-diagnostic', level: 'warning', message: '下一步读取目标', repairable: true }],
+        input: { intent: 'content', target: { kind: 'instance', instanceId: 'fixture-target' },
+          source: { kind: 'html', html: source, original: { filename: 'experiment.html', mimeType: 'text/html', bytes: new TextEncoder().encode(source) } } },
+        ...(commit === 'committed' ? { receipt: { status: 'applied', documentId: document.documentId, operationId: 'fixture-operation',
+          beforeRevision: 0, revision: 1, persistence: 'recoverable', appliedChanges: { affectedTargets: ['fixture-target'],
+            changes: [{ path: ['instances', 'fixture-target', 'data'], exists: true, value: source }] } } } : {}) }
+      const raw: ToolResult = { kind: 'read', data: { ...data, path: 'pages/02-实验.html' } }
+      const before = structuredClone(raw)
+      const originalExecute = host.tools.execute.bind(host.tools)
+      vi.spyOn(host.tools, 'execute').mockImplementation(async (...args) =>
+        args[2].name === 'project.apply' ? raw : originalExecute(...args))
+      // The host result is a fixture; the two public message carriers and raw run persistence are real.
+      mcp = await residentMcpFixture({ host, directory, workspaceRoot })
+      mcp.ui.state = { workspaceId: 'space', activeDocumentId: document.documentId }
+      const client = await mcp.connect(`input-${commit}`)
+      await callTool(client, 'workbench.state')
+      await callTool(client, 'tools.load', { families: ['content'] })
+      const reply = await callTool(client, 'project.apply', { path: 'theme.css', content: '.fixture {}' })
+      const expected = modelToolResult('project.apply', raw)
+      expect(reply.structuredContent.result).toEqual(expected)
+      expect(JSON.parse(reply.content[0]!.text!)).toEqual(expected)
+
+      let turns = 0
+      const provider: ModelProvider = { async *stream(request) {
+        yield ++turns === 1 ? complete(request, 'tools.load', { families: ['content'] })
+          : turns === 2 ? complete(request, 'project.apply', { path: 'theme.css', content: '.fixture {}' }) : complete(request)
+      } }
+      const runs = new ExecutionRunStore(path.join(directory, 'runs'))
+      const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider, runs,
+        events: new ExecutionEventStore({ directory: path.join(directory, 'events') }) })
+      const started = await engine.start({ conversationId: `input-${commit}`, taskId: `input-${commit}`,
+        instruction: 'Apply the content', selection, workspaceRoot, permission: 'workspace',
+        documents: [{ documentId: document.documentId, writable: [{ kind: 'document' }] }] })
+      const finished = await engine.wait(started.runId)
+      const tool = finished.tools.find(item => item.call.name === 'project.apply')!
+      const message = finished.messages.find(item => item.role === 'tool' && item.tool_call_id === tool.providerCallId)!
+      expect(JSON.parse(String(message.content))).toEqual(expected)
+      // wait() reads the existing JSON checkpoint: compare every raw value in that carrier, including all byte indices.
+      expect(tool.result).toEqual(JSON.parse(JSON.stringify(raw)))
+      expect((await runs.read(started.runId))!.tools.find(item => item.call.name === 'project.apply')!.result).toEqual(JSON.parse(JSON.stringify(raw)))
+      expect(JSON.stringify(expected)).not.toContain(source)
+      expect((expected as any).data.input.source.original).toEqual({ filename: 'experiment.html', mimeType: 'text/html' })
+      expect((expected as any).data).toMatchObject({ commit: data.commit, usability: data.usability, diagnostics: data.diagnostics, path: 'pages/02-实验.html' })
+      expect(raw).toEqual(before)
+      expect((raw as any).data.input.source.original.bytes).toEqual(new TextEncoder().encode(source))
+    } finally {
+      vi.restoreAllMocks()
+      await mcp?.close()
+      await rm(directory, { recursive: true, force: true, maxRetries: 8, retryDelay: 25 })
+    }
+  })

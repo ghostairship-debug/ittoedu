@@ -2,6 +2,7 @@ import type { ExecutionRunRecord, ExecutionToolRecord } from '../../../shared/wo
 import type { ToolResult } from '../../../shared/workbench/tools'
 import { USER_QUESTION_TOOL } from '../../../shared/workbench/userQuestion'
 import { agentFileMutationNames } from '../../../core/tools/AgentFileTools'
+import { committedFact, contentApplyFact, currentSave, knownApplication, operationFact, saveFact } from './executionToolFacts'
 
 export const committed = (result?: ToolResult): result is Extract<ToolResult, { kind: 'document-operation' }> =>
   result?.kind === 'document-operation' && (result.result.status === 'applied' || result.result.status === 'unchanged')
@@ -15,7 +16,7 @@ const fileMutations = new Set<string>(agentFileMutationNames)
 
 export function persistedToolWork(name: string, result?: ToolResult): boolean {
   const status = serviceToolOutcome(name, result)?.status
-  return committed(result) || fileCreated(name, result) || status === 'saved' || status === 'written'
+  return knownApplication(name, result) || fileCreated(name, result) || status === 'saved' || status === 'written'
 }
 
 /** Only tools whose read receipt is itself a service job use its status for task settlement. */
@@ -24,6 +25,14 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
     return { status: 'stopped', message: result.message }
   if (result?.kind !== 'read' || !result.data || typeof result.data !== 'object') return null
   const data = result.data as Record<string, unknown>
+  const apply = contentApplyFact(name, result)
+  if (apply) {
+    const diagnostic = apply.diagnostics.find(item => item.level === 'error')?.message
+    if (apply.commit === 'unknown') return { status: 'unknown', message: diagnostic ?? '内容提交结果未知；请查询原操作回执，不要重放' }
+    if (apply.commit === 'not_committed') return { status: 'failed', message: diagnostic ?? '内容修改未提交' }
+    if (apply.usability === 'unusable' || apply.usability === 'partial')
+      return { status: 'failed', message: diagnostic ?? (apply.usability === 'unusable' ? '内容已提交，但当前不能使用' : '内容已提交，仍有局部问题待修复') }
+  }
   if (name === 'course.createFromHtml') {
     if (data.status === 'saved' && data.saved === true) return { status: 'saved', message: 'HTML 课件已创建并保存' }
     if (data.status === 'imported') return { status: 'failed', message: typeof data.saveError === 'string' ? data.saveError : 'HTML 已导入，保存尚未成功' }
@@ -40,7 +49,10 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
     if (document.status !== 'applied' && document.status !== 'unchanged')
       return { status: 'failed', message: typeof document.message === 'string' ? document.message : '文件文档事务未提交' }
   }
+  const saved = saveFact(name, result)
+  if (saved) return { status: 'saved', message: currentSave(saved) ? '文件已保存' : '文件已保存到原版本，期间的新修改仍未保存' }
   if (name === 'file.save' && data.status === 'saved') return { status: 'saved', message: data.dirty === true ? '文件已保存到原版本，期间的新修改仍未保存' : '文件已保存' }
+  if (name === 'project.save') return { status: 'failed', message: typeof data.reason === 'string' ? data.reason : '当前课件保存尚未确认' }
   if (name === 'artifact.save') {
     if (data.status === 'written') return { status: 'written', message: '作业成果已保存为新文件' }
     if (data.status === 'unknown') return { status: 'unknown', message: '成果交付回执未知，请核对目标文件，不要重试同一操作' }
@@ -83,6 +95,7 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
 
 export const toolFailed = (name: string, result?: ToolResult) => result?.kind === 'error' ||
   result?.kind === 'document-operation' && !committed(result) ||
+  name === 'project.save' && !!saveFact(name, result) && !currentSave(saveFact(name, result)) ||
   ['failed', 'unknown', 'pending', 'stopped'].includes(serviceToolOutcome(name, result)?.status ?? '')
 
 /** Purpose describes an optional read, never authority or an exception for side effects. */
@@ -158,7 +171,7 @@ function sameObservedTarget(failed: ExecutionToolRecord, later: ExecutionToolRec
     && JSON.stringify(stable(failed.effectTargets)) === JSON.stringify(stable(later.effectTargets))
 }
 const delivered = (tool: ExecutionToolRecord) => !failedTool(tool)
-  && (committed(tool.result) || fileCreated(tool.call.name, tool.result)
+  && (knownApplication(tool.call.name, tool.result) || fileCreated(tool.call.name, tool.result)
     || tool.result?.kind === 'read' && (tool.call.name === 'file.read' || tool.call.name === 'material.read'
       || tool.call.name === 'image.generate' && (tool.result.data as { status?: unknown })?.status === 'ready'
       || tool.call.name === 'image.edit' && (tool.result.data as { status?: unknown })?.status === 'ready'
@@ -199,12 +212,13 @@ function recoveredDeliveryFailures(record: ExecutionRunRecord): Set<ExecutionToo
       && typeof data?.documentId === 'string' && typeof data.path === 'string')
       filePaths.set(handleKey(data.path), data.documentId)
     if ((tool.call.name === 'read' || tool.call.name === 'inspect') && parentDocument && typeof data?.target === 'string') handles.set(handleKey(data.target), parentDocument)
-    if ((tool.call.name === 'file.save' || tool.call.name === 'document.export') && parentDocument
+    if ((tool.call.name === 'file.save' || tool.call.name === 'project.save' || tool.call.name === 'document.export') && parentDocument
       && tool.result?.kind === 'error' && ['target-conflict', 'invalid-target', 'not-authorized', 'delivery-rejected'].includes(tool.result.code))
       pending.push({ tool, documentId: parentDocument, destination: typeof input.destination === 'string' ? input.destination : undefined, format: input.format })
-    if (tool.call.name === 'file.save' && data?.status === 'saved' && data.dirty === false
-      && data.savedRevision === data.currentRevision && typeof data.documentId === 'string')
-      for (const failed of pending) if (failed.tool.call.name === 'file.save' && failed.documentId === data.documentId) resolved.add(failed.tool)
+    const saved = saveFact(tool.call.name, tool.result)
+    if (currentSave(saved) && matchesSaveBinding(record, saved!))
+      for (const failed of pending) if ((failed.tool.call.name === 'file.save' || failed.tool.call.name === 'project.save')
+        && failed.documentId === saved!.documentId) resolved.add(failed.tool)
     if (tool.call.name === 'document.export' && data?.status === 'written' && typeof data.documentId === 'string')
       for (const failed of pending) if (failed.tool.call.name === 'document.export' && failed.documentId === data.documentId
         && failed.format === data.format && (!failed.destination || failed.destination === data.path)) resolved.add(failed.tool)
@@ -234,7 +248,10 @@ function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord
     // An unanswered or malformed question changed nothing; it is not an unfinished document operation.
     if (tool.call.name === USER_QUESTION_TOOL) return false
     if (tool.state !== 'returned') return true
-    if (!failedTool(tool)) return false
+    const saved = saveFact(tool.call.name, tool.result)
+    const wrongProjectSave = tool.call.name === 'project.save' && saved
+      && (!matchesSaveBinding(record, saved) || tool.effectTargets?.length === 1 && tool.effectTargets[0]!.documentId !== saved.documentId)
+    if (!failedTool(tool) && !wrongProjectSave) return false
     // A modification the user declined is the user's decision, not an unfinished operation.
     if (tool.result?.kind === 'error' && tool.result.code === 'user-denied') return false
     const pending = pendingJob(tool)
@@ -249,7 +266,7 @@ function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord
     if (resolvedDelivery.has(tool)) return false
     if (record.tools.slice(index + 1).some(later => (requestKey(later) === requestKey(tool) || sameIntendedEdit(tool, later))
       && later.state === 'returned' && !failedTool(later)
-      && (committed(later.result) || later.result?.kind === 'read'))) return false
+      && (knownApplication(later.call.name, later.result) || later.result?.kind === 'read' && recoversProjectSave(record, tool, later)))) return false
     // A malformed model call never reached a tool. Once a concrete result was
     // delivered, keep that attempt in history without letting its syntax alone
     // downgrade the task. Failed requested writes and unknown effects still do.
@@ -262,7 +279,26 @@ function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord
   })
 }
 
-interface NewFileDeliveryFact { documentId: string; label: string; revision: number | null; savedRevision: number | null }
+interface NewFileDeliveryFact { documentId: string; label: string; path?: string; revision: number | null; savedRevision: number | null }
+const pathKey = (value: string) => value.replace(/\\/g, '/').replace(/\/$/, '').toLowerCase()
+function matchesSaveBinding(record: ExecutionRunRecord, saved: NonNullable<ReturnType<typeof saveFact>>, createdPath?: string): boolean {
+  const binding = record.documentBindings?.[saved.documentId]
+  if (binding) {
+    if (typeof saved.epoch === 'string' && binding.epoch !== saved.epoch) return false
+    // The persistence owner carries the proved save revision through a formal rename/Save As.
+    // Its current location must not invalidate a historical receipt for those same saved bytes.
+    if (binding.savedRevision >= saved.savedRevision!) return true
+    return typeof saved.path !== 'string' || pathKey(binding.path) === pathKey(saved.path)
+  }
+  return !createdPath || !saved.path || pathKey(createdPath) === pathKey(saved.path)
+}
+function recoversProjectSave(record: ExecutionRunRecord, failed: ExecutionToolRecord, later: ExecutionToolRecord): boolean {
+  if (later.call.name !== 'project.save') return true
+  const saved = saveFact(later.call.name, later.result)
+  const documentId = failed.effectTargets?.length === 1 ? failed.effectTargets[0]!.documentId
+    : record.input.documents.length === 1 ? record.input.documents[0]!.documentId : undefined
+  return !!saved && currentSave(saved) && matchesSaveBinding(record, saved) && saved.documentId === documentId
+}
 
 /** Only this run's receipts count: a created path is not evidence that subsequent edits reached that file. */
 export function newFileDeliveryFacts(record: ExecutionRunRecord): NewFileDeliveryFact[] {
@@ -271,24 +307,25 @@ export function newFileDeliveryFacts(record: ExecutionRunRecord): NewFileDeliver
     const data = tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
       ? tool.result.data as Record<string, unknown> : null
     if (fileCreated(tool.call.name, tool.result) && typeof data?.documentId === 'string') {
-      const label = typeof data.path === 'string' ? data.path.split(/[\\/]/).at(-1)! : data.documentId
+      const currentPath = record.documentBindings?.[data.documentId]?.path ?? (typeof data.path === 'string' ? data.path : undefined)
+      const label = currentPath ? currentPath.split(/[\\/]/).at(-1)! : data.documentId
       if (!facts.has(data.documentId)) facts.set(data.documentId, { documentId: data.documentId,
-        label: label.slice(0, 160), revision: null, savedRevision: null })
+        label: label.slice(0, 160), ...(currentPath ? { path: currentPath } : {}), revision: null, savedRevision: null })
     }
-    const mutation = tool.result?.kind === 'document-operation' ? tool.result.result
-      : fileMutations.has(tool.call.name) && data?.documentResult && typeof data.documentResult === 'object'
-        ? data.documentResult as Record<string, unknown> : null
+    const mutation = operationFact(tool.call.name, tool.result)
+      ?? (fileMutations.has(tool.call.name) && data?.documentResult && typeof data.documentResult === 'object'
+        ? data.documentResult as Record<string, unknown> : null)
     if (mutation?.status === 'applied' && typeof mutation.documentId === 'string'
       && typeof mutation.revision === 'number' && Number.isSafeInteger(mutation.revision)) {
       const fact = facts.get(mutation.documentId)
       if (fact) fact.revision = mutation.revision
     }
-    if (tool.call.name === 'file.save' && data?.status === 'saved' && typeof data.documentId === 'string'
-      && typeof data.savedRevision === 'number' && Number.isSafeInteger(data.savedRevision)) {
-      const fact = facts.get(data.documentId)
-      if (fact) {
-        fact.savedRevision = data.savedRevision
-        if (data.dirty === true && typeof data.currentRevision === 'number') fact.revision = data.currentRevision
+    const saved = saveFact(tool.call.name, tool.result)
+    if (saved) {
+      const fact = facts.get(saved.documentId)
+      if (fact && matchesSaveBinding(record, saved, fact.path)) {
+        fact.savedRevision = saved.savedRevision!
+        if (saved.dirty) fact.revision = saved.currentRevision
       }
     }
   }
@@ -324,7 +361,7 @@ export function runEndSummary(record: ExecutionRunRecord): string | undefined {
     if (message) parts.push(message)
   }
   const directApplied = record.tools.filter(tool => tool.call.name !== 'build.import'
-    && tool.result?.kind === 'document-operation' && tool.result.result.status === 'applied').length
+    && committedFact(tool.call.name, tool.result)?.status === 'applied').length
   const importApplied = record.tools.filter(tool => tool.call.name === 'build.import'
     && tool.result?.kind === 'document-operation' && tool.result.result.status === 'applied').length
   if (directApplied) parts.push(`已保留 ${directApplied} 项正式文档修改`)

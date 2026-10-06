@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { htmlImportReceiptResult } from '../../src/core/tools/HtmlImportTools'
-import { hasUnresolvedToolFailure, runEndSummary, serviceToolOutcome } from '../../src/main/workbench/execution/executionOutcome'
+import { hasUnresolvedToolFailure, newFileDeliveryFacts, persistedToolWork, runEndSummary, serviceToolOutcome, toolFailed } from '../../src/main/workbench/execution/executionOutcome'
+import { applicationEventFacts, committedFact } from '../../src/main/workbench/execution/executionToolFacts'
+import type { ContentApplyResult } from '../../src/core/contentApply/planning/types'
 import type { ExecutionRunRecord, ExecutionToolRecord } from '../../src/shared/workbench/execution'
 
 const tool = (name: string, input: unknown, result: ExecutionToolRecord['result'], index: number): ExecutionToolRecord => ({
@@ -189,4 +191,78 @@ it.each(['file.write', 'file.patch'])('tracks unsaved new-document revisions fro
   expect(hasUnresolvedToolFailure(run(createdLesson(), mutation))).toBe(true)
   expect(hasUnresolvedToolFailure(run(createdLesson(), mutation, savedLesson('other', 2)))).toBe(true)
   expect(hasUnresolvedToolFailure(run(createdLesson(), mutation, savedLesson('lesson', 2)))).toBe(false)
+})
+
+const applyResult = (commit: ContentApplyResult['commit'], usability: ContentApplyResult['usability'], receipt = true): ExecutionToolRecord['result'] => ({
+  kind: 'read', data: { commit, usability, delivery: 'not_requested', diagnostics: [], input: {}, insertedIds: [],
+    ...(receipt && (commit === 'committed' || commit === 'unchanged') ? { receipt: {
+      status: commit === 'committed' ? 'applied' : 'unchanged', documentId: 'lesson', operationId: 'content-one',
+      beforeRevision: 0, revision: commit === 'committed' ? 1 : 0, persistence: 'recoverable',
+    } } : {}) },
+})
+it.each([
+  ['committed', 'usable', false, true], ['committed', 'unverified', false, true], ['committed', 'unusable', true, true],
+  ['unchanged', 'usable', false, true], ['unchanged', 'unverified', false, true], ['unchanged', 'unusable', true, true],
+  ['not_committed', 'usable', true, false], ['not_committed', 'unverified', true, false], ['unknown', 'unverified', true, false],
+] as const)('settles nested %s/%s without conflating commit and usability', (commit, usability, failed, kept) => {
+  const result = applyResult(commit, usability), operation = tool('project.apply', { path: 'theme.css', content: 'A' }, result, 1)
+  expect(toolFailed(operation.call.name, result)).toBe(failed)
+  expect(hasUnresolvedToolFailure(run(operation))).toBe(failed)
+  expect(persistedToolWork(operation.call.name, result)).toBe(kept)
+  expect(!!committedFact(operation.call.name, result)).toBe(kept)
+  if (kept) expect(applicationEventFacts(operation.call.name, result)).toMatchObject({ documentId: 'lesson' })
+  const record = run(operation); record.status = 'partial'
+  if (commit === 'committed') expect(runEndSummary(record)).toContain('已保留 1 项正式文档修改')
+})
+it('preserves equivalent content without fabricating an operation or document revision', () => {
+  const result = applyResult('unchanged', 'unverified', false)
+  expect(hasUnresolvedToolFailure(run(tool('project.apply', {}, result, 1)))).toBe(false)
+  expect(committedFact('project.apply', result)).toBeNull()
+  expect(applicationEventFacts('project.apply', result)).toEqual({ applicationStatus: 'unchanged' })
+  expect(applicationEventFacts('project.read', result)).toEqual({})
+})
+it('settles a definite content rejection only after the same request succeeds', () => {
+  const input = { path: 'theme.css', content: 'A' }, failed = tool('project.apply', input, applyResult('not_committed', 'unusable'), 1)
+  expect(hasUnresolvedToolFailure(run(failed, tool('project.apply', { ...input, content: 'B' }, applyResult('committed', 'usable'), 2)))).toBe(true)
+  expect(hasUnresolvedToolFailure(run(failed, tool('project.apply', input, applyResult('committed', 'unverified'), 2)))).toBe(false)
+  expect(hasUnresolvedToolFailure(run({ ...failed, result: applyResult('unknown', 'unverified') },
+    tool('project.apply', input, applyResult('committed', 'usable'), 2)))).toBe(true)
+})
+const projectSaved = (documentId = 'lesson', savedRevision = 1, currentRevision = savedRevision, path = 'C:/fixture/lesson.h5lesson', epoch = 'lesson-epoch') =>
+  tool('project.save', {}, { kind: 'read', data: { status: 'saved', documentId, savedRevision, currentRevision,
+    dirty: savedRevision !== currentRevision, path, epoch, warnings: [] } }, 10)
+it('settles project.save from the current course document, revision and actual binding', () => {
+  const record = run(createdLesson(), tool('project.apply', {}, applyResult('committed', 'unverified'), 1))
+  record.documentBindings = { lesson: { kind: 'course-v10', path: 'C:/fixture/lesson.h5lesson', projectId: 'lesson-project',
+    epoch: 'lesson-epoch', savedRevision: 0, fileVersion: null } }
+  expect(hasUnresolvedToolFailure(record)).toBe(true)
+  for (const save of [projectSaved('source-html'), projectSaved('lesson', 0, 1), projectSaved('lesson', 1, 1, 'C:/other.h5lesson'),
+    projectSaved('lesson', 1, 1, 'C:/fixture/lesson.h5lesson', 'other-epoch')])
+    expect(hasUnresolvedToolFailure({ ...record, tools: [...record.tools, save] })).toBe(true)
+  expect(hasUnresolvedToolFailure({ ...record, tools: [...record.tools, projectSaved()] })).toBe(false)
+  expect(newFileDeliveryFacts({ ...record, tools: [...record.tools, projectSaved('lesson', 0, 1)] })).toMatchObject([{ revision: 1, savedRevision: 0 }])
+  expect(serviceToolOutcome('project.save', projectSaved('lesson', 0, 1).result)?.message).toContain('新修改仍未保存')
+})
+it('recovers a requested project save only after a current save of that document succeeds', () => {
+  const failed = { ...tool('project.save', {}, error('target-conflict'), 1), effectTargets: [{ documentId: 'lesson', target: { kind: 'document' as const } }] }
+  expect(hasUnresolvedToolFailure(run(failed, projectSaved('other')))).toBe(true)
+  expect(hasUnresolvedToolFailure(run(failed, projectSaved('lesson', 0, 1)))).toBe(true)
+  expect(hasUnresolvedToolFailure(run(failed, projectSaved()))).toBe(false)
+  expect(hasUnresolvedToolFailure(run(projectSaved('lesson', 0, 1)))).toBe(true)
+  const wrongBinding = run(projectSaved('lesson', 1, 1, 'C:/other.h5lesson'))
+  wrongBinding.documentBindings = { lesson: { kind: 'course-v10', path: 'C:/fixture/lesson.h5lesson', projectId: 'lesson-project',
+    epoch: 'lesson-epoch', savedRevision: 0, fileVersion: null } }
+  expect(hasUnresolvedToolFailure(wrongBinding)).toBe(true)
+})
+it('keeps proved saves and current course delivery settled across formal rename or Save As', () => {
+  const currentBinding = { kind: 'course-v10' as const, path: 'C:/fixture/renamed.h5lesson', projectId: 'lesson-project',
+    epoch: 'lesson-epoch', savedRevision: 1, fileVersion: null }
+  const renamedAfterSave = run(createdLesson(), tool('project.apply', {}, applyResult('committed', 'unverified'), 1), projectSaved())
+  renamedAfterSave.documentBindings = { lesson: currentBinding }
+  expect(hasUnresolvedToolFailure(renamedAfterSave)).toBe(false)
+  expect(newFileDeliveryFacts(renamedAfterSave)).toMatchObject([{ label: 'renamed.h5lesson', revision: 1, savedRevision: 1 }])
+  const savedAfterRename = run(createdLesson(), tool('project.apply', {}, applyResult('committed', 'unverified'), 1),
+    projectSaved('lesson', 1, 1, currentBinding.path))
+  savedAfterRename.documentBindings = { lesson: currentBinding }
+  expect(hasUnresolvedToolFailure(savedAfterRename)).toBe(false)
 })

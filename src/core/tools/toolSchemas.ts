@@ -11,3 +11,10 @@ export const objectUpdatePropertiesInputSchema = z.object({
   style: z.record(z.string(), jsonValueSchema).optional(),
   implementation: componentImplementationSchema.nullable().optional(),
 }).strict()
+
+/** Paths bind the observed project file to its formal instance inside the Gateway. */
+export const objectUpdateInputSchema = z.union([
+  z.object({ target: z.string().min(1).max(100), properties: objectUpdatePropertiesInputSchema }).strict(),
+  z.object({ project: z.string().min(1).max(1000).optional(), path: z.string().min(1).max(500),
+    properties: objectUpdatePropertiesInputSchema }).strict(),
+])

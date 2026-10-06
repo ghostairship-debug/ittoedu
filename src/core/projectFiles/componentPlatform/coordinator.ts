@@ -259,11 +259,12 @@ export class ComponentProjectFileCoordinator {
   }
 
   /** Other file-addressed tools share the observed identity instead of resolving a renamed path again. */
-  captureFile(runId: string, current: ComponentProjectSnapshot, path: string): { snapshot: ComponentProjectSnapshot; file: ComponentProjectFile } {
+  captureFile(runId: string, current: ComponentProjectSnapshot, path: string, requireObserved = false): { snapshot: ComponentProjectSnapshot; file: ComponentProjectFile } {
     const seen = this.reads.get(runId)?.get(key(current.documentId, path))
     if (seen && seen.snapshot.epoch !== current.epoch) throw new Error('工程身份已变化，请读取当前工程文件。')
     if (seen?.unavailable) throw new Error('原工程文件目标已不存在或类型已变化；请用 project.list 或 project.read 读取当前文件。')
     if (seen) return seen
+    if (requireObserved) throw new Error('对象路径尚未观察；请先用 project.list 或 project.read 读取当前工程文件。')
     const file = componentProjectFiles(current.model.project, current.model.resources).find(value => value.path === path)
     if (!file) throw new Error(`没有这个工程文件：${path}`)
     return { snapshot: current, file }

@@ -90,6 +90,8 @@ export class DocumentToolGateway implements ToolGateway {
   private readonly cursors = new Map<string, Cursor>()
   private readonly pending = new Map<string, { digest: string; result: Promise<ToolResult> }>()
   private readonly callDigests = new Map<string, string>()
+  /** One live call keeps its observed identities through effects, approval preflight and commit. */
+  private readonly mutationCaptures = new WeakMap<object, { runId: string; digest: string; handles: Promise<Handle[]> }>()
 
   private readonly hostTools: HostToolCoordinator
   private readonly componentProjectFiles: ComponentProjectFileCoordinator
@@ -414,6 +416,15 @@ export class DocumentToolGateway implements ToolGateway {
 
   /** Diagnostic/settlement identity only. Does not validate or widen the writable grant. */
   async effectTargets(runId: string, call: ModelToolCall): Promise<Array<{ documentId: string; target: ToolTarget }> | undefined> {
+    if (call.name === 'batch' || canonicalToolRegistration(call.name)) {
+      try {
+        const mutations = call.name === 'batch'
+          ? (toolCatalog.find(tool => tool.name === 'batch')!.inputSchema.parse(call.input) as { operations: BatchMutationCall[] }).operations
+          : [mutationCallSchema.parse(call)]
+        const handles = await this.captureMutationHandles(runId, mutations, call.input)
+        return handles.map(handle => ({ documentId: handle.documentId, target: structuredClone(handle.target) }))
+      } catch { return undefined }
+    }
     return toolEffectTargets(call, {
       resolveHandle: id => {
         try {
@@ -574,12 +585,31 @@ export class DocumentToolGateway implements ToolGateway {
   private capture(runId: string, snapshot: DocumentSnapshot, target: ToolTarget, writable: boolean, readOnly?: boolean): string {
     const id = `t${this.createId()}`
     if (this.handles.has(id)) throw new Error('句柄编号重复')
+    this.handles.set(id, this.capturedHandle(runId, snapshot, target, writable, readOnly))
+    return id
+  }
+  private capturedHandle(runId: string, snapshot: DocumentSnapshot, target: ToolTarget, writable: boolean, readOnly?: boolean): Handle {
     readTarget(snapshot.model, target)
     const footprint = targetFootprint(snapshot.model, target)
-    this.handles.set(id, { runId, documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
+    return { runId, documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
       target: structuredClone(target), footprint, expectedFootprint: footprint, conflicted: false, writable, readOnly,
-      ...(target.kind === 'markdown-range' && isSourceDocumentModel(snapshot.model) ? { source: snapshot.model.source } : {}) })
-    return id
+      ...(target.kind === 'markdown-range' && isSourceDocumentModel(snapshot.model) ? { source: snapshot.model.source } : {}) }
+  }
+  private captureMutationHandles(runId: string, mutations: BatchMutationCall[], input: unknown): Promise<Handle[]> {
+    const digest = documentDigest(mutations)
+    const cacheKey = input && typeof input === 'object' ? input : undefined
+    const captured = cacheKey && this.mutationCaptures.get(cacheKey)
+    if (captured && captured.runId === runId && captured.digest === digest) return captured.handles
+    const handles = Promise.all(mutations.map(async mutation => {
+      if ('target' in mutation.input) return this.handle(runId, mutation.input.target)
+      const current = await this.componentProjectDocument(runId, mutation.input.project, 'read')
+      const { snapshot, file } = this.componentProjectFiles.captureFile(runId, current, mutation.input.path, true)
+      if (file.target?.kind !== 'instance') throw new ToolError('invalid-target', '属性修改需要已观察的对象文件路径')
+      const target = this.componentAssetPlacement(snapshot, file).target
+      return this.capturedHandle(runId, snapshot, target, this.canWrite(this.run(runId), current, target))
+    }))
+    if (cacheKey) this.mutationCaptures.set(cacheKey, { runId, digest, handles })
+    return handles
   }
   private handle(runId: string, id: string): Handle {
     const handle = this.handles.get(id)
@@ -733,7 +763,7 @@ export class DocumentToolGateway implements ToolGateway {
       if (run.advertised && !run.advertised.names.has('batch')) throw new ToolError('tool-not-advertised', '批量工具不在本次冻结的可用目录中')
       const schema = run.advertised?.batchSchema ?? toolCatalog.find(tool => tool.name === 'batch')!.inputSchema
       const mutations = (schema.parse(input) as { operations: BatchMutationCall[] }).operations
-      const handles = mutations.map(mutation => this.handle(runId, mutation.input.target))
+      const handles = await this.captureMutationHandles(runId, mutations, input)
       if (handles.some(handle => handle.documentId !== handles[0].documentId))
         throw new ToolError('cross-document-batch', '批量原子操作只能属于同一文档')
       const snapshot = await this.registry.get(handles[0].documentId).drain()
@@ -900,9 +930,12 @@ export class DocumentToolGateway implements ToolGateway {
       this.callDigests.set(key, digest)
       const pending = this.pending.get(key)
       if (pending) return pending.digest === digest ? pending.result : Promise.resolve({ kind: 'error', code: 'operation-payload-mismatch', message: '同一调用编号不能提交不同内容' })
-      const result = this.invoke(runId, operationId, digest, call).catch(error => this.error(error))
+      const result = this.invoke(runId, operationId, digest, call, input).catch(error => this.error(error))
       this.pending.set(key, { digest, result })
-      void result.finally(() => { this.pending.delete(key) })
+      void result.finally(() => {
+        this.pending.delete(key)
+        if (input.input && typeof input.input === 'object') this.mutationCaptures.delete(input.input)
+      })
       return result
     } catch (error) { return Promise.resolve(this.error(error)) }
   }
@@ -940,7 +973,7 @@ export class DocumentToolGateway implements ToolGateway {
   }
 
   /** Image bytes for assets/: this task's image result, a standalone image job result, or a workspace file. */
-  private async invoke(runId: string, operationId: string, requestDigest: string, call: ModelToolCall): Promise<ToolResult> {
+  private async invoke(runId: string, operationId: string, requestDigest: string, call: ModelToolCall, originalCall = call): Promise<ToolResult> {
     const run = this.run(runId)
     // Durable replay precedes target validation: a successful call has already changed that target.
     const receipt = this.findReceipt(runId, operationId, requestDigest)
@@ -1027,15 +1060,15 @@ export class DocumentToolGateway implements ToolGateway {
       } }, input),
       deliverDocument: (name, input) => this.hostTools.deliverDocument({ runId, operationId, requestDigest,
         resolveHandle: handle => this.resolveWholeDocumentHandle(runId, handle, 'write') }, name, input),
-      batch: mutations => this.dispatchCanonicalMutations(runId, operationId, requestDigest, mutations),
+      batch: mutations => this.dispatchCanonicalMutations(runId, operationId, requestDigest, mutations, originalCall.input),
     }, call.input)
     if (isHostToolName(call.name)) return this.hostTools.invoke(runId, operationId, requestDigest, call.name, call.input)
-    return this.dispatchCanonicalMutations(runId, operationId, requestDigest, [mutationCallSchema.parse(call)])
+    return this.dispatchCanonicalMutations(runId, operationId, requestDigest, [mutationCallSchema.parse(call)], originalCall.input)
   }
 
   /** Each registered handler admits its parsed mutation; the batch shares one Session receipt. */
   private async dispatchCanonicalMutations(runId: string, operationId: string, requestDigest: string,
-    mutations: BatchMutationCall[]): Promise<ToolResult> {
+    mutations: BatchMutationCall[], captureInput: unknown): Promise<ToolResult> {
     let resolve!: (result: ToolResult) => void
     let reject!: (error: unknown) => void
     const committed = new Promise<ToolResult>((done, failed) => { resolve = done; reject = failed })
@@ -1043,15 +1076,15 @@ export class DocumentToolGateway implements ToolGateway {
     const dispatched = Promise.all(mutations.map(mutation => canonicalToolRegistration(mutation.name)!.handler({
       mutate: next => { admitted.push(mutationCallSchema.parse(next)); return committed },
     }, mutation.input)))
-    void this.applyCanonicalMutations(runId, operationId, requestDigest, admitted).then(resolve, reject)
+    void this.applyCanonicalMutations(runId, operationId, requestDigest, admitted, captureInput).then(resolve, reject)
     return (await dispatched)[0]
   }
 
   /** Original canonical planner and single Session writer for both direct and batch calls. */
   private async applyCanonicalMutations(runId: string, operationId: string, requestDigest: string,
-    mutations: BatchMutationCall[]): Promise<ToolResult> {
+    mutations: BatchMutationCall[], captureInput: unknown): Promise<ToolResult> {
     const run = this.run(runId)
-    const handles = mutations.map(mutation => this.handle(runId, mutation.input.target))
+    const handles = await this.captureMutationHandles(runId, mutations, captureInput)
     if (handles.some(handle => handle.documentId !== handles[0].documentId)) throw new ToolError('cross-document-batch', '批量原子操作只能属于同一文档')
     const session = this.registry.get(handles[0].documentId)
     const snapshot = await session.drain()
@@ -1153,7 +1186,8 @@ export class DocumentToolGateway implements ToolGateway {
         // Deleted/moved intermediate targets are still affected. Do not turn their durable ACK into a failure.
         try { affected.push(this.capture(runId, committed, finalTargets[i], handles[i].writable)) }
         catch {
-          const original = mutations[i].input.target
+          const input = mutations[i].input
+          const original = 'target' in input ? input.target : input.path
           affected.push(original)
         }
       }

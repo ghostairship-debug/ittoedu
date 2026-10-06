@@ -15,6 +15,7 @@ import { effectiveModelProtocol } from '../../../shared/workbench/modelRouting'
 import { captureMainTiming, ExecutionEventStore, type ExecutionTimingMark, type ExecutionTimingStage } from './ExecutionEventStore'
 import { conflictsWithUnresolvedEffects, type UnresolvedEffect } from './executionEffectScope'
 import { committed, fileCreated, persistedToolWork, hasUnresolvedToolFailure, runEndSummary, serviceToolOutcome, toolFailed } from './executionOutcome'
+import { applicationEventFacts, committedFact, contentApplyFact, knownApplication, reconciledToolResult, saveFact } from './executionToolFacts'
 import { ExecutionRunStore } from './ExecutionRunStore'
 import { serializeModelPayload } from '../providers/ModelProviderRouter'
 import type { BodyStreamingObservation } from '../../../shared/workbench/bodyStreaming'
@@ -221,7 +222,8 @@ export function trustedRunDocumentIds(record: ExecutionRunRecord): string[] {
   const ids = new Set(record.input.documents.map(document => document.documentId))
   for (const tool of record.tools) {
     if (tool.state !== 'returned') continue
-    if (committed(tool.result)) { ids.add(tool.result.result.documentId); continue }
+    const receipt = committedFact(tool.call.name, tool.result)
+    if (receipt) { ids.add(receipt.documentId); continue }
     if (tool.call.name !== 'file.open' && !fileCreated(tool.call.name, tool.result)) continue
     const data = tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
       ? tool.result.data as { documentId?: unknown; path?: unknown } : null
@@ -562,8 +564,8 @@ export class ExecutionEngine {
       text: summary ? safeDetailString(summary) : undefined }, 'snapshot', `${record.runId}:terminal`, record.updatedAt)
   }
   private async publishCommit(record: ExecutionRunRecord, tool: ExecutionToolRecord): Promise<void> {
-    if (!committed(tool.result)) return
-    const result = tool.result.result
+    const result = committedFact(tool.call.name, tool.result)
+    if (!result) return
     if (result.status === 'applied' || result.status === 'unchanged') await this.event(record, `${tool.callId}:commit`, 'document.commit', {
       operationId: result.operationId, documentId: result.documentId, revision: result.revision, status: result.status, label: '修改已应用',
     }, 'snapshot', `${record.runId}:${tool.callId}:commit`, tool.receiptTime ?? record.createdAt)
@@ -572,7 +574,8 @@ export class ExecutionEngine {
   private async reconcileReceipts(record: ExecutionRunRecord): Promise<void> {
     let changed = false
     for (const tool of record.tools) {
-      if (tool.state === 'returned' && !(tool.result?.kind === 'error' && tool.result.code === 'tool-outcome-unknown')) continue
+      if (tool.state === 'returned' && !(tool.result?.kind === 'error' && tool.result.code === 'tool-outcome-unknown')
+        && contentApplyFact(tool.call.name, tool.result)?.commit !== 'unknown') continue
       if (tool.call.name === USER_QUESTION_TOOL) continue // A question has no Gateway receipt; only the user can answer it.
       // Artifact publication is journaled by its own owner, outside the document Gateway.
       // Query the original operation so a lost acknowledgement never becomes a new write.
@@ -591,9 +594,15 @@ export class ExecutionEngine {
       const rejectedDelivery = (tool.call.name === 'file.save' || tool.call.name === 'project.save' || tool.call.name === 'document.export')
         && receipt?.kind === 'error' && receipt.code === 'delivery-rejected'
       if (receipt?.kind !== 'document-operation' && receipt?.kind !== 'read' && !rejectedDelivery) continue
-      tool.result = receipt
+      tool.result = reconciledToolResult(tool.call.name, tool.result, receipt)
       tool.state = 'returned'
       tool.receiptTime ??= this.now()
+      await this.publishCommit(record, tool)
+      await this.event(record, tool.callId, 'tool', { ...applicationEventFacts(tool.call.name, tool.result),
+        status: serviceToolOutcome(tool.call.name, tool.result)?.status ?? (toolFailed(tool.call.name, tool.result) ? 'failed' : 'returned'),
+        text: serviceToolOutcome(tool.call.name, tool.result)?.message ?? '已查证正式操作回执' }, 'append')
+      if (contentApplyFact(tool.call.name, tool.result)?.commit !== 'unknown' && tool.call.name === 'project.apply')
+        record.messages.push({ role: 'system', content: `原调用 ${tool.callId} 已按原操作编号查证；未重放。正式结果：${JSON.stringify(modelToolResult(tool.call.name, tool.result))}` })
       changed = true
     }
     if (changed) await this.checkpoint(record)
@@ -1109,6 +1118,13 @@ export class ExecutionEngine {
       }
       if (result?.kind === 'read') {
         const data = result.data && typeof result.data === 'object' && !Array.isArray(result.data) ? result.data as Record<string, unknown> : null
+        const apply = contentApplyFact(tool.call.name, result), operation = committedFact(tool.call.name, result)
+        if (apply) return { callId: tool.callId, name: tool.call.name, result: { kind: 'content-apply',
+          commit: apply.commit, usability: apply.usability, diagnostics: apply.diagnostics,
+          ...(operation ? { status: operation.status, documentId: operation.documentId, operationId: operation.operationId,
+            revision: operation.revision } : {}) } }
+        const saved = saveFact(tool.call.name, result)
+        if (saved) return { callId: tool.callId, name: tool.call.name, result: { kind: 'save', ...saved } }
         if (data && (tool.call.name === 'file.open' || tool.call.name === 'file.create')) {
           const operation = data.operation && typeof data.operation === 'object' ? data.operation as Record<string, unknown> : {}
           return { callId: tool.callId, name: tool.call.name, result: { kind: 'file',
@@ -1211,6 +1227,20 @@ export class ExecutionEngine {
     if (tool.call.name === USER_QUESTION_TOOL || tool.call.name === LOAD_TOOLS || tool.call.name === TASK_NOTE) return false // Discovery, questions and notes have no external side effect.
     return tool.state === 'executing' || tool.result?.kind === 'error' && /outcome-unknown/.test(tool.result.code)
       || ['unknown', 'pending'].includes(serviceToolOutcome(tool.call.name, tool.result)?.status ?? '')
+  }
+  /** Rebuild the existing guard from original receipts after read-only confirmation, never retain a settled effect. */
+  private async refreshUnresolvedEffects(active: ActiveRun): Promise<void> {
+    await this.reconcileReceipts(active.record)
+    const lineage = await this.continuationLineage(active.record)
+    const ids = continuationDocumentIds(lineage, this.options.registry.list())
+    const unknown = lineage.flatMap(run => run.tools.filter(tool => this.possiblyInvokedTool(tool)
+      && serviceToolOutcome(tool.call.name, tool.result)?.status !== 'pending'
+      && !['read', 'inspect', 'listChildren'].includes(tool.call.name)))
+    active.unresolvedToolNames = new Set(unknown.filter(tool => !tool.effectTargets?.length && !tool.effectPaths?.length)
+      .flatMap(tool => this.effectNames(tool.call)))
+    active.unresolvedEffects = unknown.filter(tool => tool.effectTargets?.length || tool.effectPaths?.length)
+      .map(tool => ({ names: this.effectNames(tool.call), targets: tool.effectTargets?.map(target => ({ ...target,
+        documentId: ids.get(target.documentId) ?? target.documentId })), paths: tool.effectPaths }))
   }
   /** Direct and batch mutations share their canonical mutation names for the no-replay guard. */
   private effectNames(call: ExecutionToolRecord['call']): string[] {
@@ -1447,6 +1477,9 @@ export class ExecutionEngine {
   private async execute(active: ActiveRun, tool: ExecutionToolRecord, precomputed?: ToolResult): Promise<void> {
     if (tool.call.name === USER_QUESTION_TOOL) return this.ask(active, tool)
     const { record } = active
+    if (active.unresolvedToolNames.size || active.unresolvedEffects.length
+      || record.tools.some(prior => prior.state === 'returned' && contentApplyFact(prior.call.name, prior.result)?.commit === 'unknown'))
+      await this.refreshUnresolvedEffects(active)
     await this.waitForBrowser(active)
     tool.effectTargets ??= await this.options.gateway.effectTargets(record.runId, tool.call)
     const htmlDocumentId = tool.call.name === 'html.observe' ? this.htmlDocumentIds.get(record.runId) : undefined
@@ -1803,10 +1836,11 @@ export class ExecutionEngine {
           }
         }
       }
-      if (tool.result?.kind === 'document-operation' && tool.result.result.status === 'applied')
+      const applied = committedFact(tool.call.name, tool.result)
+      if (applied?.status === 'applied')
         this.timing(record, `${record.runId}:${tool.callId}:applied`, 'document.applied', {
           requestId: tool.requestId, toolCallId: tool.callId,
-          detail: { documentId: tool.result.result.documentId, operationId: tool.result.result.operationId, outcome: 'applied' },
+          detail: { documentId: applied.documentId, operationId: applied.operationId, outcome: 'applied' },
         })
       tool.state = 'returned'; tool.receiptTime = this.now(); await this.checkpoint(record)
     }
@@ -1822,11 +1856,11 @@ export class ExecutionEngine {
       && tool.result?.kind === 'read' && (tool.result.data as { status?: unknown } | null)?.status === 'ready'
     this.timing(record, `${record.runId}:${tool.callId}:end`, 'tool.finished', { requestId: tool.requestId,
       toolCallId: tool.callId, detail: { outcome: serviceOutcome?.status === 'stopped' ? 'stopped' : tool.result?.kind === 'error' ? 'failed' : serviceOutcome?.status
-        ?? (committed(tool.result) ? tool.result.result.status : imageReady ? 'ready' : 'returned') } })
+        ?? (committedFact(tool.call.name, tool.result)?.status ?? contentApplyFact(tool.call.name, tool.result)?.commit ?? (imageReady ? 'ready' : 'returned')) } })
     // Preserve the host receipt boundary before projecting earlier producer-side image marks.
     await this.projectImageTiming(record, tool)
     await this.publishCommit(record, tool)
-    const success = !toolFailed(tool.call.name, tool.result) && (committed(tool.result) || tool.result?.kind === 'read')
+    const success = !toolFailed(tool.call.name, tool.result) && (knownApplication(tool.call.name, tool.result) || tool.result?.kind === 'read')
     const publicResult = ['image.generate', 'image.edit'].includes(tool.call.name) && tool.result?.kind === 'read'
       && tool.result.data && typeof tool.result.data === 'object'
       ? (() => { const { timing: _timing, ...data } = tool.result!.data as Record<string, unknown>; return { kind: 'read' as const, data } })()
@@ -1851,18 +1885,17 @@ export class ExecutionEngine {
       ? safeDetailJson(tool.call.input, MAX_TOOL_INPUT_BYTES) : undefined
     const fileReceipt = tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
       ? tool.result.data as { saved?: unknown; status?: unknown; dirty?: unknown; path?: unknown } : null
-    const saved = tool.call.name === 'file.write' && fileReceipt?.saved === true
-      || (tool.call.name === 'file.save' || tool.call.name === 'project.save') && fileReceipt?.status === 'saved' && fileReceipt.dirty === false
+    const formalSave = saveFact(tool.call.name, tool.result)
+    const saved = tool.call.name === 'file.write' && fileReceipt?.saved === true || !!formalSave
     await this.event(record, tool.callId, 'tool', { toolName: tool.call.name, label: toolLabel(tool.call.name), status: serviceOutcome?.status
       ?? (tool.result?.kind === 'document-operation' ? 'returned' : imageReady ? 'ready' : success ? 'completed' : 'failed'),
       text: safeDetailString(tool.result?.kind === 'error' ? tool.result.message : serviceOutcome?.message
         ?? (imageReady ? '图片已生成，尚未应用到文档' : success ? '已收到正式结果' : '修改未应用')),
       output: safeDetailJson(publicResult), ...(visibleInput === undefined ? {} : { input: visibleInput }), ...(diff === undefined ? {} : { diff }),
-      ...(saved ? { saveStatus: 'saved', ...(typeof fileReceipt?.path === 'string'
+      ...(saved ? { saveStatus: 'saved', ...(formalSave ? { documentId: formalSave.documentId, revision: formalSave.savedRevision } : {}), ...(typeof fileReceipt?.path === 'string'
         ? { documentName: fileReceipt.path.replace(/\\/g, '/').split('/').at(-1) } : {}) } : {}),
       ...(tool.result?.kind === 'error' ? { error: safeDetailString(tool.result.message) } : serviceOutcome ? { error: safeDetailString(serviceOutcome.message) } : {}),
-      ...(tool.result?.kind === 'document-operation' ? { applicationStatus: tool.result.result.status, documentId: tool.result.result.documentId,
-        ...('revision' in tool.result.result ? { revision: tool.result.result.revision } : { error: safeDetailString(tool.result.result.message) }) } : {}) })
+      ...applicationEventFacts(tool.call.name, tool.result) })
     if (tool.origin !== 'host') record.messages.push({ role: 'tool', tool_call_id: tool.providerCallId,
       content: JSON.stringify(publicResult && modelToolResult(tool.call.name, publicResult)) })
     await this.checkpoint(record)

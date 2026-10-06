@@ -9,7 +9,7 @@ import bundledSkills from '../../shared/generated/bundledSkills.json'
 import { nativeContentInputSchemaByType } from '../../shared/contracts/native-v1/schema'
 import { z } from 'zod'
 import type { ModelToolCall, ToolDefinition, ToolResult } from '../../shared/workbench/tools'
-import { objectUpdatePropertiesInputSchema } from './toolSchemas'
+import { objectUpdateInputSchema } from './toolSchemas'
 import { handleToolTarget, hasRunDocument, hasRunWrite, projectToolTarget, registeredEffectNames,
   toolRegistrationFor, type ResolvedToolTarget, type RunToolScope, type ToolFamily, type ToolSupportContext, type ToolTargetResolver } from './ToolRegistration'
 export { toolFamilies } from './ToolRegistration'
@@ -31,9 +31,10 @@ export const canonicalMutationTools = [
     inputSchema: z.object({ target, content: z.string() }).strict(), manual: { label: '替换正文', group: 'edit', targetKinds: ['markdown-range', 'course-instance'] } },
   { capability: 'write', effect: 'document-edit', supports: context => hasRunWrite(context, ['markdown-range', 'course-instance']), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'text.replace', input }) }),
-  registerCanonical({ name: 'object.update', description: '修改获授权整对象的公开属性。Project V10 的 data 和 style 是对应字段完整值，implementation 是实例源码覆盖或 null 恢复默认；frame 可局部调整位置尺寸。文字专业格式位于 data.appearance。保留读取到的其余数据、文字、位置和身份，遵守锁定；精确文字范围不可扩大为整对象授权。',
-    inputSchema: z.object({ target, properties: objectUpdatePropertiesInputSchema }).strict(), manual: { label: '修改属性', group: 'edit', targetKinds: ['course-instance'] } },
-  { capability: 'write', effect: 'document-edit', family: 'layout', supports: context => hasRunWrite(context, ['course-instance'], 'course-v10'), targets: handleToolTarget,
+  registerCanonical({ name: 'object.update', description: '修改获授权整对象的公开属性。使用 target 句柄，或使用 project.list/read 返回的对象 path；project 可选，省略使用本任务课件。软件固定原实例和观察基线。Project V10 的 data 和 style 是对应字段完整值，implementation 是实例源码覆盖或 null 恢复默认；frame 可局部调整位置尺寸，无自由 frame 的正文不支持位置修改。文字专业格式位于 data.appearance。保留读取到的其余数据、文字、位置和身份，遵守锁定；精确文字范围不可扩大为整对象授权。',
+    inputSchema: objectUpdateInputSchema, manual: { label: '修改属性', group: 'edit', targetKinds: ['course-instance'] } },
+  { capability: 'write', effect: 'document-edit', family: 'layout', supports: context => hasRunWrite(context, ['course-instance'], 'course-v10'),
+    targets: (input, resolver) => 'target' in input ? handleToolTarget(input, resolver) : projectToolTarget(input, resolver),
     handler: (context, input) => context.mutate({ name: 'object.update', input }) }),
   registerCanonical({ name: 'media.apply', description: 'resource 使用宿主图片资源；asset 只读引用当前文档已有图片句柄。Project V10 的整张专业图片可原位替换，保留身份、frame、专业效果与未指定字段；可用于当前元素授权范围。',
     inputSchema: mediaApplyInputSchema, manual: { label: '替换媒体', group: 'edit', targetKinds: ['course-instance'] } },
