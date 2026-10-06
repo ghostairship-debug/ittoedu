@@ -35,7 +35,10 @@ function measured(html: string) {
   const result = assemblyContentDraft(assembly, { 'bg.png': 'bg', 'fg.png': 'fg' }, { createFormulaId: () => 'formula', definitions: {} })
   return { assembly, draft: result.draft }
 }
-const htmlOf = (draft: ContentObjectDraft) => typeof draft.data.html === 'string' ? draft.data.html : ''
+const htmlOf = (draft: ContentObjectDraft) => {
+  const data = draft.data
+  return data && typeof data === 'object' && !Array.isArray(data) && typeof data.html === 'string' ? data.html : ''
+}
 
 it('keeps the z5 foreground context atomic and places its z2 gradient after z1 background', () => {
   const { assembly, draft } = measured(`<div id="page" style="position:relative;background-color:#020617">
