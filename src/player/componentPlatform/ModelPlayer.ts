@@ -27,12 +27,16 @@ export interface ComponentPlayerMountOptions extends ComponentPlayerRuntimeOptio
   root: HTMLElement
   model: ComponentPlayerModel
   runScopeId: string
+  /** The requested view is selected before any content implementation mounts. */
+  initialSurfaceId?: string
   onCamera?(surfaceId: string, camera: ComponentSpatialCameraPort): () => void
+  onObservation?(surfaceId: string, observation: ComponentPlayerObservation): () => void
   /** Allows the app's surface owner to supply a projection without another runtime. */
   createProjection?(context: {
     root: HTMLElement
     runtime: ComponentPlatformRuntime
     signal: AbortSignal
+    initialSurfaceId?: string
     onCamera?(surfaceId: string, camera: ComponentSpatialCameraPort): () => void
   }): ComponentPlayerProjection
 }
@@ -42,8 +46,9 @@ export function mountV10Model(options: ComponentPlayerMountOptions) {
   const controller = new AbortController()
   const runtime = new ComponentPlatformRuntime(options.runScopeId, options)
   const projection = (options.createProjection ?? createComponentModelProjection)({
-    root: options.root, runtime, signal: controller.signal, onCamera: options.onCamera,
+    root: options.root, runtime, signal: controller.signal, initialSurfaceId: options.initialSurfaceId, onCamera: options.onCamera,
   })
+  const observationBindings = new Map<string, { observation: ComponentPlayerObservation; off(): void }>()
   let queue: Promise<void> = Promise.resolve()
   let disposal: Promise<void> | undefined
   let topology: string | undefined
@@ -60,16 +65,29 @@ export function mountV10Model(options: ComponentPlayerMountOptions) {
       try { await projection.sync(model); topology = nextTopology } finally { if (changingTopology) runtime.afterProjectionMutation() }
       if (controller.signal.aborted) return
       await runtime.sync(model.project, model.resources)
+      // Keep the existing post-mount fragment initialization order. These are only
+      // subscription lifetimes; the surface's PlaybackViewSession owns all view state.
+      if (!controller.signal.aborted && options.onObservation) {
+        for (const [id, binding] of observationBindings) if (projection.observation?.(id) !== binding.observation) {
+          binding.off(); observationBindings.delete(id)
+        }
+        for (const surface of model.project.surfaces) {
+          const observation = projection.observation?.(surface.id)
+          if (observation && !observationBindings.has(surface.id)) observationBindings.set(surface.id,
+            { observation, off: options.onObservation(surface.id, observation) })
+        }
+      }
     })
     queue = next
     return next
   }
+  void update(options.model)
   return {
     runtime,
     camera: (id: string) => projection.camera?.(id),
     viewport: (id: string) => projection.viewport?.(id),
     observation: (id: string) => projection.observation?.(id),
-    ready: update(options.model),
+    get ready() { return queue },
     update,
     /** Display only; the L07 navigation owner chooses the surface/step sequence. */
     revealSurface: (id: string) => !controller.signal.aborted && projection.revealSurface(id),
@@ -77,6 +95,8 @@ export function mountV10Model(options: ComponentPlayerMountOptions) {
     dispose(): Promise<void> {
       if (disposal) return disposal
       controller.abort()
+      for (const binding of observationBindings.values()) binding.off()
+      observationBindings.clear()
       // Invalidate old host calls immediately, including an asynchronous mount in flight.
       const stopped = runtime.dispose()
       disposal = Promise.allSettled([queue, stopped]).then(async () => {

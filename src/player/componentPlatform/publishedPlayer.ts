@@ -80,7 +80,12 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
     selectState: async id => { if (stopped) return; stateId = id; await player.update(renderModel()) },
   })
   player = mountV10Model({ model: renderModel(), root, mode: options.capture ? 'capture' : 'play', runScopeId: `published:${payload.id}:${crypto.randomUUID()}`,
-    teacherController: navigation, report: options.report,
+    teacherController: navigation, report: options.report, initialSurfaceId: surfaceId ?? undefined,
+    onObservation: options.capture ? undefined : (id, observation) => {
+      const unregister = navigation.registerObservation(id, observation)
+      const unsubscribe = observation.subscribe?.(navigation.changed)
+      return () => { unsubscribe?.(); unregister() }
+    },
     onCamera: (id, camera) => {
       let frameId: string | null = null, stepIndex: number | null = null
       return navigation.registerCamera(id, camera, { frameId: () => frameId, selectFrame: value => { frameId = value },
@@ -101,10 +106,6 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
   })
   await player.ready
   if (surfaceId) player.revealSurface(surfaceId)
-  const stopObservations = options.capture ? [] : model.project.surfaces.flatMap(surface => {
-    const observation = player.observation(surface.id)
-    return observation ? [navigation.registerObservation(surface.id, observation), observation.subscribe?.(navigation.changed) ?? (() => {})] : []
-  })
   if (!options.capture) navigation.changed()
   const tasks = new NavigationTasks<PlaybackKeyCommand, TeacherControllerAction>({
     resolve: request => {
@@ -138,15 +139,20 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
   const dispose = () => {
     if (disposal) return disposal
     stopped = true; stopKeys?.destroy(); tasks.dispose(); navigation.dispose(); placement()
-    for (const stop of stopObservations) stop()
     disposal = player.dispose()
     return disposal
   }
-  return { ...player, navigation,
+  return { ...player, get ready() { return player.ready }, navigation,
     next: () => stopped ? Promise.resolve(false) : navigation.execute({ type: 'step.next' }),
     previous: () => stopped ? Promise.resolve(false) : navigation.execute({ type: 'step.previous' }),
     go: (id: string, targetStateId?: string) => stopped ? Promise.resolve(false) : navigation.execute({ type: 'scene.go', sceneId: id, targetStateId }),
-    revealSurface: (id: string) => { if (stopped || !player.revealSurface(id)) return false; surfaceId = id; navigation.changed(); return true },
+    revealSurface: (id: string) => {
+      if (stopped || !player.revealSurface(id)) return false
+      surfaceId = id
+      void player.update(renderModel())
+      navigation.changed()
+      return true
+    },
     dispose, destroy: dispose,
   }
 }

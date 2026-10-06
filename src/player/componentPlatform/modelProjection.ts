@@ -18,7 +18,7 @@ import {
 import type { ComponentPlatformRuntime } from '../components/ComponentPlatformRuntime'
 import { applyComponentPaintStyle } from '../components/componentPlacementStyle'
 import { PlaybackViewSession, createPlaybackContent } from '../playbackViewSession'
-import type { ComponentPlayerProjection, ComponentPlayerModel } from './ModelPlayer'
+import type { ComponentPlayerProjection, ComponentPlayerModel, ComponentPlayerObservation } from './ModelPlayer'
 
 interface NodeView { outer: HTMLElement; stage: HTMLElement; content: HTMLElement; children: HTMLElement; caption?: HTMLElement }
 interface SurfaceView {
@@ -28,6 +28,7 @@ interface SurfaceView {
   camera?: ComponentSpatialCameraPort
   releaseCamera?: () => void
   playback?: PlaybackViewSession
+  observation?: ComponentPlayerObservation
   content?: HTMLElement
   designSize?: ComponentSurface['designSize']
   flow?: { paper: HTMLElement; body: HTMLElement; paperUnderlay: HTMLElement; paperOverlay: HTMLElement; viewportUnderlay: HTMLElement; viewportOverlay: HTMLElement }
@@ -38,6 +39,7 @@ interface SurfaceView {
 /** DOM placement only: no professional rendering, author writes, or navigation sequence. */
 export function createComponentModelProjection(context: {
   root: HTMLElement; runtime: ComponentPlatformRuntime; signal: AbortSignal
+  initialSurfaceId?: string
   onCamera?(surfaceId: string, camera: ComponentSpatialCameraPort): () => void
 }): ComponentPlayerProjection {
   const { root, runtime } = context
@@ -58,10 +60,11 @@ export function createComponentModelProjection(context: {
   root.append(shell)
   const nodes = new Map<string, NodeView>()
   const surfaces = new Map<string, SurfaceView>()
-  let activeSurface: string | undefined
+  let activeSurface = context.initialSurfaceId
   let projectId: string | undefined
   let disposed = false
   let currentProject: CourseProjectV10 | undefined
+  let currentModel: ComponentPlayerModel | undefined
 
   function renderChildren(parent: HTMLElement, ids: readonly string[], project: CourseProjectV10, flow: boolean, used: Set<string>) {
     let cursor = parent.firstElementChild
@@ -119,8 +122,11 @@ export function createComponentModelProjection(context: {
     }
   }
   function revealSurface(id: string): boolean {
-    if (disposed || !surfaces.has(id)) return false
+    if (disposed || !currentProject?.surfaces.some(surface => surface.id === id)) return false
     activeSurface = id
+    // The existing display API exposes geometry/observation synchronously. Realm
+    // readiness remains owned by the caller's normal ModelPlayer update queue.
+    if (!surfaces.has(id) && currentModel) sync(currentModel)
     for (const [surfaceId, surface] of surfaces) surface.root.hidden = surfaceId !== id
     resize()
     return true
@@ -232,10 +238,10 @@ export function createComponentModelProjection(context: {
   const Observer = document.defaultView?.ResizeObserver
   const observer = Observer ? new Observer(resize) : undefined
   observer?.observe(root)
-  return {
-    sync(model: ComponentPlayerModel) {
+  function sync(model: ComponentPlayerModel) {
       if (disposed || context.signal.aborted) return
-      const project = model.project; currentProject = project
+      const project = model.project; currentProject = project; currentModel = model
+      if (!project.surfaces.some(surface => surface.id === activeSurface)) activeSurface = project.surfaces[0]?.id
       if (projectId && projectId !== project.id) runtime.bindTarget(projectId, null)
       projectId = project.id; runtime.bindTarget(project.id, shell)
       const used = new Set<string>()
@@ -258,6 +264,9 @@ export function createComponentModelProjection(context: {
       }
       for (const surface of project.surfaces) {
         let view = surfaces.get(surface.id)
+        // Unvisited pages have no DOM or executing content realm. A visited page
+        // retains its existing roots/session when another surface becomes active.
+        if (!view && surface.id !== activeSurface) continue
         if (!view) {
           const element = document.createElement('div')
           element.dataset.componentSurface = surface.id
@@ -272,6 +281,12 @@ export function createComponentModelProjection(context: {
             const content = createPlaybackContent(host)
             if (surface.designSize) { host.dataset.canvasWidth = String(surface.designSize.width); host.dataset.canvasHeight = String(surface.designSize.height) }
             playback.register({ id: surface.id, kind: surface.kind, root: host, content, onObservationChange: paintGlobalObservation }); playback.activate(surface.id)
+            view.observation = {
+              readZoom: () => playback.state.zoom,
+              setZoom: zoom => { if (!disposed && !context.signal.aborted) playback.zoomTo(zoom) },
+              reset: () => { if (!disposed && !context.signal.aborted) playback.reset() },
+              subscribe: listener => playback.subscribe(listener),
+            }
             view.playback = playback; view.content = content
           }
           if (surface.kind === 'flow') {
@@ -311,7 +326,8 @@ export function createComponentModelProjection(context: {
       renderChildren(underlay, project.global.underlay, project, false, used)
       renderChildren(overlay, project.global.overlay, project, false, used)
       for (const surface of project.surfaces) {
-        const view = surfaces.get(surface.id)!
+        const view = surfaces.get(surface.id)
+        if (!view) continue
         if (view.flow) {
           renderChildren(view.flow.body, surface.childIds.filter(id => !project!.instances[id]?.flowPlacement), project, true, used)
           for (const space of ['paper', 'viewport'] as const) for (const plane of ['underlay', 'overlay'] as const) {
@@ -323,16 +339,13 @@ export function createComponentModelProjection(context: {
       const next = activeSurface && surfaces.has(activeSurface) ? activeSurface : project.surfaces[0]?.id
       if (next) revealSurface(next)
       resize()
-    },
+  }
+  return {
+    sync,
     revealSurface,
     camera: id => surfaces.get(id)?.camera,
     viewport: id => { const view = surfaces.get(id); return view ? { width: view.designSize?.width ?? view.root.clientWidth, height: view.designSize?.height ?? view.root.clientHeight } : undefined },
-    observation: id => { const playback = surfaces.get(id)?.playback; return playback ? {
-      readZoom: () => playback.state.zoom,
-      setZoom: zoom => { if (!disposed && !context.signal.aborted) playback.zoomTo(zoom) },
-      reset: () => { if (!disposed && !context.signal.aborted) playback.reset() },
-      subscribe: listener => playback.subscribe(listener),
-    } : undefined },
+    observation: id => surfaces.get(id)?.observation,
     dispose() {
       if (disposed) return
       disposed = true; observer?.disconnect()
