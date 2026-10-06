@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { configureRestrictedSession, hardenWebContents } from '../../../security'
 import { assembleMeasuredHtml, sourceProgramAssembly, type HtmlAssembly, type HtmlAssemblyDiagnostic, type HtmlDesignCapture } from '../../../../core/contentApply/assembly/htmlAssembly'
 import { captureHtmlDesignViewport } from './browserCapture'
-import { prepareMeasurementDocument } from './prepareMeasurementDocument'
+import { prepareMeasurementDocument, retainedMeasurementScopeHtml } from './prepareMeasurementDocument'
 import { cssUsesViewport } from '../../../../components/web/measuredFragmentBox'
 
 export interface HtmlDesignMeasurementRequest {
@@ -87,6 +87,9 @@ export async function measureHtmlAtDesignViewport(request: HtmlDesignMeasurement
     }
     restoreStyles(capture.pageStyle)
     if (capture.supportCss) capture.supportCss = restoreReference(capture.supportCss)
+    for (const scope of capture.sourceScopes ?? []) {
+      scope.html = retainedMeasurementScopeHtml(source, capture.elements[scope.index]!.sourcePath)
+    }
     capture.diagnostics.unshift(...diagnostics)
     capture.diagnostics.forEach(item => { if (item.reference) item.reference = restoreReference(item.reference) })
     return prepared.documentProgramReason

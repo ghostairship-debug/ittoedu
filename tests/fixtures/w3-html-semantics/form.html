@@ -1,0 +1,14 @@
+<!doctype html><html lang="zh"><head><style>
+body{margin:24px;font:18px/1.5 Arial} #lab{width:440px;padding:12px}
+#lab form{height:180px;margin:10px 0;padding:12px;border:1px solid #777}
+input[type=radio]{position:absolute;opacity:0;pointer-events:none}
+label,button{display:inline-block;padding:8px;cursor:pointer}
+.answer{display:none;padding:8px;background:#ddf}
+#pg4rOn:checked ~ .answer{display:block}
+</style></head><body>
+<h1>独立专业标题</h1><section id="lab"><form id="lesson">
+<input type="radio" id="pg4rOff" name="pg4r" checked><input type="radio" id="pg4rOn" name="pg4r">
+<label for="pg4rOn">揭示电压</label><label for="pg4rOff">隐藏电压</label>
+<div class="answer">总电压为 6 V</div><button type="reset">复位</button>
+</form></section><p>独立专业说明</p>
+</body></html>

@@ -1,5 +1,5 @@
 {
-  "description": "读取普通 UTF-8 文件的当前内容；已打开时读取未保存稿。整份回读可给 limit=64000。续页将回执的 nextCursor 传给 cursor；修改后旧游标失效，应省略 cursor 从当前版本重新读取。",
+  "description": "读取磁盘/工作区路径上的普通 UTF-8 文件，不读取 project.list 返回的工程虚拟路径；已打开时读取未保存稿。整份回读可给 limit=64000。续页将回执的 nextCursor 传给 cursor，不使用 offset；修改后旧游标失效，应省略 cursor 从当前版本重新读取。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,

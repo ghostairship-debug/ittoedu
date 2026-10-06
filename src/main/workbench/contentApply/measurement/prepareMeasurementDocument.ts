@@ -13,6 +13,49 @@ export interface PreparedMeasurementDocument {
   originalElements: Map<string, { attributes: Record<string, string>; sourceHtml: string }>
 }
 
+/** A local semantic scope keeps author CSS/ancestor selectors; only outer placement moves to its frame. */
+export function retainedMeasurementScopeHtml(input: { html: string; themeCss?: string }, sourcePath: readonly number[]): string {
+  if (!sourcePath.length) return input.html
+  const document = parse(input.html)
+  const html = document.childNodes.find(isElement)!
+  const body = html.childNodes.find((node): node is HtmlElement => isElement(node) && node.tagName === 'body')!
+  const head = html.childNodes.find((node): node is HtmlElement => isElement(node) && node.tagName === 'head')!
+  const at = (path: readonly number[]) => path.reduce<HtmlNode | undefined>((node, index) => isElement(node!) ? node!.childNodes[index] : undefined, body)
+  const scope = at(sourcePath)
+  if (!scope || !isElement(scope)) throw new Error('Measured semantic scope no longer maps to source HTML')
+  const appendStyle = (css: string, prepend = false) => {
+    const parsed = parse(`<style>${css.replace(/<\/style/gi, '<\\/style')}</style>`)
+    const style = parsed.childNodes.find(isElement)!.childNodes.find(node => isElement(node) && node.tagName === 'head') as HtmlElement
+    for (const node of style.childNodes) node.parentNode = head
+    if (prepend) head.childNodes.unshift(...style.childNodes)
+    else head.childNodes.push(...style.childNodes)
+  }
+  // Body-level styles outside the selected region remain its original CSS context.
+  const outsideStyles: HtmlElement[] = []
+  const scanStyles = (node: HtmlNode): void => {
+    if (!isElement(node) || node === scope) return
+    if (node.tagName === 'style' || node.tagName === 'link' && /(?:^|\s)stylesheet(?:\s|$)/i.test(attribute(node, 'rel') ?? '')) outsideStyles.push(node)
+    else node.childNodes.forEach(scanStyles)
+  }
+  body.childNodes.forEach(scanStyles)
+  for (const node of outsideStyles) { node.parentNode = head; head.childNodes.push(node) }
+  scope.attrs.push({ name: 'data-guoling-source-scope', value: '' })
+  let current = scope
+  while (current !== body) {
+    const parent = current.parentNode as HtmlElement
+    parent.childNodes = [current]
+    if (parent !== body) parent.attrs.push({ name: 'data-guoling-source-ancestor', value: '' })
+    current = parent
+  }
+  if (input.themeCss) appendStyle(input.themeCss, true)
+  // The author's subtree and stylesheet rules remain live. These software-owned
+  // declarations normalize only the source scope's external coordinate owner.
+  appendStyle(`html,body{margin:0!important;padding:0!important;border:0!important;background:transparent!important;min-width:0!important;min-height:0!important;width:100%!important;height:100%!important}
+[data-guoling-source-ancestor]{display:contents!important;transform:none!important;translate:none!important;rotate:none!important;scale:none!important;zoom:1!important;opacity:1!important;filter:none!important}
+[data-guoling-source-scope]{position:relative!important;inset:auto!important;left:auto!important;right:auto!important;top:auto!important;bottom:auto!important;margin:0!important;transform:none!important;translate:none!important;rotate:none!important;scale:none!important;zoom:1!important;width:100%!important;height:100%!important;min-width:0!important;max-width:none!important;min-height:0!important;max-height:none!important;box-sizing:border-box!important;float:none!important}`)
+  return serialize(document)
+}
+
 /** Resource preparation remains the existing resource owner's job; only supplied URL bindings are used. */
 export function prepareMeasurementDocument(input: { html: string; themeCss?: string; resourceUrls?: Readonly<Record<string, string>> }): PreparedMeasurementDocument {
   const document = parse(input.html, { sourceCodeLocationInfo: true })

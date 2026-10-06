@@ -14,7 +14,7 @@
         "skills/orchestrate-courseware/references/web-composition-examples.md",
         "skills/orchestrate-courseware/scripts/assemble-html.mjs"
       ],
-      "version": "64c72ff68321d75ec99056754aad6313bcbfa5827744641ff85c06e97094a035"
+      "version": "3dc99bf5d82403676ee6f111bda97521236abe75b2bac5972ee2dbdc75d18eb2"
     },
     {
       "description": "将已有第三方或外来 HTML 保真导入可编辑课件；适用于 HTML 转课件，不承担新课创作与已有工程续改。",

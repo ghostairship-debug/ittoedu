@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "semanticVersion": "6e2d07dbb1ec3e9ac0f7d411eb27117caaeb2950316fc20c6cac092fd295574e",
+  "semanticVersion": "ec7ba71eddcf1443f469265d8515769894189fa9d918857ebf95d35dfd1797bf",
   "entries": [
     {
       "id": "asset.save",
@@ -428,7 +428,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "读取普通 UTF-8 文件的当前内容；已打开时读取未保存稿。整份回读可给 limit=64000。续页将回执的 nextCursor 传给 cursor；修改后旧游标失效，应省略 cursor 从当前版本重新读取。"
+      "summary": "读取磁盘/工作区路径上的普通 UTF-8 文件，不读取 project.list 返回的工程虚拟路径；已打开时读取未保存稿。整份回读可给 limit=64000。续页将回执的 nextCursor 传给 cursor，不使用 offset；修改后旧游标失效，应省略 cursor 从当前版本重新读取。"
     },
     {
       "id": "file.rename",
@@ -932,7 +932,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "修改获授权整对象的公开属性。Project V10 的 data 和 style 是对应字段完整值，implementation 是实例源码覆盖或 null 恢复默认；frame 可局部调整位置尺寸。文字专业格式位于 data.appearance。保留读取到的其余数据、文字、位置和身份，遵守锁定；精确文字范围不可扩大为整对象授权。"
+      "summary": "修改获授权整对象的公开属性。使用 target 句柄，或使用 project.list/read 返回的对象 path；project 可选，省略使用本任务课件。软件固定原实例和观察基线。Project V10 的 data 和 style 是对应字段完整值，implementation 是实例源码覆盖或 null 恢复默认；frame 可局部调整位置尺寸，无自由 frame 的正文不支持位置修改。文字专业格式位于 data.appearance。保留读取到的其余数据、文字、位置和身份，遵守锁定；精确文字范围不可扩大为整对象授权。"
     },
     {
       "id": "office.create",
@@ -1037,7 +1037,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "列出当前Project V10的真实工程路径：pages目录、页面结构/HTML、对象data.json/style.json/源码、Flow body.html/body.md、Spatial spatial.json、components共享定义/源码、theme.css、global教师控制台与其他图层、assets素材。路径由软件按当前顺序和名称生成，直接使用返回路径，不自行编号、猜路径或填写内部身份。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。"
+      "summary": "列出当前Project V10的工程虚拟路径（不是磁盘文件，使用project.read/apply）：pages目录、页面结构/HTML、对象data.json/style.json/源码、Flow body.html/body.md、Spatial spatial.json、components共享定义/源码、theme.css、global教师控制台与其他图层、assets素材。路径由软件按当前顺序和名称生成，直接使用返回路径，不自行编号、猜路径或填写内部身份。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。"
     },
     {
       "id": "project.read",
@@ -1058,7 +1058,7 @@
       "carriers": [
         "component"
       ],
-      "summary": "读取工程路径的当前正式内容与人工修改。普通Web读HTML，专业组件读data.json；正文读body.html/body.md；空间镜头读spatial.json。components/源码作用于共享定义，页面/global内源码为实例独立实现；workspace中的模块和二进制文件原样保留。很长文本用offset/limit续读。后续project.apply固定本次观察的原目标，提交失败保留原文与诊断。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。"
+      "summary": "读取project.list返回的工程虚拟路径的当前正式内容与人工修改；不用file.read读取这些路径。普通Web读HTML，专业组件读data.json；正文读body.html/body.md；空间镜头读spatial.json。components/源码作用于共享定义，页面/global内源码为实例独立实现；workspace中的模块和二进制文件原样保留。很长文本将回执nextOffset传给offset并用limit续读，不使用cursor。后续project.apply固定本次观察的原目标，提交失败保留原文与诊断。 project省略时使用本任务当前课件；明确file.create/file.open后接续该课件。显式project可参考或修改另一课，不改变当前课件。"
     },
     {
       "id": "project.save",

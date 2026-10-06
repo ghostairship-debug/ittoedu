@@ -37,6 +37,8 @@ export interface HtmlDesignCapture {
   pageStyle: Record<string, string>
   /** Font faces and keyframes needed by retained internal content, without page layout rules. */
   supportCss?: string
+  /** Actual DOM relationships, resolved before descendants can become separate objects. */
+  sourceScopes?: { index: number; reason: string; html?: string }[]
   elements: MeasuredHtmlElement[]
   diagnostics: HtmlAssemblyDiagnostic[]
 }
@@ -66,6 +68,8 @@ export interface HtmlAssemblyObject {
   content?: HtmlObjectContent
   /** Program source is retained, never converted to a static image. */
   program?: { html: string; reason: string }
+  /** Static interactive HTML/CSS keeps one browser document, without computed child styles. */
+  retainedSource?: { html: string; reason: string }
   children: HtmlAssemblyObject[]
   /** Pure paint does not become a selectable author object. */
   decorations: { sourcePath: readonly number[]; frame: AffineFrame; content: HtmlObjectContent }[]
@@ -114,6 +118,14 @@ function sourceProgramReason(element: MeasuredHtmlElement): string | undefined {
 /** Converts only a completed capture. No DOM mutation or formal identity allocation occurs here. */
 export function assembleMeasuredHtml(capture: HtmlDesignCapture, source: HtmlAssembly['source'], framing: 'viewport' | 'content' = 'viewport'): HtmlAssembly {
   const diagnostics = [...capture.diagnostics]
+  const sourceScopes = new Map(capture.sourceScopes?.map(scope => [scope.index, scope]))
+  const documentScope = sourceScopes.get(capture.body)
+  if (documentScope) {
+    diagnostics.push({ level: 'info', code: 'html-semantic-source-scope', message: `关联的 ${documentScope.reason} 保留本次完整输入，后代不再拆分。`, sourcePath: [] })
+    return { viewport: { ...capture.viewport }, source, diagnostics, flowCoupled: true,
+      root: { kind: 'web', label: '关联内容', sourcePath: [], frame: { ...capture.viewport, transform: IDENTITY_MATRIX },
+        style: {}, pseudoElements: {}, retainedSource: { html: source.html, reason: documentScope.reason }, children: [], decorations: [], sourceRegions: [] } }
+  }
   const element = (index: number) => capture.elements[index]!
   const textOf = (index: number): string => element(index).children.map(child => child.kind === 'element' ? NON_CONTENT.has(element(child.index).tagName) ? '' : textOf(child.index) : child.kind === 'text' ? child.text : '').join('')
   const contentOf = (index: number, outer = false): HtmlObjectContent => {
@@ -136,6 +148,7 @@ export function assembleMeasuredHtml(capture: HtmlDesignCapture, source: HtmlAss
   }
   const kindOf = (index: number): HtmlAssemblyObject['kind'] | 'decoration' => {
     const value = element(index)
+    if (sourceScopes.has(index)) return 'web'
     if (sourceProgramReason(value)) return 'program'
     if (['img', 'picture'].includes(value.tagName)) return 'image'
     if (value.tagName === 'svg') return 'svg'
@@ -192,7 +205,14 @@ export function assembleMeasuredHtml(capture: HtmlDesignCapture, source: HtmlAss
       stacking: { zIndex: value.style['z-index'] ?? 'auto', layoutOrder: value.style.order ?? '0' },
       children: [], decorations: [], sourceRegions: [] }
     parent.children.push(object)
-    if (kind === 'group') {
+    const scope = sourceScopes.get(index)
+    if (scope) {
+      object.retainedSource = { html: scope.html ?? value.sourceHtml, reason: scope.reason }
+      // The retained document paints its own root. Its formal frame alone owns external placement.
+      object.style = {}
+      object.pseudoElements = {}
+      diagnostics.push({ level: 'info', code: 'html-semantic-source-scope', message: `关联的 ${scope.reason} 保留在同一 Web 文档，后代不再拆分。`, sourcePath: value.sourcePath })
+    } else if (kind === 'group') {
       const shell = contentOf(index, true)
       if (shell.kind === 'element') object.content = { ...shell, style: object.style, children: [] }
       // A collapsed affine group is kept as one source region: children cannot be reparented through it.
@@ -212,7 +232,7 @@ export function assembleMeasuredHtml(capture: HtmlDesignCapture, source: HtmlAss
   }
   // A layout-only wrapper may have been flattened above for free placement. Flow
   // still needs its authored CSS layout, so decide coupling from the capture.
-  const coupled = capture.elements.some(value => ['flex', 'inline-flex', 'grid', 'inline-grid'].includes(value.style.display ?? '')
+  const coupled = Boolean(sourceScopes.size) || capture.elements.some(value => ['flex', 'inline-flex', 'grid', 'inline-grid'].includes(value.style.display ?? '')
       || ['left', 'right'].includes(value.style.float ?? '')
       || ['absolute', 'fixed', 'sticky'].includes(value.style.position ?? '')
       || ['transform', 'rotate', 'scale'].some(name => Boolean(value.style[name] && value.style[name] !== 'none'))

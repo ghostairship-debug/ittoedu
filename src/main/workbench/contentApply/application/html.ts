@@ -68,7 +68,7 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
     return definition
   }
   const draft = (object: HtmlAssemblyObject): ContentObjectDraft => {
-    const professional = professionalHtmlDraft(object, resourceBindings, options.createFormulaId, assembly.supportCss)
+    const professional = object.retainedSource ? undefined : professionalHtmlDraft(object, resourceBindings, options.createFormulaId, assembly.supportCss)
     if (professional?.kind === 'native') {
       return { ...professional.draft, definitionId: definitionFor(professional.definition).id }
     } else if (professional?.kind === 'web') diagnostics.push(professional.diagnostic)
@@ -78,7 +78,7 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
     const measuredStyle = object.kind === 'program' ? object.style : measuredFragmentBoxStyle(object.style)
     const content = object.kind !== 'program' && originalContent?.kind === 'element'
       ? { ...originalContent, style: measuredFragmentBoxStyle(originalContent.style) } : originalContent
-    let html = object.program?.html ?? (content ? contentHtml(content) : '')
+    let html = object.retainedSource?.html ?? object.program?.html ?? (content ? contentHtml(content) : '')
     const retained = decorationHtml(object)
     if (retained) {
       const closing = content?.kind === 'element' && !VOID.has(content.tagName) ? `</${content.tagName}>` : ''

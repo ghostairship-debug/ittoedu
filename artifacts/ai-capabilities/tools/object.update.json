@@ -1,5 +1,5 @@
 {
-  "description": "修改获授权整对象的公开属性。Project V10 的 data 和 style 是对应字段完整值，implementation 是实例源码覆盖或 null 恢复默认；frame 可局部调整位置尺寸。文字专业格式位于 data.appearance。保留读取到的其余数据、文字、位置和身份，遵守锁定；精确文字范围不可扩大为整对象授权。",
+  "description": "修改获授权整对象的公开属性。使用 target 句柄，或使用 project.list/read 返回的对象 path；project 可选，省略使用本任务课件。软件固定原实例和观察基线。Project V10 的 data 和 style 是对应字段完整值，implementation 是实例源码覆盖或 null 恢复默认；frame 可局部调整位置尺寸，无自由 frame 的正文不支持位置修改。文字专业格式位于 data.appearance。保留读取到的其余数据、文字、位置和身份，遵守锁定；精确文字范围不可扩大为整对象授权。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -35,172 +35,352 @@
       }
     },
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "additionalProperties": false,
-    "properties": {
-      "properties": {
+    "anyOf": [
+      {
         "additionalProperties": false,
         "properties": {
-          "data": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "frame": {
+          "properties": {
             "additionalProperties": false,
             "properties": {
-              "height": {
-                "exclusiveMinimum": 0,
-                "type": "number"
+              "data": {
+                "$ref": "#/$defs/__schema0"
               },
-              "width": {
-                "exclusiveMinimum": 0,
-                "type": "number"
-              },
-              "x": {
-                "type": "number"
-              },
-              "y": {
-                "type": "number"
-              }
-            },
-            "type": "object"
-          },
-          "implementation": {
-            "anyOf": [
-              {
-                "oneOf": [
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "key": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "kind": {
-                        "const": "builtin",
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "key"
-                    ],
-                    "type": "object"
+              "frame": {
+                "additionalProperties": false,
+                "properties": {
+                  "height": {
+                    "exclusiveMinimum": 0,
+                    "type": "number"
                   },
+                  "width": {
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                },
+                "type": "object"
+              },
+              "implementation": {
+                "anyOf": [
                   {
-                    "additionalProperties": false,
-                    "properties": {
-                      "dependencies": {
-                        "items": {
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "type": "array"
-                      },
-                      "kind": {
-                        "const": "source",
-                        "type": "string"
-                      },
-                      "language": {
-                        "enum": [
-                          "javascript",
-                          "typescript"
-                        ],
-                        "type": "string"
-                      },
-                      "moduleBindings": {
-                        "additionalProperties": {
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "propertyNames": {
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "type": "object"
-                      },
-                      "resourceBindings": {
-                        "additionalProperties": {
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "propertyNames": {
-                          "type": "string"
-                        },
-                        "type": "object"
-                      },
-                      "source": {
-                        "type": "string"
-                      },
-                      "workspace": {
+                    "oneOf": [
+                      {
                         "additionalProperties": false,
                         "properties": {
-                          "entry": {
+                          "key": {
                             "minLength": 1,
                             "type": "string"
                           },
-                          "ownerId": {
-                            "minLength": 1,
+                          "kind": {
+                            "const": "builtin",
                             "type": "string"
                           }
                         },
                         "required": [
-                          "ownerId",
-                          "entry"
+                          "kind",
+                          "key"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "dependencies": {
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "kind": {
+                            "const": "source",
+                            "type": "string"
+                          },
+                          "language": {
+                            "enum": [
+                              "javascript",
+                              "typescript"
+                            ],
+                            "type": "string"
+                          },
+                          "moduleBindings": {
+                            "additionalProperties": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "propertyNames": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "type": "object"
+                          },
+                          "resourceBindings": {
+                            "additionalProperties": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "propertyNames": {
+                              "type": "string"
+                            },
+                            "type": "object"
+                          },
+                          "source": {
+                            "type": "string"
+                          },
+                          "workspace": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "entry": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "ownerId": {
+                                "minLength": 1,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "ownerId",
+                              "entry"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "language"
                         ],
                         "type": "object"
                       }
-                    },
-                    "required": [
-                      "kind",
-                      "language"
-                    ],
-                    "type": "object"
+                    ]
+                  },
+                  {
+                    "type": "null"
                   }
                 ]
               },
-              {
-                "type": "null"
+              "label": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "locked": {
+                "type": "boolean"
+              },
+              "opacity": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              "rotation": {
+                "type": "number"
+              },
+              "style": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/__schema0"
+                },
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "visible": {
+                "type": "boolean"
               }
-            ]
-          },
-          "label": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "locked": {
-            "type": "boolean"
-          },
-          "opacity": {
-            "maximum": 1,
-            "minimum": 0,
-            "type": "number"
-          },
-          "rotation": {
-            "type": "number"
-          },
-          "style": {
-            "additionalProperties": {
-              "$ref": "#/$defs/__schema0"
-            },
-            "propertyNames": {
-              "type": "string"
             },
             "type": "object"
           },
-          "visible": {
-            "type": "boolean"
+          "target": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
           }
         },
+        "required": [
+          "target",
+          "properties"
+        ],
         "type": "object"
       },
-      "target": {
-        "maxLength": 100,
-        "minLength": 1,
-        "type": "string"
+      {
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "project": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "properties": {
+            "additionalProperties": false,
+            "properties": {
+              "data": {
+                "$ref": "#/$defs/__schema0"
+              },
+              "frame": {
+                "additionalProperties": false,
+                "properties": {
+                  "height": {
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  "width": {
+                    "exclusiveMinimum": 0,
+                    "type": "number"
+                  },
+                  "x": {
+                    "type": "number"
+                  },
+                  "y": {
+                    "type": "number"
+                  }
+                },
+                "type": "object"
+              },
+              "implementation": {
+                "anyOf": [
+                  {
+                    "oneOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "key": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "kind": {
+                            "const": "builtin",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "key"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "dependencies": {
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "kind": {
+                            "const": "source",
+                            "type": "string"
+                          },
+                          "language": {
+                            "enum": [
+                              "javascript",
+                              "typescript"
+                            ],
+                            "type": "string"
+                          },
+                          "moduleBindings": {
+                            "additionalProperties": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "propertyNames": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "type": "object"
+                          },
+                          "resourceBindings": {
+                            "additionalProperties": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "propertyNames": {
+                              "type": "string"
+                            },
+                            "type": "object"
+                          },
+                          "source": {
+                            "type": "string"
+                          },
+                          "workspace": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "entry": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "ownerId": {
+                                "minLength": 1,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "ownerId",
+                              "entry"
+                            ],
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "language"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "label": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "locked": {
+                "type": "boolean"
+              },
+              "opacity": {
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              "rotation": {
+                "type": "number"
+              },
+              "style": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/__schema0"
+                },
+                "propertyNames": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "visible": {
+                "type": "boolean"
+              }
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "path",
+          "properties"
+        ],
+        "type": "object"
       }
-    },
-    "required": [
-      "target",
-      "properties"
     ],
     "type": "object"
   },

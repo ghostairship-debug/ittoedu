@@ -167,12 +167,15 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
     for (const name of Array.from(bodyStyle).filter(name => name.startsWith('background-'))) pageStyle[name] = bodyStyle.getPropertyValue(name)
   }
   const supportRules: string[] = []
+  const selectors: string[] = []
+  let unreadableStylesheet = false
   const collectRules = (rules: CSSRuleList): void => {
     for (const rule of Array.from(rules)) {
       if (rule.type === CSSRule.FONT_FACE_RULE || rule.type === CSSRule.KEYFRAMES_RULE || rule.cssText.startsWith('@property')) supportRules.push(rule.cssText)
       else if ('cssRules' in rule) collectRules((rule as CSSGroupingRule).cssRules)
       if (rule.type === CSSRule.STYLE_RULE) {
         const styled = rule as CSSStyleRule
+        selectors.push(styled.selectorText)
         try {
           if (body.matches(styled.selectorText) || body.querySelector(styled.selectorText)) inspectSpecifiedStyle(styled.style)
         } catch { /* A selector unsupported by querySelector does not invalidate its browser layout. */ }
@@ -181,7 +184,7 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
   }
   for (const sheet of Array.from(document.styleSheets)) {
     try { collectRules(sheet.cssRules) }
-    catch { diagnostics.push({ level: 'warning', code: 'html-stylesheet-read', message: '样式表可用于当前排版，但浏览器未开放其字体/动效规则读取。', reference: sheet.href ?? undefined }) }
+    catch { unreadableStylesheet = true; diagnostics.push({ level: 'warning', code: 'html-stylesheet-read', message: '样式表可用于当前排版，但浏览器未开放其字体/动效规则读取。', reference: sheet.href ?? undefined }) }
   }
   for (const { element, open } of disclosures) element.open = open
   // Geometry/styles came from the reserved copy. HTML/state always comes from
@@ -191,6 +194,111 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
     elements[index]!.attributes = Object.fromEntries([...node.attributes].map(attribute => [attribute.name, attribute.value]))
     elements[index]!.sourceHtml = node.outerHTML
   }
+  const scopes = new Map<Element, Set<string>>()
+  const commonRoot = (related: Element[]): Element => {
+    let root = related[0] ?? body
+    while (root !== body && !related.every(value => root.contains(value))) root = root.parentElement ?? body
+    return body.contains(root) ? root : body
+  }
+  const retain = (related: Element[], reason: string) => {
+    if (!related.length) return
+    const root = commonRoot(related)
+    const reasons = scopes.get(root) ?? new Set<string>(); reasons.add(reason); scopes.set(root, reasons)
+  }
+  // Browser ownership, including form= controls and labels outside the form subtree.
+  for (const form of Array.from(document.forms)) {
+    const controls = Array.from(form.elements)
+    if (controls.length) retain([form, ...controls], 'form')
+  }
+  for (const label of Array.from(body.querySelectorAll('label'))) if (label.control) retain([label, label.control], 'label-control')
+  const radios = Array.from(body.querySelectorAll<HTMLInputElement>('input[type="radio"]'))
+  for (const radio of radios) if (radio.name) retain(radios.filter(value => value.name === radio.name && value.form === radio.form), 'radio-group')
+  for (const details of Array.from(body.querySelectorAll('details'))) retain([details], 'disclosure')
+
+  const state = /:(?:checked|indeterminate|disabled|enabled|required|optional|valid|invalid|user-valid|user-invalid|read-only|read-write|placeholder-shown|focus-within|focus-visible|focus|hover|active|open)\b|\[open\]/g
+  const checkedAnchors = new Set<HTMLInputElement>()
+  const potentialSelector = (selector: string) => selector.replace(state, '').replace(/::[\w-]+(?:\([^)]*\))?/g, '')
+  const matches = (selector: string): Element[] => Array.from(document.querySelectorAll(selector))
+  for (const selectorText of selectors) {
+    if (!selectorText.match(state)) continue
+    // The browser resolves ordinary selectors. Nested functional state selectors
+    // need their complete input context; no arbitrary CSS dependency parser is introduced.
+    if (/:[\w-]+\([^)]*(?::(?:checked|indeterminate|disabled|enabled|required|optional|valid|invalid|user-valid|user-invalid|read-only|read-write|placeholder-shown|focus|hover|active|open)\b|\[open\])/.test(selectorText)) {
+      retain([body], 'state-css-context'); continue
+    }
+    for (const selector of selectorText.split(',')) {
+      const found = [...selector.matchAll(state)]
+      if (!found.length) continue
+      try {
+        const targets = matches(potentialSelector(selector).trim() || '*')
+        const anchors = found.flatMap(match => matches(potentialSelector(selector.slice(0, match.index)).trim() || '*'))
+        if (selector.includes(':checked')) for (const anchor of anchors) if (anchor instanceof HTMLInputElement && ['radio', 'checkbox'].includes(anchor.type)) checkedAnchors.add(anchor)
+        if (targets.length || anchors.length) retain([...anchors, ...targets], 'state-css')
+      } catch { retain([body], 'state-css-context') }
+    }
+  }
+  if (unreadableStylesheet && scopes.size) retain([body], 'stylesheet-context')
+
+  // A live state can resize normal-flow ancestors or move later siblings outside
+  // the selector's subject. Keep that measured layout relationship in the same
+  // source scope, rather than leaving fixed fragments over its newly shown controls.
+  const checkedInputs = Array.from(body.querySelectorAll<HTMLInputElement>('input[type="radio"],input[type="checkbox"]'))
+  const checkedState = checkedInputs.map(input => input.checked)
+  const boxes = nodes.map(node => node.getBoundingClientRect())
+  for (const anchor of checkedAnchors) {
+    anchor.checked = !anchor.checked
+    const changed = nodes.filter((node, index) => {
+      if (node === body) return false
+      const before = boxes[index]!, after = node.getBoundingClientRect()
+      return ['x', 'y', 'width', 'height'].some(axis => Math.abs(before[axis as keyof DOMRect] as number - (after[axis as keyof DOMRect] as number)) > 0.1)
+    })
+    if (changed.length) retain([anchor, ...changed], 'state-layout')
+    checkedInputs.forEach((input, index) => { input.checked = checkedState[index]! })
+  }
+
+  for (const [root] of [...scopes]) for (const node of [root, ...root.querySelectorAll<HTMLElement>('*')]) {
+    const style = styles.get(node)
+    if (style?.display === 'none' || style?.visibility === 'hidden' || style?.opacity === '0') continue
+    const position = style?.position
+    if (position === 'fixed') retain([body], 'viewport-layout')
+    else if (position === 'absolute' && node instanceof HTMLElement && node.offsetParent && !root.contains(node.offsetParent)) {
+      retain([root, node.offsetParent], 'positioned-layout')
+    }
+  }
+
+  // Ancestor shells preserve inherited CSS and descendant selectors. Test their
+  // actual selector matches before using them; outside sibling/nth-child context
+  // is retained as the whole input when pruning would change a relevant match.
+  for (const [root, reasons] of [...scopes]) {
+    if (root === body) continue
+    const cloned = document.cloneNode(true) as Document
+    const cloneAt = (path: readonly number[]) => path.reduce<Node | undefined>((node, index) => node?.childNodes[index], cloned.body)
+    const path = pathOf(root), target = cloneAt(path) as Element
+    let current = target
+    while (current !== cloned.body) {
+      const parent = current.parentElement!
+      for (const child of Array.from(parent.childNodes)) if (child !== current) child.remove()
+      current = parent
+    }
+    const originals = [root, ...root.querySelectorAll('*')], copies = [target, ...target.querySelectorAll('*')]
+    let changed = false
+    for (const selector of selectors) {
+      try {
+        const potential = potentialSelector(selector)
+        if (!potential.trim()) continue
+        if (originals.some((value, index) => value.matches(potential) !== copies[index]!.matches(potential))) { changed = true; break }
+      } catch { /* Unsupported selectors keep their native browser behavior. */ }
+    }
+    if (changed) { scopes.delete(root); retain([body], 'selector-context') }
+    else if (!elements[indices.get(root)!]?.frame || elements[indices.get(root)!]?.geometryIssue) {
+      scopes.delete(root)
+      let measurable = root.parentElement ?? body
+      while (measurable !== body && (!elements[indices.get(measurable)!]?.frame || elements[indices.get(measurable)!]?.geometryIssue)) measurable = measurable.parentElement ?? body
+      retain([measurable], [...reasons].join(', '))
+    }
+  }
+  const sourceScopes = [...scopes].filter(([root]) => ![...scopes.keys()].some(parent => parent !== root && parent.contains(root)))
+    .map(([root, reasons]) => ({ index: indices.get(root)!, reason: [...reasons].join(', ') }))
   return { viewport: { width: innerWidth, height: innerHeight }, contentBounds, viewportDependent,
-    body: 0, pageStyle, supportCss: supportRules.join('\n'), elements, diagnostics }
+    body: 0, pageStyle, supportCss: supportRules.join('\n'), sourceScopes, elements, diagnostics }
 }
