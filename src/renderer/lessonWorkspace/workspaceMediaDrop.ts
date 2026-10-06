@@ -1,4 +1,5 @@
 import type { WorkspaceMediaFile } from '../../shared/workbench/workspaceFiles'
+import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
 import type { WorkspaceMediaSource } from './workspaceMediaSourceContext'
 import { readWorkspaceMediaDrag } from './workspaceMediaDrag'
 
@@ -7,6 +8,7 @@ export type WorkspaceMediaPlacement =
   | { surface: 'flow'; afterBlockId: string | null }
 
 export interface WorkspaceMediaDropTarget {
+  captured: CapturedCourseTarget
   documentId: string | null
   projectId: string
   revision: number

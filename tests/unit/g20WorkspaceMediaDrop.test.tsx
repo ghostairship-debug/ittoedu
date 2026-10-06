@@ -7,6 +7,8 @@ import { createMarkdownTestHost } from '../helpers/markdownDocumentHost'
 import { deliverWorkspaceMediaDrop } from '../../src/renderer/lessonWorkspace/workspaceMediaDrop'
 import { flowMediaDropAfterBlock } from '../../src/renderer/ui/flow/flowMediaDropPosition'
 import type { WorkspaceFilesAPI, WorkspaceFilesRequest } from '../../src/shared/workbench/workspaceFiles'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import type { WorkspaceMediaDropRequest, WorkspaceMediaDropTarget } from '../../src/renderer/lessonWorkspace/workspaceMediaDrop'
 
 const roots: string[] = []
 const services: WorkspaceFilesDesktopService[] = []
@@ -53,15 +55,25 @@ it('reads the entire media selection before one callback, and rejects a failed m
     throw new Error(`Unexpected ${request.type}`)
   }) as WorkspaceFilesAPI
   const source = { directory: 'C:\\lesson', files: api }
-  const target = { documentId: 'document', projectId: 'project', revision: 7, locationId: 'scene', surfaceId: 'surface', sessionGeneration: 3 }
+  const project = createBlankCourseProjectV10('媒体目标')
+  const target: WorkspaceMediaDropTarget = {
+    documentId: 'document', projectId: project.id, revision: project.revision,
+    locationId: 'surface', surfaceId: 'surface', sessionGeneration: 3,
+    captured: {
+      documentId: 'document', epoch: 'epoch', project, editingProject: project,
+      resources: { assets: {}, components: {} }, activeStateId: null, surfaceId: 'surface',
+      instanceIds: [], instanceId: null,
+    },
+  }
   const raw = JSON.stringify({ version: 1, workspaceId: 'workspace', entryIds: ['first', 'second'] })
-  const commit = vi.fn(async () => ({ ok: true }))
+  const commit = vi.fn(async (_request: WorkspaceMediaDropRequest) => ({ ok: true }))
   const failed = await deliverWorkspaceMediaDrop(raw, source, { surface: 'slide', x: 200, y: 100 }, target, commit)
   expect(failed).toEqual({ ok: false, reason: '第二张图片已经损坏' })
   expect(commit).not.toHaveBeenCalled()
   rejectSecond = false
   expect(await deliverWorkspaceMediaDrop(raw, source, { surface: 'slide', x: 200, y: 100 }, target, commit)).toEqual({ ok: true })
   expect(commit).toHaveBeenCalledTimes(1)
+  expect(commit.mock.calls[0]?.[0]?.target.captured).toBe(target.captured)
   expect(commit).toHaveBeenCalledWith(expect.objectContaining({ placement: { surface: 'slide', x: 200, y: 100 }, target,
     items: [expect.objectContaining({ entryId: 'first' }), expect.objectContaining({ entryId: 'second' })] }))
   expect(await deliverWorkspaceMediaDrop(raw, source, { surface: 'slide', x: 200, y: 100 }, target, commit, () => false))
