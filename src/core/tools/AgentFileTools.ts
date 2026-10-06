@@ -44,7 +44,7 @@ const fileDescriptors = (Object.keys(agentFileSchemas) as AgentFileToolName[]).m
     'file.search': '按文件名搜索文件夹及子文件夹，返回有界路径列表；截断时用同 path/query 和 nextCursor 继续，不把一页无匹配当整个目录无结果。path 省略时从会话所属位置开始。',
     'file.open': '打开 Markdown、UTF-8 源文件（含 JSON/CSV/代码/无后缀文件）、HTML 或 H5 演示并取得正式文档句柄；已有未保存稿和 History 保留，不执行源代码。二进制与办公压缩格式需相应入口。当前任务权限决定可否修改。',
     'file.create': '新建并打开正式文档。kind 可省略，按扩展名自动识别；kind=text 适用任意 UTF-8 数据/源文件（.json/.csv/.svg/.xml/.yaml/代码/无后缀），.md、.h5lesson 和二进制扩展名不可用此 kind。已有完整内容用 file.write mode=create 写入保存。path 省略时放在会话所属文件夹。',
-    'file.read': '读取普通 UTF-8 文件的当前内容；已打开时读取未保存稿。整份回读可给 limit=64000。续页将回执的 nextCursor 传给 cursor；修改后旧游标失效，应省略 cursor 从当前版本重新读取。',
+    'file.read': '读取磁盘/工作区路径上的普通 UTF-8 文件，不读取 project.list 返回的工程虚拟路径；已打开时读取未保存稿。整份回读可给 limit=64000。续页将回执的 nextCursor 传给 cursor，不使用 offset；修改后旧游标失效，应省略 cursor 从当前版本重新读取。',
     'file.grep': '按字面量搜索文件或目录内的 UTF-8 正文，返回行、列、上下文及实际扫描/排除/失败范围；截断时用 cursor 续读。',
     'file.write': '直接写入完整普通 UTF-8 内容（含 Markdown、HTML 和代码）。mode=create 新建并保存文件，要求路径不存在，无需先 file.create。mode=replace 覆盖文件当前内容，无需先 file.read；如携带 expectedVersion 则校验版本一致后再写入，不一致时报版本冲突。替换已打开文件只提交文档事务，不自动保存。以返回的 saved 确认落盘。',
     'file.patch': '按唯一 oldText 或明确 range 局部修改 UTF-8 文件，expectedVersion 可省略；提供时仍校验版本。原文不存在、匹配不唯一或版本冲突时，先读当前内容修正，勿重复旧补丁。已打开文件只提交文档事务。',

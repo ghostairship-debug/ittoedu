@@ -10,7 +10,7 @@ import { prepareContentResources, type PreparedContentResources } from './resour
 import type { HtmlDesignMeasurementRequest } from './measurement/ElectronHtmlDesignMeasurement'
 import { prepareMeasurementDocument } from './measurement/prepareMeasurementDocument'
 import { assemblyContentDraft, htmlAssemblyFraming, htmlForAssembly, localHtmlInputs, preserveHtmlOuterStyle } from './application/html'
-import { planContentApply } from './application/plan'
+import { NoContentTargetError, planContentApply } from './application/plan'
 import type { CanonicalContentApplyRequest, ContentApplyDiagnostic, ContentApplyPlan, ContentApplyRequest, ContentApplyResult, ContentApplySessionPort, ContentChangeRequest, ContentObjectDraft, SurfaceApplyRequest } from './application/types'
 import type { DocumentResources } from '../../../shared/workbench/document'
 
@@ -70,6 +70,9 @@ export class ContentApplyService {
     const edits: ComponentEdit[] = []
     let drafts: ContentObjectDraft[] | undefined, unverified = false, unusable = false
     if (request.source.kind === 'html') {
+      // Resolve content before admitting its original or resources. An empty
+      // projection cannot turn an asset-only batch into content success.
+      const inputs = request.intent === 'content' ? localHtmlInputs(project, request) : undefined
       if (request.source.original) {
         const original = request.source.original, id = this.createId()
         const extension = path.extname(original.filename).replace(/[^.a-z0-9]/gi, '') || '.html'
@@ -78,8 +81,7 @@ export class ContentApplyService {
       }
       if (request.intent === 'style') throw new Error('主题修改需要明确的样式字段，不从整页 HTML 猜测布局')
       if (request.intent === 'content') {
-        const inputs = localHtmlInputs(project, request)
-        for (const input of inputs) {
+        for (const input of inputs!) {
           signal?.throwIfAborted()
           const instance = project.instances[input.instanceId]!
           const definition = project.definitions[instance.definitionId]
@@ -231,7 +233,8 @@ export class ContentApplyService {
     try { plan = await this.plan(request, signal) }
     catch (error) {
       return { commit: 'not_committed', usability: 'unusable', delivery: 'not_requested', input: request, insertedIds: [],
-        diagnostics: [{ level: 'error', code: signal?.aborted ? 'content-apply-cancelled' : 'content-apply-unresolved',
+        diagnostics: [{ level: 'error', code: signal?.aborted ? 'content-apply-cancelled'
+          : error instanceof NoContentTargetError ? error.code : 'content-apply-unresolved',
           message: error instanceof Error ? error.message : String(error), repairable: true }] }
     }
     if (!plan.command.edits.length) return { input: request, insertedIds: [], diagnostics: plan.diagnostics, usability: plan.usability,

@@ -17,6 +17,20 @@ export function contentTargetIds(project: CourseProjectV10, request: Pick<Conten
   return roots.flatMap(visit)
 }
 
+export class NoContentTargetError extends Error {
+  readonly code = 'no-content-target'
+  constructor() {
+    super('当前范围没有可修改的内容对象，输入已保留。请通过 project.list 读取目标页面的结构 JSON 路径，再用 project.apply({ path: 页面结构路径, intent: "insert", content: 原内容 }) 或 from: 原文件路径显式插入。')
+  }
+}
+
+/** HTML content edits require an existing object, even when the projection is empty. */
+export function htmlContentTargetIds(project: CourseProjectV10, request: Pick<ContentChangeRequest, 'target'>): string[] {
+  const ids = contentTargetIds(project, request)
+  if (!ids.length) throw new NoContentTargetError()
+  return ids
+}
+
 function bounds(frame: ComponentFrame) {
   const corners = frameCorners(frame)
   return { left: Math.min(...corners.map(point => point.x)), right: Math.max(...corners.map(point => point.x)),
@@ -73,6 +87,7 @@ export function planContentApply(input: PlanContentApplyInput): ContentApplyPlan
   const { project: baseProject, request } = input
   const context = request.editingContext
   const project = context ? resolveComponentPresentation(baseProject, context.surfaceId, context.stateId) : baseProject
+  if (request.intent === 'content' && request.source.kind === 'html') htmlContentTargetIds(project, request)
   const diagnostics = [...input.diagnostics ?? []]
   const edits: ComponentEdit[] = [...input.edits ?? []]
   if (request.source.kind === 'objects' || request.source.kind === 'data') edits.push(...request.source.componentFiles ?? [])

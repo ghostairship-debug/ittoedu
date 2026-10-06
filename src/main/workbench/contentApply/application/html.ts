@@ -1,7 +1,7 @@
 import { parse, serialize, serializeOuter, type DefaultTreeAdapterTypes } from 'parse5'
 import { htmlObjectStyle, type HtmlAssembly, type HtmlAssemblyObject, type HtmlObjectContent } from '../../../../core/contentApply/assembly/htmlAssembly'
 import type { ComponentDefinition, ComponentFrame, CourseProjectV10, JsonObject } from '../../../../shared/contracts/component-platform'
-import { contentTargetIds } from './plan'
+import { htmlContentTargetIds } from './plan'
 import type { ContentApplyDiagnostic, ContentChangeRequest, ContentObjectDraft, HtmlContentProjection } from './types'
 import { professionalHtmlDraft } from './professionalHtml'
 import { measuredFragmentBoxStyle } from '../../../../components/web/measuredFragmentBox'
@@ -194,7 +194,7 @@ function cloneWithout(node: Node, skip: Set<Element>): Node | undefined {
 /** Target extraction precedes resource admission, so unrelated full-page input cannot add assets. */
 export function localHtmlInputs(project: CourseProjectV10, request: ContentChangeRequest): { instanceId: string; html: string }[] {
   if (request.source.kind !== 'html') throw new Error('当前源不是 HTML')
-  const ids = contentTargetIds(project, request)
+  const ids = htmlContentTargetIds(project, request)
   if (request.source.scope !== 'projection') {
     if (request.target.kind !== 'instance' || (project.instances[request.target.instanceId]?.childIds?.length ?? 0)) {
       throw new Error('编组内容修改需要当前软件投影，不能猜测替换其内部对象')
