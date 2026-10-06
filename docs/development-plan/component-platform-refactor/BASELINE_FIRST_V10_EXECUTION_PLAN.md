@@ -369,9 +369,9 @@ Windows真实中文IME不能用keyboard.type中文或合成composition冒充。�
 | NativeText聚焦用例 | N0/F0 | 断言通过但Vitest因PM/jsdom getClientRects退出1；整体不能记green |
 | HMR Context报错 | R0/A0 | 当时存在多版本URL污染；静态Provider实际包裹Workspace，不据此盲加Provider |
 
-### 10.1 当前实施状态（2026-10-06，7dc933c5 加 Q2 续作修复）
+### 10.1 工程交付状态（2026-10-06，产品 cut 3b5d4df0）
 
-上表与 B0 中的起始调查、冻结材料和未来步骤保留为 2026-10-05 的历史记录。当前 Owner 已授权全部产品开发；本节以迁移树 7dc933c5 和原任务卡的实际证据更新状态，不把旧快照中的断点继续称为当前故障，也不把局部修复写成全部 N/L 完成。
+上表与 B0 中的起始调查、冻结材料和未来步骤保留为 2026-10-05 的历史记录。本次已授权产品工程按 `engineering candidate` 收口：实际 consumer、下表所述行为、最低有效检查及适用独立复核已完成；QA 收尾增量复核也已闭合，按工作协议移除已完成 active 卡并生成任务板。产品源码为迁移树 `3b5d4df0cbcfcb56e0da012be87691a6522e1da1`，本节区分工程结果、实际观察范围与 Owner 接受，不把所有 N/L 写成全面验收。
 
 | 范围 | 当前实现与有效证据 | 保留的界线 |
 |---|---|---|
@@ -379,12 +379,41 @@ Windows真实中文IME不能用keyboard.type中文或合成composition冒充。�
 | Flow 正文、资源与投影 | FlowWorkspace实际传clipboard context/resource port并等待正式ACK，prepared正文/实例/同名资产/私有相对源码一批提交已有针对性证据。7dc修复真实样式回写进入PM观察器的重建循环；新Main冷开11个正文DOM/ViewDesc和4个iframe/父级身份稳定，可信drag改变正式顺序，尾段输入后CtrlZ保留重排 | actual库插入与资源集成用例不冒称native跨文档剪贴板整链；本次QA未保存，正常保留恢复稿关闭，旧有效保存/冷开证据继续复用 |
 | 用户三项引用补审 | 三项初核均存在，eaa3bbf58f42157d97352aafb09e4c30622a8488修后同直接反例由3fail到3/3、exit0/979ms。互动为新ID1/旧ID0；visibility目标true/源false且unbound有诊断；正文100→180时浮层110→190，保留偏移、横比与frame，普通文本未替换。Sol独立核actualdiff/raw；e978a14c身份尾项和8bb28f空asset引用分别闭合 | 只证明这些局部引用属性，不声称全软件无回退；旧QA ghost没有被静默改写 |
 | Teacher、运行与关闭 | UI5运行/暂停/继续/重播已有实际观察。7dc checkbox列宽恢复横向标签及右列控件，布尔修改可正式撤销；独立clean Main普通docclose后QA消失且alerts/toasts为空。真实pending/composition/exact unknown ACK保留诊断由4个V10生命周期用例证明 | 首次dirty docclose遗漏harness原生choice，已保留为准备缺口；不把clean UI观测当全部pending或系统IME矩阵 |
-| 内容应用、工程文件与导入 | H1/H2已有Desktop HTML与resident MCP V10 import/save、canonical资源/源码事务、live rename后cold reopen续作证据；实际Electron局部CSS redo保留邻项且呈现320×96、28px、作者颜色和input5。成熟UI的HTML/PPTX导入编辑与保存revision10后新Main冷开已观察；Q2投影/正式批次与专业源文consumer已接线 | E1已核非web专业HTML的拒绝属于批准的adapter适用范围，原生专业编辑可用；L14/L20未要求新增同ID原件替换的普通UI，现替图保同instance/crop/frame。Source未Apply草稿是局部状态，外部文件ACK不得silentApply；dirty摄入只补实际MCP→原Source冲突保稿→显式换基线/Apply→save/coldreopen观察 |
+| 内容应用、工程文件与导入 | H1/H2已有Desktop HTML与resident MCP V10 import/save、canonical资源/源码事务、live rename后cold reopen续作证据；实际Electron局部CSS redo保留邻项且呈现320×96、28px、作者颜色和input5。成熟UI的HTML/PPTX导入编辑与保存revision10后新Main冷开已观察；Q2投影/正式批次与专业源文consumer已接线 | E1已核非web专业HTML的拒绝属于批准的adapter适用范围，原生专业编辑可用；L14/L20未要求新增同ID原件替换的普通UI，现替图保同instance/crop/frame。Source未Apply草稿是局部状态，外部文件ACK不得silentApply；实际冲突保稿链见下行 |
+| L20 公开 MCP 与 Source 草稿 | 3b5d实际公开catalog定位helper.js，唯一project.apply从真实helper-step5.js提交0→1、applied/recoverable且diagnostics空；两实例运行值5，原Source局部草稿7保持。旧capture保存实现明确冲突，formal1/undo1与草稿7均不变；显式载入当前基线保稿后UI Apply7提交2/undo2，CtrlS落盘同绑定QA且2/clean/savingfalse/saveErrornull。正常退出后新Main/新documentId/epoch冷开2/clean/undo0，Source7、两实例data/frame/badge及源码邻项保留；当前位置试运行真实点击使A0→7、B0，作者文档仍2/clean | SolUI已独立接受业务、保存、冷开和实际运行证据；不把只读基线刷新、被拒Source尝试或保存算成第二次MCP业务提交。作者模式点击不改变计数符合模式边界；该原始观察保留，不冒充运行互动成功 |
 | 正常关闭后再改名的续作 | Q2 8b953029已精确携入3源和1个新case：正式rename/move成功事实经现有FileCoordinator单consumer进入Engine既有binding队列，只更新已记录的run.documentBindings路径；cleanclose cleanup及projectId/epoch/saveRevision/fileVersion/冻结scope不变。持久化失败保物理移动结果并返回明确partial，不抛回文件协调器造成反向回滚 | 同一当前7dc源码依赖的新case，cleanclose→rename→原run retry（无manual reopen）由旧path ENOENT的1fail/7skip变为1pass/7skip、exit0/6.65s/stderr0；A亲读actualdiff和raw无finding。旧7例未重跑，dirty/recoverable已有restore+observe，不归为同一故障；本项不冒充新Main/UI实测 |
+| 默认工作空间的公开 MCP 初始化 | 旧真实initialize返回JSON-RPC−32603「请先通过工作空间选择器授权此目录」，catalog/read/apply均0。803192ef仅在production factory创建并登记软件固定userData/workbench-v2/space，复用现有FileService授权入口，集成于3b5d；用户根仍只查现有授权。新冷Main同实例的实际preload RootMap允许managed精确根、拒绝尚未选择的outside QA目录；一次公开initialize成功返回2025-11-25、guoling2.0.0、tools能力与session header，nextRpcSentfalse。A独立源码及真实正/负证据复核无finding | 不授整个profile或任意用户目录，不通过预选文件夹绕过默认入口。成功helper实际检查response.ok及RPC错误，未保存精确HTTP状态字段不影响该属性证明，未为补可选元数据重发成功请求 |
 | 发布、实际预览与格式输出 | singleHtmlMode已由useCourseDelivery传入producer，离线/在线两模式均生成；混合独立Player已有可信作答。L03实际预览走ViewObservationDesktopService的冻结V3 snapshot与同一World，正式七图manifest保留各cut来源；unused 1×1 seed没有被冒充截图。最新6f交付制品完整且报告error0，正式课件PDF实际950253B、7页/7PNG已独立目视核查 | PPTX原生table/chart的15°旋转partial路线已批准，格式诊断保留。Word原生正文/表格/图表编辑保存冷读有效；Word自身PDF导出新条件仍不返回，锚图/图像native视觉缺口保留，停止无新证据的重复；课件PDF不替代Word PDF |
-| 完整N/L与旧consumer退出 | 现Main只注册V10及普通Markdown/Text，Renderer单V10Bridge/Kernel，源Skill与同源能力已同步；旧V9文件存在不等于活writer，按实际注册退出，不清仓式删除。GJS按既定可替换适配定位，不新增无信息增益的比较门 | 页面全菜单/整卡空白点击、Spatial路径与站内分步、像素变换/恢复原图、native跨doc复制及恢复稿续编按现有集成证据与未观察属性分别对账；不能仅Q2修完便称全部目标完成 |
+| 完整N/L与旧consumer退出 | 现Main只注册V10及普通Markdown/Text，Renderer单V10Bridge/Kernel，源Skill与同源能力已同步；旧V9文件存在不等于活writer，按实际注册退出，不清仓式删除。GJS按既定可替换适配定位，不新增无信息增益的比较门。完整工程映射见下表 | 页面全菜单/整卡空白点击、Spatial路径与站内分步、像素变换/恢复原图、native跨doc复制及恢复稿续编已有focused consumer/case，未逐项做新的native观察；这不是已发现的产品故障，不派生新源码任务或全矩阵 |
 
-本轮仅对相关变化做最小充分检查：此前Flow投影1例、正常关闭4例、一次Renderer构建（main-B7de-Fqn.js）；本次Q2同一新case修前/修后各一次，四路径携入后仅Main构建一次，node scripts/build-electron.mjs exit0/3.44s、入口dist-electron/main/index.js（5847B）。Renderer/Player/默认source JSON及Office产物复用，不重跑旧矩阵或因提交ID变化重建。E3/P0新观察各自正常退出，SolUI已只读复核actualdiff和现有raw/PNG，无具体finding；本次尾段是既有非空paragraph的caret，可信drag只覆盖paragraph，不扩称本次空白造段、表格/媒体拖动或OS IME。当前任务仍active；真实模型比较未获本轮授权，发布继续暂停，Owner艺术接受另记。完整证据路径与精确回执在[现任务卡](../tasks/component-platform-refactor/baseline-v10-implementation.md)。
+主要工程提交为7dc933c5（Flow投影、正常关闭、checkbox与交付helper）、7d6a6628（Q2关闭后改名续作）和3b5d4df0（默认managed root授权）。此前Flow投影1例、正常关闭4例、一次Renderer构建有效；Q2同一新case修前/修后各一次，携入后Main-only构建exit0/3.44s；managed-root单文件携入后唯一必要Main-only构建exit0/2.68s、stdout/stderr空，当前入口dist-electron/main/index.js。Renderer仍assets/main-B7de-Fqn.js，Player仍复用5e0有效切片；默认source JSON、Office产物和未受影响证据继续有效，未因文档或提交身份变化重建。
+
+| 工程目标映射 | 已集成结果与最低有效证据 |
+|---|---|
+| N00a/N01，L03/09 | V10/V3/API5、唯一Session/History、captured/ACK、资源事务、实际预览捕获与保存恢复；UI1新进程冷开续编、UI2/UI6实际操作及正式七图 |
+| N00b/N03，L01/02/08/10/11 | affine/DOM几何、测量装配及Slide/Spatial正式consumer；W0真实Host/Bridge相机、路径、表单和保存重开focused证据 |
+| N02，L04/05 | 内存多文件编译、共享/私有源码及单World生命周期；UI6共享→私有→恢复默认→Undo→保存冷开 |
+| N04，L12 | Flow正文、专业节点、浮层、资源与ACK/Undo；F1资源碰名/私有文件证据及7dc真实稳定性/段落拖动 |
+| N05，L13–18 | 专业组件、属性与默认互动；图片crop/替图保全、布尔撤销、专业表格/图表输出和实际运行 |
+| N06，L06/07 | Teacher、导航、动效取消及临时运行状态；UI5暂停/继续/重播与混合Player真实作答 |
+| N07，L19/20/24 | 内容应用、工程文件、库、MCP及续作；HTML/PPTX导入冷开、局部redo、Q2改名反例、默认MCP授权与本次L20真实链 |
+| N08，L21/22/23a/23b | Published、两种HTML模式、独立Player与格式producer；正式七图、原生Office编辑保存冷读及正式课件PDF7页 |
+| N09，L26 | 混合样本、确定性对照与实际动作已交；同模型真实创作比较未授权，未运行 |
+| N10，L25 | 实际旧consumer退出、单Bridge/Kernel、同源Skill与能力同步；不以旧文件仍存在推断双writer |
+
+独立结论按各自范围保留：A接受Q2 actualdiff/前后反例及默认managed root源码/冷Main正负行为；SolUI接受Flow/P0和L20源码草稿、保存、冷开、实际运行，并已核完更新report/lifecycle及精确进程库存，QA收尾增量闭合，无新产品finding；SolOutputs接受正式课件PDF七页，保留Word自身原生PDF视觉缺口。没有为独立复核重跑操作，也不把不同的helper退出方式合并成全部正常exit0。
+
+原始失败没有删除或被成功记录覆盖：旧默认MCP初始化失败是真实产品缺口；旧QA选择文件夹失败是driver把Playwright evaluate误传为三个参数，导致receiptPath丢失并在writeFileSync(undefined)抛错，属于仪器问题。后续目录和文件选择只在正常UI触发后代入自有QA路径，原生选择器UI未观察。L20所有产品Main正常退出；收尾时两个孤立Node driver在stdin关闭后有exit0记录，另一精确自有driver在Main已关后Ctrl+C终止、无exit回执，最终库存确认它们及各自父进程均不存活；不把后者写成normal0。
+
+关键原始证据（根目录均为`D:/果铃恢复候选/`）：
+
+- Flow与P0：`samples/20261006-next-renderer-observation/output/observed-next-renderer.md`、`samples/20261006-p0-ui2/teacher-visual-next/observed-7dc.md`。
+- Q2：`20261006-q2-clean-close-continuation/source-manifest.json`及该目录下的`evidence/baseline`、`evidence/fixed`、`evidence/main-build`。
+- 默认MCP修复：`20261006-evidence/h1-managed-root-main-build/`、`samples/20261006-l20-q2-rootmap/output/root-map-probe.json`与`public-initialize-only.json`；早期失败保留在`samples/20261006-l20-q2-dirty-ingest/output/`。
+- L20整链及收尾：`samples/20261006-l20-q2-rootmap/report.md`及同目录`output/`的公开MCP回执、Source冲突/Apply、正式保存、新epoch冷开、运行点击与冷Source7图文；主运行日志为`lifecycle.jsonl`。
+- 正式七图与Office：`20261005-leaves/x0-x1/output/playwright/chart-layout-8d744a8e-official-captures-5e0-seven/capture-manifest.json`、`20261005-leaves/r0/output/mixed-delivery-pixels-5e0-6f802708/`及`20261005-evidence/h1-x4-carrier-6f-3a88414/`。正式PDF为`20261005-leaves/x4/output/x4-pdf/mixed-print-8d744a8e-5e0-6f-carrier3a.pdf`。
+
+交付边界：本次是工程候选，不是Owner art/accepted。OS IME、原生文件选择器、Word自身PDF/锚图像原生视觉、未逐项补做的native操作仍按实际范围披露；未授权真实模型比较没有运行，发布继续暂停。已批准的非web专业HTML适用范围与15°原生Office partial不重新开路线。本轮没有待派发源码任务，不以这些观察或授权边界冒充工程缺陷；这份工程交付也不声称全软件无回退或全部N/L全面验收。
 
 ## 11. 复用来源与证据边界
 
