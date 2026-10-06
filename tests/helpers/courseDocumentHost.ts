@@ -1,11 +1,10 @@
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
-import { CourseV9Driver } from '../../src/core/drivers/CourseV9Driver'
-import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
-import { createBlankFlowCourseProject } from '../../src/renderer/project/createFlowCourseProject'
-import { createBlankSpatialCourseProject } from '../../src/renderer/project/createSpatialCourseProject'
+import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
+import { CourseV10DocumentBridge } from '../../src/renderer/documents/CourseV10DocumentBridge'
+import { createCourseProjectContent } from '../../src/renderer/store/slices/courseLifecycleSlice'
 import type { CourseProjectLifecyclePorts } from '../../src/renderer/app/useCourseProjectLifecycle'
-import { componentPackagesToArchiveFiles } from '../../src/renderer/components/componentPackageStore'
-import type { DocumentModel, DocumentPersistence, DurableDocumentState } from '../../src/shared/workbench/document'
+import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
+import type { DocumentEvent, DocumentModel, DocumentPersistence, DurableDocumentState } from '../../src/shared/workbench/document'
 
 export function deferred<T = void>() {
   let resolve!: (value: T) => void
@@ -13,17 +12,20 @@ export function deferred<T = void>() {
   return { promise, resolve }
 }
 
-/** In-memory I/O only. Identity, History, ACK, save and recovery use the real kernel. */
+/** Only I/O is in memory. V10 authoring uses the real Bridge, Driver and unique DocumentSession. */
 export async function createCourseDocumentHost() {
-  const driver = new CourseV9Driver()
+  const driver = new CourseV10Driver()
+  const bridge = new CourseV10DocumentBridge()
   const disk = new Map<string, Uint8Array>()
   const durable = new Map<string, DurableDocumentState>()
+  const listeners = new Set<(event: DocumentEvent) => void>()
+  const observed = new Set<string>()
   const controls: {
     savePath: string | null
     beforeSave?: (input: Parameters<DocumentPersistence['save']>[0]) => Promise<void>
     beforeAppend?: (state: DurableDocumentState) => Promise<void>
   } = { savePath: 'saved.h5lesson' }
-  let count = 0, operation = 0, generation = 0, activeId = ''
+  let count = 0, startupId = ''
   const persistence: DocumentPersistence = {
     async append(state) {
       await controls.beforeAppend?.(state)
@@ -36,30 +38,37 @@ export async function createCourseDocumentHost() {
       return { ...input.binding, version: `revision-${input.revision}` }
     },
   }
-  const makeRegistry = (target = persistence) => new DocumentRegistry({
-    drivers: [driver], persistence: target, createId: () => `lifecycle-${++count}`,
+  const makeRegistry = () => new DocumentRegistry({
+    drivers: [driver], persistence, createId: () => `lifecycle-${++count}`,
     bindingKey: binding => binding.path,
   })
   let registry = makeRegistry()
-  const model = (surface: 'slide' | 'flow' | 'spatial', title: string): DocumentModel => ({
-    kind: 'course-v9',
-    project: ({ slide: createBlankCourseProject, flow: createBlankFlowCourseProject, spatial: createBlankSpatialCourseProject })[surface]({
-      title, includeDefaultController: false, controls: 'none',
-    }),
-    resources: { assets: {}, components: {} },
-  })
-  const select = (id: string) => { activeId = id; generation += 1 }
-  const read = () => registry.get(activeId).read()
-  const documents: NonNullable<CourseProjectLifecyclePorts['documents']> = {
-    async ready() {}, snapshot: read,
-    async create(surface) {
-      const session = await registry.create(model(surface, `new ${surface}`), `new-${surface}.h5lesson`)
-      select(session.documentId)
-    },
-    async createFrom(content) {
-      const session = await registry.create({ kind: 'course-v9', project: content.project,
-        resources: { assets: content.assetFiles, components: componentPackagesToArchiveFiles(content.componentPackages) } }, `${content.project.title}.h5lesson`)
-      select(session.documentId)
+  const model = (surface: 'slide' | 'flow' | 'spatial', title: string): DocumentModel => {
+    const content = createCourseProjectContent(surface)
+    content.project.title = title
+    return { kind: 'course-v10', ...content }
+  }
+  const observe = (documentId: string) => {
+    if (observed.has(documentId)) return
+    observed.add(documentId)
+    registry.get(documentId).subscribe(event => {
+      for (const listener of listeners) listener(event)
+    })
+  }
+  const activeDocumentId = () => {
+    const id = bridge.read().activeDocumentId
+    if (!id) throw new Error('No active course document')
+    return id
+  }
+  const read = () => registry.get(activeDocumentId()).read()
+  const api: DocumentHostAPI = {
+    async bootstrapCourse() { return registry.get(startupId).read() },
+    async list() { return registry.list() },
+    async read(documentId) { return registry.get(documentId).drain() },
+    async create(input, suggestedName) {
+      const session = await registry.create(input, suggestedName)
+      observe(session.documentId)
+      return session.read()
     },
     async open(path) {
       const session = await registry.open({ kind: 'file', path, version: 'disk', bindingVersion: 1 }, async () => {
@@ -67,43 +76,81 @@ export async function createCourseDocumentHost() {
         if (!bytes) throw new Error(`Missing course: ${path}`)
         return driver.load(Uint8Array.from(bytes))
       })
-      select(session.documentId)
+      observe(session.documentId)
+      return session.read()
     },
-    async save(saveAs = false) {
-      const snapshot = await registry.get(activeId).drain()
-      if (!saveAs && snapshot.binding.kind === 'file') return registry.save(snapshot.documentId)
+    async dispatch(operation) { return registry.get(operation.documentId).execute(operation) },
+    async lookup(documentId, operationId) { return registry.get(documentId).lookupOperation(operationId) },
+    async save(documentId, path) {
+      return registry.save(documentId, path ? { kind: 'file', path, version: null, bindingVersion: 1 } : undefined)
+    },
+    async saveWithDialog(documentId, saveAs = false) {
+      const snapshot = await registry.get(documentId).drain()
+      if (!saveAs && snapshot.binding.kind === 'file') return api.save(documentId)
       if (controls.savePath === null) return null
-      return registry.save(snapshot.documentId, { kind: 'file', path: controls.savePath, version: null, bindingVersion: 1 })
+      return api.save(documentId, controls.savePath)
     },
-    async drain() { return registry.get(activeId).drain() },
+    async observeFile() { throw new Error('File observation is outside this lifecycle fixture') },
+    async reconcileFile() { throw new Error('File reconciliation is outside this lifecycle fixture') },
+    async close(documentId, discardDirty) { await registry.close(documentId, { discardDirty }) },
+    async closeWithDialog(documentId) {
+      if (!await api.saveWithDialog(documentId)) return false
+      await registry.close(documentId)
+      return true
+    },
+    async recoverable() { return registry.list() },
+    async restore(documentId) {
+      const state = durable.get(documentId)
+      if (!state) throw new Error(`Missing recovery journal ${documentId}`)
+      const session = await registry.restore(state)
+      observe(session.documentId)
+      return session.read()
+    },
+    async discardRecovery(documentId) { durable.delete(documentId) },
+    subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener) } },
+  }
+  const documents: NonNullable<CourseProjectLifecyclePorts['documents']> = {
+    ready: () => bridge.connect(api), snapshot: () => bridge.read().snapshot,
+    async create(surface, canvas) { await bridge.create({ kind: 'course-v10', ...createCourseProjectContent(surface, canvas) }) },
+    async createFrom(content) { await bridge.create({ kind: 'course-v10', ...content }) },
+    open: path => bridge.open(path),
+    async save(saveAs = false) {
+      const documentId = activeDocumentId()
+      if (!await bridge.save(saveAs, undefined, documentId)) return null
+      return registry.get(documentId).read()
+    },
+    async drain() {
+      const [snapshot] = await bridge.drain([activeDocumentId()])
+      if (!snapshot) throw new Error('Course document has closed')
+      return snapshot
+    },
   }
   async function seedFile(path: string, title: string) {
-    disk.set(path, await driver.serialize(model('slide', title)))
+    disk.set(path, driver.serialize(model('slide', title)))
   }
-  async function editTitle(title: string) {
-    const snapshot = read()
-    if (snapshot.model.kind !== 'course-v9') throw new Error('Not a course')
-    return registry.get(activeId).execute({
-      documentId: activeId, epoch: snapshot.epoch, operationId: `edit-${++operation}`,
-      baseRevision: snapshot.revision, actor: 'human',
-      mutation: { type: 'command', command: { type: 'course.replace', project: { ...snapshot.model.project, title } } },
-    })
+  async function start(path: string, title: string) {
+    await seedFile(path, title)
+    startupId = (await api.open(path)).documentId
+    await documents.ready()
   }
-  await seedFile('initial.h5lesson', 'initial')
-  await documents.open('initial.h5lesson')
+  await start('initial.h5lesson', 'initial')
   return {
-    documents, controls, durable, disk, driver, read, seedFile, editTitle,
+    api, bridge, documents, controls, durable, disk, driver, read, seedFile,
     get registry() { return registry },
+    editTitle: (title: string) => bridge.edit([{ type: 'project.title.set', title }]),
     identity() {
       const snapshot = read()
-      if (snapshot.model.kind !== 'course-v9') throw new Error('Not a course')
-      return { projectId: snapshot.model.project.id, revision: snapshot.revision, sessionGeneration: generation }
+      if (snapshot.model.kind !== 'course-v10') throw new Error('Not a V10 course')
+      return { projectId: snapshot.model.project.id, revision: snapshot.revision,
+        documentId: snapshot.documentId, epoch: snapshot.epoch }
     },
+    dispose() { bridge.dispose() },
     async restart() {
       // Simulate process loss: retain only durable state and disk; never copy live History.
+      bridge.dispose()
       registry = makeRegistry()
-      await seedFile('startup.h5lesson', 'startup')
-      await documents.open('startup.h5lesson')
+      observed.clear()
+      await start('startup.h5lesson', 'startup')
     },
   }
 }

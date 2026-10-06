@@ -6,7 +6,8 @@ import {
   type CourseProjectLifecycleWatch,
 } from '../../src/renderer/app/useCourseProjectLifecycle'
 import { createCourseDocumentHost, deferred, type CourseDocumentTestHost } from '../helpers/courseDocumentHost'
-import { createBlankCourseProject } from '../../src/core/course/createCourseProject'
+import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
+import type { ComponentFrame } from '../../src/shared/contracts/component-platform/frame'
 import { APP_NAME } from '../../src/shared/constants'
 
 const WATCH: CourseProjectLifecycleWatch = {
@@ -68,7 +69,7 @@ describe('useCourseProjectLifecycle main document sessions', () => {
     expect(document.title).toBe(APP_NAME)
   })
   it.each([
-    ['newProject', 'slide-scene'], ['newFlowProject', 'flow-block'], ['newSpatialProject', 'spatial-camera'],
+    ['newProject', 'slide'], ['newFlowProject', 'flow'], ['newSpatialProject', 'spatial'],
   ] as const)('%s creates its real surface in a separate main session', async (method, kind) => {
     const host = await createCourseDocumentHost()
     await host.editTitle('old draft')
@@ -78,7 +79,8 @@ describe('useCourseProjectLifecycle main document sessions', () => {
     const current = host.read()
     expect(current.documentId).not.toBe(previous.documentId)
     expect(current).toMatchObject({ binding: { kind: 'untitled' }, dirty: true, undoDepth: 0 })
-    expect(current.model).toMatchObject({ project: { locations: [{ kind }] } })
+    expect(current.model).toMatchObject({ kind: 'course-v10', project: { schemaVersion: 10, surfaces: [{ kind }] } })
+    expect(current.epoch).not.toBe(previous.epoch)
     expect(host.registry.get(previous.documentId).read()).toEqual(previous)
     expect(ports.onProjectReplaced).toHaveBeenCalledOnce()
   })
@@ -87,8 +89,8 @@ describe('useCourseProjectLifecycle main document sessions', () => {
     const host = await createCourseDocumentHost()
     const previous = host.read()
     const { result, ports } = await mount(host)
-    const project = createBlankCourseProject({ title: '第一课', includeDefaultController: false, controls: 'none' })
-    await act(async () => { expect(await result.current.newProjectFrom(async () => ({ project, assetFiles: {}, componentPackages: {} }), { origin: 'lesson' })).toBe(true) })
+    const project = createBlankCourseProjectV10('第一课')
+    await act(async () => { expect(await result.current.newProjectFrom(async () => ({ project, resources: { assets: {}, components: {} } }), { origin: 'lesson' })).toBe(true) })
     const current = host.read()
     expect(current.documentId).not.toBe(previous.documentId)
     expect(current).toMatchObject({ binding: { kind: 'untitled', suggestedName: '第一课.h5lesson' }, dirty: true, undoDepth: 0 })
@@ -120,6 +122,38 @@ describe('useCourseProjectLifecycle main document sessions', () => {
     expect(host.read()).toEqual(existing)
     expect(existing.undoDepth).toBe(1)
     expect(ports.openRecentProjectFile).not.toHaveBeenCalled()
+  })
+
+  it('keeps instance identity and manual frame through formal History, save and a cold reopen', async () => {
+    const host = await createCourseDocumentHost()
+    const initial = host.read()
+    if (initial.model.kind !== 'course-v10') throw new Error('Expected a V10 fixture')
+    const instanceId = initial.model.project.global.overlay[0]
+    if (!instanceId) throw new Error('Expected the default controller instance')
+    const original = initial.model.project.instances[instanceId]
+    const frame: ComponentFrame = { width: 333, height: 111, transform: [1, 0, 0, 1, 82, 47] }
+    const { result } = await mount(host)
+    await act(async () => {
+      expect((await host.bridge.edit([{ type: 'frame.set', instanceId, frame }])).status).toBe('applied')
+    })
+    expect(host.read()).toMatchObject({ documentId: initial.documentId, epoch: initial.epoch, undoDepth: 1, dirty: true,
+      model: { project: { instances: { [instanceId]: { id: instanceId, definitionId: original.definitionId, frame } } } } })
+    await act(async () => { await host.bridge.undo() })
+    expect(host.read()).toMatchObject({ undoDepth: 0, redoDepth: 1,
+      model: { project: { instances: { [instanceId]: { frame: original.frame } } } } })
+    await act(async () => { await host.bridge.redo() })
+    expect(host.read()).toMatchObject({ undoDepth: 1, redoDepth: 0,
+      model: { project: { instances: { [instanceId]: { frame } } } } })
+    await act(async () => { expect(await result.current.saveProject()).toBe(true) })
+    const saved = host.read()
+    expect(saved).toMatchObject({ dirty: false, undoDepth: 1, binding: { kind: 'file', path: 'initial.h5lesson' } })
+    await act(async () => { await host.restart(); await host.documents.open('initial.h5lesson') })
+    const reopened = host.read()
+    expect(reopened.documentId).not.toBe(initial.documentId)
+    expect(reopened.epoch).not.toBe(initial.epoch)
+    expect(reopened).toMatchObject({ revision: saved.revision, dirty: false, undoDepth: 0, redoDepth: 0,
+      model: { kind: 'course-v10', project: { id: initial.model.project.id,
+        instances: { [instanceId]: { id: instanceId, definitionId: original.definitionId, frame } } } } })
   })
 
   it('leaves the same dirty untitled session and journal intact when Save As is cancelled', async () => {
@@ -197,14 +231,15 @@ describe('useCourseProjectLifecycle main document sessions', () => {
     host.disk.set('same-project-copy.h5lesson', await host.driver.serialize(original.model))
     const { result, ports } = await mount(host, {
       beforeReplace: vi.fn(() => decision.promise),
-      // Authoring generation belongs to the view and can coincide across document projections.
-      captureIdentity: () => ({ ...host.identity(), sessionGeneration: 0 }),
     })
     let replacement!: Promise<boolean>
     act(() => { replacement = result.current.newProject() })
     await waitFor(() => expect(ports.beforeReplace).toHaveBeenCalledOnce())
     await host.documents.open('same-project-copy.h5lesson')
     const latest = host.read()
+    expect(latest.documentId).not.toBe(original.documentId)
+    expect(latest.epoch).not.toBe(original.epoch)
+    expect(host.identity().projectId).toBe(original.model.kind === 'course-v10' ? original.model.project.id : undefined)
     await act(async () => { decision.resolve(true); expect(await replacement).toBe(false) })
     expect(host.read()).toEqual(latest)
     expect(host.registry.get(original.documentId).read()).toEqual(original)

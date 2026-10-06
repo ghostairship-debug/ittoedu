@@ -6,7 +6,6 @@ import type { LessonDesktopRequest } from '../../src/shared/lessonDesktopContrac
 import type { LessonWorkspace } from '../../src/shared/lessonWorkspace'
 import type { DocumentTabsController } from '../../src/renderer/lessonWorkspace/controller/useDocumentTabsController'
 import { useLessonWorkspaceController } from '../../src/renderer/lessonWorkspace/controller/useLessonWorkspaceController'
-import { createCourseStoreHost } from '../helpers/courseStoreHost'
 import { createCourseDocumentHost } from '../helpers/courseDocumentHost'
 import { useEditorStore } from '../../src/renderer/store/editorStore'
 
@@ -24,26 +23,31 @@ vi.mock('../../src/renderer/ui/TopToolbar', () => ({ TopToolbar: () => null }))
 vi.mock('../../src/renderer/export/loadPlayerBundle', () => ({ loadPlayerBundle: () => '/* not exercised by entry tests */' }))
 import App from '../../src/renderer/App'
 
-afterEach(() => { cleanup(); localStorage.clear(); Reflect.deleteProperty(window, 'desktopAPI') })
+afterEach(() => { cleanup(); useEditorStore.getState().courseBridge.dispose(); localStorage.clear(); Reflect.deleteProperty(window, 'desktopAPI') })
 
 describe('G20 default workspace entry has no embedded CLI dependency', () => {
   it('mounts the actual App and creates a canonical course without probing or starting an old agent', async () => {
-    const host = await createCourseStoreHost()
+    const host = await createCourseDocumentHost()
+    const original = host.read()
     const localAgent = vi.fn(async () => ({ enabled: true }))
     const lesson = vi.fn(async () => { throw new Error('File creation must not create a legacy conversation') })
-    window.desktopAPI = {
+    const desktop = {
       documents: host.api, localAgent, lesson,
       listRecentProjects: async () => [], setDirtyState: async () => {},
       onRequestSave: () => () => {}, onRequestSaveAndClose: () => () => {},
       loadComponentCatalog: async () => ({ sources: [], packages: [], issues: [] }),
-    } as unknown as DesktopAPI
+    } satisfies Partial<DesktopAPI> & { localAgent: typeof localAgent }
+    Object.defineProperty(window, 'desktopAPI', { configurable: true, value: desktop })
     render(<App />)
     // The metric-sensitive editor mounts once the bundled fonts have loaded.
     expect(await screen.findByTestId('course-paint')).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: '新建测试课件' }))
-    await waitFor(() => expect(useEditorStore.getState().courseDocument.documents).toHaveLength(1))
-    const active = useEditorStore.getState().courseDocument.documentId!
-    expect(host.registry.get(active).read().model.kind).toBe('course-v9')
+    await waitFor(() => expect(useEditorStore.getState().courseView.documents).toHaveLength(2))
+    const active = useEditorStore.getState().courseView.activeDocumentId
+    if (!active) throw new Error('Expected the newly created course to be active')
+    expect(active).not.toBe(original.documentId)
+    expect(host.registry.get(active).read().model.kind).toBe('course-v10')
+    expect(host.registry.get(original.documentId).read()).toEqual(original)
     expect(localAgent).not.toHaveBeenCalled()
     expect(lesson).not.toHaveBeenCalled()
     expect(screen.queryByRole('button', { name: '创作助手' })).not.toBeInTheDocument()
@@ -65,7 +69,17 @@ describe('G20 default workspace entry has no embedded CLI dependency', () => {
         default: throw new Error(`Unexpected legacy operation: ${request.operation}`)
       }
     })
-    const tabs = { drainAll: vi.fn(async () => true), setActiveTab: vi.fn() } as unknown as DocumentTabsController
+    const tabs: DocumentTabsController = {
+      isCourseActive: true, tabs: [], activeTab: 'course',
+      createMarkdown: vi.fn(async () => {}), setActiveTab: vi.fn(), focusDocument: vi.fn(async () => {}),
+      openTab: vi.fn(async () => {}), closeTab: vi.fn(async () => true), removeTab: vi.fn(),
+      registerEditor: vi.fn(), editorRef: () => () => {}, mediaEditorRef: () => () => {},
+      mediaFiles: async () => { throw new Error('Media is outside this workspace entry check') },
+      updateMediaSnapshot: vi.fn(), updateDirty: vi.fn(), flushAll: vi.fn(async () => true),
+      saveActiveDocument: vi.fn(async (): Promise<'course'> => 'course'), drainAll: vi.fn(async () => true),
+      preserveAll: vi.fn(async () => true), closeAll: vi.fn(async () => true), disposeDocuments: vi.fn(async () => {}),
+      activeDocumentTarget: () => undefined, selectionChanged: vi.fn(), sendContextualCommand: vi.fn(),
+    }
     const { result } = renderHook(() => useLessonWorkspaceController({
       lessonOperation: operation, projectPath: null, tabs,
       onOpenProject: async path => { await host.documents.open(path); return true },
@@ -74,7 +88,7 @@ describe('G20 default workspace entry has no embedded CLI dependency', () => {
     await act(async () => { await result.current.actions.openWorkspace() })
     expect(result.current.state.workspace).toBe('/workspace')
     await act(async () => { await result.current.actions.openFile({ kind: 'file', name: 'course.h5lesson', path: '/workspace/lesson/course.h5lesson' }) })
-    expect(host.read().model).toMatchObject({ kind: 'course-v9', project: { title: 'registered course' } })
+    expect(host.read().model).toMatchObject({ kind: 'course-v10', project: { title: 'registered course' } })
     expect(result.current.state.lesson).toEqual(lesson)
     expect(tabs.setActiveTab).toHaveBeenCalledWith('course')
     const opened = host.read().documentId
