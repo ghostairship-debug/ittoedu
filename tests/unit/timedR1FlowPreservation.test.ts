@@ -1,0 +1,194 @@
+// @vitest-environment jsdom
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { createElement } from 'react'
+import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { TextSelection } from 'prosemirror-state'
+import { DocumentHostService } from '@/main/workbench/DocumentHostService'
+import { useEditorStore } from '@/renderer/store/editorStore'
+import { PropertiesTab } from '@/renderer/ui/PropertiesTab'
+import { SHAPE_DEFINITION, defaultShapeData } from '@/components/shape'
+import { TEXT_DEFINITION } from '@/components/text/adapters'
+import { DOCUMENT_BLOCK_DEFINITION } from '@/components/document-block'
+import { createTextComponentData, textComponentDataSchema } from '@/components/text/data'
+import { buildFlowPropertiesOwner } from '@/renderer/ui/properties/FlowPropertiesContextBuilder'
+import { selectPropertiesAuthoringReadModel } from '@/renderer/composition/properties/PropertiesAuthoringReadModel'
+import { flushPropertiesDrafts } from '@/renderer/ui/properties/PropertyControls'
+import { FlowWorkspace, drainFlowWorkspace } from '@/renderer/ui/FlowWorkspace'
+import { flowBodyIds } from '@/core/components/document/flowDocumentProjection'
+import * as sessions from '@/renderer/document/editorSession'
+import type { CourseProjectV10 } from '@/shared/contracts/component-platform/project'
+import type { DocumentHostAPI } from '@/shared/workbench/desktop'
+
+const probe = vi.hoisted(() => ({ runtime: {} as Record<string, unknown> }))
+vi.mock('@/renderer/components/CourseV10RuntimeView', () => ({ useCourseV10Runtime: () => probe.runtime }))
+vi.mock('@/renderer/ui/useAssetObjectUrls', () => ({ useAssetObjectUrls: () => ({}) }))
+const manualFrame = { width: 384, height: 172, transform: [.8, .6, -.6, .8, 41, 67] as [number, number, number, number, number, number] }
+const directories: string[] = []
+const geometry = ['getClientRects', 'getBoundingClientRect'] as const
+const descriptors = geometry.map(key => Object.getOwnPropertyDescriptor(Range.prototype, key))
+beforeAll(() => {
+  Object.defineProperty(Range.prototype, 'getClientRects', { configurable: true, value: () => [] })
+  Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true, value: () => new DOMRect() })
+  // Main's v8 recovery round trip returns Node byte arrays, even in this renderer DOM fixture.
+  vi.stubGlobal('Uint8Array', new TextEncoder().encode('').constructor)
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+})
+afterAll(() => {
+  geometry.forEach((key, index) => { if (descriptors[index]) Object.defineProperty(Range.prototype, key, descriptors[index]!); else Reflect.deleteProperty(Range.prototype, key) })
+  vi.unstubAllGlobals()
+})
+afterEach(async () => {
+  cleanup(); vi.restoreAllMocks(); useEditorStore.getState().courseBridge.dispose()
+  for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true })
+})
+function initial(locked = false): CourseProjectV10 {
+  return { schemaVersion: 10, id: 'timed-r1-flow', revision: 0, title: '讲义',
+    definitions: { [SHAPE_DEFINITION.id]: SHAPE_DEFINITION, [TEXT_DEFINITION.id]: TEXT_DEFINITION,
+      private: { id: 'private', role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'files', entry: 'main.js' } } } },
+    instances: { shape: { id: 'shape', definitionId: SHAPE_DEFINITION.id, data: JSON.parse(JSON.stringify(defaultShapeData())), locked, frame: structuredClone(manualFrame) },
+      seed: { id: 'seed', definitionId: SHAPE_DEFINITION.id, data: JSON.parse(JSON.stringify(defaultShapeData())) },
+      body: { id: 'body', definitionId: TEXT_DEFINITION.id, data: JSON.parse(JSON.stringify(createTextComponentData('原正文'))), locked: true },
+      private: { id: 'private', definitionId: 'private', data: { title: '保留私有数据' } } },
+    surfaces: [{ id: 'flow', kind: 'flow', title: '正文', childIds: ['shape', 'body', 'seed', 'private'] }], global: { underlay: [], overlay: [] }, assets: {} }
+}
+async function harness(project = initial()) {
+  const directory = await mkdtemp(path.join(tmpdir(), 'guoling-r1-flow-')); directories.push(directory)
+  const service = new DocumentHostService(path.join(directory, 'recovery'))
+  const resources = { assets: {}, components: { files: { 'main.js': new TextEncoder().encode('export default () => {}') } } }
+  const first = await service.internalAPI.create({ kind: 'course-v10', project, resources }, '讲义')
+  const unavailable = async (): Promise<never> => { throw new Error('no dialogs') }
+  const api: DocumentHostAPI = { ...service.internalAPI, bootstrapCourse: () => service.bootstrapCourse(), saveWithDialog: unavailable,
+    close: unavailable, closeWithDialog: unavailable, discardRecovery: unavailable, subscribe: listener => service.subscribeEvents(listener) }
+  await useEditorStore.getState().connectCourseDocuments(api)
+  await useEditorStore.getState().courseBridge.activate(first.documentId)
+  useEditorStore.getState().selectNode('shape')
+  return { service, first, resources, project }
+}
+
+it('preserves authored frames through Flow Properties conversion and undo, and keeps a rejected native width draft until the actual ACK', async () => {
+  const h = await harness()
+  render(createElement(PropertiesTab, { onReplaceImage: () => {} }))
+  fireEvent.click(screen.getByRole('button', { name: '转为浮层', exact: true }))
+  await waitFor(() => expect(useEditorStore.getState().courseView.project!.instances.shape.flowPlacement).toBeDefined())
+  const snapshot = await h.service.internalAPI.read(h.first.documentId)
+  if (snapshot.model.kind !== 'course-v10') throw new Error('Expected V10')
+  expect(snapshot.model.project.instances.shape.frame).toEqual(manualFrame)
+  expect(snapshot.model.project.instances.shape.data).toEqual(h.project.instances.shape.data)
+  expect(snapshot.model.project.definitions.private).toEqual(h.project.definitions.private)
+  expect(snapshot.model.resources).toEqual(h.resources)
+  expect(snapshot.undoDepth).toBe(1)
+  await act(async () => useEditorStore.getState().courseBridge.undo(h.first.documentId))
+  expect(useEditorStore.getState().courseView.project!.instances.shape.flowPlacement).toBeUndefined()
+  expect(useEditorStore.getState().courseView.project!.instances.shape.frame).toEqual(manualFrame)
+  await act(async () => useEditorStore.getState().courseBridge.redo(h.first.documentId))
+  expect(useEditorStore.getState().courseView.project!.instances.shape.frame).toEqual(manualFrame)
+  act(() => useEditorStore.getState().selectNode('seed'))
+  fireEvent.click(screen.getByRole('button', { name: '转为浮层', exact: true }))
+  await waitFor(() => expect(useEditorStore.getState().courseView.project!.instances.seed.flowPlacement).toBeDefined())
+  expect(useEditorStore.getState().courseView.project!.instances.seed.frame).toEqual({ width: 240, height: 120, transform: [1, 0, 0, 1, 80, 80] })
+  act(() => useEditorStore.getState().selectNode('shape'))
+  let reject!: (error: Error) => void
+  const ack = new Promise<never>((_resolve, fail) => { reject = fail })
+  const commit = vi.spyOn(useEditorStore.getState().courseKernel, 'editCaptured').mockImplementationOnce(() => ack)
+  const width = screen.getByRole('spinbutton', { name: '宽', exact: true })
+  fireEvent.focus(width); fireEvent.change(width, { target: { value: '420' } })
+  let flushed = false, pending!: Promise<boolean>
+  act(() => { pending = flushPropertiesDrafts().then(result => { flushed = true; return result }) })
+  await act(async () => { await Promise.resolve() })
+  expect(commit).toHaveBeenCalledTimes(1); expect(flushed).toBe(false)
+  expect(width).toHaveValue(420)
+  await act(async () => { reject(new Error('正式宽度提交被拒绝')); expect(await pending).toBe(false) })
+  expect(width).toHaveValue(420); expect(width).toHaveAttribute('aria-invalid', 'true')
+  const unchanged = await h.service.internalAPI.read(h.first.documentId)
+  expect(unchanged.revision).toBe(useEditorStore.getState().courseView.project!.revision)
+  expect(unchanged.undoDepth).toBe(2)
+  expect(unchanged.model.kind === 'course-v10' && unchanged.model.project.instances.shape.frame).toEqual(manualFrame)
+})
+
+it('disables locked Flow structural controls and rejects their direct owners atomically while preserving selection and unlock', async () => {
+  const project = initial(true)
+  project.definitions[DOCUMENT_BLOCK_DEFINITION.id] = DOCUMENT_BLOCK_DEFINITION
+  project.instances.section = { id: 'section', definitionId: DOCUMENT_BLOCK_DEFINITION.id, locked: true, childIds: [],
+    data: { type: 'section', title: { inlines: [{ type: 'text', text: '锁定组' }] }, collapsedByDefault: false } }
+  project.instances.float = { ...structuredClone(project.instances.shape), id: 'float', flowPlacement: { space: 'paper', plane: 'overlay' } }
+  project.instances.seed.flowPlacement = { space: 'paper', plane: 'overlay' }
+  project.surfaces[0].childIds.push('section', 'float')
+  const h = await harness(project)
+  render(createElement(PropertiesTab, { onReplaceImage: () => {} }))
+  expect(screen.getByRole('button', { name: '转为浮层', exact: true })).toBeDisabled()
+  expect(screen.getByRole('button', { name: '删除', exact: true })).toBeDisabled()
+  const state = useEditorStore.getState(), target = state.courseKernel.captureTarget(h.first.documentId)
+  const commit = vi.spyOn(state.courseKernel, 'editCaptured')
+  const intents = [
+    { kind: 'convert-block-to-overlay' as const },
+    { kind: 'delete-blocks' as const, blockIds: ['seed', 'shape'] },
+    { kind: 'transform-overlay-frame' as const, frame: { x: 0, y: 0, width: 240, height: 120 } },
+    { kind: 'move-block' as const, direction: 'down' as const },
+  ]
+  for (const intent of intents) expect(await state.runFlowAuthoringIntent(target, intent)).toMatchObject({ ok: false, reason: expect.stringContaining('对象已锁定，请先解锁'), historyEntry: false })
+  act(() => useEditorStore.getState().selectNode('float'))
+  const floatingTarget = state.courseKernel.captureTarget(h.first.documentId)
+  const owner = buildFlowPropertiesOwner({ read: selectPropertiesAuthoringReadModel(useEditorStore.getState()), kernel: state.courseKernel,
+    actions: state, documentSelection: null, selectedContext: null, assets: {}, liveTarget: () => floatingTarget,
+    submit: () => {}, preview: () => {}, report: () => {} })!
+  await expect(owner.commands.convertOverlayToDocument()).rejects.toThrow('对象已锁定，请先解锁')
+  act(() => useEditorStore.getState().selectNode('seed'))
+  const destinationTarget = state.courseKernel.captureTarget(h.first.documentId)
+  const destinationOwner = buildFlowPropertiesOwner({ read: selectPropertiesAuthoringReadModel(useEditorStore.getState()), kernel: state.courseKernel,
+    actions: state, documentSelection: null, selectedContext: null, assets: {}, liveTarget: () => destinationTarget,
+    submit: () => {}, preview: () => {}, report: () => {} })!
+  await expect(destinationOwner.commands.convertOverlayToDocument({ parentBlockId: 'section', index: 0, wrap: 'none' })).rejects.toThrow('对象已锁定，请先解锁')
+  act(() => useEditorStore.getState().selectNode('shape'))
+  expect(commit).not.toHaveBeenCalled()
+  const snapshot = await h.service.internalAPI.read(h.first.documentId)
+  expect(snapshot.undoDepth).toBe(0); expect(snapshot.revision).toBe(0)
+  expect(snapshot.model.kind === 'course-v10' && snapshot.model.project.instances.shape).toEqual(h.project.instances.shape)
+  expect(useEditorStore.getState().courseView.selectedInstanceIds).toEqual(['shape'])
+  fireEvent.click(screen.getByRole('button', { name: '解锁图层', exact: true }))
+  await waitFor(() => expect(screen.getByRole('button', { name: '删除', exact: true })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: '删除', exact: true }))
+  await waitFor(() => expect(useEditorStore.getState().courseView.project!.instances.shape).toBeUndefined())
+})
+
+it('keeps locked floating controls disabled while permitting adjacent PM insertion and locked body text edits through the real Flow owner', async () => {
+  const project = initial(true)
+  project.instances.shape.flowPlacement = { space: 'paper', plane: 'overlay' }
+  project.surfaces[0].childIds = ['body', 'shape', 'seed', 'private']
+  const h = await harness(project)
+  probe.runtime = { resources: h.resources, selectedInstanceIds: ['shape'], selectInstances: (ids: string[]) => useEditorStore.getState().selectNodes(ids),
+    onElement: () => {}, onTargetElement: () => {}, renderInstance: () => null,
+    world: { beforeProjectionMutation: () => {}, afterProjectionMutation: () => {} }, registerObservation: () => () => {}, navigation: { changed: () => {} } }
+  const factory = vi.spyOn(sessions, 'createLayoutEditor')
+  function Workspace() {
+    const view = useEditorStore(state => state.courseView)
+    return createElement(FlowWorkspace, { documentId: h.first.documentId, project: view.editingProject!, surfaceId: 'flow', onSelectImageAsset: async () => null })
+  }
+  const ui = render(createElement(Workspace))
+  const overlay = ui.container.querySelector<HTMLElement>('[data-flow-overlay-id="shape"]')!
+  expect(overlay.querySelectorAll('button')).toHaveLength(6)
+  for (const button of overlay.querySelectorAll('button')) expect(button).toBeDisabled()
+  fireEvent.click(overlay.querySelector<HTMLButtonElement>('button')!)
+  expect((await h.service.internalAPI.read(h.first.documentId)).undoDepth).toBe(0)
+  const editor = factory.mock.results.at(-1)!.value as ReturnType<typeof sessions.createLayoutEditor>
+  act(() => { editor.view.dispatch(editor.view.state.tr.setSelection(TextSelection.create(editor.view.state.doc, 1))); editor.view.focus() })
+  fireEvent.click(screen.getByRole('button', { name: '插入段落', exact: true }))
+  await act(async () => fireEvent.click(screen.getByRole('menuitem', { name: '上方插入段落', exact: true })))
+  await act(async () => expect(await drainFlowWorkspace(h.first.documentId)).toEqual({ ok: true }))
+  const inserted = flowBodyIds(useEditorStore.getState().courseView.project!, 'flow')[0]
+  expect(inserted).not.toBe('body')
+  expect(flowBodyIds(useEditorStore.getState().courseView.project!, 'flow').slice(1)).toEqual(['body', 'seed', 'private'])
+  let bodyAt = -1
+  editor.view.state.doc.descendants((node, position) => { if (node.attrs.id === 'body') bodyAt = position; return bodyAt < 0 })
+  await act(async () => editor.view.dispatch(editor.view.state.tr.insertText('保留锁定文字编辑', bodyAt + 1)))
+  await act(async () => expect(await drainFlowWorkspace(h.first.documentId)).toEqual({ ok: true }))
+  const snapshot = await h.service.internalAPI.read(h.first.documentId)
+  if (snapshot.model.kind !== 'course-v10') throw new Error('Expected V10')
+  expect(textComponentDataSchema.parse(snapshot.model.project.instances.body.data).content.inlines.map(inline => inline.type === 'text' ? inline.text : '').join('')).toBe('保留锁定文字编辑原正文')
+  expect(snapshot.model.project.instances.body.locked).toBe(true)
+  expect(snapshot.model.project.instances.shape).toEqual(project.instances.shape)
+  expect(snapshot.model.project.definitions.private).toEqual(project.definitions.private)
+  expect(snapshot.model.resources).toEqual(h.resources)
+})

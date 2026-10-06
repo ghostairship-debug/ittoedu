@@ -52,6 +52,7 @@ import type { DocumentContent } from '../../shared/document/content'
 import type { DocumentResources } from '../../shared/document/resources'
 import { createCourseDocumentClipboardContext, readCourseDocumentClipboardContext } from '../document/documentClipboardContext'
 import { createFlowDocumentResourcePort, captureFlowPreparedDocumentResources,prepareFlowDocumentResourceTransaction, projectFlowPreparedResources, releaseFlowPreparedResources, retainedFlowPreparedResources, type FlowPreparedDocumentResources } from '../document/flowDocumentResources'
+import { assertFlowStructureEditsAllowed, flowStructureDisabledReason } from '../authoring/flowStructureEdits'
 
 export interface FlowWorkspaceProps {
   documentId: string
@@ -173,6 +174,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       const resources = [...new Set([...retainedFlowPreparedResources(target,preparedResources.current),
         ...(operation.preparedResourceBatches ?? (operation.preparedResources === undefined ? [] : [operation.preparedResources]))])]
       const planned = prepareFlowDocumentResourceTransaction(target, surfaceId, next.content.blocks, resources)
+      assertFlowStructureEditsAllowed(target.editingProject, planned.edits, true)
       if (planned.edits.length) await bridge.editCaptured(bridge.capture(planned.edits, planned.target), operation.historyGroup)
       releaseFlowPreparedResources(planned.prepared)
       preparedResources.current = preparedResources.current.filter(value => !planned.prepared.includes(value))
@@ -288,7 +290,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     const target = bridge.captureTarget(documentId)
     const ready = await drain()
     if (!ready.ok) { setError(ready.reason ?? '请先完成当前正文输入'); return }
-    try { await bridge.editCaptured(bridge.capture(edits,target)) }
+    try { assertFlowStructureEditsAllowed(target.editingProject, edits); await bridge.editCaptured(bridge.capture(edits,target)) }
     catch (failure) { setError(failure instanceof Error ? failure.message : String(failure)) }
   }
   const selectDocument = (value: DocumentSelection | null) => {
@@ -349,6 +351,11 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     const instance = target.editingProject.instances[id]
     if (!instance) return null
     const kind = mediaKind(instance,target.editingProject)
+    const structureDisabledReason = flowStructureDisabledReason(target.editingProject, id)
+    const commit = async (edits: ComponentEdit[]) => {
+      assertFlowStructureEditsAllowed(target.editingProject, edits)
+      await kernel.editCaptured(kernel.capture(edits, target))
+    }
     const safe = (promise: Promise<unknown>) => { void promise.catch(failure => setError(String(failure))) }
     const replace = () => {
       const picker = onSelectMediaAsset && kind ? onSelectMediaAsset(kind) : kind === 'image' ? onSelectImageAsset() : Promise.reject(new Error('媒体选择入口尚未接入'))
@@ -358,13 +365,19 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       moveSelectedBlock(direction: 'up'|'down') {
         const container = owningContainer(target.project,id); if (!container) return
         const siblings = containerChildIds(target.project,container), index = siblings.indexOf(id), next = index + (direction === 'up' ? -1 : 1)
-        if (next >= 0 && next < siblings.length) safe(kernel.editCaptured(kernel.capture([{type:'instance.move',instanceId:id,container,index:next}],target)))
+        if (next >= 0 && next < siblings.length) safe(commit([{type:'instance.move',instanceId:id,container,index:next}]))
       },
-      deleteSelectedBlocks() { safe(kernel.editCaptured(kernel.capture([{type:'instance.remove',instanceId:id}],target))) },
+      deleteSelectedBlocks() { safe(commit([{type:'instance.remove',instanceId:id}])) },
     }
     const tools: FlowMediaToolPort | undefined = kind ? {
       openCrop: () => setCrop({target,instance,data:imageDataSchema.parse(instance.data)}),
-      patchMedia: patch => { const pending=patchCourseFlowMediaLayout(kernel,target,id,patch);safe(pending);return pending },
+      patchMedia: patch => {
+        const pending = Promise.resolve().then(() => {
+          if ((patch.width !== undefined || patch.wrap !== undefined) && structureDisabledReason) throw new Error(structureDisabledReason)
+          return patchCourseFlowMediaLayout(kernel,target,id,patch)
+        })
+        safe(pending);return pending
+      },
       openCaption: (content,draft) => {
         const opened = {content:content ?? {inlines:[]},confirm: async (value: FlowTextContent) => {
           await draft.confirm(value)
@@ -372,12 +385,12 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
         },cancel: () => {draft.cancel();setCaption(current => current === opened ? null : current)}}
         setCaption(opened)
       },
-      convertToOverlay: () => safe(kernel.editCaptured(kernel.capture([
+      convertToOverlay: () => safe(commit([
         ...(!instance.frame ? [{type:'frame.set' as const,instanceId:id,frame:{width:400,height:240,transform:[1,0,0,1,72,72] as [number,number,number,number,number,number]}}] : []),
         {type:'instance.flowPlacement.set',instanceId:id,flowPlacement:{space:'paper',plane:'overlay'}},
-        ...(owningContainer(target.project,id)?.kind==='instance' ? [{type:'instance.move' as const,instanceId:id,container:{kind:'surface' as const,surfaceId},index:containerChildIds(target.project,{kind:'surface',surfaceId}).length}]:[])],target))),
+        ...(owningContainer(target.project,id)?.kind==='instance' ? [{type:'instance.move' as const,instanceId:id,container:{kind:'surface' as const,surfaceId},index:containerChildIds(target.project,{kind:'surface',surfaceId}).length}]:[])])),
     } : undefined
-    return { block:{instance,mediaKind:kind},commands,replaceMedia:replace,mediaTools:tools }
+    return { block:{instance,mediaKind:kind,structureDisabledReason},commands,replaceMedia:replace,mediaTools:tools }
   }
   const background = resolveComponentBackground(project,surface)
   const drop = (event: React.DragEvent<HTMLElement>) => {
@@ -406,7 +419,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       const id=event.target.closest<HTMLElement>('[data-component-instance]')?.dataset.componentInstance
       const instance=id && project.instances[id]
       const block=instance && flowDocumentBlock(project,surfaceId,instance.id)
-      if(!instance || instance.locked || block && block.type!=='course-instance')return
+      if(!instance || block && block.type!=='course-instance')return
       const kind=componentDefinitionBuiltinKey(project.definitions[instance.definitionId])
       if(kind!=='guoling.text' && kind!=='guoling.formula')return
       event.preventDefault();event.stopPropagation();runtime.selectInstances([instance.id],surfaceId)
@@ -627,9 +640,10 @@ function FlowFloatingInstance({ project, instanceId, selected, readOnly, paperWi
     ? projectFlowComponentControllerFrame({x:stored.transform[4],y:stored.transform[5],width:stored.width,height:stored.height},viewport):null
   const frame = controller && !preview ? {...stored,width:controller.width,height:controller.height,transform:[...stored.transform.slice(0,4),controller.x,controller.y] as typeof stored.transform}
     : anchored && !preview ? { ...stored, transform: [...stored.transform.slice(0, 4), anchored.x, anchored.y] as typeof stored.transform } : stored
+  const structureDisabledReason = flowStructureDisabledReason(project, instanceId)
   const updatePlacement = (value: typeof placement | null) => onEdits([{ type: 'instance.flowPlacement.set', instanceId, flowPlacement: value ?? null }])
   const begin = (event: React.PointerEvent, resize: boolean) => {
-    if (readOnly || instance.locked) return
+    if (readOnly || structureDisabledReason) return
     event.stopPropagation(); event.preventDefault(); onSelect()
     event.currentTarget.setPointerCapture(event.pointerId)
     const geometry=createFlowViewportGeometry({viewportClientRect:{x:0,y:0,width:0,height:0},layoutViewportSize:{width:0,height:0},paperOriginLayout:{x:0,y:0},paperScrollLayout:{x:0,y:0},playbackZoom:readObservationScale?.() ?? 1})
@@ -645,7 +659,7 @@ function FlowFloatingInstance({ project, instanceId, selected, readOnly, paperWi
     {instance.childIds?.map(id=>runtime.renderInstance(id,project,'free'))}
     {!readOnly && selected && <>
       <div className="flow-overlay-toolbar" data-flow-selection-preserving-target="true" style={{ position: 'absolute', top: -28, display: 'flex', gap: 4, background: '#fff', whiteSpace: 'nowrap' }}>
-        <button type="button" onPointerDown={event => begin(event, false)} onPointerMove={event => {
+        <button type="button" disabled={Boolean(structureDisabledReason)} title={structureDisabledReason ?? undefined} onPointerDown={event => begin(event, false)} onPointerMove={event => {
           const start = drag.current; if (!start) return
           const point=start.point({x:event.clientX,y:event.clientY})
           setPreview({ ...start.frame, transform: [...start.frame.transform.slice(0, 4), start.frame.transform[4] + point.x - start.x, start.frame.transform[5] + point.y - start.y] as typeof frame.transform })
@@ -655,13 +669,13 @@ function FlowFloatingInstance({ project, instanceId, selected, readOnly, paperWi
           onEdits([{ type: 'frame.set', instanceId, frame: next }, ...(placement && anchor ? [{ type: 'instance.flowPlacement.set' as const, instanceId, flowPlacement: { ...placement, paragraphAnchor: anchor } }] : [])])
         }} onPointerCancel={() => { drag.current = null; setPreview(null) }}>移动</button>
         {placement && <>
-          <button type="button" onClick={() => updatePlacement({ ...placement, space: placement.space === 'paper' ? 'viewport' : 'paper' })}>{placement.space === 'paper' ? '改为视口浮层' : '放到纸面上'}</button>
-          <button type="button" onClick={() => updatePlacement({ ...placement, plane: placement.plane === 'overlay' ? 'underlay' : 'overlay' })}>{placement.plane === 'overlay' ? '移到正文下方' : '移到正文上方'}</button>
-          <button type="button" onClick={() => updatePlacement(null)}>转为正文</button>
+          <button type="button" disabled={Boolean(structureDisabledReason)} title={structureDisabledReason ?? undefined} onClick={() => updatePlacement({ ...placement, space: placement.space === 'paper' ? 'viewport' : 'paper' })}>{placement.space === 'paper' ? '改为视口浮层' : '放到纸面上'}</button>
+          <button type="button" disabled={Boolean(structureDisabledReason)} title={structureDisabledReason ?? undefined} onClick={() => updatePlacement({ ...placement, plane: placement.plane === 'overlay' ? 'underlay' : 'overlay' })}>{placement.plane === 'overlay' ? '移到正文下方' : '移到正文上方'}</button>
+          <button type="button" disabled={Boolean(structureDisabledReason)} title={structureDisabledReason ?? undefined} onClick={() => updatePlacement(null)}>转为正文</button>
         </>}
-        <button type="button" onClick={() => onEdits([{ type: 'instance.remove', instanceId }])}>删除</button>
+        <button type="button" disabled={Boolean(structureDisabledReason)} title={structureDisabledReason ?? undefined} onClick={() => onEdits([{ type: 'instance.remove', instanceId }])}>删除</button>
       </div>
-      <span role="button" aria-label="调整浮层大小" style={{ position: 'absolute', right: -5, bottom: -5, width: 10, height: 10, background: '#2563eb', cursor: 'nwse-resize' }}
+      <button type="button" disabled={Boolean(structureDisabledReason)} title={structureDisabledReason ?? undefined} aria-label="调整浮层大小" style={{ position: 'absolute', right: -5, bottom: -5, width: 10, height: 10, padding: 0, border: 0, background: '#2563eb', cursor: 'nwse-resize' }}
         onPointerDown={event => begin(event, true)} onPointerMove={event => {
           const start = drag.current; if (!start) return
           const [a,b,c,d] = start.frame.transform, determinant = a*d-b*c

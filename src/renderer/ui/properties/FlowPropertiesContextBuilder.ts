@@ -9,10 +9,11 @@ import type { FlowAuthoringIntent, createFlowAuthoringSlice } from '../../store/
 import { flowBodyIds, projectFlowBlock } from '../../componentPlatform/surfaces/flow/documentProjection'
 import { flowTextStyleEdits } from '../../componentPlatform/surfaces/flow/documentSelection'
 import type { FlowPropertiesCommands, FlowPropertiesContext, FlowPropertiesView } from './FlowPropertiesPanel'
-import type { SlideNativePropertiesContext } from './SlideNativePropertiesPanel'
+import type { PropertiesPatch, SlideNativePropertiesContext } from './SlideNativePropertiesPanel'
 import { componentParentMatrix } from '../../composition/crossSurfaceCommands'
 import { composeMatrices, reparentFrame, IDENTITY_MATRIX } from '../../../core/components/geometry'
-import { propertiesEffectiveBackground } from './componentProperties'
+import { componentPropertiesEdits, propertiesEffectiveBackground } from './componentProperties'
+import { assertFlowStructureEditsAllowed, flowStructureDisabledReason } from '../../authoring/flowStructureEdits'
 const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue
 
 /** Reading structure and professional properties write the same V10 instances. */
@@ -55,6 +56,20 @@ export function buildFlowPropertiesOwner(input: {
     ...(value.backgroundColor === undefined ? {} : { color: value.backgroundColor, mode: 'own' as const }),
     ...(value.backgroundAssetId === undefined ? {} : { assetId: value.backgroundAssetId, mode: 'own' as const }) })
   const unavailable = () => report('请使用所选组件的专业属性控件。')
+  const nativePatch = (patch: PropertiesPatch): void | Promise<void> => {
+    try {
+      const target = liveTarget(), instance = target.instanceId ? target.editingProject.instances[target.instanceId] : null
+      if (!instance) throw new Error('请先选择讲义对象。')
+      assertFlowStructureEditsAllowed(target.editingProject, componentPropertiesEdits(instance, target.project.definitions[instance.definitionId], patch))
+      // The existing properties owner reports event failures; buffered inputs must receive its actual ACK.
+      return input.selectedContext?.commands.patch(patch)
+    } catch (error) {
+      report(error)
+      const pending = Promise.reject<void>(error)
+      void pending.catch(() => {})
+      return pending
+    }
+  }
   const commands: FlowPropertiesCommands = {
     reportError: report, previewNative: input.selectedContext?.commands.preview,
     previewTextColor: color => run(() => {
@@ -90,10 +105,11 @@ export function buildFlowPropertiesOwner(input: {
           return [{ type: 'data.set', instanceId: instance.id, path: isText && (key === 'textAlign' || key === 'lineSpacing') ? ['appearance', key === 'textAlign' ? 'align' : key]
             : key === 'altText' && impl?.kind === 'builtin' ? [impl.key === 'guoling.image' ? 'alt' : 'title'] : [key], value: json(value) }]
         })
+        assertFlowStructureEditsAllowed(target.editingProject, edits)
         submit(edits, target); return null
       } catch (error) { report(error); return error instanceof Error ? error.message : String(error) }
     },
-    patchOverlayProperties: patch => run(() => input.selectedContext?.commands.patch(patch)),
+    patchOverlayProperties: nativePatch,
     replaceMediaAsset: assetId => run(() => { const target = liveTarget(); if (target.instanceId) submit([{ type: 'data.set', instanceId: target.instanceId, path: ['assetId'], value: assetId }], target) }),
     importReplacementMedia: unavailable,
     moveSelectedBlock: direction => run(() => intent({ kind: 'move-block', direction })),
@@ -110,6 +126,7 @@ export function buildFlowPropertiesOwner(input: {
       if (destination) edits.push({ type: 'instance.move', instanceId: id, container, index: destination.index,
         ...(instance.frame ? { frame: reparentFrame(instance.frame, componentParentMatrix(target.project, id), parentMatrix) } : {}) },
         { type: 'instance.flowLayout.set', instanceId: id, flowLayout: { width: instance.flowLayout?.width ?? 'content-width', ...instance.flowLayout, wrap: destination.wrap ?? 'none' } })
+      assertFlowStructureEditsAllowed(target.editingProject, edits)
       await input.kernel.editCaptured(input.kernel.capture(edits, target))
     },
     deleteSelectedBlocks: () => run(() => intent({ kind: 'delete-blocks', blockIds: [...read.selectedInstanceIds] })),
@@ -121,12 +138,15 @@ export function buildFlowPropertiesOwner(input: {
     cancelBlockFormulaEdit: unavailable, commitBlockFormula: unavailable,
   }
   const block = selected ? projectFlowBlock(project, selected.id) : null
+  const structureDisabledReason = selected ? flowStructureDisabledReason(project, selected.id) : null
   const bodyRoot = selected && !selected.flowPlacement && blocks.some(item => item.blockId === selected.id)
-  const native = input.selectedContext && bodyRoot ? { ...input.selectedContext, frameEditingEnabled: false,
-    frameDimensionsEditingEnabled: Boolean(selected?.frame) && (block?.type === 'course-instance' || block?.type === 'course-component' || (block?.type === 'media' && block.mediaKind === 'image')) } : input.selectedContext
+  const native = input.selectedContext ? { ...input.selectedContext, commands: { ...input.selectedContext.commands, patch: nativePatch },
+    ...(bodyRoot ? { frameEditingEnabled: false,
+      frameDimensionsEditingEnabled: Boolean(selected?.frame) && (block?.type === 'course-instance' || block?.type === 'course-component' || (block?.type === 'media' && block.mediaKind === 'image')) } : {}),
+    ...(structureDisabledReason ? { frameEditingEnabled: false, frameDimensionsEditingEnabled: false } : {}) } : null
   return { kind: !selected ? 'flow-page' : semantic ? 'flow-block' : 'flow-component', view, assets: input.assets,
     selection: { selectedBlockId: selected?.id ?? null, selectedBlockIds: read.selectedInstanceIds, textRange }, native,
-    flowPlacement: selected?.flowPlacement, flowLayout: selected?.flowLayout, block,
+    flowPlacement: selected?.flowPlacement, flowLayout: selected?.flowLayout, block, structureDisabledReason,
     textEdit: null, draftBindingKey: JSON.stringify([read.documentId, read.epoch, surface.id, read.activeStateId, read.selectedInstanceIds]),
     course: { backgroundColor: project.background?.color, backgroundAssetId: project.background?.assetId }, commands }
 }

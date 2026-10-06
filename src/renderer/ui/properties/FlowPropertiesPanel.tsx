@@ -150,6 +150,7 @@ export interface FlowPropertiesContext {
   readonly flowPlacement?: ComponentFlowPlacement
   readonly flowLayout?: ComponentFlowBodyLayout
   readonly block?: FlowBlock | null
+  readonly structureDisabledReason?: string | null
   readonly textEdit: FlowTextEditSession | null
   readonly draftBindingKey: string
   /** Course-wide background fields, needed only to resolve the Flow surface's effective preview. */
@@ -251,6 +252,7 @@ function FlowMediaBlockProperties({
       {!block.caption ? <button type="button" onClick={() => patchMedia({ caption: { inlines: [] } })}>添加题注</button> : <p className="property-hint">在正文中编辑题注。</p>}
       <SelectField<FlowMediaBlock['layout']>
         label="版式"
+        disabled={Boolean(context.structureDisabledReason)}
         value={block.layout}
         options={[
           { value: 'content-width', label: '正文宽' },
@@ -262,6 +264,7 @@ function FlowMediaBlockProperties({
       <div data-testid="flow-media-wrap">
         <SelectField<'none' | 'left' | 'right'>
           label="文字环绕"
+          disabled={Boolean(context.structureDisabledReason)}
           value={block.wrap ?? 'none'}
           options={[
             { value: 'none', label: '不环绕（独占一行）' },
@@ -315,6 +318,7 @@ function FlowMediaBlockProperties({
           type="button"
           className="secondary-button"
           data-testid="flow-block-move-up"
+          disabled={Boolean(context.structureDisabledReason)} title={context.structureDisabledReason ?? undefined}
           onClick={() => commands.moveSelectedBlock('up')}
         >
           上移
@@ -323,6 +327,7 @@ function FlowMediaBlockProperties({
           type="button"
           className="secondary-button"
           data-testid="flow-block-move-down"
+          disabled={Boolean(context.structureDisabledReason)} title={context.structureDisabledReason ?? undefined}
           onClick={() => commands.moveSelectedBlock('down')}
         >
           下移
@@ -332,6 +337,7 @@ function FlowMediaBlockProperties({
         type="button"
         className="secondary-button"
         data-testid="flow-block-to-overlay"
+        disabled={Boolean(context.structureDisabledReason)} title={context.structureDisabledReason ?? undefined}
         onClick={() => commands.convertSelectedToOverlay()}
       >
         转为浮层
@@ -340,6 +346,7 @@ function FlowMediaBlockProperties({
         type="button"
         className="secondary-button"
         data-testid="flow-delete-media-block"
+        disabled={Boolean(context.structureDisabledReason)} title={context.structureDisabledReason ?? undefined}
         onClick={() => commands.deleteSelectedBlocks()}
       >
         <Trash2 size={14} />删除此块
@@ -408,6 +415,7 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
           <div data-testid="flow-block-type">
             <SelectField
               label="块类型"
+              disabled={Boolean(context.structureDisabledReason)}
               value={block.type === 'heading' ? `${block.level}` : block.type === 'paragraph' ? 'paragraph' : 'quote'}
               options={[
                 { value: 'paragraph', label: '段落' },
@@ -467,6 +475,7 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
                 type="button"
                 className="secondary-button"
                 data-testid="flow-block-move-up"
+                disabled={Boolean(context.structureDisabledReason)} title={context.structureDisabledReason ?? undefined}
                 onClick={() => commands.moveSelectedBlock('up')}
               >
                 上移
@@ -475,6 +484,7 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
                 type="button"
                 className="secondary-button"
                 data-testid="flow-block-move-down"
+                disabled={Boolean(context.structureDisabledReason)} title={context.structureDisabledReason ?? undefined}
                 onClick={() => commands.moveSelectedBlock('down')}
               >
                 下移
@@ -483,6 +493,7 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
                 type="button"
                 className="secondary-button"
                 data-testid="flow-block-to-overlay"
+                disabled={Boolean(context.structureDisabledReason)} title={context.structureDisabledReason ?? undefined}
                 onClick={() => commands.convertSelectedToOverlay()}
               >
                 转为浮层
@@ -491,6 +502,7 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
             <div data-testid="flow-component-wrap">
               <SelectField<'none' | 'left' | 'right'>
                 label="文字环绕"
+                disabled={Boolean(context.structureDisabledReason)}
                 value={block.wrap ?? 'none'}
                 options={[
                   { value: 'none', label: '不环绕（独占一行）' },
@@ -510,6 +522,7 @@ function FlowBlockProperties({ context }: { context: FlowPropertiesContext }) {
               onCommit={(value) => { const height = Number(value); if (height >= 80 && height <= 4000) commands.patchSelectedBlock({ height }) }} />
             <SelectField<'none' | 'left' | 'right'>
               label="文字环绕"
+              disabled={Boolean(context.structureDisabledReason)}
               value={block.wrap ?? 'none'}
               options={[
                 { value: 'none', label: '不环绕（独占一行）' },
@@ -687,7 +700,7 @@ function FlowComponentConversionControls({ context }: { context: FlowPropertiesC
   const selected = choices.find((choice) => choice.key === choiceKey) ?? choices.at(-1)
 
   const convert = async () => {
-    if (!selected || pending) return
+    if (!selected || pending || context.structureDisabledReason) return
     const controller = new AbortController()
     controllerRef.current = controller
     setPending(true)
@@ -696,6 +709,8 @@ function FlowComponentConversionControls({ context }: { context: FlowPropertiesC
         { ...selected.destination, wrap },
         controller.signal,
       )
+    } catch (error) {
+      context.commands.reportError(error instanceof Error ? error.message : String(error))
     } finally {
       if (controllerRef.current === controller) controllerRef.current = null
       setPending(false)
@@ -713,6 +728,7 @@ function FlowComponentConversionControls({ context }: { context: FlowPropertiesC
       />
       <SelectField<'none' | 'left' | 'right'>
         label="文字环绕"
+        disabled={Boolean(context.structureDisabledReason)}
         value={wrap}
         options={[
           { value: 'none', label: '不环绕（独占一行）' },
@@ -725,7 +741,8 @@ function FlowComponentConversionControls({ context }: { context: FlowPropertiesC
         type="button"
         className="secondary-button"
         data-testid="flow-overlay-to-document"
-        disabled={pending || !selected}
+        disabled={pending || !selected || Boolean(context.structureDisabledReason)}
+        title={context.structureDisabledReason ?? undefined}
         onClick={() => void convert()}
       >
         {pending ? '正在转换…' : '转回指定正文位置'}
@@ -749,14 +766,14 @@ export function FlowPropertiesPanel({ context }: { context: FlowPropertiesContex
     ? <div className="properties-scroll" data-testid="properties-tab">
         <SlideNativePropertiesPanel context={context.native} afterCommon={<><section className="property-section" data-testid="flow-overlay-space-section">
           <h3 className="property-title">排版定位</h3>
-          {context.flowPlacement && <SelectField<'viewport' | 'paper'> label="定位空间" value={context.flowPlacement.space}
+          {context.flowPlacement && <SelectField<'viewport' | 'paper'> label="定位空间" value={context.flowPlacement.space} disabled={Boolean(context.structureDisabledReason)}
             options={[{ value: 'viewport', label: '钉在视口' }, { value: 'paper', label: '跟随稿纸滚动' }]}
             onChange={context.commands.patchOverlayPaperSpace} />}
           {!context.flowPlacement && <>
-            <SelectField<'content-width' | 'wide' | 'full-width'> label="版式" value={context.flowLayout?.width ?? 'content-width'}
+            <SelectField<'content-width' | 'wide' | 'full-width'> label="版式" value={context.flowLayout?.width ?? 'content-width'} disabled={Boolean(context.structureDisabledReason)}
               options={[{ value: 'content-width', label: '正文宽' }, { value: 'wide', label: '较宽' }, { value: 'full-width', label: '全宽' }]}
               onChange={layout => context.commands.patchSelectedBlock({ layout })} />
-            <SelectField<'none' | 'left' | 'right'> label="文字环绕" value={context.flowLayout?.wrap ?? 'none'}
+            <SelectField<'none' | 'left' | 'right'> label="文字环绕" value={context.flowLayout?.wrap ?? 'none'} disabled={Boolean(context.structureDisabledReason)}
               options={[{ value: 'none', label: '不环绕（独占一行）' }, { value: 'left', label: '居左环绕' }, { value: 'right', label: '居右环绕' }]}
               onChange={wrap => context.commands.patchSelectedBlock({ wrap })} />
             {context.block?.type === 'media' && <BufferedInput label="替代文本" value={context.block.altText ?? ''} onCommit={altText => context.commands.patchSelectedBlock({ altText })} />}
@@ -766,10 +783,10 @@ export function FlowPropertiesPanel({ context }: { context: FlowPropertiesContex
             </>}
           </>}
           <div className="button-row">
-            <button type="button" className="secondary-button" onClick={() => context.commands.moveSelectedBlock('up')}>上移</button>
-            <button type="button" className="secondary-button" onClick={() => context.commands.moveSelectedBlock('down')}>下移</button>
-            {!context.flowPlacement && <button type="button" className="secondary-button" onClick={context.commands.convertSelectedToOverlay}>转为浮层</button>}
-            <button type="button" className="secondary-button secondary-button--danger" onClick={context.commands.deleteSelectedBlocks}>删除</button>
+            <button type="button" className="secondary-button" disabled={Boolean(context.structureDisabledReason)} title={context.structureDisabledReason ?? undefined} onClick={() => context.commands.moveSelectedBlock('up')}>上移</button>
+            <button type="button" className="secondary-button" disabled={Boolean(context.structureDisabledReason)} title={context.structureDisabledReason ?? undefined} onClick={() => context.commands.moveSelectedBlock('down')}>下移</button>
+            {!context.flowPlacement && <button type="button" className="secondary-button" disabled={Boolean(context.structureDisabledReason)} title={context.structureDisabledReason ?? undefined} onClick={context.commands.convertSelectedToOverlay}>转为浮层</button>}
+            <button type="button" className="secondary-button secondary-button--danger" disabled={Boolean(context.structureDisabledReason)} title={context.structureDisabledReason ?? undefined} onClick={context.commands.deleteSelectedBlocks}>删除</button>
           </div>
           {context.flowPlacement && <FlowComponentConversionControls context={context} />}
         </section></>} />

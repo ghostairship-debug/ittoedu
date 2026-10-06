@@ -20,6 +20,7 @@ import { documentTextSlots } from '../../../shared/document/content'
 import { createTextComponentData, formatTextComponentRange } from '../../../components/text/data'
 import { flowRangeDataPath,flowTextStyleEdits,flowProfessionalTextStyleEdits } from '../../componentPlatform/surfaces/flow/documentSelection'
 import { insertCourseElement, type CourseElementKind, type CourseInsertionOptions } from '../../media/commitCourseMediaAuthoring'
+import { assertFlowStructureEditsAllowed } from '../../authoring/flowStructureEdits'
 export function createInitialFlowOwnedState(): FlowOwnedState {
   return { flowDocumentDraft: null, flowDocumentDrafts: {}, flowSession: null, flowTextEdit: null, flowClipboard: null, flowContextSelection: null, flowEditingInstance: null }
 }
@@ -38,9 +39,10 @@ export function createFlowAuthoringSlice(kernel: EditorStoreKernel, flow: FlowV1
     flow.patch({ flowDocumentDrafts: drafts, ...(documentId === kernel.readView().activeDocumentId ? { flowDocumentDraft: draft } : {}) })
   }
   const report = (error: unknown) => kernel.setFeedback({ errorMessage: error instanceof Error ? error.message : String(error) })
-  const commit = async (edits: ComponentEdit[], historyGroup?: string, target = kernel.captureTarget()): Promise<FlowAuthoringReceipt> => {
+  const commit = async (edits: ComponentEdit[], historyGroup?: string, target = kernel.captureTarget(), documentProjection = false): Promise<FlowAuthoringReceipt> => {
     if (!edits.length) return { ok: true, historyEntry: false }
     try {
+      assertFlowStructureEditsAllowed(target.editingProject, edits, documentProjection)
       const captured = kernel.capture(edits, target)
       await kernel.editCaptured(captured, historyGroup)
       return { ok: true, historyEntry: true }
@@ -66,7 +68,7 @@ export function createFlowAuthoringSlice(kernel: EditorStoreKernel, flow: FlowV1
     try { await insertCourseElement(kernel,target,kind,insertion); return {ok:true,historyEntry:true} }
     catch (error) { report(error); return {ok:false,reason:String(error),historyEntry:false} }
   }
-  const documentEdit = (blocks: FlowBlock[], historyGroup?: string, target = active()) => commit(flowDocumentEdits(target.editingProject, target.surfaceId!, blocks), historyGroup, target)
+  const documentEdit = (blocks: FlowBlock[], historyGroup?: string, target = active()) => commit(flowDocumentEdits(target.editingProject, target.surfaceId!, blocks), historyGroup, target, true)
   const renameHeading = async (instanceId: string, title: string) => {
     const target = active(), instance = target.project.instances[instanceId]
     if (!instance) throw new Error('标题对象不存在')
@@ -108,7 +110,7 @@ export function createFlowAuthoringSlice(kernel: EditorStoreKernel, flow: FlowV1
         case 'document-history': if (!(await drain(target.documentId)).ok) throw new Error('请完成当前正文输入'); await kernel.bridge[intent.direction](target.documentId); return { ok: true, historyEntry: false }
         case 'replace-document-content': {
           const planned = prepareFlowDocumentResourceTransaction(target,target.surfaceId!,intent.blocks,intent.preparedResources === undefined ? [] : [intent.preparedResources])
-          const receipt = await commit(planned.edits,intent.historyGroup,planned.target)
+          const receipt = await commit(planned.edits,intent.historyGroup,planned.target,true)
           if (receipt.ok) releaseFlowPreparedResources(planned.prepared)
           return receipt
         }
@@ -141,7 +143,7 @@ export function createFlowAuthoringSlice(kernel: EditorStoreKernel, flow: FlowV1
           const placement = instance.flowPlacement ?? { space: 'paper' as const, plane: 'overlay' as const }
           const edits: ComponentEdit[] = [{ type: 'instance.flowPlacement.set', instanceId: instance.id, flowPlacement: intent.kind === 'convert-overlay-to-document' ? null : {
             ...placement, ...(intent.kind === 'patch-overlay-paper-space' ? { space: intent.paperSpace } : intent.kind === 'patch-overlay-body-plane' ? { plane: intent.bodyPlane } : intent.kind === 'convert-block-to-overlay' && intent.paragraphAnchor ? { paragraphAnchor: intent.paragraphAnchor } : {}) } }]
-          if (intent.kind === 'convert-block-to-overlay') { const frame = intent.frame ?? { x: 80, y: 80, width: 240, height: 120 }; edits.unshift({ type: 'frame.set', instanceId: instance.id, frame: { width: frame.width, height: frame.height, transform: [1,0,0,1,frame.x,frame.y] } }) }
+          if (intent.kind === 'convert-block-to-overlay' && !instance.frame) { const frame = intent.frame ?? { x: 80, y: 80, width: 240, height: 120 }; edits.unshift({ type: 'frame.set', instanceId: instance.id, frame: { width: frame.width, height: frame.height, transform: [1,0,0,1,frame.x,frame.y] } }) }
           if(intent.kind==='convert-block-to-overlay' && owningContainer(target.project,instance.id)?.kind==='instance')edits.push({type:'instance.move',instanceId:instance.id,container:{kind:'surface',surfaceId:target.surfaceId!},index:containerChildIds(target.project,{kind:'surface',surfaceId:target.surfaceId!}).length})
           return commit(edits, undefined, target)
         }
