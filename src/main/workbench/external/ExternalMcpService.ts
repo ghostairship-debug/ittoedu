@@ -3,6 +3,7 @@ import path from 'node:path'
 import { z } from 'zod'
 import type { DocumentRegistry } from '../../../core/documents/DocumentRegistry'
 import type { DocumentToolGateway } from '../../../core/tools/DocumentToolGateway'
+import { modelToolResult } from '../../../core/tools/modelToolResult'
 import { agentFileMutationNames, agentFileTools, isAgentFileTool, type AgentFileContext, type AgentFileMutationName,
   type AgentFileOutcome, type AgentFileToolName } from '../../../core/tools/AgentFileTools'
 import { createCourseFromHtmlInputSchema, createCourseFromHtmlTool } from '../../../core/tools/HtmlImportTools'
@@ -283,7 +284,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     try {
       if (tool.read) {
         const ticket = randomUUID()
-        return this.reply(session, await this.traced(session, tool, ticket, input, () => this.execute(session, tool, ticket, input)), ticket)
+        return this.reply(session, await this.traced(session, tool, ticket, input, () => this.execute(session, tool, ticket, input)), ticket, false, tool.name)
       }
       const digest = callDigest(tool.name, input)
       // The previous identical call's reply never reached the client: answer with its receipt instead of executing again.
@@ -292,7 +293,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
       if (undelivered) {
         undelivered.delivered = undefined
         this.track(undelivered, call.delivery)
-        return this.reply(session, await undelivered.result!, undelivered.ticket, true)
+        return this.reply(session, await undelivered.result!, undelivered.ticket, true, tool.name)
       }
       const ticket = supplied ?? randomUUID()
       const operation: Operation = { ticket, tool: tool.name, label: tool.label, digest, time: this.now() }
@@ -300,14 +301,15 @@ export class ExternalMcpService implements ResidentMcpHandler {
         .then(result => { operation.summary = summarize(result); return result })
       session.operations.push(operation)
       this.track(operation, call.delivery)
-      return this.reply(session, await operation.result, ticket)
+      return this.reply(session, await operation.result, ticket, false, tool.name)
     } finally { session.pending-- }
   }
   private track(operation: Operation, delivery: Promise<boolean>): void {
     void delivery.then(delivered => { operation.delivered = delivered; if (delivered) operation.result = undefined })
   }
-  private async reply(session: Session, result: ToolResult, ticket?: string, replayed = false) {
-    const content: ({ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string })[] = [{ type: 'text', text: JSON.stringify(result) }]
+  private async reply(session: Session, result: ToolResult, ticket?: string, replayed = false, toolName = '') {
+    const publicResult = modelToolResult(toolName, result)
+    const content: ({ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string })[] = [{ type: 'text', text: JSON.stringify(publicResult) }]
     if (replayed) content.push({ type: 'text', text: '这是此前同一调用的正式回执：上次回复没有送达，本次未重复执行。' })
     let imageMissing = false
     if (result.kind === 'read' && record(result.data) && record(result.data.image) && typeof result.data.image.resourceId === 'string' && result.data.image.mimeType === 'image/png') {
@@ -320,7 +322,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
       }
     }
     for (const notice of session.notices.splice(0)) content.push({ type: 'text', text: notice })
-    return { content, structuredContent: { result, ...(ticket ? { ticket } : {}), ...(replayed ? { replayed: true } : {}) }, isError: !successful(result) || imageMissing }
+    return { content, structuredContent: { result: publicResult, ...(ticket ? { ticket } : {}), ...(replayed ? { replayed: true } : {}) }, isError: !successful(result) || imageMissing }
   }
   private assertActive(session: Session, runId: string): void {
     if (session.stopped || session.runId !== runId || !this.sessions.has(session.sessionId)) throw new Error('外部会话已停止或已切换，操作未提交')

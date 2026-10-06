@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { PayloadCompiler, markPayloadSent } from '../../../core/execution/PayloadCompiler'
 import type { DocumentRegistry } from '../../../core/documents/DocumentRegistry'
 import type { DocumentToolGateway } from '../../../core/tools/DocumentToolGateway'
+import { modelToolResult } from '../../../core/tools/modelToolResult'
 import { StreamingEditArguments } from '../../../core/execution/StreamingEditArguments'
 import { isSourceDocumentModel, type DocumentEvent, type DocumentModel, type DocumentOperationResult, type DocumentSnapshot } from '../../../shared/workbench/document'
 import type { EditEvent } from '../../../shared/workbench/editSession'
@@ -1862,7 +1863,8 @@ export class ExecutionEngine {
       ...(tool.result?.kind === 'error' ? { error: safeDetailString(tool.result.message) } : serviceOutcome ? { error: safeDetailString(serviceOutcome.message) } : {}),
       ...(tool.result?.kind === 'document-operation' ? { applicationStatus: tool.result.result.status, documentId: tool.result.result.documentId,
         ...('revision' in tool.result.result ? { revision: tool.result.result.revision } : { error: safeDetailString(tool.result.result.message) }) } : {}) })
-    if (tool.origin !== 'host') record.messages.push({ role: 'tool', tool_call_id: tool.providerCallId, content: JSON.stringify(publicResult) })
+    if (tool.origin !== 'host') record.messages.push({ role: 'tool', tool_call_id: tool.providerCallId,
+      content: JSON.stringify(publicResult && modelToolResult(tool.call.name, publicResult)) })
     await this.checkpoint(record)
     if (tool.result?.kind === 'error' && tool.result.code === 'tool-outcome-unknown') throw new Error(tool.result.message)
   }
