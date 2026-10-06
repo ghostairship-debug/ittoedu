@@ -204,7 +204,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     const api = documentPort.documents
     if (!api) throw new Error('文档服务尚未连接')
     const snapshot = await api.read(documentId)
-    if (snapshot.model.kind === 'course-v9') {
+    if (snapshot.model.kind === 'course-v10') {
       const ticket = ++navigation.current
       if (!courseRef.current) throw new Error('H5 演示视图尚未连接')
       pendingCourse.current = { id: documentId, ticket }

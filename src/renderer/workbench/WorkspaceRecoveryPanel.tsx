@@ -13,7 +13,7 @@ export interface WorkspaceRecoveryPanelProps {
 
 function nameOf(snapshot: DocumentSnapshot): string {
   if (snapshot.binding.kind === 'file') return snapshot.binding.path.split(/[\\/]/).pop() || snapshot.binding.path
-  if (snapshot.model.kind === 'course-v9') return `${snapshot.model.project.title}.h5lesson`
+  if (snapshot.model.kind === 'course-v10') return `${snapshot.model.project.title}.h5lesson`
   return snapshot.binding.suggestedName
 }
 
@@ -120,7 +120,7 @@ export function WorkspaceRecoveryPanel({ api, onRestored }: WorkspaceRecoveryPan
     <ul>{items.map(item => {
       const id = item.snapshot.documentId, name = nameOf(item.snapshot)
       return <li key={id}>
-        <div><strong>{name}</strong><span>{item.snapshot.model.kind === 'course-v9' ? 'H5 演示' : item.snapshot.model.kind === 'text' ? '纯文本文档' : 'Markdown 文档'} · {item.restored ? '已恢复，等待打开' : '尚未恢复'}</span>
+        <div><strong>{name}</strong><span>{item.snapshot.model.kind === 'course-v10' ? 'H5 演示' : item.snapshot.model.kind === 'text' ? '纯文本文档' : 'Markdown 文档'} · {item.restored ? '已恢复，等待打开' : '尚未恢复'}</span>
           {item.snapshot.binding.kind === 'file' && <small title={item.snapshot.binding.path}>{item.snapshot.binding.path}</small>}</div>
         {item.error && <p role="alert">{item.error}</p>}
         {confirming === id && !item.restored ? <div className="workspace-recovery-panel__confirm">
