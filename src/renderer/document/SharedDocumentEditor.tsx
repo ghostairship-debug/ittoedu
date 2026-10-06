@@ -92,6 +92,11 @@ export function documentInlineDefaultDecorations(state: EditorState, defaults?: 
 }
 export function readDocumentFormatting(state: EditorState, defaults?: DocumentInlineStyleDefaults) {
   const samples: TextRunStyle[] = []
+  const paragraphTypes = new Set<string>()
+  for (const range of state.selection.ranges) state.doc.nodesBetween(range.$from.pos, range.$to.pos, node => {
+    if (node.isTextblock) paragraphTypes.add(node.type === documentEditorSchema.nodes.heading ? String(node.attrs.data.level ?? 2)
+      : node.type === documentEditorSchema.nodes.paragraph ? 'paragraph' : '')
+  })
   const sample = (marks: typeof state.selection.$from.parent.marks, position: number) => samples.push({ ...defaults?.(inlineBlockId(state, position)), ...marks.find(mark => mark.type === documentEditorSchema.marks.style)?.attrs.value })
   if (state.selection.empty) sample(state.storedMarks ?? state.selection.$from.marks(), state.selection.from)
   else for (const range of state.selection.ranges) state.doc.nodesBetween(range.$from.pos, range.$to.pos, (node, position) => { if (node.isInline && !node.isTextblock) sample(node.marks, position) })
@@ -99,7 +104,7 @@ export function readDocumentFormatting(state: EditorState, defaults?: DocumentIn
     const first = get(samples[0] ?? {})
     return samples.some(style => get(style) !== first) ? 'mixed' : first
   }
-  return { fontFamily: values(style => style.fontFamily), fontSize: values(style => style.fontSize),
+  return { paragraphType: paragraphTypes.size === 1 ? [...paragraphTypes][0] : '', fontFamily: values(style => style.fontFamily), fontSize: values(style => style.fontSize),
     flags: Object.fromEntries(FORMAT_FLAGS.map(key => [key, values(style => Boolean(style[key]))])) as Record<typeof FORMAT_FLAGS[number], boolean | 'mixed'> }
 }
 
@@ -180,7 +185,7 @@ export interface SharedDocumentEditorHandle {
 export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, SharedDocumentEditorProps>(function SharedDocumentEditor(props, ref) {
   const latest = useRef(props); latest.current = props
   const documentScope = (props.contentScope ?? 'document') === 'document'
-  const [format, setFormat] = useState<ReturnType<typeof readDocumentFormatting>>({ fontFamily: undefined, fontSize: undefined, flags: { bold: false, italic: false, underline: false, strike: false, emphasis: false } })
+  const [format, setFormat] = useState<ReturnType<typeof readDocumentFormatting>>({ paragraphType: '', fontFamily: undefined, fontSize: undefined, flags: { bold: false, italic: false, underline: false, strike: false, emphasis: false } })
   const [mode, setMode] = useState<'layout' | 'source'>(documentScope ? props.initialMode ?? (props.sourceDraft === undefined ? 'layout' : 'source') : 'layout')
   const [diagnostics, setDiagnostics] = useState<DocumentDiagnostic[]>(() => [...(props.sourceDiagnostics ?? [])])
   const diagnosticsRef = useRef<DocumentDiagnostic[]>([...(props.sourceDiagnostics ?? [])])
@@ -869,7 +874,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
         <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => { const editor = layout.current; if (editor) toggleMark(documentEditorSchema.marks.code)(editor.view.state, editor.view.dispatch) }}>行内代码</button>
         <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => { const state = layout.current?.view.state; setLinkDraft(state?.selection.$from.marks().find(mark => mark.type === documentEditorSchema.marks.link)?.attrs.href ?? '') }}>链接</button>
         <button type="button" onMouseDown={event => event.preventDefault()} onClick={openMath}>公式</button>
-        {documentScope && <select aria-label="段落类型" defaultValue="paragraph" onChange={event => applyParagraphType(event.target.value)}><option value="paragraph">正文</option>{[1,2,3,4,5,6].map(level => <option key={level} value={level}>标题 {level}</option>)}</select>}
+        {documentScope && <select aria-label="段落类型" value={format.paragraphType} onChange={event => applyParagraphType(event.target.value)}><option value="" disabled>段落类型</option><option value="paragraph">正文</option>{[1,2,3,4,5,6].map(level => <option key={level} value={level}>标题 {level}</option>)}</select>}
       </>}
       {discardButton}
     </div>

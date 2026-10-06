@@ -578,7 +578,14 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         const overlap = from - Math.min(end.a, end.b)
         const to = end.a + Math.max(0, overlap), nextTo = end.b + Math.max(0, overlap)
         const closed = tableReplacement(view.state.doc, document)
-        const transaction = closed
+        const before = view.state.doc.nodeAt(from), after = document.nodeAt(from)
+        const paragraph = (node: import('prosemirror-model').Node) => node.type === schema.nodes.paragraph || node.type === schema.nodes.heading
+        // A type/attribute-only paragraph update keeps its text and the caret through a markup step.
+        const markup = before && after && paragraph(before) && paragraph(after) && before.attrs.id === after.attrs.id &&
+          before.content.eq(after.content) && end.a === from + before.nodeSize && end.b === from + after.nodeSize ? after : null
+        const transaction = markup
+          ? view.state.tr.setNodeMarkup(from, markup.type, markup.attrs, markup.marks).setStoredMarks(view.state.storedMarks)
+          : closed
           ? view.state.tr.replaceWith(closed.from, closed.beforeEnd, document.content.cut(closed.from, closed.afterEnd))
           : view.state.tr.replace(from, to, document.slice(from, nextTo))
         transaction.setMeta('canonicalUpdate', true)
