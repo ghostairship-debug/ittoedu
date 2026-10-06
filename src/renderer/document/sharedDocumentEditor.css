@@ -60,3 +60,102 @@
   white-space:normal;
 }
 
+
+/* The same full toolbar is used above Flow and in the free-surface floating host. */
+.shared-document-toolbar { align-items: center; font-size: 12px; line-height: 1.4; }
+.shared-document-toolbar > button,
+.shared-document-toolbar > select,
+.shared-document-toolbar > label > input,
+.shared-document-toolbar > label > select {
+  box-sizing: border-box;
+  flex: none;
+  min-height: 28px;
+  padding: 3px 7px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  white-space: nowrap;
+}
+.shared-document-toolbar > button { cursor: pointer; }
+.shared-document-toolbar > button:hover { background: #eff6ff; color: #1d4ed8; }
+.shared-document-toolbar > button[aria-pressed="true"] { border-color: #93c5fd; background: #dbeafe; color: #1d4ed8; }
+.shared-document-toolbar > label { display: inline-flex; flex: none; align-items: center; gap: 4px; white-space: nowrap; }
+.shared-document-toolbar > label > select { width: 160px; max-width: 100%; }
+
+/* SelectionQuickBar owns the client-space portal and placement; the host never inherits a text frame's scale. */
+.selection-quick-bar__row:has(> .native-text-toolbar-host) { height: auto; padding: 0; white-space: normal; }
+.text-edit-toolbar.native-text-toolbar-host {
+  position: static;
+  z-index: auto;
+  display: block;
+  box-sizing: border-box;
+  width: max-content;
+  height: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.native-text-toolbar-host .shared-document-toolbar {
+  position: static;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: 100%;
+  padding: 4px;
+  gap: 4px;
+  background: transparent;
+  color: #d7dce4;
+}
+.native-text-toolbar-host .shared-document-toolbar > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  height: 28px;
+  border: 0;
+  background: transparent;
+  color: #c9ced6;
+}
+.native-text-toolbar-host .shared-document-toolbar > button:hover { background: var(--accent-soft, rgba(99, 132, 255, .28)); color: #fff; }
+.native-text-toolbar-host .shared-document-toolbar > button[aria-pressed="true"] { background: rgba(255, 255, 255, .14); color: #fff; }
+.native-text-toolbar-host .shared-document-toolbar > label,
+.native-text-toolbar-host .shared-document-toolbar > label:hover {
+  display: inline-flex;
+  width: auto;
+  height: auto;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  cursor: default;
+}
+.native-text-toolbar-host .shared-document-form { max-width: 100%; font-size: 12px; border-radius: 0 0 6px 6px; }
+.native-text-toolbar-host .shared-document-form label,
+.native-text-toolbar-host .shared-document-form label:hover {
+  display: inline-flex;
+  width: auto;
+  height: auto;
+  padding: 0;
+  color: #1f2937;
+  background: transparent;
+  white-space: nowrap;
+  cursor: default;
+}
+.native-text-toolbar-host .shared-document-form button,
+.native-text-toolbar-host .shared-document-form input:not([type=checkbox]) {
+  box-sizing: border-box;
+  width: auto;
+  height: 28px;
+  padding: 3px 7px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  white-space: nowrap;
+}
+.native-text-toolbar-host .shared-document-form button { display: inline-flex; align-items: center; cursor: pointer; }
+.native-text-toolbar-host .shared-document-form button:hover { background: #eff6ff; color: #1d4ed8; }
+

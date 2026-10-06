@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { CourseProjectV10 } from '../../../shared/contracts/component-platform'
 import type { GeometryPoint } from '../../../core/components/geometry'
 import { frameToSpaceMatrix, invertMatrix, transformPoint } from '../../../core/components/geometry'
@@ -10,6 +10,8 @@ import { componentFrameStyle, freeSurfaceTargets } from '../../componentPlatform
 import { CanvasPlainTextEditor, type CanvasPlainTextBounds } from '../CanvasPlainTextEditor'
 import type { SlideContentEdit } from '../../store/slices/slideAuthoringSlice'
 import { componentDefinitionPresentation } from '../properties/componentDefinitionPresentation'
+import { SelectionQuickBar } from '../../editing/quickbar/SelectionQuickBar'
+import { visibleBounds, type QuickBarBounds, type QuickBarRect } from '../../editing/quickbar/placeQuickBar'
 
 interface Field { instanceId: string; kind: 'table-cell' | 'title' | 'category' | 'series'; childId: string; bounds: CanvasPlainTextBounds }
 interface Ports {
@@ -33,6 +35,7 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
   const latestContext = useRef(contextKey); latestContext.current = contextKey
   const [field, setField] = useState<Field | null>(null)
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null)
+  const [toolbarPlace, setToolbarPlace] = useState<{ anchor: QuickBarRect; bounds: QuickBarBounds } | null>(null)
   const editorRoot = useRef<HTMLDivElement>(null)
   useEffect(() => {
     if (!ports.edit || ports.edit.source !== 'canvas') return
@@ -91,7 +94,7 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
       if (replacement) { replacement.focus({ preventScroll: true }); return }
     }
     const active = document.activeElement
-    if (afterBlur && active && (editorRoot.current?.contains(active) || active.closest('.text-edit-toolbar,.selection-quick-bar'))) return
+    if (afterBlur && active && (editorRoot.current?.contains(active) || active.closest('.text-edit-toolbar,.selection-quick-bar,.palette-button__panel'))) return
     void latest.current.commit().catch(error => latest.current.report(error instanceof Error ? error.message : String(error)))
   }) }
   const fieldValue = (): string => {
@@ -143,7 +146,28 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
         ports.update(data, undefined, layout?.height)
       }}
       onUndo={ports.undo} onRedo={ports.redo} onDiagnostic={ports.report} /> : null
-  return { begin, cancel: ports.cancel, editor: draft && frame && (rich || draft.authorSpot || field?.instanceId === draft.instanceId) ? <div ref={editorRoot} data-component-professional-editor="" className="text-edit-overlay"
+  useLayoutEffect(() => {
+    if (!rich) { setToolbarPlace(null); return }
+    const root = editorRoot.current, host = latest.current.host()
+    if (!root || !host) return
+    const position = () => {
+      const bounds = visibleBounds(host), rect = root.getBoundingClientRect()
+      const next = bounds.right > bounds.left && bounds.bottom > bounds.top
+        ? { anchor: { left: rect.left, top: rect.top, width: rect.width, height: rect.height }, bounds } : null
+      setToolbarPlace(previous => JSON.stringify(previous) === JSON.stringify(next) ? previous : next)
+    }
+    position()
+    window.addEventListener('scroll', position, true); window.addEventListener('resize', position)
+    const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(position)
+    const changed = typeof MutationObserver === 'undefined' ? null : new MutationObserver(position)
+    // Pan, zoom and frame transforms change the projection without resizing the logical frame.
+    for (let element: HTMLElement | null = root; element && element !== document.body; element = element.parentElement) {
+      resized?.observe(element)
+      changed?.observe(element, { attributes: true, attributeFilter: ['style', 'class'] })
+    }
+    return () => { window.removeEventListener('scroll', position, true); window.removeEventListener('resize', position); resized?.disconnect(); changed?.disconnect() }
+  }, [Boolean(rich), draft?.instanceId, contextKey])
+  return { begin, cancel: ports.cancel, editor: draft && frame && (rich || draft.authorSpot || field?.instanceId === draft.instanceId) ? <><div ref={editorRoot} data-component-professional-editor="" className="text-edit-overlay"
     style={{ ...componentFrameStyle(frame), zIndex: 20, pointerEvents: 'auto', background: '#fff', overflow: 'visible' }}
     onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}
     onCompositionStart={() => { if (rich) { if (latest.current.setComposing) latest.current.setComposing(true); else latest.current.update(latest.current.edit?.data ?? null, true) } }}
@@ -153,10 +177,9 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
       const next = event.relatedTarget
       if (next instanceof Node && event.currentTarget.contains(next)) return
       // Professional toolbar is a portal. Keep its selection and IME alive.
-      if (next instanceof Element && next.closest('.text-edit-toolbar,.selection-quick-bar')) return
+      if (next instanceof Element && next.closest('.text-edit-toolbar,.selection-quick-bar,.palette-button__panel')) return
       if (rich) reportCommit(true, event.target)
     }}>
-    {rich && <div className="text-edit-toolbar" ref={setToolbarHost} />}
     {rich}
     {draft.authorSpot && <CanvasPlainTextEditor key={draft.authorSpot.id} bounds={{ x: 0, y: 0, width: frame.width, height: frame.height }}
       value={draft.spotText ?? ''} multiline label={draft.authorSpot.sourceRegion?.kind === 'implementation' ? '编辑此处源码片段' : '编辑此处文字'}
@@ -167,5 +190,11 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
       maxLength={field.kind === 'table-cell' ? 20000 : 500} onDraftChange={updateField}
       onCommit={value => { updateField(value, false); reportCommit() }} onCancel={ports.cancel}
       onAdvance={field.kind === 'table-cell' ? (value, direction) => { void advance(value, direction) } : undefined} />}
-  </div> : null }
+  </div>
+    {rich && <SelectionQuickBar anchor={toolbarPlace?.anchor ?? null} bounds={toolbarPlace?.bounds ?? null}
+      label="文字编辑工具" selectionKey={contextKey + ':' + draft.instanceId} aboveOffset={34}>
+      <div className="text-edit-toolbar native-text-toolbar-host" ref={setToolbarHost}
+        style={{ maxWidth: toolbarPlace ? Math.max(0, toolbarPlace.bounds.right - toolbarPlace.bounds.left - 18) : undefined }} />
+    </SelectionQuickBar>}
+  </> : null }
 }
