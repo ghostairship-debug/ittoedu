@@ -90,6 +90,9 @@ export interface ExecutionEngineOptions {
   approveBrowserAction?(input: { runId: string; operationId: string; tool: 'browser_click' | 'browser_type' | 'browser_file_upload';
     arguments: Record<string, unknown>; snapshotId: string }): Promise<void> | void
   browserApprovalContext?(runId: string): Promise<{ pageUrl?: string; snapshotId?: string }> | { pageUrl?: string; snapshotId?: string }
+  /** Main alone observes the DOM and checks the task's frozen result authority. */
+  authorizeBrowserActionFromTask?(input: { runId: string; operationId: string; name: string;
+    arguments: Record<string, unknown>; snapshotId?: string }): Promise<boolean>
 }
 interface StreamingCall {
   callId: string; id?: string; name?: string; raw: string; sequence: number; progressCount: number
@@ -1602,19 +1605,29 @@ export class ExecutionEngine {
           artifactPreflight = await this.options.artifacts.preflight({ workspaceRoot: record.input.workspaceRoot,
             permission: active.permission, destination: input.destination })
         } catch (error) { preflightError = error instanceof Error ? error.message : String(error) }
-        const reason = preflightError || batchPreflight ? null : this.approvalReason(active, tool)
+        let browserApprovalError: string | undefined, browserTaskAuthorized = false
+        const browserWrite = this.browserWrite(tool)
+        if (browserWrite && this.options.authorizeBrowserActionFromTask && !active.stopped) {
+          const input = tool.call.input as { name: string; arguments?: unknown; snapshotId?: unknown }
+          const args = input.arguments && typeof input.arguments === 'object' && !Array.isArray(input.arguments)
+            ? input.arguments as Record<string, unknown> : {}
+          try {
+            browserTaskAuthorized = await this.options.authorizeBrowserActionFromTask({ runId: record.runId,
+              operationId: this.options.gateway.operationIdentity(record.runId, tool.callId), name: input.name, arguments: args,
+              ...(typeof input.snapshotId === 'string' ? { snapshotId: input.snapshotId } : {}) })
+          } catch (error) { browserApprovalError = error instanceof Error ? error.message : String(error) }
+        }
+        const reason = preflightError || batchPreflight || browserApprovalError || browserTaskAuthorized ? null : this.approvalReason(active, tool)
           ?? ((fileMutationNames.has(tool.call.name) || tool.call.name === 'office.create' || tool.call.name === 'office.edit') && active.permission === 'workspace' && filePreflight?.outside ? 'outside-workspace' : null)
           ?? (artifactPreflight?.approvalRequired ? artifactPreflight.outsideWorkspace ? 'outside-workspace' : 'ask' : null)
         const decision = reason ? await this.requestApproval(active, tool, reason,
           filePreflight?.paths ?? (artifactPreflight ? [artifactPreflight.path] : undefined)) : 'allow'
-        let browserApprovalError: string | undefined
-        const browserWrite = this.browserWrite(tool)
-        if ((decision === 'allow' || decision === 'allow-all') && browserWrite && !active.stopped) {
+        if ((decision === 'allow' || decision === 'allow-all') && browserWrite && !browserTaskAuthorized && !browserApprovalError && !active.stopped) {
           const input = tool.call.input as { arguments?: unknown; snapshotId?: unknown }
           const args = input.arguments && typeof input.arguments === 'object' && !Array.isArray(input.arguments)
             ? input.arguments as Record<string, unknown> : {}
           const snapshotId = typeof input.snapshotId === 'string' ? input.snapshotId
-            : typeof args.snapshotId === 'string' ? args.snapshotId : undefined
+            : typeof args.snapshotId === 'string' ? args.snapshotId : (await this.options.browserApprovalContext?.(record.runId))?.snapshotId
           if (!snapshotId || typeof args.snapshotId === 'string' && args.snapshotId !== snapshotId)
             browserApprovalError = '请先读取当前浏览器页面快照，再批准这次页面操作'
           else if (!this.options.approveBrowserAction)

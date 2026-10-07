@@ -157,6 +157,7 @@ export class ExecutionDesktopService {
       artifacts: this.artifacts,
       readImageTiming: async jobId => (await import('../workbenchToolServices.js')).workbenchImageService().readTiming(jobId),
       approveBrowserAction: async input => (await import('../workbenchToolServices.js')).approveWorkbenchBrowserAction(input),
+      authorizeBrowserActionFromTask: async input => (await import('../workbenchToolServices.js')).authorizeWorkbenchBrowserActionFromTask(input),
       browserApprovalContext: async runId => (await import('../workbenchToolServices.js')).workbenchBrowserApprovalContext(runId),
       observeBodyStreaming: (selection, observation) => options.settings.recordBodyStreaming(selection, observation) })
     this.engine.subscribe(event => {
