@@ -14,6 +14,7 @@ import type { HtmlSourceEditCommand, HtmlSourceEditOutcome } from '../../../shar
 import { applyHtmlSourceEdit, type HtmlSourceEditResult } from './htmlSourceEdits'
 import { patchHtmlAuthoringRecords, readHtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
 import type { ComponentAuthorGeometry } from '../../../shared/contracts/component-platform/runtime'
+import { equalComponentValue } from '../../../core/drivers/courseV10Operations'
 
 type ResolveRequest = Extract<HtmlPreviewRequest, { type: 'html-preview.resolve-target' }>
 type EditRequest = Extract<HtmlPreviewRequest, { type: 'html-preview.edit' }>
@@ -113,6 +114,9 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
           && command.target.from === before.valueSpan.start && command.target.to === before.valueSpan.end)
         const styles = commands.filter(command => (command.type === 'style' || command.type === 'attributes')
           && command.target.from === before.elementSpan.start && command.target.to === before.elementSpan.end)
+        const moved = commands.some(command => command.type === 'move'
+          && command.target.from <= before.elementSpan.start && command.target.to >= before.elementSpan.end)
+        if (!content && !styles.length && !moved) continue
         const after = locateHtmlAuthorRecordSource(edit.source, record, key, true)
         if (!after) continue
         const overrides = { ...record.overrides, ...(record.overrides.style ? { style: { ...record.overrides.style } } : {}),
@@ -124,8 +128,28 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
             exitGeometryStyleProperty(overrides.geometry, name)
           }
         } else if (style.type === 'attributes' && Object.hasOwn(style.patch, 'src')) delete overrides.src
-        records[key] = { ...record, ...(Object.keys(after.scope).length ? { scope: after.scope } : { scope: undefined }),
-          binding: { ...record.binding, path: after.path, baseline: after.value }, overrides }
+        let path = record.binding.path, scope = record.scope
+        if (moved) {
+          path = after.path.map((step, index) => {
+            const original = record.binding.path[index], oldSource = before.path[index]
+            const sameParent = oldSource?.tag === step.tag && equalComponentValue(oldSource?.attributes ?? {}, step.attributes ?? {})
+            const last = index === after.path.length - 1 ? record.binding.path.at(-1) : undefined
+            const sameTarget = last && (last.attributes?.['data-cw-author-key'] === key || last.attributes?.id === step.attributes?.id)
+            const attributes = sameTarget ? last.attributes : sameParent ? original?.attributes : step.attributes
+            return { tag: step.tag, index: step.index, ...(attributes ? { attributes } : {}) }
+          })
+          if (record.binding.path.at(-1)?.attributes?.['data-cw-author-key'] === key) {
+            path = path.map((step, index) => ({ tag: step.tag, index: step.index,
+              ...(index === path.length - 1 ? { attributes: { 'data-cw-author-key': key } } : {}) }))
+          }
+          scope = { ...record.scope }
+          for (const name of new Set([...Object.keys(before.scope), ...Object.keys(after.scope)])) {
+            if (before.scope[name] === after.scope[name]) continue
+            if (after.scope[name] === undefined) delete scope[name]; else scope[name] = after.scope[name]!
+          }
+        }
+        records[key] = { ...record, ...(scope ? { scope } : {}),
+          binding: { ...record.binding, path, baseline: after.value }, overrides }
         changedRecords = true
       }
       const updated = changedRecords ? patchHtmlAuthoringRecords(edit.source, records) : edit.source
@@ -190,10 +214,10 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
       if (authoring) {
         let authorSource = source
         if (request.change.kind === 'geometry' && !resolvedRecord.locator.authoring) {
-          const path = authoring.record.binding.path.map(step => ({ ...step, ...(step.attributes ? { attributes: { ...step.attributes } } : {}) }))
+          const path = authoring.record.binding.path.map(step => ({ tag: step.tag, index: step.index, attributes: undefined as Record<string, string> | undefined }))
           const last = path.at(-1)
           if (!last) return { status: 'rejected', reason: 'not-editable' }
-          last.attributes = { ...last.attributes, 'data-cw-author-key': authoring.authorKey }
+          last.attributes = { 'data-cw-author-key': authoring.authorKey }
           const locator = resolvedRecord.locator
           const patch = applyHtmlSourceEdit(source, { type: 'attributes', target: { kind: 'element', from: locator.elementSpan.start,
             to: locator.elementSpan.end }, patch: { 'data-cw-author-key': authoring.authorKey } })

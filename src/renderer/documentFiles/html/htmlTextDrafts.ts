@@ -33,8 +33,10 @@ function mapped(draft: HtmlTextDraft, source: string) {
     // The exact source adapter can anchor this same selected static element on its first geometry edit.
     const anchor = current.binding.path.at(-1)?.attributes?.['data-cw-author-key']
     const last = expected.path.at(-1)
-    if (draft.sourceAuthoring && anchor === address.authorKey && last && !last.attributes?.['data-cw-author-key'])
-      last.attributes = { ...last.attributes, 'data-cw-author-key': anchor }
+    if (draft.sourceAuthoring && anchor === address.authorKey && last && !last.attributes?.['data-cw-author-key']) {
+      expected.path = expected.path.map((step, index) => ({ tag: step.tag, index: step.index,
+        ...(index === expected.path.length - 1 ? { attributes: { 'data-cw-author-key': anchor } } : {}) }))
+    }
     if (current.kind !== address.record.kind || !equalComponentValue(current.scope ?? {}, address.record.scope ?? {})
       || !equalComponentValue(current.binding, expected)) throw new Error(sourceChanged)
   }

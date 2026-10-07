@@ -266,3 +266,39 @@ it('applies the first static anchor ACK to the same live handle without rerunnin
     document.body.replaceChildren()
   }
 })
+
+it('keeps runtime classes through an unrelated source edit and a move into a runtime styled parent', async () => {
+  const key = 'runtime-styled-target'
+  const original = '<html><body><h1>Heading</h1><article id="dest" class="loading"></article><p id="b" class="loading" data-cw-author-key="runtime-styled-target">same</p><script id="program">document.getElementById("b").className="ready";document.getElementById("dest").className="ready"</script></body></html>'
+  const record = { kind: 'text' as const, binding: { kind: 'dom' as const, path: [{ tag: 'body', index: 1 },
+    { tag: 'p', index: 2, attributes: { id: 'b', class: 'ready', 'data-cw-author-key': key } }], textIndex: 0, baseline: 'same' }, overrides: { geometry: { translateX: 25 } } }
+  const source = patchHtmlAuthoringRecords(original, { [key]: record })
+  const driver = new TextDriver()
+  const session = await DocumentSession.create({ documentId: 'doc', epoch: 'epoch', model: driver.load(new TextEncoder().encode(source)),
+    binding: { kind: 'file', path: 'sample.html', version: null, bindingVersion: 1 } }, driver,
+    { async append() {}, async save(input) { return input.binding as Extract<typeof input.binding, { kind: 'file' }> } })
+  const service = new HtmlSourceEditService({ async readDocument() { return session.read() }, execute: op => session.execute(op), withFileAccess: work => work() })
+  const current = () => { const model = session.read().model; if (model.kind !== 'text') throw new Error('text'); return model.source }
+  const apply = async (command: Parameters<typeof service.editSource>[0]['command']) => {
+    const snapshot = session.read()
+    await service.editSource({ type: 'html-preview.edit-source', operationId: `source-${snapshot.revision}`, documentId: 'doc', epoch: 'epoch',
+      baseRevision: snapshot.revision, bindingVersion: 1, leaseId: 'lease', loadId: 'load', command }, {
+      lease: { leaseId: 'lease', documentId: 'doc', epoch: 'epoch', revision: snapshot.revision, bindingVersion: 1, loadId: 'load', url: 'https://preview.invalid' },
+      tabId: 'tab', entryRealPath: 'sample.html', rootRealPath: '.', bindingPath: 'sample.html', snapshot })
+  }
+  let nodes = flattenHtmlSourceNodes(inspectHtmlSource(current()).roots)
+  await apply({ type: 'text', target: nodes.find(node => node.name === 'h1')!.children[0].address!, text: 'New heading' })
+  expect(readHtmlAuthoringRecords(current())[key].binding.path).toEqual(record.binding.path)
+  nodes = flattenHtmlSourceNodes(inspectHtmlSource(current()).roots)
+  await apply({ type: 'move', target: nodes.find(node => node.attributes.id === 'b')!.address!, parent: nodes.find(node => node.attributes.id === 'dest')!.address!, index: 0 })
+  const frame = document.createElement('iframe'); document.body.append(frame)
+  const doc = frame.contentDocument!
+  try {
+    doc.open(); doc.write(current()); doc.close()
+    new Function('document', doc.getElementById('program')!.textContent!)(doc)
+    new Function('window', 'document', doc.getElementById(HTML_AUTHORING_CONSUMER_ID)!.textContent!)(doc.defaultView!, doc)
+    expect(doc.querySelector('#dest p')!.className).toBe('ready')
+    expect((doc.querySelector('#b') as HTMLElement).style.translate).toContain('25px')
+    ;(doc.defaultView as any).__cwHtmlAuthoringConsumer.dispose()
+  } finally { frame.remove() }
+})
