@@ -2,8 +2,16 @@ import type { ComponentAsset, ComponentAuthorSpot, ComponentEdit, CourseProjectV
 import type { DocumentResources } from '../../../../shared/workbench/document'
 import { decodeHtmlEntities, scanHtmlSource } from '../../../../shared/html/htmlSourceScanner'
 import { componentSourceOwnerIsShared } from '../../../runtime/componentSourceAuthoring'
+import { prepareWebAuthoringRecordEdits } from '../../../../components/web/authoringRecords'
 
-export function authorSpotValue(data: JsonValue, path: readonly string[]): JsonValue | undefined {
+function usesRecordOwner(project: CourseProjectV10, spot: ComponentAuthorSpot): boolean {
+  if (!spot.authorKey || !spot.binding) return false
+  const property = spot.kind === 'text' ? 'text' : 'src'
+  return !spot.sourceRegion && !spot.dataPath || authorSpotValue(project.instances[spot.instanceId]?.data,
+    ['authoringRecords', spot.authorKey, 'overrides', property]) !== undefined
+}
+
+export function authorSpotValue(data: JsonValue | undefined, path: readonly string[]): JsonValue | undefined {
   let current: JsonValue | undefined = data
   for (const key of path) {
     if (current === null || typeof current !== 'object') return undefined
@@ -53,6 +61,10 @@ export function authorSpotEdit(project: CourseProjectV10, spot: ComponentAuthorS
 export function authorSpotEdits(project: CourseProjectV10, spot: ComponentAuthorSpot, value: JsonValue, resources: DocumentResources): ComponentEdit[] {
   const instance = project.instances[spot.instanceId]
   if (!instance) throw new Error('原可编辑对象已不存在')
+  if (usesRecordOwner(project, spot)) {
+    if (typeof value !== 'string') throw new Error('此处需要文字或图片地址')
+    return prepareWebAuthoringRecordEdits(project, spot, spot.kind === 'text' ? { text: value } : { src: value })
+  }
   const implementation = instance.implementationOverride ?? project.definitions[instance.definitionId]?.implementation
   if (spot.sourceRegion?.kind !== 'implementation' || implementation?.kind !== 'source' || !implementation.workspace)
     return [authorSpotEdit(project, spot, value)]
@@ -89,7 +101,7 @@ export function dataWithSpotEdit(data: JsonValue, edit: Extract<ComponentEdit, {
 export function authorSpotImageEdits(project: CourseProjectV10, spot: ComponentAuthorSpot, imported: { meta: ComponentAsset; bytes: Uint8Array }, resources: DocumentResources = { assets: {}, components: {} }): ComponentEdit[] {
   const edits: ComponentEdit[] = [{ type: 'asset.add', asset: imported.meta, bytes: imported.bytes }]
   const region = spot.sourceRegion
-  if (region?.kind === 'data' && region.encoding === 'html-attribute' && region.path?.length === 1 && region.path[0] === 'html') {
+  if (usesRecordOwner(project, spot) || region?.kind === 'data' && region.encoding === 'html-attribute' && region.path?.length === 1 && region.path[0] === 'html') {
     const token = 'cw-resource:spot-' + crypto.randomUUID()
     const bindings = authorSpotValue(project.instances[spot.instanceId].data, ['resourceBindings'])
     edits.push(...authorSpotEdits(project, spot, token, resources), bindings && typeof bindings === 'object' && !Array.isArray(bindings)

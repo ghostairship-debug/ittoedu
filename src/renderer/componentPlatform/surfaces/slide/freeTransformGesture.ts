@@ -13,6 +13,8 @@ export interface FreeGestureStart {
   /** Shared viewport/camera mapping, excluding object ancestors. */
   surfaceToPointer: AffineMatrix
   handle?: FreeResizeHandle
+  /** Text and professional content boxes reflow; ordinary visual scaling keeps local dimensions. */
+  resizeMode?: 'scale' | 'box'
   snapTargets?: readonly FreeObjectTarget[]
   designSize?: { width: number; height: number }
   snapTolerance?: number
@@ -89,6 +91,13 @@ export class FreeTransformGesture {
       if (this.start.mode === 'resize') {
         const inverse = invertMatrix(frameToSpaceMatrix(frame, target.parentToSurface))
         const factors = resizeFactors(this.start.handle!, frame.width, frame.height, transformPoint(inverse, this.initial), transformPoint(inverse, current), Boolean(modifiers.shift || target.preserveAspectRatio))
+        if (this.start.resizeMode === 'box') {
+          const x = Math.max(1 / frame.width, factors.x), y = Math.max(1 / frame.height, factors.y)
+          return { edits: [{ type: 'frame.set', instanceId: target.instanceId, frame: {
+            width: frame.width * x, height: frame.height * y,
+            transform: [...multiplyMatrices(frame.transform, translationMatrix(factors.anchor.x * (1 - x), factors.anchor.y * (1 - y)))],
+          } }], guides }
+        }
         return { edits: [frameEdit(target, multiplyMatrices(frame.transform, matrixAroundPoint(scaleMatrix(factors.x, factors.y), factors.anchor)))], guides }
       }
       const inverse = invertMatrix(target.parentToSurface)
