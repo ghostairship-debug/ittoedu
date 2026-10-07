@@ -158,7 +158,7 @@ export function drawProfessional(target: PptxDrawingTarget, key: string, instanc
 /** Display effects reuse the current image algorithm and CSS filter values. */
 export async function drawImage(target: PptxDrawingTarget, instance: ComponentInstance, frame: Frame, assetUrl: string): Promise<void> {
   const data = imageDataSchema.parse(instance.data)
-  if (!/^data:image\/(png|jpeg|webp|svg\+xml);/i.test(assetUrl)) throw new Error('图片需要可解码的内嵌静态资源；动画图片需明确的实际捕获')
+  if (!/^data:image\/(png|jpeg|webp|gif|svg\+xml);/i.test(assetUrl)) throw new Error('图片需要可解码的内嵌资源')
   const image = new Image()
   if (typeof image.decode === 'function') { image.src = assetUrl; await image.decode() }
   else await new Promise<void>((resolve, reject) => { image.onload = () => resolve(); image.onerror = () => reject(new Error('图片素材无法解码')); image.src = assetUrl })

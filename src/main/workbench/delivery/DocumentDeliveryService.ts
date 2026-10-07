@@ -139,7 +139,7 @@ export class DocumentDeliveryService implements DocumentDeliveryServicePort {
     }
   }
 
-  async export(input: { runId: string; operationId: string; requestDigest: string; documentId: string; epoch: string; revision: number; format: ExportFormat; destination?: string }): Promise<ExportReceipt> {
+  async export(input: Parameters<DocumentDeliveryServicePort['export']>[0]): Promise<ExportReceipt> {
     const known = await this.options.operations.lookup(input.runId, input.operationId)
     if (known) return (await this.lookup(input)) as ExportReceipt
     await this.started({ runId: input.runId, operationId: input.operationId, requestDigest: input.requestDigest, kind: 'export', status: 'started' })
@@ -155,7 +155,7 @@ export class DocumentDeliveryService implements DocumentDeliveryServicePort {
         throw new Error('此工具只导出当前正式 V10 文档；目标文档已关闭或重开时请重新选择')
       const request: ExportBuildRequest = { requestId: randomUUID(),
         identity: { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision, projectId: snapshot.model.project.id },
-        format: input.format, snapshot: structuredClone(snapshot) }
+        format: input.format, snapshot: structuredClone(snapshot), ...(input.options ? { options: structuredClone(input.options) } : {}) }
       let reply = await this.options.build.build(request, signal)
       signal?.throwIfAborted()
       validateExportBuildIdentity(request, reply)

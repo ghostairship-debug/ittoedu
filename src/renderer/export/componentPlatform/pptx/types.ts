@@ -1,6 +1,7 @@
 import type {
   ComponentInstance, ComponentSurface, CourseProjectV10, PublishedCourseV3,
 } from '../../../../shared/contracts/component-platform'
+import type { ExportPageOptions } from '../../../../shared/workbench/toolPorts'
 
 export type ComponentPptxInput = CourseProjectV10 | PublishedCourseV3
 export interface ComponentPptxDiagnostic {
@@ -21,7 +22,7 @@ export interface ComponentPptxCaptureContext {
   surface: ComponentSurface
   instance: ComponentInstance
 }
-export interface BuildComponentPptxOptions {
+export interface BuildComponentPptxOptions extends ExportPageOptions {
   /** C0 resources come from the existing resource service; P0 can use embedded URLs. */
   resolveAsset?(assetId: string, input: ComponentPptxInput): string | undefined | Promise<string | undefined>
   /** Real runtime capture in instance-local coordinates, excluding its children. */

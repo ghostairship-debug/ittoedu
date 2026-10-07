@@ -47,7 +47,7 @@ export async function buildDocumentExport(request: ExportBuildRequest, signal: A
       progress('complete')
       return { ...base, status: 'drained', warnings: [] }
     }
-    const snapshot = courseDeliverySnapshot(request.snapshot)
+    const snapshot = courseDeliverySnapshot(request.snapshot, request.options)
     if (!snapshot || snapshot.documentId !== request.identity.documentId || snapshot.epoch !== request.identity.epoch
       || snapshot.revision !== request.identity.revision || snapshot.project.id !== request.identity.projectId)
       throw new Error('导出请求中的 V10 快照身份不一致')

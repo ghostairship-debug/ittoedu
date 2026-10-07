@@ -5,8 +5,14 @@ import { buildComponentSingleHtml } from '../../../core/publish/componentPlatfor
 import { loadPlayerBundle } from '../loadPlayerBundle'
 import { zipSync, strToU8 } from 'fflate'
 import type { SingleHtmlExportMode } from '../course/coursePackagePreflight'
+import { prepareBundledFontEmbedding, resolveEmbeddedBundledFonts, bundledFontDataUrlCss, bundledFontRelativeUrlCss,
+  bundledFontPackageFiles, bundledFontNoticeHtmlComment, bundledFontNoticeMarkdown, unavailableEmbeddedBundledFontFamilies } from '../bundledFontEmbedding'
 
 export type ComponentCompilePort = (input: ComponentCompilationInput, signal?: AbortSignal, onProgress?: () => void) => ReturnType<import('../../../core/components/compilation/InMemoryComponentCompilation').InMemoryComponentCompilation['compile']>
+
+const fontDiagnostics = (payload: unknown, fonts: ReturnType<typeof resolveEmbeddedBundledFonts>) => unavailableEmbeddedBundledFontFamilies(payload, fonts)
+  .map(family => ({ code: 'bundled-font-unavailable', severity: 'warning' as const, path: ['fonts', family],
+    message: `内置字体 ${family} 的实际字节未能读取；内容继续交付，该字体将使用本机后备，离线排版可能不同。` }))
 
 /** Export from the captured Session snapshot; rendering never reads the live author store. */
 export async function buildComponentPublished(snapshot: DocumentSnapshot, compile: ComponentCompilePort, assetUrl?: import('../../../core/publish/componentPlatform').ComponentPublishOptions['assetUrl'], singleHtmlMode: SingleHtmlExportMode = 'offline-portable', signal?: AbortSignal, onProgress?: () => void) {
@@ -20,14 +26,21 @@ export async function buildComponentPublished(snapshot: DocumentSnapshot, compil
 }
 
 export async function buildComponentHtml(snapshot: DocumentSnapshot, compile: ComponentCompilePort, mode: SingleHtmlExportMode = 'offline-portable', signal?: AbortSignal, onProgress?: () => void) {
+  await prepareBundledFontEmbedding()
   const result = await buildComponentPublished(snapshot, compile, undefined, mode, signal, onProgress)
   signal?.throwIfAborted()
-  return { html: buildComponentSingleHtml(result.payload, loadPlayerBundle()), payload: result.payload,
-    diagnostics: result.diagnostics, warnings: result.diagnostics.map(value => value.message), offlinePrepared: result.offlineComplete }
+  const fonts = resolveEmbeddedBundledFonts(result.payload)
+  const plainHtml = buildComponentSingleHtml(result.payload, loadPlayerBundle())
+  const html = fonts.length ? plainHtml
+    .replace('</head>', `<style>${bundledFontDataUrlCss(fonts)}</style>${bundledFontNoticeHtmlComment(fonts)}</head>`) : plainHtml
+  const diagnostics = [...result.diagnostics, ...fontDiagnostics(result.payload, fonts)]
+  return { html, payload: result.payload,
+    diagnostics, warnings: diagnostics.map(value => value.message), offlinePrepared: result.offlineComplete && !diagnostics.some(value => value.code === 'bundled-font-unavailable') }
 }
 
 /** Save the same P0 into a package; actual resource bytes are separate ZIP entries. */
 export async function buildComponentWebPackage(snapshot: DocumentSnapshot, compile: ComponentCompilePort, signal?: AbortSignal, onProgress?: () => void) {
+  await prepareBundledFontEmbedding()
   const files: Record<string, Uint8Array> = {}
   const result = await buildComponentPublished(snapshot, compile, (asset, bytes) => {
     signal?.throwIfAborted()
@@ -36,6 +49,12 @@ export async function buildComponentWebPackage(snapshot: DocumentSnapshot, compi
     return filename
   }, undefined, signal, onProgress)
   signal?.throwIfAborted()
-  files['index.html'] = strToU8(buildComponentSingleHtml(result.payload, loadPlayerBundle()))
-  return { bytes: zipSync(files), diagnostics: result.diagnostics, warnings: result.diagnostics.map(value => value.message), offlinePrepared: result.offlineComplete }
+  const fonts = resolveEmbeddedBundledFonts(result.payload)
+  Object.assign(files, bundledFontPackageFiles(fonts, 'fonts'))
+  if (fonts.length) files['THIRD_PARTY_NOTICES.md'] = strToU8(bundledFontNoticeMarkdown(fonts, 'fonts'))
+  const html = buildComponentSingleHtml(result.payload, loadPlayerBundle())
+  files['index.html'] = strToU8(fonts.length ? html
+    .replace('</head>', `<style>${bundledFontRelativeUrlCss(fonts, 'fonts')}</style></head>`) : html)
+  const diagnostics = [...result.diagnostics, ...fontDiagnostics(result.payload, fonts)]
+  return { bytes: zipSync(files), diagnostics, warnings: diagnostics.map(value => value.message), offlinePrepared: result.offlineComplete && !diagnostics.some(value => value.code === 'bundled-font-unavailable') }
 }

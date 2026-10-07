@@ -17,6 +17,7 @@ import { renderDocumentText } from '../../../../shared/document/render'
 import { collectComponentAssetCredits, withCourseCreditsPage } from '../../course/courseCredits'
 
 export interface ComponentPrintOutputOptions extends ComponentDocumentOutputOptions {
+  pageId?: string
   resolveAssetUrl?: (assetId: string) => string | undefined
   /** Fixed surfaces retain real layout through the existing Player capture service. */
   captureSurface?: (request: Omit<ComponentCaptureRequest, 'instanceId'>) => Promise<readonly PdfPrintImage[]>
@@ -80,7 +81,7 @@ export async function buildComponentPrintHtml(document: ComponentExportDocument,
     if (!options.captureSurface) throw new Error(`表面 ${surface.id} 需要实际 Player 页面／镜头捕获。`)
     const pages = await options.captureSurface({ document, surfaceId: surface.id, state: 'author-initial' })
     if (!pages.length) throw new Error(`表面 ${surface.id} 没有实际捕获页面。`)
-    return { html: withCourseCreditsPage(buildPdfPrintHtml(document.title, pages, { pageName: surface.id, pageSize: options.pageSize, orientation: options.orientation }), collectComponentAssetCredits(document.assets)), diagnostics: [{ surfaceId: surface.id, instanceId: '', code: 'actual-static-surface', message: '固定表面按实际初态图面打印，PDF 不保留互动和专业编辑。' }] satisfies ComponentOutputDiagnostic[], fidelity: 'complete' as const }
+    return { html: withCourseCreditsPage(buildPdfPrintHtml(document.title, pages, { pageName: options.pageId ?? surface.id, pageSize: options.pageSize, orientation: options.orientation }), collectComponentAssetCredits(document.assets)), diagnostics: [{ surfaceId: surface.id, instanceId: '', code: 'actual-static-surface', message: '固定表面按实际初态图面打印，PDF 不保留互动和专业编辑。' }] satisfies ComponentOutputDiagnostic[], fidelity: 'complete' as const }
   }
   const projection = buildComponentReadingProjection(document, surface.id)
   const diagnostics = [...projection.diagnostics]

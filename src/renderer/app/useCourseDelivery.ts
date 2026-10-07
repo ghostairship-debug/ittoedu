@@ -8,6 +8,7 @@ import { SINGLE_HTML_WARNING_BYTES, utf8ByteLength } from '../export/exportSize'
 import { mountPublishedCourseV3 } from '../../player/componentPlatform/publishedPlayer'
 import { beginSerializedSessionMount, enqueueSerial } from '../ui/serializedSessionMount'
 import { createComponentDeliveryCapture, type ComponentScreenshot } from '../export/componentPlatform/capture'
+import type { ExportPageOptions } from '../../shared/workbench/toolPorts'
 
 export type { CourseDeliverySnapshot } from './courseDeliverySnapshot'
 export type { ComponentDeliveryFinding, ComponentDeliveryReport } from '../export/componentPlatform/delivery'
@@ -41,7 +42,7 @@ export interface CourseDeliveryApi {
   nextPreview(): void
   closePreview(): void
   openPreview(): void
-  exportCourse(format: CourseDeliveryFormat, mode?: SingleHtmlExportMode): void
+  exportCourse(format: CourseDeliveryFormat, mode?: SingleHtmlExportMode, options?: ExportPageOptions): void
   cancelPreflight(): void
   continuePreflightExport(): void
   locatePreflightItem(item: ComponentDeliveryFinding): void
@@ -104,10 +105,11 @@ export function useCourseDelivery(ports: CourseDeliveryPorts, watch: CourseDeliv
     if (html && utf8ByteLength(html) > SINGLE_HTML_WARNING_BYTES) { large.current = value; setLargeHtmlByteLength(utf8ByteLength(html)); return }
     await write(value, beforeSave)
   }, [write])
-  const exportCourse = useCallback((format: CourseDeliveryFormat, mode: SingleHtmlExportMode = 'offline-portable') => {
+  const exportCourse = useCallback((format: CourseDeliveryFormat, mode: SingleHtmlExportMode = 'offline-portable', options?: ExportPageOptions) => {
     const expected = ref.current.readCanonicalSnapshot()
+    const deliveryOptions = options ? structuredClone(options) : undefined
     generate(async (signal, beforeSave) => {
-      const snapshot = await capture(expected), built = await build(snapshot, format, signal, mode)
+      const snapshot = { ...await capture(expected), ...(deliveryOptions ? { deliveryOptions } : {}) }, built = await build(snapshot, format, signal, mode)
       const value = { snapshot, format, mode, built }
       if (built.report.items.some(item => item.severity !== 'info')) { pending.current = value; setExportPreflightReport(built.report) }
       else await present(value, beforeSave)
@@ -118,7 +120,7 @@ export function useCourseDelivery(ports: CourseDeliveryPorts, watch: CourseDeliv
     const value = pending.current
     if (!value) return
     generate(async (signal, beforeSave) => {
-      const current = await capture(value.snapshot)
+      const current = { ...await capture(value.snapshot), deliveryOptions: value.snapshot.deliveryOptions }
       if (pending.current !== value) return
       // New edits refresh the actual producer; revision is not a user-supplied delivery gate.
       const built = current.revision === value.snapshot.revision ? value.built : await build(current, value.format, signal, value.mode)
@@ -129,7 +131,7 @@ export function useCourseDelivery(ports: CourseDeliveryPorts, watch: CourseDeliv
   const continueLargeHtml = useCallback(() => {
     const value = large.current; cancelLargeHtml()
     if (value) generate(async (signal, beforeSave) => {
-      const current = await capture(value.snapshot)
+      const current = { ...await capture(value.snapshot), deliveryOptions: value.snapshot.deliveryOptions }
       const built = current.revision === value.snapshot.revision ? value.built : await build(current, value.format, signal, value.mode)
       await write({ ...value, snapshot: current, built }, beforeSave)
     })

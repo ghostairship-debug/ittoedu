@@ -75,7 +75,11 @@ async function fetchBytes(
   if (!response.ok) {
     throw new Error(`内置字体读取失败（HTTP ${response.status}）：${url}`)
   }
-  return new Uint8Array(await response.arrayBuffer())
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  if (bytes.length < 4 || bytes[0] !== 0x77 || bytes[1] !== 0x4f || bytes[2] !== 0x46 || bytes[3] !== 0x32) {
+    throw new Error(`内置字体地址没有返回可用 WOFF2 字节：${url}`)
+  }
+  return bytes
 }
 
 /**

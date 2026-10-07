@@ -184,7 +184,7 @@ export function collectBundledFontFamiliesInUse(value: unknown): string[] {
 
     // Flow's default font is a renderer contract, like formula math fonts;
     // ordinary body blocks do not repeat a fontFamily property in the document.
-    if ((current as { type?: unknown }).type === 'flow') found.add(BUNDLED_TEXT_FONT_FAMILY)
+    if ((current as { type?: unknown }).type === 'flow' || (current as { kind?: unknown }).kind === 'flow') found.add(BUNDLED_TEXT_FONT_FAMILY)
 
     for (const [key, entry] of Object.entries(current)) {
       if (key === 'fontFamily' && typeof entry === 'string') {
@@ -194,7 +194,8 @@ export function collectBundledFontFamiliesInUse(value: unknown): string[] {
         }
         continue
       }
-      if (entry === 'formula' && FORMULA_DISCRIMINANT_KEYS.has(key)) {
+      if ((entry === 'formula' || entry === 'math') && FORMULA_DISCRIMINANT_KEYS.has(key)
+        || key === 'key' && entry === 'guoling.formula') {
         found.add(BUNDLED_MATH_FONT_FAMILY)
         continue
       }
@@ -218,6 +219,13 @@ export function resolveEmbeddedBundledFonts(
   const families = collectBundledFontFamiliesInUse(payload)
   if (families.length === 0 || embedSource === null) return []
   return embedSource(families)
+}
+
+/** A registered source that failed to supply a requested family is an actual export diagnostic. */
+export function unavailableEmbeddedBundledFontFamilies(payload: unknown, fonts: readonly EmbeddableBundledFont[]): string[] {
+  if (embedSource === null) return []
+  const available = new Set(fonts.map(font => font.family))
+  return collectBundledFontFamiliesInUse(payload).filter(family => !available.has(family))
 }
 
 function manifestWith(

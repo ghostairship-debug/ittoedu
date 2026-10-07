@@ -11,6 +11,9 @@ export const documentExportInputSchema = z.object({
   target: z.string().min(1).max(200),
   format: z.enum(['html-offline', 'html-online', 'web-package', 'pptx', 'pdf', 'docx']),
   destination: z.string().min(1).max(1024).optional(),
+  options: z.object({ pageIds: z.array(z.string().min(1)).min(1).optional().describe('静态格式页面选择与顺序：surfaceId 或 Spatial 的 surfaceId:frameId；省略时按作品顺序输出。'),
+    pageSize: z.enum(['A4', 'letter', 'surface-native']).optional(),
+    orientation: z.enum(['auto', 'portrait', 'landscape']).optional() }).strict().optional(),
 }).strict()
 
 export const documentDeliveryTools = [
@@ -52,6 +55,7 @@ export async function executeDocumentDeliveryTool(
   const receipt = name === 'file.save'
     ? await service.save({ ...common, baseRevision: target.revision })
     : await service.export({ ...common, revision: target.revision,
-      format: (parsed.data as z.infer<typeof documentExportInputSchema>).format })
+      format: (parsed.data as z.infer<typeof documentExportInputSchema>).format,
+      options: (parsed.data as z.infer<typeof documentExportInputSchema>).options })
   return documentDeliveryReceiptResult(receipt)
 }

@@ -6,10 +6,12 @@ import type { ToolRunGrant, ToolResult } from '../../../shared/workbench/tools'
 import type { DocumentDeliveryServicePort } from '../../../shared/workbench/toolPorts'
 import type { ComponentProjectSnapshot } from '../../../core/projectFiles/componentPlatform'
 import { documentDeliveryReceiptResult } from '../../../core/tools/DocumentDeliveryTools'
+import { documentExportInputSchema } from '../../../core/tools/DocumentDeliveryTools'
 
 export const componentProjectDeliverySchema = z.object({
   project: z.string().min(1).optional(), destination: z.string().min(1).optional(),
-  format: z.enum(['html-offline', 'html-online', 'web-package']).optional(),
+  format: documentExportInputSchema.shape.format.optional(),
+  options: documentExportInputSchema.shape.options,
 }).strict()
 
 export interface ComponentProjectDeliveryContext {
@@ -32,7 +34,7 @@ export async function deliverComponentProject(service: DocumentDeliveryServicePo
   const common = { runId: context.runId, operationId: context.operationId, requestDigest: context.requestDigest,
     documentId: snapshot.documentId, epoch: snapshot.epoch, destination: parsed.data.destination }
   const receipt = parsed.data.format
-    ? await service.export({ ...common, revision: snapshot.revision, format: parsed.data.format })
+    ? await service.export({ ...common, revision: snapshot.revision, format: parsed.data.format, options: parsed.data.options })
     : await service.save({ ...common, baseRevision: snapshot.revision })
   return documentDeliveryReceiptResult(receipt)
 }

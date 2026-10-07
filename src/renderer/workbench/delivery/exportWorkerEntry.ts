@@ -3,6 +3,10 @@ import type { CaptureObservationInput } from '../../../shared/ipcTypes'
 import type { ComponentCompilePort } from '../../export/componentPlatform/buildHtml'
 import { buildDocumentExport } from './buildDocumentExport'
 import { createComponentDeliveryCapture } from '../../export/componentPlatform/capture'
+import { BUNDLED_FONT_MANIFEST } from '../../../shared/fonts/bundledFontAssets'
+import { installFetchBundledFontEmbedSource } from '../../export/bundledFontEmbedSourceFetch'
+
+installFetchBundledFontEmbedSource({ manifest: BUNDLED_FONT_MANIFEST })
 
 declare global {
   interface Window {

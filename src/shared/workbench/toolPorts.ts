@@ -164,11 +164,20 @@ export interface DocumentDeliveryServicePort {
     revision: number
     format: ExportFormat
     destination?: string
+    options?: ExportPageOptions
   }): Promise<ExportReceipt>
   lookup(input: { runId: string; operationId: string; requestDigest: string }): Promise<SaveReceipt | ExportReceipt | null>
 }
 
 export type ExportFormat = 'html-offline' | 'html-online' | 'web-package' | 'pptx' | 'pdf' | 'docx'
+
+/** Output choices belong to the captured request, never to mutable editor state. */
+export interface ExportPageOptions {
+  /** Static formats: surface ids, or surfaceId:frameId for Spatial cameras. List order is output order. */
+  pageIds?: readonly string[]
+  pageSize?: 'A4' | 'letter' | 'surface-native'
+  orientation?: 'auto' | 'portrait' | 'landscape'
+}
 
 export type SaveReceipt = {
   status: 'saved' | 'rejected' | 'failed'
@@ -207,6 +216,7 @@ export interface ExportBuildRequest {
   phase?: 'drain'
   /** Immutable copy supplied by Main; never the renderer's live store. */
   snapshot: DocumentSnapshot
+  options?: ExportPageOptions
 }
 
 export interface ExportBuildReply {

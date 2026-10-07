@@ -9,6 +9,7 @@ import { uniqueFlowDocxFilename } from '../docxFilename'
 import type { PdfPrintImage } from '../course/pdfPrintHtml'
 import { bytesToDataUrl } from '../base64'
 import { resolveCourseProjectDeliveryFindingRoute } from '../../diagnostics/projectHealthNavigation'
+import { componentDeliveryPages } from './deliveryPages'
 
 export type ComponentDeliveryFormat = 'single-html' | 'web-package' | 'pptx' | 'pdf' | 'docx'
 export interface ComponentDeliveryFinding {
@@ -65,6 +66,8 @@ export async function buildComponentDelivery(snapshot: CourseDeliverySnapshot, f
     }))
   }
   check()
+  const choices = snapshot.deliveryOptions ?? {}
+  const selectedPages = componentDeliveryPages(project.surfaces, format === 'single-html' || format === 'web-package' ? undefined : choices.pageIds)
   if (format === 'single-html') {
     const result = await buildComponentHtml(snapshot.snapshot, options.compile, options.singleHtmlMode, options.signal, options.onProgress)
     note(result.diagnostics)
@@ -98,6 +101,7 @@ export async function buildComponentDelivery(snapshot: CourseDeliverySnapshot, f
     try {
       if (format === 'pptx') {
         const result = await buildComponentPptx(project, {
+          ...choices,
           resolveAsset: id => {
             const value = resolveAsset(id)
             if (!value) return undefined
@@ -116,11 +120,11 @@ export async function buildComponentDelivery(snapshot: CourseDeliverySnapshot, f
         if (!result.bytes.length) throw new Error('当前课程没有可生成的 PPTX 页面；内容与资源已保留')
         artifacts.push({ suggestedName: `${project.title}.pptx`, extension: 'pptx', bytes: result.bytes })
       } else if (format === 'docx') {
-        const flows = project.surfaces.filter(surface => surface.kind === 'flow'), names = new Set<string>()
+        const flows = selectedPages.map(page => project.surfaces.find(surface => surface.id === page.surfaceId)!).filter(surface => surface.kind === 'flow'), names = new Set<string>()
         if (!flows.length) throw new Error('当前课程没有流式讲义，无法导出 DOCX')
         for (const surface of flows) {
           check()
-          const result = await buildComponentDocx(project, { surfaceId: surface.id, resolveAsset, captureInstance })
+          const result = await buildComponentDocx(project, { surfaceId: surface.id, resolveAsset, captureInstance, pageSize: choices.pageSize, orientation: choices.orientation })
           note(result.diagnostics)
           for (const message of result.warnings) items.push({ severity: 'warning', code: 'document-output', message })
           const suggestedName = uniqueFlowDocxFilename(surface.title, names); names.add(suggestedName)
@@ -129,13 +133,15 @@ export async function buildComponentDelivery(snapshot: CourseDeliverySnapshot, f
       } else {
         const fragments: string[] = []
         if (!project.surfaces.length) throw new Error('当前课程没有可打印的页面')
-        for (const surface of project.surfaces) {
+        const printPages = choices.pageIds ? selectedPages : project.surfaces.map(surface => ({ id: surface.id, surfaceId: surface.id, title: surface.title, spatialFrameId: undefined }))
+        for (const page of printPages) {
+          const surface = project.surfaces.find(value => value.id === page.surfaceId)!
           check()
           const result = await buildComponentPrintHtml(project, {
-            surfaceId: surface.id, resolveAsset, captureInstance,
+            surfaceId: surface.id, resolveAsset, captureInstance, pageSize: choices.pageSize, orientation: choices.orientation, pageId: page.id,
             captureSurface: options.createCapture ? async ({ surfaceId }) => {
               const frames = project.surfaces.find(value => value.id === surfaceId)?.spatial?.frames
-              const ids = frames?.length ? frames.map(frame => frame.id) : [undefined]
+              const ids = choices.pageIds ? [page.spatialFrameId] : frames?.length ? frames.map(frame => frame.id) : [undefined]
               const images: PdfPrintImage[] = []
               for (const id of ids) { check(); const image = await (await getCapture())?.captureSurface(surfaceId, id); check(); if (image) images.push(image) }
               return images
