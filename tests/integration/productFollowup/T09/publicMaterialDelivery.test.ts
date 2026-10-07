@@ -29,7 +29,9 @@ it.each(['pdf', 'docx'] as const)('public %s bytes enter the existing real extra
     expect((await materials.readSnapshot(opened.material.originalAttachmentId)).source).toMatchObject({ pathHint: url })
     const ids = new Set(opened.attachmentIds)
     const found = await dispatchMaterialTool(materials, ids, 'material.find', { attachmentId: opened.material.attachmentId, query: MATERIAL_TEXT })
-    expect(found.data).toMatchObject({ hits: [expect.objectContaining({ representationId: expect.any(String) })] })
+    const snapshot = await materials.readSnapshot(opened.material.attachmentId)
+    expect(found.data, JSON.stringify({ material: opened.material, representations: snapshot.representations.map(item => ({ id: item.id, kind: item.kind, locator: item.provenance.locator })) }))
+      .toMatchObject({ hits: [expect.objectContaining({ representationId: expect.any(String) })] })
     const hits = (found.data as { hits: { representationId: string; location?: { page?: number; paragraph?: number } }[] }).hits
     if (format === 'pdf') expect(hits[0].location).toMatchObject({ page: 1 })
     else { expect(hits[0].location?.paragraph).toBeGreaterThan(0); expect(hits[0].location).not.toHaveProperty('page') }
