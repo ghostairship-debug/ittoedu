@@ -49,6 +49,7 @@ interface TopToolbarProps {
   onOpenMaterials?(): void
   onPreview(): void
   onExport(format: ExportFormat, singleHtmlMode?: SingleHtmlExportMode): void
+  onExportSettings?(): void
 }
 
 export type { ExportFormat } from './ExportMenu'
@@ -102,6 +103,7 @@ export function TopToolbar({
   onOpenMaterials,
   onPreview,
   onExport,
+  onExportSettings,
 }: TopToolbarProps) {
   const editorChrome = useCourseEditorChrome()
   // The toolbar's drop-down menus close on a click elsewhere or Escape, like the workbench menus.
@@ -330,7 +332,7 @@ export function TopToolbar({
       >
         <Eye size={18} />
       </ToolButton>
-      <ExportMenu busy={busy} hasFlowSurface={hasFlowSurface} onExport={onExport} />
+      <ExportMenu busy={busy} hasFlowSurface={hasFlowSurface} onExport={onExport} onExportSettings={onExportSettings} />
     </header>
   )
 }

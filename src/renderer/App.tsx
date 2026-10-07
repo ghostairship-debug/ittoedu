@@ -51,6 +51,7 @@ import { ConfirmDialog } from './ui/ConfirmDialog'
 import { CopyableSummaryDialog } from './ui/CopyableSummaryDialog'
 import { ExportSizeWarningDialog } from './ui/ExportSizeWarningDialog'
 import { ExportPreflightDialog } from './ui/ExportPreflightDialog'
+import { CourseExportSettingsDialog } from './app/CourseExportSettingsDialog'
 import { RightSidebar } from './ui/RightSidebar'
 import { ScenePanel } from './ui/ScenePanel'
 import { CourseBottomNavigation } from './ui/BottomSceneNavigator'
@@ -802,7 +803,7 @@ export default function App() {
       insertSurface={insertSurface} editingScope={editingScope} spatialScope={spatialInsertScope}
       mode={courseCanvasMode}
       busy={busy} hasFlowSurface={hasFlowSurface}
-      onPreview={courseDelivery.openPreview} onExport={courseDelivery.exportCourse}
+      onPreview={courseDelivery.openPreview} onExport={courseDelivery.exportCourse} onExportSettings={courseDelivery.openExportSettings}
       elementCards={elementCardNavigation}
       reportError={setError} />}>
       <CourseAdvancedChrome><TopToolbar
@@ -822,7 +823,10 @@ export default function App() {
         onOpenMaterials={() => setMaterialsOpen(true)}
         onPreview={courseDelivery.openPreview}
         onExport={courseDelivery.exportCourse}
+        onExportSettings={courseDelivery.openExportSettings}
       /></CourseAdvancedChrome>
+      {courseDelivery.exportSettingsOpen && <CourseExportSettingsDialog pages={courseDelivery.exportSettingsPages}
+        onCancel={courseDelivery.closeExportSettings} onConfirm={courseDelivery.confirmExportSettings} />}
       <EditorPanelLayout
         className={`app-main${activeTab === 'developer' ? ' app-main--developer' : ''}`}
       >

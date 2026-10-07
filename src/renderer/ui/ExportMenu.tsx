@@ -9,10 +9,11 @@ export type ExportFormat = 'single-html' | 'web-package' | 'pptx' | 'pdf' | 'doc
  * The export formats, defined once for the editor toolbar and the workbench top bar (M21): same names, same order,
  * same behaviour. `variant` only changes how the trigger looks.
  */
-export function ExportMenu({ busy, hasFlowSurface, onExport, variant = 'toolbar' }: {
+export function ExportMenu({ busy, hasFlowSurface, onExport, onExportSettings, variant = 'toolbar' }: {
   busy: boolean
   hasFlowSurface: boolean
   onExport(format: ExportFormat, singleHtmlMode?: SingleHtmlExportMode): void
+  onExportSettings?(): void
   variant?: 'toolbar' | 'light'
 }) {
   const ref = useRef<HTMLDetailsElement>(null)
@@ -69,6 +70,10 @@ export function ExportMenu({ busy, hasFlowSurface, onExport, variant = 'toolbar'
         <FileText size={18} />
         <span><strong>DOCX 讲义</strong><small>Flow 内容导出为可编辑 Word 文档</small></span>
       </button>
+      {onExportSettings && <button type="button" role="menuitem" data-testid={testId('export-settings')} className="export-menu__item" onClick={event => {
+        event.currentTarget.closest('details')?.removeAttribute('open')
+        onExportSettings()
+      }}><FileDown size={18} /><span><strong>导出设置</strong><small>页面、顺序与纸型</small></span></button>}
     </div>
   </details>
 }

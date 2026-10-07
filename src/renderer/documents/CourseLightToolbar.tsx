@@ -45,6 +45,7 @@ export interface CourseLightToolbarProps {
   hasFlowSurface?: boolean
   onPreview?(): void
   onExport?(format: ExportFormat, singleHtmlMode?: SingleHtmlExportMode): void
+  onExportSettings?(): void
   /** Finds the elements of AI cards that are working or waiting (M15); shows the top bar's indicator. */
   elementCards?: ElementCardNavigation
 }
@@ -165,6 +166,7 @@ export function CourseLightToolbar(props: CourseLightToolbarProps) {
         {chrome.workbench && <span className="course-light-tools__status">{chrome.workbench.documentStatus}</span>}
         {!compact && props.onPreview && <button type="button" disabled={props.busy} onClick={() => { if (props.onPreview) invoke(props.onPreview) }}>整课预览</button>}
         {props.onExport && <ExportMenu variant="light" busy={props.busy ?? false} hasFlowSurface={props.hasFlowSurface ?? false}
+          onExportSettings={props.onExportSettings ? () => invoke(props.onExportSettings!) : undefined}
           onExport={(format, mode) => invoke(() => { if (mode) props.onExport?.(format, mode); else props.onExport?.(format) })} />}
         <div className="course-light-tools__more" ref={moreRef}>
           <button type="button" aria-label="更多工具" title="更多工具" aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => setMoreOpen(open => !open)}><MoreHorizontal size={15} /></button>
