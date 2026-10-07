@@ -8,7 +8,7 @@ import type { AgentFileContext } from '../../core/tools/AgentFileTools'
 import { materialListSchema, materialReadSchema } from '../../core/tools/MaterialTools'
 import { dispatchMaterialTool } from './execution/MaterialReadTools'
 import { attachmentsDesktopService } from './attachments/attachmentsDesktopService'
-import type { ExportBuildReply } from '../../shared/workbench/toolPorts'
+import type { ExportBuildReply, ExportBuildProgress } from '../../shared/workbench/toolPorts'
 import { IPC_CHANNELS } from '../../shared/ipcTypes'
 import { documentHost } from './documentHost'
 import { ScopedSkillService, type SkillRoot } from './skills/ScopedSkillService'
@@ -44,6 +44,7 @@ import { executionSettingsStore, resolveOAuthCredential } from './providers/exec
 import { createWorkbenchOpenImageService } from './assetSources/pixabayDesktopService'
 import { AssetLibraryService } from './assetSources/componentLibrarySearch'
 import { componentCatalogManager } from '../componentCatalogManager'
+import { renderPdfFromHtml } from '../pdfExport'
 
 let installed = false
 let imageService: ImageGenerationService | undefined
@@ -56,6 +57,9 @@ let exportOwnerId: number | undefined
 let headlessExportWorker: HeadlessDocumentExportWorker | undefined
 export function acceptWorkbenchExportBuildReply(reply: ExportBuildReply, senderId: number): boolean {
   return exportPort?.accept(reply, senderId) ?? false
+}
+export function acceptWorkbenchExportBuildProgress(progress: ExportBuildProgress, senderId: number): boolean {
+  return exportPort?.progress(progress, senderId) ?? false
 }
 export function disposeWorkbenchExportPort(): void {
   exportPort?.dispose(); exportPort = undefined; exportOwnerId = undefined
@@ -186,7 +190,8 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       disposeWorkbenchExportPort()
       const ownerId = window.webContents.id
       exportOwnerId = ownerId
-      const ownedPort = new DocumentExportPort(ownerId, request => window.webContents.send(IPC_CHANNELS.documentExportBuildRequest, request))
+      const ownedPort = new DocumentExportPort(ownerId, request => window.webContents.send(IPC_CHANNELS.documentExportBuildRequest, request),
+        cancel => { if (!window.isDestroyed()) window.webContents.send(IPC_CHANNELS.documentExportBuildCancel, cancel) })
       exportPort = ownedPort
       const disposeOwner = () => { if (exportOwnerId === ownerId && exportPort === ownedPort) disposeWorkbenchExportPort() }
       window.once('closed', disposeOwner)
@@ -222,6 +227,12 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       resolveExportDestination(runId, snapshot, requested, suggestedName, format, id => host.tools.runFileAccess(id)),
     build: { build: (request, signal) => context.headless
       ? headlessExportWorker!.build(request, signal) : currentExportPort().build(request, signal) },
+    renderPdf: async (html, signal) => {
+      signal?.throwIfAborted()
+      const bytes = await renderPdfFromHtml(html, context.getMainWindow() ?? undefined)
+      signal?.throwIfAborted()
+      return bytes
+    },
     writer: workbenchExportWriter,
     withFileOperation: work => host.fileCoordinator.withFileOperation(work),
     assertExportTarget: async filename => {

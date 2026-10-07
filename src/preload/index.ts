@@ -62,6 +62,8 @@ const IPC_CHANNELS = {
   exportPdf: 'export:write-pdf',
   documentExportBuildRequest: 'document-export:build-request',
   documentExportBuildReply: 'document-export:build-reply',
+  documentExportBuildCancel: 'document-export:build-cancel',
+  documentExportBuildProgress: 'document-export:build-progress',
   previewNetworkDocumentToken: 'preview-network:document-token',
   setPreviewNetworkPolicy: 'preview-network:set',
   releasePreviewNetworkPolicy: 'preview-network:release',
@@ -370,6 +372,12 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     return () => ipcRenderer.removeListener(IPC_CHANNELS.documentExportBuildRequest, listener)
   },
   sendDocumentExportBuildReply: reply => ipcRenderer.send(IPC_CHANNELS.documentExportBuildReply, reply),
+  onDocumentExportBuildCancel: handler => {
+    const listener = (_event: Electron.IpcRendererEvent, cancel: import('../shared/workbench/toolPorts').ExportBuildCancel) => handler(cancel)
+    ipcRenderer.on(IPC_CHANNELS.documentExportBuildCancel, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.documentExportBuildCancel, listener)
+  },
+  sendDocumentExportBuildProgress: progress => ipcRenderer.send(IPC_CHANNELS.documentExportBuildProgress, progress),
   createComponentBootstrap: input => invoke(IPC_CHANNELS.createComponentBootstrap, {
     ...input, documentToken: requirePreviewNetworkDocumentToken(),
   }),

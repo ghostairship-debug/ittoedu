@@ -1,5 +1,5 @@
 import { saveDocumentWithDialog } from './workbench/documentSaveDialog'
-import { acceptWorkbenchExportBuildReply, disposeWorkbenchExportPort, installWorkbenchToolServices, workbenchImageService, workbenchImageSelection } from './workbench/workbenchToolServices'
+import { acceptWorkbenchExportBuildReply, acceptWorkbenchExportBuildProgress, disposeWorkbenchExportPort, installWorkbenchToolServices, workbenchImageService, workbenchImageSelection } from './workbench/workbenchToolServices'
 import { ImageResultsDesktopService } from './workbench/images/ImageResultsDesktopService'
 import { HtmlImportDesktopService } from './workbench/htmlImport/HtmlImportDesktopService'
 import { closeDocumentWithDialog } from './workbench/documentCloseDialog'
@@ -98,9 +98,14 @@ const documentExportBuildReplySchema = z.object({
   requestId: z.string().uuid(),
   identity: z.object({ documentId: z.string().min(1), epoch: z.string().min(1), revision: z.number().int().nonnegative(), projectId: z.string().min(1) }).strict(),
   status: z.enum(['generated', 'drained', 'failed', 'cancelled']),
-  files: z.array(z.object({ relativePath: z.string(), mimeType: z.string(), bytes: z.instanceof(Uint8Array) }).strict()).max(1).optional(),
+  files: z.array(z.object({ relativePath: z.string(), mimeType: z.string(), bytes: z.instanceof(Uint8Array) }).strict()).optional(),
+  printHtml: z.string().optional(),
   warnings: z.array(z.string()),
   reason: z.string().optional(),
+}).strict()
+const documentExportBuildProgressSchema = z.object({
+  requestId: z.uuid(), identity: documentExportBuildReplySchema.shape.identity,
+  sequence: z.number().int().positive(), stage: z.enum(['preparing', 'building', 'compiling', 'complete']),
 }).strict()
 
 const bytesSchema = z.custom<Uint8Array>(
@@ -302,6 +307,13 @@ let detachExternalMcpWindow: (() => void) | undefined
 export function registerIpcHandlers(context: IpcContext): void {
   let htmlActionsReady: Promise<void> | undefined
   installWorkbenchToolServices(context)
+  ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildProgress)
+  ipcMain.on(IPC_CHANNELS.documentExportBuildProgress, (event: IpcMainEvent, raw: unknown) => {
+    try {
+      assertTrustedIpcSender(event, context.getMainWindow(), context.getRendererEntryUrl())
+      acceptWorkbenchExportBuildProgress(documentExportBuildProgressSchema.parse(raw), event.sender.id)
+    } catch { /* Foreign or stale progress cannot keep an export alive. */ }
+  })
   ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildReply)
   ipcMain.on(IPC_CHANNELS.documentExportBuildReply, (event: IpcMainEvent, raw: unknown) => {
     try {
@@ -1078,6 +1090,7 @@ export function registerIpcHandlers(context: IpcContext): void {
 export function unregisterIpcHandlers(): void {
   workspaceFileEventGeneration++
   ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildReply)
+  ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildProgress)
   disposeWorkbenchExportPort()
   htmlPreviewClosedCleanup?.(); htmlPreviewClosedCleanup = undefined
   htmlPreview?.dispose(); htmlPreview = undefined
