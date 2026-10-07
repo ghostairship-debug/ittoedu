@@ -437,6 +437,19 @@ export class ExecutionEngine {
   subscribe(listener: (event: ExecutionEvent) => void): () => void {
     this.listeners.add(listener); return () => this.listeners.delete(listener)
   }
+  /** Runtime references only; durable tools/messages/receipts remain in RunStore. */
+  runtimeCounts(runId?: string) {
+    const matches = (id: string) => runId === undefined || id === runId
+    const active = [...this.active.entries()].filter(([id]) => matches(id)).map(([, run]) => run)
+    return { activeRuns: active.length, preparingRecords: [...this.preparingRecords.keys()].filter(matches).length,
+      displayBuffers: [...this.displayBuffers.keys()].filter(matches).length, browserPauses: [...this.browserPauses.keys()].filter(matches).length,
+      streamingCalls: active.reduce((count, run) => count + run.streams.size, 0),
+      contextMessages: active.reduce((count, run) => count + run.contextMessages.length, 0),
+      questions: active.filter(run => !!run.question).length, approvals: active.filter(run => !!run.approval).length,
+      recoveryIssues: [...this.recoveryIssues.keys()].filter(matches).length,
+      // Saving/moving a file still updates terminal run identities through this shared cache.
+      savedDocumentBindings: this.savedBindings.size }
+  }
   async read(runId: string): Promise<ExecutionRunRecord | null> {
     const live = this.active.get(runId)
     return live ? structuredClone(live.record) : this.options.runs.read(runId)
@@ -2420,7 +2433,7 @@ export class ExecutionEngine {
       await this.publishEnd(record)
       recovered.push(structuredClone(record))
       } catch (error) {
-        this.recoveryIssues.set(record.runId, `一项历史运行恢复未完成，原记录保留：${record.runId}`)
+        this.recoveryIssues.set(record.runId, `历史运行 ${record.runId} 恢复未完成，原记录保留。请在原会话查看任务回执并核对当前文件后再显式继续；未确认的操作不会自动重发。`)
         if (onlyRunId) throw error
       }
     }

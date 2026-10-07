@@ -185,8 +185,14 @@ export class ExecutionDesktopService {
         await this.events.flushPending()
         // A stored terminal event can publish the ordinary final conversation write.
       } while (this.queues.size)
+      this.releaseElementChanges()
     })()
     return this.shutdownPromise
+  }
+  /** Actual service-owned references; live cards retain their inverse while still open. */
+  runtimeCounts() {
+    return { queues: this.queues.size, elementChanges: this.elementChanges.size, recoveryIssues: this.recoveryIssues.size,
+      engine: this.engine.runtimeCounts() }
   }
   private timing(conversationId: string, taskId: string, markId: string, stage: ExecutionTimingStage,
     extra: Pick<ExecutionTimingMark, 'sourceWallTimeMs' | 'detail'> = {},
@@ -861,12 +867,17 @@ export class ExecutionDesktopService {
         },
       } })
       this.imageRetention?.collect()
-      for (const [submissionId, change] of this.elementChanges) if (change.conversationId === input.conversationId) { change.dispose(); this.elementChanges.delete(submissionId) }
+      this.releaseElementChanges(input.conversationId)
       // Deletion is already durable. A failed sweep keeps its intent for startup retry.
       await this.collectAttachmentReleases().catch(() => undefined)
     } catch (error) {
       if (prepared) this.imageRetention?.abort(input)
       throw error
+    }
+  }
+  private releaseElementChanges(conversationId?: string): void {
+    for (const [submissionId, change] of this.elementChanges) if (conversationId === undefined || change.conversationId === conversationId) {
+      change.dispose(); this.elementChanges.delete(submissionId)
     }
   }
   /**
@@ -891,8 +902,11 @@ export class ExecutionDesktopService {
           if (current?.inputDraft.trim() || current?.inputAttachments.length) {
             for (const runId of current.runIndex.builtinRunIds) await this.engine.stop(runId)
             const latest = await this.conversations.readConversation(current)
-            if (latest) await this.conversations.recoverElementDraft({ workspaceId: latest.workspaceId,
-              conversationId: latest.conversationId, expectedRevision: latest.revision })
+            if (latest) {
+              await this.conversations.recoverElementDraft({ workspaceId: latest.workspaceId,
+                conversationId: latest.conversationId, expectedRevision: latest.revision })
+              this.releaseElementChanges(latest.conversationId)
+            }
           } else if (current) await this.removeConversation({ workspaceId: current.workspaceId, conversationId: current.conversationId, expectedRevision: current.revision })
         }))
       }
@@ -900,6 +914,7 @@ export class ExecutionDesktopService {
   /** Subscribe before the run starts; only durable commits with that run identity count. */
   private async recordElementBaseline(record: StoredExecutionSubmission): Promise<void> {
     this.elementChanges.get(record.submissionId)?.dispose()
+    this.elementChanges.delete(record.submissionId)
     try {
       const conversation = await this.conversations.readConversation({ workspaceId: record.workspaceId, conversationId: record.conversationId })
       const reference = conversation?.element && record.documents.find(value => value.documentId === conversation.element!.documentId)
