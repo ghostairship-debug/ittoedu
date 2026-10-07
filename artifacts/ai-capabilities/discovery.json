@@ -23,7 +23,7 @@
   ],
   "query": "query.mjs",
   "scope": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
-  "semanticVersion": "860e3afd4625234cca2cdba3744208f2127ef79a0869114a79ad60056c910e09",
+  "semanticVersion": "c88387ce04218c6ee676af4b508876d5ecbf8df2533ecfa00f66170ec2c55ec8",
   "tools": [
     {
       "id": "artifact.save",
@@ -266,20 +266,8 @@
       "path": "tools/office.create.json"
     },
     {
-      "id": "office.create",
-      "path": "tools/office.create.json"
-    },
-    {
       "id": "office.edit",
       "path": "tools/office.edit.json"
-    },
-    {
-      "id": "office.edit",
-      "path": "tools/office.edit.json"
-    },
-    {
-      "id": "office.inspect",
-      "path": "tools/office.inspect.json"
     },
     {
       "id": "office.inspect",

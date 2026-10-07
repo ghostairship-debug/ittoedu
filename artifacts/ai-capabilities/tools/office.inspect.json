@@ -16,6 +16,11 @@
     "type": "object"
   },
   "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "read",
+    "label": "office.inspect",
+    "targetKinds": []
+  },
   "name": "office.inspect",
   "version": 1
 }

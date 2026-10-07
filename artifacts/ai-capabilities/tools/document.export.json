@@ -20,6 +20,37 @@
         ],
         "type": "string"
       },
+      "options": {
+        "additionalProperties": false,
+        "properties": {
+          "orientation": {
+            "enum": [
+              "auto",
+              "portrait",
+              "landscape"
+            ],
+            "type": "string"
+          },
+          "pageIds": {
+            "description": "静态格式页面选择与顺序：surfaceId 或 Spatial 的 surfaceId:frameId；省略时按作品顺序输出。",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "pageSize": {
+            "enum": [
+              "A4",
+              "letter",
+              "surface-native"
+            ],
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
       "target": {
         "maxLength": 200,
         "minLength": 1,

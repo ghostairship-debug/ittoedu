@@ -32,6 +32,7 @@
     "label": "替换正文",
     "targetKinds": [
       "markdown-range",
+      "html-author-field",
       "course-instance"
     ]
   },

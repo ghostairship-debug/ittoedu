@@ -1674,6 +1674,13 @@
                               }
                             ]
                           },
+                          "playbackInitialVisibility": {
+                            "enum": [
+                              "inherit",
+                              "hidden"
+                            ],
+                            "type": "string"
+                          },
                           "style": {
                             "additionalProperties": {
                               "$ref": "#/$defs/__schema0"

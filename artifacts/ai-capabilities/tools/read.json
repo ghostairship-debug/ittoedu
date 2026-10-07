@@ -31,6 +31,7 @@
     "targetKinds": [
       "document",
       "markdown-range",
+      "html-author-field",
       "course-instance",
       "course-surface",
       "course-asset"

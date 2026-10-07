@@ -791,6 +791,7 @@
     "label": "批量修改",
     "targetKinds": [
       "markdown-range",
+      "html-author-field",
       "course-instance"
     ]
   },
