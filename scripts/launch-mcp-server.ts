@@ -16,9 +16,9 @@ async function main(): Promise<number> {
   prepareElectronLaunchEnvironment()
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
   const launch = resolveEngineeringProfileLaunch(mcpServerElectronArguments(process.argv.slice(2)))
-  const missing = ['dist-electron/main/index.js', 'dist-renderer/observation.html', 'dist-renderer/document-export.html']
+  const missing = ['dist-electron/main/index.js']
     .filter(filename => !existsSync(path.join(root, filename)))
-  if (missing.length) throw new Error(`缺少已有构建制品：${missing.join('、')}。请先准备对应 Main/Renderer 构建；启动器不会重新构建产品。`)
+  if (missing.length) throw new Error(`缺少已有构建制品：${missing.join('、')}。请先准备 Main 构建；启动器不会重新构建产品。`)
   const electronBinary = createRequire(import.meta.url)('electron') as unknown as string
   const handoffDirectory = await mkdtemp(path.join(os.tmpdir(), 'guoling-mcp-connect-'))
   const readyFile = path.join(handoffDirectory, 'ready.json')
