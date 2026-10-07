@@ -22,7 +22,7 @@ export const taskNoteInputSchema = z.object({
 
 export const taskNoteTool: ModelToolDefinition = {
   name: 'task.note',
-  description: '更新本次任务的简短工作笔记：已作取舍、待办、待确认和风险。只写当前 run 的检查点，不修改用户原话、冻结约束、权限、文档或真实工具回执。笔记中的“完成”不作为交付证明。sourceRefs 只接受 task:instruction 或已返回的 tool:<callId>。',
+  description: '更新本次任务的简短工作笔记：已作取舍、待办、待确认和风险。只写当前 run 的检查点，不修改用户原话、冻结约束、权限、文档或真实工具回执。笔记中的“完成”不作为交付证明。sourceRefs 可省略；需要引用时使用 task:instruction 或已返回工具的调用编号，宿主自动定位来源。',
   inputSchema: z.toJSONSchema(taskNoteInputSchema) as ModelToolDefinition['inputSchema'],
 }
 
@@ -48,11 +48,25 @@ function checked(note: WorkingNote): WorkingNote {
   return parsed
 }
 
-function validateSources(record: ExecutionRunRecord, decisions: WorkingNote['decisions']): void {
-  const returned = new Set(record.tools.filter(tool => tool.state === 'returned' && !!tool.result).map(tool => `tool:${tool.callId}`))
-  for (const entry of decisions) for (const reference of entry.sourceRefs ?? []) {
-    if (reference !== 'task:instruction' && !returned.has(reference)) throw new Error(`工作笔记来源引用未由宿主确认：${reference}`)
+function resolveSources(record: ExecutionRunRecord, decisions: WorkingNote['decisions']) {
+  const references = new Map<string, string>([['task:instruction', 'task:instruction']])
+  for (const tool of record.tools) if (tool.state === 'returned' && tool.result) {
+    for (const id of [tool.callId, tool.providerCallId]) {
+      references.set(id, `tool:${tool.callId}`)
+      references.set(`tool:${id}`, `tool:${tool.callId}`)
+    }
   }
+  const diagnostics: string[] = []
+  const resolved = decisions.map(entry => {
+    if (!entry.sourceRefs) return entry
+    const sourceRefs = entry.sourceRefs.flatMap(reference => {
+      const source = references.get(reference)
+      if (!source) diagnostics.push(`工作笔记来源未定位：${reference}；已保留笔记内容，可省略来源或引用已返回工具`)
+      return source ? [source] : []
+    })
+    return { ...entry, sourceRefs: [...new Set(sourceRefs)] }
+  })
+  return { decisions: resolved, diagnostics }
 }
 
 /**
@@ -67,14 +81,16 @@ export function prepareTaskNote(record: ExecutionRunRecord, raw: unknown, expect
   const input = taskNoteInputSchema.parse(raw)
   if (Object.keys(input).length === 0) throw new Error('工作笔记更新至少需要一个字段')
   const prior = record.workingNote ? checked(record.workingNote) : initialWorkingNote(record.input)
+  // Provider-visible call IDs and internal IDs identify the same returned source.
+  // An advisory citation problem does not discard an otherwise useful note.
+  const sources = input.decisions ? resolveSources(record, input.decisions) : undefined
   const note = checked({ ...prior,
-    ...(input.decisions !== undefined ? { decisions: input.decisions } : {}),
+    ...(sources ? { decisions: sources.decisions } : {}),
     ...(input.remaining !== undefined ? { remaining: input.remaining } : {}),
     ...(input.openQuestions !== undefined ? { openQuestions: input.openQuestions } : {}),
     ...(input.risks !== undefined ? { risks: input.risks } : {}),
   })
-  // Carried references were validated in their source run. New references must resolve in this run.
-  if (input.decisions) validateSources(record, input.decisions)
   return { note, result: { kind: 'read', data: { workingNote: note, authority: 'advisory-run-note',
-    instructionSource: 'run.input.instruction', persistedBy: 'next-run-checkpoint' } } }
+    instructionSource: 'run.input.instruction', persistedBy: 'next-run-checkpoint',
+    ...(sources?.diagnostics.length ? { diagnostics: sources.diagnostics } : {}) } } }
 }

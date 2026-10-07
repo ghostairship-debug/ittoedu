@@ -167,7 +167,7 @@ function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord
   }
   return record.tools.filter((tool, index) => {
     // An unanswered or malformed question changed nothing; it is not an unfinished document operation.
-    if (tool.call.name === USER_QUESTION_TOOL) return false
+    if (tool.call.name === USER_QUESTION_TOOL || tool.call.name === 'task.note') return false
     if (tool.state !== 'returned') return true
     const saved = saveFact(tool.call.name, tool.result)
     const wrongProjectSave = tool.call.name === 'project.save' && saved
@@ -266,12 +266,19 @@ export function hasUnresolvedToolFailure(record: ExecutionRunRecord): boolean {
 
 /** Only receipt-backed facts are summarized; scratch cleanup is not a new task failure. */
 export function runEndSummary(record: ExecutionRunRecord): string | undefined {
+  const noteProblems = record.tools.filter(tool => tool.call.name === 'task.note').flatMap(tool => {
+    if (tool.result?.kind === 'error') return [tool.result.message]
+    const diagnostics = tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
+      ? (tool.result.data as { diagnostics?: unknown }).diagnostics : null
+    return Array.isArray(diagnostics) ? diagnostics.filter((item): item is string => typeof item === 'string') : []
+  })
+  const noteWarning = noteProblems.length ? '工作笔记诊断：' + [...new Set(noteProblems)].join('；') : undefined
   const diagnosticFailures = record.tools.filter((tool, index) => optionalObservationFailure(tool)
     && !record.tools.slice(index + 1).some(later => sameObservedTarget(tool, later)))
   const diagnosticWarning = diagnosticFailures.length ? '可选画面诊断未完成，相关视觉结果未验证：'
     + [...new Set(diagnosticFailures.map(tool => tool.observationFailure?.message
       ?? (tool.result?.kind === 'error' ? tool.result.message : '画面不可用')))].join('；') : undefined
-  if (record.status === 'completed') return [record.failure?.message, diagnosticWarning].filter(Boolean).join('；') || undefined
+  if (record.status === 'completed') return [record.failure?.message, diagnosticWarning, noteWarning].filter(Boolean).join('；') || undefined
   const parts: string[] = []
   if (record.status === 'stopped') parts.push('任务已停止')
   else if (record.failure?.message) parts.push(record.failure.message)
@@ -287,6 +294,7 @@ export function runEndSummary(record: ExecutionRunRecord): string | undefined {
     && tool.result?.kind === 'document-operation' && tool.result.result.status === 'applied').length
   if (directApplied) parts.push(`已保留 ${directApplied} 项正式文档修改`)
   if (diagnosticWarning) parts.push(diagnosticWarning)
+  if (noteWarning) parts.push(noteWarning)
   if (importApplied) parts.push(`已正式导入 ${importApplied} 项构建成果`)
   const createdFiles = record.tools.filter(tool => fileCreated(tool.call.name, tool.result)).length
   if (createdFiles) parts.push(`已创建 ${createdFiles} 个文件`)
