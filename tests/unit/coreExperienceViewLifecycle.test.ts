@@ -9,10 +9,14 @@ import { createCourseInputLifecycle } from '../../src/renderer/authoring/courseD
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import type { AuthoringDraftRecovery, DocumentHostAPI } from '../../src/shared/workbench/desktop'
 import { closeDocumentFlow } from '../../src/main/workbench/documentCloseFlow'
+import { DocumentProjection } from '../../src/renderer/documents/DocumentProjection'
+import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
+import { useEditorStore } from '../../src/renderer/store/editorStore'
 
 const roots: string[] = [], bridges: CourseV10DocumentBridge[] = []
 afterEach(async () => {
   for (const bridge of bridges.splice(0)) bridge.dispose()
+  useEditorStore.getState().courseBridge.dispose()
   for (const root of roots.splice(0)) await fs.rm(root, { recursive: true, force: true })
 })
 async function fixture() {
@@ -32,7 +36,7 @@ async function fixture() {
     error, status: vi.fn(),
   })
   lifecycle.connect(api, recovery)
-  return { root, host, bridge, snapshot, instanceId, lifecycle, drain, recovery, error,
+  return { root, host, api, bridge, snapshot, instanceId, lifecycle, drain, recovery, error,
     setDraft() { records = { advanced: [{ kind: 'json', documentId: snapshot.documentId, epoch: snapshot.epoch, projectId: project.id, key: 'source', payload: '{未完成' }], properties: [] } } }
 }
 
@@ -138,5 +142,31 @@ describe('document input owner and Main close boundary', () => {
     expect(f.bridge.read().documents[0]).toMatchObject({ documentId: f.snapshot.documentId, epoch: f.snapshot.epoch, dirty: true })
     expect(f.bridge.read().project).toMatchObject({ instances: { [f.instanceId]: { data: { text: '未确认的原目标输入' } } } })
     expect(f.bridge.read().error).toContain('未确认输入仍保留')
+  })
+
+  it('the projection release owner retains a closed precommit even after its gate is released', async () => {
+    const f = await fixture(), projection = await DocumentProjection.attach(f.api, f.snapshot.documentId, new CourseV10Driver())
+    const release = projection.reservePrecommit()
+    try {
+      expect(projection.canRelease()).toBe(false)
+      await f.host.operate({ type: 'close', documentId: f.snapshot.documentId, discardDirty: true })
+      expect(projection.read()).toMatchObject({ pending: [], draft: null, error: { kind: 'closed' } })
+      release()
+      expect(projection.canRelease()).toBe(false)
+    } finally { release(); projection.dispose() }
+  })
+
+  it('a refused host replacement leaves recovery writes with the original document input owner', async () => {
+    const f = await fixture(), state = useEditorStore.getState()
+    await state.connectCourseDocuments(f.api)
+    state.courseBridge.beginComposition(f.instanceId, ['text'])
+    await state.courseBridge.updateComposition('未确认输入')
+    const wrongWriter = vi.fn(async () => {})
+    const replacement = { ...f.api, writeAuthoringDrafts: wrongWriter, clearAuthoringDrafts: wrongWriter }
+    await expect(state.connectCourseDocuments(replacement)).rejects.toThrow('已保留原连接与输入')
+    await state.courseInputs.persist()
+    expect(wrongWriter).not.toHaveBeenCalled()
+    expect(state.courseBridge.read().documents[0]!.epoch).toBe(f.snapshot.epoch)
+    expect(state.courseBridge.read().project).toMatchObject({ instances: { [f.instanceId]: { data: { text: '未确认输入' } } } })
   })
 })

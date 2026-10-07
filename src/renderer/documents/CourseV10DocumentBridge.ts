@@ -90,7 +90,7 @@ export class CourseV10DocumentBridge {
     this.state = { ...this.state, ...patch,
       documents: [...this.projections.values()].flatMap(projection => {
         const view = projection.read()
-        return view.committed ? [{ ...view.committed, dirty: view.committed.dirty || Boolean(view.pending.length || view.composing || view.retainedComposition) }] : []
+        return view.committed ? [{ ...view.committed, dirty: view.committed.dirty || !projection.canRelease() }] : []
       }), snapshot: active?.committed ?? null,
       views: [...this.projections.values()].flatMap(projection => {
         const view = projection.read()
@@ -115,7 +115,7 @@ export class CourseV10DocumentBridge {
     if (this.api === api && this.connecting) return this.connecting
     if (this.api === api && this.connected) return Promise.resolve()
     if (this.api && this.api !== api) {
-      if ([...this.projections.values()].some(projection => this.hasUnconfirmedInput(projection)))
+      if ([...this.projections.values()].some(projection => !projection.canRelease()))
         return Promise.reject(new Error('文档仍有未确认输入，已保留原连接与输入'))
       this.dispose()
     }
@@ -230,16 +230,12 @@ export class CourseV10DocumentBridge {
     if (!await this.host().closeWithDialog(documentId)) return false
     return this.detachClosed(documentId)
   }
-  private hasUnconfirmedInput(projection: DocumentProjection): boolean {
-    const view = projection.read()
-    return Boolean(view.pending.length || view.composing || view.retainedComposition || view.draft)
-  }
   private detachClosed(documentId: string): boolean {
     const projection = this.projections.get(documentId)
     if (!projection) return true
     // Projection deliberately retains input after an unexpected formal close.
     // Keep that recovery view and its original epoch instead of losing it here.
-    if (this.hasUnconfirmedInput(projection)) { this.publish(); return false }
+    if (!projection.canRelease()) { this.publish(); return false }
     this.projectionStops.get(documentId)?.(); this.projectionStops.delete(documentId)
     projection.dispose(); this.projections.delete(documentId); this.selections.delete(documentId)
     if (this.state.activeDocumentId === documentId) {

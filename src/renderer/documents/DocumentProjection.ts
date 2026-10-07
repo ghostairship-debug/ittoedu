@@ -263,7 +263,7 @@ export class DocumentProjection {
         this.composition = undefined
         this.update({ connected: false, draft: null, composing: null, retainedComposition: null, retainedDraftOnly: false, error: null })
         this.dispose()
-      } else if (this.queue.length || this.composition || this.state.draft || this.state.retainedComposition || this.previewTail || this.precommitGate) {
+      } else if (!this.canRelease()) {
         this.problem({ kind: 'closed', code: 'document-closed', message: '文档会话已关闭，未确认输入仍保留。' })
       } else {
         // Main emits closed before closeWithDialog returns. A drained view has no lost input.
@@ -570,6 +570,10 @@ export class DocumentProjection {
     this.composition = undefined
     ++this.projectionVersion
     this.update({ draft: null, retainedDraftOnly: false, error: null, composing: null, retainedComposition: null })
+  }
+  /** Input lifetime includes preparation outside the ordinary operation queue. */
+  canRelease(): boolean {
+    return !(this.queue.length || this.composition || this.state.draft || this.state.retainedComposition || this.previewTail || this.precommitGate || this.state.error?.kind === 'closed')
   }
   /** A discard decision stops new dispatches without requiring a failed draft to flush. */
   suspendForClose(): void { this.closeSuspended = true }
