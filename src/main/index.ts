@@ -97,11 +97,25 @@ async function reportMcpFailure(request: HeadlessMcpLaunch | null, error: unknow
 /** Explicit application exit preserves received work; disconnecting an MCP SDK client never calls it. */
 function stopHeadlessHost(): Promise<void> {
   return stopping ??= (async () => {
-    await Promise.all([executionDesktopService().then(execution => execution.shutdown()), closeExternalMcpService()])
-    await (await executionDesktopService()).events.flushPending()
+    const execution = await executionDesktopService()
+    lifecycle?.recordingState(execution.events.getPendingState())
+    await Promise.all([execution.shutdown(), closeExternalMcpService()])
+    lifecycle?.recordingState(execution.events.getPendingState())
+    await execution.events.flushPending()
+    const recording = execution.events.getPendingState()
+    lifecycle?.recordingState(recording)
     const host = documentHost()
     await Promise.all(host.registry.list().map(snapshot => host.registry.get(snapshot.documentId).drain()))
     await host.settleSaveObservations()
+    if (recording.lastFailure || recording.pendingEvents || recording.pendingTiming) {
+      const pending = recording.pendingEvents + recording.pendingTiming
+      const message = [pending ? `仍有 ${pending} 条运行记录尚未完成。` : '',
+        recording.lastFailure ? `运行记录曾出现写入失败：${recording.lastFailure.message}` : '',
+        '文档的保存和已应用修改以各自结果为准；记录失败不会重新执行操作。'].filter(Boolean).join('\n')
+      // Reuse the normal native error surface; do not turn an auxiliary failure into a replay or a document-save claim.
+      if (guiEnabled) dialog.showErrorBox('运行记录保存诊断', message)
+      else console.error('运行记录保存诊断：', message)
+    }
     disposeHeadlessWorkbenchWorkers()
     stopped = true
     app.quit()

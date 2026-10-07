@@ -42,6 +42,7 @@ export function externalMcpService(): Promise<ExternalMcpService> {
       workspaceRoot: async root => (await operateWorkspaceFiles({ type: 'root', directory: root })).resolvedPath,
       uiState: () => uiState?.() ?? Promise.resolve(null),
       appendEvent: input => execution.appendExternalEvent(input),
+      recordingState: () => execution.events.getPendingState(),
       confirm: confirmExternalChange })
     execution.setExternalRevoker(async input => service.releaseConversation(input))
     return service

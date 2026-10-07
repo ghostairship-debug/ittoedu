@@ -19,6 +19,7 @@ import { loadToolsDefinition } from '../execution/ExecutionEngine'
 import { createCourseFromHtml } from '../htmlImport/CreateCourseFromHtml'
 import { McpProtocolError, ResidentMcpServer, type ResidentMcpCall, type ResidentMcpClientInfo, type ResidentMcpHandler } from './ResidentMcpServer'
 import type { ResidentMcpSettingsStore } from './ResidentMcpSettings'
+import type { ExecutionEventPendingState } from '../execution/ExecutionEventStore'
 
 export interface ExternalApproval { clientName: string; label: string; reason: 'ask' | 'outside-workspace'; paths?: readonly string[] }
 export interface ExternalFilePort {
@@ -40,6 +41,8 @@ export interface ExternalMcpServiceOptions {
   appendEvent(event: ExecutionEventInput): Promise<unknown>
   /** Host confirmation for a modification the session's frozen permission asks about. */
   confirm(request: ExternalApproval): Promise<boolean>
+  /** Same non-authoritative record queue shown by the GUI and normal quit. */
+  recordingState?(): ExecutionEventPendingState
   now?: () => number
 }
 type ToolKind = 'gateway' | 'file' | 'course' | 'load' | 'service'
@@ -143,7 +146,10 @@ export class ExternalMcpService implements ResidentMcpHandler {
   }
   async status(): Promise<ExternalMcpStatus> {
     const settings = await this.options.settings.read()
-    return { state: this.state, ...(this.message ? { message: this.message } : {}), settings,
+    const recording = this.options.recordingState?.(), pending = recording ? recording.pendingEvents + recording.pendingTiming : 0
+    const message = [this.message, pending ? `还有 ${pending} 条运行记录正在写入；文档修改的提交与保存结果独立保留。` : undefined,
+      recording?.lastFailure ? `运行记录曾出现写入失败：${recording.lastFailure.message}。记录失败不会重新执行操作。` : undefined].filter(Boolean).join('\n')
+    return { state: this.state, ...(message ? { message } : {}), settings,
       endpoint: externalMcpEndpoint(this.server.listeningPort ?? settings.port), sessions: [...this.sessions.values()].map(session => this.view(session)) }
   }
   configure(patch: Partial<ExternalMcpSettings>): Promise<ExternalMcpStatus> {
