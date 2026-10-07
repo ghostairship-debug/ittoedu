@@ -47,7 +47,8 @@ it('public workspaceFiles defaults to disk and explicitly copies current V10 dra
     expect(sourceDisk.model).toMatchObject({ kind: 'course-v10', project: { title: 'Disk teacher title' } })
     expect(await host.internalAPI.read(saved.documentId)).toMatchObject({ documentId: before.documentId, epoch: before.epoch,
       revision: before.revision, savedRevision: before.savedRevision, dirty: true, undoDepth: before.undoDepth, redoDepth: before.redoDepth })
-    await host.internalAPI.undo({ documentId: before.documentId, epoch: before.epoch })
+    await host.internalAPI.dispatch({ documentId: before.documentId, epoch: before.epoch, baseRevision: before.revision,
+      operationId: 'teacher-undo', actor: 'human', mutation: { type: 'undo' } })
     expect((await host.internalAPI.read(before.documentId)).model).toMatchObject({ kind: 'course-v10', project: { title: 'Disk teacher title' } })
   } finally {
     desktop?.dispose()
