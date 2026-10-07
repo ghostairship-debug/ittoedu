@@ -1284,9 +1284,14 @@ export class DocumentToolGateway implements ToolGateway {
       }
       if (name === 'project.apply') {
         const parsed = componentProjectFileSchemas[name].parse(input)
-        this.contentReadExpectations(runId, await this.componentProjectDocument(runId, parsed.project, 'write'))
-        if ('from' in parsed && (this.images.has(parsed.from) || this.hostTools.parseStandaloneImageReference(parsed.from)))
-          return this.applyImageResourceFile(runId, operationId, requestDigest, parsed)
+        const current = await this.componentProjectDocument(runId, parsed.project, 'write')
+        this.contentReadExpectations(runId, current)
+        if ('from' in parsed && (this.images.has(parsed.from) || this.hostTools.parseStandaloneImageReference(parsed.from))) {
+          const { file } = this.componentProjectFiles.captureFile(runId, current, parsed.path)
+          // File-bound assets retain their identity through the existing file owner.
+          // Only object/page targets use professional-image insertion or replacement.
+          if (file.kind !== 'asset') return this.applyImageResourceFile(runId, operationId, requestDigest, parsed)
+        }
       }
       const result = await this.componentProjectFiles.execute(runId, operationId, requestDigest, name, input)
       if (name === 'project.read' && result.kind === 'read') {
