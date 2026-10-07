@@ -78,7 +78,7 @@ import type { DocumentSnapshot } from '../shared/workbench/document'
 import { resolveComponentPresentation } from '../shared/contracts/component-platform'
 import { equalComponentValue } from '../core/drivers/courseV10Operations'
 import { projectWithBackgroundPreview } from './authoring/backgroundPreview'
-import { hasSlideContentDraftChanges, projectWithSlideContentDraft } from './store/slices/slideAuthoringSlice'
+import { projectWithSlideContentDraft } from './store/slices/slideAuthoringSlice'
 
 function desktopApi() {
   if (!window.desktopAPI) {
@@ -213,9 +213,6 @@ export default function App() {
         if (mode === 'save' && issue) throw issue
         const state = useEditorStore.getState(), snapshot = state.courseView.documents.find(document => document.documentId === id)
         if (!snapshot) throw new Error('保全输入时文档已关闭')
-        const slide = state.slideContentEdit
-        if (issue && slide?.target.documentId === id && (slide.composing || hasSlideContentDraftChanges(slide)))
-          throw new Error('当前画布文字尚未完成，原输入已保留；请结束输入后再关闭')
         const records = { advanced: courseDraftLifecycle(state.courseBridge).preserve(id), properties: preservePropertiesDrafts(id) }
         const flowDraft = state.flowDocumentDrafts?.[id]
         if (!rawDocuments) throw new Error('输入恢复服务不可用，已保留原稿')

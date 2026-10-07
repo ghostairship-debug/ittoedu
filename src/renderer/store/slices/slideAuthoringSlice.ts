@@ -12,6 +12,9 @@ import { createSlideOwnedCommands } from './slideOwnedCommands'
 import { componentIsLocked } from '../../composition/crossSurfaceCommands'
 import { insertComponentDefinitionAtTarget } from '../../components/insertComponentPackages'
 import { authorSpotEdits, dataWithSpotEdit } from '../../componentPlatform/surfaces/slide/authorSpots'
+import { registerCourseDraftProvider } from '../../authoring/courseDraftLifecycle'
+import { equalComponentValue } from '../../../core/drivers/courseV10Operations'
+import { resolveComponentPresentation } from '../../../shared/contracts/component-platform'
 
 export interface SlideContentEdit {
   instanceId: string
@@ -25,6 +28,9 @@ export interface SlideContentEdit {
   authorSpot?: ComponentAuthorSpot
   spotText?: string
   implementation?: ComponentImplementation
+  /** Restored unfinished input must receive a real input event before applying. */
+  resumeRequired?: boolean
+  recoveryBlocked?: string
 }
 export function hasSlideContentDraftChanges(edit: SlideContentEdit): boolean {
   return JSON.stringify(edit.data) !== JSON.stringify(edit.originalData) || edit.frame !== undefined || Boolean(edit.implementation)
@@ -93,8 +99,10 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
     const frameBase = edit.frame === undefined ? originalFrame : edit.frame
     const frame = frameBase && height !== undefined && Number.isFinite(height) && height > frameBase.height + 0.5 ? { ...frameBase, height } : edit.frame
     const nextData = json(data)
-    if (edit && (JSON.stringify(nextData) !== JSON.stringify(edit.data) || (composing ?? edit.composing) !== edit.composing || JSON.stringify(frame) !== JSON.stringify(edit.frame)))
-      ports.patch({ slideContentEdit: { ...edit, data: nextData, composing: composing ?? edit.composing, frame } })
+    const resumed = composing === true || !equalComponentValue(nextData, edit.data)
+    if (edit && (resumed && edit.resumeRequired || JSON.stringify(nextData) !== JSON.stringify(edit.data) || (composing ?? edit.composing) !== edit.composing || JSON.stringify(frame) !== JSON.stringify(edit.frame)))
+      ports.patch({ slideContentEdit: { ...edit, data: nextData, composing: composing ?? edit.composing, frame,
+        resumeRequired: resumed ? false : edit.resumeRequired } })
   }
   const updateSlideFrameDraft = (frame: ComponentFrame | null) => {
     const edit = ports.read().slideContentEdit
@@ -117,22 +125,39 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
   const updateSlideSpotDraft = (value: string, composing?: boolean) => {
     const edit = ports.read().slideContentEdit
     if (!edit?.authorSpot) return
+    const resumeRequired = composing === true || value !== edit.spotText ? false : edit.resumeRequired
+    if (edit.recoveryBlocked) {
+      ports.patch({ slideContentEdit: { ...edit, spotText: value, composing: composing ?? edit.composing, resumeRequired } })
+      return
+    }
     const operations = authorSpotEdits(edit.target.editingProject, edit.authorSpot, value, edit.target.resources)
     const operation = operations.find(operation => operation.type === 'data.set' || operation.type === 'implementation.set')
     const instance = edit.target.editingProject.instances[edit.instanceId]
     const originalImplementation = instance.implementationOverride ?? edit.target.editingProject.definitions[instance.definitionId]?.implementation
-    ports.patch({ slideContentEdit: { ...edit, spotText: value, composing: composing ?? edit.composing,
+    ports.patch({ slideContentEdit: { ...edit, spotText: value, composing: composing ?? edit.composing, resumeRequired,
       ...(operation?.type === 'data.set' ? { data: dataWithSpotEdit(edit.data, operation) }
         : operation?.type === 'implementation.set' && operation.implementation && !operations.some(value => value.type === 'component.files.set')
           ? { implementation: JSON.stringify(operation.implementation) === JSON.stringify(originalImplementation) ? undefined : operation.implementation } : {}) } })
   }
   const pendingCommits = new WeakMap<SlideContentEdit, Promise<void>>()
+  const draftIssue = (edit: SlideContentEdit): string | undefined => edit.recoveryBlocked
+    ?? (edit.resumeRequired ? '恢复的文字输入尚未完成，请继续编辑后再保存'
+      : edit.composing ? '请先完成正在输入的文字' : undefined)
+  const sourceSpotText = (target: CapturedCourseTarget, spot?: ComponentAuthorSpot): string | undefined => {
+    const instance = spot && target.editingProject.instances[spot.instanceId]
+    const implementation = instance && (instance.implementationOverride ?? target.editingProject.definitions[instance.definitionId]?.implementation)
+    if (spot?.sourceRegion?.kind !== 'implementation' || implementation?.kind !== 'source' || !implementation.workspace) return undefined
+    const { ownerId, entry } = implementation.workspace
+    const bytes = target.resources.components[ownerId]?.[spot.sourceRegion.path?.join('/') || entry]
+    return bytes ? new TextDecoder('utf-8', { fatal: true }).decode(bytes) : undefined
+  }
   const commitTextEdit = (): Promise<void> => {
     const edit = ports.read().slideContentEdit
     if (!edit) return Promise.resolve()
     const existing = pendingCommits.get(edit)
     if (existing) return existing
-    if (edit.composing) return Promise.reject(new Error('请先完成正在输入的文字'))
+    const issue = draftIssue(edit)
+    if (issue) return Promise.reject(new Error(issue))
     const pending = (async () => {
       if (hasSlideContentDraftChanges(edit)) {
         const edits: ComponentEdit[] = edit.authorSpot && edit.spotText !== undefined
@@ -152,6 +177,65 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
     void pending.then(clear, clear)
     return pending
   }
+  registerCourseDraftProvider(kernel.bridge, 'surface-content', {
+    hasDirty(documentId) {
+      const edit = ports.read().slideContentEdit
+      return Boolean(edit && (!documentId || edit.target.documentId === documentId)
+        && (hasSlideContentDraftChanges(edit) || draftIssue(edit)))
+    },
+    async prepare(documentId) {
+      // Store follows this readiness check with the existing surface commit,
+      // after the property-input gate. This provider adds no transaction path.
+      const edit = ports.read().slideContentEdit
+      const message = edit?.target.documentId === documentId ? draftIssue(edit) : undefined
+      return message && edit ? [{ documentId, epoch: edit.target.epoch, message }] : []
+    },
+    preserve(documentId) {
+      const edit = ports.read().slideContentEdit
+      if (!edit || edit.target.documentId !== documentId || !hasSlideContentDraftChanges(edit) && !draftIssue(edit)) return []
+      const original = edit.target.editingProject.instances[edit.instanceId]
+      return [{ kind: 'surface-content', projectId: edit.target.project.id, documentId, epoch: edit.target.epoch,
+        key: JSON.stringify([edit.instanceId, edit.target.surfaceId, edit.target.activeStateId]),
+        payload: json({ projectId: edit.target.project.id, instanceId: edit.instanceId, definitionId: edit.definitionId,
+          surfaceId: edit.target.surfaceId, activeStateId: edit.target.activeStateId, source: edit.source,
+          data: edit.data, originalData: edit.originalData, frame: edit.frame,
+          originalFrame: original?.frame ?? null,
+          originalImplementation: original?.implementationOverride ?? edit.target.editingProject.definitions[edit.definitionId]?.implementation,
+          originalSourceText: sourceSpotText(edit.target, edit.authorSpot),
+          implementation: edit.implementation, authorSpot: edit.authorSpot, spotText: edit.spotText,
+          composing: edit.composing || Boolean(edit.resumeRequired), recoveryBlocked: edit.recoveryBlocked }) }]
+    },
+    restore(documentId, record) {
+      const saved = record.payload as unknown as Pick<SlideContentEdit, 'instanceId' | 'definitionId' | 'data' | 'originalData' | 'frame' | 'implementation' | 'authorSpot' | 'spotText' | 'source' | 'composing' | 'recoveryBlocked'>
+        & { projectId: string; surfaceId: string | null; activeStateId: string | null; originalFrame: ComponentFrame | null; originalImplementation: ComponentImplementation; originalSourceText?: string }
+      const current = kernel.captureTarget(documentId)
+      if (saved.projectId !== current.project.id || !current.project.surfaces.some(surface => surface.id === saved.surfaceId))
+        throw new Error('原文字恢复位置已不存在，原稿仍保留')
+      const surface = current.project.surfaces.find(value => value.id === saved.surfaceId)!
+      if (saved.activeStateId && !surface.presentation?.states.some(state => state.id === saved.activeStateId))
+        throw new Error('原文字命名态已不存在，原稿仍保留')
+      const target = { ...current, surfaceId: saved.surfaceId, activeStateId: saved.activeStateId,
+        editingProject: resolveComponentPresentation(current.project, saved.surfaceId, saved.activeStateId) }
+      const instance = target.editingProject.instances[saved.instanceId]
+      if (!instance || instance.definitionId !== saved.definitionId) throw new Error('原文字对象已不存在，原稿仍保留')
+      const previous = ports.read().slideContentEdit
+      if (previous && (hasSlideContentDraftChanges(previous) || draftIssue(previous)))
+        throw new Error('已有新的文字输入，恢复原稿仍保留')
+      const implementation = instance.implementationOverride ?? target.editingProject.definitions[instance.definitionId]?.implementation
+      const changed = !equalComponentValue(instance.data, saved.originalData)
+        || saved.frame !== undefined && !equalComponentValue(instance.frame ?? null, saved.originalFrame)
+        || Boolean(saved.implementation || saved.authorSpot?.sourceRegion) && !equalComponentValue(implementation, saved.originalImplementation)
+        || saved.originalSourceText !== undefined && sourceSpotText(target, saved.authorSpot) !== saved.originalSourceText
+      ports.patch({ slideContentEdit: { instanceId: saved.instanceId, definitionId: saved.definitionId, target,
+        data: structuredClone(saved.data), originalData: structuredClone(saved.originalData),
+        ...(saved.frame !== undefined ? { frame: structuredClone(saved.frame) } : {}),
+        ...(saved.implementation ? { implementation: structuredClone(saved.implementation) } : {}),
+        ...(saved.authorSpot ? { authorSpot: structuredClone(saved.authorSpot), spotText: saved.spotText } : {}),
+        source: saved.source, composing: false, resumeRequired: saved.composing,
+        recoveryBlocked: changed ? '原文字基线已改变，恢复原稿已保留；请核对当前对象后继续编辑' : saved.recoveryBlocked } })
+    },
+    release(documentId) { if (ports.read().slideContentEdit?.target.documentId === documentId) ports.patch({ slideContentEdit: null }) },
+  })
   const addShapeNode = (type: string, x?: number, y?: number) =>
     insert(SHAPE_DEFINITION, shapeDataSchema.parse(defaultShapeData(type as Parameters<typeof defaultShapeData>[0])), 200, 140, x, y)
   const mutatePresentation = async (recipe: (presentation: ComponentPresentation) => void, captured = kernel.captureTarget()) => {
@@ -228,7 +312,7 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
     },
     setSlideTextEditComposing(composing: boolean) {
       const edit = ports.read().slideContentEdit
-      if (edit) ports.patch({ slideContentEdit: { ...edit, composing } })
+      if (edit) ports.patch({ slideContentEdit: { ...edit, composing, resumeRequired: composing ? false : edit.resumeRequired } })
     },
     commitTextEdit,
     commitSlideContentEdit: commitTextEdit,
