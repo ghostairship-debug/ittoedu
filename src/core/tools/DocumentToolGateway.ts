@@ -98,14 +98,14 @@ export class DocumentToolGateway implements ToolGateway {
   private readonly images = new Map<string, { runId: string; documentId: string; epoch: string; asset: ImageAssetResource; source?: AssetSource }>()
   private readonly runs = new Map<string, Run>()
   private readonly startingRuns = new Set<string>()
-  private readonly operationLeases = new Map<string, ReadonlyMap<string, string>>()
+  private readonly operationLeases = new Map<string, { runId: string; leases: ReadonlyMap<string, string> }>()
   private readonly writeTaskBarriers = new Map<string, number>()
   private readonly writeTaskGenerations = new Map<string, number>()
   private hostServicesConfigured = false
   private readonly handles = new Map<string, Handle>()
   private readonly cursors = new Map<string, Cursor>()
   private readonly pending = new Map<string, { digest: string; result: Promise<ToolResult> }>()
-  private readonly callDigests = new Map<string, string>()
+  private readonly callDigests = new Map<string, { runId: string; digest: string; retain: boolean }>()
   private readonly catalogListeners = new Set<(runId: string) => void>()
   /** One live call keeps its observed identities through effects, approval preflight and commit. */
   private readonly mutationCaptures = new WeakMap<object, { runId: string; digest: string; handles: Promise<Handle[]> }>()
@@ -609,7 +609,33 @@ export class DocumentToolGateway implements ToolGateway {
     this.componentProjectFiles.stopRun(runId)
     // Already queued canonical commits finish; later requests cannot cross the barrier.
     const liveIds = new Set(this.registry.list().map(document => document.documentId))
-    await Promise.all([this.hostTools.stop(runId), ...run.grant.documents.filter(doc => liveIds.has(doc.documentId)).map(doc => this.registry.get(doc.documentId).stopRun(run.documentLeases.get(doc.documentId) ?? runId))])
+    try {
+      await Promise.all([this.hostTools.stop(runId), ...run.grant.documents.filter(doc => liveIds.has(doc.documentId)).map(doc => this.registry.get(doc.documentId).stopRun(run.documentLeases.get(doc.documentId) ?? runId))])
+    } finally {
+      for (const [id, handle] of this.handles) if (handle.runId === runId) this.handles.delete(id)
+      for (const [id, entry] of this.operationLeases) if (entry.runId === runId) this.operationLeases.delete(id)
+      for (const [id, entry] of this.callDigests) if (entry.runId === runId && !entry.retain) this.callDigests.delete(id)
+      // Only receipt-query identity survives; author bodies, grants and projections are runtime state.
+      run.grant = { runId, actor: run.grant.actor, documents: run.grant.documents.map(doc => ({ documentId: doc.documentId, writable: [] })) }
+      run.sources.clear(); run.contentReads.clear(); run.rangeFootprints.clear(); run.componentSubtrees.clear()
+      run.epochs.clear(); run.documentLeases.clear(); run.history.clear(); run.loadedFamilies.clear()
+      run.toolScopes = []; run.advertised = undefined; run.contentTarget = undefined
+      run.currentCourseDocumentId = undefined; run.currentHtmlDocumentId = undefined
+    }
+  }
+
+  /** Actual retained structures; receipt identity is counted separately from live author state. */
+  runtimeCounts(runId?: string) {
+    const belongs = (entry: { runId: string }) => runId === undefined || entry.runId === runId
+    const runs = [...this.runs.entries()].filter(([id]) => runId === undefined || id === runId).map(([, run]) => run)
+    return { activeRuns: runs.filter(run => !run.stopped).length, receiptRuns: runs.filter(run => run.stopped).length,
+      handles: [...this.handles.values()].filter(belongs).length, images: [...this.images.values()].filter(belongs).length,
+      cursors: [...this.cursors.values()].filter(belongs).length, operationLeases: [...this.operationLeases.values()].filter(belongs).length,
+      readDigests: [...this.callDigests.values()].filter(entry => belongs(entry) && !entry.retain).length,
+      receiptDigests: [...this.callDigests.values()].filter(entry => belongs(entry) && entry.retain).length,
+      sourceCharacters: runs.reduce((count, run) => count + [...run.sources.values()].reduce((sum, source) => sum + source.length, 0), 0),
+      contentReadValues: runs.reduce((count, run) => count + [...run.contentReads.values()].reduce((sum, basis) => sum + basis.expected.size, 0), 0),
+      host: this.hostTools.runtimeCounts(runId) }
   }
 
   /** Detaching one tab revokes only that document; the resident task retains its other targets. */
@@ -824,11 +850,11 @@ export class DocumentToolGateway implements ToolGateway {
     return `tool:${documentDigest({ runId, callId })}`
   }
   private captureOperationLeases(runId: string, operationId: string): void {
-    if (!this.operationLeases.has(operationId)) this.operationLeases.set(operationId, new Map(this.run(runId).documentLeases))
+    if (!this.operationLeases.has(operationId)) this.operationLeases.set(operationId, { runId, leases: new Map(this.run(runId).documentLeases) })
   }
   private operationLease(runId: string, operationId: string, documentId: string): string {
     const run = this.run(runId)
-    const lease = this.operationLeases.get(operationId)?.get(documentId)
+    const lease = this.operationLeases.get(operationId)?.leases.get(documentId)
       ?? (!run.detachedDocuments?.has(documentId) ? run.documentLeases.get(documentId) : undefined)
     if (!lease || lease !== this.run(runId).documentLeases.get(documentId))
       throw new ToolError('run-stopped', '此操作原来的文档授权已停止，请在重新打开后发起新操作')
@@ -856,7 +882,7 @@ export class DocumentToolGateway implements ToolGateway {
   async lookup(runId: string, callId: string, input: ModelToolCall): Promise<ToolResult | null> {
     try {
       const { digest, key, operationId } = this.identifyCall(runId, callId, input)
-      const previousDigest = this.callDigests.get(key)
+      const previousDigest = this.callDigests.get(key)?.digest
       if (previousDigest && previousDigest !== digest) throw new ToolError('operation-payload-mismatch', '同一调用编号不能提交不同内容')
       if (input.name === 'mcp.invoke') {
         const prior = await this.hostTools.lookupMcp(runId, operationId)
@@ -1114,9 +1140,9 @@ export class DocumentToolGateway implements ToolGateway {
     try {
       const { call, digest, key, operationId } = this.identifyCall(runId, callId, input)
       this.captureOperationLeases(runId, operationId)
-      const previousDigest = this.callDigests.get(key)
+      const previousDigest = this.callDigests.get(key)?.digest
       if (previousDigest && previousDigest !== digest) return Promise.resolve({ kind: 'error', code: 'operation-payload-mismatch', message: '同一调用编号不能提交不同内容' })
-      this.callDigests.set(key, digest)
+      this.callDigests.set(key, { runId, digest, retain: toolRegistration(input.name)?.effect !== null })
       const pending = this.pending.get(key)
       if (pending) return pending.digest === digest ? pending.result : Promise.resolve({ kind: 'error', code: 'operation-payload-mismatch', message: '同一调用编号不能提交不同内容' })
       const result = this.invoke(runId, operationId, digest, call, input).catch(error => this.error(error))
