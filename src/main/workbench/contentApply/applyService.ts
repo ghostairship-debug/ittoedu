@@ -37,13 +37,15 @@ function dataBindings(data: JsonObject): Record<string, string> {
 }
 function resourceEdits(prepared: PreparedContentResources, createId: () => string): { edits: ComponentEdit[]; bindings: Record<string, string>; urls: Record<string, string> } {
   const edits: ComponentEdit[] = [], bindings: Record<string, string> = {}, urls: Record<string, string> = {}
-  for (const resource of prepared.resources) {
+  const admitted = new Set(prepared.resources)
+  const retained: PreparedContentResources['resources'] = [...prepared.resources, ...prepared.unresolvedResources]
+  for (const resource of retained) {
     const id = resource.image?.id ?? createId()
     const reference = `cw-resource:${resource.key}`
     bindings[reference] = id
     const extension = resource.mediaType.split('/').at(-1)?.replace(/[^a-z0-9]/gi, '') || 'bin'
     edits.push({ type: 'asset.add', asset: { id, path: `assets/${id}.${extension}`, mimeType: resource.mediaType }, bytes: resource.bytes })
-    urls[reference] = `data:${resource.mediaType};base64,${Buffer.from(resource.bytes).toString('base64')}`
+    if (admitted.has(resource)) urls[reference] = `data:${resource.mediaType};base64,${Buffer.from(resource.bytes).toString('base64')}`
   }
   return { edits, bindings, urls }
 }
@@ -110,6 +112,7 @@ export class ContentApplyService {
           if (prepared.modules || previous.modules) add(['modules'], prepared.modules ?? {})
           const bindings = { ...dataBindings(previous), ...resources.bindings }
           if (Object.keys(bindings).length) add(['resourceBindings'], bindings)
+          if (prepared.resourceSources.length || previous.resourceSources) add(['resourceSources'], prepared.resourceSources.map(({ url, usage }) => ({ url, usage })))
           if (program) {
             unverified = true
             if (definition.implementation.key === 'guoling.web' && !instance.implementationOverride) edits.push({ type: 'implementation.set', instanceId: input.instanceId,
@@ -126,7 +129,8 @@ export class ContentApplyService {
         try {
           assembly = await this.options.measure({ html: prepared.html, viewport,
             framing: htmlAssemblyFraming(request),
-            themeCss: request.source.themeCss, resourceUrls: { ...this.options.resourceUrls?.(project, request), ...resources.urls }, signal })
+            themeCss: request.source.themeCss, resourceSources: prepared.resourceSources,
+            resourceUrls: { ...this.options.resourceUrls?.(project, request), ...resources.urls }, signal })
         } catch (error) {
           // A failed disposable measurement is not a verdict on the author's
           // source. The existing program carrier can retain and run it; its
@@ -142,8 +146,27 @@ export class ContentApplyService {
         diagnostics.push(...assembly.diagnostics)
         const assembled = assemblyContentDraft(assembly, resources.bindings, {
           modules: prepared.modules, createFormulaId: this.createId, definitions: project.definitions, flow: this.flowBodyTarget(project, request),
+          flowPage: request.intent === 'redo' && request.target.kind === 'container' && request.target.container.kind === 'surface',
         })
         drafts = assembled.drafts ?? [assembled.draft]
+        const persistSources = (draft: ContentObjectDraft): void => {
+          const definition = assembled.definitions.find(value => value.id === draft.definitionId) ?? project.definitions[draft.definitionId]
+          if (prepared.resourceSources.length && definition?.implementation.kind === 'builtin'
+            && ['guoling.web', 'guoling.html-program'].includes(definition.implementation.key)) {
+            dataObject(draft.data).resourceSources = prepared.resourceSources.map(({ url, usage }) => ({ url, usage }))
+          }
+          draft.children?.forEach(persistSources)
+        }
+        drafts.forEach(persistSources)
+        if (assembled.flowBackgroundColor && request.target.kind === 'container' && request.target.container.kind === 'surface') {
+          const surfaceId = request.target.container.surfaceId
+          const surface = project.surfaces.find(value => value.id === surfaceId)
+          if (surface?.kind === 'flow' && surface.flow?.layout.paperBackgroundColor !== assembled.flowBackgroundColor) {
+            const layout = surface.flow?.layout ?? { widthMode: 'fluid' as const, readingWidth: 860, wideContentWidth: 1100 }
+            edits.push({ type: 'flow.set', surfaceId: surface.id, flow: { ...surface.flow,
+              layout: { ...layout, paperBackgroundColor: assembled.flowBackgroundColor } } })
+          }
+        }
         edits.push(...assembled.definitions.map(definition => ({ type: 'definition.set' as const, definition })))
         diagnostics.push(...assembled.diagnostics)
         const definitions = { ...project.definitions, ...Object.fromEntries(assembled.definitions.map(definition => [definition.id, definition])) }

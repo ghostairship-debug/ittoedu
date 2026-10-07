@@ -80,7 +80,9 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
   createFormulaId(): string
   definitions: Readonly<Record<string, ComponentDefinition>>
   flow?: boolean
-}): { draft: ContentObjectDraft; drafts?: ContentObjectDraft[]; definitions: ComponentDefinition[]; diagnostics: ContentApplyDiagnostic[] } {
+  /** Only an explicit whole-surface redo can transfer page paint to its owner. */
+  flowPage?: boolean
+}): { draft: ContentObjectDraft; drafts?: ContentObjectDraft[]; definitions: ComponentDefinition[]; diagnostics: ContentApplyDiagnostic[]; flowBackgroundColor?: string } {
   const definitions = new Map<string, ComponentDefinition>(), diagnostics: ContentApplyDiagnostic[] = []
   const serialization: HtmlSerialization = { nextPseudo: 0 }
   const isDefaultImplementation = (existing: ComponentDefinition, expected: ComponentDefinition) =>
@@ -118,7 +120,9 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
       const closing = content?.kind === 'element' && !VOID.has(content.tagName) ? `</${content.tagName}>` : ''
       html = closing && html.endsWith(closing) ? html.slice(0, -closing.length) + retained + closing : html + retained
     }
-    const data: JsonObject = { html, ...(assembly.supportCss ? { css: assembly.supportCss } : {}),
+    const supportCss = object.sourcePath.length === 0 && (object.kind === 'program' || object.retainedSource)
+      ? assembly.source.themeCss : assembly.supportCss
+    const data: JsonObject = { html, ...(supportCss ? { css: supportCss } : {}),
       ...(object.kind === 'program' && options.modules ? { modules: options.modules } : {}),
       ...(Object.keys(resourceBindings).length ? { resourceBindings } : {}) }
     return { definitionId: definition.id, data,
@@ -126,7 +130,15 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
       style: object.kind === 'program' ? htmlObjectStyle(object.style, false) : measuredStyle,
       ...(object.kind === 'group' ? { children: orderedChildren(object).map(draft) } : {}) }
   }
-  if (options.flow && assembly.root.kind !== 'program' && assembly.flowCoupled) {
+  const rootStyle = assembly.root.style
+  const rootColor = rootStyle['background-color']
+  const hasColor = Boolean(rootColor && !['transparent', 'rgba(0, 0, 0, 0)'].includes(rootColor))
+  const complexRootPaint = ['background-image', 'box-shadow', 'clip-path', 'mask-image', '-webkit-mask-image', 'filter', 'backdrop-filter']
+    .some(name => Boolean(rootStyle[name] && rootStyle[name] !== 'none'))
+    || parseFloat(rootStyle['outline-width'] ?? '0') > 0 && rootStyle['outline-style'] !== 'none'
+    || ['top', 'right', 'bottom', 'left'].some(side => parseFloat(rootStyle[`border-${side}-width`] ?? '0') > 0 && rootStyle[`border-${side}-style`] !== 'none')
+    || Number(rootStyle.opacity ?? '1') < 1 || Boolean(Object.keys(assembly.root.pseudoElements).length)
+  if (options.flow && assembly.root.kind !== 'program' && (assembly.flowCoupled || complexRootPaint || !options.flowPage && hasColor)) {
     const definition = definitionFor(WEB_DEFINITIONS.find(value => value.id === 'guoling.web')!)
     // One responsive DOM owns the coupled CSS/disclosure layout. Do not turn its
     // descendants into a fixed free-frame stage or stamp used pixel heights into it.
@@ -140,7 +152,8 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
   if (options.flow && assembly.root.kind === 'group' && assembly.root.children.length) {
     // Independent text/images remain professional or atomic Web reading blocks.
     const roots = assembly.root.children.map(draft)
-    return { draft: roots[0]!, drafts: roots, definitions: [...definitions.values()], diagnostics }
+    return { draft: roots[0]!, drafts: roots, definitions: [...definitions.values()], diagnostics,
+      ...(options.flowPage && hasColor ? { flowBackgroundColor: rootColor } : {}) }
   }
   const root = draft(assembly.root)
   return { draft: root, definitions: [...definitions.values()], diagnostics }
