@@ -5,7 +5,8 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import { parsePublicUrl } from '../network/publicHttp'
 import { PublicBrowserProxy } from '../network/PublicBrowserProxy'
 import { McpClientService, type McpCallResult, type McpDiscovery } from './McpClientService'
-import type { EmbeddedBrowserBackend, EmbeddedBrowserBackendFactory } from '../browserEmbedded/EmbeddedBrowserBackend'
+import type { EmbeddedBrowserBackend, EmbeddedBrowserBackendFactory, ObservedBrowserAction } from '../browserEmbedded/EmbeddedBrowserBackend'
+import type { BrowserTaskAction } from './BrowserActionApprovals'
 import type { EmbeddedBrowserViewport, EmbeddedBrowserViewportState } from '../../../shared/workbench/embeddedBrowser'
 
 const browserTools = [
@@ -40,7 +41,9 @@ export interface ManagedBrowserOptions {
   externalBackend?: 'edge-mcp'
   /** Host-owned, concrete approval for this exact click/input/upload. Missing means deny. */
   approveExternalAction?: (input: { runId: string; tool: ManagedBrowserTool; arguments: Record<string, unknown>;
-    operationId: string; pageUrl?: string; snapshotId: string }) => Promise<boolean>
+    operationId: string; pageUrl?: string; snapshotId: string } & Partial<ObservedBrowserAction>) => Promise<boolean>
+  /** Main checks its frozen result scope and registers the same concrete grant used below. */
+  authorizeTaskAction?: (input: BrowserTaskAction) => Promise<boolean>
   /** File owner resolves the explicitly authorized source and freezes its original bytes. */
   readUpload?: (input: { runId: string; path: string }) => Promise<{ name: string; bytes: Uint8Array }>
   /** Test-only loopback origin for a server created by the test itself. */
@@ -200,6 +203,29 @@ export class ManagedBrowserMcpService {
       ...((run.snapshotId ?? run.fileChooserSnapshotId) ? { snapshotId: run.snapshotId ?? run.fileChooserSnapshotId } : {}) }
   }
 
+  /** Read-only preflight for built-in and external consumers, before deciding whether to ask. */
+  async authorizeTaskAction(input: { runId: string; operationId: string; name: string;
+    arguments: Record<string, unknown>; snapshotId?: string }): Promise<boolean> {
+    const run = this.run(input.runId)
+    if (run.stopped || run.control !== 'agent' || run.grant.permission === 'read-only' || !this.options.authorizeTaskAction) return false
+    const tool = remoteName(input.name)
+    if (!tool || !managedBrowserWriteTools.includes(tool as typeof managedBrowserWriteTools[number])) return false
+    const args = { ...input.arguments }
+    const snapshotId = input.snapshotId ?? (typeof args.snapshotId === 'string' ? args.snapshotId : undefined)
+      ?? (tool === 'browser_file_upload' ? run.fileChooserSnapshotId ?? run.snapshotId : run.snapshotId)
+    delete args.snapshotId
+    if (!snapshotId || !this.validateArgs(tool, args)) return false
+    if (snapshotId !== run.snapshotId && (tool !== 'browser_file_upload' || snapshotId !== run.fileChooserSnapshotId)) return false
+    const generation = run.controlGeneration
+    const observed = await run.embedded?.inspectAction?.({ tool, arguments: args })
+    if (!observed || observed.action === 'unknown' || observed.pageUrl !== run.pageUrl
+      || run.stopped || run.control !== 'agent' || generation !== run.controlGeneration) return false
+    const authorized = await this.options.authorizeTaskAction({ runId: input.runId, operationId: input.operationId, tool,
+      arguments: args, snapshotId, ...observed })
+    return authorized && !run.stopped && run.control === 'agent' && generation === run.controlGeneration
+      && (snapshotId === run.snapshotId || tool === 'browser_file_upload' && snapshotId === run.fileChooserSnapshotId)
+  }
+
   controlState(runId: string): ManagedBrowserControlState {
     const run = this.run(runId)
     return { state: run.stopped ? 'stopped' : run.control, ...(run.pageUrl ? { pageUrl: run.pageUrl } : {}),
@@ -306,7 +332,7 @@ export class ManagedBrowserMcpService {
             ? '本任务明确获授权的文件来源路径；宿主文件服务核对授权并冻结原文件。' : '授权根下的相对文件路径' } }
           : properties), snapshotId: { type: 'string', description: '最近一次 browser_snapshot 返回的页面观察身份' } },
         required: [...new Set([...(Array.isArray(source.required) ? source.required as string[] : []),
-          ...(tool.remoteName === 'browser_file_upload' ? ['paths'] : []), 'snapshotId'])], additionalProperties: false } }
+          ...(tool.remoteName === 'browser_file_upload' ? ['paths'] : [])])], additionalProperties: false } }
     }) }
   }
 
@@ -319,6 +345,7 @@ export class ManagedBrowserMcpService {
       || Array.isArray(input.arguments)) return Promise.resolve(reject('浏览器操作身份或参数无效'))
     const args = { ...input.arguments }
     const snapshotId = input.snapshotId ?? (typeof args.snapshotId === 'string' ? args.snapshotId : undefined)
+      ?? (remoteName(input.name) === 'browser_file_upload' ? run.fileChooserSnapshotId ?? run.snapshotId : run.snapshotId)
     delete args.snapshotId
     const normalized = { ...input, arguments: args, snapshotId }
     const digest = createHash('sha256').update(JSON.stringify([input.name, args, snapshotId])).digest('hex')
@@ -473,8 +500,12 @@ export class ManagedBrowserMcpService {
       if (!observed) return reject('页面观察已失效，请重新读取当前页面')
       if (!this.options.approveExternalAction) return reject('缺少本次外部页面操作的明确授权')
       let approved = false
-      try { approved = await this.options.approveExternalAction({ runId: input.runId, operationId: input.operationId, tool,
-        arguments: structuredClone(input.arguments), ...(run.pageUrl ? { pageUrl: run.pageUrl } : {}), snapshotId: input.snapshotId! }) }
+      try {
+        const observedAction = await run.embedded?.inspectAction?.({ tool, arguments: input.arguments })
+        approved = await this.options.approveExternalAction({ runId: input.runId, operationId: input.operationId, tool,
+          arguments: structuredClone(input.arguments), ...(run.pageUrl ? { pageUrl: run.pageUrl } : {}), snapshotId: input.snapshotId!,
+          ...(observedAction ?? {}) })
+      }
       catch { return reject('无法核对本次外部页面操作授权') }
       if (!approved) return reject('本次外部页面操作未获授权')
     }

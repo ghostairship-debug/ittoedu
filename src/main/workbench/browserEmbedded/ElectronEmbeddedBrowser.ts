@@ -3,7 +3,9 @@ import { randomUUID } from 'node:crypto'
 import { basename, join } from 'node:path'
 import type { McpCallResult, McpContent, McpDiscoveredTool } from '../externalTools/McpClientService'
 import type { EmbeddedBrowserViewport, EmbeddedBrowserViewportState } from '../../../shared/workbench/embeddedBrowser'
-import type { EmbeddedBrowserBackend, EmbeddedBrowserBackendFactory, EmbeddedBrowserBackendOptions } from './EmbeddedBrowserBackend'
+import type { EmbeddedBrowserBackend, EmbeddedBrowserBackendFactory, EmbeddedBrowserBackendOptions, ObservedBrowserAction } from './EmbeddedBrowserBackend'
+import type { ManagedBrowserTool } from '../externalTools/ManagedBrowserMcpService'
+import { managedBrowserActionFactsCode } from '../externalTools/managedBrowserControlCode'
 
 interface AxNode {
   nodeId: string
@@ -180,6 +182,35 @@ class ElectronEmbeddedBrowser implements EmbeddedBrowserBackend {
   async discover(writeAllowed: boolean): Promise<import('../externalTools/McpClientService').McpDiscovery> {
     this.assertActive()
     return { status: 'available', tools: tools.filter(tool => writeAllowed || tool.effect === 'read') }
+  }
+
+  async inspectAction(input: { tool: ManagedBrowserTool; arguments: Record<string, unknown> }): Promise<ObservedBrowserAction> {
+    this.assertActive()
+    const pageUrl = this.view.webContents.getURL()
+    if (input.tool === 'browser_file_upload') return { pageUrl, action: this.chooser ? 'upload' : 'unknown' }
+    const address = await this.address(input.arguments.target)
+    const { object } = await this.command('DOM.resolveNode', address)
+    try {
+      const reply = await this.command('Runtime.callFunctionOn', { objectId: object.objectId,
+        functionDeclaration: managedBrowserActionFactsCode, returnByValue: true })
+      if (reply.exceptionDetails) throw new Error('当前网页动作未能观察')
+      const facts = reply.result.value as { tag: string; type: string; editable: boolean; formAction?: string; linkUrl?: string; download: boolean }
+      if (input.tool === 'browser_type') {
+        if (input.arguments.submit === true) return { pageUrl, action: facts.formAction ? 'submit' : 'unknown',
+          ...(facts.formAction ? { destinationUrl: facts.formAction } : {}) }
+        return { pageUrl, action: facts.tag === 'input' || facts.tag === 'textarea' || facts.editable ? 'prepare' : 'unknown' }
+      }
+      if (input.tool !== 'browser_click') return { pageUrl, action: 'unknown' }
+      if (facts.linkUrl) {
+        if (!/^https?:/.test(facts.linkUrl)) return { pageUrl, action: 'unknown' }
+        return { pageUrl, action: facts.download ? 'download' : 'prepare', destinationUrl: facts.linkUrl }
+      }
+      if (facts.formAction && (facts.type === 'submit' || facts.type === 'image')) return { pageUrl, action: 'submit',
+        ...(facts.formAction ? { destinationUrl: facts.formAction } : {}) }
+      if (facts.tag === 'input' && !['button', 'reset', 'hidden'].includes(facts.type)
+        || ['textarea', 'select', 'summary'].includes(facts.tag) || facts.editable) return { pageUrl, action: 'prepare' }
+      return { pageUrl, action: 'unknown' }
+    } finally { if (object.objectId) await this.command('Runtime.releaseObject', { objectId: object.objectId }).catch(() => undefined) }
   }
 
   async invoke(input: { operationId: string; name: string; arguments: Record<string, unknown>; signal?: AbortSignal }): Promise<McpCallResult> {
