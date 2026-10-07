@@ -8,6 +8,7 @@ import { componentPublishDependencies, type ComponentPublishDependencies } from 
 import { componentAssetDataUrl } from './resourceUrl'
 import { projectWebModuleGraph, webModuleCompilationInput } from '../../../components/web/moduleGraph'
 import type { WebData } from '../../../components/web/data'
+import { collectWebNetworkResourceFacts } from '../../../components/web/resources'
 import type { ComponentCompilationInput, ComponentCompilationResult } from '../../components/compilation/types'
 
 export interface ComponentPublishDiagnostic {
@@ -31,7 +32,8 @@ export interface ComponentPublishResult {
   payload: PublishedCourseV3
   dependencies: ComponentPublishDependencies
   diagnostics: ComponentPublishDiagnostic[]
-  /** Actual asset embedding and effective-source compilation; not a playback verdict. */
+  /** Embedded assets, compiled effective sources and no source-observed network dependency.
+   * This is preparation evidence, not a verdict on arbitrary runtime/offline playback. */
   offlineComplete: boolean
 }
 
@@ -108,10 +110,12 @@ export async function buildPublishedCourseV3(
           path: ['instances', id, 'data', 'modules'] })
       }
       check()
-      const data = instance.data as WebData & { resourceSources?: readonly { url: string; usage: string }[] }
-      for (const [index, resource] of (data.resourceSources ?? []).entries()) diagnostics.push({
-        code: 'network-dependency', message: `内容使用在线${resource.usage}资源 ${resource.url}，离线运行需要该资源可达；原始内容已保留。`,
-        path: ['instances', id, 'data', 'resourceSources', index],
+      const data = instance.data as WebData
+      for (const resource of collectWebNetworkResourceFacts(data)) diagnostics.push({
+        code: 'network-dependency', message: resource.url
+          ? `当前内容使用在线${resource.usage} ${resource.url}；导出保留该内容，离线时相应资源或功能需要网络。`
+          : `当前内容存在不能静态确定依赖的${resource.usage}；离线依赖尚未确定，原始程序与可用内容继续保留。`,
+        path: ['instances', id, 'data', resource.source],
       })
     }
     instances[id] = { ...runtimeInstance, ...(instance.implementationOverride ? {
