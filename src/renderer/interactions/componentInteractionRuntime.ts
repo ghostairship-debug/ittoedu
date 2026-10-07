@@ -8,7 +8,7 @@ export interface ComponentInteractionPorts {
   currentSurfaceId(): string | null
   currentStateId(): string | null
   courseState: { get(key: string): unknown; set(key: string, value: unknown): void }
-  subscribeTrigger(trigger: InteractionTrigger, listener: (payload?: unknown) => void): () => void
+  subscribeTrigger(trigger: InteractionTrigger, listener: (payload?: unknown) => boolean | void | PromiseLike<boolean | void>): () => void
   /** The actual host action must recheck signal/scope before an asynchronous write. */
   executeAction(action: InteractionAction, context: { signal: AbortSignal; ruleId: string; stepId: string; restartFromBeginning: boolean }): boolean | void | PromiseLike<boolean | void>
   report(message: string): void
@@ -48,36 +48,41 @@ export function createComponentInteractionRuntime(createPorts: ComponentInteract
         timer = setTimeout(() => finish(true), Math.max(0, ms))
         signal.addEventListener('abort', abort, { once: true })
       })
-      const dispatch = (trigger: InteractionTrigger) => {
-        if (!active()) return
+      const dispatch = (trigger: InteractionTrigger): Promise<boolean> => {
+        if (!active()) return Promise.resolve(false)
+        const completions: Promise<boolean>[] = []
         for (const rule of rules) {
           if (!rule.enabled || !triggerMatches(rule.trigger, trigger) || !inScope(rule) || !rule.conditions.every(matches)) continue
           const previous = runs.get(rule.id), controller = new AbortController(), runGeneration = generation
           runs.set(rule.id, { controller, surfaceId: ports.currentSurfaceId() }); previous?.controller.abort()
           const current = () => active() && runGeneration === generation && runs.get(rule.id)?.controller === controller && !controller.signal.aborted
-          void (async () => {
+          const completion = (async (): Promise<boolean> => {
             const groups: typeof rule.actions[] = []
             for (const step of rule.actions) {
               if (!groups.length || step.start === 'after-previous') groups.push([step])
               else groups[groups.length - 1]!.push(step)
             }
             for (const group of groups) {
-              if (!current()) return
+              if (!current()) return false
               const outcomes = await Promise.all(group.map(async step => {
-                if (step.delayMs && !await delay(step.delayMs, controller.signal)) return false
-                if (!current() || !inScope(rule)) return false
+                if (step.delayMs && !await delay(step.delayMs, controller.signal)) return { success: false, terminal: false }
+                if (!current() || !inScope(rule)) return { success: false, terminal: false }
                 const done = await ports.executeAction(step.action, { signal: controller.signal, ruleId: rule.id, stepId: step.id, restartFromBeginning: Boolean(previous) })
-                if (!current()) return false
-                if (done === false) { ports.report(`互动“${rule.name}”的动作 ${step.action.type} 未完成`); return false }
-                if (isNodeMotionAction(step.action)) dispatch({ type: 'animation.completed', actionId: step.id })
-                return !isTerminalNavigationAction(step.action)
+                if (!current()) return { success: false, terminal: false }
+                if (done === false) { ports.report(`互动“${rule.name}”的动作 ${step.action.type} 未完成`); return { success: false, terminal: false } }
+                if (isNodeMotionAction(step.action)) void dispatch({ type: 'animation.completed', actionId: step.id })
+                return { success: true, terminal: isTerminalNavigationAction(step.action) }
               }))
-              if (outcomes.some(value => !value)) return
+              if (outcomes.some(value => !value.success)) return false
+              if (outcomes.some(value => value.terminal)) return true
             }
-          })().catch(error => { if (current()) ports.report(error instanceof Error ? error.message : String(error)) }).finally(() => {
+            return true
+          })().catch(error => { if (current()) ports.report(error instanceof Error ? error.message : String(error)); return false }).finally(() => {
             if (runs.get(rule.id)?.controller === controller) runs.delete(rule.id)
           })
+          completions.push(completion)
         }
+        return completions.length ? Promise.all(completions).then(values => values.every(Boolean)) : Promise.resolve(false)
       }
       const retire = () => { generation++; off?.(); off = undefined; for (const run of runs.values()) run.controller.abort(); runs.clear() }
       const subscribe = () => {

@@ -9,6 +9,7 @@ import { spatialSemanticVisible } from '../../surfaces/spatial/componentPlatform
 import type { ComponentMotionPort, ComponentMotionTask } from '../../../shared/contracts/component-platform/motion'
 
 type ActionContext = Parameters<ComponentInteractionPorts['executeAction']>[1]
+type TriggerListener = Parameters<ComponentInteractionPorts['subscribeTrigger']>[1]
 export interface ComponentInteractionWorld {
   project(): CourseProjectV10 | undefined
   element(id: string): HTMLElement | undefined
@@ -28,6 +29,7 @@ export class ComponentWorldInteractions {
   private readonly leases = new Map<string, symbol>()
   private readonly presentationVisibility = new Map<string, Map<symbol, { element: HTMLElement; visible: boolean }>>()
   private readonly presentationCleanup = new Map<string, Set<() => void>>()
+  private readonly presenterListeners = new Map<'next' | 'previous', Set<() => ReturnType<TriggerListener>>>()
   constructor(private readonly world: ComponentInteractionWorld) {}
   currentSurfaceId(): string { return this.world.navigation?.read().locationId ?? '' }
   private canPresent(id: string): boolean {
@@ -158,27 +160,40 @@ export class ComponentWorldInteractions {
     for (const [id, motion] of this.motions) { motion.dispose(); this.applyVisibility(id) }
     this.motions.clear()
   }
-  dispose(): void { this.reset() }
+  dispose(): void { this.reset(); this.presenterListeners.clear() }
+  async dispatchPresenterCommand(command: 'next' | 'previous'): Promise<boolean> {
+    if (!this.world.active()) return false
+    const results = await Promise.all([...(this.presenterListeners.get(command) ?? [])].map(async listener => {
+      try { return await listener() }
+      catch (error) { this.world.report(error instanceof Error ? error.message : String(error)); return false }
+    }))
+    // A void callback confirms delivery only; professional rules return their actual outcome.
+    return results.some(value => value !== false)
+  }
 
   ports(context: ComponentRuntimeContext): ComponentInteractionPorts {
     const { scope } = context, world = this.world
     const currentSurfaceId = () => world.navigation?.read().locationId ?? null
     const currentStateId = () => world.navigation?.currentStateId?.() ?? null
-    const subscribeTrigger = (trigger: InteractionTrigger, listener: (payload?: unknown) => void): (() => void) => {
+    const subscribeTrigger = (trigger: InteractionTrigger, listener: TriggerListener): (() => void) => {
       if (trigger.type === 'animation.completed') return () => {}
       if (trigger.type === 'scene.enter' || trigger.type === 'presentation.enter') {
         let last = trigger.type === 'scene.enter' ? currentSurfaceId() : currentStateId()
-        let stopped = false
+        let stopped = false, initialized = false
+        const initialize = () => {
+          if (stopped || initialized || !scope.isActive() || !world.active() || trigger.type === 'presentation.enter' && last !== trigger.stateId) return
+          initialized = true; void listener()
+        }
         const notify = () => {
           const value = trigger.type === 'scene.enter' ? currentSurfaceId() : currentStateId()
           if (value === last) return
-          last = value
-          if (world.active() && (trigger.type === 'scene.enter' || value === trigger.stateId)) listener()
+          last = value; initialized = false
+          initialize()
         }
         const off = world.navigation?.subscribe(notify) ?? (() => {})
-        queueMicrotask(() => { if (!stopped && scope.isActive() && world.active() && (trigger.type === 'scene.enter' || last === trigger.stateId)) listener() })
+        queueMicrotask(initialize)
         const run = scope.events.subscribe('__runtime.playing', value => {
-          if (value === true && (trigger.type === 'scene.enter' || currentStateId() === trigger.stateId)) listener()
+          if (value === true) initialize()
         })
         const replay = trigger.type === 'scene.enter' ? scope.events.subscribe('__runtime.scene.replay', surfaceId => {
           if (stopped || !scope.isActive() || surfaceId !== currentSurfaceId()) return
@@ -186,7 +201,7 @@ export class ComponentWorldInteractions {
           if (!project) return
           let owner = owningContainer(project, scope.instanceId)
           while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
-          if (owner?.kind === 'surface' && owner.surfaceId === surfaceId) listener()
+          if (owner?.kind === 'surface' && owner.surfaceId === surfaceId) { initialized = true; void listener() }
         }) : () => {}
         return () => { stopped = true; off(); run(); replay() }
       }
@@ -202,7 +217,14 @@ export class ComponentWorldInteractions {
           listener(value.value)
         })
       }
-      if (trigger.type === 'presenter.command') return scope.events.subscribe('__presenter.command', value => { if (world.active() && value === trigger.command) listener() })
+      if (trigger.type === 'presenter.command') {
+        const callbacks = this.presenterListeners.get(trigger.command) ?? new Set()
+        this.presenterListeners.set(trigger.command, callbacks)
+        const invoke = () => scope.isActive() && world.active() && this.canPresent(scope.instanceId) ? listener() : false
+        callbacks.add(invoke)
+        const stop = () => { callbacks.delete(invoke); if (!callbacks.size) this.presenterListeners.delete(trigger.command) }
+        scope.cleanup(stop); return stop
+      }
       if (trigger.type === 'input.submit' || trigger.type === 'node.activated') {
         return scope.events.subscribe(trigger.type, value => {
           if (world.active() && this.canPresent(trigger.nodeId) && value && typeof value === 'object' && !Array.isArray(value) && value.instanceId === trigger.nodeId) listener(value)

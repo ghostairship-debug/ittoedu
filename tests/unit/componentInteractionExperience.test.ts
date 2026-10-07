@@ -4,11 +4,13 @@ import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseP
 import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { ComponentPlatformRuntime } from '../../src/player/components/ComponentPlatformRuntime'
+import { ComponentWorldInteractions } from '../../src/player/components/runtime/ComponentWorldInteractions'
+import { createComponentInteractionRuntime } from '../../src/renderer/interactions/componentInteractionRuntime'
 import { ComponentNavigationOwner } from '../../src/renderer/components/ComponentNavigationOwner'
 import { componentClickInteractionEdits, componentRevealSequenceEdits, componentRuleEdits, interactionBehavior, interactionRules } from '../../src/renderer/interactions/componentInteractionAuthoring'
 import { buildInteractionTemplateRule, SCENE_ENTER_REVEAL_SEQUENCE_TEMPLATE_ID } from '../../src/renderer/interactions/interactionTemplates'
 import { createVideoData } from '../../src/components/media/data'
-import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform'
+import type { ComponentRuntimeContext, JsonValue, CourseProjectV10 } from '../../src/shared/contracts/component-platform'
 import type { InteractionRule, InteractionTrigger } from '../../src/shared/interactionTypes'
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.replaceChildren() })
@@ -31,6 +33,80 @@ function rule(id: string, trigger: InteractionTrigger, delayMs = 0): Interaction
   return { id, name: id, enabled: true, trigger, conditions: [],
     actions: [{ id: `${id}-action`, start: 'after-previous', delayMs, action: { type: 'course-state.set', key: id, value: true } }] }
 }
+function interactionHarness(rules: InteractionRule[] = []) {
+  const base = fixture(), project = apply(base.project, componentRuleEdits(base.project, base.target, rules))
+  const instance = interactionBehavior(project, base.target)!, events = new Map<string, Set<(value: JsonValue) => void>>()
+  const cleanups: (() => void)[] = [], state = new Map<string, JsonValue>(), changed = new Set<() => void>()
+  let playing = true, active = true, surfaceId = base.surface.id
+  const signal = new AbortController(), execute = vi.fn(async () => false)
+  const scope: ComponentRuntimeContext['scope'] = { runScopeId: 'experience', instanceId: instance.id, generation: 1,
+    signal: signal.signal, isActive: () => active, cleanup: dispose => { cleanups.push(dispose) }, target: () => null,
+    events: { emit: (name, value) => { for (const listener of events.get(name) ?? []) listener(value) }, subscribe: (name, listener) => {
+      const listeners = events.get(name) ?? new Set(); events.set(name, listeners); listeners.add(listener)
+      const off = () => { listeners.delete(listener) }; cleanups.push(off); return off
+    } }, state: { get: key => state.get(key), set: (key, value) => { state.set(key, value) }, subscribe: () => () => {} } }
+  const interactions = new ComponentWorldInteractions({ project: () => project, element: () => undefined, document: () => document,
+    audio: () => undefined, active: () => playing, playback: () => true, report() {}, navigation: {
+      read: () => ({ locationId: surfaceId, scenes: [], progress: null, zoom: 1, muted: false, fullscreen: false }),
+      subscribe: listener => { changed.add(listener); return () => { changed.delete(listener) } }, canExecute: () => true, execute,
+      setCollapsed() {}, moveBy() {}, setZoom() {}, resetView() {},
+    } })
+  const context = { instance, scope }, ports = interactions.ports(context)
+  return { context, interactions, ports, state, execute, surfaceId: base.surface.id,
+    setPlaying(value: boolean) { playing = value; if (value) scope.events.emit('__runtime.playing', true) },
+    navigate(id: string) { surfaceId = id; for (const notify of changed) notify() },
+    dispose() { active = false; signal.abort(); for (const cleanup of cleanups) cleanup(); interactions.dispose() } }
+}
+
+it('initializes each enter subscription once on resume, while paused mounts and paused location changes still initialize', async () => {
+  const h = interactionHarness(), enter = vi.fn(), off = h.ports.subscribeTrigger({ type: 'scene.enter' }, enter)
+  try {
+    await Promise.resolve(); expect(enter).toHaveBeenCalledTimes(1)
+    h.setPlaying(false); h.setPlaying(true); expect(enter).toHaveBeenCalledTimes(1)
+    h.setPlaying(false)
+    const later = vi.fn(), stopLater = h.ports.subscribeTrigger({ type: 'scene.enter' }, later)
+    await Promise.resolve(); expect(later).not.toHaveBeenCalled()
+    h.setPlaying(true); expect(enter).toHaveBeenCalledTimes(1); expect(later).toHaveBeenCalledTimes(1)
+    h.setPlaying(false); h.navigate('other'); h.setPlaying(true)
+    expect(enter).toHaveBeenCalledTimes(2); expect(later).toHaveBeenCalledTimes(2)
+    h.navigate(h.surfaceId)
+    h.setPlaying(false); h.context.scope.events.emit('__runtime.scene.replay', h.surfaceId)
+    expect(enter).toHaveBeenCalledTimes(4)
+    h.setPlaying(true); expect(enter).toHaveBeenCalledTimes(4)
+    stopLater()
+  } finally { off(); h.dispose() }
+})
+
+it('returns actual presenter rule outcomes for conditions, rejected navigation, successful terminal actions, cancellation and scope cleanup', async () => {
+  const next = { type: 'presenter.command' as const, command: 'next' as const }, initial = rule('presenter', next)
+  const h = interactionHarness([{ ...initial, conditions: [{ type: 'scene.in', sceneIds: ['other'] }] }])
+  const mounted = await createComponentInteractionRuntime(() => h.ports).mount(h.context)
+  const update = async (changed: InteractionRule) => mounted.update({ ...h.context.instance, data: { rules: [changed] } as unknown as JsonValue })
+  try {
+    expect(await h.interactions.dispatchPresenterCommand('next')).toBe(false)
+    const navigationRule = { ...initial, actions: [{ ...initial.actions[0], action: { type: 'location.go' as const, locationId: h.surfaceId } }] }
+    await update(navigationRule)
+    expect(await h.interactions.dispatchPresenterCommand('next')).toBe(false)
+    let complete!: (value: boolean) => void
+    h.execute.mockImplementationOnce(() => new Promise<boolean>(resolve => { complete = resolve }))
+    const accepted = h.interactions.dispatchPresenterCommand('next')
+    expect(h.execute).toHaveBeenCalledTimes(2)
+    complete(true); expect(await accepted).toBe(true)
+    expect(h.state.has('presenter')).toBe(false)
+    await update(rule('delayed-presenter', next, 30))
+    const cancelled = h.interactions.dispatchPresenterCommand('next')
+    h.context.scope.events.emit('__runtime.scene.reset', h.surfaceId)
+    expect(await cancelled).toBe(false); expect(h.state.has('delayed-presenter')).toBe(false)
+    await update(initial)
+    expect(await h.interactions.dispatchPresenterCommand('next')).toBe(true)
+    expect(h.state.get('presenter')).toBe(true)
+    await mounted.dispose()
+    expect(await h.interactions.dispatchPresenterCommand('next')).toBe(false)
+    const source = vi.fn(), stopSource = h.ports.subscribeTrigger(next, source)
+    expect(await h.interactions.dispatchPresenterCommand('next')).toBe(true); expect(source).toHaveBeenCalledOnce()
+    stopSource(); expect(await h.interactions.dispatchPresenterCommand('next')).toBe(false)
+  } finally { await mounted.dispose(); h.dispose() }
+})
 
 it('consumes actual AudioManager ended and video DOM timeupdate once per threshold, rearming after rewind and retiring subscriptions', async () => {
   const base = fixture()
