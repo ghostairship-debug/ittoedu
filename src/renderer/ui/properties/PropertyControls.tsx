@@ -21,23 +21,123 @@ interface PropertyDraftBindingValue {
 const PropertyDraftBindingContext = createContext<PropertyDraftBindingValue | null>(null)
 
 type PropertyDraftFlush = () => boolean | Promise<boolean>
-const pendingPropertyDrafts = new Set<PropertyDraftFlush>()
+export interface PropertyDraftRecovery {
+  readonly bindingKey: string
+  readonly label: string
+  readonly kind: 'text' | 'number' | 'range' | 'chart' | 'structured'
+  readonly raw: string
+  readonly baseline?: string
+  readonly composing: boolean
+}
+interface PropertyDraftPort {
+  hasDirty(): boolean
+  readDraft(): PropertyDraftRecovery
+  restoreDraft?(draft: PropertyDraftRecovery): void
+}
+type PropertyDraftEntry = { flush: PropertyDraftFlush; read: () => PropertyDraftRecovery | null; dirty: () => boolean;
+  restore?: (draft: PropertyDraftRecovery) => void; mounted?: boolean }
+const pendingPropertyDrafts = new Set<PropertyDraftEntry>()
+const propertyDraftListeners = new Set<() => void>()
+let notificationPending = false
+function notifyPropertyDrafts() {
+  if (notificationPending) return
+  notificationPending = true
+  queueMicrotask(() => { notificationPending = false; for (const listener of propertyDraftListeners) listener() })
+}
+function bindingParts(key: string): unknown[] | null {
+  try { const parts: unknown = JSON.parse(key); return Array.isArray(parts) ? parts : null } catch { return null }
+}
+function belongsToDocument(entry: PropertyDraftEntry, documentId?: string): boolean {
+  return documentId === undefined || bindingParts(entry.read()?.bindingKey ?? '')?.[0] === documentId
+}
+function sameDraftTarget(left: PropertyDraftRecovery, right: PropertyDraftRecovery): boolean {
+  const a = bindingParts(left.bindingKey), b = bindingParts(right.bindingKey)
+  return left.label === right.label && left.kind === right.kind && (a && b
+    ? a[0] === b[0] && JSON.stringify(a.slice(2)) === JSON.stringify(b.slice(2))
+    : left.bindingKey === right.bindingKey)
+}
+
+export function subscribePropertiesDrafts(listener: () => void): () => void {
+  propertyDraftListeners.add(listener)
+  return () => { propertyDraftListeners.delete(listener) }
+}
+export function hasPropertiesDrafts(documentId?: string): boolean {
+  return [...pendingPropertyDrafts].some(entry => belongsToDocument(entry, documentId) && entry.dirty())
+}
+export function preservePropertiesDrafts(documentId: string): PropertyDraftRecovery[] {
+  return [...pendingPropertyDrafts].filter(entry => belongsToDocument(entry, documentId) && entry.dirty())
+    .flatMap(entry => { const draft = entry.read(); return draft ? [draft] : [] })
+}
+/** Called after the existing document owner has preserved or explicitly discarded the input. */
+export function discardPropertiesDrafts(documentId: string): void {
+  for (const entry of [...pendingPropertyDrafts]) if (belongsToDocument(entry, documentId)) pendingPropertyDrafts.delete(entry)
+  notifyPropertyDrafts()
+}
+/** Recovery restores input only. It never replays an authoring command. */
+export function restorePropertiesDrafts(documentId: string, records: readonly PropertyDraftRecovery[]): void {
+  for (const record of records) {
+    const parts = bindingParts(record.bindingKey)
+    if (!parts) continue
+    const draft = { ...record, bindingKey: JSON.stringify([documentId, ...parts.slice(1)]), composing: false }
+    const existing = [...pendingPropertyDrafts].find(entry => entry.read() && sameDraftTarget(entry.read()!, draft))
+    if (existing) {
+      if (!existing.dirty()) existing.restore?.({ ...draft, bindingKey: existing.read()!.bindingKey })
+      continue
+    }
+    pendingPropertyDrafts.add({ flush: () => false, read: () => draft, dirty: () => true })
+  }
+  notifyPropertyDrafts()
+}
 
 /** Saving commits focused property drafts without moving focus. IME retains its native composition. */
-export async function flushPropertiesDrafts(): Promise<boolean> {
+export async function flushPropertiesDrafts(documentId?: string): Promise<boolean> {
   let complete = true
-  for (const flush of [...pendingPropertyDrafts]) if (!await flush()) complete = false
+  for (const entry of [...pendingPropertyDrafts]) {
+    if (!belongsToDocument(entry, documentId)) continue
+    const before = entry.read()?.raw
+    let finished = await entry.flush()
+    // A newer edit arriving during the ACK is new work, not a retry of the old command.
+    if (!finished && entry.dirty() && before !== entry.read()?.raw) finished = await entry.flush()
+    if (!finished) complete = false
+    if (entry.mounted === false && !entry.dirty()) pendingPropertyDrafts.delete(entry)
+  }
+  notifyPropertyDrafts()
   return complete
 }
 
-export function usePropertyDraftFlush(flush: PropertyDraftFlush): void {
-  const current = useRef(flush)
-  current.current = flush
+export function usePropertyDraftFlush(flush: PropertyDraftFlush, port?: PropertyDraftPort): void {
+  const binding = useContext(PropertyDraftBindingContext)?.key ?? 'unbound'
+  const current = useRef({ flush, port, binding })
+  current.current = { flush, port, binding }
+  const lastDraft = useRef('')
   useLayoutEffect(() => {
-    const run = () => current.current()
-    pendingPropertyDrafts.add(run)
-    return () => { pendingPropertyDrafts.delete(run) }
+    const entry: PropertyDraftEntry = { flush: () => current.current.flush(),
+      read: () => current.current.port?.readDraft() ?? { bindingKey: current.current.binding, label: '', kind: 'text', raw: '', composing: false },
+      dirty: () => current.current.port?.hasDirty() ?? false,
+      restore: record => current.current.port?.restoreDraft?.(record), mounted: true }
+    const target = entry.read()
+    if (target && current.current.port?.restoreDraft) {
+      for (const saved of [...pendingPropertyDrafts]) {
+        const record = saved.read()
+        if (saved.dirty() && record && sameDraftTarget(record, target)) {
+          pendingPropertyDrafts.delete(saved)
+          current.current.port.restoreDraft({ ...record, bindingKey: target.bindingKey, composing: false })
+          break
+        }
+      }
+    }
+    pendingPropertyDrafts.add(entry)
+    return () => {
+      entry.mounted = false
+      // A panel disappearing is navigation, not permission to discard its input.
+      if (!entry.dirty() || !bindingParts(entry.read()?.bindingKey ?? '')) pendingPropertyDrafts.delete(entry)
+      notifyPropertyDrafts()
+    }
   }, [])
+  useLayoutEffect(() => {
+    const next = port?.hasDirty() ? JSON.stringify(port.readDraft()) : ''
+    if (lastDraft.current !== next) { lastDraft.current = next; notifyPropertyDrafts() }
+  })
 }
 
 export function usePropertyDraftBindingKey(): string {
@@ -76,6 +176,7 @@ interface BufferedInputProps {
   title?: string
   placeholder?: string
   allowEmpty?: boolean
+  validate?(value: string): string | null
   onCommit(value: string): void | Promise<void>
 }
 
@@ -90,6 +191,7 @@ export function BufferedInput({
   title,
   placeholder,
   allowEmpty = false,
+  validate,
   onCommit,
 }: BufferedInputProps) {
   const draftBinding = useContext(PropertyDraftBindingContext)
@@ -190,21 +292,31 @@ export function BufferedInput({
     const session = sessionRef.current
     if (session.pending) return session.pending
     if (rejectStale()) return false
+    if (candidate === session.baseline) {
+      session.phase = 'idle'
+      setCommitError('')
+      return true
+    }
     let next = candidate
     if (type === 'number') {
       const parsed = Number(candidate)
-      if (!Number.isFinite(parsed)) {
-        rebaseCurrent()
-        return true
+      if (!candidate.trim() || !Number.isFinite(parsed)) {
+        setCommitError('请输入完整的有效数值；输入已保留。')
+        return false
       }
-      const clamped = Math.min(max ?? Infinity, Math.max(min ?? -Infinity, parsed))
-      next = String(clamped)
+      if (parsed < (min ?? -Infinity) || parsed > (max ?? Infinity)) {
+        setCommitError(`数值应在 ${min ?? '−∞'} 到 ${max ?? '∞'} 之间；输入已保留。`)
+        return false
+      }
+      next = String(parsed)
     } else if (allowEmpty || candidate.trim()) {
       next = candidate.trim()
     } else {
-      rebaseCurrent()
-      return true
+      setCommitError('请输入非空内容；输入已保留。')
+      return false
     }
+    const reason = validate?.(next)
+    if (reason) { setCommitError(reason); return false }
     const callback = session.onCommit
     const changed = next !== session.baseline
     session.draft = next
@@ -244,6 +356,18 @@ export function BufferedInput({
     if (session.phase === 'idle') return true
     if (session.phase === 'composing' || session.phase === 'blur-pending' || rejectStale()) return false
     return commit()
+  }, {
+    hasDirty: () => Boolean(sessionRef.current.pending) || sessionRef.current.draft !== sessionRef.current.baseline
+      || sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending',
+    readDraft: () => ({ bindingKey: sessionRef.current.bindingKey, label, kind: type, raw: sessionRef.current.draft,
+      baseline: sessionRef.current.baseline, composing: sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending' }),
+    restoreDraft: record => {
+      sessionRef.current.phase = 'editing'
+      sessionRef.current.bindingKey = record.bindingKey
+      sessionRef.current.baseline = record.baseline ?? currentValue
+      sessionRef.current.draft = record.raw
+      setDraft(record.raw)
+    },
   })
   return (
     <div className="form-field">
@@ -251,7 +375,12 @@ export function BufferedInput({
       <input
         className="form-input"
         aria-label={label}
-        type={type}
+        type={type === 'number' ? 'text' : type}
+        inputMode={type === 'number' ? 'decimal' : undefined}
+        role={type === 'number' ? 'spinbutton' : undefined}
+        aria-valuenow={type === 'number' && draft.trim() && Number.isFinite(Number(draft)) ? Number(draft) : undefined}
+        aria-valuemin={type === 'number' ? min : undefined}
+        aria-valuemax={type === 'number' ? max : undefined}
         value={draft}
         min={min}
         max={max}
@@ -273,6 +402,7 @@ export function BufferedInput({
           if (rejectStale()) return
           if (sessionRef.current.phase === 'idle') beginSession()
           sessionRef.current.phase = 'composing'
+          setSessionEpoch(epoch => epoch + 1)
         }}
         onCompositionEnd={(event) => {
           if (rejectStale()) {
@@ -287,6 +417,7 @@ export function BufferedInput({
           session.phase = 'editing'
           session.draft = next
           setDraft(next)
+          setSessionEpoch(epoch => epoch + 1)
           if (shouldCommit) commit(next)
         }}
         onBlur={() => {
@@ -305,6 +436,15 @@ export function BufferedInput({
             || session.phase === 'blur-pending'
             || event.nativeEvent.isComposing
           ) return
+          if (type === 'number' && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
+            if (rejectStale() || !session.draft.trim() || !Number.isFinite(Number(session.draft))) return
+            event.preventDefault()
+            if (session.phase === 'idle') beginSession()
+            const next = Math.min(max ?? Infinity, Math.max(min ?? -Infinity,
+              Number(session.draft) + (event.key === 'ArrowUp' ? 1 : -1) * (step ?? 1)))
+            session.draft = String(Number(next.toPrecision(15)))
+            setDraft(session.draft)
+          }
           if (event.key === 'Enter') {
             commit()
             event.currentTarget.blur()
@@ -481,6 +621,17 @@ export function RangeField({
     if (rejectStale()) return false
     commit(sessionRef.current.draft)
     return true
+  }, {
+    hasDirty: () => sessionRef.current.active && sessionRef.current.draft !== sessionRef.current.baseline,
+    readDraft: () => ({ bindingKey: sessionRef.current.bindingKey, label, kind: 'range', raw: String(sessionRef.current.draft),
+      baseline: String(sessionRef.current.baseline), composing: false }),
+    restoreDraft: record => {
+      sessionRef.current.active = true
+      sessionRef.current.bindingKey = record.bindingKey
+      sessionRef.current.baseline = Number(record.baseline ?? value)
+      sessionRef.current.draft = Number(record.raw)
+      setDraft(sessionRef.current.draft)
+    },
   })
   return (
     <div className="form-field range-field">
@@ -726,6 +877,20 @@ export function TextContentTextarea({
     if (session.phase === 'composing' || session.phase === 'blur-pending' || rejectStale()) return false
     finishCommit()
     return true
+  }, {
+    hasDirty: () => sessionRef.current.draft !== sessionRef.current.baseline
+      || sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending',
+    readDraft: () => ({ bindingKey: sessionRef.current.bindingKey, label, kind: 'text', raw: sessionRef.current.draft,
+      baseline: sessionRef.current.baseline, composing: sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending' }),
+    restoreDraft: record => {
+      sessionRef.current.phase = 'editing'
+      sessionRef.current.bindingKey = record.bindingKey
+      sessionRef.current.baseline = record.baseline ?? value
+      sessionRef.current.draft = record.raw
+      setDraft(record.raw)
+      sessionRef.current.onBegin()
+      sessionRef.current.onChange(record.raw)
+    },
   })
 
   const finishComposition = (finalDraft: string) => {
