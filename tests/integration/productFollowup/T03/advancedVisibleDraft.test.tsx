@@ -90,13 +90,14 @@ it('prepares unmounted source and object JSON visible inputs through the real V1
   expect((await h.host.internalAPI.read(h.initial.documentId)).undoDepth).toBe(1)
 })
 
-it('preserves an incomplete source as raw recovery input on a fresh Bridge without submitting or executing it', async () => {
+it('preserves unfinished IME source as raw recovery input on a fresh Bridge until the user resumes input', async () => {
   const h = await fixture(), editor = h.render(<Source bridge={h.bridge} />)
   const area = h.screen.getByRole('textbox', { name: '组件实现源码' })
   h.fireEvent.compositionStart(area); h.fireEvent.change(area, { target: { value: 'export const value =' } })
   expect(await courseDraftLifecycle(h.bridge).prepare(h.initial.documentId)).toMatchObject({ ready: false })
   const recovered = JSON.parse(JSON.stringify(courseDraftLifecycle(h.bridge).preserve(h.initial.documentId)))
   expect(recovered).toHaveLength(1)
+  expect(recovered[0]).toMatchObject({ kind: 'source', payload: { composing: true } })
   editor.unmount()
   const coldHost = new DocumentHostService(path.join(h.directory, 'cold-raw'))
   const coldDoc = await coldHost.internalAPI.create(h.initial.model, 'lesson.h5lesson')
@@ -108,6 +109,62 @@ it('preserves an incomplete source as raw recovery input on a fresh Bridge witho
   expect((await coldHost.internalAPI.read(coldDoc.documentId)).undoDepth).toBe(0)
   expect((await coldHost.internalAPI.read(coldDoc.documentId)).revision).toBe(coldDoc.revision)
   expect(await courseDraftLifecycle(coldBridge).prepare(coldDoc.documentId)).toMatchObject({ ready: false })
+  expect((await coldHost.internalAPI.read(coldDoc.documentId)).revision).toBe(coldDoc.revision)
+})
+
+it('ordinary source preparation saves its exact string without imposing a runtime syntax gate', async () => {
+  const h = await fixture()
+  const editor = h.render(<Source bridge={h.bridge} />)
+  const raw = 'export const value ='
+  h.fireEvent.change(h.screen.getByRole('textbox', { name: '组件实现源码' }), { target: { value: raw } })
+  editor.unmount()
+  await h.act(async () => expect(await courseDraftLifecycle(h.bridge).prepare(h.initial.documentId)).toMatchObject({ ready: true }))
+  const current = await h.host.internalAPI.read(h.initial.documentId)
+  expect(current.undoDepth).toBe(1)
+  expect(decode(current.model.resources.components.code['main.js'])).toBe(raw)
+  const filename = path.join(h.directory, 'source-string.h5lesson')
+  await h.host.saveToPath(h.initial.documentId, filename)
+  const reopened = await new DocumentHostService(path.join(h.directory, 'syntax-cold')).open(filename)
+  expect(decode(reopened.model.resources.components.code['main.js'])).toBe(raw)
+  // Running this string belongs to the runtime preparation consumer; this save proof makes no runtime-success claim.
+})
+
+it.each(['source', 'json'] as const)('a %s recovery arriving after its clean panel is mounted shows original pending input without History', async kind => {
+  const h = await fixture()
+  const { useEditorStore } = await import('../../../../src/renderer/store/editorStore')
+  const { createEditorStoreKernel } = await import('../../../../src/renderer/store/editorStoreKernel')
+  const { DeveloperTab } = await import('../../../../src/renderer/ui/DeveloperTab')
+  const previous = useEditorStore.getState()
+  disposers.push(async () => { useEditorStore.setState(previous, true) })
+  const mount = (bridge: CourseV10DocumentBridge) => {
+    if (kind === 'source') return h.render(<Source bridge={bridge} />)
+    const kernel = createEditorStoreKernel({ bridge, commit: patch => useEditorStore.setState(patch) })
+    useEditorStore.setState({ courseView: bridge.read(), courseBridge: bridge, courseKernel: kernel, editingScope: 'scene' })
+    const unsubscribe = bridge.subscribe(() => useEditorStore.setState({ courseView: bridge.read() }))
+    disposers.push(async () => { unsubscribe() })
+    const view = h.render(<DeveloperTab />)
+    h.fireEvent.click(h.screen.getByRole('tab', { name: /对象 JSON/ }))
+    return view
+  }
+  const label = kind === 'source' ? '组件实现源码' : '所选对象 · A'
+  const raw = kind === 'source' ? 'export const value = 99;' : '{"id":"a","data":'
+  const originalView = mount(h.bridge)
+  h.fireEvent.compositionStart(h.screen.getByRole('textbox', { name: label }))
+  h.fireEvent.change(h.screen.getByRole('textbox', { name: label }), { target: { value: raw } })
+  const records = JSON.parse(JSON.stringify(courseDraftLifecycle(h.bridge).preserve(h.initial.documentId)))
+  expect(records).toEqual([expect.objectContaining({ kind, payload: expect.objectContaining({ composing: true }) })])
+  originalView.unmount()
+  const restoredHost = new DocumentHostService(path.join(h.directory, `late-${kind}`))
+  const restoredDoc = await restoredHost.internalAPI.create(h.initial.model, 'lesson.h5lesson')
+  const restoredBridge = new CourseV10DocumentBridge(); disposers.push(async () => restoredBridge.dispose())
+  await restoredBridge.connect(api(restoredHost, restoredDoc)); restoredBridge.selectInstances(restoredDoc.documentId, ['a'], 'page')
+  mount(restoredBridge)
+  expect((h.screen.getByRole('textbox', { name: label }) as HTMLTextAreaElement).value).not.toBe(raw)
+  await h.act(async () => expect(courseDraftLifecycle(restoredBridge).restore(restoredDoc.documentId, records)).toMatchObject({ restored: 1, issues: [] }))
+  await h.waitFor(() => expect(h.screen.getByRole('textbox', { name: label })).toHaveValue(raw))
+  expect(await restoredHost.internalAPI.read(restoredDoc.documentId)).toMatchObject({ revision: restoredDoc.revision, undoDepth: 0 })
+  expect(await courseDraftLifecycle(restoredBridge).prepare(restoredDoc.documentId)).toMatchObject({ ready: false })
+  expect(await restoredHost.internalAPI.read(restoredDoc.documentId)).toMatchObject({ revision: restoredDoc.revision, undoDepth: 0 })
 })
 
 it('unchanged Developer JSON creates no History and incomplete JSON restores verbatim without automatic application', async () => {

@@ -45,6 +45,8 @@ it('restores IME text into an already mounted control without replaying a comman
   await act(async () => restorePropertiesDrafts('teacher-doc', persisted))
   expect(screen.getByLabelText('名称')).toHaveValue('中文未完')
   expect(commit).not.toHaveBeenCalled()
+  await act(async () => expect(await flushPropertiesDrafts('teacher-doc')).toBe(false))
+  expect(commit).not.toHaveBeenCalled()
   fireEvent.change(screen.getByLabelText('名称'), { target: { value: '中文完成' } })
   await act(async () => expect(await flushPropertiesDrafts('teacher-doc')).toBe(true))
   expect(commit).toHaveBeenCalledExactlyOnceWith('中文完成')
