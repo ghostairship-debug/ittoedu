@@ -26,6 +26,8 @@ export interface PublishedComponentPlayerOptions {
   initialStateId?: string | null
   capture?: boolean
   keyboardNavigation?: boolean
+  /** A package host may supply captured local bytes; the existing runtime owns their URLs and lifetime. */
+  preparedAssetBytes?: Readonly<Record<string, Uint8Array>>
   /** Internal isolated capture transport; no privileged API is installed in its renderer. */
   componentBootstrap?: ComponentBootstrapTransport
 }
@@ -52,11 +54,17 @@ function embeddedAssetBytes(url: string): Uint8Array {
 
 export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, options: PublishedComponentPlayerOptions = {}) {
   const payload = publishedCourseV3Schema.parse(value), model = publishedComponentModel(payload)
+  model.resources.assets = { ...options.preparedAssetBytes }
   const resourceController = new AbortController(), requested = new Set<string>()
   const resourceJobs = new Set<Promise<void>>(), pendingAssets = new Set<string>(), resourceFailures = new Map<string, Error>()
   // Public resources.url(assetId) is valid without optional source-token bindings.
   // Enumerating this read-only projection never fetches or decodes an asset.
-  const publishedResourceUrls = Object.fromEntries(Object.entries(payload.assets).flatMap(([id, asset]) => asset.url ? [[id, asset.url]] : []))
+  const publishedResourceUrls = Object.fromEntries(Object.entries(payload.assets).flatMap(([id, asset]) => {
+    if (!asset.url) return []
+    // Resource references are relative to the package host, never to an opaque component realm.
+    try { return [[id, new URL(asset.url, root.ownerDocument.baseURI).href]] }
+    catch { return [[id, asset.url]] }
+  }))
   let surfaceId = payload.surfaces.find(surface => surface.id === options.initialSurfaceId)?.id ?? payload.surfaces[0]?.id ?? null
   let stateId = options.initialStateId === undefined ? payload.surfaces.find(surface => surface.id === surfaceId)?.presentation?.initialStateId ?? null : options.initialStateId
   let player!: ReturnType<typeof mountV10Model>, stopped = false
@@ -80,7 +88,7 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
     pendingAssets.add(id)
     const job = (async () => {
       try {
-        const response = await fetch(asset.url!, { signal: resourceController.signal })
+        const response = await fetch(publishedResourceUrls[id], { signal: resourceController.signal })
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         const bytes = new Uint8Array(await response.arrayBuffer())
         if (stopped) return
@@ -153,7 +161,7 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
     },
     resolveBuiltin: (_key, signal) => prepareSandboxComponent({ format: 'esm', code: webContentRealmSource(), css: '', diagnostics: [] }, signal,
       { builtinKey: _key, state: () => player.runtime.stateSnapshot(), targets: profile => player.runtime.targetSnapshots(profile), teacherController,
-        instance: instance => resolveWebResourceBindings(instance, id => payload.assets[id]?.url ?? player.runtime.contentAssetUrl(id), options.report), htmlAuthoring: true,
+        instance: instance => resolveWebResourceBindings(instance, id => player.runtime.contentAssetUrl(id) ?? publishedResourceUrls[id], options.report), htmlAuthoring: true,
         connectOrigins: () => model.project.logic?.network?.connectOrigins ?? [], themeCss: () => player.runtime.themeCss(), resources: () => ({ ...publishedResourceUrls, ...player.runtime.resourceUrls() }), bootstrap: options.componentBootstrap }),
   })
   try { await player.ready }
