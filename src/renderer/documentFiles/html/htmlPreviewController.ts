@@ -166,6 +166,10 @@ export class HtmlPreviewController {
   async editGeometry(geometry: NonNullable<NonNullable<HtmlTargetReport['authoring']>['record']['overrides']['geometry']>): Promise<HtmlPreviewEditOutcome> {
     return this.edit({ kind: 'geometry', geometry })
   }
+  previewGeometry(authorKey: string, geometry: NonNullable<NonNullable<HtmlTargetReport['authoring']>['record']['overrides']['geometry']> | null): void {
+    if (!this.active) return
+    this.iframe.contentWindow?.postMessage({ type: 'html-preview.authoring-preview', loadId: this.lease.loadId, authorKey, geometry }, '*')
+  }
   async editImage(image: { name: string; mimeType: string; bytes: Uint8Array }): Promise<HtmlPreviewEditOutcome> {
     return this.edit({ kind: 'image', ...image, bytes: Uint8Array.from(image.bytes) })
   }

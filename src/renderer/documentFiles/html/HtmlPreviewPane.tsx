@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type ReactNode, type PointerEvent as ReactPointerEvent } from 'react'
 import { decodeHtmlEntities, scanHtmlSource } from '../../../shared/html/htmlSourceScanner'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import type { HtmlPreviewLease } from '../../../shared/workbench/htmlPreview'
@@ -8,6 +8,10 @@ import type { HtmlTextDrafts } from './htmlTextDrafts'
 import './htmlPreview.css'
 import { HtmlStructureEditor } from './HtmlStructureEditor'
 import { extractHtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
+import { LocalAuthorTransformGesture } from '../../componentPlatform/surfaces/slide/freeTransformGesture'
+import { frameToSpaceMatrix, transformPoint } from '../../../core/components/geometry'
+import type { ComponentFrame } from '../../../shared/contracts/component-platform/frame'
+import type { ComponentAuthorGeometry } from '../../../shared/contracts/component-platform/runtime'
 
 type Patch = { handle: string; kind: 'text' | 'image'; value: string }
 type ChangeRecord = { revision: number; beforeSource: string; afterSource?: string; beforeValue: string; patch: Patch }
@@ -77,6 +81,62 @@ export function HtmlPreviewPane({ lease, committed, textDrafts, onUndo, onRedo, 
   const [modePending, setModePending] = useState(false)
   const [editMode, setEditMode] = useState(false)
   const [structureOpen, setStructureOpen] = useState(false)
+  const [gestureFrame, setGestureFrame] = useState<ComponentFrame | null>(null)
+  const transform = useRef<{ pointerId: number; authorKey: string; broker: HtmlPreviewController; gesture: LocalAuthorTransformGesture; geometry: ComponentAuthorGeometry | null } | null>(null)
+  const cancelTransform = () => {
+    const current = transform.current
+    if (current) current.broker.previewGeometry(current.authorKey, null)
+    transform.current = null; setGestureFrame(null)
+  }
+  useEffect(() => { if (!active || !selected) cancelTransform() }, [active, selected?.report.handle])
+  useEffect(() => () => { const current = transform.current; if (current) current.broker.previewGeometry(current.authorKey, null); transform.current = null }, [])
+  const beginTransform = (event: ReactPointerEvent<HTMLButtonElement>, mode: 'drag' | 'resize') => {
+    const geometry = selected?.report.geometry, authorKey = selected?.report.authoring?.authorKey, iframe = frame.current
+    if (!geometry || !authorKey || !iframe || !controller.current || event.button !== 0 || transform.current) return
+    const box = iframe.getBoundingClientRect(), sx = box.width / iframe.offsetWidth, sy = box.height / iframe.offsetHeight
+    try {
+      transform.current = { pointerId: event.pointerId, authorKey, broker: controller.current, geometry: null,
+        gesture: new LocalAuthorTransformGesture({ geometry, kind: selected!.report.kind, mode,
+          ...(mode === 'resize' ? { handle: 'se' as const } : {}), rootToSurface: [1, 0, 0, 1, 0, 0],
+          surfaceToPointer: [sx, 0, 0, sy, box.left + iframe.clientLeft * sx, box.top + iframe.clientTop * sy],
+          pointer: { x: event.clientX, y: event.clientY } }) }
+      event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId)
+      setGestureFrame(geometry.frame)
+    } catch (reason) { setIssue(reason instanceof Error ? reason.message : String(reason)); cancelTransform() }
+  }
+  const updateTransform = (event: ReactPointerEvent) => {
+    const current = transform.current
+    if (!current || event.pointerId !== current.pointerId) return
+    const result = current.gesture.update({ x: event.clientX, y: event.clientY }, { shift: event.shiftKey, alt: event.altKey })
+    current.geometry = result.geometry
+    setGestureFrame(result.frame)
+    current.broker.previewGeometry(current.authorKey, result.geometry)
+    event.preventDefault(); event.stopPropagation()
+  }
+  const finishTransform = async (event: ReactPointerEvent) => {
+    const current = transform.current
+    if (!current || event.pointerId !== current.pointerId) return
+    transform.current = null
+    event.preventDefault(); event.stopPropagation()
+    try {
+      if (current.geometry && Object.keys(current.geometry).length) {
+        const result = await current.broker.editGeometry(current.geometry)
+        if (result?.status === 'rejected') setIssue('对象已变化，位置未应用；请重新选择。')
+      }
+    } catch (reason) { setIssue(reason instanceof Error ? reason.message : String(reason)) }
+    finally { current.broker.previewGeometry(current.authorKey, null); setGestureFrame(null) }
+  }
+  const selectedBox = (() => {
+    const geometry = selected?.report.geometry, iframe = frame.current, owner = container.current
+    if (!geometry || !iframe || !owner) return null
+    const local = gestureFrame ?? geometry.frame, matrix = frameToSpaceMatrix(local, geometry.parentToInstance)
+    const points = [{ x: 0, y: 0 }, { x: local.width, y: 0 }, { x: 0, y: local.height }, { x: local.width, y: local.height }].map(point => transformPoint(matrix, point))
+    const box = iframe.getBoundingClientRect(), outer = owner.getBoundingClientRect()
+    const sx = box.width / iframe.offsetWidth, sy = box.height / iframe.offsetHeight
+    const xs = points.map(point => box.left - outer.left + (point.x + iframe.clientLeft) * sx)
+    const ys = points.map(point => box.top - outer.top + (point.y + iframe.clientTop) * sy)
+    return { left: Math.min(...xs), top: Math.min(...ys), width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys) }
+  })()
   useEffect(() => {
     if (!active) return
     const onTrustedHistory = (event: Event) => {
@@ -202,7 +262,8 @@ export function HtmlPreviewPane({ lease, committed, textDrafts, onUndo, onRedo, 
   useEffect(() => { controller.current?.setVisibility(active) }, [active, lease.leaseId, lease.loadId])
   useEffect(() => { if (active && stale) refreshPreservingView() }, [active, stale, lease.url])
 
-  return <div ref={container} className="html-preview-pane">
+  return <div ref={container} className="html-preview-pane" onPointerMove={updateTransform} onPointerUp={event => void finishTransform(event)}
+    onPointerCancel={cancelTransform} onKeyDown={event => { if (event.key === 'Escape' && transform.current) cancelTransform() }}>
     <div className="html-preview-pane__toolbar" role="toolbar" aria-label="HTML 分页">
       {toolbarLeading}
       <button type="button" className="html-preview-pane__edit" title="编辑模式中单击文字或图片，Esc 关闭编辑框" aria-pressed={editMode} disabled={!frameReady || modePending} onClick={() => {
@@ -236,6 +297,15 @@ export function HtmlPreviewPane({ lease, committed, textDrafts, onUndo, onRedo, 
     {structureOpen && <HtmlStructureEditor committed={committed} lease={lease}
       pendingDraft={pendingSourceDraft || retainedDrafts.length > 0} loading={!frameReady} />}
     </div>
+    {selectedBox && active && selected?.resolved.status === 'editable' && <div aria-label="HTML 内部对象变换"
+      style={{ ...selectedBox, position: 'absolute', border: '1px solid #1677ff', pointerEvents: 'none', boxSizing: 'border-box', zIndex: 10 }}>
+      <button type="button" aria-label="移动 HTML 内部对象" onPointerDown={event => beginTransform(event, 'drag')}
+        onLostPointerCapture={() => { if (transform.current) cancelTransform() }}
+        style={{ position: 'absolute', left: 0, top: -25, pointerEvents: 'auto', cursor: 'move', touchAction: 'none' }}>移动</button>
+      <button type="button" aria-label={selected.report.kind === 'text' ? '调整 HTML 文字内容盒' : '缩放 HTML 图片'} onPointerDown={event => beginTransform(event, 'resize')}
+        onLostPointerCapture={() => { if (transform.current) cancelTransform() }}
+        style={{ position: 'absolute', right: -6, bottom: -6, width: 12, height: 12, padding: 0, background: '#1677ff', pointerEvents: 'auto', cursor: 'nwse-resize', touchAction: 'none' }} />
+    </div>}
     {selected && <HtmlLightEditOverlay target={selected} committed={committed} position={position}
       value={textDrafts.find(selected, source)?.value ?? selected.report.rawText}
       onValue={value => textDrafts.change(selected, source, value)}

@@ -12,6 +12,9 @@ import type { HtmlSelectedTarget } from '../../src/renderer/documentFiles/html/h
 import type { HtmlPreviewEditContext } from '../../src/main/workbench/htmlPreview/HtmlPreviewService'
 import { inspectHtmlSource, flattenHtmlSourceNodes } from '../../src/shared/html/htmlSourceStructure'
 import { mountHtmlPreviewAgent } from '../../src/player/htmlPreview/htmlPreviewAgent'
+import { createElement } from 'react'
+import { act, fireEvent, render, waitFor } from '@testing-library/react'
+import { HtmlPreviewPane } from '../../src/renderer/documentFiles/html/HtmlPreviewPane'
 
 function observation() {
   const container = document.createElement('div'); document.body.append(container)
@@ -301,6 +304,56 @@ it('keeps runtime classes through an unrelated source edit and a move into a run
     expect((doc.querySelector('#b') as HTMLElement).style.translate).toContain('25px')
     ;(doc.defaultView as any).__cwHtmlAuthoringConsumer.dispose()
   } finally { frame.remove() }
+})
+
+it('compiles one real HTML pointer stream through the iframe and parent matrices into one Session history', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  const source = '<html><body><p id="title">Hello</p></body></html>'
+  const driver = new TextDriver()
+  const session = await DocumentSession.create({ documentId: 'doc', epoch: 'epoch', model: driver.load(new TextEncoder().encode(source)),
+    binding: { kind: 'file', path: 'sample.html', version: null, bindingVersion: 1 } }, driver,
+    { async append() {}, async save(input) { return input.binding as Extract<typeof input.binding, { kind: 'file' }> } })
+  const lease = { leaseId: 'lease', documentId: 'doc', epoch: 'epoch', revision: 0, bindingVersion: 1, loadId: 'load', url: 'about:blank' }
+  const service = new HtmlSourceEditService({ async readDocument() { return session.read() }, execute: op => session.execute(op), withFileAccess: work => work() })
+  const context = () => ({ lease, tabId: 'tab', entryRealPath: 'sample.html', rootRealPath: '.', bindingPath: 'sample.html', snapshot: session.read() })
+  const previous = window.desktopAPI
+  const requests: string[] = []
+  Reflect.set(window, 'desktopAPI', { workspaceFiles: async (request: Parameters<typeof service.edit>[0] | Parameters<typeof service.resolveTarget>[0]) => {
+    requests.push(request.type)
+    if (request.type === 'html-preview.resolve-target') return service.resolveTarget(request, context())
+    return service.edit(request, context())
+  } })
+  const view = render(createElement(HtmlPreviewPane, { lease, committed: session.read(), tabId: 'tab', textDrafts: new HtmlTextDrafts(), onUndo() {}, onRedo() {} }))
+  const iframe = view.getByTitle('HTML 预览') as HTMLIFrameElement
+  Object.defineProperty(iframe, 'offsetWidth', { configurable: true, value: 400 })
+  Object.defineProperty(iframe, 'offsetHeight', { configurable: true, value: 200 })
+  iframe.getBoundingClientRect = () => ({ x: 100, y: 50, left: 100, top: 50, width: 400, height: 200, right: 500, bottom: 250, toJSON() {} })
+  const posted = vi.spyOn(iframe.contentWindow!, 'postMessage').mockImplementation(() => {})
+  const report = { handle: 'title', kind: 'text', domPath: [{ name: 'html', index: 0 }, { name: 'body', index: 1 }, { name: 'p', index: 0 }],
+    sectionOrder: null, rawText: 'Hello', attributeName: null, rect: { x: 20, y: 40, width: 200, height: 40 }, scriptCreated: false, bindingStatus: 'bound',
+    authoring: { authorKey: 'title-key', record: { kind: 'text', binding: { kind: 'dom', path: [{ tag: 'body', index: 1 }, { tag: 'p', index: 0, attributes: { id: 'title' } }], textIndex: 0, baseline: 'Hello' }, overrides: {} } },
+    geometry: { frame: { width: 100, height: 20, transform: [1, 0, 0, 1, 10, 20] }, parentToInstance: [2, 0, 0, 2, 0, 0], author: {}, boxInsets: { width: 0, height: 0 } } }
+  try {
+    await act(async () => window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow,
+      data: { event: 'targets', protocol: 1, leaseId: 'lease', loadId: 'load', seq: 1, targets: [report] } })))
+    const handle = await view.findByLabelText('移动 HTML 内部对象') as HTMLButtonElement
+    handle.setPointerCapture = () => {}
+    const pointer = (type: string, x: number, y: number) => {
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y })
+      Object.defineProperty(event, 'pointerId', { value: 1 }); return event
+    }
+    fireEvent(handle, pointer('pointerdown', 120, 90))
+    fireEvent(handle, pointer('pointermove', 140, 100))
+    fireEvent(handle, pointer('pointermove', 160, 110))
+    expect(session.read().undoDepth).toBe(0)
+    fireEvent(handle, pointer('pointerup', 160, 110))
+    await waitFor(() => expect(session.read().undoDepth).toBe(1))
+    expect(requests.filter(type => type === 'html-preview.edit')).toHaveLength(1)
+    const saved = session.read().model
+    if (saved.kind !== 'text') throw new Error('text')
+    expect(readHtmlAuthoringRecords(saved.source)['title-key'].overrides.geometry).toMatchObject({ translateX: 20, translateY: 10 })
+    expect(posted.mock.calls.map(call => call[0]).filter(item => item.type === 'html-preview.authoring-preview')).toHaveLength(3)
+  } finally { view.unmount(); posted.mockRestore(); Reflect.set(window, 'desktopAPI', previous); vi.unstubAllGlobals() }
 })
 
 it('keeps the other anchored object width when moving a repeated sibling then styling the moved object', async () => {
