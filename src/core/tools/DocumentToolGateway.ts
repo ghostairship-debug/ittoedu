@@ -850,7 +850,8 @@ export class DocumentToolGateway implements ToolGateway {
     return `tool:${documentDigest({ runId, callId })}`
   }
   private captureOperationLeases(runId: string, operationId: string): void {
-    if (!this.operationLeases.has(operationId)) this.operationLeases.set(operationId, { runId, leases: new Map(this.run(runId).documentLeases) })
+    const run = this.run(runId)
+    if (!run.stopped && !this.operationLeases.has(operationId)) this.operationLeases.set(operationId, { runId, leases: new Map(run.documentLeases) })
   }
   private operationLease(runId: string, operationId: string, documentId: string): string {
     const run = this.run(runId)
@@ -1142,7 +1143,7 @@ export class DocumentToolGateway implements ToolGateway {
       this.captureOperationLeases(runId, operationId)
       const previousDigest = this.callDigests.get(key)?.digest
       if (previousDigest && previousDigest !== digest) return Promise.resolve({ kind: 'error', code: 'operation-payload-mismatch', message: '同一调用编号不能提交不同内容' })
-      this.callDigests.set(key, { runId, digest, retain: toolRegistration(input.name)?.effect !== null })
+      if (!this.run(runId).stopped) this.callDigests.set(key, { runId, digest, retain: toolRegistration(input.name)?.effect !== null })
       const pending = this.pending.get(key)
       if (pending) return pending.digest === digest ? pending.result : Promise.resolve({ kind: 'error', code: 'operation-payload-mismatch', message: '同一调用编号不能提交不同内容' })
       const result = this.invoke(runId, operationId, digest, call, input).catch(error => this.error(error))
