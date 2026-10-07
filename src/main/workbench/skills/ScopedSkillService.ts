@@ -5,7 +5,7 @@ import { parseDocument } from 'yaml'
 import type { SkillServicePort, SkillReadResult } from '../../../shared/workbench/toolPorts'
 
 export interface SkillRoot { source: 'user' | 'workspace'; directory: string; authorizedRoot: string }
-interface LocalSkill { name: string; description: string; version: string; source: SkillRoot['source']; directory: string; root: SkillRoot }
+interface LocalSkill { name: string; description: string; source: SkillRoot['source']; directory: string; root: SkillRoot }
 interface Index { entries: LocalSkill[]; warnings: string[] }
 const inside = (root: string, filename: string) => { const relative = path.relative(root, filename); return !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative) }
 const relativeFile = (value: string) => value.length > 0 && value.length <= 512 && !value.includes('\\') && !value.includes(':')
@@ -43,11 +43,10 @@ export class ScopedSkillService implements SkillServicePort {
       const doc = parseDocument(front[1], { schema: 'failsafe', uniqueKeys: true, prettyErrors: false })
       if (doc.errors.length || doc.warnings.length) throw failure('skill-metadata-invalid', 'Skill YAML 元数据无法明确解析')
       const data = doc.toJS({ maxAliasCount: 0 }) as Record<string, unknown>
-      if (!data || typeof data.name !== 'string' || data.name !== folder || typeof data.description !== 'string' || !data.description.trim())
-        throw failure('skill-metadata-invalid', 'Skill name 必须与目录名一致，并提供 description')
-      const version = createHash('sha256').update(filename).update(bytes).digest('hex')
+      if (!data || typeof data.name !== 'string' || !data.name.trim() || typeof data.description !== 'string' || !data.description.trim())
+        throw failure('skill-metadata-invalid', 'Skill 元数据必须提供 name 和 description')
       return { name: `${root.source}/${folder}`, description: data.description.replace(/\s+/g, ' ').trim().slice(0, 600),
-        version: `sha256:${version}`, source: root.source, directory, root }
+        source: root.source, directory, root }
     } finally { await file.close() }
   }
   private async scan(runId: string): Promise<Index> {
@@ -57,7 +56,13 @@ export class ScopedSkillService implements SkillServicePort {
       try { folders = await fs.readdir(await this.allowedRoot(root), { withFileTypes: true }) }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') warnings.push(`${root.source}: 根目录未能读取或不在授权内`); continue }
       for (const folder of folders.sort((a, b) => a.name.localeCompare(b.name))) {
-        if (!folder.isDirectory() || !relativeFile(folder.name)) continue
+        if (!folder.isDirectory()) continue
+        // The file service owns directory identity; authors need not rename a
+        // Chinese folder or make a metadata label match that identity.
+        if (`${root.source}/${folder.name}`.length > 200) {
+          warnings.push(`${root.source}/${folder.name}: Skill 名称超过当前读取接口范围`)
+          continue
+        }
         try { entries.push(await this.metadata(root, folder.name)) }
         catch (error) { warnings.push(`${root.source}/${folder.name}: ${(error as { code?: string }).code ?? 'metadata-unavailable'}`) }
       }
