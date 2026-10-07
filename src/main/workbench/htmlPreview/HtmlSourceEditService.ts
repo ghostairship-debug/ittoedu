@@ -135,7 +135,13 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
       if (!matchingSnapshot(snapshot, request, context)) return { status: 'rejected', reason: 'stale-revision' }
       if (snapshot.model.kind !== 'text') return { status: 'rejected', reason: 'not-editable' }
       const source = snapshot.model.source
-      const authoring = resolvedRecord.locator.authoring ?? (request.change.kind === 'geometry' ? record.report.authoring : undefined)
+      const sourceRecords = readHtmlAuthoringRecords(source)
+      const described = record.report.authoring
+      const existing = described && sourceRecords[described.authorKey]
+      const ownsValue = existing && (request.change.kind === 'text' ? existing.overrides.text !== undefined
+        : request.change.kind === 'image' ? existing.overrides.src !== undefined
+          : request.change.kind === 'style' ? Boolean(existing.overrides.style) : true)
+      const authoring = resolvedRecord.locator.authoring ?? ((request.change.kind === 'geometry' || ownsValue) ? described : undefined)
       if (authoring) {
         const records = readHtmlAuthoringRecords(source)
         const current = records[authoring.authorKey] ?? authoring.record
@@ -232,8 +238,13 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
         const insertion = source[tag.span.end - 2] === '/' ? tag.span.end - 2 : tag.span.end - 1
         edits.push({ from: insertion, to: insertion, text: ` src="${replacement}"` })
       }
-      const updated = applySplices(source, edits)
+      let updated = applySplices(source, edits)
       if (updated === null) { await removeUnreferencedPreparedImage(); return { status: 'rejected', reason: 'not-editable' } }
+      // An exact source edit retains this object's unrelated geometry/style owner.
+      if (described && existing) {
+        sourceRecords[described.authorKey] = { ...existing, binding: { ...existing.binding, baseline: patchValue } }
+        updated = patchHtmlAuthoringRecords(updated, sourceRecords)
+      }
       if (updated === source) { await removeUnreferencedPreparedImage(); return { status: 'unchanged', revision: snapshot.revision } }
       let result: DocumentOperationResult
       try {
@@ -248,6 +259,7 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
       }
       return { status: 'applied', revision: result.revision, savedRevision: null,
         dirty: true, patch: { handle: request.target, kind: request.change.kind, value: patchValue,
+          ...(described && existing ? { authoringRecords: sourceRecords } : {}),
           ...(request.change.kind === 'image' && edits.length > 1 ? { rewroteResponsive: true } : {}) } }
     })
   }

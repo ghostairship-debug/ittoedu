@@ -108,3 +108,28 @@ it('commits dynamic text through the same HTML Session, undo/redo and normal dis
     expect(await fs.readFile(filename, 'utf8')).toBe(source)
   } finally { await fs.rm(folder, { recursive: true, force: true }) }
 })
+
+it('keeps manual geometry when an exactly mapped HTML text value changes', async () => {
+  const value = observation(), original = '<html><body><p data-item-id="a">same</p><p data-item-id="b">same</p></body></html>'
+  const record = { ...value.record, overrides: { geometry: { translateX: 20, translateY: 10 } } }
+  const source = patchHtmlAuthoringRecords(original, { [value.authorKey]: record })
+  const driver = new TextDriver()
+  const session = await DocumentSession.create({ documentId: 'doc', epoch: 'epoch', model: driver.load(new TextEncoder().encode(source)),
+    binding: { kind: 'file', path: 'sample.html', version: null, bindingVersion: 1 } }, driver,
+    { async append() {}, async save(input) { return input.binding as Extract<typeof input.binding, { kind: 'file' }> } })
+  const service = new HtmlSourceEditService({ async readDocument() { return session.read() }, execute: op => session.execute(op), withFileAccess: work => work() })
+  const context: HtmlPreviewEditContext = { lease: { leaseId: 'lease', documentId: 'doc', epoch: 'epoch', revision: 0,
+    bindingVersion: 1, loadId: 'load', url: 'https://preview.invalid' }, tabId: 'tab', entryRealPath: 'sample.html',
+    rootRealPath: '.', bindingPath: 'sample.html', snapshot: session.read() }
+  const targets = [{ handle: 'static', kind: 'text' as const, domPath: [{ name: 'html', index: 0 }, { name: 'body', index: 1 }, { name: 'p', index: 1 }],
+    sectionOrder: null, rawText: 'same', attributeName: null, rect: { x: 0, y: 0, width: 20, height: 10 }, scriptCreated: false,
+    authoring: { authorKey: value.authorKey, record } }]
+  expect((await service.resolveTarget({ type: 'html-preview.resolve-target', leaseId: 'lease', loadId: 'load', revision: 0, targets }, context)).targets[0])
+    .toMatchObject({ status: 'editable', locator: { valueSpan: expect.any(Object) } })
+  await service.edit({ type: 'html-preview.edit', operationId: 'source-text', documentId: 'doc', epoch: 'epoch', baseRevision: 0,
+    bindingVersion: 1, leaseId: 'lease', loadId: 'load', target: 'static', change: { kind: 'text', value: 'new value' } }, context)
+  const saved = session.read().model
+  if (saved.kind !== 'text') throw new Error('text')
+  expect(extractHtmlAuthoringRecords(saved.source).source).toContain('<p data-item-id="b">new value</p>')
+  expect(readHtmlAuthoringRecords(saved.source)[value.authorKey]).toMatchObject({ binding: { baseline: 'new value' }, overrides: { geometry: { translateX: 20, translateY: 10 } } })
+})
