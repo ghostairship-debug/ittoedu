@@ -117,6 +117,14 @@ export class ExecutionDesktopService {
     this.conversations = new ConversationStore({ directory: path.join(options.directory, 'conversations') })
     this.runs = new ExecutionRunStore(path.join(options.directory, 'runs'))
     this.events = new ExecutionEventStore({ directory: path.join(options.directory, 'events') })
+    this.events.subscribe(event => {
+      // Display follows the existing ordered event owner without blocking an external business receipt.
+      if (event.type === 'document.save' && (event.data.saveStatus === 'saved' || event.data.saveStatus === 'failed'))
+        this.timing(event.conversationId, event.taskId, `${event.eventId}:save-fact`, 'save.fact-observed', {
+          sourceWallTimeMs: event.time, detail: { documentId: event.data.documentId, saveStatus: event.data.saveStatus },
+        })
+      this.eventSink?.(event)
+    })
     this.submissions = new ExecutionSubmissionStore(path.join(options.directory, 'submissions'))
     this.edits = new EditSessionService(options.documents.registry, options.documents.tools)
     this.changeReview = new ExecutionChangeReviewService(options.documents, path.join(options.directory, 'change-review'))
@@ -154,7 +162,6 @@ export class ExecutionDesktopService {
       browserApprovalContext: async runId => (await import('../workbenchToolServices.js')).workbenchBrowserApprovalContext(runId),
       observeBodyStreaming: (selection, observation) => options.settings.recordBodyStreaming(selection, observation) })
     this.engine.subscribe(event => {
-      this.eventSink?.(event)
       if (event.type !== 'run.end') return
       visualAnalysis.clearRun(event.runId)
       // Before the object's next queued request can start.
@@ -175,6 +182,7 @@ export class ExecutionDesktopService {
       // run.end can enqueue its final conversation write while another queue is draining.
       while (this.queues.size) await Promise.all([...this.queues.values()])
       await this.engine.settleDocumentBindings()
+      await this.events.flushPending()
     })()
     return this.shutdownPromise
   }
@@ -190,15 +198,8 @@ export class ExecutionDesktopService {
     void this.events.recordTiming({ conversationId, taskId, markId, stage, process: 'renderer', clock: 'performance.now',
       ...stamp, ...(detail ? { detail } : {}) }).catch(() => undefined)
   }
-  async appendExternalEvent(input: ExecutionEventInput): Promise<ExecutionEvent> {
-    const event = await this.events.append(input)
-    // This observes a terminal save fact entering the timeline. It does not measure DocumentHost save completion.
-    if (event.type === 'document.save' && (event.data.saveStatus === 'saved' || event.data.saveStatus === 'failed'))
-      this.timing(event.conversationId, event.taskId, `${event.eventId}:save-fact`, 'save.fact-observed', {
-        sourceWallTimeMs: event.time, detail: { documentId: event.data.documentId, saveStatus: event.data.saveStatus },
-      })
-    this.eventSink?.(event)
-    return event
+  async appendExternalEvent(input: ExecutionEventInput): Promise<void> {
+    this.events.enqueue(input)
   }
   setExternalRevoker(revoker?: (input: { workspaceId: string; conversationId: string; portIds: string[] }) => Promise<void>) { this.externalRevoker = revoker }
   setImageRetention(retention?: ExecutionDesktopService['imageRetention']) { this.imageRetention = retention }
