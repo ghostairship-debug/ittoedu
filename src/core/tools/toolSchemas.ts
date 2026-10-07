@@ -7,8 +7,8 @@ export const objectUpdatePropertiesInputSchema = z.object({
   frame: z.object({ x: coordinate.optional(), y: coordinate.optional(), width: coordinate.positive().optional(), height: coordinate.positive().optional() }).strict().optional(),
   rotation: coordinate.optional(), opacity: z.number().min(0).max(1).optional(),
   visible: z.boolean().optional(), locked: z.boolean().optional(), label: z.string().min(1).optional(),
-  data: jsonValueSchema.optional(),
-  style: z.record(z.string(), jsonValueSchema).optional(),
+  data: jsonValueSchema.describe('Only supplied data properties change; omitted properties are preserved. Professional appearance, sizing, style, crop, feather, filters and poster records accept partial properties. Arrays and content values use their existing complete-value format.').optional(),
+  style: z.record(z.string(), jsonValueSchema).describe('Only supplied style properties change; omitted properties are preserved. Use null to explicitly clear a CSS value.').optional(),
   implementation: componentImplementationSchema.nullable().optional(),
 }).strict()
 
