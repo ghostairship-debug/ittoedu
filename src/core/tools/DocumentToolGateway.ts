@@ -88,7 +88,7 @@ export interface DocumentToolGatewayOptions { prepareImage?: PrepareImageResourc
     verifyDiagnostic?(snapshot: ComponentProjectSnapshot, diagnostic: Pick<ContentApplyDiagnostic, 'code' | 'instanceId' | 'reference'>): Promise<{
       state: 'resolved' | 'unresolved' | 'unknown'; code: string; instanceId?: string; reference?: string; assetId?: string; reason: string }>
     apply(input: { baseline: ComponentProjectSnapshot; request: ContentApplyRequest; operationId: string; requestDigest: string; runId: string; runLeaseId: string; actor: ToolRunGrant['actor']; readExpectations?: ComponentExpectation[]; assertActive(): void }): Promise<ContentApplyResult>
-    source(from: string, fileAccess: ToolRunGrant['fileAccess']): Promise<ComponentProjectFileInput>
+    source(from: string, fileAccess: ToolRunGrant['fileAccess'], sourceHtml?: string): Promise<ComponentProjectFileInput>
     prepareSource?(input: ComponentProjectFileInput, file: ComponentProjectFile, intent: ContentApplyIntent): Promise<ContentApplySource>
   }
 }
@@ -141,14 +141,14 @@ export class DocumentToolGateway implements ToolGateway {
     this.componentProjectFiles = new ComponentProjectFileCoordinator({
       document: (runId, selector, access) => this.componentProjectDocument(runId, selector, access),
       apply: (runId, operationId, requestDigest, baseline, request) => this.applyComponentContentOperation(runId, operationId, requestDigest, baseline, request),
-      source: async (runId, from, snapshot) => {
+      source: async (runId, from, snapshot, sourceHtml) => {
         const run = this.run(runId), port = this.options.componentContent
         if (run.stopped || !port) throw new ToolError('service-unavailable', '内容源服务不可用')
         if (this.images.has(from) || this.hostTools.parseStandaloneImageReference(from)) {
           const file = await this.readImageResource(runId, snapshot.documentId, from)
           return { filename: file.filename, bytes: file.bytes }
         }
-        const result = await port.source(from, run.grant.fileAccess)
+        const result = await port.source(from, run.grant.fileAccess, sourceHtml)
         if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
         return result
       },
