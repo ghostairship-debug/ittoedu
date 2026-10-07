@@ -7,8 +7,9 @@ import { DocumentSession } from '../../src/core/documents/DocumentSession'
 import { prepareCourseObjectPaste } from '../../src/renderer/composition/crossSurfaceCommands'
 import { componentDefinitionPresentation, componentFieldPresentation } from '../../src/renderer/ui/properties/componentDefinitionPresentation'
 import { WEB_DEFINITION, webDataSchema } from '../../src/components/web/data'
-import { resolveComponentPresentation, type JsonObject } from '../../src/shared/contracts/component-platform/project'
+import { resolveComponentPresentation, type JsonObject, type JsonValue } from '../../src/shared/contracts/component-platform/project'
 import type { CapturedCourseTarget } from '../../src/renderer/documents/CourseV10DocumentBridge'
+import type { InteractionRule } from '../../src/shared/interactionTypes'
 
 function fixture() {
   const project = createBlankCourseProjectV10('完整作者对象')
@@ -17,6 +18,51 @@ function fixture() {
   project.surfaces[0].childIds = ['a']
   return project
 }
+it('deletes presentation references in one canonical operation without broadening conditions or breaking scene jumps', () => {
+  const project = fixture(), surface = project.surfaces[0]!, sid = surface.id
+  project.definitions.interactions = { id: 'interactions', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.interactions' } }
+  const rule = (id: string, action: InteractionRule['actions'][number]['action']): InteractionRule => ({ id, enabled: true,
+    trigger: { type: 'node.click', nodeId: 'a' }, conditions: [], actions: [{ id: id + '-action', start: 'after-previous', delayMs: 0, action }] })
+  const enter = rule('enter', { type: 'scene.next' }); enter.trigger = { type: 'presentation.enter', stateId: 'gone' }
+  const set = rule('set', { type: 'presentation.set', stateId: 'gone' })
+  const chain = rule('chain', { type: 'scene.next' }); chain.trigger = { type: 'animation.completed', actionId: 'set-action' }
+  const condition = rule('condition', { type: 'scene.next' }); condition.conditions = [{ type: 'presentation.in', stateIds: ['gone'] }]
+  const mixed = rule('mixed', { type: 'scene.go', sceneId: sid, targetStateId: 'gone' }); mixed.conditions = [{ type: 'presentation.in', stateIds: ['gone', 'stay'] }]
+  const continued = rule('continued', { type: 'presentation.set', stateId: 'gone' }); continued.actions.push({ id: 'next-action', start: 'after-previous', delayMs: 0, action: { type: 'scene.next' } })
+  const data = (rules: InteractionRule[]) => ({ rules }) as unknown as JsonValue
+  project.instances.behavior = { id: 'behavior', definitionId: 'interactions', data: data([enter, set, chain, condition, mixed, continued]),
+    attachments: [{ instanceId: 'behavior', target: { kind: 'surface', surfaceId: sid } }] }
+  surface.childIds.push('behavior')
+  const nav = Object.values(project.instances).find(instance => project.definitions[instance.definitionId].implementation.kind === 'builtin'
+    && project.definitions[instance.definitionId].implementation.key === 'guoling.navigation')!
+  nav.data = { buttons: [{ id: 'go', action: { type: 'scene.go', sceneId: sid, targetStateId: 'gone' } }] }
+  surface.presentation = { initialStateId: 'stay', states: [
+    { id: 'gone', title: '删除', overrides: {} },
+    { id: 'stay', title: '保留', overrides: { behavior: { data: data([mixed]) }, [nav.id]: { data: structuredClone(nav.data) } } },
+  ] }
+  project.instances.otherBehavior = { id: 'otherBehavior', definitionId: 'interactions', data: data([set, rule('other-jump', { type: 'scene.go', sceneId: sid, targetStateId: 'gone' })]),
+    attachments: [{ instanceId: 'otherBehavior', target: { kind: 'surface', surfaceId: 'other' } }] }
+  project.surfaces.push({ id: 'other', kind: 'slide', title: '其他页', childIds: ['otherBehavior'],
+    presentation: { states: [{ id: 'gone', title: '同名仍存在', overrides: {} }] } })
+  const command = captureComponentOperation(project, [{ type: 'surface.presentation.set', surfaceId: sid,
+    presentation: { ...surface.presentation, states: surface.presentation.states.filter(state => state.id !== 'gone') } }])
+  const result = applyComponentOperation(project, command)
+  const rules = (result.instances.behavior.data as unknown as { rules: InteractionRule[] }).rules
+  expect(rules.map(value => value.id)).toEqual(['mixed', 'continued'])
+  expect(rules[0]).toMatchObject({ conditions: [{ type: 'presentation.in', stateIds: ['stay'] }], actions: [{ action: { type: 'scene.go', sceneId: sid } }] })
+  expect(rules[0]!.actions[0]!.action).not.toHaveProperty('targetStateId')
+  expect(rules[1]!.actions).toEqual([{ id: 'next-action', start: 'after-previous', delayMs: 0, action: { type: 'scene.next' } }])
+  expect(result.instances.nav?.data ?? result.instances[nav.id].data).toEqual({ buttons: [{ id: 'go', action: { type: 'scene.go', sceneId: sid } }] })
+  const state = result.surfaces[0]!.presentation!.states[0]!
+  expect(state.overrides[nav.id]!.data).toEqual(result.instances[nav.id].data)
+  expect((state.overrides.behavior!.data as unknown as { rules: InteractionRule[] }).rules[0]!.conditions).toEqual([{ type: 'presentation.in', stateIds: ['stay'] }])
+  expect((result.instances.otherBehavior.data as unknown as { rules: InteractionRule[] }).rules[0]).toEqual(set)
+  const stale = structuredClone(project); (stale.instances[nav.id].data as JsonObject).title = 'Human controller title'
+  expect(() => applyComponentOperation(stale, command)).toThrow('目标内容或归属已变化')
+  const driver = new CourseV10Driver(), model = { kind: 'course-v10' as const, project: result, resources: { assets: {}, components: {} } }
+  const reopened = driver.load(driver.serialize(model))
+  expect(reopened.kind === 'course-v10' && reopened.project.instances[nav.id].data).toEqual(result.instances[nav.id].data)
+})
 it('enforces inherited author locks for data, frame and named-state edits while allowing an explicit unlock', () => {
   const project = fixture()
   project.instances.group = { id: 'group', definitionId: WEB_DEFINITION.id, data: { html: '' }, childIds: ['a'], locked: true }

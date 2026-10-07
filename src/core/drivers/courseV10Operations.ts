@@ -121,6 +121,72 @@ function removeDeletedReferences(project: CourseProjectV10, removed: ReadonlySet
   })
 }
 
+/** Remove only references whose destination state was deleted, keeping scene jumps useful. */
+function deletedPresentationData(project: CourseProjectV10, surfaceId: string, removed: ReadonlySet<string>): { path: string[]; value: JsonValue; instanceId: string }[] {
+  if (!removed.size) return []
+  const changes: { path: string[]; value: JsonValue; instanceId: string }[] = []
+  const clean = (instanceId: string, data: JsonValue, local: boolean): JsonValue => {
+    const instance = project.instances[instanceId], key = componentDefinitionBuiltinKey(project.definitions[instance.definitionId])
+    if (key === 'guoling.interactions') {
+      const parsed = componentInteractionDataSchema.parse(data), removedActions = new Set<string>()
+      let rules = parsed.rules.flatMap(rule => {
+        const drop = () => { rule.actions.forEach(step => removedActions.add(step.id)); return [] }
+        if (local && rule.trigger.type === 'presentation.enter' && removed.has(rule.trigger.stateId)) return drop()
+        const conditions = rule.conditions.map(condition => local && condition.type === 'presentation.in'
+          ? { ...condition, stateIds: condition.stateIds.filter(id => !removed.has(id)) } : condition)
+        if (conditions.some(condition => condition.type === 'presentation.in' && !condition.stateIds.length)) return drop()
+        const actions = rule.actions.flatMap(step => {
+          const action = step.action
+          if (local && action.type === 'presentation.set' && removed.has(action.stateId)) { removedActions.add(step.id); return [] }
+          if (action.type === 'scene.go' && action.sceneId === surfaceId && action.targetStateId && removed.has(action.targetStateId)) {
+            const { targetStateId: _, ...destination } = action
+            return [{ ...step, action: destination }]
+          }
+          return [step]
+        })
+        if (!actions.length) return drop()
+        if (actions[0]!.id !== rule.actions[0]?.id) actions[0] = { ...actions[0]!, start: 'after-previous' }
+        return [{ ...rule, conditions, actions }]
+      })
+      let changed = true
+      while (changed) {
+        changed = false
+        rules = rules.filter(rule => {
+          if (rule.trigger.type !== 'animation.completed' || !removedActions.has(rule.trigger.actionId)) return true
+          rule.actions.forEach(step => removedActions.add(step.id)); changed = true; return false
+        })
+      }
+      return { ...parsed, rules } as unknown as JsonValue
+    }
+    if (key !== 'guoling.navigation' || !data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.buttons)) return data
+    return { ...data, buttons: data.buttons.map(button => {
+      if (!button || typeof button !== 'object' || Array.isArray(button)) return button
+      const action = button.action
+      if (!action || typeof action !== 'object' || Array.isArray(action) || action.type !== 'scene.go' || action.sceneId !== surfaceId
+        || typeof action.targetStateId !== 'string' || !removed.has(action.targetStateId)) return button
+      const { targetStateId: _, ...destination } = action
+      return { ...button, action: destination }
+    }) }
+  }
+  for (const instance of Object.values(project.instances)) {
+    let owner = owningContainer(project, instance.id)
+    while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
+    const local = instance.attachments?.some(attachment => attachment.instanceId === instance.id
+      && attachment.target.kind === 'surface' && attachment.target.surfaceId === surfaceId)
+      || owner?.kind === 'surface' && owner.surfaceId === surfaceId
+    const update = (data: JsonValue, path: string[], localState: boolean) => {
+      const value = clean(instance.id, data, localState)
+      if (!equalComponentValue(value, data)) changes.push({ path, value, instanceId: instance.id })
+    }
+    update(instance.data, ['instances', instance.id, 'data'], Boolean(local))
+    for (const surface of project.surfaces) for (const state of surface.presentation?.states ?? []) {
+      const data = state.overrides[instance.id]?.data
+      if (data !== undefined) update(data, ['@surface', surface.id, 'presentation', 'states', String(surface.presentation!.states.indexOf(state)), 'overrides', instance.id, 'data'], Boolean(local && surface.id === surfaceId))
+    }
+  }
+  return changes
+}
+
 /** The same dependency description is used for capture and host coverage checks. */
 function dependencyPaths(project: CourseProjectV10, edits: ComponentEdit[]): string[][] {
   const paths: string[][] = []
@@ -161,6 +227,11 @@ function dependencyPaths(project: CourseProjectV10, edits: ComponentEdit[]): str
     }
     if (edit.type === 'spatial.set' || edit.type === 'flow.set' || edit.type === 'surface.background.set' || edit.type === 'surface.presentation.set') {
       const field = edit.type === 'spatial.set' ? 'spatial' : edit.type === 'flow.set' ? 'flow' : edit.type.split('.')[1]
+      if (edit.type === 'surface.presentation.set') {
+        const removed = new Set(project.surfaces.find(surface => surface.id === edit.surfaceId)?.presentation?.states
+          .filter(state => !edit.presentation?.states.some(value => value.id === state.id)).map(state => state.id))
+        paths.push(...deletedPresentationData(project, edit.surfaceId, removed).map(change => change.path))
+      }
       paths.push(['@surface', edit.surfaceId, 'id'], ['@surface', edit.surfaceId, field]); continue
     }
     if (edit.type === 'definition.set') { paths.push(['definitions', edit.definition.id]); continue }
@@ -565,6 +636,18 @@ export function applyComponentOperation(project: CourseProjectV10, raw: Componen
   const removed = new Set([...removedInBatch, ...Object.keys(project.instances).filter(id => !next.instances[id])].filter(id => !next.instances[id]))
   const removedSurfaces = new Set(project.surfaces.filter(surface => !next.surfaces.some(value => value.id === surface.id)).map(surface => surface.id))
   if (removed.size || removedSurfaces.size) removeDeletedReferences(next, removed, removedSurfaces)
+  for (const surface of project.surfaces) {
+    const current = next.surfaces.find(value => value.id === surface.id)
+    if (!current) continue
+    const deletedStates = new Set(surface.presentation?.states.filter(state => !current.presentation?.states.some(value => value.id === state.id)).map(state => state.id))
+    for (const change of deletedPresentationData(next, surface.id, deletedStates)) {
+      if (componentIsLocked(next, change.instanceId)) throw new Error('状态引用对象已锁定，请先解锁')
+      if (change.path[0] === '@surface') {
+        const target = next.surfaces.find(value => value.id === change.path[1])!
+        writeField(target, change.path.slice(2), change.value)
+      } else writeField(next, change.path, change.value)
+    }
+  }
   for (const id of new Set([...Object.keys(project.instances), ...Object.keys(next.instances)])) {
     const before = project.instances[id], after = next.instances[id]
     if (componentDefinitionBuiltinKey(next.definitions[after?.definitionId] ?? project.definitions[before?.definitionId]) !== 'guoling.interactions'
