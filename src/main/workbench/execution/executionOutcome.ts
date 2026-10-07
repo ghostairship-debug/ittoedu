@@ -8,7 +8,8 @@ import { committedFact, contentApplyFact, currentSave, knownApplication, operati
 export const committed = (result?: ToolResult): result is Extract<ToolResult, { kind: 'document-operation' }> =>
   result?.kind === 'document-operation' && (result.result.status === 'applied' || result.result.status === 'unchanged')
 
-export const fileCreated = (name: string, result?: ToolResult): boolean => name === 'file.create' && result?.kind === 'read'
+export const fileCreated = (name: string, result?: ToolResult): boolean => (name === 'file.create'
+  || name === 'course.importPptx' && serviceToolOutcome(name, result)?.status === 'saved') && result?.kind === 'read'
   && !!result.data && typeof result.data === 'object'
   && (result.data as { operation?: { status?: unknown } }).operation?.status === 'success'
 
@@ -166,7 +167,7 @@ function recoveredDeliveryFailures(record: ExecutionRunRecord): Set<ExecutionToo
     if (!parentDocument && tool.call.name === 'file.save' && tool.result?.kind === 'error'
       && tool.result.code === 'invalid-target' && input.destination === undefined && typeof input.target === 'string')
       parentDocument = filePaths.get(handleKey(input.target))
-    if ((tool.call.name === 'file.open' || tool.call.name === 'file.create') && typeof data?.documentId === 'string' && typeof data.target === 'string')
+    if ((tool.call.name === 'file.open' || fileCreated(tool.call.name, tool.result)) && typeof data?.documentId === 'string' && typeof data.target === 'string')
       handles.set(handleKey(data.target), data.documentId)
     if (tool.state === 'returned' && (tool.call.name === 'file.open' || fileCreated(tool.call.name, tool.result))
       && typeof data?.documentId === 'string' && typeof data.path === 'string')
@@ -343,7 +344,12 @@ export function runEndSummary(record: ExecutionRunRecord): string | undefined {
   const fileFacts = newFileDeliveryFacts(record)
   const unsaved = fileFacts.filter(unconfirmedSave)
   if (unsaved.length) parts.push(`新文件的修改尚未确认保存：${unsaved.map(fact => `${fact.label}（文档版本 ${fact.revision}）`).join('、')}；可恢复状态不等于目标文件已写盘`)
-  const scaffolds = fileFacts.filter(fact => fact.revision === null && /\.h5lesson$/i.test(fact.label))
+  const importedDocuments = new Set(record.tools.filter(tool => tool.call.name === 'course.importPptx'
+    && fileCreated(tool.call.name, tool.result)).flatMap(tool => {
+      const data = tool.result?.kind === 'read' ? tool.result.data as { documentId?: unknown } : undefined
+      return typeof data?.documentId === 'string' ? [data.documentId] : []
+    }))
+  const scaffolds = fileFacts.filter(fact => fact.revision === null && /\.h5lesson$/i.test(fact.label) && !importedDocuments.has(fact.documentId))
   if (scaffolds.length) parts.push(`仅有创建回执、未见课件内容提交：${scaffolds.map(fact => fact.label).join('、')}`)
   const savedArtifacts = record.tools.filter(tool => tool.call.name === 'artifact.save'
     && serviceToolOutcome(tool.call.name, tool.result)?.status === 'written').length

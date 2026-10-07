@@ -192,6 +192,8 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
     if (data.status === 'saved' && data.saved === true) return { status: 'saved', message: 'HTML 课件已创建并保存' }
     if (data.status === 'imported') return { status: 'failed', message: typeof data.saveError === 'string' ? data.saveError : 'HTML 已导入，保存尚未成功' }
   }
+  if (name === 'course.importPptx' && data.status === 'saved' && record(data.operation) && data.operation.status === 'success')
+    return { status: 'saved', message: 'PPTX 已导入并保存为新课件' }
   if ((name === 'office.create' || name === 'office.edit') && data.status === 'saved' && data.saved === true)
     return { status: 'saved', message: 'Office 文件已保存' }
   if (fileMutations.has(name) && data.operation && typeof data.operation === 'object') {
