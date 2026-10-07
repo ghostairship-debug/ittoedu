@@ -52,21 +52,57 @@ function embeddedAssetBytes(url: string): Uint8Array {
 
 export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, options: PublishedComponentPlayerOptions = {}) {
   const payload = publishedCourseV3Schema.parse(value), model = publishedComponentModel(payload)
-  for (const [id, asset] of Object.entries(payload.assets)) {
-    if (!asset.url) { options.report?.(`素材字节缺失：${id}`); continue }
-    try {
-      if (/^data:/i.test(asset.url)) model.resources.assets[id] = embeddedAssetBytes(asset.url)
-      else {
-        const response = await fetch(asset.url)
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        model.resources.assets[id] = new Uint8Array(await response.arrayBuffer())
-      }
-    } catch (error) { options.report?.(`${id}资源不可用：${String(error)}`) }
-  }
+  const resourceController = new AbortController(), requested = new Set<string>()
+  const resourceJobs = new Map<string, Promise<void>>()
   let surfaceId = payload.surfaces.find(surface => surface.id === options.initialSurfaceId)?.id ?? payload.surfaces[0]?.id ?? null
   let stateId = options.initialStateId === undefined ? payload.surfaces.find(surface => surface.id === surfaceId)?.presentation?.initialStateId ?? null : options.initialStateId
   let player!: ReturnType<typeof mountV10Model>, stopped = false
   const renderModel = () => ({ ...model, project: resolveComponentPresentation(model.project, surfaceId, stateId) })
+  const resolveAssetUrl = (id: string): string | undefined => {
+    if (stopped) return undefined
+    const asset = payload.assets[id]
+    if (asset?.url && /^data:/i.test(asset.url)) {
+      if (!requested.has(id)) {
+        requested.add(id)
+        try { model.resources.assets[id] = embeddedAssetBytes(asset.url) }
+        catch (error) { options.report?.(`${id}资源不可用：${String(error)}`); return undefined }
+      }
+      return model.resources.assets[id] ? asset.url : undefined
+    }
+    if (requested.has(id)) return undefined
+    requested.add(id)
+    if (!asset?.url) { options.report?.(`素材字节缺失：${id}`); return undefined }
+    // Consumers request bytes independently; an unused or stalled later page
+    // cannot delay mounting this page. The run owns every outstanding fetch.
+    const job = (async () => {
+      try {
+        const response = await fetch(asset.url!, { signal: resourceController.signal })
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const bytes = new Uint8Array(await response.arrayBuffer())
+        if (stopped) return
+        model.resources.assets[id] = bytes
+        // Read the current navigation projection, never the page that started loading.
+        void player.update(renderModel()).catch(error => { if (!stopped) options.report?.(String(error)) })
+      } catch (error) { if (!stopped) options.report?.(`${id}资源不可用：${String(error)}`) }
+    })()
+    resourceJobs.set(id, job)
+    return undefined
+  }
+  const prepareBindings = async (bindings: Readonly<Record<string, string>> | undefined, signal: AbortSignal) => {
+    signal.throwIfAborted()
+    for (const id of Object.values(bindings ?? {})) resolveAssetUrl(id)
+    await new Promise<void>((resolve, reject) => {
+      const abort = () => { signal.removeEventListener('abort', abort); reject(signal.reason ?? new Error('资源准备已取消')) }
+      signal.addEventListener('abort', abort, { once: true })
+      Promise.all(Object.values(bindings ?? {}).map(id => resourceJobs.get(id))).then(() => {
+        signal.removeEventListener('abort', abort); resolve()
+      }, error => { signal.removeEventListener('abort', abort); reject(error) })
+      if (signal.aborted) abort()
+    })
+    signal.throwIfAborted()
+    // A realm needs data URLs; turn only its requested bytes into runtime leases.
+    player.runtime.prepareResources(model.project, model.resources)
+  }
   const navigation = new ComponentNavigationOwner({ project: () => model.project, surfaceId: () => surfaceId, stateId: () => stateId,
     viewportBounds: () => { const rect = root.getBoundingClientRect(); return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom } },
     courseState: { get: <T,>(key: string) => player?.runtime.getState(key) as T | undefined, set: (key, value) => player?.runtime.setState(key, value) },
@@ -81,6 +117,7 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
   })
   player = mountV10Model({ model: renderModel(), root, mode: options.capture ? 'capture' : 'play', runScopeId: `published:${payload.id}:${crypto.randomUUID()}`,
     teacherController: navigation, report: options.report, initialSurfaceId: surfaceId ?? undefined,
+    resolveAssetUrl,
     onObservation: options.capture ? undefined : (id, observation) => {
       const unregister = navigation.registerObservation(id, observation)
       const unsubscribe = observation.subscribe?.(navigation.changed)
@@ -95,16 +132,23 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
     resolveSource: async (source, signal) => {
       const compiled = (source as Extract<PublishedImplementation, { kind: 'source' }>).compiled
       if (!compiled) throw new Error('此源码未附可执行ESM；原始源码已保留')
+      await prepareBindings(source.resourceBindings, signal)
       return prepareSandboxComponent({ format: 'esm', code: compiled.code, css: compiled.css ?? '', diagnostics: [] }, signal,
         { state: () => player.runtime.stateSnapshot(), targets: () => player.runtime.targetSnapshots('full'), teacherController: navigation,
           connectOrigins: () => model.project.logic?.network?.connectOrigins ?? [], themeCss: () => player.runtime.themeCss(), resources: () => player.runtime.resourceUrls(), resourceBindings: source.resourceBindings, bootstrap: options.componentBootstrap })
     },
     resolveBuiltin: (_key, signal) => prepareSandboxComponent({ format: 'esm', code: webContentRealmSource(), css: '', diagnostics: [] }, signal,
       { builtinKey: _key, state: () => player.runtime.stateSnapshot(), targets: profile => player.runtime.targetSnapshots(profile), teacherController: navigation,
-        instance: instance => resolveWebResourceBindings(instance, id => player.runtime.contentAssetUrl(id) ?? payload.assets[id]?.url, options.report), htmlAuthoring: true,
+        instance: async instance => {
+          const data = instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data : undefined
+          const bindings = data?.resourceBindings as Record<string, string> | undefined
+          await prepareBindings(bindings, signal)
+          return resolveWebResourceBindings(instance, id => player.runtime.contentAssetUrl(id), options.report)
+        }, htmlAuthoring: true,
         connectOrigins: () => model.project.logic?.network?.connectOrigins ?? [], themeCss: () => player.runtime.themeCss(), resources: () => player.runtime.resourceUrls(), bootstrap: options.componentBootstrap }),
   })
-  await player.ready
+  try { await player.ready }
+  catch (error) { stopped = true; resourceController.abort(); navigation.dispose(); await player.dispose(); throw error }
   if (surfaceId) player.revealSurface(surfaceId)
   if (!options.capture) navigation.changed()
   const tasks = new NavigationTasks<PlaybackKeyCommand, TeacherControllerAction>({
@@ -138,7 +182,7 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
   let disposal: Promise<void> | undefined
   const dispose = () => {
     if (disposal) return disposal
-    stopped = true; stopKeys?.destroy(); tasks.dispose(); navigation.dispose(); placement()
+    stopped = true; resourceController.abort(); stopKeys?.destroy(); tasks.dispose(); navigation.dispose(); placement()
     disposal = player.dispose()
     return disposal
   }
