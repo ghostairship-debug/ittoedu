@@ -56,10 +56,13 @@ function htmlAuthorFieldSourceIdentity(source: string, target: HtmlAuthorFieldTa
       candidates = candidates.flatMap(parent => children(parent).filter(element => element.tagName === step.tag
         && Object.entries(step.attributes ?? {}).every(([name, value]) => name === 'class'
           ? value.split(/\s+/).every(token => (attributes(element).class ?? '').split(/\s+/).includes(token)) : attributes(element)[name] === value)))
-      steps.push(candidates.map(attributes))
+      steps.push(candidates.length === 1 ? attributes(candidates[0]!) : null)
     }
-    return { steps, value: includeText ? candidates.map(content) : candidates.map(element => target.field === 'src' ? attributes(element).src
-      : element.childNodes.filter(child => child.nodeName === '#text').map(child => (child as DefaultTreeAdapterTypes.TextNode).value)[target.record.binding.textIndex ?? 0]) }
+    // Runtime scope can distinguish nodes a static parse cannot. Such siblings are
+    // not evidence about this field, so their body text must not become its CAS.
+    const element = candidates.length === 1 ? candidates[0] : undefined
+    return { steps, value: !element ? undefined : includeText ? content(element) : target.field === 'src' ? attributes(element).src
+      : element.childNodes.filter(child => child.nodeName === '#text').map(child => (child as DefaultTreeAdapterTypes.TextNode).value)[target.record.binding.textIndex ?? 0] }
   }
   return { scripts, target: trace(target.record.binding.path, false), context: target.record.binding.context?.map(value => trace(value.path, true)) }
 }
