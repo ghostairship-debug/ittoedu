@@ -15,6 +15,7 @@ export type WorkspaceAroundMutation = (
 ) => Promise<WorkspaceItemResult>
 
 export interface WorkspaceFilesDependencies {
+  creationReceiptDirectory?: string
   captureCopyContent?(source: string, kind: WorkspaceEntryKind): Promise<readonly { sourcePath: string; relativePath: string; bytes: Uint8Array;
     markdown?: { source: string; resources: DocumentResources } }[]>
   createId?: () => string
@@ -38,6 +39,21 @@ export class WorkspaceFilesError extends Error {
 
 export class WorkspaceOperationCancelledError extends WorkspaceFilesError {
   constructor(message = '操作已取消') { super('cancelled', message); this.name = 'WorkspaceOperationCancelledError' }
+}
+
+/** An unavailable creation fact must not become an ordinary failed create or authorize a replay. */
+export class WorkspaceCreationOutcomeUnknown extends WorkspaceFilesError {
+  constructor(cause: unknown) {
+    super('tool-outcome-unknown', '文件创建回执未能确认；请查询原操作，不要重复创建', { cause })
+  }
+}
+
+interface CreationReceiptIdentity { runId: string; operationId: string; requestDigest: string }
+export interface WorkspaceCreationReceipt extends CreationReceiptIdentity {
+  schemaVersion: 1
+  path: string
+  operation: WorkspaceOperationResult
+  details: Record<string, unknown>
 }
 
 interface EntryRecord {
@@ -222,10 +238,16 @@ export class WorkspaceFiles {
   }
 
   createFile(input: { operationId: string; workspaceId: string; targetDirectoryId: string; name: string;
-    format: 'markdown' | 'course-v9' | 'course-v10' | 'file'; bytes: Uint8Array; overwrite?: boolean }, beforeCommit?: () => void): Promise<WorkspaceOperationResult> {
+    format: 'markdown' | 'course-v9' | 'course-v10' | 'file'; bytes: Uint8Array; overwrite?: boolean;
+    creationReceipt?: { runId: string; requestDigest: string; details: Record<string, unknown> } }, beforeCommit?: () => void): Promise<WorkspaceOperationResult> {
     const bytes = Uint8Array.from(input.bytes)
+    const creation = input.creationReceipt ? structuredClone({ ...input.creationReceipt, operationId: input.operationId }) : undefined
     const digest = stableDigest({ ...input, bytes: createHash('sha256').update(bytes).digest('hex') })
     return this.runOnce(input.operationId, digest, async () => {
+      if (creation) {
+        const previous = await this.lookupCreation(creation)
+        if (previous) return previous.operation
+      }
       const expected = input.format === 'file' ? null : input.format === 'markdown' ? '.md' : '.h5lesson'
       validateWorkspaceEntryName(input.name)
       if (expected && path.extname(input.name).toLowerCase() !== expected) throw new WorkspaceFilesError('format-extension-mismatch', `该格式要求 ${expected} 文件名`)
@@ -244,8 +266,46 @@ export class WorkspaceFiles {
           commit: () => this.remember(entry),
         }
       })
-      return this.aggregate(input.operationId, [result])
+      const operation = this.aggregate(input.operationId, [result])
+      if (creation && operation.status === 'success' && result.targetPath) {
+        // coordinate() has committed. Keep this outside perform(), which can still be rolled back.
+        const historical = { ...operation, items: operation.items.map(({ entryId: _entryId, sourceEntryId: _sourceEntryId, ...item }) => item) }
+        try { await this.recordCreation({ ...creation, schemaVersion: 1, path: result.targetPath, operation: historical }) }
+        catch (error) { throw new WorkspaceCreationOutcomeUnknown(error) }
+      }
+      return operation
     })
+  }
+
+  private creationFilename(identity: CreationReceiptIdentity): string {
+    if (!this.dependencies.creationReceiptDirectory) throw new WorkspaceFilesError('creation-receipt-unavailable', '创建回执存储尚未配置')
+    return path.join(this.dependencies.creationReceiptDirectory, `${stableDigest([identity.runId, identity.operationId])}.json`)
+  }
+
+  /** Historical success only: no current-file read, handle recovery or write authority. */
+  async lookupCreation(identity: CreationReceiptIdentity): Promise<WorkspaceCreationReceipt | null> {
+    const filename = this.creationFilename(identity)
+    let value: WorkspaceCreationReceipt
+    try { value = JSON.parse(await fs.readFile(filename, 'utf8')) as WorkspaceCreationReceipt }
+    catch (error) { if (isMissing(error)) return null; throw new WorkspaceCreationOutcomeUnknown(error) }
+    if (!value || value.schemaVersion !== 1 || value.runId !== identity.runId || value.operationId !== identity.operationId
+      || value.operation?.operationId !== identity.operationId || value.operation.status !== 'success'
+      || !Array.isArray(value.operation.items) || typeof value.path !== 'string' || !path.isAbsolute(value.path)
+      || !value.details || typeof value.details !== 'object')
+      throw new WorkspaceCreationOutcomeUnknown(new Error('创建回执损坏'))
+    if (value.requestDigest !== identity.requestDigest)
+      throw new WorkspaceFilesError('operation-payload-mismatch', '同一调用编号不能提交不同内容')
+    return value
+  }
+
+  private async recordCreation(receipt: WorkspaceCreationReceipt): Promise<void> {
+    const filename = this.creationFilename(receipt), temporary = `${filename}.${randomUUID()}.tmp`
+    await fs.mkdir(path.dirname(filename), { recursive: true })
+    try {
+      const handle = await fs.open(temporary, 'wx', 0o600)
+      try { await handle.writeFile(JSON.stringify(receipt)); await handle.sync() } finally { await handle.close() }
+      await fs.rename(temporary, filename)
+    } finally { await fs.rm(temporary, { force: true }).catch(() => undefined) }
   }
 
   mkdir(input: { operationId: string; workspaceId: string; targetDirectoryId: string; name: string; overwrite?: boolean }): Promise<WorkspaceOperationResult> {
@@ -673,7 +733,10 @@ export class WorkspaceFiles {
       return previous.result
     }
     const result = (this.dependencies.aroundOperation ? this.dependencies.aroundOperation(execute) : execute())
-      .catch(error => this.aggregate(operationId, [publicFailure(error, { affectedPaths: [] })]))
+      .catch(error => {
+        if (error instanceof WorkspaceCreationOutcomeUnknown) throw error
+        return this.aggregate(operationId, [publicFailure(error, { affectedPaths: [] })])
+      })
     this.replay.set(operationId, { digest, result })
     return result
   }

@@ -1225,7 +1225,7 @@ export class DocumentToolGateway implements ToolGateway {
     const definition = toolCatalog.find(tool => tool.name === call.name)
     if (!definition) throw new ToolError('unsupported-tool', '此工具尚未接入正式 Gateway')
     if (call.name === 'course.importPptx') return pptxImportRegistration.handler({ import: async input => {
-      const result = await this.hostTools.importPptx(runId, operationId, input)
+      const result = await this.hostTools.importPptx(runId, operationId, requestDigest, input)
       if (result.kind !== 'read' || !result.data || typeof result.data !== 'object') return result
       const data = result.data as Record<string, unknown>
       if (data.status !== 'saved' || typeof data.documentId !== 'string' || run.stopped) return result

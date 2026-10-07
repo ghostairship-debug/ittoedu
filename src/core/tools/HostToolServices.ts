@@ -32,8 +32,8 @@ export interface HostToolServices {
       approvedPaths?: readonly string[]; assertActive(): void }): Promise<ToolResult>
   }
   pptxImport?: {
-    import(input: { grant: ToolRunGrant; operationId: string; path: string; destination?: string; assertActive(): void }): Promise<ToolResult>
-    lookup?(runId: string, operationId: string): Promise<ToolResult | null>
+    import(input: { grant: ToolRunGrant; operationId: string; requestDigest: string; path: string; destination?: string; assertActive(): void }): Promise<ToolResult>
+    lookup?(runId: string, operationId: string, requestDigest: string): Promise<ToolResult | null>
   }
   materials?: {
     admit(runId: string, sourceIds: readonly string[]): Promise<void>
@@ -238,12 +238,12 @@ export class HostToolCoordinator {
     this.rememberResult(runId, operationId, name, result)
     return structuredClone(await result)
   }
-  async importPptx(runId: string, operationId: string, input: { path: string; destination?: string }): Promise<ToolResult> {
+  async importPptx(runId: string, operationId: string, requestDigest: string, input: { path: string; destination?: string }): Promise<ToolResult> {
     const run = this.writableRun(runId), service = this.services.pptxImport
     if (!service) return this.serviceUnavailable('PPTX 课件导入服务尚未接入')
     const previous = this.results.get(operationId)
     if (previous) return structuredClone(await previous.promise)
-    const result = service.import({ grant: run.grant, operationId, ...input, assertActive: () => { this.writableRun(runId) } })
+    const result = service.import({ grant: run.grant, operationId, requestDigest, ...input, assertActive: () => { this.writableRun(runId) } })
     this.rememberResult(runId, operationId, 'course.importPptx', result)
     return structuredClone(await result)
   }
@@ -633,7 +633,7 @@ export class HostToolCoordinator {
       return receipt ? { kind: 'read', data: receipt } : null
     }
     if (name === 'course.importPptx' && this.services.pptxImport?.lookup) {
-      const receipt = await this.services.pptxImport.lookup(runId, operationId)
+      const receipt = await this.services.pptxImport.lookup(runId, operationId, requestDigest)
       if (receipt) return structuredClone(receipt)
     }
     const cached = this.results.get(operationId)

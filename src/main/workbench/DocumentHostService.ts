@@ -98,6 +98,7 @@ export class DocumentHostService {
     })
     this.fileCoordinator = new DocumentFileCoordinator(this.registry, this.journal, path.join(directory, 'binding-intents'))
     this.files = new WorkspaceFiles({ ...fileDependencies, aroundMutation: this.fileCoordinator.aroundMutation,
+      creationReceiptDirectory: path.join(directory, 'creation-receipts'),
       aroundOperation: perform => this.fileCoordinator.withFileOperation(perform),
       captureCopyContent: async (source, kind) => {
         const captured = []

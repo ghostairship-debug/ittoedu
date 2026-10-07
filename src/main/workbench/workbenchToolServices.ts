@@ -279,7 +279,12 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     signalForRun: runId => deliverySignals.get(runId)?.signal,
   })
   const services: HostToolServices = {
-    pptxImport: { import: async ({ grant, operationId, path: sourcePath, destination, assertActive }) => {
+    pptxImport: { lookup: async (runId, operationId, requestDigest) => {
+      const previous = await host.agentFiles.lookupPreparedCourse(runId, operationId, requestDigest)
+      return previous ? { kind: 'read', data: previous.data } : null
+    }, import: async ({ grant, operationId, requestDigest, path: sourcePath, destination, assertActive }) => {
+      const previous = await host.agentFiles.lookupPreparedCourse(grant.runId, operationId, requestDigest)
+      if (previous) return { kind: 'read', data: previous.data }
       const access = fileContext(grant.runId, undefined, assertActive)
       const source = await host.agentFiles.readAuthorizedFile(access, sourcePath)
       if (!/\.pptx$/i.test(source.name)) throw new Error('此导入入口需要 PPTX 文件')
@@ -291,8 +296,10 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       const filename = destination ? path.resolve(access.workspaceRoot, destination) : undefined
       try {
         const outcome = await host.agentFiles.createPreparedCourse(access, { ...(filename ? { path: path.dirname(filename) } : {}),
-          name: filename ? path.basename(filename) : prepared.suggestedName, bytes: prepared.archiveBytes }, operationId)
+          name: filename ? path.basename(filename) : prepared.suggestedName, bytes: prepared.archiveBytes }, operationId,
+          { requestDigest, issues: prepared.issues })
         const data = outcome.data as Record<string, unknown>
+        if (data.historical === true) return { kind: 'read', data }
         const operation = data.operation as { status?: string } | undefined
         if (operation?.status !== 'success') return { kind: 'error', code: 'pptx-import-file-failed', message: '转换内容已准备，但目标课件未创建；请核对目标路径', data }
         return { kind: 'read', data: { ...data, status: 'saved', issues: prepared.issues,
