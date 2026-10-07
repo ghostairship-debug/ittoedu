@@ -17,9 +17,15 @@ import { handleToolTarget, hasRunWrite, toolRegistrationFor, type ToolSupportCon
 import type { OfficeContentToolName } from './OfficeContentTools'
 import type { HostArtifactSaveInput } from './HostArtifactTools'
 import type { MaterialToolName } from './MaterialTools'
+import type { HtmlActionToolName } from './HtmlActionTools'
 
 /** Main supplies real services. Neither their implementations nor credentials enter core. */
 export interface HostToolServices {
+  htmlActions?: {
+    execute(runId: string, document: { documentId: string; epoch: string; revision: number },
+      action: { name: HtmlActionToolName; input: unknown; operationId: string }): Promise<unknown>
+    readResource(runId: string, resourceId: string): Promise<{ mimeType: string; bytes: Uint8Array }>
+  }
   office?: {
     execute(input: { grant: ToolRunGrant; operationId: string; name: OfficeContentToolName; input: unknown;
       approvedPaths?: readonly string[]; assertActive(): void }): Promise<ToolResult>
@@ -168,6 +174,7 @@ export class HostToolCoordinator {
   private readonly results = new Map<string, Promise<ToolResult>>()
   private readonly reissuedImages = new Map<string, Promise<string>>()
   private readonly approvedPaths = new Map<string, readonly string[]>()
+  private readonly htmlResources = new Map<string, Set<string>>()
   constructor(private services: HostToolServices, private readonly registry: DocumentRegistry, private readonly authority: HostAuthority) {}
   configure(services: HostToolServices) { this.services = services }
   async beginRun(grant: ToolRunGrant) {
@@ -242,7 +249,7 @@ export class HostToolCoordinator {
       approvedPaths: this.approvedPaths.get(operationId), assertActive: () => { this.writableRun(runId) } }) }
   }
   supportContext(): ToolSupportContext {
-    return { office: !!this.services.office, materials: !!this.services.materials, artifacts: !!this.services.artifacts,
+    return { htmlActions: !!this.services.htmlActions, office: !!this.services.office, materials: !!this.services.materials, artifacts: !!this.services.artifacts,
       images: !!this.services.images, skills: !!this.services.skills, deliveries: !!this.services.deliveries,
       observations: !!this.services.observations, projectFiles: !!this.services.projectFiles, jobs: !!this.services.jobs,
       compute: !!this.services.compute, delegation: !!this.services.delegation, web: !!this.services.web,
@@ -253,6 +260,10 @@ export class HostToolCoordinator {
     return executeViewObserveTool(this.services.observations, context, input)
   }
   readObservationResource(input: { runId: string; resourceId: string }): Promise<{ mimeType: string; bytes: Uint8Array }> {
+    if (this.htmlResources.get(input.runId)?.has(input.resourceId) && this.services.htmlActions) {
+      this.serviceRun(input.runId)
+      return this.services.htmlActions.readResource(input.runId, input.resourceId)
+    }
     if (input.resourceId.startsWith('material:')) {
       this.serviceRun(input.runId)
       if (!this.services.materials) return Promise.reject(new Error('材料图片服务尚未接入'))
@@ -260,6 +271,19 @@ export class HostToolCoordinator {
     }
     if (!this.services.observations) return Promise.reject(new Error('画面观察服务尚未就绪'))
     return this.services.observations.readResource(input)
+  }
+  async executeHtmlAction(runId: string, document: { documentId: string; epoch: string; revision: number },
+    action: { name: HtmlActionToolName; input: unknown; operationId: string }): Promise<ToolResult> {
+    this.serviceRun(runId)
+    if (!this.services.htmlActions) return this.serviceUnavailable('HTML 页面操作服务尚未配置')
+    const data = await this.services.htmlActions.execute(runId, document, action)
+    const resourceId = (data as { image?: { resourceId?: string } })?.image?.resourceId
+    if (resourceId) {
+      let resources = this.htmlResources.get(runId)
+      if (!resources) { resources = new Set(); this.htmlResources.set(runId, resources) }
+      resources.add(resourceId)
+    }
+    return { kind: 'read', data }
   }
   deliverDocument(context: { runId: string; operationId: string; requestDigest: string; resolveHandle(handle: string, access: 'write'): Promise<{ documentId: string; epoch: string; revision: number }> }, name: 'file.save' | 'document.export', input: unknown): Promise<ToolResult> {
     if (!this.services.deliveries) return Promise.resolve({ kind: 'error', code: 'service-unavailable', message: '文档保存与导出服务尚未就绪' })

@@ -45,6 +45,8 @@ import { createWorkbenchOpenImageService } from './assetSources/pixabayDesktopSe
 import { AssetLibraryService } from './assetSources/componentLibrarySearch'
 import { componentCatalogManager } from '../componentCatalogManager'
 import { renderPdfFromHtml } from '../pdfExport'
+import { createHtmlActionServices } from './observation/TaskHtmlPreview'
+import type { HtmlPreviewService } from './htmlPreview/HtmlPreviewService'
 
 let installed = false
 let imageService: ImageGenerationService | undefined
@@ -55,6 +57,17 @@ let browserService: ManagedBrowserMcpService | undefined
 let exportPort: DocumentExportPort | undefined
 let exportOwnerId: number | undefined
 let headlessExportWorker: HeadlessDocumentExportWorker | undefined
+let htmlActionServices: ReturnType<typeof createHtmlActionServices> | undefined
+let htmlActionOptions: Parameters<typeof createHtmlActionServices>[0] | undefined
+export function setWorkbenchHtmlPreview(live: HtmlPreviewService): void {
+  if (!htmlActionOptions) throw new Error('HTML 页面操作服务尚未安装')
+  htmlActionOptions.live = live
+}
+export function workbenchHtmlActions() {
+  if (!htmlActionServices) throw new Error('HTML 页面操作服务尚未安装')
+  return htmlActionServices.actions
+}
+export function releaseWorkbenchHtmlDocument(documentId: string): void { htmlActionServices?.preview.releaseDocument(documentId) }
 export function acceptWorkbenchExportBuildReply(reply: ExportBuildReply, senderId: number): boolean {
   return exportPort?.accept(reply, senderId) ?? false
 }
@@ -66,6 +79,7 @@ export function disposeWorkbenchExportPort(): void {
 }
 export function disposeHeadlessWorkbenchWorkers(): void {
   headlessExportWorker?.dispose(); headlessExportWorker = undefined
+  htmlActionServices?.dispose(); htmlActionServices = undefined; htmlActionOptions = undefined
 }
 export function workbenchImageService(): ImageGenerationService {
   if (!imageService) throw new Error('图片服务尚未安装')
@@ -116,6 +130,9 @@ export function workbenchBrowserApprovalContext(runId: string): { pageUrl?: stri
 export function installWorkbenchToolServices(context: { getMainWindow(): BrowserWindow | null; getRendererEntryUrl(): string | null; headless?: boolean }): void {
   if (installed) return
   const host = documentHost(), directory = path.join(app.getPath('userData'), 'workbench-v2')
+  htmlActionOptions = { readDocument: documentId => host.registry.get(documentId).drain(),
+    agentBundlePath: path.join(app.getAppPath(), 'dist-renderer', 'html-preview-agent.iife.js') }
+  htmlActionServices = createHtmlActionServices(htmlActionOptions)
   if (context.headless) {
     const entry = context.getRendererEntryUrl()
     if (!entry) throw new Error('后台导出资源入口不可用')
@@ -244,6 +261,8 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     signalForRun: runId => deliverySignals.get(runId)?.signal,
   })
   const services: HostToolServices = {
+    htmlActions: { execute: (runId, document, action) => workbenchHtmlActions().executeDocumentAction(runId, document, action),
+      readResource: (runId, resourceId) => workbenchHtmlActions().readResource(runId, resourceId) },
     office: { execute: async ({ grant, operationId, name, input, approvedPaths, assertActive }) => {
       const result = await host.agentFiles.executeOffice(fileContext(grant.runId, approvedPaths, assertActive), name, input, operationId)
       return { kind: 'read', data: result.data }
@@ -370,6 +389,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       }
     },
     stopRun: async runId => {
+      htmlActionServices?.actions.stopRun(runId)
       approvals.revokeRun(runId)
       deliverySignals.get(runId)?.abort(); deliverySignals.delete(runId); observationImages.clearRun(runId); skills.release(runId)
       openImages.stopRun(runId)

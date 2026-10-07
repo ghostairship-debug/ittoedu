@@ -3,6 +3,7 @@ import { HostToolCoordinator, isHostToolName, type HostToolServices } from './Ho
 import { workbenchServiceRegistration } from './WorkbenchServiceTools'
 import { materialToolRegistration } from './MaterialTools'
 import { hostArtifactSaveRegistration } from './HostArtifactTools'
+import { htmlActionToolRegistration } from './HtmlActionTools'
 import { officeToolRegistration } from './ToolCatalog'
 import type { HostImageInput, PrepareImageResourcePort } from './imageResource'
 import type { AssetSource } from '../../shared/contracts/media-v1/types'
@@ -33,6 +34,7 @@ interface Run {
   loadedFamilies: Set<ToolFamily>
   courseAuthoring?: boolean
   currentCourseDocumentId?: string
+  currentHtmlDocumentId?: string
   contentTarget?: string
   contentReads: Map<string, { epoch: string; expected: Map<string, ComponentExpectation>; pending?: ComponentExpectation[] }>
   advertised?: { definitions: ToolDefinition[]; names: Set<string>; allowed: Set<string>; batchSchema?: z.ZodType;
@@ -344,6 +346,8 @@ export class DocumentToolGateway implements ToolGateway {
     if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
     const generation = this.writeTaskGenerations.get(documentId) ?? 0
     const snapshot = await this.registry.get(documentId).drain()
+    if (currentCourse === 'select' && isSourceDocumentModel(snapshot.model) && snapshot.binding.kind === 'file' && /\.html?$/i.test(snapshot.binding.path))
+      run.currentHtmlDocumentId = documentId
     if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
     const targets = writable ? [{ kind: 'document' as const }] : []
     this.assertWriteTasksAllowed({ ...run.grant, documents: [{ documentId, writable: targets }] }, new Map([[documentId, generation]]))
@@ -374,7 +378,7 @@ export class DocumentToolGateway implements ToolGateway {
     if (new Set(ids).size !== ids.length || ids.some(id => !id)) throw new Error('恢复文档身份重复或无效')
     const grant: ToolRunGrant = { runId: input.runId, actor: input.actor, documents: ids.map(documentId => ({ documentId, writable: [] })) }
     this.runs.set(input.runId, { grant, toolScopes: [], loadedFamilies: new Set(), epochs: new Map(), sources: new Map(),
-      rangeFootprints: new Map(), componentSubtrees: new Map(), stopped: true, history: new Map(), watches: [] })
+      rangeFootprints: new Map(), componentSubtrees: new Map(), stopped: true, history: new Map(), watches: [], contentReads: new Map() })
   }
 
   /** Host-only: never expose arbitrary addresses as model tool input. */
@@ -1082,6 +1086,16 @@ export class DocumentToolGateway implements ToolGateway {
     }
     const definition = toolCatalog.find(tool => tool.name === call.name)
     if (!definition) throw new ToolError('unsupported-tool', '此工具尚未接入正式 Gateway')
+    const htmlAction = htmlActionToolRegistration(call.name)
+    if (htmlAction) return htmlAction.handler({ execute: async (name, input) => {
+      const snapshots = await Promise.all(run.grant.documents.map(document => this.registry.get(document.documentId).drain()))
+      const candidates = snapshots.filter(snapshot => isSourceDocumentModel(snapshot.model) && snapshot.binding.kind === 'file' && /\.html?$/i.test(snapshot.binding.path))
+      const snapshot = candidates.find(value => value.documentId === run.currentHtmlDocumentId)
+        ?? candidates.find(value => value.documentId === run.grant.contentOutput?.documentId) ?? (candidates.length === 1 ? candidates[0] : undefined)
+      if (!snapshot) throw new ToolError('html-target-required', '请先通过 file.open 明确本任务要观察的 HTML 文件')
+      this.authorizeDocument(run, snapshot)
+      return this.hostTools.executeHtmlAction(runId, snapshot, { name, input, operationId })
+    } }, call.input)
     const office = officeToolRegistration(call.name)
     if (office) return office.handler({ runId, operationId, host: this.hostTools }, call.input)
     const material = materialToolRegistration(call.name)
@@ -1380,10 +1394,12 @@ export class DocumentToolGateway implements ToolGateway {
   }
 
   /** Main calls only when the changed-facts reply enters a new model request, never to replay a command. */
-  acknowledgeContentFacts(runId: string): void {
+  acknowledgeContentFacts(runId: string, facts: readonly { documentId: string; current: readonly ComponentExpectation[] }[]): void {
     const run = this.run(runId)
     if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
-    for (const basis of run.contentReads.values()) {
+    for (const fact of facts) {
+      const basis = run.contentReads.get(fact.documentId)
+      if (!basis?.pending || !equalComponentValue(basis.pending, fact.current)) continue
       for (const expected of basis.pending ?? []) basis.expected.set(JSON.stringify(expected.path), expected)
       delete basis.pending
     }
