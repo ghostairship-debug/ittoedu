@@ -45,7 +45,6 @@ export function SlideWorkspaceConnector(props: SlideWorkspaceConnectorProps) {
   }
   useEffect(() => {
     runtime.setPlaying(source.canvasMode === 'run')
-    return () => runtime.setPlaying(false)
   }, [runtime.setPlaying, source.canvasMode])
   const ports = useMemo<SlideWorkspacePorts>(() => {
     const state = () => useEditorStore.getState()
