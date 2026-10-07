@@ -7,6 +7,7 @@ import type { HtmlSelectedTarget } from './htmlPreviewController'
 import { readEditableTargetContent } from '../../../core/tools/ToolTargets'
 import { equalComponentValue } from '../../../core/drivers/courseV10Operations'
 import { readHtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
+import type { ExecutionSelectionTarget } from '../../../shared/workbench/executionDesktop'
 
 export interface HtmlLightEditOverlayProps {
   target: HtmlSelectedTarget
@@ -108,27 +109,24 @@ export function HtmlLightEditOverlay({ target, committed, position, value, onVal
         const snapshot = await workbenchSelection.prepare(committed.documentId)
         if (snapshot.epoch !== committed.epoch || snapshot.model.kind !== 'text') throw new Error('文档已变化，请重新选择。')
         const current = authoring ? readHtmlAuthoringRecords(snapshot.model.source)[authoring.authorKey] : undefined
-        if (!current && locator?.valueSpan) {
-          if (snapshot.revision !== locator.revision) throw new Error('源码已变化，请重新选择；输入已保留。')
-          const range = { kind: 'markdown-range' as const, from: locator.valueSpan.start, to: locator.valueSpan.end }
-          const content = readEditableTargetContent(snapshot.model, range).text
-          const label = target.report.kind === 'text' ? textCardLabel(target.report.rawText) : '所选图片地址'
-          captureSelection(snapshot, [range], label, snapshot.model.source)
-          return { target: range, label, content }
-        }
-        if (!authoring || target.report.bindingStatus !== 'bound') throw new Error('这个对象的运行位置尚未绑定，请重新选择。')
+        const sourceSpan = !current ? locator?.valueSpan : null
+        if (sourceSpan && snapshot.revision !== locator?.revision) throw new Error('源码已变化，请重新选择；输入已保留。')
+        if (!authoring || !sourceSpan && target.report.bindingStatus !== 'bound') throw new Error('这个对象的运行位置尚未绑定，请重新选择。')
         const original = authoring.record
         if (current && (current.kind !== original.kind || !equalComponentValue(current.scope ?? {}, original.scope ?? {})
           || !equalComponentValue(current.binding, original.binding))) throw new Error('对象已变化，请重新选择；输入已保留。')
         const record = current ?? original, field = target.report.kind === 'text' ? 'text' as const : 'src' as const
         const value = record.overrides[field]
-        const address = { kind: 'html-author-field' as const, authorKey: authoring.authorKey, field,
-          record: { ...record, overrides: value === undefined ? {} : { [field]: value } } }
+        const quote = sourceSpan ? snapshot.model.source[sourceSpan.start - 1] : ''
+        const address: Extract<ExecutionSelectionTarget, { kind: 'html-author-field' }> = { kind: 'html-author-field', authorKey: authoring.authorKey, field,
+          record: { ...record, overrides: value === undefined ? {} : { [field]: value } },
+          ...(sourceSpan ? { source: { from: sourceSpan.start, to: sourceSpan.end,
+            ...(field === 'src' ? { quote: quote === '"' || quote === "'" ? quote : '' as const } : {}) } } : {}) }
         const content = readEditableTargetContent(snapshot.model, address).text
         const label = target.report.kind === 'text' ? textCardLabel(content) : '所选图片地址'
         captureSelection(snapshot, [address], label)
         return { target: address, label, content }
-      }} disabledReason={!authoring && !locator?.valueSpan ? '这个位置暂时无法定位，请重新选择。' : null} />}
+      }} disabledReason={!authoring ? '这个位置暂时无法定位，请重新选择。' : null} />}
       <button type="button" disabled={busy} onClick={onClose}>关闭</button>
     </div>
     {issue && <p role="alert">{issue}</p>}

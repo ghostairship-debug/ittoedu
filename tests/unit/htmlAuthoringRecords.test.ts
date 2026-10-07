@@ -435,25 +435,43 @@ it('opens the exact HTML author field after preparing pending input and refuses 
     await view.findByText('对象已变化，请重新选择；输入已保留。')
     expect(opened).toHaveBeenCalledOnce()
     view.unmount(); unregister()
-    const staticSource = '<html><body><p data-item-id="a">same</p><p data-item-id="b">same</p></body></html>'
+    const literal = 'literal <img src=x> & value'
+    const staticSource = '<html><body><p data-item-id="a">same</p><p data-item-id="b">literal &lt;img src=x&gt; &amp; value</p></body></html>'
     const staticSession = await DocumentSession.create({ documentId: 'html-ai-static', epoch: 'epoch', model: driver.load(new TextEncoder().encode(staticSource)),
       binding: { kind: 'file', path: 'static.html', version: null, bindingVersion: 1 } }, driver,
       { async append() {}, async save(input) { return input.binding as Extract<typeof input.binding, { kind: 'file' }> } })
-    const from = staticSource.lastIndexOf('same')
+    const from = staticSource.indexOf('literal'), to = staticSource.indexOf('</p>', from)
     unregister = workbenchSelection.register('html-ai-static', async () => staticSession.read())
-    const staticView = render(createElement(HtmlLightEditOverlay, { target: { report: { ...report, rawText: 'same', bindingStatus: 'source-required',
-      authoring: value }, resolved: { handle: 'dynamic', status: 'editable', locator: { documentId: 'html-ai-static', epoch: 'epoch', revision: 0,
-        bindingVersion: 1, targetKind: 'text', elementSpan: { start: staticSource.indexOf('<p data-item-id="b">'), end: from + 8 }, valueSpan: { start: from, end: from + 4 },
-        expectedRaw: 'same', attributeName: null } } }, committed: staticSession.read(), position: { left: 0, top: 0 }, value: 'same',
+    const staticView = render(createElement(HtmlLightEditOverlay, { target: { report: { ...report, rawText: literal, bindingStatus: 'source-required',
+      authoring: { ...value, record: { ...value.record, binding: { ...value.record.binding, baseline: literal } } } },
+      resolved: { handle: 'dynamic', status: 'editable', locator: { documentId: 'html-ai-static', epoch: 'epoch', revision: 0,
+        bindingVersion: 1, targetKind: 'text', elementSpan: { start: staticSource.indexOf('<p data-item-id="b">'), end: to + 4 }, valueSpan: { start: from, end: to },
+        expectedRaw: staticSource.slice(from, to), attributeName: null } } }, committed: staticSession.read(), position: { left: 0, top: 0 }, value: literal,
       onValue() {}, async onText() { return { status: 'unchanged' as const, revision: 0 } }, async onImage() { return { status: 'unchanged' as const, revision: 0 } }, onClose() {} }))
     try {
       fireEvent.click(staticView.getByRole('button', { name: 'AI 修改' }))
       await waitFor(() => expect(opened).toHaveBeenCalledTimes(2))
-      expect(opened.mock.calls[1][0]).toMatchObject({ documentId: 'html-ai-static', content: 'same',
-        target: { kind: 'markdown-range', from, to: from + 4 } })
+      expect(opened.mock.calls[1][0]).toMatchObject({ documentId: 'html-ai-static', content: literal,
+        target: { kind: 'html-author-field', authorKey: key, field: 'text', source: { from, to } } })
       expect(staticSession.read().undoDepth).toBe(0)
       expect(staticSession.read().model).toEqual(driver.load(new TextEncoder().encode(staticSource)))
     } finally { staticView.unmount() }
+    unregister()
+    const imageSource = "<html><body><img src='old?a&amp;b'></body></html>", imageFrom = imageSource.indexOf('old?'), imageTo = imageSource.indexOf("'", imageFrom)
+    const imageSnapshot = { ...staticSession.read(), model: driver.load(new TextEncoder().encode(imageSource)) }
+    unregister = workbenchSelection.register('html-ai-static', async () => imageSnapshot)
+    const imageView = render(createElement(HtmlLightEditOverlay, { target: { report: { ...report, kind: 'image', rawText: 'old?a&b', attributeName: 'src',
+      authoring: { authorKey: 'image', record: { kind: 'image', binding: { kind: 'dom', path: [{ tag: 'body', index: 1 }, { tag: 'img', index: 0 }], baseline: 'old?a&b' }, overrides: {} } } },
+      resolved: { handle: 'dynamic', status: 'editable', locator: { documentId: 'html-ai-static', epoch: 'epoch', revision: 0, bindingVersion: 1,
+        targetKind: 'image', elementSpan: { start: imageSource.indexOf('<img'), end: imageSource.indexOf('>', imageSource.indexOf('<img')) + 1 }, valueSpan: { start: imageFrom, end: imageTo },
+        expectedRaw: imageSource.slice(imageFrom, imageTo), attributeName: 'src' } } }, committed: imageSnapshot, position: { left: 0, top: 0 }, value: 'old?a&b',
+      onValue() {}, async onText() { return { status: 'unchanged' as const, revision: 0 } }, async onImage() { return { status: 'unchanged' as const, revision: 0 } }, onClose() {} }))
+    try {
+      fireEvent.click(imageView.getByRole('button', { name: 'AI 修改' }))
+      await waitFor(() => expect(opened).toHaveBeenCalledTimes(3))
+      expect(opened.mock.calls[2][0]).toMatchObject({ content: 'old?a&b', target: { kind: 'html-author-field', authorKey: 'image', field: 'src',
+        source: { from: imageFrom, to: imageTo, quote: "'" } } })
+    } finally { imageView.unmount() }
   } finally {
     view.unmount(); unregister()
     for (const card of elementCards.texts()) if (card.documentId.startsWith('html-ai')) await elementCards.closeText(card.key)
