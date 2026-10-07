@@ -27,9 +27,11 @@ async function fixture() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'creation-image-recovery-'))
   const bytes = await sharp({ create: { width: 32, height: 24, channels: 4, background: '#347d68' } }).png().toBuffer()
   let providerCalls = 0
+  const editedReferences: Uint8Array[][] = []
   const images = new ImageGenerationService({ directory: path.join(root, 'images'), provider: {
     generate: async (request, references) => {
       providerCalls++
+      if (request.operation === 'edit') editedReferences.push(references.map(reference => Uint8Array.from(reference.bytes)))
       return { status: 'completed', images: [{ bytes, mimeType: 'image/png', filename: 'ready.png' }], provenance: imageProvenance(request, references) }
     },
   } })
@@ -53,8 +55,34 @@ async function fixture() {
   })
   const begin = (runId: string, workspaceRoot = root) => coordinator.beginRun({ runId, actor: 'agent', documents: [],
     fileAccess: { permission: 'workspace', workspaceRoot } })
-  return { root, bytes, images, coordinator, begin, providerCalls: () => providerCalls }
+  return { root, bytes, images, coordinator, begin, providerCalls: () => providerCalls, editedReferences }
 }
+
+it('edits a ready workspace image from its original bytes through a new run public image request', async () => {
+  const f = await fixture()
+  try {
+    await f.begin('original')
+    const generated = data(await f.coordinator.invoke('original', `tool:${'3'.repeat(64)}`, 'generate', 'image.generate', { prompt: 'Local fixture' }))
+    await f.coordinator.stop('original')
+    await f.begin('continuation')
+    const ready = data(await f.coordinator.invoke('continuation', 'ready-status', '', 'image.status', { job: generated.job }))
+    const request = { prompt: 'Edit the existing image', references: [ready.resources[0].resource] }
+    const edited = data(await f.coordinator.invoke('continuation', `tool:${'4'.repeat(64)}`, 'edit', 'image.edit', request))
+    expect(edited).toMatchObject({ status: 'ready', scope: 'workspace', resources: [{ mimeType: 'image/png', width: 32, height: 24 }] })
+    expect(f.editedReferences).toHaveLength(1)
+    expect(f.editedReferences[0]).toHaveLength(1)
+    expect(Buffer.from(f.editedReferences[0][0])).toEqual(f.bytes)
+    expect(f.providerCalls()).toBe(2)
+    expect(await f.images.read(generated.job)).toMatchObject({ runId: 'original', status: 'ready', stopped: false })
+    expect(await f.images.read(edited.job)).toMatchObject({ runId: 'continuation', status: 'ready', operation: 'edit' })
+    expect(data(await f.coordinator.invoke('continuation', `tool:${'4'.repeat(64)}`, 'edit', 'image.edit', request))).toEqual(edited)
+    expect(f.providerCalls()).toBe(2)
+  } finally {
+    await f.coordinator.stop('continuation')
+    if (!path.resolve(f.root).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unexpected fixture directory')
+    await fs.rm(f.root, { recursive: true, force: true })
+  }
+})
 
 it('reuses a ready workspace image after the original session closes and saves without generating again', async () => {
   const f = await fixture()

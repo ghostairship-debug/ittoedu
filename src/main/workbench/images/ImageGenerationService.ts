@@ -178,7 +178,11 @@ export class ImageGenerationService {
         else if (request.documentId.startsWith('workspace:')) {
           const match = /^(image-tool:[a-f0-9]{64})@(image_[a-f0-9]{64})$/.exec(referenceId)
           if (!match || match[1] === request.jobId) throw new ImageGenerationError('reference-unavailable', '独立参考图须来自本任务已完成的另一图片作业。')
-          source = await this.readReadyResourceFromJob({ jobId: match[1]!, sourceRunId: request.runId,
+          // Public workspace lookup already permits a Ready result from an
+          // earlier run in this exact workspace. Use its durable producer here,
+          // while the completed-resource reader retains the same scope check.
+          const parent = await this.read(match[1]!)
+          source = await this.readReadyResourceFromJob({ jobId: match[1]!, sourceRunId: parent.runId,
             sourceDocumentId: request.documentId, resourceId: match[2]! })
         } else {
           if (!this.options.resolveReference) throw new ImageGenerationError('reference-unavailable', '未配置已授权的参考图读取入口。')
