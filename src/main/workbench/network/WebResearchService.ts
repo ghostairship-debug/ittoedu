@@ -174,7 +174,8 @@ export class WebResearchService {
     if (!stored) {
       if (!input.url) return { status: 'rejected', reason: '需要网页 URL 或本任务来源句柄' }
       try {
-        const response: PublicHttpResponse = await this.call(run, input.signal, signal => this.fetch(input.url!, { signal }))
+        const requestedUrl = parsePublicUrl(input.url).href
+        const response: PublicHttpResponse = await this.call(run, input.signal, signal => this.fetch(requestedUrl, { signal }))
         const url = response.url
         if (response.contentType === 'application/pdf' || response.contentType === 'application/octet-stream'
           || response.contentType === 'application/zip' || response.contentType.startsWith('application/vnd.openxmlformats-officedocument.')) {

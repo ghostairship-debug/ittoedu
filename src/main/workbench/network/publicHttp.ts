@@ -82,7 +82,11 @@ export function isPublicAddress(address: string): boolean {
 
 export function parsePublicUrl(raw: string): URL {
   let url: URL
-  try { url = new URL(raw) } catch { throw new PublicHttpError('invalid-url', '网页地址无效') }
+  const input = raw.trim(), authority = input.split(/[/?#]/, 1)[0]!
+  // A dotted domain is an address. Relative files, credentials and explicit non-HTTP schemes stay unchanged.
+  const bareDomain = /^[^\s.\/:?#@\\]+(?:\.[^\s.\/:?#@\\]+)+\.?(?::\d+)?$/u.test(authority)
+  try { url = new URL(bareDomain ? `https://${input}` : input) }
+  catch { throw new PublicHttpError('invalid-url', '网页地址无效；请提供 HTTP(S) 地址或裸公网域名，相对素材路径请使用 file.*。') }
   if (!['http:', 'https:'].includes(url.protocol) || !url.hostname || url.username || url.password)
     throw new PublicHttpError('invalid-url', '只可读取无内嵌凭据的 HTTP 或 HTTPS 网页')
   const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase()
