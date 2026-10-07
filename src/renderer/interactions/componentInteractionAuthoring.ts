@@ -1,44 +1,14 @@
-import { componentInteractionDataSchema } from '../../shared/componentInteractionData'
-export { componentInteractionDataSchema, remapComponentInteractionData, createComponentInteractionCopyIdentities } from '../../shared/componentInteractionData'
-import type { ComponentDefinition, ComponentEdit, ComponentInstance, ComponentSurface, ComponentTarget, CourseProjectV10, JsonValue } from '../../shared/contracts/component-platform'
-import { componentDefinitionBuiltinKey, componentIsLocked } from '../../shared/contracts/component-platform/project'
+import { componentRuleEdits, interactionBehavior, interactionRules } from '../../shared/componentInteractionData'
+export { INTERACTIONS_DEFINITION, componentRuleEdits, interactionBehavior, interactionRules,
+  componentInteractionDataSchema, remapComponentInteractionData, createComponentInteractionCopyIdentities } from '../../shared/componentInteractionData'
+import type { ComponentEdit, ComponentSurface, ComponentTarget, CourseProjectV10 } from '../../shared/contracts/component-platform'
+import { componentIsLocked } from '../../shared/contracts/component-platform/project'
 import type { InteractionRule } from '../../shared/interactionTypes'
 import type { InteractionSceneView } from '../ui/InteractionEditor'
 import type { InteractionLayerTarget } from '../course/slideInteractionView'
 import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
 import type { EditorStoreKernel } from '../store/editorStoreKernel'
 
-export const INTERACTIONS_DEFINITION: ComponentDefinition = {
-  id: 'guoling.interactions', title: '互动与动画', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.interactions' },
-}
-export const interactionRules = (instance: ComponentInstance | undefined): InteractionRule[] => instance ? componentInteractionDataSchema.parse(instance.data).rules : []
-const json = (value: unknown): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue
-export function interactionBehavior(project: CourseProjectV10, target: ComponentTarget): ComponentInstance | undefined {
-  return Object.values(project.instances).find(instance => componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === INTERACTIONS_DEFINITION.id
-    && instance.attachments?.some(attachment => attachment.instanceId === instance.id && JSON.stringify(attachment.target) === JSON.stringify(target)))
-}
-export function componentRuleEdits(project: CourseProjectV10, target: ComponentTarget, rules: readonly InteractionRule[]): ComponentEdit[] {
-  const data = componentInteractionDataSchema.parse({ rules })
-  const current = interactionBehavior(project, target)
-  const before = interactionRules(current)
-  for (const rule of [...before, ...data.rules]) {
-    const previous = before.find(value => value.id === rule.id), next = data.rules.find(value => value.id === rule.id)
-    if (JSON.stringify(previous) === JSON.stringify(next)) continue
-    const ids = [...('nodeId' in rule.trigger ? [rule.trigger.nodeId] : []),
-      ...rule.actions.flatMap(step => 'nodeId' in step.action ? [step.action.nodeId] : [])]
-    if (ids.some(id => componentIsLocked(project, id))) throw new Error('锁定对象的互动不能修改，请先解锁。')
-  }
-  if (current) return [{ type: 'data.set', instanceId: current.id, path: ['rules'], value: json(data.rules) }]
-  const id = crypto.randomUUID()
-  const container = target.kind === 'surface' ? { kind: 'surface' as const, surfaceId: target.surfaceId } : { kind: 'global' as const, plane: 'underlay' as const }
-  const children = container.kind === 'surface' ? project.surfaces.find(surface => surface.id === container.surfaceId)?.childIds : project.global.underlay
-  if (!children) throw new Error('互动目标表面已不存在')
-  return [
-    ...(project.definitions[INTERACTIONS_DEFINITION.id] ? [] : [{ type: 'definition.set' as const, definition: INTERACTIONS_DEFINITION }]),
-    { type: 'instance.insert', container, index: children.length, rootIds: [id], instances: [{ id, definitionId: INTERACTIONS_DEFINITION.id,
-      name: '互动与动画', data: json(data), attachments: [{ instanceId: id, target }] }] },
-  ]
-}
 /** Initial visibility and the ordinary editable rule enter one author transaction. */
 export function componentRevealSequenceEdits(project: CourseProjectV10, target: ComponentTarget, rule: InteractionRule,
   existingRules: readonly InteractionRule[] = interactionRules(interactionBehavior(project, target))): ComponentEdit[] {

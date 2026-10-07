@@ -3,7 +3,7 @@ import type { NativeInputContent, NativeInputStyle } from '../../shared/contract
 import type { CapturedCourseTarget } from '../../renderer/documents/CourseV10DocumentBridge'
 import type { EditorStoreKernel } from '../../renderer/store/editorStoreKernel'
 import { buildInputRuleFamily, inspectInputRuleFamily, type InputRuleConfig } from '../../core/tools/inputRuleFamily'
-import { componentRuleEdits, interactionBehavior, interactionRules } from '../../renderer/interactions/componentInteractionAuthoring'
+import { componentRuleEdits, interactionBehavior, interactionRules } from '../../shared/componentInteractionData'
 import { inputAnswerContent, inputDataSchema } from './data'
 import { equalComponentValue } from '../../core/drivers/courseV10Operations'
 import { normalizeShortAnswer } from '../../shared/assessmentEvaluators'
