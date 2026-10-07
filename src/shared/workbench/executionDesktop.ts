@@ -9,10 +9,12 @@ import { executionRoles, type ExecutionRole, type ExecutionSelectionSnapshot, ty
 import { userAnswerSchema, type UserAnswer } from './userQuestion'
 import { approvalDecisionSchema, executionPermissionModeSchema, type ApprovalDecision, type ExecutionPermissionMode } from './executionPermission'
 import { lessonAuthoringMaterialSelectionSchema } from '../lessonAuthoring'
+import { componentAuthorRecordSchema } from '../contracts/component-platform/schema'
 
 const id = z.string().min(1), index = z.number().int().nonnegative()
 const executionEditTargetSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('markdown-range'), from: index, to: index }).strict().refine(value => value.to > value.from),
+  z.object({ kind: z.literal('html-author-field'), authorKey: id, field: z.enum(['text', 'src']), record: componentAuthorRecordSchema }).strict(),
   z.object({ kind: z.literal('course-instance'), surfaceId: id, instanceId: id, stateId: id.nullable().optional(),
     fieldScope: z.enum(['data', 'flowLayout']).optional(), dataPath: z.array(id).optional(), from: index.optional(), to: index.optional(),
   }).strict().refine(value => value.from === undefined && value.to === undefined

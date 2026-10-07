@@ -4,14 +4,65 @@ import type { ExecutionContentOutput } from '../../shared/workbench/execution'
 import { documentDigest } from '../documents/documentDigest'
 import { componentIsLocked, owningContainer, resolveComponentPresentation, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
-import { componentFieldIdentityPaths, componentValueAt } from '../drivers/courseV10Operations'
+import { componentFieldIdentityPaths, componentValueAt, equalComponentValue } from '../drivers/courseV10Operations'
+import { HTML_AUTHORING_CONSUMER_ID, HTML_AUTHORING_DATA_ID, patchHtmlAuthoringRecords, readHtmlAuthoringRecords } from '../../shared/html/htmlAuthoringRecords'
 import { componentAuthorRecordSchema } from '../../shared/contracts/component-platform/schema'
 import { documentTextLength, documentTextContentSchema, normalizeDocumentText, sliceDocumentText, plainDocumentText, type FlowTextContent } from '../../shared/document/content'
 import { inlineHtml } from '../../shared/document/html'
 import { readHtmlDocumentText, type DocumentHtmlNode } from '../../shared/document/htmlText'
-import { parseFragment, type DefaultTreeAdapterTypes } from 'parse5'
+import { parse, parseFragment, type DefaultTreeAdapterTypes } from 'parse5'
 
 export type CourseInstanceTarget = Extract<ToolTarget, { kind: 'course-instance' }>
+export type HtmlAuthorFieldTarget = Extract<ToolTarget, { kind: 'html-author-field' }>
+/** A dynamic HTML spot owns a decoded content field; the software wrapper is never model content. */
+export function readHtmlAuthorField(model: DocumentModel, target: HtmlAuthorFieldTarget) {
+  if (!isSourceDocumentModel(model)) throw new Error('HTML 作者字段需要源文档')
+  const records = readHtmlAuthoringRecords(model.source)
+  const frozen = componentAuthorRecordSchema.parse(target.record), current = records[target.authorKey]
+  const identity = (record: typeof frozen) => ({ kind: record.kind, scope: record.scope, binding: record.binding })
+  if (target.field !== (frozen.kind === 'text' ? 'text' : 'src')) throw new Error('HTML 作者字段类型已改变')
+  if (current && !equalComponentValue(identity(current), identity(frozen))) throw new Error('HTML 作者字段绑定已改变，请重新选择')
+  const record = current ?? frozen
+  return { records, record, identity: identity(record), value: record.overrides[target.field] ?? record.binding.baseline }
+}
+/** Re-prepare from the latest source, preserving every unrelated author field and author-authored byte. */
+export function prepareHtmlAuthorFieldSource(model: DocumentModel, target: HtmlAuthorFieldTarget, content: string): string {
+  const { records, record } = readHtmlAuthorField(model, target)
+  if (!isSourceDocumentModel(model)) throw new Error('HTML 作者字段需要源文档')
+  records[target.authorKey] = { ...structuredClone(record), overrides: { ...record.overrides, [target.field]: content } }
+  return patchHtmlAuthoringRecords(model.source, records)
+}
+/** Source-side binding facts, without unrelated text/image fields or software records. */
+function htmlAuthorFieldSourceIdentity(source: string, target: HtmlAuthorFieldTarget): unknown {
+  const document = parse(source), scripts: unknown[] = []
+  type Element = DefaultTreeAdapterTypes.Element
+  const children = (node: DefaultTreeAdapterTypes.ParentNode) => node.childNodes.filter((child): child is Element => 'tagName' in child)
+  const attributes = (element: Element) => Object.fromEntries(element.attrs.filter(attribute => attribute.name !== 'style').map(attribute => [attribute.name, attribute.value]))
+  const content = (node: DefaultTreeAdapterTypes.ParentNode): string => node.childNodes.map(child => child.nodeName === '#text'
+    ? (child as DefaultTreeAdapterTypes.TextNode).value : 'childNodes' in child ? content(child) : '').join('')
+  const visit = (node: DefaultTreeAdapterTypes.ParentNode) => {
+    for (const element of children(node)) {
+      const attrs = attributes(element)
+      if (element.tagName === 'script' && ![HTML_AUTHORING_DATA_ID, HTML_AUTHORING_CONSUMER_ID].includes(attrs.id)) scripts.push({ attributes: attrs, content: content(element) })
+      visit(element)
+    }
+  }
+  visit(document)
+  const root = children(document).find(element => element.tagName === 'html')
+  const trace = (path: typeof target.record.binding.path, includeText: boolean) => {
+    let candidates = root ? [root] : []
+    const steps: unknown[] = []
+    for (const step of path) {
+      candidates = candidates.flatMap(parent => children(parent).filter(element => element.tagName === step.tag
+        && Object.entries(step.attributes ?? {}).every(([name, value]) => name === 'class'
+          ? value.split(/\s+/).every(token => (attributes(element).class ?? '').split(/\s+/).includes(token)) : attributes(element)[name] === value)))
+      steps.push(candidates.map(attributes))
+    }
+    return { steps, value: includeText ? candidates.map(content) : candidates.map(element => target.field === 'src' ? attributes(element).src
+      : element.childNodes.filter(child => child.nodeName === '#text').map(child => (child as DefaultTreeAdapterTypes.TextNode).value)[target.record.binding.textIndex ?? 0]) }
+  }
+  return { scripts, target: trace(target.record.binding.path, false), context: target.record.binding.context?.map(value => trace(value.path, true)) }
+}
 export type CourseInstanceRange = CourseInstanceTarget & { dataPath: string[]; from: number; to: number }
 export function isCourseInstanceRange(target: ToolTarget): target is CourseInstanceRange {
   return target.kind === 'course-instance' && target.dataPath !== undefined && target.from !== undefined && target.to !== undefined
@@ -74,6 +125,7 @@ export function sliceCourseInstanceText(value: string | FlowTextContent, from: n
 }
 /** The editable projection contains content, never the target's identity or bookkeeping. */
 export function readEditableTargetContent(model: DocumentModel, target: ToolTarget): { text: string; format: 'text' | 'markdown' | 'html' } {
+  if (target.kind === 'html-author-field') return { text: readHtmlAuthorField(model, target).value, format: 'text' }
   if (target.kind === 'markdown-range' && isSourceDocumentModel(model))
     return { text: readTarget(model, target) as string, format: model.kind === 'markdown' ? 'markdown' : 'text' }
   if (target.kind !== 'course-instance') throw new Error('当前目标不是可直接改写的正文')
@@ -88,7 +140,7 @@ export function readEditableTargetContent(model: DocumentModel, target: ToolTarg
 }
 /** Both visible selection entry points and Main use the same current-content eligibility. */
 export function prepareExecutionContentOutput(snapshot: DocumentSnapshot, target: ToolTarget): ExecutionContentOutput | undefined {
-  if (target.kind !== 'markdown-range' && target.kind !== 'course-instance') return undefined
+  if (target.kind !== 'markdown-range' && target.kind !== 'course-instance' && target.kind !== 'html-author-field') return undefined
   try { readEditableTargetContent(snapshot.model, target) } catch { return undefined }
   return { kind: 'replace-text', documentId: snapshot.documentId, target: structuredClone(target) }
 }
@@ -119,6 +171,7 @@ function parseEditableInlineHtml(html: string, previous: FlowTextContent): FlowT
 /** A committed replacement carries its exact new extent; continuation never widens to an entire field. */
 export function recoverEditableTargetAfterReplacement(model: DocumentModel, original: ToolTarget, content: string,
   format?: 'text' | 'html'): ToolTarget | null {
+  if (original.kind === 'html-author-field') return readHtmlAuthorField(model, original).value === content ? original : null
   if (original.kind === 'markdown-range' && isSourceDocumentModel(model)) {
     const target = { ...original, to: original.from + content.length }
     return readTarget(model, target) === content ? target : null
@@ -172,9 +225,13 @@ export function courseInstanceTextEdit(model: DocumentModel, target: CourseInsta
 }
 
 export function containsTarget(allowed: ToolTarget, target: ToolTarget, model?: DocumentModel): boolean {
-  const kinds = ['document', 'markdown-range', 'course-instance', 'course-surface', 'course-asset']
+  const kinds = ['document', 'markdown-range', 'html-author-field', 'course-instance', 'course-surface', 'course-asset']
   if (!kinds.includes(allowed.kind) || !kinds.includes(target.kind)) return false
   if (allowed.kind === 'document') return true
+  if (allowed.kind === 'html-author-field' && target.kind === 'html-author-field')
+    return allowed.authorKey === target.authorKey && allowed.field === target.field
+      && equalComponentValue({ kind: allowed.record.kind, scope: allowed.record.scope, binding: allowed.record.binding },
+        { kind: target.record.kind, scope: target.record.scope, binding: target.record.binding })
   if (allowed.kind === 'course-surface' && target.kind === 'course-instance' && model?.kind === 'course-v10') {
     const owner = instanceRootOwner(model.project, target.instanceId)
     return allowed.surfaceId === target.surfaceId && owner?.kind === 'surface' && owner.surfaceId === allowed.surfaceId
@@ -201,6 +258,7 @@ export function containsTarget(allowed: ToolTarget, target: ToolTarget, model?: 
 }
 
 export function readTarget(model: DocumentModel, target: ToolTarget): unknown {
+  if (target.kind === 'html-author-field') return readHtmlAuthorField(model, target).value
   if (target.kind === 'document') {
     if (isSourceDocumentModel(model)) return model.source
     if (model.kind === 'course-v10') return { title: model.project.title, surfaces: model.project.surfaces.map(value => ({ id: value.id, kind: value.kind })) }
@@ -234,6 +292,12 @@ export function readTarget(model: DocumentModel, target: ToolTarget): unknown {
 }
 
 export function targetFootprint(model: DocumentModel, target: ToolTarget): string {
+  if (target.kind === 'html-author-field' && isSourceDocumentModel(model)) {
+    const { value, identity } = readHtmlAuthorField(model, target)
+    // Program/binding changes may redirect a dynamic object. Unrelated static text,
+    // image fields and author records do not change this field's identity or value.
+    return documentDigest({ identity, value, source: htmlAuthorFieldSourceIdentity(model.source, target) })
+  }
   if (target.kind === 'course-instance' && model.kind === 'course-v10') {
     const context = courseInstanceContext(model, target)
     return documentDigest({ definitionId: context.instance.definitionId, owner: owningContainer(model.project, target.instanceId),

@@ -45,8 +45,8 @@ export const officeToolRegistrations = officeContentTools.map(tool => registerOf
 export function officeToolRegistration(name: string) { return officeToolRegistrations.find(tool => tool.name === name) }
 export const canonicalMutationTools = [
   registerCanonical({ name: 'text.replace', description: '替换已授权文字字段或精确范围；保留范围外文字及富文本格式。Project V10 使用宿主捕获的组件文字字段句柄，展示状态仍固定在原目标。对象样式使用 object.update；纯文本文档保持纯文本。',
-    inputSchema: z.object({ target: target.optional().describe('省略时使用本次文字卡由宿主固定的默认目标；其它任务必须提供。'), content: z.string(), format: z.enum(['text', 'html']).optional() }).strict(), manual: { label: '替换正文', group: 'edit', targetKinds: ['markdown-range', 'course-instance'] } },
-  { capability: 'write', effect: 'document-edit', supports: context => hasRunWrite(context, ['markdown-range', 'course-instance']), targets: (input, resolver) => input.target ? handleToolTarget({ target: input.target }, resolver) : undefined,
+    inputSchema: z.object({ target: target.optional().describe('省略时使用本次文字卡由宿主固定的默认目标；其它任务必须提供。'), content: z.string(), format: z.enum(['text', 'html']).optional() }).strict(), manual: { label: '替换正文', group: 'edit', targetKinds: ['markdown-range', 'html-author-field', 'course-instance'] } },
+  { capability: 'write', effect: 'document-edit', supports: context => hasRunWrite(context, ['markdown-range', 'html-author-field', 'course-instance']), targets: (input, resolver) => input.target ? handleToolTarget({ target: input.target }, resolver) : undefined,
     handler: (context, input) => context.mutate({ name: 'text.replace', input }) }),
   registerCanonical({ name: 'object.update', description: '修改获授权整对象的公开属性。使用 target 句柄，或使用 project.list/read 返回的对象 path；project 可选。data/style 只修改提供字段，省略字段和人工位置保持；专业 appearance/style 等子记录可局部修改，数组和正文仍使用该字段完整值。implementation 是实例源码覆盖或 null 恢复默认，不能充当专业类型转换；frame 可局部调位置尺寸。文字范围授权不能扩大为整对象。',
     inputSchema: objectUpdateInputSchema, manual: { label: '修改属性', group: 'edit', targetKinds: ['course-instance'] } },
@@ -146,7 +146,7 @@ export function visibleRunToolNames(allowed: readonly string[], loadedFamilies: 
   return allowed.filter(name => direct.includes(name) || name === 'batch' && canBatch)
 }
 const page = { target, cursor: z.string().min(1).optional(), limit: z.number().int().min(1).optional() }
-const readableKinds: ToolDefinition['manual']['targetKinds'] = ['document', 'markdown-range', 'course-instance', 'course-surface', 'course-asset']
+const readableKinds: ToolDefinition['manual']['targetKinds'] = ['document', 'markdown-range', 'html-author-field', 'course-instance', 'course-surface', 'course-asset']
 /** These callbacks bind the existing Gateway readers, service owners and single batch transaction. */
 export interface GatewayToolHandlers {
   readTarget(name: 'read' | 'inspect' | 'listChildren', input: { target: string; cursor?: string; limit?: number }): Promise<ToolResult>
@@ -178,7 +178,7 @@ export const gatewayToolRegistrations = [
     supports: context => context.deliveries !== false && (tool.name === 'document.export' ? hasRunWrite(context, [], 'course-v10') : hasRunWrite(context)),
     targets: handleToolTarget, handler: (context, input) => context.deliverDocument(tool.name, input),
   })),
-  registerGateway({ name: 'batch', description: batchDescription + batchEndDescription, inputSchema: batchInputSchema, manual: { label: '批量修改', group: 'edit', targetKinds: ['markdown-range', 'course-instance'] } },
+  registerGateway({ name: 'batch', description: batchDescription + batchEndDescription, inputSchema: batchInputSchema, manual: { label: '批量修改', group: 'edit', targetKinds: ['markdown-range', 'html-author-field', 'course-instance'] } },
     { capability: 'write', effect: 'document-edit', supports: context => canonicalMutationTools.some(tool => tool.supports(context)),
       targets: (input, resolver) => toolEffectTargets({ name: 'batch', input }, resolver), handler: (context, input) => context.batch(input.operations) }),
 ] as const

@@ -3,11 +3,13 @@ import type { DocumentSlot } from '../document/ports'
 import type { DisclosedExecutionSettings } from './executionDesktop'
 import type { ExecutionPermissionMode } from './executionPermission'
 import type { ConversationHome } from './conversations'
+import type { ComponentAuthorRecord } from '../contracts/component-platform/runtime'
 
 /** Host-only addresses. A model sees opaque handles, never these coordinates. */
 export type ToolTarget =
   | { kind: 'document' }
   | { kind: 'markdown-range'; from: number; to: number }
+  | { kind: 'html-author-field'; authorKey: string; field: 'text' | 'src'; record: ComponentAuthorRecord }
   /** V10 instance/subtree or a data field. Text offsets count code points; math is one atom. */
   | { kind: 'course-instance'; surfaceId: string; instanceId: string; stateId?: string | null; fieldScope?: 'data' | 'flowLayout'; dataPath?: string[]; from?: number; to?: number }
   | { kind: 'course-audio' }

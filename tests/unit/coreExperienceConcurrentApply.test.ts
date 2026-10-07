@@ -7,6 +7,10 @@ import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { WEB_DEFINITION, webDataSchema } from '../../src/components/web/data'
 import type { ComponentEdit } from '../../src/shared/contracts/component-platform/operations'
+import { TextDriver } from '../../src/core/drivers/TextDriver'
+import { readHtmlAuthoringRecords, patchHtmlAuthoringRecords } from '../../src/shared/html/htmlAuthoringRecords'
+import { prepareExecutionContentOutput, readEditableTargetContent } from '../../src/core/tools/ToolTargets'
+import type { ToolTarget } from '../../src/shared/workbench/tools'
 
 it('applies a delayed local AI reply through Gateway while preserving human geometry and another object, and retains final CAS', async () => {
   const project = createBlankCourseProjectV10('在途共编'), driver = new CourseV10Driver()
@@ -67,4 +71,50 @@ it('edits the effective text of a geometry-only author record through its origin
   if (current.model.kind !== 'course-v10') throw new Error('Expected V10')
   expect(webDataSchema.parse(current.model.project.instances.a.data).authoringRecords!.local.overrides).toEqual({ geometry: { translateX: 40 }, text: 'AI continued' })
   expect(webDataSchema.parse(current.model.project.instances.a.data).html).toBe('<p>Original</p>')
+})
+
+it('edits a dynamic HTML author field through the real Gateway without losing concurrent geometry or another field', async () => {
+  const driver = new TextDriver(), original = '<!doctype html><html><body><div id="app"></div><p>Static B</p><script>app.textContent = "Original"</script></body></html>'
+  const registry = new DocumentRegistry({ drivers: [driver], createId: () => crypto.randomUUID(), bindingKey: binding => binding.path,
+    persistence: { async append() {}, async save() { throw new Error('unused') } } })
+  const session = await registry.create(driver.load(new TextEncoder().encode(original)), 'dynamic.html')
+  const gateway = new DocumentToolGateway(registry, [driver], () => crypto.randomUUID())
+  const target: Extract<ToolTarget, { kind: 'html-author-field' }> = { kind: 'html-author-field', authorKey: 'a', field: 'text',
+    record: { kind: 'text', scope: { item: 'one' }, binding: { kind: 'dom', path: [{ tag: 'body', index: 1 }, { tag: 'div', index: 0, attributes: { id: 'app' } }], baseline: 'Original' }, overrides: {} } }
+  const before = session.read()
+  const contentOutput = prepareExecutionContentOutput(before, target)!
+  expect(contentOutput.target).toEqual(target)
+  expect(readEditableTargetContent(before.model, target)).toEqual({ text: 'Original', format: 'text' })
+  expect(session.read().revision).toBe(0)
+  await gateway.beginRun({ runId: 'html-ai', actor: 'agent', documents: [{ documentId: session.documentId, writable: [target] }], contentOutput })
+  const handle = await gateway.issueTarget('html-ai', session.documentId, target)
+  let release!: () => void
+  const pending = new Promise<void>(resolve => { release = resolve }).then(() => gateway.execute('html-ai', 'reply', {
+    name: 'text.replace', input: { target: handle, content: 'AI </script> & "continued"' },
+  }))
+  const human = async (edit: (records: ReturnType<typeof readHtmlAuthoringRecords>) => void) => {
+    const snapshot = session.read()
+    if (snapshot.model.kind !== 'text') throw new Error('Expected text')
+    const records = readHtmlAuthoringRecords(snapshot.model.source); edit(records)
+    return session.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch, baseRevision: snapshot.revision,
+      operationId: crypto.randomUUID(), actor: 'human', mutation: { type: 'command', command: { type: 'markdown.replace',
+        source: patchHtmlAuthoringRecords(snapshot.model.source.replace('<p>Static B</p>', '<p>Human static B</p>'), records) } } })
+  }
+  expect(await human(records => {
+    records.a = { ...target.record, overrides: { geometry: { translateX: 70, width: 260 } } }
+    records.b = { ...target.record, scope: { item: 'two' }, overrides: { text: 'Human B' } }
+  })).toMatchObject({ status: 'applied' })
+  release()
+  const result = await pending
+  expect(result, JSON.stringify(result)).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  const current = session.read()
+  if (current.model.kind !== 'text') throw new Error('Expected text')
+  expect(readHtmlAuthoringRecords(current.model.source).a.overrides).toEqual({ text: 'AI </script> & "continued"', geometry: { translateX: 70, width: 260 } })
+  expect(readHtmlAuthoringRecords(current.model.source).b.overrides.text).toBe('Human B')
+  expect(current.model.source).toContain('<script>app.textContent = "Original"</script>')
+  expect(current.model.source).toContain('<p>Human static B</p>')
+  expect(driver.load(driver.serialize(current.model))).toEqual(current.model)
+  const stale = await gateway.issueTarget('html-ai', session.documentId, target)
+  await human(records => { records.a.overrides.text = 'Human same field' })
+  expect(await gateway.execute('html-ai', 'stale', { name: 'text.replace', input: { target: stale, content: 'Stale AI' } })).toMatchObject({ kind: 'error', code: 'target-conflict' })
 })

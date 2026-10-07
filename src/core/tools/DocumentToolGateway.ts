@@ -15,7 +15,7 @@ import type { ModelToolCall, ToolDefinition, ToolGateway, ToolResult, ToolRunGra
 import { DocumentRegistry } from '../documents/DocumentRegistry'
 import { documentDigest } from '../documents/documentDigest'
 import { batchInputSchemaFor, canonicalToolRegistration, describeToolFamily, describeTools, familyOfTool, gatewayToolRegistration, mutationCallSchema, mutationNamesIn, selectRunToolNames, toolCatalog, toolEffectTargets, toolFamilies, toolRegistration, visibleRunToolNames, type BatchMutationCall, type RunToolScope, type ToolFamily } from './ToolCatalog'
-import { childTargets, containsTarget, courseInstanceContext, courseInstanceTextTarget, mapMarkdownRange, readTarget, targetFootprint, replaceCourseInstanceText, readCourseInstanceText, sliceCourseInstanceText, isCourseInstanceRange, readEditableTargetContent, recoverEditableTargetAfterReplacement } from './ToolTargets'
+import { childTargets, containsTarget, courseInstanceContext, courseInstanceTextTarget, mapMarkdownRange, readTarget, targetFootprint, replaceCourseInstanceText, readCourseInstanceText, sliceCourseInstanceText, isCourseInstanceRange, readEditableTargetContent, recoverEditableTargetAfterReplacement, prepareHtmlAuthorFieldSource } from './ToolTargets'
 import { courseInstancePropertyEdits, courseInstanceConversionEdits } from './courseInstanceEdits'
 import { coursePresentationEdits } from './coursePresentationEdits'
 import { captureComponentOperation, componentValueAt, presentationComponentEdits, componentFieldIdentityPaths, equalComponentValue } from '../drivers/courseV10Operations'
@@ -75,7 +75,7 @@ function writableKinds(model: DocumentModel, writable: readonly ToolTarget[]): T
   for (const target of writable) {
     kinds.add(target.kind)
     if (target.kind === 'document') {
-      if (isSourceDocumentModel(model)) kinds.add('markdown-range')
+      if (isSourceDocumentModel(model)) { kinds.add('markdown-range'); kinds.add('html-author-field') }
       else if (model.kind === 'course-v10') kinds.add('course-instance')
     }
     if (model.kind === 'course-v10' && target.kind === 'course-surface') kinds.add('course-instance')
@@ -1467,6 +1467,22 @@ export class DocumentToolGateway implements ToolGateway {
         }
         if (mutation.name === 'text.replace' && target.from !== undefined && target.to !== undefined)
           target = { ...target, to: target.from + splice!.inserted }
+        finalTargets.push(target)
+        continue
+      }
+      if (isSourceDocumentModel(model) && mutation.name === 'text.replace' && target.kind === 'html-author-field') {
+        if (mutation.input.format === 'html') throw new ToolError('invalid-content', 'HTML 作者字段接受正文，不接受 HTML 标记')
+        const source = prepareHtmlAuthorFieldSource(model, target, mutation.input.content)
+        let from = 0, oldTo = model.source.length, newTo = source.length
+        while (from < oldTo && from < newTo && model.source[from] === source[from]) from++
+        while (oldTo > from && newTo > from && model.source[oldTo - 1] === source[newTo - 1]) { oldTo--; newTo-- }
+        const splice = { from, to: oldTo, inserted: newTo - from }
+        model = await driver.apply(model, { type: 'markdown.replace', source })
+        sourceSplices.push(splice)
+        for (let j = 0; j < finalTargets.length; j++) {
+          const previous = finalTargets[j]
+          if (previous.kind === 'markdown-range') finalTargets[j] = mapAcknowledgedRange(previous, [splice])
+        }
         finalTargets.push(target)
         continue
       }

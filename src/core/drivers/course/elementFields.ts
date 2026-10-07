@@ -3,7 +3,7 @@ import { isSourceDocumentModel, type DocumentModel } from '../../../shared/workb
 import type { ExecutionSelectionTarget } from '../../../shared/workbench/executionDesktop'
 import { resolveComponentPresentation, type ComponentPresentationState, type CourseProjectV10, type JsonValue } from '../../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../../shared/contracts/component-platform/operations'
-import { isCourseInstanceRange, readCourseInstanceText, sliceCourseInstanceText } from '../../tools/ToolTargets'
+import { isCourseInstanceRange, readCourseInstanceText, readHtmlAuthorField, sliceCourseInstanceText } from '../../tools/ToolTargets'
 
 /** Authored component fields flattened for a card inverse; absent keys are absent fields. */
 export type ElementFields = Readonly<Record<string, unknown>>
@@ -235,6 +235,7 @@ export function elementUnitLabel(unit: readonly string[]): string {
 
 /** The source or component text held by the original target, without searching elsewhere. */
 export function textTargetContent(model: DocumentModel, target: ExecutionSelectionTarget): string | null {
+  if (target.kind === 'html-author-field') { try { return readHtmlAuthorField(model, target).value } catch { return null } }
   if (target.kind === 'course-instance' && model.kind === 'course-v10') {
     try {
       const content = readCourseInstanceText(model, target)
