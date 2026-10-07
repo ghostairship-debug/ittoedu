@@ -350,7 +350,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     if (!tool) return this.reply(session, failure('unknown-tool', '工具不存在，或在本会话的权限与已打开的文档下不可用。可先打开文档，或用 tools.load 展开工具族。'))
     if (tool.read) {
       const ticket = randomUUID()
-      return this.reply(session, await this.traced(session, scope, tool, ticket, input, () => this.execute(session, scope.runId, tool, ticket, input)), ticket, false, tool.name)
+      return this.reply(session, await this.traced(session, scope, tool, ticket, input, () => this.execute(session, scope.runId, tool, ticket, input)), ticket, false, tool.name, scope.runId)
     }
     const digest = callDigest(tool.name, input)
     // The previous identical call's reply never reached the client: answer with its receipt instead of executing again.
@@ -359,7 +359,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     if (undelivered) {
       undelivered.delivered = undefined
       this.track(undelivered, call.delivery)
-      return this.reply(session, await undelivered.result!, undelivered.ticket, true, tool.name)
+      return this.reply(session, await undelivered.result!, undelivered.ticket, true, tool.name, scope.runId)
     }
     const ticket = clientTicket === undefined ? randomUUID() : /^[A-Za-z0-9_.:-]{1,200}$/.test(clientTicket)
       ? clientTicket : `client:${createHash('sha256').update(clientTicket).digest('hex')}`
@@ -368,23 +368,24 @@ export class ExternalMcpService implements ResidentMcpHandler {
       .then(result => { operation.summary = summarize(tool.name, result); return result })
     session.operations.push(operation)
     this.track(operation, call.delivery)
-    return this.reply(session, await operation.result, ticket, false, tool.name)
+    return this.reply(session, await operation.result, ticket, false, tool.name, scope.runId)
   }
   private track(operation: Operation, delivery: Promise<boolean>): void {
     void delivery.then(delivered => { operation.delivered = delivered; if (delivered) operation.result = undefined })
   }
-  private async reply(session: Session, result: ToolResult, ticket?: string, replayed = false, toolName = '') {
+  private async reply(session: Session, result: ToolResult, ticket?: string, replayed = false, toolName = '', runId = session.runId) {
     const publicResult = modelToolResult(toolName, result)
     const content: ({ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string })[] = [{ type: 'text', text: JSON.stringify(publicResult) }]
     if (replayed) content.push({ type: 'text', text: '这是此前同一调用的正式回执：上次回复没有送达，本次未重复执行。' })
     let imageMissing = false
-    if (result.kind === 'read' && record(result.data) && record(result.data.image) && typeof result.data.image.resourceId === 'string' && result.data.image.mimeType === 'image/png') {
+    if (result.kind === 'read' && record(result.data) && record(result.data.image) && typeof result.data.image.resourceId === 'string'
+      && ['image/png', 'image/jpeg', 'image/webp'].includes(String(result.data.image.mimeType))) {
       try {
-        const resource = await this.options.gateway.readObservationResource(session.runId, result.data.image.resourceId)
+        const resource = await this.options.gateway.readObservationResource(runId, result.data.image.resourceId)
         content.push({ type: 'image', data: Buffer.from(resource.bytes).toString('base64'), mimeType: resource.mimeType })
       } catch {
         imageMissing = true
-        content.push({ type: 'text', text: '观察图片资源已过期；本次结果只有身份元数据，不能据此声称已看见画面。' })
+        content.push({ type: 'text', text: '图片资源未能读取或授权已失效；本次结果只有身份元数据，不能据此声称已看见画面。' })
       }
     }
     for (const notice of session.notices.splice(0)) content.push({ type: 'text', text: notice })
