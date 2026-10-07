@@ -12,7 +12,7 @@ import { ExecutionEngine } from '../../../../src/main/workbench/execution/Execut
 import { ExecutionRunStore } from '../../../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../../../src/main/workbench/execution/ExecutionEventStore'
 import { EditSessionService } from '../../../../src/main/workbench/execution/EditSessionService'
-import type { ExecutionStart } from '../../../../src/shared/workbench/execution'
+import type { ExecutionRunRecord, ExecutionStart } from '../../../../src/shared/workbench/execution'
 import type { ModelEvent, ModelProvider, ModelRequest, ModelSelection } from '../../../../src/shared/workbench/modelProvider'
 
 const selection: ModelSelection = { model: 'controlled', connection: { id: 'controlled', revision: 1, provider: 'controlled', protocol: 'openai-chat',
@@ -37,6 +37,22 @@ it.each([false, true])('recovering a finish-executing crash slice keeps the comm
   const contentOutput = prepareExecutionContentOutput(initial, target)
   expect(contentOutput).toBeTruthy()
   const runs = new ExecutionRunStore(path.join(directory, 'runs')), events = new ExecutionEventStore({ directory: path.join(directory, 'events') })
+  let finishCheckpoint: ExecutionRunRecord | undefined
+  const persist = runs.save.bind(runs)
+  runs.save = async record => {
+    await persist(record)
+    if (finishCheckpoint || !record.tools.some(tool => tool.call.name === 'task.finish' && tool.state === 'executing')) return
+    // Observe the actual durable checkpoint while Engine is still awaiting save:
+    // executeTool checkpoints executing BEFORE running finish or publishing its ACK.
+    // The final checkpoint and publishEnd occur later, so their events cannot enter this prefix.
+    finishCheckpoint = structuredClone(record)
+    await events.flushPending()
+    const prefix = await events.readPage({ conversationId: record.input.conversationId, limit: 5000 })
+    expect(prefix.hasMore).toBe(false)
+    expect(prefix.events.some(event => event.type === 'run.end')).toBe(false)
+    expect(prefix.events.some(event => event.type === 'document.commit' && event.data.status === 'applied')).toBe(true)
+    await fs.cp(path.join(directory, 'events'), path.join(directory, 'crash-events'), { recursive: true })
+  }
   let phase: 'write' | 'continue' = 'write', continuedRequests = 0, attemptedWrites = 0
   const provider: ModelProvider = { async *stream(request) {
     if (phase === 'write') {
@@ -56,11 +72,13 @@ it.each([false, true])('recovering a finish-executing crash slice keeps the comm
     const started = await engine.start(input), completed = await engine.wait(started.runId)
     expect(completed.status, JSON.stringify({ failure: completed.failure, tools: completed.tools })).toBe('completed')
     expect(await host.internalAPI.read(initial.documentId)).toMatchObject({ undoDepth: 1 })
-    const crash = structuredClone(completed)
-    crash.status = 'running'; delete crash.failure
+    expect(finishCheckpoint, 'Actual finish-executing persistence boundary must have been observed').toBeTruthy()
+    const crash = structuredClone(finishCheckpoint!)
+    expect(crash.status).toBe('running')
     const finish = crash.tools.find(tool => tool.call.name === 'task.finish')!
-    finish.state = 'executing'; delete finish.result; delete finish.receiptTime
-    crash.messages = crash.messages.filter(message => !(message.role === 'tool' && message.tool_call_id === finish.providerCallId))
+    expect(finish).toMatchObject({ state: 'executing' })
+    expect(finish.result).toBeUndefined()
+    expect(crash.messages.some(message => message.role === 'tool' && message.tool_call_id === finish.providerCallId)).toBe(false)
     if (unknownWrite) {
       crash.tools.splice(crash.tools.indexOf(finish), 0, { callId: 'unknown-second-body', providerCallId: 'unknown-second-body', requestId: crash.requests[0].requestId,
         state: 'executing', call: { name: 'text.replace', input: { content: '结果未知的另一次写入' } }, effectTargets: structuredClone(crash.tools[0].effectTargets) })
@@ -69,17 +87,19 @@ it.each([false, true])('recovering a finish-executing crash slice keeps the comm
       assistant.tool_calls.splice(assistant.tool_calls.findIndex(call => call.id === finish.providerCallId), 0,
         { id: 'unknown-second-body', type: 'function', function: { name: 'text.replace', arguments: JSON.stringify({ content: '结果未知的另一次写入' }) } })
     }
-    // Legal persisted crash slice: the actual writer receipt exists; finish has no business effect and no returned ACK.
-    // The optional second executing write has no receipt, so its outcome must remain unknown. This is not a power-loss hardware test.
-    await runs.save(crash)
+    // The positive crash slice and event prefix are captured from the real checkpoint, not rewound from a terminal run.
+    // The optional unknown invocation is a negative recovery input: no success/receipt is manufactured for it.
+    // This is a persistence-boundary test, not a power-loss hardware test.
+    await new ExecutionRunStore(path.join(directory, 'crash-runs')).save(crash)
     // A cold owner restores the formal Session, History and receipts from the durable journal.
     // Reusing the old Gateway would retain the old run registration and is not a restart.
     const freshHost = new DocumentHostService(path.join(directory, 'documents'))
     const restored = await freshHost.internalAPI.restore(initial.documentId)
     expect(restored.epoch).not.toBe(initial.epoch)
     expect(restored).toMatchObject({ undoDepth: 1, model: { project: { instances: { body: { data: { content: { inlines: [{ type: 'text', text: '已正式提交的修订正文' }] } } } } } } })
-    const freshRuns = new ExecutionRunStore(path.join(directory, 'runs'))
-    const freshEvents = new ExecutionEventStore({ directory: path.join(directory, 'events') })
+    const freshRuns = new ExecutionRunStore(path.join(directory, 'crash-runs'))
+    const freshEvents = new ExecutionEventStore({ directory: path.join(directory, 'crash-events') })
+    expect(await freshEvents.findEvent(input.conversationId, `${crash.runId}:terminal`)).toBeNull()
     fresh = createEngine(freshHost, freshRuns, freshEvents)
     await fresh.recover(crash.runId)
     expect(attemptedWrites).toBe(1)
