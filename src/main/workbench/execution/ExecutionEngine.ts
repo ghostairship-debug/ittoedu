@@ -252,6 +252,10 @@ export class ExecutionEngine {
   constructor(private readonly options: ExecutionEngineOptions) {
     this.htmlActions = options.htmlActions
     this.id = options.createId ?? randomUUID; this.now = options.now ?? Date.now
+    options.events.subscribe(event => {
+      if (event.source !== 'builtin') return
+      for (const listener of this.listeners) { try { listener(event) } catch { /* Display cannot fail a business result. */ } }
+    })
     options.subscribeSaves?.(fact => {
       if (fact.status !== 'saved' || !fact.savedBinding) return Promise.resolve()
       return this.queueDocumentBinding(async () => {
@@ -483,19 +487,17 @@ export class ExecutionEngine {
   }
   private async event(record: ExecutionRunRecord, itemId: string, type: ExecutionEventInput['type'], data: ExecutionEventInput['data'], update: ExecutionEventInput['update'] = 'snapshot', eventId?: string, time = this.now()): Promise<void> {
     await this.displayBuffers.get(record.runId)?.flush()
-    const event = await this.options.events.append({ eventId: eventId ?? this.id(), conversationId: record.input.conversationId,
+    this.options.events.enqueue({ eventId: eventId ?? this.id(), conversationId: record.input.conversationId,
       taskId: record.input.taskId, runId: record.runId, itemId, time, source: 'builtin', type, update, data })
-    for (const listener of this.listeners) { try { listener(event) } catch { /* A view cannot fail an execution. */ } }
   }
   private async display(record: ExecutionRunRecord, itemId: string, type: 'text' | 'reasoning' | 'tool', data: ExecutionEventInput['data'], update: ExecutionEventInput['update'] = 'append'): Promise<void> {
     let buffer = this.displayBuffers.get(record.runId)
     const first = !buffer
     if (!buffer) {
       buffer = new DisplayEventBuffer(async inputs => {
-        const events = await this.options.events.batchAppend(inputs)
-        for (const event of events) for (const listener of this.listeners) {
-          try { listener(event) } catch { /* Rendering is not the durable owner. */ }
-        }
+        // The existing buffer hands its ordered batch to the existing event owner.
+        // Its flush now means queued, while EventStore tracks the durable ACK/diagnostic.
+        void this.options.events.batchAppend(inputs).catch(() => undefined)
       })
       this.displayBuffers.set(record.runId, buffer)
     }
@@ -535,7 +537,8 @@ export class ExecutionEngine {
   }
 
   private async publishEnd(record: ExecutionRunRecord): Promise<void> {
-    const existing = await this.options.events.findEvent(record.input.conversationId, `${record.runId}:terminal`)
+    const existing = this.active.has(record.runId) ? null
+      : await this.options.events.findEvent(record.input.conversationId, `${record.runId}:terminal`)
     if (existing) {
       if (existing.data.status !== record.status) throw new Error('运行终态事件与恢复记录不一致')
       return

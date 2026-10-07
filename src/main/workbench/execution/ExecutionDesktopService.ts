@@ -180,9 +180,12 @@ export class ExecutionDesktopService {
     this.shutdownPromise = (async () => {
       await Promise.all([this.initialization, this.recoveryAndRebindPromise, stopping])
       // run.end can enqueue its final conversation write while another queue is draining.
-      while (this.queues.size) await Promise.all([...this.queues.values()])
-      await this.engine.settleDocumentBindings()
-      await this.events.flushPending()
+      do {
+        while (this.queues.size) await Promise.allSettled([...this.queues.values()])
+        await this.engine.settleDocumentBindings()
+        await this.events.flushPending()
+        // A stored terminal event can publish the ordinary final conversation write.
+      } while (this.queues.size)
     })()
     return this.shutdownPromise
   }
