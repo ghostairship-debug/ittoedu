@@ -81,7 +81,9 @@ test('T03 real GUI preserves half JSON and numeric raw at normal close and resto
     await select(view.page, 'canvas')
     const canvasTarget = view.page.locator('.course-editor-frame:visible [data-component-instance="canvas"]')
     await expect(canvasTarget).toBeVisible()
-    await expect(canvasTarget).toContainText('Canvas teacher original')
+    const canvasRendered = canvasTarget.frameLocator('iframe[title="组件内容"]').locator('#component-root')
+    await expect(canvasRendered).toBeVisible()
+    await expect(canvasRendered).toHaveText('Canvas teacher original', { useInnerText: true })
     const canvasBounds = await canvasTarget.boundingBox()
     if (!canvasBounds) throw new Error('Original Canvas instance has no rendered bounds')
     const point = { x: canvasBounds.x + canvasBounds.width / 2, y: canvasBounds.y + canvasBounds.height / 2 }
