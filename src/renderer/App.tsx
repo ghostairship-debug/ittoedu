@@ -28,7 +28,7 @@ import { courseDeliverySnapshot } from './app/courseDeliverySnapshot'
 import { resolveCourseProjectDeliveryFindingRoute } from './diagnostics/projectHealthNavigation'
 import { useCourseProjectLifecycle } from './app/useCourseProjectLifecycle'
 import { useFlowDocumentRecovery } from './app/useFlowDocumentRecovery'
-import { captureFlowMenuTarget, insertFlowMenu as commitFlowMenu, type FlowInsertCommand } from './ui/flow/flowInsertCommands'
+import { captureFlowMenuTarget, resolveFlowMenuInsertionOptions, insertFlowMenu as commitFlowMenu, type CapturedFlowMenuTarget, type FlowInsertCommand } from './ui/flow/flowInsertCommands'
 import { insertCourseMedia, insertCoursePreparedMedia, transformCourseImageAtTarget, type CourseInsertionOptions } from './media/commitCourseMediaAuthoring'
 import { readComponentInteractionSounds, setComponentClickInteraction } from './interactions/componentInteractionAuthoring'
 import { flowBodyIds } from './componentPlatform/surfaces/flow/documentProjection'
@@ -626,15 +626,16 @@ export default function App() {
     runBusy: run, commitStatus: setStatus, reportError: setError,
   })
 
-  const [pendingFlowComponent, setPendingFlowComponent] = useState<{ command: FlowInsertCommand; capture: CapturedCourseTarget } | null>(null)
-  const insertFlowMenu = (command: FlowInsertCommand, payload?: FlowDeepInsertPayload, captured?: CapturedCourseTarget, entry?: ComponentLibraryEntry) => {
+  const [pendingFlowComponent, setPendingFlowComponent] = useState<{ command: FlowInsertCommand; capture: CapturedFlowMenuTarget } | null>(null)
+  const insertFlowMenu = (command: FlowInsertCommand, payload?: FlowDeepInsertPayload, captured?: CapturedFlowMenuTarget, entry?: ComponentLibraryEntry) => {
     void run(async () => {
       const target = captured ?? captureFlowMenuTarget(courseKernel)
+      const options = resolveFlowMenuInsertionOptions(target, command)
       if (command.kind === 'component') {
         if (!entry && !payload?.packageId) { setPendingFlowComponent({ command, capture: target }); return }
         const inserted = entry
-          ? await insertComponentPackagesAtTarget(courseKernel, target, [entry], { destination: command.destination })
-          : await insertComponentDefinitionAtTarget(courseKernel, target, payload!.packageId!, payload?.presetId, { destination: command.destination })
+          ? await insertComponentPackagesAtTarget(courseKernel, target, [entry], options)
+          : await insertComponentDefinitionAtTarget(courseKernel, target, payload!.packageId!, payload?.presetId, options)
         if (!inserted.ok) throw new Error(inserted.reason ?? '组件插入未提交')
         await drainCourseDocument(target.documentId)
         setStatus(`已插入${command.label}`)
@@ -645,7 +646,7 @@ export default function App() {
         const selected = await (command.kind === 'image' ? mediaImport.selectImageAsset()
           : command.kind === 'video' ? mediaImport.selectVideoAsset() : mediaImport.selectAudioAsset())
         if (!selected) return
-        result = await insertCourseMedia(courseKernel, target, [selected], { destination: command.destination })
+        result = await insertCourseMedia(courseKernel, target, [selected], options)
       } else result = await commitFlowMenu(courseKernel, target, command, { assetId: payload?.assetId })
       const confirmed = await drainCourseDocument(target.documentId)
       const current = courseKernel.readView()
