@@ -217,8 +217,9 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     if (!rootElement) return
     const request = (event: Event) => {
       const detail = (event as CustomEvent<DocumentObjectContextMenuDetail>).detail
-      if (!detail || latest.current.readOnly) return
+      if (!detail || latest.current.active === false || latest.current.readOnly) return
       window.setTimeout(() => {
+        if (latest.current.active === false) return
         const items = latest.current.objectMenu?.(detail.blockId) ?? []
         if (items.length) openObjectMenu({ x: detail.x, y: detail.y }, '对象操作', items)
       }, 0)
@@ -626,7 +627,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
   useImperativeHandle(ref, () => ({
     focusAtClientPoint: point => {
       const editor = layout.current
-      if (!editor || mode !== 'layout' || latest.current.readOnly || editor.view.composing) return false
+      if (!editor || mode !== 'layout' || latest.current.active === false || latest.current.readOnly || editor.view.composing) return false
       try {
         const hit = editor.view.posAtCoords({ left: point.x, top: point.y })
         if (!hit) return false
@@ -1022,9 +1023,9 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       {props.renderQuickBarMenu?.(contextualTarget)}
       {commandError && <span role="alert" className="selection-quick-bar__notice" title={commandError}>{commandError}</span>}
     </SelectionQuickBar>
-  return <div ref={attachRoot} onDragOverCapture={event => { if (documentScope && event.dataTransfer.types.includes(DOCUMENT_BLOCK_DRAG_MIME)) { event.preventDefault(); event.stopPropagation() } }}
+  return <div ref={attachRoot} inert={props.active === false} onDragOverCapture={event => { if (props.active !== false && documentScope && event.dataTransfer.types.includes(DOCUMENT_BLOCK_DRAG_MIME)) { event.preventDefault(); event.stopPropagation() } }}
     onDropCapture={event => {
-      if (!documentScope || !event.dataTransfer.types.includes(DOCUMENT_BLOCK_DRAG_MIME)) return
+      if (props.active === false || !documentScope || !event.dataTransfer.types.includes(DOCUMENT_BLOCK_DRAG_MIME)) return
       event.preventDefault(); event.stopPropagation()
       if (props.readOnly || mode !== 'layout') return
       const sourceId = documentBlockDragId(event.dataTransfer)
@@ -1038,7 +1039,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       } catch (error) { fail(error instanceof Error ? error.message : String(error)) }
     }}
     onContextMenu={event => {
-      if (props.readOnly || mode !== 'layout') return
+      if (props.active === false || props.readOnly || mode !== 'layout') return
       const target = (event.target as HTMLElement).closest<HTMLElement>('[data-flow-block-id]')
       const id = target?.dataset.flowBlockId
       if (!id || !layout.current) return
@@ -1060,6 +1061,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
       openObjectMenu({ x: event.clientX, y: event.clientY }, documentScope ? '段落操作' : '文字操作', [...(documentScope ? activeBlockMenu(id) : []), ...clipboardMenu()])
     }}
     className={`shared-document-editor${props.target === 'flow' ? ' shared-document-editor--flow' : ''}`} onKeyDown={event => {
+    if (props.active === false) return
     if (event.key === 'Escape' && contextualTarget) { event.preventDefault(); setDismissedGeneration(targetGeneration) }
     if (documentScope && event.key === '/' && mode === 'layout' && !event.nativeEvent.isComposing && !props.readOnly && activeBlock && layout.current) {
       const selection = layout.current.view.state.selection
@@ -1074,7 +1076,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
      {quickBar}
      {props.active !== false && objectMenu.element}
       {props.active !== false && documentScope && mode === 'layout' && !props.readOnly && activeBlock && <DocumentBlockHandle blockId={activeBlock.id} rect={activeBlock.rect} commands={activeBlockMenu(activeBlock.id)} disabledReason={props.editPreview ? '正在生成的范围暂时只读' : null} />}
-     {props.editPreview && <div className="document-generation-status" role="status">正文正在生成，生成部分尚未保存。<button type="button" onClick={props.editPreview.cancel}>停止生成</button>{commandError && <span role="alert">{commandError}</span>}</div>}
+     {props.active !== false && props.editPreview && <div className="document-generation-status" role="status">正文正在生成，生成部分尚未保存。<button type="button" onClick={props.editPreview.cancel}>停止生成</button>{commandError && <span role="alert">{commandError}</span>}</div>}
      {mode === 'layout' ? <div ref={layoutHost} /> : <div ref={sourceHost} />}
     {diagnostics.length > 0 && <ul role="alert">{diagnostics.map((diagnostic, index) => <li key={index}><button type="button" onClick={() => { const editor = source.current; if (!editor) return; const position = Math.min(editor.state.doc.length, diagnostic.offset); editor.dispatch({ selection: { anchor: position }, effects: SourceView.scrollIntoView(position) }); editor.focus() }}>第 {diagnostic.line} 行：{diagnostic.message}</button></li>)}</ul>}
   </div>
