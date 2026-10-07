@@ -3,6 +3,11 @@ import { expect, it } from 'vitest'
 import { IDENTITY_MATRIX, frameCorners, transformPoint } from '../../src/core/components/geometry'
 import { FreeTransformGesture, LocalAuthorTransformGesture } from '../../src/renderer/componentPlatform/surfaces/slide/freeTransformGesture'
 import type { FreeObjectTarget } from '../../src/renderer/componentPlatform/surfaces/slide/targets'
+import type { ComponentAuthorSpot, CourseProjectV10 } from '../../src/shared/contracts/component-platform'
+import { authorSpotGeometryEdits } from '../../src/renderer/componentPlatform/surfaces/slide/authorSpots'
+import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
+import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
+import { DocumentSession } from '../../src/core/documents/DocumentSession'
 
 const target = (image = false): FreeObjectTarget => ({ instanceId: 'local-target', frame: { width: 200, height: 100, transform: [1, 0, 0, 1, 40, 30] },
   parentToSurface: [2, 0, 0, 2, 80, 50], parent: { kind: 'instance', instanceId: 'web' }, ancestors: ['web'], preserveAspectRatio: image })
@@ -38,4 +43,31 @@ it('compiles border-box width and parent-scaled movement into existing content-b
   drag.update({ x: pointer.x + 10, y: pointer.y })
   expect(drag.update({ x: pointer.x + 50, y: pointer.y }).geometry).toEqual({ translateX: 62 })
   expect(geometry.author).toEqual({ translateX: 12, width: 200 })
+})
+
+it('commits the completed local gesture once through canonical History and undoes the whole drag', async () => {
+  const geometry = { frame: { width: 100, height: 30, transform: [1, 0, 0, 1, 20, 10] as [number, number, number, number, number, number] },
+    parentToInstance: [1, 0, 0, 1, 0, 0] as [number, number, number, number, number, number], author: {}, boxInsets: { width: 0, height: 0 } }
+  const project: CourseProjectV10 = { schemaVersion: 10, id: 'local-drag', revision: 0, title: 'Local drag', assets: {},
+    definitions: { web: { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } } },
+    instances: { web: { id: 'web', definitionId: 'web', data: { html: '<p>Original</p>' }, frame: { width: 400, height: 300, transform: [1, 0, 0, 1, 0, 0] } } },
+    surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['web'], designSize: { width: 800, height: 600 } }], global: { underlay: [], overlay: [] } }
+  const spot: ComponentAuthorSpot = { id: 'observed', instanceId: 'web', mountGeneration: 1, authorKey: 'local-text', kind: 'text',
+    binding: { kind: 'dom', path: [{ tag: 'p', index: 0 }], baseline: 'Original' }, initialValue: 'Original', localBounds: geometry.frame, geometry }
+  const gesture = new LocalAuthorTransformGesture({ geometry, kind: 'text', mode: 'drag', rootToSurface: IDENTITY_MATRIX, surfaceToPointer: IDENTITY_MATRIX, pointer: { x: 30, y: 20 } })
+  gesture.update({ x: 50, y: 20 })
+  const next = gesture.update({ x: 80, y: 40 })
+  const driver = new CourseV10Driver(), session = await DocumentSession.create({ documentId: 'doc', epoch: 'epoch', binding: { kind: 'untitled', suggestedName: 'drag' },
+    model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } } }, driver, { async append() {}, async save() { throw new Error('unused') } })
+  const command = captureComponentOperation(project, authorSpotGeometryEdits(project, spot, next.geometry))
+  const result = await session.execute({ documentId: 'doc', epoch: 'epoch', baseRevision: 0, operationId: 'gesture', actor: 'human', mutation: { type: 'command', command } })
+  expect(result.status).toBe('applied')
+  expect(session.read().undoDepth).toBe(1)
+  const model = session.read().model
+  if (model.kind !== 'course-v10') throw new Error('Expected course')
+  expect(model.project.instances.web.data).toMatchObject({ authoringRecords: { 'local-text': { overrides: { geometry: { translateX: 50, translateY: 20 } } } } })
+  expect(model.project.instances.web.frame).toEqual(project.instances.web.frame)
+  await session.execute({ documentId: 'doc', epoch: 'epoch', baseRevision: session.read().revision, operationId: 'undo', actor: 'human', mutation: { type: 'undo' } })
+  const undone = session.read().model
+  expect(undone.kind === 'course-v10' && undone.project.instances.web.data).toEqual(project.instances.web.data)
 })
