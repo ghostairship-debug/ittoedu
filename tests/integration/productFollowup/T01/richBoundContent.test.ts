@@ -40,16 +40,19 @@ it('a software-bound V10 rich selection preserves unselected links marks geometr
     let requests = 0
     const provider: ModelProvider = { async *stream(request) {
       requests++
-      expect(request.tools).toEqual([])
+      const write = request.tools?.find(value => value.name === 'text.replace')
+      expect(write).toBeTruthy()
       expect(JSON.stringify(request.messages)).toContain('https://example.org/old')
       yield { type: 'text.delta', requestId: request.requestId, sequence: 1, text: '<strong>尚未完成' }
       expect(await host.internalAPI.read(initial.documentId)).toMatchObject({ revision: 0, undoDepth: 0, model: { project: { instances: { text: { data: original } } } } })
+      const argumentsText = JSON.stringify({ content: replacement })
       yield { type: 'response.completed', requestId: request.requestId, sequence: 2, responseId: 'fixture', actualModel: 'fixture',
-        finishReason: 'stop', toolCalls: [], assistant: { role: 'assistant', content: replacement }, nativeResponse: {} }
+        finishReason: 'tool_calls', toolCalls: [{ id: 'content-result', name: write!.name, argumentsText }], assistant: { role: 'assistant', content: '',
+          tool_calls: [{ id: 'content-result', type: 'function', function: { name: write!.name, arguments: argumentsText } }] }, nativeResponse: {} }
     } }
     const selection: ModelSelection = { model: 'fixture', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat',
       baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'fixture' }, billing: { kind: 'unknown' },
-      capabilities: { tools: 'unsupported', stream: 'supported', vision: 'unsupported', reasoning: 'unknown' } } }
+      capabilities: { tools: 'supported', stream: 'supported', vision: 'unsupported', reasoning: 'unknown' } } }
     const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider, edits: new EditSessionService(host.registry, host.tools),
       runs: new ExecutionRunStore(path.join(directory, 'runs')), events: new ExecutionEventStore({ directory: path.join(directory, 'events') }) })
     const started = await engine.start({ conversationId: 'rich', taskId: 'rewrite', instruction: '改写所选内容并保留公式和链接', selection,
@@ -57,7 +60,7 @@ it('a software-bound V10 rich selection preserves unselected links marks geometr
     const ended = await engine.wait(started.runId)
     expect(ended.status).toBe('completed')
     expect(ended.tools).toHaveLength(1)
-    expect(ended.tools[0]).toMatchObject({ origin: 'host', result: { kind: 'document-operation', result: { status: 'applied' } } })
+    expect(ended.tools[0]).toMatchObject({ call: { name: 'text.replace', input: { content: replacement } }, result: { kind: 'document-operation', result: { status: 'applied' } } })
     expect(requests).toBe(1)
     const current = await host.internalAPI.read(initial.documentId)
     expect(current.undoDepth).toBe(1)

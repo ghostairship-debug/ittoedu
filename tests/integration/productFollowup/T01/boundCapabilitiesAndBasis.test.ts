@@ -101,16 +101,28 @@ async function card(h: Awaited<ReturnType<typeof fixture>>, instruction: string)
   return { requested: requested!, started: result }
 }
 
-it('a simple card rewrite keeps the single-response no-tool fast path', async () => {
+it('a simple card rewrite uses one direct existing text.replace without planning loading or another model round', async () => {
   let turns = 0
-  const h = await fixture({ async *stream(request) { turns++; yield finish(request, '简单修订正文') } }, false)
+  const h = await fixture({ async *stream(request) { turns++; yield finish(request, '', { name: offered(request, 'text.replace'), args: { content: '简单修订正文' } }) } }, false)
   const sent = await card(h, '将所选正文改写得简洁')
   const ended = await h.engine.wait(sent.started.runId)
   expect(ended.status).toBe('completed')
   expect(turns).toBe(1)
   expect(ended.tools).toHaveLength(1)
-  expect(ended.tools[0].origin).toBe('host')
+  expect(ended.tools[0]).toMatchObject({ call: { name: 'text.replace', input: { content: '简单修订正文' } }, result: { kind: 'document-operation', result: { status: 'applied' } } })
   expect(await h.host.internalAPI.read(h.snapshot.documentId)).toMatchObject({ undoDepth: 1, model: { project: { instances: { body: { data: { content: { inlines: [{ type: 'text', text: '简单修订正文' }] } } } } } } })
+})
+
+it('ordinary assistant explanation from the actual bound card has no implicit body write', async () => {
+  const h = await fixture({ async *stream(request) {
+    yield { type: 'text.delta', requestId: request.requestId, sequence: 1, text: '正在解释当前公式。' }
+    yield finish(request, '平方公式的解释，仅供讨论，没有申请正文修改。')
+  } })
+  const sent = await card(h, '解释当前文字和公式，不修改正文。')
+  const ended = await h.engine.wait(sent.started.runId)
+  expect(ended.status).toBe('completed')
+  expect(ended.tools).toEqual([])
+  expect(await h.host.internalAPI.read(h.snapshot.documentId)).toMatchObject({ revision: 0, undoDepth: 0, model: { project: { instances: { body: { data: h.data } } } } })
 })
 
 it('the actual rich card reads teacher material in the same task, keeps dialogue out of the body, and applies explicit content without model-owned targets', async () => {
