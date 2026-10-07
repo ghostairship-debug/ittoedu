@@ -13,7 +13,7 @@ import { createCourseV10Driver } from '../../core/drivers/CourseV10Driver'
 import { checkComponentExpectations, ComponentOperationConflict } from '../../core/drivers/courseV10Operations'
 import { isSourceDocumentModel, type DocumentDriver, type DocumentEvent, type DocumentKind, type DocumentModel, type DocumentSnapshot, type DocumentOperation, type DocumentOperationResult } from '../../shared/workbench/document'
 import { DesktopOperationError } from '../errors'
-import { documentHostRequestSchema, type DocumentHostRequest, type DocumentHostAPI, type DocumentFileObservation, type ReconcileDocumentFile } from '../../shared/workbench/desktop'
+import { authoringDraftRecoverySchema, documentHostRequestSchema, type AuthoringDraftRecovery, type DocumentHostRequest, type DocumentHostAPI, type DocumentFileObservation, type ReconcileDocumentFile } from '../../shared/workbench/desktop'
 import { createDocumentJournal, readDocumentFileVersion, readDocumentMarkdownResources } from './documentJournal'
 import { DocumentToolGateway } from '../../core/tools/DocumentToolGateway'
 import { WorkspaceFiles, type WorkspaceFilesDependencies } from './WorkspaceFiles'
@@ -25,6 +25,7 @@ import { InMemoryComponentCompilation } from '../../core/components/compilation/
 import { createEsbuildComponentCompiler } from './contentApply/compilation/esbuildComponentCompiler'
 import { ContentApplyService } from './contentApply/applyService'
 import { readComponentProjectFileInput, prepareComponentProjectFileSource } from './projectFiles/componentPlatformFileInput'
+import { AgentFileService } from './execution/AgentFileService'
 
 function canonicalKey(filename: string): string {
   return process.platform === 'win32' ? filename.toLowerCase() : filename
@@ -47,6 +48,7 @@ export class DocumentHostService {
   readonly files: WorkspaceFiles
   readonly fileCoordinator: DocumentFileCoordinator
   readonly artifacts: FileArtifactService
+  readonly agentFiles: AgentFileService
   /** Main consumers share compilation output; each runtime still owns its own load lease. */
   readonly compilation: Pick<InMemoryComponentCompilation, 'compile'>
   private readonly journal
@@ -58,8 +60,11 @@ export class DocumentHostService {
   private readonly saveObservations = new Set<Promise<void>>()
   private readonly closeListeners = new Set<(documentId: string) => void>()
   private bootstrapping?: Promise<DocumentSnapshot>
+  private readonly authoringDraftDirectory: string
+  private authoringDraftTail: Promise<unknown> = Promise.resolve()
 
   constructor(directory: string, fileDependencies: Pick<WorkspaceFilesDependencies, 'trashItem' | 'showItemInFolder' | 'fileOperations'> = {}) {
+    this.authoringDraftDirectory = path.join(directory, 'authoring-drafts')
     this.drivers = [createMarkdownDriver(), createTextDriver(), createCourseV10Driver()]
     this.journal = createDocumentJournal({ directory })
     this.registry = new DocumentRegistry({ persistence: this.journal, drivers: this.drivers, createId: randomUUID, bindingKey: binding => canonicalKey(binding.path) })
@@ -88,6 +93,7 @@ export class DocumentHostService {
     this.files = new WorkspaceFiles({ ...fileDependencies, aroundMutation: this.fileCoordinator.aroundMutation,
       aroundOperation: perform => this.fileCoordinator.withFileOperation(perform) })
     this.artifacts = new FileArtifactService(this)
+    this.agentFiles = new AgentFileService(this)
   }
 
   setEventSink(sink?: (event: DocumentEvent) => void): void { this.eventSink = sink }
@@ -129,6 +135,54 @@ export class DocumentHostService {
         .finally(() => { this.bootstrapping = undefined })
     }
     return this.bootstrapping
+  }
+
+  private authoringDraftPath(snapshot: DocumentSnapshot): string {
+    if (snapshot.model.kind !== 'course-v10') throw new Error('高级课件草稿需要当前 Project V10')
+    // The filename is an auxiliary storage key, never a target supplied by an author or model.
+    return path.join(this.authoringDraftDirectory, documentDigest({ projectId: snapshot.model.project.id,
+      file: snapshot.binding.kind === 'file' ? canonicalKey(snapshot.binding.path) : null }) + '.json')
+  }
+  private async readDraftFile(snapshot: DocumentSnapshot): Promise<AuthoringDraftRecovery | null> {
+    try {
+      const value = JSON.parse(await fs.readFile(this.authoringDraftPath(snapshot), 'utf8'))
+      return authoringDraftRecoverySchema.parse(value)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      throw error
+    }
+  }
+  async readAuthoringDrafts(documentId: string): Promise<AuthoringDraftRecovery | null> {
+    await this.authoringDraftTail
+    return this.readDraftFile(await this.registry.get(documentId).drain())
+  }
+  private async writeDraftFile(snapshot: DocumentSnapshot, drafts: AuthoringDraftRecovery): Promise<void> {
+    const filename = this.authoringDraftPath(snapshot), temporary = `${filename}.${randomUUID()}.tmp`
+    await fs.mkdir(this.authoringDraftDirectory, { recursive: true })
+    try {
+      const handle = await fs.open(temporary, 'wx')
+      try { await handle.writeFile(JSON.stringify(drafts), 'utf8'); await handle.sync() } finally { await handle.close() }
+      await fs.rename(temporary, filename)
+    } finally { await fs.rm(temporary, { force: true }).catch(() => {}) }
+  }
+  writeAuthoringDrafts(documentId: string, input: AuthoringDraftRecovery): Promise<void> {
+    const drafts = authoringDraftRecoverySchema.parse(input)
+    const write = this.authoringDraftTail.then(async () => {
+      const snapshot = await this.registry.get(documentId).drain()
+      if (snapshot.model.kind !== 'course-v10' || drafts.advanced.some(record => record.projectId !== snapshot.model.project.id))
+        throw new Error('原始草稿不属于当前课件，未覆盖恢复记录')
+      await this.writeDraftFile(snapshot, drafts)
+    })
+    this.authoringDraftTail = write.catch(() => undefined)
+    return write
+  }
+  clearAuthoringDrafts(documentId: string): Promise<void> {
+    const clear = this.authoringDraftTail.then(async () => {
+      const snapshot = await this.registry.get(documentId).drain()
+      await fs.rm(this.authoringDraftPath(snapshot), { force: true })
+    })
+    this.authoringDraftTail = clear.catch(() => undefined)
+    return clear
   }
 
   /** Trusted main consumers use the same sessions; UI envelopes remain human-only. */
@@ -337,6 +391,9 @@ export class DocumentHostService {
       case 'create': return this.attach(await this.registry.create(input.model, input.suggestedName))
       case 'open': return this.open(input.path)
       case 'read': return this.registry.get(input.documentId).drain()
+      case 'read-authoring-drafts': return this.readAuthoringDrafts(input.documentId)
+      case 'write-authoring-drafts': return this.writeAuthoringDrafts(input.documentId, input.drafts)
+      case 'clear-authoring-drafts': return this.clearAuthoringDrafts(input.documentId)
       case 'dispatch': return this.dispatch(input.operation)
       case 'lookup': return this.registry.get(input.documentId).lookupOperation(input.operationId)
       case 'save': return this.saveToPath(input.documentId, input.path)
