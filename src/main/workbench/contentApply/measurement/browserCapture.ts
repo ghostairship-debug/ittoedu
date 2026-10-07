@@ -292,7 +292,9 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
       } catch { retain([body], 'state-css-context') }
     }
   }
-  if (unreadableStylesheet && scopes.size) retain([body], 'stylesheet-context')
+  // Computed declarations cannot recover inaccessible font faces, keyframes or
+  // live selectors. The usable stylesheet stays with its authored Web source.
+  if (unreadableStylesheet) retain([body], 'stylesheet-context')
 
   // A live state can resize normal-flow ancestors or move later siblings outside
   // the selector's subject. Keep that measured layout relationship in the same
