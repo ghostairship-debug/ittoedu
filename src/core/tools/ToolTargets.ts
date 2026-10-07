@@ -8,6 +8,7 @@ import { componentFieldIdentityPaths, componentValueAt, equalComponentValue } fr
 import { HTML_AUTHORING_CONSUMER_ID, HTML_AUTHORING_DATA_ID, patchHtmlAuthoringRecords, readHtmlAuthoringRecords } from '../../shared/html/htmlAuthoringRecords'
 import { decodeHtmlEntities } from '../../shared/html/htmlSourceScanner'
 import { escapeHtmlAttribute, escapeHtmlText } from '../../shared/html/htmlSourceEscaping'
+import { locateHtmlAuthorRecordSource } from '../../shared/html/htmlSourceLocator'
 import { componentAuthorRecordSchema } from '../../shared/contracts/component-platform/schema'
 import { documentTextLength, documentTextContentSchema, normalizeDocumentText, sliceDocumentText, plainDocumentText, type FlowTextContent } from '../../shared/document/content'
 import { inlineHtml } from '../../shared/document/html'
@@ -28,7 +29,7 @@ export function readHtmlAuthorField(model: DocumentModel, target: HtmlAuthorFiel
   if (target.source) {
     const { from, to } = target.source
     if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to < from || to > model.source.length) throw new Error('HTML 正文字段范围已失效')
-    return { records, record, identity: identity(record), value: decodeHtmlEntities(model.source.slice(from, to).replace(/\r\n?/g, '\n')) }
+    return { records, record, identity: identity(record), value: current?.overrides[target.field] ?? decodeHtmlEntities(model.source.slice(from, to).replace(/\r\n?/g, '\n')) }
   }
   return { records, record, identity: identity(record), value: record.overrides[target.field] ?? record.binding.baseline }
 }
@@ -39,6 +40,23 @@ function encodedHtmlAuthorField(target: HtmlAuthorFieldTarget, content: string):
  * Cards may follow an edit inside the field to show a conflict; write handles may not. */
 export function mapHtmlAuthorFieldTarget(before: string, after: string, target: HtmlAuthorFieldTarget, followInside = false): HtmlAuthorFieldTarget {
   if (!target.source) return target
+  const recorded = readHtmlAuthoringRecords(after)[target.authorKey]
+  if (recorded) {
+    const previous = locateHtmlAuthorRecordSource(before, target.record, target.authorKey, true)
+    const anchored = recorded.binding.path.at(-1)?.attributes?.['data-cw-author-key'] === target.authorKey
+    const previousAnchor = previous?.path.at(-1)?.attributes?.['data-cw-author-key'] === target.authorKey
+    const samePath = (path: typeof recorded.binding.path) => path.map(step => ({ tag: step.tag, index: step.index }))
+    if (!anchored || previous?.valueSpan?.start !== target.source.from || previous.valueSpan.end !== target.source.to
+      || recorded.kind !== target.record.kind || !equalComponentValue(recorded.scope, target.record.scope)
+      || !equalComponentValue(recorded.binding.context, target.record.binding.context)
+      || !previousAnchor && !equalComponentValue(samePath(recorded.binding.path), samePath(target.record.binding.path)))
+      throw new Error('HTML 作者字段已重新绑定，请重新选择')
+    const located = locateHtmlAuthorRecordSource(after, recorded, target.authorKey, true)
+    if (!located?.valueSpan) throw new Error('HTML 作者字段源节点已不存在')
+    const { start: from, end: to } = located.valueSpan, quote = after[from - 1]
+    return { ...target, record: structuredClone(recorded), source: { from, to,
+      ...(target.field === 'src' ? { quote: quote === '"' || quote === "'" ? quote : '' } : {}) } }
+  }
   const { from, to } = target.source, end = to + after.length - before.length
   const inside = followInside && end >= from && before.slice(0, from) === after.slice(0, from) && before.slice(to) === after.slice(end)
   const source = inside ? { ...target.source, to: end } : mapSequenceRange(before, after, target.source)
@@ -46,11 +64,33 @@ export function mapHtmlAuthorFieldTarget(before: string, after: string, target: 
 }
 /** Re-prepare from the latest source, preserving every unrelated author field and author-authored byte. */
 export function prepareHtmlAuthorFieldSource(model: DocumentModel, target: HtmlAuthorFieldTarget, content: string): string {
+  return prepareHtmlAuthorFieldEdit(model, target, content).source
+}
+export function prepareHtmlAuthorFieldEdit(model: DocumentModel, target: HtmlAuthorFieldTarget, content: string) {
   const { records, record } = readHtmlAuthorField(model, target)
   if (!isSourceDocumentModel(model)) throw new Error('HTML 作者字段需要源文档')
-  if (target.source) return model.source.slice(0, target.source.from) + encodedHtmlAuthorField(target, content) + model.source.slice(target.source.to)
+  const changedSpan = (before: string, after: string) => {
+    if (before === after) return []
+    let from = 0, to = before.length, end = after.length
+    while (from < to && from < end && before[from] === after[from]) from++
+    while (to > from && end > from && before[to - 1] === after[end - 1]) { to--; end-- }
+    return [{ from, to, inserted: end - from }]
+  }
+  if (target.source) {
+    const encoded = encodedHtmlAuthorField(target, content)
+    const source = model.source.slice(0, target.source.from) + encoded + model.source.slice(target.source.to)
+    const splices = source === model.source ? [] : [{ from: target.source.from, to: target.source.to, inserted: encoded.length }]
+    if (!records[target.authorKey]) return { source, splices }
+    // A first drag can add the existing geometry owner while this source edit is in flight.
+    // Keep that owner's other fields and make the edited source the sole content value.
+    const overrides = { ...record.overrides }; delete overrides[target.field]
+    records[target.authorKey] = { ...record, binding: { ...record.binding, baseline: content }, overrides }
+    const updated = patchHtmlAuthoringRecords(source, records)
+    return { source: updated, splices: [...splices, ...changedSpan(source, updated)] }
+  }
   records[target.authorKey] = { ...structuredClone(record), overrides: { ...record.overrides, [target.field]: content } }
-  return patchHtmlAuthoringRecords(model.source, records)
+  const source = patchHtmlAuthoringRecords(model.source, records)
+  return { source, splices: changedSpan(model.source, source) }
 }
 /** Source-side binding facts, without unrelated text/image fields or software records. */
 function htmlAuthorFieldSourceIdentity(source: string, target: HtmlAuthorFieldTarget): unknown {
@@ -195,7 +235,16 @@ function parseEditableInlineHtml(html: string, previous: FlowTextContent): FlowT
 export function recoverEditableTargetAfterReplacement(model: DocumentModel, original: ToolTarget, content: string,
   format?: 'text' | 'html'): ToolTarget | null {
   if (original.kind === 'html-author-field') {
-    const target = original.source ? { ...original, source: { ...original.source, to: original.source.from + encodedHtmlAuthorField(original, content).length } } : original
+    let target = original.source ? { ...original, source: { ...original.source, to: original.source.from + encodedHtmlAuthorField(original, content).length } } : original
+    if (original.source && isSourceDocumentModel(model)) {
+      const recorded = readHtmlAuthoringRecords(model.source)[original.authorKey]
+      if (recorded && recorded.binding.path.at(-1)?.attributes?.['data-cw-author-key'] === original.authorKey
+        && recorded.kind === original.record.kind && equalComponentValue(recorded.scope, original.record.scope)) {
+        const located = locateHtmlAuthorRecordSource(model.source, recorded, original.authorKey, true)
+        if (!located?.valueSpan) return null
+        target = { ...original, record: recorded, source: { ...original.source, from: located.valueSpan.start, to: located.valueSpan.end } }
+      }
+    }
     return readHtmlAuthorField(model, target).value === content ? target : null
   }
   if (original.kind === 'markdown-range' && isSourceDocumentModel(model)) {
@@ -321,9 +370,10 @@ export function readTarget(model: DocumentModel, target: ToolTarget): unknown {
 export function targetFootprint(model: DocumentModel, target: ToolTarget): string {
   if (target.kind === 'html-author-field' && isSourceDocumentModel(model)) {
     const { value, identity } = readHtmlAuthorField(model, target)
+    if (target.source) return documentDigest({ kind: identity.kind, scope: identity.scope, value })
     // Program/binding changes may redirect a dynamic object. Unrelated static text,
     // image fields and author records do not change this field's identity or value.
-    return documentDigest({ identity, value, ...(target.source ? {} : { source: htmlAuthorFieldSourceIdentity(model.source, target) }) })
+    return documentDigest({ identity, value, source: htmlAuthorFieldSourceIdentity(model.source, target) })
   }
   if (target.kind === 'course-instance' && model.kind === 'course-v10') {
     const context = courseInstanceContext(model, target)

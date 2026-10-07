@@ -15,7 +15,7 @@ import type { ModelToolCall, ToolDefinition, ToolGateway, ToolResult, ToolRunGra
 import { DocumentRegistry } from '../documents/DocumentRegistry'
 import { documentDigest } from '../documents/documentDigest'
 import { batchInputSchemaFor, canonicalToolRegistration, describeToolFamily, describeTools, familyOfTool, gatewayToolRegistration, mutationCallSchema, mutationNamesIn, selectRunToolNames, toolCatalog, toolEffectTargets, toolFamilies, toolRegistration, visibleRunToolNames, type BatchMutationCall, type RunToolScope, type ToolFamily } from './ToolCatalog'
-import { childTargets, containsTarget, courseInstanceContext, courseInstanceTextTarget, mapMarkdownRange, readTarget, targetFootprint, replaceCourseInstanceText, readCourseInstanceText, sliceCourseInstanceText, isCourseInstanceRange, readEditableTargetContent, recoverEditableTargetAfterReplacement, prepareHtmlAuthorFieldSource, mapHtmlAuthorFieldTarget } from './ToolTargets'
+import { childTargets, containsTarget, courseInstanceContext, courseInstanceTextTarget, mapMarkdownRange, readTarget, targetFootprint, replaceCourseInstanceText, readCourseInstanceText, sliceCourseInstanceText, isCourseInstanceRange, readEditableTargetContent, recoverEditableTargetAfterReplacement, prepareHtmlAuthorFieldEdit, mapHtmlAuthorFieldTarget } from './ToolTargets'
 import { courseInstancePropertyEdits, courseInstanceConversionEdits } from './courseInstanceEdits'
 import { coursePresentationEdits } from './coursePresentationEdits'
 import { captureComponentOperation, componentValueAt, presentationComponentEdits, componentFieldIdentityPaths, equalComponentValue } from '../drivers/courseV10Operations'
@@ -30,6 +30,7 @@ import { projectFileRegistration } from './ProjectFileTools'
 import { skillReadInputSchema } from './SkillTools'
 import { ComponentProjectFileCoordinator, componentProjectFileSchemas, componentProjectFiles, type ComponentProjectSnapshot, type ComponentProjectFileInput, type ComponentProjectFile } from '../projectFiles/componentPlatform'
 import type { ContentApplyRequest, ContentApplyResult, ContentApplySource, ContentApplyIntent, ContentApplyDiagnostic } from '../contentApply/planning/types'
+import { readHtmlAuthoringRecords } from '../../shared/html/htmlAuthoringRecords'
 
 interface Run {
   grant: ToolRunGrant
@@ -73,7 +74,9 @@ function mapSourceTarget(before: string, after: string, target: ToolTarget): Too
   return target.kind === 'markdown-range' ? mapMarkdownRange(before, after, target)
     : target.kind === 'html-author-field' ? mapHtmlAuthorFieldTarget(before, after, target) : target
 }
-function mapAcknowledgedSourceTarget(target: ToolTarget, edits: readonly SourceSplice[]): ToolTarget {
+function mapAcknowledgedSourceTarget(target: ToolTarget, edits: readonly SourceSplice[], before?: string, after?: string): ToolTarget {
+  if (target.kind === 'html-author-field' && target.source && before !== undefined && after !== undefined
+    && readHtmlAuthoringRecords(after)[target.authorKey]) return mapHtmlAuthorFieldTarget(before, after, target, true)
   return target.kind === 'markdown-range' ? mapAcknowledgedRange(target, edits)
     : target.kind === 'html-author-field' && target.source ? { ...target, source: mapAcknowledgedRange(target.source, edits) } : target
 }
@@ -796,8 +799,8 @@ export class DocumentToolGateway implements ToolGateway {
       try {
         const currentTarget = sourceField(handle.target) && isSourceDocumentModel(snapshot.model)
           ? mapSourceTarget(handle.source!, snapshot.model.source, handle.target) : handle.target
-        const nextTarget = sourceField(currentTarget) && isSourceDocumentModel(model)
-          ? mapAcknowledgedSourceTarget(currentTarget, edits)
+        const nextTarget = sourceField(currentTarget) && isSourceDocumentModel(model) && isSourceDocumentModel(snapshot.model)
+          ? mapAcknowledgedSourceTarget(currentTarget, edits, snapshot.model.source, model.source)
           : isCourseInstanceRange(currentTarget) ? mapAcknowledgedComponentRange(currentTarget, componentSplices) : currentTarget
         // A task commit explains a target change only when the target still matched
         // the result of this task's previous acknowledged commit beforehand.
@@ -824,7 +827,7 @@ export class DocumentToolGateway implements ToolGateway {
           const nextWritable: ToolTarget[] = []
           for (const target of doc.writable) {
             if (!sourceField(target)) { nextWritable.push(target); continue }
-            try { nextWritable.push(mapAcknowledgedSourceTarget(mapSourceTarget(source, beforeSource, target), edits)) }
+            try { nextWritable.push(mapAcknowledgedSourceTarget(mapSourceTarget(source, beforeSource, target), edits, beforeSource, model.source)) }
             catch { /* An ambiguous external overlap does not become new write authority. */ }
           }
           doc.writable = nextWritable
@@ -1482,16 +1485,13 @@ export class DocumentToolGateway implements ToolGateway {
       }
       if (isSourceDocumentModel(model) && mutation.name === 'text.replace' && target.kind === 'html-author-field') {
         if (mutation.input.format === 'html') throw new ToolError('invalid-content', 'HTML 作者字段接受正文，不接受 HTML 标记')
-        const source = prepareHtmlAuthorFieldSource(model, target, mutation.input.content)
-        let from = 0, oldTo = model.source.length, newTo = source.length
-        while (from < oldTo && from < newTo && model.source[from] === source[from]) from++
-        while (oldTo > from && newTo > from && model.source[oldTo - 1] === source[newTo - 1]) { oldTo--; newTo-- }
-        const splice = { from, to: oldTo, inserted: newTo - from }
+        const beforeSource = model.source
+        const { source, splices } = prepareHtmlAuthorFieldEdit(model, target, mutation.input.content)
         model = await driver.apply(model, { type: 'markdown.replace', source })
-        sourceSplices.push(splice)
+        sourceSplices.push(...splices)
         for (let j = 0; j < finalTargets.length; j++) {
           const previous = finalTargets[j]
-          if (sourceField(previous)) finalTargets[j] = mapAcknowledgedSourceTarget(previous, [splice])
+          if (sourceField(previous)) finalTargets[j] = mapAcknowledgedSourceTarget(previous, splices, beforeSource, source)
         }
         finalTargets.push(recoverEditableTargetAfterReplacement(model, target, mutation.input.content) ?? target)
         continue

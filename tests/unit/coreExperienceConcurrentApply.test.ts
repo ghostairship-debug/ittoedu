@@ -9,7 +9,7 @@ import { WEB_DEFINITION, webDataSchema } from '../../src/components/web/data'
 import type { ComponentEdit } from '../../src/shared/contracts/component-platform/operations'
 import { TextDriver } from '../../src/core/drivers/TextDriver'
 import { readHtmlAuthoringRecords, patchHtmlAuthoringRecords } from '../../src/shared/html/htmlAuthoringRecords'
-import { prepareExecutionContentOutput, readEditableTargetContent, targetFootprint } from '../../src/core/tools/ToolTargets'
+import { mapHtmlAuthorFieldTarget, prepareExecutionContentOutput, readEditableTargetContent, targetFootprint } from '../../src/core/tools/ToolTargets'
 import type { ToolTarget } from '../../src/shared/workbench/tools'
 import { JSDOM } from 'jsdom'
 
@@ -166,4 +166,36 @@ it('keeps static HTML text and image attributes literal while mapping a concurre
   expect(parsed.querySelector('img')?.getAttribute('src')).toBe(value)
   expect(parsed.querySelector('img')?.attributes.length).toBe(1)
   expect(parsed.querySelectorAll('p')[1]?.textContent).toBe(content)
+})
+
+it('retains a first static drag while a source-field AI reply is in flight and keeps its continuation on that object', async () => {
+  const driver = new TextDriver(), source = '<!doctype html><html><body><p>Original</p><p>B</p></body></html>'
+  const registry = new DocumentRegistry({ drivers: [driver], createId: () => crypto.randomUUID(), bindingKey: binding => binding.path,
+    persistence: { async append() {}, async save() { throw new Error('unused') } } })
+  const session = await registry.create(driver.load(new TextEncoder().encode(source)), 'first-drag.html')
+  const gateway = new DocumentToolGateway(registry, [driver], () => crypto.randomUUID()), from = source.indexOf('Original')
+  const target: Extract<ToolTarget, { kind: 'html-author-field' }> = { kind: 'html-author-field', authorKey: 'a', field: 'text', source: { from, to: from + 8 },
+    record: { kind: 'text', binding: { kind: 'dom', path: [{ tag: 'body', index: 1 }, { tag: 'p', index: 0 }], baseline: 'Original' }, overrides: {} } }
+  await gateway.beginRun({ runId: 'static-drag', actor: 'agent', documents: [{ documentId: session.documentId, writable: [target] }] })
+  const handle = await gateway.issueTarget('static-drag', session.documentId, target), snapshot = session.read()
+  const geometry = { translateX: 40, translateY: 30, width: 250 }
+  // The existing HtmlSourceEditService's first geometry transaction adds this exact
+  // software anchor and record together, without changing the selected body field.
+  const moved = patchHtmlAuthoringRecords(source.replace('<p>Original', '<p data-cw-author-key="a">Original').replace('<p>B</p>', '<p>Human B</p>'), {
+    a: { ...target.record, binding: { ...target.record.binding, path: [{ tag: 'body', index: 1 }, { tag: 'p', index: 0, attributes: { 'data-cw-author-key': 'a' } }] }, overrides: { geometry } },
+  })
+  expect(await session.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch, operationId: 'human-first-drag', actor: 'human', baseRevision: snapshot.revision,
+    mutation: { type: 'command', command: { type: 'markdown.replace', source: moved } } })).toMatchObject({ status: 'applied' })
+  const result = await gateway.execute('static-drag', 'reply', { name: 'text.replace', input: { target: handle, content: 'AI <safe> & text' } })
+  expect(result, JSON.stringify(result)).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  const current = session.read()
+  if (current.model.kind !== 'text') throw new Error('Expected text')
+  const records = readHtmlAuthoringRecords(current.model.source)
+  expect(records.a.overrides).toEqual({ geometry })
+  expect(records.a.binding.baseline).toBe('AI <safe> & text')
+  expect([...new JSDOM(current.model.source).window.document.querySelectorAll('p')].map(node => node.textContent)).toEqual(['AI <safe> & text', 'Human B'])
+  const followed = mapHtmlAuthorFieldTarget(moved, current.model.source, mapHtmlAuthorFieldTarget(source, moved, target), true)
+  expect(readEditableTargetContent(current.model, followed).text).toBe('AI <safe> & text')
+  const fresh = await gateway.issueTarget('static-drag', session.documentId, followed)
+  expect(await gateway.execute('static-drag', 'continue', { name: 'text.replace', input: { target: fresh, content: 'Continued' } })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
 })
