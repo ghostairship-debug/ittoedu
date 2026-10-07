@@ -27,7 +27,10 @@ export class PayloadCompiler {
     imageDelivery?: 'inline' | 'source' }, options: { signal?: AbortSignal } = {}): Promise<CompiledPayload> {
     const { input, selection, tools } = structuredClone(request)
     options.signal?.throwIfAborted()
-    if (!input.instruction && !input.attachments.length) throw new PayloadCompileError('empty-input', '请输入指令或添加附件')
+    const selectedContent = input.context.some(item => item.provenance.kind === 'selection'
+      && (typeof item.message.content === 'string' ? item.message.content.length > 0
+        : Array.isArray(item.message.content) && item.message.content.length > 0))
+    if (!input.instruction && !input.attachments.length && !selectedContent) throw new PayloadCompileError('empty-input', '请输入指令或添加附件')
     const messages: ModelChatMessage[] = input.context.map(item => item.message)
     const totals: PayloadManifest['totals'] = { serializedBytes: 0, originalBytes: 0, representationBytes: 0, imageBytes: 0, textCharacters: input.instruction.length, base64Characters: 0 }
     const automaticContext = input.context.map((item, messageIndex) => {
