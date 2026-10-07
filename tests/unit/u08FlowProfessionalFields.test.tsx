@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from 'react'
+import { useEffect, useSyncExternalStore } from 'react'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -67,6 +67,7 @@ it('opens a real registered Flow chart title and commits through the shared draf
     function Workspace() {
       useSyncExternalStore(listener => { probe.listeners.add(listener); return () => { probe.listeners.delete(listener) } }, () => probe.version)
       const current = bridge.read().editingProject!
+      useEffect(() => { void world.sync(current, resources) }, [current.revision])
       return <FlowWorkspace documentId={created.documentId} project={current} surfaceId="flow" onSelectImageAsset={async () => null} />
     }
     const ui = render(<Workspace />)
@@ -82,6 +83,7 @@ it('opens a real registered Flow chart title and commits through the shared draf
     expect(accepted.undoDepth).toBe(1)
     if (accepted.model.kind !== 'course-v10') throw new Error('V10 required')
     expect(chartDataSchema.parse(accepted.model.project.instances.chart.data)).toEqual({ ...data, title: '正式图表标题' })
+    await waitFor(() => expect(ui.container.querySelector('[data-chart-text="title"]')).toHaveTextContent('正式图表标题'))
     const filename = path.join(directory, 'edited.h5lesson')
     await host.internalAPI.save(created.documentId, filename)
     const cold = new DocumentHostService(path.join(directory, 'cold-recovery'))
