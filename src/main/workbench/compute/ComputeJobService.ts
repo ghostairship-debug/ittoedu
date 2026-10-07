@@ -235,12 +235,13 @@ export class ComputeJobService {
         else { job.status = 'failed'; job.reason = `计算进程退出码 ${outcome.exitCode ?? 'unknown'}` }
       })
     } catch (error) {
+      const message = error instanceof Error ? error.message : '计算后端失败'
       await this.update(jobId, job => {
         job.status = processStarted && !processFinished ? 'unknown' : 'failed'
-        job.reason = error instanceof Error ? error.message.slice(0, 1000) : '计算后端失败'
+        job.reason = message.slice(0, 1000)
         job.artifacts = artifacts
         job.outputDiagnostics = diagnostics
-        job.logs = [...job.logs, ...this.logLines('system', job.reason)]
+        job.logs = [...job.logs, ...this.logLines('system', message)]
       }).catch(() => undefined)
     }
   }
@@ -267,11 +268,13 @@ export class ComputeJobService {
     return this.status(runId, jobId)
   }
   async logs(runId: string, jobId: string, after = 0, limit = 100): Promise<ComputeJobLogs> {
-    if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new ComputeJobError('invalid-page', '作业日志分页无效')
+    if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1)
+      throw new ComputeJobError('invalid-page', '作业日志分页无效：after 须为非负安全整数，limit 须为正安全整数；用 nextCursor 继续读取。')
     const job = await this.load(jobId)
     if (!job) throw new ComputeJobError('unknown-job', '计算作业不存在')
     if (job.runId !== runId) throw new ComputeJobError('job-not-authorized', '计算作业不属于当前运行')
-    return { entries: job.logs.slice(after, after + limit).map((entry, index) => ({ ...entry, cursor: after + index + 1 })), nextCursor: Math.min(job.logs.length, after + limit) }
+    const entries = job.logs.slice(after, after + Math.min(limit, 100)).map((entry, index) => ({ ...entry, cursor: after + index + 1 }))
+    return { entries, nextCursor: entries.at(-1)?.cursor ?? after }
   }
   async cancel(runId: string, jobId: string): Promise<ComputeJobSnapshot> {
     const key = `${runId}\u0000${jobId}`
