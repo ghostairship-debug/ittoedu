@@ -34,7 +34,7 @@ export interface SaveBinaryFileResult {
   path: string
 }
 
-export type PreserveAndCloseResult = boolean | { ready: boolean; suggestedDirectory?: SaveDirectoryContext }
+export type PreserveAndCloseResult = boolean | { ready: boolean; dirty?: boolean; suggestedDirectory?: SaveDirectoryContext }
 
 export interface SelectedImageResult extends OpenBinaryFileResult {
   mimeType: string

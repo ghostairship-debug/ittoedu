@@ -16,14 +16,17 @@ export function closeDocumentWithDialog(window: BrowserWindow, documents: Docume
   const operation = (async () => {
     const execution = await executionDesktopService(), external = await externalMcpService()
     let closed = false
+    let rendererDirty = false
     const controller = new AbortController()
     try { closed = await closeDocumentFlow({
       discardOnly,
       prepareRenderer: async mode => {
         const result = await requestRendererBeforeClose(window, mode, controller.signal, undefined, [documentId])
         if (result.suggestedDirectory) suggestedDirectory = result.suggestedDirectory
+        rendererDirty = result.dirty
         return result.ready
       },
+      rendererDirty: () => rendererDirty,
       read: () => documents.registry.get(documentId).drain(),
       hasWritableTasks: async () => {
         const active = await execution.writableTasksForDocument(documentId)
@@ -60,7 +63,7 @@ export function closeDocumentWithDialog(window: BrowserWindow, documents: Docume
   return operation
 }
 
-export function requestRendererBeforeClose(window: BrowserWindow, mode: 'save' | 'preserve' | 'discard', signal: AbortSignal, onWaiting?: () => void, documentIds?: readonly string[]): Promise<{ ready: boolean; suggestedDirectory?: SaveDirectoryContext }> {
+export function requestRendererBeforeClose(window: BrowserWindow, mode: 'save' | 'preserve' | 'discard', signal: AbortSignal, onWaiting?: () => void, documentIds?: readonly string[]): Promise<{ ready: boolean; dirty: boolean; suggestedDirectory?: SaveDirectoryContext }> {
   const requestId = randomUUID()
   const resultChannel = mode === 'discard' ? IPC_CHANNELS.discardAndCloseResult : mode === 'save' ? IPC_CHANNELS.saveAndCloseResult : IPC_CHANNELS.preserveAndCloseResult
   const requestChannel = mode === 'discard' ? IPC_CHANNELS.requestDiscardAndClose : mode === 'save' ? IPC_CHANNELS.requestSaveAndClose : IPC_CHANNELS.requestPreserveAndClose
@@ -68,26 +71,27 @@ export function requestRendererBeforeClose(window: BrowserWindow, mode: 'save' |
     let settled = false
     // This is an offered recovery choice, not a timeout or automatic discard.
     const waiting = setTimeout(() => { if (!settled) onWaiting?.() }, 3_000)
-    const finish = (ready: boolean, suggestedDirectory?: SaveDirectoryContext) => {
+    const finish = (ready: boolean, suggestedDirectory?: SaveDirectoryContext, dirty = false) => {
       if (settled) return
       settled = true
       clearTimeout(waiting)
       signal.removeEventListener('abort', onClosed)
       ipcMain.removeListener(resultChannel, onResult)
       window.removeListener('closed', onClosed)
-      resolve({ ready, ...(suggestedDirectory ? { suggestedDirectory } : {}) })
+      resolve({ ready, dirty, ...(suggestedDirectory ? { suggestedDirectory } : {}) })
     }
     const onResult = (
       event: Electron.IpcMainEvent,
       receivedRequestId: unknown,
       saved: unknown,
       directory: unknown,
+      dirty: unknown,
     ) => {
       if (event.sender !== window.webContents || receivedRequestId !== requestId) return
-      if (directory === undefined) { finish(saved === true); return }
+      if (directory === undefined) { finish(saved === true, undefined, dirty === true); return }
       const parsed = saveDirectoryContextSchema.safeParse(directory)
       if (!parsed.success) { finish(false); return }
-      finish(saved === true, parsed.data)
+      finish(saved === true, parsed.data, dirty === true)
     }
     const onClosed = () => finish(false)
     signal.addEventListener('abort', onClosed, { once: true })

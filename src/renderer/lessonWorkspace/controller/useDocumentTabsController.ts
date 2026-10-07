@@ -51,6 +51,7 @@ export interface DocumentTabsController {
   saveActiveDocument(): Promise<'course' | 'document' | 'none'>
   drainAll(): Promise<boolean>
   preserveAll(mode?: 'save' | 'preserve', documentIds?: readonly string[]): Promise<boolean>
+  hasDirtyInputs(documentIds?: readonly string[]): boolean
   suspendForClose(documentIds?: readonly string[]): void
   resumeAfterCloseCancelled(documentIds?: readonly string[]): void
   closeAll(): Promise<boolean>
@@ -182,6 +183,11 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     const unregistered = !documentIds && tabsRef.current.find(tab => tab.kind === 'media' && tab.dirty && !mediaEditors.current.has(tab.id))
     if (unregistered) { setActiveTab(unregistered.id); return false }
     return true
+  }
+  function hasDirtyInputs(documentIds?: readonly string[]): boolean {
+    return tabsRef.current.some(tab => tab.dirty && (!documentIds || tab.documentId && documentIds.includes(tab.documentId)))
+      || [...documents.current.values()].some(editor => editor.session.getSnapshot().dirty
+        && (!documentIds || editor.session.documentId && documentIds.includes(editor.session.documentId)))
   }
   function suspendForClose(documentIds?: readonly string[]) {
     for (const editor of documents.current.values()) if (!documentIds || editor.session.documentId && documentIds.includes(editor.session.documentId)) editor.session.suspendForClose()
@@ -337,7 +343,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     }
     return true
   }
-  return { tabs, activeTab, isCourseActive: tabs.some(tab => tab.id === activeTab && tab.kind === 'course'), createMarkdown, setActiveTab, focusDocument, openTab, closeTab, removeTab, registerEditor, editorRef, mediaEditorRef, mediaFiles: requestMediaFiles, updateMediaSnapshot, updateDirty, flushAll, saveActiveDocument, drainAll, preserveAll, suspendForClose, resumeAfterCloseCancelled, closeAll, disposeDocuments, activeDocumentTarget, selectionChanged, sendContextualCommand }
+  return { tabs, activeTab, isCourseActive: tabs.some(tab => tab.id === activeTab && tab.kind === 'course'), createMarkdown, setActiveTab, focusDocument, openTab, closeTab, removeTab, registerEditor, editorRef, mediaEditorRef, mediaFiles: requestMediaFiles, updateMediaSnapshot, updateDirty, flushAll, saveActiveDocument, drainAll, preserveAll, hasDirtyInputs, suspendForClose, resumeAfterCloseCancelled, closeAll, disposeDocuments, activeDocumentTarget, selectionChanged, sendContextualCommand }
 }
 
 function normalized(value: string) { return value.replace(/\\/g, '/').toLowerCase() }

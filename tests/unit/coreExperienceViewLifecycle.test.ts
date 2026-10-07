@@ -68,7 +68,7 @@ describe('document input owner and Main close boundary', () => {
     expect(f.recovery.resumeFlow).toHaveBeenCalledExactlyOnceWith([f.snapshot.epoch])
   })
 
-  it('Main does not save or close after rejected preparation, and suspends only the chosen discard', async () => {
+  it('Main does not save or close after failed preservation, and suspends only the chosen discard', async () => {
     const f = await fixture(), close = vi.fn(async () => {}), save = vi.fn(async () => f.snapshot)
     const prepare = vi.fn(async () => false)
     const ports = { read: async () => f.snapshot, hasWritableTasks: async () => false, confirmStop: async () => true,
@@ -80,6 +80,31 @@ describe('document input owner and Main close boundary', () => {
     expect(await closeDocumentFlow({ ...ports, discardOnly: true })).toBe(true)
     expect(prepare.mock.calls.at(-1)).toEqual(['discard'])
     expect(close).toHaveBeenCalledExactlyOnceWith(f.snapshot, true)
+  })
+
+  it('offers ordinary Discard for an unfinished property draft while strict Save remains refused', async () => {
+    const f = await fixture()
+    await f.host.saveToPath(f.snapshot.documentId, path.join(f.root, 'clean.h5lesson'))
+    f.setDraft(); f.drain.mockRejectedValue(new Error('正文提交已拒绝'))
+    const choose = vi.fn(async () => 'save' as 'save' | 'discard'), save = vi.fn(async () => null)
+    const close = vi.fn(async (snapshot: typeof f.snapshot, discardDirty: boolean) => {
+      await f.host.operate({ type: 'close', documentId: snapshot.documentId, discardDirty,
+        expected: { epoch: snapshot.epoch, revision: snapshot.revision } })
+    })
+    const ports = { read: () => f.host.internalAPI.read(f.snapshot.documentId), hasWritableTasks: async () => false,
+      confirmStop: async () => true, stopWritableTasks: async () => {}, chooseDirty: choose, save, close,
+      rendererDirty: () => f.lifecycle.hasDirty([f.snapshot.documentId]),
+      prepareRenderer: async (mode: 'save' | 'preserve' | 'discard') => {
+        if (mode === 'discard') { await f.lifecycle.suspend([f.snapshot.documentId]); return true }
+        return f.lifecycle.prepare([f.snapshot.documentId], mode)
+      }, withBarrier: async <T>(operation: () => Promise<T>) => operation() }
+    expect(await closeDocumentFlow(ports)).toBe(false)
+    expect(choose).toHaveBeenCalledOnce(); expect(save).not.toHaveBeenCalled(); expect(close).not.toHaveBeenCalled()
+    expect((await ports.read()).undoDepth).toBe(0)
+    choose.mockResolvedValue('discard')
+    expect(await closeDocumentFlow(ports)).toBe(true)
+    expect(close).toHaveBeenCalledOnce(); expect(save).not.toHaveBeenCalled()
+    expect(f.host.registry.list()).toEqual([])
   })
 
   it('saves the captured revision, keeps later input dirty, and cold opens the saved content', async () => {

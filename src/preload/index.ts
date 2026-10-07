@@ -437,7 +437,7 @@ const desktopAPI = Object.freeze<DesktopAPI>({
       void Promise.resolve().then(() => handler(ids as string[] | undefined)).then(result => {
         const ready = result === true || typeof result === 'object' && result.ready === true
         const suggestedDirectory = typeof result === 'object' ? result.suggestedDirectory : undefined
-        ipcRenderer.send(IPC_CHANNELS.preserveAndCloseResult, requestId, ready, suggestedDirectory)
+        ipcRenderer.send(IPC_CHANNELS.preserveAndCloseResult, requestId, ready, suggestedDirectory, typeof result === 'object' && result.dirty === true)
       }, () => ipcRenderer.send(IPC_CHANNELS.preserveAndCloseResult, requestId, false))
     }
     ipcRenderer.on(IPC_CHANNELS.requestPreserveAndClose, listener)
@@ -454,7 +454,7 @@ const desktopAPI = Object.freeze<DesktopAPI>({
         .then(() => handler(ids as string[] | undefined))
         .then((result) => {
           const ready = result === true || typeof result === 'object' && result.ready === true
-          ipcRenderer.send(IPC_CHANNELS.saveAndCloseResult, requestId, ready, typeof result === 'object' ? result.suggestedDirectory : undefined)
+          ipcRenderer.send(IPC_CHANNELS.saveAndCloseResult, requestId, ready, typeof result === 'object' ? result.suggestedDirectory : undefined, typeof result === 'object' && result.dirty === true)
         })
         .catch((error) => {
           console.error('执行关闭前保存失败', error)

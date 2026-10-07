@@ -134,6 +134,12 @@ export function createCourseInputLifecycle(bridge: CourseV10DocumentBridge, port
       host = api; recovery = adapter
     },
     restore,
+    hasDirty(documentIds: readonly string[] = ids()): boolean {
+      return documentIds.filter(id => ids().includes(id)).some(id => {
+        const current = ports.capture(id)
+        return current.snapshot.dirty || current.records.advanced.length > 0 || current.records.properties.length > 0 || Boolean(current.flowDraft)
+      })
+    },
     async prepare(documentIds: readonly string[] = ids(), mode: 'save' | 'preserve' = 'preserve'): Promise<boolean> {
       try {
         for (const documentId of documentIds.filter(id => ids().includes(id))) {

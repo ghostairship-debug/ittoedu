@@ -4,7 +4,8 @@ export interface DocumentClosePorts {
   /** A failed renderer draft can be discarded explicitly without first committing or saving it. */
   discardOnly?: boolean
   /** Complete or suspend this document's inputs; Main still owns the close decision. */
-  prepareRenderer?(mode: 'save' | 'discard'): Promise<boolean>
+  prepareRenderer?(mode: 'save' | 'preserve' | 'discard'): Promise<boolean>
+  rendererDirty?(): boolean
   read(): Promise<DocumentSnapshot>
   hasWritableTasks(): Promise<boolean>
   confirmStop(): Promise<boolean>
@@ -17,14 +18,14 @@ export interface DocumentClosePorts {
 
 /** A dialog decision applies only to the exact content the user saw. */
 export async function closeDocumentFlow(ports: DocumentClosePorts): Promise<boolean> {
-  if (!ports.discardOnly && await ports.prepareRenderer?.('save') === false) return false
+  if (!ports.discardOnly && await ports.prepareRenderer?.('preserve') === false) return false
   if (await ports.hasWritableTasks()) {
     if (!await ports.confirmStop()) return false
     await ports.stopWritableTasks()
   }
   let snapshot = await ports.read()
   let discard = false
-  if (snapshot.dirty || ports.discardOnly) {
+  if (snapshot.dirty || ports.rendererDirty?.() || ports.discardOnly) {
     const decision = await ports.chooseDirty(snapshot)
     if (decision === 'cancel') return false
     if (decision === 'save') {

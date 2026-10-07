@@ -37,6 +37,7 @@ export interface LessonWorkspaceShellHandle {
   saveActiveDocument(): Promise<'course' | 'document' | 'none'>
   closeAll(): Promise<boolean>
   preserveAll(mode?: 'save' | 'preserve', documentIds?: readonly string[]): Promise<boolean>
+  hasDirtyInputs(documentIds?: readonly string[]): boolean
   suspendForClose(documentIds?: readonly string[]): void
   resumeAfterCloseCancelled(documentIds?: readonly string[]): void
   openFile(path: string): Promise<void>
@@ -65,6 +66,7 @@ export const LessonWorkspaceShell = forwardRef<LessonWorkspaceShellHandle, Lesso
     saveActiveDocument: tabs.saveActiveDocument,
     closeAll: tabs.closeAll,
     preserveAll: tabs.preserveAll,
+    hasDirtyInputs: tabs.hasDirtyInputs,
     suspendForClose: tabs.suspendForClose,
     resumeAfterCloseCancelled: tabs.resumeAfterCloseCancelled,
     openFile: async path => workspace.actions.openFile({ path, name: path.split(/[\\/]/).pop() ?? path, kind: 'file' }),

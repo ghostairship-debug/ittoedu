@@ -390,7 +390,7 @@ export default function App() {
     prepareBeforeClose: (mode, ids) => prepareCourseClose(ids, mode),
     subscribePreserveAndCloseRequest: handler => window.desktopAPI?.onRequestPreserveAndClose?.(async ids => {
       const ready = await handler(ids)
-      return { ready, ...(ready && saveDirectory.current ? { suggestedDirectory: saveDirectory.current } : {}) }
+      return { ready, dirty: courseInputs.hasDirty(ids) || Boolean(lessonShell.current?.hasDirtyInputs(ids)), ...(ready && saveDirectory.current ? { suggestedDirectory: saveDirectory.current } : {}) }
     }) ?? (() => undefined),
     beforeSave: () => flowRecovery.flush(),
     listRecentProjects: async () => {
@@ -405,7 +405,7 @@ export default function App() {
       if (!window.desktopAPI) return () => undefined
       return window.desktopAPI.onRequestSaveAndClose(async ids => {
         const ready = await handler(ids)
-        return { ready, ...(ready && saveDirectory.current ? { suggestedDirectory: saveDirectory.current } : {}) }
+        return { ready, dirty: courseInputs.hasDirty(ids) || Boolean(lessonShell.current?.hasDirtyInputs(ids)), ...(ready && saveDirectory.current ? { suggestedDirectory: saveDirectory.current } : {}) }
       })
     },
   }, {
