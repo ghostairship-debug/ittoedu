@@ -166,6 +166,8 @@ interface HostAuthority {
   resolveImage(runId: string, target: string): Promise<{ snapshot: DocumentSnapshot; target: ToolTarget }>
   active(runId: string, documentId: string, epoch: string): void
   ownsDocument(runId: string, documentId: string): boolean
+  /** Prior receipt identity, including a detached document; never edit authority. */
+  ownsReceiptDocument?(runId: string, documentId: string): boolean
   provideImage(runId: string, documentId: string, source: HostImageInput): Promise<string>
   readImage(runId: string, documentId: string, resource: string): Promise<HostImageInput>
 }
@@ -608,6 +610,24 @@ export class HostToolCoordinator {
   }
   /** Recovery queries only; no registration of edit authority or reconstruction of a task. */
   async lookup(runId: string, operationId: string, requestDigest: string, name: string): Promise<ToolResult | null> {
+    if ((name === 'image.generate' || name === 'image.edit') && this.services.images) {
+      const jobId = `image-${operationId}`
+      let snapshot: ImageJobSnapshot
+      try { snapshot = await this.services.images.read(jobId) }
+      catch (error) {
+        if ((error as { code?: string } | null)?.code === 'unknown-image-job') return null
+        throw error
+      }
+      const workspace = /^workspace:[a-f0-9]{64}$/.test(snapshot.documentId)
+      if (snapshot.jobId !== jobId || snapshot.runId !== runId || snapshot.operation !== (name === 'image.edit' ? 'edit' : 'generate')
+        || !workspace && !(this.authority.ownsReceiptDocument?.(runId, snapshot.documentId)
+          ?? this.authority.ownsDocument(runId, snapshot.documentId))) throw new Error('原图片回执不属于此任务或文档')
+      // The durable owner binds this fixed job/run identity to its original workspace.
+      // No resource handle is issued and no current write grant is reconstructed here.
+      return { kind: 'read', data: { job: jobId, ...(workspace ? { scope: 'workspace' } : { documentId: snapshot.documentId }),
+        status: snapshot.status, stopped: snapshot.stopped, resources: structuredClone(snapshot.resources), provenance: structuredClone(snapshot.provenance),
+        ...(snapshot.failure ? { failure: structuredClone(snapshot.failure) } : {}), ...(snapshot.timing?.length ? { timing: structuredClone(snapshot.timing) } : {}) } }
+    }
     if (name === 'artifact.save' && this.services.artifacts) {
       const receipt = await this.services.artifacts.lookup(runId, operationId)
       return receipt ? { kind: 'read', data: receipt } : null
