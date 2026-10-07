@@ -46,8 +46,8 @@ it.each([false, true])('recovering a finish-executing crash slice keeps the comm
     if (++continuedRequests === 1) { yield reply(request, [{ name: actual(request, 'task.finish'), input: {} }]); return }
     yield reply(request, [], '先查明旧写入的结果，正文不重放。')
   } }
-  const createEngine = () => new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider, files: host.agentFiles, runs, events,
-    edits: new EditSessionService(host.registry, host.tools) })
+  const createEngine = (owner = host, runStore = runs, eventStore = events) => new ExecutionEngine({ registry: owner.registry, gateway: owner.tools, provider, files: owner.agentFiles, runs: runStore, events: eventStore,
+    edits: new EditSessionService(owner.registry, owner.tools) })
   const engine = createEngine()
   const input: ExecutionStart = { conversationId: 'finish-crash', taskId: 'rewrite', instruction: '改写所选正文，然后明确结束任务。', selection,
     documents: [{ documentId: initial.documentId, writable: [target], selection: [target] }], contentOutput: contentOutput!, workspaceRoot: directory, permission: 'workspace' }
@@ -72,11 +72,19 @@ it.each([false, true])('recovering a finish-executing crash slice keeps the comm
     // Legal persisted crash slice: the actual writer receipt exists; finish has no business effect and no returned ACK.
     // The optional second executing write has no receipt, so its outcome must remain unknown. This is not a power-loss hardware test.
     await runs.save(crash)
-    fresh = createEngine()
+    // A cold owner restores the formal Session, History and receipts from the durable journal.
+    // Reusing the old Gateway would retain the old run registration and is not a restart.
+    const freshHost = new DocumentHostService(path.join(directory, 'documents'))
+    const restored = await freshHost.internalAPI.restore(initial.documentId)
+    expect(restored.epoch).not.toBe(initial.epoch)
+    expect(restored).toMatchObject({ undoDepth: 1, model: { project: { instances: { body: { data: { content: { inlines: [{ type: 'text', text: '已正式提交的修订正文' }] } } } } } } })
+    const freshRuns = new ExecutionRunStore(path.join(directory, 'runs'))
+    const freshEvents = new ExecutionEventStore({ directory: path.join(directory, 'events') })
+    fresh = createEngine(freshHost, freshRuns, freshEvents)
     await fresh.recover(crash.runId)
     expect(attemptedWrites).toBe(1)
-    expect(await host.internalAPI.read(initial.documentId)).toMatchObject({ undoDepth: 1 })
-    const recovered = (await runs.read(crash.runId))!
+    expect(await freshHost.internalAPI.read(initial.documentId)).toMatchObject({ undoDepth: 1 })
+    const recovered = (await freshRuns.read(crash.runId))!
     const recoveredFinish = recovered.tools.find(tool => tool.call.name === 'task.finish')?.result
     expect(recoveredFinish?.kind === 'error' && recoveredFinish.code === 'tool-outcome-unknown').toBe(false)
     phase = 'continue'
@@ -86,7 +94,7 @@ it.each([false, true])('recovering a finish-executing crash slice keeps the comm
     expect(ended.tools.some(tool => tool.call.name === 'text.replace')).toBe(false)
     if (unknownWrite) expect(ended.tools.find(tool => tool.call.name === 'task.finish')?.result).toMatchObject({ kind: 'error' })
     expect(attemptedWrites).toBe(1)
-    expect(await host.internalAPI.read(initial.documentId)).toMatchObject({ undoDepth: 1, model: { project: { instances: { body: { data: { content: { inlines: [{ type: 'text', text: '已正式提交的修订正文' }] } } } } } } })
+    expect(await freshHost.internalAPI.read(initial.documentId)).toMatchObject({ undoDepth: 1, model: { project: { instances: { body: { data: { content: { inlines: [{ type: 'text', text: '已正式提交的修订正文' }] } } } } } } })
   } finally {
     if (fresh && resumedId) { await fresh.stop(resumedId); await fresh.wait(resumedId) }
     if (!path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unexpected fixture directory')
