@@ -1862,8 +1862,8 @@ export class ExecutionEngine {
               tool.result = receipt ? { kind: 'read', data: receipt }
                 : { kind: 'error', code: 'artifact-save-failed', message: error instanceof Error ? error.message : String(error) }
             } else if (isHtmlActionTool(tool.call.name)) {
-              tool.result = { kind: 'error', code: tool.call.name === 'html.click' || tool.call.name === 'html.input'
-                ? 'html-action-outcome-unknown' : 'html-action-failed', message: error instanceof Error ? error.message : String(error) }
+              tool.result = { kind: 'error', code: error instanceof Error && 'code' in error && typeof error.code === 'string'
+                ? error.code : 'html-action-failed', message: error instanceof Error ? error.message : String(error) }
             } else {
               // Lost ACK cannot turn into a second model turn or an unqualified operation retry.
               tool.result = isAgentFileTool(tool.call.name) ? { kind: 'error', code: 'file-create-outcome-unknown', message: '文件操作结果尚未确认；请先重读路径，不要重复提交同一修改' }
