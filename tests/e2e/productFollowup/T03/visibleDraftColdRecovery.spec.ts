@@ -91,7 +91,7 @@ test('T03 real GUI preserves half JSON and numeric raw at normal close and resto
       .map(button => button.getBoundingClientRect()).filter(rect => point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom)
       .map(rect => ({ x: rect.x, y: rect.y, width: rect.width, height: rect.height })), point)
     expect(matchingSpots, 'Exactly one real authoring spot must cover the original Canvas instance').toHaveLength(1)
-    await view.page.mouse.click(point.x, point.y)
+    await view.page.mouse.dblclick(point.x, point.y)
     const canvasInput = view.page.getByRole('textbox', { name: '编辑此处文字', exact: true })
     await expect(canvasInput).toHaveValue('Canvas teacher original')
     await canvasInput.dispatchEvent('compositionstart')
