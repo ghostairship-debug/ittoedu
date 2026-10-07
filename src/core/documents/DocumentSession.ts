@@ -174,7 +174,8 @@ export class DocumentSession {
       if (replay) return replay
       if (!id) return this.reject(id, 'denied', 'missing-operation-id', '操作缺少编号')
       if (this.closed || operation.epoch !== this.state.epoch) return this.reject(id, 'conflict', 'stale-epoch', '文档会话已改变，请重新读取')
-      if (operation.runId && this.state.stoppedRuns.includes(operation.runId)) return this.reject(id, 'cancelled', 'run-stopped', '任务已停止，未写入后续操作')
+      const stopIdentity = operation.runLeaseId ?? operation.runId
+      if (stopIdentity && this.state.stoppedRuns.includes(stopIdentity)) return this.reject(id, 'cancelled', 'run-stopped', '任务已停止，未写入后续操作')
       if (operation.baseRevision !== this.state.revision) return this.reject(id, 'conflict', 'stale-revision', '文档已改变，未覆盖当前内容')
       if (amendment) {
         const head = this.state.past.at(-1)
