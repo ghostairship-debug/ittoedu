@@ -12,6 +12,75 @@ import { readHtmlAuthoringRecords, patchHtmlAuthoringRecords } from '../../src/s
 import { mapHtmlAuthorFieldTarget, prepareExecutionContentOutput, readEditableTargetContent, targetFootprint } from '../../src/core/tools/ToolTargets'
 import type { ToolTarget } from '../../src/shared/workbench/tools'
 import { JSDOM } from 'jsdom'
+import { createInputData, inputDataSchema, INPUT_DEFINITION } from '../../src/components/input/data'
+import { buildInputRuleFamily, inspectInputRuleFamily } from '../../src/core/tools/inputRuleFamily'
+import { inputAuthoringContent } from '../../src/components/input/authoring'
+import { createComponentInteractionRuntime } from '../../src/renderer/interactions/componentInteractionRuntime'
+import { interactionBehavior, interactionRules } from '../../src/renderer/interactions/componentInteractionAuthoring'
+import type { ComponentRuntimeContext } from '../../src/shared/contracts/component-platform/runtime'
+import type { JsonValue } from '../../src/shared/contracts/component-platform/project'
+import type { InteractionRule } from '../../src/shared/interactionTypes'
+
+it('updates managed text answers through an object-only Gateway grant with live grading and one undo', async () => {
+  const project = createBlankCourseProjectV10('局部改判题答案'), driver = new CourseV10Driver(), surfaceId = project.surfaces[0].id
+  project.definitions[INPUT_DEFINITION.id] = INPUT_DEFINITION
+  project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
+  project.definitions.interactions = { id: 'interactions', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.interactions' } }
+  const motion = (nodeId: string, show: boolean): InteractionRule['actions'][number]['action'] => ({ type: show ? 'node.enter' : 'node.exit', nodeId,
+    effect: 'none', durationMs: 0, easing: 'linear' })
+  let id = 0
+  const config = { answerType: 'text' as const, answers: ['42'], correct: [motion('yes', true), motion('no', false)], error: [motion('yes', false), motion('no', true)] }
+  const keys = { stateKey: 'input:answer:value', validityKey: 'input:answer:valid' }
+  const family = buildInputRuleFamily('answer', keys, config, () => `original-${++id}`)
+  project.instances.answer = { id: 'answer', definitionId: INPUT_DEFINITION.id, data: createInputData({ placeholder: '保留提示', acceptedAnswers: ['42'],
+    answer: { type: 'text', ...keys, ruleFamilyRuleIds: family.map(rule => rule.id) } }) as unknown as JsonValue }
+  for (const nodeId of ['yes', 'no']) project.instances[nodeId] = { id: nodeId, definitionId: WEB_DEFINITION.id, data: { html: nodeId }, visible: false }
+  const other: InteractionRule = { id: 'other', enabled: true, trigger: { type: 'node.click', nodeId: 'yes' }, conditions: [],
+    actions: [{ id: 'other-action', start: 'after-previous', delayMs: 0, action: motion('no', true) }] }
+  project.instances.behavior = { id: 'behavior', definitionId: 'interactions', data: { rules: [...family, other] } as unknown as JsonValue,
+    attachments: [{ instanceId: 'behavior', target: { kind: 'surface', surfaceId } }] }
+  project.surfaces[0].childIds = ['answer', 'yes', 'no', 'behavior']
+  project.logic = { courseState: [{ key: keys.stateKey, valueType: 'string', defaultValue: '' }, { key: keys.validityKey, valueType: 'boolean', defaultValue: false }], navigationGuards: [] }
+  const registry = new DocumentRegistry({ drivers: [driver], createId: () => crypto.randomUUID(), bindingKey: binding => binding.path,
+    persistence: { async append() {}, async save() { throw new Error('unused') } } })
+  const session = await registry.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, '判题.h5lesson')
+  const gateway = new DocumentToolGateway(registry, [driver], () => crypto.randomUUID())
+  const target = { kind: 'course-instance' as const, surfaceId, instanceId: 'answer' }
+  await gateway.beginRun({ runId: 'answer-ai', actor: 'agent', documents: [{ documentId: session.documentId, writable: [target] }] })
+  const handle = await gateway.issueTarget('answer-ai', session.documentId, target)
+  expect(await gateway.execute('answer-ai', 'answer-only', { name: 'object.update', input: { target: handle, properties: { data: { acceptedAnswers: ['84'] } } } }))
+    .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  const snapshot = session.read()
+  if (snapshot.model.kind !== 'course-v10') throw new Error('Expected V10')
+  const updated = snapshot.model.project, input = inputDataSchema.parse(updated.instances.answer.data)
+  const behavior = interactionBehavior(updated, { kind: 'surface', surfaceId })!, rules = interactionRules(behavior)
+  expect(input.placeholder).toBe('保留提示'); expect(input.acceptedAnswers).toEqual(['84'])
+  expect(inspectInputRuleFamily('answer', inputAuthoringContent(updated.instances.answer), rules))
+    .toMatchObject({ conflict: false, managed: true, config: { ...config, answers: ['84'] } })
+  expect(rules.find(rule => rule.id === 'other')).toEqual(other)
+  expect(updated.instances.yes).toEqual(project.instances.yes); expect(updated.instances.no).toEqual(project.instances.no)
+  const values = new Map<string, unknown>([[keys.stateKey, '84'], [keys.validityKey, true]]), visible = new Map<string, boolean>()
+  let submit: (() => unknown) | undefined
+  const runtime = createComponentInteractionRuntime(() => ({ currentSurfaceId: () => surfaceId, currentStateId: () => null,
+    courseState: { get: key => values.get(key), set: (key, value) => { values.set(key, value) } },
+    subscribeTrigger(trigger, listener) { if (trigger.type === 'input.submit' && trigger.nodeId === 'answer') submit = listener; return () => {} },
+    executeAction(action) { if (action.type === 'node.enter' || action.type === 'node.exit') visible.set(action.nodeId, action.type === 'node.enter'); return true },
+    report(message) { throw new Error(message) } }))
+  const mounted = await runtime.mount({ instance: behavior, scope: { signal: new AbortController().signal, isActive: () => true, cleanup() {} } } as unknown as ComponentRuntimeContext)
+  try {
+    submit?.(); await new Promise(resolve => setTimeout(resolve, 0))
+    expect(visible.get('yes')).toBe(true); expect(visible.get('no')).toBe(false)
+    values.set(keys.stateKey, '42'); submit?.(); await new Promise(resolve => setTimeout(resolve, 0))
+    expect(visible.get('yes')).toBe(false); expect(visible.get('no')).toBe(true)
+  } finally { await mounted.dispose() }
+  const reopened = driver.load(driver.serialize(snapshot.model))
+  expect(reopened.kind === 'course-v10' && reopened.project.instances.answer.data).toEqual(updated.instances.answer.data)
+  expect(snapshot.undoDepth).toBe(1)
+  expect(await session.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch, operationId: 'undo-answer', actor: 'human', baseRevision: snapshot.revision,
+    mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
+  const restored = session.read().model
+  expect(restored.kind === 'course-v10' && restored.project.instances).toEqual(project.instances)
+})
 
 it('applies a delayed local AI reply through Gateway while preserving human geometry and another object, and retains final CAS', async () => {
   const project = createBlankCourseProjectV10('在途共编'), driver = new CourseV10Driver()
