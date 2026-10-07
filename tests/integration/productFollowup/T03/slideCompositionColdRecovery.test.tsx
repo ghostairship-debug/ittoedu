@@ -54,7 +54,7 @@ it('real Canvas IME input survives normal preserve close and cold Main recovery 
     const live = await setup(host, initial)
     const spot: ComponentAuthorSpot = { id: 'label-spot', instanceId: 'text', mountGeneration: 1, kind: 'text', dataPath: ['label'],
       initialValue: 'Teacher original', localBounds: { width: 180, height: 80, transform: [1, 0, 0, 1, 0, 0] } }
-    expect(live.slice.beginSlideSpotEdit(spot)).not.toBeNull()
+    expect(await live.slice.beginSlideSpotEdit(spot)).not.toBeNull()
     render(<live.Editor />)
     const input = within(document.body).getByRole('textbox', { name: 'Canvas input' })
     fireEvent.compositionStart(input)
