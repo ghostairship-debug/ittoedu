@@ -2,6 +2,7 @@ import { _electron as electron, expect, test, type ElectronApplication } from '@
 import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { createServer } from 'node:http'
+import { execFileSync } from 'node:child_process'
 import { BACKGROUND_E2E_ENV } from '../../../../src/main/windowVisibility'
 
 const root = resolve(__dirname, '../../../..')
@@ -179,10 +180,15 @@ test('T05 public Engine uses frozen Main task authorization and real Electron DO
     checkpoint('test.error.before-cleanup', { error: String(error), stack: error instanceof Error ? error.stack : undefined })
     throw error
   } finally {
-    const ownedProcess = app?.process()
-    checkpoint('cleanup.owned-process.kill.before', { pid: ownedProcess?.pid })
-    const killed = ownedProcess?.kill()
-    checkpoint('cleanup.owned-process.kill.returned', { pid: ownedProcess?.pid, killed })
+    const ownedProcess = app?.process(), ownProfile = `--user-data-dir=${join(directory, 'profile')}`
+    checkpoint('cleanup.owned-process-tree.before', { pid: ownedProcess?.pid, profileMatches: ownedProcess?.spawnargs.includes(ownProfile) })
+    try {
+      if (ownedProcess?.pid && ownedProcess.exitCode === null && ownedProcess.signalCode === null && ownedProcess.spawnargs.includes(ownProfile)) {
+        if (process.platform === 'win32') execFileSync('taskkill.exe', ['/PID', String(ownedProcess.pid), '/T', '/F'], { stdio: 'pipe', windowsHide: true })
+        else ownedProcess.kill()
+      }
+    } catch (error) { checkpoint('cleanup.owned-process-tree.error', { error: String(error) }) }
+    checkpoint('cleanup.owned-process-tree.returned', { pid: ownedProcess?.pid })
     checkpoint('cleanup.app.close.before')
     await app?.close().catch(error => checkpoint('cleanup.app.close.error', { error: String(error) }))
     checkpoint('cleanup.app.close.returned')

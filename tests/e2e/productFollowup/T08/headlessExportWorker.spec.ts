@@ -1,6 +1,7 @@
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
 import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { BACKGROUND_E2E_ENV } from '../../../../src/main/windowVisibility'
 
 const root = resolve(__dirname, '../../../..')
@@ -76,12 +77,13 @@ test('T08 actual hidden export entry reports progress, captures a running source
     }
     const { unzipSync } = await import('fflate'), { readFileSync } = await import('node:fs')
     const pptx = unzipSync(new Uint8Array(readFileSync(join(directory, 'capture.pptx'))))
-    const media = Object.entries(pptx).filter(([name]) => /^ppt\/media\//.test(name))
+    const media = Object.entries(pptx).filter(([name]) => /^ppt\/media\//.test(name) && !name.endsWith('/'))
     expect(media.length).toBeGreaterThan(0)
     const sharp = (await import('sharp')).default
     let bluePixels = 0
-    for (const [, bytes] of media) {
-      const { data, info } = await sharp(bytes).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+    for (const [name, bytes] of media) {
+      expect(bytes.byteLength, `Actual PPTX image payload: ${name}`).toBeGreaterThan(0)
+      const { data, info } = await sharp(Buffer.from(bytes)).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
       for (let i = 0; i < data.length; i += info.channels) if (data[i] < 20 && data[i + 1] > 90 && data[i + 1] < 160 && data[i + 2] > 180) bluePixels++
     }
     expect(bluePixels).toBeGreaterThan(100)
@@ -95,8 +97,15 @@ test('T08 actual hidden export entry reports progress, captures a running source
   } catch (error) {
     checkpoint('test.error.before-cleanup', { error: String(error), stack: error instanceof Error ? error.stack : undefined }); throw error
   } finally {
-    const ownedProcess = app?.process(); checkpoint('cleanup.owned-process.kill.before', { pid: ownedProcess?.pid })
-    const killed = ownedProcess?.kill(); checkpoint('cleanup.owned-process.kill.returned', { pid: ownedProcess?.pid, killed })
+    const ownedProcess = app?.process(), ownProfile = `--user-data-dir=${join(directory, 'profile')}`
+    checkpoint('cleanup.owned-process-tree.before', { pid: ownedProcess?.pid, profileMatches: ownedProcess?.spawnargs.includes(ownProfile) })
+    try {
+      if (ownedProcess?.pid && ownedProcess.exitCode === null && ownedProcess.signalCode === null && ownedProcess.spawnargs.includes(ownProfile)) {
+        if (process.platform === 'win32') execFileSync('taskkill.exe', ['/PID', String(ownedProcess.pid), '/T', '/F'], { stdio: 'pipe', windowsHide: true })
+        else ownedProcess.kill()
+      }
+    } catch (error) { checkpoint('cleanup.owned-process-tree.error', { error: String(error) }) }
+    checkpoint('cleanup.owned-process-tree.returned', { pid: ownedProcess?.pid })
     checkpoint('cleanup.app.close.before'); await app?.close().catch(error => checkpoint('cleanup.app.close.error', { error: String(error) })); checkpoint('cleanup.app.close.returned')
   }
 })
