@@ -1,11 +1,12 @@
 import type { WorkspaceMediaFile } from '../../shared/workbench/workspaceFiles'
 import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
+import type { ComponentContainer } from '../../shared/contracts/component-platform'
 import type { WorkspaceMediaSource } from './workspaceMediaSourceContext'
 import { readWorkspaceMediaDrag } from './workspaceMediaDrag'
 
 export type WorkspaceMediaPlacement =
   | { surface: 'slide' | 'spatial'; x: number; y: number }
-  | { surface: 'flow'; afterBlockId: string | null }
+  | { surface: 'flow'; afterBlockId: string | null; container?: ComponentContainer; index?: number }
 
 export interface WorkspaceMediaDropTarget {
   captured: CapturedCourseTarget

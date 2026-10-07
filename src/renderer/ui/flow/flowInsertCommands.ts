@@ -57,7 +57,8 @@ export function resolveFlowMenuInsertionOptions(target: CapturedFlowMenuTarget, 
   if (command.destination === 'paper') {
     const preferred = { width: options.width ?? (command.kind === 'image' ? 480 : 320), height: options.height ?? (command.kind === 'image' ? 320 : 180) }
     const { frame } = flowMenuPaperPlacement(page, preferred)
-    return { ...options, destination: 'paper', x: options.x ?? frame.x, y: options.y ?? frame.y, width: frame.width, height: frame.height }
+    return { ...options, destination: 'paper', x: options.x ?? frame.x, y: options.y ?? frame.y,
+      ...(options.width === undefined ? {} : { width: frame.width }), ...(options.height === undefined ? {} : { height: frame.height }) }
   }
   const selected = page.selectedBlockId
   const container = selected ? owningContainer(target.project, selected) : { kind: 'surface' as const, surfaceId: page.surfaceId }
@@ -82,6 +83,8 @@ export async function insertFlowMenu(kernel: EditorStoreKernel, target: Captured
   const block = createDocumentBlock(command.kind as DocumentBlockKind, () => `block_${nanoid()}`,
     { text: options.text ?? defaultText[command.kind as keyof typeof defaultText] })
   const id = block.id
+  if (block.type === 'paragraph') return commitCourseInsertion(kernel, target, TEXT_DEFINITION,
+    [{ id, definitionId: TEXT_DEFINITION.id, data: courseAuthorData({ ...createTextComponentData(), content: block.content }) }], placement)
   const childId = command.kind === 'section' ? `instance_${nanoid()}` : null
   return commitCourseInsertion(kernel, target, DOCUMENT_BLOCK_DEFINITION,
     [{ id, definitionId: DOCUMENT_BLOCK_DEFINITION.id, name: command.label, data: documentBlockData(block), ...(childId ? { childIds: [childId] } : {}) },

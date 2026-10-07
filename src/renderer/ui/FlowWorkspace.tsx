@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ComponentEdit, ComponentFrame, CourseProjectV10, ComponentInstance, JsonValue } from '../../shared/contracts/component-platform'
-import { componentDefinitionBuiltinKey,resolveComponentBackground, owningContainer, containerChildIds, isComponentVisibleAtSurface, resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, owningContainer, containerChildIds, isComponentVisibleAtSurface, resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
 import { layoutTable } from '../../components/table/render'
 import { parseTableData } from '../../components/table/data'
 import { createRoot } from 'react-dom/client'

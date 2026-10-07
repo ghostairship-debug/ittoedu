@@ -1,14 +1,30 @@
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
+import { createElement } from 'react'
+import { act, fireEvent, render, renderHook } from '@testing-library/react'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { applyComponentOperation, captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { TEXT_DEFINITION } from '../../src/components/text/adapters'
 import { DOCUMENT_BLOCK_DEFINITION, documentBlockData } from '../../src/components/document-block'
 import { createTextComponentData } from '../../src/components/text/data'
 import { flowDocumentInsertionAt, flowFloatingModeEdits, flowReadingMembers, flowReadingMove } from '../../src/renderer/ui/flow/flowParagraphLayout'
-import { resolveFlowMenuInsertionOptions, FLOW_DOCUMENT_INSERT_COMMANDS } from '../../src/renderer/ui/flow/flowInsertCommands'
+import { insertFlowMenu, resolveFlowMenuInsertionOptions, FLOW_DOCUMENT_INSERT_COMMANDS } from '../../src/renderer/ui/flow/flowInsertCommands'
+import type { EditorStoreKernel } from '../../src/renderer/store/editorStoreKernel'
+import { TABLE_DEFINITION } from '../../src/components/table/adapters'
+import { flowDocumentBlock } from '../../src/core/components/document/flowDocumentProjection'
+import { useMediaImport, type MediaImportPorts } from '../../src/renderer/app/useMediaImport'
 import { flowParagraphAnchoredFrame } from '../../src/shared/flowParagraphAnchors'
 import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import type { CapturedFlowMenuTarget } from '../../src/renderer/ui/flow/flowInsertCommands'
+
+const probe = vi.hoisted(() => ({ state: {} as Record<string, unknown>, runtime: {} as Record<string, unknown> }))
+vi.mock('../../src/renderer/store/editorStore', () => ({ useEditorStore: (select: (state: typeof probe.state) => unknown) => select(probe.state) }))
+vi.mock('../../src/renderer/components/CourseV10RuntimeView', () => ({ useCourseV10Runtime: () => probe.runtime }))
+vi.mock('../../src/renderer/ui/useAssetObjectUrls', () => ({ useAssetObjectUrls: () => ({}) }))
+vi.mock('../../src/renderer/workbench/NativeSelectionContext', () => ({ NativeSelectionContext: () => null }))
+vi.mock('../../src/renderer/project/assetManager', async importOriginal => ({
+  ...await importOriginal<Record<string, unknown>>(), readImageDimensions: async () => ({ width: 480, height: 240 }),
+}))
+import { FlowWorkspace } from '../../src/renderer/ui/FlowWorkspace'
 
 function lesson() {
   const project = createBlankCourseProjectV10('长章节')
@@ -49,6 +65,7 @@ it('captures a section drop and menu insertion in the real container instead of 
       paragraphRects: [{ blockId: 'c', depth: 1, x: 36, y: 150, width: 728, height: 50 }] } }
   expect(resolveFlowMenuInsertionOptions(target, { destination: 'document', kind: 'table', label: '表格' })).toMatchObject({ container: { kind: 'instance', instanceId: 'section' }, index: 1 })
   expect(resolveFlowMenuInsertionOptions(target, { destination: 'paper', kind: 'shape', label: '形状' })).toMatchObject({ x: 36, y: 216 })
+  expect(resolveFlowMenuInsertionOptions(target, { destination: 'paper', kind: 'image', label: '图片' })).not.toHaveProperty('height')
   expect(FLOW_DOCUMENT_INSERT_COMMANDS.map(value => value.kind)).toEqual(expect.arrayContaining(['paragraph', 'quote', 'code', 'table', 'section']))
 })
 
@@ -66,4 +83,71 @@ it('keeps the displayed position when switching fixed, paragraph and viewport mo
   expect(viewport.frame!.transform).toEqual([1, 0, 0, 1, 130, -660]); expect(viewport.flowPlacement).toEqual({ space: 'viewport', plane: 'overlay' })
   const paper = apply(flowFloatingModeEdits('float', viewport.frame!, viewport.flowPlacement!, 'fixed', 800, rects, { x: 80, y: -900 }))
   expect(paper.frame).toEqual(fixed.frame)
+})
+
+it('uses the shared paragraph factory and retains the professional table adapter through the actual Flow menu', async () => {
+  let project = lesson()
+  const target = { project, editingProject: project, resources: { assets: {}, components: {} }, documentId: 'flow-u13', epoch: 'epoch', surfaceId: 'flow', instanceId: 'c', instanceIds: ['c'], activeStateId: null }
+  const kernel = { capture: (edits: Parameters<typeof captureComponentOperation>[1]) => captureComponentOperation(project, edits),
+    editCaptured: async (operation: Parameters<typeof applyComponentOperation>[1]) => { project = applyComponentOperation(project, operation) }, selectInstances: () => {} } as unknown as EditorStoreKernel
+  const paragraph = await insertFlowMenu(kernel, target, { destination: 'document', kind: 'paragraph', label: '正文' }, { text: '正文内容', container: { kind: 'instance', instanceId: 'section' }, index: 1 })
+  expect(project.instances[paragraph.instanceIds[0]].definitionId).toBe(TEXT_DEFINITION.id)
+  expect(flowDocumentBlock(project, 'flow', paragraph.instanceIds[0])).toMatchObject({ type: 'paragraph', content: { inlines: [{ type: 'text', text: '正文内容' }] } })
+  const table = await insertFlowMenu(kernel, { ...target, project, editingProject: project }, { destination: 'document', kind: 'table', label: '表格' }, { container: { kind: 'instance', instanceId: 'section' }, index: 2 })
+  expect(project.instances[table.instanceIds[0]].definitionId).toBe(TABLE_DEFINITION.id)
+  expect(flowDocumentBlock(project, 'flow', table.instanceIds[0])).toMatchObject({ type: 'table', columns: expect.any(Array), rows: expect.any(Array) })
+  expect(project.instances.section.childIds!.slice(1, 3)).toEqual([paragraph.instanceIds[0], table.instanceIds[0]])
+})
+
+it('uses the actual Flow floating toolbar without turning a fixed drag into paragraph anchoring and resets the current scroll', async () => {
+  const project = lesson(), resources = { assets: {}, components: {} }
+  const target = { project, editingProject: project, resources, documentId: 'flow-u14', epoch: 'epoch', surfaceId: 'flow', instanceId: 'float', instanceIds: ['float'], activeStateId: null }
+  const capture = vi.fn((edits: unknown) => ({ edits })), editCaptured = vi.fn(async () => {})
+  const bridge = { captureTarget: () => target, capture, editCaptured, read: () => ({ activation: 1 }) }
+  let observation: { reset(): void } | undefined
+  probe.state = { courseBridge: bridge, courseKernel: bridge, flowDocumentDrafts: {}, setFlowDocumentDraft: () => {}, setFlowContextSelection: () => {}, flowEditingInstance: null, slideContentEdit: null }
+  probe.runtime = { resources, selectedInstanceIds: ['float'], selectInstances: () => {}, onElement: () => {}, onTargetElement: () => {}, world: { beforeProjectionMutation: () => {}, afterProjectionMutation: () => {} }, renderInstance: () => null,
+    navigation: { changed: () => {} }, registerObservation: (_id: string, binding: { reset(): void }) => { observation = binding; return () => {} } }
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    return this.dataset.testid === 'flow-paper' ? new DOMRect(80, -600, 800, 1200) : new DOMRect(0, 0, 800, 600)
+  })
+  let ui: ReturnType<typeof render> | undefined
+  try {
+    ui = render(createElement(FlowWorkspace, { documentId: 'flow-u14', project, surfaceId: 'flow', onSelectImageAsset: async () => null }))
+    const move = ui.getByRole('button', { name: '移动', exact: true })
+    move.setPointerCapture = () => {}
+    fireEvent.pointerDown(move, { pointerId: 1, clientX: 100, clientY: 100 })
+    fireEvent.pointerMove(move, { pointerId: 1, clientX: 130, clientY: 150 })
+    await act(async () => fireEvent.pointerUp(move, { pointerId: 1, clientX: 130, clientY: 150 }))
+    expect(capture.mock.calls.at(-1)![0]).toEqual([{ type: 'frame.set', instanceId: 'float', frame: { width: 100, height: 40, transform: [1, 0, 0, 1, 80, 190] } }])
+    await act(async () => fireEvent.change(ui!.getByLabelText('浮层定位模式'), { target: { value: 'viewport' } }))
+    expect(capture.mock.calls.at(-1)![0]).toEqual([
+      { type: 'frame.set', instanceId: 'float', frame: { width: 100, height: 40, transform: [1, 0, 0, 1, 130, -460] } },
+      { type: 'instance.flowPlacement.set', instanceId: 'float', flowPlacement: { space: 'viewport', plane: 'overlay' } },
+    ])
+    const scroller = ui.getByTestId('flow-workspace-scroll'); scroller.scrollTop = 700; scroller.scrollLeft = 20
+    act(() => observation!.reset())
+    expect(scroller.scrollTop).toBe(0); expect(scroller.scrollLeft).toBe(0)
+  } finally { ui?.unmount(); rect.mockRestore(); vi.unstubAllGlobals() }
+})
+
+it('passes a chapter-start workspace media drop through the normal importer and formal insertion owner', async () => {
+  let project = lesson()
+  const captured = { project, editingProject: project, resources: { assets: {}, components: {} }, documentId: 'drop-u14', epoch: 'epoch', surfaceId: 'flow', instanceId: 'a', instanceIds: ['a'], activeStateId: null }
+  const kernel = { capture: (edits: Parameters<typeof captureComponentOperation>[1]) => captureComponentOperation(project, edits),
+    editCaptured: async (operation: Parameters<typeof applyComponentOperation>[1]) => { project = applyComponentOperation(project, operation) }, selectInstances: () => {} } as unknown as EditorStoreKernel
+  const ports = { kernel, selectImage: async () => null, selectImages: async () => null, selectAudios: async () => null, selectVideos: async () => null,
+    runBusy: async (operation: () => Promise<unknown>) => operation(), commitStatus: () => {}, reportError: () => {} } as MediaImportPorts
+  const hook = renderHook(() => useMediaImport(ports))
+  try {
+    const result = await hook.result.current.importWorkspaceMedia({ items: [{ workspaceId: 'workspace', entryId: 'image', name: 'chapter.png', mimeType: 'image/png', bytes: new Uint8Array([1]), mediaKind: 'image' }],
+      placement: { surface: 'flow', container: { kind: 'instance', instanceId: 'section' }, index: 0, afterBlockId: null },
+      target: { captured, documentId: captured.documentId, projectId: project.id, revision: project.revision, locationId: 'flow', surfaceId: 'flow', sessionGeneration: 1 } })
+    expect(result.ok).toBe(true)
+    const inserted = project.instances.section.childIds![0]
+    expect(flowDocumentBlock(project, 'flow', inserted)).toMatchObject({ type: 'media', mediaKind: 'image' })
+    expect(project.instances.section.childIds!.slice(1)).toEqual(['c', 'd'])
+    expect(project.surfaces[0].childIds).toEqual(['a', 'float', 'behavior', 'b', 'section'])
+  } finally { hook.unmount() }
 })

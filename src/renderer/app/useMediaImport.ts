@@ -133,7 +133,9 @@ export function useMediaImport(ports: MediaImportPorts): MediaImportApi {
       const items: MediaImportItem[] = []
       for (const file of request.items) items.push(namedAsset(await prepare(file, file.mediaKind)))
       if (!items.length) return { ok: false, reason: '没有可导入的媒体' }
-      const options = request.placement.surface === 'flow' ? { afterInstanceId: request.placement.afterBlockId } : request.placement
+      const options = request.placement.surface === 'flow'
+        ? { afterInstanceId: request.placement.afterBlockId, container: request.placement.container, index: request.placement.index, destination: 'document' as const }
+        : request.placement
       try { await insertCourseMedia(owner.kernel, target, items, options) }
       catch (error) {
         if (items.every(item => item.meta.kind !== 'image')) await importCourseMediaLibrary(owner.kernel, target, items)
