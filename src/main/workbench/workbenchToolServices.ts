@@ -357,6 +357,12 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     openImages: { search: input => openImages.search(input), preview: input => openImages.preview(input),
       readPreview: (runId, resourceId) => openImages.readPreview(runId, resourceId), fetch: input => openImages.fetch(input) },
     assetLibrary: { search: input => assetLibrary.search(input), read: input => assetLibrary.read(input),
+      import: async ({ runId, file }) => {
+        const source = await host.agentFiles.readAuthorizedFile(fileContext(runId), file)
+        deliverySignals.get(runId)?.signal.throwIfAborted()
+        return assetLibrary.import(source.bytes)
+      },
+      delete: ({ runId: _runId, ...input }) => assetLibrary.delete(input),
       save: ({ runId: _runId, ...input }) => assetLibrary.save(input) },
     beginRun: async grant => {
       if (grant.disclosedSettings && (await (await executionSettingsStore()).read()).profile.revision !== grant.disclosedSettings.profileRevision)

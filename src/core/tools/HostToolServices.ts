@@ -98,6 +98,8 @@ export interface HostToolServices {
   }
   /** The same Component API 5 catalog used by the component panel. */
   assetLibrary?: {
+    import(input: { runId: string; file: string }): Promise<unknown>
+    delete(input: { runId: string; packageId: string; version?: string; sourceId?: string }): Promise<unknown>
     search(input: { runId: string; query: string; limit?: number }): Promise<unknown>
     read(input: { runId: string; packageId: string; version?: string }): Promise<
       | { status: 'ready'; packageId: string; version: string; name: string; entry: ComponentLibraryEntry }
@@ -486,6 +488,20 @@ export class HostToolCoordinator {
     this.results.set(operationId, result)
     return structuredClone(await result)
   }
+  async changeLibrary(runId: string, operationId: string, change: { kind: 'import'; file: string }
+    | { kind: 'delete'; packageId: string; version?: string; sourceId?: string }): Promise<ToolResult> {
+    this.writableRun(runId)
+    const previous = this.results.get(operationId)
+    if (previous) return structuredClone(await previous)
+    const service = this.services.assetLibrary
+    if (!service) return this.serviceUnavailable('资产库服务尚未配置')
+    const { kind, ...input } = change
+    const result: Promise<ToolResult> = (kind === 'import' ? service.import({ runId, file: (input as { file: string }).file })
+      : service.delete({ runId, ...(input as { packageId: string; version?: string; sourceId?: string }) }))
+      .then(data => ({ kind: 'read', data }))
+    this.results.set(operationId, result)
+    return structuredClone(await result)
+  }
   /** The caller proves sourceRunId belongs to its durable continuation lineage. */
   reissueImageForContinuation(currentRunId: string, sourceDocumentId: string, destinationDocumentId: string,
     sourceRunId: string, jobId: string, resourceId: string): Promise<string> {
@@ -541,7 +557,7 @@ export class HostToolCoordinator {
       return receipt ? { kind: 'read', data: receipt } : null
     }
     if (name.startsWith('office.') && this.results.has(operationId)) return structuredClone(await this.results.get(operationId)!)
-    if (name === 'asset.save') return this.results.has(operationId) ? structuredClone(await this.results.get(operationId)!) : null
+    if (name === 'asset.save' || name === 'asset.import' || name === 'asset.delete') return this.results.has(operationId) ? structuredClone(await this.results.get(operationId)!) : null
     if ((name === 'file.save' || name === 'document.export') && this.services.deliveries) {
       const receipt = await this.services.deliveries.lookup({ runId, operationId, requestDigest })
       return receipt ? documentDeliveryReceiptResult(receipt) : null

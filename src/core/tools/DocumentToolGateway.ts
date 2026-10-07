@@ -22,6 +22,7 @@ import type { ComponentEdit, ComponentExpectation, ComponentOperationBatch } fro
 import { componentDefinitionBuiltinKey, containerChildIds, owningContainer, type ComponentContainer } from '../../shared/contracts/component-platform/project'
 import { prepareComponentImageApplication } from './componentImageApplication'
 import { extractComponentLibraryApplication, prepareComponentLibraryApplication } from './componentLibraryApplication'
+import { planCourseComponentPackageReplacement } from '../components/library/replacement'
 import { documentTextLength, plainDocumentText } from '../../shared/document/content'
 import { projectFileRegistration } from './ProjectFileTools'
 import { skillReadInputSchema } from './SkillTools'
@@ -980,15 +981,40 @@ export class DocumentToolGateway implements ToolGateway {
   }
 
   /** Save the actual selected author graph and its resource closure into the existing managed catalog. */
-  private async saveLibraryComponent(runId: string, operationId: string, input: { project?: string; path: string; description?: string;
+  private librarySelection(runId: string, current: ComponentProjectSnapshot, path?: string): string[] {
+    if (path) {
+      const { file } = this.componentProjectFiles.captureFile(runId, current, path)
+      if (file.target?.kind !== 'instance') throw new ToolError('invalid-target', '请指定工程对象文件路径')
+      return [file.target.instanceId]
+    }
+    const selected = this.run(runId).grant.documents.find(doc => doc.documentId === current.documentId)?.selection ?? []
+    const ids = [...new Set(selected.flatMap(target => target.kind === 'course-instance' ? [target.instanceId] : []))]
+    if (!ids.length) throw new ToolError('selection-required', '本次任务没有绑定对象选区，请先选择对象或指定对象路径')
+    if (ids.some(id => !current.model.project.instances[id])) throw new ToolError('target-conflict', '任务绑定的部分对象已不存在')
+    return ids
+  }
+
+  private async updateLibraryComponent(runId: string, operationId: string, requestDigest: string,
+    input: { packageId: string; version?: string; project?: string; path?: string }): Promise<ToolResult> {
+    const current = await this.componentProjectDocument(runId, input.project, 'write')
+    const roots = this.librarySelection(runId, current, input.path)
+    const definitions = [...new Set(roots.map(id => current.model.project.instances[id]!.definitionId))]
+    if (definitions.length !== 1) throw new ToolError('target-ambiguous', '选中对象使用不同组件定义，请指定要更新的对象路径')
+    const component = await this.hostTools.libraryComponent(runId, input.packageId, input.version)
+    if (component.status !== 'ready') return { kind: 'read', data: component }
+    const command = captureComponentOperation(current.model.project,
+      planCourseComponentPackageReplacement(current.model.project, definitions[0]!, component.entry))
+    return this.commitComponentAsset(runId, operationId, requestDigest, current, command, input.path ? [input.path] : [])
+  }
+
+  private async saveLibraryComponent(runId: string, operationId: string, input: { project?: string; path?: string; title?: string; description?: string;
     subject?: string[]; schoolStage?: string[]; tags?: string[] }): Promise<ToolResult> {
     const current = await this.componentProjectDocument(runId, input.project, 'read')
-    const { file } = this.componentProjectFiles.captureFile(runId, current, input.path)
-    if (file.target?.kind !== 'instance') throw new ToolError('invalid-target', '请指定要存入资产库的对象文件路径')
-    const { project, resources } = current.model, instance = project.instances[file.target.instanceId]
+    const roots = this.librarySelection(runId, current, input.path)
+    const { project, resources } = current.model, instance = project.instances[roots[0]!]
     if (!instance) throw new ToolError('not-found', '捕获的对象已不存在')
-    const extracted = extractComponentLibraryApplication(project, resources, { rootIds: [instance.id],
-      title: instance.name || project.definitions[instance.definitionId]?.title || '组件' })
+    const extracted = extractComponentLibraryApplication(project, resources, { rootIds: roots,
+      title: input.title || (roots.length > 1 ? '组合组件' : instance.name || project.definitions[instance.definitionId]?.title || '组件') })
     const course = current.binding.kind === 'file' ? current.binding.path.replace(/\\/g, '/').split('/').at(-1)! : current.binding.suggestedName
     const result = await this.hostTools.saveLibraryComponent(runId, operationId, { entry: extracted.entry, sourceCourse: course,
       ...(input.description ? { description: input.description } : {}), ...(input.subject ? { subject: [...new Set(input.subject)] } : {}),
@@ -1070,7 +1096,7 @@ export class DocumentToolGateway implements ToolGateway {
     // Durable replay precedes target validation: a successful call has already changed that target.
     const receipt = this.findReceipt(runId, operationId, requestDigest)
     if (receipt) return receipt
-    if (call.name === 'asset.save' || call.name === 'artifact.save' || call.name.startsWith('office.')) {
+    if (call.name === 'asset.save' || call.name === 'asset.import' || call.name === 'asset.delete' || call.name === 'artifact.save' || call.name.startsWith('office.')) {
       const imported = await this.hostTools.lookup(runId, operationId, requestDigest, call.name)
       if (imported) return imported
     }
@@ -1133,6 +1159,9 @@ export class DocumentToolGateway implements ToolGateway {
       fetchImage: input => this.fetchOpenImage(runId, operationId, requestDigest, input),
       useAsset: input => this.useLibraryComponent(runId, operationId, requestDigest, input),
       saveAsset: input => this.saveLibraryComponent(runId, operationId, input),
+      importAsset: input => this.hostTools.changeLibrary(runId, operationId, { kind: 'import', ...input }),
+      deleteAsset: input => this.hostTools.changeLibrary(runId, operationId, { kind: 'delete', ...input }),
+      updateAsset: input => this.updateLibraryComponent(runId, operationId, requestDigest, input),
     }, call.input)
     const gateway = gatewayToolRegistration(call.name)
     if (gateway) return gateway.handler({
