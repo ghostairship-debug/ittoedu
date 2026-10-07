@@ -169,10 +169,14 @@ export class HostArtifactDeliveryService {
       message: '已交付文件后来改变或不可读；请检查当前位置' }
     return publicReceipt(record, record.status, record.status === 'unknown' ? observed : undefined)
   }
-  async lookup(operationId: string): Promise<ArtifactDeliveryResult | null> {
+  async lookup(operationId: string, runId?: string): Promise<ArtifactDeliveryResult | null> {
     const pending = this.inFlight.get(operationId)
-    if (pending) return pending.result
+    if (pending) {
+      if (runId !== undefined && pending.runId !== runId) throw new Error('成果回执不属于当前运行')
+      return pending.result
+    }
     const record = await this.readRecord(operationId)
+    if (record && runId !== undefined && record.runId !== runId) throw new Error('成果回执不属于当前运行')
     return record ? this.resultFromRecord(record) : null
   }
 
