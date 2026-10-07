@@ -10,7 +10,7 @@ import type { ModelToolCall, ToolDefinition, ToolGateway, ToolResult, ToolRunGra
 import { DocumentRegistry } from '../documents/DocumentRegistry'
 import { documentDigest } from '../documents/documentDigest'
 import { batchInputSchemaFor, canonicalToolRegistration, describeToolFamily, describeTools, familyOfTool, gatewayToolRegistration, mutationCallSchema, mutationNamesIn, selectRunToolNames, toolCatalog, toolEffectTargets, toolFamilies, toolRegistration, visibleRunToolNames, type BatchMutationCall, type RunToolScope, type ToolFamily } from './ToolCatalog'
-import { childTargets, containsTarget, courseInstanceContext, courseInstanceTextTarget, mapMarkdownRange, readTarget, targetFootprint, replaceCourseInstanceText, readCourseInstanceText, sliceCourseInstanceText, isCourseInstanceRange } from './ToolTargets'
+import { childTargets, containsTarget, courseInstanceContext, courseInstanceTextTarget, mapMarkdownRange, readTarget, targetFootprint, replaceCourseInstanceText, readCourseInstanceText, sliceCourseInstanceText, isCourseInstanceRange, readEditableTargetContent } from './ToolTargets'
 import { courseInstancePropertyEdits } from './courseInstanceEdits'
 import { captureComponentOperation, componentValueAt, presentationComponentEdits } from '../drivers/courseV10Operations'
 import { imageDataSchema } from '../../components/image/data'
@@ -30,7 +30,7 @@ interface Run {
   loadedFamilies: Set<ToolFamily>
   courseAuthoring?: boolean
   currentCourseDocumentId?: string
-  advertised?: { definitions: ToolDefinition[]; names: Set<string>; batchSchema?: z.ZodType;
+  advertised?: { definitions: ToolDefinition[]; names: Set<string>; allowed: Set<string>; batchSchema?: z.ZodType;
     availableFamilies: { family: ToolFamily; description: string; count: number }[] }
   epochs: Map<string, string>
   sources: Map<string, string>
@@ -38,6 +38,8 @@ interface Run {
   componentSubtrees: Map<string, ReadonlySet<string>>
   stopped: boolean
   history: Map<string, { undoDepth: number; redoDepth: number }>
+  /** Receipt lookup survives detaching a document; these ids carry no authority. */
+  detachedDocuments?: Set<string>
   watches: (() => void)[]
 }
 interface Handle {
@@ -90,6 +92,7 @@ export class DocumentToolGateway implements ToolGateway {
   private readonly cursors = new Map<string, Cursor>()
   private readonly pending = new Map<string, { digest: string; result: Promise<ToolResult> }>()
   private readonly callDigests = new Map<string, string>()
+  private readonly catalogListeners = new Set<(runId: string) => void>()
   /** One live call keeps its observed identities through effects, approval preflight and commit. */
   private readonly mutationCaptures = new WeakMap<object, { runId: string; digest: string; handles: Promise<Handle[]> }>()
 
@@ -196,7 +199,7 @@ export class DocumentToolGateway implements ToolGateway {
     const batchMutationNames = mutationNamesIn(names)
     run.toolScopes = scopes
     run.advertised = {
-      definitions: describeTools(names, { batchMutationNames, compactBatch: true }), names: new Set(names),
+      definitions: describeTools(names, { batchMutationNames }), names: new Set(names), allowed: new Set(allowed),
       availableFamilies: toolFamilies.map(family => ({ family, description: describeToolFamily(family, allowed),
         count: allowed.filter(name => familyOfTool(name) === family).length })).filter(item => item.count > 0),
       ...(names.includes('batch') ? { batchSchema: batchInputSchemaFor(batchMutationNames) } : {}),
@@ -224,12 +227,21 @@ export class DocumentToolGateway implements ToolGateway {
       run.loadedFamilies.add(family)
       changed = true
     }
-    if (changed) run.advertised = undefined
+    if (changed) this.catalogChanged(runId)
     await this.describeRun(runId)
     return available
   }
 
   usesProjectFileAuthoring(runId: string): boolean { return !!this.run(runId).courseAuthoring }
+
+  subscribeCatalogChanges(listener: (runId: string) => void): () => void {
+    this.catalogListeners.add(listener)
+    return () => { this.catalogListeners.delete(listener) }
+  }
+  private catalogChanged(runId: string): void {
+    this.run(runId).advertised = undefined
+    for (const listener of this.catalogListeners) try { listener(runId) } catch { /* A disconnected client cannot change authority. */ }
+  }
 
   /** Host-only lifecycle gate. Existing tasks are stopped by the caller before file work. */
   async withWriteTaskBarrier<T>(documentIds: readonly string[], work: () => T | Promise<T>): Promise<T> {
@@ -540,6 +552,23 @@ export class DocumentToolGateway implements ToolGateway {
     await Promise.all([this.hostTools.stop(runId), ...run.grant.documents.filter(doc => liveIds.has(doc.documentId)).map(doc => this.registry.get(doc.documentId).stopRun(runId))])
   }
 
+  /** Detaching one tab revokes only that document; the resident task retains its other targets. */
+  async stopRunDocument(runId: string, documentId: string): Promise<void> {
+    const run = this.run(runId)
+    if (!run.epochs.has(documentId)) return
+    ;(run.detachedDocuments ??= new Set()).add(documentId)
+    run.grant = { ...run.grant, documents: run.grant.documents.filter(document => document.documentId !== documentId) }
+    run.epochs.delete(documentId)
+    run.sources.delete(documentId)
+    run.history.delete(documentId)
+    if (run.currentCourseDocumentId === documentId) run.currentCourseDocumentId = undefined
+    for (const [id, handle] of this.handles) if (handle.runId === runId && handle.documentId === documentId) this.handles.delete(id)
+    for (const [id, cursor] of this.cursors) if (cursor.runId === runId && cursor.documentId === documentId) this.cursors.delete(id)
+    for (const [id, resource] of this.images) if (resource.runId === runId && resource.documentId === documentId) this.images.delete(id)
+    this.catalogChanged(runId)
+    if (this.registry.list().some(document => document.documentId === documentId)) await this.registry.get(documentId).stopRun(runId)
+  }
+
   private run(runId: string): Run {
     const run = this.runs.get(runId)
     if (!run) throw new ToolError('unknown-run', '任务授权不存在')
@@ -742,11 +771,11 @@ export class DocumentToolGateway implements ToolGateway {
 
   private findReceipt(runId: string, operationId: string, requestDigest: string): ToolResult | null {
     const run = this.run(runId)
-    for (const doc of run.grant.documents) {
+    for (const documentId of new Set([...run.grant.documents.map(document => document.documentId), ...(run.detachedDocuments ?? [])])) {
       // Closing another granted document cannot hide this operation's durable receipt.
       let session: ReturnType<DocumentRegistry['get']>
-      try { session = this.registry.get(doc.documentId) } catch { continue }
-      const result = session.lookupRequest({ documentId: doc.documentId, operationId, actor: run.grant.actor, runId, requestDigest })
+      try { session = this.registry.get(documentId) } catch { continue }
+      const result = session.lookupRequest({ documentId, operationId, actor: run.grant.actor, runId, requestDigest })
       if (result) return { kind: 'document-operation', result, affected: [] }
     }
     return null
@@ -756,12 +785,23 @@ export class DocumentToolGateway implements ToolGateway {
     return this.executeCall(runId, callId, input)
   }
 
+  /** Final content from a host-bound request. The software chooses the matching representation. */
+  async applyBoundContent(runId: string, callId: string, targetHandle: string, content: string): Promise<ToolResult> {
+    return this.execute(runId, callId, await this.boundContentCall(runId, targetHandle, content))
+  }
+  async boundContentCall(runId: string, targetHandle: string, content: string): Promise<ModelToolCall> {
+    const resolved = await this.resolveEditTarget(runId, targetHandle)
+    const view = readEditableTargetContent(resolved.model, resolved.target)
+    return { name: 'text.replace', input: { target: targetHandle, content, ...(view.format === 'html' ? { format: 'html' } : {}) } }
+  }
+
   /** Pure authorization and dependency check before showing an approval card. Final planning and CAS still run after approval. */
   async preflightBatch(runId: string, input: unknown): Promise<ToolResult | null> {
     try {
       const run = this.run(runId)
-      if (run.advertised && !run.advertised.names.has('batch')) throw new ToolError('tool-not-advertised', '批量工具不在本次冻结的可用目录中')
-      const schema = run.advertised?.batchSchema ?? toolCatalog.find(tool => tool.name === 'batch')!.inputSchema
+      if (!run.advertised) await this.describeRun(runId)
+      if (!run.advertised!.allowed.has('batch')) throw new ToolError('not-authorized', '当前任务没有批量修改权限')
+      const schema = batchInputSchemaFor(mutationNamesIn([...run.advertised!.allowed]))
       const mutations = (schema.parse(input) as { operations: BatchMutationCall[] }).operations
       const handles = await this.captureMutationHandles(runId, mutations, input)
       if (handles.some(handle => handle.documentId !== handles[0].documentId))
@@ -919,11 +959,8 @@ export class DocumentToolGateway implements ToolGateway {
     return this.hostTools.readComputeArtifact(runId, jobId, name)
   }
 
-  private executeCall(runId: string, callId: string, input: ModelToolCall): Promise<ToolResult> {
+  private async executeCall(runId: string, callId: string, input: ModelToolCall): Promise<ToolResult> {
     try {
-      const advertised = this.run(runId).advertised
-      if (advertised && !advertised.names.has(input.name)) throw new ToolError('tool-not-advertised', '此工具不在本次冻结的可用目录中')
-      if (advertised && input.name === 'batch') advertised.batchSchema!.parse(input.input)
       const { call, digest, key, operationId } = this.identifyCall(runId, callId, input)
       const previousDigest = this.callDigests.get(key)
       if (previousDigest && previousDigest !== digest) return Promise.resolve({ kind: 'error', code: 'operation-payload-mismatch', message: '同一调用编号不能提交不同内容' })
@@ -983,6 +1020,15 @@ export class DocumentToolGateway implements ToolGateway {
       if (imported) return imported
     }
     if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
+    if (!run.advertised) await this.describeRun(runId)
+    const advertised = run.advertised!
+    if (!advertised.allowed.has(call.name)) throw new ToolError('not-authorized', '此工具不在当前任务的授权或已配置能力中')
+    if (call.name === 'batch') batchInputSchemaFor(mutationNamesIn([...advertised.allowed])).parse(call.input)
+    const family = familyOfTool(call.name)
+    if (family && !advertised.names.has(call.name)) {
+      run.loadedFamilies.add(family)
+      this.catalogChanged(runId)
+    }
     const definition = toolCatalog.find(tool => tool.name === call.name)
     if (!definition) throw new ToolError('unsupported-tool', '此工具尚未接入正式 Gateway')
     const projectTool = projectFileRegistration(call.name)
@@ -1019,10 +1065,10 @@ export class DocumentToolGateway implements ToolGateway {
           if (parsed.data.skill === 'orchestrate-courseware' || parsed.data.skill === 'edit-content') {
             run.loadedFamilies.add('content')
             run.courseAuthoring = parsed.data.skill === 'orchestrate-courseware'
-            run.advertised = undefined
+            this.catalogChanged(runId)
           } else if (parsed.data.skill === 'build-courseware-project') {
             run.courseAuthoring = false
-            run.advertised = undefined
+            this.catalogChanged(runId)
           }
         }
         return result
@@ -1123,11 +1169,11 @@ export class DocumentToolGateway implements ToolGateway {
           surfaceId: target.surfaceId, instanceId: target.instanceId, stateId: target.stateId, fieldScope: target.fieldScope, dataPath: target.dataPath,
           from: target.from ?? 0, to: target.to ?? (typeof textBefore === 'string' ? Array.from(textBefore).length : documentTextLength(textBefore)),
           inserted: Array.from(mutation.input.content).length } : null
-        const edits = mutation.name === 'text.replace' ? [replaceCourseInstanceText(model, target, mutation.input.content)]
+        const edits = mutation.name === 'text.replace' ? [replaceCourseInstanceText(model, target, mutation.input.content, mutation.input.format)]
           : mutation.name === 'object.update' ? courseInstancePropertyEdits(model, target, mutation.input.properties)
             : null
         if (!edits) throw new ToolError('unsupported-operation', '此 V10 对象工具尚不支持当前修改')
-        if (mutation.name === 'text.replace' && textBefore !== null) {
+        if (mutation.name === 'text.replace' && mutation.input.format !== 'html' && textBefore !== null) {
           const selected = target.from !== undefined && target.to !== undefined
             ? sliceCourseInstanceText(textBefore, target.from, target.to) : textBefore
           if ((typeof selected === 'string' ? selected : plainDocumentText(selected)) === mutation.input.content) {
@@ -1140,6 +1186,9 @@ export class DocumentToolGateway implements ToolGateway {
         model = await driver.apply(model, captureComponentOperation(model.project, mapped))
         componentEdits.push(...mapped)
         if (splice) {
+          const textAfter = readCourseInstanceText(model, target)!
+          splice.inserted = (typeof textAfter === 'string' ? Array.from(textAfter).length : documentTextLength(textAfter))
+            - (typeof textBefore === 'string' ? Array.from(textBefore).length : documentTextLength(textBefore!)) + splice.to - splice.from
           for (let previous = 0; previous < finalTargets.length; previous++) {
             const previousTarget = finalTargets[previous]
             if (isCourseInstanceRange(previousTarget)) finalTargets[previous] = mapAcknowledgedComponentRange(previousTarget, [splice])
@@ -1147,7 +1196,7 @@ export class DocumentToolGateway implements ToolGateway {
           componentSplices.push(splice)
         }
         if (mutation.name === 'text.replace' && target.from !== undefined && target.to !== undefined)
-          target = { ...target, to: target.from + Array.from(mutation.input.content).length }
+          target = { ...target, to: target.from + splice!.inserted }
         finalTargets.push(target)
         continue
       }

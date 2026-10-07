@@ -1,10 +1,14 @@
-import { isSourceDocumentModel, type DocumentModel } from '../../shared/workbench/document'
+import { isSourceDocumentModel, type DocumentModel, type DocumentSnapshot } from '../../shared/workbench/document'
 import type { ToolTarget } from '../../shared/workbench/tools'
+import type { ExecutionContentOutput } from '../../shared/workbench/execution'
 import { documentDigest } from '../documents/documentDigest'
 import { owningContainer, resolveComponentPresentation, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { componentFieldIdentityPaths, componentValueAt } from '../drivers/courseV10Operations'
 import { documentTextLength, documentTextContentSchema, normalizeDocumentText, sliceDocumentText, type FlowTextContent } from '../../shared/document/content'
+import { inlineHtml } from '../../shared/document/html'
+import { readHtmlDocumentText, type DocumentHtmlNode } from '../../shared/document/htmlText'
+import { parseFragment, type DefaultTreeAdapterTypes } from 'parse5'
 
 export type CourseInstanceTarget = Extract<ToolTarget, { kind: 'course-instance' }>
 export type CourseInstanceRange = CourseInstanceTarget & { dataPath: string[]; from: number; to: number }
@@ -57,8 +61,52 @@ export function sliceCourseInstanceText(value: string | FlowTextContent, from: n
   if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to <= from || to > length) throw new Error('所选文字范围已失效')
   return typeof value === 'string' ? Array.from(value).slice(from, to).join('') : sliceDocumentText(value, from, to)
 }
+/** The editable projection contains content, never the target's identity or bookkeeping. */
+export function readEditableTargetContent(model: DocumentModel, target: ToolTarget): { text: string; format: 'text' | 'markdown' | 'html' } {
+  if (target.kind === 'markdown-range' && isSourceDocumentModel(model))
+    return { text: readTarget(model, target) as string, format: model.kind === 'markdown' ? 'markdown' : 'text' }
+  if (target.kind !== 'course-instance') throw new Error('当前目标不是可直接改写的正文')
+  if (courseInstanceContext(model, target).instance.locked) throw new Error('所选内容已锁定，请先解锁')
+  const value = readCourseInstanceText(model, target)
+  if (value === null) throw new Error('当前目标不是可直接改写的文字字段')
+  const selected = isCourseInstanceRange(target) ? sliceCourseInstanceText(value, target.from, target.to) : value
+  if (typeof selected === 'string') return { text: selected, format: 'text' }
+  // A rich slot stays rich even when today's text has no marks: the request may
+  // legitimately add a link, formula or emphasis without switching workflows.
+  return { text: inlineHtml(selected), format: 'html' }
+}
+/** Both visible selection entry points and Main use the same current-content eligibility. */
+export function prepareExecutionContentOutput(snapshot: DocumentSnapshot, target: ToolTarget): ExecutionContentOutput | undefined {
+  if (target.kind !== 'markdown-range' && target.kind !== 'course-instance') return undefined
+  try { readEditableTargetContent(snapshot.model, target) } catch { return undefined }
+  return { kind: 'replace-text', documentId: snapshot.documentId, target: structuredClone(target) }
+}
+
+function parseEditableInlineHtml(html: string, previous: FlowTextContent): FlowTextContent {
+  const project = (node: DefaultTreeAdapterTypes.ChildNode): DocumentHtmlNode[] => {
+    if (node.nodeName === '#text') return [{ kind: 'text', text: (node as DefaultTreeAdapterTypes.TextNode).value }]
+    if (!('tagName' in node)) return []
+    if (['script', 'style', 'iframe', 'img', 'video', 'audio', 'object', 'table', 'ul', 'ol', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'].includes(node.tagName))
+      throw new Error('文字字段不能承载媒体、程序或独立块结构；返回的内容已保留，请使用对象内容修改入口')
+    const element: DocumentHtmlNode = { kind: 'element', tagName: node.tagName,
+      attributes: Object.fromEntries(node.attrs.map(attribute => [attribute.name, attribute.value])), children: node.childNodes.flatMap(project) }
+    return node.tagName === 'p' || node.tagName === 'div' ? [element, { kind: 'element', tagName: 'br', attributes: {}, children: [] }] : [element]
+  }
+  const nodes = parseFragment(html).childNodes.flatMap(project)
+  if (nodes.at(-1)?.kind === 'element' && (nodes.at(-1) as { tagName: string }).tagName === 'br'
+    && /<\/(?:p|div)>\s*$/i.test(html)) nodes.pop()
+  const parsed = readHtmlDocumentText(nodes, { createFormulaId: () => crypto.randomUUID() })
+  // Formula identities belong to the selected source. Reusing an unchanged formula must
+  // not allocate a new identity merely because the surrounding words were rewritten.
+  const available = previous.inlines.filter(inline => inline.type === 'math')
+  for (const inline of parsed.inlines) if (inline.type === 'math') {
+    const index = available.findIndex(old => old.latex === inline.latex)
+    if (index >= 0) inline.formulaId = available.splice(index, 1)[0]!.formulaId
+  }
+  return documentTextContentSchema.parse(parsed)
+}
 /** Canonical data edit for content-only generation, preserving unselected rich text and its formatting. */
-export function replaceCourseInstanceText(model: DocumentModel, target: CourseInstanceTarget, text: string): ComponentEdit {
+export function replaceCourseInstanceText(model: DocumentModel, target: CourseInstanceTarget, text: string, format: 'text' | 'html' = 'text'): ComponentEdit {
   target = courseInstanceTextTarget(model, target)
   const { instance } = courseInstanceContext(model, target)
   if (instance.locked) throw new Error('所选内容已锁定，请先解锁')
@@ -68,12 +116,16 @@ export function replaceCourseInstanceText(model: DocumentModel, target: CourseIn
   if (target.from !== undefined || target.to !== undefined) sliceCourseInstanceText(value, from, to)
   let next: string | FlowTextContent
   if (typeof value === 'string') {
+    if (format === 'html') throw new Error('纯文字字段不接受富文本 HTML')
     const chars = Array.from(value)
     next = chars.slice(0, from).join('') + text + chars.slice(to).join('')
   } else {
-    const selected = sliceDocumentText(value, from, to).inlines.find(inline => inline.type === 'text')
+    const selection = sliceDocumentText(value, from, to)
+    const selected = selection.inlines.find(inline => inline.type === 'text')
+    const replacement = format === 'html' ? parseEditableInlineHtml(text, selection).inlines
+      : [{ type: 'text' as const, text, ...(selected?.style ? { style: selected.style } : {}), ...(selected?.link ? { link: selected.link } : {}), ...(selected?.code ? { code: true } : {}) }]
     next = normalizeDocumentText({ inlines: [...sliceDocumentText(value, 0, from).inlines,
-      { type: 'text', text, ...(selected?.style ? { style: selected.style } : {}) },
+      ...replacement,
       ...sliceDocumentText(value, to, documentTextLength(value)).inlines] })
   }
   return courseInstanceTextEdit(model, target, next)
