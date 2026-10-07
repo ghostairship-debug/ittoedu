@@ -10,9 +10,10 @@ import type { HtmlPreviewEditContext, HtmlPreviewEditPort } from './HtmlPreviewS
 import { escapeHtmlAttribute, escapeHtmlText, locateHtmlSourceTarget, locateHtmlAuthorRecordSource } from './htmlSourceLocator'
 import { prepareHtmlImage } from './htmlImagePreparation'
 import { replaceSrcsetUrls } from '../../../shared/html/responsiveImage'
-import type { HtmlSourceEditOutcome } from '../../../shared/html/sourceEditCommands'
-import { applyHtmlSourceEdit } from './htmlSourceEdits'
+import type { HtmlSourceEditCommand, HtmlSourceEditOutcome } from '../../../shared/html/sourceEditCommands'
+import { applyHtmlSourceEdit, type HtmlSourceEditResult } from './htmlSourceEdits'
 import { patchHtmlAuthoringRecords, readHtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
+import type { ComponentAuthorGeometry } from '../../../shared/contracts/component-platform/runtime'
 
 type ResolveRequest = Extract<HtmlPreviewRequest, { type: 'html-preview.resolve-target' }>
 type EditRequest = Extract<HtmlPreviewRequest, { type: 'html-preview.edit' }>
@@ -85,22 +86,25 @@ function applySplices(source: string, edits: Splice[]): string | null {
   return source
 }
 
+function exitGeometryStyleProperty(geometry: ComponentAuthorGeometry | undefined, name: string): void {
+  if (!geometry) return
+  if (name === 'width') delete geometry.width
+  if (name === 'height') delete geometry.height
+  if (name === 'translate') { delete geometry.translateX; delete geometry.translateY }
+  if (name === 'scale') { delete geometry.scaleX; delete geometry.scaleY }
+  if (name === 'rotate') delete geometry.rotation
+}
+
 export class HtmlSourceEditService implements HtmlPreviewEditPort {
   private readonly records = new Map<string, EditRecord>()
   constructor(private readonly dependencies: HtmlSourceEditDependencies) {}
 
-  /** Source remains the only formal HTML state; visual controls produce an ordinary canonical text transaction. */
-  async editSource(request: SourceEditRequest, context: HtmlPreviewEditContext): Promise<HtmlSourceEditOutcome> {
-    return this.dependencies.withFileAccess(async () => {
-      const snapshot = await this.dependencies.readDocument(request.documentId)
-      if (!matchingSnapshot(snapshot, request, context)) return { status: 'rejected', reason: 'stale-revision' }
-      if (snapshot.model.kind !== 'text') return { status: 'rejected', reason: 'not-editable' }
-      const source = snapshot.model.source
-      const edit = applyHtmlSourceEdit(source, request.command)
-      if (!edit.ok) return { status: 'rejected', reason: edit.reason, message: edit.message }
-      if (!edit.changed) return { status: 'unchanged', revision: snapshot.revision }
+
+  private prepareSourceEdit(source: string, command: HtmlSourceEditCommand): HtmlSourceEditResult {
+    const edit = applyHtmlSourceEdit(source, command)
+    if (!edit.ok || !edit.changed) return edit
       const records = readHtmlAuthoringRecords(source)
-      const commands = request.command.type === 'batch' ? request.command.commands : [request.command]
+      const commands = command.type === 'batch' ? command.commands : [command]
       let changedRecords = false
       for (const [key, record] of Object.entries(records)) {
         const before = locateHtmlAuthorRecordSource(source, record, key)
@@ -117,13 +121,7 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
         for (const style of styles) if (style.type === 'style') {
           for (const name of Object.keys(style.patch)) {
             if (overrides.style) delete overrides.style[name]
-            if (overrides.geometry) {
-              if (name === 'width') delete overrides.geometry.width
-              if (name === 'height') delete overrides.geometry.height
-              if (name === 'translate') { delete overrides.geometry.translateX; delete overrides.geometry.translateY }
-              if (name === 'scale') { delete overrides.geometry.scaleX; delete overrides.geometry.scaleY }
-              if (name === 'rotate') delete overrides.geometry.rotation
-            }
+            exitGeometryStyleProperty(overrides.geometry, name)
           }
         } else if (style.type === 'attributes' && Object.hasOwn(style.patch, 'src')) delete overrides.src
         records[key] = { ...record, ...(Object.keys(after.scope).length ? { scope: after.scope } : { scope: undefined }),
@@ -131,6 +129,19 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
         changedRecords = true
       }
       const updated = changedRecords ? patchHtmlAuthoringRecords(edit.source, records) : edit.source
+    return { ok: true, source: updated, changed: updated !== source }
+  }
+  /** Source remains the only formal HTML state; visual controls produce an ordinary canonical text transaction. */
+  async editSource(request: SourceEditRequest, context: HtmlPreviewEditContext): Promise<HtmlSourceEditOutcome> {
+    return this.dependencies.withFileAccess(async () => {
+      const snapshot = await this.dependencies.readDocument(request.documentId)
+      if (!matchingSnapshot(snapshot, request, context)) return { status: 'rejected', reason: 'stale-revision' }
+      if (snapshot.model.kind !== 'text') return { status: 'rejected', reason: 'not-editable' }
+      const source = snapshot.model.source
+      const edit = this.prepareSourceEdit(source, request.command)
+      if (!edit.ok) return { status: 'rejected', reason: edit.reason, message: edit.message }
+      if (!edit.changed) return { status: 'unchanged', revision: snapshot.revision }
+      const updated = edit.source
       const result = await this.dependencies.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch,
         operationId: request.operationId, baseRevision: snapshot.revision, actor: 'human',
         mutation: { type: 'command', command: { type: 'markdown.replace', source: updated } } })
@@ -203,8 +214,10 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
         } else if (request.change.kind === 'geometry') overrides.geometry = { ...overrides.geometry, ...request.change.geometry }
         else {
           const style = { ...overrides.style }
+          if (overrides.geometry) overrides.geometry = { ...overrides.geometry }
           for (const [key, value] of Object.entries(request.change.patch)) {
             if (value === null) delete style[key]; else style[key] = value
+            exitGeometryStyleProperty(overrides.geometry, key)
           }
           overrides.style = style
         }
@@ -217,7 +230,8 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
         if (result.status !== 'applied') return result.status === 'unchanged' ? { status: 'unchanged', revision: result.revision }
           : { status: 'rejected', reason: 'conflict' }
         return { status: 'applied', revision: result.revision, savedRevision: null, dirty: true,
-          patch: { handle: request.target, kind: record.report.kind, value: patchValue, authoringRecords: records } }
+          patch: { handle: request.target, kind: record.report.kind, value: patchValue, authoringRecords: records,
+            ...(authorSource !== source ? { authoringAnchor: authoring.authorKey } : {}) } }
       }
       const located = locateHtmlSourceTarget(source, record.report, {
         documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
@@ -226,7 +240,7 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
       if (located.status !== 'editable') return { status: 'rejected', reason: 'source-changed' }
       const locator = located.locator
       if (request.change.kind === 'style') {
-        const edit = applyHtmlSourceEdit(source, { type: 'style', target: { kind: 'element', from: locator.elementSpan.start, to: locator.elementSpan.end }, patch: request.change.patch })
+        const edit = this.prepareSourceEdit(source, { type: 'style', target: { kind: 'element', from: locator.elementSpan.start, to: locator.elementSpan.end }, patch: request.change.patch })
         if (!edit.ok) return { status: 'rejected', reason: edit.reason }
         const result = await this.dependencies.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch,
           operationId: request.operationId, baseRevision: snapshot.revision, actor: 'human',

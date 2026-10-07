@@ -186,9 +186,9 @@ export class HtmlPreviewController {
         const superseded = this.revision > result.revision
         this.revision = Math.max(this.revision, result.revision)
         if (!superseded) {
+          this.patch({ ...result.patch, expected: target.report.rawText })
           if (result.patch.authoringRecords) this.iframe.contentWindow?.postMessage({ type: 'html-preview.authoring-records',
             loadId: this.lease.loadId, records: result.patch.authoringRecords }, '*')
-          this.patch({ ...result.patch, expected: target.report.rawText })
           this.events.onApplied(result.revision, result.patch, target.report.rawText)
           if (change.kind === 'style' && !result.patch.authoringRecords) this.events.onPatchMismatch()
         }
