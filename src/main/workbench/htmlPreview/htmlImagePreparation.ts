@@ -1,6 +1,4 @@
-import { createHash } from 'node:crypto'
 import { promises as fs } from 'node:fs'
-import path from 'node:path'
 import { isContainedPath } from './htmlPreviewProtocol'
 
 export interface PreparedHtmlImage { filename: string; relativeUrl: string; created: boolean }
@@ -22,7 +20,7 @@ function actualExtension(bytes: Uint8Array, mimeType: string): '.png' | '.jpg' |
 
 const mimeForExtension: Record<string, string> = { '.png': 'image/png', '.jpg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' }
 
-/** Write real selected bytes durably before the document transaction. Never follows an existing symlink. */
+/** Validate selected image bytes and carry them in the HTML's own save transaction. */
 export async function prepareHtmlImage(input: {
   entryRealPath: string
   rootRealPath: string
@@ -38,39 +36,6 @@ export async function prepareHtmlImage(input: {
   if (!isContainedPath(rootRealPath, entryRealPath) || await fs.realpath(entryRealPath) !== entryRealPath) throw new Error('HTML 文件路径已变化')
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,255}$/.test(input.operationId) || input.operationId.includes('..')) throw new Error('操作标识无效')
   if (!input.name) throw new Error('图片名称无效')
-  const folder = path.join(path.dirname(entryRealPath), `${path.parse(entryRealPath).name}.assets`)
-  if (!isContainedPath(rootRealPath, folder)) throw new Error('图片目录越界')
-  try {
-    const item = await fs.lstat(folder)
-    if (!item.isDirectory() || item.isSymbolicLink() || await fs.realpath(folder) !== folder) throw new Error('图片目录不是安全的实体文件夹')
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-    await fs.mkdir(folder)
-  }
-  const filename = path.join(folder, `image-${input.operationId}${extension}`)
-  const relativeUrl = `${encodeURIComponent(path.basename(folder))}/${encodeURIComponent(path.basename(filename))}`
-  let created = false
-  let handle: fs.FileHandle | null = null
-  try {
-    handle = await fs.open(filename, 'wx')
-    created = true
-    await handle.writeFile(bytes)
-    await handle.sync()
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') {
-      if (created) {
-        await handle?.close().catch(() => {})
-        handle = null
-        await fs.unlink(filename).catch(() => {})
-      }
-      throw error
-    }
-    const stat = await fs.lstat(filename)
-    if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('图片目标文件不是普通文件')
-    const existing = await fs.readFile(filename)
-    const a = createHash('sha256').update(bytes).digest('hex')
-    const b = createHash('sha256').update(existing).digest('hex')
-    if (a !== b) throw new Error('同一操作标识对应了不同图片')
-  } finally { await handle?.close() }
-  return { filename, relativeUrl, created }
+  // The normal UTF-8 save and SaveAs paths carry the selected bytes with the HTML.
+  return { filename: '', relativeUrl: `data:${input.mimeType.toLowerCase()};base64,${Buffer.from(bytes).toString('base64')}`, created: false }
 }

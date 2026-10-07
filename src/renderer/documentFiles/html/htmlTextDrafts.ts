@@ -1,5 +1,7 @@
 import { mapMarkdownRange } from '../../../core/tools/ToolTargets'
 import type { HtmlSelectedTarget } from './htmlPreviewController'
+import type { ComponentAuthorRecord } from '../../../shared/contracts/component-platform/runtime'
+import { patchHtmlAuthoringRecords, readHtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
 
 export interface HtmlTextDraft {
   readonly id: number
@@ -9,6 +11,7 @@ export interface HtmlTextDraft {
   readonly original: string
   readonly value: string
   readonly issue?: string
+  readonly authoring?: { authorKey: string; record: ComponentAuthorRecord }
 }
 type PreparedTextDrafts = { source: string; drafts: Array<{ id: number; value: string; from: number; to: number }> }
 const sourceChanged = '原文字已变化，草稿仍保留。要保留这次修改，请复制草稿，重新选择文字并粘贴、应用，再点击“放弃这份草稿”移除旧草稿后保存；不需要这次修改可直接放弃。'
@@ -21,6 +24,12 @@ function textRange(target: HtmlSelectedTarget, source: string) {
 }
 
 function mapped(draft: HtmlTextDraft, source: string) {
+  if (draft.authoring) {
+    const record = readHtmlAuthoringRecords(source)[draft.authoring.authorKey]
+    const value = record?.overrides.text ?? record?.binding.baseline ?? draft.authoring.record.binding.baseline
+    if (value !== draft.original) throw new Error(sourceChanged)
+    return { from: 0, to: 0 }
+  }
   return mapMarkdownRange(draft.source, source, { kind: 'markdown-range', from: draft.from, to: draft.to })
 }
 
@@ -59,6 +68,8 @@ export class HtmlTextDrafts {
   }
 
   find(target: HtmlSelectedTarget, source: string): HtmlTextDraft | undefined {
+    const authoring = target.resolved.status === 'editable' ? target.resolved.locator.authoring : undefined
+    if (authoring) return this.drafts.find(draft => draft.authoring?.authorKey === authoring.authorKey)
     const range = textRange(target, source)
     if (!range) return undefined
     return this.drafts.find(draft => {
@@ -68,11 +79,13 @@ export class HtmlTextDrafts {
   }
 
   change(target: HtmlSelectedTarget, source: string, value: string): void {
+    const authoring = target.resolved.status === 'editable' ? target.resolved.locator.authoring : undefined
     const range = textRange(target, source)
-    if (!range) return
+    if (!range && !authoring) return
     const previous = this.find(target, source)
     if (value === target.report.rawText && (!previous || !this.wasPrepared(previous.id))) { if (previous) this.discard(previous.id); return }
-    const next: HtmlTextDraft = { id: previous?.id ?? ++this.sequence, source, ...range, original: target.report.rawText, value }
+    const next: HtmlTextDraft = { id: previous?.id ?? ++this.sequence, source, ...(range ?? { from: 0, to: 0 }),
+      ...(authoring ? { authoring } : {}), original: target.report.rawText, value }
     this.publish(previous ? this.drafts.map(draft => draft.id === previous.id ? next : draft) : [...this.drafts, next])
   }
 
@@ -123,7 +136,7 @@ export class HtmlTextDrafts {
       ? draft : { ...draft, issue: located[index]!.issue })
     if (next.some((draft, index) => draft !== this.drafts[index])) this.publish(next)
     if (located.some(draft => draft.issue)) return { ready: false, source }
-    const sorted = located.sort((a, b) => a.from - b.from)
+    const sorted = located.filter(draft => !draft.authoring).sort((a, b) => a.from - b.from)
     const submitted: PreparedTextDrafts['drafts'] = []
     let result = '', position = 0
     for (const draft of sorted) {
@@ -135,6 +148,17 @@ export class HtmlTextDrafts {
       position = draft.to
     }
     result += source.slice(position)
+    const dynamic = located.filter(draft => draft.authoring)
+    if (dynamic.length) {
+      const records = readHtmlAuthoringRecords(result)
+      for (const draft of dynamic) {
+        const authoring = draft.authoring!
+        const previous = records[authoring.authorKey] ?? authoring.record
+        records[authoring.authorKey] = { ...previous, overrides: { ...previous.overrides, text: draft.value } }
+        submitted.push({ id: draft.id, value: draft.value, from: 0, to: 0 })
+      }
+      result = patchHtmlAuthoringRecords(result, records)
+    }
     if (submitted.length) {
       const prepared = { source: result, drafts: submitted }
       if (this.prepared.at(-1)?.source === result) this.prepared[this.prepared.length - 1] = prepared

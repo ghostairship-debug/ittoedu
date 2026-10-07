@@ -5,6 +5,7 @@ import {
 } from '../../../shared/workbench/htmlPreview'
 import { htmlPreviewTargetReportSchema } from '../../../shared/workbench/htmlPreview'
 import type { z } from 'zod'
+import { readHtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
 
 export type HtmlTargetReport = z.infer<typeof htmlPreviewTargetReportSchema>
 export type HtmlSelectedTarget = { report: HtmlTargetReport; resolved: HtmlPreviewResolvedTarget }
@@ -45,6 +46,8 @@ export class HtmlPreviewController {
     if (snapshot.documentId !== this.lease.documentId || snapshot.epoch !== this.lease.epoch) return
     const changed = snapshot.revision > this.revision
     this.revision = Math.max(this.revision, snapshot.revision)
+    if (snapshot.model.kind === 'text') this.iframe.contentWindow?.postMessage({ type: 'html-preview.authoring-records',
+      loadId: this.lease.loadId, records: readHtmlAuthoringRecords(snapshot.model.source) }, '*')
     if (changed && this.editMode) this.iframe.contentWindow?.postMessage({ type: 'html-preview.refresh-targets', loadId: this.lease.loadId }, '*')
     if (this.selected && (this.selected.resolved.status !== 'editable'
       || this.selected.resolved.locator.revision !== snapshot.revision)) this.select(null)
@@ -159,11 +162,15 @@ export class HtmlPreviewController {
   }
 
   async editText(value: string): Promise<HtmlPreviewEditOutcome> { return this.edit({ kind: 'text', value }) }
+  async editStyle(patch: Record<string, string | null>): Promise<HtmlPreviewEditOutcome> { return this.edit({ kind: 'style', patch }) }
+  async editGeometry(geometry: NonNullable<NonNullable<HtmlTargetReport['authoring']>['record']['overrides']['geometry']>): Promise<HtmlPreviewEditOutcome> {
+    return this.edit({ kind: 'geometry', geometry })
+  }
   async editImage(image: { name: string; mimeType: string; bytes: Uint8Array }): Promise<HtmlPreviewEditOutcome> {
-    return this.edit({ kind: 'image', ...image })
+    return this.edit({ kind: 'image', ...image, bytes: Uint8Array.from(image.bytes) })
   }
 
-  private async edit(change: { kind: 'text'; value: string } | { kind: 'image'; name: string; mimeType: string; bytes: Uint8Array }): Promise<HtmlPreviewEditOutcome> {
+  private async edit(change: Extract<HtmlPreviewRequest, { type: 'html-preview.edit' }>['change']): Promise<HtmlPreviewEditOutcome> {
     const target = this.selected
     if (!target || !this.active || target.resolved.status !== 'editable'
       || target.resolved.locator.revision !== this.revision) return { status: 'rejected', reason: 'stale-revision' }
@@ -179,6 +186,8 @@ export class HtmlPreviewController {
         const superseded = this.revision > result.revision
         this.revision = Math.max(this.revision, result.revision)
         if (!superseded) {
+          if (result.patch.authoringRecords) this.iframe.contentWindow?.postMessage({ type: 'html-preview.authoring-records',
+            loadId: this.lease.loadId, records: result.patch.authoringRecords }, '*')
           this.patch({ ...result.patch, expected: target.report.rawText })
           this.events.onApplied(result.revision, result.patch, target.report.rawText)
         }

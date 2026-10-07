@@ -12,6 +12,7 @@ import { prepareHtmlImage } from './htmlImagePreparation'
 import { replaceSrcsetUrls } from '../../../shared/html/responsiveImage'
 import type { HtmlSourceEditOutcome } from '../../../shared/html/sourceEditCommands'
 import { applyHtmlSourceEdit } from './htmlSourceEdits'
+import { patchHtmlAuthoringRecords, readHtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
 
 type ResolveRequest = Extract<HtmlPreviewRequest, { type: 'html-preview.resolve-target' }>
 type EditRequest = Extract<HtmlPreviewRequest, { type: 'html-preview.edit' }>
@@ -112,7 +113,12 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
     const identity = { documentId: context.snapshot.documentId, epoch: context.snapshot.epoch,
       revision: context.snapshot.revision, bindingVersion: context.lease.bindingVersion }
     const targets = request.targets.map(report => {
-      const resolved = locateHtmlSourceTarget(model.source, report, identity)
+      let resolved = locateHtmlSourceTarget(model.source, report, identity)
+      if (resolved.status !== 'editable' && report.authoring?.record.kind === report.kind) {
+        resolved = { handle: report.handle, status: 'editable', locator: { ...identity, targetKind: report.kind,
+          elementSpan: { start: 0, end: 0 }, valueSpan: null, attributeName: report.attributeName,
+          expectedRaw: report.rawText, authoring: report.authoring } }
+      }
       this.records.set(recordKey(request.leaseId, request.loadId, report.handle), { revision: request.revision, report, resolved })
       return resolved
     })
@@ -122,18 +128,59 @@ export class HtmlSourceEditService implements HtmlPreviewEditPort {
   async edit(request: EditRequest, context: HtmlPreviewEditContext): Promise<HtmlPreviewEditOutcome> {
     const record = this.records.get(recordKey(request.leaseId, request.loadId, request.target))
     if (!record || record.revision !== request.baseRevision || record.resolved.status !== 'editable'
-      || record.report.kind !== request.change.kind) return { status: 'rejected', reason: 'not-editable' }
+      || ((request.change.kind === 'text' || request.change.kind === 'image') && record.report.kind !== request.change.kind)) return { status: 'rejected', reason: 'not-editable' }
+    const resolvedRecord = record.resolved
     return this.dependencies.withFileAccess(async () => {
       const snapshot = await this.dependencies.readDocument(request.documentId)
       if (!matchingSnapshot(snapshot, request, context)) return { status: 'rejected', reason: 'stale-revision' }
       if (snapshot.model.kind !== 'text') return { status: 'rejected', reason: 'not-editable' }
       const source = snapshot.model.source
+      const authoring = resolvedRecord.locator.authoring ?? (request.change.kind === 'geometry' ? record.report.authoring : undefined)
+      if (authoring) {
+        const records = readHtmlAuthoringRecords(source)
+        const current = records[authoring.authorKey] ?? authoring.record
+        const overrides = { ...current.overrides }
+        let patchValue = record.report.rawText
+        if (request.change.kind === 'text') { overrides.text = request.change.value; patchValue = request.change.value }
+        else if (request.change.kind === 'image') {
+          const prepared = await prepareHtmlImage({ entryRealPath: context.entryRealPath, rootRealPath: context.rootRealPath,
+            operationId: request.operationId, ...request.change })
+          overrides.src = prepared.relativeUrl; patchValue = prepared.relativeUrl
+        } else if (request.change.kind === 'geometry') overrides.geometry = { ...overrides.geometry, ...request.change.geometry }
+        else {
+          const style = { ...overrides.style }
+          for (const [key, value] of Object.entries(request.change.patch)) {
+            if (value === null) delete style[key]; else style[key] = value
+          }
+          overrides.style = style
+        }
+        records[authoring.authorKey] = { ...current, overrides }
+        const updated = patchHtmlAuthoringRecords(source, records)
+        if (updated === source) return { status: 'unchanged', revision: snapshot.revision }
+        const result = await this.dependencies.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch,
+          operationId: request.operationId, baseRevision: snapshot.revision, actor: 'human',
+          mutation: { type: 'command', command: { type: 'markdown.replace', source: updated } } })
+        if (result.status !== 'applied') return result.status === 'unchanged' ? { status: 'unchanged', revision: result.revision }
+          : { status: 'rejected', reason: 'conflict' }
+        return { status: 'applied', revision: result.revision, savedRevision: null, dirty: true,
+          patch: { handle: request.target, kind: record.report.kind, value: patchValue, authoringRecords: records } }
+      }
       const located = locateHtmlSourceTarget(source, record.report, {
         documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
         bindingVersion: request.bindingVersion,
       })
       if (located.status !== 'editable') return { status: 'rejected', reason: 'source-changed' }
       const locator = located.locator
+      if (request.change.kind === 'style') {
+        const edit = applyHtmlSourceEdit(source, { type: 'style', target: { kind: 'element', from: locator.elementSpan.start, to: locator.elementSpan.end }, patch: request.change.patch })
+        if (!edit.ok) return { status: 'rejected', reason: edit.reason }
+        const result = await this.dependencies.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch,
+          operationId: request.operationId, baseRevision: snapshot.revision, actor: 'human',
+          mutation: { type: 'command', command: { type: 'markdown.replace', source: edit.source } } })
+        if (result.status !== 'applied') return result.status === 'unchanged' ? { status: 'unchanged', revision: result.revision } : { status: 'rejected', reason: 'conflict' }
+        return { status: 'applied', revision: result.revision, savedRevision: null, dirty: true, patch: { handle: request.target, kind: record.report.kind, value: record.report.rawText } }
+      }
+      if (request.change.kind === 'geometry') return { status: 'rejected', reason: 'not-editable' }
       const original = record.resolved
       if (original.status !== 'editable' || (request.change.kind === 'text' && !locator.valueSpan)
         || Boolean(locator.valueSpan) !== Boolean(original.locator.valueSpan)

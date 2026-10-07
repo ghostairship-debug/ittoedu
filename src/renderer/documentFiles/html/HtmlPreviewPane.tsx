@@ -7,6 +7,7 @@ import { HtmlPreviewController, type HtmlSelectedTarget } from './htmlPreviewCon
 import type { HtmlTextDrafts } from './htmlTextDrafts'
 import './htmlPreview.css'
 import { HtmlStructureEditor } from './HtmlStructureEditor'
+import { extractHtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
 
 type Patch = { handle: string; kind: 'text' | 'image'; value: string }
 type ChangeRecord = { revision: number; beforeSource: string; afterSource?: string; beforeValue: string; patch: Patch }
@@ -165,6 +166,11 @@ export function HtmlPreviewPane({ lease, committed, textDrafts, onUndo, onRedo, 
     if (!active) { instance?.updateCommitted(committed); if (source !== latestSource.current) setStale(true); return }
     if (!instance || source === latestSource.current) { instance?.updateCommitted(committed); return }
     const previous = latestSource.current
+    if (extractHtmlAuthoringRecords(previous).source === extractHtmlAuthoringRecords(source).source) {
+      latestSource.current = source
+      instance.updateCommitted(committed)
+      return
+    }
     if (pendingEdit.current) {
       pendingEdit.current.observedSource = source
       pendingEdit.current.observedRevision = committed.revision
