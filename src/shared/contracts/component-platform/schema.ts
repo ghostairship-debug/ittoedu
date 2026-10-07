@@ -35,6 +35,8 @@ export const componentAuthorGeometryObservationSchema = z.object({ frame: compon
   parentToInstance: componentFrameSchema.shape.transform,
   author: componentAuthorRecordSchema.shape.overrides.shape.geometry.unwrap(),
   boxInsets: z.object({ width: finite.nonnegative(), height: finite.nonnegative() }).strict(),
+  sourceOffset: z.object({ current: z.object({ x: finite, y: finite }).strict(),
+    widthDelta: z.object({ x: finite, y: finite }).strict(), heightDelta: z.object({ x: finite, y: finite }).strict() }).strict().optional(),
 }).strict()
 export const componentBuiltinImplementationSchema = z.object({ kind: z.literal('builtin'), key: id }).strict()
 export const componentSourceImplementationSchema = z.object({ kind: z.literal('source'), source: z.string().optional(), language: z.enum(['javascript', 'typescript']), dependencies: z.array(id).optional(),
