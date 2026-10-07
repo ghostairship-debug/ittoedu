@@ -281,7 +281,7 @@ export function ComponentSourceEditor({ instance, implementation, bridge, report
   if (!instance && !draft.session) return null
   const file = value.files[value.selected], names = Object.keys(value.files)
   return <details open onKeyDownCapture={nativeHistory} onBlurCapture={event => {
-    if (!event.currentTarget.contains(event.relatedTarget as Node | null) && draft.session && sourceDraftDirty(draft)) void save()
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null) && draft.session) void save()
   }}><summary>{scope === 'definition' ? '共享定义源码' : '组件实现源码'}</summary>
     {stale && <p role="status">草稿属于“{draft.name}”；应用只修改原文档与原{draft.session?.scope.kind === 'definition' ? '共享定义' : '对象'}。</p>}
     {locked && <p role="status">源码对象已锁定，当前为只读。</p>}
