@@ -94,7 +94,7 @@ export function createHtmlGrapesProjection(container: HTMLElement, ports: Ports)
         droppable: Boolean(node.contentSpan),
       })
       editor.setComponents(body.children.filter(projected).map(definition))
-      editor.getWrapper()!.set({ cwSourceKey: body.key, cwSourceAddress: body.address })
+      editor.getWrapper()!.set({ cwSourceKey: body.key, cwSourceAddress: body.address ?? { kind: 'document', from: 0, to: source.length } })
       const gather = (model: Component) => {
         const key = model.get('cwSourceKey')
         if (key) modelByKey.set(key, model)

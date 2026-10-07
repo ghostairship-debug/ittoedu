@@ -47,3 +47,23 @@ it('remaps a style-then-move gesture within one exact source batch', () => {
     { type: 'move', target: a.address!, parent: main.address!, index: 1 },
   ] })).toMatchObject({ ok: true, source: '<main><p id="b">B</p><p id="a" style="width: 140px;">A</p></main>' })
 })
+
+it('moves a root sibling in ordinary fragment HTML without introducing document wrappers', async () => {
+  const container = document.createElement('div'); document.body.append(container)
+  let source = '<p id="a">A</p><p id="b">B</p>'
+  let transactions = 0
+  const projection = createHtmlGrapesProjection(container, { select() {}, async commit(command) {
+    transactions++
+    const result = applyHtmlSourceEdit(source, command)
+    if (!result.ok) throw new Error(result.message)
+    source = result.source
+  } })
+  try {
+    projection.project(source)
+    const nodes = flattenHtmlSourceNodes(inspectHtmlSource(source).roots)
+    projection.move(nodes.find(node => node.attributes.id === 'a')!.key, nodes.find(node => node.name === 'body')!.key, 1)
+    await Promise.resolve()
+    expect(source).toBe('<p id="b">B</p><p id="a">A</p>')
+    expect(transactions).toBe(1)
+  } finally { projection.dispose(); container.remove() }
+})

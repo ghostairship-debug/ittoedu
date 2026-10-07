@@ -125,7 +125,13 @@ export function applyHtmlSourceEdit(source: string, command: HtmlSourceEditComma
         if (['html', 'head', 'body'].includes(target.name)) return fail('文档根结构须保留，请使用源码编辑')
         edits = [{ from: target.address.from, to: target.address.to, text: '' }]
       } else if (command.type === 'move') {
-        const parent = nodes.find(node => sameHtmlSourceAddress(node.address, command.parent))
+        const documentRoot = command.parent.kind === 'document' && command.parent.from === 0 && command.parent.to === source.length
+          ? nodes.find(node => node.name === 'body' && !node.address) : undefined
+        const bodyChildren = documentRoot?.children.filter(node => node.address) ?? []
+        const parent = documentRoot ? { ...documentRoot, address: command.parent, contentSpan: {
+          from: bodyChildren[0]?.address?.from ?? 0, to: bodyChildren.at(-1)?.address?.to ?? source.length,
+        } }
+          : nodes.find(node => sameHtmlSourceAddress(node.address, command.parent))
         if (!parent?.contentSpan || parent.sourceOnly || parent.kind === 'source') return fail('目标容器没有可定位的静态内容区间')
         if (['html', 'head', 'body'].includes(target.name)) return fail('不能移动文档根结构')
         if (parent.address!.from >= target.address.from && parent.address!.to <= target.address.to) return fail('不能将节点移入自己的后代')
