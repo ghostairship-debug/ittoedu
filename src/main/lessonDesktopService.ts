@@ -11,6 +11,7 @@ import { openSelectedProjectFile } from './fileDialogs'
 
 let workspaces: LessonWorkspaceService | undefined
 let projects: LessonProjectRegistry | undefined
+const workspacePicks = new WeakMap<BrowserWindow, Promise<LessonDesktopResult>>()
 const recentSchema = z.object({ version: z.literal(1), directories: z.array(z.string().min(1)).max(20) }).strict()
 async function recentWorkspaces(): Promise<string[]> {
   try { return recentSchema.parse(JSON.parse(await fs.readFile(path.join(app.getPath('userData'), 'lesson-workspaces-v1.json'), 'utf8'))).directories }
@@ -55,9 +56,15 @@ export async function operateLessonDesktop(window: BrowserWindow, request: unkno
     }
     case 'recent-workspaces': return { recent: await recentWorkspaces() }
     case 'choose-workspace': {
-      const result = await dialog.showOpenDialog(window, { title: input.create ? '新建工作空间：选择或创建目录' : '打开工作空间', properties: ['openDirectory', 'createDirectory'] })
-      if (result.canceled || !result.filePaths[0]) return { cancelled: true }
-      return { directory: await openWorkspace(result.filePaths[0]) }
+      const existing = workspacePicks.get(window)
+      if (existing) return existing
+      const pick = Promise.resolve().then(async (): Promise<LessonDesktopResult> => {
+        const result = await dialog.showOpenDialog(window, { title: input.create ? '新建工作空间：选择或创建目录' : '打开工作空间', properties: ['openDirectory', 'createDirectory'] })
+        if (result.canceled || !result.filePaths[0]) return { cancelled: true }
+        return { directory: await openWorkspace(result.filePaths[0]) }
+      }).finally(() => { if (workspacePicks.get(window) === pick) workspacePicks.delete(window) })
+      workspacePicks.set(window, pick)
+      return pick
     }
     case 'choose-project-directory': {
       // V3.1：新建项目先弹系统选择文件夹位置；对话框内可直接新建文件夹。
