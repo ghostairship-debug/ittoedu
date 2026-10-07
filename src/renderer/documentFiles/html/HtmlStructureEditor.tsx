@@ -80,7 +80,7 @@ export function HtmlStructureEditor({ committed, lease, pendingDraft = false, lo
     grapes.current = projection
     return () => { projection.dispose(); if (grapes.current === projection) grapes.current = null }
   }, [committed.documentId, committed.epoch])
-  useEffect(() => { grapes.current?.project(source, lease.url) }, [source, committed.revision, lease.url])
+  useEffect(() => { grapes.current?.project(source, lease.url) }, [source, committed.documentId, committed.epoch, committed.revision, lease.url])
   useEffect(() => { if (selectedKey) grapes.current?.select(selectedKey) }, [selectedKey])
   const applyJson = () => {
     if (!data) return
