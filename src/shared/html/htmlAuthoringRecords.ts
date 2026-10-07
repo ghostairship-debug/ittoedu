@@ -38,7 +38,7 @@ export function extractHtmlAuthoringRecords(source: string): { source: string; a
 export function patchHtmlAuthoringRecords(source: string, records: HtmlAuthoringRecords): string {
   const regions = softwareRegions(source)
   const data = regions.find(region => region.id === HTML_AUTHORING_DATA_ID)
-  const json = JSON.stringify({ version: 1, records }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
+  const json = JSON.stringify({ version: 1, records: componentAuthorRecordsSchema.parse(records) }).replace(/</g, '\\u003c').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029')
   if (data && regions.some(region => region.id === HTML_AUTHORING_CONSUMER_ID)) {
     // Changing one record keeps every author-authored byte and the installed consumer intact.
     return source.slice(0, data.content.start) + json + source.slice(data.content.end)
