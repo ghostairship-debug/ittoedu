@@ -27,6 +27,7 @@ import { ContentApplyService } from './contentApply/applyService'
 import { readComponentProjectFileInput, prepareComponentProjectFileSource } from './projectFiles/componentPlatformFileInput'
 import { AgentFileService } from './execution/AgentFileService'
 import { HostArtifactDeliveryService } from './execution/HostArtifactDeliveryService'
+import { verifyContentResourceDiagnostic } from './contentApply/resources/verifyContentResourceDiagnostic'
 
 function canonicalKey(filename: string): string {
   return process.platform === 'win32' ? filename.toLowerCase() : filename
@@ -74,6 +75,8 @@ export class DocumentHostService {
     this.compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
     this.tools = new DocumentToolGateway(this.registry, this.drivers, randomUUID, { prepareImage: prepareImageResource,
       componentContent: {
+        verifyDiagnostic: (snapshot, diagnostic) => verifyContentResourceDiagnostic({ project: snapshot.model.project,
+          resources: snapshot.model.resources, diagnostic }),
         source: (from, fileAccess) => readComponentProjectFileInput({ from, fileAccess }),
         prepareSource: prepareComponentProjectFileSource,
         apply: input => new ContentApplyService({

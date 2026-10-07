@@ -28,7 +28,7 @@ import { documentTextLength, plainDocumentText } from '../../shared/document/con
 import { projectFileRegistration } from './ProjectFileTools'
 import { skillReadInputSchema } from './SkillTools'
 import { ComponentProjectFileCoordinator, componentProjectFileSchemas, componentProjectFiles, type ComponentProjectSnapshot, type ComponentProjectFileInput, type ComponentProjectFile } from '../projectFiles/componentPlatform'
-import type { ContentApplyRequest, ContentApplyResult, ContentApplySource, ContentApplyIntent } from '../contentApply/planning/types'
+import type { ContentApplyRequest, ContentApplyResult, ContentApplySource, ContentApplyIntent, ContentApplyDiagnostic } from '../contentApply/planning/types'
 
 interface Run {
   grant: ToolRunGrant
@@ -84,6 +84,8 @@ function writableKinds(model: DocumentModel, writable: readonly ToolTarget[]): T
 
 export interface DocumentToolGatewayOptions { prepareImage?: PrepareImageResourcePort; services?: HostToolServices;
   componentContent?: {
+    verifyDiagnostic?(snapshot: ComponentProjectSnapshot, diagnostic: Pick<ContentApplyDiagnostic, 'code' | 'instanceId' | 'reference'>): Promise<{
+      state: 'resolved' | 'unresolved' | 'unknown'; code: string; instanceId?: string; reference?: string; assetId?: string; reason: string }>
     apply(input: { baseline: ComponentProjectSnapshot; request: ContentApplyRequest; operationId: string; requestDigest: string; runId: string; runLeaseId: string; actor: ToolRunGrant['actor']; readExpectations?: ComponentExpectation[]; assertActive(): void }): Promise<ContentApplyResult>
     source(from: string, fileAccess: ToolRunGrant['fileAccess']): Promise<ComponentProjectFileInput>
     prepareSource?(input: ComponentProjectFileInput, file: ComponentProjectFile, intent: ContentApplyIntent): Promise<ContentApplySource>
@@ -180,6 +182,24 @@ export class DocumentToolGateway implements ToolGateway {
     if (this.hostServicesConfigured || this.runs.size || this.startingRuns.size) throw new Error('宿主服务只能在首个任务前配置一次')
     this.hostTools.configure(services)
     this.hostServicesConfigured = true
+  }
+
+  /** Main settlement query: old receipts stay immutable; only current author bytes can resolve their diagnostics. */
+  async verifyContentDiagnostics(runId: string, documentId: string,
+    diagnostics: readonly Pick<ContentApplyDiagnostic, 'code' | 'instanceId' | 'reference'>[]) {
+    const run = this.run(runId)
+    if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
+    const snapshot = await this.registry.get(documentId).drain()
+    this.authorizeDocument(run, snapshot)
+    if (snapshot.model.kind !== 'course-v10') throw new ToolError('unsupported-document', '当前文档不是可复核的课件')
+    const verify = this.options.componentContent?.verifyDiagnostic
+    const results = await Promise.all(diagnostics.map(diagnostic => verify
+      ? verify(snapshot as ComponentProjectSnapshot, diagnostic)
+      : Promise.resolve({ ...diagnostic, state: 'unknown' as const, reason: '当前宿主尚未配置此诊断的实际结果复核' })))
+    const current = this.registry.get(documentId).read()
+    this.authorizeDocument(run, current)
+    return { documentId, epoch: snapshot.epoch, revision: snapshot.revision,
+      current: !run.stopped && current.epoch === snapshot.epoch && current.revision === snapshot.revision, results }
   }
 
   private supports(name: string): boolean {
