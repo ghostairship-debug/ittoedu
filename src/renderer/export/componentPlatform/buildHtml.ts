@@ -2,6 +2,7 @@ import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import type { ComponentCompilationInput } from '../../../core/components/compilation/types'
 import { buildPublishedCourseV3 } from '../../../core/publish/componentPlatform'
 import { buildComponentSingleHtml } from '../../../core/publish/componentPlatform/buildSingleHtml'
+import { componentAssetDataUrl } from '../../../core/publish/componentPlatform/resourceUrl'
 import { loadPlayerBundle } from '../loadPlayerBundle'
 import { zipSync, strToU8 } from 'fflate'
 import type { SingleHtmlExportMode } from '../course/coursePackagePreflight'
@@ -42,18 +43,25 @@ export async function buildComponentHtml(snapshot: DocumentSnapshot, compile: Co
 export async function buildComponentWebPackage(snapshot: DocumentSnapshot, compile: ComponentCompilePort, signal?: AbortSignal, onProgress?: () => void) {
   await prepareBundledFontEmbedding()
   const files: Record<string, Uint8Array> = {}
+  const preparedAssets: Record<string, string> = {}
   const result = await buildComponentPublished(snapshot, compile, (asset, bytes) => {
     signal?.throwIfAborted()
     const extension = /\.([a-zA-Z0-9]+)$/.exec(asset.filename ?? asset.path)?.[1]?.toLowerCase() ?? 'bin'
     const filename = `assets/${encodeURIComponent(asset.id)}.${extension}`
     files[filename] = bytes
+    preparedAssets[asset.id] = componentAssetDataUrl(bytes).split(',')[1]!
     return filename
   }, undefined, signal, onProgress)
   signal?.throwIfAborted()
   const fonts = resolveEmbeddedBundledFonts(result.payload)
   Object.assign(files, bundledFontPackageFiles(fonts, 'fonts'))
   if (fonts.length) files['THIRD_PARTY_NOTICES.md'] = strToU8(bundledFontNoticeMarkdown(fonts, 'fonts'))
-  const html = buildComponentSingleHtml(result.payload, loadPlayerBundle())
+  // A classic script can load beside a file:// document, where fetch cannot read
+  // package files. The player consumes these same captured bytes through its
+  // existing resource preparation; binary entries remain usable by web hosts.
+  const preparedAssetScriptUrl = Object.keys(preparedAssets).length ? './course-assets.js' : undefined
+  if (preparedAssetScriptUrl) files['course-assets.js'] = strToU8(`window.CoursewarePreparedAssetBytes=Object.fromEntries(Object.entries(${JSON.stringify(preparedAssets).replace(/</g, '\\u003c')}).map(([id,encoded])=>[id,Uint8Array.from(atob(encoded),character=>character.charCodeAt(0))]));`)
+  const html = buildComponentSingleHtml(result.payload, loadPlayerBundle(), { preparedAssetScriptUrl })
   files['index.html'] = strToU8(fonts.length ? html
     .replace('</head>', `<style>${bundledFontRelativeUrlCss(fonts, 'fonts')}</style></head>`) : html)
   const diagnostics = [...result.diagnostics, ...fontDiagnostics(result.payload, fonts)]
