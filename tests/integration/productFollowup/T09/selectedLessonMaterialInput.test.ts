@@ -19,8 +19,22 @@ it('freezes only teacher-selected content from the real lesson material owner wi
     const target = { lessonId: lesson.identity.lessonId, rootPath: lesson.identity.normalizedDirectory }
     const materials = new LessonMaterials(async () => { await workspace.read(lesson.identity) })
     const docx = r19LessonMaterials().find(material => material.format === 'docx')!
-    const selected = await materials.import(target, { title: 'Teacher DOCX', original: docx.bytes, extraction: await extractMaterial(docx.bytes, docx.name) })
-    const unrelated = new TextEncoder().encode('UNSELECTED OTHER SOURCE')
+    const sourceFile = path.join(workspaceRoot, docx.name)
+    await fs.writeFile(sourceFile, docx.bytes)
+    const sourceStat = await fs.stat(sourceFile)
+    // The real Electron IPC boundary clones renderer typed arrays into Main. Recreate that carrier realm here.
+    const original = Uint8Array.from(await fs.readFile(sourceFile))
+    const extracted = await extractMaterial(original, docx.name)
+    const importInput = { title: 'Teacher DOCX', original, extraction: { ...extracted,
+      assets: extracted.assets.map(asset => ({ ...asset, bytes: Uint8Array.from(asset.bytes) })) } }
+    expect(sourceStat.isFile()).toBe(true)
+    expect(sourceStat.size).toBeGreaterThan(0)
+    expect(importInput.original).toBeInstanceOf(Uint8Array)
+    expect(importInput.original.byteLength).toBe(sourceStat.size)
+    expect(Object.keys(importInput).sort()).toEqual(['extraction', 'original', 'title'])
+    const selected = await materials.import(target, importInput)
+    const notesFile = path.join(workspaceRoot, 'notes.txt'); await fs.writeFile(notesFile, 'UNSELECTED OTHER SOURCE')
+    const unrelated = Uint8Array.from(await fs.readFile(notesFile))
     await materials.import(target, { title: 'Unselected notes', original: unrelated, extraction: await extractMaterial(unrelated, 'notes.txt') })
     const chosen = selected.fragments.find(fragment => fragment.kind === 'text')!
     const selection = { id: selected.id, extractionVersion: selected.extractionVersion, fragmentIds: [chosen.id] }
