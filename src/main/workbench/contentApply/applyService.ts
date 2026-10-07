@@ -7,6 +7,7 @@ import { componentCompilationInput } from '../../../core/components/compilation/
 import { sourceProgramAssembly, type HtmlAssembly } from '../../../core/contentApply/assembly/htmlAssembly'
 import { owningContainer, resolveComponentPresentation, type ComponentContainer, type ComponentDefinition, type ComponentEdit, type ComponentImplementation, type CourseProjectV10, type JsonObject, type JsonValue } from '../../../shared/contracts/component-platform'
 import { prepareContentResources, type PreparedContentResources } from './resources/contentResources'
+import { extractHtmlResources, htmlResourceSources } from '../htmlImport/extractHtmlResources'
 import type { HtmlDesignMeasurementRequest } from './measurement/ElectronHtmlDesignMeasurement'
 import { prepareMeasurementDocument } from './measurement/prepareMeasurementDocument'
 import { assemblyContentDraft, htmlAssemblyFraming, htmlForAssembly, localHtmlInputs, preserveHtmlOuterStyle } from './application/html'
@@ -104,6 +105,13 @@ export class ContentApplyService {
           const siblingFiles = new Map(retainedModules.map(([name, source]) => [name, new TextEncoder().encode(source)]))
           request.source.siblingFiles?.forEach((bytes, name) => siblingFiles.set(name, Uint8Array.from(bytes)))
           const prepared = await prepareContentResources({ html, siblingFiles }, this.createId)
+          // A content edit keeps this instance's existing CSS. Its real font/
+          // image consumers must keep their declaration when only HTML changed.
+          const cssSources = typeof previous.css === 'string' ? htmlResourceSources(extractHtmlResources({
+            html: `<style>${previous.css.replace(/<\/style/gi, '<\\/style')}</style>`,
+          }).remoteReferences) : []
+          prepared.resourceSources = [...new Map([...prepared.resourceSources, ...cssSources]
+            .map(source => [`${source.usage}\0${source.url}`, source])).values()]
           const resources = resourceEdits(prepared, this.createId)
           edits.push(...resources.edits)
           diagnostics.push(...prepared.diagnostics.map(item => ({ ...item, instanceId: input.instanceId, repairable: true })))
