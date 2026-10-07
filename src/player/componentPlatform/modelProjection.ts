@@ -77,6 +77,7 @@ export function createComponentModelProjection(context: {
         const outer = document.createElement('div'), stage = document.createElement('div'), content = document.createElement('div'), children = document.createElement('div')
         outer.dataset.componentObject = id
         content.dataset.componentRuntimeRoot = id
+        children.style.pointerEvents = 'none'
         stage.append(content, children); outer.append(stage)
         node = { outer, stage, content, children }; nodes.set(id, node)
         runtime.bind(id, content); runtime.bindTarget(id, outer)
