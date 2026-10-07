@@ -215,16 +215,24 @@ export function createDomAuthoring(root: HTMLElement, options: {
       return previous && current === previous.applied ? previous.original ?? '' : current
     }
     if (geometry) {
-      if (geometry.translateX !== undefined || geometry.translateY !== undefined) {
+      const changesLinear = geometry.scaleX !== undefined || geometry.scaleY !== undefined || geometry.rotation !== undefined
+      if (geometry.translateX !== undefined || geometry.translateY !== undefined || changesLinear) {
         const base = (baseStyle('translate') || '0px 0px').split(/\s+/)
-        styles.translate = `calc(${base[0] === 'none' ? '0px' : base[0]} + ${geometry.translateX ?? 0}px) calc(${base[1] ?? '0px'} + ${geometry.translateY ?? 0}px)`
+        // Individual transforms share the source's transform-origin. Keep that
+        // pivot for its existing transform and compensate only the author delta:
+        // T(O) T(A + RS*O - O) RS M T(-O) = T(A) RS T(O) M T(-O).
+        const origin = win.getComputedStyle(element).transformOrigin.split(/\s+/).map(value => parseFloat(value) || 0)
+        const angle = (geometry.rotation ?? 0) * Math.PI / 180, cosine = Math.cos(angle), sine = Math.sin(angle)
+        const x = (origin[0] ?? 0) * (geometry.scaleX ?? 1), y = (origin[1] ?? 0) * (geometry.scaleY ?? geometry.scaleX ?? 1)
+        const dx = (geometry.translateX ?? 0) + cosine * x - sine * y - (origin[0] ?? 0)
+        const dy = (geometry.translateY ?? 0) + sine * x + cosine * y - (origin[1] ?? 0)
+        styles.translate = `calc(${base[0] === 'none' ? '0px' : base[0]} + ${dx}px) calc(${base[1] ?? '0px'} + ${dy}px)`
       }
       if (geometry.scaleX !== undefined || geometry.scaleY !== undefined) {
         const base = (baseStyle('scale') || '1 1').split(/\s+/)
         styles.scale = `calc(${base[0] === 'none' ? '1' : base[0]} * ${geometry.scaleX ?? 1}) calc(${base[1] ?? base[0]} * ${geometry.scaleY ?? geometry.scaleX ?? 1})`
       }
       if (geometry.rotation !== undefined) styles.rotate = `calc(${baseStyle('rotate') || '0deg'} + ${geometry.rotation}deg)`
-      if (geometry.scaleX !== undefined || geometry.scaleY !== undefined || geometry.rotation !== undefined) styles['transform-origin'] = '0 0'
       if (geometry.width !== undefined) styles.width = `${geometry.width}px`
       if (geometry.height !== undefined) styles.height = `${geometry.height}px`
       if (record.kind === 'text' && (geometry.width !== undefined || geometry.height !== undefined)
@@ -283,7 +291,8 @@ export function createDomAuthoring(root: HTMLElement, options: {
     const previous = descriptions.get(node)
     if (previous?.scope === scopeKey) {
       const record = options.records()[previous.observation.authorKey]
-      if (record || previous.observation.record.binding.baseline === authorValueOf(node)) return { ...previous.observation, ...(record ? { record } : {}),
+      if (record || previous.observation.record.binding.baseline === authorValueOf(node)) return { ...previous.observation,
+        record: record ?? { ...previous.observation.record, overrides: {} },
         bindingStatus: resolve(previous.observation.authorKey, record ?? previous.observation.record, active.get(previous.observation.authorKey)).node === node ? 'bound' : 'unresolved',
         initialValue: record?.kind === 'image' ? record.overrides.src ?? authorValueOf(node) : authorValueOf(node) }
     }

@@ -26,6 +26,8 @@ describe('persistent local DOM authoring', () => {
     consumer.previewGeometry(selected.authorKey, null)
     expect(target.style.translate).toContain('20px')
     expect(target.textContent).toBe('New effective text')
+    records = {}; consumer.refresh()
+    expect(consumer.describe(target.firstChild!)!.record.overrides).toEqual({})
   })
   it('reports indistinguishable dynamic siblings before an edit can appear applied only for one mount', () => {
     const root = document.createElement('div'); document.body.append(root)
