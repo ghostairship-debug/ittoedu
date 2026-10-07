@@ -60,6 +60,7 @@ export const htmlPreviewTargetReportSchema = z.object({
   /** True when the page created this node at runtime rather than parsing it. */
   scriptCreated: z.boolean(),
   authoring: z.object({ authorKey: id, record: componentAuthorRecordSchema }).strict().optional(),
+  bindingStatus: z.enum(['bound', 'unmounted', 'unresolved', 'source-required']).optional(),
   geometry: componentAuthorGeometryObservationSchema.optional(),
 }).strict()
 
