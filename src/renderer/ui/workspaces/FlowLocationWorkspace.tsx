@@ -19,7 +19,6 @@ export function FlowLocationWorkspace(props: FlowLocationWorkspaceProps) {
   useEffect(() => runtime.navigation.subscribe?.(() => refreshController(value => value + 1)), [runtime.navigation])
   useEffect(() => {
     runtime.setPlaying(props.canvasMode === 'run')
-    return () => runtime.setPlaying(false)
   }, [runtime.documentId, runtime.setPlaying, props.canvasMode])
   const [toolbarContainer, setToolbarContainer] = useState<HTMLDivElement | null>(null)
   const [headerHeight, setHeaderHeight] = useState(FLOW_WORKSPACE_HEADER_HEIGHT)
