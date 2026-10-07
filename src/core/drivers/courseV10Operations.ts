@@ -156,7 +156,7 @@ function deletedPresentationData(project: CourseProjectV10, surfaceId: string, r
           rule.actions.forEach(step => removedActions.add(step.id)); changed = true; return false
         })
       }
-      return { ...parsed, rules } as unknown as JsonValue
+      return equalComponentValue(parsed.rules, rules) ? data : { ...parsed, rules } as unknown as JsonValue
     }
     if (key !== 'guoling.navigation' || !data || typeof data !== 'object' || Array.isArray(data) || !Array.isArray(data.buttons)) return data
     return { ...data, buttons: data.buttons.map(button => {
