@@ -234,16 +234,19 @@ it('forwards a live author gesture preview through the actual runtime host and r
   expect(previewGeometry).toHaveBeenCalledTimes(2); root.remove()
 })
 
-it('awaits the new React surface camera before accepting a teacher jump to its authored frame', async () => {
+it('awaits real cross-surface camera commits for teacher and previous-key navigation, and pauses only when the document deactivates', async () => {
   // External component callbacks run outside React's event flush and without act().
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', false)
   const course = project(), pose = { x: 70, y: 80, zoom: 2 }
   course.surfaces.push({ id: 'spatial', kind: 'spatial', title: '空间', childIds: [], designSize: { width: 800, height: 600 },
     spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [{ id: 'detail', title: '目标镜头', pose }] } })
+  course.surfaces.push({ id: 'later', kind: 'flow', title: '后页', childIds: [] })
   const camera = createComponentSpatialCameraPort({ x: 0, y: 0, zoom: 1 })
   let ports!: CourseV10RuntimePorts, ready!: () => void, registered = false
   const initialCommit = new Promise<void>(resolve => { ready = resolve })
   function Projection({ runtime }: { runtime: CourseV10RuntimePorts }) {
+    // Surface connectors own their selected run mode; unmounting a projection is not document deactivation.
+    useEffect(() => { runtime.setPlaying(true) }, [runtime.setPlaying])
     useEffect(() => {
       if (runtime.surfaceId !== 'spatial') return
       registered = true
@@ -252,12 +255,13 @@ it('awaits the new React surface camera before accepting a teacher jump to its a
     }, [runtime.surfaceId])
     return <div>{runtime.surfaceId}</div>
   }
-  function Editor() {
+  function Editor({ active = true, committed }: { active?: boolean; committed?: () => void }) {
     const [surface, select] = useState('page')
     useEffect(() => ready(), [])
+    useEffect(() => committed?.(), [active])
     return <CourseV10RuntimeView documentId="camera-commit" model={{ kind: 'course-v10', project: course, resources }}
-      surfaceId={surface} selectedInstanceId={null} player={false} onSelect={() => {}} onSurfaceSelect={select} report={() => {}}
-      renderWorkspace={runtime => { ports = runtime; return <Projection runtime={runtime} /> }} />
+      active={active} surfaceId={surface} selectedInstanceId={null} player={false} onSelect={() => {}} onSurfaceSelect={select} report={() => {}}
+      renderWorkspace={runtime => { ports = runtime; return active ? <Projection key={runtime.surfaceId} runtime={runtime} /> : null }} />
   }
   const container = document.createElement('div'); document.body.append(container)
   const root = createRoot(container); root.render(<Editor />)
@@ -266,9 +270,21 @@ it('awaits the new React surface camera before accepting a teacher jump to its a
     ports.setPlaying(true)
     expect(await Promise.resolve().then(() => ports.navigation.teacherPort().execute({ type: 'scene.go', sceneId: 'spatial', targetStateId: 'detail' }))).toBe(true)
     expect(registered).toBe(true); expect(camera.read()).toEqual(pose); expect(container.textContent).toBe('spatial')
+    expect(await ports.navigation.teacherPort().execute({ type: 'scene.go', sceneId: 'later' })).toBe(true)
+    camera.set({ x: 0, y: 0, zoom: 1 })
+    let record!: (result: Promise<boolean>) => void
+    const previous = new Promise<boolean>(resolve => { record = result => { void result.then(resolve) } })
+    const execute = ports.navigation.execute
+    vi.spyOn(ports.navigation, 'execute').mockImplementation((action, signal) => { const result = execute(action, signal); record(result); return result })
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true }))
+    expect(await previous).toBe(true)
+    expect(registered).toBe(true); expect(camera.read()).toEqual(pose); expect(ports.world.isPlaying()).toBe(true)
     const aborted = new AbortController()
     const pending = ports.navigation.execute({ type: 'scene.go', sceneId: 'page' }, aborted.signal)
     aborted.abort()
     expect(await pending).toBe(false)
+    const deactivated = new Promise<void>(resolve => root.render(<Editor active={false} committed={resolve} />))
+    await deactivated
+    expect(ports.world.isPlaying()).toBe(false)
   } finally { root.unmount(); await ports.world.dispose(); camera.dispose(); container.remove() }
 })

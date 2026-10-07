@@ -57,6 +57,7 @@ export function useCourseV10Runtime(): CourseV10RuntimePorts {
 
 export interface CourseV10RuntimeViewProps {
   documentId: string; model: Extract<DocumentModel, { kind: 'course-v10' }>; surfaceId: string | null
+  active?: boolean
   selectedInstanceId: string | null; player: boolean; onSelect(id: string | null): void; report(message: string): void
   selectedInstanceIds?: readonly string[]
   activeStateId?: string | null
@@ -220,6 +221,9 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
     world.setPlaying(active)
     if (world.isPlaying() !== before) navigation.changed()
   }, [world, navigation])
+  useEffect(() => {
+    if (props.active === false) { navigation.cancel(); setPlaying(false) }
+  }, [props.active, navigation, setPlaying])
   const resetPlayback = useCallback(async (playing?: boolean) => {
     if (!await navigation.replayCurrentSurface()) throw new Error('当前页未能返回初始状态')
     world.setPlaying(playing ?? false)
