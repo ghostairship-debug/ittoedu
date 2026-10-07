@@ -298,7 +298,7 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
         }
         edits.push({ type: 'data.set', instanceId: node.id, path: ['style'], value: json(style) })
       }
-      submit(edits, target); return null
+      return submit(edits, target).then(() => null, error => error instanceof Error ? error.message : String(error))
     }
     catch (error) { return error instanceof Error ? error.message : String(error) }
   }, report) : null

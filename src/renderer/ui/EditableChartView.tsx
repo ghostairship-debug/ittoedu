@@ -26,7 +26,7 @@ export function EditableChartView({ id, chart, width, height, onCommit, onHeight
 }) {
   const root = useRef<HTMLDivElement>(null)
   const draftFactory = useRef<((value: string) => ChartTextDraft) | null>(null)
-  const [edit, setEdit] = useState<{ value: string; left: number; top: number; apply: (value: string) => string | null } | null>(null)
+  const [edit, setEdit] = useState<{ value: string; left: number; top: number; apply: (value: string) => string | null | Promise<string | null> } | null>(null)
   const composing = useRef(false)
   const finishAfterComposition = useRef(false)
   const editRef = useRef(edit)
@@ -50,10 +50,16 @@ export function EditableChartView({ id, chart, width, height, onCommit, onHeight
     }
     const current = editRef.current
     if (!current) return
-    editRef.current = null
-    const reason = current.apply(current.value)
-    if (reason) { setError(reason); setEdit(current); editRef.current = current }
-    else { setEdit(null); setError(null) }
+    const finishAck = (reason: string | null) => {
+      if (editRef.current !== current) return
+      if (reason) setError(reason)
+      else { editRef.current = null; setEdit(null); setError(null) }
+    }
+    try {
+      const reason = current.apply(current.value)
+      if (reason instanceof Promise) void reason.then(finishAck, error => finishAck(error instanceof Error ? error.message : String(error)))
+      else finishAck(reason)
+    } catch (error) { finishAck(error instanceof Error ? error.message : String(error)) }
   }
   return <div ref={root} data-testid="editable-chart-view" style={{ position: 'relative', width: '100%', aspectRatio: `${width} / ${previewHeight ?? height}`, pointerEvents: 'auto' }}
     onDoubleClick={event => {

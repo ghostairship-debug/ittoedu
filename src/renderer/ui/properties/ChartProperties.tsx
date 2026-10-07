@@ -44,8 +44,8 @@ export interface ChartPropertiesCommands {
   readonly patchTitle: (title: string) => void
   readonly patchType: (newType: ChartType, retainedSeriesId?: string) => void
   readonly patchStyle: (patch: ChartStylePatch) => void
-  /** Returns null on success; on failure returns the reason and writes nothing. */
-  readonly commitTableData: (candidateData: ChartCandidateData) => string | null
+  /** Null acknowledges success; a Promise retains the draft until the writer acknowledges it. */
+  readonly commitTableData: (candidateData: ChartCandidateData) => string | null | Promise<string | null>
 }
 
 const CHART_TYPE_OPTIONS: ReadonlyArray<{ value: ChartType; label: string }> = [
@@ -222,6 +222,33 @@ export function ChartProperties({
   const baselineRef = useRef(draftSignature(node))
   const signatureRef = useRef(draftSignature(node))
   const preparedCanvasSignature = useRef<string | null>(null)
+  const pendingApply = useRef<Promise<string | null> | null>(null)
+  const nodeRef = useRef(node); nodeRef.current = node
+
+  const commitCandidate = (candidate: ChartCandidateData): string | null | Promise<string | null> => {
+    if (pendingApply.current) return pendingApply.current
+    const raw = JSON.stringify(draftRef.current), target = targetRef.current
+    const finish = (reason: string | null) => {
+      if (targetRef.current !== target) return reason
+      if (reason) { preparedCanvasSignature.current = null; setApplyError(reason); return reason }
+      preparedCanvasSignature.current = tableValueSignature(candidate)
+      const acknowledged = validateDraft(draftFromView(nodeRef.current), chartType).candidate
+      if (acknowledged && tableValueSignature(acknowledged) === tableValueSignature(candidate)) baselineRef.current = draftSignature(nodeRef.current)
+      if (JSON.stringify(draftRef.current) === raw && !composingRef.current && !resumeRequired.current) {
+        dirtyRef.current = false; setDirty(false)
+      }
+      setApplyError(null)
+      return null
+    }
+    try {
+      const result = commands.commitTableData(candidate)
+      if (!(result instanceof Promise)) return finish(result)
+      const pending = result.then(finish, error => finish(error instanceof Error ? error.message : String(error)))
+        .finally(() => { if (pendingApply.current === pending) pendingApply.current = null })
+      pendingApply.current = pending
+      return pending
+    } catch (error) { return finish(error instanceof Error ? error.message : String(error)) }
+  }
 
   const markDirty = () => {
     resumeRequired.current = false
@@ -239,7 +266,7 @@ export function ChartProperties({
     if (signatureRef.current === signature) return
     signatureRef.current = signature
     const canonical = validateDraft(draftFromView(node), chartType).candidate
-    if (canonical && preparedCanvasSignature.current === tableValueSignature(canonical)) {
+    if (!pendingApply.current && canonical && preparedCanvasSignature.current === tableValueSignature(canonical)) {
       preparedCanvasSignature.current = null
       baselineRef.current = signature
       const current = validateDraft(draftRef.current, chartType).candidate
@@ -302,12 +329,11 @@ export function ChartProperties({
         series: draft.series.map(entry => kind === 'series' && entry.id === id ? { ...entry, name: value } : entry),
       }
       const validated = validateDraft(next, chartType)
-      const reason = validated.candidate
-        ? commands.commitTableData(validated.candidate)
-        : '数据草稿含有未完成或无效的内容，请在属性栏修正后应用。'
       setDraft(next)
-      dirtyRef.current = Boolean(reason)
-      setDirty(Boolean(reason))
+      dirtyRef.current = true
+      setDirty(true)
+      if (validated.candidate) return commitCandidate(validated.candidate)
+      const reason = '数据草稿含有未完成或无效的内容，请在属性栏修正后应用。'
       setApplyError(reason)
       return reason
     },
@@ -328,20 +354,13 @@ export function ChartProperties({
     if (resumeRequired.current) { setApplyError('恢复的输入法草稿尚未完成，请继续编辑后再应用。'); return false }
     if (!dirtyRef.current) return !composingRef.current
     if (targetRef.current !== bindingKey) { setApplyError('图表数据草稿对应的编辑目标已经改变，请取消草稿后重试。'); return false }
+    if (pendingApply.current) return pendingApply.current.then(reason => !reason && !dirtyRef.current)
     if (dirtyRef.current && baselineRef.current !== draftSignature(node)) { setApplyError('图表数据已在其他编辑入口改变，请取消此草稿后重试。'); return false }
     const candidate = validateDraft(draftRef.current, chartType).candidate
     if (composingRef.current || !candidate) return false
     preview?.(null)
-    const reason = commands.commitTableData(candidate)
-    if (reason) {
-      setApplyError(reason)
-      return false
-    }
-    dirtyRef.current = false
-    preparedCanvasSignature.current = tableValueSignature(candidate)
-    setDirty(false)
-    setApplyError(null)
-    return true
+    const reason = commitCandidate(candidate)
+    return reason instanceof Promise ? reason.then(value => !value && !dirtyRef.current) : !reason && !dirtyRef.current
   }
   usePropertyDraftFlush(() => !resumeRequired.current && !composingRef.current && (!dirtyRef.current || applyDraft()), {
     hasDirty: () => resumeRequired.current || dirtyRef.current || composingRef.current,
@@ -657,7 +676,7 @@ export function ChartProperties({
           className="primary-button"
           data-testid="chart-data-apply"
           disabled={!dirty || !validation.candidate}
-          onClick={applyDraft}
+          onClick={() => { void applyDraft() }}
         >
           应用数据
         </button>

@@ -11,7 +11,7 @@ export interface ChartCanvasTextPort {
     readonly error: string | null
   }
   /** Commits through the inspector's existing validated whole-table draft. */
-  commit(kind: ChartCanvasTextKind, id: string, value: string): string | null
+  commit(kind: ChartCanvasTextKind, id: string, value: string): string | null | Promise<string | null>
 }
 
 // Only a connection to the mounted inspector; draft data stays in its owner.
