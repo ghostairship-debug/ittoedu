@@ -50,16 +50,20 @@ const textSelection: ModelSelection = { model: 'controlled', connection: { id: '
 const imageSelection: ImageModelSelection = { imageModel: 'controlled-image', connection: { ...textSelection.connection,
   provider: 'openai', baseURL: 'https://controlled.invalid/v1', imageProtocol: 'openai-images' } }
 
-it('a table-based chart edit and new explanation survive interrupted embedding; the same task reuses its real image receipt and only finishes the missing insertion', async () => {
+it.each(['existing-chart-update', 'table-conversion'] as const)('a real %s and new explanation survive interrupted embedding; the same task only finishes the missing insertion', async chartAction => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'followup-composite-image-'))
   const host = new DocumentHostService(path.join(directory, 'documents'))
   const project = createBlankCourseProjectV10('组合任务')
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   project.definitions[TABLE_DEFINITION.id] = TABLE_DEFINITION
   project.definitions[CHART_DEFINITION.id] = CHART_DEFINITION
-  const table = createTableData({ rows: 2, columns: 1 }); table.rows[0].cells[0].text = '2'; table.rows[1].cells[0].text = '5'
+  const table = createTableData({ rows: 3, columns: 2 })
+  table.headerRowCount = 1
+  table.rows[0].cells[0].text = '班级'; table.rows[0].cells[1].text = '人数'
+  table.rows[1].cells[0].text = '甲'; table.rows[1].cells[1].text = '2'
+  table.rows[2].cells[0].text = '乙'; table.rows[2].cells[1].text = '5'
   const frame = { width: 300, height: 160, transform: [1, 0, 0, 1, 40, 70] as [number, number, number, number, number, number] }
-  project.instances.table = { id: 'table', definitionId: TABLE_DEFINITION.id, data: table, frame }
+  project.instances.table = { id: 'table', definitionId: TABLE_DEFINITION.id, data: table, frame, style: { opacity: 0.75 }, name: '源数据' }
   project.instances.chart = { id: 'chart', definitionId: CHART_DEFINITION.id, data: createChartData(), frame: { ...frame, transform: [1, 0, 0, 1, 400, 70] } }
   project.instances.existing = { id: 'existing', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('原有说明') }
   project.surfaces[0].childIds = ['table', 'chart']
@@ -110,27 +114,37 @@ it('a table-based chart edit and new explanation survive interrupted embedding; 
     if (step === 1) { yield complete(request, { name: name(request, 'project.list'), args: {} }); return }
     if (step === 2) {
       const files = toolData(request).files as Array<{ path: string }>
-      tablePath = files.find(value => /表格.*\.data\.json$/.test(value.path))!.path
+      tablePath = files.find(value => /源数据.*\.data\.json$/.test(value.path))!.path
       chartPath = files.find(value => /图表.*\.data\.json$/.test(value.path))!.path
       flowPath = files.find(value => /任务说明.*\.md$/.test(value.path))!.path
       yield complete(request, { name: name(request, 'project.read'), args: { path: tablePath } }); return
     }
     if (step === 3) {
       const observed = JSON.parse(toolData(request).content) as TableData
-      values = observed.rows.map(row => Number(row.cells[0].text))
+      values = observed.rows.slice(observed.headerRowCount).map(row => Number(row.cells[1].text))
+      if (chartAction === 'table-conversion') {
+        const headers = observed.rows[0].cells.map(cell => cell.text)
+        expect(headers).toEqual(['班级', '人数'])
+        yield complete(request, { name: name(request, 'object.convert'), args: { path: tablePath, to: 'chart', chartType: 'bar', title: '人数比较',
+          categoryColumn: headers.indexOf('班级') + 1, valueColumns: [headers.indexOf('人数') + 1] } }); return
+      }
       yield complete(request, { name: name(request, 'project.read'), args: { path: chartPath } }); return
     }
     if (step === 4) {
+      if (chartAction === 'table-conversion') {
+        expect(toolData(request)).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+        yield complete(request, { name: name(request, 'project.read'), args: { path: flowPath } }); return
+      }
       const chart = JSON.parse(toolData(request).content) as ChartData
       const data = { ...chart, series: chart.series.map(series => ({ ...series, points: series.points.map((point, index) => ({ ...point, value: values[index] })) })) }
       yield complete(request, { name: name(request, 'object.update'), args: { path: chartPath, properties: { data } } }); return
     }
-    if (step === 5) { expect(toolData(request)).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } }); yield complete(request, { name: name(request, 'project.read'), args: { path: flowPath } }); return }
-    if (step === 6) {
+    if (step === 5 && chartAction === 'existing-chart-update') { expect(toolData(request)).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } }); yield complete(request, { name: name(request, 'project.read'), args: { path: flowPath } }); return }
+    if (step === (chartAction === 'table-conversion' ? 5 : 6)) {
       flowSource = toolData(request).content
       yield complete(request, { name: name(request, 'project.apply'), args: { path: flowPath, content: `${flowSource}\n\n新增说明：数据 ${values.join(' 和 ')} 已体现在图表中。\n` } }); return
     }
-    if (step === 7) { expect(toolData(request)).toMatchObject({ commit: 'committed' }); yield complete(request, { name: name(request, 'image.generate'), args: { target: surfaceTarget, prompt: '为这段数据说明生成一张教学图片', output: { format: 'png' } } }); return }
+    if (step === (chartAction === 'table-conversion' ? 6 : 7)) { expect(toolData(request)).toMatchObject({ commit: 'committed' }); yield complete(request, { name: name(request, 'image.generate'), args: { target: surfaceTarget, prompt: '为这段数据说明生成一张教学图片', output: { format: 'png' } } }); return }
     const result = toolData(request)
     job = result.job
     if (result.status !== 'ready') { yield complete(request, { name: name(request, 'image.status'), args: { job } }); return }
@@ -143,7 +157,9 @@ it('a table-based chart edit and new explanation survive interrupted embedding; 
   } }
   const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider,
     runs: new ExecutionRunStore(path.join(directory, 'runs')), events: new ExecutionEventStore({ directory: path.join(directory, 'events') }) })
-  const input: ExecutionStart = { conversationId: 'composite', taskId: 'combined-task', instruction: '读取表格，更新现有图表，新增一段说明，生成图片并嵌入当前演示页面。', selection: textSelection,
+  const input: ExecutionStart = { conversationId: 'composite', taskId: 'combined-task', instruction: chartAction === 'table-conversion'
+      ? '读取源数据表，将原表格转为柱状图；保留它的人工位置、样式和其他对象。新增一段说明，生成图片并嵌入当前演示页面。'
+      : '读取源数据表，更新现有图表，新增一段说明，生成图片并嵌入当前演示页面。', selection: textSelection,
     documents: [{ documentId: initial.documentId, writable: [{ kind: 'document' }, { kind: 'course-surface', surfaceId: project.surfaces[0].id }] }], workspaceRoot: directory, permission: 'workspace' }
   let activeRunId: string | undefined
   try {
@@ -160,13 +176,37 @@ it('a table-based chart edit and new explanation survive interrupted embedding; 
     const before = await host.internalAPI.read(initial.documentId)
     if (before.model.kind !== 'course-v10') throw new Error('V10 required')
     expect(before.undoDepth).toBe(2)
-    expect((before.model.project.instances.chart.data as ChartData).series[0].points.map(value => value.value)).toEqual([2, 5])
+    const derivedId = chartAction === 'table-conversion' ? 'table' : 'chart'
+    const derived = before.model.project.instances[derivedId]
+    expect(before.model.project.definitions[derived.definitionId].implementation).toMatchObject({ kind: 'builtin', key: 'guoling.chart' })
+    expect((derived.data as ChartData).series[0].points.map(value => value.value)).toEqual([2, 5])
+    if (chartAction === 'table-conversion') {
+      expect((derived.data as ChartData).categories.map(value => value.label)).toEqual(['甲', '乙'])
+      expect((derived.data as ChartData).series[0].name).toBe('人数')
+      expect(derived).toMatchObject({ id: 'table', frame, style: project.instances.table.style })
+      expect(before.model.project.surfaces[0].childIds).toEqual(project.surfaces[0].childIds)
+      expect(before.model.project.instances.chart).toEqual(project.instances.chart)
+    }
     const flowIds = before.model.project.surfaces.find(value => value.id === 'flow')!.childIds
     expect(flowIds).toHaveLength(2)
     expect(Object.values(before.model.project.instances).filter(value => value.definitionId === 'guoling.image')).toHaveLength(0)
+    if (chartAction === 'table-conversion') {
+      // Undo the later explanation first, then the conversion; redo reuses the original canonical command identities.
+      for (const [index, action] of ['undo', 'undo', 'redo', 'redo'].entries()) {
+        const head = await host.internalAPI.read(initial.documentId)
+        expect(await host.internalAPI.dispatch({ documentId: head.documentId, epoch: head.epoch, baseRevision: head.revision, actor: 'human', operationId: `conversion-history-${index}`,
+          mutation: { type: action as 'undo' | 'redo' } })).toMatchObject({ status: 'applied' })
+        const state = await host.internalAPI.read(initial.documentId)
+        if (state.model.kind !== 'course-v10') throw new Error('V10 required')
+        if (index === 1) expect(state.model.project.instances.table).toEqual(project.instances.table)
+        if (index >= 2) expect(state.model.project.instances.table).toEqual(derived)
+      }
+    }
+    const afterHistory = await host.internalAPI.read(initial.documentId)
+    if (afterHistory.model.kind !== 'course-v10') throw new Error('V10 required')
     const moved = { ...before.model.project.instances.table.frame!, transform: [1, 0, 0, 1, 87, 91] as [number, number, number, number, number, number] }
-    expect(await host.internalAPI.dispatch({ documentId: before.documentId, epoch: before.epoch, baseRevision: before.revision, actor: 'human', operationId: 'layout-between-runs',
-      mutation: { type: 'command', command: captureComponentOperation(before.model.project, [{ type: 'frame.set', instanceId: 'table', frame: moved }]) } })).toMatchObject({ status: 'applied' })
+    expect(await host.internalAPI.dispatch({ documentId: afterHistory.documentId, epoch: afterHistory.epoch, baseRevision: afterHistory.revision, actor: 'human', operationId: 'layout-between-runs',
+      mutation: { type: 'command', command: captureComponentOperation(afterHistory.model.project, [{ type: 'frame.set', instanceId: 'table', frame: moved }]) } })).toMatchObject({ status: 'applied' })
     mode = 'continue'; step = 0
     const resumed = await engine.start(input, { runId: stopped.runId, facts: '', sameTask: true })
     activeRunId = resumed.runId
@@ -180,6 +220,7 @@ it('a table-based chart edit and new explanation survive interrupted embedding; 
     expect(current.undoDepth).toBe(4)
     expect(current.model.project.instances.table.frame).toEqual(moved)
     expect(current.model.project.instances.chart).toEqual(before.model.project.instances.chart)
+    expect(current.model.project.instances.table.data).toEqual(before.model.project.instances.table.data)
     expect(current.model.project.surfaces.find(value => value.id === 'flow')!.childIds).toEqual(flowIds)
     const inserted = Object.values(current.model.project.instances).filter(value => value.definitionId === 'guoling.image')
     expect(inserted).toHaveLength(1)
@@ -188,6 +229,8 @@ it('a table-based chart edit and new explanation survive interrupted embedding; 
     const reopened = await new DocumentHostService(path.join(directory, 'cold')).internalAPI.open(filename)
     expect(reopened).toMatchObject({ model: { kind: 'course-v10', project: { instances: { [inserted[0].id]: inserted[0], table: { frame: moved }, chart: { data: current.model.project.instances.chart.data } } } } })
     if (reopened.model.kind !== 'course-v10') throw new Error('V10 required')
+    expect(reopened.model.project.instances.table.data).toEqual(current.model.project.instances.table.data)
+    expect(reopened.model.project.surfaces.find(value => value.id === 'flow')!.childIds).toEqual(flowIds)
     const imageData = inserted[0].data as { assetId: string }
     const decoded = await sharp(reopened.model.resources.assets[imageData.assetId]).metadata()
     expect(decoded).toMatchObject({ width: 12, height: 9 })
@@ -205,7 +248,7 @@ it('a table-based chart edit and new explanation survive interrupted embedding; 
     const jobs = await images.list()
     expect(jobs.map(value => value.jobId)).toHaveLength(2)
     expect(jobs.find(value => value.jobId !== generatedJob.jobId)).toMatchObject({ resources: [expect.objectContaining({ width: 12, height: 9 })] })
-    // Existing chart update is proven here. New chart creation/type conversion has no current public consumer in this cut.
+    // The conversion variant uses the public canonical converter; model code never substitutes implementation or invents professional identities.
   } finally {
     release()
     if (activeRunId) { await engine.stop(activeRunId); await engine.wait(activeRunId) }
