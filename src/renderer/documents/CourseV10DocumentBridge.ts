@@ -114,7 +114,11 @@ export class CourseV10DocumentBridge {
   connect(api: DocumentHostAPI): Promise<void> {
     if (this.api === api && this.connecting) return this.connecting
     if (this.api === api && this.connected) return Promise.resolve()
-    if (this.api && this.api !== api) this.dispose()
+    if (this.api && this.api !== api) {
+      if ([...this.projections.values()].some(projection => this.hasUnconfirmedInput(projection)))
+        return Promise.reject(new Error('文档仍有未确认输入，已保留原连接与输入'))
+      this.dispose()
+    }
     this.api = api
     this.stopEvents = api.subscribe(event => {
       if (event.type === 'closed' && this.projections.get(event.documentId)?.read().committed?.epoch === event.epoch)
@@ -224,12 +228,18 @@ export class CourseV10DocumentBridge {
     if (!projection) return true
     await projection.drain()
     if (!await this.host().closeWithDialog(documentId)) return false
-    this.detachClosed(documentId)
-    return true
+    return this.detachClosed(documentId)
   }
-  private detachClosed(documentId: string): void {
+  private hasUnconfirmedInput(projection: DocumentProjection): boolean {
+    const view = projection.read()
+    return Boolean(view.pending.length || view.composing || view.retainedComposition || view.draft)
+  }
+  private detachClosed(documentId: string): boolean {
     const projection = this.projections.get(documentId)
-    if (!projection) return
+    if (!projection) return true
+    // Projection deliberately retains input after an unexpected formal close.
+    // Keep that recovery view and its original epoch instead of losing it here.
+    if (this.hasUnconfirmedInput(projection)) { this.publish(); return false }
     this.projectionStops.get(documentId)?.(); this.projectionStops.delete(documentId)
     projection.dispose(); this.projections.delete(documentId); this.selections.delete(documentId)
     if (this.state.activeDocumentId === documentId) {
@@ -237,6 +247,7 @@ export class CourseV10DocumentBridge {
       if (next) this.publish({ activeDocumentId: next, activation: this.state.activation + 1 })
       else { this.state = { ...this.state, activeDocumentId: null }; this.publish() }
     } else this.publish()
+    return true
   }
   select(instanceId: string | null, surfaceId = this.state.surfaceId): void {
     if (this.state.activeDocumentId) this.selectInstances(this.state.activeDocumentId, instanceId ? [instanceId] : [], surfaceId)

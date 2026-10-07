@@ -103,4 +103,15 @@ describe('document input owner and Main close boundary', () => {
     expect(f.bridge.read().pending).toBe(0)
   })
 
+  it('retains the original projection epoch when a formal close arrives before IME ACK', async () => {
+    const f = await fixture()
+    f.bridge.beginComposition(f.instanceId, ['text'])
+    await f.bridge.updateComposition('未确认的原目标输入')
+    await f.host.operate({ type: 'close', documentId: f.snapshot.documentId, discardDirty: true })
+    await Promise.resolve()
+    expect(f.bridge.read().documents).toHaveLength(1)
+    expect(f.bridge.read().documents[0]).toMatchObject({ documentId: f.snapshot.documentId, epoch: f.snapshot.epoch, dirty: true })
+    expect(f.bridge.read().project).toMatchObject({ instances: { [f.instanceId]: { data: { text: '未确认的原目标输入' } } } })
+    expect(f.bridge.read().error).toContain('未确认输入仍保留')
+  })
 })
