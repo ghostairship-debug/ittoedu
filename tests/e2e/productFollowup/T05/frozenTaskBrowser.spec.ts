@@ -51,8 +51,9 @@ test('T05 public Engine uses frozen Main task authorization and real Electron DO
       ])
       log('imports.returned')
       const host = new DocumentHostService(path.join(input.directory, 'documents')), approvals = new BrowserActionApprovals()
-      const taskFacts: unknown[] = [], states: unknown[] = [], denied: unknown[] = []
-      const actualFactory = createElectronEmbeddedBrowserFactory(() => BrowserWindow.getAllWindows().find(window => window.webContents.getURL().startsWith('courseware-editor://')) ?? null)
+      const taskFacts: unknown[] = [], states: unknown[] = [], denied: unknown[] = [], viewportFacts: unknown[] = []
+      const ownedWindow = () => BrowserWindow.getAllWindows().find(window => !window.isDestroyed() && window.webContents.getURL().startsWith('courseware-editor://')) ?? null
+      const actualFactory = createElectronEmbeddedBrowserFactory(ownedWindow)
       let creatingBackend = false
       const watchCreated = (_event: unknown, contents: any) => {
         if (!creatingBackend) return
@@ -126,6 +127,16 @@ test('T05 public Engine uses frozen Main task authorization and real Electron DO
         else {
           readSnapshot(request)
           const id = taskFacts.length ? (taskFacts[0] as any).runId : ''
+          const window = ownedWindow()
+          if (!window) throw new Error('Actual workbench window unavailable for public browser viewport')
+          const [width, height] = window.getContentSize()
+          // The real public Main viewport displays the SAME backend in its existing host window.
+          // This carrier proves the Main viewport/control chain; it does not claim the whole renderer browser-panel entry.
+          const bounds = { x: 0, y: 0, width, height }
+          log('viewport.before', { runId: id, windowId: window.id, bounds })
+          const visible = service.viewport(id, { visible: true, bounds })
+          viewportFacts.push({ runId: id, windowId: window.id, bounds, state: visible })
+          log('viewport.returned', visible)
           log('takeover.before', { runId: id }); states.push(await service.control(id, 'takeover')); log('takeover.returned', states.at(-1))
           log('resume.before', { runId: id }); states.push(await service.control(id, 'resume')); log('resume.returned', states.at(-1))
           yield complete(request)
@@ -150,7 +161,7 @@ test('T05 public Engine uses frozen Main task authorization and real Electron DO
       log('service.endRun.before'); await service.endRun(started.runId); log('service.endRun.returned')
       app.removeListener('web-contents-created', watchCreated)
       return { status: finished.status, failure: finished.failure, tools: finished.tools.map((tool: any) => ({ name: tool.call.name, input: tool.call.input, result: tool.result })),
-        taskFacts, denied, states, snapshotText, turn }
+        taskFacts, denied, states, viewportFacts, snapshotText, turn }
     }, { root, directory, origin, checkpoints })
     checkpoint('main.evaluate.returned', { status: facts.status })
     expect(facts.status, JSON.stringify(facts)).toBe('completed')
@@ -158,6 +169,7 @@ test('T05 public Engine uses frozen Main task authorization and real Electron DO
     expect(facts.taskFacts).toEqual(expect.arrayContaining([expect.objectContaining({ action: 'prepare' }), expect.objectContaining({ action: 'submit', destinationUrl: `${origin}/submit` })]))
     expect(facts.denied).toHaveLength(1)
     expect(facts.snapshotText).toContain('Unknown clicks 0')
+    expect(facts.viewportFacts).toEqual([expect.objectContaining({ windowId: expect.any(Number), state: expect.objectContaining({ embedded: true, visible: true }) })])
     expect(facts.states).toEqual([expect.objectContaining({ state: 'human' }), expect.objectContaining({ state: 'agent', snapshotId: expect.any(String) })])
     expect(facts.tools.every((tool: any) => !('snapshotId' in tool.input))).toBe(true)
     writeFileSync(join(directory, 'facts.json'), JSON.stringify({ ...facts, posted, paidCalls: 0 }, null, 2))
