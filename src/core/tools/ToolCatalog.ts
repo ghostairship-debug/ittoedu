@@ -41,8 +41,8 @@ export const officeToolRegistrations = officeContentTools.map(tool => registerOf
 export function officeToolRegistration(name: string) { return officeToolRegistrations.find(tool => tool.name === name) }
 export const canonicalMutationTools = [
   registerCanonical({ name: 'text.replace', description: '替换已授权文字字段或精确范围；保留范围外文字及富文本格式。Project V10 使用宿主捕获的组件文字字段句柄，展示状态仍固定在原目标。对象样式使用 object.update；纯文本文档保持纯文本。',
-    inputSchema: z.object({ target, content: z.string(), format: z.enum(['text', 'html']).optional() }).strict(), manual: { label: '替换正文', group: 'edit', targetKinds: ['markdown-range', 'course-instance'] } },
-  { capability: 'write', effect: 'document-edit', supports: context => hasRunWrite(context, ['markdown-range', 'course-instance']), targets: handleToolTarget,
+    inputSchema: z.object({ target: target.optional().describe('省略时使用本次文字卡由宿主固定的默认目标；其它任务必须提供。'), content: z.string(), format: z.enum(['text', 'html']).optional() }).strict(), manual: { label: '替换正文', group: 'edit', targetKinds: ['markdown-range', 'course-instance'] } },
+  { capability: 'write', effect: 'document-edit', supports: context => hasRunWrite(context, ['markdown-range', 'course-instance']), targets: (input, resolver) => input.target ? handleToolTarget({ target: input.target }, resolver) : undefined,
     handler: (context, input) => context.mutate({ name: 'text.replace', input }) }),
   registerCanonical({ name: 'object.update', description: '修改获授权整对象的公开属性。使用 target 句柄，或使用 project.list/read 返回的对象 path；project 可选，省略使用本任务课件。软件固定原实例和观察基线。Project V10 的 data 和 style 是对应字段完整值，implementation 是实例源码覆盖或 null 恢复默认；frame 可局部调整位置尺寸，无自由 frame 的正文不支持位置修改。文字专业格式位于 data.appearance。保留读取到的其余数据、文字、位置和身份，遵守锁定；精确文字范围不可扩大为整对象授权。',
     inputSchema: objectUpdateInputSchema, manual: { label: '修改属性', group: 'edit', targetKinds: ['course-instance'] } },

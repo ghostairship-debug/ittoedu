@@ -33,6 +33,7 @@ interface Run {
   loadedFamilies: Set<ToolFamily>
   courseAuthoring?: boolean
   currentCourseDocumentId?: string
+  contentTarget?: string
   advertised?: { definitions: ToolDefinition[]; names: Set<string>; allowed: Set<string>; batchSchema?: z.ZodType;
     availableFamilies: { family: ToolFamily; description: string; count: number }[] }
   epochs: Map<string, string>
@@ -322,6 +323,14 @@ export class DocumentToolGateway implements ToolGateway {
       const run: Run = { grant, toolScopes, loadedFamilies: new Set(), epochs, sources, rangeFootprints, componentSubtrees,
         currentCourseDocumentId: courses.length === 1 ? courses[0] : writableCourses.length === 1 ? writableCourses[0] : undefined,
         stopped: false, history: new Map(), watches: [] }
+      if (grant.contentOutput) {
+        const binding = grant.contentOutput
+        const snapshot = await this.registry.get(binding.documentId).drain()
+        this.authorizeDocument(run, snapshot)
+        if (!this.canWrite(run, snapshot, binding.target)) throw new ToolError('not-authorized', '默认文字目标不属于本次已授权范围')
+        readEditableTargetContent(snapshot.model, binding.target)
+        run.contentTarget = this.capture(grant.runId, snapshot, binding.target, true)
+      }
       this.runs.set(grant.runId, run)
       for (const doc of grant.documents) this.watchDocument(grant.runId, doc.documentId)
     } finally { this.startingRuns.delete(input.runId) }
@@ -644,6 +653,11 @@ export class DocumentToolGateway implements ToolGateway {
     const captured = cacheKey && this.mutationCaptures.get(cacheKey)
     if (captured && captured.runId === runId && captured.digest === digest) return captured.handles
     const handles = Promise.all(mutations.map(async mutation => {
+      if (mutation.name === 'text.replace') {
+        const target = mutation.input.target ?? this.run(runId).contentTarget
+        if (!target) throw new ToolError('invalid-target', '当前任务没有默认文字目标；请使用已观察的可写目标')
+        return this.handle(runId, target)
+      }
       if ('target' in mutation.input) return this.handle(runId, mutation.input.target)
       const current = await this.componentProjectDocument(runId, mutation.input.project, 'read')
       const { snapshot, file } = this.componentProjectFiles.captureFile(runId, current, mutation.input.path, true)
@@ -1194,11 +1208,13 @@ export class DocumentToolGateway implements ToolGateway {
           surfaceId: target.surfaceId, instanceId: target.instanceId, stateId: target.stateId, fieldScope: target.fieldScope, dataPath: target.dataPath,
           from: target.from ?? 0, to: target.to ?? (typeof textBefore === 'string' ? Array.from(textBefore).length : documentTextLength(textBefore)),
           inserted: Array.from(mutation.input.content).length } : null
-        const edits = mutation.name === 'text.replace' ? [replaceCourseInstanceText(model, target, mutation.input.content, mutation.input.format)]
+        const textFormat = mutation.name === 'text.replace'
+          ? mutation.input.format ?? (readEditableTargetContent(model, target).format === 'html' ? 'html' : 'text') : undefined
+        const edits = mutation.name === 'text.replace' ? [replaceCourseInstanceText(model, target, mutation.input.content, textFormat)]
           : mutation.name === 'object.update' ? courseInstancePropertyEdits(model, target, mutation.input.properties)
             : null
         if (!edits) throw new ToolError('unsupported-operation', '此 V10 对象工具尚不支持当前修改')
-        if (mutation.name === 'text.replace' && mutation.input.format !== 'html' && textBefore !== null) {
+        if (mutation.name === 'text.replace' && textFormat !== 'html' && textBefore !== null) {
           const selected = target.from !== undefined && target.to !== undefined
             ? sliceCourseInstanceText(textBefore, target.from, target.to) : textBefore
           if ((typeof selected === 'string' ? selected : plainDocumentText(selected)) === mutation.input.content) {
@@ -1258,11 +1274,15 @@ export class DocumentToolGateway implements ToolGateway {
       const committed = { ...snapshot, model, revision: result.revision }
       for (let i = 0; i < finalTargets.length; i += 1) {
         // Deleted/moved intermediate targets are still affected. Do not turn their durable ACK into a failure.
-        try { affected.push(this.capture(runId, committed, finalTargets[i], handles[i].writable)) }
+        try {
+          const refreshed = this.capture(runId, committed, finalTargets[i], handles[i].writable)
+          affected.push(refreshed)
+          if (run.contentTarget && handles[i] === this.handles.get(run.contentTarget)) run.contentTarget = refreshed
+        }
         catch {
           const input = mutations[i].input
-          const original = 'target' in input ? input.target : input.path
-          affected.push(original)
+          const original = 'path' in input ? input.path : input.target ?? run.contentTarget
+          if (original) affected.push(original)
         }
       }
     }
