@@ -100,10 +100,11 @@ function sameReadSource(failed: ExecutionToolRecord, later: ExecutionToolRecord)
   const source = input(failed)?.path
   return typeof source === 'string' && source === input(later)?.path
 }
-/** The changed-facts error rejected the old conclusion before commit. A later
- * model turn may correct its contents while keeping the same formal write scope. */
-function correctedReadBasis(failed: ExecutionToolRecord, later: ExecutionToolRecord): boolean {
-  return failed.result?.kind === 'error' && failed.result.code === 'read-basis-changed'
+/** These planning errors reject content before commit. A later model turn may
+ * correct its contents while keeping the same formal write scope. */
+function correctedRejectedContent(failed: ExecutionToolRecord, later: ExecutionToolRecord): boolean {
+  return failed.result?.kind === 'error' && (failed.result.code === 'read-basis-changed'
+      || failed.call.name === 'text.replace' && failed.result.code === 'invalid-content')
     && failed.requestId !== later.requestId && failed.call.name === later.call.name
     && !!failed.effectTargets?.length && !!later.effectTargets?.length
     && JSON.stringify(stable(failed.effectTargets)) === JSON.stringify(stable(later.effectTargets))
@@ -202,7 +203,7 @@ function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord
       || tool.result?.kind === 'error' && /outcome-unknown/.test(tool.result.code)) return true
     if (record.tools.slice(index + 1).some(later => sameObservedTarget(tool, later))) return false
     if (record.tools.slice(index + 1).some(later => sameReadSource(tool, later))) return false
-    if (record.tools.slice(index + 1).some(later => correctedReadBasis(tool, later))) return false
+    if (record.tools.slice(index + 1).some(later => correctedRejectedContent(tool, later))) return false
     if (optionalObservationFailure(tool)) return false
     if (resolvedDelivery.has(tool)) return false
     if (record.tools.slice(index + 1).some(later => (requestKey(later) === requestKey(tool) || sameIntendedEdit(tool, later))
