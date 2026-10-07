@@ -14,7 +14,7 @@ import { ImageResultsDesktopService } from '../../../../src/main/workbench/image
 import { imageProvenance } from '../../../../src/main/workbench/images/imageRoute'
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
 import { createImageData, imageDataSchema } from '../../../../src/components/image/data'
-import { IMAGE_DEFINITION } from '../../../../src/components/image/adapters'
+import { IMAGE_DEFINITION } from '../../../../src/components/image'
 import { CourseV10DocumentBridge } from '../../../../src/renderer/documents/CourseV10DocumentBridge'
 import type { DocumentHostAPI } from '../../../../src/shared/workbench/desktop'
 import type { ImageModelSelection } from '../../../../src/shared/workbench/images'
