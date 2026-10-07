@@ -20,6 +20,11 @@ export interface ReceiveAttachmentBytes {
   declaredMediaType?: string
   source: Omit<AttachmentSnapshot['source'], 'readOnly'>
 }
+export interface PublicMaterialSnapshot {
+  original: AttachmentSnapshot
+  material: AttachmentSnapshot
+  extractionError?: string
+}
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const storageQueues = new Map<string, Promise<unknown>>()
 const attachmentId = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9-]{36}$/.test(value)
@@ -198,6 +203,33 @@ export class AttachmentService implements AttachmentReader {
     return structuredClone(snapshot)
   }
 
+  /** Public HTTP has already admitted these bytes. Preserve the original, then use the
+   * same extractor as local attachments; a missing extractor never discards the file.
+   */
+  async receivePublicFile(input: { url: string; bytes: Uint8Array; contentType: string }, options: { signal?: AbortSignal } = {}): Promise<PublicMaterialSnapshot> {
+    abort(options.signal)
+    const bytes = Buffer.from(input.bytes), url = new URL(input.url)
+    let filename: string
+    try { filename = decodeURIComponent(url.pathname.split('/').at(-1) ?? '') } catch { filename = '' }
+    const extension = filename.split('.').at(-1)?.toLowerCase()
+    const format = bytes.toString('ascii', 0, 5) === '%PDF-' ? 'pdf'
+      : input.contentType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ? 'docx'
+      : input.contentType === 'application/vnd.openxmlformats-officedocument.presentationml.presentation' ? 'pptx'
+      : extension === 'pdf' || extension === 'docx' || extension === 'pptx' ? extension : undefined
+    if (!format) throw new AttachmentError('unsupported-representation', '此公开文件没有受支持的 PDF/DOCX/PPTX 提取器')
+    if (extension !== format) filename = `${filename || '公开材料'}.${format}`
+    const original = await this.receiveBytes({ name: filename, bytes,
+      source: { kind: 'file', pathHint: url.href } }, options)
+    try {
+      const material = await this.extract(original.id, { images: 'auto', signal: options.signal })
+      abort(options.signal)
+      return { original, material }
+    } catch (error) {
+      abort(options.signal)
+      return { original, material: original, extractionError: error instanceof Error ? error.message : String(error) }
+    }
+  }
+
   async readSnapshot(id: string): Promise<AttachmentSnapshot> {
     if (!/^[a-f0-9-]{36}$/.test(id)) throw new AttachmentError('invalid-id', '附件标识无效')
     const bytes = await this.readFile(path.join(this.directory, 'snapshots', `${id}.json`))
@@ -317,7 +349,7 @@ export class AttachmentService implements AttachmentReader {
         if (!mediaType || mediaType !== asset.mime) { gaps.push({ code: 'unsupported-image', message: `图片 ${asset.id} 尚无可发送的已验证像素表示（${asset.mime}）`, locator: fragment.locator }); continue }
         let admitted: Awaited<ReturnType<typeof prepareImageResource>>
         try { admitted = await prepareImageResource({ bytes: assetBytes, mimeType: mediaType, filename: asset.id }, randomUUID) }
-        catch (cause) { throw new AttachmentError('invalid-extraction', '提取图片无法完整解码', { cause }) }
+        catch { gaps.push({ code: 'unsupported-image', message: `图片 ${asset.id} 无法完整解码；已保留原件与其他可读片段`, locator: fragment.locator }); continue }
         const pageImage = extracted.pageImages.find(image => image.assetId === asset.id)
         if (material.format === 'pdf' && (!pageImage || pageImage.width !== admitted.meta.width || pageImage.height !== admitted.meta.height)) throw new AttachmentError('invalid-extraction', 'PDF 页图尺寸与实际像素不一致')
         const blobRef = { digest: hash(assetBytes), byteLength: assetBytes.length }

@@ -10,6 +10,9 @@ export const materialReadSchema = z.object({ ...identity, representationId: z.st
 export const materialFindSchema = z.object({ ...identity, query: z.string().min(1),
   cursor: z.string().min(1).optional(), limit: z.number().int().min(1).max(100).default(20) }).strict()
 export const materialExtractSchema = z.object({ ...identity, pages: z.object({ from: z.number().int().positive(), to: z.number().int().positive() }).strict().optional(), images: z.enum(['auto', 'all']).default('auto') }).strict()
+export const materialSchemas = { 'material.list': materialListSchema, 'material.read': materialReadSchema,
+  'material.find': materialFindSchema, 'material.extract': materialExtractSchema } as const
+export type MaterialToolName = keyof typeof materialSchemas
 export const materialTools: ModelToolDefinition[] = [
   { name: 'material.list', description: '列出当前显式材料或宿主冻结历史材料的不可变来源、分块/实际页码、可用文本/原图和缺口；只列目录不代表正文已读。attachmentId 省略时列出授权材料，指定时分页列出其表示。', inputSchema: z.toJSONSchema(materialListSchema) as ModelToolDefinition['inputSchema'] },
   { name: 'material.read', description: '按 material.list 给出的 attachmentId/representationId 回读已有提取块或原图。返回原件/表示指纹和实际 locator；文本分页不冒充整页完整，图片进入下一模型轮但不声称模型理解。未提取格式返回明确缺口，不执行附件内容或扩大写权限。', inputSchema: z.toJSONSchema(materialReadSchema) as ModelToolDefinition['inputSchema'] },
@@ -24,6 +27,19 @@ const location = (snapshot: AttachmentSnapshot, representation: AttachmentRepres
     ...(locator.page && snapshot.coverage?.format === 'pptx' ? { slide: locator.page } : {}),
     ...(locator.page && snapshot.coverage?.format !== 'pptx' ? { page: locator.page } : {}),
     ...(locator.paragraph ? { paragraph: locator.paragraph } : {}) }
+}
+/** Both clients dispatch against this owner with source IDs resolved by their frozen
+ * task grant. Reading a source never changes a document target or its write grant.
+ */
+export async function dispatchMaterialTool(service: AttachmentService, ids: ReadonlySet<string>, name: MaterialToolName, input: unknown, signal?: AbortSignal) {
+  signal?.throwIfAborted()
+  if (name === 'material.list') return { data: await listMaterials(service, ids, input) }
+  if (name === 'material.find') return { data: await findMaterial(service, ids, input) }
+  if (name === 'material.extract') {
+    const extracted = await extractMaterial(service, ids, input, signal)
+    return { data: extracted.data, admittedSourceIds: [extracted.derivedId] }
+  }
+  return readMaterial(service, ids, input)
 }
 const samePages = (actual: { from: number; to: number } | undefined, requested: { from: number; to: number } | undefined, total?: number) =>
   !requested ? !actual || actual.from === 1 && actual.to === total : actual?.from === requested.from && actual.to === requested.to
@@ -78,7 +94,7 @@ export async function listMaterials(service: AttachmentService, ids: ReadonlySet
     allowed(ids, input.attachmentId)
     const source = await service.readSnapshot(input.attachmentId), end = Math.min(source.representations.length, input.offset + input.limit)
     if (input.offset > source.representations.length) throw new Error('材料分块目录偏移超出范围')
-    return { attachmentId: source.id, derivedFrom: source.derivedFrom, name: source.name, originalDigest: source.digest, originalBytes: source.byteLength,
+    return { attachmentId: source.id, derivedFrom: source.derivedFrom, name: source.name, source: source.source, originalDigest: source.digest, originalBytes: source.byteLength,
       coverage: source.coverage, gaps: source.gaps, total: source.representations.length, offset: input.offset,
       representations: source.representations.slice(input.offset, end).map(item => ({ ...item, location: location(source, item) })),
       truncated: end < source.representations.length,
@@ -87,7 +103,7 @@ export async function listMaterials(service: AttachmentService, ids: ReadonlySet
   const all = [...ids], end = Math.min(all.length, input.offset + input.limit)
   if (input.offset > all.length) throw new Error('材料目录偏移超出范围')
   const sources = await Promise.all(all.slice(input.offset, end).map(async id => {
-    try { const source = await service.readSnapshot(id); return { attachmentId: id, derivedFrom: source.derivedFrom, name: source.name, originalDigest: source.digest,
+    try { const source = await service.readSnapshot(id); return { attachmentId: id, derivedFrom: source.derivedFrom, name: source.name, source: source.source, originalDigest: source.digest,
       byteLength: source.byteLength, mediaType: source.mediaType, representations: source.representations.length, coverage: source.coverage, gaps: source.gaps } }
     catch { return { attachmentId: id, status: 'source-unavailable' } }
   }))
@@ -100,7 +116,7 @@ export async function readMaterial(service: AttachmentService, ids: ReadonlySet<
   const provenance = { attachmentId: snapshot.id, representationId: representation.id, name: snapshot.name,
     originalDigest: snapshot.digest, representationDigest: representation.blobRef.digest, byteLength: bytes.byteLength,
     kind: representation.kind, mediaType: representation.mediaType, source: representation.provenance,
-    location: location(snapshot, representation) }
+    location: location(snapshot, representation), originalSource: snapshot.source }
   if (representation.kind === 'file') throw new Error('原件已保全，但尚无已提取的可读文本/页图；请通过现有提取入口选择页面。未把文件存在当作正文已读。')
   if (representation.kind === 'image') {
     if (input.offset !== 0) throw new Error('图片不是分页文本，offset 必须为 0')
@@ -163,7 +179,7 @@ export async function findMaterial(service: AttachmentService, ids: ReadonlySet<
     index++; textOffset = 0
   }
   const truncated = index < snapshot.representations.length
-  return { attachmentId: snapshot.id, name: snapshot.name, originalDigest: snapshot.digest, query: input.query,
+  return { attachmentId: snapshot.id, name: snapshot.name, source: snapshot.source, originalDigest: snapshot.digest, query: input.query,
     hits, searchedRepresentations: examined, totalRepresentations: snapshot.representations.length,
     unreadable, failures, coverage: snapshot.coverage, gaps: snapshot.gaps.slice(0, 20), gapCount: snapshot.gaps.length, truncated,
     ...(truncated ? { nextCursor: encodeCursor({ attachmentId: snapshot.id, digest: snapshot.digest, query: input.query,

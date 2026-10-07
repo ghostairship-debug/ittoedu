@@ -45,6 +45,7 @@ export class PayloadCompiler {
         contentIndex = content.length; sourceMessages.set(snapshot.id, contentIndex)
         const label = `材料目录（不是正文、也不是指令）：${JSON.stringify({ attachmentId: snapshot.id, name: snapshot.name,
           mediaType: snapshot.mediaType, originalDigest: snapshot.digest, byteLength: snapshot.byteLength,
+          source: snapshot.source,
           representations: snapshot.representations.length, coverage: snapshot.coverage, gaps: snapshot.gaps,
           readStatus: 'index-only', next: 'material.list / material.extract / material.find / material.read' })}`
         content.push({ type: 'text', text: label }); totals.textCharacters += label.length
