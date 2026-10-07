@@ -183,7 +183,7 @@ export default function App() {
       if (!current || current.epoch !== snapshot.epoch) throw new Error('恢复输入时文档已关闭或重开，原稿保留在本机')
       if (!records) return
       const result = courseDraftLifecycle(state.courseBridge).restore(documentId, records.advanced)
-      restorePropertiesDrafts(documentId, records.properties)
+      restorePropertiesDrafts(documentId, records.properties, current.epoch)
       if (result.issues.length) state.setError(result.issues[0]!.message)
     }).catch(error => { restoredDrafts.current.delete(key); throw error })
     restoredDrafts.current.set(key, pending)
