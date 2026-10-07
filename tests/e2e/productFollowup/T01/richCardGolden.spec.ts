@@ -64,7 +64,23 @@ test('actual rich card rewrites from material, preserves links formulas and neig
     await expect(paragraph).toBeVisible()
     // The browser creates the selection via real mouse/keyboard; no PM/controller/selection IPC injection.
     await paragraph.click({ clickCount: 3 }); await page.keyboard.press('Home'); await page.keyboard.press('Shift+End')
-    await frame.getByRole('button', { name: 'AI 修改', exact: true }).click()
+    const selected = await paragraph.evaluate(element => {
+      const selection = window.getSelection(), range = selection?.rangeCount ? selection.getRangeAt(0) : null
+      const fragment = range?.cloneContents()
+      return { text: selection?.toString(), collapsed: selection?.isCollapsed,
+        withinParagraph: Boolean(range && element.contains(range.startContainer) && element.contains(range.endContainer)),
+        links: [...(fragment?.querySelectorAll('a') ?? [])].map(node => node.getAttribute('href')),
+        formulaIds: [...(fragment?.querySelectorAll<HTMLElement>('[data-formula-id]') ?? [])].map(node => node.dataset.formulaId) }
+    })
+    facts.keyboardSelection = selected
+    expect(selected).toMatchObject({ collapsed: false, withinParagraph: true })
+    expect(selected.text).toContain('原说明')
+    expect(selected.links).toContain('https://example.org/source')
+    expect(selected.formulaIds).toContain('kept-formula')
+    // The mature quick bar is portaled to document.body, outside the course frame.
+    const quickBar = page.getByRole('toolbar', { name: '选中内容快捷工具', exact: true }).filter({ visible: true })
+    await expect(quickBar).toBeVisible()
+    await quickBar.getByRole('button', { name: 'AI 修改', exact: true }).click()
     const instruction = page.getByLabel('AI 修改要求', { exact: true }).filter({ visible: true })
     await instruction.fill('按本工作区资料.md改写所选整段，保链接与公式，完成后结束任务。')
     await instruction.locator('xpath=ancestor::form').getByRole('button', { name: '发送', exact: true }).click()
@@ -102,6 +118,14 @@ test('actual rich card rewrites from material, preserves links formulas and neig
     expect(serverErrors).toEqual([]); expect(pageErrors).toEqual([])
     facts.coldReopened = { documentId: cold.documentId, epoch: cold.epoch, preserved: true }
   } finally {
+    if (app) {
+      const currentPage = await app.firstWindow()
+      facts.finalSelectionDOM = await currentPage.evaluate(() => ({ selectedText: window.getSelection()?.toString(),
+        collapsed: window.getSelection()?.isCollapsed, toolbars: [...document.querySelectorAll<HTMLElement>('[role="toolbar"]')].map(node => ({
+          label: node.getAttribute('aria-label'), visible: Boolean(node.getClientRects().length) && getComputedStyle(node).visibility !== 'hidden',
+          buttons: [...node.querySelectorAll('button')].map(button => button.getAttribute('aria-label') ?? button.textContent) })) })).catch(error => ({ unavailable: String(error) }))
+      await info.attach('Rich GUI final observed UI', { body: await currentPage.screenshot(), contentType: 'image/png' })
+    }
     facts.requests = requests.map(value => ({ model: value.model, offeredTools: value.tools?.map((tool: any) => tool.function.name) }))
     facts.serverErrors = serverErrors; facts.pageErrors = pageErrors
     writeFileSync(join(directory, 'evidence.json'), JSON.stringify(facts, null, 2) + '\n')
