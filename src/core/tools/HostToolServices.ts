@@ -274,7 +274,9 @@ export class HostToolCoordinator {
   }
   async executeHtmlAction(runId: string, document: { documentId: string; epoch: string; revision: number },
     action: { name: HtmlActionToolName; input: unknown; operationId: string }): Promise<ToolResult> {
-    this.serviceRun(runId)
+    const run = this.serviceRun(runId)
+    if ((action.name === 'html.click' || action.name === 'html.input') && run.grant.fileAccess?.permission === 'read-only')
+      return { kind: 'error', code: 'not-authorized', message: '只读任务不能点击或输入 HTML 页面内容' }
     if (!this.services.htmlActions) return this.serviceUnavailable('HTML 页面操作服务尚未配置')
     const data = await this.services.htmlActions.execute(runId, document, action)
     const resourceId = (data as { image?: { resourceId?: string } })?.image?.resourceId

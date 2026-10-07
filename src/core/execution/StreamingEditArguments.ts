@@ -10,7 +10,7 @@ export interface StreamingEditArgumentsIdentity {
   readonly toolCallId: string
   readonly toolName: 'text.replace'
 }
-export interface TextReplaceArguments { target: string; content: string }
+export interface TextReplaceArguments { target?: string; content: string; format?: 'text' | 'html' }
 
 export class StreamingEditArgumentsError extends Error {
   constructor(readonly toolCallId: string, readonly code: string, message: string) {
@@ -82,14 +82,15 @@ class JsonString {
   }
 }
 
-/** Narrow incremental JSON grammar: one root object, two unique string-valued fields. */
+/** Incremental grammar follows the canonical text.replace string fields. */
 class ArgumentParser {
   target: string | undefined
   private contentValue: string | undefined
+  private formatValue: string | undefined
   private phase: 'root' | 'first-key' | 'key' | 'colon' | 'value' | 'separator' | 'done' = 'root'
-  private field: 'target' | 'content' | undefined
+  private field: 'target' | 'content' | 'format' | undefined
   private string: JsonString | undefined
-  private purpose: 'key' | 'target' | 'content' | undefined
+  private purpose: 'key' | 'target' | 'content' | 'format' | undefined
   private seen = new Set<string>()
 
   get complete(): boolean { return this.phase === 'done' }
@@ -105,13 +106,14 @@ class ArgumentParser {
         this.string = undefined; this.purpose = undefined
         if (purpose === 'key') {
           if (this.seen.has(value)) return invalid('duplicate-key', `编辑参数重复定义 ${value}`)
-          if (value !== 'target' && value !== 'content') return invalid('unexpected-field', '编辑参数只允许 target 与 content')
+          if (value !== 'target' && value !== 'content' && value !== 'format') return invalid('unexpected-field', '编辑参数只允许 target、content 与 format')
           this.seen.add(value); this.field = value; this.phase = 'colon'
         } else {
           if (purpose === 'target') {
             validateInput({ target: value, content: '' })
             this.target = value
-          } else this.contentValue = value
+          } else if (purpose === 'format') this.formatValue = value
+          else this.contentValue = value
           this.phase = 'separator'
         }
         continue
@@ -132,7 +134,7 @@ class ArgumentParser {
       } else if (this.phase === 'separator') {
         if (character === ',') this.phase = 'key'
         else if (character === '}') {
-          validateInput({ target: this.target, content: this.contentValue })
+          validateInput({ target: this.target, content: this.contentValue, format: this.formatValue })
           this.phase = 'done'
         } else return invalid('invalid-json', '编辑参数字段后需要逗号或对象结束符')
       } else return invalid('trailing-json', '编辑参数对象后存在多余内容')
@@ -142,7 +144,8 @@ class ArgumentParser {
   finish(): TextReplaceArguments {
     if (this.string) return this.string.unfinished()
     if (!this.complete) return invalid('incomplete-json', '编辑参数 JSON 尚未完整结束')
-    return validateInput({ target: this.target, content: this.contentValue })
+    return validateInput({ ...(this.target !== undefined ? { target: this.target } : {}), content: this.contentValue,
+      ...(this.formatValue !== undefined ? { format: this.formatValue } : {}) })
   }
 }
 

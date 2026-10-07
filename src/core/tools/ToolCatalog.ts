@@ -13,7 +13,7 @@ import bundledSkills from '../../shared/generated/bundledSkills.json'
 import { nativeContentInputSchemaByType } from '../../shared/contracts/native-v1/schema'
 import { z } from 'zod'
 import type { ModelToolCall, ToolDefinition, ToolResult } from '../../shared/workbench/tools'
-import { objectUpdateInputSchema } from './toolSchemas'
+import { objectUpdateInputSchema, objectConvertInputSchema } from './toolSchemas'
 import { componentFrameSchema } from '../../shared/contracts/component-platform/schema'
 import { handleToolTarget, hasRunDocument, hasRunWrite, projectToolTarget, registeredEffectNames,
   toolRegistrationFor, type ResolvedToolTarget, type RunToolScope, type ToolFamily, type ToolSupportContext, type ToolTargetResolver } from './ToolRegistration'
@@ -46,7 +46,7 @@ export const canonicalMutationTools = [
     inputSchema: z.object({ target: target.optional().describe('省略时使用本次文字卡由宿主固定的默认目标；其它任务必须提供。'), content: z.string(), format: z.enum(['text', 'html']).optional() }).strict(), manual: { label: '替换正文', group: 'edit', targetKinds: ['markdown-range', 'course-instance'] } },
   { capability: 'write', effect: 'document-edit', supports: context => hasRunWrite(context, ['markdown-range', 'course-instance']), targets: (input, resolver) => input.target ? handleToolTarget({ target: input.target }, resolver) : undefined,
     handler: (context, input) => context.mutate({ name: 'text.replace', input }) }),
-  registerCanonical({ name: 'object.update', description: '修改获授权整对象的公开属性。使用 target 句柄，或使用 project.list/read 返回的对象 path；project 可选，省略使用本任务课件。软件固定原实例和观察基线。Project V10 的 data 和 style 是对应字段完整值，implementation 是实例源码覆盖或 null 恢复默认；frame 可局部调整位置尺寸，无自由 frame 的正文不支持位置修改。文字专业格式位于 data.appearance。保留读取到的其余数据、文字、位置和身份，遵守锁定；精确文字范围不可扩大为整对象授权。',
+  registerCanonical({ name: 'object.update', description: '修改获授权整对象的公开属性。使用 target 句柄，或使用 project.list/read 返回的对象 path；project 可选。data/style 只修改提供字段，省略字段和人工位置保持；专业 appearance/style 等子记录可局部修改，数组和正文仍使用该字段完整值。implementation 是实例源码覆盖或 null 恢复默认，不能充当专业类型转换；frame 可局部调位置尺寸。文字范围授权不能扩大为整对象。',
     inputSchema: objectUpdateInputSchema, manual: { label: '修改属性', group: 'edit', targetKinds: ['course-instance'] } },
   { capability: 'write', effect: 'document-edit', family: 'layout', supports: context => hasRunWrite(context, ['course-instance'], 'course-v10'),
     targets: (input, resolver) => 'target' in input ? handleToolTarget(input, resolver) : projectToolTarget(input, resolver),
@@ -60,11 +60,16 @@ export const canonicalMutationTools = [
     manual: { label: '插入图片', group: 'edit', targetKinds: ['course-surface'] } },
   { capability: 'write', effect: 'document-edit', family: 'media', supports: context => hasRunWrite(context, ['course-surface'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'media.insert', input }) }),
+  registerCanonical({ name: 'object.convert', description: '将当前表格转换为可编辑专业图表，保留对象身份、位置、样式和其它对象。用已观察的 target 或 path，to=chart；chartType 可选 bar/line/area/pie/donut。categoryColumn/valueColumns 按列从1计数，默认首列类别、其余列数值。软件读取当前表格及声明表头、产生图表身份并一次提交；不要求复制原表格数据或内部编号。',
+    inputSchema: objectConvertInputSchema, manual: { label: '转换对象类型', group: 'edit', targetKinds: ['course-instance'] } },
+  { capability: 'write', effect: 'document-edit', family: 'layout', supports: context => hasRunWrite(context, ['course-instance'], 'course-v10'),
+    targets: (input, resolver) => 'target' in input ? handleToolTarget(input, resolver) : projectToolTarget(input, resolver),
+    handler: (context, input) => context.mutate({ name: 'object.convert', input }) }),
 ] as const
 export const projectApplyTool = projectFileRegistrations.find(tool => tool.name === 'project.apply')!
 export const canonicalToolRegistrations = [...canonicalMutationTools]
 export function canonicalToolRegistration(name: string) { return canonicalToolRegistrations.find(tool => tool.name === name) }
-const mutationSchemas = [canonicalMutationTools[0].callSchema, canonicalMutationTools[1].callSchema, canonicalMutationTools[2].callSchema, canonicalMutationTools[3].callSchema] as const
+const mutationSchemas = [canonicalMutationTools[0].callSchema, canonicalMutationTools[1].callSchema, canonicalMutationTools[2].callSchema, canonicalMutationTools[3].callSchema, canonicalMutationTools[4].callSchema] as const
 export const mutationCallSchema = z.discriminatedUnion('name', mutationSchemas)
 export type MutationCall = z.infer<typeof mutationCallSchema>
 export const batchMutationCallSchema = mutationCallSchema
@@ -129,7 +134,7 @@ export function describeToolFamily(family: ToolFamily, allowedNames: readonly st
 }
 export function familyOfTool(name: string): ToolFamily | null { return toolRegistration(name)?.family ?? null }
 export function visibleRunToolNames(allowed: readonly string[], loadedFamilies: ReadonlySet<ToolFamily>): string[] {
-  const coreFamilies = new Set<ToolFamily>(['content', 'layout'])
+  const coreFamilies = new Set<ToolFamily>(['content', 'layout', 'navigation', 'interaction', 'media', 'build', 'jobs'])
   const direct = allowed.filter(name => name !== 'batch' && (!familyOfTool(name) || coreFamilies.has(familyOfTool(name)!) || loadedFamilies.has(familyOfTool(name)!)))
   const canBatch = allowed.includes('batch') && mutationNamesIn(direct).length > 0
   return allowed.filter(name => direct.includes(name) || name === 'batch' && canBatch)

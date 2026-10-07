@@ -302,7 +302,6 @@ let htmlPreviewClosedCleanup: (() => void) | undefined
 export function releaseAllHtmlPreviewLeases(): void { htmlPreview?.releaseAll() }
 let detachExternalMcpWindow: (() => void) | undefined
 export function registerIpcHandlers(context: IpcContext): void {
-  let htmlActionsReady: Promise<void> | undefined
   installWorkbenchToolServices(context)
   ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildProgress)
   ipcMain.on(IPC_CHANNELS.documentExportBuildProgress, (event: IpcMainEvent, raw: unknown) => {
@@ -383,7 +382,6 @@ export function registerIpcHandlers(context: IpcContext): void {
     // The service maps its own failures to specific reasons; this is left for a service that could not be reached.
     code: 'EXECUTION_FAILED', title: '会话操作未完成', message: '会话服务暂时不可用。', suggestion: '请重试；若仍失败，请重新启动编辑器。当前输入和已应用的修改已保留。',
   }, async (_event, args) => {
-    await htmlActionsReady
     const service = await executionDesktopService()
     const input = requireSingleArgument(args)
     if (input && typeof input === 'object' && (input as { type?: unknown }).type === 'delete-conversation') await imageResultsReady
@@ -437,12 +435,6 @@ export function registerIpcHandlers(context: IpcContext): void {
     preview.releaseComponentBootstrap(input.leaseId, previewNetworkDocumentOwner(event, input.documentToken))
   })
   setWorkbenchHtmlPreview(preview)
-  htmlActionsReady = executionDesktopService().then(service => {
-    if (generation !== workspaceFileEventGeneration) return
-    service.setHtmlActions(workbenchHtmlActions())
-  })
-  void htmlActionsReady.catch(error => diagnosticLog.append({ source: 'main', message: 'HTML 页面操作服务未能启动',
-    details: { reason: error instanceof Error ? error.message : String(error) } }))
   setHtmlPreviewProtocolHandler(preview.handleProtocolRequest)
   const stopPreviewClosed = documents.subscribeClosed(documentId => { preview.releaseDocument(documentId); releaseWorkbenchHtmlDocument(documentId) })
   htmlPreviewClosedCleanup = () => { stopPreviewClosed() }

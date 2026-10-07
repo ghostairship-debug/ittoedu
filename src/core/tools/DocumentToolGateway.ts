@@ -15,7 +15,7 @@ import { DocumentRegistry } from '../documents/DocumentRegistry'
 import { documentDigest } from '../documents/documentDigest'
 import { batchInputSchemaFor, canonicalToolRegistration, describeToolFamily, describeTools, familyOfTool, gatewayToolRegistration, mutationCallSchema, mutationNamesIn, selectRunToolNames, toolCatalog, toolEffectTargets, toolFamilies, toolRegistration, visibleRunToolNames, type BatchMutationCall, type RunToolScope, type ToolFamily } from './ToolCatalog'
 import { childTargets, containsTarget, courseInstanceContext, courseInstanceTextTarget, mapMarkdownRange, readTarget, targetFootprint, replaceCourseInstanceText, readCourseInstanceText, sliceCourseInstanceText, isCourseInstanceRange, readEditableTargetContent } from './ToolTargets'
-import { courseInstancePropertyEdits } from './courseInstanceEdits'
+import { courseInstancePropertyEdits, courseInstanceConversionEdits } from './courseInstanceEdits'
 import { captureComponentOperation, componentValueAt, presentationComponentEdits, componentFieldIdentityPaths, equalComponentValue } from '../drivers/courseV10Operations'
 import { imageDataSchema } from '../../components/image/data'
 import type { ComponentEdit, ComponentExpectation, ComponentOperationBatch } from '../../shared/contracts/component-platform/operations'
@@ -1264,9 +1264,13 @@ export class DocumentToolGateway implements ToolGateway {
           inserted: Array.from(mutation.input.content).length } : null
         const textFormat = mutation.name === 'text.replace'
           ? mutation.input.format ?? (readEditableTargetContent(model, target).format === 'html' ? 'html' : 'text') : undefined
-        const edits = mutation.name === 'text.replace' ? [replaceCourseInstanceText(model, target, mutation.input.content, textFormat)]
-          : mutation.name === 'object.update' ? courseInstancePropertyEdits(model, target, mutation.input.properties)
-            : null
+        let edits: ComponentEdit[] | null
+        if (mutation.name === 'text.replace') {
+          try { edits = [replaceCourseInstanceText(model, target, mutation.input.content, textFormat)] }
+          catch (error) { throw new ToolError('invalid-content', error instanceof Error ? error.message : String(error),
+            { documentId: snapshot.documentId, revision: snapshot.revision, currentContent: readEditableTargetContent(model, target) }) }
+        } else edits = mutation.name === 'object.update' ? courseInstancePropertyEdits(model, target, mutation.input.properties)
+          : mutation.name === 'object.convert' ? courseInstanceConversionEdits(model, target, mutation.input) : null
         if (!edits) throw new ToolError('unsupported-operation', '此 V10 对象工具尚不支持当前修改')
         if (mutation.name === 'text.replace' && textFormat !== 'html' && textBefore !== null) {
           const selected = target.from !== undefined && target.to !== undefined
