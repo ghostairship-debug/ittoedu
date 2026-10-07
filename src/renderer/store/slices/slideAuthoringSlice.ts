@@ -15,6 +15,7 @@ import { authorSpotEdits, dataWithSpotEdit } from '../../componentPlatform/surfa
 import { registerCourseDraftProvider } from '../../authoring/courseDraftLifecycle'
 import { equalComponentValue } from '../../../core/drivers/courseV10Operations'
 import { resolveComponentPresentation } from '../../../shared/contracts/component-platform'
+import { flushPropertiesDrafts } from '../../ui/properties/PropertyControls'
 
 export interface SlideContentEdit {
   instanceId: string
@@ -111,10 +112,23 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
     const value = JSON.stringify(frame) === JSON.stringify(original) ? undefined : structuredClone(frame)
     if (JSON.stringify(value) !== JSON.stringify(edit.frame)) ports.patch({ slideContentEdit: { ...edit, frame: value } })
   }
-  const beginSlideSpotEdit = (spot: ComponentAuthorSpot, target = kernel.captureTarget()) => {
+  const beginSlideSpotEdit = async (spot: ComponentAuthorSpot, captured = kernel.captureTarget(), readCurrentSpot?: () => ComponentAuthorSpot | undefined) => {
     if (typeof spot.initialValue !== 'string') { report('请使用此对象的专业内容编辑器'); return null }
     const previous = ports.read().slideContentEdit
     if (previous) { report('请先完成当前文字编辑'); return null }
+    if (!await flushPropertiesDrafts(captured.documentId)) { report('属性编辑尚未完成，当前输入已保留'); return null }
+    if (ports.read().slideContentEdit) { report('请先完成当前文字编辑'); return null }
+    const target = kernel.captureTarget(captured.documentId)
+    if (kernel.readView().activeDocumentId !== captured.documentId || target.epoch !== captured.epoch
+      || target.surfaceId !== captured.surfaceId || target.activeStateId !== captured.activeStateId) {
+      report('原编辑目标已变化，请重新选择'); return null
+    }
+    if (readCurrentSpot) {
+      const current = readCurrentSpot()
+      if (!current) { report('原画面字段已更新，请重新选择'); return null }
+      spot = current
+    }
+    if (typeof spot.initialValue !== 'string') { report('请使用此对象的专业内容编辑器'); return null }
     const instance = target.editingProject.instances[spot.instanceId]
     if (!instance || componentIsLocked(target.editingProject, spot.instanceId)) return null
     try { authorSpotEdits(target.editingProject, spot, spot.initialValue, target.resources) } catch (error) { report(error); return null }

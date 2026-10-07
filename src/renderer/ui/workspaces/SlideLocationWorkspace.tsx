@@ -62,7 +62,7 @@ export interface SlideWorkspacePorts {
   paste(): void
   selectAll(): void
   beginTextEdit(id: string): SlideContentEdit | null
-  beginSpotEdit?(spot: ComponentAuthorSpot, target?: CapturedCourseTarget): SlideContentEdit | null
+  beginSpotEdit?(spot: ComponentAuthorSpot, target?: CapturedCourseTarget): Promise<SlideContentEdit | null>
   updateSpotDraft?(value: string, composing?: boolean): void
   authorSpots?(): readonly ComponentAuthorSpot[]
   subscribeAuthorSpots?(listener: () => void): () => void
@@ -291,7 +291,10 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         if (latest.current.ports.beginTextEdit(id)) event.preventDefault()
       } else {
         const spot = latest.current.ports.authorSpots?.().find(value => value.instanceId === id && value.kind === 'text' && typeof value.initialValue === 'string')
-        if (spot && latest.current.ports.beginSpotEdit?.(spot)) event.preventDefault()
+        if (spot && latest.current.ports.beginSpotEdit) {
+          event.preventDefault()
+          void latest.current.ports.beginSpotEdit(spot).catch(error => latest.current.ports.report(String(error)))
+        }
       }
     }
     root.addEventListener(OBJECT_EDIT_EVENT, edit)
@@ -309,11 +312,13 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         hittable: true, locked: componentIsLocked(project!, target.instanceId) }
     }), exclude, canvas), scale, disabled).point
   const spotAt = (at: GeometryPoint) => [...spotTargets].reverse().find(value => frameContainsPoint(value.frame, at))?.spot
-  const beginSpot = (spot: ComponentAuthorSpot, at: GeometryPoint, client: GeometryPoint, captured?: CapturedCourseTarget): boolean => {
+  const beginSpot = async (spot: ComponentAuthorSpot, at: GeometryPoint, client: GeometryPoint, captured?: CapturedCourseTarget): Promise<boolean> => {
     if (spot.kind !== 'text') return false
-    const opened = typeof spot.initialValue === 'string' ? Boolean(ports.beginSpotEdit?.(spot, captured)) : nativeText.begin(spot.instanceId, at, client)
-    if (opened) ports.select([spot.instanceId])
-    return opened
+    try {
+      const opened = typeof spot.initialValue === 'string' ? Boolean(await ports.beginSpotEdit?.(spot, captured)) : nativeText.begin(spot.instanceId, at, client)
+      if (opened) ports.select([spot.instanceId])
+      return opened
+    } catch (error) { ports.report(String(error)); return false }
   }
   const replaceSpot = async (spot: ComponentAuthorSpot, target = ports.capture()) => {
     if (componentIsLocked(target.editingProject, spot.instanceId)) return
@@ -612,9 +617,10 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
     onDoubleClickCapture={event => {
       if (outsideStage(event.target) || snapshot.canvasMode !== 'edit' || snapshot.contentEdit || snapshot.drawTool) return
       const at = surfacePoint(event.clientX, event.clientY), client = { x: event.clientX, y: event.clientY }, spot = spotAt(at)
-      if (spot && (spot.kind === 'image' || beginSpot(spot, at, client))) {
+      if (spot) {
         event.preventDefault(); event.stopPropagation()
         if (spot.kind === 'image') void replaceSpot(spot)
+        else void beginSpot(spot, at, client).catch(error => ports.report(String(error)))
         return
       }
       const hit = hitFreeObject(listSlideWorkspaceHitTargets(state()), at, true)

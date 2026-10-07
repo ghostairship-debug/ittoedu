@@ -69,7 +69,10 @@ export function SlideWorkspaceConnector(props: SlideWorkspaceConnectorProps) {
       setDrawTool: tool => state().setSlideDrawTool(tool),
       paste: () => { safe(state().pasteNodes()) }, selectAll: () => state().selectAllNodes(),
       beginTextEdit: id => state().beginSlideDataEdit(id),
-      beginSpotEdit: (spot, target) => state().beginSlideSpotEdit(spot, target),
+      beginSpotEdit: (spot, target) => state().beginSlideSpotEdit(spot, target, () => runtime.world.authorSpots().find(current =>
+        current.instanceId === spot.instanceId && current.kind === spot.kind
+        && (spot.authorKey ? current.authorKey === spot.authorKey && JSON.stringify(current.scope ?? {}) === JSON.stringify(spot.scope ?? {})
+          : current.id === spot.id && current.mountGeneration === spot.mountGeneration))),
       updateSpotDraft: (value, composing) => state().updateSlideSpotDraft(value, composing),
       authorSpots: () => runtime.world.authorSpots(), subscribeAuthorSpots: runtime.world.subscribeAuthorSpots,
       previewAuthorSpot: (id, geometry) => runtime.world.previewAuthorSpot(id, geometry),

@@ -8,7 +8,10 @@ import { createEditorStoreKernel } from '../../src/renderer/store/editorStoreKer
 import { createInitialSlideOwnedState, createSlideAuthoringSlice } from '../../src/renderer/store/slices/slideAuthoringSlice'
 import { SlideLocationWorkspace, type SlideWorkspacePorts } from '../../src/renderer/ui/workspaces/SlideLocationWorkspace'
 import { createTextData, textComponentDataSchema, TEXT_DEFINITION } from '../../src/components/text'
-import { TextContentTextarea } from '../../src/renderer/ui/properties/PropertyControls'
+import { TextContentTextarea, PropertyDraftBoundary, hasPropertiesDrafts, discardPropertiesDrafts } from '../../src/renderer/ui/properties/PropertyControls'
+import { ChartProperties } from '../../src/renderer/ui/properties/ChartProperties'
+import { createChartData, CHART_DEFINITION } from '../../src/components/chart'
+import type { ChartCandidateData } from '../../src/renderer/course/chartContentOperations'
 import { defaultShapeData, SHAPE_DEFINITION } from '../../src/components/shape'
 import type { ComponentAuthorSpot, CourseProjectV10 } from '../../src/shared/contracts/component-platform'
 import { authorSpotEdit, authorSpotImageEdits } from '../../src/renderer/componentPlatform/surfaces/slide/authorSpots'
@@ -69,7 +72,7 @@ it('anchors the quick bar to the clicked internal author target so ordinary doub
   const ports: SlideWorkspacePorts = {
     read: () => { const v = h.bridge.read(); return { project: v.editingProject, documentId: v.activeDocumentId, surfaceId: v.surfaceId, selectedInstanceIds: v.selectedInstanceIds,
       activation: v.activation, activeStateId: v.activeStateId, assetUrls: {}, canvasMode: 'edit', contentEdit: null, drawTool: null } },
-    authorSpots: () => [spot], beginSpotEdit: () => { open(); return {} as never },
+    authorSpots: () => [spot], beginSpotEdit: async () => { open(); return {} as never },
     capture: () => kernel.captureTarget(), commit: async () => {}, edit: async () => {}, select: ids => kernel.selectInstances(ids), selectSurface() {},
     setCanvasMode() {}, setDrawTool() {}, report() {}, paste() {}, selectAll() {}, beginTextEdit: () => null, updateDataDraft() {}, commitTextEdit: async () => {}, cancelTextEdit() {},
     undo() {}, redo() {}, onElement() {}, onTargetElement() {}, addTextNode() {}, addFormulaNode() {}, addRectangleNode() {}, addShapeNode() {}, addTableNode() {}, addChartNode() {}, addExternalComponentNode() {}, drawShapeNode() {},
@@ -82,13 +85,52 @@ it('anchors the quick bar to the clicked internal author target so ordinary doub
     expect(anchor.left).toBeCloseTo(373.82); expect(anchor.top).toBeCloseTo(233.99); expect(anchor.width).toBeCloseTo(48.24); expect(anchor.height).toBeCloseTo(24.09)
     const bar = placeQuickBar(anchor, { left: 235, top: 212.53, right: 980, bottom: 680 }, { width: 201.52, height: 34 }, 8, 34)
     expect(bar.placement).toBe('below'); expect(bar.top).toBeGreaterThan(anchor.top + anchor.height)
-    fireEvent.doubleClick(workspace, { clientX: x, clientY: y }); expect(open).toHaveBeenCalledTimes(1)
+    await act(async () => { fireEvent.doubleClick(workspace, { clientX: x, clientY: y }) }); expect(open).toHaveBeenCalledTimes(1)
     expect(h.first.read().undoDepth).toBe(0); expect(h.bridge.read().project).toEqual(project)
   } finally {
     cleanup(); h.bridge.dispose(); if (capture) Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', capture); else delete (HTMLElement.prototype as Partial<HTMLElement>).setPointerCapture
     if (release) Object.defineProperty(HTMLElement.prototype, 'releasePointerCapture', release); else delete (HTMLElement.prototype as Partial<HTMLElement>).releasePointerCapture
     vi.restoreAllMocks(); vi.unstubAllGlobals()
   }
+})
+it('retains invalid Chart property input and refuses to open a different canvas author field', async () => {
+  const project = fixture(), source = '// 原文字'
+  project.definitions.custom = { id: 'custom', role: 'content', implementation: { kind: 'source', language: 'javascript', source } }
+  project.instances.custom = { id: 'custom', definitionId: 'custom', data: {}, frame: { width: 300, height: 160, transform: [1, 0, 0, 1, 280, 180] } }
+  project.surfaces[0].childIds.push('custom')
+  const chart = createChartData()
+  project.definitions[CHART_DEFINITION.id] = CHART_DEFINITION
+  project.instances.chart = { id: 'chart', definitionId: CHART_DEFINITION.id, data: JSON.parse(JSON.stringify(chart)), frame: { width: 320, height: 200, transform: [1, 0, 0, 1, 0, 0] } }
+  project.surfaces[0].childIds.push('chart')
+  const h = await host(project), kernel = createEditorStoreKernel({ bridge: h.bridge, commit() {} })
+  let owned = createInitialSlideOwnedState()
+  const slice = createSlideAuthoringSlice(kernel, { read: () => owned, patch: patch => { owned = { ...owned, ...patch } } })
+  const spot: ComponentAuthorSpot = { id: 'registered-text', instanceId: 'custom', mountGeneration: 1, kind: 'text', initialValue: '原文字',
+    sourceRegion: { kind: 'implementation', start: source.indexOf('原文字'), end: source.length }, localBounds: { width: 180, height: 40, transform: [1, 0, 0, 1, 10, 20] } }
+  const current = vi.fn(() => spot), captured = kernel.captureTarget()
+  const commit = vi.fn(async (candidate: ChartCandidateData) => {
+    const data = structuredClone(chart); data.series[0].points[0].value = candidate.series[0].values[0]
+    await kernel.edit([{ type: 'data.set', instanceId: 'chart', path: [], value: JSON.parse(JSON.stringify(data)) }]); return null
+  })
+  try {
+    render(<PropertyDraftBoundary bindingKey={JSON.stringify([captured.documentId, captured.epoch, 'chart'])} onStale={() => {}}>
+      <ChartProperties bindingKey={JSON.stringify([captured.documentId, captured.epoch, 'chart'])} node={{ id: 'chart', type: 'chart', ...chart }} commands={{ patchTitle() {}, patchType() {}, patchStyle() {}, commitTableData: commit }}/>
+    </PropertyDraftBoundary>)
+    const input = screen.getByLabelText('系列一 在 甲 的值')
+    fireEvent.focus(input); fireEvent.change(input, { target: { value: 'not-a-number' } })
+    await act(async () => { expect(await slice.beginSlideSpotEdit(spot, captured, current)).toBeNull() })
+    expect(input).toHaveValue('not-a-number'); expect(hasPropertiesDrafts(captured.documentId)).toBe(true)
+    expect(owned.slideContentEdit).toBeNull(); expect(current).not.toHaveBeenCalled(); expect(commit).not.toHaveBeenCalled()
+    expect(h.first.read().undoDepth).toBe(0); expect(h.bridge.read().project).toEqual(project)
+    fireEvent.change(input, { target: { value: '21' } })
+    await act(async () => {
+      const opened = await slice.beginSlideSpotEdit(spot, captured, current)
+      expect(opened?.target.project.revision).toBe(1)
+      expect(opened?.target.project.instances.chart.data).toMatchObject({ series: [{ points: [{ value: 21 }, { value: 35 }] }] })
+    })
+    expect(current).toHaveBeenCalledTimes(1); expect(commit).toHaveBeenCalledTimes(1)
+    expect(h.first.read().undoDepth).toBe(1)
+  } finally { cleanup(); discardPropertiesDrafts(captured.documentId); h.bridge.dispose() }
 })
 it('commits registered spot drafts once and preserves source frames and replacement resources', async () => {
   const project = fixture(), source = 'export default {mount(){return {update(){},dispose(){}}}}; // 原文字'
@@ -103,7 +145,7 @@ it('commits registered spot drafts once and preserves source frames and replacem
     sourceRegion: { kind: 'implementation', start: source.indexOf('原文字'), end: source.length },
     localBounds: { width: 180, height: 40, transform: [1, 0, 0, 1, 10, 20] } }
   try {
-    expect(slice.beginSlideSpotEdit(spot)).not.toBeNull()
+    expect(await slice.beginSlideSpotEdit(spot)).not.toBeNull()
     slice.updateSlideSpotDraft('局部修订', false)
     const commit = slice.commitSlideContentEdit()
     expect(slice.commitSlideContentEdit()).toBe(commit)
@@ -418,4 +460,6 @@ it('reframes a Slide line endpoint in affine space as one undoable saved edit', 
     expect(h.bridge.read().project!.instances.shape).toEqual(project.instances.shape)
   } finally { h.bridge.dispose() }
 })
+
+
 
