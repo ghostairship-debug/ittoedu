@@ -1,0 +1,223 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "catalogVersion": {
+      "type": "number",
+      "const": 1
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "packages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "packageId": {
+            "type": "string",
+            "minLength": 3,
+            "maxLength": 200,
+            "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)+$"
+          },
+          "version": {
+            "type": "string",
+            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-(?:0|[1-9]\\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?$"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "subject": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "schoolStage": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "category": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "packagePath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "thumbnailPath": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "componentSchemaVersion": {
+            "type": "number",
+            "const": 1
+          },
+          "runtimeApiVersion": {
+            "type": "number",
+            "const": 5
+          },
+          "renderMode": {
+            "type": "string",
+            "enum": [
+              "dom",
+              "phaser",
+              "hybrid"
+            ]
+          },
+          "supportedScopes": {
+            "minItems": 1,
+            "maxItems": 2,
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "scene",
+                "global"
+              ]
+            }
+          },
+          "quality": {
+            "type": "string",
+            "enum": [
+              "experimental",
+              "candidate",
+              "stable",
+              "deprecated"
+            ]
+          },
+          "maintainer": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "verifiedCases": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          },
+          "verifiedAt": {
+            "type": "string",
+            "format": "date-time",
+            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+          },
+          "source": {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "repository",
+                  "handoff",
+                  "local"
+                ]
+              },
+              "reference": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "kind",
+              "reference"
+            ],
+            "additionalProperties": false
+          },
+          "license": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "declared",
+                  "unknown"
+                ]
+              },
+              "expression": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "reference": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              }
+            },
+            "required": [
+              "status"
+            ],
+            "additionalProperties": false
+          },
+          "releaseBlockers": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          }
+        },
+        "required": [
+          "packageId",
+          "version",
+          "name",
+          "description",
+          "subject",
+          "schoolStage",
+          "tags",
+          "packagePath",
+          "thumbnailPath",
+          "sha256",
+          "componentSchemaVersion",
+          "runtimeApiVersion",
+          "renderMode",
+          "supportedScopes",
+          "quality",
+          "maintainer",
+          "verifiedCases"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "catalogVersion",
+    "packages"
+  ],
+  "additionalProperties": false
+}
