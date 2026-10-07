@@ -223,10 +223,14 @@ export class ImageResultsDesktopService {
     if (input.type === 'edit') {
       action.childJobId = `image-edit:${input.actionId}`
       await this.store(action)
-      const selection = await this.options.selection(action.runId, 'edit')
-      await this.options.images.editFromResult({ jobId: action.childJobId, runId: action.runId, documentId: view.job.documentId,
-        prompt: input.prompt, selection }, { jobId: view.job.jobId, runId: view.job.runId, resourceId: input.resourceId })
-      return this.read({ ...input, runId: action.runId, jobId: action.childJobId })
+      // Freeze the human action's existing image roles without inventing a course document.
+      await gateway.beginRun({ runId: action.runId, actor: 'human', documents: [] }); this.liveRuns.add(action.runId)
+      try {
+        const selection = await this.options.selection(action.runId, 'edit')
+        await this.options.images.editFromResult({ jobId: action.childJobId, runId: action.runId, documentId: view.job.documentId,
+          prompt: input.prompt, selection }, { jobId: view.job.jobId, runId: view.job.runId, resourceId: input.resourceId })
+        return this.read({ ...input, runId: action.runId, jobId: action.childJobId })
+      } finally { await gateway.stop(action.runId).catch(error => this.report(error)) }
     }
     const documentId = input.target.documentId
     const current = await this.options.documents.registry.get(documentId).drain()

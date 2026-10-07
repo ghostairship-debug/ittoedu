@@ -8,6 +8,9 @@ import { ImageResultsDesktopService, type ImageResultsDesktopOptions } from '../
 import { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
 import type { ImageProviderPort } from '../../src/main/workbench/images/ImageProviderPort'
 import { imageProvenance } from '../../src/main/workbench/images/imageRoute'
+import { frozenImageRoles } from '../../src/main/workbench/images/frozenImageRoles'
+import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
+import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { documentDigest } from '../../src/core/documents/documentDigest'
 import type { ImageJobSnapshot, ImageModelSelection } from '../../src/shared/workbench/images'
 import type { ImageResultView } from '../../src/shared/workbench/imageResultsDesktop'
@@ -63,9 +66,15 @@ it('edits an owned workspace result through the existing image service without r
   const images = new ImageGenerationService({ directory: path.join(directory, 'images'), provider: { generate: provider } })
   const generated = await images.run({ jobId: owner.jobId, runId: owner.runId, documentId,
     operation: 'generate', prompt: 'controlled parent', selection })
-  const documentLookup = vi.fn(() => { throw new Error('A result card must not require a course document') })
-  const options = { directory: path.join(directory, 'actions'), images, selection: async () => selection,
-    documents: { registry: { get: documentLookup } },
+  const registry = new DocumentRegistry({ drivers: [], createId: () => crypto.randomUUID(), bindingKey: binding => binding.path,
+    persistence: { async append() { throw new Error('No document write') }, async save() { throw new Error('No document save') } } })
+  const documentLookup = vi.spyOn(registry, 'get')
+  const roles = frozenImageRoles(async role => ({ role, profileRevision: 1, profileUpdatedAt: '',
+    connection: selection.connection, model: selection.imageModel, parameters: {} }))
+  const gateway = new DocumentToolGateway(registry, [], () => crypto.randomUUID(),
+    { services: { beginRun: grant => roles.beginRun(grant.runId, grant.disclosedSettings) } })
+  const options = { directory: path.join(directory, 'actions'), images, selection: roles.selection,
+    documents: { registry, tools: gateway },
     execution: { conversations: {
       readConversation: async ({ workspaceId, conversationId }: { workspaceId: string; conversationId: string }) =>
         workspaceId === owner.workspaceId && conversationId === owner.conversationId
