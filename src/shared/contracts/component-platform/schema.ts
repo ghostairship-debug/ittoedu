@@ -68,6 +68,7 @@ export const componentPresentationSchema = z.object({
   states: z.array(z.object({ id, title: z.string(), overrides: z.record(z.string(), z.object({
     data: jsonValueSchema.optional(), style: z.record(z.string(), jsonValueSchema).optional(),
     frame: componentFrameSchema.nullable().optional(), visible: z.boolean().optional(),
+    playbackInitialVisibility: z.enum(['inherit', 'hidden']).optional(),
   }).strict()), order: z.array(id).optional(), background: componentBackgroundSchema.optional() }).strict()),
   initialStateId: id.nullable().optional(), thumbnailStateId: id.nullable().optional(),
 }).strict().superRefine((presentation, context) => {

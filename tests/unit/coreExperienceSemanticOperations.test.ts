@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
-import { applyComponentOperation, captureComponentOperation, resizeComponentSurfacesEdits } from '../../src/core/drivers/courseV10Operations'
+import { applyComponentOperation, captureComponentOperation, presentationComponentEdits, resizeComponentSurfacesEdits } from '../../src/core/drivers/courseV10Operations'
 import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { DocumentSession } from '../../src/core/documents/DocumentSession'
 import { prepareCourseObjectPaste } from '../../src/renderer/composition/crossSurfaceCommands'
@@ -90,6 +90,19 @@ it('keeps professional presentation and field metadata for source-customized def
   const definition = { ...WEB_DEFINITION, implementation: { kind: 'source' as const, language: 'javascript' as const, source: 'export default {}' }, professionalBuiltinKey: 'guoling.web', dataSchema: {} as JsonObject }
   expect(componentDefinitionPresentation(definition).builtinKey).toBe('guoling.web')
   expect(componentFieldPresentation(definition, ['html']).label).toBe('HTML 内容')
+})
+
+it('keeps pre-playback visibility in the captured named state through normal save and reopen', () => {
+  const project = fixture(), surfaceId = project.surfaces[0].id
+  project.surfaces[0].presentation = { states: [{ id: 'a', title: 'A', overrides: {} }, { id: 'b', title: 'B', overrides: {} }] }
+  const edits = presentationComponentEdits(project, surfaceId, 'b', [{ type: 'instance.patch', instanceId: 'a', patch: { playbackInitialVisibility: 'hidden' } }])
+  const result = applyComponentOperation(project, captureComponentOperation(project, edits))
+  expect(result.instances.a.playbackInitialVisibility).toBeUndefined()
+  expect(resolveComponentPresentation(result, surfaceId, 'a').instances.a.playbackInitialVisibility).toBeUndefined()
+  expect(resolveComponentPresentation(result, surfaceId, 'b').instances.a.playbackInitialVisibility).toBe('hidden')
+  const driver = new CourseV10Driver(), reopened = driver.load(driver.serialize({ kind: 'course-v10', project: result, resources: { assets: {}, components: {} } }))
+  if (reopened.kind !== 'course-v10') throw new Error('Expected V10')
+  expect(reopened.project.surfaces[0].presentation?.states[1].overrides.a).toEqual({ playbackInitialVisibility: 'hidden' })
 })
 
 it('preserves authored coordinates by default and explicitly refits each page, state and shared branch once', () => {

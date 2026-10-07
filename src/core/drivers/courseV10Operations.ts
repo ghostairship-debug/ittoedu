@@ -349,7 +349,7 @@ export function presentationComponentEdits(project: CourseProjectV10, surfaceId:
     if (!(edit.type === 'data.set' || edit.type === 'style.set' || edit.type === 'frame.set' || edit.type === 'instance.patch') || !project.instances[edit.instanceId]) {
       result.push(edit); continue
     }
-    if (edit.type === 'instance.patch' && edit.patch.visible === undefined) { result.push(edit); continue }
+    if (edit.type === 'instance.patch' && edit.patch.visible === undefined && edit.patch.playbackInitialVisibility === undefined) { result.push(edit); continue }
     let owner = owningContainer(project, edit.instanceId)
     while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
     if (owner?.kind !== 'surface' || owner.surfaceId !== surfaceId) { result.push(edit); continue }
@@ -364,8 +364,9 @@ export function presentationComponentEdits(project: CourseProjectV10, surfaceId:
       } else { override.style ??= structuredClone(effective.instances[edit.instanceId].style ?? {}); writeField(override.style, edit.path, edit.value) }
     } else if (edit.type === 'frame.set') override.frame = structuredClone(edit.frame)
     else {
-      override.visible = edit.patch.visible
-      const { visible: _visible, ...patch } = edit.patch
+      if (edit.patch.visible !== undefined) override.visible = edit.patch.visible
+      if (edit.patch.playbackInitialVisibility !== undefined) override.playbackInitialVisibility = edit.patch.playbackInitialVisibility
+      const { visible: _visible, playbackInitialVisibility: _initialVisibility, ...patch } = edit.patch
       if (Object.keys(patch).length) result.push({ ...edit, patch })
     }
     changed = true

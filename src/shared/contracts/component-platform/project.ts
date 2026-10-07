@@ -89,7 +89,7 @@ export interface ComponentFlowAuthoring {
 export interface ComponentPresentationState {
   id: string
   title: string
-  overrides: Record<string, { data?: JsonValue; style?: JsonObject; frame?: ComponentFrame | null; visible?: boolean }>
+  overrides: Record<string, { data?: JsonValue; style?: JsonObject; frame?: ComponentFrame | null; visible?: boolean; playbackInitialVisibility?: 'inherit' | 'hidden' }>
   /** Display order only; the surface childIds remains the ownership relation. */
   order?: string[]
   background?: ComponentBackground
