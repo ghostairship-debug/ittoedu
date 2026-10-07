@@ -440,22 +440,29 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     return { x: paperBox && contentBox ? (paperBox.left - contentBox.left) / scale : 0,
       y: paperBox && contentBox ? (paperBox.top - contentBox.top) / scale : 0 }
   }
-  const beginRegisteredSpot = useCallback((instanceId: string, point: { x: number; y: number }, generation?: number) => {
+  const beginRegisteredSpot = useCallback(async (instanceId: string, point: { x: number; y: number }, generation?: number) => {
     if (readOnly || !project.instances[instanceId]) return false
     const spot = [...runtime.world.authorSpots()].reverse().find(value => value.instanceId === instanceId && value.kind === 'text'
       && typeof value.initialValue === 'string' && (generation === undefined || value.mountGeneration === generation) && frameContainsPoint(value.localBounds, point))
     if (!spot) return false
     const target = bridge.captureTarget(documentId)
-    if (!beginSpotEdit(spot, { ...target, instanceId, instanceIds: [instanceId] })) return false
+    const readCurrentSpot = () => {
+      const current = runtime.world.authorSpots()
+      return current.find(value => value.id === spot.id && value.mountGeneration === spot.mountGeneration)
+        ?? current.find(value => value.instanceId === spot.instanceId && value.kind === spot.kind
+          && (spot.authorKey ? value.authorKey === spot.authorKey && JSON.stringify(value.scope ?? {}) === JSON.stringify(spot.scope ?? {})
+            : spot.dataPath ? JSON.stringify(value.dataPath) === JSON.stringify(spot.dataPath) : false))
+    }
+    if (!await beginSpotEdit(spot, { ...target, instanceId, instanceIds: [instanceId] }, readCurrentSpot)) return false
     runtime.selectInstances([instanceId], surfaceId)
     return true
   }, [readOnly, project, runtime.world, runtime.selectInstances, bridge, documentId, surfaceId, beginSpotEdit])
   useEffect(() => {
     const root = workspace.current
     if (!root) return
-    const open = (event: Event) => {
+    const open = async (event: Event) => {
       const request = (event as CustomEvent<{ instanceId: string; mountGeneration: number; localPoint: { x: number; y: number } }>).detail
-      if (request && beginRegisteredSpot(request.instanceId, request.localPoint, request.mountGeneration)) { event.preventDefault(); event.stopPropagation() }
+      if (request && await beginRegisteredSpot(request.instanceId, request.localPoint, request.mountGeneration)) { event.preventDefault(); event.stopPropagation() }
     }
     root.addEventListener('component-author-double-click', open)
     return () => root.removeEventListener('component-author-double-click', open)
@@ -481,7 +488,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       if(target?.closest('[data-component-professional-editor],.text-edit-toolbar,.selection-quick-bar'))return
       void commitContentEdit().catch(failure=>setError(failure instanceof Error ? failure.message:String(failure)))
     }}
-    onDoubleClickCapture={event => {
+    onDoubleClickCapture={async event => {
       if(readOnly || !(event.target instanceof Element) || event.target.closest('[data-component-professional-editor]'))return
       const id=event.target.closest<HTMLElement>('[data-component-instance]')?.dataset.componentInstance
       const instance=id && project.instances[id]
@@ -489,7 +496,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
         const content=runtime.world.contentElement?.(instance.id), matrix=content && flowContentClientMatrix(content)
         if(matrix) {
           const point=transformPoint(invertMatrix(matrix),{x:event.clientX,y:event.clientY})
-          if(beginRegisteredSpot(instance.id,point)) {
+          if(await beginRegisteredSpot(instance.id,point)) {
             event.preventDefault();event.stopPropagation()
             return
           }

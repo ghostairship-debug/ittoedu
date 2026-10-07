@@ -73,7 +73,7 @@ it('opens a real registered Flow chart title and commits through the shared draf
     const ui = render(<Workspace />)
     await waitFor(() => expect(world.authorSpots().some(spot => spot.instanceId === 'chart' && spot.dataPath?.join('.') === 'title')).toBe(true))
     const title = ui.container.querySelector<SVGElement>('[data-chart-text="title"]')!
-    fireEvent.doubleClick(title, { clientX: 400, clientY: 122 })
+    await act(async () => fireEvent.doubleClick(title, { clientX: 400, clientY: 122 }))
     expect(ui.getByLabelText('编辑此处文字')).toHaveValue(data.title)
     fireEvent.change(ui.getByLabelText('编辑此处文字'), { target: { value: '正式图表标题' } })
     expect((await host.internalAPI.read(created.documentId)).undoDepth).toBe(0)
