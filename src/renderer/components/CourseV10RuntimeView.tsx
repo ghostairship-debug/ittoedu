@@ -1,7 +1,8 @@
-import { Component, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
+import { Component, createContext, useCallback, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import type { DocumentModel } from '../../shared/workbench/document'
 import { componentCompilationInput } from '../../core/components/compilation/componentCompilationInput'
-import { ComponentPlatformRuntime } from '../../player/components/ComponentPlatformRuntime'
+import type { ComponentPlatformRuntime } from '../../player/components/ComponentPlatformRuntime'
+import { createV10ModelPlayer, type ComponentModelPlayer, type ComponentProjectionCommit } from '../../player/componentPlatform/ModelPlayer'
 import { prepareSandboxComponent } from './SandboxComponentImplementation'
 import { CourseV10DocumentView, InstanceView } from '../documents/CourseV10DocumentView'
 import type { CourseV10DocumentBridge } from '../documents/CourseV10DocumentBridge'
@@ -69,7 +70,6 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
   const activeState = useRef(props.activeStateId ?? null), runtimeRef = useRef<ComponentPlatformRuntime | null>(null)
   const callbacks = useRef(props), surface = useRef(surfaceId), wrapper = useRef<HTMLDivElement>(null)
   const composing = useRef<string | null>(null)
-  const worldLifetimes = useRef(new Map<ComponentPlatformRuntime, object>())
   const compositionUpdate = useRef<Promise<void>>(Promise.resolve())
   current.current = model
   callbacks.current = props; surface.current = surfaceId; activeState.current = props.activeStateId ?? null
@@ -81,11 +81,12 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
     courseState: { get: <T,>(key: string) => runtimeRef.current?.getState(key) as T | undefined, set: (key, value) => runtimeRef.current?.setState(key, value) },
     viewportBounds: () => (wrapper.current?.querySelector<HTMLElement>('.flow-workspace') ?? wrapper.current?.querySelector<HTMLElement>('.canvas-viewport') ?? wrapper.current)?.getBoundingClientRect(),
     restart: () => runtimeRef.current?.resetPlayback(true), audio: () => runtimeRef.current?.audio(), report: message => callbacks.current.report(message) }), [documentId])
-  const world = useMemo(() => {
-    const runtime = new ComponentPlatformRuntime(`document:${documentId}`, {
+  const host = useMemo(() => {
+    const mounted = createV10ModelPlayer({ runScopeId: `document:${documentId}:${crypto.randomUUID()}`,
       report: message => callbacks.current.report(message),
       mode: player ? 'play' : 'edit',
       teacherController: navigation,
+      onDispose: () => navigation.dispose(),
       resolveBuiltin: (_key, signal) => prepareSandboxComponent({ format: 'esm', code: webContentRealmSource(), css: '', diagnostics: [] }, signal,
         { builtinKey: _key, state: () => runtime.stateSnapshot(), targets: profile => runtime.targetSnapshots(profile), instance: async value => resolveWebResourceBindings(await projectWebModuleGraph(value, input => window.desktopAPI.compileComponent(input), message => callbacks.current.report(message)), id => runtime.contentAssetUrl(id), message => callbacks.current.report(message)), htmlAuthoring: true, teacherController: navigation,
           connectOrigins: () => current.current.project.logic?.network?.connectOrigins ?? [], themeCss: () => runtime.themeCss(), resources: () => runtime.resourceUrls() }),
@@ -98,22 +99,13 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
           connectOrigins: () => current.current.project.logic?.network?.connectOrigins ?? [], themeCss: () => runtime.themeCss(), resources: () => runtime.resourceUrls(), resourceBindings: implementation.resourceBindings })
       },
     })
-    return runtime
+    const runtime = mounted.runtime
+    return mounted
   }, [documentId, navigation])
+  const world = host.runtime
   runtimeRef.current = world
   const renderProject = props.renderProject ?? resolveComponentPresentation(model.project, surfaceId, props.activeStateId ?? null)
-  useLayoutEffect(() => { void world.sync(renderProject, model.resources).catch(error => callbacks.current.report(error instanceof Error ? error.message : '组件运行未完成')) }, [world, renderProject, model.resources])
-  useEffect(() => {
-    const lifetime = {}; worldLifetimes.current.set(world, lifetime)
-    return () => {
-      // React's development effect replay reuses this same world. The replacement
-      // setup takes ownership before this microtask; a real unmount retires it.
-      queueMicrotask(() => {
-        if (worldLifetimes.current.get(world) !== lifetime) return
-        worldLifetimes.current.delete(world); navigation.dispose(); void world.dispose()
-      })
-    }
-  }, [world])
+  useEffect(() => host.retain(), [host])
   useEffect(() => props.bridge ? registerRuntimeLightEditDocument(documentId, world, props.bridge) : undefined, [documentId, world, props.bridge])
   useEffect(() => {
     const pending = new Set<AbortController>(), timers = new Set<ReturnType<typeof setTimeout>>()
@@ -180,7 +172,8 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
     renderInstance: (id, projection = renderProject, placement = 'free') => projection.instances[id] && <InstanceView key={id} instance={projection.instances[id]} project={projection} surfaceId={surfaceId} placement={placement}
       selectedInstanceId={selectedInstanceId} selectedInstanceIds={selectedInstanceIds} player={player} onSelect={onSelect} onElement={world.bind} onTargetElement={world.bindTarget} />,
   }
-  return <RuntimeContext.Provider value={ports}><ProjectionMutationBoundary project={renderProject} world={world} projectionKey={projectionKey}>
+  return <RuntimeContext.Provider value={ports}><ProjectionMutationBoundary model={{ ...model, project: renderProject }} host={host} projectionKey={projectionKey}
+    report={error => callbacks.current.report(error instanceof Error ? error.message : '组件运行未完成')}>
     <div ref={wrapper} style={{ position: 'relative', display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gridTemplateRows: 'minmax(0, 1fr)', width: '100%', height: '100%', minWidth: 0, minHeight: 0 }}>
       {props.renderWorkspace ? props.renderWorkspace(ports) : props.children ?? <CourseV10DocumentView project={renderProject} surfaceId={surfaceId}
         selectedInstanceId={selectedInstanceId} selectedInstanceIds={selectedInstanceIds} player={player} onSelect={onSelect} onElement={world.bind} onTargetElement={world.bindTarget} />}
@@ -188,17 +181,21 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
   </ProjectionMutationBoundary></RuntimeContext.Provider>
 }
 
-const projectionTopology = (project: CourseProjectV10) => JSON.stringify([project.global,
-  project.surfaces.map(surface => [surface.id, surface.kind, surface.childIds]), Object.values(project.instances).map(instance => [instance.id, instance.childIds])])
-
 /** React ancestor moves must not reload an already mounted source iframe. */
-class ProjectionMutationBoundary extends Component<{ project: CourseProjectV10; world: ComponentPlatformRuntime; projectionKey?: string; children: ReactNode }> {
-  getSnapshotBeforeUpdate(previous: Readonly<ProjectionMutationBoundary['props']>): boolean {
-    if (previous.projectionKey === this.props.projectionKey && projectionTopology(previous.project) === projectionTopology(this.props.project)) return false
-    this.props.world.beforeProjectionMutation(); return true
+class ProjectionMutationBoundary extends Component<{ model: Extract<DocumentModel, { kind: 'course-v10' }>; host: ComponentModelPlayer; projectionKey?: string; report(error: unknown): void; children: ReactNode }> {
+  private readonly initial: ComponentProjectionCommit
+  constructor(props: ProjectionMutationBoundary['props']) {
+    super(props)
+    this.initial = props.host.prepareProjection(props.model, props.projectionKey)
   }
-  componentDidUpdate(_previous: Readonly<ProjectionMutationBoundary['props']>, _state: unknown, parked: boolean): void {
-    if (parked) this.props.world.afterProjectionMutation()
+  componentDidMount(): void {
+    void this.props.host.commitProjection(this.initial).catch(this.props.report)
+  }
+  getSnapshotBeforeUpdate(): ComponentProjectionCommit {
+    return this.props.host.prepareProjection(this.props.model, this.props.projectionKey)
+  }
+  componentDidUpdate(_previous: Readonly<ProjectionMutationBoundary['props']>, _state: unknown, receipt: ComponentProjectionCommit): void {
+    void this.props.host.commitProjection(receipt).catch(this.props.report)
   }
   render() { return this.props.children }
 }

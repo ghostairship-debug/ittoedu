@@ -71,6 +71,8 @@ export class ComponentPlatformRuntime {
   private retired = false
   private disposal?: Promise<void>
   private readonly surfaceId?: () => string | null
+  private readonly projectionManaged: boolean
+  private projectionTargetsChanged = false
 
   constructor(readonly runScopeId: string, options: {
     resolveSource?(implementation: Extract<ComponentImplementation, { kind: 'source' }>, signal: AbortSignal): Promise<PreparedComponentRuntime>
@@ -82,8 +84,11 @@ export class ComponentPlatformRuntime {
     resolveAssetUrl?(id: string): string | undefined
     isAssetPending?(id: string): boolean
     mode?: 'edit' | 'play' | 'capture'
+    /** ModelPlayer performs synchronization only after an actual projection commit. */
+    projectionManaged?: boolean
   } = {}) {
     this.mode = options.mode ?? 'play'; this.playing = this.mode === 'play'
+    this.projectionManaged = options.projectionManaged ?? false
     this.resolveAssetUrl = options.resolveAssetUrl
     this.isAssetPending = options.isAssetPending
     this.surfaceId = options.teacherController && (() => options.teacherController!.read().locationId)
@@ -293,7 +298,7 @@ export class ComponentPlatformRuntime {
       }
       this.projectionRoots.delete(instanceId)
     }
-    if (element && this.project) void this.syncInstance(instanceId).catch(() => {})
+    if (element && this.project && !this.projectionManaged) void this.syncInstance(instanceId).catch(() => {})
     this.layouts.get(instanceId)?.notify()
   }
   private placeRoot(parent: HTMLElement, root: HTMLElement): void {
@@ -333,6 +338,7 @@ export class ComponentPlatformRuntime {
       const root = this.roots.get(id)
       if (root && element.isConnected && root.parentElement !== element) this.placeRoot(element, root)
     }
+    if (this.projectionManaged) { this.projectionTargetsChanged = true; return }
     if ([...this.projectionRoots.values()].some(element => element.isConnected)) {
       for (const instance of Object.values(this.project?.instances ?? {})) {
         if (this.project?.definitions[instance.definitionId]?.role !== 'behavior') continue
@@ -438,6 +444,11 @@ export class ComponentPlatformRuntime {
     }
     // Each Host reports its located failure. Healthy peers remain mounted and usable.
     await Promise.allSettled(Object.keys(project.instances).map(id => this.syncInstance(id)))
+    if (this.projectionTargetsChanged) {
+      this.projectionTargetsChanged = false
+      await Promise.allSettled(Object.values(project.instances).filter(instance => project.definitions[instance.definitionId]?.role === 'behavior')
+        .map(instance => this.host.refreshTargets(this.runScopeId, instance.id, () => this.behaviorCanProject(instance.id))))
+    }
     if (this.mode !== 'edit' || this.playing) this.interactions.applyAllVisibility()
   }
   stateSnapshot(): Record<string, JsonValue> { return Object.fromEntries(this.state) }
