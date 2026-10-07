@@ -22,7 +22,7 @@ export function SpatialWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWork
   const surface = runtime.project.surfaces.find(value => value.id === runtime.surfaceId && value.kind === 'spatial')
   const surfaceId = surface?.id
   const view = surfaceId ? source.views[runtime.documentId]?.[surfaceId] ?? initialSpatialSurfaceView(surface?.spatial?.home) : initialSpatialSurfaceView()
-  useEffect(() => { runtime.setPlaying(source.canvasMode === 'run'); return () => runtime.setPlaying(false) }, [runtime.documentId, runtime.setPlaying, source.canvasMode])
+  useEffect(() => { runtime.setPlaying(source.canvasMode === 'run') }, [runtime.setPlaying, source.canvasMode])
   useEffect(() => { runtime.navigation.changed() }, [runtime.navigation, view.activeCameraFrameId, view.playbackPathId, view.playbackStepIndex, view.viewport])
   useEffect(() => {
     if (!surfaceId) return
