@@ -37,6 +37,8 @@ it.each(['pdf', 'docx'] as const)('public %s bytes enter the existing real extra
     expect(read.data).toMatchObject({ text: expect.stringContaining(MATERIAL_TEXT) })
     await expect(dispatchMaterialTool(materials, new Set(), 'material.read', { attachmentId: opened.material.attachmentId, representationId: hits[0].representationId })).rejects.toThrow('当前显式输入')
     expect(await web.open({ runId: 'run', sourceId: opened.source.sourceId, version: opened.source.version })).toMatchObject({ status: 'material', attachmentIds: opened.attachmentIds })
+    const stopped = new AbortController(); stopped.abort(new Error('Teacher cancelled material read'))
+    expect(await web.open({ runId: 'run', sourceId: opened.source.sourceId, version: opened.source.version, signal: stopped.signal })).toMatchObject({ status: 'rejected' })
     expect(fetches).toBe(1)
   } finally {
     await web.stopRun('run'); web.endRun('run')
