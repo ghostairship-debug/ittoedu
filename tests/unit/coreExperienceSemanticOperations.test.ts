@@ -7,9 +7,14 @@ import { DocumentSession } from '../../src/core/documents/DocumentSession'
 import { prepareCourseObjectPaste } from '../../src/renderer/composition/crossSurfaceCommands'
 import { componentDefinitionPresentation, componentFieldPresentation } from '../../src/renderer/ui/properties/componentDefinitionPresentation'
 import { WEB_DEFINITION, webDataSchema } from '../../src/components/web/data'
-import { resolveComponentPresentation, type JsonObject, type JsonValue } from '../../src/shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, resolveComponentPresentation, type JsonObject, type JsonValue } from '../../src/shared/contracts/component-platform/project'
 import type { CapturedCourseTarget } from '../../src/renderer/documents/CourseV10DocumentBridge'
 import type { InteractionRule } from '../../src/shared/interactionTypes'
+import { createInputData, inputDataSchema, INPUT_DEFINITION } from '../../src/components/input/data'
+import { buildInputRuleFamily } from '../../src/core/tools/inputRuleFamily'
+import { createComponentInteractionRuntime } from '../../src/renderer/interactions/componentInteractionRuntime'
+import { interactionBehavior, interactionRules } from '../../src/renderer/interactions/componentInteractionAuthoring'
+import type { ComponentRuntimeContext } from '../../src/shared/contracts/component-platform/runtime'
 
 function fixture() {
   const project = createBlankCourseProjectV10('完整作者对象')
@@ -33,8 +38,7 @@ it('deletes presentation references in one canonical operation without broadenin
   project.instances.behavior = { id: 'behavior', definitionId: 'interactions', data: data([enter, set, chain, condition, mixed, continued]),
     attachments: [{ instanceId: 'behavior', target: { kind: 'surface', surfaceId: sid } }] }
   surface.childIds.push('behavior')
-  const nav = Object.values(project.instances).find(instance => project.definitions[instance.definitionId].implementation.kind === 'builtin'
-    && project.definitions[instance.definitionId].implementation.key === 'guoling.navigation')!
+  const nav = Object.values(project.instances).find(instance => componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.navigation')!
   nav.data = { buttons: [{ id: 'go', action: { type: 'scene.go', sceneId: sid, targetStateId: 'gone' } }] }
   surface.presentation = { initialStateId: 'stay', states: [
     { id: 'gone', title: '删除', overrides: {} },
@@ -62,6 +66,73 @@ it('deletes presentation references in one canonical operation without broadenin
   const driver = new CourseV10Driver(), model = { kind: 'course-v10' as const, project: result, resources: { assets: {}, components: {} } }
   const reopened = driver.load(driver.serialize(model))
   expect(reopened.kind === 'course-v10' && reopened.project.instances[nav.id].data).toEqual(result.instances[nav.id].data)
+})
+it('copies ordinary click programs and managed input feedback through the real executor as one undoable author object', async () => {
+  const project = fixture(), surface = project.surfaces[0]!, surfaceId = surface.id, resources = { assets: {}, components: {} }
+  project.definitions[INPUT_DEFINITION.id] = INPUT_DEFINITION
+  project.definitions.interactions = { id: 'interactions', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.interactions' } }
+  const motion = (nodeId: string, show = true): InteractionRule['actions'][number]['action'] => ({ type: show ? 'node.enter' : 'node.exit', nodeId, effect: 'none', durationMs: 0, easing: 'linear' })
+  for (const id of ['correct', 'error', 'unrelated']) project.instances[id] = { ...project.instances.a, id, visible: false }
+  let serial = 0
+  const family = buildInputRuleFamily('input', { stateKey: 'input:input:value', validityKey: 'input:input:valid' }, {
+    answerType: 'text', answers: ['42'], correct: [motion('error', false), motion('correct')], error: [motion('correct', false), motion('error')],
+  }, () => `family-${++serial}`)
+  project.instances.input = { id: 'input', definitionId: INPUT_DEFINITION.id, data: createInputData({ answer: {
+    type: 'text', stateKey: 'input:input:value', validityKey: 'input:input:valid', ruleFamilyRuleIds: family.map(rule => rule.id),
+  } }) as unknown as JsonValue }
+  const click: InteractionRule = { id: 'click', enabled: true, trigger: { type: 'node.click', nodeId: 'a' }, conditions: [],
+    actions: [{ id: 'click-action', start: 'after-previous', delayMs: 0, action: motion('correct') }] }
+  const complete: InteractionRule = { id: 'complete', enabled: true, trigger: { type: 'animation.completed', actionId: 'click-action' }, conditions: [],
+    actions: [{ id: 'complete-action', start: 'after-previous', delayMs: 0, action: motion('error', false) }] }
+  const unrelated: InteractionRule = { ...click, id: 'unrelated-rule', trigger: { type: 'node.click', nodeId: 'unrelated' }, actions: [{ ...click.actions[0]!, id: 'unrelated-action', action: { type: 'scene.next' } }] }
+  project.instances.behavior = { id: 'behavior', definitionId: 'interactions', data: { rules: [...family, click, complete, unrelated] } as unknown as JsonValue,
+    attachments: [{ instanceId: 'behavior', target: { kind: 'surface', surfaceId } }] }
+  surface.childIds = ['a', 'input', 'correct', 'error', 'unrelated', 'behavior']
+  project.logic = { courseState: [{ key: 'input:input:value', valueType: 'string', defaultValue: '' }, { key: 'input:input:valid', valueType: 'boolean', defaultValue: false }], navigationGuards: [] }
+  surface.presentation = { states: [{ id: 'answer', title: '另一状态', overrides: { behavior: { data: { rules: [...family,
+    { ...click, actions: [{ ...click.actions[0]!, action: motion('error') }] }, unrelated] } as unknown as JsonValue } } }] }
+  const target: CapturedCourseTarget = { documentId: 'doc', epoch: 'epoch', project, editingProject: project, resources, activeStateId: null, surfaceId, instanceIds: ['a', 'input'], instanceId: 'a' }
+  const plan = prepareCourseObjectPaste({ documentId: 'doc', project, roots: ['a', 'input'], resources },
+    { capturedTarget: target, container: { kind: 'surface', surfaceId }, index: surface.childIds.length, offset: { x: 20, y: 20 } })
+  expect(plan.idMap.has('correct')).toBe(true); expect(plan.idMap.has('error')).toBe(true)
+  expect(plan.idMap.has('unrelated')).toBe(false)
+  const driver = new CourseV10Driver(), session = await DocumentSession.create({ documentId: 'doc', epoch: 'epoch', model: { kind: 'course-v10', project, resources },
+    binding: { kind: 'untitled', suggestedName: 'program-copy.h5lesson' } }, driver, { async append() {}, async save() { throw new Error('unused') } })
+  expect(await session.execute({ documentId: 'doc', epoch: 'epoch', operationId: 'copy-semantic', baseRevision: 0, actor: 'human',
+    mutation: { type: 'command', command: captureComponentOperation(project, plan.edits) } })).toMatchObject({ status: 'applied' })
+  const snapshot = session.read()
+  if (snapshot.model.kind !== 'course-v10') throw new Error('Expected V10')
+  const copied = snapshot.model.project, inputId = plan.idMap.get('input')!, buttonId = plan.idMap.get('a')!, correctId = plan.idMap.get('correct')!, errorId = plan.idMap.get('error')!
+  const input = inputDataSchema.parse(copied.instances[inputId].data), copiedRules = interactionRules(interactionBehavior(copied, { kind: 'surface', surfaceId }))
+  expect(input.answer!.ruleFamilyRuleIds.every(id => copiedRules.some(rule => rule.id === id) && !family.some(rule => rule.id === id))).toBe(true)
+  expect(copiedRules.filter(rule => rule.id === 'unrelated-rule')).toHaveLength(1)
+  const execute = async (stateId: string | null) => {
+    const effective = resolveComponentPresentation(copied, surfaceId, stateId), behavior = interactionBehavior(effective, { kind: 'surface', surfaceId })!
+    const listeners = new Map<string, () => void>(), visible = new Map<string, boolean>(), values = new Map<string, unknown>([[input.answer!.stateKey, '42'], [input.answer!.validityKey, true]])
+    const runtime = createComponentInteractionRuntime(() => ({ currentSurfaceId: () => surfaceId, currentStateId: () => stateId,
+      courseState: { get: key => values.get(key), set: (key, value) => { values.set(key, value) } },
+      subscribeTrigger(trigger, listener) { listeners.set(JSON.stringify(trigger), listener); return () => { listeners.delete(JSON.stringify(trigger)) } },
+      executeAction(action) { if (action.type === 'node.enter' || action.type === 'node.exit') { expect(copied.instances[action.nodeId]).toBeDefined(); visible.set(action.nodeId, action.type === 'node.enter') }; return true }, report(message) { throw new Error(message) } }))
+    const mounted = await runtime.mount({ instance: behavior, scope: { signal: new AbortController().signal, isActive: () => true, cleanup() {} } } as unknown as ComponentRuntimeContext)
+    const emit = async (type: 'node.click' | 'input.submit', nodeId: string) => { listeners.get(JSON.stringify({ type, nodeId }))?.(); await new Promise(resolve => setTimeout(resolve, 0)) }
+    try {
+      await emit('node.click', buttonId)
+      expect(visible.get(stateId ? errorId : correctId)).toBe(true)
+      expect(visible.has('correct') || visible.has('error')).toBe(false)
+      if (!stateId) {
+        expect(visible.get(errorId)).toBe(false)
+        await emit('input.submit', inputId); expect(visible.get(correctId)).toBe(true); expect(visible.get(errorId)).toBe(false)
+        values.set(input.answer!.stateKey, 'wrong'); await emit('input.submit', inputId)
+        expect(visible.get(correctId)).toBe(false); expect(visible.get(errorId)).toBe(true)
+      }
+    } finally { await mounted.dispose() }
+  }
+  await execute(null); await execute('answer')
+  expect(driver.load(driver.serialize(snapshot.model)).kind).toBe('course-v10')
+  expect(snapshot.undoDepth).toBe(1)
+  expect(await session.execute({ documentId: 'doc', epoch: 'epoch', operationId: 'undo-semantic-copy', baseRevision: snapshot.revision, actor: 'human', mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
+  const restored = session.read().model
+  expect(restored.kind === 'course-v10' && restored.project.instances).toEqual(project.instances)
 })
 it('enforces inherited author locks for data, frame and named-state edits while allowing an explicit unlock', () => {
   const project = fixture()

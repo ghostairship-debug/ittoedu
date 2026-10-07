@@ -115,21 +115,52 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
   const target = destination.capturedTarget, project = target.project
   const moving = destination.identity === 'move'
   const sameDocument = Boolean(source.documentId && source.documentId === target.documentId)
-  const copiedIds = descendants(source.project, source.roots), idMap = new Map(copiedIds.map(id => [id, moving ? id : crypto.randomUUID()]))
+  const professionalKey = (id: string) => componentDefinitionBuiltinKey(source.project.definitions[source.project.instances[id].definitionId])
+  const stateData = (id: string) => source.project.surfaces.flatMap(surface => (surface.presentation?.states ?? [])
+    .flatMap(state => state.overrides[id]?.data === undefined ? [] : [state.overrides[id].data!]))
+  const topOwner = (value: CourseProjectV10, owner: ComponentContainer | null): ComponentContainer | null => {
+    while (owner?.kind === 'instance') owner = owningContainer(value, owner.instanceId)
+    return owner
+  }
+  const behaviorIds = Object.keys(source.project.instances).filter(id => professionalKey(id) === 'guoling.interactions')
+  const rulesAt = (id: string, data = source.project.instances[id].data) => interactionRules({ ...source.project.instances[id], data })
+  const copied = new Set(descendants(source.project, source.roots)), copyRoots = [...source.roots]
+  const familyIds = new Set<string>()
+  // The managed input's local feedback is part of its semantic copy, even when
+  // the feedback nodes are siblings instead of children of the input instance.
+  let expanded = !(moving && sameDocument)
+  while (expanded) {
+    expanded = false
+    const owners = new Map<string, ComponentContainer[]>()
+    for (const id of copied) if (professionalKey(id) === 'guoling.input') {
+      const owner = topOwner(source.project, owningContainer(source.project, id))
+      for (const data of [source.project.instances[id].data, ...stateData(id)]) for (const ruleId of inputDataSchema.parse(data).answer?.ruleFamilyRuleIds ?? []) {
+        familyIds.add(ruleId)
+        if (owner) owners.set(ruleId, [...owners.get(ruleId) ?? [], owner])
+      }
+    }
+    for (const id of behaviorIds) for (const data of [source.project.instances[id].data, ...stateData(id)]) for (const rule of rulesAt(id, data)) {
+      const familyOwners = owners.get(rule.id)
+      if (!familyOwners) continue
+      for (const step of rule.actions) if (step.action.type === 'node.enter' || step.action.type === 'node.exit') {
+        const feedbackId = step.action.nodeId, owner = topOwner(source.project, owningContainer(source.project, feedbackId))
+        if (!owner || !familyOwners.some(value => owner.kind === 'global' && value.kind === 'global' || sameContainer(owner, value)) || copied.has(feedbackId)) continue
+        copyRoots.push(feedbackId)
+        descendants(source.project, [feedbackId]).forEach(value => copied.add(value)); expanded = true
+      }
+    }
+  }
+  const copiedIds = [...copied], idMap = new Map(copiedIds.map(id => [id, moving ? id : crypto.randomUUID()]))
   // The library's existing extractor owns source-module/resource closure, including
   // private implementation workspaces. Clipboard does not infer bindings from code.
   const extracted = extractComponentLibraryEntry(source.project, source.resources, {
-    id: `clipboard_${crypto.randomUUID()}`, title: '复制对象', rootIds: [...source.roots],
+    id: `clipboard_${crypto.randomUUID()}`, title: '复制对象', rootIds: selectedRoots(source.project, copyRoots),
   })
   const entry = extracted.entry, diagnostics = extracted.diagnostics.filter(item => item.code === 'missing-asset')
   const components: DocumentResources['components'] = entry.resources.components
   const componentIds = new Map(Object.keys(components).map(ownerId => [ownerId, moving && sameDocument ? ownerId : `component_${crypto.randomUUID()}`]))
   const mapId = (id: string) => idMap.get(id) ?? id
   const surfaceIds = new Map<string, string>()
-  const topOwner = (value: CourseProjectV10, owner: ComponentContainer | null): ComponentContainer | null => {
-    while (owner?.kind === 'instance') owner = owningContainer(value, owner.instanceId)
-    return owner
-  }
   const destinationOwner = topOwner(project, destination.container)
   const destinationSurfaceId = destinationOwner?.kind === 'surface' ? destinationOwner.surfaceId : target.surfaceId
   if (!sameDocument && destinationSurfaceId) for (const id of copiedIds) {
@@ -138,12 +169,6 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
   }
   const mapSurfaceId = (id: string) => surfaceIds.get(id) ?? id
   const rules = new Map<string, string>(), actions = new Map<string, string>(), stateKeys = new Map<string, string>()
-  const stateData = (id: string) => source.project.surfaces.flatMap(surface => (surface.presentation?.states ?? [])
-    .flatMap(state => state.overrides[id]?.data === undefined ? [] : [state.overrides[id].data!]))
-  const professionalKey = (id: string) => {
-    const instance = source.project.instances[id], definition = source.project.definitions[instance.definitionId]
-    return componentDefinitionBuiltinKey(definition)
-  }
   for (const id of copiedIds) if (professionalKey(id) === 'guoling.interactions') {
     for (const data of [source.project.instances[id].data, ...stateData(id)]) {
       const copy = createComponentInteractionCopyIdentities(data)
@@ -151,16 +176,25 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
       copy.actions.forEach((value, key) => { if (!actions.has(key)) actions.set(key, moving ? key : value) })
     }
   }
-  // Managed input families live on the surface behavior, outside the input subtree.
-  // Copy only the explicitly registered family, retaining all unrelated author rules.
-  const familyIds = new Set(copiedIds.flatMap(id => professionalKey(id) === 'guoling.input'
-    ? inputDataSchema.parse(source.project.instances[id].data).answer?.ruleFamilyRuleIds ?? [] : []))
-  const family: InteractionRule[] = moving && sameDocument ? [] : Object.values(source.project.instances).flatMap(instance => professionalKey(instance.id) === 'guoling.interactions'
-    ? interactionRules(instance).filter(rule => familyIds.has(rule.id) && !rules.has(rule.id)) : [])
+  // Ordinary object triggers and their completion chain have the same copy owner
+  // as managed families. Other author rules on the shared behavior remain untouched.
+  const selectRules = (values: readonly InteractionRule[]) => {
+    const selected = new Set(values.filter(rule => familyIds.has(rule.id) || 'nodeId' in rule.trigger && copied.has(rule.trigger.nodeId)).map(rule => rule.id))
+    let added = true
+    while (added) {
+      added = false
+      const selectedActions = new Set(values.filter(rule => selected.has(rule.id)).flatMap(rule => rule.actions.map(step => step.id)))
+      for (const rule of values) if (!selected.has(rule.id) && rule.trigger.type === 'animation.completed' && selectedActions.has(rule.trigger.actionId)) { selected.add(rule.id); added = true }
+    }
+    return values.filter(rule => selected.has(rule.id))
+  }
+  const externalBehaviors = moving && sameDocument ? [] : behaviorIds.filter(id => !copied.has(id))
+  const family = externalBehaviors.flatMap(id => selectRules(rulesAt(id)))
   const familyData = JSON.parse(JSON.stringify({ rules: family })) as JsonValue
-  if (family.length) {
-    const copy = createComponentInteractionCopyIdentities(familyData)
-    copy.rules.forEach((value, key) => rules.set(key, moving ? key : value)); copy.actions.forEach((value, key) => actions.set(key, moving ? key : value))
+  for (const id of externalBehaviors) for (const data of [source.project.instances[id].data, ...stateData(id)]) {
+    const copy = createComponentInteractionCopyIdentities({ rules: selectRules(rulesAt(id, data)) } as unknown as JsonValue)
+    copy.rules.forEach((value, key) => { if (!rules.has(key)) rules.set(key, moving ? key : value) })
+    copy.actions.forEach((value, key) => { if (!actions.has(key)) actions.set(key, moving ? key : value) })
   }
   const inputData = new Map<string, JsonValue>()
   for (const id of copiedIds) if (professionalKey(id) === 'guoling.input') inputData.set(id, remapComponentInputData(source.project.instances[id].data,
@@ -268,7 +302,8 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
     edits.push({ type: 'instance.insert', container: group.owner, index: sameContainer(group.owner, destination.container) ? destination.index : containerChildIds(project, group.owner).length, instances: first ? instances : [], rootIds: group.roots })
     first = false
   }
-  if (family.length) {
+  let copiedBehaviorId: string | undefined
+  if (externalBehaviors.some(id => [source.project.instances[id].data, ...stateData(id)].some(data => selectRules(rulesAt(id, data)).length))) {
     let owner = destination.container
     while (owner.kind === 'instance') {
       const parent = owningContainer(project, owner.instanceId)
@@ -278,14 +313,19 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
     const ruleTarget = owner.kind === 'global' ? { kind: 'project' as const } : { kind: 'surface' as const, surfaceId: owner.surfaceId }
     const remapped = interactionRules({ id: 'clipboard-family', definitionId: 'guoling.interactions',
       data: remapComponentInteractionData(familyData, { instances: idMap, surfaces: surfaceIds, rules, actions, stateKeys }) })
-    edits.push(...componentRuleEdits(project, ruleTarget, [...interactionRules(interactionBehavior(project, ruleTarget)), ...remapped]))
+    const existing = interactionBehavior(project, ruleTarget)
+    const behaviorEdits = componentRuleEdits(project, ruleTarget, [...interactionRules(existing), ...remapped])
+    copiedBehaviorId = existing?.id ?? behaviorEdits.find(edit => edit.type === 'instance.insert')?.rootIds[0]
+    edits.push(...behaviorEdits)
   }
   // A normal copy keeps every named author state; the current render projection is never its source.
   const presentations = new Map<string, ComponentPresentation>()
   for (const sourceSurface of source.project.surfaces) for (const state of sourceSurface.presentation?.states ?? []) {
     const owned = copiedIds.filter(id => Object.hasOwn(state.overrides, id))
     const ordered = state.order?.filter(id => idMap.has(id)) ?? []
-    if (!owned.length && !ordered.length) continue
+    const ownsRuleState = copiedBehaviorId && (externalBehaviors.some(id => state.overrides[id]?.data !== undefined)
+      || copiedIds.some(id => { const owner = topOwner(source.project, owningContainer(source.project, id)); return owner?.kind === 'surface' && owner.surfaceId === sourceSurface.id }))
+    if (!owned.length && !ordered.length && !ownsRuleState) continue
     const surfaceId = destination.keepOwner && sameDocument ? sourceSurface.id : destinationSurfaceId
     if (!surfaceId) continue
     const destinationSurface = project.surfaces.find(surface => surface.id === surfaceId)
@@ -315,6 +355,14 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
         override.frame = translateFrame(reparentFrame(override.frame, componentParentMatrix(sourceView, id), parent), destination.offset ?? { x: 0, y: 0 }) as ComponentFrame
       }
       copiedState.overrides[mapId(id)] = override
+    }
+    if (copiedBehaviorId && ownsRuleState) {
+      const currentData = copiedState.overrides[copiedBehaviorId]?.data ?? project.instances[copiedBehaviorId]?.data ?? { rules: [] }
+      const currentRules = interactionRules({ id: copiedBehaviorId, definitionId: 'guoling.interactions', data: currentData })
+      const effectiveRules = externalBehaviors.flatMap(id => selectRules(rulesAt(id, state.overrides[id]?.data ?? source.project.instances[id].data)))
+      const rebound = interactionRules({ id: 'clipboard-state', definitionId: 'guoling.interactions', data: remapComponentInteractionData({ rules: effectiveRules } as unknown as JsonValue,
+        { instances: idMap, surfaces: surfaceIds, rules, actions, stateKeys }) })
+      copiedState.overrides[copiedBehaviorId] = { ...copiedState.overrides[copiedBehaviorId], data: { rules: [...currentRules, ...rebound] } as unknown as JsonValue }
     }
     if (state.order) {
       const existing = copiedState.order ?? [...destinationSurface.childIds]
