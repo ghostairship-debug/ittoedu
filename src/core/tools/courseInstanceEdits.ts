@@ -11,6 +11,7 @@ import { createChartData } from '../../components/chart/data'
 import { changeChartType, replaceChartTableData } from '../../components/chart/contentOperations'
 import { chartDataEdit } from '../../components/chart/edit'
 import { plainDocumentText } from '../../shared/document/content'
+import { componentInputDataPropertyEdits } from '../../components/input/authoring'
 
 type DataField = { path: string[]; value: JsonValue }
 const record = (value: unknown): value is Record<string, JsonValue> => value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -68,8 +69,11 @@ export function courseInstancePropertyEdits(model: DocumentModel, target: Course
   }
   if (properties.data !== undefined) {
     const builtinKey = componentDefinitionBuiltinKey(project.definitions[instance.definitionId])
-    edits.push(...componentDataPropertyFields(instance.data, properties.data, builtinKey)
-      .map(field => ({ type: 'data.set' as const, instanceId: instance.id, ...field })))
+    const managed = builtinKey === 'guoling.input' && record(properties.data) && Object.hasOwn(properties.data, 'acceptedAnswers')
+      ? componentInputDataPropertyEdits(project, target.surfaceId, instance.id,
+        record(instance.data) ? { ...instance.data, ...properties.data } : properties.data) : null
+    edits.push(...(managed ?? componentDataPropertyFields(instance.data, properties.data, builtinKey)
+      .map(field => ({ type: 'data.set' as const, instanceId: instance.id, ...field }))))
   }
   // CSS null remains an explicit cleared value under the existing style contract.
   const style = { ...properties.style, ...(properties.opacity !== undefined ? { opacity: properties.opacity } : {}) }
