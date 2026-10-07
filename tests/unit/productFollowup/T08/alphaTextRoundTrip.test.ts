@@ -26,9 +26,12 @@ it('half-transparent authored HTML text keeps alpha through V10 archive and the 
   const publication = await buildPublishedCourseV3({ project: reopened.project, assetBytes: reopened.resources.assets, componentFiles: reopened.resources.components })
   const player = await mountPublishedCourseV3(publication.payload, root)
   try {
-    const run = [...root.querySelectorAll('span')].find(element => element.textContent === '半透明正文')
-    expect(run).toBeTruthy()
-    expect(getComputedStyle(run!).color).toBe('rgba(18, 52, 86, 0.5)')
+    const content = root.querySelector<HTMLElement>('[data-text-component-content]')
+    expect(content, root.innerHTML).toBeTruthy()
+    expect(content!.textContent).toBe('半透明正文')
+    const runs = [...content!.querySelectorAll('span')]
+    expect(runs.length).toBeGreaterThan(0)
+    for (const run of runs) expect(getComputedStyle(run).color).toBe('rgba(18, 52, 86, 0.5)')
   } finally { await player.dispose() }
   // Native runtime CSS semantics are proven; actual browser pixels belong to the shared paint specimen.
 })

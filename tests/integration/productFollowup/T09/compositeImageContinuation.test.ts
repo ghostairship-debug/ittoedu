@@ -114,9 +114,10 @@ it.each(['existing-chart-update', 'table-conversion'] as const)('a real %s and n
     if (step === 1) { yield complete(request, { name: name(request, 'project.list'), args: {} }); return }
     if (step === 2) {
       const files = toolData(request).files as Array<{ path: string }>
-      tablePath = files.find(value => /源数据.*\.data\.json$/.test(value.path))!.path
+      tablePath = files.find(value => /表格.*\.data\.json$/.test(value.path))?.path ?? ''
       chartPath = files.find(value => /图表.*\.data\.json$/.test(value.path))!.path
       flowPath = files.find(value => /任务说明.*\.md$/.test(value.path))!.path
+      expect(tablePath, `The actual project.list must expose the table data: ${JSON.stringify(files)}`).not.toBe('')
       yield complete(request, { name: name(request, 'project.read'), args: { path: tablePath } }); return
     }
     if (step === 3) {

@@ -67,7 +67,8 @@ it('an actual compiled source realm resolves an assetId without optional binding
     expect(observed.url).toBe(`${origin}/image.png`)
     expect(observed.fetches).toEqual([])
     const image = page.frameLocator('[data-component-object="source"] iframe').getByAltText('源码组件图片')
-    await page.waitForFunction(() => [...document.querySelectorAll('iframe')].some(frame => [...(frame.contentDocument?.images ?? [])].some(image => image.alt === '源码组件图片' && image.naturalWidth === 1)), undefined, { timeout: 3000 })
+    // The source realm is sandboxed: its parent cannot inspect contentDocument. Playwright observes the actual frame directly.
+    await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).naturalWidth), { timeout: 3000 }).toBe(1)
     expect(await image.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBe(1)
     expect(await image.getAttribute('src')).toBe(`${origin}/image.png`)
     expect(requests).toEqual(['/image.png'])

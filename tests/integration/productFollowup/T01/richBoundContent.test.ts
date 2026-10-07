@@ -41,14 +41,16 @@ it('a software-bound V10 rich selection preserves unselected links marks geometr
     const provider: ModelProvider = { async *stream(request) {
       requests++
       const write = request.tools?.find(value => value.name === 'text.replace')
+      const finish = request.tools?.find(value => value.name === 'task.finish')
       expect(write).toBeTruthy()
+      expect(finish).toBeTruthy()
       expect(JSON.stringify(request.messages)).toContain('https://example.org/old')
       yield { type: 'text.delta', requestId: request.requestId, sequence: 1, text: '<strong>尚未完成' }
       expect(await host.internalAPI.read(initial.documentId)).toMatchObject({ revision: 0, undoDepth: 0, model: { project: { instances: { text: { data: original } } } } })
       const argumentsText = JSON.stringify({ content: replacement })
       yield { type: 'response.completed', requestId: request.requestId, sequence: 2, responseId: 'fixture', actualModel: 'fixture',
-        finishReason: 'tool_calls', toolCalls: [{ id: 'content-result', name: write!.name, argumentsText }], assistant: { role: 'assistant', content: '',
-          tool_calls: [{ id: 'content-result', type: 'function', function: { name: write!.name, arguments: argumentsText } }] }, nativeResponse: {} }
+        finishReason: 'tool_calls', toolCalls: [{ id: 'content-result', name: write!.name, argumentsText }, { id: 'explicit-finish', name: finish!.name, argumentsText: '{}' }], assistant: { role: 'assistant', content: '',
+          tool_calls: [{ id: 'content-result', type: 'function', function: { name: write!.name, arguments: argumentsText } }, { id: 'explicit-finish', type: 'function', function: { name: finish!.name, arguments: '{}' } }] }, nativeResponse: {} }
     } }
     const selection: ModelSelection = { model: 'fixture', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat',
       baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'fixture' }, billing: { kind: 'unknown' },
@@ -59,7 +61,7 @@ it('a software-bound V10 rich selection preserves unselected links marks geometr
       documents: [{ documentId: initial.documentId, writable: [target], selection: [target] }], contentOutput: { kind: 'replace-text', documentId: initial.documentId, target } })
     const ended = await engine.wait(started.runId)
     expect(ended.status).toBe('completed')
-    expect(ended.tools).toHaveLength(1)
+    expect(ended.tools.map(value => value.call.name)).toEqual(['text.replace', 'task.finish'])
     expect(ended.tools[0]).toMatchObject({ call: { name: 'text.replace', input: { content: replacement } }, result: { kind: 'document-operation', result: { status: 'applied' } } })
     expect(requests).toBe(1)
     const current = await host.internalAPI.read(initial.documentId)

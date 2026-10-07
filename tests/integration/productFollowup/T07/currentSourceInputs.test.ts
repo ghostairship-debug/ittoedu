@@ -25,7 +25,8 @@ it('software-produced long V10 object paths remain readable and editable without
     const file = componentProjectFiles(project, initial.model.resources).find(value => value.kind === 'data' && value.target?.kind === 'instance')!
     expect(file.path.length).toBeGreaterThan(500)
     expect(await host.tools.execute('paths', 'read', { name: 'project.read', input: { path: file.path } })).toMatchObject({ kind: 'read' })
-    expect(await host.tools.execute('paths', 'edit', { name: 'object.update', input: { path: file.path, properties: { opacity: .7 } } }))
+    const edited = await host.tools.execute('paths', 'edit', { name: 'object.update', input: { path: file.path, properties: { opacity: .7 } } })
+    expect(edited, JSON.stringify(edited))
       .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     const current = await host.internalAPI.read(initial.documentId)
     expect(current).toMatchObject({ undoDepth: 1, model: { kind: 'course-v10', project: { instances: { content: { data: project.instances.content.data, frame, style: { opacity: .7 } } } } } })
