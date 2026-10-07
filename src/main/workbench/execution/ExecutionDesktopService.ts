@@ -7,6 +7,7 @@ import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import type { ExecutionEvent, ExecutionEventInput } from '../../../shared/workbench/executionEvents'
 import type { EditEvent } from '../../../shared/workbench/editSession'
 import type { ModelChatMessage, ModelSelection } from '../../../shared/workbench/modelProvider'
+import type { InputContext } from '../../../shared/workbench/attachments'
 import { type ExecutionRunRecord } from '../../../shared/workbench/execution'
 import { conversationHistoryIndex } from './ConversationHistoryIndex'
 import { PayloadCompiler } from '../../../core/execution/PayloadCompiler'
@@ -27,7 +28,6 @@ import { routeModelProviders, serializeModelPayload } from '../providers/ModelPr
 import { DesktopOperationError } from '../../errors'
 import { DEFAULT_PERMISSION_MODE } from '../../../shared/workbench/executionPermission'
 import { executionInputError } from './executionInputErrors'
-import { AgentFileService } from './AgentFileService'
 import { ExecutionChangeReviewService } from '../review/ExecutionChangeReviewService'
 import { HostArtifactDeliveryService } from './HostArtifactDeliveryService'
 import type { HtmlActionService } from '../observation/HtmlActionService'
@@ -41,6 +41,7 @@ import { isCourseInstanceRange, readTarget } from '../../../core/tools/ToolTarge
 import { matchesSavedDocument } from './savedDocumentBinding'
 import { isSourceDocumentModel } from '../../../shared/workbench/document'
 import type { ElementChangeView, ElementRevertResult } from '../../../shared/workbench/executionDesktop'
+import { snapshotSelectedLessonMaterials } from './MaterialReadTools'
 
 export interface ExecutionDesktopServiceOptions {
   directory: string
@@ -155,7 +156,7 @@ export class ExecutionDesktopService {
       subscribeDocumentEvents: listener => options.documents.subscribeEvents(listener),
       subscribeFileRelocations: listener => options.documents.fileCoordinator.subscribeRelocations(listener),
       edits: this.edits, provider, serializePayload, initialCompiler: new PayloadCompiler({ attachments: this.attachments, serializePayload }),
-      files: new AgentFileService(options.documents), materials: this.attachments, visualAnalysis, changeReview: this.changeReview,
+      files: options.documents.agentFiles, materials: this.attachments, visualAnalysis, changeReview: this.changeReview,
       artifacts: this.artifacts,
       readImageTiming: async jobId => (await import('../workbenchToolServices.js')).workbenchImageService().readTiming(jobId),
       approveBrowserAction: async input => (await import('../workbenchToolServices.js')).approveWorkbenchBrowserAction(input),
@@ -339,7 +340,9 @@ export class ExecutionDesktopService {
     return createHash('sha256').update(JSON.stringify({ workspaceId: input.workspaceId, conversationId: input.conversationId,
       text: input.text, documents: input.documents, attachments: input.attachments ?? [], mode: input.mode ?? 'queue',
       retryOfRunId: input.retryOfRunId ?? null, permission: input.permission ?? DEFAULT_PERMISSION_MODE,
-      ...(input.contentOutput ? { contentOutput: input.contentOutput } : {}) })).digest('hex')
+      ...(input.contentOutput ? { contentOutput: input.contentOutput } : {}),
+      ...(input.materials ? { materials: input.materials } : {}),
+      ...(input.webAuthorization ? { webAuthorization: input.webAuthorization } : {}) })).digest('hex')
   }
   private async publicSubmission(record: StoredExecutionSubmission): Promise<ExecutionSubmissionRecord> {
     const { schemaVersion: _schemaVersion, digest: _digest, start: _start, attachmentIds: _attachmentIds,
@@ -393,7 +396,8 @@ export class ExecutionDesktopService {
       writable: input.permission === 'read-only' ? [] : [{ kind: 'document' as const }] }]
   }
 
-  private async prepareSubmission(input: ExecutionSendInput, current: ConversationRecord, digest: string): Promise<StoredExecutionSubmission> {
+  private async prepareSubmission(input: ExecutionSendInput, current: ConversationRecord, digest: string,
+    frozenContext?: InputContext['context']): Promise<StoredExecutionSubmission> {
     const attachments = [...input.attachments ?? []]
     // Main owns the permission level: read-only tasks receive no writable scope whatever the renderer sent.
     const permission = input.permission ?? DEFAULT_PERMISSION_MODE
@@ -422,7 +426,7 @@ export class ExecutionDesktopService {
       }
     }
     if (permission === 'read-only') input = { ...input, documents: input.documents.map(document => ({ ...document, writable: [] })) }
-    if (!input.text.trim() && !attachments.length) throw executionInputError('empty-input')
+    if (!input.text.trim() && !attachments.length && !input.materials?.selections.length) throw executionInputError('empty-input')
     let explicitImages = false, imageCount = 0, representationBytes = 0
     this.timing(input.conversationId, input.submissionId, `${input.submissionId}:attachments:start`, 'submission.attachments.started',
       { detail: { attachmentCount: attachments.length } })
@@ -449,11 +453,13 @@ export class ExecutionDesktopService {
       throw error
     }
     const documents = []
+    const readOnlyRoots: string[] = []
     for (const reference of input.documents) {
       let snapshot: DocumentSnapshot
       try { snapshot = await this.options.documents.registry.get(reference.documentId).drain() }
       catch (error) { throw executionInputError('document-session-changed', error) }
       if (snapshot.epoch !== reference.epoch) throw executionInputError('document-session-changed')
+      if (snapshot.binding.kind === 'file') readOnlyRoots.push(path.dirname(snapshot.binding.path))
       // M15: an object or a document block stays the same target while it exists; a text range only while nothing changed.
       if (snapshot.revision !== reference.revision && [...(reference.selection ?? []), ...reference.writable.filter(target => target.kind !== 'document')]
         .some(target => !targetStillExists(snapshot, target))) throw executionInputError('document-range-changed')
@@ -466,8 +472,18 @@ export class ExecutionDesktopService {
         && document.selection?.some(target => JSON.stringify(target) === JSON.stringify(output.target))))
         throw refused('正文改写目标与本次固定选区不一致，请重新选择。')
     }
-    const historyIndex = await conversationHistoryIndex(current, runId => this.engine.read(runId))
-    const context = historyIndex.context
+    const selectedMaterials = !frozenContext && input.materials ? await snapshotSelectedLessonMaterials(input.materials,
+      { workspaceRoot: space.rootPath, readOnlyRoots, permission }) : []
+    const context = frozenContext ? structuredClone(frozenContext) : [
+      ...(await conversationHistoryIndex(current, runId => this.engine.read(runId))).context,
+      ...selectedMaterials.map((message, index) => ({ message,
+        provenance: { kind: 'selection' as const, id: `${input.submissionId}:material:${index}` } })),
+    ]
+    // Selected material images are actual current request input, unlike the history index.
+    for (const entry of context) if (entry.provenance.kind !== 'history' && Array.isArray(entry.message.content))
+      for (const part of entry.message.content) if (part && typeof part === 'object' && !Array.isArray(part) && part.type === 'image_url') {
+        explicitImages = true; imageCount++
+      }
     // History is an index of sources that may be reread later. It contributes no
     // image bytes to this first request and must not select the vision role for
     // an otherwise text-only submission. The separately frozen visionSelection
@@ -504,10 +520,14 @@ export class ExecutionDesktopService {
     return { schemaVersion: 1, submissionId: input.submissionId, workspaceId: input.workspaceId, conversationId: input.conversationId,
       state: 'queued', mode: input.mode ?? 'queue', text: input.text, documents: structuredClone(input.documents), attachments: structuredClone(attachments), permission,
       ...(input.contentOutput ? { contentOutput: structuredClone(input.contentOutput) } : {}),
+      ...(input.materials ? { materials: structuredClone(input.materials) } : {}),
+      ...(input.webAuthorization ? { webAuthorization: structuredClone(input.webAuthorization) } : {}),
       model: { provider: selection.connection.provider, model: selection.model, accountId: selection.connection.accountId, billing: selection.connection.billing.kind },
       createdAt: now, updatedAt: now, digest, attachmentIds,
       start: { conversationId: current.conversationId, taskId: input.submissionId, instruction: input.text, selection, documents,
         ...(input.contentOutput ? { contentOutput: structuredClone(input.contentOutput) } : {}),
+        ...(input.materials ? { materials: structuredClone(input.materials) } : {}),
+        ...(input.webAuthorization ? { webAuthorization: structuredClone(input.webAuthorization) } : {}),
         ...(visionSelection ? { visionSelection } : {}), ...(visionUnavailableReason ? { visionUnavailableReason } : {}),
         permission, workspaceRoot: space.rootPath,
         ...(current.home ? { conversationHome: structuredClone(current.home), conversationHomeRoot: homeSpace.rootPath } : {}),
@@ -671,6 +691,8 @@ export class ExecutionDesktopService {
         throw refused('原任务尚不可继续，请先核对运行状态')
       if (input.text !== source.text || JSON.stringify(input.documents) !== JSON.stringify(source.documents)
         || JSON.stringify(input.contentOutput ?? null) !== JSON.stringify(source.contentOutput ?? null)
+        || JSON.stringify(input.materials ?? null) !== JSON.stringify(source.start.materials ?? null)
+        || JSON.stringify(input.webAuthorization ?? null) !== JSON.stringify(source.start.webAuthorization ?? null)
         || JSON.stringify(input.attachments ?? []) !== JSON.stringify(source.attachments)
         || (input.permission ?? DEFAULT_PERMISSION_MODE) !== (source.permission ?? DEFAULT_PERMISSION_MODE))
         throw refused('继续运行必须使用原任务冻结的文字、目标和附件')
@@ -701,7 +723,7 @@ export class ExecutionDesktopService {
         if (!target || target.kind === 'course-surface') throw refused('原正文改写范围无法继续，请重新选择。')
         preparedInput.contentOutput = { ...output, documentId: preparedDocument!.documentId, target: structuredClone(target) }
       }
-      record = await this.prepareSubmission(preparedInput, current, digest)
+      record = await this.prepareSubmission(preparedInput, current, digest, previous?.input.inputContext?.context)
       if (previous) {
         // The public submission remains the user's original frozen payload so
         // lost ACK confirmation computes the same digest with the same ID.
