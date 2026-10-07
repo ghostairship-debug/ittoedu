@@ -2,6 +2,7 @@ import { mapMarkdownRange } from '../../../core/tools/ToolTargets'
 import type { HtmlSelectedTarget } from './htmlPreviewController'
 import type { ComponentAuthorRecord } from '../../../shared/contracts/component-platform/runtime'
 import { patchHtmlAuthoringRecords, readHtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
+import { equalComponentValue } from '../../../core/drivers/courseV10Operations'
 
 export interface HtmlTextDraft {
   readonly id: number
@@ -25,8 +26,15 @@ function textRange(target: HtmlSelectedTarget, source: string) {
 }
 
 function mapped(draft: HtmlTextDraft, source: string) {
+  const address = draft.authoring ?? draft.sourceAuthoring
+  const current = address && readHtmlAuthoringRecords(source)[address.authorKey]
+  if (current && address) {
+    const expected = draft.sourceAuthoring ? { ...address.record.binding, baseline: draft.original } : address.record.binding
+    if (current.kind !== address.record.kind || !equalComponentValue(current.scope ?? {}, address.record.scope ?? {})
+      || !equalComponentValue(current.binding, expected)) throw new Error(sourceChanged)
+  }
   if (draft.authoring) {
-    const record = readHtmlAuthoringRecords(source)[draft.authoring.authorKey]
+    const record = current
     const value = record?.overrides.text ?? record?.binding.baseline ?? draft.authoring.record.binding.baseline
     if (value !== draft.original) throw new Error(sourceChanged)
     return { from: 0, to: 0 }
@@ -62,7 +70,7 @@ export class HtmlTextDrafts {
       const prepared = this.prepared[index]!
       const submitted = prepared.drafts.find(value => value.id === draft.id)
       if (!submitted) continue
-      try { return mapped({ ...draft, source: prepared.source, from: submitted.from, to: submitted.to }, source) }
+      try { return mapped({ ...draft, source: prepared.source, original: submitted.value, from: submitted.from, to: submitted.to }, source) }
       catch { /* This source does not contain that submitted span; try an earlier baseline. */ }
     }
     return mapped(draft, source)
