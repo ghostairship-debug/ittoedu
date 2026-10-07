@@ -52,12 +52,12 @@ export function HtmlStructureEditor({ committed, lease, pendingDraft = false, lo
   const apply = async (command: HtmlSourceEditCommand) => {
     if (!editable) return
     if (command.type === 'style' && command.target.kind === 'element' && selected && grapes.current) {
-      grapes.current.style(selected.key, command.patch); return
+      if (grapes.current.style(selected.key, command.patch)) return
     }
     if (command.type === 'move' && grapes.current) {
       const destination = nodes.find(node => node.address?.from === command.parent.from)
       const target = nodes.find(node => node.address?.from === command.target.from)
-      if (destination && target) { grapes.current.move(target.key, destination.key, command.index); return }
+      if (destination && target && grapes.current.move(target.key, destination.key, command.index)) return
     }
     await commit.current(command)
   }
@@ -78,10 +78,10 @@ export function HtmlStructureEditor({ committed, lease, pendingDraft = false, lo
     if (!grapesContainer.current) return
     const projection = createHtmlGrapesProjection(grapesContainer.current, { commit: command => commit.current(command), select: setSelectedKey })
     grapes.current = projection
-    projection.project(source)
+    projection.project(source, lease.url)
     return () => { projection.dispose(); if (grapes.current === projection) grapes.current = null }
   }, [committed.documentId, committed.epoch])
-  useEffect(() => { grapes.current?.project(source) }, [source, committed.revision])
+  useEffect(() => { grapes.current?.project(source, lease.url) }, [source, committed.revision, lease.url])
   useEffect(() => { if (selectedKey) grapes.current?.select(selectedKey) }, [selectedKey])
   const applyJson = () => {
     if (!data) return

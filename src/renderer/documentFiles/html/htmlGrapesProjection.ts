@@ -68,7 +68,7 @@ export function createHtmlGrapesProjection(container: HTMLElement, ports: Ports)
     if (!dragging && !options.partial) void flush()
   })
 
-  const project = (source: string) => {
+  const project = (source: string, previewUrl?: string) => {
     replay = true
     try {
       modelByKey.clear(); nodeByKey.clear(); pendingStyles.clear()
@@ -76,15 +76,24 @@ export function createHtmlGrapesProjection(container: HTMLElement, ports: Ports)
       const nodes = flattenHtmlSourceNodes(structure.roots)
       for (const node of nodes) nodeByKey.set(node.key, node)
       const body = nodes.find(node => node.name === 'body')!
+      const attributes = (node: HtmlSourceNode) => Object.fromEntries(Object.entries(node.attributes).flatMap(([name, value]) => {
+        // Program behaviour belongs to the sandbox preview, never GJS's workbench frame.
+        if (/^on/i.test(name) || ['srcdoc', 'href', 'action', 'formaction'].includes(name)) return []
+        if (name === 'src' && previewUrl && !/^(?:data:|https?:|blob:)/i.test(value)) {
+          try { return [[name, new URL(value, previewUrl).href]] } catch { return [[name, value]] }
+        }
+        return [[name, value]]
+      }))
+      const projected = (node: HtmlSourceNode) => node.kind !== 'source' && !['iframe', 'object', 'embed'].includes(node.name)
       const definition = (node: HtmlSourceNode): ComponentDefinition => ({
         ...(node.kind === 'text' ? { type: 'textnode', content: (node.value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;') }
-          : { tagName: node.name, attributes: node.attributes,
-            components: node.children.filter(child => child.kind !== 'source').map(definition) }),
+          : { tagName: node.name, attributes: attributes(node),
+            components: node.children.filter(projected).map(definition) }),
         cwSourceKey: node.key, cwSourceAddress: node.address,
         removable: false, copyable: false, editable: false, draggable: Boolean(node.address),
         droppable: Boolean(node.contentSpan),
       })
-      editor.setComponents(body.children.filter(node => node.kind !== 'source').map(definition))
+      editor.setComponents(body.children.filter(projected).map(definition))
       editor.getWrapper()!.set({ cwSourceKey: body.key, cwSourceAddress: body.address })
       const gather = (model: Component) => {
         const key = model.get('cwSourceKey')
@@ -103,21 +112,25 @@ export function createHtmlGrapesProjection(container: HTMLElement, ports: Ports)
     select(key: string) { const model = modelByKey.get(key); if (model) editor.select(model) },
     style(key: string, patch: Record<string, string | null>) {
       const model = modelByKey.get(key)
-      if (!model || busy) return
+      if (!model) return false
+      if (busy) return true
       snapshot()
       const next = { ...model.getStyle() }
       for (const [name, value] of Object.entries(patch)) { if (value === null) delete next[name]; else next[name] = value }
       model.setStyle(next)
+      return true
     },
     move(key: string, parentKey: string, index: number) {
       const model = modelByKey.get(key), parent = modelByKey.get(parentKey)
-      if (!model || !parent || busy) return
+      if (!model || !parent) return false
+      if (busy) return true
       const original = nodeByKey.get(parentKey)
       const siblings = original?.children.filter(node => node.key !== key) ?? []
       const next = siblings.slice(index).find(node => modelByKey.has(node.key))
       const nextModel = next && modelByKey.get(next.key)
       const at = nextModel?.index() ?? parent.components().length
       snapshot(); model.move(parent, { at }); void flush(model)
+      return true
     },
     dispose() {
       // A panel can close while GJS's iframe is still loading.
