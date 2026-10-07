@@ -66,6 +66,28 @@ function changeJson(value: unknown, path: readonly (string | number)[], replacem
 
 /** Produce a precise source patch; the caller retains the document's existing transaction and save owner. */
 export function applyHtmlSourceEdit(source: string, command: HtmlSourceEditCommand): HtmlSourceEditResult {
+  if (command.type === 'batch') {
+    let updated = source
+    const remaining = command.commands.map(leaf => structuredClone(leaf))
+    for (let i = 0; i < remaining.length; i++) {
+      const before = updated
+      const result = applyHtmlSourceEdit(before, remaining[i]!)
+      if (!result.ok) return result
+      updated = result.source
+      let from = 0, tail = 0
+      while (from < before.length && from < updated.length && before[from] === updated[from]) from++
+      while (tail < before.length - from && tail < updated.length - from && before[before.length - tail - 1] === updated[updated.length - tail - 1]) tail++
+      const to = before.length - tail, delta = updated.length - before.length
+      for (const leaf of remaining.slice(i + 1)) {
+        for (const address of [leaf.target, ...('parent' in leaf ? [leaf.parent] : [])]) {
+          if (address.from >= to) { address.from += delta; address.to += delta }
+          else if (address.from <= from && address.to >= to) address.to += delta
+          else if (address.to > from) return { ok: false, reason: 'source-changed', message: '同次操作的源码目标重叠，请重新选择。' }
+        }
+      }
+    }
+    return { ok: true, source: updated, changed: updated !== source }
+  }
   const structure = inspectHtmlSource(source)
   const nodes = flattenHtmlSourceNodes(structure.roots)
   const target = nodes.find(node => sameHtmlSourceAddress(node.address, command.target))

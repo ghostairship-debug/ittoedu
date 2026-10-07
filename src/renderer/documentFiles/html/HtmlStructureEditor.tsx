@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import type { HtmlPreviewLease } from '../../../shared/workbench/htmlPreview'
 import { inspectHtmlSource, flattenHtmlSourceNodes, type HtmlSourceNode } from '../../../shared/html/htmlSourceStructure'
 import { htmlSourceEditCommandSchema, type HtmlSourceEditCommand } from '../../../shared/html/sourceEditCommands'
+import { createHtmlGrapesProjection } from './htmlGrapesProjection'
+import 'grapesjs/dist/css/grapes.min.css'
 
 export interface HtmlStructureEditorProps {
   committed: DocumentSnapshot
@@ -33,6 +35,9 @@ export function HtmlStructureEditor({ committed, lease, pendingDraft = false, lo
   const [parentKey, setParentKey] = useState('')
   const [busy, setBusy] = useState(false)
   const [issue, setIssue] = useState<string | null>(null)
+  const grapesContainer = useRef<HTMLDivElement>(null)
+  const grapes = useRef<ReturnType<typeof createHtmlGrapesProjection> | null>(null)
+  const commit = useRef<(command: HtmlSourceEditCommand) => Promise<void>>(async () => {})
   const selected = nodes.find(node => node.key === selectedKey)
   const parent = nodes.find(node => node.children.some(child => child.key === selectedKey))
   const rule = structure.rules[ruleIndex], data = structure.data[dataIndex]
@@ -46,6 +51,18 @@ export function HtmlStructureEditor({ committed, lease, pendingDraft = false, lo
 
   const apply = async (command: HtmlSourceEditCommand) => {
     if (!editable) return
+    if (command.type === 'style' && command.target.kind === 'element' && selected && grapes.current) {
+      grapes.current.style(selected.key, command.patch); return
+    }
+    if (command.type === 'move' && grapes.current) {
+      const destination = nodes.find(node => node.address?.from === command.parent.from)
+      const target = nodes.find(node => node.address?.from === command.target.from)
+      if (destination && target) { grapes.current.move(target.key, destination.key, command.index); return }
+    }
+    await commit.current(command)
+  }
+  commit.current = async (command: HtmlSourceEditCommand) => {
+    if (!editable) return
     setBusy(true); setIssue(null)
     try {
       const checked = htmlSourceEditCommandSchema.parse(command)
@@ -57,6 +74,15 @@ export function HtmlStructureEditor({ committed, lease, pendingDraft = false, lo
     } catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
     finally { setBusy(false) }
   }
+  useEffect(() => {
+    if (!grapesContainer.current) return
+    const projection = createHtmlGrapesProjection(grapesContainer.current, { commit: command => commit.current(command), select: setSelectedKey })
+    grapes.current = projection
+    projection.project(source)
+    return () => { projection.dispose(); if (grapes.current === projection) grapes.current = null }
+  }, [committed.documentId, committed.epoch])
+  useEffect(() => { grapes.current?.project(source) }, [source, committed.revision])
+  useEffect(() => { if (selectedKey) grapes.current?.select(selectedKey) }, [selectedKey])
   const applyJson = () => {
     if (!data) return
     try { void apply({ type: 'data', target: data.address, path: [], value: JSON.parse(value) }) }
@@ -82,6 +108,7 @@ export function HtmlStructureEditor({ committed, lease, pendingDraft = false, lo
   </fieldset>
 
   return <aside className="html-structure-editor" aria-label="HTML 结构与样式">
+    <div ref={grapesContainer} aria-label="HTML 可视结构编辑" style={{ minHeight: 280, pointerEvents: editable ? undefined : 'none' }} />
     <div role="group" aria-label="HTML 编辑内容" className="html-structure-editor__tabs">
       <button type="button" aria-pressed={tab === 'structure'} onClick={() => setTab('structure')}>结构</button>
       <button type="button" aria-pressed={tab === 'styles'} onClick={() => setTab('styles')}>共享样式</button>
