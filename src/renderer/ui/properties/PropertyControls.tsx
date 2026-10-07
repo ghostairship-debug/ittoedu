@@ -180,7 +180,15 @@ interface BufferedInputProps {
   onCommit(value: string): void | Promise<void>
 }
 
-export function BufferedInput({
+export function BufferedInput(props: BufferedInputProps) {
+  const bindingKey = usePropertyDraftBindingKey()
+  // A numeric draft belongs to its original object, even when the next object
+  // happens to have the same value. The existing registry preserves the old
+  // session on unmount and restores it only when that target is shown again.
+  return <BufferedPropertyInput key={props.type === 'number' ? bindingKey : undefined} {...props} />
+}
+
+function BufferedPropertyInput({
   label,
   value,
   type = 'text',
