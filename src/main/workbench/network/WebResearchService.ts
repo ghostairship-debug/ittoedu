@@ -223,7 +223,11 @@ export class WebResearchService {
         }
         stored = { source, filename }
         run.sources.set(source.sourceId, stored)
-      } catch (cause) { return { status: 'failed', reason: cause instanceof Error ? cause.message : '网页读取未完成' } }
+      } catch (cause) {
+        if (run.stopped || input.signal?.aborted || cause instanceof PublicHttpError && cause.code === 'cancelled')
+          return { status: 'rejected', reason: '任务已停止' }
+        return { status: 'failed', reason: cause instanceof Error ? cause.message : '网页读取未完成' }
+      }
     }
     let body: string
     try { body = await fs.readFile(stored.filename, 'utf8') }
