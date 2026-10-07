@@ -416,7 +416,7 @@ export class ExecutionEngine {
         ...(Number.isSafeInteger(observed?.httpStatus) && observed!.httpStatus! >= 100 && observed!.httpStatus! <= 599 ? { httpStatus: observed!.httpStatus } : {}),
         ...(Number.isSafeInteger(observed?.imageCount) && observed!.imageCount! >= 0 ? { imageCount: observed!.imageCount } : {}) }
       // Preserve the producer's clock and instant. Reading the job later is not API dispatch time.
-      await this.options.events.recordTiming({ markId: `${record.runId}:${tool.callId}:image:${index}:${mark.stage}`,
+      void this.options.events.recordTiming({ markId: `${record.runId}:${tool.callId}:image:${index}:${mark.stage}`,
         conversationId: record.input.conversationId, taskId: record.input.taskId, runId: record.runId,
         requestId: tool.requestId, toolCallId: tool.callId, stage: mark.stage!, process: 'main', clock: 'performance.now',
         clockInstanceId: mark.clockInstanceId, timeOriginMs: mark.timeOriginMs,
