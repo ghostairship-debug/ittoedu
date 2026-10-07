@@ -141,10 +141,24 @@ export function authorSpotGeometryFromFrame(observation: ComponentAuthorGeometry
       / (start.transform[column] ** 2 + start.transform[column + 1] ** 2)
     const x = factor(0), y = factor(2)
     if (changed(x, 1)) result.scaleX = (author.scaleX ?? 1) * x
-    if (changed(y, 1)) result.scaleY = (author.scaleY ?? 1) * y
+    if (changed(y, 1)) result.scaleY = (author.scaleY ?? author.scaleX ?? 1) * y
   } else if (mode === 'rotate') {
     const angle = Math.atan2(next.transform[1], next.transform[0]) - Math.atan2(start.transform[1], start.transform[0])
     if (changed(angle, 0)) result.rotation = (author.rotation ?? 0) + Math.atan2(Math.sin(angle), Math.cos(angle)) * 180 / Math.PI
+  }
+  if (observation.sourceOffset) {
+    const source = observation.sourceOffset, after = { ...author, ...result }
+    const matrix = (geometry: ComponentAuthorGeometry) => multiplyMatrices(rotationMatrix((geometry.rotation ?? 0) * Math.PI / 180),
+      scaleMatrix(geometry.scaleX ?? 1, geometry.scaleY ?? geometry.scaleX ?? 1))
+    const beforeSource = transformPoint(matrix(author), source.current)
+    const nextSource = transformPoint(matrix(after), { x: source.current.x + (next.width - start.width) * source.widthDelta.x + (next.height - start.height) * source.heightDelta.x,
+      y: source.current.y + (next.width - start.width) * source.widthDelta.y + (next.height - start.height) * source.heightDelta.y })
+    const x = next.transform[4] - start.transform[4] - (nextSource.x - beforeSource.x)
+    const y = next.transform[5] - start.transform[5] - (nextSource.y - beforeSource.y)
+    if (changed(x, 0)) result.translateX = (author.translateX ?? 0) + x
+    else delete result.translateX
+    if (changed(y, 0)) result.translateY = (author.translateY ?? 0) + y
+    else delete result.translateY
   }
   return result
 }

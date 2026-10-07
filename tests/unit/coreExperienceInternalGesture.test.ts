@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it, vi } from 'vitest'
-import { IDENTITY_MATRIX, frameCorners, transformPoint } from '../../src/core/components/geometry'
+import { IDENTITY_MATRIX, composeMatrices, frameCorners, matrixAroundPoint, rotationMatrix, scaleMatrix, transformPoint, translationMatrix } from '../../src/core/components/geometry'
 import { FreeTransformGesture, LocalAuthorTransformGesture } from '../../src/renderer/componentPlatform/surfaces/slide/freeTransformGesture'
 import type { FreeObjectTarget } from '../../src/renderer/componentPlatform/surfaces/slide/targets'
 import type { ComponentAuthorSpot, CourseProjectV10 } from '../../src/shared/contracts/component-platform'
@@ -49,6 +49,27 @@ it('compiles border-box width and parent-scaled movement into existing content-b
   drag.update({ x: pointer.x + 10, y: pointer.y })
   expect(drag.update({ x: pointer.x + 50, y: pointer.y }).geometry).toEqual({ translateX: 62 })
   expect(geometry.author).toEqual({ translateX: 12, width: 200 })
+})
+
+it('keeps the intended handle frame when the source rotates around its center and that center changes with text width', () => {
+  const source = rotationMatrix(Math.PI / 6), origin = { x: 100, y: 50 }, base = matrixAroundPoint(source, origin)
+  const geometry = { frame: { width: 200, height: 100, transform: [...composeMatrices(translationMatrix(40, 60), base)] as [number, number, number, number, number, number] },
+    parentToInstance: [1, 0, 0, 1, 0, 0] as [number, number, number, number, number, number], author: {}, boxInsets: { width: 0, height: 0 },
+    sourceOffset: { current: { x: base[4], y: base[5] }, widthDelta: { x: (1 - source[0]) / 2, y: -source[1] / 2 },
+      heightDelta: { x: -source[2] / 2, y: (1 - source[3]) / 2 } } }
+  const parent = [0.7, 0, 0, 0.7, 80, 20] as const, at = (x: number, y: number) => transformPoint(parent, transformPoint(geometry.frame.transform, { x, y }))
+  for (const kind of ['text', 'image'] as const) {
+    const gesture = new LocalAuthorTransformGesture({ geometry, kind, mode: 'resize', handle: 'e', rootToSurface: parent,
+      surfaceToPointer: IDENTITY_MATRIX, pointer: at(200, 50) })
+    const update = gesture.update(at(250, 50)), patch = update.geometry
+    const nextWidth = patch.width ?? 200, nextHeight = patch.height ?? 100
+    const consumed = composeMatrices(translationMatrix(40, 60), translationMatrix(patch.translateX ?? 0, patch.translateY ?? 0),
+      rotationMatrix((patch.rotation ?? 0) * Math.PI / 180), scaleMatrix(patch.scaleX ?? 1, patch.scaleY ?? patch.scaleX ?? 1),
+      matrixAroundPoint(source, { x: nextWidth / 2, y: nextHeight / 2 }))
+    update.frame.transform.forEach((expected, index) => expect(consumed[index]).toBeCloseTo(expected, 8))
+    if (kind === 'text') expect(patch.width).toBeCloseTo(250)
+    else expect(patch.scaleX).toBeCloseTo(1.25)
+  }
 })
 
 it('commits the completed local gesture once through canonical History and undoes the whole drag', async () => {
