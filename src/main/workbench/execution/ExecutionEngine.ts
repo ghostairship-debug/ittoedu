@@ -647,7 +647,9 @@ export class ExecutionEngine {
             || JSON.stringify(priorBinding.target) !== JSON.stringify(binding.target)) continue
           const write = [...source.tools].reverse().find(tool => tool.call.name === 'text.replace' && committed(tool.result))
           if (!write) continue
-          const recovered = await this.options.gateway.recoverBoundContentOutput(source.runId, write.callId, write.call, priorBinding, binding.documentId)
+          const captured = write.effectTargets?.filter(target => target.documentId === priorBinding.documentId)
+          const recovered = await this.options.gateway.recoverBoundContentOutput(source.runId, write.callId, write.call, priorBinding,
+            binding.documentId, captured?.length === 1 ? captured[0] : undefined)
           if (recovered) {
             const update = (target: ToolTarget) => JSON.stringify(target) === JSON.stringify(binding.target) ? structuredClone(recovered.target) : target
             frozen.documents = frozen.documents.map(document => document.documentId === binding.documentId
