@@ -7,7 +7,6 @@ import { DocumentHostService } from '../../../../src/main/workbench/DocumentHost
 import { closeDocumentFlow } from '../../../../src/main/workbench/documentCloseFlow'
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
 import { captureComponentOperation } from '../../../../src/core/drivers/courseV10Operations'
-import { componentProjectFiles } from '../../../../src/core/projectFiles/componentPlatform'
 import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
 import { createTextComponentData } from '../../../../src/components/text/data'
 import { connectExplicitMcp, readExplicitMcpConnection } from '../../../../scripts/mcpSdkClient'
@@ -27,7 +26,7 @@ it('cancelled close can reopen A for a real edit while old A authority remains s
       project.surfaces[0].childIds = ['content']
       const snapshot = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, `${name}.h5lesson`)
       await host.saveToPath(snapshot.documentId, path.join(workspace, `${name}.h5lesson`))
-      return { snapshot, path: componentProjectFiles(project, snapshot.model.resources).find(file => file.kind === 'data' && file.target?.kind === 'instance')!.path }
+      return { snapshot }
     }
     const a = await make('A'), b = await make('B')
     if (a.snapshot.model.kind !== 'course-v10') throw new Error('Expected V10')
@@ -40,6 +39,19 @@ it('cancelled close can reopen A for a real edit while old A authority remains s
     expect(openedA.isError).toBe(false); expect(openedB.isError).toBe(false)
     const targetA = (openedA.structuredContent?.result as { data: { target: string } }).data.target
     const targetB = (openedB.structuredContent?.result as { data: { target: string } }).data.target
+    const observePath = async (project: string) => {
+      const listed = await client!.call('project.list', { project })
+      expect(listed.isError, JSON.stringify(listed)).toBe(false)
+      const files = (listed.structuredContent?.result as { data: { files: Array<{ path: string }> } }).data.files
+      const filename = files.find(file => file.path.endsWith('.data.json'))?.path
+      if (!filename) throw new Error('Public catalog did not expose the text data file')
+      const read = await client!.call('project.read', { project, path: filename })
+      expect(read.isError, JSON.stringify(read)).toBe(false)
+      expect((read.structuredContent?.result as { data: { content: string } }).data.content).toBeTruthy()
+      return filename
+    }
+    await observePath(targetA)
+    const pathB = await observePath(targetB)
     const [oldRunId] = host.tools.writableRunIdsForDocument(a.snapshot.documentId)
     expect(oldRunId).toBeTruthy()
     let closes = 0
@@ -55,10 +67,11 @@ it('cancelled close can reopen A for a real edit while old A authority remains s
     expect(reopened.isError).toBe(false)
     const renewed = (reopened.structuredContent?.result as { data: { target: string; writable: boolean } }).data
     expect(renewed.writable).toBe(true)
-    const editedA = await client.call('object.update', { project: renewed.target, path: a.path, properties: { opacity: .7 } })
+    const pathA = await observePath(renewed.target)
+    const editedA = await client.call('object.update', { project: renewed.target, path: pathA, properties: { opacity: .7 } })
     expect(editedA.structuredContent, JSON.stringify(editedA))
       .toMatchObject({ result: { kind: 'document-operation', result: { status: 'applied' } } })
-    const editedB = await client.call('object.update', { project: targetB, path: b.path, properties: { opacity: .4 } })
+    const editedB = await client.call('object.update', { project: targetB, path: pathB, properties: { opacity: .4 } })
     expect(editedB.structuredContent, JSON.stringify(editedB))
       .toMatchObject({ result: { kind: 'document-operation', result: { status: 'applied' } } })
     const currentA = await host.internalAPI.read(a.snapshot.documentId)
