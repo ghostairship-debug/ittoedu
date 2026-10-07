@@ -15,7 +15,7 @@ export const objectUpdatePropertiesInputSchema = z.object({
 /** Paths bind the observed project file to its formal instance inside the Gateway. */
 export const objectUpdateInputSchema = z.union([
   z.object({ target: z.string().min(1).max(100), properties: objectUpdatePropertiesInputSchema }).strict(),
-  z.object({ project: z.string().min(1).max(1000).optional(), path: z.string().min(1).max(500),
+  z.object({ project: z.string().min(1).max(1000).optional(), path: z.string().min(1),
     properties: objectUpdatePropertiesInputSchema }).strict(),
 ])
 
@@ -28,5 +28,5 @@ export const objectConvertOptionsInputSchema = z.object({
 }).strict()
 export const objectConvertInputSchema = z.union([
   objectConvertOptionsInputSchema.extend({ target: z.string().min(1).max(100) }).strict(),
-  objectConvertOptionsInputSchema.extend({ project: z.string().min(1).max(1000).optional(), path: z.string().min(1).max(500) }).strict(),
+  objectConvertOptionsInputSchema.extend({ project: z.string().min(1).max(1000).optional(), path: z.string().min(1) }).strict(),
 ])
