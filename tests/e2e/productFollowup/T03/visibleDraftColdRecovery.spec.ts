@@ -46,13 +46,16 @@ test('T03 real GUI preserves half JSON and numeric raw at normal close and resto
   mkdirSync(workspace)
   const project = createBlankCourseProjectV10('Draft recovery')
   project.definitions.custom = { id: 'custom', role: 'content', implementation: { kind: 'source', language: 'javascript', workspace: { ownerId: 'code', entry: 'main.js' } } }
+  project.definitions.canvas = { id: 'canvas', role: 'content', implementation: { kind: 'source', language: 'javascript',
+    source: "export default {mount({root,instance,authoring}) {root.textContent=instance.data.label;const release=authoring?.register({kind:'text',dataPath:['label'],initialValue:instance.data.label,localBounds:{width:180,height:80,transform:[1,0,0,1,0,0]}});return {update(next){root.textContent=next.data.label},dispose(){release?.();root.replaceChildren()}}}}" } }
   project.definitions.text = { ...TEXT_DEFINITION, id: 'text' }
   project.instances.source = { id: 'source', name: 'Source target', definitionId: 'custom', data: {}, frame: { width: 160, height: 80, transform: [1, 0, 0, 1, 30, 40] } }
   project.instances.text = { id: 'text', name: 'Teacher text', definitionId: 'text', data: createTextComponentData('Keep teacher text'), frame: { width: 200, height: 80, transform: [1, 0, 0, 1, 250, 40] } }
-  project.surfaces[0].childIds = ['source', 'text']
+  project.instances.canvas = { id: 'canvas', name: 'Canvas teacher target', definitionId: 'canvas', data: { label: 'Canvas teacher original' }, frame: { width: 180, height: 80, transform: [1, 0, 0, 1, 250, 190] } }
+  project.surfaces[0].childIds = ['source', 'text', 'canvas']
   const filename = join(workspace, 'drafts.h5lesson')
-  writeFileSync(filename, createCourseProjectV10Archive({ project, resources: { assets: {}, components: { code: { 'main.js': new TextEncoder().encode('export const value = 42;') } } } }))
-  const sourceText = 'export const value = 85;', halfJson = '{"data":'
+  writeFileSync(filename, createCourseProjectV10Archive({ project, resources: { assets: {}, components: { code: { 'main.js': new TextEncoder().encode("export default {mount({root}){root.textContent='42';return {update(){},dispose(){}}}}") } } } }))
+  const sourceText = "export default {mount({root}){root.textContent='85';return {update(){},dispose(){}}}}", halfJson = '{"data":', canvasRaw = '尚未完成的画布拼音稿'
   let app: ElectronApplication | undefined
   try {
     let view = await launch(profile, workspace); app = view.app
@@ -69,6 +72,10 @@ test('T03 real GUI preserves half JSON and numeric raw at normal close and resto
     await view.page.getByRole('textbox', { name: '所选对象 · Teacher text', exact: true }).fill(halfJson)
     await view.page.getByRole('tab', { name: '属性', exact: true }).click()
     await view.page.getByLabel('X', { exact: true }).fill('-')
+    await view.page.getByRole('button', { name: '双击编辑此处文字', exact: true }).click()
+    const canvasInput = view.page.getByRole('textbox', { name: '编辑此处文字', exact: true })
+    await canvasInput.dispatchEvent('compositionstart')
+    await canvasInput.fill(canvasRaw)
     const id = await view.page.locator('.course-editor-frame:visible').getAttribute('data-document-id')
     const before = await view.page.evaluate(id => window.desktopAPI.documents!.read(id!), id)
     expect(before.undoDepth).toBe(1)
@@ -78,6 +85,7 @@ test('T03 real GUI preserves half JSON and numeric raw at normal close and resto
     await exited; app = undefined
     expect(openCourseProjectV10Archive(new Uint8Array(readFileSync(filename))).project.instances.text.frame?.transform[4]).toBe(250)
     view = await launch(profile, workspace); app = view.app
+    await expect(view.page.getByRole('textbox', { name: '编辑此处文字', exact: true })).toHaveValue(canvasRaw)
     await select(view.page, 'text')
     await view.page.getByRole('tab', { name: '属性', exact: true }).click()
     await expect(view.page.getByLabel('X', { exact: true })).toHaveValue('-')
@@ -87,6 +95,7 @@ test('T03 real GUI preserves half JSON and numeric raw at normal close and resto
     const coldId = await view.page.locator('.course-editor-frame:visible').getAttribute('data-document-id')
     const restored = await view.page.evaluate(id => window.desktopAPI.documents!.read(id!), coldId)
     expect(restored.undoDepth).toBe(before.undoDepth)
+    expect(restored.model).toMatchObject({ kind: 'course-v10', project: { instances: { canvas: project.instances.canvas } } })
     expect(restored.model).toMatchObject({ kind: 'course-v10', project: { instances: { text: { frame: { transform: [1, 0, 0, 1, 250, 40] } } } } })
     await select(view.page, 'source')
     await view.page.getByRole('tab', { name: '开发', exact: true }).click()
