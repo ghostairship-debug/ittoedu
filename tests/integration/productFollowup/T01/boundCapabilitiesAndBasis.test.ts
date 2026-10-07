@@ -94,9 +94,11 @@ async function card(h: Awaited<ReturnType<typeof fixture>>, instruction: string)
   fireEvent.click(screen.getByRole('button', { name: 'AI 修改' }))
   fireEvent.change(screen.getByLabelText('AI 修改要求'), { target: { value: instruction } })
   await act(async () => { fireEvent.submit(screen.getByLabelText('AI 修改要求').closest('form')!) })
-  expect(requested?.contentOutput, 'The real rich editor card must retain its bound content output').toBeTruthy()
   expect(started).toBeTruthy()
-  return { requested: requested!, started: await started! }
+  const result = await started!
+  if (!requested?.contentOutput) await h.engine.wait(result.runId)
+  expect(requested?.contentOutput, 'The real rich editor card must retain its bound content output').toBeTruthy()
+  return { requested: requested!, started: result }
 }
 
 it('a simple card rewrite keeps the single-response no-tool fast path', async () => {
