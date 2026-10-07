@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { DocumentHostAPI } from '../../shared/workbench/desktop'
 import type { DocumentSnapshot } from '../../shared/workbench/document'
-import type { CourseSurfaceDocument } from '../../shared/courseProjectTypes'
-import { effectiveSceneCanvas } from '../../shared/slideCanvas'
+import { componentDefinitionBuiltinKey, resolveComponentPresentation, type ComponentSurface } from '../../shared/contracts/component-platform/project'
+import { readTarget } from '../../core/tools/ToolTargets'
 import type { ImageResourceReference } from '../../shared/workbench/images'
 import type { ImageApplyCapture, ImageInsertionFrame, ImageResultOwner, ImageResultsDesktopAPI, ImageResultView } from '../../shared/workbench/imageResultsDesktop'
 import { workbenchSelection } from './SelectionContextController'
@@ -10,15 +10,15 @@ import './imageResultCard.css'
 
 const labels = { preparing: '准备中', running: '图片请求进行中', ready: '已生成，尚未应用', unapplied: '已生成，停止后尚未应用', stopped: '已停止', unknown: '结果未知；不会自动重发', failed: '图片请求失败' }
 const billingLabels = { metered: '按量付费', 'token-plan': 'Token Plan', subscription: '订阅', prepaid: '预付费', unknown: '未知' }
-function suggestedFrame(surface: CourseSurfaceDocument, resource: ImageResourceReference, sceneId?: string): ImageInsertionFrame {
+function suggestedFrame(surface: ComponentSurface, resource: ImageResourceReference): ImageInsertionFrame {
   const scale = Math.min(480 / resource.width, 320 / resource.height, 1)
   const width = Math.max(1, Math.round(resource.width * scale)), height = Math.max(1, Math.round(resource.height * scale))
-  if (surface.type === 'slide') {
-    const canvas = effectiveSceneCanvas(surface, surface.scenes.find(scene => scene.id === sceneId))
+  if (surface.kind === 'slide') {
+    const canvas = surface.designSize ?? { width: 1280, height: 720 }
     return { x: canvas.width - width - 48, y: canvas.height - height - 48, width, height }
   }
-  if (surface.type === 'flow') return { x: Math.max(0, surface.layout.readingWidth - width - 32), y: 320, width, height }
-  return { x: surface.camera.home.x + 160, y: surface.camera.home.y + 100, width, height }
+  if (surface.kind === 'flow') return { x: Math.max(0, (surface.flow?.layout.readingWidth ?? 800) - width - 32), y: 320, width, height }
+  return { x: (surface.spatial?.home.x ?? 0) + 160, y: (surface.spatial?.home.y ?? 0) + 100, width, height }
 }
 function parseFrame(values: Record<'x' | 'y' | 'width' | 'height', string>): ImageInsertionFrame | null {
   if (Object.values(values).some(value => !value.trim())) return null
@@ -47,43 +47,51 @@ export function ImageResultCard({ api, owner, documents = window.desktopAPI?.doc
   useEffect(() => {
     if (!documents) return
     let alive = true
-    void documents.list().then(values => { if (alive) setAvailable(values.filter(value => value.model.kind === 'course-v9')) })
+    void documents.list().then(values => { if (alive) setAvailable(values.filter(value => value.model.kind === 'course-v10')) })
     const stop = documents.subscribe(event => {
       if (event.type === 'closed') setAvailable(values => values.filter(value => value.documentId !== event.documentId))
-      else if (event.snapshot.model.kind === 'course-v9') setAvailable(values => [...values.filter(value => value.documentId !== event.snapshot.documentId), event.snapshot])
+      else if (event.snapshot.model.kind === 'course-v10') setAvailable(values => [...values.filter(value => value.documentId !== event.snapshot.documentId), event.snapshot])
     })
     return () => { alive = false; stop() }
   }, [documents])
   useEffect(() => { ++previewGeneration.current; setPreview(undefined); return () => { ++previewGeneration.current } }, [resourceId])
   useEffect(() => () => { if (preview) URL.revokeObjectURL(preview) }, [preview])
   const selected = available.find(value => value.documentId === documentId)
-  const project = selected?.model.kind === 'course-v9' ? selected.model.project : null
-  const location = project?.locations.find(value => value.id === locationId)
-  const surface = project?.surfaces.find(value => value.id === location?.surfaceId)
+  const project = selected?.model.kind === 'course-v10' ? selected.model.project : null
+  const surface = project?.surfaces.find(value => value.id === locationId)
   const resource = view?.job.resources.find(value => value.resourceId === resourceId)
   const frame = parseFrame(frameValues)
   useEffect(() => {
     if (!surface || !resource) { setFrameValues({ x: '', y: '', width: '', height: '' }); return }
-    const suggested = suggestedFrame(surface, resource, location?.kind === 'slide-scene' ? location.sceneId : undefined)
+    const suggested = suggestedFrame(surface, resource)
     setFrameValues(Object.fromEntries(Object.entries(suggested).map(([key, value]) => [key, String(value)])) as typeof frameValues)
   }, [documentId, locationId, resourceId, surface?.id, resource?.width, resource?.height])
   const selection = documentId ? workbenchSelection.getManual(documentId) : null
-  const replacement = selection?.targets.length === 1 && ['course-object', 'flow-block'].includes(selection.targets[0]!.kind) ? selection : null
+  const replacementTarget = selection?.targets.length === 1 && selection.targets[0]?.kind === 'course-instance' ? selection.targets[0] : null
+  const replacementInstance = project && replacementTarget ? resolveComponentPresentation(project, replacementTarget.surfaceId, replacementTarget.stateId ?? null).instances[replacementTarget.instanceId] : null
+  const replacement = replacementTarget && replacementTarget.dataPath === undefined && replacementTarget.from === undefined
+    && replacementTarget.to === undefined && replacementTarget.fieldScope !== 'flowLayout' && replacementInstance
+    && project && componentDefinitionBuiltinKey(project.definitions[replacementInstance.definitionId]) === 'guoling.image' ? selection : null
   const act = async (work: () => Promise<void>) => { if (busy) return; setBusy(true); setError(''); try { await work() } catch (cause) { setError((cause as Error).message) } finally { setBusy(false) } }
   const refresh = async () => setView(await api.read(owner))
   const capture = async (mode: 'insert' | 'replace'): Promise<ImageApplyCapture> => {
     if (!documents || !selected) throw new Error('请明确选择要应用图片的 H5 演示')
+    const exact = mode === 'replace' ? structuredClone(workbenchSelection.getManual(documentId)) : null
+    const targetSurface = locationId, targetDocument = documentId, targetEpoch = selected.epoch
     const current = await workbenchSelection.prepare(documentId)
-    if (current.model.kind !== 'course-v9') throw new Error('请选择 H5 演示')
+    if (current.documentId !== targetDocument || current.epoch !== targetEpoch || current.model.kind !== 'course-v10') throw new Error('目标课件已改变，请重新选择')
     if (mode === 'replace') {
-      const exact = workbenchSelection.getManual(documentId)
-      if (!exact || exact.targets.length !== 1 || !['course-object', 'flow-block'].includes(exact.targets[0]!.kind) || exact.epoch !== current.epoch || exact.revision !== current.revision) throw new Error('请在正文中重新选中一个图片对象')
-      return { documentId, epoch: current.epoch, revision: current.revision, address: exact.targets[0] as ImageApplyCapture['address'], label: exact.label }
+      const address = exact?.targets.length === 1 ? exact.targets[0] : undefined
+      if (!address || address.kind !== 'course-instance' || address.dataPath !== undefined || address.from !== undefined
+        || address.to !== undefined || address.fieldScope === 'flowLayout' || exact?.epoch !== current.epoch) throw new Error('请在正文中选中一张完整图片')
+      readTarget(current.model, address)
+      return { documentId: targetDocument, epoch: current.epoch, revision: current.revision,
+        address: { kind: 'course-instance', surfaceId: address.surfaceId, instanceId: address.instanceId, stateId: address.stateId ?? null }, label: exact!.label }
     }
-    const location = current.model.project.locations.find(value => value.id === locationId)
-    if (!location) throw new Error('请选择明确的插入位置')
-    const surface = current.model.project.surfaces.find(value => value.id === location.surfaceId)!
-    return { documentId, epoch: current.epoch, revision: current.revision, address: { kind: 'course-owner', locationId, owner: surface.type === 'slide' ? 'scene' : surface.type === 'flow' ? 'surface' : 'world', ...(location.kind === 'slide-scene' && location.stateId ? { stateId: location.stateId } : {}) }, label: location.label }
+    const surface = current.model.project.surfaces.find(value => value.id === targetSurface)
+    if (!surface) throw new Error('请选择明确的插入页面')
+    return { documentId: targetDocument, epoch: current.epoch, revision: current.revision,
+      address: { kind: 'course-surface', surfaceId: surface.id }, label: surface.title || surface.id }
   }
   const apply = async (mode: 'insert' | 'replace') => {
     if (mode === 'insert' && !frame) throw new Error('请设置有效的图片位置与尺寸')
@@ -111,7 +119,7 @@ export function ImageResultCard({ api, owner, documents = window.desktopAPI?.doc
       <button type="button" disabled={busy} onClick={() => void act(async () => { const ticket = previewGeneration.current, result = await api.preview({ ...owner, resourceId }); if (ticket === previewGeneration.current) setPreview(URL.createObjectURL(new Blob([Uint8Array.from(result.bytes).buffer], { type: result.mimeType }))) })}>预览图片</button>
       {preview && <img className="image-result-card__preview" src={preview} alt="生成的图片预览" />}
       <label>应用到 H5 演示<select value={documentId} onChange={event => { setDocumentId(event.target.value); setLocationId('') }}><option value="">请选择 H5 演示</option>{available.map(document => <option key={document.documentId} value={document.documentId}>{document.binding.kind === 'untitled' ? document.binding.suggestedName : document.binding.path.split(/[\\/]/).pop()}</option>)}</select></label>
-      <label>插入位置<select value={locationId} onChange={event => setLocationId(event.target.value)}><option value="">请选择位置</option>{project?.locations.map(location => <option key={location.id} value={location.id}>{location.label || location.id}</option>)}</select></label>
+      <label>插入位置<select value={locationId} onChange={event => setLocationId(event.target.value)}><option value="">请选择位置</option>{project?.surfaces.map(surface => <option key={surface.id} value={surface.id}>{surface.title || surface.id}</option>)}</select></label>
       {surface && resource && <details className="image-result-card__placement">
         <summary>画布位置与尺寸：{frame ? `X ${frame.x} · Y ${frame.y} · ${frame.width}×${frame.height}` : '请填写有效数值'}</summary>
         <div className="image-result-card__frame-fields">

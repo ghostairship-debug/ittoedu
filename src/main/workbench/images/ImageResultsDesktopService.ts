@@ -200,8 +200,7 @@ export class ImageResultsDesktopService {
   }
   private async perform(input: ActionRequest): Promise<unknown> {
     if (input.type === 'apply') {
-      if (input.target.address.kind === 'course-owner' && !input.frame) throw new Error('插入图片前请明确画布位置与尺寸')
-      if (input.target.address.kind !== 'course-owner' && input.frame) throw new Error('替换图片不接受插入位置与尺寸')
+      if (input.target.address.kind !== 'course-surface' && input.frame) throw new Error('替换图片不接受插入位置与尺寸')
     }
     const view = await this.read(input), image = await this.preview(input)
     const gateway = this.options.documents.tools, prior = await this.action(input.actionId)
@@ -218,6 +217,7 @@ export class ImageResultsDesktopService {
     }
     const documentId = input.type === 'apply' ? input.target.documentId : view.job.documentId
     const current = await this.options.documents.registry.get(documentId).drain()
+    if (input.type === 'apply' && current.model.kind !== 'course-v10') throw new Error('图片应用需要 Project V10 课件')
     if (input.type === 'apply' && (current.epoch !== input.target.epoch || current.revision !== input.target.revision)) throw new Error('目标文档已改变，请重新选择图片应用位置')
     const action: Action = { version: 1, input, digest: digest(input), runId: `image-result:${input.actionId}`, source: view.source }
     if (input.type === 'edit') action.childJobId = `image-edit:${input.actionId}`
@@ -233,7 +233,11 @@ export class ImageResultsDesktopService {
       const latest = await this.options.documents.registry.get(documentId).drain()
       if (latest.epoch !== input.target.epoch || latest.revision !== input.target.revision) throw new Error('准备图片期间目标已改变，请重新选择')
       const target = await gateway.issueTarget(action.runId, documentId, input.target.address)
-      action.call = input.target.address.kind === 'course-owner' ? { name: 'media.insert', input: { target, resource, properties: { label: '生成图片', fit: 'contain', ...input.frame } } } : { name: 'media.apply', input: { target, resource } }
+      action.call = input.target.address.kind === 'course-surface'
+        ? { name: 'media.insert', input: { target, resource, fit: 'contain', ...(input.frame ? { frame: {
+          width: input.frame.width, height: input.frame.height, transform: [1, 0, 0, 1, input.frame.x, input.frame.y],
+        } } : {}) } }
+        : { name: 'media.apply', input: { target, resource } }
       await this.store(action)
       const result = await gateway.execute(action.runId, input.actionId, action.call)
       if (result.kind !== 'document-operation') throw new Error(result.kind === 'error' ? result.message : '图片操作未返回正式文档回执')
