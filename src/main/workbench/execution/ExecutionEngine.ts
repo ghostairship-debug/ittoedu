@@ -241,6 +241,7 @@ export class ExecutionEngine {
   private readonly htmlStartedRevisions = new Map<string, number>()
   private readonly displayBuffers = new Map<string, DisplayEventBuffer>()
   private readonly active = new Map<string, ActiveRun>()
+  private closing = false
   private readonly preparingRecords = new Map<string, ExecutionRunRecord>()
   private readonly browserPauses = new Map<string, { wait: Promise<void>; release(): void }>()
   private readonly listeners = new Set<(event: ExecutionEvent) => void>()
@@ -608,6 +609,7 @@ export class ExecutionEngine {
     if (changed) await this.checkpoint(record)
   }
   async start(input: ExecutionStart, continuation?: { runId: string; facts: string; sameTask?: boolean; unresolvedToolNames?: readonly string[]; unresolvedEffects?: UnresolvedEffect[] }, onPrepared?: (record: ExecutionRunRecord) => Promise<void>): Promise<ExecutionRunRecord> {
+    if (this.closing) throw new Error('应用正在关闭；输入与已有回执保留，未启动新任务')
     const frozen = structuredClone(input)
     let verifiedLineage: ExecutionRunRecord[] | undefined
     let contentAlreadyApplied = false
@@ -821,6 +823,7 @@ export class ExecutionEngine {
       this.timing(record, `${runId}:prepare:end`, 'engine.prepare.finished', { detail: { outcome: 'completed' } })
       preparationFinished = true
       await onPrepared?.(structuredClone(record))
+      if (this.closing) throw new Error('应用正在关闭；已保留准备记录，未发送模型请求')
       const active: ActiveRun = { record, contextScale: 1, forceCompaction: false, contextMessages: [], controller: new AbortController(), stopped: false, streams: new Map(), completion: Promise.resolve(), tools,
         ...(contentOutput ? { contentOutput: { targetHandle: contentOutput.targetHandle } } : {}),
         ...(contentAlreadyApplied ? { contentAlreadyApplied: true } : {}),
@@ -874,6 +877,12 @@ export class ExecutionEngine {
     }
   }
   private async waitForBrowser(active: ActiveRun): Promise<void> { await this.browserPauses.get(active.record.runId)?.wait }
+  /** Main's normal exit uses the same stop barriers and durable receipts as a teacher stop. */
+  async shutdown(): Promise<void> {
+    this.closing = true
+    await Promise.all([...this.active.keys()].map(runId => this.stop(runId)))
+    await this.settleDocumentBindings()
+  }
 
   async stop(runId: string): Promise<ExecutionRunRecord | null> {
     const active = this.active.get(runId)

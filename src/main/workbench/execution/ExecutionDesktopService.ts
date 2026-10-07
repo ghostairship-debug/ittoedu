@@ -99,6 +99,8 @@ export class ExecutionDesktopService {
   readonly changeReview: ExecutionChangeReviewService
   readonly artifacts: HostArtifactDeliveryService
   private readonly queues = new Map<string, Promise<unknown>>()
+  private closing = false
+  private shutdownPromise?: Promise<void>
   private readonly elementChanges = new Map<string, ElementChangeTracker>()
   private eventSink?: (event: ExecutionEvent) => void
   private editSink?: (event: EditEvent) => void
@@ -163,6 +165,19 @@ export class ExecutionDesktopService {
     this.edits.subscribe(event => this.editSink?.(event))
   }
   setSinks(events?: (event: ExecutionEvent) => void, edits?: (event: EditEvent) => void) { this.eventSink = events; this.editSink = edits }
+  /** Preserve queued input, stop live runs, then drain their ordinary result/conversation writes. */
+  shutdown(): Promise<void> {
+    if (this.shutdownPromise) return this.shutdownPromise
+    this.closing = true
+    const stopping = this.engine.shutdown()
+    this.shutdownPromise = (async () => {
+      await Promise.all([this.initialization, this.recoveryAndRebindPromise, stopping])
+      // run.end can enqueue its final conversation write while another queue is draining.
+      while (this.queues.size) await Promise.all([...this.queues.values()])
+      await this.engine.settleDocumentBindings()
+    })()
+    return this.shutdownPromise
+  }
   setHtmlActions(service: HtmlActionService): void { this.engine.setHtmlActions(service) }
   private timing(conversationId: string, taskId: string, markId: string, stage: ExecutionTimingStage,
     extra: Pick<ExecutionTimingMark, 'sourceWallTimeMs' | 'detail'> = {},
@@ -524,6 +539,7 @@ export class ExecutionDesktopService {
       patch: { inputDraft: record.text, inputAttachments: record.attachments, frozenContextRefs: this.refs(record.documents) } })
   }
   private async startSubmission(record: StoredExecutionSubmission, continuation = record.continuation): Promise<StoredExecutionSubmission> {
+    if (this.closing) throw refused('应用正在关闭；排队输入已保留，未启动新任务')
     record = await this.submissions.update(record.submissionId, { state: 'starting', continuation, updatedAt: Date.now(), failure: undefined })
     await this.recordElementBaseline(record)
     try {
@@ -544,6 +560,7 @@ export class ExecutionDesktopService {
     }
   }
   private async startNext(conversationId: string, previous?: ExecutionRunRecord, explicit = false): Promise<void> {
+    if (this.closing) return
     if (await this.submissions.pausedReason(conversationId)) return
     const records = (await this.submissions.list()).filter(record => record.conversationId === conversationId)
     if (records.some(record => record.state === 'starting')) return
@@ -881,6 +898,7 @@ export class ExecutionDesktopService {
   async operate(raw: unknown): Promise<unknown> {
     const received = captureMainTiming()
     try {
+      if (this.closing) throw refused('应用正在关闭；当前输入与已应用修改已保留')
       await this.ready()
       const input = executionDesktopRequestSchema.parse(raw)
       // Cold-start ready may return while background recovery is still walking the run history. The fast
