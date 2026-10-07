@@ -61,27 +61,37 @@ export function localModulePath(reference: string, importer = '', scriptSource =
 /** The HTML stays author source; generated inline entry names exist only in this projection. */
 export function webModuleCompilationInput(data: WebData): { input: ComponentCompilationInput; entries: Record<string, string> } | undefined {
   const files: Record<string, string> = { ...data.modules }, entries: Record<string, string> = {}
-  let scriptIndex = 0
+  const documentEntries = (html: string, documentPath: string) => {
+  let scriptIndex = 0, iframeIndex = 0
   const visit = (node: DefaultTreeAdapterTypes.Node): void => {
+    if ('tagName' in node && node.tagName === 'iframe') {
+      const index = iframeIndex++, srcdoc = node.attrs.find(item => item.name === 'srcdoc')?.value
+      if (srcdoc !== undefined) documentEntries(srcdoc, documentPath ? `${documentPath}/${index}` : String(index))
+    }
     if ('tagName' in node && node.tagName === 'script') {
       const index = scriptIndex++
+      const entryKey = documentPath ? `${documentPath}:${index}` : String(index)
       const type = node.attrs.find(item => item.name === 'type')?.value.trim().toLowerCase()
       if (type === 'module') {
+        const base = node.attrs.find(item => item.name === 'data-guoling-module-base')?.value
+        const importer = base ? `${base}/__document.html` : ''
         const src = node.attrs.find(item => item.name === 'src')?.value
         if (src !== undefined) {
-          const path = localModulePath(src, '', true)
-          if (path) entries[String(index)] = path
+          const path = localModulePath(src, importer, true)
+          if (path) entries[entryKey] = path
         } else {
-          let name = `__html_module_${index}.js`
+          let name = `${base ? `${base}/` : ''}__html_module_${documentPath.replaceAll('/', '_') || 'root'}_${index}.js`
           while (Object.hasOwn(files, name)) name = `_${name}`
           files[name] = node.childNodes.map(child => child.nodeName === '#text' ? (child as DefaultTreeAdapterTypes.TextNode).value : '').join('')
-          entries[String(index)] = name
+          entries[entryKey] = name
         }
       }
     }
     if ('childNodes' in node) node.childNodes.forEach(visit)
   }
-  visit(parse(data.html))
+  visit(parse(html))
+  }
+  documentEntries(data.html, '')
   if (!Object.keys(entries).length) return undefined
   return { input: { entry: Object.values(entries)[0] ?? Object.keys(files)[0]!, files,
     moduleEntries: Object.values(entries), options: { preserveModules: true, sourceMap: false } }, entries }

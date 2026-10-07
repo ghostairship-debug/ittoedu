@@ -19,8 +19,13 @@ function sourceModule(implementation: SourceImplementation, resources: DocumentR
     const { ownerId, entry } = implementation.workspace
     const files = resources?.components[ownerId]
     if (requireEntry && (!files || !Object.hasOwn(files, entry))) throw new Error(`组件源码入口尚未提供：${ownerId}/${entry}`)
-    const decoder = new TextDecoder()
-    return { entry, files: Object.fromEntries(Object.entries(files ?? {}).map(([name, bytes]) => [name, decoder.decode(bytes)])), moduleBindings }
+    const text: Record<string, string> = {}, binaryFiles: Record<string, Uint8Array> = {}
+    for (const [name, bytes] of Object.entries(files ?? {})) {
+      const value = componentSourceFileText(bytes)
+      if (value === null) binaryFiles[name] = Uint8Array.from(bytes)
+      else text[name] = value
+    }
+    return { entry, files: text, ...(Object.keys(binaryFiles).length ? { binaryFiles } : {}), moduleBindings }
   }
   if (typeof implementation.source !== 'string') throw new Error('组件源码尚未提供')
   const entry = `component.${implementation.language === 'typescript' ? 'ts' : 'js'}`

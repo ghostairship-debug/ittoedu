@@ -75,6 +75,8 @@ const RAW_TEXT = new Set(['title', 'textarea', 'noscript'])
 const reportedReference = (item: ImportDiagnostic) => item.level === 'error' || item.code === 'missing-relative-resource'
 /** Written source file of a local iframe document inlined as srcdoc. */
 export const EMBEDDED_SOURCE_ATTRIBUTE = 'data-guoling-source'
+/** Logical directory for an entry in a nested document; never a filesystem grant. */
+export const MODULE_BASE_ATTRIBUTE = 'data-guoling-module-base'
 
 const clip = (value: string, max = 64) => value.length <= max ? value : value.slice(0, max)
 const copyBytes = (bytes: Uint8Array) => new Uint8Array(bytes)
@@ -623,7 +625,8 @@ function collectModule(reference: string, baseDir: string, sink: Sink, siblings:
   }
   const source = decodeText(bytes)
   sink.modules.set(key, source)
-  sink.modules.set(key, rewriteJavaScript(source, 'module', directoryOf(key), sink, siblings, `模块 ${key}`))
+  sink.modules.set(key, extensionOf(key) === 'css' ? rewriteCss(source, directoryOf(key), sink, siblings)
+    : rewriteJavaScript(source, 'module', directoryOf(key), sink, siblings, `模块 ${key}`))
 }
 
 function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDir: string, sink: Sink, siblings: Map<string, Uint8Array>, scriptLabel = '脚本'): string {
@@ -1075,6 +1078,25 @@ function keptStyleAttributes(attrs: ParsedAttr[]): ParsedAttr[] {
 }
 
 function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Array>, baseDir = '', embedded = false): string {
+  // HTML's first base applies to references before it too. Parse only markup,
+  // skipping raw text so a string in a program cannot change the resource root.
+  let localBase = false
+  for (let at = 0; at < html.length;) {
+    const next = html.indexOf('<', at)
+    if (next < 0) break
+    if (html.startsWith('<!--', next)) { const end = html.indexOf('-->', next + 4); at = end < 0 ? html.length : end + 3; continue }
+    const tag = parseStartTag(html, next)
+    if (!tag) { at = next + 1; continue }
+    at = tag.end
+    if (['script', 'style', ...RAW_TEXT].includes(tag.name) && !tag.selfClosing) { at = readRaw(html, tag.end, tag.name).closeEnd; continue }
+    if (tag.name !== 'base') continue
+    const href = attributeBy(tag.attrs, 'href')
+    if (!href?.hasValue) continue
+    const reference = decodeEntities(href.rawValue).trim()
+    const base = resolveRelative(baseDir, reference.endsWith('/') ? `${reference}__document.html` : reference)
+    if (base) { baseDir = directoryOf(base); localBase = true }
+    break
+  }
   const parts: string[] = []
   let i = 0
   let mediaParent: string | null = null
@@ -1114,6 +1136,9 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
     const tagStart = i
     const tag = parseStartTag(html, i)
     if (!tag) { parts.push(html[i]); i++; continue }
+    // Relative addresses have been closed over this logical base. A file base
+    // must not make the portable document resolve them against the old path.
+    if (localBase && tag.name === 'base') { i = tag.end; continue }
     if (tag.attrs.some(attribute => /^(onload|onerror)$/i.test(attribute.name))) addDiagnostic(sink, 'warning', 'early-event-handler',
       'onload/onerror 等加载期事件尽力绑定，个别时序可能漏触发；关键初始化请改用脚本内 addEventListener 或立即执行')
     if (['picture', 'audio', 'video'].includes(tag.name) && !tag.selfClosing) mediaParent = tag.name
@@ -1138,7 +1163,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
             sink.htmlStack.delete(key)
             src.drop = true
             // The embedded document keeps the name of the file it came from.
-            tag.attrs.push({ name: EMBEDDED_SOURCE_ATTRIBUTE, rawName: EMBEDDED_SOURCE_ATTRIBUTE, hasValue: true, quote: '"', rawValue: '', value: reference, changed: true, drop: false })
+            tag.attrs.push({ name: EMBEDDED_SOURCE_ATTRIBUTE, rawName: EMBEDDED_SOURCE_ATTRIBUTE, hasValue: true, quote: '"', rawValue: '', value: key, changed: true, drop: false })
             tag.attrs.push({ name: 'srcdoc', rawName: 'srcdoc', hasValue: true, quote: '"', rawValue: '', value: content, changed: true, drop: false })
           }
         } else if (key) addDiagnostic(sink, 'warning', 'missing-relative-resource', `找不到嵌入 HTML ${clip(reference, 180)}，已保留为待填组件`, key)
@@ -1222,6 +1247,11 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
       if (!raw.closed) addDiagnostic(sink, 'warning', 'unclosed-element', '未闭合的 <script>')
       let body = raw.body
       let inlined = false
+      if (javascriptKind(attributeBy(tag.attrs, 'type')?.rawValue ?? null) === 'module' && baseDir) {
+        const existing = attributeBy(tag.attrs, MODULE_BASE_ATTRIBUTE)
+        if (existing) { existing.value = baseDir; existing.changed = true }
+        else tag.attrs.push({ name: MODULE_BASE_ATTRIBUTE, rawName: MODULE_BASE_ATTRIBUTE, hasValue: true, quote: '"', rawValue: '', value: baseDir, changed: true, drop: false })
+      }
       if (src?.hasValue) {
         const decoded = decodeEntities(src.rawValue).trim()
         if (/^https?:|^\/\//i.test(decoded)) addDiagnostic(sink, 'warning', 'remote-script', `远程脚本已保留: ${clip(decoded, 180)}；预览与发布播放器的 CSP 阻止远程脚本加载，请内联该库或改用本地脚本文件`, decoded)

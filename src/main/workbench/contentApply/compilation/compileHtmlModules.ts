@@ -49,6 +49,15 @@ export async function compileHtmlModules(input: ComponentCompilationInput,
       continue
     }
     try {
+      // A local side-effect CSS import uses the same editable graph. The browser
+      // receives an ordinary module that installs the closed stylesheet once.
+      if (/\.css$/i.test(pathname(name))) {
+        const output = await transform(source, { loader: 'css', target: input.options?.target ?? 'es2022', minify: input.options?.minify ?? false })
+        const css = JSON.stringify(output.code).replace(/</g, '\\u003c')
+        modules[name] = { code: `const css=${css};const style=document.createElement('style');style.textContent=css;document.head.append(style);export default css;`, imports: [] }
+        diagnostics.push(...output.warnings.map(warning => ({ stage: 'compile' as const, severity: 'warning' as const, file: name, message: warning.text })))
+        continue
+      }
       const output = await transform(source, { loader: 'js', format: 'esm', target: input.options?.target ?? 'es2022',
         sourcefile: pathname(name), sourcemap: input.options?.sourceMap ? 'inline' : false,
         minify: input.options?.minify ?? false })

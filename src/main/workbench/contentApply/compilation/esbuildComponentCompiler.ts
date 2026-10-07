@@ -33,16 +33,17 @@ function diagnostics(messages: readonly Message[], severity: 'error' | 'warning'
 /** esbuild reads only supplied virtual files and returns bytes; it never runs candidate code. */
 export function createEsbuildComponentCompiler(): ComponentCompiler {
   return {
-    identity: `esbuild:${runtimeEsbuildVersion}:component-memory-esm-4`,
+    identity: `esbuild:${runtimeEsbuildVersion}:component-memory-esm-5`,
     async compile(input: ComponentCompilationInput) {
       if (input.options?.preserveModules) {
         const { transform } = await loadRuntimeEsbuild()
         return compileHtmlModules(input, transform)
       }
       const files = new Map<string, string>(), names = new Map<string, string>()
+      const binaryFiles = new Map<string, Uint8Array>()
       const entries = new Map<string, string>()
       const owners = new Map<string, { root: string; bindings?: Readonly<Record<string, string>> }>()
-      const addFiles = (root: string, values: Readonly<Record<string, string>>, bindings?: Readonly<Record<string, string>>, dependency?: string) => {
+      const addFiles = (root: string, values: Readonly<Record<string, string>>, bindings?: Readonly<Record<string, string>>, dependency?: string, binaries?: Readonly<Record<string, Uint8Array>>) => {
         for (const [name, contents] of Object.entries(values)) {
           const relative = relativeFile(name), virtual = `${root}/${relative}`
           if (files.has(virtual)) throw new Error(`组件源码文件路径重复：${name}`)
@@ -50,21 +51,26 @@ export function createEsbuildComponentCompiler(): ComponentCompiler {
           owners.set(virtual, { root, bindings })
           names.set(virtual, dependency ? `${dependency}/${relative}` : name)
         }
+        for (const [name, bytes] of Object.entries(binaries ?? {})) {
+          const relative = relativeFile(name), virtual = `${root}/${relative}`
+          if (files.has(virtual) || binaryFiles.has(virtual)) throw new Error(`组件源码文件路径重复：${name}`)
+          binaryFiles.set(virtual, bytes); owners.set(virtual, { root, bindings }); names.set(virtual, dependency ? `${dependency}/${relative}` : name)
+        }
       }
-      addFiles('/source', input.files, input.moduleBindings)
+      addFiles('/source', input.files, input.moduleBindings, undefined, input.binaryFiles)
       for (const [specifier, dependency] of Object.entries(input.dependencies ?? {})) {
         const root = `/dependencies/${encodeURIComponent(specifier)}`
-        addFiles(root, dependency.files, dependency.moduleBindings, specifier)
+        addFiles(root, dependency.files, dependency.moduleBindings, specifier, dependency.binaryFiles)
         entries.set(specifier, `${root}/${relativeFile(dependency.entry)}`)
       }
-      const resolveFile = (base: string) => componentModuleFileExtensions.map(extension => `${base}${extension}`).find(candidate => files.has(candidate))
+      const resolveFile = (base: string) => componentModuleFileExtensions.map(extension => `${base}${extension}`).find(candidate => files.has(candidate) || binaryFiles.has(candidate))
       const plugin: Plugin = {
         name: namespace,
         setup(builder) {
           builder.onResolve({ filter: /.*/ }, args => {
             let requested: string | undefined
             if (args.kind === 'entry-point') requested = `/source/${relativeFile(input.entry)}`
-            else if (args.path.startsWith('.')) {
+            else if (args.path.startsWith('.') || args.kind === 'url-token' || args.kind === 'import-rule') {
               const owner = owners.get(args.importer)
               const relative = path.posix.join(path.posix.dirname(args.importer), args.path)
               if (owner && relative.startsWith(`${owner.root}/`)) requested = relative
@@ -75,9 +81,11 @@ export function createEsbuildComponentCompiler(): ComponentCompiler {
             }
             const resolved = requested && resolveFile(requested)
             if (!resolved) return { errors: [{ text: `无法解析组件依赖 ${JSON.stringify(args.path)}；请由资源服务提供该模块及其实际版本` }] }
-            return { path: resolved, namespace }
+            return { path: resolved, namespace, pluginData: { asset: args.kind === 'url-token' } }
           })
           builder.onLoad({ filter: /.*/, namespace }, args => {
+            if (args.pluginData?.asset) return { contents: binaryFiles.get(args.path) ?? files.get(args.path)!, loader: 'dataurl' }
+            if (binaryFiles.has(args.path)) return { errors: [{ text: `非文本组件依赖不能作为程序执行：${names.get(args.path) ?? args.path}` }] }
             const loader = loaders[path.posix.extname(args.path)]
             if (!loader) return { errors: [{ text: `组件源码类型不支持：${names.get(args.path) ?? args.path}` }] }
             return { contents: files.get(args.path)!, loader }

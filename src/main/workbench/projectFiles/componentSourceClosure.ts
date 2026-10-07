@@ -5,6 +5,7 @@ import { isInsideRoot } from '../../../shared/workbench/executionPermission'
 import { moduleImportReferences } from '../contentApply/compilation/compileHtmlModules'
 import { componentModuleFileExtensions } from '../contentApply/compilation/esbuildComponentCompiler'
 import { loadRuntimeEsbuild } from '../componentCompilerRuntime'
+import { readHtmlClosure } from '../htmlImport/readHtmlClosure'
 
 const codeLoaders: Record<string, Loader> = { '.js': 'js', '.mjs': 'js', '.cjs': 'js', '.jsx': 'jsx', '.ts': 'ts', '.tsx': 'tsx' }
 const slash = (value: string) => value.split(path.sep).join('/')
@@ -20,6 +21,16 @@ export async function readComponentSourceClosure(input: {
   while (pending.length) {
     input.signal?.throwIfAborted()
     const name = pending.shift()!, bytes = files.get(name)!, loader = codeLoaders[path.posix.extname(name).toLowerCase()]
+    if (path.posix.extname(name).toLowerCase() === '.css') {
+      const css = name === entry ? input.text : new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+      const closure = await readHtmlClosure({ htmlPath: path.resolve(root, name), rootDir: root,
+        sourceHtml: `<style>${css.replace(/<\/style/gi, '<\\/style')}</style>` })
+      for (const [relative, content] of closure.siblingFiles) {
+        const logical = path.posix.normalize(path.posix.join(path.posix.dirname(name), relative))
+        if (!files.has(logical)) files.set(logical, content)
+      }
+      continue
+    }
     if (!loader) continue
     let references: ReturnType<typeof moduleImportReferences>
     try {

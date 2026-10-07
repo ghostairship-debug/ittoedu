@@ -2,6 +2,8 @@
 export interface ComponentModuleSource {
   entry: string
   files: Readonly<Record<string, string>>
+  /** Opaque source-workspace siblings, supplied unchanged for CSS url() consumers. */
+  binaryFiles?: Readonly<Record<string, Uint8Array>>
   /** Import spelling is author content; its software binding belongs to this source owner. */
   moduleBindings?: Readonly<Record<string, string>>
 }

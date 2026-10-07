@@ -12,9 +12,11 @@ function snapshot(input: ComponentCompilationInput): ComponentCompilationInput {
     entry: input.entry,
     ...(input.moduleEntries ? { moduleEntries: [...input.moduleEntries] } : {}),
     files: sortedFiles(input.files),
+    ...(input.binaryFiles ? { binaryFiles: Object.fromEntries(Object.entries(input.binaryFiles).sort(([a], [b]) => a.localeCompare(b)).map(([name, bytes]) => [name, Uint8Array.from(bytes)])) } : {}),
     ...(input.moduleBindings ? { moduleBindings: sortedFiles(input.moduleBindings) } : {}),
     dependencies: Object.fromEntries(Object.entries(input.dependencies ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([name, dependency]) => [name, {
       version: dependency.version, entry: dependency.entry, files: sortedFiles(dependency.files),
+      ...(dependency.binaryFiles ? { binaryFiles: Object.fromEntries(Object.entries(dependency.binaryFiles).sort(([a], [b]) => a.localeCompare(b)).map(([name, bytes]) => [name, Uint8Array.from(bytes)])) } : {}),
       ...(dependency.moduleBindings ? { moduleBindings: sortedFiles(dependency.moduleBindings) } : {}),
     }])),
     options: {
