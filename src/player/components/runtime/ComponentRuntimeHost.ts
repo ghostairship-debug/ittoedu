@@ -283,9 +283,9 @@ export class ComponentRuntimeHost {
           },
           reportSize: size => { if (record!.scope.isActive()) layout.reportSize(size) },
         },
-        authoring: authoring && { register: (spot: Parameters<typeof authoring.register>[0]) => {
+        authoring: authoring && { register: (spot: Parameters<typeof authoring.register>[0], callbacks?: Parameters<typeof authoring.register>[1]) => {
           if (!record!.scope.isActive()) return () => {}
-          const off = authoring.register(spot); record!.scope.cleanup(off); return off
+          const off = authoring.register(spot, callbacks); record!.scope.cleanup(off); return off
         } } }
       const context: ComponentRuntimeContext = { ...baseContext, interactions: this.options.interactions?.(baseContext) }
       record.mount = Promise.resolve().then(() => controller.signal.aborted || pending.request.canProject?.() === false ? null : prepared.implementation.mount(context))

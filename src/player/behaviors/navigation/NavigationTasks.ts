@@ -15,7 +15,7 @@ export interface NavigationTaskPorts<Request, Target> {
   /** Synchronous final admission and fact write, owned by the host. */
   commit(target: Target, signal: AbortSignal): boolean
   /** Temporary visuals after the fact is committed; cancellation never restores an old fact. */
-  transition?(target: Target, signal: AbortSignal): void | Promise<void>
+  transition?(target: Target, signal: AbortSignal): boolean | void | Promise<boolean | void>
 }
 
 /** One navigation task owner, with no course positions, history or shortcut state. */
@@ -57,8 +57,8 @@ export class NavigationTasks<Request, Target> {
         if (!live()) return
         if (!accepted) { settle({ status: 'rejected' }); return }
         phase = 'transition'
-        await this.ports.transition?.(target, controller.signal)
-        if (live()) settle({ status: 'completed' })
+        const transitioned = await this.ports.transition?.(target, controller.signal)
+        if (live()) settle({ status: transitioned === false ? 'rejected' : 'completed' })
       } catch (error) {
         if (live()) settle({ status: 'failed', phase, error })
       }

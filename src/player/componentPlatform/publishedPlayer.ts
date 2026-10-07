@@ -1,14 +1,13 @@
 import { publishedCourseV3Schema, type PublishedCourseV3, type PublishedImplementation } from '../../shared/contracts/component-platform/published'
-import { resolveComponentPresentation, type TeacherControllerAction } from '../../shared/contracts/component-platform'
+import { resolveComponentPresentation } from '../../shared/contracts/component-platform'
 import type { DocumentResources } from '../../shared/workbench/document'
 import { mountV10Model } from './ModelPlayer'
 import { prepareSandboxComponent, type ComponentBootstrapTransport } from '../../renderer/components/SandboxComponentImplementation'
 import { ComponentNavigationOwner } from '../../renderer/components/ComponentNavigationOwner'
 import { webContentRealmSource } from '../../components/web/contentRealmImplementation'
 import { resolveWebResourceBindings } from '../../components/web/resources'
-import { NavigationTasks } from '../behaviors/navigation/NavigationTasks'
 import { attachComponentPlatformNavigationKeys } from '../behaviors/navigation/shortcuts'
-import type { PlaybackKeyCommand, PresenterInputFeedback } from '../PlayerPresenterInput'
+import type { PresenterInputFeedback } from '../PlayerPresenterInput'
 import { waitForPublishedObservationReady } from '../surfaces/publishedCapture'
 
 /** One read-only P0 projection into R0; never saved as an author document. */
@@ -128,8 +127,9 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
     },
     selectState: async id => { if (stopped) return; stateId = id; await player.update(renderModel()) },
   })
+  const teacherController = navigation.teacherPort()
   player = mountV10Model({ model: renderModel(), root, mode: options.capture ? 'capture' : 'play', runScopeId: `published:${payload.id}:${crypto.randomUUID()}`,
-    teacherController: navigation, report: options.report, initialSurfaceId: surfaceId ?? undefined,
+    teacherController, studentNavigation: navigation, report: options.report, initialSurfaceId: surfaceId ?? undefined,
     resolveAssetUrl, isAssetPending: id => pendingAssets.has(id),
     onObservation: options.capture ? undefined : (id, observation) => {
       const unregister = navigation.registerObservation(id, observation)
@@ -146,13 +146,13 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
       const compiled = (source as Extract<PublishedImplementation, { kind: 'source' }>).compiled
       if (!compiled) throw new Error('此源码未附可执行ESM；原始源码已保留')
       return prepareSandboxComponent({ format: 'esm', code: compiled.code, css: compiled.css ?? '', diagnostics: [] }, signal,
-        { state: () => player.runtime.stateSnapshot(), targets: () => player.runtime.targetSnapshots('full'), teacherController: navigation,
+        { state: () => player.runtime.stateSnapshot(), targets: () => player.runtime.targetSnapshots('full'), teacherController,
           // URL bindings let the realm's actual img/media/fetch consumer request
           // the resource. Merely declaring a binding must not start a download.
           connectOrigins: () => model.project.logic?.network?.connectOrigins ?? [], themeCss: () => player.runtime.themeCss(), resources: () => ({ ...publishedResourceUrls, ...player.runtime.resourceUrls() }), resourceBindings: source.resourceBindings, bootstrap: options.componentBootstrap })
     },
     resolveBuiltin: (_key, signal) => prepareSandboxComponent({ format: 'esm', code: webContentRealmSource(), css: '', diagnostics: [] }, signal,
-      { builtinKey: _key, state: () => player.runtime.stateSnapshot(), targets: profile => player.runtime.targetSnapshots(profile), teacherController: navigation,
+      { builtinKey: _key, state: () => player.runtime.stateSnapshot(), targets: profile => player.runtime.targetSnapshots(profile), teacherController,
         instance: instance => resolveWebResourceBindings(instance, id => payload.assets[id]?.url ?? player.runtime.contentAssetUrl(id), options.report), htmlAuthoring: true,
         connectOrigins: () => model.project.logic?.network?.connectOrigins ?? [], themeCss: () => player.runtime.themeCss(), resources: () => ({ ...publishedResourceUrls, ...player.runtime.resourceUrls() }), bootstrap: options.componentBootstrap }),
   })
@@ -160,18 +160,7 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
   catch (error) { stopped = true; resourceController.abort(); navigation.dispose(); await player.dispose(); throw error }
   if (surfaceId) player.revealSurface(surfaceId)
   if (!options.capture) navigation.changed()
-  const tasks = new NavigationTasks<PlaybackKeyCommand, TeacherControllerAction>({
-    resolve: request => {
-      const action: TeacherControllerAction = request.kind === 'edge'
-        ? { type: 'scene.go', sceneId: model.project.surfaces[request.edge === 'first' ? 0 : model.project.surfaces.length - 1]?.id ?? '' }
-        : { type: request.kind === 'scene'
-          ? request.direction === 'next' ? 'scene.next' : 'scene.previous'
-          : request.direction === 'next' ? 'step.next' : 'step.previous' }
-      return navigation.canExecute(action) ? action : null
-    },
-    prepare() {}, commit: (action, signal) => !signal.aborted && !stopped && navigation.canExecute(action),
-    transition: (action, signal) => navigation.execute(action, signal).then(() => {}),
-  })
+  const tasks = navigation.createKeyTasks()
   const stopKeys = options.capture || options.keyboardNavigation === false ? undefined : attachComponentPlatformNavigationKeys({ root, navigation: tasks,
     keyboardNavigation: model.project.playback?.keyboardNavigation ?? true,
     presenter: model.project.playback?.presenter ?? { enabled: true, strategy: 'scene-navigation', additionalBindings: [] },

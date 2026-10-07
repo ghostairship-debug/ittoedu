@@ -7,7 +7,7 @@ import { prepareSandboxComponent } from './SandboxComponentImplementation'
 import { CourseV10DocumentView, InstanceView } from '../documents/CourseV10DocumentView'
 import type { CourseV10DocumentBridge } from '../documents/CourseV10DocumentBridge'
 import type { ComponentSpatialCameraPort } from '../../player/surfaces/spatial/componentSpatialAdapter'
-import type { ComponentEdit, CourseProjectV10 } from '../../shared/contracts/component-platform'
+import type { ComponentAuthorGeometry, ComponentEdit, CourseProjectV10 } from '../../shared/contracts/component-platform'
 import type { DocumentOperation } from '../document/editorSession'
 import { webContentRealmSource } from '../../components/web/contentRealmImplementation'
 import { projectWebModuleGraph } from '../../components/web/moduleGraph'
@@ -16,6 +16,7 @@ import { ComponentNavigationOwner, type ComponentCameraBinding, type ComponentOb
 import { resolveComponentPresentation } from '../../shared/contracts/component-platform'
 import { onComponentMotionPreview } from '../interactions/componentMotionPreview'
 import { registerRuntimeLightEditDocument } from '../composition/runtime/runtimeLightEditCommands'
+import { attachComponentPlatformNavigationKeys } from '../../player/behaviors/navigation/shortcuts'
 
 export interface CourseV10RuntimePorts {
   documentId: string
@@ -37,6 +38,7 @@ export interface CourseV10RuntimePorts {
   registerObservation(surfaceId: string, binding: ComponentObservationBinding): () => void
   setPlaying(active: boolean): void
   resetPlayback(playing?: boolean): Promise<void>
+  previewAuthorSpot(id: string, geometry: ComponentAuthorGeometry | null): boolean
   /** Free placement includes authored frames; flow placement continues reading order through document sections. */
   renderInstance(instanceId: string, projection?: CourseProjectV10, placement?: 'free' | 'flow'): ReactNode
 }
@@ -82,20 +84,21 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
     viewportBounds: () => (wrapper.current?.querySelector<HTMLElement>('.flow-workspace') ?? wrapper.current?.querySelector<HTMLElement>('.canvas-viewport') ?? wrapper.current)?.getBoundingClientRect(),
     restart: () => runtimeRef.current?.resetPlayback(true), audio: () => runtimeRef.current?.audio(), report: message => callbacks.current.report(message) }), [documentId])
   const host = useMemo(() => {
+    const teacherController = navigation.teacherPort()
     const mounted = createV10ModelPlayer({ runScopeId: `document:${documentId}:${crypto.randomUUID()}`,
       report: message => callbacks.current.report(message),
       mode: player ? 'play' : 'edit',
-      teacherController: navigation,
+      teacherController, studentNavigation: navigation,
       onDispose: () => navigation.dispose(),
       resolveBuiltin: (_key, signal) => prepareSandboxComponent({ format: 'esm', code: webContentRealmSource(), css: '', diagnostics: [] }, signal,
-        { builtinKey: _key, state: () => runtime.stateSnapshot(), targets: profile => runtime.targetSnapshots(profile), instance: async value => resolveWebResourceBindings(await projectWebModuleGraph(value, input => window.desktopAPI.compileComponent(input), message => callbacks.current.report(message)), id => runtime.contentAssetUrl(id), message => callbacks.current.report(message)), htmlAuthoring: true, teacherController: navigation,
+        { builtinKey: _key, state: () => runtime.stateSnapshot(), targets: profile => runtime.targetSnapshots(profile), instance: async value => resolveWebResourceBindings(await projectWebModuleGraph(value, input => window.desktopAPI.compileComponent(input), message => callbacks.current.report(message)), id => runtime.contentAssetUrl(id), message => callbacks.current.report(message)), htmlAuthoring: true, teacherController,
           connectOrigins: () => current.current.project.logic?.network?.connectOrigins ?? [], themeCss: () => runtime.themeCss(), resources: () => runtime.resourceUrls() }),
       resolveSource: async (implementation, signal) => {
         const input = componentCompilationInput(current.current.project, implementation, current.current.resources)
         const compilation = await window.desktopAPI.compileComponent(input)
         if (signal.aborted) throw new Error('组件源码准备已取消')
         if (compilation.status === 'failed') throw new Error(compilation.diagnostics.map(value => `${value.file ?? ''}:${value.line ?? ''} ${value.message}`).join('\n'))
-        return prepareSandboxComponent(compilation.artifact, signal, { state: () => runtime.stateSnapshot(), targets: () => runtime.targetSnapshots('full'), teacherController: navigation,
+        return prepareSandboxComponent(compilation.artifact, signal, { state: () => runtime.stateSnapshot(), targets: () => runtime.targetSnapshots('full'), teacherController,
           connectOrigins: () => current.current.project.logic?.network?.connectOrigins ?? [], themeCss: () => runtime.themeCss(), resources: () => runtime.resourceUrls(), resourceBindings: implementation.resourceBindings })
       },
     })
@@ -106,6 +109,24 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
   runtimeRef.current = world
   const renderProject = props.renderProject ?? resolveComponentPresentation(model.project, surfaceId, props.activeStateId ?? null)
   useEffect(() => host.retain(), [host])
+  useEffect(() => {
+    const root = wrapper.current
+    if (!root) return
+    const tasks = navigation.createKeyTasks()
+    let keys: ReturnType<typeof attachComponentPlatformNavigationKeys> | undefined
+    const syncKeys = () => {
+      if (!world.isPlaying()) { keys?.destroy(); keys = undefined; tasks.cancel(); return }
+      if (keys) return
+      keys = attachComponentPlatformNavigationKeys({ root, navigation: tasks,
+        keyboardNavigation: model.project.playback?.keyboardNavigation ?? true,
+        presenter: model.project.playback?.presenter ?? { enabled: true, strategy: 'scene-navigation', additionalBindings: [] },
+        onAuthoredCommand: command => world.dispatchPresenterCommand(command),
+        onFeedback: feedback => callbacks.current.report(feedback.message), onError: error => callbacks.current.report(String(error)),
+      })
+    }
+    const off = navigation.subscribe(syncKeys); syncKeys()
+    return () => { off(); keys?.destroy(); tasks.dispose() }
+  }, [world, navigation, model.project.playback])
   useEffect(() => props.bridge ? registerRuntimeLightEditDocument(documentId, world, props.bridge) : undefined, [documentId, world, props.bridge])
   useEffect(() => {
     const pending = new Set<AbortController>(), timers = new Set<ReturnType<typeof setTimeout>>()
@@ -160,7 +181,8 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
     if (world.isPlaying() !== before) navigation.changed()
   }, [world, navigation])
   const resetPlayback = useCallback(async (playing?: boolean) => {
-    await world.resetPlayback(playing)
+    if (!await navigation.replayCurrentSurface()) throw new Error('当前页未能返回初始状态')
+    world.setPlaying(playing ?? false)
     navigation.changed()
   }, [world, navigation])
   const selectedInstanceIds = props.selectedInstanceIds ?? (selectedInstanceId ? [selectedInstanceId] : [])
@@ -168,7 +190,7 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
     documentId, project: renderProject, resources: model.resources, surfaceId, selectedInstanceId, selectedInstanceIds, player,
     world, navigation, onElement: world.bind, onTargetElement: world.bindTarget, edit, onEdits: flowEdit,
     onComposition: compose, selectInstances, registerCamera, registerObservation,
-    setPlaying, resetPlayback,
+    setPlaying, resetPlayback, previewAuthorSpot: world.previewAuthorSpot,
     renderInstance: (id, projection = renderProject, placement = 'free') => projection.instances[id] && <InstanceView key={id} instance={projection.instances[id]} project={projection} surfaceId={surfaceId} placement={placement}
       selectedInstanceId={selectedInstanceId} selectedInstanceIds={selectedInstanceIds} player={player} onSelect={onSelect} onElement={world.bind} onTargetElement={world.bindTarget} />,
   }

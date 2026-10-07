@@ -66,16 +66,23 @@ const projectionTopology = (model: ComponentPlayerModel) => JSON.stringify([mode
 /** The one runtime lifetime/commit owner; React and DOM only supply their actual projection commit. */
 export function createV10ModelPlayer(options: ComponentModelHostOptions) {
   const controller = new AbortController()
-  const runtime = new ComponentPlatformRuntime(options.runScopeId, { ...options, projectionManaged: true })
+  let projecting = false
+  let committedModel: ComponentPlayerModel | undefined
+  const runtime = new ComponentPlatformRuntime(options.runScopeId, { ...options, projectionManaged: true,
+    onProjectionCommit: () => {
+      if (!projecting && committedModel) void enqueueCommittedProjection().catch(error => options.report?.(error instanceof Error ? error.message : String(error)))
+    },
+  })
   const projection = options.createProjection?.(runtime, controller.signal)
   const observationBindings = new Map<string, { observation: ComponentPlayerObservation; off(): void }>()
   let queue: Promise<void> = Promise.resolve()
   let disposal: Promise<void> | undefined
   let topology: string | undefined
   let projectionKey: string | undefined
-  let committed = 0
+  let committedSyncQueued = false
   let retention: object | undefined
   const prepareProjection = (model: ComponentPlayerModel, key?: string): ComponentProjectionCommit => {
+    projecting = true
     const nextTopology = projectionTopology(model)
     runtime.prepareResources(model.project, model.resources)
     const parked = topology !== nextTopology || projectionKey !== key
@@ -85,6 +92,17 @@ export function createV10ModelPlayer(options: ComponentModelHostOptions) {
   const finishProjection = (receipt: ComponentProjectionCommit) => {
     if (receipt.parked) runtime.afterProjectionMutation()
     topology = receipt.topology; projectionKey = receipt.key
+    projecting = false; committedModel = receipt.model
+  }
+  const enqueueCommittedProjection = (): Promise<void> => {
+    if (controller.signal.aborted || committedSyncQueued) return queue
+    committedSyncQueued = true
+    queue = queue.catch(() => {}).then(async () => {
+      committedSyncQueued = false
+      // A later parent/NodeView commit uses the latest author projection, never a stale captured model.
+      if (committedModel) await syncCommittedProjection(committedModel)
+    })
+    return queue
   }
   const syncCommittedProjection = async (model: ComponentPlayerModel) => {
     if (controller.signal.aborted) return
@@ -105,10 +123,7 @@ export function createV10ModelPlayer(options: ComponentModelHostOptions) {
     if (receipt.completion) return receipt.completion
     if (controller.signal.aborted) return Promise.resolve()
     finishProjection(receipt)
-    const version = ++committed
-    // A newer actual React commit supersedes queued work for an older DOM tree.
-    queue = queue.catch(() => {}).then(() => version === committed ? syncCommittedProjection(receipt.model) : undefined)
-    return receipt.completion = queue
+    return receipt.completion = enqueueCommittedProjection()
   }
   const update = (model: ComponentPlayerModel): Promise<void> => {
     if (controller.signal.aborted) return Promise.resolve()

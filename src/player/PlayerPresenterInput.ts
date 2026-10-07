@@ -31,8 +31,8 @@ export interface PlayerPresenterInputOptions {
   keyboardNavigation: boolean
   presenter: Readonly<ProjectPresenterSettings>
   /** The playback session judges its own boundaries, guards and pending navigation. */
-  navigate(command: PlaybackKeyCommand): boolean | PresenterInputResult
-  onAuthoredCommand(command: PresenterCommand): boolean | PresenterInputResult
+  navigate(command: PlaybackKeyCommand): boolean | PresenterInputResult | PromiseLike<boolean | PresenterInputResult>
+  onAuthoredCommand(command: PresenterCommand): boolean | PresenterInputResult | PromiseLike<boolean | PresenterInputResult>
   onFeedback?(feedback: PresenterInputFeedback): void
   /** Injectable only so the hardware de-duplication window stays deterministic in tests. */
   now?(): number
@@ -206,6 +206,7 @@ export class PlayerPresenterInput {
   private frames: BridgedFrame[] = []
   private lastSignature: string | null = null
   private lastAcceptedAt = Number.NEGATIVE_INFINITY
+  private requestSequence = 0
   private destroyed = false
 
   constructor(options: PlayerPresenterInputOptions) {
@@ -310,22 +311,21 @@ export class PlayerPresenterInput {
     this.lastSignature = input.signature
     this.lastAcceptedAt = now
 
-    const result = input.presenterCommand && this.presenter.strategy === 'authored-command'
-      ? normalizeResult(
-          this.onAuthoredCommand(input.presenterCommand),
-          input.presenterCommand === 'next'
-            ? '当前场景没有可执行的“前进”规则'
-            : '当前场景没有可执行的“后退”规则',
-        )
-      : normalizeResult(this.navigate(input.command), rejectedMessage(input.command))
-
-    if (!result.accepted) {
-      this.onFeedback?.({
-        command: input.command,
-        source: input.source,
-        message: result.message ?? '演示命令未执行',
-      })
+    const request = ++this.requestSequence
+    const authored = input.presenterCommand && this.presenter.strategy === 'authored-command'
+    const fallback = authored ? input.presenterCommand === 'next' ? '当前场景没有可执行的“前进”规则' : '当前场景没有可执行的“后退”规则'
+      : rejectedMessage(input.command)
+    const report = (value: boolean | PresenterInputResult) => {
+      if (this.destroyed || request !== this.requestSequence) return
+      const result = normalizeResult(value, fallback)
+      if (!result.accepted) this.onFeedback?.({ command: input.command, source: input.source, message: result.message ?? '演示命令未执行' })
     }
+    try {
+      const result = authored ? this.onAuthoredCommand(input.presenterCommand!) : this.navigate(input.command)
+      if (result && typeof result === 'object' && 'then' in result) {
+        void Promise.resolve(result).then(report, error => report({ accepted: false, message: error instanceof Error ? error.message : String(error) }))
+      } else report(result)
+    } catch (error) { report({ accepted: false, message: error instanceof Error ? error.message : String(error) }) }
   }
 
   // Focus moving into a frame blurs the window that held it: the stage window, or a

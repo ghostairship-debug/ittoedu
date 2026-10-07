@@ -1,5 +1,5 @@
 import { ComponentRuntimeHost, type PreparedComponentRuntime } from './runtime/ComponentRuntimeHost'
-import type { ComponentDefinition, ComponentImplementation, ComponentRuntimeImplementation, ComponentTarget, JsonValue, CourseProjectV10, ComponentAuthorSpot, ComponentAuthorSpotInput } from '../../shared/contracts/component-platform'
+import type { ComponentDefinition, ComponentImplementation, ComponentRuntimeImplementation, ComponentTarget, JsonValue, CourseProjectV10, ComponentAuthorSpot, ComponentAuthorSpotInput, ComponentAuthorGeometry, ComponentAuthorPreviewCallbacks } from '../../shared/contracts/component-platform'
 import type { DocumentResources } from '../../shared/workbench/document'
 import { textRuntimeImplementation, formulaRuntimeImplementation } from '../../components/text/runtime'
 import { createImageRuntimeImplementation } from '../../components/image/runtime'
@@ -64,6 +64,7 @@ export class ComponentPlatformRuntime {
   private readonly mode: 'edit' | 'play' | 'capture'
   private readonly report: (message: string) => void
   private readonly spots = new Map<string, ComponentAuthorSpot>()
+  private readonly spotPreviews = new Map<string, ComponentAuthorPreviewCallbacks>()
   private readonly spotListeners = new Set<() => void>()
   private spotSequence = 0
   private readonly stopNavigation?: () => void
@@ -72,6 +73,7 @@ export class ComponentPlatformRuntime {
   private disposal?: Promise<void>
   private readonly surfaceId?: () => string | null
   private readonly projectionManaged: boolean
+  private readonly onProjectionCommit?: () => void
   private projectionTargetsChanged = false
 
   constructor(readonly runScopeId: string, options: {
@@ -79,6 +81,8 @@ export class ComponentPlatformRuntime {
     report?(message: string): void
     builtins?: ReadonlyMap<string, ComponentRuntimeImplementation>
     teacherController?: TeacherControllerPort & { subscribeSceneReplay?(listener: (surfaceId: string) => void): () => void }
+    /** Student/authored actions never inherit the teacher directory's force-jump capability. */
+    studentNavigation?: TeacherControllerPort
     resolveBuiltin?(key: string, signal: AbortSignal): Promise<PreparedComponentRuntime>
     /** Published resource owner resolves only actual consumer requests. */
     resolveAssetUrl?(id: string): string | undefined
@@ -86,9 +90,12 @@ export class ComponentPlatformRuntime {
     mode?: 'edit' | 'play' | 'capture'
     /** ModelPlayer performs synchronization only after an actual projection commit. */
     projectionManaged?: boolean
+    /** A connected ref / completed NodeView mutation can commit after its parent React tree. */
+    onProjectionCommit?(): void
   } = {}) {
     this.mode = options.mode ?? 'play'; this.playing = this.mode === 'play'
     this.projectionManaged = options.projectionManaged ?? false
+    this.onProjectionCommit = options.onProjectionCommit
     this.resolveAssetUrl = options.resolveAssetUrl
     this.isAssetPending = options.isAssetPending
     this.surfaceId = options.teacherController && (() => options.teacherController!.read().locationId)
@@ -99,7 +106,7 @@ export class ComponentPlatformRuntime {
     this.media = new ComponentWorldMedia(() => this.audioManager, this.report)
     this.interactions = new ComponentWorldInteractions({ project: () => this.project, element: id => this.targetElement(id),
       document: () => this.targetElements.values().next().value?.ownerDocument ?? this.roots.values().next().value?.ownerDocument,
-      audio: () => this.audioManager, video: (action, signal) => this.media.executeVideo(action, signal), navigation: options.teacherController, report: this.report, active: () => this.playing, playback: () => this.mode !== 'capture' })
+      audio: () => this.audioManager, video: (action, signal) => this.media.executeVideo(action, signal), navigation: options.studentNavigation ?? options.teacherController, report: this.report, active: () => this.playing, playback: () => this.mode !== 'capture' })
     const image = createImageRuntimeImplementation(id => {
       const url = this.assetUrl(id)
       return url ? { url } : undefined
@@ -126,7 +133,7 @@ export class ComponentPlatformRuntime {
       resources: { url: id => this.contentAssetUrl(id) },
       media: scope => this.media.port(scope),
       interactions: context => this.interactions.ports(context),
-      authoring: (_scope, instanceId, generation) => ({ register: spot => this.registerAuthorSpot(instanceId, generation, spot) }),
+      authoring: (_scope, instanceId, generation) => ({ register: (spot, callbacks) => this.registerAuthorSpot(instanceId, generation, spot, callbacks) }),
       layout: (_scope, instance, generation) => this.layoutPort(instance, generation),
       resolveImplementation: (implementation, _definition, signal) => {
         if (implementation.kind === 'source') {
@@ -177,7 +184,7 @@ export class ComponentPlatformRuntime {
       if (this.mode !== 'edit' || this.playing) this.interactions.applyAllVisibility()
     })
     const stopReplay = options.teacherController?.subscribeSceneReplay?.(surfaceId => {
-      if (this.retired || !this.playing || options.teacherController!.read().locationId !== surfaceId) return
+      if (this.retired || options.teacherController!.read().locationId !== surfaceId) return
       this.emit('__runtime.scene.reset', surfaceId)
       this.interactions.resetSurface(surfaceId)
       // Same-scene replay retires only that scene's audio, retaining global playback and mounts.
@@ -256,11 +263,19 @@ export class ComponentPlatformRuntime {
     }
   }
 
-  private registerAuthorSpot(instanceId: string, generation: number, input: ComponentAuthorSpotInput): () => void {
+  private registerAuthorSpot(instanceId: string, generation: number, input: ComponentAuthorSpotInput, callbacks?: ComponentAuthorPreviewCallbacks): () => void {
     const id = `spot:${instanceId}:${generation}:${++this.spotSequence}`
     this.spots.set(id, { ...structuredClone(input), id, instanceId, mountGeneration: generation })
+    if (callbacks) this.spotPreviews.set(id, callbacks)
     this.notifySpots()
-    return () => { if (this.spots.delete(id)) this.notifySpots() }
+    return () => { this.spotPreviews.delete(id); if (this.spots.delete(id)) this.notifySpots() }
+  }
+  /** Transient realm paint only; the gesture's final geometry still goes through the author transaction. */
+  previewAuthorSpot = (id: string, geometry: ComponentAuthorGeometry | null): boolean => {
+    const callback = !this.retired && this.spots.has(id) ? this.spotPreviews.get(id) : undefined
+    if (!callback) return false
+    callback.previewGeometry(geometry)
+    return true
   }
   private notifySpots(): void { for (const listener of this.spotListeners) listener() }
   authorSpots(): readonly ComponentAuthorSpot[] { return [...this.spots.values()].map(spot => structuredClone(spot)) }
@@ -304,6 +319,7 @@ export class ComponentPlatformRuntime {
       this.projectionRoots.delete(instanceId)
     }
     if (element && this.project && !this.projectionManaged) void this.syncInstance(instanceId).catch(() => {})
+    if (element?.isConnected && this.projectionManaged) this.onProjectionCommit?.()
     this.layouts.get(instanceId)?.notify()
   }
   private placeRoot(parent: HTMLElement, root: HTMLElement): void {
@@ -343,7 +359,7 @@ export class ComponentPlatformRuntime {
       const root = this.roots.get(id)
       if (root && element.isConnected && root.parentElement !== element) this.placeRoot(element, root)
     }
-    if (this.projectionManaged) { this.projectionTargetsChanged = true; return }
+    if (this.projectionManaged) { this.projectionTargetsChanged = true; this.onProjectionCommit?.(); return }
     if ([...this.projectionRoots.values()].some(element => element.isConnected)) {
       for (const instance of Object.values(this.project?.instances ?? {})) {
         if (this.project?.definitions[instance.definitionId]?.role !== 'behavior') continue
@@ -376,6 +392,9 @@ export class ComponentPlatformRuntime {
     else this.targetElements.delete(instanceId)
     this.layouts.get(instanceId)?.notify()
     if (this.mode !== 'edit') this.interactions.applyVisibility(instanceId)
+    if (element?.isConnected && previous !== element && this.projectionManaged) {
+      this.projectionTargetsChanged = true; this.onProjectionCommit?.()
+    }
   }
   private async syncInstance(id: string, restarting = false): Promise<unknown> {
     if (this.reset && !restarting) { await this.reset; return this.syncInstance(id) }
@@ -505,7 +524,7 @@ export class ComponentPlatformRuntime {
     this.reset = (async () => {
       await this.host.disposeScope(this.runScopeId)
       if (this.retired || !this.project) return
-      this.spots.clear(); this.notifySpots(); this.state.clear()
+      this.spots.clear(); this.spotPreviews.clear(); this.notifySpots(); this.state.clear()
       for (const declaration of this.project.logic?.courseState ?? []) this.setState(declaration.key, declaration.defaultValue)
       this.playing = playing
       await Promise.allSettled(Object.keys(this.project.instances).map(id => this.syncInstance(id, true)))
@@ -551,7 +570,7 @@ export class ComponentPlatformRuntime {
   }
   private async disposeWorld(): Promise<void> {
     this.project = undefined; this.documentResources = undefined
-    this.stopNavigation?.(); this.spots.clear(); this.notifySpots(); this.spotListeners.clear()
+    this.stopNavigation?.(); this.spots.clear(); this.spotPreviews.clear(); this.notifySpots(); this.spotListeners.clear()
     this.interactions.dispose(); this.audioManager?.destroy(); this.audioEvents.dispose(); this.resumeMedia = undefined
     await this.host.disposeScope(this.runScopeId)
     this.layouts.clear()

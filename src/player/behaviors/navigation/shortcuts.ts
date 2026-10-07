@@ -8,7 +8,7 @@ export function attachComponentPlatformNavigationKeys<Target>(options: {
   navigation: NavigationTasks<PlaybackKeyCommand, Target>
   keyboardNavigation: boolean
   presenter: Readonly<ProjectPresenterSettings>
-  onAuthoredCommand(command: PresenterCommand): boolean | PresenterInputResult
+  onAuthoredCommand(command: PresenterCommand): boolean | PresenterInputResult | PromiseLike<boolean | PresenterInputResult>
   onFeedback?(feedback: PresenterInputFeedback): void
   onError?(error: unknown): void
 }): PlayerPresenterInput {
@@ -17,10 +17,10 @@ export function attachComponentPlatformNavigationKeys<Target>(options: {
     navigate: request => {
       const task = options.navigation.request(request)
       if (!task) return false
-      void task.finished.then(result => {
+      return task.finished.then(result => {
         if (result.status === 'failed') options.onError?.(result.error)
+        return result.status === 'completed'
       })
-      return true
     },
   })
 }

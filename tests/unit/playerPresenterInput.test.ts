@@ -3,6 +3,8 @@ import {
   PlayerPresenterInput,
   type PlayerPresenterInputOptions,
 } from '../../src/player/PlayerPresenterInput'
+import { NavigationTasks } from '../../src/player/behaviors/navigation/NavigationTasks'
+import { attachComponentPlatformNavigationKeys } from '../../src/player/behaviors/navigation/shortcuts'
 
 const mounted: HTMLElement[] = []
 const inputs: PlayerPresenterInput[] = []
@@ -65,6 +67,30 @@ afterEach(() => {
 })
 
 describe('PlayerPresenterInput', () => {
+  it('reports an actual asynchronous navigation rejection instead of accepting the presence of a task', async () => {
+    const root = mount(document.createElement('div')), feedback = vi.fn()
+    let finish!: (accepted: boolean) => void
+    const navigation = new NavigationTasks({ resolve: (command: unknown) => command, prepare() {}, commit: () => true,
+      transition: () => new Promise<boolean>(resolve => { finish = resolve }) })
+    const input = attachComponentPlatformNavigationKeys({ root, navigation, keyboardNavigation: true,
+      presenter: { enabled: true, strategy: 'scene-navigation', additionalBindings: [] }, onAuthoredCommand: () => false, onFeedback: feedback })
+    inputs.push(input)
+    expect(keydown('ArrowRight').defaultPrevented).toBe(true)
+    await Promise.resolve(); expect(feedback).not.toHaveBeenCalled()
+    finish(false)
+    await vi.waitFor(() => expect(feedback).toHaveBeenCalledWith(expect.objectContaining({ message: '已到整课末尾或当前无法继续' })))
+    navigation.dispose()
+  })
+  it('uses the authored command execution result and ignores a late result after retirement', async () => {
+    let finish!: (accepted: boolean) => void
+    const { input, feedback } = createInput({ presenter: { enabled: true, strategy: 'authored-command', additionalBindings: [] },
+      onAuthoredCommand: () => new Promise<boolean>(resolve => { finish = resolve }) })
+    keydown('PageDown'); expect(feedback).not.toHaveBeenCalled()
+    finish(false); await Promise.resolve()
+    expect(feedback).toHaveBeenCalledWith(expect.objectContaining({ message: '当前场景没有可执行的“前进”规则' }))
+    feedback.mockClear(); keydown('PageUp'); input.destroy(); finish(false); await Promise.resolve()
+    expect(feedback).not.toHaveBeenCalled()
+  })
   it('maps ←/→ and PageUp/PageDown to steps, Shift+←/→ to scenes and Home/End to the first and last page', () => {
     const { navigate } = createInput()
     for (const [key, init] of [
