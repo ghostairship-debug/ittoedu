@@ -1,12 +1,14 @@
 import { expect, test, type FrameLocator, type ElectronApplication, type Locator, type Page } from '@playwright/test'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { execFileSync, type ChildProcess } from 'node:child_process'
 import sharp from 'sharp'
 import { CourseV10Driver } from '../../../../src/core/drivers/CourseV10Driver'
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
 import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
 import { createTextComponentData } from '../../../../src/components/text/data'
-import { closeSelectionApp, launchSelectionApp, openSelectionFile, readSelectionDocument } from '../../helpers/g20SelectionHarness'
+import { WEB_DEFINITION } from '../../../../src/components/web/data'
+import { launchSelectionApp, openSelectionFile, readSelectionDocument } from '../../helpers/g20SelectionHarness'
 import { chooseM23Workspace, openM23Html } from '../../helpers/g20M23Harness'
 
 async function pixel(png: Buffer, xRatio: number, yRatio: number) {
@@ -97,16 +99,25 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
   writeFileSync(sourceFile, readFileSync(join(__dirname, 'fixtures/paint-and-flow.html')))
   const project = createBlankCourseProjectV10('绘制样本')
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
+  project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
+  project.definitions.group = { id: 'group', role: 'content', implementation: { kind: 'builtin', key: 'guoling.group' } }
   project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('局部原说明') }
   project.instances.human = { id: 'human', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('人工浮层保持位置'),
     frame: { width: 220, height: 60, transform: [1, 0, 0, 1, 430, 180] }, style: { opacity: .6 }, flowPlacement: { space: 'paper', plane: 'overlay' } }
-  project.surfaces = [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body', 'human'] }]
+  project.instances['nested-group'] = { id: 'nested-group', definitionId: 'group', data: {}, childIds: ['nested-control'],
+    frame: { width: 500, height: 220, transform: [1, 0, 0, 1, 120, 100] } }
+  project.instances['nested-control'] = { id: 'nested-control', definitionId: WEB_DEFINITION.id,
+    frame: { width: 360, height: 120, transform: [1, 0, 0, 1, 35, 40] },
+    data: { html: '<details id="nested-answer"><summary>真实嵌套子对象互动</summary><p>子对象仍能接收真实鼠标点击。</p></details>' } }
+  project.surfaces = [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body', 'human'] },
+    { id: 'nested-slide', title: '嵌套交互', kind: 'slide', childIds: ['nested-group'], designSize: { width: 1000, height: 650 } }]
   const name = '绘制对照.h5lesson'
   writeFileSync(join(workspace, name), new CourseV10Driver().serialize({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }))
-  let app: ElectronApplication | undefined
+  let app: ElectronApplication | undefined, ownedProcess: ChildProcess | undefined
+  const profileArgument = `--user-data-dir=${join(directory, 'profile')}`
   const facts: Record<string, unknown> = { scope: 'one actual UI import / Electron measurement / formal V10 / real Player pixel and interaction specimen; no model supplier claim', directory }
   try {
-    app = await launchSelectionApp(directory); const page = await app.firstWindow()
+    app = await launchSelectionApp(directory); ownedProcess = app.process(); const page = await app.firstWindow()
     await chooseM23Workspace(app, page, workspace)
     await openM23Html(page, 'paint-and-flow.html')
     const source = page.frameLocator('iframe[title="HTML 预览"]')
@@ -143,8 +154,8 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
     await editor.locator('.course-light-tools').getByRole('button', { name: '整课预览', exact: true }).click()
     const host = page.getByTestId('course-preview-host'), overlay = page.getByTestId('course-preview-overlay')
     await expect(overlay).toBeVisible()
-    const frames = host.locator('iframe'); await expect(frames).toHaveCount(1)
-    const player = host.frameLocator('iframe')
+    const frames = host.locator(`[data-component-object="${program!.id}"] iframe`); await expect(frames).toHaveCount(1)
+    const player = frames.contentFrame()
     await expect(player.locator('#answer summary')).toBeVisible()
     const sourceFacts = facts.sourcePaint as Awaited<ReturnType<typeof painted>>, playerFacts = await painted(page, player, frames, directory, 'player')
     facts.playerPaint = playerFacts
@@ -178,10 +189,10 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
     }
     await page.evaluate(installPointerEvidence)
     await player.locator('#answer summary').evaluate(installPointerEvidence)
-    const clickSummary = async (step: string) => {
-      const summary = player.locator('#answer summary')
-      await frames.scrollIntoViewIfNeeded(); await summary.scrollIntoViewIfNeeded()
-      const outer = await outerGeometry(frames), inner = await summary.evaluate(element => ({ rect: element.getBoundingClientRect().toJSON(),
+    const clickSummary = async (step: string, targetFrame: FrameLocator = player, targetIframe: Locator = frames, selector = '#answer summary') => {
+      const summary = targetFrame.locator(selector)
+      await targetIframe.scrollIntoViewIfNeeded(); await summary.scrollIntoViewIfNeeded()
+      const outer = await outerGeometry(targetIframe), inner = await summary.evaluate(element => ({ rect: element.getBoundingClientRect().toJSON(),
         scrollX, scrollY, innerWidth, innerHeight }))
       const mapped = frameRectToScreen(outer, inner.rect), point = { x: mapped.screen.x + mapped.screen.width / 2, y: mapped.screen.y + mapped.screen.height / 2 }
       const topHits = await page.evaluate(point => document.elementsFromPoint(point.x, point.y).slice(0, 8).map(element => ({
@@ -213,12 +224,36 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
     await clickSummary('close')
     await expect(player.locator('#answer p')).toBeHidden()
     facts.interaction = { openedAndClosed: true }; facts.localFlowPreserved = { programId: program!.id, humanFrame: edited.model.project.instances.human.frame }
+    await overlay.getByTestId('course-preview-next').click()
+    const nestedIframe = host.locator('[data-component-object="nested-group"] [data-component-object="nested-control"] iframe')
+    await expect(nestedIframe).toHaveCount(1)
+    const nested = nestedIframe.contentFrame()
+    await expect(nested.locator('#nested-answer summary')).toBeVisible()
+    await expect(nested.locator('#nested-answer p')).toBeHidden()
+    await nested.locator('#nested-answer summary').evaluate(installPointerEvidence)
+    await clickSummary('nested-child', nested, nestedIframe, '#nested-answer summary')
+    await expect(nested.locator('#nested-answer p')).toBeVisible()
+    facts.nestedChildInteraction = { realGroupChildOpened: true }
+    const afterInteraction = await readSelectionDocument(page, opened.documentId)
+    expect(afterInteraction).toMatchObject({ revision: edited.revision, undoDepth: edited.undoDepth })
+    expect(afterInteraction.model).toEqual(edited.model)
     await overlay.getByRole('button', { name: '关闭预览', exact: true }).click()
     await editor.locator('.course-light-tools').getByRole('button', { name: '保存', exact: true }).click()
     await expect.poll(async () => (await readSelectionDocument(page, opened.documentId)).dirty).toBe(false)
   } finally {
     writeFileSync(join(directory, 'evidence.json'), JSON.stringify(facts, null, 2) + '\n')
     await info.attach('One source to Player paint facts', { path: join(directory, 'evidence.json'), contentType: 'application/json' })
-    if (app) await closeSelectionApp(app)
+    // This fixture tests Player behavior, not natural process exit. Never await an evaluation
+    // that destroys its own target; clean only the process tree launched with this exact profile.
+    const profileMatches = ownedProcess?.spawnargs.some(argument => argument === profileArgument || argument.includes(`"${profileArgument}"`)) === true
+    writeFileSync(join(directory, 'cleanup-process.json'), JSON.stringify({ pid: ownedProcess?.pid, profileArgument, profileMatches,
+      spawnfile: ownedProcess?.spawnfile, spawnargs: ownedProcess?.spawnargs }, null, 2))
+    if (ownedProcess?.pid && ownedProcess.exitCode === null && ownedProcess.signalCode === null && profileMatches) {
+      try {
+        if (process.platform === 'win32') execFileSync('taskkill.exe', ['/PID', String(ownedProcess.pid), '/T', '/F'], { stdio: 'pipe', windowsHide: true })
+        else ownedProcess.kill()
+      } catch (error) { writeFileSync(join(directory, 'cleanup-error.txt'), String(error)) }
+    }
+    await app?.close().catch(() => undefined)
   }
 })
