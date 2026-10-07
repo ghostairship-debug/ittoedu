@@ -48,7 +48,7 @@ export async function snapshotSelectedLessonMaterials(input: { target: LessonMat
         ...(record.format === 'docx' ? { ...(fragment.locator.paragraph ? { paragraph: fragment.locator.paragraph } : {}) }
           : fragment.locator.page ? { [record.format === 'pptx' ? 'slide' : 'page']: fragment.locator.page } : {}),
       }, ...(fragment.text !== undefined ? { text: fragment.text } : {}) }))
-    const label = { title: record.title, sourcePath: record.sourcePath, format: record.format,
+    const label = { title: record.title, format: record.format,
       sourceVersion: read.sourceVersion, extractionVersion: read.extractionVersion, fragments,
       gaps: record.gaps.filter(gap => read.fragments.some(fragment => gap.locator.part === fragment.locator.part
         && (gap.locator.page === undefined || gap.locator.page === fragment.locator.page)
