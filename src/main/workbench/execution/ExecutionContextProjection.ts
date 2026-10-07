@@ -1,6 +1,11 @@
 import type { ModelChatMessage } from '../../../shared/workbench/modelProvider'
 import type { ToolResult } from '../../../shared/workbench/tools'
 import { contentApplyFact, operationFact, saveFact } from '../../../core/tools/modelToolResult'
+import { modelToolWireName } from '../providers/OpenAIChatProvider'
+
+// Only these named envelopes need business receipt interpretation. Reuse the
+// provider spelling function rather than guessing that every underscore is a dot.
+const receiptWireNames = new Map(['project.apply', 'project.save', 'file.save'].map(name => [modelToolWireName(name), name]))
 
 const imagePart = (part: unknown): part is { type: 'image_url'; image_url: { url: string } } => !!part && typeof part === 'object'
   && (part as { type?: unknown }).type === 'image_url' && typeof (part as { image_url?: { url?: unknown } }).image_url?.url === 'string'
@@ -55,7 +60,7 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
       if (!call || typeof call !== 'object' || Array.isArray(call) || typeof call.id !== 'string'
         || !call.function || typeof call.function !== 'object' || Array.isArray(call.function)
         || typeof call.function.name !== 'string') continue
-      callNames.set(call.id, call.function.name)
+      callNames.set(call.id, receiptWireNames.get(call.function.name) ?? call.function.name)
     }
     if (message.role === 'tool' && typeof message.tool_call_id === 'string' && callNames.has(message.tool_call_id))
       messageTools.set(index, callNames.get(message.tool_call_id)!)
