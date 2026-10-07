@@ -8,7 +8,7 @@ import { dispatchRevealInExplorer } from './revealInExplorer'
 import { useDismissableDetails } from '../ui/useDismissableDetails'
 import { homeInScope, type ConversationRecord } from '../../shared/workbench/conversations'
 import { type ExecutionRunRecord, type ExecutionContentOutput } from '../../shared/workbench/execution'
-import { captureRendererTiming, disclosedExecutionSettings, type ExecutionDesktopAPI, type ExecutionDocumentReference, type ExecutionSendInput, type ExecutionSubmissionMode, type ExecutionSubmissionRecord } from '../../shared/workbench/executionDesktop'
+import { captureRendererTiming, disclosedExecutionSettings, executionSelectionTargetSchema, type ExecutionDesktopAPI, type ExecutionDocumentReference, type ExecutionSendInput, type ExecutionSubmissionMode, type ExecutionSubmissionRecord } from '../../shared/workbench/executionDesktop'
 import { emptyExecutionProjection, foldExecutionEvents, type ExecutionProjection } from '../../shared/workbench/executionEvents'
 import type { InputAttachmentReference } from '../../shared/workbench/attachments'
 import type { ExecutionRoleSelection, ExecutionSettingsView } from '../../shared/workbench/executionSettings'
@@ -74,11 +74,14 @@ const accountLabel = (entry: ExecutionSettingsView['connections'][number]) => {
   return compact.length > 12 ? `ChatGPT 账号 · 尾号 ${compact.slice(-4)}` : `ChatGPT 账号 · ${id}`
 }
 const updateConversation = (list: ConversationRecord[], next: ConversationRecord) => list.map(value => value.conversationId === next.conversationId ? next : value)
-const allowedScopeKinds = new Set<ExecutionDocumentReference['writable'][number]['kind']>(['document', 'markdown-range', 'course-object', 'flow-block', 'flow-range'])
 const restoredDocuments = (conversation: ConversationRecord): ExecutionDocumentReference[] => conversation.frozenContextRefs.map(value => ({
   documentId: value.documentId, epoch: value.epoch, revision: value.revision,
   ...(value.selection?.length ? { selection: value.selection as ExecutionDocumentReference['selection'] } : {}),
-  writable: (value.writeScope ?? []).filter((scope): scope is ExecutionDocumentReference['writable'][number] => allowedScopeKinds.has(scope.kind as ExecutionDocumentReference['writable'][number]['kind'])),
+  writable: (value.writeScope ?? []).flatMap<ExecutionDocumentReference['writable'][number]>(scope => {
+    if (scope.kind === 'document') return [{ kind: 'document' as const }]
+    const restored = executionSelectionTargetSchema.safeParse(scope)
+    return restored.success ? [restored.data] : []
+  }),
 }))
 // Structural equality: Main returns schema-ordered keys while the composer builds its own
 // order, so object keys are sorted; array order (documents, ranges) stays significant.
@@ -109,7 +112,7 @@ function readPermission(workspaceId: string): ExecutionPermissionMode {
 export function documentsForPermission(documents: readonly ExecutionDocumentReference[], permission: ExecutionPermissionMode): ExecutionDocumentReference[] {
   return documents.map(document => {
     if (permission === 'read-only') return { ...structuredClone(document), writable: [] }
-    if (document.writable.some(scope => scope.kind !== 'document')) return structuredClone(document)
+    if (!document.writable.length || document.writable.some(scope => scope.kind !== 'document')) return structuredClone(document)
     return { ...structuredClone(document), writable: [{ kind: 'document' as const }, ...structuredClone(document.selection ?? [])] }
   })
 }
