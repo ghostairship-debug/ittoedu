@@ -28,7 +28,7 @@ export function createComponentInteractionRuntime(createPorts: ComponentInteract
       let disposed = false, generation = 0, off: (() => void) | undefined
       let rules = componentInteractionDataSchema.parse(context.instance.data).rules
       let ports = createPorts(context, rules)
-      const runs = new Map<string, AbortController>()
+      const runs = new Map<string, { controller: AbortController; surfaceId: string | null }>()
       const active = () => !disposed && context.scope.isActive() && !context.scope.signal.aborted
       const matches = (condition: InteractionCondition) => {
         if (condition.type === 'scene.in') return condition.sceneIds.includes(ports.currentSurfaceId() ?? '')
@@ -53,8 +53,8 @@ export function createComponentInteractionRuntime(createPorts: ComponentInteract
         for (const rule of rules) {
           if (!rule.enabled || !triggerMatches(rule.trigger, trigger) || !inScope(rule) || !rule.conditions.every(matches)) continue
           const previous = runs.get(rule.id), controller = new AbortController(), runGeneration = generation
-          runs.set(rule.id, controller); previous?.abort()
-          const current = () => active() && runGeneration === generation && runs.get(rule.id) === controller && !controller.signal.aborted
+          runs.set(rule.id, { controller, surfaceId: ports.currentSurfaceId() }); previous?.controller.abort()
+          const current = () => active() && runGeneration === generation && runs.get(rule.id)?.controller === controller && !controller.signal.aborted
           void (async () => {
             const groups: typeof rule.actions[] = []
             for (const step of rule.actions) {
@@ -75,11 +75,11 @@ export function createComponentInteractionRuntime(createPorts: ComponentInteract
               if (outcomes.some(value => !value)) return
             }
           })().catch(error => { if (current()) ports.report(error instanceof Error ? error.message : String(error)) }).finally(() => {
-            if (runs.get(rule.id) === controller) runs.delete(rule.id)
+            if (runs.get(rule.id)?.controller === controller) runs.delete(rule.id)
           })
         }
       }
-      const retire = () => { generation++; off?.(); off = undefined; for (const run of runs.values()) run.abort(); runs.clear() }
+      const retire = () => { generation++; off?.(); off = undefined; for (const run of runs.values()) run.controller.abort(); runs.clear() }
       const subscribe = () => {
         const triggers = new Map(rules.filter(rule => rule.enabled).map(rule => [JSON.stringify(rule.trigger), rule.trigger]))
         const stops: (() => void)[] = []
@@ -88,6 +88,13 @@ export function createComponentInteractionRuntime(createPorts: ComponentInteract
         return () => { for (const stop of stops.reverse()) stop() }
       }
       const dispose = () => { if (disposed) return; disposed = true; retire() }
+      context.scope.events.subscribe('__runtime.scene.reset', surfaceId => {
+        if (!active() || surfaceId !== ports.currentSurfaceId()) return
+        for (const [ruleId, run] of runs) {
+          if (run.surfaceId !== surfaceId) continue
+          run.controller.abort(); runs.delete(ruleId)
+        }
+      })
       context.scope.cleanup(dispose)
       if (active()) off = subscribe()
       return {

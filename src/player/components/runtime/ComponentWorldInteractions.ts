@@ -114,7 +114,7 @@ export class ComponentWorldInteractions {
     const presentation = [...(this.presentationVisibility.get(id)?.values() ?? [])].filter(value => value.element === element).at(-1)?.visible
     if (element && instance) element.hidden = !isComponentVisibleAtSurface(instance, surfaceId)
       || !spatialSemanticVisible(surface?.spatial, id, snapshot?.zoom ?? 1)
-      || !(presentation ?? this.visibility.get(id) ?? (!this.world.playback() || instance.playbackInitialVisibility !== 'hidden'))
+      || !(presentation ?? (this.leases.has(id) ? true : undefined) ?? this.visibility.get(id) ?? (!this.world.playback() || instance.playbackInitialVisibility !== 'hidden'))
   }
   applyAllVisibility(): void { const state = this.world.navigation?.read(); for (const id of Object.keys(this.world.project()?.instances ?? {})) this.applyVisibility(id, state) }
   async motion(action: NodeMotionAction, context: ActionContext, preview = false): Promise<boolean> {
@@ -141,6 +141,16 @@ export class ComponentWorldInteractions {
     for (const motion of this.motions.values()) motion.dispose()
     this.motions.clear(); this.visibility.clear()
     for (const id of Object.keys(this.world.project()?.instances ?? {})) this.applyVisibility(id)
+  }
+  resetSurface(surfaceId: string): void {
+    const project = this.world.project()
+    if (!project) return
+    for (const id of Object.keys(project.instances)) {
+      let owner = owningContainer(project, id)
+      while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
+      if (owner?.kind !== 'surface' || owner.surfaceId !== surfaceId) continue
+      this.retire(id); this.applyVisibility(id)
+    }
   }
   retire(id: string): void { this.retirePresentation(id); this.leases.delete(id); this.motions.get(id)?.dispose(); this.motions.delete(id); this.visibility.delete(id) }
   pause(): void {
@@ -171,7 +181,7 @@ export class ComponentWorldInteractions {
           if (value === true && (trigger.type === 'scene.enter' || currentStateId() === trigger.stateId)) listener()
         })
         const replay = trigger.type === 'scene.enter' ? scope.events.subscribe('__runtime.scene.replay', surfaceId => {
-          if (stopped || !scope.isActive() || !world.active() || surfaceId !== currentSurfaceId()) return
+          if (stopped || !scope.isActive() || surfaceId !== currentSurfaceId()) return
           const project = world.project()
           if (!project) return
           let owner = owningContainer(project, scope.instanceId)
@@ -213,13 +223,26 @@ export class ComponentWorldInteractions {
       }
       // Media controls emit into the same R0 event port, including programmatic playback.
       const name = trigger.type
-      return scope.events.subscribe(name, value => {
-        if (!world.active() || !value || typeof value !== 'object' || Array.isArray(value)) return
-        const id = trigger.type === 'audio.ended' ? trigger.soundId : trigger.nodeId
-        if (value.instanceId !== id) return
-        if (trigger.type === 'video.time' && typeof value.seconds === 'number' && value.seconds < trigger.seconds) return
+      let previousSeconds = 0, crossed = false
+      const rearm = trigger.type === 'video.time' ? scope.events.subscribe('__runtime.scene.reset', surfaceId => {
+        if (surfaceId === currentSurfaceId() && this.canPresent(trigger.nodeId)) { previousSeconds = 0; crossed = false }
+      }) : () => {}
+      const stop = scope.events.subscribe(name, value => {
+        if (!scope.isActive() || !world.active() || !value || typeof value !== 'object' || Array.isArray(value)) return
+        if (trigger.type === 'audio.ended') {
+          if (value.soundId !== trigger.soundId) return
+        } else if (value.instanceId !== trigger.nodeId || !this.canPresent(trigger.nodeId)) return
+        if (trigger.type === 'video.time') {
+          const seconds = value.seconds
+          if (typeof seconds !== 'number' || !Number.isFinite(seconds)) return
+          if (seconds < previousSeconds && seconds < trigger.seconds) crossed = false
+          previousSeconds = seconds
+          if (crossed || seconds < trigger.seconds) return
+          crossed = true
+        }
         listener(value)
       })
+      return () => { stop(); rearm() }
     }
     return { currentSurfaceId, currentStateId,
       courseState: { get: key => scope.state.get(key), set: (key, value) => scope.state.set(key, structuredClone(value) as JsonValue) },

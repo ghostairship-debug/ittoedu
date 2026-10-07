@@ -122,8 +122,7 @@ export function mount(context: TeacherControllerRuntimeContext): MountedComponen
     }
     panel.append(identity)
     const steps = doc.createElement('div'), tools = doc.createElement('div'); steps.className = 'group steps'; tools.className = 'group tools'; panel.append(steps, tools)
-    const specs = [...data.buttons]
-    if (!specs.some(spec => spec.action.type === 'step.next' || spec.action.type === 'step.previous')) specs.unshift({ id: 'step-previous', label: '上一步', visible: true, action: { type: 'step.previous' } }, { id: 'step-next', label: '下一步', visible: true, action: { type: 'step.next' } })
+    const specs = data.buttons
     const glyphs: Record<string, string> = { 'step.previous': 'left', 'step.next': 'right', 'scene.previous': 'previous', 'scene.next': 'next', 'scene.open-picker': 'list', 'scene.replay': 'replay', 'course.restart': 'replay', 'audio.toggle-mute': state?.muted ? 'muted' : 'sound', 'player.fullscreen.toggle': 'full' }
     for (const spec of specs) {
       if (!spec.visible) continue

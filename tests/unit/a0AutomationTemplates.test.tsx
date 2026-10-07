@@ -110,7 +110,12 @@ it('persists the current named-state condition for scene and global reveal templ
       { type: 'presentation.in', stateIds: ['question'] },
     ])
     expect(rules[1].actions.map(step => 'nodeId' in step.action ? step.action.nodeId : null)).toEqual(['first', 'second'])
-    expect(current.capture.mock.calls[0][0]).toEqual([{ type: 'data.set', instanceId: behaviorId, path: ['rules'], value: rules }])
+    expect(current.capture.mock.calls[0][0]).toEqual([
+      ...['first', 'second'].map(instanceId => ({ type: 'instance.patch', instanceId, patch: { playbackInitialVisibility: 'hidden' } })),
+      { type: 'data.set', instanceId: behaviorId, path: ['rules'], value: rules },
+    ])
+    expect(current.readEditing().instances.first.playbackInitialVisibility).toBe('hidden')
+    expect(current.readEditing().instances.second.playbackInitialVisibility).toBe('hidden')
     expect(current.selectInstances).not.toHaveBeenCalled()
     if (scope === 'scene') {
       fireEvent.click(screen.getByRole('button', { name: '使用模板' }))

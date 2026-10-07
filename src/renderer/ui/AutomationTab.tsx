@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { InteractionRule } from '../../shared/interactionTypes'
 import { useEditorStore, selectEditingScope } from '../store/editorStore'
-import { componentInteractionView, componentRuleEdits, duplicateComponentRule } from '../interactions/componentInteractionAuthoring'
+import { componentInteractionView, componentRuleEdits, componentRevealSequenceEdits, duplicateComponentRule } from '../interactions/componentInteractionAuthoring'
 import { buildInteractionTemplateRule, SCENE_ENTER_REVEAL_SEQUENCE_TEMPLATE_ID } from '../interactions/interactionTemplates'
 import { previewComponentMotion } from '../interactions/componentMotionPreview'
 import { SceneAutomationEditor, InteractionEditor } from './InteractionEditor'
@@ -32,6 +32,14 @@ export function AutomationTab() {
     } catch (error) { setError(String(error)) }
   }
   const add = (rule: InteractionRule) => commit(rules => [...rules, rule])
+  const reveal = (rule: InteractionRule) => {
+    try {
+      const target = kernel.captureTarget(documentId)
+      const current = componentInteractionView(target.editingProject, surfaceId, scope === 'global')
+      const edits = componentRevealSequenceEdits(target.project, current.target, rule, current.rules)
+      void kernel.editCaptured(kernel.capture(edits, target)).catch(error => setError(String(error)))
+    } catch (error) { setError(String(error)) }
+  }
   const update = (ruleId: string, patch: Partial<Omit<InteractionRule, 'id'>>) => commit(rules => {
     if (!rules.some(rule => rule.id === ruleId)) throw new Error('互动规则已不存在')
     return rules.map(rule => rule.id === ruleId ? { ...rule, ...patch } : rule)
@@ -81,7 +89,7 @@ export function AutomationTab() {
     <SceneAutomationEditor {...shared} authoringStates={view.scene.presentation?.states ?? []} conditionSceneId={scope === 'global' ? surfaceId : null}
       revealTemplateTargetNodeIds={view.nodes.filter(node => node.visible && !node.locked).map(node => node.id)}
       onOpenClickRules={() => setClickRulesOpen(true)}
-      onApplyRevealSequenceTemplate={intent => add(buildInteractionTemplateRule({ templateId: SCENE_ENTER_REVEAL_SEQUENCE_TEMPLATE_ID, ...intent,
+      onApplyRevealSequenceTemplate={intent => reveal(buildInteractionTemplateRule({ templateId: SCENE_ENTER_REVEAL_SEQUENCE_TEMPLATE_ID, ...intent,
         conditions: [...(scope === 'global' ? [{ type: 'scene.in' as const, sceneIds: [surfaceId] }] : []),
           ...(courseView.activeStateId ? [{ type: 'presentation.in' as const, stateIds: [courseView.activeStateId] }] : [])] }))}
       onDuplicateRule={ruleId => commit(rules => { const index = rules.findIndex(rule => rule.id === ruleId); if (index >= 0) rules.splice(index + 1, 0, duplicateComponentRule(rules[index]!)); return rules })}
