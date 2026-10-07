@@ -48,7 +48,8 @@ import {
   type MixedCoursePlayerPort,
 } from '../src/player/surfaces/mixed/MixedCourseNavigator'
 import type { PublishedCourseV2Payload } from '../src/shared/publishedCourseTypes'
-import { validateCourseProjectArchiveBytes } from './validate-project'
+// This archived benchmark produces V9 fixtures; it does not measure the V10 production route.
+import { validateCourseProjectArchiveBytes } from './historical/validate-course-project-v9'
 
 const scriptDirectory = dirname(fileURLToPath(import.meta.url))
 const projectRoot = resolve(scriptDirectory, '..')
