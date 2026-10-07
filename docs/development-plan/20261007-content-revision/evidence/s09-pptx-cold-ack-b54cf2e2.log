@@ -1,0 +1,17 @@
+run_kind: exact T06 test command; single invocation
+cut: b54cf2e2d4c76a65b6df5ba9c5ca073732a221f8
+branch: content-revision/e-s09-tail
+cwd: D:\果铃并行\20261007-content-revision\e
+command: node node_modules/vitest/vitest.mjs run tests/integration/productFollowup/T06/pptxLostAckColdReceipt.test.ts
+expected: two real matched tests; zero skipped
+stdout and stderr follow:
+
+ RUN  v4.1.10 D:/果铃并行/20261007-content-revision/e
+
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  11:53:01
+   Duration  5.97s (transform 3.06s, setup 72ms, import 5.59s, tests 199ms, environment 0ms)
+
+exit_code: 0

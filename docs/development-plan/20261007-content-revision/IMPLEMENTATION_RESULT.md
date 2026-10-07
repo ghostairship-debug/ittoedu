@@ -1,6 +1,6 @@
 # 教师首发与统一内容协作：实施结果
 
-更新：2026-10-07。Owner 已授权持续实施；发行暂停。本轮38工作包的实施与确认优化、20补充候选处置已收口，随本次实质合并进入 main。工程候选通过相应最小验证及 R0–R4 独立审查；不声明全软件矩阵、art candidate 或 Owner accepted。
+更新：2026-10-07。Owner 已授权持续实施；发行暂停。本轮38工作包的实施与确认优化、20补充候选处置已随 a8cea6c1 合入 main。后续原 S09 冷 PPTX 创建回执尾项也已完成，随本次实质合并交付，见下文精确源码与测试 cut。工程候选按对应范围最小验证及独立审查交付；不声明全软件矩阵、art candidate 或 Owner accepted。实际协调只见[任务板](../TASK_BOARD.md)。
 
 ## 模型路由更正
 
@@ -94,7 +94,7 @@ B0 main=`afc65c9e4d713a9d362768f34e017789fad265ae`；用户已有 archive/开发
 | S06 | 授权数据桥、可用产物、artifact共同交付；坏辅助保CSV/全文日志/分页绿 | 无Podman/default Ubuntu，不安装；可控非真实后端 |
 | S07 | 附件/选集/公开教材同材料owner，PDF/DOCX/取消3及选集绿 | 不虚构页/扩写权，视觉理解另证 |
 | S08 | 当前HTML Source共享observe/act，发出后unknown查证、发出前不虚构unknown | ec208f43真实observe/html.click/Stop窗口1例绿，源文writable=[]/History0保留 |
-| S09 | 六格式同producer/File writer，PPTX公共入口复用converter→V10/真实保存回执 | 公开PPTX导入窗口已绿；真实hidden导出/PDF/取消/文档保留原单例d86dac8d 1绿；cold ACK无持久lookup，保unknown不重导 |
+| S09 | 六格式同producer/File writer，PPTX公共入口复用converter→V10/真实保存回执；原create owner持久因果事实接已有lookup | 公开PPTX导入/hidden导出原绿复用；新增b54cf2e2两例绿，丢ACK冷查证/回执失败保文件。旧记录或create→record真正中断仍unknown、不重导 |
 | S10 | 公共History/资产/展示状态同owner，资源History/资产绿 | 公开七展示状态操作闭环绿，所有播放不外推 |
 | OPT01 | 清不可再用maps但留回执/unknown，原job只读lookup、卡tracker自然释放；新三例绿，全文/metadata/行动错误已补 | 不声称内存/耗时测得改善 |
 | OPT02 | opaque短色/rgb归一、alpha保留、CSS/Flow范围、裸公网域原parser归一 | 无native历史trap同因结论/无等价别名不自造 |
@@ -121,8 +121,18 @@ B0 main=`afc65c9e4d713a9d362768f34e017789fad265ae`；用户已有 archive/开发
 
 [R0](evidence/R0_REVIEW.md)–[R4](evidence/R4_REVIEW.md)及[R-S](evidence/R_S_REVIEW.md)/[R-S4](evidence/R_S4_REVIEW.md)保留原失败和滚动cut。R4已关闭R2取消关闭lease、R3当前源码离线sink、R4纯finish恢复；A08实际pending反例现绿。R4新增F2：headless升格GUI且未开浏览器viewport时，隐藏BaseWindow阻断window-all-closed，普通退出遗留host。H在原Main退出owner接lifecycle continue/handled意图，仅真实closed才停并flush；R4已审ec208f43无新增静态阻断。T04实际Main PID20176保持至GUI晋升，未开viewport，MCP至普通native退出断言仍连接；启动cmd载体PID19488自然exitCode0/signalnull，行为主体已证。原runner随后已closed app.process getter异常，ffc→60c修仅缓存已有ownedProcess；原整例60c 1绿4秒。历史报告顶部open不当最新状态，作者未自审。
 
-最终 R4 已直接核对产品6087a936 / 测试bf4fb7c1 / E实际merge b7d1fcc3的同次原stdout/exit0、原生.last-run passed、最终facts及真实嵌套截图，所追踪的当前真实阻断均关闭。38包及候选按上述范围交付并合入main；无必要检查或产品writer仍等待。任务卡依工作协议退出active，保留源提交、原失败与最终证据。
+主包最终 R4 已直接核对产品6087a936 / 测试bf4fb7c1 / E实际merge b7d1fcc3的同次原stdout/exit0、原生.last-run passed、最终facts及真实嵌套截图，所追踪的当前真实阻断均关闭。38包及候选按上述范围交付并合入main，旧检查不因后续继续指令重跑。S09尾项按下节另记实际变更及最低证据，任务卡依工作协议退出active；保留源提交、原失败与最终证据。
 
-条件与明确差距继续保留：发行暂停下不制造安装包实测；Podman/default Ubuntu未配置，不安装；GPT OAuth真实图像连接/模型/执行者/计费未实测；历史native trap及全仓旧类型债未清零；PPTX cold-create-after-ACK无持久查证，保持unknown且不重导；简单改写仍为1请求2工具/1History，未满足零工具建议。以上没有改写成通过，也不阻断无关已交付能力。
+条件与明确差距继续保留：发行暂停下不制造安装包实测；Podman/default Ubuntu未配置，不安装；GPT OAuth实际生成/编辑、图像模型/执行者/计费未实测；历史native trap及全仓旧类型债未清零；PPTX旧运行无创建记录或实际create→record中断仍保持unknown、不重导；简单改写仍为1请求2工具/1History，未满足零工具建议。以上没有改写成通过，也不阻断无关已交付能力。
+
+GPT OAuth 后续免费检查已确认：真实产品 profile 的原 secureStorage/OAuth resolver 可用，沿正式 discover-models 服务请求官方目录，两次均 HTTP 200/live；第二次只为区分解析缺陷，原响应形状确为 models:[]，现 parser 正确读取 models/slug。图像角色仍未配置，目录没有模型或能力行，不据此猜图像 ID 或外推供应商全面不支持。刷新和生成请求均为0，未启动新收费路径。见[原服务回执](evidence/oauth-directory-evidence.json)与[响应形状](evidence/oauth-directory-shape-evidence.json)；不再重复同因探针。
 
 最后 Player 修复只在创建 children 几何容器时设 pointerEvents:none；真实 child.outer 原来在 Flow/free 都显式 auto，人工图层、源 HTML、frame、缩放和层序未动。9919实际首命中空DIV/iframe第二/子summary无事件确证截点击；修后父及嵌套点击均由真实mouse完成。6087相关Player/Renderer直接构建各一次exit0，未重跑生成器/Electron。发行继续暂停。
+
+## 后续 S09 冷创建回执收口
+
+源码 `fe503968`，parent 为主包 main `a8cea6c1`；独立 T 原 tests-only 提交 `65f3011e` / `9fcdf306`，隔离 integration/E 最终测试 cut `b54cf2e2`。六文件仅在原 WorkspaceFiles 创建 owner 成功 coordinate 后、成功 ACK 前原子持久紧凑创建事实；Gateway 原 run/op/requestDigest 贯穿既有 import/lookup。回执失败沿既有 unknown 传播，已创建文件保留，不回滚或误报普通未创建。Main 在 converter 前查询原事实，历史查询不读当前目标、不 open/attach，不恢复旧 document/entry 句柄或写权；后来改动或删除目标不会触发重建。没有完成记录则仍为 null/unknown，不猜成功或重做。
+
+独立 T/E 单文件一次执行：**1 file / 2 passed / 0 skipped，exit 0**，原命令、cut、stdout/stderr见[原测试回执](evidence/s09-pptx-cold-ack-b54cf2e2.log)。第一例以实际默认工具目录、Engine/Gateway 创建及真实 executing RunStore 切片模拟 ACK 丢失，Stop 后 fresh Host/Engine 查得历史 saved；converter/create 各一次、原输出一份，后改/删目标不重写，新写仍 run-stopped，Registry/handle/lease 不复活。第二例仅在私有回执 rename 注入 ENOSPC，实际 V10 文件仍可解析且保留，底层与 Agent 层均为 unknown，fresh lookup null，不重建或 open。converter 和 Host service port 是受控 seam；本例不冒充新版真实转换器、Main GUI或真实磁盘耗尽，原 T06 已绿真实 converter/GUI 证据继续复用。
+
+该 Main 活动消费者的唯一直接 Electron 构建 `node scripts/build-electron.mjs` / `fe503968` 已 exit 0，见[原构建回执](evidence/s09-build-electron-fe503968.log)；后续仅 tests-only，不重建 Renderer/Player或重跑生成器。R4按原边界完成设计、六文件实际 diff 与两例定义定向审查，原回执见[报告](evidence/R4_REVIEW.md)。源码、独立测试、结果与证据一起实质合入，用户无关 archive 修改保留，发行继续暂停。

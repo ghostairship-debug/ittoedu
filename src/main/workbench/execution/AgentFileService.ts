@@ -335,11 +335,22 @@ export class AgentFileService implements AgentFilePort {
     return this.createPreparedFile(context, input, kind, bytes, operationId)
   }
   /** The actual PPTX converter supplies a complete V10 archive; file identity and publication stay here. */
-  createPreparedCourse(context: AgentFileContext, input: { path?: string; name: string; bytes: Uint8Array }, operationId: string): Promise<AgentFileOutcome> {
-    return this.createPreparedFile(context, { path: input.path, name: input.name, kind: 'course-v10' }, 'course-v10', input.bytes, operationId)
+  async createPreparedCourse(context: AgentFileContext, input: { path?: string; name: string; bytes: Uint8Array }, operationId: string,
+    receipt?: { requestDigest: string; issues: readonly { page?: number; type: string; message: string }[] }): Promise<AgentFileOutcome> {
+    if (receipt) {
+      const previous = await this.lookupPreparedCourse(context.runId, operationId, receipt.requestDigest)
+      if (previous) return previous
+    }
+    return this.createPreparedFile(context, { path: input.path, name: input.name, kind: 'course-v10' }, 'course-v10', input.bytes, operationId, receipt)
+  }
+  async lookupPreparedCourse(runId: string, operationId: string, requestDigest: string): Promise<AgentFileOutcome | null> {
+    const receipt = await this.host.files.lookupCreation({ runId, operationId, requestDigest })
+    return receipt ? { data: { ...receipt.details, status: 'saved', path: receipt.path, operation: receipt.operation,
+      historical: true, currentContentVerified: false } } : null
   }
   private async createPreparedFile(context: AgentFileContext, input: { path?: string; name: string; kind?: 'markdown' | 'text' | 'html' | 'course-v10' },
-    kind: 'markdown' | 'text' | 'html' | 'course-v10', bytes: Uint8Array, operationId: string): Promise<AgentFileOutcome> {
+    kind: 'markdown' | 'text' | 'html' | 'course-v10', bytes: Uint8Array, operationId: string,
+    creation?: { requestDigest: string; issues: readonly { page?: number; type: string; message: string }[] }): Promise<AgentFileOutcome> {
     if (context.permission === 'read-only') throw new Error('只读任务不能创建文件')
     const preflight = await this.preflightCreate(context, input)
     const { directory, fallback } = await this.directory(context, input.path, true)
@@ -350,9 +361,14 @@ export class AgentFileService implements AgentFilePort {
     const root = await this.host.files.registerRoot(directory)
     context.assertActive?.()
     const receipt = await this.host.files.createFile({ operationId, workspaceId: root.workspaceId, targetDirectoryId: root.rootEntryId,
-      name: input.name, format: kind === 'course-v10' ? 'course-v10' : kind === 'markdown' && /\.md$/i.test(input.name) ? 'markdown' : 'file', bytes }, context.assertActive).catch(error => { throw new AgentFileOutcomeUnknown(error instanceof Error ? error.message : String(error)) })
+      name: input.name, format: kind === 'course-v10' ? 'course-v10' : kind === 'markdown' && /\.md$/i.test(input.name) ? 'markdown' : 'file', bytes,
+      ...(creation ? { creationReceipt: { runId: context.runId, requestDigest: creation.requestDigest,
+        details: { issues: creation.issues, homeMissingFallback: fallback } } } : {}) }, context.assertActive)
+      .catch(error => { throw new AgentFileOutcomeUnknown(error instanceof Error ? error.message : String(error)) })
     const created = receipt.items.find(item => item.status === 'success' && item.targetPath)
     if (!created?.targetPath) return { data: { operation: receipt, homeMissingFallback: fallback } }
+    // A cold replay carries no live entry handle and must not reopen a later version of the file.
+    if (creation && !created.entryId) return (await this.lookupPreparedCourse(context.runId, operationId, creation.requestDigest))!
     const snapshot = await this.host.open(created.targetPath).catch(() => null)
     if (!snapshot) return { data: { operation: receipt, path: created.targetPath, homeMissingFallback: fallback,
       openError: '文件已创建，但暂时无法打开；请检查目录后用 file.open 重试' } }

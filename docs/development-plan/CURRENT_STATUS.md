@@ -26,11 +26,11 @@
 
 [统一内容协作执行包](20261007-content-revision/README.md)已生成，承接教师首发、统一人/内置/外部能力、AI负责内容而软件负责实现的 Owner 决定。38项静态工作包覆盖原50主题、新131条记录、旧641条来源主张及20补充细项；含保留、反证、候选与条件，不能当缺陷总数。
 
-Owner已授权的38工作包实施与确认优化、20补充候选处置已收口，产品6087a936/最终测试bf4fb7c1随本次实质合并进入main，用户原无关archive修改保留。默认内容目标保持通用能力，富文本/公式、直接读依赖续修、组合图片部分恢复、自然有效稿及原未完输入恢复、同源能力与真实Player/导出已接齐。T01/T03/T04/T05/T06/T07/T08真实窗口聚焦闭环均有已执行绿例；正确deepseek-flash/V4.1实际返回deepseek-v4-1-flash-260910的1任务4请求改写/保存冷开通过。独立R0–R4及普通review按实际cut收口，未跑全矩阵，未将自动化称Owner accepted。具体提交、原失败与最终证据、38包和条件见[实施结果](20261007-content-revision/IMPLEMENTATION_RESULT.md)；当前无本批产品writer，发行继续暂停。
+Owner已授权的38工作包实施与确认优化、20补充候选处置已随a8cea6c1合入main，用户原无关archive修改保留。默认内容目标保持通用能力，富文本/公式、直接读依赖续修、组合图片部分恢复、自然有效稿及原未完输入恢复、同源能力与真实Player/导出已接齐。T01/T03/T04/T05/T06/T07/T08真实窗口聚焦闭环均有已执行绿例；正确deepseek-flash/V4.1实际返回deepseek-v4-1-flash-260910的1任务4请求改写/保存冷开通过。独立R0–R4及普通review按实际cut收口，未跑全矩阵，未将自动化称Owner accepted。后续原S09尾项产品fe503968/测试b54cf2e2也随本次实质合并交付：创建成功后持久因果回执、冷查询不重做，独立两例及唯一相关Electron构建均通过。具体提交、原失败与最终证据、38包和条件见[实施结果](20261007-content-revision/IMPLEMENTATION_RESULT.md)；实际writer/写域只见任务板，发行继续暂停。
 
 ## 仍需明确保留的边界
 
-- 本批新增条件：发行暂停下无安装版/无Nodebootstrap实测；Podman/default Ubuntu与GPT OAuth真实图像/计费未验证；PPTX冷ACK查证不足时保unknown不重导。简单改写保持1次请求2个明确提交工具/1History，零工具建议仍有差距；见本轮结果。
+- 本批新增条件：发行暂停下无安装版/无Nodebootstrap实测；Podman/default Ubuntu未配置。GPT OAuth正式免费目录已HTTP 200/live，原响应models:[]且图像角色未配置，实际生图/编辑/计费仍未验证。PPTX冷ACK现可查持久创建事实；旧记录或create→record实际中断无事实仍保unknown不重导。简单改写保持1次请求2个明确提交工具/1History，零工具建议仍有差距；见本轮结果。
 
 - 全仓类型和旧测试尚未清零。本批共享 helper 的 8 条直接诊断已消除；App 窄闭包仍有源码遗留，含 inactive V9 observation controller 的 4 条类型漂移；旧 productivity 的 9 个 V9 用例尚未迁移。
 - 历史 native trap 根因未完全验证。payload 减量、一次正常观察和释放不等于已消除崩溃或证明长期无泄漏。

@@ -1,0 +1,34 @@
+{
+  "checkedAt": "2026-10-07T03:40:46.297Z",
+  "profile": "C:\\Users\\74755\\AppData\\Roaming\\ittoedu-courseware-editor-v8-rebuild",
+  "status": "live-directory-returned",
+  "secureStorageAvailable": true,
+  "source": "live",
+  "directoryCheckedAt": "2026-10-07T03:40:46.255Z",
+  "provider": "openai",
+  "protocol": "chatgpt-responses",
+  "authKind": "oauth",
+  "billingMetadata": "subscription",
+  "models": [],
+  "imageModels": [],
+  "capabilitiesVerified": false,
+  "imageGenerationCapability": "unknown-not-requested",
+  "imageEditCapability": "unknown-not-requested",
+  "catalogRequests": 1,
+  "catalogHttpStatus": 200,
+  "refreshRequests": 0,
+  "refreshHttpStatus": null,
+  "generationRequests": 0,
+  "responseShape": {
+    "topType": "object",
+    "topFields": [
+      "models"
+    ],
+    "arrays": {
+      "models": {
+        "length": 0,
+        "sampleRows": []
+      }
+    }
+  }
+}

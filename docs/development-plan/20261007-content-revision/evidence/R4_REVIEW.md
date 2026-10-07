@@ -1,8 +1,10 @@
 # R-A4 最终组合独立审查
 
-审查者 R-A4；未参与被审实现或测试断言编写。只读产品、测试与既有原始证据，仅写本文件；本轮未执行测试、构建、真实模型调用或 GUI 操作。基线为 `afc65c9e`，首读集成为 `638b88f4`，最终产品增量审至 `6087a936`、测试增量审至 `bf4fb7c1`（E 汇合 `b7d1fcc3`）。以下保留滚动时点的定位与复审记录，当前结论及末尾最终收口优先。发行继续暂停。
+审查者 R-A4；未参与被审实现或测试断言编写。只读产品、测试与既有原始证据，仅写本文件；本轮未执行测试、构建、真实模型调用或 GUI 操作。基线为 `afc65c9e`，首读集成为 `638b88f4`，原包最终产品增量审至 `6087a936`、测试增量审至 `bf4fb7c1`（E 汇合 `b7d1fcc3`）；原包随后合入 main `a8cea6c1`。Owner 继续剩余范围后，S09 尾项独立审至产品 `fe503968`、测试 `b54cf2e2`。以下保留滚动时点的定位与复审记录，当前结论及末尾最终收口优先。发行继续暂停。
 
 **最终结论：本次独立审查发现并追踪的当前真实阻断均已闭合，没有未关闭的新 finding。R4-F1、R4-F2、R2-F1 已有对应修复与行为证据；T03 正常退出／fresh-file 冷恢复、T08 hidden export，以及最后 T08 paint 原像素／真实父组件开合／nested child 点击／模型与 History 保全／GUI 保存整例均通过。最后唯一 T08 运行 1 passed（48.6s）、exit=0；未增加时限或降低断言。结论支持本范围 engineering candidate 的已授权集成，不表示全部产品目标、安装分发、历史 native trap、真实图像供应商或 Owner accepted 已完成；简单改写的两次工具调用等明确边界见末尾。发行继续暂停。**
+
+**后续 S09 尾项结论：`fe503968` 六文件独立 exact review 通过；`b54cf2e2` 的原两例实际 2 passed / 0 skipped / exit=0，相关 Electron 构建一次 exit=0。已持久创建事实的冷 ACK 查证，以及记回执失败保留已创建文件并保持 unknown，均有最低直接证据。无新增未闭 finding，可合入该尾项；缺记录的真正不确定窗口仍 unknown，不重新转换、创建或恢复写权限。**
 
 ## 实际范围
 
@@ -310,6 +312,45 @@ exact diff 仅移除 source/player outer、whole-host、每次点击前后等重
 - **发行与安装分发**：继续暂停；源码／构建／隔离 Electron 证据不能外推为安装器、已安装载体自发现或产品发布验收。
 - **真实外部环境与图像**：受控计算和本地图像作业证据不能代替当前 Podman 实机路径、GPT OAuth 真实生成／编辑、实际图像执行者及计费验收。正确 V4.1 代表文本任务已通过，但账号计费仍 unknown，不外推其他供应商或全任务。
 - **历史 native trap 与全仓遗留**：本包未证明历史 native trap 根因完全消失或长期无泄漏；相关构建通过不等于全仓类型、旧 V9 测试全部清零。
-- **PPTX 冷 ACK**：同进程 retained receipt 可查，当前生产导入尚无对应持久 lookup；冷启动创建之后／Engine ACK 之前仍须保留 unknown，不能声称已自动查证，也不得重放未知写入。
+- **PPTX 冷 ACK**：原包收口时无持久 lookup 的缺口已由下文 S09 尾项补齐。已有成功创建事实可冷查原历史回执；旧运行缺记录或真正创建→回执持久化中断仍保 unknown，不从当前文件存在推定成功，不重放未知写入。
 - **简单改写调用数**：仍是一次 provider 请求、`text.replace` 与 `task.finish` 两次工具调用、一次正式 History。Owner 的“无额外工具调用”没有由当前协议满足；本次通过不能改称零额外调用，也不以此新造 DSL 或执行平台。
 - **证据等级**：这些结果支持本范围 engineering candidate；完整教学效果、全量真实视觉／互动质量和 Owner accepted 继续由相应实际验收决定。合入 main 与文档同步属于后续集成动作，本报告不提前声称已完成合入。
+
+## 后续 S09 冷 ACK 定向设计审（main `a8cea6c1`，尚无实现 diff）
+
+Owner 明确继续剩余范围后，本节仅审 PPTX 创建回执的持久化尾项，不重开已收口全包。直接核 `WorkspaceFiles.createFile:224–250` / `coordinate:454–510` / `runOnce:668–678`、`AgentFileService.createPreparedFile:341–365`、Main `workbenchToolServices.ts:282–304`、`HostToolServices` import/lookup、Gateway.lookup 与 Engine.reconcileReceipts。
+
+**设计可推进。**现 WorkspaceFiles replay 仅内存；DocumentFileCoordinator 的绑定 intent 只用于 rename/move/trash，成功即删除；RunStore 只有 Engine 收到结果后才有 returned 内容。它们均不能直接证明本次正式 createFile 已成功而 ACK 丢失的因果事实。保存／HTML 导入 store 可参考其原子持久写模式，但字段与生命周期不同，不需将其改成通用平台或让 PPTX 走 artifact 第二次保存。最窄改动是在原创建 owner 内记录本 consumer 的紧凑成功事实，并接已有 pptxImport.lookup。
+
+必要边界：
+
+1. 在 `coordinate` 完成成功后、`createFile` 成功 ACK 前记录；不能在仍可 rollback 的 perform 中提前记成功，也不能只在调用者收到 ACK 后才记。记录持久化失败但文件已创建时仍为 unknown，不回滚已创建文件、不经 runOnce.catch 误报普通“目标未创建”。
+2. 透传 Gateway 已有 requestDigest 到 import 与 lookup，绑定 runId／operationId／requestDigest。WorkspaceFiles 当前摘要含随机 workspaceId／entryId，不能用于跨进程身份核对。该摘要只证明原操作身份，不是文件正确性的 Hash 门。
+3. lookup 返回原历史创建成功与 issues；目标后来修改、删除不推翻原创建事实，不回写、不重建，也不拿当前相同文件内容推定原操作。回执需明确是历史事实、当前内容未重验；旧 documentId／entryId 不变成新活句柄，继续使用须经 file.open/read 的当前观察。
+4. lookup 不运行 converter、不创建／保存文件、不 open/attach、不复活权限；Stop 后可只读查证，原 beforeCommit 活性屏障仍控制新写入。持久化原已发生事实不因 Stop 丢弃。
+5. 没有完成记录的旧运行、或真正 create→record 中断窗口继续 null/unknown；不为关闭所有不确定窗口增加预备状态机或第二 writer。
+
+最小独立反例为：真实唯一创建成功后丢失 ACK，Stop 后由 fresh Host 原 lookup 取回成功回执，converter／create 仍各一次；同例改动或删除目标后只读再查仍是历史事实，无新文件、Registry 或写授权。此处只批准必要边界；持久化 exact diff 与独立 T1 实际结果仍须到达后审，不将设计结论记为已实现或已验证。
+
+### S09 exact 补审（I `fe503968`，parent `a8cea6c1`）
+
+直接核六文件 110+/23- diff 及唯一实际 caller，**无新增静态阻断**。`WorkspaceFiles.createFile` 在 coordinate 成功结束后才聚合结果、去掉 entryId/sourceEntryId，随后将成功因果事实写临时私有文件、flush、rename，最后返回 ACK；不在可 rollback 的 perform 内记录。新 `WorkspaceCreationOutcomeUnknown` 穿过 runOnce.catch，AgentFileService 转既有 AgentFileOutcomeUnknown，Main 返回 tool-outcome-unknown；该新增记回执失败路径不会删除已经创建的目标，也不会落入“目标未创建”的普通 failed 分支。
+
+Gateway 已有 requestDigest 经 HostToolCoordinator 完整传给 import/lookup；私有回执核 runId、operationId 与原摘要，不用当前文件字节推定旧操作。DocumentHost 注入自身数据目录，新增持久化只在本 PPTX consumer 提供 creationReceipt 时生效，不改变其他创建/整理动作。Main 在 converter 前查原记录；Agent prepared 入口同样先查，底层冷 replay 缺活 entryId 时返回历史回执，不打开当前文件版本。
+
+实际 lookup 只读私有因果记录，返回 saved/path/operation/issues/fallback 及 historical=true、currentContentVerified=false；没有 documentId、target 或原 entry/sourceEntry 句柄，不读、还原或重写用户文件。Gateway 已有 lookup 在 stopped 判断前，查询链不 assertActive、不 open/attach；新创建仍保原 preflight 和 beforeCommit 活性屏障。缺失记录返回 null，损坏事实保持 unknown，同 op 不同 requestDigest 拒绝；已确定的成功不会因目标后来改动/删除而消失。
+
+本轮只读审查，未跑构建或测试。实现静态通过不等于冷 ACK 行为已闭合；仍只接独立 T 原反例及 E 实际输出，旧绿不复跑，前文其他条件不变。
+
+### S09 两例定义与实际收口（tests `bdbfa557` / `b54cf2e2`，产品 `fe503968`）
+
+独立读取新增 `tests/integration/productFollowup/T06/pptxLostAckColdReceipt.test.ts` 两例及 E 原输出：
+
+- 主例运行真实 Engine/Gateway、AgentFileService 和 WorkspaceFiles，实际创建可解析课件；在 Gateway 成功返回而 Engine 原 checkpoint 仍 executing、尚无 tool result 时捕获真实 crash slice，再 hold ACK 并 Stop。fresh Host/Engine 原 lookup 将工具收敛到 historical saved，不调用模型或 converter，不创建／打开文件，不恢复 Registry、handles 或 operation leases；新 write 仍 run-stopped。同调用不同摘要拒绝；目标经人工替换及删除后，查询仍只返回原事实，未恢复旧内容或重建目标。
+- 第二例只在私有 creation-receipts 目录的 rename 注入 ENOSPC，目标文件的实际创建不拦截。断言底层 WorkspaceCreationOutcomeUnknown 和外层 AgentFileOutcomeUnknown 均成立；目标课件仍可解析且保留，无 open/Registry。fresh Host 查不到完成记录而返回 null，没有冷重建或误报普通 failed create。
+
+直接读取 `e/output/content-revision/s09-tail/pptxLostAckColdReceipt-b54cf2e2.log`：固定 cut `b54cf2e2`，指定 Node/Vitest 单文件命令一次，**1 file / 2 passed / 0 skipped，exit=0，总 5.97s**。直接读取同目录 `build-electron-fe503968.log`：固定产品 `fe503968`、唯一 `node scripts/build-electron.mjs` 调用 **exit=0**。产品到测试 cut 未再改变，无其他构建或原绿色用例重跑。
+
+证据限定：主例 converter 和 HostToolServices.pptxImport port 为受控 fixture，ACK hold 为故障注入；它证明真实持久创建 owner、Engine 原切片恢复与只读回执路径，不宣称重新测过实际 converter/Main/GUI。原真实 converter／可编辑保存／Main GUI 绿色证据在未变实现上复用，Main 新 lookup 接线由本 exact review 核对。ENOSPC 例证明新回执写入失败的错误边界，不宣称真的耗尽磁盘或硬件断电。原件、已有目标、Stop／权限和单一文件 writer 均未扩大。
+
+**该 S09 尾项可完成已授权集成，无新增未闭 finding。**旧记录、创建→回执完成前中断、无法读取或损坏回执仍保持 unknown，不根据当前路径／字节猜测原操作成功，不重跑转换、二次保存或重建授权。安装分发／发行暂停、Podman/真实 OAuth 图像与计费、历史 native trap、全仓旧类型和简单改写两次工具调用等未触及条件继续保留。本次只写审查报告，未代实施者运行测试或修改源码／断言，也不提前声称尾项已经合入 main。

@@ -1,0 +1,16 @@
+run_kind: direct Electron build; single invocation
+commit: fe503968f7ec43d2149cacbbee74e77b5b145c5f
+parent: a8cea6c1b96b22ef7808d3e512c5254c0c1fdba2
+branch: content-revision/e-s09-tail
+cwd: D:\果铃并行\20261007-content-revision\e
+command: node scripts/build-electron.mjs
+changed commit paths:
+src/core/tools/DocumentToolGateway.ts
+src/core/tools/HostToolServices.ts
+src/main/workbench/DocumentHostService.ts
+src/main/workbench/WorkspaceFiles.ts
+src/main/workbench/execution/AgentFileService.ts
+src/main/workbench/workbenchToolServices.ts
+test status: not run; awaiting exact T cold-ACK test cut from Root
+stdout and stderr follow:
+exit_code: 0
