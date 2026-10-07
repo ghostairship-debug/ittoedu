@@ -148,6 +148,8 @@ export interface ExecutionSubmissionRecord {
   text: string
   documents: ExecutionDocumentReference[]
   contentOutput?: ExecutionContentOutput
+  materials?: ExecutionMaterials
+  webAuthorization?: WebTaskAuthorization
   attachments: InputAttachmentReference[]
   /** Frozen when main accepts the submission. Later settings changes affect only later submissions. */
   model: { provider: string; model: string; accountId: string; billing: string }
