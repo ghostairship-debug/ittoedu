@@ -30,7 +30,6 @@ import { DEFAULT_PERMISSION_MODE } from '../../../shared/workbench/executionPerm
 import { executionInputError } from './executionInputErrors'
 import { ExecutionChangeReviewService } from '../review/ExecutionChangeReviewService'
 import type { HostArtifactDeliveryService } from './HostArtifactDeliveryService'
-import type { HtmlActionService } from '../observation/HtmlActionService'
 import { forkDraftFromCheckpoint, indexUserCheckpoint } from './CheckpointForkService'
 import { fileCreated } from './executionOutcome'
 import { sourceFileKind } from '../../../shared/workbench/sourceFileKind'
@@ -188,7 +187,6 @@ export class ExecutionDesktopService {
     })()
     return this.shutdownPromise
   }
-  setHtmlActions(service: HtmlActionService): void { this.engine.setHtmlActions(service) }
   private timing(conversationId: string, taskId: string, markId: string, stage: ExecutionTimingStage,
     extra: Pick<ExecutionTimingMark, 'sourceWallTimeMs' | 'detail'> = {},
     stamp = captureMainTiming()): void {

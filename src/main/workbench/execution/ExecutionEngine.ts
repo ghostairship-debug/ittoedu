@@ -41,10 +41,9 @@ import { AgentFileOutcomeUnknown, agentFileRegistration, agentFileTools, agentFi
 import { isOfficeContentTool } from '../../../core/tools/OfficeContentTools'
 import { taskNoteTool, initialWorkingNote, continuedWorkingNote, prepareTaskNote } from '../../../core/tools/TaskNoteTools'
 import { hostArtifactSaveSchema, hostArtifactSaveTool } from '../../../core/tools/HostArtifactTools'
-import { htmlActionToolCatalog, htmlActionToolSchemas, isHtmlActionTool } from '../../../core/tools/HtmlActionTools'
+import { htmlActionToolCatalog, isHtmlActionTool } from '../../../core/tools/HtmlActionTools'
 import type { ExecutionChangeReviewService } from '../review/ExecutionChangeReviewService'
 import type { HostArtifactDeliveryService } from './HostArtifactDeliveryService'
-import type { HtmlActionService } from '../observation/HtmlActionService'
 import { htmlActionModelMessage } from '../observation/HtmlActionModelInput'
 import { runToolRoundInOrder } from './ReadOnlyToolScheduler'
 import { continuationDocumentIds, reboundSavedDocumentBinding, savedDocumentBinding } from './savedDocumentBinding'
@@ -80,7 +79,6 @@ export interface ExecutionEngineOptions {
   visualAnalysis?: VisualAnalysisPort
   changeReview?: ExecutionChangeReviewService
   artifacts?: HostArtifactDeliveryService
-  htmlActions?: HtmlActionService
   /** Persistence facts enter the run journal directly, independently of view events. */
   subscribeSaves?(listener: (fact: DocumentSaveFact) => Promise<void>): () => void
   /** File moves and journal recovery publish the same formal session snapshots as the UI. */
@@ -233,10 +231,6 @@ export function trustedRunDocumentIds(record: ExecutionRunRecord): string[] {
 
 /** Owns one model/tool loop. Views only subscribe; they never start/replay work by mounting. */
 export class ExecutionEngine {
-  private htmlActions?: HtmlActionService
-  private readonly htmlDocumentIds = new Map<string, string>()
-  private readonly htmlAmbiguousRuns = new Set<string>()
-  private readonly htmlStartedRevisions = new Map<string, number>()
   private readonly displayBuffers = new Map<string, DisplayEventBuffer>()
   private readonly active = new Map<string, ActiveRun>()
   private closing = false
@@ -248,7 +242,6 @@ export class ExecutionEngine {
   private readonly id: () => string
   private readonly now: () => number
   constructor(private readonly options: ExecutionEngineOptions) {
-    this.htmlActions = options.htmlActions
     this.id = options.createId ?? randomUUID; this.now = options.now ?? Date.now
     options.events.subscribe(event => {
       if (event.source !== 'builtin') return
@@ -321,16 +314,6 @@ export class ExecutionEngine {
   }
   /** Continuation consumes persisted file facts before reading its old run lineage. */
   async settleDocumentBindings(): Promise<void> { await this.saveBindingTail }
-  setHtmlActions(service: HtmlActionService): void {
-    if (this.active.size) throw new Error('HTML 操作服务须在任务启动前接入')
-    this.htmlActions = service
-  }
-  private trackHtmlDocument(runId: string, documentId: string): void {
-    if (this.htmlAmbiguousRuns.has(runId)) return
-    const prior = this.htmlDocumentIds.get(runId)
-    if (prior && prior !== documentId) { this.htmlDocumentIds.delete(runId); this.htmlAmbiguousRuns.add(runId) }
-    else this.htmlDocumentIds.set(runId, documentId)
-  }
   private continuationImages(lineage: readonly ExecutionRunRecord[]): ContinuationImage[] {
     const images: ContinuationImage[] = [], seen = new Set<string>()
     for (const ancestor of lineage) for (const tool of ancestor.tools) {
@@ -385,9 +368,6 @@ export class ExecutionEngine {
       ...(this.options.files && workspaceRoot ? agentFileTools.filter(tool => permission !== 'read-only' || !fileMutationNames.has(tool.name)).map(tool => ({ ...tool, inputSchema: tool.inputSchema as ModelJsonObject })) : []),
       ...(this.options.files && workspaceRoot && permission !== 'read-only' && !this.options.gateway.usesProjectFileAuthoring(runId)
         ? [{ name: createCourseFromHtmlTool.name, description: createCourseFromHtmlTool.description, inputSchema: z.toJSONSchema(createCourseFromHtmlInputSchema) as ModelJsonObject }] : []),
-      ...(this.htmlActions && this.htmlDocumentIds.has(runId) ? htmlActionToolCatalog
-        .filter(tool => permission !== 'read-only' || tool.name !== 'html.click' && tool.name !== 'html.input')
-        .map(tool => ({ name: tool.name, description: tool.description, inputSchema: z.toJSONSchema(tool.inputSchema) as ModelJsonObject })) : []),
       ...(families.length ? [{ ...structuredClone(loadToolsDefinition),
         description: `${loadToolsDefinition.description} 当前可展开：${families.map(item => `${item.family} ${item.description}`).join('；')}。` }] : []),
       structuredClone(contextReadTool), structuredClone(taskNoteTool), structuredClone(userQuestionToolDefinition)]
@@ -679,8 +659,6 @@ export class ExecutionEngine {
         references.push({ documentId: snapshot.documentId, kind: snapshot.model.kind, revision: snapshot.revision,
           name, target, writable, selection })
       }
-      for (const reference of references)
-        if (reference.kind === 'text' && /\.html?$/i.test(reference.name)) this.trackHtmlDocument(runId, reference.documentId)
       let contentOutput: { targetHandle: string; text: string; format: 'markdown' | 'text' | 'html' } | undefined
       if (frozen.contentOutput) {
         if (permission === 'read-only') throw new Error('只读任务不能应用正文改写')
@@ -825,8 +803,6 @@ export class ExecutionEngine {
       this.preparingRecords.delete(runId)
       if (!preparationFinished) this.timing(timingIdentity, `${runId}:prepare:failed`, 'engine.prepare.finished', { detail: { outcome: 'failed' } })
       if (runBegun) await this.options.gateway.stop(runId)
-      this.htmlActions?.stopRun(runId)
-      this.htmlDocumentIds.delete(runId); this.htmlAmbiguousRuns.delete(runId); this.htmlStartedRevisions.delete(runId)
       throw error
     }
   }
@@ -877,7 +853,6 @@ export class ExecutionEngine {
     if (terminal(active.record.status)) { await active.completion; return this.read(runId) }
     active.stopped = true; active.record.status = 'stopping'
     this.browserPauses.get(runId)?.release(); this.browserPauses.delete(runId)
-    this.htmlActions?.stopRun(runId)
     const barrier = Promise.all([this.options.gateway.stop(runId), this.options.artifacts?.stopRun(runId)]) // Both owners revoke before cancellation.
     active.question?.settle({ kind: 'stopped' }) // An open question closes unanswered; no answer is invented.
     active.approval?.settle('stopped') // A modification still waiting for approval never runs.
@@ -1502,8 +1477,6 @@ export class ExecutionEngine {
       await this.refreshUnresolvedEffects(active)
     await this.waitForBrowser(active)
     tool.effectTargets ??= await this.options.gateway.effectTargets(record.runId, tool.call)
-    const htmlDocumentId = tool.call.name === 'html.observe' ? this.htmlDocumentIds.get(record.runId) : undefined
-    if (!tool.effectTargets && htmlDocumentId) tool.effectTargets = [{ documentId: htmlDocumentId, target: { kind: 'document' } }]
     let filePreflight: { paths: string[]; outside: boolean } | undefined
     let filePreflightError: string | undefined
     if (tool.state !== 'returned' && fileMutationNames.has(tool.call.name) && this.options.files && record.input.workspaceRoot) try {
@@ -1694,32 +1667,6 @@ export class ExecutionEngine {
                 tool.result = result
                 if (previews.length) active.contextMessages.push({ role: 'user', content } as ModelChatMessage)
               }
-            } else if (isHtmlActionTool(tool.call.name)) {
-              if (!this.htmlActions) throw new Error('HTML 实际操作服务未接通')
-              const documentId = this.htmlDocumentIds.get(record.runId)
-              if (!documentId) throw new Error('本任务没有唯一授权的 HTML 文档')
-              const snapshot = await this.options.registry.get(documentId).drain()
-              if (snapshot.model.kind !== 'text' || snapshot.binding.kind !== 'file'
-                || !/\.html?$/i.test(snapshot.binding.path)) throw new Error('HTML 文档或文件绑定已改变')
-              const input = htmlActionToolSchemas[tool.call.name].parse(tool.call.input) as { index?: number; handle?: string; value?: string }
-              if (tool.call.name === 'html.observe') {
-                if (!this.htmlStartedRevisions.has(record.runId)) {
-                  await this.htmlActions.beginDocumentRun(record.runId, { documentId, epoch: snapshot.epoch, revision: snapshot.revision })
-                  this.htmlStartedRevisions.set(record.runId, snapshot.revision)
-                } else if (this.htmlStartedRevisions.get(record.runId) !== snapshot.revision) {
-                  await this.htmlActions.restartDocumentRun(record.runId, { documentId, epoch: snapshot.epoch, revision: snapshot.revision })
-                  this.htmlStartedRevisions.set(record.runId, snapshot.revision)
-                }
-                tool.result = { kind: 'read', data: await this.htmlActions.observe(record.runId) }
-              } else if (tool.call.name === 'html.navigate')
-                tool.result = { kind: 'read', data: await this.htmlActions.navigate(record.runId, input.index!) }
-              else if (tool.call.name === 'html.click' || tool.call.name === 'html.input') {
-                if (active.permission === 'read-only') throw new Error('只读任务不能操作 HTML 页面')
-                const operationId = this.options.gateway.operationIdentity(record.runId, tool.callId)
-                tool.result = { kind: 'read', data: tool.call.name === 'html.click'
-                  ? await this.htmlActions.click(record.runId, { operationId, handle: input.handle! })
-                  : await this.htmlActions.input(record.runId, { operationId, handle: input.handle!, value: input.value! }) }
-              } else tool.result = { kind: 'read', data: await this.htmlActions.errors(record.runId) }
             } else if (tool.call.name === TASK_NOTE) {
               const prepared = prepareTaskNote(record, tool.call.input, record.version)
               if (active.stopped) throw new Error('任务已停止；工作笔记未更新')
@@ -1761,8 +1708,6 @@ export class ExecutionEngine {
                 name, input,
                   this.options.gateway.operationIdentity(record.runId, tool.callId))
                 if (outcome.opened) {
-                  if (outcome.opened.kind === 'text' && /\.html?$/i.test(outcome.opened.name))
-                    this.trackHtmlDocument(record.runId, outcome.opened.documentId)
                   const wholeWritable = await this.options.gateway.attachRunDocument(record.runId, outcome.opened.documentId, outcome.opened.writable, 'select')
                   const target = await this.options.gateway.issueTarget(record.runId, outcome.opened.documentId, { kind: 'document' })
                   const snapshot = await this.options.registry.get(outcome.opened.documentId).drain()
@@ -1996,7 +1941,7 @@ export class ExecutionEngine {
     }
     for (const tool of calls) {
       if (!['html.observe', 'html.navigate', 'html.click', 'html.input'].includes(tool.call.name)
-        || tool.result?.kind !== 'read' || !this.htmlActions) continue
+        || tool.result?.kind !== 'read') continue
       const observation = tool.result.data as import('../observation/HtmlActionService').HtmlActionObservation | null
       if (!observation?.identity || !observation.image?.resourceId) continue
       try {
@@ -2009,7 +1954,7 @@ export class ExecutionEngine {
           added = true
           continue
         }
-        const image = await this.htmlActions.readResource(record.runId, observation.image.resourceId)
+        const image = await this.options.gateway.readObservationResource(record.runId, observation.image.resourceId)
         if (image.mimeType !== observation.image.mimeType) throw new Error('HTML 图像资源格式已变化')
         record.messages.push(htmlActionModelMessage({ toolCallId: tool.providerCallId,
           toolName: tool.call.name as 'html.observe' | 'html.navigate' | 'html.click' | 'html.input',
@@ -2062,6 +2007,23 @@ export class ExecutionEngine {
       if (analysis.status !== 'analyzed') record.failure = { code: 'vision-unavailable', message: analysis.reason }
     }
   }
+  private visibleChangedContentFacts(messages: readonly ModelChatMessage[]): Parameters<DocumentToolGateway['acknowledgeContentFacts']>[1] {
+    const facts: Array<Parameters<DocumentToolGateway['acknowledgeContentFacts']>[1][number]> = []
+    for (const message of messages) {
+      if (message.role !== 'tool' || typeof message.content !== 'string') continue
+      try {
+        let result = JSON.parse(message.content)
+        // A complete context.read can restore a large original receipt. An
+        // excerpt or a partial page does not prove the model received its facts.
+        if (result?.kind === 'read' && result.data?.role === 'tool' && result.data.offset === 0
+          && result.data.truncated === false && typeof result.data.text === 'string') result = JSON.parse(result.data.text)
+        if (result?.kind !== 'error' || result.code !== 'read-basis-changed'
+          || typeof result.data?.documentId !== 'string' || !Array.isArray(result.data.current)) continue
+        facts.push({ documentId: result.data.documentId, current: result.data.current })
+      } catch { /* An archived excerpt is not an observed changed-facts receipt. */ }
+    }
+    return facts
+  }
   private async drive(active: ActiveRun): Promise<void> {
     const { record } = active
     let logicalRoundId = this.id(), attempts = 0
@@ -2085,6 +2047,7 @@ export class ExecutionEngine {
         if (active.stopped) break
         await this.refreshTools(active)
         const workingMessages = await this.prepareContext(active, tools)
+        const changedContentFacts = this.visibleChangedContentFacts(workingMessages)
         const selection = selectionForMessages(record, workingMessages)
         const serialized = (this.options.serializePayload ?? serializeModelPayload)({ selection, messages: workingMessages, tools })
         const payloadDigest = createHash('sha256').update(serialized).digest('hex')
@@ -2114,6 +2077,9 @@ export class ExecutionEngine {
           // A local adapter failure (including missing credentials) is not a Provider event.
           if (!firstProviderEvent && event.type !== 'response.failed') {
             firstProviderEvent = true
+            // Promote only exact pending facts in the payload accepted by the
+            // backend. Merely preparing or failing to send is not observation.
+            if (changedContentFacts.length) this.options.gateway.acknowledgeContentFacts(record.runId, changedContentFacts)
             this.timing(record, `${record.runId}:${requestId}:first-event`, 'provider.first-event', { requestId,
               detail: { eventType: event.type } })
           }
@@ -2303,8 +2269,6 @@ export class ExecutionEngine {
       this.abortPreviews(active, '运行已结束')
       this.options.files?.releaseRun?.(record.runId)
       active.unsubscribeEdits?.()
-      this.htmlActions?.stopRun(record.runId)
-      this.htmlDocumentIds.delete(record.runId); this.htmlAmbiguousRuns.delete(record.runId); this.htmlStartedRevisions.delete(record.runId)
       await Promise.all([this.options.gateway.stop(record.runId), this.options.artifacts?.stopRun(record.runId)])
       await this.checkpoint(record)
       await this.publishEnd(record)
