@@ -50,9 +50,11 @@ it('opens a real registered Flow chart title and commits through the shared draf
     return this.dataset.testid === 'flow-paper' ? new DOMRect(0, 0, 800, 1400) : new DOMRect(100, 100, 600, 400)
   })
   const width = vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockReturnValue(600), height = vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(400)
-  const svg = vi.spyOn(SVGElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: SVGElement) {
-    return this.getAttribute('data-chart-text') === 'title' ? new DOMRect(300, 110, 200, 24) : new DOMRect(100, 400, 80, 20)
-  })
+  const bbox = Object.getOwnPropertyDescriptor(SVGElement.prototype, 'getBBox'), ctm = Object.getOwnPropertyDescriptor(SVGElement.prototype, 'getCTM')
+  Object.defineProperty(SVGElement.prototype, 'getBBox', { configurable: true, value(this: SVGElement) {
+    return this.getAttribute('data-chart-text') === 'title' ? { x: 200, y: 10, width: 200, height: 24 } : { x: 0, y: 300, width: 80, height: 20 }
+  } })
+  Object.defineProperty(SVGElement.prototype, 'getCTM', { configurable: true, value: () => ({ a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 }) })
   try {
     await bridge.connect(api); await bridge.activate(created.documentId)
     const kernel = createEditorStoreKernel({ bridge, commit: feedback })
@@ -87,7 +89,12 @@ it('opens a real registered Flow chart title and commits through the shared draf
     if (reopened.model.kind !== 'course-v10') throw new Error('V10 required')
     expect(chartDataSchema.parse(reopened.model.project.instances.chart.data).title).toBe('正式图表标题')
     expect(feedback).not.toHaveBeenCalledWith(expect.objectContaining({ errorMessage: expect.any(String) }))
-  } finally { cleanup(); stopBridge(); bridge.dispose(); await world.dispose(); rect.mockRestore(); width.mockRestore(); height.mockRestore(); svg.mockRestore(); vi.unstubAllGlobals(); await rm(directory, { recursive: true, force: true }) }
+  } finally {
+    cleanup(); stopBridge(); bridge.dispose(); await world.dispose(); rect.mockRestore(); width.mockRestore(); height.mockRestore(); vi.unstubAllGlobals()
+    if (bbox) Object.defineProperty(SVGElement.prototype, 'getBBox', bbox); else Reflect.deleteProperty(SVGElement.prototype, 'getBBox')
+    if (ctm) Object.defineProperty(SVGElement.prototype, 'getCTM', ctm); else Reflect.deleteProperty(SVGElement.prototype, 'getCTM')
+    await rm(directory, { recursive: true, force: true })
+  }
 })
 
 it('maps registered bounds through the observed Flow parent rotation and scale once', () => {
