@@ -14,7 +14,7 @@ import { disclosureRuntimeImplementation } from '../../components/disclosure'
 import { popoverRuntimeImplementation } from '../../components/popover'
 import { documentBlockRuntimeImplementation } from '../../components/document-block'
 import { createAudioRuntimeImplementation, createVideoRuntimeImplementation } from '../../components/media'
-import { AudioManager } from '../AudioManager'
+import { AudioManager, type AudioPlaybackEvent } from '../AudioManager'
 import { CourseEventBus } from '../CourseEventBus'
 import { createComponentInteractionRuntime } from '../../renderer/interactions/componentInteractionRuntime'
 import { ComponentWorldInteractions } from './runtime/ComponentWorldInteractions'
@@ -93,6 +93,9 @@ export class ComponentPlatformRuntime {
     this.isAssetPending = options.isAssetPending
     this.surfaceId = options.teacherController && (() => options.teacherController!.read().locationId)
     this.report = message => options.report?.(message)
+    this.audioEvents.on<AudioPlaybackEvent>('audio:ended', event => {
+      if (event && !this.retired) this.emit('audio.ended', { soundId: event.soundId })
+    })
     this.media = new ComponentWorldMedia(() => this.audioManager, this.report)
     this.interactions = new ComponentWorldInteractions({ project: () => this.project, element: id => this.targetElement(id),
       document: () => this.targetElements.values().next().value?.ownerDocument ?? this.roots.values().next().value?.ownerDocument,
@@ -175,6 +178,8 @@ export class ComponentPlatformRuntime {
     })
     const stopReplay = options.teacherController?.subscribeSceneReplay?.(surfaceId => {
       if (this.retired || !this.playing || options.teacherController!.read().locationId !== surfaceId) return
+      this.emit('__runtime.scene.reset', surfaceId)
+      this.interactions.resetSurface(surfaceId)
       // Same-scene replay retires only that scene's audio, retaining global playback and mounts.
       this.audioEvents.emit('scene:leave', { sceneId: surfaceId })
       this.audioEvents.emit('scene:enter', { sceneId: surfaceId })
