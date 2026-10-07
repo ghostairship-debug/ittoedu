@@ -41,6 +41,8 @@ export interface ManagedBrowserOptions {
   /** Host-owned, concrete approval for this exact click/input/upload. Missing means deny. */
   approveExternalAction?: (input: { runId: string; tool: ManagedBrowserTool; arguments: Record<string, unknown>;
     operationId: string; pageUrl?: string; snapshotId: string }) => Promise<boolean>
+  /** File owner resolves the explicitly authorized source and freezes its original bytes. */
+  readUpload?: (input: { runId: string; path: string }) => Promise<{ name: string; bytes: Uint8Array }>
   /** Test-only loopback origin for a server created by the test itself. */
   testLoopbackOrigin?: string
   nodeExecutable?: string
@@ -387,16 +389,23 @@ export class ManagedBrowserMcpService {
     return true
   }
 
-  private async stageUploads(run: BrowserRun, args: Record<string, unknown>): Promise<Record<string, unknown>> {
-    if (!run.grant.uploadRoot) throw new Error('本任务没有上传授权根')
-    const root = await fs.realpath(run.grant.uploadRoot)
+  private async stageUploads(runId: string, run: BrowserRun, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.options.readUpload && !run.grant.uploadRoot) throw new Error('本任务没有上传文件授权')
+    const root = !this.options.readUpload && run.grant.uploadRoot ? await fs.realpath(run.grant.uploadRoot) : undefined
     const paths: string[] = []
     const staged = join(run.scratch!, 'uploads')
     await fs.mkdir(staged, { recursive: true })
     for (const entry of args.paths as string[]) {
+      if (this.options.readUpload) {
+        const frozen = await this.options.readUpload({ runId, path: entry })
+        const dest = join(staged, `${randomUUID()}-${basename(frozen.name) || 'upload'}`)
+        await fs.writeFile(dest, frozen.bytes, { flag: 'wx' })
+        paths.push(dest)
+        continue
+      }
       if (isAbsolute(entry) || entry.split(/[\\/]/).includes('..')) throw new Error('上传仅接受授权根下相对路径')
-      const source = await fs.realpath(resolve(root, entry))
-      if (!within(root, source)) throw new Error('上传来源超出授权根')
+      const source = await fs.realpath(resolve(root!, entry))
+      if (!within(root!, source)) throw new Error('上传来源超出授权根')
       const stat = await fs.stat(source)
       if (!stat.isFile()) throw new Error('上传来源不是受支持的普通文件')
       const dest = join(staged, `${randomUUID()}-${basename(source)}`)
@@ -471,7 +480,7 @@ export class ManagedBrowserMcpService {
     if (run.stopped || input.signal?.aborted) return reject('任务已停止')
     let remoteArgs = input.arguments
     if (tool === 'browser_file_upload') {
-      try { remoteArgs = await this.stageUploads(run, input.arguments) }
+      try { remoteArgs = await this.stageUploads(input.runId, run, input.arguments) }
       catch (cause) { return reject(reason(cause)) }
     }
     // The generic MCP write gate only opens for the exact, already approved operation.
