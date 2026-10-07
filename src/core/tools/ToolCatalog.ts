@@ -3,6 +3,7 @@ import { officeContentSchemas, officeContentTools } from './OfficeContentTools'
 import { materialToolRegistrations } from './MaterialTools'
 import { hostArtifactSaveRegistration } from './HostArtifactTools'
 import { htmlActionToolRegistrations } from './HtmlActionTools'
+import { pptxImportRegistration } from './CourseImportTools'
 import { workbenchServiceToolCatalog } from './WorkbenchServiceTools'
 import { agentFileRegistrations } from './AgentFileTools'
 import { skillReadTool, skillListTool } from './SkillTools'
@@ -184,7 +185,7 @@ export const gatewayToolRegistrations = [
 export function gatewayToolRegistration(name: string) { return gatewayToolRegistrations.find(tool => tool.name === name) }
 /** One item owns each current tool's parser, support, effects, targets and actual owner handler. */
 export const toolCatalog = [...hostToolCatalog, ...workbenchServiceToolCatalog, ...projectFileRegistrations, ...gatewayToolRegistrations, ...canonicalMutationTools,
-  ...officeToolRegistrations, ...materialToolRegistrations, ...htmlActionToolRegistrations, hostArtifactSaveRegistration]
+  ...officeToolRegistrations, ...materialToolRegistrations, ...htmlActionToolRegistrations, hostArtifactSaveRegistration, pptxImportRegistration]
 export const toolRegistrations = [...toolCatalog, ...agentFileRegistrations]
 export function toolRegistration(name: string) { return toolRegistrations.find(tool => tool.name === name) }
 /** Model and MCP schemas are projected from the actual canonical parsers. */

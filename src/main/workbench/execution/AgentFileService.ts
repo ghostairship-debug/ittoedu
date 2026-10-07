@@ -328,6 +328,18 @@ export class AgentFileService implements AgentFilePort {
     }
     const input = agentFileSchemas['file.create'].parse(raw)
     const kind = createKind(input.name, input.kind)
+    const bytes = kind === 'course-v10' ? (() => {
+      const project = createBlankCourseProjectV10(input.name.replace(/\.h5lesson$/i, ''))
+      return createCourseProjectV10Archive({ project, resources: { assets: {}, components: {} } })
+    })() : Buffer.from('', 'utf8')
+    return this.createPreparedFile(context, input, kind, bytes, operationId)
+  }
+  /** The actual PPTX converter supplies a complete V10 archive; file identity and publication stay here. */
+  createPreparedCourse(context: AgentFileContext, input: { path?: string; name: string; bytes: Uint8Array }, operationId: string): Promise<AgentFileOutcome> {
+    return this.createPreparedFile(context, { path: input.path, name: input.name, kind: 'course-v10' }, 'course-v10', input.bytes, operationId)
+  }
+  private async createPreparedFile(context: AgentFileContext, input: { path?: string; name: string; kind?: 'markdown' | 'text' | 'html' | 'course-v10' },
+    kind: 'markdown' | 'text' | 'html' | 'course-v10', bytes: Uint8Array, operationId: string): Promise<AgentFileOutcome> {
     if (context.permission === 'read-only') throw new Error('只读任务不能创建文件')
     const preflight = await this.preflightCreate(context, input)
     const { directory, fallback } = await this.directory(context, input.path, true)
@@ -336,10 +348,6 @@ export class AgentFileService implements AgentFilePort {
       && !(context.approvedOutsidePaths ?? []).some(approved => isInsideRoot(approved, path.join(directory, input.name))))
       throw new Error('工作空间外新建文件需要明确批准')
     const root = await this.host.files.registerRoot(directory)
-    const bytes = kind === 'course-v10' ? (() => {
-      const project = createBlankCourseProjectV10(input.name.replace(/\.h5lesson$/i, ''))
-      return createCourseProjectV10Archive({ project, resources: { assets: {}, components: {} } })
-    })() : Buffer.from('', 'utf8')
     context.assertActive?.()
     const receipt = await this.host.files.createFile({ operationId, workspaceId: root.workspaceId, targetDirectoryId: root.rootEntryId,
       name: input.name, format: kind === 'course-v10' ? 'course-v10' : kind === 'markdown' && /\.md$/i.test(input.name) ? 'markdown' : 'file', bytes }, context.assertActive).catch(error => { throw new AgentFileOutcomeUnknown(error instanceof Error ? error.message : String(error)) })

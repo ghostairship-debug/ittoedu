@@ -5,6 +5,7 @@ import type { BrowserWindow } from 'electron'
 import type { HostToolServices } from '../../core/tools/HostToolServices'
 import type { ToolRunGrant } from '../../shared/workbench/tools'
 import type { AgentFileContext } from '../../core/tools/AgentFileTools'
+import { AgentFileOutcomeUnknown } from '../../core/tools/AgentFileTools'
 import { materialListSchema, materialReadSchema } from '../../core/tools/MaterialTools'
 import { dispatchMaterialTool } from './execution/MaterialReadTools'
 import { attachmentsDesktopService } from './attachments/attachmentsDesktopService'
@@ -46,6 +47,7 @@ import { componentCatalogManager } from '../componentCatalogManager'
 import { renderPdfFromHtml } from '../pdfExport'
 import { createHtmlActionServices } from './observation/TaskHtmlPreview'
 import type { HtmlPreviewService } from './htmlPreview/HtmlPreviewService'
+import { PptxCourseImportProducer } from './pptxImport/PptxCourseImportProducer'
 
 let installed = false
 let imageService: ImageGenerationService | undefined
@@ -57,6 +59,7 @@ let exportOwnerId: number | undefined
 let headlessExportWorker: HeadlessDocumentExportWorker | undefined
 let htmlActionServices: ReturnType<typeof createHtmlActionServices> | undefined
 let htmlActionOptions: Parameters<typeof createHtmlActionServices>[0] | undefined
+let pptxImportProducer: PptxCourseImportProducer | undefined
 export function setWorkbenchHtmlPreview(live: HtmlPreviewService): void {
   if (!htmlActionOptions) throw new Error('HTML 页面操作服务尚未安装')
   htmlActionOptions.live = live
@@ -78,6 +81,7 @@ export function disposeWorkbenchExportPort(): void {
 export function disposeHeadlessWorkbenchWorkers(): void {
   headlessExportWorker?.dispose(); headlessExportWorker = undefined
   htmlActionServices?.dispose(); htmlActionServices = undefined; htmlActionOptions = undefined
+  pptxImportProducer?.dispose(); pptxImportProducer = undefined
 }
 export function workbenchImageService(): ImageGenerationService {
   if (!imageService) throw new Error('图片服务尚未安装')
@@ -275,6 +279,30 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     signalForRun: runId => deliverySignals.get(runId)?.signal,
   })
   const services: HostToolServices = {
+    pptxImport: { import: async ({ grant, operationId, path: sourcePath, destination, assertActive }) => {
+      const access = fileContext(grant.runId, undefined, assertActive)
+      const source = await host.agentFiles.readAuthorizedFile(access, sourcePath)
+      if (!/\.pptx$/i.test(source.name)) throw new Error('此导入入口需要 PPTX 文件')
+      const entry = context.getRendererEntryUrl()
+      if (!entry) throw new Error('PowerPoint 导入宿主尚未准备好')
+      const prepared = await (pptxImportProducer ??= new PptxCourseImportProducer(entry)).prepare({ bytes: source.bytes, filename: source.name },
+        deliverySignals.get(grant.runId)?.signal)
+      assertActive()
+      const filename = destination ? path.resolve(access.workspaceRoot, destination) : undefined
+      try {
+        const outcome = await host.agentFiles.createPreparedCourse(access, { ...(filename ? { path: path.dirname(filename) } : {}),
+          name: filename ? path.basename(filename) : prepared.suggestedName, bytes: prepared.archiveBytes }, operationId)
+        const data = outcome.data as Record<string, unknown>
+        const operation = data.operation as { status?: string } | undefined
+        if (operation?.status !== 'success') return { kind: 'error', code: 'pptx-import-file-failed', message: '转换内容已准备，但目标课件未创建；请核对目标路径', data }
+        return { kind: 'read', data: { ...data, status: 'saved', issues: prepared.issues,
+          ...(outcome.opened ? { documentId: outcome.opened.documentId } : {}) } }
+      } catch (error) {
+        if (error instanceof AgentFileOutcomeUnknown) return { kind: 'error', code: 'tool-outcome-unknown',
+          message: 'PPTX 导入写盘回执未确认；请先核对目标课件，不要重复转换或创建', data: { destination: filename ?? prepared.suggestedName } }
+        throw error
+      }
+    } },
     htmlActions: { execute: (runId, document, action) => workbenchHtmlActions().executeDocumentAction(runId, document, action),
       readResource: (runId, resourceId) => workbenchHtmlActions().readResource(runId, resourceId) },
     office: { execute: async ({ grant, operationId, name, input, approvedPaths, assertActive }) => {

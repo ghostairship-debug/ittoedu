@@ -4,6 +4,7 @@ import { workbenchServiceRegistration } from './WorkbenchServiceTools'
 import { materialToolRegistration } from './MaterialTools'
 import { hostArtifactSaveRegistration } from './HostArtifactTools'
 import { htmlActionToolRegistration } from './HtmlActionTools'
+import { pptxImportRegistration } from './CourseImportTools'
 import { officeToolRegistration } from './ToolCatalog'
 import type { HostImageInput, PrepareImageResourcePort } from './imageResource'
 import type { AssetSource } from '../../shared/contracts/media-v1/types'
@@ -1167,7 +1168,7 @@ export class DocumentToolGateway implements ToolGateway {
     // Durable replay precedes target validation: a successful call has already changed that target.
     const receipt = this.findReceipt(runId, operationId, requestDigest)
     if (receipt) return receipt
-    if (call.name === 'asset.save' || call.name === 'asset.import' || call.name === 'asset.delete' || call.name === 'artifact.save' || call.name.startsWith('office.')) {
+    if (call.name === 'course.importPptx' || call.name === 'asset.save' || call.name === 'asset.import' || call.name === 'asset.delete' || call.name === 'artifact.save' || call.name.startsWith('office.')) {
       const imported = await this.hostTools.lookup(runId, operationId, requestDigest, call.name)
       if (imported) return imported
     }
@@ -1183,6 +1184,16 @@ export class DocumentToolGateway implements ToolGateway {
     }
     const definition = toolCatalog.find(tool => tool.name === call.name)
     if (!definition) throw new ToolError('unsupported-tool', '此工具尚未接入正式 Gateway')
+    if (call.name === 'course.importPptx') return pptxImportRegistration.handler({ import: async input => {
+      const result = await this.hostTools.importPptx(runId, operationId, input)
+      if (result.kind !== 'read' || !result.data || typeof result.data !== 'object') return result
+      const data = result.data as Record<string, unknown>
+      if (data.status !== 'saved' || typeof data.documentId !== 'string' || run.stopped) return result
+      try {
+        await this.attachRunDocument(runId, data.documentId, true, 'select')
+        return { ...result, data: { ...data, target: await this.issueTarget(runId, data.documentId, { kind: 'document' }) } }
+      } catch { return { ...result, data: { ...data, openError: '课件已保存，任务未取得新目标；可按返回路径重新打开' } } }
+    } }, call.input)
     const htmlAction = htmlActionToolRegistration(call.name)
     if (htmlAction) return htmlAction.handler({ execute: async (name, input) => {
       const snapshots = await Promise.all(run.grant.documents.map(document => this.registry.get(document.documentId).drain()))
