@@ -112,6 +112,7 @@ it('preserves unfinished IME source as raw recovery input on a fresh Bridge unti
   expect(h.screen.getByRole('textbox', { name: '组件实现源码' })).toHaveValue('export const value =')
   expect((await coldHost.internalAPI.read(coldDoc.documentId)).undoDepth).toBe(0)
   expect((await coldHost.internalAPI.read(coldDoc.documentId)).revision).toBe(coldDoc.revision)
+  expect(decode((await coldHost.internalAPI.read(coldDoc.documentId)).model.resources.components.code['main.js'])).toBe(original)
   expect(await courseDraftLifecycle(coldBridge).prepare(coldDoc.documentId)).toMatchObject({ ready: false })
   expect((await coldHost.internalAPI.read(coldDoc.documentId)).revision).toBe(coldDoc.revision)
 })
@@ -151,7 +152,8 @@ it.each(['source', 'json'] as const)('a %s recovery arriving after its clean pan
     return view
   }
   const label = kind === 'source' ? '组件实现源码' : '所选对象 · A'
-  const raw = kind === 'source' ? 'export const value = 99;' : '{"id":"a","data":'
+  const raw = kind === 'source' ? 'export const value = 99;'
+    : JSON.stringify({ ...h.bridge.read().project!.instances.a, data: { label: 'Recovered pending JSON' } })
   const originalView = mount(h.bridge)
   h.fireEvent.compositionStart(h.screen.getByRole('textbox', { name: label }))
   h.fireEvent.change(h.screen.getByRole('textbox', { name: label }), { target: { value: raw } })
