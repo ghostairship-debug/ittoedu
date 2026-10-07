@@ -1,5 +1,6 @@
 import type { FlowTextContent } from '../../shared/document/content'
 import { documentMathOmml } from '../../shared/document/omml'
+import { parseDocumentColor } from '../../shared/document/color'
 import { flowMediaCropGeometry, type FlowImageCrop } from '../../shared/flowMediaCrop'
 import { describeNativeChart } from '../../shared/nativeChartView'
 import type { TableCellSpan } from '../../shared/tableMerge'
@@ -93,8 +94,24 @@ function wordFontFamily(value: string): string {
 }
 
 function wordColor(value: string): string | null {
-  const normalized = value.trim().replace(/^#/, '').toUpperCase()
-  return /^[0-9A-F]{6}$/.test(normalized) ? normalized : null
+  return (parseDocumentColor(value) ?? parseDocumentColor(`#${value.trim()}`))?.rgb ?? null
+}
+
+function wordTextAlphaWarnings(nodes: readonly FlowPrintNode[]): string[] {
+  const warnings: string[] = []
+  for (const node of nodes) {
+    let transparent = false
+    const visit = (value: unknown): void => {
+      if (!value || typeof value !== 'object') return
+      for (const [key, child] of Object.entries(value)) {
+        if ((key === 'color' || key === 'highlightColor') && typeof child === 'string' && (parseDocumentColor(child)?.alpha ?? 1) < 1) transparent = true
+        else if (child && typeof child === 'object') visit(child)
+      }
+    }
+    visit(node)
+    if (transparent) warnings.push(`${'blockId' in node ? `${node.blockId}: ` : ''}DOCX 原生文字、公式与高亮不支持透明色，保留 RGB 颜色与可编辑内容；原透明度保留在工程。`)
+  }
+  return warnings
 }
 
 /** Authored text styles are CSS pixels; OOXML sizes and offsets are half-points. */
@@ -137,7 +154,8 @@ function richRuns(
 }
 
 function styledMath(latex: string, display: boolean, style?: { color?: string; fontSize?: number }): string {
-  const properties = [style?.color ? `<w:color w:val="${xml(style.color.replace('#', ''))}"/>` : '', style?.fontSize ? `<w:sz w:val="${wordHalfPoints(style.fontSize)}"/><w:szCs w:val="${wordHalfPoints(style.fontSize)}"/>` : ''].join('')
+  const color = style?.color ? wordColor(style.color) : null
+  const properties = [color ? `<w:color w:val="${color}"/>` : '', style?.fontSize ? `<w:sz w:val="${wordHalfPoints(style.fontSize)}"/><w:szCs w:val="${wordHalfPoints(style.fontSize)}"/>` : ''].join('')
   const math = documentMathOmml(latex, display)
   return properties ? math.replace(/<m:r>(<m:rPr>[\s\S]*?<\/m:rPr>)?/g, (_, mathProperties = '') => `<m:r>${mathProperties}<w:rPr>${properties}</w:rPr>`) : math
 }
@@ -714,7 +732,7 @@ export function buildFlowDocxFromPlan(
 ): FlowDocxResult {
   const context: BuildContext = {
     chartMaxHeight: resolveFlowDocxPageBox(plan.pageSize, plan.orientation).maxContentHeightPx - 32,
-    warnings: [],
+    warnings: wordTextAlphaWarnings(plan.nodes),
     report: [],
     layerReport: [],
     images: [],
@@ -763,7 +781,7 @@ export function buildFlowDocxFromProjection(
 ): FlowDocxResult {
   const context: BuildContext = {
     chartMaxHeight: projection.pageBox.maxContentHeightPx - 32,
-    warnings: [...projection.warnings],
+    warnings: [...projection.warnings, ...wordTextAlphaWarnings(projection.nodes)],
     report: [],
     layerReport: [...projection.layerReport],
     images: [],
@@ -930,4 +948,3 @@ export function buildFlowDocxFromProjection(
     layerReport: context.layerReport,
   }
 }
-

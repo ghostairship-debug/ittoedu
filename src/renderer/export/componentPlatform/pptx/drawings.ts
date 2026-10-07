@@ -19,7 +19,7 @@ import type { ImageNode, ShapeNode, TextNode } from '../../../../shared/contract
 import { renderImageNodeCanvas } from '../../../../shared/imageEffects'
 import { addPptxTextNode, addPptxShapeNode } from '../../pptxTextAndShape'
 import { addPptxTableNode, addPptxChartNode } from '../../pptxTableAndChart'
-import { pptxColor, pptxRotation, pptxTransparency, type PptxDrawingTarget } from '../../pptxShared'
+import { pptxColor, pptxColorAlpha, pptxRotation, pptxTransparency, type PptxDrawingTarget } from '../../pptxShared'
 import type { PptxShapeExtensions } from '../../pptxShapeGeometry'
 import type { officeFrame } from './frame'
 
@@ -57,6 +57,9 @@ export function drawProfessional(target: PptxDrawingTarget, key: string, instanc
         ...(inline.style.fontSize ? { fontSize: inline.style.fontSize * frame.scaleY } : {}) } }] : []
     })
     const { appearance: style } = data
+    if ((style.highlightColor && pptxColorAlpha(style.highlightColor) < 1)
+      || inlines.some(inline => inline.type === 'text' && inline.style?.highlightColor && pptxColorAlpha(inline.style.highlightColor) < 1))
+      warnings.push('PPTX 原生文字高亮不支持透明色，保留高亮 RGB 与可编辑文字；原透明度保留在工程。')
     const node: TextNode = { ...base(instance, frame), type: 'text', text: textOutputAdapter.text(data), runs,
       flipX: style.flipX, flipY: style.flipY !== frame.flipY,
       style: { ...style, fontSize: style.fontSize * frame.scaleY,
@@ -89,9 +92,11 @@ export function drawProfessional(target: PptxDrawingTarget, key: string, instanc
       const textStyle = inline.type === 'text' ? inline.style : undefined
       if (inline.type === 'math') warnings.push('表格公式在 PPTX 中保留可编辑的替代说明文字；原公式保留在工程和 DOCX 的 OMML 中。')
       if (inline.type === 'text' && (style && ('baseline' in style || 'emphasis' in style))) warnings.push('表格文字的基线偏移与着重标记尚不映射到 PPTX。')
+      if (textStyle?.highlightColor && pptxColorAlpha(textStyle.highlightColor) < 1) warnings.push('PPTX 原生表格文字高亮不支持透明色，保留高亮 RGB 与可编辑文字；原透明度保留在工程。')
       return { text: inline.type === 'text' ? inline.text : inline.accessibleText, options: {
         ...(style?.fontSize ? { fontSize: style.fontSize * frame.scaleY * 0.75 } : {}),
         ...(style?.color ? { color: pptxColor(style.color) } : {}),
+        transparency: pptxTransparency(node.opacity * (style?.color ? pptxColorAlpha(style.color) : 1)),
         ...(inline.type === 'text' ? { ...(textStyle?.bold !== undefined ? { bold: textStyle.bold } : {}),
           ...(textStyle?.italic !== undefined ? { italic: textStyle.italic } : {}),
           ...(textStyle?.underline !== undefined ? { underline: { style: textStyle.underline ? 'sng' as const : 'none' as const } } : {}),
