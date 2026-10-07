@@ -10,6 +10,7 @@ import { componentPaintStyle } from '../../../player/components/componentPlaceme
 import { componentIsLocked } from '../../composition/crossSurfaceCommands'
 import { componentDefinitionPresentation } from '../properties/componentDefinitionPresentation'
 import { frameContainsPoint, frameToSpaceMatrix, invertMatrix, transformPoint, type AffineMatrix, type GeometryPoint } from '../../../core/components/geometry'
+import { FreeTransformGesture } from '../../componentPlatform/surfaces/slide/freeTransformGesture'
 import { componentFrameStyle, freeSurfaceTargets, freeTargetBounds, selectedFreeTargets, hitFreeObject, sameFreeTarget,
   type FreeObjectTarget, type FreeResizeHandle } from '../../componentPlatform/surfaces/slide'
 import { createSlideWorkspaceAuthoringController, listSlideWorkspaceHitTargets, proposeSlideLineHandle, type SlideWorkspaceAuthoringResult } from '../workspaceSlideAuthoring'
@@ -25,7 +26,7 @@ import { deliverWorkspaceMediaDrop, type WorkspaceMediaDropHandler } from '../..
 import { WORKSPACE_MEDIA_DRAG_TYPE } from '../../lessonWorkspace/workspaceMediaDrag'
 import type { ImportedImageAsset } from '../../project/assetManager'
 import { authorSpotEdits, authorSpotImageEdits } from '../../componentPlatform/surfaces/slide/authorSpots'
-import { isGlobalTeacherController, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits, type TeacherControllerDisplayPort } from '../../../shared/teacherControllerViewportGeometry'
+import { createTeacherControllerHudGeometry, teacherControllerReferenceSize, isGlobalTeacherController, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits, type TeacherControllerDisplayPort } from '../../../shared/teacherControllerViewportGeometry'
 
 export type SlideCanvasMode = 'edit' | 'run'
 export type SlideLineDrawTool = 'line' | 'elbow-arrow' | null
@@ -104,7 +105,7 @@ function SlideInstance({ id, project, surfaceId, preview, ports }: {
   const bindTarget = useCallback((element: HTMLDivElement | null) => ports.onTargetElement(id, element), [id, ports.onTargetElement])
   if (!instance || project.definitions[instance.definitionId]?.role === 'behavior') return null
   return <div ref={bindTarget} data-component-instance={id} data-layer-item-id={id} data-controller-authoring-id={isGlobalTeacherController(project, id) ? id : undefined} hidden={!isComponentVisibleAtSurface(instance, surfaceId)}
-    style={{ ...componentPaintStyle(instance, project.definitions[instance.definitionId]) as CSSProperties, ...componentFrameStyle(preview[id] ?? instance.frame) }}>
+    style={{ ...componentPaintStyle(instance, project.definitions[instance.definitionId]) as CSSProperties, ...componentFrameStyle(preview[id] ?? instance.frame), ...(isGlobalTeacherController(project, id) ? { pointerEvents: 'auto' } : {}) }}>
     <div ref={bind} data-component-render={id} style={{ width: '100%', height: '100%' }} />
     {instance.childIds?.map(child => <SlideInstance key={child} id={child} project={project} surfaceId={surfaceId} preview={preview} ports={ports} />)}
   </div>
@@ -168,9 +169,11 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
   const stageTransform = useMemo(() => createStageViewportTransform({ viewport, stage: canvas, fit: 'page', zoom: view.zoom, pan: { x: view.x, y: view.y } }),
     [viewport, canvas.width, canvas.height, view])
   const scale = stageTransform.scale
-  const controllerGeometry = useRef({ viewport, matrix: [scale, 0, 0, scale, stageTransform.stageRect.x, stageTransform.stageRect.y] as AffineMatrix, port: ports.teacherController })
-  controllerGeometry.current = { viewport, matrix: [scale, 0, 0, scale, stageTransform.stageRect.x, stageTransform.stageRect.y], port: ports.teacherController }
-  const displayProject = project && projectTeacherControllerInstances(project, viewport, controllerGeometry.current.matrix, ports.teacherController)
+  const hudGeometry = createTeacherControllerHudGeometry({ referenceSize: project ? teacherControllerReferenceSize(project) : canvas, viewportRect: viewport })
+  const controllerGeometry = useRef({ viewport: hudGeometry, port: ports.teacherController })
+  controllerGeometry.current = { viewport: hudGeometry, port: ports.teacherController }
+  const displayProject = project && projectTeacherControllerInstances(project, hudGeometry, undefined, ports.teacherController)
+  const hudGesture = useRef<{ pointerId: number; value: FreeTransformGesture; edits: ComponentEdit[]; captured: CapturedCourseTarget } | null>(null)
   const gestureDisplay = useRef<{ original: CourseProjectV10; display: CourseProjectV10; geometry: typeof controllerGeometry.current; offset: { x: number; y: number } } | null>(null)
   const mapping = (): AffineMatrix => {
     const rect = stageRef.current?.getBoundingClientRect()
@@ -180,21 +183,21 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
   const state = () => {
     const current = latest.current.ports.read()
     return current.project && current.surfaceId && current.documentId
-      ? { project: projectTeacherControllerInstances(current.project, controllerGeometry.current.viewport, controllerGeometry.current.matrix, controllerGeometry.current.port), surfaceId: current.surfaceId, documentId: current.documentId, selectedInstanceIds: current.selectedInstanceIds,
+      ? { project: { ...current.project, global: { underlay: current.project.global.underlay.filter(id => !isGlobalTeacherController(current.project!, id)), overlay: current.project.global.overlay.filter(id => !isGlobalTeacherController(current.project!, id)) } }, surfaceId: current.surfaceId, documentId: current.documentId, selectedInstanceIds: current.selectedInstanceIds,
           activeStateId: current.activeStateId, editingScope: current.editingScope } : null
   }
   const authoring = useRef<ReturnType<typeof createSlideWorkspaceAuthoringController> | null>(null)
   if (!authoring.current) authoring.current = createSlideWorkspaceAuthoringController({
     read: state, capture: () => {
       const original = latest.current.ports.read().project!, geometry = controllerGeometry.current
-      gestureDisplay.current = { original, display: projectTeacherControllerInstances(original, geometry.viewport, geometry.matrix, geometry.port), geometry,
+      gestureDisplay.current = { original, display: projectTeacherControllerInstances(original, geometry.viewport, undefined, geometry.port), geometry,
         offset: geometry.port?.placement?.() ?? { x: 0, y: 0 } }
       return latest.current.ports.capture()
     }, select: ids => latest.current.ports.select(ids),
     commit: (edits, target, group) => {
       const frozen = gestureDisplay.current
       return latest.current.ports.commit(frozen ? restoreTeacherControllerFrameEdits(edits, frozen.original, frozen.display,
-        frozen.geometry.viewport, frozen.geometry.matrix, frozen.offset, frozen.geometry.port) : edits, target, group)
+        frozen.geometry.viewport, undefined, frozen.offset, frozen.geometry.port) : edits, target, group)
     }, report: message => latest.current.ports.report(message),
   })
   useLayoutEffect(() => {
@@ -206,7 +209,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
     return () => observer.disconnect()
   }, [Boolean(project)])
   useEffect(() => {
-    authoring.current?.cancelGesture(); pointer.current = null; deferredPointer.current = null; pan.current = null; draw.current = null; line.current = null
+    authoring.current?.cancelGesture(); hudGesture.current = null; pointer.current = null; deferredPointer.current = null; pan.current = null; draw.current = null; line.current = null
     setPreview(emptyPreview()); setDrawPreview(null); setLinePreview(null); setPanning(false)
     setView({ zoom: 1, x: 0, y: 0 })
   }, [snapshot.documentId, snapshot.surfaceId, snapshot.activeStateId, snapshot.canvasMode, snapshot.editingScope])
@@ -351,8 +354,12 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
     [id, linePreview?.instanceId === id ? { ...instance, frame: linePreview.frame } : preview.preview[id] ? { ...instance, frame: preview.preview[id] } : instance])) }
   const targets = freeSurfaceTargets(effectiveProject, surface.id), selected = selectedFreeTargets(targets, snapshot.selectedInstanceIds)
   const editableSelected = selected.filter(target => !componentIsLocked(project, target.instanceId))
+  const selectedContent = editableSelected.filter(target => !isGlobalTeacherController(project, target.instanceId))
+  const hudTargets = targets.filter(target => isGlobalTeacherController(project, target.instanceId))
+  const selectedHud = editableSelected.filter(target => isGlobalTeacherController(project, target.instanceId))
   const viewportBounds = stageViewportRef.current?.getBoundingClientRect()
   const viewportScale = viewportBounds ? viewportBounds.width / viewport.width : 1
+  const hudPointerMatrix: AffineMatrix = [viewportScale, 0, 0, viewportScale, viewportBounds?.left ?? 0, viewportBounds?.top ?? 0]
   const chromeMatrix: AffineMatrix = [scale * viewportScale, 0, 0, scale * viewportScale,
     (viewportBounds?.left ?? 0) + stageTransform.stageRect.x * viewportScale, (viewportBounds?.top ?? 0) + stageTransform.stageRect.y * viewportScale]
   const background = resolveComponentBackground(project, surface)
@@ -386,6 +393,24 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         setPanning(true); event.currentTarget.setPointerCapture(event.pointerId); return
       }
       if (event.button !== 0) return
+      if (!snapshot.contentEdit && !snapshot.drawTool) {
+        const atHud = transformPoint(invertMatrix(hudPointerMatrix), { x: event.clientX, y: event.clientY })
+        const inHudHandle = event.target instanceof Element && event.target.closest('[data-controller-selection]')
+        const hit = hitFreeObject(hudTargets, atHud)
+        if (hit || inHudHandle) {
+          const ids = inHudHandle ? selectedHud.map(target => target.instanceId) : hit ? [hit.instanceId] : []
+          const targets = selectedFreeTargets(hudTargets, ids).filter(target => !componentIsLocked(project, target.instanceId))
+          if (!targets.length) { stop(event); return }
+          stop(event); ports.select(ids); event.currentTarget.setPointerCapture(event.pointerId)
+          const handle = event.target instanceof Element ? event.target.closest('[data-handle]')?.getAttribute('data-handle') as FreeResizeHandle | 'rotate' | null : null
+          const captured = ports.capture(), geometry = controllerGeometry.current
+          gestureDisplay.current = { original: project, display: displayProject!, geometry, offset: geometry.port?.placement?.() ?? { x: 0, y: 0 } }
+          hudGesture.current = { pointerId: event.pointerId, captured, edits: [], value: new FreeTransformGesture({
+            mode: handle === 'rotate' ? 'rotate' : handle ? 'resize' : 'drag', handle: handle === 'rotate' ? undefined : handle ?? undefined,
+            targets, pointer: { x: event.clientX, y: event.clientY }, surfaceToPointer: hudPointerMatrix }) }
+          return
+        }
+      }
       if (snapshot.contentEdit) {
         if (snapshot.contentEdit.composing || snapshot.drawTool) return
         stop(event); pointer.current = event.pointerId; event.currentTarget.setPointerCapture(event.pointerId)
@@ -423,6 +448,10 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       setPreview(authoring.current!.pointerDown({ x: event.clientX, y: event.clientY, additive: event.shiftKey || event.ctrlKey || event.metaKey, altKey: event.altKey }, mapping(), handle ?? undefined))
     }}
     onPointerMoveCapture={event => {
+      if (hudGesture.current?.pointerId === event.pointerId) {
+        stop(event); const gesture = hudGesture.current, update = gesture.value.update({ x: event.clientX, y: event.clientY }, { shift: event.shiftKey, alt: event.altKey })
+        gesture.edits = update.edits; setPreview({ preview: Object.fromEntries(update.edits.flatMap(edit => edit.type === 'frame.set' && edit.frame ? [[edit.instanceId, edit.frame]] : [])), guides: [], marquee: null }); return
+      }
       if (pan.current?.id === event.pointerId) { stop(event); const p = pan.current; setView(current => ({ ...current, x: p.x + event.clientX - p.start.x, y: p.y + event.clientY - p.start.y })); return }
       if (pointer.current !== event.pointerId) {
         if (snapshot.canvasMode === 'edit') setHoveredSpot(spotAt(surfacePoint(event.clientX, event.clientY))?.id ?? null)
@@ -441,6 +470,13 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       setPreview(authoring.current!.pointerMove({ x: event.clientX, y: event.clientY, altKey: event.altKey, shiftKey: event.shiftKey }, mapping()))
     }}
     onPointerUpCapture={event => {
+      if (hudGesture.current?.pointerId === event.pointerId) {
+        stop(event); const gesture = hudGesture.current, frozen = gestureDisplay.current; hudGesture.current = null
+        event.currentTarget.releasePointerCapture(event.pointerId); setPreview(emptyPreview())
+        if (gesture.edits.length && frozen) void ports.commit(restoreTeacherControllerFrameEdits(gesture.edits, frozen.original, frozen.display,
+          frozen.geometry.viewport, undefined, frozen.offset, frozen.geometry.port), gesture.captured, crypto.randomUUID()).catch(error => ports.report(String(error)))
+        return
+      }
       if (pan.current?.id === event.pointerId) { stop(event); pan.current = null; setPanning(false); event.currentTarget.releasePointerCapture(event.pointerId); return }
       if (pointer.current !== event.pointerId) return
       stop(event); pointer.current = null; event.currentTarget.releasePointerCapture(event.pointerId)
@@ -477,6 +513,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       setPreview(emptyPreview())
     }}
     onPointerCancelCapture={event => {
+      if (hudGesture.current?.pointerId === event.pointerId) { hudGesture.current = null; setPreview(emptyPreview()); return }
       if (pointer.current !== event.pointerId) return
       pointer.current = null; deferredPointer.current = null; draw.current = null; line.current = null; authoring.current?.cancelGesture()
       setPreview(emptyPreview()); setDrawPreview(null); setLinePreview(null)
@@ -528,6 +565,8 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         const target = targets.find(value => value.instanceId === id), rect = stageRef.current?.getBoundingClientRect()
         if (!target || !rect) return null
         const bounds = freeTargetBounds(target)
+        if (isGlobalTeacherController(project, id)) return { left: (viewportBounds?.left ?? 0) + bounds.left * viewportScale,
+          top: (viewportBounds?.top ?? 0) + bounds.top * viewportScale, width: bounds.width * viewportScale, height: bounds.height * viewportScale }
         return { left: rect.left + bounds.left * scale, top: rect.top + bounds.top * scale, width: bounds.width * scale, height: bounds.height * scale }
       }} />
     <div className="canvas-mode-switch" role="group" aria-label="画布模式">
@@ -569,11 +608,11 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
           backgroundImage: backgroundUrl ? 'url(' + JSON.stringify(backgroundUrl) + ')' : undefined, backgroundRepeat: 'no-repeat',
           backgroundPosition: 'center', backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit }}>
         <div className="canvas-stage canvas-stage--authoring" data-testid="canvas-stage" style={{ position: 'absolute', inset: 0, visibility: 'visible', pointerEvents: 'auto' }}>
-          {project.global.underlay.map(id => <SlideInstance key={id} id={id} project={displayProject!} surfaceId={surface.id} preview={linePreview ? { ...preview.preview, [linePreview.instanceId]: linePreview.frame } : preview.preview} ports={ports} />)}
+          {project.global.underlay.filter(id => !isGlobalTeacherController(project, id)).map(id => <SlideInstance key={id} id={id} project={project} surfaceId={surface.id} preview={linePreview ? { ...preview.preview, [linePreview.instanceId]: linePreview.frame } : preview.preview} ports={ports} />)}
           {project.surfaces.filter(value => value.kind === 'slide' && (value.id === surface.id || visitedSurfaces.has(value.id))).map(value => <div key={value.id} hidden={value.id !== surface.id} style={{ position: 'absolute', inset: 0 }}>
             {value.childIds.map(id => <SlideInstance key={id} id={id} project={project} surfaceId={value.id} preview={linePreview ? { ...preview.preview, [linePreview.instanceId]: linePreview.frame } : preview.preview} ports={ports} />)}
           </div>)}
-          {project.global.overlay.map(id => <SlideInstance key={id} id={id} project={displayProject!} surfaceId={surface.id} preview={linePreview ? { ...preview.preview, [linePreview.instanceId]: linePreview.frame } : preview.preview} ports={ports} />)}
+          {project.global.overlay.filter(id => !isGlobalTeacherController(project, id)).map(id => <SlideInstance key={id} id={id} project={project} surfaceId={surface.id} preview={linePreview ? { ...preview.preview, [linePreview.instanceId]: linePreview.frame } : preview.preview} ports={ports} />)}
         </div>
         {snapshot.canvasMode === 'edit' && <div data-slide-authoring-hit-plane="" style={{ position: 'absolute', inset: 0, zIndex: 10, pointerEvents: 'auto' }} />}
         {snapshot.canvasMode === 'edit' && !snapshot.contentEdit && <div className="canvas-authoring-targets" data-testid="runtime-authoring-targets" aria-label="画布可编辑内容" style={{ zIndex: 12 }}>
@@ -600,8 +639,13 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
                 cx={at.x} cy={at.y} r={5 / scale} fill="#fff" stroke="#2563eb" style={{ pointerEvents: 'auto' }} />)}</>}
         </svg>}
       </div>
+      <div data-controller-hud="true" style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 14 }}>
+        {[...project.global.underlay, ...project.global.overlay].filter(id => isGlobalTeacherController(project, id)).map(id =>
+          <SlideInstance key={id} id={id} project={displayProject!} surfaceId={surface.id} preview={preview.preview} ports={ports} />)}
+      </div>
     </div>
-    {snapshot.canvasMode === 'edit' && !snapshot.contentEdit && <SlideLayerSelectionOverlay targets={editableSelected} scale={scale} surfaceToPointer={chromeMatrix} lineHandles={Boolean(linePoints)} />}
+    {snapshot.canvasMode === 'edit' && !snapshot.contentEdit && <><SlideLayerSelectionOverlay targets={selectedContent} scale={scale} surfaceToPointer={chromeMatrix} lineHandles={Boolean(linePoints)} />
+      <div data-controller-selection="true"><SlideLayerSelectionOverlay targets={selectedHud} scale={viewportScale} surfaceToPointer={hudPointerMatrix} /></div></>}
     {canvasMenu.element}
   </main>
 }

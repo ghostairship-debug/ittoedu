@@ -20,7 +20,8 @@ import { useSlideNativeTextEditor } from './useSlideNativeTextEditor'
 import { componentDefinitionPresentation } from '../properties/componentDefinitionPresentation'
 import type { SlideContentEdit } from '../../store/slices/slideAuthoringSlice'
 import { resolveComponentBackground } from '../../../shared/contracts/component-platform'
-import { isGlobalTeacherController, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits, type TeacherControllerDisplayPort } from '../../../shared/teacherControllerViewportGeometry'
+import { createTeacherControllerHudGeometry, teacherControllerReferenceSize, isGlobalTeacherController, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits, type TeacherControllerDisplayPort, type TeacherControllerHudGeometry } from '../../../shared/teacherControllerViewportGeometry'
+import { SlideLayerSelectionOverlay } from './SlideLayerSelectionOverlay'
 
 export interface SpatialLocationWorkspaceProps {
   documentId: string
@@ -97,20 +98,21 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   const overlayScale = Math.min(size.width / design.width, size.height / design.height)
   const hudMatrix = composeMatrices(translationMatrix((size.width - design.width * overlayScale) / 2, (size.height - design.height * overlayScale) / 2), scaleMatrix(overlayScale))
   const worldMatrix = componentSpatialCameraMatrix(props.view.camera, { x: 0, y: 0, ...size })
-  const displayProject = projectTeacherControllerInstances(props.project, size, hudMatrix, props.teacherController)
+  const controllerGeometry = createTeacherControllerHudGeometry({ referenceSize: teacherControllerReferenceSize(props.project), viewportRect: { x: 0, y: 0, ...size } })
+  const displayProject = projectTeacherControllerInstances(props.project, controllerGeometry, undefined, props.teacherController)
   const latestDisplay = useRef(displayProject); latestDisplay.current = displayProject
   const allTargets = freeSurfaceTargets(displayProject, props.surface.id)
   const globalIds = new Set([...props.project.global.underlay, ...props.project.global.overlay])
   const controllerTargets = allTargets.filter(target => isGlobalTeacherController(props.project, target.instanceId))
-    .map(target => ({ ...target, parentToSurface: composeMatrices(invertMatrix(worldMatrix), hudMatrix, target.parentToSurface) }))
   const scopeTargets = props.view.scope === 'global' ? allTargets.filter(target => globalIds.has(target.ancestors[0] ?? target.instanceId)) : [...worldTargets, ...controllerTargets]
   const visibleTargets = scopeTargets.filter(target => props.project.instances[target.instanceId]?.visible !== false && target.ancestors.every(id => props.project.instances[id]?.visible !== false)
     && (props.view.scope === 'global' || isGlobalTeacherController(props.project, target.instanceId) || spatialSemanticVisible(spatial, target.instanceId, props.view.camera.zoom)))
   const locked = (target: FreeObjectTarget) => props.project.instances[target.instanceId]?.locked || target.ancestors.some(id => props.project.instances[id]?.locked)
-  const gestureDisplay = useRef<{ original: CourseProjectV10; display: CourseProjectV10; viewport: typeof size; matrix: AffineMatrix; offset: { x: number; y: number } } | null>(null)
+  const gestureDisplay = useRef<{ original: CourseProjectV10; display: CourseProjectV10; viewport: TeacherControllerHudGeometry; offset: { x: number; y: number } } | null>(null)
   const background = resolveComponentBackground(props.project, props.surface)
   const matrix = props.view.scope === 'global' ? hudMatrix : worldMatrix
   const clientMatrix = () => { const box = viewport.current!.getBoundingClientRect(); return composeMatrices(translationMatrix(box.left, box.top), matrix) }
+  const controllerPointerMatrix = (): AffineMatrix => { const box = viewport.current?.getBoundingClientRect(); return [1, 0, 0, 1, box?.left ?? 0, box?.top ?? 0] }
   const at = (event: { clientX: number; clientY: number }) => transformPoint(invertMatrix(clientMatrix()), pointer(event))
   const editor = useSlideNativeTextEditor({ project: props.project, surfaceId: props.surface.id, edit: props.contentEdit ?? null,
     begin: id => props.contentEditor?.begin(id) ?? null, update: (data, composing, height) => props.contentEditor?.update(data, composing, height),
@@ -216,7 +218,12 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
       return
     }
     if (props.canvasMode === 'run' && event.button !== 1 && !spacePan.current && event.target instanceof Element && event.target.closest('[data-component-instance]')) return
-    const hit = props.canvasMode === 'run' || event.button === 1 || spacePan.current ? null : mode === 'drag' ? hitFreeObject(visibleTargets, at(event), event.altKey) : scopeTargets.find(target => props.selectionIds.includes(target.instanceId)) ?? null
+    const hudHandle = event.target instanceof Element && event.target.closest('[data-controller-selection]')
+    const hudHit = props.canvasMode === 'edit' && event.button !== 1 && !spacePan.current
+      ? hudHandle ? controllerTargets.find(target => props.selectionIds.includes(target.instanceId)) ?? null
+        : mode === 'drag' ? hitFreeObject(controllerTargets.filter(target => props.project.instances[target.instanceId]?.visible !== false), transformPoint(invertMatrix(controllerPointerMatrix()), pointer(event))) : null : null
+    const contentTargets = visibleTargets.filter(target => !isGlobalTeacherController(props.project, target.instanceId))
+    const hit = hudHit ?? (props.canvasMode === 'run' || event.button === 1 || spacePan.current ? null : mode === 'drag' ? hitFreeObject(contentTargets, at(event), event.altKey) : contentTargets.find(target => props.selectionIds.includes(target.instanceId)) ?? null)
     const pan = event.button === 1 || spacePan.current || (!hit && !event.shiftKey)
     if (!hit && !pan && props.canvasMode === 'edit') {
       event.preventDefault(); event.stopPropagation(); viewport.current!.setPointerCapture(event.pointerId)
@@ -228,12 +235,12 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
     if (hit) { props.onGraphSelect(null); if (mode === 'drag') props.onSelect(event.shiftKey ? props.selectionIds.includes(hit.instanceId) ? props.selectionIds.filter(id => id !== hit.instanceId) : [...props.selectionIds, hit.instanceId] : props.selectionIds.includes(hit.instanceId) ? props.selectionIds : [hit.instanceId]) }
     else if (!event.shiftKey && props.canvasMode === 'edit' && event.button !== 1 && !spacePan.current) props.onSelect([])
     const ids = mode !== 'drag' ? props.selectionIds : hit && event.shiftKey ? props.selectionIds.includes(hit.instanceId) ? props.selectionIds.filter(id => id !== hit.instanceId) : [...props.selectionIds, hit.instanceId] : hit && props.selectionIds.includes(hit.instanceId) ? props.selectionIds : hit ? [hit.instanceId] : []
-    const targets = selectedFreeTargets(scopeTargets, ids).filter(target => !locked(target))
+    const targets = selectedFreeTargets(hudHit ? controllerTargets : contentTargets, ids).filter(target => !locked(target))
     if (hit && !targets.length || !hit && !pan) { event.stopPropagation(); return }
     event.preventDefault(); event.stopPropagation(); viewport.current!.setPointerCapture(event.pointerId)
-    gestureDisplay.current = { original: props.project, display: displayProject, viewport: size, matrix: hudMatrix,
+    gestureDisplay.current = { original: props.project, display: displayProject, viewport: controllerGeometry,
       offset: props.teacherController?.placement?.() ?? { x: 0, y: 0 } }
-    active.current = { pointerId: event.pointerId, last: pointer(event), targets, captured: props.captureTarget(), edits: [], geometry: pan ? undefined : new FreeTransformGesture({ mode, handle, targets, pointer: pointer(event), surfaceToPointer: clientMatrix(), snapTargets: visibleTargets.filter(target => !ids.includes(target.instanceId) && !target.ancestors.some(id => ids.includes(id))) }) }
+    active.current = { pointerId: event.pointerId, last: pointer(event), targets, captured: props.captureTarget(), edits: [], geometry: pan ? undefined : new FreeTransformGesture({ mode, handle, targets, pointer: pointer(event), surfaceToPointer: hudHit ? controllerPointerMatrix() : clientMatrix(), snapTargets: (hudHit ? controllerTargets : contentTargets).filter(target => !ids.includes(target.instanceId) && !target.ancestors.some(id => ids.includes(id))) }) }
   }
   resumePointer.current = begin
   const move = (event: PointerInput) => {
@@ -270,12 +277,14 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
     if (cancel && gesture.marquee) props.onSelect(gesture.originalSelection ?? [])
     if (viewport.current?.hasPointerCapture(event.pointerId)) viewport.current.releasePointerCapture(event.pointerId)
     const frozen = gestureDisplay.current
-    const edits = frozen ? restoreTeacherControllerFrameEdits(gesture.edits, frozen.original, frozen.display, frozen.viewport, frozen.matrix, frozen.offset, props.teacherController) : gesture.edits
+    const edits = frozen ? restoreTeacherControllerFrameEdits(gesture.edits, frozen.original, frozen.display, frozen.viewport, undefined, frozen.offset, props.teacherController) : gesture.edits
     if (!cancel && edits.length) void props.onEdits(edits, gesture.captured).catch(error => setError(String(error))).finally(resetPreview)
     else resetPreview()
   }
   resumeFinish.current = pointerId => finish({ pointerId })
-  const selected = selectedFreeTargets(scopeTargets.map(target => preview[target.instanceId] ? { ...target, frame: preview[target.instanceId]! } : target), props.selectionIds)
+  const selectedTargets = selectedFreeTargets(scopeTargets.map(target => preview[target.instanceId] ? { ...target, frame: preview[target.instanceId]! } : target), props.selectionIds)
+  const selected = selectedTargets.filter(target => !isGlobalTeacherController(props.project, target.instanceId))
+  const selectedControllers = selectedTargets.filter(target => isGlobalTeacherController(props.project, target.instanceId))
   const bounds = freeSelectionBounds(selected)
   const corners = selected.length === 1 ? frameCorners(selected[0]!.frame, selected[0]!.parentToSurface) : bounds ? [{ x: bounds.left, y: bounds.top }, { x: bounds.right, y: bounds.top }, { x: bounds.right, y: bounds.bottom }, { x: bounds.left, y: bounds.bottom }] : []
   const screenCorners = corners.map(point => transformPoint(matrix, point))
@@ -306,7 +315,10 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
       data-observation-surface-id={props.surface.id} data-observation-location-id={currentFrame?.id ?? props.surface.id} data-observation-state-id={props.activeStateId ?? ''} data-observation-ready="true"
       data-observation-spatial-camera={JSON.stringify(props.view.camera)} style={{ overflow: 'hidden', touchAction: 'none', backgroundColor: props.backgroundPreviewColor ?? background.color,
         backgroundImage: props.backgroundAssetUrl ? `url(${JSON.stringify(props.backgroundAssetUrl)})` : undefined, backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit, backgroundPosition: 'center', backgroundRepeat: 'no-repeat', boxShadow: dragOver ? 'inset 0 0 0 3px #245b46' : undefined }}
-      onPointerDownCapture={event => { if (!(event.target instanceof Element && event.target.closest('[data-handle]'))) begin(event) }} onPointerMove={move} onPointerUp={event => finish(event)} onPointerCancel={event => finish(event, true)} onLostPointerCapture={event => finish(event, true)}
+      onPointerDownCapture={event => { if (event.target instanceof Element && event.target.closest('[data-controller-selection]')) {
+        const handle = event.target.closest('[data-handle]')?.getAttribute('data-handle') as FreeResizeHandle | 'rotate' | null
+        begin(event, handle === 'rotate' ? 'rotate' : handle ? 'resize' : 'drag', handle === 'rotate' ? undefined : handle ?? undefined)
+      } else if (!(event.target instanceof Element && event.target.closest('[data-handle]'))) begin(event) }} onPointerMove={move} onPointerUp={event => finish(event)} onPointerCancel={event => finish(event, true)} onLostPointerCapture={event => finish(event, true)}
       onDoubleClick={event => { if (props.canvasMode === 'edit' && !inputOwnsPointer(event.target)) { const hit = hitFreeObject(visibleTargets, at(event), true); if (hit) { props.onSelect([hit.instanceId]); if (!editor.begin(hit.instanceId, at(event), pointer(event))) props.onEditContent?.(hit.instanceId) } } }}
       onContextMenu={event => {
         if (props.canvasMode !== 'edit' || inputOwnsPointer(event.target)) return
@@ -330,9 +342,11 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
           { captured: frozen, documentId: frozen.documentId, projectId: frozen.project.id, revision: frozen.project.revision, locationId: props.surface.id, surfaceId: props.surface.id, sessionGeneration: props.activation ?? 0 }, props.onDropWorkspaceMedia,
           () => mediaRef.current.directory === media.directory && mediaRef.current.files === media.files).then(result => setError(result.ok ? null : result.reason ?? '媒体未插入'))
       }}>
-      <div data-spatial-hud-plane="underlay" style={{ position: 'absolute', left: 0, top: 0, width: design.width, height: design.height, transformOrigin: '0 0', transform: `matrix(${hudMatrix.join(',')})`, pointerEvents: props.view.scope === 'global' ? 'auto' : 'none' }}>{props.project.global.underlay.map(id => props.renderInstance(id, displayProject))}</div>
+      <div data-spatial-hud-plane="underlay" style={{ position: 'absolute', left: 0, top: 0, width: design.width, height: design.height, transformOrigin: '0 0', transform: `matrix(${hudMatrix.join(',')})`, pointerEvents: props.view.scope === 'global' ? 'auto' : 'none' }}>{props.project.global.underlay.filter(id => !isGlobalTeacherController(props.project, id)).map(id => props.renderInstance(id))}</div>
       <div data-spatial-world="true" style={{ position: 'absolute', left: 0, top: 0, width: 0, height: 0, transformOrigin: '0 0', transform: `matrix(${worldMatrix.join(',')})` }}>{props.surface.childIds.map(id => props.renderInstance(id))}</div>
-      <div data-spatial-hud-plane="overlay" style={{ position: 'absolute', left: 0, top: 0, width: design.width, height: design.height, transformOrigin: '0 0', transform: `matrix(${hudMatrix.join(',')})`, pointerEvents: props.view.scope === 'global' || props.canvasMode === 'run' ? 'auto' : 'none' }}>{props.project.global.overlay.map(id => props.renderInstance(id, displayProject))}</div>
+      <div data-spatial-hud-plane="overlay" style={{ position: 'absolute', left: 0, top: 0, width: design.width, height: design.height, transformOrigin: '0 0', transform: `matrix(${hudMatrix.join(',')})`, pointerEvents: props.view.scope === 'global' || props.canvasMode === 'run' ? 'auto' : 'none' }}>{props.project.global.overlay.filter(id => !isGlobalTeacherController(props.project, id)).map(id => props.renderInstance(id))}</div>
+      <div data-controller-hud="true" style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none' }}>{[...props.project.global.underlay, ...props.project.global.overlay].filter(id => isGlobalTeacherController(props.project, id)).map(id => <div key={id} style={{ pointerEvents: 'auto' }}>{props.renderInstance(id, displayProject)}</div>)}</div>
+      {props.canvasMode === 'edit' && <div data-controller-selection="true"><SlideLayerSelectionOverlay targets={selectedControllers.filter(target => !locked(target))} scale={1} surfaceToPointer={controllerPointerMatrix()} /></div>}
       {props.canvasMode === 'edit' && <div style={{ position: 'absolute', left: 0, top: 0, width: 0, height: 0, transformOrigin: '0 0', transform: `matrix(${matrix.join(',')})` }}>{editor.editor}</div>}
       <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'visible' }}>
         {guides.map((guide, index) => {

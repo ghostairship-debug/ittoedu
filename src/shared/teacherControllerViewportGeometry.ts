@@ -3,6 +3,24 @@ import { componentDefinitionBuiltinKey } from './contracts/component-platform'
 import { invertMatrix, multiplyMatrices, type AffineMatrix } from '../core/components/geometry'
 import type { FlowSize } from './flowViewportGeometry'
 import { readTeacherControllerConfig } from './teacherControllerConfig'
+import { createStageGeometry, STAGE_VIEWPORT_WIDTH, STAGE_VIEWPORT_HEIGHT } from './stageViewport'
+
+export type TeacherControllerHudGeometry = ReturnType<typeof createTeacherControllerHudGeometry>
+
+/** The global author's reference stays the same when the active surface changes. */
+export function teacherControllerReferenceSize(project: CourseProjectV10): FlowSize {
+  return project.surfaces.find(surface => surface.kind !== 'flow' && surface.designSize)?.designSize
+    ?? { width: STAGE_VIEWPORT_WIDTH, height: STAGE_VIEWPORT_HEIGHT }
+}
+
+/** Direct HUD projection: no content fit, paper scroll, observation or world camera enters this matrix. */
+export function createTeacherControllerHudGeometry(input: {
+  referenceSize: FlowSize; viewportRect: { x: number; y: number; width: number; height: number }
+}) { return createStageGeometry(input.referenceSize, input.viewportRect) }
+
+function isHudGeometry(viewport: FlowSize | TeacherControllerHudGeometry): viewport is TeacherControllerHudGeometry {
+  return 'authorToViewport' in viewport
+}
 
 export type TeacherControllerDisplayPort = Pick<TeacherControllerPort, 'read' | 'subscribe' | 'setCollapsed'> & {
   placement?(): { x: number; y: number }
@@ -66,17 +84,24 @@ export function teacherControllerIsCollapsed(project: CourseProjectV10, id: stri
   return Boolean(config.collapsible && (port?.read().collapsed ?? config.defaultCollapsed))
 }
 
-/** Author frames remain unchanged; only the controller's viewport display cancels its parent's fit. */
-export function projectTeacherControllerInstances(project: CourseProjectV10, viewport: FlowSize,
+/** Author frames remain unchanged. HUD consumers render the returned frames directly in their HUD layer. */
+export function projectTeacherControllerInstances(project: CourseProjectV10, viewport: FlowSize | TeacherControllerHudGeometry,
   parentToViewport: AffineMatrix = identity, port?: TeacherControllerDisplayPort): CourseProjectV10 {
-  if (viewport.width <= 0 || viewport.height <= 0) return project
+  const hud = isHudGeometry(viewport) ? viewport : undefined
+  const size = hud?.viewportRect ?? viewport as FlowSize
+  if (size.width <= 0 || size.height <= 0) return project
   const offset = port?.placement?.() ?? { x: 0, y: 0 }, inverse = invertMatrix(parentToViewport)
   let instances = project.instances
   for (const id of [...project.global.underlay, ...project.global.overlay]) {
     const instance = project.instances[id], frame = instance?.frame
     if (!frame || !isGlobalTeacherController(project, id)) continue
-    const shown = teacherControllerViewportFrame(frame, viewport, offset, teacherControllerIsCollapsed(project, id, port))
-    const transform = multiplyMatrices(inverse, shown.transform)
+    const origin = hud ? { x: hud.viewportRect.x, y: hud.viewportRect.y } : { x: 0, y: 0 }
+    const projected: ComponentFrame = hud ? { ...frame, transform: [...multiplyMatrices(hud.authorToViewport, frame.transform)] } : frame
+    const localFrame = { ...projected, transform: [...projected.transform] as ComponentFrame['transform'] }
+    localFrame.transform[4] -= origin.x; localFrame.transform[5] -= origin.y
+    const shown = teacherControllerViewportFrame(localFrame, size, offset, teacherControllerIsCollapsed(project, id, port))
+    shown.transform[4] += origin.x; shown.transform[5] += origin.y
+    const transform = hud ? shown.transform : multiplyMatrices(inverse, shown.transform)
     if (instances === project.instances) instances = { ...instances }
     instances[id] = { ...instance, frame: { width: shown.width, height: shown.height, transform: [...transform] } }
   }
@@ -85,12 +110,15 @@ export function projectTeacherControllerInstances(project: CourseProjectV10, vie
 
 /** A real gesture may move a clamped frame; unchanged axes keep their authored placement. */
 export function restoreTeacherControllerFrameEdits(edits: ComponentEdit[], original: CourseProjectV10, display: CourseProjectV10,
-  viewport: FlowSize, parentToViewport: AffineMatrix = identity, offset = { x: 0, y: 0 }, port?: TeacherControllerDisplayPort): ComponentEdit[] {
+  viewport: FlowSize | TeacherControllerHudGeometry, parentToViewport: AffineMatrix = identity, offset = { x: 0, y: 0 }, port?: TeacherControllerDisplayPort): ComponentEdit[] {
   return edits.map(edit => {
     if (edit.type !== 'frame.set' || !edit.frame || !isGlobalTeacherController(original, edit.instanceId)) return edit
     const source = original.instances[edit.instanceId]?.frame, before = display.instances[edit.instanceId]?.frame
     if (!source || !before) return edit
-    const start = multiplyMatrices(parentToViewport, before.transform), next = multiplyMatrices(parentToViewport, edit.frame.transform)
+    const hud = isHudGeometry(viewport) ? viewport : undefined
+    const matrix = hud?.viewportToAuthor ?? parentToViewport
+    const start = multiplyMatrices(matrix, before.transform), next = multiplyMatrices(matrix, edit.frame.transform)
+    const authorOffset = hud ? { x: offset.x / hud.scale, y: offset.y / hud.scale } : offset
     const transform = [...source.transform] as ComponentFrame['transform']
     const collapsed = teacherControllerIsCollapsed(original, edit.instanceId, port)
     const firstColumnChanged = Math.abs(next[0] - start[0]) > 0.000001 || Math.abs(next[1] - start[1]) > 0.000001
@@ -100,8 +128,8 @@ export function restoreTeacherControllerFrameEdits(edits: ComponentEdit[], origi
     const shift = collapsedTranslation({ ...source, transform }, collapsed)
     const changesX = Math.abs(next[0] - start[0]) > 0.000001 || Math.abs(next[2] - start[2]) > 0.000001
     const changesY = Math.abs(next[1] - start[1]) > 0.000001 || Math.abs(next[3] - start[3]) > 0.000001
-    if (Math.abs(next[4] - start[4]) > 0.000001 || changesX) transform[4] = next[4] - offset.x - shift.x
-    if (Math.abs(next[5] - start[5]) > 0.000001 || changesY) transform[5] = next[5] - offset.y - shift.y
+    if (Math.abs(next[4] - start[4]) > 0.000001 || changesX) transform[4] = next[4] - authorOffset.x - shift.x
+    if (Math.abs(next[5] - start[5]) > 0.000001 || changesY) transform[5] = next[5] - authorOffset.y - shift.y
     return { ...edit, frame: { width: Math.abs(edit.frame.width - before.width) > 0.000001 ? edit.frame.width : source.width,
       height: Math.abs(edit.frame.height - before.height) > 0.000001 ? edit.frame.height : source.height, transform } }
   })
