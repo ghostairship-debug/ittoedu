@@ -11,6 +11,7 @@ import { createTextComponentData, createFormulaComponentData, type TextComponent
 import { ExecutionEngine } from '../../../../src/main/workbench/execution/ExecutionEngine'
 import { ExecutionRunStore } from '../../../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../../../src/main/workbench/execution/ExecutionEventStore'
+import { EditSessionService } from '../../../../src/main/workbench/execution/EditSessionService'
 import type { ModelProvider, ModelSelection } from '../../../../src/shared/workbench/modelProvider'
 
 it('a software-bound V10 rich selection preserves unselected links marks geometry and unchanged formula identity in one History', async () => {
@@ -49,7 +50,7 @@ it('a software-bound V10 rich selection preserves unselected links marks geometr
     const selection: ModelSelection = { model: 'fixture', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat',
       baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'fixture' }, billing: { kind: 'unknown' },
       capabilities: { tools: 'unsupported', stream: 'supported', vision: 'unsupported', reasoning: 'unknown' } } }
-    const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider,
+    const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider, edits: new EditSessionService(host.registry, host.tools),
       runs: new ExecutionRunStore(path.join(directory, 'runs')), events: new ExecutionEventStore({ directory: path.join(directory, 'events') }) })
     const started = await engine.start({ conversationId: 'rich', taskId: 'rewrite', instruction: '改写所选内容并保留公式和链接', selection,
       documents: [{ documentId: initial.documentId, writable: [target], selection: [target] }], contentOutput: { kind: 'replace-text', documentId: initial.documentId, target } })
