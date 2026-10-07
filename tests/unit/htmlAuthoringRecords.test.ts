@@ -302,3 +302,29 @@ it('keeps runtime classes through an unrelated source edit and a move into a run
     ;(doc.defaultView as any).__cwHtmlAuthoringConsumer.dispose()
   } finally { frame.remove() }
 })
+
+it('keeps the other anchored object width when moving a repeated sibling then styling the moved object', async () => {
+  const original = '<html><body><p data-cw-author-key="a">same</p><p data-cw-author-key="b">same</p></body></html>'
+  const record = (key: string, index: number, width: number) => ({ kind: 'text' as const, binding: { kind: 'dom' as const,
+    path: [{ tag: 'body', index: 1 }, { tag: 'p', index, attributes: { 'data-cw-author-key': key } }], textIndex: 0, baseline: 'same' }, overrides: { geometry: { width } } })
+  const source = patchHtmlAuthoringRecords(original, { a: record('a', 0, 90), b: record('b', 1, 180) }), driver = new TextDriver()
+  const session = await DocumentSession.create({ documentId: 'doc', epoch: 'epoch', model: driver.load(new TextEncoder().encode(source)),
+    binding: { kind: 'file', path: 'sample.html', version: null, bindingVersion: 1 } }, driver,
+    { async append() {}, async save(input) { return input.binding as Extract<typeof input.binding, { kind: 'file' }> } })
+  const service = new HtmlSourceEditService({ async readDocument() { return session.read() }, execute: op => session.execute(op), withFileAccess: work => work() })
+  const current = () => { const model = session.read().model; if (model.kind !== 'text') throw new Error('text'); return model.source }
+  const apply = async (command: Parameters<typeof service.editSource>[0]['command']) => {
+    const snapshot = session.read()
+    await service.editSource({ type: 'html-preview.edit-source', operationId: `source-${snapshot.revision}`, documentId: 'doc', epoch: 'epoch',
+      baseRevision: snapshot.revision, bindingVersion: 1, leaseId: 'lease', loadId: 'load', command }, {
+      lease: { leaseId: 'lease', documentId: 'doc', epoch: 'epoch', revision: snapshot.revision, bindingVersion: 1, loadId: 'load', url: 'about:blank' },
+      tabId: 'tab', entryRealPath: 'sample.html', rootRealPath: '.', bindingPath: 'sample.html', snapshot })
+  }
+  let nodes = flattenHtmlSourceNodes(inspectHtmlSource(current()).roots)
+  await apply({ type: 'move', target: nodes.find(node => node.attributes['data-cw-author-key'] === 'b')!.address!,
+    parent: nodes.find(node => node.name === 'body')!.address!, index: 0 })
+  nodes = flattenHtmlSourceNodes(inspectHtmlSource(current()).roots)
+  await apply({ type: 'style', target: nodes.find(node => node.attributes['data-cw-author-key'] === 'b')!.address!, patch: { width: '140px' } })
+  expect(readHtmlAuthoringRecords(current()).a.overrides.geometry?.width).toBe(90)
+  expect(readHtmlAuthoringRecords(current()).b.overrides.geometry?.width).toBeUndefined()
+})

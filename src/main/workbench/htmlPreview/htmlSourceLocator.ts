@@ -158,10 +158,11 @@ export function locateHtmlAuthorRecordSource(source: string, record: ComponentAu
     .map(attribute => [attribute.name, attribute.decodedValue ?? '']))
   const all = (node: RenderedElement): RenderedElement[] => [node, ...node.children.flatMap(all)]
   let target: RenderedElement | null = null
-  if (afterEdit) {
+  {
     const last = record.binding.path.at(-1), id = last?.attributes?.id
     const anchored = all(root).filter(node => attrs(node)['data-cw-author-key'] === authorKey)
     if (anchored.length === 1) target = anchored[0]!
+    else if (last?.attributes?.['data-cw-author-key'] === authorKey) return null
     else if (id) {
       const identified = all(root).filter(node => node.name === last!.tag && attrs(node).id === id)
       if (identified.length === 1) target = identified[0]!
@@ -179,7 +180,15 @@ export function locateHtmlAuthorRecordSource(source: string, record: ComponentAu
       }
     }
   }
-  target ??= pathToSource(root, [{ name: 'html', index: 0 }, ...record.binding.path.map(step => ({ name: step.tag, index: step.index }))])
+  if (!target) {
+    target = pathToSource(root, [{ name: 'html', index: 0 }, ...record.binding.path.map(step => ({ name: step.tag, index: step.index }))])
+    let node: RenderedElement | null = target
+    for (const step of [...record.binding.path].reverse()) {
+      if (!node || Object.entries(step.attributes ?? {}).some(([name, value]) => name === 'class'
+        ? !value.split(/\s+/).every(token => (attrs(node!).class ?? '').split(/\s+/).includes(token)) : attrs(node!)[name] !== value)) return null
+      node = node.parent
+    }
+  }
   if (!target || target.sourceIndex === null) return null
   const element = index.elements[target.sourceIndex]!
   let valueSpan: { start: number; end: number } | null = null
