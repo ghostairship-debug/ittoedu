@@ -434,7 +434,6 @@ function TeacherControllerProperties({
         <button
           type="button"
           className="secondary-button"
-          disabled={node.buttons.length >= 12}
           onClick={() => update({
             buttons: [
               ...node.buttons,
@@ -446,7 +445,7 @@ function TeacherControllerProperties({
               },
             ],
           })}
-        >添加按钮（{node.buttons.length}/12）</button>
+        >添加按钮（{node.buttons.length}）</button>
       </div>
     </section>
   )
