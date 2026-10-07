@@ -371,7 +371,6 @@ export class ComponentPlatformRuntime {
     if (!root && definition.role !== 'behavior') return Promise.resolve()
     this.synced.add(id)
     const effective = instance.implementationOverride ?? definition.implementation
-    if (effective.kind === 'source') for (const assetId of Object.values(effective.resourceBindings ?? {})) this.contentAssetUrl(assetId)
     let sourceSignature: unknown
     if (effective.kind === 'source' && this.project) {
       try { sourceSignature = componentCompilationInput(this.project, effective, this.documentResources) }
