@@ -13,10 +13,12 @@ export interface MarkdownOptions {
   previous?: MarkdownProjection
   createId: (kind: 'block' | 'item' | 'row' | 'column' | 'formula' | 'asset') => string
   target?: 'flow' | 'file'
+  /** Flow may retain usable blocks and a diagnostic for a local unsupported fragment. */
+  recoverUnsupportedBlocks?: boolean
   resolveImage?: (href: string) => { assetId: string; source: DocumentResources['assets'][number]['source'] }
 }
 export type MarkdownParseResult =
-  | { status: 'valid'; document: MarkdownDocument; source: string; sourceMap: MarkdownSourceMap; diagnostics: [] }
+  | { status: 'valid'; document: MarkdownDocument; source: string; sourceMap: MarkdownSourceMap; diagnostics: DocumentDiagnostic[] }
   | { status: 'invalid'; source: string; diagnostics: DocumentDiagnostic[] }
 class SourceError extends Error { constructor(message: string, readonly fragment: string, readonly absoluteOffset?: number) { super(message) } }
 function error(message: string, fragment: string): never { throw new SourceError(message, fragment) }
@@ -121,15 +123,24 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
   let location = 0
   try {
     const resources = emptyDocumentResources()
+    const diagnostics: DocumentDiagnostic[] = []
     const extensions: TokenizerExtension[] = [
       {
         name: 'cwMeta', level: 'block', start: src => src.indexOf('<!--cw:block'),
         tokenizer(src) {
           if (!src.startsWith('<!--cw:block')) return
           const end = src.indexOf('-->')
-          if (end < 0) return error('块标记未闭合', src)
+          if (end < 0) {
+            if (!options.recoverUnsupportedBlocks) return error('块标记未闭合', src)
+            const lineEnd = src.indexOf('\n')
+            return { type: 'cwInvalid', raw: lineEnd < 0 ? src : src.slice(0, lineEnd + 1), message: '块标记未闭合，源文已保留' }
+          }
           const raw = src.slice(0, end + 3)
-          return { type: 'cwMeta', raw, attrs: commentJson(raw, 'block') }
+          try { return { type: 'cwMeta', raw, attrs: commentJson(raw, 'block') } }
+          catch (cause) {
+            if (!options.recoverUnsupportedBlocks) throw cause
+            return { type: 'cwInvalid', raw, message: cause instanceof Error ? cause.message : String(cause) }
+          }
         },
       },
       {
@@ -137,7 +148,11 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
         tokenizer(src) {
           if (!/^\$\$[ \t]*\n/.test(src)) return
           const match = /^\$\$[ \t]*\n([\s\S]*?)\n\$\$[ \t]*(?:\n|$)/.exec(src)
-          if (!match) return error('独立公式未闭合', src)
+          if (!match) {
+            if (!options.recoverUnsupportedBlocks) return error('独立公式未闭合', src)
+            const end = src.indexOf('\n\n')
+            return { type: 'cwInvalid', raw: end < 0 ? src : src.slice(0, end), message: '独立公式未闭合，源文已保留' }
+          }
           return { type: 'cwFormula', raw: match[0], latex: match[1] }
         },
       },
@@ -145,10 +160,24 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
         name: 'cwMath', level: 'inline', start: src => src.indexOf('$'),
         tokenizer(src) {
           if (!src.startsWith('$')) return
+          // A dollar without a paired math delimiter is ordinary prose, including prices.
+          // A closing delimiter cannot touch a following digit ("$5 and $10").
+          if (/^\$\s/.test(src)) return
           let end = 1
-          for (; end < src.length; end++) { if (src[end] === '\\') end++; else if (src[end] === '$') break; else if (src[end] === '\n') return error('行内公式未闭合', src) }
-          if (end === src.length) return error('行内公式未闭合，字面美元请写 \\$', src)
-          const tail = attributeTail(src.slice(end + 1))
+          for (; end < src.length; end++) { if (src[end] === '\\') end++; else if (src[end] === '$' || src[end] === '\n') break }
+          if (src[end] !== '$') {
+            if (/^\$\d/.test(src) || src.length === 1) return
+            if (options.recoverUnsupportedBlocks) return { type: 'cwInvalid', raw: src.slice(0, end), message: '行内公式未闭合，源文已保留' }
+            return error('行内公式未闭合', src)
+          }
+          if (/\s/.test(src[end - 1]!) || /\d/.test(src[end + 1] ?? '')) return
+          let tail: ReturnType<typeof attributeTail>
+          try { tail = attributeTail(src.slice(end + 1)) }
+          catch (cause) {
+            if (!options.recoverUnsupportedBlocks) throw cause
+            const lineEnd = src.indexOf('\n')
+            return { type: 'cwInvalid', raw: lineEnd < 0 ? src : src.slice(0, lineEnd), message: cause instanceof Error ? cause.message : String(cause) }
+          }
           return { type: 'cwMath', raw: src.slice(0, end + 1 + tail.length), latex: src.slice(1, end), attrs: tail.attrs }
         },
       },
@@ -163,7 +192,13 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
             if (src[i] === ']') {
               depth--
               if (!depth) {
-                const tail = attributeTail(src.slice(i + 1))
+                let tail: ReturnType<typeof attributeTail>
+                try { tail = attributeTail(src.slice(i + 1)) }
+                catch (cause) {
+                  if (!options.recoverUnsupportedBlocks) throw cause
+                  const lineEnd = src.indexOf('\n')
+                  return { type: 'cwInvalid', raw: lineEnd < 0 ? src : src.slice(0, lineEnd), message: cause instanceof Error ? cause.message : String(cause) }
+                }
                 if (!tail.length) return
                 return { type: 'cwStyle', raw: src.slice(0, i + 1 + tail.length), text: src.slice(1, i), attrs: tail.attrs }
               }
@@ -211,6 +246,7 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
           const description = mathDescription(latex)
           return [{ type: 'math', formulaId: formulaId === undefined ? options.createId('formula') : formulaId as string, latex, accessibleText: accessibleText === undefined ? description : accessibleText as string, ...(Object.keys(resolvedStyle).length ? { style: resolvedStyle } : {}), ...(link ? { link } : {}) }]
         }
+        case 'cwInvalid': return error(t.message as string, token.raw)
         default: return error(`不支持或位置不正确的行内内容：${token.type}`, token.raw)
       }
     })
@@ -250,6 +286,8 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
       cursor += token.raw.length
       const t = token as Tokens.Generic
       if (token.type === 'space' || token.type === 'def') continue
+      const blockStart = pendingStart ?? location
+      try {
       if (token.type === 'cwMeta') {
         if (pending) error('一个块只能有一个元数据标记', token.raw)
         pending = t.attrs as Record<string, unknown>
@@ -321,6 +359,7 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
           } else value = { ...common, type: 'code', code: t.text, ...(t.lang ? { language: t.lang } : {}) }
           break
         case 'hr': value = { ...common, type: 'divider' }; break
+        case 'cwInvalid': error(t.message as string, token.raw)
         default: error(`未知源文块 ${token.type}，原文已保留`, token.raw)
       }
       const block = documentBlockSchema.parse(value)
@@ -328,8 +367,34 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
       sourceMap.blocks.push({ ...mapMarkdownBlock(token, block, location, lexInline), from: pendingStart ?? location })
       pendingStart = undefined
       location += token.raw.length
+      } catch (cause) {
+        if (!options.recoverUnsupportedBlocks) throw cause
+        // A local unsupported fragment must not reparse the surrounding formal object fences as HTML.
+        // Keep the fragment as source; known formal objects keep their original implementation.
+        let prior: DocumentBlock | undefined
+        if (token.type === 'code' && t.lang === 'cw-object-v1') {
+          try {
+            const id = (JSON.parse(t.text as string) as { block?: { id?: string } }).block?.id
+            prior = options.previous?.document.content.blocks.find(block => block.id === id)
+          } catch { /* The source fragment below remains available for repair. */ }
+        }
+        const block: DocumentBlock = prior ?? { id: options.createId('block'), type: 'code', language: 'markdown', code: source.slice(blockStart, cursor).replace(/\n+$/, '') }
+        if (prior && options.previous) mergeResources(resourcesForBlock(prior, options.previous.document.resources))
+        blocks.push(block)
+        sourceMap.blocks.push({ blockId: block.id, from: blockStart, to: cursor, keys: [], slots: [] })
+        const before = source.slice(0, location)
+        diagnostics.push({ message: cause instanceof Error ? cause.message : String(cause), offset: location,
+          endOffset: cursor, line: before.split('\n').length, column: location - before.lastIndexOf('\n') })
+        pending = undefined; pendingStart = undefined
+      }
     }
-    if (pending) error('块标记后缺少内容', '<!--cw:block')
+    if (pending) {
+      if (!options.recoverUnsupportedBlocks) error('块标记后缺少内容', '<!--cw:block')
+      const start = pendingStart ?? location, before = source.slice(0, start)
+      blocks.push({ id: options.createId('block'), type: 'code', language: 'markdown', code: source.slice(start) })
+      diagnostics.push({ message: '块标记后缺少内容，源文已保留', offset: start, endOffset: source.length,
+        line: before.split('\n').length, column: start - before.lastIndexOf('\n') })
+    }
     const content = documentContentSchema.parse({ blocks })
     validateDocumentResources(blocks, resources, options.target)
     // Source editors use the original UTF-16 indices, including CRLF pairs.
@@ -340,8 +405,9 @@ export function parseDocumentMarkdown(source: string, options: MarkdownOptions):
       block.from = offsets[block.from]!; block.to = offsets[block.to]!
       for (const slot of block.slots) { if (slot.from !== undefined) slot.from = offsets[slot.from]!; if (slot.to !== undefined) slot.to = offsets[slot.to]!; for (const unit of slot.units) { unit.from = offsets[unit.from]!; unit.to = offsets[unit.to]! } }
     }
-    const result = { status: 'valid' as const, source: originalSource, document: { content, resources }, sourceMap, diagnostics: [] as [] }
-    if (options.previous && options.target === 'file') retainMarkdownIdentities(result, options.previous)
+    for (const issue of diagnostics) { issue.offset = offsets[issue.offset]!; issue.endOffset = offsets[issue.endOffset]! }
+    const result = { status: 'valid' as const, source: originalSource, document: { content, resources }, sourceMap, diagnostics }
+    if (options.previous) retainMarkdownIdentities(result, options.previous)
     return result
   } catch (e) {
     const found = e instanceof SourceError ? source.indexOf(e.fragment, Math.min(location, source.length)) : -1
