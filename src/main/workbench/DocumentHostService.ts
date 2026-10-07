@@ -24,7 +24,7 @@ import { createBlankCourseProjectV10 } from '../../core/course/createCourseProje
 import { InMemoryComponentCompilation } from '../../core/components/compilation/InMemoryComponentCompilation'
 import { createEsbuildComponentCompiler } from './contentApply/compilation/esbuildComponentCompiler'
 import { ContentApplyService } from './contentApply/applyService'
-import { readComponentProjectFileInput, prepareComponentProjectFileSource } from './projectFiles/componentPlatformFileInput'
+import { readComponentProjectFileInput, readCurrentHtmlDocumentSource, prepareComponentProjectFileSource } from './projectFiles/componentPlatformFileInput'
 import { AgentFileService } from './execution/AgentFileService'
 import { HostArtifactDeliveryService } from './execution/HostArtifactDeliveryService'
 import { verifyContentResourceDiagnostic } from './contentApply/resources/verifyContentResourceDiagnostic'
@@ -82,13 +82,7 @@ export class DocumentHostService {
         verifyDiagnostic: (snapshot, diagnostic) => verifyContentResourceDiagnostic({ project: snapshot.model.project,
           resources: snapshot.model.resources, diagnostic }),
         source: (from, fileAccess, sourceHtml?: string) => readComponentProjectFileInput({ from, fileAccess, sourceHtml,
-          currentHtml: async (filename: string) => {
-            const opened = this.registry.list().find(snapshot => snapshot.binding.kind === 'file'
-              && canonicalKey(snapshot.binding.path) === canonicalKey(filename))
-            if (!opened) return undefined
-            const current = await this.registry.get(opened.documentId).drain()
-            return current.model.kind === 'text' ? current.model.source : undefined
-          },
+          currentHtml: (filename: string) => readCurrentHtmlDocumentSource(this.registry, filename),
         }),
         prepareSource: prepareComponentProjectFileSource,
         apply: input => new ContentApplyService({
