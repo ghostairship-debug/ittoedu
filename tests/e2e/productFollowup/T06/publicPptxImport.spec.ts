@@ -33,7 +33,7 @@ test('T06 public default PPTX import uses the actual converter and keeps text an
       const selection = { model: 'local-pptx-import', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat',
         baseURL: 'https://fixture.invalid/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'unused' }, billing: { kind: 'unknown' },
         capabilities: { tools: 'supported', stream: 'supported', vision: 'unsupported', reasoning: 'unsupported' } } }
-      let turn = 0, target = '', textPath = '', originalData: any
+      let turn = 0, target = '', textPath = '', originalData: any, imported: any
       const last = (request: any) => JSON.parse([...request.messages].reverse().find(message => message.role === 'tool').content).data
       const finish = (request: any, name?: string, args?: unknown) => {
         const calls = name ? [{ id: `pptx-${turn}`, name, argumentsText: JSON.stringify(args) }] : []
@@ -49,7 +49,7 @@ test('T06 public default PPTX import uses the actual converter and keeps text an
         } else if (turn === 2) {
           if (last(request).status !== 'saved') throw new Error(`Import receipt did not save: ${JSON.stringify(last(request))}`)
           yield finish(request, 'file.open', { path: 'editable.h5lesson' })
-        } else if (turn === 3) { target = last(request).target; yield finish(request, 'project.list', { project: target }) }
+        } else if (turn === 3) { target = last(request).target; imported = await host.internalAPI.read(last(request).documentId); yield finish(request, 'project.list', { project: target }) }
         else if (turn === 4) {
           const files = last(request).files as Array<{ path: string }>
           textPath = files.find(file => file.path.endsWith('.data.json') && /Teacher editable text/.test(file.path))?.path ?? files.find(file => file.path.endsWith('.data.json'))?.path ?? ''
@@ -69,7 +69,7 @@ test('T06 public default PPTX import uses the actual converter and keeps text an
       const finished = await engine.wait(started.runId)
       const snapshot = host.registry.list().find(value => value.binding.kind === 'file' && value.binding.path === path.join(input.workspace, 'editable.h5lesson'))
       if (!snapshot) return { status: finished.status, failure: finished.failure, tools: finished.tools, snapshot: null }
-      const imageIds = Object.values(snapshot.model.project.instances).filter((instance: any) => snapshot.model.project.definitions[instance.definitionId]?.implementation?.key === 'builtin.image')
+      const imageIds = Object.values(snapshot.model.project.instances).filter((instance: any) => snapshot.model.project.definitions[instance.definitionId]?.implementation?.key === 'guoling.image')
         .map((instance: any) => instance.id)
       const dispatch = async (type: 'undo' | 'redo') => {
         const current = await host.internalAPI.read(snapshot.documentId)
@@ -80,7 +80,7 @@ test('T06 public default PPTX import uses the actual converter and keeps text an
       const redo = await dispatch('redo'), redone = await host.internalAPI.read(snapshot.documentId)
       await host.saveToPath(snapshot.documentId)
       const cold = await new DocumentHostService(path.join(input.directory, 'cold')).open(path.join(input.workspace, 'editable.h5lesson'))
-      return { status: finished.status, failure: finished.failure, tools: finished.tools, snapshot, imageIds, undo, undone, redo, redone, cold, originalData, textPath }
+      return { status: finished.status, failure: finished.failure, tools: finished.tools, imported, snapshot, imageIds, undo, undone, redo, redone, cold, originalData, textPath }
     }, { root, directory, workspace })
     expect(facts.status, JSON.stringify(facts)).toBe('completed')
     expect(facts.tools.map((tool: any) => tool.call.name)).toEqual(['course.importPptx', 'file.open', 'project.list', 'project.read', 'object.update', 'file.save'])
@@ -88,6 +88,7 @@ test('T06 public default PPTX import uses the actual converter and keeps text an
     expect(JSON.stringify(facts.snapshot.model.project.instances)).toContain('Revised imported text')
     expect(facts.imageIds.length).toBeGreaterThan(0)
     expect(Object.keys(facts.snapshot.model.resources.assets).length).toBeGreaterThan(0)
+    for (const id of facts.imageIds) expect(facts.snapshot.model.project.instances[id]).toEqual(facts.imported.model.project.instances[id])
     expect(facts.undo).toMatchObject({ status: 'applied' }); expect(JSON.stringify(facts.undone.model.project.instances)).toContain('Teacher editable text')
     expect(facts.redo).toMatchObject({ status: 'applied' }); expect(facts.cold.model).toEqual(facts.redone.model)
     expect(JSON.stringify(inspectOfficeContent(new Uint8Array(readFileSync(source)), 'pptx'))).toContain('Teacher editable text')
