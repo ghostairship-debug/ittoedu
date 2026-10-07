@@ -25,6 +25,7 @@ export interface HostToolServices {
       approvedPaths?: readonly string[]; assertActive(): void }): Promise<ToolResult>
   }
   materials?: {
+    admit(runId: string, sourceIds: readonly string[]): Promise<void>
     read(runId: string, name: MaterialToolName, input: unknown): Promise<ToolResult>
     readResource(input: { runId: string; resourceId: string }): Promise<{ mimeType: string; bytes: Uint8Array }>
   }
@@ -224,6 +225,11 @@ export class HostToolCoordinator {
     this.serviceRun(runId)
     if (!this.services.materials) return Promise.resolve(this.serviceUnavailable('材料读取服务尚未接入'))
     return this.services.materials.read(runId, name, input)
+  }
+  async bindMaterialSources(runId: string, sourceIds: readonly string[]): Promise<void> {
+    this.serviceRun(runId)
+    if (!this.services.materials) throw new Error('材料读取服务尚未接入')
+    await this.services.materials.admit(runId, sourceIds)
   }
   async saveArtifact(runId: string, operationId: string, _requestDigest: string, input: HostArtifactSaveInput): Promise<ToolResult> {
     const run = this.writableRun(runId), service = this.services.artifacts

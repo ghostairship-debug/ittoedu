@@ -778,6 +778,11 @@ export class DocumentToolGateway implements ToolGateway {
     if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
     this.hostTools.authorizeOperationPaths(runId, this.operationIdentity(runId, callId), paths)
   }
+  /** Main-only continuation/web receipts; never exposed as model arguments or a tool. */
+  async bindMaterialSources(runId: string, sourceIds: readonly string[]): Promise<void> {
+    if (this.run(runId).stopped) throw new ToolError('run-stopped', '任务已停止')
+    await this.hostTools.bindMaterialSources(runId, sourceIds)
+  }
 
   private identifyCall(runId: string, callId: string, input: ModelToolCall) {
     const operationId = this.operationIdentity(runId, callId)

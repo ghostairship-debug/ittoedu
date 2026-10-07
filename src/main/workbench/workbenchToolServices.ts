@@ -265,6 +265,13 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       return inputs.map(({ name, bytes }) => ({ name, bytes }))
     } },
     materials: {
+      admit: async (runId, sourceIds) => {
+        const ids = materialIds.get(runId)
+        if (!ids) throw new Error('材料读取任务已停止')
+        const attachments = (await attachmentsDesktopService()).attachments
+        for (const id of sourceIds) { await attachments.readSnapshot(id); ids.add(id) }
+        deliverySignals.get(runId)?.signal.throwIfAborted()
+      },
       read: async (runId, name, raw) => {
         const ids = materialIds.get(runId)
         if (!ids) throw new Error('材料读取任务已停止')
