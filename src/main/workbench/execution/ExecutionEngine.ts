@@ -319,11 +319,16 @@ export class ExecutionEngine {
   private continuationImages(lineage: readonly ExecutionRunRecord[]): ContinuationImage[] {
     const images: ContinuationImage[] = [], seen = new Set<string>()
     for (const ancestor of lineage) for (const tool of ancestor.tools) {
-      if (tool.call.name !== 'image.generate' && tool.call.name !== 'image.edit') continue
+      if (!['image.generate', 'image.edit', 'image.status'].includes(tool.call.name)) continue
       const data = tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
         ? tool.result.data as Record<string, unknown> : null
       if (!data || data.status !== 'ready' || data.stopped === true || typeof data.job !== 'string'
         || !Array.isArray(data.resources)) continue
+      if (tool.call.name === 'image.status' && !ancestor.tools.some(producer => {
+        if (!['image.generate', 'image.edit'].includes(producer.call.name) || producer.result?.kind !== 'read') return false
+        const started = producer.result.data as { job?: unknown } | null
+        return started?.job === data.job
+      })) continue
       const documentId = typeof data.documentId === 'string' ? data.documentId
         : ancestor.input.documents.length === 1 ? ancestor.input.documents[0]!.documentId : undefined
       if (!documentId) continue
