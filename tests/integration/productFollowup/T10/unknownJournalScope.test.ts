@@ -14,12 +14,11 @@ afterEach(async () => {
   }
 })
 
-it('unknown-owner unreadable journal permits unrelated non-readOnly availability and a real save while retaining the original diagnostic', async () => {
+it.each(['short-unreadable', 'unreadable complete recovery record'.repeat(4)])('unknown-owner unreadable journal %j permits unrelated non-readOnly availability and a real save while retaining the original diagnostic', async damagedSource => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'T10-journal-')); roots.push(root)
   const directory = path.join(root, 'recovery'); await fs.mkdir(directory)
   const damaged = path.join(directory, `${'0'.repeat(64)}.journal`)
-  // Complete invalid header, no document/path record and no binding index.
-  const damagedSource = 'unreadable complete recovery record'.repeat(4)
+  // No document/path record and no binding index; neither short opaque input nor a bad complete header may be deleted.
   await fs.writeFile(damaged, damagedSource)
   const journal = createDocumentJournal({ directory })
   expect(await journal.listBindings()).toEqual([])
