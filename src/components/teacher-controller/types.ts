@@ -4,6 +4,8 @@ import type { TeacherControllerPort } from '../../shared/contracts/component-pla
 export type { TeacherControllerPort, TeacherControllerSnapshot } from '../../shared/contracts/component-platform/teacherController'
 
 export type TeacherControllerData = TeacherControllerConfig & {
+  /** Stable author space for the controller's saved frame, independent of page order. */
+  hudReferenceSize?: { width: number; height: number }
   enabled?: boolean
   backgroundAssetId?: string
   sceneStyles?: Record<string, Partial<TeacherControllerData>>

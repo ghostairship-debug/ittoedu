@@ -27,11 +27,17 @@ afterEach(async () => {
   }
 })
 
-async function fixture(scope: 'scene' | 'global' = 'scene', teacherSource?: boolean) {
+async function fixture(scope: 'scene' | 'global' = 'scene', teacherSource?: boolean, withoutTeacher = false) {
   let serial = 0
   const project = createBlankCourseProjectV10('自动化成熟入口', () => `fixture-${++serial}`)
   const surface = project.surfaces[0], teacherId = project.global.overlay[0]
   project.instances[teacherId].visible = false
+  if (withoutTeacher) {
+    delete project.instances[teacherId]; project.global.overlay = []
+    surface.designSize = { width: 960, height: 540 }
+    // Creation must use the actual current page rather than the first entry.
+    project.surfaces.unshift({ id: 'unrelated-first', kind: 'slide', title: '非当前页', designSize: { width: 1600, height: 900 }, childIds: [] })
+  }
   if (teacherSource !== undefined) {
     const alias: ComponentDefinition = { id: 'library-teacher', role: 'mixed', professionalBuiltinKey: 'guoling.navigation',
       implementation: teacherSource ? { kind: 'source', language: 'javascript', source: 'export default {}' } : { kind: 'builtin', key: 'guoling.navigation' } }
@@ -70,9 +76,28 @@ async function fixture(scope: 'scene' | 'global' = 'scene', teacherSource?: bool
   const selectInstances = vi.spyOn(kernel, 'selectInstances'), editCaptured = vi.spyOn(kernel, 'editCaptured'), capture = vi.spyOn(kernel, 'capture')
   const setActiveTab = vi.fn(), setError = vi.fn()
   store.state = { courseView: bridge.read(), courseKernel: kernel, editingScope: scope, setActiveTab, setError, setCanvasMode: vi.fn() }
-  return { project, teacherId, surfaceId: surface.id, documentId, kernel, selectInstances, editCaptured, capture,
+  return { project, teacherId, surfaceId: surface.id, documentId, kernel, selectInstances, editCaptured, capture, bridge, host, directory,
     setActiveTab, setError, read: () => bridge.read().project!, readEditing: () => bridge.read().editingProject! }
 }
+
+it('creates and cold reopens the teacher HUD reference in the same instance transaction as its authored frame', async () => {
+  const current = await fixture('scene', undefined, true)
+  render(<AutomationTab />)
+  fireEvent.click(screen.getByRole('button', { name: '添加教师控制台' }))
+  await expect(current.editCaptured.mock.results[0].value).resolves.toMatchObject({ status: 'applied' })
+  expect(current.capture).toHaveBeenCalledOnce()
+  const controller = Object.values(current.read().instances).find(instance => instance.definitionId === 'guoling.navigation')!
+  expect(controller.data).toMatchObject({ hudReferenceSize: { width: 960, height: 540 }, defaultCollapsed: true, enabled: true })
+  expect(controller.frame).toEqual({ width: 880, height: 64, transform: [1, 0, 0, 1, 40, 458] })
+  await current.bridge.drain([current.documentId])
+  const filename = path.join(current.directory, 'hud-reference.h5lesson')
+  await current.host.internalAPI.save(current.documentId, filename)
+  const reopened = await new DocumentHostService(current.directory).internalAPI.open(filename)
+  if (reopened.model.kind !== 'course-v10') throw new Error('Expected V10 reader')
+  expect(reopened.model.project.instances[controller.id]).toEqual(controller)
+  expect(reopened.model.project.surfaces[0].id).toBe('unrelated-first')
+  expect(current.setError).not.toHaveBeenCalled()
+})
 
 it('selects an existing library rebound or source teacher controller instead of adding another one', async () => {
   for (const source of [false, true]) {

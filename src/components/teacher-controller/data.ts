@@ -25,8 +25,8 @@ export const TEACHER_CONTROLLER_DEFINITION: ComponentDefinition = {
     } },
   } },
 }
-export function createTeacherControllerData(): TeacherControllerData {
-  return { ...defaultTeacherControllerConfig(), enabled: true }
+export function createTeacherControllerData(canvas: { width: number; height: number } = { width: 1280, height: 720 }): TeacherControllerData {
+  return { ...defaultTeacherControllerConfig(), enabled: true, hudReferenceSize: { ...canvas } }
 }
 /** Original bottom-centred expanded layout: 880×64 at (200,638) on 1280×720. */
 export function createTeacherControllerFrame(canvas: { width: number; height: number } = { width: 1280, height: 720 }): ComponentFrame {

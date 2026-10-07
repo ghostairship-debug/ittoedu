@@ -51,11 +51,12 @@ export function AutomationTab() {
     const captured = kernel.captureTarget(documentId), existing = Object.values(captured.project.instances).find(instance => componentDefinitionBuiltinKey(captured.project.definitions[instance.definitionId]) === 'guoling.navigation')
     if (existing) { kernel.selectInstances([existing.id], surfaceId, documentId); setActiveTab('properties'); return }
     const id = crypto.randomUUID()
+    const designSize = captured.project.surfaces.find(surface => surface.id === surfaceId)?.designSize
     const edits = [
       ...(captured.project.definitions[TEACHER_CONTROLLER_DEFINITION.id] ? [] : [{ type: 'definition.set' as const, definition: TEACHER_CONTROLLER_DEFINITION }]),
       { type: 'instance.insert' as const, container: { kind: 'global' as const, plane: 'overlay' as const }, index: captured.project.global.overlay.length,
-        rootIds: [id], instances: [{ id, definitionId: TEACHER_CONTROLLER_DEFINITION.id, name: '教师控制台', data: JSON.parse(JSON.stringify(createTeacherControllerData())) as JsonValue,
-          frame: createTeacherControllerFrame(captured.project.surfaces.find(surface => surface.id === surfaceId)?.designSize) }] },
+        rootIds: [id], instances: [{ id, definitionId: TEACHER_CONTROLLER_DEFINITION.id, name: '教师控制台', data: JSON.parse(JSON.stringify(createTeacherControllerData(designSize))) as JsonValue,
+          frame: createTeacherControllerFrame(designSize) }] },
     ]
     void kernel.editCaptured(kernel.capture(edits, captured)).then(() => {
       if (kernel.readView().activeDocumentId === documentId && kernel.readView().surfaceId === surfaceId) {
