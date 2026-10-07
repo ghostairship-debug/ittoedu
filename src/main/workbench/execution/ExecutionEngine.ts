@@ -624,7 +624,8 @@ export class ExecutionEngine {
       continuedDocumentIds = continuationDocumentIds(lineage, this.options.registry.list())
       if (continuation.sameTask && previous.input.instruction === frozen.instruction) {
         const settled = await this.settlementRecord(previous)
-        taskAlreadyCompleted = settled.tools.every(tool => tool.state === 'returned' && !this.possiblyInvokedTool(tool))
+        taskAlreadyCompleted = settled.tools.every(tool => tool.state === 'returned'
+          && (!this.possiblyInvokedTool(tool) || serviceToolOutcome(tool.call.name, tool.result)?.status === 'pending'))
           && settled.tools.some(tool => tool.call.name === TASK_FINISH && tool.result?.kind === 'read'
             && (tool.result.data as { status?: unknown })?.status === 'completed')
         // Historical body-only runs had one host write and no open tool loop.
