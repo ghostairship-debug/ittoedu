@@ -633,6 +633,8 @@ export class ExecutionEngine {
         if (snapshot.binding.kind === 'file') boundPaths[document.documentId] = snapshot.binding.path
       }
       await this.options.gateway.beginRun({ runId, actor: 'agent', documents: frozen.documents,
+        ...(frozen.webAuthorization ? { webAuthorization: frozen.webAuthorization } : {}),
+        ...(frozen.inputContext?.attachments.length ? { materialIds: frozen.inputContext.attachments.map(item => item.attachmentId) } : {}),
         fileAccess: { permission: frozen.permission ?? DEFAULT_PERMISSION_MODE, boundPaths,
           ...(frozen.workspaceRoot ? { workspaceRoot: frozen.workspaceRoot } : {}),
           ...(frozen.conversationHomeRoot ? { conversationHomeRoot: frozen.conversationHomeRoot } : {}),
