@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>T08 实际绘制与 Flow 代表样本</title>
+  <style>
+    body { margin: 0; padding: 54px 24px 24px; background: #d9f5fa; font: 18px/1.5 sans-serif; color: #102b3a; }
+    h1 { margin: 0 0 20px; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 920px; }
+    section { background: white; border: 2px solid #2d647e; padding: 16px; min-height: 145px; }
+    .number::before { content: "① "; color: #9b2020; font-weight: bold; }
+    .positioned { position: relative; z-index: auto; background: #fcbd76; width: 170px; height: 70px; }
+    .following { margin-top: -45px; background: #3b8fc9; color: white; width: 205px; height: 70px; }
+    .atomic { opacity: .5; position: relative; width: 230px; height: 90px; background: #f00000; }
+    .atomic span { display: block; position: absolute; left: 50px; top: 20px; width: 150px; height: 55px; background: #0000f0; color: white; }
+    .filtered { filter: blur(1px); background: #ffca64; padding: 12px; }
+    .plain-parent { position: relative; }
+    .plain-parent span { position: absolute; z-index: 10; width: 180px; background: #1a7d44; color: white; }
+    .peer { position: relative; z-index: 5; margin-top: 12px; background: #b62424; color: white; width: 210px; }
+    .clipped { clip-path: circle(45%); background: #a430b5; color: white; width: 150px; height: 80px; padding: 10px; }
+    #fixed { position: fixed; top: 0; left: 0; right: 0; z-index: 50; background: #123d57; color: white; height: 36px; }
+    .long { margin-top: 24px; height: 950px; background: linear-gradient(#e7faf4, #7bc5bb); }
+    details { border: 1px solid #3b8fc9; padding: 10px; }
+  </style>
+</head>
+<body>
+  <div id="fixed">滚动正文时此标题保持在视口顶部</div>
+  <h1>源网页与 V10 同样本对照</h1>
+  <div class="grid">
+    <section><h2 class="number">伪元素题号</h2><p>题号与正文都可见。</p></section>
+    <section><h2>relative z:auto 绘制</h2><div class="positioned">橙色定位块</div><div class="following">蓝色后文背景</div></section>
+    <section><h2>整组透明合成</h2><div class="atomic">红色父背景<span>蓝色子块</span></div></section>
+    <section><h2>组滤镜</h2><div class="filtered">滤镜同时作用于文字与背景</div></section>
+    <section><h2>非 context 父子层叠</h2><div class="plain-parent"><span>绿块 z10</span></div><div class="peer">红块 z5</div></section>
+    <section><h2>裁切包装</h2><div class="clipped">紫色裁切块</div></section>
+  </div>
+  <details id="answer"><summary>点击查看核心互动</summary><p>展开后答案可见，保存冷开仍可展开和关闭。</p></details>
+  <div class="long">Flow 自然长正文与整页浅青背景</div>
+  <p id="end">正文末尾</p>
+</body>
+</html>
