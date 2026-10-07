@@ -1,11 +1,16 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
+import { createElement } from 'react'
+import { render } from '@testing-library/react'
 import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform'
 import { resolveComponentOuterPresentation } from '../../src/shared/componentPresentation'
 import { resolveFlowPaperBackground } from '../../src/shared/flowBodyPresentation'
+import { InstanceView } from '../../src/renderer/documents/CourseV10DocumentView'
+import { createComponentModelProjection } from '../../src/player/componentPlatform/modelProjection'
+import type { ComponentPlatformRuntime } from '../../src/player/components/ComponentPlatformRuntime'
 
 function fixture(): CourseProjectV10 {
   return { schemaVersion: 10, id: 'presentation', revision: 0, title: 'Flow presentation',
-    definitions: Object.fromEntries(['image', 'document-block', 'web'].map(key => [`guoling.${key}`, { id: `guoling.${key}`, name: key, role: 'visual', implementation: { kind: 'builtin', key: `guoling.${key}` } }])),
+    definitions: Object.fromEntries(['image', 'document-block', 'web'].map(key => [`guoling.${key}`, { id: `guoling.${key}`, role: 'content', implementation: { kind: 'builtin', key: `guoling.${key}` } }])),
     instances: {
       image: { id: 'image', definitionId: 'guoling.image', data: {}, frame: { width: 600, height: 300, transform: [1, 0, 0, 1, 0, 0] }, flowLayout: { width: 'wide', wrap: 'left' } },
       section: { id: 'section', definitionId: 'guoling.document-block', data: { type: 'section', collapsedByDefault: true }, childIds: ['image'] },
@@ -51,5 +56,29 @@ describe('shared component outer presentation', () => {
     expect(resolveFlowPaperBackground(project, surface)).toEqual({ color: '#123456', assetId: 'background', fit: 'contain' })
     surface.background = { mode: 'own', color: '#abcdef', fit: 'cover' }
     expect(resolveFlowPaperBackground(project, surface).color).toBe('#abcdef')
+  })
+
+  it('connects React and Player to the same frame decisions while retaining bound DOM and runtime section state', () => {
+    const project = fixture()
+    const react = render(createElement(InstanceView, { instance: project.instances.group, project, surfaceId: 'flow', selectedInstanceId: null, onSelect() {}, placement: 'flow' }))
+    const root = document.createElement('div'); document.body.append(root)
+    Object.defineProperties(root, { clientWidth: { value: 1200 }, clientHeight: { value: 800 } })
+    const runtime = { bind: vi.fn(), bindTarget: vi.fn(), assetUrl: vi.fn() } as unknown as ComponentPlatformRuntime
+    const projection = createComponentModelProjection({ root, runtime, signal: new AbortController().signal })
+    const model = { kind: 'course-v10' as const, project, resources: { assets: {}, components: {} } }
+    projection.sync(model)
+    const component = root.querySelector<HTMLElement>('[data-component-object="group"]')!
+    const reactContent = react.container.querySelector<HTMLElement>('[data-component-render="group"]')!
+    const playerContent = component.querySelector<HTMLElement>('[data-component-runtime-root="group"]')!
+    expect(playerContent.style.width).toBe(reactContent.style.width)
+    expect(playerContent.style.transform).toBe(reactContent.style.transform)
+    const section = root.querySelector<HTMLDetailsElement>('[data-component-object="section"] details')!
+    expect(section.open).toBe(false)
+    section.open = true
+    projection.sync(model)
+    expect(section.open).toBe(true)
+    expect(root.querySelector('[data-component-runtime-root="group"]')).toBe(playerContent)
+    expect(runtime.bind).toHaveBeenCalledTimes(4)
+    projection.dispose(); react.unmount(); root.remove()
   })
 })

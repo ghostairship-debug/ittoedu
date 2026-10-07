@@ -1,32 +1,33 @@
 import type { ComponentInstance, ComponentSurface, CourseProjectV10 } from '../../shared/contracts/component-platform'
 import { resolveComponentBackground, isComponentVisibleAtSurface, componentDefinitionBuiltinKey } from '../../shared/contracts/component-platform'
-import { flowObjectExtent } from '../../core/components/geometry/flowObjectExtent'
-import { componentLayoutInput } from '../../components/web/measuredFragmentBox'
+import { resolveComponentOuterPresentation } from '../../shared/componentPresentation'
 import { transformPoint } from '../../core/components/geometry'
-import { isGlobalTeacherController, projectTeacherControllerInstances, type TeacherControllerDisplayPort } from '../../shared/teacherControllerViewportGeometry'
+import { createTeacherControllerHudGeometry, teacherControllerReferenceSize, isGlobalTeacherController, projectTeacherControllerInstances, type TeacherControllerDisplayPort } from '../../shared/teacherControllerViewportGeometry'
 import { flowParagraphAnchoredFrame, type FlowParagraphBlockRect } from '../../shared/flowParagraphAnchors'
-import { FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, flowPaperMaxWidth, FLOW_BODY_FONT_FAMILY } from '../../shared/flowBodyPresentation'
-import { resolveFlowMediaLayoutProjection } from '../../shared/flowMediaLayout'
+import { FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, flowPaperMaxWidth, FLOW_BODY_FONT_FAMILY, resolveFlowPaperBackground } from '../../shared/flowBodyPresentation'
+import type { FlowMediaLayoutWidths } from '../../shared/flowMediaLayout'
 import { renderDocumentText } from '../../shared/document/render'
 import type { FlowTextContent } from '../../shared/document/content'
 import { componentSurfaceGeometryTargets } from './spatialTargets'
 import { spatialComponentCenter, spatialPathPoints, spatialSemanticVisible } from '../surfaces/spatial/componentPlatform/graph'
 import {
-  componentFrameStyle, componentSpatialCameraMatrix, createComponentSpatialAdapter, createComponentSpatialCameraPort,
+  componentFrameStyle, componentSpatialCameraMatrix, createComponentSpatialAdapter, createComponentSpatialCameraPort, panComponentSpatialCamera, zoomComponentSpatialCamera,
   type ComponentSpatialAdapter, type ComponentSpatialCameraPort,
 } from '../surfaces/spatial/componentSpatialAdapter'
 import type { ComponentPlatformRuntime } from '../components/ComponentPlatformRuntime'
 import { applyComponentPaintStyle } from '../components/componentPlacementStyle'
 import { PlaybackViewSession, createPlaybackContent } from '../playbackViewSession'
+import { createStageGeometry } from '../../shared/stageViewport'
 import type { ComponentPlayerProjection, ComponentPlayerModel, ComponentPlayerObservation } from './ModelPlayer'
 
-interface NodeView { outer: HTMLElement; stage: HTMLElement; content: HTMLElement; children: HTMLElement; caption?: HTMLElement; sectionDefaultCollapsed?: boolean }
+interface NodeView { outer: HTMLElement; stage: HTMLElement; content: HTMLElement; children: HTMLElement; caption?: HTMLElement; sectionDefaultCollapsed?: boolean; flow?: boolean; flowLayout?: FlowMediaLayoutWidths }
 interface SurfaceView {
   root: HTMLElement
   kind: ComponentSurface['kind']
   spatial?: ComponentSpatialAdapter
   camera?: ComponentSpatialCameraPort
   releaseCamera?: () => void
+  releaseInput?: () => void
   playback?: PlaybackViewSession
   observation?: ComponentPlayerObservation
   content?: HTMLElement
@@ -58,7 +59,10 @@ export function createComponentModelProjection(context: {
   const underlay = plane('underlay', '0')
   const surfacePlane = plane('surface', '1')
   const overlay = plane('overlay', '2')
-  root.append(shell)
+  const hud = document.createElement('div')
+  hud.dataset.componentPlane = 'hud'
+  Object.assign(hud.style, { position: 'absolute', inset: '0px', overflow: 'hidden', pointerEvents: 'none', zIndex: '3' })
+  root.append(shell, hud)
   const nodes = new Map<string, NodeView>()
   const surfaces = new Map<string, SurfaceView>()
   let activeSurface = context.initialSurfaceId
@@ -66,11 +70,12 @@ export function createComponentModelProjection(context: {
   let disposed = false
   let currentProject: CourseProjectV10 | undefined
   let currentModel: ComponentPlayerModel | undefined
-  let controllerParentToViewport: [number, number, number, number, number, number] = [1, 0, 0, 1, 0, 0]
   const paintControllerPlacement = () => {
     const project = currentProject
     if (!project || disposed) return
-    const display = projectTeacherControllerInstances(project, { width: root.clientWidth, height: root.clientHeight }, controllerParentToViewport, context.teacherController)
+    const geometry = createTeacherControllerHudGeometry({ referenceSize: teacherControllerReferenceSize(project),
+      viewportRect: { x: 0, y: 0, width: root.clientWidth, height: root.clientHeight } })
+    const display = projectTeacherControllerInstances(project, geometry, undefined, context.teacherController)
     for (const id of [...project.global.underlay, ...project.global.overlay]) {
       if (!isGlobalTeacherController(project, id)) continue
       const node = nodes.get(id), frame = display.instances[id]?.frame
@@ -78,18 +83,26 @@ export function createComponentModelProjection(context: {
     }
   }
 
-  function renderChildren(parent: HTMLElement, ids: readonly string[], project: CourseProjectV10, flow: boolean, used: Set<string>) {
+  function placeNode(node: NodeView, instance: ComponentInstance, project: CourseProjectV10, inlineSize: number) {
+    const presentation = resolveComponentOuterPresentation(project, instance, { placement: node.flow ? 'flow' : 'free', purpose: 'playback', inlineSize, flowLayout: node.flowLayout })
+    Object.assign(node.outer.style, presentation.outerStyle, { pointerEvents: 'auto' })
+    Object.assign(node.stage.style, presentation.stageStyle)
+    Object.assign(node.content.style, presentation.contentStyle)
+    Object.assign(node.children.style, presentation.childrenStyle)
+    return presentation
+  }
+
+  function renderChildren(parent: HTMLElement, ids: readonly string[], project: CourseProjectV10, flow: boolean, used: Set<string>, flowLayout?: FlowMediaLayoutWidths) {
     let cursor = parent.firstElementChild
     for (const id of ids) {
       const instance: ComponentInstance | undefined = project.instances[id]
       if (!instance || project.definitions[instance.definitionId]?.role === 'behavior') continue
       used.add(id)
-      const definitionImplementation = project.definitions[instance.definitionId]?.implementation
-      const data = instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data : {}
-      const collapsibleSection = definitionImplementation?.kind === 'builtin' && definitionImplementation.key === 'guoling.document-block' && data.type === 'section'
       let node = nodes.get(id)
+      const presentation = resolveComponentOuterPresentation(project, instance, { placement: flow ? 'flow' : 'free', purpose: 'playback',
+        inlineSize: node?.outer.clientWidth || parent.clientWidth || instance.frame?.width || 1, flowLayout })
       if (!node) {
-        const outer = document.createElement('div'), stage = document.createElement(collapsibleSection ? 'details' : 'div'), content = document.createElement(collapsibleSection ? 'summary' : 'div'), children = document.createElement('div')
+        const outer = document.createElement('div'), stage = document.createElement(presentation.section ? 'details' : 'div'), content = document.createElement(presentation.section ? 'summary' : 'div'), children = document.createElement('div')
         outer.dataset.componentObject = id
         content.dataset.componentRuntimeRoot = id
         children.style.pointerEvents = 'none'
@@ -97,47 +110,26 @@ export function createComponentModelProjection(context: {
         node = { outer, stage, content, children }; nodes.set(id, node)
         runtime.bind(id, content); runtime.bindTarget(id, outer)
       }
-      if (collapsibleSection && node.stage.tagName === 'DETAILS' && node.sectionDefaultCollapsed !== (data.collapsedByDefault === true)) {
-        node.sectionDefaultCollapsed = data.collapsedByDefault === true
-        ;(node.stage as HTMLDetailsElement).open = !node.sectionDefaultCollapsed
+      if (presentation.section && node.stage.tagName === 'DETAILS' && node.sectionDefaultCollapsed !== presentation.section.collapsedByDefault) {
+        node.sectionDefaultCollapsed = presentation.section.collapsedByDefault
+        ;(node.stage as HTMLDetailsElement).open = presentation.section.open
       }
       applyComponentPaintStyle(node.outer, instance, project.definitions[instance.definitionId])
-      const implementation = instance.implementationOverride ?? definitionImplementation
-      const section = definitionImplementation?.kind === 'builtin' && definitionImplementation.key === 'guoling.document-block'
+      node.flow = flow; node.flowLayout = flowLayout
       node.outer.dataset.componentPlacement = flow ? 'flow' : 'free'
-      if (flow) {
-        const naturalFlow = componentLayoutInput(instance, { kind: 'flow', inlineSize: node.outer.clientWidth || parent.clientWidth || instance.frame?.width || 1,
-          definition: project.definitions[instance.definitionId] }).mode === 'flow-content'
-        const localAssembly = !naturalFlow && !section && (implementation?.kind === 'source' || implementation?.kind === 'builtin' && ['guoling.web', 'guoling.html-program'].includes(implementation.key) || Boolean(instance.childIds?.length))
-        const extent = localAssembly ? flowObjectExtent(project, id) : null
-        Object.assign(node.outer.style, { position: 'relative', left: '', top: '', transform: '', transformOrigin: '', width: '100%', height: 'auto', pointerEvents: 'auto', margin: '0 0 12px', float: 'none' })
-        Object.assign(node.stage.style, { position: 'relative', inset: '', width: '100%', height: naturalFlow || section ? 'auto' : extent ? `${extent.height}px` : instance.frame ? `${instance.frame.height}px` : 'auto' })
-        Object.assign(node.content.style, { position: extent ? 'absolute' : 'relative', inset: '', left: extent ? `${-extent.x}px` : '', top: extent ? `${-extent.y}px` : '', transform: '', transformOrigin: '', width: extent ? `${instance.frame?.width ?? extent.width}px` : '100%', height: naturalFlow ? 'var(--component-flow-height, auto)' : instance.frame ? `${instance.frame.height}px` : 'auto' })
-        Object.assign(node.children.style, { position: section ? 'relative' : 'absolute', left: extent ? `${-extent.x}px` : '0px', top: extent ? `${-extent.y}px` : '0px', transform: '', transformOrigin: '' })
-        const owner = project.surfaces.find(surface => surface.kind === 'flow' && surface.childIds.includes(id))
-        const layout = owner?.flow?.layout ?? { readingWidth: 860, wideContentWidth: 1100 }
-        const media = definitionImplementation?.kind === 'builtin' && ['guoling.image', 'guoling.video', 'guoling.audio'].includes(definitionImplementation.key)
-        if (media || instance.flowLayout) {
-          const presentation = resolveFlowMediaLayoutProjection(instance.flowLayout?.width ?? 'content-width', layout), wrap = instance.flowLayout?.wrap
-          Object.assign(node.outer.style, { width: wrap && wrap !== 'none' ? presentation.wrappedOuterInlineSize : presentation.inlineSize, maxWidth: presentation.maxInlineSize,
-            float: wrap && wrap !== 'none' ? wrap : 'none', margin: wrap === 'left' ? '8px 20px 8px 0' : wrap === 'right' ? '8px 0 8px 20px' : '16px auto' })
-        } else node.outer.style.maxWidth = ''
-        if (instance.flowLayout?.caption) {
+      Object.assign(node.outer.style, presentation.outerStyle, { pointerEvents: 'auto' })
+      Object.assign(node.stage.style, presentation.stageStyle)
+      Object.assign(node.content.style, presentation.contentStyle)
+      Object.assign(node.children.style, presentation.childrenStyle)
+      if (flow && instance.flowLayout?.caption) {
           if (!node.caption) { node.caption = document.createElement('figcaption'); node.outer.append(node.caption) }
           node.caption.innerHTML = renderDocumentText(instance.flowLayout.caption as FlowTextContent)
-        } else { node.caption?.remove(); node.caption = undefined }
-      } else {
-        Object.assign(node.outer.style, componentFrameStyle(instance.frame), { pointerEvents: 'auto', maxWidth: '', margin: '', float: '' })
-        Object.assign(node.stage.style, { position: 'absolute', inset: '0px', width: '100%', height: '100%' })
-        Object.assign(node.content.style, { position: 'absolute', inset: '0px', width: '100%', height: '100%' })
-        Object.assign(node.children.style, { position: 'absolute', left: '0px', top: '0px' })
-        node.caption?.remove(); node.caption = undefined
-      }
+      } else { node.caption?.remove(); node.caption = undefined }
       // Do not reinsert unchanged live roots on resize or same-page updates.
       if (node.outer !== cursor) parent.insertBefore(node.outer, cursor)
       cursor = node.outer.nextElementSibling
       // Only document sections continue the reading order. Local compositions keep their frames.
-      renderChildren(node.children, instance.childIds ?? [], project, flow && section, used)
+      renderChildren(node.children, instance.childIds ?? [], project, presentation.childrenPlacement === 'flow', used, flowLayout)
     }
   }
   function revealSurface(id: string): boolean {
@@ -195,21 +187,59 @@ export function createComponentModelProjection(context: {
       svg.append(line)
     }
   }
+  function bindSpatialInput(element: HTMLElement, camera: ComponentSpatialCameraPort): () => void {
+    let space = false, drag: { id: number; point: { x: number; y: number } } | undefined
+    const editable = (target: EventTarget | null) => target instanceof Element && Boolean(target.closest('input,textarea,select,[contenteditable="true"]'))
+    const geometry = () => {
+      const rect = element.getBoundingClientRect()
+      return createStageGeometry({ width: element.clientWidth || rect.width, height: element.clientHeight || rect.height }, rect)
+    }
+    const point = (event: MouseEvent) => geometry().toAuthor({ x: event.clientX, y: event.clientY })
+    const keydown = (event: KeyboardEvent) => { if (event.code === 'Space' && !editable(event.target)) { space = true; event.preventDefault() } }
+    const keyup = (event: KeyboardEvent) => { if (event.code === 'Space') space = false }
+    const blur = () => { space = false; drag = undefined }
+    const down = (event: PointerEvent) => {
+      if (event.button !== 0 && event.button !== 1 || editable(event.target)) return
+      if (!space && event.button !== 1 && event.target instanceof Element && event.target.closest('[data-component-instance-id]')) return
+      event.preventDefault(); element.focus({ preventScroll: true })
+      drag = { id: event.pointerId, point: point(event) }; element.setPointerCapture?.(event.pointerId)
+    }
+    const move = (event: PointerEvent) => {
+      if (!drag || drag.id !== event.pointerId) return
+      const next = point(event)
+      camera.set(panComponentSpatialCamera(camera.read(), { x: next.x - drag.point.x, y: next.y - drag.point.y }))
+      drag.point = next; event.preventDefault()
+    }
+    const up = (event: PointerEvent) => { if (drag?.id === event.pointerId) { drag = undefined; if (element.hasPointerCapture?.(event.pointerId)) element.releasePointerCapture(event.pointerId) } }
+    const wheel = (event: WheelEvent) => {
+      if (editable(event.target) || !event.ctrlKey && !event.metaKey && event.target instanceof Element && event.target.closest('[data-component-instance-id]')) return
+      event.preventDefault()
+      const current = camera.read(), frame = geometry()
+      camera.set(zoomComponentSpatialCamera(current, Math.max(0.01, current.zoom * Math.exp(-event.deltaY * 0.002)), frame.toAuthor({ x: event.clientX, y: event.clientY }),
+        { x: 0, y: 0, width: frame.referenceSize.width, height: frame.referenceSize.height }))
+    }
+    element.tabIndex = 0
+    element.addEventListener('keydown', keydown); element.addEventListener('keyup', keyup); element.addEventListener('blur', blur)
+    element.addEventListener('pointerdown', down); element.addEventListener('pointermove', move); element.addEventListener('pointerup', up); element.addEventListener('pointercancel', up)
+    element.addEventListener('wheel', wheel, { passive: false })
+    return () => {
+      blur(); element.removeEventListener('keydown', keydown); element.removeEventListener('keyup', keyup); element.removeEventListener('blur', blur)
+      element.removeEventListener('pointerdown', down); element.removeEventListener('pointermove', move); element.removeEventListener('pointerup', up); element.removeEventListener('pointercancel', up)
+      element.removeEventListener('wheel', wheel)
+    }
+  }
   const resize = () => {
     const project = currentProject
     const active = activeSurface ? surfaces.get(activeSurface) : undefined
     const size = active?.kind !== 'flow' ? active?.designSize : undefined
-    let parentToViewport: [number, number, number, number, number, number] = [1, 0, 0, 1, 0, 0]
     if (size) {
       const scale = root.clientWidth && root.clientHeight ? Math.min(root.clientWidth / size.width, root.clientHeight / size.height) : 1
       const x = root.clientWidth ? (root.clientWidth - size.width * scale) / 2 : 0
       const y = root.clientHeight ? (root.clientHeight - size.height * scale) / 2 : 0
-      parentToViewport = [scale, 0, 0, scale, x, y]
       Object.assign(shell.style, { width: `${size.width}px`, height: `${size.height}px`, transform: `translate(${x}px, ${y}px) scale(${scale})` })
     } else Object.assign(shell.style, { width: '100%', height: '100%', transform: 'none' })
     const activeModel = project?.surfaces.find(surface => surface.id === activeSurface)
     if (project) {
-      controllerParentToViewport = parentToViewport
       const background = resolveComponentBackground(project, activeModel), url = background.assetId ? runtime.assetUrl(background.assetId) : undefined
       Object.assign(shell.style, { backgroundColor: background.color, backgroundImage: url ? `url(${JSON.stringify(url)})` : 'none', backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit, backgroundPosition: 'center', backgroundRepeat: 'no-repeat' })
       for (const id of [...project.global.underlay, ...project.global.overlay]) {
@@ -218,6 +248,8 @@ export function createComponentModelProjection(context: {
         if (!isGlobalTeacherController(project, id)) Object.assign(node.outer.style, componentFrameStyle(instance.frame))
       }
       paintControllerPlacement()
+      for (const [id, node] of nodes) if (node.flow && project.instances[id])
+        placeNode(node, project.instances[id], project, node.outer.clientWidth || project.instances[id].frame?.width || 1)
       for (const surface of project.surfaces) {
         const view = surfaces.get(surface.id)
         if (!view?.flow) continue
@@ -225,17 +257,6 @@ export function createComponentModelProjection(context: {
         for (const id of surface.childIds) {
           const instance = project.instances[id], node = nodes.get(id)
           if (!node || !instance || instance.flowPlacement) continue
-          const definitionImplementation = project.definitions[instance.definitionId]?.implementation
-          const extent = flowObjectExtent(project, id), implementation = instance.implementationOverride ?? definitionImplementation
-          const section = definitionImplementation?.kind === 'builtin' && definitionImplementation.key === 'guoling.document-block'
-          const layoutInput = componentLayoutInput(instance, { kind: 'flow', inlineSize: node.outer.clientWidth || 1,
-            definition: project.definitions[instance.definitionId], viewport: extent ?? undefined })
-          if (layoutInput.mode === 'flow-viewport' && extent && !section && (instance.childIds?.length || implementation?.kind === 'source' || implementation?.kind === 'builtin' && ['guoling.web', 'guoling.html-program'].includes(implementation.key))) {
-            const scale = extent.width > 0 ? Math.min(1, (node.outer.clientWidth || extent.width) / extent.width) : 1
-            node.stage.style.height = `${extent.height * scale}px`
-            const geometry = { position: 'absolute', left: '0px', top: '0px', width: `${extent.width}px`, height: `${extent.height}px`, transformOrigin: '0 0', transform: `scale(${scale}) translate(${-extent.x}px,${-extent.y}px)` }
-            Object.assign(node.content.style, geometry); Object.assign(node.children.style, geometry)
-          }
           const box = node.outer.getBoundingClientRect(); blocks.push({ blockId: id, depth: 0, x: (box.x - rect.x) / zoom, y: (box.y - rect.y) / zoom, width: box.width / zoom, height: box.height / zoom })
         }
         for (const id of surface.childIds) {
@@ -278,7 +299,7 @@ export function createComponentModelProjection(context: {
       }
       const surfaceIds = new Set(project.surfaces.map(surface => surface.id))
       for (const [id, view] of surfaces) if (!surfaceIds.has(id) || project.surfaces.find(surface => surface.id === id)?.kind !== view.kind) {
-        view.spatial?.dispose(); view.releaseCamera?.(); view.releaseGraph?.(); view.camera?.dispose(); view.playback?.destroy(); view.root.remove(); surfaces.delete(id); runtime.bindTarget(id, null)
+        view.spatial?.dispose(); view.releaseCamera?.(); view.releaseInput?.(); view.releaseGraph?.(); view.camera?.dispose(); view.playback?.destroy(); view.root.remove(); surfaces.delete(id); runtime.bindTarget(id, null)
       }
       for (const surface of project.surfaces) {
         let view = surfaces.get(surface.id)
@@ -324,6 +345,7 @@ export function createComponentModelProjection(context: {
           }
           if (surface.kind === 'spatial') {
             view.camera = createComponentSpatialCameraPort(surface.spatial?.home ?? { x: 0, y: 0, zoom: 1 })
+            view.releaseInput = bindSpatialInput(element, view.camera)
             view.releaseCamera = context.onCamera?.(surface.id, view.camera)
             view.spatial = createComponentSpatialAdapter({ container: element, camera: view.camera,
               onElement: (id, content) => { runtime.bind(id, content); runtime.bindTarget(id, content?.parentElement ?? null) },
@@ -336,18 +358,22 @@ export function createComponentModelProjection(context: {
         if (surface.kind === 'spatial') view.spatial!.sync(project, surface.id)
         if (view.flow) {
           const layout = surface.flow?.layout ?? { readingWidth: 860, wideContentWidth: 1100, paperBackgroundColor: '#ffffff' }
-          Object.assign(view.flow.paper.style, { maxWidth: flowPaperMaxWidth(layout), backgroundColor: layout.paperBackgroundColor ?? '#ffffff' })
+          const background = resolveFlowPaperBackground(project, surface), url = background.assetId ? runtime.assetUrl(background.assetId) : undefined
+          Object.assign(view.flow.paper.style, { maxWidth: flowPaperMaxWidth(layout), backgroundColor: background.color,
+            backgroundImage: url ? `url(${JSON.stringify(url)})` : 'none', backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit,
+            backgroundPosition: 'center', backgroundRepeat: 'no-repeat' })
         }
         view.designSize = surface.designSize
       }
       // Spatial removals have now unbound their old placement; bind free/flow roots last.
-      renderChildren(underlay, project.global.underlay, project, false, used)
-      renderChildren(overlay, project.global.overlay, project, false, used)
+      renderChildren(underlay, project.global.underlay.filter(id => !isGlobalTeacherController(project, id)), project, false, used)
+      renderChildren(overlay, project.global.overlay.filter(id => !isGlobalTeacherController(project, id)), project, false, used)
+      renderChildren(hud, [...project.global.underlay, ...project.global.overlay].filter(id => isGlobalTeacherController(project, id)), project, false, used)
       for (const surface of project.surfaces) {
         const view = surfaces.get(surface.id)
         if (!view) continue
         if (view.flow) {
-          renderChildren(view.flow.body, surface.childIds.filter(id => !project!.instances[id]?.flowPlacement), project, true, used)
+          renderChildren(view.flow.body, surface.childIds.filter(id => !project!.instances[id]?.flowPlacement), project, true, used, surface.flow?.layout)
           for (const space of ['paper', 'viewport'] as const) for (const plane of ['underlay', 'overlay'] as const) {
             const parent = space === 'paper' ? plane === 'underlay' ? view.flow.paperUnderlay : view.flow.paperOverlay : plane === 'underlay' ? view.flow.viewportUnderlay : view.flow.viewportOverlay
             renderChildren(parent, surface.childIds.filter(id => { const placement = project!.instances[id]?.flowPlacement; return placement?.space === space && placement.plane === plane }), project, false, used)
@@ -368,11 +394,11 @@ export function createComponentModelProjection(context: {
     dispose() {
       if (disposed) return
       disposed = true; observer?.disconnect(); releaseControllerPlacement?.()
-      for (const view of surfaces.values()) { view.spatial?.dispose(); view.releaseCamera?.(); view.releaseGraph?.(); view.camera?.dispose(); view.playback?.destroy() }
+      for (const view of surfaces.values()) { view.spatial?.dispose(); view.releaseCamera?.(); view.releaseInput?.(); view.releaseGraph?.(); view.camera?.dispose(); view.playback?.destroy() }
       for (const id of nodes.keys()) { runtime.bind(id, null); runtime.bindTarget(id, null) }
       for (const id of surfaces.keys()) runtime.bindTarget(id, null)
       if (projectId) runtime.bindTarget(projectId, null)
-      nodes.clear(); surfaces.clear(); shell.remove()
+      nodes.clear(); surfaces.clear(); shell.remove(); hud.remove()
     },
   }
 }

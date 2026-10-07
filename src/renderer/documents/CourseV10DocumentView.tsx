@@ -1,8 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
 import { isComponentVisibleAtSurface, type ComponentInstance, type CourseProjectV10 } from '../../shared/contracts/component-platform/project'
 import { componentPaintStyle } from '../../player/components/componentPlacementStyle'
-import { flowObjectExtent } from '../../core/components/geometry/flowObjectExtent'
-import { componentLayoutInput } from '../../components/web/measuredFragmentBox'
+import { resolveComponentOuterPresentation } from '../../shared/componentPresentation'
 
 export interface CourseV10DocumentViewProps {
   project: CourseProjectV10
@@ -21,46 +20,38 @@ export function InstanceView({ instance, project, surfaceId, selectedInstanceId,
   surfaceId?: string | null
   placement?: 'free' | 'flow'
 } & Omit<CourseV10DocumentViewProps, 'surfaceId'>) {
-  const bind = useCallback((element: HTMLDivElement | null) => { onElement?.(instance.id, element) }, [instance.id, onElement])
+  const bind = useCallback((element: HTMLElement | null) => { onElement?.(instance.id, element) }, [instance.id, onElement])
   const outer = useRef<HTMLDivElement | null>(null)
   const bindTarget = useCallback((element: HTMLDivElement | null) => { outer.current = element; onTargetElement?.(instance.id, element) }, [instance.id, onTargetElement])
-  const frame = instance.frame
   const definition = project.definitions[instance.definitionId]
-  const implementation = instance.implementationOverride ?? definition?.implementation
-  const section = definition?.implementation.kind === 'builtin' && definition.implementation.key === 'guoling.document-block'
-  const flow = placement === 'flow'
-  const naturalFlow = flow && componentLayoutInput(instance, { kind: 'flow', inlineSize: frame?.width ?? 1, definition }).mode === 'flow-content'
-  const localAssembly = flow && !naturalFlow && !section && (implementation?.kind === 'source' || implementation?.kind === 'builtin' && ['guoling.web', 'guoling.html-program'].includes(implementation.key) || Boolean(instance.childIds?.length))
-  const extent = localAssembly ? flowObjectExtent(project, instance.id) : null
-  const [scale, setScale] = useState(1)
+  const [inlineSize, setInlineSize] = useState(instance.frame?.width ?? 1)
+  const presentation = resolveComponentOuterPresentation(project, instance, { placement, purpose: player ? 'playback' : 'author', inlineSize,
+    flowLayout: project.surfaces.find(surface => surface.id === surfaceId)?.flow?.layout })
   useLayoutEffect(() => {
     const element = outer.current
-    if (!element || !extent) return
-    const resize = () => setScale(extent.width > 0 ? Math.min(1, (element.clientWidth || extent.width) / extent.width) : 1)
+    if (!element || placement !== 'flow') return
+    const resize = () => { if (element.clientWidth > 0) setInlineSize(element.clientWidth) }
     resize()
     const Observer = element.ownerDocument.defaultView?.ResizeObserver
     const observer = Observer ? new Observer(resize) : undefined
     observer?.observe(element)
     return () => observer?.disconnect()
-  }, [extent?.width])
+  }, [placement])
   const authoredStyle = componentPaintStyle(instance, definition) as CSSProperties
-  const style: CSSProperties = flow ? {
-    position: 'relative', width: '100%', height: naturalFlow ? 'auto' : extent ? extent.height * scale : section ? 'auto' : frame?.height ?? 'auto', marginBottom: 12,
-  } : frame ? {
-    position: 'absolute', left: 0, top: 0, width: frame.width, height: frame.height,
-    transform: `matrix(${frame.transform.join(',')})`, transformOrigin: '0 0',
-  } : { position: 'relative' }
   if (definition?.role === 'behavior') return null
   const children = instance.childIds?.map(id => project.instances[id] && <InstanceView key={id} instance={project.instances[id]} project={project}
     surfaceId={surfaceId} selectedInstanceId={selectedInstanceId} selectedInstanceIds={selectedInstanceIds} player={player} onSelect={onSelect}
-    onElement={onElement} onTargetElement={onTargetElement} placement={flow && section ? 'flow' : 'free'} />)
-  const content = <div ref={bind} data-component-render={instance.id} style={{ width: extent ? frame?.width ?? extent.width : '100%',
-    height: naturalFlow ? 'var(--component-flow-height, auto)' : flow ? frame?.height ?? 'auto' : '100%' }} />
-  return <div ref={bindTarget} hidden={!isComponentVisibleAtSurface(instance, surfaceId ?? '')} style={{ pointerEvents: 'auto', ...authoredStyle, ...style,
+    onElement={onElement} onTargetElement={onTargetElement} placement={presentation.childrenPlacement} />)
+  const content = presentation.section
+    ? <summary ref={bind} data-component-render={instance.id} style={presentation.contentStyle as CSSProperties} />
+    : <div ref={bind} data-component-render={instance.id} style={presentation.contentStyle as CSSProperties} />
+  const childContent = <div style={presentation.childrenStyle as CSSProperties}>{children}</div>
+  return <div ref={bindTarget} hidden={!isComponentVisibleAtSurface(instance, surfaceId ?? '')} style={{ pointerEvents: 'auto', ...authoredStyle, ...presentation.outerStyle as CSSProperties,
     outline: !player && (selectedInstanceIds?.includes(instance.id) ?? selectedInstanceId === instance.id) ? '2px solid #2563eb' : undefined }}
     data-component-instance={instance.id} data-component-placement={placement} onPointerDown={event => { if (!player && !instance.locked) { event.stopPropagation(); onSelect(instance.id) } }}>
-    {extent ? <div style={{ position: 'absolute', left: 0, top: 0, width: extent.width, height: extent.height,
-      transform: `scale(${scale}) translate(${-extent.x}px,${-extent.y}px)`, transformOrigin: '0 0' }}>{content}{children}</div> : <>{content}{children}</>}
+    {presentation.section
+      ? <details open={presentation.section.open} style={presentation.stageStyle as CSSProperties}>{content}{childContent}</details>
+      : <div style={presentation.stageStyle as CSSProperties}>{content}{childContent}</div>}
   </div>
 }
 

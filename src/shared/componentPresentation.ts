@@ -35,7 +35,8 @@ export function resolveComponentOuterPresentation(project: CourseProjectV10, ins
   const section = documentBlock && data.type === 'section'
     ? { open: input.purpose === 'author' || data.collapsedByDefault !== true, collapsedByDefault: data.collapsedByDefault === true } : null
   const flow = input.placement === 'flow'
-  const layoutInput = componentLayoutInput(instance, { kind: flow ? 'flow' : 'free-frame', inlineSize: input.inlineSize, definition })
+  const unframedExtent = flow && !frame && instance.childIds?.length ? flowObjectExtent(project, instance.id) : null
+  const layoutInput = componentLayoutInput(instance, { kind: flow ? 'flow' : 'free-frame', inlineSize: input.inlineSize, definition, viewport: unframedExtent ?? undefined })
   const naturalFlow = flow && layoutInput.mode === 'flow-content'
   const media = ['guoling.image', 'guoling.video', 'guoling.audio'].includes(key ?? '')
   const localAssembly = flow && layoutInput.mode === 'flow-viewport' && !documentBlock
@@ -60,10 +61,10 @@ export function resolveComponentOuterPresentation(project: CourseProjectV10, ins
   const geometry: Record<string, string> = extent ? { position: 'absolute', left: '0px', top: '0px',
     transform: `scale(${scale}) translate(${-extent.x}px,${-extent.y}px)`, transformOrigin: '0 0' }
     : { position: flow ? 'relative' : 'absolute', left: '0px', top: '0px', transform: '', transformOrigin: '' }
-  const contentStyle = { ...geometry, inset: '', width: extent ? `${frame?.width ?? extent.width}px` : '100%',
+  const contentStyle = { inset: '', ...geometry, width: extent ? `${frame?.width ?? extent.width}px` : '100%',
     height: extent ? `${frame?.height ?? extent.height}px` : naturalFlow ? 'var(--component-flow-height, auto)' : flow ? frame ? `${frame.height}px` : 'auto' : '100%' }
-  const childrenStyle = { ...geometry, inset: '', position: childrenPlacement === 'flow' ? 'relative' : 'absolute',
+  const childrenStyle = { inset: '', ...geometry, position: childrenPlacement === 'flow' ? 'relative' : 'absolute',
     width: extent ? `${extent.width}px` : '100%', height: extent ? `${extent.height}px` : childrenPlacement === 'flow' ? 'auto' : '100%',
-    display: childrenPlacement === 'flow' ? 'flow-root' : 'block' }
+    display: childrenPlacement === 'flow' ? 'flow-root' : 'block', pointerEvents: 'none' }
   return { layoutInput, naturalFlow, localAssembly, extent, scale, childrenPlacement, section, outerStyle, stageStyle, contentStyle, childrenStyle }
 }
