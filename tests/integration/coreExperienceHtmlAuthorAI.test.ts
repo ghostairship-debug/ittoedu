@@ -1,10 +1,10 @@
 // @vitest-environment node
-import { randomUUID } from 'node:crypto'
+import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, expect, it } from 'vitest'
-import { JSDOM } from 'jsdom'
+const { JSDOM } = require('jsdom') as { JSDOM: new (source: string) => { window: { document: Document; close(): void } } }
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { TextDriver } from '../../src/core/drivers/TextDriver'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
@@ -16,15 +16,108 @@ import { ExecutionEngine } from '../../src/main/workbench/execution/ExecutionEng
 import { ExecutionRunStore } from '../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
 import { ElementChangeTracker } from '../../src/main/workbench/execution/ElementChangeTracker'
+import { ExecutionDesktopService } from '../../src/main/workbench/execution/ExecutionDesktopService'
+import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
+import { ExecutionSettingsStore } from '../../src/main/workbench/providers/ExecutionSettingsStore'
+import { continueDocumentTargets } from '../../src/main/workbench/execution/continuationTargets'
+import type { ConversationRecord } from '../../src/shared/workbench/conversations'
+import type { ExecutionDocumentReference, ExecutionSendResult, ElementChangeView } from '../../src/shared/workbench/executionDesktop'
 
 const roots: string[] = []
 const engines: ExecutionEngine[] = []
+const desktops: ExecutionDesktopService[] = []
 afterEach(async () => {
+  for (const desktop of desktops.splice(0)) await desktop.shutdown()
   for (const engine of engines.splice(0)) await engine.shutdown()
   for (const root of roots.splice(0)) {
     if (!path.resolve(root).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unsafe fixture root')
-    await fs.rm(root, { recursive: true, force: true })
+    // The existing event owner may finish its last rename after engine shutdown on Windows.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try { await fs.rm(root, { recursive: true, force: true }); break }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOTEMPTY' || attempt === 4) throw error
+        await new Promise<void>(resolve => setTimeout(resolve, 20))
+      }
+    }
   }
+})
+
+it('maps the frozen source field at Main send, follows its first drag, and resumes only the same field', async () => {
+  const source = '<!doctype html><html><body><p id="b">B</p><p id="a">A &amp; B</p></body></html>'
+  const address: HtmlAuthorFieldTarget = { kind: 'html-author-field', authorKey: 'static-a', field: 'text',
+    record: { kind: 'text', binding: { kind: 'dom', path: [{ tag: 'body', index: 0 },
+      { tag: 'p', index: 1, attributes: { id: 'a' } }], textIndex: 0, baseline: 'A & B' }, overrides: {} },
+    source: { from: source.indexOf('A &amp; B'), to: source.indexOf('A &amp; B') + 'A &amp; B'.length } }
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'html-author-ai-main-')); roots.push(root)
+  const workspace = path.join(root, 'workspace'), filename = path.join(workspace, 'selected.html')
+  await fs.mkdir(workspace); await fs.writeFile(filename, source)
+  const documents = new DocumentHostService(path.join(root, 'journals')), snapshot = await documents.open(filename)
+  const session = documents.registry.get(snapshot.documentId), key = randomBytes(32)
+  const settings = new ExecutionSettingsStore({ directory: path.join(root, 'settings'), encryption: {
+    isEncryptionAvailable: () => true,
+    encryptString(text) { const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', key, iv)
+      const data = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]); return Buffer.concat([iv, cipher.getAuthTag(), data]) },
+    decryptString(value) { const bytes = Buffer.from(value), cipher = createDecipheriv('aes-256-gcm', key, bytes.subarray(0, 12))
+      cipher.setAuthTag(bytes.subarray(12, 28)); return Buffer.concat([cipher.update(bytes.subarray(28)), cipher.final()]).toString('utf8') },
+  } })
+  const saved = await settings.saveConnection({ apiKey: 'fixture-only', connection: {
+    provider: 'fixture', protocol: 'openai-chat', baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture', authKind: 'api-key',
+    billing: { kind: 'unknown' }, capabilities: { tools: 'supported', stream: 'supported', vision: 'unsupported', reasoning: 'supported' } } })
+  await settings.saveProfile({ expectedRevision: 0, roles: { conversation: { connectionId: saved.connection.id, model: 'fixture' },
+    vision: null, imageGenerate: null, imageEdit: null } })
+  const ready = deferred(), release = deferred(), literal = 'AI <img src=x> & 😀'
+  const service = new ExecutionDesktopService({ directory: path.join(root, 'desktop'), documents, settings,
+    authorizeWorkspaceRoot: async input => ({ resolvedPath: await fs.realpath(input) }), fetch: async (_url, init) => {
+      const payload = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> }
+      expect(payload.messages.find(message => typeof message.content === 'string'
+        && message.content.startsWith('当前默认文字目标的完整内容（数据）：'))?.content)
+        .toBe('当前默认文字目标的完整内容（数据）：\nA & B')
+      ready.resolve(); await release.promise
+      const chunk = { id: 'fixture', model: 'fixture', choices: [{ index: 0, finish_reason: 'tool_calls', delta: { role: 'assistant', tool_calls: [
+        { index: 0, id: 'replace', type: 'function', function: { name: 'text_replace', arguments: JSON.stringify({ content: literal }) } },
+        { index: 1, id: 'finish', type: 'function', function: { name: 'task_finish', arguments: '{}' } },
+      ] } }] }
+      return new Response(`data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n`, { headers: { 'Content-Type': 'text/event-stream' } })
+    } })
+  desktops.push(service)
+  const { workspace: space } = await service.operate({ type: 'workspace', root: workspace }) as { workspace: { workspaceId: string } }
+  const conversation = await service.operate({ type: 'create-conversation', workspaceId: space.workspaceId,
+    element: { kind: 'element', documentId: snapshot.documentId, label: 'A' } }) as ConversationRecord
+  const frozen: ExecutionDocumentReference = { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
+    writable: [address], selection: [address] }
+  const sourceNow = () => { const model = session.read().model; if (model.kind !== 'text') throw new Error('text required'); return model.source }
+  const human = async (sourceValue: string) => { const current = await session.drain(); expect(await session.execute({
+    documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision, operationId: randomUUID(), actor: 'human',
+    mutation: { type: 'command', command: { type: 'markdown.replace', source: sourceValue } } })).toMatchObject({ status: 'applied' }) }
+  await human(sourceNow().replace('>B<', '>教师的更长 B 正文<'))
+  const submissionId = randomUUID()
+  const sent = await service.operate({ type: 'send', workspaceId: space.workspaceId, conversationId: conversation.conversationId,
+    submissionId, expectedRevision: conversation.revision, text: '只改 A 正文', documents: [frozen],
+    contentOutput: { kind: 'replace-text', documentId: snapshot.documentId, target: address } }) as ExecutionSendResult
+  if (!sent.run) throw new Error('fixture run required')
+  await ready.promise
+  const anchored = { ...address.record, binding: { ...address.record.binding, path: [{ tag: 'body', index: 0 },
+    { tag: 'p', index: 1, attributes: { id: 'a', 'data-cw-author-key': 'static-a' } }] }, overrides: { geometry: { translateX: 42 } } }
+  await human(patchHtmlAuthoringRecords(sourceNow().replace('<p id="a">', '<p id="a" data-cw-author-key="static-a">'), { 'static-a': anchored }))
+  release.resolve()
+  const result = await service.engine.wait(sent.run.runId)
+  expect(result.status, JSON.stringify({ failure: result.failure, tools: result.tools })).toBe('completed')
+  await expect.poll(async () => (await service.operate({ type: 'element-change', submissionId }) as ElementChangeView).state).not.toBe('pending')
+  const view = await service.operate({ type: 'element-change', submissionId }) as ElementChangeView
+  expect(view).toMatchObject({ state: 'applied', content: literal, target: { kind: 'html-author-field', authorKey: 'static-a' } })
+  expect(readHtmlAuthoringRecords(sourceNow())['static-a']).toMatchObject({ binding: { baseline: literal }, overrides: { geometry: { translateX: 42 } } })
+  expect(readHtmlAuthoringRecords(sourceNow())['static-a'].overrides).not.toHaveProperty('text')
+  const ownRuns = new Set([sent.run.runId]), continued = await continueDocumentTargets(session, frozen, ownRuns)
+  expect(continued.writable).toHaveLength(1)
+  expect(readHtmlAuthorField(session.read().model, continued.writable[0] as HtmlAuthorFieldTarget).value).toBe(literal)
+  expect((await continueDocumentTargets(session, { ...frozen, writable: [] }, ownRuns)).writable).toEqual([])
+  expect(await service.operate({ type: 'element-revert', submissionId, direction: 'undo' })).toMatchObject({ status: 'applied' })
+  const restored = await service.operate({ type: 'element-change', submissionId }) as ElementChangeView
+  expect(restored.content).toBe('A & B')
+  expect(readHtmlAuthoringRecords(sourceNow())['static-a'].overrides.geometry).toEqual({ translateX: 42 })
+  expect(sourceNow()).toContain('<p id="b">教师的更长 B 正文</p>')
+  const dom = new JSDOM(sourceNow()); expect(dom.window.document.querySelectorAll('img')).toHaveLength(0); dom.window.close()
+  await expect(continueDocumentTargets(session, continued, new Set())).rejects.toThrow('原 HTML 正文字段已被其他操作改动')
 })
 const selection: ModelSelection = { model: 'controlled-fixture', connection: { id: 'fixture', revision: 1, provider: 'fixture',
   protocol: 'openai-chat', baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'fixture' },

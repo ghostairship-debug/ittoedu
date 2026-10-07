@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import path from 'node:path'
 import { promises as fs } from 'node:fs'
-import { executionDesktopRequestSchema, matchesDisclosedSelection, type ConversationHomeInput, type ExecutionDocumentReference, type ExecutionSendInput, type ExecutionSendResult, type ExecutionSubmissionRecord, type RendererTimingStamp } from '../../../shared/workbench/executionDesktop'
+import { executionDesktopRequestSchema, executionSelectionTargetSchema, matchesDisclosedSelection, type ConversationHomeInput, type ExecutionDocumentReference, type ExecutionSendInput, type ExecutionSendResult, type ExecutionSubmissionRecord, type RendererTimingStamp } from '../../../shared/workbench/executionDesktop'
 import type { ConversationRecord } from '../../../shared/workbench/conversations'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import type { ExecutionEvent, ExecutionEventInput } from '../../../shared/workbench/executionEvents'
@@ -86,7 +86,17 @@ function targetStillExists(snapshot: DocumentSnapshot, target: ExecutionDocument
   if (target.kind !== 'course-object' && target.kind !== 'flow-block' && target.kind !== 'course-instance' && target.kind !== 'course-surface'
     && target.kind !== 'html-author-field') return false
   if (target.kind === 'course-instance' && (target.from !== undefined || target.to !== undefined)) return false
+  if (target.kind === 'html-author-field' && target.source) return false
   try { readTarget(snapshot.model, target); return true } catch { return false }
+}
+/** A mapped field keeps its original selected slot and grant; only its source location follows. */
+function mappedContentOutput(input: ExecutionSendInput, documents: ExecutionDocumentReference[]): ExecutionSendInput['contentOutput'] {
+  const output = input.contentOutput
+  if (output?.target.kind !== 'html-author-field' || !output.target.source) return output
+  const original = input.documents.find(document => document.documentId === output.documentId)
+  const index = original?.selection?.findIndex(target => JSON.stringify(target) === JSON.stringify(output.target)) ?? -1
+  const target = index >= 0 ? documents.find(document => document.documentId === output.documentId)?.selection?.[index] : undefined
+  return target?.kind === 'html-author-field' ? { ...output, target } : output
 }
 /** Main owns spaces, task freezes and runs. Mounting a view only reads/subscribes. */
 export class ExecutionDesktopService {
@@ -457,20 +467,29 @@ export class ExecutionDesktopService {
       throw error
     }
     const documents = []
+    const preparedReferences: ExecutionDocumentReference[] = []
     const readOnlyRoots: string[] = []
-    for (const reference of input.documents) {
+    for (const original of input.documents) {
+      let reference = original
       let snapshot: DocumentSnapshot
       try { snapshot = await this.options.documents.registry.get(reference.documentId).drain() }
       catch (error) { throw executionInputError('document-session-changed', error) }
       if (snapshot.epoch !== reference.epoch) throw executionInputError('document-session-changed')
       if (snapshot.binding.kind === 'file') readOnlyRoots.push(path.dirname(snapshot.binding.path))
+      if (snapshot.revision !== reference.revision && [...reference.writable, ...(reference.selection ?? [])]
+        .some(target => target.kind === 'html-author-field' && target.source)) {
+        try { reference = await continueDocumentTargets(this.options.documents.registry.get(reference.documentId), reference, new Set()) }
+        catch (error) { throw executionInputError('document-range-changed', error) }
+      }
       // M15: an object or a document block stays the same target while it exists; a text range only while nothing changed.
       if (snapshot.revision !== reference.revision && [...(reference.selection ?? []), ...reference.writable.filter(target => target.kind !== 'document')]
         .some(target => !targetStillExists(snapshot, target))) throw executionInputError('document-range-changed')
       documents.push({ documentId: reference.documentId, writable: reference.writable, ...(reference.selection?.length ? { selection: reference.selection } : {}) })
+      preparedReferences.push(reference)
     }
-    if (input.contentOutput) {
-      const output = input.contentOutput
+    const contentOutput = mappedContentOutput(input, preparedReferences)
+    if (contentOutput) {
+      const output = contentOutput
       if (!documents.some(document => document.documentId === output.documentId
         && document.selection?.some(target => JSON.stringify(target) === JSON.stringify(output.target))))
         throw refused('正文改写目标与本次固定选区不一致，请重新选择。')
@@ -528,7 +547,7 @@ export class ExecutionDesktopService {
       model: { provider: selection.connection.provider, model: selection.model, accountId: selection.connection.accountId, billing: selection.connection.billing.kind },
       createdAt: now, updatedAt: now, digest, attachmentIds,
       start: { conversationId: current.conversationId, taskId: input.submissionId, instruction: input.text, selection, documents,
-        ...(input.contentOutput ? { contentOutput: structuredClone(input.contentOutput) } : {}),
+        ...(contentOutput ? { contentOutput: structuredClone(contentOutput) } : {}),
         ...(input.materials ? { materials: structuredClone(input.materials) } : {}),
         ...(input.webAuthorization ? { webAuthorization: structuredClone(input.webAuthorization) } : {}),
         ...(visionSelection ? { visionSelection } : {}), ...(visionUnavailableReason ? { visionUnavailableReason } : {}),
@@ -654,7 +673,7 @@ export class ExecutionDesktopService {
         const reopened = await this.options.documents.open(binding.path)
         if (!matchesSavedDocument(binding, reopened)) throw refused('保存位置现在不是原课件。请核对文件并重新授权续作。')
         const ranges = [...reference.writable, ...(reference.selection ?? [])]
-          .some(target => target.kind === 'markdown-range' || isCourseInstanceRange(target))
+          .some(target => target.kind === 'markdown-range' || isCourseInstanceRange(target) || target.kind === 'html-author-field' && target.source)
         if (ranges && (reference.epoch !== binding.epoch || reference.revision !== binding.savedRevision
           || reopened.binding.kind !== 'file' || reopened.binding.version !== binding.fileVersion))
           throw refused('原文字范围与重开的保存版本无法对应。请在当前课件重新选择该范围。')
@@ -918,11 +937,13 @@ export class ExecutionDesktopService {
     this.elementChanges.delete(record.submissionId)
     try {
       const conversation = await this.conversations.readConversation({ workspaceId: record.workspaceId, conversationId: record.conversationId })
-      const reference = conversation?.element && record.documents.find(value => value.documentId === conversation.element!.documentId)
+      const reference = conversation?.element && record.start.documents.find(value => value.documentId === conversation.element!.documentId)
       const target = reference?.writable.length === 1 ? reference.writable[0] : undefined
       if (!reference || !target || target.kind === 'document') return
+      const selected = executionSelectionTargetSchema.safeParse(target)
+      if (!selected.success) return
       const session = this.options.documents.registry.get(reference.documentId), snapshot = await session.drain()
-      this.elementChanges.set(record.submissionId, new ElementChangeTracker(record.conversationId, reference.documentId, target, session, snapshot))
+      this.elementChanges.set(record.submissionId, new ElementChangeTracker(record.conversationId, reference.documentId, selected.data, session, snapshot))
     } catch { /* A card's optional inverse never blocks the actual task. */ }
   }
   private recordElementResult(submissionId: string): void { this.elementChanges.get(submissionId)?.finish() }

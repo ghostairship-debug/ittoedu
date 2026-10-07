@@ -7,7 +7,7 @@ import { elementChangeUnits, elementUnitLabel, readComponentElementFields, readC
 import type { FlowTextContent } from '../../../shared/document/content'
 import { CardTextEdits, sourceTextCodec, flowTextCodec, type PeerTextOperation } from './CardTextEdits'
 import { captureComponentOperation, presentationComponentEdits } from '../../../core/drivers/courseV10Operations'
-import { courseInstanceContext, courseInstanceFieldIdentity, courseInstanceTextEdit, isCourseInstanceRange, mapHtmlAuthorFieldTarget, prepareHtmlAuthorFieldSource, readHtmlAuthorField, readCourseInstanceText, type CourseInstanceTarget } from '../../../core/tools/ToolTargets'
+import { courseInstanceContext, courseInstanceFieldIdentity, courseInstanceTextEdit, isCourseInstanceRange, mapHtmlAuthorFieldTarget, prepareHtmlAuthorFieldEdit, readHtmlAuthorField, readCourseInstanceText, type CourseInstanceTarget } from '../../../core/tools/ToolTargets'
 import type { TextCodec } from './CardTextEdits'
 
 const componentStringCodec: TextCodec<string> = { length: value => Array.from(value).length,
@@ -122,7 +122,8 @@ export class ElementChangeTracker {
       const target = this.target.source && isSourceDocumentModel(before) && isSourceDocumentModel(after)
         ? mapHtmlAuthorFieldTarget(before.source, after.source, this.target, true) : this.target
       const b = readHtmlAuthorField(after, target)
-      if (!sameFieldValue(a.identity, b.identity)) { this.invalidate(); return }
+      // The source mapper proves the same node across its first software anchor.
+      if (!this.target.source && !sameFieldValue(a.identity, b.identity)) { this.invalidate(); return }
       this.target = target
       this.htmlText.advance(a.value, b.value, own, inverse, undefined, provenance)
       return
@@ -195,7 +196,8 @@ export class ElementChangeTracker {
     for (let attempt = 0; attempt < 3; attempt++) {
       const snapshot = await this.session.drain()
       if (this.missing || snapshot.epoch !== this.epoch) return { status: 'unavailable', message: this.missing ? this.missingMessage : UNTRACEABLE }
-      let command: DocumentCommand, accept = () => { this.undone = direction === 'undo' }
+      let command: DocumentCommand, textChanges: import('../../../shared/workbench/document').DocumentTextChanges | undefined,
+        accept = () => { this.undone = direction === 'undo' }
       if (this.source && isSourceDocumentModel(snapshot.model)) {
         const inverse = this.source.prepare(snapshot.model.source, direction)
         if (!inverse) return { status: 'unavailable', message: UNTRACEABLE }
@@ -204,7 +206,9 @@ export class ElementChangeTracker {
         const { value } = readHtmlAuthorField(snapshot.model, this.target)
         const inverse = this.htmlText.prepare(value, direction)
         if (!inverse) return { status: 'unavailable', message: UNTRACEABLE }
-        command = { type: 'markdown.replace', source: prepareHtmlAuthorFieldSource(snapshot.model, this.target, inverse.value) }
+        const edit = prepareHtmlAuthorFieldEdit(snapshot.model, this.target, inverse.value)
+        command = { type: 'markdown.replace', source: edit.source }
+        textChanges = { source: edit.splices, flow: [] }
         accept = inverse.accept
       } else if (snapshot.model.kind === 'course-v10' && this.target.kind === 'course-instance') {
         const t: CourseInstanceTarget = this.target
@@ -252,7 +256,7 @@ export class ElementChangeTracker {
       cardPeers.get(this.session)!.inverses.set(operationId, { tracker: this, direction })
       try {
         const result = await this.session.execute({ documentId: this.documentId, epoch: snapshot.epoch,
-          baseRevision: snapshot.revision, operationId, actor: 'human', mutation: { type: 'command', command } })
+          baseRevision: snapshot.revision, operationId, actor: 'human', ...(textChanges ? { textChanges } : {}), mutation: { type: 'command', command } })
         if (result.status === 'applied' || result.status === 'unchanged') {
           accept(); return { status: 'applied', change: this.view(submissionId) }
         }

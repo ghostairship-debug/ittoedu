@@ -2,7 +2,7 @@ import type { DocumentSession } from '../../../core/documents/DocumentSession'
 import { isSourceDocumentModel } from '../../../shared/workbench/document'
 import type { ExecutionDocumentReference } from '../../../shared/workbench/executionDesktop'
 import { documentDigest } from '../../../core/documents/documentDigest'
-import { courseInstanceFieldIdentity, isCourseInstanceRange, mapMarkdownRange, mapSequenceRange, readCourseInstanceText, readTarget } from '../../../core/tools/ToolTargets'
+import { courseInstanceFieldIdentity, isCourseInstanceRange, mapHtmlAuthorFieldTarget, mapMarkdownRange, mapSequenceRange, readCourseInstanceText, readTarget } from '../../../core/tools/ToolTargets'
 import { mapAcknowledgedRange } from '../../../core/tools/ToolReadCoverage'
 import { traceSourceRange } from '../../../core/drivers/course/elementFields'
 import type { FlowTextContent } from '../../../shared/document/content'
@@ -17,12 +17,22 @@ const sameTokens = (a: string[], b: string[]) => a.length === b.length && a.ever
 export async function continueDocumentTargets(session: DocumentSession, reference: ExecutionDocumentReference, ownRuns: ReadonlySet<string>): Promise<ExecutionDocumentReference> {
   const snapshot = await session.drain()
   if (snapshot.documentId !== reference.documentId) throw new Error('恢复的文档身份不一致')
-  const ranges = [...reference.writable, ...(reference.selection ?? [])].some(target => target.kind === 'markdown-range' || isCourseInstanceRange(target))
+  const ranges = [...reference.writable, ...(reference.selection ?? [])].some(target => target.kind === 'markdown-range' || isCourseInstanceRange(target)
+    || target.kind === 'html-author-field' && target.source)
   const changes = ranges ? session.committedChangesSince(reference.revision) : []
   const map = (original: ExecutionDocumentReference['writable'][number]) => {
     let target = structuredClone(original)
     for (const change of changes) {
       const own = change.actor === 'agent' && !!change.runId && ownRuns.has(change.runId)
+      if (target.kind === 'html-author-field' && target.source) {
+        if (!change.before || !change.after || !isSourceDocumentModel(change.before) || !isSourceDocumentModel(change.after))
+          throw new Error('原 HTML 作者字段历史不足以确认')
+        const before = readTarget(change.before, target)
+        const mapped = mapHtmlAuthorFieldTarget(change.before.source, change.after.source, target, own)
+        if (!own && readTarget(change.after, mapped) !== before) throw new Error('原 HTML 正文字段已被其他操作改动，请重新选择')
+        target = mapped
+        continue
+      }
       if (isCourseInstanceRange(target)) {
         if (!change.before || !change.after || change.before.kind !== 'course-v10' || change.after.kind !== 'course-v10') throw new Error('原文字范围历史不足以确认')
         if (documentDigest(courseInstanceFieldIdentity(change.before, target)) !== documentDigest(courseInstanceFieldIdentity(change.after, target))) throw new Error('原文字字段所在行、项或单元格已改变，请重新选择')
