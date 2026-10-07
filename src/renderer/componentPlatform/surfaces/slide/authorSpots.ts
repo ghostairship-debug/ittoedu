@@ -6,7 +6,10 @@ import { prepareWebAuthoringRecordEdits } from '../../../../components/web/autho
 
 function usesRecordOwner(project: CourseProjectV10, spot: ComponentAuthorSpot): boolean {
   if (!spot.authorKey || !spot.binding) return false
-  return !spot.sourceRegion && !spot.dataPath || authorSpotValue(project.instances[spot.instanceId]?.data,
+  const path = spot.dataPath
+  const recordField = path?.length === 4 && path[0] === 'authoringRecords' && path[1] === spot.authorKey
+    && path[2] === 'overrides' && path[3] === (spot.kind === 'text' ? 'text' : 'src')
+  return !spot.sourceRegion && (!path || recordField) || authorSpotValue(project.instances[spot.instanceId]?.data,
     ['authoringRecords', spot.authorKey]) !== undefined
 }
 

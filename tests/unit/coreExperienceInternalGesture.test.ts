@@ -174,3 +174,34 @@ it('prepares a frozen bound text reply from the current snapshot after remount w
       other: { overrides: { text: 'Other object changed' } } } })
   } finally { stop() }
 })
+
+it('creates the first dynamic author record from the exact registered record path and saves one canonical edit', async () => {
+  const key = 'dom-conversation-heading', html = '<div id="root"></div>'
+  const project: CourseProjectV10 = { schemaVersion: 10, id: 'first-record', revision: 0, title: 'React heading', assets: {},
+    definitions: { web: { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } } },
+    instances: { web: { id: 'web', definitionId: 'web', data: { html, resourceBindings: {} }, frame: { width: 1280, height: 720, transform: [1, 0, 0, 1, 0, 0] } } },
+    surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['web'] }], global: { underlay: [], overlay: [] } }
+  const spot: ComponentAuthorSpot = { id: 'observed', instanceId: 'web', mountGeneration: 1, kind: 'text', initialValue: 'Conversation 1', authorKey: key,
+    scope: { 'react:conversation.id': 'conversation-1' }, bindingStatus: 'bound',
+    binding: { kind: 'dom', path: [{ tag: 'body', index: 1 }, { tag: 'div', index: 0, attributes: { id: 'root' } }, { tag: 'h2', index: 1 }], textIndex: 0, baseline: 'Conversation 1' },
+    dataPath: ['authoringRecords', key, 'overrides', 'text'], localBounds: { width: 152, height: 25.5, transform: [1, 0, 0, 1, 925, 138] } }
+  const driver = new CourseV10Driver(), resources = { assets: {}, components: {} }
+  const session = await DocumentSession.create({ documentId: 'first-record', epoch: 'epoch', binding: { kind: 'untitled', suggestedName: 'first' },
+    model: { kind: 'course-v10', project, resources } }, driver, { async append() {}, async save() { throw new Error('unused') } })
+  // The same preflight used by beginSlideSpotEdit must work before a record exists.
+  expect(authorSpotEdits(project, spot, spot.initialValue, resources)).toHaveLength(1)
+  const command = captureComponentOperation(project, authorSpotEdits(project, spot, 'Revised heading', resources))
+  expect((await session.execute({ documentId: 'first-record', epoch: 'epoch', baseRevision: 0, operationId: 'first', actor: 'human', mutation: { type: 'command', command } })).status).toBe('applied')
+  expect(session.read().undoDepth).toBe(1)
+  const reopened = await driver.load(await driver.serialize(session.read().model))
+  if (reopened.kind !== 'course-v10') throw new Error('Expected course')
+  expect(reopened.project.instances.web.data).toEqual({ html, resourceBindings: {}, authoringRecords: { [key]: {
+    kind: 'text', binding: spot.binding, scope: spot.scope, overrides: { text: 'Revised heading' },
+  } } })
+  await session.execute({ documentId: 'first-record', epoch: 'epoch', baseRevision: 1, operationId: 'undo', actor: 'human', mutation: { type: 'undo' } })
+  const undone = session.read().model
+  if (undone.kind !== 'course-v10') throw new Error('Expected course')
+  expect(undone.project.instances.web.data).toEqual(project.instances.web.data)
+  const ordinary = { ...project, instances: { web: { ...project.instances.web, data: { html, label: 'Conversation 1' } } } }
+  expect(authorSpotEdits(ordinary, { ...spot, dataPath: ['label'] }, 'Ordinary field', resources)).toEqual([{ type: 'data.set', instanceId: 'web', path: ['label'], value: 'Ordinary field' }])
+})
