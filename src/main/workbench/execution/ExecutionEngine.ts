@@ -2230,7 +2230,9 @@ export class ExecutionEngine {
             if (parallelReads.has(tool)) await this.execute(active, tool, outcome.value)
           },
         })
-        const directBoundRevision = !limited && active.contentOutput && calls.length === 1
+        // A tool_calls finish requests another model turn. The same first write
+        // can precede other requested work, so it cannot mean task completion.
+        const directBoundRevision = completed.finishReason === 'stop' && active.contentOutput && calls.length === 1
           && calls[0]!.call.name === 'text.replace' && calls[0]!.call.input && typeof calls[0]!.call.input === 'object'
           && !('target' in calls[0]!.call.input)
           && record.tools.filter(tool => tool.origin !== 'host').length === 1 && committed(calls[0]!.result)
