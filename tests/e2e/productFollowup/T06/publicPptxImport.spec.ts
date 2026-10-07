@@ -1,5 +1,5 @@
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import PptxGenJS from 'pptxgenjs'
 import sharp from 'sharp'
@@ -12,6 +12,8 @@ test('T06 public default PPTX import uses the actual converter and keeps text an
   test.setTimeout(180_000)
   const base = join(root, 'output/productFollowup/T06'); mkdirSync(base, { recursive: true })
   const directory = mkdtempSync(join(base, 'public-pptx-')), workspace = join(directory, 'workspace'); mkdirSync(workspace)
+  const checkpoints = join(directory, 'checkpoint.jsonl')
+  const checkpoint = (phase: string, facts: unknown = {}) => appendFileSync(checkpoints, JSON.stringify({ time: new Date().toISOString(), process: 'test', phase, facts }) + '\n')
   const picture = await sharp({ create: { width: 80, height: 50, channels: 4, background: '#1188cc' } }).png().toBuffer()
   const pptx = new PptxGenJS(); pptx.layout = 'LAYOUT_WIDE'
   const slide = pptx.addSlide()
@@ -20,12 +22,17 @@ test('T06 public default PPTX import uses the actual converter and keeps text an
   const source = join(workspace, 'source.pptx'); await pptx.writeFile({ fileName: source })
   let app: ElectronApplication | undefined
   try {
+    checkpoint('launch.before')
     app = await electron.launch({ cwd: root, args: ['.', `--user-data-dir=${join(directory, 'profile')}`],
       env: { ...process.env, VITE_DEV_SERVER_URL: '', COURSEWARE_CLI_DOGFOOD: '', [BACKGROUND_E2E_ENV]: '1' } })
-    await app.firstWindow()
+    checkpoint('launch.returned'); await app.firstWindow(); checkpoint('firstWindow.returned')
     const facts = await app.evaluate(async (_electron, input) => {
-      const path = await import('node:path'), { pathToFileURL } = await import('node:url')
-      const load = (file: string) => import(pathToFileURL(path.join(input.root, 'dist-electron', file)).href)
+      const path = process.getBuiltinModule('node:path'), fs = process.getBuiltinModule('node:fs')
+      const { createRequire } = process.getBuiltinModule('node:module')
+      const requireProduct = createRequire(path.join(input.root, 'package.json'))
+      const log = (phase: string, facts: unknown = {}) => fs.appendFileSync(input.checkpoints, JSON.stringify({ time: new Date().toISOString(), process: 'main', phase, facts }) + '\n')
+      log('evaluate.entered')
+      const load = (file: string) => { log('module.load.before', { file }); const module = requireProduct(path.join(input.root, 'dist-electron', file)); log('module.load.returned', { file }); return module }
       const [{ documentHost }, { ExecutionEngine }, { ExecutionRunStore }, { ExecutionEventStore }, { DocumentHostService }] = await Promise.all([
         load('main/workbench/documentHost.js'), load('main/workbench/execution/ExecutionEngine.js'), load('main/workbench/execution/ExecutionRunStore.js'),
         load('main/workbench/execution/ExecutionEventStore.js'), load('main/workbench/DocumentHostService.js') ])
@@ -43,6 +50,7 @@ test('T06 public default PPTX import uses the actual converter and keeps text an
       }
       const provider = { async *stream(request: any) {
         turn++
+        log('provider.turn', { turn, requestId: request.requestId, lastTool: [...request.messages].reverse().find((message: any) => message.role === 'tool') })
         if (turn === 1) {
           if (!(request.tools ?? []).some((tool: any) => tool.name === 'course.importPptx')) throw new Error('Default public PPTX import tool was hidden')
           yield finish(request, 'course.importPptx', { path: 'source.pptx', destination: 'editable.h5lesson' })
@@ -64,9 +72,11 @@ test('T06 public default PPTX import uses the actual converter and keeps text an
       } }
       const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, files: host.agentFiles, provider,
         runs: new ExecutionRunStore(path.join(input.directory, 'runs')), events: new ExecutionEventStore({ directory: path.join(input.directory, 'events') }) })
+      log('engine.start.before')
       const started = await engine.start({ conversationId: 'pptx', taskId: 'public-import', instruction: '导入PPTX为新的可编辑课件，改写文字并保存。',
         documents: [], selection, permission: 'workspace', workspaceRoot: input.workspace })
-      const finished = await engine.wait(started.runId)
+      log('engine.start.returned', { runId: started.runId })
+      const finished = await engine.wait(started.runId); log('engine.wait.returned', { status: finished.status, failure: finished.failure, tools: finished.tools })
       const snapshot = host.registry.list().find(value => value.binding.kind === 'file' && value.binding.path === path.join(input.workspace, 'editable.h5lesson'))
       if (!snapshot) return { status: finished.status, failure: finished.failure, tools: finished.tools, snapshot: null }
       const imageIds = Object.values(snapshot.model.project.instances).filter((instance: any) => snapshot.model.project.definitions[instance.definitionId]?.implementation?.key === 'guoling.image')
@@ -81,7 +91,7 @@ test('T06 public default PPTX import uses the actual converter and keeps text an
       await host.saveToPath(snapshot.documentId)
       const cold = await new DocumentHostService(path.join(input.directory, 'cold')).open(path.join(input.workspace, 'editable.h5lesson'))
       return { status: finished.status, failure: finished.failure, tools: finished.tools, imported, snapshot, imageIds, undo, undone, redo, redone, cold, originalData, textPath }
-    }, { root, directory, workspace })
+    }, { root, directory, workspace, checkpoints })
     expect(facts.status, JSON.stringify(facts)).toBe('completed')
     expect(facts.tools.map((tool: any) => tool.call.name)).toEqual(['course.importPptx', 'file.open', 'project.list', 'project.read', 'object.update', 'file.save'])
     expect(facts.snapshot).toMatchObject({ dirty: false, undoDepth: 1, model: { kind: 'course-v10' } })
@@ -95,5 +105,11 @@ test('T06 public default PPTX import uses the actual converter and keeps text an
     const archive = openCourseProjectV10Archive(new Uint8Array(readFileSync(join(workspace, 'editable.h5lesson'))))
     expect(JSON.stringify(archive.project.instances)).toContain('Revised imported text')
     writeFileSync(join(directory, 'facts.json'), JSON.stringify({ ...facts, paidCalls: 0 }, null, 2))
-  } finally { await app?.evaluate(({ app }) => app.exit(0)).catch(() => undefined); await app?.close().catch(() => undefined) }
+  } catch (error) {
+    checkpoint('test.error.before-cleanup', { error: String(error), stack: error instanceof Error ? error.stack : undefined }); throw error
+  } finally {
+    const ownedProcess = app?.process(); checkpoint('cleanup.owned-process.kill.before', { pid: ownedProcess?.pid })
+    const killed = ownedProcess?.kill(); checkpoint('cleanup.owned-process.kill.returned', { pid: ownedProcess?.pid, killed })
+    checkpoint('cleanup.app.close.before'); await app?.close().catch(error => checkpoint('cleanup.app.close.error', { error: String(error) })); checkpoint('cleanup.app.close.returned')
+  }
 })

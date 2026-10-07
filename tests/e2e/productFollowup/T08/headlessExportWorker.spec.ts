@@ -1,5 +1,5 @@
 import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { BACKGROUND_E2E_ENV } from '../../../../src/main/windowVisibility'
 
@@ -8,14 +8,21 @@ test('T08 actual hidden export entry reports progress, captures a running source
   test.setTimeout(180_000)
   const base = join(root, 'output/productFollowup/T08'); mkdirSync(base, { recursive: true })
   const directory = mkdtempSync(join(base, 'headless-export-'))
+  const checkpoints = join(directory, 'checkpoint.jsonl')
+  const checkpoint = (phase: string, facts: unknown = {}) => appendFileSync(checkpoints, JSON.stringify({ time: new Date().toISOString(), process: 'test', phase, facts }) + '\n')
   let app: ElectronApplication | undefined
   try {
+    checkpoint('launch.before')
     app = await electron.launch({ cwd: root, args: ['.', `--user-data-dir=${join(directory, 'profile')}`],
       env: { ...process.env, VITE_DEV_SERVER_URL: '', COURSEWARE_CLI_DOGFOOD: '', [BACKGROUND_E2E_ENV]: '1' } })
-    await app.firstWindow()
+    checkpoint('launch.returned'); await app.firstWindow(); checkpoint('firstWindow.returned')
     const facts = await app.evaluate(async ({ BrowserWindow, ipcMain }, input) => {
-      const path = await import('node:path'), fs = await import('node:fs/promises'), { pathToFileURL } = await import('node:url')
-      const load = (file: string) => import(pathToFileURL(path.join(input.root, 'dist-electron', file)).href)
+      const path = process.getBuiltinModule('node:path'), fsBuiltin = process.getBuiltinModule('node:fs'), fs = fsBuiltin.promises
+      const { createRequire } = process.getBuiltinModule('node:module')
+      const requireProduct = createRequire(path.join(input.root, 'package.json'))
+      const log = (phase: string, facts: unknown = {}) => fsBuiltin.appendFileSync(input.checkpoints, JSON.stringify({ time: new Date().toISOString(), process: 'main', phase, facts }) + '\n')
+      log('evaluate.entered')
+      const load = (file: string) => { log('module.load.before', { file }); const module = requireProduct(path.join(input.root, 'dist-electron', file)); log('module.load.returned', { file }); return module }
       const [{ HeadlessDocumentExportWorker }, { documentHost }, { createBlankCourseProjectV10 }, { renderPdfFromHtml }, { IPC_CHANNELS }] = await Promise.all([
         load('main/workbench/delivery/HeadlessDocumentExportWorker.js'), load('main/workbench/documentHost.js'),
         load('core/course/createCourseProjectV10.js'), load('main/pdfExport.js'), load('shared/ipcTypes.js'),
@@ -36,26 +43,31 @@ test('T08 actual hidden export entry reports progress, captures a running source
         if (!String(value?.requestId).startsWith('T08-')) return
         if (value.identity.documentId !== identity.documentId || value.identity.epoch !== identity.epoch || value.identity.revision !== identity.revision) wrongIdentityProgress.push(value)
         progress.push(value)
+        log('worker.progress', value)
         if (value.requestId === 'T08-cancel' && !cancel.signal.aborted) cancel.abort(new Error('User cancelled the real worker build'))
       }
       ipcMain.on('document-export:build-progress', receive)
       try {
+        log('worker.pptx.before')
         const pptx = await producer.build({ requestId: 'T08-pptx', identity, format: 'pptx', snapshot })
+        log('worker.pptx.returned', { status: pptx.status })
         if (pptx.status !== 'generated' || !pptx.files?.length) throw new Error(`Actual PPTX failed: ${JSON.stringify(pptx)}`)
         const pptxFile = path.join(input.directory, 'capture.pptx'); await fs.writeFile(pptxFile, pptx.files[0].bytes)
-        const pdf = await producer.build({ requestId: 'T08-pdf', identity, format: 'pdf', snapshot })
+        log('worker.pdf.before'); const pdf = await producer.build({ requestId: 'T08-pdf', identity, format: 'pdf', snapshot }); log('worker.pdf.returned', { status: pdf.status })
         if (pdf.status !== 'generated' || !pdf.printHtml) throw new Error(`Actual PDF preparation failed: ${JSON.stringify(pdf)}`)
         const pdfBytes = await renderPdfFromHtml(pdf.printHtml), pdfFile = path.join(input.directory, 'capture.pdf'); await fs.writeFile(pdfFile, pdfBytes)
         let cancelled: any
+        log('worker.cancel.before')
         try { cancelled = await producer.build({ requestId: 'T08-cancel', identity, format: 'pptx', snapshot }, cancel.signal) }
         catch (error) { cancelled = { rejected: true, message: String(error) } }
+        log('worker.cancel.returned', cancelled)
         const after = await host.internalAPI.read(snapshot.documentId)
         return { progress, wrongIdentityProgress, cancelled, pptx: { status: pptx.status, byteLength: pptx.files[0].bytes.byteLength, warnings: pptx.warnings },
           pdf: { status: pdf.status, byteLength: pdfBytes.byteLength, header: Buffer.from(pdfBytes).subarray(0, 5).toString() },
           after: { revision: after.revision, undoDepth: after.undoDepth, model: after.model }, original: snapshot.model,
           workerUrls: BrowserWindow.getAllWindows().filter(window => !window.isDestroyed()).map(window => window.webContents.getURL()) }
       } finally { ipcMain.removeListener('document-export:build-progress', receive); producer.dispose() }
-    }, { root, directory })
+    }, { root, directory, checkpoints })
     expect(facts.wrongIdentityProgress).toEqual([])
     for (const id of ['T08-pptx', 'T08-pdf']) {
       const messages = facts.progress.filter((value: any) => value.requestId === id)
@@ -80,5 +92,11 @@ test('T08 actual hidden export entry reports progress, captures a running source
     expect(facts.after).toMatchObject({ revision: 0, undoDepth: 0, model: facts.original })
     expect(facts.workerUrls.some((url: string) => url.endsWith('document-export.html'))).toBe(false)
     writeFileSync(join(directory, 'facts.json'), JSON.stringify({ ...facts, bluePixels, paidCalls: 0 }, null, 2))
-  } finally { await app?.evaluate(({ app }) => app.exit(0)).catch(() => undefined); await app?.close().catch(() => undefined) }
+  } catch (error) {
+    checkpoint('test.error.before-cleanup', { error: String(error), stack: error instanceof Error ? error.stack : undefined }); throw error
+  } finally {
+    const ownedProcess = app?.process(); checkpoint('cleanup.owned-process.kill.before', { pid: ownedProcess?.pid })
+    const killed = ownedProcess?.kill(); checkpoint('cleanup.owned-process.kill.returned', { pid: ownedProcess?.pid, killed })
+    checkpoint('cleanup.app.close.before'); await app?.close().catch(error => checkpoint('cleanup.app.close.error', { error: String(error) })); checkpoint('cleanup.app.close.returned')
+  }
 })

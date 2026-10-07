@@ -34,12 +34,14 @@ test('T05 public Engine uses frozen Main task authorization and real Electron DO
     page.on('pageerror', error => checkpoint('renderer.error', { message: error.message }))
     checkpoint('main.evaluate.before')
     const facts = await app.evaluate(async ({ BrowserWindow, app }, input) => {
-      const path = await import('node:path'), { pathToFileURL } = await import('node:url'), fs = await import('node:fs')
+      const path = process.getBuiltinModule('node:path'), fs = process.getBuiltinModule('node:fs')
+      const { createRequire } = process.getBuiltinModule('node:module')
+      const requireProduct = createRequire(path.join(input.root, 'package.json'))
       const log = (phase: string, facts: unknown = {}) => fs.appendFileSync(input.checkpoints, JSON.stringify({ time: new Date().toISOString(), process: 'main', phase, facts }) + '\n')
       log('imports.before')
       const load = async (file: string) => {
         log('module.load.before', { file })
-        try { const module = await import(pathToFileURL(path.join(input.root, 'dist-electron', file)).href); log('module.load.returned', { file }); return module }
+        try { const module = requireProduct(path.join(input.root, 'dist-electron', file)); log('module.load.returned', { file }); return module }
         catch (error) { log('module.load.error', { file, error: String(error) }); throw error }
       }
       const [{ DocumentHostService }, { ManagedBrowserMcpService }, { BrowserActionApprovals }, { createElectronEmbeddedBrowserFactory },
@@ -173,10 +175,18 @@ test('T05 public Engine uses frozen Main task authorization and real Electron DO
     expect(facts.states).toEqual([expect.objectContaining({ state: 'human' }), expect.objectContaining({ state: 'agent', snapshotId: expect.any(String) })])
     expect(facts.tools.every((tool: any) => !('snapshotId' in tool.input))).toBe(true)
     writeFileSync(join(directory, 'facts.json'), JSON.stringify({ ...facts, posted, paidCalls: 0 }, null, 2))
+  } catch (error) {
+    checkpoint('test.error.before-cleanup', { error: String(error), stack: error instanceof Error ? error.stack : undefined })
+    throw error
   } finally {
-    checkpoint('cleanup.app.before')
-    await app?.evaluate(({ app }) => app.exit(0)).catch(error => checkpoint('cleanup.exit.error', { error: String(error) })); await app?.close().catch(() => undefined)
-    checkpoint('cleanup.app.returned')
+    const ownedProcess = app?.process()
+    checkpoint('cleanup.owned-process.kill.before', { pid: ownedProcess?.pid })
+    const killed = ownedProcess?.kill()
+    checkpoint('cleanup.owned-process.kill.returned', { pid: ownedProcess?.pid, killed })
+    checkpoint('cleanup.app.close.before')
+    await app?.close().catch(error => checkpoint('cleanup.app.close.error', { error: String(error) }))
+    checkpoint('cleanup.app.close.returned')
+    checkpoint('cleanup.server.close.before')
     server.closeAllConnections()
     await new Promise<void>(resolve => server.close(() => resolve()))
     checkpoint('cleanup.server.returned')
