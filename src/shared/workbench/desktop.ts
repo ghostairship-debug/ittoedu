@@ -19,7 +19,7 @@ export interface ReconcileDocumentFile {
 
 const id = z.string().min(1).max(512)
 /** Auxiliary input recovery only. These records never apply a command or enter History. */
-export const advancedDraftRecoverySchema = z.object({ kind: z.enum(['source', 'json']), projectId: id,
+export const advancedDraftRecoverySchema = z.object({ kind: z.enum(['source', 'json', 'surface-content']), projectId: id,
   documentId: id, epoch: id, key: z.string().min(1), payload: jsonValueSchema }).strict()
 export type AdvancedDraftRecovery = z.infer<typeof advancedDraftRecoverySchema>
 export const propertyDraftRecoverySchema = z.object({ bindingKey: z.string().min(1), label: z.string(),
