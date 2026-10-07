@@ -25,6 +25,13 @@ export interface ComponentOuterPresentation {
   childrenStyle: Record<string, string>
 }
 
+/** PM document sections and component projections share this author/playback policy. */
+export function resolveSectionPresentation(data: { collapsedByDefault?: boolean },
+  purpose: ComponentOuterPresentationInput['purpose']): { open: boolean; collapsedByDefault: boolean } {
+  const collapsedByDefault = data.collapsedByDefault === true
+  return { open: purpose === 'author' || !collapsedByDefault, collapsedByDefault }
+}
+
 /** Outer placement only. React, PM and Player retain their DOM and mount ownership. */
 export function resolveComponentOuterPresentation(project: CourseProjectV10, instance: ComponentInstance,
   input: ComponentOuterPresentationInput): ComponentOuterPresentation {
@@ -33,7 +40,7 @@ export function resolveComponentOuterPresentation(project: CourseProjectV10, ins
   const documentBlock = key === 'guoling.document-block'
   const data = instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data : {}
   const section = documentBlock && data.type === 'section'
-    ? { open: input.purpose === 'author' || data.collapsedByDefault !== true, collapsedByDefault: data.collapsedByDefault === true } : null
+    ? resolveSectionPresentation({ collapsedByDefault: data.collapsedByDefault === true }, input.purpose) : null
   const flow = input.placement === 'flow'
   const unframedExtent = flow && !frame && instance.childIds?.length ? flowObjectExtent(project, instance.id) : null
   const layoutInput = componentLayoutInput(instance, { kind: flow ? 'flow' : 'free-frame', inlineSize: input.inlineSize, definition, viewport: unframedExtent ?? undefined })
