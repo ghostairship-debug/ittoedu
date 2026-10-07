@@ -201,7 +201,9 @@ export interface DesktopAPI {
   onRequestSave(handler: () => void): () => void
   onRequestFocusDocument?(handler: (documentId: string) => void): () => void
   onRequestPreserveAndClose?(handler: () => Promise<PreserveAndCloseResult>): () => void
-  onRequestSaveAndClose(handler: () => Promise<boolean>): () => void
+  onRequestSaveAndClose(handler: () => Promise<PreserveAndCloseResult>): () => void
+  onRequestDiscardAndClose?(handler: (documentIds: readonly string[]) => Promise<boolean>): () => void
+  onRequestResumeClose?(handler: () => void): () => void
   reportDiagnostic(input: {
     source: 'renderer' | 'preview' | 'component'
     message: string
@@ -282,6 +284,9 @@ export const IPC_CHANNELS = {
   launchFilesChanged: 'app:launch-files-changed',
   requestFocusDocument: 'app:request-focus-document',
   requestSaveAndClose: 'app:request-save-and-close',
+  requestDiscardAndClose: 'app:request-discard-and-close',
+  discardAndCloseResult: 'app:discard-and-close-result',
+  requestResumeClose: 'app:request-resume-close',
   requestPreserveAndClose: 'app:request-preserve-and-close',
   preserveAndCloseResult: 'app:preserve-and-close-result',
   saveAndCloseResult: 'app:save-and-close-result',

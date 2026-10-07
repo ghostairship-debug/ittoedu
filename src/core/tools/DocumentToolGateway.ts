@@ -144,8 +144,7 @@ export class DocumentToolGateway implements ToolGateway {
       source: async (runId, from, snapshot) => {
         const run = this.run(runId), port = this.options.componentContent
         if (run.stopped || !port) throw new ToolError('service-unavailable', '内容源服务不可用')
-        const image = this.images.get(from)
-        if (image) {
+        if (this.images.has(from) || this.hostTools.parseStandaloneImageReference(from)) {
           const file = await this.readImageResource(runId, snapshot.documentId, from)
           return { filename: file.filename, bytes: file.bytes }
         }
@@ -165,7 +164,7 @@ export class DocumentToolGateway implements ToolGateway {
       documentDigest({ documentId: baseline.documentId, epoch: baseline.epoch, revision: baseline.revision, request: input }), baseline, request)
   }
 
-  private applyComponentContentOperation(runId: string, operationId: string, requestDigest: string,
+  private async applyComponentContentOperation(runId: string, operationId: string, requestDigest: string,
     baseline: ComponentProjectSnapshot, request: ContentApplyRequest): Promise<ContentApplyResult> {
     const run = this.run(runId), port = this.options.componentContent
     this.captureOperationLeases(runId, operationId)
@@ -179,7 +178,15 @@ export class DocumentToolGateway implements ToolGateway {
     }
     assertActive()
     const readExpectations = this.contentReadExpectations(runId, this.registry.get(baseline.documentId).read())
-    return port.apply({ runId, runLeaseId, operationId, requestDigest, baseline, request, actor: run.grant.actor, readExpectations, assertActive })
+    const unwatch = this.registry.get(baseline.documentId).subscribeCommits(({ operation, result, before, after }) => {
+      if (operation.runId !== runId || operation.operationId !== operationId || operation.epoch !== baseline.epoch
+        || result.status !== 'applied' || operation.mutation.type !== 'command'
+        || operation.mutation.command.type !== 'component-platform.apply') return
+      this.recordAppliedFootprints(runId, { ...baseline, revision: result.beforeRevision, model: before }, after, result.revision, [], [])
+    })
+    try {
+      return await port.apply({ runId, runLeaseId, operationId, requestDigest, baseline, request, actor: run.grant.actor, readExpectations, assertActive })
+    } finally { unwatch() }
   }
 
   /** Main finishes service wiring once, before any task has started. */
@@ -585,6 +592,8 @@ export class DocumentToolGateway implements ToolGateway {
     if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
     this.authorizeDocument(run, snapshot)
     const resource = this.images.get(resourceId)
+    if (!resource && this.hostTools.parseStandaloneImageReference(resourceId))
+      return this.hostTools.readStandaloneImageReference(runId, resourceId)
     if (!resource && snapshot.model.kind === 'course-v10' && this.handles.has(resourceId)) {
       const handle = this.handle(runId, resourceId)
       if (handle.documentId !== documentId || handle.epoch !== snapshot.epoch) throw new ToolError('invalid-resource', '参考图不属于当前任务/文档')
@@ -1060,7 +1069,7 @@ export class DocumentToolGateway implements ToolGateway {
     const { snapshot, file } = this.componentProjectFiles.captureFile(runId, current, input.path)
     const placement = this.componentAssetPlacement(snapshot, file)
     const image = await this.readImageResource(runId, snapshot.documentId, input.from)
-    const source = this.images.get(input.from)!.source
+    const source = this.images.get(input.from)?.source
     if (!this.options.prepareImage) throw new ToolError('unsupported-resource-preparation', '当前宿主未配置图片解码能力')
     const intent = input.intent ?? 'content'
     const instance = file.target?.kind === 'instance' ? snapshot.model.project.instances[file.target.instanceId] : undefined
@@ -1263,7 +1272,8 @@ export class DocumentToolGateway implements ToolGateway {
       if (name === 'project.apply') {
         const parsed = componentProjectFileSchemas[name].parse(input)
         this.contentReadExpectations(runId, await this.componentProjectDocument(runId, parsed.project, 'write'))
-        if ('from' in parsed && this.images.has(parsed.from)) return this.applyImageResourceFile(runId, operationId, requestDigest, parsed)
+        if ('from' in parsed && (this.images.has(parsed.from) || this.hostTools.parseStandaloneImageReference(parsed.from)))
+          return this.applyImageResourceFile(runId, operationId, requestDigest, parsed)
       }
       const result = await this.componentProjectFiles.execute(runId, operationId, requestDigest, name, input)
       if (name === 'project.read' && result.kind === 'read') {

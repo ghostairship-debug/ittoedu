@@ -6,6 +6,7 @@ import { HtmlLightEditOverlay } from '../../src/renderer/documentFiles/html/Html
 import { HtmlTextDrafts } from '../../src/renderer/documentFiles/html/htmlTextDrafts'
 import type { HtmlSelectedTarget } from '../../src/renderer/documentFiles/html/htmlPreviewController'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
+import { locateHtmlSourceTarget } from '../../src/main/workbench/htmlPreview/htmlSourceLocator'
 
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} }) })
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); document.body.innerHTML = '' })
@@ -26,7 +27,7 @@ const committed: DocumentSnapshot = { documentId: 'doc', epoch: 'epoch', revisio
   binding: { kind: 'file', path: '/lesson.html', version: 'v1', bindingVersion: 1 },
   dirty: false, saving: false, recoverable: true, undoDepth: 0, redoDepth: 0 }
 
-it('keeps author clicks working in preview and suppresses both clicks before editing a button label', () => {
+it('keeps author clicks working in preview and reports each intercepted click on a button label', () => {
   document.body.innerHTML = '<button id="preview">页面动作</button><button id="edit">编辑标题</button><input type="checkbox">'
   const preview = document.querySelector<HTMLButtonElement>('#preview')!
   const edit = document.querySelector<HTMLButtonElement>('#edit')!
@@ -57,7 +58,7 @@ it('keeps author clicks working in preview and suppresses both clicks before edi
     expect(delegatedAction).toHaveBeenCalledOnce()
     expect(edit.textContent).toBe('编辑标题')
     expect(posted.mock.calls.map(call => call[0]).filter(value => value.event === 'targets'))
-      .toEqual([expect.objectContaining({ targets: [expect.objectContaining({ rawText: '编辑标题', scriptCreated: false })] })])
+      .toEqual(Array.from({ length: 2 }, () => expect.objectContaining({ targets: [expect.objectContaining({ rawText: '编辑标题', scriptCreated: false })] })))
     // The caret lookup can return nearby text when the actual click was on a control.
     const checkbox = document.querySelector('input')!
     fireEvent.click(checkbox)
@@ -70,6 +71,56 @@ it('keeps author clicks working in preview and suppresses both clicks before edi
   } finally {
     dispose()
     document.removeEventListener('click', delegatedAction, true)
+    Reflect.deleteProperty(document, 'caretPositionFromPoint')
+    Reflect.deleteProperty(Range.prototype, 'getBoundingClientRect')
+  }
+})
+
+it('shows confirmed source ranges on entry, hover and single click, then restores page interaction on exit', () => {
+  const html = '<html><head></head><body><button id="label">页面动作</button><p id="dynamic">计数 0</p></body></html>'
+  document.body.innerHTML = '<button id="label">页面动作</button><p id="dynamic">计数 0</p>'
+  const label = document.querySelector<HTMLButtonElement>('#label')!
+  const dynamic = document.querySelector<HTMLParagraphElement>('#dynamic')!
+  const action = vi.fn()
+  label.onclick = action
+  let pointed = label.firstChild
+  Object.defineProperty(document, 'caretPositionFromPoint', { configurable: true, value: () => ({ offsetNode: pointed, offset: 0 }) })
+  Object.defineProperty(Range.prototype, 'getBoundingClientRect', { configurable: true,
+    value: () => ({ x: 5, y: 5, width: 80, height: 20 }) })
+  const posted = vi.spyOn(window.parent, 'postMessage').mockImplementation(() => {})
+  const dispose = mountHtmlPreviewAgent(document)
+  const command = (data: object) => window.dispatchEvent(new MessageEvent('message', { source: window.parent, data }))
+  try {
+    dynamic.textContent = '计数 1'
+    command({ type: 'html-preview.init', leaseId: 'lease', loadId: 'load' })
+    command({ type: 'html-preview.edit-mode', loadId: 'load', requestId: 'on', enabled: true })
+    const discovery = posted.mock.calls.map(call => call[0]).find(message => message.event === 'edit-targets')!
+    const resolved = discovery.targets.map((report: HtmlSelectedTarget['report']) => locateHtmlSourceTarget(html, report,
+      { documentId: 'doc', epoch: 'epoch', revision: 1, bindingVersion: 1 }))
+    expect(resolved).toEqual([expect.objectContaining({ status: 'editable' }), expect.objectContaining({ status: 'not-editable', reason: 'script-created' })])
+    const root = document.querySelector<HTMLElement>('[data-html-preview-edit-markers]')!.shadowRoot!
+    expect(root.querySelectorAll('[data-html-preview-edit-target]')).toHaveLength(0)
+    command({ type: 'html-preview.confirm-targets', loadId: 'load', scanId: discovery.scanId,
+      handles: resolved.filter((target: { status: string }) => target.status === 'editable').map((target: { handle: string }) => target.handle) })
+    expect(root.querySelectorAll('[data-editable="true"]')).toHaveLength(1)
+    expect((root.querySelector('[data-editable="true"]') as HTMLElement).style.borderStyle).toBe('dashed')
+    fireEvent.mouseMove(label)
+    expect(root.querySelector('[data-state="hovered"]')).not.toBeNull()
+    fireEvent.click(label)
+    expect(action).not.toHaveBeenCalled()
+    expect(root.querySelector('[data-state="selected"][data-editable="true"]')).not.toBeNull()
+    expect(posted.mock.calls.map(call => call[0]).filter(message => message.event === 'targets')).toHaveLength(1)
+    pointed = dynamic.firstChild
+    fireEvent.click(dynamic)
+    expect(root.querySelector('[data-state="selected"][data-editable="false"]')).not.toBeNull()
+    command({ type: 'html-preview.edit-mode', loadId: 'load', requestId: 'off', enabled: false })
+    command({ type: 'html-preview.confirm-targets', loadId: 'load', scanId: discovery.scanId, handles: [discovery.targets[0].handle] })
+    expect(document.querySelector('[data-html-preview-edit-markers]')).toBeNull()
+    pointed = label.firstChild
+    fireEvent.click(label)
+    expect(action).toHaveBeenCalledOnce()
+  } finally {
+    dispose()
     Reflect.deleteProperty(document, 'caretPositionFromPoint')
     Reflect.deleteProperty(Range.prototype, 'getBoundingClientRect')
   }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { ComponentEdit, CourseProjectV10, ComponentInstance, JsonValue } from '../../shared/contracts/component-platform'
+import type { ComponentEdit, ComponentFrame, CourseProjectV10, ComponentInstance, JsonValue } from '../../shared/contracts/component-platform'
 import { componentDefinitionBuiltinKey,resolveComponentBackground, owningContainer, containerChildIds, isComponentVisibleAtSurface, resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
 import { layoutTable } from '../../components/table/render'
 import { parseTableData } from '../../components/table/data'
@@ -21,7 +21,8 @@ import { serializeDocumentMarkdown, type MarkdownDocument } from '../../shared/d
 import type { DocumentOperation } from '../document/editorSession'
 import type { FlowParagraphBlockRect } from '../../shared/flowParagraphAnchors'
 import { flowParagraphAnchorAt, flowParagraphAnchoredFrame } from '../../shared/flowParagraphAnchors'
-import { createFlowViewportGeometry, projectFlowComponentControllerFrame } from '../../shared/flowViewportGeometry'
+import { createFlowViewportGeometry } from '../../shared/flowViewportGeometry'
+import { isGlobalTeacherController, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits } from '../../shared/teacherControllerViewportGeometry'
 import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, flowPaperMaxWidth } from '../../shared/flowBodyPresentation'
 import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../document'
 import { observeFlowParagraphLayout, measureFlowParagraphLayout } from './flow/flowParagraphLayout'
@@ -30,7 +31,11 @@ import { flowSurface } from '../componentPlatform/surfaces/flow/model'
 import { useCourseV10Runtime } from '../components/CourseV10RuntimeView'
 import { componentPaintStyle,applyComponentPaintStyle } from '../../player/components/componentPlacementStyle'
 import { PlaybackViewSession } from '../../player/playbackViewSession'
-import { TeacherControllerAuthoringChrome } from './TeacherControllerAuthoringChrome'
+import { NativeSelectionContext } from '../workbench/NativeSelectionContext'
+import { proEditorRailController } from './proEditorRailController'
+import { useCourseEditorChrome } from '../documents/CourseEditorChromeContext'
+import { SlideLayerSelectionOverlay } from './workspaces/SlideLayerSelectionOverlay'
+import { FreeTransformGesture, freeSurfaceTargets, type FreeResizeHandle } from '../componentPlatform/surfaces/slide'
 import type { WorkspaceMediaDropHandler } from '../lessonWorkspace/workspaceMediaDrop'
 import type { ImportedImageAsset } from '../project/assetManager'
 import { useEditorStore } from '../store/editorStore'
@@ -69,6 +74,7 @@ export interface FlowWorkspaceProps {
 /** Original paper/editor/chrome, projected directly from V10. The shared editor keeps text focus and IME. */
 export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer, readOnly = false, onDropWorkspaceMedia, onSelectImageAsset, onSelectMediaAsset, onStatus }: FlowWorkspaceProps) {
   const runtime = useCourseV10Runtime()
+  const chrome = useCourseEditorChrome()
   const bridge = useEditorStore(state => state.courseBridge)
   const kernel = useEditorStore(state => state.courseKernel)
   const mimeTypes = useMemo(() => Object.fromEntries(Object.values(project.assets).map(asset => [asset.id, asset.mimeType ?? 'application/octet-stream'])), [project.assets])
@@ -89,6 +95,11 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
   const observationMount=useRef<HTMLDivElement>(null),observationRoot=useRef<HTMLDivElement>(null),observationContent=useRef<HTMLDivElement>(null)
   const viewSession=useRef<PlaybackViewSession|null>(null),[observationHost,setObservationHost]=useState<HTMLElement|null>(null)
   const [viewport,setViewport]=useState({width:0,height:0})
+  const [controllerPreview, setControllerPreview] = useState<Record<string, ComponentFrame>>({})
+  const controllerGesture = useRef<{ pointerId: number; start: { x: number; y: number }; moved: boolean; captured: CapturedCourseTarget;
+    original: CourseProjectV10; display: CourseProjectV10; viewport: typeof viewport; offset: { x: number; y: number }; value: FreeTransformGesture; edits: ComponentEdit[] } | null>(null)
+  const [, refreshNavigation] = useState(0)
+  useEffect(() => runtime.navigation.subscribe?.(() => refreshNavigation(value => value + 1)), [runtime.navigation])
   const [formatHost, setFormatHost] = useState<HTMLDivElement | null>(null)
   const [formatHeight, setFormatHeight] = useState(0)
   useLayoutEffect(() => {
@@ -260,8 +271,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     })
     return () => { releaseFocus(); releaseSelection() }
   }, [documentId, surfaceId, project.revision])
-  const edit = async (edits: ComponentEdit[]) => {
-    const target = bridge.captureTarget(documentId)
+  const edit = async (edits: ComponentEdit[], target = bridge.captureTarget(documentId)) => {
     const ready = await drain()
     if (!ready.ok) { setError(ready.reason ?? '请先完成当前正文输入'); return }
     try { assertFlowStructureEditsAllowed(target.editingProject, edits); await bridge.editCaptured(bridge.capture(edits,target)) }
@@ -313,8 +323,44 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
   const floating = surface.childIds.filter(id => project.instances[id]?.flowPlacement)
   const globals = [...project.global.underlay, ...project.global.overlay].filter(id=>isComponentVisibleAtSurface(project.instances[id],surfaceId))
   const teacherChrome = (id:string) => {
-    const instance=project.instances[id],definition=project.definitions[instance.definitionId]
-    return globals.includes(id) && componentDefinitionBuiltinKey(definition)==='guoling.navigation'
+    return isGlobalTeacherController(project, id)
+  }
+  const controllerBaseProjection = projectTeacherControllerInstances(project, viewport, undefined, runtime.navigation)
+  const controllerProjection = Object.keys(controllerPreview).length ? { ...controllerBaseProjection,
+    instances: Object.fromEntries(Object.entries(controllerBaseProjection.instances).map(([id, instance]) =>
+      [id, controllerPreview[id] ? { ...instance, frame: controllerPreview[id] } : instance])) } : controllerBaseProjection
+  const selectedControllerTargets = freeSurfaceTargets(controllerProjection, surfaceId).filter(target => runtime.selectedInstanceIds.includes(target.instanceId)
+    && teacherChrome(target.instanceId) && !flowStructureDisabledReason(project, target.instanceId))
+  const controllerPointerMatrix = (): [number, number, number, number, number, number] => {
+    const box = workspace.current?.getBoundingClientRect()
+    return [1, 0, 0, 1, box?.left ?? 0, (box?.top ?? 0) + formatHeight]
+  }
+  const beginControllerResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    const handle = event.target instanceof Element ? event.target.closest('[data-handle]')?.getAttribute('data-handle') : null
+    if (readOnly || event.button !== 0 || !handle || !selectedControllerTargets.length) return
+    event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId)
+    controllerGesture.current = { pointerId: event.pointerId, start: { x: event.clientX, y: event.clientY }, moved: false,
+      captured: bridge.captureTarget(documentId), original: project, display: controllerBaseProjection, viewport,
+      offset: runtime.navigation.placement?.() ?? { x: 0, y: 0 }, edits: [], value: new FreeTransformGesture({
+        mode: handle === 'rotate' ? 'rotate' : 'resize', handle: handle === 'rotate' ? undefined : handle as FreeResizeHandle,
+        targets: selectedControllerTargets, pointer: { x: event.clientX, y: event.clientY }, surfaceToPointer: controllerPointerMatrix() }) }
+  }
+  const moveControllerResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    const gesture = controllerGesture.current
+    if (!gesture || gesture.pointerId !== event.pointerId) return
+    if (!gesture.moved && Math.hypot(event.clientX - gesture.start.x, event.clientY - gesture.start.y) < 3) return
+    gesture.moved = true
+    gesture.edits = gesture.value.update({ x: event.clientX, y: event.clientY }, { shift: event.shiftKey, alt: event.altKey }).edits
+    setControllerPreview(Object.fromEntries(gesture.edits.flatMap(value => value.type === 'frame.set' && value.frame ? [[value.instanceId, value.frame]] : [])))
+  }
+  const finishControllerResize = (event: React.PointerEvent<HTMLDivElement>, cancel = false) => {
+    const gesture = controllerGesture.current
+    if (!gesture || gesture.pointerId !== event.pointerId) return
+    if (!cancel) moveControllerResize(event)
+    controllerGesture.current = null; setControllerPreview({})
+    if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+    if (!cancel && gesture.moved && gesture.edits.length) void edit(restoreTeacherControllerFrameEdits(gesture.edits, gesture.original,
+      gesture.display, gesture.viewport, undefined, gesture.offset, runtime.navigation), gesture.captured)
   }
   const mediaKind = (instance: ComponentInstance,owner=project): FlowMediaKind | undefined => {
     const key = componentDefinitionBuiltinKey(owner.definitions[instance.definitionId])
@@ -364,7 +410,12 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
         {type:'instance.flowPlacement.set',instanceId:id,flowPlacement:{space:'paper',plane:'overlay'}},
         ...(owningContainer(target.project,id)?.kind==='instance' ? [{type:'instance.move' as const,instanceId:id,container:{kind:'surface' as const,surfaceId},index:containerChildIds(target.project,{kind:'surface',surfaceId}).length}]:[])])),
     } : undefined
-    return { block:{instance,mediaKind:kind,structureDisabledReason},commands,replaceMedia:replace,mediaTools:tools }
+    return { block:{instance,mediaKind:kind,structureDisabledReason},commands,replaceMedia:replace,mediaTools:tools,
+      openProperties: () => {
+        runtime.selectInstances([id], surfaceId)
+        const state = useEditorStore.getState()
+        chrome.setMode('deep'); state.setActiveTab('properties'); proEditorRailController.open('properties')
+      } }
   }
   const background = resolveComponentBackground(project,surface)
   const drop = (event: React.DragEvent<HTMLElement>) => {
@@ -399,6 +450,14 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       event.preventDefault();event.stopPropagation();runtime.selectInstances([instance.id],surfaceId)
       beginContentEdit(instance.id,'canvas')
     }}>
+    {!readOnly && runtime.selectedInstanceIds.length > 0 && runtime.selectedInstanceIds.every(id => globals.includes(id) || floating.includes(id))
+      && <NativeSelectionContext documentId={documentId} revision={project.revision} surfaceId={surfaceId} itemIds={runtime.selectedInstanceIds} enabled />}
+    {!readOnly && selectedControllerTargets.length > 0 && <div data-flow-controller-selection="true"
+      style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 8 }}
+      onPointerDown={beginControllerResize} onPointerMove={moveControllerResize} onPointerUp={event => finishControllerResize(event)}
+      onPointerCancel={event => finishControllerResize(event, true)} onLostPointerCapture={event => finishControllerResize(event, true)}>
+      <SlideLayerSelectionOverlay targets={selectedControllerTargets} scale={1} surfaceToPointer={controllerPointerMatrix()} />
+    </div>}
     <div ref={setFormatHost} className="flow-document-format-host" style={{ left: 8, right: 8 }} />
     <div ref={observationMount} style={{position:'absolute',inset:`${formatHeight}px 0 0`}} data-page-backdrop="transparent" />
     {observationHost && createPortal(<div ref={observationRoot} data-flow-observation-root="true">
@@ -534,10 +593,11 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       viewport={viewport}
       onSelect={() => runtime.selectInstances([id], surfaceId)} onEdits={edit} onElement={runtime.onElement} onTargetElement={runtime.onTargetElement} />)}
     </div>
-    {globals.filter(teacherChrome).map(id=><FlowFloatingInstance key={id} project={project} instanceId={id}
+    {globals.filter(teacherChrome).map(id=><FlowFloatingInstance key={id} project={controllerProjection} instanceId={id}
       selected={runtime.selectedInstanceIds.includes(id)} readOnly={readOnly} paperWidth={paperLayout.width} paragraphRects={paperLayout.rects}
       globalPlane={project.global.underlay.includes(id) ? 'underlay':'overlay'} viewport={viewport}
-      onSelect={()=>runtime.selectInstances([id],surfaceId)} onEdits={edit} onElement={runtime.onElement} onTargetElement={runtime.onTargetElement}/>)}
+      onSelect={()=>runtime.selectInstances([id],surfaceId)} onEdits={edits => edit(restoreTeacherControllerFrameEdits(edits, project, controllerProjection, viewport,
+        undefined, runtime.navigation.placement?.() ?? { x: 0, y: 0 }, runtime.navigation))} onElement={runtime.onElement} onTargetElement={runtime.onTargetElement}/>)}
     </div>,observationHost)}
     {!readOnly && contentDraft?.source==='canvas' && contentDraft.target.documentId===documentId && contentDraft.target.surfaceId===surfaceId
       && <FlowProfessionalDraftEditor key={`${contentDraft.target.epoch}:${contentDraft.instanceId}`} project={project} draft={contentDraft}
@@ -600,20 +660,16 @@ function FlowFloatingInstance({ project, instanceId, selected, readOnly, paperWi
   const runtime=useCourseV10Runtime()
   const instance = project.instances[instanceId], placement = instance?.flowPlacement
   const definition=project.definitions[instance.definitionId]
-  const authorController=!readOnly && !instance.implementationOverride && definition?.implementation.kind==='builtin' && definition.implementation.key==='guoling.navigation'
+  const controller = isGlobalTeacherController(project, instanceId)
   const [preview, setPreview] = useState<typeof instance.frame | null>(null)
-  const drag = useRef<{ x: number; y: number; frame: NonNullable<typeof instance.frame>; resize: boolean; point(value:{x:number;y:number}):{x:number;y:number} } | null>(null)
-  const bind = useCallback((element: HTMLDivElement | null) => onElement(instanceId, authorController ? null:element), [instanceId, onElement,authorController])
+  const drag = useRef<{ x: number; y: number; frame: NonNullable<typeof instance.frame>; resize: boolean; point(value:{x:number;y:number}):{x:number;y:number}; preview?: NonNullable<typeof instance.frame> } | null>(null)
+  const bind = useCallback((element: HTMLDivElement | null) => onElement(instanceId, element), [instanceId, onElement])
   const target = useCallback((element: HTMLDivElement | null) => onTargetElement(instanceId, element), [instanceId, onTargetElement])
   if (!instance?.frame) return null
   const stored = preview ?? instance.frame
   const anchored = placement?.space === 'paper' && placement.paragraphAnchor
     ? flowParagraphAnchoredFrame(placement.paragraphAnchor, { x: stored.transform[4], y: stored.transform[5], width: stored.width, height: stored.height }, paperWidth, paragraphRects) : null
-  const implementation=project.definitions[instance.definitionId]?.implementation
-  const controller=globalPlane && implementation?.kind==='builtin' && implementation.key==='guoling.navigation' && viewport && viewport.width>0 && viewport.height>0
-    ? projectFlowComponentControllerFrame({x:stored.transform[4],y:stored.transform[5],width:stored.width,height:stored.height},viewport):null
-  const frame = controller && !preview ? {...stored,width:controller.width,height:controller.height,transform:[...stored.transform.slice(0,4),controller.x,controller.y] as typeof stored.transform}
-    : anchored && !preview ? { ...stored, transform: [...stored.transform.slice(0, 4), anchored.x, anchored.y] as typeof stored.transform } : stored
+  const frame = anchored && !preview ? { ...stored, transform: [...stored.transform.slice(0, 4), anchored.x, anchored.y] as typeof stored.transform } : stored
   const structureDisabledReason = flowStructureDisabledReason(project, instanceId)
   const updatePlacement = (value: typeof placement | null) => onEdits([{ type: 'instance.flowPlacement.set', instanceId, flowPlacement: value ?? null }])
   const begin = (event: React.PointerEvent, resize: boolean) => {
@@ -624,14 +680,28 @@ function FlowFloatingInstance({ project, instanceId, selected, readOnly, paperWi
     const point=geometry.clientToViewport({x:event.clientX,y:event.clientY})
     drag.current = { ...point, frame, resize,point:geometry.clientToViewport }
   }
-  return <div ref={target} data-flow-overlay-id={instanceId} data-component-render={instanceId} data-component-instance={instanceId} data-component-placement="free" data-playback-bounds="true"
+  const moveController = (event: React.PointerEvent) => {
+    const start = drag.current; if (!controller || !start) return
+    const point = start.point({ x: event.clientX, y: event.clientY })
+    if (Math.hypot(point.x - start.x, point.y - start.y) < 3 && !start.preview) return
+    start.preview = { ...start.frame, transform: [...start.frame.transform.slice(0, 4), start.frame.transform[4] + point.x - start.x, start.frame.transform[5] + point.y - start.y] as typeof frame.transform }
+    setPreview(start.preview)
+  }
+  const finishController = (cancel = false) => {
+    if (!controller || !drag.current) return
+    const next = drag.current.preview; drag.current = null; setPreview(null)
+    if (!cancel && next) onEdits([{ type: 'frame.set', instanceId, frame: next }])
+  }
+  return <div ref={target} data-flow-overlay-id={instanceId} data-component-instance={instanceId} data-controller-authoring-id={controller ? instanceId : undefined} data-component-placement="free" data-playback-bounds="true"
     style={{ ...componentPaintStyle(instance,project.definitions[instance.definitionId]), position: 'absolute', left: 0, top: 0, width: frame.width, height: frame.height,
       transform: `matrix(${frame.transform.join(',')})`, transformOrigin: '0 0', zIndex: (globalPlane ?? placement?.plane) === 'underlay' ? 1 : 4,
       display: instance.visible === false ? 'none' : undefined, outline: selected ? '2px solid #2563eb' : undefined }}
-    onPointerDown={event => { event.stopPropagation(); onSelect() }}>
-    <div ref={bind} style={{ width: '100%', height: '100%' }}>{authorController && <TeacherControllerAuthoringChrome item={instance} definition={definition}/>}</div>
+    onPointerDownCapture={event => { if (controller && !readOnly && event.button === 0) begin(event, false) }}
+    onPointerMove={moveController} onPointerUp={() => finishController()} onPointerCancel={() => finishController(true)} onLostPointerCapture={() => finishController(true)}
+    onPointerDown={event => { if (!readOnly) { event.stopPropagation(); onSelect() } }}>
+    <div ref={bind} data-component-render={instanceId} style={{ width: '100%', height: '100%' }} />
     {instance.childIds?.map(id=>runtime.renderInstance(id,project,'free'))}
-    {!readOnly && selected && <>
+    {!readOnly && selected && !controller && <>
       <div className="flow-overlay-toolbar" data-flow-selection-preserving-target="true" style={{ position: 'absolute', top: -28, display: 'flex', gap: 4, background: '#fff', whiteSpace: 'nowrap' }}>
         <button type="button" disabled={Boolean(structureDisabledReason)} title={structureDisabledReason ?? undefined} onPointerDown={event => begin(event, false)} onPointerMove={event => {
           const start = drag.current; if (!start) return

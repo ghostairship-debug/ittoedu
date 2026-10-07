@@ -310,6 +310,21 @@ it('M25 retries a failed initialization on the next explicit operation; document
   expect(recover).toHaveBeenCalledTimes(1)
 })
 
+it('queries a clean document without waiting for unrelated background recovery', async () => {
+  const { service, workspace, document } = await fixture()
+  let finishRecovery!: () => void
+  const pendingRecovery = new Promise<void>(resolve => { finishRecovery = resolve })
+  const recover = vi.spyOn(service.engine, 'recover').mockImplementation(async () => { await pendingRecovery; return [] })
+  try {
+    await service.operate({ type: 'workspace', root: workspace })
+    expect(recover).toHaveBeenCalledTimes(1)
+    expect(await service.writableTasksForDocument(document.documentId)).toEqual({ runIds: [], submissionIds: [] })
+  } finally {
+    finishRecovery()
+    await service.shutdown()
+  }
+})
+
 it('M25 retires an orphan active submission without resurrecting its conversation or replaying its unknown request', async () => {
   const forbiddenFetch = vi.fn(async () => { throw new Error('No model call during recovery') })
   const { root, workspace, filename, documents, document, settings, service } = await fixture(forbiddenFetch)

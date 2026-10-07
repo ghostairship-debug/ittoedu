@@ -390,6 +390,39 @@ it('M30 accepts edit-mode ACK only from the current load and latest command', ()
   frame.remove()
 })
 
+it('confirms only source-editable ranges and ignores discovery results after leaving edit mode', async () => {
+  const frame = document.createElement('iframe')
+  document.body.append(frame)
+  const posted = vi.spyOn(frame.contentWindow!, 'postMessage')
+  let finish!: (value: object) => void
+  const workspaceFiles = vi.fn().mockResolvedValueOnce({ revision: 1, targets: [
+    { handle: 'text', status: 'editable' }, { handle: 'dynamic', status: 'not-editable', reason: 'script-created' },
+  ] }).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  Object.defineProperty(window, 'desktopAPI', { configurable: true, value: { workspaceFiles } })
+  const controller = new HtmlPreviewController(frame, { leaseId: 'lease', loadId: 'load', documentId: 'doc',
+    epoch: 'epoch', revision: 1, bindingVersion: 1, url: 'courseware-preview://app/token/file/lesson.html' }, {
+    onTarget: vi.fn(), onReady: vi.fn(), onEditModeReady: vi.fn(), onPage: vi.fn(), onEditing: vi.fn(),
+    onApplied: vi.fn(), onEditSettled: vi.fn(), onPatchMismatch: vi.fn(),
+  })
+  const report = { handle: 'text', kind: 'text', domPath: [{ name: 'html', index: 0 }], sectionOrder: null,
+    rawText: 'old', attributeName: null, rect: { x: 0, y: 0, width: 40, height: 20 }, scriptCreated: false }
+  const discovery = (seq: number, scanId: string) => window.dispatchEvent(new MessageEvent('message', {
+    source: frame.contentWindow, data: { event: 'edit-targets', protocol: 1, leaseId: 'lease', loadId: 'load', seq, scanId,
+      targets: [report, { ...report, handle: 'dynamic', scriptCreated: true }] },
+  }))
+  try {
+    controller.setEditMode(true)
+    discovery(1, 'scan-1')
+    await waitFor(() => expect(posted).toHaveBeenCalledWith({ type: 'html-preview.confirm-targets', loadId: 'load', scanId: 'scan-1', handles: ['text'] }, '*'))
+    discovery(2, 'scan-2')
+    expect(workspaceFiles).toHaveBeenCalledTimes(2)
+    controller.setEditMode(false)
+    finish({ revision: 1, targets: [{ handle: 'text', status: 'editable' }] })
+    await Promise.resolve(); await Promise.resolve()
+    expect(posted.mock.calls.filter(call => call[0].type === 'html-preview.confirm-targets')).toHaveLength(1)
+  } finally { controller.dispose(); frame.remove() }
+})
+
 it.each([
   ['density', '<img src="old.png" srcset="hero.webp 1x, fallback.png 2x" sizes="80vw">',
     '<img src="$new" srcset="$new 1x, $new 2x" sizes="80vw">', true],

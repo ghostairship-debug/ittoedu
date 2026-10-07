@@ -3,7 +3,7 @@ import { resolveComponentBackground, isComponentVisibleAtSurface, componentDefin
 import { flowObjectExtent } from '../../core/components/geometry/flowObjectExtent'
 import { componentLayoutInput } from '../../components/web/measuredFragmentBox'
 import { transformPoint } from '../../core/components/geometry'
-import { projectFlowComponentControllerFrame } from '../../shared/flowViewportGeometry'
+import { isGlobalTeacherController, projectTeacherControllerInstances, type TeacherControllerDisplayPort } from '../../shared/teacherControllerViewportGeometry'
 import { flowParagraphAnchoredFrame, type FlowParagraphBlockRect } from '../../shared/flowParagraphAnchors'
 import { FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, flowPaperMaxWidth, FLOW_BODY_FONT_FAMILY } from '../../shared/flowBodyPresentation'
 import { resolveFlowMediaLayoutProjection } from '../../shared/flowMediaLayout'
@@ -20,7 +20,7 @@ import { applyComponentPaintStyle } from '../components/componentPlacementStyle'
 import { PlaybackViewSession, createPlaybackContent } from '../playbackViewSession'
 import type { ComponentPlayerProjection, ComponentPlayerModel, ComponentPlayerObservation } from './ModelPlayer'
 
-interface NodeView { outer: HTMLElement; stage: HTMLElement; content: HTMLElement; children: HTMLElement; caption?: HTMLElement }
+interface NodeView { outer: HTMLElement; stage: HTMLElement; content: HTMLElement; children: HTMLElement; caption?: HTMLElement; sectionDefaultCollapsed?: boolean }
 interface SurfaceView {
   root: HTMLElement
   kind: ComponentSurface['kind']
@@ -40,6 +40,7 @@ interface SurfaceView {
 export function createComponentModelProjection(context: {
   root: HTMLElement; runtime: ComponentPlatformRuntime; signal: AbortSignal
   initialSurfaceId?: string
+  teacherController?: TeacherControllerDisplayPort
   onCamera?(surfaceId: string, camera: ComponentSpatialCameraPort): () => void
 }): ComponentPlayerProjection {
   const { root, runtime } = context
@@ -65,6 +66,17 @@ export function createComponentModelProjection(context: {
   let disposed = false
   let currentProject: CourseProjectV10 | undefined
   let currentModel: ComponentPlayerModel | undefined
+  let controllerParentToViewport: [number, number, number, number, number, number] = [1, 0, 0, 1, 0, 0]
+  const paintControllerPlacement = () => {
+    const project = currentProject
+    if (!project || disposed) return
+    const display = projectTeacherControllerInstances(project, { width: root.clientWidth, height: root.clientHeight }, controllerParentToViewport, context.teacherController)
+    for (const id of [...project.global.underlay, ...project.global.overlay]) {
+      if (!isGlobalTeacherController(project, id)) continue
+      const node = nodes.get(id), frame = display.instances[id]?.frame
+      if (node && frame) Object.assign(node.outer.style, componentFrameStyle(frame))
+    }
+  }
 
   function renderChildren(parent: HTMLElement, ids: readonly string[], project: CourseProjectV10, flow: boolean, used: Set<string>) {
     let cursor = parent.firstElementChild
@@ -72,9 +84,12 @@ export function createComponentModelProjection(context: {
       const instance: ComponentInstance | undefined = project.instances[id]
       if (!instance || project.definitions[instance.definitionId]?.role === 'behavior') continue
       used.add(id)
+      const definitionImplementation = project.definitions[instance.definitionId]?.implementation
+      const data = instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data : {}
+      const collapsibleSection = definitionImplementation?.kind === 'builtin' && definitionImplementation.key === 'guoling.document-block' && data.type === 'section'
       let node = nodes.get(id)
       if (!node) {
-        const outer = document.createElement('div'), stage = document.createElement('div'), content = document.createElement('div'), children = document.createElement('div')
+        const outer = document.createElement('div'), stage = document.createElement(collapsibleSection ? 'details' : 'div'), content = document.createElement(collapsibleSection ? 'summary' : 'div'), children = document.createElement('div')
         outer.dataset.componentObject = id
         content.dataset.componentRuntimeRoot = id
         children.style.pointerEvents = 'none'
@@ -82,8 +97,11 @@ export function createComponentModelProjection(context: {
         node = { outer, stage, content, children }; nodes.set(id, node)
         runtime.bind(id, content); runtime.bindTarget(id, outer)
       }
+      if (collapsibleSection && node.stage.tagName === 'DETAILS' && node.sectionDefaultCollapsed !== (data.collapsedByDefault === true)) {
+        node.sectionDefaultCollapsed = data.collapsedByDefault === true
+        ;(node.stage as HTMLDetailsElement).open = !node.sectionDefaultCollapsed
+      }
       applyComponentPaintStyle(node.outer, instance, project.definitions[instance.definitionId])
-      const definitionImplementation = project.definitions[instance.definitionId]?.implementation
       const implementation = instance.implementationOverride ?? definitionImplementation
       const section = definitionImplementation?.kind === 'builtin' && definitionImplementation.key === 'guoling.document-block'
       node.outer.dataset.componentPlacement = flow ? 'flow' : 'free'
@@ -181,26 +199,25 @@ export function createComponentModelProjection(context: {
     const project = currentProject
     const active = activeSurface ? surfaces.get(activeSurface) : undefined
     const size = active?.kind !== 'flow' ? active?.designSize : undefined
+    let parentToViewport: [number, number, number, number, number, number] = [1, 0, 0, 1, 0, 0]
     if (size) {
       const scale = root.clientWidth && root.clientHeight ? Math.min(root.clientWidth / size.width, root.clientHeight / size.height) : 1
       const x = root.clientWidth ? (root.clientWidth - size.width * scale) / 2 : 0
       const y = root.clientHeight ? (root.clientHeight - size.height * scale) / 2 : 0
+      parentToViewport = [scale, 0, 0, scale, x, y]
       Object.assign(shell.style, { width: `${size.width}px`, height: `${size.height}px`, transform: `translate(${x}px, ${y}px) scale(${scale})` })
     } else Object.assign(shell.style, { width: '100%', height: '100%', transform: 'none' })
     const activeModel = project?.surfaces.find(surface => surface.id === activeSurface)
     if (project) {
+      controllerParentToViewport = parentToViewport
       const background = resolveComponentBackground(project, activeModel), url = background.assetId ? runtime.assetUrl(background.assetId) : undefined
       Object.assign(shell.style, { backgroundColor: background.color, backgroundImage: url ? `url(${JSON.stringify(url)})` : 'none', backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit, backgroundPosition: 'center', backgroundRepeat: 'no-repeat' })
       for (const id of [...project.global.underlay, ...project.global.overlay]) {
         const instance = project.instances[id], node = nodes.get(id)
         if (!node || !instance?.frame) continue
-        let frame = instance.frame
-        if (activeModel?.kind === 'flow' && componentDefinitionBuiltinKey(project.definitions[instance.definitionId]) === 'guoling.navigation') {
-          const shown = projectFlowComponentControllerFrame({ x: frame.transform[4], y: frame.transform[5], width: frame.width, height: frame.height }, { width: root.clientWidth, height: root.clientHeight })
-          frame = { width: shown.width, height: shown.height, transform: [frame.transform[0], frame.transform[1], frame.transform[2], frame.transform[3], shown.x, shown.y] }
-        }
-        Object.assign(node.outer.style, componentFrameStyle(frame))
+        if (!isGlobalTeacherController(project, id)) Object.assign(node.outer.style, componentFrameStyle(instance.frame))
       }
+      paintControllerPlacement()
       for (const surface of project.surfaces) {
         const view = surfaces.get(surface.id)
         if (!view?.flow) continue
@@ -341,6 +358,7 @@ export function createComponentModelProjection(context: {
       if (next) revealSurface(next)
       resize()
   }
+  const releaseControllerPlacement = context.teacherController?.subscribe(paintControllerPlacement)
   return {
     sync,
     revealSurface,
@@ -349,7 +367,7 @@ export function createComponentModelProjection(context: {
     observation: id => surfaces.get(id)?.observation,
     dispose() {
       if (disposed) return
-      disposed = true; observer?.disconnect()
+      disposed = true; observer?.disconnect(); releaseControllerPlacement?.()
       for (const view of surfaces.values()) { view.spatial?.dispose(); view.releaseCamera?.(); view.releaseGraph?.(); view.camera?.dispose(); view.playback?.destroy() }
       for (const id of nodes.keys()) { runtime.bind(id, null); runtime.bindTarget(id, null) }
       for (const id of surfaces.keys()) runtime.bindTarget(id, null)

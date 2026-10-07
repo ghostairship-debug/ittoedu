@@ -4,7 +4,7 @@ import { CourseLightToolbar } from './documents/CourseLightToolbar'
 import { HtmlImportDialog, type HtmlImportDestination } from './documents/HtmlImportDialog'
 import { elementCards } from './workbench/elementCards/elementCardController'
 import { CourseEditorActionsContext, type CourseEditorActions } from './documents/CourseEditorActionsContext'
-import { AlertCircle, LoaderCircle, X } from 'lucide-react'
+import { AlertCircle, FileClock, LoaderCircle, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
 import { LessonWorkspaceHost } from './app/LessonWorkspaceHost'
 import type { LessonWorkspaceShellHandle } from './lessonWorkspace/LessonWorkspaceShell'
@@ -73,7 +73,7 @@ import { confirmPptxLosses } from './project/confirmPptxLosses'
 import { createCourseFromPptx, pptxCourseStem } from './project/pptxCourseCreation'
 import { CourseV10RuntimeView } from './components/CourseV10RuntimeView'
 import { courseDraftLifecycle } from './authoring/courseDraftLifecycle'
-import { preservePropertiesDrafts, restorePropertiesDrafts } from './ui/properties/PropertyControls'
+import { preservePropertiesDrafts, restorePropertiesDrafts, suspendPropertiesDrafts, resumePropertiesDrafts } from './ui/properties/PropertyControls'
 import type { DocumentSnapshot } from '../shared/workbench/document'
 import { resolveComponentPresentation } from '../shared/contracts/component-platform'
 import { equalComponentValue } from '../core/drivers/courseV10Operations'
@@ -187,6 +187,8 @@ export default function App() {
   const saveDirectory = useRef<SaveDirectoryContext | null>(null)
   const rawDocuments = window.desktopAPI?.documents
   const restoredDrafts = useRef(new Map<string, Promise<void>>())
+  const suspendedCloseDocuments = useRef(new Map<string, string>())
+  const authoringWrites = useRef<Promise<void>>(Promise.resolve())
   function restoreCourseInputs(documentId: string): Promise<void> {
     const snapshot = useEditorStore.getState().courseView.documents.find(value => value.documentId === documentId)
     if (!snapshot || !rawDocuments) return Promise.resolve()
@@ -235,8 +237,14 @@ export default function App() {
     closeWithDialog: async (documentId, suggestedDirectory, discardOnly) => {
       // Bridge.close calls this after the Store/Projection drain; input entered while
       // those awaits were pending must still keep its original tab and source draft.
-      if (!await prepareCourseClose([documentId])) return false
-      return rawDocuments.closeWithDialog(documentId, suggestedDirectory ?? saveDirectory.current ?? undefined, discardOnly)
+      const course = useEditorStore.getState().courseView.documents.some(value => value.documentId === documentId)
+      if (course && !discardOnly && !await prepareCourseClose([documentId])) return false
+      if (discardOnly) suspendCloseInputs([documentId])
+      try {
+        const closed = await rawDocuments.closeWithDialog(documentId, suggestedDirectory ?? saveDirectory.current ?? undefined, discardOnly)
+        if (!closed && discardOnly) resumeCloseInputs([documentId])
+        return closed
+      } catch (error) { if (discardOnly) resumeCloseInputs([documentId]); throw error }
     },
   } : null, [rawDocuments])
   const setSaveDirectory = useCallback((directory: SaveDirectoryContext | null) => { saveDirectory.current = directory }, [])
@@ -274,6 +282,8 @@ export default function App() {
   const projectColors = useMemo(() => activeCourseDocument?.designTokens?.colors.map(token => ({ name: token.label, value: token.color })) ?? [], [activeCourseDocument?.designTokens])
   const sidecarFiles = useEditorStore(selectMediaAssetFiles)
   const flowDocumentDraft = useEditorStore(state => state.flowDocumentDraft)
+  const localDraftVersion = useEditorStore(state => state.localDraftVersion)
+  const [retainedFlowOpen, setRetainedFlowOpen] = useState(false)
   const selectedItemName = useEditorStore(state => {
     const project = state.courseView.project
     const item = project?.instances[state.courseView.selectedInstanceId ?? '']
@@ -344,6 +354,51 @@ export default function App() {
     },
     onError: setError,
   })
+  function suspendCloseInputs(documentIds?: readonly string[]) {
+    const state = useEditorStore.getState()
+    const ids = documentIds ?? state.courseView.documents.map(value => value.documentId)
+    for (const snapshot of state.courseView.documents) if (ids.includes(snapshot.documentId)) suspendedCloseDocuments.current.set(snapshot.documentId, snapshot.epoch)
+    state.courseBridge.suspendForClose(ids)
+    suspendPropertiesDrafts(ids)
+    flowRecovery.suspendForClose([...suspendedCloseDocuments.current.values()])
+    lessonShell.current?.suspendForClose(documentIds)
+  }
+  function resumeCloseInputs(documentIds?: readonly string[]) {
+    const ids = documentIds ?? [...suspendedCloseDocuments.current.keys()]
+    const epochs = ids.flatMap(id => { const epoch = suspendedCloseDocuments.current.get(id); suspendedCloseDocuments.current.delete(id); return epoch ? [epoch] : [] })
+    useEditorStore.getState().courseBridge.resumeAfterCloseCancelled(ids)
+    resumePropertiesDrafts(ids)
+    flowRecovery.resumeAfterCloseCancelled(epochs)
+    lessonShell.current?.resumeAfterCloseCancelled(documentIds)
+  }
+  useEffect(() => {
+    const api = window.desktopAPI
+    const discard = api?.onRequestDiscardAndClose?.(async () => {
+      suspendCloseInputs()
+      // Queued authoring writes observe the suspension; an admitted write finishes
+      // before Main deletes the recovery owned by the closing document epoch.
+      await authoringWrites.current
+      await flowRecovery.flush()
+      return true
+    })
+    const resume = api?.onRequestResumeClose?.(() => resumeCloseInputs())
+    return () => { discard?.(); resume?.() }
+  }, [rawDocuments, flowRecovery.flush])
+  useEffect(() => {
+    if (!rawDocuments) return
+    const captures = courseConnection.documents.map(snapshot => ({ documentId: snapshot.documentId, epoch: snapshot.epoch }))
+    authoringWrites.current = authoringWrites.current.then(async () => {
+      for (const { documentId, epoch } of captures) {
+        if (suspendedCloseDocuments.current.has(documentId)) continue
+        await restoreCourseInputs(documentId)
+        const state = useEditorStore.getState()
+        if (suspendedCloseDocuments.current.has(documentId) || !state.courseView.documents.some(value => value.documentId === documentId && value.epoch === epoch)) continue
+        const records = { advanced: courseDraftLifecycle(state.courseBridge).preserve(documentId), properties: preservePropertiesDrafts(documentId) }
+        if (records.advanced.length || records.properties.length) await rawDocuments.writeAuthoringDrafts(documentId, records)
+        else await rawDocuments.clearAuthoringDrafts(documentId)
+      }
+    }).catch(error => setError(error instanceof Error ? error.message : '输入恢复稿尚未保存'))
+  }, [localDraftVersion, courseConnection.documents, rawDocuments])
   const preserveFlowInputs = async (documentIds?: readonly string[]): Promise<boolean> => {
     const state = useEditorStore.getState()
     const entries = Object.entries(state.flowDocumentDrafts ?? {}).flatMap(([documentId, draft]) => {
@@ -398,9 +453,9 @@ export default function App() {
     confirmProjectOpen: (confirmationId) => desktopApi().confirmProjectOpen({ confirmationId }),
     beforeReplace: async () => await prepareCourseClose(),
     onProjectReplaced: () => lessonShell.current?.detachLesson(),
-    preserveBeforeClose: async () => {
+    preserveBeforeClose: async mode => {
       await elementCards.flushDrafts()
-      if (!(await flowRecovery.flush()) || !(await lessonShell.current?.preserveAll() ?? true)) return false
+      if (!(await flowRecovery.flush()) || !(await lessonShell.current?.preserveAll(mode) ?? true)) return false
       await useEditorStore.getState().courseBridge.drain()
       return true
     },
@@ -420,7 +475,10 @@ export default function App() {
     },
     subscribeSaveAndCloseRequest: (handler) => {
       if (!window.desktopAPI) return () => undefined
-      return window.desktopAPI.onRequestSaveAndClose(handler)
+      return window.desktopAPI.onRequestSaveAndClose(async () => {
+        const ready = await handler()
+        return { ready, ...(ready && saveDirectory.current ? { suggestedDirectory: saveDirectory.current } : {}) }
+      })
     },
   }, {
     dirty: allCourseDirty || lessonDirty,
@@ -902,6 +960,7 @@ export default function App() {
       <footer className="status-bar" aria-live="polite">
         <span className="status-dot" />
         <span>{courseDelivery.exportProgress === 'cancelling' ? '正在清理已取消的导出…' : busy ? '正在处理…' : (statusMessage ?? '就绪')}</span>
+        {flowRecovery.retained.length > 0 && <button type="button" title="查看保留的正文原稿" onClick={() => setRetainedFlowOpen(true)}><FileClock size={14} />保留原稿 ({flowRecovery.retained.length})</button>}
         {courseDelivery.exportProgress === 'generating' && <button type="button" onClick={courseDelivery.cancelExport}>取消导出</button>}
         {courseDelivery.exportProgress === 'saving' && <span>正在准备保存，可在保存对话框取消</span>}
         <span className="status-bar__spacer" />
@@ -922,6 +981,19 @@ export default function App() {
         <span>·</span>
         <span>{projectPath ? '工程已命名' : '尚未保存'}</span>
       </footer>
+
+      {retainedFlowOpen && <div className="modal-backdrop" role="presentation">
+        <section className="modal copyable-summary-dialog" role="dialog" aria-modal="true" aria-labelledby="retained-flow-title">
+          <header className="copyable-summary-dialog__header"><h2 id="retained-flow-title">保留的正文原稿</h2>
+            <button type="button" className="icon-button" title="关闭原稿" aria-label="关闭原稿" onClick={() => setRetainedFlowOpen(false)}><X size={17} /></button>
+          </header>
+          {flowRecovery.retained.map((record, index) => <details key={`${record.epoch}:${record.revision}`} open={index === 0}>
+            <summary>版本 {record.revision} · {record.surfaceId}</summary>
+            <textarea className="copyable-summary-dialog__content" aria-label={`版本 ${record.revision} 的正文原稿`} value={record.source} readOnly />
+          </details>)}
+          <div className="modal__actions"><button type="button" className="primary-button" onClick={() => setRetainedFlowOpen(false)}>完成</button></div>
+        </section>
+      </div>}
 
       {errorMessage && (
         <div className="toast" role="alert">

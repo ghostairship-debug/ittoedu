@@ -12,7 +12,7 @@ import { webContentRealmSource } from '../../components/web/contentRealmImplemen
 import { projectWebModuleGraph } from '../../components/web/moduleGraph'
 import { resolveWebResourceBindings } from '../../components/web/resources'
 import { ComponentNavigationOwner, type ComponentCameraBinding, type ComponentObservationBinding } from './ComponentNavigationOwner'
-import { componentDefinitionBuiltinKey, resolveComponentPresentation } from '../../shared/contracts/component-platform'
+import { resolveComponentPresentation } from '../../shared/contracts/component-platform'
 import { onComponentMotionPreview } from '../interactions/componentMotionPreview'
 import { registerRuntimeLightEditDocument } from '../composition/runtime/runtimeLightEditCommands'
 
@@ -79,7 +79,7 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
     select: id => { surface.current = id; callbacks.current.onSurfaceSelect(id) },
     selectState: (id, nextSurfaceId) => { activeState.current = id; callbacks.current.bridge?.selectPresentationState(documentId, id, nextSurfaceId) },
     courseState: { get: <T,>(key: string) => runtimeRef.current?.getState(key) as T | undefined, set: (key, value) => runtimeRef.current?.setState(key, value) },
-    viewportBounds: () => wrapper.current?.getBoundingClientRect(),
+    viewportBounds: () => (wrapper.current?.querySelector<HTMLElement>('.flow-workspace') ?? wrapper.current?.querySelector<HTMLElement>('.canvas-viewport') ?? wrapper.current)?.getBoundingClientRect(),
     restart: () => runtimeRef.current?.resetPlayback(true), audio: () => runtimeRef.current?.audio(), report: message => callbacks.current.report(message) }), [documentId])
   const world = useMemo(() => {
     const runtime = new ComponentPlatformRuntime(`document:${documentId}`, {
@@ -132,17 +132,6 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
     })
     return () => { stop(); timers.forEach(timer => clearTimeout(timer)); pending.forEach(controller => controller.abort()) }
   }, [documentId, world])
-  useEffect(() => {
-    const place = () => {
-      const placement = navigation.placement(), element = wrapper.current
-      if (!element) return
-      for (const root of element.querySelectorAll<HTMLElement>('[data-component-render]')) {
-        const instance = current.current.project.instances[root.dataset.componentRender ?? '']
-        if (instance && componentDefinitionBuiltinKey(current.current.project.definitions[instance.definitionId]) === 'guoling.navigation') root.style.translate = `${placement.x}px ${placement.y}px`
-      }
-    }
-    place(); return navigation.subscribe(place)
-  }, [navigation])
   useEffect(() => { navigation.changed() }, [navigation, surfaceId, model.project.surfaces])
   const edit = useCallback((edits: ComponentEdit[], historyGroup?: string) => {
     const { bridge, report } = callbacks.current

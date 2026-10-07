@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { createRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { flushSync } from 'react-dom'
 import { act, fireEvent, within } from '@testing-library/react'
@@ -12,6 +12,7 @@ import type { CourseProjectV10, JsonValue } from '../../src/shared/contracts/com
 import type { CapturedCourseTarget } from '../../src/renderer/documents/CourseV10DocumentBridge'
 import type { SlideContentEdit } from '../../src/renderer/store/slices/slideAuthoringSlice'
 import { useSlideNativeTextEditor } from '../../src/renderer/ui/workspaces/useSlideNativeTextEditor'
+import type { SharedDocumentEditorHandle } from '../../src/renderer/document/SharedDocumentEditor'
 
 const probe = vi.hoisted(() => ({ view: null as EditorView | null }))
 // jsdom does not lay out ranges. Keep PM's real selection observer running with
@@ -31,6 +32,11 @@ vi.mock('../../src/renderer/document/editorSession', async importOriginal => {
   const actual = await importOriginal<typeof import('../../src/renderer/document/editorSession')>()
   return { ...actual, createLayoutEditor: (...args: Parameters<typeof actual.createLayoutEditor>) => {
     const editor = actual.createLayoutEditor(...args)
+    vi.spyOn(editor.view, 'posAtCoords').mockImplementation(() => {
+      // Before the toolbar portal mounts, its inline toolbar moves this editor below the double-click point.
+      const overlay = editor.view.dom.closest('.text-edit-overlay')
+      return overlay?.querySelector('.shared-document-toolbar') ? null : { pos: 2, inside: 0 }
+    })
     probe.view = editor.view
     return editor
   } }
@@ -45,10 +51,18 @@ describe('Main native text editing', () => {
     const change = vi.fn((_data: TextComponentData) => ack), report = vi.fn()
     const host = document.createElement('div'); document.body.append(host)
     const root = createRoot(host)
+    const editorRef = createRef<SharedDocumentEditorHandle>()
     try {
       await act(async () => root.render(<TextComponentEditor data={original} revision="doc:instance"
+        editorRef={editorRef}
         onChange={change} onUndo={() => {}} onRedo={() => {}} onDiagnostic={report} />))
       const view = probe.view!
+      await act(async () => expect(editorRef.current!.focusAtClientPoint({ x: 60, y: 70 })).toBe(true))
+      expect(view.state.selection.from).toBe(2)
+      expect(change).not.toHaveBeenCalled()
+      const composing = vi.spyOn(view, 'composing', 'get').mockReturnValue(true)
+      expect(editorRef.current!.focusAtClientPoint({ x: 80, y: 70 })).toBe(false)
+      composing.mockRestore()
       await act(async () => view.dispatch(view.state.tr.insertText('新', 1)))
       expect(change).toHaveBeenCalledTimes(1)
       expect(change.mock.calls[0][0].content.inlines[0]).toMatchObject({ type: 'text', text: '新原文' })
@@ -130,11 +144,12 @@ describe('Main native text editing', () => {
         update: (data, composing, height) => {
           update(data, composing, height)
           setEdit(previous => previous && ({ ...previous, data: json(data), composing: composing ?? previous.composing }))
-        }, commit, cancel: () => setEdit(null), undo: () => {}, redo: () => {}, host: () => null, report,
+        }, commit, cancel: () => setEdit(null), undo: () => {}, redo: () => {}, host: () => host, report,
       }, documentId + ':slide')
       return owner.entry.editor
     }
     const host = document.createElement('div'); document.body.append(host)
+    vi.spyOn(host, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 800, 600))
     const root = createRoot(host)
     try {
       await act(async () => { root.render(<MainNativeEditor />) })
@@ -143,10 +158,12 @@ describe('Main native text editing', () => {
       expect(host.querySelector('[data-component-professional-editor]')).not.toBeNull()
       expect(host.querySelector('select[aria-label="段落类型"]')).toBeNull()
       expect([...host.querySelectorAll('button')].some(button => button.textContent === '源文')).toBe(false)
-      await act(async () => { const view = probe.view!; view.dispatch(view.state.tr.insertText('新', 1)) })
+      expect(probe.view!.posAtCoords).toHaveBeenCalledWith({ left: 60, top: 70 })
+      expect(probe.view!.state.selection.from).toBe(2)
+      await act(async () => { const view = probe.view!; view.dispatch(view.state.tr.insertText('新')) })
       const data = textComponentDataSchema.parse(owner.draft!.data)
       expect(data.content.inlines.find(atom => atom.type === 'math')).toEqual(original.content.inlines[1])
-      expect(data.content.inlines.some(atom => atom.type === 'text' && atom.text.includes('人工')
+      expect(data.content.inlines.some(atom => atom.type === 'text' && atom.text.includes('人新工')
         && atom.style?.bold === false && atom.style?.highlightColor === null)).toBe(true)
       expect(data.content.inlines.some(atom => atom.type === 'text' && atom.text.includes('观察') && atom.style?.italic)).toBe(true)
       expect(update).toHaveBeenCalled()

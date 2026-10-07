@@ -60,6 +60,7 @@ export class DocumentProjection {
   private composition?: { instanceId: string; path: string[]; value: JsonValue; initialValue: JsonValue; command: ComponentOperationBatch; active: boolean; conflict?: string }
   private projectionVersion = 0
   private queue: PendingOperation[] = []
+  private closeSuspended = false
   private readonly ownOperations = new Set<string>()
   private stopSubscription?: () => void
   private worker?: Promise<void>
@@ -206,6 +207,7 @@ export class DocumentProjection {
 
   /** Native IME owns just this field until compositionend; other fields keep updating. */
   beginComposition(instanceId: string, path: string[]): void {
+    if (this.closeSuspended) throw new Error('正在关闭文档，输入已保留')
     if (this.disposed || !this.state.committed) throw new Error('文档视图尚未连接')
     if (this.precommitGate) throw new Error('动态内容正在准备静态后备图，输入未提交')
     if (this.composition) throw new Error('已有尚未结束的文本输入')
@@ -227,17 +229,22 @@ export class DocumentProjection {
     composition.value = structuredClone(value)
     composition.command.edits = [{ type: 'data.set', instanceId: composition.instanceId, path: [...composition.path], value: structuredClone(value) }]
     ++this.projectionVersion
+    if (this.closeSuspended) return Promise.resolve()
     return this.scheduleComponentRebase()
   }
   async endComposition(value?: JsonValue): Promise<void> {
     const composition = this.composition
-    if (!composition?.active) return
-    if (value !== undefined) await this.updateComposition(value)
+    if (!composition) return
+    if (value !== undefined) {
+      composition.value = structuredClone(value)
+      composition.command.edits = [{ type: 'data.set', instanceId: composition.instanceId, path: [...composition.path], value: structuredClone(value) }]
+    }
     composition.active = false
     ++this.projectionVersion
     this.update({ composing: null })
+    if (this.closeSuspended) return
     await this.scheduleComponentRebase()
-    if (this.composition !== composition || this.state.error) return
+    if (this.closeSuspended || this.composition !== composition || this.state.error) return
     const draft = this.state.draft ?? undefined
     this.composition = undefined
     ++this.projectionVersion
@@ -250,7 +257,13 @@ export class DocumentProjection {
     if (this.disposed) return
     if (event.type === 'changed') this.accept(event.snapshot, event.operationId, false, event.appliedChanges)
     else if (event.documentId === this.documentId && event.epoch === this.state.committed?.epoch) {
-      if (this.queue.length || this.composition || this.state.draft || this.state.retainedComposition || this.previewTail || this.precommitGate) {
+      if (this.closeSuspended) {
+        for (const entry of this.queue) entry.reject(new Error('已放弃未保存输入并关闭文档'))
+        this.queue = []
+        this.composition = undefined
+        this.update({ connected: false, draft: null, composing: null, retainedComposition: null, retainedDraftOnly: false, error: null })
+        this.dispose()
+      } else if (this.queue.length || this.composition || this.state.draft || this.state.retainedComposition || this.previewTail || this.precommitGate) {
         this.problem({ kind: 'closed', code: 'document-closed', message: '文档会话已关闭，未确认输入仍保留。' })
       } else {
         // Main emits closed before closeWithDialog returns. A drained view has no lost input.
@@ -312,6 +325,7 @@ export class DocumentProjection {
     return this.editPrepared(() => frozen, options)
   }
   private editPrepared(command: (model: DocumentModel) => DocumentCommand, options: { historyGroup?: string }): Promise<DocumentOperationResult> {
+    if (this.closeSuspended) return Promise.reject(new Error('正在关闭文档，输入已保留'))
     if (this.mirroringOperationId) {
       const operationId = this.mirroringOperationId
       return this.api.lookup(this.documentId, operationId).then(receipt => {
@@ -356,6 +370,7 @@ export class DocumentProjection {
   }
 
   private enqueue(mutation: DocumentOperation['mutation'], draft?: DocumentModel, historyGroup?: string, baseline?: DocumentSnapshot): Promise<DocumentOperationResult> {
+    if (this.disposed) return Promise.reject(new Error('文档会话已关闭'))
     const snapshot = baseline ?? this.state.committed!
     if (!this.queue.length) { this.expectedRevision = snapshot.revision; this.expectedEpoch = snapshot.epoch }
     const operationId = crypto.randomUUID()
@@ -371,7 +386,7 @@ export class DocumentProjection {
   }
 
   private start(): void {
-    if (this.worker || !this.state.connected || this.state.error || !this.queue.length) return
+    if (this.closeSuspended || this.disposed || this.worker || !this.state.connected || this.state.error || !this.queue.length) return
     const work = this.run()
     this.worker = work
     void work.finally(() => {
@@ -380,9 +395,9 @@ export class DocumentProjection {
     })
   }
   private async run(): Promise<void> {
-    while (this.queue.length && !this.state.error && this.state.connected) {
+    while (!this.closeSuspended && !this.disposed && this.queue.length && !this.state.error && this.state.connected) {
       if (this.state.committed?.model.kind === 'course-v10' && this.previewTail) await this.previewTail
-      if (!this.queue.length || this.state.error || !this.state.connected) return
+      if (this.closeSuspended || this.disposed || !this.queue.length || this.state.error || !this.state.connected) return
       const entry = this.queue[0]!
       if (!entry.operation) {
         const mutation = structuredClone(entry.mutation)
@@ -469,6 +484,7 @@ export class DocumentProjection {
 
   /** Reserve this projection against ordinary full-document edits while a semantic candidate is prepared. */
   reservePrecommit(): () => void {
+    if (this.closeSuspended) throw new Error('正在关闭文档，输入已保留')
     if (this.precommitGate) throw new Error('文档已有动态内容准备任务')
     let release!: () => void
     const gate = new Promise<void>(done => { release = done })
@@ -479,13 +495,14 @@ export class DocumentProjection {
 
   /** Fixed envelope: no normal queue rebase or new operation identity on an unknown ACK retry. */
   async editExact(snapshot: DocumentSnapshot, command: DocumentCommand, operationId: string = crypto.randomUUID()): Promise<DocumentOperationResult> {
-    if (!this.precommitGate || this.disposed || this.queue.length || this.composition || this.worker || this.previewTail)
+    if (this.closeSuspended || !this.precommitGate || this.disposed || this.queue.length || this.composition || this.worker || this.previewTail)
       throw new Error('精确提交前文档仍有未确认输入')
     if (snapshot.documentId !== this.documentId) throw new Error('精确提交目标文档已改变')
     let result: DocumentOperationResult | null
     try { result = await this.api.lookup(this.documentId, operationId) }
     catch (error) { if (this.ownOperations.has(operationId)) throw new DocumentExactAckUnknownError(operationId, error); throw error }
     if (!result) {
+      if (this.closeSuspended || this.disposed) throw new Error('正在关闭文档，输入已保留')
       if (!this.state.connected || this.state.committed?.epoch !== snapshot.epoch) throw new Error('精确提交文档会话已改变')
       if (this.state.committed.revision !== snapshot.revision) throw new Error('精确提交基准已变化')
       const operation: DocumentOperation = { documentId: this.documentId, epoch: snapshot.epoch, operationId,
@@ -531,7 +548,9 @@ export class DocumentProjection {
   /** The precommit owner reads the same authority while its own gate is held. */
   async drainForPrecommit(): Promise<DocumentSnapshot> {
     for (;;) {
+      if (this.closeSuspended) throw new Error('正在关闭文档，输入已保留')
       if (this.previewTail) await this.previewTail
+      if (this.composition && !this.composition.active && !this.state.error) await this.endComposition()
       while (this.worker) await this.worker
       if (this.state.error || this.queue.length || this.composition || !this.state.committed || !this.state.connected)
         throw new Error(this.state.error?.message ?? (this.composition ? '文本组合输入尚未确认' : '文档输入尚未确认'))
@@ -551,6 +570,16 @@ export class DocumentProjection {
     this.composition = undefined
     ++this.projectionVersion
     this.update({ draft: null, retainedDraftOnly: false, error: null, composing: null, retainedComposition: null })
+  }
+  /** A discard decision stops new dispatches without requiring a failed draft to flush. */
+  suspendForClose(): void { this.closeSuspended = true }
+  resumeAfterCloseCancelled(): void {
+    if (this.disposed) return
+    this.closeSuspended = false
+    if (this.composition && !this.composition.active) void this.endComposition().catch(error => {
+      if (!this.disposed) this.problem({ kind: 'rejected', code: 'composition-unconfirmed', message: error instanceof Error ? error.message : String(error) })
+    })
+    this.start()
   }
   dispose(): void {
     this.disposed = true

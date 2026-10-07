@@ -4,6 +4,8 @@ export const flowDocumentRecoveryTargetSchema = z.object({
   surfaceId: z.string().min(1).max(240),
   projectPath: z.string().min(1).max(32768).nullable(),
   epoch: z.union([z.string().min(1).max(240), z.number().int().nonnegative()]),
+  documentEpoch: z.union([z.string().min(1).max(240), z.number().int().nonnegative()]).optional(),
+  revision: z.number().int().nonnegative().optional(),
 }).strict()
 const diagnostic = z.object({ message: z.string(), offset: z.number(), endOffset: z.number(), line: z.number(), column: z.number(), path: z.array(z.union([z.string(), z.number()])).optional() }).strict()
 export const flowDocumentRecoverySchema = flowDocumentRecoveryTargetSchema.extend({ revision: z.number().int().nonnegative(), source: z.string().max(16 * 1024 * 1024), diagnostics: z.array(diagnostic).max(10000), composing: z.boolean() }).strict()
@@ -13,6 +15,8 @@ export interface FlowDocumentRecoveryAPI {
   read(target: FlowDocumentRecoveryIdentity): Promise<FlowDocumentRecoveryRecord | null>
   write(record: FlowDocumentRecoveryRecord): Promise<void>
   clear(target: FlowDocumentRecoveryIdentity): Promise<void>
+  claim?(target: FlowDocumentRecoveryIdentity, recordEpoch: FlowDocumentRecoveryIdentity['epoch'], revision: number): Promise<void>
+  retained?(target: FlowDocumentRecoveryIdentity): Promise<FlowDocumentRecoveryRecord[]>
 }
 /** Project paths originate at the desktop file owner; normalize Windows lexical aliases. */
 export function normalizedFlowRecoveryPath(value: string): string {

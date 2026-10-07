@@ -35,7 +35,9 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
     flushAll: () => shell.current?.flushAll() ?? Promise.resolve(true),
     saveActiveDocument: () => shell.current?.saveActiveDocument() ?? Promise.resolve('none'),
     closeAll: () => shell.current?.closeAll() ?? Promise.resolve(true),
-    preserveAll: async () => { await assistant.current?.preserveDraft(); return shell.current?.preserveAll() ?? true },
+    preserveAll: async mode => { await assistant.current?.preserveDraft(); return shell.current?.preserveAll(mode) ?? true },
+    suspendForClose: ids => shell.current?.suspendForClose(ids),
+    resumeAfterCloseCancelled: ids => shell.current?.resumeAfterCloseCancelled(ids),
     openFile: path => shell.current?.openFile(path) ?? Promise.resolve(),
     focusDocument: id => shell.current?.focusDocument(id) ?? Promise.resolve(),
   }), [])

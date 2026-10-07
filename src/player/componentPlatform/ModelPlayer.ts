@@ -2,6 +2,7 @@ import { ComponentPlatformRuntime } from '../components/ComponentPlatformRuntime
 import type { DocumentModel } from '../../shared/workbench/document'
 import { createComponentModelProjection } from './modelProjection'
 import type { ComponentSpatialCameraPort } from '../surfaces/spatial/componentSpatialAdapter'
+import type { TeacherControllerDisplayPort } from '../../shared/teacherControllerViewportGeometry'
 
 export type ComponentPlayerModel = Extract<DocumentModel, { kind: 'course-v10' }>
 export type ComponentPlayerRuntimeOptions = NonNullable<ConstructorParameters<typeof ComponentPlatformRuntime>[1]>
@@ -37,6 +38,7 @@ export interface ComponentPlayerMountOptions extends ComponentPlayerRuntimeOptio
     runtime: ComponentPlatformRuntime
     signal: AbortSignal
     initialSurfaceId?: string
+    teacherController?: TeacherControllerDisplayPort
     onCamera?(surfaceId: string, camera: ComponentSpatialCameraPort): () => void
   }): ComponentPlayerProjection
 }
@@ -46,7 +48,7 @@ export function mountV10Model(options: ComponentPlayerMountOptions) {
   const controller = new AbortController()
   const runtime = new ComponentPlatformRuntime(options.runScopeId, options)
   const projection = (options.createProjection ?? createComponentModelProjection)({
-    root: options.root, runtime, signal: controller.signal, initialSurfaceId: options.initialSurfaceId, onCamera: options.onCamera,
+    root: options.root, runtime, signal: controller.signal, initialSurfaceId: options.initialSurfaceId, onCamera: options.onCamera, teacherController: options.teacherController,
   })
   const observationBindings = new Map<string, { observation: ComponentPlayerObservation; off(): void }>()
   let queue: Promise<void> = Promise.resolve()

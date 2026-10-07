@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, ImageIcon } from 'lucide-react'
+import { ArrowDown, ArrowUp, ImageIcon, SlidersHorizontal } from 'lucide-react'
 import type { MenuCommand } from '../../editing/commands/CommandMenu'
 import { QuickBarButton, QuickBarMenu, QuickBarSeparator } from '../../editing/quickbar/SelectionQuickBar'
 import type { FlowPropertiesCommands } from '../properties/FlowPropertiesPanel'
@@ -31,7 +31,7 @@ export function flowBlockCommands(block: FlowBlock, commands: FlowCommands, repl
 const ON_BAR = new Set(['flow-block.replace', 'flow-block.up', 'flow-block.down', 'flow-media.crop', 'flow-media.layout.content-width', 'flow-media.layout.wide', 'flow-media.layout.full-width', 'flow-media.wrap.left', 'flow-media.wrap.right'])
 
 /** The quick bar buttons of a selected Flow document object. */
-export function FlowBlockQuickActions({ block, commands, replaceMedia, mediaTools }: { block: FlowBlock; commands: FlowCommands; replaceMedia(kind: FlowMediaKind): void; mediaTools?: FlowMediaToolPort }) {
+export function FlowBlockQuickActions({ block, commands, replaceMedia, mediaTools, openProperties }: { block: FlowBlock; commands: FlowCommands; replaceMedia(kind: FlowMediaKind): void; mediaTools?: FlowMediaToolPort; openProperties?(): void }) {
   const items = flowBlockCommands(block, commands, replaceMedia, mediaTools)
   const replace = items.find(item => item.id === 'flow-block.replace')
   return <>
@@ -40,6 +40,7 @@ export function FlowBlockQuickActions({ block, commands, replaceMedia, mediaTool
     {mediaTools && (block.mediaKind === 'image' || block.mediaKind === 'video') && <QuickBarMenu label="排版" items={items.filter(item => item.group === 'layout')} />}
     <QuickBarButton label="上移" icon={<ArrowUp size={14} />} disabled={Boolean(block.structureDisabledReason)} onClick={() => commands.moveSelectedBlock('up')} />
     <QuickBarButton label="下移" icon={<ArrowDown size={14} />} disabled={Boolean(block.structureDisabledReason)} onClick={() => commands.moveSelectedBlock('down')} />
+    {openProperties && <QuickBarButton label="属性" icon={<SlidersHorizontal size={14} />} onClick={openProperties} />}
     <QuickBarSeparator />
   </>
 }

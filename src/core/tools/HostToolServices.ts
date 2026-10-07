@@ -172,7 +172,7 @@ interface HostAuthority {
   readImage(runId: string, documentId: string, resource: string): Promise<HostImageInput>
 }
 interface Job { runId: string; documentId: string; epoch: string; jobId: string }
-interface ImageJob extends Job { kind: 'image'; scope: 'document' | 'workspace'; controller: AbortController; resources: Map<string, string> }
+interface ImageJob extends Job { kind: 'image'; scope: 'document' | 'workspace'; sourceRunId?: string; controller: AbortController; resources: Map<string, string> }
 interface CachedResult { runId: string; name: string; promise: Promise<ToolResult>; pending: boolean; uncertain: boolean; receipt: boolean }
 
 /** Service work prepares resources; the Gateway owns canonical document operations. */
@@ -216,10 +216,18 @@ export class HostToolCoordinator {
   private standaloneReference(jobId: string, resourceId: string): string {
     return `${jobId}@${resourceId}`
   }
-  private parseStandaloneReference(value: string): { jobId: string; resourceId: string } {
+  parseStandaloneImageReference(value: string): { jobId: string; resourceId: string } | null {
     const match = /^(image-tool:[a-f0-9]{64})@(image_[a-f0-9]{64})$/.exec(value)
-    if (!match) throw new Error('独立参考图句柄无效；请使用本任务已完成图片的 resource 字段')
-    return { jobId: match[1]!, resourceId: match[2]! }
+    return match ? { jobId: match[1]!, resourceId: match[2]! } : null
+  }
+  private parseStandaloneReference(value: string): { jobId: string; resourceId: string } {
+    const reference = this.parseStandaloneImageReference(value)
+    if (!reference) throw new Error('独立参考图句柄无效；请使用本任务已完成图片的 resource 字段')
+    return reference
+  }
+  readStandaloneImageReference(runId: string, value: string): Promise<HostImageInput> {
+    const reference = this.parseStandaloneReference(value)
+    return this.readStandaloneImage(runId, reference.jobId, reference.resourceId)
   }
   projectFileServices() { return this.services.projectFiles }
   authorizeOperationPaths(runId: string, operationId: string, paths: readonly string[]): void {
@@ -422,7 +430,9 @@ export class HostToolCoordinator {
   async readStandaloneImage(runId: string, jobId: string, resourceId: string): Promise<HostImageInput> {
     const scope = this.workspaceImageScope(runId)
     if (!this.services.images?.readReadyResourceFromJob) throw new Error('独立图片资源读取服务尚未配置')
-    return this.services.images.readReadyResourceFromJob({ jobId, sourceRunId: runId, sourceDocumentId: scope, resourceId })
+    const snapshot = await this.services.images.read(jobId)
+    if (snapshot.documentId !== scope) throw new Error('图片作业不属于当前任务工作空间')
+    return this.services.images.readReadyResourceFromJob({ jobId, sourceRunId: snapshot.runId, sourceDocumentId: scope, resourceId })
   }
   async webSearch(runId: string, input: { query: string; limit?: number; cursor?: string }, signal?: AbortSignal): Promise<ToolResult> {
     this.builtInRun(runId)
@@ -653,7 +663,7 @@ export class HostToolCoordinator {
     return job
   }
   private async imageResult(job: ImageJob, snapshot: ImageJobSnapshot): Promise<ToolResult> {
-    if (snapshot.jobId !== job.jobId || snapshot.runId !== job.runId || snapshot.documentId !== job.documentId) throw new Error('图像服务返回了不同任务的结果')
+    if (snapshot.jobId !== job.jobId || snapshot.runId !== (job.sourceRunId ?? job.runId) || snapshot.documentId !== job.documentId) throw new Error('图像服务返回了不同任务的结果')
     if (job.scope === 'workspace') this.workspaceImageScope(job.runId)
     else this.authority.active(job.runId, job.documentId, job.epoch)
     const resources = []
@@ -696,12 +706,13 @@ export class HostToolCoordinator {
     if (name === 'image.status') {
       const jobId = schema[name].parse(input).job
       const known = this.jobs.get(jobId)
-      if (known) return this.imageResult(this.get(runId, jobId, 'image') as ImageJob, await this.services.images!.read(jobId))
+      if (known?.runId === runId) return this.imageResult(this.get(runId, jobId, 'image') as ImageJob, await this.services.images!.read(jobId))
       // A recovered standalone result needs no document target handle to reconstruct.
       // The durable owner and frozen workspace scope still prove its authority.
       const snapshot = await this.services.images!.read(jobId), scope = this.workspaceImageScope(runId)
-      if (snapshot.runId !== runId || snapshot.documentId !== scope) throw new Error('图片作业不属于当前任务工作空间')
-      const recovered: ImageJob = { kind: 'image', scope: 'workspace', jobId, runId, documentId: scope, epoch: '', controller: new AbortController(), resources: new Map() }
+      if (snapshot.documentId !== scope || snapshot.runId !== runId && (snapshot.status !== 'ready' || snapshot.stopped)) throw new Error('图片作业不属于当前任务工作空间的已完成成果')
+      const recovered: ImageJob = { kind: 'image', scope: 'workspace', jobId, runId, sourceRunId: snapshot.runId,
+        documentId: scope, epoch: '', controller: new AbortController(), resources: new Map() }
       this.jobs.set(jobId, recovered)
       return this.imageResult(recovered, snapshot)
     }

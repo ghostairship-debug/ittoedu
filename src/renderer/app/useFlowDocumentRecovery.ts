@@ -1,13 +1,13 @@
 import { flowRecoveryStorageIdentity, type FlowDocumentRecoveryIdentity } from '../../shared/flowDocumentRecovery'
-import { useCallback, useEffect, useRef } from 'react'
-import { recoverFlowDocumentDraft, serializeFlowDocumentRecovery, type FlowDocumentDraft, type FlowDocumentRecoveryPort, type FlowDocumentRecoveryTarget } from '../authoring/flowDocumentDraft'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { recoverFlowDocumentDraft, serializeFlowDocumentRecovery, type FlowDocumentDraft, type FlowDocumentRecoveryPort, type FlowDocumentRecoveryTarget, type FlowDocumentRecoveryRecord } from '../authoring/flowDocumentDraft'
 
 function recoveryActivationKey(target: FlowDocumentRecoveryTarget): string {
   return JSON.stringify([flowRecoveryStorageIdentity(target), target.epoch])
 }
 
 function createRecoveryIdentity(target: FlowDocumentRecoveryTarget): FlowDocumentRecoveryIdentity {
-  return { projectId: target.projectId, projectPath: target.projectPath, surfaceId: target.surfaceId, epoch: crypto.randomUUID() }
+  return { projectId: target.projectId, projectPath: target.projectPath, surfaceId: target.surfaceId, epoch: crypto.randomUUID(), documentEpoch: target.epoch, revision: target.revision }
 }
 
 interface FlowDocumentRecoveryOptions {
@@ -22,7 +22,16 @@ export interface FlowDocumentRecoveryEntry {
   draft: FlowDocumentDraft
 }
 /** Serial writes keep late recovery IO bound to its original project and surface. */
-export function useFlowDocumentRecovery(options: FlowDocumentRecoveryOptions): { flush(): Promise<boolean>; flushAll(entries: readonly FlowDocumentRecoveryEntry[]): Promise<boolean> } {
+export function useFlowDocumentRecovery(options: FlowDocumentRecoveryOptions): {
+  retained: readonly FlowDocumentRecoveryRecord[]
+  flush(): Promise<boolean>
+  flushAll(entries: readonly FlowDocumentRecoveryEntry[]): Promise<boolean>
+  suspendForClose(epochs: readonly (string | number)[]): void
+  resumeAfterCloseCancelled(epochs: readonly (string | number)[]): void
+} {
+  const [retained, setRetained] = useState<FlowDocumentRecoveryRecord[]>([])
+  const [resumeVersion, setResumeVersion] = useState(0)
+  const suspended = useRef(new Set<string | number>())
   const activation = useRef<{ key: string; identity: FlowDocumentRecoveryIdentity } | null>(null)
   const activationKey = options.target ? recoveryActivationKey(options.target) : ''
   if (!options.target) activation.current = null
@@ -42,12 +51,14 @@ export function useFlowDocumentRecovery(options: FlowDocumentRecoveryOptions): {
       && target.epoch === latest.current.identity.epoch
   ), [])
   const settle = useCallback((target: FlowDocumentRecoveryIdentity, error: unknown) => {
-    if (!isCurrent(target)) return
+    if (!isCurrent(target) || target.documentEpoch !== undefined && suspended.current.has(target.documentEpoch)) return
     failed.current = true
     report(error)
   }, [isCurrent, report])
   const enqueue = useCallback((operation: () => Promise<void>, target: FlowDocumentRecoveryIdentity) => {
-    writes.current = writes.current.then(operation).then(
+    writes.current = writes.current.then(() => {
+      if (target.documentEpoch === undefined || !suspended.current.has(target.documentEpoch)) return operation()
+    }).then(
       () => { if (isCurrent(target)) failed.current = false },
       error => settle(target, error),
     )
@@ -55,19 +66,29 @@ export function useFlowDocumentRecovery(options: FlowDocumentRecoveryOptions): {
 
   useEffect(() => {
     const { target, port } = options
-    if (!target || !port || !identity) return
+    setRetained([])
+    if (!target || !port || !identity || suspended.current.has(target.epoch)) return
     failed.current = false
     let active = true
-    const registration = writes.current.then(() => port.read(identity))
-    writes.current = registration.then(() => undefined, error => settle(identity, error))
-    void registration.then(record => {
-      if (!active || !record || latest.current.options.draft || !isCurrent(identity) || latest.current.options.target?.revision !== target.revision) return
+    const registration = writes.current.then(async () => {
+      if (suspended.current.has(target.epoch)) return
+      const record = await port.read(identity)
+      const older = await port.retained?.(identity) ?? []
+      if (!active || !isCurrent(identity) || suspended.current.has(target.epoch)) return
+      setRetained(older)
+      if (!record || latest.current.options.draft || latest.current.options.target?.revision !== target.revision) return
       try {
-        latest.current.options.onRestore(recoverFlowDocumentDraft(record, target))
+        const restored = recoverFlowDocumentDraft(record, target)
+        await port.claim?.(identity, record.epoch, record.revision)
+        if (active && isCurrent(identity) && !suspended.current.has(target.epoch) && !latest.current.options.draft)
+          latest.current.options.onRestore(restored)
       } catch (error) {
-        settle(identity, error)
+        setRetained(current => current.some(value => value.epoch === record.epoch && value.revision === record.revision) ? current : [...current, record])
+        report(error)
       }
-    }, () => undefined)
+    })
+    // Reading an old record is a diagnostic, not failure to persist current input.
+    writes.current = registration.catch(error => { if (active && isCurrent(identity)) report(error) })
     return () => { active = false }
     // Source edits must not trigger a fresh read of an older disk draft.
   }, [activationKey, options.port, identity, isCurrent, report])
@@ -75,6 +96,7 @@ export function useFlowDocumentRecovery(options: FlowDocumentRecoveryOptions): {
   useEffect(() => {
     const { target, draft, port } = options
     if (!target || !port || !identity) { previous.current = null; return }
+    if (suspended.current.has(target.epoch)) return
     if (draft && draft.surfaceId === target.surfaceId && draft.revision === target.revision) {
       const record = serializeFlowDocumentRecovery({ ...identity, revision: target.revision }, draft)
       enqueue(() => port.write(record), identity)
@@ -85,9 +107,12 @@ export function useFlowDocumentRecovery(options: FlowDocumentRecoveryOptions): {
       }
       previous.current = { key: activationKey, hadDraft: false }
     }
-  }, [activationKey, identity, options.target?.revision, options.draft, options.port, enqueue])
+  }, [activationKey, identity, options.target?.revision, options.draft, options.port, enqueue, resumeVersion])
 
   return {
+    retained,
+    suspendForClose: useCallback(epochs => { for (const epoch of epochs) suspended.current.add(epoch) }, []),
+    resumeAfterCloseCancelled: useCallback(epochs => { for (const epoch of epochs) suspended.current.delete(epoch); setResumeVersion(value => value + 1) }, []),
     flush: useCallback(async () => { await writes.current; return !failed.current }, []),
     flushAll: useCallback(async (entries: readonly FlowDocumentRecoveryEntry[]) => {
       // Use the same serialized IO owner as the active view. A background draft
@@ -99,9 +124,10 @@ export function useFlowDocumentRecovery(options: FlowDocumentRecoveryOptions): {
       const pending = writes.current.then(async () => {
         const identities = new Map<string, FlowDocumentRecoveryIdentity>()
         for (const { target, draft } of frozen) {
+          if (suspended.current.has(target.epoch)) continue
           const active = latest.current.identity
           let recoveryIdentity: FlowDocumentRecoveryIdentity
-          if (active && active.projectId === target.projectId && active.projectPath === target.projectPath) recoveryIdentity = active
+          if (active && active.projectId === target.projectId && active.projectPath === target.projectPath && active.documentEpoch === target.epoch) recoveryIdentity = active
           else {
             const bindingKey = JSON.stringify([target.projectId, target.projectPath])
             const retained = identities.get(bindingKey)

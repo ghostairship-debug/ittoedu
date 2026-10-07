@@ -91,7 +91,14 @@ export const useEditorStore = create<EditorState>((set, get) => {
   const design = createDesignProductionActions({ kernel: courseKernel, hasContentDraft: () => selectHasDirtyCourseContentDraft(get()) })
   courseBridge.subscribe(() => {
     const view = courseBridge.read()
-    patch({ flowDocumentDraft: get().flowDocumentDrafts?.[view.activeDocumentId ?? ''] ?? null,
+    const closed = get().courseView.documents.filter(old => !view.documents.some(value => value.documentId === old.documentId))
+    const drafts = { ...get().flowDocumentDrafts }
+    for (const snapshot of closed) {
+      advancedDrafts.release(snapshot.documentId); discardPropertiesDrafts(snapshot.documentId)
+      delete drafts[snapshot.documentId]
+    }
+    patch({ flowDocumentDrafts: drafts, flowDocumentDraft: drafts[view.activeDocumentId ?? ''] ?? null,
+      ...(closed.some(value => value.documentId === get().slideContentEdit?.target.documentId) ? { slideContentEdit: null } : {}),
       ...(view.activeDocumentId !== get().courseView.activeDocumentId ? { flowContextSelection: null } : {}), courseView: view, dirty: Boolean(view.snapshot?.dirty || view.pending),
       projectPath: view.snapshot?.binding.kind === 'file' ? view.snapshot.binding.path : null,
       ...(view.error ? { errorMessage: view.error } : {}) })

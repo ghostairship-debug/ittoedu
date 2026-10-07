@@ -169,6 +169,15 @@ export const htmlPreviewPageMessageSchema = z.discriminatedUnion('event', [
     targets: z.array(htmlPreviewTargetReportSchema).max(HTML_PREVIEW_TARGET_MAX),
   }).strict(),
   z.object({
+    event: z.literal('edit-targets'),
+    protocol: z.literal(1),
+    leaseId: id,
+    loadId: id,
+    seq: z.number().int().nonnegative(),
+    scanId: id,
+    targets: z.array(htmlPreviewTargetReportSchema).max(HTML_PREVIEW_TARGET_MAX),
+  }).strict(),
+  z.object({
     event: z.literal('edit-mode-ready'),
     protocol: z.literal(1),
     leaseId: id,

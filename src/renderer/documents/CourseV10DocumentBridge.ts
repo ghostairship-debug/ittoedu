@@ -62,6 +62,7 @@ export class CourseV10DocumentBridge {
   private navigation = 0
   private connected = false
   private connecting?: Promise<void>
+  private stopEvents?: () => void
   private state: CourseV10ViewState = { documents: [], snapshot: null, project: null, editingProject: null, activeStateId: null, runtimeProject: null, views: [], activeDocumentId: null,
     activation: 0, selectedInstanceIds: [], selectedInstanceId: null, surfaceId: null, pending: 0, error: null }
 
@@ -115,6 +116,10 @@ export class CourseV10DocumentBridge {
     if (this.api === api && this.connected) return Promise.resolve()
     if (this.api && this.api !== api) this.dispose()
     this.api = api
+    this.stopEvents = api.subscribe(event => {
+      if (event.type === 'closed' && this.projections.get(event.documentId)?.read().committed?.epoch === event.epoch)
+        queueMicrotask(() => { if (this.api === api) this.detachClosed(event.documentId) })
+    })
     const navigation = ++this.navigation
     const pending = api.bootstrapCourse().then(async snapshot => {
       if (api === this.api) this.connected = true
@@ -194,6 +199,12 @@ export class CourseV10DocumentBridge {
   updateComposition(value: import('../../shared/contracts/component-platform/project').JsonValue, documentId?: string): Promise<void> { return this.projection(documentId).updateComposition(value) }
   endComposition(documentId?: string): Promise<void> { return this.projection(documentId).endComposition() }
   discardDraft(): void { this.projection().discardDraft() }
+  suspendForClose(documentIds: readonly string[]): void {
+    for (const id of documentIds) this.projections.get(id)?.suspendForClose()
+  }
+  resumeAfterCloseCancelled(documentIds: readonly string[]): void {
+    for (const id of documentIds) this.projections.get(id)?.resumeAfterCloseCancelled()
+  }
   async drain(documentIds?: readonly string[]): Promise<DocumentSnapshot[]> {
     const snapshots: DocumentSnapshot[] = []
     for (const [id, projection] of this.projections) if (!documentIds || documentIds.includes(id)) snapshots.push(await projection.drain())
@@ -213,14 +224,19 @@ export class CourseV10DocumentBridge {
     if (!projection) return true
     await projection.drain()
     if (!await this.host().closeWithDialog(documentId)) return false
+    this.detachClosed(documentId)
+    return true
+  }
+  private detachClosed(documentId: string): void {
+    const projection = this.projections.get(documentId)
+    if (!projection) return
     this.projectionStops.get(documentId)?.(); this.projectionStops.delete(documentId)
     projection.dispose(); this.projections.delete(documentId); this.selections.delete(documentId)
     if (this.state.activeDocumentId === documentId) {
       const next = [...this.projections.keys()].at(-1)
-      if (next) await this.activate(next)
+      if (next) this.publish({ activeDocumentId: next, activation: this.state.activation + 1 })
       else { this.state = { ...this.state, activeDocumentId: null }; this.publish() }
     } else this.publish()
-    return true
   }
   select(instanceId: string | null, surfaceId = this.state.surfaceId): void {
     if (this.state.activeDocumentId) this.selectInstances(this.state.activeDocumentId, instanceId ? [instanceId] : [], surfaceId)
@@ -275,6 +291,7 @@ export class CourseV10DocumentBridge {
   recoverable(): Promise<DocumentSnapshot[]> { return this.host().recoverable() }
   discardRecovery(documentId: string): Promise<void> { return this.host().discardRecovery(documentId) }
   dispose(): void {
+    this.stopEvents?.(); this.stopEvents = undefined
     ++this.navigation; this.api = undefined; this.connected = false; this.connecting = undefined
     for (const stop of this.projectionStops.values()) stop()
     for (const projection of this.projections.values()) projection.dispose()

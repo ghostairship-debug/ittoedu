@@ -1634,7 +1634,7 @@ button:disabled {
   outline: none;
   background: rgba(255, 255, 255, 0.98);
   box-shadow: 0 0 0 3px rgba(36, 91, 70, 0.18);
-  caret-color: #f4f1ea;
+  caret-color: #17211c;
   color-scheme: light;
   overflow-wrap: anywhere;
   white-space: pre-wrap;

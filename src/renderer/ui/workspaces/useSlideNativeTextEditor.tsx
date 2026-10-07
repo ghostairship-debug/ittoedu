@@ -12,6 +12,7 @@ import type { SlideContentEdit } from '../../store/slices/slideAuthoringSlice'
 import { componentDefinitionPresentation } from '../properties/componentDefinitionPresentation'
 import { SelectionQuickBar } from '../../editing/quickbar/SelectionQuickBar'
 import { visibleBounds, type QuickBarBounds, type QuickBarRect } from '../../editing/quickbar/placeQuickBar'
+import type { SharedDocumentEditorHandle } from '../../document/SharedDocumentEditor'
 
 interface Field { instanceId: string; kind: 'table-cell' | 'title' | 'category' | 'series'; childId: string; bounds: CanvasPlainTextBounds }
 interface Ports {
@@ -37,11 +38,18 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null)
   const [toolbarPlace, setToolbarPlace] = useState<{ anchor: QuickBarRect; bounds: QuickBarBounds } | null>(null)
   const editorRoot = useRef<HTMLDivElement>(null)
+  const richEditor = useRef<SharedDocumentEditorHandle>(null)
+  const pendingCaret = useRef<{ instanceId: string; contextKey: string; client: GeometryPoint } | null>(null)
   useEffect(() => {
     if (!ports.edit || ports.edit.source !== 'canvas') return
+    // The first render has an inline toolbar; its portal must settle before the click maps to text.
+    if (pendingCaret.current && !toolbarHost) return
+    const caret = pendingCaret.current
+    pendingCaret.current = null
+    if (caret?.instanceId === ports.edit.instanceId && caret.contextKey === contextKey && richEditor.current?.focusAtClientPoint(caret.client)) return
     const editor = editorRoot.current?.querySelector<HTMLElement>('.ProseMirror,[contenteditable="true"]')
     editor?.focus({ preventScroll: true })
-  }, [ports.edit?.instanceId, ports.edit?.target.documentId, ports.edit?.source])
+  }, [ports.edit?.instanceId, ports.edit?.target.documentId, ports.edit?.source, toolbarHost])
   useEffect(() => { setField(null) }, [contextKey])
   const begin = (instanceId: string, surfacePoint: GeometryPoint, client: GeometryPoint): boolean => {
     const p = latest.current, instance = p.project.instances[instanceId]
@@ -72,7 +80,9 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
     }
     if (kind === 'guoling.text' || kind === 'guoling.formula') {
       setField(null)
-      return Boolean(p.begin(instanceId))
+      const edit = p.begin(instanceId)
+      if (edit && kind === 'guoling.text') pendingCaret.current = { instanceId, contextKey: latestContext.current, client }
+      return Boolean(edit)
     }
     return false
   }
@@ -134,7 +144,7 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
     } catch (error) { latest.current.report(error instanceof Error ? error.message : String(error)) }
   }
   const kind = draft && componentDefinitionPresentation(ports.project.definitions[draft.definitionId]).builtinKey
-  const rich = !draft?.authorSpot && kind === 'guoling.text' && draft ? <TextComponentEditor data={textComponentDataSchema.parse(draft.data)}
+  const rich = !draft?.authorSpot && kind === 'guoling.text' && draft ? <TextComponentEditor editorRef={richEditor} data={textComponentDataSchema.parse(draft.data)}
     revision={draft.target.epoch + ':' + draft.instanceId} toolbarHost={toolbarHost} onChange={data => {
       const layout = authoredFrame && measureTextComponent(renderTextComponent(document, data), authoredFrame, data.sizing)
       ports.update(data, undefined, layout?.height)

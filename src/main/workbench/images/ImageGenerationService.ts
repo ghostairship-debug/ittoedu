@@ -327,9 +327,8 @@ export class ImageGenerationService {
     return { bytes, mimeType: reference.mimeType, filename: `${resourceId}.${reference.mimeType === 'image/jpeg' ? 'jpg' : reference.mimeType.split('/')[1]}` }
   }
 
-  /** Main-only continuation bridge. The caller must independently prove that sourceRunId is
-   * an ancestor of the current run in the same conversation; this service proves that the
-   * persisted image belongs to that ancestor and still has complete, ready bytes. */
+  /** Main-only ready-byte bridge. The caller proves continuation authority or access to the
+   * same workspace result; this service verifies the exact persisted source and ready bytes. */
   async readReadyResourceFromJob(input: { jobId: string; sourceRunId: string; sourceDocumentId: string; resourceId: string }): Promise<HostImageInput> {
     const filename = this.key(input.jobId)
     return serial(filename, async () => {

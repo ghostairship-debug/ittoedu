@@ -1,5 +1,5 @@
 import { publishedCourseV3Schema, type PublishedCourseV3, type PublishedImplementation } from '../../shared/contracts/component-platform/published'
-import { componentDefinitionBuiltinKey, resolveComponentPresentation, type TeacherControllerAction } from '../../shared/contracts/component-platform'
+import { resolveComponentPresentation, type TeacherControllerAction } from '../../shared/contracts/component-platform'
 import type { DocumentResources } from '../../shared/workbench/document'
 import { mountV10Model } from './ModelPlayer'
 import { prepareSandboxComponent, type ComponentBootstrapTransport } from '../../renderer/components/SandboxComponentImplementation'
@@ -177,21 +177,10 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
     presenter: model.project.playback?.presenter ?? { enabled: true, strategy: 'scene-navigation', additionalBindings: [] },
     onAuthoredCommand: command => player.runtime.dispatchPresenterCommand(command), onFeedback: options.onFeedback,
     onError: error => options.report?.(String(error)) })
-  const placement = navigation.subscribe(() => {
-    const offset = navigation.placement()
-    const shell = root.querySelector<HTMLElement>('[data-component-model-player]')
-    const fittedScale = shell?.offsetWidth ? shell.getBoundingClientRect().width / shell.offsetWidth : 1
-    const scale = fittedScale > 0 ? fittedScale : 1
-    for (const id of model.project.global.overlay) {
-      const instance = model.project.instances[id], definition = instance && model.project.definitions[instance.definitionId]
-      const target = player.runtime.targetElement(id)
-      if (target && componentDefinitionBuiltinKey(definition) === 'guoling.navigation') target.style.translate = `${offset.x / scale}px ${offset.y / scale}px`
-    }
-  })
   let disposal: Promise<void> | undefined
   const dispose = () => {
     if (disposal) return disposal
-    stopped = true; resourceController.abort(); stopKeys?.destroy(); tasks.dispose(); navigation.dispose(); placement()
+    stopped = true; resourceController.abort(); stopKeys?.destroy(); tasks.dispose(); navigation.dispose()
     disposal = player.dispose()
     return disposal
   }

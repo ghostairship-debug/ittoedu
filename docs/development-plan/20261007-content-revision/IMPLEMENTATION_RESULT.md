@@ -2,7 +2,21 @@
 
 更新：2026-10-07。Owner 已授权持续实施；发行暂停。本轮38工作包的实施与确认优化、20补充候选处置已随 a8cea6c1 合入 main。后续原 S09 冷 PPTX 创建回执尾项也已完成，随本次实质合并交付，见下文精确源码与测试 cut。工程候选按对应范围最小验证及独立审查交付；不声明全软件矩阵、art candidate 或 Owner accepted。实际协调只见[任务板](../TASK_BOARD.md)。
 
+## 核心体验本轮进展
+
+Owner 已于 2026-10-07 明确启动产品实施。B0 启动期间其他会话提交既有成果为 `f65767c2`；本轮以最新源码创建 `D:/果铃并行/20261007-core-experience-01a115f1/baseline` 及六个隔离源码副本，保留用户改动，不改 Git 元数据。主树仅 Root 集成。T 已先审普通目标操作，保存/关闭及三表面控制台的必要职责调整已获另一位 Astra 实施前范围审查；候选 diff 审查和真实窗口结果仍待完成。
+
+当前各包候选已独立审查并由 Root 组合到 main，Git 未提交：save 处理文件显式保存/History、旧 Flow 稿及整窗放弃；document 处理共同正文表格/公式/块属性及隐藏浮层；editing 处理光标落点、状态/镜头与快捷属性；workspace 处理控制台显示/手势/导航并持有 Player 投影单 writer；html 处理准确编辑范围和单击反馈；player 独立核原分节作品并写定向测试。新增 media 包修复真实创作触发的 project.apply ACK 句柄失效，以及同授权工作空间 ready 图片在新 MCP 会话中的查询/保存续用。正式 Session、History、最终 CAS 与未知副作用边界保留，无新生成或跨 run image.edit 承诺。
+
+最小候选证据及独立审查：HTML 2 文件 23 例；共同正文 2 文件 8 例；自由输入/状态/镜头 1+3 例；控制台 3 文件 8 例及原 ACK/观察 2 例；保存包原 5 文件 31 例，IME 取消问题修正后只重验相关 3 文件 16 例；媒体 ACK 2 例、旧 ready 图片续用 3 例。普通叶由独立 Sol 审查，保存/控制台/媒体生命周期由另一位 Astra 审查；发现的 Spatial 原位编辑切布局、控制台 affine 越界/运行拖动死区及 IME 取消卡住均已修正。未变证据不重跑。组合后的 Player、Renderer、Electron 已一次构建成功，尚不以构建替代当前真实窗口验收。
+
+原 rev15 分节作品已由独立 T 保留相同 Published 数据和资源，用新 Player 真实单击验证：6 个子对象可见数量 0→6→0→6，保持同一 DOM，公式/图像加载及缩放状态正常。无原作品改写或模型/图像/计算重跑。
+
+同账号工程 OAuth 档的公开 MCP 和真实 GUI 已正常接通；连接交接与 token 仅留 ignored output。共同三路材料见 [CREATION_BRIEF](evidence/core-experience-20261007/CREATION_BRIEF.md)。独立 Luna/medium 两路首次任务产出在 `output/core-experience-20261007/authors` 保全：裸 HTML 总约 4 分 34 秒（生图约 28 秒），作者自检修订后图片及关键互动已实际验证；MCP 约 6 分钟的 rev7 首稿已保存和导出（生图约 29 秒），尚未嵌入新图且真实点击证据不足，不记该路完成。Root 未代写/精修；后续软件修复、旧图公开续嵌入及补证另记，内置 AI 路尚未发送首次任务。当前仍缺组合 GUI/保存重开、三路完整质量与耗时比较，不记目标完成或 Owner accepted。
+
 ## 模型路由更正
+
+本轮核心体验实施另按 [CORE_EXPERIENCE_EXECUTION_PROMPT](CORE_EXPERIENCE_EXECUTION_PROMPT.md) 执行：三路创作作者统一 `gpt-6-luna/medium`，开发角色沿原分配，发行暂停。下文 DeepSeek 结果是已保全的历史证据，不替代本轮 Luna 首产出和各路首次真实生图。
 
 开发验证使用 TeamoRouter `https://api.teamorouter.com/v1` 的精确 `deepseek-flash`，沿用 Owner 已确认的 V4.1。`deepseek-v4-flash` 是另一条旧版本路由，不可混写；实时目录只确认确切别名存在，不能按名字是否包含“4.1”猜版本。
 

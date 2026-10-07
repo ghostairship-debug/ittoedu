@@ -50,7 +50,9 @@ export interface DocumentTabsController {
   flushAll(): Promise<boolean>
   saveActiveDocument(): Promise<'course' | 'document' | 'none'>
   drainAll(): Promise<boolean>
-  preserveAll(): Promise<boolean>
+  preserveAll(mode?: 'save' | 'preserve'): Promise<boolean>
+  suspendForClose(documentIds?: readonly string[]): void
+  resumeAfterCloseCancelled(documentIds?: readonly string[]): void
   closeAll(): Promise<boolean>
   disposeDocuments(): Promise<void>
   activeDocumentTarget(): ActiveDocumentTarget | undefined
@@ -168,17 +170,25 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     await disposeDocuments()
     return true
   }
-  async function preserveAll() {
+  async function preserveAll(mode: 'save' | 'preserve' = 'preserve') {
     // 同 flushAll：preserveDraft 期间的重渲染会删/增注册表键，必须按 await 前的快照遍历。
     for (const [filename, editor] of [...documents.current]) {
       if (!(await editor.preserveDraft())) { setActiveTab(tabsRef.current.find(tab => tab.id === filename)?.id ?? filename); return false }
     }
     for (const [id, editor] of [...mediaEditors.current]) {
-      if (!await editor.preserveDraft()) { setActiveTab(id); return false }
+      if (!await (mode === 'save' ? editor.flush() : editor.preserveDraft())) { setActiveTab(id); return false }
     }
     const unregistered = tabsRef.current.find(tab => tab.kind === 'media' && tab.dirty && !mediaEditors.current.has(tab.id))
     if (unregistered) { setActiveTab(unregistered.id); return false }
     return true
+  }
+  function suspendForClose(documentIds?: readonly string[]) {
+    for (const editor of documents.current.values()) if (!documentIds || editor.session.documentId && documentIds.includes(editor.session.documentId)) editor.session.suspendForClose()
+    if (!documentIds) for (const editor of mediaEditors.current.values()) editor.suspendForClose()
+  }
+  function resumeAfterCloseCancelled(documentIds?: readonly string[]) {
+    for (const editor of documents.current.values()) if (!documentIds || editor.session.documentId && documentIds.includes(editor.session.documentId)) editor.session.resumeAfterCloseCancelled()
+    if (!documentIds) for (const editor of mediaEditors.current.values()) editor.resumeAfterCloseCancelled()
   }
   async function openTab(tab: Omit<LessonFileTab, 'dirty' | 'id' | 'documentId'>) {
     const ticket = ++navigation.current
@@ -326,7 +336,7 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     }
     return true
   }
-  return { tabs, activeTab, isCourseActive: tabs.some(tab => tab.id === activeTab && tab.kind === 'course'), createMarkdown, setActiveTab, focusDocument, openTab, closeTab, removeTab, registerEditor, editorRef, mediaEditorRef, mediaFiles: requestMediaFiles, updateMediaSnapshot, updateDirty, flushAll, saveActiveDocument, drainAll, preserveAll, closeAll, disposeDocuments, activeDocumentTarget, selectionChanged, sendContextualCommand }
+  return { tabs, activeTab, isCourseActive: tabs.some(tab => tab.id === activeTab && tab.kind === 'course'), createMarkdown, setActiveTab, focusDocument, openTab, closeTab, removeTab, registerEditor, editorRef, mediaEditorRef, mediaFiles: requestMediaFiles, updateMediaSnapshot, updateDirty, flushAll, saveActiveDocument, drainAll, preserveAll, suspendForClose, resumeAfterCloseCancelled, closeAll, disposeDocuments, activeDocumentTarget, selectionChanged, sendContextualCommand }
 }
 
 function normalized(value: string) { return value.replace(/\\/g, '/').toLowerCase() }

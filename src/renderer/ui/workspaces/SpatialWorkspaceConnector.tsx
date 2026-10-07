@@ -8,10 +8,13 @@ import { SpatialLocationWorkspace } from './SpatialLocationWorkspace'
 import type { WorkspaceMediaDropHandler } from '../../lessonWorkspace/workspaceMediaDrop'
 import { resolveComponentBackground } from '../../../shared/contracts/component-platform'
 import { projectWithBackgroundPreview } from '../../authoring/backgroundPreview'
+import { useCourseEditorChrome } from '../../documents/CourseEditorChromeContext'
+import { proEditorRailController } from '../proEditorRailController'
 
 /** The original workspace consumes the active document's one World and canonical writer. */
 export function SpatialWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWorkspaceMedia?: WorkspaceMediaDropHandler }) {
   const runtime = useCourseV10Runtime()
+  const chrome = useCourseEditorChrome()
   const source = useEditorStore(useShallow(state => ({
     views: state.spatialViewStates, canvasMode: state.canvasMode, activation: state.courseView.activation,
     contentEdit: state.slideContentEdit, previewBackgroundColor: state.previewBackgroundColor, courseView: state.courseView,
@@ -54,8 +57,9 @@ export function SpatialWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWork
   const background = resolveComponentBackground(projection, projectedSurface)
   const safe = (result: unknown) => { void Promise.resolve(result).catch(error => state().setError(error instanceof Error ? error.message : String(error))) }
   return <SpatialLocationWorkspace documentId={runtime.documentId} project={projection} surface={projectedSurface} view={view}
+    teacherController={runtime.navigation}
     activeStateId={source.courseView.activeStateId}
-    selectionIds={runtime.selectedInstanceIds} canvasMode={source.canvasMode} renderInstance={id => runtime.renderInstance(id, projection)}
+    selectionIds={runtime.selectedInstanceIds} canvasMode={source.canvasMode} renderInstance={(id, displayProjection) => runtime.renderInstance(id, displayProjection ?? projection)}
     backgroundAssetUrl={background.assetId ? runtime.world.assetUrl(background.assetId) : null}
     onViewportChange={size => state().setSpatialViewport(size, surface.id, runtime.documentId)}
     captureTarget={() => state().courseKernel.captureTarget(runtime.documentId)}
@@ -65,7 +69,12 @@ export function SpatialWorkspaceConnector({ onDropWorkspaceMedia }: { onDropWork
     onActivateFrame={id => state().activateSpatialCameraFrame(surface.id, id)}
     onGraphSelect={selection => state().setSpatialGraphSelection(selection, surface.id)}
     onCanvasModeChange={mode => { safe(state().commitTextEdit().then(() => state().setCanvasMode(mode))) }}
-    onEditContent={id => { runtime.selectInstances([id], surface.id); state().setActiveTab('properties') }}
+    onEditContent={id => {
+      runtime.selectInstances([id], surface.id)
+      chrome.setMode('deep')
+      state().setActiveTab('properties')
+      proEditorRailController.open('properties')
+    }}
     contentEdit={source.contentEdit?.target.documentId === runtime.documentId && source.contentEdit.target.surfaceId === surface.id
       && source.contentEdit.target.activeStateId === source.courseView.activeStateId ? source.contentEdit : null}
     contentEditor={{ read: () => {

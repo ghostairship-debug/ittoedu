@@ -1,7 +1,7 @@
-import { Plus } from 'lucide-react'
+import { MoreHorizontal, Plus } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import type { ComponentSurface, CourseProjectV10 } from '../../shared/contracts/component-platform/project'
-import type { CapturedComponentOperation } from '../documents/CourseV10DocumentBridge'
+import type { CapturedComponentOperation, CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
 import { useCourseEditorChrome } from '../documents/CourseEditorChromeContext'
 import { useContextMenu, type MenuCommand } from '../editing/commands/CommandMenu'
 import { newPageCommands, pageCardCommands, type NewPageKind } from '../editing/commands/pageCommands'
@@ -52,6 +52,7 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
   const cards = useMemo(() => view.project ? buildBottomSceneCards(view.project) : [], [view.project])
   const menu = useContextMenu()
   const [renaming, setRenaming] = useState<string | null>(null)
+  const [renamingCamera, setRenamingCamera] = useState<{ surfaceId: string; frameId: string; title: string; target: CapturedCourseTarget } | null>(null)
   const [pendingDelete, setPendingDelete] = useState<{ card: NavigatorCard; captured: CapturedComponentOperation } | null>(null)
   const [drag, setDrag] = useState<{ key: string; over: string | null } | null>(null)
   useEffect(() => { track.current?.querySelector<HTMLElement>('[data-current-card="true"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }) }, [view.surfaceId, view.activeDocumentId])
@@ -101,6 +102,23 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
     })
   }
   const renameCard = (card: NavigatorCard, name: string) => { void liveStore()?.renameCourseSurface(card.key, name) }
+  const captureCamera = (surfaceId: string): CapturedCourseTarget | null => {
+    const state = liveStore()
+    if (!state) return null
+    try { const target = state.courseBridge.captureTarget(documentId); return { ...target, surfaceId, activeStateId: null, editingProject: target.project } }
+    catch (error) { state.setError(error instanceof Error ? error.message : '镜头目标已改变'); return null }
+  }
+  const startCameraRename = (card: NavigatorCard, child: CourseTreeNode) => {
+    const target = captureCamera(card.key)
+    if (target && child.frameId) setRenamingCamera({ surfaceId: card.key, frameId: child.frameId, title: child.label, target })
+  }
+  const cameraCommands = (card: NavigatorCard, child: CourseTreeNode): MenuCommand[] => [
+    { id: 'camera.rename', label: '重命名镜头', group: 'edit', run: () => startCameraRename(card, child) },
+    { id: 'camera.delete', label: '删除镜头', group: 'edit', danger: true, run: () => {
+      const target = captureCamera(card.key)
+      if (target && child.frameId) void liveStore()?.deleteSpatialCameraFrame(card.key, child.frameId, target)
+    } },
+  ]
   const openMenu = (event: ReactMouseEvent, label: string, items: MenuCommand[]) => { event.preventDefault(); event.stopPropagation(); menu.open({ x: event.clientX, y: event.clientY }, label, items) }
   const dropTarget = (card: NavigatorCard) => drag && drag.key !== card.key ? cards.find(candidate => candidate.key === drag.key) ?? null : null
   const dragProps = (card: NavigatorCard) => ({
@@ -117,6 +135,7 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
       const renamingCard = renaming === card.key
       const children = card.kind === 'flow' ? card.page.children : card.page.children.flatMap(group => group.children)
       const activeCamera = spatialViews[documentId]?.[card.key]?.activeCameraFrameId ?? null
+      const cameraChild = children.find(child => child.frameId === activeCamera)
       return <li key={card.key} className={'bottom-scene-card' + (card.kind !== 'slide' ? ' bottom-scene-card--' + card.kind : '') + (active ? ' bottom-scene-card--active' : '')}
         data-current-card={active} data-kind={card.kind} data-testid={(card.kind === 'slide' ? 'bottom-scene-' : 'bottom-page-') + card.key}
         onClick={event => { if (!(event.target as Element).closest('button, input')) goTo(card.page) }}
@@ -127,10 +146,25 @@ export function BottomSceneNavigator({ documentId }: { documentId: string | null
         </button>
         {renamingCard && <RenameField label="页面名称" value={card.page.label} onCommit={name => { setRenaming(null); renameCard(card, name) }} onCancel={() => setRenaming(null)} />}
         {card.kind === 'slide' ? <SceneStateButtons documentId={documentId} surfaceId={card.key} compact /> : <div className="bottom-scene-card__children" role="group" aria-label={card.page.label + '的' + (card.kind === 'flow' ? '标题与章节' : '世界与镜头')}>
+          {card.kind === 'spatial' && <>
+            <button type="button" className="bottom-scene-card__tool" aria-label="从当前画面添加镜头" title="从当前画面添加镜头" disabled={!active} onClick={() => {
+              const target = captureCamera(card.key)
+              if (target) void liveStore()?.addSpatialCameraFrameFromSession(card.key, target)
+            }}><Plus size={13} /></button>
+            <button type="button" className="bottom-scene-card__tool" aria-label="镜头操作" title="镜头操作" aria-haspopup="menu" disabled={!active || !cameraChild}
+              onClick={event => cameraChild && openMenu(event, '镜头操作', cameraCommands(card, cameraChild))}><MoreHorizontal size={13} /></button>
+          </>}
           {card.kind === 'spatial' && <button type="button" className="bottom-scene-card__child" aria-pressed={active && activeCamera === null} onClick={() => goTo(card.page)}>世界</button>}
-          {children.map(child => <button key={child.id} type="button" className="bottom-scene-card__child" data-kind={child.kind}
+          {children.map(child => renamingCamera?.surfaceId === card.key && renamingCamera.frameId === child.frameId
+            ? <RenameField key={child.id} label="镜头名称" value={renamingCamera.title} onCommit={name => {
+              const edit = renamingCamera; setRenamingCamera(null)
+              void liveStore()?.renameSpatialCameraFrame(edit.surfaceId, edit.frameId, name, edit.target)
+            }} onCancel={() => setRenamingCamera(null)} /> : <button key={child.id} type="button" className="bottom-scene-card__child" data-kind={child.kind}
             aria-current={active && (child.instanceId ? view.selectedInstanceId === child.instanceId : activeCamera === child.frameId) ? 'location' : undefined}
-            title={child.label} onClick={() => goTo(child)}>{child.kind === 'flow-heading' ? '标题 · ' : child.kind === 'flow-section' ? '章节 · ' : '镜头 · '}{child.label}</button>)}
+            title={child.label} onClick={() => goTo(child)}
+            onDoubleClick={child.frameId ? () => startCameraRename(card, child) : undefined}
+            onContextMenu={child.frameId ? event => openMenu(event, '镜头操作', cameraCommands(card, child)) : undefined}>
+            {child.kind === 'flow-heading' ? '标题 · ' : child.kind === 'flow-section' ? '章节 · ' : '镜头 · '}{child.label}</button>)}
         </div>}
       </li>
     })}

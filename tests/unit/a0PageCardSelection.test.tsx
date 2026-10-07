@@ -49,9 +49,12 @@ it('selects the page from card padding while retaining child controls, menus, dr
   const setEditingScope = vi.fn((editingScope: string) => refresh({ editingScope }))
   const camera = vi.fn((surfaceId: string, activeCameraFrameId: string | null) => refresh({ spatialViewStates: { [documentId]: { [surfaceId]: { activeCameraFrameId } } } }))
   const rename = vi.fn(async () => undefined), reorder = vi.fn(async () => undefined), add = vi.fn(async () => ({ ok: false })), error = vi.fn()
+  const addState = vi.fn(async () => undefined), deleteState = vi.fn(async () => undefined)
+  const addCamera = vi.fn(async () => undefined), renameCamera = vi.fn(async () => undefined), deleteCamera = vi.fn(async () => undefined)
   refresh({ editingScope: 'global', spatialViewStates: {}, courseBridge: bridge, setEditingScope, setError: error,
     activateSpatialCameraFrame: camera, activateFlowHeading: vi.fn(), renameCourseSurface: rename,
-    reorderCourseSurfaces: reorder, addCourseContent: add })
+    reorderCourseSurfaces: reorder, addCourseContent: add, addPresentationState: addState, deletePresentationState: deleteState,
+    addSpatialCameraFrameFromSession: addCamera, renameSpatialCameraFrame: renameCamera, deleteSpatialCameraFrame: deleteCamera })
   const before = bridge.read().snapshot!
   render(<BottomSceneNavigator documentId={documentId} />)
   const first = screen.getByTestId('bottom-scene-' + firstId), second = screen.getByTestId('bottom-scene-second'), space = screen.getByTestId('bottom-page-space')
@@ -69,11 +72,27 @@ it('selects the page from card padding while retaining child controls, menus, dr
   expect(selectState).toHaveBeenCalledExactlyOnceWith(documentId, 'question', 'second')
   expect(selectSurface).not.toHaveBeenCalled()
   expect(bridge.read().activeStateId).toBe('question')
+  fireEvent.click(within(second).getByRole('button', { name: '新建场景状态' }))
+  expect(addState).toHaveBeenCalledWith(undefined, expect.objectContaining({ documentId, surfaceId: 'second', activeStateId: null }))
+  fireEvent.click(within(second).getByRole('button', { name: '删除当前状态' }))
+  fireEvent.click(screen.getByRole('button', { name: '删除状态' }))
+  expect(deleteState).toHaveBeenCalledWith('question', expect.objectContaining({ documentId, surfaceId: 'second', activeStateId: null }))
 
   fireEvent.click(within(space).getByRole('button', { name: '镜头 · 局部镜头' }))
   expect(selectSurface).toHaveBeenCalledExactlyOnceWith(documentId, 'space')
   expect(camera).toHaveBeenCalledExactlyOnceWith('space', 'camera')
   expect(within(space).getByRole('button', { name: '镜头 · 局部镜头' })).toHaveAttribute('aria-current', 'location')
+  fireEvent.click(within(space).getByRole('button', { name: '从当前画面添加镜头' }))
+  expect(addCamera).toHaveBeenCalledWith('space', expect.objectContaining({ documentId, surfaceId: 'space' }))
+  fireEvent.click(within(space).getByRole('button', { name: '镜头操作' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '重命名镜头' }))
+  const cameraName = screen.getByRole('textbox', { name: '镜头名称' })
+  fireEvent.change(cameraName, { target: { value: '中文镜头' } })
+  fireEvent.keyDown(cameraName, { key: 'Enter' })
+  expect(renameCamera).toHaveBeenCalledWith('space', 'camera', '中文镜头', expect.objectContaining({ documentId, surfaceId: 'space' }))
+  fireEvent.click(within(space).getByRole('button', { name: '镜头操作' }))
+  fireEvent.click(screen.getByRole('menuitem', { name: '删除镜头' }))
+  expect(deleteCamera).toHaveBeenCalledWith('space', 'camera', expect.objectContaining({ documentId, surfaceId: 'space' }))
 
   // Renaming another card must leave the selected page/camera alone.
   selectSurface.mockClear()

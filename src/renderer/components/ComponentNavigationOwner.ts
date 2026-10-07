@@ -5,6 +5,7 @@ import { componentSurfaceGeometryTargets } from '../../player/componentPlatform/
 import { componentFragmentStateKey } from '../../player/componentPlatform/fragments'
 import { matchesPublishedCourseStateCondition } from '../../player/surfaces/publishedCourseState'
 import type { AudioManager } from '../../player/AudioManager'
+import { isGlobalTeacherController, teacherControllerAuthoredCollapsed, teacherControllerFrameOrigin, teacherControllerIsCollapsed, teacherControllerViewportFrame } from '../../shared/teacherControllerViewportGeometry'
 
 export interface ComponentCameraBinding {
   frameId(): string | null
@@ -39,7 +40,7 @@ interface NavigationPorts {
 export class ComponentNavigationOwner implements TeacherControllerPort {
   private readonly listeners = new Set<() => void>()
   private readonly replayListeners = new Set<(surfaceId: string) => void>()
-  /** Authored defaults apply until the first session collapse action. */
+  /** Playback overrides the authored default; the editor always follows its formal quick-bar value. */
   private collapsed: boolean | undefined
   private zoom = 1
   private offset = { x: 0, y: 0 }
@@ -168,10 +169,13 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
   read = (): TeacherControllerSnapshot => {
     const project = this.ports.project(), id = this.ports.surfaceId(), sceneIndex = project.surfaces.findIndex(surface => surface.id === id)
     const steps = this.steps(), stepIndex = this.stepIndex()
-    return { locationId: id, interactive: this.ports.interactive?.() ?? true, scenes: project.surfaces.map(surface => ({ id: surface.id, name: surface.title })),
+    const interactive = this.ports.interactive?.() ?? true
+    const teacher = [...project.global.underlay, ...project.global.overlay].find(value => isGlobalTeacherController(project, value))
+    const authoredCollapsed = teacher ? teacherControllerAuthoredCollapsed(project, teacher, id ?? '') : true
+    return { locationId: id, interactive, scenes: project.surfaces.map(surface => ({ id: surface.id, name: surface.title })),
       progress: sceneIndex < 0 ? null : { sceneIndex, sceneCount: project.surfaces.length, sceneName: project.surfaces[sceneIndex].title,
         stepIndex, stepCount: steps.length + 1, stepName: steps[stepIndex - 1]?.title ?? '' },
-      collapsed: this.collapsed, zoom: this.observations.get(id ?? '')?.readZoom() ?? this.cameras.get(id ?? '')?.camera.read().zoom ?? this.zoom,
+      collapsed: interactive ? this.collapsed ?? authoredCollapsed : authoredCollapsed, zoom: this.observations.get(id ?? '')?.readZoom() ?? this.cameras.get(id ?? '')?.camera.read().zoom ?? this.zoom,
       muted: this.ports.audio?.()?.muted() ?? false, fullscreen: typeof document !== 'undefined' && Boolean(document.fullscreenElement) }
   }
   canExecute = (action: TeacherControllerAction): boolean => {
@@ -243,7 +247,20 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
     this.changed(); return true
   }
   setCollapsed = (value: boolean) => { if (!this.retired) { this.collapsed = value; this.changed() } }
-  moveBy = (dx: number, dy: number) => { if (!this.retired && Number.isFinite(dx) && Number.isFinite(dy)) { this.offset = { x: this.offset.x + dx, y: this.offset.y + dy }; this.changed() } }
+  moveBy = (dx: number, dy: number) => {
+    if (this.retired || !Number.isFinite(dx) || !Number.isFinite(dy)) return
+    const project = this.ports.project(), bounds = this.ports.viewportBounds?.()
+    const id = [...project.global.underlay, ...project.global.overlay].find(value => isGlobalTeacherController(project, value))
+    const frame = id && project.instances[id]?.frame
+    if (frame && bounds && bounds.right > bounds.left && bounds.bottom > bounds.top) {
+      const viewport = { width: bounds.right - bounds.left, height: bounds.bottom - bounds.top }, collapsed = teacherControllerIsCollapsed(project, id!, this)
+      const shown = teacherControllerViewportFrame(frame, viewport, this.offset, collapsed)
+      const origin = teacherControllerFrameOrigin(frame, collapsed)
+      this.offset = { x: dx === 0 ? this.offset.x : shown.transform[4] + dx - origin.x,
+        y: dy === 0 ? this.offset.y : shown.transform[5] + dy - origin.y }
+    } else this.offset = { x: this.offset.x + dx, y: this.offset.y + dy }
+    this.changed()
+  }
   setZoom = (value: number) => {
     if (this.retired || !Number.isFinite(value) || value <= 0) return
     const id = this.ports.surfaceId() ?? '', observation = this.observations.get(id), camera = this.cameras.get(id)?.camera

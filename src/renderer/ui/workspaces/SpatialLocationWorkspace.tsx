@@ -20,6 +20,7 @@ import { useSlideNativeTextEditor } from './useSlideNativeTextEditor'
 import { componentDefinitionPresentation } from '../properties/componentDefinitionPresentation'
 import type { SlideContentEdit } from '../../store/slices/slideAuthoringSlice'
 import { resolveComponentBackground } from '../../../shared/contracts/component-platform'
+import { isGlobalTeacherController, projectTeacherControllerInstances, restoreTeacherControllerFrameEdits, type TeacherControllerDisplayPort } from '../../../shared/teacherControllerViewportGeometry'
 
 export interface SpatialLocationWorkspaceProps {
   documentId: string
@@ -29,7 +30,8 @@ export interface SpatialLocationWorkspaceProps {
   activeStateId?: string | null
   selectionIds: readonly string[]
   canvasMode: 'edit' | 'run'
-  renderInstance(instanceId: string): ReactNode
+  renderInstance(instanceId: string, displayProjection?: CourseProjectV10): ReactNode
+  teacherController?: TeacherControllerDisplayPort
   backgroundAssetUrl?: string | null
   backgroundPreviewColor?: string | null
   onViewportChange?(size: { width: number; height: number }): void
@@ -81,6 +83,8 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   const [marquee, setMarquee] = useState<{ start: GeometryPoint; end: GeometryPoint } | null>(null)
   const spacePan = useRef(false)
   const [error, setError] = useState<string | null>(null), [dragOver, setDragOver] = useState(false)
+  const [, refreshNavigation] = useState(0)
+  useEffect(() => props.teacherController?.subscribe(() => refreshNavigation(value => value + 1)), [props.teacherController])
   const active = useRef<{ pointerId: number; last: GeometryPoint; marquee?: GeometryPoint; originalSelection?: readonly string[]; geometry?: FreeTransformGesture; targets: FreeObjectTarget[]; edits: ComponentEdit[]; captured: CapturedCourseTarget } | null>(null)
   const deferred = useRef<{ input: PointerInput; mode: 'drag' | 'resize' | 'rotate'; handle?: FreeResizeHandle;
     latest: PointerInput; ended: boolean; documentId: string; surfaceId: string; stateId: string | null; scope: SpatialSurfaceViewState['scope']; epoch: string } | null>(null)
@@ -89,16 +93,21 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   const resumeFinish = useRef<(pointerId: number) => void>(() => {})
   const spatial = props.surface.spatial
   const worldTargets = spatialWorldTargets(props.project, props.surface.id)
-  const allTargets = freeSurfaceTargets(props.project, props.surface.id)
-  const globalIds = new Set([...props.project.global.underlay, ...props.project.global.overlay])
-  const scopeTargets = props.view.scope === 'global' ? allTargets.filter(target => globalIds.has(target.ancestors[0] ?? target.instanceId)) : worldTargets
-  const visibleTargets = scopeTargets.filter(target => props.project.instances[target.instanceId]?.visible !== false && target.ancestors.every(id => props.project.instances[id]?.visible !== false)
-    && (props.view.scope === 'global' || spatialSemanticVisible(spatial, target.instanceId, props.view.camera.zoom)))
-  const locked = (target: FreeObjectTarget) => props.project.instances[target.instanceId]?.locked || target.ancestors.some(id => props.project.instances[id]?.locked)
   const design = props.surface.designSize ?? { width: 1280, height: 720 }
   const overlayScale = Math.min(size.width / design.width, size.height / design.height)
   const hudMatrix = composeMatrices(translationMatrix((size.width - design.width * overlayScale) / 2, (size.height - design.height * overlayScale) / 2), scaleMatrix(overlayScale))
   const worldMatrix = componentSpatialCameraMatrix(props.view.camera, { x: 0, y: 0, ...size })
+  const displayProject = projectTeacherControllerInstances(props.project, size, hudMatrix, props.teacherController)
+  const latestDisplay = useRef(displayProject); latestDisplay.current = displayProject
+  const allTargets = freeSurfaceTargets(displayProject, props.surface.id)
+  const globalIds = new Set([...props.project.global.underlay, ...props.project.global.overlay])
+  const controllerTargets = allTargets.filter(target => isGlobalTeacherController(props.project, target.instanceId))
+    .map(target => ({ ...target, parentToSurface: composeMatrices(invertMatrix(worldMatrix), hudMatrix, target.parentToSurface) }))
+  const scopeTargets = props.view.scope === 'global' ? allTargets.filter(target => globalIds.has(target.ancestors[0] ?? target.instanceId)) : [...worldTargets, ...controllerTargets]
+  const visibleTargets = scopeTargets.filter(target => props.project.instances[target.instanceId]?.visible !== false && target.ancestors.every(id => props.project.instances[id]?.visible !== false)
+    && (props.view.scope === 'global' || isGlobalTeacherController(props.project, target.instanceId) || spatialSemanticVisible(spatial, target.instanceId, props.view.camera.zoom)))
+  const locked = (target: FreeObjectTarget) => props.project.instances[target.instanceId]?.locked || target.ancestors.some(id => props.project.instances[id]?.locked)
+  const gestureDisplay = useRef<{ original: CourseProjectV10; display: CourseProjectV10; viewport: typeof size; matrix: AffineMatrix; offset: { x: number; y: number } } | null>(null)
   const background = resolveComponentBackground(props.project, props.surface)
   const matrix = props.view.scope === 'global' ? hudMatrix : worldMatrix
   const clientMatrix = () => { const box = viewport.current!.getBoundingClientRect(); return composeMatrices(translationMatrix(box.left, box.top), matrix) }
@@ -113,7 +122,7 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   const resetPreview = () => {
     const current = latest.current
     for (const node of viewport.current?.querySelectorAll<HTMLElement>('[data-component-instance]') ?? []) {
-      const frame = current.project.instances[node.dataset.componentInstance ?? '']?.frame
+      const frame = latestDisplay.current.instances[node.dataset.componentInstance ?? '']?.frame
       if (frame) { node.style.transform = `matrix(${frame.transform.join(',')})`; node.style.width = `${frame.width}px`; node.style.height = `${frame.height}px` }
     }
     setPreview({})
@@ -135,7 +144,7 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   }, [])
   useEffect(() => {
     if (active.current?.geometry) {
-      const values = freeSurfaceTargets(props.project, props.surface.id)
+      const values = scopeTargets
       if (!active.current.targets.every(target => { const value = values.find(value => value.instanceId === target.instanceId); return value && sameFreeTarget(target, value) })) { active.current = null; resetPreview() }
     }
   }, [props.project])
@@ -222,6 +231,8 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
     const targets = selectedFreeTargets(scopeTargets, ids).filter(target => !locked(target))
     if (hit && !targets.length || !hit && !pan) { event.stopPropagation(); return }
     event.preventDefault(); event.stopPropagation(); viewport.current!.setPointerCapture(event.pointerId)
+    gestureDisplay.current = { original: props.project, display: displayProject, viewport: size, matrix: hudMatrix,
+      offset: props.teacherController?.placement?.() ?? { x: 0, y: 0 } }
     active.current = { pointerId: event.pointerId, last: pointer(event), targets, captured: props.captureTarget(), edits: [], geometry: pan ? undefined : new FreeTransformGesture({ mode, handle, targets, pointer: pointer(event), surfaceToPointer: clientMatrix(), snapTargets: visibleTargets.filter(target => !ids.includes(target.instanceId) && !target.ancestors.some(id => ids.includes(id))) }) }
   }
   resumePointer.current = begin
@@ -258,7 +269,9 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
     setMarquee(null)
     if (cancel && gesture.marquee) props.onSelect(gesture.originalSelection ?? [])
     if (viewport.current?.hasPointerCapture(event.pointerId)) viewport.current.releasePointerCapture(event.pointerId)
-    if (!cancel && gesture.edits.length) void props.onEdits(gesture.edits, gesture.captured).catch(error => setError(String(error))).finally(resetPreview)
+    const frozen = gestureDisplay.current
+    const edits = frozen ? restoreTeacherControllerFrameEdits(gesture.edits, frozen.original, frozen.display, frozen.viewport, frozen.matrix, frozen.offset, props.teacherController) : gesture.edits
+    if (!cancel && edits.length) void props.onEdits(edits, gesture.captured).catch(error => setError(String(error))).finally(resetPreview)
     else resetPreview()
   }
   resumeFinish.current = pointerId => finish({ pointerId })
@@ -272,7 +285,8 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   const currentFrame = spatial?.frames.find(frame => frame.id === props.view.activeCameraFrameId)
   const zoom = (delta: number) => props.onCamera({ ...props.view.camera, zoom: Math.max(0.01, props.view.camera.zoom + delta) })
   return <main ref={root} className={`workspace workspace--${props.canvasMode} workspace--spatial`} data-testid="spatial-workspace">
-    <NativeSelectionContext documentId={props.documentId} revision={props.project.revision} locationId={props.surface.id} itemIds={props.selectionIds} stateId={props.activeStateId} enabled={props.canvasMode === 'edit'} textEditing={Boolean(props.contentEdit)} />
+    <NativeSelectionContext documentId={props.documentId} revision={props.project.revision} locationId={props.surface.id} itemIds={props.selectionIds} stateId={props.activeStateId} enabled={props.canvasMode === 'edit'} textEditing={Boolean(props.contentEdit)}
+      bounds={id => { const element = [...(viewport.current?.querySelectorAll<HTMLElement>('[data-component-instance]') ?? [])].find(value => value.dataset.componentInstance === id); return element?.getBoundingClientRect() ?? null }} />
     {menu.element}
     <div className="canvas-mode-switch" role="group" aria-label="画布模式">
       <button type="button" className={props.canvasMode === 'edit' ? 'canvas-mode-switch__active' : ''} aria-pressed={props.canvasMode === 'edit'} onClick={() => props.onCanvasModeChange('edit')}><MousePointer2 size={13} />编辑状态</button>
@@ -293,7 +307,7 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
       data-observation-spatial-camera={JSON.stringify(props.view.camera)} style={{ overflow: 'hidden', touchAction: 'none', backgroundColor: props.backgroundPreviewColor ?? background.color,
         backgroundImage: props.backgroundAssetUrl ? `url(${JSON.stringify(props.backgroundAssetUrl)})` : undefined, backgroundSize: background.fit === 'fill' ? '100% 100%' : background.fit, backgroundPosition: 'center', backgroundRepeat: 'no-repeat', boxShadow: dragOver ? 'inset 0 0 0 3px #245b46' : undefined }}
       onPointerDownCapture={event => { if (!(event.target instanceof Element && event.target.closest('[data-handle]'))) begin(event) }} onPointerMove={move} onPointerUp={event => finish(event)} onPointerCancel={event => finish(event, true)} onLostPointerCapture={event => finish(event, true)}
-      onDoubleClick={event => { if (props.canvasMode === 'edit' && !inputOwnsPointer(event.target)) { const hit = hitFreeObject(visibleTargets, at(event), true); if (hit) { props.onSelect([hit.instanceId]); editor.begin(hit.instanceId, at(event), pointer(event)); props.onEditContent?.(hit.instanceId) } } }}
+      onDoubleClick={event => { if (props.canvasMode === 'edit' && !inputOwnsPointer(event.target)) { const hit = hitFreeObject(visibleTargets, at(event), true); if (hit) { props.onSelect([hit.instanceId]); if (!editor.begin(hit.instanceId, at(event), pointer(event))) props.onEditContent?.(hit.instanceId) } } }}
       onContextMenu={event => {
         if (props.canvasMode !== 'edit' || inputOwnsPointer(event.target)) return
         event.preventDefault(); const place = pointer(event), hit = hitFreeObject(visibleTargets, at(event), true)
@@ -316,9 +330,9 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
           { captured: frozen, documentId: frozen.documentId, projectId: frozen.project.id, revision: frozen.project.revision, locationId: props.surface.id, surfaceId: props.surface.id, sessionGeneration: props.activation ?? 0 }, props.onDropWorkspaceMedia,
           () => mediaRef.current.directory === media.directory && mediaRef.current.files === media.files).then(result => setError(result.ok ? null : result.reason ?? '媒体未插入'))
       }}>
-      <div data-spatial-hud-plane="underlay" style={{ position: 'absolute', left: 0, top: 0, width: design.width, height: design.height, transformOrigin: '0 0', transform: `matrix(${hudMatrix.join(',')})`, pointerEvents: props.view.scope === 'global' ? 'auto' : 'none' }}>{props.project.global.underlay.map(props.renderInstance)}</div>
-      <div data-spatial-world="true" style={{ position: 'absolute', left: 0, top: 0, width: 0, height: 0, transformOrigin: '0 0', transform: `matrix(${worldMatrix.join(',')})` }}>{props.surface.childIds.map(props.renderInstance)}</div>
-      <div data-spatial-hud-plane="overlay" style={{ position: 'absolute', left: 0, top: 0, width: design.width, height: design.height, transformOrigin: '0 0', transform: `matrix(${hudMatrix.join(',')})`, pointerEvents: props.view.scope === 'global' || props.canvasMode === 'run' ? 'auto' : 'none' }}>{props.project.global.overlay.map(props.renderInstance)}</div>
+      <div data-spatial-hud-plane="underlay" style={{ position: 'absolute', left: 0, top: 0, width: design.width, height: design.height, transformOrigin: '0 0', transform: `matrix(${hudMatrix.join(',')})`, pointerEvents: props.view.scope === 'global' ? 'auto' : 'none' }}>{props.project.global.underlay.map(id => props.renderInstance(id, displayProject))}</div>
+      <div data-spatial-world="true" style={{ position: 'absolute', left: 0, top: 0, width: 0, height: 0, transformOrigin: '0 0', transform: `matrix(${worldMatrix.join(',')})` }}>{props.surface.childIds.map(id => props.renderInstance(id))}</div>
+      <div data-spatial-hud-plane="overlay" style={{ position: 'absolute', left: 0, top: 0, width: design.width, height: design.height, transformOrigin: '0 0', transform: `matrix(${hudMatrix.join(',')})`, pointerEvents: props.view.scope === 'global' || props.canvasMode === 'run' ? 'auto' : 'none' }}>{props.project.global.overlay.map(id => props.renderInstance(id, displayProject))}</div>
       {props.canvasMode === 'edit' && <div style={{ position: 'absolute', left: 0, top: 0, width: 0, height: 0, transformOrigin: '0 0', transform: `matrix(${matrix.join(',')})` }}>{editor.editor}</div>}
       <svg width="100%" height="100%" style={{ position: 'absolute', inset: 0, pointerEvents: 'none', overflow: 'visible' }}>
         {guides.map((guide, index) => {

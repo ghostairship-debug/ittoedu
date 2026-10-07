@@ -1,4 +1,4 @@
-import { AArrowDown, AArrowUp, AlignCenter, AlignLeft, AlignRight, AlignHorizontalJustifyStart, Baseline, Bold, ChevronsDownUp, ChevronsUpDown, Crop, Eye, EyeOff, Film, Highlighter, ImageIcon, Lock, Italic, PaintBucket, Pencil, Play, Repeat, Scan, Sigma, Square, Type, Underline, Unlock, VolumeX } from 'lucide-react'
+import { AArrowDown, AArrowUp, AlignCenter, AlignLeft, AlignRight, AlignHorizontalJustifyStart, Baseline, Bold, ChevronsDownUp, ChevronsUpDown, Crop, Eye, EyeOff, Film, Highlighter, ImageIcon, Lock, Italic, PaintBucket, Pencil, Play, Repeat, Scan, Sigma, SlidersHorizontal, Square, Type, Underline, Unlock, VolumeX } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { isStrokeOnlyShapeType } from '../../shared/contracts/native-v1'
 import { useCourseEditorActions } from '../documents/CourseEditorActionsContext'
@@ -20,6 +20,9 @@ import type { PropertiesItemView, PropertiesPatch } from '../ui/properties/Slide
 import { captureCourseInstanceSelection, usePinnedSelection, workbenchSelection } from './SelectionContextController'
 import { RuntimePageTextList } from './RuntimePageText'
 import './selectionContext.css'
+import { useCourseEditorChrome } from '../documents/CourseEditorChromeContext'
+import { useEditorStore } from '../store/editorStore'
+import { proEditorRailController } from '../ui/proEditorRailController'
 
 type ObjectProperties = Extract<PropertiesContext, { kind: 'slide-native' | 'multi-selection' }>
 type GlobalProperties = Extract<PropertiesContext, { kind: 'course-global' }>
@@ -126,6 +129,7 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
   ownsDocumentSelection?: boolean
 }) {
   const locationId = surfaceId ?? legacyLocationId
+  const chrome = useCourseEditorChrome()
   const marker = useRef<HTMLSpanElement>(null)
   const [root, setRoot] = useState<HTMLElement | null>(null)
   const actions = useCourseEditorActions()
@@ -347,6 +351,11 @@ export function NativeSelectionContext({ documentId, revision, surfaceId, locati
       style={{ left: box.left, top: box.top, width: box.width, height: box.height, transform: box.rotation ? `rotate(${box.rotation}deg)` : undefined }} />)}
     {content && <SelectionQuickBar label="选中对象快捷工具" anchor={anchor} bounds={view} suspended={gesture || textEditing || cropping !== null} selectionKey={`${documentId}:${locationId}:${stateId}:${ids}`} aboveOffset={ROTATION_HANDLE_CLEARANCE}>
       {content}
+      <QuickBarButton label="属性" icon={<SlidersHorizontal size={14} />} onClick={() => {
+        chrome.setMode('deep')
+        useEditorStore.getState().setActiveTab('properties')
+        proEditorRailController.open('properties')
+      }} />
       {notice && <span role="alert" className="selection-quick-bar__notice" title={notice}>{notice}</span>}
     </SelectionQuickBar>}
     {contextMenu.element}

@@ -48,6 +48,38 @@ describe('Flow recovery path identity and session fences', () => {
     const current = { ...identity, epoch: 'new-process-session' }
     expect(await restarted({ operation: 'read', target: current })).toMatchObject({ epoch: 'session-1', source: '$unfinished' })
     await restarted({ operation: 'clear', target: current })
+    expect(await restarted({ operation: 'read', target: current })).toMatchObject({ source: '$unfinished' })
+    await restarted({ operation: 'claim', target: current, recordEpoch: record.epoch, revision: record.revision })
+    await restarted({ operation: 'clear', target: current })
     expect(await restarted({ operation: 'read', target: current })).toBeNull()
+  })
+  it('keeps an older revision retrievable through current writes, clears and document discard', async () => {
+    const { operate } = await setup()
+    await operate({ operation: 'read', target: identity })
+    await operate({ operation: 'write', record })
+    const current = { ...identity, epoch: 'current-input', documentEpoch: 'current-document', revision: 8 }
+    expect(await operate({ operation: 'read', target: current })).toMatchObject({ source: '$unfinished' })
+    await operate({ operation: 'clear', target: current })
+    expect(await operate({ operation: 'retained', target: current })).toEqual([record])
+    await operate({ operation: 'write', record: { ...record, ...current, source: 'current raw' } })
+    await operate.discardDocument({ ...current, epoch: current.documentEpoch })
+    const reopened = { ...current, epoch: 'reopen-input', documentEpoch: 'reopen-document' }
+    expect(await operate({ operation: 'read', target: reopened })).toBeNull()
+    expect(await operate({ operation: 'retained', target: reopened })).toEqual([record])
+    await expect(operate({ operation: 'write', record: { ...record, ...current } })).rejects.toThrow('会话已失效')
+  })
+  it('discards only the adopted document input, not another saved path', async () => {
+    const { operate } = await setup()
+    await operate({ operation: 'read', target: identity })
+    await operate({ operation: 'write', record })
+    const other = { ...identity, projectPath: 'C:/Lessons/B.h5lesson', epoch: 'other' }
+    await operate({ operation: 'read', target: other })
+    await operate({ operation: 'write', record: { ...record, ...other, source: 'other source' } })
+    const adopted = { ...identity, epoch: 'adopted', documentEpoch: 'main-epoch' }
+    await operate({ operation: 'read', target: adopted })
+    await operate({ operation: 'claim', target: adopted, recordEpoch: record.epoch, revision: record.revision })
+    await operate.discardDocument({ ...adopted, epoch: 'main-epoch' })
+    expect(await operate({ operation: 'read', target: { ...adopted, epoch: 'next' } })).toBeNull()
+    expect(await operate({ operation: 'read', target: other })).toMatchObject({ source: 'other source' })
   })
 })

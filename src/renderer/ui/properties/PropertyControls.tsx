@@ -38,6 +38,10 @@ type PropertyDraftEntry = { flush: PropertyDraftFlush; read: () => PropertyDraft
   restore?: (draft: PropertyDraftRecovery) => void; mounted?: boolean }
 const pendingPropertyDrafts = new Set<PropertyDraftEntry>()
 const propertyDraftListeners = new Set<() => void>()
+const suspendedPropertyDocuments = new Set<string>()
+export function suspendPropertiesDrafts(documentIds: readonly string[]): void { for (const id of documentIds) suspendedPropertyDocuments.add(id) }
+export function resumePropertiesDrafts(documentIds: readonly string[]): void { for (const id of documentIds) suspendedPropertyDocuments.delete(id) }
+function propertyDraftSuspended(key: string): boolean { return suspendedPropertyDocuments.has(String(bindingParts(key)?.[0] ?? '')) }
 let notificationPending = false
 function notifyPropertyDrafts() {
   if (notificationPending) return
@@ -300,6 +304,7 @@ function BufferedPropertyInput({
   }
   const commit = (candidate = sessionRef.current.draft): boolean | Promise<boolean> => {
     const session = sessionRef.current
+    if (propertyDraftSuspended(session.bindingKey)) return false
     if (session.pending) return session.pending
     if (resumeRequired.current) { setCommitError('恢复的输入法草稿尚未完成，请继续编辑后再应用。'); return false }
     if (rejectStale()) return false
@@ -618,6 +623,7 @@ export function RangeField({
   }
   const commit = (next: number) => {
     const session = sessionRef.current
+    if (propertyDraftSuspended(session.bindingKey)) return
     if (!session.active) return
     if (rejectStale()) {
       rebaseCurrent()
@@ -883,6 +889,7 @@ export function TextContentTextarea({
   const finishCommit = () => {
     if (resumeRequired.current) return
     const session = sessionRef.current
+    if (propertyDraftSuspended(session.bindingKey)) return
     if (rejectStale()) return
     const commit = session.onCommit
     session.phase = 'idle'
@@ -1219,6 +1226,7 @@ export function FontFamilyPicker({ value, placeholder, onCommit }: {
     : availableFonts
 
   const commit = (candidate = sessionRef.current.draft, endSession = false) => {
+    if (propertyDraftSuspended(sessionRef.current.bindingKey)) return false
     if (rejectStale()) {
       rebaseCurrent()
       return false

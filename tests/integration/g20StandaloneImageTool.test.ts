@@ -108,7 +108,8 @@ it('generates and edits a persistent workspace image without any V9 document, th
   expect(Buffer.from((await recovery.coordinator.readStandaloneImage('run', ready.job, ready.resources[0].resourceId)).bytes)).toEqual(original)
   expect(bodies).toHaveLength(2)
   const otherRun = fixture(reopened, root)
-  await otherRun.coordinator.beginRun({ ...otherRun.grant, runId: 'different-run' })
+  await otherRun.coordinator.beginRun({ ...otherRun.grant, runId: 'different-run',
+    fileAccess: { permission: 'workspace', workspaceRoot: path.join(root, 'another-workspace') } })
   await expect(otherRun.coordinator.readStandaloneImage('different-run', ready.job, ready.resources[0].resourceId)).rejects.toThrow('不属于')
   const readOnly = fixture(reopened, root)
   await readOnly.coordinator.beginRun({ ...readOnly.grant, fileAccess: { permission: 'read-only', workspaceRoot: root } })

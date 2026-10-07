@@ -30,6 +30,8 @@ export class HtmlPreviewController {
   private selected: HtmlSelectedTarget | null = null
   private requestSerial = 0
   private modeRequest: { requestId: string; enabled: boolean } | null = null
+  private editMode = false
+  private modeSerial = 0
   constructor(
     private readonly iframe: HTMLIFrameElement,
     readonly lease: HtmlPreviewLease,
@@ -41,7 +43,9 @@ export class HtmlPreviewController {
 
   updateCommitted(snapshot: DocumentSnapshot): void {
     if (snapshot.documentId !== this.lease.documentId || snapshot.epoch !== this.lease.epoch) return
+    const changed = snapshot.revision > this.revision
     this.revision = Math.max(this.revision, snapshot.revision)
+    if (changed && this.editMode) this.iframe.contentWindow?.postMessage({ type: 'html-preview.refresh-targets', loadId: this.lease.loadId }, '*')
     if (this.selected && (this.selected.resolved.status !== 'editable'
       || this.selected.resolved.locator.revision !== snapshot.revision)) this.select(null)
   }
@@ -67,6 +71,7 @@ export class HtmlPreviewController {
       this.events.onEditModeReady(message.enabled)
     }
     if (this.visible && message.event === 'targets') void this.resolve(message.targets)
+    if (this.visible && this.editMode && message.event === 'edit-targets') void this.confirmTargets(message.scanId, message.targets)
   }
 
   init(): void {
@@ -79,6 +84,7 @@ export class HtmlPreviewController {
     this.lastSeq = -1
     this.requestSerial += 1
     this.modeRequest = null
+    this.modeSerial++
     this.select(null)
   }
 
@@ -104,6 +110,10 @@ export class HtmlPreviewController {
   setEditMode(enabled: boolean): void {
     const requestId = crypto.randomUUID()
     this.modeRequest = { requestId, enabled }
+    this.editMode = enabled
+    this.modeSerial++
+    this.requestSerial++
+    this.select(null)
     this.iframe.contentWindow?.postMessage({ type: 'html-preview.edit-mode', loadId: this.lease.loadId, requestId, enabled }, '*')
   }
 
@@ -113,7 +123,21 @@ export class HtmlPreviewController {
 
   private select(value: HtmlSelectedTarget | null, issue?: string): void {
     this.selected = value
+    this.iframe.contentWindow?.postMessage({ type: 'html-preview.selection', loadId: this.lease.loadId,
+      handle: value?.report.handle ?? null, editable: value?.resolved.status === 'editable' }, '*')
     this.events.onTarget(value, issue)
+  }
+
+  private async confirmTargets(scanId: string, targets: HtmlTargetReport[]): Promise<void> {
+    const revision = this.revision, modeSerial = this.modeSerial
+    try {
+      const response = await window.desktopAPI.workspaceFiles!({ type: 'html-preview.resolve-target',
+        leaseId: this.lease.leaseId, loadId: this.lease.loadId, revision, targets })
+      if (!this.active || !this.visible || !this.editMode || modeSerial !== this.modeSerial
+        || revision !== this.revision || response.revision !== revision) return
+      this.iframe.contentWindow?.postMessage({ type: 'html-preview.confirm-targets', loadId: this.lease.loadId, scanId,
+        handles: response.targets.filter(target => target.status === 'editable').map(target => target.handle) }, '*')
+    } catch { /* Discovery cannot block the existing click-to-resolve editor. */ }
   }
 
   private async resolve(targets: HtmlTargetReport[]): Promise<void> {

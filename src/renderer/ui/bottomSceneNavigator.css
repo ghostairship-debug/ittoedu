@@ -81,6 +81,21 @@
   overflow-y: hidden;
   scrollbar-width: thin;
 }
+.lesson-workspace-shell .bottom-scene-card__tool, .bottom-scene-card__tool {
+  display: grid;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 28px;
+  min-height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border, #d9d6ce);
+  border-radius: 4px;
+  background: var(--surface, #fff);
+  color: inherit;
+  cursor: pointer;
+}
+.bottom-scene-card__tool:disabled { opacity: 0.45; cursor: default; }
 .lesson-workspace-shell .bottom-scene-card__state, .lesson-workspace-shell .bottom-scene-card__child {
   flex: 0 0 auto;
   max-width: 132px;

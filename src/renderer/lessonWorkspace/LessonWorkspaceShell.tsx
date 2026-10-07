@@ -36,7 +36,9 @@ export interface LessonWorkspaceShellHandle {
   flushAll(): Promise<boolean>
   saveActiveDocument(): Promise<'course' | 'document' | 'none'>
   closeAll(): Promise<boolean>
-  preserveAll(): Promise<boolean>
+  preserveAll(mode?: 'save' | 'preserve'): Promise<boolean>
+  suspendForClose(documentIds?: readonly string[]): void
+  resumeAfterCloseCancelled(documentIds?: readonly string[]): void
   openFile(path: string): Promise<void>
   focusDocument(documentId: string): Promise<void>
   detachLesson(): void
@@ -63,6 +65,8 @@ export const LessonWorkspaceShell = forwardRef<LessonWorkspaceShellHandle, Lesso
     saveActiveDocument: tabs.saveActiveDocument,
     closeAll: tabs.closeAll,
     preserveAll: tabs.preserveAll,
+    suspendForClose: tabs.suspendForClose,
+    resumeAfterCloseCancelled: tabs.resumeAfterCloseCancelled,
     openFile: async path => workspace.actions.openFile({ path, name: path.split(/[\\/]/).pop() ?? path, kind: 'file' }),
     focusDocument: tabs.focusDocument,
     detachLesson: workspace.actions.detachLesson,

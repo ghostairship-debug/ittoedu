@@ -199,7 +199,7 @@ export function HtmlPreviewPane({ lease, committed, textDrafts, onUndo, onRedo, 
   return <div ref={container} className="html-preview-pane">
     <div className="html-preview-pane__toolbar" role="toolbar" aria-label="HTML 分页">
       {toolbarLeading}
-      <button type="button" className="html-preview-pane__edit" title="编辑模式中双击文字或单击图片，Esc 关闭编辑框" aria-pressed={editMode} disabled={!frameReady || modePending} onClick={() => {
+      <button type="button" className="html-preview-pane__edit" title="编辑模式中单击文字或图片，Esc 关闭编辑框" aria-pressed={editMode} disabled={!frameReady || modePending} onClick={() => {
         const next = !editModeRef.current
         editModeRef.current = next
         setModePending(true)
@@ -211,7 +211,6 @@ export function HtmlPreviewPane({ lease, committed, textDrafts, onUndo, onRedo, 
         <span>{page + 1} / {pageCount}</span>
         <button type="button" disabled={page >= pageCount - 1} onClick={() => controller.current?.navigate(page + 1)}>下一页</button>
       </div>}
-      {editMode && <span className="html-preview-pane__edit-hint">双击文字 · 单击图片</span>}
       <button type="button" aria-pressed={structureOpen} onClick={() => setStructureOpen(value => !value)}>结构与样式</button>
       <details className="html-preview-pane__more"><summary aria-label="预览更多操作">更多</summary>
         <button type="button" title="重新加载当前源码；页面内运行状态将重置，文档和未发送输入保持不变" onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); refreshPreservingView() }}>重新加载预览</button>

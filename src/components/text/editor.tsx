@@ -1,11 +1,11 @@
-import { SharedDocumentEditor } from '../../renderer/document/SharedDocumentEditor'
+import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../../renderer/document/SharedDocumentEditor'
 import type { DocumentCommitResult, DocumentOperation } from '../../renderer/document/editorSession'
 import { normalizeDocumentText, type DocumentBlock, type FlowInline } from '../../shared/document/content'
 import type { MarkdownDocument } from '../../shared/document/markdown'
 import { emptyDocumentResources } from '../../shared/document/resources'
 import { formulaComponentDataSchema, textComponentDataSchema, type FormulaComponentData, type TextComponentData } from './data'
 import { textAppearanceStyles } from './render'
-import type { CSSProperties } from 'react'
+import type { CSSProperties, Ref } from 'react'
 import './editor.css'
 
 /** Editor-only paragraph identity. It is not a second persisted component object. */
@@ -35,11 +35,12 @@ export interface TextComponentEditorOwner<Data> {
   onDiagnostic?(message: string): void
   onCompositionChange?(active: boolean): void
   toolbarHost?: HTMLElement | null
+  editorRef?: Ref<SharedDocumentEditorHandle>
 }
 /** Reuses professional formatting, inline math, IME and selection. Persistence/history stay with the caller. */
 export function TextComponentEditor(props: TextComponentEditorOwner<TextComponentData>) {
   const styles = textAppearanceStyles(props.data.appearance, props.data.sizing)
-  return <div className="component-text-editor" style={styles.box as CSSProperties}><div style={styles.content as CSSProperties}><SharedDocumentEditor document={textEditorDocument(props.data)} revision={props.revision} contentScope="inline-text"
+  return <div className="component-text-editor" style={styles.box as CSSProperties}><div style={styles.content as CSSProperties}><SharedDocumentEditor ref={props.editorRef} document={textEditorDocument(props.data)} revision={props.revision} contentScope="inline-text"
     inlineStyleDefaults={() => ({ bold: props.data.appearance.bold, italic: props.data.appearance.italic,
       underline: props.data.appearance.underline, strike: props.data.appearance.strike,
       emphasis: props.data.appearance.emphasis, highlightColor: props.data.appearance.highlightColor })}

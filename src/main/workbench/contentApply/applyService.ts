@@ -76,6 +76,16 @@ export class ContentApplyService {
     if (!('source' in request)) return this.planSurfaceApply(baseProject, request)
     const context = request.editingContext
     const project = context ? resolveComponentPresentation(baseProject, context.surfaceId, context.stateId) : baseProject
+    const originalRequest = request
+    const surfaceId = request.target.kind === 'container' && request.target.container.kind === 'surface'
+      ? request.target.container.surfaceId : undefined
+    // An observed empty page has no existing object to overwrite. Its first
+    // content uses the normal assembly/insert owner and captured container CAS.
+    if (request.intent === 'content' && request.source.kind === 'html' && request.source.scope === 'projection'
+      && request.projection?.entries.length === 0 && surfaceId
+      && project.surfaces.some(surface => surface.id === surfaceId && surface.childIds.length === 0)) {
+      request = { ...request, intent: 'insert' }
+    }
     signal?.throwIfAborted()
     const diagnostics: ContentApplyDiagnostic[] = []
     const edits: ComponentEdit[] = []
@@ -221,6 +231,7 @@ export class ContentApplyService {
     if (request.source.kind === 'objects') unverified ||= request.source.objects.some(draft => hasSourceProgram(draft, compilationProject.definitions))
     signal?.throwIfAborted()
     const plan = planContentApply({ project: baseProject, request, createId: this.createId, drafts, edits, diagnostics, unusable, unverified })
+    plan.input = originalRequest
     // Bind the diagnosed source to the identities allocated by the existing
     // planner. A later read can verify its current bytes without another state.
     const inserted = plan.command.edits.flatMap(edit => edit.type === 'instance.insert' ? edit.instances : [])

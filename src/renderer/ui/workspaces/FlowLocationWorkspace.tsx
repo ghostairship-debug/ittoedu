@@ -1,8 +1,9 @@
-import { useLayoutEffect, useState, type CSSProperties } from 'react'
+import { useEffect, useLayoutEffect, useState, type CSSProperties } from 'react'
 import { MousePointer2, Play } from 'lucide-react'
 import type { FlowWorkspaceProps } from '../FlowWorkspace'
 import { FlowWorkspace } from '../FlowWorkspace'
 import { FLOW_WORKSPACE_HEADER_HEIGHT } from '../FlowBlockContextToolbar'
+import { useCourseV10Runtime } from '../../components/CourseV10RuntimeView'
 export type FlowCanvasMode = 'edit' | 'run'
 export type FlowEditingScope = 'scene' | 'global'
 export interface FlowTryRunSession { destroy(): void | Promise<void> }
@@ -13,6 +14,11 @@ export interface FlowLocationWorkspaceProps extends FlowWorkspaceProps {
 }
 /** The original shell keeps a single mounted body while switching edit/run. R0 owns every implementation. */
 export function FlowLocationWorkspace(props: FlowLocationWorkspaceProps) {
+  const runtime = useCourseV10Runtime()
+  useEffect(() => {
+    runtime.setPlaying(props.canvasMode === 'run')
+    return () => runtime.setPlaying(false)
+  }, [runtime.documentId, runtime.setPlaying, props.canvasMode])
   const [toolbarContainer, setToolbarContainer] = useState<HTMLDivElement | null>(null)
   const [headerHeight, setHeaderHeight] = useState(FLOW_WORKSPACE_HEADER_HEIGHT)
   useLayoutEffect(() => {

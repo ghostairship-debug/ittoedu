@@ -806,8 +806,8 @@ export class ExecutionDesktopService {
     })
   }
   async writableTasksForDocument(documentId: string): Promise<{ runIds: string[]; submissionIds: string[] }> {
-    // Closing one document must not initialize/rebind every conversation in the profile.
-    await this.awaitRecoveryAndRebind()
+    // A close query reads existing durable and live ownership only. Unrelated
+    // history recovery must not delay it; actual stop/submit paths still await recovery.
     const submissions = await this.submissions.list()
     const submissionIds = submissions.filter(record => ['queued', 'starting'].includes(record.state)
       && record.documents.some(document => document.documentId === documentId && document.writable.length > 0)).map(record => record.submissionId)

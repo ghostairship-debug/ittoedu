@@ -14,6 +14,7 @@ const probe = vi.hoisted(()=>({state:{} as Record<string,unknown>,runtime:{} as 
 vi.mock('../../src/renderer/store/editorStore',()=>({useEditorStore:(select:(state:typeof probe.state)=>unknown)=>select(probe.state)}))
 vi.mock('../../src/renderer/components/CourseV10RuntimeView',()=>({useCourseV10Runtime:()=>probe.runtime}))
 vi.mock('../../src/renderer/ui/useAssetObjectUrls',()=>({useAssetObjectUrls:()=>({})}))
+vi.mock('../../src/renderer/workbench/NativeSelectionContext',()=>({NativeSelectionContext:()=>null}))
 import { FlowWorkspace } from '../../src/renderer/ui/FlowWorkspace'
 import { drainFlowWorkspace } from '../../src/renderer/document/flowWorkspaceRegistry'
 import { FlowMediaCropEditor } from '../../src/renderer/ui/flow/FlowMediaCropEditor'
@@ -78,7 +79,7 @@ it('binds the original Flow observation session while rendering floating childre
   expect(content.style.transform).toContain('scale(2)');expect(content.contains(teacher)).toBe(false)
   expect(ui.queryByTestId('teacher-controller-authoring-chrome')).toBeNull();expect(editCaptured).not.toHaveBeenCalled()
   const move=async(id:string)=>{
-    const overlay=ui.container.querySelector<HTMLElement>(`[data-flow-overlay-id="${id}"]`)!,button=overlay.querySelector<HTMLButtonElement>('button')!
+    const overlay=ui.container.querySelector<HTMLElement>(`[data-flow-overlay-id="${id}"]`)!,button=id==='teacher' ? overlay : overlay.querySelector<HTMLButtonElement>('button')!
     button.setPointerCapture=()=>{}
     fireEvent.pointerDown(button,{clientX:100,clientY:200,pointerId:1})
     fireEvent.pointerMove(button,{clientX:120,clientY:220,pointerId:1})

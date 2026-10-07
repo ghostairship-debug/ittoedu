@@ -16,6 +16,8 @@ export interface MediaFileEditorHandle {
   close(): Promise<boolean>
   preserveDraft(): Promise<boolean>
   drain(): Promise<boolean>
+  suspendForClose(): void
+  resumeAfterCloseCancelled(): void
 }
 type GestureMode = 'select' | 'crop' | 'rectangle' | 'ink' | 'highlight'
 function rectBetween(a: MediaPoint, b: MediaPoint): MediaRectangle {
@@ -24,6 +26,7 @@ function rectBetween(a: MediaPoint, b: MediaPoint): MediaRectangle {
 
 export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditorProps>(function MediaFileEditor({ snapshot, port, onSaved, onDirtyChange }, ref) {
   const currentPort = useRef(port); currentPort.current = port
+  const closeSuspended = useRef(false)
   const draft = useMemo(() => new MediaFileDraft(snapshot, {
     preview: (...args) => currentPort.current.preview(...args), save: (...args) => currentPort.current.save(...args), reload: (...args) => currentPort.current.reload(...args),
   }), [snapshot.binding.path])
@@ -49,7 +52,7 @@ export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditor
     setImageUrl(url)
     return () => URL.revokeObjectURL(url)
   }, [content])
-  const apply = (operation: MediaFileOperation) => { setSavedMessage(''); void draft.apply(operation) }
+  const apply = (operation: MediaFileOperation) => { if (!closeSuspended.current) { setSavedMessage(''); void draft.apply(operation) } }
   const drain = async () => {
     if (draft.read().busy) await new Promise<void>(resolve => {
       const unsubscribe = draft.subscribe(() => { if (!draft.read().busy) { unsubscribe(); resolve() } })
@@ -57,7 +60,9 @@ export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditor
     return draft.read().previewReady
   }
   const save = async () => {
+    if (closeSuspended.current) return false
     if (!await drain()) return false
+    if (closeSuspended.current) return false
     if (!draft.read().operations.length) return true
     const saved = await draft.save()
     if (!saved) return false
@@ -66,6 +71,8 @@ export const MediaFileEditor = forwardRef<MediaFileEditorHandle, MediaFileEditor
   }
   useImperativeHandle(ref, () => ({
     flush: save, drain,
+    suspendForClose: () => { closeSuspended.current = true; activePointer.current = null; gesture.current = []; setPoints([]) },
+    resumeAfterCloseCancelled: () => { closeSuspended.current = false },
     close: async () => {
       if (!await drain()) return false
       if (draft.read().operations.length && !window.confirm('保存当前文件的编辑后关闭？取消将保留文件标签和草稿。')) return false

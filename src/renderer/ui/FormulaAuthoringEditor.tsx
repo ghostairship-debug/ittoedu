@@ -18,6 +18,7 @@ import {
 import { renderFormulaNodeCanvas } from '../../shared/formulaRenderer'
 import { formulaAstSchema } from '../../shared/contracts/native-v1'
 import type { FormulaAstNode, FormulaNode } from '../../shared/contracts/native-v1'
+import { LatexFormulaAuthoringEditor } from './LatexFormulaAuthoringEditor'
 
 export interface FormulaAuthoringDraftChange {
   readonly composing?: boolean
@@ -30,7 +31,9 @@ export interface FormulaAuthoringDraftChange {
 }
 
 interface FormulaAuthoringEditorProps {
-  node: FormulaNode
+  node: Omit<FormulaNode, 'ast'> & { ast?: FormulaAstNode; latex?: string }
+  latexSource?: string
+  onCommitLatex?(latex: string, accessibleText: string): void
   onCommit(ast: FormulaAstNode, accessibleText: string): void
   autoFocus?: boolean
   onCancel?: () => void
@@ -205,7 +208,15 @@ function FormulaDraftPreview({ node, draft }: {
   )
 }
 
-export function FormulaAuthoringEditor({
+export function FormulaAuthoringEditor(props: FormulaAuthoringEditorProps) {
+  const latex = props.latexSource ?? props.node.latex
+  if (latex !== undefined) return <LatexFormulaAuthoringEditor id={props.node.id} latex={latex} accessibleText={props.node.accessibleText}
+    draftSource={props.draftSource} autoFocus={props.autoFocus} onBeginEdit={props.onBeginEdit} onCompositionChange={props.onCompositionChange}
+    onCancel={props.onCancel} onFinishReady={props.onFinishReady} onCommit={(source, description) => props.onCommitLatex?.(source, description)} />
+  return <AstFormulaAuthoringEditor {...props} node={props.node as FormulaNode} />
+}
+
+function AstFormulaAuthoringEditor({
   node,
   onCommit,
   autoFocus = false,
@@ -215,7 +226,7 @@ export function FormulaAuthoringEditor({
   onCompositionChange,
   onBeginEdit,
   onFinishReady,
-}: FormulaAuthoringEditorProps) {
+}: Omit<FormulaAuthoringEditorProps, 'node'> & { node: FormulaNode }) {
   const canonicalSource = useMemo(() => serializeFormulaAst(node.ast), [node.ast])
   const [localDraftSource, setLocalDraftSource] = useState(canonicalSource)
   const draftSource = controlledDraftSource ?? localDraftSource

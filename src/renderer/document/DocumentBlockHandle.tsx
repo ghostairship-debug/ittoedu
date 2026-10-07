@@ -16,7 +16,7 @@ export interface DocumentBlockHandleProps {
 export function DocumentBlockHandle({ blockId, rect, commands, disabledReason, onDragStart }: DocumentBlockHandleProps) {
   const [menu, setMenu] = useState<'insert' | 'block' | null>(null)
   useEffect(() => setMenu(null), [blockId])
-  if (!blockId || !rect) return null
+  if (!blockId || !rect || rect.height <= 0) return null
   const insert = commands.filter(command => command.group === '插入')
   const blocked = commands.map(command => ({ ...command, disabledReason: disabledReason ?? command.disabledReason }))
   const items = menu === 'insert' ? blocked.filter(command => command.group === '插入') : blocked

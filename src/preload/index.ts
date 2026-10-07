@@ -76,6 +76,9 @@ const IPC_CHANNELS = {
   launchFilesChanged: 'app:launch-files-changed',
   requestFocusDocument: 'app:request-focus-document',
   requestSaveAndClose: 'app:request-save-and-close',
+  requestDiscardAndClose: 'app:request-discard-and-close',
+  discardAndCloseResult: 'app:discard-and-close-result',
+  requestResumeClose: 'app:request-resume-close',
   requestPreserveAndClose: 'app:request-preserve-and-close',
   preserveAndCloseResult: 'app:preserve-and-close-result',
   saveAndCloseResult: 'app:save-and-close-result',
@@ -297,6 +300,8 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     read: target => invoke(IPC_CHANNELS.flowDocumentRecovery, { operation: 'read', target }),
     write: record => invoke(IPC_CHANNELS.flowDocumentRecovery, { operation: 'write', record }),
     clear: target => invoke(IPC_CHANNELS.flowDocumentRecovery, { operation: 'clear', target }),
+    claim: (target, recordEpoch, revision) => invoke(IPC_CHANNELS.flowDocumentRecovery, { operation: 'claim', target, recordEpoch, revision }),
+    retained: target => invoke(IPC_CHANNELS.flowDocumentRecovery, { operation: 'retained', target }),
   },
   lessonMaterials: {
     selectSource: input => invoke(IPC_CHANNELS.lessonMaterial, { operation: 'select', ...input }),
@@ -447,8 +452,9 @@ const desktopAPI = Object.freeze<DesktopAPI>({
       if (typeof requestId !== 'string') return
       void Promise.resolve()
         .then(handler)
-        .then((saved) => {
-          ipcRenderer.send(IPC_CHANNELS.saveAndCloseResult, requestId, saved === true)
+        .then((result) => {
+          const ready = result === true || typeof result === 'object' && result.ready === true
+          ipcRenderer.send(IPC_CHANNELS.saveAndCloseResult, requestId, ready, typeof result === 'object' ? result.suggestedDirectory : undefined)
         })
         .catch((error) => {
           console.error('执行关闭前保存失败', error)
@@ -459,6 +465,21 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.requestSaveAndClose, listener)
     }
+  },
+  onRequestDiscardAndClose: handler => {
+    const listener = (_event: Electron.IpcRendererEvent, requestId: unknown, ids: unknown) => {
+      if (typeof requestId !== 'string' || !Array.isArray(ids) || !ids.every(id => typeof id === 'string')) return
+      void Promise.resolve().then(() => handler(ids)).then(
+        ready => ipcRenderer.send(IPC_CHANNELS.discardAndCloseResult, requestId, ready === true),
+        () => ipcRenderer.send(IPC_CHANNELS.discardAndCloseResult, requestId, false))
+    }
+    ipcRenderer.on(IPC_CHANNELS.requestDiscardAndClose, listener)
+    return () => { ipcRenderer.removeListener(IPC_CHANNELS.requestDiscardAndClose, listener) }
+  },
+  onRequestResumeClose: handler => {
+    const listener = () => handler()
+    ipcRenderer.on(IPC_CHANNELS.requestResumeClose, listener)
+    return () => { ipcRenderer.removeListener(IPC_CHANNELS.requestResumeClose, listener) }
   },
   reportDiagnostic: (input) => invoke(IPC_CHANNELS.reportDiagnostic, input),
   exportDiagnostics: () => invoke(IPC_CHANNELS.exportDiagnostics),

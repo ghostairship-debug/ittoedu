@@ -18,6 +18,7 @@ export interface RecoverableDocumentFilePort extends DocumentFilePort {
 }
 export interface DocumentFileSessionState {
   source: string; disk: OpenDocumentResult | null; dirty: boolean; saving: boolean; composing: boolean
+  autoSave: boolean
   error: string | null; conflict: OpenDocumentResult | 'deleted' | null; recovery: boolean
   conflictHunks: DocumentConflictHunk[]
 }
@@ -48,7 +49,7 @@ function rebaseHistorySource(base: string, local: string, confirmed: string): st
 /** View adapter only: canonical source, resources, receipt and History live in main. */
 export class DocumentFileSession {
   readonly epoch = ++sessionEpoch
-  private state: DocumentFileSessionState = { source: '', disk: null, dirty: false, saving: false, composing: false, error: null, conflict: null, recovery: false, conflictHunks: [] }
+  private state: DocumentFileSessionState = { source: '', disk: null, dirty: false, saving: false, composing: false, autoSave: false, error: null, conflict: null, recovery: false, conflictHunks: [] }
   private projection?: DocumentProjection
   private stopProjection?: () => void
   private timer?: ReturnType<typeof setTimeout>
@@ -63,6 +64,7 @@ export class DocumentFileSession {
   private historyConflict = false
   private removedByHistory = new Set<string>()
   private disposed = false
+  private closeSuspended = false
   private initialized = false
   private compositionWaiters: (() => void)[] = []
   private listeners = new Set<() => void>()
@@ -91,7 +93,7 @@ export class DocumentFileSession {
     }
     const shown = view.draft ?? current.model
     if (!isSourceDocumentModel(shown)) return
-    const keepInput = this.state.composing || Boolean(this.conflictPlan) || this.deferredHistoryInput
+    const keepInput = this.closeSuspended || this.state.composing || Boolean(this.conflictPlan) || this.deferredHistoryInput
     const disk = current.model.kind === 'markdown' ? markdownSnapshotDocument(this.ref, current)
       : { ref: this.ref, source: current.model.source, version: { contentVersion: String(current.revision), attachments: [] }, diagnostics: [] }
     this.update({ ...(!keepInput ? { source: shown.source } : {}), disk,
@@ -120,7 +122,7 @@ export class DocumentFileSession {
     this.poll()
   }
   private poll() {
-    if (this.disposed || this.savingAs || this.watchTimer || this.watchTask || !this.projection || this.committedDocument?.binding.kind !== 'file') return
+    if (this.disposed || this.closeSuspended || this.savingAs || this.watchTimer || this.watchTask || !this.projection || this.committedDocument?.binding.kind !== 'file') return
     const generation = this.watchGeneration
     this.watchTimer = setTimeout(async () => {
       this.watchTimer = undefined
@@ -137,6 +139,7 @@ export class DocumentFileSession {
     }, 1000)
   }
   private submit(source: string, historyGroup?: string): Promise<unknown> {
+    if (this.disposed || this.closeSuspended) return Promise.reject(new Error('文档输入已停止'))
     const projection = this.projection
     if (!projection) return Promise.reject(new Error('文档尚未连接'))
     const missing = [...this.removedByHistory].find(path => source.includes(path) && !this.pendingAttachments.has(path))
@@ -156,7 +159,7 @@ export class DocumentFileSession {
     })
   }
   private submitVisible(source: string, historyGroup?: string): void {
-    if (this.disposed) return
+    if (this.disposed || this.closeSuspended) return
     const request = this.submit(source, historyGroup)
     if (this.deferredHistoryInput) {
       const retained = request.then(() => {
@@ -168,7 +171,7 @@ export class DocumentFileSession {
     } else void request.catch(error => this.fail(error))
   }
   edit(source: string, historyGroup?: string) {
-    if (!this.initialized || this.disposed || this.state.conflictHunks.length || source === this.state.source) return
+    if (!this.initialized || this.disposed || this.closeSuspended || this.state.conflictHunks.length || source === this.state.source) return
 
     if (historyGroup) {
       if (this.group?.label !== historyGroup || Date.now() - this.lastEdit > 800) this.group = { label: historyGroup, id: crypto.randomUUID() }
@@ -180,7 +183,7 @@ export class DocumentFileSession {
     this.schedule()
   }
   prepareAttachments(attachments: PendingAttachment[]) {
-    if (this.disposed) throw new Error('文档已关闭')
+    if (this.disposed || this.closeSuspended) throw new Error('文档输入已停止')
     const model = this.projection?.read().draft ?? this.projection?.read().committed?.model
     for (const attachment of attachments) {
       documentRelativePathSchema.parse(attachment.relativePath)
@@ -203,28 +206,58 @@ export class DocumentFileSession {
   }
   setComposing(composing: boolean) {
     if (this.disposed) return
+    if (this.closeSuspended && composing) return
     this.update({ composing })
     if (composing) clearTimeout(this.timer)
     else {
-      if (this.historyTask) this.deferredHistoryInput = true
-      else this.submitVisible(this.state.source, this.group?.id)
+      if (!this.closeSuspended) {
+        if (this.historyTask) this.deferredHistoryInput = true
+        else this.submitVisible(this.state.source, this.group?.id)
+      }
       for (const resolve of this.compositionWaiters.splice(0)) resolve()
       this.schedule()
     }
   }
   private schedule() {
     clearTimeout(this.timer)
-    if (this.disposed) return
-    if (!this.savingAs && this.committedDocument?.binding.kind === 'file' && !/\.html?$/i.test(this.committedDocument.binding.path) && this.state.dirty && !this.state.composing && !this.state.conflict && !this.state.recovery) this.timer = setTimeout(() => { if (this.committedDocument?.binding.kind === 'file' && !/\.html?$/i.test(this.committedDocument.binding.path)) void this.flush() }, 800)
+    if (this.disposed || this.closeSuspended || !this.state.autoSave) return
+    if (!this.savingAs && this.committedDocument?.binding.kind === 'file' && this.state.dirty && !this.state.composing && !this.state.conflict && !this.state.recovery) this.timer = setTimeout(() => { if (this.state.autoSave && !this.closeSuspended && this.committedDocument?.binding.kind === 'file') void this.flush() }, 800)
+  }
+  setAutoSave(autoSave: boolean) {
+    if (this.disposed || this.closeSuspended) return
+    this.update({ autoSave })
+    this.schedule()
+  }
+  /** Stop new renderer input before Main confirms discard; do not submit or save the draft. */
+  suspendForClose() {
+    if (this.disposed || this.closeSuspended) return
+    this.closeSuspended = true
+    this.projection?.suspendForClose()
+    ++this.watchGeneration
+    clearTimeout(this.timer); clearTimeout(this.watchTimer)
+    this.watchTimer = undefined
+    for (const resolve of this.compositionWaiters.splice(0)) resolve()
+  }
+  resumeAfterCloseCancelled() {
+    if (this.disposed || !this.closeSuspended) return
+    this.closeSuspended = false
+    this.projection?.resumeAfterCloseCancelled()
+    if (!this.state.composing && !this.state.conflictHunks.length) {
+      if (this.historyTask) this.deferredHistoryInput = true
+      else this.submitVisible(this.state.source, this.group?.id)
+    }
+    this.poll(); this.schedule()
   }
   /** Confirm pending human input without forcing a file save before an AI task. */
   async drain(skipHistoryTask = false): Promise<boolean> {
+    if (this.disposed || this.closeSuspended) return false
     if (this.state.composing) await new Promise<void>(resolve => this.compositionWaiters.push(resolve))
-    if (this.disposed || !this.projection) return false
+    if (this.disposed || this.closeSuspended || !this.projection) return false
     try {
       if (this.historyTask && !skipHistoryTask) await this.historyTask
       for (;;) {
         if (this.retainedSubmission) await this.retainedSubmission
+        if (this.disposed || this.closeSuspended) return false
         if (this.deferredHistoryInput) {
           if (!skipHistoryTask || this.historyConflict) throw new Error('撤销未确认，在途输入已保留，请确认后继续')
           const source = this.state.source
@@ -236,10 +269,11 @@ export class DocumentFileSession {
         if (!skipHistoryTask || !this.deferredHistoryInput) break
       }
       this.project()
-      return !this.state.conflict && !this.state.recovery
+      return !this.disposed && !this.closeSuspended && !this.state.conflict && !this.state.recovery
     } catch (error) { this.fail(error); return false }
   }
   flush(): Promise<boolean> {
+    if (this.disposed || this.closeSuspended) return Promise.resolve(false)
     if (this.savingAs) return this.savingAs
     if (this.pending) return this.pending.then(saved => saved && this.state.dirty ? this.flush() : saved && !this.state.error)
     clearTimeout(this.timer)
@@ -273,6 +307,7 @@ export class DocumentFileSession {
   /** Save the confirmed visible draft at a user-chosen location, even when the
    * old disk binding is unavailable. The host alone changes binding identity. */
   saveAs(): Promise<boolean> {
+    if (this.disposed || this.closeSuspended) return Promise.resolve(false)
     if (this.savingAs) return this.savingAs
     if (this.state.conflictHunks.length) {
       this.fail(new Error('请先完成每处冲突选择，再另存当前稿。'))
@@ -306,6 +341,7 @@ export class DocumentFileSession {
     return operation
   }
   private async navigateHistory(action: 'undo' | 'undoLatestAgent' | 'redo') {
+    if (this.disposed || this.closeSuspended) return
     if (this.historyTask) return this.historyTask
     const task = this.performHistory(action)
     this.historyTask = task
@@ -321,7 +357,7 @@ export class DocumentFileSession {
       const result = await projection[action]()
       if ('message' in result) throw new Error(result.message)
       if (this.state.composing) await new Promise<void>(resolve => this.compositionWaiters.push(resolve))
-      if (this.disposed) return
+      if (this.disposed || this.closeSuspended) return
       while (this.deferredHistoryInput) {
         const current = projection.read().committed?.model
         if (!current || !isSourceDocumentModel(current)) throw new Error('文档格式已改变，在途输入已保留')
@@ -343,7 +379,7 @@ export class DocumentFileSession {
   undoLatestAgent() { return this.navigateHistory('undoLatestAgent') }
   redo() { return this.navigateHistory('redo') }
   private async observe(observation: DocumentFileObservation, generation = this.watchGeneration) {
-    if (this.disposed || this.savingAs || generation !== this.watchGeneration || !this.projection) return
+    if (this.disposed || this.closeSuspended || this.savingAs || generation !== this.watchGeneration || !this.projection) return
     const current = this.projection.read().committed!
     if (current.binding.kind !== 'file' || observation.bindingVersion !== current.binding.bindingVersion) return
     if (observation.version === current.binding.version) { this.observation = observation; return }
@@ -353,7 +389,7 @@ export class DocumentFileSession {
     if (!observation.model) { this.conflictPlan = null; this.update({ conflict: 'deleted', dirty: true, conflictHunks: [] }); return }
     if (!isSourceDocumentModel(observation.model) || observation.model.kind !== current.model.kind) throw new Error('磁盘文件格式已改变')
     await this.projection.drain()
-    if (this.disposed || this.savingAs || generation !== this.watchGeneration) return
+    if (this.disposed || this.closeSuspended || this.savingAs || generation !== this.watchGeneration) return
     const live = this.projection.read().committed!
     if (live.binding.kind !== 'file' || live.binding.bindingVersion !== observation.bindingVersion) return
     if (!live.dirty && !this.state.composing) { await this.reconcile('disk', undefined, observation, generation); return }
@@ -366,7 +402,7 @@ export class DocumentFileSession {
   private async reconcile(choice: 'disk' | 'local', source?: string, observation = this.observation, generation?: number) {
     if (!this.projection || !observation) throw new Error('请先重新读取磁盘版本')
     const current = await this.projection.drain()
-    if (this.disposed || this.savingAs || (generation !== undefined && generation !== this.watchGeneration)) return
+    if (this.disposed || this.closeSuspended || this.savingAs || (generation !== undefined && generation !== this.watchGeneration)) return
     if (current.binding.kind !== 'file' || current.binding.bindingVersion !== observation.bindingVersion) throw new Error('文件位置已改变，请重新读取')
     await this.documents.reconcileFile({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision,
       bindingVersion: observation.bindingVersion, version: observation.version, choice, ...(source === undefined ? {} : { source }) })
@@ -390,9 +426,10 @@ export class DocumentFileSession {
     if (!remaining.length) { try { await this.reconcile('local', source); await this.flush() } catch (error) { this.fail(error) } }
   }
   async preserveDraft(): Promise<boolean> {
+    if (this.disposed || this.closeSuspended) return false
     if (this.state.composing) await new Promise<void>(resolve => this.compositionWaiters.push(resolve))
     try {
-      if (!this.projection) return false
+      if (this.disposed || this.closeSuspended || !this.projection) return false
       const visible = this.projection.read().draft ?? this.projection.read().committed!.model
       if (isSourceDocumentModel(visible) && (visible.source !== this.state.source || (visible.kind === 'markdown' && this.pendingAttachments.size))) await this.submit(this.state.source)
       await this.projection.drain()
@@ -401,13 +438,13 @@ export class DocumentFileSession {
   }
   /** Explicit escape from a failed local draft; Main still confirms, stops writers and checks final CAS. */
   async discardAndClose(): Promise<boolean> {
-    clearTimeout(this.timer)
     if (!this.projection || this.disposed) return false
+    this.suspendForClose()
     try {
-      if (!await this.documents.closeWithDialog(this.projection.documentId, undefined, true)) return false
+      if (!await this.documents.closeWithDialog(this.projection.documentId, undefined, true)) { this.resumeAfterCloseCancelled(); return false }
       this.dispose()
       return true
-    } catch (error) { this.fail(error); return false }
+    } catch (error) { this.resumeAfterCloseCancelled(); this.fail(error); return false }
   }
   async preserveAndClose(): Promise<boolean> { if (!await this.preserveDraft()) return false; this.dispose(); return true }
   async close(): Promise<boolean> { clearTimeout(this.timer); if (!await this.drain()) return false; try { if (!await this.documents.closeWithDialog(this.projection!.documentId)) return false; this.dispose(); return true } catch (error) { this.fail(error); return false } }

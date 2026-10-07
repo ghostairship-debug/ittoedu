@@ -1,11 +1,13 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { mountPublishedCourseV3 } from '../../src/player/componentPlatform/publishedPlayer'
+import { mountPublishedCourseV3, publishedComponentModel } from '../../src/player/componentPlatform/publishedPlayer'
 import { prepareComponentOutputRegion } from '../../src/player/componentPlatform/outputCapture'
 import type { PublishedCourseV3 } from '../../src/shared/contracts/component-platform/published'
 import * as sandbox from '../../src/renderer/components/SandboxComponentImplementation'
 import { componentFragmentStateKey } from '../../src/player/componentPlatform/fragments'
 import { spatialTourSteps } from '../../src/player/surfaces/spatial/componentPlatform/graph'
 import { createTeacherControllerData } from '../../src/components/teacher-controller'
+import { DOCUMENT_BLOCK_DEFINITION } from '../../src/components/document-block'
+import { createInputData, INPUT_DEFINITION } from '../../src/components/input'
 
 const microtasks = async () => { for (let i = 0; i < 25; i++) await Promise.resolve() }
 const payload = (): PublishedCourseV3 => ({ schemaVersion: 3, id: 'r1', title: 'Player navigation',
@@ -16,6 +18,40 @@ const payload = (): PublishedCourseV3 => ({ schemaVersion: 3, id: 'r1', title: '
   ] })
 
 afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks() })
+
+it('consumes section defaults and keeps child input alive through ordinary disclosure clicks and model refresh', async () => {
+  const input = payload()
+  input.definitions[DOCUMENT_BLOCK_DEFINITION.id] = DOCUMENT_BLOCK_DEFINITION
+  input.definitions[INPUT_DEFINITION.id] = INPUT_DEFINITION
+  input.instances.section = { id: 'section', definitionId: DOCUMENT_BLOCK_DEFINITION.id,
+    data: { type: 'section', title: { inlines: [{ type: 'text', text: 'Show answers' }] }, collapsedByDefault: true }, childIds: ['answer'] }
+  input.instances.answer = { id: 'answer', definitionId: INPUT_DEFINITION.id, data: createInputData({ initialValue: '85' }) }
+  input.instances.heading = { id: 'heading', definitionId: DOCUMENT_BLOCK_DEFINITION.id,
+    data: { type: 'heading', level: 2, content: { inlines: [{ type: 'text', text: 'Next topic' }] } } }
+  input.surfaces[1].childIds = ['section', 'heading']
+  const before = structuredClone(input), root = document.createElement('section'); document.body.append(root)
+  const player = await mountPublishedCourseV3(input, root, { initialSurfaceId: 'flow' })
+  try {
+    const section = player.runtime.targetElement('section')!, details = section.querySelector<HTMLDetailsElement>('details')!
+    expect(details).not.toBeNull()
+    expect(details.open).toBe(false)
+    const summary = details.querySelector('summary')!, answer = root.querySelector<HTMLInputElement>('[data-input-node-id="answer"]')!
+    expect(summary.textContent).toBe('Show answers')
+    expect(details.contains(player.runtime.targetElement('answer'))).toBe(true)
+    expect(player.runtime.targetElement('heading')!.querySelector('details')).toBeNull()
+    summary.click(); expect(details.open).toBe(true)
+    answer.value = '90'
+    summary.click(); expect(details.open).toBe(false)
+    summary.click(); expect(details.open).toBe(true)
+    player.navigation.setZoom(1.5)
+    await player.update(publishedComponentModel(input))
+    expect(section.querySelector('details')).toBe(details)
+    expect(details.open).toBe(true)
+    expect(root.querySelector('[data-input-node-id="answer"]')).toBe(answer)
+    expect(answer.value).toBe('90')
+    expect(input).toEqual(before)
+  } finally { await player.dispose() }
+})
 
 it('includes fragments in instance-based spatial paths using the same instance and path order', () => {
   const stops = spatialTourSteps({ home: { x: 0, y: 0, zoom: 1 }, frames: [], paths: [{ id: 'tour', frameIds: [], instanceIds: ['a', 'b'] }] }, 'tour', { width: 640, height: 360 },

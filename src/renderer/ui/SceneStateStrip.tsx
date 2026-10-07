@@ -1,4 +1,4 @@
-import { Copy, Image as ImageIcon, Pencil, Plus, RotateCcw, Star, Trash2 } from 'lucide-react'
+import { Copy, Image as ImageIcon, MoreHorizontal, Pencil, Plus, RotateCcw, Star, Trash2 } from 'lucide-react'
 import { useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react'
 import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
 import type { ComponentPresentationState } from '../../shared/contracts/component-platform/project'
@@ -104,7 +104,13 @@ export function SceneStateButtons({ documentId, surfaceId, compact = false }: { 
       if (action.kind === 'delete') void state.deletePresentationState(action.id, action.target)
       else void state.clearPresentationStateOverrides(action.id, action.target)
     }} />
-  if (compact) return <div className="bottom-scene-card__states" role="group" aria-label={surface.title + '的呈现状态'}>{buttons}{menu.element}{confirmation}</div>
+  if (compact) return <div className="bottom-scene-card__states" role="group" aria-label={surface.title + '的呈现状态'}>
+    <button type="button" className="bottom-scene-card__tool" aria-label="新建场景状态" title="新建场景状态" onClick={add}><Plus size={13} /></button>
+    <button type="button" className="bottom-scene-card__tool" aria-label="状态操作" title="状态操作" aria-haspopup="menu"
+      onClick={event => openStateMenu(event, activeState?.id ?? null, activeState?.title ?? '母版')}><MoreHorizontal size={13} /></button>
+    <button type="button" className="bottom-scene-card__tool" aria-label="删除当前状态" title="删除当前状态" disabled={!activeState}
+      onClick={() => activeState && request('delete', activeState.id, activeState.title)}><Trash2 size={13} /></button>
+    {buttons}{menu.element}{confirmation}</div>
   return <section className="scene-state-strip" aria-label="场景状态">
     <header className="scene-state-strip__header"><div className="scene-state-strip__title"><strong>场景状态</strong><span>{activeState ? '正在编辑“' + activeState.title + '”的覆盖值' : '正在编辑母版；修改会被所有状态继承'}</span></div>
       <div className="scene-state-strip__actions" aria-label="状态操作">

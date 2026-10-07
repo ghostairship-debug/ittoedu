@@ -1,7 +1,7 @@
 import { indexHtmlElements } from '../../shared/html/htmlSourceScanner'
 import { mountPagination, type HtmlPreviewPagination } from './htmlPreviewPagination'
 import { mountPlaceholders } from './htmlPreviewPlaceholders'
-import { htmlPreviewTargetReportSchema } from '../../shared/workbench/htmlPreview'
+import { HTML_PREVIEW_TARGET_MAX, htmlPreviewTargetReportSchema } from '../../shared/workbench/htmlPreview'
 import type { z } from 'zod'
 
 type HtmlPreviewTargetReport = z.infer<typeof htmlPreviewTargetReportSchema>
@@ -12,7 +12,10 @@ type Navigate = { type: 'html-preview.navigate'; loadId: string; index: number }
 type Restore = { type: 'html-preview.restore'; loadId: string; index: number; scroll: number }
 type EditMode = { type: 'html-preview.edit-mode'; loadId: string; requestId: string; enabled: boolean }
 type Visibility = { type: 'html-preview.visibility'; loadId: string; active: boolean }
-type Command = Init | Patch | Navigate | Restore | EditMode | Visibility
+type ConfirmTargets = { type: 'html-preview.confirm-targets'; loadId: string; scanId: string; handles: string[] }
+type RefreshTargets = { type: 'html-preview.refresh-targets'; loadId: string }
+type Selection = { type: 'html-preview.selection'; loadId: string; handle: string | null; editable: boolean }
+type Command = Init | Patch | Navigate | Restore | EditMode | Visibility | ConfirmTargets | RefreshTargets | Selection
 
 interface RuntimeNodeTracking {
   isRuntimeNode(node: Node): boolean
@@ -189,6 +192,78 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
       rect, scriptCreated: tracking.isRuntimeNode(node) }
   }
   let visible = true
+  let scanSerial = 0
+  let scanId = ''
+  let discoveryFrame = 0
+  let hovered: string | null = null
+  let selected: string | null = null
+  const candidates = new Set<string>()
+  const confirmed = new Set<string>()
+  let markers: HTMLDivElement | null = null
+  let markerContent: ShadowRoot | null = null
+  const drawMarkers = () => tracking.withoutTracking(() => {
+    if (!editMode || !visible) { markers?.remove(); return }
+    if (!markers) {
+      markers = doc.createElement('div')
+      markers.dataset.htmlPreviewEditMarkers = ''
+      markers.style.cssText = 'all:initial!important;position:fixed!important;inset:0!important;pointer-events:none!important;z-index:2147483647!important;'
+      markerContent = markers.attachShadow({ mode: 'open' })
+    }
+    // Keep page CSS and transformed body layouts out of the viewport marker layer.
+    if (!markers.isConnected) doc.documentElement.appendChild(markers)
+    markerContent!.replaceChildren()
+    for (const handle of new Set([...confirmed, ...(selected ? [selected] : [])])) {
+      const node = nodes.get(handle)
+      if (!node?.isConnected) continue
+      const rect = rectOf(node)
+      if (!rect.width || !rect.height || rect.x + rect.width <= 0 || rect.y + rect.height <= 0
+        || rect.x >= win.innerWidth || rect.y >= win.innerHeight) continue
+      const editable = confirmed.has(handle) && !tracking.isRuntimeNode(node)
+      if (!editable && handle !== selected) continue
+      const active = handle === selected || handle === hovered
+      const mark = doc.createElement('div')
+      mark.dataset.htmlPreviewEditTarget = handle
+      mark.dataset.state = handle === selected ? 'selected' : handle === hovered ? 'hovered' : 'editable'
+      mark.dataset.editable = String(editable)
+      mark.style.cssText = `position:fixed;box-sizing:border-box;pointer-events:none;left:${rect.x - 2}px;top:${rect.y - 2}px;width:${rect.width + 4}px;height:${rect.height + 4}px;border:${active ? 2 : 1}px ${editable && !active ? 'dashed' : 'solid'} ${editable ? '#2563eb' : '#b45309'};background:${active ? editable ? 'rgba(37,99,235,.08)' : 'rgba(180,83,9,.08)' : 'transparent'};`
+      markerContent!.appendChild(mark)
+    }
+  })
+  const discoverTargets = () => {
+    discoveryFrame = 0
+    if (!editMode || !visible || disposed) return
+    scanId = `edit-scan-${++scanSerial}`
+    candidates.clear()
+    const reports: HtmlPreviewTargetReport[] = []
+    const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT)
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node === markers || markers?.contains(node)) continue
+      if (!(node instanceof HTMLImageElement) && !(node.nodeType === Node.TEXT_NODE && editableText(node as Text))) continue
+      const observation = report(node as Text | HTMLImageElement)
+      if (!observation || observation.rect.x + observation.rect.width <= 0 || observation.rect.y + observation.rect.height <= 0
+        || observation.rect.x >= win.innerWidth || observation.rect.y >= win.innerHeight) continue
+      candidates.add(observation.handle)
+      if (!confirmed.has(observation.handle)) reports.push(observation)
+    }
+    drawMarkers()
+    for (let start = 0; start < reports.length; start += HTML_PREVIEW_TARGET_MAX) {
+      send({ event: 'edit-targets', scanId, targets: reports.slice(start, start + HTML_PREVIEW_TARGET_MAX) })
+    }
+  }
+  const scheduleDiscovery = (invalidate = true) => {
+    if (!editMode || !visible) return
+    if (invalidate) { confirmed.clear(); scanId = ''; drawMarkers() }
+    if (discoveryFrame) return
+    discoveryFrame = win.requestAnimationFrame(discoverTargets)
+  }
+  const observer = new MutationObserver(records => {
+    if (records.some(record => record.target !== markers && !markers?.contains(record.target)
+      && !(record.type === 'childList' && [...record.addedNodes, ...record.removedNodes].every(node => node === markers)))) scheduleDiscovery()
+  })
+  observer.observe(doc.body, { subtree: true, childList: true, characterData: true, attributes: true })
+  const onViewportChange = () => { drawMarkers(); scheduleDiscovery(false) }
+  win.addEventListener('scroll', onViewportChange, true)
+  win.addEventListener('resize', onViewportChange)
   const pausedMedia = new Set<HTMLMediaElement>(), pausedAnimations = new Set<Animation>()
   const pauseControlledActivity = () => {
     for (const media of doc.querySelectorAll<HTMLMediaElement>('video,audio')) if (!media.paused) { pausedMedia.add(media); media.pause() }
@@ -197,6 +272,8 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
   const setVisible = (value: boolean) => {
     if (visible === value) return
     visible = value
+    if (!visible) { hovered = null; drawMarkers() }
+    else scheduleDiscovery()
     if (!visible) pauseControlledActivity()
     else {
       for (const media of pausedMedia) if (media.isConnected) void media.play().catch(() => undefined)
@@ -216,18 +293,29 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
     if (!visible || !loadId || !editMode || event.button !== 0) return
     const target = event.target
     const image = target instanceof HTMLImageElement ? target : null
-    const targetReport = image && report(image)
-    if (targetReport) send({ event: 'targets', targets: [targetReport] })
-    // A double click starts with two clicks. Keep author buttons/links from
-    // activating before the text selection can open its editing controls.
-    const textReport = image ? null : textReportAt(event)
-    if (targetReport || textReport) { event.preventDefault(); event.stopImmediatePropagation() }
+    const targetReport = image ? report(image) : textReportAt(event)
+    if (targetReport) {
+      selected = targetReport.handle; drawMarkers()
+      send({ event: 'targets', targets: [targetReport] })
+      event.preventDefault(); event.stopImmediatePropagation()
+    }
   }
   const onDoubleClick = (event: MouseEvent) => {
     if (!visible || !loadId || !editMode || event.button !== 0 || event.target instanceof HTMLImageElement) return
     const targetReport = textReportAt(event)
-    if (targetReport) { send({ event: 'targets', targets: [targetReport] }); event.preventDefault(); event.stopImmediatePropagation() }
+    if (targetReport) {
+      if (selected !== targetReport.handle) { selected = targetReport.handle; drawMarkers(); send({ event: 'targets', targets: [targetReport] }) }
+      event.preventDefault(); event.stopImmediatePropagation()
+    }
   }
+  const onPointerMove = (event: MouseEvent) => {
+    if (!editMode || !visible) return
+    const target = event.target instanceof HTMLImageElement ? event.target : textAtPoint(doc, event.clientX, event.clientY)
+    const handle = target && event.target instanceof Node && event.target.contains(target) ? handles.get(target) ?? null : null
+    const next = handle && confirmed.has(handle) ? handle : null
+    if (hovered !== next) { hovered = next; drawMarkers() }
+  }
+  const onPointerLeave = () => { if (hovered) { hovered = null; drawMarkers() } }
   const onMessage = (event: MessageEvent<Command>) => {
     if (event.source !== win.parent || !event.data || typeof event.data !== 'object') return
     const message = event.data
@@ -243,7 +331,21 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
     if (message.type === 'html-preview.edit-mode' && typeof message.enabled === 'boolean'
       && typeof message.requestId === 'string' && message.requestId.length > 0 && message.requestId.length <= 256) {
       editMode = message.enabled
+      selected = null; hovered = null; confirmed.clear()
+      if (editMode) discoverTargets()
+      else { scanId = ''; if (discoveryFrame) win.cancelAnimationFrame(discoveryFrame); discoveryFrame = 0; drawMarkers() }
       send({ event: 'edit-mode-ready', requestId: message.requestId, enabled: editMode })
+    }
+    if (message.type === 'html-preview.refresh-targets') scheduleDiscovery()
+    if (message.type === 'html-preview.confirm-targets' && editMode && message.scanId === scanId && Array.isArray(message.handles)) {
+      for (const handle of message.handles) if (candidates.has(handle)) confirmed.add(handle)
+      drawMarkers()
+    }
+    if (message.type === 'html-preview.selection' && editMode) {
+      selected = typeof message.handle === 'string' && nodes.has(message.handle) ? message.handle : null
+      if (selected && !message.editable) confirmed.delete(selected)
+      else if (selected) confirmed.add(selected)
+      drawMarkers()
     }
     if (message.type === 'html-preview.navigate' && Number.isSafeInteger(message.index)) pagination.navigate(message.index)
     if (message.type === 'html-preview.restore' && Number.isSafeInteger(message.index) && Number.isFinite(message.scroll)) {
@@ -314,6 +416,8 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
   }
   win.addEventListener('click', onClick, true)
   win.addEventListener('dblclick', onDoubleClick, true)
+  win.addEventListener('mousemove', onPointerMove, true)
+  doc.documentElement.addEventListener('mouseleave', onPointerLeave)
   win.addEventListener('message', onMessage)
   win.parent.postMessage({ event: 'html-preview.hello', protocol: 1 }, '*')
   return () => {
@@ -324,6 +428,13 @@ export function mountHtmlPreviewAgent(doc: Document, inheritedTracking?: Runtime
     pausedMedia.clear(); pausedAnimations.clear()
     win.removeEventListener('click', onClick, true)
     win.removeEventListener('dblclick', onDoubleClick, true)
+    win.removeEventListener('mousemove', onPointerMove, true)
+    doc.documentElement.removeEventListener('mouseleave', onPointerLeave)
+    win.removeEventListener('scroll', onViewportChange, true)
+    win.removeEventListener('resize', onViewportChange)
+    observer.disconnect()
+    if (discoveryFrame) win.cancelAnimationFrame(discoveryFrame)
+    tracking.withoutTracking(() => markers?.remove())
     win.removeEventListener('message', onMessage)
     pagination.destroy()
     placeholders.destroy()

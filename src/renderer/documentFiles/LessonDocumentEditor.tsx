@@ -19,6 +19,7 @@ import type { DocumentBlock } from '../../shared/document/content'
 import { resolveFileDocumentImage } from '../../shared/document/fileImageReference'
 import { cancelEditPreview, useEditPreview } from '../workbench/EditPreviewProjection'
 import { mapMarkdownRange } from '../../core/tools/ToolTargets'
+import { Redo2, Undo2 } from 'lucide-react'
 
 export interface LessonDocumentEditorHandle {
   session: DocumentFileSession
@@ -174,7 +175,10 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
   const status = state.conflict ? '存在文件冲突' : committed ? documentSaveLabel({ ...committed, dirty: state.dirty || htmlPendingDraft, saving: state.saving }) : '正在打开'
   const documentActions = <>
     <span role="status" className="lesson-document-status">{status}</span>
+    <button type="button" aria-label="撤销" title="撤销" disabled={!committed?.undoDepth || state.saving || state.composing || Boolean(state.conflict) || state.recovery || Boolean(editPreview)} onClick={() => { void session.undo() }}><Undo2 size={16} aria-hidden="true" /></button>
+    <button type="button" aria-label="重做" title="重做" disabled={!committed?.redoDepth || state.saving || state.composing || Boolean(state.conflict) || state.recovery || Boolean(editPreview)} onClick={() => { void session.redo() }}><Redo2 size={16} aria-hidden="true" /></button>
     <button type="button" disabled={state.saving || state.composing || Boolean(state.conflict) || state.recovery} onClick={() => { void flush() }}>保存</button>
+    <label><input type="checkbox" checked={state.autoSave} disabled={state.saving || state.composing || Boolean(state.conflict) || state.recovery} onChange={event => session.setAutoSave(event.target.checked)} />自动保存</label>
     <details className="lesson-document-more"><summary aria-label="文档更多操作">文件</summary>
       <div className="lesson-document-more__menu">
       <button type="button" disabled={state.saving || state.composing || state.conflictHunks.length > 0} onClick={event => { event.currentTarget.closest('details')?.removeAttribute('open'); void saveAs() }}>另存为</button>
@@ -196,7 +200,7 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
     </aside>}
     {isHtml && committed && <div className="lesson-document-editor__html-body" inert={state.conflictHunks.length > 0}><HtmlDocumentEditor ref={htmlEditor} active={active} tabId={htmlTabId} committed={committed} source={state.source} documentActions={documentActions} onPendingDraftChange={setHtmlPendingDraft} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} onSave={() => { void flush() }} /></div>}
     {isText && !isHtml && committed && <div inert={state.conflictHunks.length > 0}><PlainTextDocumentEditor ref={textEditor} source={state.source} revision={committed.revision} onDraft={source => { const ticket = ++draftTicket.current; queueMicrotask(() => { if (ticket === draftTicket.current) session.edit(source, operationGroup.current) }) }} onUndo={() => session.undo()} onRedo={() => session.redo()} /></div>}
-    {committed && committed.model.kind !== 'text' && parsedSource && <div inert={state.conflictHunks.length > 0}><SharedDocumentEditor ref={editor} document={document} revision={state.source} sourceDraft={state.source} target="file" initialMode={parsedSource.status === 'valid' ? 'layout' : 'source'} resolveImage={resolveImage}
+    {committed && committed.model.kind !== 'text' && parsedSource && <div inert={state.conflictHunks.length > 0}><SharedDocumentEditor ref={editor} active={active} document={document} revision={state.source} sourceDraft={state.source} target="file" initialMode={parsedSource.status === 'valid' ? 'layout' : 'source'} resolveImage={resolveImage}
       sourceMap={parsedSource.status === 'valid' ? parsedSource.sourceMap : undefined}
       editPreview={editPreview}
       clipboardContext={(resources: MarkdownDocument['resources']) => selectedFileClipboardContext(clipboard, resources)} clipboardResourcePort={fileClipboardResourcePort}

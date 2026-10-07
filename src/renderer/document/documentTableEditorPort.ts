@@ -78,7 +78,12 @@ export function changeDocumentTableFromEditorState(
       if (block.type !== 'table') throw new Error('表格选区已失效')
       found = true
       const table = block as FlowTableBlock
-      if (command === 'toggle-header') return { ...table, headerEnabled: table.headerEnabled === false }
+      if (command === 'toggle-header') {
+        const next = { ...table }
+        if (table.headerEnabled === false) delete next.headerEnabled
+        else next.headerEnabled = false
+        return next
+      }
       if (!target.anchor || !target.head) throw new Error('请选择表格单元格')
       if (target.anchor.kind === 'header') {
         const columnId = target.anchor.columnId

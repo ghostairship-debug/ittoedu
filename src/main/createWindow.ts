@@ -20,6 +20,8 @@ import { resolveRendererEntryUrl } from './rendererEntry'
 import { documentHost } from './workbench/documentHost'
 import { releaseAllHtmlPreviewLeases } from './ipc'
 import { saveDocumentWithDialog } from './workbench/documentSaveDialog'
+import { executionDesktopService } from './workbench/execution/ExecutionDesktopService'
+import { externalMcpService } from './workbench/external/externalDesktopService'
 import { prepareDocumentWindowClose, type DocumentCloseChoice } from './workbench/documentCloseCoordinator'
 import { mainPreviewNetworkPolicy } from './previewNetworkPolicy'
 import {
@@ -46,21 +48,21 @@ async function confirmClose(window: BrowserWindow): Promise<DocumentCloseChoice>
     type: 'warning',
     title: '保存未完成的修改？',
     message: '工作台中有尚未保存的文档修改。',
-    detail: '可以保存全部文档后关闭，保留恢复稿并关闭，或取消关闭。',
-    buttons: ['保存全部并关闭', '保留恢复稿并关闭', '取消'],
+    detail: '放弃只处理本次未保存输入，已保存文件与其他恢复稿不会删除。',
+    buttons: ['保存全部并关闭', '放弃未保存更改并关闭', '取消'],
     defaultId: 0,
     cancelId: 2,
     noLink: true,
   })
   if (choice === 0) return 'save'
-  if (choice === 1) return 'preserve'
+  if (choice === 1) return 'discard'
   return 'cancel'
 }
 
-function requestRendererBeforeClose(window: BrowserWindow, mode: 'save' | 'preserve', signal: AbortSignal, onWaiting?: () => void): Promise<{ ready: boolean; suggestedDirectory?: SaveDirectoryContext }> {
+function requestRendererBeforeClose(window: BrowserWindow, mode: 'save' | 'preserve' | 'discard', signal: AbortSignal, onWaiting?: () => void, documentIds?: readonly string[]): Promise<{ ready: boolean; suggestedDirectory?: SaveDirectoryContext }> {
   const requestId = randomUUID()
-  const resultChannel = mode === 'save' ? IPC_CHANNELS.saveAndCloseResult : IPC_CHANNELS.preserveAndCloseResult
-  const requestChannel = mode === 'save' ? IPC_CHANNELS.requestSaveAndClose : IPC_CHANNELS.requestPreserveAndClose
+  const resultChannel = mode === 'discard' ? IPC_CHANNELS.discardAndCloseResult : mode === 'save' ? IPC_CHANNELS.saveAndCloseResult : IPC_CHANNELS.preserveAndCloseResult
+  const requestChannel = mode === 'discard' ? IPC_CHANNELS.requestDiscardAndClose : mode === 'save' ? IPC_CHANNELS.requestSaveAndClose : IPC_CHANNELS.requestPreserveAndClose
   return new Promise((resolve) => {
     let settled = false
     // This is an offered recovery choice, not a timeout or automatic discard.
@@ -81,7 +83,7 @@ function requestRendererBeforeClose(window: BrowserWindow, mode: 'save' | 'prese
       directory: unknown,
     ) => {
       if (event.sender !== window.webContents || receivedRequestId !== requestId) return
-      if (mode !== 'preserve' || directory === undefined) { finish(saved === true); return }
+      if (directory === undefined) { finish(saved === true); return }
       const parsed = saveDirectoryContextSchema.safeParse(directory)
       if (!parsed.success) { finish(false); return }
       finish(saved === true, parsed.data)
@@ -92,7 +94,7 @@ function requestRendererBeforeClose(window: BrowserWindow, mode: 'save' | 'prese
     ipcMain.on(resultChannel, onResult)
     window.once('closed', onClosed)
     try {
-      window.webContents.send(requestChannel, requestId)
+      window.webContents.send(requestChannel, requestId, documentIds)
     } catch (error) {
       console.error('发送关闭前保存请求失败', error)
       finish(false)
@@ -263,19 +265,34 @@ export async function createMainWindow(
       ]).then(rendererDirty => rendererDirty || appState.isDirty()),
       confirm: () => confirmClose(window),
       cancelled: () => closing.signal.aborted,
-      prepareRenderer: async mode => {
+      prepareRenderer: async (mode, ids) => {
         if (window.webContents.isCrashed()) {
           await offerCloseRecovery('界面进程已退出，无法完成关闭前输入保全。')
           return false
         }
         const prepared = await requestRendererBeforeClose(window, mode, closing.signal, () => {
           if (closeController === closing && !closing.signal.aborted) void offerCloseRecovery()
-        })
-        if (mode === 'preserve') closeSaveDirectory = prepared.suggestedDirectory
+        }, ids)
+        if (prepared.suggestedDirectory) closeSaveDirectory = prepared.suggestedDirectory
         if (!prepared.ready && !closing.signal.aborted) await offerCloseRecovery()
         return prepared.ready && !closing.signal.aborted
       },
       save: documentId => saveDocumentWithDialog(window, documentHost(), documentId, false, closeSaveDirectory),
+      withWriteBarrier: (ids, work) => documentHost().tools.withWriteTaskBarrier(ids, work),
+      stopWriters: async ids => {
+        const execution = await executionDesktopService(), external = await externalMcpService()
+        for (const id of ids) { await execution.stopTasksForDocument(id); await external.stopForDocument(id) }
+      },
+      discard: async snapshots => {
+        for (const expected of snapshots) {
+          if (closing.signal.aborted) return false
+          const current = await documentHost().registry.get(expected.documentId).drain()
+          if (current.epoch !== expected.epoch) throw new Error('关闭期间文档已重新打开，未放弃新的文档')
+          await documentHost().operate({ type: 'close', documentId: current.documentId, discardDirty: true,
+            expected: { epoch: current.epoch, revision: current.revision } })
+        }
+        return !closing.signal.aborted
+      },
       onBlocked: documentId => {
         if (!window.isDestroyed()) { window.webContents.send(IPC_CHANNELS.requestFocusDocument, documentId); window.focus() }
       },
@@ -289,6 +306,7 @@ export async function createMainWindow(
       if (!window.isDestroyed() && !closing.signal.aborted) return offerCloseRecovery(error instanceof Error ? error.message : '无法保存全部文档')
     }).finally(() => {
       if (closeController === closing) {
+        if (!closeApproved && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.requestResumeClose)
         closeCheckInFlight = false; closeController = undefined
         if (!window.isDestroyed()) window.setProgressBar(-1)
       }
