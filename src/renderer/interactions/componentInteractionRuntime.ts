@@ -1,7 +1,7 @@
 import type { ComponentRuntimeContext, ComponentRuntimeImplementation } from '../../shared/contracts/component-platform'
 import { isNodeMotionAction, isTerminalNavigationAction, type InteractionAction, type InteractionCondition, type InteractionRule, type InteractionTrigger } from '../../shared/interactionTypes'
 import { matchesPublishedCourseStateCondition } from '../../player/surfaces/publishedCourseState'
-import { componentInteractionDataSchema } from './componentInteractionAuthoring'
+import { componentInteractionDataSchema } from '../../shared/componentInteractionData'
 
 /** Facts/actions belong to the existing world; this module only executes rule programs. */
 export interface ComponentInteractionPorts {
