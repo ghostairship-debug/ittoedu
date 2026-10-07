@@ -2,7 +2,7 @@ import { z } from 'zod'
 
 /** Temporary source positions, derived from the committed HTML revision. Never written into the user's HTML. */
 export const htmlSourceAddressSchema = z.object({
-  kind: z.enum(['element', 'text', 'stylesheet', 'data']),
+  kind: z.enum(['document', 'element', 'text', 'stylesheet', 'data']),
   from: z.number().int().nonnegative(),
   to: z.number().int().nonnegative(),
 }).strict().refine(value => value.to >= value.from, '源码区间无效')
