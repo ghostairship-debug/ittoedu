@@ -74,7 +74,7 @@ B0 main=`afc65c9e4d713a9d362768f34e017789fad265ae`；用户已有 archive/开发
 | TE05 | disk/current复制分开，current不存源；保dirty/History行为绿 | 未blur输入完整UI组合未测 |
 | TE06 | 真实资料选集版本/冻结进入Main；所选DOCX段落/出处绿 | 完整checkbox UI未测 |
 | TE07 | 研究/数据方法、中文目录、单文件版本；读Skill不撤核心能力，roots/scoped聚焦绿 | 不冒充所有CLI安装 |
-| TE08 | V10图片卡/异步固定目标/同media事务；图片替换/保存冷开/组合绿 | OAuth真实生图/计费/显示仍条件 |
+| TE08 | V10图片卡/异步固定目标/同media事务；图片替换/保存冷开/组合绿；10月7日原OAuth当前账号真实生成/参考编辑通过 | 本轮完整V10创作链未运行；实际模型/单次费未由供应商披露，不冒全部GUI已验 |
 | TE09 | 13导航按钮任意限制移除；七展示状态操作走正式surface.presentation.set | 公开七动作/撤回重做/保存冷开1例绿，所有Player切换未测 |
 | TE10 | 多选提炼与真实库包导入/使用/更新/删除同owner，资源/frame/冷开绿 | UI作品视觉接受归Owner |
 | A01 | 分页captured快照、Flow markerless身份/专业数据；原blue→cyan及interaction换ID反例绿含保存冷开 | 局部不支持保源并诊断 |
@@ -123,9 +123,9 @@ B0 main=`afc65c9e4d713a9d362768f34e017789fad265ae`；用户已有 archive/开发
 
 主包最终 R4 已直接核对产品6087a936 / 测试bf4fb7c1 / E实际merge b7d1fcc3的同次原stdout/exit0、原生.last-run passed、最终facts及真实嵌套截图，所追踪的当前真实阻断均关闭。38包及候选按上述范围交付并合入main，旧检查不因后续继续指令重跑。S09尾项按下节另记实际变更及最低证据，任务卡依工作协议退出active；保留源提交、原失败与最终证据。
 
-条件与明确差距继续保留：发行暂停下不制造安装包实测；Podman/default Ubuntu未配置，不安装；GPT OAuth实际生成/编辑、图像模型/执行者/计费未实测；历史native trap及全仓旧类型债未清零；PPTX旧运行无创建记录或实际create→record中断仍保持unknown、不重导；简单改写仍为1请求2工具/1History，未满足零工具建议。以上没有改写成通过，也不阻断无关已交付能力。
+条件与明确差距继续保留：发行暂停下无本轮安装包实测；生产计算仍依赖WSL/Podman，教师免WSL替代尚未实施；OAuth真实生成/编辑已复验通过，但当前完整V10创作链未重新运行，实际执行模型/单次费用供应商未披露；历史native trap及全仓旧类型债未清零；PPTX缺创建事实仍保持unknown、不重导；简单改写1请求2工具/1History、零工具建议未满足，本次判断不因数量继续深改。详见下节；不将未测范围改写成通过。
 
-GPT OAuth 后续免费检查已确认：真实产品 profile 的原 secureStorage/OAuth resolver 可用，沿正式 discover-models 服务请求官方目录，两次均 HTTP 200/live；第二次只为区分解析缺陷，原响应形状确为 models:[]，现 parser 正确读取 models/slug。图像角色仍未配置，目录没有模型或能力行，不据此猜图像 ID 或外推供应商全面不支持。刷新和生成请求均为0，未启动新收费路径。见[原服务回执](evidence/oauth-directory-evidence.json)与[响应形状](evidence/oauth-directory-shape-evidence.json)；不再重复同因探针。
+GPT OAuth 后续免费检查当时确认：真实产品 profile 的原 secureStorage/OAuth resolver 可用，沿正式 discover-models 服务两次HTTP200/live，原响应models:[]且parser读取正确；该步骤刷新/生成0。见[目录回执](evidence/oauth-directory-evidence.json)与[响应形状](evidence/oauth-directory-shape-evidence.json)。此目录不能清零历史图像能力；Root此前仅据当前角色为空/目录为空，将真实生成编辑泛称未验证，漏查9月23日原证据，已在下节纠正并完成10月7日真实复验。
 
 最后 Player 修复只在创建 children 几何容器时设 pointerEvents:none；真实 child.outer 原来在 Flow/free 都显式 auto，人工图层、源 HTML、frame、缩放和层序未动。9919实际首命中空DIV/iframe第二/子summary无事件确证截点击；修后父及嵌套点击均由真实mouse完成。6087相关Player/Renderer直接构建各一次exit0，未重跑生成器/Electron。发行继续暂停。
 
@@ -136,3 +136,13 @@ GPT OAuth 后续免费检查已确认：真实产品 profile 的原 secureStorag
 独立 T/E 单文件一次执行：**1 file / 2 passed / 0 skipped，exit 0**，原命令、cut、stdout/stderr见[原测试回执](evidence/s09-pptx-cold-ack-b54cf2e2.log)。第一例以实际默认工具目录、Engine/Gateway 创建及真实 executing RunStore 切片模拟 ACK 丢失，Stop 后 fresh Host/Engine 查得历史 saved；converter/create 各一次、原输出一份，后改/删目标不重写，新写仍 run-stopped，Registry/handle/lease 不复活。第二例仅在私有回执 rename 注入 ENOSPC，实际 V10 文件仍可解析且保留，底层与 Agent 层均为 unknown，fresh lookup null，不重建或 open。converter 和 Host service port 是受控 seam；本例不冒充新版真实转换器、Main GUI或真实磁盘耗尽，原 T06 已绿真实 converter/GUI 证据继续复用。
 
 该 Main 活动消费者的唯一直接 Electron 构建 `node scripts/build-electron.mjs` / `fe503968` 已 exit 0，见[原构建回执](evidence/s09-build-electron-fe503968.log)；后续仅 tests-only，不重建 Renderer/Player或重跑生成器。R4按原边界完成设计、六文件实际 diff 与两例定义定向审查，原回执见[报告](evidence/R4_REVIEW.md)。源码、独立测试、结果与证据一起实质合入，用户无关 archive 修改保留，发行继续暂停。
+
+## 10月7日 Owner 后续问题与真实图像复验
+
+**简单改写的技术判断：不为工具数量继续深改。**两次工具在同一次provider回复完成，正文只产生一次History；暂无新增模型轮次或明显性能退化的反例。第一项承担正文提交，第二项明确整个任务结束，保留复杂任务继续与失败续修语义。零工具建议仍未满足，但合并或自动结束需要调整提交/恢复语义；没有可观察收益时，不把这项数量优化当当前可用性或发行阻断。今后若有真实额外轮次或性能问题，再针对实际原因修，不新增当前核验门。
+
+**OAuth历史与本次结果：真实生成/参考编辑通过。**已直接核9月23日generation/edit-status与real-image-document/status、ui-status、real-image-chat-ui/reopen原记录；请求gpt-image-2曾成功生成、编辑并在当时V9正式应用/保存重开，另有透明背景成功。10月7日本次从main8cea17c6源码、当前默认profile、原secureStorage/resolveOAuthCredential和ImageGenerationService复验同账号：生成1次、参考编辑1次，HTTP均200、状态ready，刷新/文字/目录请求0；没有改角色、产品源码或重试。两张1254×1254真实PNG由Root实际查看：蓝色铃铛改橙色，轮廓、位置、白底保留，原图仍可读。[安全原回执](evidence/oauth-live-20261007/evidence.json)、[同次执行日志](evidence/oauth-live-20261007/run-reviewed-probe-main8cea17c6.log)、[生成图](evidence/oauth-live-20261007/generate.png)、[编辑图](evidence/oauth-live-20261007/edit.png)。实际执行者为guoling-direct-chatgpt-images，请求模型gpt-image-2，actualImageModels=null，billing metadata=subscription，单次费用unknown。不据此冒称本轮Main GUI/V10保存重开或完整创作链已运行；后续沿同job/资源复用，不重复生成。
+
+**教师免WSL计算建议：随包离线Pyodide/WASM，尚未实施。**Owner已卸载WSL，教师安装WSL不能作为生产前提。I直接核原ComputeJobService、公开compute.run、Main、附件隔离carrier与字体，未参与实施的R4独立设计审通过。建议在原compute owner替换执行carrier，复用sandbox隐藏窗口/module Worker；随包提供运行时、NumPy/pandas/Matplotlib及依赖与可供Agg使用的中文TTF/许可。授权输入进入虚拟只读FS，成果仅回原scratch→artifact.save/File writer；不开放hostfs、Provider Secret或任意网络，不新建调度/注册平台。保cwd=/job/output、/job/work同目录别名和原环境变量，保Stop、迟到结果、ready复用/中断unknown不重放。CSV/数值/常用绘图是目标范围，OS子进程与任意原生扩展不能声称完整CPython兼容。方案审不等于工程就绪；最低证据为一份中文CSV→均值90/80、总体85→中文PNG实际看/真实成果保存，结合输入/host/network边界，再补Stop/冷unknown最近层，不做全矩阵。[独立设计节](evidence/R4_REVIEW.md)。
+
+**发行准备判断：条件通过后可以进入准备，当前未发行。**先完成免WSL实现及对应最小验证，再做一份代表性V10创作链：材料→实际可编辑作品→所需计算/已配置图片→核心互动→保存冷开→关键导出。相关成功证据可复用；实际候选包仍须无源码/Node/WSL消费新增计算运行时及MCP bootstrap，不能由开发树成功替代。不要求全仓历史V9债或全模型/全组件矩阵清零；真实当前可用性阻断须修。准备/本地候选验收不等于对外发行，发布仍须Owner解除暂停。

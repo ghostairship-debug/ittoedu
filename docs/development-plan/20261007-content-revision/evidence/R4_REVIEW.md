@@ -354,3 +354,23 @@ Gateway 已有 requestDigest 经 HostToolCoordinator 完整传给 import/lookup�
 证据限定：主例 converter 和 HostToolServices.pptxImport port 为受控 fixture，ACK hold 为故障注入；它证明真实持久创建 owner、Engine 原切片恢复与只读回执路径，不宣称重新测过实际 converter/Main/GUI。原真实 converter／可编辑保存／Main GUI 绿色证据在未变实现上复用，Main 新 lookup 接线由本 exact review 核对。ENOSPC 例证明新回执写入失败的错误边界，不宣称真的耗尽磁盘或硬件断电。原件、已有目标、Stop／权限和单一文件 writer 均未扩大。
 
 **该 S09 尾项可完成已授权集成，无新增未闭 finding。**旧记录、创建→回执完成前中断、无法读取或损坏回执仍保持 unknown，不根据当前路径／字节猜测原操作成功，不重跑转换、二次保存或重建授权。安装分发／发行暂停、Podman/真实 OAuth 图像与计费、历史 native trap、全仓旧类型和简单改写两次工具调用等未触及条件继续保留。本次只写审查报告，未代实施者运行测试或修改源码／断言，也不提前声称尾项已经合入 main。
+
+## 免 WSL 计算替代设计审（main `8cea17c6`，仅方案，未实施）
+
+Owner 已卸载 WSL，并明确教师不能以安装 WSL 为前置；本节为“如何修改好”的具体建议核对，未启动产品修改、新包下载、构建或测试。直接读当前 `ComputeJobService`、`PodmanComputeBackend`、Main 接线、`WorkbenchServiceTools`、attachment sandbox carrier、Vite 与安装包文件入口，以及现有计算行为用例。
+
+**建议采用 I 提出的随包 Pyodide 薄执行端。**Main 目前确实固定实例化 `PodmanComputeBackend` 并默认 Ubuntu，后端必须调用 `wsl.exe`／Podman；因此安装依赖是当前真实原因。以独立 sandbox hidden renderer 内的 module Worker 执行 Python，可去掉此依赖，保留现有唯一作业、scratch、来源冻结、产物登记及正式文件 writer。无需第二作业系统、通用执行注册表、pip/CDN 运行时安装或 OS 沙箱平台。该结论仅为设计可用，不表示新执行端已就绪，也不授权发行。
+
+必要改动与保全范围：
+
+1. `ComputeJobService` 只把 Podman 名义类型改为当前直接消费的薄端口；仍由它维护作业身份、请求摘要、日志、停止、状态与输出诊断。Main 替换实例并接现有 dispose；sources 冻结、artifact 登记及 File writer 不另开路径。历史 ready 可读，历史 preparing/running 冷查仍 unknown、不在新后端重跑；不能靠保留名为 container 的字段假称还存在容器。
+2. 执行 carrier 复用 attachment 的独立 session、权限/下载拒绝、无 Node 的 BrowserWindow 与窄 IPC 模式，不能仅抄默认 session 的 PPTX producer。允许范围只到实际本地入口与运行时资源，Python/JS 互操作也不能绕过该网络边界；不传 Main、文件 API、Provider Secret 或通用 preload。输入为软件冻结的 bytes，WORKERFS 只读挂载；输出仅以相对名和 bytes 返回，Main 在原 scratch/output 内落地并交回现 owner。
+3. **保留公开路径语义**：`WorkbenchServiceTools.ts:44` 明确规定 cwd=`/job/output`、`/job/work` 是同一目录别名，并提供 `GUOLING_INPUT_DIR`、`GUOLING_OUTPUT_DIR`。旧 Podman 也如此挂载。MEMFS work/output 不能变成两个独立目录，否则写 work 或普通相对文件会漏交成果；该别名与环境变量须保留。`compute.run` 的 code/sources/outputNames 不变。内部非 Python program/argv 入口明确 unsupported，不能悄悄按 Python 解释；无需为未公开的任意 OS 命令建立新实现。
+4. 运行时、标准库、numpy/pandas/matplotlib 及实际依赖使用一个固定版本完整随包，载入地址固定为本地资源；新增 compute HTML/renderer/module Worker、窄 preload 与 Vite 入口属于当前 consumer 所需。现 builder 已包含 `dist-renderer/**`，不需新分发平台。Pyodide npm 包本身不含 Python wheels，不能以安装 npm 包冒称离线依赖已齐；官方部署说明见 [Pyodide 使用与部署](https://pyodide.org/en/stable/usage/index.html)。
+5. 中文 PNG 需随包提供 Agg 可读的中文 TTF/OTF 和对应许可证、并实际选择该字体；现分片浏览器 WOFF2 不能仅凭名称视为可供 Matplotlib 使用。Stop/dispose 终止实际 Worker/窗口、结算 done 并忽略迟到输出；启动中取消同样要闭合，不能只更新 UI 状态。每次作业隔离自己的虚拟文件与执行状态，不把上个作业的文件或 Python globals 留给下个作业。
+
+**能力取舍须明确给 Owner。**本地 CSV、数值计算、numpy/pandas 汇总与常用 Matplotlib 绘图是建议保全范围；WASM 不等同完整系统 CPython。旧后端用例确有真实 subprocess 子进程能力，新端不能声称保全任意 OS 进程、原生扩展、threading/multiprocessing 或系统工具；官方明确这些浏览器运行限制，见 [Python 兼容性](https://pyodide.org/en/stable/usage/wasm-constraints.html)。Worker 的隔离与异步执行是实际推荐部署方式，见 [module Worker 用法](https://pyodide.org/en/stable/usage/webworker.html)。这些差异应以能力说明和具体错误表现呈现，不转成安装 WSL 的隐性回退。
+
+最小验证建议保持 I 的单一样本：CSV 一班 80/100、二班 70/90 得均值 90/80、总均值 85，真实中文 PNG 实看；同次证明冻结输入只读、宿主 sentinel 不可见、外网不可达、仅收相对输出。补最近层 Stop 与冷 preparing/running→unknown 不重放，旧 ready 不重跑；保留原坏辅助文件逐项诊断与有效成果交付。这里列的是未来验收属性，本轮没有运行证据；不重复已绿主包、既有模型或 CLI 矩阵。
+
+口径更新：前文 Podman 实机缺口属于原实现，不能把再次安装 WSL 当教师验收前置；新方案仍须实现和实测。历史 OAuth ready 证据由 Root 查证，本报告“真实 OAuth 未验证”在当前后续任务仅指当前 V10 入口复验尚待实际证据，不能泛称历史从未接通。简单改写仍为一次 provider 请求、两次工具、一次 History；没有当前性能或可用性反例，不据工具数新造执行平台或提升成发行阻断。发行仍依 Owner 原决定暂停。

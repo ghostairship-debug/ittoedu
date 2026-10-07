@@ -1,0 +1,10 @@
+Same-run receipt copied from the original safe tool outputs; no second probe invocation.
+
+source_cut: main 8cea17c6 (as specified by Root)
+cwd: D:\果铃工作台
+command: node D:/果铃并行/20261007-content-revision/h/output/oauth-revalidation-20261007/run.cjs --execute-reviewed-probe
+initial_tool_chunk: 017775; after 30 seconds the process remained active as session 34383; output was empty
+completion_tool_chunk: c4ed9d; exit_code: 0
+
+Final safe process output from that same session (single JSON line):
+{"status":"generate-and-edit-ready","stages":{"generate":{"status":"ready","stopped":false,"executor":"guoling-direct-chatgpt-images","endpoint":"https://chatgpt.com/backend-api/codex/images/generations","requestedImageModel":"gpt-image-2","actualImageModels":null,"billingMetadata":"subscription","usage":{"input_tokens":29,"input_tokens_details":{"image_tokens":0,"text_tokens":29},"output_tokens":515,"output_tokens_details":{"image_tokens":515,"text_tokens":0},"total_tokens":544},"pngs":[{"path":"D:\\果铃并行\\20261007-content-revision\\h\\output\\oauth-revalidation-20261007\\generate.png","mimeType":"image/png","width":1254,"height":1254,"byteLength":1049581}]},"edit":{"status":"ready","stopped":false,"executor":"guoling-direct-chatgpt-images","endpoint":"https://chatgpt.com/backend-api/codex/images/edits","requestedImageModel":"gpt-image-2","actualImageModels":null,"billingMetadata":"subscription","usage":{"input_tokens":1583,"input_tokens_details":{"image_tokens":1521,"text_tokens":62},"output_tokens":515,"output_tokens_details":{"image_tokens":515,"text_tokens":0},"total_tokens":2098},"pngs":[{"path":"D:\\果铃并行\\20261007-content-revision\\h\\output\\oauth-revalidation-20261007\\edit.png","mimeType":"image/png","width":1254,"height":1254,"byteLength":1421383}]}},"generationCapability":"ready-observed","editCapability":"ready-observed","originalStillAvailable":true,"checkedAt":"2026-10-07T04:25:18.683Z","imageFetchInvocations":{"generate":1,"edit":1},"refreshFetchInvocations":0,"httpStatus":{"generate":200,"edit":200,"refresh":null},"firstFailure":{},"probeStop":{},"textRequests":0,"directoryRequests":0}

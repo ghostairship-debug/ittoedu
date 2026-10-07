@@ -30,7 +30,7 @@ Owner已授权的38工作包实施与确认优化、20补充候选处置已随a8
 
 ## 仍需明确保留的边界
 
-- 本批新增条件：发行暂停下无安装版/无Nodebootstrap实测；Podman/default Ubuntu未配置。GPT OAuth正式免费目录已HTTP 200/live，原响应models:[]且图像角色未配置，实际生图/编辑/计费仍未验证。PPTX冷ACK现可查持久创建事实；旧记录或create→record实际中断无事实仍保unknown不重导。简单改写保持1次请求2个明确提交工具/1History，零工具建议仍有差距；见本轮结果。
+- 本批新增条件：发行暂停下无本轮安装版/无Nodebootstrap实测。Owner已卸载WSL，并明确教师电脑不能依赖WSL；当前生产计算仍硬接Ubuntu/Podman，随包离线Pyodide/WASM替代方案已独立设计审，尚未实施和验证。GPT OAuth9月23日已有真实生成/参考编辑/图片保存重开证据；10月7日用当前同账号原服务重验生成1次、编辑1次，均HTTP200/ready，原图保留，PNG已实际查看。供应商未回报实际图片模型，单次费用unknown；当前默认图片角色未配置与V10完整创作链验收另记，空目录不清零已证能力。PPTX冷ACK现可查持久创建事实；无事实仍保unknown不重导。简单改写1次请求2个工具/1History，零工具建议未满足；本次技术判断暂无成本反例支持继续深改，不列为当前可用性或发行阻断。见本轮结果。
 
 - 全仓类型和旧测试尚未清零。本批共享 helper 的 8 条直接诊断已消除；App 窄闭包仍有源码遗留，含 inactive V9 observation controller 的 4 条类型漂移；旧 productivity 的 9 个 V9 用例尚未迁移。
 - 历史 native trap 根因未完全验证。payload 减量、一次正常观察和释放不等于已消除崩溃或证明长期无泄漏。
