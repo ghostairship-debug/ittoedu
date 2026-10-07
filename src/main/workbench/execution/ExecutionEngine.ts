@@ -100,7 +100,7 @@ interface StreamingCall {
 }
 interface ActiveRun {
   contentOutput?: { targetHandle: string; format: 'markdown' | 'text' | 'html' }
-  contentAlreadyApplied?: boolean
+  taskAlreadyCompleted?: boolean
   contextScale: number
   rejectedInputLimit?: number
   forceCompaction: boolean
@@ -594,7 +594,7 @@ export class ExecutionEngine {
     // A card's default focus is still readable when the task has no write grant.
     if (frozen.permission === 'read-only') delete frozen.contentOutput
     let verifiedLineage: ExecutionRunRecord[] | undefined
-    let contentAlreadyApplied = false
+    let taskAlreadyCompleted = false
     let continuedDocumentIds = new Map<string, string>()
     if (!frozen.conversationId || !frozen.taskId || !frozen.instruction.trim() && !frozen.context?.length && !frozen.inputContext?.attachments.length) throw new Error('请提供内容或附件')
     if (frozen.contentOutput) executionContentOutputSchema.parse(frozen.contentOutput)
@@ -606,11 +606,40 @@ export class ExecutionEngine {
       await this.reconcileReceipts(previous)
       const lineage = await this.continuationLineage(previous)
       continuedDocumentIds = continuationDocumentIds(lineage, this.options.registry.list())
-      if (frozen.contentOutput && continuation.sameTask && previous.input.contentOutput
-        && previous.input.instruction === frozen.instruction) {
+      if (continuation.sameTask && previous.input.instruction === frozen.instruction) {
         const settled = await this.settlementRecord(previous)
-        contentAlreadyApplied = settled.tools.some(tool => tool.origin === 'host' && tool.call.name === 'text.replace'
-          && committed(tool.result) && (continuedDocumentIds.get(tool.result.result.documentId) ?? tool.result.result.documentId) === frozen.contentOutput!.documentId)
+        taskAlreadyCompleted = settled.tools.every(tool => tool.state === 'returned' && !this.possiblyInvokedTool(tool))
+          && settled.tools.some(tool => tool.call.name === TASK_FINISH && tool.result?.kind === 'read'
+            && (tool.result.data as { status?: unknown })?.status === 'completed')
+        // Historical body-only runs had one host write and no open tool loop.
+        if (!taskAlreadyCompleted && frozen.contentOutput && previous.input.contentOutput && settled.tools.length === 1) {
+          const tool = settled.tools[0]!
+          taskAlreadyCompleted = tool.origin === 'host' && tool.call.name === 'text.replace' && committed(tool.result)
+            && (continuedDocumentIds.get(tool.result.result.documentId) ?? tool.result.result.documentId) === frozen.contentOutput.documentId
+        }
+      }
+      if (taskAlreadyCompleted) {
+        // The old task is complete; this receipt-only continuation needs no
+        // revived write scope or obsolete selection range.
+        delete frozen.contentOutput
+        frozen.documents = frozen.documents.map(document => ({ ...document, writable: [], selection: [] }))
+      } else if (frozen.contentOutput) {
+        const binding = frozen.contentOutput
+        for (const source of [...lineage].reverse()) {
+          const priorBinding = source.input.contentOutput
+          if (!priorBinding || (continuedDocumentIds.get(priorBinding.documentId) ?? priorBinding.documentId) !== binding.documentId
+            || JSON.stringify(priorBinding.target) !== JSON.stringify(binding.target)) continue
+          const write = [...source.tools].reverse().find(tool => tool.call.name === 'text.replace' && committed(tool.result))
+          if (!write) continue
+          const recovered = await this.options.gateway.recoverBoundContentOutput(source.runId, write.callId, write.call, priorBinding, binding.documentId)
+          if (recovered) {
+            const update = (target: ToolTarget) => JSON.stringify(target) === JSON.stringify(binding.target) ? structuredClone(recovered.target) : target
+            frozen.documents = frozen.documents.map(document => document.documentId === binding.documentId
+              ? { ...document, writable: document.writable.map(update), ...(document.selection ? { selection: document.selection.map(update) } : {}) } : document)
+            frozen.contentOutput = recovered
+          }
+          break // A newer mismatching result cannot be replaced by an older convenient one.
+        }
       }
       for (const tool of previous.tools) await this.publishCommit(previous, tool)
       verifiedLineage = lineage
@@ -808,7 +837,7 @@ export class ExecutionEngine {
       if (this.closing) throw new Error('应用正在关闭；已保留准备记录，未发送模型请求')
       const active: ActiveRun = { record, contextScale: 1, forceCompaction: false, contextMessages: [], controller: new AbortController(), stopped: false, streams: new Map(), completion: Promise.resolve(), tools,
         ...(contentOutput ? { contentOutput: { targetHandle: contentOutput.targetHandle, format: contentOutput.format } } : {}),
-        ...(contentAlreadyApplied ? { contentAlreadyApplied: true } : {}),
+        ...(taskAlreadyCompleted ? { taskAlreadyCompleted: true } : {}),
         unresolvedToolNames: new Set(continuation?.unresolvedToolNames ?? []), unresolvedEffects: continuation?.unresolvedEffects ?? [], permission, outsideDocuments, documentNames, approveAll: false,
         priorImages, priorImagePaths: priorPaths, reissuedImages: reissued }
       active.unsubscribeEdits = this.options.edits?.subscribe?.(event => {
@@ -2079,9 +2108,9 @@ export class ExecutionEngine {
     try {
       record.status = 'running'; await this.checkpoint(record)
       await this.event(record, 'run-state', 'run.state', { status: 'running', label: '正在执行' })
-      if (active.contentAlreadyApplied) {
+      if (active.taskAlreadyCompleted) {
         record.status = 'completed'
-        await this.event(record, 'content-recovered', 'text', { text: '已核实先前正文修改已应用，无需重复改写。', status: 'completed' })
+        await this.event(record, 'task-recovered', 'text', { text: '已核实先前任务已完成；原回执与成果保留，无需再次执行。', status: 'completed' })
         return
       }
       const tools = active.tools
