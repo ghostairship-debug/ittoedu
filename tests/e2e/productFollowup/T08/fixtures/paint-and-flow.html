@@ -9,6 +9,7 @@
     .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 920px; }
     section { background: white; border: 2px solid #2d647e; padding: 16px; min-height: 145px; }
     .number::before { content: "① "; color: #9b2020; font-weight: bold; }
+    .rgba { color: rgba(18,52,86,.5); }
     .positioned { position: relative; z-index: auto; background: #fcbd76; width: 170px; height: 70px; }
     .following { margin-top: -45px; background: #3b8fc9; color: white; width: 205px; height: 70px; }
     .atomic { opacity: .5; position: relative; width: 230px; height: 90px; background: #f00000; }
@@ -27,7 +28,7 @@
   <div id="fixed">滚动正文时此标题保持在视口顶部</div>
   <h1>源网页与 V10 同样本对照</h1>
   <div class="grid">
-    <section><h2 class="number">伪元素题号</h2><p>题号与正文都可见。</p></section>
+    <section><h2 class="number">伪元素题号</h2><p>题号与正文都可见。</p><p class="rgba">半透明说明</p></section>
     <section><h2>relative z:auto 绘制</h2><div class="positioned">橙色定位块</div><div class="following">蓝色后文背景</div></section>
     <section><h2>整组透明合成</h2><div class="atomic">红色父背景<span>蓝色子块</span></div></section>
     <section><h2>组滤镜</h2><div class="filtered">滤镜同时作用于文字与背景</div></section>

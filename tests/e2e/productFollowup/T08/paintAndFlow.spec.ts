@@ -1,0 +1,113 @@
+import { expect, test, type FrameLocator, type ElectronApplication } from '@playwright/test'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { join, resolve } from 'node:path'
+import sharp from 'sharp'
+import { CourseV10Driver } from '../../../../src/core/drivers/CourseV10Driver'
+import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
+import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
+import { createTextComponentData } from '../../../../src/components/text/data'
+import { closeSelectionApp, launchSelectionApp, openSelectionFile, readSelectionDocument } from '../../helpers/g20SelectionHarness'
+import { chooseM23Workspace, openM23Html } from '../../helpers/g20M23Harness'
+
+async function pixel(png: Buffer, xRatio: number, yRatio: number) {
+  const { data, info } = await sharp(png).removeAlpha().raw().toBuffer({ resolveWithObject: true })
+  const x = Math.min(info.width - 1, Math.floor(info.width * xRatio)), y = Math.min(info.height - 1, Math.floor(info.height * yRatio))
+  const offset = (y * info.width + x) * info.channels
+  return [...data.subarray(offset, offset + 3)]
+}
+function near(actual: number[], expected: number[]) { actual.forEach((value, index) => expect(Math.abs(value - expected[index])).toBeLessThanOrEqual(8)) }
+async function painted(frame: FrameLocator) {
+  const atomic = await frame.locator('.atomic').screenshot({ scale: 'css' })
+  const blue = await frame.locator('.atomic span').screenshot({ scale: 'css' })
+  const clipped = await frame.locator('.clipped').screenshot({ scale: 'css' })
+  const number = await frame.locator('.number').screenshot({ scale: 'css' })
+  const rgba = await frame.locator('.rgba').screenshot({ scale: 'css' })
+  const numberPixels = await sharp(number).removeAlpha().raw().toBuffer({ resolveWithObject: true })
+  let redGlyphPixels = 0
+  for (let index = 0; index < numberPixels.data.length; index += numberPixels.info.channels)
+    if (numberPixels.data[index] > 120 && numberPixels.data[index + 1] < 90 && numberPixels.data[index + 2] < 90) redGlyphPixels++
+  const rgbaPixels = await sharp(rgba).removeAlpha().raw().toBuffer({ resolveWithObject: true })
+  let alphaGlyphPixels = 0
+  for (let index = 0; index < rgbaPixels.data.length; index += rgbaPixels.info.channels)
+    if ([137, 154, 171].every((value, channel) => Math.abs(rgbaPixels.data[index + channel] - value) <= 8)) alphaGlyphPixels++
+  return { red: await pixel(atomic, .04, .9), blue: await pixel(blue, .9, .85), clipCorner: await pixel(clipped, .02, .02), clipInside: await pixel(clipped, .5, .7),
+    pseudoContent: await frame.locator('.number').evaluate(element => getComputedStyle(element, '::before').content),
+    rgbaColor: await frame.locator('.rgba').evaluate(element => getComputedStyle(element).color), redGlyphPixels, alphaGlyphPixels }
+}
+
+test('one real HTML import keeps painted pseudo clip and alpha semantics in Player and local Flow editing preserves the imported program and human layout', async ({}, info) => {
+  const root = resolve(__dirname, '../../../..'), output = join(root, 'output/content-revision/t08-paint')
+  mkdirSync(output, { recursive: true })
+  const directory = mkdtempSync(join(output, 'run-')), workspace = join(directory, 'workspace'); mkdirSync(workspace)
+  const sourceFile = join(workspace, 'paint-and-flow.html')
+  writeFileSync(sourceFile, readFileSync(join(__dirname, 'fixtures/paint-and-flow.html')))
+  const project = createBlankCourseProjectV10('绘制样本')
+  project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
+  project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('局部原说明') }
+  project.instances.human = { id: 'human', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('人工浮层保持位置'),
+    frame: { width: 220, height: 60, transform: [1, 0, 0, 1, 430, 180] }, style: { opacity: .6 }, flowPlacement: { space: 'paper', plane: 'overlay' } }
+  project.surfaces = [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body', 'human'] }]; project.global = { underlay: [], overlay: [] }
+  const name = '绘制对照.h5lesson'
+  writeFileSync(join(workspace, name), new CourseV10Driver().serialize({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }))
+  let app: ElectronApplication | undefined
+  const facts: Record<string, unknown> = { scope: 'one actual UI import / Electron measurement / formal V10 / real Player pixel and interaction specimen; no model supplier claim', directory }
+  try {
+    app = await launchSelectionApp(directory); const page = await app.firstWindow()
+    await chooseM23Workspace(app, page, workspace)
+    await openM23Html(page, 'paint-and-flow.html')
+    const source = page.frameLocator('iframe[title="HTML 预览"]')
+    facts.sourcePaint = await painted(source)
+    await info.attach('Original source paint', { body: await page.locator('iframe[title="HTML 预览"]').screenshot({ scale: 'css' }), contentType: 'image/png' })
+    const opened = await openSelectionFile(page, workspace, name)
+    const editor = page.locator('.course-editor-frame:visible')
+    await editor.locator('.course-light-tools').getByRole('button', { name: '插入', exact: true }).click()
+    await editor.getByRole('button', { name: '导入 HTML 页面', exact: true }).click()
+    const dialog = page.getByRole('dialog', { name: '导入 HTML 页面', exact: true })
+    await dialog.getByLabel('导入目标页面', { exact: true }).selectOption({ label: '流式讲义 · 讲义' })
+    await app.evaluate(({ dialog }, filename) => { dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [filename] }) }, sourceFile)
+    await dialog.getByRole('button', { name: '导入', exact: true }).click()
+    await expect(dialog).toHaveCount(0)
+    const imported = await readSelectionDocument(page, opened.documentId)
+    if (imported.model.kind !== 'course-v10') throw new Error('V10 required')
+    expect(imported.model.project.instances.body).toEqual(project.instances.body)
+    expect(imported.model.project.instances.human).toEqual(project.instances.human)
+    const program = Object.values(imported.model.project.instances).find(instance => typeof instance.data?.html === 'string' && instance.data.html.includes('点击查看核心互动'))
+    expect(program, JSON.stringify(imported.model.project.instances)).toBeTruthy()
+    const paragraph = editor.locator('.ProseMirror p').filter({ hasText: '局部原说明' })
+    await paragraph.click({ clickCount: 3 }); await page.keyboard.press('Home'); await page.keyboard.press('Shift+End'); await page.keyboard.insertText('局部修订说明')
+    await expect.poll(async () => (await readSelectionDocument(page, opened.documentId)).model).toMatchObject({ project: { instances: { body: { data: { content: { inlines: [{ type: 'text', text: '局部修订说明' }] } } } } } })
+    const edited = await readSelectionDocument(page, opened.documentId)
+    if (edited.model.kind !== 'course-v10') throw new Error('V10 required')
+    expect(edited.model.project.instances[program!.id]).toEqual(program)
+    expect(edited.model.project.instances.human).toEqual(project.instances.human)
+    await editor.locator('.course-light-tools').getByRole('button', { name: '整课预览', exact: true }).click()
+    const host = page.getByTestId('course-preview-host'), overlay = page.getByTestId('course-preview-overlay')
+    await expect(overlay).toBeVisible()
+    const frames = host.locator('iframe'); await expect(frames).toHaveCount(1)
+    const player = host.frameLocator('iframe')
+    await expect(player.locator('#answer summary')).toBeVisible()
+    const sourceFacts = facts.sourcePaint as Awaited<ReturnType<typeof painted>>, playerFacts = await painted(player)
+    facts.playerPaint = playerFacts
+    near(sourceFacts.red, [247, 127, 127]); near(playerFacts.red, sourceFacts.red)
+    near(sourceFacts.blue, [127, 127, 247]); near(playerFacts.blue, sourceFacts.blue)
+    near(sourceFacts.clipCorner, [255, 255, 255]); near(playerFacts.clipCorner, sourceFacts.clipCorner)
+    near(sourceFacts.clipInside, [164, 48, 181]); near(playerFacts.clipInside, sourceFacts.clipInside)
+    expect(sourceFacts.redGlyphPixels).toBeGreaterThan(5); expect(playerFacts.redGlyphPixels).toBeGreaterThan(5)
+    expect(playerFacts.pseudoContent).toEqual(sourceFacts.pseudoContent)
+    expect(playerFacts.rgbaColor).toBe('rgba(18, 52, 86, 0.5)')
+    expect(sourceFacts.alphaGlyphPixels).toBeGreaterThan(5); expect(playerFacts.alphaGlyphPixels).toBeGreaterThan(5)
+    await player.locator('#answer summary').click()
+    await expect(player.locator('#answer p')).toBeVisible()
+    await player.locator('#answer summary').click()
+    await expect(player.locator('#answer p')).toBeHidden()
+    await info.attach('Imported actual Player paint', { body: await frames.screenshot({ scale: 'css' }), contentType: 'image/png' })
+    facts.interaction = { openedAndClosed: true }; facts.localFlowPreserved = { programId: program!.id, humanFrame: edited.model.project.instances.human.frame }
+    await overlay.getByRole('button', { name: '关闭预览', exact: true }).click()
+    await editor.locator('.course-light-tools').getByRole('button', { name: '保存', exact: true }).click()
+    await expect.poll(async () => (await readSelectionDocument(page, opened.documentId)).dirty).toBe(false)
+  } finally {
+    writeFileSync(join(directory, 'evidence.json'), JSON.stringify(facts, null, 2) + '\n')
+    await info.attach('One source to Player paint facts', { path: join(directory, 'evidence.json'), contentType: 'application/json' })
+    if (app) await closeSelectionApp(app)
+  }
+})
