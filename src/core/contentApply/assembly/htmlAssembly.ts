@@ -107,6 +107,7 @@ function hasPaint(element: MeasuredHtmlElement): boolean {
   return !!(style['background-image'] && style['background-image'] !== 'none'
     || style['background-color'] && !['transparent', 'rgba(0, 0, 0, 0)'].includes(style['background-color'])
     || style['box-shadow'] && style['box-shadow'] !== 'none'
+    || parseFloat(style['outline-width'] ?? '0') > 0 && style['outline-style'] !== 'none'
     || ['top', 'right', 'bottom', 'left'].some(side => parseFloat(style[`border-${side}-width`] ?? '0') > 0 && style[`border-${side}-style`] !== 'none')
     || Object.keys(element.pseudoElements).length)
 }
@@ -193,7 +194,7 @@ export function assembleMeasuredHtml(capture: HtmlDesignCapture, source: HtmlAss
     message: '片段没有可测的初始内容边界；保留设计视口及源码。' })
   const root: HtmlAssemblyObject = { kind: 'group', label: framing === 'content' ? '内容' : '页面', sourcePath: [],
     frame: rootFrame, style: htmlObjectStyle(capture.pageStyle, true),
-    pseudoElements: {}, children: [], decorations: [], sourceRegions: [] }
+    pseudoElements: element(capture.body).pseudoElements, children: [], decorations: [], sourceRegions: [] }
   const bodyContent = contentOf(capture.body, true)
   if (bodyContent.kind === 'element') root.content = { ...bodyContent, children: [], style: root.style }
 

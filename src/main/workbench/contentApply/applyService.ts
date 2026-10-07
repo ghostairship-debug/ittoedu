@@ -4,7 +4,7 @@ import { captureComponentOperation, equalComponentValue } from '../../../core/dr
 import { assertCourseSurfaceRemoval, createCourseSurface } from '../../../core/course/courseSurfaceStructure'
 import type { InMemoryComponentCompilation } from '../../../core/components/compilation/InMemoryComponentCompilation'
 import { componentCompilationInput } from '../../../core/components/compilation/componentCompilationInput'
-import type { HtmlAssembly } from '../../../core/contentApply/assembly/htmlAssembly'
+import { sourceProgramAssembly, type HtmlAssembly } from '../../../core/contentApply/assembly/htmlAssembly'
 import { owningContainer, resolveComponentPresentation, type ComponentContainer, type ComponentDefinition, type ComponentEdit, type ComponentImplementation, type CourseProjectV10, type JsonObject, type JsonValue } from '../../../shared/contracts/component-platform'
 import { prepareContentResources, type PreparedContentResources } from './resources/contentResources'
 import type { HtmlDesignMeasurementRequest } from './measurement/ElectronHtmlDesignMeasurement'
@@ -121,9 +121,24 @@ export class ContentApplyService {
         const resources = resourceEdits(prepared, this.createId)
         edits.push(...resources.edits)
         diagnostics.push(...prepared.diagnostics.map(item => ({ ...item, repairable: true })))
-        const assembly = await this.options.measure({ html: prepared.html, viewport: this.designViewport(project, request),
-          framing: htmlAssemblyFraming(request),
-          themeCss: request.source.themeCss, resourceUrls: { ...this.options.resourceUrls?.(project, request), ...resources.urls }, signal })
+        const viewport = this.designViewport(project, request)
+        let assembly: HtmlAssembly
+        try {
+          assembly = await this.options.measure({ html: prepared.html, viewport,
+            framing: htmlAssemblyFraming(request),
+            themeCss: request.source.themeCss, resourceUrls: { ...this.options.resourceUrls?.(project, request), ...resources.urls }, signal })
+        } catch (error) {
+          // A failed disposable measurement is not a verdict on the author's
+          // source. The existing program carrier can retain and run it; its
+          // actual availability remains unverified. Cancellation still stops.
+          signal?.throwIfAborted()
+          if (error instanceof Error && error.name === 'AbortError') throw error
+          assembly = sourceProgramAssembly(viewport, { html: prepared.html,
+            ...(request.source.themeCss !== undefined ? { themeCss: request.source.themeCss } : {}) }, 'measurement-unavailable', [{
+            level: 'warning', code: 'html-measurement-source-retained', repairable: true,
+            message: `实测装配不可用，已保留可运行源码，运行结果待观察：${error instanceof Error ? error.message : String(error)}`,
+          } as ContentApplyDiagnostic])
+        }
         diagnostics.push(...assembly.diagnostics)
         const assembled = assemblyContentDraft(assembly, resources.bindings, {
           modules: prepared.modules, createFormulaId: this.createId, definitions: project.definitions, flow: this.flowBodyTarget(project, request),
@@ -306,6 +321,9 @@ export class ContentApplyService {
       return { width: Math.ceil(width ?? (layout?.widthMode === 'fluid' ? 1100 : 860)), height: 900 }
     }
     const size = surface?.designSize
+    // Spatial has no page-sized designSize. A newly added world still needs a
+    // temporary browser viewport; this input never becomes author geometry.
+    if (!size && surface?.kind === 'spatial') return { width: 1280, height: 720 }
     if (!size) throw new Error('新建或重做范围缺少设计尺寸，未擅自采用默认画布')
     return { width: Math.ceil(size.width), height: Math.ceil(size.height) }
   }

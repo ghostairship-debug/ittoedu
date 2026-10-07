@@ -17,14 +17,26 @@ const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input'
 
 export const WEB_DEFINITIONS: ComponentDefinition[] = [WEB_DEFINITION, HTML_PROGRAM_DEFINITION]
 
-function contentHtml(content: HtmlObjectContent, rawText = false): string {
+interface HtmlSerialization { nextPseudo: number }
+function contentHtml(content: HtmlObjectContent, serialization: HtmlSerialization, rawText = false): string {
   if (content.kind !== 'element') return content.kind === 'comment' ? `<!--${content.text}-->` : rawText ? content.text : escape(content.text)
   const attributes = { ...content.attributes }
+  // A computed pseudo-element has no DOM node. Keep its measured declarations
+  // under a software-owned selector instead of dropping generated text/paint.
+  const pseudos = Object.entries(content.pseudoElements)
+  let pseudoCss = ''
+  if (pseudos.length) {
+    const anchor = `p${serialization.nextPseudo++}`
+    attributes['data-guoling-measured-pseudo'] = anchor
+    pseudoCss = `<style>${pseudos.map(([pseudo, declarations]) =>
+      `[data-guoling-measured-pseudo="${anchor}"]${pseudo}{${Object.entries(declarations).map(([name, value]) => `${name}:${value}`).join(';')}}`
+    ).join('\n').replace(/<\/style/gi, '<\\/style')}</style>`
+  }
   const style = Object.entries(content.style).map(([key, value]) => `${key}:${value}`).join(';')
   if (style) attributes.style = style
   const open = `<${content.tagName}${Object.entries(attributes).map(([key, value]) => ` ${key}="${escape(value)}"`).join('')}>`
-  if (VOID.has(content.tagName)) return open
-  return `${open}${content.children.map(child => contentHtml(child, ['style', 'script'].includes(content.tagName))).join('')}</${content.tagName}>`
+  if (VOID.has(content.tagName)) return pseudoCss + open
+  return `${pseudoCss}${open}${content.children.map(child => contentHtml(child, serialization, ['style', 'script'].includes(content.tagName))).join('')}</${content.tagName}>`
 }
 
 /** One ordered parent list; measured stacking values are consumed here and then discarded. */
@@ -52,14 +64,14 @@ function orderedChildren(object: HtmlAssemblyObject): HtmlAssemblyObject[] {
       || sourceOrder(a.child.sourcePath, b.child.sourcePath) || a.index - b.index).map(value => value.child)
 }
 
-function backgroundDecorationHtml(object: HtmlAssemblyObject): string {
+function backgroundDecorationHtml(object: HtmlAssemblyObject, serialization: HtmlSerialization): string {
   // Ordinary in-flow block backgrounds paint below in-flow text, even when the
   // block follows that text in DOM order and overlaps it through negative margin.
   return object.decorations.filter(value => !value.interleaves).map(decoration => {
     const frame = decoration.frame
     const content = decoration.content.kind === 'element'
       ? { ...decoration.content, style: measuredFragmentBoxStyle(decoration.content.style) } : decoration.content
-    return `<div style="position:absolute;left:0;top:0;width:${frame.width}px;height:${frame.height}px;transform-origin:0 0;transform:matrix(${frame.transform.join(',')})">${contentHtml(content)}</div>`
+    return `<div style="position:absolute;left:0;top:0;width:${frame.width}px;height:${frame.height}px;transform-origin:0 0;transform:matrix(${frame.transform.join(',')})">${contentHtml(content, serialization)}</div>`
   }).join('')
 }
 
@@ -70,6 +82,7 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
   flow?: boolean
 }): { draft: ContentObjectDraft; drafts?: ContentObjectDraft[]; definitions: ComponentDefinition[]; diagnostics: ContentApplyDiagnostic[] } {
   const definitions = new Map<string, ComponentDefinition>(), diagnostics: ContentApplyDiagnostic[] = []
+  const serialization: HtmlSerialization = { nextPseudo: 0 }
   const isDefaultImplementation = (existing: ComponentDefinition, expected: ComponentDefinition) =>
     existing.role === expected.role && existing.implementation.kind === 'builtin'
       && expected.implementation.kind === 'builtin' && existing.implementation.key === expected.implementation.key
@@ -99,8 +112,8 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
     const measuredStyle = object.kind === 'program' ? object.style : measuredFragmentBoxStyle(object.style)
     const content = object.kind !== 'program' && originalContent?.kind === 'element'
       ? { ...originalContent, style: measuredFragmentBoxStyle(originalContent.style) } : originalContent
-    let html = object.retainedSource?.html ?? object.program?.html ?? (content ? contentHtml(content) : '')
-    const retained = backgroundDecorationHtml(object) + object.sourceRegions.map(region => region.html).join('')
+    let html = object.retainedSource?.html ?? object.program?.html ?? (content ? contentHtml(content, serialization) : '')
+    const retained = backgroundDecorationHtml(object, serialization) + object.sourceRegions.map(region => region.html).join('')
     if (retained) {
       const closing = content?.kind === 'element' && !VOID.has(content.tagName) ? `</${content.tagName}>` : ''
       html = closing && html.endsWith(closing) ? html.slice(0, -closing.length) + retained + closing : html + retained
