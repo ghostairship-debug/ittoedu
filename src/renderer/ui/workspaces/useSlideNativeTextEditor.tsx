@@ -182,7 +182,13 @@ export function useSlideNativeTextEditor(ports: Ports, contextKey: string) {
     onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}
     onCompositionStart={() => { if (rich) { if (latest.current.setComposing) latest.current.setComposing(true); else latest.current.update(latest.current.edit?.data ?? null, true) } }}
     onCompositionEnd={() => { if (rich) { if (latest.current.setComposing) latest.current.setComposing(false); else latest.current.update(latest.current.edit?.data ?? null, false) } }}
-    onKeyDown={event => { if (event.key === 'Escape' && !event.nativeEvent.isComposing && !latest.current.edit?.composing) { event.stopPropagation(); ports.cancel() } }}
+    onKeyDown={event => {
+      if (event.nativeEvent.isComposing || latest.current.edit?.composing) return
+      if (event.key === 'Escape') { event.stopPropagation(); ports.cancel() }
+      else if (rich && event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault(); event.stopPropagation(); reportCommit()
+      }
+    }}
     onBlur={event => {
       const next = event.relatedTarget
       if (next instanceof Node && event.currentTarget.contains(next)) return
