@@ -217,8 +217,10 @@ it.each(['table-data', 'unrelated-layout'] as const)('a chart derived from an ac
     }
     if (turns === 5 && change === 'table-data') {
       const failed = lastTool(request)
-      expect(failed.kind).toBe('error')
-      expect(JSON.stringify(failed)).toMatch(/改变|变化|依据|stale|conflict/i)
+      expect(failed).toMatchObject({ kind: 'error', code: 'read-basis-changed' })
+      expect(failed.data.current).toContainEqual(expect.objectContaining({ exists: true, value: expect.objectContaining({
+        rows: [expect.objectContaining({ cells: [expect.objectContaining({ text: '9' })] }), expect.objectContaining({ cells: [expect.objectContaining({ text: '5' })] })],
+      }) }))
       const current = await h.host.internalAPI.read(h.snapshot.documentId)
       expect(current).toMatchObject({ model: { project: { instances: { chart: { data: h.project.instances.chart.data } } } } })
       yield finish(request, '重新读取当前表格', { name: offered(request, 'project.read'), args: { path: tablePath } }); return
@@ -234,7 +236,8 @@ it.each(['table-data', 'unrelated-layout'] as const)('a chart derived from an ac
   const started = await h.engine.start({ conversationId: 'basis', taskId: 'table-to-chart', instruction: '读取当前表格，根据数值更新旁边已有图表。', selection,
     documents: [{ documentId: h.snapshot.documentId, writable: [{ kind: 'document' }] }], workspaceRoot: h.directory, permission: 'workspace' })
   const ending = h.engine.wait(started.runId)
-  await Promise.race([ready, ending.then(result => { throw new Error(`The provider never reached the pending table-based edit: ${result.failure?.message ?? result.status}`) })])
+  try {
+    await Promise.race([ready, ending.then(result => { throw new Error(`The provider never reached the pending table-based edit: ${result.failure?.message ?? result.status}`) })])
   const before = await h.host.internalAPI.read(h.snapshot.documentId)
   if (before.model.kind !== 'course-v10') throw new Error('V10 required')
   const moved = { ...before.model.project.instances.table.frame!, transform: [1, 0, 0, 1, 77, 93] as [number, number, number, number, number, number] }
@@ -251,4 +254,5 @@ it.each(['table-data', 'unrelated-layout'] as const)('a chart derived from an ac
   expect((current.model.project.instances.chart.data as ChartData).series[0].points.map(point => point.value)).toEqual(change === 'table-data' ? [9, 5] : [2, 5])
   expect(current.undoDepth).toBe(2)
   if (change === 'unrelated-layout') expect(current.model.project.instances.table.frame).toEqual(moved)
+  } finally { release(); await h.engine.stop(started.runId); await ending }
 })
