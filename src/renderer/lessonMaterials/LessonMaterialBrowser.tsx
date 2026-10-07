@@ -65,6 +65,15 @@ export function LessonMaterialBrowser(props: LessonMaterialBrowserProps) {
           if (token === generation.current) setRecords(next)
         })
       }}>添加材料（PDF / DOCX / PPTX / 文本 / 图片，可多选）</button>
+    <button type="button" disabled={busy} onClick={() => {
+      const token = generation.current, currentApi = api.current
+      void run(async () => {
+        const next = await currentApi.list()
+        if (token !== generation.current) return
+        for (const previous of records) if (!next.some(record => record.id === previous.id)) currentApi.onSelect?.(previous, [])
+        setRecords(next); setSelected(null)
+      })
+    }}>刷新材料</button>
     {busy && <p role="status">正在读取材料…</p>}
     {error && <p role="alert">{error}</p>}
     {!records.length && !busy && <p>当前课例尚未添加材料。</p>}

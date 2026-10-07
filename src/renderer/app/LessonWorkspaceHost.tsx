@@ -81,7 +81,7 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
           const record = records.find(item => item.id === choice.id)
           if (!record || record.extractionVersion !== choice.extractionVersion
             || choice.fragmentIds.some(id => !record.fragments.some(fragment => fragment.id === id)))
-            throw new Error('所选材料已更新或不可读取，请重新选择材料片段后发送。')
+            throw new Error('所选材料已更新或不可读取，请刷新材料并重新选择片段后发送。')
         }
         return { target, selections: chosen }
       }}
