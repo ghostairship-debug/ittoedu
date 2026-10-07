@@ -55,9 +55,11 @@ it('cancelled close can reopen A for a real edit while old A authority remains s
     expect(reopened.isError).toBe(false)
     const renewed = (reopened.structuredContent?.result as { data: { target: string; writable: boolean } }).data
     expect(renewed.writable).toBe(true)
-    expect((await client.call('object.update', { project: renewed.target, path: a.path, properties: { opacity: .7 } })).structuredContent)
+    const editedA = await client.call('object.update', { project: renewed.target, path: a.path, properties: { opacity: .7 } })
+    expect(editedA.structuredContent, JSON.stringify(editedA))
       .toMatchObject({ result: { kind: 'document-operation', result: { status: 'applied' } } })
-    expect((await client.call('object.update', { project: targetB, path: b.path, properties: { opacity: .4 } })).structuredContent)
+    const editedB = await client.call('object.update', { project: targetB, path: b.path, properties: { opacity: .4 } })
+    expect(editedB.structuredContent, JSON.stringify(editedB))
       .toMatchObject({ result: { kind: 'document-operation', result: { status: 'applied' } } })
     const currentA = await host.internalAPI.read(a.snapshot.documentId)
     if (currentA.model.kind !== 'course-v10') throw new Error('Expected V10')

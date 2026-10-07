@@ -53,7 +53,7 @@ it('default Office catalog edits through public Gateway and Engine receipts pres
     const start = await engine.start({ conversationId: 'conversation', taskId: 'office-review', instruction: '修改现有 Word 的第一段，保留第二段',
       documents: [], workspaceRoot: workspace, permission: 'workspace', selection })
     const finished = await engine.wait(start.runId)
-    expect(finished.status, JSON.stringify(finished.tools)).toBe('completed')
+    expect(finished.status, JSON.stringify({ status: finished.status, failure: finished.failure, requests: finished.requests, tools: finished.tools })).toBe('completed')
     const stored = await runs.read(start.runId)
     if (!stored) throw new Error('Missing persisted Engine receipt')
     const edit = stored.tools.find(tool => tool.call.name === 'office.edit')!
