@@ -192,6 +192,7 @@ const previewNetworkReleaseSchema = z.object({
 }).strict()
 const componentBootstrapSchema = previewNetworkReleaseSchema.extend({
   html: z.string(), connectOrigins: z.array(z.string().min(1)).optional(), remoteAssetUrls: z.array(z.string().min(1)).optional(),
+  resourceSources: z.array(z.object({ url: z.string().min(1), usage: z.enum(['image', 'media', 'stylesheet', 'font']) }).strict()).optional(),
 }).strict()
 
 const dirtySchema = z.boolean()

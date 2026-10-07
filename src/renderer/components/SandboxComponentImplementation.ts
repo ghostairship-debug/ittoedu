@@ -874,6 +874,7 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
           ? authoredDocumentBootstrap(projected.data as WebRuntimeData, { nonce, instanceId: context.instance.id, bridge, resources, themeCss: snapshots.themeCss?.(), resourceCss: typeof data?.css === 'string' ? data.css : undefined })
           : `<!doctype html><meta charset="utf-8"><style id="component-defaults">html,body,#component-root{width:100%;height:100%;margin:0}</style><div id="component-root"></div><script>${bridge().replace(/<\/script/gi, '<\\/script')}</script>`
         lease = bootstrapApi ? await bootstrapApi.createComponentBootstrap!({ leaseId, html, connectOrigins: [...(snapshots.connectOrigins?.() ?? [])],
+          resourceSources: web && Array.isArray(data?.resourceSources) ? data.resourceSources as ComponentBootstrapInput['resourceSources'] : undefined,
           remoteAssetUrls: Object.values(resources).filter(url => /^https?:/i.test(url)) }) : undefined
         if (signal.aborted || !scope.isActive()) {
           if (lease) await bootstrapApi!.releaseComponentBootstrap!({ leaseId })

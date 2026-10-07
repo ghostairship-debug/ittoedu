@@ -96,6 +96,7 @@ export interface PreviewNetworkPolicyInput {
 }
 
 export interface ComponentBootstrapInput {
+  resourceSources?: readonly { url: string; usage: 'image' | 'media' | 'stylesheet' | 'font' }[]
   leaseId: string
   html: string
   connectOrigins?: string[]
