@@ -61,8 +61,14 @@ it.each([false, true])('recovering a finish-executing crash slice keeps the comm
     const finish = crash.tools.find(tool => tool.call.name === 'task.finish')!
     finish.state = 'executing'; delete finish.result; delete finish.receiptTime
     crash.messages = crash.messages.filter(message => !(message.role === 'tool' && message.tool_call_id === finish.providerCallId))
-    if (unknownWrite) crash.tools.splice(crash.tools.indexOf(finish), 0, { callId: 'unknown-second-body', providerCallId: 'unknown-second-body', requestId: crash.requests[0].requestId,
-      state: 'executing', call: { name: 'text.replace', input: { content: '结果未知的另一次写入' } }, effectTargets: structuredClone(crash.tools[0].effectTargets) })
+    if (unknownWrite) {
+      crash.tools.splice(crash.tools.indexOf(finish), 0, { callId: 'unknown-second-body', providerCallId: 'unknown-second-body', requestId: crash.requests[0].requestId,
+        state: 'executing', call: { name: 'text.replace', input: { content: '结果未知的另一次写入' } }, effectTargets: structuredClone(crash.tools[0].effectTargets) })
+      const assistant = crash.messages.find(message => message.role === 'assistant' && message.tool_calls?.some(call => call.id === finish.providerCallId))
+      if (!assistant || assistant.role !== 'assistant' || !assistant.tool_calls) throw new Error('Actual paired tool-call response required')
+      assistant.tool_calls.splice(assistant.tool_calls.findIndex(call => call.id === finish.providerCallId), 0,
+        { id: 'unknown-second-body', type: 'function', function: { name: 'text.replace', arguments: JSON.stringify({ content: '结果未知的另一次写入' }) } })
+    }
     // Legal persisted crash slice: the actual writer receipt exists; finish has no business effect and no returned ACK.
     // The optional second executing write has no receipt, so its outcome must remain unknown. This is not a power-loss hardware test.
     await runs.save(crash)
@@ -71,7 +77,8 @@ it.each([false, true])('recovering a finish-executing crash slice keeps the comm
     expect(attemptedWrites).toBe(1)
     expect(await host.internalAPI.read(initial.documentId)).toMatchObject({ undoDepth: 1 })
     const recovered = (await runs.read(crash.runId))!
-    expect(recovered.tools.find(tool => tool.call.name === 'task.finish')?.result).not.toMatchObject({ kind: 'error', code: 'tool-outcome-unknown' })
+    const recoveredFinish = recovered.tools.find(tool => tool.call.name === 'task.finish')?.result
+    expect(recoveredFinish?.kind === 'error' && recoveredFinish.code === 'tool-outcome-unknown').toBe(false)
     phase = 'continue'
     const resumed = await fresh.resume(crash.runId, input); resumedId = resumed.runId
     const ended = await fresh.wait(resumed.runId)
