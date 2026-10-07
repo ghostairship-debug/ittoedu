@@ -1,3 +1,4 @@
+/** @deprecated Historical V9/CLI consumer only; current production uses Project V10 and the canonical Gateway. */
 import type { LocalAgentEvent } from './localAgentContract'
 import { GENERATION_OPEN, GENERATION_CLOSE, GENERATION_RESULT_OPEN, GENERATION_RESULT_CLOSE } from './generationResult'
 

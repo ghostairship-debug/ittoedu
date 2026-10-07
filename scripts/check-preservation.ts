@@ -638,7 +638,13 @@ function parseCliOptions(argv: readonly string[]): CliOptions {
 }
 
 async function main(): Promise<void> {
-  const options = parseCliOptions(process.argv.slice(2))
+  const args = process.argv.slice(2)
+  if (!args.includes('--historical')) {
+    console.log('历史 1.1 保全检查未执行；它不表示当前 V10 产品通过。维护原历史证据时显式传 --historical；不会默认执行旧自动化矩阵。')
+    return
+  }
+  args.splice(args.indexOf('--historical'), 1)
+  const options = parseCliOptions(args)
   const result = await checkPreservation({
     projectRoot: options.projectRoot,
     mapPath: options.mapPath,
@@ -650,7 +656,7 @@ async function main(): Promise<void> {
     ? `；Owner 观察未签署：${result.ownerObservationRequired.join(', ')}`
     : ''
   console.log(
-    `1.1 保全检查通过：candidate ${result.candidate}，${result.rows.filter((row) => row.status === 'pass').length} 个 automated pass${observation}。自动化结果不是 Owner accepted。`,
+    `历史 1.1 保全检查通过（不证明当前 V10 产品）：candidate ${result.candidate}，${result.rows.filter((row) => row.status === 'pass').length} 个 automated pass${observation}。自动化结果不是 Owner accepted。`,
   )
 }
 

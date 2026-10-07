@@ -1,3 +1,4 @@
+/** @deprecated Historical V9/CLI consumer only; current production uses Project V10 and the canonical Gateway. */
 import type { DocumentHostAPI } from '../../shared/workbench/desktop'
 import type { DocumentModel, DocumentOperationResult, DocumentSnapshot } from '../../shared/workbench/document'
 import type { CompositionContentEdit } from '../../shared/composition/edit'

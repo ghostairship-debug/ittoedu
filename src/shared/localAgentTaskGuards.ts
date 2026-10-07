@@ -1,3 +1,4 @@
+/** @deprecated Historical V9/CLI consumer only; current production uses Project V10 and the canonical Gateway. */
 import { workspaceIdentityKey } from './workspaceIdentity'
 import { generationRequestSchema, type GenerationRequest, type GenerationFailure } from './generationContract'
 import { aiHostResultSchema, aiObservationSchema, aiProposalSchema, aiTaskSchema, type AiHostResult, type AiObservation, type AiProposal, type AiTask } from './localAgentTaskContract'

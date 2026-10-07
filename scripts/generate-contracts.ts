@@ -3,9 +3,9 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
-import { componentManifestSchema } from '../src/shared/contracts/component-v4/schema'
-import { courseProjectDocumentSchema } from '../src/shared/contracts/course-project-v9/schema'
-import { publishedCourseV2Schema } from '../src/shared/contracts/published-course-v2/schema'
+import { componentDefinitionSchema, courseProjectV10Schema } from '../src/shared/contracts/component-platform/schema'
+import { publishedCourseV3Schema } from '../src/shared/contracts/component-platform/published'
+import { componentCatalogSchema } from '../src/shared/componentCatalog'
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
 const defaultProjectRoot = path.resolve(scriptDirectory, '..')
@@ -28,46 +28,58 @@ export function generateContractArtifacts(
 ): ContractGenerationResult {
   const files = new Map<string, string>()
 
-  const courseProjectSchemaJson = z.toJSONSchema(courseProjectDocumentSchema, {
+  const courseProjectSchemaJson = z.toJSONSchema(courseProjectV10Schema, {
     unrepresentable: 'any',
   })
-  const publishedCourseSchemaJson = z.toJSONSchema(publishedCourseV2Schema, {
+  const publishedCourseSchemaJson = z.toJSONSchema(publishedCourseV3Schema, {
     unrepresentable: 'any',
   })
-  const componentManifestSchemaJson = z.toJSONSchema(componentManifestSchema, {
+  const componentDefinitionSchemaJson = z.toJSONSchema(componentDefinitionSchema, {
     unrepresentable: 'any',
   })
 
   const courseProjectFormatted = `${JSON.stringify(courseProjectSchemaJson, null, 2)}\n`
   const publishedCourseFormatted = `${JSON.stringify(publishedCourseSchemaJson, null, 2)}\n`
-  const componentManifestFormatted = `${JSON.stringify(componentManifestSchemaJson, null, 2)}\n`
+  const componentDefinitionFormatted = `${JSON.stringify(componentDefinitionSchemaJson, null, 2)}\n`
+  const componentCatalogFormatted = `${JSON.stringify(z.toJSONSchema(componentCatalogSchema, { unrepresentable: 'any' }), null, 2)}\n`
 
-  files.set('course-project-v9.schema.json', courseProjectFormatted)
-  files.set('published-course-v2.schema.json', publishedCourseFormatted)
-  files.set('component-manifest.schema.json', componentManifestFormatted)
+  files.set('course-project-v10.schema.json', courseProjectFormatted)
+  files.set('published-course-v3.schema.json', publishedCourseFormatted)
+  files.set('component-definition.schema.json', componentDefinitionFormatted)
+  files.set('component-catalog.schema.json', componentCatalogFormatted)
 
   const manifest = {
     manifestVersion: 1,
     generator: 'scripts/generate-contracts.ts',
     generationCommand: 'npm run generate:contracts',
+    protocols: { project: 10, publishedCourse: 3, componentRuntime: 5 },
+    // JSON Schema describes wire structure. Source refinements and runtime behavior
+    // remain authoritative in the production parsers and ComponentRuntimeImplementation.
+    runtimeSourceOfTruth: 'src/shared/contracts/component-platform/runtime.ts',
     contracts: [
       {
-        name: 'courseProjectDocumentSchema',
-        file: 'course-project-v9.schema.json',
-        sourceOfTruth: 'src/shared/contracts/course-project-v9/schema.ts',
+        name: 'courseProjectV10Schema',
+        file: 'course-project-v10.schema.json',
+        sourceOfTruth: 'src/shared/contracts/component-platform/schema.ts',
         sha256: sha256(courseProjectFormatted),
       },
       {
-        name: 'publishedCourseV2Schema',
-        file: 'published-course-v2.schema.json',
-        sourceOfTruth: 'src/shared/contracts/published-course-v2/schema.ts',
+        name: 'publishedCourseV3Schema',
+        file: 'published-course-v3.schema.json',
+        sourceOfTruth: 'src/shared/contracts/component-platform/published.ts',
         sha256: sha256(publishedCourseFormatted),
       },
       {
-        name: 'componentManifestSchema',
-        file: 'component-manifest.schema.json',
-        sourceOfTruth: 'src/shared/contracts/component-v4/schema.ts',
-        sha256: sha256(componentManifestFormatted),
+        name: 'componentDefinitionSchema',
+        file: 'component-definition.schema.json',
+        sourceOfTruth: 'src/shared/contracts/component-platform/schema.ts',
+        sha256: sha256(componentDefinitionFormatted),
+      },
+      {
+        name: 'componentCatalogSchema',
+        file: 'component-catalog.schema.json',
+        sourceOfTruth: 'src/shared/componentCatalog.ts',
+        sha256: sha256(componentCatalogFormatted),
       },
     ],
   }

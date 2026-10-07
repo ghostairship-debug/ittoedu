@@ -1,3 +1,4 @@
+/** @deprecated Historical V9/CLI consumer only; current production uses Project V10 and the canonical Gateway. */
 import { z } from 'zod'
 import { resolveEffectiveLayerTarget } from '../../../core/tools/layerCommands'
 import { patchEffectiveLayerPropertiesAtTarget } from '../../course/effectiveLayerCommands'
@@ -7,7 +8,7 @@ import { updateFlowDocumentComponentBlock } from '../../course/flowSharedAuthori
 import { resolveAuthoringToolScope } from './authoringToolScope'
 import { admitDynamicCandidate, verifyDynamicCandidateBehavior } from './dynamicCandidateAdmission'
 import type { AuthoringToolDefinition } from './executeAuthoringTool'
-import { layerItemPropertiesInputSchema } from '../../../core/tools/toolSchemas'
+import { layerItemPropertiesInputSchema } from './historicalSchemas'
 import { projectEffectiveLayers } from '../../course/effectiveLayerProjection'
 import { applyComponentVariant, getComponentPropValue, mergeComponentProps, resolveComponentEditorProperties } from '../../../shared/componentProps'
 import type { ComponentManifest } from '../../../shared/componentTypes'

@@ -1,3 +1,4 @@
+/** @deprecated Historical V9/CLI consumer only; current production uses Project V10 and the canonical Gateway. */
 import type { AssetSource } from '../../shared/contracts/media-v1/types'
 import type { DocumentModel, DocumentSnapshot } from '../../shared/workbench/document'
 import type { ToolAdvisory, ToolResult } from '../../shared/workbench/tools'
@@ -196,7 +197,7 @@ export class ProjectFileCoordinator {
           ...(end < file.content.length ? { nextOffset: end } : {}) } }
       }
       if (name === 'project.write' || name === 'project.edit') {
-        const input = name === 'project.write' ? projectFileToolSchemas[name].parse(raw) : projectFileToolSchemas[name].parse(raw)
+        const input = projectFileToolSchemas[name].parse(raw)
         const snapshot = await this.host.document(runId, input.project, 'write')
         const current = readFile(snapshot.model, input.path)
         if ('from' in input) {

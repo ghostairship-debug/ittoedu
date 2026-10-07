@@ -634,11 +634,7 @@ export function collectCourseSlideLocationVisualPreflightItems(input: {
     locationId: input.locationId,
     stateId: initialStateId,
   })
-  const visibleContent = initialComposition.entries.some((entry) => (
-    entry.mounted && !(
-      false
-    )
-  ))
+  const visibleContent = initialComposition.entries.some((entry) => entry.mounted)
   if (!visibleContent && !initialComposition.background?.assetId) {
     add({
       severity: 'warning',

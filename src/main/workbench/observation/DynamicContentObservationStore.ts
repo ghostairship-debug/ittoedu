@@ -1,3 +1,4 @@
+/** @deprecated Historical V9/CLI consumer only; current production uses Project V10 and the canonical Gateway. */
 import { lightEditTextOverrideSchema } from '../../../shared/contracts/runtime/lightEdit'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import type { DynamicContentObservedTarget, DynamicContentTargetsPublication } from '../../../shared/workbench/dynamicContentTargets'

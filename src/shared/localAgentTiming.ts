@@ -1,3 +1,4 @@
+/** @deprecated Historical V9/CLI consumer only; current production uses Project V10 and the canonical Gateway. */
 import { MAX_AI_TASK_TIMING_ENTRIES, type AiTask, type AiTaskTimingStage } from './localAgentTaskContract'
 
 type TimingIdentity = Pick<AiTask, 'taskId' | 'epoch' | 'observationId'>
