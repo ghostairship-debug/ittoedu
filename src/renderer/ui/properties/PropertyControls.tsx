@@ -74,11 +74,11 @@ export function discardPropertiesDrafts(documentId: string): void {
   notifyPropertyDrafts()
 }
 /** Recovery restores input only. It never replays an authoring command. */
-export function restorePropertiesDrafts(documentId: string, records: readonly PropertyDraftRecovery[]): void {
+export function restorePropertiesDrafts(documentId: string, records: readonly PropertyDraftRecovery[], epoch?: string): void {
   for (const record of records) {
     const parts = bindingParts(record.bindingKey)
     if (!parts) continue
-    const draft = { ...record, bindingKey: JSON.stringify([documentId, ...parts.slice(1)]) }
+    const draft = { ...record, bindingKey: JSON.stringify([documentId, epoch ?? parts[1], ...parts.slice(2)]) }
     const existing = [...pendingPropertyDrafts].find(entry => entry.read() && sameDraftTarget(entry.read()!, draft))
     if (existing) {
       if (!existing.dirty()) existing.restore?.({ ...draft, bindingKey: existing.read()!.bindingKey })
