@@ -70,7 +70,7 @@ async function painted(page: Page, frame: FrameLocator, iframe: Locator, directo
     writeFileSync(join(directory, `${label}-${name}.png`), png)
     const metadata = await sharp(png).metadata()
     sample.png = { width: metadata.width, height: metadata.height, format: metadata.format }
-    sample.after = await measure(); saveGeometry()
+    saveGeometry()
     return png
   }
   const atomic = await capture('.atomic', 'atomic')
@@ -123,9 +123,6 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
     const source = page.frameLocator('iframe[title="HTML 预览"]')
     const sourceIframe = page.locator('iframe[title="HTML 预览"]')
     facts.sourcePaint = await painted(page, source, sourceIframe, directory, 'source')
-    const sourcePng = await sourceIframe.screenshot({ scale: 'css', path: join(directory, 'source-outer.png') })
-    facts.sourceOuter = { geometry: await outerGeometry(sourceIframe), png: await sharp(sourcePng).metadata() }
-    await info.attach('Original source paint', { body: sourcePng, contentType: 'image/png' })
     const opened = await openSelectionFile(page, workspace, name)
     const editor = page.locator('.course-editor-frame:visible')
     await editor.locator('.course-light-tools').getByRole('button', { name: '插入', exact: true }).click()
@@ -159,11 +156,6 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
     await expect(player.locator('#answer summary')).toBeVisible()
     const sourceFacts = facts.sourcePaint as Awaited<ReturnType<typeof painted>>, playerFacts = await painted(page, player, frames, directory, 'player')
     facts.playerPaint = playerFacts
-    const playerPng = await frames.screenshot({ scale: 'css', path: join(directory, 'player-outer.png') })
-    facts.playerOuter = { geometry: await outerGeometry(frames), png: await sharp(playerPng).metadata() }
-    await info.attach('Imported actual Player paint before pixel assertions', { body: playerPng, contentType: 'image/png' })
-    const playerHostPng = await host.screenshot({ scale: 'css', path: join(directory, 'player-whole-host.png') })
-    await info.attach('Whole Player host before pixel assertions', { body: playerHostPng, contentType: 'image/png' })
     near(sourceFacts.red, [247, 127, 127]); near(playerFacts.red, sourceFacts.red)
     near(sourceFacts.blue, [127, 127, 247]); near(playerFacts.blue, sourceFacts.blue)
     near(sourceFacts.clipCorner, [255, 255, 255]); near(playerFacts.clipCorner, sourceFacts.clipCorner)
@@ -210,14 +202,12 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
       const interaction: Record<string, unknown> = { outer, inner, mapped, point, topHits, childHits }
       facts[`interaction-${step}`] = interaction
       writeFileSync(join(directory, 'interaction-geometry.json'), JSON.stringify(facts, null, 2))
-      await page.screenshot({ path: join(directory, `interaction-${step}-before.png`), scale: 'css' })
       await page.mouse.click(point.x, point.y)
       interaction.after = await summary.evaluate(element => ({ rect: element.getBoundingClientRect().toJSON(), scrollX, scrollY,
         open: (element.parentElement as HTMLDetailsElement).open, activeTag: document.activeElement?.tagName,
         events: (window as typeof window & { __t08PointerEvidence?: unknown[] }).__t08PointerEvidence }))
       interaction.topEvents = await page.evaluate(() => (window as typeof window & { __t08PointerEvidence?: unknown[] }).__t08PointerEvidence)
       writeFileSync(join(directory, 'interaction-geometry.json'), JSON.stringify(facts, null, 2))
-      await page.screenshot({ path: join(directory, `interaction-${step}-after.png`), scale: 'css' })
     }
     await clickSummary('open')
     await expect(player.locator('#answer p')).toBeVisible()
@@ -233,13 +223,16 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
     await nested.locator('#nested-answer summary').evaluate(installPointerEvidence)
     await clickSummary('nested-child', nested, nestedIframe, '#nested-answer summary')
     await expect(nested.locator('#nested-answer p')).toBeVisible()
+    await page.screenshot({ path: join(directory, 'nested-child-open.png'), scale: 'css' })
     facts.nestedChildInteraction = { realGroupChildOpened: true }
     const afterInteraction = await readSelectionDocument(page, opened.documentId)
     expect(afterInteraction).toMatchObject({ revision: edited.revision, undoDepth: edited.undoDepth })
     expect(afterInteraction.model).toEqual(edited.model)
+    facts.noSyntheticHistory = { revision: afterInteraction.revision, undoDepth: afterInteraction.undoDepth, modelUnchanged: true }
     await overlay.getByRole('button', { name: '关闭预览', exact: true }).click()
     await editor.locator('.course-light-tools').getByRole('button', { name: '保存', exact: true }).click()
     await expect.poll(async () => (await readSelectionDocument(page, opened.documentId)).dirty).toBe(false)
+    facts.saved = { dirty: false }
   } finally {
     writeFileSync(join(directory, 'evidence.json'), JSON.stringify(facts, null, 2) + '\n')
     await info.attach('One source to Player paint facts', { path: join(directory, 'evidence.json'), contentType: 'application/json' })
