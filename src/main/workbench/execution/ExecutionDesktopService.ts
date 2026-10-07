@@ -29,7 +29,7 @@ import { DesktopOperationError } from '../../errors'
 import { DEFAULT_PERMISSION_MODE } from '../../../shared/workbench/executionPermission'
 import { executionInputError } from './executionInputErrors'
 import { ExecutionChangeReviewService } from '../review/ExecutionChangeReviewService'
-import { HostArtifactDeliveryService } from './HostArtifactDeliveryService'
+import type { HostArtifactDeliveryService } from './HostArtifactDeliveryService'
 import type { HtmlActionService } from '../observation/HtmlActionService'
 import { forkDraftFromCheckpoint, indexUserCheckpoint } from './CheckpointForkService'
 import { fileCreated } from './executionOutcome'
@@ -129,9 +129,7 @@ export class ExecutionDesktopService {
     this.submissions = new ExecutionSubmissionStore(path.join(options.directory, 'submissions'))
     this.edits = new EditSessionService(options.documents.registry, options.documents.tools)
     this.changeReview = new ExecutionChangeReviewService(options.documents, path.join(options.directory, 'change-review'))
-    this.artifacts = new HostArtifactDeliveryService({ journalDirectory: path.join(options.directory, 'artifact-deliveries'),
-      withFileOperation: work => options.documents.fileCoordinator.withFileOperation(work),
-      assertTarget: filename => options.documents.assertFileAvailable(filename) })
+    this.artifacts = options.documents.artifactDeliveries
     this.attachments = options.attachments ?? new AttachmentService({ directory: path.join(options.directory, 'attachments') })
     const chat = new OpenAIChatProvider({ credentialResolver: connection => options.settings.resolveCredential(connection), fetch: options.fetch,
       onTransportDiagnostic: diagnostic => diagnosticLog.append({ source: 'main', message: 'OpenAI Chat transport failure', details: {

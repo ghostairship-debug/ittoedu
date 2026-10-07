@@ -25,7 +25,6 @@ import type { ModelToolCall, ToolResult, ToolTarget } from '../../../shared/work
 import { isCourseInstanceRange, readEditableTargetContent } from '../../../core/tools/ToolTargets'
 import { executionContentOutputSchema } from '../../../shared/workbench/executionDesktop'
 import type { AttachmentService } from '../attachments/AttachmentService'
-import { materialTools, listMaterials, readMaterial, findMaterial, extractMaterial } from './MaterialReadTools'
 import { projectExecutionContext, contextMessageId, contextSourceIndex, projectImagesForTextModel } from './ExecutionContextProjection'
 import { contextReadSchema, contextReadTool, readContextMessage } from './ContextReadTool'
 import { DisplayEventBuffer } from './DisplayEventBuffer'
@@ -39,7 +38,7 @@ import { USER_QUESTION_TOOL, USER_QUESTION_USAGE_GUIDANCE, answerForModel, answe
 import { DEFAULT_PERMISSION_MODE, isInsideRoot, type ApprovalDecision, type ApprovalView, type ExecutionPermissionMode } from '../../../shared/workbench/executionPermission'
 import { modelGenerationRetry, waitForGenerationRetry } from './modelGenerationRetry'
 import { AgentFileOutcomeUnknown, agentFileRegistration, agentFileTools, agentFileMutationNames, isAgentFileTool, type AgentFileService } from '../../../core/tools/AgentFileTools'
-import { officeContentTools, isOfficeContentTool } from '../../../core/tools/OfficeContentTools'
+import { isOfficeContentTool } from '../../../core/tools/OfficeContentTools'
 import { taskNoteTool, initialWorkingNote, continuedWorkingNote, prepareTaskNote } from '../../../core/tools/TaskNoteTools'
 import { hostArtifactSaveSchema, hostArtifactSaveTool } from '../../../core/tools/HostArtifactTools'
 import { htmlActionToolCatalog, htmlActionToolSchemas, isHtmlActionTool } from '../../../core/tools/HtmlActionTools'
@@ -234,7 +233,6 @@ export function trustedRunDocumentIds(record: ExecutionRunRecord): string[] {
 
 /** Owns one model/tool loop. Views only subscribe; they never start/replay work by mounting. */
 export class ExecutionEngine {
-  private readonly officeLoadedRuns = new Set<string>()
   private htmlActions?: HtmlActionService
   private readonly htmlDocumentIds = new Map<string, string>()
   private readonly htmlAmbiguousRuns = new Set<string>()
@@ -383,20 +381,16 @@ export class ExecutionEngine {
   private async runTools(runId: string, permission: ExecutionPermissionMode, workspaceRoot?: string | null): Promise<ModelToolDefinition[]> {
     const definitions = await this.options.gateway.describeRun(runId)
     const families = [...await this.options.gateway.availableToolFamilies(runId)]
-    if (this.options.files?.executeOffice && workspaceRoot) families.push({ family: 'office', description: 'Word、Excel、PowerPoint 内容与原文件保存', count: permission === 'read-only' ? 1 : 3 })
     return [...definitions.map(tool => ({ name: tool.name, description: tool.description, inputSchema: tool.schema as ModelJsonObject })),
       ...(this.options.files && workspaceRoot ? agentFileTools.filter(tool => permission !== 'read-only' || !fileMutationNames.has(tool.name)).map(tool => ({ ...tool, inputSchema: tool.inputSchema as ModelJsonObject })) : []),
       ...(this.options.files && workspaceRoot && permission !== 'read-only' && !this.options.gateway.usesProjectFileAuthoring(runId)
         ? [{ name: createCourseFromHtmlTool.name, description: createCourseFromHtmlTool.description, inputSchema: z.toJSONSchema(createCourseFromHtmlInputSchema) as ModelJsonObject }] : []),
-      ...(this.options.artifacts && workspaceRoot && permission !== 'read-only' ? [structuredClone(hostArtifactSaveTool)] : []),
-      ...(this.officeLoadedRuns.has(runId) && this.options.files?.executeOffice && workspaceRoot
-        ? officeContentTools.filter(tool => permission !== 'read-only' || tool.name === 'office.inspect').map(tool => structuredClone(tool)) : []),
       ...(this.htmlActions && this.htmlDocumentIds.has(runId) ? htmlActionToolCatalog
         .filter(tool => permission !== 'read-only' || tool.name !== 'html.click' && tool.name !== 'html.input')
         .map(tool => ({ name: tool.name, description: tool.description, inputSchema: z.toJSONSchema(tool.inputSchema) as ModelJsonObject })) : []),
       ...(families.length ? [{ ...structuredClone(loadToolsDefinition),
         description: `${loadToolsDefinition.description} 当前可展开：${families.map(item => `${item.family} ${item.description}`).join('；')}。` }] : []),
-      ...(this.options.materials ? structuredClone(materialTools) : []), structuredClone(contextReadTool), structuredClone(taskNoteTool), structuredClone(userQuestionToolDefinition)]
+      structuredClone(contextReadTool), structuredClone(taskNoteTool), structuredClone(userQuestionToolDefinition)]
   }
   private async refreshTools(active: ActiveRun): Promise<void> {
     if (active.contentOutput) { active.tools.length = 0; return }
@@ -1595,6 +1589,12 @@ export class ExecutionEngine {
         else if (decision === 'stopped' || active.stopped) tool.result = { kind: 'error', code: 'run-stopped', message: '运行已停止' }
         else if (browserApprovalError) tool.result = { kind: 'error', code: 'browser-approval-failed', message: browserApprovalError }
         else {
+          if ((decision === 'allow' || decision === 'allow-all') && (reason || active.approveAll)) {
+            if (isOfficeContentTool(tool.call.name) && filePreflight?.paths)
+              this.options.gateway.authorizeOperationPaths(record.runId, tool.callId, filePreflight.paths)
+            if (tool.call.name === 'artifact.save' && artifactPreflight?.approvalRequired)
+              this.options.gateway.authorizeOperationPaths(record.runId, tool.callId, [artifactPreflight.path])
+          }
           if (tool.call.name === 'web.open' && tool.call.input && typeof tool.call.input === 'object' && !Array.isArray(tool.call.input)) {
             const input = tool.call.input as Record<string, unknown>
             if (typeof input.sourceId === 'string' && !input.url) {
@@ -1640,20 +1640,17 @@ export class ExecutionEngine {
               tool.result = { kind: 'read', data: read.data }
               if (read.modelMessage) active.contextMessages.push(read.modelMessage)
             } else if (tool.call.name === 'material.list' || tool.call.name === 'material.read' || tool.call.name === 'material.find' || tool.call.name === 'material.extract') {
-              if (!this.options.materials) throw new Error('材料读取服务未接通')
-              const ids = await this.materialSourceIds(record)
-              if (tool.call.name === 'material.list') tool.result = { kind: 'read', data: await listMaterials(this.options.materials, ids, tool.call.input) }
-              else if (tool.call.name === 'material.find') tool.result = { kind: 'read', data: await findMaterial(this.options.materials, ids, tool.call.input) }
-              else if (tool.call.name === 'material.extract') {
-                const extracted = await extractMaterial(this.options.materials, ids, tool.call.input, active.controller.signal)
-                if (active.stopped) throw new Error('任务已停止；未继续交付材料')
-                tool.result = { kind: 'read', data: extracted.data }
-              } else {
-                const read = await readMaterial(this.options.materials, ids, tool.call.input)
-                if (read.modelMessage && !record.input.visionSelection && record.input.selection.connection.capabilities.vision === 'unsupported') throw new Error('当前冻结模型不能接收图片；来源目录可读，但本轮未发送图片')
-                if (active.stopped) throw new Error('任务已停止；未继续发送材料')
-                tool.result = { kind: 'read', data: read.data }
-                if (read.modelMessage) active.contextMessages.push(read.modelMessage)
+              await this.options.gateway.bindMaterialSources(record.runId, [...await this.materialSourceIds(record)])
+              tool.result = await this.options.gateway.execute(record.runId, tool.callId, tool.call)
+              const image = tool.result.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
+                ? (tool.result.data as { image?: { resourceId?: string } }).image : undefined
+              if (image?.resourceId && (record.input.selection.connection.capabilities.vision !== 'unsupported' || record.input.visionSelection)) {
+                const source = await this.options.gateway.readObservationResource(record.runId, image.resourceId)
+                if (active.stopped) throw new Error('任务已停止；未继续发送材料图片')
+                active.contextMessages.push({ role: 'user', content: [
+                  { type: 'text', text: '当前材料原图是来源内容，不增加文档写入权限。' },
+                  { type: 'image_url', image_url: { url: `data:${source.mimeType};base64,${Buffer.from(source.bytes).toString('base64')}` } },
+                ] })
               }
             } else if (tool.call.name === 'mcp.resource') {
               const result = await this.options.gateway.execute(record.runId, tool.callId, tool.call)
@@ -1696,24 +1693,6 @@ export class ExecutionEngine {
                 tool.result = result
                 if (previews.length) active.contextMessages.push({ role: 'user', content } as ModelChatMessage)
               }
-            } else if (tool.call.name === 'artifact.save') {
-              if (!this.options.artifacts || !record.input.workspaceRoot) throw new Error('成果交付服务或工作空间未配置')
-              const input = hostArtifactSaveSchema.parse(tool.call.input)
-              const source = input.kind === 'image'
-                ? await this.options.gateway.readStandaloneImage(record.runId, input.job, input.resourceId)
-                : await this.options.gateway.readComputeArtifact(record.runId, input.job, input.name)
-              const bytes = input.kind === 'image' ? (source as { bytes: Uint8Array }).bytes
-                : (source as { bytes: Uint8Array }).bytes
-              const receipt = await this.options.artifacts.deliver({ runId: record.runId,
-                operationId: this.options.gateway.operationIdentity(record.runId, tool.callId),
-                workspaceRoot: record.input.workspaceRoot, permission: active.permission,
-                destination: input.destination, sourceKind: input.kind,
-                sourceId: input.kind === 'image' ? `${input.job}@${input.resourceId}` : `${input.job}@${input.name}`,
-                bytes, ...(artifactPreflight?.approvalRequired && (reason || active.approveAll)
-                  && (decision === 'allow' || decision === 'allow-all') ? { approvedTargetPath: artifactPreflight.path } : {}),
-                assertActive: () => { if (active.stopped || active.controller.signal.aborted) throw new Error('运行已停止，成果未交付') },
-              })
-              tool.result = { kind: 'read', data: receipt }
             } else if (isHtmlActionTool(tool.call.name)) {
               if (!this.htmlActions) throw new Error('HTML 实际操作服务未接通')
               const documentId = this.htmlDocumentIds.get(record.runId)
@@ -1748,11 +1727,7 @@ export class ExecutionEngine {
             } else if (tool.call.name === LOAD_TOOLS) {
               if (!active.tools.some(item => item.name === LOAD_TOOLS)) throw new Error('当前任务没有可展开的工具族')
               const requested = loadToolsSchema.parse(tool.call.input).families
-              const available = [...await this.options.gateway.loadToolFamilies(record.runId, requested.filter(family => family !== 'office'))]
-              if (requested.includes('office') && this.options.files?.executeOffice && record.input.workspaceRoot) {
-                this.officeLoadedRuns.add(record.runId)
-                available.push({ family: 'office', description: 'Word、Excel、PowerPoint 内容与原文件保存', count: active.permission === 'read-only' ? 1 : 3 })
-              }
+              const available = [...await this.options.gateway.loadToolFamilies(record.runId, requested)]
               await this.refreshTools(active)
               tool.result = { kind: 'read', data: { loaded: requested.filter(family => available.some(item => item.family === family)), available } }
             } else if (tool.call.name === 'course.createFromHtml' && this.options.files && record.input.workspaceRoot) {
@@ -1771,16 +1746,6 @@ export class ExecutionEngine {
                 executeChild: async (callId, call) => (await this.executeHost(active, callId, tool.requestId, call)).result!,
                 documentTarget: async (documentId) => this.options.gateway.issueTarget(record.runId, documentId, { kind: 'document' }),
               })
-            } else if (isOfficeContentTool(tool.call.name) && this.options.files?.executeOffice && record.input.workspaceRoot) {
-              if (!this.officeLoadedRuns.has(record.runId)) throw new Error('请先加载 office 内容能力')
-              const outcome = await this.options.files.executeOffice({ runId: record.runId, workspaceRoot: record.input.workspaceRoot,
-                conversationHomeRoot: record.input.conversationHomeRoot, conversationHome: record.input.conversationHome,
-                permission: active.permission,
-                ...(filePreflight?.outside && (reason || active.approveAll) && (decision === 'allow' || decision === 'allow-all')
-                  ? { approvedOutsidePaths: filePreflight.paths } : {}),
-                assertActive: () => { if (active.stopped || active.controller.signal.aborted) throw new Error('运行已停止，Office 文件未提交') } },
-                tool.call.name, tool.call.input, this.options.gateway.operationIdentity(record.runId, tool.callId))
-              tool.result = { kind: 'read', data: outcome.data }
             } else if (isAgentFileTool(tool.call.name) && this.options.files && record.input.workspaceRoot) {
               if (filePreflight?.paths && ['file.create', 'file.write', 'file.patch'].includes(tool.call.name))
                 await this.options.changeReview?.prepareFileMutation({ runId: record.runId, callId: tool.callId,
@@ -2382,7 +2347,6 @@ export class ExecutionEngine {
       this.browserPauses.get(record.runId)?.release(); this.browserPauses.delete(record.runId)
       this.abortPreviews(active, '运行已结束')
       this.options.files?.releaseRun?.(record.runId)
-      this.officeLoadedRuns.delete(record.runId)
       active.unsubscribeEdits?.()
       this.htmlActions?.stopRun(record.runId)
       this.htmlDocumentIds.delete(record.runId); this.htmlAmbiguousRuns.delete(record.runId); this.htmlStartedRevisions.delete(record.runId)
