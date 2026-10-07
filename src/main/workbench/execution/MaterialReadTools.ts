@@ -1,24 +1,11 @@
 import { z } from 'zod'
-import type { ModelChatMessage, ModelToolDefinition } from '../../../shared/workbench/modelProvider'
+import type { ModelChatMessage } from '../../../shared/workbench/modelProvider'
 import type { AttachmentService } from '../attachments/AttachmentService'
 import type { AttachmentSnapshot, AttachmentRepresentation } from '../../../shared/workbench/attachments'
 
-const identity = { attachmentId: z.uuid() }
-export const materialListSchema = z.object({ attachmentId: z.uuid().optional(), offset: z.number().int().nonnegative().default(0), limit: z.number().int().min(1).max(100).default(30) }).strict()
-export const materialReadSchema = z.object({ ...identity, representationId: z.string().min(1),
-  offset: z.number().int().nonnegative().default(0), maxChars: z.number().int().min(1).default(6000) }).strict()
-export const materialFindSchema = z.object({ ...identity, query: z.string().min(1),
-  cursor: z.string().min(1).optional(), limit: z.number().int().min(1).max(100).default(20) }).strict()
-export const materialExtractSchema = z.object({ ...identity, pages: z.object({ from: z.number().int().positive(), to: z.number().int().positive() }).strict().optional(), images: z.enum(['auto', 'all']).default('auto') }).strict()
-export const materialSchemas = { 'material.list': materialListSchema, 'material.read': materialReadSchema,
-  'material.find': materialFindSchema, 'material.extract': materialExtractSchema } as const
-export type MaterialToolName = keyof typeof materialSchemas
-export const materialTools: ModelToolDefinition[] = [
-  { name: 'material.list', description: '列出当前显式材料或宿主冻结历史材料的不可变来源、分块/实际页码、可用文本/原图和缺口；只列目录不代表正文已读。attachmentId 省略时列出授权材料，指定时分页列出其表示。', inputSchema: z.toJSONSchema(materialListSchema) as ModelToolDefinition['inputSchema'] },
-  { name: 'material.read', description: '按 material.list 给出的 attachmentId/representationId 回读已有提取块或原图。返回原件/表示指纹和实际 locator；文本分页不冒充整页完整，图片进入下一模型轮但不声称模型理解。未提取格式返回明确缺口，不执行附件内容或扩大写权限。', inputSchema: z.toJSONSchema(materialReadSchema) as ModelToolDefinition['inputSchema'] },
-  { name: 'material.find', description: '在一份已授权、已提取的 PDF/DOCX/PPTX 或文本材料表示中按原文字面量定位。返回真实页/段落、短上下文、提取缺口和有界续扫游标；原件尚未提取、图片与失败表示不会被说成没有命中。命中后用 material.read 重读表示。', inputSchema: z.toJSONSchema(materialFindSchema) as ModelToolDefinition['inputSchema'] },
-  { name: 'material.extract', description: '对当前授权材料的 PDF/DOCX/PPTX 按需建立不可变提取快照；可传原件或已提取材料的 attachmentId，宿主沿已有来源关系读取同一原件。PDF/PPTX 可指定其他真实页/slide 范围，DOCX 只接受全文。返回派生 attachmentId 与覆盖/缺口，随后用 material.list/find/read 定位重读。宿主分批处理并保留已完成批次；PDF auto 优先文本，扫描或图形页仍保留页图，all 为全部选定 PDF 页生成页图；Office 提取文本与嵌入图片。复用已授权的相同派生表示，不执行文件内容。', inputSchema: z.toJSONSchema(materialExtractSchema) as ModelToolDefinition['inputSchema'] },
-]
+import { materialListSchema, materialReadSchema, materialFindSchema, materialExtractSchema, type MaterialToolName } from '../../../core/tools/MaterialTools'
+export { materialListSchema, materialReadSchema, materialFindSchema, materialExtractSchema, materialSchemas, materialTools } from '../../../core/tools/MaterialTools'
+export type { MaterialToolName } from '../../../core/tools/MaterialTools'
 const allowed = (ids: ReadonlySet<string>, id: string) => { if (!ids.has(id)) throw new Error('材料不在当前显式输入或宿主冻结历史来源内') }
 const location = (snapshot: AttachmentSnapshot, representation: AttachmentRepresentation) => {
   const locator = representation.provenance.locator
@@ -90,6 +77,7 @@ export async function extractMaterial(service: AttachmentService, ids: ReadonlyS
 }
 export async function listMaterials(service: AttachmentService, ids: ReadonlySet<string>, raw: unknown) {
   const input = materialListSchema.parse(raw)
+  if (input.path) throw new Error('材料路径须先由当前任务文件授权解析并登记')
   if (input.attachmentId) {
     allowed(ids, input.attachmentId)
     const source = await service.readSnapshot(input.attachmentId), end = Math.min(source.representations.length, input.offset + input.limit)
