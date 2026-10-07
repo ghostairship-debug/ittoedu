@@ -79,7 +79,17 @@ test('T03 real GUI preserves half JSON and numeric raw at normal close and resto
     await view.page.getByRole('tab', { name: '属性', exact: true }).click()
     await view.page.getByLabel('X', { exact: true }).fill('-')
     await select(view.page, 'canvas')
-    await view.page.getByRole('button', { name: '双击编辑此处文字', exact: true }).click()
+    const canvasTarget = view.page.locator('.course-editor-frame:visible [data-component-instance="canvas"]')
+    await expect(canvasTarget).toBeVisible()
+    await expect(canvasTarget).toContainText('Canvas teacher original')
+    const canvasBounds = await canvasTarget.boundingBox()
+    if (!canvasBounds) throw new Error('Original Canvas instance has no rendered bounds')
+    const point = { x: canvasBounds.x + canvasBounds.width / 2, y: canvasBounds.y + canvasBounds.height / 2 }
+    const matchingSpots = await view.page.getByRole('button', { name: '双击编辑此处文字', exact: true }).evaluateAll((buttons, point) => buttons
+      .map(button => button.getBoundingClientRect()).filter(rect => point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom)
+      .map(rect => ({ x: rect.x, y: rect.y, width: rect.width, height: rect.height })), point)
+    expect(matchingSpots, 'Exactly one real authoring spot must cover the original Canvas instance').toHaveLength(1)
+    await view.page.mouse.click(point.x, point.y)
     const canvasInput = view.page.getByRole('textbox', { name: '编辑此处文字', exact: true })
     await expect(canvasInput).toHaveValue('Canvas teacher original')
     await canvasInput.dispatchEvent('compositionstart')
