@@ -168,7 +168,7 @@ export interface DocumentDeliveryServicePort {
   lookup(input: { runId: string; operationId: string; requestDigest: string }): Promise<SaveReceipt | ExportReceipt | null>
 }
 
-export type ExportFormat = 'html-offline' | 'html-online' | 'web-package'
+export type ExportFormat = 'html-offline' | 'html-online' | 'web-package' | 'pptx' | 'pdf' | 'docx'
 
 export type SaveReceipt = {
   status: 'saved' | 'rejected' | 'failed'
@@ -192,6 +192,7 @@ export type ExportReceipt = {
   format: ExportFormat
   fileVersion?: string | null
   exportedRevision?: number
+  files?: readonly { path?: string; fileVersion?: string; suggestedName: string; byteLength: number }[]
   currentRevision: number
   warnings: readonly string[]
   reason?: string
@@ -213,6 +214,16 @@ export interface ExportBuildReply {
   identity: ExportBuildRequest['identity']
   status: 'generated' | 'drained' | 'failed' | 'cancelled'
   files?: readonly { relativePath: string; mimeType: string; bytes: Uint8Array }[]
+  /** Existing Main print owner converts this renderer-built content to PDF bytes. */
+  printHtml?: string
   warnings: readonly string[]
   reason?: string
 }
+
+export interface ExportBuildProgress {
+  requestId: string
+  identity: ExportBuildRequest['identity']
+  sequence: number
+  stage: 'preparing' | 'building' | 'compiling' | 'complete'
+}
+export interface ExportBuildCancel { requestId: string; identity: ExportBuildRequest['identity'] }

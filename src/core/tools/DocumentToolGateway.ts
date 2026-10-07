@@ -218,6 +218,16 @@ export class DocumentToolGateway implements ToolGateway {
     return structuredClone(run.advertised!.availableFamilies)
   }
 
+  /** Exact capability discovery shares the authorization owner with execute, never a second load gate. */
+  async resolveRunTool(runId: string, name: string): Promise<ToolDefinition | null> {
+    const run = this.run(runId)
+    if (!run.advertised) await this.describeRun(runId)
+    if (!run.advertised!.allowed.has(name)) return null
+    const family = familyOfTool(name)
+    if (family && !run.advertised!.names.has(name)) await this.loadToolFamilies(runId, [family])
+    return structuredClone(run.advertised!.definitions.find(tool => tool.name === name) ?? null)
+  }
+
   async loadToolFamilies(runId: string, families: readonly ToolFamily[]): Promise<readonly { family: ToolFamily; description: string; count: number }[]> {
     const run = this.run(runId)
     if (run.stopped) throw new ToolError('run-stopped', '任务已停止')

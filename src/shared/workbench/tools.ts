@@ -28,10 +28,13 @@ export type ToolTarget =
 export interface ToolRunGrant {
   runId: string
   actor: DocumentOperation['actor']
-  documents: readonly { documentId: string; writable: readonly ToolTarget[] }[]
+  documents: readonly { documentId: string; writable: readonly ToolTarget[]; selection?: readonly ToolTarget[] }[]
   disclosedSettings?: DisclosedExecutionSettings
   /** Main-frozen file scope for built-in task delivery tools; external MCP grants use their bound documents. */
   fileAccess?: { permission: ExecutionPermissionMode; workspaceRoot?: string; conversationHomeRoot?: string; conversationHome?: ConversationHome; boundPaths?: Record<string, string> }
+  /** Explicit user result authorization, frozen by Main; methods and observations cannot extend it. */
+  webAuthorization?: { origins: readonly string[]; actions: readonly ('submit' | 'upload' | 'download')[] }
+  materialIds?: readonly string[]
 }
 
 /** Transport assigns callId outside the model arguments. */

@@ -8,6 +8,7 @@ import { inputAttachmentReferenceSchema, type InputAttachmentReference } from '.
 import { executionRoles, type ExecutionRole, type ExecutionSelectionSnapshot, type ExecutionSettingsView } from './executionSettings'
 import { userAnswerSchema, type UserAnswer } from './userQuestion'
 import { approvalDecisionSchema, executionPermissionModeSchema, type ApprovalDecision, type ExecutionPermissionMode } from './executionPermission'
+import { lessonAuthoringMaterialSelectionSchema } from '../lessonAuthoring'
 
 const id = z.string().min(1), index = z.number().int().nonnegative()
 const executionEditTargetSchema = z.discriminatedUnion('kind', [
@@ -28,6 +29,11 @@ export const executionSelectionTargetSchema = z.discriminatedUnion('kind', [
 export type ExecutionSelectionTarget = z.infer<typeof executionSelectionTargetSchema>
 export const executionContentOutputSchema = z.object({ kind: z.literal('replace-text'), documentId: id,
   target: executionEditTargetSchema }).strict()
+export const executionMaterialsSchema = z.object({ target: z.object({ lessonId: id, rootPath: id }).strict(),
+  selections: z.array(lessonAuthoringMaterialSelectionSchema) }).strict()
+export type ExecutionMaterials = z.infer<typeof executionMaterialsSchema>
+export const webTaskAuthorizationSchema = z.object({ origins: z.array(z.string().url()), actions: z.array(z.enum(['submit', 'upload', 'download'])) }).strict()
+export type WebTaskAuthorization = z.infer<typeof webTaskAuthorizationSchema>
 const scope = z.union([z.object({ kind: z.literal('document') }).strict(), executionSelectionTargetSchema])
 export const executionDocumentReferenceSchema = z.object({ documentId: id, epoch: id, revision: index, writable: z.array(scope), selection: z.array(executionSelectionTargetSchema).min(1).optional() }).strict()
 export type ExecutionDocumentReference = z.infer<typeof executionDocumentReferenceSchema>
@@ -84,6 +90,7 @@ export const executionDesktopRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('delete-conversation'), ...identity, expectedRevision: index }).strict(),
   z.object({ type: z.literal('send'), ...identity, submissionId: z.uuid(), expectedRevision: index, text: z.string(), documents: z.array(executionDocumentReferenceSchema), attachments: z.array(inputAttachmentReferenceSchema).default([]), mode: executionSubmissionModeSchema.default('queue'), retryOfRunId: id.optional(), disclosedSettings: disclosedSettingsSchema.optional(), permission: executionPermissionModeSchema.optional(),
     contentOutput: executionContentOutputSchema.optional(),
+    materials: executionMaterialsSchema.optional(), webAuthorization: webTaskAuthorizationSchema.optional(),
     clientTiming: z.object({ click: rendererTimingStampSchema, invoke: rendererTimingStampSchema }).strict().optional() }).strict(),
   z.object({ type: z.literal('timing'), ...identity, submissionId: z.uuid(), stage: z.literal('renderer.first-visible'),
     stamp: rendererTimingStampSchema, itemId: id }).strict(),
@@ -121,6 +128,8 @@ export interface ExecutionSendInput {
   text: string
   documents: ExecutionDocumentReference[]
   contentOutput?: ExecutionContentOutput
+  materials?: ExecutionMaterials
+  webAuthorization?: WebTaskAuthorization
   attachments?: InputAttachmentReference[]
   mode?: ExecutionSubmissionMode
   /** Explicit continuation of a terminal run. Repeated requests for that run reuse its child submission. */
