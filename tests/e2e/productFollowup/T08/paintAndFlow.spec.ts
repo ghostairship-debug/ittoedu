@@ -1,4 +1,4 @@
-import { expect, test, type FrameLocator, type ElectronApplication } from '@playwright/test'
+import { expect, test, type FrameLocator, type ElectronApplication, type Locator } from '@playwright/test'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import sharp from 'sharp'
@@ -16,12 +16,42 @@ async function pixel(png: Buffer, xRatio: number, yRatio: number) {
   return [...data.subarray(offset, offset + 3)]
 }
 function near(actual: number[], expected: number[]) { actual.forEach((value, index) => expect(Math.abs(value - expected[index])).toBeLessThanOrEqual(8)) }
-async function painted(frame: FrameLocator) {
-  const atomic = await frame.locator('.atomic').screenshot({ scale: 'css' })
-  const blue = await frame.locator('.atomic span').screenshot({ scale: 'css' })
-  const clipped = await frame.locator('.clipped').screenshot({ scale: 'css' })
-  const number = await frame.locator('.number').screenshot({ scale: 'css' })
-  const rgba = await frame.locator('.rgba').screenshot({ scale: 'css' })
+async function outerGeometry(iframe: Locator) {
+  return { playwrightBox: await iframe.boundingBox(), dom: await iframe.evaluate(element => {
+    const ancestors = []
+    for (let node: HTMLElement | null = element as HTMLElement; node; node = node.parentElement) {
+      const style = getComputedStyle(node)
+      ancestors.push({ tag: node.tagName, className: node.className, rect: node.getBoundingClientRect().toJSON(),
+        clientWidth: node.clientWidth, clientHeight: node.clientHeight, scrollLeft: node.scrollLeft, scrollTop: node.scrollTop,
+        transform: style.transform, transformOrigin: style.transformOrigin, zoom: style.zoom, width: style.width, height: style.height,
+        overflowX: style.overflowX, overflowY: style.overflowY, borderLeftWidth: style.borderLeftWidth, borderTopWidth: style.borderTopWidth })
+    }
+    return { window: { innerWidth, innerHeight, scrollX, scrollY, devicePixelRatio }, ancestors }
+  }) }
+}
+async function painted(frame: FrameLocator, iframe: Locator, directory: string, label: string) {
+  const geometry: Record<string, unknown> = { label, samples: {} }
+  const saveGeometry = () => writeFileSync(join(directory, `${label}-capture-geometry.json`), JSON.stringify(geometry, null, 2))
+  const capture = async (selector: string, name: string) => {
+    const target = frame.locator(selector)
+    const measure = async () => ({ playwrightBox: await target.boundingBox(), outer: await outerGeometry(iframe), inner: await target.evaluate(element => ({
+      rect: element.getBoundingClientRect().toJSON(), window: { innerWidth, innerHeight, scrollX, scrollY, devicePixelRatio },
+      document: { scrollLeft: document.documentElement.scrollLeft, scrollTop: document.documentElement.scrollTop,
+        clientWidth: document.documentElement.clientWidth, clientHeight: document.documentElement.clientHeight },
+      body: { scrollLeft: document.body.scrollLeft, scrollTop: document.body.scrollTop, clientWidth: document.body.clientWidth, clientHeight: document.body.clientHeight } })) })
+    const sample: Record<string, unknown> = { selector, before: await measure() }
+    ;(geometry.samples as Record<string, unknown>)[name] = sample; saveGeometry()
+    const png = await target.screenshot({ scale: 'css', path: join(directory, `${label}-${name}.png`) })
+    const metadata = await sharp(png).metadata()
+    sample.png = { width: metadata.width, height: metadata.height, format: metadata.format }
+    sample.after = await measure(); saveGeometry()
+    return png
+  }
+  const atomic = await capture('.atomic', 'atomic')
+  const blue = await capture('.atomic span', 'blue')
+  const clipped = await capture('.clipped', 'clipped')
+  const number = await capture('.number', 'number')
+  const rgba = await capture('.rgba', 'rgba')
   const numberPixels = await sharp(number).removeAlpha().raw().toBuffer({ resolveWithObject: true })
   let redGlyphPixels = 0
   for (let index = 0; index < numberPixels.data.length; index += numberPixels.info.channels)
@@ -56,8 +86,11 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
     await chooseM23Workspace(app, page, workspace)
     await openM23Html(page, 'paint-and-flow.html')
     const source = page.frameLocator('iframe[title="HTML 预览"]')
-    facts.sourcePaint = await painted(source)
-    await info.attach('Original source paint', { body: await page.locator('iframe[title="HTML 预览"]').screenshot({ scale: 'css' }), contentType: 'image/png' })
+    const sourceIframe = page.locator('iframe[title="HTML 预览"]')
+    facts.sourcePaint = await painted(source, sourceIframe, directory, 'source')
+    const sourcePng = await sourceIframe.screenshot({ scale: 'css', path: join(directory, 'source-outer.png') })
+    facts.sourceOuter = { geometry: await outerGeometry(sourceIframe), png: await sharp(sourcePng).metadata() }
+    await info.attach('Original source paint', { body: sourcePng, contentType: 'image/png' })
     const opened = await openSelectionFile(page, workspace, name)
     const editor = page.locator('.course-editor-frame:visible')
     await editor.locator('.course-light-tools').getByRole('button', { name: '插入', exact: true }).click()
@@ -89,8 +122,13 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
     const frames = host.locator('iframe'); await expect(frames).toHaveCount(1)
     const player = host.frameLocator('iframe')
     await expect(player.locator('#answer summary')).toBeVisible()
-    const sourceFacts = facts.sourcePaint as Awaited<ReturnType<typeof painted>>, playerFacts = await painted(player)
+    const sourceFacts = facts.sourcePaint as Awaited<ReturnType<typeof painted>>, playerFacts = await painted(player, frames, directory, 'player')
     facts.playerPaint = playerFacts
+    const playerPng = await frames.screenshot({ scale: 'css', path: join(directory, 'player-outer.png') })
+    facts.playerOuter = { geometry: await outerGeometry(frames), png: await sharp(playerPng).metadata() }
+    await info.attach('Imported actual Player paint before pixel assertions', { body: playerPng, contentType: 'image/png' })
+    const playerHostPng = await host.screenshot({ scale: 'css', path: join(directory, 'player-whole-host.png') })
+    await info.attach('Whole Player host before pixel assertions', { body: playerHostPng, contentType: 'image/png' })
     near(sourceFacts.red, [247, 127, 127]); near(playerFacts.red, sourceFacts.red)
     near(sourceFacts.blue, [127, 127, 247]); near(playerFacts.blue, sourceFacts.blue)
     near(sourceFacts.clipCorner, [255, 255, 255]); near(playerFacts.clipCorner, sourceFacts.clipCorner)
@@ -103,7 +141,6 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
     await expect(player.locator('#answer p')).toBeVisible()
     await player.locator('#answer summary').click()
     await expect(player.locator('#answer p')).toBeHidden()
-    await info.attach('Imported actual Player paint', { body: await frames.screenshot({ scale: 'css' }), contentType: 'image/png' })
     facts.interaction = { openedAndClosed: true }; facts.localFlowPreserved = { programId: program!.id, humanFrame: edited.model.project.instances.human.frame }
     await overlay.getByRole('button', { name: '关闭预览', exact: true }).click()
     await editor.locator('.course-light-tools').getByRole('button', { name: '保存', exact: true }).click()
