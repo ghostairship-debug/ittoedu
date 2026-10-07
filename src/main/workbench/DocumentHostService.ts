@@ -162,23 +162,33 @@ export class DocumentHostService {
     try {
       const handle = await fs.open(temporary, 'wx')
       try { await handle.writeFile(JSON.stringify(drafts), 'utf8'); await handle.sync() } finally { await handle.close() }
+      if (this.registry.get(snapshot.documentId).read().epoch !== snapshot.epoch) throw new Error('草稿所属会话已改变，原恢复记录未覆盖')
       await fs.rename(temporary, filename)
     } finally { await fs.rm(temporary, { force: true }).catch(() => {}) }
   }
   writeAuthoringDrafts(documentId: string, input: AuthoringDraftRecovery): Promise<void> {
     const drafts = authoringDraftRecoverySchema.parse(input)
+    const epoch = this.registry.get(documentId).read().epoch
     const write = this.authoringDraftTail.then(async () => {
       const snapshot = await this.registry.get(documentId).drain()
-      if (snapshot.model.kind !== 'course-v10' || drafts.advanced.some(record => record.projectId !== snapshot.model.project.id))
+      const model = snapshot.model
+      if (snapshot.epoch !== epoch || model.kind !== 'course-v10'
+        || drafts.advanced.some(record => record.projectId !== model.project.id || record.documentId !== documentId || record.epoch !== epoch))
         throw new Error('原始草稿不属于当前课件，未覆盖恢复记录')
+      for (const record of drafts.properties) {
+        const binding: unknown = JSON.parse(record.bindingKey)
+        if (!Array.isArray(binding) || binding[0] !== documentId || binding[1] !== epoch) throw new Error('属性草稿不属于当前课件会话，未覆盖恢复记录')
+      }
       await this.writeDraftFile(snapshot, drafts)
     })
     this.authoringDraftTail = write.catch(() => undefined)
     return write
   }
   clearAuthoringDrafts(documentId: string): Promise<void> {
+    const epoch = this.registry.get(documentId).read().epoch
     const clear = this.authoringDraftTail.then(async () => {
       const snapshot = await this.registry.get(documentId).drain()
+      if (snapshot.epoch !== epoch) throw new Error('草稿所属会话已改变，未清除恢复记录')
       await fs.rm(this.authoringDraftPath(snapshot), { force: true })
     })
     this.authoringDraftTail = clear.catch(() => undefined)
@@ -357,6 +367,18 @@ export class DocumentHostService {
     return this.fileCoordinator.withFileAccess(async () => {
       const saved = await this.saveFile(documentId, filename, overwriteConfirmed, observer, saveIdentity)
       if (saved.binding.kind === 'file') await this.files.acknowledgeDocumentSave(saved.binding.path, saved.model.kind, saved.binding.version)
+      if (initial.model.kind === 'course-v10' && saved.model.kind === 'course-v10'
+        && this.authoringDraftPath(initial) !== this.authoringDraftPath(saved)) {
+        const move = this.authoringDraftTail.then(async () => {
+          const drafts = await this.readDraftFile(initial)
+          if (!drafts) return
+          // A concurrent current-binding collector may already have saved newer visible inputs.
+          if (!await this.readDraftFile(saved)) await this.writeDraftFile(saved, drafts)
+          await fs.rm(this.authoringDraftPath(initial), { force: true })
+        })
+        this.authoringDraftTail = move.catch(() => undefined)
+        await move
+      }
       return saved
     }).catch(error => {
       error = error instanceof DocumentSaveFailure ? error : new DocumentSaveFailure(enteredSession ? 'unknown' : 'not-published', error)
