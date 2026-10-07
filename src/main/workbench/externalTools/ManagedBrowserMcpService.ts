@@ -28,7 +28,7 @@ export interface ManagedBrowserGrant {
   /** Frozen task origins. The default public policy may be used for open-web research. */
   allowedOrigins?: readonly string[]
   allowPublicNavigation?: boolean
-  /** Only files whose real path remains beneath this root can become upload resources. */
+  /** Legacy relative-source grant; configured file-owner reads take precedence. */
   uploadRoot?: string
 }
 
@@ -302,7 +302,8 @@ export class ManagedBrowserMcpService {
       const properties = source.properties && typeof source.properties === 'object' ? source.properties as Record<string, unknown> : {}
       return { ...tool, inputSchema: { ...source,
         properties: { ...(tool.remoteName === 'browser_file_upload'
-          ? { paths: { type: 'array', items: { type: 'string' }, description: '授权根下的相对文件路径' } }
+          ? { paths: { type: 'array', items: { type: 'string' }, description: this.options.readUpload
+            ? '本任务明确获授权的文件来源路径；宿主文件服务核对授权并冻结原文件。' : '授权根下的相对文件路径' } }
           : properties), snapshotId: { type: 'string', description: '最近一次 browser_snapshot 返回的页面观察身份' } },
         required: [...new Set([...(Array.isArray(source.required) ? source.required as string[] : []),
           ...(tool.remoteName === 'browser_file_upload' ? ['paths'] : []), 'snapshotId'])], additionalProperties: false } }
