@@ -235,26 +235,40 @@ it('forwards a live author gesture preview through the actual runtime host and r
 })
 
 it('awaits the new React surface camera before accepting a teacher jump to its authored frame', async () => {
+  // External component callbacks run outside React's event flush and without act().
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', false)
   const course = project(), pose = { x: 70, y: 80, zoom: 2 }
   course.surfaces.push({ id: 'spatial', kind: 'spatial', title: '空间', childIds: [], designSize: { width: 800, height: 600 },
     spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [{ id: 'detail', title: '目标镜头', pose }] } })
   const camera = createComponentSpatialCameraPort({ x: 0, y: 0, zoom: 1 })
-  let ports!: CourseV10RuntimePorts
+  let ports!: CourseV10RuntimePorts, ready!: () => void, registered = false
+  const initialCommit = new Promise<void>(resolve => { ready = resolve })
   function Projection({ runtime }: { runtime: CourseV10RuntimePorts }) {
-    useEffect(() => runtime.surfaceId === 'spatial' ? runtime.registerCamera('spatial', camera) : undefined, [runtime.surfaceId])
+    useEffect(() => {
+      if (runtime.surfaceId !== 'spatial') return
+      registered = true
+      const off = runtime.registerCamera('spatial', camera)
+      return () => { registered = false; off() }
+    }, [runtime.surfaceId])
     return <div>{runtime.surfaceId}</div>
   }
   function Editor() {
     const [surface, select] = useState('page')
+    useEffect(() => ready(), [])
     return <CourseV10RuntimeView documentId="camera-commit" model={{ kind: 'course-v10', project: course, resources }}
       surfaceId={surface} selectedInstanceId={null} player={false} onSelect={() => {}} onSurfaceSelect={select} report={() => {}}
       renderWorkspace={runtime => { ports = runtime; return <Projection runtime={runtime} /> }} />
   }
-  const ui = render(<Editor />)
-  act(() => ports.setPlaying(true))
-  let accepted: Promise<boolean>
-  act(() => { accepted = ports.navigation.teacherPort().execute({ type: 'scene.go', sceneId: 'spatial', targetStateId: 'detail' }) })
-  await act(async () => expect(await accepted!).toBe(true))
-  expect(camera.read()).toEqual(pose); expect(ui.container.textContent).toBe('spatial')
-  ui.unmount(); camera.dispose()
+  const container = document.createElement('div'); document.body.append(container)
+  const root = createRoot(container); root.render(<Editor />)
+  try {
+    await initialCommit
+    ports.setPlaying(true)
+    expect(await Promise.resolve().then(() => ports.navigation.teacherPort().execute({ type: 'scene.go', sceneId: 'spatial', targetStateId: 'detail' }))).toBe(true)
+    expect(registered).toBe(true); expect(camera.read()).toEqual(pose); expect(container.textContent).toBe('spatial')
+    const aborted = new AbortController()
+    const pending = ports.navigation.execute({ type: 'scene.go', sceneId: 'page' }, aborted.signal)
+    aborted.abort()
+    expect(await pending).toBe(false)
+  } finally { root.unmount(); await ports.world.dispose(); camera.dispose(); container.remove() }
 })

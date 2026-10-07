@@ -30,9 +30,9 @@ interface NavigationPorts {
   project(): CourseProjectV10
   surfaceId(): string | null
   interactive?(): boolean
-  select(surfaceId: string): void | Promise<void>
+  select(surfaceId: string, signal?: AbortSignal): boolean | void | Promise<boolean | void>
   stateId?(): string | null
-  selectState?(stateId: string | null, surfaceId: string): void | Promise<void>
+  selectState?(stateId: string | null, surfaceId: string, signal?: AbortSignal): boolean | void | Promise<boolean | void>
   courseState?: { get<T = unknown>(key: string): T | undefined; set?(key: string, value: number): void }
   audio?(): AudioManager | undefined
   report?(message: string): void
@@ -133,9 +133,9 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
     const surface = this.ports.project().surfaces.find(value => value.id === surfaceId)
     if (!surface) return false
     if (surface.kind !== 'spatial' || stateId && surface.presentation?.states.some(state => state.id === stateId)) {
+      const selected = await this.ports.selectState?.(stateId, surfaceId, signal)
+      if (selected === false || signal?.aborted) return false
       this.states.set(surfaceId, stateId)
-      await this.ports.selectState?.(stateId, surfaceId)
-      if (signal?.aborted) return false
       this.changed(); return true
     }
     const entry = this.cameras.get(surfaceId)
@@ -269,7 +269,7 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
       // A course reset must reach its start even when reset state blocks ordinary visits there.
       if (action.type !== 'course.restart' && action.type !== 'scene.replay' && !(teacher && action.type === 'scene.go') && this.blocked(destination, true)) return false
       // Replay keeps the current surface and its mounted program; only its transient view is reset.
-      if (action.type !== 'scene.replay') await this.ports.select(destination)
+      if (action.type !== 'scene.replay' && await this.ports.select(destination, signal) === false) return false
       if (signal?.aborted) return false
       const surface = this.ports.project().surfaces.find(value => value.id === destination)
       const last = action.type === 'step.previous' ? this.steps(destination).length - 1 : -1

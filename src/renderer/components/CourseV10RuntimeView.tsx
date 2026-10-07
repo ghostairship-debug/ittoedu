@@ -44,6 +44,11 @@ export interface CourseV10RuntimePorts {
 }
 
 const RuntimeContext = createContext<CourseV10RuntimePorts | null>(null)
+interface ProjectionView { surfaceId: string | null; stateId?: string | null }
+interface ProjectionNavigationCommit {
+  view: ProjectionView | null
+  pending?: { target: ProjectionView; finish(accepted: boolean): void }
+}
 export function useCourseV10Runtime(): CourseV10RuntimePorts {
   const ports = useContext(RuntimeContext)
   if (!ports) throw new Error('工作区需要挂载在 CourseV10RuntimeView 内')
@@ -71,6 +76,7 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
   const current = useRef(model)
   const activeState = useRef(props.activeStateId ?? null), runtimeRef = useRef<ComponentPlatformRuntime | null>(null)
   const callbacks = useRef(props), surface = useRef(surfaceId), wrapper = useRef<HTMLDivElement>(null)
+  const projectionNavigation = useMemo<ProjectionNavigationCommit>(() => ({ view: null }), [documentId])
   const composing = useRef<string | null>(null)
   const compositionUpdate = useRef<Promise<void>>(Promise.resolve())
   current.current = model
@@ -78,8 +84,13 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
   const navigation = useMemo(() => new ComponentNavigationOwner({ project: () => current.current.project, surfaceId: () => surface.current,
     interactive: () => runtimeRef.current?.isPlaying() ?? Boolean(player),
     stateId: () => activeState.current,
-    select: id => { surface.current = id; callbacks.current.onSurfaceSelect(id) },
-    selectState: (id, nextSurfaceId) => { activeState.current = id; callbacks.current.bridge?.selectPresentationState(documentId, id, nextSurfaceId) },
+    select: (id, signal) => selectProjection({ surfaceId: id }, () => { surface.current = id; callbacks.current.onSurfaceSelect(id) }, signal),
+    selectState: (id, nextSurfaceId, signal) => {
+      if (!callbacks.current.bridge && id !== (callbacks.current.activeStateId ?? null)) return false
+      return selectProjection({ surfaceId: nextSurfaceId, stateId: id }, () => {
+        activeState.current = id; callbacks.current.bridge?.selectPresentationState(documentId, id, nextSurfaceId)
+      }, signal)
+    },
     courseState: { get: <T,>(key: string) => runtimeRef.current?.getState(key) as T | undefined, set: (key, value) => runtimeRef.current?.setState(key, value) },
     viewportBounds: () => (wrapper.current?.querySelector<HTMLElement>('.flow-workspace') ?? wrapper.current?.querySelector<HTMLElement>('.canvas-viewport') ?? wrapper.current)?.getBoundingClientRect(),
     restart: () => runtimeRef.current?.resetPlayback(true), audio: () => runtimeRef.current?.audio(), report: message => callbacks.current.report(message) }), [documentId])
@@ -89,7 +100,7 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
       report: message => callbacks.current.report(message),
       mode: player ? 'play' : 'edit',
       teacherController, studentNavigation: navigation,
-      onDispose: () => navigation.dispose(),
+      onDispose: () => { projectionNavigation.pending?.finish(false); navigation.dispose() },
       resolveBuiltin: (_key, signal) => prepareSandboxComponent({ format: 'esm', code: webContentRealmSource(), css: '', diagnostics: [] }, signal,
         { builtinKey: _key, state: () => runtime.stateSnapshot(), targets: profile => runtime.targetSnapshots(profile), instance: async value => resolveWebResourceBindings(await projectWebModuleGraph(value, input => window.desktopAPI.compileComponent(input), message => callbacks.current.report(message)), id => runtime.contentAssetUrl(id), message => callbacks.current.report(message)), htmlAuthoring: true, teacherController,
           connectOrigins: () => current.current.project.logic?.network?.connectOrigins ?? [], themeCss: () => runtime.themeCss(), resources: () => runtime.resourceUrls() }),
@@ -108,6 +119,35 @@ export function CourseV10RuntimeView(props: CourseV10RuntimeViewProps) {
   const world = host.runtime
   runtimeRef.current = world
   const renderProject = props.renderProject ?? resolveComponentPresentation(model.project, surfaceId, props.activeStateId ?? null)
+  const matchesProjection = (target: ProjectionView) => projectionNavigation.view?.surfaceId === target.surfaceId
+    && (target.stateId === undefined || projectionNavigation.view.stateId === target.stateId)
+  function selectProjection(target: ProjectionView, select: () => void, signal?: AbortSignal): Promise<boolean> {
+    if (signal?.aborted) return Promise.resolve(false)
+    return new Promise((resolve, reject) => {
+      projectionNavigation.pending?.finish(false)
+      const finish = (accepted: boolean) => {
+        signal?.removeEventListener('abort', abort)
+        if (projectionNavigation.pending === pending) projectionNavigation.pending = undefined
+        resolve(accepted)
+      }
+      const abort = () => finish(false), pending = { target, finish }
+      projectionNavigation.pending = pending
+      signal?.addEventListener('abort', abort, { once: true })
+      try { select(); if (matchesProjection(target)) finish(true) }
+      catch (error) {
+        signal?.removeEventListener('abort', abort)
+        if (projectionNavigation.pending === pending) projectionNavigation.pending = undefined
+        reject(error)
+      }
+    })
+  }
+  useEffect(() => {
+    // Child camera/observation effects have installed their ports at this real React commit.
+    // Navigation waits for this projection, not for arbitrary source mounts in the runtime queue.
+    projectionNavigation.view = { surfaceId, stateId: props.activeStateId ?? null }
+    const pending = projectionNavigation.pending
+    if (pending && matchesProjection(pending.target)) pending.finish(true)
+  }, [projectionNavigation, surfaceId, props.activeStateId])
   useEffect(() => host.retain(), [host])
   useEffect(() => {
     const root = wrapper.current
