@@ -1,5 +1,6 @@
 import type { ExecutionRunRecord, ExecutionToolRecord } from '../../../shared/workbench/execution'
 import type { ToolResult } from '../../../shared/workbench/tools'
+import type { DocumentToolGateway } from '../../../core/tools/DocumentToolGateway'
 import { USER_QUESTION_TOOL } from '../../../shared/workbench/userQuestion'
 import { agentFileMutationNames } from '../../../core/tools/AgentFileTools'
 import { committedFact, contentApplyFact, currentSave, knownApplication, operationFact, saveFact, serviceToolOutcome, toolFailed } from '../../../core/tools/modelToolResult'
@@ -28,6 +29,25 @@ function optionalObservationFailure(tool: ExecutionToolRecord): boolean {
   return tool.result?.kind === 'error' && ['observation-failed', 'service-unavailable', 'html-action-failed'].includes(tool.result.code)
 }
 const failedTool = (tool: ExecutionToolRecord) => !!tool.observationFailure || toolFailed(tool.call.name, tool.result)
+
+/** Main's current settlement view; never changes or replaces the original receipt. */
+export type SettledExecutionTool = ExecutionToolRecord & {
+  currentContentVerification?: { sourceDocumentId: string;
+    observation: Awaited<ReturnType<DocumentToolGateway['verifyContentDiagnostics']>> }
+}
+export function currentContentRepaired(tool: SettledExecutionTool): boolean {
+  const apply = contentApplyFact(tool.call.name, tool.result), receipt = committedFact(tool.call.name, tool.result)
+  const verified = tool.currentContentVerification
+  if (!apply || !receipt || tool.observationFailure || !verified || verified.sourceDocumentId !== receipt.documentId
+    || !verified.observation.current || !['partial', 'unusable'].includes(apply.usability)) return false
+  const diagnostics = apply.diagnostics.filter(item => item.level !== 'info')
+  return diagnostics.length > 0 && verified.observation.results.length === diagnostics.length
+    && diagnostics.every((diagnostic, index) => {
+      const result = verified.observation.results[index]!
+      return result.state === 'resolved' && result.code === diagnostic.code
+        && result.instanceId === diagnostic.instanceId && result.reference === diagnostic.reference
+    })
+}
 
 const pendingJob = (tool: ExecutionToolRecord): { kind: 'image' | 'compute' | 'delegation'; id: string } | null => {
   if (serviceToolOutcome(tool.call.name, tool.result)?.status !== 'pending' || tool.result?.kind !== 'read') return null
@@ -192,6 +212,7 @@ function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord
     const wrongProjectSave = tool.call.name === 'project.save' && saved
       && (!matchesSaveBinding(record, saved) || tool.effectTargets?.length === 1 && tool.effectTargets[0]!.documentId !== saved.documentId)
     if (!failedTool(tool) && !wrongProjectSave) return false
+    if (currentContentRepaired(tool as SettledExecutionTool)) return false
     // A modification the user declined is the user's decision, not an unfinished operation.
     if (tool.result?.kind === 'error' && tool.result.code === 'user-denied') return false
     const pending = pendingJob(tool)

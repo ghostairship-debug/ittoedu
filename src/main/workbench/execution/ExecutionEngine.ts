@@ -14,7 +14,8 @@ import type { ModelChatMessage, ModelEvent, ModelJsonObject, ModelProvider, Mode
 import { effectiveModelProtocol } from '../../../shared/workbench/modelRouting'
 import { captureMainTiming, ExecutionEventStore, type ExecutionTimingMark, type ExecutionTimingStage } from './ExecutionEventStore'
 import { conflictsWithUnresolvedEffects, type UnresolvedEffect } from './executionEffectScope'
-import { committed, fileCreated, persistedToolWork, hasUnresolvedToolFailure, runEndSummary, serviceToolOutcome, toolFailed } from './executionOutcome'
+import { committed, fileCreated, persistedToolWork, hasUnresolvedToolFailure, runEndSummary, serviceToolOutcome, toolFailed,
+  currentContentRepaired, type SettledExecutionTool } from './executionOutcome'
 import { applicationEventFacts, committedFact, contentApplyFact, knownApplication, reconciledToolResult, saveFact } from './executionToolFacts'
 import { ExecutionRunStore } from './ExecutionRunStore'
 import { serializeModelPayload } from '../providers/ModelProviderRouter'
@@ -481,7 +482,6 @@ export class ExecutionEngine {
   }
   /** A temporary view of the explicit task lineage, never copied into the current run's tool history. */
   private async settlementRecord(record: ExecutionRunRecord): Promise<ExecutionRunRecord> {
-    if (!record.taskContinuedFrom) return record
     const prior: ExecutionRunRecord[] = [], visited = new Set([record.runId])
     let id: string | undefined = record.taskContinuedFrom
     while (id) {
@@ -495,7 +495,7 @@ export class ExecutionEngine {
     const lineage = [...prior, record]
     const exploratoryRead = new Set(['read', 'inspect', 'listChildren', 'file.list', 'file.search', 'file.grep', 'tools.load', 'material.list', 'material.find'])
     const scope = (run: ExecutionRunRecord) => JSON.stringify(run.input.documents.map(value => value.documentId).sort())
-    const tools = lineage.flatMap((run, at) => run.tools.filter(tool => {
+    const tools: SettledExecutionTool[] = lineage.flatMap((run, at) => run.tools.filter(tool => {
       if (run.runId === record.runId) return true
       // A planned but never-invoked old tool has no unknown side effect. Do not
       // confuse its retired queue entry with a new run's unfinished invocation.
@@ -507,6 +507,28 @@ export class ExecutionEngine {
       }
       return true
     }).map(tool => ({ ...tool, sourceRunId: run.runId })))
+    const currentIds = continuationDocumentIds(lineage, this.options.registry.list())
+    for (const tool of tools) {
+      const apply = contentApplyFact(tool.call.name, tool.result), receipt = committedFact(tool.call.name, tool.result)
+      if (!apply || !receipt || !['partial', 'unusable'].includes(apply.usability)) continue
+      const diagnostics = apply.diagnostics.filter(item => item.level !== 'info')
+      if (!diagnostics.length) continue
+      let observation: Awaited<ReturnType<DocumentToolGateway['verifyContentDiagnostics']>>
+      try {
+        observation = await this.options.gateway.verifyContentDiagnostics(record.runId,
+          currentIds.get(receipt.documentId) ?? receipt.documentId, diagnostics)
+      } catch { continue /* Missing authority or actual evidence cannot settle an old diagnostic. */ }
+      tool.currentContentVerification = { sourceDocumentId: receipt.documentId, observation }
+      if (currentContentRepaired(tool)) {
+        const fact = `宿主已在当前正式版本核实先前内容诊断已修复；原提交回执和诊断保留为历史事实：${JSON.stringify({ operationId: receipt.operationId, ...observation })}`
+        if (!record.messages.some(message => message.role === 'system' && message.content === fact)) {
+          record.messages.push({ role: 'system', content: fact })
+          await this.event(record, `${receipt.operationId}:current:${observation.revision}`, 'tool', {
+            toolName: tool.call.name, label: '核对修复结果', status: 'completed', text: '当前内容已确认修复原资源问题', output: JSON.stringify(observation) })
+          await this.checkpoint(record)
+        }
+      }
+    }
     return { ...record, tools }
   }
 
