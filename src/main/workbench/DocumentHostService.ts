@@ -316,10 +316,12 @@ export class DocumentHostService {
     return { bindingVersion: snapshot.binding.bindingVersion, ...await this.readDisk(snapshot.binding.path, snapshot.model.kind) }
   }
 
-  reconcileFile(input: ReconcileDocumentFile): Promise<DocumentSnapshot> {
+  reconcileFile(input: ReconcileDocumentFile, assertActive?: () => void): Promise<DocumentSnapshot> {
     return this.fileCoordinator.withFileAccess(() => this.registry.get(input.documentId).reconcileFile(input, async current => {
+      assertActive?.()
       if (current.binding.kind !== 'file') throw new Error('文件位置已改变')
       const disk = await this.readDisk(current.binding.path, current.model.kind)
+      assertActive?.()
       if (disk.version !== input.version) throw new Error('磁盘文件再次改变，请重新比较')
       if (!disk.model) throw new Error('磁盘文件已删除或移动，请另存当前稿或重新定位')
       if (input.choice === 'disk') {

@@ -88,6 +88,12 @@ export function workbenchImageSelection(runId: string, operation: 'generate' | '
   return imageRoles.selection(runId, operation)
 }
 /** Browser scope is frozen with the document run; outside-workspace uploads have no implicit grant. */
+export function workbenchSkillRootsForGrant(grant: ToolRunGrant): readonly SkillRoot[] {
+  const userSkillDirectory = path.resolve(process.env.COURSEWARE_SKILLS_DESTINATION || path.join(app.getPath('home'), '.agents', 'skills'))
+  return [{ source: 'user', directory: userSkillDirectory, authorizedRoot: userSkillDirectory },
+    ...(grant.fileAccess?.workspaceRoot ? [{ source: 'workspace' as const, directory: path.join(grant.fileAccess.workspaceRoot, '.agents', 'skills'),
+      authorizedRoot: grant.fileAccess.workspaceRoot }] : [])]
+}
 export function managedBrowserGrantForRun(grant: Parameters<NonNullable<HostToolServices['beginRun']>>[0]): ManagedBrowserGrant {
   const permission = grant.actor === 'agent' ? grant.fileAccess?.permission : 'read-only'
   return {
@@ -368,11 +374,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       if (grant.disclosedSettings && (await (await executionSettingsStore()).read()).profile.revision !== grant.disclosedSettings.profileRevision)
         throw new Error('模型或服务配置在发送时已变化；本次未请求模型，请核对后重新发送。')
       await roles.beginRun(grant.runId, grant.disclosedSettings)
-      const userSkillDirectory = path.resolve(process.env.COURSEWARE_SKILLS_DESTINATION || path.join(app.getPath('home'), '.agents', 'skills'))
-      const candidates: SkillRoot[] = [{ source: 'user', directory: userSkillDirectory, authorizedRoot: userSkillDirectory },
-        ...(grant.fileAccess?.workspaceRoot ? [{ source: 'workspace' as const, directory: path.join(grant.fileAccess.workspaceRoot, '.agents', 'skills'),
-          authorizedRoot: grant.fileAccess.workspaceRoot }] : [])]
-      frozenSkillRoots.set(grant.runId, candidates)
+      frozenSkillRoots.set(grant.runId, workbenchSkillRootsForGrant(grant))
       const controller = new AbortController()
       deliverySignals.set(grant.runId, controller)
       runGrants.set(grant.runId, structuredClone(grant))
