@@ -16,6 +16,11 @@ import { createEsbuildComponentCompiler } from '../../src/main/workbench/content
 import { patchHtmlAuthoringRecords } from '../../src/shared/html/htmlAuthoringRecords'
 import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { HtmlImportDesktopService } from '../../src/main/workbench/htmlImport/HtmlImportDesktopService'
+import { chromium } from 'playwright'
+import { buildPublishedCourseV3 } from '../../src/core/publish/componentPlatform/buildPublishedCourseV3'
+import { resolveWebResourceBindings } from '../../src/components/web/resources'
+import { authoredDocumentBootstrap, installAuthoredDocumentPrograms } from '../../src/components/web/authoredDocumentBootstrap'
+import type { WebRuntimeData } from '../../src/components/web/moduleGraph'
 
 // The disposable measurement window is unrelated to source capture, pagination
 // and archive closure. Use its real supported retained-program result here.
@@ -183,3 +188,48 @@ it('adopts HTML author records into the single H5 consumer with image override r
   expect(adopted.caption.overrides.geometry).toEqual(records.caption.overrides.geometry)
   expect(adopted.picture).toEqual(data.authoringRecords.picture)
 })
+
+it('runs saved nested iframe/srcdoc modules, CSS and images through the real native document consumer', async () => {
+  const escaped = (html: string) => html.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+  const nested = '<!doctype html><html><body><button id="count">0</button><script type="module" src="main.js"></script></body></html>'
+  const child = `<html><head><base href="assets/"></head><body><img id="picture" src="picture.svg"><button id="count">0</button><iframe name="nested" srcdoc="${escaped(nested)}"></iframe><script type="module" src="main.js"></script></body></html>`
+  const html = '<!doctype html><html><body><iframe name="experiment" id="experiment" src="child/page.html"></iframe><script>window.parentRuns=(window.parentRuns||0)+1</script></body></html>'
+  const f = await fixture(html)
+  await fs.mkdir(path.join(f.root, 'child/assets'), { recursive: true })
+  await fs.writeFile(path.join(f.root, 'child/page.html'), child)
+  await fs.writeFile(path.join(f.root, 'child/assets/main.js'), 'import "./theme.css";window.childRuns=(window.childRuns||0)+1;let count=0;document.getElementById("count").onclick=()=>document.getElementById("count").textContent=String(++count)')
+  await fs.writeFile(path.join(f.root, 'child/assets/theme.css'), '@import "nested.css";button{background-image:url(picture.svg)}')
+  await fs.writeFile(path.join(f.root, 'child/assets/nested.css'), 'button{color:rgb(1,2,3)}')
+  await fs.writeFile(path.join(f.root, 'child/assets/picture.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="8" height="6"><rect width="8" height="6" fill="green"/></svg>')
+  const result = await createCourseFromHtml({ sourcePath: f.sourcePath }, f.context, f.ports)
+  expect(result).toMatchObject({ kind: 'read', data: { saved: true } })
+  const reopened = await new DocumentHostService(path.join(f.root, 'nested-reopened')).open((result as { data: { path: string } }).data.path)
+  if (reopened.model.kind !== 'course-v10') throw new Error('Expected current course format')
+  const compilation = new InMemoryComponentCompilation(createEsbuildComponentCompiler())
+  const published = await buildPublishedCourseV3({ project: reopened.model.project, assetBytes: reopened.model.resources.assets }, { compilation })
+  expect(published.diagnostics).toEqual([])
+  const instance = published.payload.instances[published.payload.surfaces[0]!.childIds[0]!]!
+  const resources = Object.fromEntries(Object.entries(reopened.model.resources.assets).map(([id, bytes]) => [id,
+    `data:${reopened.model.kind === 'course-v10' ? reopened.model.project.assets[id]!.mimeType : ''};base64,${Buffer.from(bytes).toString('base64')}`]))
+  const projected = resolveWebResourceBindings(instance, id => resources[id])
+  const source = authoredDocumentBootstrap(projected.data as WebRuntimeData, { instanceId: instance.id, nonce: 'nested-test', resources,
+    bridge: programs => `(${installAuthoredDocumentPrograms.toString()})(${JSON.stringify(programs)})` })
+  const browser = await chromium.launch({ headless: true })
+  try {
+    const page = await browser.newPage()
+    await page.setContent(source)
+    const childFrame = page.frame({ name: 'experiment' })!
+    await childFrame.waitForFunction(() => (window as any).childRuns === 1)
+    await childFrame.locator('#count').click()
+    expect(await childFrame.locator('#count').textContent()).toBe('1')
+    expect(await childFrame.locator('#count').evaluate(node => getComputedStyle(node).color)).toBe('rgb(1, 2, 3)')
+    expect(await childFrame.locator('#picture').evaluate((node: HTMLImageElement) => ({ complete: node.complete, width: node.naturalWidth, height: node.naturalHeight }))).toEqual({ complete: true, width: 8, height: 6 })
+    expect(await childFrame.locator('#count').evaluate(node => getComputedStyle(node).backgroundImage)).toContain('data:image/svg+xml')
+    const nestedFrame = childFrame.childFrames().find(frame => frame.name() === 'nested')!
+    await nestedFrame.waitForFunction(() => (window as any).childRuns === 1)
+    await nestedFrame.locator('#count').click()
+    expect(await nestedFrame.locator('#count').textContent()).toBe('1')
+    expect(await childFrame.locator('#count').textContent()).toBe('1')
+    expect(await page.evaluate(() => (window as any).parentRuns)).toBe(1)
+  } finally { await browser.close() }
+}, 30_000)
