@@ -44,7 +44,8 @@ export async function buildComponentWebPackage(snapshot: DocumentSnapshot, compi
   const files: Record<string, Uint8Array> = {}
   const result = await buildComponentPublished(snapshot, compile, (asset, bytes) => {
     signal?.throwIfAborted()
-    const filename = `assets/${encodeURIComponent(asset.id)}.bin`
+    const extension = /\.([a-zA-Z0-9]+)$/.exec(asset.filename ?? asset.path)?.[1]?.toLowerCase() ?? 'bin'
+    const filename = `assets/${encodeURIComponent(asset.id)}.${extension}`
     files[filename] = bytes
     return filename
   }, undefined, signal, onProgress)
