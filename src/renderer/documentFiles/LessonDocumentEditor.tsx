@@ -2,7 +2,7 @@ import { documentSaveLabel } from '../lessonWorkspace/view/WorkspaceDocumentStat
 import type { MarkdownProjection } from '../../shared/document/markdownIdentity'
 import { captureMarkdownSelection, usePinnedSelection, workbenchSelection } from '../workbench/SelectionContextController'
 import { TextAiButton, textCardLabel } from '../workbench/elementCards/ElementTextCards'
-import { textTargetContent } from '../../core/drivers/course/elementFields'
+import { prepareDocumentTextEdit, requestDocumentSelection } from '../document/documentSelectionCommands'
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../document/SharedDocumentEditor'
 import type { ContextualEditTarget, DocumentContextSelection } from '../../shared/document/ports'
@@ -222,16 +222,12 @@ export const LessonDocumentEditor = forwardRef<LessonDocumentEditorHandle, Lesso
          const label = textCardLabel(target.ranges.map(range => range.before).join(''))
          return <TextAiButton documentId={documentId} selectionIdentity={JSON.stringify(target.ranges.map(range => [range.from, range.to, range.before]))}
            disabledReason={issue} start={async () => {
-           const snapshot = await workbenchSelection.prepare(documentId)
-           const capture = captureMarkdownSelection(snapshot, target), range = capture.targets[0]
-           if (capture.targets.length !== 1 || range?.kind !== 'markdown-range') throw new Error('请选择连续的一段文字再用 AI 修改。')
-           return { target: range, label, content: textTargetContent(snapshot.model, range) }
+           return prepareDocumentTextEdit(documentId, target, captureMarkdownSelection, label)
          }} />
        }}
        onContextualCommand={async (instruction, selection) => {
          if (!session.documentId) throw new Error('文档尚未就绪。')
-         const snapshot = await workbenchSelection.prepare(session.documentId)
-         await workbenchSelection.request(captureMarkdownSelection(snapshot, selection), instruction, true)
+         await requestDocumentSelection(session.documentId, selection, instruction, captureMarkdownSelection)
        }}
        onContextualDismiss={target => onContextualDismiss?.(bindTarget(target))} onUndo={() => session.undo()} onRedo={() => session.redo()} /></div>}
   </section>
