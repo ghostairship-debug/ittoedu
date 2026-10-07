@@ -141,10 +141,24 @@ export default function App() {
   useEffect(() => {
     const api = window.desktopAPI
     if (!api?.onDocumentExportBuildRequest || !api.sendDocumentExportBuildReply) return
-    return api.onDocumentExportBuildRequest(request => {
-      void buildDocumentExport(request).then(reply => api.sendDocumentExportBuildReply?.(reply))
+    const builds = new Map<string, { controller: AbortController; identity: import('../shared/workbench/toolPorts').ExportBuildRequest['identity'] }>()
+    const stopRequests = api.onDocumentExportBuildRequest(request => {
+      // Main owns request identity. Re-delivery does not start a second build.
+      if (builds.has(request.requestId)) return
+      const build = { controller: new AbortController(), identity: structuredClone(request.identity) }
+      builds.set(request.requestId, build)
+      void buildDocumentExport(request, build.controller.signal, undefined, undefined, progress => {
+        if (builds.get(request.requestId) === build && !build.controller.signal.aborted) void api.sendDocumentExportBuildProgress?.(progress)
+      }).then(reply => api.sendDocumentExportBuildReply?.(reply))
         .catch(error => console.error('文档导出生成回复失败', error))
+        .finally(() => { if (builds.get(request.requestId) === build) builds.delete(request.requestId) })
     })
+    const stopCancellation = api.onDocumentExportBuildCancel?.(request => {
+      const build = builds.get(request.requestId), identity = request.identity
+      if (build && build.identity.documentId === identity.documentId && build.identity.epoch === identity.epoch
+        && build.identity.revision === identity.revision && build.identity.projectId === identity.projectId) build.controller.abort()
+    })
+    return () => { stopRequests(); stopCancellation?.(); for (const build of builds.values()) build.controller.abort() }
   }, [])
   const lessonShell = useRef<LessonWorkspaceShellHandle>(null)
   const openingLaunchFiles = useRef(false)
