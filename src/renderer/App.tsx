@@ -122,7 +122,7 @@ function CourseWorkspaces(props: ComponentProps<typeof Workspace>) {
       surfaceId: document.surfaceId, activeStateId: document.activeStateId })
     const renderProject = projectWithBackgroundPreview(effective, preview, document.documentId, document.surfaceId, document.activeStateId, epoch)
     return <div key={document.documentId} hidden={!active} style={active ? { display: 'flex', flex: 1, minHeight: 0 } : undefined}>
-      <CourseV10RuntimeView documentId={document.documentId} model={document.model} surfaceId={document.surfaceId}
+      <CourseV10RuntimeView active={active} documentId={document.documentId} model={document.model} surfaceId={document.surfaceId}
         activeStateId={document.activeStateId}
         renderProject={renderProject}
         selectedInstanceId={document.selectedInstanceId} selectedInstanceIds={document.selectedInstanceIds}
