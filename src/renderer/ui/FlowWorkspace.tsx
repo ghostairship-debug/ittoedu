@@ -321,7 +321,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       }
     }
     visit(content.blocks)
-    return createCourseDocumentClipboardContext({ documentId: captured.documentId, project: captured.editingProject, resources: captured.resources, roots })
+    return createCourseDocumentClipboardContext({ documentId: captured.documentId, project: captured.project, resources: captured.resources, roots })
   }
   const clipboardResourcePort = (context: unknown) => {
     const captured = bridge.captureTarget(documentId)
