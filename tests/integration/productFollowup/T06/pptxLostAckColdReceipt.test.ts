@@ -8,6 +8,9 @@ import { DocumentHostService } from '../../../../src/main/workbench/DocumentHost
 import { ExecutionEngine } from '../../../../src/main/workbench/execution/ExecutionEngine'
 import { ExecutionRunStore } from '../../../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../../../src/main/workbench/execution/ExecutionEventStore'
+import { WorkspaceCreationOutcomeUnknown } from '../../../../src/main/workbench/WorkspaceFiles'
+import { AgentFileOutcomeUnknown } from '../../../../src/core/tools/AgentFileTools'
+import { documentDigest } from '../../../../src/core/documents/documentDigest'
 import { createBlankCourseProjectV10 } from '../../../../src/core/course/createCourseProjectV10'
 import { createCourseProjectV10Archive, openCourseProjectV10Archive } from '../../../../src/core/drivers/codecs/courseProjectV10Archive'
 import type { HostToolServices } from '../../../../src/core/tools/HostToolServices'
@@ -152,3 +155,48 @@ it('cold Engine lookup settles a PPTX create whose ACK was lost without converti
     await fs.rm(directory, { recursive: true, force: true })
   }
 }, 15_000)
+
+it('a creation receipt write failure stays unknown after publication and preserves the actual course without reopening or returning an ordinary failed create', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'T06-pptx-receipt-write-failure-'))
+  try {
+    const workspace = path.join(directory, 'workspace'), hostDirectory = path.join(directory, 'documents')
+    await fs.mkdir(workspace)
+    const host = new DocumentHostService(hostDirectory), runId = 'receipt-failure-run', callId = 'original-create'
+    const call = { name: 'course.importPptx', input: { path: 'source.pptx', destination: 'retained.h5lesson' } }
+    const operationId = host.tools.operationIdentity(runId, callId), requestDigest = documentDigest(call)
+    const destination = path.join(workspace, call.input.destination), receiptDirectory = path.join(hostDirectory, 'creation-receipts')
+    const project = createBlankCourseProjectV10('Published before receipt failure')
+    const bytes = createCourseProjectV10Archive({ project, resources: { assets: {}, components: {} } })
+    const rename = fs.rename.bind(fs)
+    let receiptWrites = 0
+    vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+      if (path.dirname(String(to)) === receiptDirectory) {
+        receiptWrites++
+        throw Object.assign(new Error('Controlled receipt disk-full after actual publication'), { code: 'ENOSPC' })
+      }
+      return rename(from, to)
+    })
+    const create = vi.spyOn(host.files, 'createFile'), open = vi.spyOn(host, 'open')
+    const publication = host.agentFiles.createPreparedCourse({ runId, workspaceRoot: workspace, permission: 'workspace', assertActive: () => {} },
+      { name: call.input.destination, bytes }, operationId, { requestDigest, issues: [] })
+    await expect(publication).rejects.toBeInstanceOf(AgentFileOutcomeUnknown)
+    expect(receiptWrites).toBe(1)
+    expect(create).toHaveBeenCalledTimes(1)
+    const ownerOutcome = await (create.mock.results[0].value as Promise<unknown>).catch(error => error)
+    expect(ownerOutcome).toBeInstanceOf(WorkspaceCreationOutcomeUnknown)
+    expect(ownerOutcome).toMatchObject({ code: 'tool-outcome-unknown' })
+    expect(openCourseProjectV10Archive(new Uint8Array(await fs.readFile(destination))).project.title).toBe('Published before receipt failure')
+    expect(await fs.readdir(workspace)).toEqual(['retained.h5lesson'])
+    expect(host.registry.list()).toHaveLength(0)
+    expect(open).not.toHaveBeenCalled()
+    const cold = new DocumentHostService(hostDirectory), coldCreate = vi.spyOn(cold.files, 'createFile')
+    expect(await cold.agentFiles.lookupPreparedCourse(runId, operationId, requestDigest)).toBeNull()
+    expect(coldCreate).not.toHaveBeenCalled()
+    expect(cold.registry.list()).toHaveLength(0)
+    expect(openCourseProjectV10Archive(new Uint8Array(await fs.readFile(destination))).project.title).toBe('Published before receipt failure')
+  } finally {
+    vi.restoreAllMocks()
+    if (!path.resolve(directory).startsWith(path.resolve(os.tmpdir()) + path.sep)) throw new Error('Unsafe cleanup')
+    await fs.rm(directory, { recursive: true, force: true })
+  }
+})
