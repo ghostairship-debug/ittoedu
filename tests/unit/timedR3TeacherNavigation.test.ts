@@ -60,6 +60,9 @@ it('replays the actual reveal recipe once in its retained scene while preserving
     next().click(); next().click()
     expect(root.querySelectorAll('.teaching-interaction p')).toHaveLength(2)
     expect(world.getState('progress')).toBe(2)
+    world.setPlaying(false); world.setPlaying(true)
+    expect(root.querySelectorAll('.teaching-interaction p')).toHaveLength(2)
+    expect(world.getState('progress')).toBe(2)
     world.setState('course-kept', 99); world.setState('global-kept', 77); world.setState('other-kept', 55)
     const initialEnters = new Map(enters), retainedRoot = world.contentElement(instance.id), retainedScopes = [...scopes.values()]
     expect(await navigation.execute({ type: 'scene.replay' })).toBe(true)
@@ -79,6 +82,18 @@ it('replays the actual reveal recipe once in its retained scene while preserving
     expect(await navigation.execute({ type: 'scene.replay' }, abort.signal)).toBe(false)
     expect(root.querySelectorAll('.teaching-interaction p')).toHaveLength(1)
     expect(replay).toHaveBeenCalledTimes(1)
+    cancelPresent = undefined
+    let zoom = 2, scroll = 160
+    const stopObservation = navigation.registerObservation(surface.id, { readZoom: () => zoom, setZoom: value => { zoom = value }, reset: () => { zoom = 1; scroll = 0 } })
+    navigation.moveBy(20, 30)
+    world.setPlaying(false)
+    expect(await navigation.replayCurrentSurface()).toBe(true)
+    expect(currentSurface).toBe(surface.id); expect(world.isPlaying()).toBe(false)
+    expect(root.querySelectorAll('.teaching-interaction p')).toHaveLength(0); expect(world.getState('progress')).toBe(0)
+    expect(zoom).toBe(1); expect(scroll).toBe(0); expect(navigation.placement()).toEqual({ x: 0, y: 0, zoom: 1 })
+    expect(world.getState('course-kept')).toBe(99); expect(world.getState('other-kept')).toBe(55)
+    expect(prepare).toHaveBeenCalledTimes(1); expect(disposed).not.toHaveBeenCalled(); expect(restart).not.toHaveBeenCalled()
+    stopObservation()
     expect(model).toEqual(authorBefore); expect(diagnostics).toEqual([])
   } finally { offReplay(); await world.dispose(); navigation.dispose(); dom.window.close() }
   expect([...scopes.values()].every(scope => !scope.isActive())).toBe(true)
@@ -106,5 +121,9 @@ it('restarts to the first scene after reset state blocks ordinary entry, retaini
     expect(navigation.canExecute({ type: 'scene.go', sceneId: first })).toBe(false)
     expect(await navigation.execute({ type: 'scene.go', sceneId: first })).toBe(false)
     expect(currentSurface).toBe('later'); expect(reports).toEqual(['首页被普通访问规则锁定'])
+    expect(navigation.teacherPort().canExecute({ type: 'scene.go', sceneId: first })).toBe(true)
+    expect(navigation.teacherPort().canExecute({ type: 'scene.go', sceneId: first, targetStateId: 'missing' })).toBe(false)
+    expect(await navigation.teacherPort().execute({ type: 'scene.go', sceneId: first })).toBe(true)
+    expect(currentSurface).toBe(first)
   } finally { await world.dispose(); navigation.dispose() }
 })

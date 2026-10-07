@@ -1,4 +1,4 @@
-import { StrictMode, useState } from 'react'
+import { StrictMode, useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -13,6 +13,7 @@ import { ComponentNavigationOwner } from '../../src/renderer/components/Componen
 import { createTeacherControllerHudGeometry, isGlobalTeacherController, projectTeacherControllerInstances, teacherControllerReferenceSize } from '../../src/shared/teacherControllerViewportGeometry'
 import { componentFragmentStateKey } from '../../src/player/componentPlatform/fragments'
 import { FlowWorkspace } from '../../src/renderer/ui/FlowWorkspace'
+import { createComponentSpatialCameraPort } from '../../src/player/surfaces/spatial/componentSpatialAdapter'
 
 const flowProbe = vi.hoisted(() => ({ state: {} as Record<string, any> }))
 vi.mock('../../src/renderer/store/editorStore', () => ({ useEditorStore: (select: (state: typeof flowProbe.state) => unknown) => select(flowProbe.state) }))
@@ -160,6 +161,16 @@ it('resets the current page fragment progress without changing another page', as
     frames: [{ id: 'follow', title: '当前正文', targetInstanceId: 'current', pose: { x: 0, y: 0, zoom: 1 } }] } }
   expect(await navigation.replayCurrentSurface()).toBe(true)
   expect(state.get(componentFragmentStateKey('current'))).toBe(0); expect(state.get(componentFragmentStateKey('other'))).toBe(1)
+  const camera = createComponentSpatialCameraPort({ x: 50, y: 60, zoom: 2 })
+  let frameId: string | null = 'follow', stepIndex: number | null = 1
+  const off = navigation.registerCamera('current', camera, { frameId: () => frameId, selectFrame: value => { frameId = value },
+    stepIndex: () => stepIndex, selectStep: value => { stepIndex = value } })
+  course.surfaces[0].presentation = { initialStateId: 'initial', states: [{ id: 'initial', title: '初始', overrides: {} }] }
+  expect(await navigation.replayCurrentSurface()).toBe(true)
+  expect(camera.read()).toEqual({ x: 0, y: 0, zoom: 1 })
+  expect(frameId).toBeNull(); expect(stepIndex).toBeNull()
+  expect(state.get(componentFragmentStateKey('current'))).toBe(0); expect(state.get(componentFragmentStateKey('other'))).toBe(1)
+  off(); camera.dispose()
   navigation.dispose()
 })
 
@@ -221,4 +232,29 @@ it('forwards a live author gesture preview through the actual runtime host and r
   await player.dispose()
   expect(player.runtime.previewAuthorSpot(spot.id, { translateX: 40 })).toBe(false)
   expect(previewGeometry).toHaveBeenCalledTimes(2); root.remove()
+})
+
+it('awaits the new React surface camera before accepting a teacher jump to its authored frame', async () => {
+  const course = project(), pose = { x: 70, y: 80, zoom: 2 }
+  course.surfaces.push({ id: 'spatial', kind: 'spatial', title: '空间', childIds: [], designSize: { width: 800, height: 600 },
+    spatial: { home: { x: 0, y: 0, zoom: 1 }, frames: [{ id: 'detail', title: '目标镜头', pose }] } })
+  const camera = createComponentSpatialCameraPort({ x: 0, y: 0, zoom: 1 })
+  let ports!: CourseV10RuntimePorts
+  function Projection({ runtime }: { runtime: CourseV10RuntimePorts }) {
+    useEffect(() => runtime.surfaceId === 'spatial' ? runtime.registerCamera('spatial', camera) : undefined, [runtime.surfaceId])
+    return <div>{runtime.surfaceId}</div>
+  }
+  function Editor() {
+    const [surface, select] = useState('page')
+    return <CourseV10RuntimeView documentId="camera-commit" model={{ kind: 'course-v10', project: course, resources }}
+      surfaceId={surface} selectedInstanceId={null} player={false} onSelect={() => {}} onSurfaceSelect={select} report={() => {}}
+      renderWorkspace={runtime => { ports = runtime; return <Projection runtime={runtime} /> }} />
+  }
+  const ui = render(<Editor />)
+  act(() => ports.setPlaying(true))
+  let accepted: Promise<boolean>
+  act(() => { accepted = ports.navigation.teacherPort().execute({ type: 'scene.go', sceneId: 'spatial', targetStateId: 'detail' }) })
+  await act(async () => expect(await accepted!).toBe(true))
+  expect(camera.read()).toEqual(pose); expect(ui.container.textContent).toBe('spatial')
+  ui.unmount(); camera.dispose()
 })

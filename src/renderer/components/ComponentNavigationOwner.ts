@@ -277,6 +277,9 @@ export class ComponentNavigationOwner implements TeacherControllerPort {
         : await this.presentState(destination, stateId === undefined ? surface?.presentation?.initialStateId ?? null : stateId, signal))) return false
       if (signal?.aborted) return false
       if (action.type === 'scene.replay') {
+        // A spatial surface can also have presentation states; its tour cursor still returns to home.
+        const entry = this.cameras.get(destination)
+        if (entry) { entry.binding?.selectFrame(null); entry.binding?.selectStep?.(null); entry.frameId = null; entry.stepIndex = null }
         this.resetView()
         for (const listener of this.replayListeners) listener(destination)
       }

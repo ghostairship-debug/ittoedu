@@ -538,10 +538,8 @@ export class ComponentPlatformRuntime {
   }
   audio(): AudioManager | undefined { return this.audioManager }
   isPlaying(): boolean { return this.playing }
-  dispatchPresenterCommand(command: 'next' | 'previous'): boolean {
-    const handled = Boolean(this.eventListeners.get('__presenter.command')?.size)
-    if (this.playing) this.emit('__presenter.command', command)
-    return this.playing && handled
+  dispatchPresenterCommand(command: 'next' | 'previous'): Promise<boolean> {
+    return this.interactions.dispatchPresenterCommand(command)
   }
   setPlaying = (active: boolean): void => {
     if (this.retired || active === this.playing || this.mode === 'capture') return
