@@ -871,17 +871,19 @@ export class DocumentToolGateway implements ToolGateway {
 
   /** Main proves task lineage; the original committed call and current exact content prove the renewed range. */
   async recoverBoundContentOutput(priorRunId: string, callId: string, call: ModelToolCall,
-    binding: NonNullable<ToolRunGrant['contentOutput']>, currentDocumentId = binding.documentId): Promise<ToolRunGrant['contentOutput'] | null> {
+    binding: NonNullable<ToolRunGrant['contentOutput']>, currentDocumentId = binding.documentId,
+    capturedTarget?: { documentId: string; target: ToolTarget }): Promise<ToolRunGrant['contentOutput'] | null> {
     if (call.name !== 'text.replace') return null
     const parsed = canonicalToolRegistration('text.replace')!.inputSchema.safeParse(call.input)
     if (!parsed.success || !('content' in parsed.data)) return null
     const input = parsed.data as { target?: string; content: string; format?: 'text' | 'html' }
     if (input.target) {
       const captured = this.handles.get(input.target)
-      if (!captured || captured.runId !== priorRunId || captured.documentId !== binding.documentId) return null
+      const original = captured && captured.runId === priorRunId ? captured : capturedTarget
+      if (!original || original.documentId !== binding.documentId) return null
       const fieldIdentity = (target: ToolTarget) => target.kind === 'markdown-range' ? { kind: target.kind, from: target.from }
         : target.kind === 'course-instance' ? { ...target, to: undefined } : target
-      if (!equalComponentValue(fieldIdentity(captured.target), fieldIdentity(binding.target))) return null
+      if (!equalComponentValue(fieldIdentity(original.target), fieldIdentity(binding.target))) return null
     }
     const receipt = await this.lookup(priorRunId, callId, call)
     if (receipt?.kind !== 'document-operation' || !['applied', 'unchanged'].includes(receipt.result.status)) return null
