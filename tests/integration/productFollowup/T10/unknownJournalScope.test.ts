@@ -19,7 +19,8 @@ it('unknown-owner unreadable journal permits unrelated non-readOnly availability
   const directory = path.join(root, 'recovery'); await fs.mkdir(directory)
   const damaged = path.join(directory, `${'0'.repeat(64)}.journal`)
   // Complete invalid header, no document/path record and no binding index.
-  await fs.writeFile(damaged, 'unreadable complete recovery record')
+  const damagedSource = 'unreadable complete recovery record'.repeat(4)
+  await fs.writeFile(damaged, damagedSource)
   const journal = createDocumentJournal({ directory })
   expect(await journal.listBindings()).toEqual([])
   expect(journal.recoveryIssues).toHaveLength(1)
@@ -32,7 +33,7 @@ it('unknown-owner unreadable journal permits unrelated non-readOnly availability
   expect(await fs.readFile(filename, 'utf8')).toBe('# Unrelated teacher content')
   const cold = new DocumentHostService(directory)
   expect(await cold.open(filename)).toMatchObject({ dirty: false, model: { source: '# Unrelated teacher content' } })
-  expect(await fs.readFile(damaged, 'utf8')).toBe('unreadable complete recovery record')
+  expect(await fs.readFile(damaged, 'utf8')).toBe(damagedSource)
   await journal.listBindings()
   expect(journal.recoveryIssues).toHaveLength(1)
 })
