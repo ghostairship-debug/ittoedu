@@ -100,6 +100,15 @@ function sameReadSource(failed: ExecutionToolRecord, later: ExecutionToolRecord)
   const source = input(failed)?.path
   return typeof source === 'string' && source === input(later)?.path
 }
+/** The changed-facts error rejected the old conclusion before commit. A later
+ * model turn may correct its contents while keeping the same formal write scope. */
+function correctedReadBasis(failed: ExecutionToolRecord, later: ExecutionToolRecord): boolean {
+  return failed.result?.kind === 'error' && failed.result.code === 'read-basis-changed'
+    && failed.requestId !== later.requestId && failed.call.name === later.call.name
+    && !!failed.effectTargets?.length && !!later.effectTargets?.length
+    && JSON.stringify(stable(failed.effectTargets)) === JSON.stringify(stable(later.effectTargets))
+    && later.state === 'returned' && !failedTool(later) && knownApplication(later.call.name, later.result)
+}
 const delivered = (tool: ExecutionToolRecord) => !failedTool(tool)
   && (knownApplication(tool.call.name, tool.result) || fileCreated(tool.call.name, tool.result)
     || tool.result?.kind === 'read' && (tool.call.name === 'file.read' || tool.call.name === 'material.read'
@@ -193,6 +202,7 @@ function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord
       || tool.result?.kind === 'error' && /outcome-unknown/.test(tool.result.code)) return true
     if (record.tools.slice(index + 1).some(later => sameObservedTarget(tool, later))) return false
     if (record.tools.slice(index + 1).some(later => sameReadSource(tool, later))) return false
+    if (record.tools.slice(index + 1).some(later => correctedReadBasis(tool, later))) return false
     if (optionalObservationFailure(tool)) return false
     if (resolvedDelivery.has(tool)) return false
     if (record.tools.slice(index + 1).some(later => (requestKey(later) === requestKey(tool) || sameIntendedEdit(tool, later))
