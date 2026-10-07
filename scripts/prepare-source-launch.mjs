@@ -26,10 +26,11 @@ export async function prepareSourceLaunch(root = repository, run = runScript) {
   try { previous = JSON.parse(await fs.readFile(filename, 'utf8')) } catch (error) { if (error.code !== 'ENOENT') console.warn('启动构建索引不可读，将重新核对构建') }
   if (previous.lock && previous.lock !== lock && previous.installation === installation)
     throw new Error('依赖锁已变更；请先执行 npm ci 后重试。安装完成会自动重建，无需删除启动索引。')
-  const shared = ['src/shared', 'src/core', 'package.json', 'package-lock.json', 'node_modules/.package-lock.json']
+  const shared = ['src/shared', 'src/core', 'src/components', 'scripts/generate-component-builtin-sources.ts', 'package.json', 'package-lock.json', 'node_modules/.package-lock.json']
+  const rendererHtml = (await fs.readdir(root)).filter(name => name.endsWith('.html')).sort()
   const groups = [
     { name: 'player', inputs: [...shared, 'src/player', 'vite.player.config.ts', 'scripts/htmlPreviewAgentPlugin.ts', 'resources/built-in-components'], outputs: ['dist-player'], scripts: ['check:built-in-components', 'build:player'] },
-    { name: 'renderer', inputs: [...shared, 'src/player', 'src/renderer', 'vite.renderer.config.ts', 'scripts/htmlPreviewAgentPlugin.ts', 'dist-player'], outputs: ['dist-renderer'], scripts: ['build:renderer'] },
+    { name: 'renderer', inputs: [...shared, ...rendererHtml, 'src/player', 'src/renderer', 'vite.renderer.config.ts', 'scripts/htmlPreviewAgentPlugin.ts', 'dist-player'], outputs: ['dist-renderer'], scripts: ['build:renderer'] },
     { name: 'electron', inputs: [...shared, 'src/main', 'src/preload', 'tsconfig.electron.json', 'scripts/build-electron.mjs'], outputs: ['dist-electron'], scripts: ['build:electron'] },
     { name: 'clipboard', inputs: ['resources/clipboard-file-list/Program.cs', 'scripts/build-clipboard-helper.ps1'], outputs: ['resources/clipboard-file-list/clipboard-file-list.exe'], scripts: ['build:clipboard-helper'] },
     { name: 'publish', inputs: ['resources/file-publish/Program.cs', 'scripts/build-file-publish-helper.ps1'], outputs: ['resources/file-publish/file-publish.exe'], scripts: ['build:file-publish-helper'] },

@@ -126,6 +126,23 @@ it('reuses a matching source build and accepts a completed dependency reinstall 
     calls.length = 0
     expect(await prepareSourceLaunch(root, run)).toEqual([])
     expect(calls).toEqual([])
+    for (const input of ['src/components/text/render.ts', 'scripts/generate-component-builtin-sources.ts']) {
+      const file = path.join(root, input)
+      await fs.mkdir(path.dirname(file), { recursive: true })
+      await fs.writeFile(file, 'changed source input')
+      expect(await prepareSourceLaunch(root, run)).toEqual(['player', 'renderer', 'electron'])
+      calls.length = 0
+    }
+    for (const input of ['index.html', 'document-export.html', 'pptx-import.html', 'compute.html']) {
+      await fs.writeFile(path.join(root, input), '<html>new worker input</html>')
+      expect(await prepareSourceLaunch(root, run)).toEqual(['renderer'])
+      expect(calls).toEqual(['build:renderer'])
+      calls.length = 0
+      await fs.writeFile(path.join(root, input), '<html>modified worker input</html>')
+      expect(await prepareSourceLaunch(root, run)).toEqual(['renderer'])
+      expect(calls).toEqual(['build:renderer'])
+      calls.length = 0
+    }
     await fs.writeFile(path.join(root, 'package-lock.json'), 'new requested lock')
     await expect(prepareSourceLaunch(root, run)).rejects.toThrow('npm ci')
     expect(calls).toEqual([])
