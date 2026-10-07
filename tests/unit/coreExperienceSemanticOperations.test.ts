@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { expect, it } from 'vitest'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
-import { applyComponentOperation, captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
+import { applyComponentOperation, captureComponentOperation, resizeComponentSurfacesEdits } from '../../src/core/drivers/courseV10Operations'
 import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { DocumentSession } from '../../src/core/documents/DocumentSession'
 import { prepareCourseObjectPaste } from '../../src/renderer/composition/crossSurfaceCommands'
@@ -90,4 +90,43 @@ it('keeps professional presentation and field metadata for source-customized def
   const definition = { ...WEB_DEFINITION, implementation: { kind: 'source' as const, language: 'javascript' as const, source: 'export default {}' }, professionalBuiltinKey: 'guoling.web', dataSchema: {} as JsonObject }
   expect(componentDefinitionPresentation(definition).builtinKey).toBe('guoling.web')
   expect(componentFieldPresentation(definition, ['html']).label).toBe('HTML 内容')
+})
+
+it('preserves authored coordinates by default and explicitly refits each page, state and shared branch once', () => {
+  const project = fixture(), surfaceId = project.surfaces[0].id
+  project.surfaces[0].designSize = { width: 800, height: 400 }
+  const groupFrame = { width: 200, height: 100, transform: [0, 1, -1, 0, 20, 30] as [number, number, number, number, number, number] }
+  project.instances.group = { id: 'group', definitionId: WEB_DEFINITION.id, data: { html: '' }, frame: groupFrame, childIds: ['a'] }
+  project.instances.flat = { id: 'flat', definitionId: WEB_DEFINITION.id, data: { html: '' }, childIds: ['child'] }
+  project.instances.child = { ...project.instances.a, id: 'child', frame: { width: 20, height: 10, transform: [1, 0, 0, 1, 40, 10] } }
+  project.instances.b = { ...project.instances.a, id: 'b' }
+  project.instances.global = { ...project.instances.a, id: 'global' }
+  project.global.underlay.push('global')
+  project.surfaces[0].childIds = ['group', 'flat']
+  project.surfaces.push({ id: 'second', kind: 'slide', title: '第二页', childIds: ['b'], designSize: { width: 400, height: 400 } })
+  project.surfaces[0].presentation = { states: [
+    { id: 'framed', title: '有父框', overrides: { flat: { frame: { width: 200, height: 100, transform: [1, 0, 0, 1, 30, 20] } } } },
+    { id: 'frameless', title: '无父框', overrides: { group: { frame: null }, global: { frame: { width: 30, height: 20, transform: [1, 0, 0, 1, 20, 10] } } } },
+  ] }
+  const resize = { surfaceIds: [surfaceId, 'second'], designSize: { width: 1200, height: 1200 } }
+  const preserve = applyComponentOperation(project, captureComponentOperation(project,
+    resizeComponentSurfacesEdits(project, { ...resize, mode: 'preserve' })))
+  expect(preserve.instances).toEqual(project.instances)
+  expect(preserve.surfaces[0].presentation).toEqual(project.surfaces[0].presentation)
+  const edits = resizeComponentSurfacesEdits(project, { ...resize, mode: 'contain', globalReferenceSurfaceId: surfaceId })
+  const result = applyComponentOperation(project, captureComponentOperation(project, edits))
+  expect(result.instances.group.frame?.transform).toEqual([0, 1.5, -1.5, 0, 30, 345])
+  expect(result.instances.a.frame).toEqual(project.instances.a.frame)
+  expect(result.instances.b.frame?.transform).toEqual([3, 0, 0, 3, 30, 60])
+  expect(result.instances.global.frame?.transform).toEqual([1.5, 0, 0, 1.5, 15, 330])
+  for (const id of project.global.overlay) expect(result.instances[id]).toEqual(project.instances[id])
+  const framed = resolveComponentPresentation(result, surfaceId, 'framed')
+  expect(framed.instances.flat.frame?.transform).toEqual([1.5, 0, 0, 1.5, 45, 330])
+  expect(framed.instances.child.frame).toEqual(project.instances.child.frame)
+  const frameless = resolveComponentPresentation(result, surfaceId, 'frameless')
+  expect(frameless.instances.group.frame).toBeUndefined()
+  expect(frameless.instances.a.frame?.transform).toEqual([1.5, 0, 0, 1.5, 15, 330])
+  expect(frameless.instances.global.frame?.transform).toEqual([1.5, 0, 0, 1.5, 30, 315])
+  const driver = new CourseV10Driver()
+  expect(driver.load(driver.serialize({ kind: 'course-v10', project: result, resources: { assets: {}, components: {} } }))).toMatchObject({ project: result })
 })

@@ -3,6 +3,9 @@ import type { ComponentAppliedChanges, ComponentEdit, ComponentExpectation, Comp
 import { componentDefinitionBuiltinKey, componentIsLocked, resolveComponentPresentation, containerChildIds, owningContainer, type ComponentContainer, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
 import { componentOperationBatchSchema, courseProjectV10Schema } from '../../shared/contracts/component-platform/schema'
 import { componentInteractionDataSchema } from '../../shared/componentInteractionData'
+import type { ComponentFrame } from '../../shared/contracts/component-platform/frame'
+import { DEFAULT_SLIDE_CANVAS, sharedSlideFrameMapping } from '../../shared/slideCanvas'
+import { multiplyMatrices, type AffineMatrix } from '../components/geometry'
 
 export class ComponentOperationConflict extends Error {
   readonly code = 'component-field-conflict'
@@ -243,6 +246,71 @@ function writeField(root: unknown, path: string[], value: JsonValue): void {
   if (!current || typeof current !== 'object') throw new Error('字段目标不是对象')
   if (Array.isArray(current) && (!/^(0|[1-9]\d*)$/.test(path.at(-1)!) || !Object.hasOwn(current, path.at(-1)!))) throw new Error('数组元素已不存在')
   Object.defineProperty(current, path.at(-1)!, { value: structuredClone(value), writable: true, enumerable: true, configurable: true })
+}
+
+/** Explicit author resize: viewport fitting remains a read-only display concern. */
+export function resizeComponentSurfacesEdits(project: CourseProjectV10, input: {
+  surfaceIds: readonly string[]
+  designSize: { width: number; height: number } | null
+  mode: 'preserve' | 'contain'
+  /** Shared author objects move once, using this captured page as their reference. HUD is independent. */
+  globalReferenceSurfaceId?: string
+}): ComponentEdit[] {
+  const surfaces = [...new Set(input.surfaceIds)].map(id => {
+    const surface = project.surfaces.find(value => value.id === id)
+    if (!surface || surface.kind !== 'slide') throw new Error('尺寸修改目标演示页已不存在')
+    return surface
+  })
+  const edits: ComponentEdit[] = surfaces.filter(surface => !equalComponentValue(surface.designSize ?? null, input.designSize))
+    .map(surface => ({ type: 'surface.designSize.set', surfaceId: surface.id, designSize: input.designSize }))
+  if (input.mode === 'preserve' || !surfaces.length) return edits
+  const nextSize = input.designSize ?? DEFAULT_SLIDE_CANVAS
+  const matrix = (surface: CourseProjectV10['surfaces'][number]): AffineMatrix => {
+    const mapping = sharedSlideFrameMapping(surface.designSize ?? DEFAULT_SLIDE_CANVAS, nextSize)
+    return [mapping.scale, 0, 0, mapping.scale, mapping.offsetX, mapping.offsetY]
+  }
+  const transforms = new Map(surfaces.map(surface => [surface.id, matrix(surface)]))
+  const reference = input.globalReferenceSurfaceId ? project.surfaces.find(surface => surface.id === input.globalReferenceSurfaceId) : undefined
+  if (input.globalReferenceSurfaceId && !reference) throw new Error('共享层参考演示页已不存在')
+  const globalMatrix = reference ? matrix(reference) : undefined
+  const globalRoots = [...project.global.underlay, ...project.global.overlay].filter(id =>
+    componentDefinitionBuiltinKey(project.definitions[project.instances[id]?.definitionId]) !== 'guoling.navigation')
+  // Transform the first framed ancestor of each branch. Descendants remain in that ancestor's coordinates.
+  const frames = (view: CourseProjectV10, roots: readonly string[], transform: AffineMatrix) => {
+    const result = new Map<string, ComponentFrame | undefined>()
+    const visit = (id: string, transformed: boolean) => {
+      const instance = view.instances[id]
+      if (!instance) return
+      const frame = instance.frame
+      result.set(id, frame && !transformed ? { ...frame, transform: [...multiplyMatrices(transform, frame.transform)] } : frame)
+      instance.childIds?.forEach(child => visit(child, transformed || Boolean(frame)))
+    }
+    roots.forEach(id => visit(id, false))
+    return result
+  }
+  const baseFrames = new Map<string, ComponentFrame | undefined>()
+  for (const surface of surfaces) for (const pair of frames(project, surface.childIds, transforms.get(surface.id)!)) baseFrames.set(...pair)
+  if (globalMatrix) for (const pair of frames(project, globalRoots, globalMatrix)) baseFrames.set(...pair)
+  for (const [instanceId, frame] of baseFrames) if (frame && !equalComponentValue(frame, project.instances[instanceId].frame))
+    edits.push({ type: 'frame.set', instanceId, frame })
+  for (const surface of project.surfaces) {
+    const transform = transforms.get(surface.id)
+    if (!surface.presentation || !transform && !globalMatrix) continue
+    const presentation = structuredClone(surface.presentation)
+    for (const state of presentation.states) {
+      const view = resolveComponentPresentation(project, surface.id, state.id)
+      const desired = transform ? frames(view, surface.childIds, transform) : new Map<string, ComponentFrame | undefined>()
+      if (globalMatrix) for (const pair of frames(view, globalRoots, globalMatrix)) desired.set(...pair)
+      for (const [id, frame] of desired) {
+        const base = baseFrames.has(id) ? baseFrames.get(id) : project.instances[id].frame
+        // State parents may add/remove a frame; compensate their children against the resized base once.
+        if (state.overrides[id]?.frame !== undefined || !equalComponentValue(frame, base))
+          (state.overrides[id] ??= {}).frame = frame ?? null
+      }
+    }
+    if (!equalComponentValue(presentation, surface.presentation)) edits.push({ type: 'surface.presentation.set', surfaceId: surface.id, presentation })
+  }
+  return edits
 }
 
 /** Convert only explicitly overridable properties at the captured editing state. */
