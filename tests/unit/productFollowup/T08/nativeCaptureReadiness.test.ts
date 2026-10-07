@@ -37,7 +37,7 @@ function networkControl() {
 function viewport() {
   const root = document.createElement('section'); document.body.append(root)
   Object.defineProperties(root, { clientWidth: { value: 640 }, clientHeight: { value: 360 } })
-  // jsdom has no layout or decoder. Only these two browser facilities are substituted.
+  // jsdom has no browser layout, decoding or Blob URL registry; Runtime and capture owners remain real.
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, width: 320, height: 200, left: 0, top: 0, right: 320, bottom: 200, toJSON() {} })
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { queueMicrotask(() => callback(0)); return 1 })
   vi.stubGlobal('URL', class extends URL { static createObjectURL() { return 'blob:controlled-browser-resource' }; static revokeObjectURL() {} })
@@ -94,7 +94,7 @@ it('disposal cancels a real pending output-region capture and a late response ca
     expect(await capturing).toHaveProperty('error')
     remote.resolve(); await turns()
     expect(root.children).toHaveLength(0)
-    expect(player.runtime.contentElement('photo')).toBeNull()
+    expect(player.runtime.contentElement('photo')).toBeUndefined()
     expect(remote.network).toHaveBeenCalledOnce()
   } finally { remote.close(); player ??= await mounting; await player.dispose() }
 })
