@@ -1,3 +1,4 @@
+import { nanoid } from 'nanoid'
 import type { CompiledComponentModule } from '../../core/components/compilation/types'
 import type { ComponentInstance, ComponentRuntimeScope, ComponentTarget, JsonValue, ComponentRuntimeContext, ComponentAuthorSpotInput, ComponentAuthorPreviewCallbacks, ComponentAuthorGeometry, ComponentMediaCommand, ComponentMediaRegistration, ComponentMediaPort, ComponentInteractionPort, ComponentPresentationPort, ComponentMediaState, ComponentMediaRegistrationOptions, ComponentLayoutInput, ComponentLayoutPort } from '../../shared/contracts/component-platform'
 import type { PreparedComponentRuntime } from '../../player/components/runtime/ComponentRuntimeHost'
@@ -564,10 +565,10 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
 
 /** One source lease/generation. No author module is imported by the workbench realm. */
 export async function prepareSandboxComponent(artifact: CompiledComponentModule, signal: AbortSignal, snapshots: SnapshotPorts): Promise<PreparedComponentRuntime> {
-  const leaseId = `component-${crypto.randomUUID()}`
+  const leaseId = `component-${nanoid()}`
   const bootstrapApi = snapshots.bootstrap ?? (typeof window.desktopAPI?.createComponentBootstrap === 'function' && typeof window.desktopAPI?.releaseComponentBootstrap === 'function' ? window.desktopAPI : undefined)
   if (signal.aborted) throw new Error('组件源码准备已取消')
-  const nonce = crypto.randomUUID(), iframe = document.createElement('iframe')
+  const nonce = nanoid(), iframe = document.createElement('iframe')
   iframe.setAttribute('sandbox', 'allow-scripts')
   iframe.setAttribute('title', '组件内容')
   Object.assign(iframe.style, { border: '0', width: '100%', height: '100%' })
