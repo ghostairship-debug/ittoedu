@@ -75,7 +75,7 @@ export function createComponentModelProjection(context: {
     if (!project || disposed) return
     const geometry = createTeacherControllerHudGeometry({ referenceSize: teacherControllerReferenceSize(project),
       viewportRect: { x: 0, y: 0, width: root.clientWidth, height: root.clientHeight } })
-    const display = projectTeacherControllerInstances(project, geometry, undefined, context.teacherController)
+    const display = projectTeacherControllerInstances(project, geometry, context.teacherController)
     for (const id of [...project.global.underlay, ...project.global.overlay]) {
       if (!isGlobalTeacherController(project, id)) continue
       const node = nodes.get(id), frame = display.instances[id]?.frame
