@@ -568,6 +568,16 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
   // The author module still arrives over a dedicated port and is loaded by the child.
   const bridge = (programs?: import('../../components/web/authoredDocumentBootstrap').AuthoredDocumentPrograms) =>
     `(function(){${programs ? `const authored=(${installAuthoredDocumentPrograms.toString()})(${JSON.stringify(programs)});` : ''}(${contentRealmBridge.toString()})(${JSON.stringify(nonce)}, {isMeasured:(${isMeasuredWebFragmentBox.toString()}),extent:(${measuredFragmentExtent.toString()}),refreshResources:(${refreshWebResourceReferences.toString()}),authoring:(${createDomAuthoring.toString()})}${programs ? ',authored' : ''})})()`
+  const projectInstance = async (instance: ComponentInstance) => {
+    const projected = await snapshots.instance?.(instance) ?? instance
+    const data = projected.data as WebRuntimeData
+    if (!['guoling.web', 'guoling.html-program'].includes(snapshots.builtinKey ?? '')
+      || !data || typeof data.html !== 'string' || htmlDocumentKind(data.html) === 'document') return projected
+    return { ...projected, data: { ...data, html: authoredDocumentBootstrap(data, {
+      nonce, instanceId: instance.id, nestedOnly: true, resources: snapshots.resources?.() ?? {},
+      bridge: programs => `(${installAuthoredDocumentPrograms.toString()})(${JSON.stringify(programs)})`,
+    }) } }
+  }
   let lease: ComponentBootstrapLease | undefined, htmlUrl: string | undefined
   const channel = new MessageChannel(), port = channel.port1
   let scope: ComponentRuntimeScope | undefined, authoring: ComponentRuntimeContext['authoring'], layoutPort: ComponentLayoutPort | undefined, disposed = false, sequence = 0
@@ -939,7 +949,7 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
         const data = context.instance.data && typeof context.instance.data === 'object' && !Array.isArray(context.instance.data) ? context.instance.data : undefined
         const web = ['guoling.web', 'guoling.html-program'].includes(snapshots.builtinKey ?? '')
         const documentKind = web && typeof data?.html === 'string' ? htmlDocumentKind(data.html) : undefined
-        const projected = await snapshots.instance?.(context.instance) ?? context.instance
+        const projected = await projectInstance(context.instance)
         if (signal.aborted || !scope.isActive()) throw new Error('组件挂载已取消')
         const resources = snapshots.resources?.() ?? {}
         const html = documentKind === 'document' && context.root
@@ -968,7 +978,7 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
           fragmentStateKey: componentFragmentStateKey(context.instance.id), themeCss: snapshots.themeCss?.(), resources: snapshots.resources?.(), resourceBindings: snapshots.resourceBindings,
           authorHtml, documentKind, builtinKey: snapshots.builtinKey, resourceCss: typeof data?.css === 'string' ? data.css : undefined })
         if (!scope.isActive()) throw new Error('组件挂载已取消')
-        return { update: async instance => { authorInstance = instance; const projected = await snapshots.instance?.(instance) ?? instance; return request('update', { instance: projected, state: snapshots.state(), targets: targetsFor(projected), themeCss: snapshots.themeCss?.(), resources: snapshots.resources?.(), interaction: interactionSnapshot(),
+        return { update: async instance => { authorInstance = instance; const projected = await projectInstance(instance); return request('update', { instance: projected, state: snapshots.state(), targets: targetsFor(projected), themeCss: snapshots.themeCss?.(), resources: snapshots.resources?.(), interaction: interactionSnapshot(),
             resourceCss: instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) && typeof instance.data.css === 'string' ? instance.data.css : undefined,
             authorHtml: snapshots.htmlAuthoring && instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data.html : undefined }) },
           updatePlacement: frame => {

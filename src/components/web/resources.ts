@@ -316,6 +316,7 @@ export function resolveWebResourceBindings(instance: ComponentInstance, resolve:
   const htmlAttribute = (value: string) => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
   // Preserve author syntax, doctype and parser order. DOM serialization would add
   // implicit document tags and turn a no-doctype document into a different load.
+  const projectHtml = (sourceHtml: string): string => {
   const edits: Array<{ start: number; end: number; value: string }> = []
   const visit = (node: DefaultTreeAdapterTypes.Node) => {
     if ('tagName' in node) {
@@ -323,9 +324,9 @@ export function resolveWebResourceBindings(instance: ComponentInstance, resolve:
       for (const attribute of node.attrs) {
         const name = attribute.prefix ? `${attribute.prefix}:${attribute.name}` : attribute.name
         const location = node.sourceCodeLocation?.attrs?.[name]
-        if (!location || !['src', 'href', 'poster', 'srcset', 'xlink:href', 'style'].includes(name) && !/^on[a-z]+$/i.test(name)) continue
-        const raw = data.html.slice(location.startOffset, location.endOffset)
-        const projected = name === 'style' ? cssUrls(attribute.value) : /^on[a-z]+$/i.test(name) ? javascript(attribute.value) : references(attribute.value)
+        if (!location || !['src', 'href', 'poster', 'srcset', 'srcdoc', 'xlink:href', 'style'].includes(name) && !/^on[a-z]+$/i.test(name)) continue
+        const raw = sourceHtml.slice(location.startOffset, location.endOffset)
+        const projected = name === 'srcdoc' ? projectHtml(attribute.value) : name === 'style' ? cssUrls(attribute.value) : /^on[a-z]+$/i.test(name) ? javascript(attribute.value) : references(attribute.value)
         if (node.tagName !== 'script' && !/^on[a-z]+$/i.test(name)) templates[name] = attribute.value
         if (projected !== attribute.value) edits.push({ start: location.startOffset, end: location.endOffset,
           value: `${raw.match(/^[^\s=]+/)?.[0] ?? name}="${htmlAttribute(projected)}"` })
@@ -337,7 +338,7 @@ export function resolveWebResourceBindings(instance: ComponentInstance, resolve:
       if (node.tagName === 'style' || script) for (const child of node.childNodes) {
         if (child.nodeName !== '#text' || !child.sourceCodeLocation) continue
         const { startOffset: start, endOffset: end } = child.sourceCodeLocation
-        const source = data.html.slice(start, end), value = script ? javascript(source, type === 'module') : cssUrls(source)
+        const source = sourceHtml.slice(start, end), value = script ? javascript(source, type === 'module') : cssUrls(source)
         if (!script) templates.$text = source
         if (value !== source) edits.push({ start, end, value })
       }
@@ -346,15 +347,18 @@ export function resolveWebResourceBindings(instance: ComponentInstance, resolve:
       if (marker && opening) {
         const existing = node.sourceCodeLocation?.attrs?.['data-component-resource-bindings']
         if (existing) edits.push({ start: existing.startOffset, end: existing.endOffset, value: '' })
-        const end = opening.endOffset - (data.html[opening.endOffset - 2] === '/' ? 2 : 1)
+        const end = opening.endOffset - (sourceHtml[opening.endOffset - 2] === '/' ? 2 : 1)
         edits.push({ start: end, end, value: ` data-component-resource-bindings="${htmlAttribute(marker)}"` })
       }
       if (node.tagName === 'template' && 'content' in node) visit(node.content)
     }
     if ('childNodes' in node) node.childNodes.forEach(visit)
   }
-  visit(parse(data.html, { sourceCodeLocationInfo: true }))
-  let html = data.html
+  visit(parse(sourceHtml, { sourceCodeLocationInfo: true }))
+  let html = sourceHtml
   for (const edit of edits.sort((a, b) => b.start - a.start)) html = html.slice(0, edit.start) + edit.value + html.slice(edit.end)
+  return html
+  }
+  const html = projectHtml(data.html)
   return { ...instance, data: { ...data, ...(moduleGraph ? { moduleGraph: moduleGraph as unknown as import('../../shared/contracts/component-platform').JsonObject } : {}), html, ...(data.css === undefined ? {} : { css: cssUrls(data.css) }) } }
 }

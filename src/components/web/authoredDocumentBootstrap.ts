@@ -49,22 +49,39 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
   resources: Record<string, string>
   themeCss?: string
   resourceCss?: string
+  /** Internal projection of child documents inside a fragment carrier. */
+  nestedOnly?: boolean
+  documentPath?: string
 }): string {
   const source = data.html, parsed = parse(source, { sourceCodeLocationInfo: true })
-  const prefix = `guoling-module:${encodeURIComponent(options.instanceId)}/${options.nonce}/`
+  const documentPath = options.documentPath ?? ''
+  const prefix = `guoling-module:${encodeURIComponent(options.instanceId)}/${options.nonce}/${documentPath ? `${documentPath}/` : ''}`
   const property = `__guoling_parser_${options.nonce.replace(/-/g, '_')}`
   const programs: AuthoredDocumentPrograms = { graph: data.moduleGraph, prefix, property, classic: {},
     resources: options.resources, resourceBindings: data.resourceBindings }
   const edits: Array<{ start: number; end: number; value: string }> = []
-  let index = 0
+  let index = 0, iframeIndex = 0
+  const quote = (value: string) => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
   const visit = (node: DefaultTreeAdapterTypes.Node): void => {
-    if ('tagName' in node && node.tagName === 'script') {
+    if ('tagName' in node && node.tagName === 'iframe') {
+      const current = iframeIndex++, srcdoc = node.attrs.find(attribute => attribute.name === 'srcdoc')
+      const location = node.sourceCodeLocation?.attrs?.srcdoc
+      if (srcdoc && location) {
+        const childPath = documentPath ? `${documentPath}/${current}` : String(current)
+        const child = authoredDocumentBootstrap({ ...data, html: srcdoc.value, css: undefined }, {
+          ...options, nestedOnly: false, documentPath: childPath, themeCss: undefined, resourceCss: undefined,
+          bridge: programs => `(${installAuthoredDocumentPrograms.toString()})(${JSON.stringify(programs)})`,
+        })
+        edits.push({ start: location.startOffset, end: location.endOffset, value: `srcdoc="${quote(child)}"` })
+      }
+    }
+    if ('tagName' in node && node.tagName === 'script' && !options.nestedOnly) {
       const current = index++, location = node.sourceCodeLocation
       if (location?.startTag) {
         const attrs = Object.fromEntries(node.attrs.map(attribute => [attribute.name, attribute.value]))
         const type = (attrs.type ?? (attrs.language ? `text/${attrs.language}` : 'text/javascript')).trim().toLowerCase()
         const classic = type === '' || /^(?:(?:application|text)\/(?:x-)?(?:java|ecma)script|text\/(?:javascript1\.[0-5]|jscript|livescript))$/.test(type)
-        const entry = data.moduleGraph?.entries[String(current)]
+        const entry = data.moduleGraph?.entries[documentPath ? `${documentPath}:${current}` : String(current)]
         const start = location.startTag.endOffset, end = location.endTag?.startOffset ?? location.endOffset
         if (entry && attrs.type?.trim().toLowerCase() === 'module') {
           if (location.attrs?.src) edits.push({ start: location.attrs.src.startOffset, end: location.attrs.src.endOffset, value: '' })
@@ -73,7 +90,6 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
           // Resource closure retained external classic source inline. Recreate a
           // parser-inserted external script so native defer/async and DCL apply.
           programs.classic[String(current)] = source.slice(start, end)
-          const quote = (value: string) => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
           const retained = node.attrs.filter(attribute => !['src', 'data-cw-defer', 'data-cw-async'].includes(attribute.name))
             .map(attribute => ` ${attribute.name}="${quote(attribute.value)}"`).join('')
           const opening = `<script${retained}${Object.hasOwn(attrs, 'data-cw-defer') && !Object.hasOwn(attrs, 'defer') ? ' defer' : ''}${Object.hasOwn(attrs, 'data-cw-async') && !Object.hasOwn(attrs, 'async') ? ' async' : ''} src="`
@@ -94,10 +110,9 @@ export function authoredDocumentBootstrap(data: WebRuntimeData, options: {
     ?? html?.sourceCodeLocation?.startTag?.endOffset
     ?? doctype?.sourceCodeLocation?.endOffset ?? 0
   const marker = webResourceReferenceMarker({ $text: options.resourceCss ?? data.css ?? '' }, data.resourceBindings ?? {}, id => options.resources[id])
-  const quote = (value: string) => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;')
   const style = [options.themeCss ? `<style data-component-initial-theme>${options.themeCss.replace(/<\/style/gi, '<\\/style')}</style>` : '', data.css ? `<style${marker ? ` data-component-resource-bindings="${quote(marker)}"` : ''}>${data.css.replace(/<\/style/gi, '<\\/style')}</style>` : ''].join('')
   const bootstrap = `<meta charset="utf-8"><script>${options.bridge(programs).replace(/<\/script/gi, '<\\/script')}</script>${style}`
-  edits.push({ start: insertion, end: insertion, value: bootstrap })
+  if (!options.nestedOnly) edits.push({ start: insertion, end: insertion, value: bootstrap })
   let result = source
   for (const edit of edits.sort((a, b) => b.start - a.start)) result = result.slice(0, edit.start) + edit.value + result.slice(edit.end)
   return result
