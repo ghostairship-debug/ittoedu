@@ -60,6 +60,7 @@ test('actual Main Engine default HTML tools observe click and freshly observe on
         turns++; catalogs.push(request.tools?.map(tool => tool.name) ?? [])
         if (turns === 1) {
           if (!JSON.stringify(request.messages).includes('counter.html')) throw new Error('Product context omitted the bound source document')
+          if (request.tools?.some(tool => tool.name === 'text.replace')) throw new Error('The source document has no formal write grant')
           offered(request, 'html.click')
           yield reply(request, 'html.observe', {}); return
         }
@@ -93,7 +94,9 @@ test('actual Main Engine default HTML tools observe click and freshly observe on
         runs: new ExecutionRunStore(`${input.directory}/runs`), events })
       const started = await engine.start({ conversationId: 'public-html', taskId: 'one-dom-action', selection,
         instruction: '观察当前counter.html，点击Add一次，再重新观察确认Count 1；等待停止，不改源码。',
-        documents: [{ documentId: initial.documentId, writable: [], selection: [{ kind: 'document' }] }], permission: 'read-only', workspaceRoot: input.directory })
+        // The user authorizes the explicit preview click. Workspace action permission
+        // permits that interaction; the source document itself still has no write grant.
+        documents: [{ documentId: initial.documentId, writable: [], selection: [{ kind: 'document' }] }], permission: 'workspace', workspaceRoot: input.directory })
       const completion = engine.wait(started.runId)
       const freshObserved = await Promise.race([freshReady.then(() => true), completion.then(() => false)])
       if (!freshObserved) {
@@ -102,13 +105,14 @@ test('actual Main Engine default HTML tools observe click and freshly observe on
       }
       const image = await host.tools.readObservationResource(started.runId, observations.at(-1)!.image.resourceId)
       fs.writeFileSync(`${input.directory}/fresh-dom.png`, image.bytes)
+      const beforeStop = await host.internalAPI.read(initial.documentId)
       await engine.stop(started.runId)
       const ended = await completion
       const afterStop = await host.tools.execute(started.runId, 'late-new-click-after-stop', { name: 'html.click', input: { handle: lateClickHandle } })
       const final = await host.internalAPI.read(initial.documentId)
       await events.flushPending()
       return { freshObserved, status: ended.status, failure: ended.failure, tools: ended.tools, turns, catalogs, observations,
-        imageDelivered, stoppedSignalObserved, afterStop, initial, final }
+        imageDelivered, stoppedSignalObserved, afterStop, initial, beforeStop, final }
     }, { filename, directory })
     await info.attach('Public HTML action facts', { body: JSON.stringify({
       scope: 'actual Main Engine, singleton Gateway and shared HTML preview; controlled provider; supplier not tested', ...facts,
@@ -125,6 +129,8 @@ test('actual Main Engine default HTML tools observe click and freshly observe on
     expect(facts.imageDelivered).toBe(true)
     expect(facts.stoppedSignalObserved).toBe(true)
     expect(facts.afterStop).toMatchObject({ kind: 'error', code: 'run-stopped' })
+    expect(facts.beforeStop).toMatchObject({ revision: 0, undoDepth: 0, redoDepth: 0, dirty: false })
+    expect(facts.beforeStop!.model).toEqual(facts.initial!.model)
     expect(facts.final).toMatchObject({ revision: 0, undoDepth: 0, redoDepth: 0, dirty: false })
     expect(facts.final!.model).toEqual(facts.initial!.model)
     expect(readFileSync(filename, 'utf8')).toBe(source)
