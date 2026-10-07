@@ -77,6 +77,8 @@ function backgroundDecorationHtml(object: HtmlAssemblyObject, serialization: Htm
 
 export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: Record<string, string>, options: {
   modules?: Record<string, string>
+  /** Failed image bytes remain source assets; they are not professional image admission. */
+  admittedResourceBindings?: Readonly<Record<string, string>>
   createFormulaId(): string
   definitions: Readonly<Record<string, ComponentDefinition>>
   flow?: boolean
@@ -104,7 +106,7 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
     return definition
   }
   const draft = (object: HtmlAssemblyObject): ContentObjectDraft => {
-    const professional = object.retainedSource ? undefined : professionalHtmlDraft(object, resourceBindings, options.createFormulaId, assembly.supportCss)
+    const professional = object.retainedSource ? undefined : professionalHtmlDraft(object, options.admittedResourceBindings ?? resourceBindings, options.createFormulaId, assembly.supportCss)
     if (professional?.kind === 'native') {
       return { ...professional.draft, definitionId: definitionFor(professional.definition).id }
     } else if (professional?.kind === 'web') diagnostics.push(professional.diagnostic)

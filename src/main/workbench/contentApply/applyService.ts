@@ -50,6 +50,14 @@ function resourceEdits(prepared: PreparedContentResources, createId: () => strin
   }
   return { edits, bindings, urls }
 }
+function resourceDiagnostics(prepared: PreparedContentResources, instanceId?: string): ContentApplyDiagnostic[] {
+  return prepared.diagnostics.map(item => {
+    const retained = item.code === 'image-resource-unavailable' ? prepared.unresolvedResources.find(resource =>
+      resource.origins.some(origin => origin.reference === item.reference)) : undefined
+    return { ...item, ...(retained ? { reference: `cw-resource:${retained.key}` } : {}),
+      ...(instanceId ? { instanceId } : {}), repairable: true }
+  })
+}
 function hasSourceProgram(draft: ContentObjectDraft, definitions: Readonly<Record<string, ComponentDefinition>>): boolean {
   const implementation = draft.implementationOverride ?? definitions[draft.definitionId]?.implementation
   return implementation?.kind === 'builtin' && implementation.key === 'guoling.html-program'
@@ -114,7 +122,7 @@ export class ContentApplyService {
             .map(source => [`${source.usage}\0${source.url}`, source])).values()]
           const resources = resourceEdits(prepared, this.createId)
           edits.push(...resources.edits)
-          diagnostics.push(...prepared.diagnostics.map(item => ({ ...item, instanceId: input.instanceId, repairable: true })))
+          diagnostics.push(...resourceDiagnostics(prepared, input.instanceId))
           const add = (path: string[], value: JsonValue) => { if (!equalComponentValue(previous[path[0]!], value)) edits.push({ type: 'data.set', instanceId: input.instanceId, path, value }) }
           add(['html'], prepared.html)
           if (prepared.modules || previous.modules) add(['modules'], prepared.modules ?? {})
@@ -131,7 +139,7 @@ export class ContentApplyService {
         const prepared = await prepareContentResources({ html: htmlForAssembly(request), siblingFiles: request.source.siblingFiles }, this.createId)
         const resources = resourceEdits(prepared, this.createId)
         edits.push(...resources.edits)
-        diagnostics.push(...prepared.diagnostics.map(item => ({ ...item, repairable: true })))
+        diagnostics.push(...resourceDiagnostics(prepared))
         const viewport = this.designViewport(project, request)
         let assembly: HtmlAssembly
         try {
@@ -153,6 +161,7 @@ export class ContentApplyService {
         }
         diagnostics.push(...assembly.diagnostics)
         const assembled = assemblyContentDraft(assembly, resources.bindings, {
+          admittedResourceBindings: Object.fromEntries(Object.keys(resources.urls).map(reference => [reference, resources.bindings[reference]!])),
           modules: prepared.modules, createFormulaId: this.createId, definitions: project.definitions, flow: this.flowBodyTarget(project, request),
           flowPage: request.intent === 'redo' && request.target.kind === 'container' && request.target.container.kind === 'surface',
         })
@@ -211,7 +220,18 @@ export class ContentApplyService {
     unverified ||= sourceImplementations.length > 0
     if (request.source.kind === 'objects') unverified ||= request.source.objects.some(draft => hasSourceProgram(draft, compilationProject.definitions))
     signal?.throwIfAborted()
-    return planContentApply({ project: baseProject, request, createId: this.createId, drafts, edits, diagnostics, unusable, unverified })
+    const plan = planContentApply({ project: baseProject, request, createId: this.createId, drafts, edits, diagnostics, unusable, unverified })
+    // Bind the diagnosed source to the identities allocated by the existing
+    // planner. A later read can verify its current bytes without another state.
+    const inserted = plan.command.edits.flatMap(edit => edit.type === 'instance.insert' ? edit.instances : [])
+    plan.diagnostics = plan.diagnostics.flatMap(item => {
+      if (item.code !== 'image-resource-unavailable' || item.instanceId || !item.reference) return [item]
+      const reference = item.reference
+      const owners = inserted.filter(instance => instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data)
+        && dataBindings(instance.data)[reference])
+      return owners.length ? owners.map(instance => ({ ...item, instanceId: instance.id })) : [item]
+    })
+    return plan
   }
 
   private async compileSources(project: CourseProjectV10, resources: DocumentResources,
