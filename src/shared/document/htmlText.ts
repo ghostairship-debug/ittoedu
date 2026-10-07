@@ -146,9 +146,12 @@ export function readHtmlDocumentText(nodes: readonly DocumentHtmlNode[], options
       const base = { ...(Object.keys(context.style).length ? { style: context.style } : {}), ...(context.link ? { link: context.link } : {}) }
       if (context.code || part.br) { inlines.push({ type: 'text', text, ...(context.code ? { code: true } : {}), ...base }); return }
       let rest = text
-      for (let match = /\\\(([\s\S]+?)\\\)/.exec(rest); match; match = /\\\(([\s\S]+?)\\\)/.exec(rest)) {
+      // Tool responses may retain an extra escape on both math delimiters. Accept
+      // that pair without unescaping the formula body or ordinary/code text.
+      const math = /(?<!\\)(\\{1,2})\(([\s\S]+?)\1\)/
+      for (let match = math.exec(rest); match; match = math.exec(rest)) {
         if (match.index) inlines.push({ type: 'text', text: rest.slice(0, match.index), ...base })
-        const latex = match[1]!.trim()
+        const latex = match[2]!.trim()
         const accessibleText = context.math?.accessibleText ?? documentHtmlMathAccessibleText(latex)
         if (accessibleText) inlines.push({ type: 'math', formulaId: options.createFormulaId(), latex, accessibleText,
           ...(context.math?.style ? { style: context.math.style } : {}), ...(context.link ? { link: context.link } : {}) })
