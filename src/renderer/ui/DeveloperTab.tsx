@@ -92,6 +92,9 @@ function codeLifecycle(bridge: CourseV10DocumentBridge, cache: Map<string, CodeD
       cache.set(key, { key, value: saved.raw, binding: { apply, version: 1 }, busy: false, composing: false, listeners: new Set(),
         baseline: saved.baseline, blocked, message: blocked ?? '已恢复 JSON 原输入；尚未自动应用。' })
     },
+    release(documentId) {
+      for (const [key, draft] of cache) if (draft.binding?.apply.target?.documentId === documentId || JSON.parse(key)[0] === documentId) cache.delete(key)
+    },
   })
 }
 function jsonEqual(left: string, right: string): boolean {

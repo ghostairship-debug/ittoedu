@@ -16,6 +16,7 @@ export interface CourseDraftProvider {
   prepare(documentId: string): Promise<AdvancedDraftIssue[]>
   preserve(documentId: string): AdvancedDraftRecovery[]
   restore(documentId: string, record: AdvancedDraftRecovery): void
+  release(documentId: string): void
 }
 type Lifecycle = { providers: Map<AdvancedDraftRecovery['kind'], CourseDraftProvider>; listeners: Set<() => void>; pending: Map<string, AdvancedDraftRecovery> }
 const lifecycles = new WeakMap<CourseV10DocumentBridge, Lifecycle>()
@@ -69,6 +70,12 @@ export function courseDraftLifecycle(bridge: CourseV10DocumentBridge) {
       }
       notifyCourseDrafts(bridge)
       return { restored, issues }
+    },
+    /** Only the close owner calls this after confirmed preservation and successful close. */
+    release(documentId: string): void {
+      for (const provider of value.providers.values()) provider.release(documentId)
+      for (const [key, record] of value.pending) if (record.documentId === documentId) value.pending.delete(key)
+      notifyCourseDrafts(bridge)
     },
   }
 }

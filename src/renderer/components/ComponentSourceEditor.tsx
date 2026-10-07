@@ -202,6 +202,9 @@ function sourceLifecycle(bridge: CourseV10DocumentBridge, cache: Map<string, Sou
       }
       cache.set(key, draft)
     },
+    release(documentId) {
+      for (const [key, draft] of cache) if (draft.session?.target.documentId === documentId || JSON.parse(key)[0] === documentId) cache.delete(key)
+    },
   })
 }
 
