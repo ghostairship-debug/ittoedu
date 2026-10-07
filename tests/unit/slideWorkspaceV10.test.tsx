@@ -137,7 +137,7 @@ it('keeps original Slide interactions on the V10 writer', async () => {
   const uiListeners = new Set<() => void>(), update = () => { uiVersion++; uiListeners.forEach(listener => listener()) }
   const slice = createSlideAuthoringSlice(kernel, { read: () => owned, patch: patch => { owned = { ...owned, ...patch }; update() } })
   const observation = { current: null as { readZoom(): number; setZoom(value: number): void; reset(): void } | null }
-  const releaseObservation = vi.fn(), navigationChanged = vi.fn()
+  const releaseObservation = vi.fn(), navigationChanged = vi.fn(), drawShapeNode = vi.fn()
   const stopBridge = h.bridge.subscribe(update)
   const pointer = class extends MouseEvent { pointerId: number; constructor(type: string, init: MouseEventInit & { pointerId?: number } = {}) { super(type, init); this.pointerId = init.pointerId ?? 1 } }
   vi.stubGlobal('PointerEvent', pointer)
@@ -164,7 +164,7 @@ it('keeps original Slide interactions on the V10 writer', async () => {
     updateDataDraft: slice.updateSlideDataDraft, commitTextEdit: slice.commitSlideContentEdit, cancelTextEdit: slice.cancelTextEdit,
     undo: () => { void kernel.navigateHistory('undo') }, redo: () => { void kernel.navigateHistory('redo') },
     onElement() {}, onTargetElement() {}, addTextNode() {}, addFormulaNode() {}, addRectangleNode() {}, addShapeNode() {},
-    addTableNode() {}, addChartNode() {}, addExternalComponentNode() {}, drawShapeNode() {},
+    addTableNode() {}, addChartNode() {}, addExternalComponentNode() {}, drawShapeNode,
   }
   function Harness() {
     useSyncExternalStore(listener => { uiListeners.add(listener); return () => { uiListeners.delete(listener) } }, () => uiVersion)
@@ -183,6 +183,23 @@ it('keeps original Slide interactions on the V10 writer', async () => {
     expect(observation.current!.readZoom()).toBe(1)
     expect(navigationChanged).toHaveBeenCalled()
     const workspace = screen.getByRole('main', { name: '画布' })
+    const beforeDrawing = structuredClone(h.bridge.read().project)
+    act(() => ports.setDrawTool('line'))
+    expect(workspace).toHaveStyle({ cursor: 'crosshair' })
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(owned.slideDrawTool).toBeNull()
+    expect(workspace.style.cursor).toBe('')
+    act(() => ports.setDrawTool('elbow-arrow'))
+    fireEvent.pointerDown(workspace, { pointerId: 9, button: 0, clientX: 1820, clientY: 1100 })
+    fireEvent.pointerMove(workspace, { pointerId: 9, buttons: 1, clientX: 1760, clientY: 1060 })
+    expect(document.querySelector('.canvas-line-overlay line[stroke-dasharray="6 4"]')).not.toBeNull()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    expect(owned.slideDrawTool).toBeNull()
+    expect(document.querySelector('.canvas-line-overlay line[stroke-dasharray="6 4"]')).toBeNull()
+    fireEvent.pointerUp(workspace, { pointerId: 9, button: 0, clientX: 1760, clientY: 1060 })
+    expect(drawShapeNode).not.toHaveBeenCalled()
+    expect(h.first.read().undoDepth).toBe(0)
+    expect(h.bridge.read().project).toEqual(beforeDrawing)
     const beforeNeighbor = structuredClone(h.bridge.read().project!.instances.shape)
     fireEvent.pointerDown(workspace, { pointerId: 1, button: 0, clientX: 260, clientY: 200 })
     fireEvent.pointerMove(workspace, { pointerId: 1, buttons: 1, clientX: 300, clientY: 240, altKey: true })

@@ -235,6 +235,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       }
       if (event.key === 'Escape' && hudGesture.current) { hudGesture.current = null; setPreview(emptyPreview()) }
       if (event.key === 'Escape' && internalGesture.current) { internalGesture.current.preview?.(internalGesture.current.value.spot.id, null); internalGesture.current = null; setInternalPreview(null); suppressSpotClick.current = true }
+      if (event.key === 'Escape' && event.type === 'keydown' && latest.current.snapshot.drawTool) latest.current.ports.setDrawTool(null)
     }
     const blur = () => { space.current = false; pan.current = null; setPanning(false) }
     window.addEventListener('keydown', onKey); window.addEventListener('keyup', onKey); window.addEventListener('blur', blur)
