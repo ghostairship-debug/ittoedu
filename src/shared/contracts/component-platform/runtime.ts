@@ -30,7 +30,7 @@ export interface ComponentInteractionPort {
   currentSurfaceId(): string | null
   currentStateId(): string | null
   courseState: { get(key: string): unknown; set(key: string, value: unknown): void }
-  subscribeTrigger(trigger: InteractionTrigger, listener: (payload?: unknown) => void): () => void
+  subscribeTrigger(trigger: InteractionTrigger, listener: (payload?: unknown) => boolean | void | PromiseLike<boolean | void>): () => void
   executeAction(action: InteractionAction, context: { signal: AbortSignal; ruleId: string; stepId: string; restartFromBeginning: boolean }): boolean | void | PromiseLike<boolean | void>
   report(message: string): void
 }
