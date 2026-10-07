@@ -16,6 +16,8 @@
  */
 import { z } from 'zod'
 import { htmlSourceEditCommandSchema, type HtmlSourceEditOutcome } from '../html/sourceEditCommands'
+import { componentAuthorRecordSchema, componentAuthorRecordsSchema } from '../contracts/component-platform/schema'
+import type { ComponentAuthorRecord } from '../contracts/component-platform/runtime'
 
 const id = z.string().min(1)
 const revision = z.number().int().nonnegative()
@@ -57,6 +59,7 @@ export const htmlPreviewTargetReportSchema = z.object({
   rect,
   /** True when the page created this node at runtime rather than parsing it. */
   scriptCreated: z.boolean(),
+  authoring: z.object({ authorKey: id, record: componentAuthorRecordSchema }).strict().optional(),
 }).strict()
 
 export const htmlPreviewRequestSchema = z.discriminatedUnion('type', [
@@ -95,6 +98,8 @@ export const htmlPreviewRequestSchema = z.discriminatedUnion('type', [
     target: targetHandle,
     change: z.discriminatedUnion('kind', [
       z.object({ kind: z.literal('text'), value: text }).strict(),
+      z.object({ kind: z.literal('style'), patch: z.record(z.string().min(1), z.string().nullable()) }).strict(),
+      z.object({ kind: z.literal('geometry'), geometry: componentAuthorRecordSchema.shape.overrides.shape.geometry.unwrap() }).strict(),
       z.object({
         kind: z.literal('image'),
         name: z.string().min(1),
@@ -119,6 +124,7 @@ export interface HtmlPreviewSourceLocator {
   valueSpan: { start: number; end: number } | null
   attributeName: string | null
   expectedRaw: string
+  authoring?: { authorKey: string; record: ComponentAuthorRecord }
 }
 
 export type HtmlPreviewResolvedTarget =
@@ -136,7 +142,7 @@ export interface HtmlPreviewLease {
 }
 
 export type HtmlPreviewEditOutcome =
-  | { status: 'applied'; revision: number; savedRevision: number | null; dirty: true; patch: { handle: string; kind: 'text' | 'image'; value: string; rewroteResponsive?: boolean } }
+  | { status: 'applied'; revision: number; savedRevision: number | null; dirty: true; patch: { handle: string; kind: 'text' | 'image'; value: string; rewroteResponsive?: boolean; authoringRecords?: z.infer<typeof componentAuthorRecordsSchema> } }
   | { status: 'unchanged'; revision: number }
   | { status: 'rejected'; reason: 'stale-epoch' | 'stale-revision' | 'stale-binding' | 'lease-released' | 'source-changed' | 'not-editable' | 'conflict' }
 

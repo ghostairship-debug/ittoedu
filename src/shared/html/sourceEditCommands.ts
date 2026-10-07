@@ -9,7 +9,7 @@ export const htmlSourceAddressSchema = z.object({
 export type HtmlSourceAddress = z.infer<typeof htmlSourceAddressSchema>
 
 const patch = z.record(z.string().min(1), z.string().nullable())
-export const htmlSourceEditCommandSchema = z.discriminatedUnion('type', [
+export const htmlSourceEditLeafCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('text'), target: htmlSourceAddressSchema, text: z.string() }).strict(),
   z.object({ type: z.literal('attributes'), target: htmlSourceAddressSchema, patch }).strict(),
   z.object({ type: z.literal('style'), target: htmlSourceAddressSchema, patch }).strict(),
@@ -20,6 +20,11 @@ export const htmlSourceEditCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('data'), target: htmlSourceAddressSchema,
     path: z.array(z.union([z.string(), z.number().int().nonnegative()])), value: z.json() }).strict(),
 ])
+/** A projection gesture commits its related source operations once; nested batches have no extra meaning. */
+export const htmlSourceEditCommandSchema = z.union([htmlSourceEditLeafCommandSchema,
+  z.object({ type: z.literal('batch'), commands: z.array(htmlSourceEditLeafCommandSchema).min(1) }).strict(),
+])
+export type HtmlSourceEditLeafCommand = z.infer<typeof htmlSourceEditLeafCommandSchema>
 export type HtmlSourceEditCommand = z.infer<typeof htmlSourceEditCommandSchema>
 
 export type HtmlSourceEditOutcome =

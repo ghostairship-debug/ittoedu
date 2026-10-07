@@ -6,6 +6,8 @@ import { applyComponentOperation, captureComponentOperation } from '../../src/co
 import { prepareWebAuthoringRecordEdits } from '../../src/components/web/authoringRecords'
 import { WEB_DEFINITION, webDataSchema } from '../../src/components/web/data'
 import type { ComponentAuthorSpotInput } from '../../src/shared/contracts/component-platform/runtime'
+import { htmlPreviewRequestSchema, htmlPreviewTargetReportSchema } from '../../src/shared/workbench/htmlPreview'
+import { htmlSourceEditCommandSchema } from '../../src/shared/html/sourceEditCommands'
 
 const spot: ComponentAuthorSpotInput & { instanceId: string } = { instanceId: 'web', kind: 'text', authorKey: 'local-a',
   scope: { 'item.id': 'conversation-1' }, binding: { kind: 'dom', path: [{ tag: 'p', index: 0 }], baseline: 'Original' },
@@ -37,4 +39,21 @@ it('merges a delayed text edit with newer geometry and another internal object b
   expect(records['local-a'].overrides).toEqual({ text: 'AI revision', geometry: { translateX: 35, width: 210 } })
   expect(records['local-b'].overrides.text).toBe('Other edit')
   expect(() => prepareWebAuthoringRecordEdits(project, capture, { text: 'Stale' })).toThrow('内容已变化')
+  const nextText = captureComponentOperation(project, prepareWebAuthoringRecordEdits(project, { ...capture, initialValue: 'AI revision' }, { text: 'Later' }))
+  const rebound = structuredClone(project)
+  ;(rebound.instances.web.data as { authoringRecords: Record<string, { scope: Record<string, string> }> }).authoringRecords['local-a'].scope = { 'item.id': 'another-item' }
+  expect(() => applyComponentOperation(rebound, nextText)).toThrow('目标内容或归属已变化')
+})
+it('carries the same local record through HTML reports and accepts a single source gesture batch', () => {
+  const record = { kind: 'text', scope: spot.scope, binding: spot.binding, overrides: { text: 'Edited', geometry: { translateX: 35 } } }
+  const report = htmlPreviewTargetReportSchema.parse({ handle: 'hit', kind: 'text', domPath: [], sectionOrder: null,
+    rawText: 'Original', attributeName: null, rect: { x: 0, y: 0, width: 100, height: 20 }, scriptCreated: true,
+    authoring: { authorKey: 'local-a', record } })
+  expect(report.authoring?.record).toEqual(record)
+  expect(htmlPreviewRequestSchema.parse({ type: 'html-preview.edit', operationId: 'op', documentId: 'doc', epoch: 'epoch',
+    baseRevision: 1, bindingVersion: 1, leaseId: 'lease', loadId: 'load', target: 'hit', change: { kind: 'geometry', geometry: { width: 200 } } }).type).toBe('html-preview.edit')
+  expect(htmlSourceEditCommandSchema.parse({ type: 'batch', commands: [
+    { type: 'style', target: { kind: 'element', from: 0, to: 10 }, patch: { color: 'blue' } },
+    { type: 'move', target: { kind: 'element', from: 0, to: 10 }, parent: { kind: 'element', from: 0, to: 20 }, index: 1 },
+  ] }).type).toBe('batch')
 })

@@ -6,12 +6,27 @@ import { projectPlaybackSettingsSchema } from '../playback-v1/schema'
 import { assetRemoteDeliveryUrlSchema, assetSourceSchema, projectMediaSettingsSchema } from '../media-v1/schema'
 import type { ComponentImplementation, CourseProjectV10, JsonValue } from './project'
 import type { ComponentOperationBatch } from './operations'
+import type { ComponentAuthorRecord } from './runtime'
 
 const id = z.string().min(1)
 const finite = z.number().finite()
 export const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() => z.union([
   z.null(), z.boolean(), finite, z.string(), z.array(jsonValueSchema), z.record(z.string(), jsonValueSchema),
 ]))
+const authorBindingStepSchema = z.object({ tag: z.string().min(1), index: z.number().int().nonnegative(),
+  attributes: z.record(z.string(), z.string()).optional() }).strict()
+export const componentAuthorRecordSchema = z.object({ kind: z.enum(['text', 'image']),
+  scope: z.record(z.string(), z.string()).optional(),
+  binding: z.object({ kind: z.literal('dom'), path: z.array(authorBindingStepSchema), textIndex: z.number().int().nonnegative().optional(),
+    baseline: z.string(), context: z.array(z.object({ path: z.array(authorBindingStepSchema), value: z.string() }).strict()).optional() }).strict(),
+  overrides: z.object({ text: z.string().optional(), src: z.string().optional(), style: z.record(z.string(), z.string()).optional(),
+    geometry: z.object({ translateX: z.number().finite().optional(), translateY: z.number().finite().optional(),
+      scaleX: z.number().finite().positive().optional(), scaleY: z.number().finite().positive().optional(),
+      width: z.number().finite().positive().optional(), height: z.number().finite().positive().optional(),
+      rotation: z.number().finite().optional() }).strict().optional() }).strict(),
+}).strict() satisfies z.ZodType<ComponentAuthorRecord>
+export const componentAuthorRecordsSchema = z.record(z.string().min(1), componentAuthorRecordSchema)
+
 export const componentFrameSchema = z.object({
   width: finite.positive(), height: finite.positive(),
   transform: z.tuple([finite, finite, finite, finite, finite, finite]),
