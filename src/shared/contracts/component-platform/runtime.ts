@@ -97,6 +97,8 @@ export interface ComponentAuthorGeometryObservation {
   author: ComponentAuthorGeometry
   /** Insets to subtract when a border-box gesture writes CSS content-box width/height. */
   boxInsets: { width: number; height: number }
+  /** Original CSS transform-origin offset and its response to one CSS px of box resizing. */
+  sourceOffset?: { current: { x: number; y: number }; widthDelta: { x: number; y: number }; heightDelta: { x: number; y: number } }
 }
 
 /** Ephemeral observations carry the persistent record needed to commit a first local edit. */
