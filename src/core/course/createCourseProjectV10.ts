@@ -10,7 +10,7 @@ export function createBlankCourseProjectV10(title = '未命名课件', createId:
   const id = createId()
   project.definitions[TEACHER_CONTROLLER_DEFINITION.id] = structuredClone(TEACHER_CONTROLLER_DEFINITION)
   project.instances[id] = { id, definitionId: TEACHER_CONTROLLER_DEFINITION.id, name: '教师控制台',
-    data: JSON.parse(JSON.stringify(createTeacherControllerData())) as JsonValue, frame: createTeacherControllerFrame(project.surfaces[0].designSize) }
+    data: JSON.parse(JSON.stringify(createTeacherControllerData(project.surfaces[0].designSize))) as JsonValue, frame: createTeacherControllerFrame(project.surfaces[0].designSize) }
   project.global.overlay.push(id)
   return project
 }
