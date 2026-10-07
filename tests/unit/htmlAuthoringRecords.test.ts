@@ -405,6 +405,9 @@ it('opens the exact HTML author field after preparing pending input and refuses 
   const prepare = vi.fn(async () => {
     await service.edit({ type: 'html-preview.edit', operationId: 'pending-human-text', documentId: 'html-ai', epoch: 'epoch', baseRevision: 0,
       bindingVersion: 1, leaseId: 'lease', loadId: 'load', target: 'dynamic', change: { kind: 'text', value: '人工最终文字' } }, context)
+    view.rerender(createElement(HtmlLightEditOverlay, { target, committed: session.read(), position: { left: 0, top: 0 },
+      value: '人工最终文字', onValue() {}, async onText() { return { status: 'unchanged' as const, revision: 0 } },
+      async onImage() { return { status: 'unchanged' as const, revision: 0 } }, onClose() {} }))
     return session.read()
   })
   let unregister = workbenchSelection.register('html-ai', prepare)

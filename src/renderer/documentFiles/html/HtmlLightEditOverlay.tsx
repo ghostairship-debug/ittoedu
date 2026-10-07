@@ -102,7 +102,9 @@ export function HtmlLightEditOverlay({ target, committed, position, value, onVal
         {target.report.kind === 'text' ? '应用' : '选择图片'}
       </button>}
       {aiAvailable && <TextAiButton documentId={committed.documentId}
-        selectionIdentity={`${target.report.kind}:${target.report.handle}:${committed.revision}`} start={async () => {
+        selectionIdentity={authoring ? `${committed.documentId}:${committed.epoch}:${authoring.authorKey}:${JSON.stringify({
+          kind: authoring.record.kind, scope: authoring.record.scope, binding: authoring.record.binding })}`
+          : `${target.report.kind}:${target.report.handle}:${committed.revision}`} start={async () => {
         const snapshot = await workbenchSelection.prepare(committed.documentId)
         if (snapshot.epoch !== committed.epoch || snapshot.model.kind !== 'text') throw new Error('文档已变化，请重新选择。')
         const current = authoring ? readHtmlAuthoringRecords(snapshot.model.source)[authoring.authorKey] : undefined
