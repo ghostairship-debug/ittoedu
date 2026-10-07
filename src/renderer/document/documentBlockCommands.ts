@@ -3,7 +3,7 @@ import { documentContentSchema, plainDocumentText } from '../../shared/document/
 import { fromEditorDocument, renewEditorIdentities, toEditorDocument } from './documentAdapter'
 import type { MenuCommand } from '../editing/commands/CommandMenu'
 
-export type DocumentBlockKind = 'paragraph' | 'heading' | 'quote' | 'list' | 'code' | 'divider' | 'table'
+export type DocumentBlockKind = 'paragraph' | 'heading' | 'quote' | 'list' | 'code' | 'divider' | 'table' | 'callout' | 'section'
 export type DocumentBlockAction = 'insert-above' | 'insert-below' | 'duplicate' | 'delete' | 'move-up' | 'move-down'
 export type DocumentBlockCommand = { action: DocumentBlockAction; blockId: string; kind?: DocumentBlockKind }
   | { action: 'ai'; blockId: string }
@@ -23,11 +23,12 @@ export interface DocumentBlockCommandPort {
 }
 
 const empty = (): FlowTextContent => ({ inlines: [] })
-const kinds: readonly { kind: DocumentBlockKind; label: string }[] = [
+export const DOCUMENT_BLOCK_KINDS: readonly { kind: DocumentBlockKind; label: string }[] = [
   { kind: 'paragraph', label: '正文' }, { kind: 'heading', label: '标题' },
   { kind: 'quote', label: '引用' }, { kind: 'list', label: '列表' },
   { kind: 'code', label: '代码' }, { kind: 'divider', label: '分隔线' },
   { kind: 'table', label: '表格' },
+  { kind: 'callout', label: '提示框' }, { kind: 'section', label: '折叠节' },
 ]
 
 function locate(blocks: DocumentBlock[], id: string): { blocks: DocumentBlock[]; index: number; block: DocumentBlock } | null {
@@ -42,15 +43,18 @@ function locate(blocks: DocumentBlock[], id: string): { blocks: DocumentBlock[];
   return null
 }
 
-export function createDocumentBlock(kind: DocumentBlockKind, id: () => string = () => crypto.randomUUID()): DocumentBlock {
+export function createDocumentBlock(kind: DocumentBlockKind, id: () => string = () => crypto.randomUUID(), initial: { text?: string; title?: string } = {}): DocumentBlock {
   const blockId = id()
+  const text = (): FlowTextContent => ({ inlines: initial.text ? [{ type: 'text', text: initial.text }] : [] })
   switch (kind) {
-    case 'paragraph': return { id: blockId, type: kind, content: empty() }
-    case 'heading': return { id: blockId, type: kind, level: 2, content: empty() }
-    case 'quote': return { id: blockId, type: kind, content: empty() }
-    case 'list': return { id: blockId, type: kind, ordered: false, items: [{ id: id(), content: empty() }] }
-    case 'code': return { id: blockId, type: kind, code: '' }
+    case 'paragraph': return { id: blockId, type: kind, content: text() }
+    case 'heading': return { id: blockId, type: kind, level: 2, content: text() }
+    case 'quote': return { id: blockId, type: kind, content: text() }
+    case 'list': return { id: blockId, type: kind, ordered: false, items: [{ id: id(), content: text() }] }
+    case 'code': return { id: blockId, type: kind, code: initial.text ?? '' }
     case 'divider': return { id: blockId, type: kind }
+    case 'callout': return { id: blockId, type: kind, tone: 'note', title: { inlines: [{ type: 'text', text: initial.title ?? '提示' }] }, body: text() }
+    case 'section': return { id: blockId, type: kind, title: text(), collapsedByDefault: false, blocks: [] }
     case 'table': {
       const columns = Array.from({ length: 2 }, () => ({ id: id(), header: empty() }))
       const rows = Array.from({ length: 2 }, () => ({ id: id(), cells: Object.fromEntries(columns.map(column => [column.id, empty()])) }))
@@ -64,7 +68,7 @@ function convertible(block: DocumentBlock): block is Extract<DocumentBlock, { ty
 }
 
 function convert(block: DocumentBlock, kind: DocumentBlockKind, id: () => string): DocumentBlock {
-  if (kind === 'table') throw new Error('表格请使用插入操作')
+  if (kind === 'table' || kind === 'callout' || kind === 'section') throw new Error('此类型请使用插入操作')
   if (!convertible(block)) throw new Error('此对象不能转换为文字段落')
   if (block.type === kind) return block
   if (block.type === 'quote' && block.citation?.inlines.length) throw new Error('带出处的引用不能直接转换')
@@ -153,9 +157,9 @@ export function documentBlockMenu(port: DocumentBlockCommandPort): MenuCommand[]
     run: () => run(command), danger: command.action === 'delete',
   })
   return [
-    ...kinds.map(({ kind, label }) => item(`insert-${kind}`, `下方插入${label}`, '插入', { action: 'insert-below', blockId: port.blockId, kind })),
+    ...DOCUMENT_BLOCK_KINDS.map(({ kind, label }) => item(`insert-${kind}`, `下方插入${label}`, '插入', { action: 'insert-below', blockId: port.blockId, kind })),
     item('insert-above', '上方插入段落', '插入', { action: 'insert-above', blockId: port.blockId }),
-    ...kinds.filter(({ kind }) => kind !== 'table').map(({ kind, label }) => item(`convert-${kind}`, `转换为${label}`, '转换', { action: 'convert', blockId: port.blockId, kind }, conversionReason(location.block, kind))),
+    ...DOCUMENT_BLOCK_KINDS.filter(({ kind }) => !['table', 'callout', 'section'].includes(kind)).map(({ kind, label }) => item(`convert-${kind}`, `转换为${label}`, '转换', { action: 'convert', blockId: port.blockId, kind }, conversionReason(location.block, kind))),
     item('duplicate', '复制段落', '段落', { action: 'duplicate', blockId: port.blockId }),
     item('delete', '删除段落', '段落', { action: 'delete', blockId: port.blockId }),
     item('move-up', '上移段落', '排序', { action: 'move-up', blockId: port.blockId }, location.index === 0 ? '已在顶部' : undefined),
