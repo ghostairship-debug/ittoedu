@@ -21,11 +21,13 @@ test('a real headless MCP browser promoted to GUI exits its whole owner through 
   const address = reservation.address(); if (!address || typeof address === 'string') throw new Error('No available local MCP port')
   const port = address.port; await new Promise<void>(done => reservation.close(() => done()))
   const env = { ...process.env, VITE_DEV_SERVER_URL: '', COURSEWARE_CLI_DOGFOOD: '', [BACKGROUND_E2E_ENV]: '1' }
-  let app: ElectronApplication | undefined, secondary: ChildProcess | undefined, client: Awaited<ReturnType<typeof connectExplicitMcp>> | undefined
+  let app: ElectronApplication | undefined, primaryProcess: ChildProcess | undefined, secondary: ChildProcess | undefined,
+    client: Awaited<ReturnType<typeof connectExplicitMcp>> | undefined
   try {
     log('headless.launch.before')
     app = await electron.launch({ cwd: root, args: ['.', profileArgument, '--headless-mcp', `--workspace=${workspace}`, `--port=${port}`, '--permission=workspace'], env })
-    const ownedProcess = app.process(); log('headless.launch.returned', { pid: ownedProcess.pid })
+    const ownedProcess = app.process(); primaryProcess = ownedProcess
+    log('headless.launch.returned', { pid: ownedProcess.pid })
     await expect.poll(() => app!.evaluate(async ({ app }) => {
       const { createRequire } = process.getBuiltinModule('node:module'), requireProduct = createRequire(`${app.getAppPath()}/package.json`)
       const { externalMcpService } = requireProduct('./dist-electron/main/workbench/external/externalDesktopService.js')
@@ -96,7 +98,7 @@ test('a real headless MCP browser promoted to GUI exits its whole owner through 
     writeFileSync(join(directory, 'facts.json'), JSON.stringify(facts, null, 2))
     await info.attach('Headless browser promotion and ordinary process exit', { path: join(directory, 'facts.json'), contentType: 'application/json' })
     // Failure cleanup only. It happens after the measured natural-exit assertion and cannot make that assertion pass.
-    for (const child of [secondary, app?.process()]) if (child?.pid && child.exitCode === null && child.signalCode === null
+    for (const child of [secondary, primaryProcess]) if (child?.pid && child.exitCode === null && child.signalCode === null
       && child.spawnargs.some(argument => argument === profileArgument || argument.includes(`"${profileArgument}"`))) {
       log('failure-cleanup.owned-tree', { pid: child.pid, profileArgument, spawnfile: child.spawnfile, spawnargs: child.spawnargs })
       try { if (process.platform === 'win32') execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'pipe', windowsHide: true }); else child.kill() }
