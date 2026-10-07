@@ -12,6 +12,7 @@ export interface HtmlTextDraft {
   readonly value: string
   readonly issue?: string
   readonly authoring?: { authorKey: string; record: ComponentAuthorRecord }
+  readonly sourceAuthoring?: { authorKey: string; record: ComponentAuthorRecord }
 }
 type PreparedTextDrafts = { source: string; drafts: Array<{ id: number; value: string; from: number; to: number }> }
 const sourceChanged = '原文字已变化，草稿仍保留。要保留这次修改，请复制草稿，重新选择文字并粘贴、应用，再点击“放弃这份草稿”移除旧草稿后保存；不需要这次修改可直接放弃。'
@@ -85,7 +86,7 @@ export class HtmlTextDrafts {
     const previous = this.find(target, source)
     if (value === target.report.rawText && (!previous || !this.wasPrepared(previous.id))) { if (previous) this.discard(previous.id); return }
     const next: HtmlTextDraft = { id: previous?.id ?? ++this.sequence, source, ...(range ?? { from: 0, to: 0 }),
-      ...(authoring ? { authoring } : {}), original: target.report.rawText, value }
+      ...(authoring ? { authoring } : target.report.authoring ? { sourceAuthoring: target.report.authoring } : {}), original: target.report.rawText, value }
     this.publish(previous ? this.drafts.map(draft => draft.id === previous.id ? next : draft) : [...this.drafts, next])
   }
 
@@ -149,15 +150,24 @@ export class HtmlTextDrafts {
     }
     result += source.slice(position)
     const dynamic = located.filter(draft => draft.authoring)
-    if (dynamic.length) {
+    if (dynamic.length || sorted.some(draft => draft.sourceAuthoring)) {
       const records = readHtmlAuthoringRecords(result)
+      let changed = false
+      for (const draft of sorted) {
+        const key = draft.sourceAuthoring?.authorKey, previous = key && records[key]
+        if (key && previous) {
+          records[key] = { ...previous, binding: { ...previous.binding, baseline: draft.value } }
+          changed = true
+        }
+      }
       for (const draft of dynamic) {
         const authoring = draft.authoring!
         const previous = records[authoring.authorKey] ?? authoring.record
         records[authoring.authorKey] = { ...previous, overrides: { ...previous.overrides, text: draft.value } }
+        changed = true
         submitted.push({ id: draft.id, value: draft.value, from: 0, to: 0 })
       }
-      result = patchHtmlAuthoringRecords(result, records)
+      if (changed) result = patchHtmlAuthoringRecords(result, records)
     }
     if (submitted.length) {
       const prepared = { source: result, drafts: submitted }
