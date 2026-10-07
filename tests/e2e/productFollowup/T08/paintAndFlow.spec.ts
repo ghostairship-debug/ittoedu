@@ -1,4 +1,4 @@
-import { expect, test, type FrameLocator, type ElectronApplication, type Locator } from '@playwright/test'
+import { expect, test, type FrameLocator, type ElectronApplication, type Locator, type Page } from '@playwright/test'
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import sharp from 'sharp'
@@ -22,26 +22,46 @@ async function outerGeometry(iframe: Locator) {
     for (let node: HTMLElement | null = element as HTMLElement; node; node = node.parentElement) {
       const style = getComputedStyle(node)
       ancestors.push({ tag: node.tagName, className: node.className, rect: node.getBoundingClientRect().toJSON(),
-        clientWidth: node.clientWidth, clientHeight: node.clientHeight, scrollLeft: node.scrollLeft, scrollTop: node.scrollTop,
+        clientWidth: node.clientWidth, clientHeight: node.clientHeight, offsetWidth: node.offsetWidth, offsetHeight: node.offsetHeight,
+        clientLeft: node.clientLeft, clientTop: node.clientTop, scrollLeft: node.scrollLeft, scrollTop: node.scrollTop,
         transform: style.transform, transformOrigin: style.transformOrigin, zoom: style.zoom, width: style.width, height: style.height,
         overflowX: style.overflowX, overflowY: style.overflowY, borderLeftWidth: style.borderLeftWidth, borderTopWidth: style.borderTopWidth })
     }
     return { window: { innerWidth, innerHeight, scrollX, scrollY, devicePixelRatio }, ancestors }
   }) }
 }
-async function painted(frame: FrameLocator, iframe: Locator, directory: string, label: string) {
+async function painted(page: Page, frame: FrameLocator, iframe: Locator, directory: string, label: string) {
   const geometry: Record<string, unknown> = { label, samples: {} }
   const saveGeometry = () => writeFileSync(join(directory, `${label}-capture-geometry.json`), JSON.stringify(geometry, null, 2))
   const capture = async (selector: string, name: string) => {
     const target = frame.locator(selector)
+    await iframe.scrollIntoViewIfNeeded()
+    await target.scrollIntoViewIfNeeded()
     const measure = async () => ({ playwrightBox: await target.boundingBox(), outer: await outerGeometry(iframe), inner: await target.evaluate(element => ({
       rect: element.getBoundingClientRect().toJSON(), window: { innerWidth, innerHeight, scrollX, scrollY, devicePixelRatio },
       document: { scrollLeft: document.documentElement.scrollLeft, scrollTop: document.documentElement.scrollTop,
         clientWidth: document.documentElement.clientWidth, clientHeight: document.documentElement.clientHeight },
       body: { scrollLeft: document.body.scrollLeft, scrollTop: document.body.scrollTop, clientWidth: document.body.clientWidth, clientHeight: document.body.clientHeight } })) })
-    const sample: Record<string, unknown> = { selector, before: await measure() }
+    const before = await measure(), sample: Record<string, unknown> = { selector, before }
     ;(geometry.samples as Record<string, unknown>)[name] = sample; saveGeometry()
-    const png = await target.screenshot({ scale: 'css', path: join(directory, `${label}-${name}.png`) })
+    // Child-frame DOM rectangles already include child scrolling. Map them through the actual
+    // iframe border/content box and parent transforms into the same top-page viewport pixels.
+    // Playwright's child element screenshot omits this scale for a transformed OOP iframe.
+    const outer = before.outer.dom.ancestors[0], inner = before.inner.rect
+    const scaleX = outer.rect.width / outer.offsetWidth, scaleY = outer.rect.height / outer.offsetHeight
+    const screen = { x: outer.rect.x + (outer.clientLeft + inner.x) * scaleX,
+      y: outer.rect.y + (outer.clientTop + inner.y) * scaleY, width: inner.width * scaleX, height: inner.height * scaleY }
+    const viewportPng = await page.screenshot({ scale: 'css' }), viewportImage = await sharp(viewportPng).metadata()
+    const pixelX = viewportImage.width! / before.outer.dom.window.innerWidth, pixelY = viewportImage.height! / before.outer.dom.window.innerHeight
+    const left = Math.floor(screen.x * pixelX), top = Math.floor(screen.y * pixelY)
+    const clip = { left, top, width: Math.ceil((screen.x + screen.width) * pixelX) - left, height: Math.ceil((screen.y + screen.height) * pixelY) - top }
+    expect(left, 'Paint target must be visible in its actual screen viewport').toBeGreaterThanOrEqual(0)
+    expect(top, 'Paint target must be visible in its actual screen viewport').toBeGreaterThanOrEqual(0)
+    expect(left + clip.width).toBeLessThanOrEqual(viewportImage.width!)
+    expect(top + clip.height).toBeLessThanOrEqual(viewportImage.height!)
+    sample.screenMapping = { scaleX, scaleY, screen, clip, viewport: { width: viewportImage.width, height: viewportImage.height } }; saveGeometry()
+    const png = await sharp(viewportPng).extract(clip).png().toBuffer()
+    writeFileSync(join(directory, `${label}-${name}.png`), png)
     const metadata = await sharp(png).metadata()
     sample.png = { width: metadata.width, height: metadata.height, format: metadata.format }
     sample.after = await measure(); saveGeometry()
@@ -87,7 +107,7 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
     await openM23Html(page, 'paint-and-flow.html')
     const source = page.frameLocator('iframe[title="HTML 预览"]')
     const sourceIframe = page.locator('iframe[title="HTML 预览"]')
-    facts.sourcePaint = await painted(source, sourceIframe, directory, 'source')
+    facts.sourcePaint = await painted(page, source, sourceIframe, directory, 'source')
     const sourcePng = await sourceIframe.screenshot({ scale: 'css', path: join(directory, 'source-outer.png') })
     facts.sourceOuter = { geometry: await outerGeometry(sourceIframe), png: await sharp(sourcePng).metadata() }
     await info.attach('Original source paint', { body: sourcePng, contentType: 'image/png' })
@@ -122,7 +142,7 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
     const frames = host.locator('iframe'); await expect(frames).toHaveCount(1)
     const player = host.frameLocator('iframe')
     await expect(player.locator('#answer summary')).toBeVisible()
-    const sourceFacts = facts.sourcePaint as Awaited<ReturnType<typeof painted>>, playerFacts = await painted(player, frames, directory, 'player')
+    const sourceFacts = facts.sourcePaint as Awaited<ReturnType<typeof painted>>, playerFacts = await painted(page, player, frames, directory, 'player')
     facts.playerPaint = playerFacts
     const playerPng = await frames.screenshot({ scale: 'css', path: join(directory, 'player-outer.png') })
     facts.playerOuter = { geometry: await outerGeometry(frames), png: await sharp(playerPng).metadata() }
