@@ -94,7 +94,7 @@ it('moves the default collapsed controller by the requested screen distance in t
   const navigation = new ComponentNavigationOwner({ project: () => course, surfaceId: () => course.surfaces[0].id,
     select() {}, viewportBounds: () => ({ left: 0, top: 0, right: 640, bottom: 360 }) })
   const geometry = createTeacherControllerHudGeometry({ referenceSize: teacherControllerReferenceSize(course), viewportRect: { x: 0, y: 0, width: 640, height: 360 } })
-  const draw = () => projectTeacherControllerInstances(course, geometry, undefined, navigation).instances[id].frame!.transform.slice(4)
+  const draw = () => projectTeacherControllerInstances(course, geometry, navigation).instances[id].frame!.transform.slice(4)
   const start = draw()
   navigation.moveBy(-10, -10)
   expect(draw()).toEqual([start[0] - 10, start[1] - 10])
