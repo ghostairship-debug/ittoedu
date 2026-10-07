@@ -1,4 +1,5 @@
 import { ComponentRuntimeHost, type PreparedComponentRuntime } from './runtime/ComponentRuntimeHost'
+import { nanoid } from 'nanoid'
 import type { ComponentDefinition, ComponentImplementation, ComponentRuntimeImplementation, ComponentTarget, JsonValue, CourseProjectV10, ComponentAuthorSpot, ComponentAuthorSpotInput, ComponentAuthorGeometry, ComponentAuthorPreviewCallbacks } from '../../shared/contracts/component-platform'
 import type { DocumentResources } from '../../shared/workbench/document'
 import { textRuntimeImplementation, formulaRuntimeImplementation } from '../../components/text/runtime'
@@ -47,7 +48,7 @@ export class ComponentPlatformRuntime {
   private readonly resolveAssetUrl?: (id: string) => string | undefined
   private readonly isAssetPending?: (id: string) => boolean
   private readonly assetContents = new Map<string, { bytes: Uint8Array; mimeType: string }>()
-  private readonly themeMarker = `component-${crypto.randomUUID()}`
+  private readonly themeMarker = `component-${nanoid()}`
   private themeStyle?: HTMLStyleElement
   private themeText = ''
   private resourceVersion = 0

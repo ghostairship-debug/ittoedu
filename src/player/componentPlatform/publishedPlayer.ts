@@ -1,4 +1,5 @@
 import { publishedCourseV3Schema, type PublishedCourseV3, type PublishedImplementation } from '../../shared/contracts/component-platform/published'
+import { nanoid } from 'nanoid'
 import { resolveComponentPresentation } from '../../shared/contracts/component-platform'
 import type { DocumentResources } from '../../shared/workbench/document'
 import { mountV10Model } from './ModelPlayer'
@@ -136,7 +137,7 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
     selectState: async id => { if (stopped) return; stateId = id; await player.update(renderModel()) },
   })
   const teacherController = navigation.teacherPort()
-  player = mountV10Model({ model: renderModel(), root, mode: options.capture ? 'capture' : 'play', runScopeId: `published:${payload.id}:${crypto.randomUUID()}`,
+  player = mountV10Model({ model: renderModel(), root, mode: options.capture ? 'capture' : 'play', runScopeId: `published:${payload.id}:${nanoid()}`,
     teacherController, studentNavigation: navigation, report: options.report, initialSurfaceId: surfaceId ?? undefined,
     resolveAssetUrl, isAssetPending: id => pendingAssets.has(id),
     onObservation: options.capture ? undefined : (id, observation) => {
