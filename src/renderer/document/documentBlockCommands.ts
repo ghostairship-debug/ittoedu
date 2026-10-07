@@ -18,6 +18,8 @@ export interface DocumentBlockCommandPort {
   apply(content: DocumentContent): void
   onError?(message: string): void
   ai?(blockId: string): void
+  /** The host's existing clipboard/resource owner copies formal component instances. */
+  duplicate?(blockId: string): void
   disabledReason?: string | null
   createId?(): string
 }
@@ -145,6 +147,7 @@ export function documentBlockMenu(port: DocumentBlockCommandPort): MenuCommand[]
       const current = port.readContent?.() ?? port.content
       if (!locate(current.blocks, port.blockId)) throw new Error('段落已变化，请重新选择')
       if (command.action === 'ai') { port.ai?.(port.blockId); return }
+      if (command.action === 'duplicate' && port.duplicate) { port.duplicate(port.blockId); return }
       const result = applyDocumentBlockCommand(current, command, port.createId)
       if (result !== current) port.apply(result)
     } catch (error) {

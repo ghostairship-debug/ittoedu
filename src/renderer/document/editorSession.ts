@@ -8,7 +8,7 @@ import type { DocumentPoint, DocumentSelection } from '../../shared/document/por
 import { toEditorDocument, fromEditorDocument, renewEditorIdentities, editorPositionToPoint } from './documentAdapter'
 import { documentEditorSchema as schema } from './editorSchema'
 import { CellSelection, tableEditing } from 'prosemirror-tables'
-import { Slice } from 'prosemirror-model'
+import { Fragment, Slice } from 'prosemirror-model'
 import type { DocumentBlock } from '../../shared/document/content'
 import { prepareDocumentClipboard, type DocumentClipboardResourcePort } from './documentClipboard'
 import { documentResourceReferences } from '../../shared/document/resources'
@@ -337,7 +337,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     const head = editorPositionToPoint(state.doc, state.selection.head)
     return anchor && head ? { revision: options.revision, kind: 'text', anchor, head } : null
   }
-  async function pastePrepared(payload: { slice: unknown; resources: MarkdownDocument['resources']; context?: unknown }, identity: 'copy' | 'move') {
+  async function pastePrepared(payload: { slice: unknown; resources: MarkdownDocument['resources']; context?: unknown }, identity: 'copy' | 'move', insertAt?: number) {
     const targetState = view.state, targetOptions = options; const revision = targetOptions.revision
     let port: DocumentClipboardResourcePort<unknown> | undefined
     let prepared: Awaited<ReturnType<typeof prepareDocumentClipboard>> | undefined
@@ -351,7 +351,8 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       const components = new Map(options.document.resources.components.map(component => [`${component.packageId}@${component.version}`, component])); prepared.document.resources.components.forEach(component => components.set(`${component.packageId}@${component.version}`, component))
       options = { ...options, document: { ...options.document, resources: { assets: [...assets.values()], components: [...components.values()] } } }
       const fragment = toEditorDocument(prepared.document.content).content
-      const transaction = view.state.tr.replaceSelection(new Slice(fragment, slice.openStart, slice.openEnd)).setMeta('preparedResources', { value: prepared.prepared, discard: () => port!.discard(prepared!.prepared) })
+      const transaction = (insertAt === undefined ? view.state.tr.replaceSelection(new Slice(fragment, slice.openStart, slice.openEnd)) : view.state.tr.insert(insertAt, fragment))
+        .setMeta('preparedResources', { value: prepared.prepared, discard: () => port!.discard(prepared!.prepared) })
       pendingCut = null
       view.dispatch(transaction)
     } catch (error) { if (prepared) await port?.discard(prepared.prepared); targetOptions.diagnostic(error instanceof Error ? error.message : String(error)) }
@@ -429,12 +430,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
   function textView(node: import('prosemirror-model').Node, tag: string) {
     const dom = flowBlockElement(node, tag), contentDOM = richTextHost(); dom.append(contentDOM); return { dom, contentDOM }
   }
-  function clipboard(event: ClipboardEvent, cut: boolean): boolean {
-    if (options.projectionClipboard?.(view, event, cut)) return true
-    if (!event.clipboardData || view.state.selection.empty) return false
-    const slice = view.state.selection.content()
-    const cutToken = cut ? crypto.randomUUID() : null
-    pendingCut = cutToken
+  function clipboardPayload(slice: Slice) {
     const assets = new Set<string>(); const components = new Set<string>()
     slice.content.descendants(node => {
       const data = node.attrs.data
@@ -442,10 +438,32 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
       if (data?.type === 'component') { assets.add(data.staticFallbackAssetId); components.add(`${data.component.packageId}@${data.component.version}`) }
     })
     const resources = { assets: options.document.resources.assets.filter(asset => assets.has(asset.assetId)), components: options.document.resources.components.filter(component => components.has(`${component.packageId}@${component.version}`)) }
-    let context: unknown
-    try { context = typeof options.clipboardContext === 'function' ? options.clipboardContext(resources, fromEditorDocument(schema.nodes.doc.create(null, slice.content))) : options.clipboardContext }
+    const context = typeof options.clipboardContext === 'function' ? options.clipboardContext(resources, fromEditorDocument(schema.nodes.doc.create(null, slice.content))) : options.clipboardContext
+    return { slice: slice.toJSON(), resources, context }
+  }
+  async function duplicateBlock(blockId: string) {
+    try {
+      if (options.readOnly || !options.clipboardResourcePort) return
+      let at: number | null = null
+      view.state.doc.descendants((node, position) => { if (at === null && node.attrs.id === blockId) at = position; return at === null })
+      const node = at === null ? null : view.state.doc.nodeAt(at)
+      if (!node || at === null) throw new Error('段落已变化，请重新选择')
+      boundary()
+      const preparation = pastePrepared(clipboardPayload(new Slice(Fragment.from(node), 0, 0)), 'copy', at + node.nodeSize)
+      preparations.add(preparation)
+      try { await preparation } finally { preparations.delete(preparation) }
+    } catch (error) { options.diagnostic(error instanceof Error ? error.message : String(error)) }
+  }
+  function clipboard(event: ClipboardEvent, cut: boolean): boolean {
+    if (options.projectionClipboard?.(view, event, cut)) return true
+    if (!event.clipboardData || view.state.selection.empty) return false
+    const slice = view.state.selection.content()
+    const cutToken = cut ? crypto.randomUUID() : null
+    pendingCut = cutToken
+    let payload: ReturnType<typeof clipboardPayload>
+    try { payload = clipboardPayload(slice) }
     catch (error) { event.preventDefault(); options.diagnostic(error instanceof Error ? error.message : String(error)); return true }
-    event.clipboardData.setData(clipboardType, JSON.stringify({ editorId, cutToken, slice: slice.toJSON(), resources, context }))
+    event.clipboardData.setData(clipboardType, JSON.stringify({ editorId, cutToken, ...payload }))
     event.clipboardData.setData('text/plain', slice.content.textBetween(0, slice.content.size, '\n', node => node.attrs.data?.accessibleText ?? ''))
     event.preventDefault()
     if (cut) { boundary(); view.dispatch(view.state.tr.deleteSelection()) }
@@ -617,7 +635,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
     }
     return drain().then(ready => { if (ready) return invoke() })
   }
-  return { view, update, boundary, syncDomTextSelection, paintProjection,
+  return { view, update, boundary, syncDomTextSelection, paintProjection, duplicateBlock,
     requestPlainPaste: () => { clearPlainPaste(); plainPastePending = true; plainPasteTimer = setTimeout(clearPlainPaste, 3000); return clearPlainPaste },
     flush: () => { if (composing || view.composing || preparations.size) return false; publish(); boundary(); return !draftSession.rejected },
     drain,

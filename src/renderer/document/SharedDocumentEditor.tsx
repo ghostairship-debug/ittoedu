@@ -413,6 +413,7 @@ export const SharedDocumentEditor = forwardRef<SharedDocumentEditorHandle, Share
     if (!editor || latest.current.readOnly) return []
     return documentBlockMenu({ content: fromEditorDocument(editor.view.state.doc),
       readContent: () => fromEditorDocument(editor.view.state.doc), blockId, apply: applyDocumentContent, onError: fail,
+      duplicate: latest.current.clipboardResourcePort ? id => { void editor.duplicateBlock(id) } : undefined,
       ai: latest.current.onContextualCommand ? id => {
         let at = -1
         editor.view.state.doc.descendants((node, position) => { if (at < 0 && node.attrs.id === id) at = position; return at < 0 })
