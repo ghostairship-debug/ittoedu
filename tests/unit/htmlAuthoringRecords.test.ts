@@ -15,6 +15,9 @@ import { mountHtmlPreviewAgent } from '../../src/player/htmlPreview/htmlPreviewA
 import { createElement } from 'react'
 import { act, fireEvent, render, waitFor } from '@testing-library/react'
 import { HtmlPreviewPane } from '../../src/renderer/documentFiles/html/HtmlPreviewPane'
+import { HtmlLightEditOverlay } from '../../src/renderer/documentFiles/html/HtmlLightEditOverlay'
+import { workbenchSelection } from '../../src/renderer/workbench/SelectionContextController'
+import { elementCards } from '../../src/renderer/workbench/elementCards/elementCardController'
 
 function observation() {
   const container = document.createElement('div'); document.body.append(container)
@@ -380,4 +383,77 @@ it('keeps the other anchored object width when moving a repeated sibling then st
   await apply({ type: 'style', target: nodes.find(node => node.attributes['data-cw-author-key'] === 'b')!.address!, patch: { width: '140px' } })
   expect(readHtmlAuthoringRecords(current()).a.overrides.geometry?.width).toBe(90)
   expect(readHtmlAuthoringRecords(current()).b.overrides.geometry?.width).toBeUndefined()
+})
+
+it('opens the exact HTML author field after preparing pending input and refuses a rebound key', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  const value = observation(), key = value.authorKey, driver = new TextDriver()
+  const record = { ...value.record, overrides: { text: '人工起始文字', geometry: { translateX: 25 }, style: { color: 'red' } } }
+  const original = '<html><body><script>/* dynamic program stays */</script></body></html>'
+  const source = patchHtmlAuthoringRecords(original, { [key]: record })
+  const session = await DocumentSession.create({ documentId: 'html-ai', epoch: 'epoch', model: driver.load(new TextEncoder().encode(source)),
+    binding: { kind: 'file', path: 'sample.html', version: null, bindingVersion: 1 } }, driver,
+    { async append() {}, async save(input) { return input.binding as Extract<typeof input.binding, { kind: 'file' }> } })
+  const service = new HtmlSourceEditService({ async readDocument() { return session.read() }, execute: op => session.execute(op), withFileAccess: work => work() })
+  const context: HtmlPreviewEditContext = { lease: { leaseId: 'lease', documentId: 'html-ai', epoch: 'epoch', revision: 0,
+    bindingVersion: 1, loadId: 'load', url: 'about:blank' }, tabId: 'tab', entryRealPath: 'sample.html', rootRealPath: '.', bindingPath: 'sample.html', snapshot: session.read() }
+  const report: HtmlSelectedTarget['report'] = { handle: 'dynamic', kind: 'text', domPath: [], rawText: record.overrides.text,
+    sectionOrder: null, attributeName: null, rect: { x: 0, y: 0, width: 20, height: 10 }, scriptCreated: true, bindingStatus: 'bound',
+    authoring: { authorKey: key, record } }
+  const resolution = await service.resolveTarget({ type: 'html-preview.resolve-target', leaseId: 'lease', loadId: 'load', revision: 0, targets: [report] }, context)
+  const target: HtmlSelectedTarget = { report, resolved: resolution.targets[0]! }
+  const prepare = vi.fn(async () => {
+    await service.edit({ type: 'html-preview.edit', operationId: 'pending-human-text', documentId: 'html-ai', epoch: 'epoch', baseRevision: 0,
+      bindingVersion: 1, leaseId: 'lease', loadId: 'load', target: 'dynamic', change: { kind: 'text', value: '人工最终文字' } }, context)
+    return session.read()
+  })
+  let unregister = workbenchSelection.register('html-ai', prepare)
+  const opened = vi.spyOn(elementCards, 'openText')
+  const view = render(createElement(HtmlLightEditOverlay, { target, committed: session.read(), position: { left: 0, top: 0 },
+    value: '人工最终文字', onValue() {}, async onText() { return { status: 'unchanged' as const, revision: 0 } },
+    async onImage() { return { status: 'unchanged' as const, revision: 0 } }, onClose() {} }))
+  try {
+    fireEvent.click(view.getByRole('button', { name: 'AI 修改' }))
+    await waitFor(() => expect(opened).toHaveBeenCalledOnce())
+    expect(prepare).toHaveBeenCalledOnce()
+    expect(opened.mock.calls[0][0]).toMatchObject({ documentId: 'html-ai', content: '人工最终文字', target: {
+      kind: 'html-author-field', authorKey: key, field: 'text', record: { binding: record.binding, scope: record.scope, overrides: { text: '人工最终文字' } } } })
+    const address = opened.mock.calls[0][0].target
+    if (address.kind !== 'html-author-field') throw new Error('exact author field')
+    expect(address.record.overrides).toEqual({ text: '人工最终文字' })
+    expect(session.read().undoDepth).toBe(1)
+    const model = session.read().model
+    if (model.kind !== 'text') throw new Error('text')
+    expect(extractHtmlAuthoringRecords(model.source).source).toBe(original)
+    unregister()
+    unregister = workbenchSelection.register('html-ai', async () => ({ ...session.read(), model: { ...model,
+      source: patchHtmlAuthoringRecords(model.source, { [key]: { ...record, scope: { 'dom:0:data-item-id': 'other' } } }) } }))
+    fireEvent.click(view.getByRole('button', { name: 'AI 修改' }))
+    await view.findByText('对象已变化，请重新选择；输入已保留。')
+    expect(opened).toHaveBeenCalledOnce()
+    view.unmount(); unregister()
+    const staticSource = '<html><body><p data-item-id="a">same</p><p data-item-id="b">same</p></body></html>'
+    const staticSession = await DocumentSession.create({ documentId: 'html-ai-static', epoch: 'epoch', model: driver.load(new TextEncoder().encode(staticSource)),
+      binding: { kind: 'file', path: 'static.html', version: null, bindingVersion: 1 } }, driver,
+      { async append() {}, async save(input) { return input.binding as Extract<typeof input.binding, { kind: 'file' }> } })
+    const from = staticSource.lastIndexOf('same')
+    unregister = workbenchSelection.register('html-ai-static', async () => staticSession.read())
+    const staticView = render(createElement(HtmlLightEditOverlay, { target: { report: { ...report, rawText: 'same', bindingStatus: 'source-required',
+      authoring: value }, resolved: { handle: 'dynamic', status: 'editable', locator: { documentId: 'html-ai-static', epoch: 'epoch', revision: 0,
+        bindingVersion: 1, targetKind: 'text', elementSpan: { start: staticSource.indexOf('<p data-item-id="b">'), end: from + 8 }, valueSpan: { start: from, end: from + 4 },
+        expectedRaw: 'same', attributeName: null } } }, committed: staticSession.read(), position: { left: 0, top: 0 }, value: 'same',
+      onValue() {}, async onText() { return { status: 'unchanged' as const, revision: 0 } }, async onImage() { return { status: 'unchanged' as const, revision: 0 } }, onClose() {} }))
+    try {
+      fireEvent.click(staticView.getByRole('button', { name: 'AI 修改' }))
+      await waitFor(() => expect(opened).toHaveBeenCalledTimes(2))
+      expect(opened.mock.calls[1][0]).toMatchObject({ documentId: 'html-ai-static', content: 'same',
+        target: { kind: 'markdown-range', from, to: from + 4 } })
+      expect(staticSession.read().undoDepth).toBe(0)
+      expect(staticSession.read().model).toEqual(driver.load(new TextEncoder().encode(staticSource)))
+    } finally { staticView.unmount() }
+  } finally {
+    view.unmount(); unregister()
+    for (const card of elementCards.texts()) if (card.documentId.startsWith('html-ai')) await elementCards.closeText(card.key)
+    opened.mockRestore(); vi.unstubAllGlobals()
+  }
 })

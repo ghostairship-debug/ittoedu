@@ -1,9 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import type { HtmlPreviewEditOutcome } from '../../../shared/workbench/htmlPreview'
-import { captureSelection } from '../../workbench/SelectionContextController'
+import { captureSelection, workbenchSelection } from '../../workbench/SelectionContextController'
 import { TextAiButton, textCardLabel } from '../../workbench/elementCards/ElementTextCards'
 import type { HtmlSelectedTarget } from './htmlPreviewController'
+import { readEditableTargetContent } from '../../../core/tools/ToolTargets'
+import { equalComponentValue } from '../../../core/drivers/courseV10Operations'
+import { readHtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
 
 export interface HtmlLightEditOverlayProps {
   target: HtmlSelectedTarget
@@ -66,6 +69,7 @@ export function HtmlLightEditOverlay({ target, committed, position, value, onVal
     finally { setBusy(false) }
   }
   const locator = target.resolved.status === 'editable' ? target.resolved.locator : null
+  const authoring = target.report.authoring ?? locator?.authoring
   const aiAvailable = committed.model.kind === 'text'
   return <div ref={overlay} role="dialog" tabIndex={-1} aria-label={target.report.kind === 'text' ? '编辑 HTML 文字' : '替换 HTML 图片'}
     onKeyDown={event => {
@@ -77,7 +81,7 @@ export function HtmlLightEditOverlay({ target, committed, position, value, onVal
     }}
     className="html-preview-light-edit" style={{ left: placed.left, top: placed.top, boxSizing: 'border-box', maxHeight: 'min(60vh, 420px, calc(100% - 16px))' }}>
     <div className="html-preview-light-edit__heading">{target.report.kind === 'text' ? '编辑文字' : '替换图片'}</div>
-    {target.resolved.status !== 'editable' && <p>不能直接修改这个位置，可用 AI 修改 HTML 源码。</p>}
+    {target.resolved.status !== 'editable' && <p>这个位置暂时无法定位，请重新选择要修改的文字或图片。</p>}
     {target.report.kind === 'text' && target.resolved.status === 'editable' && <textarea aria-label="HTML 文字" value={value} disabled={busy}
       onChange={event => onValue(event.target.value)} rows={Math.min(8, Math.max(2, value.split('\n').length))} />}
     {onStyle && target.resolved.status === 'editable' && <details>
@@ -99,15 +103,30 @@ export function HtmlLightEditOverlay({ target, committed, position, value, onVal
       </button>}
       {aiAvailable && <TextAiButton documentId={committed.documentId}
         selectionIdentity={`${target.report.kind}:${target.report.handle}:${committed.revision}`} start={async () => {
-        if (committed.model.kind !== 'text' || (locator && committed.revision !== locator.revision)) throw new Error('源码已变化，请重新选择。')
-        const range = { kind: 'markdown-range' as const,
-          from: target.report.kind === 'text' ? locator?.valueSpan?.start ?? 0 : 0,
-          to: target.report.kind === 'text' ? locator?.valueSpan?.end ?? committed.model.source.length : committed.model.source.length }
-        const label = target.report.kind === 'text' && locator ? textCardLabel(target.report.rawText) : 'HTML 源码'
-        captureSelection(committed, [range], label, committed.model.source)
-        return { target: range, label,
-          content: committed.model.source.slice(range.from, range.to) }
-      }} disabledReason={committed.model.kind === 'text' && committed.model.source.length ? null : 'HTML 源码为空'} />}
+        const snapshot = await workbenchSelection.prepare(committed.documentId)
+        if (snapshot.epoch !== committed.epoch || snapshot.model.kind !== 'text') throw new Error('文档已变化，请重新选择。')
+        const current = authoring ? readHtmlAuthoringRecords(snapshot.model.source)[authoring.authorKey] : undefined
+        if (!current && locator?.valueSpan) {
+          if (snapshot.revision !== locator.revision) throw new Error('源码已变化，请重新选择；输入已保留。')
+          const range = { kind: 'markdown-range' as const, from: locator.valueSpan.start, to: locator.valueSpan.end }
+          const content = readEditableTargetContent(snapshot.model, range).text
+          const label = target.report.kind === 'text' ? textCardLabel(target.report.rawText) : '所选图片地址'
+          captureSelection(snapshot, [range], label, snapshot.model.source)
+          return { target: range, label, content }
+        }
+        if (!authoring || target.report.bindingStatus !== 'bound') throw new Error('这个对象的运行位置尚未绑定，请重新选择。')
+        const original = authoring.record
+        if (current && (current.kind !== original.kind || !equalComponentValue(current.scope ?? {}, original.scope ?? {})
+          || !equalComponentValue(current.binding, original.binding))) throw new Error('对象已变化，请重新选择；输入已保留。')
+        const record = current ?? original, field = target.report.kind === 'text' ? 'text' as const : 'src' as const
+        const value = record.overrides[field]
+        const address = { kind: 'html-author-field' as const, authorKey: authoring.authorKey, field,
+          record: { ...record, overrides: value === undefined ? {} : { [field]: value } } }
+        const content = readEditableTargetContent(snapshot.model, address).text
+        const label = target.report.kind === 'text' ? textCardLabel(content) : '所选图片地址'
+        captureSelection(snapshot, [address], label)
+        return { target: address, label, content }
+      }} disabledReason={!authoring && !locator?.valueSpan ? '这个位置暂时无法定位，请重新选择。' : null} />}
       <button type="button" disabled={busy} onClick={onClose}>关闭</button>
     </div>
     {issue && <p role="alert">{issue}</p>}
