@@ -465,7 +465,6 @@ export class ExecutionDesktopService {
     }
     if (input.contentOutput) {
       const output = input.contentOutput
-      if (permission === 'read-only') throw refused('只读任务不能应用正文改写，请切换到可修改模式。')
       if (!documents.some(document => document.documentId === output.documentId
         && document.selection?.some(target => JSON.stringify(target) === JSON.stringify(output.target))))
         throw refused('正文改写目标与本次固定选区不一致，请重新选择。')
