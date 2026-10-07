@@ -243,14 +243,21 @@ export class HtmlActionService {
     session.busy = true
     session.handles.clear()
     const promise = (async () => {
+      let actionMayHaveApplied = false
       try {
         await this.assertCurrent(session)
+        actionMayHaveApplied = true
         const result = await this.options.frames.act(session.context, session.frameToken,
           { ...input, path: target.path, fingerprint: target.fingerprint })
+        actionMayHaveApplied = result.applied
         await this.assertCurrent(session)
         if (!result.applied) throw new Error(result.reason === 'stale-element'
           ? 'HTML 元素已变化，请重新观察' : `HTML 操作未应用：${result.reason ?? '未知原因'}`)
         return await this.observeCurrent(session)
+      } catch (cause) {
+        if (!actionMayHaveApplied) throw cause
+        throw Object.assign(new Error(`HTML 页面动作结果未知；动作已经发出，请先用 html.observe 查证当前页面，不要重新提交点击或输入。${cause instanceof Error ? ` 原因：${cause.message}` : ''}`),
+          { code: 'html-action-outcome-unknown' })
       } finally { session.busy = false }
     })()
     // Keep failed/unknown receipts: repeating an operation ID must not click twice.
