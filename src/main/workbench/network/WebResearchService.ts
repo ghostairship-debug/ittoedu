@@ -161,7 +161,7 @@ export class WebResearchService {
     const offset = input.offset ?? 0, limit = input.limit ?? 7000
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1)
       return { status: 'rejected', reason: '正文读取范围无效' }
-    if (run.stopped) return { status: 'rejected', reason: '任务已停止' }
+    if (run.stopped || input.signal?.aborted) return { status: 'rejected', reason: '任务已停止' }
     const materialSources = run.materials
     const priorMaterial = input.sourceId ? materialSources.get(input.sourceId) : undefined
     if (priorMaterial) {
