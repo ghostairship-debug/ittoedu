@@ -19,6 +19,12 @@ export interface RemoteReference {
   usage: 'image' | 'media' | 'script' | 'stylesheet' | 'font' | 'unknown'
 }
 
+/** Identified passive consumers, retained separately from embedded asset delivery URLs. */
+export interface HtmlResourceSource {
+  url: string
+  usage: 'image' | 'media' | 'stylesheet' | 'font'
+}
+
 export interface ImportDiagnostic {
   level: 'info' | 'warning' | 'error'
   code: string

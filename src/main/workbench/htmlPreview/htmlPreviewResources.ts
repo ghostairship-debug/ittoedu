@@ -1,8 +1,8 @@
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { scanHtmlSource } from '../../../shared/html/htmlSourceScanner'
-import { extractHtmlResources } from '../htmlImport/extractHtmlResources'
-import { remoteHttpsOrigin } from '../htmlImport/remoteHtmlReferences'
+import { extractHtmlResources, htmlResourceSources } from '../htmlImport/extractHtmlResources'
+import type { HtmlResourceSource } from '../htmlImport/types'
 import { isContainedPath } from './htmlPreviewProtocol'
 
 const TYPES: Record<string, string> = {
@@ -78,8 +78,8 @@ export async function resolveHtmlPreviewResource(rootRealPath: string, relativeP
   } catch { return null }
 }
 
-/** Reuse M17's passive sink classification, including CSS reached from local stylesheets. */
-export async function collectHtmlPreviewMediaUrls(source: string, rootRealPath: string): Promise<string[]> {
+/** Follow the existing realpath-closed local CSS reads; never fetch remote stylesheets to guess their dependencies. */
+export async function collectHtmlPreviewResourceSources(source: string, rootRealPath: string): Promise<HtmlResourceSource[]> {
   const files = new Map<string, Uint8Array>()
   let result = extractHtmlResources({ html: source, siblingFiles: files })
   for (;;) {
@@ -98,8 +98,11 @@ export async function collectHtmlPreviewMediaUrls(source: string, rootRealPath: 
     if (!added) break
     result = extractHtmlResources({ html: source, siblingFiles: files })
   }
-  return [...new Set(result.remoteReferences
-    .filter(reference => reference.usage === 'image' || reference.usage === 'media')
-    .filter(reference => remoteHttpsOrigin(reference) !== null)
-    .map(reference => reference.url.startsWith('//') ? `https:${reference.url}` : reference.url))]
+  return htmlResourceSources(result.remoteReferences)
+}
+
+/** Existing media-only callers keep the same grant scope. New consumers use the typed source declaration. */
+export async function collectHtmlPreviewMediaUrls(source: string, rootRealPath: string): Promise<string[]> {
+  return [...new Set((await collectHtmlPreviewResourceSources(source, rootRealPath))
+    .filter(source => source.usage === 'image' || source.usage === 'media').map(source => source.url))]
 }

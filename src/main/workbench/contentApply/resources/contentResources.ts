@@ -1,16 +1,7 @@
-import sharp from 'sharp'
 import type { ImageAssetResource } from '../../../../core/tools/imageAssetMetadata'
 import { prepareImageResource } from '../../admittedImageResource'
-import { extractHtmlResources } from '../../htmlImport/extractHtmlResources'
-import type { ExtractedResource, ExtractHtmlResourcesInput, ExtractHtmlResourcesResult } from '../../htmlImport/types'
-
-/** A preview seed, not a screenshot or a claim that the content has rendered. */
-export async function createContentPreviewResource(filename: string, createId: () => string): Promise<ImageAssetResource> {
-  const bytes = await sharp({
-    create: { width: 1, height: 1, channels: 4, background: '#ffffff' },
-  }).png().toBuffer()
-  return prepareImageResource({ bytes, mimeType: 'image/png', filename }, createId)
-}
+import { extractHtmlResources, htmlResourceSources } from '../../htmlImport/extractHtmlResources'
+import type { ExtractedResource, ExtractHtmlResourcesInput, ExtractHtmlResourcesResult, HtmlResourceSource } from '../../htmlImport/types'
 
 export interface PreparedContentResource extends ExtractedResource {
   /** Image identity and dimensions come from the existing host decoder. */
@@ -19,8 +10,9 @@ export interface PreparedContentResource extends ExtractedResource {
 
 export interface PreparedContentResources extends Omit<ExtractHtmlResourcesResult, 'resources'> {
   resources: PreparedContentResource[]
-  /** Original bytes remain available for repair; these are not admitted image assets. */
+  /** Must be committed as ordinary binary assets with their cw-resource bindings, without image metadata. */
   unresolvedResources: ExtractedResource[]
+  resourceSources: HtmlResourceSource[]
 }
 
 const imageExtension: Record<string, string> = {
@@ -64,7 +56,7 @@ export async function prepareExtractedContentResources(extracted: ExtractHtmlRes
       })
     }
   }
-  return { ...extracted, resources, unresolvedResources, diagnostics }
+  return { ...extracted, resources, unresolvedResources, diagnostics, resourceSources: htmlResourceSources(extracted.remoteReferences) }
 }
 
 // Program content and HTML content use the same existing host admission service.

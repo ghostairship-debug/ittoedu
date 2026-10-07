@@ -10,9 +10,26 @@ import type {
   ExtractHtmlResourcesResult,
   ImportDiagnostic,
   RemoteReference,
+  HtmlResourceSource,
 } from './types'
 
 export type { ExtractedResource, ExtractedResourceOrigin, ExtractHtmlResourcesInput, ExtractHtmlResourcesResult, ImportDiagnostic, RemoteReference }
+
+/** A URL grants only its recognized consumer; links, strings and remote scripts grant nothing. */
+export function htmlResourceSources(references: readonly RemoteReference[]): HtmlResourceSource[] {
+  const sources = new Map<string, HtmlResourceSource>()
+  for (const reference of references) {
+    const { usage } = reference
+    if (!['image', 'media', 'stylesheet', 'font'].includes(usage)) continue
+    try {
+      const url = new URL(reference.url.startsWith('//') ? `https:${reference.url}` : reference.url)
+      if (url.protocol !== 'https:' || url.username || url.password) continue
+      const source = { url: url.href, usage: usage as HtmlResourceSource['usage'] }
+      sources.set(`${usage}\n${source.url}`, source)
+    } catch { /* Invalid URLs remain in the source, without a network grant. */ }
+  }
+  return [...sources.values()]
+}
 
 type Context = ExtractedResourceOrigin['context']
 type Usage = Remote['usage']
@@ -433,7 +450,7 @@ function cssUrlUsage(css: string, at: number, propertyHint?: string): Usage {
   const property = (declaration.includes(':') ? declaration.split(':')[0] : propertyHint ?? '')
     .replace(/^style\./, '').replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`).trim().toLowerCase()
   if (/@font-face\b/i.test(rule) && property === 'src') return 'font'
-  if (/^(?:background(?:-image)?|border-image(?:-source)?|list-style(?:-image)?|content|cursor|mask-image)$/.test(property)) return 'image'
+  if (/^(?:background(?:-image)?|border-image(?:-source)?|list-style(?:-image)?|content|cursor|mask(?:-image|-border(?:-source)?)?|fill|stroke|filter|clip-path|marker(?:-start|-mid|-end)?)$/.test(property)) return 'image'
   return 'unknown'
 }
 
@@ -514,7 +531,14 @@ function rewriteCss(css: string, baseDir: string, sink: Sink, siblings: Map<stri
       const conditions = importConditions(match[5] ?? '')
       const key = resolveRelative(baseDir, reference)
       const bytes = key ? siblings.get(key) : undefined
-      if (/^https?:|^\/\//i.test(reference)) sink.remoteReferences.push({ url: reference, context: 'css-url', usage: 'stylesheet' })
+      if (/^https?:|^\/\//i.test(reference)) {
+        const rewritten = rewriteSingleUrl(reference, 'css-url', baseDir, sink, siblings, false, 'stylesheet')
+        if (rewritten.changed) {
+          changed = true
+          parts.push(css.slice(cursor, next), match[0].replace(reference, rewritten.value))
+          cursor = next + match[0].length
+        }
+      }
       else if (!key || !bytes) addDiagnostic(sink, 'warning', 'missing-relative-resource', `找不到相对资源 ${clip(reference, 180)}，已保留引用作为待填位置`, key ?? reference)
       else if (sink.cssStack.has(key)) addDiagnostic(sink, 'warning', 'css-import-cycle', `CSS @import 循环: ${key}`, reference)
       else if (!conditions) addDiagnostic(sink, 'warning', 'unsupported-css-import', 'CSS @import 条件无法解析，已保留原文；本地样式不能加载，请内联对应样式', reference)
@@ -991,7 +1015,7 @@ function attributeUsage(tag: StartTag, attribute: string, parent: string | null)
   if (tag.name === 'link' && relHas(tag.attrs, 'modulepreload')) return 'script'
   if (tag.name === 'link' && relHas(tag.attrs, 'preload')) {
     const as = attributeBy(tag.attrs, 'as')?.rawValue.toLowerCase()
-    return as === 'image' ? 'image' : as === 'audio' || as === 'video' ? 'media' : as === 'font' ? 'font' : as === 'script' ? 'script' : 'unknown'
+    return as === 'image' ? 'image' : as === 'audio' || as === 'video' ? 'media' : as === 'font' ? 'font' : as === 'style' ? 'stylesheet' : as === 'script' ? 'script' : 'unknown'
   }
   return 'unknown'
 }
@@ -1149,7 +1173,7 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
       if (href?.hasValue && (modulepreload || relHas(tag.attrs, 'preload'))) {
         const decoded = decodeEntities(href.rawValue).trim()
         const data = /^data:/i.test(decoded) ? parseDataUri(decoded, 0, true) : null
-        const remoteMedia = /^https:|^\/\//i.test(decoded) && ['image', 'audio', 'video', 'font'].includes(attributeBy(tag.attrs, 'as')?.rawValue.toLowerCase() ?? '')
+        const remoteMedia = /^https:|^\/\//i.test(decoded) && ['image', 'audio', 'video', 'font', 'style'].includes(attributeBy(tag.attrs, 'as')?.rawValue.toLowerCase() ?? '')
         if (!managedMediaType(mediaTypeForPath(decoded)) && data?.kind !== 'media' && !remoteMedia) {
           const key = resolveRelative(baseDir, decoded)
           // Keep the existing bad-input diagnostics even when the performance hint is omitted.
@@ -1168,7 +1192,10 @@ function transformHtml(html: string, sink: Sink, siblings: Map<string, Uint8Arra
         const decoded = decodeEntities(href.rawValue).trim()
         const key = resolveRelative(baseDir, decoded)
         const bytes = key ? siblings.get(key) : undefined
-        if (/^https?:/i.test(decoded) || decoded.startsWith('//')) sink.remoteReferences.push({ url: decoded, context: 'html-attr', usage: 'stylesheet' })
+        if (/^https?:/i.test(decoded) || decoded.startsWith('//')) {
+          const rewritten = rewriteSingleUrl(decoded, 'html-attr', baseDir, sink, siblings, true, 'stylesheet')
+          if (rewritten.changed) { href.value = rewritten.value; href.changed = true }
+        }
         else if (bytes && key) {
           const css = neutralizeStyleClose(rewriteCss(decodeText(bytes), directoryOf(key), sink, siblings))
           parts.push(rebuildStart({ rawName: 'style', name: 'style', attrs: keptStyleAttributes(tag.attrs), end: 0, selfClosing: false }, false))
