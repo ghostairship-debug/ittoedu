@@ -25,7 +25,7 @@ import {
 } from '../../src/core/drivers/codecs/courseProjectArchive'
 import type { CourseProjectDocument, FlowBlock } from '../../src/shared/courseProjectTypes'
 import { publishedCourseV2Schema } from '../../src/shared/publishedCourseSchema'
-import { validateCourseProjectArchiveBytes } from '../../scripts/validate-project'
+import { validateCourseProjectArchiveBytes } from '../../scripts/historical/validate-course-project-v9'
 import {
   COURSE_PROJECT_REJECTION_INPUTS,
   COURSE_PROJECT_REJECTION_KIND,
