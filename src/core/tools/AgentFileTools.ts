@@ -15,6 +15,8 @@ export const agentFileSchemas = {
   'file.list': z.object({ path: path.optional(), cursor: z.string().uuid().optional(), limit: z.number().int().min(1).optional() }).strict(),
   'file.search': z.object({ path: path.optional(), cursor: z.string().uuid().optional(), query: z.string().min(1), limit: z.number().int().min(1).optional() }).strict(),
   'file.open': z.object({ path }).strict(),
+  'file.observe': z.object({ path, limit: z.number().int().min(1).optional() }).strict(),
+  'file.reconcile': z.object({ path, choice: z.enum(['disk', 'local']), expectedVersion: version.nullable().optional() }).strict(),
   'file.create': z.object({ path: path.optional(), name: z.string().min(1), kind: z.enum(['markdown', 'text', 'html', 'course-v10']).optional() }).strict(),
   'file.read': z.object({ path, cursor: z.string().min(1).optional(), limit: z.number().int().min(1).optional() }).strict(),
   'file.grep': z.object({ path: path.optional(), query: z.string().min(1), cursor: z.string().uuid().optional(), limit: z.number().int().min(1).optional() }).strict(),
@@ -32,7 +34,7 @@ export const agentFileSchemas = {
 } as const
 export type AgentFileToolName = keyof typeof agentFileSchemas
 const fileCapabilities = {
-  'file.list': 'read', 'file.search': 'read', 'file.open': 'read', 'file.create': 'write', 'file.read': 'read', 'file.grep': 'read',
+  'file.list': 'read', 'file.search': 'read', 'file.open': 'read', 'file.observe': 'read', 'file.reconcile': 'write', 'file.create': 'write', 'file.read': 'read', 'file.grep': 'read',
   'file.write': 'write', 'file.patch': 'write', 'file.mkdir': 'write', 'file.copy': 'write', 'file.move': 'write', 'file.rename': 'write', 'file.trash': 'write',
 } as const satisfies Record<AgentFileToolName, 'read' | 'write'>
 export type AgentFileMutationName = { [Name in AgentFileToolName]: typeof fileCapabilities[Name] extends 'write' ? Name : never }[AgentFileToolName]
@@ -43,6 +45,8 @@ const fileDescriptors = (Object.keys(agentFileSchemas) as AgentFileToolName[]).m
     'file.list': '列出文件夹内容。path 可用绝对路径或工作空间相对路径；省略时从会话所属位置开始。返回有界列表；截断时用同 path 和返回的 nextCursor 续页，目录变化需重读。',
     'file.search': '按文件名搜索文件夹及子文件夹，返回有界路径列表；截断时用同 path/query 和 nextCursor 继续，不把一页无匹配当整个目录无结果。path 省略时从会话所属位置开始。',
     'file.open': '打开 Markdown、UTF-8 源文件（含 JSON/CSV/代码/无后缀文件）、HTML 或 H5 演示并取得正式文档句柄；已有未保存稿和 History 保留，不执行源代码。二进制与办公压缩格式需相应入口。当前任务权限决定可否修改。',
+    'file.observe': '比较正式文档当前稿与磁盘版本，返回真实版本差异、可选处理及正文片段；软件固定本次比较的文档、当前位置与版本。limit 可扩大文本显示范围，不执行源文件。file.read 仍读当前稿。外部修改造成保存冲突时，先查看此比较，再用 file.reconcile 采纳磁盘或保留当前稿。',
+    'file.reconcile': '处理 file.observe 已比较的文件变化。choice=disk 采纳磁盘内容，保留正式撤回历史；choice=local 保留当前稿，并允许后续 file.save 保存覆盖刚比较的磁盘版本。软件沿用同任务最近比较的版本，无需抄文档 ID；expectedVersion 可省略，提供时必须与该比较一致。只协调当前文档，未执行保存。正文、文件位置或磁盘再次变化时重新比较；只读权限不能执行。',
     'file.create': '新建并打开正式文档。kind 可省略，按扩展名自动识别；kind=text 适用任意 UTF-8 数据/源文件（.json/.csv/.svg/.xml/.yaml/代码/无后缀），.md、.h5lesson 和二进制扩展名不可用此 kind。已有完整内容用 file.write mode=create 写入保存。path 省略时放在会话所属文件夹。',
     'file.read': '读取磁盘/工作区路径上的普通 UTF-8 文件，不读取 project.list 返回的工程虚拟路径；已打开时读取未保存稿。整份回读可给 limit=64000。续页将回执的 nextCursor 传给 cursor，不使用 offset；修改后旧游标失效，应省略 cursor 从当前版本重新读取。',
     'file.grep': '按字面量搜索文件或目录内的 UTF-8 正文，返回行、列、上下文及实际扫描/排除/失败范围；截断时用 cursor 续读。',
