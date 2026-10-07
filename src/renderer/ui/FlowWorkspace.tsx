@@ -337,7 +337,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     return isGlobalTeacherController(project, id)
   }
   const hudGeometry = createTeacherControllerHudGeometry({ referenceSize: teacherControllerReferenceSize(project), viewportRect: { x: 0, y: 0, width: Math.max(1, viewport.width), height: Math.max(1, viewport.height) } })
-  const controllerBaseProjection = projectTeacherControllerInstances(project, hudGeometry, undefined, runtime.navigation)
+  const controllerBaseProjection = projectTeacherControllerInstances(project, hudGeometry, runtime.navigation)
   const controllerProjection = Object.keys(controllerPreview).length ? { ...controllerBaseProjection,
     instances: Object.fromEntries(Object.entries(controllerBaseProjection.instances).map(([id, instance]) =>
       [id, controllerPreview[id] ? { ...instance, frame: controllerPreview[id] } : instance])) } : controllerBaseProjection
@@ -372,7 +372,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     controllerGesture.current = null; setControllerPreview({})
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
     if (!cancel && gesture.moved && gesture.edits.length) void edit(restoreTeacherControllerFrameEdits(gesture.edits, gesture.original,
-      gesture.display, gesture.viewport, undefined, gesture.offset, runtime.navigation), gesture.captured)
+      gesture.display, gesture.viewport, gesture.offset, runtime.navigation), gesture.captured)
   }
   const mediaKind = (instance: ComponentInstance,owner=project): FlowMediaKind | undefined => {
     const key = componentDefinitionBuiltinKey(owner.definitions[instance.definitionId])
@@ -597,7 +597,7 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       selected={runtime.selectedInstanceIds.includes(id)} readOnly={readOnly} paperWidth={paperLayout.width} paragraphRects={paperLayout.rects}
       globalPlane={project.global.underlay.includes(id) ? 'underlay':'overlay'} viewport={viewport}
       onSelect={()=>runtime.selectInstances([id],surfaceId)} onEdits={edits => edit(restoreTeacherControllerFrameEdits(edits, project, controllerProjection, hudGeometry,
-        undefined, runtime.navigation.placement?.() ?? { x: 0, y: 0 }, runtime.navigation))} onElement={runtime.onElement} onTargetElement={runtime.onTargetElement}/>)}
+        runtime.navigation.placement?.() ?? { x: 0, y: 0 }, runtime.navigation))} onElement={runtime.onElement} onTargetElement={runtime.onTargetElement}/>)}
     </div>,observationHost)}
     {!readOnly && contentDraft?.source==='canvas' && contentDraft.target.documentId===documentId && contentDraft.target.surfaceId===surfaceId
       && <FlowProfessionalDraftEditor key={`${contentDraft.target.epoch}:${contentDraft.instanceId}`} project={project} draft={contentDraft}
