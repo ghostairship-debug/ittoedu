@@ -9,7 +9,7 @@ import { OBJECT_EDIT_EVENT, requestObjectContextMenu } from '../../editing/comma
 import { componentPaintStyle } from '../../../player/components/componentPlacementStyle'
 import { componentIsLocked } from '../../composition/crossSurfaceCommands'
 import { componentDefinitionPresentation } from '../properties/componentDefinitionPresentation'
-import { frameContainsPoint, frameToSpaceMatrix, invertMatrix, multiplyMatrices, transformPoint, type AffineMatrix, type GeometryPoint } from '../../../core/components/geometry'
+import { frameContainsPoint, frameCorners, frameToSpaceMatrix, invertMatrix, multiplyMatrices, transformPoint, type AffineMatrix, type GeometryPoint } from '../../../core/components/geometry'
 import { AuthorSpotTransformGesture, FreeTransformGesture } from '../../componentPlatform/surfaces/slide/freeTransformGesture'
 import { componentFrameStyle, freeSurfaceTargets, freeTargetBounds, selectedFreeTargets, hitFreeObject, sameFreeTarget,
   type FreeObjectTarget, type FreeResizeHandle } from '../../componentPlatform/surfaces/slide'
@@ -427,6 +427,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
               handle: handle === 'rotate' ? undefined : handle ?? undefined, instanceToSurface, surfaceToPointer: mapping(), pointer: { x: event.clientX, y: event.clientY } }) }
           return
         }
+        setSelectedSpotKey(null)
       }
       if (!snapshot.contentEdit && !snapshot.drawTool) {
         const atHud = transformPoint(invertMatrix(hudPointerMatrix), { x: event.clientX, y: event.clientY })
@@ -624,6 +625,11 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
     <NativeSelectionContext documentId={snapshot.documentId} revision={project.revision} locationId={surface.id} itemIds={snapshot.selectedInstanceIds}
       stateId={snapshot.activeStateId} sceneItemIds={surface.childIds} enabled={snapshot.canvasMode === 'edit'} textEditing={Boolean(snapshot.contentEdit)}
       bounds={id => {
+        if (snapshot.selectedInstanceIds.length === 1 && selectedInternal?.spot.instanceId === id) {
+          const points = frameCorners(selectedInternal.frame).map(point => transformPoint(mapping(), point))
+          const left = Math.min(...points.map(point => point.x)), top = Math.min(...points.map(point => point.y))
+          return { left, top, width: Math.max(...points.map(point => point.x)) - left, height: Math.max(...points.map(point => point.y)) - top }
+        }
         const target = targets.find(value => value.instanceId === id), rect = stageRef.current?.getBoundingClientRect()
         if (!target || !rect) return null
         const bounds = freeTargetBounds(target)

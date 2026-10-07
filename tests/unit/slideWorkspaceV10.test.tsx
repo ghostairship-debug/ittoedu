@@ -20,9 +20,11 @@ import { WEB_DEFINITION } from '../../src/components/web/data'
 import { resolveWebResourceBindings } from '../../src/components/web/resources'
 import type { DocumentHostAPI } from '../../src/shared/workbench/desktop'
 import type { DocumentEvent } from '../../src/shared/workbench/document'
+import { placeQuickBar } from '../../src/renderer/editing/quickbar/placeQuickBar'
 
 // Quickbar/AI is U7's consumer. This check exercises the original workspace gesture and rich text routes.
-vi.mock('../../src/renderer/workbench/NativeSelectionContext', () => ({ NativeSelectionContext: () => null }))
+const selectionProbe = vi.hoisted(() => ({ bounds: null as null | ((id: string) => { left: number; top: number; width: number; height: number } | null) }))
+vi.mock('../../src/renderer/workbench/NativeSelectionContext', () => ({ NativeSelectionContext: (props: { bounds?: typeof selectionProbe.bounds }) => { selectionProbe.bounds = props.bounds ?? null; return null } }))
 const fixture = (): CourseProjectV10 => ({
   schemaVersion: 10, id: 'u4', revision: 0, title: '原画布',
   definitions: { [TEXT_DEFINITION.id]: TEXT_DEFINITION, [SHAPE_DEFINITION.id]: SHAPE_DEFINITION },
@@ -50,6 +52,44 @@ async function host(project = fixture()) {
   const bridge = new CourseV10DocumentBridge(); await bridge.connect(api)
   return { driver, first, bridge }
 }
+it('anchors the quick bar to the clicked internal author target so ordinary double click stays reachable', async () => {
+  const project = fixture()
+  project.instances.text.frame = { width: 900, height: 600, transform: [1, 0, 0, 1, 200, 140] }
+  const h = await host(project), kernel = createEditorStoreKernel({ bridge: h.bridge, commit() {} })
+  const frame = { width: 48.24, height: 24.09, transform: [1, 0, 0, 1, 153.82, 53.99] as [number, number, number, number, number, number] }
+  const spot: ComponentAuthorSpot = { id: 'hello', instanceId: 'text', mountGeneration: 1, authorKey: 'hello', kind: 'text', initialValue: 'Hello',
+    binding: { kind: 'dom', path: [{ tag: 'p', index: 0 }], baseline: 'Hello' }, localBounds: frame,
+    geometry: { frame, parentToInstance: [1, 0, 0, 1, 0, 0], author: {}, boxInsets: { width: 0, height: 0 } } }
+  const open = vi.fn(), capture = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'setPointerCapture'), release = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'releasePointerCapture')
+  vi.stubGlobal('PointerEvent', class extends MouseEvent { pointerId: number; constructor(type: string, init: MouseEventInit & { pointerId?: number } = {}) { super(type, init); this.pointerId = init.pointerId ?? 1 } })
+  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 20, y: 40, left: 20, top: 40, right: 980, bottom: 680, width: 960, height: 640, toJSON() {} })
+  Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', { configurable: true, value() {} })
+  Object.defineProperty(HTMLElement.prototype, 'releasePointerCapture', { configurable: true, value() {} })
+  const ports: SlideWorkspacePorts = {
+    read: () => { const v = h.bridge.read(); return { project: v.editingProject, documentId: v.activeDocumentId, surfaceId: v.surfaceId, selectedInstanceIds: v.selectedInstanceIds,
+      activation: v.activation, activeStateId: v.activeStateId, assetUrls: {}, canvasMode: 'edit', contentEdit: null, drawTool: null } },
+    authorSpots: () => [spot], beginSpotEdit: () => { open(); return {} as never },
+    capture: () => kernel.captureTarget(), commit: async () => {}, edit: async () => {}, select: ids => kernel.selectInstances(ids), selectSurface() {},
+    setCanvasMode() {}, setDrawTool() {}, report() {}, paste() {}, selectAll() {}, beginTextEdit: () => null, updateDataDraft() {}, commitTextEdit: async () => {}, cancelTextEdit() {},
+    undo() {}, redo() {}, onElement() {}, onTargetElement() {}, addTextNode() {}, addFormulaNode() {}, addRectangleNode() {}, addShapeNode() {}, addTableNode() {}, addChartNode() {}, addExternalComponentNode() {}, drawShapeNode() {},
+  }
+  function Harness() { useSyncExternalStore(h.bridge.subscribe.bind(h.bridge), () => h.bridge.read()); return <SlideLocationWorkspace snapshot={ports.read()} ports={ports} onAddImage={() => {}} onAddVideo={() => {}} onSelectImageAsset={async () => null}/> }
+  try {
+    render(<Harness/>); const workspace = screen.getByRole('main', { name: '画布' }), x = 398, y = 246
+    fireEvent.pointerDown(workspace, { pointerId: 8, button: 0, clientX: x, clientY: y }); fireEvent.pointerUp(workspace, { pointerId: 8, button: 0, clientX: x, clientY: y })
+    const anchor = selectionProbe.bounds!('text')!
+    expect(anchor.left).toBeCloseTo(373.82); expect(anchor.top).toBeCloseTo(233.99); expect(anchor.width).toBeCloseTo(48.24); expect(anchor.height).toBeCloseTo(24.09)
+    const bar = placeQuickBar(anchor, { left: 235, top: 212.53, right: 980, bottom: 680 }, { width: 201.52, height: 34 }, 8, 34)
+    expect(bar.placement).toBe('below'); expect(bar.top).toBeGreaterThan(anchor.top + anchor.height)
+    fireEvent.doubleClick(workspace, { clientX: x, clientY: y }); expect(open).toHaveBeenCalledTimes(1)
+    expect(h.first.read().undoDepth).toBe(0); expect(h.bridge.read().project).toEqual(project)
+  } finally {
+    cleanup(); h.bridge.dispose(); if (capture) Object.defineProperty(HTMLElement.prototype, 'setPointerCapture', capture); else delete (HTMLElement.prototype as Partial<HTMLElement>).setPointerCapture
+    if (release) Object.defineProperty(HTMLElement.prototype, 'releasePointerCapture', release); else delete (HTMLElement.prototype as Partial<HTMLElement>).releasePointerCapture
+    vi.restoreAllMocks(); vi.unstubAllGlobals()
+  }
+})
 it('commits registered spot drafts once and preserves source frames and replacement resources', async () => {
   const project = fixture(), source = 'export default {mount(){return {update(){},dispose(){}}}}; // 原文字'
   project.definitions.custom = { id: 'custom', role: 'content', implementation: { kind: 'source', language: 'javascript', source } }
@@ -378,3 +418,4 @@ it('reframes a Slide line endpoint in affine space as one undoable saved edit', 
     expect(h.bridge.read().project!.instances.shape).toEqual(project.instances.shape)
   } finally { h.bridge.dispose() }
 })
+
