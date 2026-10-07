@@ -75,7 +75,8 @@ export function createV10ModelPlayer(options: ComponentModelHostOptions) {
   })
   const projection = options.createProjection?.(runtime, controller.signal)
   const observationBindings = new Map<string, { observation: ComponentPlayerObservation; off(): void }>()
-  let queue: Promise<void> = Promise.resolve()
+  let projectionQueue: Promise<void> = Promise.resolve()
+  let runtimeReady: Promise<void> = Promise.resolve()
   let disposal: Promise<void> | undefined
   let topology: string | undefined
   let projectionKey: string | undefined
@@ -95,19 +96,21 @@ export function createV10ModelPlayer(options: ComponentModelHostOptions) {
     projecting = false; committedModel = receipt.model
   }
   const enqueueCommittedProjection = (): Promise<void> => {
-    if (controller.signal.aborted || committedSyncQueued) return queue
+    if (controller.signal.aborted || committedSyncQueued) return runtimeReady
     committedSyncQueued = true
-    queue = queue.catch(() => {}).then(async () => {
+    // Coalesce commits from one DOM mutation, without waiting for an older source
+    // preparation: RuntimeHost must receive new inputs to supersede that preparation.
+    runtimeReady = Promise.resolve().then(async () => {
       committedSyncQueued = false
       // A later parent/NodeView commit uses the latest author projection, never a stale captured model.
       if (committedModel) await syncCommittedProjection(committedModel)
     })
-    return queue
+    return runtimeReady
   }
   const syncCommittedProjection = async (model: ComponentPlayerModel) => {
     if (controller.signal.aborted) return
     await runtime.sync(model.project, model.resources)
-    if (!controller.signal.aborted && options.onObservation && projection) {
+    if (!controller.signal.aborted && committedModel === model && options.onObservation && projection) {
       for (const [id, binding] of observationBindings) if (projection.observation?.(id) !== binding.observation) {
         binding.off(); observationBindings.delete(id)
       }
@@ -128,15 +131,17 @@ export function createV10ModelPlayer(options: ComponentModelHostOptions) {
   const update = (model: ComponentPlayerModel): Promise<void> => {
     if (controller.signal.aborted) return Promise.resolve()
     if (!projection) return Promise.reject(new Error('React 投影必须在实际 commit 后提交运行同步'))
-    // A failed component leaves a recoverable model; a later corrected update can run.
-    const next = queue.catch(() => {}).then(async () => {
+    // DOM mutations stay ordered. Component preparation belongs to RuntimeHost and
+    // must not block a later formal projection from reaching its cancellation owner.
+    let completion = Promise.resolve()
+    const projected = projectionQueue.catch(() => {}).then(async () => {
       if (controller.signal.aborted) return
       const receipt = prepareProjection(model)
       try { await projection.sync(model) } finally { finishProjection(receipt) }
-      await syncCommittedProjection(model)
+      completion = enqueueCommittedProjection()
     })
-    queue = next
-    return next
+    projectionQueue = projected
+    return projected.then(() => completion)
   }
   const dispose = (): Promise<void> => {
     if (disposal) return disposal
@@ -146,7 +151,7 @@ export function createV10ModelPlayer(options: ComponentModelHostOptions) {
     observationBindings.clear()
     // Invalidate old host calls immediately, including an asynchronous mount in flight.
     const stopped = runtime.dispose()
-    disposal = Promise.allSettled([queue, stopped]).then(async () => { await projection?.dispose() })
+    disposal = Promise.allSettled([projectionQueue, runtimeReady, stopped]).then(async () => { await projection?.dispose() })
     return disposal
   }
   return {
@@ -154,7 +159,7 @@ export function createV10ModelPlayer(options: ComponentModelHostOptions) {
     camera: (id: string) => projection?.camera?.(id),
     viewport: (id: string) => projection?.viewport?.(id),
     observation: (id: string) => projection?.observation?.(id),
-    get ready() { return queue },
+    get ready() { return projectionQueue.then(() => runtimeReady) },
     update, prepareProjection, commitProjection,
     /** React StrictMode's replacement setup retains the same run before retirement. */
     retain(): () => void {

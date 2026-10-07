@@ -7,7 +7,7 @@ import { ComponentPlatformRuntime } from '../../src/player/components/ComponentP
 import { CourseV10RuntimeView, type CourseV10RuntimePorts } from '../../src/renderer/components/CourseV10RuntimeView'
 import { TEXT_DEFINITION } from '../../src/components/text/adapters'
 import { createTextComponentData } from '../../src/components/text/data'
-import type { CourseProjectV10 } from '../../src/shared/contracts/component-platform'
+import type { ComponentRuntimeContext, CourseProjectV10 } from '../../src/shared/contracts/component-platform'
 import { createBlankCourseProjectV10 } from '../../src/core/course/createCourseProjectV10'
 import { ComponentNavigationOwner } from '../../src/renderer/components/ComponentNavigationOwner'
 import { createTeacherControllerHudGeometry, isGlobalTeacherController, projectTeacherControllerInstances, teacherControllerReferenceSize } from '../../src/shared/teacherControllerViewportGeometry'
@@ -68,6 +68,46 @@ it('waits for the DOM projection commit before mounting and binding observation,
   await player.dispose(); await updating
   expect(release).toHaveBeenCalledTimes(1); expect(disposeProjection).toHaveBeenCalledTimes(1)
   expect(root.textContent).toBe(''); root.remove()
+})
+
+it.each(['commitProjection', 'update'] as const)('supersedes a pending source preparation after a new %s and readies the latest mount', async entry => {
+  const root = document.createElement('div'); document.body.append(root)
+  const course = project(), order: string[] = [], report = vi.fn()
+  course.definitions[TEXT_DEFINITION.id] = { ...TEXT_DEFINITION, implementation: { kind: 'builtin', key: 'guoling.web' } }
+  course.instances.text.data = { html: 'slow' }
+  const initial = { kind: 'course-v10' as const, project: course, resources }
+  const latest = structuredClone(initial)
+  latest.project.revision++; latest.project.instances.text.data = { html: 'fast' }
+  let firstSignal!: AbortSignal
+  const resolveBuiltin = vi.fn((_key: string, signal: AbortSignal) => {
+    if (!firstSignal) {
+      firstSignal = signal; order.push('prepare:slow')
+      return new Promise<never>((_resolve, reject) => signal.addEventListener('abort', () => {
+        order.push('abort:slow'); reject(signal.reason)
+      }, { once: true }))
+    }
+    order.push('prepare:fast')
+    return Promise.resolve({ implementation: { mount(context: ComponentRuntimeContext) {
+      const html = (context.instance.data as { html: string }).html
+      order.push(`mount:${html}`); context.root!.textContent = html
+      return { update() {}, dispose() {} }
+    } } })
+  })
+  const options = { runScopeId: `supersede-${entry}`, resolveBuiltin, report }
+  const player = entry === 'update' ? mountV10Model({ ...options, root, model: initial }) : createV10ModelPlayer(options)
+  if (entry === 'commitProjection') player.runtime.bind('text', root)
+  const commit = (model: typeof initial) => entry === 'update' ? player.update(model) : player.commitProjection(player.prepareProjection(model))
+  const first = entry === 'update' ? player.ready : commit(initial)
+  try {
+    await waitFor(() => expect(order).toEqual(['prepare:slow']))
+    const second = commit(latest)
+    let ready = false; void player.ready.then(() => { ready = true })
+    await waitFor(() => expect(ready).toBe(true))
+    await Promise.all([first, second])
+    expect(firstSignal.aborted).toBe(true)
+    expect(order).toEqual(['prepare:slow', 'abort:slow', 'prepare:fast', 'mount:fast'])
+    expect(root.textContent).toBe('fast'); expect(report).not.toHaveBeenCalled()
+  } finally { await player.dispose(); root.remove() }
 })
 
 it('retains the actual React runtime through StrictMode, ancestor replacement and pause/resume, then applies the committed model', async () => {
