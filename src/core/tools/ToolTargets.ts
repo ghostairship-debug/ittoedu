@@ -105,6 +105,26 @@ function parseEditableInlineHtml(html: string, previous: FlowTextContent): FlowT
   }
   return documentTextContentSchema.parse(parsed)
 }
+/** A committed replacement carries its exact new extent; continuation never widens to an entire field. */
+export function recoverEditableTargetAfterReplacement(model: DocumentModel, original: ToolTarget, content: string,
+  format?: 'text' | 'html'): ToolTarget | null {
+  if (original.kind === 'markdown-range' && isSourceDocumentModel(model)) {
+    const target = { ...original, to: original.from + content.length }
+    return readTarget(model, target) === content ? target : null
+  }
+  if (original.kind !== 'course-instance') return null
+  const field = courseInstanceTextTarget(model, original)
+  const value = readCourseInstanceText(model, field)
+  if (value === null) return null
+  const rich = format === 'html' || format === undefined && typeof value !== 'string'
+  const parsed = rich ? parseEditableInlineHtml(content, { inlines: [] }) : undefined
+  const inserted = parsed ? documentTextLength(parsed) : Array.from(content).length
+  const target = original.from !== undefined && original.to !== undefined ? { ...field, to: original.from + inserted } : field
+  const selected = isCourseInstanceRange(target) ? sliceCourseInstanceText(value, target.from, target.to) : value
+  const matches = parsed ? typeof selected !== 'string' && inlineHtml(selected) === inlineHtml(parsed)
+    : (typeof selected === 'string' ? selected : plainDocumentText(selected)) === content
+  return matches ? target : null
+}
 /** Canonical data edit for content-only generation, preserving unselected rich text and its formatting. */
 export function replaceCourseInstanceText(model: DocumentModel, target: CourseInstanceTarget, text: string, format: 'text' | 'html' = 'text'): ComponentEdit {
   target = courseInstanceTextTarget(model, target)

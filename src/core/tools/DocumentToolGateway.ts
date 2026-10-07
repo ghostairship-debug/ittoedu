@@ -14,7 +14,7 @@ import type { ModelToolCall, ToolDefinition, ToolGateway, ToolResult, ToolRunGra
 import { DocumentRegistry } from '../documents/DocumentRegistry'
 import { documentDigest } from '../documents/documentDigest'
 import { batchInputSchemaFor, canonicalToolRegistration, describeToolFamily, describeTools, familyOfTool, gatewayToolRegistration, mutationCallSchema, mutationNamesIn, selectRunToolNames, toolCatalog, toolEffectTargets, toolFamilies, toolRegistration, visibleRunToolNames, type BatchMutationCall, type RunToolScope, type ToolFamily } from './ToolCatalog'
-import { childTargets, containsTarget, courseInstanceContext, courseInstanceTextTarget, mapMarkdownRange, readTarget, targetFootprint, replaceCourseInstanceText, readCourseInstanceText, sliceCourseInstanceText, isCourseInstanceRange, readEditableTargetContent } from './ToolTargets'
+import { childTargets, containsTarget, courseInstanceContext, courseInstanceTextTarget, mapMarkdownRange, readTarget, targetFootprint, replaceCourseInstanceText, readCourseInstanceText, sliceCourseInstanceText, isCourseInstanceRange, readEditableTargetContent, recoverEditableTargetAfterReplacement } from './ToolTargets'
 import { courseInstancePropertyEdits, courseInstanceConversionEdits } from './courseInstanceEdits'
 import { coursePresentationEdits } from './coursePresentationEdits'
 import { captureComponentOperation, componentValueAt, presentationComponentEdits, componentFieldIdentityPaths, equalComponentValue } from '../drivers/courseV10Operations'
@@ -867,6 +867,29 @@ export class DocumentToolGateway implements ToolGateway {
       }
       return this.findReceipt(runId, operationId, digest) ?? await this.hostTools.lookup(runId, operationId, digest, input.name)
     } catch (error) { return this.error(error) }
+  }
+
+  /** Main proves task lineage; the original committed call and current exact content prove the renewed range. */
+  async recoverBoundContentOutput(priorRunId: string, callId: string, call: ModelToolCall,
+    binding: NonNullable<ToolRunGrant['contentOutput']>, currentDocumentId = binding.documentId): Promise<ToolRunGrant['contentOutput'] | null> {
+    if (call.name !== 'text.replace') return null
+    const parsed = canonicalToolRegistration('text.replace')!.inputSchema.safeParse(call.input)
+    if (!parsed.success || !('content' in parsed.data)) return null
+    const input = parsed.data as { target?: string; content: string; format?: 'text' | 'html' }
+    if (input.target) {
+      const captured = this.handles.get(input.target)
+      if (!captured || captured.runId !== priorRunId || captured.documentId !== binding.documentId) return null
+      const fieldIdentity = (target: ToolTarget) => target.kind === 'markdown-range' ? { kind: target.kind, from: target.from }
+        : target.kind === 'course-instance' ? { ...target, to: undefined } : target
+      if (!equalComponentValue(fieldIdentity(captured.target), fieldIdentity(binding.target))) return null
+    }
+    const receipt = await this.lookup(priorRunId, callId, call)
+    if (receipt?.kind !== 'document-operation' || !['applied', 'unchanged'].includes(receipt.result.status)) return null
+    try {
+      const current = await this.registry.get(currentDocumentId).drain()
+      const target = recoverEditableTargetAfterReplacement(current.model, binding.target, input.content, input.format)
+      return target ? { kind: 'replace-text', documentId: currentDocumentId, target } : null
+    } catch { return null }
   }
 
   private findReceipt(runId: string, operationId: string, requestDigest: string): ToolResult | null {

@@ -139,7 +139,7 @@ export function describeToolFamily(family: ToolFamily, allowedNames: readonly st
 }
 export function familyOfTool(name: string): ToolFamily | null { return toolRegistration(name)?.family ?? null }
 export function visibleRunToolNames(allowed: readonly string[], loadedFamilies: ReadonlySet<ToolFamily>): string[] {
-  const coreFamilies = new Set<ToolFamily>(['content', 'layout', 'navigation', 'interaction', 'media', 'build', 'jobs'])
+  const coreFamilies = new Set<ToolFamily>(['content', 'layout', 'navigation', 'interaction', 'media', 'build', 'jobs', 'office'])
   const direct = allowed.filter(name => name !== 'batch' && (!familyOfTool(name) || coreFamilies.has(familyOfTool(name)!) || loadedFamilies.has(familyOfTool(name)!)))
   const canBatch = allowed.includes('batch') && mutationNamesIn(direct).length > 0
   return allowed.filter(name => direct.includes(name) || name === 'batch' && canBatch)
