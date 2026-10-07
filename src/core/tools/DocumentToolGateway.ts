@@ -402,9 +402,18 @@ export class DocumentToolGateway implements ToolGateway {
 
   /** Recovery registers receipt-query identity only. It cannot renew old target authority. */
   recoverRun(input: ToolRunGrant): void {
-    if (!input.runId || this.runs.has(input.runId)) throw new Error('任务编号已存在或无效')
+    if (!input.runId) throw new Error('任务编号无效')
     const ids = input.documents.map(document => document.documentId)
     if (new Set(ids).size !== ids.length || ids.some(id => !id)) throw new Error('恢复文档身份重复或无效')
+    const existing = this.runs.get(input.runId)
+    if (existing) {
+      // An Engine can restart while its DocumentHost still owns the stopped run's receipts.
+      // Keep that owner and its receipt metadata; recovery must not restart its authority.
+      const knownIds = new Set([...existing.grant.documents.map(document => document.documentId), ...(existing.detachedDocuments ?? [])])
+      if (!existing.stopped || existing.grant.actor !== input.actor || ids.some(id => !knownIds.has(id)))
+        throw new Error('恢复身份与现有任务不一致，或任务仍在运行')
+      return
+    }
     const grant: ToolRunGrant = { runId: input.runId, actor: input.actor, documents: ids.map(documentId => ({ documentId, writable: [] })) }
     this.runs.set(input.runId, { grant, toolScopes: [], loadedFamilies: new Set(), epochs: new Map(), sources: new Map(),
       rangeFootprints: new Map(), componentSubtrees: new Map(), documentLeases: new Map(), stopped: true, history: new Map(), watches: new Map(), contentReads: new Map() })
