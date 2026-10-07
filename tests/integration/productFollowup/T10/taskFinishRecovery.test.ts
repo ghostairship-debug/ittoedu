@@ -31,7 +31,7 @@ it.each([false, true])('recovering a finish-executing crash slice keeps the comm
   const host = new DocumentHostService(path.join(directory, 'documents')), project = createBlankCourseProjectV10('finish恢复')
   project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
   project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('原稿') }
-  project.surfaces = [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body'] }]; project.global = { underlay: [], overlay: [] }
+  project.surfaces = [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body'] }]
   const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'finish.h5lesson')
   const target = { kind: 'course-instance' as const, surfaceId: 'flow', instanceId: 'body', dataPath: ['content'] }
   const contentOutput = prepareExecutionContentOutput(initial, target)

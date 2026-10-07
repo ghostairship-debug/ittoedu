@@ -46,7 +46,7 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
   project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('局部原说明') }
   project.instances.human = { id: 'human', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('人工浮层保持位置'),
     frame: { width: 220, height: 60, transform: [1, 0, 0, 1, 430, 180] }, style: { opacity: .6 }, flowPlacement: { space: 'paper', plane: 'overlay' } }
-  project.surfaces = [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body', 'human'] }]; project.global = { underlay: [], overlay: [] }
+  project.surfaces = [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body', 'human'] }]
   const name = '绘制对照.h5lesson'
   writeFileSync(join(workspace, name), new CourseV10Driver().serialize({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }))
   let app: ElectronApplication | undefined

@@ -24,7 +24,7 @@ test('actual rich card rewrites from material, preserves links formulas and neig
   project.instances.tail = { id: 'tail', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('未选正文保留') }
   project.instances.overlay = { id: 'overlay', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('人工定位保留'),
     frame: { width: 180, height: 60, transform: [1, 0, 0, 1, 470, 220] }, style: { opacity: .65 }, flowPlacement: { space: 'paper', plane: 'overlay' } }
-  project.surfaces = [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body', 'tail', 'overlay'] }]; project.global = { underlay: [], overlay: [] }
+  project.surfaces = [{ id: 'flow', title: '讲义', kind: 'flow', childIds: ['body', 'tail', 'overlay'] }]
   writeFileSync(join(workspace, filename), new CourseV10Driver().serialize({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }))
   writeFileSync(join(workspace, '资料.md'), '教师材料：正方形面积是边长的平方。\n')
   const requests: any[] = [], serverErrors: string[] = [], pageErrors: string[] = []

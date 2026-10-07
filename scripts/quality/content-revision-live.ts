@@ -45,7 +45,6 @@ async function run() {
   project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: original, style: { opacity: 0.9 } }
   project.instances.untouched = { id: 'untouched', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('未选正文保持原样') }
   project.surfaces = [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['body', 'untouched'] }]
-  project.global = { underlay: [], overlay: [] }
   const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, '代表课件.h5lesson')
   const target = { kind: 'course-instance' as const, surfaceId: 'flow', instanceId: 'body', dataPath: ['content'], from: 0, to: documentTextLength(original.content) }
   const contentOutput = prepareExecutionContentOutput(initial, target)
