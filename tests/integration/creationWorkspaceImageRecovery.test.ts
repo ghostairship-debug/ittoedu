@@ -9,6 +9,7 @@ import { documentDigest } from '../../src/core/documents/documentDigest'
 import { HostToolCoordinator, type HostToolServices } from '../../src/core/tools/HostToolServices'
 import { HostArtifactDeliveryService } from '../../src/main/workbench/execution/HostArtifactDeliveryService'
 import { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
+import { HostJobService } from '../../src/main/workbench/jobs/HostJobService'
 import { imageProvenance } from '../../src/main/workbench/images/imageRoute'
 import type { ImageModelSelection } from '../../src/shared/workbench/images'
 import type { ToolResult } from '../../src/shared/workbench/tools'
@@ -40,6 +41,7 @@ async function fixture() {
     persistence: { async append() { throw new Error('No document writes') }, async save() { throw new Error('No document saves') } } })
   const never = (): never => { throw new Error('Workspace recovery cannot use document authority') }
   const services: HostToolServices = {
+    jobs: new HostJobService({ images }),
     images: { selection: () => selection, run: images.run.bind(images), read: images.read.bind(images), stop: images.stop.bind(images),
       readResource: images.readResource.bind(images), readReadyResourceFromJob: images.readReadyResourceFromJob.bind(images) },
     artifacts: { lookup: (runId, operationId) => artifacts.lookup(operationId, runId),
@@ -65,6 +67,8 @@ it('edits a ready workspace image from its original bytes through a new run publ
     const generated = data(await f.coordinator.invoke('original', `tool:${'3'.repeat(64)}`, 'generate', 'image.generate', { prompt: 'Local fixture' }))
     await f.coordinator.stop('original')
     await f.begin('continuation')
+    expect(data(await f.coordinator.jobStatus('continuation', { kind: 'image', jobId: generated.job })))
+      .toMatchObject({ kind: 'image', status: 'ready', snapshot: { runId: 'original' } })
     const ready = data(await f.coordinator.invoke('continuation', 'ready-status', '', 'image.status', { job: generated.job }))
     const request = { prompt: 'Edit the existing image', references: [ready.resources[0].resource] }
     const edited = data(await f.coordinator.invoke('continuation', `tool:${'4'.repeat(64)}`, 'edit', 'image.edit', request))
