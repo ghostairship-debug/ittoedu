@@ -9,12 +9,13 @@ test('T08 actual hidden export entry reports progress, captures a running source
   test.setTimeout(180_000)
   const base = join(root, 'output/productFollowup/T08'); mkdirSync(base, { recursive: true })
   const directory = mkdtempSync(join(base, 'headless-export-'))
+  const profileArgument = `--user-data-dir=${join(directory, 'profile')}`
   const checkpoints = join(directory, 'checkpoint.jsonl')
   const checkpoint = (phase: string, facts: unknown = {}) => appendFileSync(checkpoints, JSON.stringify({ time: new Date().toISOString(), process: 'test', phase, facts }) + '\n')
   let app: ElectronApplication | undefined
   try {
     checkpoint('launch.before')
-    app = await electron.launch({ cwd: root, args: ['.', `--user-data-dir=${join(directory, 'profile')}`],
+    app = await electron.launch({ cwd: root, args: ['.', profileArgument],
       env: { ...process.env, VITE_DEV_SERVER_URL: '', COURSEWARE_CLI_DOGFOOD: '', [BACKGROUND_E2E_ENV]: '1' } })
     checkpoint('launch.returned'); await app.firstWindow(); checkpoint('firstWindow.returned')
     const facts = await app.evaluate(async ({ BrowserWindow, ipcMain }, input) => {
@@ -97,10 +98,14 @@ test('T08 actual hidden export entry reports progress, captures a running source
   } catch (error) {
     checkpoint('test.error.before-cleanup', { error: String(error), stack: error instanceof Error ? error.stack : undefined }); throw error
   } finally {
-    const ownedProcess = app?.process(), ownProfile = `--user-data-dir=${join(directory, 'profile')}`
-    checkpoint('cleanup.owned-process-tree.before', { pid: ownedProcess?.pid, profileMatches: ownedProcess?.spawnargs.includes(ownProfile) })
+    const ownedProcess = app?.process()
+    // Playwright's Windows Electron launcher owns a cmd.exe wrapper whose single
+    // command argument contains the individually quoted Electron arguments.
+    const profileMatches = ownedProcess?.spawnargs.some(argument => argument === profileArgument || argument.includes(`"${profileArgument}"`)) === true
+    checkpoint('cleanup.owned-process-tree.before', { pid: ownedProcess?.pid, profileMatches, profileArgument,
+      spawnfile: ownedProcess?.spawnfile, spawnargs: ownedProcess?.spawnargs })
     try {
-      if (ownedProcess?.pid && ownedProcess.exitCode === null && ownedProcess.signalCode === null && ownedProcess.spawnargs.includes(ownProfile)) {
+      if (ownedProcess?.pid && ownedProcess.exitCode === null && ownedProcess.signalCode === null && profileMatches) {
         if (process.platform === 'win32') execFileSync('taskkill.exe', ['/PID', String(ownedProcess.pid), '/T', '/F'], { stdio: 'pipe', windowsHide: true })
         else ownedProcess.kill()
       }
