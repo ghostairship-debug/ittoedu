@@ -122,7 +122,10 @@ export function CourseLightToolbar(props: CourseLightToolbarProps) {
       ...(props.onPreview ? [<button key="preview" type="button" role="menuitem" disabled={props.busy} onClick={() => { if (props.onPreview) more(props.onPreview) }}>整课预览</button>] : []),
     ] : []),
     <button key="agent" type="button" role="menuitem" disabled={!props.canUndoLatestAgent || !undoLatestAgent || !editing} onClick={() => { if (undoLatestAgent) more(undoLatestAgent) }}>撤销最近 AI 修改</button>,
-    ...(fitWorld ? [<button key="fit" type="button" role="menuitem" onClick={() => more(fitWorld)}>查看全部对象</button>] : []),
+    ...(fitWorld ? [
+      <button key="fit-visible" type="button" role="menuitem" onClick={() => more(() => fitWorld('visible'))}>适配可见内容</button>,
+      <button key="fit-all" type="button" role="menuitem" onClick={() => more(() => fitWorld('all'))}>适配全部内容</button>,
+    ] : []),
   ]
   return <div ref={toolbarRef} className="course-light-tools" aria-label="常用工具">
     <div className="course-light-tools__row">
