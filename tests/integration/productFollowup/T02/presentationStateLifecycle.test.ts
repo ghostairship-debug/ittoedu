@@ -51,13 +51,21 @@ it('public V10 presentation state actions preserve teacher content geometry back
     // returns the surface handle, and public read returns state identities; callers invent neither.
     const documentHandle = await host.tools.issueTarget(runId, initial.documentId, { kind: 'document' })
     const children = readData<Array<{ target: string; label: string; kind: string }>>(await call('listChildren', { target: documentHandle }))
-    const pageHandle = children.find(child => child.kind === 'course-surface' && child.label === observedPage!.title)?.target
+    let pageHandle = children.find(child => child.kind === 'course-surface' && child.label === observedPage!.title)?.target
     expect(pageHandle, JSON.stringify(children)).toBeTruthy()
-    const readSurface = async () => JSON.parse(readData<{ text: string }>(await call('read', { target: pageHandle })).text) as ComponentSurface
+    const readSurface = async () => {
+      const data = readData<{ target: string; text: string }>(await call('read', { target: pageHandle }))
+      expect(data.target, JSON.stringify(data)).toEqual(expect.any(String))
+      // The public read renews the observed handle; the caller consumes that response
+      // rather than reusing the pre-edit snapshot for the next write.
+      pageHandle = data.target
+      return JSON.parse(data.text) as ComponentSurface
+    }
     const observed = await readSurface()
     const sourceState = observed.presentation!.states.find(state => state.title === '教师已设状态')!
     expect(sourceState).toBeTruthy()
     const update = async (input: Record<string, unknown>) => {
+      await readSurface()
       const result = await call('presentation.update', { target: pageHandle, ...input })
       expect(result, JSON.stringify({ action: input.action, result })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
     }
