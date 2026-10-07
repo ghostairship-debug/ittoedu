@@ -5,7 +5,7 @@ import { createTextData, createFormulaData, TEXT_DEFINITION, FORMULA_DEFINITION,
 import { defaultShapeData, SHAPE_DEFINITION, shapeDataSchema } from '../../../components/shape'
 import { createTableData, TABLE_DEFINITION } from '../../../components/table'
 import { createChartData, CHART_DEFINITION, chartDataSchema } from '../../../components/chart'
-import { createTeacherControllerData, TEACHER_CONTROLLER_DEFINITION } from '../../../components/teacher-controller'
+import { createTeacherControllerData, createTeacherControllerFrame, TEACHER_CONTROLLER_DEFINITION } from '../../../components/teacher-controller'
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
 import type { EditorStoreKernel } from '../editorStoreKernel'
 import { createSlideOwnedCommands } from './slideOwnedCommands'
@@ -349,10 +349,11 @@ export function createSlideAuthoringSlice(kernel: EditorStoreKernel, ports: Slid
       const target = kernel.captureTarget()
       const existing = Object.values(target.project.instances).find(instance => instance.definitionId === TEACHER_CONTROLLER_DEFINITION.id)
       if (existing) { kernel.selectInstances([existing.id], target.surfaceId, target.documentId); return }
+      const canvas = target.editingProject.surfaces.find(surface => surface.id === target.surfaceId)?.designSize ?? { width: 1280, height: 720 }
       const id = crypto.randomUUID(), edits: ComponentEdit[] = []
       if (!target.project.definitions[TEACHER_CONTROLLER_DEFINITION.id]) edits.push({ type: 'definition.set', definition: TEACHER_CONTROLLER_DEFINITION })
       edits.push({ type: 'instance.insert', container: { kind: 'global', plane: 'overlay' }, index: target.project.global.overlay.length, rootIds: [id],
-        instances: [{ id, definitionId: TEACHER_CONTROLLER_DEFINITION.id, data: json(createTeacherControllerData()), frame: { width: 360, height: 72, transform: [1, 0, 0, 1, 24, 24] } }] })
+        instances: [{ id, definitionId: TEACHER_CONTROLLER_DEFINITION.id, data: json(createTeacherControllerData(canvas)), frame: createTeacherControllerFrame(canvas) }] })
       await kernel.editCaptured(kernel.capture(edits, target))
       kernel.selectInstances([id], target.surfaceId, target.documentId)
     },
