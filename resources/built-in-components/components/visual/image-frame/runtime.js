@@ -102,6 +102,33 @@
       stage.append(picture, caption)
       root.replaceChildren(style, svg, stage)
 
+      var authorReleases = []
+      function releaseAuthorFields() {
+        authorReleases.forEach(function (release) { release() })
+        authorReleases = []
+      }
+      function registerAuthorFields() {
+        releaseAuthorFields()
+        if (destroyed || !ctx.authoring) return
+        var origin = root.getBoundingClientRect()
+        root.querySelectorAll('[data-courseware-edit-key]').forEach(function (element) {
+          if (element.closest('[hidden]')) return
+          var dataPath = element.dataset.coursewareEditKey.split('.')
+          var value = dataPath.reduce(function (parent, key) { return parent && parent[key] }, props)
+          // The display may tokenize markup, build ruby, or truncate a label.
+          // Its editable value always comes from the component's real data.
+          if (typeof value !== 'string') return
+          var bounds = element.getBoundingClientRect()
+          if (bounds.width <= 0 || bounds.height <= 0) return
+          authorReleases.push(ctx.authoring.register({ kind: 'text', dataPath: dataPath, initialValue: value,
+            localBounds: { width: bounds.width, height: bounds.height,
+              transform: [1, 0, 0, 1, bounds.left - origin.left, bounds.top - origin.top] } }))
+        })
+      }
+      var authorObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(registerAuthorFields)
+      if (authorObserver) authorObserver.observe(root)
+      if (document.fonts) document.fonts.ready.then(registerAuthorFields)
+
       function render() {
         var values = objectValue(objectValue(props).content)
         var visualStyle = props.visualStyle === 'sticker' ? 'sticker' : 'brush'
@@ -130,6 +157,7 @@
         shadowFlood.setAttribute('flood-opacity', props.shadowEnabled === false
           ? '0'
           : String(numberValue(props.shadowOpacity, 0.22)))
+        registerAuthorFields()
       }
 
       render()
@@ -140,6 +168,8 @@
         dispose: function () {
           if (destroyed) return
           destroyed = true
+          if (authorObserver) authorObserver.disconnect()
+          releaseAuthorFields()
           root.replaceChildren()
         }
       }
