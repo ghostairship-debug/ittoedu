@@ -231,6 +231,7 @@ export class ComputeJobService {
         if (job.stopped || active.cancelled || outcome.cancelled)
           job.status = outcome.cancelled && !artifacts.length ? 'cancelled' : 'unapplied'
         else if (outcome.exitCode === 0) job.status = diagnostics.length && !artifacts.length ? 'failed' : 'ready'
+        else if (outcome.exitCode === null) { job.status = 'unknown'; job.reason = '计算进程未返回可确认的退出码；未交付或重放。' }
         else { job.status = 'failed'; job.reason = `计算进程退出码 ${outcome.exitCode ?? 'unknown'}` }
       })
     } catch (error) {
