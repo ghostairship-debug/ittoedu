@@ -29,15 +29,19 @@ it('saves a first internal text edit with its local binding and reopens the same
 })
 it('merges a delayed text edit with newer geometry and another internal object but rejects changed text', () => {
   let project = fixture()
+  // A first AI reply is prepared against current data after the human has created local records.
+  project = applyComponentOperation(project, captureComponentOperation(project, prepareWebAuthoringRecordEdits(project, spot, { geometry: { translateX: 12 } })))
+  project = applyComponentOperation(project, captureComponentOperation(project, prepareWebAuthoringRecordEdits(project, { ...spot, authorKey: 'local-b' }, { text: 'Other edit' })))
   project = applyComponentOperation(project, captureComponentOperation(project, prepareWebAuthoringRecordEdits(project, spot, { text: 'Edited' })))
+  expect(webDataSchema.parse(project.instances.web.data).authoringRecords!['local-a'].overrides).toEqual({ text: 'Edited', geometry: { translateX: 12 } })
   const capture = { ...spot, initialValue: 'Edited' }
   const text = captureComponentOperation(project, prepareWebAuthoringRecordEdits(project, capture, { text: 'AI revision' }))
   project = applyComponentOperation(project, captureComponentOperation(project, prepareWebAuthoringRecordEdits(project, capture, { geometry: { translateX: 35, width: 210 } })))
-  project = applyComponentOperation(project, captureComponentOperation(project, prepareWebAuthoringRecordEdits(project, { ...spot, authorKey: 'local-b' }, { text: 'Other edit' })))
+  project = applyComponentOperation(project, captureComponentOperation(project, prepareWebAuthoringRecordEdits(project, { ...spot, authorKey: 'local-b', initialValue: 'Other edit' }, { text: 'Newer other edit' })))
   project = applyComponentOperation(project, text)
   const records = webDataSchema.parse(project.instances.web.data).authoringRecords!
   expect(records['local-a'].overrides).toEqual({ text: 'AI revision', geometry: { translateX: 35, width: 210 } })
-  expect(records['local-b'].overrides.text).toBe('Other edit')
+  expect(records['local-b'].overrides.text).toBe('Newer other edit')
   expect(() => prepareWebAuthoringRecordEdits(project, capture, { text: 'Stale' })).toThrow('内容已变化')
   const nextText = captureComponentOperation(project, prepareWebAuthoringRecordEdits(project, { ...capture, initialValue: 'AI revision' }, { text: 'Later' }))
   const rebound = structuredClone(project)
