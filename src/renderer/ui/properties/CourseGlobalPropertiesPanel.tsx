@@ -56,6 +56,16 @@ export interface CourseGlobalLocationView {
   readonly label: string
 }
 
+export interface SlideCanvasResizeOptions {
+  readonly surfaceIds?: readonly string[]
+  readonly mode?: 'preserve' | 'contain'
+  readonly includeGlobal?: boolean
+}
+export interface SlideCanvasResizeScope {
+  readonly currentSurfaceId: string
+  readonly pages: readonly CourseGlobalLocationView[]
+}
+
 export interface CourseGlobalLayerView {
   readonly nodeId: string
   readonly visibleHere: boolean
@@ -81,6 +91,7 @@ export interface CourseGlobalEmptyView {
     readonly assets: Readonly<Record<string, AssetMeta>>
   }
   readonly canvas: SlideCanvasSize | null
+  readonly canvasScope?: SlideCanvasResizeScope
 }
 
 export interface TeacherControllerSceneView {
@@ -128,7 +139,7 @@ export interface CourseGlobalPropertiesContext {
     readonly replaceImage: () => void
     readonly clearPresentationOverride: () => void
     readonly updateCourseBackground: (patch: { backgroundColor?: string; backgroundAssetId?: string | null }) => void
-    readonly resizeSlideCanvas: (canvas: SlideCanvasSize) => void
+    readonly resizeSlideCanvas: (canvas: SlideCanvasSize, options?: SlideCanvasResizeOptions) => void
     readonly previewCourseBackground?: (patch: { backgroundColor?: string | null }) => void
     readonly updatePlayback: (patch: Partial<ProjectPlaybackSettings>) => void
     readonly ensureTeacherController: () => void
@@ -455,11 +466,13 @@ export function SlideCanvasSizeSection({
   canvas,
   onApply,
   title = '课程默认尺寸',
+  scope,
   testId = 'slide-canvas-size',
-  hint = '未单独设置尺寸的页面将使用此规格。自由内容按比例调整，Web 自动布局区域重新排版。',
+  hint = '默认只改变页面尺寸，保留已有对象的位置与大小。等比适配将页面内容调整到新尺寸。',
 }: {
   canvas: SlideCanvasSize
-  onApply: (next: SlideCanvasSize) => void
+  onApply: (next: SlideCanvasSize, options?: SlideCanvasResizeOptions) => void
+  scope?: SlideCanvasResizeScope
   title?: string
   testId?: string
   hint?: string
@@ -467,6 +480,13 @@ export function SlideCanvasSizeSection({
   const [width, setWidth] = useState(String(canvas.width))
   const [height, setHeight] = useState(String(canvas.height))
   const [presetId, setPresetId] = useState('')
+  const [range, setRange] = useState<'current' | 'selected' | 'all'>('current')
+  const [selectedPages, setSelectedPages] = useState<readonly string[]>(scope ? [scope.currentSurfaceId] : [])
+  const [fitContent, setFitContent] = useState(false)
+  const [includeGlobal, setIncludeGlobal] = useState(false)
+  useEffect(() => {
+    setRange('current'); setSelectedPages(scope ? [scope.currentSurfaceId] : []); setFitContent(false); setIncludeGlobal(false)
+  }, [scope?.currentSurfaceId])
   useEffect(() => {
     setWidth(String(canvas.width))
     setHeight(String(canvas.height))
@@ -475,9 +495,21 @@ export function SlideCanvasSizeSection({
   const parsedWidth = Number(width)
   const parsedHeight = Number(height)
   const parsed = slideCanvasSchema.safeParse({ width: parsedWidth, height: parsedHeight })
+  const surfaceIds = scope ? range === 'all' ? scope.pages.map(page => page.id)
+    : range === 'selected' ? selectedPages : [scope.currentSurfaceId] : undefined
   return (
     <section className="property-section" data-testid={testId}>
       <h3 className="property-title">{title}</h3>
+      {scope && <>
+        <SelectField<'current' | 'selected' | 'all'> label="应用范围" value={range} options={[
+          { value: 'current', label: '当前演示页' }, { value: 'selected', label: '所选演示页' }, { value: 'all', label: '全部演示页' },
+        ]} onChange={setRange} />
+        {range === 'selected' && <div role="group" aria-label="选择尺寸修改页面">{scope.pages.map(page => <label key={page.id} className="checkbox-row">
+          <input type="checkbox" aria-label={`选择页面 ${page.label}`} checked={selectedPages.includes(page.id)} onChange={event => {
+            setSelectedPages(current => event.target.checked ? [...current, page.id] : current.filter(id => id !== page.id))
+          }} />{page.label}
+        </label>)}</div>}
+      </>}
       <SelectField<string>
         label="预设"
         value={presetId}
@@ -502,14 +534,18 @@ export function SlideCanvasSizeSection({
         <input id={`${testId}-height`} inputMode="numeric" value={height} onChange={(event) => { setPresetId(''); setHeight(event.target.value) }} />
       </div>
       <p className="property-hint">{hint}宽高须为 {SLIDE_CANVAS_MIN}–{SLIDE_CANVAS_MAX} 的整数。</p>
+      <ToggleRow label="等比适配页面内容" checked={fitContent} onChange={setFitContent} />
+      {fitContent && <ToggleRow label="同时适配共享全局层" checked={includeGlobal} onChange={setIncludeGlobal} />}
       {!parsed.success && (
         <p className="property-hint" role="alert" data-testid={`${testId}-error`}>宽高须为 {SLIDE_CANVAS_MIN}–{SLIDE_CANVAS_MAX} 的整数。</p>
       )}
       <button
         type="button"
         className="secondary-button"
-        disabled={!parsed.success}
-        onClick={() => { if (parsed.success) onApply(parsed.data) }}
+        disabled={!parsed.success || surfaceIds?.length === 0}
+        onClick={() => { if (parsed.success && surfaceIds?.length !== 0) onApply(parsed.data, {
+          ...(surfaceIds ? { surfaceIds } : {}), mode: fitContent ? 'contain' : 'preserve', includeGlobal: fitContent && includeGlobal,
+        }) }}
       >应用</button>
     </section>
   )
@@ -537,7 +573,7 @@ function CourseGlobalEmptyPanel({
           全局层是所有页面共用的内容：文字、图片、图形和组件都可统一布置，并可设置场景可见范围。
         </p>
       </section>
-      {empty.canvas && <SlideCanvasSizeSection canvas={empty.canvas} title="当前演示页尺寸" hint="只改变当前演示页尺寸；已有对象的位置与大小保持。" onApply={commands.resizeSlideCanvas} />}
+      {empty.canvas && <SlideCanvasSizeSection canvas={empty.canvas} scope={empty.canvasScope} title="演示页尺寸" onApply={commands.resizeSlideCanvas} />}
       <SharedBackgroundProperties
         ownerLabel="课程"
         color={empty.background.color}

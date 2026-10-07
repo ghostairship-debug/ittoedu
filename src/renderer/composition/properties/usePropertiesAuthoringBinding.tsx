@@ -19,7 +19,7 @@ import { buildSpatialPropertiesOwner } from '../../ui/properties/SpatialProperti
 import type { BackgroundPreviewTarget } from '../../authoring/backgroundPreview'
 import { buildCourseGlobalPropertiesOwner } from '../../ui/properties/CourseGlobalPropertiesContextBuilder'
 import { buildRuntimePropertiesContexts } from '../../ui/properties/RuntimePropertiesContextBuilder'
-import { applyComponentOperation, captureComponentOperation } from '../../../core/drivers/courseV10Operations'
+import { applyComponentOperation, captureComponentOperation, resizeComponentSurfacesEdits } from '../../../core/drivers/courseV10Operations'
 import { inspectComponentInputRules, configureComponentInputRules } from '../../../components/input/authoring'
 import { chartDataSchema } from '../../../components/chart/data'
 import { useCourseEditorActions } from '../../documents/CourseEditorActionsContext'
@@ -393,9 +393,15 @@ export function usePropertiesAuthoringBinding({ onReplaceImage }: { readonly onR
       effective: propertiesEffectiveBackground(read.project, baseSurface),
       interactionCount: Object.values(read.project.instances).flatMap(instance => instance.attachments ?? []).filter(value => value.target.kind === 'surface' && value.target.surfaceId === surface.id).length,
       stateName: activeState?.title ?? null,
-      canvas: { effective: surface.designSize ?? { width: 1280, height: 720 }, inherited: !surface.designSize } }, runtime: null,
+      canvas: { effective: surface.designSize ?? { width: 1280, height: 720 }, inherited: !surface.designSize,
+        ...(surface.kind === 'slide' ? { scope: { currentSurfaceId: surface.id,
+          pages: read.project.surfaces.filter(value => value.kind === 'slide').map(value => ({ id: value.id, label: value.title })) } } : {}) } }, runtime: null,
     commands: { updateName: title => run(() => submit([{ type: 'surface.title.set', surfaceId: surface.id, title }])),
-      resizeCanvas: designSize => run(() => submit([{ type: 'surface.designSize.set', surfaceId: surface.id, designSize }])),
+      resizeCanvas: (designSize, options = {}) => run(() => {
+        const captured = liveTarget(), target = { ...captured, activeStateId: null, editingProject: captured.project }
+        return submit(resizeComponentSurfacesEdits(target.project, { surfaceIds: options.surfaceIds ?? [surface.id], designSize,
+          mode: options.mode ?? 'preserve', ...(options.mode === 'contain' && options.includeGlobal ? { globalReferenceSurfaceId: surface.id } : {}) }), target)
+      }),
       updateSceneBackground: updateBackground, updateSlideSurfaceBackground: updateBackground,
       previewSceneBackground: previewSurface, previewSlideSurfaceBackground: previewSurface,
       importSceneBackgroundAsset: importBackground, importSlideSurfaceBackgroundAsset: importBackground,

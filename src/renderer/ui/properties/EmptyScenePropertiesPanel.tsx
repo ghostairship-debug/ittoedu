@@ -4,7 +4,7 @@ import type { AssetMeta } from '../../../shared/contracts/media-v1'
 import type { BackgroundMode } from '../../../shared/courseProjectTypes'
 import type { EffectiveBackground } from '../../../shared/effectiveBackground'
 import type { SlideCanvasSize } from '../../../shared/slideCanvas'
-import { SlideCanvasSizeSection } from './CourseGlobalPropertiesPanel'
+import { SlideCanvasSizeSection, type SlideCanvasResizeOptions, type SlideCanvasResizeScope } from './CourseGlobalPropertiesPanel'
 import { BufferedInput, PropertyDraftBoundary } from './PropertyControls'
 import { RuntimePropertiesPanel, type RuntimePropertiesContext } from './RuntimePropertiesPanel'
 import {
@@ -42,7 +42,7 @@ export interface EmptySceneSceneView {
   readonly effective: EffectiveBackground
   readonly interactionCount: number
   readonly stateName: string | null
-  readonly canvas?: { readonly effective: SlideCanvasSize; readonly inherited: boolean }
+  readonly canvas?: { readonly effective: SlideCanvasSize; readonly inherited: boolean; readonly scope?: SlideCanvasResizeScope }
 }
 
 export interface EmptySceneStateView {
@@ -64,7 +64,7 @@ export interface EmptyScenePropertiesContext {
   readonly runtime: RuntimePropertiesContext | null
   readonly commands: {
     readonly updateName: (name: string) => void
-    readonly resizeCanvas?: (canvas: SlideCanvasSize | null) => void
+    readonly resizeCanvas?: (canvas: SlideCanvasSize | null, options?: SlideCanvasResizeOptions) => void
     readonly updateSlideSurfaceBackground: (patch: EmptySceneBackgroundPatch) => void
     readonly previewSlideSurfaceBackground?: (patch: EmptySceneBackgroundPreviewPatch) => void
     readonly importSlideSurfaceBackgroundAsset: (file: SharedBackgroundImportFile) => void
@@ -127,10 +127,10 @@ export function EmptyScenePropertiesPanel({
             <SlideCanvasSizeSection
               key={`scene-canvas:${scene.id}`}
               canvas={scene.canvas.effective}
+              scope={scene.canvas.scope}
               title="本页尺寸"
               testId="scene-canvas-size"
-              hint={context.surfaceOnly ? scene.canvas.inherited ? '当前使用宿主默认尺寸。应用后只改变本页尺寸。' : '本页使用单独的尺寸；已有对象的位置与大小保持。' : scene.canvas.inherited ? '当前跟随课程默认尺寸。应用后只改变本页；自由内容按比例调整，Web 自动布局重新排版。' : '本页使用单独的尺寸。自由内容按比例调整，Web 自动布局重新排版。'}
-              onApply={(canvas) => context.commands.resizeCanvas?.(canvas)}
+              onApply={(canvas, options) => context.commands.resizeCanvas?.(canvas, options)}
             />
             {!scene.canvas.inherited && (
               <button type="button" className="secondary-button" data-testid="scene-canvas-inherit" onClick={() => context.commands.resizeCanvas?.(null)}>{context.surfaceOnly ? '恢复默认尺寸' : '恢复课程默认尺寸'}</button>

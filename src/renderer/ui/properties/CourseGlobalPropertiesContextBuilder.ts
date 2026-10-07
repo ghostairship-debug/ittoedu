@@ -12,6 +12,7 @@ import type { SlideNativePropertiesContext } from './SlideNativePropertiesPanel'
 import type { CourseGlobalPropertiesContext } from './CourseGlobalPropertiesPanel'
 import { componentParentMatrix } from '../../composition/crossSurfaceCommands'
 import { reparentFrame, IDENTITY_MATRIX } from '../../../core/components/geometry'
+import { resizeComponentSurfacesEdits } from '../../../core/drivers/courseV10Operations'
 const defaults: ProjectPlaybackSettings = { controls: 'none', keyboardNavigation: true, presenter: { enabled: false, strategy: 'scene-navigation', additionalBindings: [] } }
 /** Editing one page preserves an include list's restriction on future pages. */
 export function globalVisibilityAtSurface(current: NonNullable<import('../../../shared/contracts/component-platform/project').ComponentInstance['visibility']>, surfaceId: string, visible: boolean) {
@@ -50,7 +51,9 @@ export function buildCourseGlobalPropertiesOwner(input: {
       designTokens: project.designTokens ?? projectDesignTokensSchema.parse(undefined),
       background: { color: project.background?.color, assetId: project.background?.assetId,
         effective: propertiesEffectiveBackground(project), assets: input.assets },
-      canvas: read.surface?.kind === 'slide' ? read.surface.designSize ?? { width: 1280, height: 720 } : null },
+      canvas: read.surface?.kind === 'slide' ? read.surface.designSize ?? { width: 1280, height: 720 } : null,
+      ...(read.surface?.kind === 'slide' ? { canvasScope: { currentSurfaceId: read.surface.id,
+        pages: project.surfaces.filter(surface => surface.kind === 'slide').map(surface => ({ id: surface.id, label: surface.title })) } } : {}) },
     layer: selected ? { nodeId: selected.id, visibleHere: scopeVisible, visibility: { mode: visibility.mode, locationIds: visibility.surfaceIds },
       scenePlane: container?.kind === 'global' ? container.plane : 'overlay', isController: controller, locationKind: read.surface?.kind,
       locations: project.surfaces.map(surface => ({ id: surface.id, label: surface.title })) } : null,
@@ -64,7 +67,12 @@ export function buildCourseGlobalPropertiesOwner(input: {
       updateCourseBackground: value => run(() => { const target = liveTarget(); submit([{ type: 'project.background.set', background: { ...target.project.background,
         ...(value.backgroundColor === undefined ? {} : { color: value.backgroundColor }), ...(value.backgroundAssetId === undefined ? {} : { assetId: value.backgroundAssetId }) } }], target) }),
       previewCourseBackground: value => run(() => input.preview(value.backgroundColor == null ? null : [{ type: 'project.background.set', background: { ...project.background, color: value.backgroundColor } }], 'project')),
-      resizeSlideCanvas: designSize => run(() => { const target = liveTarget(); if (target.surfaceId) submit([{ type: 'surface.designSize.set', surfaceId: target.surfaceId, designSize }], target) }),
+      resizeSlideCanvas: (designSize, options = {}) => run(() => {
+        const captured = liveTarget(), target = { ...captured, activeStateId: null, editingProject: captured.project }
+        if (!target.surfaceId) return
+        return submit(resizeComponentSurfacesEdits(target.project, { surfaceIds: options.surfaceIds ?? [target.surfaceId], designSize,
+          mode: options.mode ?? 'preserve', ...(options.mode === 'contain' && options.includeGlobal ? { globalReferenceSurfaceId: target.surfaceId } : {}) }), target)
+      }),
       updatePlayback: value => run(() => { const target = liveTarget(); submit([{ type: 'project.playback.set', playback: { ...defaults, ...target.project.playback, ...value } }], target) }),
       ensureTeacherController: () => run(async () => { const target = liveTarget(); await input.ensureTeacherController(); submit([{ type: 'project.playback.set', playback: { ...defaults, ...target.project.playback, controls: 'canvas' } }], target) }),
       manageTeacherControllerComponent: (id, _operation) => run(() => submit([{ type: 'implementation.set', instanceId: id, implementation: null }])),
