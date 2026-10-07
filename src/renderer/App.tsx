@@ -76,6 +76,7 @@ import { courseDraftLifecycle } from './authoring/courseDraftLifecycle'
 import { preservePropertiesDrafts, restorePropertiesDrafts } from './ui/properties/PropertyControls'
 import type { DocumentSnapshot } from '../shared/workbench/document'
 import { resolveComponentPresentation } from '../shared/contracts/component-platform'
+import { equalComponentValue } from '../core/drivers/courseV10Operations'
 import { projectWithBackgroundPreview } from './authoring/backgroundPreview'
 import { hasSlideContentDraftChanges, projectWithSlideContentDraft } from './store/slices/slideAuthoringSlice'
 
@@ -202,14 +203,15 @@ export default function App() {
         if (issue && slide?.target.documentId === id && (slide.composing || hasSlideContentDraftChanges(slide)))
           throw new Error('当前画布文字尚未完成，原输入已保留；请结束输入后再关闭')
         const records = { advanced: courseDraftLifecycle(state.courseBridge).preserve(id), properties: preservePropertiesDrafts(id) }
-        const version = state.localDraftVersion, flowDraft = state.flowDocumentDrafts?.[id]
+        const flowDraft = state.flowDocumentDrafts?.[id]
         if (!rawDocuments) throw new Error('输入恢复服务不可用，已保留原稿')
         if (records.advanced.length || records.properties.length) await rawDocuments.writeAuthoringDrafts(id, records)
         else await rawDocuments.clearAuthoringDrafts(id)
         if (!await preserveFlowInputs([id])) return false
         await state.courseBridge.drain([id])
         const current = useEditorStore.getState(), currentSnapshot = current.courseView.documents.find(document => document.documentId === id)
-        if (!currentSnapshot || currentSnapshot.epoch !== snapshot.epoch || current.localDraftVersion !== version || current.flowDocumentDrafts?.[id] !== flowDraft)
+        const currentRecords = { advanced: courseDraftLifecycle(current.courseBridge).preserve(id), properties: preservePropertiesDrafts(id) }
+        if (!currentSnapshot || currentSnapshot.epoch !== snapshot.epoch || !equalComponentValue(records, currentRecords) || current.flowDocumentDrafts?.[id] !== flowDraft)
           throw new Error('保全期间又有新输入，原稿仍保留；请完成本次输入后再关闭')
         if (issue) state.setStatus('未完成的输入已保存在本机恢复稿中')
       }
