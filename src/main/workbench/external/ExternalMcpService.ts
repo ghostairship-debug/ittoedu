@@ -44,6 +44,7 @@ export interface ExternalMcpServiceOptions {
 }
 type ToolKind = 'gateway' | 'file' | 'course' | 'load' | 'service'
 interface HostTool { name: string; description: string; schema: Record<string, unknown>; read: boolean; label: string; kind: ToolKind }
+interface CallScope { runId: string; taskId: string; workspaceId: string }
 interface OperationSummary {
   status: 'applied' | 'unchanged' | 'completed' | 'failed'; documentId?: string; revision?: number; operationId?: string; message?: string
   commit?: string; usability?: string; delivery?: string
@@ -252,7 +253,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     }
     if (session.workspaceId !== workspaceId) { session.conversation = undefined; session.conversationId = undefined; session.taskId = randomUUID() }
     Object.assign(session, { runId, workspaceId, workspaceRoot: root, workspaceName: workspaceName(root), listChanged: true })
-    session.children.clear()
+    session.children = new Map()
     this.lastWorkspaceId = workspaceId
     if (previous) await this.stopRun(previous)
   }
@@ -315,9 +316,9 @@ export class ExternalMcpService implements ResidentMcpHandler {
   }
 
   /** Same selection as a built-in task in this space: Gateway catalog for the run, file tools by permission, family loading. */
-  private async catalog(session: Session): Promise<HostTool[]> {
-    const domain = await this.options.gateway.describeRun(session.runId)
-    const families = await this.options.gateway.availableToolFamilies(session.runId)
+  private async catalog(session: Session, runId = session.runId): Promise<HostTool[]> {
+    const domain = await this.options.gateway.describeRun(runId)
+    const families = await this.options.gateway.availableToolFamilies(runId)
     const tools: HostTool[] = domain.map(tool => ({ name: tool.name, description: tool.description, schema: tool.schema, read: tool.manual.group === 'read', label: tool.manual.label, kind: 'gateway' }))
     for (const tool of agentFileTools) {
       const mutation = (agentFileMutationNames as readonly string[]).includes(tool.name)
@@ -331,6 +332,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
   }
 
   private async callTool(session: Session, call: ResidentMcpCall): Promise<unknown> {
+    const scope: CallScope = { runId: session.runId, taskId: session.taskId, workspaceId: session.workspaceId }
     const name = typeof call.params.name === 'string' ? call.params.name : ''
     const input = call.params.arguments ?? {}
     if (!record(input)) throw new McpProtocolError(-32602, '工具 arguments 必须是对象')
@@ -338,16 +340,22 @@ export class ExternalMcpService implements ResidentMcpHandler {
     const supplied = record(call.params._meta) ? call.params._meta['guoling/ticket'] : undefined
     // Client correlation text is not the host's operation identity. Non-string metadata carries no identity.
     const clientTicket = typeof supplied === 'string' && supplied.length > 0 ? supplied : undefined
-    const tool = (await this.catalog(session)).find(item => item.name === name)
+    let tool = (await this.catalog(session, scope.runId)).find(item => item.name === name)
+    if (!tool) {
+      const definition = await this.options.gateway.resolveRunTool(scope.runId, name)
+      if (definition) tool = { name: definition.name, description: definition.description, schema: definition.schema,
+        read: definition.manual.group === 'read', label: definition.manual.label, kind: 'gateway' }
+    }
+    this.assertActive(session, scope.runId)
     if (!tool) return this.reply(session, failure('unknown-tool', '工具不存在，或在本会话的权限与已打开的文档下不可用。可先打开文档，或用 tools.load 展开工具族。'))
     if (tool.read) {
       const ticket = randomUUID()
-      return this.reply(session, await this.traced(session, tool, ticket, input, () => this.execute(session, tool, ticket, input)), ticket, false, tool.name)
+      return this.reply(session, await this.traced(session, scope, tool, ticket, input, () => this.execute(session, scope.runId, tool, ticket, input)), ticket, false, tool.name)
     }
     const digest = callDigest(tool.name, input)
     // The previous identical call's reply never reached the client: answer with its receipt instead of executing again.
     const undelivered = clientTicket === undefined ? [...session.operations].reverse()
-      .find(item => item.runId === session.runId && item.tool === tool.name && item.digest === digest && item.delivered === false && item.result) : undefined
+      .find(item => item.runId === scope.runId && item.tool === tool.name && item.digest === digest && item.delivered === false && item.result) : undefined
     if (undelivered) {
       undelivered.delivered = undefined
       this.track(undelivered, call.delivery)
@@ -355,8 +363,8 @@ export class ExternalMcpService implements ResidentMcpHandler {
     }
     const ticket = clientTicket === undefined ? randomUUID() : /^[A-Za-z0-9_.:-]{1,200}$/.test(clientTicket)
       ? clientTicket : `client:${createHash('sha256').update(clientTicket).digest('hex')}`
-    const operation: Operation = { ticket, runId: session.runId, tool: tool.name, label: tool.label, digest, time: this.now() }
-    operation.result = this.traced(session, tool, ticket, input, () => this.execute(session, tool, ticket, input))
+    const operation: Operation = { ticket, runId: scope.runId, tool: tool.name, label: tool.label, digest, time: this.now() }
+    operation.result = this.traced(session, scope, tool, ticket, input, () => this.execute(session, scope.runId, tool, ticket, input))
       .then(result => { operation.summary = summarize(tool.name, result); return result })
     session.operations.push(operation)
     this.track(operation, call.delivery)
@@ -385,11 +393,10 @@ export class ExternalMcpService implements ResidentMcpHandler {
   private assertActive(session: Session, runId: string): void {
     if (session.stopped || session.runId !== runId || !this.sessions.has(session.sessionId)) throw new Error('外部会话已停止或已切换，操作未提交')
   }
-  private async execute(session: Session, tool: HostTool, ticket: string, input: unknown): Promise<ToolResult> {
-    const runId = session.runId
+  private async execute(session: Session, runId: string, tool: HostTool, ticket: string, input: unknown): Promise<ToolResult> {
     try {
       this.assertActive(session, runId)
-      if (tool.kind === 'service') return { kind: 'read', data: await this.service(session, tool.name, input) }
+      if (tool.kind === 'service') return { kind: 'read', data: await this.service(session, runId, tool.name, input) }
       if (tool.kind === 'load') {
         const families = loadToolsSchema.parse(input).families
         const available = await this.options.gateway.loadToolFamilies(runId, families)
@@ -401,14 +408,15 @@ export class ExternalMcpService implements ResidentMcpHandler {
       this.assertActive(session, runId)
       if (tool.kind === 'gateway') return await this.options.gateway.execute(runId, ticket, { name: tool.name, input })
       if (tool.kind === 'file') return await this.file(session, runId, ticket, tool, input, true)
+      const children = session.children
       return await createCourseFromHtml(createCourseFromHtmlInputSchema.parse(input), { callId: ticket, permission: session.permission,
         assertActive: () => this.assertActive(session, runId) }, {
-        lookupChild: async callId => session.children.get(callId) ?? null,
+        lookupChild: async callId => children.get(callId) ?? null,
         executeChild: async (callId, child: ModelToolCall) => {
           const result = isAgentFileTool(child.name)
             ? await this.file(session, runId, callId, { name: child.name, label: tool.label, kind: 'file', read: false, description: '', schema: {} }, child.input, true)
             : await this.options.gateway.execute(runId, callId, child)
-          session.children.set(callId, result)
+          children.set(callId, result)
           return result
         },
         documentTarget: documentId => this.options.gateway.issueTarget(runId, documentId, { kind: 'document' }),
@@ -432,7 +440,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     session.listChanged = true
     return { kind: 'read', data: { ...outcome.data as object, target, writable } }
   }
-  private async service(session: Session, name: string, raw: unknown): Promise<unknown> {
+  private async service(session: Session, runId: string, name: string, raw: unknown): Promise<unknown> {
     if (name === 'workspace.list') {
       serviceSchemas['workspace.list'].parse(raw)
       return { current: session.workspaceId, workspaces: (await this.options.conversations.listWorkspaces()).map(workspace => ({
@@ -450,11 +458,12 @@ export class ExternalMcpService implements ResidentMcpHandler {
         delivered: item.delivered === undefined ? 'pending' : item.delivered })) }
     }
     serviceSchemas['workbench.state'].parse(raw)
-    return this.workbenchState(session)
+    return this.workbenchState(session, runId)
   }
   /** Read-only view of the user's foreground. Handles follow the same path rule as file.open in this session. */
-  private async workbenchState(session: Session): Promise<unknown> {
-    const ui = await this.options.uiState().catch(() => null), runId = session.runId
+  private async workbenchState(session: Session, runId: string): Promise<unknown> {
+    const ui = await this.options.uiState().catch(() => null)
+    this.assertActive(session, runId)
     const writableFor = (filePath?: string) => session.permission !== 'read-only'
       && (session.permission === 'full' || !filePath || isInsideRoot(session.workspaceRoot, filePath))
     const documents = this.options.registry.list().map(snapshot => ({ documentId: snapshot.documentId, kind: snapshot.model.kind,
@@ -482,38 +491,42 @@ export class ExternalMcpService implements ResidentMcpHandler {
   }
 
   /** Visible as "外部 AI · <client>" in the bound space; created at the first tool call, not on health-check connects. */
-  private conversation(session: Session): Promise<string> {
-    const workspaceId = session.workspaceId
-    return session.conversation ??= (async () => {
+  private conversation(session: Session, scope: CallScope): Promise<string> {
+    const { workspaceId, runId } = scope
+    if (session.conversation) return session.conversation
+    const pending = (async () => {
       const title = `外部 AI · ${session.clientName}`
       const existing = (await this.options.conversations.listConversations(workspaceId)).find(item => item.title === title)
       const created = existing ?? await this.options.conversations.createConversation({ workspaceId, title })
       const updated = await this.options.conversations.updateConversation({ workspaceId, conversationId: created.conversationId, expectedRevision: created.revision,
-        patch: { runIndex: { ...created.runIndex, externalRunIds: [...created.runIndex.externalRunIds, session.runId], externalPortIds: [...created.runIndex.externalPortIds, session.sessionId] } } })
-      if (session.workspaceId === workspaceId) session.conversationId = updated.conversationId
+        patch: { runIndex: { ...created.runIndex, externalRunIds: [...created.runIndex.externalRunIds, runId], externalPortIds: [...created.runIndex.externalPortIds, session.sessionId] } } })
+      if (session.workspaceId === workspaceId && session.runId === runId) session.conversationId = updated.conversationId
       return updated.conversationId
-    })().catch(cause => { session.conversation = undefined; throw cause })
+    })().catch(cause => { if (session.conversation === pending) session.conversation = undefined; throw cause })
+    session.conversation = pending
+    return pending
   }
-  private async emit(session: Session, itemId: string, type: ExecutionEventInput['type'], data: ExecutionEventInput['data'], update: ExecutionEventInput['update'] = 'snapshot') {
+  private async emit(scope: CallScope, conversationId: string | undefined, itemId: string, type: ExecutionEventInput['type'], data: ExecutionEventInput['data'], update: ExecutionEventInput['update'] = 'snapshot') {
+    if (!conversationId) return
     try {
-      const conversationId = await this.conversation(session)
-      await this.options.appendEvent({ eventId: randomUUID(), conversationId, taskId: session.taskId, runId: session.runId,
+      await this.options.appendEvent({ eventId: randomUUID(), conversationId, taskId: scope.taskId, runId: scope.runId,
         itemId, time: this.now(), source: 'external-mcp', type, update, data })
     } catch { /* The timeline is a projection; a failed event never changes the tool outcome. */ }
   }
-  private async traced(session: Session, tool: HostTool, ticket: string, input: unknown, run: () => Promise<ToolResult>): Promise<ToolResult> {
+  private async traced(session: Session, scope: CallScope, tool: HostTool, ticket: string, input: unknown, run: () => Promise<ToolResult>): Promise<ToolResult> {
     if (tool.kind === 'service') return run()
-    await this.emit(session, ticket, 'tool', { toolName: tool.name, label: tool.label, status: 'running', text: '已收到外部工具请求。' }, 'append')
-    await this.emit(session, ticket, 'tool', { status: 'running', text: '正在调用正式工具。' }, 'append')
+    const conversationId = await this.conversation(session, scope).catch(() => undefined)
+    await this.emit(scope, conversationId, ticket, 'tool', { toolName: tool.name, label: tool.label, status: 'running', text: '已收到外部工具请求。' }, 'append')
+    await this.emit(scope, conversationId, ticket, 'tool', { status: 'running', text: '正在调用正式工具。' }, 'append')
     const result = await run()
     const receipt = committedFact(tool.name, result), saved = saveFact(tool.name, result)
     const outcome = serviceToolOutcome(tool.name, result)
-    await this.emit(session, ticket, 'tool', { toolName: tool.name, label: tool.label, status: toolFailed(tool.name, result) ? 'failed' : 'completed',
+    await this.emit(scope, conversationId, ticket, 'tool', { toolName: tool.name, label: tool.label, status: toolFailed(tool.name, result) ? 'failed' : 'completed',
       input: JSON.stringify(input), output: JSON.stringify(result),
       ...(result.kind === 'error' ? { error: result.message } : toolFailed(tool.name, result) && outcome ? { error: outcome.message } : {}),
       ...applicationEventFacts(tool.name, result),
       ...(saved ? { saveStatus: currentSave(saved) ? 'saved' : 'failed' } : {}) })
-    if (receipt) await this.emit(session, `${ticket}:commit`, 'document.commit', {
+    if (receipt) await this.emit(scope, conversationId, `${ticket}:commit`, 'document.commit', {
       documentId: receipt.documentId, operationId: receipt.operationId, revision: receipt.revision, status: receipt.status, label: '外部工具修改已应用' })
     return result
   }
