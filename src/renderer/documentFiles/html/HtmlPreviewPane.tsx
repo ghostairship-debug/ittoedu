@@ -243,7 +243,7 @@ export function HtmlPreviewPane({ lease, committed, textDrafts, onUndo, onRedo, 
         const result = await controller.current!.editText(value)
         if (result.status === 'applied' || result.status === 'unchanged') textDrafts.applied(selected, source, value)
         return result
-      }} onImage={image => controller.current!.editImage(image)}
+      }} onImage={image => controller.current!.editImage(image)} onStyle={patch => controller.current!.editStyle(patch)}
       onClose={() => setSelected(null)} />}
     {issue && <p role="alert" className="html-preview-pane__notice">{issue}</p>}
   </div>

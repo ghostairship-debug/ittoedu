@@ -13,14 +13,17 @@ export interface HtmlLightEditOverlayProps {
   onValue(value: string): void
   onText(value: string): Promise<HtmlPreviewEditOutcome>
   onImage(image: { name: string; mimeType: string; bytes: Uint8Array }): Promise<HtmlPreviewEditOutcome>
+  onStyle?(patch: Record<string, string | null>): Promise<HtmlPreviewEditOutcome>
   onClose(): void
 }
 
-export function HtmlLightEditOverlay({ target, committed, position, value, onValue, onText, onImage, onClose }: HtmlLightEditOverlayProps) {
+export function HtmlLightEditOverlay({ target, committed, position, value, onValue, onText, onImage, onStyle, onClose }: HtmlLightEditOverlayProps) {
   const overlay = useRef<HTMLDivElement>(null)
   const [placed, setPlaced] = useState(position)
   const [busy, setBusy] = useState(false)
   const [issue, setIssue] = useState<string | null>(null)
+  const [lineHeight, setLineHeight] = useState('')
+  const [width, setWidth] = useState('')
   useLayoutEffect(() => {
     const element = overlay.current
     if (!element) return
@@ -66,6 +69,9 @@ export function HtmlLightEditOverlay({ target, committed, position, value, onVal
   const aiAvailable = committed.model.kind === 'text'
   return <div ref={overlay} role="dialog" tabIndex={-1} aria-label={target.report.kind === 'text' ? '编辑 HTML 文字' : '替换 HTML 图片'}
     onKeyDown={event => {
+      if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && !busy && !event.nativeEvent.isComposing && event.keyCode !== 229) {
+        event.preventDefault(); event.stopPropagation(); void submit(); return
+      }
       if (event.key !== 'Escape' || busy || event.nativeEvent.isComposing || event.keyCode === 229) return
       event.preventDefault(); event.stopPropagation(); onClose()
     }}
@@ -74,6 +80,19 @@ export function HtmlLightEditOverlay({ target, committed, position, value, onVal
     {target.resolved.status !== 'editable' && <p>不能直接修改这个位置，可用 AI 修改 HTML 源码。</p>}
     {target.report.kind === 'text' && target.resolved.status === 'editable' && <textarea aria-label="HTML 文字" value={value} disabled={busy}
       onChange={event => onValue(event.target.value)} rows={Math.min(8, Math.max(2, value.split('\n').length))} />}
+    {onStyle && target.resolved.status === 'editable' && <details>
+      <summary>文字与尺寸属性</summary>
+      <label>行距<input aria-label="HTML 行距" placeholder="1.5 / 24px" value={lineHeight} disabled={busy}
+        onChange={event => setLineHeight(event.target.value)} /></label>
+      <label>内容盒宽度<input aria-label="HTML 内容盒宽度" placeholder="240px" value={width} disabled={busy}
+        onChange={event => setWidth(event.target.value)} /></label>
+      <button type="button" disabled={busy || (!lineHeight.trim() && !width.trim())} onClick={() => {
+        setBusy(true); setIssue(null)
+        void onStyle({ ...(lineHeight.trim() ? { 'line-height': lineHeight.trim() } : {}), ...(width.trim() ? { width: width.trim() } : {}) })
+          .then(result => { if (result.status === 'rejected') setIssue('属性未应用，源码已变化，请重新选择。'); else onClose() })
+          .catch(error => setIssue(error instanceof Error ? error.message : String(error))).finally(() => setBusy(false))
+      }}>应用属性</button>
+    </details>}
     <div className="html-preview-light-edit__actions">
       {target.resolved.status === 'editable' && <button type="button" disabled={busy || (target.report.kind === 'text' && value === target.report.rawText)} onClick={() => void submit()}>
         {target.report.kind === 'text' ? '应用' : '选择图片'}

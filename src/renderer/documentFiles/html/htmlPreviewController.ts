@@ -190,6 +190,7 @@ export class HtmlPreviewController {
             loadId: this.lease.loadId, records: result.patch.authoringRecords }, '*')
           this.patch({ ...result.patch, expected: target.report.rawText })
           this.events.onApplied(result.revision, result.patch, target.report.rawText)
+          if (change.kind === 'style' && !result.patch.authoringRecords) this.events.onPatchMismatch()
         }
         this.select(null)
       }
