@@ -14,8 +14,9 @@ import { mainPreviewNetworkPolicy, type PreviewNetworkDocumentOwner, type Previe
 import { registerHtmlPreviewFrameEntry } from '../../security'
 import { HTML_PREVIEW_AGENT_PATH, htmlPreviewFileUrl, isContainedPath, parseHtmlPreviewProtocolUrl } from './htmlPreviewProtocol'
 import { htmlPreviewResponse } from './htmlPreviewResponse'
+import type { HtmlResourceSource } from '../htmlImport/types'
 import {
-  collectHtmlPreviewMediaUrls, htmlPreviewContentType, normalizeCssPreviewMediaReferences,
+  collectHtmlPreviewResourceSources, htmlPreviewContentType, normalizeCssPreviewMediaReferences,
   normalizeHtmlPreviewMediaReferences, resolveHtmlPreviewResource,
 } from './htmlPreviewResources'
 
@@ -83,8 +84,7 @@ interface ActiveLease {
   entryRealPath: string
   bindingPath: string
   entryName: string
-  mediaUrls: string[]
-  mediaOrigins: string[]
+  resourceSources: HtmlResourceSource[]
   unregisterFrame: () => void
 }
 
@@ -96,6 +96,7 @@ interface ActiveBootstrapLease {
   owner: PreviewNetworkDocumentOwner
   connectOrigins: string[]
   mediaOrigins: string[]
+  resourceSources: HtmlResourceSource[]
   unregisterFrame(): void
 }
 
@@ -194,7 +195,7 @@ export class HtmlPreviewService implements HtmlPreviewHost {
   }
 
   /** A component's in-memory content realm uses the existing isolated preview origin. */
-  createComponentBootstrap(input: ComponentBootstrapInput, owner: PreviewNetworkDocumentOwner): ComponentBootstrapLease {
+  createComponentBootstrap(input: ComponentBootstrapInput & { resourceSources?: HtmlResourceSource[] }, owner: PreviewNetworkDocumentOwner): ComponentBootstrapLease {
     if (this.disposed) throw new Error('HTML preview service is disposed')
     const current = this.currentOwner()
     if (!current || !sameOwner(owner, current.owner)) throw new Error('Component bootstrap main document is not active')
@@ -202,12 +203,16 @@ export class HtmlPreviewService implements HtmlPreviewHost {
     const token = randomBytes(32).toString('hex')
     const result = { leaseId: input.leaseId, url: htmlPreviewFileUrl(token, 'component.html') }
     const connectOrigins = [...input.connectOrigins ?? []], mediaUrls = [...input.remoteAssetUrls ?? []]
-    this.policy.replacePreviewLease({ leaseId: result.leaseId, connectOrigins, remoteAssetUrls: mediaUrls }, owner)
+    const resourceSources = (input.resourceSources ?? []).map(source => ({ ...source }))
+    const resourceUrls = [...new Set([...mediaUrls, ...resourceSources.map(source => source.url)])]
+    this.policy.replacePreviewLease({ leaseId: result.leaseId, connectOrigins, remoteAssetUrls: resourceUrls }, owner)
     let unregisterFrame: () => void
     try { unregisterFrame = this.registerFrame(result.url, current.frame.webContentsId) }
     catch (error) { this.policy.releasePreviewLease(result.leaseId, owner); throw error }
-    const lease: ActiveBootstrapLease = { public: result, token, entryHtml: input.html, webContentsId: current.frame.webContentsId,
-      owner: { ...owner }, connectOrigins, mediaOrigins: [...new Set(mediaUrls.map(value => new URL(value).origin))], unregisterFrame }
+    const lease: ActiveBootstrapLease = { public: result, token,
+      entryHtml: normalizeHtmlPreviewMediaReferences(input.html, resourceUrls), webContentsId: current.frame.webContentsId,
+      owner: { ...owner }, connectOrigins, resourceSources,
+      mediaOrigins: [...new Set(mediaUrls.map(value => new URL(value).origin))], unregisterFrame }
     this.bootstrapLeases.set(result.leaseId, lease); this.byToken.set(token, lease)
     return result
   }
@@ -231,7 +236,8 @@ export class HtmlPreviewService implements HtmlPreviewHost {
     const stat = await fs.stat(entryRealPath)
     if (!stat.isFile() || !isContainedPath(rootRealPath, entryRealPath)) throw new Error('HTML preview entry is outside its folder')
     const entryName = path.basename(snapshot.binding.path)
-    const mediaUrls = await collectHtmlPreviewMediaUrls(snapshot.model.source, rootRealPath)
+    const resourceSources = await collectHtmlPreviewResourceSources(snapshot.model.source, rootRealPath)
+    const resourceUrls = [...new Set(resourceSources.map(source => source.url))]
     const ownerNow = this.currentOwner()
     const snapshotNow = await this.options.readDocument(request.documentId)
     if (!ownerNow || !sameOwner(current.owner, ownerNow.owner) || current.frame.webContentsId !== ownerNow.frame.webContentsId
@@ -244,7 +250,7 @@ export class HtmlPreviewService implements HtmlPreviewHost {
       revision: snapshot.revision, bindingVersion: snapshot.binding.bindingVersion,
       loadId: randomUUID(), url: htmlPreviewFileUrl(token, entryName),
     }
-    this.policy.replacePreviewLease({ leaseId: lease.leaseId, connectOrigins: [], remoteAssetUrls: mediaUrls }, current.owner)
+    this.policy.replacePreviewLease({ leaseId: lease.leaseId, connectOrigins: [], remoteAssetUrls: resourceUrls }, current.owner)
     let unregisterFrame: () => void
     try { unregisterFrame = this.registerFrame(lease.url, current.frame.webContentsId) }
     catch (error) {
@@ -260,7 +266,7 @@ export class HtmlPreviewService implements HtmlPreviewHost {
     }
     const active: ActiveLease = { public: lease, token, tabId: request.tabId, webContentsId: current.frame.webContentsId,
       owner: current.owner, rootRealPath, entryRealPath, bindingPath: snapshot.binding.path, entryName,
-      mediaUrls, mediaOrigins: [...new Set(mediaUrls.map(value => new URL(value).origin))], unregisterFrame }
+      resourceSources, unregisterFrame }
     for (const old of this.leases.values()) {
       if (old.tabId === request.tabId && old.webContentsId === current.frame.webContentsId) this.removeLease(old)
     }
@@ -401,7 +407,7 @@ export class HtmlPreviewService implements HtmlPreviewHost {
       }
       if (target.kind !== 'file' || target.relativePath !== 'component.html' || target.hasQuery) return notFound(method)
       return htmlPreviewResponse(lease.entryHtml, { contentType: 'text/html; charset=utf-8', method,
-        mediaOrigins: lease.mediaOrigins, connectOrigins: lease.connectOrigins })
+        mediaOrigins: lease.mediaOrigins, connectOrigins: lease.connectOrigins, resourceSources: lease.resourceSources })
     }
     const snapshot = await this.snapshotFor(lease)
     if (!snapshot) { this.removeLease(lease); return notFound(method) }
@@ -410,7 +416,8 @@ export class HtmlPreviewService implements HtmlPreviewHost {
       try {
         const bytes = await fs.readFile(this.options.agentBundlePath)
         if (!(await this.snapshotFor(lease))) return notFound(method)
-        return htmlPreviewResponse(new Uint8Array(bytes), { contentType: 'text/javascript; charset=utf-8', method, mediaOrigins: lease.mediaOrigins })
+        return htmlPreviewResponse(new Uint8Array(bytes), { contentType: 'text/javascript; charset=utf-8', method,
+          resourceSources: lease.resourceSources })
       } catch { return notFound(method) }
     }
     const isEntry = target.relativePath === lease.entryName
@@ -419,21 +426,21 @@ export class HtmlPreviewService implements HtmlPreviewHost {
       const source = snapshot.model.kind === 'text' ? snapshot.model.source : ''
       // The entry always comes from the canonical source. Its media grants must
       // follow that same revision when an edit adds or removes a remote asset.
-      const mediaUrls = await collectHtmlPreviewMediaUrls(source, lease.rootRealPath)
+      const resourceSources = await collectHtmlPreviewResourceSources(source, lease.rootRealPath)
+      const resourceUrls = [...new Set(resourceSources.map(source => source.url))]
       const current = await this.snapshotFor(lease)
       if (!current || current.revision !== snapshot.revision || current.model.kind !== 'text'
         || current.model.source !== source) return notFound(method)
       try {
-        this.policy.replacePreviewLease({ leaseId: lease.public.leaseId, connectOrigins: [], remoteAssetUrls: mediaUrls }, lease.owner)
+        this.policy.replacePreviewLease({ leaseId: lease.public.leaseId, connectOrigins: [], remoteAssetUrls: resourceUrls }, lease.owner)
       } catch { return notFound(method) }
-      lease.mediaUrls = mediaUrls
-      lease.mediaOrigins = [...new Set(mediaUrls.map(value => new URL(value).origin))]
+      lease.resourceSources = resourceSources
       const script = this.options.agentBundlePath
         ? `<script src="/${lease.token}/_agent/${HTML_PREVIEW_AGENT_PATH}"></script>` : ''
-      const normalized = normalizeHtmlPreviewMediaReferences(source, lease.mediaUrls)
+      const normalized = normalizeHtmlPreviewMediaReferences(source, resourceUrls)
       const body = script ? injectEarlyPreviewAgent(normalized, script) : normalized
       if (!(await this.snapshotFor(lease))) return notFound(method)
-      return htmlPreviewResponse(body, { contentType: 'text/html; charset=utf-8', method, mediaOrigins: lease.mediaOrigins })
+      return htmlPreviewResponse(body, { contentType: 'text/html; charset=utf-8', method, resourceSources: lease.resourceSources })
     }
     const filename = await resolveHtmlPreviewResource(lease.rootRealPath, target.relativePath)
     const contentType = filename && htmlPreviewContentType(filename)
@@ -443,14 +450,14 @@ export class HtmlPreviewService implements HtmlPreviewHost {
       if (bytes && contentType.startsWith('text/css')) {
         try {
           const original = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
-          const normalized = normalizeCssPreviewMediaReferences(original, lease.mediaUrls)
+          const normalized = normalizeCssPreviewMediaReferences(original, lease.resourceSources.map(source => source.url))
           if (normalized !== original) bytes = new TextEncoder().encode(normalized)
         } catch { /* Keep unsupported CSS bytes intact; they do not gain remote access. */ }
       }
       if (!(await this.snapshotFor(lease))) return notFound(method)
       const targetNow = await resolveHtmlPreviewResource(lease.rootRealPath, target.relativePath)
       if (targetNow !== filename) return notFound(method)
-      return htmlPreviewResponse(bytes, { contentType, method, mediaOrigins: lease.mediaOrigins })
+      return htmlPreviewResponse(bytes, { contentType, method, resourceSources: lease.resourceSources })
     } catch { return notFound(method) }
   }
 }

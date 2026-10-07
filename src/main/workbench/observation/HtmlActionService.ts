@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { htmlActionToolSchemas, type HtmlActionToolName } from '../../../core/tools/HtmlActionTools'
 import type { ObservationImageResource } from '../../../shared/workbench/toolPorts'
 import type { HtmlPreviewAutomationContext } from '../htmlPreview/HtmlPreviewService'
 import { ObservationImageStore } from './ObservationImageStore'
@@ -56,11 +57,37 @@ export class HtmlActionService {
   private readonly opening = new Set<string>()
   private readonly cancelledOpening = new Set<string>()
   private readonly stoppedRuns = new Set<string>()
+  private disposed = false
   /** A host call ID remains spent across a source-revision restart, including unknown outcomes. */
   private readonly usedActionIds = new Map<string, Set<string>>()
 
   constructor(private readonly options: { preview: HtmlActionPreviewPort; frames: HtmlActionFramePort;
     images: ObservationImageStore }) {}
+
+  /** Both Engine and Gateway bind the document and action ID before calling
+   * this same service. Only observe can refresh a changed canonical revision. */
+  async executeDocumentAction(runId: string,
+    document: { documentId: string; epoch: string; revision: number; tabId?: string },
+    action: { name: HtmlActionToolName; input: unknown; operationId?: string },
+  ): Promise<HtmlActionObservation | { identity: HtmlActionIdentity; errors: HtmlActionDiagnostic[] }> {
+    const input = htmlActionToolSchemas[action.name].parse(action.input) as { index?: number; handle?: string; value?: string }
+    const session = this.runs.get(runId)
+    if (session && (session.identity.documentId !== document.documentId || session.identity.epoch !== document.epoch))
+      throw new Error('HTML 任务目标已变化，不能沿用其他文档的观察会话')
+    if (action.name === 'html.observe') {
+      if (!session) await this.beginDocumentRun(runId, document)
+      else if (session.identity.revision !== document.revision) await this.restartDocumentRun(runId, document)
+      return this.observe(runId)
+    }
+    if (!session || session.identity.revision !== document.revision)
+      throw new Error('请先观察当前 HTML 源码版本，再执行页面动作')
+    if (action.name === 'html.navigate') return this.navigate(runId, input.index!)
+    if (action.name === 'html.errors') return this.errors(runId)
+    if (!action.operationId) throw new Error('HTML 操作缺少宿主执行身份')
+    return action.name === 'html.click'
+      ? this.click(runId, { operationId: action.operationId, handle: input.handle! })
+      : this.input(runId, { operationId: action.operationId, handle: input.handle!, value: input.value! })
+  }
 
   async beginRun(runId: string, input: { leaseId: string; loadId: string; revision: number }): Promise<HtmlActionIdentity> {
     if (!runId || !input.leaseId || !input.loadId || !Number.isSafeInteger(input.revision) || input.revision < 0)
@@ -100,7 +127,7 @@ export class HtmlActionService {
 
   private async beginFromContext(runId: string,
     locate: () => Promise<HtmlPreviewAutomationContext>): Promise<HtmlActionIdentity> {
-    if (this.stoppedRuns.has(runId)) throw new Error('HTML 观察已停止')
+    if (this.disposed || this.stoppedRuns.has(runId)) throw new Error('HTML 观察已停止')
     if (this.runs.has(runId) || this.opening.has(runId)) throw new Error('本次任务已有 HTML 观察会话')
     this.opening.add(runId)
     try {
@@ -137,7 +164,7 @@ export class HtmlActionService {
 
   private require(runId: string): ActionSession {
     const session = this.runs.get(runId)
-    if (!session || session.stopped) throw new Error('HTML 观察会话已停止或不存在')
+    if (this.disposed || !session || session.stopped) throw new Error('HTML 观察会话已停止或不存在')
     return session
   }
 
@@ -256,5 +283,10 @@ export class HtmlActionService {
     const session = this.runs.get(runId)
     if (session) this.retire(session)
     this.options.preview.releaseRun?.(runId)
+  }
+
+  dispose(): void {
+    this.disposed = true
+    for (const runId of new Set([...this.runs.keys(), ...this.opening])) this.stopRun(runId)
   }
 }
