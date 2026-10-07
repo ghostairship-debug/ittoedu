@@ -15,7 +15,7 @@ import type { ModelToolCall, ToolDefinition, ToolGateway, ToolResult, ToolRunGra
 import { DocumentRegistry } from '../documents/DocumentRegistry'
 import { documentDigest } from '../documents/documentDigest'
 import { batchInputSchemaFor, canonicalToolRegistration, describeToolFamily, describeTools, familyOfTool, gatewayToolRegistration, mutationCallSchema, mutationNamesIn, selectRunToolNames, toolCatalog, toolEffectTargets, toolFamilies, toolRegistration, visibleRunToolNames, type BatchMutationCall, type RunToolScope, type ToolFamily } from './ToolCatalog'
-import { childTargets, containsTarget, courseInstanceContext, courseInstanceTextTarget, mapMarkdownRange, readTarget, targetFootprint, replaceCourseInstanceText, readCourseInstanceText, sliceCourseInstanceText, isCourseInstanceRange, readEditableTargetContent, recoverEditableTargetAfterReplacement, prepareHtmlAuthorFieldSource } from './ToolTargets'
+import { childTargets, containsTarget, courseInstanceContext, courseInstanceTextTarget, mapMarkdownRange, readTarget, targetFootprint, replaceCourseInstanceText, readCourseInstanceText, sliceCourseInstanceText, isCourseInstanceRange, readEditableTargetContent, recoverEditableTargetAfterReplacement, prepareHtmlAuthorFieldSource, mapHtmlAuthorFieldTarget } from './ToolTargets'
 import { courseInstancePropertyEdits, courseInstanceConversionEdits } from './courseInstanceEdits'
 import { coursePresentationEdits } from './coursePresentationEdits'
 import { captureComponentOperation, componentValueAt, presentationComponentEdits, componentFieldIdentityPaths, equalComponentValue } from '../drivers/courseV10Operations'
@@ -68,6 +68,15 @@ interface Handle {
 }
 interface Cursor { runId: string; documentId: string; epoch: string; revision: number; target: string; method: string; digest: string; offset: number }
 class ToolError extends Error { constructor(readonly code: string, message: string, readonly data?: unknown) { super(message) } }
+function sourceField(target: ToolTarget): boolean { return target.kind === 'markdown-range' || target.kind === 'html-author-field' && Boolean(target.source) }
+function mapSourceTarget(before: string, after: string, target: ToolTarget): ToolTarget {
+  return target.kind === 'markdown-range' ? mapMarkdownRange(before, after, target)
+    : target.kind === 'html-author-field' ? mapHtmlAuthorFieldTarget(before, after, target) : target
+}
+function mapAcknowledgedSourceTarget(target: ToolTarget, edits: readonly SourceSplice[]): ToolTarget {
+  return target.kind === 'markdown-range' ? mapAcknowledgedRange(target, edits)
+    : target.kind === 'html-author-field' && target.source ? { ...target, source: mapAcknowledgedRange(target.source, edits) } : target
+}
 
 /** A conservative upper bound on kinds reachable under the frozen grant. Gateway still checks every concrete target. */
 function writableKinds(model: DocumentModel, writable: readonly ToolTarget[]): ToolTarget['kind'][] {
@@ -719,8 +728,8 @@ export class DocumentToolGateway implements ToolGateway {
         if (frozen && frozen !== targetFootprint(snapshot.model, allowed)) return false
         if (allowed.kind === 'course-instance' && target.kind === 'course-instance' && allowed.instanceId !== target.instanceId
           && !run.componentSubtrees.get(key)?.has(target.instanceId)) return false
-        const mapped = allowed.kind === 'markdown-range' && isSourceDocumentModel(snapshot.model)
-          ? mapMarkdownRange(run.sources.get(snapshot.documentId)!, snapshot.model.source, allowed) : allowed
+        const mapped = sourceField(allowed) && isSourceDocumentModel(snapshot.model)
+          ? mapSourceTarget(run.sources.get(snapshot.documentId)!, snapshot.model.source, allowed) : allowed
         return containsTarget(mapped, target, snapshot.model)
       } catch { return false }
     })
@@ -736,7 +745,7 @@ export class DocumentToolGateway implements ToolGateway {
     const footprint = targetFootprint(snapshot.model, target)
     return { runId, documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
       target: structuredClone(target), footprint, expectedFootprint: footprint, conflicted: false, writable, readOnly,
-      ...(target.kind === 'markdown-range' && isSourceDocumentModel(snapshot.model) ? { source: snapshot.model.source } : {}) }
+      ...(sourceField(target) && isSourceDocumentModel(snapshot.model) ? { source: snapshot.model.source } : {}) }
   }
   private captureMutationHandles(runId: string, mutations: BatchMutationCall[], input: unknown): Promise<Handle[]> {
     const digest = documentDigest(mutations)
@@ -765,8 +774,8 @@ export class DocumentToolGateway implements ToolGateway {
     return handle
   }
   private handleFootprint(handle: Handle, model: DocumentModel): string {
-    const target = handle.target.kind === 'markdown-range' && isSourceDocumentModel(model)
-      ? mapMarkdownRange(handle.source!, model.source, handle.target) : handle.target
+    const target = sourceField(handle.target) && isSourceDocumentModel(model)
+      ? mapSourceTarget(handle.source!, model.source, handle.target) : handle.target
     return targetFootprint(model, target)
   }
   private recordAppliedFootprints(runId: string, snapshot: DocumentSnapshot, model: DocumentModel,
@@ -785,10 +794,10 @@ export class DocumentToolGateway implements ToolGateway {
       if (handle.runId !== runId || handle.documentId !== snapshot.documentId || handle.epoch !== snapshot.epoch
         || handle.revision > snapshot.revision) continue
       try {
-        const currentTarget = handle.target.kind === 'markdown-range' && isSourceDocumentModel(snapshot.model)
-          ? mapMarkdownRange(handle.source!, snapshot.model.source, handle.target) : handle.target
-        const nextTarget = currentTarget.kind === 'markdown-range' && isSourceDocumentModel(model)
-          ? mapAcknowledgedRange(currentTarget, edits)
+        const currentTarget = sourceField(handle.target) && isSourceDocumentModel(snapshot.model)
+          ? mapSourceTarget(handle.source!, snapshot.model.source, handle.target) : handle.target
+        const nextTarget = sourceField(currentTarget) && isSourceDocumentModel(model)
+          ? mapAcknowledgedSourceTarget(currentTarget, edits)
           : isCourseInstanceRange(currentTarget) ? mapAcknowledgedComponentRange(currentTarget, componentSplices) : currentTarget
         // A task commit explains a target change only when the target still matched
         // the result of this task's previous acknowledged commit beforehand.
@@ -797,7 +806,7 @@ export class DocumentToolGateway implements ToolGateway {
           continue
         }
         handle.target = nextTarget
-        if (nextTarget.kind === 'markdown-range' && isSourceDocumentModel(model)) handle.source = model.source
+        if (sourceField(nextTarget) && isSourceDocumentModel(model)) handle.source = model.source
         // handle.footprint stays the pre-apply snapshot so a second write on the same
         // short handle is reported as "本任务已修改目标内容" (target-conflict), not a
         // silent re-apply over the task's own prior commit. expectedFootprint tracks
@@ -814,8 +823,8 @@ export class DocumentToolGateway implements ToolGateway {
         if (doc) {
           const nextWritable: ToolTarget[] = []
           for (const target of doc.writable) {
-            if (target.kind !== 'markdown-range') { nextWritable.push(target); continue }
-            try { nextWritable.push(mapAcknowledgedRange(mapMarkdownRange(source, beforeSource, target), edits)) }
+            if (!sourceField(target)) { nextWritable.push(target); continue }
+            try { nextWritable.push(mapAcknowledgedSourceTarget(mapSourceTarget(source, beforeSource, target), edits)) }
             catch { /* An ambiguous external overlap does not become new write authority. */ }
           }
           doc.writable = nextWritable
@@ -853,7 +862,7 @@ export class DocumentToolGateway implements ToolGateway {
     if (handle.conflicted && (write || verifyFootprint)) throw new ToolError('target-conflict', '目标内容已由其他操作改变；旧句柄不可续写，请核对新内容后重新发起任务。')
     let target = handle.target
     try {
-      if (target.kind === 'markdown-range' && isSourceDocumentModel(snapshot.model)) target = mapMarkdownRange(handle.source!, snapshot.model.source, target)
+      if (sourceField(target) && isSourceDocumentModel(snapshot.model)) target = mapSourceTarget(handle.source!, snapshot.model.source, target)
       if (verifyFootprint
         && targetFootprint(snapshot.model, target) !== handle.footprint) {
         throw new Error(targetFootprint(snapshot.model, target) === handle.expectedFootprint && handle.expectedFootprint !== handle.footprint
@@ -932,6 +941,7 @@ export class DocumentToolGateway implements ToolGateway {
       const original = captured && captured.runId === priorRunId ? captured : capturedTarget
       if (!original || original.documentId !== binding.documentId) return null
       const fieldIdentity = (target: ToolTarget) => target.kind === 'markdown-range' ? { kind: target.kind, from: target.from }
+        : target.kind === 'html-author-field' ? { kind: target.kind, authorKey: target.authorKey, field: target.field }
         : target.kind === 'course-instance' ? { ...target, to: undefined } : target
       if (!equalComponentValue(fieldIdentity(original.target), fieldIdentity(binding.target))) return null
     }
@@ -1387,7 +1397,7 @@ export class DocumentToolGateway implements ToolGateway {
     for (let i = 0; i < mutations.length; i += 1) {
       const mutation = mutations[i]
       let target = targets[i]
-      if (target.kind === 'markdown-range' && isSourceDocumentModel(model) && isSourceDocumentModel(snapshot.model)) target = mapMarkdownRange(snapshot.model.source, model.source, target)
+      if (sourceField(target) && isSourceDocumentModel(model) && isSourceDocumentModel(snapshot.model)) target = mapSourceTarget(snapshot.model.source, model.source, target)
       if (model.kind === 'course-v10') {
         if (mutation.name === 'presentation.update') {
           if (target.kind !== 'course-surface') throw new ToolError('invalid-target', '命名状态需要已授权演示页面目标')
@@ -1481,9 +1491,9 @@ export class DocumentToolGateway implements ToolGateway {
         sourceSplices.push(splice)
         for (let j = 0; j < finalTargets.length; j++) {
           const previous = finalTargets[j]
-          if (previous.kind === 'markdown-range') finalTargets[j] = mapAcknowledgedRange(previous, [splice])
+          if (sourceField(previous)) finalTargets[j] = mapAcknowledgedSourceTarget(previous, [splice])
         }
-        finalTargets.push(target)
+        finalTargets.push(recoverEditableTargetAfterReplacement(model, target, mutation.input.content) ?? target)
         continue
       }
       if (!isSourceDocumentModel(model) || mutation.name !== 'text.replace' || target.kind !== 'markdown-range')
@@ -1493,7 +1503,7 @@ export class DocumentToolGateway implements ToolGateway {
       sourceSplices.push(splice)
       for (let j = 0; j < finalTargets.length; j += 1) {
         const previous = finalTargets[j]
-        if (previous.kind === 'markdown-range') finalTargets[j] = mapAcknowledgedRange(previous, [splice])
+        if (sourceField(previous)) finalTargets[j] = mapAcknowledgedSourceTarget(previous, [splice])
       }
       target = { ...target, to: target.from + mutation.input.content.length }
       finalTargets.push(target)

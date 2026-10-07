@@ -9,7 +9,8 @@ import type { ComponentAuthorRecord } from '../contracts/component-platform/runt
 export type ToolTarget =
   | { kind: 'document' }
   | { kind: 'markdown-range'; from: number; to: number }
-  | { kind: 'html-author-field'; authorKey: string; field: 'text' | 'src'; record: ComponentAuthorRecord }
+  | { kind: 'html-author-field'; authorKey: string; field: 'text' | 'src'; record: ComponentAuthorRecord;
+    source?: { from: number; to: number; quote?: '"' | "'" | '' } }
   /** V10 instance/subtree or a data field. Text offsets count code points; math is one atom. */
   | { kind: 'course-instance'; surfaceId: string; instanceId: string; stateId?: string | null; fieldScope?: 'data' | 'flowLayout'; dataPath?: string[]; from?: number; to?: number }
   | { kind: 'course-audio' }

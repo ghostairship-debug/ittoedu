@@ -11,6 +11,7 @@ import { TextDriver } from '../../src/core/drivers/TextDriver'
 import { readHtmlAuthoringRecords, patchHtmlAuthoringRecords } from '../../src/shared/html/htmlAuthoringRecords'
 import { prepareExecutionContentOutput, readEditableTargetContent, targetFootprint } from '../../src/core/tools/ToolTargets'
 import type { ToolTarget } from '../../src/shared/workbench/tools'
+import { JSDOM } from 'jsdom'
 
 it('applies a delayed local AI reply through Gateway while preserving human geometry and another object, and retains final CAS', async () => {
   const project = createBlankCourseProjectV10('在途共编'), driver = new CourseV10Driver()
@@ -127,4 +128,42 @@ it('does not treat an ambiguous static sibling as the content of a dynamic scope
   const model = driver.load(new TextEncoder().encode(source))
   expect(targetFootprint(driver.load(new TextEncoder().encode(source.replace('Static B', 'Human B'))), target)).toBe(targetFootprint(model, target))
   expect(targetFootprint(driver.load(new TextEncoder().encode(source.replace('="one"', '="two"'))), target)).not.toBe(targetFootprint(model, target))
+})
+
+it('keeps static HTML text and image attributes literal while mapping a concurrent edit before the exact field', async () => {
+  const driver = new TextDriver(), source = '<!doctype html><html><body><header>B</header><p>same</p><p>same</p><img src="old.png"></body></html>'
+  const registry = new DocumentRegistry({ drivers: [driver], createId: () => crypto.randomUUID(), bindingKey: binding => binding.path,
+    persistence: { async append() {}, async save() { throw new Error('unused') } } })
+  const session = await registry.create(driver.load(new TextEncoder().encode(source)), 'literal.html')
+  const gateway = new DocumentToolGateway(registry, [driver], () => crypto.randomUUID())
+  const from = source.lastIndexOf('same'), target: Extract<ToolTarget, { kind: 'html-author-field' }> = { kind: 'html-author-field', authorKey: 'selected-second', field: 'text',
+    source: { from, to: from + 4 }, record: { kind: 'text', binding: { kind: 'dom', path: [{ tag: 'body', index: 1 }, { tag: 'p', index: 2 }], baseline: 'same' }, overrides: {} } }
+  await gateway.beginRun({ runId: 'static', actor: 'agent', documents: [{ documentId: session.documentId, writable: [target] }] })
+  const handle = await gateway.issueTarget('static', session.documentId, target), snapshot = session.read()
+  expect(await session.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch, operationId: 'human-b', actor: 'human', baseRevision: snapshot.revision,
+    mutation: { type: 'command', command: { type: 'markdown.replace', source: source.replace('<header>B</header>', '<header>Human longer B</header>') } } })).toMatchObject({ status: 'applied' })
+  const content = 'show <img src=x> & "fun"'
+  expect(await gateway.execute('static', 'literal-text', { name: 'text.replace', input: { target: handle, content } })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  let current = session.read()
+  if (current.model.kind !== 'text') throw new Error('Expected text')
+  const dom = new JSDOM(current.model.source)
+  expect([...dom.window.document.querySelectorAll('p')].map(node => node.textContent)).toEqual(['same', content])
+  expect(dom.window.document.querySelectorAll('img')).toHaveLength(1)
+  expect(dom.window.document.querySelector('header')?.textContent).toBe('Human longer B')
+  expect(readHtmlAuthoringRecords(current.model.source)).toEqual({})
+  const imageFrom = current.model.source.indexOf('old.png'), imageTarget: Extract<ToolTarget, { kind: 'html-author-field' }> = {
+    kind: 'html-author-field', authorKey: 'image', field: 'src', source: { from: imageFrom, to: imageFrom + 7, quote: '"' },
+    record: { kind: 'image', binding: { kind: 'dom', path: [{ tag: 'body', index: 1 }, { tag: 'img', index: 3 }], baseline: 'old.png' }, overrides: {} },
+  }
+  await gateway.beginRun({ runId: 'image', actor: 'agent', documents: [{ documentId: session.documentId, writable: [imageTarget] }] })
+  const imageHandle = await gateway.issueTarget('image', session.documentId, imageTarget), value = 'photo "quoted" & path.png'
+  expect(await gateway.execute('image', 'literal-image', { name: 'text.replace', input: { target: imageHandle, content: value } })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  current = session.read()
+  if (current.model.kind !== 'text') throw new Error('Expected text')
+  const reopened = driver.load(driver.serialize(current.model))
+  if (reopened.kind !== 'text') throw new Error('Expected text')
+  const parsed = new JSDOM(reopened.source).window.document
+  expect(parsed.querySelector('img')?.getAttribute('src')).toBe(value)
+  expect(parsed.querySelector('img')?.attributes.length).toBe(1)
+  expect(parsed.querySelectorAll('p')[1]?.textContent).toBe(content)
 })

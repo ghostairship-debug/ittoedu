@@ -6,6 +6,8 @@ import { componentIsLocked, owningContainer, resolveComponentPresentation, type 
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { componentFieldIdentityPaths, componentValueAt, equalComponentValue } from '../drivers/courseV10Operations'
 import { HTML_AUTHORING_CONSUMER_ID, HTML_AUTHORING_DATA_ID, patchHtmlAuthoringRecords, readHtmlAuthoringRecords } from '../../shared/html/htmlAuthoringRecords'
+import { decodeHtmlEntities } from '../../shared/html/htmlSourceScanner'
+import { escapeHtmlAttribute, escapeHtmlText } from '../../shared/html/htmlSourceEscaping'
 import { componentAuthorRecordSchema } from '../../shared/contracts/component-platform/schema'
 import { documentTextLength, documentTextContentSchema, normalizeDocumentText, sliceDocumentText, plainDocumentText, type FlowTextContent } from '../../shared/document/content'
 import { inlineHtml } from '../../shared/document/html'
@@ -23,12 +25,30 @@ export function readHtmlAuthorField(model: DocumentModel, target: HtmlAuthorFiel
   if (target.field !== (frozen.kind === 'text' ? 'text' : 'src')) throw new Error('HTML 作者字段类型已改变')
   if (current && !equalComponentValue(identity(current), identity(frozen))) throw new Error('HTML 作者字段绑定已改变，请重新选择')
   const record = current ?? frozen
+  if (target.source) {
+    const { from, to } = target.source
+    if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to < from || to > model.source.length) throw new Error('HTML 正文字段范围已失效')
+    return { records, record, identity: identity(record), value: decodeHtmlEntities(model.source.slice(from, to).replace(/\r\n?/g, '\n')) }
+  }
   return { records, record, identity: identity(record), value: record.overrides[target.field] ?? record.binding.baseline }
+}
+function encodedHtmlAuthorField(target: HtmlAuthorFieldTarget, content: string): string {
+  return target.field === 'src' ? escapeHtmlAttribute(content, target.source?.quote ?? '') : escapeHtmlText(content)
+}
+/** Follow a source-backed field with the same range mechanics as source selections.
+ * Cards may follow an edit inside the field to show a conflict; write handles may not. */
+export function mapHtmlAuthorFieldTarget(before: string, after: string, target: HtmlAuthorFieldTarget, followInside = false): HtmlAuthorFieldTarget {
+  if (!target.source) return target
+  const { from, to } = target.source, end = to + after.length - before.length
+  const inside = followInside && end >= from && before.slice(0, from) === after.slice(0, from) && before.slice(to) === after.slice(end)
+  const source = inside ? { ...target.source, to: end } : mapSequenceRange(before, after, target.source)
+  return { ...target, source }
 }
 /** Re-prepare from the latest source, preserving every unrelated author field and author-authored byte. */
 export function prepareHtmlAuthorFieldSource(model: DocumentModel, target: HtmlAuthorFieldTarget, content: string): string {
   const { records, record } = readHtmlAuthorField(model, target)
   if (!isSourceDocumentModel(model)) throw new Error('HTML 作者字段需要源文档')
+  if (target.source) return model.source.slice(0, target.source.from) + encodedHtmlAuthorField(target, content) + model.source.slice(target.source.to)
   records[target.authorKey] = { ...structuredClone(record), overrides: { ...record.overrides, [target.field]: content } }
   return patchHtmlAuthoringRecords(model.source, records)
 }
@@ -174,7 +194,10 @@ function parseEditableInlineHtml(html: string, previous: FlowTextContent): FlowT
 /** A committed replacement carries its exact new extent; continuation never widens to an entire field. */
 export function recoverEditableTargetAfterReplacement(model: DocumentModel, original: ToolTarget, content: string,
   format?: 'text' | 'html'): ToolTarget | null {
-  if (original.kind === 'html-author-field') return readHtmlAuthorField(model, original).value === content ? original : null
+  if (original.kind === 'html-author-field') {
+    const target = original.source ? { ...original, source: { ...original.source, to: original.source.from + encodedHtmlAuthorField(original, content).length } } : original
+    return readHtmlAuthorField(model, target).value === content ? target : null
+  }
   if (original.kind === 'markdown-range' && isSourceDocumentModel(model)) {
     const target = { ...original, to: original.from + content.length }
     return readTarget(model, target) === content ? target : null
@@ -233,6 +256,7 @@ export function containsTarget(allowed: ToolTarget, target: ToolTarget, model?: 
   if (allowed.kind === 'document') return true
   if (allowed.kind === 'html-author-field' && target.kind === 'html-author-field')
     return allowed.authorKey === target.authorKey && allowed.field === target.field
+      && (allowed.source ? target.source?.from === allowed.source.from && target.source.to === allowed.source.to : !target.source)
       && equalComponentValue({ kind: allowed.record.kind, scope: allowed.record.scope, binding: allowed.record.binding },
         { kind: target.record.kind, scope: target.record.scope, binding: target.record.binding })
   if (allowed.kind === 'course-surface' && target.kind === 'course-instance' && model?.kind === 'course-v10') {
@@ -299,7 +323,7 @@ export function targetFootprint(model: DocumentModel, target: ToolTarget): strin
     const { value, identity } = readHtmlAuthorField(model, target)
     // Program/binding changes may redirect a dynamic object. Unrelated static text,
     // image fields and author records do not change this field's identity or value.
-    return documentDigest({ identity, value, source: htmlAuthorFieldSourceIdentity(model.source, target) })
+    return documentDigest({ identity, value, ...(target.source ? {} : { source: htmlAuthorFieldSourceIdentity(model.source, target) }) })
   }
   if (target.kind === 'course-instance' && model.kind === 'course-v10') {
     const context = courseInstanceContext(model, target)
