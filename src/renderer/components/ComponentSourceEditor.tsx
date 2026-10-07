@@ -13,7 +13,7 @@ type SourceSession = { target: CapturedCourseTarget; instanceId: string; scope: 
   implementation?: SourceImplementation; ownerId: string; expectedFiles: Record<string, Uint8Array> | null }
 type SourceDraft = { key: string; name: string; value: SourceValue; session: SourceSession | null;
   version: number; busy: boolean; composing: boolean; newPath: string; message: string | null; listeners: Set<() => void>; pending?: Promise<boolean>;
-  recoveryBaseline?: SourceValue; blocked?: string }
+  recoveryBaseline?: SourceValue; blocked?: string; resumeRequired?: boolean }
 // One local draft owner per bridge/author target. Panel unmount never applies or discards source.
 const drafts = new WeakMap<CourseV10DocumentBridge, Map<string, SourceDraft>>()
 const encode = (text: string) => new TextEncoder().encode(text)
@@ -59,7 +59,7 @@ function sourceValuesEqual(left: SourceValue, right: SourceValue): boolean {
   return names.length === Object.keys(right.files).length && names.every(name => sameFile(left.files[name], right.files[name]))
 }
 function sourceDraftDirty(draft: SourceDraft): boolean {
-  return Boolean(draft.busy || draft.composing || draft.blocked || draft.session &&
+  return Boolean(draft.busy || draft.composing || draft.blocked || draft.resumeRequired || draft.session &&
     (!sourceValuesEqual(draft.value, readSource(draft.session.implementation, draft.session.target.resources)) || draft.newPath))
 }
 function publishSourceDraft(bridge: CourseV10DocumentBridge, draft: SourceDraft) {
@@ -109,7 +109,7 @@ function resetDraft(draft: SourceDraft, value: SourceValue, preserveSelection = 
   const selected = draft.value.selected
   draft.value = preserveSelection && Object.hasOwn(value.files, selected) ? { ...value, selected } : value
   draft.session = null; draft.newPath = ''; draft.message = null
-  draft.recoveryBaseline = undefined; draft.blocked = undefined
+  draft.recoveryBaseline = undefined; draft.blocked = undefined; draft.resumeRequired = undefined
 }
 function rebaseSourceDraft(value: SourceValue, baseline: SourceValue, fresh: SourceValue): SourceValue {
   const files = { ...fresh.files }
@@ -130,6 +130,7 @@ async function applySourceDraft(bridge: CourseV10DocumentBridge, draft: SourceDr
   if (!session) return true
   const fail = (message: string) => { draft.message = message; publishSourceDraft(bridge, draft); return false }
   if (draft.blocked && !restore) return fail(draft.blocked)
+  if (draft.resumeRequired && !restore) return fail('上次输入尚未结束；原输入已恢复，请继续编辑后保存。')
   if (draft.composing) return fail('输入法组合尚未结束；原输入已保留。')
   if (!restore && draft.newPath) return fail('新增文件路径尚未完成；请新增文件或清空路径，原输入已保留。')
   const version = draft.version
@@ -182,20 +183,21 @@ function sourceLifecycle(bridge: CourseV10DocumentBridge, cache: Map<string, Sou
           key: JSON.stringify([session.scope.kind, session.scope.kind === 'definition' ? session.scope.definition.id : session.instanceId]),
           payload: { instanceId: session.instanceId, scope: session.scope.kind, definitionId: session.scope.kind === 'definition' ? session.scope.definition.id : null,
             name: draft.name, value: sourceRecoveryValue(draft.value), baseline: sourceRecoveryValue(draft.recoveryBaseline ?? readSource(session.implementation, session.target.resources)),
-            newPath: draft.newPath, message: draft.message, composing: draft.composing } } satisfies AdvancedDraftRecovery
+            newPath: draft.newPath, message: draft.message, composing: draft.composing || Boolean(draft.resumeRequired) } } satisfies AdvancedDraftRecovery
       })
     },
     restore(documentId, record) {
       const saved = record.payload as unknown as { instanceId: string; scope: 'instance' | 'definition'; definitionId: string | null; name: string;
-        value: ReturnType<typeof sourceRecoveryValue>; baseline: ReturnType<typeof sourceRecoveryValue>; newPath: string; message: string | null }
+        value: ReturnType<typeof sourceRecoveryValue>; baseline: ReturnType<typeof sourceRecoveryValue>; newPath: string; message: string | null; composing: boolean }
       const session = captureComponentSourceSession(bridge, documentId, saved.instanceId, saved.scope, saved.definitionId ?? undefined)
       const key = JSON.stringify([documentId, session.target.epoch, saved.scope, saved.scope === 'definition' ? saved.definitionId : saved.instanceId])
       if (cache.get(key)?.session) return
       const draft = freshDraft(key, saved.name, restoreSourceValue(saved.value))
       // Recovered text remains input until the user resumes editing or explicitly saves it.
-      draft.session = session; draft.newPath = saved.newPath; draft.version++
+      draft.session = session; draft.newPath = saved.newPath; draft.version++; draft.resumeRequired = saved.composing
       draft.message = sourceValuesEqual(restoreSourceValue(saved.baseline), readSource(session.implementation, session.target.resources))
-        ? '已恢复源码原输入；尚未自动应用。' : '源码基线已改变；原输入已恢复，请载入当前基线后检查。'
+        ? saved.composing ? '上次输入尚未结束；原输入已恢复，请继续编辑后保存。' : '已恢复源码原输入；尚未自动应用。'
+        : '源码基线已改变；原输入已恢复，请载入当前基线后检查。'
       if (!sourceValuesEqual(restoreSourceValue(saved.baseline), readSource(session.implementation, session.target.resources))) {
         draft.recoveryBaseline = restoreSourceValue(saved.baseline)
         draft.blocked = draft.message
@@ -204,7 +206,7 @@ function sourceLifecycle(bridge: CourseV10DocumentBridge, cache: Map<string, Sou
     },
     release(documentId) {
       for (const [key, draft] of cache) if (draft.session?.target.documentId === documentId || JSON.parse(key)[0] === documentId) {
-        draft.session = null; draft.composing = false; draft.busy = false; draft.blocked = undefined; draft.message = null
+        draft.session = null; draft.composing = false; draft.busy = false; draft.blocked = undefined; draft.resumeRequired = undefined; draft.message = null
         cache.delete(key)
         for (const notify of draft.listeners) notify()
       }
@@ -257,7 +259,7 @@ export function ComponentSourceEditor({ instance, implementation, bridge, report
   }
   const change = (next: SourceValue) => {
     if (disabled) return
-    try { capture(); draft.version++; draft.value = next; draft.message = null; render() }
+    try { capture(); draft.version++; draft.value = next; draft.resumeRequired = false; draft.message = null; render() }
     catch (error) { draft.message = error instanceof Error ? error.message : String(error); render() }
   }
   const nativeHistory = (event: KeyboardEvent) => {

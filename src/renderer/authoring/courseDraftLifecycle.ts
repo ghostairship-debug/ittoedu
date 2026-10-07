@@ -1,16 +1,8 @@
 import type { CourseV10DocumentBridge } from '../documents/CourseV10DocumentBridge'
-import type { JsonValue } from '../../shared/contracts/component-platform/project'
+import type { AdvancedDraftRecovery } from '../../shared/workbench/desktop'
+export type { AdvancedDraftRecovery } from '../../shared/workbench/desktop'
 
 export interface AdvancedDraftIssue { documentId: string; epoch: string; message: string }
-/** Local recovery input, never author content or a replayable operation. */
-export interface AdvancedDraftRecovery {
-  kind: 'source' | 'json'
-  projectId: string
-  documentId: string
-  epoch: string
-  key: string
-  payload: JsonValue
-}
 export interface CourseDraftProvider {
   hasDirty(documentId?: string): boolean
   prepare(documentId: string): Promise<AdvancedDraftIssue[]>

@@ -25,7 +25,7 @@ const errorMessage = (error: unknown) => {
   return error instanceof Error ? error.message : String(error)
 }
 type CodeDraft = { key: string; value: string; binding: { apply: ApplyDraft; version: number } | null;
-  busy: boolean; composing: boolean; message: string | null; listeners: Set<() => void>; pending?: Promise<boolean>; blocked?: string; baseline?: string }
+  busy: boolean; composing: boolean; message: string | null; listeners: Set<() => void>; pending?: Promise<boolean>; blocked?: string; baseline?: string; resumeRequired?: boolean }
 const codeDrafts = new WeakMap<object, Map<string, CodeDraft>>()
 const codeBridges = new WeakMap<object, CourseV10DocumentBridge>()
 function publishCodeDraft(owner: object, draft: CodeDraft) {
@@ -38,8 +38,8 @@ async function applyCodeDraft(owner: object, draft: CodeDraft): Promise<boolean>
   if (draft.pending) return draft.pending
   const binding = draft.binding
   if (!binding) return !draft.composing
-  if (draft.composing || draft.blocked) {
-    draft.message = draft.blocked ?? '输入法组合尚未结束；原输入已保留。'; publishCodeDraft(owner, draft); return false
+  if (draft.composing || draft.blocked || draft.resumeRequired) {
+    draft.message = draft.blocked ?? (draft.resumeRequired ? '上次输入尚未结束；原输入已恢复，请继续编辑后保存。' : '输入法组合尚未结束；原输入已保留。'); publishCodeDraft(owner, draft); return false
   }
   const version = binding.version
   draft.busy = true
@@ -78,11 +78,11 @@ function codeLifecycle(bridge: CourseV10DocumentBridge, cache: Map<string, CodeD
         if (!apply?.context || !target || target.documentId !== documentId || !codeDraftDirty(draft)) return []
         return [{ kind: 'json', documentId, epoch: target.epoch, projectId: target.project.id, key: JSON.stringify([apply.context, target.surfaceId, target.activeStateId]),
           payload: { context: apply.context, raw: draft.value, baseline: draft.baseline ?? apply.baseline ?? '',
-            surfaceId: target.surfaceId, activeStateId: target.activeStateId, message: draft.message, composing: draft.composing } } satisfies AdvancedDraftRecovery]
+            surfaceId: target.surfaceId, activeStateId: target.activeStateId, message: draft.message, composing: draft.composing || Boolean(draft.resumeRequired) } } satisfies AdvancedDraftRecovery]
       })
     },
     restore(documentId, record) {
-      const saved = record.payload as unknown as { context: JsonDraftContext; raw: string; baseline: string; surfaceId: string | null; activeStateId: string | null }
+      const saved = record.payload as unknown as { context: JsonDraftContext; raw: string; baseline: string; surfaceId: string | null; activeStateId: string | null; composing: boolean }
       const fresh = bridge.captureTarget(documentId), target = { ...fresh, surfaceId: saved.surfaceId, activeStateId: saved.activeStateId,
         editingProject: resolveComponentPresentation(fresh.project, saved.surfaceId, saved.activeStateId) }
       const apply = captureDeveloperJsonSession(bridge, target, saved.context)
@@ -90,11 +90,12 @@ function codeLifecycle(bridge: CourseV10DocumentBridge, cache: Map<string, CodeD
       if (cache.get(key)?.binding) return
       const blocked = jsonEqual(saved.baseline, apply.baseline ?? '') ? undefined : 'JSON 基线已改变；原输入已恢复，请检查当前内容或放弃草稿后继续。'
       cache.set(key, { key, value: saved.raw, binding: { apply, version: 1 }, busy: false, composing: false, listeners: new Set(),
-        baseline: saved.baseline, blocked, message: blocked ?? '已恢复 JSON 原输入；尚未自动应用。' })
+        baseline: saved.baseline, blocked, resumeRequired: saved.composing,
+        message: blocked ?? (saved.composing ? '上次输入尚未结束；原输入已恢复，请继续编辑后保存。' : '已恢复 JSON 原输入；尚未自动应用。') })
     },
     release(documentId) {
       for (const [key, draft] of cache) if (draft.binding?.apply.target?.documentId === documentId || JSON.parse(key)[0] === documentId) {
-        draft.binding = null; draft.composing = false; draft.busy = false; draft.blocked = undefined; draft.message = null
+        draft.binding = null; draft.composing = false; draft.busy = false; draft.blocked = undefined; draft.resumeRequired = undefined; draft.message = null
         cache.delete(key)
         for (const notify of draft.listeners) notify()
       }
@@ -172,7 +173,7 @@ export function CodeDocumentEditor({ title, description, value, bindingKey, lang
     return draft.binding
   }
   const change = (raw: string) => {
-    try { const binding = begin(); if (binding) binding.version++; draft.value = raw; draft.message = null; render() }
+    try { const binding = begin(); if (binding) binding.version++; draft.value = raw; draft.resumeRequired = false; draft.message = null; render() }
     catch (error) { draft.message = errorMessage(error); render() }
   }
   const apply = async () => {
