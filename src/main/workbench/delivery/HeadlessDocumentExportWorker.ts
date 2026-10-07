@@ -29,11 +29,17 @@ export class HeadlessDocumentExportWorker {
         contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, backgroundThrottling: false } })
     this.workers.add(worker)
     const port = new DocumentExportPort(worker.webContents.id,
-      input => worker.webContents.send(IPC_CHANNELS.documentExportBuildRequest, input))
+      input => worker.webContents.send(IPC_CHANNELS.documentExportBuildRequest, input),
+      input => { if (!worker.isDestroyed()) worker.webContents.send('document-export:build-cancel', input) })
     const receive = (event: Electron.IpcMainEvent, reply: unknown) => { port.accept(reply, event.sender.id) }
+    const progress = (event: Electron.IpcMainEvent, value: unknown) => {
+      if (event.senderFrame !== event.sender.mainFrame) return
+      port.progress(value, event.sender.id)
+    }
     const closed = () => port.dispose()
     const abort = () => { port.dispose(); if (!worker.isDestroyed()) worker.destroy() }
     ipcMain.on(IPC_CHANNELS.documentExportBuildReply, receive)
+    ipcMain.on('document-export:build-progress', progress)
     worker.once('closed', closed)
     worker.webContents.once('render-process-gone', closed)
     worker.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -47,6 +53,7 @@ export class HeadlessDocumentExportWorker {
     } finally {
       signal?.removeEventListener('abort', abort)
       ipcMain.removeListener(IPC_CHANNELS.documentExportBuildReply, receive)
+      ipcMain.removeListener('document-export:build-progress', progress)
       port.dispose()
       this.workers.delete(worker)
       if (!worker.isDestroyed()) worker.destroy()
