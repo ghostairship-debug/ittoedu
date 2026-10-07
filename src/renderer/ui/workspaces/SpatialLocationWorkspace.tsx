@@ -100,7 +100,7 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
   const hudMatrix = composeMatrices(translationMatrix((size.width - design.width * overlayScale) / 2, (size.height - design.height * overlayScale) / 2), scaleMatrix(overlayScale))
   const worldMatrix = componentSpatialCameraMatrix(props.view.camera, { x: 0, y: 0, ...size })
   const controllerGeometry = createTeacherControllerHudGeometry({ referenceSize: teacherControllerReferenceSize(props.project), viewportRect: { x: 0, y: 0, ...size } })
-  const displayProject = projectTeacherControllerInstances(props.project, controllerGeometry, undefined, props.teacherController)
+  const displayProject = projectTeacherControllerInstances(props.project, controllerGeometry, props.teacherController)
   const latestDisplay = useRef(displayProject); latestDisplay.current = displayProject
   const allTargets = freeSurfaceTargets(displayProject, props.surface.id)
   const globalIds = new Set([...props.project.global.underlay, ...props.project.global.overlay])
@@ -283,7 +283,7 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
     if (cancel && gesture.marquee) props.onSelect(gesture.originalSelection ?? [])
     if (viewport.current?.hasPointerCapture(event.pointerId)) viewport.current.releasePointerCapture(event.pointerId)
     const frozen = gestureDisplay.current
-    const edits = frozen ? restoreTeacherControllerFrameEdits(gesture.edits, frozen.original, frozen.display, frozen.viewport, undefined, frozen.offset, props.teacherController) : gesture.edits
+    const edits = frozen ? restoreTeacherControllerFrameEdits(gesture.edits, frozen.original, frozen.display, frozen.viewport, frozen.offset, props.teacherController) : gesture.edits
     if (!cancel && edits.length) void props.onEdits(edits, gesture.captured).catch(error => setError(String(error))).finally(resetPreview)
     else resetPreview()
   }

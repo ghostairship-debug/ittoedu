@@ -180,7 +180,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
   const hudGeometry = createTeacherControllerHudGeometry({ referenceSize: project ? teacherControllerReferenceSize(project) : canvas, viewportRect: viewport })
   const controllerGeometry = useRef({ viewport: hudGeometry, port: ports.teacherController })
   controllerGeometry.current = { viewport: hudGeometry, port: ports.teacherController }
-  const displayProject = project && projectTeacherControllerInstances(project, hudGeometry, undefined, ports.teacherController)
+  const displayProject = project && projectTeacherControllerInstances(project, hudGeometry, ports.teacherController)
   const hudGesture = useRef<{ pointerId: number; value: FreeTransformGesture; edits: ComponentEdit[]; captured: CapturedCourseTarget } | null>(null)
   const gestureDisplay = useRef<{ original: CourseProjectV10; display: CourseProjectV10; geometry: typeof controllerGeometry.current; offset: { x: number; y: number } } | null>(null)
   const mapping = (): AffineMatrix => {
@@ -198,14 +198,14 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
   if (!authoring.current) authoring.current = createSlideWorkspaceAuthoringController({
     read: state, capture: () => {
       const original = latest.current.ports.read().project!, geometry = controllerGeometry.current
-      gestureDisplay.current = { original, display: projectTeacherControllerInstances(original, geometry.viewport, undefined, geometry.port), geometry,
+      gestureDisplay.current = { original, display: projectTeacherControllerInstances(original, geometry.viewport, geometry.port), geometry,
         offset: geometry.port?.placement?.() ?? { x: 0, y: 0 } }
       return latest.current.ports.capture()
     }, select: ids => latest.current.ports.select(ids),
     commit: (edits, target, group) => {
       const frozen = gestureDisplay.current
       return latest.current.ports.commit(frozen ? restoreTeacherControllerFrameEdits(edits, frozen.original, frozen.display,
-        frozen.geometry.viewport, undefined, frozen.offset, frozen.geometry.port) : edits, target, group)
+        frozen.geometry.viewport, frozen.offset, frozen.geometry.port) : edits, target, group)
     }, report: message => latest.current.ports.report(message),
   })
   useLayoutEffect(() => {
@@ -530,7 +530,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         stop(event); const gesture = hudGesture.current, frozen = gestureDisplay.current; hudGesture.current = null
         event.currentTarget.releasePointerCapture(event.pointerId); setPreview(emptyPreview())
         if (gesture.edits.length && frozen) void ports.commit(restoreTeacherControllerFrameEdits(gesture.edits, frozen.original, frozen.display,
-          frozen.geometry.viewport, undefined, frozen.offset, frozen.geometry.port), gesture.captured, crypto.randomUUID()).catch(error => ports.report(String(error)))
+          frozen.geometry.viewport, frozen.offset, frozen.geometry.port), gesture.captured, crypto.randomUUID()).catch(error => ports.report(String(error)))
         return
       }
       if (pan.current?.id === event.pointerId) { stop(event); pan.current = null; setPanning(false); event.currentTarget.releasePointerCapture(event.pointerId); return }

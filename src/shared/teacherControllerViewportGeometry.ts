@@ -1,6 +1,6 @@
 import type { ComponentEdit, ComponentFrame, CourseProjectV10, TeacherControllerPort } from './contracts/component-platform'
 import { componentDefinitionBuiltinKey } from './contracts/component-platform'
-import { invertMatrix, multiplyMatrices, type AffineMatrix } from '../core/components/geometry'
+import { multiplyMatrices } from '../core/components/geometry'
 import type { FlowSize } from './flowViewportGeometry'
 import { readTeacherControllerConfig } from './teacherControllerConfig'
 import { createStageGeometry, STAGE_VIEWPORT_WIDTH, STAGE_VIEWPORT_HEIGHT } from './stageViewport'
@@ -22,16 +22,11 @@ export function createTeacherControllerHudGeometry(input: {
   referenceSize: FlowSize; viewportRect: { x: number; y: number; width: number; height: number }
 }) { return createStageGeometry(input.referenceSize, input.viewportRect) }
 
-function isHudGeometry(viewport: FlowSize | TeacherControllerHudGeometry): viewport is TeacherControllerHudGeometry {
-  return 'authorToViewport' in viewport
-}
-
 export type TeacherControllerDisplayPort = Pick<TeacherControllerPort, 'read' | 'subscribe' | 'setCollapsed'> & {
   placement?(): { x: number; y: number }
   canExecute?: TeacherControllerPort['canExecute']
   execute?: TeacherControllerPort['execute']
 }
-const identity: AffineMatrix = [1, 0, 0, 1, 0, 0]
 
 function collapsedTranslation(frame: ComponentFrame, collapsed: boolean) {
   const x = collapsed ? Math.max(0, frame.width - 52) : 0, y = collapsed ? Math.max(0, frame.height - 52) : 0
@@ -91,40 +86,37 @@ export function teacherControllerIsCollapsed(project: CourseProjectV10, id: stri
 }
 
 /** Author frames remain unchanged. HUD consumers render the returned frames directly in their HUD layer. */
-export function projectTeacherControllerInstances(project: CourseProjectV10, viewport: FlowSize | TeacherControllerHudGeometry,
-  parentToViewport: AffineMatrix = identity, port?: TeacherControllerDisplayPort): CourseProjectV10 {
-  const hud = isHudGeometry(viewport) ? viewport : undefined
-  const size = hud?.viewportRect ?? viewport as FlowSize
+export function projectTeacherControllerInstances(project: CourseProjectV10, hud: TeacherControllerHudGeometry,
+  port?: TeacherControllerDisplayPort): CourseProjectV10 {
+  const size = hud.viewportRect
   if (size.width <= 0 || size.height <= 0) return project
-  const offset = port?.placement?.() ?? { x: 0, y: 0 }, inverse = invertMatrix(parentToViewport)
+  const offset = port?.placement?.() ?? { x: 0, y: 0 }
   let instances = project.instances
   for (const id of [...project.global.underlay, ...project.global.overlay]) {
     const instance = project.instances[id], frame = instance?.frame
     if (!frame || !isGlobalTeacherController(project, id)) continue
-    const origin = hud ? { x: hud.viewportRect.x, y: hud.viewportRect.y } : { x: 0, y: 0 }
-    const projected: ComponentFrame = hud ? { ...frame, transform: [...multiplyMatrices(hud.authorToViewport, frame.transform)] } : frame
+    const origin = { x: hud.viewportRect.x, y: hud.viewportRect.y }
+    const projected: ComponentFrame = { ...frame, transform: [...multiplyMatrices(hud.authorToViewport, frame.transform)] }
     const localFrame = { ...projected, transform: [...projected.transform] as ComponentFrame['transform'] }
     localFrame.transform[4] -= origin.x; localFrame.transform[5] -= origin.y
     const shown = teacherControllerViewportFrame(localFrame, size, offset, teacherControllerIsCollapsed(project, id, port))
     shown.transform[4] += origin.x; shown.transform[5] += origin.y
-    const transform = hud ? shown.transform : multiplyMatrices(inverse, shown.transform)
     if (instances === project.instances) instances = { ...instances }
-    instances[id] = { ...instance, frame: { width: shown.width, height: shown.height, transform: [...transform] } }
+    instances[id] = { ...instance, frame: shown }
   }
   return instances === project.instances ? project : { ...project, instances }
 }
 
 /** A real gesture may move a clamped frame; unchanged axes keep their authored placement. */
 export function restoreTeacherControllerFrameEdits(edits: ComponentEdit[], original: CourseProjectV10, display: CourseProjectV10,
-  viewport: FlowSize | TeacherControllerHudGeometry, parentToViewport: AffineMatrix = identity, offset = { x: 0, y: 0 }, port?: TeacherControllerDisplayPort): ComponentEdit[] {
+  hud: TeacherControllerHudGeometry, offset = { x: 0, y: 0 }, port?: TeacherControllerDisplayPort): ComponentEdit[] {
   return edits.map(edit => {
     if (edit.type !== 'frame.set' || !edit.frame || !isGlobalTeacherController(original, edit.instanceId)) return edit
     const source = original.instances[edit.instanceId]?.frame, before = display.instances[edit.instanceId]?.frame
     if (!source || !before) return edit
-    const hud = isHudGeometry(viewport) ? viewport : undefined
-    const matrix = hud?.viewportToAuthor ?? parentToViewport
+    const matrix = hud.viewportToAuthor
     const start = multiplyMatrices(matrix, before.transform), next = multiplyMatrices(matrix, edit.frame.transform)
-    const authorOffset = hud ? { x: offset.x / hud.scale, y: offset.y / hud.scale } : offset
+    const authorOffset = { x: offset.x / hud.scale, y: offset.y / hud.scale }
     const transform = [...source.transform] as ComponentFrame['transform']
     const collapsed = teacherControllerIsCollapsed(original, edit.instanceId, port)
     const firstColumnChanged = Math.abs(next[0] - start[0]) > 0.000001 || Math.abs(next[1] - start[1]) > 0.000001
