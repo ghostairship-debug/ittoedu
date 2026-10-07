@@ -203,7 +203,11 @@ function sourceLifecycle(bridge: CourseV10DocumentBridge, cache: Map<string, Sou
       cache.set(key, draft)
     },
     release(documentId) {
-      for (const [key, draft] of cache) if (draft.session?.target.documentId === documentId || JSON.parse(key)[0] === documentId) cache.delete(key)
+      for (const [key, draft] of cache) if (draft.session?.target.documentId === documentId || JSON.parse(key)[0] === documentId) {
+        draft.session = null; draft.composing = false; draft.busy = false; draft.blocked = undefined; draft.message = null
+        cache.delete(key)
+        for (const notify of draft.listeners) notify()
+      }
     },
   })
 }

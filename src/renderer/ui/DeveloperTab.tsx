@@ -93,7 +93,11 @@ function codeLifecycle(bridge: CourseV10DocumentBridge, cache: Map<string, CodeD
         baseline: saved.baseline, blocked, message: blocked ?? '已恢复 JSON 原输入；尚未自动应用。' })
     },
     release(documentId) {
-      for (const [key, draft] of cache) if (draft.binding?.apply.target?.documentId === documentId || JSON.parse(key)[0] === documentId) cache.delete(key)
+      for (const [key, draft] of cache) if (draft.binding?.apply.target?.documentId === documentId || JSON.parse(key)[0] === documentId) {
+        draft.binding = null; draft.composing = false; draft.busy = false; draft.blocked = undefined; draft.message = null
+        cache.delete(key)
+        for (const notify of draft.listeners) notify()
+      }
     },
   })
 }
