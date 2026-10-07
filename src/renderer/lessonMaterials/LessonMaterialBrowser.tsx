@@ -6,7 +6,7 @@ import { extractMaterial } from '../project/materialExtraction'
 export interface LessonMaterialBrowserProps {
   /** Change this whenever the active lesson identity changes. */
   targetKey: string
-  selections?: { id: string; fragmentIds: string[] }[]
+  selections?: { id: string; extractionVersion?: string; fragmentIds: string[] }[]
   onSelect?(record: LessonMaterialRecord, fragmentIds: string[]): void
   selectSource(): Promise<LessonMaterialSelectResult>
   list(): Promise<LessonMaterialRecord[]>
@@ -69,10 +69,13 @@ export function LessonMaterialBrowser(props: LessonMaterialBrowserProps) {
     {error && <p role="alert">{error}</p>}
     {!records.length && !busy && <p>当前课例尚未添加材料。</p>}
     {records.map(record => {
-      const selectedFragments = props.selections?.find(item => item.id === record.id)?.fragmentIds ?? []
+      const selection = props.selections?.find(item => item.id === record.id)
+      const outdated = selection?.extractionVersion !== undefined && selection.extractionVersion !== record.extractionVersion
+      const selectedFragments = outdated ? [] : selection?.fragmentIds ?? []
       const allSelected = record.fragments.length > 0 && record.fragments.every(fragment => selectedFragments.includes(fragment.id))
       return <article key={record.id}>
       <h3>{record.title}</h3>
+      {outdated && <p role="status">材料提取内容已更新，请重新选择用于创作的片段。</p>}
       {props.onSelect && <label><input type="checkbox" checked={allSelected} ref={node => { if (node) node.indeterminate = selectedFragments.length > 0 && !allSelected }} onChange={event => props.onSelect?.(record, event.target.checked ? record.fragments.map(fragment => fragment.id) : [])} />用于本课例创作（整份材料）</label>}
       <p>{record.fragments.length} 个可查看片段 · {record.assets.length} 份图像</p>
       {record.gaps.length > 0 && <details><summary>有 {record.gaps.length} 项内容需要复核</summary><ul>{record.gaps.map((gap, index) => <li key={index}>{gap.locator.page ? `第 ${gap.locator.page} 页：` : ''}{gap.reason}</li>)}</ul></details>}

@@ -40,6 +40,8 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
     focusDocument: id => shell.current?.focusDocument(id) ?? Promise.resolve(),
   }), [])
   const [selections, setSelections] = useState<Record<string, LessonAuthoringMaterialSelection[]>>({})
+  const selectionsRef = useRef(selections); selectionsRef.current = selections
+  const activeLessonKey = useRef<string | null>(null)
   const api = window.desktopAPI
   useEffect(() => api?.onRequestFocusDocument?.(id => {
     void shell.current?.focusDocument(id).catch(error => { void api.reportDiagnostic({ source: 'renderer', message: error instanceof Error ? error.message : '无法定位保留的文档' }) })
@@ -63,7 +65,25 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
       list={() => service.list(target)} importMaterial={input => service.importMaterial(target, input)} read={input => service.read(target, input)} />
   }
   return <><LessonWorkspaceShell ref={shell} {...props} lessonOperation={api.lesson} workspaceFiles={api.workspaceFiles} documentPort={port}
-    renderAssistant={(root, documentTarget, isCourse, drainDocuments) => api.execution ? <ExecutionAssistant ref={assistant} root={root}
+    renderAssistant={(root, documentTarget, isCourse, drainDocuments, lesson) => {
+      const lessonKey = lesson ? lesson.identity.normalizedDirectory + ':' + lesson.identity.lessonId : null
+      activeLessonKey.current = lessonKey
+      return api.execution ? <ExecutionAssistant ref={assistant} root={root}
+      captureMaterials={async () => {
+        if (!lesson || !lessonKey || !api.lessonMaterials) return undefined
+        const chosen = structuredClone(selectionsRef.current[lessonKey] ?? [])
+        if (!chosen.length) return undefined
+        const target = { lessonId: lesson.identity.lessonId, rootPath: lesson.identity.normalizedDirectory }
+        const records = await api.lessonMaterials.list(target)
+        if (activeLessonKey.current !== lessonKey) throw new Error('课例已切换，请在当前课例重新发送。')
+        for (const choice of chosen) {
+          const record = records.find(item => item.id === choice.id)
+          if (!record || record.extractionVersion !== choice.extractionVersion
+            || choice.fragmentIds.some(id => !record.fragments.some(fragment => fragment.id === id)))
+            throw new Error('所选材料已更新或不可读取，请重新选择材料片段后发送。')
+        }
+        return { target, selections: chosen }
+      }}
       onLocateDocument={id => shell.current?.focusDocument(id) ?? Promise.resolve()}
       prepareSend={async (ids = []) => { if (!await drainDocuments(ids)) return false; await props.prepareCourseDocuments?.(ids); return true }}
       captureDocuments={async writable => {
@@ -76,7 +96,8 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
           return [captureDocumentReference(snapshot, writable)]
         }
         return isCourse ? props.captureCourseDocument?.(writable) ?? [] : []
-      }} /> : <p role="alert">创作助手服务不可用，请重新打开应用。</p>}
+      }} /> : <p role="alert">创作助手服务不可用，请重新打开应用。</p>
+    }}
     renderMaterial={(filename, lesson) => material(filename, lesson)} renderMaterials={lesson => material(undefined, lesson)} />
     <WorkspaceRecoveryPanel api={api.documents!} onRestored={id => shell.current?.focusDocument(id) ?? Promise.reject(new Error('文档视图尚未就绪'))} />
   </>
