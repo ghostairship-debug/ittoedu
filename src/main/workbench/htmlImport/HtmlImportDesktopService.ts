@@ -1,4 +1,3 @@
-/** @deprecated Historical V9/CLI consumer only; current production uses Project V10 and the canonical Gateway. */
 import { randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -6,8 +5,7 @@ import type { DocumentHostService } from '../DocumentHostService'
 import { htmlImportDesktopRequestSchema, type HtmlImportDesktopResult } from '../../../shared/workbench/htmlImportDesktop'
 import { containerChildIds, owningContainer, type ComponentContainer } from '../../../shared/contracts/component-platform'
 import type { ComponentProjectSnapshot } from '../../../core/projectFiles/componentPlatform'
-import { decodeComponentHtmlSource } from '../projectFiles/componentPlatformFileInput'
-import { readHtmlClosure } from './readHtmlClosure'
+import { decodeComponentHtmlSource, readComponentProjectFileInput, readCurrentHtmlDocumentSource } from '../projectFiles/componentPlatformFileInput'
 
 /** A manual import captures its original document, then uses the same L19 service/writer as project.apply. */
 export class HtmlImportDesktopService {
@@ -42,11 +40,12 @@ export class HtmlImportDesktopService {
     try {
       const current = await session.drain()
       if (current.epoch !== frozen.epoch) throw new Error('HTML 导入工程会话已变化；原文件未修改')
-      const bytes = new Uint8Array(await fs.readFile(source)), decoded = decodeComponentHtmlSource(bytes)
-      const closure = (await readHtmlClosure({ htmlPath: source, rootDir: fileAccess.workspaceRoot, sourceHtml: decoded.text })).siblingFiles
+      const prepared = await readComponentProjectFileInput({ from: source, fileAccess,
+        currentHtml: filename => readCurrentHtmlDocumentSource(host.registry, filename) })
+      const bytes = prepared.bytes, decoded = decodeComponentHtmlSource(bytes)
       const result = await gateway.applyComponentContent(runId, callId, frozen as ComponentProjectSnapshot, {
         intent: 'insert', target: { kind: 'container', container, index },
-        source: { kind: 'html', html: decoded.text, siblingFiles: closure,
+        source: { kind: 'html', html: prepared.text ?? decoded.text, siblingFiles: prepared.siblingFiles,
           original: { bytes, filename: path.basename(source), mimeType: 'text/html' } },
         editingContext: { surfaceId: surface.id, stateId }, ...(input.viewport ? { viewport: input.viewport } : {}),
       })

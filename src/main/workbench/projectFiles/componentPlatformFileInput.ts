@@ -13,9 +13,19 @@ import { readComponentSourceClosure } from './componentSourceClosure'
 import { prepareContentResources, prepareImageResource } from '../contentApply/resources/contentResources'
 import { assetReferencePath, projectReferencePath } from '../../../shared/composition/projectReferences'
 import { parse } from 'parse5'
+import type { DocumentRegistry } from '../../../core/documents/DocumentRegistry'
 
 const TEXT = new Set(['.html', '.htm', '.css', '.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx', '.json', '.md', '.markdown', '.txt', '.svg'])
 const SOURCE = new Set(['.js', '.mjs', '.cjs', '.ts', '.tsx', '.jsx'])
+
+/** Both path application and manual import capture the same already-open source Session. */
+export async function readCurrentHtmlDocumentSource(registry: Pick<DocumentRegistry, 'list' | 'get'>, filename: string): Promise<string | undefined> {
+  const key = (value: string) => process.platform === 'win32' ? value.toLowerCase() : value
+  const observed = registry.list().find(snapshot => snapshot.binding.kind === 'file' && key(snapshot.binding.path) === key(filename))
+  if (!observed) return undefined
+  const snapshot = await registry.get(observed.documentId).drain()
+  return snapshot.model.kind === 'text' ? snapshot.model.source : undefined
+}
 
 /** Browser HTML encodings are decoded at the source boundary; the original bytes remain untouched. */
 export function decodeComponentHtmlSource(bytes: Uint8Array): { text: string; notices: string[] } {

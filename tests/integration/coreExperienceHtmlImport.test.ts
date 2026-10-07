@@ -15,6 +15,7 @@ import { InMemoryComponentCompilation } from '../../src/core/components/compilat
 import { createEsbuildComponentCompiler } from '../../src/main/workbench/contentApply/compilation/esbuildComponentCompiler'
 import { patchHtmlAuthoringRecords } from '../../src/shared/html/htmlAuthoringRecords'
 import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
+import { HtmlImportDesktopService } from '../../src/main/workbench/htmlImport/HtmlImportDesktopService'
 
 // The disposable measurement window is unrelated to source capture, pagination
 // and archive closure. Use its real supported retained-program result here.
@@ -73,6 +74,18 @@ it('creates independent host pages from current unsaved HTML, saves/reopens and 
   expect(contents[1]).toContain('第二课'); expect(contents[1]).not.toContain('当前未落盘第一课')
   expect(await fs.readFile(f.sourcePath, 'utf8')).toContain('旧第一课')
   expect(await createCourseFromHtml({ sourcePath: f.sourcePath }, f.context, f.ports)).toEqual(result)
+  const manual = await f.host.registry.create({ kind: 'course-v10', project: createBlankCourseProjectV10(), resources: { assets: {}, components: {} } }, 'manual.h5lesson')
+  const manualBefore = await manual.drain()
+  if (manualBefore.model.kind !== 'course-v10') throw new Error('Expected current course format')
+  const imported = await new HtmlImportDesktopService({ documents: f.host, chooseSource: async () => null }).import({
+    documentId: manual.documentId, epoch: manualBefore.epoch, revision: manualBefore.revision, surfaceId: manualBefore.model.project.surfaces[0]!.id,
+    source: { kind: 'file', path: f.sourcePath },
+  })
+  expect(imported?.receipt.status).toBe('applied')
+  const manualAfter = await manual.drain()
+  if (manualAfter.model.kind !== 'course-v10') throw new Error('Expected current course format')
+  const manualHtml = (manualAfter.model.project.instances[manualAfter.model.project.surfaces[0]!.childIds[0]!]!.data as { html: string }).html
+  expect(manualHtml).toContain('当前未落盘第一课'); expect(manualHtml).not.toContain('旧第一课')
 })
 
 it('retains one coupled program and accepts ordinary content into its explicitly empty surface', async () => {
