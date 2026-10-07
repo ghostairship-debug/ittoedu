@@ -37,7 +37,7 @@ export function installWindowLifecycle(getWindow: () => BrowserWindow | null): W
     },
   })
   setBeforeWindowClose(() => lifecycle.beforeClose())
-  // Quitting from elsewhere (tray, OS session end, app.quit) must not be turned into a hide.
-  app.on('before-quit', () => lifecycle.requestQuit())
+  // Main's single before-quit owner requests a normal window close. A second listener here
+  // would re-arm requestQuit after the first close consumes it, including a cancelled save.
   return lifecycle
 }

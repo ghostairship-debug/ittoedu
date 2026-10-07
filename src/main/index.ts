@@ -8,6 +8,7 @@ import { startExternalMcpService, externalMcpService, closeExternalMcpService,
   configureHeadlessExternalMcp, bindHeadlessMcpWorkspace } from './workbench/external/externalDesktopService'
 import { installWorkbenchToolServices, disposeHeadlessWorkbenchWorkers } from './workbench/workbenchToolServices'
 import { documentHost } from './workbench/documentHost'
+import { executionDesktopService } from './workbench/execution/ExecutionDesktopService'
 import { parseHeadlessMcpLaunch, writeMcpLaunchReply, type HeadlessMcpLaunch } from './headlessMcpLaunch'
 import { resolveRendererEntryUrl } from './rendererEntry'
 import { installWindowLifecycle } from './windowLifecycleDesktop'
@@ -24,6 +25,20 @@ import {
 } from './windowVisibility'
 import { APP_ID } from '../shared/constants'
 import { installSystemProxy } from './workbench/network/systemProxyDispatcher'
+import { runProductMcpBootstrap } from './workbench/external/installedMcpBootstrap'
+
+if (process.argv.includes('--mcp-connect')) {
+  // This packaged, one-use entry delegates to a detached product process before taking
+  // the profile lock. The returned facts always belong to the existing or new Main owner.
+  if (!app.isPackaged) {
+    console.error('--mcp-connect 需要已安装的果铃产品入口；工程调试请使用原 MCP launcher。')
+    app.exit(1)
+  } else {
+    void runProductMcpBootstrap(process.argv.slice(1), { executable: process.execPath, cwd: process.cwd() })
+      .then(reply => { process.stdout.write(`${JSON.stringify(reply)}\n`); app.exit(0) })
+      .catch(error => { console.error('果铃连接未完成：', error instanceof Error ? error.message : String(error)); app.exit(1) })
+  }
+} else {
 
 if (!shouldShowApplicationWindows()) {
   BACKGROUND_E2E_CHROMIUM_SWITCHES.forEach((name) => {
@@ -37,6 +52,10 @@ let headlessLaunch: HeadlessMcpLaunch | null = null
 let launchError: unknown
 try { headlessLaunch = parseHeadlessMcpLaunch(process.argv) } catch (error) { launchError = error }
 const headless = process.argv.includes('--headless-mcp')
+// A background launch can acquire the normal GUI without replacing its Main/DocumentHost.
+let guiEnabled = !headless
+let guiInstalled = false
+let promoting: Promise<void> | undefined
 
 registerPrivilegedSchemes()
 
@@ -52,14 +71,17 @@ hostReady = new Promise((resolve, reject) => { resolveHostReady = resolve; rejec
 void hostReady.catch(() => undefined)
 let stopped = false
 let stopping: Promise<void> | undefined
+let quitRequested = false
+let context: { getMainWindow(): BrowserWindow | null; getRendererEntryUrl(): string | null; appState: AppState; headless: boolean }
 
 async function reportMcpReady(request: HeadlessMcpLaunch, ownership: 'owned' | 'attached'): Promise<void> {
   await hostReady
+  if (stopping || stopped) throw new Error('果铃宿主正在退出，请在退出完成后重新连接')
   const service = await externalMcpService(), info = await service.connectionInfo()
   const samePath = (left: string, right: string) => process.platform === 'win32'
     ? left.toLowerCase() === right.toLowerCase() : left === right
   const reply = { status: 'ready', ...info, token: await service.revealToken(), pid: process.pid,
-    profile: app.getPath('userData'), mode: headless ? 'headless' : 'gui', ownership,
+    profile: app.getPath('userData'), mode: guiEnabled ? 'gui' : 'headless', ownership,
     requestedWorkspace: request.workspace, workspaceMismatch: !samePath(info.workspace, request.workspace) }
   if (request.readyFile) await writeMcpLaunchReply(request.readyFile, reply)
   else if (request.readyJson) process.stdout.write(`${JSON.stringify(reply)}\n`)
@@ -72,10 +94,11 @@ async function reportMcpFailure(request: HeadlessMcpLaunch | null, error: unknow
   if (request?.readyFile) await writeMcpLaunchReply(request.readyFile, { status: 'failed', message }).catch(error => console.error('连接失败信息未能交接：', error))
 }
 
-/** The dedicated launcher owns this host. Disconnecting an MCP SDK client never calls it. */
+/** Explicit application exit preserves received work; disconnecting an MCP SDK client never calls it. */
 function stopHeadlessHost(): Promise<void> {
   return stopping ??= (async () => {
-    await closeExternalMcpService()
+    await Promise.all([executionDesktopService().then(execution => execution.shutdown()), closeExternalMcpService()])
+    await (await executionDesktopService()).events.flushPending()
     const host = documentHost()
     await Promise.all(host.registry.list().map(snapshot => host.registry.get(snapshot.documentId).drain()))
     await host.settleSaveObservations()
@@ -132,8 +155,28 @@ async function openMainWindow(): Promise<void> {
     result.window.on('session-end', () => lifecycle?.requestQuit())
     result.window.once('closed', () => {
       mainWindow = null
+      if (quitRequested) void stopHeadlessHost()
     })
   })
+}
+
+function installGui(): void {
+  if (guiInstalled) return
+  context.headless = false
+  lifecycle = installWindowLifecycle(() => mainWindow)
+  registerIpcHandlers(context)
+  guiInstalled = true
+  guiEnabled = true
+}
+
+/** Attach the mature editor to the already-live registry and history, once. */
+function promoteToGui(): Promise<void> {
+  return promoting ??= (async () => {
+    await hostReady
+    if (stopping || stopped) throw new Error('果铃宿主正在退出，未打开新的编辑窗口')
+    installGui()
+    await openMainWindow()
+  })().finally(() => { promoting = undefined })
 }
 
 app.on('second-instance', (_event, argv, workingDirectory) => {
@@ -144,8 +187,7 @@ app.on('second-instance', (_event, argv, workingDirectory) => {
     void reportMcpReady(request, 'attached').catch(error => reportMcpFailure(request, error))
     return
   }
-  if (headless) { console.error('此 profile 当前由后台 MCP 持有；请先正常停止该宿主再打开工作台。'); return }
-  void (async () => { appState.enqueueOpenFiles(await launchFileArguments(argv, workingDirectory, app.isPackaged)); await app.whenReady(); await openMainWindow() })().catch((error) => {
+  void (async () => { appState.enqueueOpenFiles(await launchFileArguments(argv, workingDirectory, app.isPackaged)); await promoteToGui() })().catch((error) => {
     console.error('恢复主窗口失败', error)
   })
 })
@@ -166,21 +208,22 @@ app
     }
 
     removeDiagnosticHandlers = diagnosticLog.installProcessHandlers()
-    if (!headless) lifecycle = installWindowLifecycle(() => mainWindow)
     // Every outbound request of the main process follows the system proxy (or PAC) from here on.
     installSystemProxy(session.defaultSession)
 
     installEditorProtocol(session.defaultSession)
     installHtmlPreviewProtocol(session.defaultSession)
     rendererEntryUrl = resolveRendererEntryUrl()
-    const context = {
+    context = {
       getMainWindow: () => mainWindow,
       getRendererEntryUrl: () => rendererEntryUrl,
       appState,
+      headless,
     }
     if (headlessLaunch) {
       configureHeadlessExternalMcp()
-      installWorkbenchToolServices({ ...context, headless: true })
+      // The service closures retain this same context so GUI promotion changes only their UI ports.
+      installWorkbenchToolServices(context)
       await bindHeadlessMcpWorkspace(headlessLaunch.workspace)
       const service = await externalMcpService()
       await service.configure({ enabled: true, ...(headlessLaunch.port ? { port: headlessLaunch.port } : {}),
@@ -192,7 +235,7 @@ app
       await reportMcpReady(headlessLaunch, 'owned')
       return
     }
-    registerIpcHandlers(context)
+    installGui()
     // Default on; an occupied port only shows in settings and never blocks the window.
     const externalReady = startExternalMcpService().catch(error => diagnosticLog.append({ source: 'main', message: '外部连接服务未能启动',
       details: { reason: error instanceof Error ? error.message : String(error) } }))
@@ -201,11 +244,6 @@ app
     await externalReady
     resolveHostReady()
 
-    app.on('activate', () => {
-      void openMainWindow().catch((error) => {
-        console.error('创建主窗口失败', error)
-      })
-    })
   })
   .catch((error) => {
     rejectHostReady(error)
@@ -224,7 +262,7 @@ app
   })
 
 app.on('window-all-closed', () => {
-  if (headless) return
+  if (!guiEnabled) return
   if (process.platform !== 'darwin') app.quit()
 })
 
@@ -232,13 +270,31 @@ app.on('will-quit', () => {
   lifecycle?.dispose()
   removeDiagnosticHandlers?.()
   removeDiagnosticHandlers = null
-  if (!headless) unregisterIpcHandlers()
+  if (guiInstalled) unregisterIpcHandlers()
+})
+
+app.on('activate', () => {
+  if (!singleInstanceLock) return
+  void promoteToGui().catch(error => console.error('创建主窗口失败', error))
+})
+
+app.on('before-quit', event => {
+  if (stopped || !singleInstanceLock) return
+  event.preventDefault()
+  const window = mainWindow
+  if (guiEnabled && window && !window.isDestroyed()) {
+    // Native app quit still passes through the existing renderer-input and document-save protection.
+    quitRequested = true
+    lifecycle?.requestQuit()
+    window.close()
+  } else void stopHeadlessHost()
 })
 
 if (headless) {
-  app.on('before-quit', event => { if (!stopped && singleInstanceLock) { event.preventDefault(); void stopHeadlessHost() } })
-  process.on('message', message => { if (singleInstanceLock && message && typeof message === 'object' && 'type' in message && message.type === 'mcp-stop') void stopHeadlessHost() })
-  if (process.connected) process.on('disconnect', () => { if (singleInstanceLock) void stopHeadlessHost() })
-  process.on('SIGINT', () => { if (singleInstanceLock) void stopHeadlessHost() })
-  process.on('SIGTERM', () => { if (singleInstanceLock) void stopHeadlessHost() })
+  process.on('message', message => { if (singleInstanceLock && message && typeof message === 'object' && 'type' in message && message.type === 'mcp-stop') app.quit() })
+  // Engineering launchers retain their owned-parent stop; a product bootstrap starts detached with no IPC.
+  if (process.connected) process.on('disconnect', () => { if (singleInstanceLock && !guiEnabled) void stopHeadlessHost() })
+  process.on('SIGINT', () => { if (singleInstanceLock) app.quit() })
+  process.on('SIGTERM', () => { if (singleInstanceLock) app.quit() })
+}
 }

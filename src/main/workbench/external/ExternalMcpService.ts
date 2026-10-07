@@ -3,7 +3,8 @@ import path from 'node:path'
 import { z } from 'zod'
 import type { DocumentRegistry } from '../../../core/documents/DocumentRegistry'
 import type { DocumentToolGateway } from '../../../core/tools/DocumentToolGateway'
-import { modelToolResult } from '../../../core/tools/modelToolResult'
+import { applicationEventFacts, committedFact, contentApplyFact, currentSave, modelToolResult,
+  operationFact, saveFact, serviceToolOutcome, toolFailed } from '../../../core/tools/modelToolResult'
 import { agentFileMutationNames, agentFileTools, isAgentFileTool, type AgentFileContext, type AgentFileMutationName,
   type AgentFileOutcome, type AgentFileToolName } from '../../../core/tools/AgentFileTools'
 import { createCourseFromHtmlInputSchema, createCourseFromHtmlTool } from '../../../core/tools/HtmlImportTools'
@@ -43,9 +44,13 @@ export interface ExternalMcpServiceOptions {
 }
 type ToolKind = 'gateway' | 'file' | 'course' | 'load' | 'service'
 interface HostTool { name: string; description: string; schema: Record<string, unknown>; read: boolean; label: string; kind: ToolKind }
-interface OperationSummary { status: 'applied' | 'unchanged' | 'completed' | 'failed'; documentId?: string; revision?: number; operationId?: string; message?: string }
+interface OperationSummary {
+  status: 'applied' | 'unchanged' | 'completed' | 'failed'; documentId?: string; revision?: number; operationId?: string; message?: string
+  commit?: string; usability?: string; delivery?: string
+  save?: { savedRevision: number; currentRevision: number; dirty: boolean; current: boolean }
+}
 interface Operation {
-  ticket: string; tool: string; label: string; digest: string; time: number
+  ticket: string; runId: string; tool: string; label: string; digest: string; time: number
   /** Retained only until the reply is known to have reached the client; a delivered reply is never replayed. */
   result?: Promise<ToolResult>
   summary?: OperationSummary
@@ -84,16 +89,17 @@ const record = (value: unknown): value is Record<string, unknown> => !!value && 
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
   : record(value) ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value
 const callDigest = (name: string, input: unknown) => createHash('sha256').update(JSON.stringify([name, canonical(input)])).digest('hex')
-const committed = (result: ToolResult) => result.kind === 'document-operation' && (result.result.status === 'applied' || result.result.status === 'unchanged')
-const successful = (result: ToolResult) => result.kind === 'read' || committed(result)
 const failure = (code: string, message: string): ToolResult => ({ kind: 'error', code, message })
-function summarize(result: ToolResult): OperationSummary {
-  if (result.kind === 'document-operation') {
-    const receipt = result.result
-    return { status: receipt.status === 'applied' || receipt.status === 'unchanged' ? receipt.status : 'failed', documentId: receipt.documentId,
-      operationId: receipt.operationId, ...('message' in receipt ? { message: receipt.message } : { revision: receipt.revision }) }
-  }
-  return result.kind === 'error' ? { status: 'failed', message: result.message } : { status: 'completed' }
+function summarize(name: string, result: ToolResult): OperationSummary {
+  const receipt = operationFact(name, result), apply = contentApplyFact(name, result), saved = saveFact(name, result)
+  const outcome = serviceToolOutcome(name, result)
+  return { status: receipt?.status === 'applied' || receipt?.status === 'unchanged' ? receipt.status : toolFailed(name, result) ? 'failed' : 'completed',
+    ...(receipt ? { documentId: receipt.documentId, operationId: receipt.operationId,
+      ...('revision' in receipt ? { revision: receipt.revision } : { message: receipt.message }) } : {}),
+    ...(result.kind === 'error' ? { message: result.message } : outcome ? { message: outcome.message } : {}),
+    ...(apply ? { commit: apply.commit, usability: apply.usability, delivery: apply.delivery } : {}),
+    ...(saved ? { save: { savedRevision: saved.savedRevision, currentRevision: saved.currentRevision,
+      dirty: saved.dirty, current: currentSave(saved) } } : {}) }
 }
 const workspaceName = (rootPath: string) => path.basename(rootPath) || rootPath
 
@@ -106,6 +112,8 @@ export class ExternalMcpService implements ResidentMcpHandler {
   private lifecycle: Promise<unknown> = Promise.resolve()
   private lastWorkspaceId?: string
   private readonly requests = new Set<Promise<unknown>>()
+  private sessionGeneration = 0
+  private detachCatalog?: () => void
   private readonly now: () => number
   constructor(private readonly options: ExternalMcpServiceOptions) { this.now = options.now ?? Date.now }
 
@@ -125,6 +133,9 @@ export class ExternalMcpService implements ResidentMcpHandler {
     let token: string
     try { token = await this.options.settings.token() }
     catch (cause) { this.state = 'failed'; this.message = `外部连接令牌不可用：${cause instanceof Error ? cause.message : String(cause)}`; return }
+    this.detachCatalog ??= this.options.gateway.subscribeCatalogChanges(runId => {
+      for (const session of this.sessions.values()) if (session.runId === runId) session.listChanged = true
+    })
     const started = await this.server.start(settings.port, token)
     this.state = started.state
     if (started.state !== 'running') this.message = started.message
@@ -158,22 +169,22 @@ export class ExternalMcpService implements ResidentMcpHandler {
     if (!session.stopped) { session.stopped = true; await this.stopRun(session.runId) }
     return this.status()
   }
-  /** Sessions whose calls have actually reached the app, for the close prompt. */
+  /** Only currently pending calls count as work, not idle long-lived connections. */
   activity(): { clientName: string; pendingCalls: number }[] {
-    return [...this.sessions.values()].filter(session => !session.stopped && (session.lastCallAt !== undefined || session.pending > 0))
+    return [...this.sessions.values()].filter(session => session.pending > 0)
       .map(session => ({ clientName: session.clientName, pendingCalls: session.pending }))
   }
   writableSessionsForDocument(documentId: string): string[] {
     const runs = new Set(this.options.gateway.writableRunIdsForDocument(documentId))
     return [...this.sessions.values()].filter(session => !session.stopped && runs.has(session.runId)).map(session => session.sessionId)
   }
-  /** Close/trash barrier: sessions lose every handle of their current run and must reopen documents by path. */
+  /** Close/trash stops only the affected document; the session's other documents keep their handles. */
   async stopForDocument(documentId: string): Promise<void> {
     await Promise.all(this.writableSessionsForDocument(documentId).map(async id => {
       const session = this.sessions.get(id)!
-      // If the space can no longer be bound, the session stops instead of keeping its old authority.
-      try { await this.bind(session, session.workspaceId) } catch { session.stopped = true; await this.stopRun(session.runId); return }
-      session.notices.push('用户在果铃中关闭或移走了你正在修改的文档；之前取得的文档句柄均已失效，如需继续请按路径重新打开。')
+      await this.options.gateway.stopRunDocument(session.runId, documentId)
+      session.listChanged = true
+      session.notices.push('用户在果铃中关闭或移走了你正在修改的一份文档；该文档的句柄已失效，其他文档可继续编辑。需要该文档时请按路径重新打开。')
     }))
   }
   /** Called inside ConversationStore's delete transaction: never read that store here. Sessions log into a new conversation next time. */
@@ -186,6 +197,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     this.state = 'disabled'; await this.server.stop(); await this.closeSessions()
     // Transport disposal is not completion of the received tool calls or their event/journal ACKs.
     await Promise.allSettled([...this.requests])
+    this.detachCatalog?.(); this.detachCatalog = undefined
   }) }
 
   /** Startup chooses a registered, already-authorized root; it grants no extra authority. */
@@ -208,6 +220,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
       pendingCalls: session.pending, stopped: session.stopped }
   }
   private async closeSessions(): Promise<void> {
+    this.sessionGeneration++
     const sessions = [...this.sessions.values()]
     this.sessions.clear()
     await Promise.allSettled(sessions.map(session => this.stopRun(session.runId)))
@@ -228,25 +241,45 @@ export class ExternalMcpService implements ResidentMcpHandler {
     const workspace = await this.options.conversations.readWorkspace(workspaceId)
     if (!workspace) throw new Error('工作空间不存在或已移除')
     const root = await this.options.workspaceRoot(workspace.rootPath), runId = randomUUID(), previous = session.runId
+    // Selecting the already-bound workspace does not revoke live document handles or replay facts.
+    if (previous) this.assertActive(session, previous)
+    if (session.workspaceId === workspaceId && session.workspaceRoot === root && previous) return
     // Same actor and file scope as a built-in task, so the shared catalog selection and Main's permission checks apply unchanged.
     await this.options.gateway.beginRun({ runId, actor: 'agent', documents: [], fileAccess: { permission: session.permission, workspaceRoot: root } })
+    if (previous) {
+      try { this.assertActive(session, previous) }
+      catch (cause) { await this.stopRun(runId); throw cause }
+    }
     if (session.workspaceId !== workspaceId) { session.conversation = undefined; session.conversationId = undefined; session.taskId = randomUUID() }
     Object.assign(session, { runId, workspaceId, workspaceRoot: root, workspaceName: workspaceName(root), listChanged: true })
+    session.children.clear()
     this.lastWorkspaceId = workspaceId
     if (previous) await this.stopRun(previous)
   }
 
-  async initialize(client: ResidentMcpClientInfo): Promise<{ sessionId: string; instructions: string }> {
+  initialize(client: ResidentMcpClientInfo): Promise<{ sessionId: string; instructions: string }> {
+    const pending = this.openSession(client, this.sessionGeneration)
+    this.requests.add(pending)
+    void pending.then(() => this.requests.delete(pending), () => this.requests.delete(pending))
+    return pending
+  }
+  private async openSession(client: ResidentMcpClientInfo, generation: number): Promise<{ sessionId: string; instructions: string }> {
+    if (this.state !== 'running') throw new McpProtocolError(-32001, '外部连接尚未启动或已停止')
     const settings = await this.options.settings.read()
     const session: Session = { sessionId: randomUUID(), clientName: client.title ?? client.name, permission: settings.permission,
       connectedAt: this.now(), pending: 0, stopped: false, workspaceId: '', workspaceName: '', workspaceRoot: '', runId: '', taskId: randomUUID(),
       operations: [], children: new Map(), notices: [], listChanged: false }
     await this.bind(session, await this.currentWorkspace())
+    // Revocation while initialization awaits disk/workspace facts must not leave a late, live run behind.
+    if (generation !== this.sessionGeneration || this.state !== 'running') {
+      await this.stopRun(session.runId)
+      throw new McpProtocolError(-32001, '外部连接已停止或更新，请重新连接')
+    }
     session.listChanged = false
     this.sessions.set(session.sessionId, session)
     return { sessionId: session.sessionId, instructions: [
       `已连接到正在运行的果铃。本会话绑定工作空间「${session.workspaceName}」（${session.workspaceRoot}），权限为「${permissionLabels[session.permission]}」，由果铃主进程执行。`,
-      '用 file.* 按路径在空间内打开、新建、读写文件与文档；打开后用返回的 target 句柄调用读取和编辑工具，需要更多工具时用 tools.load 展开。',
+      '用 file.* 按路径在空间内打开、新建、读写文件与文档；打开后用返回的 target 句柄调用读取和编辑工具。宿主按当前文档接入可用能力；tools.load 可用于手动浏览其他工具族。',
       'workspace.list / workspace.switch 查看和切换空间；workbench.state 只读查看用户当前打开的文档与选中内容。',
       '操作票据由果铃自动编号，不需要填写 ticket。若某次修改的回复没有收到，原样重发同一调用会直接返回原正式回执而不会重复执行；也可用 operation.recent 核对最近结果。',
       '果铃只记录收到的工具调用；你自己的对话、用量与磁盘操作不由果铃管理。',
@@ -255,6 +288,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
   terminate(sessionId: string): void {
     const session = this.sessions.get(sessionId)
     if (!session) return
+    session.stopped = true
     this.sessions.delete(sessionId)
     const stopping = this.stopRun(session.runId).catch(() => undefined)
     this.requests.add(stopping)
@@ -271,10 +305,11 @@ export class ExternalMcpService implements ResidentMcpHandler {
         ...(tool.read ? { annotations: { readOnlyHint: true } } : {}) })) }
     }
     if (call.method !== 'tools/call') throw new McpProtocolError(-32601, '不支持此 MCP 方法')
+    session.pending++; session.lastCallAt = this.now()
     const pending = this.callTool(session, call)
     this.requests.add(pending)
     let result: unknown
-    try { result = await pending } finally { this.requests.delete(pending) }
+    try { result = await pending } finally { session.pending--; this.requests.delete(pending) }
     if (session.listChanged) { session.listChanged = false; call.notify('notifications/tools/list_changed') }
     return result
   }
@@ -301,32 +336,31 @@ export class ExternalMcpService implements ResidentMcpHandler {
     if (!record(input)) throw new McpProtocolError(-32602, '工具 arguments 必须是对象')
     // Optional explicit replay identity is transport metadata, never part of a tool's input schema.
     const supplied = record(call.params._meta) ? call.params._meta['guoling/ticket'] : undefined
-    if (supplied !== undefined && (typeof supplied !== 'string' || !/^[A-Za-z0-9_.:-]{1,200}$/.test(supplied))) throw new McpProtocolError(-32602, 'ticket 无效；通常省略即可')
+    // Client correlation text is not the host's operation identity. Non-string metadata carries no identity.
+    const clientTicket = typeof supplied === 'string' && supplied.length > 0 ? supplied : undefined
     const tool = (await this.catalog(session)).find(item => item.name === name)
     if (!tool) return this.reply(session, failure('unknown-tool', '工具不存在，或在本会话的权限与已打开的文档下不可用。可先打开文档，或用 tools.load 展开工具族。'))
-    session.pending++; session.lastCallAt = this.now()
-    try {
-      if (tool.read) {
-        const ticket = randomUUID()
-        return this.reply(session, await this.traced(session, tool, ticket, input, () => this.execute(session, tool, ticket, input)), ticket, false, tool.name)
-      }
-      const digest = callDigest(tool.name, input)
-      // The previous identical call's reply never reached the client: answer with its receipt instead of executing again.
-      const undelivered = supplied === undefined ? [...session.operations].reverse()
-        .find(item => item.tool === tool.name && item.digest === digest && item.delivered === false && item.result) : undefined
-      if (undelivered) {
-        undelivered.delivered = undefined
-        this.track(undelivered, call.delivery)
-        return this.reply(session, await undelivered.result!, undelivered.ticket, true, tool.name)
-      }
-      const ticket = supplied ?? randomUUID()
-      const operation: Operation = { ticket, tool: tool.name, label: tool.label, digest, time: this.now() }
-      operation.result = this.traced(session, tool, ticket, input, () => this.execute(session, tool, ticket, input))
-        .then(result => { operation.summary = summarize(result); return result })
-      session.operations.push(operation)
-      this.track(operation, call.delivery)
-      return this.reply(session, await operation.result, ticket, false, tool.name)
-    } finally { session.pending-- }
+    if (tool.read) {
+      const ticket = randomUUID()
+      return this.reply(session, await this.traced(session, tool, ticket, input, () => this.execute(session, tool, ticket, input)), ticket, false, tool.name)
+    }
+    const digest = callDigest(tool.name, input)
+    // The previous identical call's reply never reached the client: answer with its receipt instead of executing again.
+    const undelivered = clientTicket === undefined ? [...session.operations].reverse()
+      .find(item => item.runId === session.runId && item.tool === tool.name && item.digest === digest && item.delivered === false && item.result) : undefined
+    if (undelivered) {
+      undelivered.delivered = undefined
+      this.track(undelivered, call.delivery)
+      return this.reply(session, await undelivered.result!, undelivered.ticket, true, tool.name)
+    }
+    const ticket = clientTicket === undefined ? randomUUID() : /^[A-Za-z0-9_.:-]{1,200}$/.test(clientTicket)
+      ? clientTicket : `client:${createHash('sha256').update(clientTicket).digest('hex')}`
+    const operation: Operation = { ticket, runId: session.runId, tool: tool.name, label: tool.label, digest, time: this.now() }
+    operation.result = this.traced(session, tool, ticket, input, () => this.execute(session, tool, ticket, input))
+      .then(result => { operation.summary = summarize(tool.name, result); return result })
+    session.operations.push(operation)
+    this.track(operation, call.delivery)
+    return this.reply(session, await operation.result, ticket, false, tool.name)
   }
   private track(operation: Operation, delivery: Promise<boolean>): void {
     void delivery.then(delivered => { operation.delivered = delivered; if (delivered) operation.result = undefined })
@@ -346,7 +380,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
       }
     }
     for (const notice of session.notices.splice(0)) content.push({ type: 'text', text: notice })
-    return { content, structuredContent: { result: publicResult, ...(ticket ? { ticket } : {}), ...(replayed ? { replayed: true } : {}) }, isError: !successful(result) || imageMissing }
+    return { content, structuredContent: { result: publicResult, ...(ticket ? { ticket } : {}), ...(replayed ? { replayed: true } : {}) }, isError: toolFailed(toolName, result) || imageMissing }
   }
   private assertActive(session: Session, runId: string): void {
     if (session.stopped || session.runId !== runId || !this.sessions.has(session.sessionId)) throw new Error('外部会话已停止或已切换，操作未提交')
@@ -354,6 +388,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
   private async execute(session: Session, tool: HostTool, ticket: string, input: unknown): Promise<ToolResult> {
     const runId = session.runId
     try {
+      this.assertActive(session, runId)
       if (tool.kind === 'service') return { kind: 'read', data: await this.service(session, tool.name, input) }
       if (tool.kind === 'load') {
         const families = loadToolsSchema.parse(input).families
@@ -363,6 +398,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
       }
       if (!tool.read && session.permission === 'ask' && tool.kind !== 'file' && tool.kind !== 'course'
         && !await this.options.confirm({ clientName: session.clientName, label: tool.label, reason: 'ask' })) return failure('approval-denied', '用户未批准此次修改，未执行。')
+      this.assertActive(session, runId)
       if (tool.kind === 'gateway') return await this.options.gateway.execute(runId, ticket, { name: tool.name, input })
       if (tool.kind === 'file') return await this.file(session, runId, ticket, tool, input, true)
       return await createCourseFromHtml(createCourseFromHtmlInputSchema.parse(input), { callId: ticket, permission: session.permission,
@@ -410,7 +446,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
     if (name === 'operation.recent') {
       const input = serviceSchemas['operation.recent'].parse(raw)
       return { operations: session.operations.slice(-(input.limit ?? 20)).reverse().map(item => ({ ticket: item.ticket, tool: item.tool, label: item.label,
-        time: new Date(item.time).toISOString(), ...(item.summary ?? { status: 'running' }),
+        runId: item.runId, time: new Date(item.time).toISOString(), ...(item.summary ?? { status: 'running' }),
         delivered: item.delivered === undefined ? 'pending' : item.delivered })) }
     }
     serviceSchemas['workbench.state'].parse(raw)
@@ -470,13 +506,15 @@ export class ExternalMcpService implements ResidentMcpHandler {
     await this.emit(session, ticket, 'tool', { toolName: tool.name, label: tool.label, status: 'running', text: '已收到外部工具请求。' }, 'append')
     await this.emit(session, ticket, 'tool', { status: 'running', text: '正在调用正式工具。' }, 'append')
     const result = await run()
-    await this.emit(session, ticket, 'tool', { toolName: tool.name, label: tool.label, status: successful(result) ? 'completed' : 'failed',
+    const receipt = committedFact(tool.name, result), saved = saveFact(tool.name, result)
+    const outcome = serviceToolOutcome(tool.name, result)
+    await this.emit(session, ticket, 'tool', { toolName: tool.name, label: tool.label, status: toolFailed(tool.name, result) ? 'failed' : 'completed',
       input: JSON.stringify(input), output: JSON.stringify(result),
-      ...(result.kind === 'error' ? { error: result.message } : {}),
-      ...(result.kind === 'document-operation' ? { documentId: result.result.documentId, operationId: result.result.operationId, applicationStatus: result.result.status,
-        ...('message' in result.result ? { error: result.result.message } : { revision: result.result.revision }) } : {}) })
-    if (result.kind === 'document-operation' && committed(result) && 'revision' in result.result) await this.emit(session, `${ticket}:commit`, 'document.commit', {
-      documentId: result.result.documentId, operationId: result.result.operationId, revision: result.result.revision, status: result.result.status as 'applied' | 'unchanged', label: '外部工具修改已应用' })
+      ...(result.kind === 'error' ? { error: result.message } : toolFailed(tool.name, result) && outcome ? { error: outcome.message } : {}),
+      ...applicationEventFacts(tool.name, result),
+      ...(saved ? { saveStatus: currentSave(saved) ? 'saved' : 'failed' } : {}) })
+    if (receipt) await this.emit(session, `${ticket}:commit`, 'document.commit', {
+      documentId: receipt.documentId, operationId: receipt.operationId, revision: receipt.revision, status: receipt.status, label: '外部工具修改已应用' })
     return result
   }
 }

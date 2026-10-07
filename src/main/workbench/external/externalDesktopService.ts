@@ -50,6 +50,7 @@ export function externalMcpService(): Promise<ExternalMcpService> {
 
 /** Lets Main ask the renderer for the user's foreground document and selection; returns a detach function. */
 export function attachExternalMcpWindow(getWindow: () => BrowserWindow | null): () => void {
+  headless = false
   const replies = new Map<string, (state: ExternalUiState | null) => void>()
   const receive = (event: Electron.IpcMainEvent, raw: unknown) => {
     const window = getWindow()
