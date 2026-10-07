@@ -57,8 +57,10 @@ it('public V10 presentation state actions preserve teacher content geometry back
     const observed = await readSurface()
     const sourceState = observed.presentation!.states.find(state => state.title === '教师已设状态')!
     expect(sourceState).toBeTruthy()
-    const update = async (input: Record<string, unknown>) => expect(await call('presentation.update', { target: pageHandle, ...input }))
-      .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+    const update = async (input: Record<string, unknown>) => {
+      const result = await call('presentation.update', { target: pageHandle, ...input })
+      expect(result, JSON.stringify({ action: input.action, result })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+    }
     await update({ action: 'add', title: '临时状态' })
     const added = (await readSurface()).presentation!.states.find(state => state.title === '临时状态')!
     expect(added).toMatchObject({ title: '临时状态', overrides: {} })
