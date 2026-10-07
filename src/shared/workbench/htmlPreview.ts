@@ -144,7 +144,7 @@ export interface HtmlPreviewLease {
 }
 
 export type HtmlPreviewEditOutcome =
-  | { status: 'applied'; revision: number; savedRevision: number | null; dirty: true; patch: { handle: string; kind: 'text' | 'image'; value: string; rewroteResponsive?: boolean; authoringRecords?: z.infer<typeof componentAuthorRecordsSchema> } }
+  | { status: 'applied'; revision: number; savedRevision: number | null; dirty: true; patch: { handle: string; kind: 'text' | 'image'; value: string; rewroteResponsive?: boolean; authoringRecords?: z.infer<typeof componentAuthorRecordsSchema>; authoringAnchor?: string } }
   | { status: 'unchanged'; revision: number }
   | { status: 'rejected'; reason: 'stale-epoch' | 'stale-revision' | 'stale-binding' | 'lease-released' | 'source-changed' | 'not-editable' | 'conflict' }
 
