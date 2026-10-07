@@ -5,7 +5,7 @@ import type { DocumentResources } from '../../shared/document/resources'
 import { documentResourcesSchema } from '../../shared/document/resources'
 import { applyComponentOperation, captureComponentOperation } from '../../core/drivers/courseV10Operations'
 import { flowDocumentEdits } from '../../core/components/document/flowDocumentProjection'
-import { owningContainer } from '../../shared/contracts/component-platform/project'
+import { owningContainer, resolveComponentPresentation } from '../../shared/contracts/component-platform/project'
 import type { CapturedCourseTarget } from '../documents/CourseV10DocumentBridge'
 import { prepareCourseObjectPaste, type CourseObjectClipboardSource } from '../composition/crossSurfaceCommands'
 import type { DocumentClipboardResourcePort } from './documentClipboard'
@@ -28,7 +28,7 @@ function sameOwner(left: CapturedCourseTarget, right: CapturedCourseTarget): boo
     && left.surfaceId === right.surfaceId && left.activeStateId === right.activeStateId
 }
 function preparedProject(target: CapturedCourseTarget, batches: readonly FlowPreparedDocumentResources[]): CourseProjectV10 {
-  let project = target.editingProject
+  let project = target.project
   for (const batch of batches) {
     if (!sameOwner(target, batch.target)) throw new Error('正文资源不属于当前捕获目标')
     project = applyComponentOperation(project, captureComponentOperation(project, [...batch.edits]))
@@ -48,7 +48,7 @@ function preparedTarget(target: CapturedCourseTarget, batches: readonly FlowPrep
     }
   }
   const project = preparedProject(base, batches)
-  return { ...base, project, editingProject: project, resources }
+  return { ...base, project, editingProject: resolveComponentPresentation(project, base.surfaceId, base.activeStateId), resources }
 }
 /** Copying a retained local object uses the same staged identity/files snapshot as its body. */
 export function captureFlowPreparedDocumentResources(target:CapturedCourseTarget,values:readonly FlowPreparedDocumentResources[]):CapturedCourseTarget {
@@ -103,7 +103,7 @@ export function createFlowDocumentResourcePort(input: {
 /** Resolves the editor's provisional object shell before the formal ACK is rendered. */
 export function projectFlowPreparedResources(target: CapturedCourseTarget, values: readonly FlowPreparedDocumentResources[]): CourseProjectV10 {
   const batches = values.filter(value => staged.has(value) && sameOwner(value.target, target))
-  return batches.length ? preparedProject(batches[0].target, batches) : target.editingProject
+  return batches.length ? preparedTarget(batches[0].target, batches).editingProject : target.editingProject
 }
 
 /** One formal operation contains every resource edit and the complete body projection. */
@@ -112,8 +112,11 @@ export function prepareFlowDocumentResourceTransaction(target: CapturedCourseTar
 } {
   const batches = preparedBatches(values), captured = batches[0]?.target ?? target
   if (!sameOwner(captured, target) || captured.surfaceId !== surfaceId) throw new Error('正文资源目标已变化，请回到原稿后继续')
-  const project = preparedProject(captured, batches)
-  return { target: captured, edits: [...batches.flatMap(batch => [...batch.edits]), ...flowDocumentEdits(project, surfaceId, blocks,captured.editingProject)], prepared: batches }
+  const project = batches.length ? preparedProject(captured, batches) : captured.editingProject
+  const edits = [...batches.flatMap(batch => [...batch.edits]), ...flowDocumentEdits(project, surfaceId, blocks, captured.editingProject)]
+  // Resource copy batches are canonical already. Flow has no persisted named states;
+  // the final capture must not reinterpret a complete clone as a presentation edit.
+  return { target: batches.length ? { ...captured, activeStateId: null, editingProject: captured.project } : captured, edits, prepared: batches }
 }
 export function releaseFlowPreparedResources(values: readonly FlowPreparedDocumentResources[]): void {
   values.forEach(value => staged.delete(value))
