@@ -1,13 +1,19 @@
-// @vitest-environment node
-import { expect, it } from 'vitest'
+// @vitest-environment jsdom
+import { expect, it, vi } from 'vitest'
 import { IDENTITY_MATRIX, frameCorners, transformPoint } from '../../src/core/components/geometry'
 import { FreeTransformGesture, LocalAuthorTransformGesture } from '../../src/renderer/componentPlatform/surfaces/slide/freeTransformGesture'
 import type { FreeObjectTarget } from '../../src/renderer/componentPlatform/surfaces/slide/targets'
 import type { ComponentAuthorSpot, CourseProjectV10 } from '../../src/shared/contracts/component-platform'
-import { authorSpotGeometryEdits } from '../../src/renderer/componentPlatform/surfaces/slide/authorSpots'
-import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
+import { authorSpotEdits, authorSpotGeometryEdits } from '../../src/renderer/componentPlatform/surfaces/slide/authorSpots'
+import { applyComponentOperation, captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
 import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
 import { DocumentSession } from '../../src/core/documents/DocumentSession'
+import { createDomAuthoring } from '../../src/components/web/authoringDom'
+import { registerRuntimeLightEditDocument, runtimeLightEditCommands } from '../../src/renderer/composition/runtime/runtimeLightEditCommands'
+import type { CapturedComponentOperation, CapturedCourseTarget, CourseV10DocumentBridge } from '../../src/renderer/documents/CourseV10DocumentBridge'
+import type { ComponentPlatformRuntime } from '../../src/player/components/ComponentPlatformRuntime'
+
+vi.mock('../../src/renderer/store/editorStore', () => ({ useEditorStore: { getState: () => ({ courseView: { activeDocumentId: 'doc' } }) } }))
 
 const target = (image = false): FreeObjectTarget => ({ instanceId: 'local-target', frame: { width: 200, height: 100, transform: [1, 0, 0, 1, 40, 30] },
   parentToSurface: [2, 0, 0, 2, 80, 50], parent: { kind: 'instance', instanceId: 'web' }, ancestors: ['web'], preserveAspectRatio: image })
@@ -70,4 +76,80 @@ it('commits the completed local gesture once through canonical History and undoe
   await session.execute({ documentId: 'doc', epoch: 'epoch', baseRevision: session.read().revision, operationId: 'undo', actor: 'human', mutation: { type: 'undo' } })
   const undone = session.read().model
   expect(undone.kind === 'course-v10' && undone.project.instances.web.data).toEqual(project.instances.web.data)
+})
+
+it('anchors one static same-looking object in its source transaction and binds only that object after cold serialization', () => {
+  const html = '<html><body><p>same</p><p>same</p></body></html>', from = html.lastIndexOf('same')
+  const project: CourseProjectV10 = { schemaVersion: 10, id: 'static-anchor', revision: 0, title: 'Static', assets: {},
+    definitions: { web: { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } } },
+    instances: { web: { id: 'web', definitionId: 'web', data: { html }, frame: { width: 400, height: 300, transform: [1, 0, 0, 1, 0, 0] } } },
+    surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['web'] }], global: { underlay: [], overlay: [] } }
+  const spot: ComponentAuthorSpot = { id: 'static-second', instanceId: 'web', mountGeneration: 1, authorKey: 'second-same', kind: 'text', bindingStatus: 'unresolved',
+    binding: { kind: 'dom', path: [{ tag: 'body', index: 0 }, { tag: 'p', index: 1 }], textIndex: 0, baseline: 'same' }, initialValue: 'same',
+    sourceRegion: { kind: 'data', path: ['html'], start: from, end: from + 4, encoding: 'html-text' },
+    localBounds: { width: 100, height: 30, transform: [1, 0, 0, 1, 0, 30] } }
+  const edits = authorSpotGeometryEdits(project, spot, { translateX: 42 })
+  const next = applyComponentOperation(project, captureComponentOperation(project, edits))
+  const driver = new CourseV10Driver(), cold = driver.load(driver.serialize({ kind: 'course-v10', project: next, resources: { assets: {}, components: {} } }))
+  if (cold.kind !== 'course-v10') throw new Error('Expected course')
+  const data = cold.project.instances.web.data as { html: string; authoringRecords: Record<string, any> }, frame = document.createElement('iframe')
+  document.body.append(frame)
+  const doc = frame.contentDocument!
+  doc.open(); doc.write(data.html); doc.close()
+  const runtime = createDomAuthoring(doc.documentElement, { records: () => data.authoringRecords })
+  const paragraphs = doc.querySelectorAll('p')
+  expect(paragraphs[0].style.getPropertyValue('translate')).toBe('')
+  expect(paragraphs[1].style.getPropertyValue('translate')).toContain('42px')
+  expect(paragraphs[0].textContent).toBe('same')
+  expect(paragraphs[1].textContent).toBe('same')
+  expect(paragraphs[1].getAttribute('data-cw-author-key')).toBe('second-same')
+  const changed = applyComponentOperation(cold.project, captureComponentOperation(cold.project, authorSpotEdits(cold.project,
+    { ...spot, binding: data.authoringRecords['second-same'].binding, bindingStatus: 'bound' }, 'Changed', { assets: {}, components: {} })))
+  const changedData = changed.instances.web.data as typeof data
+  expect(changedData.html).toBe(data.html)
+  data.authoringRecords = changedData.authoringRecords
+  runtime.refresh()
+  expect(paragraphs[0].textContent).toBe('same')
+  expect(paragraphs[1].textContent).toBe('Changed')
+  expect(paragraphs[1].style.getPropertyValue('translate')).toContain('42px')
+  runtime.dispose(); frame.remove()
+})
+
+it('prepares a frozen bound text reply from the current snapshot after remount without overwriting newer geometry or another object', async () => {
+  const binding = { kind: 'dom' as const, path: [{ tag: 'p', index: 0, attributes: { id: 'title' } }], baseline: 'Original' }
+  const project: CourseProjectV10 = { schemaVersion: 10, id: 'reply', revision: 0, title: 'Reply', assets: {},
+    definitions: { web: { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } } },
+    instances: { web: { id: 'web', definitionId: 'web', data: { html: '<p id="title">Original</p><p id="other">Other</p>',
+      authoringRecords: { title: { kind: 'text', binding, overrides: { text: 'Original', geometry: { translateX: 0 } } },
+        other: { kind: 'text', binding: { kind: 'dom', path: [{ tag: 'p', index: 1, attributes: { id: 'other' } }], baseline: 'Other' }, overrides: { text: 'Other' } } } },
+      frame: { width: 400, height: 300, transform: [1, 0, 0, 1, 0, 0] } } },
+    surfaces: [{ id: 'slide', kind: 'slide', title: 'Slide', childIds: ['web'] }], global: { underlay: [], overlay: [] } }
+  const driver = new CourseV10Driver(), session = await DocumentSession.create({ documentId: 'doc', epoch: 'epoch', binding: { kind: 'untitled', suggestedName: 'reply' },
+    model: { kind: 'course-v10', project, resources: { assets: {}, components: {} } } }, driver, { async append() {}, async save() { throw new Error('unused') } })
+  const current = (): CapturedCourseTarget => {
+    const model = session.read().model
+    if (model.kind !== 'course-v10') throw new Error('Expected course')
+    return { documentId: 'doc', epoch: 'epoch', project: model.project, editingProject: model.project, resources: model.resources,
+      surfaceId: 'slide', activeStateId: null, instanceId: 'web', instanceIds: ['web'] }
+  }
+  const bridge = { captureTarget: current,
+    capture: (edits: Parameters<typeof captureComponentOperation>[1], target: CapturedCourseTarget) => ({ ...captureComponentOperation(target.project, edits), documentId: 'doc', epoch: 'epoch' }),
+    editCaptured: async (captured: CapturedComponentOperation) => {
+      const { documentId, epoch, ...command } = captured
+      const result = await session.execute({ documentId, epoch, baseRevision: session.read().revision, operationId: 'reply', actor: 'human', mutation: { type: 'command', command } })
+      if (result.status !== 'applied') throw new Error(JSON.stringify(result))
+      return result
+    },
+  } as unknown as CourseV10DocumentBridge
+  const captured = current(), spot: ComponentAuthorSpot = { id: 'retired-mount', instanceId: 'web', mountGeneration: 1, kind: 'text', authorKey: 'title', binding,
+    bindingStatus: 'bound', initialValue: 'Original', localBounds: { width: 100, height: 30, transform: [1, 0, 0, 1, 0, 0] } }
+  const stop = registerRuntimeLightEditDocument('doc', { authorSpots: () => [], subscribeAuthorSpots: () => () => {} } as unknown as ComponentPlatformRuntime, bridge)
+  const human = captureComponentOperation(project, [{ type: 'data.set', instanceId: 'web', path: ['authoringRecords', 'title', 'overrides', 'geometry', 'translateX'], value: 25 },
+    { type: 'data.set', instanceId: 'web', path: ['authoringRecords', 'other', 'overrides', 'text'], value: 'Other object changed' }])
+  expect((await session.execute({ documentId: 'doc', epoch: 'epoch', baseRevision: 0, operationId: 'human', actor: 'human', mutation: { type: 'command', command: human } })).status).toBe('applied')
+  try {
+    expect(await runtimeLightEditCommands.setPageText({ target: captured, spot, bridge }, 'AI reply')).toEqual({ ok: true, changed: true })
+    expect(current().project.instances.web.data).toMatchObject({ authoringRecords: { title: { overrides: { text: 'AI reply', geometry: { translateX: 25 } } },
+      other: { overrides: { text: 'Other object changed' } } } })
+  } finally { stop() }
 })

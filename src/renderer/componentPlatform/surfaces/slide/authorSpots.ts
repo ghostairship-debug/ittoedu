@@ -1,17 +1,55 @@
 import type { ComponentAsset, ComponentAuthorGeometry, ComponentAuthorSpot, ComponentEdit, CourseProjectV10, JsonValue } from '../../../../shared/contracts/component-platform'
 import type { DocumentResources } from '../../../../shared/workbench/document'
-import { decodeHtmlEntities, scanHtmlSource } from '../../../../shared/html/htmlSourceScanner'
+import { decodeHtmlEntities, indexHtmlElements, scanHtmlSource } from '../../../../shared/html/htmlSourceScanner'
 import { componentSourceOwnerIsShared } from '../../../runtime/componentSourceAuthoring'
 import { prepareWebAuthoringRecordEdits } from '../../../../components/web/authoringRecords'
 
 function usesRecordOwner(project: CourseProjectV10, spot: ComponentAuthorSpot): boolean {
   if (!spot.authorKey || !spot.binding) return false
-  const property = spot.kind === 'text' ? 'text' : 'src'
   return !spot.sourceRegion && !spot.dataPath || authorSpotValue(project.instances[spot.instanceId]?.data,
-    ['authoringRecords', spot.authorKey, 'overrides', property]) !== undefined
+    ['authoringRecords', spot.authorKey]) !== undefined
 }
 
-export function authorSpotGeometryEdits(project: CourseProjectV10, spot: ComponentAuthorSpot, geometry: ComponentAuthorGeometry): ComponentEdit[] {
+export function authorSpotGeometryEdits(project: CourseProjectV10, spot: ComponentAuthorSpot, geometry: ComponentAuthorGeometry,
+  originalProject: CourseProjectV10 = project): ComponentEdit[] {
+  if (!Object.keys(geometry).length) return []
+  if (spot.geometry && spot.authorKey) {
+    const current = authorSpotValue(project.instances[spot.instanceId]?.data, ['authoringRecords', spot.authorKey, 'overrides', 'geometry'])
+    const values = current && typeof current === 'object' && !Array.isArray(current) ? current as ComponentAuthorGeometry : {}
+    const defaults: ComponentAuthorGeometry = { translateX: 0, translateY: 0, scaleX: 1, scaleY: 1, rotation: 0 }
+    for (const key of Object.keys(geometry) as (keyof ComponentAuthorGeometry)[]) {
+      if ((values[key] ?? defaults[key]) !== (spot.geometry.author[key] ?? defaults[key]))
+        throw new Error('此处作者几何已变化，本次手势已保留原结果，请重新操作')
+    }
+  }
+  // A static precise source address can receive software identity in the same transaction as its first geometry.
+  // Dynamic same-looking items still need their real semantic binding; a DOM index is not persistent identity.
+  if ((spot.bindingStatus === 'unresolved' || spot.bindingStatus === 'source-required') && spot.sourceRegion?.kind === 'data'
+    && spot.sourceRegion.path?.length === 1 && spot.sourceRegion.path[0] === 'html' && spot.authorKey && spot.binding) {
+    const instance = project.instances[spot.instanceId], data = instance?.data
+    const source = authorSpotValue(data, ['html']), original = authorSpotValue(originalProject.instances[spot.instanceId]?.data, ['html'])
+    if (typeof source !== 'string' || source !== original) throw new Error('精确HTML源地址已变化，本次手势未写入，请重新操作')
+    if (authorSpotValue(data, ['authoringRecords', spot.authorKey]) !== undefined) throw new Error('原作者记录尚未唯一绑定，本次手势未写入')
+    authorSpotEdit(project, spot, spot.initialValue)
+    const region = spot.sourceRegion, scan = scanHtmlSource(source)
+    const owner = indexHtmlElements(source, scan.tokens).elements.filter(element => spot.kind === 'image'
+      ? element.startTag.start <= region.start && element.startTag.end >= region.end
+      : element.content.start <= region.start && element.content.end >= region.end)
+      .sort((a, b) => (a.full.end - a.full.start) - (b.full.end - b.full.start))[0]
+    if (!owner || owner.name !== spot.binding.path.at(-1)?.tag) throw new Error('精确HTML父元素已变化，本次手势未写入')
+    const token = scan.tokens.find(token => token.kind === 'start-tag' && token.span.start === owner.startTag.start)!
+    const existing = token.attributes?.find(attribute => attribute.name === 'data-cw-author-key')
+    if (existing && existing.decodedValue !== spot.authorKey) throw new Error('HTML对象已有其他作者身份，本次手势未写入')
+    const key = spot.authorKey.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+    const at = owner.startTag.end - (source.slice(owner.startTag.end - 2, owner.startTag.end) === '/>' ? 2 : 1)
+    const html = existing ? source : source.slice(0, at) + ` data-cw-author-key="${key}"` + source.slice(at)
+    const binding = structuredClone(spot.binding), step = binding.path.at(-1)!
+    step.attributes = { ...step.attributes, 'data-cw-author-key': spot.authorKey }
+    const anchored = { ...project, instances: { ...project.instances, [spot.instanceId]: { ...instance,
+      data: { ...data as Record<string, JsonValue>, html } } } }
+    return [{ type: 'data.set', instanceId: spot.instanceId, path: ['html'], value: html },
+      ...prepareWebAuthoringRecordEdits(anchored, { ...spot, binding, bindingStatus: 'bound' }, { geometry })]
+  }
   return Object.keys(geometry).length ? prepareWebAuthoringRecordEdits(project, spot, { geometry }) : []
 }
 

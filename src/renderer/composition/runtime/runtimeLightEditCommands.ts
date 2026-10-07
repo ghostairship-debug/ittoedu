@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import type { ComponentAuthorSpot } from '../../../shared/contracts/component-platform'
+import { resolveComponentPresentation, type ComponentAuthorSpot } from '../../../shared/contracts/component-platform'
 import { documentTextContentSchema, plainDocumentText } from '../../../shared/document/content'
 import { replaceCourseInstanceText } from '../../../core/tools/ToolTargets'
 import type { ComponentPlatformRuntime } from '../../../player/components/ComponentPlatformRuntime'
@@ -63,16 +63,22 @@ export const runtimeLightEditCommands = {
     try {
       const { target, spot, bridge } = captured
       const entry = documents.get(target.documentId)
-      if (entry?.bridge !== bridge || !entry.world.authorSpots().some(value => value.id === spot.id && value.mountGeneration === spot.mountGeneration))
+      const stableBinding = spot.authorKey && spot.binding && spot.bindingStatus !== 'unresolved' && spot.bindingStatus !== 'source-required'
+      if (entry?.bridge !== bridge || !stableBinding && !entry.world.authorSpots().some(value => value.id === spot.id && value.mountGeneration === spot.mountGeneration))
         throw new Error('原运行内容已更换，文字草稿已保留')
+      const latest = bridge.captureTarget(target.documentId)
+      if (latest.epoch !== target.epoch || latest.project.id !== target.project.id) throw new Error('原文档会话已更换，文字草稿已保留')
+      const current: CapturedCourseTarget = { ...target, project: latest.project, resources: latest.resources,
+        editingProject: resolveComponentPresentation(latest.project, target.surfaceId, target.activeStateId) }
+      if (componentIsLocked(current.editingProject, spot.instanceId)) throw new Error('这个对象已锁定，文字草稿已保留')
       const rich = documentTextContentSchema.safeParse(spot.initialValue)
       const edits = rich.success && spot.dataPath && !spot.sourceRegion
-        ? [replaceCourseInstanceText({ kind: 'course-v10', project: target.editingProject, resources: target.resources },
+        ? [replaceCourseInstanceText({ kind: 'course-v10', project: current.editingProject, resources: current.resources },
           { kind: 'course-instance', surfaceId: target.surfaceId ?? '', instanceId: spot.instanceId, dataPath: spot.dataPath }, text)]
-        : authorSpotEdits(target.editingProject, spot, text, target.resources)
+        : authorSpotEdits(current.editingProject, spot, text, current.resources)
       const previous = rich.success ? plainDocumentText(rich.data) : spot.initialValue
       if (text === previous) return { ok: true, changed: false }
-      await bridge.editCaptured(bridge.capture(edits, target))
+      await bridge.editCaptured(bridge.capture(edits, current))
       return { ok: true, changed: true }
     } catch (error) { return { ok: false, reason: error instanceof Error ? error.message : '页面文字提交失败，草稿已保留' } }
   },
