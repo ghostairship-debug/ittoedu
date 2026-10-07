@@ -3,6 +3,24 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import { readUtf8File } from '../readUtf8File'
 
+/** Binary versions protect the original-format file identity at snapshot and rollback boundaries. */
+export async function readChangeReviewBinaryFile(filename: string) {
+  const [actual, entry] = await Promise.all([fs.realpath(filename), fs.lstat(filename)])
+  const same = process.platform === 'win32' ? actual.toLowerCase() === filename.toLowerCase() : actual === filename
+  if (!same || !entry.isFile() || entry.isSymbolicLink()) throw new Error('文件位置或类型已改变')
+  const file = await fs.open(filename, 'r')
+  try {
+    const before = await file.stat({ bigint: true }), bytes = await file.readFile()
+    const after = await file.stat({ bigint: true }), current = await fs.lstat(filename, { bigint: true })
+    const unchanged = (a: typeof before, b: typeof before) => a.dev === b.dev && a.ino === b.ino
+      && a.size === b.size && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs && a.mode === b.mode
+    if (!unchanged(before, after) || !unchanged(after, current) || current.isSymbolicLink()) throw new Error('读取期间文件已改变，请重新读取')
+    // FileArtifactService binds binary files with documentJournal's raw digest token.
+    return { bytes, version: createHash('sha256').update(bytes).digest('hex'), mode: Number(before.mode),
+      ...(before.ino ? { identity: `${before.dev}:${before.ino}` } : {}) }
+  } finally { await file.close() }
+}
+
 export interface ChangeReviewCapture {
   schemaVersion: 1
   runId: string
@@ -12,6 +30,7 @@ export interface ChangeReviewCapture {
   /** Deterministic empty text creation only; a generated archive has no predeclared byte identity. */
   expectedCreatedVersion?: string
   before: { kind: 'missing' } | { kind: 'file'; version: string; text: string; mode: number; blob?: { id: string; byteLength: number; characters: number } }
+    | { kind: 'binary'; version: string; mode: number; blob: { id: string; byteLength: number } }
     | { kind: 'document'; documentId: string; epoch: string; revision: number }
     | { kind: 'unavailable'; reason: string }
   after?: { version: string; identity?: string; mode?: number; documentId?: string; epoch?: string; revision?: number }
@@ -33,14 +52,25 @@ export class ChangeReviewStore {
         blob: { id, byteLength: current.byteLength, characters: current.total } }
     } finally { await file.close(); if (!success) await fs.rm(destination, { force: true }).catch(() => undefined) }
   }
+  async captureBinaryFile(filename: string): Promise<Extract<ChangeReviewCapture['before'], { kind: 'binary' }>> {
+    const current = await readChangeReviewBinaryFile(filename), id = randomUUID(), destination = this.beforePath(id)
+    await fs.mkdir(path.dirname(destination), { recursive: true })
+    const file = await fs.open(destination, 'wx', 0o600)
+    try { await file.writeFile(current.bytes); await file.sync() } finally { await file.close() }
+    return { kind: 'binary', version: current.version, mode: current.mode, blob: { id, byteLength: current.bytes.byteLength } }
+  }
   private beforePath(id: string): string {
     if (!/^[a-f0-9-]{36}$/.test(id)) throw new Error('修改前快照标识无效')
     return path.join(this.directory, 'before', `${id}.utf8`)
   }
-  async writeBefore(before: Extract<ChangeReviewCapture['before'], { kind: 'file' }>, destination: string): Promise<void> {
+  async writeBefore(before: Extract<ChangeReviewCapture['before'], { kind: 'file' | 'binary' }>, destination: string): Promise<void> {
     const output = await fs.open(destination, 'wx')
     try {
-      if (before.blob) {
+      if (before.kind === 'binary') {
+        const checked = await readChangeReviewBinaryFile(this.beforePath(before.blob.id))
+        if (checked.version !== before.version || checked.bytes.byteLength !== before.blob.byteLength) throw new Error('修改前原格式快照校验失败')
+        await output.writeFile(checked.bytes)
+      } else if (before.blob) {
         const checked = await readUtf8File(this.beforePath(before.blob.id), { limit: 0, onChunk: async bytes => { await output.writeFile(bytes) } })
         if (checked.version !== before.version || checked.byteLength !== before.blob.byteLength || checked.total !== before.blob.characters)
           throw new Error('修改前完整快照校验失败')

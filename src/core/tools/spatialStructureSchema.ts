@@ -1,3 +1,4 @@
+/** @deprecated Historical V9/CLI consumer only; current production uses Project V10 and the canonical Gateway. */
 import { z } from 'zod'
 import { spatialCameraPoseSchema, spatialPathDocumentSchema, spatialRelationDocumentSchema } from '../../shared/courseProjectSchema'
 
@@ -16,22 +17,4 @@ export const spatialStructureToolInputSchema = z.discriminatedUnion('operation',
   z.object({ operation: z.literal('add-relation'), relation }).strict(),
   z.object({ operation: z.literal('update-relation'), relation: relation.partial() }).strict(),
   z.object({ operation: z.literal('delete-relation') }).strict(),
-])
-
-
-const target = z.string().min(1).max(200)
-const operations = spatialStructureToolInputSchema.options
-/** Entity references in path/relation fields are run-bound object handles, resolved by the host. */
-export const spatialGatewayInputSchema = z.discriminatedUnion('operation', [
-  operations[0].extend({ target }),
-  operations[1].extend({ target }),
-  operations[2].extend({ target }),
-  operations[3].extend({ target }),
-  operations[4].extend({ target, surface: target }),
-  operations[5].extend({ target }),
-  operations[6].extend({ target }),
-  operations[7].extend({ target }),
-  operations[8].extend({ target }),
-  operations[9].extend({ target }),
-  operations[10].extend({ target }),
 ])

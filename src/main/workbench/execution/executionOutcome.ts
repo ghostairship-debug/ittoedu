@@ -1,102 +1,25 @@
 import type { ExecutionRunRecord, ExecutionToolRecord } from '../../../shared/workbench/execution'
 import type { ToolResult } from '../../../shared/workbench/tools'
+import type { DocumentToolGateway } from '../../../core/tools/DocumentToolGateway'
 import { USER_QUESTION_TOOL } from '../../../shared/workbench/userQuestion'
 import { agentFileMutationNames } from '../../../core/tools/AgentFileTools'
-import { committedFact, contentApplyFact, currentSave, knownApplication, operationFact, saveFact } from './executionToolFacts'
+import { committedFact, contentApplyFact, currentSave, knownApplication, operationFact, saveFact, serviceToolOutcome, toolFailed } from '../../../core/tools/modelToolResult'
 
 export const committed = (result?: ToolResult): result is Extract<ToolResult, { kind: 'document-operation' }> =>
   result?.kind === 'document-operation' && (result.result.status === 'applied' || result.result.status === 'unchanged')
 
-export const fileCreated = (name: string, result?: ToolResult): boolean => name === 'file.create' && result?.kind === 'read'
+export const fileCreated = (name: string, result?: ToolResult): boolean => (name === 'file.create'
+  || name === 'course.importPptx' && serviceToolOutcome(name, result)?.status === 'saved') && result?.kind === 'read'
   && !!result.data && typeof result.data === 'object'
   && (result.data as { operation?: { status?: unknown } }).operation?.status === 'success'
 
-export interface ServiceToolOutcome { status: 'failed' | 'unknown' | 'pending' | 'stopped' | 'saved' | 'generated' | 'written'; message: string }
+export { serviceToolOutcome, toolFailed, type ServiceToolOutcome } from '../../../core/tools/modelToolResult'
 const fileMutations = new Set<string>(agentFileMutationNames)
 
 export function persistedToolWork(name: string, result?: ToolResult): boolean {
   const status = serviceToolOutcome(name, result)?.status
   return knownApplication(name, result) || fileCreated(name, result) || status === 'saved' || status === 'written'
 }
-
-/** Only tools whose read receipt is itself a service job use its status for task settlement. */
-export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceToolOutcome | null => {
-  if (name === 'html.import' && result?.kind === 'error' && result.code === 'html-import-cancelled')
-    return { status: 'stopped', message: result.message }
-  if (result?.kind !== 'read' || !result.data || typeof result.data !== 'object') return null
-  const data = result.data as Record<string, unknown>
-  const apply = contentApplyFact(name, result)
-  if (apply) {
-    const diagnostic = apply.diagnostics.find(item => item.level === 'error')?.message
-    if (apply.commit === 'unknown') return { status: 'unknown', message: diagnostic ?? '内容提交结果未知；请查询原操作回执，不要重放' }
-    if (apply.commit === 'not_committed') return { status: 'failed', message: diagnostic ?? '内容修改未提交' }
-    if (apply.usability === 'unusable' || apply.usability === 'partial')
-      return { status: 'failed', message: diagnostic ?? (apply.usability === 'unusable' ? '内容已提交，但当前不能使用' : '内容已提交，仍有局部问题待修复') }
-  }
-  if (name === 'course.createFromHtml') {
-    if (data.status === 'saved' && data.saved === true) return { status: 'saved', message: 'HTML 课件已创建并保存' }
-    if (data.status === 'imported') return { status: 'failed', message: typeof data.saveError === 'string' ? data.saveError : 'HTML 已导入，保存尚未成功' }
-  }
-  if ((name === 'office.create' || name === 'office.edit') && data.status === 'saved' && data.saved === true)
-    return { status: 'saved', message: 'Office 文件已保存' }
-  if (fileMutations.has(name) && data.operation && typeof data.operation === 'object') {
-    const operation = data.operation as { status?: unknown; items?: { error?: { message?: string } }[] }
-    if (operation.status === 'failed' || operation.status === 'cancelled' || operation.status === 'partial')
-      return { status: 'failed', message: operation.items?.find(item => item.error?.message)?.error?.message ?? '文件整理未完整成功' }
-  }
-  if (fileMutations.has(name) && data.documentResult && typeof data.documentResult === 'object') {
-    const document = data.documentResult as { status?: unknown; message?: unknown }
-    if (document.status !== 'applied' && document.status !== 'unchanged')
-      return { status: 'failed', message: typeof document.message === 'string' ? document.message : '文件文档事务未提交' }
-  }
-  const saved = saveFact(name, result)
-  if (saved) return { status: 'saved', message: currentSave(saved) ? '文件已保存' : '文件已保存到原版本，期间的新修改仍未保存' }
-  if (name === 'file.save' && data.status === 'saved') return { status: 'saved', message: data.dirty === true ? '文件已保存到原版本，期间的新修改仍未保存' : '文件已保存' }
-  if (name === 'project.save') return { status: 'failed', message: typeof data.reason === 'string' ? data.reason : '当前课件保存尚未确认' }
-  if (name === 'artifact.save') {
-    if (data.status === 'written') return { status: 'written', message: '作业成果已保存为新文件' }
-    if (data.status === 'unknown') return { status: 'unknown', message: '成果交付回执未知，请核对目标文件，不要重试同一操作' }
-    if (data.status === 'rejected' || data.status === 'conflict' || data.status === 'stopped') return { status: 'failed', message: typeof data.message === 'string' ? data.message : '成果未保存' }
-  }
-  if (name === 'document.export' && data.status === 'generated') return { status: 'generated', message: '导出内容已生成，尚未写入文件' }
-  if (name === 'document.export' && data.status === 'written') return { status: 'written', message: '导出文件已写入' }
-  if (name === 'build.compile' && data.ok === false) return { status: 'failed', message: typeof data.message === 'string' ? data.message : '构建语法编译未通过' }
-  if (name === 'build.check' && (data.status === 'failed' || data.status === 'cancelled')) {
-    return { status: 'failed', message: data.status === 'failed' ? '构建检查未通过，请读取构建日志' : '构建检查已取消' }
-  }
-  if (name === 'web.search' || name === 'web.open' || name === 'mcp.discover' || name === 'mcp.invoke'
-    || name === 'media.start' || name === 'compute.run' || name === 'delegate.start'
-    || name === 'image.search' || name === 'image.preview' || name === 'image.fetch' || name === 'asset.search'
-    || name === 'asset.use' || name === 'asset.save') {
-    const message = typeof data.reason === 'string' ? data.reason.slice(0, 240) : '外部能力未返回可用成果'
-    if (data.status === 'unknown') return { status: 'unknown', message }
-    if (name === 'compute.run' && (data.status === 'preparing' || data.status === 'running'))
-      return { status: 'pending', message: '受限计算作业仍在运行，请等待并读取成果' }
-    if (name === 'delegate.start' && (data.status === 'preparing' || data.status === 'running' || data.status === 'ready'))
-      return { status: 'pending', message: '外部委派须等待并回读封存成果' }
-    if (data.status === 'not-configured' || data.status === 'rejected' || data.status === 'failed'
-      || data.status === 'stopped' || data.status === 'unconfigured' || data.status === 'access-required' || data.status === 'needs-material-reader'
-      || (name === 'compute.run' || name === 'delegate.start') && (data.status === 'cancelled' || data.status === 'unapplied'))
-      return { status: 'failed', message }
-  }
-  if (name === 'image.generate' || name === 'image.edit') {
-    const failure = data.failure && typeof data.failure === 'object' ? data.failure as Record<string, unknown> : null
-    const message = typeof failure?.message === 'string' && failure.message.trim() ? failure.message.slice(0, 240) : undefined
-    // Stopping after dispatch leaves the provider outcome and charge unknown.
-    // The user-facing stop flag must not authorize a fresh paid call ID.
-    if (data.status === 'unknown' || failure?.outcome === 'unknown') return { status: 'unknown', message: message ?? '图片请求结果未知，未自动重试' }
-    if (data.stopped === true) return { status: 'stopped', message: message ?? '图片任务已停止，成果尚未应用' }
-    if (data.status === 'failed') return { status: 'failed', message: message ?? '图片请求失败，未得到可应用成果' }
-    if (data.status === 'stopped' || data.status === 'unapplied') return { status: 'stopped', message: message ?? '图片任务已停止，成果尚未应用' }
-    if (data.status === 'preparing' || data.status === 'running') return { status: 'pending', message: '图片作业仍在运行，请等待并读取成果' }
-  }
-  return null
-}
-
-export const toolFailed = (name: string, result?: ToolResult) => result?.kind === 'error' ||
-  result?.kind === 'document-operation' && !committed(result) ||
-  name === 'project.save' && !!saveFact(name, result) && !currentSave(saveFact(name, result)) ||
-  ['failed', 'unknown', 'pending', 'stopped'].includes(serviceToolOutcome(name, result)?.status ?? '')
 
 /** Purpose describes an optional read, never authority or an exception for side effects. */
 function optionalObservationFailure(tool: ExecutionToolRecord): boolean {
@@ -107,6 +30,25 @@ function optionalObservationFailure(tool: ExecutionToolRecord): boolean {
   return tool.result?.kind === 'error' && ['observation-failed', 'service-unavailable', 'html-action-failed'].includes(tool.result.code)
 }
 const failedTool = (tool: ExecutionToolRecord) => !!tool.observationFailure || toolFailed(tool.call.name, tool.result)
+
+/** Main's current settlement view; never changes or replaces the original receipt. */
+export type SettledExecutionTool = ExecutionToolRecord & {
+  currentContentVerification?: { sourceDocumentId: string;
+    observation: Awaited<ReturnType<DocumentToolGateway['verifyContentDiagnostics']>> }
+}
+export function currentContentRepaired(tool: SettledExecutionTool): boolean {
+  const apply = contentApplyFact(tool.call.name, tool.result), receipt = committedFact(tool.call.name, tool.result)
+  const verified = tool.currentContentVerification
+  if (!apply || !receipt || tool.observationFailure || !verified || verified.sourceDocumentId !== receipt.documentId
+    || !verified.observation.current || !['partial', 'unusable'].includes(apply.usability)) return false
+  const diagnostics = apply.diagnostics.filter(item => item.level !== 'info')
+  return diagnostics.length > 0 && verified.observation.results.length === diagnostics.length
+    && diagnostics.every((diagnostic, index) => {
+      const result = verified.observation.results[index]!
+      return result.state === 'resolved' && result.code === diagnostic.code
+        && result.instanceId === diagnostic.instanceId && result.reference === diagnostic.reference
+    })
+}
 
 const pendingJob = (tool: ExecutionToolRecord): { kind: 'image' | 'compute' | 'delegation'; id: string } | null => {
   if (serviceToolOutcome(tool.call.name, tool.result)?.status !== 'pending' || tool.result?.kind !== 'read') return null
@@ -170,6 +112,25 @@ function sameObservedTarget(failed: ExecutionToolRecord, later: ExecutionToolRec
   return !!failed.effectTargets?.length && !!later.effectTargets?.length
     && JSON.stringify(stable(failed.effectTargets)) === JSON.stringify(stable(later.effectTargets))
 }
+/** Correcting a read cursor changes no work. A successful reread must still identify the same source. */
+function sameReadSource(failed: ExecutionToolRecord, later: ExecutionToolRecord): boolean {
+  if (failed.call.name !== 'file.read' || later.call.name !== 'file.read' || origin(failed) !== origin(later)
+    || later.state !== 'returned' || later.result?.kind !== 'read' || failedTool(later)) return false
+  const input = (tool: ExecutionToolRecord) => tool.call.input && typeof tool.call.input === 'object'
+    ? tool.call.input as { path?: unknown } : null
+  const source = input(failed)?.path
+  return typeof source === 'string' && source === input(later)?.path
+}
+/** These planning errors reject content before commit. A later model turn may
+ * correct its contents while keeping the same formal write scope. */
+function correctedRejectedContent(failed: ExecutionToolRecord, later: ExecutionToolRecord): boolean {
+  return failed.result?.kind === 'error' && (failed.result.code === 'read-basis-changed'
+      || failed.call.name === 'text.replace' && failed.result.code === 'invalid-content')
+    && failed.requestId !== later.requestId && failed.call.name === later.call.name
+    && !!failed.effectTargets?.length && !!later.effectTargets?.length
+    && JSON.stringify(stable(failed.effectTargets)) === JSON.stringify(stable(later.effectTargets))
+    && later.state === 'returned' && !failedTool(later) && knownApplication(later.call.name, later.result)
+}
 const delivered = (tool: ExecutionToolRecord) => !failedTool(tool)
   && (knownApplication(tool.call.name, tool.result) || fileCreated(tool.call.name, tool.result)
     || tool.result?.kind === 'read' && (tool.call.name === 'file.read' || tool.call.name === 'material.read'
@@ -206,7 +167,7 @@ function recoveredDeliveryFailures(record: ExecutionRunRecord): Set<ExecutionToo
     if (!parentDocument && tool.call.name === 'file.save' && tool.result?.kind === 'error'
       && tool.result.code === 'invalid-target' && input.destination === undefined && typeof input.target === 'string')
       parentDocument = filePaths.get(handleKey(input.target))
-    if ((tool.call.name === 'file.open' || tool.call.name === 'file.create') && typeof data?.documentId === 'string' && typeof data.target === 'string')
+    if ((tool.call.name === 'file.open' || fileCreated(tool.call.name, tool.result)) && typeof data?.documentId === 'string' && typeof data.target === 'string')
       handles.set(handleKey(data.target), data.documentId)
     if (tool.state === 'returned' && (tool.call.name === 'file.open' || fileCreated(tool.call.name, tool.result))
       && typeof data?.documentId === 'string' && typeof data.path === 'string')
@@ -246,12 +207,13 @@ function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord
   }
   return record.tools.filter((tool, index) => {
     // An unanswered or malformed question changed nothing; it is not an unfinished document operation.
-    if (tool.call.name === USER_QUESTION_TOOL) return false
+    if (tool.call.name === USER_QUESTION_TOOL || tool.call.name === 'task.note' || tool.call.name === 'task.finish') return false
     if (tool.state !== 'returned') return true
     const saved = saveFact(tool.call.name, tool.result)
     const wrongProjectSave = tool.call.name === 'project.save' && saved
       && (!matchesSaveBinding(record, saved) || tool.effectTargets?.length === 1 && tool.effectTargets[0]!.documentId !== saved.documentId)
     if (!failedTool(tool) && !wrongProjectSave) return false
+    if (currentContentRepaired(tool as SettledExecutionTool)) return false
     // A modification the user declined is the user's decision, not an unfinished operation.
     if (tool.result?.kind === 'error' && tool.result.code === 'user-denied') return false
     const pending = pendingJob(tool)
@@ -262,6 +224,8 @@ function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord
     if (tool.observationFailure?.outcome === 'unknown' || serviceToolOutcome(tool.call.name, tool.result)?.status === 'unknown'
       || tool.result?.kind === 'error' && /outcome-unknown/.test(tool.result.code)) return true
     if (record.tools.slice(index + 1).some(later => sameObservedTarget(tool, later))) return false
+    if (record.tools.slice(index + 1).some(later => sameReadSource(tool, later))) return false
+    if (record.tools.slice(index + 1).some(later => correctedRejectedContent(tool, later))) return false
     if (optionalObservationFailure(tool)) return false
     if (resolvedDelivery.has(tool)) return false
     if (record.tools.slice(index + 1).some(later => (requestKey(later) === requestKey(tool) || sameIntendedEdit(tool, later))
@@ -345,12 +309,19 @@ export function hasUnresolvedToolFailure(record: ExecutionRunRecord): boolean {
 
 /** Only receipt-backed facts are summarized; scratch cleanup is not a new task failure. */
 export function runEndSummary(record: ExecutionRunRecord): string | undefined {
+  const noteProblems = record.tools.filter(tool => tool.call.name === 'task.note').flatMap(tool => {
+    if (tool.result?.kind === 'error') return [tool.result.message]
+    const diagnostics = tool.result?.kind === 'read' && tool.result.data && typeof tool.result.data === 'object'
+      ? (tool.result.data as { diagnostics?: unknown }).diagnostics : null
+    return Array.isArray(diagnostics) ? diagnostics.filter((item): item is string => typeof item === 'string') : []
+  })
+  const noteWarning = noteProblems.length ? '工作笔记诊断：' + [...new Set(noteProblems)].join('；') : undefined
   const diagnosticFailures = record.tools.filter((tool, index) => optionalObservationFailure(tool)
     && !record.tools.slice(index + 1).some(later => sameObservedTarget(tool, later)))
   const diagnosticWarning = diagnosticFailures.length ? '可选画面诊断未完成，相关视觉结果未验证：'
     + [...new Set(diagnosticFailures.map(tool => tool.observationFailure?.message
       ?? (tool.result?.kind === 'error' ? tool.result.message : '画面不可用')))].join('；') : undefined
-  if (record.status === 'completed') return [record.failure?.message, diagnosticWarning].filter(Boolean).join('；') || undefined
+  if (record.status === 'completed') return [record.failure?.message, diagnosticWarning, noteWarning].filter(Boolean).join('；') || undefined
   const parts: string[] = []
   if (record.status === 'stopped') parts.push('任务已停止')
   else if (record.failure?.message) parts.push(record.failure.message)
@@ -366,13 +337,19 @@ export function runEndSummary(record: ExecutionRunRecord): string | undefined {
     && tool.result?.kind === 'document-operation' && tool.result.result.status === 'applied').length
   if (directApplied) parts.push(`已保留 ${directApplied} 项正式文档修改`)
   if (diagnosticWarning) parts.push(diagnosticWarning)
+  if (noteWarning) parts.push(noteWarning)
   if (importApplied) parts.push(`已正式导入 ${importApplied} 项构建成果`)
   const createdFiles = record.tools.filter(tool => fileCreated(tool.call.name, tool.result)).length
   if (createdFiles) parts.push(`已创建 ${createdFiles} 个文件`)
   const fileFacts = newFileDeliveryFacts(record)
   const unsaved = fileFacts.filter(unconfirmedSave)
   if (unsaved.length) parts.push(`新文件的修改尚未确认保存：${unsaved.map(fact => `${fact.label}（文档版本 ${fact.revision}）`).join('、')}；可恢复状态不等于目标文件已写盘`)
-  const scaffolds = fileFacts.filter(fact => fact.revision === null && /\.h5lesson$/i.test(fact.label))
+  const importedDocuments = new Set(record.tools.filter(tool => tool.call.name === 'course.importPptx'
+    && fileCreated(tool.call.name, tool.result)).flatMap(tool => {
+      const data = tool.result?.kind === 'read' ? tool.result.data as { documentId?: unknown } : undefined
+      return typeof data?.documentId === 'string' ? [data.documentId] : []
+    }))
+  const scaffolds = fileFacts.filter(fact => fact.revision === null && /\.h5lesson$/i.test(fact.label) && !importedDocuments.has(fact.documentId))
   if (scaffolds.length) parts.push(`仅有创建回执、未见课件内容提交：${scaffolds.map(fact => fact.label).join('、')}`)
   const savedArtifacts = record.tools.filter(tool => tool.call.name === 'artifact.save'
     && serviceToolOutcome(tool.call.name, tool.result)?.status === 'written').length

@@ -9,14 +9,14 @@ export const fileSaveInputSchema = z.object({
 
 export const documentExportInputSchema = z.object({
   target: z.string().min(1).max(200),
-  format: z.enum(['html-offline', 'html-online', 'web-package']),
+  format: z.enum(['html-offline', 'html-online', 'web-package', 'pptx', 'pdf', 'docx']),
   destination: z.string().min(1).max(1024).optional(),
 }).strict()
 
 export const documentDeliveryTools = [
   { name: 'file.save' as const, description: '保存已打开文档的当前正式内容。target 使用宿主返回的文档短句柄，destination 仅用于另存为。返回确切保存版本与脏状态。', inputSchema: fileSaveInputSchema,
     manual: { label: '保存文件', group: 'edit' as const, targetKinds: ['document'] as const } },
-  { name: 'document.export' as const, description: '将已授权的课件文档导出为离线单 HTML、在线单 HTML 或网页包，返回生成与写盘的真实状态。Project V10 使用同一 Published V3 输出。同任务同文档的既有导出未被修改时可原位更新；其他同名文件不覆盖，不需先删除旧文件。', inputSchema: documentExportInputSchema,
+  { name: 'document.export' as const, description: '将已授权课件的当前内容导出为离线单 HTML、在线单 HTML、网页包、PPTX、PDF 或 Flow 讲义 DOCX，消费与人工导出相同的 V10 格式生产器。DOCX 为每份 Flow 自动命名；静态格式保留可映射内容并报告互动或对象差异。返回 generated 或 written 的真实状态。同任务同文档的既有导出未被修改时可原位更新，其他同名文件不覆盖。', inputSchema: documentExportInputSchema,
     manual: { label: '导出文档', group: 'edit' as const, targetKinds: ['document'] as const } },
 ]
 
@@ -40,8 +40,8 @@ export async function executeDocumentDeliveryTool(
   const parsed = name === 'file.save' ? fileSaveInputSchema.safeParse(raw) : documentExportInputSchema.safeParse(raw)
   if (!parsed.success) return { kind: 'error', code: 'invalid-input',
     message: name === 'document.export' && raw && typeof raw === 'object' && 'format' in raw
-      && !['html-offline', 'html-online', 'web-package'].includes(String(raw.format))
-      ? 'document.export 当前仅支持 html-offline、html-online、web-package；PPTX、PDF、DOCX 请使用现有人工导出入口。'
+      && !['html-offline', 'html-online', 'web-package', 'pptx', 'pdf', 'docx'].includes(String(raw.format))
+      ? 'document.export 支持 html-offline、html-online、web-package、pptx、pdf、docx；DOCX 仅导出 Flow 讲义。'
       : '保存或导出参数无效：' + parsed.error.issues.map(issue => issue.message).join('；') }
   const existing = await service.lookup({ runId: context.runId, operationId: context.operationId, requestDigest: context.requestDigest })
   if (existing) return documentDeliveryReceiptResult(existing)

@@ -1,0 +1,137 @@
+
+ RUN  v4.1.10 D:/果铃并行/20261007-content-revision/e
+
+ ❯ tests/unit/productFollowup/T08/sourceResourceConsumer.test.ts (1 test | 1 failed) 5453ms
+   × an actual compiled source realm resolves an assetId without optional bindings and only its real image consumer requests the URL 5452ms
+ ❯ tests/unit/productFollowup/T08/alphaTextRoundTrip.test.ts (1 test | 1 failed) 379ms
+   × half-transparent authored HTML text keeps alpha through V10 archive and the actual professional Player renderer 376ms
+ ❯ tests/integration/productFollowup/T07/currentSourceInputs.test.ts (2 tests | 1 failed) 422ms
+   × software-produced long V10 object paths remain readable and editable without caller-owned IDs 101ms
+ ❯ tests/integration/productFollowup/T09/imageCurrentV10Target.test.ts (0 test)
+ ❯ tests/integration/productFollowup/T09/compositeImageContinuation.test.ts (2 tests | 2 failed) 389ms
+   × a real existing-chart-update and new explanation survive interrupted embedding; the same task only finishes the missing insertion 247ms
+   × a real table-conversion and new explanation survive interrupted embedding; the same task only finishes the missing insertion 140ms
+ ❯ tests/integration/productFollowup/T01/boundCapabilitiesAndBasis.test.ts (7 tests | 2 failed) 2392ms
+   × the actual rich card reads teacher material in the same task, keeps dialogue out of the body, and applies explicit content without model-owned targets 201ms
+   × a card query with a real read tool returns progress and explanation without any body transaction 194ms
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/productFollowup/T09/imageCurrentV10Target.test.ts [ tests/integration/productFollowup/T09/imageCurrentV10Target.test.ts ]
+Error: Cannot find module '../../../../src/components/image/adapters' imported from D:/果铃并行/20261007-content-revision/e/tests/integration/productFollowup/T09/imageCurrentV10Target.test.ts
+ ❯ tests/integration/productFollowup/T09/imageCurrentV10Target.test.ts:17:1
+     15| import { createBlankCourseProjectV10 } from '../../../../src/core/cour…
+     16| import { createImageData, imageDataSchema } from '../../../../src/comp…
+     17| import { IMAGE_DEFINITION } from '../../../../src/components/image/ada…
+       | ^
+     18| import { CourseV10DocumentBridge } from '../../../../src/renderer/docu…
+     19| import type { DocumentHostAPI } from '../../../../src/shared/workbench…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/8]⎯
+
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/productFollowup/T01/boundCapabilitiesAndBasis.test.ts > the actual rich card reads teacher material in the same task, keeps dialogue out of the body, and applies explicit content without model-owned targets
+AssertionError: expected 'failed' to be 'completed' // Object.is equality
+
+Expected: "completed"
+Received: "failed"
+
+ ❯ tests/integration/productFollowup/T01/boundCapabilitiesAndBasis.test.ts:148:24
+    146|   const sent = await card(h, '按资料.md改写所选文字，保留链接与公式。')
+    147|   const ended = await h.engine.wait(sent.started.runId)
+    148|   expect(ended.status).toBe('completed')
+       |                        ^
+    149|   expect(ended.tools.map(value => value.call.name)).toEqual(['file.rea…
+    150|   const current = await h.host.internalAPI.read(h.snapshot.documentId)
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/8]⎯
+
+ FAIL  tests/integration/productFollowup/T01/boundCapabilitiesAndBasis.test.ts > a card query with a real read tool returns progress and explanation without any body transaction
+AssertionError: expected 'failed' to be 'completed' // Object.is equality
+
+Expected: "completed"
+Received: "failed"
+
+ ❯ tests/integration/productFollowup/T01/boundCapabilitiesAndBasis.test.ts:170:24
+    168|   const sent = await card(h, '读资料.md，解释当前公式；不要修改正文。')
+    169|   const ended = await h.engine.wait(sent.started.runId)
+    170|   expect(ended.status).toBe('completed')
+       |                        ^
+    171|   expect(ended.tools.map(value => value.call.name)).toEqual(['file.rea…
+    172|   expect(await h.host.internalAPI.read(h.snapshot.documentId)).toMatch…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/8]⎯
+
+ FAIL  tests/integration/productFollowup/T07/currentSourceInputs.test.ts > software-produced long V10 object paths remain readable and editable without caller-owned IDs
+AssertionError: expected { kind: 'error', …(2) } to match object { kind: 'document-operation', …(1) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "kind": "document-operation",
+-   "result": {
+-     "status": "applied",
+-   },
++   "kind": "error",
+  }
+
+ ❯ tests/integration/productFollowup/T07/currentSourceInputs.test.ts:29:8
+     27|     expect(await host.tools.execute('paths', 'read', { name: 'project.…
+     28|     expect(await host.tools.execute('paths', 'edit', { name: 'object.u…
+     29|       .toMatchObject({ kind: 'document-operation', result: { status: '…
+       |        ^
+     30|     const current = await host.internalAPI.read(initial.documentId)
+     31|     expect(current).toMatchObject({ undoDepth: 1, model: { kind: 'cour…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/8]⎯
+
+ FAIL  tests/integration/productFollowup/T09/compositeImageContinuation.test.ts > a real existing-chart-update and new explanation survive interrupted embedding; the same task only finishes the missing insertion
+ FAIL  tests/integration/productFollowup/T09/compositeImageContinuation.test.ts > a real table-conversion and new explanation survive interrupted embedding; the same task only finishes the missing insertion
+Error: Did not reach generated image before embedding: 模型响应处理未完成：Cannot read properties of undefined (reading 'path')
+ ❯ tests/integration/productFollowup/T09/compositeImageContinuation.test.ts:168:73
+    166|     const started = await engine.start(input), ending = engine.wait(st…
+    167|     activeRunId = started.runId
+    168|     await Promise.race([embeddingPending, ending.then(result => { thro…
+       |                                                                         ^
+    169|     expect(imageReady).toBe(true)
+    170|     expect(generated).toBe(1)
+ ❯ tests/integration/productFollowup/T09/compositeImageContinuation.test.ts:168:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/8]⎯
+
+ FAIL  tests/unit/productFollowup/T08/alphaTextRoundTrip.test.ts > half-transparent authored HTML text keeps alpha through V10 archive and the actual professional Player renderer
+AssertionError: expected undefined to be truthy
+
+- Expected:
+true
+
++ Received:
+undefined
+
+ ❯ tests/unit/productFollowup/T08/alphaTextRoundTrip.test.ts:30:17
+     28|   try {
+     29|     const run = [...root.querySelectorAll('span')].find(element => ele…
+     30|     expect(run).toBeTruthy()
+       |                 ^
+     31|     expect(getComputedStyle(run!).color).toBe('rgba(18, 52, 86, 0.5)')
+     32|   } finally { await player.dispose() }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/8]⎯
+
+ FAIL  tests/unit/productFollowup/T08/sourceResourceConsumer.test.ts > an actual compiled source realm resolves an assetId without optional bindings and only its real image consumer requests the URL
+TimeoutError: page.waitForFunction: Timeout 3000ms exceeded.
+ ❯ tests/unit/productFollowup/T08/sourceResourceConsumer.test.ts:70:16
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/8]⎯
+
+
+ Test Files  6 failed | 6 passed (12)
+      Tests  7 failed | 22 passed (29)
+   Start at  09:02:27
+   Duration  15.19s (transform 37.31s, setup 1.14s, import 72.27s, tests 12.69s, environment 2.87s)
+

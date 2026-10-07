@@ -19,7 +19,7 @@ export interface ComputeProcess {
   cancel(): Promise<boolean>
 }
 export interface ComputeBackendRequest {
-  /** Host-created directory containing input/, work/ and output/. */
+  /** Host-created directory containing input/ and output/. */
   directory: string
   program: string
   argv: readonly string[]
@@ -27,29 +27,23 @@ export interface ComputeBackendRequest {
   containerName: string
 }
 
-const MAX_LOG_BYTES = 64 * 1024
 const safeArg = (value: string) => typeof value === 'string' && !value.includes('\0')
 const validContainerName = (name: string) => /^guoling-compute-[a-f0-9]{32}$/.test(name)
 
 function observeProcess(child: ChildProcessWithoutNullStreams, timeoutMs?: number): Promise<{ code: number | null; stdout: string; stderr: string; truncated: boolean }> {
   return new Promise((resolve, reject) => {
-    let stdout = '', stderr = '', truncated = false, finished = false
+    const stdout: Buffer[] = [], stderr: Buffer[] = []
+    let finished = false
     const timer = timeoutMs === undefined ? undefined : setTimeout(() => { child.kill(); finish(new Error('执行后端控制命令超时')) }, timeoutMs)
-    const append = (current: string, chunk: Buffer): string => {
-      const remaining = MAX_LOG_BYTES - Buffer.byteLength(current)
-      if (remaining <= 0) { truncated = true; return current }
-      if (chunk.length > remaining) truncated = true
-      return current + chunk.subarray(0, remaining).toString('utf8')
-    }
-    child.stdout.on('data', (chunk: Buffer) => { stdout = append(stdout, chunk) })
-    child.stderr.on('data', (chunk: Buffer) => { stderr = append(stderr, chunk) })
+    child.stdout.on('data', (chunk: Buffer) => { stdout.push(Buffer.from(chunk)) })
+    child.stderr.on('data', (chunk: Buffer) => { stderr.push(Buffer.from(chunk)) })
     child.once('error', error => finish(error))
     child.once('close', code => finish(undefined, code))
     function finish(error?: Error, code: number | null = null) {
       if (finished) return
       finished = true; if (timer) clearTimeout(timer)
       if (error) reject(error)
-      else resolve({ code, stdout, stderr, truncated })
+      else resolve({ code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8'), truncated: false })
     }
   })
 }
@@ -132,8 +126,9 @@ export class PodmanComputeBackend {
       '--network', 'none', '--read-only', '--pids-limit', '-1', '--stop-timeout', '1',
       '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '65534:65534',
       '--tmpfs', '/tmp:rw,nosuid,nodev',
-      '--volume', `${root}/input:/job/input:ro`, '--volume', `${root}/work:/job/work:rw`, '--volume', `${root}/output:/job/output:rw`,
-      '--workdir', '/job/work', '--entrypoint', request.program, this.options.image, ...request.argv]
+      '--volume', `${root}/input:/job/input:ro`, '--volume', `${root}/output:/job/work:rw`, '--volume', `${root}/output:/job/output:rw`,
+      '--workdir', '/job/output', '--env', 'GUOLING_INPUT_DIR=/job/input', '--env', 'GUOLING_OUTPUT_DIR=/job/output',
+      '--entrypoint', request.program, this.options.image, ...request.argv]
     const child = this.command(args)
     let cancelled = false, finished = false
     const stop = async () => {

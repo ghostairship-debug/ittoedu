@@ -1,0 +1,108 @@
+
+ RUN  v4.1.10 D:/果铃并行/20261007-content-revision/e
+
+ ❯ tests/integration/productFollowup/T03/currentDraftCopy.test.ts (1 test | 1 failed) 237ms
+   × public workspaceFiles defaults to disk and explicitly copies current V10 draft without saving or clearing the source dirty history 235ms
+ ❯ tests/integration/productFollowup/T04/cancelledCloseContinuation.test.ts (1 test | 1 failed) 494ms
+   × cancelled close can reopen A for a real edit while old A authority remains stopped and the same client B target still writes 492ms
+ ❯ tests/integration/productFollowup/T06/officePublicEngineReview.test.ts (1 test | 1 failed) 175ms
+   × default Office catalog edits through public Gateway and Engine receipts preserve binary before after for rollback and later human CAS conflict 173ms
+ ❯ tests/integration/productFollowup/T09/compositeImageContinuation.test.ts (2 tests | 2 failed) 1630ms
+   × a real existing-chart-update and new explanation survive interrupted embedding; the same task only finishes the missing insertion 911ms
+   × a real table-conversion and new explanation survive interrupted embedding; the same task only finishes the missing insertion 716ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/productFollowup/T03/currentDraftCopy.test.ts > public workspaceFiles defaults to disk and explicitly copies current V10 draft without saving or clearing the source dirty history
+AssertionError: expected { …(13) } to match object { …(7) }
+(16 matching properties omitted from actual)
+
+- Expected
++ Received
+
+@@ -2,8 +2,7 @@
+    "dirty": true,
+    "documentId": "22e726d0-2370-446f-a1fd-129f1b153014",
+    "epoch": "194bbdc2-de6d-4fbd-ac0d-24785e599dc4",
+    "redoDepth": 0,
+    "revision": 1,
+-   "savedRevision": undefined,
+    "undoDepth": 1,
+  }
+
+ ❯ tests/integration/productFollowup/T03/currentDraftCopy.test.ts:48:59
+     46|     expect(currentCopy.model).toMatchObject({ kind: 'course-v10', proj…
+     47|     expect(sourceDisk.model).toMatchObject({ kind: 'course-v10', proje…
+     48|     expect(await host.internalAPI.read(saved.documentId)).toMatchObjec…
+       |                                                           ^
+     49|       revision: before.revision, savedRevision: before.savedRevision, …
+     50|     await host.internalAPI.dispatch({ documentId: before.documentId, e…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  tests/integration/productFollowup/T04/cancelledCloseContinuation.test.ts > cancelled close can reopen A for a real edit while old A authority remains stopped and the same client B target still writes
+AssertionError: expected { …(2) } to match object { result: { …(2) } }
+(3 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "result": {
+-     "kind": "document-operation",
+-     "result": {
+-       "status": "applied",
+-     },
++     "kind": "error",
+    },
+  }
+
+ ❯ tests/integration/productFollowup/T04/cancelledCloseContinuation.test.ts:59:8
+     57|     expect(renewed.writable).toBe(true)
+     58|     expect((await client.call('object.update', { project: renewed.targ…
+     59|       .toMatchObject({ result: { kind: 'document-operation', result: {…
+       |        ^
+     60|     expect((await client.call('object.update', { project: targetB, pat…
+     61|       .toMatchObject({ result: { kind: 'document-operation', result: {…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  tests/integration/productFollowup/T06/officePublicEngineReview.test.ts > default Office catalog edits through public Gateway and Engine receipts preserve binary before after for rollback and later human CAS conflict
+AssertionError: []: expected 'failed' to be 'completed' // Object.is equality
+
+Expected: "completed"
+Received: "failed"
+
+ ❯ tests/integration/productFollowup/T06/officePublicEngineReview.test.ts:56:61
+     54|       documents: [], workspaceRoot: workspace, permission: 'workspace'…
+     55|     const finished = await engine.wait(start.runId)
+     56|     expect(finished.status, JSON.stringify(finished.tools)).toBe('comp…
+       |                                                             ^
+     57|     const stored = await runs.read(start.runId)
+     58|     if (!stored) throw new Error('Missing persisted Engine receipt')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  tests/integration/productFollowup/T09/compositeImageContinuation.test.ts > a real existing-chart-update and new explanation survive interrupted embedding; the same task only finishes the missing insertion
+ FAIL  tests/integration/productFollowup/T09/compositeImageContinuation.test.ts > a real table-conversion and new explanation survive interrupted embedding; the same task only finishes the missing insertion
+AssertionError: expected 'failed' to be 'completed' // Object.is equality
+
+Expected: "completed"
+Received: "failed"
+
+ ❯ tests/integration/productFollowup/T09/compositeImageContinuation.test.ts:215:30
+    213|     activeRunId = resumed.runId
+    214|     const completed = await engine.wait(resumed.runId)
+    215|     expect(completed.status).toBe('completed')
+       |                              ^
+    216|     expect(continuedOnce).toBe(true)
+    217|     expect(completed.tools.map(value => value.call.name)).toEqual(['re…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+
+ Test Files  4 failed | 5 passed (9)
+      Tests  5 failed | 13 passed (18)
+   Start at  09:09:08
+   Duration  16.68s (transform 43.54s, setup 773ms, import 82.09s, tests 8.32s, environment 2.23s)
+

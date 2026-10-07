@@ -52,10 +52,11 @@ export async function buildComponentDelivery(snapshot: CourseDeliverySnapshot, f
   compile: ComponentCompilePort
   singleHtmlMode?: SingleHtmlExportMode
   signal?: AbortSignal
+  onProgress?: () => void
   createCapture?: (payload: PublishedCourseV3) => Promise<ComponentOutputCapture>
 }): Promise<BuiltComponentDelivery> {
   const { project } = snapshot, items: ComponentDeliveryFinding[] = [], artifacts: ComponentDeliveryArtifact[] = []
-  const check = () => options.signal?.throwIfAborted()
+  const check = () => { options.signal?.throwIfAborted(); options.onProgress?.() }
   const note = (values: readonly { code: string; message: string; severity?: ComponentDeliveryFinding['severity']; surfaceId?: string; instanceId?: string; path?: readonly (string | number)[] }[]) => {
     items.push(...values.map(value => {
       const route = resolveCourseProjectDeliveryFindingRoute(project, value)
@@ -65,11 +66,11 @@ export async function buildComponentDelivery(snapshot: CourseDeliverySnapshot, f
   }
   check()
   if (format === 'single-html') {
-    const result = await buildComponentHtml(snapshot.snapshot, options.compile, options.singleHtmlMode)
+    const result = await buildComponentHtml(snapshot.snapshot, options.compile, options.singleHtmlMode, options.signal, options.onProgress)
     note(result.diagnostics)
     artifacts.push({ suggestedName: `${project.title}.html`, extension: 'html', html: result.html })
   } else if (format === 'web-package') {
-    const result = await buildComponentWebPackage(snapshot.snapshot, options.compile, options.signal)
+    const result = await buildComponentWebPackage(snapshot.snapshot, options.compile, options.signal, options.onProgress)
     note(result.diagnostics)
     artifacts.push({ suggestedName: `${project.title}-网页包.zip`, extension: 'zip', bytes: result.bytes })
   } else {
@@ -77,9 +78,12 @@ export async function buildComponentDelivery(snapshot: CourseDeliverySnapshot, f
     // Prepare a fresh Player only when a format consumer actually requests a captured region.
     const getCapture = async () => {
       if (!capture && options.createCapture) {
-        const published = await buildComponentPublished(snapshot.snapshot, options.compile)
+        check()
+        const published = await buildComponentPublished(snapshot.snapshot, options.compile, undefined, undefined, options.signal, options.onProgress)
         note(published.diagnostics)
+        check()
         capture = await options.createCapture(published.payload)
+        check()
       }
       return capture
     }
@@ -99,9 +103,15 @@ export async function buildComponentDelivery(snapshot: CourseDeliverySnapshot, f
             if (!value) return undefined
             return bytesToDataUrl(value.bytes, value.mimeType)
           },
-          captureInstance: options.createCapture ? async ({ surface, instance }) => (await (await getCapture())?.captureInstance(surface.id, instance.id))?.dataUrl : undefined,
-          captureSurface: options.createCapture ? async ({ surface, page }) => (await (await getCapture())?.captureSurface(surface.id, page.spatialFrameId))?.dataUrl : undefined,
+          captureInstance: options.createCapture ? async ({ surface, instance }) => {
+            check(); const image = await (await getCapture())?.captureInstance(surface.id, instance.id); check(); return image?.dataUrl
+          } : undefined,
+          captureSurface: options.createCapture ? async ({ surface, page }) => {
+            check(); const image = await (await getCapture())?.captureSurface(surface.id, page.spatialFrameId); check(); return image?.dataUrl
+          } : undefined,
+          onDiagnostic: () => check(),
         })
+        check()
         note(result.diagnostics)
         if (!result.bytes.length) throw new Error('当前课程没有可生成的 PPTX 页面；内容与资源已保留')
         artifacts.push({ suggestedName: `${project.title}.pptx`, extension: 'pptx', bytes: result.bytes })
@@ -127,7 +137,7 @@ export async function buildComponentDelivery(snapshot: CourseDeliverySnapshot, f
               const frames = project.surfaces.find(value => value.id === surfaceId)?.spatial?.frames
               const ids = frames?.length ? frames.map(frame => frame.id) : [undefined]
               const images: PdfPrintImage[] = []
-              for (const id of ids) { const image = await (await getCapture())?.captureSurface(surfaceId, id); if (image) images.push(image) }
+              for (const id of ids) { check(); const image = await (await getCapture())?.captureSurface(surfaceId, id); check(); if (image) images.push(image) }
               return images
             } : undefined,
           })

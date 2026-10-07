@@ -62,6 +62,8 @@ const IPC_CHANNELS = {
   exportPdf: 'export:write-pdf',
   documentExportBuildRequest: 'document-export:build-request',
   documentExportBuildReply: 'document-export:build-reply',
+  documentExportBuildCancel: 'document-export:build-cancel',
+  documentExportBuildProgress: 'document-export:build-progress',
   previewNetworkDocumentToken: 'preview-network:document-token',
   setPreviewNetworkPolicy: 'preview-network:set',
   releasePreviewNetworkPolicy: 'preview-network:release',
@@ -269,6 +271,9 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     create: (model, suggestedName) => invoke(IPC_CHANNELS.documents, { type: 'create', model, suggestedName }),
     open: path => invoke(IPC_CHANNELS.documents, { type: 'open', path }),
     read: documentId => invoke(IPC_CHANNELS.documents, { type: 'read', documentId }),
+    readAuthoringDrafts: documentId => invoke(IPC_CHANNELS.documents, { type: 'read-authoring-drafts', documentId }),
+    writeAuthoringDrafts: (documentId, drafts) => invoke(IPC_CHANNELS.documents, { type: 'write-authoring-drafts', documentId, drafts }),
+    clearAuthoringDrafts: documentId => invoke(IPC_CHANNELS.documents, { type: 'clear-authoring-drafts', documentId }),
     dispatch: operation => invoke(IPC_CHANNELS.documents, { type: 'dispatch', operation }),
     lookup: (documentId, operationId) => invoke(IPC_CHANNELS.documents, { type: 'lookup', documentId, operationId }),
     save: (documentId, path) => invoke(IPC_CHANNELS.documents, { type: 'save', documentId, ...(path ? { path } : {}) }),
@@ -367,6 +372,12 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     return () => ipcRenderer.removeListener(IPC_CHANNELS.documentExportBuildRequest, listener)
   },
   sendDocumentExportBuildReply: reply => ipcRenderer.send(IPC_CHANNELS.documentExportBuildReply, reply),
+  onDocumentExportBuildCancel: handler => {
+    const listener = (_event: Electron.IpcRendererEvent, cancel: import('../shared/workbench/toolPorts').ExportBuildCancel) => handler(cancel)
+    ipcRenderer.on(IPC_CHANNELS.documentExportBuildCancel, listener)
+    return () => ipcRenderer.removeListener(IPC_CHANNELS.documentExportBuildCancel, listener)
+  },
+  sendDocumentExportBuildProgress: progress => ipcRenderer.send(IPC_CHANNELS.documentExportBuildProgress, progress),
   createComponentBootstrap: input => invoke(IPC_CHANNELS.createComponentBootstrap, {
     ...input, documentToken: requirePreviewNetworkDocumentToken(),
   }),

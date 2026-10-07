@@ -18,6 +18,7 @@ import {
   clamp,
   PIXELS_TO_POINTS,
   pptxColor,
+  pptxColorAlpha,
   pptxFontFace,
   pptxNodePosition,
   pptxObjectName,
@@ -109,7 +110,7 @@ function pptxTextRuns(node: TextNode, fontSize: number): PptxGenJS.TextProps[] {
       fontSize: style.fontSize * fontSize / node.style.fontSize * PIXELS_TO_POINTS,
       baseline: style.baseline * 2000,
       charSpacing: node.style.letterSpacing * PIXELS_TO_POINTS,
-      transparency: pptxTransparency(node.opacity),
+      transparency: pptxTransparency(node.opacity * pptxColorAlpha(style.color)),
       lang: 'zh-CN',
     },
   }))

@@ -18,9 +18,9 @@ export type HostJobLog = {
 }
 
 function page(after = 0, limit = 100): { after: number; limit: number } {
-  if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100)
-    throw new Error('作业日志分页参数无效')
-  return { after, limit }
+  if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1)
+    throw new Error('作业日志分页参数无效：after 须为非负安全整数，limit 须为正安全整数；用返回的 nextCursor 继续读取。')
+  return { after, limit: Math.min(limit, 100) }
 }
 
 export class HostJobService {
@@ -68,10 +68,11 @@ export class HostJobService {
     const job = await this.owners.images.read(ref.jobId)
     if (job.runId !== ref.runId) throw new Error('图片任务不属于当前运行')
     const marks = job.timing ?? []
-    return { entries: marks.slice(after, after + limit).map((mark, index) => ({
+    const entries = marks.slice(after, after + limit).map((mark, index) => ({
       cursor: after + index + 1, time: mark.wallTimeMs, stage: mark.stage, level: 'info' as const,
       message: mark.detail ? `${mark.stage}: ${JSON.stringify(mark.detail)}` : mark.stage,
-    })), nextCursor: Math.min(marks.length, after + limit) }
+    }))
+    return { entries, nextCursor: entries.at(-1)?.cursor ?? after }
   }
 
   async cancel(ref: HostJobRef): Promise<HostJobSnapshot> {

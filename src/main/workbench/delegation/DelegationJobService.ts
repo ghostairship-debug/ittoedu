@@ -249,7 +249,7 @@ export class DelegationJobService {
         signal: active.controller.signal,
         onEvent: event => { void this.update(jobId, job => {
           job.logs = [...job.logs, { cursor: ++job.nextLogCursor, time: Date.now(), kind: event.kind,
-            message: event.detail.slice(0, 1000) }].slice(-200)
+            message: event.detail }]
         }).catch(() => undefined) },
         verify: async ({ artifacts }) => ({ accepted: artifacts.length === input.expectedArtifacts.length
           && artifacts.every(artifact => artifact.bytes > 0),
@@ -265,17 +265,20 @@ export class DelegationJobService {
         job.account = result!.account; job.cliVersion = result!.cliVersion; job.threadId = result!.threadId
         job.exitCode = result!.exitCode; job.summary = result!.summary?.slice(0, 8000)
         job.reason = result!.reason.slice(0, 1000); job.artifacts = artifacts
+        if (result!.reason.length > 1000) job.logs = [...job.logs, { cursor: ++job.nextLogCursor,
+          time: Date.now(), kind: 'system' as const, message: result!.reason }]
         if (result!.diagnostic) job.logs = [...job.logs, { cursor: ++job.nextLogCursor,
-          time: Date.now(), kind: 'system' as const, message: result!.diagnostic.slice(0, 2000) }].slice(-200)
+          time: Date.now(), kind: 'system' as const, message: result!.diagnostic }]
         job.status = job.stopped || active.controller.signal.aborted
           ? result!.status === 'cancelled' ? 'cancelled' : 'unknown'
           : result!.status === 'verified' ? 'ready' : result!.status
       })
     } catch (error) {
+      const message = error instanceof Error ? error.message : '委派作业失败'
       await this.update(jobId, job => {
         job.status = active.controller.signal.aborted ? 'unknown' : 'failed'
-        job.reason = error instanceof Error ? error.message.slice(0, 1000) : '委派作业失败'
-        job.logs = [...job.logs, { cursor: ++job.nextLogCursor, time: Date.now(), kind: 'system' as const, message: job.reason }].slice(-200)
+        job.reason = message.slice(0, 1000)
+        job.logs = [...job.logs, { cursor: ++job.nextLogCursor, time: Date.now(), kind: 'system' as const, message }]
       }).catch(() => undefined)
     }
   }
@@ -301,12 +304,12 @@ export class DelegationJobService {
     return this.status(runId, jobId)
   }
   async logs(runId: string, jobId: string, after = 0, limit = 100): Promise<DelegationJobLog> {
-    if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100)
-      throw new DelegationJobError('invalid-page', '委派日志分页无效')
+    if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1)
+      throw new DelegationJobError('invalid-page', '委派日志分页无效：after 须为非负安全整数，limit 须为正安全整数；用 nextCursor 继续读取。')
     await this.status(runId, jobId)
     const job = await this.load(jobId)
     if (!job) throw new DelegationJobError('unknown-job', '委派作业不存在')
-    const entries = job.logs.filter(entry => entry.cursor > after).slice(0, limit)
+    const entries = job.logs.filter(entry => entry.cursor > after).slice(0, Math.min(limit, 100))
     return { entries, nextCursor: entries.at(-1)?.cursor ?? after }
   }
   async cancel(runId: string, jobId: string): Promise<DelegationJobSnapshot> {

@@ -19,12 +19,13 @@ type Dialog = 'create-markdown' | 'create-course' | 'create-text' | 'create-html
 type Row = { entry: Entry; parentId: string }
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 function icon(name: string) { return /\.(md|markdown)$/i.test(name) ? <FileText size={16} /> : /\.h5lesson$/i.test(name) ? <Presentation size={16} /> : /\.html?$/i.test(name) ? <FileCode2 size={16} /> : <File size={16} /> }
-export function WorkspaceFilesTree({ directory, files, operation, refreshVersion = 0, onFile, onDirectory, onScope, onSaveDirectoryChange, onImportHtml }: {
+export function WorkspaceFilesTree({ directory, files, operation, refreshVersion = 0, onFile, onDirectory, onScope, onSaveDirectoryChange, onImportHtml, prepareCurrentCopy }: {
   directory: string; files: WorkspaceFilesAPI; operation?(request: LessonDesktopRequest): Promise<LessonDesktopResult>; refreshVersion?: number
   onFile(entry: LessonDirectoryEntry): void; onDirectory(path: string): void
   onScope?(path: string, kind: 'folder' | 'file', workspaceId?: string): void
   onSaveDirectoryChange?(directory: SaveDirectoryContext | null): void
   onImportHtml?(directory: SaveDirectoryContext, sourceEntryId?: string): void
+  prepareCurrentCopy?(): Promise<boolean>
 }) {
   const [root, setRoot] = useState<RegisteredWorkspaceRoot>()
   const [pages, setPages] = useState<Record<string, WorkspaceListItem[]>>({})
@@ -37,6 +38,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
   const [error, setError] = useState(''), [busy, setBusy] = useState(false), [notice, setNotice] = useState('')
   const [results, setResults] = useState<WorkspaceOperationResult>(), [retry, setRetry] = useState<WorkspaceFilesRequest>()
   const [clipboard, setClipboard] = useState<{ workspaceId: string; ids: string[]; type: 'copy' | 'move' }>()
+  const [copyVersion, setCopyVersion] = useState<'disk' | 'current'>('disk')
   const [menu, setMenu] = useState<{ x: number; y: number; directoryEntryId: string; htmlImport: 'pick' | 'selected' | null; sourceEntryId?: string }>(), [dropTarget, setDropTarget] = useState<string>()
   const active = useRef<RegisteredWorkspaceRoot | undefined>(undefined), epoch = useRef(0), lock = useRef(false)
   const scopeTicket = useRef(0)
@@ -248,13 +250,17 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
       setName('')
       setDialog(type)
     }
-    if ((type === 'copy' || type === 'move') && root) { setDestinations([{ id: root.rootEntryId, name: directory }]); await browse(root.rootEntryId) }
+    if ((type === 'copy' || type === 'move') && root) { setCopyVersion('disk'); setDestinations([{ id: root.rootEntryId, name: directory }]); await browse(root.rootEntryId) }
   }
   const run = async (request: WorkspaceFilesRequest) => {
     if (!root || lock.current) return
     const generation = epoch.current
     lock.current = true; setBusy(true); setError(''); setMenu(undefined); setRetry(undefined)
     try {
+      if (request.type === 'copy' && request.sourceVersion === 'current') {
+        if (!prepareCurrentCopy || !await prepareCurrentCopy()) throw new Error('当前输入尚未同步，请完成输入或处理冲突后再复制当前稿。')
+        if (generation !== epoch.current) return
+      }
       const result = await files(request) as WorkspaceOperationResult
       if (generation !== epoch.current) return
       setResults(result)
@@ -323,7 +329,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
       if (dialog === 'create-course') void run({ type: 'create-course', ...common(), targetDirectoryId: targetDirectory!, name: filename, canvas: { width: preset.width, height: preset.height } })
       else void run({ type: dialog === 'create-html' ? 'create-text' : dialog as 'mkdir' | 'create-markdown' | 'create-text', ...common(), targetDirectoryId: targetDirectory!, name: filename })
     } else if (dialog === 'rename' && single) void run({ type: 'rename', ...common(), sourceEntryId: single.entryId, name: name.trim() })
-    else if (dialog === 'copy' || dialog === 'move') void run({ type: dialog, ...common(), sourceEntryIds: selected.map(row => row.entry.entryId), targetDirectoryId: destination ?? root.rootEntryId })
+    else if (dialog === 'copy' || dialog === 'move') void run({ type: dialog, ...common(), sourceEntryIds: selected.map(row => row.entry.entryId), targetDirectoryId: destination ?? root.rootEntryId, ...(dialog === 'copy' ? { sourceVersion: copyVersion } : {}) })
     else if (dialog === 'trash') void run({ type: 'trash', ...common(), entryIds: selected.map(row => row.entry.entryId) })
   }
   const copy = (type: 'copy' | 'move') => { if (!root || !selected.length) return; setClipboard({ workspaceId: root.workspaceId, ids: selected.map(row => row.entry.entryId), type }); setMenu(undefined); setNotice(type === 'copy' ? `已复制 ${selected.length} 项，请选择目标文件夹后粘贴` : `已剪切 ${selected.length} 项，粘贴成功前原件保持不变`) }
@@ -423,6 +429,7 @@ export function WorkspaceFilesTree({ directory, files, operation, refreshVersion
       </select></label>}
       {(dialog === 'rename' || dialog === 'mkdir' || dialog.startsWith('create-')) && <label>名称<input autoFocus aria-label="文件名称" value={name} onChange={event => setName(event.target.value)} onFocus={event => { if (dialog !== 'rename') { const [start, end] = getStemSelectionRange(event.currentTarget.value); event.currentTarget.setSelectionRange(start, end) } }} /></label>}
       {(dialog === 'copy' || dialog === 'move') && <><label>目标文件夹<select aria-label="目标文件夹" value={destination} onChange={event => { void browse(event.target.value).catch(reason => setError(message(reason))) }}>{destinations.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label><p>选择文件夹后可继续进入其子目录。</p></>}
+      {dialog === 'copy' && !retry && <label>复制内容<select aria-label="复制内容" value={copyVersion} onChange={event => setCopyVersion(event.target.value as 'disk' | 'current')}><option value="disk">磁盘版本</option><option value="current">当前稿（不保存源文件）</option></select></label>}
       {results?.items.some(item => item.error?.code === 'same-name-conflict') && single && (dialog === 'copy' || dialog === 'move') && <button type="button" disabled={busy} onClick={() => action('rename')}>先重命名当前文件</button>}
       {retry ? <><p>未完成的文档引用本地附件。连同资源复制到目标目录，源素材会保留。已完成项不会重复操作。</p><button type="button" disabled={busy} onClick={() => { if (retry.type === 'move' || retry.type === 'copy') void run({ ...retry, operationId: crypto.randomUUID(), resourcePolicy: 'copy' }) }}>连同资源继续</button></> : <button type="button" disabled={busy || ((dialog === 'rename' || dialog === 'mkdir' || dialog.startsWith('create-')) && !name.trim())} onClick={submit}>确认</button>}
       <button type="button" disabled={busy} onClick={close}>取消</button>

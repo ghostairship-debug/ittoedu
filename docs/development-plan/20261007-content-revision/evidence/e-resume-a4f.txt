@@ -1,0 +1,30 @@
+
+ RUN  v4.1.10 D:/果铃并行/20261007-content-revision/e
+
+ ❯ tests/integration/productFollowup/T10/taskFinishRecovery.test.ts (2 tests | 2 failed) 527ms
+   × recovering a finish-executing crash slice keeps the committed body once and preserves an additional unknown write: false 322ms
+   × recovering a finish-executing crash slice keeps the committed body once and preserves an additional unknown write: true 203ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/productFollowup/T10/taskFinishRecovery.test.ts > recovering a finish-executing crash slice keeps the committed body once and preserves an additional unknown write: false
+ FAIL  tests/integration/productFollowup/T10/taskFinishRecovery.test.ts > recovering a finish-executing crash slice keeps the committed body once and preserves an additional unknown write: true
+Error: 任务编号已存在或无效
+ ❯ DocumentToolGateway.recoverRun src/core/tools/DocumentToolGateway.ts:404:59
+    402|   /** Recovery registers receipt-query identity only. It cannot renew …
+    403|   recoverRun(input: ToolRunGrant): void {
+    404|     if (!input.runId || this.runs.has(input.runId)) throw new Error('任…
+       |                                                           ^
+    405|     const ids = input.documents.map(document => document.documentId)
+    406|     if (new Set(ids).size !== ids.length || ids.some(id => !id)) throw…
+ ❯ ExecutionEngine.recover src/main/workbench/execution/ExecutionEngine.ts:2398:28
+ ❯ tests/integration/productFollowup/T10/taskFinishRecovery.test.ts:76:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  2 failed | 2 passed (4)
+   Start at  09:24:33
+   Duration  12.33s (transform 7.94s, setup 135ms, import 17.97s, tests 3.68s, environment 0ms)
+

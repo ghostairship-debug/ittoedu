@@ -63,9 +63,10 @@ export interface LessonWorkspaceViewProps {
   documentPort: RecoverableDocumentFilePort;
   onSaveDirectoryChange?(directory: SaveDirectoryContext | null): void;
   onImportHtml?(directory: SaveDirectoryContext, sourceEntryId?: string): void;
+  prepareCurrentCopy?(): Promise<boolean>;
   tabs: DocumentTabsController;
   projectPath: string | null;
-  renderAssistant?(root: string | null, documentTarget: ActiveDocumentTarget | undefined, isCourse: boolean, drainDocuments: (documentIds?: readonly string[]) => Promise<boolean>): ReactNode;
+  renderAssistant?(root: string | null, documentTarget: ActiveDocumentTarget | undefined, isCourse: boolean, drainDocuments: (documentIds?: readonly string[]) => Promise<boolean>, lesson: LessonWorkspace | null): ReactNode;
   renderMaterial?(path: string, lesson: LessonWorkspace | null): ReactNode;
   renderMaterials?(lesson: LessonWorkspace): ReactNode;
   children: ReactNode;

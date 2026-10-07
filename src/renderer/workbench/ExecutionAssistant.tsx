@@ -37,6 +37,8 @@ import { bodyStreamingLabel, bodyStreamingRecord, configuredBodyStreamingAlterna
 import { useWorkbenchSessionDock } from './WorkbenchSessionPortal'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { TaskBrowserViewport } from './browserEmbedded/TaskBrowserViewport'
+import type { LessonMaterialTarget } from '../../shared/materialExtraction'
+import type { LessonAuthoringMaterialSelection } from '../../shared/lessonAuthoring'
 
 export interface ExecutionAssistantHandle { preserveDraft(): Promise<void> }
 type BrowserControlState = Awaited<ReturnType<NonNullable<ExecutionDesktopAPI['browserControl']>>>
@@ -44,6 +46,7 @@ type BrowserControlState = Awaited<ReturnType<NonNullable<ExecutionDesktopAPI['b
 export interface ExecutionAssistantProps {
   root: string | null
   captureDocuments(writable: boolean): Promise<ExecutionDocumentReference[]>
+  captureMaterials?(): Promise<{ target: LessonMaterialTarget; selections: LessonAuthoringMaterialSelection[] } | undefined>
   prepareSend(documentIds?: readonly string[]): Promise<boolean>
   api?: ExecutionDesktopAPI
   settingsAPI?: ExecutionSettingsAPI
@@ -115,7 +118,7 @@ function defaultExecutionAPI(): ExecutionDesktopAPI | undefined {
   return (window.desktopAPI as typeof window.desktopAPI & { execution?: ExecutionDesktopAPI }).execution
 }
 
-export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, ExecutionAssistantProps>(function ExecutionAssistant({ root, captureDocuments, prepareSend, api: suppliedAPI, settingsAPI: suppliedSettingsAPI, externalAPI: suppliedExternalAPI, onLocateDocument }, ref) {
+export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, ExecutionAssistantProps>(function ExecutionAssistant({ root, captureDocuments, captureMaterials, prepareSend, api: suppliedAPI, settingsAPI: suppliedSettingsAPI, externalAPI: suppliedExternalAPI, onLocateDocument }, ref) {
   const sessionDock = useWorkbenchSessionDock()
   const sessionScope = sessionDock.scope
   useSyncExternalStore(workbenchSelection.subscribe, workbenchSelection.readVersion)
@@ -851,7 +854,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
     try {
       if (retry) request = { workspaceId: retry.workspaceId, conversationId: retry.conversationId, submissionId: retry.submissionId,
         expectedRevision: selected.revision, text: retry.text, documents: structuredClone(retry.documents), attachments: structuredClone(retry.attachments),
-        mode: retry.mode, ...(retry.retryOfRunId ? { retryOfRunId: retry.retryOfRunId } : {}), ...(retry.permission ? { permission: retry.permission } : {}), ...(retry.contentOutput ? { contentOutput: retry.contentOutput } : {}) }
+        mode: retry.mode, ...(retry.retryOfRunId ? { retryOfRunId: retry.retryOfRunId } : {}), ...(retry.permission ? { permission: retry.permission } : {}), ...(retry.contentOutput ? { contentOutput: retry.contentOutput } : {}),
+        ...(retry.materials ? { materials: structuredClone(retry.materials) } : {}) }
       else if (continueRun) {
         const source = submissions.find(item => item.runId === continueRun.runId)
         if (!source) throw new Error('原任务提交记录不可读取，尚未重试。')
@@ -870,9 +874,11 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         request = { workspaceId: source.workspaceId, conversationId: source.conversationId, submissionId: crypto.randomUUID(),
           expectedRevision: persisted.revision, text: source.text, documents: structuredClone(source.documents),
           attachments: structuredClone(source.attachments), mode: 'queue', retryOfRunId: continueRun.runId,
-          ...(source.permission ? { permission: source.permission } : {}), ...(source.contentOutput ? { contentOutput: source.contentOutput } : {}) }
+          ...(source.permission ? { permission: source.permission } : {}), ...(source.contentOutput ? { contentOutput: source.contentOutput } : {}),
+          ...(source.materials ? { materials: structuredClone(source.materials) } : {}) }
       }
       else {
+        const materials = await captureMaterials?.()
         const pinned = await (capturePromise.current ?? Promise.resolve(documentsRef.current))
         const preparedDocuments = api.prepareDocuments ? await api.prepareDocuments({ workspaceId: selected.workspaceId,
           conversationId: selected.conversationId, documents: pinned, permission: permissionOverride ?? permission }) : pinned
@@ -885,7 +891,8 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         const captured = preparedDocuments
         const level = permissionOverride ?? permission
         request = { workspaceId: current.workspaceId, conversationId: current.conversationId, submissionId: crypto.randomUUID(),
-          expectedRevision: current.revision, text: draftRef.current, documents: documentsForPermission(captured, level), attachments: structuredClone(attachmentsRef.current), mode, permission: level, ...(contentOutput ? { contentOutput } : {}) }
+          expectedRevision: current.revision, text: draftRef.current, documents: documentsForPermission(captured, level), attachments: structuredClone(attachmentsRef.current), mode, permission: level, ...(contentOutput ? { contentOutput } : {}),
+          ...(materials ? { materials: structuredClone(materials) } : {}) }
       }
       // Owner 2026-09-24: no service notice. The route shown in the model menu is frozen with the task.
       const shownSettings: ExecutionSettingsView | null = settingsAPI ? await settingsAPI.read() : settings
@@ -900,6 +907,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         replaceSubmission({ submissionId: request.submissionId, workspaceId: request.workspaceId, conversationId: request.conversationId,
           state: 'starting', mode, text: request.text, documents: request.documents, attachments: request.attachments ?? [],
           ...(request.contentOutput ? { contentOutput: request.contentOutput } : {}),
+          ...(request.materials ? { materials: structuredClone(request.materials) } : {}),
           ...(request.retryOfRunId ? { retryOfRunId: request.retryOfRunId } : {}), ...(request.permission ? { permission: request.permission } : {}),
           model: { provider: connection?.connection.provider ?? '当前连接', model: conversationSelection?.model ?? '当前模型',
             accountId: connection?.connection.accountId ?? '', billing: connection?.connection.billing.kind ?? 'unknown' }, createdAt: now, updatedAt: now })
@@ -946,6 +954,7 @@ export const ExecutionAssistant = forwardRef<ExecutionAssistantHandle, Execution
         replaceSubmission({ submissionId: request.submissionId, workspaceId: request.workspaceId, conversationId: request.conversationId,
           state: 'failed', mode: request.mode ?? 'queue', text: request.text, documents: request.documents, attachments: request.attachments ?? [],
           ...(request.contentOutput ? { contentOutput: request.contentOutput } : {}),
+          ...(request.materials ? { materials: structuredClone(request.materials) } : {}),
           ...(request.retryOfRunId ? { retryOfRunId: request.retryOfRunId } : {}),
           model: { provider: connection?.connection.provider ?? '当前连接', model: conversationSelection?.model ?? '当前模型', accountId: connection?.connection.accountId ?? '', billing: connection?.connection.billing.kind ?? 'unknown' },
           createdAt: Date.now(), updatedAt: Date.now(), failure: closedDocument

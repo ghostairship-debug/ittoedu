@@ -1,6 +1,7 @@
+/** @deprecated Historical V9/CLI consumer only; current production uses Project V10 and the canonical Gateway. */
 import { z } from 'zod'
 import { makeAuthoringAddress } from '../../../shared/authoringAddress'
-import { backgroundToolInputSchema } from '../../../core/tools/toolSchemas'
+import { backgroundToolInputSchema } from './historicalSchemas'
 export { backgroundToolInputSchema }
 import { updateCourseBackground, updateSlideBackgroundOwner } from '../../../core/tools/courseBackground'
 import { updateFlowSurfaceBackground } from '../../course/flowEditorCommands'

@@ -1,0 +1,5752 @@
+{
+  "scope": "one actual UI import / Electron measurement / formal V10 / real Player pixel and interaction specimen; no model supplier claim",
+  "directory": "D:\\果铃并行\\20261007-content-revision\\e\\output\\content-revision\\t08-paint\\run-ZbfB6L",
+  "sourcePaint": {
+    "red": [
+      247,
+      127,
+      127
+    ],
+    "blue": [
+      127,
+      127,
+      247
+    ],
+    "clipCorner": [
+      255,
+      255,
+      255
+    ],
+    "clipInside": [
+      164,
+      48,
+      181
+    ],
+    "pseudoContent": "\"① \"",
+    "rgbaColor": "rgba(18, 52, 86, 0.5)",
+    "redGlyphPixels": 91,
+    "alphaGlyphPixels": 125
+  },
+  "playerPaint": {
+    "red": [
+      247,
+      127,
+      127
+    ],
+    "blue": [
+      127,
+      127,
+      247
+    ],
+    "clipCorner": [
+      255,
+      255,
+      255
+    ],
+    "clipInside": [
+      164,
+      48,
+      181
+    ],
+    "pseudoContent": "\"① \"",
+    "rgbaColor": "rgba(18, 52, 86, 0.5)",
+    "redGlyphPixels": 40,
+    "alphaGlyphPixels": 49
+  },
+  "interaction-open": {
+    "outer": {
+      "playwrightBox": {
+        "x": 413,
+        "y": 176.890625,
+        "width": 788,
+        "height": 495.47283935546875
+      },
+      "dom": {
+        "window": {
+          "innerWidth": 1614,
+          "innerHeight": 1036,
+          "scrollX": 0,
+          "scrollY": 0,
+          "devicePixelRatio": 2
+        },
+        "ancestors": [
+          {
+            "tag": "IFRAME",
+            "className": "",
+            "rect": {
+              "x": 413,
+              "y": 176.890625,
+              "width": 788,
+              "height": 495.47283935546875,
+              "top": 176.890625,
+              "right": 1201,
+              "bottom": 672.3634643554688,
+              "left": 413
+            },
+            "clientWidth": 994,
+            "clientHeight": 625,
+            "offsetWidth": 994,
+            "offsetHeight": 625,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "497px 312.5px",
+            "zoom": "1",
+            "width": "994px",
+            "height": "625px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "clip",
+            "overflowY": "clip",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 413,
+              "y": 176.890625,
+              "width": 788,
+              "height": 495.47283935546875,
+              "top": 176.890625,
+              "right": 1201,
+              "bottom": 672.3634643554688,
+              "left": 413
+            },
+            "clientWidth": 994,
+            "clientHeight": 625,
+            "offsetWidth": 994,
+            "offsetHeight": 625,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "497px 312.5px",
+            "zoom": "1",
+            "width": "994px",
+            "height": "625px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 413,
+              "y": 176.890625,
+              "width": 788,
+              "height": 495.47283935546875,
+              "top": 176.890625,
+              "right": 1201,
+              "bottom": 672.3634643554688,
+              "left": 413
+            },
+            "clientWidth": 994,
+            "clientHeight": 625,
+            "offsetWidth": 994,
+            "offsetHeight": 625,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "497px 312.5px",
+            "zoom": "1",
+            "width": "994px",
+            "height": "625px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 413,
+              "y": 176.890625,
+              "width": 788,
+              "height": 495.47283935546875,
+              "top": 176.890625,
+              "right": 1201,
+              "bottom": 672.3634643554688,
+              "left": 413
+            },
+            "clientWidth": 994,
+            "clientHeight": 625,
+            "offsetWidth": 994,
+            "offsetHeight": 625,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "matrix(0.792757, 0, 0, 0.792757, 0, 0)",
+            "transformOrigin": "0px 0px",
+            "zoom": "1",
+            "width": "994px",
+            "height": "625px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 413,
+              "y": 176.890625,
+              "width": 788,
+              "height": 495.46875,
+              "top": 176.890625,
+              "right": 1201,
+              "bottom": 672.359375,
+              "left": 413
+            },
+            "clientWidth": 788,
+            "clientHeight": 495,
+            "offsetWidth": 788,
+            "offsetHeight": 495,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "394px 247.734px",
+            "zoom": "1",
+            "width": "788px",
+            "height": "495.469px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 413,
+              "y": 176.890625,
+              "width": 788,
+              "height": 495.46875,
+              "top": 176.890625,
+              "right": 1201,
+              "bottom": 672.359375,
+              "left": 413
+            },
+            "clientWidth": 788,
+            "clientHeight": 495,
+            "offsetWidth": 788,
+            "offsetHeight": 495,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "394px 247.734px",
+            "zoom": "1",
+            "width": "788px",
+            "height": "495.469px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 413,
+              "y": 131.296875,
+              "width": 788,
+              "height": 553.0625,
+              "top": 131.296875,
+              "right": 1201,
+              "bottom": 684.359375,
+              "left": 413
+            },
+            "clientWidth": 788,
+            "clientHeight": 553,
+            "offsetWidth": 788,
+            "offsetHeight": 553,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "394px 276.531px",
+            "zoom": "1",
+            "width": "788px",
+            "height": "553.062px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "1",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "ARTICLE",
+            "className": "",
+            "rect": {
+              "x": 377,
+              "y": 103.296875,
+              "width": 860,
+              "height": 884.703125,
+              "top": 103.296875,
+              "right": 1237,
+              "bottom": 988,
+              "left": 377
+            },
+            "clientWidth": 860,
+            "clientHeight": 885,
+            "offsetWidth": 860,
+            "offsetHeight": 885,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "430px 442.352px",
+            "zoom": "1",
+            "width": "860px",
+            "height": "884.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 478.352px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "auto",
+            "overflowY": "auto",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "matrix(1, 0, 0, 1, 0, 0)",
+            "transformOrigin": "0px 0px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "matrix(1, 0, 0, 1, 0, 0)",
+            "transformOrigin": "0px 0px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 478.352px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "clip",
+            "overflowY": "clip",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 478.352px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "clip",
+            "overflowY": "clip",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 478.352px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 478.352px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "none",
+            "visibility": "visible",
+            "zIndex": "1",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "0px 0px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "course-preview-host",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 478.352px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "5",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "course-preview-viewport",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 478.352px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "SECTION",
+            "className": "course-preview-shell",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 1614,
+              "height": 1036,
+              "top": 0,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 1036,
+            "offsetWidth": 1614,
+            "offsetHeight": 1036,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 518px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "1036px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "modal-backdrop course-preview-overlay",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 1614,
+              "height": 1036,
+              "top": 0,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 1036,
+            "offsetWidth": 1614,
+            "offsetHeight": 1036,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 518px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "1036px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "200",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "app-shell course-editor-frame course-editor-frame--light",
+            "rect": {
+              "x": 221,
+              "y": 101.5,
+              "width": 1038,
+              "height": 934.5,
+              "top": 101.5,
+              "right": 1259,
+              "bottom": 1036,
+              "left": 221
+            },
+            "clientWidth": 1038,
+            "clientHeight": 935,
+            "offsetWidth": 1038,
+            "offsetHeight": 935,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "519px 467.25px",
+            "zoom": "1",
+            "width": "1038px",
+            "height": "934.5px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "lesson-course-tab",
+            "rect": {
+              "x": 221,
+              "y": 101.5,
+              "width": 1038,
+              "height": 934.5,
+              "top": 101.5,
+              "right": 1259,
+              "bottom": 1036,
+              "left": 221
+            },
+            "clientWidth": 1038,
+            "clientHeight": 935,
+            "offsetWidth": 1038,
+            "offsetHeight": 935,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "519px 467.25px",
+            "zoom": "1",
+            "width": "1038px",
+            "height": "934.5px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "auto",
+            "overflowY": "auto",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "SECTION",
+            "className": "lesson-workspace-workbench",
+            "rect": {
+              "x": 221,
+              "y": 52,
+              "width": 1038,
+              "height": 984,
+              "top": 52,
+              "right": 1259,
+              "bottom": 1036,
+              "left": 221
+            },
+            "clientWidth": 1038,
+            "clientHeight": 984,
+            "offsetWidth": 1038,
+            "offsetHeight": 984,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "519px 492px",
+            "zoom": "1",
+            "width": "1038px",
+            "height": "984px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "workspace-region workspace-region--content",
+            "rect": {
+              "x": 221,
+              "y": 52,
+              "width": 1038,
+              "height": 984,
+              "top": 52,
+              "right": 1259,
+              "bottom": 1036,
+              "left": 221
+            },
+            "clientWidth": 1038,
+            "clientHeight": 984,
+            "offsetWidth": 1038,
+            "offsetHeight": 984,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "519px 492px",
+            "zoom": "1",
+            "width": "1038px",
+            "height": "984px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "lesson-workspace-columns workspace-grid",
+            "rect": {
+              "x": 0,
+              "y": 52,
+              "width": 1614,
+              "height": 984,
+              "top": 52,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 984,
+            "offsetWidth": 1614,
+            "offsetHeight": 984,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 492px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "984px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "lesson-workspace-shell",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 1614,
+              "height": 1036,
+              "top": 0,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 1036,
+            "offsetWidth": 1614,
+            "offsetHeight": 1036,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 518px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "1036px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 1614,
+              "height": 1036,
+              "top": 0,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 1036,
+            "offsetWidth": 1614,
+            "offsetHeight": 1036,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 518px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "1036px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "BODY",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 1614,
+              "height": 1036,
+              "top": 0,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 1036,
+            "offsetWidth": 1614,
+            "offsetHeight": 1036,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 518px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "1036px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "HTML",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 1614,
+              "height": 1036,
+              "top": 0,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 1036,
+            "offsetWidth": 1614,
+            "offsetHeight": 1036,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 518px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "1036px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          }
+        ]
+      }
+    },
+    "inner": {
+      "rect": {
+        "x": 35,
+        "y": 298.9375,
+        "width": 909,
+        "height": 27,
+        "top": 298.9375,
+        "right": 944,
+        "bottom": 325.9375,
+        "left": 35
+      },
+      "scrollX": 0,
+      "scrollY": 537,
+      "innerWidth": 994,
+      "innerHeight": 625
+    },
+    "mapped": {
+      "scaleX": 0.7927565392354124,
+      "scaleY": 0.79275654296875,
+      "screen": {
+        "x": 440.7464788732394,
+        "y": 413.8752840637207,
+        "width": 720.6156941649899,
+        "height": 21.40442666015625
+      }
+    },
+    "point": {
+      "x": 801.0543259557344,
+      "y": 424.5774973937988
+    },
+    "topHits": [
+      {
+        "tag": "IFRAME",
+        "id": "",
+        "className": null,
+        "title": "组件内容",
+        "rect": {
+          "x": 413,
+          "y": 176.890625,
+          "width": 788,
+          "height": 495.47283935546875,
+          "top": 176.890625,
+          "right": 1201,
+          "bottom": 672.3634643554688,
+          "left": 413
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 413,
+          "y": 176.890625,
+          "width": 788,
+          "height": 495.47283935546875,
+          "top": 176.890625,
+          "right": 1201,
+          "bottom": 672.3634643554688,
+          "left": 413
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 413,
+          "y": 176.890625,
+          "width": 788,
+          "height": 495.47283935546875,
+          "top": 176.890625,
+          "right": 1201,
+          "bottom": 672.3634643554688,
+          "left": 413
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 413,
+          "y": 176.890625,
+          "width": 788,
+          "height": 495.47283935546875,
+          "top": 176.890625,
+          "right": 1201,
+          "bottom": 672.3634643554688,
+          "left": 413
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 413,
+          "y": 176.890625,
+          "width": 788,
+          "height": 495.46875,
+          "top": 176.890625,
+          "right": 1201,
+          "bottom": 672.359375,
+          "left": 413
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 413,
+          "y": 176.890625,
+          "width": 788,
+          "height": 495.46875,
+          "top": 176.890625,
+          "right": 1201,
+          "bottom": 672.359375,
+          "left": 413
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 413,
+          "y": 131.296875,
+          "width": 788,
+          "height": 553.0625,
+          "top": 131.296875,
+          "right": 1201,
+          "bottom": 684.359375,
+          "left": 413
+        },
+        "pointerEvents": "auto",
+        "zIndex": "1",
+        "text": "局部修订说明"
+      },
+      {
+        "tag": "ARTICLE",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 377,
+          "y": 103.296875,
+          "width": 860,
+          "height": 884.703125,
+          "top": 103.296875,
+          "right": 1237,
+          "bottom": 988,
+          "left": 377
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": "局部修订说明人工浮层保持位置"
+      }
+    ],
+    "childHits": {
+      "summaryHit": true,
+      "hits": [
+        {
+          "tag": "SUMMARY",
+          "id": "",
+          "className": null,
+          "rect": {
+            "x": 35,
+            "y": 298.9375,
+            "width": 909,
+            "height": 27,
+            "top": 298.9375,
+            "right": 944,
+            "bottom": 325.9375,
+            "left": 35
+          },
+          "pointerEvents": "auto",
+          "zIndex": "auto",
+          "text": "点击查看核心互动"
+        },
+        {
+          "tag": "DETAILS",
+          "id": "answer",
+          "className": null,
+          "rect": {
+            "x": 24,
+            "y": 287.9375,
+            "width": 931,
+            "height": 49,
+            "top": 287.9375,
+            "right": 955,
+            "bottom": 336.9375,
+            "left": 24
+          },
+          "pointerEvents": "auto",
+          "zIndex": "auto",
+          "text": "点击查看核心互动展开后答案可见，保存冷开仍可展开和关闭。"
+        },
+        {
+          "tag": "BODY",
+          "id": "",
+          "className": null,
+          "rect": {
+            "x": 0,
+            "y": -537,
+            "width": 979,
+            "height": 1934.9375,
+            "top": -537,
+            "right": 979,
+            "bottom": 1397.9375,
+            "left": 0
+          },
+          "pointerEvents": "auto",
+          "zIndex": "auto",
+          "text": "\n  滚动正文时此标题保持在视口顶部\n  源网页与 V10 同样本对照\n  \n    伪元素题号题号与正文都可见。半透明说明\n    relative z:auto 绘制橙色定位块蓝色后文背景\n    整组透明合成红色父背景蓝色子块\n   "
+        },
+        {
+          "tag": "HTML",
+          "id": "",
+          "className": null,
+          "rect": {
+            "x": 0,
+            "y": -537,
+            "width": 979,
+            "height": 1934.9375,
+            "top": -537,
+            "right": 979,
+            "bottom": 1397.9375,
+            "left": 0
+          },
+          "pointerEvents": "auto",
+          "zIndex": "auto",
+          "text": "(function(){const authored=(function an(e){let t=[],n=t=>t.replace(/cw-resource:[a-zA-Z0-9_.-]+/g,t=>e.resources[e.resou"
+        }
+      ],
+      "open": false
+    },
+    "after": {
+      "rect": {
+        "x": 35,
+        "y": 298.9375,
+        "width": 909,
+        "height": 27,
+        "top": 298.9375,
+        "right": 944,
+        "bottom": 325.9375,
+        "left": 35
+      },
+      "scrollX": 0,
+      "scrollY": 537,
+      "open": true,
+      "activeTag": "SUMMARY",
+      "events": [
+        {
+          "type": "pointerdown",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489.5,
+          "clientY": 312.296875,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "pointerdown",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489.5,
+          "clientY": 312.296875,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "mousedown",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489,
+          "clientY": 312,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "mousedown",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489,
+          "clientY": 312,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "pointerup",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489.5,
+          "clientY": 312.296875,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "pointerup",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489.5,
+          "clientY": 312.296875,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "mouseup",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489,
+          "clientY": 312,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "mouseup",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489,
+          "clientY": 312,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "click",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489,
+          "clientY": 312,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "click",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489,
+          "clientY": 312,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "toggle",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "path": [
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动展开后答案可见，保存冷开仍可展开和关闭。",
+          "answerOpen": true
+        }
+      ]
+    },
+    "topEvents": []
+  },
+  "interaction-close": {
+    "outer": {
+      "playwrightBox": {
+        "x": 413,
+        "y": 176.890625,
+        "width": 788,
+        "height": 495.47283935546875
+      },
+      "dom": {
+        "window": {
+          "innerWidth": 1614,
+          "innerHeight": 1036,
+          "scrollX": 0,
+          "scrollY": 0,
+          "devicePixelRatio": 2
+        },
+        "ancestors": [
+          {
+            "tag": "IFRAME",
+            "className": "",
+            "rect": {
+              "x": 413,
+              "y": 176.890625,
+              "width": 788,
+              "height": 495.47283935546875,
+              "top": 176.890625,
+              "right": 1201,
+              "bottom": 672.3634643554688,
+              "left": 413
+            },
+            "clientWidth": 994,
+            "clientHeight": 625,
+            "offsetWidth": 994,
+            "offsetHeight": 625,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "497px 312.5px",
+            "zoom": "1",
+            "width": "994px",
+            "height": "625px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "clip",
+            "overflowY": "clip",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 413,
+              "y": 176.890625,
+              "width": 788,
+              "height": 495.47283935546875,
+              "top": 176.890625,
+              "right": 1201,
+              "bottom": 672.3634643554688,
+              "left": 413
+            },
+            "clientWidth": 994,
+            "clientHeight": 625,
+            "offsetWidth": 994,
+            "offsetHeight": 625,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "497px 312.5px",
+            "zoom": "1",
+            "width": "994px",
+            "height": "625px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 413,
+              "y": 176.890625,
+              "width": 788,
+              "height": 495.47283935546875,
+              "top": 176.890625,
+              "right": 1201,
+              "bottom": 672.3634643554688,
+              "left": 413
+            },
+            "clientWidth": 994,
+            "clientHeight": 625,
+            "offsetWidth": 994,
+            "offsetHeight": 625,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "497px 312.5px",
+            "zoom": "1",
+            "width": "994px",
+            "height": "625px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 413,
+              "y": 176.890625,
+              "width": 788,
+              "height": 495.47283935546875,
+              "top": 176.890625,
+              "right": 1201,
+              "bottom": 672.3634643554688,
+              "left": 413
+            },
+            "clientWidth": 994,
+            "clientHeight": 625,
+            "offsetWidth": 994,
+            "offsetHeight": 625,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "matrix(0.792757, 0, 0, 0.792757, 0, 0)",
+            "transformOrigin": "0px 0px",
+            "zoom": "1",
+            "width": "994px",
+            "height": "625px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 413,
+              "y": 176.890625,
+              "width": 788,
+              "height": 495.46875,
+              "top": 176.890625,
+              "right": 1201,
+              "bottom": 672.359375,
+              "left": 413
+            },
+            "clientWidth": 788,
+            "clientHeight": 495,
+            "offsetWidth": 788,
+            "offsetHeight": 495,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "394px 247.734px",
+            "zoom": "1",
+            "width": "788px",
+            "height": "495.469px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 413,
+              "y": 176.890625,
+              "width": 788,
+              "height": 495.46875,
+              "top": 176.890625,
+              "right": 1201,
+              "bottom": 672.359375,
+              "left": 413
+            },
+            "clientWidth": 788,
+            "clientHeight": 495,
+            "offsetWidth": 788,
+            "offsetHeight": 495,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "394px 247.734px",
+            "zoom": "1",
+            "width": "788px",
+            "height": "495.469px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 413,
+              "y": 131.296875,
+              "width": 788,
+              "height": 553.0625,
+              "top": 131.296875,
+              "right": 1201,
+              "bottom": 684.359375,
+              "left": 413
+            },
+            "clientWidth": 788,
+            "clientHeight": 553,
+            "offsetWidth": 788,
+            "offsetHeight": 553,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "394px 276.531px",
+            "zoom": "1",
+            "width": "788px",
+            "height": "553.062px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "1",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "ARTICLE",
+            "className": "",
+            "rect": {
+              "x": 377,
+              "y": 103.296875,
+              "width": 860,
+              "height": 884.703125,
+              "top": 103.296875,
+              "right": 1237,
+              "bottom": 988,
+              "left": 377
+            },
+            "clientWidth": 860,
+            "clientHeight": 885,
+            "offsetWidth": 860,
+            "offsetHeight": 885,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "430px 442.352px",
+            "zoom": "1",
+            "width": "860px",
+            "height": "884.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 478.352px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "auto",
+            "overflowY": "auto",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "matrix(1, 0, 0, 1, 0, 0)",
+            "transformOrigin": "0px 0px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "matrix(1, 0, 0, 1, 0, 0)",
+            "transformOrigin": "0px 0px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 478.352px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "clip",
+            "overflowY": "clip",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 478.352px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "clip",
+            "overflowY": "clip",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 478.352px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 478.352px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "none",
+            "visibility": "visible",
+            "zIndex": "1",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "0px 0px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "course-preview-host",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 478.352px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "5",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "course-preview-viewport",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 478.352px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "SECTION",
+            "className": "course-preview-shell",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 1614,
+              "height": 1036,
+              "top": 0,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 1036,
+            "offsetWidth": 1614,
+            "offsetHeight": 1036,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 518px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "1036px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "modal-backdrop course-preview-overlay",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 1614,
+              "height": 1036,
+              "top": 0,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 1036,
+            "offsetWidth": 1614,
+            "offsetHeight": 1036,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 518px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "1036px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "200",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "app-shell course-editor-frame course-editor-frame--light",
+            "rect": {
+              "x": 221,
+              "y": 101.5,
+              "width": 1038,
+              "height": 934.5,
+              "top": 101.5,
+              "right": 1259,
+              "bottom": 1036,
+              "left": 221
+            },
+            "clientWidth": 1038,
+            "clientHeight": 935,
+            "offsetWidth": 1038,
+            "offsetHeight": 935,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "519px 467.25px",
+            "zoom": "1",
+            "width": "1038px",
+            "height": "934.5px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "lesson-course-tab",
+            "rect": {
+              "x": 221,
+              "y": 101.5,
+              "width": 1038,
+              "height": 934.5,
+              "top": 101.5,
+              "right": 1259,
+              "bottom": 1036,
+              "left": 221
+            },
+            "clientWidth": 1038,
+            "clientHeight": 935,
+            "offsetWidth": 1038,
+            "offsetHeight": 935,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "519px 467.25px",
+            "zoom": "1",
+            "width": "1038px",
+            "height": "934.5px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "auto",
+            "overflowY": "auto",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "SECTION",
+            "className": "lesson-workspace-workbench",
+            "rect": {
+              "x": 221,
+              "y": 52,
+              "width": 1038,
+              "height": 984,
+              "top": 52,
+              "right": 1259,
+              "bottom": 1036,
+              "left": 221
+            },
+            "clientWidth": 1038,
+            "clientHeight": 984,
+            "offsetWidth": 1038,
+            "offsetHeight": 984,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "519px 492px",
+            "zoom": "1",
+            "width": "1038px",
+            "height": "984px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "workspace-region workspace-region--content",
+            "rect": {
+              "x": 221,
+              "y": 52,
+              "width": 1038,
+              "height": 984,
+              "top": 52,
+              "right": 1259,
+              "bottom": 1036,
+              "left": 221
+            },
+            "clientWidth": 1038,
+            "clientHeight": 984,
+            "offsetWidth": 1038,
+            "offsetHeight": 984,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "519px 492px",
+            "zoom": "1",
+            "width": "1038px",
+            "height": "984px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "lesson-workspace-columns workspace-grid",
+            "rect": {
+              "x": 0,
+              "y": 52,
+              "width": 1614,
+              "height": 984,
+              "top": 52,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 984,
+            "offsetWidth": 1614,
+            "offsetHeight": 984,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 492px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "984px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "lesson-workspace-shell",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 1614,
+              "height": 1036,
+              "top": 0,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 1036,
+            "offsetWidth": 1614,
+            "offsetHeight": 1036,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 518px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "1036px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 1614,
+              "height": 1036,
+              "top": 0,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 1036,
+            "offsetWidth": 1614,
+            "offsetHeight": 1036,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 518px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "1036px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "BODY",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 1614,
+              "height": 1036,
+              "top": 0,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 1036,
+            "offsetWidth": 1614,
+            "offsetHeight": 1036,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 518px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "1036px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "HTML",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 1614,
+              "height": 1036,
+              "top": 0,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 1036,
+            "offsetWidth": 1614,
+            "offsetHeight": 1036,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 518px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "1036px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          }
+        ]
+      }
+    },
+    "inner": {
+      "rect": {
+        "x": 35,
+        "y": 298.9375,
+        "width": 909,
+        "height": 27,
+        "top": 298.9375,
+        "right": 944,
+        "bottom": 325.9375,
+        "left": 35
+      },
+      "scrollX": 0,
+      "scrollY": 537,
+      "innerWidth": 994,
+      "innerHeight": 625
+    },
+    "mapped": {
+      "scaleX": 0.7927565392354124,
+      "scaleY": 0.79275654296875,
+      "screen": {
+        "x": 440.7464788732394,
+        "y": 413.8752840637207,
+        "width": 720.6156941649899,
+        "height": 21.40442666015625
+      }
+    },
+    "point": {
+      "x": 801.0543259557344,
+      "y": 424.5774973937988
+    },
+    "topHits": [
+      {
+        "tag": "IFRAME",
+        "id": "",
+        "className": null,
+        "title": "组件内容",
+        "rect": {
+          "x": 413,
+          "y": 176.890625,
+          "width": 788,
+          "height": 495.47283935546875,
+          "top": 176.890625,
+          "right": 1201,
+          "bottom": 672.3634643554688,
+          "left": 413
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 413,
+          "y": 176.890625,
+          "width": 788,
+          "height": 495.47283935546875,
+          "top": 176.890625,
+          "right": 1201,
+          "bottom": 672.3634643554688,
+          "left": 413
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 413,
+          "y": 176.890625,
+          "width": 788,
+          "height": 495.47283935546875,
+          "top": 176.890625,
+          "right": 1201,
+          "bottom": 672.3634643554688,
+          "left": 413
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 413,
+          "y": 176.890625,
+          "width": 788,
+          "height": 495.47283935546875,
+          "top": 176.890625,
+          "right": 1201,
+          "bottom": 672.3634643554688,
+          "left": 413
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 413,
+          "y": 176.890625,
+          "width": 788,
+          "height": 495.46875,
+          "top": 176.890625,
+          "right": 1201,
+          "bottom": 672.359375,
+          "left": 413
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 413,
+          "y": 176.890625,
+          "width": 788,
+          "height": 495.46875,
+          "top": 176.890625,
+          "right": 1201,
+          "bottom": 672.359375,
+          "left": 413
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 413,
+          "y": 131.296875,
+          "width": 788,
+          "height": 553.0625,
+          "top": 131.296875,
+          "right": 1201,
+          "bottom": 684.359375,
+          "left": 413
+        },
+        "pointerEvents": "auto",
+        "zIndex": "1",
+        "text": "局部修订说明"
+      },
+      {
+        "tag": "ARTICLE",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 377,
+          "y": 103.296875,
+          "width": 860,
+          "height": 884.703125,
+          "top": 103.296875,
+          "right": 1237,
+          "bottom": 988,
+          "left": 377
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": "局部修订说明人工浮层保持位置"
+      }
+    ],
+    "childHits": {
+      "summaryHit": true,
+      "hits": [
+        {
+          "tag": "SUMMARY",
+          "id": "",
+          "className": null,
+          "rect": {
+            "x": 35,
+            "y": 298.9375,
+            "width": 909,
+            "height": 27,
+            "top": 298.9375,
+            "right": 944,
+            "bottom": 325.9375,
+            "left": 35
+          },
+          "pointerEvents": "auto",
+          "zIndex": "auto",
+          "text": "点击查看核心互动"
+        },
+        {
+          "tag": "DETAILS",
+          "id": "answer",
+          "className": null,
+          "rect": {
+            "x": 24,
+            "y": 287.9375,
+            "width": 931,
+            "height": 112,
+            "top": 287.9375,
+            "right": 955,
+            "bottom": 399.9375,
+            "left": 24
+          },
+          "pointerEvents": "auto",
+          "zIndex": "auto",
+          "text": "点击查看核心互动展开后答案可见，保存冷开仍可展开和关闭。"
+        },
+        {
+          "tag": "BODY",
+          "id": "",
+          "className": null,
+          "rect": {
+            "x": 0,
+            "y": -537,
+            "width": 979,
+            "height": 1997.9375,
+            "top": -537,
+            "right": 979,
+            "bottom": 1460.9375,
+            "left": 0
+          },
+          "pointerEvents": "auto",
+          "zIndex": "auto",
+          "text": "\n  滚动正文时此标题保持在视口顶部\n  源网页与 V10 同样本对照\n  \n    伪元素题号题号与正文都可见。半透明说明\n    relative z:auto 绘制橙色定位块蓝色后文背景\n    整组透明合成红色父背景蓝色子块\n   "
+        },
+        {
+          "tag": "HTML",
+          "id": "",
+          "className": null,
+          "rect": {
+            "x": 0,
+            "y": -537,
+            "width": 979,
+            "height": 1997.9375,
+            "top": -537,
+            "right": 979,
+            "bottom": 1460.9375,
+            "left": 0
+          },
+          "pointerEvents": "auto",
+          "zIndex": "auto",
+          "text": "(function(){const authored=(function an(e){let t=[],n=t=>t.replace(/cw-resource:[a-zA-Z0-9_.-]+/g,t=>e.resources[e.resou"
+        }
+      ],
+      "open": true
+    },
+    "after": {
+      "rect": {
+        "x": 35,
+        "y": 298.9375,
+        "width": 909,
+        "height": 27,
+        "top": 298.9375,
+        "right": 944,
+        "bottom": 325.9375,
+        "left": 35
+      },
+      "scrollX": 0,
+      "scrollY": 537,
+      "open": false,
+      "activeTag": "SUMMARY",
+      "events": [
+        {
+          "type": "pointerdown",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489.5,
+          "clientY": 312.296875,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "pointerdown",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489.5,
+          "clientY": 312.296875,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "mousedown",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489,
+          "clientY": 312,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "mousedown",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489,
+          "clientY": 312,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "pointerup",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489.5,
+          "clientY": 312.296875,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "pointerup",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489.5,
+          "clientY": 312.296875,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "mouseup",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489,
+          "clientY": 312,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "mouseup",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489,
+          "clientY": 312,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "click",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489,
+          "clientY": 312,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "click",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489,
+          "clientY": 312,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": false
+        },
+        {
+          "type": "toggle",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "path": [
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动展开后答案可见，保存冷开仍可展开和关闭。",
+          "answerOpen": true
+        },
+        {
+          "type": "pointerdown",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489.5,
+          "clientY": 312.296875,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": true
+        },
+        {
+          "type": "pointerdown",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489.5,
+          "clientY": 312.296875,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": true
+        },
+        {
+          "type": "mousedown",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489,
+          "clientY": 312,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": true
+        },
+        {
+          "type": "mousedown",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489,
+          "clientY": 312,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": true
+        },
+        {
+          "type": "pointerup",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489.5,
+          "clientY": 312.296875,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": true
+        },
+        {
+          "type": "pointerup",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489.5,
+          "clientY": 312.296875,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": true
+        },
+        {
+          "type": "mouseup",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489,
+          "clientY": 312,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": true
+        },
+        {
+          "type": "mouseup",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489,
+          "clientY": 312,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": true
+        },
+        {
+          "type": "click",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489,
+          "clientY": 312,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": true
+        },
+        {
+          "type": "click",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 489,
+          "clientY": 312,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动",
+          "answerOpen": true
+        },
+        {
+          "type": "toggle",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "path": [
+            {
+              "tag": "DETAILS",
+              "id": "answer",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "点击查看核心互动展开后答案可见，保存冷开仍可展开和关闭。",
+          "answerOpen": false
+        }
+      ]
+    },
+    "topEvents": []
+  },
+  "interaction": {
+    "openedAndClosed": true
+  },
+  "localFlowPreserved": {
+    "programId": "0617ff35-b0a6-4e53-b891-98a5f74a93c1",
+    "humanFrame": {
+      "width": 220,
+      "height": 60,
+      "transform": [
+        1,
+        0,
+        0,
+        1,
+        430,
+        180
+      ]
+    }
+  },
+  "interaction-nested-child": {
+    "outer": {
+      "playwrightBox": {
+        "x": 299.0538330078125,
+        "y": 285.4199523925781,
+        "width": 530.03076171875,
+        "height": 176.67691040039062
+      },
+      "dom": {
+        "window": {
+          "innerWidth": 1614,
+          "innerHeight": 1036,
+          "scrollX": 0,
+          "scrollY": 0,
+          "devicePixelRatio": 2
+        },
+        "ancestors": [
+          {
+            "tag": "IFRAME",
+            "className": "",
+            "rect": {
+              "x": 299.0538330078125,
+              "y": 285.4199523925781,
+              "width": 530.03076171875,
+              "height": 176.67691040039062,
+              "top": 285.4199523925781,
+              "right": 829.0845947265625,
+              "bottom": 462.09686279296875,
+              "left": 299.0538330078125
+            },
+            "clientWidth": 360,
+            "clientHeight": 120,
+            "offsetWidth": 360,
+            "offsetHeight": 120,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "180px 60px",
+            "zoom": "1",
+            "width": "360px",
+            "height": "120px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "clip",
+            "overflowY": "clip",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 299.0538330078125,
+              "y": 285.4199523925781,
+              "width": 530.03076171875,
+              "height": 176.67691040039062,
+              "top": 285.4199523925781,
+              "right": 829.0845947265625,
+              "bottom": 462.09686279296875,
+              "left": 299.0538330078125
+            },
+            "clientWidth": 360,
+            "clientHeight": 120,
+            "offsetWidth": 360,
+            "offsetHeight": 120,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "180px 60px",
+            "zoom": "1",
+            "width": "360px",
+            "height": "120px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 299.0538330078125,
+              "y": 285.4199523925781,
+              "width": 530.03076171875,
+              "height": 176.67691040039062,
+              "top": 285.4199523925781,
+              "right": 829.0845947265625,
+              "bottom": 462.09686279296875,
+              "left": 299.0538330078125
+            },
+            "clientWidth": 360,
+            "clientHeight": 120,
+            "offsetWidth": 360,
+            "offsetHeight": 120,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "180px 60px",
+            "zoom": "1",
+            "width": "360px",
+            "height": "120px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 299.0538330078125,
+              "y": 285.4199523925781,
+              "width": 530.03076171875,
+              "height": 176.67691040039062,
+              "top": 285.4199523925781,
+              "right": 829.0845947265625,
+              "bottom": 462.09686279296875,
+              "left": 299.0538330078125
+            },
+            "clientWidth": 360,
+            "clientHeight": 120,
+            "offsetWidth": 360,
+            "offsetHeight": 120,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "180px 60px",
+            "zoom": "1",
+            "width": "360px",
+            "height": "120px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 299.0538330078125,
+              "y": 285.4199523925781,
+              "width": 530.03076171875,
+              "height": 176.67691040039062,
+              "top": 285.4199523925781,
+              "right": 829.0845947265625,
+              "bottom": 462.09686279296875,
+              "left": 299.0538330078125
+            },
+            "clientWidth": 360,
+            "clientHeight": 120,
+            "offsetWidth": 360,
+            "offsetHeight": 120,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "180px 60px",
+            "zoom": "1",
+            "width": "360px",
+            "height": "120px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 299.0538330078125,
+              "y": 285.4199523925781,
+              "width": 530.03076171875,
+              "height": 176.67691040039062,
+              "top": 285.4199523925781,
+              "right": 829.0845947265625,
+              "bottom": 462.09686279296875,
+              "left": 299.0538330078125
+            },
+            "clientWidth": 360,
+            "clientHeight": 120,
+            "offsetWidth": 360,
+            "offsetHeight": 120,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "matrix(1, 0, 0, 1, 35, 40)",
+            "transformOrigin": "0px 0px",
+            "zoom": "1",
+            "width": "360px",
+            "height": "120px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 247.5230712890625,
+              "y": 226.52764892578125,
+              "width": 0,
+              "height": 0,
+              "top": 226.52764892578125,
+              "right": 247.5230712890625,
+              "bottom": 226.52764892578125,
+              "left": 247.5230712890625
+            },
+            "clientWidth": 0,
+            "clientHeight": 0,
+            "offsetWidth": 0,
+            "offsetHeight": 0,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "0px 0px",
+            "zoom": "1",
+            "width": "0px",
+            "height": "0px",
+            "pointerEvents": "none",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 247.5230712890625,
+              "y": 226.52764892578125,
+              "width": 736.15380859375,
+              "height": 323.90765380859375,
+              "top": 226.52764892578125,
+              "right": 983.6768798828125,
+              "bottom": 550.435302734375,
+              "left": 247.5230712890625
+            },
+            "clientWidth": 500,
+            "clientHeight": 220,
+            "offsetWidth": 500,
+            "offsetHeight": 220,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "250px 110px",
+            "zoom": "1",
+            "width": "500px",
+            "height": "220px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 247.5230712890625,
+              "y": 226.52764892578125,
+              "width": 736.15380859375,
+              "height": 323.90765380859375,
+              "top": 226.52764892578125,
+              "right": 983.6768798828125,
+              "bottom": 550.435302734375,
+              "left": 247.5230712890625
+            },
+            "clientWidth": 500,
+            "clientHeight": 220,
+            "offsetWidth": 500,
+            "offsetHeight": 220,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "matrix(1, 0, 0, 1, 120, 100)",
+            "transformOrigin": "0px 0px",
+            "zoom": "1",
+            "width": "500px",
+            "height": "220px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 70.84615325927734,
+              "y": 79.296875,
+              "width": 1472.3077392578125,
+              "height": 957,
+              "top": 79.296875,
+              "right": 1543.1538925170898,
+              "bottom": 1036.296875,
+              "left": 70.84615325927734
+            },
+            "clientWidth": 1000,
+            "clientHeight": 650,
+            "offsetWidth": 1000,
+            "offsetHeight": 650,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "matrix(1, 0, 0, 1, 0, 0)",
+            "transformOrigin": "0px 0px",
+            "zoom": "1",
+            "width": "1000px",
+            "height": "650px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "clip",
+            "overflowY": "clip",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 70.84615325927734,
+              "y": 79.296875,
+              "width": 1472.3077392578125,
+              "height": 957,
+              "top": 79.296875,
+              "right": 1543.1538925170898,
+              "bottom": 1036.296875,
+              "left": 70.84615325927734
+            },
+            "clientWidth": 1000,
+            "clientHeight": 650,
+            "offsetWidth": 1000,
+            "offsetHeight": 650,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "matrix(1, 0, 0, 1, 0, 0)",
+            "transformOrigin": "0px 0px",
+            "zoom": "1",
+            "width": "1000px",
+            "height": "650px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 70.84615325927734,
+              "y": 79.296875,
+              "width": 1472.3077392578125,
+              "height": 957,
+              "top": 79.296875,
+              "right": 1543.1538925170898,
+              "bottom": 1036.296875,
+              "left": 70.84615325927734
+            },
+            "clientWidth": 1000,
+            "clientHeight": 650,
+            "offsetWidth": 1000,
+            "offsetHeight": 650,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "500px 325px",
+            "zoom": "1",
+            "width": "1000px",
+            "height": "650px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "clip",
+            "overflowY": "clip",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 70.84615325927734,
+              "y": 79.296875,
+              "width": 1472.3077392578125,
+              "height": 957,
+              "top": 79.296875,
+              "right": 1543.1538925170898,
+              "bottom": 1036.296875,
+              "left": 70.84615325927734
+            },
+            "clientWidth": 1000,
+            "clientHeight": 650,
+            "offsetWidth": 1000,
+            "offsetHeight": 650,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "500px 325px",
+            "zoom": "1",
+            "width": "1000px",
+            "height": "650px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "clip",
+            "overflowY": "clip",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 70.84615325927734,
+              "y": 79.296875,
+              "width": 1472.3077392578125,
+              "height": 957,
+              "top": 79.296875,
+              "right": 1543.1538925170898,
+              "bottom": 1036.296875,
+              "left": 70.84615325927734
+            },
+            "clientWidth": 1000,
+            "clientHeight": 650,
+            "offsetWidth": 1000,
+            "offsetHeight": 650,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "500px 325px",
+            "zoom": "1",
+            "width": "1000px",
+            "height": "650px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 70.84615325927734,
+              "y": 79.296875,
+              "width": 1472.3077392578125,
+              "height": 957,
+              "top": 79.296875,
+              "right": 1543.1538925170898,
+              "bottom": 1036.296875,
+              "left": 70.84615325927734
+            },
+            "clientWidth": 1000,
+            "clientHeight": 650,
+            "offsetWidth": 1000,
+            "offsetHeight": 650,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "500px 325px",
+            "zoom": "1",
+            "width": "1000px",
+            "height": "650px",
+            "pointerEvents": "none",
+            "visibility": "visible",
+            "zIndex": "1",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 70.84615325927734,
+              "y": 79.296875,
+              "width": 1472.3077392578125,
+              "height": 957,
+              "top": 79.296875,
+              "right": 1543.1538925170898,
+              "bottom": 1036.296875,
+              "left": 70.84615325927734
+            },
+            "clientWidth": 1000,
+            "clientHeight": 650,
+            "offsetWidth": 1000,
+            "offsetHeight": 650,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "matrix(1.47231, 0, 0, 1.47231, 70.8462, 0)",
+            "transformOrigin": "0px 0px",
+            "zoom": "1",
+            "width": "1000px",
+            "height": "650px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "course-preview-host",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 478.352px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "5",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "course-preview-viewport",
+            "rect": {
+              "x": 0,
+              "y": 79.296875,
+              "width": 1614,
+              "height": 956.703125,
+              "top": 79.296875,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 957,
+            "offsetWidth": 1614,
+            "offsetHeight": 957,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 478.352px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "956.703px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "SECTION",
+            "className": "course-preview-shell",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 1614,
+              "height": 1036,
+              "top": 0,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 1036,
+            "offsetWidth": 1614,
+            "offsetHeight": 1036,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 518px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "1036px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "modal-backdrop course-preview-overlay",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 1614,
+              "height": 1036,
+              "top": 0,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 1036,
+            "offsetWidth": 1614,
+            "offsetHeight": 1036,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 518px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "1036px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "200",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "app-shell course-editor-frame course-editor-frame--light",
+            "rect": {
+              "x": 221,
+              "y": 101.5,
+              "width": 1038,
+              "height": 934.5,
+              "top": 101.5,
+              "right": 1259,
+              "bottom": 1036,
+              "left": 221
+            },
+            "clientWidth": 1038,
+            "clientHeight": 935,
+            "offsetWidth": 1038,
+            "offsetHeight": 935,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "519px 467.25px",
+            "zoom": "1",
+            "width": "1038px",
+            "height": "934.5px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "lesson-course-tab",
+            "rect": {
+              "x": 221,
+              "y": 101.5,
+              "width": 1038,
+              "height": 934.5,
+              "top": 101.5,
+              "right": 1259,
+              "bottom": 1036,
+              "left": 221
+            },
+            "clientWidth": 1038,
+            "clientHeight": 935,
+            "offsetWidth": 1038,
+            "offsetHeight": 935,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "519px 467.25px",
+            "zoom": "1",
+            "width": "1038px",
+            "height": "934.5px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "auto",
+            "overflowY": "auto",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "SECTION",
+            "className": "lesson-workspace-workbench",
+            "rect": {
+              "x": 221,
+              "y": 52,
+              "width": 1038,
+              "height": 984,
+              "top": 52,
+              "right": 1259,
+              "bottom": 1036,
+              "left": 221
+            },
+            "clientWidth": 1038,
+            "clientHeight": 984,
+            "offsetWidth": 1038,
+            "offsetHeight": 984,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "519px 492px",
+            "zoom": "1",
+            "width": "1038px",
+            "height": "984px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "workspace-region workspace-region--content",
+            "rect": {
+              "x": 221,
+              "y": 52,
+              "width": 1038,
+              "height": 984,
+              "top": 52,
+              "right": 1259,
+              "bottom": 1036,
+              "left": 221
+            },
+            "clientWidth": 1038,
+            "clientHeight": 984,
+            "offsetWidth": 1038,
+            "offsetHeight": 984,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "519px 492px",
+            "zoom": "1",
+            "width": "1038px",
+            "height": "984px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "lesson-workspace-columns workspace-grid",
+            "rect": {
+              "x": 0,
+              "y": 52,
+              "width": 1614,
+              "height": 984,
+              "top": 52,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 984,
+            "offsetWidth": 1614,
+            "offsetHeight": 984,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 492px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "984px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "lesson-workspace-shell",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 1614,
+              "height": 1036,
+              "top": 0,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 1036,
+            "offsetWidth": 1614,
+            "offsetHeight": 1036,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 518px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "1036px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "visible",
+            "overflowY": "visible",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "DIV",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 1614,
+              "height": 1036,
+              "top": 0,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 1036,
+            "offsetWidth": 1614,
+            "offsetHeight": 1036,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 518px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "1036px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "BODY",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 1614,
+              "height": 1036,
+              "top": 0,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 1036,
+            "offsetWidth": 1614,
+            "offsetHeight": 1036,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 518px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "1036px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          },
+          {
+            "tag": "HTML",
+            "className": "",
+            "rect": {
+              "x": 0,
+              "y": 0,
+              "width": 1614,
+              "height": 1036,
+              "top": 0,
+              "right": 1614,
+              "bottom": 1036,
+              "left": 0
+            },
+            "clientWidth": 1614,
+            "clientHeight": 1036,
+            "offsetWidth": 1614,
+            "offsetHeight": 1036,
+            "clientLeft": 0,
+            "clientTop": 0,
+            "scrollLeft": 0,
+            "scrollTop": 0,
+            "transform": "none",
+            "transformOrigin": "807px 518px",
+            "zoom": "1",
+            "width": "1614px",
+            "height": "1036px",
+            "pointerEvents": "auto",
+            "visibility": "visible",
+            "zIndex": "auto",
+            "overflowX": "hidden",
+            "overflowY": "hidden",
+            "borderLeftWidth": "0px",
+            "borderTopWidth": "0px"
+          }
+        ]
+      }
+    },
+    "inner": {
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 360,
+        "height": 23,
+        "top": 0,
+        "right": 360,
+        "bottom": 23,
+        "left": 0
+      },
+      "scrollX": 0,
+      "scrollY": 0,
+      "innerWidth": 360,
+      "innerHeight": 120
+    },
+    "mapped": {
+      "scaleX": 1.4723076714409722,
+      "scaleY": 1.4723075866699218,
+      "screen": {
+        "x": 299.0538330078125,
+        "y": 285.4199523925781,
+        "width": 530.03076171875,
+        "height": 33.8630744934082
+      }
+    },
+    "point": {
+      "x": 564.0692138671875,
+      "y": 302.35148963928225
+    },
+    "topHits": [
+      {
+        "tag": "IFRAME",
+        "id": "",
+        "className": null,
+        "title": "组件内容",
+        "rect": {
+          "x": 299.0538330078125,
+          "y": 285.4199523925781,
+          "width": 530.03076171875,
+          "height": 176.67691040039062,
+          "top": 285.4199523925781,
+          "right": 829.0845947265625,
+          "bottom": 462.09686279296875,
+          "left": 299.0538330078125
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 299.0538330078125,
+          "y": 285.4199523925781,
+          "width": 530.03076171875,
+          "height": 176.67691040039062,
+          "top": 285.4199523925781,
+          "right": 829.0845947265625,
+          "bottom": 462.09686279296875,
+          "left": 299.0538330078125
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 299.0538330078125,
+          "y": 285.4199523925781,
+          "width": 530.03076171875,
+          "height": 176.67691040039062,
+          "top": 285.4199523925781,
+          "right": 829.0845947265625,
+          "bottom": 462.09686279296875,
+          "left": 299.0538330078125
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 299.0538330078125,
+          "y": 285.4199523925781,
+          "width": 530.03076171875,
+          "height": 176.67691040039062,
+          "top": 285.4199523925781,
+          "right": 829.0845947265625,
+          "bottom": 462.09686279296875,
+          "left": 299.0538330078125
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 299.0538330078125,
+          "y": 285.4199523925781,
+          "width": 530.03076171875,
+          "height": 176.67691040039062,
+          "top": 285.4199523925781,
+          "right": 829.0845947265625,
+          "bottom": 462.09686279296875,
+          "left": 299.0538330078125
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 299.0538330078125,
+          "y": 285.4199523925781,
+          "width": 530.03076171875,
+          "height": 176.67691040039062,
+          "top": 285.4199523925781,
+          "right": 829.0845947265625,
+          "bottom": 462.09686279296875,
+          "left": 299.0538330078125
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 247.5230712890625,
+          "y": 226.52764892578125,
+          "width": 736.15380859375,
+          "height": 323.90765380859375,
+          "top": 226.52764892578125,
+          "right": 983.6768798828125,
+          "bottom": 550.435302734375,
+          "left": 247.5230712890625
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "id": "",
+        "className": null,
+        "title": null,
+        "rect": {
+          "x": 247.5230712890625,
+          "y": 226.52764892578125,
+          "width": 736.15380859375,
+          "height": 323.90765380859375,
+          "top": 226.52764892578125,
+          "right": 983.6768798828125,
+          "bottom": 550.435302734375,
+          "left": 247.5230712890625
+        },
+        "pointerEvents": "auto",
+        "zIndex": "auto",
+        "text": ""
+      }
+    ],
+    "childHits": {
+      "summaryHit": true,
+      "hits": [
+        {
+          "tag": "SUMMARY",
+          "id": "",
+          "className": null,
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 360,
+            "height": 23,
+            "top": 0,
+            "right": 360,
+            "bottom": 23,
+            "left": 0
+          },
+          "pointerEvents": "auto",
+          "zIndex": "auto",
+          "text": "真实嵌套子对象互动"
+        },
+        {
+          "tag": "DETAILS",
+          "id": "nested-answer",
+          "className": null,
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 360,
+            "height": 23,
+            "top": 0,
+            "right": 360,
+            "bottom": 23,
+            "left": 0
+          },
+          "pointerEvents": "auto",
+          "zIndex": "auto",
+          "text": "真实嵌套子对象互动子对象仍能接收真实鼠标点击。"
+        },
+        {
+          "tag": "DIV",
+          "id": "component-root",
+          "className": null,
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 360,
+            "height": 120,
+            "top": 0,
+            "right": 360,
+            "bottom": 120,
+            "left": 0
+          },
+          "pointerEvents": "auto",
+          "zIndex": "auto",
+          "text": "真实嵌套子对象互动子对象仍能接收真实鼠标点击。"
+        },
+        {
+          "tag": "BODY",
+          "id": "",
+          "className": null,
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 360,
+            "height": 120,
+            "top": 0,
+            "right": 360,
+            "bottom": 120,
+            "left": 0
+          },
+          "pointerEvents": "auto",
+          "zIndex": "auto",
+          "text": "真实嵌套子对象互动子对象仍能接收真实鼠标点击。"
+        },
+        {
+          "tag": "HTML",
+          "id": "",
+          "className": null,
+          "rect": {
+            "x": 0,
+            "y": 0,
+            "width": 360,
+            "height": 120,
+            "top": 0,
+            "right": 360,
+            "bottom": 120,
+            "left": 0
+          },
+          "pointerEvents": "auto",
+          "zIndex": "auto",
+          "text": "html,body,#component-root{width:100%;height:100%;margin:0}(function(){(function sn(e,t,n){let r=Function(`url`,`return i"
+        }
+      ],
+      "open": false
+    },
+    "after": {
+      "rect": {
+        "x": 0,
+        "y": 0,
+        "width": 360,
+        "height": 23,
+        "top": 0,
+        "right": 360,
+        "bottom": 23,
+        "left": 0
+      },
+      "scrollX": 0,
+      "scrollY": 0,
+      "open": true,
+      "activeTag": "SUMMARY",
+      "events": [
+        {
+          "type": "pointerdown",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 180,
+          "clientY": 11.359375,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "nested-answer",
+              "className": null
+            },
+            {
+              "tag": "DIV",
+              "id": "component-root",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "真实嵌套子对象互动"
+        },
+        {
+          "type": "pointerdown",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 180,
+          "clientY": 11.359375,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "nested-answer",
+              "className": null
+            },
+            {
+              "tag": "DIV",
+              "id": "component-root",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "真实嵌套子对象互动"
+        },
+        {
+          "type": "mousedown",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 180,
+          "clientY": 11,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "nested-answer",
+              "className": null
+            },
+            {
+              "tag": "DIV",
+              "id": "component-root",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "真实嵌套子对象互动"
+        },
+        {
+          "type": "mousedown",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 180,
+          "clientY": 11,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "nested-answer",
+              "className": null
+            },
+            {
+              "tag": "DIV",
+              "id": "component-root",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "真实嵌套子对象互动"
+        },
+        {
+          "type": "pointerup",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 180,
+          "clientY": 11.359375,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "nested-answer",
+              "className": null
+            },
+            {
+              "tag": "DIV",
+              "id": "component-root",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "真实嵌套子对象互动"
+        },
+        {
+          "type": "pointerup",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 180,
+          "clientY": 11.359375,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "nested-answer",
+              "className": null
+            },
+            {
+              "tag": "DIV",
+              "id": "component-root",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "真实嵌套子对象互动"
+        },
+        {
+          "type": "mouseup",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 180,
+          "clientY": 11,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "nested-answer",
+              "className": null
+            },
+            {
+              "tag": "DIV",
+              "id": "component-root",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "真实嵌套子对象互动"
+        },
+        {
+          "type": "mouseup",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 180,
+          "clientY": 11,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "nested-answer",
+              "className": null
+            },
+            {
+              "tag": "DIV",
+              "id": "component-root",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "真实嵌套子对象互动"
+        },
+        {
+          "type": "click",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 180,
+          "clientY": 11,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "nested-answer",
+              "className": null
+            },
+            {
+              "tag": "DIV",
+              "id": "component-root",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "真实嵌套子对象互动"
+        },
+        {
+          "type": "click",
+          "phase": "bubble",
+          "trusted": true,
+          "defaultPrevented": false,
+          "clientX": 180,
+          "clientY": 11,
+          "path": [
+            {
+              "tag": "SUMMARY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "DETAILS",
+              "id": "nested-answer",
+              "className": null
+            },
+            {
+              "tag": "DIV",
+              "id": "component-root",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "真实嵌套子对象互动"
+        },
+        {
+          "type": "toggle",
+          "phase": "capture",
+          "trusted": true,
+          "defaultPrevented": false,
+          "path": [
+            {
+              "tag": "DETAILS",
+              "id": "nested-answer",
+              "className": null
+            },
+            {
+              "tag": "DIV",
+              "id": "component-root",
+              "className": null
+            },
+            {
+              "tag": "BODY",
+              "id": "",
+              "className": null
+            },
+            {
+              "tag": "HTML",
+              "id": "",
+              "className": null
+            }
+          ],
+          "targetText": "真实嵌套子对象互动子对象仍能接收真实鼠标点击。"
+        }
+      ]
+    },
+    "topEvents": [
+      {
+        "type": "pointerdown",
+        "phase": "capture",
+        "trusted": true,
+        "defaultPrevented": false,
+        "clientX": 1475,
+        "clientY": 39.63999938964844,
+        "path": [
+          {
+            "tag": "BUTTON",
+            "id": "",
+            "className": "secondary-button"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "course-preview-chrome__actions"
+          },
+          {
+            "tag": "HEADER",
+            "id": "",
+            "className": "course-preview-chrome"
+          },
+          {
+            "tag": "SECTION",
+            "id": "",
+            "className": "course-preview-shell"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "modal-backdrop course-preview-overlay"
+          }
+        ],
+        "targetText": "下一页"
+      },
+      {
+        "type": "pointerdown",
+        "phase": "bubble",
+        "trusted": true,
+        "defaultPrevented": false,
+        "clientX": 1475,
+        "clientY": 39.63999938964844,
+        "path": [
+          {
+            "tag": "BUTTON",
+            "id": "",
+            "className": "secondary-button"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "course-preview-chrome__actions"
+          },
+          {
+            "tag": "HEADER",
+            "id": "",
+            "className": "course-preview-chrome"
+          },
+          {
+            "tag": "SECTION",
+            "id": "",
+            "className": "course-preview-shell"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "modal-backdrop course-preview-overlay"
+          }
+        ],
+        "targetText": "下一页"
+      },
+      {
+        "type": "mousedown",
+        "phase": "capture",
+        "trusted": true,
+        "defaultPrevented": false,
+        "clientX": 1475,
+        "clientY": 39,
+        "path": [
+          {
+            "tag": "BUTTON",
+            "id": "",
+            "className": "secondary-button"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "course-preview-chrome__actions"
+          },
+          {
+            "tag": "HEADER",
+            "id": "",
+            "className": "course-preview-chrome"
+          },
+          {
+            "tag": "SECTION",
+            "id": "",
+            "className": "course-preview-shell"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "modal-backdrop course-preview-overlay"
+          }
+        ],
+        "targetText": "下一页"
+      },
+      {
+        "type": "mousedown",
+        "phase": "bubble",
+        "trusted": true,
+        "defaultPrevented": false,
+        "clientX": 1475,
+        "clientY": 39,
+        "path": [
+          {
+            "tag": "BUTTON",
+            "id": "",
+            "className": "secondary-button"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "course-preview-chrome__actions"
+          },
+          {
+            "tag": "HEADER",
+            "id": "",
+            "className": "course-preview-chrome"
+          },
+          {
+            "tag": "SECTION",
+            "id": "",
+            "className": "course-preview-shell"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "modal-backdrop course-preview-overlay"
+          }
+        ],
+        "targetText": "下一页"
+      },
+      {
+        "type": "pointerup",
+        "phase": "capture",
+        "trusted": true,
+        "defaultPrevented": false,
+        "clientX": 1475,
+        "clientY": 39.63999938964844,
+        "path": [
+          {
+            "tag": "BUTTON",
+            "id": "",
+            "className": "secondary-button"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "course-preview-chrome__actions"
+          },
+          {
+            "tag": "HEADER",
+            "id": "",
+            "className": "course-preview-chrome"
+          },
+          {
+            "tag": "SECTION",
+            "id": "",
+            "className": "course-preview-shell"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "modal-backdrop course-preview-overlay"
+          }
+        ],
+        "targetText": "下一页"
+      },
+      {
+        "type": "pointerup",
+        "phase": "bubble",
+        "trusted": true,
+        "defaultPrevented": false,
+        "clientX": 1475,
+        "clientY": 39.63999938964844,
+        "path": [
+          {
+            "tag": "BUTTON",
+            "id": "",
+            "className": "secondary-button"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "course-preview-chrome__actions"
+          },
+          {
+            "tag": "HEADER",
+            "id": "",
+            "className": "course-preview-chrome"
+          },
+          {
+            "tag": "SECTION",
+            "id": "",
+            "className": "course-preview-shell"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "modal-backdrop course-preview-overlay"
+          }
+        ],
+        "targetText": "下一页"
+      },
+      {
+        "type": "mouseup",
+        "phase": "capture",
+        "trusted": true,
+        "defaultPrevented": false,
+        "clientX": 1475,
+        "clientY": 39,
+        "path": [
+          {
+            "tag": "BUTTON",
+            "id": "",
+            "className": "secondary-button"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "course-preview-chrome__actions"
+          },
+          {
+            "tag": "HEADER",
+            "id": "",
+            "className": "course-preview-chrome"
+          },
+          {
+            "tag": "SECTION",
+            "id": "",
+            "className": "course-preview-shell"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "modal-backdrop course-preview-overlay"
+          }
+        ],
+        "targetText": "下一页"
+      },
+      {
+        "type": "mouseup",
+        "phase": "bubble",
+        "trusted": true,
+        "defaultPrevented": false,
+        "clientX": 1475,
+        "clientY": 39,
+        "path": [
+          {
+            "tag": "BUTTON",
+            "id": "",
+            "className": "secondary-button"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "course-preview-chrome__actions"
+          },
+          {
+            "tag": "HEADER",
+            "id": "",
+            "className": "course-preview-chrome"
+          },
+          {
+            "tag": "SECTION",
+            "id": "",
+            "className": "course-preview-shell"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "modal-backdrop course-preview-overlay"
+          }
+        ],
+        "targetText": "下一页"
+      },
+      {
+        "type": "click",
+        "phase": "capture",
+        "trusted": true,
+        "defaultPrevented": false,
+        "clientX": 1475,
+        "clientY": 39,
+        "path": [
+          {
+            "tag": "BUTTON",
+            "id": "",
+            "className": "secondary-button"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "course-preview-chrome__actions"
+          },
+          {
+            "tag": "HEADER",
+            "id": "",
+            "className": "course-preview-chrome"
+          },
+          {
+            "tag": "SECTION",
+            "id": "",
+            "className": "course-preview-shell"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "modal-backdrop course-preview-overlay"
+          }
+        ],
+        "targetText": "下一页"
+      },
+      {
+        "type": "click",
+        "phase": "bubble",
+        "trusted": true,
+        "defaultPrevented": false,
+        "clientX": 1475,
+        "clientY": 39,
+        "path": [
+          {
+            "tag": "BUTTON",
+            "id": "",
+            "className": "secondary-button"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "course-preview-chrome__actions"
+          },
+          {
+            "tag": "HEADER",
+            "id": "",
+            "className": "course-preview-chrome"
+          },
+          {
+            "tag": "SECTION",
+            "id": "",
+            "className": "course-preview-shell"
+          },
+          {
+            "tag": "DIV",
+            "id": "",
+            "className": "modal-backdrop course-preview-overlay"
+          }
+        ],
+        "targetText": "下一页"
+      }
+    ]
+  },
+  "nestedChildInteraction": {
+    "realGroupChildOpened": true
+  },
+  "noSyntheticHistory": {
+    "revision": 2,
+    "undoDepth": 2,
+    "modelUnchanged": true
+  },
+  "saved": {
+    "dirty": false
+  }
+}

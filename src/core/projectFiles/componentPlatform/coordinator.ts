@@ -63,7 +63,11 @@ const sameFile = (left: ComponentProjectFile, right: ComponentProjectFile): bool
   && (left.binding ? equalComponentValue(bindingIdentity(left), bindingIdentity(right))
     : left.target ? equalComponentValue(left.target, right.target) : !right.target && left.path === right.path)
   && left.sourceFile?.path === right.sourceFile?.path
-type ObservedFile = { snapshot: ComponentProjectSnapshot; file: ComponentProjectFile; unavailable?: boolean }
+type ObservedFile = { snapshot: ComponentProjectSnapshot; file: ComponentProjectFile; unavailable?: boolean
+  /** ACK projections are explained values, not actual Session captures of that revision. */
+  captured?: boolean
+  /** Offset continuation reads this immutable capture, even after an ACK advances other observations. */
+  pagination?: { snapshot: ComponentProjectSnapshot; file: ComponentProjectFile } }
 function bindingIdentity(file: ComponentProjectFile): unknown {
   const binding = file.binding
   return binding?.kind === 'flow' ? { kind: binding.kind, surfaceId: binding.surfaceId, format: binding.format }
@@ -149,16 +153,25 @@ export function canonicalComponentFileEdits(snapshot: ComponentProjectSnapshot, 
     const previous = parseDocumentMarkdown(file.content!, { createId: () => crypto.randomUUID() })
     if (previous.status !== 'valid') throw new Error('当前正文投影无法解析')
     bindMarkdownIdentities(previous, binding.document)
-    const parsed = parseDocumentMarkdown(content, { previous, createId: () => crypto.randomUUID(),
+    const parsed = parseDocumentMarkdown(content, { previous, recoverUnsupportedBlocks: true, createId: () => crypto.randomUUID(),
       resolveImage: href => {
         const asset = input?.resourceBindings?.[href] ?? Object.values(project.assets).find(asset => asset.path === assetReferencePath(href))
         if (!asset) throw new Error(`正文引用的素材尚未提供：${href}`)
         return { assetId: asset.id, source: { kind: 'project' } }
       } })
-    if (parsed.status === 'valid') return flowDocumentEdits(project, binding.surfaceId, parsed.document.content.blocks)
-    if (!input?.preparedHtml) throw new Error(parsed.diagnostics.map(issue => issue.message).join('\n'))
+    if (parsed.status === 'valid') {
+      const edits = flowDocumentEdits(project, binding.surfaceId, parsed.document.content.blocks)
+      if (parsed.diagnostics.length) {
+        diagnostics.push(...parsed.diagnostics.map(issue => ({ level: 'warning' as const, code: 'flow-markdown-partial', message: issue.message, repairable: true })))
+        const id = crypto.randomUUID(), bytes = input?.bytes ?? new TextEncoder().encode(content)
+        edits.push({ type: 'asset.add', asset: { id, path: `assets/${id}.md`, filename: input?.filename ?? '正文源文.md',
+          mimeType: 'text/markdown', byteLength: bytes.byteLength }, bytes })
+      }
+      return edits
+    }
     diagnostics.push(...parsed.diagnostics.map(issue => ({ level: 'warning' as const, code: 'flow-markdown-partial', message: issue.message, repairable: true })))
-    content = input.preparedHtml
+    // Whole-body HTML fallback loses formal object fences. Keep an unrepresentable draft for repair.
+    throw new Error(parsed.diagnostics.map(issue => issue.message).join('\n'))
   }
   const instanceByPath = (path: string) => Object.entries(binding.objectPaths).find(([, observed]) => observed === path)?.[0]
   const context = { assets: project.assets, packageName: (id: string) => id,
@@ -170,9 +183,8 @@ export function canonicalComponentFileEdits(snapshot: ComponentProjectSnapshot, 
   const edits = flowDocumentEdits(project, binding.surfaceId, aligned.blocks)
   if (diagnostics.some(issue => issue.level !== 'info')) {
     const id = crypto.randomUUID(), bytes = input?.bytes ?? new TextEncoder().encode(content)
-    const markdown = binding.format === 'markdown'
-    edits.push({ type: 'asset.add', asset: { id, path: `assets/${id}.${markdown ? 'md' : 'html'}`, filename: input?.filename ?? `正文源文.${markdown ? 'md' : 'html'}`,
-      mimeType: markdown ? 'text/markdown' : 'text/html', byteLength: bytes.byteLength }, bytes })
+    edits.push({ type: 'asset.add', asset: { id, path: `assets/${id}.html`, filename: input?.filename ?? '正文源文.html',
+      mimeType: 'text/html', byteLength: bytes.byteLength }, bytes })
   }
   return edits
 }
@@ -219,9 +231,12 @@ export class ComponentProjectFileCoordinator {
   constructor(private readonly host: ComponentProjectFileHost) {}
   stopRun(runId: string): void { this.reads.delete(runId) }
 
-  private remember(runId: string, snapshot: ComponentProjectSnapshot, files: ComponentProjectFile[]): void {
+  private remember(runId: string, snapshot: ComponentProjectSnapshot, files: ComponentProjectFile[], captured = true): void {
     const reads = this.reads.get(runId) ?? new Map()
-    for (const file of files) reads.set(key(snapshot.documentId, file.path), { snapshot, file })
+    // Session reads clone the same immutable version. Share that capture inside this observation owner.
+    if (captured) snapshot = [...reads.values()].find(seen => seen.captured && seen.snapshot.documentId === snapshot.documentId
+      && seen.snapshot.epoch === snapshot.epoch && seen.snapshot.revision === snapshot.revision)?.snapshot ?? snapshot
+    for (const file of files) reads.set(key(snapshot.documentId, file.path), { snapshot, file, captured })
     this.reads.set(runId, reads)
   }
 
@@ -253,7 +268,7 @@ export class ComponentProjectFileCoordinator {
       const next = projected.get(seen.snapshot)
       if (!next) continue
       const file = next.files.find(file => sameFile(seen.file, file))
-      reads.set(pathKey, file ? { snapshot: next.snapshot, file: { ...file, path: seen.file.path } }
+      reads.set(pathKey, file ? { snapshot: next.snapshot, file: { ...file, path: seen.file.path }, ...(seen.pagination ? { pagination: seen.pagination } : {}) }
         : { ...seen, unavailable: true })
     }
   }
@@ -282,12 +297,20 @@ export class ComponentProjectFileCoordinator {
       }
       if (name === 'project.read') {
         const input = componentProjectFileSchemas[name].parse(raw)
-        const snapshot = await this.host.document(runId, input.project, 'read')
-        const file = componentProjectFiles(snapshot.model.project, snapshot.model.resources).find(file => file.path === input.path)
+        const current = await this.host.document(runId, input.project, 'read')
+        const seen = this.reads.get(runId)?.get(key(current.documentId, input.path))
+        const offset = input.offset ?? 0
+        if (offset && seen?.pagination && seen.pagination.snapshot.epoch !== current.epoch) return failure('project-changed', '工程身份已变化，请从文件开头重新读取。')
+        if (offset && seen?.unavailable) return failure('target-not-found', '原工程文件目标已不存在或类型已变化；请从文件开头重新读取。')
+        const captured = offset ? seen?.pagination : undefined
+        const snapshot = captured?.snapshot ?? current
+        const file = captured?.file ?? componentProjectFiles(snapshot.model.project, snapshot.model.resources).find(file => file.path === input.path)
         if (!file) return failure('not-found', `没有这个工程文件：${input.path}`)
         this.remember(runId, snapshot, [file])
+        const saved = this.reads.get(runId)!.get(key(current.documentId, input.path))!
+        saved.pagination = captured ?? { snapshot: saved.snapshot, file: saved.file }
         if (file.content === undefined) return { kind: 'read', data: { path: file.path, type: file.kind, mimeType: file.mimeType, byteLength: file.bytes?.byteLength ?? 0 } }
-        const offset = input.offset ?? 0, end = Math.min(file.content.length, offset + (input.limit ?? 100_000))
+        const end = Math.min(file.content.length, offset + (input.limit ?? 100_000))
         return { kind: 'read', data: { path: file.path, type: file.kind, content: file.content.slice(offset, end),
           ...(file.note ? { note: file.note } : {}), ...(offset || end < file.content.length ? { offset, total: file.content.length } : {}),
           ...(end < file.content.length ? { nextOffset: end } : {}) } }
@@ -342,7 +365,7 @@ export class ComponentProjectFileCoordinator {
                 return file ? [{ snapshot, file }] : []
               })[0]
             if (known) {
-              this.remember(runId, known.snapshot, [{ ...known.file, path: nextFile.path }])
+              this.remember(runId, known.snapshot, [{ ...known.file, path: nextFile.path }], false)
               introduced = true
             }
           }

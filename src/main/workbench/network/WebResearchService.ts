@@ -4,6 +4,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { extractHtml } from './extractHtml'
 import { fetchPublicResource, parsePublicUrl, PublicHttpError, type PublicHttpResponse } from './publicHttp'
+import type { AttachmentService } from '../attachments/AttachmentService'
+import type { AttachmentSnapshot } from '../../../shared/workbench/attachments'
 
 export interface WebSearchHit {
   title: string
@@ -48,10 +50,21 @@ export interface WebSource {
 
 export type WebOpenResult =
   | { status: 'opened'; source: WebSource; text: string; offset: number; nextOffset?: number; truncated: boolean }
+  | WebMaterialResult
   | { status: 'access-required' | 'needs-material-reader' | 'failed' | 'rejected'; reason: string; url?: string }
 
+export interface WebMaterialResult {
+  status: 'material'
+  source: Omit<WebSource, 'bodyComplete'>
+  attachmentIds: string[]
+  material: { attachmentId: string; originalAttachmentId: string; derivedFrom?: string; originalDigest: string;
+    coverage?: AttachmentSnapshot['coverage']; gaps: AttachmentSnapshot['gaps']; extractionError?: string }
+  observation: 'index-only'
+  next: 'material.list / material.read / material.find / material.extract'
+}
 interface StoredSource { source: WebSource; filename: string }
-interface RunState { stopped: boolean; controllers: Set<AbortController>; sources: Map<string, StoredSource>; directory?: Promise<string> }
+interface RunState { stopped: boolean; controllers: Set<AbortController>; sources: Map<string, StoredSource>;
+  materials: Map<string, WebMaterialResult>; directory?: Promise<string> }
 
 export interface WebResearchOptions {
   searchProvider?: SearchProviderPort
@@ -59,6 +72,8 @@ export interface WebResearchOptions {
   fetch?: typeof fetchPublicResource
   now?: () => Date
   temporaryRoot?: string
+  /** The same immutable material owner used by local attachments and shared tools. */
+  materials?: AttachmentService
 }
 
 export class WebResearchService {
@@ -72,7 +87,7 @@ export class WebResearchService {
 
   beginRun(runId: string): void {
     if (this.runs.has(runId)) throw new Error('联网研究任务已开始')
-    this.runs.set(runId, { stopped: false, controllers: new Set(), sources: new Map() })
+    this.runs.set(runId, { stopped: false, controllers: new Set(), sources: new Map(), materials: new Map() })
   }
 
   async stopRun(runId: string): Promise<void> {
@@ -81,6 +96,7 @@ export class WebResearchService {
     run.stopped = true
     for (const controller of run.controllers) controller.abort()
     run.sources.clear()
+    run.materials.clear()
     const directory = await run.directory?.catch(() => null)
     if (directory) await fs.rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 })
   }
@@ -145,17 +161,41 @@ export class WebResearchService {
     const offset = input.offset ?? 0, limit = input.limit ?? 7000
     if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1)
       return { status: 'rejected', reason: '正文读取范围无效' }
-    if (run.stopped) return { status: 'rejected', reason: '任务已停止' }
+    if (run.stopped || input.signal?.aborted) return { status: 'rejected', reason: '任务已停止' }
+    const materialSources = run.materials
+    const priorMaterial = input.sourceId ? materialSources.get(input.sourceId) : undefined
+    if (priorMaterial) {
+      if (input.version && input.version !== priorMaterial.source.version) return { status: 'rejected', reason: '材料来源版本已改变' }
+      return structuredClone(priorMaterial)
+    }
     let stored = input.sourceId ? run.sources.get(input.sourceId) : undefined
     if (input.sourceId && !stored && !input.url) return { status: 'rejected', reason: '原网页正文缓存已失效，请使用来源 URL 与版本重新读取' }
     if (stored && input.version && stored.source.version !== input.version) return { status: 'rejected', reason: '正文来源版本已改变' }
     if (!stored) {
       if (!input.url) return { status: 'rejected', reason: '需要网页 URL 或本任务来源句柄' }
       try {
-        const response: PublicHttpResponse = await this.call(run, input.signal, signal => this.fetch(input.url!, { signal }))
+        const requestedUrl = parsePublicUrl(input.url).href
+        const response: PublicHttpResponse = await this.call(run, input.signal, signal => this.fetch(requestedUrl, { signal }))
         const url = response.url
-        if (response.contentType === 'application/pdf' || response.contentType === 'application/octet-stream')
-          return { status: 'needs-material-reader', reason: '此 URL 返回文件；需受控下载后交材料读取服务', url }
+        if (response.contentType === 'application/pdf' || response.contentType === 'application/octet-stream'
+          || response.contentType === 'application/zip' || response.contentType.startsWith('application/vnd.openxmlformats-officedocument.')) {
+          if (!this.options.materials) return { status: 'needs-material-reader', reason: '此 URL 返回文件；材料读取服务未接通', url }
+          const version = createHash('sha256').update(response.bytes).digest('hex')
+          if (input.version && version !== input.version) return { status: 'rejected', reason: '材料原件与此前引用版本不一致', url }
+          const captured = await this.call(run, input.signal, signal => this.options.materials!.receivePublicFile({
+            url, bytes: response.bytes, contentType: response.contentType }, { signal }))
+          const material = captured.material
+          const result: WebMaterialResult = { status: 'material', source: { sourceId: randomUUID(), url,
+            title: captured.original.name, fetchedAt: this.now().toISOString(), contentType: response.contentType, version },
+            attachmentIds: [...new Set([captured.original.id, material.id])],
+            material: { attachmentId: material.id, originalAttachmentId: captured.original.id,
+              ...(material.derivedFrom ? { derivedFrom: material.derivedFrom } : {}), originalDigest: material.digest,
+              ...(material.coverage ? { coverage: material.coverage } : {}), gaps: material.gaps,
+              ...(captured.extractionError ? { extractionError: captured.extractionError } : {}) },
+            observation: 'index-only', next: 'material.list / material.read / material.find / material.extract' }
+          materialSources.set(result.source.sourceId, result)
+          return structuredClone(result)
+        }
         if (!['text/html', 'application/xhtml+xml', 'text/plain'].includes(response.contentType))
           return { status: 'failed', reason: `不支持将 ${response.contentType} 当作网页正文`, url }
         let raw: string
@@ -184,7 +224,11 @@ export class WebResearchService {
         }
         stored = { source, filename }
         run.sources.set(source.sourceId, stored)
-      } catch (cause) { return { status: 'failed', reason: cause instanceof Error ? cause.message : '网页读取未完成' } }
+      } catch (cause) {
+        if (run.stopped || input.signal?.aborted || cause instanceof PublicHttpError && cause.code === 'cancelled')
+          return { status: 'rejected', reason: '任务已停止' }
+        return { status: 'failed', reason: cause instanceof Error ? cause.message : '网页读取未完成' }
+      }
     }
     let body: string
     try { body = await fs.readFile(stored.filename, 'utf8') }

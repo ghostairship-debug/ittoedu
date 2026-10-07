@@ -1,7 +1,9 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { bootstrapInstalledMcp, type InstalledMcpBootstrapOptions } from '../src/main/workbench/external/installedMcpBootstrap'
+import { readMcpConnectionReady, type McpConnectionReady } from '../src/shared/workbench/mcpConnection'
 
-export interface ExplicitMcpConnection { endpoint: string; token: string; workspaceId?: string }
+export interface ExplicitMcpConnection { endpoint: string; token: string; workspaceId?: string; host?: McpConnectionReady }
 
 /** Accept the launcher's ready JSON or explicit HTTP credentials; never extract them from a UI. */
 export function readExplicitMcpConnection(value: unknown): ExplicitMcpConnection {
@@ -11,7 +13,8 @@ export function readExplicitMcpConnection(value: unknown): ExplicitMcpConnection
   const endpoint = new URL(input.endpoint)
   if (!['http:', 'https:'].includes(endpoint.protocol)) throw new Error('MCP 使用 HTTP 传输')
   if (input.workspaceId !== undefined && (typeof input.workspaceId !== 'string' || !input.workspaceId)) throw new Error('workspaceId 无效')
-  return { endpoint: endpoint.href, token: input.token, ...(typeof input.workspaceId === 'string' ? { workspaceId: input.workspaceId } : {}) }
+  return { endpoint: endpoint.href, token: input.token, ...(typeof input.workspaceId === 'string' ? { workspaceId: input.workspaceId } : {}),
+    ...(input.status === 'ready' ? { host: readMcpConnectionReady(input) } : {}) }
 }
 
 /** Closing this SDK connection detaches the client; it does not stop a shared resident host. */
@@ -21,12 +24,30 @@ export async function connectExplicitMcp(connection: ExplicitMcpConnection, name
     requestInit: { headers: { Authorization: `Bearer ${connection.token}` } },
   })
   try { await client.connect(transport) }
-  catch (error) { await client.close().catch(() => undefined); throw error }
+  catch (error) {
+    await transport.terminateSession().catch(() => undefined)
+    await client.close().catch(() => undefined)
+    throw error
+  }
+  let detaching: Promise<void> | undefined
+  const detach = () => detaching ??= (async () => {
+    // close() only aborts this client's streams. DELETE releases its server run,
+    // without shutting down the resident owner or its other clients.
+    try { await transport.terminateSession() }
+    finally { await client.close() }
+  })()
   return {
+    connection,
     client,
     call: (name: string, args: Record<string, unknown> = {}) => client.callTool({ name, arguments: args }),
-    detach: () => client.close(),
+    detach,
   }
+}
+
+/** Launch/attach once, then consume the owner's actual facts through the same HTTP SDK. */
+export async function connectInstalledMcp(options: InstalledMcpBootstrapOptions, name = 'guoling-direct-sdk') {
+  const ready = await bootstrapInstalledMcp(options)
+  return connectExplicitMcp(readExplicitMcpConnection(ready), name)
 }
 
 /** A successful transport is not proof of a committed document or a saved package. */

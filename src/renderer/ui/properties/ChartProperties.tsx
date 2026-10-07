@@ -205,17 +205,26 @@ export function ChartProperties({
     target: ChartType
     seriesId: string
   } | null>(null)
-  const [draft, setDraft] = useState<ChartDataDraft>(() => draftFromView(node))
+  const [draft, setDraftState] = useState<ChartDataDraft>(() => draftFromView(node))
+  const draftRef = useRef(draft)
+  const setDraft = (update: ChartDataDraft | ((current: ChartDataDraft) => ChartDataDraft)) => {
+    const next = typeof update === 'function' ? update(draftRef.current) : update
+    draftRef.current = next
+    setDraftState(next)
+  }
   const [dirty, setDirty] = useState(false)
   const [applyError, setApplyError] = useState<string | null>(null)
   const dirtyRef = useRef(false)
   const targetRef = useRef(bindingKey)
   const composingRef = useRef(false)
+  const resumeRequired = useRef(false)
+  const blurPendingRef = useRef(false)
   const baselineRef = useRef(draftSignature(node))
   const signatureRef = useRef(draftSignature(node))
   const preparedCanvasSignature = useRef<string | null>(null)
 
   const markDirty = () => {
+    resumeRequired.current = false
     if (!dirtyRef.current) { targetRef.current = bindingKey; baselineRef.current = draftSignature(node) }
     dirtyRef.current = true
     setDirty(true)
@@ -232,8 +241,12 @@ export function ChartProperties({
     const canonical = validateDraft(draftFromView(node), chartType).candidate
     if (canonical && preparedCanvasSignature.current === tableValueSignature(canonical)) {
       preparedCanvasSignature.current = null
-      dirtyRef.current = false
-      setDirty(false)
+      baselineRef.current = signature
+      const current = validateDraft(draftRef.current, chartType).candidate
+      if (current && tableValueSignature(current) === tableValueSignature(canonical)) {
+        dirtyRef.current = false
+        setDirty(false)
+      }
       setApplyError(null)
     }
     if (!dirtyRef.current) setDraft(draftFromView(node))
@@ -242,7 +255,7 @@ export function ChartProperties({
   // embeds the session revision, and every chart command bumps it; resetting
   // on revision would wipe an in-progress draft after unrelated style commits.
   useEffect(() => {
-    if (dirtyRef.current && targetRef.current !== bindingKey) return
+    if (dirtyRef.current) return
     dirtyRef.current = false
     setDirty(false)
     setApplyError(null)
@@ -257,6 +270,10 @@ export function ChartProperties({
 
   useEffect(() => commands.connectCanvasText?.({
     prepare: (kind, id, value) => {
+      if (resumeRequired.current) return { candidate: null, error: '恢复的输入法草稿尚未完成，请先在属性栏继续编辑。' }
+      if (dirtyRef.current && (targetRef.current !== bindingKey || baselineRef.current !== draftSignature(node))) {
+        return { candidate: null, error: '图表数据草稿对应的目标或数据已经改变，请先处理属性栏保留的输入。' }
+      }
       const exists = kind === 'category'
         ? draft.categories.some(entry => entry.id === id)
         : draft.series.some(entry => entry.id === id)
@@ -272,6 +289,10 @@ export function ChartProperties({
       ? draft.categories.find(entry => entry.id === id)?.label
       : draft.series.find(entry => entry.id === id)?.name,
     commit: (kind, id, value) => {
+      if (resumeRequired.current) return '恢复的输入法草稿尚未完成，请先在属性栏继续编辑。'
+      if (dirtyRef.current && (targetRef.current !== bindingKey || baselineRef.current !== draftSignature(node))) {
+        return '图表数据草稿对应的目标或数据已经改变，请先处理属性栏保留的输入。'
+      }
       const exists = kind === 'category'
         ? draft.categories.some(entry => entry.id === id)
         : draft.series.some(entry => entry.id === id)
@@ -304,23 +325,41 @@ export function ChartProperties({
   }
 
   const applyDraft = () => {
+    if (resumeRequired.current) { setApplyError('恢复的输入法草稿尚未完成，请继续编辑后再应用。'); return false }
+    if (!dirtyRef.current) return !composingRef.current
     if (targetRef.current !== bindingKey) { setApplyError('图表数据草稿对应的编辑目标已经改变，请取消草稿后重试。'); return false }
     if (dirtyRef.current && baselineRef.current !== draftSignature(node)) { setApplyError('图表数据已在其他编辑入口改变，请取消此草稿后重试。'); return false }
-    if (composingRef.current || !validation.candidate) return false
+    const candidate = validateDraft(draftRef.current, chartType).candidate
+    if (composingRef.current || !candidate) return false
     preview?.(null)
-    const reason = commands.commitTableData(validation.candidate)
+    const reason = commands.commitTableData(candidate)
     if (reason) {
       setApplyError(reason)
       return false
     }
     dirtyRef.current = false
+    preparedCanvasSignature.current = tableValueSignature(candidate)
     setDirty(false)
     setApplyError(null)
     return true
   }
-  usePropertyDraftFlush(() => !dirtyRef.current || applyDraft())
+  usePropertyDraftFlush(() => !resumeRequired.current && !composingRef.current && (!dirtyRef.current || applyDraft()), {
+    hasDirty: () => resumeRequired.current || dirtyRef.current || composingRef.current,
+    readDraft: () => ({ bindingKey: targetRef.current, label: '图表数据', kind: 'chart', raw: JSON.stringify(draftRef.current),
+      baseline: baselineRef.current, composing: resumeRequired.current || composingRef.current }),
+    restoreDraft: record => {
+      targetRef.current = record.bindingKey
+      baselineRef.current = record.baseline ?? draftSignature(node)
+      dirtyRef.current = true
+      resumeRequired.current = record.composing
+      setDirty(true)
+      if (record.composing) setApplyError('恢复的输入法草稿尚未完成，请继续编辑后再应用。')
+      setDraft(JSON.parse(record.raw) as ChartDataDraft)
+    },
+  })
 
   const resetDraft = () => {
+    resumeRequired.current = false
     targetRef.current = bindingKey
     baselineRef.current = draftSignature(node)
     preview?.(null)
@@ -354,6 +393,7 @@ export function ChartProperties({
         })),
       }
     })
+    applyDraft()
   }
 
   const addSeries = () => {
@@ -378,6 +418,7 @@ export function ChartProperties({
       categories: current.categories,
       series: current.series.filter((series) => series.key !== key),
     }))
+    applyDraft()
   }
 
   const patchCategoryLabel = (key: string, label: string) => {
@@ -402,6 +443,7 @@ export function ChartProperties({
       const pending = draft.series.find(series => series.id === item.id)
       return { ...item, color: pending?.key === key ? patch.color! : pending?.color ?? item.color }
     }) })
+    if (patch.color) applyDraft()
   }
 
   const patchValue = (seriesKey: string, categoryIndex: number, value: string) => {
@@ -477,7 +519,7 @@ export function ChartProperties({
       <div className="property-subsection-header">
         <div>
           <strong>数据表</strong>
-          <small>修改先留在草稿。点击「应用数据」，或在画布确认分类/系列文字时，一并应用。</small>
+          <small>完成输入后自动应用，可撤回；未完成的数据保留待修正。</small>
         </div>
       </div>
       <div
@@ -485,8 +527,24 @@ export function ChartProperties({
         data-testid="chart-data-table"
         role="group"
         aria-label="图表数据表"
-        onCompositionStart={() => { composingRef.current = true }}
-        onCompositionEnd={() => { composingRef.current = false }}
+        onCompositionStart={() => { resumeRequired.current = false; composingRef.current = true; setDirty(true) }}
+        onCompositionEnd={() => {
+          composingRef.current = false
+          setDirty(dirtyRef.current)
+          if (blurPendingRef.current) {
+            blurPendingRef.current = false
+            queueMicrotask(() => applyDraft())
+          }
+        }}
+        onBlur={() => {
+          if (composingRef.current) blurPendingRef.current = true
+          else applyDraft()
+        }}
+        onKeyDown={event => {
+          if (event.nativeEvent.isComposing || composingRef.current) return
+          if (event.key === 'Enter') { event.preventDefault(); applyDraft() }
+          if (event.key === 'Escape') { event.preventDefault(); resetDraft() }
+        }}
         style={{
           display: 'grid',
           gridTemplateColumns: `minmax(88px, 1.2fr) repeat(${Math.max(draft.series.length, 1)}, minmax(72px, 1fr)) auto`,
@@ -665,6 +723,7 @@ export function ChartProperties({
             label="数值轴最小值（留空自动）"
             value={style.valueMin ?? ''}
             allowEmpty
+            validate={raw => !raw || Number.isFinite(Number(raw)) ? null : '请输入完整的有效数值，或留空使用自动范围。'}
             onCommit={(raw) => {
               const trimmed = raw.trim()
               if (!trimmed) {
@@ -679,6 +738,7 @@ export function ChartProperties({
             label="数值轴最大值（留空自动）"
             value={style.valueMax ?? ''}
             allowEmpty
+            validate={raw => !raw || Number.isFinite(Number(raw)) ? null : '请输入完整的有效数值，或留空使用自动范围。'}
             onCommit={(raw) => {
               const trimmed = raw.trim()
               if (!trimmed) {

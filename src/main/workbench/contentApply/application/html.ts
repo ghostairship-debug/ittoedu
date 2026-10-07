@@ -17,14 +17,26 @@ const VOID = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input'
 
 export const WEB_DEFINITIONS: ComponentDefinition[] = [WEB_DEFINITION, HTML_PROGRAM_DEFINITION]
 
-function contentHtml(content: HtmlObjectContent, rawText = false): string {
+interface HtmlSerialization { nextPseudo: number }
+function contentHtml(content: HtmlObjectContent, serialization: HtmlSerialization, rawText = false): string {
   if (content.kind !== 'element') return content.kind === 'comment' ? `<!--${content.text}-->` : rawText ? content.text : escape(content.text)
   const attributes = { ...content.attributes }
+  // A computed pseudo-element has no DOM node. Keep its measured declarations
+  // under a software-owned selector instead of dropping generated text/paint.
+  const pseudos = Object.entries(content.pseudoElements)
+  let pseudoCss = ''
+  if (pseudos.length) {
+    const anchor = `p${serialization.nextPseudo++}`
+    attributes['data-guoling-measured-pseudo'] = anchor
+    pseudoCss = `<style>${pseudos.map(([pseudo, declarations]) =>
+      `[data-guoling-measured-pseudo="${anchor}"]${pseudo}{${Object.entries(declarations).map(([name, value]) => `${name}:${value}`).join(';')}}`
+    ).join('\n').replace(/<\/style/gi, '<\\/style')}</style>`
+  }
   const style = Object.entries(content.style).map(([key, value]) => `${key}:${value}`).join(';')
   if (style) attributes.style = style
   const open = `<${content.tagName}${Object.entries(attributes).map(([key, value]) => ` ${key}="${escape(value)}"`).join('')}>`
-  if (VOID.has(content.tagName)) return open
-  return `${open}${content.children.map(child => contentHtml(child, ['style', 'script'].includes(content.tagName))).join('')}</${content.tagName}>`
+  if (VOID.has(content.tagName)) return pseudoCss + open
+  return `${pseudoCss}${open}${content.children.map(child => contentHtml(child, serialization, ['style', 'script'].includes(content.tagName))).join('')}</${content.tagName}>`
 }
 
 /** One ordered parent list; measured stacking values are consumed here and then discarded. */
@@ -52,24 +64,29 @@ function orderedChildren(object: HtmlAssemblyObject): HtmlAssemblyObject[] {
       || sourceOrder(a.child.sourcePath, b.child.sourcePath) || a.index - b.index).map(value => value.child)
 }
 
-function backgroundDecorationHtml(object: HtmlAssemblyObject): string {
+function backgroundDecorationHtml(object: HtmlAssemblyObject, serialization: HtmlSerialization): string {
   // Ordinary in-flow block backgrounds paint below in-flow text, even when the
   // block follows that text in DOM order and overlaps it through negative margin.
   return object.decorations.filter(value => !value.interleaves).map(decoration => {
     const frame = decoration.frame
     const content = decoration.content.kind === 'element'
       ? { ...decoration.content, style: measuredFragmentBoxStyle(decoration.content.style) } : decoration.content
-    return `<div style="position:absolute;left:0;top:0;width:${frame.width}px;height:${frame.height}px;transform-origin:0 0;transform:matrix(${frame.transform.join(',')})">${contentHtml(content)}</div>`
+    return `<div style="position:absolute;left:0;top:0;width:${frame.width}px;height:${frame.height}px;transform-origin:0 0;transform:matrix(${frame.transform.join(',')})">${contentHtml(content, serialization)}</div>`
   }).join('')
 }
 
 export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: Record<string, string>, options: {
   modules?: Record<string, string>
+  /** Failed image bytes remain source assets; they are not professional image admission. */
+  admittedResourceBindings?: Readonly<Record<string, string>>
   createFormulaId(): string
   definitions: Readonly<Record<string, ComponentDefinition>>
   flow?: boolean
-}): { draft: ContentObjectDraft; drafts?: ContentObjectDraft[]; definitions: ComponentDefinition[]; diagnostics: ContentApplyDiagnostic[] } {
+  /** Only an explicit whole-surface redo can transfer page paint to its owner. */
+  flowPage?: boolean
+}): { draft: ContentObjectDraft; drafts?: ContentObjectDraft[]; definitions: ComponentDefinition[]; diagnostics: ContentApplyDiagnostic[]; flowBackgroundColor?: string } {
   const definitions = new Map<string, ComponentDefinition>(), diagnostics: ContentApplyDiagnostic[] = []
+  const serialization: HtmlSerialization = { nextPseudo: 0 }
   const isDefaultImplementation = (existing: ComponentDefinition, expected: ComponentDefinition) =>
     existing.role === expected.role && existing.implementation.kind === 'builtin'
       && expected.implementation.kind === 'builtin' && existing.implementation.key === expected.implementation.key
@@ -89,7 +106,7 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
     return definition
   }
   const draft = (object: HtmlAssemblyObject): ContentObjectDraft => {
-    const professional = object.retainedSource ? undefined : professionalHtmlDraft(object, resourceBindings, options.createFormulaId, assembly.supportCss)
+    const professional = object.retainedSource ? undefined : professionalHtmlDraft(object, options.admittedResourceBindings ?? resourceBindings, options.createFormulaId, assembly.supportCss)
     if (professional?.kind === 'native') {
       return { ...professional.draft, definitionId: definitionFor(professional.definition).id }
     } else if (professional?.kind === 'web') diagnostics.push(professional.diagnostic)
@@ -99,13 +116,15 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
     const measuredStyle = object.kind === 'program' ? object.style : measuredFragmentBoxStyle(object.style)
     const content = object.kind !== 'program' && originalContent?.kind === 'element'
       ? { ...originalContent, style: measuredFragmentBoxStyle(originalContent.style) } : originalContent
-    let html = object.retainedSource?.html ?? object.program?.html ?? (content ? contentHtml(content) : '')
-    const retained = backgroundDecorationHtml(object) + object.sourceRegions.map(region => region.html).join('')
+    let html = object.retainedSource?.html ?? object.program?.html ?? (content ? contentHtml(content, serialization) : '')
+    const retained = backgroundDecorationHtml(object, serialization) + object.sourceRegions.map(region => region.html).join('')
     if (retained) {
       const closing = content?.kind === 'element' && !VOID.has(content.tagName) ? `</${content.tagName}>` : ''
       html = closing && html.endsWith(closing) ? html.slice(0, -closing.length) + retained + closing : html + retained
     }
-    const data: JsonObject = { html, ...(assembly.supportCss ? { css: assembly.supportCss } : {}),
+    const supportCss = object.sourcePath.length === 0 && (object.kind === 'program' || object.retainedSource)
+      ? assembly.source.themeCss : assembly.supportCss
+    const data: JsonObject = { html, ...(supportCss ? { css: supportCss } : {}),
       ...(object.kind === 'program' && options.modules ? { modules: options.modules } : {}),
       ...(Object.keys(resourceBindings).length ? { resourceBindings } : {}) }
     return { definitionId: definition.id, data,
@@ -113,7 +132,15 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
       style: object.kind === 'program' ? htmlObjectStyle(object.style, false) : measuredStyle,
       ...(object.kind === 'group' ? { children: orderedChildren(object).map(draft) } : {}) }
   }
-  if (options.flow && assembly.root.kind !== 'program' && assembly.flowCoupled) {
+  const rootStyle = assembly.root.style
+  const rootColor = rootStyle['background-color']
+  const hasColor = Boolean(rootColor && !['transparent', 'rgba(0, 0, 0, 0)'].includes(rootColor))
+  const complexRootPaint = ['background-image', 'box-shadow', 'clip-path', 'mask-image', '-webkit-mask-image', 'filter', 'backdrop-filter']
+    .some(name => Boolean(rootStyle[name] && rootStyle[name] !== 'none'))
+    || parseFloat(rootStyle['outline-width'] ?? '0') > 0 && rootStyle['outline-style'] !== 'none'
+    || ['top', 'right', 'bottom', 'left'].some(side => parseFloat(rootStyle[`border-${side}-width`] ?? '0') > 0 && rootStyle[`border-${side}-style`] !== 'none')
+    || Number(rootStyle.opacity ?? '1') < 1 || Boolean(Object.keys(assembly.root.pseudoElements).length)
+  if (options.flow && assembly.root.kind !== 'program' && (assembly.flowCoupled || complexRootPaint || !options.flowPage && hasColor)) {
     const definition = definitionFor(WEB_DEFINITIONS.find(value => value.id === 'guoling.web')!)
     // One responsive DOM owns the coupled CSS/disclosure layout. Do not turn its
     // descendants into a fixed free-frame stage or stamp used pixel heights into it.
@@ -127,7 +154,8 @@ export function assemblyContentDraft(assembly: HtmlAssembly, resourceBindings: R
   if (options.flow && assembly.root.kind === 'group' && assembly.root.children.length) {
     // Independent text/images remain professional or atomic Web reading blocks.
     const roots = assembly.root.children.map(draft)
-    return { draft: roots[0]!, drafts: roots, definitions: [...definitions.values()], diagnostics }
+    return { draft: roots[0]!, drafts: roots, definitions: [...definitions.values()], diagnostics,
+      ...(options.flowPage && hasColor ? { flowBackgroundColor: rootColor } : {}) }
   }
   const root = draft(assembly.root)
   return { draft: root, definitions: [...definitions.values()], diagnostics }

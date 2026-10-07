@@ -2,7 +2,7 @@ import type { DocumentCommand, DocumentDriver, DocumentModel } from '../../share
 import { applyComponentOperation, ComponentOperationConflict, describeComponentChanges, equalComponentValue } from './courseV10Operations'
 import { cloneDocumentResources } from './resources'
 import { validateComponentData } from '../components/validateComponentData'
-import { createCourseProjectV10Archive, openCourseProjectV10Archive, validateCourseProjectV10Archive } from './codecs/courseProjectV10Archive'
+import { createCourseProjectV10Archive, openCourseProjectV10Archive, validateCourseProjectV10Archive, validateCourseProjectV10Resources } from './codecs/courseProjectV10Archive'
 
 function course(model: DocumentModel): asserts model is Extract<DocumentModel, { kind: 'course-v10' }> {
   if (model.kind !== 'course-v10') throw new TypeError('Course V10 Driver 不接受其他文档格式')
@@ -19,9 +19,13 @@ export class CourseV10Driver implements DocumentDriver {
   }
   apply(model: DocumentModel, command: DocumentCommand): DocumentModel {
     this.validate(model)
+    // Public callers own mutable buffers; detach them before using the Session path.
+    return this.applyValidated({ ...model, resources: cloneDocumentResources(model.resources) }, command)
+  }
+  applyValidated(model: DocumentModel, command: DocumentCommand): DocumentModel {
     course(model)
     if (command.type !== 'component-platform.apply') throw new TypeError('V10 只接受身份定位的组件操作')
-    const resources = cloneDocumentResources(model.resources)
+    const resources = { assets: { ...model.resources.assets }, components: { ...model.resources.components } }
     for (const edit of command.edits) if (edit.type === 'component.files.set') {
       const current = Object.hasOwn(model.resources.components, edit.ownerId) ? model.resources.components[edit.ownerId] : null
       if (!equalComponentValue(current, edit.expectedFiles)) throw new ComponentOperationConflict(['@componentFiles', edit.ownerId], '组件源码文件已变化')
@@ -37,14 +41,16 @@ export class CourseV10Driver implements DocumentDriver {
       Object.defineProperty(resources.assets, edit.asset.id, { value: Uint8Array.from(edit.bytes), enumerable: true, configurable: true, writable: true })
     }
     const next: DocumentModel = { kind: 'course-v10', project: applyComponentOperation(model.project, command), resources }
-    this.validate(next)
+    // applyComponentOperation already parses the candidate project. Only its resource
+    // closure and professional data remain to be checked at this boundary.
+    validateCourseProjectV10Resources(next.project, next.resources)
+    validateComponentData(next.project)
     return next
   }
   withRevision(model: DocumentModel, revision: number): DocumentModel {
     course(model)
     if (!Number.isSafeInteger(revision) || revision < model.project.revision) throw new Error('工程版本必须单调递增')
     const next: DocumentModel = { ...model, project: { ...model.project, revision } }
-    this.validate(next)
     return next
   }
   describeChanges(before: DocumentModel, after: DocumentModel) {
@@ -53,7 +59,8 @@ export class CourseV10Driver implements DocumentDriver {
   }
   load(bytes: Uint8Array): DocumentModel { return { kind: 'course-v10', ...openCourseProjectV10Archive(bytes) } }
   serialize(model: DocumentModel): Uint8Array {
-    this.validate(model); course(model)
+    course(model)
+    validateComponentData(model.project)
     return createCourseProjectV10Archive({ project: model.project, resources: model.resources })
   }
 }

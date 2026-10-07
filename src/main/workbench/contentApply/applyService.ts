@@ -4,9 +4,10 @@ import { captureComponentOperation, equalComponentValue } from '../../../core/dr
 import { assertCourseSurfaceRemoval, createCourseSurface } from '../../../core/course/courseSurfaceStructure'
 import type { InMemoryComponentCompilation } from '../../../core/components/compilation/InMemoryComponentCompilation'
 import { componentCompilationInput } from '../../../core/components/compilation/componentCompilationInput'
-import type { HtmlAssembly } from '../../../core/contentApply/assembly/htmlAssembly'
+import { sourceProgramAssembly, type HtmlAssembly } from '../../../core/contentApply/assembly/htmlAssembly'
 import { owningContainer, resolveComponentPresentation, type ComponentContainer, type ComponentDefinition, type ComponentEdit, type ComponentImplementation, type CourseProjectV10, type JsonObject, type JsonValue } from '../../../shared/contracts/component-platform'
 import { prepareContentResources, type PreparedContentResources } from './resources/contentResources'
+import { extractHtmlResources, htmlResourceSources } from '../htmlImport/extractHtmlResources'
 import type { HtmlDesignMeasurementRequest } from './measurement/ElectronHtmlDesignMeasurement'
 import { prepareMeasurementDocument } from './measurement/prepareMeasurementDocument'
 import { assemblyContentDraft, htmlAssemblyFraming, htmlForAssembly, localHtmlInputs, preserveHtmlOuterStyle } from './application/html'
@@ -37,15 +38,25 @@ function dataBindings(data: JsonObject): Record<string, string> {
 }
 function resourceEdits(prepared: PreparedContentResources, createId: () => string): { edits: ComponentEdit[]; bindings: Record<string, string>; urls: Record<string, string> } {
   const edits: ComponentEdit[] = [], bindings: Record<string, string> = {}, urls: Record<string, string> = {}
-  for (const resource of prepared.resources) {
+  const admitted = new Set(prepared.resources)
+  const retained: PreparedContentResources['resources'] = [...prepared.resources, ...prepared.unresolvedResources]
+  for (const resource of retained) {
     const id = resource.image?.id ?? createId()
     const reference = `cw-resource:${resource.key}`
     bindings[reference] = id
     const extension = resource.mediaType.split('/').at(-1)?.replace(/[^a-z0-9]/gi, '') || 'bin'
     edits.push({ type: 'asset.add', asset: { id, path: `assets/${id}.${extension}`, mimeType: resource.mediaType }, bytes: resource.bytes })
-    urls[reference] = `data:${resource.mediaType};base64,${Buffer.from(resource.bytes).toString('base64')}`
+    if (admitted.has(resource)) urls[reference] = `data:${resource.mediaType};base64,${Buffer.from(resource.bytes).toString('base64')}`
   }
   return { edits, bindings, urls }
+}
+function resourceDiagnostics(prepared: PreparedContentResources, instanceId?: string): ContentApplyDiagnostic[] {
+  return prepared.diagnostics.map(item => {
+    const retained = item.code === 'image-resource-unavailable' ? prepared.unresolvedResources.find(resource =>
+      resource.origins.some(origin => origin.reference === item.reference)) : undefined
+    return { ...item, ...(retained ? { reference: `cw-resource:${retained.key}` } : {}),
+      ...(instanceId ? { instanceId } : {}), repairable: true }
+  })
 }
 function hasSourceProgram(draft: ContentObjectDraft, definitions: Readonly<Record<string, ComponentDefinition>>): boolean {
   const implementation = draft.implementationOverride ?? definitions[draft.definitionId]?.implementation
@@ -102,14 +113,22 @@ export class ContentApplyService {
           const siblingFiles = new Map(retainedModules.map(([name, source]) => [name, new TextEncoder().encode(source)]))
           request.source.siblingFiles?.forEach((bytes, name) => siblingFiles.set(name, Uint8Array.from(bytes)))
           const prepared = await prepareContentResources({ html, siblingFiles }, this.createId)
+          // A content edit keeps this instance's existing CSS. Its real font/
+          // image consumers must keep their declaration when only HTML changed.
+          const cssSources = typeof previous.css === 'string' ? htmlResourceSources(extractHtmlResources({
+            html: `<style>${previous.css.replace(/<\/style/gi, '<\\/style')}</style>`,
+          }).remoteReferences) : []
+          prepared.resourceSources = [...new Map([...prepared.resourceSources, ...cssSources]
+            .map(source => [`${source.usage}\0${source.url}`, source])).values()]
           const resources = resourceEdits(prepared, this.createId)
           edits.push(...resources.edits)
-          diagnostics.push(...prepared.diagnostics.map(item => ({ ...item, instanceId: input.instanceId, repairable: true })))
+          diagnostics.push(...resourceDiagnostics(prepared, input.instanceId))
           const add = (path: string[], value: JsonValue) => { if (!equalComponentValue(previous[path[0]!], value)) edits.push({ type: 'data.set', instanceId: input.instanceId, path, value }) }
           add(['html'], prepared.html)
           if (prepared.modules || previous.modules) add(['modules'], prepared.modules ?? {})
           const bindings = { ...dataBindings(previous), ...resources.bindings }
           if (Object.keys(bindings).length) add(['resourceBindings'], bindings)
+          if (prepared.resourceSources.length || previous.resourceSources) add(['resourceSources'], prepared.resourceSources.map(({ url, usage }) => ({ url, usage })))
           if (program) {
             unverified = true
             if (definition.implementation.key === 'guoling.web' && !instance.implementationOverride) edits.push({ type: 'implementation.set', instanceId: input.instanceId,
@@ -120,15 +139,51 @@ export class ContentApplyService {
         const prepared = await prepareContentResources({ html: htmlForAssembly(request), siblingFiles: request.source.siblingFiles }, this.createId)
         const resources = resourceEdits(prepared, this.createId)
         edits.push(...resources.edits)
-        diagnostics.push(...prepared.diagnostics.map(item => ({ ...item, repairable: true })))
-        const assembly = await this.options.measure({ html: prepared.html, viewport: this.designViewport(project, request),
-          framing: htmlAssemblyFraming(request),
-          themeCss: request.source.themeCss, resourceUrls: { ...this.options.resourceUrls?.(project, request), ...resources.urls }, signal })
+        diagnostics.push(...resourceDiagnostics(prepared))
+        const viewport = this.designViewport(project, request)
+        let assembly: HtmlAssembly
+        try {
+          assembly = await this.options.measure({ html: prepared.html, viewport,
+            framing: htmlAssemblyFraming(request),
+            themeCss: request.source.themeCss, resourceSources: prepared.resourceSources,
+            resourceUrls: { ...this.options.resourceUrls?.(project, request), ...resources.urls }, signal })
+        } catch (error) {
+          // A failed disposable measurement is not a verdict on the author's
+          // source. The existing program carrier can retain and run it; its
+          // actual availability remains unverified. Cancellation still stops.
+          signal?.throwIfAborted()
+          if (error instanceof Error && error.name === 'AbortError') throw error
+          assembly = sourceProgramAssembly(viewport, { html: prepared.html,
+            ...(request.source.themeCss !== undefined ? { themeCss: request.source.themeCss } : {}) }, 'measurement-unavailable', [{
+            level: 'warning', code: 'html-measurement-source-retained', repairable: true,
+            message: `实测装配不可用，已保留可运行源码，运行结果待观察：${error instanceof Error ? error.message : String(error)}`,
+          } as ContentApplyDiagnostic])
+        }
         diagnostics.push(...assembly.diagnostics)
         const assembled = assemblyContentDraft(assembly, resources.bindings, {
+          admittedResourceBindings: Object.fromEntries(Object.keys(resources.urls).map(reference => [reference, resources.bindings[reference]!])),
           modules: prepared.modules, createFormulaId: this.createId, definitions: project.definitions, flow: this.flowBodyTarget(project, request),
+          flowPage: request.intent === 'redo' && request.target.kind === 'container' && request.target.container.kind === 'surface',
         })
         drafts = assembled.drafts ?? [assembled.draft]
+        const persistSources = (draft: ContentObjectDraft): void => {
+          const definition = assembled.definitions.find(value => value.id === draft.definitionId) ?? project.definitions[draft.definitionId]
+          if (prepared.resourceSources.length && definition?.implementation.kind === 'builtin'
+            && ['guoling.web', 'guoling.html-program'].includes(definition.implementation.key)) {
+            dataObject(draft.data).resourceSources = prepared.resourceSources.map(({ url, usage }) => ({ url, usage }))
+          }
+          draft.children?.forEach(persistSources)
+        }
+        drafts.forEach(persistSources)
+        if (assembled.flowBackgroundColor && request.target.kind === 'container' && request.target.container.kind === 'surface') {
+          const surfaceId = request.target.container.surfaceId
+          const surface = project.surfaces.find(value => value.id === surfaceId)
+          if (surface?.kind === 'flow' && surface.flow?.layout.paperBackgroundColor !== assembled.flowBackgroundColor) {
+            const layout = surface.flow?.layout ?? { widthMode: 'fluid' as const, readingWidth: 860, wideContentWidth: 1100 }
+            edits.push({ type: 'flow.set', surfaceId: surface.id, flow: { ...surface.flow,
+              layout: { ...layout, paperBackgroundColor: assembled.flowBackgroundColor } } })
+          }
+        }
         edits.push(...assembled.definitions.map(definition => ({ type: 'definition.set' as const, definition })))
         diagnostics.push(...assembled.diagnostics)
         const definitions = { ...project.definitions, ...Object.fromEntries(assembled.definitions.map(definition => [definition.id, definition])) }
@@ -165,7 +220,18 @@ export class ContentApplyService {
     unverified ||= sourceImplementations.length > 0
     if (request.source.kind === 'objects') unverified ||= request.source.objects.some(draft => hasSourceProgram(draft, compilationProject.definitions))
     signal?.throwIfAborted()
-    return planContentApply({ project: baseProject, request, createId: this.createId, drafts, edits, diagnostics, unusable, unverified })
+    const plan = planContentApply({ project: baseProject, request, createId: this.createId, drafts, edits, diagnostics, unusable, unverified })
+    // Bind the diagnosed source to the identities allocated by the existing
+    // planner. A later read can verify its current bytes without another state.
+    const inserted = plan.command.edits.flatMap(edit => edit.type === 'instance.insert' ? edit.instances : [])
+    plan.diagnostics = plan.diagnostics.flatMap(item => {
+      if (item.code !== 'image-resource-unavailable' || item.instanceId || !item.reference) return [item]
+      const reference = item.reference
+      const owners = inserted.filter(instance => instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data)
+        && dataBindings(instance.data)[reference])
+      return owners.length ? owners.map(instance => ({ ...item, instanceId: instance.id })) : [item]
+    })
+    return plan
   }
 
   private async compileSources(project: CourseProjectV10, resources: DocumentResources,
@@ -306,6 +372,9 @@ export class ContentApplyService {
       return { width: Math.ceil(width ?? (layout?.widthMode === 'fluid' ? 1100 : 860)), height: 900 }
     }
     const size = surface?.designSize
+    // Spatial has no page-sized designSize. A newly added world still needs a
+    // temporary browser viewport; this input never becomes author geometry.
+    if (!size && surface?.kind === 'spatial') return { width: 1280, height: 720 }
     if (!size) throw new Error('新建或重做范围缺少设计尺寸，未擅自采用默认画布')
     return { width: Math.ceil(size.width), height: Math.ceil(size.height) }
   }

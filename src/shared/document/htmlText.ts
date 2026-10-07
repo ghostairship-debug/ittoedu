@@ -1,4 +1,5 @@
 import { normalizeDocumentText, type FlowInline, type FlowTextContent, type InlineLink, type MathStyle } from './content'
+import { normalizeDocumentColor } from './color'
 import { describeDocumentMath, parseDocumentMath } from './math'
 import type { TextRunStyle } from '../contracts/native-v1/types'
 
@@ -48,16 +49,6 @@ export function htmlDeclarations(css: string | undefined): [string, string][] {
   return result
 }
 
-function hexColor(value: string): string | undefined {
-  const text = value.trim()
-  if (/^#[0-9a-fA-F]{6}$/.test(text)) return text
-  const short = /^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/.exec(text)
-  if (short) return `#${short[1]}${short[1]}${short[2]}${short[2]}${short[3]}${short[3]}`
-  const rgb = /^rgba?\(\s*(\d+)\s*,?\s*(\d+)\s*,?\s*(\d+)/i.exec(text)
-  if (rgb) return `#${rgb.slice(1, 4).map(part => Math.min(255, Number(part)).toString(16).padStart(2, '0')).join('')}`
-  return undefined
-}
-
 export function htmlCssLength(value: string): number | undefined {
   const match = /^(-?[\d.]+)(px|pt|em|rem)?$/.exec(value.trim())
   if (!match) return undefined
@@ -69,7 +60,7 @@ export function htmlTextStyle(style: TextRunStyle, element: Pick<DocumentHtmlEle
   const next: TextRunStyle = { ...style }
   for (const [name, value] of htmlDeclarations(element.attributes.style)) {
     const lower = value.toLowerCase()
-    if (name === 'color') { const color = hexColor(value); if (color) next.color = color }
+    if (name === 'color') { const color = normalizeDocumentColor(value); if (color) next.color = color }
     else if (name === 'font-family' && value) next.fontFamily = value
     else if (name === 'font-size') { const size = htmlCssLength(value); if (size !== undefined) next.fontSize = Math.min(400, Math.max(8, Math.round(size * 100) / 100)) }
     else if (name === 'vertical-align') {
@@ -84,7 +75,7 @@ export function htmlTextStyle(style: TextRunStyle, element: Pick<DocumentHtmlEle
       if (lower.includes('line-through')) next.strike = true
     } else if (name === 'background-color' || name === 'background') {
       if (lower === 'transparent') next.highlightColor = null
-      else { const color = hexColor(value); if (color) next.highlightColor = color }
+      else { const color = normalizeDocumentColor(value); if (color) next.highlightColor = color }
     } else if (name === 'text-emphasis' || name === 'text-emphasis-style' || name === '-webkit-text-emphasis-style') next.emphasis = lower !== 'none'
   }
   if (element.attributes['data-style']) {
@@ -155,9 +146,12 @@ export function readHtmlDocumentText(nodes: readonly DocumentHtmlNode[], options
       const base = { ...(Object.keys(context.style).length ? { style: context.style } : {}), ...(context.link ? { link: context.link } : {}) }
       if (context.code || part.br) { inlines.push({ type: 'text', text, ...(context.code ? { code: true } : {}), ...base }); return }
       let rest = text
-      for (let match = /\\\(([\s\S]+?)\\\)/.exec(rest); match; match = /\\\(([\s\S]+?)\\\)/.exec(rest)) {
+      // Tool responses may retain an extra escape on both math delimiters. Accept
+      // that pair without unescaping the formula body or ordinary/code text.
+      const math = /(?<!\\)(\\{1,2})\(([\s\S]+?)\1\)/
+      for (let match = math.exec(rest); match; match = math.exec(rest)) {
         if (match.index) inlines.push({ type: 'text', text: rest.slice(0, match.index), ...base })
-        const latex = match[1]!.trim()
+        const latex = match[2]!.trim()
         const accessibleText = context.math?.accessibleText ?? documentHtmlMathAccessibleText(latex)
         if (accessibleText) inlines.push({ type: 'math', formulaId: options.createFormulaId(), latex, accessibleText,
           ...(context.math?.style ? { style: context.math.style } : {}), ...(context.link ? { link: context.link } : {}) })

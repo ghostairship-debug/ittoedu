@@ -1,0 +1,59 @@
+
+ RUN  v4.1.10 D:/果铃并行/20261007-content-revision/e
+
+ ❯ tests/integration/productFollowup/T04/cancelledCloseContinuation.test.ts (1 test | 1 failed) 486ms
+   × cancelled close can reopen A for a real edit while old A authority remains stopped and the same client B target still writes 484ms
+ ❯ tests/integration/productFollowup/T06/officePublicEngineReview.test.ts (1 test | 1 failed) 206ms
+   × default Office catalog edits through public Gateway and Engine receipts preserve binary before after for rollback and later human CAS conflict 204ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/productFollowup/T04/cancelledCloseContinuation.test.ts > cancelled close can reopen A for a real edit while old A authority remains stopped and the same client B target still writes
+AssertionError: {"content":[{"type":"text","text":"{\"kind\":\"error\",\"code\":\"invalid-operation\",\"message\":\"对象路径尚未观察；请先用 project.list 或 project.read 读取当前工程文件。\"}"}],"structuredContent":{"result":{"kind":"error","code":"invalid-operation","message":"对象路径尚未观察；请先用 project.list 或 project.read 读取当前工程文件。"},"ticket":"d87f1004-0b53-467f-9d7e-855d52baac49"},"isError":true}: expected { …(2) } to match object { result: { …(2) } }
+(3 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+    "result": {
+-     "kind": "document-operation",
+-     "result": {
+-       "status": "applied",
+-     },
++     "kind": "error",
+    },
+  }
+
+ ❯ tests/integration/productFollowup/T04/cancelledCloseContinuation.test.ts:60:8
+     58|     const editedA = await client.call('object.update', { project: rene…
+     59|     expect(editedA.structuredContent, JSON.stringify(editedA))
+     60|       .toMatchObject({ result: { kind: 'document-operation', result: {…
+       |        ^
+     61|     const editedB = await client.call('object.update', { project: targ…
+     62|     expect(editedB.structuredContent, JSON.stringify(editedB))
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  tests/integration/productFollowup/T06/officePublicEngineReview.test.ts > default Office catalog edits through public Gateway and Engine receipts preserve binary before after for rollback and later human CAS conflict
+AssertionError: {"status":"failed","failure":{"outcome":"unknown","kind":"transport","code":"model-outcome-unknown","message":"模型响应处理未完成：expected [ 'file.list', 'file.search', …(17) ] to deeply equal ArrayContaining{…}"},"requests":[{"requestId":"17ff53d7-93dc-46b1-9023-3150a119ef2b.attempt-1","state":"failed","payload":{"phase":"initial","digest":"cfa1bb7b20beee0700841988a00cd507dc59293c7034e8407e77e1bcef0c4519","serializedBytes":18546},"failure":{"outcome":"unknown","kind":"transport","code":"model-outcome-unknown","message":"模型响应处理未完成：expected [ 'file.list', 'file.search', …(17) ] to deeply equal ArrayContaining{…}"}}],"tools":[]}: expected 'failed' to be 'completed' // Object.is equality
+
+Expected: "completed"
+Received: "failed"
+
+ ❯ tests/integration/productFollowup/T06/officePublicEngineReview.test.ts:56:153
+     54|       documents: [], workspaceRoot: workspace, permission: 'workspace'…
+     55|     const finished = await engine.wait(start.runId)
+     56|     expect(finished.status, JSON.stringify({ status: finished.status, …
+       |                                                                                                                                                         ^
+     57|     const stored = await runs.read(start.runId)
+     58|     if (!stored) throw new Error('Missing persisted Engine receipt')
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 1 passed (3)
+      Tests  2 failed | 1 passed (3)
+   Start at  09:13:07
+   Duration  9.34s (transform 11.91s, setup 203ms, import 24.46s, tests 1.04s, environment 0ms)
+

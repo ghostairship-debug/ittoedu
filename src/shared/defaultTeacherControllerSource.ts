@@ -1,4 +1,4 @@
-/** The complete editable default UI is embedded in the course package. */
+/** @deprecated Historical V9 Component API4 embedded controller; V10 uses components/teacher-controller/defaultController.ts. */
 export const DEFAULT_TEACHER_CONTROLLER_SOURCE = String.raw`
 window.CoursewareComponent.define({
   id: "com.ittoedu.teacher-controller", runtimeApiVersion: 4,

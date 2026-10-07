@@ -1,0 +1,12 @@
+vite v8.1.5 building client environment for production...
+
+ WARN  inlineDynamicImports option is ignored because codeSplitting: false is set.
+
+[2K
+transforming...✓ 239 modules transformed.
+rendering chunks...
+computing gzip size...
+dist-player/player.iife.js  967.05 kB │ gzip: 296.72 kB
+
+✓ built in 636ms
+BUILD_PLAYER_EXIT_CODE=0

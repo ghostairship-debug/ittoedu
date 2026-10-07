@@ -1,7 +1,7 @@
 import type { ModelChatMessage, ModelFailure, ModelSelection } from './modelProvider'
 import type { ModelToolCall, ToolResult, ToolTarget } from './tools'
 import type { InputContext, PayloadManifest } from './attachments'
-import type { DisclosedExecutionSettings } from './executionDesktop'
+import type { DisclosedExecutionSettings, ExecutionMaterials, WebTaskAuthorization } from './executionDesktop'
 import type { ExecutionPermissionMode } from './executionPermission'
 import type { ConversationHome } from './conversations'
 import type { EditTarget } from './editSession'
@@ -27,6 +27,8 @@ export interface ExecutionStart {
   disclosedSettings?: DisclosedExecutionSettings
   documents: readonly { documentId: string; writable: readonly ToolTarget[]; selection?: readonly ToolTarget[] }[]
   contentOutput?: ExecutionContentOutput
+  materials?: ExecutionMaterials
+  webAuthorization?: WebTaskAuthorization
   /** Compiled, frozen attachment/context messages. No path implies a new grant. */
   context?: readonly ModelChatMessage[]
   inputContext?: InputContext

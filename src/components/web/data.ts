@@ -4,6 +4,7 @@ import type { ComponentDefinition } from '../../shared/contracts/component-platf
 export const webDataSchema = z.object({ html: z.string(), css: z.string().optional(),
   /** Editable local ES-module source, keyed relative to the HTML document. */
   modules: z.record(z.string(), z.string()).optional(),
+  resourceSources: z.array(z.object({ url: z.string().min(1), usage: z.enum(['image', 'media', 'stylesheet', 'font']) }).strict()).optional(),
   resourceBindings: z.record(z.string(), z.string().min(1)).optional() }).strict()
 export type WebData = z.infer<typeof webDataSchema>
 const webDataPresentation = { type: 'object', properties: {

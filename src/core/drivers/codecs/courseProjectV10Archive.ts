@@ -3,7 +3,7 @@ import { courseProjectV10Schema } from '../../../shared/contracts/component-plat
 import type { CourseProjectV10 } from '../../../shared/contracts/component-platform/project'
 import type { DocumentResources } from '../../../shared/workbench/document'
 import { assertSafeArchivePath } from './archivePath'
-import { cloneDocumentResources } from '../resources'
+import { validateDocumentResources } from '../resources'
 
 export interface CourseProjectV10ArchiveData {
   project: CourseProjectV10
@@ -12,7 +12,12 @@ export interface CourseProjectV10ArchiveData {
 
 export function validateCourseProjectV10Archive(data: CourseProjectV10ArchiveData): void {
   const project = courseProjectV10Schema.parse(data.project)
-  const resources = cloneDocumentResources(data.resources)
+  validateCourseProjectV10Resources(project, data.resources)
+}
+
+/** Resource closure is checked separately when the operation owner has already parsed the project. */
+export function validateCourseProjectV10Resources(project: CourseProjectV10, resources: DocumentResources): void {
+  validateDocumentResources(resources)
   const claimed = new Set<string>(['project.json'])
   const claim = (path: string) => {
     assertSafeArchivePath(path, 'project')
@@ -60,6 +65,6 @@ export function openCourseProjectV10Archive(bytes: Uint8Array): CourseProjectV10
     resources.components[id] ??= Object.create(null)
     resources.components[id][parts.join('/')] = content
   }
-  validateCourseProjectV10Archive({ project, resources })
+  validateCourseProjectV10Resources(project, resources)
   return { project, resources }
 }

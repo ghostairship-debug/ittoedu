@@ -39,7 +39,7 @@ import {
 } from '../../src/player/surfaces/mixed/MixedCourseNavigator'
 import { mountFlowLocationTryRun } from '../../src/renderer/ui/flowLocationTryRun'
 import { FlowWorkspaceTestHarness as FlowWorkspace } from '../helpers/FlowWorkspaceTestHarness'
-import { validateCourseProjectArchiveBytes } from '../../scripts/validate-project'
+import { validateCourseProjectArchiveBytes } from '../../scripts/historical/validate-course-project-v9'
 import type { FlowBlock } from '../../src/shared/courseProjectTypes'
 import {
   PLAYER_V2_ENTRY_UNSUPPORTED_ERROR,

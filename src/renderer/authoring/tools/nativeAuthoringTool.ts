@@ -1,3 +1,4 @@
+/** @deprecated Historical V9/CLI consumer only; current production uses Project V10 and the canonical Gateway. */
 import { imageReplacementInputSchema as imageEdit, nativeImageReplacementData } from '../../../core/tools/imageApplication'
 import { nativeTemplateSchema as template, nativeShapeStyleSchema as shapeStyle } from '../../../core/tools/nativeInsertionSchema'
 import { z } from 'zod'
@@ -15,7 +16,7 @@ import { patchEffectiveLayerPropertiesAtTarget } from '../../course/effectiveLay
 import { makeLayerItemAuthoringAddress } from '../courseAuthoringScope'
 import { insertionIndex, resolveAuthoringToolScope } from './authoringToolScope'
 import { AuthoringToolFailure, type AuthoringToolDefinition } from './executeAuthoringTool'
-import { nativeLayerItemPropertiesInputSchema as layerItemPropertiesInputSchema } from '../../../core/tools/toolSchemas'
+import { nativeLayerItemPropertiesInputSchema as layerItemPropertiesInputSchema } from './historicalSchemas'
 import { projectEffectiveLayers } from '../../course/effectiveLayerProjection'
 import { planNativeTextEdit } from '../../../core/tools/nativeText'
 

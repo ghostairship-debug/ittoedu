@@ -1,0 +1,11 @@
+
+ RUN  v4.1.10 D:/果铃并行/20261007-content-revision/e
+
+ ✓ tests/integration/productFollowup/T02/presentationStateLifecycle.test.ts > public V10 presentation state actions preserve teacher content geometry background interaction and formal History through save and cold reopen 500ms
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  10:28:02
+   Duration  8.44s (transform 3.23s, setup 68ms, import 7.76s, tests 502ms, environment 0ms)
+
+VITEST_EXIT_CODE=0

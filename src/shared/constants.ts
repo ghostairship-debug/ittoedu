@@ -17,7 +17,9 @@ export const CANVAS_WIDTH = 1280 as const
 export const CANVAS_HEIGHT = 720 as const
 export const RUNTIME_API_VERSION = 2 as const
 export const RUNTIME_AUTHORING_API_VERSION = 1 as const
+/** Historical .h5component/V9 consumer version; current component-platform runtime is API 5. */
 export const COMPONENT_SCHEMA_VERSION = 4 as const
+/** Historical Component V4 host version. Do not use it to label the current V10 runtime. */
 export const COMPONENT_RUNTIME_API_VERSION = 4 as const
 export const MAX_HISTORY_STEPS = 50
 /** Product guidance only; projects remain valid beyond this point. */

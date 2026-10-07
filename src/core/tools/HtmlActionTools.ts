@@ -1,5 +1,6 @@
 import { z } from 'zod'
-import type { ToolDefinition } from '../../shared/workbench/tools'
+import type { ToolDefinition, ToolResult } from '../../shared/workbench/tools'
+import { toolRegistrationFor } from './ToolRegistration'
 
 const noInput = z.object({}).strict()
 /** Transient handle from the most recent html.observe or action receipt. */
@@ -31,3 +32,10 @@ export const htmlActionToolCatalog = (Object.keys(htmlActionToolSchemas) as Html
   .map(name => ({ name, description: descriptions[name], inputSchema: htmlActionToolSchemas[name],
     manual: { label: name, group: (name === 'html.click' || name === 'html.input' ? 'edit' : 'read') as 'read' | 'edit',
       targetKinds: ['document'] as ToolDefinition['manual']['targetKinds'] } }))
+const registerHtmlAction = toolRegistrationFor<{ execute(name: HtmlActionToolName, input: unknown): Promise<ToolResult> }>()
+export const htmlActionToolRegistrations = htmlActionToolCatalog.map(tool => registerHtmlAction(tool, {
+  capability: 'read', effect: tool.name === 'html.click' || tool.name === 'html.input' ? 'html-preview-action' : null,
+  supports: context => context.htmlActions !== false, targets: () => [],
+  handler: (context, input) => context.execute(tool.name, input),
+}))
+export function htmlActionToolRegistration(name: string) { return htmlActionToolRegistrations.find(tool => tool.name === name) }

@@ -1,3 +1,4 @@
+/** Historical V9 case builder; current in-project authoring uses the V10 Gateway. */
 import { encodeBase64 } from '../src/renderer/export/base64'
 import '../src/renderer/export/bundledFontEmbedSourceNode'
 import { componentPackagesFromArchive } from '../src/renderer/components/componentPackageStore'
@@ -17,7 +18,7 @@ import {
 import {
   courseProjectValidationExitCode,
   validateCourseProjectArchiveBytes,
-} from './validate-project'
+} from './historical/validate-course-project-v9'
 import {
   lstat,
   mkdir,

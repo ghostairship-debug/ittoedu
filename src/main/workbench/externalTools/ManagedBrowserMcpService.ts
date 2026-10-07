@@ -5,7 +5,8 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve, sep } 
 import { parsePublicUrl } from '../network/publicHttp'
 import { PublicBrowserProxy } from '../network/PublicBrowserProxy'
 import { McpClientService, type McpCallResult, type McpDiscovery } from './McpClientService'
-import type { EmbeddedBrowserBackend, EmbeddedBrowserBackendFactory } from '../browserEmbedded/EmbeddedBrowserBackend'
+import type { EmbeddedBrowserBackend, EmbeddedBrowserBackendFactory, ObservedBrowserAction } from '../browserEmbedded/EmbeddedBrowserBackend'
+import type { BrowserTaskAction } from './BrowserActionApprovals'
 import type { EmbeddedBrowserViewport, EmbeddedBrowserViewportState } from '../../../shared/workbench/embeddedBrowser'
 
 const browserTools = [
@@ -28,7 +29,7 @@ export interface ManagedBrowserGrant {
   /** Frozen task origins. The default public policy may be used for open-web research. */
   allowedOrigins?: readonly string[]
   allowPublicNavigation?: boolean
-  /** Only files whose real path remains beneath this root can become upload resources. */
+  /** Legacy relative-source grant; configured file-owner reads take precedence. */
   uploadRoot?: string
 }
 
@@ -40,7 +41,11 @@ export interface ManagedBrowserOptions {
   externalBackend?: 'edge-mcp'
   /** Host-owned, concrete approval for this exact click/input/upload. Missing means deny. */
   approveExternalAction?: (input: { runId: string; tool: ManagedBrowserTool; arguments: Record<string, unknown>;
-    operationId: string; pageUrl?: string; snapshotId: string }) => Promise<boolean>
+    operationId: string; pageUrl?: string; snapshotId: string } & Partial<ObservedBrowserAction>) => Promise<boolean>
+  /** Main checks its frozen result scope and registers the same concrete grant used below. */
+  authorizeTaskAction?: (input: BrowserTaskAction) => Promise<boolean>
+  /** File owner resolves the explicitly authorized source and freezes its original bytes. */
+  readUpload?: (input: { runId: string; path: string }) => Promise<{ name: string; bytes: Uint8Array }>
   /** Test-only loopback origin for a server created by the test itself. */
   testLoopbackOrigin?: string
   nodeExecutable?: string
@@ -198,6 +203,29 @@ export class ManagedBrowserMcpService {
       ...((run.snapshotId ?? run.fileChooserSnapshotId) ? { snapshotId: run.snapshotId ?? run.fileChooserSnapshotId } : {}) }
   }
 
+  /** Read-only preflight for built-in and external consumers, before deciding whether to ask. */
+  async authorizeTaskAction(input: { runId: string; operationId: string; name: string;
+    arguments: Record<string, unknown>; snapshotId?: string }): Promise<boolean> {
+    const run = this.run(input.runId)
+    if (run.stopped || run.control !== 'agent' || run.grant.permission === 'read-only' || !this.options.authorizeTaskAction) return false
+    const tool = remoteName(input.name)
+    if (!tool || !managedBrowserWriteTools.includes(tool as typeof managedBrowserWriteTools[number])) return false
+    const args = { ...input.arguments }
+    const snapshotId = input.snapshotId ?? (typeof args.snapshotId === 'string' ? args.snapshotId : undefined)
+      ?? (run.snapshotId ?? (tool === 'browser_file_upload' ? run.fileChooserSnapshotId : undefined))
+    delete args.snapshotId
+    if (!snapshotId || !this.validateArgs(tool, args)) return false
+    if (snapshotId !== run.snapshotId && (tool !== 'browser_file_upload' || snapshotId !== run.fileChooserSnapshotId)) return false
+    const generation = run.controlGeneration
+    const observed = await run.embedded?.inspectAction?.({ tool, arguments: args })
+    if (!observed || observed.action === 'unknown' || observed.pageUrl !== run.pageUrl
+      || run.stopped || run.control !== 'agent' || generation !== run.controlGeneration) return false
+    const authorized = await this.options.authorizeTaskAction({ runId: input.runId, operationId: input.operationId, tool,
+      arguments: args, snapshotId, ...observed })
+    return authorized && !run.stopped && run.control === 'agent' && generation === run.controlGeneration
+      && (snapshotId === run.snapshotId || tool === 'browser_file_upload' && snapshotId === run.fileChooserSnapshotId)
+  }
+
   controlState(runId: string): ManagedBrowserControlState {
     const run = this.run(runId)
     return { state: run.stopped ? 'stopped' : run.control, ...(run.pageUrl ? { pageUrl: run.pageUrl } : {}),
@@ -218,7 +246,7 @@ export class ManagedBrowserMcpService {
     const run = this.run(runId)
     if (run.stopped) throw new Error('浏览器任务已停止')
     if (run.controls) throw new Error('浏览器接管正在切换，请等待当前操作结束')
-    if (run.control === (action === 'takeover' ? 'human' : 'agent')) return this.controlState(runId)
+    if (action === 'resume' && run.control === 'agent') return this.controlState(runId)
     if (action === 'takeover' && !run.pageUrl) throw new Error('本任务尚未打开可接管的网页。')
     run.control = 'transition'; run.controlGeneration++
     if (action === 'takeover') run.activeOperation?.abort(new Error('用户正在接管当前网页'))
@@ -229,16 +257,7 @@ export class ManagedBrowserMcpService {
       if (run.stopped) throw new Error('任务已停止')
       run.snapshotId = undefined; run.fileChooserSnapshotId = undefined; run.pendingApproval = undefined
       run.used = true
-      if (run.embedded) await run.embedded.control(action === 'takeover')
-      else {
-        const code = managedBrowserWindowCode[action === 'takeover' ? 'show' : 'hide']
-        const args = { code }
-        run.pendingApproval = { tool: 'browser_run_code_unsafe', digest: createHash('sha256').update(JSON.stringify(args)).digest('hex') }
-        try {
-          const reply = await run.client!.invoke({ runId, operationId: `host-window-${randomUUID()}`, name: 'mcp.browser.browser_run_code_unsafe', arguments: args })
-          if (reply.status !== 'returned') throw new Error('未能切换原受管浏览器窗口；任务保持暂停，可再次尝试或停止')
-        } finally { run.pendingApproval = undefined }
-      }
+      await this.setBackendControl(runId, run, action === 'takeover')
       if (run.stopped) throw new Error('任务已停止')
       if (action === 'resume') {
         const result = await this.perform(run, { runId, operationId: `host-return-observe-${randomUUID()}`,
@@ -251,8 +270,35 @@ export class ManagedBrowserMcpService {
     })()
     run.controls = control
     try { return await control }
-    catch (error) { if (!run.stopped) run.control = 'human'; throw error }
+    catch (error) {
+      if (!run.stopped) {
+        run.snapshotId = undefined; run.fileChooserSnapshotId = undefined; run.pendingApproval = undefined
+        // Resume may already have disabled native human input before observing fails.
+        // Report human ownership only after restoring the same backend's real control.
+        try {
+          await this.setBackendControl(runId, run, true)
+          if (!run.stopped) run.control = 'human'
+        } catch (restoreError) {
+          if (!run.stopped) run.control = 'transition'
+          throw new Error(`${reason(error)}；人工控制尚未恢复：${reason(restoreError)}。请显示当前网页后重试接管或停止。`)
+        }
+      }
+      throw error
+    }
     finally { if (run.controls === control) run.controls = undefined }
+  }
+
+  private async setBackendControl(runId: string, run: BrowserRun, human: boolean): Promise<void> {
+    if (run.stopped) throw new Error('任务已停止')
+    if (run.embedded) { await run.embedded.control(human); return }
+    if (!run.client) throw new Error('任务浏览器尚未就绪')
+    const args = { code: managedBrowserWindowCode[human ? 'show' : 'hide'] }
+    run.pendingApproval = { tool: 'browser_run_code_unsafe', digest: createHash('sha256').update(JSON.stringify(args)).digest('hex') }
+    try {
+      const reply = await run.client.invoke({ runId, operationId: `host-window-${randomUUID()}`,
+        name: 'mcp.browser.browser_run_code_unsafe', arguments: args })
+      if (reply.status !== 'returned') throw new Error('未能切换原受管浏览器窗口；任务保持暂停，可再次尝试或停止')
+    } finally { run.pendingApproval = undefined }
   }
 
   /** Local diagnostic only: verifies that denied requests reached the per-run egress guard. */
@@ -282,10 +328,11 @@ export class ManagedBrowserMcpService {
       const properties = source.properties && typeof source.properties === 'object' ? source.properties as Record<string, unknown> : {}
       return { ...tool, inputSchema: { ...source,
         properties: { ...(tool.remoteName === 'browser_file_upload'
-          ? { paths: { type: 'array', items: { type: 'string' }, description: '授权根下的相对文件路径' } }
+          ? { paths: { type: 'array', items: { type: 'string' }, description: this.options.readUpload
+            ? '本任务明确获授权的文件来源路径；宿主文件服务核对授权并冻结原文件。' : '授权根下的相对文件路径' } }
           : properties), snapshotId: { type: 'string', description: '最近一次 browser_snapshot 返回的页面观察身份' } },
         required: [...new Set([...(Array.isArray(source.required) ? source.required as string[] : []),
-          ...(tool.remoteName === 'browser_file_upload' ? ['paths'] : []), 'snapshotId'])], additionalProperties: false } }
+          ...(tool.remoteName === 'browser_file_upload' ? ['paths'] : [])])], additionalProperties: false } }
     }) }
   }
 
@@ -298,6 +345,7 @@ export class ManagedBrowserMcpService {
       || Array.isArray(input.arguments)) return Promise.resolve(reject('浏览器操作身份或参数无效'))
     const args = { ...input.arguments }
     const snapshotId = input.snapshotId ?? (typeof args.snapshotId === 'string' ? args.snapshotId : undefined)
+      ?? (run.snapshotId ?? (remoteName(input.name) === 'browser_file_upload' ? run.fileChooserSnapshotId : undefined))
     delete args.snapshotId
     const normalized = { ...input, arguments: args, snapshotId }
     const digest = createHash('sha256').update(JSON.stringify([input.name, args, snapshotId])).digest('hex')
@@ -369,16 +417,23 @@ export class ManagedBrowserMcpService {
     return true
   }
 
-  private async stageUploads(run: BrowserRun, args: Record<string, unknown>): Promise<Record<string, unknown>> {
-    if (!run.grant.uploadRoot) throw new Error('本任务没有上传授权根')
-    const root = await fs.realpath(run.grant.uploadRoot)
+  private async stageUploads(runId: string, run: BrowserRun, args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.options.readUpload && !run.grant.uploadRoot) throw new Error('本任务没有上传文件授权')
+    const root = !this.options.readUpload && run.grant.uploadRoot ? await fs.realpath(run.grant.uploadRoot) : undefined
     const paths: string[] = []
     const staged = join(run.scratch!, 'uploads')
     await fs.mkdir(staged, { recursive: true })
     for (const entry of args.paths as string[]) {
+      if (this.options.readUpload) {
+        const frozen = await this.options.readUpload({ runId, path: entry })
+        const dest = join(staged, `${randomUUID()}-${basename(frozen.name) || 'upload'}`)
+        await fs.writeFile(dest, frozen.bytes, { flag: 'wx' })
+        paths.push(dest)
+        continue
+      }
       if (isAbsolute(entry) || entry.split(/[\\/]/).includes('..')) throw new Error('上传仅接受授权根下相对路径')
-      const source = await fs.realpath(resolve(root, entry))
-      if (!within(root, source)) throw new Error('上传来源超出授权根')
+      const source = await fs.realpath(resolve(root!, entry))
+      if (!within(root!, source)) throw new Error('上传来源超出授权根')
       const stat = await fs.stat(source)
       if (!stat.isFile()) throw new Error('上传来源不是受支持的普通文件')
       const dest = join(staged, `${randomUUID()}-${basename(source)}`)
@@ -445,15 +500,19 @@ export class ManagedBrowserMcpService {
       if (!observed) return reject('页面观察已失效，请重新读取当前页面')
       if (!this.options.approveExternalAction) return reject('缺少本次外部页面操作的明确授权')
       let approved = false
-      try { approved = await this.options.approveExternalAction({ runId: input.runId, operationId: input.operationId, tool,
-        arguments: structuredClone(input.arguments), ...(run.pageUrl ? { pageUrl: run.pageUrl } : {}), snapshotId: input.snapshotId! }) }
+      try {
+        const observedAction = await run.embedded?.inspectAction?.({ tool, arguments: input.arguments })
+        approved = await this.options.approveExternalAction({ runId: input.runId, operationId: input.operationId, tool,
+          arguments: structuredClone(input.arguments), ...(run.pageUrl ? { pageUrl: run.pageUrl } : {}), snapshotId: input.snapshotId!,
+          ...(observedAction ?? {}) })
+      }
       catch { return reject('无法核对本次外部页面操作授权') }
       if (!approved) return reject('本次外部页面操作未获授权')
     }
     if (run.stopped || input.signal?.aborted) return reject('任务已停止')
     let remoteArgs = input.arguments
     if (tool === 'browser_file_upload') {
-      try { remoteArgs = await this.stageUploads(run, input.arguments) }
+      try { remoteArgs = await this.stageUploads(input.runId, run, input.arguments) }
       catch (cause) { return reject(reason(cause)) }
     }
     // The generic MCP write gate only opens for the exact, already approved operation.

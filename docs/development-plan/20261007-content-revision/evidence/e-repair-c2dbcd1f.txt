@@ -1,0 +1,466 @@
+
+ RUN  v4.1.10 D:/果铃并行/20261007-content-revision/e
+
+ ❯ tests/integration/productFollowup/T09/selectedLessonMaterialInput.test.ts (1 test | 1 failed) 47ms
+   × freezes only teacher-selected content from the real lesson material owner with DOCX paragraph provenance and no fabricated pages or model-owned target IDs 46ms
+ ❯ tests/integration/productFollowup/T03/advancedVisibleDraft.test.tsx (6 tests | 2 failed) 4477ms
+   × a source recovery arriving after its clean panel is mounted shows original pending input without History 1112ms
+   × a json recovery arriving after its clean panel is mounted shows original pending input without History 1156ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 3 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/productFollowup/T03/advancedVisibleDraft.test.tsx > a source recovery arriving after its clean panel is mounted shows original pending input without History
+Error: expect(element).toHaveValue(export const value = 99;)
+
+Expected the element to have value:
+  export const value = 99;
+Received:
+  export const value = 42;
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div />
+    <div>
+      <details
+        open=""
+      >
+        <summary>
+          共享定义源码
+        </summary>
+        <label>
+          语言
+          <select>
+            <option
+              value="typescript"
+            >
+              TypeScript
+            </option>
+            <option
+              value="javascript"
+            >
+              JavaScript
+            </option>
+          </select>
+        </label>
+        <div
+          class="developer-source-files"
+        >
+          <label>
+            文件
+            <select
+              aria-label="组件源码文件"
+            >
+              <option
+                value="main.js"
+              >
+                main.js
+                （入口）
+              </option>
+            </select>
+          </label>
+          <label>
+            入口
+            <select
+              aria-label="组件源码入口"
+            >
+              <option
+                value="main.js"
+              >
+                main.js
+              </option>
+            </select>
+          </label>
+          <button>
+            删除当前文件
+          </button>
+        </div>
+        <div>
+          <label>
+            新增文件路径
+            <input
+              aria-label="新增组件源码文件路径"
+              value=""
+            />
+          </label>
+          <button
+            disabled=""
+          >
+            新增文件
+          </button>
+        </div>
+        <div>
+          <textarea
+            aria-label="组件实现源码"
+            class="developer-code-editor"
+            spellcheck="false"
+            style="width: 100%; min-height: 240px; font-family: monospace;"
+            wrap="off"
+          >
+            export const value = 42;
+          </textarea>
+        </div>
+        <button>
+          保存实现
+        </button>
+        <button>
+          放弃草稿
+        </button>
+      </details>
+    </div>
+  </body>
+</html>
+ ❯ tests/integration/productFollowup/T03/advancedVisibleDraft.test.tsx:170:80
+    168|   expect((h.screen.getByRole('textbox', { name: label }) as HTMLTextAr…
+    169|   await h.act(async () => expect(courseDraftLifecycle(restoredBridge).…
+    170|   await h.waitFor(() => expect(h.screen.getByRole('textbox', { name: l…
+       |                                                                                ^
+    171|   expect(await restoredHost.internalAPI.read(restoredDoc.documentId)).…
+    172|   expect(await courseDraftLifecycle(restoredBridge).prepare(restoredDo…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../../果铃工作台/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../../果铃工作台/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../../果铃工作台/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/3]⎯
+
+ FAIL  tests/integration/productFollowup/T03/advancedVisibleDraft.test.tsx > a json recovery arriving after its clean panel is mounted shows original pending input without History
+Error: expect(element).toHaveValue({"id":"a","definitionId":"custom","name":"A","data":{"label":"Recovered pending JSON"},"frame":{"width":180,"height":90,"transform":[1,0,0,1,23,41]}})
+
+Expected the element to have value:
+  {"id":"a","definitionId":"custom","name":"A","data":{"label":"Recovered pending JSON"},"frame":{"width":180,"height":90,"transform":[1,0,0,1,23,41]}}
+Received:
+  {
+    "id": "a",
+    "definitionId": "custom",
+    "name": "A",
+    "data": {
+      "label": "A"
+    },
+    "frame": {
+      "width": 180,
+      "height": 90,
+      "transform": [
+        1,
+        0,
+        0,
+        1,
+        23,
+        41
+      ]
+    }
+  }
+
+Ignored nodes: comments, script, style
+<html>
+  <head />
+  <body>
+    <div />
+    <div>
+      <div
+        class="developer-tab"
+        data-testid="developer-tab"
+      >
+        <header
+          class="developer-workbench-header"
+        >
+          <div
+            class="developer-workbench-title"
+          >
+            <svg
+              aria-hidden="true"
+              class="lucide lucide-code-xml"
+              fill="none"
+              height="19"
+              stroke="currentColor"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              viewBox="0 0 24 24"
+              width="19"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="m18 16 4-4-4-4"
+              />
+              <path
+                d="m6 8-4 4 4 4"
+              />
+              <path
+                d="m14.5 4-5 16"
+              />
+            </svg>
+            <div>
+              <strong>
+                工程开发工作台
+              </strong>
+              <span>
+                编辑课件组件、行为与工程数据。
+              </span>
+            </div>
+          </div>
+          <div
+            class="developer-workbench-meta"
+          >
+            <label>
+              作用域
+              <select
+                aria-label="开发作用范围"
+              >
+                <option
+                  value="scene"
+                >
+                  当前页面
+                </option>
+                <option
+                  value="global"
+                >
+                  全局层
+                </option>
+              </select>
+            </label>
+            <button
+              class="secondary-button"
+            >
+              <svg
+                aria-hidden="true"
+                class="lucide lucide-play"
+                fill="none"
+                height="13"
+                stroke="currentColor"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                viewBox="0 0 24 24"
+                width="13"
+                xmlns="http://www.w3.org/2000/svg"
+              >
+                <path
+                  d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"
+                />
+              </svg>
+              试运行
+            </button>
+          </div>
+        </header>
+        <div
+          aria-label="开发工作区"
+          class="developer-workspace-tabs"
+          role="tablist"
+        >
+          <button
+            aria-selected="false"
+            class=""
+            role="tab"
+          >
+            <span>
+              运行时
+            </span>
+            <small>
+              未创建
+            </small>
+          </button>
+          <button
+            aria-selected="true"
+            class="is-active"
+            role="tab"
+          >
+            <span>
+              对象 JSON
+            </span>
+            <small>
+              A
+            </small>
+          </button>
+          <button
+            aria-selected="false"
+            class=""
+            role="tab"
+          >
+            <span>
+              规则 JSON
+            </span>
+            <small>
+              0 条
+            </small>
+          </button>
+          <button
+            aria-selected="false"
+            class=""
+            role="tab"
+          >
+            <span>
+              组件代码
+            </span>
+            <small>
+              共享定义／实例源码
+            </small>
+          </button>
+        </div>
+        <div
+          aria-label="对象 JSON"
+          class="developer-workspace-content"
+          role="tabpanel"
+        >
+          <div
+            hidden=""
+          />
+          <section
+            class="developer-card"
+          >
+            <div
+              class="developer-card__heading"
+            >
+              <div>
+                <strong>
+                  所选对象 · A
+                </strong>
+                <span>
+                  布局、data 与实现进入撤销历史；身份、组合关系由图层操作维护。
+                </span>
+              </div>
+              <code>
+                JSON
+              </code>
+            </div>
+            <textarea
+              aria-label="所选对象 · A"
+              class="developer-code-editor"
+              spellcheck="false"
+              wrap="off"
+            >
+              {
+  "id": "a",
+  "definitionId": "custom",
+  "name": "A",
+  "data": {
+    "label": "A"
+  },
+  "frame": {
+    "width": 180,
+    "height": 90,
+    "transform": [
+      1,
+      0,
+      0,
+      1,
+      23,
+      41
+    ]
+  }
+}
+            </textarea>
+            <div
+              class="developer-card__actions"
+            >
+              <button
+                class="secondary-button"
+              >
+                <svg
+                  aria-hidden="true"
+                  class="lucide lucide-wand-sparkles"
+                  fill="none"
+                  height="13"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  viewBox="0 0 24 24"
+                  width="13"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"
+                  />
+                  <path
+                    d="m14 7 3 3"
+                  />
+                  <path
+                    d="M5 6v4"
+                  />
+                  <path
+                    d="M19 14v4"
+                  />
+                  <path
+                    d="M10 2v2"
+                  />
+                  <path
+                    d="M7 8H3"
+                  />
+                  <path
+                    d="M21 16h-4"
+                  />
+                  <path
+                    d="M11 3H9"
+                  />
+                </svg>
+                格式化
+              </button>
+              <button
+                class="primary-button"
+              >
+                <svg
+                  aria-hidden="true"
+                  class="lucide lucide-shield-check"
+                  fill="none"
+                  height="13"
+                  stroke="currentColor"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  viewBox="0 0 24 24"
+                  width="13"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"
+                  />
+                  <path
+                    d="m9 12 2 2 4-4"
+                  />
+                </svg>
+                校验并应用
+              </button>
+              <button
+                class="secondary-button"
+              >
+                放弃草稿
+              </button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
+ ❯ tests/integration/productFollowup/T03/advancedVisibleDraft.test.tsx:170:80
+    168|   expect((h.screen.getByRole('textbox', { name: label }) as HTMLTextAr…
+    169|   await h.act(async () => expect(courseDraftLifecycle(restoredBridge).…
+    170|   await h.waitFor(() => expect(h.screen.getByRole('textbox', { name: l…
+       |                                                                                ^
+    171|   expect(await restoredHost.internalAPI.read(restoredDoc.documentId)).…
+    172|   expect(await courseDraftLifecycle(restoredBridge).prepare(restoredDo…
+ ❯ runWithExpensiveErrorDiagnosticsDisabled ../../../果铃工作台/node_modules/@testing-library/dom/dist/config.js:47:12
+ ❯ checkCallback ../../../果铃工作台/node_modules/@testing-library/dom/dist/wait-for.js:124:77
+ ❯ Timeout.checkRealTimersCallback ../../../果铃工作台/node_modules/@testing-library/dom/dist/wait-for.js:118:16
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/3]⎯
+
+ FAIL  tests/integration/productFollowup/T09/selectedLessonMaterialInput.test.ts > freezes only teacher-selected content from the real lesson material owner with DOCX paragraph provenance and no fabricated pages or model-owned target IDs
+Error: 原材料须为非空文件
+ ❯ src/main/lessonMaterials.ts:44:84
+     42|     return this.serialized(async () => {
+     43|       const title = z.string().trim().min(1).max(300).parse(input.titl…
+     44|       if (!(input.original instanceof Uint8Array) || !input.original.l…
+       |                                                                                    ^
+     45|       const extraction = extractionSchema.parse(input.extraction)
+     46|       const assets = new Set(extraction.assets.map(asset => asset.id))
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/3]⎯
+
+
+ Test Files  2 failed | 4 passed (6)
+      Tests  3 failed | 12 passed (15)
+   Start at  08:43:51
+   Duration  12.31s (transform 6.90s, setup 437ms, import 24.09s, tests 6.96s, environment 1.62s)
+

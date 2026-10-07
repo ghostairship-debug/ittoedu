@@ -1,9 +1,11 @@
-import { session, WebContentsView, type BrowserWindow, type DownloadItem } from 'electron'
+import { session, BaseWindow, WebContentsView, type BrowserWindow, type DownloadItem } from 'electron'
 import { randomUUID } from 'node:crypto'
 import { basename, join } from 'node:path'
 import type { McpCallResult, McpContent, McpDiscoveredTool } from '../externalTools/McpClientService'
 import type { EmbeddedBrowserViewport, EmbeddedBrowserViewportState } from '../../../shared/workbench/embeddedBrowser'
-import type { EmbeddedBrowserBackend, EmbeddedBrowserBackendFactory, EmbeddedBrowserBackendOptions } from './EmbeddedBrowserBackend'
+import type { EmbeddedBrowserBackend, EmbeddedBrowserBackendFactory, EmbeddedBrowserBackendOptions, ObservedBrowserAction } from './EmbeddedBrowserBackend'
+import type { ManagedBrowserTool } from '../externalTools/ManagedBrowserMcpService'
+import { managedBrowserActionFactsCode } from '../externalTools/managedBrowserControlCode'
 
 interface AxNode {
   nodeId: string
@@ -43,7 +45,10 @@ class ElectronEmbeddedBrowser implements EmbeddedBrowserBackend {
   private readonly downloads: PendingDownload[] = []
   private readonly downloadNames = new Set<string>()
   private readonly lifetime = new AbortController()
+  private readonly background: BaseWindow
+  private carrier?: BaseWindow
   private window?: BrowserWindow
+  private readonly windowClosed = () => { void this.stop() }
   private viewportRequest: EmbeddedBrowserViewport = { visible: false }
   private human = false
   private dispatchingInput = false
@@ -55,7 +60,15 @@ class ElectronEmbeddedBrowser implements EmbeddedBrowserBackend {
     this.view = new WebContentsView({ webPreferences: { session: browserSession, nodeIntegration: false,
       contextIsolation: true, sandbox: true, webSecurity: true, backgroundThrottling: false } })
     this.view.setBounds({ x: 0, y: 0, width: 1000, height: 700 })
-    this.view.setVisible(false)
+    // Native pointer delivery needs a mounted view even while the teacher has not opened it.
+    // This window owns no second WebContents, profile or page.
+    this.background = new BaseWindow({ width: 1000, height: 700, useContentSize: true,
+      frame: false, show: false, skipTaskbar: true })
+    this.carrier = this.background
+    this.background.contentView.addChildView(this.view)
+    this.view.setVisible(true)
+    this.bindWindow(getWindow() ?? undefined)
+    this.background.once('closed', () => { void this.stop() })
     const contents = this.view.webContents
     contents.on('will-navigate', details => {
       if (!options.allowedUrl(details.url)) details.preventDefault()
@@ -180,6 +193,35 @@ class ElectronEmbeddedBrowser implements EmbeddedBrowserBackend {
   async discover(writeAllowed: boolean): Promise<import('../externalTools/McpClientService').McpDiscovery> {
     this.assertActive()
     return { status: 'available', tools: tools.filter(tool => writeAllowed || tool.effect === 'read') }
+  }
+
+  async inspectAction(input: { tool: ManagedBrowserTool; arguments: Record<string, unknown> }): Promise<ObservedBrowserAction> {
+    this.assertActive()
+    const pageUrl = this.view.webContents.getURL()
+    if (input.tool === 'browser_file_upload') return { pageUrl, action: this.chooser ? 'upload' : 'unknown' }
+    const address = await this.address(input.arguments.target)
+    const { object } = await this.command('DOM.resolveNode', address)
+    try {
+      const reply = await this.command('Runtime.callFunctionOn', { objectId: object.objectId,
+        functionDeclaration: managedBrowserActionFactsCode, returnByValue: true })
+      if (reply.exceptionDetails) throw new Error('当前网页动作未能观察')
+      const facts = reply.result.value as { tag: string; type: string; editable: boolean; formAction?: string; linkUrl?: string; download: boolean }
+      if (input.tool === 'browser_type') {
+        if (input.arguments.submit === true) return { pageUrl, action: facts.formAction ? 'submit' : 'unknown',
+          ...(facts.formAction ? { destinationUrl: facts.formAction } : {}) }
+        return { pageUrl, action: facts.tag === 'input' || facts.tag === 'textarea' || facts.editable ? 'prepare' : 'unknown' }
+      }
+      if (input.tool !== 'browser_click') return { pageUrl, action: 'unknown' }
+      if (facts.linkUrl) {
+        if (!/^https?:/.test(facts.linkUrl)) return { pageUrl, action: 'unknown' }
+        return { pageUrl, action: facts.download ? 'download' : 'prepare', destinationUrl: facts.linkUrl }
+      }
+      if (facts.formAction && (facts.type === 'submit' || facts.type === 'image')) return { pageUrl, action: 'submit',
+        ...(facts.formAction ? { destinationUrl: facts.formAction } : {}) }
+      if (facts.tag === 'input' && !['button', 'reset', 'hidden'].includes(facts.type)
+        || ['textarea', 'select', 'summary'].includes(facts.tag) || facts.editable) return { pageUrl, action: 'prepare' }
+      return { pageUrl, action: 'unknown' }
+    } finally { if (object.objectId) await this.command('Runtime.releaseObject', { objectId: object.objectId }).catch(() => undefined) }
   }
 
   async invoke(input: { operationId: string; name: string; arguments: Record<string, unknown>; signal?: AbortSignal }): Promise<McpCallResult> {
@@ -324,26 +366,40 @@ class ElectronEmbeddedBrowser implements EmbeddedBrowserBackend {
     else this.window?.webContents.focus()
   }
 
+  private bindWindow(window?: BrowserWindow): void {
+    if (this.window === window) return
+    this.window?.removeListener('closed', this.windowClosed)
+    this.window = window
+    this.window?.once('closed', this.windowClosed)
+  }
+
   viewport(input: EmbeddedBrowserViewport): EmbeddedBrowserViewportState {
     this.assertActive()
     const nextWindow = this.getWindow()
     if (input.visible && (!nextWindow || nextWindow.isDestroyed())) throw new Error('当前没有可用工作台窗口')
-    if (nextWindow !== this.window) {
-      if (this.window && !this.window.isDestroyed()) this.window.contentView.removeChildView(this.view)
-      this.window = nextWindow ?? undefined
-      this.window?.contentView.addChildView(this.view)
+    this.bindWindow(nextWindow && !nextWindow.isDestroyed() ? nextWindow : undefined)
+    const carrier = input.visible ? this.window! : this.background
+    if (carrier !== this.carrier) {
+      if (this.carrier && !this.carrier.isDestroyed()) this.carrier.contentView.removeChildView(this.view)
+      carrier.contentView.addChildView(this.view)
+      this.carrier = carrier
     }
-    const factor = this.window?.webContents.getZoomFactor() ?? 1
+    const factor = input.visible ? this.window?.webContents.getZoomFactor() ?? 1 : 1
     const bounds = input.bounds
-    if (bounds) {
+    if (input.visible && bounds) {
       if (![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite) || bounds.width < 1 || bounds.height < 1) throw new Error('任务网页显示范围无效')
       const [width, height] = this.window?.getContentSize() ?? [0, 0]
       const x = Math.max(0, Math.round(bounds.x * factor)), y = Math.max(0, Math.round(bounds.y * factor))
       this.view.setBounds({ x, y, width: Math.max(1, Math.min(Math.round(bounds.width * factor), width - x)),
         height: Math.max(1, Math.min(Math.round(bounds.height * factor), height - y)) })
     }
+    if (!input.visible) {
+      const { width, height } = this.view.getBounds()
+      this.background.setContentSize(width, height)
+      this.view.setBounds({ x: 0, y: 0, width, height })
+    }
     this.viewportRequest = { ...input }
-    this.view.setVisible(input.visible)
+    this.view.setVisible(true)
     const pageUrl = this.view.webContents.getURL()
     return { embedded: true, visible: input.visible, ...(pageUrl && pageUrl !== 'about:blank' ? { pageUrl } : {}) }
   }
@@ -360,15 +416,21 @@ class ElectronEmbeddedBrowser implements EmbeddedBrowserBackend {
     this.stopped = true
     this.lifetime.abort()
     for (const download of this.downloads) if (!download.done) download.item.cancel()
-    if (this.window && !this.window.isDestroyed()) this.window.contentView.removeChildView(this.view)
+    this.bindWindow(undefined)
+    if (this.carrier && !this.carrier.isDestroyed()) this.carrier.contentView.removeChildView(this.view)
+    this.carrier = undefined
     const contents = this.view.webContents
-    if (!contents.isDestroyed()) {
-      if (contents.debugger.isAttached()) contents.debugger.detach()
-      const browserSession = contents.session
-      contents.close()
-      await browserSession.clearStorageData()
+    try {
+      if (!contents.isDestroyed()) {
+        if (contents.debugger.isAttached()) contents.debugger.detach()
+        const browserSession = contents.session
+        contents.close()
+        await browserSession.clearStorageData()
+      }
+    } finally {
+      if (!this.background.isDestroyed()) this.background.destroy()
+      this.resources.clear(); this.refs.clear()
     }
-    this.resources.clear(); this.refs.clear()
   }
 }
 

@@ -1,5 +1,5 @@
 import { saveDocumentWithDialog } from './workbench/documentSaveDialog'
-import { acceptWorkbenchExportBuildReply, disposeWorkbenchExportPort, installWorkbenchToolServices, workbenchImageService, workbenchImageSelection } from './workbench/workbenchToolServices'
+import { acceptWorkbenchExportBuildReply, acceptWorkbenchExportBuildProgress, disposeWorkbenchExportPort, installWorkbenchToolServices, workbenchImageService, workbenchImageSelection, setWorkbenchHtmlPreview, workbenchHtmlActions, releaseWorkbenchHtmlDocument } from './workbench/workbenchToolServices'
 import { ImageResultsDesktopService } from './workbench/images/ImageResultsDesktopService'
 import { HtmlImportDesktopService } from './workbench/htmlImport/HtmlImportDesktopService'
 import { closeDocumentWithDialog } from './workbench/documentCloseDialog'
@@ -16,10 +16,6 @@ import { attachmentsDesktopService } from './workbench/attachments/attachmentsDe
 import { attachHtmlPreviewHost, operateWorkspaceFiles, subscribeWorkspaceFilesChanges } from './workbench/workspaceFilesDesktopService'
 import { HtmlPreviewService } from './workbench/htmlPreview/HtmlPreviewService'
 import { HtmlSourceEditService } from './workbench/htmlPreview/HtmlSourceEditService'
-import { TaskHtmlPreview } from './workbench/observation/TaskHtmlPreview'
-import { HtmlActionService } from './workbench/observation/HtmlActionService'
-import { HtmlActionDesktopPort } from './workbench/observation/HtmlActionDesktopPort'
-import { ObservationImageStore } from './workbench/observation/ObservationImageStore'
 import { ViewObservationDesktopService } from './workbench/observation/ViewObservationDesktopService'
 import { publishedCourseV3Schema } from '../shared/contracts/component-platform/published'
 import { setHtmlPreviewProtocolHandler } from './protocols'
@@ -98,9 +94,14 @@ const documentExportBuildReplySchema = z.object({
   requestId: z.string().uuid(),
   identity: z.object({ documentId: z.string().min(1), epoch: z.string().min(1), revision: z.number().int().nonnegative(), projectId: z.string().min(1) }).strict(),
   status: z.enum(['generated', 'drained', 'failed', 'cancelled']),
-  files: z.array(z.object({ relativePath: z.string(), mimeType: z.string(), bytes: z.instanceof(Uint8Array) }).strict()).max(1).optional(),
+  files: z.array(z.object({ relativePath: z.string(), mimeType: z.string(), bytes: z.instanceof(Uint8Array) }).strict()).optional(),
+  printHtml: z.string().optional(),
   warnings: z.array(z.string()),
   reason: z.string().optional(),
+}).strict()
+const documentExportBuildProgressSchema = z.object({
+  requestId: z.uuid(), identity: documentExportBuildReplySchema.shape.identity,
+  sequence: z.number().int().positive(), stage: z.enum(['preparing', 'building', 'compiling', 'complete']),
 }).strict()
 
 const bytesSchema = z.custom<Uint8Array>(
@@ -187,6 +188,7 @@ const previewNetworkReleaseSchema = z.object({
 }).strict()
 const componentBootstrapSchema = previewNetworkReleaseSchema.extend({
   html: z.string(), connectOrigins: z.array(z.string().min(1)).optional(), remoteAssetUrls: z.array(z.string().min(1)).optional(),
+  resourceSources: z.array(z.object({ url: z.string().min(1), usage: z.enum(['image', 'media', 'stylesheet', 'font']) }).strict()).optional(),
 }).strict()
 
 const dirtySchema = z.boolean()
@@ -300,8 +302,14 @@ let htmlPreviewClosedCleanup: (() => void) | undefined
 export function releaseAllHtmlPreviewLeases(): void { htmlPreview?.releaseAll() }
 let detachExternalMcpWindow: (() => void) | undefined
 export function registerIpcHandlers(context: IpcContext): void {
-  let htmlActionsReady: Promise<void> | undefined
   installWorkbenchToolServices(context)
+  ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildProgress)
+  ipcMain.on(IPC_CHANNELS.documentExportBuildProgress, (event: IpcMainEvent, raw: unknown) => {
+    try {
+      assertTrustedIpcSender(event, context.getMainWindow(), context.getRendererEntryUrl())
+      acceptWorkbenchExportBuildProgress(documentExportBuildProgressSchema.parse(raw), event.sender.id)
+    } catch { /* Foreign or stale progress cannot keep an export alive. */ }
+  })
   ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildReply)
   ipcMain.on(IPC_CHANNELS.documentExportBuildReply, (event: IpcMainEvent, raw: unknown) => {
     try {
@@ -374,7 +382,6 @@ export function registerIpcHandlers(context: IpcContext): void {
     // The service maps its own failures to specific reasons; this is left for a service that could not be reached.
     code: 'EXECUTION_FAILED', title: '会话操作未完成', message: '会话服务暂时不可用。', suggestion: '请重试；若仍失败，请重新启动编辑器。当前输入和已应用的修改已保留。',
   }, async (_event, args) => {
-    await htmlActionsReady
     const service = await executionDesktopService()
     const input = requireSingleArgument(args)
     if (input && typeof input === 'object' && (input as { type?: unknown }).type === 'delete-conversation') await imageResultsReady
@@ -427,19 +434,10 @@ export function registerIpcHandlers(context: IpcContext): void {
     const input = previewNetworkReleaseSchema.parse(requireSingleArgument(args))
     preview.releaseComponentBootstrap(input.leaseId, previewNetworkDocumentOwner(event, input.documentToken))
   })
-  const taskPreview = new TaskHtmlPreview({ live: preview,
-    readDocument: documentId => documents.registry.get(documentId).drain(),
-    agentBundlePath: path.join(app.getAppPath(), 'dist-renderer', 'html-preview-agent.iife.js') })
-  context.getMainWindow()?.webContents.once('destroyed', () => taskPreview.dispose())
-  htmlActionsReady = executionDesktopService().then(service => {
-    if (generation !== workspaceFileEventGeneration) return
-    service.setHtmlActions(new HtmlActionService({ preview: taskPreview, frames: new HtmlActionDesktopPort(), images: new ObservationImageStore() }))
-  })
-  void htmlActionsReady.catch(error => diagnosticLog.append({ source: 'main', message: 'HTML 页面操作服务未能启动',
-    details: { reason: error instanceof Error ? error.message : String(error) } }))
+  setWorkbenchHtmlPreview(preview)
   setHtmlPreviewProtocolHandler(preview.handleProtocolRequest)
-  const stopPreviewClosed = documents.subscribeClosed(documentId => { preview.releaseDocument(documentId); taskPreview.releaseDocument(documentId) })
-  htmlPreviewClosedCleanup = () => { stopPreviewClosed(); taskPreview.dispose() }
+  const stopPreviewClosed = documents.subscribeClosed(documentId => { preview.releaseDocument(documentId); releaseWorkbenchHtmlDocument(documentId) })
+  htmlPreviewClosedCleanup = () => { stopPreviewClosed() }
   void attachHtmlPreviewHost(preview).catch(error => diagnosticLog.append({ source: 'main', message: 'HTML 预览服务未能启动', details: { reason: error instanceof Error ? error.message : String(error) } }))
   const htmlImport = new HtmlImportDesktopService({
     documents,
@@ -1078,6 +1076,7 @@ export function registerIpcHandlers(context: IpcContext): void {
 export function unregisterIpcHandlers(): void {
   workspaceFileEventGeneration++
   ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildReply)
+  ipcMain.removeAllListeners(IPC_CHANNELS.documentExportBuildProgress)
   disposeWorkbenchExportPort()
   htmlPreviewClosedCleanup?.(); htmlPreviewClosedCleanup = undefined
   htmlPreview?.dispose(); htmlPreview = undefined

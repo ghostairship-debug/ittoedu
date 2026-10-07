@@ -6,7 +6,9 @@ import { executionDesktopService } from './workbench/execution/ExecutionDesktopS
 import { externalMcpService } from './workbench/external/externalDesktopService'
 
 async function closeActivity(): Promise<CloseActivity> {
+  let recording: CloseActivity['recording']
   const builtinTasks = await executionDesktopService().then(async execution => {
+    recording = execution.events.getPendingState()
     let count = 0
     for (const stored of await execution.runs.list()) {
       const run = await execution.engine.read(stored.runId) ?? stored
@@ -15,11 +17,12 @@ async function closeActivity(): Promise<CloseActivity> {
     return count
   }).catch(() => 0)
   const external = await externalMcpService().then(service => service.activity()).catch(() => [])
-  return { builtinTasks, external }
+  return { builtinTasks, external, ...(recording ? { recording } : {}) }
 }
 
 /** Hide-to-tray close behaviour for the main window, inserted before the existing document close protection. */
-export function installWindowLifecycle(getWindow: () => BrowserWindow | null): WindowLifecycle {
+export function installWindowLifecycle(getWindow: () => BrowserWindow | null,
+  onCloseDecision?: (decision: 'continue' | 'handled') => void): WindowLifecycle {
   const lifecycle = new WindowLifecycle({
     window: getWindow,
     // Closing must keep working even if the connection service could not start: fall back to asking.
@@ -36,8 +39,12 @@ export function installWindowLifecycle(getWindow: () => BrowserWindow | null): W
       return tray
     },
   })
-  setBeforeWindowClose(() => lifecycle.beforeClose())
-  // Quitting from elsewhere (tray, OS session end, app.quit) must not be turned into a hide.
-  app.on('before-quit', () => lifecycle.requestQuit())
+  setBeforeWindowClose(async () => {
+    const decision = await lifecycle.beforeClose()
+    onCloseDecision?.(decision)
+    return decision
+  })
+  // Main's single before-quit owner requests a normal window close. A second listener here
+  // would re-arm requestQuit after the first close consumes it, including a cancelled save.
   return lifecycle
 }

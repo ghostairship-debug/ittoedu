@@ -25,6 +25,7 @@ export async function prepareComponentOutputRegion(input: {
   }
   const element = instanceId ? player.runtime.contentElement(instanceId) : root
   if (!element) throw new Error(`捕获组件没有运行内容：${instanceId}`)
+  await player.waitForCaptureReady(element)
   if (instanceId) {
     const target = player.runtime.targetElement(instanceId)
     if (!target) throw new Error(`捕获组件没有本地投影：${instanceId}`)

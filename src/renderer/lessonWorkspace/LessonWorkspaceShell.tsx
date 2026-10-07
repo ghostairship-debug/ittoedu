@@ -20,7 +20,7 @@ export interface LessonWorkspaceShellProps {
   onNewProject(): Promise<boolean>
   /** A new H5 presentation made from a PPT (M21). */
   onNewProjectFromPptx?(file: { name: string; bytes: Uint8Array }): Promise<boolean>
-  renderAssistant?(root: string | null, documentTarget: ActiveDocumentTarget | undefined, isCourse: boolean, drainDocuments: (documentIds?: readonly string[]) => Promise<boolean>): ReactNode
+  renderAssistant?(root: string | null, documentTarget: ActiveDocumentTarget | undefined, isCourse: boolean, drainDocuments: (documentIds?: readonly string[]) => Promise<boolean>, lesson: LessonWorkspace | null): ReactNode
   renderMaterial?(path: string, lesson: LessonWorkspace | null): ReactNode
   renderMaterials?(lesson: LessonWorkspace): ReactNode
   onDirtyChange?(dirty: boolean): void
@@ -28,6 +28,7 @@ export interface LessonWorkspaceShellProps {
   onActiveDocumentChange?(active: { kind: LessonFileTab['kind']; name: string } | null): void
   onSaveDirectoryChange?(directory: SaveDirectoryContext | null): void
   onImportHtml?(directory: SaveDirectoryContext, sourceEntryId?: string): void
+  prepareCurrentCopy?(): Promise<boolean>
   children: ReactNode
 }
 
@@ -68,5 +69,6 @@ export const LessonWorkspaceShell = forwardRef<LessonWorkspaceShellHandle, Lesso
     showProject: workspace.actions.showProject,
   }), [tabs, workspace.actions, workspace.state.lesson])
   return <LessonWorkspaceView state={workspace.state} actions={workspace.actions} operation={props.lessonOperation} workspaceFiles={props.workspaceFiles} documentPort={props.documentPort} tabs={tabs} projectPath={props.projectPath} onSaveDirectoryChange={props.onSaveDirectoryChange} onImportHtml={props.onImportHtml}
+    prepareCurrentCopy={async () => { if (!await tabs.drainAll()) return false; return props.prepareCurrentCopy?.() ?? true }}
     renderAssistant={props.renderAssistant} renderMaterial={props.renderMaterial} renderMaterials={props.renderMaterials}>{props.children}</LessonWorkspaceView>
 })

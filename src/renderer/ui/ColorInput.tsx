@@ -26,6 +26,24 @@ export const COMMON_COLOR_PRESETS: readonly ColorPreset[] = [
 ] as const
 
 const isValidHex = (val: string): boolean => /^#[0-9a-fA-F]{6}$/.test(val)
+/** Equivalent opaque input for professional fields whose stored color is six-digit hex. */
+export function normalizeOpaqueColor(value: string): string | null {
+  const color = value.trim().toLowerCase()
+  if (isValidHex(color)) return color
+  if (/^#[0-9a-f]{3}$/.test(color)) return `#${color.slice(1).split('').map(channel => channel + channel).join('')}`
+  const rgb = /^rgb\(([^()]+)\)$/.exec(color)
+  if (!rgb || rgb[1].includes('/')) return null
+  const parts = rgb[1].includes(',') ? rgb[1].split(',').map(part => part.trim()) : rgb[1].trim().split(/\s+/)
+  if (parts.length !== 3) return null
+  const channels = parts.map(part => {
+    const percent = part.endsWith('%'), numeric = percent ? part.slice(0, -1) : part
+    if (!/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(numeric)) return null
+    const channel = Number(numeric), maximum = percent ? 100 : 255
+    return Number.isFinite(channel) && channel <= maximum ? Math.round(channel * 255 / maximum) : null
+  })
+  return channels.some(channel => channel === null) ? null
+    : `#${channels.map(channel => channel!.toString(16).padStart(2, '0')).join('')}`
+}
 
 export interface ColorInputProps {
   readonly id: string
@@ -46,10 +64,11 @@ export function ColorInput({
 }: ColorInputProps) {
   const projectColors = useContext(ProjectColorPaletteContext)
   const bindingKey = `${usePropertyDraftBindingKey()}:${id}`
-  const normalizedValue = (value || '').toLowerCase()
+  const normalizedValue = normalizeOpaqueColor(value || '') ?? (value || '').toLowerCase()
   const [draft, setDraft] = useState(normalizedValue)
   const [pickerDraft, setPickerDraft] = useState(normalizedValue)
   const [expanded, setExpanded] = useState(false)
+  const [inputError, setInputError] = useState('')
   const isCancelledRef = useRef(false)
   const isPreviewDirtyRef = useRef(false)
   const draftRef = useRef(normalizedValue)
@@ -73,6 +92,7 @@ export function ColorInput({
     setDraft(normalizedValue)
     setPickerDraft(normalizedValue)
     setExpanded(false)
+    setInputError('')
   }, [bindingKey, normalizedValue])
 
   useEffect(() => {
@@ -85,6 +105,7 @@ export function ColorInput({
     setDraft(normalizedValue)
     setPickerDraft(normalizedValue)
     lastCommittedRef.current = normalizedValue
+    setInputError('')
   }, [normalizedValue])
 
   useEffect(() => {
@@ -146,8 +167,9 @@ export function ColorInput({
     }
     isPreviewDirtyRef.current = false
     onPreviewChange?.(null)
-    const trimmed = draftRef.current.trim().toLowerCase()
-    if (isValidHex(trimmed)) {
+    const trimmed = normalizeOpaqueColor(draftRef.current)
+    if (trimmed) {
+      setInputError('')
       if (trimmed !== normalizedValue && trimmed !== lastCommittedRef.current) {
         lastCommittedRef.current = trimmed
         draftRef.current = trimmed
@@ -160,9 +182,7 @@ export function ColorInput({
         setPickerDraft(normalizedValue)
       }
     } else {
-      draftRef.current = normalizedValue
-      setDraft(normalizedValue)
-      setPickerDraft(normalizedValue)
+      setInputError('当前专业颜色支持 #RGB、#RRGGBB 或不透明 rgb()；输入已保留，请修正后应用。')
     }
   }
 
@@ -171,6 +191,7 @@ export function ColorInput({
     isPreviewDirtyRef.current = false
     onPreviewChange?.(null)
     const next = presetColor.toLowerCase()
+    setInputError('')
     if (next !== normalizedValue && next !== lastCommittedRef.current) {
       lastCommittedRef.current = next
       draftRef.current = next
@@ -231,17 +252,18 @@ export function ColorInput({
           className="form-input"
           id={`${id}-text`}
           value={draft}
-          maxLength={7}
+          aria-invalid={Boolean(inputError) || undefined}
           onFocus={() => {
             isCancelledRef.current = false
           }}
           onChange={(event) => {
             isCancelledRef.current = false
             const nextVal = event.target.value
+            setInputError('')
             draftRef.current = nextVal
             setDraft(nextVal)
-            const trimmed = nextVal.trim().toLowerCase()
-            if (isValidHex(trimmed)) {
+            const trimmed = normalizeOpaqueColor(nextVal)
+            if (trimmed) {
               setPickerDraft(trimmed)
               isPreviewDirtyRef.current = true
               onPreviewChange?.(trimmed)
@@ -259,12 +281,14 @@ export function ColorInput({
               draftRef.current = normalizedValue
               setDraft(normalizedValue)
               setPickerDraft(normalizedValue)
+              setInputError('')
               onPreviewChange?.(null)
               event.currentTarget.blur()
             }
           }}
         />
       </div>
+      {inputError && <small role="alert">{inputError}</small>}
       <button type="button" className="secondary-button" aria-expanded={expanded}
         onClick={() => { if (expanded) commit(); setExpanded(!expanded) }}>连续调色</button>
       {expanded && <div role="group" aria-label={`${label}连续调色`} onKeyDown={event => {

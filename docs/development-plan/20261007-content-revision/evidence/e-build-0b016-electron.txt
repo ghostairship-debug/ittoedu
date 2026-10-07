@@ -1,0 +1,17 @@
+src/core/projectFiles/componentPlatform/coordinator.ts(186,22): error TS2367: This comparison appears to be unintentional because the types '"html"' and '"markdown"' have no overlap.
+src/main/workbench/contentApply/resources/verifyContentResourceDiagnostic.ts(41,93): error TS2345: Argument of type 'string' is not assignable to parameter of type 'never'.
+src/main/workbench/execution/ExecutionEngine.ts(658,13): error TS2322: Type '{ kind: "replace-text"; documentId: string; target: ToolTarget; }' is not assignable to type 'ExecutionContentOutput'.
+  Types of property 'target' are incompatible.
+    Type 'ToolTarget' is not assignable to type 'EditTarget'.
+      Type '{ kind: "document"; }' is not assignable to type 'EditTarget'.
+        Type '{ kind: "document"; }' is missing the following properties from type '{ kind: "flow-range"; surfaceId: string; blockId: string; parentId: string | null; slot: DocumentSlot; from: number; to: number; }': surfaceId, blockId, parentId, slot, and 2 more.
+src/main/workbench/external/ExternalMcpService.ts(89,7): error TS2739: Type '{ 'file.list': string; 'file.search': string; 'file.open': string; 'file.create': string; 'file.read': string; 'file.grep': string; 'file.write': string; 'file.patch': string; 'file.mkdir': string; 'file.copy': string; 'file.move': string; 'file.rename': string; 'file.trash': string; }' is missing the following properties from type 'Record<"file.copy" | "file.create" | "file.grep" | "file.list" | "file.mkdir" | "file.move" | "file.observe" | "file.open" | "file.patch" | "file.read" | "file.reconcile" | "file.rename" | "file.search" | "file.trash" | "file.write", string>': "file.observe", "file.reconcile"
+src/main/workbench/external/ExternalMcpService.ts(100,3): error TS2322: Type '{ status: "applied" | "completed" | "failed" | "unchanged"; documentId: string; operationId: string; revision: number; message?: string | undefined; commit?: "committed" | "not_committed" | "unchanged" | "unknown" | undefined; usability?: "partial" | ... 3 more ... | undefined; delivery?: "not_requested" | undefined...' is not assignable to type 'OperationSummary'.
+  Type '{ status: "applied" | "completed" | "failed" | "unchanged"; documentId: string; operationId: string; revision: number; message?: string | undefined; commit?: "committed" | "not_committed" | "unchanged" | "unknown" | undefined; usability?: "partial" | ... 3 more ... | undefined; delivery?: "not_requested" | undefined...' is not assignable to type 'OperationSummary'.
+    Types of property 'save' are incompatible.
+      Type '{ savedRevision: number | undefined; currentRevision: number; dirty: boolean; current: boolean; } | undefined' is not assignable to type '{ savedRevision: number; currentRevision: number; dirty: boolean; current: boolean; } | undefined'.
+        Type '{ savedRevision: number | undefined; currentRevision: number; dirty: boolean; current: boolean; }' is not assignable to type '{ savedRevision: number; currentRevision: number; dirty: boolean; current: boolean; }'.
+          Types of property 'savedRevision' are incompatible.
+            Type 'number | undefined' is not assignable to type 'number'.
+              Type 'undefined' is not assignable to type 'number'.
+src/main/workbench/workbenchToolServices.ts(352,61): error TS18048: 'result.admittedSourceIds' is possibly 'undefined'.

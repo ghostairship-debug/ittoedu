@@ -1,7 +1,8 @@
+/** @deprecated Historical V9/CLI consumer only; current production uses Project V10 and the canonical Gateway. */
 import { flowImageReplacementInputSchema, replaceFlowImage } from '../../../core/tools/imageApplication'
 import { flowContextTextRangeSchema, editFlowTextRange } from '../../../core/tools/flowTextSlot'
-import { newFlowBlockSchema as newBlock } from '../../../core/tools/toolSchemas'
-import { flowTableStructureSchema as structure } from '../../../core/tools/toolSchemas'
+import { newFlowBlockSchema as newBlock } from './historicalSchemas'
+import { flowTableStructureSchema as structure } from './historicalSchemas'
 import { z } from 'zod'
 import { flowBlockSchema } from '../../../shared/courseProjectSchema'
 import type { FlowBlock } from '../../../shared/courseProjectTypes'

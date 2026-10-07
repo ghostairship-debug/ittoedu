@@ -13,7 +13,7 @@ export const skillReadInputSchema = z.object({
 /** One schema is projected by both the built-in gateway and MCP. */
 export const skillReadTool = (catalog: readonly { name: string; description: string }[]) => ({
   name: 'skills.read' as const,
-  description: `按需读取随附或已授权用户/工作区 Skill 的 SKILL.md、references/assets/scripts 文本；不执行脚本，读取不扩大权限。skills.list 可刷新目录；分页应带返回的 version，文件变化时重新核对。不自动加载正文。可用 Skill：${catalog.map(item => `${item.name}：${item.description}`).join('；')}`,
+  description: `按需读取随附或已授权用户/工作区 Skill 的 SKILL.md、references/assets/scripts 文本；不执行脚本，读取不扩大权限，也不撤下已有授权能力。skills.list 可刷新目录；拼接同一文件的分页时带返回的 version，该文件变化时重新读取。其他资料变更不使当前文件失效。不自动加载正文。可用 Skill：${catalog.map(item => `${item.name}：${item.description}`).join('；')}`,
   inputSchema: skillReadInputSchema,
   manual: { label: '读取 Skill', group: 'read' as const, targetKinds: [] as const },
 })

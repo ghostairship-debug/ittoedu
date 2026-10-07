@@ -1,0 +1,15 @@
+{
+  "status": "script-ready-no-provider-request",
+  "route": {
+    "provider": "teamorouter",
+    "baseURL": "https://api.teamorouter.com/v1",
+    "model": "deepseek-flash",
+    "expectedFamily": "V4.1",
+    "expectedFamilySource": "Owner confirmation 2026-10-07",
+    "accountId": "owner-authorized-test",
+    "accountBilling": "unknown"
+  },
+  "output": "D:\\果铃并行\\20261007-content-revision\\e\\output\\content-revision\\live-v41-final",
+  "command": "npx tsx scripts/quality/content-revision-live.ts --run",
+  "scope": "one actual Engine rich-bound task with shared product files owner and actual catalog; no preloaded tools, no image generation"
+}

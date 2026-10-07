@@ -4,10 +4,8 @@ import type { DocumentOperationResult } from './document'
 const id = z.string().min(1).max(512), index = z.number().int().nonnegative()
 const owner = { workspaceId: id, conversationId: id, runId: id, jobId: id }
 export const imageApplyTargetSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('course-owner'), locationId: id, owner: z.enum(['scene', 'global', 'surface', 'world']), stateId: id.optional() }).strict(),
-  z.object({ kind: z.literal('course-object'), locationId: id, itemId: id, stateId: id.optional() }).strict(),
-  z.object({ kind: z.literal('flow-block'), surfaceId: id, blockId: id, parentId: id.nullable() }).strict(),
-  z.object({ kind: z.literal('course-background'), owner: z.enum(['course', 'surface', 'scene']), surfaceId: id.optional(), sceneId: id.optional(), stateId: id.optional() }).strict(),
+  z.object({ kind: z.literal('course-surface'), surfaceId: id }).strict(),
+  z.object({ kind: z.literal('course-instance'), surfaceId: id, instanceId: id, stateId: id.nullable().optional() }).strict(),
 ])
 export const imageApplyCaptureSchema = z.object({ documentId: id, epoch: id, revision: index, address: imageApplyTargetSchema, label: z.string().min(1).max(1024) }).strict()
 export type ImageApplyCapture = z.infer<typeof imageApplyCaptureSchema>

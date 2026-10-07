@@ -1,4 +1,5 @@
 import type PptxGenJS from 'pptxgenjs'
+import { parseDocumentColor } from '../../shared/document/color'
 
 export const WIDE_SLIDE_WIDTH = 13.333
 export const WIDE_SLIDE_HEIGHT = 7.5
@@ -33,16 +34,12 @@ export function clamp(value: number, minimum: number, maximum: number): number {
 }
 
 export function pptxColor(value: string, fallback = '000000'): string {
-  const normalized = value.trim().replace(/^#/, '')
-  if (/^[0-9a-f]{6}$/i.test(normalized)) return normalized.toUpperCase()
-  if (/^[0-9a-f]{3}$/i.test(normalized)) {
-    return normalized
-      .split('')
-      .map((character) => character.repeat(2))
-      .join('')
-      .toUpperCase()
-  }
-  return fallback
+  return (parseDocumentColor(value) ?? parseDocumentColor(`#${value.trim()}`))?.rgb ?? fallback
+}
+
+/** The format stores authored color alpha separately from its RGB value. */
+export function pptxColorAlpha(value: string): number {
+  return (parseDocumentColor(value) ?? parseDocumentColor(`#${value.trim()}`))?.alpha ?? 1
 }
 
 export function pptxFontFace(
@@ -59,7 +56,8 @@ export function pptxFontFace(
 }
 
 export function pptxTransparency(alpha: number): number {
-  return Math.round((1 - clamp(alpha, 0, 1)) * 100)
+  // PptxGenJS stores alpha in 1/1000-percent units; keep that precision.
+  return Math.round((1 - clamp(alpha, 0, 1)) * 100_000) / 1000
 }
 
 export function pptxRotation(degrees: number): number {

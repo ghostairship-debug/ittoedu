@@ -12,10 +12,11 @@ export type ToolFamily = typeof toolFamilies[number]
 
 /** These are the existing service owners, supplied by the composition root. */
 export type ToolSupportContext = Partial<Record<'componentContent' | 'images' | 'skills' | 'deliveries' | 'observations'
-  | 'projectFiles' | 'files' | 'jobs' | 'compute' | 'delegation' | 'web' | 'mcp' | 'media' | 'openImages' | 'assetLibrary', boolean>> & {
+  | 'projectFiles' | 'files' | 'office' | 'artifacts' | 'materials' | 'htmlActions' | 'pptxImport' | 'jobs' | 'compute' | 'delegation' | 'web' | 'mcp' | 'media' | 'openImages' | 'assetLibrary', boolean>> & {
   scopes?: readonly RunToolScope[]
   standaloneImage?: boolean
   projectFilesAccess?: 'read' | 'write'
+  fileAccess?: 'read' | 'write'
   courseAuthoring?: boolean
   /** The existing built-in actor/file grant for workbench service tools. */
   workbenchServices?: boolean

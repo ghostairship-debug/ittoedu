@@ -19,8 +19,11 @@ export const assetSourceSchemas = {
   'asset.search': z.object({ query, limit: z.number().int().min(1).optional() }).strict(),
   'asset.use': z.object({ packageId: z.string().min(1), version: z.string().min(1).optional(), project,
     path: z.string().min(1) }).strict(),
-  'asset.save': z.object({ project, path: z.string().min(1), description: z.string().optional(),
+  'asset.save': z.object({ project, path: z.string().min(1).optional(), title: z.string().trim().min(1).optional(), description: z.string().optional(),
     subject: labels.optional(), schoolStage: labels.optional(), tags: labels.optional() }).strict(),
+  'asset.import': z.object({ file: z.string().min(1) }).strict(),
+  'asset.delete': z.object({ packageId: z.string().min(1), version: z.string().min(1).optional(), sourceId: z.string().min(1).optional() }).strict(),
+  'asset.update': z.object({ packageId: z.string().min(1), version: z.string().min(1).optional(), project, path: z.string().min(1).optional() }).strict(),
 } as const
 
 export type AssetSourceToolName = keyof typeof assetSourceSchemas
@@ -31,7 +34,10 @@ export const assetSourceDescriptions: Record<AssetSourceToolName, string> = {
   'image.fetch': '下载选中的图库候选。path 使用 project.list/read 返回的页面或对象路径：图片对象表示原位替换，页面或其他对象表示插入。来源、授权与署名随素材保存，替换保留人工位置与图片效果，可撤销。省略 path 返回本任务图片 resource，可用 project.apply 的 from 插入或替换。project 与工程文件工具相同。',
   'asset.search': '检索与组件库面板相同的 Component API 5 条目，按名称、标签、学科、学段和说明匹配，返回 packageId、版本、来源与信任状态；可用 asset.use 插入。',
   'asset.use': '把检索到的 Component API 5 条目及其实际资源插入课件。path 使用 project.list/read 返回的页面路径或对象路径；页面表示末尾插入，对象表示在该对象后插入。软件生成身份与处理依赖，一次撤销可恢复。未确认信任的目录需在组件库面板确认。',
-  'asset.save': '仅在用户要求时调用：把 project.list/read 返回的对象路径所对应的实例、子对象、源码依赖与素材保存到我的资产库。可附说明、学科、学段与标签，之后用 asset.search 检索及 asset.use 插入。',
+  'asset.save': '仅在用户要求时调用：把任务开始时选中的全部对象、子对象、源码依赖与素材一起保存到我的资产库。软件维护选区和身份，无需列举对象 ID；省略 path 使用任务绑定的多选范围，指定 project.list/read 对象路径则只提炼该对象。可附 title、说明、学科、学段与标签；之后用 asset.search 检索及 asset.use 插入。',
+  'asset.import': '仅在用户要求时调用：把已授权文件中的 .h5component 归档导入我的资产库，复用组件库面板同一目录服务。file 为用户材料或当前任务可读取的文件路径；原件保留，相同条目与版本由目录安装服务更新。导入不自动替换或删除工程中的实例；需要插入时用 asset.use。',
+  'asset.delete': '仅在用户要求时调用：从我的资产库删除指定条目版本，复用组件库面板同一删除服务。packageId、version、sourceId 可取 asset.search 的结果；省略 version 删除我的资产库中该条目的最新版本。其他目录条目不能删除，工程中已有实例和素材保留。',
+  'asset.update': '仅在用户要求时调用：从资产库读取指定版本，更新任务选中工程对象所使用的组件定义。软件从任务绑定或可选对象 path 定位工程定义，保留实例内容、人工位置和局部源码覆盖，通过正式事务应用并可撤销；库条目和工程定义身份无需相同。多选中包含不同组件定义时请指定要更新的对象路径。',
 }
 
 export interface AssetSourceToolContext {
@@ -40,6 +46,9 @@ export interface AssetSourceToolContext {
   fetchImage(input: z.output<typeof assetSourceSchemas['image.fetch']>): Promise<ToolResult>
   useAsset(input: z.output<typeof assetSourceSchemas['asset.use']>): Promise<ToolResult>
   saveAsset(input: z.output<typeof assetSourceSchemas['asset.save']>): Promise<ToolResult>
+  importAsset(input: z.output<typeof assetSourceSchemas['asset.import']>): Promise<ToolResult>
+  deleteAsset(input: z.output<typeof assetSourceSchemas['asset.delete']>): Promise<ToolResult>
+  updateAsset(input: z.output<typeof assetSourceSchemas['asset.update']>): Promise<ToolResult>
 }
 const registerSource = toolRegistrationFor<AssetSourceToolContext>()
 const sourceDescriptor = <Name extends AssetSourceToolName>(name: Name, group: 'read' | 'edit') => ({ name,
@@ -59,8 +68,14 @@ export const assetSourceRegistrations = [
     targets: () => [], handler: (context, input) => context.host.assetSearch(context.runId, input) }),
   registerSource(sourceDescriptor('asset.use', 'edit'), { capability: 'write', effect: 'document-edit', supports: context => supportsWorkbenchService(context, 'assetLibrary') && hasRunWrite(context, [], 'course-v10'),
     targets: projectToolTarget, handler: (context, input) => context.useAsset(input) }),
-  registerSource(sourceDescriptor('asset.save', 'edit'), { capability: 'write', effect: 'asset-library-write', supports: context => supportsWorkbenchService(context, 'assetLibrary') && hasRunWrite(context, [], 'course-v10'),
+  registerSource(sourceDescriptor('asset.save', 'edit'), { capability: 'write', effect: 'asset-library-write', supports: context => supportsWorkbenchService(context, 'assetLibrary') && hasRunWrite(context, ['course-instance'], 'course-v10'),
     targets: projectToolTarget, handler: (context, input) => context.saveAsset(input) }),
+  registerSource(sourceDescriptor('asset.import', 'edit'), { capability: 'write', effect: 'asset-library-write', supports: context => supportsWorkbenchService(context, 'assetLibrary'),
+    targets: () => [], handler: (context, input) => context.importAsset(input) }),
+  registerSource(sourceDescriptor('asset.delete', 'edit'), { capability: 'write', effect: 'asset-library-write', supports: context => supportsWorkbenchService(context, 'assetLibrary'),
+    targets: () => [], handler: (context, input) => context.deleteAsset(input) }),
+  registerSource(sourceDescriptor('asset.update', 'edit'), { capability: 'write', effect: 'document-edit', supports: context => supportsWorkbenchService(context, 'assetLibrary') && hasRunWrite(context, [], 'course-v10'),
+    targets: projectToolTarget, handler: (context, input) => context.updateAsset(input) }),
 ] as const
 export function assetSourceRegistration(name: string) { return assetSourceRegistrations.find(tool => tool.name === name) }
 

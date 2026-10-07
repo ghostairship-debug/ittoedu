@@ -5,7 +5,9 @@ import { HTML_PREVIEW_SCHEME } from '../../protocols'
 import { PreviewNetworkPolicy } from '../../previewNetworkPolicy'
 import { configureRestrictedSession, hardenWebContents, isAllowedHtmlPreviewFrameUrl, isAllowedHtmlPreviewChildFrameUrl } from '../../security'
 import { HtmlPreviewService, HtmlPreviewUnavailableError, type HtmlPreviewAutomationContext } from '../htmlPreview/HtmlPreviewService'
-import type { HtmlActionPreviewPort } from './HtmlActionService'
+import { HtmlActionService, type HtmlActionPreviewPort } from './HtmlActionService'
+import { HtmlActionDesktopPort } from './HtmlActionDesktopPort'
+import { ObservationImageStore } from './ObservationImageStore'
 
 interface OwnedPreview {
   documentId: string
@@ -27,12 +29,16 @@ export class TaskHtmlPreview implements HtmlActionPreviewPort {
   private readonly byLease = new Map<string, OwnedPreview>()
   private readonly stopped = new Set<string>()
   private disposed = false
-  constructor(private readonly options: { live: HtmlPreviewService;
+  constructor(private readonly options: { live?: HtmlPreviewService;
     readDocument(documentId: string): Promise<DocumentSnapshot>; agentBundlePath: string }) {}
 
   async automationContext(leaseId: string, loadId: string, revision: number): Promise<HtmlPreviewAutomationContext> {
+    if (this.disposed) throw new Error('HTML 观察已停止')
     const owner = this.byLease.get(leaseId)
-    if (!owner) return this.options.live.automationContext(leaseId, loadId, revision)
+    if (!owner) {
+      if (!this.options.live) throw new HtmlPreviewUnavailableError('missing')
+      return this.options.live.automationContext(leaseId, loadId, revision)
+    }
     if (owner.closed) throw new Error('HTML 任务预览已关闭')
     return { ...await owner.preview.automationContext(leaseId, loadId, revision), source: 'isolated' }
   }
@@ -44,6 +50,7 @@ export class TaskHtmlPreview implements HtmlActionPreviewPort {
     // Preserve this task's interaction state even if a live tab opens in the meantime.
     if (existing?.key === key && !existing.closed) return existing.context
     try {
+      if (!this.options.live) throw new HtmlPreviewUnavailableError('missing')
       const context = await this.options.live.automationContextForDocument(input)
       if (this.disposed || input.runId && this.stopped.has(input.runId)) throw new Error('HTML 观察已停止')
       if (existing) this.close(existing)
@@ -118,4 +125,12 @@ export class TaskHtmlPreview implements HtmlActionPreviewPort {
   releaseRun(runId: string): void { this.stopped.add(runId); const owner = this.owned.get(runId); if (owner) this.close(owner) }
   releaseDocument(documentId: string): void { for (const owner of this.owned.values()) if (owner.documentId === documentId) this.close(owner) }
   dispose(): void { this.disposed = true; for (const owner of this.owned.values()) this.close(owner) }
+}
+
+/** GUI and headless composition consume the same actions and canonical source
+ * reader. The existing isolated preview is prepared only when a run needs it. */
+export function createHtmlActionServices(options: ConstructorParameters<typeof TaskHtmlPreview>[0]) {
+  const preview = new TaskHtmlPreview(options)
+  const actions = new HtmlActionService({ preview, frames: new HtmlActionDesktopPort(), images: new ObservationImageStore() })
+  return { actions, preview, dispose: () => { actions.dispose(); preview.dispose() } }
 }

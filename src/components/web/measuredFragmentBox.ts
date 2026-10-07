@@ -97,7 +97,8 @@ export function webUsesFixedViewport(html: string, css = ''): boolean {
   const parsed = new DOMParser().parseFromString(html, 'text/html')
   const roots = [...parsed.body.children].filter(element => !['script', 'style', 'template'].includes(element.localName))
   if (roots.length === 1 && ['canvas', 'iframe', 'object', 'embed'].includes(roots[0]!.localName)) return true
-  const inspect = (style: CSSStyleDeclaration, documentBox = false) => cssUsesViewport(style, true)
+  const inspect = (style: CSSStyleDeclaration, documentBox = false) => style.getPropertyValue('position').trim() === 'fixed'
+    || cssUsesViewport(style, true)
     || documentBox && ['height', 'block-size', 'min-height', 'min-block-size'].some(name => /%$/.test(style.getPropertyValue(name).trim()))
   for (const element of [...parsed.querySelectorAll<HTMLElement>('[style]')])
     if (inspect(element.style, element === parsed.body || element === parsed.documentElement)) return true
@@ -117,6 +118,17 @@ export function webUsesFixedViewport(html: string, css = ''): boolean {
   return visit(sheet.cssRules)
 }
 
+// Flow consumes this predicate for both block placement and measured layout in
+// the same projection. Reuse the source result while that live instance remains.
+const flowViewportSources = new WeakMap<ComponentInstance, { html: string; css: string; fixed: boolean }>()
+function instanceWebUsesFixedViewport(instance: ComponentInstance, html: string, css: string): boolean {
+  const previous = flowViewportSources.get(instance)
+  if (previous?.html === html && previous.css === css) return previous.fixed
+  const fixed = webUsesFixedViewport(html, css)
+  if (typeof DOMParser !== 'undefined') flowViewportSources.set(instance, { html, css, fixed })
+  return fixed
+}
+
 /** Software derives Surface input; the returned height is never a formal edit. */
 export function componentLayoutInput(instance: ComponentInstance, host: {
   kind: 'free-frame' | 'flow'; inlineSize: number; viewport?: { width: number; height: number }; definition?: ComponentDefinition
@@ -128,7 +140,7 @@ export function componentLayoutInput(instance: ComponentInstance, host: {
   const key = declared?.kind === 'builtin' ? declared.key : instance.definitionId
   const data = instance.data && typeof instance.data === 'object' && !Array.isArray(instance.data) ? instance.data : null
   const web = ['guoling.web', 'guoling.html-program'].includes(key)
-  const viewport = fixedViewport ?? (key !== 'guoling.document-block' && Boolean(instance.childIds?.length) || (web && typeof data?.html === 'string' ? webUsesFixedViewport(data.html, typeof data.css === 'string' ? data.css : '')
+  const viewport = fixedViewport ?? (key !== 'guoling.document-block' && Boolean(instance.childIds?.length) || (web && typeof data?.html === 'string' ? instanceWebUsesFixedViewport(instance, data.html, typeof data.css === 'string' ? data.css : '')
     : key !== 'guoling.document-block' && (instance.implementationOverride ?? declared)?.kind === 'source' && Boolean(instance.frame)))
   return viewport ? { mode: 'flow-viewport', inlineSize: width, blockSize: height } : { mode: 'flow-content', inlineSize: host.inlineSize }
 }

@@ -30,7 +30,7 @@ import {
   runValidateProjectCli,
   serializeCourseProjectValidationReport,
   validateCourseProjectArchiveBytes,
-} from '../../scripts/validate-project'
+} from '../../scripts/historical/validate-course-project-v9'
 
 function blankArchiveData(): CourseProjectArchiveData {
   return {

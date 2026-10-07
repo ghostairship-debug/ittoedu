@@ -206,6 +206,60 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
     const root = commonRoot(related)
     const reasons = scopes.get(root) ?? new Set<string>(); reasons.add(reason); scopes.set(root, reasons)
   }
+  const createsContext = (node: Element): boolean => {
+    const style = styles.get(node) ?? getComputedStyle(node)
+    const parent = node.parentElement && (styles.get(node.parentElement) ?? getComputedStyle(node.parentElement))
+    return style.zIndex !== 'auto' && (style.position !== 'static' || /^(?:inline-)?(?:flex|grid)$/.test(parent?.display ?? ''))
+      || ['fixed', 'sticky'].includes(style.position)
+      || ['transform', 'translate', 'rotate', 'scale', 'filter', 'backdrop-filter', 'perspective', 'clip-path', 'mask-image', '-webkit-mask-image']
+        .some(name => Boolean(style.getPropertyValue(name) && style.getPropertyValue(name) !== 'none'))
+      || Number(style.opacity || '1') < 1 || style.isolation === 'isolate' || Boolean(style.mixBlendMode && style.mixBlendMode !== 'normal')
+      || /(?:^|\s)(?:layout|paint|strict|content)(?:\s|$)/.test(style.contain)
+      || /(?:^|,\s*)(?:transform|opacity|filter|perspective)(?:\s*,|$)/.test(style.willChange)
+  }
+  const paintContext = (node: Element): Element => {
+    let parent = node.parentElement ?? body
+    while (parent !== body && !createsContext(parent)) parent = parent.parentElement ?? body
+    return body.contains(parent) ? parent : body
+  }
+  // These are observed CSS ownership relationships, not admission rules. A
+  // shared browser scope keeps counters and whole-group compositing live.
+  const semanticGroups = new Set(['article', 'aside', 'figure', 'fieldset', 'footer', 'header', 'main', 'nav', 'section', 'ul', 'ol', 'li'])
+  const painted = (style: CSSStyleDeclaration) => style.backgroundImage !== 'none'
+    || !['transparent', 'rgba(0, 0, 0, 0)'].includes(style.backgroundColor)
+    || style.boxShadow !== 'none' || parseFloat(style.outlineWidth) > 0 && style.outlineStyle !== 'none'
+    || ['top', 'right', 'bottom', 'left'].some(side => parseFloat(style.getPropertyValue(`border-${side}-width`)) > 0 && style.getPropertyValue(`border-${side}-style`) !== 'none')
+  for (const node of nodes) {
+    const style = styles.get(node)!, measured = elements[indices.get(node)!]!
+    if (style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility)) continue
+    if (style.position === 'fixed') retain([body], 'viewport-layout')
+    if (style.display === 'list-item' && (style.listStyleType !== 'none' || style.listStyleImage !== 'none')) {
+      retain([node.closest('ol,ul') ?? node.parentElement ?? body], 'list-marker')
+    }
+    if (Object.values(measured.pseudoElements).some(pseudo => /\b(?:counter|counters|attr)\(/.test(pseudo.content ?? ''))) {
+      retain([body], 'generated-content-context')
+    } else if (Object.keys(measured.pseudoElements).length && node.children.length) retain([node], 'generated-paint')
+    if (node.children.length && (Number(style.opacity || '1') < 1
+      || ['filter', 'clip-path', 'mask-image', '-webkit-mask-image'].some(name => Boolean(style.getPropertyValue(name) && style.getPropertyValue(name) !== 'none')))) retain([node], 'group-compositing')
+    if (style.backdropFilter && style.backdropFilter !== 'none' || style.mixBlendMode && style.mixBlendMode !== 'normal') retain([paintContext(node)], 'shared-compositing')
+    const blockChildren = [...node.children].some(child => !/^(?:inline(?:-block|-flex|-grid|-table)?|contents)$/.test(styles.get(child)?.display ?? ''))
+    if (!createsContext(node) && node !== body && blockChildren && ['relative', 'absolute', 'sticky'].includes(style.position)) {
+      retain([paintContext(node)], 'positioned-paint-order')
+    }
+    if (createsContext(node)) {
+      // A detached group cannot give a descendant its original ancestor's
+      // stacking phase. Keep the common context when a real intermediate
+      // painted/semantic shell would otherwise become a separate frame.
+      let parent = node.parentElement
+      while (parent && parent !== body && !createsContext(parent)) {
+        const parentStyle = styles.get(parent)!
+        if (semanticGroups.has(parent.localName) || painted(parentStyle) || parent.hasAttribute('aria-label') || parent.hasAttribute('title')) {
+          retain([paintContext(parent)], 'ancestor-paint-order'); break
+        }
+        parent = parent.parentElement
+      }
+    }
+  }
   // Browser ownership, including form= controls and labels outside the form subtree.
   for (const form of Array.from(document.forms)) {
     const controls = Array.from(form.elements)
@@ -238,7 +292,9 @@ export async function captureHtmlDesignViewport(resourceWaitMs: number, viewport
       } catch { retain([body], 'state-css-context') }
     }
   }
-  if (unreadableStylesheet && scopes.size) retain([body], 'stylesheet-context')
+  // Computed declarations cannot recover inaccessible font faces, keyframes or
+  // live selectors. The usable stylesheet stays with its authored Web source.
+  if (unreadableStylesheet) retain([body], 'stylesheet-context')
 
   // A live state can resize normal-flow ancestors or move later siblings outside
   // the selector's subject. Keep that measured layout relationship in the same

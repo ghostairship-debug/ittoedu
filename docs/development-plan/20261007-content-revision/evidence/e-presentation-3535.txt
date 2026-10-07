@@ -1,0 +1,45 @@
+
+ RUN  v4.1.10 D:/果铃并行/20261007-content-revision/e
+
+ × tests/integration/productFollowup/T02/presentationStateLifecycle.test.ts > public V10 presentation state actions preserve teacher content geometry background interaction and formal History through save and cold reopen 156ms
+   → expected { kind: 'error', …(2) } to match object { kind: 'document-operation', …(1) }
+(2 matching properties omitted from actual)
+ ✓ tests/integration/productFollowup/T09/imageLostAckReadonlyLookup.test.ts > looks up a durable original image after its ACK is lost and document detached without another generation or renewed resource authority 198ms
+ ✓ tests/integration/productFollowup/T10/executionRecordingProgress.test.ts > real Engine tool receipt and Stop finish while timeline disk append is pending and later flush preserves the applied outcome exactly once 288ms
+ ✓ tests/integration/productFollowup/T10/desktopRuntimeCleanup.test.ts > closing a drafted card retains its ordinary conversation raw input and releases only its tracker while an open card keeps undo until shutdown drains 1068ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/productFollowup/T02/presentationStateLifecycle.test.ts > public V10 presentation state actions preserve teacher content geometry background interaction and formal History through save and cold reopen
+AssertionError: expected { kind: 'error', …(2) } to match object { kind: 'document-operation', …(1) }
+(2 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "kind": "document-operation",
+-   "result": {
+-     "status": "applied",
+-   },
++   "kind": "error",
+  }
+
+ ❯ update tests/integration/productFollowup/T02/presentationStateLifecycle.test.ts:61:8
+     59|     expect(sourceState).toBeTruthy()
+     60|     const update = async (input: Record<string, unknown>) => expect(aw…
+     61|       .toMatchObject({ kind: 'document-operation', result: { status: '…
+       |        ^
+     62|     await update({ action: 'add', title: '临时状态' })
+     63|     const added = (await readSurface()).presentation!.states.find(stat…
+ ❯ tests/integration/productFollowup/T02/presentationStateLifecycle.test.ts:66:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 3 passed (4)
+      Tests  1 failed | 3 passed (4)
+   Start at  10:04:38
+   Duration  10.53s (transform 15.56s, setup 271ms, import 31.34s, tests 1.72s, environment 0ms)
+
+VITEST_EXIT_CODE=1

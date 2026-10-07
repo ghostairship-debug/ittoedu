@@ -23,8 +23,11 @@ async function main() {
       const models = payload.data.flatMap(item => item && typeof item === 'object' && 'id' in item && typeof item.id === 'string'
         && item.id.length < 512 && !item.id.includes(credential) ? [item.id] : []).sort()
       const candidates = models.filter(id => /deepseek/i.test(id))
-      const preferred = candidates.find(id => /v?4[.\-_]?1.*flash|flash.*v?4[.\-_]?1/i.test(id))
-      return { ...metadata, status: 'catalog-read', models, candidates, preferred: preferred ?? null, capabilities: 'not-probed' }
+      // Owner-established routing: deepseek-flash is V4.1; deepseek-v4-flash is a different, older route.
+      // The catalog confirms exact alias availability, not versions inferred from ID spelling.
+      const preferred = candidates.includes('deepseek-flash') ? 'deepseek-flash' : null
+      return { ...metadata, status: 'catalog-read', models, candidates, preferred,
+        selectionBasis: 'Owner-established deepseek-flash V4.1 route; exact alias availability only', capabilities: 'not-probed' }
     } catch { return { ...metadata, status: controller.signal.aborted ? 'timeout' : 'transport-failure', models: [] } }
     finally { clearTimeout(timer) }
   }))

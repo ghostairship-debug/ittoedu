@@ -150,8 +150,11 @@ export function useComponentLibrary(ports: ComponentLibraryPorts): ComponentLibr
     const request = catalogUpdateRequest; setUpdate(null)
     if (!request) return
     void current.current.runBusy(async () => {
-      const file = await current.current.readCatalogPackage(catalogPackageReference(request.entries[0]))
-      const result = await commitComponentReplacementAtTarget(current.current.kernel, request.target, importComponentLibraryArchive(file.bytes).entry)
+      const selected = request.entries[0]
+      const file = await current.current.readCatalogPackage(catalogPackageReference(selected))
+      const archive = importComponentLibraryArchive(file.bytes)
+      if (archive.entry.id !== selected.packageId || archive.version !== selected.version) throw new Error('目录条目身份已改变，请刷新；工程原版本保留。')
+      const result = await commitComponentReplacementAtTarget(current.current.kernel, request.target, archive.entry)
       if (!result.ok) throw new Error(result.reason)
     }, '组件更新失败。')
   }, [catalogUpdateRequest])

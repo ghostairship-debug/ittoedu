@@ -1186,6 +1186,11 @@ export async function checkDevelopmentRoadmap(
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
+  if (!args.includes('--historical')) {
+    console.log('历史 1.1–2.0 路线检查未执行；它不表示当前 V10 产品通过。维护历史资料时显式传 --historical [--project-root <path>]。')
+    return
+  }
+  args.splice(args.indexOf('--historical'), 1)
   let projectRoot = defaultProjectRoot
   if (args.length > 0) {
     if (args.length !== 2 || args[0] !== '--project-root') throw new Error('用法：check-development-roadmap [--project-root <path>]')
@@ -1193,7 +1198,7 @@ async function main(): Promise<void> {
   }
   const report = await checkDevelopmentRoadmap(projectRoot)
   const frontier = report.parallelFrontier.length > 0 ? report.parallelFrontier.join(' + ') : '当前无可并行核心节点'
-  console.log(`开发路线校验通过：${report.taskCount} 个节点，${report.specCount} 份规格，归档旧任务映射 ${report.crosswalkCount} 行；首个并行 frontier：${frontier}。`)
+  console.log(`历史路线资料校验通过（不证明当前产品）：${report.taskCount} 个节点，${report.specCount} 份规格，归档旧任务映射 ${report.crosswalkCount} 行；历史并行 frontier：${frontier}。`)
 }
 
 const invokedPath = process.argv[1]

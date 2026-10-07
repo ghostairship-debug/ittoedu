@@ -1,3 +1,4 @@
+/** @deprecated Historical V9/CLI consumer only; current production uses Project V10 and the canonical Gateway. */
 import { z } from 'zod'
 import { generationSemanticChangesSchema } from './generationChangeSummary'
 import { generationExecutionEvidenceSchema } from './generationExecutionEvidence'

@@ -1,0 +1,275 @@
+{
+  "directory": "D:\\果铃并行\\20261007-content-revision\\e\\output\\productFollowup\\T04\\background-close-s0vtnB",
+  "closeMethod": "BrowserWindow.close()",
+  "browserViewportOpenedByTest": false,
+  "forcedCleanupUsedForSuccess": false,
+  "discovery": {
+    "result": {
+      "kind": "read",
+      "data": {
+        "status": "available",
+        "tools": [
+          {
+            "remoteName": "browser_navigate",
+            "effect": "read",
+            "description": "在当前任务页面打开网页。",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "url": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url"
+              ],
+              "additionalProperties": false
+            },
+            "name": "mcp.browser.browser_navigate"
+          },
+          {
+            "remoteName": "browser_snapshot",
+            "effect": "read",
+            "description": "观察当前任务网页的可访问结构与元素编号。",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "type": "string",
+                  "description": "最近页面快照的 e 编号；也可使用精确 CSS 选择器。"
+                },
+                "depth": {
+                  "type": "number"
+                },
+                "boxes": {
+                  "type": "boolean"
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            },
+            "name": "mcp.browser.browser_snapshot"
+          },
+          {
+            "remoteName": "browser_find",
+            "effect": "read",
+            "description": "在当前页面可访问结构中查找文本。",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "regex": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "text"
+              ],
+              "additionalProperties": false
+            },
+            "name": "mcp.browser.browser_find"
+          },
+          {
+            "remoteName": "browser_take_screenshot",
+            "effect": "read",
+            "description": "截取当前网页或指定元素的图片。",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "type": "string",
+                  "description": "最近页面快照的 e 编号；也可使用精确 CSS 选择器。"
+                },
+                "element": {
+                  "type": "string"
+                },
+                "type": {
+                  "enum": [
+                    "png",
+                    "jpeg"
+                  ]
+                },
+                "fullPage": {
+                  "type": "boolean"
+                },
+                "scale": {
+                  "enum": [
+                    "css",
+                    "device"
+                  ]
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            },
+            "name": "mcp.browser.browser_take_screenshot"
+          },
+          {
+            "remoteName": "browser_wait_for",
+            "effect": "read",
+            "description": "等待页面出现或移除文本，也可等待指定时间。",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "textGone": {
+                  "type": "string"
+                },
+                "time": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "required": [],
+              "additionalProperties": false
+            },
+            "name": "mcp.browser.browser_wait_for"
+          },
+          {
+            "remoteName": "browser_click",
+            "effect": "write",
+            "description": "点击最近观察中指定的网页元素。",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "type": "string",
+                  "description": "最近页面快照的 e 编号；也可使用精确 CSS 选择器。"
+                },
+                "element": {
+                  "type": "string"
+                },
+                "button": {
+                  "enum": [
+                    "left",
+                    "right",
+                    "middle"
+                  ]
+                },
+                "doubleClick": {
+                  "type": "boolean"
+                },
+                "modifiers": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "snapshotId": {
+                  "type": "string",
+                  "description": "最近一次 browser_snapshot 返回的页面观察身份"
+                }
+              },
+              "required": [
+                "target"
+              ],
+              "additionalProperties": false
+            },
+            "name": "mcp.browser.browser_click"
+          },
+          {
+            "remoteName": "browser_type",
+            "effect": "write",
+            "description": "替换指定输入框内容，可按回车提交。",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "target": {
+                  "type": "string",
+                  "description": "最近页面快照的 e 编号；也可使用精确 CSS 选择器。"
+                },
+                "element": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                },
+                "submit": {
+                  "type": "boolean"
+                },
+                "slowly": {
+                  "type": "boolean"
+                },
+                "snapshotId": {
+                  "type": "string",
+                  "description": "最近一次 browser_snapshot 返回的页面观察身份"
+                }
+              },
+              "required": [
+                "target",
+                "text"
+              ],
+              "additionalProperties": false
+            },
+            "name": "mcp.browser.browser_type"
+          },
+          {
+            "remoteName": "browser_file_upload",
+            "effect": "write",
+            "description": "向当前已打开的文件选择框上传授权文件。",
+            "inputSchema": {
+              "type": "object",
+              "properties": {
+                "paths": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "本任务明确获授权的文件来源路径；宿主文件服务核对授权并冻结原文件。"
+                },
+                "snapshotId": {
+                  "type": "string",
+                  "description": "最近一次 browser_snapshot 返回的页面观察身份"
+                }
+              },
+              "required": [
+                "paths"
+              ],
+              "additionalProperties": false
+            },
+            "name": "mcp.browser.browser_file_upload"
+          }
+        ]
+      }
+    },
+    "ticket": "129ca1b3-05e5-4af9-a792-cc779486e28e"
+  },
+  "background": {
+    "pid": 20176,
+    "browserWindows": [],
+    "nativeWindows": [
+      {
+        "id": 1,
+        "visible": false
+      }
+    ]
+  },
+  "promoted": {
+    "pid": 20176,
+    "browserWindows": [
+      {
+        "id": 2,
+        "url": "courseware-editor://app/index.html"
+      }
+    ],
+    "nativeWindows": [
+      {
+        "id": 2,
+        "visible": false
+      },
+      {
+        "id": 1,
+        "visible": false
+      }
+    ]
+  },
+  "naturalExit": {
+    "pid": 19488,
+    "exitCode": 0,
+    "signalCode": null
+  }
+}

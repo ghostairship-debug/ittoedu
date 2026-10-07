@@ -1,0 +1,2 @@
+Command: node scripts/build-electron.mjs
+BUILD_ELECTRON_EXIT_CODE=0

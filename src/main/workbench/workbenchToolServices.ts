@@ -3,11 +3,16 @@ import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
 import type { BrowserWindow } from 'electron'
 import type { HostToolServices } from '../../core/tools/HostToolServices'
-import type { ExportBuildReply } from '../../shared/workbench/toolPorts'
+import type { ToolRunGrant } from '../../shared/workbench/tools'
+import type { AgentFileContext } from '../../core/tools/AgentFileTools'
+import { AgentFileOutcomeUnknown } from '../../core/tools/AgentFileTools'
+import { materialListSchema, materialReadSchema } from '../../core/tools/MaterialTools'
+import { dispatchMaterialTool } from './execution/MaterialReadTools'
+import { attachmentsDesktopService } from './attachments/attachmentsDesktopService'
+import type { ExportBuildReply, ExportBuildProgress } from '../../shared/workbench/toolPorts'
 import { IPC_CHANNELS } from '../../shared/ipcTypes'
 import { documentHost } from './documentHost'
 import { ScopedSkillService, type SkillRoot } from './skills/ScopedSkillService'
-import { EnabledSkillRootStore } from './skills/EnabledSkillRootStore'
 import { BundledSkillService } from './skills/BundledSkillService'
 import bundledSkills from '../../shared/generated/bundledSkills.json'
 import { createProjectFileServices } from './projectFiles/projectFileServices'
@@ -25,11 +30,11 @@ import { ImageGenerationService } from './images/ImageGenerationService'
 import { HostJobService } from './jobs/HostJobService'
 import { ComputeJobService } from './compute/ComputeJobService'
 import { PINNED_PYTHON_IMAGE_ID, PodmanComputeBackend } from './compute/PodmanComputeBackend'
-import { WebResearchService } from './network/WebResearchService'
+import { WebResearchService, type WebResearchOptions } from './network/WebResearchService'
 import { ManagedBrowserMcpService, type ManagedBrowserGrant } from './externalTools/ManagedBrowserMcpService'
 import { createElectronEmbeddedBrowserFactory } from './browserEmbedded/ElectronEmbeddedBrowser'
 import type { EmbeddedBrowserViewport } from '../../shared/workbench/embeddedBrowser'
-import { BrowserActionApprovals, type BrowserActionApproval } from './externalTools/BrowserActionApprovals'
+import { BrowserActionApprovals, type BrowserActionApproval, type BrowserTaskAction } from './externalTools/BrowserActionApprovals'
 import { MediaCapabilityService } from './media/MediaCapabilityService'
 import { DelegationJobService } from './delegation/DelegationJobService'
 import { ChatGPTImageProvider } from './images/ChatGPTImageProvider'
@@ -39,24 +44,44 @@ import { executionSettingsStore, resolveOAuthCredential } from './providers/exec
 import { createWorkbenchOpenImageService } from './assetSources/pixabayDesktopService'
 import { AssetLibraryService } from './assetSources/componentLibrarySearch'
 import { componentCatalogManager } from '../componentCatalogManager'
+import { renderPdfFromHtml } from '../pdfExport'
+import { createHtmlActionServices } from './observation/TaskHtmlPreview'
+import type { HtmlPreviewService } from './htmlPreview/HtmlPreviewService'
+import { PptxCourseImportProducer } from './pptxImport/PptxCourseImportProducer'
 
 let installed = false
 let imageService: ImageGenerationService | undefined
 let imageRoles: ReturnType<typeof frozenImageRoles> | undefined
-let skillRootStore: EnabledSkillRootStore | undefined
 let browserActionApprovals: BrowserActionApprovals | undefined
 let browserService: ManagedBrowserMcpService | undefined
 let exportPort: DocumentExportPort | undefined
 let exportOwnerId: number | undefined
 let headlessExportWorker: HeadlessDocumentExportWorker | undefined
+let htmlActionServices: ReturnType<typeof createHtmlActionServices> | undefined
+let htmlActionOptions: Parameters<typeof createHtmlActionServices>[0] | undefined
+let pptxImportProducer: PptxCourseImportProducer | undefined
+export function setWorkbenchHtmlPreview(live: HtmlPreviewService): void {
+  if (!htmlActionOptions) throw new Error('HTML 页面操作服务尚未安装')
+  htmlActionOptions.live = live
+}
+export function workbenchHtmlActions() {
+  if (!htmlActionServices) throw new Error('HTML 页面操作服务尚未安装')
+  return htmlActionServices.actions
+}
+export function releaseWorkbenchHtmlDocument(documentId: string): void { htmlActionServices?.preview.releaseDocument(documentId) }
 export function acceptWorkbenchExportBuildReply(reply: ExportBuildReply, senderId: number): boolean {
   return exportPort?.accept(reply, senderId) ?? false
+}
+export function acceptWorkbenchExportBuildProgress(progress: ExportBuildProgress, senderId: number): boolean {
+  return exportPort?.progress(progress, senderId) ?? false
 }
 export function disposeWorkbenchExportPort(): void {
   exportPort?.dispose(); exportPort = undefined; exportOwnerId = undefined
 }
 export function disposeHeadlessWorkbenchWorkers(): void {
   headlessExportWorker?.dispose(); headlessExportWorker = undefined
+  htmlActionServices?.dispose(); htmlActionServices = undefined; htmlActionOptions = undefined
+  pptxImportProducer?.dispose(); pptxImportProducer = undefined
 }
 export function workbenchImageService(): ImageGenerationService {
   if (!imageService) throw new Error('图片服务尚未安装')
@@ -66,12 +91,13 @@ export function workbenchImageSelection(runId: string, operation: 'generate' | '
   if (!imageRoles) throw new Error('图片角色尚未安装')
   return imageRoles.selection(runId, operation)
 }
-/** User/workspace Skills remain disabled until the user explicitly enables each real root. */
-export function workbenchEnabledSkillRootStore(): EnabledSkillRootStore {
-  if (!skillRootStore) throw new Error('Skill 根启用服务尚未安装')
-  return skillRootStore
-}
 /** Browser scope is frozen with the document run; outside-workspace uploads have no implicit grant. */
+export function workbenchSkillRootsForGrant(grant: ToolRunGrant): readonly SkillRoot[] {
+  const userSkillDirectory = path.resolve(process.env.COURSEWARE_SKILLS_DESTINATION || path.join(app.getPath('home'), '.agents', 'skills'))
+  return [{ source: 'user', directory: userSkillDirectory, authorizedRoot: userSkillDirectory },
+    ...(grant.fileAccess?.workspaceRoot ? [{ source: 'workspace' as const, directory: path.join(grant.fileAccess.workspaceRoot, '.agents', 'skills'),
+      authorizedRoot: grant.fileAccess.workspaceRoot }] : [])]
+}
 export function managedBrowserGrantForRun(grant: Parameters<NonNullable<HostToolServices['beginRun']>>[0]): ManagedBrowserGrant {
   const permission = grant.actor === 'agent' ? grant.fileAccess?.permission : 'read-only'
   return {
@@ -87,6 +113,19 @@ export function approveWorkbenchBrowserAction(input: BrowserActionApproval): voi
   if (browserService.approvalContext(input.runId).snapshotId !== input.snapshotId)
     throw new Error('外部页面已变化，请重新观察后批准具体操作')
   browserActionApprovals.grant(input)
+}
+/** Main obtains action facts from the owned browser; a model cannot supply the authorization classification. */
+export function authorizeWorkbenchBrowserActionFromTask(input: Parameters<ManagedBrowserMcpService['authorizeTaskAction']>[0]): Promise<boolean> {
+  return browserService ? browserService.authorizeTaskAction(input) : Promise.resolve(false)
+}
+export function browserTaskActionWithinGrant(grant: ToolRunGrant, action: BrowserTaskAction): boolean {
+  const scope = grant.webAuthorization
+  if (!scope?.actions.length || action.action === 'unknown' || grant.fileAccess?.permission === 'read-only') return false
+  try {
+    const origins = new Set(scope.origins.map(value => new URL(value).origin))
+    if (!origins.has(new URL(action.pageUrl).origin) || action.destinationUrl && !origins.has(new URL(action.destinationUrl).origin)) return false
+    return action.action === 'prepare' || scope.actions.includes(action.action)
+  } catch { return false }
 }
 export async function controlWorkbenchBrowser(runId: string, action: 'status' | 'takeover' | 'resume') {
   if (!browserService) throw new Error('本任务尚未启动受管浏览器')
@@ -107,6 +146,9 @@ export function workbenchBrowserApprovalContext(runId: string): { pageUrl?: stri
 export function installWorkbenchToolServices(context: { getMainWindow(): BrowserWindow | null; getRendererEntryUrl(): string | null; headless?: boolean }): void {
   if (installed) return
   const host = documentHost(), directory = path.join(app.getPath('userData'), 'workbench-v2')
+  htmlActionOptions = { readDocument: documentId => host.registry.get(documentId).drain(),
+    agentBundlePath: path.join(app.getAppPath(), 'dist-renderer', 'html-preview-agent.iife.js') }
+  htmlActionServices = createHtmlActionServices(htmlActionOptions)
   if (context.headless) {
     const entry = context.getRendererEntryUrl()
     if (!entry) throw new Error('后台导出资源入口不可用')
@@ -130,15 +172,23 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   // verify an actual authorized copy write before enabling product-paid delegation.
   const delegationWriteVerified = process.env.GUOLING_CODEX_DELEGATION_WRITE_VERIFIED === '1'
   const jobs = new HostJobService({ images, compute, delegation })
-  const web = new WebResearchService()
+  const webOptions: WebResearchOptions = {}
+  const web = new WebResearchService(webOptions)
   const openImages = createWorkbenchOpenImageService(app.getVersion())
   const assetLibrary = new AssetLibraryService({ catalog: componentCatalogManager })
   // Agent and human share the task's main-owned embedded page.
   const approvals = new BrowserActionApprovals()
   const mcp = new ManagedBrowserMcpService({ scratchRoot: path.join(directory, 'browser'),
     embeddedBackend: createElectronEmbeddedBrowserFactory(context.getMainWindow),
-    approveExternalAction: async input => approvals.consume({ runId: input.runId, operationId: input.operationId,
-      tool: input.tool, arguments: input.arguments, snapshotId: input.snapshotId }) })
+    readUpload: async ({ runId, path: source }) => {
+      const file = await host.agentFiles.readAuthorizedFile(fileContext(runId), source)
+      return { name: file.name, bytes: file.bytes }
+    },
+    authorizeTaskAction: input => approvals.grantFromTask(input),
+    approveExternalAction: async input => {
+      if (input.pageUrl && input.action) await approvals.grantFromTask({ ...input, pageUrl: input.pageUrl, action: input.action })
+      return approvals.consume(input)
+    } })
   // Speech/video/music have no verified provider adapter in the current connection set.
   const media = new MediaCapabilityService()
   const observationImages = new ObservationImageStore()
@@ -152,16 +202,21 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     images: observationImages,
   })
   const deliverySignals = new Map<string, AbortController>()
-  const enabledSkillRoots = new EnabledSkillRootStore(path.join(directory, 'enabled-skill-roots.json'))
+  const runGrants = new Map<string, ToolRunGrant>()
+  const materialIds = new Map<string, Set<string>>()
+  const materialImages = new Map<string, Map<string, { mimeType: string; bytes: Uint8Array }>>()
+  const fileContext = (runId: string, approvedPaths?: readonly string[], assertActive?: () => void): AgentFileContext => {
+    const grant = runGrants.get(runId), access = grant?.fileAccess
+    if (!access?.workspaceRoot) throw new Error('任务缺少已冻结的文件读取范围')
+    return { runId, workspaceRoot: access.workspaceRoot, permission: access.permission,
+      conversationHome: access.conversationHome, conversationHomeRoot: access.conversationHomeRoot,
+      readOnlyRoots: Object.values(access.boundPaths ?? {}), approvedOutsidePaths: approvedPaths,
+      assertActive: () => { deliverySignals.get(runId)?.signal.throwIfAborted(); if (!runGrants.has(runId)) throw new Error('任务已停止'); assertActive?.() } }
+  }
   const frozenSkillRoots = new Map<string, readonly SkillRoot[]>()
-  const skillRootErrors = new Map<string, string>()
   const skills = new ScopedSkillService(new BundledSkillService(bundledSkills), async runId => {
     if (!deliverySignals.has(runId) || deliverySignals.get(runId)!.signal.aborted) throw new Error('Skill 读取任务已停止')
-    if (skillRootErrors.has(runId)) throw new Error(skillRootErrors.get(runId))
-    // Fresh state can revoke a root, but cannot add one absent from the task start.
-    const enabled = await enabledSkillRoots.enabledRoots(frozenSkillRoots.get(runId) ?? [])
-    if (deliverySignals.get(runId)?.signal.aborted) throw new Error('Skill 读取任务已停止')
-    return enabled.roots
+    return frozenSkillRoots.get(runId) ?? []
   })
   const currentExportPort = (): DocumentExportPort => {
     const window = context.getMainWindow()
@@ -170,7 +225,8 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       disposeWorkbenchExportPort()
       const ownerId = window.webContents.id
       exportOwnerId = ownerId
-      const ownedPort = new DocumentExportPort(ownerId, request => window.webContents.send(IPC_CHANNELS.documentExportBuildRequest, request))
+      const ownedPort = new DocumentExportPort(ownerId, request => window.webContents.send(IPC_CHANNELS.documentExportBuildRequest, request),
+        cancel => { if (!window.isDestroyed()) window.webContents.send(IPC_CHANNELS.documentExportBuildCancel, cancel) })
       exportPort = ownedPort
       const disposeOwner = () => { if (exportOwnerId === ownerId && exportPort === ownedPort) disposeWorkbenchExportPort() }
       window.once('closed', disposeOwner)
@@ -206,6 +262,12 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       resolveExportDestination(runId, snapshot, requested, suggestedName, format, id => host.tools.runFileAccess(id)),
     build: { build: (request, signal) => context.headless
       ? headlessExportWorker!.build(request, signal) : currentExportPort().build(request, signal) },
+    renderPdf: async (html, signal) => {
+      signal?.throwIfAborted()
+      const bytes = await renderPdfFromHtml(html, context.getMainWindow() ?? undefined)
+      signal?.throwIfAborted()
+      return bytes
+    },
     writer: workbenchExportWriter,
     withFileOperation: work => host.fileCoordinator.withFileOperation(work),
     assertExportTarget: async filename => {
@@ -217,6 +279,94 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     signalForRun: runId => deliverySignals.get(runId)?.signal,
   })
   const services: HostToolServices = {
+    pptxImport: { import: async ({ grant, operationId, path: sourcePath, destination, assertActive }) => {
+      const access = fileContext(grant.runId, undefined, assertActive)
+      const source = await host.agentFiles.readAuthorizedFile(access, sourcePath)
+      if (!/\.pptx$/i.test(source.name)) throw new Error('此导入入口需要 PPTX 文件')
+      const entry = context.getRendererEntryUrl()
+      if (!entry) throw new Error('PowerPoint 导入宿主尚未准备好')
+      const prepared = await (pptxImportProducer ??= new PptxCourseImportProducer(entry)).prepare({ bytes: source.bytes, filename: source.name },
+        deliverySignals.get(grant.runId)?.signal)
+      assertActive()
+      const filename = destination ? path.resolve(access.workspaceRoot, destination) : undefined
+      try {
+        const outcome = await host.agentFiles.createPreparedCourse(access, { ...(filename ? { path: path.dirname(filename) } : {}),
+          name: filename ? path.basename(filename) : prepared.suggestedName, bytes: prepared.archiveBytes }, operationId)
+        const data = outcome.data as Record<string, unknown>
+        const operation = data.operation as { status?: string } | undefined
+        if (operation?.status !== 'success') return { kind: 'error', code: 'pptx-import-file-failed', message: '转换内容已准备，但目标课件未创建；请核对目标路径', data }
+        return { kind: 'read', data: { ...data, status: 'saved', issues: prepared.issues,
+          ...(outcome.opened ? { documentId: outcome.opened.documentId } : {}) } }
+      } catch (error) {
+        if (error instanceof AgentFileOutcomeUnknown) return { kind: 'error', code: 'tool-outcome-unknown',
+          message: 'PPTX 导入写盘回执未确认；请先核对目标课件，不要重复转换或创建', data: { destination: filename ?? prepared.suggestedName } }
+        throw error
+      }
+    } },
+    htmlActions: { execute: (runId, document, action) => workbenchHtmlActions().executeDocumentAction(runId, document, action),
+      readResource: (runId, resourceId) => workbenchHtmlActions().readResource(runId, resourceId) },
+    office: { execute: async ({ grant, operationId, name, input, approvedPaths, assertActive }) => {
+      const result = await host.agentFiles.executeOffice(fileContext(grant.runId, approvedPaths, assertActive), name, input, operationId)
+      return { kind: 'read', data: result.data }
+    } },
+    artifacts: {
+      lookup: (runId, operationId) => host.artifactDeliveries.lookup(operationId, runId),
+      save: ({ grant, operationId, source, bytes, approvedPaths, assertActive }) => {
+        const access = fileContext(grant.runId, approvedPaths, assertActive)
+        const destination = path.resolve(access.workspaceRoot, source.destination)
+        return host.artifactDeliveries.deliver({ runId: grant.runId, operationId, workspaceRoot: access.workspaceRoot,
+          permission: access.permission, destination: source.destination, sourceKind: source.kind,
+          sourceId: source.kind === 'image' ? `${source.job}@${source.resourceId}` : `${source.job}@${source.name}`, bytes,
+          approvedTargetPath: approvedPaths?.find(value => path.resolve(value) === destination), assertActive: access.assertActive! })
+      },
+    },
+    computeInputs: { freeze: async (runId, sources) => {
+      const inputs = await Promise.all(sources.map(source => host.agentFiles.readAuthorizedFile(fileContext(runId), source)))
+      if (new Set(inputs.map(input => input.name)).size !== inputs.length) throw new Error('计算输入文件重名；请先选择不同文件名')
+      return inputs.map(({ name, bytes }) => ({ name, bytes }))
+    } },
+    materials: {
+      admit: async (runId, sourceIds) => {
+        const ids = materialIds.get(runId)
+        if (!ids) throw new Error('材料读取任务已停止')
+        const attachments = (await attachmentsDesktopService()).attachments
+        for (const id of sourceIds) { await attachments.readSnapshot(id); ids.add(id) }
+        deliverySignals.get(runId)?.signal.throwIfAborted()
+      },
+      read: async (runId, name, raw) => {
+        const ids = materialIds.get(runId)
+        if (!ids) throw new Error('材料读取任务已停止')
+        const attachments = (await attachmentsDesktopService()).attachments
+        let input = raw
+        if (name === 'material.list') {
+          const requested = materialListSchema.parse(raw)
+          if (requested.path) {
+            const file = await host.agentFiles.readAuthorizedFile(fileContext(runId), requested.path)
+            const snapshot = await attachments.receiveBytes({ name: file.name, bytes: file.bytes,
+              source: { kind: 'workspace', authorizationId: runId, pathHint: file.path } }, { signal: deliverySignals.get(runId)?.signal })
+            ids.add(snapshot.id)
+            input = { attachmentId: snapshot.id, offset: requested.offset, limit: requested.limit }
+          }
+        }
+        const result = await dispatchMaterialTool(attachments, ids, name, input, deliverySignals.get(runId)?.signal)
+        if ('admittedSourceIds' in result) for (const id of result.admittedSourceIds ?? []) ids.add(id)
+        if (name === 'material.read' && 'modelMessage' in result && result.modelMessage) {
+          const requested = materialReadSchema.parse(input)
+          const image = await attachments.readRepresentation(requested.attachmentId, requested.representationId)
+          const resourceId = `material:${requested.attachmentId}:${requested.representationId}`
+          let resources = materialImages.get(runId)
+          if (!resources) { resources = new Map(); materialImages.set(runId, resources) }
+          resources.set(resourceId, { mimeType: image.representation.mediaType, bytes: image.bytes })
+          return { kind: 'read', data: { ...result.data, image: { resourceId, mimeType: image.representation.mediaType } } }
+        }
+        return { kind: 'read', data: result.data }
+      },
+      readResource: async ({ runId, resourceId }) => {
+        const image = materialImages.get(runId)?.get(resourceId)
+        if (!image) throw new Error('材料图片不属于当前任务或已失效')
+        return image
+      },
+    },
     projectFiles: createProjectFileServices(host),
     deliveries,
     observations: {
@@ -243,45 +393,61 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       cancel: (runId, jobId) => delegation.cancel(runId, jobId),
       cancelRun: runId => delegation.cancelRun(runId),
     },
-    web,
+    web: { search: input => web.search(input), open: async input => {
+      const result = await web.open(input)
+      if (result.status === 'material') {
+        const ids = materialIds.get(input.runId)
+        if (!ids) throw new Error('联网材料任务已停止')
+        result.attachmentIds.forEach(id => ids.add(id))
+      }
+      return result
+    } },
     mcp,
     media,
     openImages: { search: input => openImages.search(input), preview: input => openImages.preview(input),
       readPreview: (runId, resourceId) => openImages.readPreview(runId, resourceId), fetch: input => openImages.fetch(input) },
     assetLibrary: { search: input => assetLibrary.search(input), read: input => assetLibrary.read(input),
+      import: async ({ runId, file }) => {
+        const source = await host.agentFiles.readAuthorizedFile(fileContext(runId), file)
+        deliverySignals.get(runId)?.signal.throwIfAborted()
+        return assetLibrary.import(source.bytes)
+      },
+      delete: ({ runId: _runId, ...input }) => assetLibrary.delete(input),
       save: ({ runId: _runId, ...input }) => assetLibrary.save(input) },
     beginRun: async grant => {
       if (grant.disclosedSettings && (await (await executionSettingsStore()).read()).profile.revision !== grant.disclosedSettings.profileRevision)
         throw new Error('模型或服务配置在发送时已变化；本次未请求模型，请核对后重新发送。')
       await roles.beginRun(grant.runId, grant.disclosedSettings)
-      const candidates: SkillRoot[] = [{ source: 'user', directory: path.join(directory, 'skills'), authorizedRoot: directory },
-        ...(grant.fileAccess?.workspaceRoot ? [{ source: 'workspace' as const, directory: path.join(grant.fileAccess.workspaceRoot, '.agents', 'skills'),
-          authorizedRoot: grant.fileAccess.workspaceRoot }] : [])]
-      try { frozenSkillRoots.set(grant.runId, (await enabledSkillRoots.enabledRoots(candidates)).roots) }
-      catch (error) { frozenSkillRoots.set(grant.runId, []); skillRootErrors.set(grant.runId,
-        error instanceof Error ? `Skill 启用配置无法读取：${error.message}` : 'Skill 启用配置无法读取') }
+      frozenSkillRoots.set(grant.runId, workbenchSkillRootsForGrant(grant))
       const controller = new AbortController()
       deliverySignals.set(grant.runId, controller)
+      runGrants.set(grant.runId, structuredClone(grant))
+      materialIds.set(grant.runId, new Set(grant.materialIds ?? []))
       try {
+        webOptions.materials = (await attachmentsDesktopService()).attachments
         web.beginRun(grant.runId)
         openImages.beginRun(grant.runId)
         await mcp.beginRun(grant.runId, managedBrowserGrantForRun(grant))
-        approvals.beginRun(grant.runId)
+        approvals.beginRun(grant.runId, input => !controller.signal.aborted && browserTaskActionWithinGrant(grant, input))
         media.beginRun(grant.runId, { writable: grant.actor === 'agent' && !!grant.fileAccess && grant.fileAccess.permission !== 'read-only', capabilities: [] })
       } catch (error) {
         controller.abort(); deliverySignals.delete(grant.runId)
+        runGrants.delete(grant.runId); materialIds.delete(grant.runId); materialImages.delete(grant.runId)
         approvals.revokeRun(grant.runId)
-        frozenSkillRoots.delete(grant.runId); skillRootErrors.delete(grant.runId)
+        frozenSkillRoots.delete(grant.runId)
         await Promise.allSettled([web.stopRun(grant.runId), mcp.endRun(grant.runId), media.stopRun(grant.runId)])
         web.endRun(grant.runId); media.endRun(grant.runId); openImages.endRun(grant.runId)
         throw error
       }
     },
     stopRun: async runId => {
+      htmlActionServices?.actions.stopRun(runId)
       approvals.revokeRun(runId)
       deliverySignals.get(runId)?.abort(); deliverySignals.delete(runId); observationImages.clearRun(runId); skills.release(runId)
       openImages.stopRun(runId)
-      frozenSkillRoots.delete(runId); skillRootErrors.delete(runId)
+      frozenSkillRoots.delete(runId)
+      runGrants.delete(runId); materialIds.delete(runId); materialImages.delete(runId); host.agentFiles.releaseRun(runId)
+      await host.artifactDeliveries.stopRun(runId)
       await Promise.allSettled([web.stopRun(runId), mcp.stopRun(runId), media.stopRun(runId), ...(compute ? [compute.cancelRun(runId)] : [])])
     },
     images: { selection: (runId, _documentId, operation) => roles.selection(runId, operation),
@@ -292,7 +458,6 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
   host.tools.configureHostServices(services)
   imageService = images
   imageRoles = roles
-  skillRootStore = enabledSkillRoots
   browserActionApprovals = approvals
   browserService = mcp
   installed = true

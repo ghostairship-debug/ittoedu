@@ -7,6 +7,7 @@ import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import type { ExecutionEvent, ExecutionEventInput } from '../../../shared/workbench/executionEvents'
 import type { EditEvent } from '../../../shared/workbench/editSession'
 import type { ModelChatMessage, ModelSelection } from '../../../shared/workbench/modelProvider'
+import type { InputContext } from '../../../shared/workbench/attachments'
 import { type ExecutionRunRecord } from '../../../shared/workbench/execution'
 import { conversationHistoryIndex } from './ConversationHistoryIndex'
 import { PayloadCompiler } from '../../../core/execution/PayloadCompiler'
@@ -27,10 +28,8 @@ import { routeModelProviders, serializeModelPayload } from '../providers/ModelPr
 import { DesktopOperationError } from '../../errors'
 import { DEFAULT_PERMISSION_MODE } from '../../../shared/workbench/executionPermission'
 import { executionInputError } from './executionInputErrors'
-import { AgentFileService } from './AgentFileService'
 import { ExecutionChangeReviewService } from '../review/ExecutionChangeReviewService'
-import { HostArtifactDeliveryService } from './HostArtifactDeliveryService'
-import type { HtmlActionService } from '../observation/HtmlActionService'
+import type { HostArtifactDeliveryService } from './HostArtifactDeliveryService'
 import { forkDraftFromCheckpoint, indexUserCheckpoint } from './CheckpointForkService'
 import { fileCreated } from './executionOutcome'
 import { sourceFileKind } from '../../../shared/workbench/sourceFileKind'
@@ -41,6 +40,7 @@ import { isCourseInstanceRange, readTarget } from '../../../core/tools/ToolTarge
 import { matchesSavedDocument } from './savedDocumentBinding'
 import { isSourceDocumentModel } from '../../../shared/workbench/document'
 import type { ElementChangeView, ElementRevertResult } from '../../../shared/workbench/executionDesktop'
+import { snapshotSelectedLessonMaterials } from './MaterialReadTools'
 
 export interface ExecutionDesktopServiceOptions {
   directory: string
@@ -99,6 +99,8 @@ export class ExecutionDesktopService {
   readonly changeReview: ExecutionChangeReviewService
   readonly artifacts: HostArtifactDeliveryService
   private readonly queues = new Map<string, Promise<unknown>>()
+  private closing = false
+  private shutdownPromise?: Promise<void>
   private readonly elementChanges = new Map<string, ElementChangeTracker>()
   private eventSink?: (event: ExecutionEvent) => void
   private editSink?: (event: EditEvent) => void
@@ -115,12 +117,18 @@ export class ExecutionDesktopService {
     this.conversations = new ConversationStore({ directory: path.join(options.directory, 'conversations') })
     this.runs = new ExecutionRunStore(path.join(options.directory, 'runs'))
     this.events = new ExecutionEventStore({ directory: path.join(options.directory, 'events') })
+    this.events.subscribe(event => {
+      // Display follows the existing ordered event owner without blocking an external business receipt.
+      if (event.type === 'document.save' && (event.data.saveStatus === 'saved' || event.data.saveStatus === 'failed'))
+        this.timing(event.conversationId, event.taskId, `${event.eventId}:save-fact`, 'save.fact-observed', {
+          sourceWallTimeMs: event.time, detail: { documentId: event.data.documentId, saveStatus: event.data.saveStatus },
+        })
+      this.eventSink?.(event)
+    })
     this.submissions = new ExecutionSubmissionStore(path.join(options.directory, 'submissions'))
     this.edits = new EditSessionService(options.documents.registry, options.documents.tools)
     this.changeReview = new ExecutionChangeReviewService(options.documents, path.join(options.directory, 'change-review'))
-    this.artifacts = new HostArtifactDeliveryService({ journalDirectory: path.join(options.directory, 'artifact-deliveries'),
-      withFileOperation: work => options.documents.fileCoordinator.withFileOperation(work),
-      assertTarget: filename => options.documents.assertFileAvailable(filename) })
+    this.artifacts = options.documents.artifactDeliveries
     this.attachments = options.attachments ?? new AttachmentService({ directory: path.join(options.directory, 'attachments') })
     const chat = new OpenAIChatProvider({ credentialResolver: connection => options.settings.resolveCredential(connection), fetch: options.fetch,
       onTransportDiagnostic: diagnostic => diagnosticLog.append({ source: 'main', message: 'OpenAI Chat transport failure', details: {
@@ -145,14 +153,14 @@ export class ExecutionDesktopService {
       subscribeDocumentEvents: listener => options.documents.subscribeEvents(listener),
       subscribeFileRelocations: listener => options.documents.fileCoordinator.subscribeRelocations(listener),
       edits: this.edits, provider, serializePayload, initialCompiler: new PayloadCompiler({ attachments: this.attachments, serializePayload }),
-      files: new AgentFileService(options.documents), materials: this.attachments, visualAnalysis, changeReview: this.changeReview,
+      files: options.documents.agentFiles, materials: this.attachments, visualAnalysis, changeReview: this.changeReview,
       artifacts: this.artifacts,
       readImageTiming: async jobId => (await import('../workbenchToolServices.js')).workbenchImageService().readTiming(jobId),
       approveBrowserAction: async input => (await import('../workbenchToolServices.js')).approveWorkbenchBrowserAction(input),
+      authorizeBrowserActionFromTask: async input => (await import('../workbenchToolServices.js')).authorizeWorkbenchBrowserActionFromTask(input),
       browserApprovalContext: async runId => (await import('../workbenchToolServices.js')).workbenchBrowserApprovalContext(runId),
       observeBodyStreaming: (selection, observation) => options.settings.recordBodyStreaming(selection, observation) })
     this.engine.subscribe(event => {
-      this.eventSink?.(event)
       if (event.type !== 'run.end') return
       visualAnalysis.clearRun(event.runId)
       // Before the object's next queued request can start.
@@ -163,7 +171,29 @@ export class ExecutionDesktopService {
     this.edits.subscribe(event => this.editSink?.(event))
   }
   setSinks(events?: (event: ExecutionEvent) => void, edits?: (event: EditEvent) => void) { this.eventSink = events; this.editSink = edits }
-  setHtmlActions(service: HtmlActionService): void { this.engine.setHtmlActions(service) }
+  /** Preserve queued input, stop live runs, then drain their ordinary result/conversation writes. */
+  shutdown(): Promise<void> {
+    if (this.shutdownPromise) return this.shutdownPromise
+    this.closing = true
+    const stopping = this.engine.shutdown()
+    this.shutdownPromise = (async () => {
+      await Promise.all([this.initialization, this.recoveryAndRebindPromise, stopping])
+      // run.end can enqueue its final conversation write while another queue is draining.
+      do {
+        while (this.queues.size) await Promise.allSettled([...this.queues.values()])
+        await this.engine.settleDocumentBindings()
+        await this.events.flushPending()
+        // A stored terminal event can publish the ordinary final conversation write.
+      } while (this.queues.size)
+      this.releaseElementChanges()
+    })()
+    return this.shutdownPromise
+  }
+  /** Actual service-owned references; live cards retain their inverse while still open. */
+  runtimeCounts() {
+    return { queues: this.queues.size, elementChanges: this.elementChanges.size, recoveryIssues: this.recoveryIssues.size,
+      engine: this.engine.runtimeCounts() }
+  }
   private timing(conversationId: string, taskId: string, markId: string, stage: ExecutionTimingStage,
     extra: Pick<ExecutionTimingMark, 'sourceWallTimeMs' | 'detail'> = {},
     stamp = captureMainTiming()): void {
@@ -175,15 +205,8 @@ export class ExecutionDesktopService {
     void this.events.recordTiming({ conversationId, taskId, markId, stage, process: 'renderer', clock: 'performance.now',
       ...stamp, ...(detail ? { detail } : {}) }).catch(() => undefined)
   }
-  async appendExternalEvent(input: ExecutionEventInput): Promise<ExecutionEvent> {
-    const event = await this.events.append(input)
-    // This observes a terminal save fact entering the timeline. It does not measure DocumentHost save completion.
-    if (event.type === 'document.save' && (event.data.saveStatus === 'saved' || event.data.saveStatus === 'failed'))
-      this.timing(event.conversationId, event.taskId, `${event.eventId}:save-fact`, 'save.fact-observed', {
-        sourceWallTimeMs: event.time, detail: { documentId: event.data.documentId, saveStatus: event.data.saveStatus },
-      })
-    this.eventSink?.(event)
-    return event
+  async appendExternalEvent(input: ExecutionEventInput): Promise<void> {
+    this.events.enqueue(input)
   }
   setExternalRevoker(revoker?: (input: { workspaceId: string; conversationId: string; portIds: string[] }) => Promise<void>) { this.externalRevoker = revoker }
   setImageRetention(retention?: ExecutionDesktopService['imageRetention']) { this.imageRetention = retention }
@@ -320,7 +343,9 @@ export class ExecutionDesktopService {
     return createHash('sha256').update(JSON.stringify({ workspaceId: input.workspaceId, conversationId: input.conversationId,
       text: input.text, documents: input.documents, attachments: input.attachments ?? [], mode: input.mode ?? 'queue',
       retryOfRunId: input.retryOfRunId ?? null, permission: input.permission ?? DEFAULT_PERMISSION_MODE,
-      ...(input.contentOutput ? { contentOutput: input.contentOutput } : {}) })).digest('hex')
+      ...(input.contentOutput ? { contentOutput: input.contentOutput } : {}),
+      ...(input.materials ? { materials: input.materials } : {}),
+      ...(input.webAuthorization ? { webAuthorization: input.webAuthorization } : {}) })).digest('hex')
   }
   private async publicSubmission(record: StoredExecutionSubmission): Promise<ExecutionSubmissionRecord> {
     const { schemaVersion: _schemaVersion, digest: _digest, start: _start, attachmentIds: _attachmentIds,
@@ -374,7 +399,8 @@ export class ExecutionDesktopService {
       writable: input.permission === 'read-only' ? [] : [{ kind: 'document' as const }] }]
   }
 
-  private async prepareSubmission(input: ExecutionSendInput, current: ConversationRecord, digest: string): Promise<StoredExecutionSubmission> {
+  private async prepareSubmission(input: ExecutionSendInput, current: ConversationRecord, digest: string,
+    frozenContext?: InputContext['context']): Promise<StoredExecutionSubmission> {
     const attachments = [...input.attachments ?? []]
     // Main owns the permission level: read-only tasks receive no writable scope whatever the renderer sent.
     const permission = input.permission ?? DEFAULT_PERMISSION_MODE
@@ -403,7 +429,7 @@ export class ExecutionDesktopService {
       }
     }
     if (permission === 'read-only') input = { ...input, documents: input.documents.map(document => ({ ...document, writable: [] })) }
-    if (!input.text.trim() && !attachments.length) throw executionInputError('empty-input')
+    if (!input.text.trim() && !attachments.length && !input.materials?.selections.length) throw executionInputError('empty-input')
     let explicitImages = false, imageCount = 0, representationBytes = 0
     this.timing(input.conversationId, input.submissionId, `${input.submissionId}:attachments:start`, 'submission.attachments.started',
       { detail: { attachmentCount: attachments.length } })
@@ -430,11 +456,13 @@ export class ExecutionDesktopService {
       throw error
     }
     const documents = []
+    const readOnlyRoots: string[] = []
     for (const reference of input.documents) {
       let snapshot: DocumentSnapshot
       try { snapshot = await this.options.documents.registry.get(reference.documentId).drain() }
       catch (error) { throw executionInputError('document-session-changed', error) }
       if (snapshot.epoch !== reference.epoch) throw executionInputError('document-session-changed')
+      if (snapshot.binding.kind === 'file') readOnlyRoots.push(path.dirname(snapshot.binding.path))
       // M15: an object or a document block stays the same target while it exists; a text range only while nothing changed.
       if (snapshot.revision !== reference.revision && [...(reference.selection ?? []), ...reference.writable.filter(target => target.kind !== 'document')]
         .some(target => !targetStillExists(snapshot, target))) throw executionInputError('document-range-changed')
@@ -442,13 +470,22 @@ export class ExecutionDesktopService {
     }
     if (input.contentOutput) {
       const output = input.contentOutput
-      if (permission === 'read-only') throw refused('只读任务不能应用正文改写，请切换到可修改模式。')
       if (!documents.some(document => document.documentId === output.documentId
         && document.selection?.some(target => JSON.stringify(target) === JSON.stringify(output.target))))
         throw refused('正文改写目标与本次固定选区不一致，请重新选择。')
     }
-    const historyIndex = await conversationHistoryIndex(current, runId => this.engine.read(runId))
-    const context = historyIndex.context
+    const selectedMaterials = !frozenContext && input.materials ? await snapshotSelectedLessonMaterials(input.materials,
+      { workspaceRoot: space.rootPath, readOnlyRoots, permission }) : []
+    const context = frozenContext ? structuredClone(frozenContext) : [
+      ...(await conversationHistoryIndex(current, runId => this.engine.read(runId))).context,
+      ...selectedMaterials.map((message, index) => ({ message,
+        provenance: { kind: 'selection' as const, id: `${input.submissionId}:material:${index}` } })),
+    ]
+    // Selected material images are actual current request input, unlike the history index.
+    for (const entry of context) if (entry.provenance.kind !== 'history' && Array.isArray(entry.message.content))
+      for (const part of entry.message.content) if (part && typeof part === 'object' && !Array.isArray(part) && part.type === 'image_url') {
+        explicitImages = true; imageCount++
+      }
     // History is an index of sources that may be reread later. It contributes no
     // image bytes to this first request and must not select the vision role for
     // an otherwise text-only submission. The separately frozen visionSelection
@@ -485,10 +522,14 @@ export class ExecutionDesktopService {
     return { schemaVersion: 1, submissionId: input.submissionId, workspaceId: input.workspaceId, conversationId: input.conversationId,
       state: 'queued', mode: input.mode ?? 'queue', text: input.text, documents: structuredClone(input.documents), attachments: structuredClone(attachments), permission,
       ...(input.contentOutput ? { contentOutput: structuredClone(input.contentOutput) } : {}),
+      ...(input.materials ? { materials: structuredClone(input.materials) } : {}),
+      ...(input.webAuthorization ? { webAuthorization: structuredClone(input.webAuthorization) } : {}),
       model: { provider: selection.connection.provider, model: selection.model, accountId: selection.connection.accountId, billing: selection.connection.billing.kind },
       createdAt: now, updatedAt: now, digest, attachmentIds,
       start: { conversationId: current.conversationId, taskId: input.submissionId, instruction: input.text, selection, documents,
         ...(input.contentOutput ? { contentOutput: structuredClone(input.contentOutput) } : {}),
+        ...(input.materials ? { materials: structuredClone(input.materials) } : {}),
+        ...(input.webAuthorization ? { webAuthorization: structuredClone(input.webAuthorization) } : {}),
         ...(visionSelection ? { visionSelection } : {}), ...(visionUnavailableReason ? { visionUnavailableReason } : {}),
         permission, workspaceRoot: space.rootPath,
         ...(current.home ? { conversationHome: structuredClone(current.home), conversationHomeRoot: homeSpace.rootPath } : {}),
@@ -524,6 +565,7 @@ export class ExecutionDesktopService {
       patch: { inputDraft: record.text, inputAttachments: record.attachments, frozenContextRefs: this.refs(record.documents) } })
   }
   private async startSubmission(record: StoredExecutionSubmission, continuation = record.continuation): Promise<StoredExecutionSubmission> {
+    if (this.closing) throw refused('应用正在关闭；排队输入已保留，未启动新任务')
     record = await this.submissions.update(record.submissionId, { state: 'starting', continuation, updatedAt: Date.now(), failure: undefined })
     await this.recordElementBaseline(record)
     try {
@@ -544,6 +586,7 @@ export class ExecutionDesktopService {
     }
   }
   private async startNext(conversationId: string, previous?: ExecutionRunRecord, explicit = false): Promise<void> {
+    if (this.closing) return
     if (await this.submissions.pausedReason(conversationId)) return
     const records = (await this.submissions.list()).filter(record => record.conversationId === conversationId)
     if (records.some(record => record.state === 'starting')) return
@@ -650,6 +693,8 @@ export class ExecutionDesktopService {
         throw refused('原任务尚不可继续，请先核对运行状态')
       if (input.text !== source.text || JSON.stringify(input.documents) !== JSON.stringify(source.documents)
         || JSON.stringify(input.contentOutput ?? null) !== JSON.stringify(source.contentOutput ?? null)
+        || JSON.stringify(input.materials ?? null) !== JSON.stringify(source.start.materials ?? null)
+        || JSON.stringify(input.webAuthorization ?? null) !== JSON.stringify(source.start.webAuthorization ?? null)
         || JSON.stringify(input.attachments ?? []) !== JSON.stringify(source.attachments)
         || (input.permission ?? DEFAULT_PERMISSION_MODE) !== (source.permission ?? DEFAULT_PERMISSION_MODE))
         throw refused('继续运行必须使用原任务冻结的文字、目标和附件')
@@ -680,7 +725,7 @@ export class ExecutionDesktopService {
         if (!target || target.kind === 'course-surface') throw refused('原正文改写范围无法继续，请重新选择。')
         preparedInput.contentOutput = { ...output, documentId: preparedDocument!.documentId, target: structuredClone(target) }
       }
-      record = await this.prepareSubmission(preparedInput, current, digest)
+      record = await this.prepareSubmission(preparedInput, current, digest, previous?.input.inputContext?.context)
       if (previous) {
         // The public submission remains the user's original frozen payload so
         // lost ACK confirmation computes the same digest with the same ID.
@@ -822,12 +867,17 @@ export class ExecutionDesktopService {
         },
       } })
       this.imageRetention?.collect()
-      for (const [submissionId, change] of this.elementChanges) if (change.conversationId === input.conversationId) { change.dispose(); this.elementChanges.delete(submissionId) }
+      this.releaseElementChanges(input.conversationId)
       // Deletion is already durable. A failed sweep keeps its intent for startup retry.
       await this.collectAttachmentReleases().catch(() => undefined)
     } catch (error) {
       if (prepared) this.imageRetention?.abort(input)
       throw error
+    }
+  }
+  private releaseElementChanges(conversationId?: string): void {
+    for (const [submissionId, change] of this.elementChanges) if (conversationId === undefined || change.conversationId === conversationId) {
+      change.dispose(); this.elementChanges.delete(submissionId)
     }
   }
   /**
@@ -852,8 +902,11 @@ export class ExecutionDesktopService {
           if (current?.inputDraft.trim() || current?.inputAttachments.length) {
             for (const runId of current.runIndex.builtinRunIds) await this.engine.stop(runId)
             const latest = await this.conversations.readConversation(current)
-            if (latest) await this.conversations.recoverElementDraft({ workspaceId: latest.workspaceId,
-              conversationId: latest.conversationId, expectedRevision: latest.revision })
+            if (latest) {
+              await this.conversations.recoverElementDraft({ workspaceId: latest.workspaceId,
+                conversationId: latest.conversationId, expectedRevision: latest.revision })
+              this.releaseElementChanges(latest.conversationId)
+            }
           } else if (current) await this.removeConversation({ workspaceId: current.workspaceId, conversationId: current.conversationId, expectedRevision: current.revision })
         }))
       }
@@ -861,6 +914,7 @@ export class ExecutionDesktopService {
   /** Subscribe before the run starts; only durable commits with that run identity count. */
   private async recordElementBaseline(record: StoredExecutionSubmission): Promise<void> {
     this.elementChanges.get(record.submissionId)?.dispose()
+    this.elementChanges.delete(record.submissionId)
     try {
       const conversation = await this.conversations.readConversation({ workspaceId: record.workspaceId, conversationId: record.conversationId })
       const reference = conversation?.element && record.documents.find(value => value.documentId === conversation.element!.documentId)
@@ -881,6 +935,7 @@ export class ExecutionDesktopService {
   async operate(raw: unknown): Promise<unknown> {
     const received = captureMainTiming()
     try {
+      if (this.closing) throw refused('应用正在关闭；当前输入与已应用修改已保留')
       await this.ready()
       const input = executionDesktopRequestSchema.parse(raw)
       // Cold-start ready may return while background recovery is still walking the run history. The fast

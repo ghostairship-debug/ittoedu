@@ -141,6 +141,9 @@ async function scan(filename: string, documentId?: string, options: { offset?: n
         throw new DocumentJournalError('journal-corrupt', '恢复日志身份或顺序损坏')
       latest = state; options.onRecord?.(offset); offset = end
     }
+    // A torn suffix is repairable only after an actual committed state. With no
+    // readable record there is no owner or recovery point to justify erasing input.
+    if (!latest && fileSize > 0) throw new DocumentJournalError('journal-corrupt', '恢复日志没有可读取的完整记录，原文件已保留')
     if (await journalIdentity(filename) !== initialIdentity) throw new DocumentJournalError('journal-sequence-conflict', '恢复日志在读取期间改变，未修复或提交')
   } finally { await file.close() }
   if (offset !== fileSize && options.repairTail !== false) {
@@ -606,10 +609,13 @@ export function createDocumentJournal(options: { directory: string }): DocumentJ
     },
     listBindings,
     get recoveryIssues() { return [...unavailable.values()].map(issue => issue.message) },
-    async assertAvailable(paths = [], documentIds = [], readOnly = false) {
+    async assertAvailable(paths = [], documentIds = [], _readOnly = false) {
       await listBindings()
       const contains = (parent: string, child: string) => { const rel = path.relative(fileKey(parent), fileKey(child)); return !rel || rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel) }
-      for (const issue of unavailable.values()) if (!readOnly && !issue.documentId && !issue.path
+      // Unknown ownership is a diagnostic, not a reservation of every workspace path.
+      // A supplied document ID can still identify its exact journal without trusting a
+      // damaged payload or a missing binding index.
+      for (const [target, issue] of unavailable) if (documentIds.some(id => filename(id) === target)
         || issue.documentId && documentIds.includes(issue.documentId)
         || issue.path && paths.some(filename => contains(issue.path!, filename) || contains(filename, issue.path!))) throw new Error(issue.message)
     },

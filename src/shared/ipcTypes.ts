@@ -96,6 +96,7 @@ export interface PreviewNetworkPolicyInput {
 }
 
 export interface ComponentBootstrapInput {
+  resourceSources?: readonly { url: string; usage: 'image' | 'media' | 'stylesheet' | 'font' }[]
   leaseId: string
   html: string
   connectOrigins?: string[]
@@ -186,6 +187,8 @@ export interface DesktopAPI {
   }): Promise<{ path: string } | null>
   onDocumentExportBuildRequest?(handler: (request: import('./workbench/toolPorts').ExportBuildRequest) => void): () => void
   sendDocumentExportBuildReply?(reply: import('./workbench/toolPorts').ExportBuildReply): void
+  onDocumentExportBuildCancel?(handler: (cancel: import('./workbench/toolPorts').ExportBuildCancel) => void): () => void
+  sendDocumentExportBuildProgress?(progress: import('./workbench/toolPorts').ExportBuildProgress): void
   exportPdf(input: {
     suggestedName: string
     html: string
@@ -265,6 +268,8 @@ export const IPC_CHANNELS = {
   exportPdf: 'export:write-pdf',
   documentExportBuildRequest: 'document-export:build-request',
   documentExportBuildReply: 'document-export:build-reply',
+  documentExportBuildCancel: 'document-export:build-cancel',
+  documentExportBuildProgress: 'document-export:build-progress',
   previewNetworkDocumentToken: 'preview-network:document-token',
   setPreviewNetworkPolicy: 'preview-network:set',
   releasePreviewNetworkPolicy: 'preview-network:release',

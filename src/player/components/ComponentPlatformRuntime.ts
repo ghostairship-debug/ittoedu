@@ -43,6 +43,9 @@ export class ComponentPlatformRuntime {
   private readonly eventListeners = new Map<string, Set<(value: JsonValue) => void>>()
   private readonly assetUrls = new Map<string, string>()
   private readonly contentAssetUrls = new Map<string, string>()
+  private readonly referencedAssetUrls = new Map<string, string>()
+  private readonly resolveAssetUrl?: (id: string) => string | undefined
+  private readonly isAssetPending?: (id: string) => boolean
   private readonly assetContents = new Map<string, { bytes: Uint8Array; mimeType: string }>()
   private readonly themeMarker = `component-${crypto.randomUUID()}`
   private themeStyle?: HTMLStyleElement
@@ -75,9 +78,14 @@ export class ComponentPlatformRuntime {
     builtins?: ReadonlyMap<string, ComponentRuntimeImplementation>
     teacherController?: TeacherControllerPort & { subscribeSceneReplay?(listener: (surfaceId: string) => void): () => void }
     resolveBuiltin?(key: string, signal: AbortSignal): Promise<PreparedComponentRuntime>
+    /** Published resource owner resolves only actual consumer requests. */
+    resolveAssetUrl?(id: string): string | undefined
+    isAssetPending?(id: string): boolean
     mode?: 'edit' | 'play' | 'capture'
   } = {}) {
     this.mode = options.mode ?? 'play'; this.playing = this.mode === 'play'
+    this.resolveAssetUrl = options.resolveAssetUrl
+    this.isAssetPending = options.isAssetPending
     this.surfaceId = options.teacherController && (() => options.teacherController!.read().locationId)
     this.report = message => options.report?.(message)
     this.media = new ComponentWorldMedia(() => this.audioManager, this.report)
@@ -85,9 +93,12 @@ export class ComponentPlatformRuntime {
       document: () => this.targetElements.values().next().value?.ownerDocument ?? this.roots.values().next().value?.ownerDocument,
       audio: () => this.audioManager, video: (action, signal) => this.media.executeVideo(action, signal), navigation: options.teacherController, report: this.report, active: () => this.playing, playback: () => this.mode !== 'capture' })
     const image = createImageRuntimeImplementation(id => {
-      const url = this.assetUrls.get(id)
+      const url = this.assetUrl(id)
       return url ? { url } : undefined
-    }, diagnostic => options.report?.(diagnostic.message))
+    }, diagnostic => {
+      if (diagnostic.code === 'image-resource-missing' && options.isAssetPending?.(diagnostic.assetId)) return
+      options.report?.(diagnostic.message)
+    })
     // Professional implementations are shared; no per-instance default compilation.
     this.implementations = new Map([
       ['guoling.text', textRuntimeImplementation], ['guoling.formula', formulaRuntimeImplementation],
@@ -409,7 +420,10 @@ export class ComponentPlatformRuntime {
       this.mediaSettings = project.media
       const mediaOptions = { resolveAssetUrl: (id: string) => this.assetUrl(id), audioManager: this.audioManager,
         subscribeAudioChange: (listener: () => void) => this.audioEvents.on('audio:change', listener),
-        report: (diagnostic: { message: string }) => this.report(diagnostic.message) }
+        report: (diagnostic: { code: string; assetId: string; message: string }) => {
+          if (diagnostic.code === 'media-resource-missing' && this.isAssetPending?.(diagnostic.assetId)) return
+          this.report(diagnostic.message)
+        } }
       this.implementations.set('guoling.audio', createAudioRuntimeImplementation(mediaOptions) as ComponentRuntimeImplementation)
       this.implementations.set('guoling.video', createVideoRuntimeImplementation(mediaOptions) as ComponentRuntimeImplementation)
     } else if (this.mediaSettings !== project.media) { this.audioManager.updateProject(project); this.mediaSettings = project.media }
@@ -446,10 +460,19 @@ export class ComponentPlatformRuntime {
       this.resourceVersion++
     }
   }
-  themeCss(): string { return this.project ? courseThemeStyleText({ designTokens: this.project.designTokens ?? { fonts: [], colors: [] }, theme: this.project.theme }, id => this.contentAssetUrls.get(id)) : '' }
-  assetUrl(id: string): string | undefined { return this.assetUrls.get(id) }
-  contentAssetUrl(id: string): string | undefined { return this.contentAssetUrls.get(id) }
-  resourceUrls(): Record<string, string> { return Object.fromEntries(Object.keys(this.project?.assets ?? {}).flatMap(id => { const url = this.contentAssetUrls.get(id); return url ? [[id, url]] : [] })) }
+  themeCss(): string { return this.project ? courseThemeStyleText({ designTokens: this.project.designTokens ?? { fonts: [], colors: [] }, theme: this.project.theme }, id => this.contentAssetUrl(id)) : '' }
+  private referencedAssetUrl(id: string): string | undefined {
+    if (this.retired) return undefined
+    const url = this.resolveAssetUrl?.(id)
+    if (url && this.referencedAssetUrls.get(id) !== url) { this.referencedAssetUrls.set(id, url); this.resourceVersion++ }
+    return url
+  }
+  assetUrl(id: string): string | undefined { return this.assetUrls.get(id) ?? this.referencedAssetUrl(id) }
+  contentAssetUrl(id: string): string | undefined { return this.contentAssetUrls.get(id) ?? this.referencedAssetUrl(id) }
+  resourceUrls(): Record<string, string> {
+    // Enumerating resources for a realm is not itself a request to fetch every asset.
+    return Object.fromEntries([...this.referencedAssetUrls, ...this.contentAssetUrls].filter(([id]) => this.project?.assets[id]))
+  }
   targetElement(id: string): HTMLElement | undefined { return this.targetElements.get(id) ?? this.projectionRoots.get(id)?.parentElement ?? undefined }
   contentElement(id: string): HTMLElement | undefined { return this.projectionRoots.get(id) }
   getState(name: string): JsonValue | undefined { return this.state.get(name) }
@@ -519,7 +542,7 @@ export class ComponentPlatformRuntime {
     for (const root of this.roots.values()) root.remove()
     this.roots.clear(); this.projectionRoots.clear(); this.targetElements.clear(); this.synced.clear(); this.eventListeners.clear(); this.stateListeners.clear(); this.state.clear()
     for (const url of this.assetUrls.values()) URL.revokeObjectURL(url)
-    this.assetUrls.clear(); this.contentAssetUrls.clear(); this.assetContents.clear(); this.themeStyle?.remove(); this.themeStyle = undefined
+    this.assetUrls.clear(); this.contentAssetUrls.clear(); this.referencedAssetUrls.clear(); this.assetContents.clear(); this.themeStyle?.remove(); this.themeStyle = undefined
     this.parking?.remove(); this.parking = undefined
   }
 }

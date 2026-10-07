@@ -45,7 +45,7 @@ import {
   selectCanUndoActiveSurface, selectCanRedoActiveSurface,
   selectActiveCourseLocationId, selectActiveCourseProjectDocument,
   selectEditingNodes, selectEditingScope, selectMediaAssetFiles,
-  selectSelectedNodeIds, selectHasUnsavedCourseChanges, useEditorStore,
+  selectSelectedNodeIds, selectHasUnsavedCourseChanges, selectHasUnsavedCourseDocuments, useEditorStore,
 } from './store/editorStore'
 import { ConfirmDialog } from './ui/ConfirmDialog'
 import { CopyableSummaryDialog } from './ui/CopyableSummaryDialog'
@@ -72,9 +72,11 @@ import { BundledFontBoundary } from './app/BundledFontBoundary'
 import { confirmPptxLosses } from './project/confirmPptxLosses'
 import { createCourseFromPptx, pptxCourseStem } from './project/pptxCourseCreation'
 import { CourseV10RuntimeView } from './components/CourseV10RuntimeView'
-import { componentSourceCloseIssue } from './components/ComponentSourceEditor'
+import { courseDraftLifecycle } from './authoring/courseDraftLifecycle'
+import { preservePropertiesDrafts, restorePropertiesDrafts } from './ui/properties/PropertyControls'
 import type { DocumentSnapshot } from '../shared/workbench/document'
 import { resolveComponentPresentation } from '../shared/contracts/component-platform'
+import { equalComponentValue } from '../core/drivers/courseV10Operations'
 import { projectWithBackgroundPreview } from './authoring/backgroundPreview'
 import { projectWithSlideContentDraft } from './store/slices/slideAuthoringSlice'
 
@@ -139,10 +141,24 @@ export default function App() {
   useEffect(() => {
     const api = window.desktopAPI
     if (!api?.onDocumentExportBuildRequest || !api.sendDocumentExportBuildReply) return
-    return api.onDocumentExportBuildRequest(request => {
-      void buildDocumentExport(request).then(reply => api.sendDocumentExportBuildReply?.(reply))
+    const builds = new Map<string, { controller: AbortController; identity: import('../shared/workbench/toolPorts').ExportBuildRequest['identity'] }>()
+    const stopRequests = api.onDocumentExportBuildRequest(request => {
+      // Main owns request identity. Re-delivery does not start a second build.
+      if (builds.has(request.requestId)) return
+      const build = { controller: new AbortController(), identity: structuredClone(request.identity) }
+      builds.set(request.requestId, build)
+      void buildDocumentExport(request, build.controller.signal, undefined, undefined, progress => {
+        if (builds.get(request.requestId) === build && !build.controller.signal.aborted) void api.sendDocumentExportBuildProgress?.(progress)
+      }).then(reply => api.sendDocumentExportBuildReply?.(reply))
         .catch(error => console.error('文档导出生成回复失败', error))
+        .finally(() => { if (builds.get(request.requestId) === build) builds.delete(request.requestId) })
     })
+    const stopCancellation = api.onDocumentExportBuildCancel?.(request => {
+      const build = builds.get(request.requestId), identity = request.identity
+      if (build && build.identity.documentId === identity.documentId && build.identity.epoch === identity.epoch
+        && build.identity.revision === identity.revision && build.identity.projectId === identity.projectId) build.controller.abort()
+    })
+    return () => { stopRequests(); stopCancellation?.(); for (const build of builds.values()) build.controller.abort() }
   }, [])
   const lessonShell = useRef<LessonWorkspaceShellHandle>(null)
   const openingLaunchFiles = useRef(false)
@@ -170,10 +186,48 @@ export default function App() {
   }, [])
   const saveDirectory = useRef<SaveDirectoryContext | null>(null)
   const rawDocuments = window.desktopAPI?.documents
-  function prepareSourceClose(documentIds?: readonly string[]): boolean {
-    const state = useEditorStore.getState(), issue = componentSourceCloseIssue(state.courseBridge, documentIds)
-    state.setError(issue?.message ?? null)
-    return !issue
+  const restoredDrafts = useRef(new Map<string, Promise<void>>())
+  function restoreCourseInputs(documentId: string): Promise<void> {
+    const snapshot = useEditorStore.getState().courseView.documents.find(value => value.documentId === documentId)
+    if (!snapshot || !rawDocuments) return Promise.resolve()
+    const key = JSON.stringify([documentId, snapshot.epoch]), previous = restoredDrafts.current.get(key)
+    if (previous) return previous
+    const pending = rawDocuments.readAuthoringDrafts(documentId).then(records => {
+      const state = useEditorStore.getState(), current = state.courseView.documents.find(value => value.documentId === documentId)
+      if (!current || current.epoch !== snapshot.epoch) throw new Error('恢复输入时文档已关闭或重开，原稿保留在本机')
+      if (!records) return
+      const result = courseDraftLifecycle(state.courseBridge).restore(documentId, records.advanced)
+      restorePropertiesDrafts(documentId, records.properties, current.epoch)
+      if (result.issues.length) state.setError(result.issues[0]!.message)
+    }).catch(error => { restoredDrafts.current.delete(key); throw error })
+    restoredDrafts.current.set(key, pending)
+    return pending
+  }
+  async function prepareCourseClose(documentIds?: readonly string[], mode: 'save' | 'preserve' = 'preserve'): Promise<boolean> {
+    try {
+      const ids = documentIds ?? useEditorStore.getState().courseView.documents.map(document => document.documentId)
+      for (const id of ids) {
+        await restoreCourseInputs(id)
+        let issue: unknown
+        try { await useEditorStore.getState().drainCourseDocument(id) } catch (error) { issue = error }
+        if (mode === 'save' && issue) throw issue
+        const state = useEditorStore.getState(), snapshot = state.courseView.documents.find(document => document.documentId === id)
+        if (!snapshot) throw new Error('保全输入时文档已关闭')
+        const records = { advanced: courseDraftLifecycle(state.courseBridge).preserve(id), properties: preservePropertiesDrafts(id) }
+        const flowDraft = state.flowDocumentDrafts?.[id]
+        if (!rawDocuments) throw new Error('输入恢复服务不可用，已保留原稿')
+        if (records.advanced.length || records.properties.length) await rawDocuments.writeAuthoringDrafts(id, records)
+        else await rawDocuments.clearAuthoringDrafts(id)
+        if (!await preserveFlowInputs([id])) return false
+        await state.courseBridge.drain([id])
+        const current = useEditorStore.getState(), currentSnapshot = current.courseView.documents.find(document => document.documentId === id)
+        const currentRecords = { advanced: courseDraftLifecycle(current.courseBridge).preserve(id), properties: preservePropertiesDrafts(id) }
+        if (!currentSnapshot || currentSnapshot.epoch !== snapshot.epoch || !equalComponentValue(records, currentRecords) || current.flowDocumentDrafts?.[id] !== flowDraft)
+          throw new Error('保全期间又有新输入，原稿仍保留；请完成本次输入后再关闭')
+        if (issue) state.setStatus('未完成的输入已保存在本机恢复稿中')
+      }
+      return true
+    } catch (error) { useEditorStore.getState().setError(error instanceof Error ? error.message : '输入尚未保全，已取消关闭'); return false }
   }
   const documentsWithSaveDirectory = useMemo<DocumentHostAPI | null>(() => rawDocuments ? {
     ...rawDocuments,
@@ -181,7 +235,7 @@ export default function App() {
     closeWithDialog: async (documentId, suggestedDirectory, discardOnly) => {
       // Bridge.close calls this after the Store/Projection drain; input entered while
       // those awaits were pending must still keep its original tab and source draft.
-      if (!prepareSourceClose([documentId])) return false
+      if (!await prepareCourseClose([documentId])) return false
       return rawDocuments.closeWithDialog(documentId, suggestedDirectory ?? saveDirectory.current ?? undefined, discardOnly)
     },
   } : null, [rawDocuments])
@@ -209,8 +263,12 @@ export default function App() {
   const canRedoCourse = useEditorStore(selectCanRedoActiveSurface)
   const courseCanvasMode = useEditorStore(state => state.canvasMode)
   const courseConnection = useEditorStore(state => state.courseView)
+  useEffect(() => {
+    for (const snapshot of courseConnection.documents) void restoreCourseInputs(snapshot.documentId)
+      .catch(error => useEditorStore.getState().setError(error instanceof Error ? error.message : '输入恢复暂未完成，原稿保留在本机'))
+  }, [courseConnection.documents, rawDocuments])
   const courseKernel = useEditorStore(state => state.courseKernel)
-  const dirty = useEditorStore(selectHasUnsavedCourseChanges)
+  const allCourseDirty = useEditorStore(selectHasUnsavedCourseDocuments)
   const projectPath = useEditorStore((state) => state.projectPath)
   const activeCourseDocument = useEditorStore(selectActiveCourseProjectDocument)
   const projectColors = useMemo(() => activeCourseDocument?.designTokens?.colors.map(token => ({ name: token.label, value: token.color })) ?? [], [activeCourseDocument?.designTokens])
@@ -286,6 +344,17 @@ export default function App() {
     },
     onError: setError,
   })
+  const preserveFlowInputs = async (documentIds?: readonly string[]): Promise<boolean> => {
+    const state = useEditorStore.getState()
+    const entries = Object.entries(state.flowDocumentDrafts ?? {}).flatMap(([documentId, draft]) => {
+      if (!draft || documentIds && !documentIds.includes(documentId)) return []
+      const snapshot = state.courseView.documents.find(value => value.documentId === documentId)
+      if (!snapshot || snapshot.model.kind !== 'course-v10') return []
+      return [{ target: { projectId: snapshot.model.project.id, projectPath: snapshot.binding.kind === 'file' ? snapshot.binding.path : null,
+        surfaceId: draft.surfaceId, revision: draft.revision, epoch: snapshot.epoch }, draft }]
+    })
+    return flowRecovery.flushAll(entries)
+  }
 
   const courseProjectLifecycle = useCourseProjectLifecycle({
     captureIdentity() {
@@ -297,7 +366,7 @@ export default function App() {
       ready: () => {
         const host = documentsWithSaveDirectory
         if (!host) return Promise.reject(new Error('课程文档服务不可用'))
-        return useEditorStore.getState().connectCourseDocuments(host)
+        return useEditorStore.getState().connectCourseDocuments(host, id => prepareCourseClose([id]), restoreCourseInputs)
       },
       snapshot: () => useEditorStore.getState().courseView.snapshot,
       create: (surface, canvas) => useEditorStore.getState().createCourseDocument(surface, canvas),
@@ -305,6 +374,13 @@ export default function App() {
       open: path => useEditorStore.getState().openCourseDocument(path),
       save: saveAs => useEditorStore.getState().saveCourseDocument(saveAs, saveDirectory.current ?? undefined),
       drain: () => drainCourseDocument(),
+      settle: async () => {
+        const state = useEditorStore.getState(), id = state.courseView.activeDocumentId
+        if (!id) throw new Error('当前没有打开的课件')
+        const [snapshot] = await state.courseBridge.drain([id])
+        if (!snapshot) throw new Error('当前课件已关闭')
+        return snapshot
+      },
     },
     hasUnsavedChanges: () => selectHasUnsavedCourseChanges(useEditorStore.getState()),
     projectPath: () => useEditorStore.getState().projectPath,
@@ -320,15 +396,15 @@ export default function App() {
     },
     openRecentProjectFile: (path) => desktopApi().openRecentProject({ path }),
     confirmProjectOpen: (confirmationId) => desktopApi().confirmProjectOpen({ confirmationId }),
-    beforeReplace: async () => await flowRecovery.flush(),
+    beforeReplace: async () => await prepareCourseClose(),
     onProjectReplaced: () => lessonShell.current?.detachLesson(),
     preserveBeforeClose: async () => {
       await elementCards.flushDrafts()
       if (!(await flowRecovery.flush()) || !(await lessonShell.current?.preserveAll() ?? true)) return false
-      await useEditorStore.getState().drainAllCourseDocuments()
+      await useEditorStore.getState().courseBridge.drain()
       return true
     },
-    prepareBeforeClose: () => prepareSourceClose(),
+    prepareBeforeClose: mode => prepareCourseClose(undefined, mode),
     subscribePreserveAndCloseRequest: handler => window.desktopAPI?.onRequestPreserveAndClose?.(async () => {
       const ready = await handler()
       return { ready, ...(ready && saveDirectory.current ? { suggestedDirectory: saveDirectory.current } : {}) }
@@ -347,7 +423,7 @@ export default function App() {
       return window.desktopAPI.onRequestSaveAndClose(handler)
     },
   }, {
-    dirty: dirty || lessonDirty,
+    dirty: allCourseDirty || lessonDirty,
     projectTitle: activeWorkspaceDocument?.kind === 'course' ? activeCourseDocument?.title ?? activeWorkspaceDocument.name : activeWorkspaceDocument?.name ?? '',
     projectPath,
     documentTrigger: activeCourseDocument,
@@ -682,7 +758,6 @@ export default function App() {
         activeDocumentId: courseConnection.activeDocumentId,
         activate: id => useEditorStore.getState().activateCourseDocument(id),
         close: async id => {
-          if (!prepareSourceClose([id])) return false
           return useEditorStore.getState().closeCourseDocument(id)
         } }}
       prepareCourseDocuments={async ids => { await useEditorStore.getState().drainAllCourseDocuments(ids) }}

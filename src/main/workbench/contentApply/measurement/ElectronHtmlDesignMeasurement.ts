@@ -5,6 +5,7 @@ import { assembleMeasuredHtml, sourceProgramAssembly, type HtmlAssembly, type Ht
 import { captureHtmlDesignViewport } from './browserCapture'
 import { prepareMeasurementDocument, retainedMeasurementScopeHtml } from './prepareMeasurementDocument'
 import { cssUsesViewport } from '../../../../components/web/measuredFragmentBox'
+import type { HtmlResourceSource } from '../../htmlImport/types'
 
 export interface HtmlDesignMeasurementRequest {
   html: string
@@ -16,6 +17,8 @@ export interface HtmlDesignMeasurementRequest {
   resourceUrls?: Readonly<Record<string, string>>
   diagnostics?: readonly HtmlAssemblyDiagnostic[]
   allowedNetworkOrigins?: readonly string[]
+  /** Same passive source declaration as application and runtime; author scripts remain disabled. */
+  resourceSources?: readonly HtmlResourceSource[]
   signal?: AbortSignal
 }
 
@@ -39,7 +42,15 @@ export async function measureHtmlAtDesignViewport(request: HtmlDesignMeasurement
   await app.whenReady()
   request.signal?.throwIfAborted()
   const isolated = session.fromPartition(`html-design-measurement-${randomUUID()}`, { cache: false })
-  configureRestrictedSession(isolated, new Set(request.allowedNetworkOrigins ?? []))
+  const allowedOrigins = new Set(request.allowedNetworkOrigins ?? [])
+  for (const source of request.resourceSources ?? []) {
+    if (!['image', 'media', 'stylesheet', 'font'].includes(source.usage)) continue
+    try {
+      const url = new URL(source.url)
+      if (url.protocol === 'https:' && !url.username && !url.password) allowedOrigins.add(url.origin)
+    } catch { /* Failed resource declarations do not reject the usable document. */ }
+  }
+  configureRestrictedSession(isolated, allowedOrigins)
   const diagnostics: HtmlAssemblyDiagnostic[] = (request.diagnostics ?? []).map(item => ({ ...item }))
   isolated.webRequest.onErrorOccurred(details => { diagnostics.push({ level: 'warning', code: 'html-resource-load', message: `局部资源加载失败：${details.error}`, reference: details.url }) })
   // CSP blocks author scripts; Electron must still evaluate the host measurement function.

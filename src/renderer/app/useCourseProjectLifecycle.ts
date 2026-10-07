@@ -70,6 +70,8 @@ export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
     open(path: string): Promise<void>
     save(saveAs?: boolean): Promise<DocumentSnapshot | null>
     drain(): Promise<DocumentSnapshot>
+    /** Settles already admitted operations while raw recovery input stays local. */
+    settle?(): Promise<DocumentSnapshot>
   }
   captureIdentity(): CourseProjectLifecycleIdentity
   prepareDraft?(): CourseProjectDraftPreparation<TDraftToken>
@@ -98,7 +100,7 @@ export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
   beforeReplace?(): Promise<boolean>
   onProjectReplaced?(): void
   /** A local authoring owner may retain input that has not entered DocumentSession. */
-  prepareBeforeClose?(): boolean
+  prepareBeforeClose?(mode?: 'save' | 'preserve'): boolean | Promise<boolean>
   preserveBeforeClose?(mode?: 'save' | 'preserve'): Promise<boolean>
   subscribePreserveAndCloseRequest?(handler: () => Promise<boolean>): () => void
   onProjectSaved?(input: { projectId: string; path: string; previousPath: string | null; saveAs: boolean }): Promise<void>
@@ -167,7 +169,7 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
       // Switching views retains the previous main-owned document and its History.
       // Only unfinished renderer input needs admission; nothing is discarded here.
       if (!sameDocument() || options?.isCurrent?.() === false) return false
-      if (identity) await service().drain()
+      if (identity) await (service().settle?.() ?? service().drain())
       if (!sameDocument() || options?.isCurrent?.() === false) return false
       const epoch = ++replacement.current
       await work()
@@ -230,11 +232,12 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
   }, [watch.dirty, watch.projectTitle])
   const prepareBeforeClose = useCallback(async (mode: 'save' | 'preserve'): Promise<boolean> => {
     try {
-      if (ref.current.prepareBeforeClose?.() === false) return false
-      if (service().snapshot()) await service().drain()
-      if (ref.current.prepareBeforeClose?.() === false) return false
+      if (await ref.current.prepareBeforeClose?.(mode) === false) return false
+      // Preserve may retain invalid raw input. Only Save requires every visible
+      // input to be a formal edit; the preserve owner settles admitted operations.
+      if (mode === 'save' && service().snapshot()) await service().drain()
       if (!(await (ref.current.preserveBeforeClose?.(mode) ?? Promise.resolve(true)))) return false
-      return ref.current.prepareBeforeClose?.() !== false
+      return await ref.current.prepareBeforeClose?.(mode) !== false
     }
     catch (error) { ref.current.reportError(error instanceof Error ? error.message : '输入未确认，已取消关闭'); return false }
   }, [])

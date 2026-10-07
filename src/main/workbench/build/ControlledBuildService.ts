@@ -1,3 +1,4 @@
+/** @deprecated Historical V9/CLI consumer only; current production uses Project V10 and the canonical Gateway. */
 import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs } from 'node:fs'
 import path from 'node:path'
@@ -100,7 +101,7 @@ export class ControlledBuildService {
     if (job.status === 'cancelled') throw new ControlledBuildError('build-cancelled', '构建已取消，未导入正式文档')
   }
   private log(job: Job, stage: BuildLogEntry['stage'], level: BuildLogEntry['level'], message: string) {
-    job.logs.push({ cursor: job.logs.length + 1, time: Date.now(), stage, level, message: message.slice(0, 8000), ...(message.length > 8000 ? { truncated: true } : {}) })
+    job.logs.push({ cursor: job.logs.length + 1, time: Date.now(), stage, level, message })
   }
   private async files(job: Job): Promise<Record<string, Uint8Array>> {
     const root = await this.scratch(job), output: Record<string, Uint8Array> = Object.create(null)

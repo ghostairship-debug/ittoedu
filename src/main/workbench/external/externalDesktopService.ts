@@ -5,7 +5,6 @@ import { IPC_CHANNELS } from '../../../shared/ipcTypes'
 import { externalRequestSchema, externalUiStateSchema, type ExternalUiState } from '../../../shared/workbench/external'
 import { DesktopOperationError } from '../../errors'
 import { executionDesktopService } from '../execution/ExecutionDesktopService'
-import { AgentFileService } from '../execution/AgentFileService'
 import { documentHost } from '../documentHost'
 import { createElectronCredentialEncryption } from '../providers/providerCredentials'
 import { authorizeWorkspaceFilesRoot, operateWorkspaceFiles } from '../workspaceFilesDesktopService'
@@ -38,10 +37,11 @@ export function externalMcpService(): Promise<ExternalMcpService> {
     const settings = new ResidentMcpSettingsStore({ directory: path.join(app.getPath('userData'), 'workbench-v2', 'external-mcp'),
       encryption: await createElectronCredentialEncryption() })
     const service = new ExternalMcpService({ settings, conversations: execution.conversations, registry: documents.registry, gateway: documents.tools,
-      files: new AgentFileService(documents),
+      files: documents.agentFiles,
       workspaceRoot: async root => (await operateWorkspaceFiles({ type: 'root', directory: root })).resolvedPath,
       uiState: () => uiState?.() ?? Promise.resolve(null),
       appendEvent: input => execution.appendExternalEvent(input),
+      recordingState: () => execution.events.getPendingState(),
       confirm: confirmExternalChange })
     execution.setExternalRevoker(async input => service.releaseConversation(input))
     return service
@@ -50,6 +50,7 @@ export function externalMcpService(): Promise<ExternalMcpService> {
 
 /** Lets Main ask the renderer for the user's foreground document and selection; returns a detach function. */
 export function attachExternalMcpWindow(getWindow: () => BrowserWindow | null): () => void {
+  headless = false
   const replies = new Map<string, (state: ExternalUiState | null) => void>()
   const receive = (event: Electron.IpcMainEvent, raw: unknown) => {
     const window = getWindow()

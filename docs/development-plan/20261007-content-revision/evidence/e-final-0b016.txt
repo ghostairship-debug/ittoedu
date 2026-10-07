@@ -1,0 +1,30 @@
+
+ RUN  v4.1.10 D:/果铃并行/20261007-content-revision/e
+
+ ❯ tests/integration/productFollowup/T10/taskFinishRecovery.test.ts (2 tests | 2 failed) 639ms
+   × recovering a finish-executing crash slice keeps the committed body once and preserves an additional unknown write: false 343ms
+   × recovering a finish-executing crash slice keeps the committed body once and preserves an additional unknown write: true 293ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/productFollowup/T10/taskFinishRecovery.test.ts > recovering a finish-executing crash slice keeps the committed body once and preserves an additional unknown write: false
+ FAIL  tests/integration/productFollowup/T10/taskFinishRecovery.test.ts > recovering a finish-executing crash slice keeps the committed body once and preserves an additional unknown write: true
+Error: 运行终态事件与恢复记录不一致
+ ❯ ExecutionEngine.publishEnd src/main/workbench/execution/ExecutionEngine.ts:547:57
+    545|       : await this.options.events.findEvent(record.input.conversationI…
+    546|     if (existing) {
+    547|       if (existing.data.status !== record.status) throw new Error('运行终…
+       |                                                         ^
+    548|       return
+    549|     }
+ ❯ ExecutionEngine.recover src/main/workbench/execution/ExecutionEngine.ts:2420:7
+ ❯ tests/integration/productFollowup/T10/taskFinishRecovery.test.ts:84:5
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  1 failed | 6 passed (7)
+      Tests  2 failed | 9 passed (11)
+   Start at  09:43:29
+   Duration  11.10s (transform 26.34s, setup 472ms, import 58.87s, tests 6.41s, environment 0ms)
+

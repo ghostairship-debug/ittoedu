@@ -6,6 +6,7 @@ import type {
 import { isSourceDocumentModel } from '../../shared/workbench/document'
 import { documentDigest } from './documentDigest'
 import { DocumentSaveFailure, type DocumentSaveIdentity, type DocumentSaveProof } from '../../shared/workbench/documentSave'
+import { retainDocumentResourceBytes } from '../drivers/resources'
 
 export interface CreateDocumentSession {
   documentId: string
@@ -37,6 +38,12 @@ function operationDigest(operation: DocumentOperation): string {
 function sourceChange(before: DocumentModel, after: DocumentModel): DocumentSourceChange | undefined {
   if (before.kind !== after.kind || !isSourceDocumentModel(before) || !isSourceDocumentModel(after)) return
   return before.source === after.source ? { kind: 'unchanged' } : { kind: 'changed', before: before.source, after: after.source }
+}
+
+/** Models and receipts are immutable inside the Session; only the queue's next containers change. */
+function nextState(state: DurableDocumentState): DurableDocumentState {
+  return { ...state, past: [...state.past], future: [...state.future],
+    operations: [...state.operations], stoppedRuns: [...state.stoppedRuns] }
 }
 
 
@@ -81,8 +88,8 @@ export class DocumentSession {
 
   static async restore(input: DurableDocumentState, epoch: string, driver: DocumentDriver, persistence: DocumentPersistence): Promise<DocumentSession> {
     if (!epoch || input.schemaVersion !== 1 || input.model.kind !== driver.kind) throw new Error('无法恢复文档版本或 Driver')
-    driver.validate(input.model)
-    for (const entry of [...input.past, ...input.future]) { driver.validate(entry.before); driver.validate(entry.after) }
+    const models = new Set([input.model, ...[...input.past, ...input.future].flatMap(entry => [entry.before, entry.after])])
+    for (const model of models) driver.validate(model)
     const state = structuredClone(input)
     state.epoch = epoch
     state.sequence += 1
@@ -167,7 +174,8 @@ export class DocumentSession {
       if (replay) return replay
       if (!id) return this.reject(id, 'denied', 'missing-operation-id', '操作缺少编号')
       if (this.closed || operation.epoch !== this.state.epoch) return this.reject(id, 'conflict', 'stale-epoch', '文档会话已改变，请重新读取')
-      if (operation.runId && this.state.stoppedRuns.includes(operation.runId)) return this.reject(id, 'cancelled', 'run-stopped', '任务已停止，未写入后续操作')
+      const stopIdentity = operation.runLeaseId ?? operation.runId
+      if (stopIdentity && this.state.stoppedRuns.includes(stopIdentity)) return this.reject(id, 'cancelled', 'run-stopped', '任务已停止，未写入后续操作')
       if (operation.baseRevision !== this.state.revision) return this.reject(id, 'conflict', 'stale-revision', '文档已改变，未覆盖当前内容')
       if (amendment) {
         const head = this.state.past.at(-1)
@@ -179,8 +187,9 @@ export class DocumentSession {
         }
         if (this.state.future.length) return this.reject(id, 'conflict', 'history-redo-present', '存在待重做操作，未追加静态结果')
       }
-      const next = structuredClone(this.state)
+      const next = nextState(this.state)
       let candidate: DocumentModel
+      let changed: boolean
       try {
         if (operation.mutation.type === 'undo') {
           if (operation.mutation.expectedTopOperationId) {
@@ -195,34 +204,36 @@ export class DocumentSession {
           const entry = next.future.pop()
           if (entry) { next.past.push(entry); candidate = entry.after } else candidate = next.model
         } else {
-          candidate = await this.driver.apply(structuredClone(next.model), operation.mutation.command)
-          this.driver.validate(candidate)
-          if (documentDigest(candidate) !== documentDigest(next.model)) {
-            const previous = next.past.at(-1)
-            if (amendment || (operation.historyGroup && previous?.historyGroup === operation.historyGroup
-              && previous.actor === operation.actor && previous.runId === operation.runId
-              && previous.operationId === next.operations.at(-1)?.operationId)) {
-              // A strict amendment was checked in this serial turn; retain its original before/group.
-              previous!.after = structuredClone(candidate)
-              previous!.operationId = id
-              previous!.revision = this.state.revision + 1
-            } else next.past.push({ operationId: id, actor: operation.actor, beforeRevision: this.state.revision, revision: this.state.revision + 1,
-              ...(operation.runId ? { runId: operation.runId } : {}),
-              ...(operation.historyGroup ? { historyGroup: operation.historyGroup } : {}),
-              before: next.model, after: structuredClone(candidate) })
-            next.future = []
+          if (this.driver.applyValidated) candidate = await this.driver.applyValidated(next.model, operation.mutation.command)
+          else {
+            candidate = structuredClone(await this.driver.apply(structuredClone(next.model), operation.mutation.command))
+            this.driver.validate(candidate)
           }
+          candidate = { ...candidate, resources: retainDocumentResourceBytes(candidate.resources, next.model.resources) }
         }
-        this.driver.validate(candidate)
+        changed = documentDigest(candidate) !== documentDigest(this.state.model)
+        if (operation.mutation.type === 'command' && changed) {
+          const previous = next.past.at(-1)
+          if (amendment || (operation.historyGroup && previous?.historyGroup === operation.historyGroup
+            && previous.actor === operation.actor && previous.runId === operation.runId
+            && previous.operationId === next.operations.at(-1)?.operationId)) {
+            // A strict amendment was checked in this serial turn; retain its original before/group.
+            // Replace the entry too: a failed append must leave the acknowledged head intact.
+            next.past[next.past.length - 1] = { ...previous!, after: candidate,
+              operationId: id, revision: this.state.revision + 1 }
+          } else next.past.push({ operationId: id, actor: operation.actor, beforeRevision: this.state.revision, revision: this.state.revision + 1,
+            ...(operation.runId ? { runId: operation.runId } : {}),
+            ...(operation.historyGroup ? { historyGroup: operation.historyGroup } : {}),
+            before: next.model, after: candidate })
+          next.future = []
+        }
+        if (changed) {
+          next.revision += 1
+          next.model = this.driver.withRevision(candidate, next.revision)
+        }
       } catch (error) {
         if (error instanceof Error && 'code' in error && error.code === 'component-field-conflict') return this.reject(id, 'conflict', error.code, error.message)
         return this.reject(id, 'failed', 'invalid-operation', error instanceof Error ? error.message : '文档操作无效')
-      }
-      const changed = documentDigest(candidate) !== documentDigest(this.state.model)
-      if (changed) {
-        next.revision += 1
-        next.model = this.driver.withRevision(candidate, next.revision)
-        this.driver.validate(next.model)
       }
       const result: DocumentOperationResult = {
         status: changed ? 'applied' : 'unchanged', documentId: this.state.documentId,
@@ -275,7 +286,7 @@ export class DocumentSession {
     return this.serial(async () => {
       if (!runId) throw new Error('停止任务缺少编号')
       if (!this.state.stoppedRuns.includes(runId)) {
-        const next = structuredClone(this.state)
+        const next = nextState(this.state)
         next.stoppedRuns.push(runId)
         next.sequence += 1
         await this.persistence.append(structuredClone(next))
@@ -293,15 +304,16 @@ export class DocumentSession {
       if (this.state.binding.kind !== 'file' || this.state.binding.bindingVersion !== input.bindingVersion) throw new Error('文件位置已改变，请重新读取')
       const loaded = await load(this.read())
       this.driver.validate(loaded.model)
-      const next = structuredClone(this.state)
-      if (documentDigest(loaded.model) !== documentDigest(next.model)) {
+      const next = nextState(this.state)
+      const candidate = { ...structuredClone(loaded.model), resources: retainDocumentResourceBytes(loaded.model.resources, next.model.resources) }
+      if (documentDigest(candidate) !== documentDigest(next.model)) {
         const operationId = `disk:${next.documentId}:${next.sequence + 1}`
         const beforeRevision = next.revision
         next.past.push({ operationId, actor: 'external', beforeRevision, revision: beforeRevision + 1,
-          before: next.model, after: structuredClone(loaded.model) })
+          before: next.model, after: candidate })
         next.future = []
         next.revision += 1
-        next.model = this.driver.withRevision(loaded.model, next.revision)
+        next.model = this.driver.withRevision(candidate, next.revision)
         const source = sourceChange(this.state.model, next.model)
         next.operations.push({ operationId, actor: 'external',
           digest: documentDigest({ operationId, beforeRevision, revision: next.revision, bindingVersion: input.bindingVersion, version: loaded.version }),
@@ -337,7 +349,7 @@ export class DocumentSession {
             const binding = this.state.binding
             if (documentDigest(binding) !== documentDigest(proof.sourceBinding)
               && documentDigest(binding) !== documentDigest(proof.binding)) throw new Error('保存后文件绑定已改变，未回退当前绑定')
-            const next = structuredClone(this.state)
+            const next = nextState(this.state)
             next.binding = structuredClone(proof.binding); next.savedRevision = proof.savedRevision; next.sequence++
             await this.persistence.append(structuredClone(next))
             this.state = next; this.saveError = null
@@ -346,7 +358,7 @@ export class DocumentSession {
           },
           rebind: async binding => {
             assertActive()
-            const next = structuredClone(this.state)
+            const next = nextState(this.state)
             next.binding = structuredClone(binding)
             if (binding.kind === 'untitled') next.savedRevision = null
             next.sequence += 1
@@ -384,8 +396,8 @@ export class DocumentSession {
         persistenceCalled = true
         const savedBinding = await this.persistence.save({ documentId: captured.documentId, revision: captured.revision, model: captured.model, binding: captured.binding, bytes, ...(saveIdentity ? { saveIdentity } : {}) })
         return await this.serial(async () => {
-          const next = structuredClone(this.state)
-          next.binding = savedBinding
+          const next = nextState(this.state)
+          next.binding = structuredClone(savedBinding)
           next.savedRevision = captured.revision
           next.sequence += 1
           await this.persistence.append(structuredClone(next))

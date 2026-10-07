@@ -5,7 +5,11 @@ import type { ComputeArtifact, ComputeJobInput, ComputeJobLogs, ComputeJobSnapsh
 import { waitForHostWork } from '../../../shared/workbench/jobWait'
 import { PodmanComputeBackend, type ComputeProcess } from './PodmanComputeBackend'
 
-type StoredJob = ComputeJobSnapshot & { version: 1; containerName: string; logs: ComputeJobLogs['entries'] }
+type OutputDiagnostic = { name: string; code: string; message: string }
+type StoredJob = ComputeJobSnapshot & { version: 1; containerName: string; logs: ComputeJobLogs['entries'];
+  outputDiagnostics?: OutputDiagnostic[];
+  locations?: { input: string; work: string; output: string };
+  inputs?: { name: string; version: string; byteLength: number }[] }
 type Active = { runId: string; work: Promise<void>; process?: ComputeProcess; starting: boolean; cancelled: boolean }
 const digest = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const forbidden = /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$/i
@@ -42,6 +46,7 @@ export class ComputeJobService {
   }
   private readonly backend: PodmanComputeBackend
   private readonly now: () => Date
+  availability() { return this.backend.availability() }
   private folder(jobId: string) {
     if (typeof jobId !== 'string' || !jobId) throw new ComputeJobError('invalid-job', '计算作业身份无效')
     return path.join(this.directory, digest(jobId))
@@ -112,6 +117,8 @@ export class ComputeJobService {
     return { inputs, outputNames, program, argv, requestDigest }
   }
   async start(input: ComputeJobInput): Promise<ComputeJobSnapshot> {
+    // Capture caller-owned metadata before waiting; request() separately copies input bytes.
+    input = { ...input, argv: input.argv ? [...input.argv] : undefined }
     const frozen = this.request(input)
     return this.serial(input.jobId, async () => {
       const prior = await this.load(input.jobId)
@@ -128,7 +135,6 @@ export class ComputeJobService {
       try { await fs.access(root); throw new ComputeJobError('job-create-unknown', '作业目录已存在但没有完整回执，未重复执行；请使用新的作业身份。') }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
       await fs.mkdir(path.join(root, 'input'), { recursive: true, mode: 0o700 })
-      await fs.mkdir(path.join(root, 'work'), { recursive: true, mode: 0o700 })
       await fs.mkdir(path.join(root, 'output'), { recursive: true, mode: 0o700 })
       for (const file of frozen.inputs) {
         const filename = path.join(root, 'input', ...file.name.split('/'))
@@ -139,7 +145,9 @@ export class ComputeJobService {
       const now = this.now().toISOString()
       const containerName = `guoling-compute-${digest(input.jobId).slice(0, 32)}`
       const job: StoredJob = { version: 1, containerName, jobId: input.jobId, runId: input.runId, requestDigest: frozen.requestDigest,
-        status: 'preparing', createdAt: now, updatedAt: now, stopped: false, outputNames: frozen.outputNames, artifacts: [], logs: [] }
+        status: 'preparing', createdAt: now, updatedAt: now, stopped: false, outputNames: frozen.outputNames, artifacts: [], logs: [],
+        locations: { input: '/job/input', work: '/job/work', output: '/job/output' },
+        inputs: frozen.inputs.map(file => ({ name: file.name, version: `sha256:${digest(file.bytes)}`, byteLength: file.bytes.byteLength })) }
       await this.save(job)
       const active: Active = { runId: input.runId, work: Promise.resolve(), starting: false, cancelled: false }
       this.active.set(input.jobId, active)
@@ -163,9 +171,30 @@ export class ComputeJobService {
     if (name.endsWith('.png') && !bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) throw new ComputeJobError('output-invalid', 'PNG 计算结果签名无效')
     return { name, digest: digest(bytes), byteLength: bytes.byteLength, mimeType: mime(name) }
   }
+  /** Output names are discovered by the owner when the content did not request a fixed list. */
+  private async outputNames(root: string, diagnostics: OutputDiagnostic[]): Promise<string[]> {
+    const names: string[] = []
+    const visit = async (directory: string, prefix: string) => {
+      let entries
+      try { entries = await fs.readdir(directory, { withFileTypes: true }) }
+      catch (error) {
+        diagnostics.push({ name: prefix || '.', code: (error as NodeJS.ErrnoException).code ?? 'output-invalid',
+          message: error instanceof Error ? error.message : '计算输出目录无法读取' })
+        return
+      }
+      for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+        const name = prefix ? `${prefix}/${entry.name}` : entry.name
+        if (entry.isDirectory()) await visit(path.join(directory, entry.name), name)
+        else names.push(name)
+      }
+    }
+    await visit(path.join(root, 'output'), '')
+    return names
+  }
   private async execute(jobId: string, root: string, frozen: ReturnType<ComputeJobService['request']>, containerName: string, active: Active): Promise<void> {
     let processStarted = false, processFinished = false
     let artifacts: ComputeArtifact[] = []
+    const diagnostics: OutputDiagnostic[] = []
     try {
       if (active.cancelled) return
       active.starting = true
@@ -178,32 +207,47 @@ export class ComputeJobService {
       processFinished = true
       // Process facts survive even when an output is missing or malformed.
       await this.update(jobId, job => {
-        job.logs = [...job.logs, ...this.logLines('stdout', outcome.stdout), ...this.logLines('stderr', outcome.stderr)].slice(-200)
-        if (outcome.truncated) job.logs = [...job.logs, ...this.logLines('system', '日志已截断')].slice(-200)
+        job.logs = [...job.logs, ...this.logLines('stdout', outcome.stdout), ...this.logLines('stderr', outcome.stderr)]
+        if (outcome.truncated) job.logs = [...job.logs, ...this.logLines('system', '后端返回的日志已截断')]
         job.exitCode = outcome.exitCode
       })
-      if (outcome.exitCode === 0) for (const name of frozen.outputNames) {
-        artifacts.push(await this.artifact(root, name))
+      const names = outcome.exitCode === 0
+        ? frozen.outputNames.length ? frozen.outputNames : await this.outputNames(root, diagnostics) : frozen.outputNames
+      if (outcome.exitCode === 0) for (const name of names) {
+        try { artifacts.push(await this.artifact(root, safeName(name))) }
+        catch (error) {
+          diagnostics.push({ name, code: error instanceof ComputeJobError ? error.code : (error as NodeJS.ErrnoException).code ?? 'output-invalid',
+            message: error instanceof Error ? error.message : '计算输出无法读取' })
+        }
       }
       await this.update(jobId, job => {
         job.artifacts = artifacts
+        job.outputNames = names
+        job.outputDiagnostics = diagnostics
+        if (diagnostics.length) {
+          job.reason = diagnostics.map(item => `${item.name}: ${item.message}`).join('；')
+          job.logs = [...job.logs, ...this.logLines('system', job.reason)]
+        }
         if (job.stopped || active.cancelled || outcome.cancelled)
           job.status = outcome.cancelled && !artifacts.length ? 'cancelled' : 'unapplied'
-        else if (outcome.exitCode === 0) job.status = 'ready'
+        else if (outcome.exitCode === 0) job.status = diagnostics.length && !artifacts.length ? 'failed' : 'ready'
+        else if (outcome.exitCode === null) { job.status = 'unknown'; job.reason = '计算进程未返回可确认的退出码；未交付或重放。' }
         else { job.status = 'failed'; job.reason = `计算进程退出码 ${outcome.exitCode ?? 'unknown'}` }
       })
     } catch (error) {
+      const message = error instanceof Error ? error.message : '计算后端失败'
       await this.update(jobId, job => {
         job.status = processStarted && !processFinished ? 'unknown' : 'failed'
-        job.reason = error instanceof Error ? error.message.slice(0, 1000) : '计算后端失败'
+        job.reason = message.slice(0, 1000)
         job.artifacts = artifacts
-        job.logs = [...job.logs, ...this.logLines('system', job.reason)].slice(-200)
+        job.outputDiagnostics = diagnostics
+        job.logs = [...job.logs, ...this.logLines('system', message)]
       }).catch(() => undefined)
     }
   }
   private logLines(stream: 'stdout' | 'stderr' | 'system', source: string): ComputeJobLogs['entries'] {
     const now = Date.now()
-    return source.split(/\r?\n/).filter(Boolean).slice(0, 100).map((line, index) => ({ cursor: index + 1, time: now, stream, message: line.slice(0, 2000) }))
+    return source.split(/\r?\n/).filter(Boolean).map((line, index) => ({ cursor: index + 1, time: now, stream, message: line }))
   }
   async status(runId: string, jobId: string): Promise<ComputeJobSnapshot> {
     const job = await this.serial(jobId, async () => {
@@ -224,11 +268,13 @@ export class ComputeJobService {
     return this.status(runId, jobId)
   }
   async logs(runId: string, jobId: string, after = 0, limit = 100): Promise<ComputeJobLogs> {
-    if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new ComputeJobError('invalid-page', '作业日志分页无效')
+    if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1)
+      throw new ComputeJobError('invalid-page', '作业日志分页无效：after 须为非负安全整数，limit 须为正安全整数；用 nextCursor 继续读取。')
     const job = await this.load(jobId)
     if (!job) throw new ComputeJobError('unknown-job', '计算作业不存在')
     if (job.runId !== runId) throw new ComputeJobError('job-not-authorized', '计算作业不属于当前运行')
-    return { entries: job.logs.slice(after, after + limit).map((entry, index) => ({ ...entry, cursor: after + index + 1 })), nextCursor: Math.min(job.logs.length, after + limit) }
+    const entries = job.logs.slice(after, after + Math.min(limit, 100)).map((entry, index) => ({ ...entry, cursor: after + index + 1 }))
+    return { entries, nextCursor: entries.at(-1)?.cursor ?? after }
   }
   async cancel(runId: string, jobId: string): Promise<ComputeJobSnapshot> {
     const key = `${runId}\u0000${jobId}`

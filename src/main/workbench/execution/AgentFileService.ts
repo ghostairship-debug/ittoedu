@@ -10,6 +10,7 @@ import { officeContentSchemas, type OfficeContentToolName } from '../../../core/
 import type { FileArtifactBinding } from '../../../shared/workbench/mediaFiles'
 import type { OfficeFormat } from '../../../shared/workbench/officeFiles'
 import type { OfficeFileService } from '../office/OfficeFileService'
+import { isSourceDocumentModel, type DocumentSnapshot } from '../../../shared/workbench/document'
 import { isInsideRoot } from '../../../shared/workbench/executionPermission'
 import type { DocumentHostService } from '../DocumentHostService'
 import { createBlankCourseProjectV10 } from '../../../core/course/createCourseProjectV10'
@@ -43,8 +44,10 @@ export class AgentFileService implements AgentFilePort {
   private readonly text: AgentFileText
   private office?: Promise<OfficeFileService>
   private readonly officeBindings = new Map<string, Map<string, FileArtifactBinding>>()
+  /** Only the tuple from an explicit comparison is retained, never a second disk model. */
+  private readonly fileObservations = new Map<string, Map<string, { documentId: string; epoch: string; baseRevision: number; bindingVersion: number; version: string | null }>>()
   constructor(private readonly host: DocumentHostService) { this.text = new AgentFileText(host) }
-  releaseRun(runId: string): void { this.pages.releaseRun(runId); this.grepPages.releaseRun(runId); this.text.releaseRun(runId); this.officeBindings.delete(runId) }
+  releaseRun(runId: string): void { this.pages.releaseRun(runId); this.grepPages.releaseRun(runId); this.text.releaseRun(runId); this.officeBindings.delete(runId); this.fileObservations.delete(runId) }
   private officeService(): Promise<OfficeFileService> { return this.office ??= import('../office/OfficeFileService.js').then(module => new module.OfficeFileService(this.host)) }
   private officeKey(filename: string): string { return process.platform === 'win32' ? filename.toLowerCase() : filename }
   private rememberOfficeBinding(runId: string, binding: FileArtifactBinding): void {
@@ -108,6 +111,9 @@ export class AgentFileService implements AgentFilePort {
         validateWorkspaceEntryName(path.basename(input.path))
         paths = [path.join((await this.directory(context, path.dirname(path.resolve(context.workspaceRoot, input.path)), true)).directory, path.basename(input.path))]
       } else paths = [await this.filename(context, input.path, 'write', true)]
+    } else if (name === 'file.reconcile') {
+      const input = agentFileSchemas[name].parse(raw)
+      paths = [await this.documentFilename(context, input.path, true)]
     } else if (name === 'file.patch') {
       const input = agentFileSchemas[name].parse(raw)
       paths = [await this.filename(context, input.path, 'write', true)]
@@ -145,6 +151,74 @@ export class AgentFileService implements AgentFilePort {
       if (i < copySources && await this.mayRead(context, paths[i]!)) continue
       if (!this.mayWrite(context, paths[i]!)) throw new Error('工作空间外修改需要当前操作的明确批准')
     }
+  }
+
+  private async documentFilename(context: AgentFileContext, raw: string, forWrite = false): Promise<string> {
+    try { return await this.filename(context, raw, forWrite ? 'write' : 'read', forWrite) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      // A deleted/moved file can still be compared through its existing formal binding.
+      const wanted = path.resolve(context.workspaceRoot, raw)
+      const bound = this.host.registry.list().find(snapshot => snapshot.binding.kind === 'file'
+        && this.officeKey(snapshot.binding.path) === this.officeKey(wanted))
+      if (!bound || !await this.mayRead(context, wanted)) throw error
+      return wanted
+    }
+  }
+  private openedFile(context: AgentFileContext, filename: string, snapshot: DocumentSnapshot): NonNullable<AgentFileOutcome['opened']> {
+    return { documentId: snapshot.documentId, kind: snapshot.model.kind, name: filename, writable: this.mayWrite(context, filename) }
+  }
+  async observeFile(context: AgentFileContext, raw: unknown): Promise<AgentFileOutcome> {
+    const input = agentFileSchemas['file.observe'].parse(raw)
+    const filename = await this.documentFilename(context, input.path)
+    context.assertActive?.()
+    const bound = this.host.registry.list().find(snapshot => snapshot.binding.kind === 'file'
+      && this.officeKey(snapshot.binding.path) === this.officeKey(filename))
+    const opened = bound ?? await this.host.open(filename)
+    const current = await this.host.registry.get(opened.documentId).drain()
+    const disk = await this.host.observeFile(current.documentId)
+    context.assertActive?.()
+    let observations = this.fileObservations.get(context.runId)
+    if (!observations) { observations = new Map(); this.fileObservations.set(context.runId, observations) }
+    observations.set(this.officeKey(filename), { documentId: current.documentId, epoch: current.epoch,
+      baseRevision: current.revision, bindingVersion: disk.bindingVersion, version: disk.version })
+    const summary = (model: DocumentSnapshot['model'] | null) => !model ? null : isSourceDocumentModel(model)
+      ? { kind: model.kind, source: model.source.slice(0, input.limit ?? 8000), total: model.source.length,
+        truncated: model.source.length > (input.limit ?? 8000) }
+      : { kind: model.kind, title: model.project.title, surfaces: model.project.surfaces.length }
+    return { data: { path: filename, current: { ...summary(current.model), revision: current.revision, dirty: current.dirty },
+      disk: { ...summary(disk.model), version: disk.version, exists: !!disk.model },
+      changed: current.binding.kind === 'file' && current.binding.version !== disk.version,
+      choices: disk.model && this.mayWrite(context, filename) ? ['disk', 'local'] : [], observation: 'current-and-disk-compared' },
+      opened: this.openedFile(context, filename, current) }
+  }
+  async reconcileFile(context: AgentFileContext, raw: unknown): Promise<AgentFileOutcome> {
+    const input = agentFileSchemas['file.reconcile'].parse(raw)
+    const filename = await this.documentFilename(context, input.path, true)
+    await this.requireMutationScope(context, [filename])
+    const compared = this.fileObservations.get(context.runId)?.get(this.officeKey(filename))
+    if (!compared) throw new Error('请先比较当前文件与磁盘版本，再选择采纳磁盘或保留当前稿')
+    if (input.expectedVersion !== undefined && input.expectedVersion !== compared.version)
+      throw new Error('指定磁盘版本不属于最近的比较，请重新比较')
+    const current = await this.host.registry.get(compared.documentId).drain()
+    if (current.binding.kind !== 'file' || this.officeKey(current.binding.path) !== this.officeKey(filename))
+      throw new Error('比较的文档文件位置已改变，请重新比较')
+    context.assertActive?.()
+    const reconciled = await this.host.reconcileFile({ ...compared, choice: input.choice }, context.assertActive)
+    this.fileObservations.get(context.runId)?.delete(this.officeKey(filename))
+    return { data: { path: filename, choice: input.choice, status: 'reconciled', saved: false, dirty: reconciled.dirty,
+      revision: reconciled.revision, undoDepth: reconciled.undoDepth, persistence: 'recoverable',
+      diskVersion: reconciled.binding.kind === 'file' ? reconciled.binding.version : null },
+      opened: this.openedFile(context, filename, reconciled) }
+  }
+  /** Original bytes for material import, browser upload, computation and component packages. */
+  async readAuthorizedFile(context: AgentFileContext, raw: string): Promise<{ path: string; name: string; version: string; bytes: Uint8Array }> {
+    context.assertActive?.()
+    const filename = await this.filenameOrDirectory(context, raw, false)
+    const binding = await this.host.artifacts.bind(filename)
+    const bytes = await this.host.artifacts.read(binding)
+    context.assertActive?.()
+    return { path: binding.path, name: path.basename(binding.path), version: binding.fileVersion, bytes }
   }
   async preflightOffice(context: AgentFileContext, name: OfficeContentToolName, raw: unknown): Promise<{ paths: string[]; outside: boolean }> {
     if (name !== 'office.inspect' && context.permission === 'read-only') throw new Error('只读任务不能修改 Office 文件')
@@ -210,6 +284,8 @@ export class AgentFileService implements AgentFilePort {
         writable: context.permission !== 'read-only' && (context.permission === 'full' || isInsideRoot(context.workspaceRoot, filename)),
       } }
     }
+    if (name === 'file.observe') return this.observeFile(context, raw)
+    if (name === 'file.reconcile') return this.reconcileFile(context, raw)
     if (name === 'file.read') {
       const input = agentFileSchemas[name].parse(raw), filename = await this.filename(context, input.path)
       return this.text.read(context, filename, input.limit, input.cursor, operationId)
@@ -252,6 +328,18 @@ export class AgentFileService implements AgentFilePort {
     }
     const input = agentFileSchemas['file.create'].parse(raw)
     const kind = createKind(input.name, input.kind)
+    const bytes = kind === 'course-v10' ? (() => {
+      const project = createBlankCourseProjectV10(input.name.replace(/\.h5lesson$/i, ''))
+      return createCourseProjectV10Archive({ project, resources: { assets: {}, components: {} } })
+    })() : Buffer.from('', 'utf8')
+    return this.createPreparedFile(context, input, kind, bytes, operationId)
+  }
+  /** The actual PPTX converter supplies a complete V10 archive; file identity and publication stay here. */
+  createPreparedCourse(context: AgentFileContext, input: { path?: string; name: string; bytes: Uint8Array }, operationId: string): Promise<AgentFileOutcome> {
+    return this.createPreparedFile(context, { path: input.path, name: input.name, kind: 'course-v10' }, 'course-v10', input.bytes, operationId)
+  }
+  private async createPreparedFile(context: AgentFileContext, input: { path?: string; name: string; kind?: 'markdown' | 'text' | 'html' | 'course-v10' },
+    kind: 'markdown' | 'text' | 'html' | 'course-v10', bytes: Uint8Array, operationId: string): Promise<AgentFileOutcome> {
     if (context.permission === 'read-only') throw new Error('只读任务不能创建文件')
     const preflight = await this.preflightCreate(context, input)
     const { directory, fallback } = await this.directory(context, input.path, true)
@@ -260,10 +348,6 @@ export class AgentFileService implements AgentFilePort {
       && !(context.approvedOutsidePaths ?? []).some(approved => isInsideRoot(approved, path.join(directory, input.name))))
       throw new Error('工作空间外新建文件需要明确批准')
     const root = await this.host.files.registerRoot(directory)
-    const bytes = kind === 'course-v10' ? (() => {
-      const project = createBlankCourseProjectV10(input.name.replace(/\.h5lesson$/i, ''))
-      return createCourseProjectV10Archive({ project, resources: { assets: {}, components: {} } })
-    })() : Buffer.from('', 'utf8')
     context.assertActive?.()
     const receipt = await this.host.files.createFile({ operationId, workspaceId: root.workspaceId, targetDirectoryId: root.rootEntryId,
       name: input.name, format: kind === 'course-v10' ? 'course-v10' : kind === 'markdown' && /\.md$/i.test(input.name) ? 'markdown' : 'file', bytes }, context.assertActive).catch(error => { throw new AgentFileOutcomeUnknown(error instanceof Error ? error.message : String(error)) })
@@ -322,24 +406,24 @@ export class AgentFileService implements AgentFilePort {
     }
     const sources = name === 'file.trash' ? scoped : scoped.slice(0, agentFileSchemas[name].parse(raw).sources.length)
     const destination = name === 'file.trash' ? undefined : await this.entryId(root, path.dirname(scoped[sources.length]!))
-    const flushFirst = name === 'file.copy' && (raw as { flushFirst?: unknown }).flushFirst === true
+    const sourceVersion = name === 'file.copy'
+      ? agentFileSchemas['file.copy'].parse(raw).sourceVersion ?? ((raw as { flushFirst?: unknown }).flushFirst === true ? 'current' : 'disk') : undefined
     const items: Array<{ status: 'success' | 'partial' | 'failed' | 'cancelled'; sourcePath?: string; targetPath?: string;
-      affectedPaths: string[]; copied?: 'disk-version'; error?: { code: string; message: string } }> = []
+      affectedPaths: string[]; copied?: 'disk-version' | 'current-draft'; error?: { code: string; message: string } }> = []
     for (const [index, source] of sources.entries()) {
       try {
         const dirty = name === 'file.copy' && this.host.registry.list().some(snapshot => snapshot.binding.kind === 'file'
           && snapshot.binding.path.toLowerCase() === source.toLowerCase() && snapshot.dirty)
-        if (dirty && flushFirst) throw new Error('源文件有未保存修改；请先保存或省略 flushFirst 复制磁盘版本')
         const entry = await this.entryId(root, source)
         const id = `${operationId}:${index}`
         context.assertActive?.()
         const receipt = name === 'file.trash'
           ? await this.host.files.trash({ operationId: id, workspaceId: root.workspaceId, entryIds: [entry] })
           : name === 'file.copy'
-            ? await this.host.files.copy({ operationId: id, workspaceId: root.workspaceId, sourceEntryIds: [entry], targetDirectoryId: destination! })
+            ? await this.host.files.copy({ operationId: id, workspaceId: root.workspaceId, sourceEntryIds: [entry], targetDirectoryId: destination!, sourceVersion })
             : await this.host.files.move({ operationId: id, workspaceId: root.workspaceId, sourceEntryIds: [entry], targetDirectoryId: destination! })
         items.push(...receipt.items.map(item => ({ ...item, sourcePath: item.sourcePath ?? source,
-          ...(dirty && item.status === 'success' ? { copied: 'disk-version' as const } : {}) })))
+          ...(dirty && sourceVersion === 'disk' && item.status === 'success' ? { copied: 'disk-version' as const } : {}) })))
       } catch (error) {
         items.push({ status: 'failed', sourcePath: source, affectedPaths: [source],
           error: { code: 'file-operation-failed', message: error instanceof Error ? error.message : String(error) } })
@@ -348,7 +432,8 @@ export class AgentFileService implements AgentFilePort {
     const status = items.every(item => item.status === 'success') ? 'success'
       : items.some(item => item.status === 'success' || item.status === 'partial') ? 'partial' : 'failed'
     const anyDiskVersion = items.some(item => item.copied === 'disk-version')
+    const anyCurrentDraft = items.some(item => item.copied === 'current-draft')
     return { data: { operation: { operationId, status, items, affectedPaths: [...new Set(items.flatMap(item => item.affectedPaths))] },
-      ...(name === 'file.copy' && anyDiskVersion ? { copied: 'disk-version' as const } : {}) } }
+      ...(name === 'file.copy' && (anyCurrentDraft || anyDiskVersion) ? { copied: anyCurrentDraft ? 'current-draft' as const : 'disk-version' as const } : {}) } }
   }
 }

@@ -9,9 +9,9 @@ import type { ChangeReviewAvailability, ChangeReviewEntry, ChangeReviewPage, Cha
 import { isInsideRoot } from '../../../shared/workbench/executionPermission'
 import type { DocumentHostService } from '../DocumentHostService'
 import { createTextDriver } from '../../../core/drivers/TextDriver'
-import { ChangeReviewStore, type ChangeReviewCapture } from './ChangeReviewStore'
+import { ChangeReviewStore, readChangeReviewBinaryFile, type ChangeReviewCapture } from './ChangeReviewStore'
 
-const FILE_MUTATIONS = new Set(['file.create', 'file.write', 'file.patch', 'file.mkdir', 'file.copy', 'file.move', 'file.rename', 'file.trash'])
+const FILE_MUTATIONS = new Set(['file.create', 'file.write', 'file.patch', 'file.mkdir', 'file.copy', 'file.move', 'file.rename', 'file.trash', 'office.create', 'office.edit'])
 const OUTSIDE_EFFECTS = new Set(['mcp.invoke', 'compute.run', 'job.cancel', 'job.start', 'media.start',
   'agent.delegate', 'image.generate', 'image.edit', 'build.import'])
 const textDriver = createTextDriver()
@@ -40,10 +40,14 @@ export class ExecutionChangeReviewService {
   private async ordinaryFile(filename: string): Promise<{ version: string; text: string; mode: number; identity?: string }> {
     return readUtf8File(filename, { limit: 4000 })
   }
+  private currentFile(capture: ChangeReviewCapture) {
+    return capture.name === 'office.create' || capture.name === 'office.edit'
+      ? readChangeReviewBinaryFile(capture.path) : this.ordinaryFile(capture.path)
+  }
 
   /** Call after file preflight and before the side effect. Missing/oversize before content is recorded as unavailable. */
   async prepareFileMutation(input: { runId: string; callId: string; name: string; paths: readonly string[]; toolInput?: unknown }): Promise<void> {
-    if (!['file.write', 'file.patch', 'file.create'].includes(input.name) || !input.paths[0]) return
+    if (!['file.write', 'file.patch', 'file.create', 'office.create', 'office.edit'].includes(input.name) || !input.paths[0]) return
     const filename = path.resolve(input.paths[0])
     const existing = await this.store.read(input.runId, input.callId)
     if (existing) {
@@ -51,11 +55,12 @@ export class ExecutionChangeReviewService {
       return
     }
     let before: ChangeReviewCapture['before']
-    const live = this.live(filename)
+    const binary = input.name === 'office.create' || input.name === 'office.edit'
+    const live = binary ? undefined : this.live(filename)
     if (live) before = { kind: 'document', documentId: live.documentId, epoch: live.epoch, revision: live.revision }
     else {
       try {
-        before = await this.store.captureFile(filename)
+        before = binary ? await this.store.captureBinaryFile(filename) : await this.store.captureFile(filename)
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') before = { kind: 'missing' }
         else throw new Error('无法保全修改前正文，未开始覆盖；请检查源文件和快照目录', { cause: error })
@@ -84,9 +89,12 @@ export class ExecutionChangeReviewService {
       } else if (data.status === 'written' || data.saved === true || (data.operation && typeof data.operation === 'object'
         && (data.operation as { items?: Array<{ status?: unknown; targetPath?: unknown }> }).items?.some(item =>
           item.status === 'success' && item.targetPath === capture.path))) {
-        const expected = typeof data.afterVersion === 'string' ? data.afterVersion : capture.expectedCreatedVersion ?? null
+        const binding = data.binding as { path?: string; fileVersion?: string } | undefined
+        const expected = typeof data.afterVersion === 'string' ? data.afterVersion
+          : (capture.name === 'office.create' || capture.name === 'office.edit') && binding?.path && samePath(binding.path, capture.path)
+            ? binding.fileVersion : capture.expectedCreatedVersion ?? null
         if (!expected) return
-        const current = await this.ordinaryFile(capture.path)
+        const current = await this.currentFile(capture)
         if (current.version !== expected) return
         capture.after = { version: expected, mode: current.mode, ...(current.identity ? { identity: current.identity } : {}) }
       }
@@ -107,7 +115,7 @@ export class ExecutionChangeReviewService {
     const operation = data?.operation as { items?: Array<{ status?: string; sourcePath?: string; targetPath?: string }> } | undefined
     const operationApplied = operationItem ? operationItem.status === 'success' || operationItem.status === 'partial'
       : operation?.items?.some(item => item.status === 'success' || item.status === 'partial') ?? false
-    const changed = documentResult?.status === 'applied' || data?.status === 'written' || operationApplied
+    const changed = documentResult?.status === 'applied' || data?.status === 'written' || data?.status === 'saved' && data.saved === true || operationApplied
     const isFile = FILE_MUTATIONS.has(call.name)
     const isDocument = !!documentResult?.documentId
     if (!isFile && !isDocument && !OUTSIDE_EFFECTS.has(call.name)) return null
@@ -133,12 +141,12 @@ export class ExecutionChangeReviewService {
     } else if (status === 'applied' && capture) {
       if (capture.before.kind === 'unavailable') { availability = 'no-before-snapshot'; reason = capture.before.reason }
       else if (!capture.after) { availability = 'unverified'; reason = '缺少提交后版本证据' }
-      else if (capture.before.kind === 'missing' || capture.before.kind === 'file') { availability = 'ready'; reason = '' }
+      else if (capture.before.kind === 'missing' || capture.before.kind === 'file' || capture.before.kind === 'binary') { availability = 'ready'; reason = '' }
     } else if (status === 'applied' && isFile) { availability = 'no-before-snapshot'; reason = '此操作没有修改前快照' }
     const entry: ChangeReviewEntry = { entryId: operationItem ? `${callId}:${operationItem.index}` : callId,
       runId: run.runId, callId, name: call.name, path: pathName,
       ...(isDocument ? { documentId: documentResult!.documentId } : {}), status, source,
-      ...(capture?.before.kind === 'file' ? { beforeVersion: capture.before.version } : {}),
+      ...(capture?.before.kind === 'file' || capture?.before.kind === 'binary' ? { beforeVersion: capture.before.version } : {}),
       ...(capture?.after ? { afterVersion: capture.after.version } : {}), availability, ...(reason ? { reason } : {}) }
     if (capture?.before.kind === 'file' && status === 'applied' && capture.after) {
       const before = capture.before.text
@@ -148,7 +156,7 @@ export class ExecutionChangeReviewService {
     }
     if (entry.availability === 'ready' && capture?.after && source === 'host-file') {
       try {
-        const current = await this.ordinaryFile(capture.path)
+        const current = await this.currentFile(capture)
         if (!this.matchesAfter(current, capture.after) || this.live(capture.path)) {
           entry.availability = 'conflict'; entry.reason = '当前文件已改变或已由编辑器打开'
         }
@@ -202,8 +210,8 @@ export class ExecutionChangeReviewService {
     return this.host.fileCoordinator.withFileOperation(async () => {
       await this.host.assertFileAvailable(filename)
       if (this.live(filename)) return { entryId, status: 'conflict', message: '文件已在编辑器中打开，请使用文档历史回退' }
-      let current: Awaited<ReturnType<typeof this.ordinaryFile>>
-      try { current = await this.ordinaryFile(filename) }
+      let current: Awaited<ReturnType<typeof this.currentFile>>
+      try { current = await this.currentFile(capture) }
       catch { return { entryId, status: 'conflict', message: '文件已不存在或类型已改变' } }
       if (!this.matchesAfter(current, capture.after!)) return { entryId, status: 'conflict', message: '文件在原修改后已改变，未覆盖后续修改' }
       if (capture.before.kind === 'missing') {
@@ -213,8 +221,8 @@ export class ExecutionChangeReviewService {
           await fs.copyFile(filename, preserved, 1)
           const handle = await fs.open(preserved, 'r+')
           try { await handle.sync() } finally { await handle.close() }
-          if (hash(await fs.readFile(preserved)) !== capture.after!.version ||
-            !this.matchesAfter(await this.ordinaryFile(filename), capture.after!) || this.live(filename)) {
+          if ((await this.currentFile({ ...capture, path: preserved })).version !== capture.after!.version ||
+            !this.matchesAfter(await this.currentFile(capture), capture.after!) || this.live(filename)) {
             await fs.rm(preserved, { force: true })
             return { entryId, status: 'conflict', message: '新建文件在回收前再次改变，未移走' }
           }
@@ -225,16 +233,16 @@ export class ExecutionChangeReviewService {
           return { entryId, status: 'unknown', message: `文件保全或移走结果需检查：${error instanceof Error ? error.message : String(error)}` }
         }
       }
-      if (capture.before.kind !== 'file') return { entryId, status: 'unavailable', message: '没有可恢复的修改前正文' }
+      if (capture.before.kind !== 'file' && capture.before.kind !== 'binary') return { entryId, status: 'unavailable', message: '没有可恢复的修改前内容' }
       const temporary = path.join(path.dirname(filename), `.${path.basename(filename)}.${randomUUID()}.tmp`)
       try {
         await this.store.writeBefore(capture.before, temporary)
         await fs.chmod(temporary, capture.before.mode)
-        if (!this.matchesAfter(await this.ordinaryFile(filename), capture.after!) || this.live(filename))
+        if (!this.matchesAfter(await this.currentFile(capture), capture.after!) || this.live(filename))
           return { entryId, status: 'conflict', message: '提交前文件再次改变，未覆盖' }
         authority.assertActive?.()
         await fs.rename(temporary, filename)
-        return { entryId, status: 'reverted', message: '已恢复修改前正文并保存', saved: true }
+        return { entryId, status: 'reverted', message: '已恢复修改前内容并保存', saved: true }
       } catch (error) {
         return { entryId, status: 'unknown', message: `回退结果需检查：${error instanceof Error ? error.message : String(error)}` }
       } finally { await fs.rm(temporary, { force: true }).catch(() => undefined) }

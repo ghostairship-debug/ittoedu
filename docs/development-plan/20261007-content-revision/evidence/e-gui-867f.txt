@@ -1,0 +1,18 @@
+
+Running 6 tests using 1 worker
+
+(node:24192) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x  1 tests\e2e\productFollowup\T01\richCardGolden.spec.ts:13:5 › actual rich card rewrites from material, preserves links formulas and neighboring layout, then undoes redoes saves and cold reopens (58.9s)
+(node:15464) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x  2 tests\e2e\productFollowup\T03\visibleDraftColdRecovery.spec.ts:42:5 › T03 real GUI preserves half JSON and numeric raw at normal close and restores original targets in a cold process while valid source stays editable (38.0s)
+(node:28860) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  x  3 tests\e2e\productFollowup\T05\frozenTaskBrowser.spec.ts:8:5 › T05 public Engine uses frozen Main task authorization and real Electron DOM facts without model snapshots or repeated approval (2.5m)
+Worker teardown timeout of 60000ms exceeded.
+
+Failed worker ran 1 test:
+tests\e2e\productFollowup\T05\frozenTaskBrowser.spec.ts:8:5 › T05 public Engine uses frozen Main task authorization and real Electron DOM facts without model snapshots or repeated approval
+(node:26636) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)

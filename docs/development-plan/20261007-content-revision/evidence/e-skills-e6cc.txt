@@ -1,0 +1,18 @@
+
+ RUN  v4.1.10 D:/果铃并行/20261007-content-revision/e
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  09:20:40
+   Duration  12.98s (transform 6.83s, setup 66ms, import 9.22s, tests 3.59s, environment 0ms)
+
+
+ RUN  v4.1.10 D:/果铃并行/20261007-content-revision/e
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed | 3 skipped (6)
+   Start at  09:21:00
+   Duration  8.68s (transform 3.68s, setup 64ms, import 8.34s, tests 164ms, environment 0ms)
+

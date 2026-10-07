@@ -1,0 +1,2 @@
+{"status":"completed","route":{"provider":"teamorouter","baseURL":"https://api.teamorouter.com/v1","model":"deepseek-flash","expectedFamily":"V4.1","expectedFamilySource":"Owner confirmation 2026-10-07","accountId":"owner-authorized-test","accountBilling":"unknown"},"evidence":"D:\\果铃并行\\20261007-content-revision\\e\\output\\content-revision\\live-v41-final\\evidence.json","validationFailure":null}
+LIVE_RUN_EXIT_CODE=0

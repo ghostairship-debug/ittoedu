@@ -25,6 +25,9 @@ export interface ComputeJobSnapshot {
   stopped: boolean
   outputNames: readonly string[]
   artifacts: readonly ComputeArtifact[]
+  outputDiagnostics?: readonly { name: string; code: string; message: string }[]
+  locations?: { input: string; work: string; output: string }
+  inputs?: readonly { name: string; version: string; byteLength: number }[]
   exitCode?: number | null
   reason?: string
 }
