@@ -183,9 +183,8 @@ export function canonicalComponentFileEdits(snapshot: ComponentProjectSnapshot, 
   const edits = flowDocumentEdits(project, binding.surfaceId, aligned.blocks)
   if (diagnostics.some(issue => issue.level !== 'info')) {
     const id = crypto.randomUUID(), bytes = input?.bytes ?? new TextEncoder().encode(content)
-    const markdown = binding.format === 'markdown'
-    edits.push({ type: 'asset.add', asset: { id, path: `assets/${id}.${markdown ? 'md' : 'html'}`, filename: input?.filename ?? `正文源文.${markdown ? 'md' : 'html'}`,
-      mimeType: markdown ? 'text/markdown' : 'text/html', byteLength: bytes.byteLength }, bytes })
+    edits.push({ type: 'asset.add', asset: { id, path: `assets/${id}.html`, filename: input?.filename ?? '正文源文.html',
+      mimeType: 'text/html', byteLength: bytes.byteLength }, bytes })
   }
   return edits
 }

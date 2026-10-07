@@ -87,6 +87,7 @@ const serviceTools: HostTool[] = [
   { name: 'operation.recent', label: '最近操作结果', description: '只读：本会话最近的修改类调用及其正式结果与回复是否送达。用于连接中断后核对，不会执行或重放工具。', read: true },
 ].map(tool => ({ ...tool, kind: 'service' as const, schema: z.toJSONSchema(serviceSchemas[tool.name as keyof typeof serviceSchemas]) as Record<string, unknown> }))
 const fileLabels: Record<AgentFileToolName, string> = { 'file.list': '列出文件', 'file.search': '搜索文件', 'file.open': '打开文件', 'file.create': '新建文件',
+  'file.observe': '比较磁盘版本', 'file.reconcile': '处理文件变化',
   'file.read': '读取文件', 'file.grep': '搜索正文', 'file.write': '写入文件', 'file.patch': '修改文件', 'file.mkdir': '新建文件夹', 'file.copy': '复制文件',
   'file.move': '移动文件', 'file.rename': '重命名', 'file.trash': '移入回收站' }
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
@@ -102,7 +103,7 @@ function summarize(name: string, result: ToolResult): OperationSummary {
       ...('revision' in receipt ? { revision: receipt.revision } : { message: receipt.message }) } : {}),
     ...(result.kind === 'error' ? { message: result.message } : outcome ? { message: outcome.message } : {}),
     ...(apply ? { commit: apply.commit, usability: apply.usability, delivery: apply.delivery } : {}),
-    ...(saved ? { save: { savedRevision: saved.savedRevision, currentRevision: saved.currentRevision,
+    ...(saved && saved.savedRevision !== undefined ? { save: { savedRevision: saved.savedRevision, currentRevision: saved.currentRevision,
       dirty: saved.dirty, current: currentSave(saved) } } : {}) }
 }
 const workspaceName = (rootPath: string) => path.basename(rootPath) || rootPath

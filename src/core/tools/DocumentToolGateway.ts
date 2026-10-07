@@ -131,6 +131,10 @@ export class DocumentToolGateway implements ToolGateway {
       },
       active: (runId, documentId, epoch) => { const run = this.run(runId); if (run.stopped) throw new ToolError('run-stopped', '任务已停止'); const current = this.registry.get(documentId).read(); this.authorizeDocument(run, current); if (current.epoch !== epoch) throw new ToolError('stale-epoch', '文档会话已改变') },
       ownsDocument: (runId, documentId) => this.run(runId).grant.documents.some(document => document.documentId === documentId),
+      ownsReceiptDocument: (runId, documentId) => {
+        const run = this.run(runId)
+        return run.grant.documents.some(document => document.documentId === documentId) || run.detachedDocuments?.has(documentId) === true
+      },
       provideImage: (runId, documentId, source) => this.provideImage(runId, documentId, source),
       readImage: (runId, documentId, resource) => this.readImageResource(runId, documentId, resource),
     })

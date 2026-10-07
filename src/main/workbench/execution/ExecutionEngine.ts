@@ -665,10 +665,11 @@ export class ExecutionEngine {
           const recovered = await this.options.gateway.recoverBoundContentOutput(source.runId, write.callId, write.call, priorBinding,
             binding.documentId, captured?.length === 1 ? captured[0] : undefined)
           if (recovered) {
-            const update = (target: ToolTarget) => JSON.stringify(target) === JSON.stringify(binding.target) ? structuredClone(recovered.target) : target
+            const contentOutput = executionContentOutputSchema.parse(recovered)
+            const update = (target: ToolTarget) => JSON.stringify(target) === JSON.stringify(binding.target) ? structuredClone(contentOutput.target) : target
             frozen.documents = frozen.documents.map(document => document.documentId === binding.documentId
               ? { ...document, writable: document.writable.map(update), ...(document.selection ? { selection: document.selection.map(update) } : {}) } : document)
-            frozen.contentOutput = recovered
+            frozen.contentOutput = contentOutput
           }
           break // A newer mismatching result cannot be replaced by an older convenient one.
         }

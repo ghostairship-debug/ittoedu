@@ -349,7 +349,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
           }
         }
         const result = await dispatchMaterialTool(attachments, ids, name, input, deliverySignals.get(runId)?.signal)
-        if ('admittedSourceIds' in result) for (const id of result.admittedSourceIds) ids.add(id)
+        if ('admittedSourceIds' in result) for (const id of result.admittedSourceIds ?? []) ids.add(id)
         if (name === 'material.read' && 'modelMessage' in result && result.modelMessage) {
           const requested = materialReadSchema.parse(input)
           const image = await attachments.readRepresentation(requested.attachmentId, requested.representationId)

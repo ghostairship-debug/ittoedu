@@ -38,7 +38,7 @@ export async function verifyContentResourceDiagnostic(input: {
     ? Object.entries(data.modules).filter((entry): entry is [string, string] => typeof entry[1] === 'string') : []
   const css = typeof data.css === 'string' ? data.css : ''
   const sources = [data.html, css, ...modules.map(([, source]) => source)]
-  if (!sources.some(source => (source.match(/cw-resource:[a-zA-Z0-9_.-]+/g) ?? []).includes(reference))) return result('resolved', '当前源码已经移除原图片引用。')
+  if (!sources.some(source => (source.match(/cw-resource:[a-zA-Z0-9_.-]+/g) ?? []).some(token => token === reference))) return result('resolved', '当前源码已经移除原图片引用。')
   // Reuse the actual resource consumer parser. The sentinel is parse-only;
   // no network request, formal write or new resource identity is performed.
   const extracted = extractHtmlResources({ html: `${replace(data.html)}<style>${replace(css).replace(/<\/style/gi, '<\\/style')}</style>`,
