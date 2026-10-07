@@ -9,6 +9,8 @@ import { mountPublishedCourseV3 } from '../../player/componentPlatform/published
 import { beginSerializedSessionMount, enqueueSerial } from '../ui/serializedSessionMount'
 import { createComponentDeliveryCapture, type ComponentScreenshot } from '../export/componentPlatform/capture'
 import type { ExportPageOptions } from '../../shared/workbench/toolPorts'
+import { componentDeliveryPages, type ComponentDeliveryPage } from '../export/componentPlatform/deliveryPages'
+import type { StaticCourseExportFormat } from './CourseExportSettingsDialog'
 
 export type { CourseDeliverySnapshot } from './courseDeliverySnapshot'
 export type { ComponentDeliveryFinding, ComponentDeliveryReport } from '../export/componentPlatform/delivery'
@@ -43,6 +45,11 @@ export interface CourseDeliveryApi {
   closePreview(): void
   openPreview(): void
   exportCourse(format: CourseDeliveryFormat, mode?: SingleHtmlExportMode, options?: ExportPageOptions): void
+  readonly exportSettingsOpen: boolean
+  readonly exportSettingsPages: readonly ComponentDeliveryPage[]
+  openExportSettings(): void
+  closeExportSettings(): void
+  confirmExportSettings(format: StaticCourseExportFormat, options: ExportPageOptions): void
   cancelPreflight(): void
   continuePreflightExport(): void
   locatePreflightItem(item: ComponentDeliveryFinding): void
@@ -62,6 +69,7 @@ export function useCourseDelivery(ports: CourseDeliveryPorts, watch: CourseDeliv
   const [previewFeedback, setPreviewFeedback] = useState<CourseDeliveryPreviewFeedback | null>(null)
   const [exportPreflightReport, setExportPreflightReport] = useState<ComponentDeliveryReport | null>(null)
   const [largeHtmlByteLength, setLargeHtmlByteLength] = useState<number | null>(null)
+  const [settingsSnapshot, setSettingsSnapshot] = useState<CourseDeliverySnapshot | null>(null)
   const pending = useRef<PendingDelivery | null>(null), large = useRef<PendingDelivery | null>(null)
   const preview = useRef<Awaited<ReturnType<typeof mountPublishedCourseV3>> | null>(null)
   const chain = useRef(Promise.resolve())
@@ -115,6 +123,18 @@ export function useCourseDelivery(ports: CourseDeliveryPorts, watch: CourseDeliv
       else await present(value, beforeSave)
     })
   }, [build, capture, generate, present])
+  const openExportSettings = useCallback(() => {
+    const snapshot = ref.current.readCanonicalSnapshot()
+    if (!snapshot) { ref.current.reportError('当前会话没有可导出的课程。'); return }
+    setSettingsSnapshot(snapshot)
+  }, [])
+  const confirmExportSettings = useCallback((format: StaticCourseExportFormat, options: ExportPageOptions) => {
+    const current = ref.current.readCanonicalSnapshot()
+    if (!settingsSnapshot || !current || !sameDeliveryDocument(settingsSnapshot, current)) {
+      ref.current.reportError('导出设置的目标文档已切换，请在当前文档重新打开设置。'); return
+    }
+    setSettingsSnapshot(null); exportCourse(format, 'offline-portable', options)
+  }, [exportCourse, settingsSnapshot])
   const cancelPreflight = useCallback(() => { pending.current = null; setExportPreflightReport(null) }, [])
   const continuePreflightExport = useCallback(() => {
     const value = pending.current
@@ -168,6 +188,8 @@ export function useCourseDelivery(ports: CourseDeliveryPorts, watch: CourseDeliv
     previewOpen, previewFeedback, exportPreflightReport, largeHtmlByteLength, bindPreviewHost: setPreviewHost,
     previousPreview: () => { void preview.current?.previous() }, nextPreview: () => { void preview.current?.next() },
     closePreview: () => setPreviewOpen(false), openPreview, exportCourse, cancelPreflight, continuePreflightExport,
+    exportSettingsOpen: settingsSnapshot !== null, exportSettingsPages: settingsSnapshot ? componentDeliveryPages(settingsSnapshot.project.surfaces) : [],
+    openExportSettings, closeExportSettings: () => setSettingsSnapshot(null), confirmExportSettings,
     locatePreflightItem: item => { const current = ref.current.readCanonicalSnapshot(); if (current && pending.current && sameDeliveryDocument(current, pending.current.snapshot)) ref.current.navigateFinding(item); cancelPreflight() },
     savePreflightReport, cancelLargeHtml, continueLargeHtml,
     exportLargeHtmlAsWebPackage: () => { cancelLargeHtml(); exportCourse('web-package') },

@@ -11,6 +11,10 @@ import { installFetchBundledFontEmbedSource } from '../../src/renderer/export/bu
 import { executeDocumentDeliveryTool } from '../../src/core/tools/DocumentDeliveryTools'
 import type { DocumentSnapshot } from '../../src/shared/workbench/document'
 import type { ComponentCompilePort } from '../../src/renderer/export/componentPlatform/buildHtml'
+import { createElement } from 'react'
+import { act, fireEvent, render, renderHook, waitFor } from '@testing-library/react'
+import { CourseExportSettingsDialog } from '../../src/renderer/app/CourseExportSettingsDialog'
+import { useCourseDelivery, type CourseDeliveryPorts } from '../../src/renderer/app/useCourseDelivery'
 
 vi.mock('../../src/renderer/export/loadPlayerBundle', () => ({ loadPlayerBundle: () => 'var CoursewarePlayer={};' }))
 const compile: ComponentCompilePort = async () => { throw new Error('No custom source in this sample') }
@@ -94,4 +98,32 @@ it('prints only selected Spatial cameras in captured order with requested paper'
   expect(calls).toEqual(['space/second', 'b/', 'space/first'])
   expect(output.artifacts[0]!.html).toContain('letter landscape')
   expect(new DOMParser().parseFromString(output.artifacts[0]!.html!, 'text/html').querySelectorAll('.page')).toHaveLength(3)
+})
+
+it('confirms optional GUI settings into the drained snapshot and retains them through the existing output notice', async () => {
+  const { snapshot } = sample(), delivery = courseDeliverySnapshot(snapshot)!, calls: string[] = [], saved: string[] = []
+  const captureSnapshot = vi.fn(async () => delivery)
+  const ports: CourseDeliveryPorts = { captureSnapshot, readCanonicalSnapshot: () => delivery, compileComponent: compile,
+    runBusy: async work => work(), commitStatus: vi.fn(), reportError: vi.fn(), navigateFinding: vi.fn(),
+    exportHtml: vi.fn(), exportWebPackage: vi.fn(), exportBinary: vi.fn(), exportPdf: async input => { saved.push(input.html); return { path: 'selected.pdf' } },
+    createOutputCapture: async () => ({ async captureSurface(id) { calls.push(id); return { dataUrl: 'data:image/png;base64,aW1hZ2U=', width: 1000, height: 700 } }, captureInstance: async () => undefined, dispose() {} }),
+  }
+  const hook = renderHook(() => useCourseDelivery(ports, { documentTrigger: null, sidecarTrigger: null, componentPackagesTrigger: null }))
+  act(() => hook.result.current.openExportSettings())
+  expect(captureSnapshot).not.toHaveBeenCalled()
+  const dialog = render(createElement(CourseExportSettingsDialog, { pages: hook.result.current.exportSettingsPages,
+    onCancel: hook.result.current.closeExportSettings, onConfirm: hook.result.current.confirmExportSettings }))
+  fireEvent.click(dialog.getByLabelText('导出 b'))
+  fireEvent.click(dialog.getByLabelText('上移 c'))
+  fireEvent.change(dialog.getByLabelText('导出纸型'), { target: { value: 'letter' } })
+  fireEvent.change(dialog.getByLabelText('导出方向'), { target: { value: 'landscape' } })
+  fireEvent.click(dialog.getByRole('button', { name: '导出', exact: true }))
+  await waitFor(() => expect(hook.result.current.exportPreflightReport).not.toBeNull())
+  expect(captureSnapshot).toHaveBeenCalledTimes(1)
+  expect(calls).toEqual(['c', 'a'])
+  act(() => hook.result.current.continuePreflightExport())
+  await waitFor(() => expect(saved).toHaveLength(1))
+  expect(saved[0]).toContain('letter landscape')
+  expect(calls).toEqual(['c', 'a'])
+  dialog.unmount(); hook.unmount()
 })
