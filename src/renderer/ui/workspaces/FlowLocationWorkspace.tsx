@@ -15,6 +15,8 @@ export interface FlowLocationWorkspaceProps extends FlowWorkspaceProps {
 /** The original shell keeps a single mounted body while switching edit/run. R0 owns every implementation. */
 export function FlowLocationWorkspace(props: FlowLocationWorkspaceProps) {
   const runtime = useCourseV10Runtime()
+  const [, refreshController] = useState(0)
+  useEffect(() => runtime.navigation.subscribe?.(() => refreshController(value => value + 1)), [runtime.navigation])
   useEffect(() => {
     runtime.setPlaying(props.canvasMode === 'run')
     return () => runtime.setPlaying(false)
@@ -36,6 +38,10 @@ export function FlowLocationWorkspace(props: FlowLocationWorkspaceProps) {
     <div className="canvas-mode-switch" role="group" aria-label="画布模式">
       <button type="button" className={props.canvasMode === 'edit' ? 'canvas-mode-switch__active' : ''} aria-pressed={props.canvasMode === 'edit'} onClick={() => props.onCanvasModeChange('edit')}><MousePointer2 size={13} />编辑状态</button>
       <button type="button" className={props.canvasMode === 'run' ? 'canvas-mode-switch__active' : ''} aria-pressed={props.canvasMode === 'run'} onClick={() => props.onCanvasModeChange('run')}><Play size={13} />当前位置试运行</button>
+      <button type="button" aria-label="收展教师控制台" onClick={() => {
+        const collapsed = runtime.navigation.read().collapsed
+        runtime.navigation.setCollapsed(!collapsed)
+      }}>教师控制台</button>
     </div>
     <div className={`canvas-label${props.editingScope === 'global' ? ' canvas-label--global' : ''}`}>{props.editingScope === 'global' ? '全局层 · 视口浮层' : surface?.title}</div>
     <div className="canvas-viewport"><FlowWorkspace {...props} toolbarContainer={toolbarContainer} readOnly={props.canvasMode === 'run'} /></div>

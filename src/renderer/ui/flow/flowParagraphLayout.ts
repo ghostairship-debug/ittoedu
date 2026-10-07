@@ -1,4 +1,69 @@
 import type { FlowParagraphBlockRect } from '../../../shared/flowParagraphAnchors'
+import type { ComponentContainer, ComponentEdit, ComponentFrame, CourseProjectV10 } from '../../../shared/contracts/component-platform'
+import { containerChildIds, owningContainer } from '../../../shared/contracts/component-platform/project'
+import { flowDocumentBlock } from '../../componentPlatform/surfaces/flow/documentProjection'
+import { flowParagraphAnchorAt } from '../../../shared/flowParagraphAnchors'
+
+export function flowReadingMembers(project: CourseProjectV10, container: ComponentContainer): string[] {
+  return containerChildIds(project, container).filter(id => {
+    const instance = project.instances[id]
+    return instance && !instance.flowPlacement && project.definitions[instance.definitionId]?.role !== 'behavior'
+  })
+}
+
+/** Reorder reading members while retaining the actual mixed ownership list. */
+export function flowReadingMove(project: CourseProjectV10, id: string, direction: 'up' | 'down'): ComponentEdit[] {
+  const container = owningContainer(project, id)
+  if (!container) return []
+  const members = flowReadingMembers(project, container), at = members.indexOf(id)
+  if (at < 0) return []
+  const neighbor = members[at + (direction === 'up' ? -1 : 1)]
+  if (!neighbor) return []
+  const remaining = containerChildIds(project, container).filter(member => member !== id)
+  return [{ type: 'instance.move', instanceId: id, container, index: remaining.indexOf(neighbor) + (direction === 'down' ? 1 : 0) }]
+}
+
+/** Capture the real reading container beneath the pointer, including nested sections. */
+export function flowDocumentInsertionAt(paper: HTMLElement, project: CourseProjectV10, surfaceId: string, point: { x: number; y: number }) {
+  const observed = [...paper.querySelectorAll<HTMLElement>('[data-flow-block-id]')]
+    .filter(element => flowDocumentBlock(project, surfaceId, element.dataset.flowBlockId!))
+  const hit = observed.filter(element => {
+    const rect = element.getBoundingClientRect()
+    return point.x >= rect.left && point.x <= rect.right && point.y >= rect.top && point.y <= rect.bottom
+  }).sort((a, b) => depthWithin(b, paper) - depthWithin(a, paper))[0]
+  const id = hit?.dataset.flowBlockId
+  const block = id && flowDocumentBlock(project, surfaceId, id)
+  const container: ComponentContainer = block && block.type === 'section'
+    ? { kind: 'instance', instanceId: block.id }
+    : id ? owningContainer(project, id) ?? { kind: 'surface', surfaceId } : { kind: 'surface', surfaceId }
+  const members = flowReadingMembers(project, container)
+  let afterBlockId: string | null = null
+  for (const member of members) {
+    const element = observed.find(element => element.dataset.flowBlockId === member)
+    if (!element) continue
+    const rect = element.getBoundingClientRect()
+    if (point.y < rect.top + rect.height / 2) break
+    afterBlockId = member
+  }
+  const all = containerChildIds(project, container)
+  const index = afterBlockId ? all.indexOf(afterBlockId) + 1 : members.length ? all.indexOf(members[0]) : all.length
+  return { container, index, afterBlockId }
+}
+
+export type FlowFloatingMode = 'fixed' | 'paragraph' | 'viewport'
+
+/** Freeze the displayed frame when changing mode; anchors are created only by an explicit mode command. */
+export function flowFloatingModeEdits(instanceId: string, displayed: ComponentFrame, placement: NonNullable<CourseProjectV10['instances'][string]['flowPlacement']>,
+  mode: FlowFloatingMode, paperWidth: number, blocks: readonly FlowParagraphBlockRect[], paperOffset: { x: number; y: number }): ComponentEdit[] {
+  const space = mode === 'viewport' ? 'viewport' : 'paper'
+  const delta = placement.space === space ? { x: 0, y: 0 } : space === 'viewport' ? paperOffset : { x: -paperOffset.x, y: -paperOffset.y }
+  const frame: ComponentFrame = { ...displayed, transform: [...displayed.transform.slice(0, 4), displayed.transform[4] + delta.x, displayed.transform[5] + delta.y] as ComponentFrame['transform'] }
+  const anchor = mode === 'paragraph' ? flowParagraphAnchorAt({ x: frame.transform[4], y: frame.transform[5], width: frame.width, height: frame.height }, paperWidth, blocks) : null
+  if (mode === 'paragraph' && !anchor) throw new Error('正文尚未完成布局，暂时不能随段落移动')
+  const { paragraphAnchor: _anchor, ...rest } = placement
+  return [{ type: 'frame.set', instanceId, frame }, { type: 'instance.flowPlacement.set', instanceId,
+    flowPlacement: { ...rest, space, ...(anchor ? { paragraphAnchor: anchor } : {}) } }]
+}
 
 function depthWithin(element: Element, root: Element): number {
   let depth = 0

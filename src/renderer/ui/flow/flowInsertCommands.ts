@@ -1,5 +1,5 @@
 export type FlowInsertDestination = 'document' | 'paper'
-export type FlowInsertKind = 'heading' | 'list' | 'table' | 'formula' | 'divider' | 'callout' | 'section' | 'image' | 'video' | 'audio' | 'component' | 'text-box' | 'shape'
+export type FlowInsertKind = DocumentBlockKind | 'formula' | 'image' | 'video' | 'audio' | 'component' | 'text-box' | 'shape'
 
 export interface FlowInsertCommand {
   readonly destination: FlowInsertDestination
@@ -8,13 +8,8 @@ export interface FlowInsertCommand {
 }
 
 export const FLOW_DOCUMENT_INSERT_COMMANDS: readonly FlowInsertCommand[] = [
-  { destination: 'document', kind: 'heading', label: '标题' },
-  { destination: 'document', kind: 'list', label: '列表' },
-  { destination: 'document', kind: 'table', label: '表格' },
+  ...DOCUMENT_BLOCK_KINDS.map(({ kind, label }) => ({ destination: 'document' as const, kind, label })),
   { destination: 'document', kind: 'formula', label: '公式' },
-  { destination: 'document', kind: 'divider', label: '分隔线' },
-  { destination: 'document', kind: 'callout', label: '提示框' },
-  { destination: 'document', kind: 'section', label: '折叠节' },
   { destination: 'document', kind: 'image', label: '图片' },
   { destination: 'document', kind: 'video', label: '视频' },
   { destination: 'document', kind: 'audio', label: '音频' },
@@ -35,23 +30,45 @@ import { nanoid } from 'nanoid'
 import type { EditorStoreKernel } from '../../store/editorStoreKernel'
 import type { CapturedCourseTarget } from '../../documents/CourseV10DocumentBridge'
 import { DOCUMENT_BLOCK_DEFINITION, documentBlockData } from '../../../components/document-block'
-import type { DocumentBlock } from '../../../shared/document/content'
+import { DOCUMENT_BLOCK_KINDS, createDocumentBlock, type DocumentBlockKind } from '../../document/documentBlockCommands'
 import { TEXT_DEFINITION } from '../../../components/text/adapters'
 import { createTextComponentData } from '../../../components/text/data'
+import { captureFlowMenuPage, type FlowMenuPageCapture } from '../../document/flowWorkspaceRegistry'
+import { flowMenuPaperPlacement } from './flowMenuPaperPlacement'
+import { containerChildIds, owningContainer } from '../../../shared/contracts/component-platform/project'
 import { captureCourseInsertionTarget, commitCourseInsertion, insertCourseElement, insertCourseLibraryAsset, courseAuthorData,
   type CourseInsertionOptions, type CourseInsertionResult } from '../../media/commitCourseMediaAuthoring'
 
 
-export function captureFlowMenuTarget(kernel: EditorStoreKernel): CapturedCourseTarget {
+export type CapturedFlowMenuTarget = CapturedCourseTarget & { flowMenuPage?: Extract<FlowMenuPageCapture, { ok: true }> }
+export function captureFlowMenuTarget(kernel: EditorStoreKernel): CapturedFlowMenuTarget {
   const target = captureCourseInsertionTarget(kernel)
   if (target.project.surfaces.find(surface => surface.id === target.surfaceId)?.kind !== 'flow') throw new Error('请先选择讲义页面')
-  return target
+  const page = captureFlowMenuPage()
+  if (!page.ok) throw new Error(page.reason)
+  if (page.documentId !== target.documentId || page.surfaceId !== target.surfaceId) throw new Error('讲义插入位置已改变，请重新选择')
+  return { ...target, flowMenuPage: page }
 }
 export interface FlowInsertionOptions extends CourseInsertionOptions { assetId?: string }
+/** Resolve once at menu activation, before a picker or library request can change the selection. */
+export function resolveFlowMenuInsertionOptions(target: CapturedFlowMenuTarget, command: FlowInsertCommand, options: FlowInsertionOptions = {}): FlowInsertionOptions {
+  const page = target.flowMenuPage
+  if (!page) return { ...options, destination: command.destination }
+  if (command.destination === 'paper') {
+    const preferred = { width: options.width ?? (command.kind === 'image' ? 480 : 320), height: options.height ?? (command.kind === 'image' ? 320 : 180) }
+    const { frame } = flowMenuPaperPlacement(page, preferred)
+    return { ...options, destination: 'paper', x: options.x ?? frame.x, y: options.y ?? frame.y, width: frame.width, height: frame.height }
+  }
+  const selected = page.selectedBlockId
+  const container = selected ? owningContainer(target.project, selected) : { kind: 'surface' as const, surfaceId: page.surfaceId }
+  if (!container) throw new Error('正文插入位置已不存在')
+  return { ...options, destination: 'document', container: options.container ?? container,
+    index: options.index ?? (selected ? containerChildIds(target.project, container).indexOf(selected) + 1 : containerChildIds(target.project, container).length) }
+}
 /** The original menu enters the canonical component writer, retaining the captured document. */
 export async function insertFlowMenu(kernel: EditorStoreKernel, target: CapturedCourseTarget,
   command: FlowInsertCommand, options: FlowInsertionOptions = {}): Promise<CourseInsertionResult> {
-  const placement = { ...options, destination: command.destination }
+  const placement = resolveFlowMenuInsertionOptions(target, command, options)
   if (['image', 'video', 'audio'].includes(command.kind)) {
     if (!options.assetId) throw new Error('请先选择要插入的媒体素材')
     // Library insertion also fixes the target before asynchronous image metadata reads.
@@ -60,17 +77,11 @@ export async function insertFlowMenu(kernel: EditorStoreKernel, target: Captured
   if (command.kind === 'component') throw new Error('请选择组件库条目后使用组件库的原目标插入入口')
   if (command.kind === 'text-box') return insertCourseElement(kernel, target, 'text', placement)
   if (command.kind === 'shape' || command.kind === 'table' || command.kind === 'formula') return insertCourseElement(kernel, target, command.kind, placement)
-  const text = (value: string) => ({ inlines: [{ type: 'text' as const, text: value }] })
-  const id = `block_${nanoid()}`
-  let block: DocumentBlock
-  switch (command.kind) {
-    case 'heading': block = { id, type: 'heading', level: 2, content: text(options.text ?? '新标题') }; break
-    case 'list': block = { id, type: 'list', ordered: false, items: [{ id: `listitem_${nanoid()}`, content: text(options.text ?? '列表内容') }] }; break
-    case 'divider': block = { id, type: 'divider' }; break
-    case 'callout': block = { id, type: 'callout', tone: 'note', title: text('提示'), body: text(options.text ?? '提示内容') }; break
-    case 'section': block = { id, type: 'section', title: text(options.text ?? '新章节'), collapsedByDefault: false, blocks: [] }; break
-    default: throw new Error(`未知讲义插入类型：${command.kind}`)
-  }
+  if (!DOCUMENT_BLOCK_KINDS.some(value => value.kind === command.kind)) throw new Error(`未知讲义插入类型：${command.kind}`)
+  const defaultText = { heading: '新标题', list: '列表内容', callout: '提示内容', section: '新章节' }
+  const block = createDocumentBlock(command.kind as DocumentBlockKind, () => `block_${nanoid()}`,
+    { text: options.text ?? defaultText[command.kind as keyof typeof defaultText] })
+  const id = block.id
   const childId = command.kind === 'section' ? `instance_${nanoid()}` : null
   return commitCourseInsertion(kernel, target, DOCUMENT_BLOCK_DEFINITION,
     [{ id, definitionId: DOCUMENT_BLOCK_DEFINITION.id, name: command.label, data: documentBlockData(block), ...(childId ? { childIds: [childId] } : {}) },
