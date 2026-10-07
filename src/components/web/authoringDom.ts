@@ -215,7 +215,24 @@ export function createDomAuthoring(root: HTMLElement, options: {
       return previous && current === previous.applied ? previous.computed ?? previous.original ?? ''
         : win.getComputedStyle(element).getPropertyValue(name) || current
     }
+    const applyStyle = (name: string, value: string) => {
+      const current = element.style.getPropertyValue(name), previous = state.styles.get(name)
+      const original = previous && current === previous.applied ? previous.original : current
+      const priority = previous && current === previous.applied ? previous.priority : element.style.getPropertyPriority(name)
+      const computed = previous && current === previous.applied ? previous.computed : win.getComputedStyle(element).getPropertyValue(name)
+      const declaration = doc.createElement('span').style
+      declaration.setProperty(name, value)
+      if (current !== declaration.getPropertyValue(name)) element.style.setProperty(name, value)
+      state.styles.set(name, { original, priority, computed, applied: element.style.getPropertyValue(name) })
+    }
     if (geometry) {
+      if (geometry.width !== undefined) styles.width = `${geometry.width}px`
+      if (geometry.height !== undefined) styles.height = `${geometry.height}px`
+      if (record.kind === 'text' && (geometry.width !== undefined || geometry.height !== undefined)
+        && baseStyle('display') === 'inline') styles.display = 'inline-block'
+      // A percentage origin belongs to the new box, including when a rotated
+      // text box is resized again. Keep the same restoration bookkeeping.
+      for (const name of ['display', 'width', 'height']) if (styles[name] !== undefined) applyStyle(name, styles[name]!)
       const changesLinear = geometry.scaleX !== undefined || geometry.scaleY !== undefined || geometry.rotation !== undefined
       if (geometry.translateX !== undefined || geometry.translateY !== undefined || changesLinear) {
         const base = (baseStyle('translate') || '0px 0px').split(/\s+/)
@@ -237,10 +254,6 @@ export function createDomAuthoring(root: HTMLElement, options: {
         const source = baseStyle('rotate')
         styles.rotate = `calc(${!source || source === 'none' ? '0deg' : source} + ${geometry.rotation}deg)`
       }
-      if (geometry.width !== undefined) styles.width = `${geometry.width}px`
-      if (geometry.height !== undefined) styles.height = `${geometry.height}px`
-      if (record.kind === 'text' && (geometry.width !== undefined || geometry.height !== undefined)
-        && win.getComputedStyle(element).display === 'inline') styles.display = 'inline-block'
     }
     for (const [name, property] of state.styles) if (!(name in styles)) {
       if (element.style.getPropertyValue(name) === property.applied) {
@@ -249,16 +262,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
       }
       state.styles.delete(name)
     }
-    for (const [name, value] of Object.entries(styles)) {
-      const current = element.style.getPropertyValue(name), previous = state.styles.get(name)
-      const original = previous && current === previous.applied ? previous.original : current
-      const priority = previous && current === previous.applied ? previous.priority : element.style.getPropertyPriority(name)
-      const computed = previous && current === previous.applied ? previous.computed : win.getComputedStyle(element).getPropertyValue(name)
-      const declaration = doc.createElement('span').style
-      declaration.setProperty(name, value)
-      if (current !== declaration.getPropertyValue(name)) element.style.setProperty(name, value)
-      state.styles.set(name, { original, priority, computed, applied: element.style.getPropertyValue(name) })
-    }
+    for (const [name, value] of Object.entries(styles)) applyStyle(name, value)
   }
   const refresh = () => {
     if (disposed || refreshing) return
