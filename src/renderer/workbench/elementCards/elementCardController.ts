@@ -12,6 +12,7 @@ import { selectionReference, workbenchSelection, type SelectionCapture } from '.
 import type { DocumentSnapshot } from '../../../shared/workbench/document'
 import { isExecutionInputError } from '../../../shared/workbench/executionInputMessages'
 import { textTargetContent } from '../../../core/drivers/course/elementFields'
+import { prepareExecutionContentOutput } from '../../../core/tools/ToolTargets'
 
 /**
  * Element AI cards (M15): every element has its own card with its requests and replies. A card is backed by an
@@ -315,7 +316,7 @@ export class ElementCardController {
       if (this.cards.get(key) !== card || card.closing || pending.cancelled) throw new Error('发送已取消；未发送的输入保留。')
     }
     // Capture now, before another send finishes. Queuing and subsequent browsing never retarget this request.
-    const prepared = (async () => card.kind === 'text' ? this.textCapture(card)
+    const prepared = (async (): Promise<(SelectionCapture & { contentOutput?: ExecutionSendInput['contentOutput'] }) | undefined> => card.kind === 'text' ? this.textCapture(card)
       : typeof selected === 'function' ? selected() : selected)()
       .then(capture => ({ capture }), error => ({ error }))
     try {
@@ -338,8 +339,10 @@ export class ElementCardController {
         card.workspaceId = workspace.workspaceId; card.conversation = current
         card.projection = emptyExecutionProjection(current.conversationId); this.listen(api); alive()
       }
+      const contentOutput = card.kind === 'text' ? capture.contentOutput : undefined
       const request = { workspaceId: workspace.workspaceId, conversationId: current.conversationId, submissionId, text,
         documents: [selectionReference(capture, permission !== 'read-only')], attachments: [], mode: 'queue' as const,
+        ...(contentOutput ? { contentOutput } : {}),
         permission, disclosedSettings: disclosedExecutionSettings(settings) }
       let result: ExecutionSendResult
       for (let attempt = 0; ; attempt++) {
@@ -408,7 +411,7 @@ export class ElementCardController {
   }
 
   /** A text card's range as it is now; refused while a request runs or when the text is no longer where the card left it. */
-  private async textCapture(card: CardRecord): Promise<SelectionCapture> {
+  private async textCapture(card: CardRecord): Promise<SelectionCapture & { contentOutput?: ExecutionSendInput['contentOutput'] }> {
     const latest = this.latestTextEntry(card), api = this.ports.execution()
     if (latest && api?.elementChange) {
       const start = card.textStart, change = await api.elementChange(latest.submissionId)
@@ -420,7 +423,9 @@ export class ElementCardController {
     const snapshot = await this.ports.snapshot?.(card.documentId)
     if (!snapshot) throw new Error('文档尚未就绪，请稍后再发送。')
     if (card.content !== undefined && textTargetContent(snapshot.model, card.target) !== card.content) throw new Error('这段文字已被改动，请重新选中后再打开 AI 卡。')
-    return { documentId: card.documentId, epoch: snapshot.epoch, revision: snapshot.revision, targets: [structuredClone(card.target)], label: card.label }
+    const contentOutput = prepareExecutionContentOutput(snapshot, card.target)
+    return { documentId: card.documentId, epoch: snapshot.epoch, revision: snapshot.revision, targets: [structuredClone(card.target)], label: card.label,
+      ...(contentOutput ? { contentOutput } : {}) }
   }
   /** A text card follows its text: each ended request, undo or redo says where it is now. */
   private followText(card: CardRecord, change: ElementChangeView) {

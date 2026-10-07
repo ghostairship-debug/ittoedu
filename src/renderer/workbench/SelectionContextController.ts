@@ -3,9 +3,9 @@ import { useSyncExternalStore } from 'react'
 import type { DocumentContextSelection } from '../../shared/document/ports'
 import type { DocumentSnapshot } from '../../shared/workbench/document'
 import type { ExecutionDocumentReference, ExecutionSelectionTarget } from '../../shared/workbench/executionDesktop'
-import { containsTarget, readTarget } from '../../core/tools/ToolTargets'
+import { containsTarget, readTarget, prepareExecutionContentOutput } from '../../core/tools/ToolTargets'
 import type { ExecutionContentOutput } from '../../shared/workbench/execution'
-import { courseInstanceContext, isCourseInstanceRange, readCourseInstanceText, type CourseInstanceTarget } from '../../core/tools/ToolTargets'
+import { isCourseInstanceRange, type CourseInstanceTarget } from '../../core/tools/ToolTargets'
 import type { DocumentSlot } from '../../shared/document/ports'
 
 export interface SelectionCapture {
@@ -153,18 +153,8 @@ export class SelectionContextController {
     if (snapshot.epoch !== selection.epoch || snapshot.revision !== selection.revision) throw new Error('选中的内容已改变，请重新选择后发送。')
     captureSelection(snapshot, selection.targets, selection.label)
     if (!this.requestHandler) throw new Error('统一创作助手尚未就绪。')
-    let contentOutput: ExecutionContentOutput | undefined
     const target = selection.targets.length === 1 ? selection.targets[0] : undefined
-    if (contentOnly && target) {
-      if (target.kind === 'course-instance') {
-        const { instance } = courseInstanceContext(snapshot.model, target)
-        const content = readCourseInstanceText(snapshot.model, target)
-        if (!instance.locked && content !== null && (typeof content === 'string' || !content.inlines.some(inline => inline.type === 'math')))
-          contentOutput = { kind: 'replace-text', documentId: selection.documentId, target: structuredClone(target) }
-      } else if (target.kind === 'markdown-range') {
-        contentOutput = { kind: 'replace-text', documentId: selection.documentId, target: structuredClone(target) }
-      }
-    }
+    const contentOutput = contentOnly && target ? prepareExecutionContentOutput(snapshot, target) : undefined
     this.requestHandler({ selection: structuredClone(selection), instruction, ...(contentOutput ? { contentOutput } : {}) })
   }
 }
