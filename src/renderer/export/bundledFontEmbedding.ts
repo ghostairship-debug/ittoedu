@@ -150,7 +150,7 @@ export function parseCssFontStack(value: string): string[] {
 /**
  * Every bundled family the payload needs, in manifest order.
  *
- * The walk keys on the `fontFamily` property name rather than on a list of
+ * The walk keys on the `fontFamily` / CSS `font-family` property names rather than on a list of
  * document paths, so it covers a text node's `style.fontFamily`, a run-level
  * override, a presentation-state override, a flow block run, a design token and
  * any component prop that names a font — without having to be taught each new
@@ -187,7 +187,7 @@ export function collectBundledFontFamiliesInUse(value: unknown): string[] {
     if ((current as { type?: unknown }).type === 'flow' || (current as { kind?: unknown }).kind === 'flow') found.add(BUNDLED_TEXT_FONT_FAMILY)
 
     for (const [key, entry] of Object.entries(current)) {
-      if (key === 'fontFamily' && typeof entry === 'string') {
+      if ((key === 'fontFamily' || key === 'font-family') && typeof entry === 'string') {
         for (const name of parseCssFontStack(entry)) {
           const bundled = BUNDLED_FAMILY_BY_LOWERCASE.get(name.toLowerCase())
           if (bundled) found.add(bundled)

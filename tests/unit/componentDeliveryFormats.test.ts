@@ -67,6 +67,21 @@ it('diagnoses the observed HTTP-200 HTML font response without embedding it or r
   } finally { warning.mockRestore() }
 })
 
+it('carries an imported Web fragment CSS font declaration into the actual offline HTML product', async () => {
+  registerBundledFontEmbedSource(resolveEmbeddableBundledFonts)
+  const { snapshot } = sample()
+  if (snapshot.model.kind !== 'course-v10') throw new Error('course')
+  const project = snapshot.model.project
+  project.definitions = { web: { id: 'web', role: 'content', implementation: { kind: 'builtin', key: 'guoling.web' } } }
+  project.instances = { web: { id: 'web', definitionId: 'web', data: { html: '<p>串联电路</p>' },
+    style: { 'font-family': '"Noto Sans SC", sans-serif' }, frame: { width: 1280, height: 23, transform: [1, 0, 0, 1, 0, 0] } } }
+  project.surfaces = [{ id: 'page', title: '导入正文', kind: 'slide', childIds: ['web'], designSize: { width: 1280, height: 720 } }]
+  const output = await buildComponentDelivery(courseDeliverySnapshot(snapshot)!, 'single-html', { compile })
+  expect(output.artifacts[0]!.html).toContain('data:font/woff2;base64,')
+  expect(output.artifacts[0]!.html).toContain('SIL OPEN FONT LICENSE')
+  expect(output.report.items.filter(item => item.code === 'bundled-font-unavailable')).toEqual([])
+})
+
 it('carries public ordered page choices through a captured Main request into actual PPTX XML and paper dimensions', async () => {
   const { snapshot } = sample(), options = { pageIds: ['c', 'a'], pageSize: 'letter' as const, orientation: 'landscape' as const }
   const service = { lookup: async () => null, export: vi.fn(async () => ({ status: 'generated' as const, documentId: 'delivery', epoch: 'epoch', format: 'pptx' as const, currentRevision: 0, warnings: [] })), save: vi.fn() }
