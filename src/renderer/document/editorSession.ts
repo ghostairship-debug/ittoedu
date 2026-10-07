@@ -13,6 +13,7 @@ import type { DocumentBlock } from '../../shared/document/content'
 import { prepareDocumentClipboard, type DocumentClipboardResourcePort } from './documentClipboard'
 import { documentResourceReferences } from '../../shared/document/resources'
 import { resolveFlowParagraphPresentation } from '../../shared/flowBodyPresentation'
+import { resolveSectionPresentation } from '../../shared/componentPresentation'
 import { flowFormulaBlockElement, flowInlineFormulaHtml } from '../../shared/document/render'
 import { previewCaretTransaction } from './editPreviewWidgets'
 import { createDocumentInputRuleResult, matchDocumentInputRule, type DocumentFormulaDraftRequest } from './documentInputRules'
@@ -187,7 +188,7 @@ export function createLayoutEditor(element: HTMLElement, initial: LayoutEditorOp
         heading: (node: import('prosemirror-model').Node) => textView(node, `h${node.attrs.data.level}`),
         section: (node: import('prosemirror-model').Node) => {
           const dom = flowBlockElement(node, 'details') as HTMLDetailsElement
-          dom.open = !node.attrs.data.collapsedByDefault
+          dom.open = resolveSectionPresentation(node.attrs.data, 'author').open
           return { dom, contentDOM: dom }
         },
         slot: (node: import('prosemirror-model').Node, current: EditorView, getPos: () => number | undefined) => {
