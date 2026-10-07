@@ -95,7 +95,24 @@ export class DocumentHostService {
     })
     this.fileCoordinator = new DocumentFileCoordinator(this.registry, this.journal, path.join(directory, 'binding-intents'))
     this.files = new WorkspaceFiles({ ...fileDependencies, aroundMutation: this.fileCoordinator.aroundMutation,
-      aroundOperation: perform => this.fileCoordinator.withFileOperation(perform) })
+      aroundOperation: perform => this.fileCoordinator.withFileOperation(perform),
+      captureCopyContent: async (source, kind) => {
+        const captured = []
+        for (const observed of this.registry.list()) {
+          if (observed.binding.kind !== 'file') continue
+          const relative = path.relative(source, observed.binding.path)
+          if (kind === 'file' ? canonicalKey(source) !== canonicalKey(observed.binding.path)
+            : relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) continue
+          const snapshot = await this.registry.get(observed.documentId).drain()
+          if (snapshot.binding.kind !== 'file' || canonicalKey(snapshot.binding.path) !== canonicalKey(observed.binding.path)) throw new Error('复制期间当前稿文件位置已变化')
+          const driver = this.drivers.find(driver => driver.kind === snapshot.model.kind)
+          if (!driver) throw new Error('当前稿格式没有可用的保存编码器')
+          captured.push({ sourcePath: snapshot.binding.path, relativePath: kind === 'file' ? '' : relative,
+            bytes: await driver.serialize(snapshot.model), ...(snapshot.model.kind === 'markdown'
+              ? { markdown: { source: snapshot.model.source, resources: snapshot.model.resources } } : {}) })
+        }
+        return captured
+      } })
     this.artifacts = new FileArtifactService(this)
     this.agentFiles = new AgentFileService(this)
     this.artifactDeliveries = new HostArtifactDeliveryService({

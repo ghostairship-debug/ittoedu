@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { promises as fs, type Stats } from 'node:fs'
 import path from 'node:path'
+import type { DocumentResources } from '../../shared/workbench/document'
 import { DocumentJournalError, markdownReferences, readDocumentFileVersion, readDocumentMarkdownResources, resourcePath } from './documentJournal'
 
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT'
@@ -40,7 +41,8 @@ async function removeOwned(items: Owned[]): Promise<void> {
 }
 
 /** Prepares immutable sidecars only. The caller owns the file-operation lock and Markdown rename. */
-export async function prepareMarkdownMoveResources(sourcePath: string, targetPath: string): Promise<{ sourceVersion: string; rollback(): Promise<void> }> {
+export async function prepareMarkdownMoveResources(sourcePath: string, targetPath: string,
+  captured?: { source: string; resources: DocumentResources }): Promise<{ sourceVersion: string; rollback(): Promise<void> }> {
   const source = path.resolve(sourcePath), target = path.resolve(targetPath)
   for (const filename of [source, target]) {
     const volume = path.parse(filename).root
@@ -51,9 +53,9 @@ export async function prepareMarkdownMoveResources(sourcePath: string, targetPat
   const sourceRoot = await fs.realpath(path.dirname(source)), targetRoot = await fs.realpath(path.dirname(target))
   const sourceVersion = await readDocumentFileVersion(source, 'markdown')
   if (sourceVersion === null) throw new Error('移动源文件已不存在')
-  const references = await markdownReferences(await fs.readFile(source, 'utf8'))
+  const references = await markdownReferences(captured?.source ?? await fs.readFile(source, 'utf8'))
   for (const relative of references) await resourcePath(sourceRoot, relative, { rejectSymlinks: true })
-  const resources = await readDocumentMarkdownResources(source)
+  const resources = captured?.resources ?? await readDocumentMarkdownResources(source)
   const packageNames = Object.keys(resources.components).filter(relative => !Object.keys(resources.components).some(other => other !== relative && relative.startsWith(`${other}/`)))
   const packages: Package[] = []
   const files: { relative: string; target: string; bytes: Uint8Array; prepared?: string }[] = []
@@ -86,7 +88,7 @@ export async function prepareMarkdownMoveResources(sourcePath: string, targetPat
       if (!existing.isFile() || hash(await fs.readFile(filename)) !== hash(bytes)) throw conflict()
     } else files.push({ relative, target: filename, bytes })
   }
-  if (await readDocumentFileVersion(source, 'markdown') !== sourceVersion) throw new DocumentJournalError('file-conflict', '移动准备期间源文档或附件已改变')
+  if (!captured && await readDocumentFileVersion(source, 'markdown') !== sourceVersion) throw new DocumentJournalError('file-conflict', '移动准备期间源文档或附件已改变')
 
   const created: Owned[] = [], staging: Owned[] = []
   let rolledBack = false
@@ -164,7 +166,7 @@ export async function prepareMarkdownMoveResources(sourcePath: string, targetPat
       await fs.rename(bundle.prepared!, bundle.target)
       bundle.owned = owned.map(item => ({ ...item, filename: path.join(bundle.target, path.relative(bundle.prepared!, item.filename)) }))
     }
-    if (await readDocumentFileVersion(source, 'markdown') !== sourceVersion) throw new DocumentJournalError('file-conflict', '移动准备期间源文档或附件已改变')
+    if (!captured && await readDocumentFileVersion(source, 'markdown') !== sourceVersion) throw new DocumentJournalError('file-conflict', '移动准备期间源文档或附件已改变')
     await removeOwned(staging)
     return { sourceVersion, rollback }
   } catch (error) {

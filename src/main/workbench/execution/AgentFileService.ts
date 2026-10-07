@@ -331,24 +331,24 @@ export class AgentFileService implements AgentFilePort {
     }
     const sources = name === 'file.trash' ? scoped : scoped.slice(0, agentFileSchemas[name].parse(raw).sources.length)
     const destination = name === 'file.trash' ? undefined : await this.entryId(root, path.dirname(scoped[sources.length]!))
-    const flushFirst = name === 'file.copy' && (raw as { flushFirst?: unknown }).flushFirst === true
+    const sourceVersion = name === 'file.copy'
+      ? agentFileSchemas['file.copy'].parse(raw).sourceVersion ?? ((raw as { flushFirst?: unknown }).flushFirst === true ? 'current' : 'disk') : undefined
     const items: Array<{ status: 'success' | 'partial' | 'failed' | 'cancelled'; sourcePath?: string; targetPath?: string;
-      affectedPaths: string[]; copied?: 'disk-version'; error?: { code: string; message: string } }> = []
+      affectedPaths: string[]; copied?: 'disk-version' | 'current-draft'; error?: { code: string; message: string } }> = []
     for (const [index, source] of sources.entries()) {
       try {
         const dirty = name === 'file.copy' && this.host.registry.list().some(snapshot => snapshot.binding.kind === 'file'
           && snapshot.binding.path.toLowerCase() === source.toLowerCase() && snapshot.dirty)
-        if (dirty && flushFirst) throw new Error('源文件有未保存修改；请先保存或省略 flushFirst 复制磁盘版本')
         const entry = await this.entryId(root, source)
         const id = `${operationId}:${index}`
         context.assertActive?.()
         const receipt = name === 'file.trash'
           ? await this.host.files.trash({ operationId: id, workspaceId: root.workspaceId, entryIds: [entry] })
           : name === 'file.copy'
-            ? await this.host.files.copy({ operationId: id, workspaceId: root.workspaceId, sourceEntryIds: [entry], targetDirectoryId: destination! })
+            ? await this.host.files.copy({ operationId: id, workspaceId: root.workspaceId, sourceEntryIds: [entry], targetDirectoryId: destination!, sourceVersion })
             : await this.host.files.move({ operationId: id, workspaceId: root.workspaceId, sourceEntryIds: [entry], targetDirectoryId: destination! })
         items.push(...receipt.items.map(item => ({ ...item, sourcePath: item.sourcePath ?? source,
-          ...(dirty && item.status === 'success' ? { copied: 'disk-version' as const } : {}) })))
+          ...(dirty && sourceVersion === 'disk' && item.status === 'success' ? { copied: 'disk-version' as const } : {}) })))
       } catch (error) {
         items.push({ status: 'failed', sourcePath: source, affectedPaths: [source],
           error: { code: 'file-operation-failed', message: error instanceof Error ? error.message : String(error) } })
@@ -357,7 +357,8 @@ export class AgentFileService implements AgentFilePort {
     const status = items.every(item => item.status === 'success') ? 'success'
       : items.some(item => item.status === 'success' || item.status === 'partial') ? 'partial' : 'failed'
     const anyDiskVersion = items.some(item => item.copied === 'disk-version')
+    const anyCurrentDraft = items.some(item => item.copied === 'current-draft')
     return { data: { operation: { operationId, status, items, affectedPaths: [...new Set(items.flatMap(item => item.affectedPaths))] },
-      ...(name === 'file.copy' && anyDiskVersion ? { copied: 'disk-version' as const } : {}) } }
+      ...(name === 'file.copy' && (anyCurrentDraft || anyDiskVersion) ? { copied: anyCurrentDraft ? 'current-draft' as const : 'disk-version' as const } : {}) } }
   }
 }

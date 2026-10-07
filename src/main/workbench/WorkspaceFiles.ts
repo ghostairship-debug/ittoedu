@@ -4,7 +4,7 @@ import type { BigIntStats, Dirent, Stats } from 'node:fs'
 import path from 'node:path'
 
 import type { WorkspaceEntryKind, WorkspaceOperationStatus, WorkspaceMutationKind, RegisteredWorkspaceRoot, ResolvedWorkspaceEntry, WorkspaceListItem, WorkspaceListPage, WorkspaceItemResult, WorkspaceOperationResult, WorkspaceMutationAction } from '../../shared/workbench/workspaceFiles'
-import type { DocumentKind } from '../../shared/workbench/document'
+import type { DocumentKind, DocumentResources } from '../../shared/workbench/document'
 export type { WorkspaceEntryKind, WorkspaceOperationStatus, WorkspaceMutationKind, RegisteredWorkspaceRoot, ResolvedWorkspaceEntry, WorkspaceListItem, WorkspaceListPage, WorkspaceItemResult, WorkspaceOperationResult, WorkspaceMutationAction } from '../../shared/workbench/workspaceFiles'
 import { markdownReferences, readDocumentFileVersion } from './documentJournal'
 import { prepareMarkdownMoveResources } from './markdownMoveResources'
@@ -15,6 +15,8 @@ export type WorkspaceAroundMutation = (
 ) => Promise<WorkspaceItemResult>
 
 export interface WorkspaceFilesDependencies {
+  captureCopyContent?(source: string, kind: WorkspaceEntryKind): Promise<readonly { sourcePath: string; relativePath: string; bytes: Uint8Array;
+    markdown?: { source: string; resources: DocumentResources } }[]>
   createId?: () => string
   trashItem?: (resolvedPath: string) => Promise<void>
   showItemInFolder?: (resolvedPath: string) => void
@@ -279,7 +281,7 @@ export class WorkspaceFiles {
     })
   }
 
-  copy(input: { operationId: string; workspaceId: string; sourceEntryIds: string[]; targetDirectoryId: string; overwrite?: boolean; resourcePolicy?: 'copy' | 'cancel' }): Promise<WorkspaceOperationResult> {
+  copy(input: { operationId: string; workspaceId: string; sourceEntryIds: string[]; targetDirectoryId: string; overwrite?: boolean; resourcePolicy?: 'copy' | 'cancel'; sourceVersion?: 'disk' | 'current' }): Promise<WorkspaceOperationResult> {
     return this.transferMany('copy', input)
   }
 
@@ -325,7 +327,7 @@ export class WorkspaceFiles {
 
   private async transferMany(kind: 'copy' | 'move', input: { operationId: string; workspaceId: string;
     sourceEntryIds: string[]; targetWorkspaceId?: string; targetDirectoryId: string; overwrite?: boolean;
-    resourcePolicy?: 'copy' | 'cancel' }): Promise<WorkspaceOperationResult> {
+    resourcePolicy?: 'copy' | 'cancel'; sourceVersion?: 'disk' | 'current' }): Promise<WorkspaceOperationResult> {
     const digest = stableDigest({ kind, ...input })
     return this.runOnce(input.operationId, digest, async () => {
       const targetWorkspaceId = kind === 'move' ? input.targetWorkspaceId ?? input.workspaceId : input.workspaceId
@@ -343,7 +345,7 @@ export class WorkspaceFiles {
           })); continue
         }
         if (kind === 'move') items.push(await this.renameOrMove(input.operationId, input.workspaceId, kind, source, target, !!input.overwrite, input.resourcePolicy))
-        else items.push(await this.copyOne(input.operationId, input.workspaceId, source, target, !!input.overwrite, input.resourcePolicy))
+        else items.push(await this.copyOne(input.operationId, input.workspaceId, source, target, !!input.overwrite, input.resourcePolicy, input.sourceVersion))
       }
       return this.aggregate(input.operationId, items)
     })
@@ -364,17 +366,21 @@ export class WorkspaceFiles {
   }
 
   private async copyOne(operationId: string, workspaceId: string, source: ResolvedWorkspaceEntry,
-    target: WorkspaceDestination, overwrite: boolean, resourcePolicy?: 'copy' | 'cancel'): Promise<WorkspaceItemResult> {
-    const action = { ...this.action(operationId, workspaceId, 'copy', [source], target, overwrite), resourcePolicy }
+    target: WorkspaceDestination, overwrite: boolean, resourcePolicy?: 'copy' | 'cancel', sourceVersion: 'disk' | 'current' = 'disk'): Promise<WorkspaceItemResult> {
+    const current = sourceVersion === 'current' ? await this.dependencies.captureCopyContent?.(source.resolvedPath, source.kind) ?? [] : []
+    const action = { ...this.action(operationId, workspaceId, 'copy', [source], target, overwrite), resourcePolicy,
+      sourceVersion: current.length ? 'current' as const : 'disk' as const }
     return this.coordinate(action, async () => {
       await this.requireAvailableTarget(target.resolvedPath, overwrite)
       await this.assertTreeClosed(workspaceId, source.resolvedPath)
-      await this.copyVerified(source.resolvedPath, target.resolvedPath, source.kind, operationId)
+      let rollbackResources: (() => Promise<void>) | undefined
+      if (current.length) rollbackResources = await this.copyCurrentContent(source.resolvedPath, target.resolvedPath, source.kind, operationId, current, resourcePolicy)
+      else await this.copyVerified(source.resolvedPath, target.resolvedPath, source.kind, operationId)
       const copied = await this.provisionalEntry(workspaceId, target.resolvedPath, source.kind)
       return {
-        result: { status: 'success', sourceEntryId: source.entryId, entryId: copied.entryId, sourcePath: source.resolvedPath,
-          targetPath: target.resolvedPath, affectedPaths: [source.resolvedPath, target.resolvedPath] },
-        rollback: async () => { await this.removePath(target.resolvedPath); this.forgetTree(workspaceId, target.resolvedPath) },
+          result: { status: 'success', sourceEntryId: source.entryId, entryId: copied.entryId, sourcePath: source.resolvedPath,
+            targetPath: target.resolvedPath, affectedPaths: [source.resolvedPath, target.resolvedPath], copied: current.length ? 'current-draft' : 'disk-version' },
+          rollback: async () => { await this.removePath(target.resolvedPath); await rollbackResources?.(); this.forgetTree(workspaceId, target.resolvedPath) },
         commit: () => this.remember(copied),
       }
     })
@@ -453,7 +459,7 @@ export class WorkspaceFiles {
       if (++calls !== 1) throw new WorkspaceFilesError('mutation-performed-twice', '协调钩子只能执行一次文件操作')
       await this.assertMutationPathsCurrent(action)
       const source = action.sources[0], target = action.target
-      if ((action.kind === 'move' || action.kind === 'copy') && source?.kind === 'file' && target
+      if ((action.kind === 'move' || action.kind === 'copy' && action.sourceVersion !== 'current') && source?.kind === 'file' && target
         && /\.(md|markdown)$/i.test(source.resolvedPath)
         && this.pathKey(path.dirname(source.resolvedPath)) !== this.pathKey(target.resolvedDirectoryPath)) {
         const references = await markdownReferences(await fs.readFile(source.resolvedPath, 'utf8'))
@@ -535,6 +541,34 @@ export class WorkspaceFiles {
       await this.renamePath(temporary, target)
       return before
     } catch (error) {
+      await fs.rm(temporary, { recursive: true, force: true }).catch(() => {})
+      throw error
+    }
+  }
+
+  private async copyCurrentContent(source: string, target: string, kind: WorkspaceEntryKind, operationId: string,
+    content: Awaited<ReturnType<NonNullable<WorkspaceFilesDependencies['captureCopyContent']>>>, resourcePolicy?: 'copy' | 'cancel'): Promise<() => Promise<void>> {
+    const temporary = this.temporarySibling(target, operationId)
+    const resources: Awaited<ReturnType<typeof prepareMarkdownMoveResources>>[] = []
+    const rollbackResources = async () => { for (const resource of resources.reverse()) await resource.rollback() }
+    await fs.rm(temporary, { recursive: true, force: true })
+    try {
+      await this.copyPath(source, temporary, kind)
+      for (const captured of content) {
+        const filename = kind === 'file' ? temporary : path.resolve(temporary, captured.relativePath)
+        if (kind === 'directory' && !this.isSameOrDescendant(filename, temporary)) throw new Error('当前稿副本越出复制目录')
+        if (captured.markdown && (await markdownReferences(captured.markdown.source)).length) {
+          if (resourcePolicy === 'cancel') throw new WorkspaceOperationCancelledError('已取消当前稿及附件复制')
+          if (resourcePolicy !== 'copy' && this.pathKey(path.dirname(source)) !== this.pathKey(path.dirname(target)))
+            throw new WorkspaceFilesError('resource-choice-required', '当前稿引用本地附件，请选择一并复制附件或取消')
+          resources.push(await prepareMarkdownMoveResources(captured.sourcePath, filename, captured.markdown))
+        }
+        await fs.writeFile(filename, captured.bytes)
+      }
+      await this.renamePath(temporary, target)
+      return rollbackResources
+    } catch (error) {
+      await rollbackResources()
       await fs.rm(temporary, { recursive: true, force: true }).catch(() => {})
       throw error
     }

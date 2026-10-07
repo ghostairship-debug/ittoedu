@@ -53,6 +53,7 @@ export interface WorkspaceItemResult {
   sourcePath?: string
   targetPath?: string
   affectedPaths: string[]
+  copied?: 'disk-version' | 'current-draft'
   error?: { code: string; message: string }
 }
 
@@ -72,6 +73,7 @@ export interface WorkspaceMutationAction {
   affectedPaths: string[]
   overwrite: boolean
   resourcePolicy?: 'copy' | 'cancel'
+  sourceVersion?: 'disk' | 'current'
 }
 
 
@@ -94,7 +96,8 @@ export const workspaceFilesRequestSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('create-markdown'), ...mutation, targetDirectoryId: id, name }).strict(),
   z.object({ type: z.literal('mkdir'), ...mutation, targetDirectoryId: id, name }).strict(),
   z.object({ type: z.literal('rename'), ...mutation, sourceEntryId: id, name }).strict(),
-  z.object({ type: z.literal('copy'), ...mutation, sourceEntryIds: z.array(id).min(1), targetDirectoryId: id, resourcePolicy: z.enum(['copy', 'cancel']).optional() }).strict(),
+  z.object({ type: z.literal('copy'), ...mutation, sourceEntryIds: z.array(id).min(1), targetDirectoryId: id,
+    sourceVersion: z.enum(['disk', 'current']).optional(), resourcePolicy: z.enum(['copy', 'cancel']).optional() }).strict(),
   z.object({ type: z.literal('move'), ...mutation, sourceEntryIds: z.array(id).min(1), targetWorkspaceId: id.optional(), targetDirectoryId: id, resourcePolicy: z.enum(['copy', 'cancel']).optional() }).strict(),
   z.object({ type: z.literal('trash'), ...mutation, entryIds: z.array(id).min(1) }).strict(),
   z.object({ type: z.literal('reveal'), ...mutation, entryId: id }).strict(),
