@@ -18,6 +18,7 @@ import type { OfficeContentToolName } from './OfficeContentTools'
 import type { HostArtifactSaveInput } from './HostArtifactTools'
 import type { MaterialToolName } from './MaterialTools'
 import type { HtmlActionToolName } from './HtmlActionTools'
+import { serviceToolOutcome } from './modelToolResult'
 
 /** Main supplies real services. Neither their implementations nor credentials enter core. */
 export interface HostToolServices {
@@ -29,6 +30,10 @@ export interface HostToolServices {
   office?: {
     execute(input: { grant: ToolRunGrant; operationId: string; name: OfficeContentToolName; input: unknown;
       approvedPaths?: readonly string[]; assertActive(): void }): Promise<ToolResult>
+  }
+  pptxImport?: {
+    import(input: { grant: ToolRunGrant; operationId: string; path: string; destination?: string; assertActive(): void }): Promise<ToolResult>
+    lookup?(runId: string, operationId: string): Promise<ToolResult | null>
   }
   materials?: {
     admit(runId: string, sourceIds: readonly string[]): Promise<void>
@@ -166,6 +171,7 @@ interface HostAuthority {
 }
 interface Job { runId: string; documentId: string; epoch: string; jobId: string }
 interface ImageJob extends Job { kind: 'image'; scope: 'document' | 'workspace'; controller: AbortController; resources: Map<string, string> }
+interface CachedResult { runId: string; name: string; promise: Promise<ToolResult>; pending: boolean; uncertain: boolean; receipt: boolean }
 
 /** Service work prepares resources; the Gateway owns canonical document operations. */
 export class HostToolCoordinator {
@@ -173,9 +179,9 @@ export class HostToolCoordinator {
   private readonly runs = new Map<string, { grant: ToolRunGrant; stopped: boolean;
     computeJobs: Set<string>; pendingCompute: Set<Promise<ComputeJobSnapshot>>;
     delegationJobs: Set<string>; pendingDelegation: Set<Promise<HostDelegationSnapshot>> }>()
-  private readonly results = new Map<string, Promise<ToolResult>>()
-  private readonly reissuedImages = new Map<string, Promise<string>>()
-  private readonly approvedPaths = new Map<string, readonly string[]>()
+  private readonly results = new Map<string, CachedResult>()
+  private readonly reissuedImages = new Map<string, { runId: string; promise: Promise<string> }>()
+  private readonly approvedPaths = new Map<string, { runId: string; paths: readonly string[] }>()
   private readonly htmlResources = new Map<string, Set<string>>()
   constructor(private services: HostToolServices, private readonly registry: DocumentRegistry, private readonly authority: HostAuthority) {}
   configure(services: HostToolServices) { this.services = services }
@@ -216,18 +222,27 @@ export class HostToolCoordinator {
   projectFileServices() { return this.services.projectFiles }
   authorizeOperationPaths(runId: string, operationId: string, paths: readonly string[]): void {
     this.serviceRun(runId)
-    this.approvedPaths.set(operationId, [...paths])
+    this.approvedPaths.set(operationId, { runId, paths: [...paths] })
   }
   async executeOffice(runId: string, operationId: string, name: OfficeContentToolName, input: unknown): Promise<ToolResult> {
     const run = name === 'office.inspect' ? this.serviceRun(runId) : this.writableRun(runId)
     if (!this.services.office) return this.serviceUnavailable('Office 原格式服务尚未接入')
     const execute = () => this.services.office!.execute({ grant: run.grant, operationId, name, input,
-      approvedPaths: this.approvedPaths.get(operationId), assertActive: () => { this.serviceRun(runId) } })
+      approvedPaths: this.approvedPaths.get(operationId)?.paths, assertActive: () => { this.serviceRun(runId) } })
     if (name === 'office.inspect') return execute()
     const previous = this.results.get(operationId)
-    if (previous) return structuredClone(await previous)
+    if (previous) return structuredClone(await previous.promise)
     const result = execute()
-    this.results.set(operationId, result)
+    this.rememberResult(runId, operationId, name, result)
+    return structuredClone(await result)
+  }
+  async importPptx(runId: string, operationId: string, input: { path: string; destination?: string }): Promise<ToolResult> {
+    const run = this.writableRun(runId), service = this.services.pptxImport
+    if (!service) return this.serviceUnavailable('PPTX 课件导入服务尚未接入')
+    const previous = this.results.get(operationId)
+    if (previous) return structuredClone(await previous.promise)
+    const result = service.import({ grant: run.grant, operationId, ...input, assertActive: () => { this.writableRun(runId) } })
+    this.rememberResult(runId, operationId, 'course.importPptx', result)
     return structuredClone(await result)
   }
   readMaterial(runId: string, name: MaterialToolName, input: unknown): Promise<ToolResult> {
@@ -248,10 +263,10 @@ export class HostToolCoordinator {
     const source = input.kind === 'image' ? await this.readStandaloneImage(runId, input.job, input.resourceId)
       : await this.readComputeArtifact(runId, input.job, input.name)
     return { kind: 'read', data: await service.save({ grant: run.grant, operationId, source: input, bytes: source.bytes,
-      approvedPaths: this.approvedPaths.get(operationId), assertActive: () => { this.writableRun(runId) } }) }
+      approvedPaths: this.approvedPaths.get(operationId)?.paths, assertActive: () => { this.writableRun(runId) } }) }
   }
   supportContext(): ToolSupportContext {
-    return { htmlActions: !!this.services.htmlActions, office: !!this.services.office, materials: !!this.services.materials, artifacts: !!this.services.artifacts,
+    return { pptxImport: !!this.services.pptxImport, htmlActions: !!this.services.htmlActions, office: !!this.services.office, materials: !!this.services.materials, artifacts: !!this.services.artifacts,
       images: !!this.services.images, skills: !!this.services.skills, deliveries: !!this.services.deliveries,
       observations: !!this.services.observations, projectFiles: !!this.services.projectFiles, jobs: !!this.services.jobs,
       compute: !!this.services.compute, delegation: !!this.services.delegation, web: !!this.services.web,
@@ -281,6 +296,7 @@ export class HostToolCoordinator {
       return { kind: 'error', code: 'not-authorized', message: '只读任务不能点击或输入 HTML 页面内容' }
     if (!this.services.htmlActions) return this.serviceUnavailable('HTML 页面操作服务尚未配置')
     const data = await this.services.htmlActions.execute(runId, document, action)
+    this.serviceRun(runId)
     const resourceId = (data as { image?: { resourceId?: string } })?.image?.resourceId
     if (resourceId) {
       let resources = this.htmlResources.get(runId)
@@ -481,25 +497,25 @@ export class HostToolCoordinator {
   async saveLibraryComponent(runId: string, operationId: string, input: Omit<Parameters<NonNullable<HostToolServices['assetLibrary']>['save']>[0], 'runId'>): Promise<ToolResult> {
     this.writableRun(runId)
     const existing = this.results.get(operationId)
-    if (existing) return structuredClone(await existing)
+    if (existing) return structuredClone(await existing.promise)
     const result: Promise<ToolResult> = this.services.assetLibrary
       ? this.services.assetLibrary.save({ runId, ...input }).then(data => ({ kind: 'read', data }))
       : Promise.resolve(this.serviceUnavailable('资产库服务尚未配置'))
-    this.results.set(operationId, result)
+    this.rememberResult(runId, operationId, 'asset.save', result)
     return structuredClone(await result)
   }
   async changeLibrary(runId: string, operationId: string, change: { kind: 'import'; file: string }
     | { kind: 'delete'; packageId: string; version?: string; sourceId?: string }): Promise<ToolResult> {
     this.writableRun(runId)
     const previous = this.results.get(operationId)
-    if (previous) return structuredClone(await previous)
+    if (previous) return structuredClone(await previous.promise)
     const service = this.services.assetLibrary
     if (!service) return this.serviceUnavailable('资产库服务尚未配置')
     const { kind, ...input } = change
     const result: Promise<ToolResult> = (kind === 'import' ? service.import({ runId, file: (input as { file: string }).file })
       : service.delete({ runId, ...(input as { packageId: string; version?: string; sourceId?: string }) }))
       .then(data => ({ kind: 'read', data }))
-    this.results.set(operationId, result)
+    this.rememberResult(runId, operationId, `asset.${kind}`, result)
     return structuredClone(await result)
   }
   /** The caller proves sourceRunId belongs to its durable continuation lineage. */
@@ -509,7 +525,7 @@ export class HostToolCoordinator {
       return Promise.reject(new Error('当前任务无权重新签发此图片资源'))
     const key = JSON.stringify([currentRunId, sourceDocumentId, destinationDocumentId, sourceRunId, jobId, resourceId])
     const existing = this.reissuedImages.get(key)
-    if (existing) return existing
+    if (existing) return existing.promise
     const work = (async () => {
       const snapshot = await this.registry.get(destinationDocumentId).drain()
       this.authority.active(currentRunId, destinationDocumentId, snapshot.epoch)
@@ -517,37 +533,77 @@ export class HostToolCoordinator {
       this.authority.active(currentRunId, destinationDocumentId, snapshot.epoch)
       return this.authority.provideImage(currentRunId, destinationDocumentId, image)
     })()
-    this.reissuedImages.set(key, work)
-    void work.catch(() => { if (this.reissuedImages.get(key) === work) this.reissuedImages.delete(key) })
+    this.reissuedImages.set(key, { runId: currentRunId, promise: work })
+    void work.catch(() => { if (this.reissuedImages.get(key)?.promise === work) this.reissuedImages.delete(key) })
     return work
   }
   async stop(runId: string) {
     const run = this.runs.get(runId)
     if (run) run.stopped = true
     for (const job of this.jobs.values()) if (job.runId === runId && job.kind === 'image') job.controller.abort()
-    await Promise.allSettled([
-      ...(this.services.stopRun ? [this.services.stopRun(runId)] : []),
-      ...(this.services.observations?.stopRun ? [this.services.observations.stopRun(runId)] : []),
-      ...[...this.jobs.values()].filter((job): job is ImageJob => job.runId === runId && job.kind === 'image').map(job => this.services.images!.stop(job.jobId)),
-      ...(this.services.compute ? [this.services.compute.cancelRun(runId)] : []),
-      ...(this.services.delegation ? [this.services.delegation.cancelRun(runId)] : []),
-      ...(run?.pendingCompute ? [...run.pendingCompute].map(async pending => { const result = await pending; await this.services.compute?.cancel(runId, result.jobId) }) : []),
-      ...(run?.computeJobs ? [...run.computeJobs].map(jobId => this.services.compute?.cancel(runId, jobId)) : []),
-      ...(run?.pendingDelegation ? [...run.pendingDelegation].map(async pending => {
-        const result = await pending; await this.services.delegation?.cancel(runId, result.jobId)
-      }) : []),
-      ...(run?.delegationJobs ? [...run.delegationJobs].map(jobId => this.services.delegation?.cancel(runId, jobId)) : []),
-    ])
+    try {
+      await Promise.allSettled([
+        ...(this.services.stopRun ? [this.services.stopRun(runId)] : []),
+        ...(this.services.observations?.stopRun ? [this.services.observations.stopRun(runId)] : []),
+        ...[...this.jobs.values()].filter((job): job is ImageJob => job.runId === runId && job.kind === 'image').map(job => this.services.images!.stop(job.jobId)),
+        ...(this.services.compute ? [this.services.compute.cancelRun(runId)] : []),
+        ...(this.services.delegation ? [this.services.delegation.cancelRun(runId)] : []),
+        ...(run?.pendingCompute ? [...run.pendingCompute].map(async pending => { const result = await pending; await this.services.compute?.cancel(runId, result.jobId) }) : []),
+        ...(run?.computeJobs ? [...run.computeJobs].map(jobId => this.services.compute?.cancel(runId, jobId)) : []),
+        ...(run?.pendingDelegation ? [...run.pendingDelegation].map(async pending => {
+          const result = await pending; await this.services.delegation?.cancel(runId, result.jobId)
+        }) : []),
+        ...(run?.delegationJobs ? [...run.delegationJobs].map(jobId => this.services.delegation?.cancel(runId, jobId)) : []),
+      ])
+    } finally { this.releaseRuntime(runId) }
+  }
+  /** Called by stop after cancellation; durable owners retain jobs and delivery receipts. */
+  releaseRuntime(runId: string): void {
+    if (this.runs.get(runId)?.stopped === false) throw new Error('运行中的任务不能释放宿主授权和资源句柄')
+    this.runs.delete(runId)
+    for (const [id, job] of this.jobs) if (job.runId === runId) this.jobs.delete(id)
+    for (const [id, entry] of this.approvedPaths) if (entry.runId === runId) this.approvedPaths.delete(id)
+    for (const [id, entry] of this.reissuedImages) if (entry.runId === runId) this.reissuedImages.delete(id)
+    this.htmlResources.delete(runId)
+    for (const [id, entry] of this.results) if (entry.runId === runId && !entry.pending && !entry.uncertain && !entry.receipt) this.results.delete(id)
+  }
+  /** Counts the actual structures, including receipts which recovery still consumes. */
+  runtimeCounts(runId?: string) {
+    const belongs = (entry: { runId: string }) => runId === undefined || entry.runId === runId
+    const runs = [...this.runs.entries()].filter(([id]) => runId === undefined || id === runId).map(([, run]) => run)
+    const jobs = [...this.jobs.values()].filter(belongs), results = [...this.results.values()].filter(belongs)
+    return { runs: runs.length, imageJobs: jobs.length, imageResources: jobs.reduce((count, job) => count + job.resources.size, 0),
+      computeJobs: runs.reduce((count, run) => count + run.computeJobs.size, 0), pendingCompute: runs.reduce((count, run) => count + run.pendingCompute.size, 0),
+      delegationJobs: runs.reduce((count, run) => count + run.delegationJobs.size, 0), pendingDelegation: runs.reduce((count, run) => count + run.pendingDelegation.size, 0),
+      approvedPaths: [...this.approvedPaths.values()].filter(belongs).length, reissuedImages: [...this.reissuedImages.values()].filter(belongs).length,
+      htmlResources: [...this.htmlResources.entries()].filter(([id]) => runId === undefined || id === runId).reduce((count, [, resources]) => count + resources.size, 0),
+      results: results.length, pendingResults: results.filter(entry => entry.pending).length, uncertainResults: results.filter(entry => entry.uncertain).length,
+      receiptResults: results.filter(entry => entry.receipt).length }
+  }
+  private rememberResult(runId: string, operationId: string, name: string, promise: Promise<ToolResult>): void {
+    const entry: CachedResult = { runId, name, promise, pending: true, uncertain: false,
+      receipt: name.startsWith('office.') || name === 'asset.save' || name === 'asset.import' || name === 'asset.delete'
+        || name === 'course.importPptx' && !this.services.pptxImport?.lookup }
+    this.results.set(operationId, entry)
+    void promise.then(result => {
+      entry.pending = false
+      const outcome = serviceToolOutcome(name, result)
+      entry.uncertain = outcome?.status === 'unknown' || outcome?.status === 'pending'
+        || result.kind === 'error' && result.code === 'tool-outcome-unknown'
+      // A service call may settle after stop has removed its runtime owner.
+      if (!this.runs.has(runId) && !entry.uncertain && !entry.receipt && this.results.get(operationId) === entry) this.results.delete(operationId)
+    }, () => { entry.pending = false; entry.uncertain = true })
   }
   invoke(runId: string, operationId: string, requestDigest: string, name: HostToolName, raw: unknown): Promise<ToolResult> {
+    this.serviceRun(runId)
     const registration = hostToolRegistration(name)!
     if (!registration.supports(this.supportContext())) return Promise.resolve({ kind: 'error', code: 'service-unavailable', message: '宿主未配置该正式服务' })
     const invoke = () => registration.handler({ run: (toolName, input) => this.execute(runId, operationId, requestDigest, toolName, input) }, raw)
     if (registration.capability === 'read') return invoke()
     const existing = this.results.get(operationId)
-    if (existing) return existing.then(result => structuredClone(result))
+    if (existing) return existing.promise.then(result => structuredClone(result))
     const promise = invoke()
-    this.results.set(operationId, promise)
+    this.rememberResult(runId, operationId, name, promise)
     return promise.then(result => structuredClone(result))
   }
   /** Recovery queries only; no registration of edit authority or reconstruction of a task. */
@@ -556,8 +612,12 @@ export class HostToolCoordinator {
       const receipt = await this.services.artifacts.lookup(runId, operationId)
       return receipt ? { kind: 'read', data: receipt } : null
     }
-    if (name.startsWith('office.') && this.results.has(operationId)) return structuredClone(await this.results.get(operationId)!)
-    if (name === 'asset.save' || name === 'asset.import' || name === 'asset.delete') return this.results.has(operationId) ? structuredClone(await this.results.get(operationId)!) : null
+    if (name === 'course.importPptx' && this.services.pptxImport?.lookup) {
+      const receipt = await this.services.pptxImport.lookup(runId, operationId)
+      if (receipt) return structuredClone(receipt)
+    }
+    const cached = this.results.get(operationId)
+    if (cached && cached.runId === runId && cached.name === name) return structuredClone(await cached.promise)
     if ((name === 'file.save' || name === 'document.export') && this.services.deliveries) {
       const receipt = await this.services.deliveries.lookup({ runId, operationId, requestDigest })
       return receipt ? documentDeliveryReceiptResult(receipt) : null
