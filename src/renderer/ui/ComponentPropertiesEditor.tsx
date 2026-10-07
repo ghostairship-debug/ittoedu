@@ -18,13 +18,15 @@ function StructuredField({label,value,onChange,structured=true,maxLength,placeho
   const bindingKey=usePropertyDraftBindingKey(),[draft,setDraft]=useState(source),[error,setError]=useState('')
   const [,setInputEpoch]=useState(0)
   const draftRef=useRef(draft)
+  const resumeRequired=useRef(false)
   const session=useRef<{key:string;baseline:string;dirty:boolean;composing:boolean;blurPending:boolean;serial:number;pending?:Promise<boolean>;commit:(value:JsonValue)=>void|Promise<void>}>({key:bindingKey,baseline:source(),dirty:false,composing:false,blurPending:false,serial:0,commit:onChange})
   const fresh=()=>({key:bindingKey,baseline:source(),dirty:false,composing:false,blurPending:false,serial:0,commit:onChange})
   const edit=(next:string)=>{draftRef.current=next;setDraft(next)}
   useEffect(()=>{if(!session.current.dirty&&!session.current.composing){edit(source());setError('');session.current=fresh()}else if(session.current.key===bindingKey)session.current.commit=onChange},[value,bindingKey,onChange])
-  const reset=()=>{session.current=fresh();edit(source());setError('')}
+  const reset=()=>{resumeRequired.current=false;session.current=fresh();edit(source());setError('')}
   const commit=(candidate=draftRef.current):boolean|Promise<boolean>=>{
     if(session.current.pending)return session.current.pending
+    if(resumeRequired.current){setError('恢复的输入法草稿尚未完成，请继续编辑后再应用。');return false}
     if(session.current.composing)return false
     if(!session.current.dirty)return true
     if(session.current.key!==bindingKey){setError('编辑目标已改变；输入保留，请按 Esc 放弃后重试。');return false}
@@ -43,11 +45,11 @@ function StructuredField({label,value,onChange,structured=true,maxLength,placeho
     }catch(error){return fail(error)}
   }
   usePropertyDraftFlush(()=>commit(),{
-    hasDirty:()=>session.current.dirty||session.current.composing||Boolean(session.current.pending),
-    readDraft:()=>({bindingKey:session.current.key,label,kind:structured?'structured':'text',raw:draftRef.current,baseline:session.current.baseline,composing:session.current.composing}),
-    restoreDraft:record=>{session.current.key=record.bindingKey;session.current.baseline=record.baseline??source();session.current.dirty=true;edit(record.raw)},
+    hasDirty:()=>resumeRequired.current||session.current.dirty||session.current.composing||Boolean(session.current.pending),
+    readDraft:()=>({bindingKey:session.current.key,label,kind:structured?'structured':'text',raw:draftRef.current,baseline:session.current.baseline,composing:resumeRequired.current||session.current.composing}),
+    restoreDraft:record=>{resumeRequired.current=record.composing;session.current.key=record.bindingKey;session.current.baseline=record.baseline??source();session.current.dirty=true;edit(record.raw);if(record.composing)setError('恢复的输入法草稿尚未完成，请继续编辑后再应用。')},
   })
-  return <><textarea aria-label={label} rows={structured?5:draft.includes('\n')?4:2} maxLength={maxLength} placeholder={placeholder} value={draft} onFocus={()=>{if(!session.current.dirty)session.current=fresh()}} onChange={event=>{session.current.dirty=true;session.current.serial++;edit(event.currentTarget.value)}} onBlur={()=>{if(session.current.composing)session.current.blurPending=true;else commit()}} onCompositionStart={()=>{session.current.composing=true;setInputEpoch(epoch=>epoch+1)}} onCompositionEnd={event=>{session.current.composing=false;edit(event.currentTarget.value);setInputEpoch(epoch=>epoch+1);if(session.current.blurPending){session.current.blurPending=false;commit(event.currentTarget.value)}}} onKeyDown={event=>{if(event.key==='Escape'&&!session.current.composing)reset()}}/>{error&&<small role="alert" className="component-property-description">{error}</small>}</>
+  return <><textarea aria-label={label} rows={structured?5:draft.includes('\n')?4:2} maxLength={maxLength} placeholder={placeholder} value={draft} onFocus={()=>{if(!session.current.dirty)session.current=fresh()}} onChange={event=>{resumeRequired.current=false;session.current.dirty=true;session.current.serial++;edit(event.currentTarget.value)}} onBlur={()=>{if(session.current.composing)session.current.blurPending=true;else commit()}} onCompositionStart={()=>{resumeRequired.current=false;session.current.composing=true;setInputEpoch(epoch=>epoch+1)}} onCompositionEnd={event=>{session.current.composing=false;edit(event.currentTarget.value);setInputEpoch(epoch=>epoch+1);if(session.current.blurPending){session.current.blurPending=false;commit(event.currentTarget.value)}}} onKeyDown={event=>{if(event.key==='Escape'&&!session.current.composing)reset()}}/>{error&&<small role="alert" className="component-property-description">{error}</small>}</>
 }
 /** The original properties panel now edits the definition's formal author data. */
 export function ComponentPropertiesEditor({definition,node,assets={},onChange,onPreview,title,groups}:ComponentPropertiesEditorProps){

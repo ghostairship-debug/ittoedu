@@ -78,7 +78,7 @@ export function restorePropertiesDrafts(documentId: string, records: readonly Pr
   for (const record of records) {
     const parts = bindingParts(record.bindingKey)
     if (!parts) continue
-    const draft = { ...record, bindingKey: JSON.stringify([documentId, ...parts.slice(1)]), composing: false }
+    const draft = { ...record, bindingKey: JSON.stringify([documentId, ...parts.slice(1)]) }
     const existing = [...pendingPropertyDrafts].find(entry => entry.read() && sameDraftTarget(entry.read()!, draft))
     if (existing) {
       if (!existing.dirty()) existing.restore?.({ ...draft, bindingKey: existing.read()!.bindingKey })
@@ -121,7 +121,7 @@ export function usePropertyDraftFlush(flush: PropertyDraftFlush, port?: Property
         const record = saved.read()
         if (saved.dirty() && record && sameDraftTarget(record, target)) {
           pendingPropertyDrafts.delete(saved)
-          current.current.port.restoreDraft({ ...record, bindingKey: target.bindingKey, composing: false })
+          current.current.port.restoreDraft({ ...record, bindingKey: target.bindingKey })
           break
         }
       }
@@ -199,6 +199,7 @@ export function BufferedInput({
   const currentValue = String(value)
   const [draft, setDraft] = useState(currentValue)
   const [commitError, setCommitError] = useState('')
+  const resumeRequired = useRef(false)
   const [, setSessionEpoch] = useState(0)
   type Phase = 'idle' | 'editing' | 'composing' | 'blur-pending'
   const currentRef = useRef({
@@ -273,6 +274,7 @@ export function BufferedInput({
     session.onCommit = current.onCommit
     session.pending = undefined
     setCommitError('')
+    resumeRequired.current = false
     setDraft(current.value)
     setSessionEpoch((epoch) => epoch + 1)
   }
@@ -291,6 +293,7 @@ export function BufferedInput({
   const commit = (candidate = sessionRef.current.draft): boolean | Promise<boolean> => {
     const session = sessionRef.current
     if (session.pending) return session.pending
+    if (resumeRequired.current) { setCommitError('恢复的输入法草稿尚未完成，请继续编辑后再应用。'); return false }
     if (rejectStale()) return false
     if (candidate === session.baseline) {
       session.phase = 'idle'
@@ -357,15 +360,17 @@ export function BufferedInput({
     if (session.phase === 'composing' || session.phase === 'blur-pending' || rejectStale()) return false
     return commit()
   }, {
-    hasDirty: () => Boolean(sessionRef.current.pending) || sessionRef.current.draft !== sessionRef.current.baseline
+    hasDirty: () => resumeRequired.current || Boolean(sessionRef.current.pending) || sessionRef.current.draft !== sessionRef.current.baseline
       || sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending',
     readDraft: () => ({ bindingKey: sessionRef.current.bindingKey, label, kind: type, raw: sessionRef.current.draft,
-      baseline: sessionRef.current.baseline, composing: sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending' }),
+      baseline: sessionRef.current.baseline, composing: resumeRequired.current || sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending' }),
     restoreDraft: record => {
       sessionRef.current.phase = 'editing'
       sessionRef.current.bindingKey = record.bindingKey
       sessionRef.current.baseline = record.baseline ?? currentValue
       sessionRef.current.draft = record.raw
+      resumeRequired.current = record.composing
+      if (record.composing) setCommitError('恢复的输入法草稿尚未完成，请继续编辑后再应用。')
       setDraft(record.raw)
     },
   })
@@ -392,6 +397,7 @@ export function BufferedInput({
         onFocus={beginSession}
         onChange={(event) => {
           if (rejectStale()) return
+          resumeRequired.current = false
           if (sessionRef.current.phase === 'idle') beginSession()
           const nextDraft = event.target.value
           const session = sessionRef.current
@@ -400,6 +406,7 @@ export function BufferedInput({
         }}
         onCompositionStart={() => {
           if (rejectStale()) return
+          resumeRequired.current = false
           if (sessionRef.current.phase === 'idle') beginSession()
           sessionRef.current.phase = 'composing'
           setSessionEpoch(epoch => epoch + 1)
@@ -439,6 +446,7 @@ export function BufferedInput({
           if (type === 'number' && (event.key === 'ArrowUp' || event.key === 'ArrowDown')) {
             if (rejectStale() || !session.draft.trim() || !Number.isFinite(Number(session.draft))) return
             event.preventDefault()
+            resumeRequired.current = false
             if (session.phase === 'idle') beginSession()
             const next = Math.min(max ?? Infinity, Math.max(min ?? -Infinity,
               Number(session.draft) + (event.key === 'ArrowUp' ? 1 : -1) * (step ?? 1)))
@@ -457,6 +465,7 @@ export function BufferedInput({
               session.staleNotified = false
               session.pending = undefined
               setCommitError('')
+              resumeRequired.current = false
               setDraft(session.baseline)
             }
             event.currentTarget.blur()
@@ -704,6 +713,7 @@ export function TextContentTextarea({
   const [, setSessionEpoch] = useState(0)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const inputCaptureRef = useRef<TextRunInputCapture | null>(null)
+  const resumeRequired = useRef(false)
   const compositionCaptureRef = useRef<TextRunInputCapture | null>(null)
   type Phase = 'idle' | 'editing' | 'composing' | 'blur-pending'
   const currentRef = useRef({
@@ -797,6 +807,7 @@ export function TextContentTextarea({
     session.staleNotified = false
     inputCaptureRef.current = null
     compositionCaptureRef.current = null
+    resumeRequired.current = false
     copyCurrentHandlers()
     if (draft !== current.value) setDraft(current.value)
   }, [currentBindingKey, onBegin, onCancel, onChange, onCommit, onCompositionChange, value])
@@ -827,6 +838,7 @@ export function TextContentTextarea({
     session.staleNotified = false
     inputCaptureRef.current = null
     compositionCaptureRef.current = null
+    resumeRequired.current = false
     copyCurrentHandlers()
     setDraft(current.value)
     setSessionEpoch((epoch) => epoch + 1)
@@ -861,6 +873,7 @@ export function TextContentTextarea({
   }
 
   const finishCommit = () => {
+    if (resumeRequired.current) return
     const session = sessionRef.current
     if (rejectStale()) return
     const commit = session.onCommit
@@ -872,22 +885,25 @@ export function TextContentTextarea({
     commit()
   }
   usePropertyDraftFlush(() => {
+    if (resumeRequired.current) return false
     const session = sessionRef.current
     if (session.phase === 'idle') return true
     if (session.phase === 'composing' || session.phase === 'blur-pending' || rejectStale()) return false
     finishCommit()
     return true
   }, {
-    hasDirty: () => sessionRef.current.draft !== sessionRef.current.baseline
+    hasDirty: () => resumeRequired.current || sessionRef.current.draft !== sessionRef.current.baseline
       || sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending',
     readDraft: () => ({ bindingKey: sessionRef.current.bindingKey, label, kind: 'text', raw: sessionRef.current.draft,
-      baseline: sessionRef.current.baseline, composing: sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending' }),
+      baseline: sessionRef.current.baseline, composing: resumeRequired.current || sessionRef.current.phase === 'composing' || sessionRef.current.phase === 'blur-pending' }),
     restoreDraft: record => {
       sessionRef.current.phase = 'editing'
       sessionRef.current.bindingKey = record.bindingKey
       sessionRef.current.baseline = record.baseline ?? value
       sessionRef.current.draft = record.raw
+      resumeRequired.current = record.composing
       setDraft(record.raw)
+      setSessionEpoch(epoch => epoch + 1)
       sessionRef.current.onBegin()
       sessionRef.current.onChange(record.raw)
     },
@@ -962,6 +978,7 @@ export function TextContentTextarea({
         onFocus={beginSession}
         onChange={(event) => {
           if (rejectStale()) return
+          resumeRequired.current = false
           const next = event.target.value
           setDraft(next)
           const session = sessionRef.current
@@ -974,6 +991,7 @@ export function TextContentTextarea({
         }}
         onCompositionStart={(event) => {
           if (rejectStale()) return
+          resumeRequired.current = false
           const session = sessionRef.current
           compositionCaptureRef.current = captureInput(event.currentTarget, 'insertCompositionText')
           inputCaptureRef.current = null
@@ -1022,6 +1040,7 @@ export function TextContentTextarea({
             } else {
               const baseline = session.baseline
               const cancel = session.onCancel
+              resumeRequired.current = false
               session.phase = 'idle'
               session.draft = baseline
               session.staleNotified = false
@@ -1039,6 +1058,7 @@ export function TextContentTextarea({
           }
         }}
       />
+      {resumeRequired.current && <small role="status">恢复的输入法草稿尚未完成，请继续编辑后再应用。</small>}
     </div>
   )
 }

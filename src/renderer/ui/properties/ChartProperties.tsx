@@ -217,12 +217,14 @@ export function ChartProperties({
   const dirtyRef = useRef(false)
   const targetRef = useRef(bindingKey)
   const composingRef = useRef(false)
+  const resumeRequired = useRef(false)
   const blurPendingRef = useRef(false)
   const baselineRef = useRef(draftSignature(node))
   const signatureRef = useRef(draftSignature(node))
   const preparedCanvasSignature = useRef<string | null>(null)
 
   const markDirty = () => {
+    resumeRequired.current = false
     if (!dirtyRef.current) { targetRef.current = bindingKey; baselineRef.current = draftSignature(node) }
     dirtyRef.current = true
     setDirty(true)
@@ -268,6 +270,7 @@ export function ChartProperties({
 
   useEffect(() => commands.connectCanvasText?.({
     prepare: (kind, id, value) => {
+      if (resumeRequired.current) return { candidate: null, error: '恢复的输入法草稿尚未完成，请先在属性栏继续编辑。' }
       if (dirtyRef.current && (targetRef.current !== bindingKey || baselineRef.current !== draftSignature(node))) {
         return { candidate: null, error: '图表数据草稿对应的目标或数据已经改变，请先处理属性栏保留的输入。' }
       }
@@ -286,6 +289,7 @@ export function ChartProperties({
       ? draft.categories.find(entry => entry.id === id)?.label
       : draft.series.find(entry => entry.id === id)?.name,
     commit: (kind, id, value) => {
+      if (resumeRequired.current) return '恢复的输入法草稿尚未完成，请先在属性栏继续编辑。'
       if (dirtyRef.current && (targetRef.current !== bindingKey || baselineRef.current !== draftSignature(node))) {
         return '图表数据草稿对应的目标或数据已经改变，请先处理属性栏保留的输入。'
       }
@@ -321,6 +325,7 @@ export function ChartProperties({
   }
 
   const applyDraft = () => {
+    if (resumeRequired.current) { setApplyError('恢复的输入法草稿尚未完成，请继续编辑后再应用。'); return false }
     if (!dirtyRef.current) return !composingRef.current
     if (targetRef.current !== bindingKey) { setApplyError('图表数据草稿对应的编辑目标已经改变，请取消草稿后重试。'); return false }
     if (dirtyRef.current && baselineRef.current !== draftSignature(node)) { setApplyError('图表数据已在其他编辑入口改变，请取消此草稿后重试。'); return false }
@@ -338,20 +343,23 @@ export function ChartProperties({
     setApplyError(null)
     return true
   }
-  usePropertyDraftFlush(() => !composingRef.current && (!dirtyRef.current || applyDraft()), {
-    hasDirty: () => dirtyRef.current || composingRef.current,
+  usePropertyDraftFlush(() => !resumeRequired.current && !composingRef.current && (!dirtyRef.current || applyDraft()), {
+    hasDirty: () => resumeRequired.current || dirtyRef.current || composingRef.current,
     readDraft: () => ({ bindingKey: targetRef.current, label: '图表数据', kind: 'chart', raw: JSON.stringify(draftRef.current),
-      baseline: baselineRef.current, composing: composingRef.current }),
+      baseline: baselineRef.current, composing: resumeRequired.current || composingRef.current }),
     restoreDraft: record => {
       targetRef.current = record.bindingKey
       baselineRef.current = record.baseline ?? draftSignature(node)
       dirtyRef.current = true
+      resumeRequired.current = record.composing
       setDirty(true)
+      if (record.composing) setApplyError('恢复的输入法草稿尚未完成，请继续编辑后再应用。')
       setDraft(JSON.parse(record.raw) as ChartDataDraft)
     },
   })
 
   const resetDraft = () => {
+    resumeRequired.current = false
     targetRef.current = bindingKey
     baselineRef.current = draftSignature(node)
     preview?.(null)
@@ -519,7 +527,7 @@ export function ChartProperties({
         data-testid="chart-data-table"
         role="group"
         aria-label="图表数据表"
-        onCompositionStart={() => { composingRef.current = true; setDirty(true) }}
+        onCompositionStart={() => { resumeRequired.current = false; composingRef.current = true; setDirty(true) }}
         onCompositionEnd={() => {
           composingRef.current = false
           setDirty(dirtyRef.current)
