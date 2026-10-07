@@ -31,6 +31,11 @@ export const componentFrameSchema = z.object({
   width: finite.positive(), height: finite.positive(),
   transform: z.tuple([finite, finite, finite, finite, finite, finite]),
 }).strict()
+export const componentAuthorGeometryObservationSchema = z.object({ frame: componentFrameSchema,
+  parentToInstance: componentFrameSchema.shape.transform,
+  author: componentAuthorRecordSchema.shape.overrides.shape.geometry.unwrap(),
+  boxInsets: z.object({ width: finite.nonnegative(), height: finite.nonnegative() }).strict(),
+}).strict()
 export const componentBuiltinImplementationSchema = z.object({ kind: z.literal('builtin'), key: id }).strict()
 export const componentSourceImplementationSchema = z.object({ kind: z.literal('source'), source: z.string().optional(), language: z.enum(['javascript', 'typescript']), dependencies: z.array(id).optional(),
     workspace: z.object({ ownerId: id, entry: id }).strict().optional(), moduleBindings: z.record(id, id).optional(),

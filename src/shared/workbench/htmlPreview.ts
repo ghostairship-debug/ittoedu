@@ -16,7 +16,7 @@
  */
 import { z } from 'zod'
 import { htmlSourceEditCommandSchema, type HtmlSourceEditOutcome } from '../html/sourceEditCommands'
-import { componentAuthorRecordSchema, componentAuthorRecordsSchema } from '../contracts/component-platform/schema'
+import { componentAuthorGeometryObservationSchema, componentAuthorRecordSchema, componentAuthorRecordsSchema } from '../contracts/component-platform/schema'
 import type { ComponentAuthorRecord } from '../contracts/component-platform/runtime'
 
 const id = z.string().min(1)
@@ -60,6 +60,7 @@ export const htmlPreviewTargetReportSchema = z.object({
   /** True when the page created this node at runtime rather than parsing it. */
   scriptCreated: z.boolean(),
   authoring: z.object({ authorKey: id, record: componentAuthorRecordSchema }).strict().optional(),
+  geometry: componentAuthorGeometryObservationSchema.optional(),
 }).strict()
 
 export const htmlPreviewRequestSchema = z.discriminatedUnion('type', [

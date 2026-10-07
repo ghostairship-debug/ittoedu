@@ -1,4 +1,4 @@
-import type { ComponentFrame } from './frame'
+import type { AffineTransform, ComponentFrame } from './frame'
 import type { ComponentInstance, ComponentTarget, JsonValue } from './project'
 import type { TeacherControllerPort } from './teacherController'
 import type { ComponentMotionPort } from './motion'
@@ -90,6 +90,14 @@ export interface ComponentAuthorRecord {
   binding: ComponentAuthorBinding
   overrides: { text?: string; src?: string; style?: Record<string, string>; geometry?: ComponentAuthorGeometry }
 }
+/** Observed border box in its actual DOM parent; the parent map excludes the object itself. */
+export interface ComponentAuthorGeometryObservation {
+  frame: ComponentFrame
+  parentToInstance: AffineTransform
+  author: ComponentAuthorGeometry
+  /** Insets to subtract when a border-box gesture writes CSS content-box width/height. */
+  boxInsets: { width: number; height: number }
+}
 
 /** Ephemeral observations carry the persistent record needed to commit a first local edit. */
 export interface ComponentAuthorSpotInput {
@@ -98,6 +106,7 @@ export interface ComponentAuthorSpotInput {
   scope?: ComponentAuthorScope
   binding?: ComponentAuthorBinding
   bindingStatus?: 'bound' | 'unmounted' | 'unresolved' | 'source-required'
+  geometry?: ComponentAuthorGeometryObservation
   dataPath?: string[]
   sourceRegion?: { kind: 'implementation' | 'data'; path?: string[]; start: number; end: number;
     encoding?: 'html-text' | 'html-attribute' }
