@@ -73,7 +73,7 @@ export default defineConfig({
     },
   },
   build: {
-    rollupOptions: { input: { main: resolve(__dirname, 'index.html'), admission: resolve(__dirname, 'admission.html'), observation: resolve(__dirname, 'observation.html'), attachmentExtraction: resolve(__dirname, 'attachment-extraction.html'), nativeTextMeasurement: resolve(__dirname, 'native-text-measurement.html'), documentExport: resolve(__dirname, 'document-export.html') } },
+    rollupOptions: { input: { main: resolve(__dirname, 'index.html'), admission: resolve(__dirname, 'admission.html'), observation: resolve(__dirname, 'observation.html'), attachmentExtraction: resolve(__dirname, 'attachment-extraction.html'), nativeTextMeasurement: resolve(__dirname, 'native-text-measurement.html'), documentExport: resolve(__dirname, 'document-export.html'), pptxImport: resolve(__dirname, 'pptx-import.html') } },
     outDir: 'dist-renderer',
     emptyOutDir: true,
     sourcemap: true,
