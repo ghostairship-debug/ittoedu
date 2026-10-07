@@ -23,7 +23,8 @@ export type ManagedBrowserControlState = { state: 'agent' | 'human' | 'transitio
 
 /** Read only the actual DOM target; neither a selector's spelling nor model labels classify an action. */
 export const managedBrowserActionFactsCode = `function () {
-  const target = this.closest('button,input,a,textarea,select,summary') || this;
+  const element = this.nodeType === 1 ? this : this.parentElement;
+  const target = element.closest('button,input,a,textarea,select,summary') || element;
   const form = target.form || target.closest('form');
   return {
     tag: target.tagName.toLowerCase(), type: target.type || '',
