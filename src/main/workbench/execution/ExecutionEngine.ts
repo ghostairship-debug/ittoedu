@@ -557,6 +557,14 @@ export class ExecutionEngine {
     for (const tool of record.tools) {
       if (tool.state === 'returned' && !(tool.result?.kind === 'error' && tool.result.code === 'tool-outcome-unknown')
         && contentApplyFact(tool.call.name, tool.result)?.commit !== 'unknown') continue
+      if (tool.call.name === TASK_FINISH) {
+        // Run control has no document or external side effect to query/replay.
+        // A crashed finish does not turn earlier committed work into unknown work.
+        tool.state = 'returned'; tool.receiptTime ??= this.now()
+        tool.result = { kind: 'error', code: 'task-finish-interrupted', message: '结束请求在应用中断时未完成；已有正式回执保留，可继续核实剩余工作后结束。' }
+        changed = true
+        continue
+      }
       if (tool.call.name === USER_QUESTION_TOOL) continue // A question has no Gateway receipt; only the user can answer it.
       // Artifact publication is journaled by its own owner, outside the document Gateway.
       // Query the original operation so a lost acknowledgement never becomes a new write.
@@ -1248,7 +1256,8 @@ export class ExecutionEngine {
   }
   /** A pending call is durably checkpointed before execute, so it cannot have caused a side effect. */
   private possiblyInvokedTool(tool: ExecutionToolRecord): boolean {
-    if (tool.call.name === USER_QUESTION_TOOL || tool.call.name === LOAD_TOOLS || tool.call.name === TASK_NOTE) return false // Discovery, questions and notes have no external side effect.
+    if (tool.call.name === USER_QUESTION_TOOL || tool.call.name === LOAD_TOOLS || tool.call.name === TASK_NOTE
+      || tool.call.name === TASK_FINISH) return false // Run control, discovery, questions and notes have no external side effect.
     return tool.state === 'executing' || tool.result?.kind === 'error' && /outcome-unknown/.test(tool.result.code)
       || ['unknown', 'pending'].includes(serviceToolOutcome(tool.call.name, tool.result)?.status ?? '')
   }
