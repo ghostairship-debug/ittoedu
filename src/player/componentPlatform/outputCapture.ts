@@ -25,6 +25,7 @@ export async function prepareComponentOutputRegion(input: {
   }
   const element = instanceId ? player.runtime.contentElement(instanceId) : root
   if (!element) throw new Error(`捕获组件没有运行内容：${instanceId}`)
+  await player.waitForCaptureReady(element)
   if (instanceId) {
     const target = player.runtime.targetElement(instanceId)
     if (!target) throw new Error(`捕获组件没有本地投影：${instanceId}`)
@@ -57,7 +58,6 @@ export async function prepareComponentOutputRegion(input: {
   }
   const view = root.ownerDocument.defaultView
   if (!view) throw new Error('捕获窗口已关闭')
-  await player.waitForCaptureReady(element)
   await root.ownerDocument.fonts?.ready
   await new Promise<void>(resolve => view.requestAnimationFrame(() => view.requestAnimationFrame(() => resolve())))
   const rect = element.getBoundingClientRect()
