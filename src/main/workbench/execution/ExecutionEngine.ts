@@ -52,6 +52,7 @@ import { continuationDocumentIds, reboundSavedDocumentBinding, savedDocumentBind
 import type { DocumentSaveFact, SavedCourseIdentity } from '../../../shared/workbench/documentSave'
 import { relocatedDocumentPath } from '../DocumentFileCoordinator'
 import type { WorkspaceMutationAction } from '../WorkspaceFiles'
+import type { WebMaterialResult } from '../network/WebResearchService'
 
 interface EditProjectionPort {
   begin(input: { runId: string; editId: string; toolCallId?: string; targetHandle: string }): Promise<unknown>
@@ -1143,7 +1144,8 @@ export class ExecutionEngine {
     // source versions without expanding the fixed header once per read.
     const readCounts: Record<string, number> = {}
     type ArchivedWebSource = { url: string; title?: string; version?: string; sourceId?: string;
-      firstContextSource: string; latestContextSource: string; readRanges: { from: number; to: number }[] }
+      firstContextSource: string; latestContextSource: string; readRanges: { from: number; to: number }[];
+      material?: Pick<WebMaterialResult, 'attachmentIds' | 'material' | 'observation'> }
     const webSources = new Map<string, ArchivedWebSource>()
     let workingNoteSource: string | undefined
     const completed = lineage.flatMap(run => {
@@ -1156,7 +1158,7 @@ export class ExecutionEngine {
         if (tool.call.name === TASK_NOTE && data?.workingNote && typeof data.workingNote === 'object') {
           workingNoteSource = locations.get(tool.providerCallId) ?? workingNoteSource
         }
-        if (tool.call.name === 'web.open' && data?.status === 'opened' && data.source && typeof data.source === 'object') {
+        if (tool.call.name === 'web.open' && (data?.status === 'opened' || data?.status === 'material') && data.source && typeof data.source === 'object') {
           const source = data.source as Record<string, unknown>, url = stringField(source, 'url', 32767)
           const location = locations.get(tool.providerCallId)
           if (url && location) {
@@ -1165,6 +1167,10 @@ export class ExecutionEngine {
               firstContextSource: location, latestContextSource: location, readRanges: [] }
             entry.sourceId = previousRun ? undefined : stringField(source, 'sourceId')
             entry.latestContextSource = location
+            if (data.status === 'material') {
+              const material = data as unknown as WebMaterialResult
+              entry.material = { attachmentIds: material.attachmentIds, material: material.material, observation: 'index-only' }
+            }
             if (typeof data.offset === 'number' && typeof data.text === 'string') {
               const range = { from: data.offset, to: data.offset + data.text.length }
               const ranges = [...entry.readRanges, range].sort((a, b) => a.from - b.from)
@@ -1246,6 +1252,31 @@ export class ExecutionEngine {
       if (source?.input.conversationId === record.input.conversationId && source.messages[identity.index]?.role === 'user') sources.push(source)
     }
     const original = new Set(sources.flatMap(source => source.initialPayload?.explicitAttachments.map(item => item.attachmentId) ?? []))
+    const taskSources = new Set([record.runId])
+    let taskParent = record.taskContinuedFrom
+    while (taskParent && !taskSources.has(taskParent)) {
+      taskSources.add(taskParent)
+      taskParent = sources.find(source => source.runId === taskParent)?.taskContinuedFrom
+    }
+    // Successful web material receipts identify immutable input bytes. They grant
+    // source reading in this task, never a writable document or a webpage action.
+    if (this.options.materials) for (const source of sources) {
+      if (!taskSources.has(source.runId)) continue
+      for (const tool of source.tools) {
+        if (tool.state !== 'returned' || tool.call.name !== 'web.open' || tool.result?.kind !== 'read'
+          || !tool.result.data || typeof tool.result.data !== 'object') continue
+        const data = tool.result.data as WebMaterialResult
+        if (data.status !== 'material' || !data.material || !Array.isArray(data.attachmentIds)) continue
+        const captured = await this.options.materials.readSnapshot(data.material.originalAttachmentId).catch(() => null)
+        if (!captured || captured.digest !== data.material.originalDigest) continue
+        original.add(captured.id)
+        for (const id of data.attachmentIds) {
+          const derived = await this.options.materials.readSnapshot(id).catch(() => null)
+          if (derived?.derivedFrom === captured.id && derived.digest === captured.digest && derived.byteLength === captured.byteLength)
+            original.add(derived.id)
+        }
+      }
+    }
     // A user may attach an extracted snapshot. Its immutable host manifest links
     // the same original bytes; later extraction receipts still name that source.
     if (this.options.materials) for (const id of [...original]) {
