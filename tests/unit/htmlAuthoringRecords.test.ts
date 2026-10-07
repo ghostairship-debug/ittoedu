@@ -124,8 +124,13 @@ it('keeps manual geometry when an exactly mapped HTML text value changes', async
   const targets = [{ handle: 'static', kind: 'text' as const, domPath: [{ name: 'html', index: 0 }, { name: 'body', index: 1 }, { name: 'p', index: 1 }],
     sectionOrder: null, rawText: 'same', attributeName: null, rect: { x: 0, y: 0, width: 20, height: 10 }, scriptCreated: false,
     authoring: { authorKey: value.authorKey, record } }]
-  expect((await service.resolveTarget({ type: 'html-preview.resolve-target', leaseId: 'lease', loadId: 'load', revision: 0, targets }, context)).targets[0])
-    .toMatchObject({ status: 'editable', locator: { valueSpan: expect.any(Object) } })
+  const resolved = (await service.resolveTarget({ type: 'html-preview.resolve-target', leaseId: 'lease', loadId: 'load', revision: 0, targets }, context)).targets[0]!
+  expect(resolved).toMatchObject({ status: 'editable', locator: { valueSpan: expect.any(Object) } })
+  const drafts = new HtmlTextDrafts()
+  drafts.change({ report: targets[0]!, resolved }, source, 'normal draft save')
+  const prepared = drafts.prepare(source)
+  expect(extractHtmlAuthoringRecords(prepared.source).source).toContain('<p data-item-id="b">normal draft save</p>')
+  expect(readHtmlAuthoringRecords(prepared.source)[value.authorKey]).toMatchObject({ binding: { baseline: 'normal draft save' }, overrides: { geometry: record.overrides.geometry } })
   await service.edit({ type: 'html-preview.edit', operationId: 'source-text', documentId: 'doc', epoch: 'epoch', baseRevision: 0,
     bindingVersion: 1, leaseId: 'lease', loadId: 'load', target: 'static', change: { kind: 'text', value: 'new value' } }, context)
   const saved = session.read().model
