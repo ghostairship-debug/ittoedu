@@ -787,6 +787,30 @@ function rewriteJavaScript(code: string, sourceType: 'script' | 'module', baseDi
     const preserveDynamicHtml = (name: string) => addDiagnostic(sink, 'warning', 'dynamic-html-preserved',
       `${name} 的动态内容保留原代码执行；运行时生成的资源未作静态收集`)
     const embeddedSink = (value: Node, kind: 'css' | 'html', name: string) => {
+      if (kind === 'css') {
+        const proof = closureProof.cssInput(value)
+        if (proof.kind === 'proven-resource') {
+          const local: Array<{ start: number; end: number; value: string }> = [], projected = new Map<string, string>()
+          for (const literal of proof.literals) {
+            const text = literalValue(literal)!
+            const next = rewriteCss(text, baseDir, sink, siblings, name)
+            if (text === next) continue
+            if (literal.start >= value.start && literal.end <= value.end)
+              local.push({ start: literal.start, end: literal.end, value: jsString(next) })
+            else projected.set(text, next)
+          }
+          // Only this CSS consumer acquires substitutions. A shared literal
+          // declaration may also be visible text or be used by another sink.
+          if (projected.size) {
+            let expression = code.slice(value.start, value.end)
+            for (const edit of local.sort((a, b) => b.start - a.start))
+              expression = expression.slice(0, edit.start - value.start) + edit.value + expression.slice(edit.end - value.start)
+            const branches = [...projected].map(([before, after]) => `__cwCss===${jsString(before)}?${jsString(after)}:`).join('')
+            addEdit({ start: value.start, end: value.end, value: `(__cwCss=>${branches}__cwCss)(${expression})` })
+          } else for (const edit of local) addEdit(edit)
+          return
+        }
+      }
       const text = literalValue(value) ?? (value.type === 'Identifier' ? constants.get(String(value.name)) ?? null : null)
       if (text === null) {
         if (kind === 'html') preserveDynamicHtml(name)

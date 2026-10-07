@@ -8,6 +8,8 @@ type Value = { kind: 'string'; node: JsNode } | { kind: 'object'; fields: Map<st
 export type ClosureProof = { kind: 'proven-state' } | { kind: 'proven-resource'; literals: JsNode[] } | { kind: 'unknown' }
 export interface JavaScriptClosureProof {
   internalSink(node: JsNode): ClosureProof
+  /** Reuse the same finite CSS value proof for ordinary DOM setters and React props. */
+  cssInput(node: JsNode): ClosureProof
   auditedNode(node: JsNode): boolean
   styleReceiver(node: JsNode): boolean
   dataReceiver(node: JsNode): boolean
@@ -679,6 +681,7 @@ export function analyzeJavaScriptClosure(root: JsNode, inertCalls: Set<JsNode> =
     styleReceiver,
     dataReceiver,
     memberName,
+    cssInput: node => cssProof(evaluate(node)),
     auditedNode: node => !!audited && !frameworkError && inLibrary(node),
     internalSink(node) {
       if (!audited || frameworkError) return UNKNOWN_PROOF
