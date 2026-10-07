@@ -21,7 +21,8 @@ async function closeActivity(): Promise<CloseActivity> {
 }
 
 /** Hide-to-tray close behaviour for the main window, inserted before the existing document close protection. */
-export function installWindowLifecycle(getWindow: () => BrowserWindow | null): WindowLifecycle {
+export function installWindowLifecycle(getWindow: () => BrowserWindow | null,
+  onCloseDecision?: (decision: 'continue' | 'handled') => void): WindowLifecycle {
   const lifecycle = new WindowLifecycle({
     window: getWindow,
     // Closing must keep working even if the connection service could not start: fall back to asking.
@@ -38,7 +39,11 @@ export function installWindowLifecycle(getWindow: () => BrowserWindow | null): W
       return tray
     },
   })
-  setBeforeWindowClose(() => lifecycle.beforeClose())
+  setBeforeWindowClose(async () => {
+    const decision = await lifecycle.beforeClose()
+    onCloseDecision?.(decision)
+    return decision
+  })
   // Main's single before-quit owner requests a normal window close. A second listener here
   // would re-arm requestQuit after the first close consumes it, including a cancelled save.
   return lifecycle

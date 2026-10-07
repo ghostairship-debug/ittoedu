@@ -177,7 +177,9 @@ async function openMainWindow(): Promise<void> {
 function installGui(): void {
   if (guiInstalled) return
   context.headless = false
-  lifecycle = installWindowLifecycle(() => mainWindow)
+  // Hidden service windows may keep Electron from emitting window-all-closed.
+  // An accepted quit still waits for the ordinary draft/save protection to close this window.
+  lifecycle = installWindowLifecycle(() => mainWindow, decision => { quitRequested = decision === 'continue' })
   registerIpcHandlers(context)
   guiInstalled = true
   guiEnabled = true
