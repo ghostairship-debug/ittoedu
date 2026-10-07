@@ -33,6 +33,24 @@ it('enforces inherited author locks for data, frame and named-state edits while 
   expect(webDataSchema.parse(unlocked.instances.a.data).html).toBe('Changed')
   expect(webDataSchema.parse(project.instances.a.data).html).toBe('Base')
 })
+it('blocks changed interaction rules targeting a locked author object without blocking unrelated rule edits', () => {
+  const project = fixture()
+  project.instances.a.locked = true
+  project.instances.b = { ...project.instances.a, id: 'b', locked: false }
+  project.definitions.interactions = { id: 'interactions', role: 'behavior', implementation: { kind: 'builtin', key: 'guoling.interactions' } }
+  const rule = (id: string, nodeId: string) => ({ id, enabled: true, trigger: { type: 'node.click', nodeId }, conditions: [],
+    actions: [{ id: `${id}-action`, start: 'after-previous', delayMs: 0, action: { type: 'node.enter', nodeId, effect: 'none', durationMs: 0, easing: 'linear' } }] })
+  const lockedRule = rule('locked-rule', 'a'), otherRule = rule('other-rule', 'b')
+  project.instances.behavior = { id: 'behavior', definitionId: 'interactions', data: { rules: [lockedRule, otherRule] } }
+  project.surfaces[0].childIds.push('b', 'behavior')
+  const change = (rules: ReturnType<typeof rule>[]) => captureComponentOperation(project,
+    [{ type: 'data.set', instanceId: 'behavior', path: ['rules'], value: rules }])
+  expect(() => applyComponentOperation(project, change([{ ...lockedRule, enabled: false }, otherRule]))).toThrow('已锁定')
+  expect(() => applyComponentOperation(project, change([otherRule]))).toThrow('已锁定')
+  const updated = applyComponentOperation(project, change([lockedRule, { ...otherRule, enabled: false }]))
+  expect(updated.instances.behavior.data).toEqual({ rules: [lockedRule, { ...otherRule, enabled: false }] })
+  expect(updated.instances.a).toEqual(project.instances.a)
+})
 it('copies base values, all named states and local records in one undoable saved transaction', async () => {
   const project = fixture(), surfaceId = project.surfaces[0].id
   project.instances.a.data = { html: 'Base', authoringRecords: { local: { kind: 'text', scope: { item: 'a' },
