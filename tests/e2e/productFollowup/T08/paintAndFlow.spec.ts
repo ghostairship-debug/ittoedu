@@ -71,7 +71,10 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
     if (imported.model.kind !== 'course-v10') throw new Error('V10 required')
     expect(imported.model.project.instances.body).toEqual(project.instances.body)
     expect(imported.model.project.instances.human).toEqual(project.instances.human)
-    const program = Object.values(imported.model.project.instances).find(instance => typeof instance.data?.html === 'string' && instance.data.html.includes('点击查看核心互动'))
+    const program = Object.values(imported.model.project.instances).find(instance => {
+      const data = instance.data
+      return data !== null && typeof data === 'object' && !Array.isArray(data) && typeof data.html === 'string' && data.html.includes('点击查看核心互动')
+    })
     expect(program, JSON.stringify(imported.model.project.instances)).toBeTruthy()
     const paragraph = editor.locator('.ProseMirror p').filter({ hasText: '局部原说明' })
     await paragraph.click({ clickCount: 3 }); await page.keyboard.press('Home'); await page.keyboard.press('Shift+End'); await page.keyboard.insertText('局部修订说明')
