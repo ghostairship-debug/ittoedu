@@ -1,7 +1,8 @@
 import { componentAssetIds } from '../components/library/references'
 import type { ComponentAppliedChanges, ComponentEdit, ComponentExpectation, ComponentOperationBatch } from '../../shared/contracts/component-platform/operations'
-import { resolveComponentPresentation, containerChildIds, owningContainer, type ComponentContainer, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, componentIsLocked, resolveComponentPresentation, containerChildIds, owningContainer, type ComponentContainer, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
 import { componentOperationBatchSchema, courseProjectV10Schema } from '../../shared/contracts/component-platform/schema'
+import { componentInteractionDataSchema } from '../../shared/componentInteractionData'
 
 export class ComponentOperationConflict extends Error {
   readonly code = 'component-field-conflict'
@@ -311,6 +312,38 @@ export function applyComponentOperation(project: CourseProjectV10, raw: Componen
   const next = structuredClone(project)
   const removedInBatch = new Set<string>()
   for (const edit of command.edits) {
+    // Every author entry reaches this application boundary. Runtime state/animation never does.
+    const requireUnlocked = (id: string) => {
+      if (project.instances[id] && componentIsLocked(next, id)) throw new Error('对象已锁定，请先解锁')
+    }
+    if ('instanceId' in edit && !(edit.type === 'instance.patch' && Object.keys(edit.patch).every(key => key === 'locked')))
+      requireUnlocked(edit.instanceId)
+    if (edit.type === 'instance.insert' && edit.container.kind === 'instance') requireUnlocked(edit.container.instanceId)
+    if (edit.type === 'instance.move' && edit.container.kind === 'instance') requireUnlocked(edit.container.instanceId)
+    if (edit.type === 'instance.remove') descendantIds(next, edit.instanceId).forEach(requireUnlocked)
+    if (edit.type === 'surface.remove') next.surfaces.find(surface => surface.id === edit.surfaceId)?.childIds
+      .flatMap(id => descendantIds(next, id)).forEach(requireUnlocked)
+    if (edit.type === 'definition.set' || edit.type === 'definition.remove') {
+      const id = edit.type === 'definition.set' ? edit.definition.id : edit.definitionId
+      for (const instance of Object.values(next.instances)) if (instance.definitionId === id
+        && (edit.type === 'definition.remove' || !equalComponentValue(next.definitions[id], edit.definition))) requireUnlocked(instance.id)
+    }
+    if (edit.type === 'component.files.set') for (const instance of Object.values(next.instances)) {
+      const implementation = instance.implementationOverride ?? next.definitions[instance.definitionId]?.implementation
+      if (implementation?.kind === 'source' && implementation.workspace?.ownerId === edit.ownerId) requireUnlocked(instance.id)
+    }
+    if (edit.type === 'asset.replace') for (const instance of Object.values(next.instances)) {
+      if (componentAssetIds(instance, next.definitions[instance.definitionId]).includes(edit.asset.id)) requireUnlocked(instance.id)
+    }
+    if (edit.type === 'surface.presentation.set') {
+      const old = next.surfaces.find(surface => surface.id === edit.surfaceId)?.presentation
+      for (const state of [...(old?.states ?? []), ...(edit.presentation?.states ?? [])]) {
+        const before = old?.states.find(value => value.id === state.id), after = edit.presentation?.states.find(value => value.id === state.id)
+        for (const id of new Set([...Object.keys(before?.overrides ?? {}), ...Object.keys(after?.overrides ?? {})])) {
+          if (!equalComponentValue(before?.overrides[id], after?.overrides[id])) requireUnlocked(id)
+        }
+      }
+    }
     if (edit.type === 'component.files.set') continue
     if (edit.type === 'project.title.set') { next.title = edit.title; continue }
     if (edit.type === 'project.background.set') { if (edit.background == null) delete next.background; else next.background = structuredClone(edit.background); continue }
@@ -463,6 +496,19 @@ export function applyComponentOperation(project: CourseProjectV10, raw: Componen
   const removed = new Set([...removedInBatch, ...Object.keys(project.instances).filter(id => !next.instances[id])].filter(id => !next.instances[id]))
   const removedSurfaces = new Set(project.surfaces.filter(surface => !next.surfaces.some(value => value.id === surface.id)).map(surface => surface.id))
   if (removed.size || removedSurfaces.size) removeDeletedReferences(next, removed, removedSurfaces)
+  for (const id of new Set([...Object.keys(project.instances), ...Object.keys(next.instances)])) {
+    const before = project.instances[id], after = next.instances[id]
+    if (componentDefinitionBuiltinKey(next.definitions[after?.definitionId] ?? project.definitions[before?.definitionId]) !== 'guoling.interactions'
+      || equalComponentValue(before?.data, after?.data)) continue
+    const oldRules = before ? componentInteractionDataSchema.parse(before.data).rules : []
+    const newRules = after ? componentInteractionDataSchema.parse(after.data).rules : []
+    for (const rule of [...oldRules, ...newRules]) {
+      if (equalComponentValue(oldRules.find(value => value.id === rule.id), newRules.find(value => value.id === rule.id))) continue
+      const targets = [...('nodeId' in rule.trigger ? [rule.trigger.nodeId] : []),
+        ...rule.actions.flatMap(step => 'nodeId' in step.action ? [step.action.nodeId] : [])]
+      if (targets.some(target => project.instances[target] && componentIsLocked(next, target))) throw new Error('互动关联对象已锁定，请先解锁')
+    }
+  }
   return courseProjectV10Schema.parse(next)
 }
 

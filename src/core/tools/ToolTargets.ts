@@ -2,7 +2,7 @@ import { isSourceDocumentModel, type DocumentModel, type DocumentSnapshot } from
 import type { ToolTarget } from '../../shared/workbench/tools'
 import type { ExecutionContentOutput } from '../../shared/workbench/execution'
 import { documentDigest } from '../documents/documentDigest'
-import { owningContainer, resolveComponentPresentation, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
+import { componentIsLocked, owningContainer, resolveComponentPresentation, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { componentFieldIdentityPaths, componentValueAt } from '../drivers/courseV10Operations'
 import { documentTextLength, documentTextContentSchema, normalizeDocumentText, sliceDocumentText, plainDocumentText, type FlowTextContent } from '../../shared/document/content'
@@ -66,7 +66,7 @@ export function readEditableTargetContent(model: DocumentModel, target: ToolTarg
   if (target.kind === 'markdown-range' && isSourceDocumentModel(model))
     return { text: readTarget(model, target) as string, format: model.kind === 'markdown' ? 'markdown' : 'text' }
   if (target.kind !== 'course-instance') throw new Error('当前目标不是可直接改写的正文')
-  if (courseInstanceContext(model, target).instance.locked) throw new Error('所选内容已锁定，请先解锁')
+  if (componentIsLocked(courseInstanceContext(model, target).project, target.instanceId)) throw new Error('所选内容已锁定，请先解锁')
   const value = readCourseInstanceText(model, target)
   if (value === null) throw new Error('当前目标不是可直接改写的文字字段')
   const selected = isCourseInstanceRange(target) ? sliceCourseInstanceText(value, target.from, target.to) : value
@@ -129,7 +129,7 @@ export function recoverEditableTargetAfterReplacement(model: DocumentModel, orig
 export function replaceCourseInstanceText(model: DocumentModel, target: CourseInstanceTarget, text: string, format: 'text' | 'html' = 'text'): ComponentEdit {
   target = courseInstanceTextTarget(model, target)
   const { instance } = courseInstanceContext(model, target)
-  if (instance.locked) throw new Error('所选内容已锁定，请先解锁')
+  if (componentIsLocked(courseInstanceContext(model, target).project, instance.id)) throw new Error('所选内容已锁定，请先解锁')
   const value = readCourseInstanceText(model, target)
   if (value === null || !target.dataPath) throw new Error('当前目标不是可直接改写的文字字段')
   const from = target.from ?? 0, to = target.to ?? (typeof value === 'string' ? Array.from(value).length : documentTextLength(value))

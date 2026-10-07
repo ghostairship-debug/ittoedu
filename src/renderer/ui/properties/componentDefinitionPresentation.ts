@@ -1,4 +1,5 @@
 import type { ComponentDefinition, JsonObject, JsonValue } from '../../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey } from '../../../shared/contracts/component-platform/project'
 import { TEACHER_CONTROLLER_DEFINITION } from '../../../components/teacher-controller/data'
 import { AUDIO_DEFINITION, VIDEO_DEFINITION } from '../../../components/media/adapters'
 import { WEB_DEFINITION, HTML_PROGRAM_DEFINITION } from '../../../components/web/data'
@@ -37,8 +38,7 @@ export function componentEditorPresentation(definition: ComponentDefinition): Co
 
 /** Read the existing formal builtin definition; persisted author metadata takes precedence. */
 function builtinPresentation(definition: ComponentDefinition | undefined): ComponentDefinition | undefined {
-  if (definition?.implementation.kind !== 'builtin') return undefined
-  switch (definition.implementation.key) {
+  switch (componentDefinitionBuiltinKey(definition)) {
     case 'guoling.navigation': return TEACHER_CONTROLLER_DEFINITION
     case 'guoling.audio': return AUDIO_DEFINITION
     case 'guoling.video': return VIDEO_DEFINITION
@@ -53,9 +53,9 @@ export function componentDefinitionPresentation(definition: ComponentDefinition 
   return {
     title: definition?.title ?? builtin?.title ?? (definition?.implementation.kind === 'source' ? '源码组件' : category),
     category,
-    builtinKey: definition?.implementation.kind === 'builtin' ? definition.implementation.key : undefined,
-    iconType: definition?.implementation.kind === 'builtin' ? definition.implementation.key
-      : definition?.role === 'behavior' ? 'behavior' : definition?.implementation.kind === 'source' ? 'source' : 'component',
+    builtinKey: componentDefinitionBuiltinKey(definition),
+    iconType: componentDefinitionBuiltinKey(definition)
+      ?? (definition?.role === 'behavior' ? 'behavior' : definition?.implementation.kind === 'source' ? 'source' : 'component'),
   }
 }
 

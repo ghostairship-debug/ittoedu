@@ -1,6 +1,6 @@
 import type { EditorStoreKernel } from '../store/editorStoreKernel'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
-import { componentDefinitionBuiltinKey, componentIsLocked, containerChildIds, owningContainer, type ComponentContainer, type ComponentDefinition, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
+import { componentDefinitionBuiltinKey, componentIsLocked, containerChildIds, owningContainer, resolveComponentPresentation, type ComponentContainer, type ComponentDefinition, type ComponentPresentation, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
 import type { ComponentFrame } from '../../shared/contracts/component-platform/frame'
 import { translateFrame, rotateFrame, reparentFrame, frameCorners, transformVector, invertMatrix, composeMatrices, IDENTITY_MATRIX, type AffineMatrix } from '../../core/components/geometry'
 import type { EditorCanvasNodePatch } from '../phaser/editorCanvasNode'
@@ -112,7 +112,7 @@ export interface CourseObjectPastePlan {
 /** Derives one canonical clone batch; callers combine it with their own document edits. */
 export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, destination: CourseObjectPasteDestination): CourseObjectPastePlan {
   if (!source.roots.length) throw new Error('请先复制对象')
-  const target = destination.capturedTarget, project = target.editingProject
+  const target = destination.capturedTarget, project = target.project
   const moving = destination.identity === 'move'
   const sameDocument = Boolean(source.documentId && source.documentId === target.documentId)
   const copiedIds = descendants(source.project, source.roots), idMap = new Map(copiedIds.map(id => [id, moving ? id : crypto.randomUUID()]))
@@ -138,13 +138,18 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
   }
   const mapSurfaceId = (id: string) => surfaceIds.get(id) ?? id
   const rules = new Map<string, string>(), actions = new Map<string, string>(), stateKeys = new Map<string, string>()
+  const stateData = (id: string) => source.project.surfaces.flatMap(surface => (surface.presentation?.states ?? [])
+    .flatMap(state => state.overrides[id]?.data === undefined ? [] : [state.overrides[id].data!]))
   const professionalKey = (id: string) => {
     const instance = source.project.instances[id], definition = source.project.definitions[instance.definitionId]
     return componentDefinitionBuiltinKey(definition)
   }
   for (const id of copiedIds) if (professionalKey(id) === 'guoling.interactions') {
-    const copy = createComponentInteractionCopyIdentities(source.project.instances[id].data)
-    copy.rules.forEach((value, key) => rules.set(key, moving ? key : value)); copy.actions.forEach((value, key) => actions.set(key, moving ? key : value))
+    for (const data of [source.project.instances[id].data, ...stateData(id)]) {
+      const copy = createComponentInteractionCopyIdentities(data)
+      copy.rules.forEach((value, key) => { if (!rules.has(key)) rules.set(key, moving ? key : value) })
+      copy.actions.forEach((value, key) => { if (!actions.has(key)) actions.set(key, moving ? key : value) })
+    }
   }
   // Managed input families live on the surface behavior, outside the input subtree.
   // Copy only the explicitly registered family, retaining all unrelated author rules.
@@ -160,6 +165,8 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
   const inputData = new Map<string, JsonValue>()
   for (const id of copiedIds) if (professionalKey(id) === 'guoling.input') inputData.set(id, remapComponentInputData(source.project.instances[id].data,
     { fromInstanceId: id, toInstanceId: mapId(id), rules, stateKeys }))
+  for (const id of copiedIds) if (professionalKey(id) === 'guoling.input') for (const data of stateData(id))
+    remapComponentInputData(data, { fromInstanceId: id, toInstanceId: mapId(id), rules, stateKeys })
   // As in page copy, references outside the copied graph remain explicit external targets.
   // Only declared identities are rebound; prose and arbitrary component strings stay authored.
   const rewrite = (value: JsonValue) => rebindDeclaredTargets(value, mapId, mapSurfaceId)
@@ -192,6 +199,13 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
   const referencedAssets = new Set(Object.keys(assets))
   for (const instance of Object.values(entry.example.instances)) {
     for (const id of componentAssetIds(instance, entry.definitions[instance.definitionId])) referencedAssets.add(id)
+  }
+  for (const id of copiedIds) for (const data of stateData(id)) {
+    const instance = source.project.instances[id]
+    for (const assetId of componentAssetIds({ ...instance, data }, source.project.definitions[instance.definitionId])) {
+      referencedAssets.add(assetId)
+      if (source.project.assets[assetId]) assets[assetId] = structuredClone(source.project.assets[assetId])
+    }
   }
   for (const definition of definitions) for (const id of sourceAssetIds(definition.implementation)) referencedAssets.add(id)
   const assetIds = new Map([...referencedAssets].map(id => [id, sameDocument ? id : `asset_${crypto.randomUUID()}`]))
@@ -228,7 +242,7 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
   for (const asset of Object.values(assets)) {
     const id = assetIds.get(asset.id)!
     if (!project.assets[id]) {
-      const bytes = entry.resources.assets[asset.id]
+      const bytes = entry.resources.assets[asset.id] ?? source.resources.assets[asset.id]
       if (!bytes) continue
       const extension = /\.[a-zA-Z0-9]+$/.exec(asset.path)?.[0] ?? ''
       edits.push({ type: 'asset.add', asset: { ...structuredClone(asset), id,
@@ -266,6 +280,52 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
       data: remapComponentInteractionData(familyData, { instances: idMap, surfaces: surfaceIds, rules, actions, stateKeys }) })
     edits.push(...componentRuleEdits(project, ruleTarget, [...interactionRules(interactionBehavior(project, ruleTarget)), ...remapped]))
   }
+  // A normal copy keeps every named author state; the current render projection is never its source.
+  const presentations = new Map<string, ComponentPresentation>()
+  for (const sourceSurface of source.project.surfaces) for (const state of sourceSurface.presentation?.states ?? []) {
+    const owned = copiedIds.filter(id => Object.hasOwn(state.overrides, id))
+    const ordered = state.order?.filter(id => idMap.has(id)) ?? []
+    if (!owned.length && !ordered.length) continue
+    const surfaceId = destination.keepOwner && sameDocument ? sourceSurface.id : destinationSurfaceId
+    if (!surfaceId) continue
+    const destinationSurface = project.surfaces.find(surface => surface.id === surfaceId)
+    if (!destinationSurface) continue
+    const presentation = presentations.get(surfaceId) ?? structuredClone(destinationSurface.presentation ?? { states: [] })
+    let copiedState = presentation.states.find(value => value.id === state.id)
+    if (!copiedState) {
+      copiedState = { id: state.id, title: state.title, overrides: {} }
+      presentation.states.push(copiedState)
+    }
+    for (const id of owned) {
+      const original = source.project.instances[id], override = structuredClone(state.overrides[id])
+      if (override.data !== undefined) {
+        const data = professionalKey(id) === 'guoling.interactions'
+          ? remapComponentInteractionData(override.data, { instances: idMap, surfaces: surfaceIds, rules, actions, stateKeys })
+          : professionalKey(id) === 'guoling.input' ? remapComponentInputData(override.data, { fromInstanceId: id, toInstanceId: mapId(id), rules, stateKeys })
+          : rewrite(override.data)
+        override.data = rebindWebAssets({ ...original, data: rebindProfessionalAssets(data, identities) },
+          source.project.definitions[original.definitionId], identities).data
+      }
+      if (override.style) override.style = rebindProfessionalAssets(rewrite(override.style), identities) as typeof override.style
+      if (override.frame && graphRoots.includes(id)) {
+        const sourceView = resolveComponentPresentation(source.project, sourceSurface.id, state.id)
+        const owner = [...groups.values()].find(group => group.roots.includes(mapId(id)))?.owner ?? destination.container
+        const targetView = resolveComponentPresentation(project, surfaceId, copiedState.id)
+        const parent = owner.kind === 'instance' ? composeMatrices(componentParentMatrix(targetView, owner.instanceId), targetView.instances[owner.instanceId].frame?.transform ?? IDENTITY_MATRIX) : IDENTITY_MATRIX
+        override.frame = translateFrame(reparentFrame(override.frame, componentParentMatrix(sourceView, id), parent), destination.offset ?? { x: 0, y: 0 }) as ComponentFrame
+      }
+      copiedState.overrides[mapId(id)] = override
+    }
+    if (state.order) {
+      const existing = copiedState.order ?? [...destinationSurface.childIds]
+      const newIds = ordered.map(mapId)
+      const insertion = sameDocument && surfaceId === sourceSurface.id
+        ? Math.max(-1, ...ordered.map(id => existing.indexOf(id))) + 1 : Math.min(destination.index, existing.length)
+      copiedState.order = [...existing.slice(0, insertion), ...newIds.filter(id => !existing.includes(id)), ...existing.slice(insertion)]
+    }
+    presentations.set(surfaceId, presentation)
+  }
+  for (const [surfaceId, presentation] of presentations) edits.push({ type: 'surface.presentation.set', surfaceId, presentation })
   return { edits, idMap, assetIds, rootIds: selected, diagnostics }
 }
 
@@ -318,7 +378,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
     await write(roots.map(instanceId => ({ type: 'instance.remove', instanceId })), target, target.instanceIds.filter(id => !descendants(target.project, roots, false).includes(id)))
   }
   const captureClipboard = (ids: readonly string[]): ObjectClipboard => {
-    const project = structuredClone(current()), roots = selectedRoots(project, ids)
+    const project = structuredClone(kernel.readDocument()), roots = selectedRoots(project, ids)
     return { documentId: kernel.readView().activeDocumentId ?? undefined, project, roots, resources: structuredClone(kernel.readResources()), matrices: Object.fromEntries(roots.map(id => [id, componentParentMatrix(project, id)])) }
   }
   const paste = async (source: ObjectClipboard, keepOwner: boolean) => {
@@ -335,7 +395,7 @@ export function createCrossSurfaceCommands(ports: CrossSurfaceCommandPorts) {
       await source.removal
       const { edits, rootIds: selected, diagnostics } = prepareCourseObjectPaste(source, { capturedTarget: target, container: destination,
         index: containerChildIds(project, destination).length, offset: { x: 20, y: 20 }, keepOwner, identity: moving ? 'move' : 'copy' })
-      await write(edits, target, selected)
+      await write(edits, { ...target, activeStateId: null, editingProject: target.project }, selected)
       if (diagnostics.length) kernel.setFeedback({ errorMessage: [...new Set(diagnostics.map(item => item.message))].join('\n') })
     } catch (error) { if (moving) source.moveAvailable = true; throw error }
   }
