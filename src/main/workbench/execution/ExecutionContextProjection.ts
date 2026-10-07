@@ -1,4 +1,6 @@
 import type { ModelChatMessage } from '../../../shared/workbench/modelProvider'
+import type { ToolResult } from '../../../shared/workbench/tools'
+import { contentApplyFact, operationFact, saveFact } from '../../../core/tools/modelToolResult'
 
 const imagePart = (part: unknown): part is { type: 'image_url'; image_url: { url: string } } => !!part && typeof part === 'object'
   && (part as { type?: unknown }).type === 'image_url' && typeof (part as { image_url?: { url?: unknown } }).image_url?.url === 'string'
@@ -47,6 +49,17 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
     && Array.isArray(message.tool_calls) && message.tool_calls.length ? [index] : [])
   const recentStart = retainToolTurns > 0 ? assistantTurns.at(-retainToolTurns) ?? initialCount : messages.length
   const archiveThreshold = Number.isSafeInteger(textLimit) && textLimit! > 0 ? textLimit! : 8000
+  const callNames = new Map<string, string>(), messageTools = new Map<number, string>()
+  messages.forEach((message, index) => {
+    for (const call of Array.isArray(message.tool_calls) ? message.tool_calls : []) {
+      if (!call || typeof call !== 'object' || Array.isArray(call) || typeof call.id !== 'string'
+        || !call.function || typeof call.function !== 'object' || Array.isArray(call.function)
+        || typeof call.function.name !== 'string') continue
+      callNames.set(call.id, call.function.name)
+    }
+    if (message.role === 'tool' && typeof message.tool_call_id === 'string' && callNames.has(message.tool_call_id))
+      messageTools.set(index, callNames.get(message.tool_call_id)!)
+  })
   let imagesArchived = 0, encodedImageBytesRemoved = 0, toolBytesRemoved = 0
   const projected = messages.map((message, index): ModelChatMessage => {
     if (index < initialCount && !(Array.isArray(message.content) && message.content.some(imagePart))) return message
@@ -66,10 +79,15 @@ export function projectExecutionContext(runId: string, messages: readonly ModelC
       let receipt: unknown
       try {
         const original = JSON.parse(message.content)
-        const result = original?.result
-        receipt = { kind: original?.kind, ...(result && typeof result === 'object' ? { operation: {
-          operationId: result.operationId, documentId: result.documentId, status: result.status, revision: result.revision,
-        } } : {}) }
+        const name = messageTools.get(index) ?? ''
+        const apply = contentApplyFact(name, original as ToolResult)
+        const operation = operationFact(name, original as ToolResult)
+        const saved = saveFact(name, original as ToolResult)
+        receipt = { kind: original?.kind, ...(operation ? { operation: {
+          operationId: operation.operationId, documentId: operation.documentId, status: operation.status,
+          ...('revision' in operation ? { revision: operation.revision } : {}),
+        } } : {}), ...(apply ? { commit: apply.commit, usability: apply.usability, diagnostics: apply.diagnostics } : {}),
+          ...(saved ? { save: saved } : {}) }
       } catch { /* The complete source remains readable even when a diagnostic wasn't JSON. */ }
       const excerptLimit = Math.max(200, Math.floor(archiveThreshold * 0.55))
       const content = JSON.stringify({ archivedContext: sourceId, receipt, characters: message.content.length,

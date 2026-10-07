@@ -91,6 +91,15 @@ function sameObservedTarget(failed: ExecutionToolRecord, later: ExecutionToolRec
   return !!failed.effectTargets?.length && !!later.effectTargets?.length
     && JSON.stringify(stable(failed.effectTargets)) === JSON.stringify(stable(later.effectTargets))
 }
+/** Correcting a read cursor changes no work. A successful reread must still identify the same source. */
+function sameReadSource(failed: ExecutionToolRecord, later: ExecutionToolRecord): boolean {
+  if (failed.call.name !== 'file.read' || later.call.name !== 'file.read' || origin(failed) !== origin(later)
+    || later.state !== 'returned' || later.result?.kind !== 'read' || failedTool(later)) return false
+  const input = (tool: ExecutionToolRecord) => tool.call.input && typeof tool.call.input === 'object'
+    ? tool.call.input as { path?: unknown } : null
+  const source = input(failed)?.path
+  return typeof source === 'string' && source === input(later)?.path
+}
 const delivered = (tool: ExecutionToolRecord) => !failedTool(tool)
   && (knownApplication(tool.call.name, tool.result) || fileCreated(tool.call.name, tool.result)
     || tool.result?.kind === 'read' && (tool.call.name === 'file.read' || tool.call.name === 'material.read'
@@ -183,6 +192,7 @@ function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord
     if (tool.observationFailure?.outcome === 'unknown' || serviceToolOutcome(tool.call.name, tool.result)?.status === 'unknown'
       || tool.result?.kind === 'error' && /outcome-unknown/.test(tool.result.code)) return true
     if (record.tools.slice(index + 1).some(later => sameObservedTarget(tool, later))) return false
+    if (record.tools.slice(index + 1).some(later => sameReadSource(tool, later))) return false
     if (optionalObservationFailure(tool)) return false
     if (resolvedDelivery.has(tool)) return false
     if (record.tools.slice(index + 1).some(later => (requestKey(later) === requestKey(tool) || sameIntendedEdit(tool, later))
