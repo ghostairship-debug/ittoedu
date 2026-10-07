@@ -141,6 +141,9 @@ async function scan(filename: string, documentId?: string, options: { offset?: n
         throw new DocumentJournalError('journal-corrupt', '恢复日志身份或顺序损坏')
       latest = state; options.onRecord?.(offset); offset = end
     }
+    // A torn suffix is repairable only after an actual committed state. With no
+    // readable record there is no owner or recovery point to justify erasing input.
+    if (!latest && fileSize > 0) throw new DocumentJournalError('journal-corrupt', '恢复日志没有可读取的完整记录，原文件已保留')
     if (await journalIdentity(filename) !== initialIdentity) throw new DocumentJournalError('journal-sequence-conflict', '恢复日志在读取期间改变，未修复或提交')
   } finally { await file.close() }
   if (offset !== fileSize && options.repairTail !== false) {
