@@ -5,6 +5,7 @@ import { documentDigest } from '../documents/documentDigest'
 import { componentIsLocked, owningContainer, resolveComponentPresentation, type CourseProjectV10, type JsonValue } from '../../shared/contracts/component-platform/project'
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import { componentFieldIdentityPaths, componentValueAt } from '../drivers/courseV10Operations'
+import { componentAuthorRecordSchema } from '../../shared/contracts/component-platform/schema'
 import { documentTextLength, documentTextContentSchema, normalizeDocumentText, sliceDocumentText, plainDocumentText, type FlowTextContent } from '../../shared/document/content'
 import { inlineHtml } from '../../shared/document/html'
 import { readHtmlDocumentText, type DocumentHtmlNode } from '../../shared/document/htmlText'
@@ -29,6 +30,16 @@ export function courseInstanceContext(model: DocumentModel, target: CourseInstan
   const owner = instanceRootOwner(model.project, target.instanceId)
   if (!instance || !surface || !owner || owner.kind === 'surface' && owner.surfaceId !== surface.id) throw new Error('对象不属于捕获的表面')
   const field = target.dataPath === undefined ? undefined : componentValueAt(project, ['instances', instance.id, target.fieldScope ?? 'data', ...target.dataPath])
+  if (field && !field.exists && (target.fieldScope ?? 'data') === 'data' && target.dataPath?.length === 4
+    && target.dataPath[0] === 'authoringRecords' && target.dataPath[2] === 'overrides') {
+    const record = componentAuthorRecordSchema.safeParse(componentValueAt(project,
+      ['instances', instance.id, 'data', 'authoringRecords', target.dataPath[1]]).value)
+    const property = record.success ? record.data.kind === 'text' ? 'text' : 'src' : null
+    if (record.success && target.dataPath[3] === property) {
+      field.exists = true
+      field.value = record.data.binding.baseline
+    }
+  }
   if (field && !field.exists) throw new Error('所选数据字段已不存在')
   return { project, instance, surface, owner, ...(field ? { value: field.value } : {}) }
 }

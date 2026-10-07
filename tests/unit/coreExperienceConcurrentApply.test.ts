@@ -46,3 +46,25 @@ it('applies a delayed local AI reply through Gateway while preserving human geom
   expect(await session.execute({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision, operationId: 'stale-final-cas', actor: 'agent',
     mutation: { type: 'command', command: captureComponentOperation(current.model.project, [{ type: 'data.set', instanceId: 'a', path: target.dataPath, value: 'Stale AI' }]) } })).toMatchObject({ status: 'conflict', code: 'stale-revision' })
 })
+
+it('edits the effective text of a geometry-only author record through its original scoped Gateway target', async () => {
+  const project = createBlankCourseProjectV10('先移动后续写'), driver = new CourseV10Driver()
+  project.definitions[WEB_DEFINITION.id] = WEB_DEFINITION
+  project.instances.a = { id: 'a', definitionId: WEB_DEFINITION.id, data: { html: '<p>Original</p>', authoringRecords: {
+    local: { kind: 'text', binding: { kind: 'dom', path: [{ tag: 'p', index: 0 }], baseline: 'Original' }, overrides: { geometry: { translateX: 40 } } },
+  } } }
+  project.surfaces[0].childIds = ['a']
+  const registry = new DocumentRegistry({ drivers: [driver], createId: () => crypto.randomUUID(), bindingKey: binding => binding.path,
+    persistence: { async append() {}, async save() { throw new Error('unused') } } })
+  const session = await registry.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, '先移动后续写.h5lesson')
+  const gateway = new DocumentToolGateway(registry, [driver], () => crypto.randomUUID())
+  const target = { kind: 'course-instance' as const, surfaceId: project.surfaces[0].id, instanceId: 'a',
+    dataPath: ['authoringRecords', 'local', 'overrides', 'text'] }
+  await gateway.beginRun({ runId: 'ai', actor: 'agent', documents: [{ documentId: session.documentId, writable: [target] }] })
+  const handle = await gateway.issueTarget('ai', session.documentId, target)
+  expect(await gateway.execute('ai', 'reply', { name: 'text.replace', input: { target: handle, content: 'AI continued' } })).toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  const current = session.read()
+  if (current.model.kind !== 'course-v10') throw new Error('Expected V10')
+  expect(webDataSchema.parse(current.model.project.instances.a.data).authoringRecords!.local.overrides).toEqual({ geometry: { translateX: 40 }, text: 'AI continued' })
+  expect(webDataSchema.parse(current.model.project.instances.a.data).html).toBe('<p>Original</p>')
+})
