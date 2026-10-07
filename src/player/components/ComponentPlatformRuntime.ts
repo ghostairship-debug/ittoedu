@@ -107,7 +107,7 @@ export class ComponentPlatformRuntime {
     this.interactions = new ComponentWorldInteractions({ project: () => this.project, element: id => this.targetElement(id),
       document: () => this.targetElements.values().next().value?.ownerDocument ?? this.roots.values().next().value?.ownerDocument,
       audio: () => this.audioManager, video: (action, signal) => this.media.executeVideo(action, signal), navigation: options.studentNavigation ?? options.teacherController, report: this.report, active: () => this.playing, playback: () => this.mode !== 'capture',
-      controlsVisible: () => this.mode === 'edit' && !this.playing || this.project?.playback?.controls !== 'none' })
+      controlsInitiallyVisible: () => this.mode === 'edit' && !this.playing || this.project?.playback?.controls !== 'none' })
     const image = createImageRuntimeImplementation(id => {
       const url = this.assetUrl(id)
       return url ? { url } : undefined

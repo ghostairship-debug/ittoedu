@@ -21,7 +21,7 @@ export interface ComponentInteractionWorld {
   report(message: string): void
   active(): boolean
   playback(): boolean
-  controlsVisible?(): boolean
+  controlsInitiallyVisible?(): boolean
 }
 
 /** Targets, events and transient values come from the single document world. */
@@ -116,10 +116,11 @@ export class ComponentWorldInteractions {
     const element = this.world.element(id), project = this.world.project(), instance = project?.instances[id]
     const surfaceId = snapshot?.locationId ?? '', surface = project?.surfaces.find(value => value.id === surfaceId)
     const presentation = [...(this.presentationVisibility.get(id)?.values() ?? [])].filter(value => value.element === element).at(-1)?.visible
-    if (element && instance && project) element.hidden = !isComponentVisibleAtSurface(instance, surfaceId)
-      || this.world.controlsVisible?.() === false && isGlobalTeacherController(project, id)
+    const initial = Boolean(instance && project && (!this.world.playback() || instance.playbackInitialVisibility !== 'hidden')
+      && (this.world.controlsInitiallyVisible?.() !== false || !isGlobalTeacherController(project, id)))
+    if (element && instance) element.hidden = !isComponentVisibleAtSurface(instance, surfaceId)
       || !spatialSemanticVisible(surface?.spatial, id, snapshot?.zoom ?? 1)
-      || !(presentation ?? (this.leases.has(id) ? true : undefined) ?? this.visibility.get(id) ?? (!this.world.playback() || instance.playbackInitialVisibility !== 'hidden'))
+      || !(presentation ?? (this.leases.has(id) ? true : undefined) ?? this.visibility.get(id) ?? initial)
   }
   applyAllVisibility(): void { const state = this.world.navigation?.read(); for (const id of Object.keys(this.world.project()?.instances ?? {})) this.applyVisibility(id, state) }
   async motion(action: NodeMotionAction, context: ActionContext, preview = false): Promise<boolean> {
@@ -127,17 +128,17 @@ export class ComponentWorldInteractions {
     if (!element || !element.isConnected || !this.canPresent(action.nodeId) || context.signal.aborted) return false
     let motion = this.motions.get(action.nodeId)
     if (!motion) { motion = new MotionScope(); this.motions.set(action.nodeId, motion) }
-    const hidden = element.hidden, previous = this.visibility.get(action.nodeId)
+    const previous = this.visibility.get(action.nodeId)
     const lease = Symbol(action.nodeId); this.leases.set(action.nodeId, lease)
-    element.hidden = false
+    this.applyVisibility(action.nodeId)
     const success = await runComponentNodeMotion(motion, 'visibility', element, action, context.signal)
     if (this.leases.get(action.nodeId) !== lease || !element.isConnected || !this.canPresent(action.nodeId)) return false
     this.leases.delete(action.nodeId)
     if (preview || !success) {
       if (previous === undefined) this.visibility.delete(action.nodeId)
       else this.visibility.set(action.nodeId, previous)
-      element.hidden = hidden
-    } else { this.visibility.set(action.nodeId, action.type === 'node.enter'); this.applyVisibility(action.nodeId) }
+    } else this.visibility.set(action.nodeId, action.type === 'node.enter')
+    this.applyVisibility(action.nodeId)
     return success
   }
   reset(): void {

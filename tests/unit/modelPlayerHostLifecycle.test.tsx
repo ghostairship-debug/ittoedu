@@ -320,16 +320,31 @@ it('consumes the real no-controls setting in author try-run and Published visibi
   const editor = mountV10Model({ root: editorRoot, model, runScopeId: 'controls-edit', mode: 'edit' })
   try {
     await editor.ready
-    const panel = editorRoot.querySelector('nav[aria-label="教师控制台"]')!, target = editor.runtime.targetElement(id)
+    const panel = editorRoot.querySelector('nav[aria-label="教师控制台"]')!, target = editor.runtime.targetElement(id)!
     expect(panel).toBeVisible()
     editor.runtime.setPlaying(true)
     expect(panel).not.toBeVisible()
     expect(editor.runtime.targetElement('decoration')).toBeVisible()
+    const animate = vi.fn(() => {
+      let cancel!: () => void
+      const finished = new Promise<void>((_resolve, reject) => { cancel = () => reject(new DOMException('Cancelled', 'AbortError')) })
+      return { finished, cancel }
+    })
+    Object.defineProperty(target, 'animate', { configurable: true, value: animate })
+    const enter = { type: 'node.enter' as const, nodeId: id, effect: 'scale' as const, durationMs: 100, easing: 'linear' as const }
+    const firstAbort = new AbortController(), explicit = editor.runtime.previewMotion(enter, firstAbort.signal)
+    // The setting promises an initially hidden controller, while an explicit authored reveal remains available.
+    expect(animate).toHaveBeenCalledTimes(2); expect(panel).toBeVisible()
+    firstAbort.abort(); expect(await explicit).toBe(false); expect(panel).not.toBeVisible()
     editor.runtime.setPlaying(false)
     expect(panel).toBeVisible()
     choose('canvas'); await editor.update(model); editor.runtime.setPlaying(true)
     expect(panel).toBeVisible()
+    const nextAbort = new AbortController(), cancelled = editor.runtime.previewMotion(enter, nextAbort.signal)
     choose('none'); await editor.update(model)
+    expect(panel).toBeVisible()
+    nextAbort.abort(); expect(await cancelled).toBe(false)
+    // Cancellation restores the current formal default, not the element.hidden value from before the setting changed.
     expect(panel).not.toBeVisible()
     expect(editor.runtime.targetElement(id)).toBe(target)
   } finally { await editor.dispose(); editorRoot.remove() }
