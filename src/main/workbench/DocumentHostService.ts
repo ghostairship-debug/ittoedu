@@ -81,7 +81,15 @@ export class DocumentHostService {
       componentContent: {
         verifyDiagnostic: (snapshot, diagnostic) => verifyContentResourceDiagnostic({ project: snapshot.model.project,
           resources: snapshot.model.resources, diagnostic }),
-        source: (from, fileAccess) => readComponentProjectFileInput({ from, fileAccess }),
+        source: (from, fileAccess, sourceHtml?: string) => readComponentProjectFileInput({ from, fileAccess, sourceHtml,
+          currentHtml: async (filename: string) => {
+            const opened = this.registry.list().find(snapshot => snapshot.binding.kind === 'file'
+              && canonicalKey(snapshot.binding.path) === canonicalKey(filename))
+            if (!opened) return undefined
+            const current = await this.registry.get(opened.documentId).drain()
+            return current.model.kind === 'text' ? current.model.source : undefined
+          },
+        }),
         prepareSource: prepareComponentProjectFileSource,
         apply: input => new ContentApplyService({
           session: { project: () => input.baseline.model.project,
