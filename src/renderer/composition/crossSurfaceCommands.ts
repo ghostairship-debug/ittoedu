@@ -18,6 +18,7 @@ import { componentRuleEdits, createComponentInteractionCopyIdentities, interacti
 import { remapComponentInputData } from '../../components/input/authoring'
 import { inputDataSchema } from '../../components/input/data'
 import type { InteractionRule } from '../../shared/interactionTypes'
+import { equalComponentValue } from '../../core/drivers/courseV10Operations'
 
 /** Surface-owned content commands; generic objects use the common canonical writer below. */
 export interface CrossSurfaceContentPorts {
@@ -144,7 +145,7 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
       if (!familyOwners) continue
       for (const step of rule.actions) if (step.action.type === 'node.enter' || step.action.type === 'node.exit') {
         const feedbackId = step.action.nodeId, owner = topOwner(source.project, owningContainer(source.project, feedbackId))
-        if (!owner || !familyOwners.some(value => owner.kind === 'global' && value.kind === 'global' || sameContainer(owner, value)) || copied.has(feedbackId)) continue
+        if (!owner || !(owner.kind === 'global' || familyOwners.some(value => sameContainer(owner, value))) || copied.has(feedbackId)) continue
         copyRoots.push(feedbackId)
         descendants(source.project, [feedbackId]).forEach(value => copied.add(value)); expanded = true
       }
@@ -188,7 +189,8 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
     }
     return values.filter(rule => selected.has(rule.id))
   }
-  const externalBehaviors = moving && sameDocument ? [] : behaviorIds.filter(id => !copied.has(id))
+  const externalBehaviors = moving && sameDocument ? [] : behaviorIds.filter(id => !copied.has(id)
+    && [source.project.instances[id].data, ...stateData(id)].some(data => selectRules(rulesAt(id, data)).length))
   const family = externalBehaviors.flatMap(id => selectRules(rulesAt(id)))
   const familyData = JSON.parse(JSON.stringify({ rules: family })) as JsonValue
   for (const id of externalBehaviors) for (const data of [source.project.instances[id].data, ...stateData(id)]) {
@@ -303,7 +305,7 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
     first = false
   }
   let copiedBehaviorId: string | undefined
-  if (externalBehaviors.some(id => [source.project.instances[id].data, ...stateData(id)].some(data => selectRules(rulesAt(id, data)).length))) {
+  if (externalBehaviors.length) {
     let owner = destination.container
     while (owner.kind === 'instance') {
       const parent = owningContainer(project, owner.instanceId)
@@ -323,7 +325,8 @@ export function prepareCourseObjectPaste(source: CourseObjectClipboardSource, de
   for (const sourceSurface of source.project.surfaces) for (const state of sourceSurface.presentation?.states ?? []) {
     const owned = copiedIds.filter(id => Object.hasOwn(state.overrides, id))
     const ordered = state.order?.filter(id => idMap.has(id)) ?? []
-    const ownsRuleState = copiedBehaviorId && (externalBehaviors.some(id => state.overrides[id]?.data !== undefined)
+    const ownsRuleState = copiedBehaviorId && (externalBehaviors.some(id => state.overrides[id]?.data !== undefined
+      && !equalComponentValue(selectRules(rulesAt(id, state.overrides[id].data!)), selectRules(rulesAt(id))))
       || copiedIds.some(id => { const owner = topOwner(source.project, owningContainer(source.project, id)); return owner?.kind === 'surface' && owner.surfaceId === sourceSurface.id }))
     if (!owned.length && !ordered.length && !ownsRuleState) continue
     const surfaceId = destination.keepOwner && sameDocument ? sourceSurface.id : destinationSurfaceId

@@ -87,7 +87,15 @@ it('copies ordinary click programs and managed input feedback through the real e
   const unrelated: InteractionRule = { ...click, id: 'unrelated-rule', trigger: { type: 'node.click', nodeId: 'unrelated' }, actions: [{ ...click.actions[0]!, id: 'unrelated-action', action: { type: 'scene.next' } }] }
   project.instances.behavior = { id: 'behavior', definitionId: 'interactions', data: { rules: [...family, click, complete, unrelated] } as unknown as JsonValue,
     attachments: [{ instanceId: 'behavior', target: { kind: 'surface', surfaceId } }] }
-  surface.childIds = ['a', 'input', 'correct', 'error', 'unrelated', 'behavior']
+  surface.childIds = ['a', 'input', 'error', 'unrelated', 'behavior']
+  project.global.overlay.push('correct')
+  project.instances.other = { ...project.instances.a, id: 'other' }
+  const otherRule: InteractionRule = { ...unrelated, id: 'other-rule', trigger: { type: 'node.click', nodeId: 'other' },
+    actions: [{ ...unrelated.actions[0]!, id: 'other-action' }] }
+  project.instances.otherBehavior = { id: 'otherBehavior', definitionId: 'interactions', data: { rules: [otherRule] } as unknown as JsonValue,
+    attachments: [{ instanceId: 'otherBehavior', target: { kind: 'surface', surfaceId: 'other-page' } }] }
+  project.surfaces.push({ id: 'other-page', kind: 'slide', title: 'Other page', childIds: ['other', 'otherBehavior'],
+    presentation: { states: [{ id: 'unrelated-state', title: 'Unrelated state', overrides: { otherBehavior: { data: { rules: [{ ...otherRule, enabled: false }] } as unknown as JsonValue } } }] } })
   project.logic = { courseState: [{ key: 'input:input:value', valueType: 'string', defaultValue: '' }, { key: 'input:input:valid', valueType: 'boolean', defaultValue: false }], navigationGuards: [] }
   surface.presentation = { states: [{ id: 'answer', title: '另一状态', overrides: { behavior: { data: { rules: [...family,
     { ...click, actions: [{ ...click.actions[0]!, action: motion('error') }] }, unrelated] } as unknown as JsonValue } } }] }
@@ -103,6 +111,7 @@ it('copies ordinary click programs and managed input feedback through the real e
   const snapshot = session.read()
   if (snapshot.model.kind !== 'course-v10') throw new Error('Expected V10')
   const copied = snapshot.model.project, inputId = plan.idMap.get('input')!, buttonId = plan.idMap.get('a')!, correctId = plan.idMap.get('correct')!, errorId = plan.idMap.get('error')!
+  expect(copied.surfaces[0].presentation?.states.map(state => state.id)).toEqual(['answer'])
   const input = inputDataSchema.parse(copied.instances[inputId].data), copiedRules = interactionRules(interactionBehavior(copied, { kind: 'surface', surfaceId }))
   expect(input.answer!.ruleFamilyRuleIds.every(id => copiedRules.some(rule => rule.id === id) && !family.some(rule => rule.id === id))).toBe(true)
   expect(copiedRules.filter(rule => rule.id === 'unrelated-rule')).toHaveLength(1)
