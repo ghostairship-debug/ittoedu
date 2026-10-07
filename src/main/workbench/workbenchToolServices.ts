@@ -33,7 +33,7 @@ import { WebResearchService, type WebResearchOptions } from './network/WebResear
 import { ManagedBrowserMcpService, type ManagedBrowserGrant } from './externalTools/ManagedBrowserMcpService'
 import { createElectronEmbeddedBrowserFactory } from './browserEmbedded/ElectronEmbeddedBrowser'
 import type { EmbeddedBrowserViewport } from '../../shared/workbench/embeddedBrowser'
-import { BrowserActionApprovals, type BrowserActionApproval } from './externalTools/BrowserActionApprovals'
+import { BrowserActionApprovals, type BrowserActionApproval, type BrowserTaskAction } from './externalTools/BrowserActionApprovals'
 import { MediaCapabilityService } from './media/MediaCapabilityService'
 import { DelegationJobService } from './delegation/DelegationJobService'
 import { ChatGPTImageProvider } from './images/ChatGPTImageProvider'
@@ -110,6 +110,19 @@ export function approveWorkbenchBrowserAction(input: BrowserActionApproval): voi
     throw new Error('外部页面已变化，请重新观察后批准具体操作')
   browserActionApprovals.grant(input)
 }
+/** Main obtains action facts from the owned browser; a model cannot supply the authorization classification. */
+export function authorizeWorkbenchBrowserActionFromTask(input: Parameters<ManagedBrowserMcpService['authorizeTaskAction']>[0]): Promise<boolean> {
+  return browserService ? browserService.authorizeTaskAction(input) : Promise.resolve(false)
+}
+export function browserTaskActionWithinGrant(grant: ToolRunGrant, action: BrowserTaskAction): boolean {
+  const scope = grant.webAuthorization
+  if (!scope?.actions.length || action.action === 'unknown' || grant.fileAccess?.permission === 'read-only') return false
+  try {
+    const origins = new Set(scope.origins.map(value => new URL(value).origin))
+    if (!origins.has(new URL(action.pageUrl).origin) || action.destinationUrl && !origins.has(new URL(action.destinationUrl).origin)) return false
+    return action.action === 'prepare' || scope.actions.includes(action.action)
+  } catch { return false }
+}
 export async function controlWorkbenchBrowser(runId: string, action: 'status' | 'takeover' | 'resume') {
   if (!browserService) throw new Error('本任务尚未启动受管浏览器')
   if (action === 'status') return browserService.controlState(runId)
@@ -167,8 +180,11 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       const file = await host.agentFiles.readAuthorizedFile(fileContext(runId), source)
       return { name: file.name, bytes: file.bytes }
     },
-    approveExternalAction: async input => approvals.consume({ runId: input.runId, operationId: input.operationId,
-      tool: input.tool, arguments: input.arguments, snapshotId: input.snapshotId }) })
+    authorizeTaskAction: input => approvals.grantFromTask(input),
+    approveExternalAction: async input => {
+      if (input.pageUrl && input.action) await approvals.grantFromTask({ ...input, pageUrl: input.pageUrl, action: input.action })
+      return approvals.consume(input)
+    } })
   // Speech/video/music have no verified provider adapter in the current connection set.
   const media = new MediaCapabilityService()
   const observationImages = new ObservationImageStore()
@@ -384,7 +400,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
         web.beginRun(grant.runId)
         openImages.beginRun(grant.runId)
         await mcp.beginRun(grant.runId, managedBrowserGrantForRun(grant))
-        approvals.beginRun(grant.runId)
+        approvals.beginRun(grant.runId, input => !controller.signal.aborted && browserTaskActionWithinGrant(grant, input))
         media.beginRun(grant.runId, { writable: grant.actor === 'agent' && !!grant.fileAccess && grant.fileAccess.permission !== 'read-only', capabilities: [] })
       } catch (error) {
         controller.abort(); deliverySignals.delete(grant.runId)
