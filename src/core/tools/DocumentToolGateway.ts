@@ -28,7 +28,7 @@ import { planCourseComponentPackageReplacement } from '../components/library/rep
 import { documentTextLength, plainDocumentText } from '../../shared/document/content'
 import { projectFileRegistration } from './ProjectFileTools'
 import { skillReadInputSchema } from './SkillTools'
-import { ComponentProjectFileCoordinator, componentProjectFileSchemas, componentProjectFiles, type ComponentProjectSnapshot, type ComponentProjectFileInput, type ComponentProjectFile } from '../projectFiles/componentPlatform'
+import { ComponentProjectFileCoordinator, componentProjectFileSchemas, componentProjectFiles, componentProjectSurfaceId, type ComponentProjectSnapshot, type ComponentProjectFileInput, type ComponentProjectFile } from '../projectFiles/componentPlatform'
 import type { ContentApplyRequest, ContentApplyResult, ContentApplySource, ContentApplyIntent, ContentApplyDiagnostic } from '../contentApply/planning/types'
 import { readHtmlAuthoringRecords } from '../../shared/html/htmlAuthoringRecords'
 
@@ -1340,11 +1340,14 @@ export class DocumentToolGateway implements ToolGateway {
       resolveFileTarget: async (selector, path) => {
         const snapshot = await this.componentProjectDocument(runId, selector, 'read')
         const project = snapshot.model.project
-        const target = componentProjectFiles(project, snapshot.model.resources).find(file => file.path === path)?.target
-        if (!target) return null
-        let owner = target.kind === 'container' ? target.container : owningContainer(project, target.instanceId)
-        while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
-        const locationId = owner?.kind === 'surface' ? owner.surfaceId : owner?.kind === 'global' ? project.surfaces[0]?.id : undefined
+        let locationId = componentProjectSurfaceId(project, path)
+        if (!locationId) {
+          const target = componentProjectFiles(project, snapshot.model.resources).find(file => file.path === path)?.target
+          if (!target) return null
+          let owner = target.kind === 'container' ? target.container : owningContainer(project, target.instanceId)
+          while (owner?.kind === 'instance') owner = owningContainer(project, owner.instanceId)
+          locationId = owner?.kind === 'surface' ? owner.surfaceId : owner?.kind === 'global' ? project.surfaces[0]?.id : undefined
+        }
         if (!locationId) return null
         return { documentId: snapshot.documentId, epoch: snapshot.epoch, revision: snapshot.revision,
           projectId: project.id, locationId, stateId: null }

@@ -16,6 +16,15 @@ type Node = DefaultTreeAdapterTypes.ChildNode
 const element = (node: Node): node is Element => 'tagName' in node
 const stem = (name: string) => name.replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-').trim().replace(/^\.+|\.+$/g, '') || '未命名'
 const json = (value: unknown) => JSON.stringify(value, null, 2)
+const surfacePath = (title: string, index: number) => `pages/${String(index + 1).padStart(2, '0')}-${stem(title)}`
+
+/** Observation addresses the formal page even when its contents have no HTML projection. */
+export function componentProjectSurfaceId(project: CourseProjectV10, path: string): string | undefined {
+  return project.surfaces.find((surface, index) => {
+    const base = surfacePath(surface.title, index)
+    return path === `${base}.html` || path === `${base}.json`
+  })?.id
+}
 
 export interface ComponentProjectFile {
   path: string
@@ -111,7 +120,6 @@ export function projectHtmlProjection(project: CourseProjectV10, rootIds: readon
 /** Natural paths are derived once per observation from current order and names. */
 export function componentProjectFiles(project: CourseProjectV10, resources: DocumentResources): ComponentProjectFile[] {
   const defaultViewport = createCourseSurface(project, { kind: 'slide' }, () => 'source-viewport').designSize!
-  const surfacePath = (title: string, index: number) => `pages/${String(index + 1).padStart(2, '0')}-${stem(title)}`
   const files: ComponentProjectFile[] = [{ path: 'pages', kind: 'framework',
     content: json({ pages: project.surfaces.map((surface, index) => ({ path: `${surfacePath(surface.title, index)}.json`, title: surface.title, kind: surface.kind })) }),
     note: '页面框架目录。surface.add 新增页面；现存页面路径可用 surface.move、surface.remove、surface.title，before 选择本次列出的页面路径，省略即末尾。身份与编号由软件维护。' }]
