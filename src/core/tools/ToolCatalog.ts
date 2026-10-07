@@ -13,6 +13,7 @@ import { nativeContentInputSchemaByType } from '../../shared/contracts/native-v1
 import { z } from 'zod'
 import type { ModelToolCall, ToolDefinition, ToolResult } from '../../shared/workbench/tools'
 import { objectUpdateInputSchema } from './toolSchemas'
+import { componentFrameSchema } from '../../shared/contracts/component-platform/schema'
 import { handleToolTarget, hasRunDocument, hasRunWrite, projectToolTarget, registeredEffectNames,
   toolRegistrationFor, type ResolvedToolTarget, type RunToolScope, type ToolFamily, type ToolSupportContext, type ToolTargetResolver } from './ToolRegistration'
 export { toolFamilies } from './ToolRegistration'
@@ -53,11 +54,16 @@ export const canonicalMutationTools = [
     inputSchema: mediaApplyInputSchema, manual: { label: '替换媒体', group: 'edit', targetKinds: ['course-instance'] } },
   { capability: 'write', effect: 'document-edit', family: 'media', supports: context => hasRunWrite(context, ['course-instance'], 'course-v10'), targets: handleToolTarget,
     handler: (context, input) => context.mutate({ name: 'media.apply', input }) }),
+  registerCanonical({ name: 'media.insert', description: '把已准备的本任务图片资源插入已授权页面；软件登记资源和组件身份。frame 可省略，由宿主按图片比例放置；插入和撤销均经过正式文档事务。',
+    inputSchema: z.object({ target, resource: z.string().min(1), fit: imageFitSchema.optional(), frame: componentFrameSchema.optional() }).strict(),
+    manual: { label: '插入图片', group: 'edit', targetKinds: ['course-surface'] } },
+  { capability: 'write', effect: 'document-edit', family: 'media', supports: context => hasRunWrite(context, ['course-surface'], 'course-v10'), targets: handleToolTarget,
+    handler: (context, input) => context.mutate({ name: 'media.insert', input }) }),
 ] as const
 export const projectApplyTool = projectFileRegistrations.find(tool => tool.name === 'project.apply')!
 export const canonicalToolRegistrations = [...canonicalMutationTools]
 export function canonicalToolRegistration(name: string) { return canonicalToolRegistrations.find(tool => tool.name === name) }
-const mutationSchemas = [canonicalMutationTools[0].callSchema, canonicalMutationTools[1].callSchema, canonicalMutationTools[2].callSchema] as const
+const mutationSchemas = [canonicalMutationTools[0].callSchema, canonicalMutationTools[1].callSchema, canonicalMutationTools[2].callSchema, canonicalMutationTools[3].callSchema] as const
 export const mutationCallSchema = z.discriminatedUnion('name', mutationSchemas)
 export type MutationCall = z.infer<typeof mutationCallSchema>
 export const batchMutationCallSchema = mutationCallSchema

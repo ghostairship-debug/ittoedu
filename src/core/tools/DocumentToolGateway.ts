@@ -1192,6 +1192,19 @@ export class DocumentToolGateway implements ToolGateway {
       let target = targets[i]
       if (target.kind === 'markdown-range' && isSourceDocumentModel(model) && isSourceDocumentModel(snapshot.model)) target = mapMarkdownRange(snapshot.model.source, model.source, target)
       if (model.kind === 'course-v10') {
+        if (mutation.name === 'media.insert') {
+          if (target.kind !== 'course-surface') throw new ToolError('invalid-target', '插入图片需要已授权页面目标')
+          if (!this.options.prepareImage) throw new ToolError('unsupported-resource-preparation', '当前宿主未配置图片解码能力')
+          const image = await this.readImageResource(runId, snapshot.documentId, mutation.input.resource)
+          const source = this.images.get(mutation.input.resource)?.source
+          const prepared = await prepareComponentImageApplication({ snapshot: { ...snapshot, model }, target, image,
+            mode: 'insert', fit: mutation.input.fit, frame: mutation.input.frame, source }, { prepareImage: this.options.prepareImage, createId: this.createId })
+          model = await driver.apply(model, prepared.command)
+          componentEdits.push(...prepared.command.edits)
+          for (const expected of prepared.command.expected) componentReadPaths.set(JSON.stringify(expected.path), expected.path)
+          finalTargets.push(prepared.target)
+          continue
+        }
         if (target.kind !== 'course-instance') throw new ToolError('invalid-target', '此修改需要已授权的组件对象或文字字段')
         if (mutation.name === 'media.apply') {
           if (!this.options.prepareImage) throw new ToolError('unsupported-resource-preparation', '当前宿主未配置图片解码能力')
