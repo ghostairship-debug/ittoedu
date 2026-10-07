@@ -100,9 +100,9 @@ export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
   beforeReplace?(): Promise<boolean>
   onProjectReplaced?(): void
   /** A local authoring owner may retain input that has not entered DocumentSession. */
-  prepareBeforeClose?(mode?: 'save' | 'preserve'): boolean | Promise<boolean>
-  preserveBeforeClose?(mode?: 'save' | 'preserve'): Promise<boolean>
-  subscribePreserveAndCloseRequest?(handler: () => Promise<boolean>): () => void
+  prepareBeforeClose?(mode?: 'save' | 'preserve', documentIds?: readonly string[]): boolean | Promise<boolean>
+  preserveBeforeClose?(mode?: 'save' | 'preserve', documentIds?: readonly string[]): Promise<boolean>
+  subscribePreserveAndCloseRequest?(handler: (documentIds?: readonly string[]) => Promise<boolean>): () => void
   onProjectSaved?(input: { projectId: string; path: string; previousPath: string | null; saveAs: boolean }): Promise<void>
   listRecentProjects(): Promise<RecentProjectEntry[]>
   clearRecoveryProject?(): Promise<void>
@@ -114,7 +114,7 @@ export interface CourseProjectLifecyclePorts<TDraftToken = unknown> {
   readRecoveryProject?(): Promise<RecoveryProjectResult | null>
   peekProjectArchive?(path: string): Promise<{ bytes: Uint8Array } | null>
   setWindowDirtyState(dirty: boolean): Promise<void>
-  subscribeSaveAndCloseRequest(handler: () => Promise<boolean>): () => void
+  subscribeSaveAndCloseRequest(handler: (documentIds?: readonly string[]) => Promise<boolean>): () => void
 }
 
 export interface CourseProjectLifecycleWatch {
@@ -230,18 +230,18 @@ export function useCourseProjectLifecycle<TDraftToken>(ports: CourseProjectLifec
     document.title = APP_NAME
     if (ref.current.desktopAvailable()) void ref.current.setWindowDirtyState(watch.dirty).catch(() => undefined)
   }, [watch.dirty, watch.projectTitle])
-  const prepareBeforeClose = useCallback(async (mode: 'save' | 'preserve'): Promise<boolean> => {
+  const prepareBeforeClose = useCallback(async (mode: 'save' | 'preserve', documentIds?: readonly string[]): Promise<boolean> => {
     try {
-      if (await ref.current.prepareBeforeClose?.(mode) === false) return false
+      if (await ref.current.prepareBeforeClose?.(mode, documentIds) === false) return false
       // Preserve may retain invalid raw input. Only Save requires every visible
       // input to be a formal edit; the preserve owner settles admitted operations.
-      if (mode === 'save' && service().snapshot()) await service().drain()
-      if (!(await (ref.current.preserveBeforeClose?.(mode) ?? Promise.resolve(true)))) return false
-      return await ref.current.prepareBeforeClose?.(mode) !== false
+      if (!documentIds && mode === 'save' && service().snapshot()) await service().drain()
+      if (!(await (ref.current.preserveBeforeClose?.(mode, documentIds) ?? Promise.resolve(true)))) return false
+      return await ref.current.prepareBeforeClose?.(mode, documentIds) !== false
     }
     catch (error) { ref.current.reportError(error instanceof Error ? error.message : '输入未确认，已取消关闭'); return false }
   }, [])
-  useEffect(() => ref.current.desktopAvailable() ? ref.current.subscribeSaveAndCloseRequest(() => prepareBeforeClose('save')) : undefined, [prepareBeforeClose])
-  useEffect(() => ref.current.desktopAvailable() ? ref.current.subscribePreserveAndCloseRequest?.(() => prepareBeforeClose('preserve')) : undefined, [prepareBeforeClose])
+  useEffect(() => ref.current.desktopAvailable() ? ref.current.subscribeSaveAndCloseRequest(ids => prepareBeforeClose('save', ids)) : undefined, [prepareBeforeClose])
+  useEffect(() => ref.current.desktopAvailable() ? ref.current.subscribePreserveAndCloseRequest?.(ids => prepareBeforeClose('preserve', ids)) : undefined, [prepareBeforeClose])
   return { recentProjects, newProject, newProjectFrom, newFlowProject, newSpatialProject, openProject, openRecentProject, saveProject }
 }

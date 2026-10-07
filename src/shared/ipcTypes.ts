@@ -200,10 +200,10 @@ export interface DesktopAPI {
   setDirtyState(dirty: boolean): Promise<void>
   onRequestSave(handler: () => void): () => void
   onRequestFocusDocument?(handler: (documentId: string) => void): () => void
-  onRequestPreserveAndClose?(handler: () => Promise<PreserveAndCloseResult>): () => void
-  onRequestSaveAndClose(handler: () => Promise<PreserveAndCloseResult>): () => void
+  onRequestPreserveAndClose?(handler: (documentIds?: readonly string[]) => Promise<PreserveAndCloseResult>): () => void
+  onRequestSaveAndClose(handler: (documentIds?: readonly string[]) => Promise<PreserveAndCloseResult>): () => void
   onRequestDiscardAndClose?(handler: (documentIds: readonly string[]) => Promise<boolean>): () => void
-  onRequestResumeClose?(handler: () => void): () => void
+  onRequestResumeClose?(handler: (documentIds?: readonly string[]) => void): () => void
   reportDiagnostic(input: {
     source: 'renderer' | 'preview' | 'component'
     message: string

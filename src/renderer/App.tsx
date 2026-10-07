@@ -72,11 +72,8 @@ import { BundledFontBoundary } from './app/BundledFontBoundary'
 import { confirmPptxLosses } from './project/confirmPptxLosses'
 import { createCourseFromPptx, pptxCourseStem } from './project/pptxCourseCreation'
 import { CourseV10RuntimeView } from './components/CourseV10RuntimeView'
-import { courseDraftLifecycle } from './authoring/courseDraftLifecycle'
-import { preservePropertiesDrafts, restorePropertiesDrafts, suspendPropertiesDrafts, resumePropertiesDrafts } from './ui/properties/PropertyControls'
 import type { DocumentSnapshot } from '../shared/workbench/document'
 import { resolveComponentPresentation } from '../shared/contracts/component-platform'
-import { equalComponentValue } from '../core/drivers/courseV10Operations'
 import { projectWithBackgroundPreview } from './authoring/backgroundPreview'
 import { projectWithSlideContentDraft } from './store/slices/slideAuthoringSlice'
 
@@ -186,66 +183,14 @@ export default function App() {
   }, [])
   const saveDirectory = useRef<SaveDirectoryContext | null>(null)
   const rawDocuments = window.desktopAPI?.documents
-  const restoredDrafts = useRef(new Map<string, Promise<void>>())
-  const suspendedCloseDocuments = useRef(new Map<string, string>())
-  const authoringWrites = useRef<Promise<void>>(Promise.resolve())
-  function restoreCourseInputs(documentId: string): Promise<void> {
-    const snapshot = useEditorStore.getState().courseView.documents.find(value => value.documentId === documentId)
-    if (!snapshot || !rawDocuments) return Promise.resolve()
-    const key = JSON.stringify([documentId, snapshot.epoch]), previous = restoredDrafts.current.get(key)
-    if (previous) return previous
-    const pending = rawDocuments.readAuthoringDrafts(documentId).then(records => {
-      const state = useEditorStore.getState(), current = state.courseView.documents.find(value => value.documentId === documentId)
-      if (!current || current.epoch !== snapshot.epoch) throw new Error('恢复输入时文档已关闭或重开，原稿保留在本机')
-      if (!records) return
-      const result = courseDraftLifecycle(state.courseBridge).restore(documentId, records.advanced)
-      restorePropertiesDrafts(documentId, records.properties, current.epoch)
-      if (result.issues.length) state.setError(result.issues[0]!.message)
-    }).catch(error => { restoredDrafts.current.delete(key); throw error })
-    restoredDrafts.current.set(key, pending)
-    return pending
-  }
-  async function prepareCourseClose(documentIds?: readonly string[], mode: 'save' | 'preserve' = 'preserve'): Promise<boolean> {
-    try {
-      const ids = documentIds ?? useEditorStore.getState().courseView.documents.map(document => document.documentId)
-      for (const id of ids) {
-        await restoreCourseInputs(id)
-        let issue: unknown
-        try { await useEditorStore.getState().drainCourseDocument(id) } catch (error) { issue = error }
-        if (mode === 'save' && issue) throw issue
-        const state = useEditorStore.getState(), snapshot = state.courseView.documents.find(document => document.documentId === id)
-        if (!snapshot) throw new Error('保全输入时文档已关闭')
-        const records = { advanced: courseDraftLifecycle(state.courseBridge).preserve(id), properties: preservePropertiesDrafts(id) }
-        const flowDraft = state.flowDocumentDrafts?.[id]
-        if (!rawDocuments) throw new Error('输入恢复服务不可用，已保留原稿')
-        if (records.advanced.length || records.properties.length) await rawDocuments.writeAuthoringDrafts(id, records)
-        else await rawDocuments.clearAuthoringDrafts(id)
-        if (!await preserveFlowInputs([id])) return false
-        await state.courseBridge.drain([id])
-        const current = useEditorStore.getState(), currentSnapshot = current.courseView.documents.find(document => document.documentId === id)
-        const currentRecords = { advanced: courseDraftLifecycle(current.courseBridge).preserve(id), properties: preservePropertiesDrafts(id) }
-        if (!currentSnapshot || currentSnapshot.epoch !== snapshot.epoch || !equalComponentValue(records, currentRecords) || current.flowDocumentDrafts?.[id] !== flowDraft)
-          throw new Error('保全期间又有新输入，原稿仍保留；请完成本次输入后再关闭')
-        if (issue) state.setStatus('未完成的输入已保存在本机恢复稿中')
-      }
-      return true
-    } catch (error) { useEditorStore.getState().setError(error instanceof Error ? error.message : '输入尚未保全，已取消关闭'); return false }
-  }
+  const courseInputs = useEditorStore(state => state.courseInputs)
+  const restoreCourseInputs = courseInputs.restore
+  const prepareCourseClose = courseInputs.prepare
   const documentsWithSaveDirectory = useMemo<DocumentHostAPI | null>(() => rawDocuments ? {
     ...rawDocuments,
     saveWithDialog: (documentId, saveAs, suggestedDirectory) => rawDocuments.saveWithDialog(documentId, saveAs, suggestedDirectory ?? saveDirectory.current ?? undefined),
-    closeWithDialog: async (documentId, suggestedDirectory, discardOnly) => {
-      // Bridge.close calls this after the Store/Projection drain; input entered while
-      // those awaits were pending must still keep its original tab and source draft.
-      const course = useEditorStore.getState().courseView.documents.some(value => value.documentId === documentId)
-      if (course && !discardOnly && !await prepareCourseClose([documentId])) return false
-      if (discardOnly) suspendCloseInputs([documentId])
-      try {
-        const closed = await rawDocuments.closeWithDialog(documentId, suggestedDirectory ?? saveDirectory.current ?? undefined, discardOnly)
-        if (!closed && discardOnly) resumeCloseInputs([documentId])
-        return closed
-      } catch (error) { if (discardOnly) resumeCloseInputs([documentId]); throw error }
-    },
+    closeWithDialog: (documentId, suggestedDirectory, discardOnly) =>
+      rawDocuments.closeWithDialog(documentId, suggestedDirectory ?? saveDirectory.current ?? undefined, discardOnly),
   } : null, [rawDocuments])
   const setSaveDirectory = useCallback((directory: SaveDirectoryContext | null) => { saveDirectory.current = directory }, [])
   const [lessonDirty, setLessonDirty] = useState(false)
@@ -354,30 +299,19 @@ export default function App() {
     },
     onError: setError,
   })
-  function suspendCloseInputs(documentIds?: readonly string[]) {
-    const state = useEditorStore.getState()
-    const ids = documentIds ?? state.courseView.documents.map(value => value.documentId)
-    for (const snapshot of state.courseView.documents) if (ids.includes(snapshot.documentId)) suspendedCloseDocuments.current.set(snapshot.documentId, snapshot.epoch)
-    state.courseBridge.suspendForClose(ids)
-    suspendPropertiesDrafts(ids)
-    flowRecovery.suspendForClose([...suspendedCloseDocuments.current.values()])
+  async function suspendCloseInputs(documentIds?: readonly string[]) {
+    const pending = courseInputs.suspend(documentIds)
     lessonShell.current?.suspendForClose(documentIds)
+    await pending
   }
   function resumeCloseInputs(documentIds?: readonly string[]) {
-    const ids = documentIds ?? [...suspendedCloseDocuments.current.keys()]
-    const epochs = ids.flatMap(id => { const epoch = suspendedCloseDocuments.current.get(id); suspendedCloseDocuments.current.delete(id); return epoch ? [epoch] : [] })
-    useEditorStore.getState().courseBridge.resumeAfterCloseCancelled(ids)
-    resumePropertiesDrafts(ids)
-    flowRecovery.resumeAfterCloseCancelled(epochs)
+    courseInputs.resume(documentIds)
     lessonShell.current?.resumeAfterCloseCancelled(documentIds)
   }
   useEffect(() => {
     const api = window.desktopAPI
-    const discard = api?.onRequestDiscardAndClose?.(async () => {
-      suspendCloseInputs()
-      // Queued authoring writes observe the suspension; an admitted write finishes
-      // before Main deletes the recovery owned by the closing document epoch.
-      await authoringWrites.current
+    const discard = api?.onRequestDiscardAndClose?.(async ids => {
+      await suspendCloseInputs(ids)
       await flowRecovery.flush()
       return true
     })
@@ -386,18 +320,7 @@ export default function App() {
   }, [rawDocuments, flowRecovery.flush])
   useEffect(() => {
     if (!rawDocuments) return
-    const captures = courseConnection.documents.map(snapshot => ({ documentId: snapshot.documentId, epoch: snapshot.epoch }))
-    authoringWrites.current = authoringWrites.current.then(async () => {
-      for (const { documentId, epoch } of captures) {
-        if (suspendedCloseDocuments.current.has(documentId)) continue
-        await restoreCourseInputs(documentId)
-        const state = useEditorStore.getState()
-        if (suspendedCloseDocuments.current.has(documentId) || !state.courseView.documents.some(value => value.documentId === documentId && value.epoch === epoch)) continue
-        const records = { advanced: courseDraftLifecycle(state.courseBridge).preserve(documentId), properties: preservePropertiesDrafts(documentId) }
-        if (records.advanced.length || records.properties.length) await rawDocuments.writeAuthoringDrafts(documentId, records)
-        else await rawDocuments.clearAuthoringDrafts(documentId)
-      }
-    }).catch(error => setError(error instanceof Error ? error.message : '输入恢复稿尚未保存'))
+    void courseInputs.persist()
   }, [localDraftVersion, courseConnection.documents, rawDocuments])
   const preserveFlowInputs = async (documentIds?: readonly string[]): Promise<boolean> => {
     const state = useEditorStore.getState()
@@ -421,7 +344,9 @@ export default function App() {
       ready: () => {
         const host = documentsWithSaveDirectory
         if (!host) return Promise.reject(new Error('课程文档服务不可用'))
-        return useEditorStore.getState().connectCourseDocuments(host, id => prepareCourseClose([id]), restoreCourseInputs)
+        return useEditorStore.getState().connectCourseDocuments(host, {
+          preserveFlow: preserveFlowInputs, suspendFlow: flowRecovery.suspendForClose, resumeFlow: flowRecovery.resumeAfterCloseCancelled,
+        })
       },
       snapshot: () => useEditorStore.getState().courseView.snapshot,
       create: (surface, canvas) => useEditorStore.getState().createCourseDocument(surface, canvas),
@@ -453,15 +378,18 @@ export default function App() {
     confirmProjectOpen: (confirmationId) => desktopApi().confirmProjectOpen({ confirmationId }),
     beforeReplace: async () => await prepareCourseClose(),
     onProjectReplaced: () => lessonShell.current?.detachLesson(),
-    preserveBeforeClose: async mode => {
-      await elementCards.flushDrafts()
-      if (!(await flowRecovery.flush()) || !(await lessonShell.current?.preserveAll(mode) ?? true)) return false
-      await useEditorStore.getState().courseBridge.drain()
+    preserveBeforeClose: async (mode, ids) => {
+      if (!ids) {
+        await elementCards.flushDrafts()
+        if (!await flowRecovery.flush()) return false
+      }
+      if (!(await lessonShell.current?.preserveAll(mode, ids) ?? true)) return false
+      await useEditorStore.getState().courseBridge.drain(ids)
       return true
     },
-    prepareBeforeClose: mode => prepareCourseClose(undefined, mode),
-    subscribePreserveAndCloseRequest: handler => window.desktopAPI?.onRequestPreserveAndClose?.(async () => {
-      const ready = await handler()
+    prepareBeforeClose: (mode, ids) => prepareCourseClose(ids, mode),
+    subscribePreserveAndCloseRequest: handler => window.desktopAPI?.onRequestPreserveAndClose?.(async ids => {
+      const ready = await handler(ids)
       return { ready, ...(ready && saveDirectory.current ? { suggestedDirectory: saveDirectory.current } : {}) }
     }) ?? (() => undefined),
     beforeSave: () => flowRecovery.flush(),
@@ -475,8 +403,8 @@ export default function App() {
     },
     subscribeSaveAndCloseRequest: (handler) => {
       if (!window.desktopAPI) return () => undefined
-      return window.desktopAPI.onRequestSaveAndClose(async () => {
-        const ready = await handler()
+      return window.desktopAPI.onRequestSaveAndClose(async ids => {
+        const ready = await handler(ids)
         return { ready, ...(ready && saveDirectory.current ? { suggestedDirectory: saveDirectory.current } : {}) }
       })
     },

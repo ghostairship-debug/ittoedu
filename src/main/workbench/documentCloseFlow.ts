@@ -3,6 +3,8 @@ import type { DocumentSnapshot } from '../../shared/workbench/document'
 export interface DocumentClosePorts {
   /** A failed renderer draft can be discarded explicitly without first committing or saving it. */
   discardOnly?: boolean
+  /** Complete or suspend this document's inputs; Main still owns the close decision. */
+  prepareRenderer?(mode: 'save' | 'discard'): Promise<boolean>
   read(): Promise<DocumentSnapshot>
   hasWritableTasks(): Promise<boolean>
   confirmStop(): Promise<boolean>
@@ -15,6 +17,7 @@ export interface DocumentClosePorts {
 
 /** A dialog decision applies only to the exact content the user saw. */
 export async function closeDocumentFlow(ports: DocumentClosePorts): Promise<boolean> {
+  if (!ports.discardOnly && await ports.prepareRenderer?.('save') === false) return false
   if (await ports.hasWritableTasks()) {
     if (!await ports.confirmStop()) return false
     await ports.stopWritableTasks()
@@ -26,6 +29,7 @@ export async function closeDocumentFlow(ports: DocumentClosePorts): Promise<bool
     if (decision === 'cancel') return false
     if (decision === 'save') {
       if (ports.discardOnly) return false
+      if (await ports.prepareRenderer?.('save') === false) return false
       const saved = await ports.save()
       if (!saved || saved.dirty) return false
       snapshot = saved
@@ -37,6 +41,11 @@ export async function closeDocumentFlow(ports: DocumentClosePorts): Promise<bool
     if (await ports.hasWritableTasks()) {
       if (!await ports.confirmStop()) return false
       await ports.stopWritableTasks()
+    }
+    if (await ports.prepareRenderer?.(discard ? 'discard' : 'save') === false) return false
+    if (!discard) {
+      const current = await ports.read()
+      if (current.epoch !== snapshot.epoch || current.revision !== snapshot.revision || current.dirty !== snapshot.dirty) return false
     }
     await ports.close(snapshot, discard)
     return true

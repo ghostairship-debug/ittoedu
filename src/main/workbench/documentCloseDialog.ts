@@ -1,4 +1,7 @@
-import { dialog, type BrowserWindow } from 'electron'
+import { randomUUID } from 'node:crypto'
+import { dialog, ipcMain, type BrowserWindow } from 'electron'
+import { IPC_CHANNELS } from '../../shared/ipcTypes'
+import { saveDirectoryContextSchema } from '../../shared/workbench/desktop'
 import type { DocumentHostService } from './DocumentHostService'
 import { closeDocumentFlow } from './documentCloseFlow'
 import { saveDocumentWithDialog } from './documentSaveDialog'
@@ -12,8 +15,15 @@ export function closeDocumentWithDialog(window: BrowserWindow, documents: Docume
   if (existing) return existing
   const operation = (async () => {
     const execution = await executionDesktopService(), external = await externalMcpService()
-    return closeDocumentFlow({
+    let closed = false
+    const controller = new AbortController()
+    try { closed = await closeDocumentFlow({
       discardOnly,
+      prepareRenderer: async mode => {
+        const result = await requestRendererBeforeClose(window, mode, controller.signal, undefined, [documentId])
+        if (result.suggestedDirectory) suggestedDirectory = result.suggestedDirectory
+        return result.ready
+      },
       read: () => documents.registry.get(documentId).drain(),
       hasWritableTasks: async () => {
         const active = await execution.writableTasksForDocument(documentId)
@@ -39,9 +49,56 @@ export function closeDocumentWithDialog(window: BrowserWindow, documents: Docume
       withBarrier: work => documents.tools.withWriteTaskBarrier([documentId], work),
       close: async (snapshot, discardDirty) => { await documents.operate({ type: 'close', documentId, discardDirty,
         expected: { epoch: snapshot.epoch, revision: snapshot.revision } }) },
-    })
+    }); return closed }
+    finally {
+      controller.abort()
+      if (!closed && !window.isDestroyed()) window.webContents.send(IPC_CHANNELS.requestResumeClose, [documentId])
+    }
   })()
   pending.set(documentId, operation)
   void operation.finally(() => { if (pending.get(documentId) === operation) pending.delete(documentId) }).catch(() => undefined)
   return operation
+}
+
+export function requestRendererBeforeClose(window: BrowserWindow, mode: 'save' | 'preserve' | 'discard', signal: AbortSignal, onWaiting?: () => void, documentIds?: readonly string[]): Promise<{ ready: boolean; suggestedDirectory?: SaveDirectoryContext }> {
+  const requestId = randomUUID()
+  const resultChannel = mode === 'discard' ? IPC_CHANNELS.discardAndCloseResult : mode === 'save' ? IPC_CHANNELS.saveAndCloseResult : IPC_CHANNELS.preserveAndCloseResult
+  const requestChannel = mode === 'discard' ? IPC_CHANNELS.requestDiscardAndClose : mode === 'save' ? IPC_CHANNELS.requestSaveAndClose : IPC_CHANNELS.requestPreserveAndClose
+  return new Promise((resolve) => {
+    let settled = false
+    // This is an offered recovery choice, not a timeout or automatic discard.
+    const waiting = setTimeout(() => { if (!settled) onWaiting?.() }, 3_000)
+    const finish = (ready: boolean, suggestedDirectory?: SaveDirectoryContext) => {
+      if (settled) return
+      settled = true
+      clearTimeout(waiting)
+      signal.removeEventListener('abort', onClosed)
+      ipcMain.removeListener(resultChannel, onResult)
+      window.removeListener('closed', onClosed)
+      resolve({ ready, ...(suggestedDirectory ? { suggestedDirectory } : {}) })
+    }
+    const onResult = (
+      event: Electron.IpcMainEvent,
+      receivedRequestId: unknown,
+      saved: unknown,
+      directory: unknown,
+    ) => {
+      if (event.sender !== window.webContents || receivedRequestId !== requestId) return
+      if (directory === undefined) { finish(saved === true); return }
+      const parsed = saveDirectoryContextSchema.safeParse(directory)
+      if (!parsed.success) { finish(false); return }
+      finish(saved === true, parsed.data)
+    }
+    const onClosed = () => finish(false)
+    signal.addEventListener('abort', onClosed, { once: true })
+    if (signal.aborted) { finish(false); return }
+    ipcMain.on(resultChannel, onResult)
+    window.once('closed', onClosed)
+    try {
+      window.webContents.send(requestChannel, requestId, documentIds)
+    } catch (error) {
+      console.error('发送关闭前保存请求失败', error)
+      finish(false)
+    }
+  })
 }

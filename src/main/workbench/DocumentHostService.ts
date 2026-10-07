@@ -262,7 +262,7 @@ export class DocumentHostService {
   }
 
   /** Trusted main consumers use the same sessions; UI envelopes remain human-only. */
-  readonly internalAPI: Pick<DocumentHostAPI, 'list' | 'create' | 'recoverable' | 'restore' | 'open' | 'read' | 'dispatch' | 'lookup' | 'save' | 'observeFile' | 'reconcileFile'> & { stopRun(documentId: string, runId: string): Promise<unknown> } = {
+  readonly internalAPI: Pick<DocumentHostAPI, 'list' | 'create' | 'recoverable' | 'restore' | 'open' | 'read' | 'dispatch' | 'lookup' | 'save' | 'observeFile' | 'reconcileFile' | 'readAuthoringDrafts' | 'writeAuthoringDrafts' | 'clearAuthoringDrafts'> & { stopRun(documentId: string, runId: string): Promise<unknown> } = {
     list: async () => this.registry.list(),
     create: async (model, suggestedName) => this.attach(await this.registry.create(model, suggestedName)),
     recoverable: () => this.operate({ type: 'recoverable' }) as Promise<DocumentSnapshot[]>,
@@ -274,6 +274,9 @@ export class DocumentHostService {
     save: (documentId, filename) => this.saveToPath(documentId, filename),
     observeFile: documentId => this.observeFile(documentId),
     reconcileFile: input => this.reconcileFile(input),
+    readAuthoringDrafts: documentId => this.readAuthoringDrafts(documentId),
+    writeAuthoringDrafts: (documentId, drafts) => this.writeAuthoringDrafts(documentId, drafts),
+    clearAuthoringDrafts: documentId => this.clearAuthoringDrafts(documentId),
     stopRun: (documentId, runId) => this.registry.get(documentId).stopRun(runId),
   }
 

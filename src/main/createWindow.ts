@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { app, BrowserWindow, dialog, ipcMain, session } from 'electron'
+import { app, BrowserWindow, dialog, session } from 'electron'
 import { APP_NAME } from '../shared/constants'
 import { IPC_CHANNELS } from '../shared/ipcTypes'
-import { saveDirectoryContextSchema, type SaveDirectoryContext } from '../shared/workbench/desktop'
+import type { SaveDirectoryContext } from '../shared/workbench/desktop'
 import type { AppState } from './appState'
 import {
   configureRestrictedSession,
@@ -20,6 +20,7 @@ import { resolveRendererEntryUrl } from './rendererEntry'
 import { documentHost } from './workbench/documentHost'
 import { releaseAllHtmlPreviewLeases } from './ipc'
 import { saveDocumentWithDialog } from './workbench/documentSaveDialog'
+import { requestRendererBeforeClose } from './workbench/documentCloseDialog'
 import { executionDesktopService } from './workbench/execution/ExecutionDesktopService'
 import { externalMcpService } from './workbench/external/externalDesktopService'
 import { prepareDocumentWindowClose, type DocumentCloseChoice } from './workbench/documentCloseCoordinator'
@@ -59,48 +60,7 @@ async function confirmClose(window: BrowserWindow): Promise<DocumentCloseChoice>
   return 'cancel'
 }
 
-function requestRendererBeforeClose(window: BrowserWindow, mode: 'save' | 'preserve' | 'discard', signal: AbortSignal, onWaiting?: () => void, documentIds?: readonly string[]): Promise<{ ready: boolean; suggestedDirectory?: SaveDirectoryContext }> {
-  const requestId = randomUUID()
-  const resultChannel = mode === 'discard' ? IPC_CHANNELS.discardAndCloseResult : mode === 'save' ? IPC_CHANNELS.saveAndCloseResult : IPC_CHANNELS.preserveAndCloseResult
-  const requestChannel = mode === 'discard' ? IPC_CHANNELS.requestDiscardAndClose : mode === 'save' ? IPC_CHANNELS.requestSaveAndClose : IPC_CHANNELS.requestPreserveAndClose
-  return new Promise((resolve) => {
-    let settled = false
-    // This is an offered recovery choice, not a timeout or automatic discard.
-    const waiting = setTimeout(() => { if (!settled) onWaiting?.() }, 3_000)
-    const finish = (ready: boolean, suggestedDirectory?: SaveDirectoryContext) => {
-      if (settled) return
-      settled = true
-      clearTimeout(waiting)
-      signal.removeEventListener('abort', onClosed)
-      ipcMain.removeListener(resultChannel, onResult)
-      window.removeListener('closed', onClosed)
-      resolve({ ready, ...(suggestedDirectory ? { suggestedDirectory } : {}) })
-    }
-    const onResult = (
-      event: Electron.IpcMainEvent,
-      receivedRequestId: unknown,
-      saved: unknown,
-      directory: unknown,
-    ) => {
-      if (event.sender !== window.webContents || receivedRequestId !== requestId) return
-      if (directory === undefined) { finish(saved === true); return }
-      const parsed = saveDirectoryContextSchema.safeParse(directory)
-      if (!parsed.success) { finish(false); return }
-      finish(saved === true, parsed.data)
-    }
-    const onClosed = () => finish(false)
-    signal.addEventListener('abort', onClosed, { once: true })
-    if (signal.aborted) { finish(false); return }
-    ipcMain.on(resultChannel, onResult)
-    window.once('closed', onClosed)
-    try {
-      window.webContents.send(requestChannel, requestId, documentIds)
-    } catch (error) {
-      console.error('发送关闭前保存请求失败', error)
-      finish(false)
-    }
-  })
-}
+
 
 export async function createMainWindow(
   appState: AppState,

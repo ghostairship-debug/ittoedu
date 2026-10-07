@@ -432,9 +432,9 @@ const desktopAPI = Object.freeze<DesktopAPI>({
   },
   onRequestPreserveAndClose: handler => {
     if (typeof handler !== 'function') throw new TypeError('关闭前恢复稿处理器必须是函数。')
-    const listener = (_event: Electron.IpcRendererEvent, requestId: unknown) => {
-      if (typeof requestId !== 'string') return
-      void Promise.resolve().then(handler).then(result => {
+    const listener = (_event: Electron.IpcRendererEvent, requestId: unknown, ids: unknown) => {
+      if (typeof requestId !== 'string' || ids !== undefined && (!Array.isArray(ids) || !ids.every(id => typeof id === 'string'))) return
+      void Promise.resolve().then(() => handler(ids as string[] | undefined)).then(result => {
         const ready = result === true || typeof result === 'object' && result.ready === true
         const suggestedDirectory = typeof result === 'object' ? result.suggestedDirectory : undefined
         ipcRenderer.send(IPC_CHANNELS.preserveAndCloseResult, requestId, ready, suggestedDirectory)
@@ -448,10 +448,10 @@ const desktopAPI = Object.freeze<DesktopAPI>({
       throw new TypeError('关闭前保存处理器必须是函数。')
     }
 
-    const listener = (_event: Electron.IpcRendererEvent, requestId: unknown): void => {
-      if (typeof requestId !== 'string') return
+    const listener = (_event: Electron.IpcRendererEvent, requestId: unknown, ids: unknown): void => {
+      if (typeof requestId !== 'string' || ids !== undefined && (!Array.isArray(ids) || !ids.every(id => typeof id === 'string'))) return
       void Promise.resolve()
-        .then(handler)
+        .then(() => handler(ids as string[] | undefined))
         .then((result) => {
           const ready = result === true || typeof result === 'object' && result.ready === true
           ipcRenderer.send(IPC_CHANNELS.saveAndCloseResult, requestId, ready, typeof result === 'object' ? result.suggestedDirectory : undefined)
@@ -477,7 +477,10 @@ const desktopAPI = Object.freeze<DesktopAPI>({
     return () => { ipcRenderer.removeListener(IPC_CHANNELS.requestDiscardAndClose, listener) }
   },
   onRequestResumeClose: handler => {
-    const listener = () => handler()
+    const listener = (_event: Electron.IpcRendererEvent, ids: unknown) => {
+      if (ids !== undefined && (!Array.isArray(ids) || !ids.every(id => typeof id === 'string'))) return
+      handler(ids as string[] | undefined)
+    }
     ipcRenderer.on(IPC_CHANNELS.requestResumeClose, listener)
     return () => { ipcRenderer.removeListener(IPC_CHANNELS.requestResumeClose, listener) }
   },

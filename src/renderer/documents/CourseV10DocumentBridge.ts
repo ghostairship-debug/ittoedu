@@ -90,7 +90,7 @@ export class CourseV10DocumentBridge {
     this.state = { ...this.state, ...patch,
       documents: [...this.projections.values()].flatMap(projection => {
         const view = projection.read()
-        return view.committed ? [{ ...view.committed, dirty: view.committed.dirty || Boolean(view.pending.length) }] : []
+        return view.committed ? [{ ...view.committed, dirty: view.committed.dirty || Boolean(view.pending.length || view.composing || view.retainedComposition) }] : []
       }), snapshot: active?.committed ?? null,
       views: [...this.projections.values()].flatMap(projection => {
         const view = projection.read()
@@ -107,7 +107,7 @@ export class CourseV10DocumentBridge {
       runtimeProject: runtimeModel?.kind === 'course-v10' ? runtimeModel.project : null,
       selectedInstanceIds: selection?.instanceIds ?? [], selectedInstanceId: selection?.instanceIds[0] ?? null,
       surfaceId: selection?.surfaceId ?? (model?.kind === 'course-v10' ? model.project.surfaces[0]?.id ?? null : null),
-      pending: active?.pending.length ?? 0, error: active?.error?.message ?? null }
+      pending: (active?.pending.length ?? 0) + Number(Boolean(active?.composing || active?.retainedComposition)), error: active?.error?.message ?? null }
     for (const listener of this.listeners) listener()
   }
 

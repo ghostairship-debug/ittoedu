@@ -13,8 +13,8 @@ import { createFlowAuthoringSlice, createInitialFlowOwnedState, type FlowOwnedSt
 import { createSpatialAuthoringSlice, createInitialSpatialOwnedState, type SpatialOwnedState } from './slices/spatialAuthoringSlice'
 import { createDesignProductionActions } from '../composition/designProductionActions'
 import { createCrossSurfaceCommands } from '../composition/crossSurfaceCommands'
-import { discardPropertiesDrafts, flushPropertiesDrafts, hasPropertiesDrafts, subscribePropertiesDrafts } from '../ui/properties/PropertyControls'
-import { courseDraftLifecycle } from '../authoring/courseDraftLifecycle'
+import { discardPropertiesDrafts, flushPropertiesDrafts, hasPropertiesDrafts, subscribePropertiesDrafts, preservePropertiesDrafts, restorePropertiesDrafts, suspendPropertiesDrafts, resumePropertiesDrafts } from '../ui/properties/PropertyControls'
+import { courseDraftLifecycle, createCourseInputLifecycle, type CourseInputRecoveryAdapter } from '../authoring/courseDraftLifecycle'
 
 export type { SidebarTab, EditingScope, CanvasMode, TextEditSource } from './slices/editorShellSlice'
 export type { AlignmentMode } from './slices/slideOwnedCommands'
@@ -28,6 +28,7 @@ export interface EditorRootOwnedState {
   readonly courseView: CourseV10ViewState
   readonly courseBridge: CourseV10DocumentBridge
   readonly courseKernel: EditorStoreKernel
+  readonly courseInputs: ReturnType<typeof createCourseInputLifecycle>
   /** Notification of local input owners; content and History remain in DocumentSession. */
   readonly localDraftVersion: number
 }
@@ -44,7 +45,7 @@ export type EditorState = EditorOwnedState
     ReturnType<typeof createCrossSurfaceCommands>, ReturnType<typeof createDesignProductionActions>,
   ]>
   & {
-    connectCourseDocuments(api: DocumentHostAPI, prepareClose?: (documentId: string) => Promise<boolean>, restoreInputs?: (documentId: string) => Promise<void>): Promise<void>
+    connectCourseDocuments(api: DocumentHostAPI, recovery?: CourseInputRecoveryAdapter): Promise<void>
     activateCourseDocument(documentId: string): Promise<void>
     closeCourseDocument(documentId: string): Promise<boolean>
     createCourseDocument(kind: ComponentSurface['kind'], canvas?: { width: number; height: number }): Promise<void>
@@ -64,8 +65,6 @@ export type EditorState = EditorOwnedState
 export const useEditorStore = create<EditorState>((set, get) => {
   const courseBridge = new CourseV10DocumentBridge()
   const advancedDrafts = courseDraftLifecycle(courseBridge)
-  let prepareClose: ((documentId: string) => Promise<boolean>) | undefined
-  let restoreInputs: ((documentId: string) => Promise<void>) | undefined
   const patch = (value: Partial<EditorState>) => set(value)
   const notifyLocalDrafts = () => patch({ localDraftVersion: (get().localDraftVersion ?? 0) + 1 })
   advancedDrafts.subscribe(notifyLocalDrafts)
@@ -115,28 +114,42 @@ export const useEditorStore = create<EditorState>((set, get) => {
     if (issues.length) throw new Error(issues.join('；'))
   }
   const retainBeforeNavigation = async (documentId: string) => {
-    if (prepareClose) {
-      if (!await prepareClose(documentId)) throw new Error('当前输入尚未保全，已保留原文档')
-      await courseBridge.drain([documentId])
-    } else await drainActive(documentId)
+    if (!await courseInputs.prepare([documentId])) throw new Error('当前输入尚未保全，已保留原文档')
   }
   const drainActive = async (documentId?: string): Promise<DocumentSnapshot> => {
     const id = documentId ?? courseBridge.read().activeDocumentId
     if (!id) throw new Error('当前没有已打开的课件')
-    await restoreInputs?.(id)
+    await courseInputs.restore(id)
     await flushDrafts(id)
     const [snapshot] = await courseBridge.drain([id])
     if (!snapshot) throw new Error('课件文档已关闭')
     return snapshot
   }
+  const courseInputs = createCourseInputLifecycle(courseBridge, {
+    capture(documentId) {
+      const snapshot = courseBridge.read().documents.find(value => value.documentId === documentId)
+      if (!snapshot) throw new Error('保全输入时文档已关闭')
+      return { snapshot, records: { advanced: advancedDrafts.preserve(documentId), properties: preservePropertiesDrafts(documentId) },
+        flowDraft: get().flowDocumentDrafts?.[documentId] }
+    },
+    drain: drainActive,
+    restore(documentId, epoch, records) {
+      const result = advancedDrafts.restore(documentId, records.advanced)
+      restorePropertiesDrafts(documentId, records.properties, epoch)
+      if (result.issues.length) get().setError(result.issues[0]!.message)
+    },
+    suspend(ids) { courseBridge.suspendForClose(ids); suspendPropertiesDrafts(ids) },
+    resume(ids) { courseBridge.resumeAfterCloseCancelled(ids); resumePropertiesDrafts(ids) },
+    error: message => get().setError(message), status: message => get().setStatus(message),
+  })
   return {
     ...createInitialSlideOwnedState(), ...createInitialFlowOwnedState(), ...createInitialSpatialOwnedState(),
     activeTab: 'elements', canvasMode: 'edit', editingScope: 'scene', statusMessage: null, errorMessage: null,
     editingTextNodeId: null, slideDrawTool: null, previewBackgroundColor: null,
     projectPath: null, dirty: false,
-    courseView: courseBridge.read(), courseBridge, courseKernel, localDraftVersion: 0,
+    courseView: courseBridge.read(), courseBridge, courseKernel, courseInputs, localDraftVersion: 0,
     ...editorShellSlice, ...lifecycle, ...structure, ...slide, ...flow, ...spatial, ...commands, ...design,
-    connectCourseDocuments: (api, prepare, restore) => { prepareClose = prepare; restoreInputs = restore; return courseBridge.connect(api) },
+    connectCourseDocuments: (api, recovery) => { courseInputs.connect(api, recovery); return courseBridge.connect(api) },
     async activateCourseDocument(id) { const current = courseBridge.read().activeDocumentId; if (current && current !== id) await retainBeforeNavigation(current); await courseBridge.activate(id) },
     async closeCourseDocument(id) {
       await retainBeforeNavigation(id)
@@ -158,7 +171,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     drainCourseDocument: drainActive,
     async drainAllCourseDocuments(ids) {
       const targets = ids ?? courseBridge.read().documents.map(snapshot => snapshot.documentId)
-      for (const id of targets) { await restoreInputs?.(id); await flushDrafts(id) }
+      for (const id of targets) { await courseInputs.restore(id); await flushDrafts(id) }
       return courseBridge.drain(targets)
     },
     async undoLatestAgentCourseDocument() {
@@ -170,7 +183,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     async saveCourseDocument(saveAs, directory, documentId) {
       const id = documentId ?? courseBridge.read().activeDocumentId
       if (!id) return null
-      await restoreInputs?.(id)
+      await courseInputs.restore(id)
       await flushDrafts(id)
       if (!await courseBridge.save(saveAs, directory, id)) return null
       return (await courseBridge.drain([id]))[0] ?? null

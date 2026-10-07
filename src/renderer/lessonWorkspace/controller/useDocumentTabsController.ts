@@ -50,7 +50,7 @@ export interface DocumentTabsController {
   flushAll(): Promise<boolean>
   saveActiveDocument(): Promise<'course' | 'document' | 'none'>
   drainAll(): Promise<boolean>
-  preserveAll(mode?: 'save' | 'preserve'): Promise<boolean>
+  preserveAll(mode?: 'save' | 'preserve', documentIds?: readonly string[]): Promise<boolean>
   suspendForClose(documentIds?: readonly string[]): void
   resumeAfterCloseCancelled(documentIds?: readonly string[]): void
   closeAll(): Promise<boolean>
@@ -170,15 +170,16 @@ export function useDocumentTabsController({ documentPort, courseDocuments, media
     await disposeDocuments()
     return true
   }
-  async function preserveAll(mode: 'save' | 'preserve' = 'preserve') {
+  async function preserveAll(mode: 'save' | 'preserve' = 'preserve', documentIds?: readonly string[]) {
     // 同 flushAll：preserveDraft 期间的重渲染会删/增注册表键，必须按 await 前的快照遍历。
     for (const [filename, editor] of [...documents.current]) {
+      if (documentIds && (!editor.session.documentId || !documentIds.includes(editor.session.documentId))) continue
       if (!(await editor.preserveDraft())) { setActiveTab(tabsRef.current.find(tab => tab.id === filename)?.id ?? filename); return false }
     }
-    for (const [id, editor] of [...mediaEditors.current]) {
+    for (const [id, editor] of documentIds ? [] : [...mediaEditors.current]) {
       if (!await (mode === 'save' ? editor.flush() : editor.preserveDraft())) { setActiveTab(id); return false }
     }
-    const unregistered = tabsRef.current.find(tab => tab.kind === 'media' && tab.dirty && !mediaEditors.current.has(tab.id))
+    const unregistered = !documentIds && tabsRef.current.find(tab => tab.kind === 'media' && tab.dirty && !mediaEditors.current.has(tab.id))
     if (unregistered) { setActiveTab(unregistered.id); return false }
     return true
   }

@@ -36,7 +36,7 @@ export interface LessonWorkspaceShellHandle {
   flushAll(): Promise<boolean>
   saveActiveDocument(): Promise<'course' | 'document' | 'none'>
   closeAll(): Promise<boolean>
-  preserveAll(mode?: 'save' | 'preserve'): Promise<boolean>
+  preserveAll(mode?: 'save' | 'preserve', documentIds?: readonly string[]): Promise<boolean>
   suspendForClose(documentIds?: readonly string[]): void
   resumeAfterCloseCancelled(documentIds?: readonly string[]): void
   openFile(path: string): Promise<void>
