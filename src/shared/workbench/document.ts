@@ -55,6 +55,8 @@ export interface DocumentOperation {
   baseRevision: number
   actor: 'human' | 'agent' | 'external'
   runId?: string
+  /** Host-owned document authorization lease; logical runId continues to own receipts and history. */
+  runLeaseId?: string
   historyGroup?: string
   /** Trusted gateway's digest of the original tool call, before planning/rebasing. Never accepted by UI IPC. */
   requestDigest?: string

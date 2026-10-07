@@ -84,7 +84,7 @@ export class DocumentHostService {
               const current = await this.registry.get(input.baseline.documentId).drain()
               input.assertActive()
               return this.dispatch({ documentId: current.documentId, epoch: input.baseline.epoch, baseRevision: current.revision,
-                operationId: input.operationId, requestDigest: input.requestDigest, actor: input.actor, runId: input.runId,
+                operationId: input.operationId, requestDigest: input.requestDigest, actor: input.actor, runId: input.runId, runLeaseId: input.runLeaseId,
                 mutation: { type: 'command', command: { ...command, expected: [...new Map([...command.expected, ...(input.readExpectations ?? [])]
                   .map(expected => [JSON.stringify(expected.path), expected])).values()] } } })
             } },

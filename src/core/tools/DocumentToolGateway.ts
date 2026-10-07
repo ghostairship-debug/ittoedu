@@ -41,6 +41,7 @@ interface Run {
   advertised?: { definitions: ToolDefinition[]; names: Set<string>; allowed: Set<string>; batchSchema?: z.ZodType;
     availableFamilies: { family: ToolFamily; description: string; count: number }[] }
   epochs: Map<string, string>
+  documentLeases: Map<string, string>
   sources: Map<string, string>
   rangeFootprints: Map<string, string>
   componentSubtrees: Map<string, ReadonlySet<string>>
@@ -48,7 +49,7 @@ interface Run {
   history: Map<string, { undoDepth: number; redoDepth: number }>
   /** Receipt lookup survives detaching a document; these ids carry no authority. */
   detachedDocuments?: Set<string>
-  watches: (() => void)[]
+  watches: Map<string, () => void>
 }
 interface Handle {
   runId: string
@@ -82,7 +83,7 @@ function writableKinds(model: DocumentModel, writable: readonly ToolTarget[]): T
 
 export interface DocumentToolGatewayOptions { prepareImage?: PrepareImageResourcePort; services?: HostToolServices;
   componentContent?: {
-    apply(input: { baseline: ComponentProjectSnapshot; request: ContentApplyRequest; operationId: string; requestDigest: string; runId: string; actor: ToolRunGrant['actor']; readExpectations?: ComponentExpectation[]; assertActive(): void }): Promise<ContentApplyResult>
+    apply(input: { baseline: ComponentProjectSnapshot; request: ContentApplyRequest; operationId: string; requestDigest: string; runId: string; runLeaseId: string; actor: ToolRunGrant['actor']; readExpectations?: ComponentExpectation[]; assertActive(): void }): Promise<ContentApplyResult>
     source(from: string, fileAccess: ToolRunGrant['fileAccess']): Promise<ComponentProjectFileInput>
     prepareSource?(input: ComponentProjectFileInput, file: ComponentProjectFile, intent: ContentApplyIntent): Promise<ContentApplySource>
   }
@@ -93,6 +94,7 @@ export class DocumentToolGateway implements ToolGateway {
   private readonly images = new Map<string, { runId: string; documentId: string; epoch: string; asset: ImageAssetResource; source?: AssetSource }>()
   private readonly runs = new Map<string, Run>()
   private readonly startingRuns = new Set<string>()
+  private readonly operationLeases = new Map<string, ReadonlyMap<string, string>>()
   private readonly writeTaskBarriers = new Map<string, number>()
   private readonly writeTaskGenerations = new Map<string, number>()
   private hostServicesConfigured = false
@@ -158,6 +160,8 @@ export class DocumentToolGateway implements ToolGateway {
   private applyComponentContentOperation(runId: string, operationId: string, requestDigest: string,
     baseline: ComponentProjectSnapshot, request: ContentApplyRequest): Promise<ContentApplyResult> {
     const run = this.run(runId), port = this.options.componentContent
+    this.captureOperationLeases(runId, operationId)
+    const runLeaseId = this.operationLease(runId, operationId, baseline.documentId)
     if (!port) throw new ToolError('service-unavailable', '组件内容应用服务尚未接入')
     const assertActive = () => {
       if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
@@ -167,7 +171,7 @@ export class DocumentToolGateway implements ToolGateway {
     }
     assertActive()
     const readExpectations = this.contentReadExpectations(runId, this.registry.get(baseline.documentId).read())
-    return port.apply({ runId, operationId, requestDigest, baseline, request, actor: run.grant.actor, readExpectations, assertActive })
+    return port.apply({ runId, runLeaseId, operationId, requestDigest, baseline, request, actor: run.grant.actor, readExpectations, assertActive })
   }
 
   /** Main finishes service wiring once, before any task has started. */
@@ -327,7 +331,8 @@ export class DocumentToolGateway implements ToolGateway {
       this.assertWriteTasksAllowed(grant, generations)
       const run: Run = { grant, toolScopes, loadedFamilies: new Set(), epochs, sources, rangeFootprints, componentSubtrees,
         currentCourseDocumentId: courses.length === 1 ? courses[0] : writableCourses.length === 1 ? writableCourses[0] : undefined,
-        stopped: false, history: new Map(), watches: [], contentReads: new Map() }
+        documentLeases: new Map(grant.documents.map(doc => [doc.documentId, grant.runId])),
+        stopped: false, history: new Map(), watches: new Map(), contentReads: new Map() }
       if (grant.contentOutput) {
         const binding = grant.contentOutput
         const snapshot = await this.registry.get(binding.documentId).drain()
@@ -363,6 +368,7 @@ export class DocumentToolGateway implements ToolGateway {
         ...run.grant.fileAccess, boundPaths: { ...run.grant.fileAccess.boundPaths, [documentId]: snapshot.binding.path },
       } } : {}) }
     run.epochs.set(documentId, snapshot.epoch)
+    run.documentLeases.set(documentId, run.detachedDocuments?.has(documentId) ? `${runId}:document:${this.createId()}` : runId)
     if (snapshot.model.kind === 'course-v10' && (currentCourse === 'select' || currentCourse === 'initialize' && !run.currentCourseDocumentId))
       run.currentCourseDocumentId = documentId
     run.toolScopes.push(this.runScope(snapshot.model, targets))
@@ -379,7 +385,7 @@ export class DocumentToolGateway implements ToolGateway {
     if (new Set(ids).size !== ids.length || ids.some(id => !id)) throw new Error('恢复文档身份重复或无效')
     const grant: ToolRunGrant = { runId: input.runId, actor: input.actor, documents: ids.map(documentId => ({ documentId, writable: [] })) }
     this.runs.set(input.runId, { grant, toolScopes: [], loadedFamilies: new Set(), epochs: new Map(), sources: new Map(),
-      rangeFootprints: new Map(), componentSubtrees: new Map(), stopped: true, history: new Map(), watches: [], contentReads: new Map() })
+      rangeFootprints: new Map(), componentSubtrees: new Map(), documentLeases: new Map(), stopped: true, history: new Map(), watches: new Map(), contentReads: new Map() })
   }
 
   /** Host-only: never expose arbitrary addresses as model tool input. */
@@ -574,30 +580,36 @@ export class DocumentToolGateway implements ToolGateway {
   async stop(runId: string): Promise<void> {
     const run = this.run(runId)
     run.stopped = true
-    for (const unwatch of run.watches.splice(0)) unwatch()
+    for (const unwatch of run.watches.values()) unwatch()
+    run.watches.clear()
     for (const [id, resource] of this.images) if (resource.runId === runId) this.images.delete(id)
     for (const [id, cursor] of this.cursors) if (cursor.runId === runId) this.cursors.delete(id)
     this.componentProjectFiles.stopRun(runId)
     // Already queued canonical commits finish; later requests cannot cross the barrier.
     const liveIds = new Set(this.registry.list().map(document => document.documentId))
-    await Promise.all([this.hostTools.stop(runId), ...run.grant.documents.filter(doc => liveIds.has(doc.documentId)).map(doc => this.registry.get(doc.documentId).stopRun(runId))])
+    await Promise.all([this.hostTools.stop(runId), ...run.grant.documents.filter(doc => liveIds.has(doc.documentId)).map(doc => this.registry.get(doc.documentId).stopRun(run.documentLeases.get(doc.documentId) ?? runId))])
   }
 
   /** Detaching one tab revokes only that document; the resident task retains its other targets. */
   async stopRunDocument(runId: string, documentId: string): Promise<void> {
     const run = this.run(runId)
     if (!run.epochs.has(documentId)) return
+    const lease = run.documentLeases.get(documentId) ?? runId
+    run.watches.get(documentId)?.(); run.watches.delete(documentId)
     ;(run.detachedDocuments ??= new Set()).add(documentId)
     run.grant = { ...run.grant, documents: run.grant.documents.filter(document => document.documentId !== documentId) }
     run.epochs.delete(documentId)
     run.sources.delete(documentId)
     run.history.delete(documentId)
+    run.contentReads.delete(documentId)
+    if (run.contentTarget && this.handles.get(run.contentTarget)?.documentId === documentId) run.contentTarget = undefined
+    if (run.currentHtmlDocumentId === documentId) run.currentHtmlDocumentId = undefined
     if (run.currentCourseDocumentId === documentId) run.currentCourseDocumentId = undefined
     for (const [id, handle] of this.handles) if (handle.runId === runId && handle.documentId === documentId) this.handles.delete(id)
     for (const [id, cursor] of this.cursors) if (cursor.runId === runId && cursor.documentId === documentId) this.cursors.delete(id)
     for (const [id, resource] of this.images) if (resource.runId === runId && resource.documentId === documentId) this.images.delete(id)
     this.catalogChanged(runId)
-    if (this.registry.list().some(document => document.documentId === documentId)) await this.registry.get(documentId).stopRun(runId)
+    if (this.registry.list().some(document => document.documentId === documentId)) await this.registry.get(documentId).stopRun(lease)
   }
 
   private run(runId: string): Run {
@@ -611,18 +623,19 @@ export class DocumentToolGateway implements ToolGateway {
     // and handle footprints already protect against cross-task overwrites).
     const run = this.run(runId), session = this.registry.get(documentId), current = session.read()
     run.history.set(documentId, { undoDepth: current.undoDepth, redoDepth: current.redoDepth })
-    run.watches.push(session.subscribe(event => {
+    const unwatch = session.subscribe(event => {
       if (event.type !== 'changed') return
       const next = event.snapshot
       run.history.set(documentId, { undoDepth: next.undoDepth, redoDepth: next.redoDepth })
       // Recompute the catalog when the formal targets addressed by this run change.
       run.advertised = undefined
-    }))
-    run.watches.push(session.subscribeCommits(({ operation, result }) => {
+    })
+    const unwatchCommits = session.subscribeCommits(({ operation, result }) => {
       if (operation.runId !== runId || result.status !== 'applied' || operation.mutation.type !== 'command'
         || operation.mutation.command.type !== 'component-platform.apply') return
       this.componentProjectFiles.acknowledge(runId, documentId, operation.epoch, result.revision, operation.mutation.command)
-    }))
+    })
+    run.watches.set(documentId, () => { unwatch(); unwatchCommits() })
   }
   private authorizeDocument(run: Run, snapshot: DocumentSnapshot): void {
     if (!run.epochs.has(snapshot.documentId)) throw new ToolError('not-authorized', '任务没有此文档的读取权限')
@@ -788,6 +801,15 @@ export class DocumentToolGateway implements ToolGateway {
     if (!callId) throw new ToolError('invalid-call-id', '工具调用缺少宿主编号')
     return `tool:${documentDigest({ runId, callId })}`
   }
+  private captureOperationLeases(runId: string, operationId: string): void {
+    if (!this.operationLeases.has(operationId)) this.operationLeases.set(operationId, new Map(this.run(runId).documentLeases))
+  }
+  private operationLease(runId: string, operationId: string, documentId: string): string {
+    const lease = this.operationLeases.get(operationId)?.get(documentId)
+    if (!lease || lease !== this.run(runId).documentLeases.get(documentId))
+      throw new ToolError('run-stopped', '此操作原来的文档授权已停止，请在重新打开后发起新操作')
+    return lease
+  }
   /** Main approval binds exact paths to this existing operation identity. */
   authorizeOperationPaths(runId: string, callId: string, paths: readonly string[]): void {
     const run = this.run(runId)
@@ -910,7 +932,7 @@ export class DocumentToolGateway implements ToolGateway {
     const next = await driver.apply(current.model, command)
     if (run.stopped) throw new ToolError('run-stopped', '任务已停止，修改未提交')
     const result = await session.execute({ documentId: baseline.documentId, epoch: baseline.epoch, operationId,
-      baseRevision: baseline.revision, actor: run.grant.actor, runId, requestDigest, mutation: { type: 'command', command } })
+      baseRevision: baseline.revision, actor: run.grant.actor, runId, runLeaseId: this.operationLease(runId, operationId, baseline.documentId), requestDigest, mutation: { type: 'command', command } })
     if (result.status === 'applied') this.recordAppliedFootprints(runId, current, next, result.revision, [], [])
     return { kind: 'document-operation', result, affected }
   }
@@ -1042,6 +1064,7 @@ export class DocumentToolGateway implements ToolGateway {
   private async executeCall(runId: string, callId: string, input: ModelToolCall): Promise<ToolResult> {
     try {
       const { call, digest, key, operationId } = this.identifyCall(runId, callId, input)
+      this.captureOperationLeases(runId, operationId)
       const previousDigest = this.callDigests.get(key)
       if (previousDigest && previousDigest !== digest) return Promise.resolve({ kind: 'error', code: 'operation-payload-mismatch', message: '同一调用编号不能提交不同内容' })
       this.callDigests.set(key, digest)
@@ -1351,7 +1374,7 @@ export class DocumentToolGateway implements ToolGateway {
     } else if (isSourceDocumentModel(model)) command = { type: 'markdown.replace', source: model.source, resources: model.resources }
     else throw new ToolError('unsupported-document', '当前文档格式不受支持')
     const result = await session.execute({ documentId: snapshot.documentId, epoch: snapshot.epoch, operationId, baseRevision: snapshot.revision,
-      actor: run.grant.actor, runId, requestDigest,
+      actor: run.grant.actor, runId, runLeaseId: this.operationLease(runId, operationId, snapshot.documentId), requestDigest,
       ...(sourceSplices.length ? { textChanges: { source: sourceSplices, flow: [] } } : {}),
       mutation: { type: 'command', command } })
     if (result.status === 'applied') this.recordAppliedFootprints(runId, snapshot, model, result.revision, sourceSplices, componentSplices)
