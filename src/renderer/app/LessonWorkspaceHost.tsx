@@ -65,6 +65,7 @@ export const LessonWorkspaceHost = forwardRef<LessonWorkspaceShellHandle, Lesson
       list={() => service.list(target)} importMaterial={input => service.importMaterial(target, input)} read={input => service.read(target, input)} />
   }
   return <><LessonWorkspaceShell ref={shell} {...props} lessonOperation={api.lesson} workspaceFiles={api.workspaceFiles} documentPort={port}
+    prepareCurrentCopy={async () => { await props.prepareCourseDocuments?.(); return true }}
     renderAssistant={(root, documentTarget, isCourse, drainDocuments, lesson) => {
       const lessonKey = lesson ? lesson.identity.normalizedDirectory + ':' + lesson.identity.lessonId : null
       activeLessonKey.current = lessonKey
