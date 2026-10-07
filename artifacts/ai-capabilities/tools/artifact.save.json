@@ -1,0 +1,79 @@
+{
+  "description": "把本任务已确认 ready 的独立图片或受限计算成果保存为工作空间新文件；目标已存在时拒绝覆盖。作业 ready 与文件已保存分别有回执，文件字节不进入模型上下文。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "oneOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "destination": {
+            "maxLength": 32767,
+            "minLength": 1,
+            "type": "string"
+          },
+          "job": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "const": "image",
+            "type": "string"
+          },
+          "resourceId": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "job",
+          "resourceId",
+          "destination"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "destination": {
+            "maxLength": 32767,
+            "minLength": 1,
+            "type": "string"
+          },
+          "job": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "kind": {
+            "const": "compute",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "job",
+          "name",
+          "destination"
+        ],
+        "type": "object"
+      }
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "保存成果文件",
+    "targetKinds": []
+  },
+  "name": "artifact.save",
+  "version": 1
+}

@@ -8,7 +8,10 @@ export type { PrepareDocumentExportDrafts } from './buildDocumentExport'
 async function prepareRootDrafts(documentId: string, epoch: string): Promise<void> {
   const root = useEditorStore.getState()
   const current = root.courseKernel.readView().documents.find(snapshot => snapshot.documentId === documentId)
-  if (!current || current.epoch !== epoch || current.model.kind !== 'course-v10') throw new Error('准备导出的目标文档已关闭或重开')
+  // Main validates the live Session before and after this UI-only drain. A course
+  // created through tools may have no GUI projection and therefore no UI draft.
+  if (!current) return
+  if (current.epoch !== epoch || current.model.kind !== 'course-v10') throw new Error('准备导出的目标文档已关闭或重开')
   const drained = await root.drainCourseDocument(documentId)
   if (drained.documentId !== documentId || drained.epoch !== epoch) throw new Error('准备导出时目标文档已变化')
 }

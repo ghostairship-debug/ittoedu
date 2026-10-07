@@ -1,0 +1,55 @@
+{
+  "description": "修改已授权演示页的命名状态：add、rename、duplicate、delete、set-initial、set-thumbnail、clear-overrides。target为页面句柄；state使用当前读取到的状态名称或身份，初始/缩略图可用null恢复母版。软件生成新状态身份；复制保留覆盖、顺序和背景，清除只作用于指定状态，一次事务可撤销。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "action": {
+        "enum": [
+          "add",
+          "rename",
+          "duplicate",
+          "delete",
+          "set-initial",
+          "set-thumbnail",
+          "clear-overrides"
+        ],
+        "type": "string"
+      },
+      "state": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "target": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "title": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "target",
+      "action"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "修改演示状态",
+    "targetKinds": [
+      "course-surface"
+    ]
+  },
+  "name": "presentation.update",
+  "version": 1
+}

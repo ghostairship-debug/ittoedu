@@ -32,7 +32,7 @@ export async function bootstrapInstalledMcp(options: InstalledMcpBootstrapOption
   delete environment.ELECTRON_RUN_AS_NODE
   // No IPC channel: a successful bootstrap returns and its parent may exit.
   // The resident Main, not this one-use helper, owns the product lifetime.
-  const child = spawn(executable, args, { cwd: workspace, env: environment, detached: true, windowsHide: true, stdio: 'ignore' })
+  const child = spawn(executable, args, { cwd: workspace, env: environment, detached: true, stdio: 'ignore' })
   let exited: { code: number | null; signal: NodeJS.Signals | null } | undefined
   let launchError: Error | undefined
   child.once('error', error => { launchError = error; exited = { code: 1, signal: null } })

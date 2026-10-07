@@ -1,0 +1,37 @@
+{
+  "description": "仅在用户要求时调用：从资产库读取指定版本，更新任务选中工程对象所使用的组件定义。软件从任务绑定或可选对象 path 定位工程定义，保留实例内容、人工位置和局部源码覆盖，通过正式事务应用并可撤销；库条目和工程定义身份无需相同。多选中包含不同组件定义时请指定要更新的对象路径。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "packageId": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "path": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "project": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "version": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "packageId"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "asset.update",
+    "targetKinds": []
+  },
+  "name": "asset.update",
+  "version": 1
+}

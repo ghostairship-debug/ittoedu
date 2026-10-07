@@ -1,5 +1,5 @@
 {
-  "description": "将已授权的课件文档导出为离线单 HTML、在线单 HTML 或网页包，返回生成与写盘的真实状态。Project V10 使用同一 Published V3 输出。同任务同文档的既有导出未被修改时可原位更新；其他同名文件不覆盖，不需先删除旧文件。",
+  "description": "将已授权课件的当前内容导出为离线单 HTML、在线单 HTML、网页包、PPTX、PDF 或 Flow 讲义 DOCX，消费与人工导出相同的 V10 格式生产器。DOCX 为每份 Flow 自动命名；静态格式保留可映射内容并报告互动或对象差异。返回 generated 或 written 的真实状态。同任务同文档的既有导出未被修改时可原位更新，其他同名文件不覆盖。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
@@ -13,7 +13,10 @@
         "enum": [
           "html-offline",
           "html-online",
-          "web-package"
+          "web-package",
+          "pptx",
+          "pdf",
+          "docx"
         ],
         "type": "string"
       },

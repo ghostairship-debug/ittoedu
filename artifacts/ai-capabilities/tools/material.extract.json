@@ -1,0 +1,55 @@
+{
+  "description": "从授权 PDF/DOCX/PPTX 原件或已有派生来源建立不可变提取快照。PDF/PPTX pages 使用真实页/slide，DOCX 只能全文/段落。auto 优先文字并保留扫描/图形页图，all 为所有选定 PDF 页准备页图；Office 保留文字与嵌入图像。软件分批、复用并保留原件及局部缺口，返回派生 attachmentId 后用 material.list/find/read，不执行文件内容。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "attachmentId": {
+        "format": "uuid",
+        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+        "type": "string"
+      },
+      "images": {
+        "default": "auto",
+        "enum": [
+          "auto",
+          "all"
+        ],
+        "type": "string"
+      },
+      "pages": {
+        "additionalProperties": false,
+        "properties": {
+          "from": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "to": {
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "from",
+          "to"
+        ],
+        "type": "object"
+      }
+    },
+    "required": [
+      "attachmentId",
+      "images"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "read",
+    "label": "提取材料",
+    "targetKinds": []
+  },
+  "name": "material.extract",
+  "version": 1
+}

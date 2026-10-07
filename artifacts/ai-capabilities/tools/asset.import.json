@@ -1,0 +1,25 @@
+{
+  "description": "仅在用户要求时调用：把已授权文件中的 .h5component 归档导入我的资产库，复用组件库面板同一目录服务。file 为用户材料或当前任务可读取的文件路径；原件保留，相同条目与版本由目录安装服务更新。导入不自动替换或删除工程中的实例；需要插入时用 asset.use。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "file": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "file"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "asset.import",
+    "targetKinds": []
+  },
+  "name": "asset.import",
+  "version": 1
+}

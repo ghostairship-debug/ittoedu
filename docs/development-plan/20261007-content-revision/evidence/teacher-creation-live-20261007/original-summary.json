@@ -1,0 +1,252 @@
+{
+  "runId": "c4f41cae-4d71-4159-8957-499d2b995a85",
+  "runStoreStatus": "partial",
+  "engineEndedPhase": "engine.ended",
+  "engineEndedTime": "2026-10-07T07:57:52.829Z",
+  "engineEndedStatus": "partial",
+  "engineEndedFailure": null,
+  "route": {
+    "provider": "teamorouter",
+    "baseURL": "https://api.teamorouter.com/v1",
+    "requestedModel": "deepseek-flash",
+    "expectedFamily": "V4.1",
+    "billing": "unknown"
+  },
+  "modelCatalog": {
+    "httpStatus": 200,
+    "selectedExact": true
+  },
+  "requestCount": 102,
+  "actualModels": [
+    "deepseek-v4-1-flash-260910"
+  ],
+  "usage": {
+    "total": 11697596,
+    "input": 11612596,
+    "output": 85000,
+    "reasoning": 58823,
+    "cachedInput": 11170432
+  },
+  "toolCount": 131,
+  "taskFinishCount": 6,
+  "taskFinishResultGroups": [
+    {
+      "result": "returned|error|task-unfinished",
+      "count": 6
+    }
+  ],
+  "computedRows": [
+    {
+      "Class": "一班",
+      "Mean": "90.0"
+    },
+    {
+      "Class": "二班",
+      "Mean": "80.0"
+    },
+    {
+      "Class": "总体",
+      "Mean": "85.0"
+    }
+  ],
+  "computedCsv": {
+    "exists": true,
+    "name": "班级平均分结果.csv",
+    "bytes": 94
+  },
+  "chart": {
+    "exists": true,
+    "name": "班级平均分计算图.png",
+    "bytes": 75749
+  },
+  "exports": [
+    {
+      "format": "docx",
+      "status": " written",
+      "count": 4,
+      "latestRevision": 15
+    },
+    {
+      "format": "html-offline",
+      "status": " written",
+      "count": 4,
+      "latestRevision": 15
+    }
+  ],
+  "htmlFileExists": true,
+  "docxFileExists": true,
+  "playerScreenshotReached": false,
+  "toolSummary": [
+    {
+      "toolStateResult": "artifact.save|returned|read|",
+      "count": 2
+    },
+    {
+      "toolStateResult": "asset.search|returned|read|",
+      "count": 1
+    },
+    {
+      "toolStateResult": "compute.run|returned|read|",
+      "count": 7
+    },
+    {
+      "toolStateResult": "document.export|returned|error|delivery-rejected",
+      "count": 2
+    },
+    {
+      "toolStateResult": "document.export|returned|error|target-conflict",
+      "count": 2
+    },
+    {
+      "toolStateResult": "document.export|returned|read|",
+      "count": 8
+    },
+    {
+      "toolStateResult": "file.copy|returned|read|",
+      "count": 1
+    },
+    {
+      "toolStateResult": "file.create|returned|read|",
+      "count": 1
+    },
+    {
+      "toolStateResult": "file.grep|returned|read|",
+      "count": 3
+    },
+    {
+      "toolStateResult": "file.list|returned|read|",
+      "count": 2
+    },
+    {
+      "toolStateResult": "file.mkdir|returned|read|",
+      "count": 1
+    },
+    {
+      "toolStateResult": "file.observe|returned|read|",
+      "count": 3
+    },
+    {
+      "toolStateResult": "file.open|returned|read|",
+      "count": 3
+    },
+    {
+      "toolStateResult": "file.patch|returned|read|",
+      "count": 3
+    },
+    {
+      "toolStateResult": "file.read|returned|read|",
+      "count": 2
+    },
+    {
+      "toolStateResult": "file.reconcile|returned|error|file-tool-failed",
+      "count": 1
+    },
+    {
+      "toolStateResult": "file.reconcile|returned|read|",
+      "count": 2
+    },
+    {
+      "toolStateResult": "file.trash|returned|read|",
+      "count": 1
+    },
+    {
+      "toolStateResult": "file.write|returned|read|",
+      "count": 1
+    },
+    {
+      "toolStateResult": "html.errors|returned|read|",
+      "count": 1
+    },
+    {
+      "toolStateResult": "html.observe|returned|error|invalid-operation",
+      "count": 2
+    },
+    {
+      "toolStateResult": "html.observe|returned|read|",
+      "count": 4
+    },
+    {
+      "toolStateResult": "job.logs|returned|read|",
+      "count": 6
+    },
+    {
+      "toolStateResult": "job.wait|returned|read|",
+      "count": 7
+    },
+    {
+      "toolStateResult": "listChildren|returned|read|",
+      "count": 1
+    },
+    {
+      "toolStateResult": "material.list|returned|read|",
+      "count": 1
+    },
+    {
+      "toolStateResult": "media.insert|returned|error|invalid-target",
+      "count": 1
+    },
+    {
+      "toolStateResult": "object.update|returned|document-operation|",
+      "count": 2
+    },
+    {
+      "toolStateResult": "office.inspect|returned|read|",
+      "count": 1
+    },
+    {
+      "toolStateResult": "project.apply|returned|error|file-content-required",
+      "count": 1
+    },
+    {
+      "toolStateResult": "project.apply|returned|error|target-not-found",
+      "count": 1
+    },
+    {
+      "toolStateResult": "project.apply|returned|read|",
+      "count": 13
+    },
+    {
+      "toolStateResult": "project.list|returned|read|",
+      "count": 5
+    },
+    {
+      "toolStateResult": "project.read|returned|read|",
+      "count": 17
+    },
+    {
+      "toolStateResult": "project.save|returned|read|",
+      "count": 3
+    },
+    {
+      "toolStateResult": "skills.read|returned|read|",
+      "count": 7
+    },
+    {
+      "toolStateResult": "task.finish|returned|error|task-unfinished",
+      "count": 6
+    },
+    {
+      "toolStateResult": "task.note|returned|read|",
+      "count": 3
+    },
+    {
+      "toolStateResult": "tools.load|returned|read|",
+      "count": 1
+    },
+    {
+      "toolStateResult": "view.observe|returned|read|",
+      "count": 2
+    }
+  ],
+  "sourceSha256AtRunStart": "DEFD0C3DC982A5D81A418AD6D206DB8B609CE736E331C14942D042B7271C22EA",
+  "sourceSha256AtRunEnd": "DEFD0C3DC982A5D81A418AD6D206DB8B609CE736E331C14942D042B7271C22EA",
+  "sourceUnchangedDuringRun": true,
+  "sourceSha256ObservedAfterRun": "70C2160D7BC578B9D5F4047406566BBC75B959593CC050BDD20B6937BDFC1C96",
+  "keyLeakScan": {
+    "runtimeKeyWasNonEmpty": true,
+    "keyLength": 57,
+    "factsContainsLiteralKey": false,
+    "logContainsLiteralKey": false,
+    "summaryContainsLiteralKey": false
+  }
+}

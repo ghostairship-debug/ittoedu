@@ -1,0 +1,119 @@
+{
+  "description": "将当前表格转换为可编辑专业图表，保留对象身份、位置、样式和其它对象。用已观察的 target 或 path，to=chart；chartType 可选 bar/line/area/pie/donut。categoryColumn/valueColumns 按列从1计数，默认首列类别、其余列数值。软件读取当前表格及声明表头、产生图表身份并一次提交；不要求复制原表格数据或内部编号。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "anyOf": [
+      {
+        "additionalProperties": false,
+        "properties": {
+          "categoryColumn": {
+            "description": "Category column, counted from 1. Defaults to the first column.",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "chartType": {
+            "enum": [
+              "bar",
+              "line",
+              "area",
+              "pie",
+              "donut"
+            ],
+            "type": "string"
+          },
+          "target": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "to": {
+            "const": "chart",
+            "type": "string"
+          },
+          "valueColumns": {
+            "description": "Numeric series columns, counted from 1. Defaults to all columns except the category column.",
+            "items": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "to",
+          "target"
+        ],
+        "type": "object"
+      },
+      {
+        "additionalProperties": false,
+        "properties": {
+          "categoryColumn": {
+            "description": "Category column, counted from 1. Defaults to the first column.",
+            "exclusiveMinimum": 0,
+            "maximum": 9007199254740991,
+            "type": "integer"
+          },
+          "chartType": {
+            "enum": [
+              "bar",
+              "line",
+              "area",
+              "pie",
+              "donut"
+            ],
+            "type": "string"
+          },
+          "path": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "project": {
+            "maxLength": 1000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "to": {
+            "const": "chart",
+            "type": "string"
+          },
+          "valueColumns": {
+            "description": "Numeric series columns, counted from 1. Defaults to all columns except the category column.",
+            "items": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "to",
+          "path"
+        ],
+        "type": "object"
+      }
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "转换对象类型",
+    "targetKinds": [
+      "course-instance"
+    ]
+  },
+  "name": "object.convert",
+  "version": 1
+}

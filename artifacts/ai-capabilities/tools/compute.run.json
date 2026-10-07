@@ -1,5 +1,5 @@
 {
-  "description": "在已配置的受限 Python 后端异步运行代码，返回持久 job；仅能看到显式给定的 scratch，无宿主文件/网络。未配置固定镜像时明确失败。",
+  "description": "运行内置 Python 计算，无需安装 WSL；已包含 NumPy、pandas、Matplotlib 和自动中文绘图字体。sources 点名本任务获授权的文件路径或材料来源，由软件冻结字节与版本，输入文件位于 /job/input。当前目录与成果目录均为 /job/output，/job/work 为同目录别名；GUOLING_INPUT_DIR、GUOLING_OUTPUT_DIR 也提供位置。可用 outputNames 点名成果，省略时软件发现实际产物；坏辅助文件逐项诊断，ready 仅表示列出的成果可用，未保存到用户文件。只执行 Python 源码，无宿主文件、网络、OS 子进程、动态 pip 安装或未预装的原生扩展；缺库时明确报告。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
@@ -9,6 +9,13 @@
         "type": "string"
       },
       "outputNames": {
+        "items": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "sources": {
         "items": {
           "minLength": 1,
           "type": "string"

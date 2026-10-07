@@ -49,14 +49,21 @@
                     "content": {
                       "type": "string"
                     },
+                    "format": {
+                      "enum": [
+                        "text",
+                        "html"
+                      ],
+                      "type": "string"
+                    },
                     "target": {
+                      "description": "省略时使用本次文字卡由宿主固定的默认目标；其它任务必须提供。",
                       "maxLength": 100,
                       "minLength": 1,
                       "type": "string"
                     }
                   },
                   "required": [
-                    "target",
                     "content"
                   ],
                   "type": "object"
@@ -84,7 +91,8 @@
                           "additionalProperties": false,
                           "properties": {
                             "data": {
-                              "$ref": "#/$defs/__schema0"
+                              "$ref": "#/$defs/__schema0",
+                              "description": "Only supplied data properties change; omitted properties are preserved. Professional appearance, sizing, style, crop, feather, filters and poster records accept partial properties. Arrays and content values use their existing complete-value format."
                             },
                             "frame": {
                               "additionalProperties": false,
@@ -224,6 +232,7 @@
                               "additionalProperties": {
                                 "$ref": "#/$defs/__schema0"
                               },
+                              "description": "Only supplied style properties change; omitted properties are preserved. Use null to explicitly clear a CSS value.",
                               "propertyNames": {
                                 "type": "string"
                               },
@@ -251,7 +260,6 @@
                       "additionalProperties": false,
                       "properties": {
                         "path": {
-                          "maxLength": 500,
                           "minLength": 1,
                           "type": "string"
                         },
@@ -264,7 +272,8 @@
                           "additionalProperties": false,
                           "properties": {
                             "data": {
-                              "$ref": "#/$defs/__schema0"
+                              "$ref": "#/$defs/__schema0",
+                              "description": "Only supplied data properties change; omitted properties are preserved. Professional appearance, sizing, style, crop, feather, filters and poster records accept partial properties. Arrays and content values use their existing complete-value format."
                             },
                             "frame": {
                               "additionalProperties": false,
@@ -404,6 +413,7 @@
                               "additionalProperties": {
                                 "$ref": "#/$defs/__schema0"
                               },
+                              "description": "Only supplied style properties change; omitted properties are preserved. Use null to explicitly clear a CSS value.",
                               "propertyNames": {
                                 "type": "string"
                               },
@@ -499,6 +509,262 @@
                 },
                 "name": {
                   "const": "media.apply",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "input"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "input": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "fit": {
+                      "enum": [
+                        "contain",
+                        "cover",
+                        "stretch"
+                      ],
+                      "type": "string"
+                    },
+                    "frame": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "height": {
+                          "exclusiveMinimum": 0,
+                          "type": "number"
+                        },
+                        "transform": {
+                          "prefixItems": [
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "number"
+                            }
+                          ],
+                          "type": "array"
+                        },
+                        "width": {
+                          "exclusiveMinimum": 0,
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "width",
+                        "height",
+                        "transform"
+                      ],
+                      "type": "object"
+                    },
+                    "resource": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "target": {
+                      "maxLength": 100,
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "target",
+                    "resource"
+                  ],
+                  "type": "object"
+                },
+                "name": {
+                  "const": "media.insert",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "input"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "input": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "categoryColumn": {
+                          "description": "Category column, counted from 1. Defaults to the first column.",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "type": "integer"
+                        },
+                        "chartType": {
+                          "enum": [
+                            "bar",
+                            "line",
+                            "area",
+                            "pie",
+                            "donut"
+                          ],
+                          "type": "string"
+                        },
+                        "target": {
+                          "maxLength": 100,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "to": {
+                          "const": "chart",
+                          "type": "string"
+                        },
+                        "valueColumns": {
+                          "description": "Numeric series columns, counted from 1. Defaults to all columns except the category column.",
+                          "items": {
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991,
+                            "type": "integer"
+                          },
+                          "minItems": 1,
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "to",
+                        "target"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "categoryColumn": {
+                          "description": "Category column, counted from 1. Defaults to the first column.",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "type": "integer"
+                        },
+                        "chartType": {
+                          "enum": [
+                            "bar",
+                            "line",
+                            "area",
+                            "pie",
+                            "donut"
+                          ],
+                          "type": "string"
+                        },
+                        "path": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "project": {
+                          "maxLength": 1000,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "to": {
+                          "const": "chart",
+                          "type": "string"
+                        },
+                        "valueColumns": {
+                          "description": "Numeric series columns, counted from 1. Defaults to all columns except the category column.",
+                          "items": {
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991,
+                            "type": "integer"
+                          },
+                          "minItems": 1,
+                          "type": "array"
+                        }
+                      },
+                      "required": [
+                        "to",
+                        "path"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "name": {
+                  "const": "object.convert",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "input"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "input": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "action": {
+                      "enum": [
+                        "add",
+                        "rename",
+                        "duplicate",
+                        "delete",
+                        "set-initial",
+                        "set-thumbnail",
+                        "clear-overrides"
+                      ],
+                      "type": "string"
+                    },
+                    "state": {
+                      "anyOf": [
+                        {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "target": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "title": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "target",
+                    "action"
+                  ],
+                  "type": "object"
+                },
+                "name": {
+                  "const": "presentation.update",
                   "type": "string"
                 }
               },

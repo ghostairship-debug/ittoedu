@@ -8,6 +8,7 @@ param(
   [string]$Profile
 )
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 
 function Quote-NativeArgument([string]$Value) {
   # Windows CommandLineToArgvW quoting, including a path's trailing backslash.
@@ -54,18 +55,45 @@ try {
   $start.CreateNoWindow = $true
   $start.RedirectStandardOutput = $true
   $start.RedirectStandardError = $true
+  $start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+  $start.StandardErrorEncoding = [Text.UTF8Encoding]::new($false)
   $start.EnvironmentVariables.Remove('ELECTRON_RUN_AS_NODE')
   $start.EnvironmentVariables['VITE_DEV_SERVER_URL'] = ''
   $process = New-Object Diagnostics.Process
   $process.StartInfo = $start
   [void]$process.Start()
-  $stdout = $process.StandardOutput.ReadToEndAsync()
-  $stderr = $process.StandardError.ReadToEndAsync()
+  # Main writes one complete JSON line. A resident child can keep inherited pipe
+  # handles open after the connector exits, so EOF is not the ready boundary.
+  $stdout = $process.StandardOutput.ReadLineAsync()
+  $stderr = $process.StandardError.ReadLineAsync()
   $process.WaitForExit()
-  $output = $stdout.Result.Trim()
-  if ($process.ExitCode -ne 0) { throw ('Guoling connection failed: ' + $stderr.Result.Trim()) }
-  $connection = $output | ConvertFrom-Json
-  if ($connection.status -ne 'ready') { throw 'Guoling did not return a ready connection.' }
+  if ($process.ExitCode -ne 0) {
+    $diagnostic = ''
+    if ($stderr.Status -eq [Threading.Tasks.TaskStatus]::RanToCompletion) {
+      $diagnostic = $stderr.Result
+    }
+    throw ('Guoling connection failed (exit ' + $process.ExitCode + '): ' + $diagnostic)
+  }
+  $readyLine = $stdout.Result
+  # Windows may prefix the connector's JSON with a console newline. JSON permits
+  # this whitespace; stop at the first content line, without waiting for EOF.
+  while ($null -ne $readyLine -and [string]::IsNullOrWhiteSpace($readyLine)) {
+    $readyLine = $process.StandardOutput.ReadLine()
+  }
+  if ($null -eq $readyLine) { throw 'Guoling did not return a ready connection. EOF before JSON.' }
+  $output = $readyLine.Trim()
+  $lineShape = 'lineChars=' + $readyLine.Length + '; trimmedChars=' + $output.Length +
+    '; empty=' + [string]::IsNullOrWhiteSpace($readyLine)
+  try { $connection = $output | ConvertFrom-Json }
+  catch { throw ('Guoling ready receipt is not JSON. ' + $lineShape) }
+  if ($connection.status -ne 'ready') {
+    $parsedType = if ($null -eq $connection) { 'null' } else { $connection.GetType().FullName }
+    $statusShape = if ($connection.status -in @('ready', 'failed')) { $connection.status }
+      elseif ($null -eq $connection.status) { 'absent' } else { 'other' }
+    # Shape only: never include the raw line, its JSON values, or credentials.
+    throw ('Guoling did not return a ready connection. ' + $lineShape +
+      '; parsedType=' + $parsedType + '; status=' + $statusShape)
+  }
   # Keep actual owner workspace/profile/permission/ownership facts intact.
   [Console]::Out.WriteLine($output)
   exit 0

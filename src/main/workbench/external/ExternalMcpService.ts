@@ -115,6 +115,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
   private state: ExternalMcpState = 'disabled'
   private message?: string
   private lifecycle: Promise<unknown> = Promise.resolve()
+  private initialWorkspaceId?: string
   private lastWorkspaceId?: string
   private readonly requests = new Set<Promise<unknown>>()
   private sessionGeneration = 0
@@ -211,6 +212,7 @@ export class ExternalMcpService implements ResidentMcpHandler {
   /** Startup chooses a registered, already-authorized root; it grants no extra authority. */
   async setInitialWorkspace(workspaceId: string): Promise<void> {
     if (!await this.options.conversations.readWorkspace(workspaceId)) throw new Error('后台工作空间未登记')
+    this.initialWorkspaceId = workspaceId
     this.lastWorkspaceId = workspaceId
   }
 
@@ -237,6 +239,9 @@ export class ExternalMcpService implements ResidentMcpHandler {
     try { await this.options.gateway.stop(runId) } finally { this.options.files.releaseRun(runId) }
   }
   private async currentWorkspace(): Promise<string> {
+    // A CLI launch owns its default root even after the same host gains a GUI.
+    // Session workspace.switch changes only that session, not this startup choice.
+    if (this.initialWorkspaceId) return this.initialWorkspaceId
     const ui = await this.options.uiState().catch(() => null)
     for (const id of [ui?.workspaceId, this.lastWorkspaceId]) if (id && await this.options.conversations.readWorkspace(id)) return id
     // No window answered: fall back to the most recently used registered space.

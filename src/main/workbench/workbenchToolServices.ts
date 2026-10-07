@@ -29,7 +29,7 @@ import { frozenImageRoles } from './images/frozenImageRoles'
 import { ImageGenerationService } from './images/ImageGenerationService'
 import { HostJobService } from './jobs/HostJobService'
 import { ComputeJobService } from './compute/ComputeJobService'
-import { PINNED_PYTHON_IMAGE_ID, PodmanComputeBackend } from './compute/PodmanComputeBackend'
+import { PyodideComputeBackend } from './compute/PyodideComputeBackend'
 import { WebResearchService, type WebResearchOptions } from './network/WebResearchService'
 import { ManagedBrowserMcpService, type ManagedBrowserGrant } from './externalTools/ManagedBrowserMcpService'
 import { createElectronEmbeddedBrowserFactory } from './browserEmbedded/ElectronEmbeddedBrowser'
@@ -60,6 +60,7 @@ let headlessExportWorker: HeadlessDocumentExportWorker | undefined
 let htmlActionServices: ReturnType<typeof createHtmlActionServices> | undefined
 let htmlActionOptions: Parameters<typeof createHtmlActionServices>[0] | undefined
 let pptxImportProducer: PptxCourseImportProducer | undefined
+let computeBackend: PyodideComputeBackend | undefined
 export function setWorkbenchHtmlPreview(live: HtmlPreviewService): void {
   if (!htmlActionOptions) throw new Error('HTML 页面操作服务尚未安装')
   htmlActionOptions.live = live
@@ -82,6 +83,7 @@ export function disposeHeadlessWorkbenchWorkers(): void {
   headlessExportWorker?.dispose(); headlessExportWorker = undefined
   htmlActionServices?.dispose(); htmlActionServices = undefined; htmlActionOptions = undefined
   pptxImportProducer?.dispose(); pptxImportProducer = undefined
+  computeBackend?.dispose(); computeBackend = undefined
 }
 export function workbenchImageService(): ImageGenerationService {
   if (!imageService) throw new Error('图片服务尚未安装')
@@ -162,10 +164,13 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       (imageRoute(request) === 'chatgpt-oauth' ? oauthImages : apiImages).generate(request, references, options) },
     resolveReference: (runId, documentId, resource) => host.tools.readImageResource(runId, documentId, resource),
   })
-  const configuredImage = process.env.GUOLING_COMPUTE_IMAGE
-  const computeImage = configuredImage && /^sha256:[a-f0-9]{64}$/.test(configuredImage) ? configuredImage : PINNED_PYTHON_IMAGE_ID
+  const computeDevURL = process.env.VITE_DEV_SERVER_URL
+  computeBackend = new PyodideComputeBackend({ preloadPath: path.join(__dirname, '..', '..', 'preload', 'compute.js'),
+    ...(computeDevURL ? { rendererURL: new URL('compute.html', computeDevURL).href }
+      : { rendererFile: path.join(app.getAppPath(), 'dist-renderer', 'compute.html') }),
+    runtimeDirectory: path.join(app.getAppPath(), computeDevURL ? 'public' : 'dist-renderer', 'vendor', 'compute-runtime') })
   const compute = new ComputeJobService({ directory: path.join(directory, 'compute'),
-    backend: new PodmanComputeBackend({ distro: process.env.GUOLING_COMPUTE_WSL_DISTRO || 'Ubuntu', image: computeImage }) })
+    backend: computeBackend })
   const delegation = new DelegationJobService({ directory: path.join(directory, 'delegation', 'jobs'),
     copyRootBase: path.join(directory, 'delegation', 'copies') })
   // The installed Codex CLI rejected both real command and patch writes. An operator must

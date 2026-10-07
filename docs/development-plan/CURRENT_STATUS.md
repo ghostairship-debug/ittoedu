@@ -1,41 +1,27 @@
 # 当前状态与剩余范围
 
-更新：2026-10-07。正式承载 `D:/果铃工作台` / `main`。这是工程事实和已知剩余范围的状态入口；具体任务协调只看[任务板](TASK_BOARD.md)，不将历史卡片或 planned 工作包表示为当前 writer。
+更新：2026-10-07。正式目录：`D:/果铃工作台` / `main`。完整回执见[实施结果](20261007-content-revision/IMPLEMENTATION_RESULT.md)，协调见[任务板](TASK_BOARD.md)。
 
-## 当前正式实现
+## 基线与授权阶段
 
-| 项目 | 当前事实与依据 |
-|---|---|
-| 工程格式 | Project V10；[Schema](../../src/shared/contracts/component-platform/schema.ts) 的 schemaVersion=10 |
-| 运行发布投影 | Published V3；[源合同](../../src/shared/contracts/component-platform/published.ts) 的 schemaVersion=3 |
-| 组件合同 | Component API 5；[当前机器索引](../../artifacts/ai-capabilities/index.json)与[运行合同](../../src/shared/contracts/component-platform/runtime.ts) |
-| 正式 writer/History | 每文档 DocumentSession；[Main DocumentHost](../../src/main/workbench/DocumentHostService.ts)注册 Markdown、Text、CourseV10 driver，旧 V9 类型/测试仍有遗留，不构成公开旧工程兼容承诺 |
-| 编辑与布局 | Slide/Spatial 自由 frame/编组/顺序，Flow 正文顺序；组件内容、专业数据与程序共用正式定义/实例语义 |
-| AI 与外部客户端 | 内置通用执行器；外部客户端经同源 Gateway/HTTP MCP。后台入口已交付，不挂载主 App，观察/导出按需 worker |
-| 发布状态 | 发行继续暂停；本页不承诺安装包验收、未配置供应商或新的收费路径 |
+正式模型为 Project V10、Published V3、Component API 5；每文档 DocumentSession 持有正式内容、History 与保存。Slide/Spatial 保留自由 frame，Flow 保留阅读顺序。旧 V9 类型和测试遗留不构成兼容承诺。
 
-## 已记录的验证
+原内容协作主包与 S09 冷创建回执已合入；后续源码是 `162aee26` 上的未提交候选，当前 Git 元数据只读。不得把候选写成已提交、安装验收或发行。
 
-[2026-10-06 修复结果](20261006-required-fixes-result.md)记录 L/M/R1–R5 与有界 R6 的具体提交、最小检查和独立 review。零模型 SDK 实际完成创建/应用、局部可编辑修改、保存 revision 4、dirty=false、新 Main 冷开、HTML 输出、attach/detach 与正常 owned stop；受影响最终公开首图和导出画面完整。
+**本窗口只完成开发入口文档瘦身**，不启动产品修改、测试、构建或创作。Owner 已准备[新窗口执行提示词](20261007-content-revision/CORE_EXPERIENCE_EXECUTION_PROMPT.md)，交给下一窗口后按其中授权实施核心体验修复与三路创作验证；此前“先讨论、不开发”仅限定当前窗口，不阻断下一窗口的明确实施指令。发行继续暂停。
 
-同原 rev32/pg4 的唯一实际性能对照为 wall 7.53→3.42 秒、应用 private 采样峰 8.23→4.54 GB、targets JSON UTF-8 17,487,884→38,158 B；不同环境和本批多项变更不允许单变量归因。原作品既有碎片叠层没有在性能包中重做。
+## 已验证范围
 
-[主线归并](20261006-main-consolidation.md)记录候选 125d52fd 的快进与保全；源码未因目录整理重新叠加旧分片，主目录后台启动/只读 SDK/正常退出已验证。
+- 默认计算已切换随包离线 Pyodide，无需 WSL。真实中文 CSV 均值90/80/85、中文 PNG、资源交付、只读输入、宿主文件/网络隔离、Stop、冷 ready 复用及 Python exit 0/3 已有最小证据和[独立复审](20261007-content-revision/evidence/teacher-compute-review.md)。不承诺 OS 子进程或任意原生扩展。
+- 当前同账号 GPT OAuth 真实生成、参考编辑已通过，原图保留；[回执与图片](20261007-content-revision/evidence/oauth-live-20261007/)可复用。实际图片模型未由供应商回报，单次费用未知；默认图片角色配置与完整创作验收另计。
+- 可控 provider 代表性 V10 全链1例14.6秒通过，0模型请求、0新增生图：实际计算、可编辑表图、公式/链接/既有图片、正式 History、保存及新 Main 冷读、HTML/DOCX、独立内容浏览器真实点击。见[原证据](20261007-content-revision/evidence/teacher-creation-controlled-20261007/)。不外推全部 GUI、真实模型或安装包。
+- 既有聚焦修复、真实窗口及正确 V4.1 改写/保存冷开证据仍有效，范围和限制统一见实施结果；不因换窗口重跑。
 
-## 2026-10-07 计划与审计承接
+## 未完成与下一步
 
-[统一内容协作执行包](20261007-content-revision/README.md)已生成，承接教师首发、统一人/内置/外部能力、AI负责内容而软件负责实现的 Owner 决定。38项静态工作包覆盖原50主题、新131条记录、旧641条来源主张及20补充细项；含保留、反证、候选与条件，不能当缺陷总数。
+1. 文件关闭、显式保存/History、普通输入与常用插入/属性、公式、HTML 轻编辑、三表面视口/控制台、整窗放弃及恢复稿问题尚未修复，见[核心体验问题](20261007-content-revision/CORE_EXPERIENCE_ISSUES.md)。只读定位不等于真实窗口验收。
+2. 原真实 V4.1 作品已保存并导出 rev15；102请求结束循环已有候选及聚焦证据，原结果仍为 partial。零付费续验发现原生 section 折叠消费缺失，真实点击未通过；不能用可控主例的互动结果替代。保留[原产物事实](20261007-content-revision/evidence/teacher-creation-live-20261007/)。
+3. Windows dir 默认入口已实际连接、计算及三资源 written；GUI 工作区续接已有候选/独立三例，GUI 延续与完整退出仍缺完成证据。私有端口、隐藏启动等续验支线已停止，不记完整包通过。
+4. 三路真实首产出质量/耗时比较、完整核心体验与 Owner 接受尚未完成。全仓旧类型/测试债及历史 native trap 根因未清零；不以此自动扩大矩阵或替代当前用户路径的修复。
 
-Owner已授权的38工作包实施与确认优化、20补充候选处置已随a8cea6c1合入main，用户原无关archive修改保留。默认内容目标保持通用能力，富文本/公式、直接读依赖续修、组合图片部分恢复、自然有效稿及原未完输入恢复、同源能力与真实Player/导出已接齐。T01/T03/T04/T05/T06/T07/T08真实窗口聚焦闭环均有已执行绿例；正确deepseek-flash/V4.1实际返回deepseek-v4-1-flash-260910的1任务4请求改写/保存冷开通过。独立R0–R4及普通review按实际cut收口，未跑全矩阵，未将自动化称Owner accepted。后续原S09尾项产品fe503968/测试b54cf2e2也随本次实质合并交付：创建成功后持久因果回执、冷查询不重做，独立两例及唯一相关Electron构建均通过。具体提交、原失败与最终证据、38包和条件见[实施结果](20261007-content-revision/IMPLEMENTATION_RESULT.md)；实际writer/写域只见任务板，发行继续暂停。
-
-## 仍需明确保留的边界
-
-- 本批新增条件：发行暂停下无本轮安装版/无Nodebootstrap实测。Owner已卸载WSL，并明确教师电脑不能依赖WSL；当前生产计算仍硬接Ubuntu/Podman，随包离线Pyodide/WASM替代方案已独立设计审，尚未实施和验证。GPT OAuth9月23日已有真实生成/参考编辑/图片保存重开证据；10月7日用当前同账号原服务重验生成1次、编辑1次，均HTTP200/ready，原图保留，PNG已实际查看。供应商未回报实际图片模型，单次费用unknown；当前默认图片角色未配置与V10完整创作链验收另记，空目录不清零已证能力。PPTX冷ACK现可查持久创建事实；无事实仍保unknown不重导。简单改写1次请求2个工具/1History，零工具建议未满足；本次技术判断暂无成本反例支持继续深改，不列为当前可用性或发行阻断。见本轮结果。
-
-- 全仓类型和旧测试尚未清零。本批共享 helper 的 8 条直接诊断已消除；App 窄闭包仍有源码遗留，含 inactive V9 observation controller 的 4 条类型漂移；旧 productivity 的 9 个 V9 用例尚未迁移。
-- 历史 native trap 根因未完全验证。payload 减量、一次正常观察和释放不等于已消除崩溃或证明长期无泄漏。
-- 最新零模型闭环不代替完整三路真实模型创作、完整互动质量或 Owner 对作品/成熟编辑器全部操作的接受。旧任务卡中的未签收范围留在[历史协调记录](../archive/README.md#历史原文)，不据此制造 active 产品任务。
-- 旧执行包的发行准备、媒体/账号与外部环境范围保留原决定；当前发行仍暂停。旧已签收范围不迁成 V10 整体通过，新供应商或收费路径也不从旧文档取得授权。
-
-2026-10-06 文档卫生整理只改变入口、存放位置和状态表达，不增加核验门、不改产品行为、不重跑模型或全量审计。当前无产品写锁的历史卡已退出实际任务板；后续有真实派发再按工作协议建卡。
-
+下一窗口按正常用户操作选批，复用有效证据；发行仍须 Owner 解除暂停。

@@ -1,0 +1,28 @@
+{
+  "description": "将当前 HTML 预览翻到指定页码（从 0 开始），随后返回该页真实状态和截图；只在本任务绑定的页面内操作。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "index": {
+        "maximum": 10000,
+        "minimum": 0,
+        "type": "integer"
+      }
+    },
+    "required": [
+      "index"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "read",
+    "label": "html.navigate",
+    "targetKinds": [
+      "document"
+    ]
+  },
+  "name": "html.navigate",
+  "version": 1
+}

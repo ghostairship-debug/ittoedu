@@ -1,0 +1,43 @@
+{
+  "description": "列出本次显式材料或宿主冻结来源的不可变原件、表示、实际页段与缺口。省略 attachmentId 时列授权目录；path 可读取已授权工作空间内的具体材料，软件负责登记来源；指定 attachmentId 时分页列表示。目录不是正文，随后用 material.extract/find/read。读取参考不扩大作品修改权限。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "attachmentId": {
+        "format": "uuid",
+        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$",
+        "type": "string"
+      },
+      "limit": {
+        "default": 30,
+        "maximum": 100,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "offset": {
+        "default": 0,
+        "maximum": 9007199254740991,
+        "minimum": 0,
+        "type": "integer"
+      },
+      "path": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "offset",
+      "limit"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "read",
+    "label": "材料目录",
+    "targetKinds": []
+  },
+  "name": "material.list",
+  "version": 1
+}

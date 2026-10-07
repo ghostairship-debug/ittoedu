@@ -7,14 +7,21 @@
       "content": {
         "type": "string"
       },
+      "format": {
+        "enum": [
+          "text",
+          "html"
+        ],
+        "type": "string"
+      },
       "target": {
+        "description": "省略时使用本次文字卡由宿主固定的默认目标；其它任务必须提供。",
         "maxLength": 100,
         "minLength": 1,
         "type": "string"
       }
     },
     "required": [
-      "target",
       "content"
     ],
     "type": "object"

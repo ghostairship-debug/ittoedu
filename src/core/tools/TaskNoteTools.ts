@@ -30,7 +30,7 @@ export const taskFinishInputSchema = z.object({}).strict()
 /** Engine run control; it does not register a document operation or change a grant. */
 export const taskFinishTool: ModelToolDefinition = {
   name: 'task.finish',
-  description: '完成本次任务。只有用户要求的工作均已完成且没有后续操作时调用；可以在同一响应中先给出写入工具，再把 task.finish({}) 放在最后，软件按顺序核实实际回执后结束，不需要再请求一轮总结。写入失败、结果未知或作业仍在运行时不会结束，继续在本任务修正或读取结果。此工具不修改正文、不保存文件，也不能将未提交内容声明为已应用。',
+  description: '结束本轮任务。可以在同一响应中先给出写入工具，再把 task.finish({}) 放在最后，软件按顺序核实实际回执后结束，不需要再请求一轮总结。工作完整时返回 completed；同一响应中刚出现失败或必要验证缺口时，先返回具体结果供下一轮判断，不直接结束。模型已读到确定失败、未保存内容或无法取得的必要验证后，仍明确结束的，可返回 partial 并列出实际缺口，不必反复尝试无法获得的证据。工具尚未返回、原作业仍在运行或结果未知时仍须读取原结果，不能结束或重放。此工具不修改正文、不保存文件，也不能将未提交内容或未验证结果声明为完成。',
   inputSchema: z.toJSONSchema(taskFinishInputSchema) as ModelToolDefinition['inputSchema'],
 }
 

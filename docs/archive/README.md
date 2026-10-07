@@ -18,6 +18,7 @@
 归档现已位于仓库目录内；`local/` 保存本机原始材料并由 `.gitignore` 排除，不把恢复 profile、课件样本及大型原始记录混入远端源码提交。
 
 - `evidence/`：各批真实检查、截图、失败记录与性能采样，目录名称保留原日期。
+- `evidence/20261007-product-audit/`：桌面审计20份原输入、两轮收敛报告及641/131证据记录的本机副本，原件未修改；当前执行及逐条覆盖见[20261007 执行包](../development-plan/20261007-content-revision/README.md)。
 - `materials/`：原课件样本、恢复稿和测试 profile；不能作为无效文档删除。
 - `20261006-main-consolidation/`：工作树保全映射、未提交材料与原始辅助数据。`preservation.json`/Git archive refs 负责恢复；不再在仓库重复保存这些快照。
 - `retired-workspaces/`：D 盘根目录旧开发工作区中的独有源码/补丁/记录，压缩保存及实际清理范围见 `manifest.json`；可再生依赖和 dist 缓存不保留。

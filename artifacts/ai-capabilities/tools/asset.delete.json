@@ -1,0 +1,33 @@
+{
+  "description": "仅在用户要求时调用：从我的资产库删除指定条目版本，复用组件库面板同一删除服务。packageId、version、sourceId 可取 asset.search 的结果；省略 version 删除我的资产库中该条目的最新版本。其他目录条目不能删除，工程中已有实例和素材保留。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "packageId": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "sourceId": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "version": {
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "packageId"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "asset.delete",
+    "targetKinds": []
+  },
+  "name": "asset.delete",
+  "version": 1
+}

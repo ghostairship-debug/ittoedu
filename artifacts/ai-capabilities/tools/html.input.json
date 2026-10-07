@@ -1,0 +1,33 @@
+{
+  "description": "向最近一次 HTML 观察返回的可编辑元素句柄输入 value，并触发页面输入事件，随后重新读取真实状态和截图。不可输入密码或文件控件。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "handle": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      },
+      "value": {
+        "maxLength": 8192,
+        "type": "string"
+      }
+    },
+    "required": [
+      "handle",
+      "value"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "html.input",
+    "targetKinds": [
+      "document"
+    ]
+  },
+  "name": "html.input",
+  "version": 1
+}

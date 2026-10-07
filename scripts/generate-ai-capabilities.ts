@@ -144,7 +144,9 @@ export async function generateAiCapabilityArtifacts(
       source: 'src/shared/contracts/component-platform/published.ts', summary: 'Published V3 播放数据结构；由正式工程生成，包含实际运行资源。' },
   ]
   for (const protocol of schemaResources) {
-    resources.set(protocol.path, readableResourceJson(z.toJSONSchema(protocol.schema)))
+    // Catalogs describe submitted JSON. Canonical parsers still normalize and
+    // validate inputs such as document text colors after this discovery step.
+    resources.set(protocol.path, readableResourceJson(z.toJSONSchema(protocol.schema, { io: 'input' })))
     entries.push({ id: protocol.id, kind: 'protocol', label: protocol.id, path: protocol.path,
       scopes: allScopes, carriers, summary: protocol.summary })
   }
@@ -158,8 +160,8 @@ export async function generateAiCapabilityArtifacts(
   ]
   resources.set('protocols/component-api5.json', readableResourceJson({
     apiVersion: 5,
-    definitionSchema: z.toJSONSchema(componentDefinitionSchema),
-    implementationSchema: z.toJSONSchema(componentImplementationSchema),
+    definitionSchema: z.toJSONSchema(componentDefinitionSchema, { io: 'input' }),
+    implementationSchema: z.toJSONSchema(componentImplementationSchema, { io: 'input' }),
     types: Object.fromEntries(await Promise.all(runtimeSources.map(async source => [source, await fs.readFile(path.join(projectRoot, source), 'utf8')]))),
     source: 'src/shared/contracts/component-platform/runtime.ts',
     note: '组件 mount/update/dispose 和 scope、目标、事件、状态、媒体、互动、教师控制器端口取自正式合同。相关类型保留原源码引用路径；实际端口由当前宿主提供。',

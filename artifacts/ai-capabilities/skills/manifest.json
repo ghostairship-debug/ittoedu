@@ -47,6 +47,20 @@
       "path": "skills/office-content/SKILL.md",
       "references": [],
       "version": "271e9660cdacb4642edebff2af02a95c61e1f680e3b3ffe708db4ef6d6ebdc9b"
+    },
+    {
+      "description": "多来源研究并创作有可追溯引用的报告，支持材料阅读、网页核实和已有报告续写。",
+      "name": "research-and-report",
+      "path": "skills/research-and-report/SKILL.md",
+      "references": [],
+      "version": "a61799cf0bdfd5c382557706e37992f123ff294affafbd6c83494546e99edeab"
+    },
+    {
+      "description": "读取数据、受限计算并交付真实图表与报告，保证数值可核查、结果资源实际保存。",
+      "name": "data-and-report",
+      "path": "skills/data-and-report/SKILL.md",
+      "references": [],
+      "version": "4a88dd63cc631298d6a3b2c98dcbef9324ab3023ea307d16ef037cda4d2a72aa"
     }
   ]
 }

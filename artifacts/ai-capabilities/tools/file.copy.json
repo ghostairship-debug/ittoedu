@@ -1,5 +1,5 @@
 {
-  "description": "把 sources 复制到 destination 文件夹，逐项返回成功或失败；不默认覆盖。GUI 打开且未保存的源默认按磁盘版本复制并在 outcome 中标记 copied=disk-version；需要复制当前草稿时显式传 flushFirst=true，模型应自行先 file.save 或接受失败。",
+  "description": "把 sources 复制到 destination 文件夹，逐项返回成功或失败；不默认覆盖。sourceVersion=disk（默认）复制磁盘版本，未保存的源在 outcome 标记 copied=disk-version；sourceVersion=current 序列化当前已提交的编辑草稿，源文件保持未保存，不先保存源文件。flushFirst=true 等价 current。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
@@ -20,6 +20,13 @@
         },
         "minItems": 1,
         "type": "array"
+      },
+      "sourceVersion": {
+        "enum": [
+          "disk",
+          "current"
+        ],
+        "type": "string"
       }
     },
     "required": [

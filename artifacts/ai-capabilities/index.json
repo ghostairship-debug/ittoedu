@@ -22,7 +22,7 @@
     }
   },
   "scope": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
-  "semanticVersion": "1e1fdb8d0bf9f169b23b18bff7df40130f147809de685b12195ae0ee1bb2c403",
+  "semanticVersion": "860e3afd4625234cca2cdba3744208f2127ef79a0869114a79ad60056c910e09",
   "skills": "skills/manifest.json",
   "surfaces": [
     "slide",
@@ -31,12 +31,28 @@
   ],
   "tools": [
     {
+      "id": "artifact.save",
+      "path": "tools/artifact.save.json"
+    },
+    {
+      "id": "asset.delete",
+      "path": "tools/asset.delete.json"
+    },
+    {
+      "id": "asset.import",
+      "path": "tools/asset.import.json"
+    },
+    {
       "id": "asset.save",
       "path": "tools/asset.save.json"
     },
     {
       "id": "asset.search",
       "path": "tools/asset.search.json"
+    },
+    {
+      "id": "asset.update",
+      "path": "tools/asset.update.json"
     },
     {
       "id": "asset.use",
@@ -49,6 +65,10 @@
     {
       "id": "compute.run",
       "path": "tools/compute.run.json"
+    },
+    {
+      "id": "course.importPptx",
+      "path": "tools/course.importPptx.json"
     },
     {
       "id": "delegate.read",
@@ -87,6 +107,10 @@
       "path": "tools/file.move.json"
     },
     {
+      "id": "file.observe",
+      "path": "tools/file.observe.json"
+    },
+    {
       "id": "file.open",
       "path": "tools/file.open.json"
     },
@@ -97,6 +121,10 @@
     {
       "id": "file.read",
       "path": "tools/file.read.json"
+    },
+    {
+      "id": "file.reconcile",
+      "path": "tools/file.reconcile.json"
     },
     {
       "id": "file.rename",
@@ -117,6 +145,26 @@
     {
       "id": "file.write",
       "path": "tools/file.write.json"
+    },
+    {
+      "id": "html.click",
+      "path": "tools/html.click.json"
+    },
+    {
+      "id": "html.errors",
+      "path": "tools/html.errors.json"
+    },
+    {
+      "id": "html.input",
+      "path": "tools/html.input.json"
+    },
+    {
+      "id": "html.navigate",
+      "path": "tools/html.navigate.json"
+    },
+    {
+      "id": "html.observe",
+      "path": "tools/html.observe.json"
     },
     {
       "id": "image.edit",
@@ -167,6 +215,22 @@
       "path": "tools/listChildren.json"
     },
     {
+      "id": "material.extract",
+      "path": "tools/material.extract.json"
+    },
+    {
+      "id": "material.find",
+      "path": "tools/material.find.json"
+    },
+    {
+      "id": "material.list",
+      "path": "tools/material.list.json"
+    },
+    {
+      "id": "material.read",
+      "path": "tools/material.read.json"
+    },
+    {
       "id": "mcp.discover",
       "path": "tools/mcp.discover.json"
     },
@@ -187,8 +251,16 @@
       "path": "tools/media.discover.json"
     },
     {
+      "id": "media.insert",
+      "path": "tools/media.insert.json"
+    },
+    {
       "id": "media.start",
       "path": "tools/media.start.json"
+    },
+    {
+      "id": "object.convert",
+      "path": "tools/object.convert.json"
     },
     {
       "id": "object.update",
@@ -199,12 +271,28 @@
       "path": "tools/office.create.json"
     },
     {
+      "id": "office.create",
+      "path": "tools/office.create.json"
+    },
+    {
+      "id": "office.edit",
+      "path": "tools/office.edit.json"
+    },
+    {
       "id": "office.edit",
       "path": "tools/office.edit.json"
     },
     {
       "id": "office.inspect",
       "path": "tools/office.inspect.json"
+    },
+    {
+      "id": "office.inspect",
+      "path": "tools/office.inspect.json"
+    },
+    {
+      "id": "presentation.update",
+      "path": "tools/presentation.update.json"
     },
     {
       "id": "project.apply",

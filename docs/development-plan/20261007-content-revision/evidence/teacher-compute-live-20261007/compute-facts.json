@@ -1,0 +1,187 @@
+{
+  "phase": "compute",
+  "starts": 1,
+  "observations": [
+    {
+      "id": 1,
+      "loaded": true,
+      "destroyed": true,
+      "url": "https://guoling-compute.invalid/compute.html",
+      "preferences": {
+        "sandbox": true,
+        "contextIsolation": true,
+        "nodeIntegration": false,
+        "nodeIntegrationInWorker": null,
+        "nodeIntegrationInSubFrames": false
+      },
+      "rendererNetwork": {
+        "rejected": true,
+        "message": "TypeError: Failed to fetch"
+      }
+    }
+  ],
+  "outcomes": [
+    {
+      "exitCode": 0,
+      "stdout": "一班均分90，二班均分80，总均分85",
+      "stderr": "/job/input/__main__.py:63: MatplotlibDeprecationWarning: The x parameter as float was deprecated in Matplotlib 3.10 and will be removed in 3.12. Use int(x) instead.\n  fig.savefig('charts/班级均分.png')\n/job/input/__main__.py:63: MatplotlibDeprecationWarning: The y parameter as float was deprecated in Matplotlib 3.10 and will be removed in 3.12. Use int(y) instead.\n  fig.savefig('charts/班级均分.png')",
+      "truncated": false,
+      "cancelled": false,
+      "outputs": [
+        {
+          "name": "summary.csv",
+          "byteLength": 56
+        },
+        {
+          "name": "charts/班级均分.png",
+          "byteLength": 12646
+        },
+        {
+          "name": "probe.json",
+          "byteLength": 392
+        }
+      ]
+    }
+  ],
+  "jobs": "D:\\果铃工作台\\output\\productFollowup\\T06\\teacherLocalCompute\\grades-sEd6hb\\jobs",
+  "availability": {
+    "available": true
+  },
+  "final": {
+    "jobId": "teacher-grades",
+    "runId": "teacher-grades-run",
+    "requestDigest": "cc2e71d4cc36f6a0152e28cd228bcd8d34be19862d54a3d10aa7f96b326f00e2",
+    "status": "ready",
+    "createdAt": "2026-10-07T05:39:14.100Z",
+    "updatedAt": "2026-10-07T05:39:19.778Z",
+    "stopped": false,
+    "outputNames": [
+      "summary.csv",
+      "charts/班级均分.png",
+      "probe.json"
+    ],
+    "artifacts": [
+      {
+        "name": "summary.csv",
+        "digest": "6f0e96a0c8d29449946c6de0069b82ee69671ab89d946662d6ddfe675db8ca8f",
+        "byteLength": 56,
+        "mimeType": "text/csv"
+      },
+      {
+        "name": "charts/班级均分.png",
+        "digest": "44fe1916cf57fa27160cca8260c6c88985e9653a557559050458dc3be3e56fd9",
+        "byteLength": 12646,
+        "mimeType": "image/png"
+      },
+      {
+        "name": "probe.json",
+        "digest": "7f3144c8110f991b0cb93645fa2db393f0b66cb7697b45adedee6d6ff6a8b478",
+        "byteLength": 392,
+        "mimeType": "application/json"
+      }
+    ],
+    "locations": {
+      "input": "/job/input",
+      "work": "/job/work",
+      "output": "/job/output"
+    },
+    "inputs": [
+      {
+        "name": "班级分数.csv",
+        "version": "sha256:3f183fb08540385f9bbca9e96c063d0341de42266f0f36d8e5a6149da08f1e48",
+        "byteLength": 55
+      },
+      {
+        "name": "probe-input.json",
+        "version": "sha256:5cdd2aa628b3dbe2c2050305fa1e9a480e1a0996a040f1c099a4367aaa54028a",
+        "byteLength": 322
+      }
+    ],
+    "exitCode": 0,
+    "outputDiagnostics": []
+  },
+  "logs": {
+    "entries": [
+      {
+        "cursor": 1,
+        "time": 1791351559764,
+        "stream": "stdout",
+        "message": "一班均分90，二班均分80，总均分85"
+      },
+      {
+        "cursor": 2,
+        "time": 1791351559764,
+        "stream": "stderr",
+        "message": "/job/input/__main__.py:63: MatplotlibDeprecationWarning: The x parameter as float was deprecated in Matplotlib 3.10 and will be removed in 3.12. Use int(x) instead."
+      },
+      {
+        "cursor": 3,
+        "time": 1791351559764,
+        "stream": "stderr",
+        "message": "  fig.savefig('charts/班级均分.png')"
+      },
+      {
+        "cursor": 4,
+        "time": 1791351559764,
+        "stream": "stderr",
+        "message": "/job/input/__main__.py:63: MatplotlibDeprecationWarning: The y parameter as float was deprecated in Matplotlib 3.10 and will be removed in 3.12. Use int(y) instead."
+      },
+      {
+        "cursor": 5,
+        "time": 1791351559764,
+        "stream": "stderr",
+        "message": "  fig.savefig('charts/班级均分.png')"
+      }
+    ],
+    "nextCursor": 5
+  },
+  "jobFolder": "D:\\果铃工作台\\output\\productFollowup\\T06\\teacherLocalCompute\\grades-sEd6hb\\jobs\\56a5c3146d4c0ab99a7f39ab7ce6e6c137f96163b1e12ea0f36691c0e9874755",
+  "inputAfter": "班级,分数\n一班,80\n一班,100\n二班,70\n二班,90\n",
+  "probe": {
+    "inputReadOnly": true,
+    "hostFileHidden": true,
+    "workerNetworkBlocked": {
+      "http": "AbortError",
+      "host_file": "AbortError"
+    },
+    "cwd": "/job/output",
+    "workAlias": "/job/output",
+    "env": {
+      "GUOLING_INPUT_DIR": "/job/input",
+      "GUOLING_OUTPUT_DIR": "/job/output"
+    },
+    "numpyVersion": "2.4.6",
+    "pandasVersion": "3.0.2",
+    "fontFamily": "Noto Sans SC",
+    "means": {
+      "一班": 90,
+      "二班": 80
+    },
+    "total": 85
+  },
+  "summary": "班级,平均分\n一班,90.0\n二班,80.0\n总均分,85.0\n",
+  "deliveries": [
+    {
+      "operationId": "teacher-delivery-summary.csv",
+      "status": "written",
+      "path": "D:\\果铃工作台\\output\\productFollowup\\T06\\teacherLocalCompute\\grades-sEd6hb\\delivered\\summary.csv",
+      "sourceKind": "compute",
+      "sourceId": "teacher-grades@summary.csv",
+      "byteLength": 56,
+      "version": "sha256:6f0e96a0c8d29449946c6de0069b82ee69671ab89d946662d6ddfe675db8ca8f"
+    },
+    {
+      "operationId": "teacher-delivery-班级均分.png",
+      "status": "written",
+      "path": "D:\\果铃工作台\\output\\productFollowup\\T06\\teacherLocalCompute\\grades-sEd6hb\\delivered\\班级均分.png",
+      "sourceKind": "compute",
+      "sourceId": "teacher-grades@charts/班级均分.png",
+      "byteLength": 12646,
+      "version": "sha256:44fe1916cf57fa27160cca8260c6c88985e9653a557559050458dc3be3e56fd9"
+    }
+  ],
+  "chartPath": "D:\\果铃工作台\\output\\productFollowup\\T06\\teacherLocalCompute\\grades-sEd6hb\\delivered\\班级均分.png",
+  "chartByteLength": 12646,
+  "unsafeOutputRejected": true,
+  "unsafeOutputReason": "Error: 作业文件名无效"
+}

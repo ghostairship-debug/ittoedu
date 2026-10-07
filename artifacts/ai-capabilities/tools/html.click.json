@@ -1,0 +1,28 @@
+{
+  "description": "点击最近一次 HTML 观察返回的元素句柄，随后重新读取真实状态和截图。旧句柄或页面变化会冲突；不得重复猜测同一点击是否发生。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "handle": {
+        "maxLength": 256,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "handle"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "html.click",
+    "targetKinds": [
+      "document"
+    ]
+  },
+  "name": "html.click",
+  "version": 1
+}

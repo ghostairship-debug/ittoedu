@@ -1,0 +1,353 @@
+{
+  "pyodideRelease": "https://github.com/pyodide/pyodide/releases/tag/314.0.7",
+  "python": "3.14.2",
+  "abi": "2026_0",
+  "packages": [
+    {
+      "key": "numpy",
+      "name": "numpy",
+      "version": "2.4.6",
+      "file": "numpy-2.4.6-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "depends": [],
+      "sha256": "a292c1f5d7d8a2208cd5e94fc467604c131cabcd2fc14fed6eefde121e7fabdf",
+      "license": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0",
+      "licenses": [
+        "licenses/packages/numpy/numpy/_core/include/numpy/random/LICENSE.txt",
+        "licenses/packages/numpy/numpy/ma/LICENSE",
+        "licenses/packages/numpy/numpy/random/LICENSE.md",
+        "licenses/packages/numpy/numpy-2.4.6.dist-info/licenses/LICENSE.txt",
+        "licenses/packages/numpy/numpy-2.4.6.dist-info/licenses/numpy/_core/include/numpy/libdivide/LICENSE.txt",
+        "licenses/packages/numpy/numpy-2.4.6.dist-info/licenses/numpy/_core/src/common/pythoncapi-compat/COPYING",
+        "licenses/packages/numpy/numpy-2.4.6.dist-info/licenses/numpy/_core/src/highway/LICENSE",
+        "licenses/packages/numpy/numpy-2.4.6.dist-info/licenses/numpy/_core/src/npysort/x86-simd-sort/LICENSE.md",
+        "licenses/packages/numpy/numpy-2.4.6.dist-info/licenses/numpy/_core/src/umath/svml/LICENSE",
+        "licenses/packages/numpy/numpy-2.4.6.dist-info/licenses/numpy/fft/pocketfft/LICENSE.md",
+        "licenses/packages/numpy/numpy-2.4.6.dist-info/licenses/numpy/linalg/lapack_lite/LICENSE.txt",
+        "licenses/packages/numpy/numpy-2.4.6.dist-info/licenses/numpy/ma/LICENSE",
+        "licenses/packages/numpy/numpy-2.4.6.dist-info/licenses/numpy/random/LICENSE.md",
+        "licenses/packages/numpy/numpy-2.4.6.dist-info/licenses/numpy/random/src/distributions/LICENSE.md",
+        "licenses/packages/numpy/numpy-2.4.6.dist-info/licenses/numpy/random/src/mt19937/LICENSE.md",
+        "licenses/packages/numpy/numpy-2.4.6.dist-info/licenses/numpy/random/src/pcg64/LICENSE.md",
+        "licenses/packages/numpy/numpy-2.4.6.dist-info/licenses/numpy/random/src/philox/LICENSE.md",
+        "licenses/packages/numpy/numpy-2.4.6.dist-info/licenses/numpy/random/src/sfc64/LICENSE.md",
+        "licenses/packages/numpy/numpy-2.4.6.dist-info/licenses/numpy/random/src/splitmix64/LICENSE.md"
+      ]
+    },
+    {
+      "key": "pandas",
+      "name": "pandas",
+      "version": "3.0.2",
+      "file": "pandas-3.0.2-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "depends": [
+        "numpy",
+        "python-dateutil",
+        "pytz"
+      ],
+      "sha256": "45ff57772cc2f366a8582c7d3097cc4e6676342ecd5a3c08184a43462d5a02ae",
+      "license": "BSD 3-Clause License",
+      "licenses": [
+        "licenses/packages/pandas/pandas-3.0.2.dist-info/LICENSE"
+      ]
+    },
+    {
+      "key": "python-dateutil",
+      "name": "python-dateutil",
+      "version": "2.9.0.post0",
+      "file": "python_dateutil-2.9.0.post0-py2.py3-none-any.whl",
+      "depends": [
+        "six"
+      ],
+      "sha256": "9b13365edf9c188f570baf9c540bbb3029ada2a2dacb9694b3659941693ee9e5",
+      "license": "Dual License",
+      "licenses": [
+        "licenses/packages/python-dateutil/python_dateutil-2.9.0.post0.dist-info/LICENSE"
+      ]
+    },
+    {
+      "key": "six",
+      "name": "six",
+      "version": "1.17.0",
+      "file": "six-1.17.0-py2.py3-none-any.whl",
+      "depends": [],
+      "sha256": "228c50f73aa7addf2c2ccf2979c256802a59ab69cad8152b31b9443cc8140f42",
+      "license": "MIT",
+      "licenses": [
+        "licenses/packages/six/six-1.17.0.dist-info/LICENSE"
+      ]
+    },
+    {
+      "key": "pytz",
+      "name": "pytz",
+      "version": "2026.1.post1",
+      "file": "pytz-2026.1.post1-py2.py3-none-any.whl",
+      "depends": [],
+      "sha256": "b8249d6450146e0b61e6d710dc02ebb35a904796c4c2f97fe87d4ac5872db36a",
+      "license": "MIT",
+      "licenses": [
+        "licenses/packages/pytz/pytz-2026.1.post1.dist-info/LICENSE.txt"
+      ]
+    },
+    {
+      "key": "matplotlib",
+      "name": "matplotlib",
+      "version": "3.10.8",
+      "file": "matplotlib-3.10.8-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "depends": [
+        "contourpy",
+        "cycler",
+        "fonttools",
+        "kiwisolver",
+        "numpy",
+        "packaging",
+        "pillow",
+        "pyparsing",
+        "python-dateutil",
+        "pytz"
+      ],
+      "sha256": "722857932f8f62eac64f8439af15c94d427f9fb945f9590cd242805c983d2d54",
+      "license": "License agreement for matplotlib versions 1.3.0 and later",
+      "licenses": [
+        "licenses/packages/matplotlib/matplotlib/mpl-data/fonts/ttf/LICENSE_DEJAVU",
+        "licenses/packages/matplotlib/matplotlib/mpl-data/fonts/ttf/LICENSE_STIX",
+        "licenses/packages/matplotlib/matplotlib-3.10.8.dist-info/LICENSE"
+      ]
+    },
+    {
+      "key": "contourpy",
+      "name": "contourpy",
+      "version": "1.3.3",
+      "file": "contourpy-1.3.3-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "depends": [
+        "numpy"
+      ],
+      "sha256": "0ac15ebf9f820d2d1c3526388aa2818b631cb6c4aae1682efd6b4cc12c1f302c",
+      "license": "BSD 3-Clause License",
+      "licenses": [
+        "licenses/packages/contourpy/contourpy-1.3.3.dist-info/LICENSE"
+      ]
+    },
+    {
+      "key": "cycler",
+      "name": "cycler",
+      "version": "0.12.1",
+      "file": "cycler-0.12.1-py3-none-any.whl",
+      "depends": [
+        "six"
+      ],
+      "sha256": "8ee450085f15b47f78b034d60059af6a3649e98fa5dde073363437742cc0b4ea",
+      "license": "Copyright (c) 2015, matplotlib project",
+      "licenses": [
+        "licenses/packages/cycler/cycler-0.12.1.dist-info/LICENSE"
+      ]
+    },
+    {
+      "key": "fonttools",
+      "name": "fonttools",
+      "version": "4.62.1",
+      "file": "fonttools-4.62.1-py3-none-any.whl",
+      "depends": [],
+      "sha256": "0d1516e073fd0a8d8e6d9af46417b6a26209a42518024a18f7085e72d2599605",
+      "license": "MIT",
+      "licenses": [
+        "licenses/packages/fonttools/fonttools-4.62.1.dist-info/licenses/LICENSE",
+        "licenses/packages/fonttools/fonttools-4.62.1.dist-info/licenses/LICENSE.external"
+      ]
+    },
+    {
+      "key": "kiwisolver",
+      "name": "kiwisolver",
+      "version": "1.5.0",
+      "file": "kiwisolver-1.5.0-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "depends": [],
+      "sha256": "47781998156721147c128a3c74547d5703e0e3cc454d8203e629339368308a93",
+      "license": "=========================",
+      "licenses": [
+        "licenses/packages/kiwisolver/kiwisolver-1.5.0.dist-info/licenses/LICENSE"
+      ]
+    },
+    {
+      "key": "packaging",
+      "name": "packaging",
+      "version": "26.1",
+      "file": "packaging-26.1-py3-none-any.whl",
+      "depends": [],
+      "sha256": "565acbbea54da30348b6d68b6a54373e6f777987db9f1db6966b4b3a5060d303",
+      "license": "Apache-2.0 OR BSD-2-Clause",
+      "licenses": [
+        "licenses/packages/packaging/packaging-26.1.dist-info/licenses/LICENSE",
+        "licenses/packages/packaging/packaging-26.1.dist-info/licenses/LICENSE.APACHE",
+        "licenses/packages/packaging/packaging-26.1.dist-info/licenses/LICENSE.BSD"
+      ]
+    },
+    {
+      "key": "pillow",
+      "name": "Pillow",
+      "version": "12.2.0",
+      "file": "pillow-12.2.0-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "depends": [],
+      "sha256": "e29838b7a756e4ee0f27a9cfa9a387ee0dfa2e9dd44be2dd595130b9f9d93ac3",
+      "license": "MIT-CMU",
+      "licenses": [
+        "licenses/packages/pillow/pillow-12.2.0.dist-info/licenses/LICENSE"
+      ]
+    },
+    {
+      "key": "pyparsing",
+      "name": "pyparsing",
+      "version": "3.3.2",
+      "file": "pyparsing-3.3.2-py3-none-any.whl",
+      "depends": [],
+      "sha256": "f0dd8225b5f8e945980b400bd465b4b90cb0498a2eede0d9dbea98372f6110c5",
+      "license": "MIT",
+      "licenses": [
+        "licenses/packages/pyparsing/pyparsing-3.3.2.dist-info/licenses/LICENSE"
+      ]
+    }
+  ],
+  "font": {
+    "version": "2.004",
+    "commit": "523d033d6cb47f4a80c58a35753646f5c3608a78",
+    "source": "https://raw.githubusercontent.com/notofonts/noto-cjk/523d033d6cb47f4a80c58a35753646f5c3608a78/Sans/SubsetOTF/SC/NotoSansSC-Regular.otf",
+    "license": "OFL-1.1"
+  },
+  "downloads": [
+    {
+      "file": "fonts/NotoSansSC-Regular.otf",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-cjk/523d033d6cb47f4a80c58a35753646f5c3608a78/Sans/SubsetOTF/SC/NotoSansSC-Regular.otf",
+      "bytes": 8331336,
+      "sha256": "faa6c9df652116dde789d351359f3d7e5d2285a2b2a1f04a2d7244df706d5ea9"
+    },
+    {
+      "file": "fonts/OFL.txt",
+      "url": "https://raw.githubusercontent.com/notofonts/noto-cjk/523d033d6cb47f4a80c58a35753646f5c3608a78/LICENSE",
+      "bytes": 4301,
+      "sha256": "6a73f9541c2de74158c0e7cf6b0a58ef774f5a780bf191f2d7ec9cc53efe2bf2"
+    },
+    {
+      "file": "licenses/CPYTHON-LICENSE.txt",
+      "url": "https://raw.githubusercontent.com/python/cpython/v3.14.2/LICENSE",
+      "bytes": 13804,
+      "sha256": "b0e25a78cffb43f4d92de8b61ccfa1f1f98ecbc22330b54b5251e7b6ba010231"
+    },
+    {
+      "file": "licenses/PYODIDE-MPL-2.0.txt",
+      "url": "https://raw.githubusercontent.com/pyodide/pyodide/314.0.7/LICENSE",
+      "bytes": 16725,
+      "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
+    },
+    {
+      "file": "pyodide/contourpy-1.3.3-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/contourpy-1.3.3-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "bytes": 118874,
+      "sha256": "0ac15ebf9f820d2d1c3526388aa2818b631cb6c4aae1682efd6b4cc12c1f302c"
+    },
+    {
+      "file": "pyodide/cycler-0.12.1-py3-none-any.whl",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/cycler-0.12.1-py3-none-any.whl",
+      "bytes": 8321,
+      "sha256": "8ee450085f15b47f78b034d60059af6a3649e98fa5dde073363437742cc0b4ea"
+    },
+    {
+      "file": "pyodide/fonttools-4.62.1-py3-none-any.whl",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/fonttools-4.62.1-py3-none-any.whl",
+      "bytes": 1152647,
+      "sha256": "0d1516e073fd0a8d8e6d9af46417b6a26209a42518024a18f7085e72d2599605"
+    },
+    {
+      "file": "pyodide/kiwisolver-1.5.0-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/kiwisolver-1.5.0-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "bytes": 36616,
+      "sha256": "47781998156721147c128a3c74547d5703e0e3cc454d8203e629339368308a93"
+    },
+    {
+      "file": "pyodide/matplotlib-3.10.8-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/matplotlib-3.10.8-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "bytes": 6982033,
+      "sha256": "722857932f8f62eac64f8439af15c94d427f9fb945f9590cd242805c983d2d54"
+    },
+    {
+      "file": "pyodide/numpy-2.4.6-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/numpy-2.4.6-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "bytes": 2960568,
+      "sha256": "a292c1f5d7d8a2208cd5e94fc467604c131cabcd2fc14fed6eefde121e7fabdf"
+    },
+    {
+      "file": "pyodide/packaging-26.1-py3-none-any.whl",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/packaging-26.1-py3-none-any.whl",
+      "bytes": 95852,
+      "sha256": "565acbbea54da30348b6d68b6a54373e6f777987db9f1db6966b4b3a5060d303"
+    },
+    {
+      "file": "pyodide/pandas-3.0.2-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/pandas-3.0.2-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "bytes": 4177749,
+      "sha256": "45ff57772cc2f366a8582c7d3097cc4e6676342ecd5a3c08184a43462d5a02ae"
+    },
+    {
+      "file": "pyodide/pillow-12.2.0-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/pillow-12.2.0-cp314-cp314-pyemscripten_2026_0_wasm32.whl",
+      "bytes": 1037806,
+      "sha256": "e29838b7a756e4ee0f27a9cfa9a387ee0dfa2e9dd44be2dd595130b9f9d93ac3"
+    },
+    {
+      "file": "pyodide/pyodide-lock.json",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/pyodide-lock.json",
+      "bytes": 119077,
+      "sha256": "5dc2fc119108bc148c7457dc86e7675b5c87e1cafd420b9c34c1eaef7b36c010"
+    },
+    {
+      "file": "pyodide/pyodide.asm.mjs",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/pyodide.asm.mjs",
+      "bytes": 1250344,
+      "sha256": "f7cdc8ece80678ceb712f8e65ebe6d3a83203a180c399865f49612a051693635"
+    },
+    {
+      "file": "pyodide/pyodide.asm.wasm",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/pyodide.asm.wasm",
+      "bytes": 9598218,
+      "sha256": "cc36e3cab04fdfc9a63ff13eb52eae2b911bf46c025cc7b281f394bd3de1d5e6"
+    },
+    {
+      "file": "pyodide/pyodide.js",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/pyodide.js",
+      "bytes": 18912,
+      "sha256": "3141b814715a72e59b51b1b18b9ceae5bf19f7c852417e431bb0a34feadf825c"
+    },
+    {
+      "file": "pyodide/pyodide.mjs",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/pyodide.mjs",
+      "bytes": 17931,
+      "sha256": "6f1d60f7bf529beb300f0f47983c921d3982363640ba20af0e38efdddbc66109"
+    },
+    {
+      "file": "pyodide/pyparsing-3.3.2-py3-none-any.whl",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/pyparsing-3.3.2-py3-none-any.whl",
+      "bytes": 122781,
+      "sha256": "f0dd8225b5f8e945980b400bd465b4b90cb0498a2eede0d9dbea98372f6110c5"
+    },
+    {
+      "file": "pyodide/python_dateutil-2.9.0.post0-py2.py3-none-any.whl",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/python_dateutil-2.9.0.post0-py2.py3-none-any.whl",
+      "bytes": 229892,
+      "sha256": "9b13365edf9c188f570baf9c540bbb3029ada2a2dacb9694b3659941693ee9e5"
+    },
+    {
+      "file": "pyodide/python_stdlib.zip",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/python_stdlib.zip",
+      "bytes": 2545637,
+      "sha256": "fa1957e5777068fc4f7437f96d860ae2fbe9c19732ba06c84e004ec16dd7dd7a"
+    },
+    {
+      "file": "pyodide/pytz-2026.1.post1-py2.py3-none-any.whl",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/pytz-2026.1.post1-py2.py3-none-any.whl",
+      "bytes": 510489,
+      "sha256": "b8249d6450146e0b61e6d710dc02ebb35a904796c4c2f97fe87d4ac5872db36a"
+    },
+    {
+      "file": "pyodide/six-1.17.0-py2.py3-none-any.whl",
+      "url": "https://cdn.jsdelivr.net/pyodide/v314.0.7/full/six-1.17.0-py2.py3-none-any.whl",
+      "bytes": 11050,
+      "sha256": "228c50f73aa7addf2c2ccf2979c256802a59ab69cad8152b31b9443cc8140f42"
+    }
+  ]
+}

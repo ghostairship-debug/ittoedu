@@ -1,0 +1,83 @@
+{
+  "description": "把已准备的本任务图片资源插入已授权页面；软件登记资源和组件身份。frame 可省略，由宿主按图片比例放置；插入和撤销均经过正式文档事务。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "fit": {
+        "enum": [
+          "contain",
+          "cover",
+          "stretch"
+        ],
+        "type": "string"
+      },
+      "frame": {
+        "additionalProperties": false,
+        "properties": {
+          "height": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          },
+          "transform": {
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "width": {
+            "exclusiveMinimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "width",
+          "height",
+          "transform"
+        ],
+        "type": "object"
+      },
+      "resource": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "target": {
+        "maxLength": 100,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "target",
+      "resource"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "manual": {
+    "group": "edit",
+    "label": "插入图片",
+    "targetKinds": [
+      "course-surface"
+    ]
+  },
+  "name": "media.insert",
+  "version": 1
+}

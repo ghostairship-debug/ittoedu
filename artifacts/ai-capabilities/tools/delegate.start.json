@@ -1,5 +1,5 @@
 {
-  "description": "在已核验可写的 Codex Luna Fast 路由中，把点名的工作区文件复制到受管副本后提交一个持久委派作业。未核验写权限时返回 blocked，不发模型请求。",
+  "description": "在已核验可写的 Codex Luna 路由中，把点名的工作区文件复制到受管副本后提交一个持久委派作业。未核验写权限时返回 blocked，不发模型请求。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,

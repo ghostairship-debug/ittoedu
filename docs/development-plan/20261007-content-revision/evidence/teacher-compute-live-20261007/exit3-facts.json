@@ -1,0 +1,40 @@
+{
+  "final": {
+    "jobId": "teacher-exit3",
+    "runId": "teacher-exit3-run",
+    "requestDigest": "e5720b64126a38499543d683600807de7e95b01cf23fdf53d88858d748c0b82a",
+    "status": "failed",
+    "createdAt": "2026-10-07T05:41:50.340Z",
+    "updatedAt": "2026-10-07T05:41:54.172Z",
+    "stopped": false,
+    "outputNames": [
+      "result-before-exit.txt"
+    ],
+    "artifacts": [],
+    "locations": {
+      "input": "/job/input",
+      "work": "/job/work",
+      "output": "/job/output"
+    },
+    "inputs": [],
+    "exitCode": 3,
+    "outputDiagnostics": [],
+    "reason": "计算进程退出码 3"
+  },
+  "logs": {
+    "entries": [
+      {
+        "cursor": 1,
+        "time": 1791351714155,
+        "stream": "stdout",
+        "message": "before normal Python exit 3"
+      }
+    ],
+    "nextCursor": 1
+  },
+  "readArtifact": {
+    "rejected": true,
+    "code": "artifact-not-ready",
+    "message": "ComputeJobError: 计算成果未准备好或已撤销"
+  }
+}

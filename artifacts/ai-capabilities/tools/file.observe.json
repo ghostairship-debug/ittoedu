@@ -1,0 +1,26 @@
+{
+  "description": "比较正式文档当前稿与磁盘版本，返回真实版本差异、可选处理及正文片段；软件固定本次比较的文档、当前位置与版本。limit 可扩大文本显示范围，不执行源文件。file.read 仍读当前稿。外部修改造成保存冲突时，先查看此比较，再用 file.reconcile 采纳磁盘或保留当前稿。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "limit": {
+        "maximum": 9007199254740991,
+        "minimum": 1,
+        "type": "integer"
+      },
+      "path": {
+        "maxLength": 32767,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "path"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "name": "file.observe",
+  "version": 1
+}

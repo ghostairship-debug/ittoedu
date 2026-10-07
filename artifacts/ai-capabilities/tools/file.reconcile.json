@@ -1,0 +1,40 @@
+{
+  "description": "处理 file.observe 已比较的文件变化。choice=disk 采纳磁盘内容，保留正式撤回历史；choice=local 保留当前稿，并允许后续 file.save 保存覆盖刚比较的磁盘版本。软件沿用同任务最近比较的版本，无需抄文档 ID；expectedVersion 可省略，提供时必须与该比较一致。只协调当前文档，未执行保存。正文、文件位置或磁盘再次变化时重新比较；只读权限不能执行。",
+  "inputSchema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "additionalProperties": false,
+    "properties": {
+      "choice": {
+        "enum": [
+          "disk",
+          "local"
+        ],
+        "type": "string"
+      },
+      "expectedVersion": {
+        "anyOf": [
+          {
+            "minLength": 1,
+            "type": "string"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      },
+      "path": {
+        "maxLength": 32767,
+        "minLength": 1,
+        "type": "string"
+      }
+    },
+    "required": [
+      "path",
+      "choice"
+    ],
+    "type": "object"
+  },
+  "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",
+  "name": "file.reconcile",
+  "version": 1
+}

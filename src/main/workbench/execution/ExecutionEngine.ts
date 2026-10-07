@@ -14,7 +14,7 @@ import type { ModelChatMessage, ModelEvent, ModelJsonObject, ModelProvider, Mode
 import { effectiveModelProtocol } from '../../../shared/workbench/modelRouting'
 import { captureMainTiming, ExecutionEventStore, type ExecutionTimingMark, type ExecutionTimingStage } from './ExecutionEventStore'
 import { conflictsWithUnresolvedEffects, type UnresolvedEffect } from './executionEffectScope'
-import { committed, fileCreated, persistedToolWork, hasUnresolvedToolFailure, runEndSummary, serviceToolOutcome, toolFailed,
+import { committed, fileCreated, persistedToolWork, hasUnresolvedToolFailure, executionCompletionIssues, runEndSummary, serviceToolOutcome, toolFailed,
   currentContentRepaired, type SettledExecutionTool } from './executionOutcome'
 import { applicationEventFacts, committedFact, contentApplyFact, knownApplication, reconciledToolResult, saveFact } from './executionToolFacts'
 import { ExecutionRunStore } from './ExecutionRunStore'
@@ -103,7 +103,7 @@ interface StreamingCall {
 }
 interface ActiveRun {
   contentOutput?: { targetHandle: string; format: 'markdown' | 'text' | 'html' }
-  taskAlreadyCompleted?: boolean
+  acknowledgedTaskStatus?: 'completed' | 'partial'
   contextScale: number
   rejectedInputLimit?: number
   forceCompaction: boolean
@@ -623,7 +623,7 @@ export class ExecutionEngine {
     // A card's default focus is still readable when the task has no write grant.
     if (frozen.permission === 'read-only') delete frozen.contentOutput
     let verifiedLineage: ExecutionRunRecord[] | undefined
-    let taskAlreadyCompleted = false
+    let acknowledgedTaskStatus: 'completed' | 'partial' | undefined
     let continuedDocumentIds = new Map<string, string>()
     if (!frozen.conversationId || !frozen.taskId || !frozen.instruction.trim() && !frozen.context?.length && !frozen.inputContext?.attachments.length) throw new Error('请提供内容或附件')
     if (frozen.contentOutput) executionContentOutputSchema.parse(frozen.contentOutput)
@@ -637,19 +637,26 @@ export class ExecutionEngine {
       continuedDocumentIds = continuationDocumentIds(lineage, this.options.registry.list())
       if (continuation.sameTask && previous.input.instruction === frozen.instruction) {
         const settled = await this.settlementRecord(previous)
-        taskAlreadyCompleted = settled.tools.every(tool => tool.state === 'returned'
+        if (settled.tools.every(tool => tool.state === 'returned'
           && (!this.possiblyInvokedTool(tool) || serviceToolOutcome(tool.call.name, tool.result)?.status === 'pending'))
           && settled.tools.some(tool => tool.call.name === TASK_FINISH && tool.result?.kind === 'read'
-            && (tool.result.data as { status?: unknown })?.status === 'completed')
+            && (tool.result.data as { status?: unknown })?.status === 'completed')) acknowledgedTaskStatus = 'completed'
+        const lastOwnTool = previous.tools.at(-1)
+        if (!acknowledgedTaskStatus && previous.status === 'interrupted' && previous.failure?.code === 'application-interrupted'
+          && lastOwnTool?.call.name === TASK_FINISH && lastOwnTool.state === 'returned' && lastOwnTool.result?.kind === 'read'
+          && (lastOwnTool.result.data as { status?: unknown })?.status === 'partial'
+          && !executionCompletionIssues(settled).some(issue => issue.status === 'pending' || issue.status === 'unknown'))
+          acknowledgedTaskStatus = 'partial'
         // Historical body-only runs had one host write and no open tool loop.
-        if (!taskAlreadyCompleted && frozen.contentOutput && previous.input.contentOutput && settled.tools.length === 1) {
+        if (!acknowledgedTaskStatus && frozen.contentOutput && previous.input.contentOutput && settled.tools.length === 1) {
           const tool = settled.tools[0]!
-          taskAlreadyCompleted = tool.origin === 'host' && tool.call.name === 'text.replace' && committed(tool.result)
-            && (continuedDocumentIds.get(tool.result.result.documentId) ?? tool.result.result.documentId) === frozen.contentOutput.documentId
+          if (tool.origin === 'host' && tool.call.name === 'text.replace' && committed(tool.result)
+            && (continuedDocumentIds.get(tool.result.result.documentId) ?? tool.result.result.documentId) === frozen.contentOutput.documentId)
+            acknowledgedTaskStatus = 'completed'
         }
       }
-      if (taskAlreadyCompleted) {
-        // The old task is complete; this receipt-only continuation needs no
+      if (acknowledgedTaskStatus) {
+        // The old loop's end is acknowledged; this receipt-only continuation needs no
         // revived write scope or obsolete selection range.
         delete frozen.contentOutput
         frozen.documents = frozen.documents.map(document => ({ ...document, writable: [], selection: [] }))
@@ -870,7 +877,7 @@ export class ExecutionEngine {
       if (this.closing) throw new Error('应用正在关闭；已保留准备记录，未发送模型请求')
       const active: ActiveRun = { record, contextScale: 1, forceCompaction: false, contextMessages: [], controller: new AbortController(), stopped: false, streams: new Map(), completion: Promise.resolve(), tools,
         ...(contentOutput ? { contentOutput: { targetHandle: contentOutput.targetHandle, format: contentOutput.format } } : {}),
-        ...(taskAlreadyCompleted ? { taskAlreadyCompleted: true } : {}),
+        ...(acknowledgedTaskStatus ? { acknowledgedTaskStatus } : {}),
         unresolvedToolNames: new Set(continuation?.unresolvedToolNames ?? []), unresolvedEffects: continuation?.unresolvedEffects ?? [], permission, outsideDocuments, documentNames, approveAll: false,
         priorImages, priorImagePaths: priorPaths, reissuedImages: reissued }
       active.unsubscribeEdits = this.options.edits?.subscribe?.(event => {
@@ -1775,10 +1782,25 @@ export class ExecutionEngine {
               const settled = await this.settlementRecord(record)
               const otherTools = settled.tools.filter(value => value.callId !== tool.callId)
               const business = { ...settled, tools: otherTools.filter(value => value.call.name !== TASK_FINISH) }
-              tool.result = otherTools.some(value => value.state !== 'returned') || hasUnresolvedToolFailure(business)
-                || record.failure?.code === 'vision-unavailable'
-                ? { kind: 'error', code: 'task-unfinished', message: '本任务仍有失败、结果未知或未结束的操作；已有成果保留，请根据实际回执完成剩余工作后再结束。' }
-                : { kind: 'read', data: { status: 'completed' } }
+              const remaining = executionCompletionIssues(business)
+              for (const pending of otherTools.filter(value => value.state !== 'returned')) if (!remaining.some(issue => issue.callId === pending.callId))
+                remaining.push({ callId: pending.callId, receiptCallId: pending.callId, requestId: pending.requestId,
+                  name: pending.call.name, status: 'pending', message: '工具调用尚未返回' })
+              if (record.failure?.code === 'vision-unavailable') {
+                const image = otherTools.slice().reverse().find(value => value.requestId === tool.requestId
+                  && (value.call.name === 'image.generate' || value.call.name === 'image.edit'))
+                remaining.push({ name: '视觉分析', status: 'unverified', message: record.failure.message,
+                  ...(image ? { requestId: image.requestId, receiptCallId: image.callId } : {}) })
+              }
+              const unsettled = remaining.some(issue => issue.status === 'pending' || issue.status === 'unknown')
+              // Calls in one response share a request: the model has not read
+              // a receipt produced earlier in that same tool batch yet.
+              const unreadReceipt = remaining.some(issue => issue.requestId === tool.requestId)
+              tool.result = unsettled || unreadReceipt
+                ? { kind: 'error', code: 'task-unfinished', message: unsettled
+                  ? '仍有正在运行或结果未知的操作；请查询这些原操作，不要重放已提交的成果。'
+                  : '本轮刚返回失败或必要验证缺口；请先根据这些实际结果修正或判断剩余工作，再明确结束。', data: { remaining } }
+                : { kind: 'read', data: { status: remaining.length ? 'partial' : 'completed', ...(remaining.length ? { remaining } : {}) } }
             } else if (tool.call.name === LOAD_TOOLS) {
               if (!active.tools.some(item => item.name === LOAD_TOOLS)) throw new Error('当前任务没有可展开的工具族')
               const requested = loadToolsSchema.parse(tool.call.input).families
@@ -2152,9 +2174,11 @@ export class ExecutionEngine {
     try {
       record.status = 'running'; await this.checkpoint(record)
       await this.event(record, 'run-state', 'run.state', { status: 'running', label: '正在执行' })
-      if (active.taskAlreadyCompleted) {
-        record.status = 'completed'
-        await this.event(record, 'task-recovered', 'text', { text: '已核实先前任务已完成；原回执与成果保留，无需再次执行。', status: 'completed' })
+      if (active.acknowledgedTaskStatus) {
+        record.status = active.acknowledgedTaskStatus
+        await this.event(record, 'task-recovered', 'text', { text: record.status === 'completed'
+          ? '已核实先前任务已完成；原回执与成果保留，无需再次执行。'
+          : '已恢复先前确认的部分完成终态；原成果与未完成事项保留，未重复执行。', status: record.status })
         return
       }
       const tools = active.tools
@@ -2352,9 +2376,10 @@ export class ExecutionEngine {
           },
         })
         if (!limited) await this.deliverObservationRound(active, calls.slice(observationsDeliveredThrough))
-        if (!limited && calls.some(tool => tool.call.name === TASK_FINISH && tool.result?.kind === 'read'
-          && (tool.result.data as { status?: unknown })?.status === 'completed')) {
-          record.status = 'completed'
+        const finish = calls.slice().reverse().find(tool => tool.call.name === TASK_FINISH && tool.result?.kind === 'read'
+          && ['completed', 'partial'].includes(String((tool.result.data as { status?: unknown })?.status)))
+        if (!limited && finish?.result?.kind === 'read') {
+          record.status = (finish.result.data as { status: 'completed' | 'partial' }).status
           break
         }
         for (const [index, tool] of calls.entries()) {

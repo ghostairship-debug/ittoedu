@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "pyodide": {
+    "version": "314.0.7",
+    "entry": "pyodide/pyodide.mjs"
+  },
+  "packages": [
+    "numpy",
+    "pandas",
+    "matplotlib"
+  ],
+  "font": {
+    "file": "fonts/NotoSansSC-Regular.otf",
+    "family": "Noto Sans SC"
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "phase": "ready-reopen",
+  "starts": 0,
+  "observations": [],
+  "outcomes": [],
+  "jobs": "D:\\果铃工作台\\output\\productFollowup\\T06\\teacherLocalCompute\\grades-sEd6hb\\jobs",
+  "final": {
+    "jobId": "teacher-grades",
+    "runId": "teacher-grades-run",
+    "requestDigest": "cc2e71d4cc36f6a0152e28cd228bcd8d34be19862d54a3d10aa7f96b326f00e2",
+    "status": "ready",
+    "createdAt": "2026-10-07T05:39:14.100Z",
+    "updatedAt": "2026-10-07T05:39:19.778Z",
+    "stopped": false,
+    "outputNames": [
+      "summary.csv",
+      "charts/班级均分.png",
+      "probe.json"
+    ],
+    "artifacts": [
+      {
+        "name": "summary.csv",
+        "digest": "6f0e96a0c8d29449946c6de0069b82ee69671ab89d946662d6ddfe675db8ca8f",
+        "byteLength": 56,
+        "mimeType": "text/csv"
+      },
+      {
+        "name": "charts/班级均分.png",
+        "digest": "44fe1916cf57fa27160cca8260c6c88985e9653a557559050458dc3be3e56fd9",
+        "byteLength": 12646,
+        "mimeType": "image/png"
+      },
+      {
+        "name": "probe.json",
+        "digest": "7f3144c8110f991b0cb93645fa2db393f0b66cb7697b45adedee6d6ff6a8b478",
+        "byteLength": 392,
+        "mimeType": "application/json"
+      }
+    ],
+    "locations": {
+      "input": "/job/input",
+      "work": "/job/work",
+      "output": "/job/output"
+    },
+    "inputs": [
+      {
+        "name": "班级分数.csv",
+        "version": "sha256:3f183fb08540385f9bbca9e96c063d0341de42266f0f36d8e5a6149da08f1e48",
+        "byteLength": 55
+      },
+      {
+        "name": "probe-input.json",
+        "version": "sha256:5cdd2aa628b3dbe2c2050305fa1e9a480e1a0996a040f1c099a4367aaa54028a",
+        "byteLength": 322
+      }
+    ],
+    "exitCode": 0,
+    "outputDiagnostics": []
+  },
+  "summary": "班级,平均分\n一班,90.0\n二班,80.0\n总均分,85.0\n"
+}

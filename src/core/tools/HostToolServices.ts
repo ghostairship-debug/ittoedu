@@ -342,7 +342,7 @@ export class HostToolCoordinator {
   }
   async runCompute(runId: string, operationId: string, input: ComputeRunInput): Promise<ToolResult> {
     const run = this.writableRun(runId)
-    if (!this.services.compute) return this.serviceUnavailable('受限计算后端未配置固定镜像')
+    if (!this.services.compute) return this.serviceUnavailable('内置 Python 计算服务未配置')
     const availability = await this.services.compute.availability?.()
     if (availability && !availability.available) return this.serviceUnavailable(availability.reason ?? '受限计算后端尚未配置')
     if (!operationId || operationId.length > 512) throw new Error('计算操作身份无效')

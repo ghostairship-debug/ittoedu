@@ -1,5 +1,5 @@
 {
-  "description": "修改获授权整对象的公开属性。使用 target 句柄，或使用 project.list/read 返回的对象 path；project 可选，省略使用本任务课件。软件固定原实例和观察基线。Project V10 的 data 和 style 是对应字段完整值，implementation 是实例源码覆盖或 null 恢复默认；frame 可局部调整位置尺寸，无自由 frame 的正文不支持位置修改。文字专业格式位于 data.appearance。保留读取到的其余数据、文字、位置和身份，遵守锁定；精确文字范围不可扩大为整对象授权。",
+  "description": "修改获授权整对象的公开属性。使用 target 句柄，或使用 project.list/read 返回的对象 path；project 可选。data/style 只修改提供字段，省略字段和人工位置保持；专业 appearance/style 等子记录可局部修改，数组和正文仍使用该字段完整值。implementation 是实例源码覆盖或 null 恢复默认，不能充当专业类型转换；frame 可局部调位置尺寸。文字范围授权不能扩大为整对象。",
   "inputSchema": {
     "$defs": {
       "__schema0": {
@@ -43,7 +43,8 @@
             "additionalProperties": false,
             "properties": {
               "data": {
-                "$ref": "#/$defs/__schema0"
+                "$ref": "#/$defs/__schema0",
+                "description": "Only supplied data properties change; omitted properties are preserved. Professional appearance, sizing, style, crop, feather, filters and poster records accept partial properties. Arrays and content values use their existing complete-value format."
               },
               "frame": {
                 "additionalProperties": false,
@@ -183,6 +184,7 @@
                 "additionalProperties": {
                   "$ref": "#/$defs/__schema0"
                 },
+                "description": "Only supplied style properties change; omitted properties are preserved. Use null to explicitly clear a CSS value.",
                 "propertyNames": {
                   "type": "string"
                 },
@@ -210,7 +212,6 @@
         "additionalProperties": false,
         "properties": {
           "path": {
-            "maxLength": 500,
             "minLength": 1,
             "type": "string"
           },
@@ -223,7 +224,8 @@
             "additionalProperties": false,
             "properties": {
               "data": {
-                "$ref": "#/$defs/__schema0"
+                "$ref": "#/$defs/__schema0",
+                "description": "Only supplied data properties change; omitted properties are preserved. Professional appearance, sizing, style, crop, feather, filters and poster records accept partial properties. Arrays and content values use their existing complete-value format."
               },
               "frame": {
                 "additionalProperties": false,
@@ -363,6 +365,7 @@
                 "additionalProperties": {
                   "$ref": "#/$defs/__schema0"
                 },
+                "description": "Only supplied style properties change; omitted properties are preserved. Use null to explicitly clear a CSS value.",
                 "propertyNames": {
                   "type": "string"
                 },

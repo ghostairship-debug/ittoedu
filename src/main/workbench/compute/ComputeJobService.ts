@@ -3,10 +3,11 @@ import { promises as fs } from 'node:fs'
 import path from 'node:path'
 import type { ComputeArtifact, ComputeJobInput, ComputeJobLogs, ComputeJobSnapshot } from '../../../shared/workbench/compute'
 import { waitForHostWork } from '../../../shared/workbench/jobWait'
-import { PodmanComputeBackend, type ComputeProcess } from './PodmanComputeBackend'
+import type { ComputeBackend, ComputeProcess } from './ComputeBackend'
 
 type OutputDiagnostic = { name: string; code: string; message: string }
-type StoredJob = ComputeJobSnapshot & { version: 1; containerName: string; logs: ComputeJobLogs['entries'];
+type StoredJob = ComputeJobSnapshot & { version: 1 | 2; containerName?: string;
+  backend?: ComputeBackend['kind']; executionId?: string; logs: ComputeJobLogs['entries'];
   outputDiagnostics?: OutputDiagnostic[];
   locations?: { input: string; work: string; output: string };
   inputs?: { name: string; version: string; byteLength: number }[] }
@@ -41,10 +42,10 @@ export class ComputeJobService {
   private readonly active = new Map<string, Active>()
   private readonly cancellations = new Map<string, Promise<ComputeJobSnapshot>>()
   private readonly tails = new Map<string, Promise<unknown>>()
-  constructor(options: { directory: string; backend: PodmanComputeBackend; now?: () => Date }) {
+  constructor(options: { directory: string; backend: ComputeBackend; now?: () => Date }) {
     this.directory = path.resolve(options.directory); this.backend = options.backend; this.now = options.now ?? (() => new Date())
   }
-  private readonly backend: PodmanComputeBackend
+  private readonly backend: ComputeBackend
   private readonly now: () => Date
   availability() { return this.backend.availability() }
   private folder(jobId: string) {
@@ -75,14 +76,16 @@ export class ComputeJobService {
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error }
     try {
       const job = JSON.parse(source) as StoredJob
-      if (job.version !== 1 || job.jobId !== jobId || !job.runId || !job.requestDigest
-        || job.containerName !== `guoling-compute-${digest(jobId).slice(0, 32)}` || !Array.isArray(job.logs)
+      const identity = `guoling-compute-${digest(jobId).slice(0, 32)}`
+      if (job.jobId !== jobId || !job.runId || !job.requestDigest
+        || !(job.version === 1 && job.containerName === identity
+          || job.version === 2 && job.executionId === identity && (job.backend === 'pyodide' || job.backend === 'podman')) || !Array.isArray(job.logs)
         || !Array.isArray(job.outputNames) || !Array.isArray(job.artifacts)) throw new Error()
       return job
     } catch { throw new ComputeJobError('job-corrupt', '计算作业记录损坏，未重新执行') }
   }
   private expose(job: StoredJob): ComputeJobSnapshot {
-    const { version: _version, containerName: _containerName, logs: _logs, ...snapshot } = job
+    const { version: _version, containerName: _containerName, executionId: _executionId, backend: _backend, logs: _logs, ...snapshot } = job
     return structuredClone(snapshot)
   }
   private async update(jobId: string, mutate: (job: StoredJob) => void): Promise<StoredJob> {
@@ -93,12 +96,14 @@ export class ComputeJobService {
     })
   }
   private async recoverInterrupted(job: StoredJob): Promise<void> {
-    const observed = await this.backend.inspectContainer(job.containerName)
-    const stopped = observed === 'running' ? await this.backend.stopContainer(job.containerName) : false
+    const sameBackend = (job.version === 1 ? 'podman' : job.backend) === this.backend.kind
+    const identity = job.version === 1 ? job.containerName! : job.executionId!
+    const observed = sameBackend ? await this.backend.inspectExecution?.(identity) ?? 'unknown' : 'unknown'
+    const stopped = observed === 'running' ? await this.backend.stopExecution?.(identity) ?? false : false
     job.status = 'unknown'
     job.reason = observed === 'running'
-      ? stopped ? '恢复时发现容器仍运行，已停止；此前输出未知，未自动交付或重放。' : '恢复时发现容器仍运行，但停止未获确认；输出未知，未自动交付或重放。'
-      : observed === 'unknown' ? '恢复时无法确认容器状态；输出未知，未自动交付或重放。'
+      ? stopped ? '恢复时发现计算仍运行，已停止；此前输出未知，未自动交付或重放。' : '恢复时发现计算仍运行，但停止未获确认；输出未知，未自动交付或重放。'
+      : observed === 'unknown' ? '恢复时无法确认原执行状态；输出未知，未自动交付或重放。'
         : '执行进程已中断，先前输出未知；未自动交付或重放。'
     job.updatedAt = this.now().toISOString()
     await this.save(job)
@@ -114,7 +119,7 @@ export class ComputeJobService {
     const program = input.program ?? 'python3', argv = input.argv ?? (input.code !== undefined ? ['/job/input/__main__.py'] : [])
     const requestDigest = digest(JSON.stringify({ runId: input.runId, language: input.language, code: input.code,
       program, argv, inputs: inputs.map(file => ({ name: file.name, digest: digest(file.bytes) })), outputNames }))
-    return { inputs, outputNames, program, argv, requestDigest }
+    return { inputs, outputNames, program, argv, code: input.code, requestDigest }
   }
   async start(input: ComputeJobInput): Promise<ComputeJobSnapshot> {
     // Capture caller-owned metadata before waiting; request() separately copies input bytes.
@@ -143,15 +148,15 @@ export class ComputeJobService {
       }
       if (input.code !== undefined) await fs.writeFile(path.join(root, 'input', '__main__.py'), input.code, { flag: 'wx', mode: 0o600 })
       const now = this.now().toISOString()
-      const containerName = `guoling-compute-${digest(input.jobId).slice(0, 32)}`
-      const job: StoredJob = { version: 1, containerName, jobId: input.jobId, runId: input.runId, requestDigest: frozen.requestDigest,
+      const executionId = `guoling-compute-${digest(input.jobId).slice(0, 32)}`
+      const job: StoredJob = { version: 2, executionId, backend: this.backend.kind ?? 'podman', jobId: input.jobId, runId: input.runId, requestDigest: frozen.requestDigest,
         status: 'preparing', createdAt: now, updatedAt: now, stopped: false, outputNames: frozen.outputNames, artifacts: [], logs: [],
         locations: { input: '/job/input', work: '/job/work', output: '/job/output' },
         inputs: frozen.inputs.map(file => ({ name: file.name, version: `sha256:${digest(file.bytes)}`, byteLength: file.bytes.byteLength })) }
       await this.save(job)
       const active: Active = { runId: input.runId, work: Promise.resolve(), starting: false, cancelled: false }
       this.active.set(input.jobId, active)
-      active.work = this.execute(input.jobId, root, frozen, containerName, active).finally(() => { if (this.active.get(input.jobId) === active) this.active.delete(input.jobId) })
+      active.work = this.execute(input.jobId, root, frozen, executionId, active).finally(() => { if (this.active.get(input.jobId) === active) this.active.delete(input.jobId) })
       void active.work.catch(() => undefined)
       return this.expose(job)
     })
@@ -191,20 +196,33 @@ export class ComputeJobService {
     await visit(path.join(root, 'output'), '')
     return names
   }
-  private async execute(jobId: string, root: string, frozen: ReturnType<ComputeJobService['request']>, containerName: string, active: Active): Promise<void> {
+  private async execute(jobId: string, root: string, frozen: ReturnType<ComputeJobService['request']>, executionId: string, active: Active): Promise<void> {
     let processStarted = false, processFinished = false
     let artifacts: ComputeArtifact[] = []
     const diagnostics: OutputDiagnostic[] = []
     try {
       if (active.cancelled) return
       active.starting = true
-      const process = await this.backend.start({ directory: root, program: frozen.program, argv: frozen.argv, containerName })
+      const process = await this.backend.start({ directory: root, program: frozen.program, argv: frozen.argv, executionId,
+        code: frozen.code, inputs: frozen.inputs })
       processStarted = true
       active.process = process; active.starting = false
       if (active.cancelled) await process.cancel()
       else await this.update(jobId, job => { if (!job.stopped) job.status = 'running' })
       const outcome = await process.done
       processFinished = true
+      diagnostics.push(...outcome.outputDiagnostics ?? [])
+      if (!active.cancelled && !outcome.cancelled && outcome.exitCode === 0) for (const output of outcome.outputs ?? []) {
+        if (active.cancelled) break
+        try {
+          const name = safeName(output.name), filename = path.join(root, 'output', ...name.split('/'))
+          await fs.mkdir(path.dirname(filename), { recursive: true, mode: 0o700 })
+          if (active.cancelled) break
+          await fs.writeFile(filename, output.bytes, { flag: 'wx', mode: 0o600 })
+        } catch (error) {
+          diagnostics.push({ name: output.name, code: 'output-invalid', message: error instanceof Error ? error.message : '计算成果无法保存到作业目录' })
+        }
+      }
       // Process facts survive even when an output is missing or malformed.
       await this.update(jobId, job => {
         job.logs = [...job.logs, ...this.logLines('stdout', outcome.stdout), ...this.logLines('stderr', outcome.stderr)]

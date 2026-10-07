@@ -563,7 +563,6 @@
                                   "type": "boolean"
                                 },
                                 "color": {
-                                  "pattern": "^#[0-9a-fA-F]{6}$",
                                   "type": "string"
                                 },
                                 "emphasis": {
@@ -582,7 +581,6 @@
                                 "highlightColor": {
                                   "anyOf": [
                                     {
-                                      "pattern": "^#[0-9a-fA-F]{6}$",
                                       "type": "string"
                                     },
                                     {
@@ -654,7 +652,6 @@
                               "additionalProperties": false,
                               "properties": {
                                 "color": {
-                                  "pattern": "^#[0-9a-fA-F]{6}$",
                                   "type": "string"
                                 },
                                 "fontSize": {

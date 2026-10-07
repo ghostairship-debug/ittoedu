@@ -74,7 +74,7 @@ B0 main=`afc65c9e4d713a9d362768f34e017789fad265ae`；用户已有 archive/开发
 | TE05 | disk/current复制分开，current不存源；保dirty/History行为绿 | 未blur输入完整UI组合未测 |
 | TE06 | 真实资料选集版本/冻结进入Main；所选DOCX段落/出处绿 | 完整checkbox UI未测 |
 | TE07 | 研究/数据方法、中文目录、单文件版本；读Skill不撤核心能力，roots/scoped聚焦绿 | 不冒充所有CLI安装 |
-| TE08 | V10图片卡/异步固定目标/同media事务；图片替换/保存冷开/组合绿；10月7日原OAuth当前账号真实生成/参考编辑通过 | 本轮完整V10创作链未运行；实际模型/单次费未由供应商披露，不冒全部GUI已验 |
+| TE08 | V10图片卡/异步固定目标/同media事务；图片替换/保存冷开/组合绿；10月7日原OAuth当前账号真实生成/参考编辑通过；后续可控 provider 完整 V10 计算/可编辑表图/现有图像/保存冷开/HTML-DOCX/Player 点击全链1例绿 | 真实模型续验另记；实际图片模型/单次费未由供应商披露，不冒全部GUI已验 |
 | TE09 | 13导航按钮任意限制移除；七展示状态操作走正式surface.presentation.set | 公开七动作/撤回重做/保存冷开1例绿，所有Player切换未测 |
 | TE10 | 多选提炼与真实库包导入/使用/更新/删除同owner，资源/frame/冷开绿 | UI作品视觉接受归Owner |
 | A01 | 分页captured快照、Flow markerless身份/专业数据；原blue→cyan及interaction换ID反例绿含保存冷开 | 局部不支持保源并诊断 |
@@ -86,12 +86,12 @@ B0 main=`afc65c9e4d713a9d362768f34e017789fad265ae`；用户已有 archive/开发
 | A07 | 去重复validate/投影复制，实际candidate校验保留；局部/live Flow事实复用 | 不声称全链parse一次/性能幅度 |
 | A08 | 非业务有序queue，真实pending/failure可见，Journal仍durable；受控真实Engine/Stop绿 | 不量化生产磁盘延迟 |
 | A09 | 公共V10验证、历史consumer边界、当前生成制品已提交；validator绿 | 全仓旧V9红债未清零 |
-| S01 | --mcp-connect/随包PowerShell helper/ready，launcher按需准备 | 发行暂停，无安装版无Node实测 |
+| S01 | --mcp-connect/随包PowerShell helper/ready，launcher按需准备；后续 Windows dir 候选已生成，原 helper EOF/前导空白及首次 GUI 显示已窄修，已有 owner 的实际 attached/ready 回执绿 | 无 Node/WSL 新鲜完整候选消费另验，尚未记全链通过 |
 | S02 | 同profile同Host/Registry升格、detach不停宿主、单文档新lease；resident/A-B授权绿 | T04真实Main同PID后台→GUI/未打开viewport/普通退出整例60c 1绿 |
 | S03 | 冻结web范围→真实DOM事实→一次精确grant/consume | ec208f43原真实Engine/后台POST窗口1例绿 |
 | S04 | 同页接管/resume、失败还human控制、真实File owner上传字节；合同各2绿 | ec208f43真实WebContents一次POST/同页接管恢复绿 |
 | S05 | Office同公共owner，模型语义/软件OOXML/CAS；默认执行/review/rollback绿 | 非Office重写/全对象兼容 |
-| S06 | 授权数据桥、可用产物、artifact共同交付；坏辅助保CSV/全文日志/分页绿 | 无Podman/default Ubuntu，不安装；可控非真实后端 |
+| S06 | 授权数据桥、可用产物、artifact共同交付；坏辅助保CSV/全文日志/分页绿；后续工作候选默认随包 Pyodide，真实 CSV/NumPy/pandas/中文图及资源交付最小证据绿 | 不再要求 WSL/Podman；打包后消费另验，不声称完整系统 CPython 兼容 |
 | S07 | 附件/选集/公开教材同材料owner，PDF/DOCX/取消3及选集绿 | 不虚构页/扩写权，视觉理解另证 |
 | S08 | 当前HTML Source共享observe/act，发出后unknown查证、发出前不虚构unknown | ec208f43真实observe/html.click/Stop窗口1例绿，源文writable=[]/History0保留 |
 | S09 | 六格式同producer/File writer，PPTX公共入口复用converter→V10/真实保存回执；原create owner持久因果事实接已有lookup | 公开PPTX导入/hidden导出原绿复用；新增b54cf2e2两例绿，丢ACK冷查证/回执失败保文件。旧记录或create→record真正中断仍unknown、不重导 |
@@ -123,7 +123,7 @@ B0 main=`afc65c9e4d713a9d362768f34e017789fad265ae`；用户已有 archive/开发
 
 主包最终 R4 已直接核对产品6087a936 / 测试bf4fb7c1 / E实际merge b7d1fcc3的同次原stdout/exit0、原生.last-run passed、最终facts及真实嵌套截图，所追踪的当前真实阻断均关闭。38包及候选按上述范围交付并合入main，旧检查不因后续继续指令重跑。S09尾项按下节另记实际变更及最低证据，任务卡依工作协议退出active；保留源提交、原失败与最终证据。
 
-条件与明确差距继续保留：发行暂停下无本轮安装包实测；生产计算仍依赖WSL/Podman，教师免WSL替代尚未实施；OAuth真实生成/编辑已复验通过，但当前完整V10创作链未重新运行，实际执行模型/单次费用供应商未披露；历史native trap及全仓旧类型债未清零；PPTX缺创建事实仍保持unknown、不重导；简单改写1请求2工具/1History、零工具建议未满足，本次判断不因数量继续深改。详见下节；不将未测范围改写成通过。
+条件与明确差距继续保留：发行暂停，Windows dir 候选已生成，实际无 Node/WSL 入口验收正在收口；本工作候选默认计算已改为随包离线 Pyodide 并有最小运行证据。OAuth真实生成/编辑已复验通过，完整V10创作链仍按实际后续结果记录，实际执行模型/单次费用供应商未披露；历史native trap及全仓旧类型债未清零；PPTX缺创建事实仍保持unknown、不重导；简单改写1请求2工具/1History、零工具建议未满足，本次判断不因数量继续深改。详见下节；不将未测范围改写成通过。
 
 GPT OAuth 后续免费检查当时确认：真实产品 profile 的原 secureStorage/OAuth resolver 可用，沿正式 discover-models 服务两次HTTP200/live，原响应models:[]且parser读取正确；该步骤刷新/生成0。见[目录回执](evidence/oauth-directory-evidence.json)与[响应形状](evidence/oauth-directory-shape-evidence.json)。此目录不能清零历史图像能力；Root此前仅据当前角色为空/目录为空，将真实生成编辑泛称未验证，漏查9月23日原证据，已在下节纠正并完成10月7日真实复验。
 
@@ -143,6 +143,28 @@ GPT OAuth 后续免费检查当时确认：真实产品 profile 的原 secureSto
 
 **OAuth历史与本次结果：真实生成/参考编辑通过。**已直接核9月23日generation/edit-status与real-image-document/status、ui-status、real-image-chat-ui/reopen原记录；请求gpt-image-2曾成功生成、编辑并在当时V9正式应用/保存重开，另有透明背景成功。10月7日本次从main8cea17c6源码、当前默认profile、原secureStorage/resolveOAuthCredential和ImageGenerationService复验同账号：生成1次、参考编辑1次，HTTP均200、状态ready，刷新/文字/目录请求0；没有改角色、产品源码或重试。两张1254×1254真实PNG由Root实际查看：蓝色铃铛改橙色，轮廓、位置、白底保留，原图仍可读。[安全原回执](evidence/oauth-live-20261007/evidence.json)、[同次执行日志](evidence/oauth-live-20261007/run-reviewed-probe-main8cea17c6.log)、[生成图](evidence/oauth-live-20261007/generate.png)、[编辑图](evidence/oauth-live-20261007/edit.png)。实际执行者为guoling-direct-chatgpt-images，请求模型gpt-image-2，actualImageModels=null，billing metadata=subscription，单次费用unknown。不据此冒称本轮Main GUI/V10保存重开或完整创作链已运行；后续沿同job/资源复用，不重复生成。
 
-**教师免WSL计算建议：随包离线Pyodide/WASM，尚未实施。**Owner已卸载WSL，教师安装WSL不能作为生产前提。I直接核原ComputeJobService、公开compute.run、Main、附件隔离carrier与字体，未参与实施的R4独立设计审通过。建议在原compute owner替换执行carrier，复用sandbox隐藏窗口/module Worker；随包提供运行时、NumPy/pandas/Matplotlib及依赖与可供Agg使用的中文TTF/许可。授权输入进入虚拟只读FS，成果仅回原scratch→artifact.save/File writer；不开放hostfs、Provider Secret或任意网络，不新建调度/注册平台。保cwd=/job/output、/job/work同目录别名和原环境变量，保Stop、迟到结果、ready复用/中断unknown不重放。CSV/数值/常用绘图是目标范围，OS子进程与任意原生扩展不能声称完整CPython兼容。方案审不等于工程就绪；最低证据为一份中文CSV→均值90/80、总体85→中文PNG实际看/真实成果保存，结合输入/host/network边界，再补Stop/冷unknown最近层，不做全矩阵。[独立设计节](evidence/R4_REVIEW.md)。
+**教师免WSL计算：随包离线Pyodide/WASM 已实现并通过最小运行验证。**Owner已卸载WSL，教师安装WSL不能作为生产前提。I在原 ComputeJobService owner 接薄 backend 与 sandbox 隐藏窗口/module Worker，默认 Main 使用 Pyodide；既有作业、资源和正式 ArtifactDelivery/File writer 保持。随包资产为官方 Pyodide 314.0.7/CPython 3.14.2、NumPy 2.4.6、pandas 3.0.2、Matplotlib 3.10.8 及完整递归依赖，Noto Sans SC Regular OTF 与许可，共61文件39,491,221字节。运行不取 CDN、pip 或 WSL。授权输入进入只读 WORKERFS，成果字节仅交 Main 原 scratch→artifact.save；保 cwd=/job/output、/job/work 别名、GUOLING 环境变量、Stop、迟到结果、ready 复用及冷 pending unknown 不重放。OS子进程与任意未预装原生扩展不在该端承诺内，不声称完整系统 CPython 兼容。
+
+独立 T/E 原中文 CSV 主例 **1匹配/1通过/0跳过、exit0**，实际均值一班90、二班80、总体85；中文 Matplotlib PNG 600×360 已直接查看，真实 CSV/PNG 正式 written。实际输入改写被拒绝且原件不变，Worker 宿主 file/HTTP fetch 均 AbortError，测试服务器0请求，无 Node/preload；fresh Electron 对同 ready 作业 starts=0、不新建窗口或重算。原启动阶段 Stop/冷 pending unknown 最近层与真实 Python exit3 反例各按相关变化执行，不重复全部矩阵。原 file origin 泄露和 SystemExit:0 误判失败记录保留；最终仅 compute 私有 HTTPS origin 映射真实本地 entry/assets/vendor，以 realpath 闭包保资源边界，使用真实 SystemExit.code，不猜错误字符串。所有最终相关构建 exit0，独立 R4 的实际源码/原结果复审已关闭这两项真实缺口。[安全证据](evidence/teacher-compute-live-20261007/)、[独立复审](evidence/teacher-compute-review.md)。
+
+这些新增源码仍是 `162aee26` 上的工作候选：当前环境 `.git` 只读，标准 worktree/clone 已被拒绝，采用明确单 writer 文件域，不伪称已提交或合入。Windows dir 候选已构建；首次运行后台 listener 实际存在，但随包 helper 等待 stdout EOF 未完成回执交接，正在原入口窄修。打包后计算/GUI/自然退出及代表性 V10 全链仍须其实际结果，不能以开发载体计算通过代替。没有新增软件任务累计时限、模型费用、调度平台或全局权限。
 
 **发行准备判断：条件通过后可以进入准备，当前未发行。**先完成免WSL实现及对应最小验证，再做一份代表性V10创作链：材料→实际可编辑作品→所需计算/已配置图片→核心互动→保存冷开→关键导出。相关成功证据可复用；实际候选包仍须无源码/Node/WSL消费新增计算运行时及MCP bootstrap，不能由开发树成功替代。不要求全仓历史V9债或全模型/全组件矩阵清零；真实当前可用性阻断须修。准备/本地候选验收不等于对外发行，发布仍须Owner解除暂停。
+
+## 后续代表性创作与 Windows 候选收尾
+
+本次沿原 S01/S06/K03/K05/K07/TE08 与独立 T06/T10 收口，没有重做方案或增加模型矩阵。实际新缺口在正确 owner 上修复：随包 PowerShell helper 消费首个完整非空 JSON 回执而不等待驻留管道 EOF，仍要求真实 connector exit0/status=ready；GUI exe detached 启动移除隐藏首次窗口的 `windowsHide` 参数；导出草稿准备不再把缺少 GUI projection 当作 Main 正式文档不存在，已有投影草稿 drain 与 Main 身份/版本校验保留。[独立报告](evidence/teacher-compute-review.md)记录原失败、实际窄修和每项已到达的行为。
+
+代表性可控 provider 完整主例 **1/1 passed，14.6秒，0模型请求/0新增生图**，见[稳定原证据](evidence/teacher-creation-controlled-20261007/)。从实际 Main Engine 默认工具读取资料和 CSV，真实离线计算一班90/二班80/总体85，写出中文图与 CSV，再创建 V10 原生可编辑表格/图表、说明/链接/公式、图片与答案互动；复用10月7日已真实生成的铃铛。人工经 Gateway 调整表格列宽260/160、字号20、opacity0.9，完整实例保留。公开保存 revision8/dirty=false，HTML/DOCX written；canonical Undo/Redo 递增到9/10且业务内容恢复，再保存并由新 DocumentHost 冷读工程，revision10/dirty=false。此处不冒称全 GUI Undo/Redo 或完整新 Electron 冷启动。
+
+同例消费真实公开导出的 HTML：独立可见、sandbox、无 Node/preload 的内容浏览器执行真实点击，答案由隐藏变为可见，收到 trusted click/toggle，图片解码和作者工程/History/dirty 保全均通过。Root与独立 reviewer 已实际查看中文计算图及展开答案截图；DOCX 含原生表格、公式与媒体，并保留程序初态静态输出的真实诊断，源码/数据在工程保留。测试曾错误期待 Undo/Redo 版本回退、使用陈旧 Player 制品、在工作台 session 增设非产品消费窗口；原失败全部保留，最终观测只纠正合同/载体，原业务、真实点击及保全断言均到达，未以诊断 MiniProbe 代替通过。
+
+## 10月7日核心体验转向与当前切片
+
+本节承接上文当时的进行状态。Owner 随后要求先只读定位并讨论核心编辑体验，相关产品实施和验证支线已停止；当前窗口仅获准完成开发入口文档瘦身，不运行产品、测试、构建或创作。下一窗口收到[执行提示词](CORE_EXPERIENCE_EXECUTION_PROMPT.md)后按该指令恢复实施；本窗口的暂停不构成对下一窗口的新禁令。发行继续暂停。
+
+真实 V4.1 单次创作请求 `deepseek-flash`，实际返回 `deepseek-v4-1-flash-260910`，原任务102次请求后为 partial；已保存并导出原作品 rev15，计算 CSV、中文图、原生可编辑表图及 DOCX 内容已有实际成果。原[事实与摘要](evidence/teacher-creation-live-20261007/)完整保留，结束循环的候选修复已有聚焦证据，但不能改写原供应商运行结果为 completed。后续零付费复用原作品续验到达冷读与导出消费，仍在真实 Player 点击原生 section 时失败：正式数据保有 collapsedByDefault 与六个 childIds，运行实现缺少对应收展。该问题已并入[核心体验问题](CORE_EXPERIENCE_ISSUES.md)，尚未实施；原失败 HTML 保留，可控主例的独立答案互动通过不替代它。直接消费缺口见[独立复审末节](evidence/teacher-compute-review.md)。
+
+Windows dir 默认入口已实际连接、执行随包计算并交付三项 written 资源。随后的 GUI 工作区续接问题已有窄候选与独立三例；完整 GUI 延续及退出仍缺完成证据，完整安装消费未通过。私有端口、隐藏启动等续验支线已停止，不再表述为“正在续验”；各局部证据及限制见[复审记录](evidence/teacher-compute-review.md)。这些限制不清零已证免 WSL 计算、OAuth 生成/参考编辑及可控全链14.6秒结果，也不把它们扩成完整打包验收。
+
+新增源码仍是 `162aee26` 上的未提交候选，Git 元数据只读；原38包/20候选及 S09 已合入的事实保留。核心文件关闭/保存/History、普通输入与插入/属性、公式、HTML 轻编辑、三表面视口/控制台、整窗放弃与恢复问题尚未修复。完整三路真实首产出质量/耗时比较、Owner 接受、全仓旧类型/测试债及历史 native trap 根因均未宣称完成。新窗口按实际核心旅程推进，不恢复旧全矩阵或把历史条件改绿。

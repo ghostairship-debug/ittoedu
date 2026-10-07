@@ -1,5 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import path from 'node:path'
+import type { ComputeBackendRequest as BackendRequest, ComputeProcess, ComputeProcessResult } from './ComputeBackend'
+export type { ComputeProcess, ComputeProcessResult } from './ComputeBackend'
 
 /** Linux amd64 Python 3.12.14 slim, pinned to the platform manifest and local
  * image identity observed on 2026-09-29. A tag is never an execution identity.
@@ -7,17 +9,6 @@ import path from 'node:path'
 export const PINNED_PYTHON_IMAGE_SOURCE = 'docker.io/library/python@sha256:f77ac9e44ae96ef2c90b8053ea08c31f8be030f824196b0ae4db6d462c84e51f'
 export const PINNED_PYTHON_IMAGE_ID = 'sha256:9e87977b867847e186d066f531ef783b006d582a985c341c269446088d90f2c4'
 
-export interface ComputeProcessResult {
-  exitCode: number | null
-  stdout: string
-  stderr: string
-  truncated: boolean
-  cancelled: boolean
-}
-export interface ComputeProcess {
-  done: Promise<ComputeProcessResult>
-  cancel(): Promise<boolean>
-}
 export interface ComputeBackendRequest {
   /** Host-created directory containing input/ and output/. */
   directory: string
@@ -55,6 +46,7 @@ function observeProcess(child: ChildProcessWithoutNullStreams, timeoutMs?: numbe
  * no network, and a read-only root filesystem. Podman owns descendant cleanup.
  */
 export class PodmanComputeBackend {
+  readonly kind = 'podman' as const
   constructor(private readonly options: { distro: string; image: string; wslExecutable?: string }) {
     if (!/^[A-Za-z0-9._-]{1,64}$/.test(options.distro)) throw new Error('无效的 WSL 后端名称')
     if (!/^sha256:[a-f0-9]{64}$/.test(options.image)) throw new Error('计算镜像必须固定到本地 SHA-256 身份')
@@ -114,14 +106,16 @@ export class PodmanComputeBackend {
     try { return (await this.short(['podman', 'stop', '--time', '1', name], 10_000)).code === 0 }
     catch { return false }
   }
-  async start(request: ComputeBackendRequest): Promise<ComputeProcess> {
+  inspectExecution(name: string) { return this.inspectContainer(name) }
+  stopExecution(name: string) { return this.stopContainer(name) }
+  async start(request: ComputeBackendRequest | BackendRequest): Promise<ComputeProcess> {
+    const name = 'executionId' in request ? request.executionId : request.containerName
     if (!safeArg(request.program) || !request.program || request.argv.some(arg => !safeArg(arg))
-      || !validContainerName(request.containerName))
+      || !validContainerName(name))
       throw new Error('受限执行参数无效')
     const available = await this.availability()
     if (!available.available) throw new Error(available.reason ?? '受限执行后端不可用')
     const root = await this.linuxPath(request.directory)
-    const name = request.containerName
     const args = ['podman', 'run', '--rm', '--pull=never', '--name', name,
       '--network', 'none', '--read-only', '--pids-limit', '-1', '--stop-timeout', '1',
       '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '65534:65534',

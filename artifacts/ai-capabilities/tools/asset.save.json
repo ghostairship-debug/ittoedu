@@ -1,5 +1,5 @@
 {
-  "description": "仅在用户要求时调用：把 project.list/read 返回的对象路径所对应的实例、子对象、源码依赖与素材保存到我的资产库。可附说明、学科、学段与标签，之后用 asset.search 检索及 asset.use 插入。",
+  "description": "仅在用户要求时调用：把任务开始时选中的全部对象、子对象、源码依赖与素材一起保存到我的资产库。软件维护选区和身份，无需列举对象 ID；省略 path 使用任务绑定的多选范围，指定 project.list/read 对象路径则只提炼该对象。可附 title、说明、学科、学段与标签；之后用 asset.search 检索及 asset.use 插入。",
   "inputSchema": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "additionalProperties": false,
@@ -35,11 +35,12 @@
           "type": "string"
         },
         "type": "array"
+      },
+      "title": {
+        "minLength": 1,
+        "type": "string"
       }
     },
-    "required": [
-      "path"
-    ],
     "type": "object"
   },
   "invocation": "静态目录只说明已登记接口；当前运行是否可调用、文档范围、写权限、短句柄和服务配置，以宿主本轮发现与实际回执为准。",

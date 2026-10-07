@@ -30,6 +30,9 @@ function optionalObservationFailure(tool: ExecutionToolRecord): boolean {
   return tool.result?.kind === 'error' && ['observation-failed', 'service-unavailable', 'html-action-failed'].includes(tool.result.code)
 }
 const failedTool = (tool: ExecutionToolRecord) => !!tool.observationFailure || toolFailed(tool.call.name, tool.result)
+const unknownToolOutcome = (tool: ExecutionToolRecord) => tool.observationFailure?.outcome === 'unknown'
+  || serviceToolOutcome(tool.call.name, tool.result)?.status === 'unknown'
+  || tool.result?.kind === 'error' && /outcome-unknown/.test(tool.result.code)
 
 /** Main's current settlement view; never changes or replaces the original receipt. */
 export type SettledExecutionTool = ExecutionToolRecord & {
@@ -221,8 +224,7 @@ function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord
     const job = jobOf(tool)
     if (tool.call.name.startsWith('build.') && job && (lastImportByJob.get(job) ?? -1) > index) return false
     // An unknown external effect cannot be repaired by issuing a second call ID.
-    if (tool.observationFailure?.outcome === 'unknown' || serviceToolOutcome(tool.call.name, tool.result)?.status === 'unknown'
-      || tool.result?.kind === 'error' && /outcome-unknown/.test(tool.result.code)) return true
+    if (unknownToolOutcome(tool)) return true
     if (record.tools.slice(index + 1).some(later => sameObservedTarget(tool, later))) return false
     if (record.tools.slice(index + 1).some(later => sameReadSource(tool, later))) return false
     if (record.tools.slice(index + 1).some(later => correctedRejectedContent(tool, later))) return false
@@ -307,6 +309,74 @@ export function hasUnresolvedToolFailure(record: ExecutionRunRecord): boolean {
   return unresolvedToolFailures(record).length > 0 || newFileDeliveryFacts(record).some(unconfirmedSave)
 }
 
+export interface ExecutionCompletionIssue {
+  callId?: string; name: string; status: 'pending' | 'unknown' | 'failed' | 'unverified' | 'unsaved'; message: string
+  requestId?: string; receiptCallId?: string
+  documentId?: string
+  job?: string; kind?: 'image' | 'compute' | 'delegation'
+}
+
+function completionJobObservation(tool: ExecutionToolRecord, pending: NonNullable<ReturnType<typeof pendingJob>>) {
+  if (tool.state !== 'returned' || tool.result?.kind !== 'read') return null
+  const data = tool.result.data as { job?: unknown; jobId?: unknown; kind?: unknown; status?: unknown; terminal?: unknown;
+    failure?: { outcome?: unknown }; snapshot?: { reason?: unknown; failure?: { outcome?: unknown; message?: unknown } } } | null
+  if (!data || (data.job ?? data.jobId) !== pending.id) return null
+  return (tool.call.name === 'job.wait' || tool.call.name === 'job.status') && data.kind === pending.kind
+    || tool.call.name === 'image.status' && pending.kind === 'image' ? data : null
+}
+const knownJobFailure = (tool: ExecutionToolRecord, data: NonNullable<ReturnType<typeof completionJobObservation>>) =>
+  (tool.call.name === 'image.status' || data.terminal === true) && ['failed', 'cancelled', 'stopped', 'unapplied'].includes(String(data.status))
+    && data.failure?.outcome !== 'unknown' && data.snapshot?.failure?.outcome !== 'unknown'
+
+/** Ending the loop is distinct from proving complete delivery. These are derived
+ * from the original receipts; a terminal failed job never becomes a successful one. */
+export function executionCompletionIssues(record: ExecutionRunRecord): ExecutionCompletionIssue[] {
+  const issues = unresolvedToolFailures(record).map((tool): ExecutionCompletionIssue => {
+    let receipt = tool
+    let status: ExecutionCompletionIssue['status'] = unknownToolOutcome(tool) ? 'unknown'
+      : tool.state !== 'returned' ? 'pending' : tool.observationFailure ? 'unverified' : 'failed'
+    let message = tool.observationFailure?.message ?? (tool.result?.kind === 'error' ? tool.result.message
+      : serviceToolOutcome(tool.call.name, tool.result)?.message ?? '工具操作尚未确认完成')
+    const pending = pendingJob(tool)
+    if (pending && status !== 'unknown') {
+      status = 'pending'
+      const observations = record.tools.slice(record.tools.indexOf(tool) + 1)
+      for (const later of observations.slice().reverse()) {
+        const data = completionJobObservation(later, pending)
+        if (!data) continue
+        receipt = later
+        if (data.status === 'unknown' || data.failure?.outcome === 'unknown' || data.snapshot?.failure?.outcome === 'unknown') {
+          status = 'unknown'; message = '原作业结果未知；请查询原作业，不要重新提交'
+        } else if (knownJobFailure(later, data)) {
+          status = 'failed'
+          // Reading the same ended failure again is not a new failure that
+          // forces another model turn before it can choose partial termination.
+          receipt = observations.find(earlier => {
+            const observed = completionJobObservation(earlier, pending)
+            return observed && knownJobFailure(earlier, observed)
+          }) ?? later
+          message = typeof data.snapshot?.reason === 'string' ? data.snapshot.reason
+            : typeof data.snapshot?.failure?.message === 'string' ? data.snapshot.failure.message : `原作业已结束，状态为 ${data.status}`
+        }
+        break
+      }
+    }
+    return { callId: tool.callId, name: tool.call.name, status, message,
+      requestId: receipt.requestId, receiptCallId: receipt.callId, ...(pending ? { job: pending.id, kind: pending.kind } : {}) }
+  })
+  for (const fact of newFileDeliveryFacts(record).filter(unconfirmedSave)) {
+    const receipt = record.tools.slice().reverse().find(tool => {
+      const data = tool.result?.kind === 'read' ? tool.result.data as { documentResult?: Record<string, unknown> } | null : null
+      const mutation = operationFact(tool.call.name, tool.result) ?? (fileMutations.has(tool.call.name) ? data?.documentResult : null)
+      return mutation?.status === 'applied' && mutation.documentId === fact.documentId && mutation.revision === fact.revision
+    })
+    issues.push({ name: 'project.save', status: 'unsaved', documentId: fact.documentId,
+      ...(receipt ? { callId: receipt.callId, receiptCallId: receipt.callId, requestId: receipt.requestId } : {}),
+      message: `${fact.label} 的文档版本 ${fact.revision} 尚未确认保存到目标文件` })
+  }
+  return issues
+}
+
 /** Only receipt-backed facts are summarized; scratch cleanup is not a new task failure. */
 export function runEndSummary(record: ExecutionRunRecord): string | undefined {
   const noteProblems = record.tools.filter(tool => tool.call.name === 'task.note').flatMap(tool => {
@@ -326,9 +396,7 @@ export function runEndSummary(record: ExecutionRunRecord): string | undefined {
   if (record.status === 'stopped') parts.push('任务已停止')
   else if (record.failure?.message) parts.push(record.failure.message)
   else if (record.status === 'partial') {
-    const latest = unresolvedToolFailures(record).at(-1)
-    const message = latest ? latest.observationFailure?.message ?? serviceToolOutcome(latest.call.name, latest.result)?.message
-      ?? (latest.result?.kind === 'error' ? latest.result.message : '存在未完成的工具操作') : null
+    const message = executionCompletionIssues(record).at(-1)?.message
     if (message) parts.push(message)
   }
   const directApplied = record.tools.filter(tool => tool.call.name !== 'build.import'
