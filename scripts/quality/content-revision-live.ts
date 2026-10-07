@@ -14,7 +14,8 @@ import { EditSessionService } from '../../src/main/workbench/execution/EditSessi
 import { OpenAIChatProvider } from '../../src/main/workbench/providers/OpenAIChatProvider'
 import type { ModelProvider, ModelSelection } from '../../src/shared/workbench/modelProvider'
 
-const route = { provider: 'teamorouter', baseURL: 'https://api.teamorouter.com/v1', model: 'deepseek-v4-flash', accountId: 'owner-authorized-test', accountBilling: 'unknown' }
+const route = { provider: 'teamorouter', baseURL: 'https://api.teamorouter.com/v1', model: 'deepseek-flash',
+  expectedFamily: 'V4.1', expectedFamilySource: 'Owner confirmation 2026-10-07', accountId: 'owner-authorized-test', accountBilling: 'unknown' }
 const output = path.resolve(process.argv.find(value => value.startsWith('--output='))?.slice('--output='.length)
   ?? `output/content-revision/live-${new Date().toISOString().replace(/[:.]/g, '-')}`)
 const selection: ModelSelection = { model: route.model, connection: { id: 'content-revision-teamorouter', revision: 1, provider: route.provider,
@@ -26,7 +27,7 @@ const selection: ModelSelection = { model: route.model, connection: { id: 'conte
 async function run() {
   if (!process.argv.includes('--run')) {
     console.log(JSON.stringify({ status: 'script-ready-no-provider-request', route, output,
-      command: 'npx tsx scripts/quality/content-revision-live.ts --run --output=output/content-revision/live-representative',
+      command: 'npx tsx scripts/quality/content-revision-live.ts --run',
       scope: 'one actual Engine rich-bound task with shared product files owner and actual catalog; no preloaded tools, no image generation' }, null, 2))
     return
   }

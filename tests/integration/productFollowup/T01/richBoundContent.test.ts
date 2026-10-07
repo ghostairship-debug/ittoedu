@@ -8,6 +8,7 @@ import { createBlankCourseProjectV10 } from '../../../../src/core/course/createC
 import { prepareExecutionContentOutput, readEditableTargetContent } from '../../../../src/core/tools/ToolTargets'
 import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
 import { createTextComponentData, createFormulaComponentData, type TextComponentData } from '../../../../src/components/text/data'
+import { documentTextLength } from '../../../../src/shared/document/content'
 import { ExecutionEngine } from '../../../../src/main/workbench/execution/ExecutionEngine'
 import { ExecutionRunStore } from '../../../../src/main/workbench/execution/ExecutionRunStore'
 import { ExecutionEventStore } from '../../../../src/main/workbench/execution/ExecutionEventStore'
@@ -82,6 +83,65 @@ it('a software-bound V10 rich selection preserves unselected links marks geometr
       actor: 'human', operationId: 'undo', mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
     expect(await host.internalAPI.read(initial.documentId)).toMatchObject({ model: { project: { instances: { text: { data: original } } } } })
   } finally { await fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }) }
+})
+
+it('offline replays the first actual live rich tool input through the formal writer save and cold reopen without losing formula identity', async () => {
+  const captured = JSON.parse(await fs.readFile(new URL('./fixtures/live-first-tool-rich.json', import.meta.url), 'utf8')) as {
+    evidenceLayer: string; call: { name: string; input: { content: string; format: 'html' } }
+  }
+  expect(captured.call.name).toBe('text.replace')
+  expect(captured.call.input.content).toContain('\\\\(x^2\\\\)')
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'followup-t01-captured-rich-'))
+  const host = new DocumentHostService(path.join(directory, 'documents'))
+  const runId = 'offline-captured-rich'
+  try {
+    const project = createBlankCourseProjectV10('原失败输入离线回放')
+    project.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
+    const original = createTextComponentData({ inlines: [
+      { type: 'text', text: '正方形面积', link: { href: 'https://example.org/area' }, style: { bold: true } },
+      { type: 'text', text: '：待按教师材料解释。' }, createFormulaComponentData('kept-area-formula', 'x^2').formula,
+    ] })
+    const bodyFrame = { width: 360, height: 120, transform: [1, 0, 0, 1, 41, 63] as [number, number, number, number, number, number] }
+    const literalCode = '\\\\(x^2\\\\)', ordinary = 'C:\\课程\\素材'
+    const guard = createTextComponentData({ inlines: [{ type: 'text', text: '旧样例：' }, { type: 'text', text: literalCode, code: true },
+      { type: 'text', text: '；' }, createFormulaComponentData('kept-fraction', '\\frac{1}{2}').formula, { type: 'text', text: `；${ordinary}` }] })
+    project.instances.body = { id: 'body', definitionId: TEXT_DEFINITION.id, data: original, frame: bodyFrame, style: { opacity: .9 } }
+    project.instances.guard = { id: 'guard', definitionId: TEXT_DEFINITION.id, data: guard }
+    project.instances.untouched = { id: 'untouched', definitionId: TEXT_DEFINITION.id, data: createTextComponentData('未选正文保持原样'),
+      frame: { width: 280, height: 90, transform: [1, 0, 0, 1, 83, 147] } }
+    project.surfaces = [{ id: 'flow', kind: 'flow', title: '讲义', childIds: ['body', 'guard', 'untouched'] }]
+    const initial = await host.internalAPI.create({ kind: 'course-v10', project, resources: { assets: {}, components: {} } }, 'captured.h5lesson')
+    const bodyTarget = { kind: 'course-instance' as const, surfaceId: 'flow', instanceId: 'body', dataPath: ['content'], from: 0, to: documentTextLength(original.content) }
+    const guardTarget = { ...bodyTarget, instanceId: 'guard', to: documentTextLength(guard.content) }
+    await host.tools.beginRun({ runId, actor: 'agent', documents: [{ documentId: initial.documentId, writable: [bodyTarget, guardTarget] }] })
+    const bodyHandle = await host.tools.issueTarget(runId, initial.documentId, bodyTarget)
+    // Captured canonical tool input is replayed unchanged. No ModelProvider is created or called.
+    expect(await host.tools.execute(runId, 'captured-live-body', { name: captured.call.name, input: { ...captured.call.input, target: bodyHandle } }))
+      .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+    const guardHandle = await host.tools.issueTarget(runId, initial.documentId, guardTarget)
+    expect(await host.tools.execute(runId, 'ordinary-html-guard', { name: 'text.replace', input: { target: guardHandle, format: 'html',
+      content: `规范输入：<code>${literalCode}</code>；\\(\\frac{1}{2}\\)；${ordinary}` } }))
+      .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+    const current = await host.internalAPI.read(initial.documentId)
+    if (current.model.kind !== 'course-v10') throw new Error('V10 required')
+    const body = current.model.project.instances.body
+    const inlines = (body.data as TextComponentData).content.inlines
+    expect(inlines.find(value => value.type === 'math')).toEqual(original.content.inlines[2])
+    expect(inlines).toContainEqual(original.content.inlines[0])
+    expect(inlines.some(value => value.type === 'text' && value.text.includes('3') && value.text.includes('9'))).toBe(true)
+    const guarded = (current.model.project.instances.guard.data as TextComponentData).content.inlines
+    expect(guarded.filter(value => value.type === 'math')).toEqual([guard.content.inlines[3]])
+    expect(guarded).toContainEqual({ type: 'text', text: literalCode, code: true })
+    expect(guarded.some(value => value.type === 'text' && value.text.includes(ordinary))).toBe(true)
+    expect(body.frame).toEqual(bodyFrame)
+    expect(body.style).toEqual(project.instances.body.style)
+    expect(current.model.project.instances.untouched).toEqual(project.instances.untouched)
+    expect(current.model.project.surfaces).toEqual(project.surfaces)
+    const filename = path.join(directory, 'saved.h5lesson')
+    await host.internalAPI.save(initial.documentId, filename)
+    const reopened = await new DocumentHostService(path.join(directory, 'cold-documents')).internalAPI.open(filename)
+    expect(reopened.model).toEqual(current.model)
+  } finally { await host.tools.stop(runId); await fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }) }
 })
 
 it('roundtrips the actual initial model message as rich content without escaping LaTeX or changing its formula identity', async () => {

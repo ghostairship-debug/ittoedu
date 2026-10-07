@@ -1,0 +1,17 @@
+{
+  "evidenceLayer": "offline replay of original failed live tool input; zero new provider requests",
+  "source": {
+    "runId": "af3490a2-1ff5-4013-8cd9-d967b7be76a0",
+    "provider": "teamorouter",
+    "requestedModel": "deepseek-v4-flash",
+    "actualModel": "deepseek-v4-flash-ga-260731",
+    "providerCallId": "call_bhn13e6oh5022jhrzn35iish"
+  },
+  "call": {
+    "name": "text.replace",
+    "input": {
+      "content": "<a href=\"https://example.org/area\"><strong>正方形面积</strong></a>：边长3厘米，面积就是9平方厘米，因为9恰好是3的平方。\\\\(x^2\\\\)",
+      "format": "html"
+    }
+  }
+}
