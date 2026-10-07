@@ -221,7 +221,7 @@ export class ExecutionChangeReviewService {
           await fs.copyFile(filename, preserved, 1)
           const handle = await fs.open(preserved, 'r+')
           try { await handle.sync() } finally { await handle.close() }
-          if (hash(await fs.readFile(preserved)) !== capture.after!.version ||
+          if ((await this.currentFile({ ...capture, path: preserved })).version !== capture.after!.version ||
             !this.matchesAfter(await this.currentFile(capture), capture.after!) || this.live(filename)) {
             await fs.rm(preserved, { force: true })
             return { entryId, status: 'conflict', message: '新建文件在回收前再次改变，未移走' }

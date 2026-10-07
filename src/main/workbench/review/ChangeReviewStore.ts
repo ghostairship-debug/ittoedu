@@ -15,7 +15,8 @@ export async function readChangeReviewBinaryFile(filename: string) {
     const unchanged = (a: typeof before, b: typeof before) => a.dev === b.dev && a.ino === b.ino
       && a.size === b.size && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs && a.mode === b.mode
     if (!unchanged(before, after) || !unchanged(after, current) || current.isSymbolicLink()) throw new Error('读取期间文件已改变，请重新读取')
-    return { bytes, version: `sha256:${createHash('sha256').update(bytes).digest('hex')}`, mode: Number(before.mode),
+    // FileArtifactService binds binary files with documentJournal's raw digest token.
+    return { bytes, version: createHash('sha256').update(bytes).digest('hex'), mode: Number(before.mode),
       ...(before.ino ? { identity: `${before.dev}:${before.ino}` } : {}) }
   } finally { await file.close() }
 }
