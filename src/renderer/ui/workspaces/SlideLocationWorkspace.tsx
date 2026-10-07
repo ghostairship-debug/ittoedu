@@ -420,11 +420,14 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       if (!snapshot.contentEdit && !snapshot.drawTool) {
         const selectedHandle = event.target instanceof Element && event.target.closest('[data-internal-selection]')
         const at = surfacePoint(event.clientX, event.clientY)
-        const hit = selectedHandle ? selectedInternal : [...spotTargets].reverse().find(value => value.spot.geometry && frameContainsPoint(value.frame, at))
-        if (hit?.spot.geometry && hit.spot.authorKey && hit.spot.binding) {
+        const hit = selectedHandle ? selectedInternal : [...spotTargets].reverse().find(value => frameContainsPoint(value.frame, at))
+        if (hit) {
           stop(event); suppressSpotClick.current = false
           if (componentIsLocked(project, hit.spot.instanceId)) return
-          setSelectedSpotKey(spotKey(hit.spot)); ports.select([hit.spot.instanceId]); event.currentTarget.setPointerCapture(event.pointerId)
+          setSelectedSpotKey(spotKey(hit.spot)); ports.select([hit.spot.instanceId])
+          // A rich text run can be editable without an independently resizable parent box.
+          if (!hit.spot.geometry || !hit.spot.authorKey || !hit.spot.binding) return
+          event.currentTarget.setPointerCapture(event.pointerId)
           const handle = selectedHandle && event.target instanceof Element ? event.target.closest('[data-handle]')?.getAttribute('data-handle') as FreeResizeHandle | 'rotate' | null : null
           const instanceToSurface = frameToSpaceMatrix(hit.target.frame, hit.target.parentToSurface), captured = ports.capture()
           internalGesture.current = { pointerId: event.pointerId, start: { x: event.clientX, y: event.clientY }, moved: false, captured, instanceToSurface, preview: ports.previewAuthorSpot,

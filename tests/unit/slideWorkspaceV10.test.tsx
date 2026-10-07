@@ -55,14 +55,14 @@ async function host(project = fixture()) {
   const bridge = new CourseV10DocumentBridge(); await bridge.connect(api)
   return { driver, first, bridge }
 }
-it('anchors the quick bar to the clicked internal author target so ordinary double click stays reachable', async () => {
+it.each([true, false])('anchors the quick bar to the clicked internal author target so ordinary double click stays reachable (independent geometry: %s)', async hasGeometry => {
   const project = fixture()
   project.instances.text.frame = { width: 900, height: 600, transform: [1, 0, 0, 1, 200, 140] }
   const h = await host(project), kernel = createEditorStoreKernel({ bridge: h.bridge, commit() {} })
   const frame = { width: 48.24, height: 24.09, transform: [1, 0, 0, 1, 153.82, 53.99] as [number, number, number, number, number, number] }
   const spot: ComponentAuthorSpot = { id: 'hello', instanceId: 'text', mountGeneration: 1, authorKey: 'hello', kind: 'text', initialValue: 'Hello',
     binding: { kind: 'dom', path: [{ tag: 'p', index: 0 }], baseline: 'Hello' }, localBounds: frame,
-    geometry: { frame, parentToInstance: [1, 0, 0, 1, 0, 0], author: {}, boxInsets: { width: 0, height: 0 } } }
+    geometry: hasGeometry ? { frame, parentToInstance: [1, 0, 0, 1, 0, 0], author: {}, boxInsets: { width: 0, height: 0 } } : undefined }
   const open = vi.fn(), capture = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'setPointerCapture'), release = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'releasePointerCapture')
   vi.stubGlobal('PointerEvent', class extends MouseEvent { pointerId: number; constructor(type: string, init: MouseEventInit & { pointerId?: number } = {}) { super(type, init); this.pointerId = init.pointerId ?? 1 } })
   vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
@@ -82,6 +82,7 @@ it('anchors the quick bar to the clicked internal author target so ordinary doub
     render(<Harness/>); const workspace = screen.getByRole('main', { name: '画布' }), x = 398, y = 246
     fireEvent.pointerDown(workspace, { pointerId: 8, button: 0, clientX: x, clientY: y }); fireEvent.pointerUp(workspace, { pointerId: 8, button: 0, clientX: x, clientY: y })
     const anchor = selectionProbe.bounds!('text')!
+    expect(Boolean(document.querySelector('[data-internal-selection]'))).toBe(hasGeometry)
     expect(anchor.left).toBeCloseTo(373.82); expect(anchor.top).toBeCloseTo(233.99); expect(anchor.width).toBeCloseTo(48.24); expect(anchor.height).toBeCloseTo(24.09)
     const bar = placeQuickBar(anchor, { left: 235, top: 212.53, right: 980, bottom: 680 }, { width: 201.52, height: 34 }, 8, 34)
     expect(bar.placement).toBe('below'); expect(bar.top).toBeGreaterThan(anchor.top + anchor.height)
