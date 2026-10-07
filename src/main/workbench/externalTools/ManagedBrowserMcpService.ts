@@ -212,7 +212,7 @@ export class ManagedBrowserMcpService {
     if (!tool || !managedBrowserWriteTools.includes(tool as typeof managedBrowserWriteTools[number])) return false
     const args = { ...input.arguments }
     const snapshotId = input.snapshotId ?? (typeof args.snapshotId === 'string' ? args.snapshotId : undefined)
-      ?? (tool === 'browser_file_upload' ? run.fileChooserSnapshotId ?? run.snapshotId : run.snapshotId)
+      ?? (run.snapshotId ?? (tool === 'browser_file_upload' ? run.fileChooserSnapshotId : undefined))
     delete args.snapshotId
     if (!snapshotId || !this.validateArgs(tool, args)) return false
     if (snapshotId !== run.snapshotId && (tool !== 'browser_file_upload' || snapshotId !== run.fileChooserSnapshotId)) return false
@@ -345,7 +345,7 @@ export class ManagedBrowserMcpService {
       || Array.isArray(input.arguments)) return Promise.resolve(reject('浏览器操作身份或参数无效'))
     const args = { ...input.arguments }
     const snapshotId = input.snapshotId ?? (typeof args.snapshotId === 'string' ? args.snapshotId : undefined)
-      ?? (remoteName(input.name) === 'browser_file_upload' ? run.fileChooserSnapshotId ?? run.snapshotId : run.snapshotId)
+      ?? (run.snapshotId ?? (remoteName(input.name) === 'browser_file_upload' ? run.fileChooserSnapshotId : undefined))
     delete args.snapshotId
     const normalized = { ...input, arguments: args, snapshotId }
     const digest = createHash('sha256').update(JSON.stringify([input.name, args, snapshotId])).digest('hex')
