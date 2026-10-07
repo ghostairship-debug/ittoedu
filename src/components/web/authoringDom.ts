@@ -44,6 +44,14 @@ export function createDomAuthoring(root: HTMLElement, options: {
     return nodes
   }
   const ordered = (scope: ComponentAuthorScope) => JSON.stringify(Object.entries(scope).sort(([a], [b]) => a.localeCompare(b)))
+  const newKey = () => {
+    if (typeof win.crypto.randomUUID === 'function') return `dom-${win.crypto.randomUUID()}`
+    // Saved file/opaque frames can expose getRandomValues without the secure-
+    // context randomUUID convenience method. Keys remain local software data.
+    const bytes = win.crypto.getRandomValues(new Uint8Array(16))
+    bytes[6] = (bytes[6]! & 15) | 64; bytes[8] = (bytes[8]! & 63) | 128
+    return `dom-${[...bytes].map(value => value.toString(16).padStart(2, '0')).join('')}`
+  }
 
   // React keys and explicit data IDs identify repeated program items. Read the
   // current committed tree, never mutate its fibers or treat hook state as data.
@@ -281,7 +289,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
     }
     const binding: ComponentAuthorBinding = { kind: 'dom', path: pathFor(element), baseline: authorValueOf(node),
       ...(node.nodeType === 3 ? { textIndex: [...element.childNodes].filter(child => child.nodeType === 3).indexOf(node) } : {}) }
-    const observation: DomAuthorObservation = { node, authorKey: `dom-${win.crypto.randomUUID()}`,
+    const observation: DomAuthorObservation = { node, authorKey: newKey(),
       record: { kind: node.nodeType === 3 ? 'text' : 'image', binding, ...(Object.keys(scope).length ? { scope } : {}), overrides: {} },
       initialValue: authorValueOf(node), bindingStatus: 'bound' }
     if (resolve(observation.authorKey, observation.record).node !== node) observation.bindingStatus = 'unresolved'
