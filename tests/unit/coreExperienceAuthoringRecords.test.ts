@@ -43,6 +43,7 @@ it('merges a delayed text edit with newer geometry and another internal object b
   const rebound = structuredClone(project)
   ;(rebound.instances.web.data as { authoringRecords: Record<string, { scope: Record<string, string> }> }).authoringRecords['local-a'].scope = { 'item.id': 'another-item' }
   expect(() => applyComponentOperation(rebound, nextText)).toThrow('目标内容或归属已变化')
+  expect(() => prepareWebAuthoringRecordEdits(rebound, { ...capture, initialValue: 'AI revision' }, { text: 'Old object reply' })).toThrow('对象绑定已变化')
 })
 it('carries the same local record through HTML reports and accepts a single source gesture batch', () => {
   const record = { kind: 'text', scope: spot.scope, binding: spot.binding, overrides: { text: 'Edited', geometry: { translateX: 35 } } }

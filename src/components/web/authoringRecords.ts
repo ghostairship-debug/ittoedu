@@ -2,6 +2,7 @@ import type { ComponentAuthorRecord, ComponentAuthorSpotInput } from '../../shar
 import type { ComponentEdit } from '../../shared/contracts/component-platform/operations'
 import type { CourseProjectV10, JsonValue } from '../../shared/contracts/component-platform/project'
 import { webAuthoringRecordSchema, webAuthoringRecordsSchema } from './data'
+import { equalComponentValue } from '../../core/drivers/courseV10Operations'
 
 /** Compile an observed local object into the existing data writer; no runtime mount state is persisted. */
 export function prepareWebAuthoringRecordEdits(project: CourseProjectV10,
@@ -12,6 +13,10 @@ export function prepareWebAuthoringRecordEdits(project: CourseProjectV10,
     throw new Error('此处对象尚未唯一绑定，修改内容已保留')
   const records = webAuthoringRecordsSchema.parse(instance.data.authoringRecords ?? {})
   const previous = records[spot.authorKey]
+  // Re-preparation reads the current project; CAS alone cannot prove that a reused local key is still this object.
+  if (previous && (previous.kind !== spot.kind || !equalComponentValue(previous.scope ?? {}, spot.scope ?? {})
+    || !equalComponentValue(previous.binding, spot.binding)))
+    throw new Error('此处对象绑定已变化，修改内容已保留，请重新选择')
   const property = spot.kind === 'text' ? 'text' : 'src'
   // Only a submitted content field conflicts. Geometry and other local records can evolve independently.
   if (Object.hasOwn(patch, property) && previous
