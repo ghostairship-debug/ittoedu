@@ -26,6 +26,14 @@ export const taskNoteTool: ModelToolDefinition = {
   inputSchema: z.toJSONSchema(taskNoteInputSchema) as ModelToolDefinition['inputSchema'],
 }
 
+export const taskFinishInputSchema = z.object({}).strict()
+/** Engine run control; it does not register a document operation or change a grant. */
+export const taskFinishTool: ModelToolDefinition = {
+  name: 'task.finish',
+  description: '完成本次任务。只有用户要求的工作均已完成且没有后续操作时调用；可以在同一响应中先给出写入工具，再把 task.finish({}) 放在最后，软件按顺序核实实际回执后结束，不需要再请求一轮总结。写入失败、结果未知或作业仍在运行时不会结束，继续在本任务修正或读取结果。此工具不修改正文、不保存文件，也不能将未提交内容声明为已应用。',
+  inputSchema: z.toJSONSchema(taskFinishInputSchema) as ModelToolDefinition['inputSchema'],
+}
+
 /** Host-only initialization; long instructions are explicitly abbreviated in this advisory projection. */
 export function initialWorkingNote(input: Pick<ExecutionStart, 'instruction'>, userConstraints: readonly string[] = []): WorkingNote {
   const instruction = input.instruction.trim()

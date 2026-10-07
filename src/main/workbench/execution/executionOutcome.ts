@@ -186,7 +186,7 @@ function unresolvedToolFailures(record: ExecutionRunRecord): ExecutionToolRecord
   }
   return record.tools.filter((tool, index) => {
     // An unanswered or malformed question changed nothing; it is not an unfinished document operation.
-    if (tool.call.name === USER_QUESTION_TOOL || tool.call.name === 'task.note') return false
+    if (tool.call.name === USER_QUESTION_TOOL || tool.call.name === 'task.note' || tool.call.name === 'task.finish') return false
     if (tool.state !== 'returned') return true
     const saved = saveFact(tool.call.name, tool.result)
     const wrongProjectSave = tool.call.name === 'project.save' && saved
