@@ -253,7 +253,7 @@ export function ChartProperties({
   // embeds the session revision, and every chart command bumps it; resetting
   // on revision would wipe an in-progress draft after unrelated style commits.
   useEffect(() => {
-    if (dirtyRef.current && targetRef.current !== bindingKey) return
+    if (dirtyRef.current) return
     dirtyRef.current = false
     setDirty(false)
     setApplyError(null)
