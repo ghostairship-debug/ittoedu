@@ -23,7 +23,7 @@ export function createDomAuthoring(root: HTMLElement, options: {
 }) {
   type Target = Text | HTMLImageElement
   type Path = ComponentAuthorBinding['path']
-  type Property = { original: string | null; applied: string | null; priority?: string }
+  type Property = { original: string | null; applied: string | null; priority?: string; computed?: string }
   type Applied = { node: Target; content?: Property; attributes: Map<Element, Map<string, Property>>; styles: Map<string, Property> }
   const doc = root.ownerDocument, win = doc.defaultView!
   const descriptions = new WeakMap<Node, { scope: string; observation: DomAuthorObservation }>()
@@ -212,7 +212,8 @@ export function createDomAuthoring(root: HTMLElement, options: {
     const styles = { ...record.overrides.style }, geometry = record.overrides.geometry
     const baseStyle = (name: string) => {
       const previous = state.styles.get(name), current = element.style.getPropertyValue(name)
-      return previous && current === previous.applied ? previous.original ?? '' : current
+      return previous && current === previous.applied ? previous.computed ?? previous.original ?? ''
+        : win.getComputedStyle(element).getPropertyValue(name) || current
     }
     if (geometry) {
       const changesLinear = geometry.scaleX !== undefined || geometry.scaleY !== undefined || geometry.rotation !== undefined
@@ -229,10 +230,13 @@ export function createDomAuthoring(root: HTMLElement, options: {
         styles.translate = `calc(${base[0] === 'none' ? '0px' : base[0]} + ${dx}px) calc(${base[1] ?? '0px'} + ${dy}px)`
       }
       if (geometry.scaleX !== undefined || geometry.scaleY !== undefined) {
-        const base = (baseStyle('scale') || '1 1').split(/\s+/)
-        styles.scale = `calc(${base[0] === 'none' ? '1' : base[0]} * ${geometry.scaleX ?? 1}) calc(${base[1] ?? base[0]} * ${geometry.scaleY ?? geometry.scaleX ?? 1})`
+        const source = baseStyle('scale'), base = (!source || source === 'none' ? '1 1' : source).split(/\s+/)
+        styles.scale = `calc(${base[0]} * ${geometry.scaleX ?? 1}) calc(${base[1] ?? base[0]} * ${geometry.scaleY ?? geometry.scaleX ?? 1})`
       }
-      if (geometry.rotation !== undefined) styles.rotate = `calc(${baseStyle('rotate') || '0deg'} + ${geometry.rotation}deg)`
+      if (geometry.rotation !== undefined) {
+        const source = baseStyle('rotate')
+        styles.rotate = `calc(${!source || source === 'none' ? '0deg' : source} + ${geometry.rotation}deg)`
+      }
       if (geometry.width !== undefined) styles.width = `${geometry.width}px`
       if (geometry.height !== undefined) styles.height = `${geometry.height}px`
       if (record.kind === 'text' && (geometry.width !== undefined || geometry.height !== undefined)
@@ -249,10 +253,11 @@ export function createDomAuthoring(root: HTMLElement, options: {
       const current = element.style.getPropertyValue(name), previous = state.styles.get(name)
       const original = previous && current === previous.applied ? previous.original : current
       const priority = previous && current === previous.applied ? previous.priority : element.style.getPropertyPriority(name)
+      const computed = previous && current === previous.applied ? previous.computed : win.getComputedStyle(element).getPropertyValue(name)
       const declaration = doc.createElement('span').style
       declaration.setProperty(name, value)
       if (current !== declaration.getPropertyValue(name)) element.style.setProperty(name, value)
-      state.styles.set(name, { original, priority, applied: element.style.getPropertyValue(name) })
+      state.styles.set(name, { original, priority, computed, applied: element.style.getPropertyValue(name) })
     }
   }
   const refresh = () => {
@@ -364,8 +369,62 @@ export function createDomAuthoring(root: HTMLElement, options: {
       const toInstance: Matrix | undefined = documentRoot ? [1, 0, 0, 1, 0, 0] : rootBox && invert(rootBox.matrix)
       if (!inverseParent || !toInstance) return undefined
       const observation = describe(node)
+      // CSSOM has resolved the origin's percentages to pixels. Typed OM keeps
+      // their size dependence so a text-box resize can preserve the requested
+      // corner even when the source rotates about its default centre.
+      const style = win.getComputedStyle(element), sourceState = observation && active.get(observation.authorKey)
+      const sourceValue = (name: string) => {
+        const previous = sourceState?.styles.get(name)
+        return previous && element.style.getPropertyValue(name) === previous.applied
+          ? previous.computed ?? previous.original ?? '' : style.getPropertyValue(name)
+      }
+      type Numeric = { toSum(...units: string[]): { values: Iterable<{ unit: string; value: number }> } }
+      const numeric = (win as unknown as { CSSNumericValue: { parse(value: string): Numeric } }).CSSNumericValue
+      const length = (value: string | Numeric) => {
+        const terms = (typeof value === 'string' ? numeric.parse(value) : value).toSum('px', 'percent').values
+        let offset = 0, fraction = 0
+        for (const term of terms) {
+          if (term.unit === 'px') offset += term.value
+          else if (term.unit === 'percent') fraction += term.value / 100
+          else throw new Error('Unsupported source transform length')
+        }
+        return { offset, fraction }
+      }
+      const typed = element.computedStyleMap(), originValues = String(typed.get('transform-origin')).match(/calc\([^)]*\)|\S+/g) ?? []
+      const originX = length(originValues[0] ?? '50%'), originY = length(originValues[1] ?? '50%')
+      const sourceTransform = new win.DOMMatrix(style.transform === 'none' ? undefined : style.transform)
+      let transformWidth = { x: 0, y: 0 }, transformHeight = { x: 0, y: 0 }
+      let prefix: Matrix = [1, 0, 0, 1, 0, 0]
+      type TransformPart = { constructor: { name: string }; x: Numeric; y: Numeric; toMatrix(): DOMMatrix }
+      if (style.transform !== 'none') for (const part of typed.get('transform') as unknown as Iterable<TransformPart>) {
+        if (part.constructor.name === 'CSSTranslate') {
+          const x = length(part.x), y = length(part.y)
+          transformWidth.x += prefix[0] * x.fraction; transformWidth.y += prefix[1] * x.fraction
+          transformHeight.x += prefix[2] * y.fraction; transformHeight.y += prefix[3] * y.fraction
+          // Translation does not change the prefix linear map.
+        } else {
+          const matrix = part.toMatrix()
+          prefix = multiply(prefix, [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f])
+        }
+      }
+      const sourceScale = sourceValue('scale'), scale = sourceScale && sourceScale !== 'none' ? sourceScale.split(/\s+/).map(Number) : [1, 1]
+      const sourceRotate = sourceValue('rotate'), rotation = sourceRotate && sourceRotate !== 'none'
+        ? /^(?:z\s+)?(-?[\d.]+)(deg|rad|turn)$/.exec(sourceRotate) : undefined
+      if (sourceRotate && sourceRotate !== 'none' && !rotation || scale.some(value => !Number.isFinite(value)) || scale.length > 2) return undefined
+      const radians = rotation ? Number(rotation[1]) * (rotation[2] === 'deg' ? Math.PI / 180 : rotation[2] === 'turn' ? Math.PI * 2 : 1) : 0
+      const cosine = Math.cos(radians), sine = Math.sin(radians), sx = scale[0]!, sy = scale[1] ?? sx
+      const individual: Matrix = [cosine * sx, sine * sx, -sine * sy, cosine * sy, 0, 0]
+      const source = multiply(individual, [sourceTransform.a, sourceTransform.b, sourceTransform.c, sourceTransform.d, sourceTransform.e, sourceTransform.f])
+      const ox = originX.offset + originX.fraction * measured.width, oy = originY.offset + originY.fraction * measured.height
+      const sourceOffset = {
+        current: { x: source[4] + (1 - source[0]) * ox - source[2] * oy, y: source[5] - source[1] * ox + (1 - source[3]) * oy },
+        widthDelta: { x: individual[0] * transformWidth.x + individual[2] * transformWidth.y + (1 - source[0]) * originX.fraction,
+          y: individual[1] * transformWidth.x + individual[3] * transformWidth.y - source[1] * originX.fraction },
+        heightDelta: { x: individual[0] * transformHeight.x + individual[2] * transformHeight.y - source[2] * originY.fraction,
+          y: individual[1] * transformHeight.x + individual[3] * transformHeight.y + (1 - source[3]) * originY.fraction },
+      }
       return { frame: { width: measured.width, height: measured.height, transform: multiply(inverseParent, measured.matrix) },
-        parentToInstance: multiply(toInstance, parent.matrix), author: observation?.record.overrides.geometry ?? {}, boxInsets: measured.boxInsets }
+        parentToInstance: multiply(toInstance, parent.matrix), author: observation?.record.overrides.geometry ?? {}, boxInsets: measured.boxInsets, sourceOffset }
     } catch { return undefined }
   }
   const enqueue = () => {
