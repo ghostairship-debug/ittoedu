@@ -349,17 +349,23 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
           cleanups.add(() => { contentAuthoring?.dispose(); contentAuthoring = undefined })
         }
         if (root && observeHtml && originalHtml !== undefined) {
-          const fragmentKey = String(message.fragmentStateKey), hiddenStyles = new WeakMap<HTMLElement, { value: string; priority: string }>()
+          const fragmentKey = String(message.fragmentStateKey), hiddenStyles = new WeakMap<HTMLElement, { property: 'display' | 'visibility'; value: string; priority: string }>()
           const applyFragments = () => {
             const progress = states[fragmentKey], fragments = [...root.querySelectorAll<HTMLElement>('.fragment')]
             const count = typeof progress === 'number' ? progress : fragments.length
             fragments.forEach((element, index) => {
-              const previous = hiddenStyles.get(element)
+              let previous = hiddenStyles.get(element)
+              const property = layoutInput?.mode === 'flow-content' ? 'display' : 'visibility', hidden = property === 'display' ? 'none' : 'hidden'
+              if (previous && previous.property !== property) {
+                if (previous.value) element.style.setProperty(previous.property, previous.value, previous.priority)
+                else element.style.removeProperty(previous.property)
+                hiddenStyles.delete(element); previous = undefined
+              }
               if (index < count) {
-                if (previous) { if (previous.value) element.style.setProperty('display', previous.value, previous.priority); else element.style.removeProperty('display'); hiddenStyles.delete(element) }
-              } else if (element.style.getPropertyValue('display') !== 'none' || element.style.getPropertyPriority('display') !== 'important') {
-                hiddenStyles.set(element, { value: element.style.getPropertyValue('display'), priority: element.style.getPropertyPriority('display') })
-                element.style.setProperty('display', 'none', 'important')
+                if (previous) { if (previous.value) element.style.setProperty(property, previous.value, previous.priority); else element.style.removeProperty(property); hiddenStyles.delete(element) }
+              } else if (element.style.getPropertyValue(property) !== hidden || element.style.getPropertyPriority(property) !== 'important') {
+                hiddenStyles.set(element, { property, value: element.style.getPropertyValue(property), priority: element.style.getPropertyPriority(property) })
+                element.style.setProperty(property, hidden, 'important')
               }
             })
           }
