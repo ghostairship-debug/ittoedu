@@ -8,6 +8,10 @@ import { createBlankCourseProjectV10 } from '../../../../src/core/course/createC
 import { readEditableTargetContent } from '../../../../src/core/tools/ToolTargets'
 import { TEXT_DEFINITION } from '../../../../src/components/text/adapters'
 import { createTextComponentData, createFormulaComponentData, type TextComponentData } from '../../../../src/components/text/data'
+import { ExecutionEngine } from '../../../../src/main/workbench/execution/ExecutionEngine'
+import { ExecutionRunStore } from '../../../../src/main/workbench/execution/ExecutionRunStore'
+import { ExecutionEventStore } from '../../../../src/main/workbench/execution/ExecutionEventStore'
+import type { ModelProvider, ModelSelection } from '../../../../src/shared/workbench/modelProvider'
 
 it('a software-bound V10 rich selection preserves unselected links marks geometry and unchanged formula identity in one History', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'followup-t01-rich-'))
@@ -31,11 +35,29 @@ it('a software-bound V10 rich selection preserves unselected links marks geometr
     expect(content.text).toContain('https://example.org/old')
     expect(content.text).not.toContain('old-formula')
     expect(content.text).not.toContain('保留')
-    await host.tools.beginRun({ runId: 'rich', actor: 'agent', documents: [{ documentId: initial.documentId, writable: [target] }] })
-    const handle = await host.tools.issueTarget('rich', initial.documentId, target)
     const replacement = '<a href="https://example.org/new"><strong>新</strong></a>\\(x^2\\)与\\(y\\)'
-    expect(await host.tools.applyBoundContent('rich', 'content-result', handle, replacement))
-      .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+    let requests = 0
+    const provider: ModelProvider = { async *stream(request) {
+      requests++
+      expect(request.tools).toEqual([])
+      expect(JSON.stringify(request.messages)).toContain('https://example.org/old')
+      yield { type: 'text.delta', requestId: request.requestId, sequence: 1, text: '<strong>尚未完成' }
+      expect(await host.internalAPI.read(initial.documentId)).toMatchObject({ revision: 0, undoDepth: 0, model: { project: { instances: { text: { data: original } } } } })
+      yield { type: 'response.completed', requestId: request.requestId, sequence: 2, responseId: 'fixture', actualModel: 'fixture',
+        finishReason: 'stop', toolCalls: [], assistant: { role: 'assistant', content: replacement }, nativeResponse: {} }
+    } }
+    const selection: ModelSelection = { model: 'fixture', connection: { id: 'fixture', revision: 1, provider: 'fixture', protocol: 'openai-chat',
+      baseURL: 'http://127.0.0.1:1/v1', accountId: 'fixture', auth: { kind: 'api-key', credentialRef: 'fixture' }, billing: { kind: 'unknown' },
+      capabilities: { tools: 'unsupported', stream: 'supported', vision: 'unsupported', reasoning: 'unknown' } } }
+    const engine = new ExecutionEngine({ registry: host.registry, gateway: host.tools, provider,
+      runs: new ExecutionRunStore(path.join(directory, 'runs')), events: new ExecutionEventStore({ directory: path.join(directory, 'events') }) })
+    const started = await engine.start({ conversationId: 'rich', taskId: 'rewrite', instruction: '改写所选内容并保留公式和链接', selection,
+      documents: [{ documentId: initial.documentId, writable: [target], selection: [target] }], contentOutput: { kind: 'replace-text', documentId: initial.documentId, target } })
+    const ended = await engine.wait(started.runId)
+    expect(ended.status).toBe('completed')
+    expect(ended.tools).toHaveLength(1)
+    expect(ended.tools[0]).toMatchObject({ origin: 'host', result: { kind: 'document-operation', result: { status: 'applied' } } })
+    expect(requests).toBe(1)
     const current = await host.internalAPI.read(initial.documentId)
     expect(current.undoDepth).toBe(1)
     if (current.model.kind !== 'course-v10') throw new Error('V10 required')
@@ -53,5 +75,5 @@ it('a software-bound V10 rich selection preserves unselected links marks geometr
     expect(await host.internalAPI.dispatch({ documentId: current.documentId, epoch: current.epoch, baseRevision: current.revision,
       actor: 'human', operationId: 'undo', mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
     expect(await host.internalAPI.read(initial.documentId)).toMatchObject({ model: { project: { instances: { text: { data: original } } } } })
-  } finally { await host.tools.stop('rich'); await fs.rm(directory, { recursive: true, force: true }) }
+  } finally { await fs.rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }) }
 })
