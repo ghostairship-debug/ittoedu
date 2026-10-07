@@ -103,12 +103,13 @@ export function useFlowDocumentRecovery(options: FlowDocumentRecoveryOptions): {
           let recoveryIdentity: FlowDocumentRecoveryIdentity
           if (active && active.projectId === target.projectId && active.projectPath === target.projectPath) recoveryIdentity = active
           else {
-            const retained = identities.get(target.projectId)
+            const bindingKey = JSON.stringify([target.projectId, target.projectPath])
+            const retained = identities.get(bindingKey)
             if (retained) recoveryIdentity = retained
             else {
               recoveryIdentity = createRecoveryIdentity(target)
               await port.read(recoveryIdentity)
-              identities.set(target.projectId, recoveryIdentity)
+              identities.set(bindingKey, recoveryIdentity)
             }
           }
           await port.write(serializeFlowDocumentRecovery({ ...recoveryIdentity, revision: target.revision }, draft))
