@@ -30,12 +30,24 @@ export class ExecutionRunStore {
     const operation = (writes.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
       await fs.mkdir(this.directory, { recursive: true })
       const temporary = `${filename}.${randomUUID()}.tmp`
+      let complete = false
       try {
         const file = await fs.open(temporary, 'wx')
         try { await file.writeFile(JSON.stringify(copy)); await file.sync() } finally { await file.close() }
-        await fs.rename(temporary, filename)
+        complete = true
+        try { await fs.rename(temporary, filename) }
+        catch (error) {
+          if (process.platform !== 'win32' || (error as NodeJS.ErrnoException).code !== 'EPERM') throw error
+          // Republish this closed, flushed checkpoint once in its existing file
+          // queue. No model request, tool or write of the snapshot is repeated.
+          await fs.rename(temporary, filename)
+        }
         this.unavailable.delete(filename)
-      } finally { await fs.rm(temporary, { force: true }).catch(() => undefined) }
+      } finally {
+        // A failed publication keeps its complete candidate and native error
+        // path for diagnosis; the previous authoritative JSON remains intact.
+        if (!complete) await fs.rm(temporary, { force: true }).catch(() => undefined)
+      }
     })
     const tail = operation.catch(() => undefined)
     writes.set(key, tail)
