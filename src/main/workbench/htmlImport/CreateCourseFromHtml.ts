@@ -3,6 +3,8 @@ import type { ExecutionPermissionMode } from '../../../shared/workbench/executio
 import type { SaveReceipt } from '../../../shared/workbench/toolPorts'
 import type { ModelToolCall, ToolResult } from '../../../shared/workbench/tools'
 import type { DocumentOperationResult } from '../../../shared/workbench/document'
+import { splitHtmlSections, type HtmlSectionPage } from './splitHtmlSections'
+import { prepareMeasurementDocument } from '../contentApply/measurement/prepareMeasurementDocument'
 
 export interface CreateCourseFromHtmlInput {
   sourcePath: string
@@ -11,7 +13,7 @@ export interface CreateCourseFromHtmlInput {
   path?: string
 }
 
-export type CreateCourseFromHtmlChild = 'file.open' | 'file.create' | 'project.list' | 'project.apply' | 'file.save'
+export type CreateCourseFromHtmlChild = 'file.open' | 'file.create' | 'read' | 'project.list' | 'project.apply' | 'file.save'
 
 export interface CreateCourseFromHtmlPorts {
   /** Query the existing child call and its original receipt. Unknown outcomes must not return null. */
@@ -78,6 +80,20 @@ export async function createCourseFromHtml(
   const source = data(sourceResult)
   if (typeof source?.documentId !== 'string' || typeof source.path !== 'string')
     return failure('invalid-html-source', '来源文件未打开；没有创建课件')
+  const sourceTarget = await ports.documentTarget(source.documentId, 'read')
+  let sourceHtml = '', cursor: string | undefined, part = 0
+  do {
+    const captured = await child(`capture-source-${part++}`, 'read', () => ({ target: sourceTarget, limit: 640, ...(cursor ? { cursor } : {}) }))
+    if (captured.kind === 'error') return captured
+    const value = data(captured)
+    if (typeof value?.text !== 'string') return failure('invalid-html-source', '当前 HTML 正文未捕获；没有创建课件')
+    sourceHtml += value.text
+    cursor = captured.kind === 'read' ? captured.nextCursor : undefined
+  } while (cursor)
+  // A shared program can couple sections through state or navigation. Keep that
+  // program once; ordinary independent pages use the existing host surfaces.
+  const sections: HtmlSectionPage[] = prepareMeasurementDocument({ html: sourceHtml }).documentProgramReason
+    ? [{ order: 0, id: null, html: sourceHtml }] : splitHtmlSections(sourceHtml).sections
 
   const requestedName = input.name ?? (path.parse(source.path).name || '课件')
   const name = /\.h5lesson$/i.test(requestedName) ? requestedName : `${requestedName}.h5lesson`
@@ -109,19 +125,41 @@ export async function createCourseFromHtml(
   const targetPath = Array.isArray(files) ? files.find(file => file && typeof file === 'object'
     && file.type === 'structure' && typeof file.path === 'string' && file.path.startsWith('pages/'))?.path : undefined
   if (typeof targetPath !== 'string') return failure('course-target-missing', `课件文件已创建，但没有可导入的页面：${created.path}`)
-  const applied = await child('import', 'project.apply', () => ({
-    project, path: targetPath, from: source.path, intent: 'insert',
-  }))
-  if (applied.kind === 'error') return { ...applied, message: `${applied.message}；课件文件：${created.path}` }
-  const application = data(applied), receipt = applied.kind === 'document-operation' ? applied.result : application?.receipt
-  if (!committedReceipt(receipt, targetDocumentId)) {
-    const diagnostics = Array.isArray(application?.diagnostics) ? application.diagnostics.map(item => item?.message).filter(message => typeof message === 'string').join('；') : ''
-    return failure('html-import-failed', `${diagnostics || 'HTML 未得到正式提交回执'}；课件文件：${created.path}`)
+  let receipt!: Extract<DocumentOperationResult, { status: 'applied' | 'unchanged' }>
+  const affected: string[] = [], warnings: NonNullable<Extract<ToolResult, { kind: 'document-operation' }>['advisories']>[number][] = []
+  for (const section of sections) {
+    let pagePath = targetPath
+    if (section.order > 0) {
+      const added = await child(`page-${section.order}`, 'project.apply', () => ({ project, path: 'pages', intent: 'surface.add', kind: 'slide', title: section.title ?? `第 ${section.order + 1} 页` }))
+      if (added.kind === 'error') return added
+      const id = data(added)?.insertedIds
+      const listed = await child(`list-page-${section.order}`, 'project.list', () => ({ project }))
+      if (listed.kind === 'error') return listed
+      const files = data(listed)?.files
+      // surface.add appends; read its formal directory instead of guessing a title slug.
+      const pages = Array.isArray(files) ? files.filter(file => file?.type === 'structure' && typeof file.path === 'string' && file.path.startsWith('pages/')) : []
+      pagePath = pages.at(-1)?.path
+      if (!Array.isArray(id) || !id.length || typeof pagePath !== 'string') return failure('course-target-missing', `新页面已提交，但目录不可用：${created.path}`)
+    } else if (sections.length > 1 && section.title) {
+      const titled = await child('title-page-0', 'project.apply', () => ({ project, path: pagePath, intent: 'surface.title', title: section.title }))
+      if (titled.kind === 'error') return titled
+    }
+    const applied = await child(section.order ? `import-${section.order}` : 'import', 'project.apply', () => ({
+      project, path: pagePath, from: source.path, content: section.html, intent: 'insert',
+    }))
+    const result = data(applied)
+    if (applied.kind === 'error') return { ...applied, message: `${applied.message}；课件文件：${created.path}` }
+    const committed = applied.kind === 'document-operation' ? applied.result : result?.receipt
+    if (!committedReceipt(committed, targetDocumentId)) return failure('html-import-failed', `第 ${section.order + 1} 页未得到正式提交回执；课件文件：${created.path}`)
+    receipt = committed
+    if (applied.kind === 'document-operation') affected.push(...applied.affected)
+    if (Array.isArray(result?.insertedIds)) affected.push(...result.insertedIds.filter(id => typeof id === 'string'))
+    if (Array.isArray(result?.diagnostics)) warnings.push(...result.diagnostics.filter(item => typeof item?.message === 'string')
+      .map(item => ({ step: section.order, code: 'html-import-warning' as const, message: item.message + (typeof item.reference === 'string' ? ` (${item.reference})` : '') })))
   }
   const imported: Extract<ToolResult, { kind: 'document-operation' }> = { kind: 'document-operation', result: receipt,
-    affected: Array.isArray(application?.insertedIds) ? application.insertedIds.filter(id => typeof id === 'string') : [],
-    ...(Array.isArray(application?.diagnostics) ? { advisories: application.diagnostics.filter(item => typeof item?.message === 'string')
-      .map(item => ({ step: 0, code: 'html-import-warning' as const, message: item.message + (typeof item.reference === 'string' ? ` (${item.reference})` : '') })) } : {}) }
+    affected,
+    ...(warnings.length ? { advisories: warnings } : {}) }
 
   const saved = await child('save', 'file.save', async () => ({
     target: await ports.documentTarget(targetDocumentId, 'write'),

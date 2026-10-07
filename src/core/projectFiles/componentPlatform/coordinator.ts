@@ -35,7 +35,7 @@ export interface ComponentProjectFileHost {
   /** I binds this baseline to L19 planning and dispatches through the current canonical Session. */
   apply(runId: string, operationId: string, requestDigest: string, baseline: ComponentProjectSnapshot,
     request: ContentApplyRequest): Promise<ContentApplyResult>
-  source(runId: string, from: string, snapshot: ComponentProjectSnapshot): Promise<ComponentProjectFileInput>
+  source(runId: string, from: string, snapshot: ComponentProjectSnapshot, sourceHtml?: string): Promise<ComponentProjectFileInput>
   /** Existing Markdown/professional/image parsers can normalize real source formats without another writer. */
   prepareSource?(input: ComponentProjectFileInput, file: ComponentProjectFile, intent: ContentApplyIntent): Promise<ContentApplySource>
 }
@@ -45,7 +45,7 @@ export const componentProjectFileSchemas = {
   'project.list': z.object({ project: selector }).strict(),
   'project.read': z.object({ project: selector, path, offset: z.number().int().nonnegative().optional(), limit: z.number().int().positive().optional() }).strict(),
   'project.apply': z.union([
-    z.object({ ...common, content: z.string() }).strict(), z.object({ ...common, from: z.string().min(1) }).strict(),
+    z.object({ ...common, content: z.string() }).strict(), z.object({ ...common, from: z.string().min(1), content: z.string().optional() }).strict(),
     z.object({ project: selector, path: z.literal('pages'), intent: z.literal('surface.add'),
       kind: z.enum(['slide', 'flow', 'spatial']), title: z.string().optional(), before: path.optional() }).strict(),
     z.object({ project: selector, path, intent: z.literal('surface.move'), before: path.optional() }).strict(),
@@ -381,7 +381,7 @@ export class ComponentProjectFileCoordinator {
       if (file?.binding) {
         const intent = input.intent ?? 'content'
         if (intent === 'insert' || intent === 'redo') return failure('file-content-required', '此路径修改已存在的正式字段；向页面插入或重做请使用页面结构路径。')
-        let actual = 'from' in input ? await this.host.source(runId, input.from, baseline) : undefined
+        let actual = 'from' in input ? await this.host.source(runId, input.from, baseline, input.content) : undefined
         let content = actual ? actual.text : 'content' in input ? input.content : undefined
         let source: ContentApplySource | undefined
         if (file.binding.kind === 'flow' || file.binding.kind === 'theme') {
@@ -410,7 +410,7 @@ export class ComponentProjectFileCoordinator {
       if (file.kind === 'html' && file.note && !file.projection && intent === 'content') return failure('professional-target-required', file.note)
       let source: ContentApplySource
       if ('from' in input) {
-        const actual = await this.host.source(runId, input.from, baseline)
+        const actual = await this.host.source(runId, input.from, baseline, input.content)
         source = this.host.prepareSource ? await this.host.prepareSource(actual, file, intent)
           : actual.text !== undefined ? componentFileContentSource(file, actual.text, actual) : (() => { throw new Error('当前文件需要专业资源适配；原始字节已保留。') })()
       } else source = componentFileContentSource(file, input.content)

@@ -37,6 +37,9 @@ export function decodeComponentHtmlSource(bytes: Uint8Array): { text: string; no
 export async function readComponentProjectFileInput(input: {
   from: string
   fileAccess: ToolRunGrant['fileAccess']
+  /** Host capture wins over disk; sourceHtml can be a captured independent page. */
+  sourceHtml?: string
+  currentHtml?(filename: string): Promise<string | undefined>
   signal?: AbortSignal
 }): Promise<ComponentProjectFileInput> {
   const { fileAccess, signal } = input
@@ -45,10 +48,12 @@ export async function readComponentProjectFileInput(input: {
   const root = await fs.realpath(fileAccess.workspaceRoot)
   const filename = await fs.realpath(path.resolve(fileAccess.workspaceRoot, input.from))
   if (fileAccess.permission !== 'full' && !isInsideRoot(root, filename)) throw new Error('内容源文件位于本任务授权工作空间外。')
-  const bytes = new Uint8Array(await fs.readFile(filename))
+  let bytes = new Uint8Array(await fs.readFile(filename))
   const extension = path.extname(filename).toLowerCase()
   const html = extension === '.html' || extension === '.htm'
-  const text = html ? decodeComponentHtmlSource(bytes).text : TEXT.has(extension) ? new TextDecoder('utf-8', { fatal: true }).decode(bytes) : undefined
+  const currentHtml = html ? input.sourceHtml ?? await input.currentHtml?.(filename) : undefined
+  if (currentHtml !== undefined) bytes = new TextEncoder().encode(currentHtml)
+  const text = html ? currentHtml ?? decodeComponentHtmlSource(bytes).text : TEXT.has(extension) ? new TextDecoder('utf-8', { fatal: true }).decode(bytes) : undefined
   if (extension === '.html' || extension === '.htm') {
     const closure = await readHtmlClosure({ htmlPath: filename, rootDir: fileAccess.permission === 'full' ? path.parse(filename).root : root, sourceHtml: text })
     signal?.throwIfAborted()
@@ -129,7 +134,7 @@ export async function prepareComponentProjectFileSource(input: ComponentProjectF
     if (mediaType && ['insert', 'redo'].includes(_intent)) return { kind: 'html', html: `<img src="data:${mediaType};base64,${Buffer.from(input.bytes).toString('base64')}">` }
     throw new Error('该二进制文件需要专业资源替换适配；可将图片插入页面，原件保留。')
   }
-  if (SOURCE.has(extension)) {
+  if (SOURCE.has(extension) || extension === '.css' && file.kind === 'source') {
     if (file.sourceFile && file.implementation?.workspace && _intent !== 'insert' && _intent !== 'redo') {
       const captured = file.sourceFile, previous = file.implementation
       const ownerId = captured.privateOwner ? previous.workspace!.ownerId : randomUUID()

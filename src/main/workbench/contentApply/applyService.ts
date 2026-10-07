@@ -14,6 +14,9 @@ import { assemblyContentDraft, htmlAssemblyFraming, htmlForAssembly, localHtmlIn
 import { NoContentTargetError, planContentApply } from './application/plan'
 import type { CanonicalContentApplyRequest, ContentApplyDiagnostic, ContentApplyPlan, ContentApplyRequest, ContentApplyResult, ContentApplySessionPort, ContentChangeRequest, ContentObjectDraft, SurfaceApplyRequest } from './application/types'
 import type { DocumentResources } from '../../../shared/workbench/document'
+import { extractHtmlAuthoringRecords, type HtmlAuthoringRecords } from '../../../shared/html/htmlAuthoringRecords'
+import { decodeHtmlEntities } from '../../../shared/html/htmlSourceScanner'
+import { parse, type DefaultTreeAdapterTypes } from 'parse5'
 
 export type { ContentApplyRequest, ContentApplyResult, ContentApplyPlan, ContentApplySessionPort } from './application/types'
 
@@ -35,6 +38,66 @@ function dataBindings(data: JsonObject): Record<string, string> {
   const value = data.resourceBindings
   return value && typeof value === 'object' && !Array.isArray(value)
     ? Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string] => typeof entry[1] === 'string')) : {}
+}
+/** Adopt source-owned records once; image overrides use the existing resource preparation. */
+async function prepareHtmlAuthoring(html: string, siblingFiles: ReadonlyMap<string, Uint8Array> | undefined, createId: () => string) {
+  const extracted = extractHtmlAuthoringRecords(html)
+  const prepared = await prepareContentResources({ html: extracted.source, siblingFiles }, createId)
+  const records: HtmlAuthoringRecords = structuredClone(extracted.authoringRecords)
+  const reference = async (src: string) => {
+    if (!src || src.startsWith('cw-resource:')) return src
+    const attr = src.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+    const image = await prepareContentResources({ html: `<img src="${attr}">`, siblingFiles }, createId)
+    prepared.resources.push(...image.resources); prepared.unresolvedResources.push(...image.unresolvedResources)
+    prepared.diagnostics.push(...image.diagnostics); prepared.resourceSources.push(...image.resourceSources)
+    return decodeHtmlEntities(/src="([^"]*)"/.exec(image.html)?.[1] ?? attr)
+  }
+  for (const record of Object.values(records)) {
+    if (record.kind === 'image') record.binding.baseline = await reference(record.binding.baseline)
+    if (record.overrides.src) record.overrides.src = await reference(record.overrides.src)
+  }
+  prepared.resources = [...new Map(prepared.resources.map(resource => [resource.key, resource])).values()]
+  prepared.unresolvedResources = [...new Map(prepared.unresolvedResources.map(resource => [resource.key, resource])).values()]
+  return { prepared, records }
+}
+/** Fold only a source change whose existing local binding still names one object. */
+function reconcileSourceAuthoring(before: string, after: string, records: HtmlAuthoringRecords): { records: HtmlAuthoringRecords; unresolved: string[] } {
+  type Element = DefaultTreeAdapterTypes.Element
+  const root = (html: string) => parse(html).childNodes.find((node): node is Element => 'tagName' in node && node.tagName === 'html')!
+  const roots = [root(before), root(after)]
+  const value = (htmlRoot: Element, record: HtmlAuthoringRecords[string]): string | undefined => {
+    // React's keyed runtime scope has no source DOM counterpart. Its owner must
+    // provide an explicit data/region mapping; do not invent one from HTML order.
+    if (Object.keys(record.scope ?? {}).some(key => !key.startsWith('dom:'))) return undefined
+    let elements = [htmlRoot]
+    for (const step of record.binding.path) elements = elements.flatMap(parent => parent.childNodes.filter((node): node is Element => 'tagName' in node)
+      .filter(element => element.tagName === step.tag && Object.entries(step.attributes ?? {}).every(([name, text]) => {
+        const actual = element.attrs.find(attribute => attribute.name === name)?.value
+        return name === 'class' ? text.split(/\s+/).every(token => actual?.split(/\s+/).includes(token)) : actual === text
+      })))
+    elements = elements.filter(element => Object.entries(record.scope ?? {}).every(([key, expected]) => {
+      const [, depth, name] = /^dom:(\d+):(.+)$/.exec(key) ?? []
+      let ancestor: Element | undefined = element
+      for (let at = 0; at < Number(depth); at++) ancestor = ancestor?.parentNode && 'tagName' in ancestor.parentNode ? ancestor.parentNode : undefined
+      return !!ancestor && ancestor.attrs.find(attribute => attribute.name === name)?.value === expected
+    }))
+    if (elements.length !== 1) return undefined
+    const element = elements[0]!
+    if (record.kind === 'image') return element.tagName === 'img' ? element.attrs.find(attribute => attribute.name === 'src')?.value : undefined
+    const text = element.childNodes.filter((node): node is DefaultTreeAdapterTypes.TextNode => node.nodeName === '#text')
+    return text[record.binding.textIndex ?? 0]?.value
+  }
+  const next = structuredClone(records), unresolved: string[] = []
+  for (const [key, record] of Object.entries(next)) {
+    const old = value(roots[0]!, record), current = value(roots[1]!, record)
+    if (old === undefined || current === undefined) { unresolved.push(key); continue }
+    if (old !== current && old === record.binding.baseline) {
+      record.binding.baseline = current
+      if (record.kind === 'text') delete record.overrides.text
+      else delete record.overrides.src
+    }
+  }
+  return { records: next, unresolved }
 }
 function resourceEdits(prepared: PreparedContentResources, createId: () => string): { edits: ComponentEdit[]; bindings: Record<string, string>; urls: Record<string, string> } {
   const edits: ComponentEdit[] = [], bindings: Record<string, string> = {}, urls: Record<string, string> = {}
@@ -81,8 +144,7 @@ export class ContentApplyService {
       ? request.target.container.surfaceId : undefined
     // An observed empty page has no existing object to overwrite. Its first
     // content uses the normal assembly/insert owner and captured container CAS.
-    if (request.intent === 'content' && request.source.kind === 'html' && request.source.scope === 'projection'
-      && request.projection?.entries.length === 0 && surfaceId
+    if (request.intent === 'content' && request.source.kind === 'html' && surfaceId
       && project.surfaces.some(surface => surface.id === surfaceId && surface.childIds.length === 0)) {
       request = { ...request, intent: 'insert' }
     }
@@ -122,7 +184,14 @@ export class ContentApplyService {
             ? Object.entries(previous.modules).filter((entry): entry is [string, string] => typeof entry[1] === 'string') : []
           const siblingFiles = new Map(retainedModules.map(([name, source]) => [name, new TextEncoder().encode(source)]))
           request.source.siblingFiles?.forEach((bytes, name) => siblingFiles.set(name, Uint8Array.from(bytes)))
-          const prepared = await prepareContentResources({ html, siblingFiles }, this.createId)
+          const { prepared, records } = await prepareHtmlAuthoring(html, siblingFiles, this.createId)
+          let authoringRecords = Object.keys(records).length ? records : previous.authoringRecords as unknown as HtmlAuthoringRecords | undefined
+          if (authoringRecords && previous.html !== prepared.html) {
+            const reconciled = reconcileSourceAuthoring(previous.html as string, prepared.html, authoringRecords)
+            authoringRecords = reconciled.records
+            if (reconciled.unresolved.length) diagnostics.push({ level: 'warning', code: 'author-record-source-unmapped', instanceId: input.instanceId,
+              message: '源码已保留；部分已有作者对象在源码中没有唯一对应，原作者值和几何保留，需通过该对象的正式目标续改。', repairable: true })
+          }
           // A content edit keeps this instance's existing CSS. Its real font/
           // image consumers must keep their declaration when only HTML changed.
           const cssSources = typeof previous.css === 'string' ? htmlResourceSources(extractHtmlResources({
@@ -135,6 +204,7 @@ export class ContentApplyService {
           diagnostics.push(...resourceDiagnostics(prepared, input.instanceId))
           const add = (path: string[], value: JsonValue) => { if (!equalComponentValue(previous[path[0]!], value)) edits.push({ type: 'data.set', instanceId: input.instanceId, path, value }) }
           add(['html'], prepared.html)
+          if (authoringRecords) add(['authoringRecords'], authoringRecords as unknown as JsonValue)
           if (prepared.modules || previous.modules) add(['modules'], prepared.modules ?? {})
           const bindings = { ...dataBindings(previous), ...resources.bindings }
           if (Object.keys(bindings).length) add(['resourceBindings'], bindings)
@@ -146,14 +216,16 @@ export class ContentApplyService {
           }
         }
       } else {
-        const prepared = await prepareContentResources({ html: htmlForAssembly(request), siblingFiles: request.source.siblingFiles }, this.createId)
+        const { prepared, records } = await prepareHtmlAuthoring(htmlForAssembly(request), request.source.siblingFiles, this.createId)
         const resources = resourceEdits(prepared, this.createId)
         edits.push(...resources.edits)
         diagnostics.push(...resourceDiagnostics(prepared))
         const viewport = this.designViewport(project, request)
         let assembly: HtmlAssembly
         try {
-          assembly = await this.options.measure({ html: prepared.html, viewport,
+          assembly = Object.keys(records).length ? sourceProgramAssembly(viewport, { html: prepared.html,
+            ...(request.source.themeCss !== undefined ? { themeCss: request.source.themeCss } : {}) }, 'persistent-html-authoring')
+            : await this.options.measure({ html: prepared.html, viewport,
             framing: htmlAssemblyFraming(request),
             themeCss: request.source.themeCss, resourceSources: prepared.resourceSources,
             resourceUrls: { ...this.options.resourceUrls?.(project, request), ...resources.urls }, signal })
@@ -176,6 +248,7 @@ export class ContentApplyService {
           flowPage: request.intent === 'redo' && request.target.kind === 'container' && request.target.container.kind === 'surface',
         })
         drafts = assembled.drafts ?? [assembled.draft]
+        if (Object.keys(records).length) for (const draft of drafts) dataObject(draft.data).authoringRecords = records as unknown as JsonValue
         const persistSources = (draft: ContentObjectDraft): void => {
           const definition = assembled.definitions.find(value => value.id === draft.definitionId) ?? project.definitions[draft.definitionId]
           if (prepared.resourceSources.length && definition?.implementation.kind === 'builtin'
