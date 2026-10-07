@@ -6,6 +6,7 @@ import path from 'node:path'
 import sharp from 'sharp'
 import { ImageResultsDesktopService, type ImageResultsDesktopOptions } from '../../src/main/workbench/images/ImageResultsDesktopService'
 import { ImageGenerationService } from '../../src/main/workbench/images/ImageGenerationService'
+import { HostJobService } from '../../src/main/workbench/jobs/HostJobService'
 import type { ImageProviderPort } from '../../src/main/workbench/images/ImageProviderPort'
 import { imageProvenance } from '../../src/main/workbench/images/imageRoute'
 import { frozenImageRoles } from '../../src/main/workbench/images/frozenImageRoles'
@@ -14,6 +15,46 @@ import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
 import { documentDigest } from '../../src/core/documents/documentDigest'
 import type { ImageJobSnapshot, ImageModelSelection } from '../../src/shared/workbench/images'
 import type { ImageResultView } from '../../src/shared/workbench/imageResultsDesktop'
+
+it('reads an existing ready workspace image through generic jobs in a new run while retaining producer cancel ownership', async () => {
+  const root = 'D:/workspace/teacher-journey', job = { version: 1, jobId: 'original-job', runId: 'original-run',
+    documentId: `workspace:${documentDigest({ root })}`, status: 'ready', stopped: false, resources: [],
+    timing: [{ stage: 'image.provider.started', wallTimeMs: 100 }],
+  } as ImageJobSnapshot
+  const generate = vi.fn(() => { throw new Error('Reading a completed image must not regenerate it') })
+  const stop = vi.fn(async () => { job.stopped = true; return structuredClone(job) })
+  const read = async () => structuredClone(job)
+  const wait = vi.fn(async (runId: string) => { if (runId !== job.runId) throw new Error('图片任务不属于当前运行'); return read() })
+  const images = { read, wait, stop, run: generate } as unknown as ImageGenerationService
+  const jobs = new HostJobService({ images })
+  const registry = new DocumentRegistry({ drivers: [], createId: () => crypto.randomUUID(), bindingKey: binding => binding.path,
+    persistence: { async append() { throw new Error('No document write') }, async save() { throw new Error('No document save') } } })
+  const gateway = new DocumentToolGateway(registry, [], () => crypto.randomUUID(), { services: { jobs,
+    images: { read, stop, run: generate, selection() { throw new Error('No model selection') }, readResource() { throw new Error('No image bytes needed') } } } })
+  const begin = (runId: string, workspaceRoot: string) => gateway.beginRun({ runId, actor: 'agent', documents: [],
+    fileAccess: { permission: 'workspace', workspaceRoot } })
+  await begin('new-run', root)
+  expect(await gateway.execute('new-run', 'read-old-ready', { name: 'job.status', input: { kind: 'image', job: job.jobId } }))
+    .toMatchObject({ kind: 'read', data: { kind: 'image', status: 'ready', snapshot: { runId: 'original-run' } } })
+  expect(await gateway.execute('new-run', 'wait-old-ready', { name: 'job.wait', input: { kind: 'image', job: job.jobId, milliseconds: 1 } }))
+    .toMatchObject({ kind: 'read', data: { kind: 'image', status: 'ready' } })
+  expect(await gateway.execute('new-run', 'log-old-ready', { name: 'job.logs', input: { kind: 'image', job: job.jobId } }))
+    .toMatchObject({ kind: 'read', data: { entries: [{ cursor: 1, time: 100 }], nextCursor: 1 } })
+  expect(wait).toHaveBeenCalledWith('original-run', job.jobId, 1, undefined)
+  expect(await gateway.execute('new-run', 'cancel-old-ready', { name: 'job.cancel', input: { kind: 'image', job: job.jobId } }))
+    .toMatchObject({ kind: 'error' })
+  expect(stop).not.toHaveBeenCalled()
+  await begin('other-root', 'D:/workspace/another')
+  expect(await gateway.execute('other-root', 'read-foreign-ready', { name: 'job.status', input: { kind: 'image', job: job.jobId } }))
+    .toMatchObject({ kind: 'error' })
+  job.status = 'running'
+  expect(await gateway.execute('new-run', 'read-unfinished', { name: 'job.status', input: { kind: 'image', job: job.jobId } }))
+    .toMatchObject({ kind: 'error' })
+  job.status = 'ready'; job.stopped = true
+  expect(await gateway.execute('new-run', 'read-stopped', { name: 'job.status', input: { kind: 'image', job: job.jobId } }))
+    .toMatchObject({ kind: 'error' })
+  expect(generate).not.toHaveBeenCalled()
+})
 
 it('shows an existing ready workspace image from its owning built-in conversation without a document or another generation', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'core-ready-image-'))

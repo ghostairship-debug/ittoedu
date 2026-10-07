@@ -328,19 +328,33 @@ export class HostToolCoordinator {
     return executeSkillList(this.services.skills, runId, input)
   }
   private serviceUnavailable(message: string): ToolResult { return { kind: 'error', code: 'service-unavailable', message } }
+  private recoveredWorkspaceImageScope(runId: string, snapshot: ImageJobSnapshot): string {
+    const scope = this.workspaceImageScope(runId)
+    if (snapshot.documentId !== scope || snapshot.runId !== runId && (snapshot.status !== 'ready' || snapshot.stopped))
+      throw new Error('图片作业不属于当前任务工作空间的已完成成果')
+    return scope
+  }
+  private async readableJobRef(runId: string, input: Omit<HostJobRef, 'runId'>): Promise<HostJobRef> {
+    if (input.kind !== 'image' || !this.services.images) return { runId, ...input }
+    const snapshot = await this.services.images.read(input.jobId)
+    if (snapshot.runId !== runId) this.recoveredWorkspaceImageScope(runId, snapshot)
+    // Only completed results admitted by the existing image reader can refer to
+    // their durable producer. This does not grant that producer's cancel rights.
+    return { runId: snapshot.runId, ...input }
+  }
   async jobStatus(runId: string, input: Omit<HostJobRef, 'runId'>): Promise<ToolResult> {
     this.builtInRun(runId)
-    return this.services.jobs ? { kind: 'read', data: await this.services.jobs.status({ runId, ...input }) }
+    return this.services.jobs ? { kind: 'read', data: await this.services.jobs.status(await this.readableJobRef(runId, input)) }
       : this.serviceUnavailable('通用作业服务尚未配置')
   }
   async jobWait(runId: string, input: Omit<HostJobRef, 'runId'> & { milliseconds: number }, signal?: AbortSignal): Promise<ToolResult> {
     this.builtInRun(runId)
-    return this.services.jobs ? { kind: 'read', data: await this.services.jobs.wait({ runId, ...input, signal }) }
+    return this.services.jobs ? { kind: 'read', data: await this.services.jobs.wait({ ...input, ...await this.readableJobRef(runId, input), signal }) }
       : this.serviceUnavailable('通用作业服务尚未配置')
   }
   async jobLogs(runId: string, input: Omit<HostJobRef, 'runId'> & { after?: number; limit?: number }): Promise<ToolResult> {
     this.builtInRun(runId)
-    return this.services.jobs ? { kind: 'read', data: await this.services.jobs.logs({ runId, ...input }) }
+    return this.services.jobs ? { kind: 'read', data: await this.services.jobs.logs({ ...input, ...await this.readableJobRef(runId, input) }) }
       : this.serviceUnavailable('通用作业服务尚未配置')
   }
   async jobCancel(runId: string, input: Omit<HostJobRef, 'runId'>): Promise<ToolResult> {
@@ -709,8 +723,7 @@ export class HostToolCoordinator {
       if (known?.runId === runId) return this.imageResult(this.get(runId, jobId, 'image') as ImageJob, await this.services.images!.read(jobId))
       // A recovered standalone result needs no document target handle to reconstruct.
       // The durable owner and frozen workspace scope still prove its authority.
-      const snapshot = await this.services.images!.read(jobId), scope = this.workspaceImageScope(runId)
-      if (snapshot.documentId !== scope || snapshot.runId !== runId && (snapshot.status !== 'ready' || snapshot.stopped)) throw new Error('图片作业不属于当前任务工作空间的已完成成果')
+      const snapshot = await this.services.images!.read(jobId), scope = this.recoveredWorkspaceImageScope(runId, snapshot)
       const recovered: ImageJob = { kind: 'image', scope: 'workspace', jobId, runId, sourceRunId: snapshot.runId,
         documentId: scope, epoch: '', controller: new AbortController(), resources: new Map() }
       this.jobs.set(jobId, recovered)
