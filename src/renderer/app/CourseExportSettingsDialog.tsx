@@ -22,9 +22,9 @@ export function CourseExportSettingsDialog({ pages, onCancel, onConfirm }: Cours
   })
   const ordered = [...selected, ...pages.filter(page => !selected.includes(page.id)).map(page => page.id)]
   return <div className="modal-backdrop" role="presentation" onKeyDown={event => { if (event.key === 'Escape') onCancel() }}>
-    <section className="modal" role="dialog" aria-modal="true" aria-labelledby="course-export-settings-title" style={{ width: 560, maxWidth: '90vw' }}>
-      <h2 id="course-export-settings-title">导出设置</h2>
-      <p>选择导出页面及顺序。PPTX 输出演示页和空间镜头，DOCX 输出流式讲义。</p>
+    <section className="modal" role="dialog" aria-modal="true" aria-labelledby="course-export-settings-title" style={{ width: 560, maxWidth: '90vw', padding: 20 }}>
+      <h2 className="modal__title" id="course-export-settings-title">导出设置</h2>
+      <p className="modal__message" style={{ marginBottom: 14 }}>选择导出页面及顺序。PPTX 输出演示页和空间镜头，DOCX 输出流式讲义。</p>
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
         <label>格式 <select autoFocus aria-label="导出格式" value={format} onChange={event => setFormat(event.target.value as StaticCourseExportFormat)}>
           <option value="pdf">PDF</option><option value="pptx">PPTX</option><option value="docx">DOCX</option>
@@ -47,7 +47,7 @@ export function CourseExportSettingsDialog({ pages, onCancel, onConfirm }: Cours
           </li>
         })}
       </ol>
-      <div className="modal__actions"><button type="button" onClick={onCancel}>取消</button>
+      <div className="modal__actions" style={{ margin: '16px -20px -20px' }}><button type="button" onClick={onCancel}>取消</button>
         <button type="button" disabled={!selected.length} onClick={() => onConfirm(format, { pageIds: selected, pageSize, orientation })}>导出</button>
       </div>
     </section>
