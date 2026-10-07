@@ -218,7 +218,7 @@ export class ManagedBrowserMcpService {
     const run = this.run(runId)
     if (run.stopped) throw new Error('浏览器任务已停止')
     if (run.controls) throw new Error('浏览器接管正在切换，请等待当前操作结束')
-    if (run.control === (action === 'takeover' ? 'human' : 'agent')) return this.controlState(runId)
+    if (action === 'resume' && run.control === 'agent') return this.controlState(runId)
     if (action === 'takeover' && !run.pageUrl) throw new Error('本任务尚未打开可接管的网页。')
     run.control = 'transition'; run.controlGeneration++
     if (action === 'takeover') run.activeOperation?.abort(new Error('用户正在接管当前网页'))
@@ -229,16 +229,7 @@ export class ManagedBrowserMcpService {
       if (run.stopped) throw new Error('任务已停止')
       run.snapshotId = undefined; run.fileChooserSnapshotId = undefined; run.pendingApproval = undefined
       run.used = true
-      if (run.embedded) await run.embedded.control(action === 'takeover')
-      else {
-        const code = managedBrowserWindowCode[action === 'takeover' ? 'show' : 'hide']
-        const args = { code }
-        run.pendingApproval = { tool: 'browser_run_code_unsafe', digest: createHash('sha256').update(JSON.stringify(args)).digest('hex') }
-        try {
-          const reply = await run.client!.invoke({ runId, operationId: `host-window-${randomUUID()}`, name: 'mcp.browser.browser_run_code_unsafe', arguments: args })
-          if (reply.status !== 'returned') throw new Error('未能切换原受管浏览器窗口；任务保持暂停，可再次尝试或停止')
-        } finally { run.pendingApproval = undefined }
-      }
+      await this.setBackendControl(runId, run, action === 'takeover')
       if (run.stopped) throw new Error('任务已停止')
       if (action === 'resume') {
         const result = await this.perform(run, { runId, operationId: `host-return-observe-${randomUUID()}`,
@@ -251,8 +242,35 @@ export class ManagedBrowserMcpService {
     })()
     run.controls = control
     try { return await control }
-    catch (error) { if (!run.stopped) run.control = 'human'; throw error }
+    catch (error) {
+      if (!run.stopped) {
+        run.snapshotId = undefined; run.fileChooserSnapshotId = undefined; run.pendingApproval = undefined
+        // Resume may already have disabled native human input before observing fails.
+        // Report human ownership only after restoring the same backend's real control.
+        try {
+          await this.setBackendControl(runId, run, true)
+          if (!run.stopped) run.control = 'human'
+        } catch (restoreError) {
+          if (!run.stopped) run.control = 'transition'
+          throw new Error(`${reason(error)}；人工控制尚未恢复：${reason(restoreError)}。请显示当前网页后重试接管或停止。`)
+        }
+      }
+      throw error
+    }
     finally { if (run.controls === control) run.controls = undefined }
+  }
+
+  private async setBackendControl(runId: string, run: BrowserRun, human: boolean): Promise<void> {
+    if (run.stopped) throw new Error('任务已停止')
+    if (run.embedded) { await run.embedded.control(human); return }
+    if (!run.client) throw new Error('任务浏览器尚未就绪')
+    const args = { code: managedBrowserWindowCode[human ? 'show' : 'hide'] }
+    run.pendingApproval = { tool: 'browser_run_code_unsafe', digest: createHash('sha256').update(JSON.stringify(args)).digest('hex') }
+    try {
+      const reply = await run.client.invoke({ runId, operationId: `host-window-${randomUUID()}`,
+        name: 'mcp.browser.browser_run_code_unsafe', arguments: args })
+      if (reply.status !== 'returned') throw new Error('未能切换原受管浏览器窗口；任务保持暂停，可再次尝试或停止')
+    } finally { run.pendingApproval = undefined }
   }
 
   /** Local diagnostic only: verifies that denied requests reached the per-run egress guard. */
