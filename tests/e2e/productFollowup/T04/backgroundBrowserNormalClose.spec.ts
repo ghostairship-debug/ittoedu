@@ -12,6 +12,7 @@ test('a real headless MCP browser promoted to GUI exits its whole owner through 
   test.setTimeout(90_000)
   const output = join(root, 'output/productFollowup/T04'); mkdirSync(output, { recursive: true })
   const directory = mkdtempSync(join(output, 'background-close-')), workspace = join(directory, 'workspace'), profile = join(directory, 'profile')
+  const profileArgument = `--user-data-dir=${profile}`
   mkdirSync(workspace)
   const checkpoints = join(directory, 'checkpoint.jsonl')
   const log = (phase: string, facts: unknown = {}) => appendFileSync(checkpoints, JSON.stringify({ time: new Date().toISOString(), phase, facts }) + '\n')
@@ -23,7 +24,7 @@ test('a real headless MCP browser promoted to GUI exits its whole owner through 
   let app: ElectronApplication | undefined, secondary: ChildProcess | undefined, client: Awaited<ReturnType<typeof connectExplicitMcp>> | undefined
   try {
     log('headless.launch.before')
-    app = await electron.launch({ cwd: root, args: ['.', `--user-data-dir=${profile}`, '--headless-mcp', `--workspace=${workspace}`, `--port=${port}`, '--permission=workspace'], env })
+    app = await electron.launch({ cwd: root, args: ['.', profileArgument, '--headless-mcp', `--workspace=${workspace}`, `--port=${port}`, '--permission=workspace'], env })
     const ownedProcess = app.process(); log('headless.launch.returned', { pid: ownedProcess.pid })
     await expect.poll(() => app!.evaluate(async ({ app }) => {
       const { createRequire } = process.getBuiltinModule('node:module'), requireProduct = createRequire(`${app.getAppPath()}/package.json`)
@@ -36,7 +37,8 @@ test('a real headless MCP browser promoted to GUI exits its whole owner through 
       const service = await externalMcpService()
       const status = await service.status()
       if (status.state !== 'running') throw new Error(`Actual headless MCP was not listening: ${status.message}`)
-      return { ...await service.connectionInfo(), token: await service.revealToken(), pid: process.pid, browserWindows: BrowserWindow.getAllWindows().length }
+      return { ...await service.connectionInfo(), token: await service.revealToken(), pid: process.pid, executable: process.execPath,
+        browserWindows: BrowserWindow.getAllWindows().length }
     })
     expect(connection.browserWindows).toBe(0)
     client = await connectExplicitMcp(readExplicitMcpConnection(connection), 'T04-background-close')
@@ -51,8 +53,10 @@ test('a real headless MCP browser promoted to GUI exits its whole owner through 
     expect(background.nativeWindows.length).toBeGreaterThan(0)
     expect(background.nativeWindows.every(window => window.visible === false)).toBe(true)
     // A real second executable launch exercises the product's same-profile GUI promotion.
-    secondary = spawn(ownedProcess.spawnfile, ['.', `--user-data-dir=${profile}`], { cwd: root, env, windowsHide: true, stdio: 'ignore' })
-    log('gui.second-instance.spawned', { pid: secondary.pid })
+    // On Windows app.process() is Playwright's owned cmd.exe wrapper, not the product executable.
+    // Main reports the actual original Electron executable; launch it normally to trigger second-instance.
+    secondary = spawn(connection.executable, ['.', profileArgument], { cwd: root, env, windowsHide: true, stdio: 'ignore' })
+    log('gui.second-instance.spawned', { pid: secondary.pid, executable: connection.executable })
     await expect.poll(() => secondary!.exitCode, { timeout: 20_000, message: 'Second GUI launch must hand off to the existing owner' }).toBe(0)
     await expect.poll(() => app!.windows().some(page => page.url().startsWith('courseware-editor://')), { timeout: 20_000 }).toBe(true)
     const page = app.windows().find(page => page.url().startsWith('courseware-editor://'))!
@@ -92,8 +96,9 @@ test('a real headless MCP browser promoted to GUI exits its whole owner through 
     writeFileSync(join(directory, 'facts.json'), JSON.stringify(facts, null, 2))
     await info.attach('Headless browser promotion and ordinary process exit', { path: join(directory, 'facts.json'), contentType: 'application/json' })
     // Failure cleanup only. It happens after the measured natural-exit assertion and cannot make that assertion pass.
-    for (const child of [secondary, app?.process()]) if (child?.pid && child.exitCode === null && child.signalCode === null && child.spawnargs.includes(`--user-data-dir=${profile}`)) {
-      log('failure-cleanup.owned-tree', { pid: child.pid })
+    for (const child of [secondary, app?.process()]) if (child?.pid && child.exitCode === null && child.signalCode === null
+      && child.spawnargs.some(argument => argument === profileArgument || argument.includes(`"${profileArgument}"`))) {
+      log('failure-cleanup.owned-tree', { pid: child.pid, profileArgument, spawnfile: child.spawnfile, spawnargs: child.spawnargs })
       try { if (process.platform === 'win32') execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'pipe', windowsHide: true }); else child.kill() }
       catch (error) { log('failure-cleanup.error', { error: String(error) }) }
     }
