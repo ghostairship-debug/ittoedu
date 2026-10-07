@@ -57,6 +57,7 @@ export async function prepareComponentOutputRegion(input: {
   }
   const view = root.ownerDocument.defaultView
   if (!view) throw new Error('捕获窗口已关闭')
+  await player.waitForCaptureReady(element)
   await root.ownerDocument.fonts?.ready
   await new Promise<void>(resolve => view.requestAnimationFrame(() => view.requestAnimationFrame(() => resolve())))
   const rect = element.getBoundingClientRect()

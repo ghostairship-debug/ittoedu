@@ -45,6 +45,7 @@ export class ComponentPlatformRuntime {
   private readonly contentAssetUrls = new Map<string, string>()
   private readonly referencedAssetUrls = new Map<string, string>()
   private readonly resolveAssetUrl?: (id: string) => string | undefined
+  private readonly isAssetPending?: (id: string) => boolean
   private readonly assetContents = new Map<string, { bytes: Uint8Array; mimeType: string }>()
   private readonly themeMarker = `component-${crypto.randomUUID()}`
   private themeStyle?: HTMLStyleElement
@@ -79,10 +80,12 @@ export class ComponentPlatformRuntime {
     resolveBuiltin?(key: string, signal: AbortSignal): Promise<PreparedComponentRuntime>
     /** Published resource owner resolves only actual consumer requests. */
     resolveAssetUrl?(id: string): string | undefined
+    isAssetPending?(id: string): boolean
     mode?: 'edit' | 'play' | 'capture'
   } = {}) {
     this.mode = options.mode ?? 'play'; this.playing = this.mode === 'play'
     this.resolveAssetUrl = options.resolveAssetUrl
+    this.isAssetPending = options.isAssetPending
     this.surfaceId = options.teacherController && (() => options.teacherController!.read().locationId)
     this.report = message => options.report?.(message)
     this.media = new ComponentWorldMedia(() => this.audioManager, this.report)
@@ -92,7 +95,10 @@ export class ComponentPlatformRuntime {
     const image = createImageRuntimeImplementation(id => {
       const url = this.assetUrl(id)
       return url ? { url } : undefined
-    }, diagnostic => options.report?.(diagnostic.message))
+    }, diagnostic => {
+      if (diagnostic.code === 'image-resource-missing' && options.isAssetPending?.(diagnostic.assetId)) return
+      options.report?.(diagnostic.message)
+    })
     // Professional implementations are shared; no per-instance default compilation.
     this.implementations = new Map([
       ['guoling.text', textRuntimeImplementation], ['guoling.formula', formulaRuntimeImplementation],
@@ -414,7 +420,10 @@ export class ComponentPlatformRuntime {
       this.mediaSettings = project.media
       const mediaOptions = { resolveAssetUrl: (id: string) => this.assetUrl(id), audioManager: this.audioManager,
         subscribeAudioChange: (listener: () => void) => this.audioEvents.on('audio:change', listener),
-        report: (diagnostic: { message: string }) => this.report(diagnostic.message) }
+        report: (diagnostic: { code: string; assetId: string; message: string }) => {
+          if (diagnostic.code === 'media-resource-missing' && this.isAssetPending?.(diagnostic.assetId)) return
+          this.report(diagnostic.message)
+        } }
       this.implementations.set('guoling.audio', createAudioRuntimeImplementation(mediaOptions) as ComponentRuntimeImplementation)
       this.implementations.set('guoling.video', createVideoRuntimeImplementation(mediaOptions) as ComponentRuntimeImplementation)
     } else if (this.mediaSettings !== project.media) { this.audioManager.updateProject(project); this.mediaSettings = project.media }

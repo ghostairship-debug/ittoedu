@@ -9,6 +9,7 @@ import { resolveWebResourceBindings } from '../../components/web/resources'
 import { NavigationTasks } from '../behaviors/navigation/NavigationTasks'
 import { attachComponentPlatformNavigationKeys } from '../behaviors/navigation/shortcuts'
 import type { PlaybackKeyCommand, PresenterInputFeedback } from '../PlayerPresenterInput'
+import { waitForPublishedObservationReady } from '../surfaces/publishedCapture'
 
 /** One read-only P0 projection into R0; never saved as an author document. */
 export function publishedComponentModel(payload: PublishedCourseV3) {
@@ -53,6 +54,10 @@ function embeddedAssetBytes(url: string): Uint8Array {
 export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, options: PublishedComponentPlayerOptions = {}) {
   const payload = publishedCourseV3Schema.parse(value), model = publishedComponentModel(payload)
   const resourceController = new AbortController(), requested = new Set<string>()
+  const resourceJobs = new Set<Promise<void>>(), pendingAssets = new Set<string>(), resourceFailures = new Map<string, Error>()
+  // Public resources.url(assetId) is valid without optional source-token bindings.
+  // Enumerating this read-only projection never fetches or decodes an asset.
+  const publishedResourceUrls = Object.fromEntries(Object.entries(payload.assets).flatMap(([id, asset]) => asset.url ? [[id, asset.url]] : []))
   let surfaceId = payload.surfaces.find(surface => surface.id === options.initialSurfaceId)?.id ?? payload.surfaces[0]?.id ?? null
   let stateId = options.initialStateId === undefined ? payload.surfaces.find(surface => surface.id === surfaceId)?.presentation?.initialStateId ?? null : options.initialStateId
   let player!: ReturnType<typeof mountV10Model>, stopped = false
@@ -64,30 +69,53 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
       if (!requested.has(id)) {
         requested.add(id)
         try { model.resources.assets[id] = embeddedAssetBytes(asset.url) }
-        catch (error) { options.report?.(`${id}资源不可用：${String(error)}`); return undefined }
+        catch (error) { resourceFailures.set(id, new Error(`${id}资源不可用：${String(error)}`)); options.report?.(resourceFailures.get(id)!.message); return undefined }
       }
       return model.resources.assets[id] ? asset.url : undefined
     }
     if (requested.has(id)) return undefined
     requested.add(id)
-    if (!asset?.url) { options.report?.(`素材字节缺失：${id}`); return undefined }
+    if (!asset?.url) { resourceFailures.set(id, new Error(`素材字节缺失：${id}`)); options.report?.(resourceFailures.get(id)!.message); return undefined }
     // Consumers request bytes independently; an unused or stalled later page
     // cannot delay mounting this page. The run owns every outstanding fetch.
-    void (async () => {
+    pendingAssets.add(id)
+    const job = (async () => {
       try {
         const response = await fetch(asset.url!, { signal: resourceController.signal })
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         const bytes = new Uint8Array(await response.arrayBuffer())
         if (stopped) return
         model.resources.assets[id] = bytes
+        pendingAssets.delete(id)
         // Read the current navigation projection, never the page that started loading.
-        void player.update(renderModel()).catch(error => { if (!stopped) options.report?.(String(error)) })
-      } catch (error) { if (!stopped) options.report?.(`${id}资源不可用：${String(error)}`) }
+        await player.update(renderModel())
+      } catch (error) {
+        if (!stopped) { resourceFailures.set(id, new Error(`${id}资源不可用：${String(error)}`)); options.report?.(resourceFailures.get(id)!.message) }
+      } finally { pendingAssets.delete(id) }
     })()
+    resourceJobs.add(job)
+    void job.then(() => resourceJobs.delete(job))
     return undefined
   }
-  const boundResourceUrls = (bindings: Readonly<Record<string, string>> | undefined) => Object.fromEntries(
-    Object.values(bindings ?? {}).flatMap(id => payload.assets[id]?.url ? [[id, payload.assets[id]!.url!]] : []))
+  const waitForResourceWork = async (work: Promise<unknown>) => {
+    const signal = resourceController.signal
+    signal.throwIfAborted()
+    await new Promise<void>((resolve, reject) => {
+      const abort = () => { signal.removeEventListener('abort', abort); reject(signal.reason ?? new Error('资源准备已取消')) }
+      signal.addEventListener('abort', abort, { once: true })
+      work.then(() => { signal.removeEventListener('abort', abort); resolve() }, error => { signal.removeEventListener('abort', abort); reject(error) })
+      if (signal.aborted) abort()
+    })
+    signal.throwIfAborted()
+  }
+  const waitForCaptureReady = async (element: HTMLElement = root) => {
+    // Drain work already requested by mounted consumers, including any resource
+    // requests caused by their update. Unused assets never enter this set.
+    do { await waitForResourceWork(Promise.all([...resourceJobs])); await waitForResourceWork(player.ready) } while (resourceJobs.size)
+    const failure = resourceFailures.values().next().value
+    if (failure) throw failure
+    await waitForPublishedObservationReady(element, resourceController.signal)
+  }
   const navigation = new ComponentNavigationOwner({ project: () => model.project, surfaceId: () => surfaceId, stateId: () => stateId,
     viewportBounds: () => { const rect = root.getBoundingClientRect(); return { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom } },
     courseState: { get: <T,>(key: string) => player?.runtime.getState(key) as T | undefined, set: (key, value) => player?.runtime.setState(key, value) },
@@ -102,7 +130,7 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
   })
   player = mountV10Model({ model: renderModel(), root, mode: options.capture ? 'capture' : 'play', runScopeId: `published:${payload.id}:${crypto.randomUUID()}`,
     teacherController: navigation, report: options.report, initialSurfaceId: surfaceId ?? undefined,
-    resolveAssetUrl,
+    resolveAssetUrl, isAssetPending: id => pendingAssets.has(id),
     onObservation: options.capture ? undefined : (id, observation) => {
       const unregister = navigation.registerObservation(id, observation)
       const unsubscribe = observation.subscribe?.(navigation.changed)
@@ -121,12 +149,12 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
         { state: () => player.runtime.stateSnapshot(), targets: () => player.runtime.targetSnapshots('full'), teacherController: navigation,
           // URL bindings let the realm's actual img/media/fetch consumer request
           // the resource. Merely declaring a binding must not start a download.
-          connectOrigins: () => model.project.logic?.network?.connectOrigins ?? [], themeCss: () => player.runtime.themeCss(), resources: () => ({ ...player.runtime.resourceUrls(), ...boundResourceUrls(source.resourceBindings) }), resourceBindings: source.resourceBindings, bootstrap: options.componentBootstrap })
+          connectOrigins: () => model.project.logic?.network?.connectOrigins ?? [], themeCss: () => player.runtime.themeCss(), resources: () => ({ ...publishedResourceUrls, ...player.runtime.resourceUrls() }), resourceBindings: source.resourceBindings, bootstrap: options.componentBootstrap })
     },
     resolveBuiltin: (_key, signal) => prepareSandboxComponent({ format: 'esm', code: webContentRealmSource(), css: '', diagnostics: [] }, signal,
       { builtinKey: _key, state: () => player.runtime.stateSnapshot(), targets: profile => player.runtime.targetSnapshots(profile), teacherController: navigation,
         instance: instance => resolveWebResourceBindings(instance, id => payload.assets[id]?.url ?? player.runtime.contentAssetUrl(id), options.report), htmlAuthoring: true,
-        connectOrigins: () => model.project.logic?.network?.connectOrigins ?? [], themeCss: () => player.runtime.themeCss(), resources: () => ({ ...player.runtime.resourceUrls(), ...Object.fromEntries(Object.entries(payload.assets).flatMap(([id, asset]) => asset.url ? [[id, asset.url]] : [])) }), bootstrap: options.componentBootstrap }),
+        connectOrigins: () => model.project.logic?.network?.connectOrigins ?? [], themeCss: () => player.runtime.themeCss(), resources: () => ({ ...publishedResourceUrls, ...player.runtime.resourceUrls() }), bootstrap: options.componentBootstrap }),
   })
   try { await player.ready }
   catch (error) { stopped = true; resourceController.abort(); navigation.dispose(); await player.dispose(); throw error }
@@ -167,7 +195,7 @@ export async function mountPublishedCourseV3(value: unknown, root: HTMLElement, 
     disposal = player.dispose()
     return disposal
   }
-  return { ...player, get ready() { return player.ready }, navigation,
+  return { ...player, get ready() { return player.ready }, navigation, waitForCaptureReady,
     next: () => stopped ? Promise.resolve(false) : navigation.execute({ type: 'step.next' }),
     previous: () => stopped ? Promise.resolve(false) : navigation.execute({ type: 'step.previous' }),
     go: (id: string, targetStateId?: string) => stopped ? Promise.resolve(false) : navigation.execute({ type: 'scene.go', sceneId: id, targetStateId }),
