@@ -28,7 +28,7 @@ const connection = { id: 'connection', revision: 1, provider: 'openai', protocol
 const request = (jobId: string): ImageGenerationRequest => ({ jobId, runId: 'ancestor-run', documentId: 'course',
   operation: 'generate', prompt: '蓝色铃铛', selection: { connection, imageModel: 'fixture-model' } })
 
-it('recovers a ready document image in a new authorized run and applies a fresh handle without another provider call', async () => {
+it('recovers a ready document image after cold restore and applies a fresh authorized handle without another provider call', async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'g20-image-continuation-'))
   directories.push(directory)
   const original = await sharp({ create: { width: 24, height: 16, channels: 4, background: '#234567' } }).png().toBuffer()
@@ -40,19 +40,22 @@ it('recovers a ready document image in a new authorized run and applies a fresh 
   const frame = { width: 120, height: 80, transform: [1, 0, 0, 1, 45, 65] as [number, number, number, number, number, number] }
   project.instances.picture = { id: 'picture', definitionId: IMAGE_DEFINITION.id, data: createImageData(asset.meta.id), frame }
   project.surfaces[0].childIds = ['picture']
-  const host = new DocumentHostService(path.join(directory, 'documents'))
+  let host = new DocumentHostService(path.join(directory, 'documents'))
   const document = await host.internalAPI.create({ kind: 'course-v10', project,
     resources: { assets: { [asset.meta.id]: asset.bytes }, components: {} } }, 'document-image.h5lesson')
-  await host.internalAPI.save(document.documentId, path.join(directory, 'document-image.h5lesson'))
+  const filename = path.join(directory, 'document-image.h5lesson')
+  await host.internalAPI.save(document.documentId, filename)
   let calls = 0
-  const images = new ImageGenerationService({ directory: path.join(directory, 'images'), provider: { generate: async (input, references) => {
+  const createImages = () => new ImageGenerationService({ directory: path.join(directory, 'images'), provider: { generate: async (input, references) => {
     calls++
     return { status: 'completed', images: [{ bytes: replacement, mimeType: 'image/png', filename: 'replacement.png' }], provenance: imageProvenance(input, references) }
   } } })
-  host.tools.configureHostServices({ images: { selection: () => request('unused').selection,
+  let images = createImages()
+  const configure = () => host.tools.configureHostServices({ images: { selection: () => request('unused').selection,
     run: images.run.bind(images), read: images.read.bind(images), stop: images.stop.bind(images),
     readResource: images.readResource.bind(images), readReadyResourceFromJob: images.readReadyResourceFromJob.bind(images) },
     jobs: new HostJobService({ images }) })
+  configure()
   const data = (result: ToolResult): any => { if (result.kind !== 'read') throw new Error(JSON.stringify(result)); return result.data }
   const begin = (runId: string, authorized = true) => host.tools.beginRun({ runId, actor: 'agent',
     documents: authorized ? [{ documentId: document.documentId, writable: [{ kind: 'document' }] }] : [],
@@ -63,6 +66,16 @@ it('recovers a ready document image in a new authorized run and applies a fresh 
   const ready = data(await host.tools.execute('original', 'create-image', { name: 'image.generate', input: { target: originalTarget, prompt: 'Controlled replacement' } }))
   expect(ready.status).toBe('ready')
   await host.tools.stop('original')
+  // Product restart keeps the formal journal. Restore the exact saved document
+  // before normal file.open so its durable identity survives with a fresh epoch.
+  host = new DocumentHostService(path.join(directory, 'documents'))
+  images = createImages()
+  configure()
+  const restored = await host.internalAPI.restore(document.documentId)
+  expect(restored.documentId).toBe(document.documentId)
+  expect(restored.epoch).not.toBe(document.epoch)
+  expect(restored.dirty).toBe(false)
+  expect(await host.internalAPI.open(filename)).toMatchObject({ documentId: restored.documentId, epoch: restored.epoch })
   await begin('outside', false)
   expect(await host.tools.execute('outside', 'denied-recovery', { name: 'image.status', input: { job: ready.job } }))
     .toMatchObject({ kind: 'error', message: expect.stringContaining('已授权文档') })
