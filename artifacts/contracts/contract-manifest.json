@@ -2,24 +2,36 @@
   "manifestVersion": 1,
   "generator": "scripts/generate-contracts.ts",
   "generationCommand": "npm run generate:contracts",
+  "protocols": {
+    "project": 10,
+    "publishedCourse": 3,
+    "componentRuntime": 5
+  },
+  "runtimeSourceOfTruth": "src/shared/contracts/component-platform/runtime.ts",
   "contracts": [
     {
-      "name": "courseProjectDocumentSchema",
-      "file": "course-project-v9.schema.json",
-      "sourceOfTruth": "src/shared/contracts/course-project-v9/schema.ts",
-      "sha256": "87ce35f57bb110d394d74506ffa678d5a8ec2c81363cd6f2f85be90b6233ccc0"
+      "name": "courseProjectV10Schema",
+      "file": "course-project-v10.schema.json",
+      "sourceOfTruth": "src/shared/contracts/component-platform/schema.ts",
+      "sha256": "095b74a9e99cd9fa369ae0dd419632e98d3a303be1e5f38ca66d2556867a7cce"
     },
     {
-      "name": "publishedCourseV2Schema",
-      "file": "published-course-v2.schema.json",
-      "sourceOfTruth": "src/shared/contracts/published-course-v2/schema.ts",
-      "sha256": "417ed570799abaeb708fb27754a05c775b4d60808b1a64e11d5287945449f598"
+      "name": "publishedCourseV3Schema",
+      "file": "published-course-v3.schema.json",
+      "sourceOfTruth": "src/shared/contracts/component-platform/published.ts",
+      "sha256": "c6e4b6704db9d58ac10b934c9d7314bab78d7de9fc59d9be69658306c6a8f20e"
     },
     {
-      "name": "componentManifestSchema",
-      "file": "component-manifest.schema.json",
-      "sourceOfTruth": "src/shared/contracts/component-v4/schema.ts",
-      "sha256": "6c9f7800aac2f58f8d4063e481297620361295e5d3a453212cef3eb8ddfecbbc"
+      "name": "componentDefinitionSchema",
+      "file": "component-definition.schema.json",
+      "sourceOfTruth": "src/shared/contracts/component-platform/schema.ts",
+      "sha256": "9c5be13c19b4fc4b73bae85e39b676e9b54257661d5960876f4a69c640095526"
+    },
+    {
+      "name": "componentCatalogSchema",
+      "file": "component-catalog.schema.json",
+      "sourceOfTruth": "src/shared/componentCatalog.ts",
+      "sha256": "8933af941ffa865cdd26e6b0c52397208ed37bc4551850f93c18b88c849d8241"
     }
   ]
 }
