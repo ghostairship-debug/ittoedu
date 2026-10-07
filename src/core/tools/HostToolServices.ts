@@ -170,6 +170,8 @@ interface HostAuthority {
   ownsReceiptDocument?(runId: string, documentId: string): boolean
   provideImage(runId: string, documentId: string, source: HostImageInput): Promise<string>
   readImage(runId: string, documentId: string, resource: string): Promise<HostImageInput>
+  /** The Gateway resolves its own current-run resource handle; absent means this is another image source. */
+  readRunImage?(runId: string, resource: string): Promise<HostImageInput | null>
 }
 interface Job { runId: string; documentId: string; epoch: string; jobId: string }
 interface ImageJob extends Job { kind: 'image'; scope: 'document' | 'workspace'; sourceRunId?: string; controller: AbortController; resources: Map<string, string> }
@@ -504,12 +506,46 @@ export class HostToolCoordinator {
   }
   async imagePreview(runId: string, input: { images: readonly string[] }, signal?: AbortSignal): Promise<ToolResult> {
     this.builtInRun(runId)
-    return this.services.openImages ? { kind: 'read', data: await this.services.openImages.preview({ runId, images: input.images, signal }) }
-      : this.serviceUnavailable('开放图库服务尚未配置')
+    const previews: { image: string; resourceId: string; mimeType: string; byteLength: number }[] = []
+    const failures: { image: string; reason: string }[] = [], candidates: string[] = []
+    for (const image of input.images) {
+      try {
+        const file = await this.generatedImagePreview(runId, image)
+        if (file) previews.push({ image, resourceId: image, mimeType: file.mimeType, byteLength: file.bytes.byteLength })
+        else candidates.push(image)
+      } catch (error) { failures.push({ image, reason: error instanceof Error ? error.message : '图片读取失败' }) }
+    }
+    if (candidates.length) {
+      if (!this.services.openImages) failures.push(...candidates.map(image => ({ image, reason: '图片资源不属于本任务，且开放图库服务尚未配置' })))
+      else {
+        const result = await this.services.openImages.preview({ runId, images: candidates, signal })
+        // Preserve the existing library receipt, including its partial-result diagnostics.
+        if (!previews.length && !failures.length) return { kind: 'read', data: result }
+        const library = result as { previews?: typeof previews; failures?: typeof failures; reason?: string }
+        previews.push(...library.previews ?? [])
+        failures.push(...library.failures ?? (library.reason ? candidates.map(image => ({ image, reason: library.reason! })) : []))
+      }
+    }
+    this.builtInRun(runId)
+    return { kind: 'read', data: previews.length ? { status: 'prepared', previews, ...(failures.length ? { failures } : {}) }
+      : { status: 'failed', reason: '没有取得可查看的图片', failures } }
+  }
+  private async generatedImagePreview(runId: string, image: string): Promise<HostImageInput | null> {
+    const reference = this.parseStandaloneImageReference(image)
+    if (!reference) return this.authority.readRunImage?.(runId, image) ?? null
+    const service = this.services.images
+    if (!service?.readReadyResourceFromJob) throw new Error('图片资源读取服务尚未配置')
+    const snapshot = await service.read(reference.jobId), scope = await this.recoveredImageScope(runId, snapshot)
+    const file = await service.readReadyResourceFromJob({ ...reference, sourceRunId: snapshot.runId, sourceDocumentId: scope.documentId })
+    if (scope.scope === 'document') this.authority.active(runId, scope.documentId, scope.epoch)
+    else this.workspaceImageScope(runId)
+    return file
   }
   /** Preview bytes go only to the run's next model request, never into a document. */
-  readImagePreview(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array } {
+  async readImagePreview(runId: string, resourceId: string): Promise<{ mimeType: string; bytes: Uint8Array }> {
     this.builtInRun(runId)
+    const generated = await this.generatedImagePreview(runId, resourceId)
+    if (generated) return generated
     if (!this.services.openImages) throw new Error('开放图库服务尚未配置')
     return this.services.openImages.readPreview(runId, resourceId)
   }

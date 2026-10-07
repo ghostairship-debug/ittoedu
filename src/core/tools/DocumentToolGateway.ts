@@ -149,6 +149,10 @@ export class DocumentToolGateway implements ToolGateway {
       },
       provideImage: (runId, documentId, source) => this.provideImage(runId, documentId, source),
       readImage: (runId, documentId, resource) => this.readImageResource(runId, documentId, resource),
+      readRunImage: async (runId, resource) => {
+        const image = this.images.get(resource)
+        return image ? this.readImageResource(runId, image.documentId, resource) : null
+      },
     })
     this.componentProjectFiles = new ComponentProjectFileCoordinator({
       document: (runId, selector, access) => this.componentProjectDocument(runId, selector, access),
@@ -1155,8 +1159,8 @@ export class DocumentToolGateway implements ToolGateway {
     return result.kind === 'read' && extracted.diagnostics.length ? { ...result, data: { result: result.data, diagnostics: extracted.diagnostics } } : result
   }
 
-  /** Host-only: open-library preview bytes for the run's next model request. */
-  readOpenImagePreview(runId: string, resourceId: string): { mimeType: string; bytes: Uint8Array } {
+  /** Host-only: authorized image bytes for the run's next model request. */
+  async readOpenImagePreview(runId: string, resourceId: string): Promise<{ mimeType: string; bytes: Uint8Array }> {
     if (this.run(runId).stopped) throw new ToolError('run-stopped', '任务已停止')
     return this.hostTools.readImagePreview(runId, resourceId)
   }

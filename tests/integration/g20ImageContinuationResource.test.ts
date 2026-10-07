@@ -86,6 +86,11 @@ it('recovers a ready document image after cold restore and applies a fresh autho
   expect(recovered).toMatchObject({ job: ready.job, documentId: document.documentId, status: 'ready', stopped: false })
   expect(recovered.resources[0].resource).not.toBe(ready.resources[0].resource)
   await expect(host.tools.readImageResource('continuation', document.documentId, ready.resources[0].resource)).rejects.toThrow()
+  const preview = data(await host.tools.execute('continuation', 'preview-image', { name: 'image.preview', input: { images: [recovered.resources[0].resource] } }))
+  expect(preview).toMatchObject({ status: 'prepared', previews: [{ resourceId: recovered.resources[0].resource, mimeType: 'image/png' }] })
+  const previewed = await host.tools.readOpenImagePreview('continuation', preview.previews[0].resourceId)
+  expect(await sharp(previewed.bytes).raw().toBuffer()).toEqual(await sharp(replacement).raw().toBuffer())
+  await expect(host.tools.readOpenImagePreview('outside', recovered.resources[0].resource)).rejects.toThrow()
   const freshTarget = await host.tools.issueTarget('continuation', document.documentId, target)
   expect(await host.tools.execute('continuation', 'apply-image', { name: 'media.apply', input: { target: freshTarget, resource: recovered.resources[0].resource } }))
     .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
@@ -99,6 +104,7 @@ it('recovers a ready document image after cold restore and applies a fresh autho
   expect(await images.read(ready.job)).toMatchObject({ runId: 'original', documentId: document.documentId, status: 'ready', stopped: false })
   expect(calls).toBe(1)
   await host.tools.stop('outside'); await host.tools.stop('continuation')
+  await expect(host.tools.readOpenImagePreview('continuation', recovered.resources[0].resource)).rejects.toThrow()
 })
 
 it('reopens only a ready resource of the exact durable job without another provider call', async () => {

@@ -61,7 +61,7 @@ it('searches, previews and fetches an open-license photo as a run resource for t
   expect(found).toMatchObject({ status: 'results', candidates: [{ image: 'img1', title: 'Autumn maple leaves', license: 'CC BY 2.0', source: 'Flickr' }] })
   const previewed = data(await h.call('run', 'preview', 'image.preview', { images: ['img1'] }))
   expect(previewed).toMatchObject({ status: 'prepared', previews: [{ image: 'img1', mimeType: 'image/jpeg', width: 480, height: 360 }] })
-  expect(h.gateway.readOpenImagePreview('run', previewed.previews[0].resourceId).bytes.byteLength).toBe(previewed.previews[0].byteLength)
+  expect((await h.gateway.readOpenImagePreview('run', previewed.previews[0].resourceId)).bytes.byteLength).toBe(previewed.previews[0].byteLength)
 
   // Without a path the download is only a run resource; the course is unchanged until a media tool uses it.
   const fetched = data(await h.call('run', 'fetch', 'image.fetch', { image: 'img1' }))
