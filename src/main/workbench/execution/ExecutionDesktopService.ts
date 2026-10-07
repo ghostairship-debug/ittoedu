@@ -83,7 +83,8 @@ function operationFailure(error: unknown, type: unknown): DesktopOperationError 
 function listed(records: ConversationRecord[]): ConversationRecord[] { return records.filter(record => !record.element) }
 /** An object or document block that still exists is the same target after other edits; a text range never is. */
 function targetStillExists(snapshot: DocumentSnapshot, target: ExecutionDocumentReference['writable'][number]): boolean {
-  if (target.kind !== 'course-object' && target.kind !== 'flow-block' && target.kind !== 'course-instance' && target.kind !== 'course-surface') return false
+  if (target.kind !== 'course-object' && target.kind !== 'flow-block' && target.kind !== 'course-instance' && target.kind !== 'course-surface'
+    && target.kind !== 'html-author-field') return false
   if (target.kind === 'course-instance' && (target.from !== undefined || target.to !== undefined)) return false
   try { readTarget(snapshot.model, target); return true } catch { return false }
 }

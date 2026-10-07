@@ -7,7 +7,7 @@ import { elementChangeUnits, elementUnitLabel, readComponentElementFields, readC
 import type { FlowTextContent } from '../../../shared/document/content'
 import { CardTextEdits, sourceTextCodec, flowTextCodec, type PeerTextOperation } from './CardTextEdits'
 import { captureComponentOperation, presentationComponentEdits } from '../../../core/drivers/courseV10Operations'
-import { courseInstanceContext, courseInstanceFieldIdentity, courseInstanceTextEdit, isCourseInstanceRange, readCourseInstanceText, type CourseInstanceTarget } from '../../../core/tools/ToolTargets'
+import { courseInstanceContext, courseInstanceFieldIdentity, courseInstanceTextEdit, isCourseInstanceRange, prepareHtmlAuthorFieldSource, readHtmlAuthorField, readCourseInstanceText, type CourseInstanceTarget } from '../../../core/tools/ToolTargets'
 import type { TextCodec } from './CardTextEdits'
 
 const componentStringCodec: TextCodec<string> = { length: value => Array.from(value).length,
@@ -60,6 +60,7 @@ export class ElementChangeTracker {
   private readonly rootsBefore: Record<string, unknown> = {}
   private readonly rootsAfter: Record<string, unknown> = {}
   private readonly source?: CardTextEdits<string>
+  private readonly htmlText?: CardTextEdits<string>
   private readonly componentText?: CardTextEdits<string> | CardTextEdits<FlowTextContent>
   private readonly componentIdentity?: ReturnType<typeof courseInstanceFieldIdentity>
   private fieldAvailable = false
@@ -77,6 +78,10 @@ export class ElementChangeTracker {
     }
     if (target.kind === 'markdown-range' && isSourceDocumentModel(snapshot.model))
       this.source = new CardTextEdits(sourceTextCodec, snapshot.model.source, target)
+    if (target.kind === 'html-author-field') {
+      const { value } = readHtmlAuthorField(snapshot.model, target)
+      this.htmlText = new CardTextEdits(componentStringCodec, value, { from: 0, to: Array.from(value).length })
+    }
     this.off.push(session.subscribeCommits(commit => {
       try { this.observe(commit) } catch { this.invalidate() }
     }), session.subscribe(event => {
@@ -88,13 +93,13 @@ export class ElementChangeTracker {
   finish(): void {
     this.finished = true
     // A run can change text and then restore it without leaving a net inverse.
-    if (this.runId && (this.source ?? this.componentText)?.changed === false)
+    if (this.runId && (this.source ?? this.componentText ?? this.htmlText)?.changed === false)
       for (const peer of cardPeers.get(this.session)!.trackers) if (peer.conversationId === this.conversationId) {
-        peer.source?.releaseUnchangedPeer(this.runId); peer.componentText?.releaseUnchangedPeer(this.runId)
+        peer.source?.releaseUnchangedPeer(this.runId); peer.componentText?.releaseUnchangedPeer(this.runId); peer.htmlText?.releaseUnchangedPeer(this.runId)
       }
   }
   dispose(): void { for (const stop of this.off.splice(0)) stop(); cardPeers.get(this.session)?.trackers.delete(this) }
-  private invalidate(message = UNTRACEABLE): void { this.missing = true; this.missingMessage = message; this.source?.invalidate(); this.componentText?.invalidate() }
+  private invalidate(message = UNTRACEABLE): void { this.missing = true; this.missingMessage = message; this.source?.invalidate(); this.componentText?.invalidate(); this.htmlText?.invalidate() }
   private observe({ operation, result, before, after }: CommittedDocumentOperation): void {
     if (operation.epoch !== this.epoch || result.beforeRevision !== this.revision) { this.invalidate(); return }
     this.revision = result.revision
@@ -110,6 +115,12 @@ export class ElementChangeTracker {
       const command = operation.mutation.type === 'command' ? operation.mutation.command : null
       const exact = command?.type === 'markdown.splice' ? { from: command.from, to: command.to, inserted: command.text.length } : undefined
       this.source.advance(before.source, after.source, own, inverse, exact, provenance)
+      return
+    }
+    if (this.htmlText && this.target.kind === 'html-author-field') {
+      const a = readHtmlAuthorField(before, this.target), b = readHtmlAuthorField(after, this.target)
+      if (!sameFieldValue(a.identity, b.identity)) { this.invalidate(); return }
+      this.htmlText.advance(a.value, b.value, own, inverse, undefined, provenance)
       return
     }
     if (this.componentText && this.target.kind === 'course-instance') {
@@ -155,9 +166,10 @@ export class ElementChangeTracker {
   }
   view(submissionId: string): ElementChangeView {
     if (!this.finished) return { submissionId, state: 'pending', fields: [] }
-    const text = this.source ?? this.componentText
+    const text = this.source ?? this.componentText ?? this.htmlText
     if (text) {
-      const place = text.range && text.range.to > text.range.from ? {
+      const place = this.htmlText ? { target: structuredClone(this.target), content: this.htmlText.content }
+        : text.range && text.range.to > text.range.from ? {
         target: { ...this.target, ...text.range } as ExecutionSelectionTarget,
         content: typeof text.content === 'string' ? text.content : JSON.stringify(text.content),
       } : {}
@@ -174,7 +186,7 @@ export class ElementChangeTracker {
     const view = this.view(submissionId)
     if (view.state === 'none' || view.state === 'pending' || view.unavailable)
       return { status: 'unavailable', message: view.unavailable ?? '这次请求没有已完成的可撤销修改。' }
-    const wasUndone = (this.source ?? this.componentText)?.undone ?? this.undone
+    const wasUndone = (this.source ?? this.componentText ?? this.htmlText)?.undone ?? this.undone
     if ((direction === 'undo') === wasUndone) return { status: 'unavailable', message: '这次修改已处于所选状态。' }
     for (let attempt = 0; attempt < 3; attempt++) {
       const snapshot = await this.session.drain()
@@ -184,6 +196,12 @@ export class ElementChangeTracker {
         const inverse = this.source.prepare(snapshot.model.source, direction)
         if (!inverse) return { status: 'unavailable', message: UNTRACEABLE }
         command = { type: 'markdown.replace', source: inverse.value }; accept = inverse.accept
+      } else if (this.htmlText && this.target.kind === 'html-author-field') {
+        const { value } = readHtmlAuthorField(snapshot.model, this.target)
+        const inverse = this.htmlText.prepare(value, direction)
+        if (!inverse) return { status: 'unavailable', message: UNTRACEABLE }
+        command = { type: 'markdown.replace', source: prepareHtmlAuthorFieldSource(snapshot.model, this.target, inverse.value) }
+        accept = inverse.accept
       } else if (snapshot.model.kind === 'course-v10' && this.target.kind === 'course-instance') {
         const t: CourseInstanceTarget = this.target
         if (!componentFields(snapshot.model, t)) return { status: 'unavailable', message: UNTRACEABLE }
