@@ -68,6 +68,10 @@ export function createEsbuildComponentCompiler(): ComponentCompiler {
         name: namespace,
         setup(builder) {
           builder.onResolve({ filter: /.*/ }, args => {
+            // Passive CSS addresses stay under the existing content CSP. They
+            // are not ambient filesystem modules and grant no network origin.
+            if ((args.kind === 'url-token' || args.kind === 'import-rule') && /^(?:data:|https?:|\/\/|cw-resource:|#)/i.test(args.path))
+              return { path: args.path, external: true }
             let requested: string | undefined
             if (args.kind === 'entry-point') requested = `/source/${relativeFile(input.entry)}`
             else if (args.path.startsWith('.') || args.kind === 'url-token' || args.kind === 'import-rule') {

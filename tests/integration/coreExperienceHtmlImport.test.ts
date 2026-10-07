@@ -138,9 +138,11 @@ it('passes CSS from siblings into the existing source owner/compiler/cache witho
   if (first.status !== 'ready') throw new Error('Expected actual CSS compilation')
   expect(first.artifact.css).toMatch(/rgb\(1,\s*2,\s*3\)/); expect(first.artifact.css).toContain(Buffer.from(pixel).toString('base64'))
   expect((await compilation.compile(compilationInput)).cacheHit).toBe(true)
-  const modified = { ...compilationInput, files: { ...compilationInput.files, 'styles/nested.css': '.sample{color:blue}' } }
+  const modified = { ...compilationInput, files: { ...compilationInput.files,
+    'styles/nested.css': '.sample{color:blue}.passive{background:url(data:image/png;base64,AQ==)}.remote{background:url(https://cdn.example/picture.png)}' } }
   const next = await compilation.compile(modified)
-  expect(next.cacheHit).toBe(false); if (next.status === 'ready') expect(next.artifact.css).toContain('blue')
+  expect(next.cacheHit).toBe(false); expect(next.status).toBe('ready')
+  if (next.status === 'ready') { expect(next.artifact.css).toContain('blue'); expect(next.artifact.css).toContain('https://cdn.example/picture.png') }
 })
 
 it('adopts HTML author records into the single H5 consumer with image override resources on normal save', async () => {
