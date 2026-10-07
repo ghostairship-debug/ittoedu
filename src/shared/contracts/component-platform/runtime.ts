@@ -69,9 +69,35 @@ export interface ComponentRuntimeTarget {
   emit(name: string, value: JsonValue): void
 }
 
-/** Ephemeral author observations; identity and mount generation belong to the host. */
+/** Identity is local to one component/HTML document; scopes contain real state or data-item keys. */
+export type ComponentAuthorScope = Record<string, string>
+export interface ComponentAuthorBindingStep { tag: string; index: number; attributes?: Record<string, string> }
+export interface ComponentAuthorBinding {
+  kind: 'dom'
+  path: ComponentAuthorBindingStep[]
+  textIndex?: number
+  baseline: string
+  context?: { path: ComponentAuthorBindingStep[]; value: string }[]
+}
+/** Author increments compose with the program's own transform; width/height resize its content box. */
+export interface ComponentAuthorGeometry {
+  translateX?: number; translateY?: number; scaleX?: number; scaleY?: number
+  width?: number; height?: number; rotation?: number
+}
+export interface ComponentAuthorRecord {
+  kind: 'text' | 'image'
+  scope?: ComponentAuthorScope
+  binding: ComponentAuthorBinding
+  overrides: { text?: string; src?: string; style?: Record<string, string>; geometry?: ComponentAuthorGeometry }
+}
+
+/** Ephemeral observations carry the persistent record needed to commit a first local edit. */
 export interface ComponentAuthorSpotInput {
   kind: 'text' | 'image'
+  authorKey?: string
+  scope?: ComponentAuthorScope
+  binding?: ComponentAuthorBinding
+  bindingStatus?: 'bound' | 'unmounted' | 'unresolved' | 'source-required'
   dataPath?: string[]
   sourceRegion?: { kind: 'implementation' | 'data'; path?: string[]; start: number; end: number;
     encoding?: 'html-text' | 'html-attribute' }

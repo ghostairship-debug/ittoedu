@@ -46,6 +46,11 @@ export function componentValueAt(project: CourseProjectV10, path: string[]): { e
 /** Array indexes locate a field; authored row/item/cell identities keep that field on its original object. */
 export function componentFieldIdentityPaths(project: CourseProjectV10, path: readonly string[]): string[][] {
   const identities: string[][] = []
+  // An internal authorKey is local to its instance; rebinding it changes the selected object.
+  if (path[0] === 'instances' && path[2] === 'data' && path[3] === 'authoringRecords' && path.length > 5) {
+    const record = path.slice(0, 5)
+    identities.push(...['kind', 'scope', 'binding'].map(field => [...record, field]))
+  }
   for (let length = 3; length < path.length; length++) {
     const parent = path.slice(0, length), field = componentValueAt(project, parent)
     if (!field.exists || !field.value || typeof field.value !== 'object' || Array.isArray(field.value)) continue
