@@ -149,7 +149,7 @@ export const useEditorStore = create<EditorState>((set, get) => {
     projectPath: null, dirty: false,
     courseView: courseBridge.read(), courseBridge, courseKernel, courseInputs, localDraftVersion: 0,
     ...editorShellSlice, ...lifecycle, ...structure, ...slide, ...flow, ...spatial, ...commands, ...design,
-    connectCourseDocuments: async (api, recovery) => { await courseBridge.connect(api); courseInputs.connect(api, recovery) },
+    connectCourseDocuments: (api, recovery) => courseBridge.connect(api, () => courseInputs.connect(api, recovery)),
     async activateCourseDocument(id) { const current = courseBridge.read().activeDocumentId; if (current && current !== id) await retainBeforeNavigation(current); await courseBridge.activate(id) },
     async closeCourseDocument(id) {
       await retainBeforeNavigation(id)

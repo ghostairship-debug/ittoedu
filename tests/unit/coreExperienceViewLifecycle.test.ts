@@ -41,6 +41,20 @@ async function fixture() {
 }
 
 describe('document input owner and Main close boundary', () => {
+  it('connects recovery before publishing the first document view', async () => {
+    const f = await fixture(), store = useEditorStore.getState(), reads = vi.spyOn(f.api, 'readAuthoringDrafts')
+    const restores: Promise<void>[] = []
+    const stop = store.courseBridge.subscribe(() => {
+      if (store.courseBridge.read().activeDocumentId === f.snapshot.documentId)
+        restores.push(store.courseInputs.restore(f.snapshot.documentId))
+    })
+    try {
+      await store.connectCourseDocuments(f.api)
+      expect(restores.length).toBeGreaterThan(0)
+      await Promise.all(restores)
+      expect(reads).toHaveBeenCalledWith(f.snapshot.documentId)
+    } finally { stop() }
+  })
   it('preserves a refused input for its document epoch and refuses Save without moving History', async () => {
     const f = await fixture(); f.setDraft()
     f.drain.mockRejectedValue(new Error('正文提交已拒绝'))

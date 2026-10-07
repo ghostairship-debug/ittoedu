@@ -111,15 +111,19 @@ export class CourseV10DocumentBridge {
     for (const listener of this.listeners) listener()
   }
 
-  connect(api: DocumentHostAPI): Promise<void> {
-    if (this.api === api && this.connecting) return this.connecting
-    if (this.api === api && this.connected) return Promise.resolve()
+  connect(api: DocumentHostAPI, onAccepted?: () => void): Promise<void> {
+    if (this.api === api) {
+      onAccepted?.()
+      if (this.connecting) return this.connecting
+      if (this.connected) return Promise.resolve()
+    }
     if (this.api && this.api !== api) {
       if ([...this.projections.values()].some(projection => !projection.canRelease()))
         return Promise.reject(new Error('文档仍有未确认输入，已保留原连接与输入'))
       this.dispose()
     }
     this.api = api
+    onAccepted?.()
     this.stopEvents = api.subscribe(event => {
       if (event.type === 'closed' && this.projections.get(event.documentId)?.read().committed?.epoch === event.epoch)
         queueMicrotask(() => { if (this.api === api) this.detachClosed(event.documentId) })
