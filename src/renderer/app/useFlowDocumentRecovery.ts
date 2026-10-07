@@ -17,8 +17,12 @@ interface FlowDocumentRecoveryOptions {
   onRestore(draft: FlowDocumentDraft): void
   onError(message: string): void
 }
+export interface FlowDocumentRecoveryEntry {
+  target: FlowDocumentRecoveryTarget
+  draft: FlowDocumentDraft
+}
 /** Serial writes keep late recovery IO bound to its original project and surface. */
-export function useFlowDocumentRecovery(options: FlowDocumentRecoveryOptions): { flush(): Promise<boolean> } {
+export function useFlowDocumentRecovery(options: FlowDocumentRecoveryOptions): { flush(): Promise<boolean>; flushAll(entries: readonly FlowDocumentRecoveryEntry[]): Promise<boolean> } {
   const activation = useRef<{ key: string; identity: FlowDocumentRecoveryIdentity } | null>(null)
   const activationKey = options.target ? recoveryActivationKey(options.target) : ''
   if (!options.target) activation.current = null
@@ -83,5 +87,37 @@ export function useFlowDocumentRecovery(options: FlowDocumentRecoveryOptions): {
     }
   }, [activationKey, identity, options.target?.revision, options.draft, options.port, enqueue])
 
-  return { flush: useCallback(async () => { await writes.current; return !failed.current }, []) }
+  return {
+    flush: useCallback(async () => { await writes.current; return !failed.current }, []),
+    flushAll: useCallback(async (entries: readonly FlowDocumentRecoveryEntry[]) => {
+      // Use the same serialized IO owner as the active view. A background draft
+      // must not retire the active view's recovery epoch while closing the window.
+      const frozen = structuredClone(entries), port = latest.current.options.port
+      if (!frozen.length) { await writes.current; return true }
+      if (!port) { report(new Error('正文恢复服务不可用，输入仍保留')); return false }
+      let complete = true
+      const pending = writes.current.then(async () => {
+        const identities = new Map<string, FlowDocumentRecoveryIdentity>()
+        for (const { target, draft } of frozen) {
+          const active = latest.current.identity
+          let recoveryIdentity: FlowDocumentRecoveryIdentity
+          if (active && active.projectId === target.projectId && active.projectPath === target.projectPath) recoveryIdentity = active
+          else {
+            const retained = identities.get(target.projectId)
+            if (retained) recoveryIdentity = retained
+            else {
+              recoveryIdentity = createRecoveryIdentity(target)
+              await port.read(recoveryIdentity)
+              identities.set(target.projectId, recoveryIdentity)
+            }
+          }
+          await port.write(serializeFlowDocumentRecovery({ ...recoveryIdentity, revision: target.revision }, draft))
+          if (isCurrent(recoveryIdentity)) failed.current = false
+        }
+      }).catch(error => { complete = false; report(error) })
+      writes.current = pending
+      await pending
+      return complete && !failed.current
+    }, [report, isCurrent]),
+  }
 }
