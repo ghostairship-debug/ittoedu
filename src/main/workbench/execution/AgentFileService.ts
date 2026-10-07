@@ -146,6 +146,15 @@ export class AgentFileService implements AgentFilePort {
       if (!this.mayWrite(context, paths[i]!)) throw new Error('工作空间外修改需要当前操作的明确批准')
     }
   }
+  /** Original bytes for material import, browser upload, computation and component packages. */
+  async readAuthorizedFile(context: AgentFileContext, raw: string): Promise<{ path: string; name: string; version: string; bytes: Uint8Array }> {
+    context.assertActive?.()
+    const filename = await this.filenameOrDirectory(context, raw, false)
+    const binding = await this.host.artifacts.bind(filename)
+    const bytes = await this.host.artifacts.read(binding)
+    context.assertActive?.()
+    return { path: binding.path, name: path.basename(binding.path), version: binding.fileVersion, bytes }
+  }
   async preflightOffice(context: AgentFileContext, name: OfficeContentToolName, raw: unknown): Promise<{ paths: string[]; outside: boolean }> {
     if (name !== 'office.inspect' && context.permission === 'read-only') throw new Error('只读任务不能修改 Office 文件')
     let filename: string

@@ -1,6 +1,9 @@
 import { mapAcknowledgedComponentRange, mapAcknowledgedRange, type ComponentTextSplice, type SourceSplice } from './ToolReadCoverage'
 import { HostToolCoordinator, isHostToolName, type HostToolServices } from './HostToolServices'
 import { workbenchServiceRegistration } from './WorkbenchServiceTools'
+import { materialToolRegistration } from './MaterialTools'
+import { hostArtifactSaveRegistration } from './HostArtifactTools'
+import { officeToolRegistration } from './ToolCatalog'
 import type { HostImageInput, PrepareImageResourcePort } from './imageResource'
 import type { AssetSource } from '../../shared/contracts/media-v1/types'
 import type { ImageAssetResource } from './imageAssetMetadata'
@@ -193,7 +196,8 @@ export class DocumentToolGateway implements ToolGateway {
       ? run.grant.fileAccess.permission === 'read-only' ? 'read' as const : 'write' as const : undefined
     const allowed = selectRunToolNames(scopes, { standaloneImage, projectFiles }, {
       ...this.hostTools.supportContext(), componentContent: !!this.options.componentContent,
-      courseAuthoring: run.courseAuthoring, workbenchServices: run.grant.actor === 'agent' && !!run.grant.fileAccess,
+      courseAuthoring: run.courseAuthoring, workbenchServices: !!run.grant.fileAccess,
+      fileAccess: run.grant.fileAccess?.permission === 'read-only' ? 'read' : 'write',
     })
     const names = visibleRunToolNames(allowed, run.loadedFamilies)
     const batchMutationNames = mutationNamesIn(names)
@@ -754,6 +758,12 @@ export class DocumentToolGateway implements ToolGateway {
     if (!callId) throw new ToolError('invalid-call-id', '工具调用缺少宿主编号')
     return `tool:${documentDigest({ runId, callId })}`
   }
+  /** Main approval binds exact paths to this existing operation identity. */
+  authorizeOperationPaths(runId: string, callId: string, paths: readonly string[]): void {
+    const run = this.run(runId)
+    if (run.stopped) throw new ToolError('run-stopped', '任务已停止')
+    this.hostTools.authorizeOperationPaths(runId, this.operationIdentity(runId, callId), paths)
+  }
 
   private identifyCall(runId: string, callId: string, input: ModelToolCall) {
     const operationId = this.operationIdentity(runId, callId)
@@ -1025,7 +1035,7 @@ export class DocumentToolGateway implements ToolGateway {
     // Durable replay precedes target validation: a successful call has already changed that target.
     const receipt = this.findReceipt(runId, operationId, requestDigest)
     if (receipt) return receipt
-    if (call.name === 'asset.save') {
+    if (call.name === 'asset.save' || call.name === 'artifact.save' || call.name.startsWith('office.')) {
       const imported = await this.hostTools.lookup(runId, operationId, requestDigest, call.name)
       if (imported) return imported
     }
@@ -1041,6 +1051,11 @@ export class DocumentToolGateway implements ToolGateway {
     }
     const definition = toolCatalog.find(tool => tool.name === call.name)
     if (!definition) throw new ToolError('unsupported-tool', '此工具尚未接入正式 Gateway')
+    const office = officeToolRegistration(call.name)
+    if (office) return office.handler({ runId, operationId, host: this.hostTools }, call.input)
+    const material = materialToolRegistration(call.name)
+    if (material) return material.handler({ runId, operationId, host: this.hostTools }, call.input)
+    if (call.name === 'artifact.save') return hostArtifactSaveRegistration.handler({ runId, operationId, requestDigest, host: this.hostTools }, call.input)
     const projectTool = projectFileRegistration(call.name)
     if (projectTool) return projectTool.handler({ projectFiles: async (name, input) => {
       if (name === 'project.save') {

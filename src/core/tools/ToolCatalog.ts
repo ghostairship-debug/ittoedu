@@ -1,4 +1,7 @@
-import { hostToolCatalog } from './HostToolServices'
+import { hostToolCatalog, type HostToolCoordinator } from './HostToolServices'
+import { officeContentSchemas, officeContentTools } from './OfficeContentTools'
+import { materialToolRegistrations } from './MaterialTools'
+import { hostArtifactSaveRegistration } from './HostArtifactTools'
 import { workbenchServiceToolCatalog } from './WorkbenchServiceTools'
 import { agentFileRegistrations } from './AgentFileTools'
 import { skillReadTool, skillListTool } from './SkillTools'
@@ -26,6 +29,16 @@ export interface CanonicalToolHandlers {
   mutate(call: ModelToolCall): Promise<ToolResult>
 }
 const registerCanonical = toolRegistrationFor<CanonicalToolHandlers>()
+const registerOffice = toolRegistrationFor<{ runId: string; operationId: string; host: HostToolCoordinator }>()
+export const officeToolRegistrations = officeContentTools.map(tool => registerOffice({ name: tool.name,
+  description: tool.description, inputSchema: officeContentSchemas[tool.name],
+  manual: { label: tool.name, group: tool.name === 'office.inspect' ? 'read' : 'edit', targetKinds: [] },
+}, { capability: tool.name === 'office.inspect' ? 'read' : 'write', effect: tool.name === 'office.inspect' ? null : 'office-write',
+  family: 'office', supports: context => context.office !== false && context.workbenchServices !== false
+    && (tool.name === 'office.inspect' || context.fileAccess !== 'read'), targets: () => [],
+  handler: (context, input) => context.host.executeOffice(context.runId, context.operationId, tool.name, input),
+}))
+export function officeToolRegistration(name: string) { return officeToolRegistrations.find(tool => tool.name === name) }
 export const canonicalMutationTools = [
   registerCanonical({ name: 'text.replace', description: '替换已授权文字字段或精确范围；保留范围外文字及富文本格式。Project V10 使用宿主捕获的组件文字字段句柄，展示状态仍固定在原目标。对象样式使用 object.update；纯文本文档保持纯文本。',
     inputSchema: z.object({ target, content: z.string(), format: z.enum(['text', 'html']).optional() }).strict(), manual: { label: '替换正文', group: 'edit', targetKinds: ['markdown-range', 'course-instance'] } },
@@ -153,7 +166,8 @@ export const gatewayToolRegistrations = [
 ] as const
 export function gatewayToolRegistration(name: string) { return gatewayToolRegistrations.find(tool => tool.name === name) }
 /** One item owns each current tool's parser, support, effects, targets and actual owner handler. */
-export const toolCatalog = [...hostToolCatalog, ...workbenchServiceToolCatalog, ...projectFileRegistrations, ...gatewayToolRegistrations, ...canonicalMutationTools]
+export const toolCatalog = [...hostToolCatalog, ...workbenchServiceToolCatalog, ...projectFileRegistrations, ...gatewayToolRegistrations, ...canonicalMutationTools,
+  ...officeToolRegistrations, ...materialToolRegistrations, hostArtifactSaveRegistration]
 export const toolRegistrations = [...toolCatalog, ...agentFileRegistrations]
 export function toolRegistration(name: string) { return toolRegistrations.find(tool => tool.name === name) }
 /** Model and MCP schemas are projected from the actual canonical parsers. */

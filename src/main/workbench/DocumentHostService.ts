@@ -26,6 +26,7 @@ import { createEsbuildComponentCompiler } from './contentApply/compilation/esbui
 import { ContentApplyService } from './contentApply/applyService'
 import { readComponentProjectFileInput, prepareComponentProjectFileSource } from './projectFiles/componentPlatformFileInput'
 import { AgentFileService } from './execution/AgentFileService'
+import { HostArtifactDeliveryService } from './execution/HostArtifactDeliveryService'
 
 function canonicalKey(filename: string): string {
   return process.platform === 'win32' ? filename.toLowerCase() : filename
@@ -49,6 +50,7 @@ export class DocumentHostService {
   readonly fileCoordinator: DocumentFileCoordinator
   readonly artifacts: FileArtifactService
   readonly agentFiles: AgentFileService
+  readonly artifactDeliveries: HostArtifactDeliveryService
   /** Main consumers share compilation output; each runtime still owns its own load lease. */
   readonly compilation: Pick<InMemoryComponentCompilation, 'compile'>
   private readonly journal
@@ -63,7 +65,8 @@ export class DocumentHostService {
   private readonly authoringDraftDirectory: string
   private authoringDraftTail: Promise<unknown> = Promise.resolve()
 
-  constructor(directory: string, fileDependencies: Pick<WorkspaceFilesDependencies, 'trashItem' | 'showItemInFolder' | 'fileOperations'> = {}) {
+  constructor(directory: string, fileDependencies: Pick<WorkspaceFilesDependencies, 'trashItem' | 'showItemInFolder' | 'fileOperations'> = {},
+    options: { artifactDeliveryDirectory?: string } = {}) {
     this.authoringDraftDirectory = path.join(directory, 'authoring-drafts')
     this.drivers = [createMarkdownDriver(), createTextDriver(), createCourseV10Driver()]
     this.journal = createDocumentJournal({ directory })
@@ -94,6 +97,11 @@ export class DocumentHostService {
       aroundOperation: perform => this.fileCoordinator.withFileOperation(perform) })
     this.artifacts = new FileArtifactService(this)
     this.agentFiles = new AgentFileService(this)
+    this.artifactDeliveries = new HostArtifactDeliveryService({
+      journalDirectory: options.artifactDeliveryDirectory ?? path.join(directory, 'artifact-deliveries'),
+      withFileOperation: work => this.fileCoordinator.withFileOperation(work),
+      assertTarget: filename => this.assertFileAvailable(filename),
+    })
   }
 
   setEventSink(sink?: (event: DocumentEvent) => void): void { this.eventSink = sink }

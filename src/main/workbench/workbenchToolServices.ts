@@ -3,6 +3,11 @@ import { randomUUID } from 'node:crypto'
 import { app } from 'electron'
 import type { BrowserWindow } from 'electron'
 import type { HostToolServices } from '../../core/tools/HostToolServices'
+import type { ToolRunGrant } from '../../shared/workbench/tools'
+import type { AgentFileContext } from '../../core/tools/AgentFileTools'
+import { materialListSchema, materialReadSchema } from '../../core/tools/MaterialTools'
+import { dispatchMaterialTool } from './execution/MaterialReadTools'
+import { attachmentsDesktopService } from './attachments/attachmentsDesktopService'
 import type { ExportBuildReply } from '../../shared/workbench/toolPorts'
 import { IPC_CHANNELS } from '../../shared/ipcTypes'
 import { documentHost } from './documentHost'
@@ -152,6 +157,17 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     images: observationImages,
   })
   const deliverySignals = new Map<string, AbortController>()
+  const runGrants = new Map<string, ToolRunGrant>()
+  const materialIds = new Map<string, Set<string>>()
+  const materialImages = new Map<string, Map<string, { mimeType: string; bytes: Uint8Array }>>()
+  const fileContext = (runId: string, approvedPaths?: readonly string[], assertActive?: () => void): AgentFileContext => {
+    const grant = runGrants.get(runId), access = grant?.fileAccess
+    if (!access?.workspaceRoot) throw new Error('任务缺少已冻结的文件读取范围')
+    return { runId, workspaceRoot: access.workspaceRoot, permission: access.permission,
+      conversationHome: access.conversationHome, conversationHomeRoot: access.conversationHomeRoot,
+      readOnlyRoots: Object.values(access.boundPaths ?? {}), approvedOutsidePaths: approvedPaths,
+      assertActive: () => { deliverySignals.get(runId)?.signal.throwIfAborted(); if (!runGrants.has(runId)) throw new Error('任务已停止'); assertActive?.() } }
+  }
   const enabledSkillRoots = new EnabledSkillRootStore(path.join(directory, 'enabled-skill-roots.json'))
   const frozenSkillRoots = new Map<string, readonly SkillRoot[]>()
   const skillRootErrors = new Map<string, string>()
@@ -217,6 +233,61 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
     signalForRun: runId => deliverySignals.get(runId)?.signal,
   })
   const services: HostToolServices = {
+    office: { execute: async ({ grant, operationId, name, input, approvedPaths, assertActive }) => {
+      const result = await host.agentFiles.executeOffice(fileContext(grant.runId, approvedPaths, assertActive), name, input, operationId)
+      return { kind: 'read', data: result.data }
+    } },
+    artifacts: {
+      lookup: (runId, operationId) => host.artifactDeliveries.lookup(operationId, runId),
+      save: ({ grant, operationId, source, bytes, approvedPaths, assertActive }) => {
+        const access = fileContext(grant.runId, approvedPaths, assertActive)
+        const destination = path.resolve(access.workspaceRoot, source.destination)
+        return host.artifactDeliveries.deliver({ runId: grant.runId, operationId, workspaceRoot: access.workspaceRoot,
+          permission: access.permission, destination: source.destination, sourceKind: source.kind,
+          sourceId: source.kind === 'image' ? `${source.job}@${source.resourceId}` : `${source.job}@${source.name}`, bytes,
+          approvedTargetPath: approvedPaths?.find(value => path.resolve(value) === destination), assertActive: access.assertActive! })
+      },
+    },
+    computeInputs: { freeze: async (runId, sources) => {
+      const inputs = await Promise.all(sources.map(source => host.agentFiles.readAuthorizedFile(fileContext(runId), source)))
+      if (new Set(inputs.map(input => input.name)).size !== inputs.length) throw new Error('计算输入文件重名；请先选择不同文件名')
+      return inputs.map(({ name, bytes }) => ({ name, bytes }))
+    } },
+    materials: {
+      read: async (runId, name, raw) => {
+        const ids = materialIds.get(runId)
+        if (!ids) throw new Error('材料读取任务已停止')
+        const attachments = (await attachmentsDesktopService()).attachments
+        let input = raw
+        if (name === 'material.list') {
+          const requested = materialListSchema.parse(raw)
+          if (requested.path) {
+            const file = await host.agentFiles.readAuthorizedFile(fileContext(runId), requested.path)
+            const snapshot = await attachments.receiveBytes({ name: file.name, bytes: file.bytes,
+              source: { kind: 'workspace', authorizationId: runId, pathHint: file.path } }, { signal: deliverySignals.get(runId)?.signal })
+            ids.add(snapshot.id)
+            input = { attachmentId: snapshot.id, offset: requested.offset, limit: requested.limit }
+          }
+        }
+        const result = await dispatchMaterialTool(attachments, ids, name, input, deliverySignals.get(runId)?.signal)
+        if ('admittedSourceIds' in result) for (const id of result.admittedSourceIds) ids.add(id)
+        if (name === 'material.read' && 'modelMessage' in result && result.modelMessage) {
+          const requested = materialReadSchema.parse(input)
+          const image = await attachments.readRepresentation(requested.attachmentId, requested.representationId)
+          const resourceId = `material:${requested.attachmentId}:${requested.representationId}`
+          let resources = materialImages.get(runId)
+          if (!resources) { resources = new Map(); materialImages.set(runId, resources) }
+          resources.set(resourceId, { mimeType: image.representation.mediaType, bytes: image.bytes })
+          return { kind: 'read', data: { ...result.data, image: { resourceId, mimeType: image.representation.mediaType } } }
+        }
+        return { kind: 'read', data: result.data }
+      },
+      readResource: async ({ runId, resourceId }) => {
+        const image = materialImages.get(runId)?.get(resourceId)
+        if (!image) throw new Error('材料图片不属于当前任务或已失效')
+        return image
+      },
+    },
     projectFiles: createProjectFileServices(host),
     deliveries,
     observations: {
@@ -262,6 +333,8 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
         error instanceof Error ? `Skill 启用配置无法读取：${error.message}` : 'Skill 启用配置无法读取') }
       const controller = new AbortController()
       deliverySignals.set(grant.runId, controller)
+      runGrants.set(grant.runId, structuredClone(grant))
+      materialIds.set(grant.runId, new Set(grant.materialIds ?? []))
       try {
         web.beginRun(grant.runId)
         openImages.beginRun(grant.runId)
@@ -270,6 +343,7 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
         media.beginRun(grant.runId, { writable: grant.actor === 'agent' && !!grant.fileAccess && grant.fileAccess.permission !== 'read-only', capabilities: [] })
       } catch (error) {
         controller.abort(); deliverySignals.delete(grant.runId)
+        runGrants.delete(grant.runId); materialIds.delete(grant.runId); materialImages.delete(grant.runId)
         approvals.revokeRun(grant.runId)
         frozenSkillRoots.delete(grant.runId); skillRootErrors.delete(grant.runId)
         await Promise.allSettled([web.stopRun(grant.runId), mcp.endRun(grant.runId), media.stopRun(grant.runId)])
@@ -282,6 +356,8 @@ export function installWorkbenchToolServices(context: { getMainWindow(): Browser
       deliverySignals.get(runId)?.abort(); deliverySignals.delete(runId); observationImages.clearRun(runId); skills.release(runId)
       openImages.stopRun(runId)
       frozenSkillRoots.delete(runId); skillRootErrors.delete(runId)
+      runGrants.delete(runId); materialIds.delete(runId); materialImages.delete(runId); host.agentFiles.releaseRun(runId)
+      await host.artifactDeliveries.stopRun(runId)
       await Promise.allSettled([web.stopRun(runId), mcp.stopRun(runId), media.stopRun(runId), ...(compute ? [compute.cancelRun(runId)] : [])])
     },
     images: { selection: (runId, _documentId, operation) => roles.selection(runId, operation),
