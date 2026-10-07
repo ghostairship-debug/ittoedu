@@ -120,6 +120,37 @@ it('edits a dynamic HTML author field through the real Gateway without losing co
   expect(await gateway.execute('html-ai', 'stale', { name: 'text.replace', input: { target: stale, content: 'Stale AI' } })).toMatchObject({ kind: 'error', code: 'target-conflict' })
 })
 
+it('conflicts a delayed dynamic HTML reply after undo removes the human text record', async () => {
+  const driver = new TextDriver(), original = '<body><div id="app"></div><script>app.textContent="Original"</script></body>'
+  const registry = new DocumentRegistry({ drivers: [driver], createId: () => crypto.randomUUID(), bindingKey: binding => binding.path,
+    persistence: { async append() {}, async save() { throw new Error('unused') } } })
+  const session = await registry.create(driver.load(new TextEncoder().encode(original)), 'undo-dynamic.html')
+  const target: Extract<ToolTarget, { kind: 'html-author-field' }> = { kind: 'html-author-field', authorKey: 'a', field: 'text',
+    record: { kind: 'text', binding: { kind: 'dom', path: [{ tag: 'body', index: 1 }, { tag: 'div', index: 0, attributes: { id: 'app' } }], baseline: 'Original' },
+      overrides: { text: 'Human prior', geometry: { translateX: 40 } } } }
+  const before = session.read()
+  expect(await session.execute({ documentId: before.documentId, epoch: before.epoch, baseRevision: before.revision, operationId: 'human-text', actor: 'human',
+    mutation: { type: 'command', command: { type: 'markdown.replace', source: patchHtmlAuthoringRecords(original, { a: target.record }) } } })).toMatchObject({ status: 'applied' })
+  const gateway = new DocumentToolGateway(registry, [driver], () => crypto.randomUUID())
+  await gateway.beginRun({ runId: 'undo-ai', actor: 'agent', documents: [{ documentId: session.documentId, writable: [target] }] })
+  const handle = await gateway.issueTarget('undo-ai', session.documentId, target), human = session.read()
+  expect(await session.execute({ documentId: human.documentId, epoch: human.epoch, baseRevision: human.revision, operationId: 'undo-human', actor: 'human',
+    mutation: { type: 'undo' } })).toMatchObject({ status: 'applied' })
+  const undone = session.read()
+  expect(readEditableTargetContent(undone.model, target)).toEqual({ text: 'Original', format: 'text' })
+  expect(await gateway.execute('undo-ai', 'stale-reply', { name: 'text.replace', input: { target: handle, content: 'AI stale' } }))
+    .toMatchObject({ kind: 'error', code: 'target-conflict' })
+  expect(session.read().revision).toBe(undone.revision)
+  expect(session.read().model).toEqual(driver.load(new TextEncoder().encode(original)))
+  // A fresh first edit remains legal and must not resurrect the undone geometry.
+  const fresh = await gateway.issueTarget('undo-ai', session.documentId, target)
+  expect(await gateway.execute('undo-ai', 'fresh-reply', { name: 'text.replace', input: { target: fresh, content: 'Fresh edit' } }))
+    .toMatchObject({ kind: 'document-operation', result: { status: 'applied' } })
+  const current = session.read()
+  if (current.model.kind !== 'text') throw new Error('Expected text')
+  expect(readHtmlAuthoringRecords(current.model.source).a.overrides).toEqual({ text: 'Fresh edit' })
+})
+
 it('does not treat an ambiguous static sibling as the content of a dynamic scoped field', () => {
   const driver = new TextDriver(), source = '<body><p>Original</p><p>Static B</p><script>document.querySelector("p").dataset.itemId="one"</script></body>'
   const target: Extract<ToolTarget, { kind: 'html-author-field' }> = { kind: 'html-author-field', authorKey: 'a', field: 'text',

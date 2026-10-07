@@ -25,7 +25,9 @@ export function readHtmlAuthorField(model: DocumentModel, target: HtmlAuthorFiel
   const identity = (record: typeof frozen) => ({ kind: record.kind, scope: record.scope, binding: record.binding })
   if (target.field !== (frozen.kind === 'text' ? 'text' : 'src')) throw new Error('HTML 作者字段类型已改变')
   if (current && !equalComponentValue(identity(current), identity(frozen))) throw new Error('HTML 作者字段绑定已改变，请重新选择')
-  const record = current ?? frozen
+  // A captured spot supplies its binding when no record exists yet. Its old
+  // overrides are never current data after a human undo removes that record.
+  const record = current ?? { ...frozen, overrides: {} }
   if (target.source) {
     const { from, to } = target.source
     if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from < 0 || to < from || to > model.source.length) throw new Error('HTML 正文字段范围已失效')
