@@ -106,7 +106,8 @@ export class ComponentPlatformRuntime {
     this.media = new ComponentWorldMedia(() => this.audioManager, this.report)
     this.interactions = new ComponentWorldInteractions({ project: () => this.project, element: id => this.targetElement(id),
       document: () => this.targetElements.values().next().value?.ownerDocument ?? this.roots.values().next().value?.ownerDocument,
-      audio: () => this.audioManager, video: (action, signal) => this.media.executeVideo(action, signal), navigation: options.studentNavigation ?? options.teacherController, report: this.report, active: () => this.playing, playback: () => this.mode !== 'capture' })
+      audio: () => this.audioManager, video: (action, signal) => this.media.executeVideo(action, signal), navigation: options.studentNavigation ?? options.teacherController, report: this.report, active: () => this.playing, playback: () => this.mode !== 'capture',
+      controlsVisible: () => this.mode === 'edit' && !this.playing || this.project?.playback?.controls !== 'none' })
     const image = createImageRuntimeImplementation(id => {
       const url = this.assetUrl(id)
       return url ? { url } : undefined
@@ -545,7 +546,10 @@ export class ComponentPlatformRuntime {
     if (this.retired || active === this.playing || this.mode === 'capture') return
     this.playing = active
     if (active) { this.resumeMedia?.(); this.resumeMedia = undefined; this.interactions.applyAllVisibility(); this.emit('__runtime.playing', true) }
-    else { this.interactions.pause(); this.resumeMedia = this.audioManager?.pauseActive() }
+    else {
+      this.interactions.pause(); this.resumeMedia = this.audioManager?.pauseActive()
+      if (this.mode === 'edit') this.interactions.applyAllVisibility()
+    }
   }
   previewMotion(action: import('../../shared/interactionTypes').NodeMotionAction, signal: AbortSignal): Promise<boolean> {
     return this.interactions.motion(action, { signal, ruleId: 'editor-preview', stepId: 'editor-preview', restartFromBeginning: true }, true)

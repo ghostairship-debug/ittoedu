@@ -7,6 +7,7 @@ import type { AudioManager } from '../../AudioManager'
 import { isComponentVisibleAtSurface, owningContainer } from '../../../shared/contracts/component-platform'
 import { spatialSemanticVisible } from '../../surfaces/spatial/componentPlatform/graph'
 import type { ComponentMotionPort, ComponentMotionTask } from '../../../shared/contracts/component-platform/motion'
+import { isGlobalTeacherController } from '../../../shared/teacherControllerViewportGeometry'
 
 type ActionContext = Parameters<ComponentInteractionPorts['executeAction']>[1]
 type TriggerListener = Parameters<ComponentInteractionPorts['subscribeTrigger']>[1]
@@ -20,6 +21,7 @@ export interface ComponentInteractionWorld {
   report(message: string): void
   active(): boolean
   playback(): boolean
+  controlsVisible?(): boolean
 }
 
 /** Targets, events and transient values come from the single document world. */
@@ -111,10 +113,11 @@ export class ComponentWorldInteractions {
   }
 
   applyVisibility(id: string, snapshot = this.world.navigation?.read()): void {
-    const element = this.world.element(id), instance = this.world.project()?.instances[id]
-    const surfaceId = snapshot?.locationId ?? '', surface = this.world.project()?.surfaces.find(value => value.id === surfaceId)
+    const element = this.world.element(id), project = this.world.project(), instance = project?.instances[id]
+    const surfaceId = snapshot?.locationId ?? '', surface = project?.surfaces.find(value => value.id === surfaceId)
     const presentation = [...(this.presentationVisibility.get(id)?.values() ?? [])].filter(value => value.element === element).at(-1)?.visible
-    if (element && instance) element.hidden = !isComponentVisibleAtSurface(instance, surfaceId)
+    if (element && instance && project) element.hidden = !isComponentVisibleAtSurface(instance, surfaceId)
+      || this.world.controlsVisible?.() === false && isGlobalTeacherController(project, id)
       || !spatialSemanticVisible(surface?.spatial, id, snapshot?.zoom ?? 1)
       || !(presentation ?? (this.leases.has(id) ? true : undefined) ?? this.visibility.get(id) ?? (!this.world.playback() || instance.playbackInitialVisibility !== 'hidden'))
   }

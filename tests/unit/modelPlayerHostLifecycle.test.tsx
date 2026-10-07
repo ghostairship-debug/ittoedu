@@ -14,6 +14,12 @@ import { createTeacherControllerHudGeometry, isGlobalTeacherController, projectT
 import { componentFragmentStateKey } from '../../src/player/componentPlatform/fragments'
 import { FlowWorkspace } from '../../src/renderer/ui/FlowWorkspace'
 import { createComponentSpatialCameraPort } from '../../src/player/surfaces/spatial/componentSpatialAdapter'
+import { CourseV10Driver } from '../../src/core/drivers/CourseV10Driver'
+import { captureComponentOperation } from '../../src/core/drivers/courseV10Operations'
+import { buildCourseGlobalPropertiesOwner } from '../../src/renderer/ui/properties/CourseGlobalPropertiesContextBuilder'
+import { buildPublishedCourseV3 } from '../../src/core/publish/componentPlatform/buildPublishedCourseV3'
+import { mountPublishedCourseV3 } from '../../src/player/componentPlatform/publishedPlayer'
+import type { DocumentModel } from '../../src/shared/workbench/document'
 
 const flowProbe = vi.hoisted(() => ({ state: {} as Record<string, any> }))
 vi.mock('../../src/renderer/store/editorStore', () => ({ useEditorStore: (select: (state: typeof flowProbe.state) => unknown) => select(flowProbe.state) }))
@@ -287,4 +293,58 @@ it('awaits real cross-surface camera commits for teacher and previous-key naviga
     await deactivated
     expect(ports.world.isPlaying()).toBe(false)
   } finally { root.unmount(); await ports.world.dispose(); camera.dispose(); container.remove() }
+})
+
+it('consumes the real no-controls setting in author try-run and Published visibility while preserving the editing entry and other global content', async () => {
+  const course = createBlankCourseProjectV10('不显示控制器'), id = course.global.overlay[0]
+  course.definitions[TEXT_DEFINITION.id] = TEXT_DEFINITION
+  course.instances.decoration = { id: 'decoration', definitionId: TEXT_DEFINITION.id,
+    data: JSON.parse(JSON.stringify(createTextComponentData('保留的全局内容'))), frame: { width: 200, height: 50, transform: [1, 0, 0, 1, 20, 20] } }
+  course.global.underlay.push('decoration')
+  const authorInstances = structuredClone(course.instances), driver = new CourseV10Driver()
+  let model: Extract<DocumentModel, { kind: 'course-v10' }> = { kind: 'course-v10', project: course, resources }
+  const choose = (controls: 'canvas' | 'none') => {
+    const target = { documentId: 'controls', epoch: 'controls-epoch', project: model.project, editingProject: model.project,
+      resources, surfaceId: model.project.surfaces[0].id, activeStateId: null, instanceIds: [], instanceId: null }
+    const owner = buildCourseGlobalPropertiesOwner({
+      read: { project: model.project, editingGlobal: true, selectedInstanceIds: [], surface: model.project.surfaces[0] } as unknown as Parameters<typeof buildCourseGlobalPropertiesOwner>[0]['read'],
+      selectedContext: null, assets: {}, key: 'controls', liveTarget: () => target,
+      submit: edits => { const next = driver.apply(model, captureComponentOperation(model.project, edits)); if (next.kind !== 'course-v10') throw new Error('Expected V10'); model = next },
+      preview() {}, ensureTeacherController: async () => {}, editSource() {}, openAutomation() {}, report: error => { throw error },
+    })!
+    owner.commands.updatePlayback({ controls })
+  }
+  choose('none')
+  expect(model.project.playback?.controls).toBe('none')
+  const editorRoot = document.createElement('div'); document.body.append(editorRoot)
+  const editor = mountV10Model({ root: editorRoot, model, runScopeId: 'controls-edit', mode: 'edit' })
+  try {
+    await editor.ready
+    const panel = editorRoot.querySelector('nav[aria-label="教师控制台"]')!, target = editor.runtime.targetElement(id)
+    expect(panel).toBeVisible()
+    editor.runtime.setPlaying(true)
+    expect(panel).not.toBeVisible()
+    expect(editor.runtime.targetElement('decoration')).toBeVisible()
+    editor.runtime.setPlaying(false)
+    expect(panel).toBeVisible()
+    choose('canvas'); await editor.update(model); editor.runtime.setPlaying(true)
+    expect(panel).toBeVisible()
+    choose('none'); await editor.update(model)
+    expect(panel).not.toBeVisible()
+    expect(editor.runtime.targetElement(id)).toBe(target)
+  } finally { await editor.dispose(); editorRoot.remove() }
+  const published = await buildPublishedCourseV3({ project: model.project, assetBytes: {} })
+  expect(published.payload.playback?.controls).toBe('none')
+  for (const capture of [false, true]) {
+    const root = document.createElement('div'); document.body.append(root)
+    const player = await mountPublishedCourseV3(published.payload, root, { capture, keyboardNavigation: false })
+    try {
+      await player.ready
+      expect(root.querySelector('nav[aria-label="教师控制台"]')).not.toBeVisible()
+      expect(player.runtime.targetElement('decoration')).toBeVisible()
+      player.runtime.setPlaying(false); player.navigation.changed()
+      expect(player.runtime.targetElement(id)).not.toBeVisible()
+    } finally { await player.dispose(); root.remove() }
+  }
+  expect(model.project.instances).toEqual(authorInstances)
 })
