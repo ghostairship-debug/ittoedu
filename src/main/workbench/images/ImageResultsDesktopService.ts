@@ -219,21 +219,23 @@ export class ImageResultsDesktopService {
       }
       throw new Error('上次图片操作结果未知；未重新请求模型或重复应用，请重新观察文档。')
     }
-    const documentId = input.type === 'apply' ? input.target.documentId : view.job.documentId
-    const current = await this.options.documents.registry.get(documentId).drain()
-    if (input.type === 'apply' && current.model.kind !== 'course-v10') throw new Error('图片应用需要 Project V10 课件')
-    if (input.type === 'apply' && (current.epoch !== input.target.epoch || current.revision !== input.target.revision)) throw new Error('目标文档已改变，请重新选择图片应用位置')
     const action: Action = { version: 1, input, digest: digest(input), runId: `image-result:${input.actionId}`, source: view.source }
-    if (input.type === 'edit') action.childJobId = `image-edit:${input.actionId}`
+    if (input.type === 'edit') {
+      action.childJobId = `image-edit:${input.actionId}`
+      await this.store(action)
+      const selection = await this.options.selection(action.runId, 'edit')
+      await this.options.images.editFromResult({ jobId: action.childJobId, runId: action.runId, documentId: view.job.documentId,
+        prompt: input.prompt, selection }, { jobId: view.job.jobId, runId: view.job.runId, resourceId: input.resourceId })
+      return this.read({ ...input, runId: action.runId, jobId: action.childJobId })
+    }
+    const documentId = input.target.documentId
+    const current = await this.options.documents.registry.get(documentId).drain()
+    if (current.model.kind !== 'course-v10') throw new Error('图片应用需要 Project V10 课件')
+    if (current.epoch !== input.target.epoch || current.revision !== input.target.revision) throw new Error('目标文档已改变，请重新选择图片应用位置')
     await this.store(action)
-    await gateway.beginRun({ runId: action.runId, actor: 'human', documents: [{ documentId, writable: input.type === 'apply' ? [input.target.address] : [] }] }); this.liveRuns.add(action.runId)
+    await gateway.beginRun({ runId: action.runId, actor: 'human', documents: [{ documentId, writable: [input.target.address] }] }); this.liveRuns.add(action.runId)
     try {
       const resource = await gateway.provideImage(action.runId, documentId, { ...image, filename: `${input.resourceId}.${image.mimeType === 'image/jpeg' ? 'jpg' : image.mimeType.split('/')[1]}` })
-      if (input.type === 'edit') {
-        const selection = await this.options.selection(action.runId, 'edit')
-        await this.options.images.run({ jobId: action.childJobId!, runId: action.runId, documentId, operation: 'edit', prompt: input.prompt, selection, referenceIds: [resource] })
-        return this.read({ ...input, runId: action.runId, jobId: action.childJobId! })
-      }
       const latest = await this.options.documents.registry.get(documentId).drain()
       if (latest.epoch !== input.target.epoch || latest.revision !== input.target.revision) throw new Error('准备图片期间目标已改变，请重新选择')
       const target = await gateway.issueTarget(action.runId, documentId, input.target.address)

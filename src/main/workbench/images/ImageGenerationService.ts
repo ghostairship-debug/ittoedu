@@ -107,11 +107,20 @@ export class ImageGenerationService {
   run(input: ImageGenerationRequest, options: { signal?: AbortSignal } = {}): Promise<ImageJobSnapshot> {
     try { return this.launch(input, options).promise.then(value => structuredClone(value)) } catch (error) { return Promise.reject(error) }
   }
+  /** Main result cards prove conversation ownership before admitting an exact parent result. */
+  async editFromResult(input: Omit<ImageGenerationRequest, 'operation' | 'referenceIds'>,
+    parent: { jobId: string; runId: string; resourceId: string }): Promise<ImageJobSnapshot> {
+    const image = await this.readCompletedResourceFromJob({ jobId: parent.jobId, sourceRunId: parent.runId,
+      sourceDocumentId: input.documentId, resourceId: parent.resourceId }, true)
+    const referenceId = `${parent.jobId}@${parent.resourceId}`
+    return structuredClone(await this.launch({ ...input, operation: 'edit', referenceIds: [referenceId] }, {},
+      [{ ...image, referenceId }]).promise)
+  }
   /** Returns only after the existing job owner durably creates or recovers its receipt. */
   start(input: ImageGenerationRequest, options: { signal?: AbortSignal } = {}): Promise<ImageJobSnapshot> {
     try { return this.launch(input, options).started.then(value => structuredClone(value)) } catch (error) { return Promise.reject(error) }
   }
-  private launch(input: ImageGenerationRequest, options: { signal?: AbortSignal }) {
+  private launch(input: ImageGenerationRequest, options: { signal?: AbortSignal }, admittedReferences?: readonly ImageProviderReference[]) {
     const request = structuredClone(input), key = this.key(request.jobId), requestDigest = hash(JSON.stringify(request)), existing = active.get(key)
     if (existing) {
       if (existing.requestDigest !== requestDigest) throw new ImageGenerationError('image-job-conflict', '此图片任务身份已绑定其他请求。')
@@ -122,7 +131,7 @@ export class ImageGenerationService {
     const sequence = ++this.runSequence
     let accepted!: (value: ImageJobSnapshot) => void, rejectStart!: (error: unknown) => void
     const started = new Promise<ImageJobSnapshot>((resolve, reject) => { accepted = resolve; rejectStart = reject })
-    const promise = this.maintenance.then(() => this.execute(request, key, requestDigest, controller, accepted))
+    const promise = this.maintenance.then(() => this.execute(request, key, requestDigest, controller, accepted, admittedReferences))
       .catch(error => { rejectStart(error); throw error }).finally(() => {
       options.signal?.removeEventListener('abort', abort); active.delete(key)
       for (const listener of this.settledListeners) { try { listener() } catch { /* Cleanup observers cannot change a model result. */ } }
@@ -133,7 +142,8 @@ export class ImageGenerationService {
     active.set(key, entry)
     return entry
   }
-  private async execute(request: ImageGenerationRequest, filename: string, requestDigest: string, controller: AbortController, accepted: (job: ImageJobSnapshot) => void): Promise<ImageJobSnapshot> {
+  private async execute(request: ImageGenerationRequest, filename: string, requestDigest: string, controller: AbortController,
+    accepted: (job: ImageJobSnapshot) => void, admittedReferences?: readonly ImageProviderReference[]): Promise<ImageJobSnapshot> {
     const initial = await serial(filename, async () => {
       try {
         const retired = JSON.parse(await fs.readFile(this.retiredKey(request.jobId), 'utf8')) as { jobId?: unknown; requestDigest?: unknown }
@@ -163,7 +173,9 @@ export class ImageGenerationService {
     try {
       for (const referenceId of request.referenceIds ?? []) {
         let source: HostImageInput
-        if (request.documentId.startsWith('workspace:')) {
+        const admitted = admittedReferences?.find(reference => reference.referenceId === referenceId)
+        if (admitted) source = admitted
+        else if (request.documentId.startsWith('workspace:')) {
           const match = /^(image-tool:[a-f0-9]{64})@(image_[a-f0-9]{64})$/.exec(referenceId)
           if (!match || match[1] === request.jobId) throw new ImageGenerationError('reference-unavailable', '独立参考图须来自本任务已完成的另一图片作业。')
           source = await this.readReadyResourceFromJob({ jobId: match[1]!, sourceRunId: request.runId,
@@ -330,12 +342,15 @@ export class ImageGenerationService {
   /** Main-only ready-byte bridge. The caller proves continuation authority or access to the
    * same workspace result; this service verifies the exact persisted source and ready bytes. */
   async readReadyResourceFromJob(input: { jobId: string; sourceRunId: string; sourceDocumentId: string; resourceId: string }): Promise<HostImageInput> {
+    return this.readCompletedResourceFromJob(input, false)
+  }
+  private async readCompletedResourceFromJob(input: { jobId: string; sourceRunId: string; sourceDocumentId: string; resourceId: string }, allowUnapplied: boolean): Promise<HostImageInput> {
     const filename = this.key(input.jobId)
     return serial(filename, async () => {
       const job = await this.load(filename)
       const reference = job?.resources.find(resource => resource.resourceId === input.resourceId)
       if (!job || job.runId !== input.sourceRunId || job.documentId !== input.sourceDocumentId
-        || job.status !== 'ready' || job.stopped || !reference) {
+        || !(job.status === 'ready' && !job.stopped || allowUnapplied && job.status === 'unapplied') || !reference) {
         throw new ImageGenerationError('image-continuation-unavailable', '先前图片不属于当前可继续的已完成任务。')
       }
       // A durable reference alone is not enough: verify the actual blob before issuing any
