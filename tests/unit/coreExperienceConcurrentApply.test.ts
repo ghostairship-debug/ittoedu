@@ -9,7 +9,7 @@ import { WEB_DEFINITION, webDataSchema } from '../../src/components/web/data'
 import type { ComponentEdit } from '../../src/shared/contracts/component-platform/operations'
 import { TextDriver } from '../../src/core/drivers/TextDriver'
 import { readHtmlAuthoringRecords, patchHtmlAuthoringRecords } from '../../src/shared/html/htmlAuthoringRecords'
-import { prepareExecutionContentOutput, readEditableTargetContent } from '../../src/core/tools/ToolTargets'
+import { prepareExecutionContentOutput, readEditableTargetContent, targetFootprint } from '../../src/core/tools/ToolTargets'
 import type { ToolTarget } from '../../src/shared/workbench/tools'
 
 it('applies a delayed local AI reply through Gateway while preserving human geometry and another object, and retains final CAS', async () => {
@@ -117,4 +117,14 @@ it('edits a dynamic HTML author field through the real Gateway without losing co
   const stale = await gateway.issueTarget('html-ai', session.documentId, target)
   await human(records => { records.a.overrides.text = 'Human same field' })
   expect(await gateway.execute('html-ai', 'stale', { name: 'text.replace', input: { target: stale, content: 'Stale AI' } })).toMatchObject({ kind: 'error', code: 'target-conflict' })
+})
+
+it('does not treat an ambiguous static sibling as the content of a dynamic scoped field', () => {
+  const driver = new TextDriver(), source = '<body><p>Original</p><p>Static B</p><script>document.querySelector("p").dataset.itemId="one"</script></body>'
+  const target: Extract<ToolTarget, { kind: 'html-author-field' }> = { kind: 'html-author-field', authorKey: 'a', field: 'text',
+    record: { kind: 'text', scope: { 'dom:0:data-item-id': 'one' }, binding: { kind: 'dom',
+      path: [{ tag: 'body', index: 1 }, { tag: 'p', index: 0 }], baseline: 'Original' }, overrides: {} } }
+  const model = driver.load(new TextEncoder().encode(source))
+  expect(targetFootprint(driver.load(new TextEncoder().encode(source.replace('Static B', 'Human B'))), target)).toBe(targetFootprint(model, target))
+  expect(targetFootprint(driver.load(new TextEncoder().encode(source.replace('="one"', '="two"'))), target)).not.toBe(targetFootprint(model, target))
 })
