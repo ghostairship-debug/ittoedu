@@ -322,7 +322,8 @@ export function SpatialLocationWorkspace(props: SpatialLocationWorkspaceProps) {
       onDoubleClick={event => { if (props.canvasMode === 'edit' && !inputOwnsPointer(event.target)) { const hit = hitFreeObject(visibleTargets, at(event), true); if (hit) { props.onSelect([hit.instanceId]); if (!editor.begin(hit.instanceId, at(event), pointer(event))) props.onEditContent?.(hit.instanceId) } } }}
       onContextMenu={event => {
         if (props.canvasMode !== 'edit' || inputOwnsPointer(event.target)) return
-        event.preventDefault(); const place = pointer(event), hit = hitFreeObject(visibleTargets, at(event), true)
+        event.preventDefault(); const place = pointer(event), hit = hitFreeObject(controllerTargets, transformPoint(invertMatrix(controllerPointerMatrix()), place), true)
+          ?? hitFreeObject(visibleTargets.filter(target => !isGlobalTeacherController(props.project, target.instanceId)), at(event), true)
         if (hit) { const ids = props.selectionIds.includes(hit.instanceId) ? props.selectionIds : [hit.instanceId]; props.onSelect(ids); setTimeout(() => { if (root.current) requestObjectContextMenu(root.current, { ...place, itemIds: ids }) }, 0); return }
         menu.open(place, '画布操作', [
           { id: 'canvas.paste', label: '粘贴', shortcut: 'Ctrl+V', group: 'clipboard', run: () => props.onPaste?.(), disabledReason: props.onPaste ? null : '当前界面不支持此操作' },

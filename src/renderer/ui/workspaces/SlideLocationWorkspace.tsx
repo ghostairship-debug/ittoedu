@@ -223,6 +223,7 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
         authoring.current?.cancelGesture(); pointer.current = null; deferredPointer.current = null; draw.current = null; line.current = null
         setPreview(emptyPreview()); setDrawPreview(null); setLinePreview(null)
       }
+      if (event.key === 'Escape' && hudGesture.current) { hudGesture.current = null; setPreview(emptyPreview()) }
     }
     const blur = () => { space.current = false; pan.current = null; setPanning(false) }
     window.addEventListener('keydown', onKey); window.addEventListener('keyup', onKey); window.addEventListener('blur', blur)
@@ -522,6 +523,10 @@ export function SlideLocationWorkspace({ snapshot, ports, onAddImage, onAddVideo
       if (outsideStage(event.target) || snapshot.canvasMode !== 'edit' || snapshot.contentEdit || snapshot.drawTool) return
       event.preventDefault()
       const point = { x: event.clientX, y: event.clientY }, root = event.currentTarget
+      const hudHit = hitFreeObject(hudTargets, transformPoint(invertMatrix(hudPointerMatrix), point))
+      if (hudHit) {
+        ports.select([hudHit.instanceId]); window.setTimeout(() => requestObjectContextMenu(root, { ...point, itemIds: [hudHit.instanceId] }), 0); return
+      }
       const at = surfacePoint(point.x, point.y), spot = spotAt(at), captured = ports.capture()
       if (spot) {
         ports.select([spot.instanceId])
