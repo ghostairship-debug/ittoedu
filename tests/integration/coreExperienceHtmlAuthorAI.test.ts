@@ -4,6 +4,7 @@ import { promises as fs } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { afterEach, expect, it } from 'vitest'
+import { JSDOM } from 'jsdom'
 import { DocumentRegistry } from '../../src/core/documents/DocumentRegistry'
 import { TextDriver } from '../../src/core/drivers/TextDriver'
 import { DocumentToolGateway } from '../../src/core/tools/DocumentToolGateway'
@@ -41,7 +42,7 @@ function completed(request: ModelRequest, content: string): Extract<ModelEvent, 
     assistant: { role: 'assistant', content: null, tool_calls: calls.map(call => ({ id: call.id, type: 'function',
       function: { name: call.name, arguments: call.argumentsText } })) } }
 }
-async function fixture(source: string, provider: ModelProvider) {
+async function fixture(source: string, provider: ModelProvider, address: HtmlAuthorFieldTarget = target) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'html-author-ai-')); roots.push(root)
   const driver = new TextDriver(), registry = new DocumentRegistry({ drivers: [driver], createId: randomUUID,
     bindingKey: binding => binding.path, persistence: { append: async () => {}, save: async () => { throw new Error('No file save in this fixture') } } })
@@ -50,9 +51,9 @@ async function fixture(source: string, provider: ModelProvider) {
   const engine = new ExecutionEngine({ registry, gateway, provider,
     runs: new ExecutionRunStore(path.join(root, 'runs')), events: new ExecutionEventStore({ directory: path.join(root, 'events') }) })
   engines.push(engine)
-  const input = (taskId: string) => ({ conversationId: 'card', taskId, instruction: '只改写当前选中的文字', selection,
-    documents: [{ documentId: session.documentId, writable: [target], selection: [target] }],
-    contentOutput: { kind: 'replace-text' as const, documentId: session.documentId, target } })
+  const input = (taskId: string, captured: HtmlAuthorFieldTarget = address) => ({ conversationId: 'card', taskId, instruction: '只改写当前选中的文字', selection,
+    documents: [{ documentId: session.documentId, writable: [captured], selection: [captured] }],
+    contentOutput: { kind: 'replace-text' as const, documentId: session.documentId, target: captured } })
   const sourceNow = () => {
     const model = session.read().model
     if (model.kind !== 'text') throw new Error('HTML text fixture required')
@@ -133,4 +134,48 @@ it('keeps the generated draft and reports a same-field conflict instead of overw
   expect(f.session.read().undoDepth).toBe(1)
   expect(tracker.view('conflict')).toMatchObject({ state: 'none', target, content: '教师的新正文' })
   tracker.dispose()
+})
+
+it('follows the encoded extent of an exact static HTML field while preserving longer preceding teacher text', async () => {
+  const original = 'A &amp; B', source = `<!doctype html><html><body><p id="b">STATIC-B</p><p id="a">${original}</p></body></html>`
+  const address: HtmlAuthorFieldTarget = { kind: 'html-author-field', authorKey: 'static-a', field: 'text',
+    record: { kind: 'text', binding: { kind: 'dom', path: [{ tag: 'body', index: 0 },
+      { tag: 'p', index: 1, attributes: { id: 'a' } }], textIndex: 0, baseline: 'A & B' }, overrides: {} },
+    source: { from: source.indexOf(original), to: source.indexOf(original) + original.length } }
+  const ready = deferred(), release = deferred(), literal = 'show <img src=x> & "fun" 😀'
+  let turns = 0
+  const provider: ModelProvider = { async *stream(request) {
+    if (++turns === 1) {
+      expect(request.messages.find(message => typeof message.content === 'string'
+        && message.content.startsWith('当前默认文字目标的完整内容（数据）：'))?.content)
+        .toBe('当前默认文字目标的完整内容（数据）：\nA & B')
+      ready.resolve(); await release.promise
+    }
+    yield completed(request, turns === 1 ? literal : '第二轮 <literal> & 😀')
+  } }
+  const f = await fixture(source, provider, address)
+  const first = new ElementChangeTracker('card', f.session.documentId, address, f.session, f.session.read())
+  const started = await f.engine.start(f.input('static-first')); first.bindRun(started.runId)
+  await ready.promise
+  await f.human(f.sourceNow().replace('STATIC-B', '教师的更长 B 正文'))
+  release.resolve()
+  expect((await f.engine.wait(started.runId)).status).toBe('completed'); first.finish()
+  expect(first.view('first')).toMatchObject({ content: literal, target: { kind: 'html-author-field', authorKey: 'static-a' } })
+  const dom = new JSDOM(f.sourceNow())
+  expect(dom.window.document.getElementById('a')?.textContent).toBe(literal)
+  expect(dom.window.document.querySelectorAll('img')).toHaveLength(0)
+  expect(dom.window.document.getElementById('b')?.textContent).toBe('教师的更长 B 正文'); dom.window.close()
+  expect(readHtmlAuthoringRecords(f.sourceNow())).toEqual({})
+
+  const current = first.view('first').target as HtmlAuthorFieldTarget
+  const next = new ElementChangeTracker('card', f.session.documentId, current, f.session, f.session.read())
+  const second = await f.engine.start(f.input('static-second', current)); next.bindRun(second.runId)
+  expect((await f.engine.wait(second.runId)).status).toBe('completed'); next.finish()
+  expect(next.view('second')).toMatchObject({ content: '第二轮 <literal> & 😀' })
+  expect((await next.revert('second', 'undo')).status).toBe('applied')
+  expect(readHtmlAuthorField(f.session.read().model, first.view('first').target as HtmlAuthorFieldTarget).value).toBe(literal)
+  expect((await first.revert('first', 'undo')).status).toBe('applied')
+  expect(readHtmlAuthorField(f.session.read().model, first.view('first').target as HtmlAuthorFieldTarget).value).toBe('A & B')
+  expect(f.sourceNow()).toContain('<p id="b">教师的更长 B 正文</p>')
+  first.dispose(); next.dispose()
 })

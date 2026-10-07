@@ -7,7 +7,7 @@ import { elementChangeUnits, elementUnitLabel, readComponentElementFields, readC
 import type { FlowTextContent } from '../../../shared/document/content'
 import { CardTextEdits, sourceTextCodec, flowTextCodec, type PeerTextOperation } from './CardTextEdits'
 import { captureComponentOperation, presentationComponentEdits } from '../../../core/drivers/courseV10Operations'
-import { courseInstanceContext, courseInstanceFieldIdentity, courseInstanceTextEdit, isCourseInstanceRange, prepareHtmlAuthorFieldSource, readHtmlAuthorField, readCourseInstanceText, type CourseInstanceTarget } from '../../../core/tools/ToolTargets'
+import { courseInstanceContext, courseInstanceFieldIdentity, courseInstanceTextEdit, isCourseInstanceRange, mapHtmlAuthorFieldTarget, prepareHtmlAuthorFieldSource, readHtmlAuthorField, readCourseInstanceText, type CourseInstanceTarget } from '../../../core/tools/ToolTargets'
 import type { TextCodec } from './CardTextEdits'
 
 const componentStringCodec: TextCodec<string> = { length: value => Array.from(value).length,
@@ -65,7 +65,7 @@ export class ElementChangeTracker {
   private readonly componentIdentity?: ReturnType<typeof courseInstanceFieldIdentity>
   private fieldAvailable = false
   constructor(readonly conversationId: string, readonly documentId: string,
-    private readonly target: ExecutionSelectionTarget, private readonly session: DocumentSession, snapshot: DocumentSnapshot) {
+    private target: ExecutionSelectionTarget, private readonly session: DocumentSession, snapshot: DocumentSnapshot) {
     this.revision = snapshot.revision; this.epoch = snapshot.epoch
     if (!cardPeers.has(session)) cardPeers.set(session, { trackers: new Set(), inverses: new Map() })
     cardPeers.get(session)!.trackers.add(this)
@@ -118,8 +118,12 @@ export class ElementChangeTracker {
       return
     }
     if (this.htmlText && this.target.kind === 'html-author-field') {
-      const a = readHtmlAuthorField(before, this.target), b = readHtmlAuthorField(after, this.target)
+      const a = readHtmlAuthorField(before, this.target)
+      const target = this.target.source && isSourceDocumentModel(before) && isSourceDocumentModel(after)
+        ? mapHtmlAuthorFieldTarget(before.source, after.source, this.target, true) : this.target
+      const b = readHtmlAuthorField(after, target)
       if (!sameFieldValue(a.identity, b.identity)) { this.invalidate(); return }
+      this.target = target
       this.htmlText.advance(a.value, b.value, own, inverse, undefined, provenance)
       return
     }
