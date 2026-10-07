@@ -57,7 +57,7 @@ export class ScopedSkillService implements SkillServicePort {
       try { folders = await fs.readdir(await this.allowedRoot(root), { withFileTypes: true }) }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') warnings.push(`${root.source}: 根目录未能读取或不在授权内`); continue }
       for (const folder of folders.sort((a, b) => a.name.localeCompare(b.name))) {
-        if (!folder.isDirectory() || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,99}$/.test(folder.name)) continue
+        if (!folder.isDirectory() || !relativeFile(folder.name)) continue
         try { entries.push(await this.metadata(root, folder.name)) }
         catch (error) { warnings.push(`${root.source}/${folder.name}: ${(error as { code?: string }).code ?? 'metadata-unavailable'}`) }
       }
@@ -89,11 +89,12 @@ export class ScopedSkillService implements SkillServicePort {
     const roots = await this.rootsFor(runId)
     if (!roots.some(root => root.source === entry.root.source && root.directory === entry.root.directory && root.authorizedRoot === entry.root.authorizedRoot))
       throw failure('skill-authority-revoked', 'Skill 根目录的任务授权已撤销')
-    const current = await this.metadata(entry.root, entry.name.slice(entry.name.indexOf('/') + 1))
-    if (current.version !== entry.version || current.directory !== entry.directory)
-      throw failure('skill-changed', 'Skill 已改变；请刷新 skills.list 并重新核对内容，旧内容不能沿用执行授权')
-    const filename = await fs.realpath(path.join(current.directory, input.path))
-    if (!inside(current.directory, filename)) throw failure('skill-path-outside-root', '资料路径越出本 Skill 根目录')
+    const base = await this.allowedRoot(entry.root)
+    const directory = await fs.realpath(path.join(base, entry.name.slice(entry.name.indexOf('/') + 1)))
+    if (!inside(base, directory) || directory === base || directory !== entry.directory)
+      throw failure('skill-path-outside-root', 'Skill 路径越出本根目录或已改变')
+    const filename = await fs.realpath(path.join(directory, input.path))
+    if (!inside(directory, filename)) throw failure('skill-path-outside-root', '资料路径越出本 Skill 根目录')
     const file = await fs.open(filename, 'r')
     let bytes: Buffer
     try {
@@ -103,8 +104,8 @@ export class ScopedSkillService implements SkillServicePort {
       if (result.bytesRead !== stat.size || (await file.stat()).mtimeMs !== stat.mtimeMs) throw failure('skill-file-changed', 'Skill 资料在读取时改变，请重新核对')
       bytes = buffer.subarray(0, result.bytesRead)
     } finally { await file.close() }
-    const version = `sha256:${createHash('sha256').update(current.version).update(input.path).update(bytes).digest('hex')}`
-    if (input.version && input.version !== version) throw failure('skill-file-changed', 'Skill 资料版本已改变，不能拼接旧页或复用旧脚本批准')
+    const version = `sha256:${createHash('sha256').update(filename).update(bytes).digest('hex')}`
+    if (input.version && input.version !== version) throw failure('skill-file-changed', '当前 Skill 文件已改变，请重新读取，不能拼接旧页')
     let source: string
     try { source = new TextDecoder('utf-8', { fatal: true }).decode(bytes); if (source.includes(String.fromCharCode(0))) throw new Error('binary') }
     catch { throw failure('skill-binary-resource', '该资源不是 UTF-8 文本；原文件保留，需通过素材/文件接口使用，未执行或伪装为已读文本') }
