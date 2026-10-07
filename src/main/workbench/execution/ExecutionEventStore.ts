@@ -74,6 +74,11 @@ export class ExecutionEventStoreError extends Error {
   constructor(readonly code: 'event-corrupt' | 'event-id-conflict' | 'event-item-conflict' | 'blob-not-owned' | 'blob-corrupt', message: string) { super(message); this.name = 'ExecutionEventStoreError' }
 }
 export interface ExecutionEventStoreOptions { directory: string; segmentBytes?: number; inlineBytes?: number }
+export interface ExecutionEventPendingState {
+  pendingEvents: number
+  pendingTiming: number
+  lastFailure?: { kind: 'event' | 'timing'; message: string }
+}
 
 /** A durable fact log, not a Run/Conversation owner. It has no execution callbacks or recovery replay hooks. */
 export class ExecutionEventStore {
@@ -85,6 +90,27 @@ export class ExecutionEventStore {
   // At most two parsed segments; old pages remain on disk and are revalidated on change.
   private readonly pages = new Map<string, { stamp: string; records: Stored[]; size: number }>()
   private readonly listeners = new Set<(event: ExecutionEvent) => void>()
+  private readonly pending = new Map<Promise<unknown>, 'event' | 'timing'>()
+  private lastFailure?: ExecutionEventPendingState['lastFailure']
+  private track<T>(promise: Promise<T>, kind: 'event' | 'timing'): Promise<T> {
+    this.pending.set(promise, kind)
+    void promise.then(() => { this.pending.delete(promise) }, error => {
+      this.pending.delete(promise)
+      this.lastFailure = { kind, message: error instanceof Error ? error.message : String(error) }
+    })
+    return promise
+  }
+  /** Non-authoritative display recording: queue now, observe durability through subscribe or flushPending. */
+  enqueue(input: ExecutionEventInput): void { void this.append(input).catch(() => {}) }
+  getPendingState(): ExecutionEventPendingState {
+    let pendingEvents = 0, pendingTiming = 0
+    for (const kind of this.pending.values()) { if (kind === 'event') pendingEvents++; else pendingTiming++ }
+    return { pendingEvents, pendingTiming, ...(this.lastFailure ? { lastFailure: { ...this.lastFailure } } : {}) }
+  }
+  /** Call after producers stop. Failures remain diagnostic; they cannot change or replay the business outcome. */
+  async flushPending(): Promise<void> {
+    while (this.pending.size) await Promise.allSettled([...this.pending.keys()])
+  }
   /** Durable append observation only; observers never participate in the acknowledgement. */
   subscribe(listener: (event: ExecutionEvent) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener) }
   constructor(options: ExecutionEventStoreOptions) {
@@ -119,6 +145,9 @@ export class ExecutionEventStore {
    */
   private readonly timingPending = new Map<string, { marks: ExecutionTimingMark[]; waiters: { resolve: () => void; reject: (error: unknown) => void }[]; scheduled: boolean }>()
   recordTiming(mark: ExecutionTimingMark): Promise<void> {
+    return this.track(this.queueTiming(mark), 'timing')
+  }
+  private queueTiming(mark: ExecutionTimingMark): Promise<void> {
     if (!mark.markId || !mark.taskId || !['main', 'renderer'].includes(mark.process) || mark.clock !== 'performance.now'
       || !mark.clockInstanceId || !Number.isFinite(mark.monotonicMs) || mark.monotonicMs < 0
       || !Number.isFinite(mark.wallTimeMs) || mark.wallTimeMs < 0
@@ -134,7 +163,7 @@ export class ExecutionEventStore {
       if (hot || !bucket!.scheduled) {
         bucket!.scheduled = true
         // setImmediate coalesces same-tick recorders into one flush; `hot` skips nothing — every mark still durable.
-        setImmediate(() => { void this.flushTiming(mark.conversationId, mark.taskId) })
+        setImmediate(() => { void this.flushTiming(mark.conversationId, mark.taskId).catch(() => {}) })
       }
     })
   }
@@ -156,7 +185,7 @@ export class ExecutionEventStore {
       } finally {
         if (bucket.marks.length && !bucket.scheduled) {
           bucket.scheduled = true
-          setImmediate(() => { void this.flushTiming(conversationId, taskId) })
+          setImmediate(() => { void this.flushTiming(conversationId, taskId).catch(() => {}) })
         }
       }
     })
@@ -264,7 +293,8 @@ export class ExecutionEventStore {
   }
   append(input: ExecutionEventInput): Promise<ExecutionEvent> { return this.batchAppend([input]).then(events => events[0]!) }
   /** One atomic record/fsync for a bounded batch. Individual append has the same durable acknowledgement contract. */
-  async batchAppend(inputs: readonly ExecutionEventInput[]): Promise<ExecutionEvent[]> {
+  batchAppend(inputs: readonly ExecutionEventInput[]): Promise<ExecutionEvent[]> { return this.track(this.appendBatch(inputs), 'event') }
+  private async appendBatch(inputs: readonly ExecutionEventInput[]): Promise<ExecutionEvent[]> {
     if (!inputs.length || inputs.length > 5000) return Promise.reject(new RangeError('一次事件写入需要 1 至 5000 项'))
     const parsed = inputs.map(input => executionEventInputSchema.parse(input)) // Freeze and reject undeclared native/secret fields before yielding.
     const conversationId = parsed[0]!.conversationId
