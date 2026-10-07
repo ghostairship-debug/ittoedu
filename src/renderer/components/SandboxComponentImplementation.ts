@@ -283,6 +283,8 @@ function contentRealmBridge(nonce: string, fragmentBox: { isMeasured: typeof isM
         if (root) {
           const clicked = () => send({ type: 'interaction.clicked' })
           root.addEventListener('click', clicked); cleanups.add(() => root.removeEventListener('click', clicked))
+          const doubleClicked = (event: MouseEvent) => send({ type: 'authoring.double-click', x: event.clientX, y: event.clientY })
+          root.addEventListener('dblclick', doubleClicked, true); cleanups.add(() => root.removeEventListener('dblclick', doubleClicked, true))
         }
         const teacherController = teacher ? {
           read: () => teacher!.snapshot,
@@ -582,6 +584,7 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
   const channel = new MessageChannel(), port = channel.port1
   let scope: ComponentRuntimeScope | undefined, authoring: ComponentRuntimeContext['authoring'], layoutPort: ComponentLayoutPort | undefined, disposed = false, sequence = 0
   let authorInstance: ComponentInstance | undefined
+  let authorRoot: HTMLElement | undefined
   // A full realm can retain author-created handlers/timers across content updates.
   // Only its existing retirement lifecycle may reset this transport choice.
   let targetProfile: RuntimeTargetProfile | undefined
@@ -757,6 +760,12 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
       }); return
     }
     if (message.type === 'interaction.clicked') { scope.events.emit('__runtime.node-click', { instanceId: scope.instanceId }); return }
+    if (message.type === 'authoring.double-click' && authoring && authorRoot?.isConnected
+      && (authorSpots.size || observedSpots.size) && Number.isFinite(message.x) && Number.isFinite(message.y)) {
+      authorRoot.dispatchEvent(new CustomEvent('component-author-double-click', { bubbles: true, detail: {
+        instanceId: scope.instanceId, mountGeneration: scope.generation, localPoint: { x: message.x, y: message.y },
+      } })); return
+    }
     if (message.type === 'interaction.unsubscribe') { interactionSubscriptions.get(message.subscriptionId)?.(); interactionSubscriptions.delete(message.subscriptionId); return }
     if (message.type === 'interaction.subscribe' && interactionPort && Number.isInteger(message.subscriptionId)) {
       const trigger = interactionTriggerSchema.safeParse(message.trigger), currentScope = scope
@@ -923,6 +932,7 @@ export async function prepareSandboxComponent(artifact: CompiledComponentModule,
         scope = context.scope
         mediaPort = context.media; interactionPort = context.interactions
         authoring = context.authoring
+        authorRoot = context.root
         layoutPort = context.layout
         authorInstance = context.instance
         scope.signal.addEventListener('abort', release, { once: true }); scope.cleanup(release)
