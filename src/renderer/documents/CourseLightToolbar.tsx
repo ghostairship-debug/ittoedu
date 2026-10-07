@@ -4,6 +4,7 @@ import { usePropertiesContext } from '../ui/properties/PropertiesContextAdapter'
 import { ExportMenu, type ExportFormat } from '../ui/ExportMenu'
 import type { SingleHtmlExportMode } from '../export/course/coursePackagePreflight'
 import { useCourseEditorChrome } from './CourseEditorChromeContext'
+import { useProEditorRailState } from '../ui/proEditorRailController'
 import { ElementCardIndicator, type ElementCardNavigation } from '../workbench/elementCards/ElementCardIndicator'
 import { FlowInsertMenu } from '../ui/flow/FlowInsertMenu'
 import { SlideLightPageActions } from '../editing/quickbar/SlideLightActions'
@@ -46,6 +47,7 @@ export interface CourseLightToolbarProps {
   onPreview?(): void
   onExport?(format: ExportFormat, singleHtmlMode?: SingleHtmlExportMode): void
   onExportSettings?(): void
+  onToggleProperties?(): void
   /** Finds the elements of AI cards that are working or waiting (M15); shows the top bar's indicator. */
   elementCards?: ElementCardNavigation
 }
@@ -77,6 +79,7 @@ function useDismiss(open: boolean, ref: RefObject<HTMLElement | null>, close: ()
  */
 export function CourseLightToolbar(props: CourseLightToolbarProps) {
   const chrome = useCourseEditorChrome()
+  const { activePanel } = useProEditorRailState()
   const context = usePropertiesContext({ onReplaceImage: props.onReplaceImage })
   const [insertOpen, setInsertOpen] = useState(false), [moreOpen, setMoreOpen] = useState(false)
   const insertRef = useRef<HTMLDivElement>(null), moreRef = useRef<HTMLDivElement>(null), toolbarRef = useRef<HTMLDivElement>(null)
@@ -160,6 +163,8 @@ export function CourseLightToolbar(props: CourseLightToolbarProps) {
         </div>}
       </div>
       <div className="course-light-tools__document-actions">
+        {editing && props.onToggleProperties && <button type="button" aria-expanded={activePanel === 'properties'} aria-controls="embedded-editor-properties"
+          onClick={() => invoke(props.onToggleProperties!)}>属性</button>}
         {editing && props.slideLightPage && <SlideLightPageActions commands={props.slideLightPage.view.commands}
           backgroundColor={props.slideLightPage.view.backgroundColor} onRun={props.slideLightPage.run} onError={props.reportError} />}
         {props.elementCards && <ElementCardIndicator documentId={props.documentId} navigation={props.elementCards} />}

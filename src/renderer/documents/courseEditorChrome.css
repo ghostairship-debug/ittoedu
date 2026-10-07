@@ -5,6 +5,9 @@
 .app-main.editor-panel-layout--light { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
 .app-main.editor-panel-layout--light > .editor-center { grid-column: 1; grid-row: 1; min-width: 0; }
 .editor-panel-layout--light > .editor-panel-slot[hidden] { display: none !important; }
+.app-main.editor-panel-layout--light:not(.editor-panel-layout--compact):has(> .editor-panel-slot--properties:not([hidden])) { grid-template-columns: minmax(0, 1fr) 312px; }
+.editor-panel-layout--light:not(.editor-panel-layout--compact) > .editor-panel-slot--properties:not([hidden]) { grid-column: 2; grid-row: 1; min-width: 0; }
+.app-main.editor-panel-layout--light.editor-panel-layout--compact > .editor-panel-slot--properties:not([hidden]) { top: 0; }
 /* One fixed row: selection tools live in the floating quick bar, so selecting never resizes the canvas. */
 .course-light-tools { box-sizing: border-box; height: 44px; padding: 0 10px; border-bottom: 1px solid var(--border-color, #d8dee6); background: var(--panel-bg, #fff); }
 .course-light-tools__row { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; height: 100%; min-width: 0; }

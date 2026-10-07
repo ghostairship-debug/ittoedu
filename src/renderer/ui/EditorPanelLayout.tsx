@@ -36,7 +36,7 @@ export function EditorPanelLayout({ children, className = '', chrome }: { childr
       setStructureOpen(false)
       proEditorRailController.close()
     }
-  }, [light])
+  }, [light, context.documentId])
   useEffect(() => {
     if (propertiesOpen) setStructureOpen(false)
   }, [propertiesOpen])
@@ -47,7 +47,7 @@ export function EditorPanelLayout({ children, className = '', chrome }: { childr
   }
   const panel = structureOpen ? 'structure' : propertiesOpen ? 'properties' : null
   return <div ref={root} className={`${className} editor-panel-layout${compact ? ' editor-panel-layout--compact' : ''}${light ? ' editor-panel-layout--light' : ''}`}
-    onKeyDown={event => { if (compact && panel && event.key === 'Escape') { event.preventDefault(); close() } }}>
+    onKeyDown={event => { if ((compact || light) && panel && event.key === 'Escape') { event.preventDefault(); close() } }}>
     {!light && compact && <div className="editor-panel-controls" aria-label="面板切换">
       {(['structure', 'properties'] as const).map(value => <button key={value} type="button"
         aria-expanded={panel === value} aria-controls={`embedded-editor-${value}`}
@@ -67,7 +67,7 @@ export function EditorPanelLayout({ children, className = '', chrome }: { childr
     </div>}
     <div id="embedded-editor-structure" className="editor-panel-slot editor-panel-slot--structure" hidden={light || compact && panel !== 'structure'}>{slots[0]}</div>
     {slots[1]}
-    <div id="embedded-editor-properties" className="editor-panel-slot editor-panel-slot--properties" hidden={light}>{slots[2]}</div>
+    <div id="embedded-editor-properties" className="editor-panel-slot editor-panel-slot--properties" hidden={light && !propertiesOpen}>{slots[2]}</div>
     {slots.slice(3)}
   </div>
 }

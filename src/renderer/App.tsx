@@ -57,6 +57,7 @@ import { ScenePanel } from './ui/ScenePanel'
 import { CourseBottomNavigation } from './ui/BottomSceneNavigator'
 import { requestFlowBlockFocus, requestFlowBlockSelection } from './document/flowWorkspaceRegistry'
 import { TopToolbar } from './ui/TopToolbar'
+import { proEditorRailController } from './ui/proEditorRailController'
 import { Workspace } from './ui/Workspace'
 import { ProjectHealthPanel } from './ui/ProjectHealthPanel'
 import { ProjectColorPaletteContext } from './ui/ColorInput'
@@ -804,6 +805,7 @@ export default function App() {
       mode={courseCanvasMode}
       busy={busy} hasFlowSurface={hasFlowSurface}
       onPreview={courseDelivery.openPreview} onExport={courseDelivery.exportCourse} onExportSettings={courseDelivery.openExportSettings}
+      onToggleProperties={() => { useEditorStore.getState().setActiveTab('properties'); proEditorRailController.toggle('properties') }}
       elementCards={elementCardNavigation}
       reportError={setError} />}>
       <CourseAdvancedChrome><TopToolbar
