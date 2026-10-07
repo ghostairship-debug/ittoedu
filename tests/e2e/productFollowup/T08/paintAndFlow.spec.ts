@@ -30,6 +30,12 @@ async function outerGeometry(iframe: Locator) {
     return { window: { innerWidth, innerHeight, scrollX, scrollY, devicePixelRatio }, ancestors }
   }) }
 }
+function frameRectToScreen(outerFacts: Awaited<ReturnType<typeof outerGeometry>>, inner: { x: number; y: number; width: number; height: number }) {
+  const outer = outerFacts.dom.ancestors[0]!
+  const scaleX = outer.rect.width / outer.offsetWidth, scaleY = outer.rect.height / outer.offsetHeight
+  return { scaleX, scaleY, screen: { x: outer.rect.x + (outer.clientLeft + inner.x) * scaleX,
+    y: outer.rect.y + (outer.clientTop + inner.y) * scaleY, width: inner.width * scaleX, height: inner.height * scaleY } }
+}
 async function painted(page: Page, frame: FrameLocator, iframe: Locator, directory: string, label: string) {
   const geometry: Record<string, unknown> = { label, samples: {} }
   const saveGeometry = () => writeFileSync(join(directory, `${label}-capture-geometry.json`), JSON.stringify(geometry, null, 2))
@@ -47,10 +53,7 @@ async function painted(page: Page, frame: FrameLocator, iframe: Locator, directo
     // Child-frame DOM rectangles already include child scrolling. Map them through the actual
     // iframe border/content box and parent transforms into the same top-page viewport pixels.
     // Playwright's child element screenshot omits this scale for a transformed OOP iframe.
-    const outer = before.outer.dom.ancestors[0], inner = before.inner.rect
-    const scaleX = outer.rect.width / outer.offsetWidth, scaleY = outer.rect.height / outer.offsetHeight
-    const screen = { x: outer.rect.x + (outer.clientLeft + inner.x) * scaleX,
-      y: outer.rect.y + (outer.clientTop + inner.y) * scaleY, width: inner.width * scaleX, height: inner.height * scaleY }
+    const { scaleX, scaleY, screen } = frameRectToScreen(before.outer, before.inner.rect)
     const viewportPng = await page.screenshot({ scale: 'css' }), viewportImage = await sharp(viewportPng).metadata()
     const pixelX = viewportImage.width! / before.outer.dom.window.innerWidth, pixelY = viewportImage.height! / before.outer.dom.window.innerHeight
     const left = Math.floor(screen.x * pixelX), top = Math.floor(screen.y * pixelY)
@@ -157,9 +160,19 @@ test('one real HTML import keeps painted pseudo clip and alpha semantics in Play
     expect(playerFacts.pseudoContent).toEqual(sourceFacts.pseudoContent)
     expect(playerFacts.rgbaColor).toBe('rgba(18, 52, 86, 0.5)')
     expect(sourceFacts.alphaGlyphPixels).toBeGreaterThan(5); expect(playerFacts.alphaGlyphPixels).toBeGreaterThan(5)
-    await player.locator('#answer summary').click()
+    const clickSummary = async (step: string) => {
+      const summary = player.locator('#answer summary')
+      await frames.scrollIntoViewIfNeeded(); await summary.scrollIntoViewIfNeeded()
+      const outer = await outerGeometry(frames), inner = await summary.evaluate(element => ({ rect: element.getBoundingClientRect().toJSON(),
+        scrollX, scrollY, innerWidth, innerHeight }))
+      const mapped = frameRectToScreen(outer, inner.rect), point = { x: mapped.screen.x + mapped.screen.width / 2, y: mapped.screen.y + mapped.screen.height / 2 }
+      facts[`interaction-${step}`] = { outer, inner, mapped, point }
+      writeFileSync(join(directory, 'interaction-geometry.json'), JSON.stringify(facts, null, 2))
+      await page.mouse.click(point.x, point.y)
+    }
+    await clickSummary('open')
     await expect(player.locator('#answer p')).toBeVisible()
-    await player.locator('#answer summary').click()
+    await clickSummary('close')
     await expect(player.locator('#answer p')).toBeHidden()
     facts.interaction = { openedAndClosed: true }; facts.localFlowPreserved = { programId: program!.id, humanFrame: edited.model.project.instances.human.frame }
     await overlay.getByRole('button', { name: '关闭预览', exact: true }).click()
