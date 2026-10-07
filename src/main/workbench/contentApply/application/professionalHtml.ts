@@ -3,6 +3,7 @@ import { createTextComponentData, textComponentDataSchema } from '../../../../co
 import { IMAGE_DEFINITION } from '../../../../components/image'
 import { createImageData, imageDataSchema } from '../../../../components/image/data'
 import { htmlDeclarations, readHtmlDocumentText, type DocumentHtmlNode } from '../../../../shared/document/htmlText'
+import { normalizeDocumentColor } from '../../../../shared/document/color'
 import { jsonValueSchema, type ComponentDefinition, type ComponentFrame } from '../../../../shared/contracts/component-platform'
 import type { HtmlAssemblyObject, HtmlObjectContent } from '../../../../core/contentApply/assembly/htmlAssembly'
 import type { ContentApplyDiagnostic, ContentObjectDraft } from './types'
@@ -25,7 +26,6 @@ const projected = (content: HtmlObjectContent): DocumentHtmlNode => content.kind
   : { kind: 'element', tagName: content.tagName,
     attributes: { ...content.attributes, style: css(Object.fromEntries(Object.entries(content.style)
       .filter(([name, value]) => name !== 'background-color' || !transparent(value)))) }, children: content.children.map(projected) }
-const hasAlpha = (color: string) => /^rgba\(/i.test(color) && !/,\s*1(?:\.0+)?\s*\)$/.test(color)
 
 /** Family commas inside quotes are names, and font-family matching is case insensitive. */
 function fontFamilies(value: string): string[] {
@@ -108,9 +108,9 @@ function textReason(content: Extract<HtmlObjectContent, { kind: 'element' }>): s
     if (style['text-transform'] && style['text-transform'] !== 'none') return '文字大小写变换无法原样对应；保留 Web。'
     if (style['white-space'] && style['white-space'] !== 'normal') return `white-space:${style['white-space']} 未使用普通 HTML 空白规则；保留 Web。`
     if (style['writing-mode'] && style['writing-mode'] !== 'horizontal-tb') return '该书写方向尚未由导入专业映射消费；保留 Web。'
-    if (style.color && hasAlpha(style.color)) return '范围文字透明颜色不属于当前专业色值合同；保留 Web。'
+    if (style.color && normalizeDocumentColor(style.color) === undefined) return '范围文字颜色没有当前专业正文的等价表达；保留 Web。'
     if (node !== content && style['letter-spacing'] && style['letter-spacing'] !== root['letter-spacing']) return '局部字距没有等价范围字段；保留 Web。'
-    if (node !== content && style['background-color'] && hasAlpha(style['background-color']) && !/rgba\(\s*0,\s*0,\s*0,\s*0\s*\)/.test(style['background-color'])) return '局部半透明背景无法原样对应文字高亮；保留 Web。'
+    if (node !== content && style['background-color'] && normalizeDocumentColor(style['background-color']) === undefined) return '局部背景颜色没有当前专业高亮的等价表达；保留 Web。'
     if (node !== content && style['line-height'] && style['line-height'] !== line) return '局部行高没有等价范围字段；保留 Web。'
     if (node.tagName === 'strong' || node.tagName === 'b') {
       if (style['font-weight'] && !['bold', '700'].includes(style['font-weight'])) return '粗体标签的 CSS 覆盖不能由现有富文本标签规则保真；保留 Web。'

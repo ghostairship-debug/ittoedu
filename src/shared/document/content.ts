@@ -4,6 +4,7 @@ import type { NativeChartContent, TextRunStyle } from '../contracts/native-v1/ty
 import { tableCellSpan, tableMergeIssues, tableMergeRegionSchema, type TableMergeRegion } from '../tableMerge'
 import { parseDocumentMath } from './math'
 import { assetReferencePath, courseComponentNameIssue } from '../composition/projectReferences'
+import { normalizeDocumentColor } from './color'
 
 // The 048 root switch will consume these definitions; no legacy Flow writer uses them.
 export interface InlineLink { href: string; title?: string }
@@ -41,7 +42,12 @@ export type DocumentBlock = { id: string } & (
 )
 
 export const documentIdSchema = z.string().min(1).max(240).refine(s => s === s.trim(), '身份不得含首尾空白')
-const color = z.string().regex(/^#[0-9a-fA-F]{6}$/)
+const color = z.string().transform((value, context) => {
+  const normalized = normalizeDocumentColor(value)
+  if (normalized !== undefined) return normalized
+  context.addIssue({ code: 'custom', message: '颜色需要可解析的 RGB 或 RGBA 色值' })
+  return z.NEVER
+})
 export const documentTextStyleSchema = z.object({
   baseline: z.number().finite().min(-1).max(1).optional(), color: color.optional(),
   bold: z.boolean().optional(), italic: z.boolean().optional(), underline: z.boolean().optional(),
