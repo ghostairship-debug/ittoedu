@@ -41,7 +41,7 @@ import { AgentFileOutcomeUnknown, agentFileRegistration, agentFileTools, agentFi
 import { isOfficeContentTool } from '../../../core/tools/OfficeContentTools'
 import { taskNoteTool, initialWorkingNote, continuedWorkingNote, prepareTaskNote } from '../../../core/tools/TaskNoteTools'
 import { hostArtifactSaveSchema, hostArtifactSaveTool } from '../../../core/tools/HostArtifactTools'
-import { htmlActionToolCatalog, isHtmlActionTool } from '../../../core/tools/HtmlActionTools'
+import { isHtmlActionTool } from '../../../core/tools/HtmlActionTools'
 import type { ExecutionChangeReviewService } from '../review/ExecutionChangeReviewService'
 import type { HostArtifactDeliveryService } from './HostArtifactDeliveryService'
 import { htmlActionModelMessage } from '../observation/HtmlActionModelInput'
@@ -907,12 +907,14 @@ export class ExecutionEngine {
     const registration = toolRegistration(name)
     let modifies = registration?.capability === 'write' || registration?.capability === 'save'
     if (registration && !modifies) {
-      try { modifies = (typeof registration.effect === 'function' ? registration.effect(tool.call.input) : registration.effect) === 'document-edit' }
+      try {
+        const effect = typeof registration.effect === 'function' ? registration.effect(tool.call.input) : registration.effect
+        modifies = effect === 'document-edit' || effect === 'html-preview-action'
+      }
       catch { /* Invalid arguments fail in their parser without requesting write approval. */ }
     }
     // These retained services have their own physical-file and preview owners.
     if (!registration) modifies = name === 'office.create' || name === 'office.edit' || name === hostArtifactSaveTool.name
-      || htmlActionToolCatalog.some(tool => tool.name === name && tool.manual.group === 'edit')
     if (active.approveAll || !modifies) return null
     if (active.permission === 'ask') return 'ask'
     if (fileMutationNames.has(name) || name === 'office.create' || name === 'office.edit') return null
