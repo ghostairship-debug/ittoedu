@@ -52,7 +52,7 @@ export interface ToolAdvisory { step: number; code: 'native-text-shrink' | 'nati
 export type ToolResult =
   | { kind: 'document-operation'; result: DocumentOperationResult; affected: readonly string[]; advisories?: readonly ToolAdvisory[] }
   | { kind: 'read'; data: unknown; nextCursor?: string }
-  | { kind: 'error'; code: string; message: string }
+  | { kind: 'error'; code: string; message: string; data?: unknown }
 
 export interface ToolGateway {
   /** Host recovery query; this is not a model tool. */

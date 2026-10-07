@@ -85,7 +85,8 @@ export class DocumentHostService {
               input.assertActive()
               return this.dispatch({ documentId: current.documentId, epoch: input.baseline.epoch, baseRevision: current.revision,
                 operationId: input.operationId, requestDigest: input.requestDigest, actor: input.actor, runId: input.runId,
-                mutation: { type: 'command', command } })
+                mutation: { type: 'command', command: { ...command, expected: [...new Map([...command.expected, ...(input.readExpectations ?? [])]
+                  .map(expected => [JSON.stringify(expected.path), expected])).values()] } } })
             } },
           measure: async request => (await import('./contentApply/measurement/ElectronHtmlDesignMeasurement.js')).measureHtmlAtDesignViewport(request),
           compilation: this.compilation,
