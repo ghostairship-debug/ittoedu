@@ -182,10 +182,11 @@ export const serviceToolOutcome = (name: string, result?: ToolResult): ServiceTo
   const data = result.data as Record<string, unknown>
   const apply = contentApplyFact(name, result)
   if (apply) {
-    const diagnostic = apply.diagnostics.find(item => item.level === 'error')?.message
+    const error = apply.diagnostics.find(item => item.level === 'error'), diagnostic = error?.message
     if (apply.commit === 'unknown') return { status: 'unknown', message: diagnostic ?? '内容提交结果未知；请查询原操作回执，不要重放' }
     if (apply.commit === 'not_committed') return { status: 'failed', message: diagnostic ?? '内容修改未提交' }
-    if (apply.usability === 'unusable' || apply.usability === 'partial')
+    // A committed local warning is an application fact, not a failed transaction.
+    if (apply.usability === 'unusable' || apply.usability === 'partial' && error)
       return { status: 'failed', message: diagnostic ?? (apply.usability === 'unusable' ? '内容已提交，但当前不能使用' : '内容已提交，仍有局部问题待修复') }
   }
   if (name === 'course.createFromHtml') {

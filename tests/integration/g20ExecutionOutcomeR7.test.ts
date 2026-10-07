@@ -4,6 +4,7 @@ import { hasUnresolvedToolFailure, newFileDeliveryFacts, persistedToolWork, runE
 import { applicationEventFacts, committedFact } from '../../src/main/workbench/execution/executionToolFacts'
 import type { ContentApplyResult } from '../../src/core/contentApply/planning/types'
 import type { ExecutionRunRecord, ExecutionToolRecord } from '../../src/shared/workbench/execution'
+import { modelToolResult } from '../../src/core/tools/modelToolResult'
 
 const tool = (name: string, input: unknown, result: ExecutionToolRecord['result'], index: number): ExecutionToolRecord => ({
   callId: `call-${index}`, providerCallId: `provider-${index}`, requestId: 'request',
@@ -199,6 +200,32 @@ const applyResult = (commit: ContentApplyResult['commit'], usability: ContentApp
       status: commit === 'committed' ? 'applied' : 'unchanged', documentId: 'lesson', operationId: 'content-one',
       beforeRevision: 0, revision: commit === 'committed' ? 1 : 0, persistence: 'recoverable',
     } } : {}) },
+})
+it('keeps the real MCP committed SVG warning receipt successful while retaining local diagnostics and genuine failures', () => {
+  // MCP author output 682195137: the experiment was committed at revision 16,
+  // then saved at revision 17; its only finding was a conditional SVG color warning.
+  const diagnostic = { code: 'unsupported-dynamic-url-sink', level: 'warning' as const,
+    message: '无法静态解析stroke的资源内容', repairable: true, instanceId: '54c59c57-3ffc-4f6c-b231-5bb2c4e11016' }
+  const data: ContentApplyResult = { commit: 'committed', usability: 'partial', delivery: 'not_requested', diagnostics: [diagnostic],
+    input: { intent: 'canonical', edits: [] }, insertedIds: [], receipt: { status: 'applied',
+      documentId: 'cddeeb43-5e83-4a8f-94c6-26806cc05db4',
+      operationId: 'tool:4cb99b5e8532348b23e05ece47275296d53c380d030b5247f914a1b162b035e3',
+      beforeRevision: 15, revision: 16, persistence: 'recoverable' } }
+  const result = { kind: 'read' as const, data }, projected = modelToolResult('project.apply', result)
+  expect(serviceToolOutcome('project.apply', projected)).toBeNull()
+  expect(toolFailed('project.apply', projected)).toBe(false)
+  expect(committedFact('project.apply', projected)).toEqual(data.receipt)
+  expect(persistedToolWork('project.apply', projected)).toBe(true)
+  expect(hasUnresolvedToolFailure(run(tool('project.apply', {}, projected, 1)))).toBe(false)
+  expect(projected).toMatchObject({ data: { usability: 'partial', diagnostics: [diagnostic] } })
+  const failed = (patch: Partial<ContentApplyResult>) => ({ kind: 'read' as const, data: { ...data, ...patch } })
+  expect(serviceToolOutcome('project.apply', failed({ diagnostics: [{ ...diagnostic, level: 'error', message: '交互模块不能运行' }] })))
+    .toEqual({ status: 'failed', message: '交互模块不能运行' })
+  expect(serviceToolOutcome('project.apply', failed({ usability: 'unusable' }))?.status).toBe('failed')
+  expect(serviceToolOutcome('project.apply', failed({ commit: 'not_committed' }))?.status).toBe('failed')
+  expect(serviceToolOutcome('project.apply', failed({ commit: 'unknown' }))?.status).toBe('unknown')
+  expect(toolFailed('project.apply', error('explicit-failure'))).toBe(true)
+  expect(toolFailed('image.generate', { kind: 'read', data: { status: 'running' } })).toBe(true)
 })
 it.each([
   ['committed', 'usable', false, true], ['committed', 'unverified', false, true], ['committed', 'unusable', true, true],
