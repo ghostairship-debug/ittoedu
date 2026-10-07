@@ -26,7 +26,7 @@ import { FLOW_BODY_CSS, FLOW_BODY_PAPER_PADDING, FLOW_BODY_SCROLL_PADDING, flowP
 import { resolveComponentOuterPresentation } from '../../shared/componentPresentation'
 import { SharedDocumentEditor, type SharedDocumentEditorHandle } from '../document'
 import { prepareDocumentSelection, prepareDocumentTextEdit, requestDocumentSelection, type DocumentSelectionAdapter } from '../document/documentSelectionCommands'
-import { observeFlowParagraphLayout, measureFlowParagraphLayout, flowReadingMove, flowDocumentInsertionAt, flowFloatingModeEdits, type FlowFloatingMode } from './flow/flowParagraphLayout'
+import { observeFlowParagraphLayout, measureFlowParagraphLayout, flowReadingMove, flowDocumentInsertionAt, flowFloatingModeEdits, flowContentClientMatrix, type FlowFloatingMode } from './flow/flowParagraphLayout'
 import { projectFlowDocument,flowDocumentBlock } from '../componentPlatform/surfaces/flow/documentProjection'
 import { flowSurface } from '../componentPlatform/surfaces/flow/model'
 import { useCourseV10Runtime } from '../components/CourseV10RuntimeView'
@@ -47,6 +47,9 @@ import { TextComponentEditor, FormulaComponentEditor } from '../../components/te
 import { textComponentDataSchema, formulaComponentDataSchema } from '../../components/text/data'
 import { textAppearanceStyles } from '../../components/text/render'
 import type { SlideContentEdit } from '../store/slices/slideAuthoringSlice'
+import { frameContainsPoint, invertMatrix, transformPoint } from '../../core/components/geometry'
+import { componentFrameStyle } from '../componentPlatform/surfaces/slide'
+import { CanvasPlainTextEditor } from './CanvasPlainTextEditor'
 import { flowRangeDataPath } from '../componentPlatform/surfaces/flow/documentSelection'
 import { WORKSPACE_MEDIA_DRAG_TYPE } from '../lessonWorkspace/workspaceMediaDrag'
 import { useWorkspaceMediaSource } from '../lessonWorkspace/workspaceMediaSourceContext'
@@ -85,6 +88,8 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
   const editingInstance = useEditorStore(state => state.flowEditingInstance)
   const contentDraft = useEditorStore(state => state.slideContentEdit)
   const beginContentEdit = useEditorStore(state => state.beginSlideDataEdit)
+  const beginSpotEdit = useEditorStore(state => state.beginSlideSpotEdit)
+  const updateSpotDraft = useEditorStore(state => state.updateSlideSpotDraft)
   const updateContentDraft = useEditorStore(state => state.updateSlideDataDraft)
   const commitContentEdit = useEditorStore(state => state.commitSlideContentEdit)
   const cancelContentEdit = useEditorStore(state => state.cancelTextEdit)
@@ -435,6 +440,26 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     return { x: paperBox && contentBox ? (paperBox.left - contentBox.left) / scale : 0,
       y: paperBox && contentBox ? (paperBox.top - contentBox.top) / scale : 0 }
   }
+  const beginRegisteredSpot = useCallback((instanceId: string, point: { x: number; y: number }, generation?: number) => {
+    if (readOnly || !project.instances[instanceId]) return false
+    const spot = [...runtime.world.authorSpots()].reverse().find(value => value.instanceId === instanceId && value.kind === 'text'
+      && typeof value.initialValue === 'string' && (generation === undefined || value.mountGeneration === generation) && frameContainsPoint(value.localBounds, point))
+    if (!spot) return false
+    const target = bridge.captureTarget(documentId)
+    if (!beginSpotEdit(spot, { ...target, instanceId, instanceIds: [instanceId] })) return false
+    runtime.selectInstances([instanceId], surfaceId)
+    return true
+  }, [readOnly, project, runtime.world, runtime.selectInstances, bridge, documentId, surfaceId, beginSpotEdit])
+  useEffect(() => {
+    const root = workspace.current
+    if (!root) return
+    const open = (event: Event) => {
+      const request = (event as CustomEvent<{ instanceId: string; mountGeneration: number; localPoint: { x: number; y: number } }>).detail
+      if (request && beginRegisteredSpot(request.instanceId, request.localPoint, request.mountGeneration)) { event.preventDefault(); event.stopPropagation() }
+    }
+    root.addEventListener('component-author-double-click', open)
+    return () => root.removeEventListener('component-author-double-click', open)
+  }, [beginRegisteredSpot])
   const drop = (event: React.DragEvent<HTMLElement>) => {
     if (!onDropWorkspaceMedia || !event.dataTransfer.types.includes(WORKSPACE_MEDIA_DRAG_TYPE)) return
     event.preventDefault(); event.stopPropagation()
@@ -460,6 +485,16 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
       if(readOnly || !(event.target instanceof Element) || event.target.closest('[data-component-professional-editor]'))return
       const id=event.target.closest<HTMLElement>('[data-component-instance]')?.dataset.componentInstance
       const instance=id && project.instances[id]
+      if(instance) {
+        const content=runtime.world.contentElement?.(instance.id), matrix=content && flowContentClientMatrix(content)
+        if(matrix) {
+          const point=transformPoint(invertMatrix(matrix),{x:event.clientX,y:event.clientY})
+          if(beginRegisteredSpot(instance.id,point)) {
+            event.preventDefault();event.stopPropagation()
+            return
+          }
+        }
+      }
       const block=instance && flowDocumentBlock(project,surfaceId,instance.id)
       if(!instance || block && block.type!=='course-instance')return
       const kind=componentDefinitionBuiltinKey(project.definitions[instance.definitionId])
@@ -601,7 +636,8 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
     </div>,observationHost)}
     {!readOnly && contentDraft?.source==='canvas' && contentDraft.target.documentId===documentId && contentDraft.target.surfaceId===surfaceId
       && <FlowProfessionalDraftEditor key={`${contentDraft.target.epoch}:${contentDraft.instanceId}`} project={project} draft={contentDraft}
-        target={()=>runtime.world.targetElement(contentDraft.instanceId)} update={updateContentDraft} commit={commitContentEdit} cancel={cancelContentEdit}
+        target={()=>contentDraft.authorSpot ? runtime.world.contentElement(contentDraft.instanceId) : runtime.world.targetElement(contentDraft.instanceId)}
+        update={updateContentDraft} updateSpot={updateSpotDraft} commit={commitContentEdit} cancel={cancelContentEdit}
         undo={async ()=>{await commitContentEdit();await bridge.undo(contentDraft.target.documentId)}}
         redo={async ()=>{await commitContentEdit();await bridge.redo(contentDraft.target.documentId)}} report={setError} />}
     {crop && <div className="flow-media-modal" style={{position:'absolute',inset:24,zIndex:20,background:'#fff',padding:24,overflow:'auto'}}><FlowMediaCropEditor instance={crop.instance} imageData={crop.data} url={assetUrls[crop.data.assetId]}
@@ -615,24 +651,26 @@ export function FlowWorkspace({ documentId, project, surfaceId, toolbarContainer
 }
 
 /** The existing runtime target owns all Flow/free-group geometry; this portal owns only the captured field input. */
-function FlowProfessionalDraftEditor({project,draft,target,update,commit,cancel,undo,redo,report}:{
+function FlowProfessionalDraftEditor({project,draft,target,update,updateSpot,commit,cancel,undo,redo,report}:{
   project:CourseProjectV10;draft:SlideContentEdit;target():HTMLElement|undefined
   update(data:unknown,composing?:boolean):void;commit():Promise<void>;cancel():unknown;undo():void|Promise<void>;redo():void|Promise<void>;report(message:string):void
+  updateSpot(value:string,composing?:boolean):void
 }) {
   const [host,setHost]=useState<HTMLElement|null>(null),[toolbar,setToolbar]=useState<HTMLDivElement|null>(null)
   const root=useRef<HTMLDivElement>(null),latest=useRef({draft,commit,report})
   latest.current={draft,commit,report}
   useLayoutEffect(()=>{setHost(target() ?? null)},[draft.instanceId,target])
-  useLayoutEffect(()=>{root.current?.querySelector<HTMLElement>('.ProseMirror')?.focus({preventScroll:true})},[host])
+  useLayoutEffect(()=>{root.current?.querySelector<HTMLElement>('.ProseMirror,textarea,input')?.focus({preventScroll:true})},[host])
   const kind=componentDefinitionBuiltinKey(draft.target.editingProject.definitions[draft.definitionId])
-  if(!host || (kind!=='guoling.text' && kind!=='guoling.formula'))return null
+  if(!host || (!draft.authorSpot && kind!=='guoling.text' && kind!=='guoling.formula'))return null
   const owner={revision:`${draft.target.epoch}:${draft.instanceId}`,toolbarHost:toolbar,onUndo:undo,onRedo:redo,onDiagnostic:report,
     onCompositionChange:(active:boolean)=>update(latest.current.draft.data,active),onChange:(data:unknown)=>{update(data);return true}}
   return createPortal(<div ref={root} data-component-professional-editor="" className="text-edit-overlay"
-    style={{position:'absolute',inset:0,zIndex:20,pointerEvents:'auto',background:'#fff',overflow:'visible'}}
+    style={{...(draft.authorSpot ? componentFrameStyle(draft.authorSpot.localBounds) : {position:'absolute' as const,inset:0}),zIndex:20,pointerEvents:'auto',background:'#fff',overflow:'visible'}}
     onPointerDown={event=>event.stopPropagation()} onDoubleClick={event=>event.stopPropagation()}
     onKeyDown={event=>{if(event.key==='Escape' && !event.nativeEvent.isComposing && !latest.current.draft.composing){event.stopPropagation();cancel()}}}
     onBlur={event=>{
+      if(latest.current.draft.authorSpot)return
       const next=event.relatedTarget
       if(next instanceof Node && event.currentTarget.contains(next))return
       if(next instanceof Element && next.closest('.text-edit-toolbar,.selection-quick-bar'))return
@@ -644,8 +682,11 @@ function FlowProfessionalDraftEditor({project,draft,target,update,commit,cancel,
         if(!latest.current.draft.composing)void latest.current.commit().catch(failure=>latest.current.report(failure instanceof Error ? failure.message:String(failure)))
       })
     }}>
-    <div className="text-edit-toolbar" ref={setToolbar}/>
-    {kind==='guoling.text' ? <TextComponentEditor {...owner} data={textComponentDataSchema.parse(draft.data)}/>
+    {!draft.authorSpot && <div className="text-edit-toolbar" ref={setToolbar}/>}
+    {draft.authorSpot ? <CanvasPlainTextEditor key={draft.authorSpot.id} bounds={{x:0,y:0,width:draft.authorSpot.localBounds.width,height:draft.authorSpot.localBounds.height}}
+      value={draft.spotText ?? ''} multiline label="编辑此处文字" onDraftChange={updateSpot}
+      onCommit={value=>{updateSpot(value,false);void commit().catch(failure=>report(failure instanceof Error ? failure.message:String(failure)))}} onCancel={cancel}/>
+      : kind==='guoling.text' ? <TextComponentEditor {...owner} data={textComponentDataSchema.parse(draft.data)}/>
       : <FormulaComponentEditor {...owner} data={formulaComponentDataSchema.parse(draft.data)}/>}
   </div>,host)
 }
