@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { createServer, type Server } from 'node:net'
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -7,13 +7,16 @@ import path from 'node:path'
 import { DocumentHostService } from '../../src/main/workbench/DocumentHostService'
 import { ExecutionEventStore } from '../../src/main/workbench/execution/ExecutionEventStore'
 import { agentFileTools } from '../../src/core/tools/AgentFileTools'
+import { describeTools } from '../../src/core/tools/ToolCatalog'
+import { toolFailed } from '../../src/core/tools/modelToolResult'
+import type { ToolResult } from '../../src/shared/workbench/tools'
 import type { ExternalFilePort } from '../../src/main/workbench/external/ExternalMcpService'
 import type { AgentFileService } from '../../src/main/workbench/execution/AgentFileService'
 import type { ExternalApproval } from '../../src/main/workbench/external/ExternalMcpService'
-import { callTool, residentMcpFixture } from '../helpers/residentMcpFixture'
+import { callTool, residentMcpFixture, type ResidentToolReply } from '../helpers/residentMcpFixture'
 
 const cleanups: (() => Promise<unknown>)[] = []
-afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
+afterEach(async () => { vi.restoreAllMocks(); for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
 
 async function fixture(options: { confirm?: (request: ExternalApproval) => boolean | Promise<boolean>; files?: (files: AgentFileService) => ExternalFilePort;
   permission?: 'full' | 'workspace' | 'ask' | 'read-only'; port?: number } = {}) {
@@ -32,6 +35,42 @@ async function fixture(options: { confirm?: (request: ExternalApproval) => boole
   return { directory, workspace, second, host, events, ...mcp }
 }
 const data = (reply: { structuredContent: { result: any } }) => reply.structuredContent.result.data
+
+it('keeps pending image jobs non-error on the real MCP transport without claiming completion or resending', async () => {
+  const f = await fixture()
+  // Control only the Gateway receipt; exercise the resident server, SDK envelope,
+  // session, operation summaries and timeline used by an external image client.
+  vi.spyOn(f.host.tools, 'resolveRunTool').mockImplementation(async (_run, name) => describeTools([name])[0] ?? null)
+  let receipt: ToolResult = { kind: 'read', data: { job: 'image-pending', status: 'preparing', stopped: false, resources: [] } }
+  const execute = vi.spyOn(f.host.tools, 'execute').mockImplementation(async (_run, _operation, call) => call.name === 'image.status'
+    ? { kind: 'read', data: { job: 'image-pending', status: 'ready', stopped: false, resources: [{ resource: 'ready-image' }] } } : receipt)
+  const client = await f.connect('pending-image-client')
+  const call = async (name: string, args: Record<string, unknown> = {}) =>
+    await client.callTool({ name, arguments: args }) as unknown as ResidentToolReply
+  const pending = await call('image.edit', { prompt: 'Edit the original image', references: ['original-image'] })
+  expect(pending.isError).toBe(false)
+  expect(data(pending)).toMatchObject({ job: 'image-pending', status: 'preparing' })
+  expect(toolFailed('image.edit', receipt)).toBe(true) // Internal task settlement still remains unfinished.
+  const recent = await call('operation.recent')
+  expect(recent.isError, JSON.stringify(recent.structuredContent.result)).toBe(false)
+  expect(data(recent).operations[0]).toMatchObject({ status: 'pending' })
+  const conversation = (await f.conversations.listConversations('space'))[0]!
+  const timeline = await f.events.snapshot(conversation.conversationId)
+  const imageEvent = timeline.items.find(item => item.type === 'tool' && item.data.toolName === 'image.edit')!
+  expect(imageEvent.data).toMatchObject({ status: 'pending' })
+  expect(imageEvent.data.error).toBeUndefined()
+  const status = await call('image.status', { job: data(pending).job })
+  expect(status.isError).toBe(false)
+  expect(data(status)).toMatchObject({ job: 'image-pending', status: 'ready' })
+  expect(execute.mock.calls.filter(call => call[2].name === 'image.edit')).toHaveLength(1)
+  expect((await f.service.status()).sessions).toHaveLength(1)
+  for (const state of ['running', 'failed', 'unknown', 'stopped'] as const) {
+    receipt = { kind: 'read', data: { job: `image-${state}`, status: state, stopped: state === 'stopped', resources: [] } }
+    const result = await call('image.edit', { prompt: `Controlled ${state}`, references: ['original-image'] })
+    expect(result.isError).toBe(state !== 'running')
+    expect(data(result).status).toBe(state)
+  }
+})
 
 it('serves a resident session in the current workspace with the built-in tool selection, automatic tickets and canonical writes', async () => {
   const f = await fixture()

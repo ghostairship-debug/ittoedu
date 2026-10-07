@@ -49,7 +49,7 @@ type ToolKind = 'gateway' | 'file' | 'course' | 'load' | 'service'
 interface HostTool { name: string; description: string; schema: Record<string, unknown>; read: boolean; label: string; kind: ToolKind }
 interface CallScope { runId: string; taskId: string; workspaceId: string }
 interface OperationSummary {
-  status: 'applied' | 'unchanged' | 'completed' | 'failed'; documentId?: string; revision?: number; operationId?: string; message?: string
+  status: 'applied' | 'unchanged' | 'completed' | 'pending' | 'failed'; documentId?: string; revision?: number; operationId?: string; message?: string
   commit?: string; usability?: string; delivery?: string
   save?: { savedRevision: number; currentRevision: number; dirty: boolean; current: boolean }
 }
@@ -98,7 +98,8 @@ const failure = (code: string, message: string): ToolResult => ({ kind: 'error',
 function summarize(name: string, result: ToolResult): OperationSummary {
   const receipt = operationFact(name, result), apply = contentApplyFact(name, result), saved = saveFact(name, result)
   const outcome = serviceToolOutcome(name, result)
-  return { status: receipt?.status === 'applied' || receipt?.status === 'unchanged' ? receipt.status : toolFailed(name, result) ? 'failed' : 'completed',
+  return { status: receipt?.status === 'applied' || receipt?.status === 'unchanged' ? receipt.status
+    : outcome?.status === 'pending' ? 'pending' : toolFailed(name, result) ? 'failed' : 'completed',
     ...(receipt ? { documentId: receipt.documentId, operationId: receipt.operationId,
       ...('revision' in receipt ? { revision: receipt.revision } : { message: receipt.message }) } : {}),
     ...(result.kind === 'error' ? { message: result.message } : outcome ? { message: outcome.message } : {}),
@@ -401,7 +402,10 @@ export class ExternalMcpService implements ResidentMcpHandler {
       }
     }
     for (const notice of session.notices.splice(0)) content.push({ type: 'text', text: notice })
-    return { content, structuredContent: { result: publicResult, ...(ticket ? { ticket } : {}), ...(replayed ? { replayed: true } : {}) }, isError: toolFailed(toolName, result) || imageMissing }
+    // An accepted background job is unfinished, but its MCP call succeeded. The
+    // client must keep the session and query that job instead of treating it as a failed call.
+    const pending = serviceToolOutcome(toolName, result)?.status === 'pending'
+    return { content, structuredContent: { result: publicResult, ...(ticket ? { ticket } : {}), ...(replayed ? { replayed: true } : {}) }, isError: !pending && toolFailed(toolName, result) || imageMissing }
   }
   private assertActive(session: Session, runId: string): void {
     if (session.stopped || session.runId !== runId || !this.sessions.has(session.sessionId)) throw new Error('外部会话已停止或已切换，操作未提交')
@@ -534,9 +538,10 @@ export class ExternalMcpService implements ResidentMcpHandler {
     const result = await run()
     const receipt = committedFact(tool.name, result), saved = saveFact(tool.name, result)
     const outcome = serviceToolOutcome(tool.name, result)
-    await this.emit(scope, conversationId, ticket, 'tool', { toolName: tool.name, label: tool.label, status: toolFailed(tool.name, result) ? 'failed' : 'completed',
+    const pending = outcome?.status === 'pending'
+    await this.emit(scope, conversationId, ticket, 'tool', { toolName: tool.name, label: tool.label, status: pending ? 'pending' : toolFailed(tool.name, result) ? 'failed' : 'completed',
       input: JSON.stringify(input), output: JSON.stringify(result),
-      ...(result.kind === 'error' ? { error: result.message } : toolFailed(tool.name, result) && outcome ? { error: outcome.message } : {}),
+      ...(pending ? { text: outcome.message } : result.kind === 'error' ? { error: result.message } : toolFailed(tool.name, result) && outcome ? { error: outcome.message } : {}),
       ...applicationEventFacts(tool.name, result),
       ...(saved ? { saveStatus: currentSave(saved) ? 'saved' : 'failed' } : {}) })
     if (receipt) await this.emit(scope, conversationId, `${ticket}:commit`, 'document.commit', {
